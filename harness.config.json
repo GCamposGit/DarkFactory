@@ -1,0 +1,15 @@
+{
+  "steps": [
+    {
+      "name": "syntax_and_types",
+      "cmd": "python -m py_compile core/benchmarks/__init__.py core/benchmarks/models.py core/benchmarks/frontier.py core/benchmarks/fetcher.py core/benchmarks/racing.py core/benchmarks/router.py core/benchmarks/cli.py core/orchestrator/state.py core/router/model_router.py core/audio/transcriber.py core/research/models.py core/research/classifier.py core/research/arxiv_client.py core/research/github_scout.py core/research/trends_scout.py core/research/ledger.py core/research/cli.py core/learning/__init__.py core/learning/models.py core/learning/tracker.py core/learning/cli.py core/learning/benchmark.py core/learning_pack/__init__.py core/learning_pack/models.py core/learning_pack/analyzer.py core/learning_pack/generator.py core/learning_pack/renderer.py core/learning_pack/storage.py core/learning_pack/cli.py core/content/__init__.py core/content/models.py core/content/anti_slop_linter.py core/content/presets.py core/content/engine.py core/content/cli.py core/visual/__init__.py core/visual/models.py core/visual/prompt_synthesizer.py core/visual/procedural_engine.py core/visual/cloud_engine.py core/visual/studio.py core/visual/cli.py hub/backend/models.py hub/backend/service.py hub/backend/api.py hub/backend/main.py run_hub.py",
+      "quick": true
+    },
+
+    {
+      "name": "unit_and_integration_tests",
+      "cmd": "python -m pytest tests -v --ignore=tests/test_canaletto.py",
+      "quick": true
+    }
+  ]
+}

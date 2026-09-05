@@ -1,0 +1,100 @@
+{
+  "ledger_id": "20260905_003216_procurar-repositórios-github-com-código-já-existente-para-vo",
+  "query": "Procurar repositórios github com código já existente para voice activity detection em Python",
+  "topic_type": "code_reuse",
+  "created_at": "2026-09-05T00:32:16.567069+00:00",
+  "summary_executive": "Mineração de repositórios para 'Procurar repositórios github com código já existente para voice activity detection em Python'. Identificados 2 repositórios existentes com componentes de alta qualidade para evitar reinventar a roda.",
+  "sources": [
+    {
+      "id": "gh:KoljaB/RealtimeSTT",
+      "title": "KoljaB/RealtimeSTT",
+      "url": "https://github.com/KoljaB/RealtimeSTT",
+      "source_type": "repository",
+      "authors_or_maintainers": [
+        "KoljaB"
+      ],
+      "published_date": "2026-08-30T02:40:12Z",
+      "summary": "A robust, efficient, low-latency speech-to-text library with advanced voice activity detection, wake word activation and instant transcription.",
+      "license": "MIT License",
+      "license_category": "permissive",
+      "credibility_score": 1.0,
+      "stars": 10111,
+      "has_test_suite": true,
+      "metadata": {
+        "language": "Python",
+        "forks": 856,
+        "open_issues": 147,
+        "topics": [
+          "python",
+          "realtime",
+          "speech-to-text"
+        ],
+        "archived": false
+      }
+    },
+    {
+      "id": "gh:filippogiruzzi/voice_activity_detection",
+      "title": "filippogiruzzi/voice_activity_detection",
+      "url": "https://github.com/filippogiruzzi/voice_activity_detection",
+      "source_type": "repository",
+      "authors_or_maintainers": [
+        "filippogiruzzi"
+      ],
+      "published_date": "2026-07-22T14:09:35Z",
+      "summary": "Voice Activity Detection based on Deep Learning & TensorFlow",
+      "license": "GNU General Public License v3.0",
+      "license_category": "copyleft",
+      "credibility_score": 0.75,
+      "stars": 372,
+      "has_test_suite": true,
+      "metadata": {
+        "language": "Python",
+        "forks": 69,
+        "open_issues": 12,
+        "topics": [
+          "artificial-intelligence",
+          "deep-learning",
+          "deep-neural-networks",
+          "deeplearning",
+          "librispeech",
+          "librispeech-dataset",
+          "machine-learning",
+          "mfcc-features",
+          "python",
+          "pytorch",
+          "resnet",
+          "speech",
+          "speech-detection",
+          "speech-recognition",
+          "time-series",
+          "time-series-classification",
+          "vad",
+          "voice-activity-detection"
+        ],
+        "archived": false
+      }
+    }
+  ],
+  "insights": [
+    {
+      "source_id": "gh:KoljaB/RealtimeSTT",
+      "source_title": "KoljaB/RealtimeSTT",
+      "key_insight": "Componente maduro (10111 ⭐, licença MIT License). Descrição: A robust, efficient, low-latency speech-to-text library with advanced voice activity detection, wake word activation and instant transcription.",
+      "architectural_implications": "Reutilizar ou adaptar módulo testado como dependência/serviço isolado ",
+      "future_reference_value": "Referência canônica de implementação testada para a feature: https://github.com/KoljaB/RealtimeSTT",
+      "code_patterns_or_algorithms": [
+        "KoljaB/RealtimeSTT"
+      ]
+    },
+    {
+      "source_id": "gh:filippogiruzzi/voice_activity_detection",
+      "source_title": "filippogiruzzi/voice_activity_detection",
+      "key_insight": "Componente maduro (372 ⭐, licença GNU General Public License v3.0). Descrição: Voice Activity Detection based on Deep Learning & TensorFlow",
+      "architectural_implications": "ATENÇÃO: Licença restritiva/desconhecida. Usar apenas como referência de arquitetura, sem cópia direta.",
+      "future_reference_value": "Referência canônica de implementação testada para a feature: https://github.com/filippogiruzzi/voice_activity_detection",
+      "code_patterns_or_algorithms": [
+        "filippogiruzzi/voice_activity_detection"
+      ]
+    }
+  ]
+}

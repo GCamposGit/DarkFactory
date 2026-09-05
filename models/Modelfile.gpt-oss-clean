@@ -1,0 +1,16 @@
+# Modelfile para GPT-OSS 20B - Versão Limpa e Otimizada
+# Otimizado para RTX 4070 (8GB) + 32GB RAM + Multi-Core (20 threads)
+# Sem System Prompt específico
+
+FROM gpt-oss:20b
+
+# Janela de contexto estendida de 16k tokens
+PARAMETER num_ctx 16384
+
+# 20 threads distribuídas para inferência híbrida GPU/CPU
+PARAMETER num_thread 20
+
+# Parâmetros calibrados para raciocínio, análise e auditoria precisa
+PARAMETER temperature 0.2
+PARAMETER top_p 0.9
+PARAMETER repeat_penalty 1.05

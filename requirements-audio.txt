@@ -1,0 +1,4 @@
+# Optional GPU transcription stack. Install after requirements.txt when needed.
+-r requirements.txt
+torch>=2.4,<3
+faster-whisper>=1.1,<2

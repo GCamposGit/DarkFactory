@@ -1,0 +1,31 @@
+# Agent Contract
+
+## Antes de começar
+
+- Leia `MISSION.md` e `FACTORY_RULES.md`.
+- Preserve o escopo: o núcleo DarkFac é compartilhado; Canaletto é local.
+- Use `.agents/skills/` como catálogo de skills. Grok e outros harnesses devem seguir este contrato mesmo que não carreguem skills automaticamente.
+
+## Convenções de código
+
+- Python 3.12+, type hints em APIs públicas e nomes `snake_case`.
+- UTF-8 na entrada/saída de CLI; não imprimir emojis sem fallback seguro no Windows.
+- `pathlib.Path` para caminhos e `logging` para diagnóstico.
+- Pydantic v2 para contratos de dados; FastAPI apenas na camada HTTP.
+- Mantenha domínio e I/O separados para permitir testes `library`, `cli` e `http`.
+- Trate falhas externas (Ollama, OpenRouter, GitHub, arXiv) com fallback ou erro estruturado, sem vazar credenciais.
+
+## Validação obrigatória
+
+```powershell
+python core/harness/runner.py --quick
+python -m pytest tests -v --ignore=tests/test_canaletto.py
+```
+
+O harness compartilhado não inclui o experimento Canaletto. Para depurá-lo, use os arquivos locais diretamente nesta máquina.
+
+## Compatibilidade entre harnesses
+
+- Antigravity: carrega `.agents/skills/`.
+- Grok: use a raiz clonada como workspace, leia `AGENTS.md` e `FACTORY_RULES.md` e execute os comandos acima.
+- Outros agentes: `AGENTS.md` é o contrato mínimo; `docs/HARNESS_INTEROP.md` contém o fluxo de bootstrap.

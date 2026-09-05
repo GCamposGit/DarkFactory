@@ -1,0 +1,956 @@
+{
+  "catalog_version": "2026.09.04",
+  "benchmark_standard": "Artificial Analysis v4.2 & Coding Agent Index",
+  "task_profile": {
+    "standard_prompt_tokens": 25000,
+    "standard_completion_tokens": 2500
+  },
+  "models": [
+    {
+      "model_id": "anthropic/claude-fable-5-1",
+      "name": "Claude Fable 5.1 (Adaptive)",
+      "provider": "anthropic",
+      "context_length": 200000,
+      "input_cost_per_m": 3.0,
+      "output_cost_per_m": 15.0,
+      "cache_read_cost_per_m": 0.3,
+      "coding_score": 88.5,
+      "intelligence_score": 92.4,
+      "output_speed_tps": 76.0,
+      "latency_ttft_sec": 1.1,
+      "tokens_per_task": 2480,
+      "tier": "frontier_high",
+      "release_date": "2026-08-28",
+      "domain_scores": {
+        "coding": 88.5,
+        "deep_research": 90.5,
+        "legal_contract": 91.0,
+        "business_automation": 88.0,
+        "formal_reasoning": 89.0,
+        "multimodal_audio": 87.0
+      }
+    },
+    {
+      "model_id": "anthropic/claude-opus-5",
+      "name": "Claude Opus 5",
+      "provider": "anthropic",
+      "context_length": 200000,
+      "input_cost_per_m": 5.0,
+      "output_cost_per_m": 25.0,
+      "cache_read_cost_per_m": 0.5,
+      "coding_score": 89.2,
+      "intelligence_score": 91.8,
+      "output_speed_tps": 54.0,
+      "latency_ttft_sec": 1.45,
+      "tokens_per_task": 2600,
+      "tier": "frontier_high",
+      "release_date": "2026-08-15",
+      "domain_scores": {
+        "coding": 89.2,
+        "deep_research": 92.0,
+        "legal_contract": 94.5,
+        "business_automation": 91.0,
+        "formal_reasoning": 92.5,
+        "multimodal_audio": 89.0
+      }
+    },
+    {
+      "model_id": "anthropic/claude-3.7-sonnet",
+      "name": "Claude 3.7 Sonnet (Thinking)",
+      "provider": "anthropic",
+      "context_length": 200000,
+      "input_cost_per_m": 3.0,
+      "output_cost_per_m": 15.0,
+      "cache_read_cost_per_m": 0.3,
+      "coding_score": 83.4,
+      "intelligence_score": 84.1,
+      "output_speed_tps": 82.0,
+      "latency_ttft_sec": 0.95,
+      "tokens_per_task": 2450,
+      "tier": "frontier_high",
+      "release_date": "2025-02-24",
+      "domain_scores": {
+        "coding": 83.4,
+        "deep_research": 86.0,
+        "legal_contract": 88.0,
+        "business_automation": 85.0,
+        "formal_reasoning": 86.0,
+        "multimodal_audio": 84.0
+      }
+    },
+    {
+      "model_id": "anthropic/claude-3.5-haiku",
+      "name": "Claude 3.5 Haiku",
+      "provider": "anthropic",
+      "context_length": 200000,
+      "input_cost_per_m": 0.8,
+      "output_cost_per_m": 4.0,
+      "cache_read_cost_per_m": 0.08,
+      "coding_score": 67.2,
+      "intelligence_score": 69.5,
+      "output_speed_tps": 115.0,
+      "latency_ttft_sec": 0.52,
+      "tokens_per_task": 2100,
+      "tier": "fast_economy",
+      "release_date": "2024-11-04",
+      "domain_scores": {
+        "coding": 67.2,
+        "deep_research": 68.0,
+        "legal_contract": 66.0,
+        "business_automation": 70.0,
+        "formal_reasoning": 65.0,
+        "multimodal_audio": 62.0
+      }
+    },
+    {
+      "model_id": "openai/gpt-6-astra",
+      "name": "OpenAI GPT-6 Astra",
+      "provider": "openai",
+      "context_length": 1050000,
+      "input_cost_per_m": 10.0,
+      "output_cost_per_m": 50.0,
+      "cache_read_cost_per_m": 1.0,
+      "coding_score": 91.0,
+      "intelligence_score": 93.6,
+      "output_speed_tps": 68.0,
+      "latency_ttft_sec": 1.3,
+      "tokens_per_task": 2550,
+      "tier": "frontier_high",
+      "release_date": "2026-09-03",
+      "has_subscription_plan": true,
+      "subscription_name": "OpenAI Codex / Plus",
+      "domain_scores": {
+        "coding": 91.0,
+        "deep_research": 91.0,
+        "legal_contract": 93.0,
+        "business_automation": 92.5,
+        "formal_reasoning": 95.0,
+        "multimodal_audio": 91.5
+      }
+    },
+    {
+      "model_id": "openai/gpt-5-6-luna-high",
+      "name": "OpenAI GPT-5.6 Luna (high)",
+      "provider": "openai",
+      "context_length": 1050000,
+      "input_cost_per_m": 0.2,
+      "output_cost_per_m": 1.2,
+      "cache_read_cost_per_m": 0.02,
+      "coding_score": 87.5,
+      "intelligence_score": 88.2,
+      "output_speed_tps": 123.0,
+      "latency_ttft_sec": 0.45,
+      "tokens_per_task": 2250,
+      "tier": "frontier_high",
+      "release_date": "2026-07-09",
+      "has_subscription_plan": true,
+      "subscription_name": "OpenAI Codex / Plus",
+      "domain_scores": {
+        "coding": 87.5,
+        "deep_research": 89.5,
+        "legal_contract": 88.0,
+        "business_automation": 89.0,
+        "formal_reasoning": 91.0,
+        "multimodal_audio": 87.5
+      }
+    },
+    {
+      "model_id": "openai/gpt-5-6-sol",
+      "name": "OpenAI GPT-5.6 Sol",
+      "provider": "openai",
+      "context_length": 500000,
+      "input_cost_per_m": 2.5,
+      "output_cost_per_m": 10.0,
+      "cache_read_cost_per_m": 0.25,
+      "coding_score": 85.0,
+      "intelligence_score": 87.2,
+      "output_speed_tps": 94.0,
+      "latency_ttft_sec": 0.8,
+      "tokens_per_task": 2350,
+      "tier": "frontier_high",
+      "release_date": "2026-08-10",
+      "has_subscription_plan": true,
+      "subscription_name": "OpenAI Codex / Plus",
+      "domain_scores": {
+        "coding": 85.0,
+        "deep_research": 87.0,
+        "legal_contract": 86.0,
+        "business_automation": 86.5,
+        "formal_reasoning": 87.0,
+        "multimodal_audio": 85.0
+      }
+    },
+    {
+      "model_id": "openai/gpt-4o",
+      "name": "OpenAI GPT-4o",
+      "provider": "openai",
+      "context_length": 128000,
+      "input_cost_per_m": 2.5,
+      "output_cost_per_m": 10.0,
+      "cache_read_cost_per_m": 1.25,
+      "coding_score": 77.8,
+      "intelligence_score": 81.3,
+      "output_speed_tps": 110.0,
+      "latency_ttft_sec": 0.65,
+      "tokens_per_task": 2200,
+      "tier": "balanced_mid",
+      "release_date": "2024-05-13",
+      "has_subscription_plan": true,
+      "subscription_name": "OpenAI Codex / Plus",
+      "domain_scores": {
+        "coding": 77.8,
+        "deep_research": 81.0,
+        "legal_contract": 82.0,
+        "business_automation": 80.0,
+        "formal_reasoning": 80.0,
+        "multimodal_audio": 84.0
+      }
+    },
+    {
+      "model_id": "openai/o3-mini",
+      "name": "OpenAI o3-mini (High)",
+      "provider": "openai",
+      "context_length": 200000,
+      "input_cost_per_m": 1.1,
+      "output_cost_per_m": 4.4,
+      "cache_read_cost_per_m": 0.55,
+      "coding_score": 82.3,
+      "intelligence_score": 83.9,
+      "output_speed_tps": 88.0,
+      "latency_ttft_sec": 1.2,
+      "tokens_per_task": 3100,
+      "tier": "balanced_mid",
+      "release_date": "2025-01-31",
+      "has_subscription_plan": true,
+      "subscription_name": "OpenAI Codex / Plus",
+      "domain_scores": {
+        "coding": 81.5,
+        "deep_research": 82.0,
+        "legal_contract": 78.0,
+        "business_automation": 79.0,
+        "formal_reasoning": 90.0,
+        "multimodal_audio": 70.0
+      }
+    },
+    {
+      "model_id": "google/gemini-3.8-flash",
+      "name": "Google Gemini 3.8 Flash (High)",
+      "provider": "google",
+      "context_length": 1000000,
+      "input_cost_per_m": 0.75,
+      "output_cost_per_m": 3.75,
+      "cache_read_cost_per_m": 0.18,
+      "coding_score": 81.2,
+      "intelligence_score": 82.5,
+      "output_speed_tps": 352.0,
+      "latency_ttft_sec": 0.38,
+      "tokens_per_task": 2400,
+      "tier": "balanced_mid",
+      "release_date": "2026-09-01",
+      "has_subscription_plan": true,
+      "subscription_name": "Google Gemini Advanced",
+      "domain_scores": {
+        "coding": 82.0,
+        "deep_research": 92.5,
+        "legal_contract": 84.0,
+        "business_automation": 85.0,
+        "formal_reasoning": 86.0,
+        "multimodal_audio": 93.0
+      }
+    },
+    {
+      "model_id": "google/gemini-2.5-pro",
+      "name": "Google Gemini 2.5 Pro",
+      "provider": "google",
+      "context_length": 2000000,
+      "input_cost_per_m": 1.25,
+      "output_cost_per_m": 5.0,
+      "cache_read_cost_per_m": 0.31,
+      "coding_score": 84.6,
+      "intelligence_score": 86.8,
+      "output_speed_tps": 98.0,
+      "latency_ttft_sec": 0.85,
+      "tokens_per_task": 2500,
+      "tier": "frontier_high",
+      "release_date": "2025-04-12",
+      "has_subscription_plan": true,
+      "subscription_name": "Google Gemini Advanced",
+      "domain_scores": {
+        "coding": 83.5,
+        "deep_research": 91.0,
+        "legal_contract": 86.0,
+        "business_automation": 85.0,
+        "formal_reasoning": 87.0,
+        "multimodal_audio": 91.0
+      }
+    },
+    {
+      "model_id": "xai/grok-4.6",
+      "name": "xAI Grok 4.6",
+      "provider": "xai",
+      "context_length": 524288,
+      "input_cost_per_m": 2.0,
+      "output_cost_per_m": 8.0,
+      "cache_read_cost_per_m": 0.5,
+      "coding_score": 83.1,
+      "intelligence_score": 85.0,
+      "output_speed_tps": 125.0,
+      "latency_ttft_sec": 0.62,
+      "tokens_per_task": 2350,
+      "tier": "balanced_mid",
+      "release_date": "2026-07-20",
+      "has_subscription_plan": true,
+      "subscription_name": "xAI Grok Premium+",
+      "domain_scores": {
+        "coding": 85.0,
+        "deep_research": 93.5,
+        "legal_contract": 85.0,
+        "business_automation": 87.0,
+        "formal_reasoning": 87.5,
+        "multimodal_audio": 86.0
+      }
+    },
+    {
+      "model_id": "deepseek/deepseek-v4-pro",
+      "name": "DeepSeek V4 Pro",
+      "provider": "deepseek",
+      "context_length": 256000,
+      "input_cost_per_m": 0.45,
+      "output_cost_per_m": 1.8,
+      "cache_read_cost_per_m": 0.05,
+      "coding_score": 86.4,
+      "intelligence_score": 88.0,
+      "output_speed_tps": 90.0,
+      "latency_ttft_sec": 0.7,
+      "tokens_per_task": 2400,
+      "tier": "balanced_mid",
+      "release_date": "2026-08-21",
+      "domain_scores": {
+        "coding": 86.4,
+        "deep_research": 85.0,
+        "legal_contract": 85.5,
+        "business_automation": 86.0,
+        "formal_reasoning": 90.5,
+        "multimodal_audio": 83.0
+      }
+    },
+    {
+      "model_id": "deepseek/deepseek-r1",
+      "name": "DeepSeek R1 (Reasoning)",
+      "provider": "deepseek",
+      "context_length": 128000,
+      "input_cost_per_m": 0.55,
+      "output_cost_per_m": 2.19,
+      "cache_read_cost_per_m": 0.14,
+      "coding_score": 84.8,
+      "intelligence_score": 87.5,
+      "output_speed_tps": 65.0,
+      "latency_ttft_sec": 1.25,
+      "tokens_per_task": 3200,
+      "tier": "balanced_mid",
+      "release_date": "2025-01-20",
+      "domain_scores": {
+        "coding": 85.5,
+        "deep_research": 86.0,
+        "legal_contract": 84.0,
+        "business_automation": 84.0,
+        "formal_reasoning": 93.5,
+        "multimodal_audio": 80.0
+      }
+    },
+    {
+      "model_id": "qwen/qwen3-8-max",
+      "name": "Alibaba Qwen3-8 Max",
+      "provider": "qwen",
+      "context_length": 256000,
+      "input_cost_per_m": 0.6,
+      "output_cost_per_m": 2.4,
+      "cache_read_cost_per_m": 0.1,
+      "coding_score": 83.5,
+      "intelligence_score": 84.9,
+      "output_speed_tps": 110.0,
+      "latency_ttft_sec": 0.58,
+      "tokens_per_task": 2300,
+      "tier": "balanced_mid",
+      "release_date": "2026-08-14",
+      "domain_scores": {
+        "coding": 84.5,
+        "deep_research": 85.5,
+        "legal_contract": 85.0,
+        "business_automation": 86.5,
+        "formal_reasoning": 88.0,
+        "multimodal_audio": 84.0
+      }
+    },
+    {
+      "model_id": "qwen/qwen3-8-flash-next",
+      "name": "Alibaba Qwen3-8 Flash Next",
+      "provider": "qwen",
+      "context_length": 131072,
+      "input_cost_per_m": 0.15,
+      "output_cost_per_m": 0.6,
+      "cache_read_cost_per_m": 0.03,
+      "coding_score": 75.8,
+      "intelligence_score": 77.2,
+      "output_speed_tps": 180.0,
+      "latency_ttft_sec": 0.42,
+      "tokens_per_task": 2150,
+      "tier": "fast_economy",
+      "release_date": "2026-08-30",
+      "domain_scores": {
+        "coding": 75.8,
+        "deep_research": 76.5,
+        "legal_contract": 74.0,
+        "business_automation": 78.0,
+        "formal_reasoning": 77.0,
+        "multimodal_audio": 75.0
+      }
+    },
+    {
+      "model_id": "zhipu/glm-5-3",
+      "name": "Zhipu GLM 5.3",
+      "provider": "zhipu",
+      "context_length": 200000,
+      "input_cost_per_m": 0.85,
+      "output_cost_per_m": 3.4,
+      "cache_read_cost_per_m": 0.15,
+      "coding_score": 82.0,
+      "intelligence_score": 83.4,
+      "output_speed_tps": 95.0,
+      "latency_ttft_sec": 0.68,
+      "tokens_per_task": 2300,
+      "tier": "balanced_mid",
+      "release_date": "2026-08-18",
+      "domain_scores": {
+        "coding": 82.0,
+        "deep_research": 83.0,
+        "legal_contract": 82.5,
+        "business_automation": 83.0,
+        "formal_reasoning": 84.0,
+        "multimodal_audio": 82.0
+      }
+    },
+    {
+      "model_id": "moonshot/kimi-k3",
+      "name": "Moonshot Kimi K3",
+      "provider": "moonshot",
+      "context_length": 500000,
+      "input_cost_per_m": 1.2,
+      "output_cost_per_m": 4.8,
+      "cache_read_cost_per_m": 0.2,
+      "coding_score": 83.9,
+      "intelligence_score": 85.3,
+      "output_speed_tps": 85.0,
+      "latency_ttft_sec": 0.75,
+      "tokens_per_task": 2400,
+      "tier": "balanced_mid",
+      "release_date": "2026-08-25",
+      "domain_scores": {
+        "coding": 83.0,
+        "deep_research": 88.0,
+        "legal_contract": 87.5,
+        "business_automation": 84.0,
+        "formal_reasoning": 85.0,
+        "multimodal_audio": 81.0
+      }
+    },
+    {
+      "model_id": "meta/muse-spark-1-3",
+      "name": "Meta Muse Spark 1.3",
+      "provider": "meta",
+      "context_length": 256000,
+      "input_cost_per_m": 0.9,
+      "output_cost_per_m": 3.6,
+      "cache_read_cost_per_m": 0.18,
+      "coding_score": 85.5,
+      "intelligence_score": 86.9,
+      "output_speed_tps": 130.0,
+      "latency_ttft_sec": 0.55,
+      "tokens_per_task": 2250,
+      "tier": "frontier_high",
+      "release_date": "2026-09-02",
+      "domain_scores": {
+        "coding": 79.5,
+        "deep_research": 80.0,
+        "legal_contract": 78.0,
+        "business_automation": 80.5,
+        "formal_reasoning": 79.0,
+        "multimodal_audio": 78.0
+      }
+    },
+    {
+      "model_id": "meta/llama-3.3-70b-instruct",
+      "name": "Meta Llama 3.3 70B Instruct",
+      "provider": "meta",
+      "context_length": 128000,
+      "input_cost_per_m": 0.35,
+      "output_cost_per_m": 1.2,
+      "cache_read_cost_per_m": 0.05,
+      "coding_score": 76.5,
+      "intelligence_score": 79.1,
+      "output_speed_tps": 120.0,
+      "latency_ttft_sec": 0.48,
+      "tokens_per_task": 2200,
+      "tier": "fast_economy",
+      "release_date": "2024-12-06",
+      "domain_scores": {
+        "coding": 76.0,
+        "deep_research": 78.0,
+        "legal_contract": 79.0,
+        "business_automation": 77.0,
+        "formal_reasoning": 77.5,
+        "multimodal_audio": 74.0
+      }
+    },
+    {
+      "model_id": "ollama/qwen-code-deep:latest",
+      "name": "Local Qwen3-Coder 30B MoE (Ollama)",
+      "provider": "ollama",
+      "context_length": 16384,
+      "input_cost_per_m": 0.0,
+      "output_cost_per_m": 0.0,
+      "cache_read_cost_per_m": 0.0,
+      "coding_score": 74.0,
+      "intelligence_score": 75.5,
+      "output_speed_tps": 48.0,
+      "latency_ttft_sec": 0.15,
+      "tokens_per_task": 2100,
+      "tier": "local_zero_cost",
+      "release_date": "2026-01-01",
+      "domain_scores": {
+        "coding": 78.0,
+        "deep_research": 76.0,
+        "legal_contract": 75.0,
+        "business_automation": 77.0,
+        "formal_reasoning": 80.0,
+        "multimodal_audio": 72.0
+      }
+    },
+    {
+      "model_id": "ollama/qwen-code-fast:latest",
+      "name": "Local Qwen3-Coder Fast Worker (Ollama)",
+      "provider": "ollama",
+      "context_length": 8192,
+      "input_cost_per_m": 0.0,
+      "output_cost_per_m": 0.0,
+      "cache_read_cost_per_m": 0.0,
+      "coding_score": 68.0,
+      "intelligence_score": 69.0,
+      "output_speed_tps": 85.0,
+      "latency_ttft_sec": 0.08,
+      "tokens_per_task": 1900,
+      "tier": "local_zero_cost",
+      "release_date": "2026-01-01",
+      "domain_scores": {
+        "coding": 68.0,
+        "deep_research": 65.0,
+        "legal_contract": 62.0,
+        "business_automation": 66.0,
+        "formal_reasoning": 65.0,
+        "multimodal_audio": 60.0
+      }
+    },
+    {
+      "model_id": "black-forest-labs/flux-1-schnell",
+      "name": "FLUX.1 [schnell] (Black Forest Labs)",
+      "provider": "black_forest",
+      "context_length": 4096,
+      "input_cost_per_m": 0.0,
+      "output_cost_per_m": 0.0,
+      "cost_per_task": 0.003,
+      "coding_score": 20.0,
+      "intelligence_score": 86.0,
+      "output_speed_tps": 120.0,
+      "latency_ttft_sec": 1.2,
+      "tokens_per_task": 1,
+      "tier": "fast_economy",
+      "release_date": "2024-08-01",
+      "domain_scores": {
+        "image_gen": 87.5
+      },
+      "metadata": {
+        "modality": "image",
+        "resolution": "1024x1024",
+        "steps": 4,
+        "architecture": "12B Flow Matching DiT"
+      }
+    },
+    {
+      "model_id": "black-forest-labs/flux-1.1-pro",
+      "name": "FLUX 1.1 [pro] (Black Forest Labs)",
+      "provider": "black_forest",
+      "context_length": 4096,
+      "input_cost_per_m": 0.0,
+      "output_cost_per_m": 0.0,
+      "cost_per_task": 0.04,
+      "coding_score": 20.0,
+      "intelligence_score": 93.0,
+      "output_speed_tps": 40.0,
+      "latency_ttft_sec": 3.5,
+      "tokens_per_task": 1,
+      "tier": "frontier_high",
+      "release_date": "2024-10-03",
+      "domain_scores": {
+        "image_gen": 93.5
+      },
+      "metadata": {
+        "modality": "image",
+        "resolution": "1024x1024",
+        "steps": 28,
+        "architecture": "12B Flow Matching DiT"
+      }
+    },
+    {
+      "model_id": "recraft/recraft-v3",
+      "name": "Recraft v3 (Red_Panda)",
+      "provider": "recraft",
+      "context_length": 4096,
+      "input_cost_per_m": 0.0,
+      "output_cost_per_m": 0.0,
+      "cost_per_task": 0.01,
+      "coding_score": 20.0,
+      "intelligence_score": 92.0,
+      "output_speed_tps": 65.0,
+      "latency_ttft_sec": 2.8,
+      "tokens_per_task": 1,
+      "tier": "balanced_mid",
+      "release_date": "2024-10-29",
+      "domain_scores": {
+        "image_gen": 92.5
+      },
+      "metadata": {
+        "modality": "image",
+        "resolution": "1024x1024",
+        "specialty": "vector_and_typography"
+      }
+    },
+    {
+      "model_id": "google/gemini-2.5-flash-image",
+      "name": "Gemini 2.5 Flash Image Gen (Imagen 3 Core)",
+      "provider": "google",
+      "context_length": 32768,
+      "input_cost_per_m": 0.0,
+      "output_cost_per_m": 0.0,
+      "cost_per_task": 0.005,
+      "coding_score": 25.0,
+      "intelligence_score": 89.0,
+      "output_speed_tps": 90.0,
+      "latency_ttft_sec": 1.8,
+      "tokens_per_task": 1,
+      "tier": "fast_economy",
+      "release_date": "2025-01-15",
+      "domain_scores": {
+        "image_gen": 89.0
+      },
+      "metadata": {
+        "modality": "image",
+        "resolution": "1024x1024"
+      }
+    },
+    {
+      "model_id": "openai/dall-e-3",
+      "name": "OpenAI DALL-E 3 (HD)",
+      "provider": "openai",
+      "context_length": 4096,
+      "input_cost_per_m": 0.0,
+      "output_cost_per_m": 0.0,
+      "cost_per_task": 0.04,
+      "coding_score": 20.0,
+      "intelligence_score": 88.0,
+      "output_speed_tps": 35.0,
+      "latency_ttft_sec": 5.0,
+      "tokens_per_task": 1,
+      "tier": "balanced_mid",
+      "release_date": "2023-10-19",
+      "domain_scores": {
+        "image_gen": 88.0
+      },
+      "metadata": {
+        "modality": "image",
+        "resolution": "1024x1024"
+      }
+    },
+    {
+      "model_id": "stabilityai/stable-diffusion-3.5-medium",
+      "name": "Stable Diffusion 3.5 Medium (Stability AI)",
+      "provider": "stability",
+      "context_length": 4096,
+      "input_cost_per_m": 0.0,
+      "output_cost_per_m": 0.0,
+      "cost_per_task": 0.008,
+      "coding_score": 20.0,
+      "intelligence_score": 86.5,
+      "output_speed_tps": 75.0,
+      "latency_ttft_sec": 2.2,
+      "tokens_per_task": 1,
+      "tier": "fast_economy",
+      "release_date": "2024-10-22",
+      "domain_scores": {
+        "image_gen": 86.5
+      },
+      "metadata": {
+        "modality": "image",
+        "resolution": "1024x1024",
+        "parameters": "2.5B"
+      }
+    },
+    {
+      "model_id": "ollama/sdxl-turbo",
+      "name": "Local SDXL-Turbo (Adversarial Distillation)",
+      "provider": "ollama",
+      "context_length": 2048,
+      "input_cost_per_m": 0.0,
+      "output_cost_per_m": 0.0,
+      "cost_per_task": 0.0,
+      "coding_score": 10.0,
+      "intelligence_score": 79.0,
+      "output_speed_tps": 150.0,
+      "latency_ttft_sec": 0.4,
+      "tokens_per_task": 1,
+      "tier": "local_zero_cost",
+      "release_date": "2023-11-28",
+      "domain_scores": {
+        "image_gen": 80.0
+      },
+      "metadata": {
+        "modality": "image",
+        "vram_min_gb": 6,
+        "vram_rec_gb": 8,
+        "steps": 1,
+        "local_viable": true
+      }
+    },
+    {
+      "model_id": "ollama/flux-1-schnell-4bit",
+      "name": "Local FLUX.1 [schnell] Q4_K_S (GGUF)",
+      "provider": "ollama",
+      "context_length": 4096,
+      "input_cost_per_m": 0.0,
+      "output_cost_per_m": 0.0,
+      "cost_per_task": 0.0,
+      "coding_score": 15.0,
+      "intelligence_score": 85.0,
+      "output_speed_tps": 45.0,
+      "latency_ttft_sec": 2.5,
+      "tokens_per_task": 1,
+      "tier": "local_zero_cost",
+      "release_date": "2024-08-10",
+      "domain_scores": {
+        "image_gen": 85.5
+      },
+      "metadata": {
+        "modality": "image",
+        "vram_min_gb": 10,
+        "vram_rec_gb": 12,
+        "steps": 4,
+        "local_viable": true
+      }
+    },
+    {
+      "model_id": "minimax/hailuo-video-01",
+      "name": "MiniMax Hailuo Video 01 (Director Tier 2)",
+      "provider": "minimax",
+      "context_length": 4096,
+      "input_cost_per_m": 0.0,
+      "output_cost_per_m": 0.0,
+      "cost_per_task": 0.1,
+      "coding_score": 15.0,
+      "intelligence_score": 88.0,
+      "output_speed_tps": 25.0,
+      "latency_ttft_sec": 15.0,
+      "tokens_per_task": 1,
+      "tier": "balanced_mid",
+      "release_date": "2024-10-01",
+      "domain_scores": {
+        "video_gen": 88.5
+      },
+      "metadata": {
+        "modality": "video",
+        "clip_seconds": 5,
+        "resolution": "720p/1080p",
+        "fps": 25
+      }
+    },
+    {
+      "model_id": "kuaishou/kling-1.5-standard",
+      "name": "Kling 1.5 Standard (Kuaishou)",
+      "provider": "kuaishou",
+      "context_length": 4096,
+      "input_cost_per_m": 0.0,
+      "output_cost_per_m": 0.0,
+      "cost_per_task": 0.08,
+      "coding_score": 15.0,
+      "intelligence_score": 86.5,
+      "output_speed_tps": 30.0,
+      "latency_ttft_sec": 12.0,
+      "tokens_per_task": 1,
+      "tier": "fast_economy",
+      "release_date": "2024-09-20",
+      "domain_scores": {
+        "video_gen": 86.5
+      },
+      "metadata": {
+        "modality": "video",
+        "clip_seconds": 5,
+        "resolution": "720p",
+        "fps": 30
+      }
+    },
+    {
+      "model_id": "kuaishou/kling-1.5-pro",
+      "name": "Kling 1.5 Pro (1080p Cinematic)",
+      "provider": "kuaishou",
+      "context_length": 4096,
+      "input_cost_per_m": 0.0,
+      "output_cost_per_m": 0.0,
+      "cost_per_task": 0.2,
+      "coding_score": 15.0,
+      "intelligence_score": 90.5,
+      "output_speed_tps": 20.0,
+      "latency_ttft_sec": 22.0,
+      "tokens_per_task": 1,
+      "tier": "frontier_high",
+      "release_date": "2024-09-20",
+      "domain_scores": {
+        "video_gen": 90.5
+      },
+      "metadata": {
+        "modality": "video",
+        "clip_seconds": 5,
+        "resolution": "1080p",
+        "fps": 30
+      }
+    },
+    {
+      "model_id": "luma/ray-2-flash",
+      "name": "Luma Dream Machine (Ray 2 Flash)",
+      "provider": "luma",
+      "context_length": 4096,
+      "input_cost_per_m": 0.0,
+      "output_cost_per_m": 0.0,
+      "cost_per_task": 0.1,
+      "coding_score": 15.0,
+      "intelligence_score": 85.5,
+      "output_speed_tps": 35.0,
+      "latency_ttft_sec": 8.0,
+      "tokens_per_task": 1,
+      "tier": "fast_economy",
+      "release_date": "2024-11-15",
+      "domain_scores": {
+        "video_gen": 85.5
+      },
+      "metadata": {
+        "modality": "video",
+        "clip_seconds": 5,
+        "resolution": "720p",
+        "fps": 24
+      }
+    },
+    {
+      "model_id": "runway/gen-3-alpha-turbo",
+      "name": "Runway Gen-3 Alpha Turbo",
+      "provider": "runway",
+      "context_length": 4096,
+      "input_cost_per_m": 0.0,
+      "output_cost_per_m": 0.0,
+      "cost_per_task": 0.25,
+      "coding_score": 15.0,
+      "intelligence_score": 89.0,
+      "output_speed_tps": 22.0,
+      "latency_ttft_sec": 18.0,
+      "tokens_per_task": 1,
+      "tier": "frontier_high",
+      "release_date": "2024-07-25",
+      "domain_scores": {
+        "video_gen": 89.0
+      },
+      "metadata": {
+        "modality": "video",
+        "clip_seconds": 5,
+        "resolution": "720p",
+        "fps": 30
+      }
+    },
+    {
+      "model_id": "openai/sora-2-preview",
+      "name": "OpenAI Sora 2 (Cinematic Preview)",
+      "provider": "openai",
+      "context_length": 4096,
+      "input_cost_per_m": 0.0,
+      "output_cost_per_m": 0.0,
+      "cost_per_task": 0.5,
+      "coding_score": 20.0,
+      "intelligence_score": 92.5,
+      "output_speed_tps": 15.0,
+      "latency_ttft_sec": 45.0,
+      "tokens_per_task": 1,
+      "tier": "frontier_high",
+      "release_date": "2025-02-01",
+      "domain_scores": {
+        "video_gen": 92.5
+      },
+      "metadata": {
+        "modality": "video",
+        "clip_seconds": 5,
+        "resolution": "1080p",
+        "fps": 30
+      }
+    },
+    {
+      "model_id": "local/ltx-video-0.9b",
+      "name": "Local LTX-Video 0.9B (Lightricks DiT FP8)",
+      "provider": "local",
+      "context_length": 2048,
+      "input_cost_per_m": 0.0,
+      "output_cost_per_m": 0.0,
+      "cost_per_task": 0.0,
+      "coding_score": 10.0,
+      "intelligence_score": 76.0,
+      "output_speed_tps": 12.0,
+      "latency_ttft_sec": 10.0,
+      "tokens_per_task": 1,
+      "tier": "local_zero_cost",
+      "release_date": "2024-11-18",
+      "domain_scores": {
+        "video_gen": 76.0
+      },
+      "metadata": {
+        "modality": "video",
+        "vram_min_gb": 8,
+        "vram_rec_gb": 12,
+        "clip_seconds": 5,
+        "resolution": "720x480",
+        "fps": 24,
+        "local_viable": true
+      }
+    },
+    {
+      "model_id": "local/cogvideox-5b-int8",
+      "name": "Local CogVideoX 5B (THUDM INT8)",
+      "provider": "local",
+      "context_length": 2048,
+      "input_cost_per_m": 0.0,
+      "output_cost_per_m": 0.0,
+      "cost_per_task": 0.0,
+      "coding_score": 10.0,
+      "intelligence_score": 79.5,
+      "output_speed_tps": 6.0,
+      "latency_ttft_sec": 35.0,
+      "tokens_per_task": 1,
+      "tier": "local_zero_cost",
+      "release_date": "2024-08-30",
+      "domain_scores": {
+        "video_gen": 79.5
+      },
+      "metadata": {
+        "modality": "video",
+        "vram_min_gb": 14,
+        "vram_rec_gb": 18,
+        "clip_seconds": 6,
+        "resolution": "720p",
+        "fps": 16,
+        "local_viable": false
+      }
+    }
+  ]
+}

@@ -1,0 +1,181 @@
+{
+  "ledger_id": "20260905_095430_text-to-image-text-to-video-benchmarks-pareto-frontier-vbenc",
+  "query": "text-to-image text-to-video benchmarks pareto frontier vbench imagearena",
+  "topic_type": "topic_concept",
+  "created_at": "2026-09-05T09:54:30.646457+00:00",
+  "summary_executive": "Pesquisa conceitual estruturada sobre 'text-to-image text-to-video benchmarks pareto frontier vbench imagearena'. Catalogadas 5 publicações acadêmicas de alta relevância com DOI/arXiv IDs.",
+  "sources": [
+    {
+      "id": "arxiv:2503.21721v2",
+      "title": "Evaluating Text-to-Image and Text-to-Video Synthesis with a Conditional Fréchet Distance",
+      "url": "http://arxiv.org/abs/2503.21721v2",
+      "source_type": "paper",
+      "authors_or_maintainers": [
+        "Jaywon Koo",
+        "Jefferson Hernandez",
+        "Moayed Haji-Ali",
+        "Ziyan Yang",
+        "Vicente Ordonez"
+      ],
+      "published_date": "2025-03-27T17:35:14Z",
+      "summary": "Evaluating text-to-image and text-to-video models is challenging due to a fundamental disconnect: established metrics fail to jointly measure visual quality and semantic alignment with text, leading to a poor correlation with human judgments. To address this critical issue, we propose cFreD, a general metric based on a Conditional Fréchet Distance that unifies the assessment of visual fidelity and text-prompt consistency into a single score. Existing metrics such as Fréchet Inception Distance (FID) capture image quality but ignore text conditioning while alignment scores such as CLIPScore are insensitive to visual quality. Furthermore, learned preference models require constant retraining and are unlikely to generalize to novel architectures or out-of-distribution prompts. Through extensive experiments across multiple recently proposed text-to-image models and diverse prompt datasets, cFreD exhibits a higher correlation with human judgments compared to statistical metrics , including metrics trained with human preferences. Our findings validate cFreD as a robust, future-proof metric for the systematic evaluation of text conditioned models, standardizing benchmarking in this rapidly evolving field. We release our evaluation toolkit and benchmark.",
+      "license": "arXiv Open Access / Creative Commons",
+      "license_category": "permissive",
+      "authority_tier": "high_credibility",
+      "credibility_score": 0.95,
+      "stars": null,
+      "has_test_suite": null,
+      "metadata": {
+        "arxiv_id": "2503.21721v2"
+      }
+    },
+    {
+      "id": "arxiv:2308.06571v1",
+      "title": "ModelScope Text-to-Video Technical Report",
+      "url": "http://arxiv.org/abs/2308.06571v1",
+      "source_type": "paper",
+      "authors_or_maintainers": [
+        "Jiuniu Wang",
+        "Hangjie Yuan",
+        "Dayou Chen",
+        "Yingya Zhang",
+        "Xiang Wang",
+        "Shiwei Zhang"
+      ],
+      "published_date": "2023-08-12T13:53:10Z",
+      "summary": "This paper introduces ModelScopeT2V, a text-to-video synthesis model that evolves from a text-to-image synthesis model (i.e., Stable Diffusion). ModelScopeT2V incorporates spatio-temporal blocks to ensure consistent frame generation and smooth movement transitions. The model could adapt to varying frame numbers during training and inference, rendering it suitable for both image-text and video-text datasets. ModelScopeT2V brings together three components (i.e., VQGAN, a text encoder, and a denoising UNet), totally comprising 1.7 billion parameters, in which 0.5 billion parameters are dedicated to temporal capabilities. The model demonstrates superior performance over state-of-the-art methods across three evaluation metrics. The code and an online demo are available at \\url{https://modelscope.cn/models/damo/text-to-video-synthesis/summary}.",
+      "license": "arXiv Open Access / Creative Commons",
+      "license_category": "permissive",
+      "authority_tier": "high_credibility",
+      "credibility_score": 0.95,
+      "stars": null,
+      "has_test_suite": null,
+      "metadata": {
+        "arxiv_id": "2308.06571v1"
+      }
+    },
+    {
+      "id": "arxiv:2506.10005v1",
+      "title": "Multimodal Cinematic Video Synthesis Using Text-to-Image and Audio Generation Models",
+      "url": "http://arxiv.org/abs/2506.10005v1",
+      "source_type": "paper",
+      "authors_or_maintainers": [
+        "Sridhar S",
+        "Nithin A",
+        "Shakeel Rifath",
+        "Vasantha Raj"
+      ],
+      "published_date": "2025-04-06T17:10:34Z",
+      "summary": "Advances in generative artificial intelligence have altered multimedia creation, allowing for automatic cinematic video synthesis from text inputs. This work describes a method for creating 60-second cinematic movies incorporating Stable Diffusion for high-fidelity image synthesis, GPT-2 for narrative structuring, and a hybrid audio pipeline using gTTS and YouTube-sourced music. It uses a five-scene framework, which is augmented by linear frame interpolation, cinematic post-processing (e.g., sharpening), and audio-video synchronization to provide professional-quality results. It was created in a GPU-accelerated Google Colab environment using Python 3.11. It has a dual-mode Gradio interface (Simple and Advanced), which supports resolutions of up to 1024x768 and frame rates of 15-30 FPS. Optimizations such as CUDA memory management and error handling ensure reliability. The experiments demonstrate outstanding visual quality, narrative coherence, and efficiency, furthering text-to-video synthesis for creative, educational, and industrial applications.",
+      "license": "arXiv Open Access / Creative Commons",
+      "license_category": "permissive",
+      "authority_tier": "high_credibility",
+      "credibility_score": 0.95,
+      "stars": null,
+      "has_test_suite": null,
+      "metadata": {
+        "arxiv_id": "2506.10005v1"
+      }
+    },
+    {
+      "id": "arxiv:2311.06329v1",
+      "title": "A Survey of AI Text-to-Image and AI Text-to-Video Generators",
+      "url": "http://arxiv.org/abs/2311.06329v1",
+      "source_type": "paper",
+      "authors_or_maintainers": [
+        "Aditi Singh"
+      ],
+      "published_date": "2023-11-10T17:33:58Z",
+      "summary": "Text-to-Image and Text-to-Video AI generation models are revolutionary technologies that use deep learning and natural language processing (NLP) techniques to create images and videos from textual descriptions. This paper investigates cutting-edge approaches in the discipline of Text-to-Image and Text-to-Video AI generations. The survey provides an overview of the existing literature as well as an analysis of the approaches used in various studies. It covers data preprocessing techniques, neural network types, and evaluation metrics used in the field. In addition, the paper discusses the challenges and limitations of Text-to-Image and Text-to-Video AI generations, as well as future research directions. Overall, these models have promising potential for a wide range of applications such as video production, content creation, and digital marketing.",
+      "license": "arXiv Open Access / Creative Commons",
+      "license_category": "permissive",
+      "authority_tier": "high_credibility",
+      "credibility_score": 0.95,
+      "stars": null,
+      "has_test_suite": null,
+      "metadata": {
+        "arxiv_id": "2311.06329v1"
+      }
+    },
+    {
+      "id": "arxiv:2501.01156v2",
+      "title": "TexAVi: Generating Stereoscopic VR Video Clips from Text Descriptions",
+      "url": "http://arxiv.org/abs/2501.01156v2",
+      "source_type": "paper",
+      "authors_or_maintainers": [
+        "Vriksha Srihari",
+        "R. Bhavya",
+        "Shruti Jayaraman",
+        "V. Mary Anita Rajam"
+      ],
+      "published_date": "2025-01-02T09:21:03Z",
+      "summary": "While generative models such as text-to-image, large language models and text-to-video have seen significant progress, the extension to text-to-virtual-reality remains largely unexplored, due to a deficit in training data and the complexity of achieving realistic depth and motion in virtual environments. This paper proposes an approach to coalesce existing generative systems to form a stereoscopic virtual reality video from text. Carried out in three main stages, we start with a base text-to-image model that captures context from an input text. We then employ Stable Diffusion on the rudimentary image produced, to generate frames with enhanced realism and overall quality. These frames are processed with depth estimation algorithms to create left-eye and right-eye views, which are stitched side-by-side to create an immersive viewing experience. Such systems would be highly beneficial in virtual reality production, since filming and scene building often require extensive hours of work and post-production effort. We utilize image evaluation techniques, specifically Fréchet Inception Distance and CLIP Score, to assess the visual quality of frames produced for the video. These quantitative measures establish the proficiency of the proposed method. Our work highlights the exciting possibilities of using natural language-driven graphics in fields like virtual reality simulations.",
+      "license": "arXiv Open Access / Creative Commons",
+      "license_category": "permissive",
+      "authority_tier": "high_credibility",
+      "credibility_score": 0.95,
+      "stars": null,
+      "has_test_suite": null,
+      "metadata": {
+        "arxiv_id": "2501.01156v2"
+      }
+    }
+  ],
+  "insights": [
+    {
+      "source_id": "arxiv:2503.21721v2",
+      "source_title": "Evaluating Text-to-Image and Text-to-Video Synthesis with a Conditional Fréchet Distance",
+      "key_insight": "Fundamentação teórica extraída de: Evaluating text-to-image and text-to-video models is challenging due to a fundamental disconnect: established metrics fail to jointly measure visual quality and semantic alignment with text, leading to a poor correlation with human judgment...",
+      "architectural_implications": "Basear o design do componente nos padrões formais documentados neste paper.",
+      "future_reference_value": "Consultar equações e garantias de consistência em versões futuras.",
+      "authority_tier": "high_credibility",
+      "code_patterns_or_algorithms": [
+        "2503.21721v2"
+      ]
+    },
+    {
+      "source_id": "arxiv:2308.06571v1",
+      "source_title": "ModelScope Text-to-Video Technical Report",
+      "key_insight": "Fundamentação teórica extraída de: This paper introduces ModelScopeT2V, a text-to-video synthesis model that evolves from a text-to-image synthesis model (i.e., Stable Diffusion). ModelScopeT2V incorporates spatio-temporal blocks to ensure consistent frame generation and smo...",
+      "architectural_implications": "Basear o design do componente nos padrões formais documentados neste paper.",
+      "future_reference_value": "Consultar equações e garantias de consistência em versões futuras.",
+      "authority_tier": "high_credibility",
+      "code_patterns_or_algorithms": [
+        "2308.06571v1"
+      ]
+    },
+    {
+      "source_id": "arxiv:2506.10005v1",
+      "source_title": "Multimodal Cinematic Video Synthesis Using Text-to-Image and Audio Generation Models",
+      "key_insight": "Fundamentação teórica extraída de: Advances in generative artificial intelligence have altered multimedia creation, allowing for automatic cinematic video synthesis from text inputs. This work describes a method for creating 60-second cinematic movies incorporating Stable Di...",
+      "architectural_implications": "Basear o design do componente nos padrões formais documentados neste paper.",
+      "future_reference_value": "Consultar equações e garantias de consistência em versões futuras.",
+      "authority_tier": "high_credibility",
+      "code_patterns_or_algorithms": [
+        "2506.10005v1"
+      ]
+    },
+    {
+      "source_id": "arxiv:2311.06329v1",
+      "source_title": "A Survey of AI Text-to-Image and AI Text-to-Video Generators",
+      "key_insight": "Fundamentação teórica extraída de: Text-to-Image and Text-to-Video AI generation models are revolutionary technologies that use deep learning and natural language processing (NLP) techniques to create images and videos from textual descriptions. This paper investigates cutti...",
+      "architectural_implications": "Basear o design do componente nos padrões formais documentados neste paper.",
+      "future_reference_value": "Consultar equações e garantias de consistência em versões futuras.",
+      "authority_tier": "high_credibility",
+      "code_patterns_or_algorithms": [
+        "2311.06329v1"
+      ]
+    },
+    {
+      "source_id": "arxiv:2501.01156v2",
+      "source_title": "TexAVi: Generating Stereoscopic VR Video Clips from Text Descriptions",
+      "key_insight": "Fundamentação teórica extraída de: While generative models such as text-to-image, large language models and text-to-video have seen significant progress, the extension to text-to-virtual-reality remains largely unexplored, due to a deficit in training data and the complexity...",
+      "architectural_implications": "Basear o design do componente nos padrões formais documentados neste paper.",
+      "future_reference_value": "Consultar equações e garantias de consistência em versões futuras.",
+      "authority_tier": "high_credibility",
+      "code_patterns_or_algorithms": [
+        "2501.01156v2"
+      ]
+    }
+  ]
+}

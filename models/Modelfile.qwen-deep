@@ -1,0 +1,19 @@
+# Modelfile para Qwen 30B MoE - Versão Raciocínio Profundo / Contexto 16k
+# Otimizado para RTX 4070 (8GB) + 32GB RAM + Multi-Core (20 threads)
+# Sem System Prompt
+
+FROM hf.co/unsloth/Qwen3-Coder-30B-A3B-Instruct-GGUF:Q3_K_M
+
+# Janela de contexto estendida de 16k tokens
+PARAMETER num_ctx 16384
+
+# 20 threads distribuídas para alto throughput em tarefas densas
+PARAMETER num_thread 20
+
+# Amostragem calibrada para raciocínio e arquitetura
+PARAMETER temperature 0.2
+PARAMETER top_p 0.85
+PARAMETER top_k 30
+PARAMETER repeat_penalty 1.05
+PARAMETER stop "<|im_start|>"
+PARAMETER stop "<|im_end|>"

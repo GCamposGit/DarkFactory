@@ -1,0 +1,62 @@
+{
+  "stack": {
+    "language": "python 3.12",
+    "framework": "fastapi",
+    "test_runner": "pytest",
+    "frontend": "static html/css/javascript"
+  },
+  "entrypoints": [
+    "run_hub.py",
+    "hub/backend/main.py"
+  ],
+  "local_only_components": [
+    "run_canaletto.py",
+    "canaletto_gallery/",
+    "tests/test_canaletto.py",
+    "audio_bench/*.wav"
+  ],
+  "domain_layers": [
+    "core/benchmarks",
+    "core/content",
+    "core/learning",
+    "core/learning_pack",
+    "core/research",
+    "core/router",
+    "core/visual",
+    "core/audio",
+    "core/orchestrator",
+    "core/harness"
+  ],
+  "reachability": {
+    "drivers": [
+      "http",
+      "cli"
+    ],
+    "quick_validation_command": "python core/harness/runner.py --quick",
+    "test_command": "python -m pytest tests -v --ignore=tests/test_canaletto.py",
+    "test_files": 11,
+    "local_only_test_files": 1
+  },
+  "skills": {
+    "source": ".agents/skills",
+    "count": 17,
+    "frontmatter_validated": true,
+    "duplicate_names": 0
+  },
+  "governance": {
+    "governance_detected": true,
+    "files": [
+      "MISSION.md",
+      "FACTORY_RULES.md",
+      "AGENTS.md"
+    ]
+  },
+  "validation": {
+    "syntax_and_types": "passed",
+    "unit_and_integration_tests": "not_run_missing_pytest_in_bundled_runtime"
+  },
+  "repository": {
+    "git_worktree": true,
+    "nested_reference_git_repo": "_reference_skills/.git"
+  }
+}

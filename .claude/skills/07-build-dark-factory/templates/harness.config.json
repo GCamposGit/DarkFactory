@@ -1,0 +1,24 @@
+{
+  "project_name": "dark-factory-app",
+  "driver": "cli",
+  "steps": [
+    {
+      "name": "static_analysis",
+      "cmd": "python -m py_compile core/router/model_router.py",
+      "timeout_sec": 30,
+      "quick": true
+    },
+    {
+      "name": "unit_tests",
+      "cmd": "pytest tests/unit/ -v",
+      "timeout_sec": 60,
+      "quick": true
+    },
+    {
+      "name": "e2e_headless",
+      "cmd": "pytest tests/e2e/ -v",
+      "timeout_sec": 120,
+      "quick": false
+    }
+  ]
+}

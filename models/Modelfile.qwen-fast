@@ -1,0 +1,19 @@
+# Modelfile para Qwen 30B MoE - Versão Rápida / Worker Limpo
+# Otimizado para RTX 4070 (8GB) + 32GB RAM + P-Cores (8 threads)
+# Sem System Prompt
+
+FROM hf.co/unsloth/Qwen3-Coder-30B-A3B-Instruct-GGUF:Q3_K_M
+
+# Contexto enxuto para máxima velocidade e retenção de camadas na VRAM
+PARAMETER num_ctx 4096
+
+# 8 threads focadas exclusivamente nos P-Cores de alta frequência (evitando jitter dos E-cores)
+PARAMETER num_thread 8
+
+# Amostragem determinística para código
+PARAMETER temperature 0.15
+PARAMETER top_p 0.8
+PARAMETER top_k 20
+PARAMETER repeat_penalty 1.05
+PARAMETER stop "<|im_start|>"
+PARAMETER stop "<|im_end|>"

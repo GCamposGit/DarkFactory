@@ -1,0 +1,63 @@
+# Python bytecode and test/tool caches
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.pyright/
+.ruff_cache/
+.coverage
+coverage.xml
+htmlcov/
+
+# Local environments and packaging output
+.venv/
+venv/
+env/
+ENV/
+*.egg-info/
+dist/
+build/
+
+# Secrets and machine-local configuration
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.secret
+
+# Local model/runtime data
+models/*.bin
+models/*.gguf
+models/*.safetensors
+models/checkpoints/
+
+# Generated DarkFac state/assets (source ledgers remain versionable)
+.factory/visuals/
+.factory/learning_packs/
+.factory/content/
+.factory/benchmarks/history/
+.factory/benchmarks/latest.json
+.factory/benchmarks/empirical_ledger.json
+.factory/decks/
+
+# Local audio samples and generated media
+audio_bench/*.wav
+audio_bench/output/
+
+# Canaletto is a local-only visual experiment; keep it out of shared clones.
+/canaletto_gallery/
+/run_canaletto.py
+/tests/test_canaletto.py
+
+# OS/editor files
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Embedded reference repository; not part of the portable DarkFac source.
+/_reference_skills/

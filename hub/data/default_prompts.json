@@ -1,0 +1,30 @@
+[
+  {
+    "id": "prompt-code-review",
+    "title": "Auditoria de Código & Edge Cases",
+    "description": "Revisão técnica profunda focada em segurança, concorrência, vazamento de recursos e tipos.",
+    "tags": ["review", "security", "types"],
+    "content": "Você é um Engenheiro Principal executando uma auditoria adversarial rigorosa no código a seguir.\n\nAnalise:\n1. Segurança e validação de limites.\n2. Tipagem estrita e ausência de cast inseguro / 'Any'.\n3. Desacoplamento da lógica de negócios (Reachability Headless).\n4. Tratamento explícito de exceções (sem 'except: pass').\n5. Race conditions ou contenção de recursos.\n\nCódigo para revisão:\n```\n{{code}}\n```"
+  },
+  {
+    "id": "prompt-unit-test-gen",
+    "title": "Gerador de Testes Unitários TDD",
+    "description": "Gera suíte completa de testes unitários isolados com casos de sucesso, falha e limites.",
+    "tags": ["testing", "tdd", "pytest"],
+    "content": "Escreva uma suíte de testes unitários em pytest para a seguinte função/módulo.\n\nRequisitos:\n- Cobertura de cenários felizes, entradas inválidas e exceções esperadas.\n- Isolamento total de estado (sem dependência entre testes).\n- Asserções explícitas com mensagens claras de falha.\n\nCódigo alvo:\n```\n{{target_code}}\n```"
+  },
+  {
+    "id": "prompt-architecture-spike",
+    "title": "Spike Arquitetural & Non-Goals",
+    "description": "Estruturação de PRD conciso, fronteiras do sistema e lista inegociável de non-goals.",
+    "tags": ["architecture", "prd", "planning"],
+    "content": "Atue como Arquiteto de Software Sênior. Estruture um plano de arquitetura para o seguinte problema:\n\n1. O Problema Real\n2. A Jornada Feliz (The Core Journey) em passos observáveis\n3. Non-Goals inegociáveis (o que NÃO faremos para evitar escopo inchado)\n4. Contrato de Reachability (como a lógica será testada headless via CLI/HTTP)\n5. Fatiamento em tickets executáveis de 1 passada\n\nDescrição da funcionalidade:\n```\n{{feature_description}}\n```"
+  },
+  {
+    "id": "prompt-refactor-strict",
+    "title": "Refatoração com Tipagem Estrita",
+    "description": "Refatora código legado aplicando tipagem estrita, Pydantic v2 e padrões SOLID.",
+    "tags": ["refactor", "types", "solid"],
+    "content": "Refatore o seguinte código aplicando tipagem estrita total (Pydantic v2 / Type Hints modernos no Python ou TypeScript strict).\nGaranta imutabilidade onde cabível, separação de responsabilidades e elimine code smells.\n\nCódigo:\n```\n{{legacy_code}}\n```"
+  }
+]

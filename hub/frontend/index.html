@@ -1,0 +1,660 @@
+<!DOCTYPE html>
+<html lang="pt-BR" class="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>DarkHub - AI & Dev Command Center</title>
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            brand: {
+              50: '#eef2ff',
+              500: '#6366f1',
+              600: '#4f46e5',
+              700: '#4338ca',
+            }
+          },
+          fontFamily: {
+            sans: ['Inter', 'system-ui', 'sans-serif'],
+            mono: ['JetBrains Mono', 'monospace'],
+          }
+        }
+      }
+    }
+  </script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body class="bg-slate-950 text-slate-100 min-h-screen font-sans selection:bg-indigo-500 selection:text-white antialiased relative">
+  
+  <!-- Subtle background glow -->
+  <div class="fixed top-0 left-1/4 w-96 h-96 bg-indigo-600/10 rounded-full blur-3xl pointer-events-none -z-10"></div>
+  <div class="fixed bottom-0 right-1/4 w-96 h-96 bg-blue-600/10 rounded-full blur-3xl pointer-events-none -z-10"></div>
+
+  <!-- Main Navigation Header -->
+  <header class="sticky top-0 z-30 border-b border-slate-800/80 bg-slate-950/80 backdrop-blur-xl">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between gap-4">
+      
+      <!-- Brand Logo -->
+      <div class="flex items-center gap-3">
+        <div class="w-9 h-9 rounded-xl bg-gradient-to-tr from-indigo-600 to-blue-500 flex items-center justify-center font-mono font-bold text-lg text-white shadow-lg shadow-indigo-500/25">
+          ⚡
+        </div>
+        <div>
+          <div class="flex items-center gap-2">
+            <span class="font-bold text-base tracking-tight text-white">DarkHub</span>
+            <span class="px-2 py-0.5 rounded-full bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 text-[10px] font-mono">v1.0</span>
+          </div>
+          <p class="text-[10px] text-slate-400 font-mono hidden sm:block">AI & Dev Command Center</p>
+        </div>
+      </div>
+
+      <!-- Quick Actions / Status Header -->
+      <div class="flex items-center gap-2.5">
+        
+        <!-- Live Ollama Status Indicator -->
+        <div id="ollama-status-badge">
+          <div class="flex items-center gap-2 px-2.5 py-1 rounded-full bg-slate-900 border border-slate-800 text-slate-500 text-xs font-mono">
+            <span class="w-2 h-2 rounded-full bg-slate-600"></span>
+            <span class="hidden sm:inline">Ollama: Checando...</span>
+          </div>
+        </div>
+
+        <!-- Live OpenRouter Status Indicator -->
+        <div id="openrouter-status-badge">
+          <div class="flex items-center gap-2 px-2.5 py-1 rounded-full bg-slate-900 border border-slate-800 text-slate-500 text-xs font-mono">
+            <span class="w-2 h-2 rounded-full bg-slate-600"></span>
+            <span class="hidden sm:inline">OpenRouter: Checando...</span>
+          </div>
+        </div>
+
+        <!-- Search / Command Palette Trigger -->
+        <button 
+          onclick="openCommandPalette()"
+          class="hidden md:flex items-center gap-2.5 px-3 py-1.5 rounded-xl bg-slate-900 border border-slate-800 hover:border-indigo-500/40 text-slate-400 hover:text-slate-200 transition-all text-xs font-mono group shadow-inner">
+          <svg class="w-3.5 h-3.5 text-slate-500 group-hover:text-indigo-400 transition-colors" stroke="currentColor" fill="none" viewBox="0 0 24 24">
+            <circle cx="11" cy="11" r="8"></circle>
+            <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+          </svg>
+          <span>Buscar...</span>
+          <kbd class="px-1.5 py-0.5 rounded bg-slate-800 border border-slate-700 text-[10px] text-slate-400">Ctrl+K</kbd>
+        </button>
+
+        <!-- Benchmarks & Pareto Trigger -->
+        <button 
+          onclick="openBenchmarksModal()" 
+          title="Ver Benchmarks & Fronteira de Pareto"
+          class="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-amber-300 border border-slate-800 hover:border-amber-500/30 transition-all text-xs font-medium">
+          <span>📊</span>
+          <span class="hidden lg:inline">Benchmarks & Pareto</span>
+        </button>
+
+        <!-- Playground Trigger -->
+        <button 
+          onclick="openPlaygroundDrawer()" 
+          title="Abrir AI Playground (Local Ollama & OpenRouter)"
+          class="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-indigo-300 border border-slate-800 hover:border-indigo-500/30 transition-all text-xs font-medium">
+          <span>🧠</span>
+          <span class="hidden sm:inline">Playground</span>
+        </button>
+
+        <!-- Prompt Vault Trigger -->
+        <button 
+          onclick="openPromptVaultDrawer()" 
+          title="Abrir Cofre de Prompts"
+          class="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-indigo-300 border border-slate-800 hover:border-indigo-500/30 transition-all text-xs font-medium">
+          <span>📋</span>
+          <span class="hidden md:inline">Prompts</span>
+        </button>
+
+        <!-- Backup & Settings Trigger -->
+        <button 
+          onclick="openBackupModal()" 
+          title="Backup & Configurações"
+          class="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-slate-200 border border-slate-800 transition-all text-xs">
+          <span>⚙️</span>
+        </button>
+
+        <!-- Add Service Button -->
+        <button 
+          onclick="openServiceModal()"
+          class="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-medium text-xs shadow-lg shadow-indigo-600/30 transition-all">
+          <span>+</span>
+          <span class="hidden sm:inline">Novo</span>
+        </button>
+
+      </div>
+    </div>
+  </header>
+
+  <!-- Main Cockpit Container -->
+  <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8">
+    
+    <!-- Quick Dock (Pinned Services) -->
+    <section id="quick-dock-section" class="space-y-3">
+      <div class="flex items-center justify-between">
+        <h2 class="text-xs font-mono font-semibold uppercase tracking-wider text-slate-400 flex items-center gap-2">
+          <span>⚡ Quick Launch Dock</span>
+        </h2>
+        <span class="text-[10px] text-slate-500 font-mono">Fixados no topo</span>
+      </div>
+      <div id="quick-dock-items" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
+        <!-- Pinned items dynamically rendered here -->
+      </div>
+    </section>
+
+    <!-- Toolbar: Search Bar + Category Pills -->
+    <section class="space-y-4">
+      
+      <div class="flex flex-col md:flex-row gap-4 justify-between items-stretch md:items-center">
+        <!-- Category Pills -->
+        <div id="category-tabs" class="flex items-center gap-2 overflow-x-auto pb-2 md:pb-0 scrollbar-none">
+          <!-- Category buttons dynamically rendered here -->
+        </div>
+
+        <!-- Search Input -->
+        <div class="relative min-w-[260px]">
+          <input 
+            id="search-input"
+            type="text" 
+            placeholder="Filtrar por nome, tag ou URL..." 
+            class="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-2 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-indigo-500 transition-colors font-mono"
+          />
+          <span class="absolute right-3 top-2.5 text-slate-600 text-xs">/</span>
+        </div>
+      </div>
+
+    </section>
+
+    <!-- Services Grid -->
+    <section>
+      <div id="services-grid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+        <!-- Service cards rendered dynamically here -->
+      </div>
+
+      <!-- Empty State -->
+      <div id="empty-state" class="hidden py-16 text-center space-y-3">
+        <div class="text-3xl">🔍</div>
+        <h3 class="text-sm font-semibold text-slate-300">Nenhum serviço encontrado</h3>
+        <p class="text-xs text-slate-500 max-w-sm mx-auto">
+          Tente ajustar sua busca ou categoria, ou adicione um novo link ao cockpit pelo botão "+ Novo Serviço".
+        </p>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- Command Palette Modal (Ctrl+K) -->
+  <div id="command-palette-modal" class="hidden fixed inset-0 z-50 flex items-start justify-center pt-20 px-4 bg-slate-950/80 backdrop-blur-sm animate-in-quick">
+    <div class="w-full max-w-xl bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[75vh]">
+      <!-- Search Input -->
+      <div class="p-4 border-b border-slate-800 flex items-center gap-3">
+        <svg class="w-4 h-4 text-slate-400 shrink-0" stroke="currentColor" fill="none" viewBox="0 0 24 24">
+          <circle cx="11" cy="11" r="8"></circle>
+          <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+        </svg>
+        <input 
+          id="palette-search-input"
+          type="text" 
+          placeholder="Digite para buscar ferramentas, tags ou URLs..." 
+          class="w-full bg-transparent text-sm text-slate-100 placeholder-slate-500 focus:outline-none font-mono"
+        />
+        <kbd class="px-1.5 py-0.5 rounded bg-slate-800 text-[10px] text-slate-400 font-mono">ESC para fechar</kbd>
+      </div>
+
+      <!-- Results List -->
+      <div id="palette-results-list" class="overflow-y-auto p-2 space-y-1 flex-1">
+        <!-- Items rendered dynamically -->
+      </div>
+
+      <!-- Footer Info -->
+      <div class="p-3 bg-slate-950/60 border-t border-slate-800/80 flex items-center justify-between text-[10px] text-slate-500 font-mono">
+        <div class="flex gap-3">
+          <span>↑↓ Navegar</span>
+          <span>↵ Abrir link</span>
+        </div>
+        <span>DarkHub Command Palette</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Unified AI Playground Drawer -->
+  <div id="playground-drawer" class="hidden fixed inset-0 z-50 flex justify-end bg-slate-950/60 backdrop-blur-sm animate-in-quick">
+    <div class="w-full max-w-lg h-full bg-slate-900 border-l border-slate-800 p-6 flex flex-col justify-between overflow-y-auto">
+      <div>
+        <div class="flex items-center justify-between pb-4 border-b border-slate-800 mb-5">
+          <div class="flex items-center gap-2">
+            <span class="text-xl">🧠</span>
+            <div>
+              <h3 class="font-bold text-sm text-slate-100">AI Playground</h3>
+              <p class="text-[10px] text-slate-400 font-mono">Cluster Local (Ollama $0) & Nuvem (OpenRouter)</p>
+            </div>
+          </div>
+          <button onclick="closePlaygroundDrawer()" class="p-1.5 rounded-lg text-slate-500 hover:text-slate-300 hover:bg-slate-800">✕</button>
+        </div>
+
+        <!-- Provider Switch Tabs -->
+        <div class="grid grid-cols-2 gap-2 p-1 bg-slate-950 rounded-xl border border-slate-800 mb-4">
+          <button 
+            id="provider-tab-ollama"
+            onclick="setPlaygroundProvider('ollama')"
+            class="py-1.5 px-3 rounded-lg text-xs font-mono font-medium transition-all bg-indigo-600 text-white shadow-sm flex items-center justify-center gap-1.5">
+            <span>💻</span>
+            <span>Cluster Local ($0)</span>
+          </button>
+          <button 
+            id="provider-tab-openrouter"
+            onclick="setPlaygroundProvider('openrouter')"
+            class="py-1.5 px-3 rounded-lg text-xs font-mono font-medium transition-all text-slate-400 hover:text-slate-200 flex items-center justify-center gap-1.5">
+            <span>☁️</span>
+            <span>OpenRouter Cloud</span>
+          </button>
+        </div>
+
+        <!-- Model Selector & Provider Status -->
+        <div class="space-y-2 mb-4">
+          <div class="flex items-center justify-between">
+            <label class="text-xs font-semibold text-slate-300">Modelo Selecionado</label>
+            <span id="playground-provider-status" class="text-[10px] font-mono text-emerald-400">Pronto</span>
+          </div>
+          <select id="playground-model-select" class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-indigo-500 font-mono">
+            <!-- Populated dynamically -->
+          </select>
+        </div>
+
+        <!-- Collapsible Advanced Settings (System Prompt, Temperature, Max Tokens) -->
+        <div class="mb-4">
+          <button 
+            type="button" 
+            onclick="togglePlaygroundAdvanced()"
+            class="text-[11px] text-slate-400 hover:text-indigo-400 font-mono flex items-center gap-1.5">
+            <span id="advanced-toggle-arrow">▶</span>
+            <span>Parâmetros Avançados (System, Temp, Tokens)</span>
+          </button>
+          <div id="playground-advanced-panel" class="hidden mt-3 p-3 rounded-xl bg-slate-950/80 border border-slate-800/80 space-y-3">
+            <div>
+              <label class="block text-[10px] font-mono text-slate-400 mb-1">System Prompt (Opcional)</label>
+              <textarea 
+                id="playground-system-input" 
+                rows="2" 
+                placeholder="Ex: Você é um engenheiro de software sênior da DarkFac..." 
+                class="w-full bg-slate-900 border border-slate-800 rounded-lg p-2 text-xs text-slate-200 font-mono focus:outline-none focus:border-indigo-500"></textarea>
+            </div>
+            <div class="grid grid-cols-2 gap-3">
+              <div>
+                <div class="flex justify-between text-[10px] font-mono text-slate-400 mb-1">
+                  <span>Temperature</span>
+                  <span id="playground-temp-val">0.7</span>
+                </div>
+                <input 
+                  id="playground-temperature" 
+                  type="range" 
+                  min="0.0" 
+                  max="1.5" 
+                  step="0.1" 
+                  value="0.7" 
+                  oninput="document.getElementById('playground-temp-val').innerText = this.value"
+                  class="w-full accent-indigo-500 cursor-pointer"
+                />
+              </div>
+              <div>
+                <label class="block text-[10px] font-mono text-slate-400 mb-1">Max Tokens</label>
+                <input 
+                  id="playground-max-tokens" 
+                  type="number" 
+                  value="1024" 
+                  min="64" 
+                  max="8192" 
+                  class="w-full bg-slate-900 border border-slate-800 rounded-lg px-2.5 py-1 text-xs text-slate-200 font-mono focus:outline-none focus:border-indigo-500"
+                />
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Prompt Textarea -->
+        <div class="space-y-2 mb-4">
+          <label class="text-xs font-semibold text-slate-300">Prompt / Instrução</label>
+          <textarea 
+            id="playground-prompt-input"
+            rows="6" 
+            placeholder="Digite sua dúvida, código ou instrução técnica..." 
+            class="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-xs text-slate-200 focus:outline-none focus:border-indigo-500 font-mono leading-relaxed"
+          ></textarea>
+        </div>
+
+        <button 
+          id="playground-run-btn"
+          class="w-full py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-medium text-xs shadow-lg shadow-indigo-600/30 transition-all flex items-center justify-center gap-2">
+          <span>Executar Prompt</span>
+        </button>
+
+        <!-- Response Output -->
+        <div id="playground-output" class="hidden mt-5 p-4 rounded-xl bg-slate-950 border border-slate-800">
+          <!-- Output will be injected here -->
+        </div>
+      </div>
+
+      <div id="playground-footer-note" class="pt-4 border-t border-slate-800 text-[10px] text-slate-500 font-mono text-center">
+        Rodando no hardware local via Ollama (Custo: $0)
+      </div>
+    </div>
+  </div>
+
+  <!-- Benchmarks & Fronteira de Pareto Modal -->
+  <div id="benchmarks-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md animate-in-quick">
+    <div class="w-full max-w-5xl bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
+      
+      <!-- Modal Header -->
+      <div class="p-5 border-b border-slate-800 flex items-center justify-between gap-4 bg-slate-950/50">
+        <div class="flex items-center gap-3">
+          <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-amber-500 to-indigo-600 flex items-center justify-center text-xl shadow-lg shadow-amber-500/20">
+            📊
+          </div>
+          <div>
+            <div class="flex items-center gap-2">
+              <h3 class="font-bold text-base text-slate-100">Daily LLM Benchmarks & Fronteira de Pareto</h3>
+              <span id="benchmarks-date-badge" class="px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/20 text-[10px] font-mono">Hoje</span>
+            </div>
+            <p class="text-xs text-slate-400 font-mono">Padrão Artificial Analysis v4.2 & Preços OpenRouter (Tarefa Padrão: 25k in / 2.5k out)</p>
+          </div>
+        </div>
+
+        <div class="flex items-center gap-2">
+          <button 
+            id="benchmarks-refresh-btn"
+            onclick="refreshBenchmarksData()" 
+            class="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-mono transition-colors">
+            <span class="refresh-icon">🔄</span>
+            <span>Atualizar Hoje</span>
+          </button>
+          <button onclick="closeBenchmarksModal()" class="p-1.5 rounded-lg text-slate-500 hover:text-slate-300 hover:bg-slate-800">✕</button>
+        </div>
+      </div>
+
+      <!-- Top Summary Cards -->
+      <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 p-5 border-b border-slate-800 bg-slate-950/30">
+        <div class="p-3 rounded-xl bg-slate-950 border border-slate-800">
+          <div class="text-[10px] text-slate-500 font-mono uppercase">Modelos Monitorados</div>
+          <div id="bench-stat-total" class="text-xl font-bold text-slate-200 mt-0.5">--</div>
+        </div>
+        <div class="p-3 rounded-xl bg-slate-950 border border-slate-800">
+          <div class="text-[10px] text-indigo-400 font-mono uppercase">Fronteira Pareto (Coding)</div>
+          <div id="bench-stat-pareto-coding" class="text-xl font-bold text-indigo-300 mt-0.5">--</div>
+        </div>
+        <div class="p-3 rounded-xl bg-slate-950 border border-slate-800">
+          <div class="text-[10px] text-amber-400 font-mono uppercase">Fronteira Pareto (Geral)</div>
+          <div id="bench-stat-pareto-general" class="text-xl font-bold text-amber-300 mt-0.5">--</div>
+        </div>
+        <div class="p-3 rounded-xl bg-slate-950 border border-slate-800">
+          <div class="text-[10px] text-emerald-400 font-mono uppercase">Custo Local (Ollama)</div>
+          <div class="text-xl font-bold text-emerald-300 mt-0.5">$0.00</div>
+        </div>
+      </div>
+
+      <!-- Filter Tabs -->
+      <div class="px-5 pt-3 pb-2 flex items-center justify-between gap-3 border-b border-slate-800/80">
+        <div id="benchmarks-provider-filters" class="flex items-center gap-1.5 overflow-x-auto scrollbar-none py-1">
+          <!-- Filters populated dynamically -->
+        </div>
+        <div class="text-[11px] text-slate-500 font-mono shrink-0 hidden sm:block">
+          Classificado por Coding Agent Index
+        </div>
+      </div>
+
+      <!-- Table Container -->
+      <div class="overflow-y-auto flex-1 p-5">
+        <table class="w-full text-left text-xs">
+          <thead>
+            <tr class="text-[10px] font-mono uppercase text-slate-500 border-b border-slate-800">
+              <th class="pb-3 font-semibold">Modelo</th>
+              <th class="pb-3 font-semibold">Fabricante</th>
+              <th class="pb-3 font-semibold">Coding Index</th>
+              <th class="pb-3 font-semibold">Intel. Index</th>
+              <th class="pb-3 font-semibold">Custo / Tarefa</th>
+              <th class="pb-3 font-semibold">Velocidade</th>
+              <th class="pb-3 font-semibold">Fronteira Pareto</th>
+              <th class="pb-3 font-semibold text-right">Ação</th>
+            </tr>
+          </thead>
+          <tbody id="benchmarks-table-body" class="divide-y divide-slate-800/50 font-mono">
+            <!-- Populated dynamically -->
+          </tbody>
+        </table>
+      </div>
+
+      <!-- Footer Info -->
+      <div class="p-3.5 bg-slate-950/80 border-t border-slate-800 flex items-center justify-between text-[10px] text-slate-500 font-mono">
+        <span>Dados integrados do ledger diário (.factory/benchmarks/latest.json)</span>
+        <span class="text-indigo-400">DarkFac Model Matrix 2026</span>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- Backup & Configurações Modal -->
+  <div id="backup-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm animate-in-quick">
+    <div class="w-full max-w-md bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl p-6">
+      
+      <div class="flex items-center justify-between pb-4 border-b border-slate-800 mb-5">
+        <div class="flex items-center gap-2">
+          <span class="text-lg">⚙️</span>
+          <div>
+            <h3 class="font-bold text-sm text-slate-100">Backup & Configurações</h3>
+            <p class="text-[10px] text-slate-400 font-mono">Exportação, Importação e Restauração</p>
+          </div>
+        </div>
+        <button onclick="closeBackupModal()" class="p-1.5 rounded-lg text-slate-500 hover:text-slate-300 hover:bg-slate-800">✕</button>
+      </div>
+
+      <div class="space-y-4">
+        <!-- Export Card -->
+        <div class="p-4 rounded-xl bg-slate-950 border border-slate-800 space-y-2">
+          <h4 class="text-xs font-semibold text-slate-200 flex items-center gap-1.5">
+            <span>📥</span>
+            <span>Exportar Catálogo</span>
+          </h4>
+          <p class="text-[11px] text-slate-400">
+            Baixe um snapshot completo com todos os serviços, categorias, tags e favoritos personalizados em JSON.
+          </p>
+          <button 
+            onclick="handleExportCatalog()" 
+            class="w-full py-2 rounded-xl bg-slate-800 hover:bg-indigo-600 hover:text-white text-slate-200 text-xs font-medium border border-slate-700 hover:border-indigo-500 transition-all">
+            Baixar Backup JSON
+          </button>
+        </div>
+
+        <!-- Import Card -->
+        <div class="p-4 rounded-xl bg-slate-950 border border-slate-800 space-y-2">
+          <h4 class="text-xs font-semibold text-slate-200 flex items-center gap-1.5">
+            <span>📤</span>
+            <span>Importar Catálogo</span>
+          </h4>
+          <p class="text-[11px] text-slate-400">
+            Restaure serviços a partir de um arquivo JSON exportado anteriormente.
+          </p>
+          <input 
+            type="file" 
+            id="import-file-input" 
+            accept=".json,application/json" 
+            class="hidden" 
+            onchange="handleImportFileSelected(event)"
+          />
+          <div class="flex items-center gap-2">
+            <label class="flex items-center gap-1.5 text-[11px] text-slate-400 cursor-pointer">
+              <input type="checkbox" id="import-merge-checkbox" class="rounded border-slate-800 bg-slate-900 text-indigo-600 focus:ring-0">
+              <span>Mesclar com atuais (não sobrescrever tudo)</span>
+            </label>
+          </div>
+          <button 
+            onclick="document.getElementById('import-file-input').click()" 
+            class="w-full py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium border border-slate-700 transition-all">
+            Selecionar Arquivo JSON
+          </button>
+        </div>
+
+        <!-- Reset Defaults Card -->
+        <div class="p-4 rounded-xl bg-red-950/20 border border-red-900/40 space-y-2">
+          <h4 class="text-xs font-semibold text-red-300 flex items-center gap-1.5">
+            <span>🔄</span>
+            <span>Restaurar Padrões da DarkFac</span>
+          </h4>
+          <p class="text-[11px] text-red-300/70">
+            Reverte o catálogo para os links e ferramentas padrão originais. Um backup será salvo automaticamente.
+          </p>
+          <button 
+            onclick="handleResetDefaults()" 
+            class="w-full py-2 rounded-xl bg-red-900/40 hover:bg-red-800/80 text-red-200 text-xs font-medium border border-red-800/50 transition-all">
+            Restaurar Catálogo Original
+          </button>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+
+  <!-- Prompt Snippet Vault Drawer -->
+  <div id="prompt-vault-drawer" class="hidden fixed inset-0 z-50 flex justify-end bg-slate-950/60 backdrop-blur-sm animate-in-quick">
+    <div class="w-full max-w-lg h-full bg-slate-900 border-l border-slate-800 p-6 flex flex-col justify-between overflow-y-auto">
+      <div>
+        <div class="flex items-center justify-between pb-4 border-b border-slate-800 mb-5">
+          <div class="flex items-center gap-2">
+            <span class="text-xl">📋</span>
+            <div>
+              <h3 class="font-bold text-sm text-slate-100">Cofre de Prompts Técnicos</h3>
+              <p class="text-[10px] text-slate-400 font-mono">Templates prontos para desenvolvimento com IA</p>
+            </div>
+          </div>
+          <button onclick="closePromptVaultDrawer()" class="p-1.5 rounded-lg text-slate-500 hover:text-slate-300 hover:bg-slate-800">✕</button>
+        </div>
+
+        <div id="prompt-vault-list" class="space-y-4">
+          <!-- Populated dynamically -->
+        </div>
+      </div>
+
+      <div class="pt-4 border-t border-slate-800 text-[10px] text-slate-500 font-mono text-center">
+        Pressione "Copiar" para usar no Claude, Gemini, ChatGPT ou Playground local
+      </div>
+    </div>
+  </div>
+
+  <!-- Add / Edit Service Modal -->
+  <div id="service-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm animate-in-quick">
+    <div class="w-full max-w-md bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl p-6">
+      
+      <div class="flex items-center justify-between pb-4 border-b border-slate-800 mb-4">
+        <h3 id="modal-title" class="font-bold text-sm text-slate-100">Adicionar Novo Serviço</h3>
+        <button onclick="closeServiceModal()" class="p-1.5 rounded-lg text-slate-500 hover:text-slate-300 hover:bg-slate-800">✕</button>
+      </div>
+
+      <form id="service-form" class="space-y-4">
+        <div>
+          <label class="block text-xs font-medium text-slate-300 mb-1">Nome da Ferramenta</label>
+          <input 
+            name="name" 
+            type="text" 
+            required 
+            placeholder="Ex: Claude Console" 
+            class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-indigo-500 font-mono"
+          />
+        </div>
+
+        <div>
+          <label class="block text-xs font-medium text-slate-300 mb-1">URL de Acesso</label>
+          <input 
+            name="url" 
+            type="url" 
+            required 
+            placeholder="https://console.anthropic.com/" 
+            class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-indigo-500 font-mono"
+          />
+        </div>
+
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block text-xs font-medium text-slate-300 mb-1">Categoria</label>
+            <select name="category" class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-indigo-500 font-mono">
+              <option value="llm_chat">LLMs & Chat</option>
+              <option value="code_agents">Código & Agentes</option>
+              <option value="local_cluster">Clusters Locais</option>
+              <option value="infra_apis">Infra & APIs</option>
+              <option value="image_audio">Visão & Áudio</option>
+              <option value="custom">Personalizado</option>
+            </select>
+          </div>
+          <div>
+            <label class="block text-xs font-medium text-slate-300 mb-1">Cor de Destaque</label>
+            <input 
+              name="color" 
+              type="color" 
+              value="#3b82f6" 
+              class="w-full h-9 bg-slate-950 border border-slate-800 rounded-xl p-1 focus:outline-none cursor-pointer"
+            />
+          </div>
+        </div>
+
+        <div>
+          <label class="block text-xs font-medium text-slate-300 mb-1">Descrição</label>
+          <textarea 
+            name="description" 
+            rows="2" 
+            placeholder="Breve descrição da finalidade e uso desta ferramenta..." 
+            class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-indigo-500 font-mono"
+          ></textarea>
+        </div>
+
+        <div>
+          <label class="block text-xs font-medium text-slate-300 mb-1">Tags (separadas por vírgula)</label>
+          <input 
+            name="tags" 
+            type="text" 
+            placeholder="api, llm, fast, cloud" 
+            class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-indigo-500 font-mono"
+          />
+        </div>
+
+        <div class="flex items-center gap-4 pt-2">
+          <label class="flex items-center gap-2 cursor-pointer">
+            <input name="is_favorite" type="checkbox" class="rounded border-slate-800 bg-slate-950 text-indigo-600 focus:ring-0">
+            <span class="text-xs text-slate-300">Favorito</span>
+          </label>
+          <label class="flex items-center gap-2 cursor-pointer">
+            <input name="pinned" type="checkbox" class="rounded border-slate-800 bg-slate-950 text-indigo-600 focus:ring-0">
+            <span class="text-xs text-slate-300">Fixar no Dock</span>
+          </label>
+        </div>
+
+        <div class="flex items-center justify-end gap-3 pt-4 border-t border-slate-800">
+          <button 
+            type="button" 
+            onclick="closeServiceModal()" 
+            class="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-medium transition-colors">
+            Cancelar
+          </button>
+          <button 
+            type="submit" 
+            class="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-medium transition-colors shadow-lg shadow-indigo-600/30">
+            Salvar
+          </button>
+        </div>
+      </form>
+
+    </div>
+  </div>
+
+  <!-- Toast Container -->
+  <div id="toast-container" class="fixed bottom-6 right-6 z-50 flex flex-col gap-2 pointer-events-none"></div>
+
+  <!-- Scripts -->
+  <script src="/static/app.js"></script>
+</body>
+</html>

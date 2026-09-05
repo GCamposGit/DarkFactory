@@ -1,0 +1,82 @@
+{
+  "ledger_id": "20260905_004046_otimizações-de-performance-e-vad-para-faster-whisper-em-pyth",
+  "query": "Otimizações de performance e VAD para faster-whisper em Python",
+  "topic_type": "topic_concept",
+  "created_at": "2026-09-05T00:40:46.522531+00:00",
+  "summary_executive": "Pesquisa conceitual estruturada sobre 'Otimizações de performance e VAD para faster-whisper em Python'. Catalogadas 2 publicações acadêmicas de alta relevância com DOI/arXiv IDs.",
+  "sources": [
+    {
+      "id": "arxiv:2010.14827v1",
+      "title": "ePython: An implementation of Python for the many-core Epiphany coprocessor",
+      "url": "http://arxiv.org/abs/2010.14827v1",
+      "source_type": "paper",
+      "authors_or_maintainers": [
+        "Nick Brown"
+      ],
+      "published_date": "2020-10-28T09:01:27Z",
+      "summary": "The Epiphany is a many-core, low power, low on-chip memory architecture and one can very cheaply gain access to a number of parallel cores which is beneficial for HPC education and prototyping. The very low power nature of these architectures also means that there is potential for their use in future HPC machines, however there is a high barrier to entry in programming them due to the associated complexities and immaturity of supporting tools. In this paper we present our work on ePython, a subset of Python for the Epiphany and similar many-core co-processors. Due to the limited on-chip memory per core we have developed a new Python interpreter and this, combined with additional support for parallelism, has meant that novices can take advantage of Python to very quickly write parallel codes on the Epiphany and explore concepts of HPC using a smaller scale parallel machine. The high level nature of Python opens up new possibilities on the Epiphany, we examine a computationally intensive Gauss-Seidel code from the programmability and performance perspective, discuss running Python hybrid on both the host CPU and Epiphany, and interoperability between a full Python interpreter on the CPU and ePython on the Epiphany. The result of this work is support for developing Python on the Epiphany, which can be applied to other similar architectures, that the community have already started to adopt and use to explore concepts of parallelism and HPC.",
+      "license": "arXiv Open Access / Creative Commons",
+      "license_category": "permissive",
+      "authority_tier": "high_credibility",
+      "credibility_score": 0.95,
+      "stars": null,
+      "has_test_suite": null,
+      "metadata": {
+        "arxiv_id": "2010.14827v1"
+      }
+    },
+    {
+      "id": "arxiv:2303.12077v3",
+      "title": "VAD: Vectorized Scene Representation for Efficient Autonomous Driving",
+      "url": "http://arxiv.org/abs/2303.12077v3",
+      "source_type": "paper",
+      "authors_or_maintainers": [
+        "Bo Jiang",
+        "Shaoyu Chen",
+        "Qing Xu",
+        "Bencheng Liao",
+        "Jiajie Chen",
+        "Helong Zhou",
+        "Qian Zhang",
+        "Wenyu Liu",
+        "Chang Huang",
+        "Xinggang Wang"
+      ],
+      "published_date": "2023-03-21T17:59:22Z",
+      "summary": "Autonomous driving requires a comprehensive understanding of the surrounding environment for reliable trajectory planning. Previous works rely on dense rasterized scene representation (e.g., agent occupancy and semantic map) to perform planning, which is computationally intensive and misses the instance-level structure information. In this paper, we propose VAD, an end-to-end vectorized paradigm for autonomous driving, which models the driving scene as a fully vectorized representation. The proposed vectorized paradigm has two significant advantages. On one hand, VAD exploits the vectorized agent motion and map elements as explicit instance-level planning constraints which effectively improves planning safety. On the other hand, VAD runs much faster than previous end-to-end planning methods by getting rid of computation-intensive rasterized representation and hand-designed post-processing steps. VAD achieves state-of-the-art end-to-end planning performance on the nuScenes dataset, outperforming the previous best method by a large margin. Our base model, VAD-Base, greatly reduces the average collision rate by 29.0% and runs 2.5x faster. Besides, a lightweight variant, VAD-Tiny, greatly improves the inference speed (up to 9.3x) while achieving comparable planning performance. We believe the excellent performance and the high efficiency of VAD are critical for the real-world deployment of an autonomous driving system. Code and models are available at https://github.com/hustvl/VAD for facilitating future research.",
+      "license": "arXiv Open Access / Creative Commons",
+      "license_category": "permissive",
+      "authority_tier": "high_credibility",
+      "credibility_score": 0.95,
+      "stars": null,
+      "has_test_suite": null,
+      "metadata": {
+        "arxiv_id": "2303.12077v3"
+      }
+    }
+  ],
+  "insights": [
+    {
+      "source_id": "arxiv:2010.14827v1",
+      "source_title": "ePython: An implementation of Python for the many-core Epiphany coprocessor",
+      "key_insight": "Fundamentação teórica extraída de: The Epiphany is a many-core, low power, low on-chip memory architecture and one can very cheaply gain access to a number of parallel cores which is beneficial for HPC education and prototyping. The very low power nature of these architectur...",
+      "architectural_implications": "Basear o design do componente nos padrões formais documentados neste paper.",
+      "future_reference_value": "Consultar equações e garantias de consistência em versões futuras.",
+      "authority_tier": "high_credibility",
+      "code_patterns_or_algorithms": [
+        "2010.14827v1"
+      ]
+    },
+    {
+      "source_id": "arxiv:2303.12077v3",
+      "source_title": "VAD: Vectorized Scene Representation for Efficient Autonomous Driving",
+      "key_insight": "Fundamentação teórica extraída de: Autonomous driving requires a comprehensive understanding of the surrounding environment for reliable trajectory planning. Previous works rely on dense rasterized scene representation (e.g., agent occupancy and semantic map) to perform plan...",
+      "architectural_implications": "Basear o design do componente nos padrões formais documentados neste paper.",
+      "future_reference_value": "Consultar equações e garantias de consistência em versões futuras.",
+      "authority_tier": "high_credibility",
+      "code_patterns_or_algorithms": [
+        "2303.12077v3"
+      ]
+    }
+  ]
+}

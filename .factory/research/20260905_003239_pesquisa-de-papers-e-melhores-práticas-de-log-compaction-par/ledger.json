@@ -1,0 +1,72 @@
+{
+  "ledger_id": "20260905_003239_pesquisa-de-papers-e-melhores-práticas-de-log-compaction-par",
+  "query": "Pesquisa de papers e melhores práticas de log compaction para Raft consensus algorithm",
+  "topic_type": "topic_concept",
+  "created_at": "2026-09-05T00:32:39.583447+00:00",
+  "summary_executive": "Pesquisa conceitual estruturada sobre 'Pesquisa de papers e melhores práticas de log compaction para Raft consensus algorithm'. Catalogadas 2 publicações acadêmicas de alta relevância com DOI/arXiv IDs.",
+  "sources": [
+    {
+      "id": "arxiv:2004.05074v2",
+      "title": "Paxos vs Raft: Have we reached consensus on distributed consensus?",
+      "url": "http://arxiv.org/abs/2004.05074v2",
+      "source_type": "paper",
+      "authors_or_maintainers": [
+        "Heidi Howard",
+        "Richard Mortier"
+      ],
+      "published_date": "2020-04-10T15:30:31Z",
+      "summary": "Distributed consensus is a fundamental primitive for constructing fault-tolerant, strongly-consistent distributed systems. Though many distributed consensus algorithms have been proposed, just two dominate production systems: Paxos, the traditional, famously subtle, algorithm; and Raft, a more recent algorithm positioned as a more understandable alternative to Paxos. In this paper, we consider the question of which algorithm, Paxos or Raft, is the better solution to distributed consensus? We analyse both to determine exactly how they differ by describing a simplified Paxos algorithm using Raft's terminology and pragmatic abstractions. We find that both Paxos and Raft take a very similar approach to distributed consensus, differing only in their approach to leader election. Most notably, Raft only allows servers with up-to-date logs to become leaders, whereas Paxos allows any server to be leader provided it then updates its log to ensure it is up-to-date. Raft's approach is surprisingly efficient given its simplicity as, unlike Paxos, it does not require log entries to be exchanged during leader election. We surmise that much of the understandability of Raft comes from the paper's clear presentation rather than being fundamental to the underlying algorithm being presented.",
+      "license": "arXiv Open Access / Creative Commons",
+      "license_category": "permissive",
+      "credibility_score": 0.95,
+      "stars": null,
+      "has_test_suite": null,
+      "metadata": {
+        "arxiv_id": "2004.05074v2"
+      }
+    },
+    {
+      "id": "arxiv:cond-mat/0003172v1",
+      "title": "A minimal model for slow dynamics: Compaction of granular media under vibration or shear",
+      "url": "http://arxiv.org/abs/cond-mat/0003172v1",
+      "source_type": "paper",
+      "authors_or_maintainers": [
+        "Stefan Luding",
+        "Maxime Nicolas",
+        "Olivier Pouliquen"
+      ],
+      "published_date": "2000-03-10T13:05:54Z",
+      "summary": "Based on experiments of the compaction of granular materials under periodic shear of a packing of glass beads, a minimal model for the dynamics of the packing density as a function of time is proposed. First, a random ``energy landscape'' is created by a random walk (RW) in energy. Second, an ensemble of RWs is performed for various temperatures in different temperature-time sequences. We identify the minimum (mean) of the energy landscape with the maximum (random) density. The temperature scaled by the step-size of the energy landscape determines the dynamics of the system and can be regarded as the agitation or shear amplitude. The model reproduces qualitatively both tapping and shear experiments. {\\bf Key-words}: Compaction, crystallization, Sinai-diffusion, random walks, quenched disorder",
+      "license": "arXiv Open Access / Creative Commons",
+      "license_category": "permissive",
+      "credibility_score": 0.95,
+      "stars": null,
+      "has_test_suite": null,
+      "metadata": {
+        "arxiv_id": "cond-mat/0003172v1"
+      }
+    }
+  ],
+  "insights": [
+    {
+      "source_id": "arxiv:2004.05074v2",
+      "source_title": "Paxos vs Raft: Have we reached consensus on distributed consensus?",
+      "key_insight": "Fundamentação teórica extraída de: Distributed consensus is a fundamental primitive for constructing fault-tolerant, strongly-consistent distributed systems. Though many distributed consensus algorithms have been proposed, just two dominate production systems: Paxos, the tra...",
+      "architectural_implications": "Basear o design do componente nos padrões formais documentados neste paper.",
+      "future_reference_value": "Consultar equações e garantias de consistência em versões futuras.",
+      "code_patterns_or_algorithms": [
+        "2004.05074v2"
+      ]
+    },
+    {
+      "source_id": "arxiv:cond-mat/0003172v1",
+      "source_title": "A minimal model for slow dynamics: Compaction of granular media under vibration or shear",
+      "key_insight": "Fundamentação teórica extraída de: Based on experiments of the compaction of granular materials under periodic shear of a packing of glass beads, a minimal model for the dynamics of the packing density as a function of time is proposed. First, a random ``energy landscape'' i...",
+      "architectural_implications": "Basear o design do componente nos padrões formais documentados neste paper.",
+      "future_reference_value": "Consultar equações e garantias de consistência em versões futuras.",
+      "code_patterns_or_algorithms": [
+        "cond-mat/0003172v1"
+      ]
+    }
+  ]
+}

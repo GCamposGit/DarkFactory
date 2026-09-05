@@ -1,0 +1,23 @@
+# Universal Engineering Standards (AGENTS.md)
+
+Este documento governa a qualidade técnica de todo código produzido pelos agentes (Antigravity, Claude, Grok, DeepSeek, Qwen ou Ollama Local).
+
+## 1. Padrões de Código e Arquitetura
+
+- **Tipagem Estrita**: Todo código Python deve conter type hints completos; TypeScript deve operar com `strict: true`.
+- **Desacoplamento de Visão & Lógica (Reachability)**:
+  - NUNCA misture lógica de negócios com frameworks de apresentação (React, CLI prints, loops de jogo).
+  - Toda regra de negócio deve ser acessível de forma headless por scripts automatizados (via chamadas de biblioteca ou APIs HTTP/CLI).
+- **Tratamento de Erros e Logs**:
+  - Proibido engolir exceções com `except: pass`.
+  - Utilize structured logging com timestamps e contexto da operação.
+
+## 2. Padrões de Teste e Validação
+
+- **Test-Driven / Test-First**: Toda nova funcionalidade deve ser acompanhada de testes unitários ou de integração que falhem antes da implementação e passem depois.
+- **Isolamento de Estado**: Testes não devem depender da ordem de execução nem deixar artefatos temporários órfãos no filesystem.
+- **Portões Determinísticos**: A validação é decidida por comandos executáveis emitindo marcadores estruturados, nunca por um resumo conversacional de LLM.
+
+## 3. Padrões de Comunicação e Comandos para o Usuário
+
+- **Comandos de Terminal para o Usuário**: SEMPRE indicar comandos no PowerShell/Terminal com o endereço absoluto completo (ex: `python C:\dev\DarkFac\run_canaletto.py`). O usuário pode abrir o shell a partir de qualquer pasta raiz (`C:\`, `C:\dev`, etc.); caminhos absolutos eliminam qualquer risco de `FileNotFoundError` ou ambiguidade de diretório.
