@@ -18,6 +18,9 @@ from core.benchmarks.models import (
     ParetoFrontierSummary,
     ModelTier,
     TaskComplexity,
+    FieldProvenance,
+    MetricAcquisitionMode,
+    MetricQuality,
 )
 from core.benchmarks.frontier import (
     calculate_task_cost,
@@ -268,3 +271,96 @@ def test_hub_rest_api_benchmarks():
     assert resp_refresh.status_code == 200
     refreshed = resp_refresh.json()
     assert "date" in refreshed
+
+
+def test_field_provenance_round_trip_preserves_unknown_values():
+    """An absent metric remains unknown instead of receiving a heuristic default."""
+    entry = ModelBenchmarkEntry(
+        model_id="provider/unknown",
+        name="Unknown",
+        provider="provider",
+        context_length=None,
+        input_cost_per_m=0.2,
+        output_cost_per_m=0.8,
+        cost_per_task=0.007,
+        coding_score=None,
+        intelligence_score=None,
+        output_speed_tps=None,
+        latency_ttft_sec=None,
+        tokens_per_task=None,
+        field_provenance={
+            "input_cost_per_m": FieldProvenance(
+                source="https://example.test/pricing",
+                observed_at="2026-09-06T12:00:00+00:00",
+                unit="USD/1M input tokens",
+                acquisition_mode=MetricAcquisitionMode.LIVE_API,
+                quality=MetricQuality.OBSERVED,
+            )
+        },
+    )
+
+    assert entry.coding_score is None
+    assert not entry.is_measured("coding_score")
+    assert entry.field_provenance["coding_score"].quality is MetricQuality.UNKNOWN
+    restored = ModelBenchmarkEntry.from_dict(entry.to_dict())
+    assert restored.coding_score is None
+    assert restored.field_provenance["input_cost_per_m"].source.endswith("example.test/pricing")
+
+
+def test_offline_fixture_is_deterministic_and_never_calls_external_sources():
+    with tempfile.TemporaryDirectory(prefix="benchmark_provenance_offline_") as folder:
+        service = DailyBenchmarkService(Path(folder))
+        with patch.object(service, "fetch_openrouter_catalog", side_effect=AssertionError("network")):
+            with patch.object(service, "fetch_artificial_analysis_api", side_effect=AssertionError("network")):
+                first = service.build_daily_ledger(offline=True)
+                second = service.build_daily_ledger(offline=True)
+
+        assert first.to_dict()["models"] == second.to_dict()["models"]
+        assert first.metadata["offline_fixture"] is True
+        sample = first.models["anthropic/claude-fable-5-1"]
+        provenance = sample.field_provenance["coding_score"]
+        assert provenance.source == "Artificial Analysis v4.2 & Coding Agent Index"
+        assert provenance.observed_at == "2026-09-04T00:00:00+00:00"
+        assert provenance.unit == "score (0-100)"
+        assert provenance.acquisition_mode is MetricAcquisitionMode.OFFLINE_FIXTURE
+        assert provenance.quality is MetricQuality.REPORTED
+
+
+def test_openrouter_discovery_does_not_promote_heuristic_scores():
+    with tempfile.TemporaryDirectory(prefix="benchmark_provenance_discovery_") as folder:
+        service = DailyBenchmarkService(Path(folder))
+        discovered = {
+            "id": "openai/brand-new-unknown",
+            "name": "Brand New Unknown",
+            "context_length": 64000,
+            "pricing": {"prompt": "0.000001", "completion": "0.000002"},
+        }
+        with patch.object(service, "fetch_artificial_analysis_api", return_value=[]):
+            with patch.object(service, "fetch_openrouter_catalog", return_value=[discovered]):
+                ledger = service.build_daily_ledger()
+
+        entry = ledger.models["openai/brand-new-unknown"]
+        assert entry.coding_score is None
+        assert entry.intelligence_score is None
+        assert entry.output_speed_tps is None
+        assert entry.field_provenance["coding_score"].quality is MetricQuality.UNKNOWN
+        assert entry.field_provenance["input_cost_per_m"].acquisition_mode is MetricAcquisitionMode.LIVE_API
+        assert "openai/brand-new-unknown" in ledger.metadata["unknown_capability_models"]
+        assert "openai/brand-new-unknown" not in ledger.pareto_coding_models
+
+
+def test_live_price_update_does_not_relabel_baseline_score_source():
+    with tempfile.TemporaryDirectory(prefix="benchmark_provenance_merge_") as folder:
+        service = DailyBenchmarkService(Path(folder))
+        update = {
+            "id": "openai/gpt-6-astra",
+            "pricing": {"prompt": "0.0000003", "completion": "0.0000012"},
+        }
+        with patch.object(service, "fetch_artificial_analysis_api", return_value=[]):
+            with patch.object(service, "fetch_openrouter_catalog", return_value=[update]):
+                ledger = service.build_daily_ledger()
+
+        entry = ledger.models["openai/gpt-6-astra"]
+        assert entry.field_provenance["input_cost_per_m"].source == "https://openrouter.ai/api/v1/models"
+        assert entry.field_provenance["coding_score"].source == "Artificial Analysis v4.2 & Coding Agent Index"
+        assert entry.field_provenance["coding_score"].acquisition_mode is MetricAcquisitionMode.OFFLINE_FIXTURE
