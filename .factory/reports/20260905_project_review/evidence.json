@@ -1,0 +1,101 @@
+{
+  "review_date": "2026-09-05",
+  "base_commit": "de6442408427adaaf336a122c6dd7c4dbe2e9311",
+  "scope": "Existing working tree including untracked shared modules; Canaletto excluded",
+  "validation": [
+    {
+      "command": "python core/harness/runner.py --quick",
+      "exit_code": 0,
+      "harness_pass": true,
+      "steps": 2,
+      "pytest_passed": 138,
+      "pytest_duration_seconds": 32.53
+    },
+    {
+      "command": "python -m pytest tests -v --ignore=tests/test_canaletto.py",
+      "exit_code": 0,
+      "pytest_passed": 138,
+      "pytest_duration_seconds": 30.79
+    }
+  ],
+  "probes": [
+    {
+      "id": "F01",
+      "operation": "update_task_status on a new task using MERGED in a temporary STATE_FILE",
+      "observed": {
+        "status": "MERGED",
+        "created_at": null,
+        "updated_at": null
+      },
+      "limitation": "Local state update; no remote merge performed."
+    },
+    {
+      "id": "F02",
+      "operation": "get_modified_files('audit-ref-that-does-not-exist-20260905') then audit_paths",
+      "observed": {
+        "modified": [],
+        "violations": []
+      }
+    },
+    {
+      "id": "F03",
+      "input": [
+        "[STEP_PASS] invented",
+        "[TEST_COUNT] count=0",
+        "[HARNESS_PASS]"
+      ],
+      "observed": {
+        "valid": true,
+        "steps_started": [],
+        "total_tests_run": 0
+      }
+    },
+    {
+      "id": "F05",
+      "operation": "Record an RCA with python -c raising SystemExit(1), then load priming context",
+      "observed": {
+        "status": "verification_failed",
+        "rule_in_context": true
+      }
+    },
+    {
+      "id": "F10",
+      "operation": "ModelUsageLedger max_events=10; record 11 unique invocation IDs, then replay the first",
+      "observed": {
+        "before": 11,
+        "after": 12
+      }
+    },
+    {
+      "id": "F06",
+      "operation": "Validate ServiceCreate with active HTML in name and javascript URL",
+      "observed": {
+        "schema_accepted": true
+      },
+      "limitation": "Static sink inspection plus schema probe; browser payload not executed."
+    }
+  ],
+  "limitations": [
+    "No fresh Linux clone validated",
+    "No production deployment or remote branch protection inspected",
+    "No paid live image build executed",
+    "Audio test used machine-local fixture/model; current suite is not uniformly hermetic",
+    "No exhaustive security certification"
+  ],
+  "inventory": {
+    "core": {
+      "files": 58,
+      "lines": 12408
+    },
+    "hub": {
+      "files": 8,
+      "lines": 4468
+    },
+    "tests": {
+      "files": 16,
+      "lines": 3351
+    },
+    "skills": 17,
+    "canonical_files_differing_in_mirror": []
+  }
+}

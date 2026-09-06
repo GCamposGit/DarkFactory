@@ -1,0 +1,118 @@
+{
+  "ledger_id": "20260905_dark_factory_game_mechanics",
+  "query": "constrained procedural generation and player agency for a tiny deterministic game",
+  "topic_type": "topic_concept",
+  "created_at": "2026-09-05T10:51:32.576029+00:00",
+  "summary_executive": "Pesquisa conceitual estruturada sobre 'constrained procedural generation and player agency for a tiny deterministic game'. Catalogadas 3 publicações acadêmicas de alta relevância com DOI/arXiv IDs.",
+  "sources": [
+    {
+      "id": "arxiv:2007.06108v2",
+      "title": "Tabletop Roleplaying Games as Procedural Content Generators",
+      "url": "http://arxiv.org/abs/2007.06108v2",
+      "source_type": "paper",
+      "authors_or_maintainers": [
+        "Matthew Guzdial",
+        "Devi Acharya",
+        "Max Kreminski",
+        "Michael Cook",
+        "Mirjam Eladhari",
+        "Antonios Liapis",
+        "Anne Sullivan"
+      ],
+      "published_date": "2020-07-12T22:05:17Z",
+      "summary": "Tabletop roleplaying games (TTRPGs) and procedural content generators can both be understood as systems of rules for producing content. In this paper, we argue that TTRPG design can usefully be viewed as procedural content generator design. We present several case studies linking key concepts from PCG research -- including possibility spaces, expressive range analysis, and generative pipelines -- to key concepts in TTRPG design. We then discuss the implications of these relationships and suggest directions for future work uniting research in TTRPGs and PCG.",
+      "license": "arXiv Open Access / Creative Commons",
+      "license_category": "permissive",
+      "authority_tier": "high_credibility",
+      "credibility_score": 0.95,
+      "stars": null,
+      "has_test_suite": null,
+      "metadata": {
+        "arxiv_id": "2007.06108v2"
+      }
+    },
+    {
+      "id": "arxiv:2107.12532v1",
+      "title": "Generating Lode Runner Levels by Learning Player Paths with LSTMs",
+      "url": "http://arxiv.org/abs/2107.12532v1",
+      "source_type": "paper",
+      "authors_or_maintainers": [
+        "Kynan Sorochan",
+        "Jerry Chen",
+        "Yakun Yu",
+        "Matthew Guzdial"
+      ],
+      "published_date": "2021-07-27T00:48:30Z",
+      "summary": "Machine learning has been a popular tool in many different fields, including procedural content generation. However, procedural content generation via machine learning (PCGML) approaches can struggle with controllability and coherence. In this paper, we attempt to address these problems by learning to generate human-like paths, and then generating levels based on these paths. We extract player path data from gameplay video, train an LSTM to generate new paths based on this data, and then generate game levels based on this path data. We demonstrate that our approach leads to more coherent levels for the game Lode Runner in comparison to an existing PCGML approach.",
+      "license": "arXiv Open Access / Creative Commons",
+      "license_category": "permissive",
+      "authority_tier": "high_credibility",
+      "credibility_score": 0.95,
+      "stars": null,
+      "has_test_suite": null,
+      "metadata": {
+        "arxiv_id": "2107.12532v1"
+      }
+    },
+    {
+      "id": "arxiv:2107.12524v1",
+      "title": "Ensemble Learning For Mega Man Level Generation",
+      "url": "http://arxiv.org/abs/2107.12524v1",
+      "source_type": "paper",
+      "authors_or_maintainers": [
+        "Bowei Li",
+        "Ruohan Chen",
+        "Yuqing Xue",
+        "Ricky Wang",
+        "Wenwen Li",
+        "Matthew Guzdial"
+      ],
+      "published_date": "2021-07-27T00:16:23Z",
+      "summary": "Procedural content generation via machine learning (PCGML) is the process of procedurally generating game content using models trained on existing game content. PCGML methods can struggle to capture the true variance present in underlying data with a single model. In this paper, we investigated the use of ensembles of Markov chains for procedurally generating \\emph{Mega Man} levels. We conduct an initial investigation of our approach and evaluate it on measures of playability and stylistic similarity in comparison to a non-ensemble, existing Markov chain approach.",
+      "license": "arXiv Open Access / Creative Commons",
+      "license_category": "permissive",
+      "authority_tier": "high_credibility",
+      "credibility_score": 0.95,
+      "stars": null,
+      "has_test_suite": null,
+      "metadata": {
+        "arxiv_id": "2107.12524v1"
+      }
+    }
+  ],
+  "insights": [
+    {
+      "source_id": "arxiv:2007.06108v2",
+      "source_title": "Tabletop Roleplaying Games as Procedural Content Generators",
+      "key_insight": "Fundamentação teórica extraída de: Tabletop roleplaying games (TTRPGs) and procedural content generators can both be understood as systems of rules for producing content. In this paper, we argue that TTRPG design can usefully be viewed as procedural content generator design....",
+      "architectural_implications": "Basear o design do componente nos padrões formais documentados neste paper.",
+      "future_reference_value": "Consultar equações e garantias de consistência em versões futuras.",
+      "authority_tier": "high_credibility",
+      "code_patterns_or_algorithms": [
+        "2007.06108v2"
+      ]
+    },
+    {
+      "source_id": "arxiv:2107.12532v1",
+      "source_title": "Generating Lode Runner Levels by Learning Player Paths with LSTMs",
+      "key_insight": "Fundamentação teórica extraída de: Machine learning has been a popular tool in many different fields, including procedural content generation. However, procedural content generation via machine learning (PCGML) approaches can struggle with controllability and coherence. In t...",
+      "architectural_implications": "Basear o design do componente nos padrões formais documentados neste paper.",
+      "future_reference_value": "Consultar equações e garantias de consistência em versões futuras.",
+      "authority_tier": "high_credibility",
+      "code_patterns_or_algorithms": [
+        "2107.12532v1"
+      ]
+    },
+    {
+      "source_id": "arxiv:2107.12524v1",
+      "source_title": "Ensemble Learning For Mega Man Level Generation",
+      "key_insight": "Fundamentação teórica extraída de: Procedural content generation via machine learning (PCGML) is the process of procedurally generating game content using models trained on existing game content. PCGML methods can struggle to capture the true variance present in underlying d...",
+      "architectural_implications": "Basear o design do componente nos padrões formais documentados neste paper.",
+      "future_reference_value": "Consultar equações e garantias de consistência em versões futuras.",
+      "authority_tier": "high_credibility",
+      "code_patterns_or_algorithms": [
+        "2107.12524v1"
+      ]
+    }
+  ]
+}

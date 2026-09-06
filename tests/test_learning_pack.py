@@ -127,6 +127,10 @@ def test_analyzer_fallback():
     # If no files matched, fallback should still produce default high-yield concepts
     patterns = analyzer.detect_patterns(file_paths=["non_existent_file.xyz"])
     assert len(patterns) >= 2
+    assert {pattern["id"] for pattern in patterns} >= {
+        "pareto_frontier",
+        "finite_state_machine",
+    }
 
 
 # -------------------------------------------------------------
@@ -212,7 +216,10 @@ def test_storage_lifecycle(temp_store, sample_pack):
 # -------------------------------------------------------------
 # 6. REST API Endpoints Tests
 # -------------------------------------------------------------
-def test_rest_api_endpoints():
+def test_rest_api_endpoints(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        "core.learning_pack.storage.DEFAULT_PACKS_DIR", tmp_path / "api_learning_packs"
+    )
     client = TestClient(app)
 
     # 1. Generate via API

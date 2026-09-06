@@ -194,6 +194,24 @@ def test_engine_generate_commercial_proposal_offline(tmp_path):
     assert "ROI & Risk Mitigation" in resp.final_content
 
 
+def test_engine_generate_release_notes_offline_is_grounded(tmp_path):
+    engine = ContentEngine(storage_dir=tmp_path)
+    supplied = ["Atomic artifact publication", "Deterministic replay verification"]
+    req = ContentRequest(
+        topic="Echo Garden E2E",
+        content_type=ContentType.RELEASE_NOTES,
+        key_points=supplied,
+        offline=True,
+    )
+
+    resp = engine.generate(req)
+
+    assert all(point in resp.final_content for point in supplied)
+    assert "buffer overruns" not in resp.final_content
+    assert "Zero-downtime" not in resp.final_content
+    assert "No additional changes are claimed" in resp.final_content
+
+
 def test_engine_presets():
     for ctype in ContentType:
         preset = get_preset(ctype)

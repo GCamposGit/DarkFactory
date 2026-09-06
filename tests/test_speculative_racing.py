@@ -11,7 +11,9 @@ import pytest
 from fastapi.testclient import TestClient
 
 from core.benchmarks.models import (
+    LiveModelExecution,
     ModelBenchmarkEntry,
+    RaceExecutionMode,
     SpeculativeCandidate,
     SpeculativeRaceResult,
     ModelTier,
@@ -177,6 +179,33 @@ def test_top3_candidate_selection_by_tier(mock_models):
     assert drafter.cost_per_task <= 0.01 or drafter.output_speed_tps >= 100.0
 
 
+def test_local_coding_candidates_exclude_media_only_models(mock_models):
+    media_model = ModelBenchmarkEntry(
+        model_id="ollama/sdxl-turbo",
+        name="SDXL Turbo",
+        provider="ollama",
+        context_length=0,
+        input_cost_per_m=0.0,
+        output_cost_per_m=0.0,
+        cost_per_task=0.0,
+        coding_score=99.0,
+        intelligence_score=99.0,
+        output_speed_tps=999.0,
+        latency_ttft_sec=0.1,
+        tokens_per_task=0,
+        tier=ModelTier.LOCAL_ZERO_COST,
+        domain_scores={"image_gen": 99.0},
+        metadata={"modality": "image"},
+    )
+
+    candidates = get_top_candidates_for_tier(
+        [*mock_models, media_model], tier="local_fast", k=3
+    )
+
+    assert candidates
+    assert all(candidate.model_id != media_model.model_id for candidate in candidates)
+
+
 def test_reasoning_effort_scaling(mock_models):
     """Validates thinking budget curve scaling for reasoning models."""
     luna = mock_models[1]  # Balanced Luna
@@ -208,16 +237,17 @@ def test_speculative_race_execution_and_savings():
         )
 
         assert race.winner_role == "fast_drafter"
+        assert race.verification_details["execution_mode"] == "synthetic_simulation"
+        assert race.verification_details["model_inference_executed"] is False
         assert not race.escalation_occurred
         assert race.verification_passed is True
         assert race.cost_saved_usd >= 0.0
         assert race.total_cost_usd > 0.0
 
-        # Verify ledger updated
-        winner_stat = ledger.get_or_create_stats(race.winner_model_id)
-        assert winner_stat.total_tasks_run == 1
-        assert winner_stat.successful_tasks == 1
-        assert winner_stat.pass_rate_at_1 == 1.0
+        # Synthetic outcomes remain auditable but never contaminate live metrics.
+        assert ledger.stats == {}
+        assert ledger.live_history == []
+        assert ledger.simulated_history == [race]
     finally:
         import shutil
         shutil.rmtree(temp_dir, ignore_errors=True)
@@ -247,6 +277,9 @@ def test_speculative_race_escalation_on_failure():
         assert race.winner_role == "frontier_arbiter"
         assert race.verification_passed is True
         assert "escalated_to" in race.verification_details
+        assert race.execution_mode is RaceExecutionMode.VALIDATOR_ONLY
+        assert ledger.stats == {}
+        assert ledger.validator_history == [race]
     finally:
         import shutil
         shutil.rmtree(temp_dir, ignore_errors=True)
@@ -260,6 +293,7 @@ def test_empirical_tournament_and_elo():
         engine = SpeculativeRacingEngine(ledger=ledger)
 
         tournament = engine.run_empirical_tournament(complexity="high")
+        assert tournament["execution_mode"] == "validator_only"
         assert "leaderboard" in tournament
         assert "races" in tournament
         assert len(tournament["races"]) > 0
@@ -269,11 +303,120 @@ def test_empirical_tournament_and_elo():
 
         # Reload from disk
         reloaded = EmpiricalBenchmarkLedger(file_path=temp_dir / "empirical_ledger.json")
-        assert len(reloaded.stats) > 0
+        assert reloaded.stats == {}
         assert len(reloaded.history) > 0
+        assert len(reloaded.validator_history) == len(tournament["races"])
     finally:
         import shutil
         shutil.rmtree(temp_dir, ignore_errors=True)
+
+
+def test_live_race_records_only_executed_attempts_in_live_metrics():
+    """Only real model inference may update live Pass@1, cost, latency, and Elo."""
+    temp_dir = Path(tempfile.mkdtemp(prefix="speculative_live_test_"))
+    try:
+        ledger = EmpiricalBenchmarkLedger(file_path=temp_dir / "empirical_ledger.json")
+        engine = SpeculativeRacingEngine(ledger=ledger)
+        executed_model_ids = []
+
+        def live_executor(model_id: str, prompt: str) -> LiveModelExecution:
+            assert prompt == "Implement a verified parser"
+            executed_model_ids.append(model_id)
+            if len(executed_model_ids) == 1:
+                return LiveModelExecution(
+                    response="invalid draft",
+                    verification_passed=False,
+                    cost_usd=0.001,
+                    duration_ms=12.0,
+                    tokens_generated=15,
+                    verification_details={"error": "syntax_error"},
+                )
+            return LiveModelExecution(
+                response="verified implementation",
+                verification_passed=True,
+                cost_usd=0.02,
+                duration_ms=40.0,
+                tokens_generated=30,
+                verification_details={"tests_passed": 4},
+            )
+
+        race = engine.execute_speculative_race(
+            task_id="live_parser",
+            task_prompt="Implement a verified parser",
+            complexity="high",
+            live_executor=live_executor,
+        )
+
+        assert race.execution_mode is RaceExecutionMode.LIVE
+        assert [attempt.response for attempt in race.attempts] == [
+            "invalid draft",
+            "verified implementation",
+        ]
+        assert all(attempt.model_inference_executed for attempt in race.attempts)
+        assert race.total_cost_usd == pytest.approx(0.021)
+        assert race.cost_saved_usd == 0.0
+        assert (
+            race.verification_details["cost_saved_basis"]
+            == "live_baseline_unavailable"
+        )
+        assert ledger.live_history == [race]
+        assert ledger.simulated_history == []
+        assert ledger.validator_history == []
+
+        drafter_attempt, arbiter_attempt = race.attempts
+        drafter_stats = ledger.stats[drafter_attempt.model_id]
+        arbiter_stats = ledger.stats[arbiter_attempt.model_id]
+        assert drafter_stats.total_tasks_run == 1
+        assert drafter_stats.successful_tasks == 0
+        assert drafter_stats.total_cost_spent == pytest.approx(0.001)
+        assert drafter_stats.avg_latency_ms == pytest.approx(12.0)
+        assert arbiter_stats.total_tasks_run == 1
+        assert arbiter_stats.successful_tasks == 1
+        assert arbiter_stats.total_cost_spent == pytest.approx(0.02)
+        assert arbiter_stats.avg_tokens_generated == pytest.approx(30.0)
+        assert arbiter_stats.elo_rating > 1200.0
+        assert drafter_stats.elo_rating < 1200.0
+        assert set(ledger.stats) == {
+            drafter_attempt.model_id,
+            arbiter_attempt.model_id,
+        }
+
+        reloaded = EmpiricalBenchmarkLedger(file_path=ledger.file_path)
+        assert len(reloaded.live_history) == 1
+        assert reloaded.live_history[0].attempts[0].response == "invalid draft"
+    finally:
+        import shutil
+        shutil.rmtree(temp_dir, ignore_errors=True)
+
+
+def test_legacy_empirical_metrics_are_quarantined_from_live_stats(tmp_path):
+    ledger_path = tmp_path / "legacy_empirical_ledger.json"
+    ledger_path.write_text(
+        json.dumps(
+            {
+                "models": {
+                    "legacy-model": {
+                        "model_id": "legacy-model",
+                        "total_tasks_run": 9,
+                        "successful_tasks": 9,
+                        "pass_rate_at_1": 1.0,
+                    }
+                },
+                "recent_races": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    ledger = EmpiricalBenchmarkLedger(file_path=ledger_path)
+
+    assert ledger.stats == {}
+    assert ledger.legacy_stats["legacy-model"].total_tasks_run == 9
+    ledger.save()
+    persisted = json.loads(ledger_path.read_text(encoding="utf-8"))
+    assert persisted["metrics_scope"] == "live_model_inference_only"
+    assert persisted["models"] == {}
+    assert persisted["legacy_models"]["legacy-model"]["total_tasks_run"] == 9
 
 
 def test_model_router_speculative_fields():

@@ -4,6 +4,9 @@ Tests data models, semantic prompt synthesis, procedural local rendering (Pillow
 diagram generation, UI mockup rendering, app icon synthesis, and DarkHub REST APIs.
 """
 
+import base64
+import io
+import json
 from pathlib import Path
 import pytest
 from PIL import Image
@@ -20,7 +23,9 @@ from core.visual.models import (
 )
 from core.visual.prompt_synthesizer import VisualPromptSynthesizer
 from core.visual.procedural_engine import ProceduralVisualEngine
+from core.visual.cloud_engine import CloudVisualEngine
 from core.visual.studio import VisualStudio
+from core.router.model_router import recommend_model
 from hub.backend.main import app
 
 client = TestClient(app)
@@ -45,6 +50,7 @@ def test_models_and_dimensions():
     restored = VisualPromptSpec.from_dict(s_dict)
     assert restored.title == "Distributed Queue Worker"
     assert restored.theme == VisualTheme.MODERN_MINIMALIST_DARK
+    assert restored.strict_provider is False
 
     w, h = ASPECT_DIMENSIONS[AspectRatio.RATIO_16_9]
     assert (w, h) == (1920, 1080)
@@ -181,6 +187,88 @@ def test_studio_illustrate_text_coupling(tmp_path):
     fetched = studio.get_asset(res.asset_id)
     assert fetched is not None
     assert fetched["asset_id"] == res.asset_id
+
+
+class _FakeHttpResponse:
+    def __init__(self, payload: dict) -> None:
+        self.payload = payload
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, traceback) -> None:
+        return None
+
+    def read(self) -> bytes:
+        return json.dumps(self.payload).encode("utf-8")
+
+
+def _png_base64() -> str:
+    buffer = io.BytesIO()
+    Image.new("RGB", (32, 24), "#123456").save(buffer, format="PNG")
+    return base64.b64encode(buffer.getvalue()).decode("ascii")
+
+
+def test_openrouter_images_api_persists_real_response(monkeypatch, tmp_path):
+    payload = {
+        "model": "google/gemini-3.1-flash-lite-image",
+        "data": [{"b64_json": _png_base64()}],
+        "usage": {"cost": 0.0123},
+    }
+    captured = {}
+
+    def fake_urlopen(request, timeout):
+        captured["url"] = request.full_url
+        captured["body"] = json.loads(request.data.decode("utf-8"))
+        captured["timeout"] = timeout
+        return _FakeHttpResponse(payload)
+
+    monkeypatch.setattr("core.visual.cloud_engine.urllib.request.urlopen", fake_urlopen)
+    engine = CloudVisualEngine(output_dir=tmp_path)
+    spec = VisualPromptSpec(
+        title="Echo Garden",
+        prompt="A luminous three-channel garden",
+        model_override="google/gemini-3.1-flash-lite-image",
+        strict_provider=True,
+    )
+    result = engine._generate_openrouter_image(spec, "test-key")
+
+    assert captured["url"] == "https://openrouter.ai/api/v1/images"
+    assert captured["body"]["aspect_ratio"] == "16:9"
+    assert result.provider == "openrouter"
+    assert result.model_used == spec.model_override
+    assert result.cost_usd == pytest.approx(0.0123)
+    assert (result.width, result.height) == (32, 24)
+    with Image.open(result.file_path) as image:
+        assert image.size == (32, 24)
+
+
+def test_strict_cloud_mode_rejects_silent_local_fallback(monkeypatch, tmp_path):
+    engine = CloudVisualEngine(output_dir=tmp_path)
+    monkeypatch.setattr(engine, "get_openai_key", lambda: None)
+    monkeypatch.setattr(engine, "get_openrouter_key", lambda: "test-key")
+    monkeypatch.setattr(
+        engine,
+        "_generate_openrouter_image",
+        lambda spec, key: (_ for _ in ()).throw(RuntimeError("provider down")),
+    )
+
+    strict_spec = VisualPromptSpec(title="Strict", strict_provider=True)
+    with pytest.raises(RuntimeError, match="strict cloud generation failed"):
+        engine.generate(strict_spec)
+
+    fallback_spec = VisualPromptSpec(title="Fallback allowed")
+    result = engine.generate(fallback_spec)
+    assert result.provider == "local_procedural"
+
+
+def test_visual_router_scales_image_model_by_complexity():
+    low = recommend_model("visual", "low")
+    high = recommend_model("visual", "high")
+    assert low["model"] == "google/gemini-3.1-flash-lite-image"
+    assert high["model"] == "openai/gpt-image-2"
+    assert low["provider"] == high["provider"] == "openrouter"
+    assert "daily_efficiency_frontier" not in high
 
 
 # -------------------------------------------------------------

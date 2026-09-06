@@ -3,8 +3,10 @@ FastAPI REST API router for DarkHub.
 """
 
 import asyncio
+import os
+import secrets
 from typing import List, Optional
-from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Response, status
 
 from hub.backend.models import (
     ExportCatalogResponse,
@@ -37,8 +39,23 @@ from hub.backend.models import (
     VisualIllustrateRequest,
 )
 from hub.backend.service import HubService
+from core.usage.models import AccountUsageReport, ModelCallEvent, ModelUsageReport
+from core.roadmap.models import (
+    ConfidenceLevel,
+    DeliveryStatus,
+    LifecycleStage,
+    PlanningHorizon,
+    RoadmapHealth,
+    RoadmapItem,
+    RoadmapItemType,
+    RoadmapProjectSummary,
+    RoadmapSnapshot,
+    RoadmapSourceDocument,
+)
+from core.roadmap.store import RoadmapUnavailableError
 
 router = APIRouter(prefix="/api", tags=["DarkHub API"])
+roadmap_router = APIRouter(prefix="/projects", tags=["Operational Roadmap"])
 
 # Dependency Injection for HubService singleton
 _service_instance: Optional[HubService] = None
@@ -49,6 +66,95 @@ def get_hub_service() -> HubService:
     if _service_instance is None:
         _service_instance = HubService()
     return _service_instance
+
+
+def _roadmap_project_or_404(service: HubService, project_id: str) -> None:
+    if not any(project.id == project_id for project in service.list_roadmap_projects()):
+        raise HTTPException(status_code=404, detail=f"Project '{project_id}' not found")
+
+
+@roadmap_router.get("", response_model=List[RoadmapProjectSummary])
+def list_roadmap_projects(service: HubService = Depends(get_hub_service)) -> List[RoadmapProjectSummary]:
+    """List project scopes available to the isolated roadmap projection."""
+
+    return service.list_roadmap_projects()
+
+
+@roadmap_router.get("/{project_id}/roadmap", response_model=RoadmapSnapshot)
+def get_project_roadmap(
+    project_id: str,
+    search: Optional[str] = None,
+    item_type: Optional[RoadmapItemType] = None,
+    lifecycle_stage: Optional[LifecycleStage] = None,
+    delivery_status: Optional[DeliveryStatus] = None,
+    horizon: Optional[PlanningHorizon] = None,
+    confidence: Optional[ConfidenceLevel] = None,
+    source_id: Optional[str] = None,
+    service: HubService = Depends(get_hub_service),
+) -> RoadmapSnapshot:
+    """Return the selected project's current operational roadmap snapshot."""
+
+    _roadmap_project_or_404(service, project_id)
+    try:
+        return service.get_roadmap(
+            project_id,
+            search=search,
+            item_type=item_type.value if item_type else None,
+            lifecycle_stage=lifecycle_stage.value if lifecycle_stage else None,
+            delivery_status=delivery_status.value if delivery_status else None,
+            horizon=horizon.value if horizon else None,
+            confidence=confidence.value if confidence else None,
+            source_id=source_id,
+        )
+    except RoadmapUnavailableError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
+@roadmap_router.get("/{project_id}/roadmap/items/{item_id}", response_model=RoadmapItem)
+def get_project_roadmap_item(
+    project_id: str,
+    item_id: str,
+    service: HubService = Depends(get_hub_service),
+) -> RoadmapItem:
+    """Return one item and its evidence/provenance drawer payload."""
+
+    _roadmap_project_or_404(service, project_id)
+    item = service.get_roadmap_item(project_id, item_id)
+    if item is None:
+        raise HTTPException(status_code=404, detail=f"Roadmap item '{item_id}' not found")
+    return item
+
+
+@roadmap_router.get("/{project_id}/roadmap/health", response_model=RoadmapHealth)
+def get_project_roadmap_health(
+    project_id: str,
+    service: HubService = Depends(get_hub_service),
+) -> RoadmapHealth:
+    """Return snapshot health, source availability and consistency counts."""
+
+    _roadmap_project_or_404(service, project_id)
+    try:
+        return service.get_roadmap_health(project_id)
+    except RoadmapUnavailableError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
+@roadmap_router.get(
+    "/{project_id}/roadmap/sources/{source_id}",
+    response_model=RoadmapSourceDocument,
+)
+def get_project_roadmap_source(
+    project_id: str,
+    source_id: str,
+    service: HubService = Depends(get_hub_service),
+) -> RoadmapSourceDocument:
+    """Expose only the selected project's known source document for provenance links."""
+
+    _roadmap_project_or_404(service, project_id)
+    document = service.get_roadmap_source(project_id, source_id)
+    if document is None:
+        raise HTTPException(status_code=404, detail=f"Roadmap source '{source_id}' not found")
+    return document
 
 
 @router.get("/services", response_model=List[ServiceItem])
@@ -492,14 +598,58 @@ def illustrate_text_endpoint(
         raise HTTPException(status_code=500, detail=str(exc))
 
 
+@router.get("/usage/accounts", response_model=AccountUsageReport)
+def get_account_usage_endpoint(
+    refresh: bool = Query(default=False),
+    service: HubService = Depends(get_hub_service),
+) -> AccountUsageReport:
+    """Return all provider states; disconnected providers are normal rows, never errors."""
+    return service.get_account_usage(force=refresh)
+
+
+@router.post("/usage/accounts/refresh", response_model=AccountUsageReport)
+def refresh_account_usage_endpoint(
+    service: HubService = Depends(get_hub_service),
+) -> AccountUsageReport:
+    """Force provider probes while preserving partial-success semantics."""
+    return service.get_account_usage(force=True)
+
+
+@router.get("/usage/models", response_model=ModelUsageReport)
+def get_model_usage_endpoint(
+    service: HubService = Depends(get_hub_service),
+) -> ModelUsageReport:
+    """Return aggregate and recent model usage for this project."""
+    return service.get_model_usage()
+
+
+@router.post("/usage/models/events", response_model=ModelUsageReport)
+def record_model_usage_endpoint(
+    payload: ModelCallEvent,
+    x_darkfac_telemetry_key: Optional[str] = Header(default=None),
+    service: HubService = Depends(get_hub_service),
+) -> ModelUsageReport:
+    """Ingest a sanitized event from an authenticated external harness."""
+    configured_key = os.environ.get("DARKFAC_TELEMETRY_KEY")
+    if not configured_key:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="HTTP telemetry ingestion is disabled; set DARKFAC_TELEMETRY_KEY or use the local CLI.",
+        )
+    if not x_darkfac_telemetry_key or not secrets.compare_digest(
+        x_darkfac_telemetry_key,
+        configured_key,
+    ):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid telemetry key.")
+    return service.record_model_usage(payload)
+
+
 @router.get("/visual/gallery")
 def list_visual_gallery_endpoint(
     service: HubService = Depends(get_hub_service),
 ) -> list:
     """List all previously generated visual assets and their metadata."""
     return service.list_visual_assets()
-
-
 
 
 

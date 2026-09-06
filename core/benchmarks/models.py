@@ -46,6 +46,14 @@ class TaskComplexity(str, Enum):
     CRITICAL = "critical"
 
 
+class RaceExecutionMode(str, Enum):
+    """Evidence level for a speculative race."""
+
+    SYNTHETIC_SIMULATION = "synthetic_simulation"
+    VALIDATOR_ONLY = "validator_only"
+    LIVE = "live"
+
+
 class BenchmarkDomain(str, Enum):
     CODING = "coding"                           # SWE-bench Verified, HumanEval, repo debugging
     DEEP_RESEARCH = "deep_research"             # GAIA, BrowseBench, live search, multi-hop reasoning
@@ -180,6 +188,55 @@ class SpeculativeCandidate:
 
 
 @dataclass
+class LiveModelExecution:
+    """Observed output and telemetry returned by one real model invocation."""
+
+    response: str
+    verification_passed: bool
+    cost_usd: Optional[float]
+    duration_ms: float
+    tokens_generated: Optional[int] = None
+    verification_details: Dict[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        if self.cost_usd is not None and self.cost_usd < 0:
+            raise ValueError("cost_usd cannot be negative")
+        if self.duration_ms < 0:
+            raise ValueError("duration_ms cannot be negative")
+        if self.tokens_generated is not None and self.tokens_generated < 0:
+            raise ValueError("tokens_generated cannot be negative")
+
+
+@dataclass
+class SpeculativeAttempt:
+    """Auditable evidence for one candidate considered during a race."""
+
+    model_id: str
+    role: str
+    execution_mode: RaceExecutionMode
+    model_inference_executed: bool
+    verification_passed: bool
+    response: Optional[str] = None
+    cost_usd: Optional[float] = None
+    duration_ms: Optional[float] = None
+    tokens_generated: Optional[int] = None
+    verification_details: Dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> Dict[str, Any]:
+        data = asdict(self)
+        data["execution_mode"] = self.execution_mode.value
+        return data
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "SpeculativeAttempt":
+        payload = dict(data)
+        mode = payload.get("execution_mode", RaceExecutionMode.SYNTHETIC_SIMULATION)
+        if isinstance(mode, str):
+            payload["execution_mode"] = RaceExecutionMode(mode)
+        return cls(**payload)
+
+
+@dataclass
 class SpeculativeRaceResult:
     """Result of an A/B speculative execution race across top candidates."""
     race_id: str
@@ -195,9 +252,33 @@ class SpeculativeRaceResult:
     cost_saved_usd: float
     verification_passed: bool
     verification_details: Dict[str, Any] = field(default_factory=dict)
+    execution_mode: RaceExecutionMode = RaceExecutionMode.SYNTHETIC_SIMULATION
+    attempts: List[SpeculativeAttempt] = field(default_factory=list)
 
     def to_dict(self) -> Dict[str, Any]:
-        return asdict(self)
+        data = asdict(self)
+        data["execution_mode"] = self.execution_mode.value
+        data["attempts"] = [attempt.to_dict() for attempt in self.attempts]
+        return data
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "SpeculativeRaceResult":
+        payload = dict(data)
+        mode = payload.get("execution_mode")
+        if mode is None:
+            mode = payload.get("verification_details", {}).get(
+                "execution_mode",
+                RaceExecutionMode.SYNTHETIC_SIMULATION.value,
+            )
+        if isinstance(mode, str):
+            payload["execution_mode"] = RaceExecutionMode(mode)
+        payload["attempts"] = [
+            attempt
+            if isinstance(attempt, SpeculativeAttempt)
+            else SpeculativeAttempt.from_dict(attempt)
+            for attempt in payload.get("attempts", [])
+        ]
+        return cls(**payload)
 
 
 @dataclass
@@ -208,8 +289,12 @@ class EmpiricalModelStats:
     successful_tasks: int = 0
     pass_rate_at_1: float = 0.0
     total_cost_spent: float = 0.0
+    cost_observations: int = 0
+    unknown_cost_tasks: int = 0
     avg_latency_ms: float = 0.0
+    latency_observations: int = 0
     avg_tokens_generated: float = 0.0
+    token_observations: int = 0
     elo_rating: float = 1200.0
     last_updated: str = ""
 
