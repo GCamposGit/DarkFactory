@@ -123,17 +123,16 @@ def estimate_task_tokens(
     )
 
 
-def _hourly_headroom(account: ProviderAccountUsage) -> Optional[float]:
+def _quota_headroom(account: ProviderAccountUsage) -> Optional[float]:
+    """Return the most restrictive known quota window.
+
+    A healthy short window cannot compensate for an exhausted weekly/monthly
+    window (or vice versa), so routing must respect both horizons.
+    """
     known = [window for window in account.windows if window.remaining_percent is not None]
     if not known:
         return None
-    hourly = [
-        window
-        for window in known
-        if window.window_duration_minutes is not None and window.window_duration_minutes <= 180
-    ]
-    relevant = hourly or known
-    return min(float(window.remaining_percent) for window in relevant if window.remaining_percent is not None)
+    return min(float(window.remaining_percent) for window in known if window.remaining_percent is not None)
 
 
 def _pressure_for(remaining_percent: Optional[float]) -> TokenPressure:
@@ -170,7 +169,7 @@ def plan_token_stress(
         if account.family != ProviderFamily.LOCAL
         and account.status in {AccountConnectionStatus.CONNECTED, AccountConnectionStatus.LIMITED}
     ]
-    headrooms = [(account, _hourly_headroom(account)) for account in usable]
+    headrooms = [(account, _quota_headroom(account)) for account in usable]
     known = [(account, value) for account, value in headrooms if value is not None]
     best_account: Optional[ProviderAccountUsage] = None
     best_remaining = remaining_hourly_percent
