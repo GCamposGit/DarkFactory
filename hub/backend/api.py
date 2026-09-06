@@ -38,7 +38,7 @@ from hub.backend.models import (
     VisualGenerateResponse,
     VisualIllustrateRequest,
 )
-from hub.backend.service import HubService
+from hub.backend.service import HubService, ProbeTargetError
 from core.usage.models import AccountUsageReport, ModelCallEvent, ModelUsageReport
 from core.roadmap.models import (
     ConfidenceLevel,
@@ -279,11 +279,14 @@ def toggle_pin(
 @router.get("/health/ping", response_model=HealthCheckResult)
 def ping_service(
     service_id: str = Query(..., description="ID of the service"),
-    url: str = Query(..., description="URL to ping"),
+    url: Optional[str] = Query(default=None, description="Registered URL to ping"),
     service: HubService = Depends(get_hub_service),
 ) -> HealthCheckResult:
     """Ping a specific URL to check availability and latency."""
-    return service.ping_url(service_id=service_id, url=url)
+    try:
+        return service.ping_url(service_id=service_id, url=url)
+    except ProbeTargetError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
 
 @router.get("/health/ping-all", response_model=List[HealthCheckResult])
@@ -650,7 +653,5 @@ def list_visual_gallery_endpoint(
 ) -> list:
     """List all previously generated visual assets and their metadata."""
     return service.list_visual_assets()
-
-
 
 

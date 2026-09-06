@@ -3,17 +3,20 @@ Headless business logic layer for DarkHub.
 Decoupled from Web UI and HTTP frameworks (Reachability standard).
 """
 
+import ipaddress
 import json
 import logging
 import os
 import re
+import socket
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 import sys
-from typing import Dict, List, Optional, Tuple, Any
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from hub.backend.models import (
     ExportCatalogResponse,
@@ -85,6 +88,33 @@ from core.roadmap.service import build_repository_roadmap_service
 
 logger = logging.getLogger("darkhub.service")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
+
+
+class ProbeTargetError(ValueError):
+    """Raised when a health probe target violates the outbound policy."""
+
+
+class _SafeProbeRedirectHandler(urllib.request.HTTPRedirectHandler):
+    """Revalidate every redirect before urllib opens the next destination."""
+
+    def __init__(self, validator: Callable[[str], str], *, initial_scheme: str) -> None:
+        super().__init__()
+        self._validator = validator
+        self._initial_scheme = initial_scheme
+
+    def redirect_request(
+        self,
+        req: urllib.request.Request,
+        fp: Any,
+        code: int,
+        msg: str,
+        headers: Any,
+        newurl: str,
+    ) -> Optional[urllib.request.Request]:
+        validated = self._validator(newurl)
+        if self._initial_scheme == "https" and urllib.parse.urlsplit(validated).scheme != "https":
+            raise ProbeTargetError("Health probe redirect cannot downgrade HTTPS to HTTP")
+        return super().redirect_request(req, fp, code, msg, headers, validated)
 
 
 class HubService:
@@ -367,21 +397,91 @@ class HubService:
             return None
         return self.update_service(service_id, ServiceUpdate(pinned=not service.pinned))
 
-    def ping_url(self, service_id: str, url: str, timeout_sec: float = 2.5) -> HealthCheckResult:
-        """Pings a service URL and measures round-trip latency."""
+    def validate_probe_target(self, url: str, *, is_local: bool) -> str:
+        """Validate a probe URL and every resolved address against its service class."""
+        try:
+            parsed = urllib.parse.urlsplit(url)
+            port = parsed.port or (443 if parsed.scheme == "https" else 80)
+        except ValueError as exc:
+            raise ProbeTargetError("Health probe target is malformed") from exc
+
+        if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+            raise ProbeTargetError("Health probe target must use HTTP or HTTPS")
+        if parsed.username is not None or parsed.password is not None:
+            raise ProbeTargetError("Health probe target cannot contain credentials")
+        if parsed.fragment:
+            raise ProbeTargetError("Health probe target cannot contain a fragment")
+
+        hostname = parsed.hostname.rstrip(".").lower()
+        try:
+            literal = ipaddress.ip_address(hostname)
+            addresses = {literal}
+        except ValueError:
+            try:
+                answers = socket.getaddrinfo(hostname, port, type=socket.SOCK_STREAM)
+            except OSError as exc:
+                raise ProbeTargetError("Health probe target could not be resolved") from exc
+            addresses = {ipaddress.ip_address(answer[4][0]) for answer in answers}
+
+        if not addresses:
+            raise ProbeTargetError("Health probe target could not be resolved")
+        if is_local:
+            allowed = all(address.is_loopback for address in addresses)
+        else:
+            allowed = all(address.is_global for address in addresses)
+        if not allowed:
+            target_class = "loopback" if is_local else "public"
+            raise ProbeTargetError(f"Health probe destination is not allowed for a {target_class} service")
+
+        normalized_path = parsed.path or "/"
+        return urllib.parse.urlunsplit(
+            (parsed.scheme, parsed.netloc.lower(), normalized_path, parsed.query, "")
+        )
+
+    def _registered_probe_target(self, service_id: str, url: Optional[str]) -> Tuple[ServiceItem, str]:
+        service = self.get_service(service_id)
+        if service is None:
+            raise ProbeTargetError("Health probe requires a registered service")
+
+        requested = urllib.parse.urlsplit(url or service.url)
+        registered = urllib.parse.urlsplit(service.url)
+        requested_key = urllib.parse.urlunsplit(
+            (requested.scheme.lower(), requested.netloc.lower(), requested.path or "/", requested.query, "")
+        )
+        registered_key = urllib.parse.urlunsplit(
+            (registered.scheme.lower(), registered.netloc.lower(), registered.path or "/", registered.query, "")
+        )
+        if requested_key != registered_key:
+            raise ProbeTargetError("Health probe URL must match the registered service URL")
+        return service, self.validate_probe_target(service.url, is_local=service.is_local)
+
+    def ping_url(
+        self,
+        service_id: str,
+        url: Optional[str] = None,
+        timeout_sec: float = 2.5,
+    ) -> HealthCheckResult:
+        """Ping only a registered destination, revalidating all redirects."""
+        service, target = self._registered_probe_target(service_id, url)
+        initial_scheme = urllib.parse.urlsplit(target).scheme
+        redirect_handler = _SafeProbeRedirectHandler(
+            lambda candidate: self.validate_probe_target(candidate, is_local=service.is_local),
+            initial_scheme=initial_scheme,
+        )
+        opener = urllib.request.build_opener(redirect_handler)
         start = time.perf_counter()
         req = urllib.request.Request(
-            url,
+            target,
             headers={"User-Agent": "DarkHub-Ping/1.0 (Headless Health Probe)"},
             method="HEAD",
         )
 
         try:
-            with urllib.request.urlopen(req, timeout=timeout_sec) as response:
+            with opener.open(req, timeout=timeout_sec) as response:
                 latency = round((time.perf_counter() - start) * 1000, 1)
                 return HealthCheckResult(
                     service_id=service_id,
-                    url=url,
+                    url=target,
                     status=HealthStatus.ONLINE,
                     latency_ms=latency,
                     status_code=response.getcode(),
@@ -392,33 +492,37 @@ class HubService:
             status = HealthStatus.ONLINE if http_err.code < 500 else HealthStatus.DEGRADED
             return HealthCheckResult(
                 service_id=service_id,
-                url=url,
+                url=target,
                 status=status,
                 latency_ms=latency,
                 status_code=http_err.code,
             )
-        except Exception as exc:
+        except ProbeTargetError:
+            raise
+        except Exception:
             # Fallback retry with GET if HEAD was disallowed by remote
             try:
                 start_get = time.perf_counter()
                 req_get = urllib.request.Request(
-                    url,
+                    target,
                     headers={"User-Agent": "DarkHub-Ping/1.0"},
                     method="GET",
                 )
-                with urllib.request.urlopen(req_get, timeout=timeout_sec) as response:
+                with opener.open(req_get, timeout=timeout_sec) as response:
                     latency = round((time.perf_counter() - start_get) * 1000, 1)
                     return HealthCheckResult(
                         service_id=service_id,
-                        url=url,
+                        url=target,
                         status=HealthStatus.ONLINE,
                         latency_ms=latency,
                         status_code=response.getcode(),
                     )
+            except ProbeTargetError:
+                raise
             except Exception as get_exc:
                 return HealthCheckResult(
                     service_id=service_id,
-                    url=url,
+                    url=target,
                     status=HealthStatus.OFFLINE,
                     latency_ms=None,
                     error=str(get_exc),
@@ -1077,6 +1181,4 @@ class HubService:
         """Returns catalog of all saved visual assets."""
         studio = VisualStudio()
         return studio.list_assets()
-
-
 
