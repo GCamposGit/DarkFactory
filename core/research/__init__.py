@@ -18,6 +18,15 @@ from core.research.arxiv_client import ArxivClient
 from core.research.github_scout import GitHubScout
 from core.research.trends_scout import ExpertTrendsScout
 from core.research.ledger import KnowledgeLedgerManager
+from core.research.transport import (
+    ResearchSearchResult,
+    ResearchTransport,
+    SearchStatus,
+    TransportError,
+    TransportErrorKind,
+    TransportFailure,
+    TransportResponse,
+)
 
 __all__ = [
     "ResearchTopicType",
@@ -30,5 +39,11 @@ __all__ = [
     "GitHubScout",
     "ExpertTrendsScout",
     "KnowledgeLedgerManager",
+    "ResearchSearchResult",
+    "ResearchTransport",
+    "SearchStatus",
+    "TransportError",
+    "TransportErrorKind",
+    "TransportFailure",
+    "TransportResponse",
 ]
-
