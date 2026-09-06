@@ -334,6 +334,9 @@ def test_roadmap_frontend_is_read_only_and_keyboard_accessible() -> None:
     assert "renderRoadmapTimeline" in script
     assert "renderRoadmapDependencies" in script
     assert "operational_flags" in script
+    assert "roadmap-list-item" in script
+    assert "sortRoadmapTable" in script
+    assert "aria-sort" in script
 
 
 def test_cli_and_library_expose_the_same_snapshot_hash() -> None:

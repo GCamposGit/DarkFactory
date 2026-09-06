@@ -12,6 +12,7 @@ const roadmapUi = {
   mode: "overview",
   selectedItemId: null,
   loading: false,
+  tableSort: { key: "id", direction: "asc" },
 };
 
 const ROADMAP_LABELS = {
@@ -231,8 +232,8 @@ function renderRoadmapOverview(items) {
             <h3 id="roadmap-stage-${stage}" class="text-xs font-mono font-semibold uppercase tracking-[0.18em] text-slate-400">${roadmapLabel("lifecycle_stage", stage)}</h3>
             <span class="text-[10px] text-slate-500 font-mono">${stageItems.length} item(ns)</span>
           </div>
-          <div class="grid grid-cols-1 xl:grid-cols-2 gap-3">
-            ${stageItems.map(renderRoadmapCard).join("")}
+          <div class="roadmap-list">
+            ${stageItems.map(renderRoadmapListItem).join("")}
           </div>
         </section>
       `;
@@ -297,75 +298,131 @@ function renderRoadmapDependencies(items) {
   return `<div class="roadmap-graph-intro">Relações <code>related_to</code> ficam fora do cálculo causal. Clique ou pressione Enter em um nó para abrir o drawer de evidências.</div><div class="roadmap-graph-shell"><svg class="roadmap-graph" viewBox="0 0 ${width} ${height}" role="img" aria-label="Grafo direcionado de dependências do roadmap"><defs><marker id="roadmap-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#67e8f9"></path></marker></defs>${edges.join("")}${nodes}</svg></div>`;
 }
 
-function renderRoadmapCard(item) {
+function renderRoadmapListItem(item) {
   const flags = item.operational_flags || [];
   const dependencies = item.dependencies || [];
   const sources = item.source_refs || [];
   const flagMarkup = flags.length
-    ? flags.map((flag) => `<span class="roadmap-tag roadmap-tag-warning">⚠ ${escapeRoadmapHtml(roadmapFlagLabel(flag))}</span>`).join("")
-    : '<span class="roadmap-tag roadmap-tag-neutral">● Sem alerta</span>';
+    ? flags.map((flag) => `<span class="roadmap-tag roadmap-tag-warning">⚠ ${escapeRoadmapHtml(roadmapFlagLabel(flag))}</span>`).join(" ")
+    : "";
   return `
-    <article class="roadmap-card" data-roadmap-item-id="${escapeRoadmapHtml(item.id)}">
-      <button type="button" class="w-full text-left" onclick="selectRoadmapItem('${escapeRoadmapAttribute(item.id)}')" aria-label="Abrir detalhes de ${escapeRoadmapHtml(item.title)}">
-        <div class="flex items-start justify-between gap-3">
-          <div class="min-w-0">
-            <div class="flex flex-wrap items-center gap-2 mb-2">
-              <span class="roadmap-id">${escapeRoadmapHtml(item.id)}</span>
-              ${flagMarkup}
-            </div>
-            <h4 class="text-sm font-semibold text-slate-100 leading-snug">${escapeRoadmapHtml(item.title)}</h4>
-            <p class="mt-1.5 text-xs text-slate-400 leading-relaxed line-clamp-2">${escapeRoadmapHtml(item.description || "Sem descrição registrada.")}</p>
-          </div>
-          <span class="roadmap-state-symbol" aria-hidden="true">${roadmapStatusSymbol(item.delivery_status)}</span>
-        </div>
-        <div class="flex flex-wrap gap-1.5 mt-4">
-          <span class="roadmap-tag roadmap-tag-status">${roadmapLabel("delivery_status", item.delivery_status)}</span>
-          <span class="roadmap-tag roadmap-tag-neutral">${roadmapLabel("horizon", item.horizon)}</span>
-          <span class="roadmap-tag roadmap-tag-neutral">${roadmapLabel("item_type", item.item_type)}</span>
-        </div>
-        <div class="mt-3 pt-3 border-t border-slate-800/80 flex items-center justify-between gap-3 text-[10px] text-slate-500 font-mono">
-          <span>${dependencies.length ? `${dependencies.length} dependência(s)` : "Sem dependências diretas"}</span>
-          <span>${sources.length ? `${sources.length} fonte(s)` : "Sem fonte confirmável"}</span>
-        </div>
+    <article class="roadmap-list-item" data-roadmap-item-id="${escapeRoadmapHtml(item.id)}">
+      <button type="button" class="roadmap-list-button" onclick="selectRoadmapItem('${escapeRoadmapAttribute(item.id)}')" aria-label="Abrir detalhes de ${escapeRoadmapHtml(item.title)}">
+        <span class="roadmap-list-status" aria-hidden="true">${roadmapStatusSymbol(item.delivery_status)}</span>
+        <span class="roadmap-list-main">
+          <span class="roadmap-list-heading">
+            <span class="roadmap-id">${escapeRoadmapHtml(item.id)}</span>
+            <span class="roadmap-list-title">${escapeRoadmapHtml(item.title)}</span>
+          </span>
+          <span class="roadmap-list-meta">
+            <span class="roadmap-tag roadmap-tag-status">${roadmapLabel("delivery_status", item.delivery_status)}</span>
+            <span>${roadmapLabel("horizon", item.horizon)}</span>
+            <span>${roadmapLabel("item_type", item.item_type)}</span>
+          </span>
+        </span>
+        <span class="roadmap-list-tail">
+          ${flagMarkup}
+          <span class="roadmap-list-count">${dependencies.length} dep. · ${sources.length} fonte(s)</span>
+        </span>
       </button>
     </article>
   `;
 }
 
 function renderRoadmapTable(items) {
+  const sortedItems = sortRoadmapItems(items);
+  const sortStatus = `Ordenado por ${roadmapSortLabel(roadmapUi.tableSort.key)}, ${roadmapUi.tableSort.direction === "asc" ? "crescente" : "decrescente"}.`;
   return `
+    <div class="roadmap-table-intro">Lista compacta. Selecione um cabeçalho para ordenar; selecione o ID para abrir os detalhes.</div>
     <div class="overflow-x-auto rounded-2xl border border-slate-800">
       <table class="w-full text-left text-xs" aria-label="Tabela acessível do roadmap operacional">
         <thead class="bg-slate-950/80 text-[10px] uppercase tracking-wider text-slate-500 font-mono">
           <tr>
-            <th scope="col" class="px-4 py-3">Item</th>
-            <th scope="col" class="px-4 py-3">Tipo</th>
-            <th scope="col" class="px-4 py-3">Estado</th>
-            <th scope="col" class="px-4 py-3">Horizonte</th>
-            <th scope="col" class="px-4 py-3">Dependências</th>
-            <th scope="col" class="px-4 py-3">Proveniência</th>
+            ${renderRoadmapSortHeader("id", "Item")}
+            ${renderRoadmapSortHeader("item_type", "Tipo")}
+            ${renderRoadmapSortHeader("lifecycle_stage", "Etapa")}
+            ${renderRoadmapSortHeader("delivery_status", "Estado")}
+            ${renderRoadmapSortHeader("horizon", "Horizonte")}
+            ${renderRoadmapSortHeader("dependencies", "Dependências")}
+            ${renderRoadmapSortHeader("source_refs", "Proveniência")}
           </tr>
         </thead>
         <tbody class="divide-y divide-slate-800/70">
-          ${items.map((item) => `
+          ${sortedItems.map((item) => `
             <tr class="hover:bg-slate-800/40 focus-within:bg-slate-800/40">
-              <th scope="row" class="px-4 py-3 min-w-[240px]">
+              <th scope="row" class="px-3 py-2 min-w-[240px]">
                 <button type="button" class="text-left group" onclick="selectRoadmapItem('${escapeRoadmapAttribute(item.id)}')">
                   <span class="roadmap-id">${escapeRoadmapHtml(item.id)}</span>
-                  <span class="block mt-1 text-slate-200 font-semibold group-hover:text-indigo-300">${escapeRoadmapHtml(item.title)}</span>
+                  <span class="block mt-0.5 text-slate-200 font-semibold group-hover:text-indigo-300">${escapeRoadmapHtml(item.title)}</span>
                 </button>
               </th>
-              <td class="px-4 py-3 text-slate-400">${roadmapLabel("item_type", item.item_type)}</td>
-              <td class="px-4 py-3"><span class="roadmap-tag roadmap-tag-status">${roadmapStatusSymbol(item.delivery_status)} ${roadmapLabel("delivery_status", item.delivery_status)}</span></td>
-              <td class="px-4 py-3 text-slate-400">${roadmapLabel("horizon", item.horizon)}</td>
-              <td class="px-4 py-3 text-slate-400 font-mono">${(item.dependencies || []).length}</td>
-              <td class="px-4 py-3 text-slate-400 font-mono">${(item.source_refs || []).length}</td>
+              <td class="px-3 py-2 text-slate-400">${roadmapLabel("item_type", item.item_type)}</td>
+              <td class="px-3 py-2 text-slate-400">${roadmapLabel("lifecycle_stage", item.lifecycle_stage)}</td>
+              <td class="px-3 py-2"><span class="roadmap-tag roadmap-tag-status">${roadmapStatusSymbol(item.delivery_status)} ${roadmapLabel("delivery_status", item.delivery_status)}</span></td>
+              <td class="px-3 py-2 text-slate-400">${roadmapLabel("horizon", item.horizon)}</td>
+              <td class="px-3 py-2 text-slate-400 font-mono">${(item.dependencies || []).length}</td>
+              <td class="px-3 py-2 text-slate-400 font-mono">${(item.source_refs || []).length}</td>
             </tr>
           `).join("")}
         </tbody>
       </table>
     </div>
+    <p id="roadmap-table-sort-status" class="sr-only" role="status">${escapeRoadmapHtml(sortStatus)}</p>
   `;
+}
+
+function renderRoadmapSortHeader(key, label) {
+  const active = roadmapUi.tableSort.key === key;
+  const ariaSort = active
+    ? (roadmapUi.tableSort.direction === "asc" ? "ascending" : "descending")
+    : "none";
+  const indicator = active ? (roadmapUi.tableSort.direction === "asc" ? "↑" : "↓") : "↕";
+  const nextDirection = active && roadmapUi.tableSort.direction === "asc" ? "decrescente" : "crescente";
+  const actionLabel = `Ordenar por ${label} em ordem ${nextDirection}`;
+  return `<th scope="col" aria-sort="${ariaSort}" class="px-3 py-2 whitespace-nowrap"><button type="button" class="roadmap-sort-button" onclick="sortRoadmapTable('${key}')" aria-label="${escapeRoadmapHtml(actionLabel)}"><span>${escapeRoadmapHtml(label)}</span><span class="roadmap-sort-indicator" aria-hidden="true">${indicator}</span></button></th>`;
+}
+
+function sortRoadmapTable(key) {
+  const current = roadmapUi.tableSort;
+  roadmapUi.tableSort = {
+    key,
+    direction: current.key === key && current.direction === "asc" ? "desc" : "asc",
+  };
+  renderRoadmapContent();
+}
+
+function sortRoadmapItems(items) {
+  const { key, direction } = roadmapUi.tableSort;
+  const multiplier = direction === "asc" ? 1 : -1;
+  return items
+    .map((item, index) => ({ item, index }))
+    .sort((left, right) => {
+      const leftValue = roadmapSortValue(left.item, key);
+      const rightValue = roadmapSortValue(right.item, key);
+      if (leftValue < rightValue) return -1 * multiplier;
+      if (leftValue > rightValue) return 1 * multiplier;
+      return left.index - right.index;
+    })
+    .map(({ item }) => item);
+}
+
+function roadmapSortValue(item, key) {
+  if (key === "dependencies") return (item.dependencies || []).length;
+  if (key === "source_refs") return (item.source_refs || []).length;
+  const value = item[key] ?? "";
+  return String(value).toLocaleLowerCase("pt-BR");
+}
+
+function roadmapSortLabel(key) {
+  return ({
+    id: "item",
+    item_type: "tipo",
+    lifecycle_stage: "etapa",
+    delivery_status: "estado",
+    horizon: "horizonte",
+    dependencies: "dependências",
+    source_refs: "proveniência",
+  })[key] || key;
 }
 
 async function selectRoadmapItem(itemId) {
