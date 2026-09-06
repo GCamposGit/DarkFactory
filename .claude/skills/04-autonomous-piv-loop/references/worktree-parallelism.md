@@ -1,43 +1,93 @@
 # Protocolo fail-closed de worktrees paralelas
 
-Use este protocolo sempre que duas ou mais frentes puderem escrever no mesmo repositório ou quando uma entrega isolada precisar voltar ao checkout de integração.
+Estes controles são obrigatórios quando duas ou mais frentes podem escrever no mesmo
+repositório e quando uma entrega isolada retorna ao checkout de integração.
 
-## 1. Fechar a baseline antes do fan-out
+### WT-01 — Checkpoint de integração limpo
 
-1. Eleja exatamente um coordenador e um checkout de integração. Nenhuma outra tarefa pode escrever nesse diretório.
-2. Confirme o repositório, branch e `HEAD`. Registre o SHA-base.
-3. Se houver alterações locais, gere um backup recuperável fora do índice de integração e registre um fingerprint determinístico do estado: `git status --porcelain=v1`, `git diff --binary` e lista de arquivos untracked com hashes.
-4. Separe o trabalho validado em commits lógicos. A baseline de fan-out deve estar limpa. Se isso não for possível, pare; não use `startingState: working-tree` para multiplicar um checkout sujo.
-5. Verifique o ambiente antes de despachar: caminho e versão do Python, import de `pytest`, coleta da suíte e comandos focais. Em Windows/sandbox, prove também um `--basetemp` novo e gravável. Runtime sem dependências ou diretório temporário inacessível é bloqueio explícito; não descubra isso depois da implementação.
+Eleja um coordenador e um checkout de integração que não execute tarefas. Antes do
+fan-out, confirme `git status --porcelain=v1` vazio e grave o SHA-base. Se a raiz ou o
+checkout de integração estiver dirty, pare: não despache e não use
+`startingState: working-tree`.
 
-## 2. Manifesto, ownership e leases
+### WT-02 — Fingerprint e backup recuperável
 
-Antes de criar worktrees, mantenha um manifesto versionável ou artefato de execução recuperável com: ticket/título, task ID, owner, branch, worktree, SHA-base, escopo permitido, lease com fencing e expiração, testes e ordem topológica.
+Antes de sanear qualquer estado dirty, preserve fora do índice de integração um backup
+recuperável contendo `git diff --binary`, status porcelain, arquivos untracked e hashes.
+Registre o fingerprint formado por SHA, dirty-state e hashes. Nunca descarte deltas para
+obter uma baseline limpa.
 
-Rejeite o despacho quando escopos se sobrepõem, quando owners usam o mesmo diretório/branch, quando o título/ID é temporário ou vazio, ou quando já existe escritor ativo no checkout de integração. Um `clientThreadId` de setup não é o task ID final: resolva e persista o ID real, título e `cwd` antes de autorizar escrita. Renovação preserva fencing monotônico; conclusão com lease vencido ou token obsoleto é rejeitada.
+### WT-03 — Identidade exclusiva e persistente
 
-## 3. Execução e retry
+Antes da escrita, persista em manifesto o ticket ID definitivo, título definitivo,
+owner, branch, caminho absoluto/cwd da worktree, SHA-base e lease. `clientThreadId`
+de setup não é o task ID final: resolva e persista o ID real. IDs ou títulos
+temporários, campos vazios, branch detached ou reutilização de branch/worktree/owner
+bloqueiam o despacho.
 
-- Cada frente escreve somente nos caminhos declarados. Expansão exige nova verificação de sobreposição.
-- Não inclua no commit arquivos herdados da baseline ou alterações de outro owner. Compare sempre `SHA-base..HEAD` e o estado residual.
-- Enquanto houver trabalho, publique heartbeat observável em intervalos de no máximo 60 segundos com etapa, último comando e bloqueio. Dois intervalos sem nova revisão exigem auditoria do task; não presuma progresso apenas porque o status é `active`.
-- Falha de ferramenta, setup, quota, dependência ou teste produz RCA antes do retry. O retry reutiliza a mesma identidade quando o resultado anterior é incerto e nunca cria outra frente silenciosamente.
-- `setup refresh`, task criado sem ID final, turno sem itens e executor sem `pytest` são falhas de infraestrutura. Preserve o estado, verifique o ambiente e retome a mesma frente. Só crie substituta após provar que a anterior não escreve mais e registrar a substituição no manifesto.
-- Não use handoff para checkout sujo ou com escritor ativo. Primeiro encerre o escritor, capture backup e estabeleça checkpoint limpo. Se um handoff parcial falhar, audite stash, branch, worktree e reachability antes de tentar de novo; nunca encadeie handoffs às cegas.
+### WT-04 — Lease com fencing e heartbeat
 
-## 4. Contrato de handoff
+Cada frente possui lease exclusivo, expiração e fencing token monotônico. Emita
+heartbeat periódico em intervalos de no máximo 60 segundos com task ID, owner, cwd, HEAD, fase,
+último comando e horário. Dois intervalos sem revisão nova exigem auditoria do task;
+não presuma progresso apenas porque o status é `active`. Lease vencido, heartbeat
+ausente ou token antigo bloqueia escrita, conclusão e integração.
 
-A frente entrega ticket/owner/task ID/lease; SHA-base e commit seletivo; `git show --name-status`; testes com exit codes, contagem e marcadores; relatório; e `git status --short` residual separando qualquer herança.
+### WT-05 — Ownership por arquivo
 
-Ausência de final textual não invalida um commit verificável, mas exige auditoria direta. Declaração textual sem commit, arquivos e testes verificáveis nunca autoriza integração.
+O manifesto lista cada arquivo permitido e seu owner. Antes da primeira escrita e de
+toda expansão de escopo, adquira lock de ownership e compare todos os manifestos
+ativos. Sobreposição de arquivo, diretório compartilhado ou lock concorrente bloqueia
+o despacho; não resolva a colisão escolhendo silenciosamente um escritor.
 
-## 5. Integração topológica
+### WT-06 — Preflight executável
 
-1. Confirme backup recuperável e checkout de integração limpo.
-2. Integre por dependência usando `cherry-pick` ou merge explícito do commit seletivo. Nunca copie a worktree inteira nem aceite automaticamente um lado completo de conflito.
-3. Resolva conflitos por conteúdo, ownership e contrato do ticket. Após cada integração, execute os testes focais afetados e registre o novo SHA.
-4. Depois do último ticket, rode os comandos obrigatórios, whitespace, marcadores de conflito, sync de skills e gates de governança.
+Registre caminho e versão do Python, confirme `python -m pytest --version`, prove um
+`--basetemp` novo, exclusivo e gravável, colete a suíte e valide os comandos focais.
+Python sem pytest, coleta vazia, PermissionError ou executor setup/refresh travado são
+falhas de ambiente: imponha timeout, preserve diagnóstico e não inicie a implementação.
 
-## 6. Limpeza recuperável
+### WT-07 — Escrita e commit seletivos
 
-Remova uma worktree somente quando o commit seletivo estiver alcançável pela branch de integração, os gates conjuntos estiverem verdes e o estado residual não contiver delta exclusivo. Resolva e confira o caminho absoluto antes da remoção. Preserve worktree, branch e backup quando qualquer prova estiver ausente; não use remoção forçada para ocultar estado não auditado.
+Escreva apenas arquivos possuídos. Compare `SHA-base..HEAD`, índice e estado residual.
+O commit contém somente o delta da frente; nunca inclui baseline herdada, arquivos de
+outro owner ou alterações replicadas por `startingState: working-tree`.
+
+### WT-08 — Contrato de conclusão
+
+A resposta final entrega ticket, task ID, owner e lease; SHA-base e SHA final; branch e
+cwd; `git show --name-status`; arquivos; testes focais e obrigatórios com contagem e
+exit codes; heartbeat final; relatório; e `git status --short` residual explicado.
+Task sem resposta final é incompleta. Texto sem commit verificável não autoriza
+integração; commit sem o restante do contrato exige auditoria direta.
+
+### WT-09 — Handoff protegido
+
+É proibido fazer handoff para a raiz/check-out de integração dirty ou com escritor
+ativo. Encerre o escritor, preserve backup e restabeleça checkpoint limpo. Não tente
+desanexar ou trocar uma branch com alterações locais. Se um handoff parcial falhar,
+audite stash, branch, worktree, cwd, lease e reachability antes do retry; reutilize a
+identidade persistida e nunca encadeie handoffs às cegas.
+
+### WT-10 — Retry com RCA
+
+Falha ou resultado incerto de criação, executor setup/refresh, teste ou handoff gera
+RCA antes do retry. Defina timeout e limite de tentativas; reconcilie o estado existente
+em vez de criar outra task/worktree. Uma substituta só pode nascer após provar que a
+anterior não escreve mais e registrar a troca no manifesto. Um segundo erro de detach
+não autoriza force nem perda de estado.
+
+### WT-11 — Integração topológica e validação conjunta
+
+Com o checkout de integração limpo, integre commits seletivos em ordem de dependência
+por cherry-pick ou merge explícito. Após cada commit, rode os testes focais afetados;
+ao final, rode conjuntamente os dois comandos obrigatórios, drift de skills, whitespace
+e marcadores de conflito. Um gate vermelho interrompe a cadeia.
+
+### WT-12 — Limpeza somente após alcance
+
+Remova worktree, branch temporária, lease e backup somente quando o commit seletivo
+estiver alcançável pela branch de integração, os gates focais e conjuntos estiverem
+verdes e não houver delta exclusivo no estado residual. Resolva e confira cada caminho
+absoluto antes da remoção. Preserve tudo quando faltar prova; remoção forçada não é
+mecanismo de limpeza.
