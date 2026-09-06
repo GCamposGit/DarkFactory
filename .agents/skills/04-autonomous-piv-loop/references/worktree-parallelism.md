@@ -43,9 +43,14 @@ o despacho; não resolva a colisão escolhendo silenciosamente um escritor.
 ### WT-06 — Preflight executável
 
 Registre caminho e versão do Python, confirme `python -m pytest --version`, prove um
-`--basetemp` novo, exclusivo e gravável, colete a suíte e valide os comandos focais.
-Python sem pytest, coleta vazia, PermissionError ou executor setup/refresh travado são
-falhas de ambiente: imponha timeout, preserve diagnóstico e não inicie a implementação.
+`--basetemp` novo, exclusivo e gravável, colete a suíte existente e valide os comandos
+focais que já existem. Quando o critério do ticket introduz um teste focal novo,
+registre a ausência esperada antes da escrita e prove coleta geral não vazia ou um
+teste adjacente existente; não execute o caminho inexistente. Após a primeira escrita,
+o novo teste focal deve existir e coletar ao menos um caso antes de ampliar a
+implementação. Python sem pytest, coleta geral vazia, PermissionError ou executor
+setup/refresh travado são falhas de ambiente: imponha timeout, preserve diagnóstico e
+não inicie a implementação.
 
 ### WT-07 — Escrita e commit seletivos
 

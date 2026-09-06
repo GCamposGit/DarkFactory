@@ -27,6 +27,8 @@ integração bloqueia a próxima transição.
 1. Leia `AGENTS.md`, `MISSION.md` e `FACTORY_RULES.md`; registre ticket, identidade,
    escopo e comandos de aceitação.
 2. Faça o preflight da unidade de trabalho e do ambiente antes da primeira escrita.
+   Quando o ticket introduz o próprio teste focal, registre sua ausência esperada e
+   prove coleta não vazia da suíte existente; não execute um caminho ainda inexistente.
 3. Implemente somente os caminhos possuídos pela tarefa.
 4. Execute o teste focal e `python core/harness/runner.py --quick`; corrija a causa
    antes de avançar se algum gate falhar.
