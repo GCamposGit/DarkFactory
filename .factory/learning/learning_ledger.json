@@ -1,6 +1,6 @@
 {
   "session_id": "session_20260905_072924",
-  "prompt_count": 5,
+  "prompt_count": 6,
   "turns": [
     {
       "turn_id": 1,
@@ -50,6 +50,16 @@
       "was_followup": false,
       "one_shot_success": true,
       "missing_context_or_gap": "Ainda nao existe uma prova E2E unica que atravesse jogo, tres tiers, imagem, pesquisa, aprendizagem e harness",
+      "target_skill": "autonomous-piv-loop"
+    },
+    {
+      "turn_id": 6,
+      "timestamp": "2026-09-06T10:32:51.862444+00:00",
+      "user_prompt_summary": "retry",
+      "perceived_intent": "Retomar DF-23 do estado persistido e concluir validação e commit sem reiniciar nem ampliar escopo",
+      "was_followup": true,
+      "one_shot_success": false,
+      "missing_context_or_gap": "Turno anterior terminou antes do commit após gates obrigatórios revelarem duas falhas preexistentes",
       "target_skill": "autonomous-piv-loop"
     }
   ],
@@ -102,6 +112,58 @@
       "patch_description": "Execucao imediata do generator de learning pack e apresentacao completa dos 5 componentes Feynman no chat",
       "preventative_rule": "Todo marco arquitetural concluido deve gerar e exibir o Session Learning Pack (skill 13)",
       "regression_test_file": "tests/test_learning_pack.py",
+      "verification_gate_id": null,
+      "status": "resolved"
+    },
+    {
+      "rca_id": "rca_c28d37d5",
+      "timestamp": "2026-09-06T10:26:32.535777+00:00",
+      "category": "governance_violation",
+      "symptom": "Fan-out de baseline dirty duplicou deltas herdados, gerou IDs e títulos temporários, tasks sem resposta final, handoff bloqueado, escritor concorrente na raiz, pytest ausente, refresh travado e retry de detach falho",
+      "mechanism": "startingState working-tree propagou estado não checkpointado sem identidade persistente, ownership por arquivo, lease, preflight, heartbeat ou contrato verificável de conclusão e integração",
+      "root_cause": "A skill tratava worktree como sugestão de isolamento, não como máquina de estados fail-closed com cadeia de custódia da baseline até a limpeza",
+      "patch_description": "Protocolo WT-01 a WT-12, roadmap DF-23, espelho sincronizado e teste determinístico de controles e drift",
+      "preventative_rule": "Nunca fazer fan-out, handoff, integração ou limpeza sem checkpoint limpo, fingerprint e backup, identidades e ownership exclusivos, ambiente validado, heartbeat, commit seletivo alcançável e gates verdes",
+      "regression_test_file": "tests/test_worktree_protocol.py",
+      "verification_gate_id": null,
+      "status": "resolved"
+    },
+    {
+      "rca_id": "rca_04a112d6",
+      "timestamp": "2026-09-06T10:26:32.617118+00:00",
+      "category": "test_regression",
+      "symptom": "Primeiro teste focal DF-23 falhou ao procurar uma frase quebrada por newline",
+      "mechanism": "A asserção comparou substring literal no Markdown sem normalizar whitespace",
+      "root_cause": "O teste de contrato acoplou evidência semântica à formatação de linha do documento",
+      "patch_description": "Normalização determinística de whitespace antes de verificar as evidências obrigatórias",
+      "preventative_rule": "Testes de contratos documentais validam IDs e significado estável sem depender de quebras de linha editoriais",
+      "regression_test_file": "tests/test_worktree_protocol.py",
+      "verification_gate_id": null,
+      "status": "resolved"
+    },
+    {
+      "rca_id": "rca_ce55ee27",
+      "timestamp": "2026-09-06T10:28:18.706863+00:00",
+      "category": "tool_misuse",
+      "symptom": "Quick harness não encontrou python embora o shell pai tivesse uma função PowerShell python",
+      "mechanism": "runner.py executa comandos em subprocesso cmd.exe, que herda PATH mas não funções do PowerShell",
+      "root_cause": "O preflight provou resolução apenas no shell coordenador e não no ambiente efetivamente herdado pelo executor",
+      "patch_description": "Runtime Python 3.12.14 propagado no PATH do processo e pytest basetemp exclusivo validado",
+      "preventative_rule": "Preflight de executor deve provar Python e pytest no mesmo ambiente e mecanismo de subprocesso usado pelos gates",
+      "regression_test_file": "tests/test_worktree_protocol.py",
+      "verification_gate_id": null,
+      "status": "resolved"
+    },
+    {
+      "rca_id": "rca_cd51f2d4",
+      "timestamp": "2026-09-06T10:28:18.784465+00:00",
+      "category": "test_regression",
+      "symptom": "Os dois comandos obrigatórios falham com 2 testes antigos mesmo após remover o erro ambiental de basetemp",
+      "mechanism": "Baseline espera 6 domínios mas expõe 8, e fallback do learning pack retorna 1 padrão quando o teste exige pelo menos 2",
+      "root_cause": "O SHA-base de64424 já contém inconsistências entre implementação e testes fora dos arquivos e critérios do DF-23",
+      "patch_description": "Falhas reproduzidas e isoladas; nenhum módulo fora do DF-23 foi alterado",
+      "preventative_rule": "Não misturar correções funcionais alheias ao ticket para tornar verde um gate de baseline; registrar evidência e integrar somente conforme política",
+      "regression_test_file": "tests/test_benchmark_router.py tests/test_learning_pack.py",
       "verification_gate_id": null,
       "status": "resolved"
     }
@@ -275,6 +337,39 @@
       "generalized_principle": "Release model memory on test exit",
       "applied_actions": [],
       "created_at": "2026-09-05T10:50:21.975710+00:00"
+    },
+    {
+      "transfer_id": "trans_88d55b48",
+      "source_domain": "core.audio",
+      "target_domains": [
+        "core.benchmarks"
+      ],
+      "specific_lesson": "VRAM leak",
+      "generalized_principle": "Release model memory on test exit",
+      "applied_actions": [],
+      "created_at": "2026-09-06T10:27:00.598948+00:00"
+    },
+    {
+      "transfer_id": "trans_cf71aa9c",
+      "source_domain": "core.audio",
+      "target_domains": [
+        "core.benchmarks"
+      ],
+      "specific_lesson": "VRAM leak",
+      "generalized_principle": "Release model memory on test exit",
+      "applied_actions": [],
+      "created_at": "2026-09-06T10:27:31.823644+00:00"
+    },
+    {
+      "transfer_id": "trans_f5fa8563",
+      "source_domain": "core.audio",
+      "target_domains": [
+        "core.benchmarks"
+      ],
+      "specific_lesson": "VRAM leak",
+      "generalized_principle": "Release model memory on test exit",
+      "applied_actions": [],
+      "created_at": "2026-09-06T10:27:55.267669+00:00"
     }
   ],
   "contrasts": [],
@@ -390,7 +485,31 @@
       "passed": false,
       "output_snippet": "Exit code: 1",
       "executed_at": "2026-09-05T10:50:21.974201+00:00"
+    },
+    {
+      "gate_id": "gate_80402daa",
+      "target_type": "rca_patch",
+      "test_command": "python -c \"import sys; sys.exit(1)\"",
+      "passed": false,
+      "output_snippet": "Exit code: 1",
+      "executed_at": "2026-09-06T10:27:00.596438+00:00"
+    },
+    {
+      "gate_id": "gate_5e54bc5c",
+      "target_type": "rca_patch",
+      "test_command": "python -c \"import sys; sys.exit(1)\"",
+      "passed": false,
+      "output_snippet": "Exit code: 1",
+      "executed_at": "2026-09-06T10:27:31.803576+00:00"
+    },
+    {
+      "gate_id": "gate_7b3e9998",
+      "target_type": "rca_patch",
+      "test_command": "python -c \"import sys; sys.exit(1)\"",
+      "passed": false,
+      "output_snippet": "Exit code: 1",
+      "executed_at": "2026-09-06T10:27:55.260657+00:00"
     }
   ],
-  "last_updated": "2026-09-05T10:50:21.975710+00:00"
+  "last_updated": "2026-09-06T10:32:51.862444+00:00"
 }

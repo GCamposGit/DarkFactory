@@ -1,67 +1,49 @@
 ---
 name: autonomous-piv-loop
-description: Executa o ciclo contínuo Prime-Plan-Implement-Validate (PIV) de forma autônoma e com isolamento de contexto fresco por tarefa. Cada subtarefa é implementada e validada antes de avançar para a próxima. Use ao implementar tickets, funcionalidades ou correções de bugs.
+description: Executa tickets, funcionalidades e correções pelo ciclo Prime-Plan-Implement-Validate (PIV), com protocolo fail-closed para branches e worktrees concorrentes.
 ---
 
-# Autonomous PIV Loop: O Motor de Execução
+# Autonomous PIV Loop
 
-O ciclo PIV decompõe a implementação em passos atômicos estritos, garantindo que o agente nunca gere um bloco maciço de código sem validação intermediária.
+O ciclo PIV divide a entrega em mudanças pequenas e verificáveis: preparar o contexto,
+planejar, implementar uma unidade, validar imediatamente e só então avançar.
 
-## Princípio Fundamental: Fresh Context Isolation
-- Sessões longas degradam a atenção do modelo e geram alucinações cumulativas.
-- Cada etapa (Planejar, Codificar Tarefa 1, Codificar Tarefa 2, Validar, Auditar) roda com **contexto limpo** ou via subagentes especializados (`invoke_subagent`).
+## Isolamento de contexto e estado
 
-## O Loop em 5 Etapas
+- Contexto fresco não substitui isolamento Git.
+- Uma frente única usa branch dedicada. Cada frente concorrente que escreve recebe
+  branch, worktree, owner e lease exclusivos.
+- O checkout de integração é coordenado por um único owner e não é executor.
+- Nunca use `startingState: working-tree` para propagar uma baseline suja.
 
-```text
-[Prime] Contexto Mínimo Necessário
-   │
-   ▼
-[Plan] Decomposição em Micro-tarefas com comandos de validação
-   │
-   ▼
-[Implement] Tarefa N (Local com qwen-fast/qwen-deep ou Nuvem com Claude 3.7/DeepSeek)
-   │
-   ▼
-[Validate Step] python core/harness/runner.py --quick
-   │ (Se falhar: corrige imediatamente. Não acumula erros)
-   ▼
-[Loop para Tarefa N+1 até concluir todas]
-   │
-   ▼
-[Validate Full] python core/harness/runner.py
-   │
-   ▼
-[Adversarial Review] Nível 1 (gpt-review local) -> Nível 2 (Nuvem Cruzada)
-```
+Ao despachar duas ou mais frentes, receber uma entrega de outra worktree ou integrar
+commits concorrentes, leia e siga integralmente
+[references/worktree-parallelism.md](references/worktree-parallelism.md). O protocolo
+é fail-closed: prova ausente de baseline, ownership, ambiente, heartbeat, conclusão ou
+integração bloqueia a próxima transição.
 
-## Instruções de Execução por Tarefa
+## Loop por tarefa
 
-1. **Crie uma branch ou worktree dedicada**:
-   `git checkout -b feature/<task-slug>`
-2. **Execute tarefa a tarefa**:
-   - Abra apenas os arquivos explicitamente listados no ticket.
-   - Escreva o código seguindo os padrões do `AGENTS.md`.
-   - **Execute o comando de validação rápida imediatamente**:
-     `python core/harness/runner.py --quick`
-   - Se falhar, corrija agora. Proibido avançar com testes rápidos em vermelho.
-3. **Validação Final da Suíte**:
-   - Execute a suíte completa com marcadores determinísticos:
-     `python core/harness/runner.py | python core/harness/markers.py`
-4. **Relatório de Implementação**:
-   Gere um sumário em `.factory/reports/<task-slug>-report.md` documentando os arquivos alterados e os comandos executados.
+1. Leia `AGENTS.md`, `MISSION.md` e `FACTORY_RULES.md`; registre ticket, identidade,
+   escopo e comandos de aceitação.
+2. Faça o preflight da unidade de trabalho e do ambiente antes da primeira escrita.
+3. Implemente somente os caminhos possuídos pela tarefa.
+4. Execute o teste focal e `python core/harness/runner.py --quick`; corrija a causa
+   antes de avançar se algum gate falhar.
+5. Ao concluir, execute os comandos obrigatórios do repositório e produza o contrato
+   de conclusão definido no protocolo.
 
----
+## Relatório
 
-## 🧠 Continuous Self-Improvement & Failure RCA Integration
+Registre em `.factory/reports/<task-slug>-report.md`: ticket, owner, branch, worktree,
+SHA-base e SHA final; arquivos alterados; comandos, contagens e exit codes; heartbeat
+final; e estado residual. Uma resposta textual sem commit seletivo e evidência não é
+handoff verificável.
 
-1. **Gatilho de Auto-Avaliação no 2º Prompt da Sessão**:
-   - Se a implementação for desencadeada por um follow-up ou se estiver no 2º prompt da sessão, execute obrigatoriamente a verificação de intenção via `core/learning/cli.py record-turn`.
-   - Avalie a causa da necessidade de intervenção humana anterior e incorpore as preferências no plano antes de codificar.
-2. **Root Cause Analysis em Toda Quebra de Validação (`--quick` ou `Full`)**:
-   - Nunca faça tentativas aleatórias (*trial and error*) ao encontrar um teste falhando.
-   - Aplique o diagnóstico 5-Whys: Identifique a causa raiz exata (ex.: tipo incompatível, mock desatualizado, path no Windows com barras invertidas).
-   - Registre o RCA no ledger (`python core/learning/cli.py rca`) e aplique o patch de forma que o erro não possa se repetir.
-3. **Execução One-Shot com Cobertura Preventiva**:
-   - A entrega deve ser completa na primeira passada: código tipado, testes unitários para a nova funcionalidade, documentação atualizada e zero dependências soltas.
+## Continuous Self-Improvement e RCA
 
+- Em follow-up corretivo, registre a intenção e o gap no motor de aprendizagem antes
+  de implementar.
+- Toda falha de validação, ferramenta, setup, quota, lease ou handoff recebe RCA antes
+  do retry. Retry não cria silenciosamente uma nova identidade ou outro escritor.
+- Uma regra preventiva só é considerada resolvida depois de um gate determinístico.
