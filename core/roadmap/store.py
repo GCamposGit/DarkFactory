@@ -57,8 +57,10 @@ class RoadmapSnapshotStore:
         return self._telemetry[project_id]
 
     def get_or_compile(self, project_id: str, compiler: RoadmapCompiler) -> RoadmapSnapshot:
+        with self._lock:
+            cached = self._entries.get(project_id)
         start_time = time.perf_counter()
-        candidate = compiler.compile(project_id)
+        candidate = compiler.compile(project_id, previous_snapshot=cached)
         compile_duration = time.perf_counter() - start_time
         compile_latency_ms = round(compile_duration * 1000, 3)
 
