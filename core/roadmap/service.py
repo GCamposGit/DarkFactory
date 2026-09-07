@@ -22,6 +22,7 @@ from core.roadmap.sources import (
     JsonRoadmapSource,
     MarkdownDevelopmentPlanSource,
     RoadmapSource,
+    UserDemandsRoadmapSource,
 )
 from core.roadmap.store import RoadmapSnapshotStore
 
@@ -160,7 +161,12 @@ class RoadmapQueryService:
         return RoadmapCompiler._stats(items)
 
 
-def build_repository_roadmap_service(repository_root: Path) -> RoadmapQueryService:
+def build_repository_roadmap_service(
+    repository_root: Path,
+    *,
+    demands_path: Path | None = None,
+    include_demands: bool = False,
+) -> RoadmapQueryService:
     """Build the default DarkHub service from all versioned roadmap sources."""
 
     repository_root = Path(repository_root)
@@ -172,7 +178,8 @@ def build_repository_roadmap_service(repository_root: Path) -> RoadmapQueryServi
         development_plan_path,
         evidence_dir=evidence_dir,
     )
-    documents = {
+    sources: list[RoadmapSource] = [manifest_source]
+    documents: dict[str, RoadmapSourceDocument] = {
         manifest_source.source_id: RoadmapSourceDocument(
             source_id=manifest_source.source_id,
             label=manifest_source.label,
@@ -183,18 +190,39 @@ def build_repository_roadmap_service(repository_root: Path) -> RoadmapQueryServi
             ),
             content_type="application/json",
         ),
-        development_plan_source.source_id: RoadmapSourceDocument(
-            source_id=development_plan_source.source_id,
-            label=development_plan_source.label,
-            locator="docs/DEVELOPMENT_PLAN_2026-09-05.md",
-            content=(
-                development_plan_path.read_text(encoding="utf-8")
-                if development_plan_path.exists() else ""
-            ),
-            content_type="text/markdown",
-        ),
     }
+
+    if include_demands or demands_path is not None:
+        target_demands_path = demands_path or (repository_root / ".factory" / "demands" / "demands.json")
+        user_demands_source = UserDemandsRoadmapSource(
+            target_demands_path,
+            evidence_dir=evidence_dir,
+        )
+        sources.append(user_demands_source)
+        documents[user_demands_source.source_id] = RoadmapSourceDocument(
+            source_id=user_demands_source.source_id,
+            label=user_demands_source.label,
+            locator=target_demands_path.relative_to(repository_root).as_posix() if target_demands_path.is_relative_to(repository_root) else target_demands_path.as_posix(),
+            content=(
+                target_demands_path.read_text(encoding="utf-8")
+                if target_demands_path.exists() else ""
+            ),
+            content_type="application/json",
+        )
+
+    sources.append(development_plan_source)
+    documents[development_plan_source.source_id] = RoadmapSourceDocument(
+        source_id=development_plan_source.source_id,
+        label=development_plan_source.label,
+        locator="docs/DEVELOPMENT_PLAN_2026-09-05.md",
+        content=(
+            development_plan_path.read_text(encoding="utf-8")
+            if development_plan_path.exists() else ""
+        ),
+        content_type="text/markdown",
+    )
+
     return RoadmapQueryService(
-        compiler=RoadmapCompiler([manifest_source, development_plan_source]),
+        compiler=RoadmapCompiler(sources),
         source_documents=documents,
     )
