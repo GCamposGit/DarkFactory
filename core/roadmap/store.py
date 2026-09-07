@@ -8,7 +8,14 @@ from threading import RLock
 from typing import Any
 
 from core.roadmap.compiler import RoadmapCompiler
-from core.roadmap.models import FreshnessStatus, RoadmapSnapshot
+from core.roadmap.models import (
+    FreshnessStatus,
+    RoadmapChangeType,
+    RoadmapItemChange,
+    RoadmapSnapshot,
+    RoadmapSnapshotComparison,
+    RoadmapSnapshotSummary,
+)
 
 
 class RoadmapUnavailableError(RuntimeError):
@@ -45,8 +52,12 @@ class RoadmapSnapshotStore:
     warmed HTTP path cheap (< 5ms) and deterministic.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, *, history_limit: int = 50) -> None:
+        if history_limit < 2:
+            raise ValueError("history_limit must be at least 2")
         self._entries: dict[str, RoadmapSnapshot] = {}
+        self._history: dict[str, list[RoadmapSnapshot]] = {}
+        self._history_limit = history_limit
         self._telemetry: dict[str, StoreTelemetry] = {}
         self._last_source_fingerprints: dict[str, str] = {}
         self._lock = RLock()
@@ -100,7 +111,74 @@ class RoadmapSnapshotStore:
                     "No previous roadmap snapshot is available while a canonical source is unavailable."
                 )
             self._entries[project_id] = candidate
+            self._record_snapshot(project_id, candidate)
             return candidate
+
+    def get_history(
+        self,
+        project_id: str,
+        *,
+        limit: int | None = None,
+    ) -> list[RoadmapSnapshotSummary]:
+        """Return retained snapshots from oldest to newest.
+
+        The store deliberately keeps this history in memory. Durable history is
+        a later persistence concern and is outside RM-09's local read-only scope.
+        """
+
+        if limit is not None and limit < 1:
+            raise ValueError("history limit must be positive")
+        with self._lock:
+            snapshots = list(self._history.get(project_id, []))
+        if limit is not None:
+            snapshots = snapshots[-limit:]
+        return [self._summary(snapshot) for snapshot in snapshots]
+
+    def compare(
+        self,
+        project_id: str,
+        from_snapshot_id: str,
+        to_snapshot_id: str,
+    ) -> RoadmapSnapshotComparison:
+        """Build a deterministic item-level diff for two retained snapshots."""
+
+        with self._lock:
+            snapshots = list(self._history.get(project_id, []))
+        by_id = {snapshot.snapshot_id: snapshot for snapshot in snapshots}
+        try:
+            from_snapshot = by_id[from_snapshot_id]
+            to_snapshot = by_id[to_snapshot_id]
+        except KeyError as exc:
+            raise KeyError(
+                f"snapshot '{exc.args[0]}' is not retained for project '{project_id}'"
+            ) from exc
+
+        before = {item.id: item for item in from_snapshot.items}
+        after = {item.id: item for item in to_snapshot.items}
+        added_ids = sorted(set(after) - set(before))
+        removed_ids = sorted(set(before) - set(after))
+        changed_items: list[RoadmapItemChange] = []
+        for item_id in sorted(set(before) & set(after)):
+            before_item = before[item_id]
+            after_item = after[item_id]
+            changed_fields = self._changed_fields(before_item, after_item)
+            if changed_fields:
+                changed_items.append(RoadmapItemChange(
+                    item_id=item_id,
+                    change_type=RoadmapChangeType.CHANGED,
+                    changed_fields=changed_fields,
+                    before=before_item,
+                    after=after_item,
+                ))
+
+        return RoadmapSnapshotComparison(
+            project_id=project_id,
+            from_snapshot=self._summary(from_snapshot),
+            to_snapshot=self._summary(to_snapshot),
+            added_item_ids=added_ids,
+            removed_item_ids=removed_ids,
+            changed_items=changed_items,
+        )
 
     def get_telemetry(self, project_id: str | None = None) -> dict[str, Any]:
         with self._lock:
@@ -137,6 +215,40 @@ class RoadmapSnapshotStore:
             else:
                 self._entries.pop(project_id, None)
                 self._last_source_fingerprints.pop(project_id, None)
+
+    def _record_snapshot(self, project_id: str, snapshot: RoadmapSnapshot) -> None:
+        history = self._history.setdefault(project_id, [])
+        if history and history[-1].snapshot_hash == snapshot.snapshot_hash:
+            return
+        history.append(snapshot.model_copy(deep=True))
+        del history[:-self._history_limit]
+
+    @staticmethod
+    def _summary(snapshot: RoadmapSnapshot) -> RoadmapSnapshotSummary:
+        return RoadmapSnapshotSummary(
+            snapshot_id=snapshot.snapshot_id,
+            snapshot_hash=snapshot.snapshot_hash,
+            observed_at=snapshot.observed_at,
+            item_count=len(snapshot.items),
+            relation_count=sum(len(item.dependencies) for item in snapshot.items),
+            issue_count=len(snapshot.issues),
+            source_fingerprint=snapshot.source_fingerprint,
+        )
+
+    @staticmethod
+    def _changed_fields(before: Any, after: Any) -> list[str]:
+        before_data = before.model_dump(
+            mode="json",
+            exclude={"observed_at", "last_verified_at"},
+        )
+        after_data = after.model_dump(
+            mode="json",
+            exclude={"observed_at", "last_verified_at"},
+        )
+        return sorted(
+            key for key in before_data
+            if before_data.get(key) != after_data.get(key)
+        )
 
     @staticmethod
     def _stale_snapshot(cached: RoadmapSnapshot, failed: RoadmapSnapshot) -> RoadmapSnapshot:

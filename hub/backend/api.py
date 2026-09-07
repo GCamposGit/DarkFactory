@@ -58,6 +58,8 @@ from core.roadmap.models import (
     RoadmapItemType,
     RoadmapProjectSummary,
     RoadmapSnapshot,
+    RoadmapSnapshotComparison,
+    RoadmapSnapshotHistory,
     RoadmapSourceDocument,
 )
 from core.roadmap.store import RoadmapUnavailableError
@@ -155,6 +157,45 @@ def get_project_roadmap_health(
     _roadmap_project_or_404(service, project_id)
     try:
         return service.get_roadmap_health(project_id)
+    except RoadmapUnavailableError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
+@roadmap_router.get(
+    "/{project_id}/roadmap/history",
+    response_model=RoadmapSnapshotHistory,
+)
+def get_project_roadmap_history(
+    project_id: str,
+    limit: Optional[int] = Query(default=None, ge=1, le=50),
+    service: HubService = Depends(get_hub_service),
+) -> RoadmapSnapshotHistory:
+    """Return bounded metadata for the selected project's retained snapshots."""
+
+    _roadmap_project_or_404(service, project_id)
+    try:
+        return service.roadmap.get_history(project_id, limit=limit)
+    except RoadmapUnavailableError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
+@roadmap_router.get(
+    "/{project_id}/roadmap/history/compare",
+    response_model=RoadmapSnapshotComparison,
+)
+def compare_project_roadmap_snapshots(
+    project_id: str,
+    from_snapshot: str = Query(..., min_length=1),
+    to_snapshot: str = Query(..., min_length=1),
+    service: HubService = Depends(get_hub_service),
+) -> RoadmapSnapshotComparison:
+    """Compare two retained snapshots without changing roadmap state."""
+
+    _roadmap_project_or_404(service, project_id)
+    try:
+        return service.roadmap.compare_snapshots(project_id, from_snapshot, to_snapshot)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
     except RoadmapUnavailableError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
@@ -876,9 +917,6 @@ def run_tests(
 ) -> DistilledTestReport:
     """Execute test suite via headless test subagent engine and return distilled report."""
     return service.run_tests(instruction)
-
-
-
 
 
 
