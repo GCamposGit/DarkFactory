@@ -236,6 +236,8 @@ class RoadmapHealth(BaseModel):
     sources_consulted: list[RoadmapSourceState] = Field(default_factory=list)
     sources_unavailable: list[str] = Field(default_factory=list)
     policy: str
+    telemetry: dict[str, Any] | None = None
+
 
 
 class RoadmapProjectSummary(BaseModel):
