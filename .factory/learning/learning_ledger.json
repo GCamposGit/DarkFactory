@@ -1,6 +1,6 @@
 {
   "session_id": "session_20260905_072924",
-  "prompt_count": 12,
+  "prompt_count": 15,
   "turns": [
     {
       "turn_id": 1,
@@ -121,6 +121,36 @@
       "one_shot_success": false,
       "missing_context_or_gap": "Executor sandboxed falhou na preparacao do helper; foi necessario usar execucao aprovada fora do sandbox",
       "target_skill": "prime-intelligence"
+    },
+    {
+      "turn_id": 13,
+      "timestamp": "2026-09-07T13:19:56.719922+00:00",
+      "user_prompt_summary": "Pegue o proximo item sem conflito com DF-15",
+      "perceived_intent": "Implementar USR-14 auto-launch de servicos locais no DarkHub",
+      "was_followup": false,
+      "one_shot_success": true,
+      "missing_context_or_gap": null,
+      "target_skill": "04-autonomous-piv-loop"
+    },
+    {
+      "turn_id": 14,
+      "timestamp": "2026-09-07T14:05:55.272781+00:00",
+      "user_prompt_summary": "DF-15: Vertical de bugfix autonomo da fabrica",
+      "perceived_intent": "Avançar DF-15 no caminho critico, reaproveitando tentativa anterior sem conflito",
+      "was_followup": false,
+      "one_shot_success": true,
+      "missing_context_or_gap": null,
+      "target_skill": "04-autonomous-piv-loop"
+    },
+    {
+      "turn_id": 15,
+      "timestamp": "2026-09-07T23:07:07.931448+00:00",
+      "user_prompt_summary": "Publicar tudo no GitHub e garantir PR merged; remoto não pode ficar desatualizado",
+      "perceived_intent": "Obrigar entrega remota verificável após desenvolvimento: commit, push, PR, merge e confirmação do main",
+      "was_followup": true,
+      "one_shot_success": false,
+      "missing_context_or_gap": "O fluxo anterior permitiu concluir com commits e alterações apenas locais, sem PR nem verificação do remoto",
+      "target_skill": "autonomous-piv-loop"
     }
   ],
   "preferences": [
@@ -584,6 +614,36 @@
       "patch_description": "Criacao do guardrail core/harness/terminal_env.py, script scripts/init_terminal.ps1, teste tests/test_bug_em_inicializa_o_do_te.py e inclusao obrigatoria de -NoProfile nas regras e skills",
       "preventative_rule": "Invocacoes de terminal no Windows devem incluir -NoProfile e verificar ancoragem do repositorio via terminal_env antes de executar leituras relativas",
       "regression_test_file": "tests/test_bug_em_inicializa_o_do_te.py",
+      "verification_gate_id": null,
+      "origin": "rca",
+      "status": "proposed",
+      "active": false
+    },
+    {
+      "rca_id": "rca_ac2580b0",
+      "timestamp": "2026-09-07T21:05:27.172321+00:00",
+      "category": "test_regression",
+      "symptom": "DF-18 focal test expected JSON classification but received raw decoder text",
+      "mechanism": "_parse_patch_response propagated json.JSONDecodeError directly",
+      "root_cause": "The real-mode provider boundary lacked an explicit error taxonomy for malformed JSON output",
+      "patch_description": "Translate JSONDecodeError into a stable provider response is not valid JSON ValueError",
+      "preventative_rule": "Provider output parsers must classify malformed protocol payloads before returning errors",
+      "regression_test_file": "tests/test_agent_evals.py",
+      "verification_gate_id": null,
+      "origin": "rca",
+      "status": "proposed",
+      "active": false
+    },
+    {
+      "rca_id": "rca_193b826f",
+      "timestamp": "2026-09-07T21:07:43.427519+00:00",
+      "category": "timeout",
+      "symptom": "Full pytest run exceeded RM-08 warm-cache latency threshold at 219.07 ms",
+      "mechanism": "The dense graph performance assertion is sensitive to process-wide scheduling/contention; the same test passed in 0.14 s when isolated",
+      "root_cause": "Suite-level Windows runtime contention caused an intermittent performance sample outside the DF-18 change surface",
+      "patch_description": "No source patch: rerun isolated and preserve the existing RM-08 threshold and implementation",
+      "preventative_rule": "Classify unrelated performance flakes with an isolated reproduction before changing production code",
+      "regression_test_file": "tests/test_roadmap_scale.py",
       "verification_gate_id": null,
       "origin": "rca",
       "status": "proposed",
@@ -1215,5 +1275,5 @@
       "executed_at": "2026-09-06T10:16:46.631871+00:00"
     }
   ],
-  "last_updated": "2026-09-07T03:46:11.356108+00:00"
+  "last_updated": "2026-09-07T23:07:07.931448+00:00"
 }

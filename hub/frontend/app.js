@@ -489,6 +489,8 @@ function renderServices() {
       const initials = escapeHtml(item.name.substring(0, 2).toUpperCase());
       const safeCategory = escapeHtml(CATEGORIES[item.category]?.label || item.category);
       const safeDescription = escapeHtml(item.description || "Nenhuma descrição fornecida.");
+      const isLaunchable = Boolean(item.launch_script || item.id === "canaletto-gallery");
+      const targetHref = isLaunchable ? `${API_BASE}/services/${safeId}/open` : safeUrl;
       const safeTags = (item.tags || [])
         .slice(0, 3)
         .map(
@@ -515,12 +517,27 @@ function renderServices() {
           <!-- Top Row: Icon, Title, Actions -->
           <div class="flex items-start justify-between gap-3 mb-3">
             <div class="flex items-center gap-3">
-              <div class="w-10 h-10 rounded-xl flex items-center justify-center font-bold text-base shadow-md" style="background: ${safeColor}25; color: ${safeColor}; border: 1px solid ${safeColor}50">
+              <a 
+                href="${targetHref}" 
+                target="_blank" 
+                rel="noopener noreferrer"
+                data-launchable="${isLaunchable}"
+                data-service-id="${safeId}"
+                class="w-10 h-10 rounded-xl flex items-center justify-center font-bold text-base shadow-md cursor-pointer hover:scale-105 transition-transform" 
+                style="background: ${safeColor}25; color: ${safeColor}; border: 1px solid ${safeColor}50">
                 ${initials}
-              </div>
+              </a>
               <div>
                 <div class="flex items-center gap-2">
-                  <h3 class="font-semibold text-slate-100 text-sm group-hover:text-indigo-300 transition-colors">${safeName}</h3>
+                  <a 
+                    href="${targetHref}" 
+                    target="_blank" 
+                    rel="noopener noreferrer"
+                    data-launchable="${isLaunchable}"
+                    data-service-id="${safeId}"
+                    class="hover:underline">
+                    <h3 class="font-semibold text-slate-100 text-sm group-hover:text-indigo-300 transition-colors">${safeName}</h3>
+                  </a>
                   <span class="w-2 h-2 rounded-full ${statusDotClass}" title="${escapeHtml(
         health?.status || "Status pendente"
       )}"></span>
@@ -604,13 +621,13 @@ function renderServices() {
           <!-- Launch Button -->
           <div class="flex items-center gap-2">
             <a 
-              href="${item.launch_script || item.id === "canaletto-gallery" ? `${API_BASE}/services/${safeId}/open` : safeUrl}" 
+              href="${targetHref}" 
               target="_blank" 
               rel="noopener noreferrer"
-              data-launchable="${Boolean(item.launch_script || item.id === "canaletto-gallery")}"
+              data-launchable="${isLaunchable}"
               data-service-id="${safeId}"
               class="flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-xl bg-slate-800/90 hover:bg-indigo-600 hover:text-white text-slate-200 text-xs font-medium border border-slate-700/60 hover:border-indigo-500 transition-all shadow-sm">
-              <span>${item.launch_script || item.id === "canaletto-gallery" ? "Iniciar & Abrir" : "Abrir Ferramenta"}</span>
+              <span>${isLaunchable ? "Iniciar & Abrir" : "Abrir Ferramenta"}</span>
               <svg class="w-3.5 h-3.5" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" fill="none">
                 <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
                 <polyline points="15 3 21 3 21 9"></polyline>

@@ -681,6 +681,26 @@ class HubService:
                     error=str(redirect_err),
                 )
             except Exception as get_exc:
+                if service_id == "canaletto-gallery" and ":8899" in url:
+                    alt_url = url.replace(":8899", ":8900")
+                    try:
+                        req_alt = urllib.request.Request(
+                            alt_url,
+                            headers={"User-Agent": "DarkHub-Ping/1.0"},
+                            method="GET",
+                        )
+                        with opener.open(req_alt, timeout=timeout_sec) as response:
+                            latency = round((time.perf_counter() - start) * 1000, 1)
+                            return HealthCheckResult(
+                                service_id=service_id,
+                                url=alt_url,
+                                status=HealthStatus.ONLINE,
+                                latency_ms=latency,
+                                status_code=response.getcode(),
+                            )
+                    except Exception:
+                        pass
+
                 return HealthCheckResult(
                     service_id=service_id,
                     url=url,
@@ -709,7 +729,7 @@ class HubService:
         if current_health.status == HealthStatus.ONLINE:
             return ServiceLaunchResponse(
                 service_id=service.id,
-                url=service.url,
+                url=current_health.url or service.url,
                 status="already_running",
                 launched=False,
                 message=f"Service '{service.name}' is already running and accessible.",
@@ -759,17 +779,23 @@ class HubService:
         # Wait for service to come online
         start_wait = time.perf_counter()
         is_online = False
+        resolved_url = service.url
         while (time.perf_counter() - start_wait) < max_wait_sec:
+            poll_val = proc.poll() if hasattr(proc, "poll") and callable(proc.poll) else None
+            if poll_val is not None and isinstance(poll_val, int):
+                logger.error(f"Service '{service_id}' process exited prematurely (exit code: {poll_val})")
+                break
             time.sleep(poll_interval)
             probe = self.ping_url(service_id=service.id, url=service.url, timeout_sec=0.5)
             if probe.status == HealthStatus.ONLINE:
                 is_online = True
+                resolved_url = probe.url or service.url
                 break
 
         if is_online:
             return ServiceLaunchResponse(
                 service_id=service.id,
-                url=service.url,
+                url=resolved_url,
                 status="online",
                 launched=True,
                 message=f"Service '{service.name}' successfully launched (PID: {proc.pid}).",
@@ -777,7 +803,7 @@ class HubService:
         else:
             return ServiceLaunchResponse(
                 service_id=service.id,
-                url=service.url,
+                url=resolved_url,
                 status="starting",
                 launched=True,
                 message=f"Service '{service.name}' process spawned (PID: {proc.pid}), still warming up.",
@@ -792,7 +818,9 @@ class HubService:
             raise KeyError(f"Service '{service_id}' not found in catalog")
 
         if service.launch_script or service_id == "canaletto-gallery":
-            self.launch_service(service_id, max_wait_sec=max_wait_sec)
+            res = self.launch_service(service_id, max_wait_sec=max_wait_sec)
+            if isinstance(res, ServiceLaunchResponse) and res.url:
+                return res.url
 
         return service.url
 
@@ -1441,6 +1469,4 @@ class HubService:
         """Returns catalog of all saved visual assets."""
         studio = VisualStudio()
         return studio.list_assets()
-
-
 

@@ -297,3 +297,48 @@ def test_frontend_app_js_contains_launch_route() -> None:
     assert "/services/${sanitizeId(item.id)}/open" in content or "/services/${safeId}/open" in content
     assert "data-launchable" in content
     assert "canaletto-gallery" in content
+
+
+def test_frontend_app_js_title_and_icon_are_clickable_links() -> None:
+    """Verify that hub/frontend/app.js links both the card title and icon to targetHref."""
+    app_js_path = Path(__file__).resolve().parent.parent / "hub" / "frontend" / "app.js"
+    content = app_js_path.read_text(encoding="utf-8")
+    assert 'href="${targetHref}"' in content
+    assert '<h3 class="font-semibold text-slate-100 text-sm' in content
+    assert 'data-launchable="${isLaunchable}"' in content
+
+
+def test_hub_service_canaletto_fallback_to_port_8900() -> None:
+    """When 8899 is unreachable, ping_url for canaletto-gallery checks port 8900."""
+    import urllib.error
+    service = HubService()
+
+    mock_resp = MagicMock()
+    mock_resp.getcode.return_value = 200
+
+    def fake_open(req, *args, **kwargs):
+        req_url = req.full_url if hasattr(req, "full_url") else str(req)
+        if ":8900" in req_url:
+            return mock_resp
+        raise urllib.error.URLError("Connection refused on 8899")
+
+    with patch("urllib.request.OpenerDirector.open", side_effect=fake_open):
+        result = service.ping_url("canaletto-gallery", "http://127.0.0.1:8899")
+        assert result.status == HealthStatus.ONLINE
+        assert result.url == "http://127.0.0.1:8900"
+
+
+def test_hub_service_get_launch_target_dynamic_port() -> None:
+    """If launch_service resolves an alternate port (8900), get_service_launch_target returns it."""
+    service = HubService()
+    alt_response = ServiceLaunchResponse(
+        service_id="canaletto-gallery",
+        url="http://127.0.0.1:8900",
+        status="online",
+        launched=True,
+        message="Running on alternate port",
+    )
+    with patch.object(service, "launch_service", return_value=alt_response):
+        target_url = service.get_service_launch_target("canaletto-gallery")
+        assert target_url == "http://127.0.0.1:8900"
+
