@@ -10,7 +10,9 @@ import subprocess
 from pathlib import Path
 from typing import List, Dict, Any, Optional, Set
 
-_ROOT_DIR = Path(__file__).resolve().parent.parent.parent
+from core.paths import project_root
+
+_ROOT_DIR = project_root()
 
 # Architectural pattern signatures and their metadata
 PATTERN_SIGNATURES: List[Dict[str, Any]] = [

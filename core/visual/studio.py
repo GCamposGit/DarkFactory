@@ -5,6 +5,8 @@ Orchestrates prompt synthesis, semantic text illustration, procedural and cloud 
 
 import json
 from pathlib import Path
+
+from core.paths import project_root
 from typing import List, Dict, Any, Optional
 
 from core.visual.models import (
@@ -25,7 +27,7 @@ class VisualStudio:
 
     def __init__(self, output_dir: Optional[Path] = None) -> None:
         if output_dir is None:
-            self.output_dir = Path(__file__).resolve().parent.parent.parent / ".factory" / "visuals"
+            self.output_dir = project_root() / ".factory" / "visuals"
         else:
             self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)

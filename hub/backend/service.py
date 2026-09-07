@@ -568,7 +568,17 @@ class HubService:
         compute_frontier_proximity_indices(all_models, metric="coding_score")
         return {
             "date": ledger.date,
-            "models": [m.to_dict() for m in sorted(all_models, key=lambda m: (-m.frontier_proximity_index, -m.coding_score))]
+            "models": [
+                m.to_dict()
+                for m in sorted(
+                    all_models,
+                    key=lambda m: (
+                        -m.frontier_proximity_index,
+                        m.coding_score is None,
+                        -(m.coding_score or 0.0),
+                    ),
+                )
+            ],
         }
 
     def get_top_candidates_for_tier(self, tier: str = "high", k: int = 3) -> List[Dict[str, Any]]:
@@ -1077,6 +1087,5 @@ class HubService:
         """Returns catalog of all saved visual assets."""
         studio = VisualStudio()
         return studio.list_assets()
-
 
 

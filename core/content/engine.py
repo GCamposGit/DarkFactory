@@ -16,6 +16,8 @@ import time
 import urllib.request
 import urllib.error
 from pathlib import Path
+
+from core.paths import project_root
 from typing import Optional, Dict, Any, Tuple
 from datetime import datetime, timezone
 
@@ -41,7 +43,7 @@ class ContentEngine:
 
     def __init__(self, storage_dir: Optional[Path] = None) -> None:
         if storage_dir is None:
-            self.storage_dir = Path(__file__).resolve().parent.parent.parent / ".factory" / "content"
+            self.storage_dir = project_root() / ".factory" / "content"
         else:
             self.storage_dir = Path(storage_dir)
         self.storage_dir.mkdir(parents=True, exist_ok=True)

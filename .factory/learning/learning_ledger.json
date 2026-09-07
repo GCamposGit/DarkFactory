@@ -548,6 +548,111 @@
       "origin": "rca",
       "status": "proposed",
       "active": false
+    },
+    {
+      "rca_id": "rca_e03af518",
+      "timestamp": "2026-09-07T01:22:45.067831+00:00",
+      "category": "assumption_error",
+      "symptom": "Repo Code Scout retornou zero repositorios para a arquitetura de adocao de projetos",
+      "mechanism": "A consulta combinou muitos conceitos abstratos e o extrator reduziu a busca a termos pouco presentes nos metadados dos repositorios",
+      "root_cause": "Taxonomia de descoberta nao comecou pelos nomes concretos de ferramentas maduras do dominio",
+      "patch_description": "Refinar a descoberta para Copier, Cruft e project template update mantendo a pesquisa canonica externa",
+      "preventative_rule": "Para pesquisar padroes de template atualizavel, iniciar por ferramentas concretas e depois generalizar a arquitetura",
+      "regression_test_file": null,
+      "verification_gate_id": null,
+      "origin": "rca",
+      "status": "proposed",
+      "active": false
+    },
+    {
+      "rca_id": "rca_53bd7306",
+      "timestamp": "2026-09-07T01:44:49.399823+00:00",
+      "category": "tool_misuse",
+      "symptom": "RCA registration command was rejected for missing structured fields",
+      "mechanism": "The command used an outdated free-form option shape instead of the current typed CLI contract",
+      "root_cause": "The CLI schema was not re-read after the root-path repair",
+      "patch_description": "Use category, symptom, mechanism, root-cause, patch and rule arguments",
+      "preventative_rule": "Read the active subcommand help before recording an RCA when the CLI contract is uncertain",
+      "regression_test_file": null,
+      "verification_gate_id": null,
+      "origin": "rca",
+      "status": "proposed",
+      "active": false
+    },
+    {
+      "rca_id": "rca_ae8df6e6",
+      "timestamp": "2026-09-07T01:44:49.539897+00:00",
+      "category": "test_regression",
+      "symptom": "Greenfield adoption test was blocked because no deterministic validation command was discovered",
+      "mechanism": "The test added tests but no canonical ecosystem configuration file, so stack discovery correctly stayed fail-closed",
+      "root_cause": "The fixture did not model a valid Python project contract",
+      "patch_description": "Add a minimal pyproject.toml before committing the greenfield fixture",
+      "preventative_rule": "Adoption fixtures must include a canonical stack file or an explicit harness seed before expecting readiness",
+      "regression_test_file": "tests/test_project_adoption.py",
+      "verification_gate_id": null,
+      "origin": "rca",
+      "status": "proposed",
+      "active": false
+    },
+    {
+      "rca_id": "rca_3ff136ce",
+      "timestamp": "2026-09-07T02:56:45.723487+00:00",
+      "category": "test_regression",
+      "symptom": "Daily benchmark cache with a newly discovered model caused model routing and APIs to fail",
+      "mechanism": "Pareto and candidate selection paths performed arithmetic and ordering directly on optional metrics",
+      "root_cause": "The benchmark model correctly preserved unknown as None, but downstream selection still assumed every discovery had complete scores",
+      "patch_description": "Filter incomplete models from score-based selection and sort unknown API records after measured records",
+      "preventative_rule": "Never coerce unknown benchmark metrics to zero; exclude them from numeric selection and keep them visible in diagnostics",
+      "regression_test_file": "tests/test_model_benchmark.py",
+      "verification_gate_id": null,
+      "origin": "rca",
+      "status": "proposed",
+      "active": false
+    },
+    {
+      "rca_id": "rca_2861936a",
+      "timestamp": "2026-09-07T03:01:24.394087+00:00",
+      "category": "governance_violation",
+      "symptom": "The session initially conflated the DarkFac evolution roadmap with the SegundoCerebro product roadmap",
+      "mechanism": "Work was reasoned from the factory checkout without an explicit source-versus-target project boundary",
+      "root_cause": "DarkFac lacked a native adoption manifest and gateway that made product identity, ownership and task base explicit",
+      "patch_description": "Implement the namespaced Project Adoption Gateway and task manifests bound to each consumer repository",
+      "preventative_rule": "Treat DarkFac as shared tooling and every adopted repository as a separate product with its own mission, roadmap, governance and task worktrees",
+      "regression_test_file": "tests/test_project_adoption.py",
+      "verification_gate_id": null,
+      "origin": "rca",
+      "status": "proposed",
+      "active": false
+    },
+    {
+      "rca_id": "rca_9aa4ef88",
+      "timestamp": "2026-09-07T03:09:47.180460+00:00",
+      "category": "assumption_error",
+      "symptom": "SegundoCerebro harness launched from its virtualenv still executed child checks with the base Python",
+      "mechanism": "On Windows CreateProcess can resolve an unqualified python command from the parent executable directory before PATH",
+      "root_cause": "The harness assumed the shell environment would preserve the initiating interpreter for child Python steps",
+      "patch_description": "Resolve unqualified python/python.exe to sys.executable before subprocess execution",
+      "preventative_rule": "A Python harness must bind child Python commands to the interpreter that launched the runner",
+      "regression_test_file": "tests/test_harness_contract.py",
+      "verification_gate_id": null,
+      "origin": "rca",
+      "status": "proposed",
+      "active": false
+    },
+    {
+      "rca_id": "rca_929c17e6",
+      "timestamp": "2026-09-07T03:13:06.584806+00:00",
+      "category": "governance_violation",
+      "symptom": "An adopted optional Claude skills mirror was ignored by the consumer repository but still listed in the managed lock",
+      "mechanism": "The bundle was built without evaluating the target repository ignore policy",
+      "root_cause": "The gateway treated every compatibility mirror as required and assumed created files were versionable",
+      "patch_description": "Filter optional ignored Claude mirrors and block any ignored required managed path before planning writes",
+      "preventative_rule": "A project adoption lock may include only managed files that survive the consumer's version-control policy",
+      "regression_test_file": "tests/test_project_adoption.py",
+      "verification_gate_id": null,
+      "origin": "rca",
+      "status": "proposed",
+      "active": false
     }
   ],
   "transfers": [
@@ -1175,5 +1280,5 @@
       "executed_at": "2026-09-06T10:16:46.631871+00:00"
     }
   ],
-  "last_updated": "2026-09-06T10:25:50.795942+00:00"
+  "last_updated": "2026-09-07T03:13:06.584806+00:00"
 }

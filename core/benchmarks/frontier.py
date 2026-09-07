@@ -101,13 +101,14 @@ DOMAIN_METADATA: Dict[str, BenchmarkDomainMetadata] = {
 }
 
 
-def get_model_metric_score(model: ModelBenchmarkEntry, metric: str) -> float:
-    """Extracts score from attribute or domain_scores dictionary."""
+def get_model_metric_score(model: ModelBenchmarkEntry, metric: str) -> Optional[float]:
+    """Extract a score while preserving unknown as distinct from numeric zero."""
     if hasattr(model, metric):
         val = getattr(model, metric)
         if isinstance(val, (int, float)):
             return float(val)
-    return float(model.get_domain_score(metric))
+    domain_score = model.get_domain_score(metric)
+    return float(domain_score) if domain_score is not None else None
 
 
 def compute_pareto_frontier(
@@ -124,17 +125,18 @@ def compute_pareto_frontier(
     if not models:
         return []
 
-    # Sort primarily by cost ascending, then capability descending
-    sorted_models = sorted(
-        models,
-        key=lambda m: (m.cost_per_task, -get_model_metric_score(m, metric))
-    )
+    scored_models = [
+        (model, get_model_metric_score(model, metric))
+        for model in models
+        if isinstance(model.cost_per_task, (int, float))
+    ]
+    known_models = [(model, score) for model, score in scored_models if score is not None]
+    sorted_models = sorted(known_models, key=lambda item: (item[0].cost_per_task, -item[1]))
 
     frontier: List[ModelBenchmarkEntry] = []
     max_capability_seen = -1.0
 
-    for model in sorted_models:
-        score = get_model_metric_score(model, metric)
+    for model, score in sorted_models:
         # If this model achieves a higher capability than any cheaper model seen so far,
         # it is Pareto-optimal (strictly expands the capability envelope).
         if score > max_capability_seen:
@@ -200,13 +202,21 @@ def compute_frontier_proximity_indices(
     if not models:
         return models
 
-    eval_models = [m for m in models if is_production_interactive_model(m, domain=metric)]
+    def has_known_axes(model: ModelBenchmarkEntry) -> bool:
+        return (
+            isinstance(model.cost_per_task, (int, float))
+            and get_model_metric_score(model, metric) is not None
+        )
+
+    eval_models = [
+        m for m in models if is_production_interactive_model(m, domain=metric) and has_known_axes(m)
+    ]
     if not eval_models:
-        eval_models = [m for m in models if metric in m.domain_scores]
+        eval_models = [m for m in models if metric in m.domain_scores and has_known_axes(m)]
     if not eval_models:
-        eval_models = [m for m in models if m.tier != ModelTier.LOCAL_ZERO_COST]
+        eval_models = [m for m in models if m.tier != ModelTier.LOCAL_ZERO_COST and has_known_axes(m)]
     if not eval_models:
-        eval_models = models
+        eval_models = [m for m in models if has_known_axes(m)]
 
     frontier = compute_pareto_frontier(eval_models, metric=metric)
     if not frontier:
@@ -215,7 +225,7 @@ def compute_frontier_proximity_indices(
     frontier_ids = {m.model_id for m in frontier}
 
     costs = [max(m.cost_per_task, 0.0001) for m in eval_models]
-    scores = [get_model_metric_score(m, metric) for m in eval_models]
+    scores = [score for m in eval_models if (score := get_model_metric_score(m, metric)) is not None]
 
     min_log_c = math.log(min(costs))
     max_log_c = math.log(max(costs))
@@ -229,14 +239,24 @@ def compute_frontier_proximity_indices(
     for f in frontier:
         log_c = math.log(max(f.cost_per_task, 0.0001))
         norm_c = (log_c - min_log_c) / log_c_range
-        norm_s = (get_model_metric_score(f, metric) - min_s) / s_range
-        frontier_pts.append((norm_c, norm_s, f.cost_per_task, get_model_metric_score(f, metric)))
+        frontier_score = get_model_metric_score(f, metric)
+        if frontier_score is None:
+            continue
+        norm_s = (frontier_score - min_s) / s_range
+        frontier_pts.append((norm_c, norm_s, f.cost_per_task, frontier_score))
 
     frontier_pts.sort(key=lambda p: p[0])
 
     for m in models:
         is_on_frontier = m.model_id in frontier_ids
         score_val = get_model_metric_score(m, metric)
+        if score_val is None or not isinstance(m.cost_per_task, (int, float)):
+            m.frontier_proximity_index = 0.0
+            m.epsilon_gap_cost = 0.0
+            m.epsilon_gap_capability = 0.0
+            m.opportunity_score = 0.0
+            m.is_near_pareto = False
+            continue
         cost_val = max(m.cost_per_task, 0.0001)
 
         if is_on_frontier:
@@ -335,9 +355,19 @@ def get_top_candidates_for_tier(
             if (m.tier == ModelTier.LOCAL_ZERO_COST or m.provider == "ollama")
             and (not m.domain_scores or "coding" in m.domain_scores)
             and m.metadata.get("modality", "text") not in {"image", "video"}
+            and isinstance(m.coding_score, (int, float))
+            and isinstance(m.output_speed_tps, (int, float))
+            and isinstance(m.cost_per_task, (int, float))
         ]
         if not local_models:
-            local_models = models[:k]
+            local_models = [
+                m for m in models
+                if isinstance(m.coding_score, (int, float))
+                and isinstance(m.output_speed_tps, (int, float))
+                and isinstance(m.cost_per_task, (int, float))
+            ][:k]
+        if not local_models:
+            return []
 
         sorted_local = sorted(local_models, key=lambda m: (-m.output_speed_tps, -m.coding_score))
         roles = ["fast_drafter", "balanced_challenger", "frontier_arbiter"]
@@ -357,11 +387,19 @@ def get_top_candidates_for_tier(
             ))
         return candidates
 
-    prod = [m for m in models if is_production_interactive_model(m)]
+    complete_models = [
+        m for m in models
+        if isinstance(m.coding_score, (int, float))
+        and isinstance(m.output_speed_tps, (int, float))
+        and isinstance(m.cost_per_task, (int, float))
+    ]
+    prod = [m for m in complete_models if is_production_interactive_model(m)]
     if not prod:
-        prod = [m for m in models if m.tier != ModelTier.LOCAL_ZERO_COST]
+        prod = [m for m in complete_models if m.tier != ModelTier.LOCAL_ZERO_COST]
     if not prod:
-        prod = models
+        prod = complete_models
+    if not prod:
+        return []
 
     compute_frontier_proximity_indices(prod, metric="coding_score")
     candidates: List[SpeculativeCandidate] = []
@@ -424,7 +462,7 @@ def get_top_candidates_for_tier(
         med_pool = [m for m in prod if m.coding_score >= 80.0]
         if not med_pool:
             med_pool = prod
-        arbiter = max(med_pool, key=lambda m: m.efficiency_score_coding)
+        arbiter = max(med_pool, key=lambda m: m.efficiency_score_coding or float("-inf"))
 
         ch_pool = [m for m in med_pool if m.model_id != arbiter.model_id]
         if not ch_pool:
@@ -496,7 +534,10 @@ def build_frontier_summary(
     if coding_frontier:
         cloud_coding = [m for m in coding_frontier if m.cost_per_task > 0]
         if cloud_coding:
-            most_efficient = max(cloud_coding, key=lambda m: m.efficiency_score_coding)
+            most_efficient = max(
+                cloud_coding,
+                key=lambda m: m.efficiency_score_coding or float("-inf"),
+            )
         else:
             most_efficient = coding_frontier[0]
 
@@ -505,8 +546,9 @@ def build_frontier_summary(
         highest_capability = max(coding_frontier, key=lambda m: m.coding_score)
 
     fastest_model = None
-    if models:
-        fastest_model = max(models, key=lambda m: m.output_speed_tps)
+    speed_models = [m for m in models if isinstance(m.output_speed_tps, (int, float))]
+    if speed_models:
+        fastest_model = max(speed_models, key=lambda m: m.output_speed_tps)
 
     return ParetoFrontierSummary(
         date=date,
@@ -543,9 +585,15 @@ def select_best_model_for_task(
                 return best_local, "Local Ollama Fast Worker ($0 cost) selected for offline execution."
 
     # Compute coding frontier on clean production models (no contributor, no free-tier rate limits)
-    prod_models = [m for m in models if is_production_interactive_model(m)]
+    selectable_models = [
+        m for m in models
+        if isinstance(m.coding_score, (int, float))
+        and isinstance(m.cost_per_task, (int, float))
+        and isinstance(m.output_speed_tps, (int, float))
+    ]
+    prod_models = [m for m in selectable_models if is_production_interactive_model(m)]
     if not prod_models:
-        prod_models = [m for m in models if m.tier != ModelTier.LOCAL_ZERO_COST]
+        prod_models = [m for m in selectable_models if m.tier != ModelTier.LOCAL_ZERO_COST]
 
     coding_frontier = compute_pareto_frontier(prod_models, metric="coding_score")
     cloud_frontier = coding_frontier if coding_frontier else prod_models
@@ -578,7 +626,7 @@ def select_best_model_for_task(
         if not candidates:
             candidates = cloud_frontier
 
-        best = max(candidates, key=lambda m: m.efficiency_score_coding)
+        best = max(candidates, key=lambda m: m.efficiency_score_coding or float("-inf"))
         return (
             best,
             f"Balanced-tier Pareto leader: coding score {best.coding_score} with optimal cost/perf ratio "
@@ -637,6 +685,8 @@ def get_domain_top3_candidates(
                 m for m in models
                 if (m.tier == ModelTier.LOCAL_ZERO_COST or m.provider in ["ollama", "local"])
                 and (domain in m.domain_scores or m.metadata.get("modality") == domain.split("_")[0])
+                and m.get_domain_score(domain) is not None
+                and isinstance(m.cost_per_task, (int, float))
             ]
             if local_domain_models:
                 sorted_local = sorted(local_domain_models, key=lambda m: -m.get_domain_score(domain))
@@ -658,13 +708,20 @@ def get_domain_top3_candidates(
                 return candidates
         return get_top_candidates_for_tier(models, tier="local_fast", k=3)
 
-    prod = [m for m in models if is_production_interactive_model(m, domain=domain)]
+    complete_models = [
+        m for m in models
+        if m.get_domain_score(domain) is not None
+        and isinstance(m.cost_per_task, (int, float))
+    ]
+    prod = [m for m in complete_models if is_production_interactive_model(m, domain=domain)]
     if not prod:
-        prod = [m for m in models if domain in m.domain_scores]
+        prod = [m for m in complete_models if domain in m.domain_scores]
     if not prod:
-        prod = [m for m in models if m.tier != ModelTier.LOCAL_ZERO_COST]
+        prod = [m for m in complete_models if m.tier != ModelTier.LOCAL_ZERO_COST]
     if not prod:
-        prod = models
+        prod = complete_models
+    if not prod:
+        return []
 
     # Ensure proximity indices for this domain
     compute_frontier_proximity_indices(prod, metric=domain)
