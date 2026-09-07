@@ -46,6 +46,103 @@ class TaskComplexity(str, Enum):
     CRITICAL = "critical"
 
 
+class RaceExecutionMode(str, Enum):
+    """Evidence level for a speculative race."""
+
+    SYNTHETIC_SIMULATION = "synthetic_simulation"
+    VALIDATOR_ONLY = "validator_only"
+    LIVE = "live"
+class MetricQuality(str, Enum):
+    """Evidence quality attached to an individual benchmark field."""
+
+    OBSERVED = "observed"
+    REPORTED = "reported"
+    ESTIMATED = "estimated"
+    DERIVED = "derived"
+    UNKNOWN = "unknown"
+
+
+class MetricAcquisitionMode(str, Enum):
+    """How a benchmark field entered the ledger."""
+
+    LIVE_API = "live_api"
+    OFFLINE_FIXTURE = "offline_fixture"
+    CACHE = "cache"
+    DERIVED = "derived"
+    HEURISTIC = "heuristic"
+    UNKNOWN = "unknown"
+
+
+FIELD_UNITS: Dict[str, str] = {
+    "context_length": "tokens",
+    "input_cost_per_m": "USD/1M input tokens",
+    "output_cost_per_m": "USD/1M output tokens",
+    "cache_read_cost_per_m": "USD/1M cached input tokens",
+    "cost_per_task": "USD/task",
+    "coding_score": "score (0-100)",
+    "intelligence_score": "score (0-100)",
+    "output_speed_tps": "tokens/second",
+    "latency_ttft_sec": "seconds",
+    "tokens_per_task": "tokens/task",
+    "release_date": "ISO-8601 date",
+    "domain_scores": "score (0-100)",
+}
+
+
+@dataclass
+class FieldProvenance:
+    """Source and evidence metadata for one model field.
+
+    ``quality=unknown`` is deliberately different from a numeric zero.  A
+    heuristic or estimate may be retained for diagnostics, but it is never
+    considered a measured field by :meth:`is_measured`.
+    """
+
+    source: str = "unknown"
+    observed_at: Optional[str] = None
+    unit: str = "unknown"
+    acquisition_mode: MetricAcquisitionMode = MetricAcquisitionMode.UNKNOWN
+    quality: MetricQuality = MetricQuality.UNKNOWN
+    note: Optional[str] = None
+
+    def __post_init__(self) -> None:
+        if isinstance(self.acquisition_mode, str):
+            self.acquisition_mode = MetricAcquisitionMode(self.acquisition_mode)
+        if isinstance(self.quality, str):
+            self.quality = MetricQuality(self.quality)
+
+    @property
+    def is_measured(self) -> bool:
+        """Whether this field is safe to treat as an observed/report value."""
+
+        return self.quality in {MetricQuality.OBSERVED, MetricQuality.REPORTED}
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "source": self.source,
+            "observed_at": self.observed_at,
+            "unit": self.unit,
+            "acquisition_mode": self.acquisition_mode.value,
+            "quality": self.quality.value,
+            "note": self.note,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "FieldProvenance":
+        return cls(
+            source=data.get("source", "unknown"),
+            observed_at=data.get("observed_at"),
+            unit=data.get("unit", "unknown"),
+            acquisition_mode=data.get("acquisition_mode", MetricAcquisitionMode.UNKNOWN.value),
+            quality=data.get("quality", MetricQuality.UNKNOWN.value),
+            note=data.get("note"),
+        )
+
+
+# Public alias used by callers that describe benchmark fields as metrics.
+MetricProvenance = FieldProvenance
+
+
 class BenchmarkDomain(str, Enum):
     CODING = "coding"                           # SWE-bench Verified, HumanEval, repo debugging
     DEEP_RESEARCH = "deep_research"             # GAIA, BrowseBench, live search, multi-hop reasoning
@@ -98,17 +195,17 @@ class ModelBenchmarkEntry:
     model_id: str
     name: str
     provider: str
-    context_length: int
-    input_cost_per_m: float       # USD per 1M prompt tokens
-    output_cost_per_m: float      # USD per 1M completion tokens
-    cost_per_task: float          # USD for standard engineering task (25k prompt + 2.5k completion)
-    coding_score: float           # Artificial Analysis Coding Agent Index / SWE-bench composite (0-100)
-    intelligence_score: float     # Artificial Analysis Intelligence Index v4.2 composite (0-100)
-    output_speed_tps: float       # Output speed in tokens per second
-    latency_ttft_sec: float       # Time to first token (seconds)
-    tokens_per_task: int          # Average tokens generated per benchmark task
-    efficiency_score_coding: float = 0.0    # Coding capability per unit of cost
-    efficiency_score_general: float = 0.0   # General intelligence per unit of cost
+    context_length: Optional[int]
+    input_cost_per_m: Optional[float]       # USD per 1M prompt tokens
+    output_cost_per_m: Optional[float]      # USD per 1M completion tokens
+    cost_per_task: Optional[float]          # USD for standard engineering task (25k prompt + 2.5k completion)
+    coding_score: Optional[float]           # Artificial Analysis Coding Agent Index / SWE-bench composite (0-100)
+    intelligence_score: Optional[float]     # Artificial Analysis Intelligence Index v4.2 composite (0-100)
+    output_speed_tps: Optional[float]       # Output speed in tokens per second
+    latency_ttft_sec: Optional[float]       # Time to first token (seconds)
+    tokens_per_task: Optional[int]          # Average tokens generated per benchmark task
+    efficiency_score_coding: Optional[float] = None    # Coding capability per unit of cost
+    efficiency_score_general: Optional[float] = None   # General intelligence per unit of cost
     is_pareto_coding: bool = False          # True if on coding Pareto frontier
     is_pareto_general: bool = False         # True if on general intelligence Pareto frontier
     frontier_proximity_index: float = 0.0   # 0.0 to 1.0 (1.0 = on frontier)
@@ -124,34 +221,92 @@ class ModelBenchmarkEntry:
     cache_read_cost_per_m: Optional[float] = None
     has_subscription_plan: bool = False     # True if available in user's active paid subscriptions
     subscription_name: Optional[str] = None # e.g. "OpenAI Codex / Plus", "Google Gemini Advanced", "xAI Grok Premium+"
-    marginal_cost_plan: float = 0.0         # Marginal cost per task under active subscription quota ($0.00)
+    marginal_cost_plan: Optional[float] = 0.0         # Marginal cost per task under active subscription quota ($0.00)
     domain_scores: Dict[str, float] = field(default_factory=dict) # Specialized scores across domains (0-100)
     metadata: Dict[str, Any] = field(default_factory=dict)
+    field_provenance: Dict[str, FieldProvenance] = field(default_factory=dict)
 
-    def get_domain_score(self, domain: str) -> float:
+    def __post_init__(self) -> None:
+        """Normalize provenance and make absent fields explicit unknowns."""
+
+        normalized: Dict[str, FieldProvenance] = {}
+        for field_name, value in self.field_provenance.items():
+            normalized[field_name] = (
+                value if isinstance(value, FieldProvenance) else FieldProvenance.from_dict(value)
+            )
+
+        for field_name, unit in FIELD_UNITS.items():
+            if field_name not in normalized:
+                normalized[field_name] = FieldProvenance(unit=unit)
+        self.field_provenance = normalized
+
+    @property
+    def metric_provenance(self) -> Dict[str, FieldProvenance]:
+        """Compatibility alias for consumers that call fields metrics."""
+
+        return self.field_provenance
+
+    def is_measured(self, field_name: str) -> bool:
+        """Return true only for a present field with observed/report quality."""
+
+        value = getattr(self, field_name, None)
+        provenance = self.field_provenance.get(field_name)
+        return value is not None and provenance is not None and provenance.is_measured
+
+    def is_rankable(self) -> bool:
+        """Whether the entry has enough known values for Pareto ranking.
+
+        Derived cost is allowed here when both token prices are known.  It is
+        still excluded from :meth:`is_measured`, so ranking never upgrades a
+        calculation into an observation.
+        """
+
+        usable_qualities = {
+            MetricQuality.OBSERVED,
+            MetricQuality.REPORTED,
+            MetricQuality.DERIVED,
+        }
+        return all(
+            getattr(self, field_name, None) is not None
+            and self.field_provenance.get(field_name) is not None
+            and self.field_provenance[field_name].quality in usable_qualities
+            for field_name in ("cost_per_task", "coding_score", "intelligence_score")
+        )
+
+    def get_domain_score(self, domain: str) -> Optional[float]:
         """Returns benchmark score for a specific domain, with graceful fallback to composite scores."""
         dom = domain.lower()
         if self.domain_scores and dom in self.domain_scores:
             return float(self.domain_scores[dom])
         if dom == "coding":
-            return float(self.coding_score)
+            return float(self.coding_score) if self.coding_score is not None else None
         if dom in ["formal_reasoning", "deep_research"]:
-            return float(self.intelligence_score)
+            return float(self.intelligence_score) if self.intelligence_score is not None else None
         if dom == "legal_contract":
+            if self.intelligence_score is None or self.coding_score is None:
+                return None
             return round((float(self.intelligence_score) * 0.7 + float(self.coding_score) * 0.3), 1)
         if dom == "business_automation":
+            if self.intelligence_score is None or self.coding_score is None:
+                return None
             return round((float(self.coding_score) * 0.6 + float(self.intelligence_score) * 0.4), 1)
         if dom == "multimodal_audio":
-            return round(float(self.intelligence_score) * 0.95, 1)
+            return round(float(self.intelligence_score) * 0.95, 1) if self.intelligence_score is not None else None
         if dom in ["image_gen", "image_generation"]:
-            return float(self.domain_scores.get("image_gen", self.intelligence_score))
+            score = self.domain_scores.get("image_gen", self.intelligence_score)
+            return float(score) if score is not None else None
         if dom in ["video_gen", "video_generation"]:
-            return float(self.domain_scores.get("video_gen", self.intelligence_score))
-        return float(self.coding_score)
+            score = self.domain_scores.get("video_gen", self.intelligence_score)
+            return float(score) if score is not None else None
+        return float(self.coding_score) if self.coding_score is not None else None
 
     def to_dict(self) -> Dict[str, Any]:
         data = asdict(self)
         data["tier"] = self.tier.value
+        data["field_provenance"] = {
+            name: provenance.to_dict()
+            for name, provenance in self.field_provenance.items()
+        }
         return data
 
     @classmethod
@@ -159,6 +314,12 @@ class ModelBenchmarkEntry:
         d = dict(data)
         if "tier" in d and isinstance(d["tier"], str):
             d["tier"] = ModelTier(d["tier"])
+        provenance = d.get("field_provenance", d.get("metric_provenance", {}))
+        d["field_provenance"] = {
+            name: value if isinstance(value, FieldProvenance) else FieldProvenance.from_dict(value)
+            for name, value in provenance.items()
+        }
+        d.pop("metric_provenance", None)
         return cls(**d)
 
 
@@ -180,6 +341,55 @@ class SpeculativeCandidate:
 
 
 @dataclass
+class LiveModelExecution:
+    """Observed output and telemetry returned by one real model invocation."""
+
+    response: str
+    verification_passed: bool
+    cost_usd: Optional[float]
+    duration_ms: float
+    tokens_generated: Optional[int] = None
+    verification_details: Dict[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        if self.cost_usd is not None and self.cost_usd < 0:
+            raise ValueError("cost_usd cannot be negative")
+        if self.duration_ms < 0:
+            raise ValueError("duration_ms cannot be negative")
+        if self.tokens_generated is not None and self.tokens_generated < 0:
+            raise ValueError("tokens_generated cannot be negative")
+
+
+@dataclass
+class SpeculativeAttempt:
+    """Auditable evidence for one candidate considered during a race."""
+
+    model_id: str
+    role: str
+    execution_mode: RaceExecutionMode
+    model_inference_executed: bool
+    verification_passed: bool
+    response: Optional[str] = None
+    cost_usd: Optional[float] = None
+    duration_ms: Optional[float] = None
+    tokens_generated: Optional[int] = None
+    verification_details: Dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> Dict[str, Any]:
+        data = asdict(self)
+        data["execution_mode"] = self.execution_mode.value
+        return data
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "SpeculativeAttempt":
+        payload = dict(data)
+        mode = payload.get("execution_mode", RaceExecutionMode.SYNTHETIC_SIMULATION)
+        if isinstance(mode, str):
+            payload["execution_mode"] = RaceExecutionMode(mode)
+        return cls(**payload)
+
+
+@dataclass
 class SpeculativeRaceResult:
     """Result of an A/B speculative execution race across top candidates."""
     race_id: str
@@ -195,9 +405,33 @@ class SpeculativeRaceResult:
     cost_saved_usd: float
     verification_passed: bool
     verification_details: Dict[str, Any] = field(default_factory=dict)
+    execution_mode: RaceExecutionMode = RaceExecutionMode.SYNTHETIC_SIMULATION
+    attempts: List[SpeculativeAttempt] = field(default_factory=list)
 
     def to_dict(self) -> Dict[str, Any]:
-        return asdict(self)
+        data = asdict(self)
+        data["execution_mode"] = self.execution_mode.value
+        data["attempts"] = [attempt.to_dict() for attempt in self.attempts]
+        return data
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "SpeculativeRaceResult":
+        payload = dict(data)
+        mode = payload.get("execution_mode")
+        if mode is None:
+            mode = payload.get("verification_details", {}).get(
+                "execution_mode",
+                RaceExecutionMode.SYNTHETIC_SIMULATION.value,
+            )
+        if isinstance(mode, str):
+            payload["execution_mode"] = RaceExecutionMode(mode)
+        payload["attempts"] = [
+            attempt
+            if isinstance(attempt, SpeculativeAttempt)
+            else SpeculativeAttempt.from_dict(attempt)
+            for attempt in payload.get("attempts", [])
+        ]
+        return cls(**payload)
 
 
 @dataclass
@@ -208,8 +442,12 @@ class EmpiricalModelStats:
     successful_tasks: int = 0
     pass_rate_at_1: float = 0.0
     total_cost_spent: float = 0.0
+    cost_observations: int = 0
+    unknown_cost_tasks: int = 0
     avg_latency_ms: float = 0.0
+    latency_observations: int = 0
     avg_tokens_generated: float = 0.0
+    token_observations: int = 0
     elo_rating: float = 1200.0
     last_updated: str = ""
 

@@ -14,8 +14,11 @@ from datetime import datetime, timezone
 from typing import List, Dict, Any, Optional, Callable, Tuple
 
 from core.benchmarks.models import (
+    LiveModelExecution,
     ModelBenchmarkEntry,
+    RaceExecutionMode,
     SpeculativeCandidate,
+    SpeculativeAttempt,
     SpeculativeRaceResult,
     EmpiricalModelStats,
     ModelTier,
@@ -28,6 +31,7 @@ logger = logging.getLogger("darkfac.benchmarks.racing")
 
 DEFAULT_EMPIRICAL_LEDGER_PATH = Path(".factory/benchmarks/empirical_ledger.json")
 K_FACTOR_ELO = 32.0
+LiveExecutor = Callable[[str, str], LiveModelExecution]
 
 
 class EmpiricalBenchmarkLedger:
@@ -36,8 +40,21 @@ class EmpiricalBenchmarkLedger:
     def __init__(self, file_path: Path = DEFAULT_EMPIRICAL_LEDGER_PATH):
         self.file_path = file_path
         self.stats: Dict[str, EmpiricalModelStats] = {}
+        self.legacy_stats: Dict[str, EmpiricalModelStats] = {}
         self.history: List[SpeculativeRaceResult] = []
+        self.live_history: List[SpeculativeRaceResult] = []
+        self.simulated_history: List[SpeculativeRaceResult] = []
+        self.validator_history: List[SpeculativeRaceResult] = []
         self._load()
+
+    def _append_history(self, race: SpeculativeRaceResult) -> None:
+        self.history.append(race)
+        if race.execution_mode is RaceExecutionMode.LIVE:
+            self.live_history.append(race)
+        elif race.execution_mode is RaceExecutionMode.VALIDATOR_ONLY:
+            self.validator_history.append(race)
+        else:
+            self.simulated_history.append(race)
 
     def _load(self) -> None:
         if not self.file_path.exists():
@@ -46,11 +63,21 @@ class EmpiricalBenchmarkLedger:
             with open(self.file_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
 
-            for mid, sdata in data.get("models", {}).items():
-                self.stats[mid] = EmpiricalModelStats.from_dict(sdata)
+            for mid, sdata in data.get("legacy_models", {}).items():
+                self.legacy_stats[mid] = EmpiricalModelStats.from_dict(sdata)
+
+            stored_stats = {
+                mid: EmpiricalModelStats.from_dict(sdata)
+                for mid, sdata in data.get("models", {}).items()
+            }
+            if data.get("metrics_scope") == "live_model_inference_only":
+                self.stats.update(stored_stats)
+            else:
+                # Pre-DF-05 ledgers mixed simulations with empirical metrics.
+                self.legacy_stats.update(stored_stats)
 
             for rdata in data.get("recent_races", []):
-                self.history.append(SpeculativeRaceResult(**rdata))
+                self._append_history(SpeculativeRaceResult.from_dict(rdata))
         except Exception as e:
             logger.warning(f"Failed to load empirical ledger from {self.file_path}: {e}")
 
@@ -61,8 +88,23 @@ class EmpiricalBenchmarkLedger:
                 "updated_at": datetime.now(timezone.utc).isoformat(),
                 "total_models_tracked": len(self.stats),
                 "total_races_recorded": len(self.history),
+                "metrics_scope": "live_model_inference_only",
                 "models": {mid: s.to_dict() for mid, s in self.stats.items()},
+                "legacy_models": {
+                    mid: stat.to_dict() for mid, stat in self.legacy_stats.items()
+                },
                 "recent_races": [r.to_dict() for r in self.history[-50:]],
+                "recent_races_by_mode": {
+                    RaceExecutionMode.LIVE.value: [
+                        race.to_dict() for race in self.live_history[-50:]
+                    ],
+                    RaceExecutionMode.VALIDATOR_ONLY.value: [
+                        race.to_dict() for race in self.validator_history[-50:]
+                    ],
+                    RaceExecutionMode.SYNTHETIC_SIMULATION.value: [
+                        race.to_dict() for race in self.simulated_history[-50:]
+                    ],
+                },
             }
             with open(self.file_path, "w", encoding="utf-8") as f:
                 json.dump(payload, f, indent=2)
@@ -95,22 +137,63 @@ class EmpiricalBenchmarkLedger:
             loser_stat.elo_rating += round(K_FACTOR_ELO * (0.0 - eb), 2)
 
     def record_race(self, race: SpeculativeRaceResult) -> None:
-        """Records a speculative race and updates cumulative stats."""
-        self.history.append(race)
+        """Records every race, while restricting empirical metrics to live attempts."""
+        self._append_history(race)
 
-        # Update winner stats
-        winner_stat = self.get_or_create_stats(race.winner_model_id)
-        winner_stat.total_tasks_run += 1
-        if race.verification_passed:
-            winner_stat.successful_tasks += 1
-        winner_stat.pass_rate_at_1 = round(winner_stat.successful_tasks / max(winner_stat.total_tasks_run, 1), 4)
-        winner_stat.total_cost_spent = round(winner_stat.total_cost_spent + race.total_cost_usd, 6)
-        winner_stat.last_updated = datetime.now(timezone.utc).isoformat()
+        if race.execution_mode is not RaceExecutionMode.LIVE:
+            self.save()
+            return
 
-        # Update Elo: winner defeated all other candidates that failed or escalated
-        other_candidates = [cid for cid in race.candidates if cid != race.winner_model_id]
-        if race.verification_passed and other_candidates:
-            self.update_elo(race.winner_model_id, other_candidates)
+        live_attempts = [
+            attempt for attempt in race.attempts if attempt.model_inference_executed
+        ]
+        for attempt in live_attempts:
+            stat = self.get_or_create_stats(attempt.model_id)
+            stat.total_tasks_run += 1
+            if attempt.verification_passed:
+                stat.successful_tasks += 1
+            stat.pass_rate_at_1 = round(
+                stat.successful_tasks / stat.total_tasks_run,
+                4,
+            )
+            if attempt.cost_usd is None:
+                stat.unknown_cost_tasks += 1
+            else:
+                stat.total_cost_spent = round(
+                    stat.total_cost_spent + attempt.cost_usd,
+                    6,
+                )
+                stat.cost_observations += 1
+            if attempt.duration_ms is not None:
+                total_latency = (
+                    stat.avg_latency_ms * stat.latency_observations
+                    + attempt.duration_ms
+                )
+                stat.latency_observations += 1
+                stat.avg_latency_ms = round(
+                    total_latency / stat.latency_observations,
+                    2,
+                )
+            if attempt.tokens_generated is not None:
+                total_tokens = (
+                    stat.avg_tokens_generated * stat.token_observations
+                    + attempt.tokens_generated
+                )
+                stat.token_observations += 1
+                stat.avg_tokens_generated = round(
+                    total_tokens / stat.token_observations,
+                    2,
+                )
+            stat.last_updated = datetime.now(timezone.utc).isoformat()
+
+        executed_losers = [
+            attempt.model_id
+            for attempt in live_attempts
+            if not attempt.verification_passed
+            and attempt.model_id != race.winner_model_id
+        ]
+        if race.verification_passed and executed_losers:
+            self.update_elo(race.winner_model_id, executed_losers)
 
         self.save()
 
@@ -142,6 +225,7 @@ class SpeculativeRacingEngine:
         validator_func: Optional[Callable[[str], Tuple[bool, Dict[str, Any]]]] = None,
         simulate_drafter_success_rate: float = 0.75,
         offline: bool = False,
+        live_executor: Optional[LiveExecutor] = None,
     ) -> SpeculativeRaceResult:
         """
         Executes an A/B speculative cascade race across the top-3 candidate models.
@@ -153,6 +237,11 @@ class SpeculativeRacingEngine:
         4. If drafter fails: Escalates to the balanced challenger or frontier arbiter.
         5. Verification and economics recorded to empirical ledger.
         """
+        if validator_func is not None and live_executor is not None:
+            raise ValueError("validator_func and live_executor are mutually exclusive")
+        if not 0.0 <= simulate_drafter_success_rate <= 1.0:
+            raise ValueError("simulate_drafter_success_rate must be between 0.0 and 1.0")
+
         candidates = self.get_top_candidates(complexity=complexity, offline=offline, k=3)
         if not candidates:
             raise ValueError(f"No candidate models found for complexity '{complexity}'")
@@ -165,11 +254,84 @@ class SpeculativeRacingEngine:
         escalation_occurred = False
         winner = drafter
         verification_passed = True
-        verification_details: Dict[str, Any] = {"phase": "drafter_check"}
+        attempts: List[SpeculativeAttempt] = []
+        if live_executor is not None:
+            execution_mode = RaceExecutionMode.LIVE
+        elif validator_func is not None:
+            execution_mode = RaceExecutionMode.VALIDATOR_ONLY
+        else:
+            execution_mode = RaceExecutionMode.SYNTHETIC_SIMULATION
+        verification_details: Dict[str, Any] = {
+            "phase": "drafter_check",
+            "execution_mode": execution_mode.value,
+            "model_inference_executed": execution_mode is RaceExecutionMode.LIVE,
+        }
 
-        if validator_func:
+        if live_executor is not None:
+            def run_live(candidate: SpeculativeCandidate) -> SpeculativeAttempt:
+                attempt_started = time.perf_counter()
+                try:
+                    execution = live_executor(candidate.model_id, task_prompt)
+                    return SpeculativeAttempt(
+                        model_id=candidate.model_id,
+                        role=candidate.role,
+                        execution_mode=RaceExecutionMode.LIVE,
+                        model_inference_executed=True,
+                        verification_passed=execution.verification_passed,
+                        response=execution.response,
+                        cost_usd=execution.cost_usd,
+                        duration_ms=execution.duration_ms,
+                        tokens_generated=execution.tokens_generated,
+                        verification_details=execution.verification_details,
+                    )
+                except Exception as exc:
+                    logger.warning(
+                        "Live executor failed for model %s: %s",
+                        candidate.model_id,
+                        type(exc).__name__,
+                    )
+                    return SpeculativeAttempt(
+                        model_id=candidate.model_id,
+                        role=candidate.role,
+                        execution_mode=RaceExecutionMode.LIVE,
+                        model_inference_executed=True,
+                        verification_passed=False,
+                        duration_ms=round(
+                            (time.perf_counter() - attempt_started) * 1000.0,
+                            2,
+                        ),
+                        verification_details={
+                            "execution_error": type(exc).__name__,
+                        },
+                    )
+
+            drafter_attempt = run_live(drafter)
+            attempts.append(drafter_attempt)
+            verification_passed = drafter_attempt.verification_passed
+            verification_details.update(drafter_attempt.verification_details)
+            if not drafter_attempt.verification_passed:
+                escalation_occurred = True
+                winner = arbiter
+                arbiter_attempt = run_live(arbiter)
+                attempts.append(arbiter_attempt)
+                verification_passed = arbiter_attempt.verification_passed
+                verification_details["escalated_to"] = arbiter.model_id
+                verification_details["arbiter_result"] = (
+                    arbiter_attempt.verification_details
+                )
+        elif validator_func:
             # Execute actual deterministic validator on provided prompt/logic
             passed, details = validator_func(drafter.model_id)
+            attempts.append(
+                SpeculativeAttempt(
+                    model_id=drafter.model_id,
+                    role=drafter.role,
+                    execution_mode=RaceExecutionMode.VALIDATOR_ONLY,
+                    model_inference_executed=False,
+                    verification_passed=passed,
+                    verification_details=details,
+                )
+            )
             verification_details.update(details)
             if passed:
                 winner = drafter
@@ -179,6 +341,16 @@ class SpeculativeRacingEngine:
                 escalation_occurred = True
                 winner = arbiter
                 passed_arb, details_arb = validator_func(arbiter.model_id)
+                attempts.append(
+                    SpeculativeAttempt(
+                        model_id=arbiter.model_id,
+                        role=arbiter.role,
+                        execution_mode=RaceExecutionMode.VALIDATOR_ONLY,
+                        model_inference_executed=False,
+                        verification_passed=passed_arb,
+                        verification_details=details_arb,
+                    )
+                )
                 verification_passed = passed_arb
                 verification_details["escalated_to"] = arbiter.model_id
                 verification_details["arbiter_result"] = details_arb
@@ -189,22 +361,71 @@ class SpeculativeRacingEngine:
                 winner = drafter
                 verification_passed = True
                 verification_details["status"] = "drafter_verified_one_shot"
+                attempts.append(
+                    SpeculativeAttempt(
+                        model_id=drafter.model_id,
+                        role=drafter.role,
+                        execution_mode=RaceExecutionMode.SYNTHETIC_SIMULATION,
+                        model_inference_executed=False,
+                        verification_passed=True,
+                        verification_details={
+                            "simulated_success_rate": simulate_drafter_success_rate,
+                        },
+                    )
+                )
             else:
                 escalation_occurred = True
                 winner = arbiter
                 verification_passed = True
                 verification_details["status"] = "escalated_to_arbiter_verified"
+                attempts.extend(
+                    [
+                        SpeculativeAttempt(
+                            model_id=drafter.model_id,
+                            role=drafter.role,
+                            execution_mode=RaceExecutionMode.SYNTHETIC_SIMULATION,
+                            model_inference_executed=False,
+                            verification_passed=False,
+                            verification_details={
+                                "simulated_success_rate": simulate_drafter_success_rate,
+                            },
+                        ),
+                        SpeculativeAttempt(
+                            model_id=arbiter.model_id,
+                            role=arbiter.role,
+                            execution_mode=RaceExecutionMode.SYNTHETIC_SIMULATION,
+                            model_inference_executed=False,
+                            verification_passed=True,
+                        ),
+                    ]
+                )
 
         elapsed_ms = round((time.perf_counter() - start_time) * 1000.0, 2)
 
-        # Cost calculation
-        total_cost = drafter.cost_per_task
-        if escalation_occurred:
-            total_cost += arbiter.cost_per_task
+        if execution_mode is RaceExecutionMode.LIVE:
+            total_cost = sum(
+                attempt.cost_usd
+                for attempt in attempts
+                if attempt.cost_usd is not None
+            )
+            verification_details["cost_basis"] = "reported_live"
+            verification_details["cost_complete"] = all(
+                attempt.cost_usd is not None for attempt in attempts
+            )
+        else:
+            total_cost = drafter.cost_per_task
+            if escalation_occurred:
+                total_cost += arbiter.cost_per_task
+            verification_details["cost_basis"] = "benchmark_estimate"
 
-        # Savings relative to always blindly dispatching the expensive frontier arbiter
-        cost_if_always_arbiter = arbiter.cost_per_task
-        cost_saved = round(max(0.0, cost_if_always_arbiter - total_cost), 6)
+        if execution_mode is RaceExecutionMode.LIVE:
+            # A comparable live arbiter baseline is not available in a cascade.
+            cost_saved = 0.0
+            verification_details["cost_saved_basis"] = "live_baseline_unavailable"
+        else:
+            cost_if_always_arbiter = arbiter.cost_per_task
+            cost_saved = round(max(0.0, cost_if_always_arbiter - total_cost), 6)
+            verification_details["cost_saved_basis"] = "benchmark_estimate"
 
         race_result = SpeculativeRaceResult(
             race_id=f"race_{uuid.uuid4().hex[:8]}",
@@ -220,6 +441,8 @@ class SpeculativeRacingEngine:
             cost_saved_usd=cost_saved,
             verification_passed=verification_passed,
             verification_details=verification_details,
+            execution_mode=execution_mode,
+            attempts=attempts,
         )
 
         self.ledger.record_race(race_result)
@@ -232,8 +455,9 @@ class SpeculativeRacingEngine:
         offline: bool = False,
     ) -> Dict[str, Any]:
         """
-        Runs an empirical tournament across the top-3 models on real Dark Factory tasks.
-        Updates empirical Elo ratings and Pass@1 statistics.
+        Runs deterministic validator-only tournament fixtures.
+
+        Results remain auditable, but do not update live Elo or Pass@1 metrics.
         """
         if not sample_tasks:
             # Standard Dark Factory micro-task fixtures for deterministic verification
@@ -269,6 +493,7 @@ class SpeculativeRacingEngine:
         return {
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "complexity": complexity,
+            "execution_mode": RaceExecutionMode.VALIDATOR_ONLY.value,
             "tasks_evaluated": len(sample_tasks),
             "races": [r.to_dict() for r in results],
             "leaderboard": {

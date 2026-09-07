@@ -29,6 +29,31 @@ class MistakeCategory(str, Enum):
     TIMEOUT = "timeout"
 
 
+class PolicyStatus(str, Enum):
+    """Lifecycle for rules that may be injected into execution context."""
+
+    PROPOSED = "proposed"
+    EVALUATED = "evaluated"
+    ACTIVE = "active"
+    RETIRED = "retired"
+
+
+class PolicyOrigin(str, Enum):
+    """Provenance that distinguishes observations from user-authored policy."""
+
+    OBSERVATION = "observation"
+    EXPLICIT_PREFERENCE = "explicit_preference"
+    INFERRED_PREFERENCE = "inferred_preference"
+    RCA = "rca"
+    ANALOGY = "analogy"
+
+
+class MetricProvenance(str, Enum):
+    SYNTHETIC = "synthetic"
+    OBSERVED = "observed"
+    LIVE = "live"
+
+
 @dataclass
 class InteractionTurn:
     """Represents a single prompt-response turn in an agent-user session."""
@@ -60,23 +85,48 @@ class InteractionTurn:
 
 @dataclass
 class UserPreference:
-    """Represents an inferred or explicitly stated user preference/convention."""
+    """Explicit preferences are evidence; inferred preferences are candidates."""
+
     preference_id: str
     category: PreferenceCategory
     rule: str
     context_or_example: str
-    confidence: float  # 0.0 to 1.0
+    confidence: float
     created_at: str
     times_reinforced: int = 1
-    active: bool = True
+    origin: PolicyOrigin = PolicyOrigin.EXPLICIT_PREFERENCE
+    status: PolicyStatus = PolicyStatus.ACTIVE
+    verification_gate_id: Optional[str] = None
+    active: Optional[bool] = None
+
+    def __post_init__(self) -> None:
+        self.origin = PolicyOrigin(self.origin)
+        self.status = PolicyStatus(self.status)
+        if self.active is None:
+            self.active = self.status is PolicyStatus.ACTIVE
+        elif self.active is False and self.status is PolicyStatus.ACTIVE:
+            self.status = PolicyStatus.RETIRED
+        else:
+            self.active = self.status is PolicyStatus.ACTIVE
+
+    def set_status(self, status: PolicyStatus) -> None:
+        self.status = PolicyStatus(status)
+        self.active = self.status is PolicyStatus.ACTIVE
 
     def to_dict(self) -> Dict[str, Any]:
         data = asdict(self)
         data["category"] = self.category.value
+        data["origin"] = self.origin.value
+        data["status"] = self.status.value
         return data
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "UserPreference":
+        raw_status = data.get("status")
+        if raw_status is None:
+            status = PolicyStatus.ACTIVE if data.get("active", True) else PolicyStatus.RETIRED
+        else:
+            status = PolicyStatus(raw_status)
         return cls(
             preference_id=data["preference_id"],
             category=PreferenceCategory(data["category"]),
@@ -85,7 +135,9 @@ class UserPreference:
             confidence=float(data.get("confidence", 1.0)),
             created_at=data["created_at"],
             times_reinforced=int(data.get("times_reinforced", 1)),
-            active=data.get("active", True),
+            origin=PolicyOrigin(data.get("origin", PolicyOrigin.EXPLICIT_PREFERENCE.value)),
+            status=status,
+            verification_gate_id=data.get("verification_gate_id"),
         )
 
 
@@ -163,11 +215,29 @@ class MistakeRCA:
     preventative_rule: str
     regression_test_file: Optional[str] = None
     verification_gate_id: Optional[str] = None
-    status: str = "resolved"
+    origin: PolicyOrigin = PolicyOrigin.RCA
+    status: PolicyStatus = PolicyStatus.PROPOSED
+    active: Optional[bool] = None
+
+    def __post_init__(self) -> None:
+        self.origin = PolicyOrigin(self.origin)
+        legacy_statuses = {
+            "resolved": PolicyStatus.ACTIVE,
+            "verification_failed": PolicyStatus.EVALUATED,
+        }
+        raw_status = self.status.value if isinstance(self.status, PolicyStatus) else str(self.status)
+        self.status = legacy_statuses[raw_status] if raw_status in legacy_statuses else PolicyStatus(raw_status)
+        self.active = self.status is PolicyStatus.ACTIVE
+
+    def set_status(self, status: PolicyStatus) -> None:
+        self.status = PolicyStatus(status)
+        self.active = self.status is PolicyStatus.ACTIVE
 
     def to_dict(self) -> Dict[str, Any]:
         data = asdict(self)
         data["category"] = self.category.value
+        data["origin"] = self.origin.value
+        data["status"] = self.status.value
         return data
 
     @classmethod
@@ -183,7 +253,9 @@ class MistakeRCA:
             preventative_rule=data["preventative_rule"],
             regression_test_file=data.get("regression_test_file"),
             verification_gate_id=data.get("verification_gate_id"),
-            status=data.get("status", "resolved"),
+            origin=PolicyOrigin(data.get("origin", PolicyOrigin.RCA.value)),
+            status=data.get("status", PolicyStatus.PROPOSED.value),
+            active=data.get("active"),
         )
 
 

@@ -11,18 +11,24 @@ from core.learning.models import PreferenceCategory
 
 
 def test_benchmark_full_suite():
-    """Verify that all empirical scenarios in the benchmark pass with 100% score."""
+    """Verify all synthetic scenarios pass and are labelled as synthetic evidence."""
     bench = SelfLearningBenchmark(verbose=False)
     summary = bench.run_all()
     assert summary["all_passed"] is True
     assert summary["passed_count"] == 4
     assert summary["total_count"] == 4
     assert summary["overall_score_pct"] == 100.0
+    assert summary["metric_provenance"] == "synthetic"
+    assert summary["synthetic"] is True
+    assert all(item["metric_provenance"] == "synthetic" for item in summary["scenarios"])
 
 
-def test_code_judge_verification_failure_blocks_promotion():
+def test_code_judge_verification_failure_blocks_promotion(tmp_path):
     """Verify that Code Judge blocks patch promotion if the verification test fails."""
-    tracker = ContinuousLearningTracker(session_id="test_judge_session")
+    tracker = ContinuousLearningTracker(
+        ledger_file=tmp_path / "judge_ledger.json",
+        session_id="test_judge_session",
+    )
     # Command that intentionally exits with non-zero exit code
     failing_cmd = "python -c \"import sys; sys.exit(1)\""
     gate = tracker.verify_patch_with_code_judge(
@@ -33,9 +39,12 @@ def test_code_judge_verification_failure_blocks_promotion():
     assert len(tracker.ledger.verifications) >= 1
 
 
-def test_system1_context_filtering_by_domain():
+def test_system1_context_filtering_by_domain(tmp_path):
     """Verify System 1 context can filter and prioritize rules by domain."""
-    tracker = ContinuousLearningTracker(session_id="test_domain_session")
+    tracker = ContinuousLearningTracker(
+        ledger_file=tmp_path / "domain_ledger.json",
+        session_id="test_domain_session",
+    )
     tracker.extrapolate_analogy(
         source_domain="core.audio",
         target_domains=["core.benchmarks"],

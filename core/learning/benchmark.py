@@ -13,7 +13,7 @@ from tempfile import TemporaryDirectory
 from typing import Dict, Any, List
 
 from core.learning.tracker import ContinuousLearningTracker
-from core.learning.models import PreferenceCategory, MistakeCategory
+from core.learning.models import MetricProvenance, PolicyStatus, PreferenceCategory, MistakeCategory
 
 
 class SelfLearningBenchmark:
@@ -55,7 +55,7 @@ class SelfLearningBenchmark:
             )
 
             # Step 3: Verify Code Judge passed
-            assert rca.status == "resolved", "RCA should be resolved"
+            assert rca.status is PolicyStatus.ACTIVE, "RCA should be active"
             assert rca.verification_gate_id is not None, "Verification gate should exist"
 
             # Step 4: Subsequent simulation under identical conditions
@@ -98,7 +98,7 @@ class SelfLearningBenchmark:
             assert tracker.is_checkpoint_turn(prompt_count=2, was_followup=True) is True
 
             # System 2 records trajectory contrast and extracts preference
-            tracker.record_trajectory_contrast(
+            contrast = tracker.record_trajectory_contrast(
                 initial_output_summary="Detailed 10-paragraph verbose text report",
                 user_correction="Please make it a compact bulleted markdown table with actionable points only",
                 corrected_output_summary="Compact 5-row markdown table with metrics",
@@ -106,6 +106,12 @@ class SelfLearningBenchmark:
                 inferred_preference_rule="Always format analytical summaries as compact markdown tables rather than verbose prose",
                 preference_category=PreferenceCategory.COMMUNICATION,
             )
+
+            gate = tracker.verify_patch_with_code_judge(
+                target_type="preference_rule",
+                test_command='python -c "raise SystemExit(0)"',
+            )
+            tracker.evaluate_preference(contrast.inferred_preference_id or "", gate.gate_id)
 
             # Turn 3: Analogous task in same session
             # System 1 primes context
@@ -261,6 +267,8 @@ class SelfLearningBenchmark:
             self.run_scenario_cross_domain_transfer(),
             self.run_scenario_policy_debt_pruning(),
         ]
+        for result in results:
+            result["metric_provenance"] = MetricProvenance.SYNTHETIC.value
 
         total = len(results)
         passed = sum(1 for r in results if r["passed"])
@@ -279,6 +287,8 @@ class SelfLearningBenchmark:
             "passed_count": passed,
             "total_count": total,
             "overall_score_pct": overall_score,
+            "metric_provenance": MetricProvenance.SYNTHETIC.value,
+            "synthetic": True,
             "scenarios": results,
         }
 

@@ -187,8 +187,9 @@ class CodebaseAnalyzer:
         Inspects given files (or detected modified files) against architectural signatures.
         Returns matching pattern definitions with code anchors.
         """
-        target_files = file_paths or self.get_modified_files()
-        diff_text = self.get_recent_git_diff()
+        explicit_file_scope = file_paths is not None
+        target_files = file_paths if explicit_file_scope else self.get_modified_files()
+        diff_text = "" if explicit_file_scope else self.get_recent_git_diff()
 
         detected: List[Dict[str, Any]] = []
         matched_ids: Set[str] = set()

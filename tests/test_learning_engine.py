@@ -13,6 +13,8 @@ from tempfile import TemporaryDirectory
 from core.learning.models import (
     PreferenceCategory,
     MistakeCategory,
+    PolicyOrigin,
+    PolicyStatus,
     InteractionTurn,
     UserPreference,
     MistakeRCA,
@@ -89,6 +91,8 @@ def test_register_and_reinforce_preference(temp_tracker):
         confidence=0.9,
     )
     assert pref1.times_reinforced == 1
+    assert pref1.origin is PolicyOrigin.EXPLICIT_PREFERENCE
+    assert pref1.status is PolicyStatus.ACTIVE
     assert len(temp_tracker.ledger.preferences) == 1
 
     # Reinforce identical rule
@@ -104,8 +108,8 @@ def test_register_and_reinforce_preference(temp_tracker):
     assert len(temp_tracker.ledger.preferences) == 1
 
 
-def test_record_mistake_rca(temp_tracker):
-    """Verify 5-Whys Root Cause Analysis recording and preventative rule formation."""
+def test_record_mistake_rca_without_evidence_remains_candidate(temp_tracker):
+    """An RCA without executable evidence must not become an active rule."""
     rca = temp_tracker.record_mistake_rca(
         category=MistakeCategory.TOOL_MISUSE,
         symptom="write_to_file rejected workspace path when ArtifactMetadata was provided",
@@ -115,7 +119,9 @@ def test_record_mistake_rca(temp_tracker):
         preventative_rule="Never include ArtifactMetadata for target files outside artifact dir",
         regression_test_file="tests/test_learning_engine.py",
     )
-    assert rca.status == "resolved"
+    assert rca.status is PolicyStatus.PROPOSED
+    assert rca.active is False
+    assert rca.preventative_rule not in temp_tracker.get_active_system1_context()
     assert len(temp_tracker.ledger.mistakes) == 1
 
     # Check persistence
@@ -123,6 +129,61 @@ def test_record_mistake_rca(temp_tracker):
         data = json.load(f)
     assert data["mistakes"][0]["rca_id"] == rca.rca_id
     assert data["mistakes"][0]["category"] == "tool_misuse"
+    assert data["mistakes"][0]["status"] == "proposed"
+
+
+def test_rca_verification_controls_activation(temp_tracker):
+    failing = temp_tracker.record_mistake_rca(
+        category=MistakeCategory.TEST_REGRESSION,
+        symptom="Regression repeated",
+        mechanism="The guard was missing",
+        root_cause="The proposed policy had not been evaluated",
+        patch_description="Add a deterministic guard",
+        preventative_rule="Never activate rejected policies",
+        test_verification_cmd='python -c "raise SystemExit(1)"',
+    )
+    assert failing.status is PolicyStatus.EVALUATED
+    assert failing.active is False
+    assert failing.preventative_rule not in temp_tracker.get_active_system1_context()
+
+    passing = temp_tracker.record_mistake_rca(
+        category=MistakeCategory.TEST_REGRESSION,
+        symptom="A separately verified regression",
+        mechanism="The guard was absent",
+        root_cause="No executable evidence existed",
+        patch_description="Add and execute the regression check",
+        preventative_rule="Activate only policies supported by passing evidence",
+        test_verification_cmd='python -c "raise SystemExit(0)"',
+    )
+    assert passing.status is PolicyStatus.ACTIVE
+    assert passing.active is True
+    assert passing.preventative_rule in temp_tracker.get_active_system1_context()
+
+
+def test_inferred_preference_requires_evaluation_before_activation(temp_tracker):
+    contrast = temp_tracker.record_trajectory_contrast(
+        initial_output_summary="Verbose prose",
+        user_correction="Use a compact table",
+        corrected_output_summary="Compact table",
+        key_delta="prose to table",
+        inferred_preference_rule="Prefer compact tables",
+    )
+    pref = next(
+        item
+        for item in temp_tracker.ledger.preferences
+        if item.preference_id == contrast.inferred_preference_id
+    )
+    assert pref.origin is PolicyOrigin.INFERRED_PREFERENCE
+    assert pref.status is PolicyStatus.PROPOSED
+    assert pref.rule not in temp_tracker.get_active_system1_context()
+
+    gate = temp_tracker.verify_patch_with_code_judge(
+        target_type="preference_rule",
+        test_command='python -c "raise SystemExit(0)"',
+    )
+    evaluated = temp_tracker.evaluate_preference(pref.preference_id, gate.gate_id)
+    assert evaluated.status is PolicyStatus.ACTIVE
+    assert evaluated.rule in temp_tracker.get_active_system1_context()
 
 
 def test_extrapolate_analogy(temp_tracker):

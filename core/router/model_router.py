@@ -10,6 +10,7 @@ Routes tasks dynamically between:
 import sys
 import json
 import argparse
+import time
 import urllib.request
 import urllib.error
 from typing import Dict, Any, Optional
@@ -26,6 +27,9 @@ from core.benchmarks.frontier import (
     build_frontier_summary,
     get_top_candidates_for_tier,
 )
+from core.router.token_budget import plan_token_stress
+from core.usage.ledger import ModelUsageLedger
+from core.usage.models import AccountUsageReport, ModelCallEvent, ModelModality, ModelTier
 
 # Ensure UTF-8 output on Windows
 if hasattr(sys.stdout, "reconfigure"):
@@ -126,14 +130,79 @@ MODEL_MATRIX = {
         "notes": "Deterministic regex & cadence linter + local GPT-OSS / Gemini 3.8 Flash for critique and polish passes."
     },
     "visual_synthesis": {
-        "primary": "gemini-2.5-flash-image",
+        "fast": "google/gemini-3.1-flash-lite-image",
+        "balanced": "google/gemini-3.1-flash-image",
+        "frontier": "openai/gpt-image-2",
         "primary_provider": "openrouter",
-        "secondary": "dall-e-3",
-        "secondary_provider": "openai",
+        "secondary": "google/gemini-3-pro-image",
+        "secondary_provider": "openrouter",
         "local_fallback": "darkfac-vector-v1",
-        "notes": "OpenRouter / Gemini 2.5 Flash Image / DALL-E 3 for frontier visuals; Pillow procedural vector engine for $0 offline diagrams & banners."
+        "notes": "OpenRouter Images API selects fast, balanced, or frontier image models by complexity; Pillow remains the deterministic $0 local fallback."
     }
 }
+
+_QUOTA_FAILOVER_MODELS = {
+    "antigravity": "gemini-3.8-flash",
+    "google": "gemini-3.8-flash",
+    "xai": "grok-4.6",
+    "anthropic": "claude-3.7-sonnet",
+    "openai": "gpt-5-6-sol",
+    "deepseek": "deepseek-v4-pro",
+    "siliconflow": "deepseek-v4-pro",
+    "qwen": "qwen3-8-flash-next",
+}
+
+
+def _apply_token_plan(
+    result: Dict[str, Any],
+    task_type: str,
+    complexity: str,
+    description: str,
+    expected_steps: int,
+    usage_report: Optional[AccountUsageReport],
+    remaining_hourly_percent: Optional[float],
+    offline: bool,
+) -> Dict[str, Any]:
+    """Attach a forecast and displace a route when quota pressure requires it."""
+    preferred_provider = result.get("provider")
+    plan = plan_token_stress(
+        task_type=task_type,
+        complexity=complexity,
+        description=description,
+        expected_steps=expected_steps,
+        accounts=usage_report.accounts if usage_report else (),
+        preferred_provider=preferred_provider,
+        remaining_hourly_percent=remaining_hourly_percent,
+        offline=offline,
+    )
+    if plan.prefer_local and preferred_provider not in {"local_process", "ollama"}:
+        result["quota_displaced_recommendation"] = {
+            "model": result.get("model"), "provider": preferred_provider,
+        }
+        result["model"] = (
+            "qwen-code-deep:latest"
+            if complexity in {"high", "critical"} or task_type in {"architecture", "plan", "prd"}
+            else "qwen-code-fast:latest"
+        )
+        result["provider"] = "ollama"
+    elif plan.failover_required and plan.selected_provider:
+        selected_provider = plan.selected_provider
+        replacement = _QUOTA_FAILOVER_MODELS.get(selected_provider)
+        if plan.use_paid_api:
+            replacement = (
+                "deepseek/deepseek-v4-pro"
+                if complexity in {"high", "critical"}
+                else "qwen/qwen3-8-flash-next"
+            )
+        if replacement:
+            result["quota_displaced_recommendation"] = {
+                "model": result.get("model"), "provider": preferred_provider,
+            }
+            result["model"] = replacement
+            result["provider"] = selected_provider
+    result["token_budget"] = plan.model_dump(mode="json")
+    return result
+
 
 def query_ollama(endpoint: str, data: Optional[Dict[str, Any]] = None, timeout: int = 120) -> Dict[str, Any]:
     """Interacts with local Ollama API."""
@@ -169,7 +238,15 @@ def list_local_models():
         })
     return models
 
-def recommend_model(task_type: str, complexity: str = "medium", offline: bool = False) -> Dict[str, Any]:
+def recommend_model(
+    task_type: str,
+    complexity: str = "medium",
+    offline: bool = False,
+    task_description: str = "",
+    expected_steps: int = 1,
+    usage_report: Optional[AccountUsageReport] = None,
+    remaining_hourly_percent: Optional[float] = None,
+) -> Dict[str, Any]:
     """Recommends best model according to 2026 benchmark and local availability."""
     task_type = task_type.lower()
     complexity = complexity.lower()
@@ -207,26 +284,36 @@ def recommend_model(task_type: str, complexity: str = "medium", offline: bool = 
 
     if offline:
         if task_type == "review":
-            return {
+            result = {
                 "model": "gpt-oss-clean:latest",
                 "provider": "ollama",
                 "mode": "offline",
                 "reason": "Local GPT-OSS 20B limpo com 16k de contexto, 20 threads e sem prompt prévio ($0 custo)."
             }
         elif complexity in ["high", "critical"] or task_type == "architecture":
-            return {
+            result = {
                 "model": "qwen-code-deep:latest",
                 "provider": "ollama",
                 "mode": "offline",
                 "reason": "Local Qwen3-Coder 30B MoE com contexto de 16k e 20 threads (sem prompt)."
             }
         else:
-            return {
+            result = {
                 "model": "qwen-code-fast:latest",
                 "provider": "ollama",
                 "mode": "offline",
                 "reason": "Local Qwen3-Coder 30B fast worker em 8 P-Cores e contexto 4k (sem prompt)."
             }
+        return _apply_token_plan(
+            result,
+            task_type,
+            complexity,
+            task_description,
+            expected_steps,
+            usage_report,
+            remaining_hourly_percent,
+            offline,
+        )
 
     result: Dict[str, Any] = {}
     if task_type in ["research", "topic_research", "papers"]:
@@ -316,8 +403,14 @@ def recommend_model(task_type: str, complexity: str = "medium", offline: bool = 
             "reason": MODEL_MATRIX["anti_slop_scrub"]["notes"]
         }
     elif task_type in ["visual", "visual_synthesis", "image_gen", "diagram"]:
+        if complexity in ["high", "critical"]:
+            visual_model = MODEL_MATRIX["visual_synthesis"]["frontier"]
+        elif complexity == "medium":
+            visual_model = MODEL_MATRIX["visual_synthesis"]["balanced"]
+        else:
+            visual_model = MODEL_MATRIX["visual_synthesis"]["fast"]
         result = {
-            "model": MODEL_MATRIX["visual_synthesis"]["primary"],
+            "model": visual_model,
             "provider": MODEL_MATRIX["visual_synthesis"]["primary_provider"],
             "secondary": MODEL_MATRIX["visual_synthesis"]["secondary"],
             "local_fallback": MODEL_MATRIX["visual_synthesis"]["local_fallback"],
@@ -330,10 +423,19 @@ def recommend_model(task_type: str, complexity: str = "medium", offline: bool = 
             "reason": "Default versatile high-throughput orchestrator."
         }
 
-    if frontier_data:
+    if frontier_data and task_type not in ["visual", "visual_synthesis", "image_gen", "diagram"]:
         result["daily_efficiency_frontier"] = frontier_data
 
-    return result
+    return _apply_token_plan(
+        result,
+        task_type,
+        complexity,
+        task_description,
+        expected_steps,
+        usage_report,
+        remaining_hourly_percent,
+        offline,
+    )
 
 def main():
     parser = argparse.ArgumentParser(description="Model Router & Execution CLI (2026 Edition)")
@@ -365,6 +467,10 @@ def main():
     )
     rec_parser.add_argument("--complexity", choices=["low", "medium", "high", "critical"], default="medium")
     rec_parser.add_argument("--offline", action="store_true", help="Force local-only Ollama models")
+    rec_parser.add_argument("--task-description", default="", help="Task text used by the token forecaster")
+    rec_parser.add_argument("--expected-steps", type=int, default=1)
+    rec_parser.add_argument("--remaining-hourly-percent", type=float)
+    rec_parser.add_argument("--no-quota-scan", action="store_true", help="Skip inspection of configured accounts")
 
 
     # Command: call-local
@@ -409,7 +515,25 @@ def main():
         top3_list = get_top_candidates_for_tier(all_models, tier=tier_key, k=3)
         print(json.dumps([c.to_dict() for c in top3_list], indent=2))
     elif args.command == "recommend":
-        rec = recommend_model(args.task_type, args.complexity, args.offline)
+        usage_report = None
+        if not args.offline and not args.no_quota_scan:
+            try:
+                from core.usage.monitor import AccountUsageMonitor
+
+                usage_report = AccountUsageMonitor(
+                    _ROOT / ".factory" / "usage" / "providers"
+                ).inspect()
+            except Exception as exc:
+                print(f"[WARN] Quota scan unavailable: {exc}", file=sys.stderr)
+        rec = recommend_model(
+            args.task_type,
+            args.complexity,
+            args.offline,
+            task_description=args.task_description,
+            expected_steps=max(1, args.expected_steps),
+            usage_report=usage_report,
+            remaining_hourly_percent=args.remaining_hourly_percent,
+        )
         print(json.dumps(rec, indent=2))
     elif args.command == "call-local":
         payload = {
@@ -417,7 +541,25 @@ def main():
             "prompt": args.prompt,
             "stream": False
         }
+        started = time.perf_counter()
         res = query_ollama("/api/generate", payload, timeout=args.timeout)
+        latency_ms = round((time.perf_counter() - started) * 1000, 1)
+        try:
+            ModelUsageLedger(_ROOT / ".factory" / "usage").record(ModelCallEvent(
+                provider="ollama",
+                model=str(res.get("model") or args.model),
+                tier=ModelTier.LOCAL,
+                harness="model_router_cli",
+                modality=ModelModality.TEXT,
+                success="error" not in res,
+                input_tokens=res.get("prompt_eval_count"),
+                output_tokens=res.get("eval_count"),
+                cost_usd=0.0,
+                latency_ms=latency_ms,
+                source="core.router.call_local",
+            ))
+        except Exception as exc:
+            print(f"Telemetry warning: {exc}", file=sys.stderr)
         if "error" in res:
             print(f"Error: {res['error']}", file=sys.stderr)
             sys.exit(1)

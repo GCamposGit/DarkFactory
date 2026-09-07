@@ -16,6 +16,11 @@ from core.visual.models import (
 )
 from core.visual.prompt_synthesizer import VisualPromptSynthesizer
 from core.visual.cloud_engine import CloudVisualEngine
+from core.usage.ledger import ModelUsageLedger, infer_model_tier
+from core.usage.models import ModelCallEvent, ModelModality, ModelTier
+
+
+from core.execution.budget import ExecutionBudgetManager
 
 
 class VisualStudio:
@@ -30,11 +35,34 @@ class VisualStudio:
         self.metadata_dir = self.output_dir / "metadata"
         self.metadata_dir.mkdir(parents=True, exist_ok=True)
         self.engine = CloudVisualEngine(output_dir=self.output_dir)
+        self.model_usage_ledger = ModelUsageLedger(self.output_dir.parent / "usage")
 
-    def create_asset(self, spec: VisualPromptSpec) -> VisualAssetResult:
+    def _record_usage(self, result: VisualAssetResult) -> None:
+        try:
+            self.model_usage_ledger.record(ModelCallEvent(
+                provider=result.provider,
+                model=result.model_used,
+                tier=ModelTier(infer_model_tier(result.provider, result.model_used)),
+                harness="visual_studio",
+                modality=ModelModality.IMAGE,
+                success=True,
+                cost_usd=result.cost_usd,
+                latency_ms=float(result.generation_time_ms),
+                source="core.visual",
+            ))
+        except Exception:
+            pass
+
+    def create_asset(
+        self,
+        spec: VisualPromptSpec,
+        budget_manager: Optional[ExecutionBudgetManager] = None,
+        budget_id: Optional[str] = None,
+    ) -> VisualAssetResult:
         """Generates a visual asset from explicit prompt specifications."""
-        result = self.engine.generate(spec)
+        result = self.engine.generate(spec, budget_manager=budget_manager, budget_id=budget_id)
         self._save_metadata(result)
+        self._record_usage(result)
         return result
 
     def illustrate_text(
@@ -44,6 +72,8 @@ class VisualStudio:
         theme: Optional[VisualTheme] = None,
         aspect_ratio: Optional[AspectRatio] = None,
         offline: bool = False,
+        budget_manager: Optional[ExecutionBudgetManager] = None,
+        budget_id: Optional[str] = None,
     ) -> VisualAssetResult:
         """Analyzes text semantics, synthesizes prompt, and renders matching visual asset."""
         spec = VisualPromptSynthesizer.synthesize_from_text(
@@ -53,8 +83,9 @@ class VisualStudio:
             aspect_ratio=aspect_ratio,
         )
         spec.offline = offline
-        result = self.engine.generate(spec)
+        result = self.engine.generate(spec, budget_manager=budget_manager, budget_id=budget_id)
         self._save_metadata(result)
+        self._record_usage(result)
         return result
 
     def _save_metadata(self, result: VisualAssetResult) -> None:

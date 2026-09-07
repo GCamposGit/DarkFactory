@@ -3,8 +3,12 @@ FastAPI REST API router for DarkHub.
 """
 
 import asyncio
+import os
+import secrets
 from typing import List, Optional
-from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from pydantic import BaseModel
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Response, status
+from fastapi.responses import RedirectResponse
 
 from hub.backend.models import (
     ExportCatalogResponse,
@@ -22,6 +26,7 @@ from hub.backend.models import (
     ServiceCategory,
     ServiceCreate,
     ServiceItem,
+    ServiceLaunchResponse,
     ServiceUpdate,
     UnifiedGenerateRequest,
     UnifiedGenerateResponse,
@@ -37,8 +42,42 @@ from hub.backend.models import (
     VisualIllustrateRequest,
 )
 from hub.backend.service import HubService
+from core.usage.models import AccountUsageReport, ModelCallEvent, ModelUsageReport
+from core.usage.api_credits import (
+    ApiCreditsReport,
+    CreditAccountUpdateRequest,
+    ProviderCreditCard,
+)
+from core.roadmap.models import (
+    ConfidenceLevel,
+    DeliveryStatus,
+    LifecycleStage,
+    PlanningHorizon,
+    RoadmapHealth,
+    RoadmapItem,
+    RoadmapItemType,
+    RoadmapProjectSummary,
+    RoadmapSnapshot,
+    RoadmapSnapshotComparison,
+    RoadmapSnapshotHistory,
+    RoadmapSourceDocument,
+)
+from core.roadmap.store import RoadmapUnavailableError
+from core.demands.models import (
+    DemandInput,
+    DemandSpecificationGuidance,
+    GrillAnswersPayload,
+    GrillRefinementResult,
+    GrillSession,
+    UserTicket,
+)
+from core.harness.test_subagent import (
+    DistilledTestReport,
+    TestExecutionInstruction,
+)
 
 router = APIRouter(prefix="/api", tags=["DarkHub API"])
+roadmap_router = APIRouter(prefix="/projects", tags=["Operational Roadmap"])
 
 # Dependency Injection for HubService singleton
 _service_instance: Optional[HubService] = None
@@ -49,6 +88,134 @@ def get_hub_service() -> HubService:
     if _service_instance is None:
         _service_instance = HubService()
     return _service_instance
+
+
+def _roadmap_project_or_404(service: HubService, project_id: str) -> None:
+    if not any(project.id == project_id for project in service.list_roadmap_projects()):
+        raise HTTPException(status_code=404, detail=f"Project '{project_id}' not found")
+
+
+@roadmap_router.get("", response_model=List[RoadmapProjectSummary])
+def list_roadmap_projects(service: HubService = Depends(get_hub_service)) -> List[RoadmapProjectSummary]:
+    """List project scopes available to the isolated roadmap projection."""
+
+    return service.list_roadmap_projects()
+
+
+@roadmap_router.get("/{project_id}/roadmap", response_model=RoadmapSnapshot)
+def get_project_roadmap(
+    project_id: str,
+    search: Optional[str] = None,
+    item_type: Optional[RoadmapItemType] = None,
+    lifecycle_stage: Optional[LifecycleStage] = None,
+    delivery_status: Optional[DeliveryStatus] = None,
+    horizon: Optional[PlanningHorizon] = None,
+    confidence: Optional[ConfidenceLevel] = None,
+    source_id: Optional[str] = None,
+    service: HubService = Depends(get_hub_service),
+) -> RoadmapSnapshot:
+    """Return the selected project's current operational roadmap snapshot."""
+
+    _roadmap_project_or_404(service, project_id)
+    try:
+        return service.get_roadmap(
+            project_id,
+            search=search,
+            item_type=item_type.value if item_type else None,
+            lifecycle_stage=lifecycle_stage.value if lifecycle_stage else None,
+            delivery_status=delivery_status.value if delivery_status else None,
+            horizon=horizon.value if horizon else None,
+            confidence=confidence.value if confidence else None,
+            source_id=source_id,
+        )
+    except RoadmapUnavailableError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
+@roadmap_router.get("/{project_id}/roadmap/items/{item_id}", response_model=RoadmapItem)
+def get_project_roadmap_item(
+    project_id: str,
+    item_id: str,
+    service: HubService = Depends(get_hub_service),
+) -> RoadmapItem:
+    """Return one item and its evidence/provenance drawer payload."""
+
+    _roadmap_project_or_404(service, project_id)
+    item = service.get_roadmap_item(project_id, item_id)
+    if item is None:
+        raise HTTPException(status_code=404, detail=f"Roadmap item '{item_id}' not found")
+    return item
+
+
+@roadmap_router.get("/{project_id}/roadmap/health", response_model=RoadmapHealth)
+def get_project_roadmap_health(
+    project_id: str,
+    service: HubService = Depends(get_hub_service),
+) -> RoadmapHealth:
+    """Return snapshot health, source availability and consistency counts."""
+
+    _roadmap_project_or_404(service, project_id)
+    try:
+        return service.get_roadmap_health(project_id)
+    except RoadmapUnavailableError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
+@roadmap_router.get(
+    "/{project_id}/roadmap/history",
+    response_model=RoadmapSnapshotHistory,
+)
+def get_project_roadmap_history(
+    project_id: str,
+    limit: Optional[int] = Query(default=None, ge=1, le=50),
+    service: HubService = Depends(get_hub_service),
+) -> RoadmapSnapshotHistory:
+    """Return bounded metadata for the selected project's retained snapshots."""
+
+    _roadmap_project_or_404(service, project_id)
+    try:
+        return service.roadmap.get_history(project_id, limit=limit)
+    except RoadmapUnavailableError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
+@roadmap_router.get(
+    "/{project_id}/roadmap/history/compare",
+    response_model=RoadmapSnapshotComparison,
+)
+def compare_project_roadmap_snapshots(
+    project_id: str,
+    from_snapshot: str = Query(..., min_length=1),
+    to_snapshot: str = Query(..., min_length=1),
+    service: HubService = Depends(get_hub_service),
+) -> RoadmapSnapshotComparison:
+    """Compare two retained snapshots without changing roadmap state."""
+
+    _roadmap_project_or_404(service, project_id)
+    try:
+        return service.roadmap.compare_snapshots(project_id, from_snapshot, to_snapshot)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except RoadmapUnavailableError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
+@roadmap_router.get(
+    "/{project_id}/roadmap/sources/{source_id}",
+    response_model=RoadmapSourceDocument,
+)
+def get_project_roadmap_source(
+    project_id: str,
+    source_id: str,
+    service: HubService = Depends(get_hub_service),
+) -> RoadmapSourceDocument:
+    """Expose only the selected project's known source document for provenance links."""
+
+    _roadmap_project_or_404(service, project_id)
+    document = service.get_roadmap_source(project_id, source_id)
+    if document is None:
+        raise HTTPException(status_code=404, detail=f"Roadmap source '{source_id}' not found")
+    return document
 
 
 @router.get("/services", response_model=List[ServiceItem])
@@ -170,14 +337,81 @@ def toggle_pin(
     return updated
 
 
+@router.post("/services/{service_id}/launch", response_model=ServiceLaunchResponse)
+def launch_service_endpoint(
+    service_id: str,
+    timeout: float = Query(default=5.0, ge=1.0, le=30.0, description="Max seconds to wait for service readiness"),
+    service: HubService = Depends(get_hub_service),
+) -> ServiceLaunchResponse:
+    """Launch a configured local service in background if offline, waiting for health confirmation."""
+    try:
+        return service.launch_service(service_id=service_id, max_wait_sec=timeout)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to launch service: {exc}") from exc
+
+
+@router.get("/services/{service_id}/open")
+def open_service_endpoint(
+    service_id: str,
+    timeout: float = Query(default=5.0, ge=1.0, le=30.0, description="Max seconds to wait for service readiness"),
+    service: HubService = Depends(get_hub_service),
+) -> RedirectResponse:
+    """
+    Launch local service if offline, wait for readiness, and redirect browser to the target service URL.
+    For non-local or non-launchable services, redirects immediately to service URL.
+    """
+    try:
+        target_url = service.get_service_launch_target(service_id=service_id, max_wait_sec=timeout)
+        return RedirectResponse(url=target_url, status_code=status.HTTP_307_TEMPORARY_REDIRECT)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to open service: {exc}") from exc
+
+
+class SessionInfoResponse(BaseModel):
+    session_token: str
+    is_active: bool = True
+
+
+@router.get("/session", response_model=SessionInfoResponse)
+def get_session_info(
+    service: HubService = Depends(get_hub_service),
+) -> SessionInfoResponse:
+    """Return active local session token for client authentication (DF-08)."""
+    return SessionInfoResponse(session_token=service.session_token)
+
+
 @router.get("/health/ping", response_model=HealthCheckResult)
 def ping_service(
     service_id: str = Query(..., description="ID of the service"),
-    url: str = Query(..., description="URL to ping"),
+    url: Optional[str] = Query(default=None, description="Optional URL to verify against registered service"),
     service: HubService = Depends(get_hub_service),
 ) -> HealthCheckResult:
-    """Ping a specific URL to check availability and latency."""
-    return service.ping_url(service_id=service_id, url=url)
+    """
+    Ping a registered service URL to check availability and latency (DF-08).
+    Strictly requires a registered service ID. Rejects arbitrary SSRF targets.
+    """
+    registered = service.get_service(service_id)
+    if not registered:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Service '{service_id}' not found in registered catalog",
+        )
+
+    if url and url.strip().rstrip("/") != registered.url.strip().rstrip("/"):
+        raise HTTPException(
+            status_code=400,
+            detail="Provided URL does not match registered service URL",
+        )
+
+    return service.ping_url(service_id=service_id, url=registered.url)
 
 
 @router.get("/health/ping-all", response_model=List[HealthCheckResult])
@@ -492,6 +726,52 @@ def illustrate_text_endpoint(
         raise HTTPException(status_code=500, detail=str(exc))
 
 
+@router.get("/usage/accounts", response_model=AccountUsageReport)
+def get_account_usage_endpoint(
+    refresh: bool = Query(default=False),
+    service: HubService = Depends(get_hub_service),
+) -> AccountUsageReport:
+    """Return all provider states; disconnected providers are normal rows, never errors."""
+    return service.get_account_usage(force=refresh)
+
+
+@router.post("/usage/accounts/refresh", response_model=AccountUsageReport)
+def refresh_account_usage_endpoint(
+    service: HubService = Depends(get_hub_service),
+) -> AccountUsageReport:
+    """Force provider probes while preserving partial-success semantics."""
+    return service.get_account_usage(force=True)
+
+
+@router.get("/usage/models", response_model=ModelUsageReport)
+def get_model_usage_endpoint(
+    service: HubService = Depends(get_hub_service),
+) -> ModelUsageReport:
+    """Return aggregate and recent model usage for this project."""
+    return service.get_model_usage()
+
+
+@router.post("/usage/models/events", response_model=ModelUsageReport)
+def record_model_usage_endpoint(
+    payload: ModelCallEvent,
+    x_darkfac_telemetry_key: Optional[str] = Header(default=None),
+    service: HubService = Depends(get_hub_service),
+) -> ModelUsageReport:
+    """Ingest a sanitized event from an authenticated external harness."""
+    configured_key = os.environ.get("DARKFAC_TELEMETRY_KEY")
+    if not configured_key:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="HTTP telemetry ingestion is disabled; set DARKFAC_TELEMETRY_KEY or use the local CLI.",
+        )
+    if not x_darkfac_telemetry_key or not secrets.compare_digest(
+        x_darkfac_telemetry_key,
+        configured_key,
+    ):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid telemetry key.")
+    return service.record_model_usage(payload)
+
+
 @router.get("/visual/gallery")
 def list_visual_gallery_endpoint(
     service: HubService = Depends(get_hub_service),
@@ -500,7 +780,143 @@ def list_visual_gallery_endpoint(
     return service.list_visual_assets()
 
 
+# ==============================================================================
+# API Credits & Billing Monitor ($) Endpoints
+# ==============================================================================
 
+
+@router.get("/credits", response_model=ApiCreditsReport)
+def get_api_credits_endpoint(
+    refresh: bool = Query(default=False, description="Force fresh live probes"),
+    service: HubService = Depends(get_hub_service),
+) -> ApiCreditsReport:
+    """Returns API credit balances and monthly expenditures in USD ($)."""
+    return service.get_api_credits_report(force=refresh)
+
+
+@router.post("/credits/refresh", response_model=ApiCreditsReport)
+def refresh_api_credits_endpoint(
+    service: HubService = Depends(get_hub_service),
+) -> ApiCreditsReport:
+    """Forces live external refresh of API credit balances and expenditures ($)."""
+    return service.refresh_api_credits_report()
+
+
+@router.post("/credits/accounts/{provider_id}", response_model=ProviderCreditCard)
+def update_api_credit_account_endpoint(
+    provider_id: str,
+    payload: CreditAccountUpdateRequest,
+    service: HubService = Depends(get_hub_service),
+) -> ProviderCreditCard:
+    """Updates manual/synchronized credit values for a specific provider."""
+    return service.update_credit_account(provider_id, payload)
+
+
+# ==============================================================================
+# User Demands & Backlog Endpoints
+# ==============================================================================
+
+
+@router.post("/demands/guide", response_model=DemandSpecificationGuidance)
+def guide_user_demand(
+    payload: DemandInput,
+    force_heuristic: bool = Query(default=False, description="Force deterministic script guidance ($0)"),
+    timeout: Optional[float] = Query(default=None, description="Timeout in seconds for local model guidance"),
+    service: HubService = Depends(get_hub_service),
+) -> DemandSpecificationGuidance:
+    """Analyze, refine, and structure a user demand using local model or script ($0.00)."""
+    return service.guide_demand(payload, force_heuristic=force_heuristic, timeout=timeout)
+
+
+@router.get("/demands/next-id")
+def get_next_demand_id(
+    project_id: str = Query(default="darkfac", description="Project identifier"),
+    service: HubService = Depends(get_hub_service),
+) -> dict[str, str]:
+    """Get the next sequential ticket ID for a project."""
+    next_id = service.get_next_ticket_id(project_id)
+    return {"project_id": project_id, "next_id": next_id}
+
+
+@router.post("/demands/tickets", response_model=UserTicket, status_code=status.HTTP_201_CREATED)
+def create_demand_ticket(
+    payload: UserTicket,
+    service: HubService = Depends(get_hub_service),
+) -> UserTicket:
+    """Insert a specified user demand ticket into the development backlog."""
+    return service.create_demand_ticket(payload)
+
+
+@router.get("/demands/tickets", response_model=List[UserTicket])
+def list_demand_tickets(
+    project_id: Optional[str] = Query(default=None),
+    status: Optional[str] = Query(default=None),
+    service: HubService = Depends(get_hub_service),
+) -> List[UserTicket]:
+    """List user demand tickets in the backlog."""
+    return service.list_demand_tickets(project_id=project_id, status=status)
+
+
+@router.get("/demands/tickets/{ticket_id}", response_model=UserTicket)
+def get_demand_ticket(
+    ticket_id: str,
+    service: HubService = Depends(get_hub_service),
+) -> UserTicket:
+    """Retrieve details for a single demand ticket."""
+    ticket = service.get_demand_ticket(ticket_id)
+    if not ticket:
+        raise HTTPException(status_code=404, detail=f"Demand ticket '{ticket_id}' not found")
+    return ticket
+
+
+@router.patch("/demands/tickets/{ticket_id}/status", response_model=UserTicket)
+def update_demand_ticket_status(
+    ticket_id: str,
+    status_value: DeliveryStatus = Query(..., alias="status"),
+    notes: Optional[str] = Query(default=None),
+    service: HubService = Depends(get_hub_service),
+) -> UserTicket:
+    """Update status of a demand ticket in the backlog."""
+    try:
+        return service.update_demand_ticket_status(ticket_id, status_value, notes=notes)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.post("/demands/tickets/{ticket_id}/grill", response_model=GrillSession)
+def start_demand_grill(
+    ticket_id: str,
+    force_heuristic: bool = Query(default=False, description="Force deterministic script questions ($0)"),
+    timeout: Optional[float] = Query(default=None, description="Timeout in seconds"),
+    service: HubService = Depends(get_hub_service),
+) -> GrillSession:
+    """Start an interactive or automated Q&A Grill session to clarify a demand ticket."""
+    try:
+        return service.start_demand_grill(ticket_id, force_heuristic=force_heuristic, timeout=timeout)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.post("/demands/tickets/{ticket_id}/grill/submit", response_model=GrillRefinementResult)
+def submit_demand_grill(
+    ticket_id: str,
+    payload: GrillAnswersPayload,
+    service: HubService = Depends(get_hub_service),
+) -> GrillRefinementResult:
+    """Submit answers from a grill session and refine the ticket in the backlog."""
+    try:
+        return service.submit_demand_grill(ticket_id, answers=payload.answers)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.post("/harness/run-tests", response_model=DistilledTestReport)
+def run_tests(
+    instruction: TestExecutionInstruction,
+    service: HubService = Depends(get_hub_service),
+) -> DistilledTestReport:
+    """Execute test suite via headless test subagent engine and return distilled report."""
+    return service.run_tests(instruction)
 
 
 

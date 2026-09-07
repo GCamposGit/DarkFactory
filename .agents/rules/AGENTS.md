@@ -21,3 +21,4 @@ Este documento governa a qualidade técnica de todo código produzido pelos agen
 ## 3. Padrões de Comunicação e Comandos para o Usuário
 
 - **Comandos de Terminal para o Usuário**: SEMPRE indicar comandos no PowerShell/Terminal com o endereço absoluto completo (ex: `python C:\dev\DarkFac\run_canaletto.py`). O usuário pode abrir o shell a partir de qualquer pasta raiz (`C:\`, `C:\dev`, etc.); caminhos absolutos eliminam qualquer risco de `FileNotFoundError` ou ambiguidade de diretório.
+- **Invocação Programática do Terminal no Windows**: Toda chamada interna ou subprocesso ao PowerShell DEVE incluir `-NoProfile -NonInteractive -ExecutionPolicy Bypass` para blindar o processo contra perfis globais que sequestram o diretório de trabalho. Utilize `core.harness.terminal_env.wrap_powershell_command` ou o script `scripts/init_terminal.ps1`.
