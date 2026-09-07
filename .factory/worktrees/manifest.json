@@ -1,0 +1,52 @@
+{
+  "schema_version": "1",
+  "base_sha": "864f50f62e1e2e6f73b955f9e3883a08a05c2af1",
+  "created_at": "2026-09-07T03:56:30Z",
+  "leases": [
+    {
+      "ticket_id": "DF-13",
+      "title": "DF-13 - start/resume/cancel, timeout e kill de filhos; limites de rede/arquivos testados",
+      "owner": "worker-df13",
+      "branch": "codex/df-13-executor-sandbox",
+      "cwd": "C:/dev/DarkFac_worktrees/df13",
+      "base_sha": "864f50f62e1e2e6f73b955f9e3883a08a05c2af1",
+      "fencing_token": 1,
+      "phase": "preflight",
+      "status": "active",
+      "allowed_paths": [
+        "core/execution/providers.py",
+        "core/execution/agent_executor.py",
+        "core/execution/sandbox.py",
+        "tests/test_executor_contract.py",
+        ".factory/reports/df-13-executor-sandbox-report.md"
+      ],
+      "heartbeat": {
+        "timestamp": "2026-09-07T03:56:30Z",
+        "head": "864f50f62e1e2e6f73b955f9e3883a08a05c2af1",
+        "last_command": "git reset --hard 864f50f"
+      }
+    },
+    {
+      "ticket_id": "RM-08",
+      "title": "RM-08 - Atualizacao incremental, telemetria e testes de escala",
+      "owner": "worker-rm08",
+      "branch": "codex/rm-08-incremental-telemetry",
+      "cwd": "C:/dev/DarkFac_worktrees/rm08",
+      "base_sha": "864f50f62e1e2e6f73b955f9e3883a08a05c2af1",
+      "fencing_token": 1,
+      "phase": "preflight",
+      "status": "active",
+      "allowed_paths": [
+        "core/roadmap/store.py",
+        "core/roadmap/service.py",
+        "tests/test_roadmap_scale.py",
+        ".factory/reports/rm-08-incremental-telemetry-report.md"
+      ],
+      "heartbeat": {
+        "timestamp": "2026-09-07T03:56:30Z",
+        "head": "864f50f62e1e2e6f73b955f9e3883a08a05c2af1",
+        "last_command": "git reset --hard 864f50f"
+      }
+    }
+  ]
+}
