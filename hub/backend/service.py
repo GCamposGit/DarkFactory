@@ -3,16 +3,19 @@ Headless business logic layer for DarkHub.
 Decoupled from Web UI and HTTP frameworks (Reachability standard).
 """
 
+import ipaddress
 import json
 import logging
 import os
 import re
+import secrets
+import sys
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
-import sys
 from typing import Dict, List, Optional, Tuple, Any
 
 from hub.backend.models import (
@@ -74,7 +77,14 @@ from core.benchmarks import (
 from core.usage.ledger import ModelUsageLedger, infer_model_tier
 from core.usage.models import ModelCallEvent, ModelModality, ModelTier
 from core.usage.monitor import AccountUsageMonitor
+from core.usage.api_credits import (
+    ApiCreditsMonitor,
+    ApiCreditsReport,
+    CreditAccountUpdateRequest,
+    ProviderCreditCard,
+)
 from core.roadmap.models import (
+    DeliveryStatus,
     RoadmapHealth,
     RoadmapItem,
     RoadmapProjectSummary,
@@ -82,9 +92,108 @@ from core.roadmap.models import (
     RoadmapSourceDocument,
 )
 from core.roadmap.service import build_repository_roadmap_service
+from core.demands.models import (
+    DemandInput,
+    DemandSpecificationGuidance,
+    GrillRefinementResult,
+    GrillSession,
+    UserTicket,
+)
+from core.demands.service import DemandsService
+from core.demands.specifier import DemandSpecifier
+from core.demands.store import DemandsStore
+from core.harness.test_subagent import (
+    DistilledTestReport,
+    TestExecutionInstruction,
+    TestSubagentEngine,
+)
 
 logger = logging.getLogger("darkhub.service")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
+
+BLOCKED_SSRF_NETWORKS = [
+    ipaddress.ip_network("169.254.0.0/16"),     # Link-local / Cloud Metadata (AWS, GCP, Azure, etc.)
+    ipaddress.ip_network("0.0.0.0/8"),          # Current network
+    ipaddress.ip_network("224.0.0.0/4"),        # Multicast
+    ipaddress.ip_network("240.0.0.0/4"),        # Reserved
+    ipaddress.ip_network("255.255.255.255/32"), # Broadcast
+]
+
+BLOCKED_METADATA_HOSTS = {
+    "metadata",
+    "metadata.google.internal",
+    "instance-data",
+}
+
+
+class DisallowedDestinationError(urllib.error.URLError):
+    """Raised when a probe or redirect targets a forbidden IP/host or scheme."""
+    pass
+
+
+def is_destination_allowed(url: str) -> Tuple[bool, str]:
+    """
+    Evaluates whether a target URL is permitted for health checks and network probing (DF-08).
+    Strictly blocks cloud metadata endpoints, link-local addresses, and non-HTTP schemes.
+    Deliberately permits legitimate local cluster services (localhost, 127.0.0.1, ::1).
+    """
+    if not url or not isinstance(url, str):
+        return False, "URL is empty or invalid"
+
+    try:
+        parsed = urllib.parse.urlparse(url.strip())
+    except Exception as exc:
+        return False, f"Malformed URL: {exc}"
+
+    scheme = parsed.scheme.lower()
+    if scheme not in ("http", "https"):
+        return False, f"Protocol '{scheme}' not permitted for health probes (only HTTP/HTTPS allowed)"
+
+    host = parsed.hostname
+    if not host:
+        return False, "Missing hostname in target URL"
+
+    host_lower = host.strip("[]").lower()
+
+    # Explicitly permitted loopback endpoints for local AI clusters (Ollama, Canaletto, etc.)
+    if host_lower in ("localhost", "127.0.0.1", "::1", "testserver"):
+        return True, "Permitted local loopback service"
+
+    # Check for metadata hostnames
+    if host_lower in BLOCKED_METADATA_HOSTS:
+        return False, f"Cloud metadata host '{host_lower}' is strictly blocked"
+
+    # Check if host is an IP address literal
+    try:
+        ip_obj = ipaddress.ip_address(host_lower)
+        for net in BLOCKED_SSRF_NETWORKS:
+            if ip_obj in net:
+                return False, f"Destination IP {host_lower} is blocked by SSRF policy (cloud metadata/link-local)"
+
+        if ip_obj.is_private and not ip_obj.is_loopback:
+            return False, f"Private network address {host_lower} is blocked by default SSRF policy"
+
+        if ip_obj.is_reserved or ip_obj.is_multicast or ip_obj.is_link_local:
+            return False, f"Address {host_lower} is blocked by SSRF policy"
+    except ValueError:
+        # Host is a domain name (not raw IP)
+        pass
+
+    return True, "Permitted external destination"
+
+
+class SafeRedirectHandler(urllib.request.HTTPRedirectHandler):
+    """
+    Inspects HTTP redirect Location headers to prevent SSRF bypass via 3xx redirects (DF-08).
+    """
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        allowed, reason = is_destination_allowed(newurl)
+        if not allowed:
+            raise DisallowedDestinationError(
+                f"SSRF Redirect Blocked: redirect to '{newurl}' is disallowed ({reason})"
+            )
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
 
 
 class HubService:
@@ -95,6 +204,7 @@ class HubService:
         usage_dir: Optional[Path] = None,
         roadmap_root: Optional[Path] = None,
     ) -> None:
+        self._session_token = secrets.token_urlsafe(32)
         if data_dir is None:
             # Default to hub/data relative to this file
             self.data_dir = Path(__file__).resolve().parent.parent / "data"
@@ -113,10 +223,101 @@ class HubService:
             self.usage_dir = Path(__file__).resolve().parents[2] / ".factory" / "usage"
         self.model_usage_ledger = ModelUsageLedger(self.usage_dir)
         self.account_usage_monitor = AccountUsageMonitor(self.usage_dir / "providers")
+        self.api_credits_monitor = ApiCreditsMonitor(self.usage_dir / "credits")
+
+        if data_dir is not None:
+            self.demands_dir = self.data_dir / "demands"
+        else:
+            self.demands_dir = Path(__file__).resolve().parents[2] / ".factory" / "demands"
+        self.demands_store = DemandsStore(self.demands_dir / "demands.json")
+        self.demands_service = DemandsService(
+            store=self.demands_store,
+            specifier=DemandSpecifier(ollama_url=ollama_base_url),
+        )
+
         repository_root = roadmap_root or Path(__file__).resolve().parents[2]
-        self.roadmap = build_repository_roadmap_service(repository_root)
+        self.test_subagent_engine = TestSubagentEngine(project_root=repository_root)
+        self.roadmap = build_repository_roadmap_service(
+            repository_root,
+            demands_path=self.demands_dir / "demands.json",
+            include_demands=True,
+        )
 
         self._ensure_storage()
+
+    def run_tests(self, instruction: TestExecutionInstruction) -> DistilledTestReport:
+        """Execute test suite via headless test subagent engine and return distilled report."""
+        return self.test_subagent_engine.execute(instruction)
+
+    def guide_demand(
+        self,
+        demand: DemandInput,
+        *,
+        force_heuristic: bool = False,
+        timeout: Optional[float] = None,
+    ) -> DemandSpecificationGuidance:
+        """Guide and structure a user demand using local model or deterministic script ($0)."""
+        return self.demands_service.guide_demand(demand, force_heuristic=force_heuristic, timeout=timeout)
+
+    def get_next_ticket_id(self, project_id: str = "darkfac") -> str:
+        """Return the next sequential user demand ticket ID."""
+        return self.demands_service.get_next_ticket_id(project_id)
+
+    def create_demand_ticket(self, ticket: UserTicket) -> UserTicket:
+        """Create and insert a specified user demand into the backlog and invalidate roadmap cache."""
+        saved = self.demands_service.create_ticket(ticket)
+        if hasattr(self.roadmap, "store") and self.roadmap.store:
+            self.roadmap.store.clear(ticket.project_id)
+        return saved
+
+    def list_demand_tickets(
+        self,
+        project_id: Optional[str] = None,
+        status: Optional[str] = None,
+    ) -> List[UserTicket]:
+        """List user demands filtered by project and status."""
+        stat_enum = DeliveryStatus(status) if status else None
+        return self.demands_service.list_tickets(project_id=project_id, status=stat_enum)
+
+    def get_demand_ticket(self, ticket_id: str) -> Optional[UserTicket]:
+        """Retrieve a single user demand ticket."""
+        return self.demands_service.get_ticket(ticket_id)
+
+    def update_demand_ticket_status(
+        self,
+        ticket_id: str,
+        status: DeliveryStatus,
+        notes: Optional[str] = None,
+    ) -> UserTicket:
+        """Update the delivery status of a user demand ticket."""
+        updated = self.demands_service.update_ticket_status(ticket_id, status, notes=notes)
+        if hasattr(self.roadmap, "store") and self.roadmap.store:
+            self.roadmap.store.clear(updated.project_id)
+        return updated
+
+    def start_demand_grill(
+        self,
+        ticket_id: str,
+        *,
+        force_heuristic: bool = False,
+        timeout: Optional[float] = None,
+    ) -> GrillSession:
+        """Start a clarifying Q&A grill session for a demand ticket."""
+        return self.demands_service.start_grill_session(
+            ticket_id, force_heuristic=force_heuristic, timeout=timeout
+        )
+
+    def submit_demand_grill(
+        self,
+        ticket_id: str,
+        answers: dict[str, str],
+        session: Optional[GrillSession] = None,
+    ) -> GrillRefinementResult:
+        """Submit answers to refine a demand ticket in the backlog."""
+        result = self.demands_service.submit_grill_answers(ticket_id, answers, session=session)
+        if hasattr(self.roadmap, "store") and self.roadmap.store:
+            self.roadmap.store.clear(result.refined_ticket.project_id)
+        return result
 
     def list_roadmap_projects(self) -> List[RoadmapProjectSummary]:
         """List projects with an isolated roadmap source."""
@@ -213,6 +414,18 @@ class HubService:
         """Allow Codex, Grok, Gemini and other harnesses to report calls."""
         self.model_usage_ledger.record(event)
         return self.model_usage_ledger.report()
+
+    def get_api_credits_report(self, force: bool = False) -> ApiCreditsReport:
+        """Returns API credit balance and current month expenditure in USD ($)."""
+        return self.api_credits_monitor.generate_report(force=force)
+
+    def refresh_api_credits_report(self) -> ApiCreditsReport:
+        """Forces live refresh of API credit balance and expenditures ($)."""
+        return self.api_credits_monitor.refresh_report()
+
+    def update_credit_account(self, provider_id: str, payload: CreditAccountUpdateRequest) -> ProviderCreditCard:
+        """Updates and persists credit balances or notes for a provider."""
+        return self.api_credits_monitor.update_account(provider_id, payload)
 
     def _load_services_raw(self) -> List[Dict]:
         try:
@@ -367,9 +580,39 @@ class HubService:
             return None
         return self.update_service(service_id, ServiceUpdate(pinned=not service.pinned))
 
+    @property
+    def session_token(self) -> str:
+        """Returns the current active local session token."""
+        return self._session_token
+
+    def validate_session(self, token: Optional[str]) -> bool:
+        """Validates a provided session token against active local session."""
+        if not token or not isinstance(token, str):
+            return False
+        return secrets.compare_digest(token.strip(), self._session_token)
+
+    def rotate_session(self) -> str:
+        """Rotates the session token."""
+        self._session_token = secrets.token_urlsafe(32)
+        return self._session_token
+
     def ping_url(self, service_id: str, url: str, timeout_sec: float = 2.5) -> HealthCheckResult:
-        """Pings a service URL and measures round-trip latency."""
+        """
+        Pings a service URL and measures round-trip latency with strict SSRF & redirect guards (DF-08).
+        """
+        allowed, reason = is_destination_allowed(url)
+        if not allowed:
+            return HealthCheckResult(
+                service_id=service_id,
+                url=url,
+                status=HealthStatus.OFFLINE,
+                latency_ms=None,
+                status_code=None,
+                error=f"Destination disallowed by SSRF policy: {reason}",
+            )
+
         start = time.perf_counter()
+        opener = urllib.request.build_opener(SafeRedirectHandler)
         req = urllib.request.Request(
             url,
             headers={"User-Agent": "DarkHub-Ping/1.0 (Headless Health Probe)"},
@@ -377,7 +620,7 @@ class HubService:
         )
 
         try:
-            with urllib.request.urlopen(req, timeout=timeout_sec) as response:
+            with opener.open(req, timeout=timeout_sec) as response:
                 latency = round((time.perf_counter() - start) * 1000, 1)
                 return HealthCheckResult(
                     service_id=service_id,
@@ -386,6 +629,15 @@ class HubService:
                     latency_ms=latency,
                     status_code=response.getcode(),
                 )
+        except DisallowedDestinationError as redirect_err:
+            return HealthCheckResult(
+                service_id=service_id,
+                url=url,
+                status=HealthStatus.OFFLINE,
+                latency_ms=None,
+                status_code=None,
+                error=str(redirect_err),
+            )
         except urllib.error.HTTPError as http_err:
             latency = round((time.perf_counter() - start) * 1000, 1)
             # HTTP errors (e.g. 401, 403, 405) still mean the server is reachable and online
@@ -406,7 +658,7 @@ class HubService:
                     headers={"User-Agent": "DarkHub-Ping/1.0"},
                     method="GET",
                 )
-                with urllib.request.urlopen(req_get, timeout=timeout_sec) as response:
+                with opener.open(req_get, timeout=timeout_sec) as response:
                     latency = round((time.perf_counter() - start_get) * 1000, 1)
                     return HealthCheckResult(
                         service_id=service_id,
@@ -415,6 +667,15 @@ class HubService:
                         latency_ms=latency,
                         status_code=response.getcode(),
                     )
+            except DisallowedDestinationError as redirect_err:
+                return HealthCheckResult(
+                    service_id=service_id,
+                    url=url,
+                    status=HealthStatus.OFFLINE,
+                    latency_ms=None,
+                    status_code=None,
+                    error=str(redirect_err),
+                )
             except Exception as get_exc:
                 return HealthCheckResult(
                     service_id=service_id,
@@ -568,7 +829,7 @@ class HubService:
         compute_frontier_proximity_indices(all_models, metric="coding_score")
         return {
             "date": ledger.date,
-            "models": [m.to_dict() for m in sorted(all_models, key=lambda m: (-m.frontier_proximity_index, -m.coding_score))]
+            "models": [m.to_dict() for m in sorted(all_models, key=lambda m: (-(m.frontier_proximity_index or 0.0), -(m.coding_score or 0.0)))]
         }
 
     def get_top_candidates_for_tier(self, tier: str = "high", k: int = 3) -> List[Dict[str, Any]]:

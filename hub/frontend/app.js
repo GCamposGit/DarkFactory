@@ -36,17 +36,73 @@ const state = {
   editingServiceId: null,
   paletteResults: [],
   paletteSelectedIndex: 0,
+  sessionToken: null,
 };
 
 // API Base URL
 const API_BASE = "/api";
+
+// Security & Sanitization Helpers (DF-07)
+function escapeHtml(text) {
+  if (text === null || text === undefined) return "";
+  return String(text)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+}
+
+function sanitizeUrl(url) {
+  if (!url || typeof url !== "string") return "#";
+  const trimmed = url.trim();
+  if (/^https?:\/\/[^\s<>"']+$/i.test(trimmed)) {
+    return escapeHtml(trimmed);
+  }
+  return "#";
+}
+
+function sanitizeColor(color, defaultColor = "#3b82f6") {
+  if (!color || typeof color !== "string") return defaultColor;
+  const trimmed = color.trim();
+  if (/^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/.test(trimmed)) {
+    return trimmed;
+  }
+  return defaultColor;
+}
+
+function sanitizeId(id) {
+  if (!id || typeof id !== "string") return "";
+  return id.replace(/[^a-zA-Z0-9_-]/g, "");
+}
+
+async function hubFetch(url, options = {}) {
+  const headers = new Headers(options.headers || {});
+  if (state.sessionToken) {
+    headers.set("X-Hub-Session", state.sessionToken);
+  }
+  return fetch(url, { ...options, headers });
+}
 
 // Initialize App on DOM Ready
 document.addEventListener("DOMContentLoaded", () => {
   initApp();
 });
 
+async function initSession() {
+  try {
+    const res = await fetch(`${API_BASE}/session`);
+    if (res.ok) {
+      const data = await res.json();
+      state.sessionToken = data.session_token;
+    }
+  } catch (err) {
+    // Graceful offline fallback
+  }
+}
+
 async function initApp() {
+  await initSession();
   setupEventListeners();
   await Promise.all([
     loadServices(),
@@ -314,24 +370,24 @@ function renderQuickDock() {
     .map((item) => {
       const health = state.health[item.id];
       const statusDotClass = getStatusDotClass(health?.status);
-      const latencyText = health?.latency_ms ? `${health.latency_ms}ms` : "";
+      const latencyText = health?.latency_ms ? `${Number(health.latency_ms)}ms` : "";
+      const safeUrl = sanitizeUrl(item.url);
+      const safeColor = sanitizeColor(item.color);
+      const safeName = escapeHtml(item.name);
+      const initials = escapeHtml(item.name.substring(0, 2).toUpperCase());
 
       return `
       <a 
-        href="${item.url}" 
+        href="${safeUrl}" 
         target="_blank" 
         rel="noopener noreferrer"
         class="group relative flex items-center gap-3 px-3.5 py-2 rounded-xl glass-card hover:border-indigo-500/50 transition-all cursor-pointer">
-        <div class="w-8 h-8 rounded-lg flex items-center justify-center text-sm font-bold shadow-inner" style="background: ${
-          item.color
-        }22; color: ${item.color}; border: 1px solid ${item.color}44">
-          ${item.name.substring(0, 2).toUpperCase()}
+        <div class="w-8 h-8 rounded-lg flex items-center justify-center text-sm font-bold shadow-inner" style="background: ${safeColor}22; color: ${safeColor}; border: 1px solid ${safeColor}44">
+          ${initials}
         </div>
         <div class="flex flex-col min-w-0">
           <div class="flex items-center gap-1.5">
-            <span class="text-xs font-semibold text-slate-200 group-hover:text-indigo-300 transition-colors truncate max-w-[120px]">${
-              item.name
-            }</span>
+            <span class="text-xs font-semibold text-slate-200 group-hover:text-indigo-300 transition-colors truncate max-w-[120px]">${safeName}</span>
             <span class="w-1.5 h-1.5 rounded-full ${statusDotClass}"></span>
           </div>
           <span class="text-[10px] text-slate-400 font-mono">${
@@ -342,6 +398,31 @@ function renderQuickDock() {
     `;
     })
     .join("");
+}
+
+let servicesGridListenerAttached = false;
+function initServicesGridEvents() {
+  const container = document.getElementById("services-grid");
+  if (!container || servicesGridListenerAttached) return;
+  servicesGridListenerAttached = true;
+  container.addEventListener("click", (e) => {
+    const btn = e.target.closest("[data-action]");
+    if (!btn) return;
+    const action = btn.dataset.action;
+    const serviceId = btn.dataset.serviceId;
+    if (action === "toggle-favorite" && serviceId) {
+      toggleFavorite(serviceId);
+    } else if (action === "toggle-pin" && serviceId) {
+      togglePin(serviceId);
+    } else if (action === "edit-service" && serviceId) {
+      editService(serviceId);
+    } else if (action === "delete-service" && serviceId) {
+      deleteService(serviceId);
+    } else if (action === "copy-url") {
+      const url = btn.dataset.serviceUrl;
+      if (url) copyToClipboard(url, "Link copiado para a área de transferência!");
+    }
+  });
 }
 
 // Render Main Services Grid
@@ -387,38 +468,53 @@ function renderServices() {
       const health = state.health[item.id];
       const statusDotClass = getStatusDotClass(health?.status);
       const latencyDisplay = health?.latency_ms
-        ? `<span class="text-[10px] font-mono text-slate-400">${health.latency_ms}ms</span>`
+        ? `<span class="text-[10px] font-mono text-slate-400">${Number(health.latency_ms)}ms</span>`
         : "";
+      const safeId = sanitizeId(item.id);
+      const safeUrl = sanitizeUrl(item.url);
+      const safeColor = sanitizeColor(item.color);
+      const safeName = escapeHtml(item.name);
+      const initials = escapeHtml(item.name.substring(0, 2).toUpperCase());
+      const safeCategory = escapeHtml(CATEGORIES[item.category]?.label || item.category);
+      const safeDescription = escapeHtml(item.description || "Nenhuma descrição fornecida.");
+      const safeTags = (item.tags || [])
+        .slice(0, 3)
+        .map(
+          (tag) => `
+          <span class="px-2 py-0.5 rounded-md bg-slate-800/80 border border-slate-700/40 text-[10px] text-slate-400 font-mono">
+            #${escapeHtml(tag)}
+          </span>
+        `
+        )
+        .join("");
+      const extraTagsCount =
+        (item.tags || []).length > 3
+          ? `<span class="text-[10px] text-slate-500 font-mono">+${
+              item.tags.length - 3
+            }</span>`
+          : "";
 
       return `
       <div class="glass-card rounded-2xl p-5 flex flex-col justify-between group relative overflow-hidden">
         <!-- Accent Glow Header line -->
-        <div class="absolute top-0 left-0 right-0 h-[2px]" style="background: linear-gradient(90deg, ${
-          item.color
-        }, transparent)"></div>
+        <div class="absolute top-0 left-0 right-0 h-[2px]" style="background: linear-gradient(90deg, ${safeColor}, transparent)"></div>
 
         <div>
           <!-- Top Row: Icon, Title, Actions -->
           <div class="flex items-start justify-between gap-3 mb-3">
             <div class="flex items-center gap-3">
-              <div class="w-10 h-10 rounded-xl flex items-center justify-center font-bold text-base shadow-md" style="background: ${
-                item.color
-              }25; color: ${item.color}; border: 1px solid ${item.color}50">
-                ${item.name.substring(0, 2).toUpperCase()}
+              <div class="w-10 h-10 rounded-xl flex items-center justify-center font-bold text-base shadow-md" style="background: ${safeColor}25; color: ${safeColor}; border: 1px solid ${safeColor}50">
+                ${initials}
               </div>
               <div>
                 <div class="flex items-center gap-2">
-                  <h3 class="font-semibold text-slate-100 text-sm group-hover:text-indigo-300 transition-colors">${
-                    item.name
-                  }</h3>
-                  <span class="w-2 h-2 rounded-full ${statusDotClass}" title="${
+                  <h3 class="font-semibold text-slate-100 text-sm group-hover:text-indigo-300 transition-colors">${safeName}</h3>
+                  <span class="w-2 h-2 rounded-full ${statusDotClass}" title="${escapeHtml(
         health?.status || "Status pendente"
-      }"></span>
+      )}"></span>
                 </div>
                 <div class="flex items-center gap-2 mt-0.5">
-                  <span class="text-[10px] text-slate-400 font-mono">${
-                    CATEGORIES[item.category]?.label || item.category
-                  }</span>
+                  <span class="text-[10px] text-slate-400 font-mono">${safeCategory}</span>
                   ${latencyDisplay}
                 </div>
               </div>
@@ -427,14 +523,15 @@ function renderServices() {
             <!-- Card Actions -->
             <div class="flex items-center gap-1">
               <button 
-                onclick="toggleFavorite('${item.id}')" 
+                data-action="toggle-favorite"
+                data-service-id="${safeId}"
                 title="${
                   item.is_favorite
                     ? "Remover dos favoritos"
                     : "Marcar como favorito"
                 }"
                 class="p-1.5 rounded-lg text-slate-400 hover:text-amber-400 hover:bg-slate-800/80 transition-colors">
-                <svg class="w-4 h-4 ${
+                <svg class="w-4 h-4 pointer-events-none ${
                   item.is_favorite
                     ? "text-amber-400 fill-amber-400"
                     : "fill-none"
@@ -444,12 +541,13 @@ function renderServices() {
               </button>
 
               <button 
-                onclick="togglePin('${item.id}')" 
+                data-action="toggle-pin"
+                data-service-id="${safeId}"
                 title="${
                   item.pinned ? "Desafixar do dock" : "Fixar no topo (dock)"
                 }"
                 class="p-1.5 rounded-lg text-slate-400 hover:text-indigo-400 hover:bg-slate-800/80 transition-colors">
-                <svg class="w-4 h-4 ${
+                <svg class="w-4 h-4 pointer-events-none ${
                   item.pinned ? "text-indigo-400 fill-indigo-400" : "fill-none"
                 }" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
                   <line x1="12" y1="17" x2="12" y2="22"></line>
@@ -459,21 +557,17 @@ function renderServices() {
 
               <div class="relative group/menu">
                 <button class="p-1.5 rounded-lg text-slate-500 hover:text-slate-300 hover:bg-slate-800/80 transition-colors">
-                  <svg class="w-4 h-4" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" fill="none">
+                  <svg class="w-4 h-4 pointer-events-none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" fill="none">
                     <circle cx="12" cy="12" r="1"></circle>
                     <circle cx="12" cy="5" r="1"></circle>
                     <circle cx="12" cy="19" r="1"></circle>
                   </svg>
                 </button>
                 <div class="absolute right-0 top-full mt-1 w-28 bg-slate-900 border border-slate-700/80 rounded-xl shadow-xl py-1 hidden group-hover/menu:block z-20">
-                  <button onclick="editService('${
-                    item.id
-                  }')" class="w-full text-left px-3 py-1.5 text-xs text-slate-300 hover:bg-slate-800 hover:text-white flex items-center gap-2">
+                  <button data-action="edit-service" data-service-id="${safeId}" class="w-full text-left px-3 py-1.5 text-xs text-slate-300 hover:bg-slate-800 hover:text-white flex items-center gap-2">
                     Editar
                   </button>
-                  <button onclick="deleteService('${
-                    item.id
-                  }')" class="w-full text-left px-3 py-1.5 text-xs text-red-400 hover:bg-slate-800 hover:text-red-300 flex items-center gap-2">
+                  <button data-action="delete-service" data-service-id="${safeId}" class="w-full text-left px-3 py-1.5 text-xs text-red-400 hover:bg-slate-800 hover:text-red-300 flex items-center gap-2">
                     Excluir
                   </button>
                 </div>
@@ -483,7 +577,7 @@ function renderServices() {
 
           <!-- Description -->
           <p class="text-xs text-slate-400 leading-relaxed mb-4 line-clamp-2">
-            ${item.description || "Nenhuma descrição fornecida."}
+            ${safeDescription}
           </p>
         </div>
 
@@ -491,29 +585,14 @@ function renderServices() {
         <div>
           <!-- Tags -->
           <div class="flex flex-wrap gap-1.5 mb-4">
-            ${item.tags
-              .slice(0, 3)
-              .map(
-                (tag) => `
-              <span class="px-2 py-0.5 rounded-md bg-slate-800/80 border border-slate-700/40 text-[10px] text-slate-400 font-mono">
-                #${tag}
-              </span>
-            `
-              )
-              .join("")}
-            ${
-              item.tags.length > 3
-                ? `<span class="text-[10px] text-slate-500 font-mono">+${
-                    item.tags.length - 3
-                  }</span>`
-                : ""
-            }
+            ${safeTags}
+            ${extraTagsCount}
           </div>
 
           <!-- Launch Button -->
           <div class="flex items-center gap-2">
             <a 
-              href="${item.url}" 
+              href="${safeUrl}" 
               target="_blank" 
               rel="noopener noreferrer"
               class="flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-xl bg-slate-800/90 hover:bg-indigo-600 hover:text-white text-slate-200 text-xs font-medium border border-slate-700/60 hover:border-indigo-500 transition-all shadow-sm">
@@ -525,12 +604,11 @@ function renderServices() {
               </svg>
             </a>
             <button 
-              onclick="copyToClipboard('${
-                item.url
-              }', 'Link copiado para a área de transferência!')"
+              data-action="copy-url"
+              data-service-url="${safeUrl}"
               title="Copiar URL"
               class="p-2 rounded-xl bg-slate-800/60 hover:bg-slate-700/80 text-slate-400 hover:text-slate-200 border border-slate-700/50 transition-colors">
-              <svg class="w-3.5 h-3.5" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" fill="none">
+              <svg class="w-3.5 h-3.5 pointer-events-none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" fill="none">
                 <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
                 <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
               </svg>
@@ -541,6 +619,8 @@ function renderServices() {
     `;
     })
     .join("");
+
+  initServicesGridEvents();
 }
 
 function getStatusDotClass(status) {
@@ -553,7 +633,7 @@ function getStatusDotClass(status) {
 // Toggle Favorite
 async function toggleFavorite(id) {
   try {
-    const res = await fetch(`${API_BASE}/services/${id}/toggle-favorite`, {
+    const res = await hubFetch(`${API_BASE}/services/${id}/toggle-favorite`, {
       method: "POST",
     });
     if (res.ok) {
@@ -571,7 +651,7 @@ async function toggleFavorite(id) {
 // Toggle Pin
 async function togglePin(id) {
   try {
-    const res = await fetch(`${API_BASE}/services/${id}/toggle-pin`, {
+    const res = await hubFetch(`${API_BASE}/services/${id}/toggle-pin`, {
       method: "POST",
     });
     if (res.ok) {
@@ -590,7 +670,7 @@ async function togglePin(id) {
 async function deleteService(id) {
   if (!confirm("Tem certeza que deseja excluir este serviço?")) return;
   try {
-    const res = await fetch(`${API_BASE}/services/${id}`, { method: "DELETE" });
+    const res = await hubFetch(`${API_BASE}/services/${id}`, { method: "DELETE" });
     if (res.ok) {
       state.services = state.services.filter((s) => s.id !== id);
       delete state.health[id];
@@ -670,7 +750,7 @@ async function handleSaveService(e) {
   try {
     if (state.editingServiceId) {
       // Update
-      const res = await fetch(
+      const res = await hubFetch(
         `${API_BASE}/services/${state.editingServiceId}`,
         {
           method: "PUT",
@@ -688,7 +768,7 @@ async function handleSaveService(e) {
       }
     } else {
       // Create
-      const res = await fetch(`${API_BASE}/services`, {
+      const res = await hubFetch(`${API_BASE}/services`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
@@ -766,7 +846,10 @@ function handlePaletteKeyboardNav(e) {
     e.preventDefault();
     const selected = state.paletteResults[state.paletteSelectedIndex];
     if (selected) {
-      window.open(selected.url, "_blank", "noopener,noreferrer");
+      const safeUrl = sanitizeUrl(selected.url);
+      if (safeUrl && safeUrl !== "#") {
+        window.open(safeUrl, "_blank", "noopener,noreferrer");
+      }
       closeCommandPalette();
     }
   }
@@ -788,6 +871,12 @@ function renderPaletteResults() {
   list.innerHTML = state.paletteResults
     .map((item, idx) => {
       const isSelected = idx === state.paletteSelectedIndex;
+      const safeColor = sanitizeColor(item.color);
+      const safeName = escapeHtml(item.name);
+      const safeDesc = escapeHtml(item.description);
+      const safeCategory = escapeHtml(CATEGORIES[item.category]?.label || item.category);
+      const initials = escapeHtml(item.name.substring(0, 2).toUpperCase());
+
       return `
       <div 
         onclick="launchPaletteItem(${idx})"
@@ -797,24 +886,16 @@ function renderPaletteResults() {
             : "text-slate-300 hover:bg-slate-800/60"
         }">
         <div class="flex items-center gap-3 min-w-0">
-          <div class="w-8 h-8 rounded-lg flex items-center justify-center text-xs font-bold shrink-0" style="background: ${
-            item.color
-          }25; color: ${item.color}">
-            ${item.name.substring(0, 2).toUpperCase()}
+          <div class="w-8 h-8 rounded-lg flex items-center justify-center text-xs font-bold shrink-0" style="background: ${safeColor}25; color: ${safeColor}">
+            ${initials}
           </div>
           <div class="min-w-0">
-            <div class="text-xs font-medium text-slate-200 truncate">${
-              item.name
-            }</div>
-            <div class="text-[10px] text-slate-400 truncate">${
-              item.description
-            }</div>
+            <div class="text-xs font-medium text-slate-200 truncate">${safeName}</div>
+            <div class="text-[10px] text-slate-400 truncate">${safeDesc}</div>
           </div>
         </div>
         <div class="flex items-center gap-2 shrink-0">
-          <span class="text-[10px] font-mono text-slate-500">${
-            CATEGORIES[item.category]?.label || item.category
-          }</span>
+          <span class="text-[10px] font-mono text-slate-500">${safeCategory}</span>
           <span class="px-1.5 py-0.5 rounded bg-slate-800 text-[10px] font-mono text-slate-400">↵ Abrir</span>
         </div>
       </div>
@@ -832,7 +913,10 @@ function renderPaletteResults() {
 function launchPaletteItem(idx) {
   const item = state.paletteResults[idx];
   if (item) {
-    window.open(item.url, "_blank", "noopener,noreferrer");
+    const safeUrl = sanitizeUrl(item.url);
+    if (safeUrl && safeUrl !== "#") {
+      window.open(safeUrl, "_blank", "noopener,noreferrer");
+    }
     closeCommandPalette();
   }
 }
@@ -1078,47 +1162,70 @@ function closePromptVaultDrawer() {
   if (drawer) drawer.classList.add("hidden");
 }
 
+let promptVaultEventsAttached = false;
+function initPromptVaultEvents() {
+  const container = document.getElementById("prompt-vault-list");
+  if (!container || promptVaultEventsAttached) return;
+  promptVaultEventsAttached = true;
+  container.addEventListener("click", (e) => {
+    const btn = e.target.closest("[data-action]");
+    if (!btn) return;
+    const action = btn.dataset.action;
+    const promptId = btn.dataset.promptId;
+    if (action === "copy-prompt" && promptId) {
+      copyPromptContent(promptId);
+    } else if (action === "use-prompt" && promptId) {
+      sendPromptToPlayground(promptId);
+    }
+  });
+}
+
 function renderPromptsList() {
   const container = document.getElementById("prompt-vault-list");
   if (!container) return;
 
   container.innerHTML = state.prompts
     .map(
-      (p) => `
+      (p) => {
+        const safeId = sanitizeId(p.id);
+        const safeTitle = escapeHtml(p.title);
+        const safeDesc = escapeHtml(p.description);
+        const safeTags = (p.tags || [])
+          .map((t) => `<span class="text-[9px] text-slate-500 font-mono">#${escapeHtml(t)}</span>`)
+          .join(" ");
+
+        return `
     <div class="glass-panel p-4 rounded-xl border border-slate-800 flex flex-col justify-between group">
       <div>
         <div class="flex items-start justify-between gap-2 mb-1.5">
-          <h4 class="text-xs font-semibold text-slate-200">${p.title}</h4>
+          <h4 class="text-xs font-semibold text-slate-200">${safeTitle}</h4>
           <button 
-            onclick="copyPromptContent('${p.id}')"
+            data-action="copy-prompt"
+            data-prompt-id="${safeId}"
             class="px-2.5 py-1 rounded-lg bg-indigo-600/30 hover:bg-indigo-600 text-indigo-300 hover:text-white text-[10px] font-mono border border-indigo-500/30 transition-all">
             Copiar
           </button>
         </div>
-        <p class="text-[11px] text-slate-400 mb-3">${p.description}</p>
+        <p class="text-[11px] text-slate-400 mb-3">${safeDesc}</p>
         <div class="p-2.5 rounded-lg bg-slate-900/90 text-slate-300 font-mono text-[10px] whitespace-pre-wrap border border-slate-800/80 max-h-24 overflow-y-auto mb-2">
 ${escapeHtml(p.content)}
         </div>
       </div>
       <div class="flex items-center justify-between mt-2 pt-2 border-t border-slate-800/50">
         <div class="flex gap-1">
-          ${p.tags
-            .map(
-              (t) =>
-                `<span class="text-[9px] text-slate-500 font-mono">#${t}</span>`
-            )
-            .join(" ")}
+          ${safeTags}
         </div>
-        <button onclick="sendPromptToPlayground('${
-          p.id
-        }')" class="text-[10px] text-slate-400 hover:text-slate-200 font-mono">
+        <button data-action="use-prompt" data-prompt-id="${safeId}" class="text-[10px] text-slate-400 hover:text-slate-200 font-mono">
           Usar no Playground →
         </button>
       </div>
     </div>
-  `
+  `;
+      }
     )
     .join("");
+
+  initPromptVaultEvents();
 }
 
 function copyPromptContent(promptId) {

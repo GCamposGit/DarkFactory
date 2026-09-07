@@ -6,6 +6,7 @@ import asyncio
 import os
 import secrets
 from typing import List, Optional
+from pydantic import BaseModel
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Response, status
 
 from hub.backend.models import (
@@ -40,6 +41,11 @@ from hub.backend.models import (
 )
 from hub.backend.service import HubService
 from core.usage.models import AccountUsageReport, ModelCallEvent, ModelUsageReport
+from core.usage.api_credits import (
+    ApiCreditsReport,
+    CreditAccountUpdateRequest,
+    ProviderCreditCard,
+)
 from core.roadmap.models import (
     ConfidenceLevel,
     DeliveryStatus,
@@ -53,6 +59,18 @@ from core.roadmap.models import (
     RoadmapSourceDocument,
 )
 from core.roadmap.store import RoadmapUnavailableError
+from core.demands.models import (
+    DemandInput,
+    DemandSpecificationGuidance,
+    GrillAnswersPayload,
+    GrillRefinementResult,
+    GrillSession,
+    UserTicket,
+)
+from core.harness.test_subagent import (
+    DistilledTestReport,
+    TestExecutionInstruction,
+)
 
 router = APIRouter(prefix="/api", tags=["DarkHub API"])
 roadmap_router = APIRouter(prefix="/projects", tags=["Operational Roadmap"])
@@ -276,14 +294,43 @@ def toggle_pin(
     return updated
 
 
+class SessionInfoResponse(BaseModel):
+    session_token: str
+    is_active: bool = True
+
+
+@router.get("/session", response_model=SessionInfoResponse)
+def get_session_info(
+    service: HubService = Depends(get_hub_service),
+) -> SessionInfoResponse:
+    """Return active local session token for client authentication (DF-08)."""
+    return SessionInfoResponse(session_token=service.session_token)
+
+
 @router.get("/health/ping", response_model=HealthCheckResult)
 def ping_service(
     service_id: str = Query(..., description="ID of the service"),
-    url: str = Query(..., description="URL to ping"),
+    url: Optional[str] = Query(default=None, description="Optional URL to verify against registered service"),
     service: HubService = Depends(get_hub_service),
 ) -> HealthCheckResult:
-    """Ping a specific URL to check availability and latency."""
-    return service.ping_url(service_id=service_id, url=url)
+    """
+    Ping a registered service URL to check availability and latency (DF-08).
+    Strictly requires a registered service ID. Rejects arbitrary SSRF targets.
+    """
+    registered = service.get_service(service_id)
+    if not registered:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Service '{service_id}' not found in registered catalog",
+        )
+
+    if url and url.strip().rstrip("/") != registered.url.strip().rstrip("/"):
+        raise HTTPException(
+            status_code=400,
+            detail="Provided URL does not match registered service URL",
+        )
+
+    return service.ping_url(service_id=service_id, url=registered.url)
 
 
 @router.get("/health/ping-all", response_model=List[HealthCheckResult])
@@ -650,6 +697,147 @@ def list_visual_gallery_endpoint(
 ) -> list:
     """List all previously generated visual assets and their metadata."""
     return service.list_visual_assets()
+
+
+# ==============================================================================
+# API Credits & Billing Monitor ($) Endpoints
+# ==============================================================================
+
+
+@router.get("/credits", response_model=ApiCreditsReport)
+def get_api_credits_endpoint(
+    refresh: bool = Query(default=False, description="Force fresh live probes"),
+    service: HubService = Depends(get_hub_service),
+) -> ApiCreditsReport:
+    """Returns API credit balances and monthly expenditures in USD ($)."""
+    return service.get_api_credits_report(force=refresh)
+
+
+@router.post("/credits/refresh", response_model=ApiCreditsReport)
+def refresh_api_credits_endpoint(
+    service: HubService = Depends(get_hub_service),
+) -> ApiCreditsReport:
+    """Forces live external refresh of API credit balances and expenditures ($)."""
+    return service.refresh_api_credits_report()
+
+
+@router.post("/credits/accounts/{provider_id}", response_model=ProviderCreditCard)
+def update_api_credit_account_endpoint(
+    provider_id: str,
+    payload: CreditAccountUpdateRequest,
+    service: HubService = Depends(get_hub_service),
+) -> ProviderCreditCard:
+    """Updates manual/synchronized credit values for a specific provider."""
+    return service.update_credit_account(provider_id, payload)
+
+
+# ==============================================================================
+# User Demands & Backlog Endpoints
+# ==============================================================================
+
+
+@router.post("/demands/guide", response_model=DemandSpecificationGuidance)
+def guide_user_demand(
+    payload: DemandInput,
+    force_heuristic: bool = Query(default=False, description="Force deterministic script guidance ($0)"),
+    timeout: Optional[float] = Query(default=None, description="Timeout in seconds for local model guidance"),
+    service: HubService = Depends(get_hub_service),
+) -> DemandSpecificationGuidance:
+    """Analyze, refine, and structure a user demand using local model or script ($0.00)."""
+    return service.guide_demand(payload, force_heuristic=force_heuristic, timeout=timeout)
+
+
+@router.get("/demands/next-id")
+def get_next_demand_id(
+    project_id: str = Query(default="darkfac", description="Project identifier"),
+    service: HubService = Depends(get_hub_service),
+) -> dict[str, str]:
+    """Get the next sequential ticket ID for a project."""
+    next_id = service.get_next_ticket_id(project_id)
+    return {"project_id": project_id, "next_id": next_id}
+
+
+@router.post("/demands/tickets", response_model=UserTicket, status_code=status.HTTP_201_CREATED)
+def create_demand_ticket(
+    payload: UserTicket,
+    service: HubService = Depends(get_hub_service),
+) -> UserTicket:
+    """Insert a specified user demand ticket into the development backlog."""
+    return service.create_demand_ticket(payload)
+
+
+@router.get("/demands/tickets", response_model=List[UserTicket])
+def list_demand_tickets(
+    project_id: Optional[str] = Query(default=None),
+    status: Optional[str] = Query(default=None),
+    service: HubService = Depends(get_hub_service),
+) -> List[UserTicket]:
+    """List user demand tickets in the backlog."""
+    return service.list_demand_tickets(project_id=project_id, status=status)
+
+
+@router.get("/demands/tickets/{ticket_id}", response_model=UserTicket)
+def get_demand_ticket(
+    ticket_id: str,
+    service: HubService = Depends(get_hub_service),
+) -> UserTicket:
+    """Retrieve details for a single demand ticket."""
+    ticket = service.get_demand_ticket(ticket_id)
+    if not ticket:
+        raise HTTPException(status_code=404, detail=f"Demand ticket '{ticket_id}' not found")
+    return ticket
+
+
+@router.patch("/demands/tickets/{ticket_id}/status", response_model=UserTicket)
+def update_demand_ticket_status(
+    ticket_id: str,
+    status_value: DeliveryStatus = Query(..., alias="status"),
+    notes: Optional[str] = Query(default=None),
+    service: HubService = Depends(get_hub_service),
+) -> UserTicket:
+    """Update status of a demand ticket in the backlog."""
+    try:
+        return service.update_demand_ticket_status(ticket_id, status_value, notes=notes)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.post("/demands/tickets/{ticket_id}/grill", response_model=GrillSession)
+def start_demand_grill(
+    ticket_id: str,
+    force_heuristic: bool = Query(default=False, description="Force deterministic script questions ($0)"),
+    timeout: Optional[float] = Query(default=None, description="Timeout in seconds"),
+    service: HubService = Depends(get_hub_service),
+) -> GrillSession:
+    """Start an interactive or automated Q&A Grill session to clarify a demand ticket."""
+    try:
+        return service.start_demand_grill(ticket_id, force_heuristic=force_heuristic, timeout=timeout)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.post("/demands/tickets/{ticket_id}/grill/submit", response_model=GrillRefinementResult)
+def submit_demand_grill(
+    ticket_id: str,
+    payload: GrillAnswersPayload,
+    service: HubService = Depends(get_hub_service),
+) -> GrillRefinementResult:
+    """Submit answers from a grill session and refine the ticket in the backlog."""
+    try:
+        return service.submit_demand_grill(ticket_id, answers=payload.answers)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.post("/harness/run-tests", response_model=DistilledTestReport)
+def run_tests(
+    instruction: TestExecutionInstruction,
+    service: HubService = Depends(get_hub_service),
+) -> DistilledTestReport:
+    """Execute test suite via headless test subagent engine and return distilled report."""
+    return service.run_tests(instruction)
+
+
 
 
 

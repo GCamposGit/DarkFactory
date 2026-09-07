@@ -3,8 +3,57 @@ Data models and schemas with strict Pydantic v2 typing for DarkHub.
 """
 
 from enum import Enum
+import re
 from typing import List, Optional, Dict, Any
-from pydantic import BaseModel, Field, HttpUrl
+import urllib.parse
+from pydantic import BaseModel, Field, field_validator
+
+COLOR_HEX_REGEX = re.compile(r"^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$")
+ID_SLUG_REGEX = re.compile(r"^[a-zA-Z0-9_-]{1,100}$")
+
+
+def validate_safe_url(v: str) -> str:
+    if not isinstance(v, str):
+        raise ValueError("URL must be a string.")
+    cleaned = v.strip()
+    if not cleaned:
+        raise ValueError("URL cannot be empty.")
+    if any(ord(c) < 32 or ord(c) == 127 for c in cleaned):
+        raise ValueError("URL contains illegal control characters.")
+    
+    parsed = urllib.parse.urlparse(cleaned)
+    scheme = parsed.scheme.lower()
+    if scheme not in ("http", "https"):
+        raise ValueError(
+            f"Invalid URL protocol '{scheme}'. Only 'http' and 'https' protocols are permitted."
+        )
+    if not parsed.netloc:
+        raise ValueError("URL must contain a valid network location/host.")
+    return cleaned
+
+
+def validate_safe_color(v: Optional[str]) -> Optional[str]:
+    if v is None:
+        return v
+    if not isinstance(v, str):
+        raise ValueError("Color must be a string.")
+    cleaned = v.strip()
+    if not COLOR_HEX_REGEX.match(cleaned):
+        raise ValueError(
+            f"Invalid color '{v}'. Expected valid hexadecimal color code (e.g. #3b82f6 or #fff)."
+        )
+    return cleaned
+
+
+def validate_safe_id(v: str) -> str:
+    if not isinstance(v, str):
+        raise ValueError("ID must be a string.")
+    cleaned = v.strip()
+    if not ID_SLUG_REGEX.match(cleaned):
+        raise ValueError(
+            f"Invalid ID '{v}'. ID must be 1-100 characters and contain only letters, numbers, dashes, or underscores."
+        )
+    return cleaned
 
 
 class ServiceCategory(str, Enum):
@@ -29,6 +78,22 @@ class ServiceItem(BaseModel):
     pinned: bool = Field(default=False, description="Whether pinned in quick dock")
     is_local: bool = Field(default=False, description="Whether hosted locally (e.g. localhost)")
 
+    @field_validator("id")
+    @classmethod
+    def check_id(cls, v: str) -> str:
+        return validate_safe_id(v)
+
+    @field_validator("url")
+    @classmethod
+    def check_url(cls, v: str) -> str:
+        return validate_safe_url(v)
+
+    @field_validator("color")
+    @classmethod
+    def check_color(cls, v: str) -> str:
+        res = validate_safe_color(v)
+        return res or "#3b82f6"
+
 
 class ServiceCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=100)
@@ -42,6 +107,17 @@ class ServiceCreate(BaseModel):
     pinned: bool = Field(default=False)
     is_local: bool = Field(default=False)
 
+    @field_validator("url")
+    @classmethod
+    def check_url(cls, v: str) -> str:
+        return validate_safe_url(v)
+
+    @field_validator("color")
+    @classmethod
+    def check_color(cls, v: str) -> str:
+        res = validate_safe_color(v)
+        return res or "#3b82f6"
+
 
 class ServiceUpdate(BaseModel):
     name: Optional[str] = Field(default=None, min_length=1, max_length=100)
@@ -54,6 +130,18 @@ class ServiceUpdate(BaseModel):
     is_favorite: Optional[bool] = None
     pinned: Optional[bool] = None
     is_local: Optional[bool] = None
+
+    @field_validator("url")
+    @classmethod
+    def check_url(cls, v: Optional[str]) -> Optional[str]:
+        if v is not None:
+            return validate_safe_url(v)
+        return v
+
+    @field_validator("color")
+    @classmethod
+    def check_color(cls, v: Optional[str]) -> Optional[str]:
+        return validate_safe_color(v)
 
 
 class HealthStatus(str, Enum):
