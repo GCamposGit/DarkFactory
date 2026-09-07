@@ -12,6 +12,16 @@ if hasattr(sys.stdout, "reconfigure"):
 if hasattr(sys.stderr, "reconfigure"):
     sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
+from datetime import UTC, datetime
+import uuid
+
+from core.execution.budget import ExecutionBudgetManager
+from core.execution.contracts import AttemptOutcome, AttemptRecord, Budget, UnknownCostPolicy
+from core.execution.providers import (
+    ModelProvider,
+    ProviderResponse,
+    get_model_provider,
+)
 from core.game.factory import (
     build_asset_evidence,
     validate_local_contribution,
@@ -22,8 +32,6 @@ from core.game.factory import (
 )
 from core.game.models import GameManifest, ModelEvidence
 from core.visual import AssetType, AspectRatio, VisualPromptSpec, VisualStudio, VisualTheme
-from hub.backend.models import PlaygroundProvider, UnifiedGenerateRequest, UnifiedGenerateResponse
-from hub.backend.service import HubService
 
 
 LOCAL_MODEL = "qwen-code-fast:latest"
@@ -49,40 +57,74 @@ def build_review_prompt(trace: dict) -> str:
 
 
 def _call_model(
-    service: HubService,
+    provider: ModelProvider,
     tier: str,
-    provider: PlaygroundProvider,
     model: str,
     prompt: str,
     max_tokens: int,
+    budget_manager: ExecutionBudgetManager | None = None,
+    budget_id: str | None = None,
 ) -> Tuple[str, ModelEvidence]:
-    response: UnifiedGenerateResponse = service.generate_unified(
-        UnifiedGenerateRequest(
-            provider=provider,
-            model=model,
-            prompt=prompt,
-            system="Return only the requested JSON object. No markdown, prose, links, or code fences.",
-            temperature=0.0,
-            max_tokens=max_tokens,
+    attempt_id = f"game-{tier}-{uuid.uuid4().hex[:8]}"
+    reservation = None
+    if budget_manager is not None and budget_id is not None:
+        reservation = budget_manager.reserve(
+            budget_id=budget_id,
+            attempt_id=attempt_id,
+            amount=0.05,
         )
-    )
-    text = response.response.strip()
-    if not text:
-        raise RuntimeError(f"{tier} returned an empty response")
-    evidence = ModelEvidence(
-        tier=tier,
-        provider=response.provider.value,
-        requested_model=model,
-        returned_model=response.model,
-        response_sha256=hashlib.sha256(text.encode("utf-8")).hexdigest(),
-        duration_ms=float(response.total_duration_ms or 0.0),
-        tokens_used=response.tokens_used,
-        cost_usd=response.cost_usd,
-    )
-    return text, evidence
+
+    try:
+        response: ProviderResponse = provider.generate(
+            prompt=prompt,
+            model=model,
+            system_prompt="Return only the requested JSON object. No markdown, prose, links, or code fences.",
+            max_tokens=max_tokens,
+            temperature=0.0,
+        )
+        text = response.text.strip()
+        if not text:
+            raise RuntimeError(f"{tier} returned an empty response")
+
+        cost = response.measured_cost if response.measured_cost is not None else response.estimated_cost
+
+        if budget_manager is not None and reservation is not None:
+            attempt_rec = AttemptRecord(
+                attempt_id=attempt_id,
+                input_artifact_hash=hashlib.sha256(prompt.encode("utf-8")).hexdigest(),
+                output_artifact_hash=hashlib.sha256(text.encode("utf-8")).hexdigest(),
+                mode="live",
+                tokens=response.total_tokens,
+                measured_cost=response.measured_cost,
+                estimated_cost=response.estimated_cost,
+                latency=response.latency_seconds,
+                outcome=AttemptOutcome.SUCCEEDED,
+                timestamp=datetime.now(UTC),
+            )
+            budget_manager.commit(reservation.reservation_id, attempt_rec)
+
+        backend = (response.metadata or {}).get("backend") or getattr(provider, "provider_id", "unified")
+        if backend not in ("ollama", "openrouter", "mock", "unified"):
+            backend = "unified"
+
+        evidence = ModelEvidence(
+            tier=tier,
+            provider=backend,
+            requested_model=model,
+            returned_model=response.model,
+            response_sha256=hashlib.sha256(text.encode("utf-8")).hexdigest(),
+            duration_ms=round(response.latency_seconds * 1000, 1),
+            tokens_used=response.total_tokens,
+            cost_usd=cost,
+        )
+        return text, evidence
+    except Exception as exc:
+        if budget_manager is not None and reservation is not None:
+            budget_manager.release(reservation.reservation_id, reason=str(exc))
+        raise
 
 
-def _generate_assets(output_dir: Path) -> List:
+def _generate_assets(output_dir: Path, offline: bool = False) -> List:
     assets_dir = output_dir / "assets"
     studio = VisualStudio(output_dir=assets_dir)
     shared_prompt = (
@@ -109,7 +151,8 @@ def _generate_assets(output_dir: Path) -> List:
             aspect_ratio=AspectRatio.RATIO_16_9,
             prompt=shared_prompt,
             model_override=FAST_IMAGE_MODEL,
-            strict_provider=True,
+            strict_provider=not offline,
+            offline=offline,
         )
     )
     frontier = studio.create_asset(
@@ -121,7 +164,8 @@ def _generate_assets(output_dir: Path) -> List:
             prompt=shared_prompt,
             model_override=FRONTIER_IMAGE_MODEL,
             high_res=True,
-            strict_provider=True,
+            strict_provider=not offline,
+            offline=offline,
         )
     )
     return [
@@ -131,43 +175,69 @@ def _generate_assets(output_dir: Path) -> List:
     ]
 
 
-def build_live(output_dir: Path, seed: int) -> dict:
-    service = HubService()
+def build_live(
+    output_dir: Path,
+    seed: int = 0,
+    provider: ModelProvider | None = None,
+    budget_manager: ExecutionBudgetManager | None = None,
+    budget_id: str | None = None,
+    offline_assets: bool = False,
+) -> dict:
+    if provider is None:
+        provider = get_model_provider("auto")
+    if budget_manager is None:
+        budget_manager = ExecutionBudgetManager()
+    if budget_id is None:
+        budget_id = f"echo-garden-build-{uuid.uuid4().hex[:8]}"
+        budget_manager.register_budget(
+            budget_id,
+            Budget(
+                currency="USD",
+                ceiling=10.0,
+                concurrency_limit=2,
+                max_attempts=10,
+                unknown_cost_policy=UnknownCostPolicy.ESTIMATE,
+            ),
+        )
+
     local_text, local_evidence = _call_model(
-        service,
+        provider,
         "local_fast",
-        PlaygroundProvider.OLLAMA,
         LOCAL_MODEL,
         "Design terse UI copy for a three-action deterministic puzzle. Return exactly "
         '{"tagline":"8-90 chars","move_labels":{"weave":"2-18 chars","echo":"2-18 chars","ground":"2-18 chars"}}.',
         180,
+        budget_manager=budget_manager,
+        budget_id=budget_id,
     )
     local = validate_local_contribution(local_text)
 
     strategy_text, strategy_evidence = _call_model(
-        service,
+        provider,
         "balanced_cloud",
-        PlaygroundProvider.OPENROUTER,
         BALANCED_MODEL,
         "Solve this deterministic coding fixture. Start energies are [2,4,6]. Moves are "
         "weave=[1,0,-1], echo=[-1,1,0], ground=[0,-1,1]. From turn 2 onward, also add the previous move delta rotated right: [a,b,c] becomes [c,a,b]. Win on turn 3-6 when max-min <= 1. "
         'Return exactly one JSON object shaped like {"moves":["weave","ground","weave"],"rationale":"8-240 chars"}. '
         'The moves array must have 3-6 items. Every item must be exactly one enum value: "weave", "echo", or "ground"; never join alternatives with punctuation.',
         220,
+        budget_manager=budget_manager,
+        budget_id=budget_id,
     )
     strategy, trace = validate_strategy_contribution(strategy_text, seed=seed)
 
     review_prompt = build_review_prompt(trace)
     review_text, review_evidence = _call_model(
-        service,
+        provider,
         "frontier_cloud",
-        PlaygroundProvider.OPENROUTER,
         FRONTIER_MODEL,
         review_prompt,
         1200,
+        budget_manager=budget_manager,
+        budget_id=budget_id,
     )
     review = validate_review_contribution(review_text)
-    assets = _generate_assets(output_dir)
+    assets = _generate_assets(output_dir, offline=offline_assets)
     manifest = GameManifest(
         seed=seed,
         local_contribution=local,
@@ -177,7 +247,8 @@ def build_live(output_dir: Path, seed: int) -> dict:
         assets=assets,
     )
     manifest_path, html_path = write_game_artifacts(manifest, output_dir)
-    verification = verify_game_artifacts(output_dir)
+    is_mock = provider is not None and getattr(provider, "provider_id", "") in ("mock", "mock-provider")
+    verification = verify_game_artifacts(output_dir, allow_mock=is_mock)
     return {
         **verification,
         "manifest_path": str(manifest_path.resolve()),
@@ -187,6 +258,7 @@ def build_live(output_dir: Path, seed: int) -> dict:
             + sum(asset.cost_usd for asset in assets),
             6,
         ),
+        "budget_id": budget_id,
     }
 
 

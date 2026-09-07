@@ -46,6 +46,7 @@ from hub.backend.models import (
     VisualGenerateRequest,
     VisualIllustrateRequest,
 )
+from core.execution.providers import get_openrouter_api_key
 from core.content import (
     ContentEngine,
     AntiSlopLinter,
@@ -873,15 +874,7 @@ class HubService:
 
     def get_openrouter_key(self) -> Optional[str]:
         """Recovers OpenRouter API key from environment variable or Windows registry."""
-        key = os.environ.get("OPENROUTER_API_KEY")
-        if not key and sys.platform == "win32":
-            try:
-                import winreg
-                with winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Environment") as k:
-                    key, _ = winreg.QueryValueEx(k, "OPENROUTER_API_KEY")
-            except Exception:
-                pass
-        return key.strip() if (key and key.strip()) else None
+        return get_openrouter_api_key()
 
     def get_openrouter_status(self) -> OpenRouterStatusResponse:
         """Inspects OpenRouter authentication, balance/usage, and curated frontier models."""
