@@ -8,6 +8,7 @@ import secrets
 from typing import List, Optional
 from pydantic import BaseModel
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Response, status
+from fastapi.responses import RedirectResponse
 
 from hub.backend.models import (
     ExportCatalogResponse,
@@ -25,6 +26,7 @@ from hub.backend.models import (
     ServiceCategory,
     ServiceCreate,
     ServiceItem,
+    ServiceLaunchResponse,
     ServiceUpdate,
     UnifiedGenerateRequest,
     UnifiedGenerateResponse,
@@ -292,6 +294,44 @@ def toggle_pin(
     if not updated:
         raise HTTPException(status_code=404, detail=f"Service '{service_id}' not found")
     return updated
+
+
+@router.post("/services/{service_id}/launch", response_model=ServiceLaunchResponse)
+def launch_service_endpoint(
+    service_id: str,
+    timeout: float = Query(default=5.0, ge=1.0, le=30.0, description="Max seconds to wait for service readiness"),
+    service: HubService = Depends(get_hub_service),
+) -> ServiceLaunchResponse:
+    """Launch a configured local service in background if offline, waiting for health confirmation."""
+    try:
+        return service.launch_service(service_id=service_id, max_wait_sec=timeout)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to launch service: {exc}") from exc
+
+
+@router.get("/services/{service_id}/open")
+def open_service_endpoint(
+    service_id: str,
+    timeout: float = Query(default=5.0, ge=1.0, le=30.0, description="Max seconds to wait for service readiness"),
+    service: HubService = Depends(get_hub_service),
+) -> RedirectResponse:
+    """
+    Launch local service if offline, wait for readiness, and redirect browser to the target service URL.
+    For non-local or non-launchable services, redirects immediately to service URL.
+    """
+    try:
+        target_url = service.get_service_launch_target(service_id=service_id, max_wait_sec=timeout)
+        return RedirectResponse(url=target_url, status_code=status.HTTP_307_TEMPORARY_REDIRECT)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to open service: {exc}") from exc
 
 
 class SessionInfoResponse(BaseModel):

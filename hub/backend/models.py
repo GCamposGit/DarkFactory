@@ -77,6 +77,7 @@ class ServiceItem(BaseModel):
     is_favorite: bool = Field(default=False, description="Whether marked as favorite")
     pinned: bool = Field(default=False, description="Whether pinned in quick dock")
     is_local: bool = Field(default=False, description="Whether hosted locally (e.g. localhost)")
+    launch_script: Optional[str] = Field(default=None, description="Optional relative or absolute python script to launch service if offline")
 
     @field_validator("id")
     @classmethod
@@ -106,6 +107,7 @@ class ServiceCreate(BaseModel):
     is_favorite: bool = Field(default=False)
     pinned: bool = Field(default=False)
     is_local: bool = Field(default=False)
+    launch_script: Optional[str] = Field(default=None)
 
     @field_validator("url")
     @classmethod
@@ -130,6 +132,7 @@ class ServiceUpdate(BaseModel):
     is_favorite: Optional[bool] = None
     pinned: Optional[bool] = None
     is_local: Optional[bool] = None
+    launch_script: Optional[str] = None
 
     @field_validator("url")
     @classmethod
@@ -142,6 +145,14 @@ class ServiceUpdate(BaseModel):
     @classmethod
     def check_color(cls, v: Optional[str]) -> Optional[str]:
         return validate_safe_color(v)
+
+
+class ServiceLaunchResponse(BaseModel):
+    service_id: str = Field(..., description="ID of the service")
+    url: str = Field(..., description="Destination URL of the service")
+    status: str = Field(..., description="Status after launch attempt ('online', 'already_running', 'starting', 'failed')")
+    launched: bool = Field(..., description="Whether a new background process was spawned")
+    message: str = Field(default="", description="Descriptive status message")
 
 
 class HealthStatus(str, Enum):

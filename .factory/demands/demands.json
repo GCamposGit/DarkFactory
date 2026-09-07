@@ -165,7 +165,7 @@
     "project_id": "darkfac",
     "title": "Ajustar link para Canalleto na home para iniciar .py antes de redirecionar para localhost",
     "origin": "user",
-    "status": "planned",
+    "status": "completed",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -189,10 +189,19 @@
       "Redirecionamento para localhost é realizado corretamente após a inicialização do .py",
       "Nenhum erro ocorre durante o processo de navegação"
     ],
-    "suggested_files": [],
+    "suggested_files": [
+      "hub/backend/models.py",
+      "hub/backend/service.py",
+      "hub/backend/api.py",
+      "hub/data/services.json",
+      "hub/data/default_services.json",
+      "hub/frontend/app.js",
+      "run_canaletto.py",
+      "tests/test_ajustar_link_para_canalle.py"
+    ],
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-09-07T10:03:32.274806Z",
-    "updated_at": "2026-09-07T10:03:32.274806Z"
+    "updated_at": "2026-09-07T10:18:00.000000Z"
   }
 ]

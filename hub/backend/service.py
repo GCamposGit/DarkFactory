@@ -9,6 +9,7 @@ import logging
 import os
 import re
 import secrets
+import subprocess
 import sys
 import time
 import urllib.error
@@ -35,6 +36,7 @@ from hub.backend.models import (
     ServiceCategory,
     ServiceCreate,
     ServiceItem,
+    ServiceLaunchResponse,
     ServiceUpdate,
     UnifiedGenerateRequest,
     UnifiedGenerateResponse,
@@ -237,6 +239,7 @@ class HubService:
         )
 
         repository_root = roadmap_root or Path(__file__).resolve().parents[2]
+        self.project_root = repository_root
         self.test_subagent_engine = TestSubagentEngine(project_root=repository_root)
         self.roadmap = build_repository_roadmap_service(
             repository_root,
@@ -685,6 +688,113 @@ class HubService:
                     latency_ms=None,
                     error=str(get_exc),
                 )
+
+    def launch_service(
+        self,
+        service_id: str,
+        max_wait_sec: float = 5.0,
+        poll_interval: float = 0.2,
+    ) -> ServiceLaunchResponse:
+        """
+        Launches a configured local service script (e.g. run_canaletto.py) if currently offline.
+        Waits until the service is verified online via health probe before returning.
+        If already online, returns immediately with already_running status.
+        """
+        service = self.get_service(service_id)
+        if not service:
+            raise KeyError(f"Service '{service_id}' not found in catalog")
+
+        # Check if already online
+        current_health = self.ping_url(service_id=service.id, url=service.url, timeout_sec=1.0)
+        if current_health.status == HealthStatus.ONLINE:
+            return ServiceLaunchResponse(
+                service_id=service.id,
+                url=service.url,
+                status="already_running",
+                launched=False,
+                message=f"Service '{service.name}' is already running and accessible.",
+            )
+
+        # Resolve launch script path
+        script_name = service.launch_script
+        if not script_name and service_id == "canaletto-gallery":
+            script_name = "run_canaletto.py"
+
+        if not script_name:
+            raise ValueError(f"Service '{service_id}' does not define a launch_script.")
+
+        script_path = Path(script_name)
+        if not script_path.is_absolute():
+            script_path = (self.project_root / script_name).resolve()
+
+        if not script_path.exists():
+            raise FileNotFoundError(f"Launch script not found: {script_path}")
+
+        # Prepare environment and launch subprocess
+        env = os.environ.copy()
+        env["CANALETTO_NO_BROWSER"] = "1"
+        env["PYTHONUNBUFFERED"] = "1"
+
+        creationflags = 0
+        if sys.platform == "win32":
+            creationflags = subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
+
+        log_dir = self.project_root / ".factory" / "services"
+        log_dir.mkdir(parents=True, exist_ok=True)
+        log_file = log_dir / f"{service_id}.log"
+
+        cmd = [sys.executable, str(script_path), "--no-browser"]
+        logger.info(f"Launching service '{service_id}' with command: {' '.join(cmd)}")
+
+        with open(log_file, "a", encoding="utf-8") as out:
+            proc = subprocess.Popen(
+                cmd,
+                cwd=str(self.project_root),
+                env=env,
+                stdout=out,
+                stderr=out,
+                creationflags=creationflags,
+            )
+
+        # Wait for service to come online
+        start_wait = time.perf_counter()
+        is_online = False
+        while (time.perf_counter() - start_wait) < max_wait_sec:
+            time.sleep(poll_interval)
+            probe = self.ping_url(service_id=service.id, url=service.url, timeout_sec=0.5)
+            if probe.status == HealthStatus.ONLINE:
+                is_online = True
+                break
+
+        if is_online:
+            return ServiceLaunchResponse(
+                service_id=service.id,
+                url=service.url,
+                status="online",
+                launched=True,
+                message=f"Service '{service.name}' successfully launched (PID: {proc.pid}).",
+            )
+        else:
+            return ServiceLaunchResponse(
+                service_id=service.id,
+                url=service.url,
+                status="starting",
+                launched=True,
+                message=f"Service '{service.name}' process spawned (PID: {proc.pid}), still warming up.",
+            )
+
+    def get_service_launch_target(self, service_id: str, max_wait_sec: float = 5.0) -> str:
+        """
+        Ensures local service is launched if applicable and returns its destination URL.
+        """
+        service = self.get_service(service_id)
+        if not service:
+            raise KeyError(f"Service '{service_id}' not found in catalog")
+
+        if service.launch_script or service_id == "canaletto-gallery":
+            self.launch_service(service_id, max_wait_sec=max_wait_sec)
+
+        return service.url
 
     def get_ollama_status(self) -> OllamaStatusResponse:
         """Inspects local Ollama instance and lists installed models."""
