@@ -24,9 +24,14 @@ integração bloqueia a próxima transição.
 
 ## Loop por tarefa
 
-1. Leia `AGENTS.md`, `MISSION.md` e `FACTORY_RULES.md`; registre ticket, identidade,
-   escopo e comandos de aceitação.
+1. Leia `AGENTS.md`, `MISSION.md` e `FACTORY_RULES.md`; identifique a origem do ticket pela tag canônica:
+   - `user-demand` (`USR-XX`): Demanda manual aberta pelo usuário/dono do projeto (prioridade de escopo).
+   - `code-review`: Ticket aberto por auditoria de revisão adversarial ou inspeção de qualidade.
+   - `agent-feature`: Melhoria autônoma ou refatoração proposta pelos próprios agentes (self-improvement).
+   Registre ticket, identidade, escopo e comandos de aceitação.
 2. Faça o preflight da unidade de trabalho e do ambiente antes da primeira escrita.
+   Valide o ambiente de terminal (`python core/harness/terminal_env.py --check` ou `scripts/init_terminal.ps1`),
+   assegurando ancoragem na raiz e imunidade contra interferências de perfis (`-NoProfile`).
    Quando o ticket introduz o próprio teste focal, registre sua ausência esperada e
    prove coleta não vazia da suíte existente; não execute um caminho ainda inexistente.
 3. Implemente somente os caminhos possuídos pela tarefa.

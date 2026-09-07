@@ -14,6 +14,12 @@ Esta skill orienta o agente em uma base de código existente, extraindo os padr�
 
 ## Procedimento Passo a Passo
 
+### 0. Preflight do Ambiente de Terminal e Ancoragem de CWD
+Antes de qualquer leitura ou inventário inicial:
+- Assegure que o diretório de trabalho do processo corresponde exatamente à raiz do projeto (`ensure_clean_working_directory()` ou executando `scripts/init_terminal.ps1`).
+- Se invocar comandos no Windows via PowerShell, SEMPRE utilize as flags defensivas `-NoProfile -NonInteractive -ExecutionPolicy Bypass` para evitar que perfis globais do sistema (`Microsoft.PowerShell_profile.ps1`) sequestrem o diretório de trabalho para `C:\dev`.
+- Se a primeira leitura falhar, diagnostique e reancore o terminal imediatamente via `python core/harness/terminal_env.py --fix` em vez de fragmentar chamadas.
+
 ### 1. Detecção de Stack e Ecossistema
 Identifique os arquivos raiz de configuração:
 - Python: `pyproject.toml`, `requirements.txt`, `setup.py`

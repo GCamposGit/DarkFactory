@@ -61,3 +61,7 @@ Thumbs.db
 
 # Embedded reference repository; not part of the portable DarkFac source.
 /_reference_skills/
+
+# Isolated worktrees
+.worktrees/
+
