@@ -311,3 +311,118 @@ def test_api_visual_gallery():
     assert resp.status_code == 200
     data = resp.json()
     assert isinstance(data, list)
+
+
+# -------------------------------------------------------------
+# 6. DF-22 Safe Download, Explicit Fallback & Budget Manager Tests
+# -------------------------------------------------------------
+def test_safe_download_image_enforces_max_bytes(monkeypatch, tmp_path):
+    engine = CloudVisualEngine(output_dir=tmp_path)
+
+    # 1. Test Content-Length header exceeding limit
+    class _OversizedHeaderResponse:
+        def __init__(self) -> None:
+            self.headers = {"Content-Length": str(30 * 1024 * 1024)}
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return None
+
+        def read(self, chunk_size):
+            return b"0" * 1024
+
+    monkeypatch.setattr(
+        "core.visual.cloud_engine.urllib.request.urlopen",
+        lambda req, timeout: _OversizedHeaderResponse(),
+    )
+
+    dest = tmp_path / "oversized.png"
+    with pytest.raises(ValueError, match="exceeds maximum safe limit"):
+        engine._safe_download_image("https://example.com/huge.png", dest)
+    assert not dest.exists()
+
+    # 2. Test unannounced stream exceeding limit
+    class _OversizedStreamResponse:
+        def __init__(self) -> None:
+            self.headers = {}
+            self.chunks_read = 0
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return None
+
+        def read(self, chunk_size):
+            if self.chunks_read > 450:  # 450 * 64KB > 28MB (> 25MB safety limit)
+                return b""
+            self.chunks_read += 1
+            return b"X" * chunk_size
+
+    monkeypatch.setattr(
+        "core.visual.cloud_engine.urllib.request.urlopen",
+        lambda req, timeout: _OversizedStreamResponse(),
+    )
+
+    with pytest.raises(ValueError, match="Download stream exceeded maximum safe limit"):
+        engine._safe_download_image("https://example.com/infinite.png", dest)
+    assert not dest.exists()
+
+
+def test_cloud_engine_fallback_explicit_metadata(monkeypatch, tmp_path):
+    engine = CloudVisualEngine(output_dir=tmp_path)
+    monkeypatch.setattr(engine, "get_openrouter_key", lambda: "test-key")
+    monkeypatch.setattr(engine, "get_openai_key", lambda: None)
+    monkeypatch.setattr(
+        engine,
+        "_generate_openrouter_image",
+        lambda spec, key: (_ for _ in ()).throw(ConnectionResetError("OpenRouter gateway timeout")),
+    )
+
+    spec = VisualPromptSpec(
+        title="Architecture Diagram",
+        asset_type=AssetType.ARCHITECTURE_DIAGRAM,
+        theme=VisualTheme.BLUEPRINT_TECHNICAL,
+        strict_provider=False,
+    )
+    result = engine.generate(spec)
+    assert result.provider == "local_procedural"
+    assert result.fallback_occurred is True
+    assert result.original_provider_requested == "openrouter"
+    assert "OpenRouter gateway timeout" in result.fallback_reason
+    assert Path(result.file_path).exists()
+
+
+def test_visual_engine_execution_budget_manager_integration(tmp_path):
+    from core.execution.budget import ExecutionBudgetManager
+    from core.execution.contracts import Budget, UnknownCostPolicy, AttemptOutcome
+
+    db_path = tmp_path / "budget.sqlite"
+    mgr = ExecutionBudgetManager(db_path)
+    mgr.register_budget(
+        "test-visual-budget",
+        Budget(
+            currency="USD",
+            ceiling=5.0,
+            unknown_cost_policy=UnknownCostPolicy.ESTIMATE,
+        ),
+    )
+
+    engine = CloudVisualEngine(output_dir=tmp_path / "visuals")
+    spec = VisualPromptSpec(
+        title="Dev Pipeline",
+        asset_type=AssetType.APP_ICON,
+        offline=True,
+    )
+
+    result = engine.generate(spec, budget_manager=mgr, budget_id="test-visual-budget")
+    assert result.provider == "local_procedural"
+    assert Path(result.file_path).exists()
+
+    attempts = mgr.list_attempts("test-visual-budget")
+    assert len(attempts) == 1
+    assert attempts[0].outcome == AttemptOutcome.SUCCEEDED
+    assert attempts[0].mode == "offline"
+    assert attempts[0].attempt_id.startswith("visual-app_icon-")
