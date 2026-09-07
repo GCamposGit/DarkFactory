@@ -105,7 +105,12 @@ class RoadmapQueryService:
             sources_consulted=snapshot.sources_consulted,
             sources_unavailable=snapshot.sources_unavailable,
             policy=snapshot.derivation_policy,
+            telemetry=self.get_telemetry(project_id),
         )
+
+    def get_telemetry(self, project_id: str | None = None) -> dict[str, Any]:
+        """Expose operational and scale telemetry from the snapshot store."""
+        return self.store.get_telemetry(project_id)
 
     def get_source_document(self, project_id: str, source_id: str) -> RoadmapSourceDocument | None:
         self._ensure_project(project_id)
