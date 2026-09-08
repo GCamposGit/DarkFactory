@@ -20,15 +20,18 @@ obter uma baseline limpa.
 ### WT-03 — Identidade exclusiva e persistente
 
 Antes da escrita, persista em manifesto o ticket ID definitivo, título definitivo,
-owner, branch, caminho absoluto/cwd da worktree, SHA-base e lease. IDs ou títulos
+owner, branch, caminho absoluto/cwd da worktree, SHA-base e lease. `clientThreadId`
+de setup não é o task ID final: resolva e persista o ID real. IDs ou títulos
 temporários, campos vazios, branch detached ou reutilização de branch/worktree/owner
 bloqueiam o despacho.
 
 ### WT-04 — Lease com fencing e heartbeat
 
 Cada frente possui lease exclusivo, expiração e fencing token monotônico. Emita
-heartbeat periódico com task ID, owner, cwd, HEAD, fase e horário. Lease vencido,
-heartbeat ausente ou token antigo bloqueia escrita, conclusão e integração.
+heartbeat periódico em intervalos de no máximo 60 segundos com task ID, owner, cwd, HEAD, fase,
+último comando e horário. Dois intervalos sem revisão nova exigem auditoria do task;
+não presuma progresso apenas porque o status é `active`. Lease vencido, heartbeat
+ausente ou token antigo bloqueia escrita, conclusão e integração.
 
 ### WT-05 — Ownership por arquivo
 
@@ -40,9 +43,14 @@ o despacho; não resolva a colisão escolhendo silenciosamente um escritor.
 ### WT-06 — Preflight executável
 
 Registre caminho e versão do Python, confirme `python -m pytest --version`, prove um
-basetemp exclusivo e gravável, colete a suíte e valide os comandos focais. Python sem
-pytest, coleta vazia, PermissionError ou executor setup/refresh travado são falhas de
-ambiente: imponha timeout, preserve diagnóstico e não inicie a implementação.
+`--basetemp` novo, exclusivo e gravável, colete a suíte existente e valide os comandos
+focais que já existem. Quando o critério do ticket introduz um teste focal novo,
+registre a ausência esperada antes da escrita e prove coleta geral não vazia ou um
+teste adjacente existente; não execute o caminho inexistente. Após a primeira escrita,
+o novo teste focal deve existir e coletar ao menos um caso antes de ampliar a
+implementação. Python sem pytest, coleta geral vazia, PermissionError ou executor
+setup/refresh travado são falhas de ambiente: imponha timeout, preserve diagnóstico e
+não inicie a implementação.
 
 ### WT-07 — Escrita e commit seletivos
 
@@ -62,15 +70,17 @@ integração; commit sem o restante do contrato exige auditoria direta.
 
 É proibido fazer handoff para a raiz/check-out de integração dirty ou com escritor
 ativo. Encerre o escritor, preserve backup e restabeleça checkpoint limpo. Não tente
-desanexar ou trocar uma branch com alterações locais; em retry de handoff, reutilize a
-identidade persistida e primeiro prove branch, cwd, lease e estado Git.
+desanexar ou trocar uma branch com alterações locais. Se um handoff parcial falhar,
+audite stash, branch, worktree, cwd, lease e reachability antes do retry; reutilize a
+identidade persistida e nunca encadeie handoffs às cegas.
 
 ### WT-10 — Retry com RCA
 
 Falha ou resultado incerto de criação, executor setup/refresh, teste ou handoff gera
 RCA antes do retry. Defina timeout e limite de tentativas; reconcilie o estado existente
-em vez de criar outra task/worktree. Um segundo erro de detach não autoriza force nem
-perda de estado.
+em vez de criar outra task/worktree. Uma substituta só pode nascer após provar que a
+anterior não escreve mais e registrar a troca no manifesto. Um segundo erro de detach
+não autoriza force nem perda de estado.
 
 ### WT-11 — Integração topológica e validação conjunta
 
@@ -83,5 +93,6 @@ e marcadores de conflito. Um gate vermelho interrompe a cadeia.
 
 Remova worktree, branch temporária, lease e backup somente quando o commit seletivo
 estiver alcançável pela branch de integração, os gates focais e conjuntos estiverem
-verdes e não houver delta exclusivo no estado residual. Preserve tudo quando faltar
-prova; remoção forçada não é mecanismo de limpeza.
+verdes e não houver delta exclusivo no estado residual. Resolva e confira cada caminho
+absoluto antes da remoção. Preserve tudo quando faltar prova; remoção forçada não é
+mecanismo de limpeza.

@@ -1,0 +1,22 @@
+{
+  "steps": [
+    {
+      "name": "live_preflight_and_contract_tests",
+      "cmd": "python -m pytest tests/test_echo_garden.py tests/test_echo_garden_factory.py tests/test_visual_studio.py -v",
+      "quick": true,
+      "timeout_sec": 180
+    },
+    {
+      "name": "live_three_tier_game_build",
+      "cmd": "python -m core.game.cli build --live --output-dir .factory/e2e_game --seed 0",
+      "quick": false,
+      "timeout_sec": 900
+    },
+    {
+      "name": "headless_artifact_reverification",
+      "cmd": "python -m core.game.cli verify --output-dir .factory/e2e_game",
+      "quick": false,
+      "timeout_sec": 120
+    }
+  ]
+}

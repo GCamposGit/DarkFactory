@@ -289,6 +289,8 @@ def cmd_race(args):
     print(f" Cost Incurred:       ${result.total_cost_usd:.6f}")
     print(f" Cost Saved:          +${result.cost_saved_usd:.6f}")
     print(f" Verification Status: {'PASSED' if result.verification_passed else 'FAILED'}")
+    print(f" Execution Mode:      {result.verification_details.get('execution_mode', 'unknown')}")
+    print(f" Model Inference:     {'YES' if result.verification_details.get('model_inference_executed') else 'NO'}")
     print("=" * 70)
 
 

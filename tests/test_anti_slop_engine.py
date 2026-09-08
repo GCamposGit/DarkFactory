@@ -194,6 +194,24 @@ def test_engine_generate_commercial_proposal_offline(tmp_path):
     assert "ROI & Risk Mitigation" in resp.final_content
 
 
+def test_engine_generate_release_notes_offline_is_grounded(tmp_path):
+    engine = ContentEngine(storage_dir=tmp_path)
+    supplied = ["Atomic artifact publication", "Deterministic replay verification"]
+    req = ContentRequest(
+        topic="Echo Garden E2E",
+        content_type=ContentType.RELEASE_NOTES,
+        key_points=supplied,
+        offline=True,
+    )
+
+    resp = engine.generate(req)
+
+    assert all(point in resp.final_content for point in supplied)
+    assert "buffer overruns" not in resp.final_content
+    assert "Zero-downtime" not in resp.final_content
+    assert "No additional changes are claimed" in resp.final_content
+
+
 def test_engine_presets():
     for ctype in ContentType:
         preset = get_preset(ctype)
@@ -247,3 +265,130 @@ def test_api_content_presets():
     assert "linkedin_post" in types
     assert "technical_blog" in types
     assert "commercial_proposal" in types
+
+
+# -------------------------------------------------------------
+# 5. DF-22 Provider, Budget & Quality/Fallback Integration Tests
+# -------------------------------------------------------------
+def test_engine_with_injected_mock_provider(tmp_path):
+    from core.execution.providers import MockModelProvider
+
+    mock_text = (
+        "Distributed Consensus Invariants:\n"
+        "- Raft leader election enforces strict term monotonicity.\n"
+        "- Log replication commits only after majority quorum confirmation.\n"
+        "- State machines transition deterministically without side effects."
+    )
+    mock_provider = MockModelProvider(
+        provider_id="mock-qwen",
+        fixed_response=mock_text,
+    )
+    engine = ContentEngine(storage_dir=tmp_path, provider=mock_provider)
+    req = ContentRequest(
+        topic="Consensus Invariants",
+        content_type=ContentType.TECHNICAL_BLOG,
+        key_points=["Monotonic terms", "Majority quorum"],
+        offline=False,
+    )
+    resp = engine.generate(req)
+
+    assert resp.provider == "mock-qwen"
+    assert resp.model_used == "mock-model"
+    assert resp.fallback_occurred is False
+    assert resp.quality_rejected is False
+    assert "Distributed Consensus Invariants" in resp.final_content
+    assert resp.cost_usd is not None
+
+
+def test_engine_quality_rejection_explicit_tracking(tmp_path):
+    from core.execution.providers import MockModelProvider
+
+    # Slop text containing toxic buzzwords
+    toxic_text = (
+        "In today's fast-paced digital world, we must delve into the tapestry of AI "
+        "to unleash a game-changer paradigm shift and revolutionize systems."
+    )
+    mock_provider = MockModelProvider(
+        provider_id="mock-slop",
+        fixed_response=toxic_text,
+    )
+    engine = ContentEngine(storage_dir=tmp_path, provider=mock_provider)
+    req = ContentRequest(
+        topic="Modern AI",
+        content_type=ContentType.LINKEDIN_POST,
+        max_slop_threshold=15.0,
+        offline=False,
+    )
+    resp = engine.generate(req)
+
+    assert resp.quality_rejected is True
+    assert resp.rejection_reason is not None
+    assert "exceeded max threshold" in resp.rejection_reason
+    assert resp.initial_draft == toxic_text
+    assert resp.scrubbed is True
+    assert resp.final_slop_score < resp.initial_slop_score
+
+
+def test_engine_provider_fallback_explicit_tracking(tmp_path):
+    from core.execution.providers import MockModelProvider
+
+    class _FailingProvider(MockModelProvider):
+        def generate(self, *args, **kwargs):
+            raise ConnectionResetError("Remote model endpoint connection dropped")
+
+    failing_provider = _FailingProvider(provider_id="failing-cloud")
+    engine = ContentEngine(storage_dir=tmp_path, provider=failing_provider)
+    req = ContentRequest(
+        topic="Zero-Downtime Migration",
+        content_type=ContentType.LINKEDIN_POST,
+        offline=False,
+    )
+    resp = engine.generate(req)
+
+    assert resp.provider == "local_procedural"
+    assert resp.fallback_occurred is True
+    assert resp.original_provider_requested == "failing-cloud"
+    assert "Remote model endpoint connection dropped" in resp.fallback_reason
+    assert "Zero-Downtime Migration" in resp.final_content
+
+
+def test_engine_execution_budget_manager_integration(tmp_path):
+    from core.execution.budget import ExecutionBudgetManager
+    from core.execution.contracts import Budget, UnknownCostPolicy, AttemptOutcome
+    from core.execution.providers import MockModelProvider
+
+    db_path = tmp_path / "budget.sqlite"
+    mgr = ExecutionBudgetManager(db_path)
+    mgr.register_budget(
+        "test-content-budget",
+        Budget(
+            currency="USD",
+            ceiling=5.0,
+            unknown_cost_policy=UnknownCostPolicy.ESTIMATE,
+        ),
+    )
+
+    mock_provider = MockModelProvider(
+        provider_id="mock-budgeted",
+        fixed_response="Deterministic high-throughput append-only log architecture.",
+    )
+    engine = ContentEngine(storage_dir=tmp_path / "content", provider=mock_provider)
+    req = ContentRequest(
+        topic="Log Compaction",
+        content_type=ContentType.TECHNICAL_BLOG,
+        offline=False,
+    )
+
+    resp = engine.generate(req, budget_manager=mgr, budget_id="test-content-budget")
+    assert resp.provider == "mock-budgeted"
+
+    # Verify attempt committed in budget manager
+    attempts = mgr.list_attempts("test-content-budget")
+    assert len(attempts) == 1
+    assert attempts[0].outcome == AttemptOutcome.SUCCEEDED
+    assert attempts[0].mode == "live"
+    assert attempts[0].attempt_id.startswith("content-technical_blog-")
+
+    b = mgr.get_budget("test-content-budget")
+    assert b.spent > 0
+    assert b.reserved == 0.0

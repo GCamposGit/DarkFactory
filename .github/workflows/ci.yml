@@ -4,24 +4,97 @@ on:
   push:
     branches: [main, master]
   pull_request:
+  pull_request_target:
+    types: [opened, synchronize, reopened, ready_for_review]
 
 permissions:
   contents: read
 
 jobs:
-  test:
+  trusted-pr-policy:
+    if: github.event_name == 'pull_request_target'
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout trusted base
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          path: trusted
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Checkout candidate merge without executing it
+        uses: actions/checkout@v4
+        with:
+          ref: refs/pull/${{ github.event.pull_request.number }}/merge
+          path: candidate
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Enforce base-owned governance policy
+        working-directory: candidate
+        run: python ../trusted/core/orchestrator/guard.py ${{ github.event.pull_request.base.sha }}
+
+  pr-validation:
+    if: github.event_name == 'pull_request'
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout trusted base
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          path: trusted
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Checkout candidate
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          path: candidate
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Enforce base-owned governance policy
+        working-directory: candidate
+        run: python ../trusted/core/orchestrator/guard.py ${{ github.event.pull_request.base.sha }}
+      - name: Materialize base-owned verifier
+        working-directory: candidate
+        shell: bash
+        run: |
+          cp -R ../trusted/core/harness/. core/harness/
+          cp ../trusted/harness.config.json harness.config.json
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        working-directory: candidate
+        run: python -m pip install -r requirements.txt
+      - name: Run base-owned deterministic harness
+        working-directory: candidate
+        run: python core/harness/runner.py --quick
+      - name: Run shared offline test suite
+        working-directory: candidate
+        run: python -m pytest tests -v --ignore=tests/test_canaletto.py
+
+  main-validation:
+    if: github.event_name == 'push'
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
           cache: pip
       - name: Install dependencies
         run: python -m pip install -r requirements.txt
-      - name: Compile Python sources
-        run: python -m compileall -q core hub run_hub.py
       - name: Run deterministic harness
         run: python core/harness/runner.py --quick
-      - name: Run shared test suite
+      - name: Run shared offline test suite
         run: python -m pytest tests -v --ignore=tests/test_canaletto.py

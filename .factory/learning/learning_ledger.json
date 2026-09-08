@@ -1,6 +1,6 @@
 {
   "session_id": "session_20260905_072924",
-  "prompt_count": 6,
+  "prompt_count": 18,
   "turns": [
     {
       "turn_id": 1,
@@ -54,12 +54,132 @@
     },
     {
       "turn_id": 6,
-      "timestamp": "2026-09-06T10:32:51.862444+00:00",
-      "user_prompt_summary": "retry",
-      "perceived_intent": "Retomar DF-23 do estado persistido e concluir validação e commit sem reiniciar nem ampliar escopo",
+      "timestamp": "2026-09-05T11:16:12.104006+00:00",
+      "user_prompt_summary": "Criar monitor flexivel de contas base IA e log de uso de modelos",
+      "perceived_intent": "Entregar monitor OpenAI, Grok/xAI e Gemini resiliente a desconexao, extensivel para frontier/chinesas, com contadores por modelo, tier, harness e modalidade",
+      "was_followup": false,
+      "one_shot_success": true,
+      "missing_context_or_gap": null,
+      "target_skill": "autonomous-piv-loop"
+    },
+    {
+      "turn_id": 7,
+      "timestamp": "2026-09-06T02:11:36.582774+00:00",
+      "user_prompt_summary": "Retomar implementação do roadmap DF-01, DF-02, DF-03, DF-05 e DF-06",
+      "perceived_intent": "Continuar o ciclo PIV após interrupção e concluir validações",
       "was_followup": true,
       "one_shot_success": false,
-      "missing_context_or_gap": "Turno anterior terminou antes do commit após gates obrigatórios revelarem duas falhas preexistentes",
+      "missing_context_or_gap": "Subagentes atingiram limite de uso depois de escrever testes e antes de concluir/handoff de DF-06",
+      "target_skill": "autonomous-piv-loop"
+    },
+    {
+      "turn_id": 8,
+      "timestamp": "2026-09-06T03:10:27.841969+00:00",
+      "user_prompt_summary": "Além do DF-11 o que pode avançar?",
+      "perceived_intent": "Identificar frentes desbloqueadas que possam avançar em paralelo sem perder o caminho crítico nem criar conflito de arquivos",
+      "was_followup": true,
+      "one_shot_success": false,
+      "missing_context_or_gap": "A resposta anterior indicou apenas DF-11 e não explicitou as trilhas paralelas já liberadas pelas dependências concluídas",
+      "target_skill": "autonomous-piv-loop"
+    },
+    {
+      "turn_id": 9,
+      "timestamp": "2026-09-06T03:17:22.336612+00:00",
+      "user_prompt_summary": "Incluir ticket para aprimorar desenvolvimento com worktrees e iniciar DF-11, DF-09, DF-16 e DF-17 em frentes paralelas isoladas",
+      "perceived_intent": "Garantir paralelismo eficiente sem conflitos entre tarefas Codex",
+      "was_followup": true,
+      "one_shot_success": false,
+      "missing_context_or_gap": "As frentes anteriores reutilizaram o mesmo checkout local em vez de worktrees dedicadas",
+      "target_skill": "autonomous-piv-loop"
+    },
+    {
+      "turn_id": 10,
+      "timestamp": "2026-09-06T09:42:33.580393+00:00",
+      "user_prompt_summary": "O painel do roadmap mostra apenas itens RM-xx; conferir fonte e renderização e incluir DF-xx em andamento",
+      "perceived_intent": "Garantir que o painel represente todos os itens ativos do roadmap, sem filtrar apenas por série RM",
+      "was_followup": true,
+      "one_shot_success": false,
+      "missing_context_or_gap": "Filtro/consulta pode estar limitado à série RM-xx e ocultar itens DF-xx",
+      "target_skill": "autonomous-piv-loop"
+    },
+    {
+      "turn_id": 11,
+      "timestamp": "2026-09-06T10:13:32.018811+00:00",
+      "user_prompt_summary": "Consolidar quatro worktrees herdadas de baseline dirty, corrigir skill e integrar tickets",
+      "perceived_intent": "Eliminar conflitos e tornar paralelismo de desenvolvimento fail-closed e recuperável",
+      "was_followup": true,
+      "one_shot_success": false,
+      "missing_context_or_gap": "O protocolo antigo não exigia checkpoint limpo, preflight de ambiente, ownership, handoff verificável nem integração topológica",
+      "target_skill": "autonomous-piv-loop"
+    },
+    {
+      "turn_id": 12,
+      "timestamp": "2026-09-06T23:22:12.477652+00:00",
+      "user_prompt_summary": "Retry da checagem de prontidao do proximo modulo do SegundoCerebro",
+      "perceived_intent": "Reexecutar reconhecimento e validar se o workspace local esta apto para desenvolvimento",
+      "was_followup": true,
+      "one_shot_success": false,
+      "missing_context_or_gap": "Executor sandboxed falhou na preparacao do helper; foi necessario usar execucao aprovada fora do sandbox",
+      "target_skill": "prime-intelligence"
+    },
+    {
+      "turn_id": 13,
+      "timestamp": "2026-09-07T13:19:56.719922+00:00",
+      "user_prompt_summary": "Pegue o proximo item sem conflito com DF-15",
+      "perceived_intent": "Implementar USR-14 auto-launch de servicos locais no DarkHub",
+      "was_followup": false,
+      "one_shot_success": true,
+      "missing_context_or_gap": null,
+      "target_skill": "04-autonomous-piv-loop"
+    },
+    {
+      "turn_id": 14,
+      "timestamp": "2026-09-07T14:05:55.272781+00:00",
+      "user_prompt_summary": "DF-15: Vertical de bugfix autonomo da fabrica",
+      "perceived_intent": "Avançar DF-15 no caminho critico, reaproveitando tentativa anterior sem conflito",
+      "was_followup": false,
+      "one_shot_success": true,
+      "missing_context_or_gap": null,
+      "target_skill": "04-autonomous-piv-loop"
+    },
+    {
+      "turn_id": 15,
+      "timestamp": "2026-09-07T23:07:07.931448+00:00",
+      "user_prompt_summary": "Publicar tudo no GitHub e garantir PR merged; remoto não pode ficar desatualizado",
+      "perceived_intent": "Obrigar entrega remota verificável após desenvolvimento: commit, push, PR, merge e confirmação do main",
+      "was_followup": true,
+      "one_shot_success": false,
+      "missing_context_or_gap": "O fluxo anterior permitiu concluir com commits e alterações apenas locais, sem PR nem verificação do remoto",
+      "target_skill": "autonomous-piv-loop"
+    },
+    {
+      "turn_id": 16,
+      "timestamp": "2026-09-08T03:14:26.063281+00:00",
+      "user_prompt_summary": "Desenvolver próximo item do backlog",
+      "perceived_intent": "Implementar DF-20: política de entrega e integração GitHub com checks, risco, merge queue e idempotência",
+      "was_followup": false,
+      "one_shot_success": true,
+      "missing_context_or_gap": null,
+      "target_skill": "autonomous-piv-loop"
+    },
+    {
+      "turn_id": 17,
+      "timestamp": "2026-09-08T04:37:02.227329+00:00",
+      "user_prompt_summary": "Versão atualizada do painel não subiu...",
+      "perceived_intent": "Iniciar/subir o painel DarkHub atualizado com os cards de infraestrutura e garantir cache limpo no navegador",
+      "was_followup": true,
+      "one_shot_success": false,
+      "missing_context_or_gap": "Após implementar feature no painel, o servidor não foi iniciado automaticamente nem as instruções de inicialização foram destacadas para o usuário",
+      "target_skill": "autonomous-piv-loop"
+    },
+    {
+      "turn_id": 18,
+      "timestamp": "2026-09-08T19:28:48.310016+00:00",
+      "user_prompt_summary": "Desenvolver o próximo item HF- do roadmap",
+      "perceived_intent": "Executar o ticket canônico HF-01-02 após HF-01-01, com contratos Pydantic e leitura segura de fontes",
+      "was_followup": true,
+      "one_shot_success": false,
+      "missing_context_or_gap": "Confirmar o estado compartilhado antes de editar e preservar mudanças concorrentes",
       "target_skill": "autonomous-piv-loop"
     }
   ],
@@ -72,6 +192,35 @@
       "confidence": 1.0,
       "created_at": "2026-09-05T07:29:28.354988+00:00",
       "times_reinforced": 1,
+      "origin": "explicit_preference",
+      "status": "active",
+      "verification_gate_id": null,
+      "active": true
+    },
+    {
+      "preference_id": "pref_2168f2b5",
+      "category": "workflow",
+      "rule": "Quando o usuário pedir o próximo item do backlog, selecionar o próximo ticket canônico e executar o ciclo PIV completo sem perguntas triviais",
+      "context_or_example": "Pedido de desenvolvimento do próximo item após o DF-19; selecionar DF-20 pelo DEVELOPMENT_PLAN e validar com os gates oficiais",
+      "confidence": 1.0,
+      "created_at": "2026-09-08T03:14:42.231842+00:00",
+      "times_reinforced": 1,
+      "origin": "explicit_preference",
+      "status": "active",
+      "verification_gate_id": null,
+      "active": true
+    },
+    {
+      "preference_id": "pref_37a620c3",
+      "category": "workflow",
+      "rule": "Inviolável: Nunca dar um ticket como concluído sem teste de ponta a ponta no ambiente/hardware real. Toda configuração manual necessária deve ser demandada e realizada com o usuário ANTES dos testes finais de entrega.",
+      "context_or_example": "USR-16: validação em hardware físico on-premise desktop-g45ipem antes de marcar como delivered",
+      "confidence": 1.0,
+      "created_at": "2026-09-08T14:25:26.395997+00:00",
+      "times_reinforced": 1,
+      "origin": "explicit_preference",
+      "status": "active",
+      "verification_gate_id": null,
       "active": true
     }
   ],
@@ -87,7 +236,9 @@
       "preventative_rule": "Garantir stdout reconfigure UTF-8 e tags ASCII-safe em todas as CLIs",
       "regression_test_file": "tests/test_learning_engine.py",
       "verification_gate_id": null,
-      "status": "resolved"
+      "origin": "rca",
+      "status": "active",
+      "active": true
     },
     {
       "rca_id": "rca_e4eb9622",
@@ -100,7 +251,9 @@
       "preventative_rule": "Agir com proatividade Staff+: pesquisar literatura, formular modelos matematicos e implementar sistemas completos de ponta a ponta",
       "regression_test_file": "tests/test_model_benchmark.py",
       "verification_gate_id": null,
-      "status": "resolved"
+      "origin": "rca",
+      "status": "active",
+      "active": true
     },
     {
       "rca_id": "rca_4fec03aa",
@@ -113,59 +266,534 @@
       "preventative_rule": "Todo marco arquitetural concluido deve gerar e exibir o Session Learning Pack (skill 13)",
       "regression_test_file": "tests/test_learning_pack.py",
       "verification_gate_id": null,
-      "status": "resolved"
+      "origin": "rca",
+      "status": "active",
+      "active": true
     },
     {
-      "rca_id": "rca_c28d37d5",
-      "timestamp": "2026-09-06T10:26:32.535777+00:00",
-      "category": "governance_violation",
-      "symptom": "Fan-out de baseline dirty duplicou deltas herdados, gerou IDs e títulos temporários, tasks sem resposta final, handoff bloqueado, escritor concorrente na raiz, pytest ausente, refresh travado e retry de detach falho",
-      "mechanism": "startingState working-tree propagou estado não checkpointado sem identidade persistente, ownership por arquivo, lease, preflight, heartbeat ou contrato verificável de conclusão e integração",
-      "root_cause": "A skill tratava worktree como sugestão de isolamento, não como máquina de estados fail-closed com cadeia de custódia da baseline até a limpeza",
-      "patch_description": "Protocolo WT-01 a WT-12, roadmap DF-23, espelho sincronizado e teste determinístico de controles e drift",
-      "preventative_rule": "Nunca fazer fan-out, handoff, integração ou limpeza sem checkpoint limpo, fingerprint e backup, identidades e ownership exclusivos, ambiente validado, heartbeat, commit seletivo alcançável e gates verdes",
-      "regression_test_file": "tests/test_worktree_protocol.py",
-      "verification_gate_id": null,
-      "status": "resolved"
-    },
-    {
-      "rca_id": "rca_04a112d6",
-      "timestamp": "2026-09-06T10:26:32.617118+00:00",
+      "rca_id": "rca_6647a3ce",
+      "timestamp": "2026-09-05T10:54:11.509492+00:00",
       "category": "test_regression",
-      "symptom": "Primeiro teste focal DF-23 falhou ao procurar uma frase quebrada por newline",
-      "mechanism": "A asserção comparou substring literal no Markdown sem normalizar whitespace",
-      "root_cause": "O teste de contrato acoplou evidência semântica à formatação de linha do documento",
-      "patch_description": "Normalização determinística de whitespace antes de verificar as evidências obrigatórias",
-      "preventative_rule": "Testes de contratos documentais validam IDs e significado estável sem depender de quebras de linha editoriais",
-      "regression_test_file": "tests/test_worktree_protocol.py",
+      "symptom": "API retorna 8 dominios mas teste esperava contagem fixa 6",
+      "mechanism": "Novos dominios image_gen e video_gen foram adicionados ao catalogo sem atualizar assercao literal",
+      "root_cause": "Teste duplicava o tamanho do contrato em vez de derivar a expectativa de DOMAIN_METADATA",
+      "patch_description": "Assercao agora compara o conjunto retornado ao catalogo canonico DOMAIN_METADATA",
+      "preventative_rule": "Testes de catalogos extensíveis devem derivar expectativas da fonte canonica e validar igualdade de conjuntos",
+      "regression_test_file": "tests/test_benchmark_router.py",
       "verification_gate_id": null,
-      "status": "resolved"
+      "origin": "rca",
+      "status": "active",
+      "active": true
     },
     {
-      "rca_id": "rca_ce55ee27",
-      "timestamp": "2026-09-06T10:28:18.706863+00:00",
+      "rca_id": "rca_fc08b71c",
+      "timestamp": "2026-09-05T10:54:12.687949+00:00",
+      "category": "assumption_error",
+      "symptom": "Primeira consulta do code scout retornou zero repositorios",
+      "mechanism": "Query combinou restricoes de arquitetura e testes em termos pouco presentes nos metadados do GitHub",
+      "root_cause": "Taxonomia de busca excessivamente especifica para descoberta inicial de repositorios",
+      "patch_description": "Consulta refinada para nome de categoria e framework consolidado, mantendo filtros de licença, linguagem e maturidade",
+      "preventative_rule": "Code scout deve iniciar com termos de categoria amplos e aplicar qualidade por filtros estruturados",
+      "regression_test_file": "tests/test_research_engine.py",
+      "verification_gate_id": null,
+      "origin": "rca",
+      "status": "active",
+      "active": true
+    },
+    {
+      "rca_id": "rca_ba6e0186",
+      "timestamp": "2026-09-05T11:00:40.683333+00:00",
+      "category": "test_regression",
+      "symptom": "Fallback do Learning Pack retornou um conceito ao receber arquivo inexistente",
+      "mechanism": "Analyzer consultava o diff global mesmo quando file_paths definia escopo explicito",
+      "root_cause": "Ausencia de isolamento entre analise solicitada por arquivos e fallback implicito baseado no repositorio",
+      "patch_description": "Escopo explicito agora desabilita leitura do diff global e aciona defaults quando nao ha match",
+      "preventative_rule": "APIs de analise com escopo explicito nunca devem incorporar estado global fora do escopo",
+      "regression_test_file": "tests/test_learning_pack.py",
+      "verification_gate_id": null,
+      "origin": "rca",
+      "status": "active",
+      "active": true
+    },
+    {
+      "rca_id": "rca_b06447f7",
+      "timestamp": "2026-09-05T11:07:36.260389+00:00",
+      "category": "test_regression",
+      "symptom": "Verificador rejeitou HTML funcional por encontrar apenas uma ocorrencia literal de data-move",
+      "mechanism": "Botoes sao criados dinamicamente por JavaScript e a contagem textual nao representa a quantidade em runtime",
+      "root_cause": "Gate estrutural usou proxy fragil sem relacao um-para-um com a superficie interativa",
+      "patch_description": "Gate agora exige container de acoes, atribuicao dataset.move e iteracao sobre as tres deltas",
+      "preventative_rule": "Verificadores de artefatos gerados devem testar marcadores semanticos independentes, nao contagens incidentais de strings",
+      "regression_test_file": "tests/test_echo_garden_factory.py",
+      "verification_gate_id": null,
+      "origin": "rca",
+      "status": "active",
+      "active": true
+    },
+    {
+      "rca_id": "rca_49df2b98",
+      "timestamp": "2026-09-05T11:11:42.478541+00:00",
+      "category": "test_regression",
+      "symptom": "Live balanced-tier JSON foi rejeitado por conter uma seta tecnica com caractere maior-que",
+      "mechanism": "Regex anti-injecao tratava maior-que isolado como markup ativo",
+      "root_cause": "Sanitizador lexical nao refletia o sink real, que escapa menor-que e usa textContent",
+      "patch_description": "Maior-que foi removido da blacklist; menor-que, URLs e esquemas ativos permanecem bloqueados; regressao cobre A -> B",
+      "preventative_rule": "Sanitizacao deve ser calibrada ao contexto de saida e testar payloads maliciosos sem bloquear notacao tecnica inerte",
+      "regression_test_file": "tests/test_echo_garden_factory.py",
+      "verification_gate_id": null,
+      "origin": "rca",
+      "status": "active",
+      "active": true
+    },
+    {
+      "rca_id": "rca_f820b889",
+      "timestamp": "2026-09-05T11:13:06.622793+00:00",
+      "category": "test_regression",
+      "symptom": "Live balanced-tier JSON ainda foi rejeitado ao citar a condicao max-min <= 1",
+      "mechanism": "Blacklist de entrada bloqueava menor-que apesar do serializador escapar o caractere antes do HTML",
+      "root_cause": "Seguranca duplicada no ponto errado confundia operadores de dados com markup executavel",
+      "patch_description": "Operadores sao aceitos; escape contextual u003c no JSON e textContent continuam impedindo execucao; URLs ativas seguem bloqueadas",
+      "preventative_rule": "Preservar operadores em dados tipados e neutralizar markup no sink de serializacao testado",
+      "regression_test_file": "tests/test_echo_garden_factory.py",
+      "verification_gate_id": null,
+      "origin": "rca",
+      "status": "active",
+      "active": true
+    },
+    {
+      "rca_id": "rca_89d37fa6",
+      "timestamp": "2026-09-05T11:13:54.325729+00:00",
+      "category": "assumption_error",
+      "symptom": "Balanced model retornou strings literais com alternativas unidas por pipe no array moves",
+      "mechanism": "Prompt usou pseudo-enum weave|echo|ground dentro de uma representacao que parecia JSON",
+      "root_cause": "Contrato de prompt misturava notacao de documentacao com exemplo de payload executavel",
+      "patch_description": "Prompt agora mostra JSON valido e descreve enum, cardinalidade e proibicao de juntar alternativas em prosa separada",
+      "preventative_rule": "Prompts estruturados devem usar exemplos sintaticamente validos e nunca inserir metanotacao dentro de valores JSON",
+      "regression_test_file": "tests/test_echo_garden_factory.py",
+      "verification_gate_id": null,
+      "origin": "rca",
+      "status": "active",
+      "active": true
+    },
+    {
+      "rca_id": "rca_be245d6d",
+      "timestamp": "2026-09-05T11:14:40.952888+00:00",
+      "category": "assumption_error",
+      "symptom": "Frontier reviewer rejeitou trace vencedor que continha apenas energias e spread finais",
+      "mechanism": "Pacote de auditoria omitia estado anterior e decomposicao entre delta direto e eco",
+      "root_cause": "Evidencia era suficiente para o validador interno mas insuficiente para verificacao independente de ordem causal",
+      "patch_description": "Cada turno agora inclui before, direct_delta, echo_delta, after, indice, spread e status",
+      "preventative_rule": "Auditoria independente deve receber insumos para recomputar a transicao, nao apenas o resultado alegado",
+      "regression_test_file": "tests/test_echo_garden_factory.py",
+      "verification_gate_id": null,
+      "origin": "rca",
+      "status": "active",
+      "active": true
+    },
+    {
+      "rca_id": "rca_43ce1838",
+      "timestamp": "2026-09-05T11:15:29.019767+00:00",
+      "category": "assumption_error",
+      "symptom": "Frontier reviewer nao emitiu objeto JSON com limite de 300 tokens",
+      "mechanism": "Modelo de raciocinio consumiu o orcamento antes da resposta estruturada final",
+      "root_cause": "Orcamento de saida foi calibrado como modelo direto apesar do tier frontier usar raciocinio interno",
+      "patch_description": "Gate frontier recebeu max_tokens 1200; tiers local e balanced mantiveram limites economicos",
+      "preventative_rule": "Modelos reasoning devem ter budget que cubra deliberacao e resposta final, com limite maior apenas no gate que exige profundidade",
+      "regression_test_file": "tests/test_echo_garden_factory.py",
+      "verification_gate_id": null,
+      "origin": "rca",
+      "status": "active",
+      "active": true
+    },
+    {
+      "rca_id": "rca_2653e251",
+      "timestamp": "2026-09-05T11:17:01.431780+00:00",
+      "category": "assumption_error",
+      "symptom": "Frontier reviewer validou numeros mas rejeitou por ausencia de regras autoritativas completas no prompt",
+      "mechanism": "Trace continha evidencias, porem contrato de clamp, rotacao, win e loss nao estava formalizado como fonte de verdade",
+      "root_cause": "Auditor recebeu observacoes suficientes para consistencia, nao especificacao suficiente para prova independente",
+      "patch_description": "Prompt de review agora inclui equacao de transicao, ordem do eco, clamp, janela de vitoria e terminal de derrota; schema usa enum descrito fora do JSON",
+      "preventative_rule": "Revisao adversarial deve receber contrato autoritativo completo mais evidencia recomputavel",
+      "regression_test_file": "tests/test_echo_garden_factory.py",
+      "verification_gate_id": null,
+      "origin": "rca",
+      "status": "active",
+      "active": true
+    },
+    {
+      "rca_id": "rca_95d3201d",
+      "timestamp": "2026-09-05T11:24:10.514627+00:00",
+      "category": "assumption_error",
+      "symptom": "Offline coding race selected ollama/sdxl-turbo and presented fixture verification without execution provenance",
+      "mechanism": "Provider-only filtering admitted a media-only local model and result metadata omitted the execution mode",
+      "root_cause": "The local candidate selector did not enforce domain or modality capabilities",
+      "patch_description": "Filter local coding candidates by coding domain and text modality, then expose execution_mode and model_inference_executed",
+      "preventative_rule": "Every task router must filter candidates by capability, and every benchmark result must state whether model inference actually ran",
+      "regression_test_file": "tests/test_speculative_racing.py",
+      "verification_gate_id": null,
+      "origin": "rca",
+      "status": "active",
+      "active": true
+    },
+    {
+      "rca_id": "rca_355f6eb7",
+      "timestamp": "2026-09-05T13:08:38.675571+00:00",
+      "category": "test_regression",
+      "symptom": "Local adversarial reviewer rejected artifact publication because manifest.json and index.html were written non-atomically",
+      "mechanism": "A process interruption could leave a new HTML paired with an old manifest or only one published file",
+      "root_cause": "The exporter used sequential Path.write_text calls without a commit marker or cross-file consistency check",
+      "patch_description": "Atomically replace HTML first, atomically replace manifest last, and require HTML to equal a deterministic render of the committed manifest",
+      "preventative_rule": "Multi-file artifacts must publish a final commit marker and their verifier must detect mixed generations",
+      "regression_test_file": "tests/test_echo_garden_factory.py",
+      "verification_gate_id": null,
+      "origin": "rca",
+      "status": "active",
+      "active": true
+    },
+    {
+      "rca_id": "rca_59d907dc",
+      "timestamp": "2026-09-05T13:11:23.927318+00:00",
+      "category": "assumption_error",
+      "symptom": "Offline release notes introduced zero-downtime and buffer-overrun claims absent from supplied facts",
+      "mechanism": "The procedural release-notes template contained hard-coded success and fix claims",
+      "root_cause": "Content quality was measured lexically but not grounded against request key points",
+      "patch_description": "Render highlights and verified changes only from supplied points and state that no additional claims are made",
+      "preventative_rule": "Procedural factual content must not introduce unverifiable events, metrics, fixes, or outcomes beyond supplied inputs",
+      "regression_test_file": "tests/test_anti_slop_engine.py",
+      "verification_gate_id": null,
+      "origin": "rca",
+      "status": "active",
+      "active": true
+    },
+    {
+      "rca_id": "rca_205d31dd",
+      "timestamp": "2026-09-05T13:20:51.232175+00:00",
+      "category": "timeout",
+      "symptom": "gpt-review exceeded 180 seconds with no final output",
+      "mechanism": "the full multi-file prompt saturated a slow local review model",
+      "root_cause": "review prompt was not bounded before local inference",
+      "patch_description": "retry with a compact invariant-focused prompt",
+      "preventative_rule": "cap local adversarial review prompts to an invariant summary and targeted snippets",
+      "regression_test_file": "tests/test_usage_monitor.py",
+      "verification_gate_id": null,
+      "origin": "rca",
+      "status": "active",
+      "active": true
+    },
+    {
+      "rca_id": "rca_a5952833",
+      "timestamp": "2026-09-05T13:23:03.780536+00:00",
+      "category": "test_regression",
+      "symptom": "concurrent ledger test raised PermissionError on Windows",
+      "mechanism": "the contender read a byte already protected by the first process lock",
+      "root_cause": "lock file initialization inspected contents before acquiring the Windows byte-range lock",
+      "patch_description": "initialize from file size without reading the locked byte",
+      "preventative_rule": "do not read a Windows byte-range lock file before lock acquisition",
+      "regression_test_file": "tests/test_usage_monitor.py",
+      "verification_gate_id": null,
+      "origin": "rca",
+      "status": "active",
+      "active": true
+    },
+    {
+      "rca_id": "rca_08c973a7",
+      "timestamp": "2026-09-05T13:28:19.671428+00:00",
       "category": "tool_misuse",
-      "symptom": "Quick harness não encontrou python embora o shell pai tivesse uma função PowerShell python",
-      "mechanism": "runner.py executa comandos em subprocesso cmd.exe, que herda PATH mas não funções do PowerShell",
-      "root_cause": "O preflight provou resolução apenas no shell coordenador e não no ambiente efetivamente herdado pelo executor",
-      "patch_description": "Runtime Python 3.12.14 propagado no PATH do processo e pytest basetemp exclusivo validado",
-      "preventative_rule": "Preflight de executor deve provar Python e pytest no mesmo ambiente e mecanismo de subprocesso usado pelos gates",
-      "regression_test_file": "tests/test_worktree_protocol.py",
+      "symptom": "learning CLI rejected nonexistent report subcommand",
+      "mechanism": "the valid summary command is status",
+      "root_cause": "assumed a subcommand name without checking CLI help",
+      "patch_description": "use status for the learning ledger summary",
+      "preventative_rule": "inspect CLI help before invoking unfamiliar subcommands",
+      "regression_test_file": null,
       "verification_gate_id": null,
-      "status": "resolved"
+      "origin": "rca",
+      "status": "active",
+      "active": true
     },
     {
-      "rca_id": "rca_cd51f2d4",
-      "timestamp": "2026-09-06T10:28:18.784465+00:00",
+      "rca_id": "rca_bad3d6d7",
+      "timestamp": "2026-09-05T13:31:42.807255+00:00",
       "category": "test_regression",
-      "symptom": "Os dois comandos obrigatórios falham com 2 testes antigos mesmo após remover o erro ambiental de basetemp",
-      "mechanism": "Baseline espera 6 domínios mas expõe 8, e fallback do learning pack retorna 1 padrão quando o teste exige pelo menos 2",
-      "root_cause": "O SHA-base de64424 já contém inconsistências entre implementação e testes fora dos arquivos e critérios do DF-23",
-      "patch_description": "Falhas reproduzidas e isoladas; nenhum módulo fora do DF-23 foi alterado",
-      "preventative_rule": "Não misturar correções funcionais alheias ao ticket para tornar verde um gate de baseline; registrar evidência e integrar somente conforme política",
-      "regression_test_file": "tests/test_benchmark_router.py tests/test_learning_pack.py",
+      "symptom": "API-key fallback test used a fixture without env_keys",
+      "mechanism": "the adapter correctly reads keys declared by its ProviderSpec",
+      "root_cause": "the test reused a parser-only provider fixture that intentionally omitted env metadata",
+      "patch_description": "construct the fallback fixture with OPENAI_API_KEY",
+      "preventative_rule": "test specialized adapters with the same provider metadata required by the behavior under test",
+      "regression_test_file": "tests/test_usage_monitor.py",
       "verification_gate_id": null,
-      "status": "resolved"
+      "origin": "rca",
+      "status": "active",
+      "active": true
+    },
+    {
+      "rca_id": "rca_591d0a6d",
+      "timestamp": "2026-09-05T13:34:39.938115+00:00",
+      "category": "tool_misuse",
+      "symptom": "PowerShell mangled a quoted ripgrep pattern",
+      "mechanism": "nested double quotes produced an incomplete regex",
+      "root_cause": "used a regex where fixed-string search was sufficient",
+      "patch_description": "rerun with rg fixed-string mode",
+      "preventative_rule": "use rg -F for literal HTML fragments in PowerShell",
+      "regression_test_file": null,
+      "verification_gate_id": null,
+      "origin": "rca",
+      "status": "active",
+      "active": true
+    },
+    {
+      "rca_id": "rca_5f39eca7",
+      "timestamp": "2026-09-06T02:11:52.959184+00:00",
+      "category": "test_regression",
+      "symptom": "Gate rápido falhou em quatro testes DF-06 após a execução paralela",
+      "mechanism": "Os testes novos foram persistidos, mas o subagente atingiu o limite antes de concluir tracker.py e benchmark.py",
+      "root_cause": "O gate compartilhado começou sem confirmar um handoff atômico de código e testes de cada frente delegada",
+      "patch_description": "Completei o lifecycle proposed/evaluated/active, filtrei contexto ativo e rotulei métricas sintéticas; 11 testes focais passaram",
+      "preventative_rule": "Antes do gate compartilhado, confirmar que cada ticket delegado entregou código e testes e passou sua suíte focal",
+      "regression_test_file": "tests/test_learning_engine.py tests/test_self_learning_benchmark.py",
+      "verification_gate_id": null,
+      "origin": "rca",
+      "status": "proposed",
+      "active": false
+    },
+    {
+      "rca_id": "rca_4aba3f7c",
+      "timestamp": "2026-09-06T02:17:47.743015+00:00",
+      "category": "test_regression",
+      "symptom": "Gate PIV encadeado falhou com ModuleNotFoundError ao executar markers.py diretamente",
+      "mechanism": "O módulo usava import absoluto de core sem inserir a raiz do repositório no sys.path quando chamado por caminho",
+      "root_cause": "Os testes anteriores cobriam apenas import como pacote e não exercitavam o entrypoint standalone exigido pelo contrato",
+      "patch_description": "Adicionado bootstrap portátil da raiz e teste subprocesso executado fora do cwd do repositório",
+      "preventative_rule": "Todo entrypoint Python suportado como script deve ter teste subprocesso a partir de um cwd externo",
+      "regression_test_file": "tests/test_harness_contract.py",
+      "verification_gate_id": null,
+      "origin": "rca",
+      "status": "proposed",
+      "active": false
+    },
+    {
+      "rca_id": "rca_66fc5404",
+      "timestamp": "2026-09-06T02:44:47.396552+00:00",
+      "category": "test_regression",
+      "symptom": "test_rest_api_endpoints recebeu outra pack em /latest",
+      "mechanism": "o teste REST usava o diretório persistente compartilhado .factory/learning_packs, permitindo gravação concorrente entre POST e GET",
+      "root_cause": "a fronteira de teste da API não isolava o estado persistente; latest é global e pode mudar legitimamente durante o teste",
+      "patch_description": "redirecionar DEFAULT_PACKS_DIR para tmp_path por monkeypatch antes de criar o TestClient",
+      "preventative_rule": "testes de API que afirmam ordem ou latest devem usar storage temporário exclusivo",
+      "regression_test_file": "tests/test_learning_pack.py",
+      "verification_gate_id": null,
+      "origin": "rca",
+      "status": "proposed",
+      "active": false
+    },
+    {
+      "rca_id": "rca_c9b6117c",
+      "timestamp": "2026-09-06T09:58:52.539202+00:00",
+      "category": "test_regression",
+      "symptom": "O gate rápido falhou em três testes após integrar a fonte DF: expectativas ainda assumiam apenas RM e um fixture sem o plano retornou 503.",
+      "mechanism": "O serviço passou a compilar uma segunda fonte canônica, mas os testes não refletiam a composição RM+DF e o snapshot store tratava qualquer fonte auxiliar ausente como falha total.",
+      "root_cause": "A expansão de fontes não foi acompanhada por contrato de snapshot combinado nem por uma política explícita de disponibilidade parcial.",
+      "patch_description": "Atualizados testes para exigir 9 RM + 23 DF, adicionada cobertura de dependências e fonte HTTP, e ajustado o store para publicar itens disponíveis com indisponibilidade explícita quando não há cache.",
+      "preventative_rule": "Toda nova fonte do roadmap deve ter teste de composição, documento de proveniência e comportamento definido para indisponibilidade parcial.",
+      "regression_test_file": "tests/test_roadmap.py",
+      "verification_gate_id": null,
+      "origin": "rca",
+      "status": "proposed",
+      "active": false
+    },
+    {
+      "rca_id": "rca_f605a6f4",
+      "timestamp": "2026-09-06T10:13:49.106590+00:00",
+      "category": "governance_violation",
+      "symptom": "Fan-out de quatro frentes a partir de baseline dirty gerou deltas herdados, IDs temporários, handoffs incompletos, colisão de escritores na raiz e testes inicialmente indisponíveis.",
+      "mechanism": "startingState working-tree replicou o checkout sujo sem manifesto de ownership, preflight de Python/pytest, contrato de conclusão ou gate de integração.",
+      "root_cause": "A skill autonomous-piv-loop tratava worktree como sugestão de isolamento, não como protocolo fail-closed com checkpoint limpo e cadeia de custódia verificável.",
+      "patch_description": "Skill endurecida com referência operacional; DF-23 ampliado; sync .agents/.claude validado.",
+      "preventative_rule": "Nunca despachar frentes concorrentes sem baseline limpa, fingerprint e backup, worktree/branch/owner/lease únicos, ambiente testável, escopos não sobrepostos e contrato de handoff; integrar topologicamente antes de limpar.",
+      "regression_test_file": ".agents/skills/04-autonomous-piv-loop/references/worktree-parallelism.md",
+      "verification_gate_id": "gate_b20ba6e1",
+      "origin": "rca",
+      "status": "active",
+      "active": true
+    },
+    {
+      "rca_id": "rca_528d08ce",
+      "timestamp": "2026-09-06T10:16:46.633870+00:00",
+      "category": "tool_misuse",
+      "symptom": "Harness coletou 188 testes, mas 50 falharam no setup com PermissionError em pytest-of-guigc.",
+      "mechanism": "Pytest escolheu um diretório temporário global pré-existente sem permissão para a sandbox da worktree.",
+      "root_cause": "O preflight validou a presença do pytest, mas não a gravabilidade do basetemp efetivamente usado pela suíte.",
+      "patch_description": "Execuções na worktree usam basetemp novo e exclusivo em diretório temporário gravável; o protocolo da skill exige validar o ambiente antes do despacho.",
+      "preventative_rule": "Em worktrees Windows sandboxed, provar criação e uso de basetemp exclusivo antes do harness; PermissionError de fixture é falha de ambiente, não regressão funcional.",
+      "regression_test_file": "tests/test_orchestrator_state.py",
+      "verification_gate_id": "gate_96bb46c3",
+      "origin": "rca",
+      "status": "active",
+      "active": true
+    },
+    {
+      "rca_id": "rca_f76312f7",
+      "timestamp": "2026-09-06T10:25:50.795942+00:00",
+      "category": "tool_misuse",
+      "symptom": "Executor setup refresh travou, tasks ficaram active sem heartbeat e handoffs parciais falharam durante consolidação",
+      "mechanism": "O fluxo tratava status ativo e clientThreadId como progresso suficiente e tentou novo handoff sem auditar branch, stash e writer da raiz",
+      "root_cause": "A skill não definia heartbeat observável, resolução do task ID, basetemp gravável nem recuperação explícita de handoff parcial",
+      "patch_description": "Protocolo de worktrees agora exige heartbeat <=60s, auditoria após dois intervalos, ID final/cwd persistidos, preflight Python/pytest/basetemp e auditoria de stash/branch/reachability antes de retry",
+      "preventative_rule": "Falha de infraestrutura preserva estado e bloqueia fan-out substituto até provar que a frente anterior não escreve; handoff parcial nunca é repetido às cegas",
+      "regression_test_file": ".agents/skills/04-autonomous-piv-loop/references/worktree-parallelism.md",
+      "verification_gate_id": null,
+      "origin": "rca",
+      "status": "proposed",
+      "active": false
+    },
+    {
+      "rca_id": "rca_3f571ead",
+      "timestamp": "2026-09-06T23:22:12.562655+00:00",
+      "category": "tool_misuse",
+      "symptom": "Comandos locais e apply_patch falham com helper_unknown_error durante setup refresh do sandbox",
+      "mechanism": "O helper de isolamento do host nao conclui a preparacao do processo, antes de executar o comando",
+      "root_cause": "Falha externa na inicializacao do sandbox desta tarefa, nao reproduzida na execucao aprovada fora do sandbox",
+      "patch_description": "Usar fallback aprovado fora do sandbox apenas para comandos necessarios e manter alteracoes de produto bloqueadas ate o helper voltar",
+      "preventative_rule": "Quando helper_unknown_error ocorrer antes da execucao, confirmar com comando minimo e fallback aprovado; classificar como ambiente e nao como regressao do repositorio",
+      "regression_test_file": null,
+      "verification_gate_id": null,
+      "origin": "rca",
+      "status": "proposed",
+      "active": false
+    },
+    {
+      "rca_id": "rca_e2691184",
+      "timestamp": "2026-09-07T03:46:11.356108+00:00",
+      "category": "tool_misuse",
+      "symptom": "Primeira leitura falhou por um erro de inicializacao do terminal com PathNotFound ou FileNotFound ao tentar ler MISSION.md",
+      "mechanism": "Perfil global do PowerShell (Microsoft.PowerShell_profile.ps1) executa Set-Location C:\\dev incondicionalmente, sequestrando o cwd de subprocessos para C:\\dev",
+      "root_cause": "Invocacao programatica de PowerShell sem -NoProfile e ausencia de guardrail de ambiente de terminal na inicializacao do DarkFac",
+      "patch_description": "Criacao do guardrail core/harness/terminal_env.py, script scripts/init_terminal.ps1, teste tests/test_bug_em_inicializa_o_do_te.py e inclusao obrigatoria de -NoProfile nas regras e skills",
+      "preventative_rule": "Invocacoes de terminal no Windows devem incluir -NoProfile e verificar ancoragem do repositorio via terminal_env antes de executar leituras relativas",
+      "regression_test_file": "tests/test_bug_em_inicializa_o_do_te.py",
+      "verification_gate_id": null,
+      "origin": "rca",
+      "status": "proposed",
+      "active": false
+    },
+    {
+      "rca_id": "rca_ac2580b0",
+      "timestamp": "2026-09-07T21:05:27.172321+00:00",
+      "category": "test_regression",
+      "symptom": "DF-18 focal test expected JSON classification but received raw decoder text",
+      "mechanism": "_parse_patch_response propagated json.JSONDecodeError directly",
+      "root_cause": "The real-mode provider boundary lacked an explicit error taxonomy for malformed JSON output",
+      "patch_description": "Translate JSONDecodeError into a stable provider response is not valid JSON ValueError",
+      "preventative_rule": "Provider output parsers must classify malformed protocol payloads before returning errors",
+      "regression_test_file": "tests/test_agent_evals.py",
+      "verification_gate_id": null,
+      "origin": "rca",
+      "status": "proposed",
+      "active": false
+    },
+    {
+      "rca_id": "rca_193b826f",
+      "timestamp": "2026-09-07T21:07:43.427519+00:00",
+      "category": "timeout",
+      "symptom": "Full pytest run exceeded RM-08 warm-cache latency threshold at 219.07 ms",
+      "mechanism": "The dense graph performance assertion is sensitive to process-wide scheduling/contention; the same test passed in 0.14 s when isolated",
+      "root_cause": "Suite-level Windows runtime contention caused an intermittent performance sample outside the DF-18 change surface",
+      "patch_description": "No source patch: rerun isolated and preserve the existing RM-08 threshold and implementation",
+      "preventative_rule": "Classify unrelated performance flakes with an isolated reproduction before changing production code",
+      "regression_test_file": "tests/test_roadmap_scale.py",
+      "verification_gate_id": null,
+      "origin": "rca",
+      "status": "proposed",
+      "active": false
+    },
+    {
+      "rca_id": "rca_bfe151ee",
+      "timestamp": "2026-09-08T04:37:21.427021+00:00",
+      "category": "assumption_error",
+      "symptom": "Painel com versoes atualizadas nao sobe ou nao reflete mudancas no navegador",
+      "mechanism": "Servidor local offline e falta de headers anti-cache para index.html no FastAPI",
+      "root_cause": "run_hub.py nao foi inicializado e Starlette FileResponse mantinha cache local do index.html sem no-cache headers",
+      "patch_description": "Adicionados headers anti-cache no serve_index, inicializacao robusta com fallback em infra.js e comando claro de inicializacao",
+      "preventative_rule": "Sempre garantir headers anti-cache em rotas de UI SPA e inicializar/oferecer comando explicito de boot do servidor",
+      "regression_test_file": "tests/test_adicionar_cards_de_infrae.py",
+      "verification_gate_id": null,
+      "origin": "rca",
+      "status": "proposed",
+      "active": false
+    },
+    {
+      "rca_id": "rca_33b08efd",
+      "timestamp": "2026-09-08T04:38:09.733904+00:00",
+      "category": "assumption_error",
+      "symptom": "Painel com versoes atualizadas nao sobe ou nao reflete mudancas no navegador",
+      "mechanism": "Servidor local offline e falta de headers anti-cache para index.html no FastAPI",
+      "root_cause": "run_hub.py nao foi inicializado e Starlette FileResponse mantinha cache local do index.html sem no-cache headers",
+      "patch_description": "Adicionados headers anti-cache no serve_index, inicializacao robusta com fallback em infra.js e comando claro de inicializacao",
+      "preventative_rule": "Sempre garantir headers anti-cache em rotas de UI SPA e inicializar/oferecer comando explicito de boot do servidor",
+      "regression_test_file": "tests/test_adicionar_cards_de_infrae.py",
+      "verification_gate_id": "gate_7980cbc7",
+      "origin": "rca",
+      "status": "active",
+      "active": true
+    },
+    {
+      "rca_id": "rca_42a7be7a",
+      "timestamp": "2026-09-08T14:25:32.956991+00:00",
+      "category": "assumption_error",
+      "symptom": "Ticket concluido sem teste funcional real no desktop fisico e sem demandar configuracoes manuais previas do usuario",
+      "mechanism": "Aceite baseado apenas em mocks/testes locais sem rodar ponta a ponta no hardware remoto via Tailscale",
+      "root_cause": "Ausencia de portao de validacao real em ambiente fisico e omissao de demanda antecipada de ajustes manuais necessarios",
+      "patch_description": "Atualizacao do subagent com CREATE_NO_WINDOW, suporte a modo headless em background e enforcamento de testes E2E reais com intervencao humana antecipada",
+      "preventative_rule": "Proibido entregar ticket distribuido sem teste real em hardware e sem solicitar configuracoes manuais ao usuario antes da conclusao",
+      "regression_test_file": "tests/test_worker_onprem_test_subagent.py",
+      "verification_gate_id": "gate_e20d19dc",
+      "origin": "rca",
+      "status": "active",
+      "active": true
+    },
+    {
+      "rca_id": "rca_0afc142f",
+      "timestamp": "2026-09-08T19:29:58.374634+00:00",
+      "category": "tool_misuse",
+      "symptom": "Consulta exploratória multiline falhou com SyntaxError no python -c e a RCA inicial recusou uma categoria inválida",
+      "mechanism": "PowerShell recebeu literal de escape de nova linha e o CLI aceita apenas categorias fechadas",
+      "root_cause": "Uso de quoting frágil e categoria não pertencente ao contrato do CLI",
+      "patch_description": "Decompor inspeções em comandos simples e usar somente categorias enumeradas pelo help",
+      "preventative_rule": "Antes de registrar RCA, consultar o contrato de argumentos; sob PowerShell evitar quoting multiline em python -c",
+      "regression_test_file": "core/harness/terminal_env.py",
+      "verification_gate_id": null,
+      "origin": "rca",
+      "status": "proposed",
+      "active": false
+    },
+    {
+      "rca_id": "rca_393ec111",
+      "timestamp": "2026-09-08T19:37:58.919911+00:00",
+      "category": "test_regression",
+      "symptom": "Teste de extra_fields não falhou como esperado",
+      "mechanism": "Pydantic model_copy(update) preserva atualização sem revalidar campos extras",
+      "root_cause": "O teste usou uma API de cópia inadequada para verificar ConfigDict extra=forbid",
+      "patch_description": "Construir BaselineSourceSpec com campo unexpected diretamente para acionar a validação do contrato",
+      "preventative_rule": "Testes de validação Pydantic devem instanciar ou usar model_validate, não model_copy, para confirmar rejeição de campos",
+      "regression_test_file": "tests/test_baseline_sources.py",
+      "verification_gate_id": null,
+      "origin": "rca",
+      "status": "proposed",
+      "active": false
+    },
+    {
+      "rca_id": "rca_44ec765f",
+      "timestamp": "2026-09-08T19:39:44.993199+00:00",
+      "category": "tool_misuse",
+      "symptom": "Ruff rejeitou os arquivos HF-01-02 por imports, anotação antecipada e datetime ingênuo no teste",
+      "mechanism": "A implementação inicial não seguiu a ordenação automática de imports e o teste intencional não documentou o datetime sem timezone",
+      "root_cause": "Faltou rodar a checagem estática antes da primeira validação focal",
+      "patch_description": "Organizar imports, remover aspas da anotação futura e construir o datetime ingênuo com comentário explícito no teste",
+      "preventative_rule": "Executar lint dos arquivos novos antes dos gates e isolar construções intencionalmente inválidas em testes",
+      "regression_test_file": "tests/test_baseline_sources.py",
+      "verification_gate_id": null,
+      "origin": "rca",
+      "status": "proposed",
+      "active": false
     }
   ],
   "transfers": [
@@ -339,7 +967,7 @@
       "created_at": "2026-09-05T10:50:21.975710+00:00"
     },
     {
-      "transfer_id": "trans_88d55b48",
+      "transfer_id": "trans_dc30461a",
       "source_domain": "core.audio",
       "target_domains": [
         "core.benchmarks"
@@ -347,10 +975,10 @@
       "specific_lesson": "VRAM leak",
       "generalized_principle": "Release model memory on test exit",
       "applied_actions": [],
-      "created_at": "2026-09-06T10:27:00.598948+00:00"
+      "created_at": "2026-09-05T10:59:58.070370+00:00"
     },
     {
-      "transfer_id": "trans_cf71aa9c",
+      "transfer_id": "trans_f2df6369",
       "source_domain": "core.audio",
       "target_domains": [
         "core.benchmarks"
@@ -358,10 +986,10 @@
       "specific_lesson": "VRAM leak",
       "generalized_principle": "Release model memory on test exit",
       "applied_actions": [],
-      "created_at": "2026-09-06T10:27:31.823644+00:00"
+      "created_at": "2026-09-05T11:00:57.680325+00:00"
     },
     {
-      "transfer_id": "trans_f5fa8563",
+      "transfer_id": "trans_8b5fec39",
       "source_domain": "core.audio",
       "target_domains": [
         "core.benchmarks"
@@ -369,7 +997,192 @@
       "specific_lesson": "VRAM leak",
       "generalized_principle": "Release model memory on test exit",
       "applied_actions": [],
-      "created_at": "2026-09-06T10:27:55.267669+00:00"
+      "created_at": "2026-09-05T11:02:53.218469+00:00"
+    },
+    {
+      "transfer_id": "trans_19df0e2b",
+      "source_domain": "core.audio",
+      "target_domains": [
+        "core.benchmarks"
+      ],
+      "specific_lesson": "VRAM leak",
+      "generalized_principle": "Release model memory on test exit",
+      "applied_actions": [],
+      "created_at": "2026-09-05T11:06:57.316659+00:00"
+    },
+    {
+      "transfer_id": "trans_1026a84d",
+      "source_domain": "core.audio",
+      "target_domains": [
+        "core.benchmarks"
+      ],
+      "specific_lesson": "VRAM leak",
+      "generalized_principle": "Release model memory on test exit",
+      "applied_actions": [],
+      "created_at": "2026-09-05T11:08:09.088243+00:00"
+    },
+    {
+      "transfer_id": "trans_07fd445f",
+      "source_domain": "core.audio",
+      "target_domains": [
+        "core.benchmarks"
+      ],
+      "specific_lesson": "VRAM leak",
+      "generalized_principle": "Release model memory on test exit",
+      "applied_actions": [],
+      "created_at": "2026-09-05T11:09:43.003105+00:00"
+    },
+    {
+      "transfer_id": "trans_92109b60",
+      "source_domain": "core.audio",
+      "target_domains": [
+        "core.benchmarks"
+      ],
+      "specific_lesson": "VRAM leak",
+      "generalized_principle": "Release model memory on test exit",
+      "applied_actions": [],
+      "created_at": "2026-09-05T13:14:23.486308+00:00"
+    },
+    {
+      "transfer_id": "trans_9c5d18bd",
+      "source_domain": "core.audio",
+      "target_domains": [
+        "core.benchmarks"
+      ],
+      "specific_lesson": "VRAM leak",
+      "generalized_principle": "Release model memory on test exit",
+      "applied_actions": [],
+      "created_at": "2026-09-05T13:14:41.514136+00:00"
+    },
+    {
+      "transfer_id": "trans_8942421e",
+      "source_domain": "core.audio",
+      "target_domains": [
+        "core.benchmarks"
+      ],
+      "specific_lesson": "VRAM leak",
+      "generalized_principle": "Release model memory on test exit",
+      "applied_actions": [],
+      "created_at": "2026-09-05T13:16:23.983368+00:00"
+    },
+    {
+      "transfer_id": "trans_17346bd3",
+      "source_domain": "core.audio",
+      "target_domains": [
+        "core.benchmarks"
+      ],
+      "specific_lesson": "VRAM leak",
+      "generalized_principle": "Release model memory on test exit",
+      "applied_actions": [],
+      "created_at": "2026-09-05T13:17:16.813276+00:00"
+    },
+    {
+      "transfer_id": "trans_92e82c36",
+      "source_domain": "core.audio",
+      "target_domains": [
+        "core.benchmarks"
+      ],
+      "specific_lesson": "VRAM leak",
+      "generalized_principle": "Release model memory on test exit",
+      "applied_actions": [],
+      "created_at": "2026-09-05T13:27:34.380631+00:00"
+    },
+    {
+      "transfer_id": "trans_2d2c68ed",
+      "source_domain": "core.audio",
+      "target_domains": [
+        "core.benchmarks"
+      ],
+      "specific_lesson": "VRAM leak",
+      "generalized_principle": "Release model memory on test exit",
+      "applied_actions": [],
+      "created_at": "2026-09-05T13:32:33.102106+00:00"
+    },
+    {
+      "transfer_id": "trans_f18f352e",
+      "source_domain": "core.audio",
+      "target_domains": [
+        "core.benchmarks"
+      ],
+      "specific_lesson": "VRAM leak",
+      "generalized_principle": "Release model memory on test exit",
+      "applied_actions": [],
+      "created_at": "2026-09-05T13:41:15.239006+00:00"
+    },
+    {
+      "transfer_id": "trans_f96c154b",
+      "source_domain": "core.audio",
+      "target_domains": [
+        "core.benchmarks"
+      ],
+      "specific_lesson": "VRAM leak",
+      "generalized_principle": "Release model memory on test exit",
+      "applied_actions": [],
+      "created_at": "2026-09-05T13:55:56.404017+00:00"
+    },
+    {
+      "transfer_id": "trans_3f59b842",
+      "source_domain": "core.audio",
+      "target_domains": [
+        "core.benchmarks"
+      ],
+      "specific_lesson": "VRAM leak",
+      "generalized_principle": "Release model memory on test exit",
+      "applied_actions": [],
+      "created_at": "2026-09-05T13:57:08.351467+00:00"
+    },
+    {
+      "transfer_id": "trans_1ec9466a",
+      "source_domain": "core.audio",
+      "target_domains": [
+        "core.benchmarks"
+      ],
+      "specific_lesson": "VRAM leak",
+      "generalized_principle": "Release model memory on test exit",
+      "applied_actions": [],
+      "created_at": "2026-09-05T19:55:22.728510+00:00"
+    },
+    {
+      "transfer_id": "trans_b7c0eb96",
+      "source_domain": "core.audio",
+      "target_domains": [
+        "core.benchmarks"
+      ],
+      "specific_lesson": "VRAM leak",
+      "generalized_principle": "Release model memory on test exit",
+      "applied_actions": [],
+      "created_at": "2026-09-05T19:57:34.150655+00:00"
+    },
+    {
+      "transfer_id": "trans_1d36d975",
+      "source_domain": "hub.frontend",
+      "target_domains": [
+        "canaletto_gallery.backend",
+        "hub.backend"
+      ],
+      "specific_lesson": "Index HTML sem headers no-cache causou exibicao de versao antiga do painel",
+      "generalized_principle": "Rotas raiz que servem index.html devem declarar headers no-cache para evitar retencao de HTML obsoleto no navegador do usuario",
+      "applied_actions": [
+        "headers Cache-Control no-cache no FileResponse"
+      ],
+      "created_at": "2026-09-08T04:38:15.242371+00:00"
+    },
+    {
+      "transfer_id": "trans_441a2520",
+      "source_domain": "core.harness",
+      "target_domains": [
+        "core.infra",
+        "hub.backend",
+        "core.database",
+        "core.deployment"
+      ],
+      "specific_lesson": "Tickets com dependencia de hardware ou servicos externos precisam de teste real E2E e demanda proativa de ajustes manuais antes do encerramento",
+      "generalized_principle": "Zero-Trust Physical E2E Gate: nenhum componente distribuido e aceito sem execucao real no nó de destino com configuracoes manuais do usuario alinhadas previamente",
+      "applied_actions": [
+        "Sempre demandar do usuario quaisquer configuracoes de portas/chaves/permissoes antes dos testes finais",
+        "Validar via rede real no hardware remoto antes de marcar ticket como delivered"
+      ],
+      "created_at": "2026-09-08T14:25:43.382680+00:00"
     }
   ],
   "contrasts": [],
@@ -487,29 +1300,173 @@
       "executed_at": "2026-09-05T10:50:21.974201+00:00"
     },
     {
-      "gate_id": "gate_80402daa",
+      "gate_id": "gate_de4597a8",
       "target_type": "rca_patch",
       "test_command": "python -c \"import sys; sys.exit(1)\"",
       "passed": false,
       "output_snippet": "Exit code: 1",
-      "executed_at": "2026-09-06T10:27:00.596438+00:00"
+      "executed_at": "2026-09-05T10:59:58.068359+00:00"
     },
     {
-      "gate_id": "gate_5e54bc5c",
+      "gate_id": "gate_63926c27",
       "target_type": "rca_patch",
       "test_command": "python -c \"import sys; sys.exit(1)\"",
       "passed": false,
       "output_snippet": "Exit code: 1",
-      "executed_at": "2026-09-06T10:27:31.803576+00:00"
+      "executed_at": "2026-09-05T11:00:57.678325+00:00"
     },
     {
-      "gate_id": "gate_7b3e9998",
+      "gate_id": "gate_8226a22d",
       "target_type": "rca_patch",
       "test_command": "python -c \"import sys; sys.exit(1)\"",
       "passed": false,
       "output_snippet": "Exit code: 1",
-      "executed_at": "2026-09-06T10:27:55.260657+00:00"
+      "executed_at": "2026-09-05T11:02:53.216466+00:00"
+    },
+    {
+      "gate_id": "gate_d70ddbfc",
+      "target_type": "rca_patch",
+      "test_command": "python -c \"import sys; sys.exit(1)\"",
+      "passed": false,
+      "output_snippet": "Exit code: 1",
+      "executed_at": "2026-09-05T11:06:57.310647+00:00"
+    },
+    {
+      "gate_id": "gate_18dfd360",
+      "target_type": "rca_patch",
+      "test_command": "python -c \"import sys; sys.exit(1)\"",
+      "passed": false,
+      "output_snippet": "Exit code: 1",
+      "executed_at": "2026-09-05T11:08:09.075725+00:00"
+    },
+    {
+      "gate_id": "gate_de06c03d",
+      "target_type": "rca_patch",
+      "test_command": "python -c \"import sys; sys.exit(1)\"",
+      "passed": false,
+      "output_snippet": "Exit code: 1",
+      "executed_at": "2026-09-05T11:09:43.001111+00:00"
+    },
+    {
+      "gate_id": "gate_99cc004a",
+      "target_type": "rca_patch",
+      "test_command": "python -c \"import sys; sys.exit(1)\"",
+      "passed": false,
+      "output_snippet": "Exit code: 1",
+      "executed_at": "2026-09-05T13:14:23.484317+00:00"
+    },
+    {
+      "gate_id": "gate_0e16e438",
+      "target_type": "rca_patch",
+      "test_command": "python -c \"import sys; sys.exit(1)\"",
+      "passed": false,
+      "output_snippet": "Exit code: 1",
+      "executed_at": "2026-09-05T13:14:41.512129+00:00"
+    },
+    {
+      "gate_id": "gate_868e3902",
+      "target_type": "rca_patch",
+      "test_command": "python -c \"import sys; sys.exit(1)\"",
+      "passed": false,
+      "output_snippet": "Exit code: 1",
+      "executed_at": "2026-09-05T13:16:23.981354+00:00"
+    },
+    {
+      "gate_id": "gate_83210a0d",
+      "target_type": "rca_patch",
+      "test_command": "python -c \"import sys; sys.exit(1)\"",
+      "passed": false,
+      "output_snippet": "Exit code: 1",
+      "executed_at": "2026-09-05T13:17:16.810286+00:00"
+    },
+    {
+      "gate_id": "gate_f60d4435",
+      "target_type": "rca_patch",
+      "test_command": "python -c \"import sys; sys.exit(1)\"",
+      "passed": false,
+      "output_snippet": "Exit code: 1",
+      "executed_at": "2026-09-05T13:27:34.377597+00:00"
+    },
+    {
+      "gate_id": "gate_269ebbf9",
+      "target_type": "rca_patch",
+      "test_command": "python -c \"import sys; sys.exit(1)\"",
+      "passed": false,
+      "output_snippet": "Exit code: 1",
+      "executed_at": "2026-09-05T13:32:33.100098+00:00"
+    },
+    {
+      "gate_id": "gate_054ccd79",
+      "target_type": "rca_patch",
+      "test_command": "python -c \"import sys; sys.exit(1)\"",
+      "passed": false,
+      "output_snippet": "Exit code: 1",
+      "executed_at": "2026-09-05T13:41:15.221037+00:00"
+    },
+    {
+      "gate_id": "gate_28359649",
+      "target_type": "rca_patch",
+      "test_command": "python -c \"import sys; sys.exit(1)\"",
+      "passed": false,
+      "output_snippet": "Exit code: 1",
+      "executed_at": "2026-09-05T13:55:56.401011+00:00"
+    },
+    {
+      "gate_id": "gate_a52e225f",
+      "target_type": "rca_patch",
+      "test_command": "python -c \"import sys; sys.exit(1)\"",
+      "passed": false,
+      "output_snippet": "Exit code: 1",
+      "executed_at": "2026-09-05T13:57:08.348455+00:00"
+    },
+    {
+      "gate_id": "gate_21aa5b7b",
+      "target_type": "rca_patch",
+      "test_command": "python -c \"import sys; sys.exit(1)\"",
+      "passed": false,
+      "output_snippet": "Exit code: 1",
+      "executed_at": "2026-09-05T19:55:22.720505+00:00"
+    },
+    {
+      "gate_id": "gate_d048ad6d",
+      "target_type": "rca_patch",
+      "test_command": "python -c \"import sys; sys.exit(1)\"",
+      "passed": false,
+      "output_snippet": "Exit code: 1",
+      "executed_at": "2026-09-05T19:57:34.135317+00:00"
+    },
+    {
+      "gate_id": "gate_b20ba6e1",
+      "target_type": "rca_patch",
+      "test_command": "C:\\Users\\guigc\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\python.exe C:\\Users\\guigc\\.codex\\skills\\.system\\skill-creator\\scripts\\quick_validate.py .agents\\skills\\04-autonomous-piv-loop",
+      "passed": true,
+      "output_snippet": "Skill is valid!\n",
+      "executed_at": "2026-09-06T10:13:49.104639+00:00"
+    },
+    {
+      "gate_id": "gate_96bb46c3",
+      "target_type": "rca_patch",
+      "test_command": "C:\\Users\\guigc\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\python.exe -m pytest tests\\test_orchestrator_state.py -q --basetemp=C:\\Users\\guigc\\AppData\\Local\\Temp\\DarkFac-pytest-probe-20260906-071629",
+      "passed": true,
+      "output_snippet": "..........                                                               [100%]\n10 passed in 0.14s\n",
+      "executed_at": "2026-09-06T10:16:46.631871+00:00"
+    },
+    {
+      "gate_id": "gate_7980cbc7",
+      "target_type": "rca_patch",
+      "test_command": "python -m pytest tests/test_adicionar_cards_de_infrae.py -v",
+      "passed": true,
+      "output_snippet": "/test_adicionar_cards_de_infrae.py::test_system_access_links_integrity PASSED [ 30%]\ntests/test_adicionar_cards_de_infrae.py::test_probe_liveness_graceful_failure PASSED [ 40%]\ntests/test_adicionar_cards_de_infrae.py::test_probe_liveness_successful_mock PASSED [ 50%]\ntests/test_adicionar_cards_de_infrae.py::test_api_get_infra_cards PASSED [ 60%]\ntests/test_adicionar_cards_de_infrae.py::test_api_post_infra_cards_refresh PASSED [ 70%]\ntests/test_adicionar_cards_de_infrae.py::test_api_get_single_node_card PASSED [ 80%]\ntests/test_adicionar_cards_de_infrae.py::test_frontend_infra_assets_mounted PASSED [ 90%]\ntests/test_adicionar_cards_de_infrae.py::test_non_goals_no_administrative_mutation_endpoints PASSED [100%]\n\n============================= 10 passed in 0.65s ==============================\n",
+      "executed_at": "2026-09-08T04:38:09.730815+00:00"
+    },
+    {
+      "gate_id": "gate_e20d19dc",
+      "target_type": "rca_patch",
+      "test_command": "python -m pytest tests/test_worker_onprem_test_subagent.py -v",
+      "passed": true,
+      "output_snippet": "ASSED [ 41%]\ntests/test_worker_onprem_test_subagent.py::test_engine_execute_local_mode PASSED [ 50%]\ntests/test_worker_onprem_test_subagent.py::test_engine_execute_remote_success PASSED [ 58%]\ntests/test_worker_onprem_test_subagent.py::test_engine_execute_auto_failover_to_local_when_remote_offline PASSED [ 66%]\ntests/test_worker_onprem_test_subagent.py::test_engine_execute_remote_fail_closed_when_no_fallback PASSED [ 75%]\ntests/test_worker_onprem_test_subagent.py::test_engine_execute_remote_network_error_triggers_fallback PASSED [ 83%]\ntests/test_worker_onprem_test_subagent.py::test_hub_api_list_test_workers PASSED [ 91%]\ntests/test_worker_onprem_test_subagent.py::test_hub_api_execute_test_suite PASSED [100%]\n\n============================= 12 passed in 0.44s ==============================\n",
+      "executed_at": "2026-09-08T14:25:32.955989+00:00"
     }
   ],
-  "last_updated": "2026-09-06T10:32:51.862444+00:00"
+  "last_updated": "2026-09-08T19:39:44.993199+00:00"
 }

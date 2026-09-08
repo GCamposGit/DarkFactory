@@ -52,3 +52,21 @@ A fábrica é composta por três camadas integradas:
    - Pipeline automatizado de empacotamento e entrega acionado pós-merge.
 5. **Trigger / Agendador Autônomo**:
    - Agendamento de polling via Task Scheduler (Windows) ou Cron/Systemd (Linux) que dispara o ciclo de trabalho sem depender de webhooks frágeis.
+
+---
+
+## 3. Vertical E2E de Referência: Echo Garden
+
+`core/game/` isola o domínio determinístico do jogo das integrações de modelo, imagem e apresentação. O motor aceita estado + movimento e retorna um novo estado sem rede, relógio ou I/O. A camada one-shot recebe contribuições estruturadas dos três tiers, valida-as contra o motor e somente então exporta o HTML autocontido.
+
+O driver oficial é `cli`, com chamadas `library` nos níveis unitário e de integração. A suíte live é separada da validação compartilhada para não consumir APIs em clones limpos, mas não aceita `skip` como sucesso durante um ensaio solicitado: credencial ausente, modelo indisponível, resposta inválida ou fallback de provedor falham o gate.
+
+Os limites de segurança são:
+
+- respostas de LLM são dados validados, nunca código executado;
+- chaves permanecem no ambiente/registro e não entram nos artefatos;
+- chamadas cloud têm timeout e erro estruturado;
+- imagens usam bytes base64 retornados pela API oficial e limites de tamanho;
+- o HTML não carrega bibliotecas, scripts ou conteúdo remoto.
+
+O plano completo e os critérios de aceitação estão em `docs/DARK_FACTORY_E2E_TEST_PLAN.md`.

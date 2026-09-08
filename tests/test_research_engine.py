@@ -6,6 +6,7 @@ Runs deterministically without network dependencies.
 
 import json
 import tempfile
+import urllib.error
 from pathlib import Path
 import pytest
 
@@ -26,6 +27,16 @@ from core.research.arxiv_client import ArxivClient
 from core.research.github_scout import GitHubScout
 from core.research.trends_scout import ExpertTrendsScout
 from core.research.ledger import KnowledgeLedgerManager
+from core.research.transport import (
+    ResearchTransport,
+    SearchStatus,
+    TlsConfigurationError,
+    TransportError,
+    TransportErrorKind,
+    TransportFailure,
+    TransportResponse,
+    get_ssl_context,
+)
 
 
 
@@ -147,6 +158,158 @@ def test_arxiv_atom_feed_parser():
     assert s.authors_or_maintainers == ["Alice Smith", "Bob Jones"]
     assert "Alice Smith" in s.authors_or_maintainers
     assert s.license_category == LicenseType.PERMISSIVE
+
+
+class _FakeResearchTransport:
+    def __init__(self, response=None, failure=None):
+        self.response = response
+        self.failure = failure
+        self.calls = []
+
+    def get(self, url, *, headers=None):
+        self.calls.append((url, headers or {}))
+        if self.failure is not None:
+            raise TransportError(self.failure)
+        return self.response
+
+
+def test_research_clients_distinguish_empty_results_from_transport_failures():
+    empty_feed = b'<feed xmlns="http://www.w3.org/2005/Atom"></feed>'
+    transport = _FakeResearchTransport(TransportResponse(200, empty_feed))
+    result = ArxivClient(transport=transport).search_papers("tls transport")
+
+    assert result.status == SearchStatus.EMPTY
+    assert result.is_empty
+    assert result.failure is None
+    assert transport.calls[0][0].startswith("https://export.arxiv.org/")
+
+    failed_transport = _FakeResearchTransport(
+        failure=TransportFailure(
+            TransportErrorKind.TIMEOUT,
+            "remote service request timed out",
+            retryable=True,
+        )
+    )
+    failed = ArxivClient(transport=failed_transport).search_papers("tls transport")
+
+    assert failed.status == SearchStatus.FAILED
+    assert failed.failure is not None
+    assert failed.failure.kind == TransportErrorKind.TIMEOUT
+    assert failed.failure.retryable is True
+
+
+def test_research_transport_structured_failure_categories(monkeypatch):
+    monkeypatch.setattr(
+        "core.research.transport.get_ssl_context",
+        lambda _ca_bundle=None: object(),
+    )
+
+    def raise_timeout(*_args, **_kwargs):
+        raise urllib.error.URLError(TimeoutError("internal detail"))
+
+    monkeypatch.setattr("core.research.transport.urllib.request.urlopen", raise_timeout)
+    with pytest.raises(TransportError) as timeout_error:
+        ResearchTransport().get("https://example.test/search")
+    assert timeout_error.value.failure.kind == TransportErrorKind.TIMEOUT
+    assert "internal detail" not in str(timeout_error.value)
+
+    def raise_http_error(*_args, **_kwargs):
+        raise urllib.error.HTTPError(
+            "https://example.test/search?token=secret",
+            503,
+            "server detail",
+            hdrs=None,
+            fp=None,
+        )
+
+    monkeypatch.setattr("core.research.transport.urllib.request.urlopen", raise_http_error)
+    with pytest.raises(TransportError) as http_error:
+        ResearchTransport().get("https://example.test/search?token=secret")
+    assert http_error.value.failure.kind == TransportErrorKind.HTTP_STATUS
+    assert http_error.value.failure.status_code == 503
+    assert "secret" not in str(http_error.value)
+    assert "secret" not in repr(http_error.value.failure)
+
+    class InvalidStatusResponse:
+        status = None
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def getcode(self):
+            return "200"
+
+    monkeypatch.setattr(
+        "core.research.transport.urllib.request.urlopen",
+        lambda *_args, **_kwargs: InvalidStatusResponse(),
+    )
+    with pytest.raises(TransportError) as invalid_response_error:
+        ResearchTransport().get("https://example.test/search")
+    assert invalid_response_error.value.failure.kind == TransportErrorKind.INVALID_RESPONSE
+
+
+def test_research_transport_rejects_empty_body_and_unverified_fallback(monkeypatch):
+    monkeypatch.setattr(
+        "core.research.transport.get_ssl_context",
+        lambda _ca_bundle=None: object(),
+    )
+
+    class EmptyResponse:
+        status = 200
+        headers = {}
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def read(self):
+            return b""
+
+    monkeypatch.setattr(
+        "core.research.transport.urllib.request.urlopen",
+        lambda *_args, **_kwargs: EmptyResponse(),
+    )
+    with pytest.raises(TransportError) as empty_error:
+        ResearchTransport().get("https://example.test/search")
+    assert empty_error.value.failure.kind == TransportErrorKind.EMPTY_RESPONSE
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        missing_bundle = Path(tmpdir) / "missing-ca.pem"
+        with pytest.raises(TlsConfigurationError) as tls_error:
+            get_ssl_context(missing_bundle)
+    assert tls_error.value.failure.kind == TransportErrorKind.TLS_ERROR
+    assert "unverified" not in str(tls_error.value).lower()
+
+
+def test_github_search_does_not_expose_token_on_failure():
+    token = "ghp-secret-token"
+    transport = _FakeResearchTransport(
+        failure=TransportFailure(
+            TransportErrorKind.TRANSPORT_ERROR,
+            "remote service transport failed",
+            retryable=True,
+        )
+    )
+    result = GitHubScout(token=token, transport=transport).search_repositories("secure search")
+
+    assert result.status == SearchStatus.FAILED
+    assert result.failure is not None
+    assert token not in repr(result.failure)
+    assert token not in str(result.failure.message)
+
+
+def test_github_search_marks_malformed_payload_as_invalid_response():
+    transport = _FakeResearchTransport(TransportResponse(200, b"not-json"))
+    result = GitHubScout(transport=transport).search_repositories("secure search")
+
+    assert result.status == SearchStatus.FAILED
+    assert result.failure is not None
+    assert result.failure.kind == TransportErrorKind.INVALID_RESPONSE
 
 
 # 4. GitHub Scout Quality and Licensing
@@ -345,4 +508,3 @@ def test_expert_trends_scout_and_authority_tiers():
     assert "## 3. Radar de Tendências & Experts da Comunidade (Ideação de Features)" in md
     assert "🔥 [TENDÊNCIA / EXPERT - IDEAÇÃO DE FEATURE]" in md
     assert "Diretriz DarkFac" in md
-

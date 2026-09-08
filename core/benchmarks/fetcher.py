@@ -19,6 +19,10 @@ from core.benchmarks.models import (
     DailyBenchmarkLedger,
     ModelTier,
     ModelProvider,
+    FieldProvenance,
+    MetricAcquisitionMode,
+    MetricQuality,
+    FIELD_UNITS,
 )
 from core.benchmarks.frontier import (
     DEFAULT_STANDARD_INPUT_TOKENS,
@@ -67,6 +71,36 @@ TRACKED_PROVIDERS = {
 }
 
 
+def _optional_float(value: Any) -> Optional[float]:
+    """Parse a numeric field without turning absence into a fabricated zero."""
+
+    if value is None or value == "":
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _optional_int(value: Any) -> Optional[int]:
+    """Parse an integer field without assigning a default measurement."""
+
+    if value is None or value == "":
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _first_numeric(payload: Dict[str, Any], *keys: str) -> Optional[float]:
+    for key in keys:
+        value = _optional_float(payload.get(key))
+        if value is not None:
+            return value
+    return None
+
+
 class DailyBenchmarkService:
     """Orchestrates once-per-day benchmarking of LLM frontier models."""
 
@@ -75,6 +109,10 @@ class DailyBenchmarkService:
         self.benchmarks_dir = self.root / BENCHMARKS_DIR
         self.latest_file = self.root / LATEST_LEDGER_FILE
         self.history_dir = self.root / HISTORY_DIR
+        self._catalog_field_provenance: Dict[str, Dict[str, Any]] = {}
+        self._catalog_observed_at: Optional[str] = None
+        self._last_openrouter_observed_at: Optional[str] = None
+        self._last_artificial_analysis_observed_at: Optional[str] = None
 
     def get_today_str(self) -> str:
         """Returns current date in YYYY-MM-DD format (UTC)."""
@@ -121,10 +159,123 @@ class DailyBenchmarkService:
         try:
             with open(BASELINE_CATALOG_FILE, "r", encoding="utf-8") as f:
                 data = json.load(f)
+                self._catalog_field_provenance = data.get("field_provenance_defaults", {})
+                self._catalog_observed_at = data.get("catalog_observed_at")
                 return data.get("models", [])
         except Exception as exc:
             logger.error(f"Error loading baseline catalog: {exc}")
             return []
+
+    def _catalog_provenance(
+        self,
+        field_name: str,
+        model_data: Dict[str, Any],
+    ) -> FieldProvenance:
+        """Build provenance from the per-model or catalog-wide fixture contract."""
+
+        raw = model_data.get("field_provenance", {}).get(field_name)
+        if raw is None:
+            raw = self._catalog_field_provenance.get(field_name)
+        if raw is not None:
+            return FieldProvenance.from_dict(raw)
+        return FieldProvenance(
+            source="benchmark_catalog.json",
+            observed_at=self._catalog_observed_at,
+            unit=FIELD_UNITS.get(field_name, "unknown"),
+            acquisition_mode=MetricAcquisitionMode.OFFLINE_FIXTURE,
+            quality=MetricQuality.REPORTED,
+        )
+
+    @staticmethod
+    def _live_provenance(field_name: str, source: str, observed_at: str) -> FieldProvenance:
+        return FieldProvenance(
+            source=source,
+            observed_at=observed_at,
+            unit=FIELD_UNITS.get(field_name, "unknown"),
+            acquisition_mode=MetricAcquisitionMode.LIVE_API,
+            quality=MetricQuality.OBSERVED,
+        )
+
+    @staticmethod
+    def _derived_provenance(field_name: str, note: str) -> FieldProvenance:
+        return FieldProvenance(
+            source="darkfac:derived",
+            observed_at=None,
+            unit=FIELD_UNITS.get(field_name, "unknown"),
+            acquisition_mode=MetricAcquisitionMode.DERIVED,
+            quality=MetricQuality.DERIVED,
+            note=note,
+        )
+
+    @staticmethod
+    def _api_model_id(model_data: Dict[str, Any]) -> str:
+        value = model_data.get("id") or model_data.get("model_id") or model_data.get("model")
+        return str(value) if value else ""
+
+    def _apply_artificial_analysis_metrics(
+        self,
+        entries: Dict[str, ModelBenchmarkEntry],
+        payloads: List[Dict[str, Any]],
+    ) -> None:
+        """Merge only explicitly returned metrics; never infer missing scores."""
+
+        observed_at = self._last_artificial_analysis_observed_at or datetime.now(timezone.utc).isoformat()
+        for payload in payloads:
+            model_id = self._api_model_id(payload)
+            entry = entries.get(model_id)
+            if entry is None:
+                continue
+
+            field_values = {
+                "coding_score": _first_numeric(
+                    payload,
+                    "coding_score",
+                    "coding_agent_index",
+                    "swe_bench_verified",
+                ),
+                "intelligence_score": _first_numeric(
+                    payload,
+                    "intelligence_score",
+                    "intelligence_index",
+                ),
+                "output_speed_tps": _first_numeric(
+                    payload,
+                    "output_speed_tps",
+                    "tokens_per_second",
+                ),
+                "latency_ttft_sec": _first_numeric(
+                    payload,
+                    "latency_ttft_sec",
+                    "time_to_first_token",
+                ),
+                "tokens_per_task": _optional_int(payload.get("tokens_per_task")),
+            }
+            for field_name, value in field_values.items():
+                if value is None:
+                    continue
+                setattr(entry, field_name, value)
+                entry.field_provenance[field_name] = self._live_provenance(
+                    field_name,
+                    ARTIFICIAL_ANALYSIS_MODELS_URL,
+                    observed_at,
+                )
+
+            raw_domains = payload.get("domain_scores")
+            if isinstance(raw_domains, dict):
+                domain_scores = {
+                    str(key): float(value)
+                    for key, value in raw_domains.items()
+                    if _optional_float(value) is not None
+                }
+                if domain_scores:
+                    entry.domain_scores.update(domain_scores)
+                    entry.field_provenance["domain_scores"] = self._live_provenance(
+                        "domain_scores",
+                        ARTIFICIAL_ANALYSIS_MODELS_URL,
+                        observed_at,
+                    )
+            if any(value is not None for value in field_values.values()) or raw_domains:
+                entry.benchmark_source = "field_provenance"
 
     def fetch_openrouter_catalog(self, timeout: int = 10) -> List[Dict[str, Any]]:
         """
@@ -140,6 +291,7 @@ class DailyBenchmarkService:
         )
         try:
             with urllib.request.urlopen(req, timeout=timeout) as resp:
+                self._last_openrouter_observed_at = datetime.now(timezone.utc).isoformat()
                 data = json.loads(resp.read().decode("utf-8"))
                 models = data.get("data", [])
                 logger.info(f"OpenRouter public API returned {len(models)} models.")
@@ -169,6 +321,7 @@ class DailyBenchmarkService:
         )
         try:
             with urllib.request.urlopen(req, timeout=timeout) as resp:
+                self._last_artificial_analysis_observed_at = datetime.now(timezone.utc).isoformat()
                 data = json.loads(resp.read().decode("utf-8"))
                 logger.info(f"Artificial Analysis API returned {len(data)} models.")
                 return data if isinstance(data, list) else data.get("models", [])
@@ -176,9 +329,12 @@ class DailyBenchmarkService:
             logger.warning(f"Artificial Analysis API query failed: {exc}")
             return []
 
-    def build_daily_ledger(self, force: bool = False) -> DailyBenchmarkLedger:
+    def build_daily_ledger(self, force: bool = False, offline: bool = False) -> DailyBenchmarkLedger:
         """
         Executes daily benchmark run, calculates Pareto efficiency frontier, and persists ledger.
+
+        ``offline=True`` is a deterministic fixture mode: it never calls either
+        external API and keeps unknown values unknown.
         """
         today = self.get_today_str()
 
@@ -187,47 +343,91 @@ class DailyBenchmarkService:
         model_entries_map: Dict[str, ModelBenchmarkEntry] = {}
 
         for b in baseline_entries:
-            input_cost = float(b.get("input_cost_per_m", 0.0))
-            output_cost = float(b.get("output_cost_per_m", 0.0))
-            coding_score = float(b.get("coding_score", 70.0))
-            intelligence_score = float(b.get("intelligence_score", 70.0))
-            if "cost_per_task" in b:
-                cost_per_task = float(b["cost_per_task"])
-            else:
+            input_cost = _optional_float(b.get("input_cost_per_m"))
+            output_cost = _optional_float(b.get("output_cost_per_m"))
+            coding_score = _optional_float(b.get("coding_score"))
+            intelligence_score = _optional_float(b.get("intelligence_score"))
+            cost_per_task = _optional_float(b.get("cost_per_task"))
+            field_provenance = {
+                field_name: self._catalog_provenance(field_name, b)
+                for field_name in (
+                    "context_length",
+                    "input_cost_per_m",
+                    "output_cost_per_m",
+                    "cache_read_cost_per_m",
+                    "cost_per_task",
+                    "coding_score",
+                    "intelligence_score",
+                    "output_speed_tps",
+                    "latency_ttft_sec",
+                    "tokens_per_task",
+                    "release_date",
+                    "domain_scores",
+                )
+            }
+            if cost_per_task is None and input_cost is not None and output_cost is not None:
                 cost_per_task = calculate_task_cost(input_cost, output_cost)
+                field_provenance["cost_per_task"] = self._derived_provenance(
+                    "cost_per_task",
+                    "Calculated from the observed input and output token prices.",
+                )
 
-            eff_coding = calculate_efficiency_score(coding_score, cost_per_task)
-            eff_general = calculate_efficiency_score(intelligence_score, cost_per_task)
+            eff_coding = (
+                calculate_efficiency_score(coding_score, cost_per_task)
+                if coding_score is not None and cost_per_task is not None
+                else None
+            )
+            eff_general = (
+                calculate_efficiency_score(intelligence_score, cost_per_task)
+                if intelligence_score is not None and cost_per_task is not None
+                else None
+            )
 
             entry = ModelBenchmarkEntry(
                 model_id=b["model_id"],
                 name=b.get("name", b["model_id"]),
                 provider=b.get("provider", "other"),
-                context_length=int(b.get("context_length", 128000)),
+                context_length=_optional_int(b.get("context_length")),
                 input_cost_per_m=input_cost,
                 output_cost_per_m=output_cost,
                 cost_per_task=cost_per_task,
                 coding_score=coding_score,
                 intelligence_score=intelligence_score,
-                output_speed_tps=float(b.get("output_speed_tps", 80.0)),
-                latency_ttft_sec=float(b.get("latency_ttft_sec", 0.8)),
-                tokens_per_task=int(b.get("tokens_per_task", 2400)),
+                output_speed_tps=_optional_float(b.get("output_speed_tps")),
+                latency_ttft_sec=_optional_float(b.get("latency_ttft_sec")),
+                tokens_per_task=_optional_int(b.get("tokens_per_task")),
                 efficiency_score_coding=eff_coding,
                 efficiency_score_general=eff_general,
                 tier=ModelTier(b.get("tier", "balanced_mid")),
-                benchmark_source="artificial_analysis_calibrated",
+                benchmark_source="field_provenance",
                 release_date=b.get("release_date"),
-                cache_read_cost_per_m=b.get("cache_read_cost_per_m"),
+                cache_read_cost_per_m=_optional_float(b.get("cache_read_cost_per_m")),
                 has_subscription_plan=b.get("has_subscription_plan", False),
                 subscription_name=b.get("subscription_name"),
                 marginal_cost_plan=0.0 if b.get("has_subscription_plan", False) else cost_per_task,
                 domain_scores=b.get("domain_scores", {}),
                 metadata=b.get("metadata", {}),
+                field_provenance=field_provenance,
             )
+            if eff_coding is not None:
+                entry.field_provenance["efficiency_score_coding"] = self._derived_provenance(
+                    "efficiency_score_coding",
+                    "Calculated capability-to-cost index.",
+                )
+            if eff_general is not None:
+                entry.field_provenance["efficiency_score_general"] = self._derived_provenance(
+                    "efficiency_score_general",
+                    "Calculated capability-to-cost index.",
+                )
             model_entries_map[entry.model_id] = entry
 
-        # Step 2: Query OpenRouter live API to enrich and update token prices & new models
-        openrouter_models = self.fetch_openrouter_catalog()
+        # Step 2: Merge directly measured benchmark values when available.
+        if not offline:
+            artificial_analysis_models = self.fetch_artificial_analysis_api()
+            self._apply_artificial_analysis_metrics(model_entries_map, artificial_analysis_models)
+
+        # Step 3: Query OpenRouter live API to enrich token prices & discover models.
+        openrouter_models = [] if offline else self.fetch_openrouter_catalog()
         for or_model in openrouter_models:
             mid = or_model.get("id", "")
             if not mid or "/" not in mid:
@@ -237,12 +437,13 @@ class DailyBenchmarkService:
             if provider_prefix not in TRACKED_PROVIDERS:
                 continue
 
-            pricing = or_model.get("pricing", {})
-            try:
-                prompt_cost_m = float(pricing.get("prompt", 0.0)) * 1_000_000.0
-                comp_cost_m = float(pricing.get("completion", 0.0)) * 1_000_000.0
-            except (ValueError, TypeError):
+            pricing = or_model.get("pricing", {}) or {}
+            prompt_raw = _optional_float(pricing.get("prompt"))
+            completion_raw = _optional_float(pricing.get("completion"))
+            if prompt_raw is None and completion_raw is None:
                 continue
+            prompt_cost_m = prompt_raw * 1_000_000.0 if prompt_raw is not None else None
+            comp_cost_m = completion_raw * 1_000_000.0 if completion_raw is not None else None
 
             if mid in model_entries_map:
                 entry = model_entries_map[mid]
@@ -251,77 +452,142 @@ class DailyBenchmarkService:
                     continue
 
                 # Update with real-time live prices
-                entry.input_cost_per_m = round(prompt_cost_m, 4)
-                entry.output_cost_per_m = round(comp_cost_m, 4)
-                entry.cost_per_task = calculate_task_cost(entry.input_cost_per_m, entry.output_cost_per_m)
-                entry.efficiency_score_coding = calculate_efficiency_score(entry.coding_score, entry.cost_per_task)
-                entry.efficiency_score_general = calculate_efficiency_score(entry.intelligence_score, entry.cost_per_task)
-                entry.benchmark_source = "openrouter_live_pricing"
+                observed_at = self._last_openrouter_observed_at or datetime.now(timezone.utc).isoformat()
+                if prompt_cost_m is not None:
+                    entry.input_cost_per_m = round(prompt_cost_m, 4)
+                    entry.field_provenance["input_cost_per_m"] = self._live_provenance(
+                        "input_cost_per_m", OPENROUTER_MODELS_URL, observed_at
+                    )
+                if comp_cost_m is not None:
+                    entry.output_cost_per_m = round(comp_cost_m, 4)
+                    entry.field_provenance["output_cost_per_m"] = self._live_provenance(
+                        "output_cost_per_m", OPENROUTER_MODELS_URL, observed_at
+                    )
+                if entry.input_cost_per_m is not None and entry.output_cost_per_m is not None:
+                    entry.cost_per_task = calculate_task_cost(
+                        entry.input_cost_per_m,
+                        entry.output_cost_per_m,
+                    )
+                    entry.field_provenance["cost_per_task"] = self._derived_provenance(
+                        "cost_per_task",
+                        "Calculated from the live OpenRouter price fields.",
+                    )
+                if entry.coding_score is not None and entry.cost_per_task is not None:
+                    entry.efficiency_score_coding = calculate_efficiency_score(
+                        entry.coding_score, entry.cost_per_task
+                    )
+                if entry.intelligence_score is not None and entry.cost_per_task is not None:
+                    entry.efficiency_score_general = calculate_efficiency_score(
+                        entry.intelligence_score, entry.cost_per_task
+                    )
+                entry.benchmark_source = "field_provenance"
                 entry.marginal_cost_plan = 0.0 if entry.has_subscription_plan else entry.cost_per_task
             else:
-                # Discovered newly released model on OpenRouter!
-                # Estimate baseline scores using provider/model family heuristics
+                # Discovered model: availability/pricing are known, capability is not.
+                # Never promote a name-based heuristic into a benchmark measurement.
                 name = or_model.get("name", mid)
-                created_ts = or_model.get("created")
-                rel_date = datetime.fromtimestamp(created_ts, timezone.utc).strftime("%Y-%m-%d") if created_ts else today
-
-                # Infer capability estimation
-                base_coding = 80.0
-                base_intel = 82.0
-                tier = ModelTier.BALANCED_MID
-                if any(k in mid for k in ["pro", "opus", "astra", "max", "large"]):
-                    base_coding = 86.0
-                    base_intel = 88.0
-                    tier = ModelTier.FRONTIER_HIGH
-                elif any(k in mid for k in ["flash", "mini", "haiku", "small"]):
-                    base_coding = 74.0
-                    base_intel = 76.0
-                    tier = ModelTier.FAST_ECONOMY
-
-                cost_task = calculate_task_cost(prompt_cost_m, comp_cost_m)
-                eff_c = calculate_efficiency_score(base_coding, cost_task)
-                eff_g = calculate_efficiency_score(base_intel, cost_task)
+                created_ts = _optional_int(or_model.get("created"))
+                rel_date = (
+                    datetime.fromtimestamp(created_ts, timezone.utc).strftime("%Y-%m-%d")
+                    if created_ts is not None
+                    else None
+                )
+                tier_value = or_model.get("tier", ModelTier.BALANCED_MID.value)
+                try:
+                    tier = ModelTier(tier_value)
+                except ValueError:
+                    tier = ModelTier.BALANCED_MID
+                observed_at = self._last_openrouter_observed_at or datetime.now(timezone.utc).isoformat()
+                discovered_provenance = {
+                    "context_length": self._live_provenance(
+                        "context_length", OPENROUTER_MODELS_URL, observed_at
+                    ),
+                    "input_cost_per_m": self._live_provenance(
+                        "input_cost_per_m", OPENROUTER_MODELS_URL, observed_at
+                    ),
+                    "output_cost_per_m": self._live_provenance(
+                        "output_cost_per_m", OPENROUTER_MODELS_URL, observed_at
+                    ),
+                }
+                context_length = _optional_int(or_model.get("context_length"))
+                cost_task = (
+                    calculate_task_cost(prompt_cost_m, comp_cost_m)
+                    if prompt_cost_m is not None and comp_cost_m is not None
+                    else None
+                )
+                if cost_task is not None:
+                    discovered_provenance["cost_per_task"] = self._derived_provenance(
+                        "cost_per_task",
+                        "Calculated from the live OpenRouter price fields.",
+                    )
+                if rel_date is not None:
+                    discovered_provenance["release_date"] = self._live_provenance(
+                        "release_date", OPENROUTER_MODELS_URL, observed_at
+                    )
 
                 new_entry = ModelBenchmarkEntry(
                     model_id=mid,
                     name=name,
                     provider=provider_prefix,
-                    context_length=int(or_model.get("context_length", 128000)),
-                    input_cost_per_m=round(prompt_cost_m, 4),
-                    output_cost_per_m=round(comp_cost_m, 4),
+                    context_length=context_length,
+                    input_cost_per_m=round(prompt_cost_m, 4) if prompt_cost_m is not None else None,
+                    output_cost_per_m=round(comp_cost_m, 4) if comp_cost_m is not None else None,
                     cost_per_task=cost_task,
-                    coding_score=base_coding,
-                    intelligence_score=base_intel,
-                    output_speed_tps=100.0,
-                    latency_ttft_sec=0.7,
-                    tokens_per_task=2400,
-                    efficiency_score_coding=eff_c,
-                    efficiency_score_general=eff_g,
+                    coding_score=None,
+                    intelligence_score=None,
+                    output_speed_tps=None,
+                    latency_ttft_sec=None,
+                    tokens_per_task=None,
+                    efficiency_score_coding=None,
+                    efficiency_score_general=None,
                     tier=tier,
-                    benchmark_source="openrouter_discovered",
+                    benchmark_source="field_provenance",
                     release_date=rel_date,
+                    field_provenance=discovered_provenance,
                 )
                 model_entries_map[mid] = new_entry
 
-        # Step 3: Compute Pareto Frontiers & Archetypes
+        # Recompute derived efficiencies after all live fields have been merged.
+        for entry in model_entries_map.values():
+            if entry.coding_score is not None and entry.cost_per_task is not None:
+                entry.efficiency_score_coding = calculate_efficiency_score(
+                    entry.coding_score,
+                    entry.cost_per_task,
+                )
+                entry.field_provenance["efficiency_score_coding"] = self._derived_provenance(
+                    "efficiency_score_coding",
+                    "Calculated from the final known coding score and task cost.",
+                )
+            if entry.intelligence_score is not None and entry.cost_per_task is not None:
+                entry.efficiency_score_general = calculate_efficiency_score(
+                    entry.intelligence_score,
+                    entry.cost_per_task,
+                )
+                entry.field_provenance["efficiency_score_general"] = self._derived_provenance(
+                    "efficiency_score_general",
+                    "Calculated from the final known intelligence score and task cost.",
+                )
+
+        # Step 4: Compute Pareto Frontiers using only sufficiently evidenced entries.
         models_list = list(model_entries_map.values())
-        summary = build_frontier_summary(today, models_list)
+        rankable_models = [model for model in models_list if model.is_rankable()]
+        summary = build_frontier_summary(today, rankable_models)
 
-        # Generate tier recommendations
-        rec_high, _ = select_best_model_for_task(models_list, "coding", "high")
-        rec_med, _ = select_best_model_for_task(models_list, "coding", "medium")
-        rec_low, _ = select_best_model_for_task(models_list, "coding", "low")
-        rec_local, _ = select_best_model_for_task(models_list, "coding", "medium", offline=True)
-
-        recommendations = {
-            "high_complexity": rec_high.model_id,
-            "medium_complexity": rec_med.model_id,
-            "low_complexity": rec_low.model_id,
-            "offline_local": rec_local.model_id,
-        }
+        recommendations: Dict[str, str] = {}
+        if rankable_models:
+            rec_high, _ = select_best_model_for_task(rankable_models, "coding", "high")
+            rec_med, _ = select_best_model_for_task(rankable_models, "coding", "medium")
+            rec_low, _ = select_best_model_for_task(rankable_models, "coding", "low")
+            rec_local, _ = select_best_model_for_task(rankable_models, "coding", "medium", offline=True)
+            recommendations = {
+                "high_complexity": rec_high.model_id,
+                "medium_complexity": rec_med.model_id,
+                "low_complexity": rec_low.model_id,
+                "offline_local": rec_local.model_id,
+            }
 
         # Multi-domain Pareto frontiers (SWE-bench, GAIA, LegalBench, OSWorld, AIME, AudioBench)
-        domain_frontiers = compute_domain_pareto_frontiers(models_list)
+        domain_frontiers = compute_domain_pareto_frontiers(rankable_models)
         frontiers_by_domain = {d: [m.model_id for m in f] for d, f in domain_frontiers.items()}
 
         ledger = DailyBenchmarkLedger(
@@ -340,6 +606,11 @@ class DailyBenchmarkService:
                 "most_efficient_coding": summary.most_cost_efficient_coding.model_id if summary.most_cost_efficient_coding else None,
                 "highest_capability_coding": summary.highest_capability_coding.model_id if summary.highest_capability_coding else None,
                 "supported_domains": list(domain_frontiers.keys()),
+                "offline_fixture": offline,
+                "rankable_models_count": len(rankable_models),
+                "unknown_capability_models": sorted(
+                    model.model_id for model in models_list if not model.is_rankable()
+                ),
             }
         )
 
@@ -378,7 +649,11 @@ def get_daily_benchmark_service(workspace_root: Optional[Path] = None) -> DailyB
     return _default_service
 
 
-def ensure_daily_benchmark(force: bool = False, workspace_root: Optional[Path] = None) -> DailyBenchmarkLedger:
+def ensure_daily_benchmark(
+    force: bool = False,
+    workspace_root: Optional[Path] = None,
+    offline: bool = False,
+) -> DailyBenchmarkLedger:
     """
     Hook called by Dark Factory entry points.
     If already run today and force=False, returns cached ledger in <1ms without network calls.
@@ -391,7 +666,7 @@ def ensure_daily_benchmark(force: bool = False, workspace_root: Optional[Path] =
             return cached
 
     try:
-        return service.build_daily_ledger(force=force)
+        return service.build_daily_ledger(force=force, offline=offline)
     except Exception as exc:
         logger.warning(f"ensure_daily_benchmark encountered error: {exc}. Returning fallback.")
         cached = service.load_latest_ledger()

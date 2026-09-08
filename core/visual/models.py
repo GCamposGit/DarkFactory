@@ -71,6 +71,7 @@ class VisualPromptSpec:
     offline: bool = False
     model_override: Optional[str] = None
     high_res: bool = False
+    strict_provider: bool = False
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -87,6 +88,7 @@ class VisualPromptSpec:
             "offline": self.offline,
             "model_override": self.model_override,
             "high_res": self.high_res,
+            "strict_provider": self.strict_provider,
         }
 
     @classmethod
@@ -105,6 +107,7 @@ class VisualPromptSpec:
             offline=data.get("offline", False),
             model_override=data.get("model_override"),
             high_res=data.get("high_res", False),
+            strict_provider=data.get("strict_provider", False),
         )
 
 
@@ -126,6 +129,9 @@ class VisualAssetResult:
     generation_time_ms: int
     cost_usd: float = 0.0
     created_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    fallback_occurred: bool = False
+    fallback_reason: Optional[str] = None
+    original_provider_requested: Optional[str] = None
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -144,6 +150,9 @@ class VisualAssetResult:
             "generation_time_ms": self.generation_time_ms,
             "cost_usd": self.cost_usd,
             "created_at": self.created_at,
+            "fallback_occurred": self.fallback_occurred,
+            "fallback_reason": self.fallback_reason,
+            "original_provider_requested": self.original_provider_requested,
         }
 
     @classmethod
@@ -164,4 +173,7 @@ class VisualAssetResult:
             generation_time_ms=data.get("generation_time_ms", 0),
             cost_usd=data.get("cost_usd", 0.0),
             created_at=data.get("created_at", datetime.now(timezone.utc).isoformat()),
+            fallback_occurred=data.get("fallback_occurred", False),
+            fallback_reason=data.get("fallback_reason"),
+            original_provider_requested=data.get("original_provider_requested"),
         )
