@@ -57,6 +57,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_rca.add_argument("--patch", required=True, help="Description of applied patch")
     p_rca.add_argument("--rule", required=True, help="Preventative inviolable rule")
     p_rca.add_argument("--test-file", default=None, help="Associated regression test file")
+    p_rca.add_argument("--verify-cmd", default=None, help="Command for Code Judge validation")
 
     # extrapolate command
     p_ext = subparsers.add_parser("extrapolate", help="Transfer lesson to analogous domains")
@@ -154,6 +155,7 @@ def main():
             patch_description=args.patch,
             preventative_rule=args.rule,
             regression_test_file=args.test_file,
+            test_verification_cmd=args.verify_cmd,
         )
         print(
             f"[RCA RECORDED] ID: {rca.rca_id} | "

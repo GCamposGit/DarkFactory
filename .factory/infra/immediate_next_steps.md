@@ -1,5 +1,7 @@
 # Próximos Passos Imediatos: Ativação da Infraestrutura Híbrida Multi-Projeto
 
+> Atualização 08/09/2026: este é o guia histórico de instalação, não uma lista de ações pendentes. A VPS vigente é Hetzner CX23 em Falkenstein/Alemanha; Ashburn/CPX21 estão superados. O servidor local entregue usa Windows/Docker Desktop/WSL2; não aplicar as instruções antigas de instalação Linux/formatação abaixo a essa máquina. O owner confirmou que Ubuntu/formatação foi abandonado para preservar Windows com WSL2 no servidor. O sistema efetivo da VPS requer verificação técnica separada; o guia não comprova sua instalação. Reaproveitar Dokploy/PostgreSQL existentes. Referência vigente: [ADR-002](decisions/ADR-002-vps-and-paas-orchestration.md).
+
 Este guia detalha exatamente o que deve ser feito no ambiente para colocar a arquitetura em funcionamento passo a passo, aumentando a produtividade sem gerar complexidade ou custos prematuros.
 
 ---
@@ -24,20 +26,15 @@ Para transformar a máquina de 2015 em um servidor headless estável e econômic
 1. **Recomendação de Hardware**:
    - As duas GTX 980 Ti consomem muita energia (~500W sob carga, ~100W em idle) e não aceleram os LLMs modernos eficientemente.
    - **Ação sugerida**: Deixar apenas uma GPU instalada (ou usar o vídeo integrado Intel HD 4600 da CPU se a placa-mãe suportar display headless), o que reduz drasticamente o consumo elétrico da fonte de 1200W para menos de ~40W em idle.
-2. **Instalação do Sistema Operacional**:
-   - Instalar **Ubuntu Server 24.04 LTS (x86_64)** no SSD Kingston de 240 GB.
-   - Formatar o HDD Hitachi de 3 TB como partição dedicada de armazenamento de dados montada em `/mnt/storage_vault`.
-   - Plugar o Samsung P3 de 1 TB como partição secundária de rotação de backups.
-3. **Instalação de Pacotes Básicos**:
-   ```bash
-   sudo apt update && sudo apt install -y docker.io docker-compose-v2 curl git ufw rclone
-   sudo systemctl enable --now docker
-   curl -fsSL https://tailscale.com/install.sh | sh
-   sudo tailscale up
-   ```
-4. **Resultado Imediato**:
-   - O servidor vira um nó headless acessível via `ssh user@onprem-node` pela rede Tailscale.
-   - Serve como repositório de 3 TB de backups e runner de testes pesados.
+2. **Sistema operacional vigente — Windows preservado**:
+   - A instalação Ubuntu e a formatação foram abandonadas por decisão do owner.
+   - Reaproveitar Windows com Docker Desktop/WSL2 e dados no Drive E:, conforme INFRA-03.
+   - Não reinstalar o sistema nem formatar discos. Verificar disponibilidade dos serviços/worker existentes antes de ajustes.
+3. **Validação futura de configuração**:
+   - Conferir distribuições com `wsl --list --verbose`, Docker e conectividade Tailscale na sessão autorizada.
+   - Testar jobs a partir da identidade efetiva do worker; registrar evidência e resolver dependências conforme o workflow híbrido.
+4. **Resultado esperado**:
+   - Nó local fornece storage, backups e capacidade de testes sem exigir Ubuntu como sistema do host.
 
 ---
 

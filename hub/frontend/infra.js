@@ -60,6 +60,9 @@ function mountInfraMonitor() {
     </div>
     <div id="infra-cards-grid" class="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
       ${infraSkeleton(3)}
+    </div>
+    <div id="cloud-gateway-banner" class="mt-4 pt-3 border-t border-slate-800/80">
+      <div class="h-16 animate-pulse rounded-xl bg-slate-950/60 border border-slate-800/60"></div>
     </div>`;
 
   if (targetAnchor.tagName && targetAnchor.tagName.toLowerCase() === "main") {
@@ -141,6 +144,7 @@ function renderInfraCards() {
   }
 
   container.innerHTML = report.cards.map((card) => renderSingleInfraCard(card)).join("");
+  renderCloudGatewayBanner();
 }
 
 function renderSingleInfraCard(card) {
@@ -291,3 +295,80 @@ function renderInfraError(msg) {
     pill.textContent = "falha na API";
   }
 }
+
+async function renderCloudGatewayBanner() {
+  const banner = document.getElementById("cloud-gateway-banner");
+  if (!banner) return;
+
+  try {
+    const res = await fetch("/api/cloud/status");
+    if (!res.ok) return;
+    const status = await res.json();
+
+    const isCloud = status.is_cloud;
+    const cloudBadge = isCloud
+      ? '<span class="px-2 py-0.5 rounded-full text-[10px] font-mono bg-emerald-950/60 text-emerald-300 border border-emerald-700/60 font-medium">Dokploy PaaS 24/7 (Ativo)</span>'
+      : '<span class="px-2 py-0.5 rounded-full text-[10px] font-mono bg-indigo-950/60 text-indigo-300 border border-indigo-700/60 font-medium">Local Workstation (Hybrid Edge)</span>';
+
+    const cfBadge = status.cloudflare_zero_trust_enabled
+      ? '<span class="px-2 py-0.5 rounded text-[10px] font-mono bg-amber-950/40 text-amber-300 border border-amber-800/60">Zero Trust WAF Ativo</span>'
+      : '<span class="px-2 py-0.5 rounded text-[10px] font-mono bg-slate-800/80 text-slate-300 border border-slate-700/60">Traefik TLS / Dokploy</span>';
+
+    const webhookStatus = status.webhook_secret_configured
+      ? '<span class="text-emerald-400 font-medium">HMAC-SHA256 Ativo</span>'
+      : '<span class="text-amber-400 font-medium">Modo Simulado / Dev</span>';
+
+    banner.innerHTML = `
+      <div class="rounded-xl border border-indigo-800/40 bg-slate-950/80 p-3.5 sm:p-4 flex flex-col md:flex-row items-start md:items-center justify-between gap-3 shadow-inner">
+        <div class="space-y-1">
+          <div class="flex items-center gap-2 flex-wrap">
+            <span class="text-xs font-semibold text-white flex items-center gap-1.5">
+              <span class="h-2 w-2 rounded-full bg-emerald-400 animate-ping"></span>
+              DarkHub 24/7 Gateway & Webhooks Dokploy
+            </span>
+            ${cloudBadge}
+            ${cfBadge}
+          </div>
+          <div class="flex items-center gap-4 text-[11px] font-mono text-slate-400 flex-wrap">
+            <span>Webhook Listener: ${webhookStatus}</span>
+            <span>Entregas: <strong class="text-slate-200">${status.total_events_received}</strong></span>
+            ${status.last_event_type ? `<span>Ultimo: <code class="text-cyan-300">${status.last_event_type}</code></span>` : ""}
+            <span>Endpoint: <code class="text-slate-300">/api/webhooks/github</code></span>
+          </div>
+        </div>
+        <div class="flex items-center gap-2 self-end md:self-auto">
+          <button id="btn-test-webhook-ping" type="button" class="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-indigo-500/40 bg-indigo-600/20 text-indigo-300 text-xs hover:bg-indigo-600/30 transition active:scale-95">
+            <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
+            </svg>
+            <span>Testar Webhook Ping</span>
+          </button>
+        </div>
+      </div>`;
+
+    document.getElementById("btn-test-webhook-ping")?.addEventListener("click", async () => {
+      const btn = document.getElementById("btn-test-webhook-ping");
+      if (btn) btn.disabled = true;
+      try {
+        const pingRes = await fetch("/api/webhooks/test", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            event_type: "ping",
+            payload: { zen: "Autonomous software factories build the future.", hook_id: 101 },
+          }),
+        });
+        if (pingRes.ok) {
+          renderCloudGatewayBanner();
+        }
+      } catch (err) {
+        console.warn("Falha ao testar webhook ping:", err);
+      } finally {
+        if (btn) btn.disabled = false;
+      }
+    });
+  } catch (err) {
+    console.debug("Cloud Gateway probe:", err);
+  }
+}
+

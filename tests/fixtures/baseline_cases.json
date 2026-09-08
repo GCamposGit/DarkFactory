@@ -1,0 +1,102 @@
+{
+  "schema_version": "1",
+  "ticket_id": "HF-01-01",
+  "description": "Fixtures pequenas e sintéticas para os casos de aceitação A1–A10 do handoff HF-01.",
+  "cases": [
+    {
+      "case_id": "A1",
+      "description": "Ticket planejado com relatório de implementação, mas sem SHA remoto.",
+      "input": {
+        "item_id": "T-A1",
+        "declared_status": "planned",
+        "claims": [{"dimension": "implementation", "assertion": "positive", "candidate_sha": null}]
+      },
+      "expected": {
+        "assessments": {"implementation": "reported", "integration": "unknown", "operation": "unknown"},
+        "issue_codes": []
+      }
+    },
+    {
+      "case_id": "A2",
+      "description": "DF-23 declara protocolo, mas não automação funcional.",
+      "input": {
+        "item_id": "DF-23",
+        "declared_status": "completed",
+        "claims": [{"dimension": "implementation", "assertion": "partial", "scope": "automation coverage"}]
+      },
+      "expected": {
+        "assessments": {"implementation": "partial", "integration": "unknown", "operation": "unknown"},
+        "issue_codes": ["partial_ticket_coverage"]
+      }
+    },
+    {
+      "case_id": "A3",
+      "description": "INFRA-10 tem declaração planejada em uma fonte e entrega USR-16 em outra.",
+      "input": {
+        "item_id": "INFRA-10",
+        "declarations": [
+          {"source_id": "infra-roadmap", "declared_status": "planned"},
+          {"source_id": "usr-16-report", "declared_status": "completed"}
+        ]
+      },
+      "expected": {"item_count": 1, "issue_codes": ["source_conflict"]}
+    },
+    {
+      "case_id": "A4",
+      "description": "n8n aparece ativo, mas o link aponta para o site genérico.",
+      "input": {"item_id": "n8n", "declared_status": "active", "url": "https://n8n.io"},
+      "expected": {"assessments": {"operation": "unknown"}, "issue_codes": ["service_endpoint_missing"]}
+    },
+    {
+      "case_id": "A5",
+      "description": "O owner declara PostgreSQL testado sem disponibilizar credencial de acesso.",
+      "input": {"item_id": "PostgreSQL", "owner_statement": "installed, working and tested"},
+      "expected": {"assessments": {"operation": "reported"}, "issue_codes": ["access_required"]}
+    },
+    {
+      "case_id": "A6",
+      "description": "Código e relatório do painel existem, mas o endpoint observado retorna 404.",
+      "input": {"item_id": "DF-21", "artifact_present": true, "endpoint_status": 404},
+      "expected": {"assessments": {"implementation": "reported"}, "issue_codes": ["service_endpoint_missing"]}
+    },
+    {
+      "case_id": "A7",
+      "description": "Uma menção incidental em dependências não conclui o ticket mencionado.",
+      "input": {"item_id": "DF-23", "mentioned_item_id": "DF-17", "mention_scope": "dependency paragraph"},
+      "expected": {"completion_claims_for_mentioned_item": 0}
+    },
+    {
+      "case_id": "A8",
+      "description": "O check remoto verde pertence a um SHA antigo, não ao candidato atual.",
+      "input": {
+        "item_id": "DF-20",
+        "candidate_sha": "1111111111111111111111111111111111111111",
+        "check_head_sha": "0000000000000000000000000000000000000000",
+        "check_conclusion": "success"
+      },
+      "expected": {"assessments": {"integration": "unknown"}, "issue_codes": ["stale_evidence"]}
+    },
+    {
+      "case_id": "A9",
+      "description": "A coleta encontra mudança concorrente, JSON inválido e symlink fora da raiz.",
+      "input": {
+        "observations": [
+          {"path": "mutable.md", "status": "unstable"},
+          {"path": "broken.json", "status": "invalid"},
+          {"path": "outside-link.md", "status": "access_denied"}
+        ]
+      },
+      "expected": {"source_statuses": ["unstable", "invalid", "access_denied"]}
+    },
+    {
+      "case_id": "A10",
+      "description": "Os mesmos bytes coletados em horários diferentes preservam a identidade lógica.",
+      "input": {
+        "first_observed_at": "2026-09-08T10:00:00Z",
+        "second_observed_at": "2026-09-08T10:05:00Z",
+        "source_bytes": "same-fixture-bytes"
+      },
+      "expected": {"source_fingerprint_same": true, "assessments_same": true}
+    }
+  ]
+}

@@ -199,6 +199,14 @@
           "managed_by": "Dokploy"
         },
         {
+          "name": "darkhub-247-gateway",
+          "description": "DarkHub Core 24/7 & Gateway de Webhooks Autônomos com SSL e proteção Cloudflare Zero Trust (USR-18)",
+          "container_engine": "docker",
+          "port": 8000,
+          "status": "active",
+          "managed_by": "Dokploy"
+        },
+        {
           "name": "valkey-redis",
           "description": "Broker de cache e filas de alta performance em memória",
           "container_engine": "docker",

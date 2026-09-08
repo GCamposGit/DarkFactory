@@ -182,6 +182,13 @@ def build_default_inventory() -> InfraInventory:
                 managed_by="Dokploy",
             ),
             ServiceItem(
+                name="darkhub-247-gateway",
+                description="DarkHub Core 24/7 & Gateway de Webhooks Autônomos com SSL e proteção Cloudflare Zero Trust (USR-18)",
+                status=NodeStatus.ACTIVE,
+                port=8000,
+                managed_by="Dokploy",
+            ),
+            ServiceItem(
                 name="valkey-redis",
                 description="Broker de cache e filas de alta performance em memória",
                 status=NodeStatus.PLANNED,

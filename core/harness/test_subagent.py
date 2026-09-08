@@ -16,6 +16,8 @@ import os
 import re
 import subprocess
 import sys
+import urllib.error
+import urllib.request
 import uuid
 from enum import StrEnum
 from pathlib import Path
@@ -152,6 +154,10 @@ class TestExecutionInstruction(BaseModel):
     timeout_seconds: int = Field(default=60, description="Max execution duration in seconds")
     fail_fast: bool = Field(default=False, description="Stop immediately on first failure (-x)")
     extra_args: List[str] = Field(default_factory=list, description="Additional pytest flags")
+    worker_mode: str = Field(default="auto", description="Worker execution mode: 'auto', 'remote', or 'local'")
+    remote_worker_url: Optional[str] = Field(default="http://100.78.181.90:8080", description="URL of the on-premise dedicated test worker")
+    allow_fallback: bool = Field(default=True, description="Fallback to local execution if remote worker is unreachable or errors")
+    worker_probe_timeout: float = Field(default=1.0, description="Healthcheck probe timeout in seconds")
 
 
 class FailedTestItem(BaseModel):
@@ -178,6 +184,8 @@ class DistilledTestReport(BaseModel):
     concise_summary: str = Field(..., description="One-line summary of results")
     agent_feedback: str = Field(..., description="Direct, actionable feedback pointing to file and line")
     raw_log_path: Optional[str] = Field(default=None, description="Path to isolated raw log on disk")
+    worker_id: str = Field(default="local", description="Identifier of worker node executing tests")
+    execution_mode: str = Field(default="local", description="Actual execution mode: local, remote, or local_fallback")
 
 
 def generate_subagent_prompt(
@@ -399,8 +407,57 @@ class TestSubagentEngine:
             agent_feedback=agent_feedback,
         )
 
-    def execute(self, instruction: TestExecutionInstruction) -> DistilledTestReport:
-        """Execute pytest according to instructions and return a DistilledTestReport."""
+    def probe_remote_worker(self, worker_url: str, timeout: float = 1.0) -> Optional[Dict[str, Any]]:
+        """Probe the remote test worker's /health endpoint with a strict short timeout."""
+        health_url = f"{worker_url.rstrip('/')}/health"
+        try:
+            req = urllib.request.Request(health_url, headers={"User-Agent": "DarkFac-TestEngine/1.0"})
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                if resp.status == 200:
+                    raw = resp.read().decode("utf-8")
+                    data = json.loads(raw)
+                    return data
+        except Exception as exc:
+            logger.debug("Probe failed for %s: %s", health_url, exc)
+            return None
+        return None
+
+    def execute_remote(self, instruction: TestExecutionInstruction) -> DistilledTestReport:
+        """Offload test execution to the remote worker daemon via HTTP POST /execute."""
+        if not instruction.remote_worker_url:
+            raise ValueError("remote_worker_url must be provided for remote test execution.")
+
+        execute_url = f"{instruction.remote_worker_url.rstrip('/')}/execute"
+        # Serialize instruction (forcing worker_mode='local' remotely to prevent infinite forward recursion)
+        req_payload = instruction.model_dump()
+        req_payload["worker_mode"] = "local"
+        data_bytes = json.dumps(req_payload).encode("utf-8")
+
+        req = urllib.request.Request(
+            execute_url,
+            data=data_bytes,
+            headers={
+                "Content-Type": "application/json",
+                "User-Agent": "DarkFac-TestEngine/1.0",
+            },
+            method="POST",
+        )
+
+        # Allow extra buffer over instruction.timeout_seconds for network overhead
+        http_timeout = max(5.0, float(instruction.timeout_seconds) + 10.0)
+        with urllib.request.urlopen(req, timeout=http_timeout) as resp:
+            if resp.status != 200:
+                raise RuntimeError(f"Remote worker returned HTTP status {resp.status}")
+            resp_bytes = resp.read()
+            report_dict = json.loads(resp_bytes.decode("utf-8"))
+            return DistilledTestReport.model_validate(report_dict)
+
+    def execute_local(
+        self,
+        instruction: TestExecutionInstruction,
+        execution_mode: str = "local",
+    ) -> DistilledTestReport:
+        """Execute pytest locally according to instructions and return a DistilledTestReport."""
         cmd = [sys.executable, "-m", "pytest"]
 
         if instruction.scope == TestScope.QUICK:
@@ -421,7 +478,11 @@ class TestSubagentEngine:
         run_id = f"{int(start_time.timestamp())}_{uuid.uuid4().hex[:8]}"
         log_file_path = self.log_dir / f"test_run_{run_id}.log"
 
-        logger.info("Running tests: %s (Timeout: %ds)", " ".join(cmd), instruction.timeout_seconds)
+        logger.info("Running tests locally: %s (Timeout: %ds)", " ".join(cmd), instruction.timeout_seconds)
+
+        subp_kwargs: Dict[str, Any] = {}
+        if sys.platform == "win32":
+            subp_kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
 
         try:
             res = subprocess.run(
@@ -432,6 +493,7 @@ class TestSubagentEngine:
                 timeout=instruction.timeout_seconds,
                 encoding="utf-8",
                 errors="replace",
+                **subp_kwargs,
             )
             raw_stdout = res.stdout or ""
             raw_stderr = res.stderr or ""
@@ -459,8 +521,47 @@ class TestSubagentEngine:
 
         report = self.parse_output(combined_output, exit_code=exit_code, duration_seconds=duration)
         report.raw_log_path = str(log_file_path.resolve())
+        report.worker_id = "local"
+        report.execution_mode = execution_mode
 
         return report
+
+    def execute(self, instruction: TestExecutionInstruction) -> DistilledTestReport:
+        """
+        Execute tests with automatic worker dispatch and failover.
+        Supports 'local', 'remote', and 'auto' modes.
+        """
+        target_mode = (instruction.worker_mode or "auto").lower()
+
+        if target_mode == "local":
+            return self.execute_local(instruction, execution_mode="local")
+
+        # Auto or Remote dispatch
+        worker_url = instruction.remote_worker_url
+        worker_healthy = False
+
+        if worker_url:
+            health_info = self.probe_remote_worker(worker_url, timeout=instruction.worker_probe_timeout)
+            if health_info and health_info.get("status") in ("ok", "healthy"):
+                worker_healthy = True
+
+        if worker_healthy:
+            try:
+                logger.info("Offloading test execution to remote worker at %s", worker_url)
+                return self.execute_remote(instruction)
+            except Exception as exc:
+                logger.warning("Remote worker execution failed: %s", exc)
+                if not instruction.allow_fallback or target_mode == "remote":
+                    raise
+
+        # If remote was strictly requested and failover is disallowed
+        if target_mode == "remote" and not instruction.allow_fallback:
+            raise RuntimeError(f"Remote test worker at {worker_url} is unavailable or failed.")
+
+        # Fallback to local
+        fallback_mode = "local_fallback" if target_mode != "local" else "local"
+        logger.info("Executing tests locally (mode: %s)...", fallback_mode)
+        return self.execute_local(instruction, execution_mode=fallback_mode)
 
 
 def main() -> None:
@@ -470,6 +571,9 @@ def main() -> None:
     parser.add_argument("--scope", type=str, default="file", choices=["all", "quick", "file", "pattern", "failed_only"])
     parser.add_argument("--timeout", type=int, default=60, help="Timeout in seconds")
     parser.add_argument("-x", "--fail-fast", action="store_true", help="Fail fast on first error")
+    parser.add_argument("--worker-mode", type=str, default="auto", choices=["auto", "remote", "local"], help="Worker execution mode")
+    parser.add_argument("--worker-url", type=str, default="http://100.78.181.90:8080", help="Remote worker daemon URL")
+    parser.add_argument("--no-fallback", action="store_false", dest="allow_fallback", default=True, help="Disable local fallback on remote worker failure")
     parser.add_argument("--json", action="store_true", help="Output full JSON DistilledTestReport")
     args = parser.parse_args()
 
@@ -478,6 +582,9 @@ def main() -> None:
         scope=TestScope(args.scope),
         timeout_seconds=args.timeout,
         fail_fast=args.fail_fast,
+        worker_mode=args.worker_mode,
+        remote_worker_url=args.worker_url,
+        allow_fallback=args.allow_fallback,
     )
 
     engine = TestSubagentEngine()
@@ -487,7 +594,7 @@ def main() -> None:
         print(json.dumps(report.model_dump(), indent=2))
     else:
         status_marker = "[PASS]" if report.success else "[FAIL]"
-        print(f"{status_marker} {report.verdict}: {report.concise_summary}")
+        print(f"{status_marker} {report.verdict} [{report.worker_id} / {report.execution_mode}]: {report.concise_summary}")
         print(f"Log: {report.raw_log_path}")
         print(f"Agent Feedback:\n{report.agent_feedback}")
 
