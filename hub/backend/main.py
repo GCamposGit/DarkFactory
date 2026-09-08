@@ -112,11 +112,17 @@ app.include_router(roadmap_router)
 
 # Root route serving index.html
 @app.get("/", response_class=FileResponse)
+@app.head("/", response_class=FileResponse)
 def serve_index() -> FileResponse:
     index_file = FRONTEND_DIR / "index.html"
-    if not index_file.exists():
-        return FileResponse(FRONTEND_DIR / "index.html")
-    return FileResponse(index_file)
+    return FileResponse(
+        index_file,
+        headers={
+            "Cache-Control": "no-cache, no-store, must-revalidate",
+            "Pragma": "no-cache",
+            "Expires": "0",
+        },
+    )
 
 
 # Mount static assets (CSS, JS)

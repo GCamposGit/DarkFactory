@@ -42,6 +42,8 @@ models/checkpoints/
 .factory/benchmarks/empirical_ledger.json
 .factory/decks/
 .factory/usage/
+.factory/services/
+.factory/test_logs/
 
 
 # Local audio samples and generated media

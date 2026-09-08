@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Iterable
+from typing import Any, Iterable
 
 from core.roadmap.compiler import RoadmapCompiler
 from core.roadmap.models import (
@@ -12,6 +12,8 @@ from core.roadmap.models import (
     LifecycleStage,
     PlanningHorizon,
     RoadmapHealth,
+    RoadmapSnapshotComparison,
+    RoadmapSnapshotHistory,
     RoadmapItem,
     RoadmapProjectSummary,
     RoadmapSnapshot,
@@ -105,7 +107,34 @@ class RoadmapQueryService:
             sources_consulted=snapshot.sources_consulted,
             sources_unavailable=snapshot.sources_unavailable,
             policy=snapshot.derivation_policy,
+            telemetry=self.get_telemetry(project_id),
         )
+
+    def get_telemetry(self, project_id: str | None = None) -> dict[str, Any]:
+        """Expose operational and scale telemetry from the snapshot store."""
+        return self.store.get_telemetry(project_id)
+
+    def get_history(self, project_id: str, *, limit: int | None = None) -> RoadmapSnapshotHistory:
+        """Return retained snapshot metadata after compiling the current state."""
+
+        self._ensure_project(project_id)
+        self.store.get_or_compile(project_id, self.compiler)
+        return RoadmapSnapshotHistory(
+            project_id=project_id,
+            snapshots=self.store.get_history(project_id, limit=limit),
+        )
+
+    def compare_snapshots(
+        self,
+        project_id: str,
+        from_snapshot_id: str,
+        to_snapshot_id: str,
+    ) -> RoadmapSnapshotComparison:
+        """Compare two retained snapshots without mutating either one."""
+
+        self._ensure_project(project_id)
+        self.store.get_or_compile(project_id, self.compiler)
+        return self.store.compare(project_id, from_snapshot_id, to_snapshot_id)
 
     def get_source_document(self, project_id: str, source_id: str) -> RoadmapSourceDocument | None:
         self._ensure_project(project_id)
@@ -173,7 +202,7 @@ def build_repository_roadmap_service(
     manifest_path = repository_root / ".factory" / "roadmap" / "darkfac.json"
     development_plan_path = repository_root / "docs" / "DEVELOPMENT_PLAN_2026-09-05.md"
     evidence_dir = repository_root / ".factory" / "reports"
-    manifest_source = JsonRoadmapSource(manifest_path)
+    manifest_source = JsonRoadmapSource(manifest_path, evidence_dir=evidence_dir)
     development_plan_source = MarkdownDevelopmentPlanSource(
         development_plan_path,
         evidence_dir=evidence_dir,

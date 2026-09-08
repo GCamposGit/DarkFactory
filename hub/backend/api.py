@@ -8,6 +8,7 @@ import secrets
 from typing import List, Optional
 from pydantic import BaseModel
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Response, status
+from fastapi.responses import RedirectResponse
 
 from hub.backend.models import (
     ExportCatalogResponse,
@@ -25,6 +26,7 @@ from hub.backend.models import (
     ServiceCategory,
     ServiceCreate,
     ServiceItem,
+    ServiceLaunchResponse,
     ServiceUpdate,
     UnifiedGenerateRequest,
     UnifiedGenerateResponse,
@@ -38,6 +40,7 @@ from hub.backend.models import (
     VisualGenerateRequest,
     VisualGenerateResponse,
     VisualIllustrateRequest,
+    TaskDashboardReport,
 )
 from hub.backend.service import HubService
 from core.usage.models import AccountUsageReport, ModelCallEvent, ModelUsageReport
@@ -56,6 +59,8 @@ from core.roadmap.models import (
     RoadmapItemType,
     RoadmapProjectSummary,
     RoadmapSnapshot,
+    RoadmapSnapshotComparison,
+    RoadmapSnapshotHistory,
     RoadmapSourceDocument,
 )
 from core.roadmap.store import RoadmapUnavailableError
@@ -71,6 +76,7 @@ from core.harness.test_subagent import (
     DistilledTestReport,
     TestExecutionInstruction,
 )
+from core.infra.cards import InfraCard, InfraCardsReport
 
 router = APIRouter(prefix="/api", tags=["DarkHub API"])
 roadmap_router = APIRouter(prefix="/projects", tags=["Operational Roadmap"])
@@ -153,6 +159,45 @@ def get_project_roadmap_health(
     _roadmap_project_or_404(service, project_id)
     try:
         return service.get_roadmap_health(project_id)
+    except RoadmapUnavailableError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
+@roadmap_router.get(
+    "/{project_id}/roadmap/history",
+    response_model=RoadmapSnapshotHistory,
+)
+def get_project_roadmap_history(
+    project_id: str,
+    limit: Optional[int] = Query(default=None, ge=1, le=50),
+    service: HubService = Depends(get_hub_service),
+) -> RoadmapSnapshotHistory:
+    """Return bounded metadata for the selected project's retained snapshots."""
+
+    _roadmap_project_or_404(service, project_id)
+    try:
+        return service.roadmap.get_history(project_id, limit=limit)
+    except RoadmapUnavailableError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
+@roadmap_router.get(
+    "/{project_id}/roadmap/history/compare",
+    response_model=RoadmapSnapshotComparison,
+)
+def compare_project_roadmap_snapshots(
+    project_id: str,
+    from_snapshot: str = Query(..., min_length=1),
+    to_snapshot: str = Query(..., min_length=1),
+    service: HubService = Depends(get_hub_service),
+) -> RoadmapSnapshotComparison:
+    """Compare two retained snapshots without changing roadmap state."""
+
+    _roadmap_project_or_404(service, project_id)
+    try:
+        return service.roadmap.compare_snapshots(project_id, from_snapshot, to_snapshot)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
     except RoadmapUnavailableError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
@@ -292,6 +337,44 @@ def toggle_pin(
     if not updated:
         raise HTTPException(status_code=404, detail=f"Service '{service_id}' not found")
     return updated
+
+
+@router.post("/services/{service_id}/launch", response_model=ServiceLaunchResponse)
+def launch_service_endpoint(
+    service_id: str,
+    timeout: float = Query(default=5.0, ge=1.0, le=30.0, description="Max seconds to wait for service readiness"),
+    service: HubService = Depends(get_hub_service),
+) -> ServiceLaunchResponse:
+    """Launch a configured local service in background if offline, waiting for health confirmation."""
+    try:
+        return service.launch_service(service_id=service_id, max_wait_sec=timeout)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to launch service: {exc}") from exc
+
+
+@router.get("/services/{service_id}/open")
+def open_service_endpoint(
+    service_id: str,
+    timeout: float = Query(default=5.0, ge=1.0, le=30.0, description="Max seconds to wait for service readiness"),
+    service: HubService = Depends(get_hub_service),
+) -> RedirectResponse:
+    """
+    Launch local service if offline, wait for readiness, and redirect browser to the target service URL.
+    For non-local or non-launchable services, redirects immediately to service URL.
+    """
+    try:
+        target_url = service.get_service_launch_target(service_id=service_id, max_wait_sec=timeout)
+        return RedirectResponse(url=target_url, status_code=status.HTTP_307_TEMPORARY_REDIRECT)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to open service: {exc}") from exc
 
 
 class SessionInfoResponse(BaseModel):
@@ -838,7 +921,54 @@ def run_tests(
     return service.run_tests(instruction)
 
 
+# ==============================================================================
+# Task Dashboard (DF-21)
+# ==============================================================================
 
+
+@router.get("/tasks/dashboard", response_model=TaskDashboardReport)
+@router.get("/tasks", response_model=TaskDashboardReport, include_in_schema=False)
+def get_task_dashboard(service: HubService = Depends(get_hub_service)) -> TaskDashboardReport:
+    """Return the read-only queue/run/stage/cost/evidence projection for DarkHub."""
+    return service.get_task_dashboard()
+
+
+# ==============================================================================
+# Infrastructure Nodes & Topology Cards Endpoints (USR-15)
+# ==============================================================================
+
+
+@router.get("/infra/cards", response_model=InfraCardsReport)
+def get_infra_cards_endpoint(
+    probe: bool = Query(default=False, description="Perform live network probe"),
+    timeout: float = Query(default=0.5, description="Probe timeout in seconds"),
+    service: HubService = Depends(get_hub_service),
+) -> InfraCardsReport:
+    """Returns infrastructure nodes and system links as UI-ready cards."""
+    return service.get_infra_cards_report(probe_liveness=probe, probe_timeout=timeout)
+
+
+@router.post("/infra/cards/refresh", response_model=InfraCardsReport)
+def refresh_infra_cards_endpoint(
+    timeout: float = Query(default=1.0, description="Probe timeout in seconds"),
+    service: HubService = Depends(get_hub_service),
+) -> InfraCardsReport:
+    """Forces live connectivity probes and returns refreshed infrastructure cards."""
+    return service.get_infra_cards_report(probe_liveness=True, probe_timeout=timeout)
+
+
+@router.get("/infra/cards/{node_id}", response_model=InfraCard)
+def get_infra_card_endpoint(
+    node_id: str,
+    probe: bool = Query(default=False, description="Perform live network probe"),
+    timeout: float = Query(default=0.5, description="Probe timeout in seconds"),
+    service: HubService = Depends(get_hub_service),
+) -> InfraCard:
+    """Returns a single infrastructure card by node ID."""
+    card = service.get_infra_card(node_id, probe_liveness=probe, probe_timeout=timeout)
+    if not card:
+        raise HTTPException(status_code=404, detail=f"Infrastructure node '{node_id}' not found")
+    return card
 
 
 
