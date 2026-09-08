@@ -24,6 +24,8 @@ from core.learning.models import (
     LearningLedger,
     PreferenceCategory,
     MistakeCategory,
+    PolicyOrigin,
+    PolicyStatus,
 )
 
 DEFAULT_LEARNING_DIR = Path(".factory") / "learning"
@@ -101,9 +103,10 @@ class ContinuousLearningTracker:
                 lines.append(f"- [{p.category.value.upper()}] {p.rule} (Evidence: {p.context_or_example})")
 
         # 2. Inviolable RCA preventative rules
-        if self.ledger.mistakes:
+        active_mistakes = [m for m in self.ledger.mistakes if m.active]
+        if active_mistakes:
             lines.append("### NEVER-REPEAT INVIOLABLE RULES (ROOT CAUSE RESOLVED):")
-            for m in self.ledger.mistakes[-4:]:
+            for m in active_mistakes[-4:]:
                 lines.append(f"- [{m.category.value.upper()}] {m.preventative_rule}")
 
         # 3. Relevant Analogous Principles
@@ -172,6 +175,8 @@ class ContinuousLearningTracker:
                 rule=inferred_preference_rule,
                 context_or_example=f"Extracted from contrast delta: {key_delta}",
                 confidence=1.0,
+                origin=PolicyOrigin.INFERRED_PREFERENCE,
+                status=PolicyStatus.PROPOSED,
             )
             pref_id = pref.preference_id
 
@@ -198,6 +203,9 @@ class ContinuousLearningTracker:
         rule: str,
         context_or_example: str,
         confidence: float = 1.0,
+        *,
+        origin: PolicyOrigin = PolicyOrigin.EXPLICIT_PREFERENCE,
+        status: PolicyStatus = PolicyStatus.ACTIVE,
     ) -> UserPreference:
         """Registers or reinforces a user preference."""
         clean_rule = rule.strip()
@@ -218,11 +226,31 @@ class ContinuousLearningTracker:
             confidence=confidence,
             created_at=datetime.now(timezone.utc).isoformat(),
             times_reinforced=1,
-            active=True,
+            origin=origin,
+            status=status,
         )
         self.ledger.preferences.append(new_pref)
         self.save()
         return new_pref
+
+    def evaluate_preference(self, preference_id: str, gate_id: str) -> UserPreference:
+        """Promote a candidate only when its referenced verification passed."""
+        preference = next(
+            (item for item in self.ledger.preferences if item.preference_id == preference_id),
+            None,
+        )
+        if preference is None:
+            raise ValueError(f"Unknown preference: {preference_id}")
+        gate = next(
+            (item for item in self.ledger.verifications if item.gate_id == gate_id),
+            None,
+        )
+        if gate is None:
+            raise ValueError(f"Unknown verification gate: {gate_id}")
+        preference.verification_gate_id = gate_id
+        preference.set_status(PolicyStatus.ACTIVE if gate.passed else PolicyStatus.EVALUATED)
+        self.save()
+        return preference
 
     # -------------------------------------------------------------
     # Deterministic Code Judge Verification (Voyager / RSI Pattern)
@@ -290,12 +318,14 @@ class ContinuousLearningTracker:
         If test_verification_cmd is provided, executes Code Judge verification.
         """
         gate_id = None
+        policy_status = PolicyStatus.PROPOSED
         if test_verification_cmd:
             gate = self.verify_patch_with_code_judge(
                 target_type="rca_patch",
                 test_command=test_verification_cmd,
             )
             gate_id = gate.gate_id
+            policy_status = PolicyStatus.ACTIVE if gate.passed else PolicyStatus.EVALUATED
             if not gate.passed:
                 print(f"[WARN] RCA patch verification failed Code Judge: {gate.output_snippet}")
 
@@ -311,7 +341,8 @@ class ContinuousLearningTracker:
             preventative_rule=preventative_rule,
             regression_test_file=regression_test_file,
             verification_gate_id=gate_id,
-            status="resolved" if (gate_id is None or gate.passed) else "verification_failed",
+            origin=PolicyOrigin.RCA,
+            status=policy_status,
         )
         self.ledger.mistakes.append(rca)
         self.save()
@@ -368,7 +399,7 @@ class ContinuousLearningTracker:
                 canonical.times_reinforced += pref.times_reinforced
                 canonical.confidence = max(canonical.confidence, pref.confidence)
                 canonical.context_or_example = f"{canonical.context_or_example} | {pref.context_or_example}"
-                pref.active = False
+                pref.set_status(PolicyStatus.RETIRED)
                 pruned_ids.append(pref.preference_id)
                 consolidated += 1
             else:
@@ -400,7 +431,7 @@ class ContinuousLearningTracker:
             "followup_turns": followups,
             "one_shot_rate_pct": round(one_shot_rate, 1),
             "preferences_tracked": len([p for p in self.ledger.preferences if p.active]),
-            "rcas_resolved": len(self.ledger.mistakes),
+            "rcas_resolved": len([m for m in self.ledger.mistakes if m.active]),
             "analogous_transfers": len(self.ledger.transfers),
             "contrasts_analyzed": len(self.ledger.contrasts),
             "verifications_passed": sum(1 for v in self.ledger.verifications if v.passed),

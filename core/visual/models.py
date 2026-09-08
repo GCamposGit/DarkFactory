@@ -71,6 +71,7 @@ class VisualPromptSpec:
     offline: bool = False
     model_override: Optional[str] = None
     high_res: bool = False
+    strict_provider: bool = False
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -87,6 +88,7 @@ class VisualPromptSpec:
             "offline": self.offline,
             "model_override": self.model_override,
             "high_res": self.high_res,
+            "strict_provider": self.strict_provider,
         }
 
     @classmethod
@@ -105,6 +107,7 @@ class VisualPromptSpec:
             offline=data.get("offline", False),
             model_override=data.get("model_override"),
             high_res=data.get("high_res", False),
+            strict_provider=data.get("strict_provider", False),
         )
 
 

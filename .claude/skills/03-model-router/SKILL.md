@@ -1,6 +1,6 @@
 ---
 name: model-router
-description: Avalia o tipo de tarefa, a complexidade e a necessidade de privacidade para despachar a execução para o modelo ideal (Cluster local Ollama, Gemini 3.8 Flash, Grok 4.6, Claude 3.7 Sonnet ou modelos chineses de alto rendimento como DeepSeek-R1 e Qwen3). Use sempre que iniciar uma nova etapa ou subagente no pipeline.
+description: Avalia tarefa, complexidade, privacidade, consumo previsto e cota disponível em todas as contas para despachar modelos locais ou de nuvem. Use ao iniciar uma etapa ou subagente e quando houver pressão de tokens, failover de conta ou decisão entre assinatura e API paga.
 ---
 
 # Model Router: Roteamento Inteligente & Otimização de Recursos
@@ -23,7 +23,18 @@ python core/router/model_router.py list-local
 
 # Invocar diretamente o executor rápido local (Custo $0)
 python core/router/model_router.py call-local --model qwen-fast:latest --prompt "Gere o schema JSON para..."
+
+# Prever consumo e simular pressão de uma cota horária
+python core/router/model_router.py recommend --task-type coding --complexity high --task-description "Implementar parser tipado e testes" --expected-steps 4 --remaining-hourly-percent 18
 ```
+
+## Pressão de tokens e continuidade
+
+Toda recomendação deve considerar a previsão de tokens e, quando disponível, o relatório de todas as contas. O resultado `token_budget` é um contrato operacional: respeite o teto de saída, o esforço, o tamanho dos blocos, a prioridade e a indicação de adiar trabalho de fronteira.
+
+Sob pressão, favoreça scripts e modelos locais, aceite maior latência e menor qualidade marginal, e entregue em módulos curtos. Quando outra conta tiver mais headroom, faça failover. Antes de consumir a reserva final das assinaturas, use um gateway de API paga configurado.
+
+Para faixas, ordem de decisão e campos do contrato, leia [references/token-stress-policy.md](references/token-stress-policy.md).
 
 ## Regras de Despacho (Matriz 2026)
 

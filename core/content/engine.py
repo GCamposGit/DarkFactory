@@ -12,6 +12,7 @@ import sys
 import json
 import uuid
 import logging
+import time
 import urllib.request
 import urllib.error
 from pathlib import Path
@@ -28,6 +29,8 @@ from core.content.models import (
 )
 from core.content.anti_slop_linter import AntiSlopLinter
 from core.content.presets import get_preset, NEGATIVE_SLOP_PROMPT_INSTRUCTIONS
+from core.usage.ledger import ModelUsageLedger, infer_model_tier
+from core.usage.models import ModelCallEvent, ModelModality, ModelTier
 
 logger = logging.getLogger("core.content.engine")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
@@ -43,6 +46,35 @@ class ContentEngine:
             self.storage_dir = Path(storage_dir)
         self.storage_dir.mkdir(parents=True, exist_ok=True)
         self.linter = AntiSlopLinter()
+        usage_dir = self.storage_dir.parent / "usage"
+        self.model_usage_ledger = ModelUsageLedger(usage_dir)
+
+    def _record_usage(
+        self,
+        provider: str,
+        model: str,
+        *,
+        success: bool,
+        latency_ms: Optional[float] = None,
+        input_tokens: Optional[int] = None,
+        output_tokens: Optional[int] = None,
+    ) -> None:
+        try:
+            self.model_usage_ledger.record(ModelCallEvent(
+                provider=provider,
+                model=model,
+                tier=ModelTier(infer_model_tier(provider, model)),
+                harness="content_engine",
+                modality=ModelModality.TEXT,
+                success=success,
+                latency_ms=latency_ms,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                cost_usd=0.0 if provider in {"ollama", "local_procedural"} else None,
+                source="core.content",
+            ))
+        except Exception as exc:
+            logger.warning("Content telemetry write failed: %s", exc)
 
     @staticmethod
     def get_openrouter_key() -> Optional[str]:
@@ -77,6 +109,8 @@ class ContentEngine:
 
         # 1. Generate Draft
         raw_draft, provider, model_used = self._generate_draft(request, preset, tone)
+        if provider == "local_procedural":
+            self._record_usage(provider, model_used, success=True, latency_ms=0.0)
 
         # 2. Audit initial draft
         initial_report = linter.audit(raw_draft)
@@ -182,9 +216,22 @@ class ContentEngine:
             data=req_data,
             headers={"Content-Type": "application/json"},
         )
-        with urllib.request.urlopen(req, timeout=90) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
+        started = time.perf_counter()
+        try:
+            with urllib.request.urlopen(req, timeout=90) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+            self._record_usage(
+                "ollama", str(data.get("model") or payload["model"]), success=True,
+                latency_ms=round((time.perf_counter() - started) * 1000, 1),
+                input_tokens=data.get("prompt_eval_count"), output_tokens=data.get("eval_count"),
+            )
             return data.get("response", "").strip()
+        except Exception:
+            self._record_usage(
+                "ollama", str(payload["model"]), success=False,
+                latency_ms=round((time.perf_counter() - started) * 1000, 1),
+            )
+            raise
 
     def _call_openrouter(
         self,
@@ -218,9 +265,23 @@ class ContentEngine:
                 "X-Title": "DarkFac Content Studio",
             },
         )
-        with urllib.request.urlopen(req, timeout=60) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
+        started = time.perf_counter()
+        try:
+            with urllib.request.urlopen(req, timeout=60) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+            usage = data.get("usage", {}) if isinstance(data.get("usage"), dict) else {}
+            self._record_usage(
+                "openrouter", str(data.get("model") or model), success=True,
+                latency_ms=round((time.perf_counter() - started) * 1000, 1),
+                input_tokens=usage.get("prompt_tokens"), output_tokens=usage.get("completion_tokens"),
+            )
             return data["choices"][0]["message"]["content"].strip()
+        except Exception:
+            self._record_usage(
+                "openrouter", model, success=False,
+                latency_ms=round((time.perf_counter() - started) * 1000, 1),
+            )
+            raise
 
     def _compose_prompt(self, request: ContentRequest, preset: Dict[str, Any], tone: ToneProfile) -> str:
         """Builds combined prompt string for single-turn model invocation."""
@@ -310,17 +371,15 @@ class ContentEngine:
 
         elif request.content_type == ContentType.RELEASE_NOTES:
             bullets = "\n".join([f"- {pt}" for pt in points])
+            highlight = points[0] if points else f"Release information for {topic}"
             return (
                 f"## Release Notes — {topic}\n\n"
-                f"### 🌟 Highlights\n"
-                f"- Zero-downtime architecture upgrades and deterministic latency bounds.\n\n"
-                f"### 🚀 New Features & Enhancements\n"
+                f"### Highlights\n"
+                f"- {highlight}\n\n"
+                f"### Verified Changes\n"
                 f"{bullets}\n\n"
-                f"### 🐛 Stability & Fixes\n"
-                f"- Resolved edge-case buffer overruns in asynchronous dispatch pipelines.\n"
-                f"- Hardened input validation for external API adapters.\n\n"
-                f"### 📦 Upgrade Instructions\n"
-                f"Pull latest commit and run test validation: `pytest tests/ -v`"
+                f"### Scope Note\n"
+                f"No additional changes are claimed beyond the supplied verified points."
             )
 
         elif request.content_type == ContentType.EXECUTIVE_MEMO:

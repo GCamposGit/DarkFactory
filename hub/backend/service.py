@@ -71,6 +71,17 @@ from core.benchmarks import (
     compute_pareto_frontier,
     is_production_interactive_model,
 )
+from core.usage.ledger import ModelUsageLedger, infer_model_tier
+from core.usage.models import ModelCallEvent, ModelModality, ModelTier
+from core.usage.monitor import AccountUsageMonitor
+from core.roadmap.models import (
+    RoadmapHealth,
+    RoadmapItem,
+    RoadmapProjectSummary,
+    RoadmapSnapshot,
+    RoadmapSourceDocument,
+)
+from core.roadmap.service import build_repository_roadmap_service
 
 logger = logging.getLogger("darkhub.service")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
@@ -81,6 +92,8 @@ class HubService:
         self,
         data_dir: Optional[Path] = None,
         ollama_base_url: str = "http://localhost:11434",
+        usage_dir: Optional[Path] = None,
+        roadmap_root: Optional[Path] = None,
     ) -> None:
         if data_dir is None:
             # Default to hub/data relative to this file
@@ -92,8 +105,57 @@ class HubService:
         self.default_services_file = self.data_dir / "default_services.json"
         self.prompts_file = self.data_dir / "default_prompts.json"
         self.ollama_base_url = ollama_base_url
+        if usage_dir is not None:
+            self.usage_dir = Path(usage_dir)
+        elif data_dir is not None:
+            self.usage_dir = self.data_dir / "usage"
+        else:
+            self.usage_dir = Path(__file__).resolve().parents[2] / ".factory" / "usage"
+        self.model_usage_ledger = ModelUsageLedger(self.usage_dir)
+        self.account_usage_monitor = AccountUsageMonitor(self.usage_dir / "providers")
+        repository_root = roadmap_root or Path(__file__).resolve().parents[2]
+        self.roadmap = build_repository_roadmap_service(repository_root)
 
         self._ensure_storage()
+
+    def list_roadmap_projects(self) -> List[RoadmapProjectSummary]:
+        """List projects with an isolated roadmap source."""
+
+        return self.roadmap.list_projects()
+
+    def get_roadmap(
+        self,
+        project_id: str,
+        *,
+        search: Optional[str] = None,
+        item_type: Optional[str] = None,
+        lifecycle_stage: Optional[str] = None,
+        delivery_status: Optional[str] = None,
+        horizon: Optional[str] = None,
+        confidence: Optional[str] = None,
+        source_id: Optional[str] = None,
+    ) -> RoadmapSnapshot:
+        """Return a filtered, read-only operational roadmap snapshot."""
+
+        return self.roadmap.get_snapshot(
+            project_id,
+            search=search,
+            item_type=item_type,
+            lifecycle_stage=lifecycle_stage,
+            delivery_status=delivery_status,
+            horizon=horizon,
+            confidence=confidence,
+            source_id=source_id,
+        )
+
+    def get_roadmap_item(self, project_id: str, item_id: str) -> Optional[RoadmapItem]:
+        return self.roadmap.get_item(project_id, item_id)
+
+    def get_roadmap_health(self, project_id: str) -> RoadmapHealth:
+        return self.roadmap.get_health(project_id)
+
+    def get_roadmap_source(self, project_id: str, source_id: str) -> Optional[RoadmapSourceDocument]:
+        return self.roadmap.get_source_document(project_id, source_id)
 
     def _ensure_storage(self) -> None:
         """Ensures the storage directory and initial files exist."""
@@ -106,6 +168,51 @@ class HubService:
             else:
                 logger.warning("Default services file missing. Creating empty list.")
                 self.services_file.write_text("[]", encoding="utf-8")
+
+    def _record_model_call(
+        self,
+        *,
+        provider: str,
+        model: str,
+        harness: str = "darkhub",
+        modality: ModelModality = ModelModality.TEXT,
+        success: bool = True,
+        input_tokens: Optional[int] = None,
+        output_tokens: Optional[int] = None,
+        cost_usd: Optional[float] = None,
+        latency_ms: Optional[float] = None,
+        source: str,
+    ) -> None:
+        """Persist telemetry fail-open so observability never breaks inference."""
+        try:
+            self.model_usage_ledger.record(ModelCallEvent(
+                provider=provider,
+                model=model,
+                tier=ModelTier(infer_model_tier(provider, model)),
+                harness=harness,
+                modality=modality,
+                success=success,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                cost_usd=cost_usd,
+                latency_ms=latency_ms,
+                source=source,
+            ))
+        except Exception as exc:
+            logger.warning("Model telemetry write failed: %s", exc)
+
+    def get_account_usage(self, force: bool = False) -> Any:
+        """Return a partial-success report for every known AI platform."""
+        return self.account_usage_monitor.inspect(force=force)
+
+    def get_model_usage(self) -> Any:
+        """Return project-wide model counters and recent attempts."""
+        return self.model_usage_ledger.report()
+
+    def record_model_usage(self, event: ModelCallEvent) -> Any:
+        """Allow Codex, Grok, Gemini and other harnesses to report calls."""
+        self.model_usage_ledger.record(event)
+        return self.model_usage_ledger.report()
 
     def _load_services_raw(self) -> List[Dict]:
         try:
@@ -380,13 +487,30 @@ class HubService:
             with urllib.request.urlopen(req, timeout=60.0) as resp:
                 data = json.loads(resp.read().decode("utf-8"))
                 duration_ms = round((time.perf_counter() - start) * 1000, 1)
+                returned_model = data.get("model", req_data.model)
+                self._record_model_call(
+                    provider="ollama",
+                    model=returned_model,
+                    input_tokens=data.get("prompt_eval_count"),
+                    output_tokens=data.get("eval_count"),
+                    cost_usd=0.0,
+                    latency_ms=duration_ms,
+                    source="hub.generate_ollama",
+                )
                 return OllamaGenerateResponse(
                     response=data.get("response", ""),
-                    model=data.get("model", req_data.model),
+                    model=returned_model,
                     done=data.get("done", True),
                     total_duration_ms=duration_ms,
                 )
         except Exception as exc:
+            self._record_model_call(
+                provider="ollama",
+                model=req_data.model,
+                success=False,
+                latency_ms=round((time.perf_counter() - start) * 1000, 1),
+                source="hub.generate_ollama",
+            )
             logger.error(f"Error querying Ollama model {req_data.model}: {exc}")
             raise RuntimeError(f"Ollama generation failed: {exc}")
 
@@ -642,16 +766,33 @@ class HubService:
                 except Exception:
                     pass
 
+                returned_model = data.get("model", req_data.model)
+                self._record_model_call(
+                    provider="openrouter",
+                    model=returned_model,
+                    input_tokens=usage.get("prompt_tokens"),
+                    output_tokens=usage.get("completion_tokens"),
+                    cost_usd=cost_usd,
+                    latency_ms=duration_ms,
+                    source="hub.generate_openrouter",
+                )
                 return UnifiedGenerateResponse(
                     response=response_text,
                     provider=PlaygroundProvider.OPENROUTER,
-                    model=data.get("model", req_data.model),
+                    model=returned_model,
                     done=True,
                     total_duration_ms=duration_ms,
                     tokens_used=tokens_used,
                     cost_usd=cost_usd,
                 )
         except Exception as exc:
+            self._record_model_call(
+                provider="openrouter",
+                model=req_data.model,
+                success=False,
+                latency_ms=round((time.perf_counter() - start) * 1000, 1),
+                source="hub.generate_openrouter",
+            )
             logger.error(f"OpenRouter generate failed for {req_data.model}: {exc}")
             raise RuntimeError(f"OpenRouter generation failed: {exc}")
 
@@ -936,8 +1077,6 @@ class HubService:
         """Returns catalog of all saved visual assets."""
         studio = VisualStudio()
         return studio.list_assets()
-
-
 
 
 

@@ -8,7 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from hub.backend.api import router as api_router
+from hub.backend.api import roadmap_router, router as api_router
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 FRONTEND_DIR = BASE_DIR / "frontend"
@@ -30,6 +30,8 @@ app.add_middleware(
 
 # Include API Router
 app.include_router(api_router)
+app.include_router(roadmap_router, prefix="/api")
+app.include_router(roadmap_router)
 
 
 # Root route serving index.html
@@ -48,4 +50,3 @@ if FRONTEND_DIR.exists():
 VISUALS_DIR = BASE_DIR.parent / ".factory" / "visuals"
 VISUALS_DIR.mkdir(parents=True, exist_ok=True)
 app.mount("/visuals", StaticFiles(directory=str(VISUALS_DIR)), name="visuals")
-

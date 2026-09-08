@@ -96,6 +96,15 @@
           <span class="hidden lg:inline">Benchmarks & Pareto</span>
         </button>
 
+        <!-- Operational Roadmap Trigger -->
+        <button
+          onclick="openRoadmapDrawer()"
+          title="Abrir Roadmap Operacional"
+          class="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-cyan-300 border border-slate-800 hover:border-cyan-500/30 transition-all text-xs font-medium">
+          <span>🗺️</span>
+          <span class="hidden lg:inline">Roadmap</span>
+        </button>
+
         <!-- Playground Trigger -->
         <button 
           onclick="openPlaygroundDrawer()" 
@@ -190,6 +199,92 @@
     </section>
 
   </main>
+
+  <!-- Operational Roadmap Drawer -->
+  <div id="roadmap-drawer" class="hidden fixed inset-0 z-50 bg-slate-950/90 backdrop-blur-md animate-in-quick" role="dialog" aria-modal="true" aria-labelledby="roadmap-title">
+    <div class="w-full h-full max-w-[1600px] mx-auto bg-slate-950 border-x border-slate-800 overflow-y-auto">
+      <div class="sticky top-0 z-10 border-b border-slate-800 bg-slate-950/95 backdrop-blur-xl">
+        <div class="px-5 sm:px-8 py-5 flex flex-col xl:flex-row xl:items-center justify-between gap-4">
+          <div class="flex items-start gap-3">
+            <div class="w-10 h-10 rounded-xl bg-cyan-500/10 border border-cyan-500/30 flex items-center justify-center text-xl">🗺️</div>
+            <div>
+              <div class="flex items-center gap-2 flex-wrap">
+                <h2 id="roadmap-title" class="text-lg font-bold text-white">Roadmap Operacional</h2>
+                <span class="roadmap-tag roadmap-tag-neutral">Somente leitura</span>
+              </div>
+              <p class="mt-1 text-xs text-slate-400">Projeção das fontes operacionais canônicas. Nenhum dado é inventado para preencher lacunas.</p>
+            </div>
+          </div>
+          <div class="flex items-center gap-2">
+            <label for="roadmap-project-select" class="text-[10px] uppercase tracking-wider text-slate-500 font-mono">Projeto</label>
+            <select id="roadmap-project-select" class="min-w-[180px] bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-cyan-500 font-mono">
+              <option value="">Carregando…</option>
+            </select>
+            <button type="button" onclick="closeRoadmapDrawer()" aria-label="Fechar roadmap" class="p-2 rounded-xl text-slate-500 hover:text-slate-200 hover:bg-slate-800">✕</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="px-5 sm:px-8 py-6 space-y-6">
+        <div id="roadmap-alert" class="roadmap-alert roadmap-alert-neutral" role="status">Aguardando snapshot…</div>
+
+        <div class="grid grid-cols-2 lg:grid-cols-4 gap-3" aria-label="Resumo do roadmap">
+          <div class="roadmap-stat"><span class="roadmap-stat-label">Itens visíveis</span><strong id="roadmap-total-items">—</strong><span class="roadmap-stat-note">snapshot filtrado</span></div>
+          <div class="roadmap-stat"><span class="roadmap-stat-label">Confirmados</span><strong id="roadmap-confirmed-items">—</strong><span class="roadmap-stat-note">com fonte navegável</span></div>
+          <div class="roadmap-stat"><span class="roadmap-stat-label">Bloqueados</span><strong id="roadmap-blocked-items" class="text-amber-300">—</strong><span class="roadmap-stat-note">dependência causal</span></div>
+          <div class="roadmap-stat"><span class="roadmap-stat-label">Conflitos</span><strong id="roadmap-conflict-items" class="text-rose-300">—</strong><span class="roadmap-stat-note">versões divergentes</span></div>
+        </div>
+
+        <div class="flex flex-col lg:flex-row lg:items-end justify-between gap-4">
+          <div class="flex items-center gap-1 p-1 rounded-xl bg-slate-900 border border-slate-800" role="tablist" aria-label="Modo de visualização do roadmap">
+            <button id="roadmap-mode-overview" type="button" role="tab" aria-selected="true" onclick="selectRoadmapMode('overview')" class="roadmap-mode-button roadmap-mode-active">Visão geral</button>
+            <button id="roadmap-mode-timeline" type="button" role="tab" aria-selected="false" onclick="selectRoadmapMode('timeline')" class="roadmap-mode-button">Linha do tempo</button>
+            <button id="roadmap-mode-dependencies" type="button" role="tab" aria-selected="false" onclick="selectRoadmapMode('dependencies')" class="roadmap-mode-button">Dependências</button>
+            <button id="roadmap-mode-table" type="button" role="tab" aria-selected="false" onclick="selectRoadmapMode('table')" class="roadmap-mode-button">Tabela acessível</button>
+          </div>
+          <div class="text-[10px] text-slate-500 font-mono text-right">Observado: <span id="roadmap-observed-at">—</span> · Hash: <span id="roadmap-snapshot-hash">—</span></div>
+        </div>
+
+        <section class="rounded-2xl border border-slate-800 bg-slate-900/50 p-4" aria-labelledby="roadmap-filters-title">
+          <div class="flex items-center justify-between gap-3 mb-3">
+            <h3 id="roadmap-filters-title" class="text-xs font-semibold uppercase tracking-wider text-slate-400">Filtros</h3>
+            <button type="button" onclick="clearRoadmapFilters()" class="text-[10px] text-slate-500 hover:text-cyan-300 font-mono">Limpar filtros</button>
+          </div>
+          <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-2">
+            <input id="roadmap-search-input" type="search" placeholder="Buscar item, tag…" aria-label="Buscar no roadmap" class="xl:col-span-2 bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-200 placeholder-slate-600 focus:outline-none focus:border-cyan-500 font-mono" onkeydown="if(event.key==='Enter') loadRoadmapSnapshot()" />
+            <select id="roadmap-type-filter" aria-label="Filtrar por tipo" onchange="loadRoadmapSnapshot()" class="bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-300 focus:outline-none focus:border-cyan-500 font-mono">
+              <option value="">Todos os tipos</option><option value="epic">Épico</option><option value="feature">Feature</option><option value="infrastructure">Infraestrutura</option><option value="research">Pesquisa</option><option value="quality">Qualidade</option><option value="security">Segurança</option><option value="documentation">Documentação</option><option value="operations">Operação</option>
+            </select>
+            <select id="roadmap-stage-filter" aria-label="Filtrar por etapa" onchange="loadRoadmapSnapshot()" class="bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-300 focus:outline-none focus:border-cyan-500 font-mono">
+              <option value="">Todas as etapas</option><option value="foundations">Fundações</option><option value="execution">Execução atual</option><option value="next_steps">Próximas etapas</option><option value="future">Futuro</option>
+            </select>
+            <select id="roadmap-status-filter" aria-label="Filtrar por estado" onchange="loadRoadmapSnapshot()" class="bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-300 focus:outline-none focus:border-cyan-500 font-mono">
+              <option value="">Todos os estados</option><option value="discovered">Descoberto</option><option value="accepted">Aceito</option><option value="planned">Planejado</option><option value="implementing">Em implementação</option><option value="validating">Em validação</option><option value="completed">Concluído</option><option value="cancelled">Cancelado</option>
+            </select>
+            <select id="roadmap-horizon-filter" aria-label="Filtrar por horizonte" onchange="loadRoadmapSnapshot()" class="bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-300 focus:outline-none focus:border-cyan-500 font-mono">
+              <option value="">Todos os horizontes</option><option value="now">Agora</option><option value="next">Próximo</option><option value="later">Mais adiante</option><option value="exploratory">Exploratório</option><option value="unscheduled">Sem previsão</option>
+            </select>
+            <select id="roadmap-confidence-filter" aria-label="Filtrar por confiança" onchange="loadRoadmapSnapshot()" class="bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-300 focus:outline-none focus:border-cyan-500 font-mono">
+              <option value="">Toda confiança</option><option value="high">Alta</option><option value="medium">Média</option><option value="low">Baixa</option><option value="unknown">Desconhecida</option>
+            </select>
+          </div>
+        </section>
+
+        <div id="roadmap-alerts" class="sr-only" aria-live="polite"></div>
+        <div id="roadmap-overview" class="space-y-7"></div>
+        <div id="roadmap-timeline-view" class="hidden"></div>
+        <div id="roadmap-dependencies-view" class="hidden"></div>
+        <div id="roadmap-table-view" class="hidden"></div>
+
+        <section class="pt-2 border-t border-slate-800/80" aria-labelledby="roadmap-sources-title">
+          <div class="flex items-center gap-2 mb-2"><h3 id="roadmap-sources-title" class="text-[10px] uppercase tracking-wider text-slate-500 font-mono">Fontes consultadas</h3><span class="text-[10px] text-slate-600">·</span><span class="text-[10px] text-slate-600">proveniência operacional</span></div>
+          <div id="roadmap-sources" class="flex flex-wrap gap-2 text-[10px] font-mono"></div>
+        </section>
+
+        <aside id="roadmap-detail" class="hidden rounded-2xl border border-cyan-500/25 bg-slate-900/80" aria-label="Detalhe do item selecionado"></aside>
+      </div>
+    </div>
+  </div>
 
   <!-- Command Palette Modal (Ctrl+K) -->
   <div id="command-palette-modal" class="hidden fixed inset-0 z-50 flex items-start justify-center pt-20 px-4 bg-slate-950/80 backdrop-blur-sm animate-in-quick">
@@ -656,5 +751,7 @@
 
   <!-- Scripts -->
   <script src="/static/app.js"></script>
+  <script src="/static/usage.js"></script>
+  <script src="/static/roadmap.js"></script>
 </body>
 </html>

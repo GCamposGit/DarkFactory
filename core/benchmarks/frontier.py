@@ -329,7 +329,13 @@ def get_top_candidates_for_tier(
     tier = tier.lower()
 
     if tier in ["local", "local_fast", "offline"]:
-        local_models = [m for m in models if m.tier == ModelTier.LOCAL_ZERO_COST or m.provider == "ollama"]
+        local_models = [
+            m
+            for m in models
+            if (m.tier == ModelTier.LOCAL_ZERO_COST or m.provider == "ollama")
+            and (not m.domain_scores or "coding" in m.domain_scores)
+            and m.metadata.get("modality", "text") not in {"image", "video"}
+        ]
         if not local_models:
             local_models = models[:k]
 
@@ -705,4 +711,3 @@ def get_domain_top3_candidates(
         ))
 
     return candidates
-

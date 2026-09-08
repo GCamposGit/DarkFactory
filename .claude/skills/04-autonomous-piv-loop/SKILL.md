@@ -1,15 +1,19 @@
 ---
 name: autonomous-piv-loop
-description: Executa o ciclo contínuo Prime-Plan-Implement-Validate (PIV) de forma autônoma e com isolamento de contexto fresco por tarefa. Cada subtarefa é implementada e validada antes de avançar para a próxima. Use ao implementar tickets, funcionalidades ou correções de bugs.
+description: Executa tickets, funcionalidades e correções pelo ciclo Prime-Plan-Implement-Validate (PIV), incluindo paralelização segura em branches e worktrees isoladas quando duas ou mais frentes escrevem no mesmo repositório.
 ---
 
 # Autonomous PIV Loop: O Motor de Execução
 
 O ciclo PIV decompõe a implementação em passos atômicos estritos, garantindo que o agente nunca gere um bloco maciço de código sem validação intermediária.
 
-## Princípio Fundamental: Fresh Context Isolation
+## Princípio Fundamental: isolamento de contexto e estado
 - Sessões longas degradam a atenção do modelo e geram alucinações cumulativas.
 - Cada etapa (Planejar, Codificar Tarefa 1, Codificar Tarefa 2, Validar, Auditar) roda com **contexto limpo** ou via subagentes especializados (`invoke_subagent`).
+- Isolamento de contexto não substitui isolamento Git: cada frente que escreve recebe branch, worktree, owner e lease exclusivos.
+- Nunca faça fan-out a partir de um checkout sujo sem antes criar um backup recuperável e um checkpoint de integração limpo. Copiar uma baseline suja para várias worktrees duplica deltas e torna autoria e integração ambíguas.
+
+Quando houver duas ou mais frentes concorrentes, ou quando resultados de worktrees precisarem ser integrados, leia e siga integralmente [references/worktree-parallelism.md](references/worktree-parallelism.md). O protocolo é fail-closed: se não for possível provar baseline, ownership, ambiente de teste ou conclusão, não despache nem integre.
 
 ## O Loop em 5 Etapas
 
@@ -37,8 +41,10 @@ O ciclo PIV decompõe a implementação em passos atômicos estritos, garantindo
 
 ## Instruções de Execução por Tarefa
 
-1. **Crie uma branch ou worktree dedicada**:
-   `git checkout -b feature/<task-slug>`
+1. **Prepare a unidade de trabalho**:
+   - Em uma frente única, use uma branch dedicada.
+   - Em paralelismo, use o protocolo de worktrees referenciado acima; não reutilize o checkout raiz como executor.
+   - Registre o SHA-base e confirme `python`, `pytest` e os comandos focais antes da escrita.
 2. **Execute tarefa a tarefa**:
    - Abra apenas os arquivos explicitamente listados no ticket.
    - Escreva o código seguindo os padrões do `AGENTS.md`.
@@ -49,7 +55,11 @@ O ciclo PIV decompõe a implementação em passos atômicos estritos, garantindo
    - Execute a suíte completa com marcadores determinísticos:
      `python core/harness/runner.py | python core/harness/markers.py`
 4. **Relatório de Implementação**:
-   Gere um sumário em `.factory/reports/<task-slug>-report.md` documentando os arquivos alterados e os comandos executados.
+   Gere um sumário em `.factory/reports/<task-slug>-report.md` documentando SHA/branch/worktree, arquivos alterados, comandos executados, resultados e estado residual.
+
+## Contrato de conclusão
+
+Uma frente só está pronta para integração quando entrega um commit seletivo e alcançável contendo apenas seu delta, acompanhado de: ticket e owner; SHA-base e SHA final; lista de arquivos; testes focais e obrigatórios com exit code; relatório; e `git status` residual explicado. Turno concluído sem esse contrato, título/ID ausente, teste indisponível ou commit misturado é falha de handoff, não sucesso.
 
 ---
 

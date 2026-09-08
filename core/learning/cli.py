@@ -155,7 +155,10 @@ def main():
             preventative_rule=args.rule,
             regression_test_file=args.test_file,
         )
-        print(f"[RCA RESOLVED] ID: {rca.rca_id} | Root Cause: {rca.root_cause}")
+        print(
+            f"[RCA RECORDED] ID: {rca.rca_id} | "
+            f"Status: {rca.status.value} | Root Cause: {rca.root_cause}"
+        )
 
     elif args.command == "extrapolate":
         transfer = tracker.extrapolate_analogy(
@@ -191,4 +194,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
