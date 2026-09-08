@@ -1,0 +1,39 @@
+{
+  "schema_version": "1",
+  "question": "Model identifier and read-only infrastructure inspection supporting owner workflow revision",
+  "sources": [
+    {
+      "canonical_url": "https://developers.openai.com/api/docs/models/gpt-6-astra",
+      "title": "GPT-6 Astra model",
+      "organization": "OpenAI",
+      "consulted_at": "2026-09-08",
+      "insight": "Official identifier is gpt-6-astra; policy selects high/max from available effort values. This does not certify subscription access or other harness models.",
+      "related": [
+        "HF-07"
+      ]
+    },
+    {
+      "canonical_url": "https://docs.hetzner.com/cloud/servers/getting-started/vnc-console/",
+      "title": "Using the console",
+      "organization": "Hetzner",
+      "consulted_at": "2026-09-08",
+      "insight": "Select server and console icon to inspect existing system; this planning does not require password reset, reinstall or rescue.",
+      "related": [
+        "HF-01",
+        "HF-03"
+      ]
+    },
+    {
+      "canonical_url": "https://docs.hetzner.com/cloud/servers/faq/",
+      "title": "Cloud servers FAQ",
+      "organization": "Hetzner",
+      "consulted_at": "2026-09-08",
+      "insight": "VNC console provides direct access; existing SSH is preferred for routine administration. Documentation cannot identify the actual installed OS.",
+      "related": [
+        "HF-03"
+      ]
+    }
+  ],
+  "revalidate": "At model dispatch/catalog refresh and before infrastructure execution",
+  "limits": "Other model names are owner preferences, not verified account capabilities; VPS OS not remotely inspected."
+}

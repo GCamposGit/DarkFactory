@@ -155,6 +155,14 @@ def _build_system_links(node: InfraNode) -> List[InfraLink]:
         )
         links.append(
             InfraLink(
+                title="DarkHub 24/7",
+                url="https://darkhub.ggcampos.com",
+                category="hub",
+                badge="Cloud 24/7",
+            )
+        )
+        links.append(
+            InfraLink(
                 title="Hetzner Console",
                 url="https://console.hetzner.cloud",
                 category="cloud",

@@ -1,0 +1,118 @@
+{
+  "ledger_id": "20260907_project_adoption_gateway",
+  "query": "Definitive transactional adoption and initialization of arbitrary projects by an autonomous software factory",
+  "topic_type": "topic_concept",
+  "created_at": "2026-09-07T02:00:00Z",
+  "summary_executive": "A native adoption gateway should isolate work with Git worktrees, separate factory-owned runtime files from project-owned governance, pin provenance by source commit and content digests, model updates as three-way ownership decisions, and fail closed on dirty state, drift, or missing deterministic validation.",
+  "sources": [
+    {
+      "id": "git-worktree",
+      "title": "git-worktree Documentation",
+      "url": "https://git-scm.com/docs/git-worktree.html",
+      "source_type": "official_documentation",
+      "authors_or_maintainers": ["Git project"],
+      "published_date": null,
+      "summary": "Official semantics for multiple working trees, locked worktrees, and porcelain status.",
+      "license": null,
+      "license_category": "documentation",
+      "authority_tier": "high_credibility",
+      "credibility_score": 1.0,
+      "stars": null,
+      "has_test_suite": null,
+      "metadata": {}
+    },
+    {
+      "id": "copier-updating",
+      "title": "Copier: Updating a project",
+      "url": "https://copier.readthedocs.io/en/stable/updating/",
+      "source_type": "official_documentation",
+      "authors_or_maintainers": ["Copier project"],
+      "published_date": null,
+      "summary": "Template updates retain prior answers/version and expose conflicts for review.",
+      "license": null,
+      "license_category": "documentation",
+      "authority_tier": "high_credibility",
+      "credibility_score": 0.95,
+      "stars": null,
+      "has_test_suite": null,
+      "metadata": {}
+    },
+    {
+      "id": "slsa-verifying-artifacts",
+      "title": "SLSA v1.2: Verifying artifacts",
+      "url": "https://slsa.dev/spec/v1.2/verifying-artifacts",
+      "source_type": "standard",
+      "authors_or_maintainers": ["OpenSSF SLSA"],
+      "published_date": null,
+      "summary": "Artifact verification binds digests to expected source, builder and parameters.",
+      "license": "Community specification",
+      "license_category": "documentation",
+      "authority_tier": "high_credibility",
+      "credibility_score": 1.0,
+      "stars": null,
+      "has_test_suite": null,
+      "metadata": {"version": "1.2"}
+    },
+    {
+      "id": "github-reusable-workflows",
+      "title": "Reusing workflow configurations",
+      "url": "https://docs.github.com/en/actions/reference/workflows-and-actions/reusing-workflow-configurations",
+      "source_type": "official_documentation",
+      "authors_or_maintainers": ["GitHub"],
+      "published_date": null,
+      "summary": "Reusable CI workflows can be centralized and pinned; commit SHA is the strongest immutable reference.",
+      "license": null,
+      "license_category": "documentation",
+      "authority_tier": "high_credibility",
+      "credibility_score": 1.0,
+      "stars": null,
+      "has_test_suite": null,
+      "metadata": {}
+    },
+    {
+      "id": "openai-latest-model-guide",
+      "title": "Using GPT-5.4",
+      "url": "https://developers.openai.com/api/docs/guides/latest-model",
+      "source_type": "official_documentation",
+      "authors_or_maintainers": ["OpenAI"],
+      "published_date": null,
+      "summary": "Agent behavior should be shaped with explicit skills and repository instructions, with delegation and validation tuned to the task.",
+      "license": null,
+      "license_category": "documentation",
+      "authority_tier": "high_credibility",
+      "credibility_score": 1.0,
+      "stars": null,
+      "has_test_suite": null,
+      "metadata": {}
+    }
+  ],
+  "insights": [
+    {
+      "source_id": "git-worktree",
+      "source_title": "git-worktree Documentation",
+      "key_insight": "Adoption and task execution can start from committed state without carrying dirty edits from the user's checkout.",
+      "architectural_implications": "Create and lock a dedicated branch/worktree before any target write.",
+      "future_reference_value": "Use porcelain worktree data for machine-readable lifecycle management.",
+      "authority_tier": "high_credibility",
+      "code_patterns_or_algorithms": ["locked worktree", "commit-bound base"]
+    },
+    {
+      "source_id": "copier-updating",
+      "source_title": "Copier: Updating a project",
+      "key_insight": "Safe updates need a remembered prior version so local changes can be distinguished from factory-owned unchanged files.",
+      "architectural_implications": "Classify each path as create, adopt, update, unchanged, preserve, or conflict using the prior lock.",
+      "future_reference_value": "A future template engine can use the same ownership state machine.",
+      "authority_tier": "high_credibility",
+      "code_patterns_or_algorithms": ["three-way ownership", "explicit conflict"]
+    },
+    {
+      "source_id": "slsa-verifying-artifacts",
+      "source_title": "SLSA v1.2: Verifying artifacts",
+      "key_insight": "A bundle is trustworthy only when its content digests and source identity match declared provenance.",
+      "architectural_implications": "Write the lock last and verify every managed SHA-256 plus the source commit.",
+      "future_reference_value": "The lock can later be signed or emitted as formal provenance.",
+      "authority_tier": "high_credibility",
+      "code_patterns_or_algorithms": ["content-addressed manifest", "verify before execute"]
+    }
+  ]
+}

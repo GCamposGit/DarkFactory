@@ -5,10 +5,16 @@ FastAPI REST API router for DarkHub.
 import asyncio
 import os
 import secrets
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 from pydantic import BaseModel
-from fastapi import APIRouter, Depends, Header, HTTPException, Query, Response, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, Response, status
 from fastapi.responses import RedirectResponse
+
+from hub.backend.webhooks import (
+    CloudGatewayStatus,
+    DokployDeployTrigger,
+    WebhookEventRecord,
+)
 
 from hub.backend.models import (
     ExportCatalogResponse,
@@ -969,6 +975,125 @@ def get_infra_card_endpoint(
     if not card:
         raise HTTPException(status_code=404, detail=f"Infrastructure node '{node_id}' not found")
     return card
+
+
+# ==============================================================================
+# Harness Test Subagent & Dedicated Worker Endpoints (USR-16)
+# ==============================================================================
+
+
+@router.get("/harness/workers", response_model=List[dict])
+def list_test_workers(
+    service: HubService = Depends(get_hub_service),
+) -> List[dict]:
+    """Returns real-time status, latency, and capabilities of available test worker nodes."""
+    return service.get_test_workers_status()
+
+
+@router.post("/harness/execute", response_model=DistilledTestReport)
+def execute_test_suite(
+    instruction: TestExecutionInstruction,
+    service: HubService = Depends(get_hub_service),
+) -> DistilledTestReport:
+    """Executes a headless test suite across remote worker or local fallback."""
+    return service.execute_test_run(instruction)
+
+
+# ==============================================================================
+# Cloud Gateway & Autonomous Webhooks Endpoints (USR-18 / INFRA-09 / DF-20)
+# ==============================================================================
+
+
+@router.post("/webhooks/github", response_model=WebhookEventRecord)
+async def handle_github_webhook(
+    request: Request,
+    service: HubService = Depends(get_hub_service),
+    x_github_event: Optional[str] = Header(None, alias="X-GitHub-Event"),
+    x_github_delivery: Optional[str] = Header(None, alias="X-GitHub-Delivery"),
+    x_hub_signature_256: Optional[str] = Header(None, alias="X-Hub-Signature-256"),
+) -> WebhookEventRecord:
+    """Receives, verifies, deduplicates, and processes incoming GitHub webhooks.
+
+    Fail-closed security: rejects missing event or delivery headers, and enforces
+    HMAC-SHA256 signature verification when GITHUB_WEBHOOK_SECRET is configured.
+    """
+    if not x_github_event or not x_github_delivery:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Missing required GitHub webhook headers (X-GitHub-Event and X-GitHub-Delivery).",
+        )
+
+    try:
+        payload = await request.json()
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid JSON payload: {exc}",
+        )
+
+    record = service.process_github_webhook(
+        event_type=x_github_event,
+        delivery_id=x_github_delivery,
+        payload=payload,
+        signature_header=x_hub_signature_256,
+    )
+
+    if record.status == "rejected":
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=record.details.get("reason", "Webhook signature verification failed."),
+        )
+
+    return record
+
+
+@router.get("/webhooks/events", response_model=List[WebhookEventRecord])
+def list_webhook_events(
+    limit: int = Query(50, ge=1, le=200),
+    event_type: Optional[str] = Query(None),
+    service: HubService = Depends(get_hub_service),
+) -> List[WebhookEventRecord]:
+    """Returns the historical audit trail of received webhook events."""
+    return service.get_webhook_events(limit=limit, event_type=event_type)
+
+
+@router.post("/webhooks/test", response_model=WebhookEventRecord)
+def simulate_webhook_event(
+    event: Dict[str, Any],
+    service: HubService = Depends(get_hub_service),
+) -> WebhookEventRecord:
+    """Simulates an incoming webhook event for local testing and deterministic validation."""
+    event_type = event.get("event_type", "ping")
+    delivery_id = event.get("delivery_id") or f"test-sim-{secrets.token_hex(6)}"
+    payload = event.get("payload", {})
+
+    return service.process_github_webhook(
+        event_type=event_type,
+        delivery_id=delivery_id,
+        payload=payload,
+        signature_header=None,
+        require_secret=False,
+    )
+
+
+@router.get("/cloud/status", response_model=CloudGatewayStatus)
+def get_cloud_gateway_status(
+    service: HubService = Depends(get_hub_service),
+) -> CloudGatewayStatus:
+    """Returns the runtime status, allowed hosts, and webhook statistics of the Cloud Gateway."""
+    return service.get_cloud_gateway_status()
+
+
+@router.post("/cloud/deploy", response_model=DokployDeployTrigger)
+def trigger_cloud_deploy(
+    service: HubService = Depends(get_hub_service),
+    body: Optional[Dict[str, Any]] = None,
+) -> DokployDeployTrigger:
+    """Triggers Dokploy PaaS auto-deployment webhook for DarkHub or target service (INFRA-09)."""
+    service_name = (body or {}).get("service_name", "darkhub")
+    custom_url = (body or {}).get("deploy_url")
+    return service.trigger_dokploy_deployment(service_name=service_name, custom_url=custom_url)
+
 
 
 
