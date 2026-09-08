@@ -1,6 +1,6 @@
 {
   "session_id": "session_20260905_072924",
-  "prompt_count": 17,
+  "prompt_count": 18,
   "turns": [
     {
       "turn_id": 1,
@@ -170,6 +170,16 @@
       "was_followup": true,
       "one_shot_success": false,
       "missing_context_or_gap": "Após implementar feature no painel, o servidor não foi iniciado automaticamente nem as instruções de inicialização foram destacadas para o usuário",
+      "target_skill": "autonomous-piv-loop"
+    },
+    {
+      "turn_id": 18,
+      "timestamp": "2026-09-08T19:28:48.310016+00:00",
+      "user_prompt_summary": "Desenvolver o próximo item HF- do roadmap",
+      "perceived_intent": "Executar o ticket canônico HF-01-02 após HF-01-01, com contratos Pydantic e leitura segura de fontes",
+      "was_followup": true,
+      "one_shot_success": false,
+      "missing_context_or_gap": "Confirmar o estado compartilhado antes de editar e preservar mudanças concorrentes",
       "target_skill": "autonomous-piv-loop"
     }
   ],
@@ -739,6 +749,51 @@
       "origin": "rca",
       "status": "active",
       "active": true
+    },
+    {
+      "rca_id": "rca_0afc142f",
+      "timestamp": "2026-09-08T19:29:58.374634+00:00",
+      "category": "tool_misuse",
+      "symptom": "Consulta exploratória multiline falhou com SyntaxError no python -c e a RCA inicial recusou uma categoria inválida",
+      "mechanism": "PowerShell recebeu literal de escape de nova linha e o CLI aceita apenas categorias fechadas",
+      "root_cause": "Uso de quoting frágil e categoria não pertencente ao contrato do CLI",
+      "patch_description": "Decompor inspeções em comandos simples e usar somente categorias enumeradas pelo help",
+      "preventative_rule": "Antes de registrar RCA, consultar o contrato de argumentos; sob PowerShell evitar quoting multiline em python -c",
+      "regression_test_file": "core/harness/terminal_env.py",
+      "verification_gate_id": null,
+      "origin": "rca",
+      "status": "proposed",
+      "active": false
+    },
+    {
+      "rca_id": "rca_393ec111",
+      "timestamp": "2026-09-08T19:37:58.919911+00:00",
+      "category": "test_regression",
+      "symptom": "Teste de extra_fields não falhou como esperado",
+      "mechanism": "Pydantic model_copy(update) preserva atualização sem revalidar campos extras",
+      "root_cause": "O teste usou uma API de cópia inadequada para verificar ConfigDict extra=forbid",
+      "patch_description": "Construir BaselineSourceSpec com campo unexpected diretamente para acionar a validação do contrato",
+      "preventative_rule": "Testes de validação Pydantic devem instanciar ou usar model_validate, não model_copy, para confirmar rejeição de campos",
+      "regression_test_file": "tests/test_baseline_sources.py",
+      "verification_gate_id": null,
+      "origin": "rca",
+      "status": "proposed",
+      "active": false
+    },
+    {
+      "rca_id": "rca_44ec765f",
+      "timestamp": "2026-09-08T19:39:44.993199+00:00",
+      "category": "tool_misuse",
+      "symptom": "Ruff rejeitou os arquivos HF-01-02 por imports, anotação antecipada e datetime ingênuo no teste",
+      "mechanism": "A implementação inicial não seguiu a ordenação automática de imports e o teste intencional não documentou o datetime sem timezone",
+      "root_cause": "Faltou rodar a checagem estática antes da primeira validação focal",
+      "patch_description": "Organizar imports, remover aspas da anotação futura e construir o datetime ingênuo com comentário explícito no teste",
+      "preventative_rule": "Executar lint dos arquivos novos antes dos gates e isolar construções intencionalmente inválidas em testes",
+      "regression_test_file": "tests/test_baseline_sources.py",
+      "verification_gate_id": null,
+      "origin": "rca",
+      "status": "proposed",
+      "active": false
     }
   ],
   "transfers": [
@@ -1413,5 +1468,5 @@
       "executed_at": "2026-09-08T14:25:32.955989+00:00"
     }
   ],
-  "last_updated": "2026-09-08T14:25:43.382680+00:00"
+  "last_updated": "2026-09-08T19:39:44.993199+00:00"
 }
