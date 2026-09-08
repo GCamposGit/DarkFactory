@@ -1,10 +1,12 @@
 # Dark Factory — plano integrado de produção com workflow híbrido
 
-Data: 08/09/2026. Status: proposta de desenvolvimento, informada pelas respostas do owner nesta sessão. Nenhuma instalação, migração ou alteração de comportamento foi executada por este documento. A escolha definitiva do runtime pertence ao HF-02.
+Data: 08/09/2026. Revisão: 1.1, após revisão do owner. Status: proposta de desenvolvimento, informada pelas respostas do owner nesta sessão. Nenhuma instalação, migração ou alteração de comportamento foi executada por este documento. A escolha definitiva do runtime pertence ao HF-02.
+
+Requisitos obrigatórios complementares: [autonomia, Grill, ambiente, modelos e paralelismo](HYBRID_AUTONOMY_REQUIREMENTS.md). A matriz desse documento especifica o impacto em cada módulo HF e os cenários adicionais G1–G8. Em caso de conflito com formulações anteriores deste plano, prevalecem esses requisitos revisados. A região Alemanha está oficializada. O owner confirmou Windows preservado com Linux via WSL2 e abandono da instalação Ubuntu/formatação do servidor. O inventário associa esse setup ao servidor local; conferir separadamente o sistema da VPS por preflight técnico. Nenhuma configuração de máquina é alterada por inferência.
 
 ## 1. Resultado esperado e decisões do owner
 
-A fábrica recebe uma demanda por conversa, produz uma especificação verificável, escolhe o fluxo apropriado e executa o ciclo de engenharia até a operação do produto. O owner participa da definição de intenção, de decisões que dependem exclusivamente de seu julgamento e do aceite estruturado. O sistema registra progresso e retoma trabalho sem depender de uma conversa aberta ou do notebook ligado.
+A fábrica recebe uma demanda por conversa, realiza o Grill eficiente de entendimento, produz uma especificação verificável, escolhe o fluxo apropriado e executa o ciclo de engenharia até a operação do produto. O owner participa da definição de intenção, de decisões que dependem exclusivamente de seu julgamento e do aceite estruturado. O sistema registra progresso e retoma trabalho sem depender de uma conversa aberta ou do notebook ligado.
 
 O portfólio de referência contém três tipos de produto: ferramentas de engenharia semelhantes à própria DarkFac; um segundo cérebro; e um site empresarial com frontend, backend, CRM, conteúdo, blog, identidade visual, SEO, IA e integrações de marketing. O segundo cérebro é uma referência de complexidade; sua implementação não foi auditada nesta revisão. Cerca de dez projetos devem coexistir; isso não significa dez builds pesados simultâneos.
 
@@ -20,6 +22,8 @@ O portfólio de referência contém três tipos de produto: ferramentas de engen
 | Dados | Dados sensíveis são possíveis. Sem exigência inicial de processamento local; preservar isolamento, segredos, minimização e capacidade futura de políticas por cliente. |
 | Operação | Tolerância a interrupções de horas em situações críticas; alta disponibilidade não é requisito inicial. |
 | Piloto | Ainda não escolhido. A onda 1 encerra com ensaio real completo da fábrica em projeto de aceitação descartável; um projeto comercial vem depois. |
+
+O owner confirmou PostgreSQL instalado, funcionando e testado no Dokploy. Reaproveitar a instância; verificar acesso pela identidade de execução antes de integração nova.
 
 A qualidade é responsabilidade da fábrica: a entrega ao humano já precisa ter evidência automática suficiente. O aceite não transfere ao owner a obrigação de procurar erros técnicos. Nenhuma arquitetura, porém, permite presumir como comprovada a qualidade de um resultado ainda não verificado.
 
@@ -40,7 +44,7 @@ A revisão cobre missão, regras, arquitetura, playbook, roadmap operacional, pl
 | DF-23 | Relatório entrega protocolo e espelho de skills, explicitamente sem automação funcional. | Registrar cobertura parcial e implementar ownership/worktrees no executor. |
 | RM-01–09 | Roadmap como projeção de fontes; histórico RM-09 limitado à vida do serviço. | Preservar projeção; integrar HF e INFRA, sem converter o painel em segunda fonte de verdade. |
 | INFRA-01–07 | Inventário declara nós, VPS, Dokploy e PostgreSQL entregues. | Confirmar serviço/configuração/versionamento antes do rollout. |
-| INFRA-08–11 | Backups, CD, runner e métricas ainda planejados nas fontes consultadas. | Tornar dependências da onda 1; não duplicar com outros IDs. |
+| INFRA-08–11 | A leitura inicial apontava itens planejados; fontes posteriores relatam INFRA-09/USR-18 e INFRA-10/USR-16 entregues. Relatos não substituem validação operacional. | Tornar dependências da onda 1; não duplicar com outros IDs. |
 
 Fontes locais principais: [plano DF](DEVELOPMENT_PLAN_2026-09-05.md), [roadmap RM](ROADMAP_OPERACIONAL.md), [runtime DF-11](RUNTIME_DECISION.md), [política DF-20](AUTONOMY_POLICY.md), [relatório DF-23](../.factory/reports/df-23-worktree-protocol-report.md), [roadmap INFRA](../.factory/infra/roadmap.md).
 
@@ -50,7 +54,7 @@ Fontes locais principais: [plano DF](DEVELOPMENT_PLAN_2026-09-05.md), [roadmap R
 - A leitura focal do monitor mostrou uso do campo `usage` como gasto mensal; a documentação oficial diferencia `usage` acumulado e `usage_monthly`. O valor mensal deve ser reconciliado no HF-07. Não usar esse rótulo como limite de execução nem alterar faturamento nesta fase. [OpenRouter — limites](https://openrouter.ai/docs/api_reference/limits).
 - O cartão n8n marca ativo, mas aponta para `https://n8n.io`, sem identificar instância ou instalação. O Dokploy foi acessado e apresentou login; a instalação remota de n8n permanece **não confirmada**, não declarada ausente. A busca documental não localizou um manifesto de instalação específico.
 - O painel de tarefas exibiu **“Fila indisponível: HTTP 404”**. Registrar incompatibilidade de serviço/interface como pendência do HF-01; a causa não foi depurada.
-- O inventário registra VPS CX23 com 2 vCPU/4 GB/40 GB na Alemanha; ADRs anteriores citam outro plano/região. O servidor local entregue usa Windows/Docker Desktop/WSL2, enquanto propostas anteriores citam Linux. Conciliar esses registros sem reinstalar ou formatar máquinas por inferência.
+- Decisão oficial do owner: VPS na Alemanha; inventário registra CX23 com 2 vCPU/4 GB/40 GB em Falkenstein. A referência anterior a Ashburn/CPX21 fica superada. O inventário associa Windows/Docker Desktop/WSL2 ao servidor local; o owner confirmou que a instalação Ubuntu foi abandonada para preservar o servidor Windows usando WSL2. Essa decisão substitui o guia histórico para o servidor local. O sistema efetivo da VPS será verificado tecnicamente, sem reinstalação ou formatação.
 - Existem mudanças locais de outras frentes. Este planejamento não as integra, reverte nem declara entregues.
 
 As afirmações antigas de custo zero absoluto, eliminação de viés, segurança inviolável e impossibilidade de perda de dados precisam de revisão editorial. A arquitetura deve comunicar garantias delimitadas e evidências observadas.
@@ -64,11 +68,13 @@ O núcleo DarkFac continua responsável por política, escopo, risco, orçamento
 ```mermaid
 flowchart TD
     A[Conversa / Telegram / DarkHub] --> B[Entrada autenticada e deduplicada]
-    B --> C[DarkFac: contratos, política e plano de execução]
+    B --> Q[Grill: intenção, alternativas e decisões]
+    Q --> C[DarkFac: contratos, política e plano de execução]
     C <--> D[(PostgreSQL: execução, eventos e decisões)]
     C --> E[Runtime durável]
     E --> F[Workers isolados: nuvem e nós disponíveis]
-    F --> G[Verificações e revisão independente]
+    F --> R[Manifesto e validação operacional do ambiente]
+    R --> G[Verificações e revisão independente]
     G -->|corrigir dentro dos limites| F
     G --> H[PR e merge com evidência atual]
     H --> I[Build imutável e staging]
@@ -131,9 +137,9 @@ Cada etapa vira um módulo versionado com uma ficha legível e contrato validáv
 | Falha e retomada | Timeout, retries limitados, classificação de erro, checkpoint, reconciliação e eventual compensação. |
 | Interação humana | Pergunta concreta, opções, recomendação, evidências, identidade e objeto exato da decisão. |
 
-Resultados mínimos: `succeeded`, `failed`, `retryable`, `waiting_human`, `waiting_capacity`, `blocked_policy`, `cancelled` e `skipped_by_policy`. Dispensa nunca significa aprovação fictícia. Um evento de sucesso textual do modelo não altera o estado oficial.
+Resultados mínimos: `waiting_budget`, `waiting_dependency`, `retry_scheduled`, `succeeded`, `failed`, `retryable`, `waiting_human`, `waiting_capacity`, `blocked_policy`, `cancelled` e `skipped_by_policy`. Dispensa nunca significa aprovação fictícia. Um evento de sucesso textual do modelo não altera o estado oficial.
 
-O fluxo de alto nível usa estados de produto — especificação, planejamento, execução, verificação, integração, staging, aceite, release, operação — com tentativas subordinadas. Os nomes atuais de DF-01 serão mapeados, não substituídos silenciosamente. `MERGED`, `DEPLOYED` e `ACCEPTED` representam fatos diferentes.
+O fluxo de alto nível usa estados de produto — recepção, Grill, especificação, planejamento, execução, verificação, integração, staging, aceite, release, operação — com tentativas subordinadas. Os nomes atuais de DF-01 serão mapeados, não substituídos silenciosamente. `MERGED`, `DEPLOYED` e `ACCEPTED` representam fatos diferentes.
 
 Determinismo significa repetir as decisões de controle dadas as mesmas versões, entradas e saídas registradas. Inferência, relógio, rede e ferramentas continuam não determinísticos e ficam dentro das etapas com resultados persistidos. Para efeitos externos, exigir idempotência e reconciliação: não prometer execução única universal. [DBOS — determinismo](https://docs.dbos.dev/python/tutorials/workflow-tutorial).
 
@@ -142,21 +148,24 @@ Determinismo significa repetir as decisões de controle dadas as mesmas versões
 | Etapa | Inputs e acionamento | Ações | Outputs e condição de avanço |
 | --- | --- | --- | --- |
 | 1. Recepção | Conversa, mensagem, issue ou áudio; sempre. | Autenticar owner, identificar projeto, deduplicar; transcrever apenas se necessário. | Demanda rastreável, origem, anexos e dúvidas reais. |
-| 2. Especificação | Demanda e contexto do negócio. | Agente estrutura jornada, funcionalidades, exclusões, marca, dados, integrações e critérios; agrupa decisões humanas. | Especificação versionada e acordo sobre intenção; ambiguidade material resolvida. |
-| 3. Triagem | Especificação e política do projeto. | Separar complexidade, risco, incerteza, custo e ambiente; determinar módulos aplicáveis. | Plano de execução com justificativa de cada etapa e limite global. |
-| 4. Pesquisa/reúso | Incerteza técnica, dependência nova ou falta de solução conhecida. | Consultar fontes e componentes; checar manutenção/licença; reutilizar pesquisa válida. | Decisões fundamentadas; dispensa registrada se conhecimento existente basta. |
-| 5. Produto/arquitetura | Especificação, pesquisa, infraestrutura e padrões. | Definir arquitetura, jornada/UI, dados, requisitos operacionais e ameaças; fatiar dependências. | PRD, ADRs, contratos e backlog; owner só resolve escolhas de negócio que faltam. |
-| 6. Provisionamento | Manifesto do projeto e plano. | Criar repositório, ambientes, storage, CI e configurações; validar acesso a integrações. | Projeto executável em ambiente isolado; chaves ausentes geram tarefa humana precisa. |
-| 7. Preparação | Ticket pronto, baseline e capacidade. | Selecionar executor/modelo, contexto e orçamento; reservar worktree/ownership; verificar ambiente. | Job reproduzível, lease e manifesto de contexto. |
-| 8. Implementação | Job e critérios. | Agente implementa unidade, testes pertinentes e documentação; scripts fazem operações mecânicas. | Candidato versionado e inventário de mudanças. |
-| 9. Verificação | Candidato e critérios independentes. | Estático, unitário, integração, jornada, navegador quando há UI, segurança e desempenho aplicáveis. | Evidência vinculada ao candidato; falha volta para correção dentro do teto. |
-| 10. Revisão crítica | Diff, critérios, evidências e histórico relevante. | Revisor independente avalia correção, escopo, segurança e manutenção; resolve achados materiais. | Revisão estruturada atual; mudança posterior invalida evidências afetadas. |
-| 11. Integração | Candidato aprovado. | Push, PR, checks remotos e merge; reconciliar timeout/resposta perdida e base atual. | PR integrada e SHA remoto observado; nenhum pedido adicional de publicação. |
-| 12. Build e staging | Commit integrado. | Construir artefato identificável, inventariar dependências e publicar staging; verificar migrações e jornada. | Release candidate com digest, URL, evidências e plano de recuperação. |
-| 13. Aceite humano | Somente critérios subjetivos/negociais ou release protegido. | Entregar resumo, previews e escolhas; pedir teste manual apenas do que a automação não pode decidir. | Aceite/rejeição/ajuste vinculado ao release, com identidade e data. |
-| 14. Produção | Candidato de staging e política de aceite satisfeita. | Promover mesmo artefato, aplicar migração autorizada, executar smoke e observar saúde. | Deployment confirmado ou recuperação/rollback; API retornar 200 não basta. |
-| 15. Operação/documentação | Release e telemetria. | Atualizar docs de uso/código, runbooks e decisões; monitorar serviço, backups, custos e falhas. | Produto operável, alertas úteis e trilha de entrega completa. |
-| 16. Aprendizado | Resultado real, correções, incidentes e avaliações. | Registrar fatos, propor regra, avaliar em tarefas distintas e ativar/reverter sob política. | Memória selecionável e melhoria medida; erros não viram regras globais automaticamente. |
+| 2. Grill | Demanda, contexto e decisões conhecidas. | Alta inteligência esclarece lacunas materiais com opções e exemplos; reutiliza respostas; evita perguntas técnicas substituíveis. | GrillRecord pronto para especificar; pendência humana bloqueia só o que depende dela. |
+| 3. Especificação | Demanda e contexto do negócio. | Agente estrutura jornada, funcionalidades, exclusões, marca, dados, integrações e critérios; agrupa decisões humanas. | Especificação versionada e acordo sobre intenção; ambiguidade material resolvida. |
+| 4. Triagem | Especificação e política do projeto. | Separar complexidade, risco, incerteza, custo e ambiente; determinar módulos aplicáveis. | Plano de execução com justificativa de cada etapa e limite global. |
+| 5. Pesquisa/reúso | Incerteza técnica, dependência nova ou falta de solução conhecida. | Consultar fontes e componentes; checar manutenção/licença; reutilizar pesquisa válida. | Decisões fundamentadas; dispensa registrada se conhecimento existente basta. |
+| 6. Produto/arquitetura | Especificação, pesquisa, infraestrutura e padrões. | Definir arquitetura, jornada/UI, dados, requisitos operacionais e ameaças; fatiar dependências. | PRD, ADRs, contratos e backlog; owner só resolve escolhas de negócio que faltam. |
+| 7. Provisionamento | Manifesto do projeto e plano. | Criar repositório, ambientes, storage, CI e configurações; validar acesso a integrações. | Projeto executável em ambiente isolado; chaves ausentes geram tarefa humana precisa. |
+| 8. Preparação | Ticket pronto, baseline e capacidade. | Selecionar executor/modelo, contexto e orçamento; reservar worktree/ownership; verificar ambiente. | Job reproduzível, lease e manifesto de contexto. |
+| 9. Implementação | Job e critérios. | Agente implementa unidade, testes pertinentes e documentação; scripts fazem operações mecânicas. | Candidato versionado e inventário de mudanças. |
+| 10. Prontidão de ambiente | Candidato e manifesto de dependências. | Declarar/reconciliar ferramentas, chaves, rede e identidades; testar no worker/destino; tentar alternativa equivalente antes de pedir ação humana. | EnvironmentEvidence; dependência manual inevitável com passos e retomada automática; integração externa realisticamente validada. |
+| 11. Verificação | Candidato e critérios independentes. | Estático, unitário, integração, jornada, navegador quando há UI, segurança e desempenho aplicáveis. | Evidência vinculada ao candidato; falha volta para correção dentro do teto. |
+| 12. Revisão crítica | Diff, critérios, evidências e histórico relevante. | Revisor independente avalia correção, escopo, segurança e manutenção; resolve achados materiais. | Revisão estruturada atual; mudança posterior invalida evidências afetadas. |
+| 13. Integração | Candidato aprovado. | Push, PR, checks remotos e merge; reconciliar timeout/resposta perdida e base atual. | PR integrada e SHA remoto observado; nenhum pedido adicional de publicação. |
+| 14. Build e staging | Commit integrado. | Construir artefato identificável, inventariar dependências e publicar staging; verificar migrações e jornada. | Release candidate com digest, URL, evidências e plano de recuperação. |
+| 15. Aceite humano | Somente critérios subjetivos/negociais ou release protegido. | Entregar resumo, previews e escolhas; pedir teste manual apenas do que a automação não pode decidir. | Aceite/rejeição/ajuste vinculado ao release, com identidade e data. |
+| 16. Produção | Candidato de staging e política de aceite satisfeita. | Promover mesmo artefato, aplicar migração autorizada, executar smoke e observar saúde. | Deployment confirmado ou recuperação/rollback; API retornar 200 não basta. |
+| 17. Operação/documentação | Release e telemetria. | Atualizar docs de uso/código, runbooks e decisões; monitorar serviço, backups, custos e falhas. | Produto operável, alertas úteis e trilha de entrega completa. |
+| 18. Aprendizado | Resultado real, correções, incidentes e avaliações. | Registrar fatos, propor regra, avaliar em tarefas distintas e ativar/reverter sob política. | Memória selecionável e melhoria medida; erros não viram regras globais automaticamente. |
+
 
 Documentação é produzida durante a execução e consolidada na entrega. Deve cobrir instalação, arquitetura/ADRs, funcionalidades, APIs, integrações, releases, operação, migrações, decisões e erros. Não exigir comentários que apenas repitam o código.
 
@@ -170,7 +179,7 @@ Documentação é produzida durante a execução e consolidada na entrega. Deve 
 | Sensível | Autenticação, dados, migrations, credenciais ou governança. | Controles reforçados, recuperação e verificador protegido; humano somente quando há decisão exclusiva ou exigência de política. |
 | Incidente | Regressão ou serviço degradado. | Diagnóstico e mitigação priorizados, escopo restrito, correção, pós-incidente e aprendizado. |
 
-Risco prevalece sobre conveniência: uma mudança de uma linha pode exigir controles fortes. O LLM pode sugerir a classe; fatos como caminhos de autenticação, migração e ambiente protegido impedem rebaixamento indevido. Controle de novas tentativas: proposta inicial de até três tentativas de implementação por ticket e um escalonamento de modelo; teto financeiro e prazo podem encerrar antes. Transporte e falha de solução têm contadores distintos.
+Risco prevalece sobre conveniência: uma mudança de uma linha pode exigir controles fortes. O LLM pode sugerir a classe; fatos como caminhos de autenticação, migração e ambiente protegido impedem rebaixamento indevido. Duas tentativas focais sem progresso sobre a mesma causa devolvem o diagnóstico ao planejador de alta inteligência, que revisa a estratégia e devolve o handoff ao executor econômico. Não encerrar toda a fábrica por uma falha local; transporte, solução e orçamento têm estados distintos. Aplicar a política de recuperação e continuidade do documento complementar.
 
 ## 6. Revisão das skills, scripts e agentes
 
@@ -178,16 +187,16 @@ Risco prevalece sobre conveniência: uma mudança de uma linha pode exigir contr
 | --- | --- |
 | 00 e 08 — aprendizado/evolução | Substituir cadência por prompt por gatilhos de evidência, recorrência e revisão periódica; separar evento, preferência explícita, hipótese e política ativa. |
 | 01 — reconhecimento | Entrada: identidade/base do projeto. Saída: mapa incremental e referências; evitar releitura integral a cada tarefa. |
-| 02 — planejamento | Produzir PRD/ADRs e critérios; escalonar profundidade; perguntas agrupadas e decisões de negócio antes de implementação. |
+| 02 — planejamento | Executar Grill antes da especificação, produzir PRD/ADRs e handoffs concretos; alta inteligência resolve arquitetura e agrupa decisões exclusivas do owner. |
 | 03 — roteamento | Resolver capacidade real do adaptador, disponibilidade do host, cota, custo e qualidade mínima; remover nomes fixos como autoridade. |
 | 04 — PIV | Executar contrato de etapa; ownership, heartbeat e handoff automáticos; stop/resume preservam identidade. |
 | 05 e 17 — validação | Scripts executam e resumem deterministicamente; IA interpreta falhas quando agrega valor. Não chamar LLM apenas para iniciar um comando. |
 | 06 — revisão | Revisor independente, achados estruturados, evidência e resolução. Diversidade de modelo é um recurso, sem promessa de eliminar viés. |
 | 07 — bootstrap | Instalação repetível por manifesto, dry-run, validação e rollback; nenhum setup manual recorrente por projeto. |
 | 09 — áudio | Adaptador opcional de entrada; ausência da GPU não bloqueia demandas textuais. |
-| 10 e 11 — pesquisa/reúso | Disparo por incerteza/novidade, fontes com validade e reúso de resultados; evitar pesquisa obrigatória sem propósito. |
-| 12 e 14 — benchmark/corridas | Atualização em segundo plano; experimentos separados de produção, teto próprio e comparação por tarefa aceita. |
-| 13 — Learning Pack | Resumo curto no marco relevante; aprofundamento sob demanda, sem interromper a cadeia de entrega. |
+| 10 e 11 — pesquisa/reúso | Disparo por incerteza/novidade, fontes com links canônicos, ledger, resumos/insights/aprendizados, validade e reúso de resultados; evitar pesquisa obrigatória sem propósito. |
+| 12 e 14 — benchmark/corridas | Atualização diária de releases/capacidades e Pareto em segundo plano; modelo fixado por job; experimentos separados de produção, teto próprio e comparação por tarefa aceita. |
+| 13 — Learning Pack | Learning Pack persistente com aprendizados e tópicos de discussão no marco relevante; leitura e aprofundamento opcionais, sem interromper a cadeia de entrega. |
 | 15 e 16 — conteúdo/visual | Carregar por necessidade; saída ligada a critérios de marca/qualidade e contratos comuns. |
 
 Scripts devem cuidar de provisionar, reservar, despachar, coletar, reconciliar, publicar e restaurar. Skills orientam julgamento dentro dessas etapas. Versões canônicas e espelhos continuam sincronizadas; manter regras de precedência e verificação de drift. O plano não ativa agora nenhuma regra inferida nem modifica skills de outras frentes.
@@ -244,18 +253,18 @@ IDs **HF** são uma extensão proposta e não substituem DF, RM, INFRA ou demand
 | HF-01 | Baseline reconciliada de capacidades, versões e roadmaps; registrar cobertura parcial e pendências de integração. | — | DF/RM/INFRA; DF-21 e DF-23 | Uma matriz distingue planejado, implementado, integrado e operacional com fontes; HTTP 404 e n8n têm diagnóstico/pendência explícitos. |
 | HF-02 | Spike, decisão do runtime e ADR de workflow híbrido; migração e reversão desenhadas. | HF-01 | DF-11 | Opção escolhida satisfaz cenários essenciais e custo operacional; alternativas e limites registrados. |
 | HF-03 | Plano de instalação aplicado ao controle cloud, storage e worker cloud isolado; verificar/reaproveitar infraestrutura. | HF-02 | INFRA-05–07, DF-08/13 | Reinício recupera controle; execução mínima funciona com notebook e servidor local indisponíveis. |
-| HF-04 | Contratos de etapas, manifesto de projeto, perfis e política determinística. | HF-02 | DF-01–04, DF-12 | Plano explica cada etapa executada/dispensada, rejeita transições ilegais e preserva versões. |
-| HF-05 | Integração do runtime: eventos, jobs, espera, reconciliação, orçamento, ownership e cancelamento. | HF-03, HF-04 | DF-10–13, DF-23 | Interrupção e duplicação de mensagens não perdem estado nem causam avanço indevido; store único por run. |
+| HF-04 | Contratos de etapas, Grill, ambiente/dependências manuais, manifesto de projeto, perfis e política determinística. | HF-02 | DF-01–04, DF-12 | Plano explica cada etapa executada/dispensada, rejeita transições ilegais e preserva versões. |
+| HF-05 | Integração do runtime: eventos, jobs, espera, reconciliação, orçamento, ownership, gatilhos automáticos, paralelismo por etapa/projeto e cancelamento. | HF-03, HF-04 | DF-10–13, DF-23 | Interrupção e duplicação de mensagens não perdem estado nem causam avanço indevido; store único por run. |
 | HF-06 | Modularizar catálogo 00–17, scripts de etapa e espelhos; remover gatilhos conflitantes. | HF-04 | Todas as skills | Catálogo completo aponta inputs, ações, outputs e política; nenhuma skill reduz os gates do supervisor. |
 | HF-07 | Adaptadores efetivos de IA/execução, despacho por host/cota e orçamento financeiro reconciliado. | HF-03, HF-05 | DF-12–14/17, monitor de uso; INFRA-10 | Adaptadores demonstrados em execução real; ausência de assinatura remota usa fallback permitido; saldo/limite/mês são distintos. |
-| HF-08 | Entrada de demandas, especificação e planejamento integrado; bootstrap de projeto novo. | HF-05, HF-06, HF-07 | Skills 01/02/07/09/10/11 | Conversa produz backlog, ambiente e critérios sem owner editar arquivos de fluxo. |
+| HF-08 | Entrada de demandas, Grill, especificação e planejamento integrado; bootstrap de projeto novo. | HF-05, HF-06, HF-07 | Skills 01/02/07/09/10/11 | Conversa produz backlog, ambiente e critérios sem owner editar arquivos de fluxo. |
 | HF-09 | Ciclo de implementação, qualidade e revisão independente por perfil. | HF-08 | DF-03/04/13/15/16/18/23 | Projeto novo e mudança em base existente geram candidatos verificáveis; falhas retornam ao loop limitado. |
-| HF-10 | Memória de projeto e aprendizado conectado aos runs; documentação contínua. | HF-06, HF-09 | DF-06/18/19; skills 00/08/13 | Retomada recebe contexto seletivo; regra reprovada não ativa; dados de projetos não se misturam. |
+| HF-10 | Memória persistente, autoaprendizado, pesquisa com fontes e Learning Pack do owner; documentação contínua. | HF-06, HF-09 | DF-06/18/19; skills 00/08/13 | Retomada recebe contexto seletivo; regra reprovada não ativa; dados de projetos não se misturam. |
 | HF-11 | Executor GitHub de push/PR/checks/merge e reconciliação remota. | HF-09 | DF-20, protocolo de entrega | Entrega confirma estado/SHA remoto; checks antigos, timeout e replay não liberam candidato errado. |
 | HF-12 | Build, staging, aceite, produção, smoke, rollback e backups exercitados. | HF-03, HF-11, INFRA-08, INFRA-09 | DF-20, Dokploy, política nova | Mesmo artefato é promovido; cliente pagante bloqueia produção sem aceite; restauração demonstrada. |
 | HF-13 | DarkHub central: fila real, HF/INFRA, decisões, comandos autenticados e observabilidade. | HF-05 | DF-21, RM-01–09, INFRA-11 | Owner acompanha e decide sem editar ledgers; comandar e observar usam o mesmo estado canônico. |
 | HF-14 | Telegram do owner e n8n Community simples, após verificar instalação existente. | HF-03, HF-05, HF-13 | Infraestrutura n8n cadastrada | Demanda e resposta retomam o run correto; reenvio é deduplicado; workflows mantidos/exportados pelos agentes. |
-| HF-15 | Ensaio completo de aceitação e documentação de operação da fábrica. | HF-07, HF-09, HF-10, HF-12, HF-13, HF-14 | Evals existentes ampliados | Todos os cenários finais abaixo demonstrados em fluxo real; limitações e custo registrados; owner só faz aceite exclusivo. |
+| HF-15 | Ensaio completo de aceitação e documentação de operação da fábrica. | HF-07, HF-09, HF-10, HF-12, HF-13, HF-14 | Evals existentes ampliados | Todos os cenários finais abaixo e G1–G8 do complemento demonstrados em fluxo real; limitações e custo registrados; owner só faz aceite exclusivo. |
 
 Caminho principal: **HF-01 → HF-02 → HF-03/04 → HF-05 → HF-06/07 → HF-08 → HF-09 → HF-11 → HF-12 → HF-15**. HF-10, HF-13 e HF-14 convergem no mesmo gate final. INFRA-08/09 não podem ficar para a onda 2 porque a primeira onda já entrega produção. INFRA-10 amplia capacidade; HF-03 garante que sua indisponibilidade não paralisa tudo.
 
@@ -299,7 +308,7 @@ Telegram pode usar bot direto com polling durável ou conector n8n, escolhendo u
 
 - Licenças adicionais: objetivo de US$ 0 para runtime self-hosted e n8n Community; recursos de nuvem, armazenamento e manutenção não são gratuitos.
 - Reserva de planejamento: **US$ 15–35/mês adicionais**, estimativa a cotar no HF-02/03, para capacidade cloud de execução e margem de storage/backup. Não é preço confirmado nem compra autorizada.
-- Começar com um job pesado cloud por vez e até dois jobs leves, medindo a capacidade real; expandir conforme fila e memória. Dez projetos recebem quotas e prioridades para impedir monopolização.
+- Dimensionar slots por recursos reais de cada worker/pool e conta; um pesado e dois leves são apenas hipótese para um host pequeno, nunca limite global fixo. Despachar em paralelo todos os jobs independentes que caibam na capacidade autorizada, inclusive desenvolvimento e testes simultâneos. Dez projetos recebem justiça de fila; expandir dentro do orçamento, sem compras implícitas.
 - A VPS existente de 4 GB não deve ser declarada capaz de sustentar dez aplicações completas sem medição. Separar controle, jobs e aplicações segundo carga; suspender previews ociosos e limitar retenção.
 - OpenRouter: saldo observado é uma fotografia, não recarga recorrente. Reservar orçamento por projeto/run/etapa, respeitar limite da chave e saldo, tratar custo desconhecido e parar/aguardar quando esgotado. Nenhuma compra automática de crédito é acrescentada.
 - Assinaturas: só contam como capacidade autônoma quando o adaptador funciona no host executor. Não pressupor que uma sessão de desktop possa ser movida para servidor ou substitua uma API. Na ausência, usar API econômica dentro do envelope ou enfileirar com motivo visível, sem depender de extrair sessões privadas.
@@ -318,6 +327,8 @@ O HF-15 deve usar execução real de agentes, efeitos GitHub reais e staging/pro
 8. Um projeto de demonstração marcado como já aceito por cliente pagante faz merge/staging automaticamente, mas bloqueia produção até aprovação autenticada do owner. A liberação promove o mesmo artefato aprovado.
 9. Um cenário de falha de release exercita recuperação compatível com dados; backup é restaurado. O run registra RPO/RTO observados e limitações.
 10. Aprendizado reprovado não entra no contexto; regra avaliada pode ser ativada e revertida; não há mistura de dados entre projetos. Atualização do workflow não corrompe um run na versão anterior.
+
+Os cenários G1–G8 de [HYBRID_AUTONOMY_REQUIREMENTS.md](HYBRID_AUTONOMY_REQUIREMENTS.md) são parte obrigatória deste gate, incluindo quatro desenvolvimentos e cinco testes concorrentes com capacidade suficiente.
 
 Metas iniciais: zero avanço indevido nos cenários conhecidos; rastreabilidade completa das etapas; nenhuma edição manual de fluxo durante a jornada; um pacote final de aceite por entrega comum, salvo dúvida material; custos medidos ou explicitamente desconhecidos. Medir duração, tentativas, minutos humanos e defeitos escapados. Não declarar autonomia geral para qualquer projeto com base num único ensaio.
 

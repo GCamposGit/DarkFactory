@@ -1,5 +1,7 @@
 # Roadmap Operacional do Projeto
 
+Revisão obrigatória do owner (08/09/2026): [requisitos de autonomia do workflow híbrido](HYBRID_AUTONOMY_REQUIREMENTS.md), com Grill, ambiente testado, dependências manuais guiadas, modelos atualizados diariamente, aprendizado/pesquisa e despacho paralelo automático. A matriz por módulo integra esses requisitos à onda 1 e preserva os IDs existentes.
+
 ## Procedimento obrigatório: planejar com alta inteligência, executar com modelos econômicos
 
 **Por instrução explícita do owner, toda funcionalidade, correção, script, skill ou configuração deve ser especificada e aprovada por um modelo de alta inteligência antes do handoff para um modelo econômico implementar e testar. Sempre.** A profundidade varia com a tarefa; a separação de papéis e o gate de prontidão não são opcionais. Lacunas de arquitetura, escopo ou critérios retornam ao planejador, sem serem resolvidas silenciosamente pelo implementador.

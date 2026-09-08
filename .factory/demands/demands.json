@@ -335,10 +335,10 @@
     "project_id": "darkfac",
     "title": "DarkHub 24/7 & Gateway de Webhooks Autônomos no Dokploy (INFRA-09 / DF-20/21)",
     "origin": "user",
-    "status": "planned",
+    "status": "completed",
     "item_type": "infrastructure",
-    "lifecycle_stage": "next_steps",
-    "horizon": "later",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
     "tags": [
       "user-demand",
       "infrastructure",
@@ -360,12 +360,19 @@
       "Listener de webhooks do GitHub ativo para triggers de validação autônoma"
     ],
     "suggested_files": [
+      "deploy/dokploy/Dockerfile.hub",
       "deploy/dokploy/docker-compose.hub.yml",
-      "hub/backend/webhooks.py"
+      "deploy/dokploy/env.hub.example",
+      "hub/backend/webhooks.py",
+      "hub/backend/main.py",
+      "hub/backend/api.py",
+      "hub/backend/service.py",
+      "hub/frontend/infra.js",
+      "tests/test_darkhub_cloud_gateway.py"
     ],
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-09-08T13:38:00.000000Z",
-    "updated_at": "2026-09-08T13:38:00.000000Z"
+    "updated_at": "2026-09-08T18:24:00.000000Z"
   }
 ]

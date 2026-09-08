@@ -1,6 +1,8 @@
 # Política obrigatória de planejamento e handoff
 
-Versão: 1.0 — 08/09/2026. Origem: instrução explícita do owner nesta sessão. Aplicável a toda funcionalidade, correção, refatoração, script, skill e configuração desenvolvida pela Dark Factory, inclusive alterações na própria fábrica.
+Versão: 1.1 — 08/09/2026. Origem: instrução explícita do owner nesta sessão. Aplicável a toda funcionalidade, correção, refatoração, script, skill e configuração desenvolvida pela Dark Factory, inclusive alterações na própria fábrica.
+
+Complemento obrigatório: [Grill, operação, modelos, continuidade e paralelismo](HYBRID_AUTONOMY_REQUIREMENTS.md). O mapa de alta inteligência por harness, atualização diária, esforço high/max e contingência Pareto desse documento substitui defaults históricos das skills durante o planejamento; HF-06/HF-07 implementarão a sincronização.
 
 ## Regra central
 
@@ -8,7 +10,7 @@ Versão: 1.0 — 08/09/2026. Origem: instrução explícita do owner nesta sess�
 
 A regra é permanente, não uma recomendação para tarefas complexas. Para tarefas simples, o plano pode ser curto, mas deve conter os mesmos elementos de prontidão. Um template genérico, um título de issue ou uma descrição de épico não substituem um plano específico revisado por modelo de alta inteligência.
 
-O papel de alta inteligência pode ser ocupado pelo Astra ou outro modelo qualificado no catálogo de capacidades. O implementador econômico é escolhido por capacidade demonstrada, custo, disponibilidade e cota; não fixar nomes comerciais como condição permanente. A ausência de um planejador qualificado suspende novos planejamentos, sem autorizar o implementador a assumir esse papel. Tickets já aprovados e vigentes continuam executáveis.
+O papel de alta inteligência pode ser ocupado pelo Astra ou outro modelo qualificado no catálogo de capacidades. O implementador econômico é escolhido por capacidade demonstrada, custo, disponibilidade e cota; não fixar nomes comerciais como condição permanente. Antes de suspender novos planejamentos por falta de cota, aplicar outras contas/hosts e a contingência Pareto qualificada para dependência bloqueante ou urgente. Somente ausência de rota qualificada dentro do orçamento autoriza waiting_budget; o implementador não assume o papel sem qualificação. Tickets já aprovados e vigentes continuam executáveis.
 
 ## Sequência obrigatória
 
@@ -26,7 +28,9 @@ Todo handoff deve declarar:
 - `ticket_id`, `parent_id`, objetivo, origem, versão do plano e documento canônico;
 - identidade do planejador, capacidade/nível, registro de aprovação do plano e referência à sessão/run que o produziu;
 - baseline de referência e hashes dos arquivos relevantes; dependências e artefatos que devem existir antes da execução;
-- inputs, outputs, interfaces, exemplos, invariantes e casos de erro;
+- GrillRecord ou referência à intenção já esclarecida; inputs, outputs, interfaces, exemplos, invariantes e casos de erro;
+- manifesto de ambiente, provas de integração externa e equivalência de simulação; passos de dependências humanas inevitáveis;
+- gatilhos automáticos, recursos, conflitos, paralelismo, sucessor e retomada; registro de pesquisa, memória e Learning Pack aplicáveis;
 - arquivos principais permitidos, arquivos apenas de leitura, non-goals e ordem de implementação;
 - decisões já tomadas e valores configuráveis; nenhuma dúvida arquitetural aberta no ticket liberado;
 - critérios de aceitação numerados e verificadores externos ao texto do implementador;
@@ -53,9 +57,11 @@ Após duas tentativas focais sem progresso sobre a mesma causa, ou imediatamente
 
 A aprovação do plano pelo modelo qualificado é diferente do aceite de produto pelo owner. Não criar uma aprovação humana adicional por ticket. Preservar a política de produção de clientes pagantes.
 
+Para funcionalidades de produção, `delivered` exige também prontidão operacional comprovada no ambiente-alvo; `merged` e `validated_in_simulation` não são substitutos. Falhas geram correção/replanejamento automáticos; só dependências realmente humanas ou ausência de rota financiável aguardam ação externa, preservando esperas técnicas com recuperação explícita.
+
 ## Handoffs preparados
 
 - [HF-01 — baseline e reconciliação](handoffs/HF-01.md): seis tickets, com revisão final do pacote por alta inteligência.
 - [HF-02 — experimento e decisão de runtime](handoffs/HF-02.md): oito tickets; implementação/medição econômicas, decisão arquitetural final de alta inteligência.
 
-Os handoffs estão especificados para execução sequencial, condicionada às dependências e ao preflight de cada sessão. Eles não autorizam iniciar o desenvolvimento nesta sessão de planejamento. O registro estruturado está em `.factory/planning/hf01-hf02-handoffs.json`; seu status descreve o plano, não a conclusão da funcionalidade.
+Os handoffs estão especificados para execução por grafo, com paralelismo onde dependências e ownership permitirem, condicionada às dependências e ao preflight de cada sessão. Eles não autorizam iniciar o desenvolvimento nesta sessão de planejamento. O registro estruturado está em `.factory/planning/hf01-hf02-handoffs.json`; seu status descreve o plano, não a conclusão da funcionalidade.
