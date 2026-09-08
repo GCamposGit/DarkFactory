@@ -172,7 +172,7 @@ class TaskBenchmarkRouter:
             if not local_models:
                 local_models = all_models[:3]
 
-            best_local = max(local_models, key=lambda m: m.get_domain_score(domain_key))
+            best_local = max(local_models, key=lambda m: (m.get_domain_score(domain_key) or 0.0))
             if detected_domain in [BenchmarkDomain.FORMAL_REASONING, BenchmarkDomain.LEGAL_CONTRACT] or (complexity in ["high", "critical"] and detected_domain == BenchmarkDomain.CODING):
                 deep_opt = next((m for m in local_models if "deep" in m.model_id), None)
                 if deep_opt:
@@ -208,18 +208,18 @@ class TaskBenchmarkRouter:
 
         # Select optimal model for domain & complexity
         if complexity == "critical":
-            best_model = max(domain_frontier, key=lambda m: m.get_domain_score(domain_key))
+            best_model = max(domain_frontier, key=lambda m: (m.get_domain_score(domain_key) or 0.0))
         elif complexity == "high":
             # Best quality-weighted efficiency
-            candidates = [m for m in domain_frontier if m.get_domain_score(domain_key) >= 85.0]
+            candidates = [m for m in domain_frontier if (m.get_domain_score(domain_key) or 0.0) >= 85.0]
             if not candidates:
                 candidates = domain_frontier
-            best_model = max(candidates, key=lambda m: (m.get_domain_score(domain_key) ** 2) / max(m.cost_per_task, 0.001))
+            best_model = max(candidates, key=lambda m: (((m.get_domain_score(domain_key) or 0.0) ** 2) / max(m.cost_per_task, 0.001)))
         elif complexity == "medium":
-            candidates = [m for m in domain_frontier if m.get_domain_score(domain_key) >= 80.0]
+            candidates = [m for m in domain_frontier if (m.get_domain_score(domain_key) or 0.0) >= 80.0]
             if not candidates:
                 candidates = domain_frontier
-            best_model = max(candidates, key=lambda m: m.get_domain_score(domain_key) / max(m.cost_per_task, 0.001))
+            best_model = max(candidates, key=lambda m: (m.get_domain_score(domain_key) or 0.0) / max(m.cost_per_task, 0.001))
         else:
             best_model = min(domain_frontier, key=lambda m: m.cost_per_task)
 

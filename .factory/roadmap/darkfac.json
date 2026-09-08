@@ -1,0 +1,220 @@
+{
+  "schema_version": "1",
+  "project_id": "darkfac",
+  "title": "Roadmap Operacional do Projeto",
+  "items": [
+    {
+      "id": "RM-01",
+      "project_id": "darkfac",
+      "title": "Inventário formal das fontes canônicas e regras de precedência",
+      "description": "Registrar quais fontes operacionais alimentam o roadmap e como conflitos de precedência são tratados.",
+      "item_type": "operations",
+      "lifecycle_stage": "foundations",
+      "delivery_status": "planned",
+      "horizon": "now",
+      "confidence": "unknown",
+      "dependencies": [],
+      "tags": ["roadmap", "fontes", "governança"],
+      "completion_criteria": ["Inventário versionado e política de precedência publicada."],
+      "source_refs": [
+        {
+          "source_id": "approved-roadmap",
+          "source_kind": "document",
+          "label": "Roadmap operacional aprovado — RM-01",
+          "locator": ".factory/roadmap/darkfac.json#RM-01",
+          "produced_by": "project-owner"
+        }
+      ]
+    },
+    {
+      "id": "RM-02",
+      "project_id": "darkfac",
+      "title": "Contratos Pydantic e fixtures do grafo",
+      "description": "Definir os contratos tipados das entidades, relações, proveniência e fixtures determinísticas.",
+      "item_type": "infrastructure",
+      "lifecycle_stage": "foundations",
+      "delivery_status": "planned",
+      "horizon": "now",
+      "confidence": "unknown",
+      "dependencies": [{"item_id": "RM-01", "type": "requires"}],
+      "tags": ["contratos", "pydantic", "fixtures"],
+      "completion_criteria": ["Contratos rejeitam dados inválidos e fixtures cobrem o grafo base."],
+      "source_refs": [
+        {
+          "source_id": "approved-roadmap",
+          "source_kind": "document",
+          "label": "Roadmap operacional aprovado — RM-02",
+          "locator": ".factory/roadmap/darkfac.json#RM-02",
+          "produced_by": "project-owner"
+        }
+      ]
+    },
+    {
+      "id": "RM-03",
+      "project_id": "darkfac",
+      "title": "Compilador, normalização e resolução de identidade",
+      "description": "Compilar fontes reais em uma representação normalizada, preservando identidade e proveniência.",
+      "item_type": "feature",
+      "lifecycle_stage": "execution",
+      "delivery_status": "planned",
+      "horizon": "now",
+      "confidence": "unknown",
+      "dependencies": [{"item_id": "RM-02", "type": "requires"}],
+      "tags": ["compiler", "normalização", "identidade"],
+      "completion_criteria": ["O mesmo conjunto de fontes produz o mesmo snapshot lógico."],
+      "source_refs": [
+        {
+          "source_id": "approved-roadmap",
+          "source_kind": "document",
+          "label": "Roadmap operacional aprovado — RM-03",
+          "locator": ".factory/roadmap/darkfac.json#RM-03",
+          "produced_by": "project-owner"
+        }
+      ]
+    },
+    {
+      "id": "RM-04",
+      "project_id": "darkfac",
+      "title": "Validador de ciclos, conflitos, órfãos e evidências",
+      "description": "Detectar inconsistências do grafo e impedir que o painel escolha silenciosamente uma versão conflitante.",
+      "item_type": "quality",
+      "lifecycle_stage": "execution",
+      "delivery_status": "planned",
+      "horizon": "now",
+      "confidence": "unknown",
+      "dependencies": [{"item_id": "RM-03", "type": "requires"}],
+      "tags": ["validação", "ciclos", "conflitos", "evidência"],
+      "completion_criteria": ["Ciclos causais, conflitos, órfãos e conclusões sem evidência aparecem como issues."],
+      "source_refs": [
+        {
+          "source_id": "approved-roadmap",
+          "source_kind": "document",
+          "label": "Roadmap operacional aprovado — RM-04",
+          "locator": ".factory/roadmap/darkfac.json#RM-04",
+          "produced_by": "project-owner"
+        }
+      ]
+    },
+    {
+      "id": "RM-05",
+      "project_id": "darkfac",
+      "title": "Snapshot store, cache e API somente leitura",
+      "description": "Publicar snapshots imutáveis com cache aquecido, hash, fontes consultadas e indisponibilidades explícitas.",
+      "item_type": "infrastructure",
+      "lifecycle_stage": "execution",
+      "delivery_status": "planned",
+      "horizon": "now",
+      "confidence": "unknown",
+      "dependencies": [
+        {"item_id": "RM-03", "type": "requires"},
+        {"item_id": "RM-04", "type": "requires"}
+      ],
+      "tags": ["snapshot", "cache", "api", "proveniência"],
+      "completion_criteria": ["API read-only preserva o último snapshot quando uma fonte fica indisponível."],
+      "source_refs": [
+        {
+          "source_id": "approved-roadmap",
+          "source_kind": "document",
+          "label": "Roadmap operacional aprovado — RM-05",
+          "locator": ".factory/roadmap/darkfac.json#RM-05",
+          "produced_by": "project-owner"
+        }
+      ]
+    },
+    {
+      "id": "RM-06",
+      "project_id": "darkfac",
+      "title": "Painel do Hub com visão geral, filtros e drawer",
+      "description": "Exibir a projeção do roadmap por projeto, com visão geral, filtros acessíveis, tabela equivalente e detalhe de proveniência.",
+      "item_type": "feature",
+      "lifecycle_stage": "execution",
+      "delivery_status": "planned",
+      "horizon": "now",
+      "confidence": "unknown",
+      "dependencies": [{"item_id": "RM-05", "type": "requires"}],
+      "tags": ["hub", "painel", "acessibilidade", "mvp"],
+      "completion_criteria": ["A troca de projeto não vaza itens e a visão tabular é navegável por teclado."],
+      "source_refs": [
+        {
+          "source_id": "approved-roadmap",
+          "source_kind": "document",
+          "label": "Roadmap operacional aprovado — RM-06",
+          "locator": ".factory/roadmap/darkfac.json#RM-06",
+          "produced_by": "project-owner"
+        }
+      ]
+    },
+    {
+      "id": "RM-07",
+      "project_id": "darkfac",
+      "title": "Linha do tempo, grafo de dependências e tabela acessível",
+      "description": "Completar as visões temporais e de dependências com progressive disclosure e alternativa tabular equivalente.",
+      "item_type": "feature",
+      "lifecycle_stage": "next_steps",
+      "delivery_status": "planned",
+      "horizon": "next",
+      "confidence": "unknown",
+      "dependencies": [{"item_id": "RM-06", "type": "requires"}],
+      "tags": ["timeline", "grafo", "teclado"],
+      "completion_criteria": ["As três visões representam o mesmo snapshot e o grafo destaca caminho crítico."],
+      "source_refs": [
+        {
+          "source_id": "approved-roadmap",
+          "source_kind": "document",
+          "label": "Roadmap operacional aprovado — RM-07",
+          "locator": ".factory/roadmap/darkfac.json#RM-07",
+          "produced_by": "project-owner"
+        }
+      ]
+    },
+    {
+      "id": "RM-08",
+      "project_id": "darkfac",
+      "title": "Atualização incremental, telemetria e testes de escala",
+      "description": "Tornar o painel operacionalmente confiável para mudanças incrementais, observabilidade e grafos densos.",
+      "item_type": "operations",
+      "lifecycle_stage": "next_steps",
+      "delivery_status": "planned",
+      "horizon": "later",
+      "confidence": "unknown",
+      "dependencies": [
+        {"item_id": "RM-05", "type": "requires"},
+        {"item_id": "RM-07", "type": "requires"}
+      ],
+      "tags": ["incremental", "telemetria", "escala"],
+      "completion_criteria": ["500 itens e 1.500 relações atendem ao orçamento de latência definido."],
+      "source_refs": [
+        {
+          "source_id": "approved-roadmap",
+          "source_kind": "document",
+          "label": "Roadmap operacional aprovado — RM-08",
+          "locator": ".factory/roadmap/darkfac.json#RM-08",
+          "produced_by": "project-owner"
+        }
+      ]
+    },
+    {
+      "id": "RM-09",
+      "project_id": "darkfac",
+      "title": "Histórico de snapshots e comparação entre versões",
+      "description": "Evolução opcional para consultar versões anteriores e comparar mudanças do roadmap.",
+      "item_type": "feature",
+      "lifecycle_stage": "future",
+      "delivery_status": "planned",
+      "horizon": "exploratory",
+      "confidence": "unknown",
+      "dependencies": [{"item_id": "RM-08", "type": "requires"}],
+      "tags": ["histórico", "diff", "evolução"],
+      "completion_criteria": ["Comparações preservam snapshots anteriores e sua proveniência."],
+      "source_refs": [
+        {
+          "source_id": "approved-roadmap",
+          "source_kind": "document",
+          "label": "Roadmap operacional aprovado — RM-09",
+          "locator": ".factory/roadmap/darkfac.json#RM-09",
+          "produced_by": "project-owner"
+        }
+      ]
+    }
+  ]
+}

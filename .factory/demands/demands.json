@@ -1,0 +1,249 @@
+[
+  {
+    "id": "USR-09",
+    "project_id": "darkfac",
+    "title": "Criar mecanismo de Grill de demandas/especificações",
+    "origin": "user",
+    "status": "completed",
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand",
+      "feature"
+    ],
+    "problem_statement": "O módulo do workflow autonomo da Dark Factory está funcionando bem, mas após a criação de uma demanda genérica pelo usuário, o sistema inicia o planejamento e sem estressar com o usuário os objetivos reais, detalhes de features e limites que devem fazer parte da funcionalidade ou sistema demandado. As melhores práticas indicam que antes de qualquer sistema autonomo iniciar o desenvolvimento, uma etapa eficiente de Q&A com o originador da demanda é essenial para evitar retrabalho e frustração. Integrar este conceito ao fluxo, seguindo as absolutas melhores práticas de fabricas de software apoiada por agentes state of the art.\n\n[Refinamentos acordados no Grill]:\n- Não criar novos frameworks ou acoplamentos visuais; focar na lógica de negócios headless e testes.\n- Teste de integração e reachability headless via pytest exercendo CLI e endpoints HTTP.\n- Degradar graciosamente para script determinístico local a custo zero ($0.00).",
+    "core_journey": [
+      "Usuário digita/dita demanda na interface do sistema ou agente de código preferido;",
+      "Qualquer nível de detalhes pode ser aceito, ainda que faltem especificações e regras;",
+      "Tiket é aberto no backlog imediatamente;",
+      "Sistema dispara uma besquisa básica e muito eficiente sobre os temas e lê a documentação do projeto para identificar o que já existe (leitura de documentação, não revisão de códig) - aqui o objetivo é apenas se educar sobre o assunto;",
+      "Sistema gera perguntas de esclarecimento essenciais para o usuário, não é um questionário super extenso, e se o usuário ignorar ou respnder superficialmente ok. Sempre oferecer alternativas mais próvaveis pré-preenchidas e deixar campo aberto para texto de input;",
+      "Ticket é atualizado no backlog com os detalhes finais refinados pelo usuáiro;"
+    ],
+    "non_goals": [
+      "Não faremos o planejamento de implantação nesta etapa;",
+      "Não é para reinventar a roda, utilize todas as componentes de skills e regras já existentes, só melhore e detalhe o que já existe para deixar ideal",
+      "Não criar novos frameworks ou acoplamentos visuais; focar na lógica de negócios headless e testes."
+    ],
+    "reachability_contract": "python -m pytest tests/test_criar_mecanismo_de_grill_.py -v",
+    "acceptance_criteria": [
+      "Demanda tem os detalhes suficientes para próxima etapa do pipeline de desenvolvimento",
+      "Tempo de interação com o usuário é reduzido ao mínimo necessário",
+      "Teste headless de reachability",
+      "Validação alinhada no Grill: Teste de integração e reachability headless via pytest exercendo CLI e endpoints HTTP.",
+      "Tolerância a falha acordada: Degradar graciosamente para script determinístico local a custo zero ($0.00)."
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-09-06T23:01:03.548591Z",
+    "updated_at": "2026-09-07T01:46:08.663519Z"
+  },
+  {
+    "id": "USR-AUTO",
+    "project_id": "darkfac",
+    "title": "Bug em inicialização do terminal",
+    "origin": "user",
+    "status": "completed",
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand",
+      "feature"
+    ],
+    "problem_statement": "\"A primeira leitura falhou por um erro de inicialização do terminal, não do projeto. Vou repetir em chamadas menores e seguir com o inventário.\" Esta frase aparece em quase todos os inicios de execução. Identificar a causa raiz e corrigir definitivamente o problema. Atualizar Skills e workflow.\n\n[Refinamentos acordados no Grill]:\n- Configuração do ambiente de terminal não está sendo respeitada\n- Atualizar o script de inicialização para tratar erros de terminal\n- Não sei a resposta",
+    "core_journey": [],
+    "non_goals": [
+      "Não modificar arquivos fora do escopo desta demanda"
+    ],
+    "reachability_contract": "python -m pytest tests/test_bug_em_inicializa_o_do_te.py -v",
+    "acceptance_criteria": [
+      "A funcionalidade descrita em 'Bug em inicialização do terminal' é validada sem regressões"
+    ],
+    "suggested_files": [
+      "core/harness/terminal_env.py",
+      "scripts/init_terminal.ps1",
+      "tests/test_bug_em_inicializa_o_do_te.py",
+      ".agents/skills/01-prime-intelligence/SKILL.md",
+      ".agents/skills/04-autonomous-piv-loop/SKILL.md",
+      ".agents/rules/AGENTS.md",
+      ".agents/rules/GEMINI.md"
+    ],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-09-07T01:46:22.666182Z",
+    "updated_at": "2026-09-07T03:45:00.000000Z"
+  },
+  {
+    "id": "USR-12",
+    "project_id": "darkfac",
+    "title": "Controle de créditos de API",
+    "origin": "user",
+    "status": "completed",
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand",
+      "feature"
+    ],
+    "problem_statement": "Nova feature no Hub para controle de créditos de API das contas utilizadas na DarkFactory. Criar placeholder para todas as contas planejadas e conectar as que já estão ativas e operacionais: Open Router e Open AI API. Mostar sempre o gasto no mês corrente em $ e o crédito disponível em $; criar link apontando para o site oficial https://platform.openai.com/home e https://openrouter.ai/activity https://openrouter.ai/settings/credits",
+    "core_journey": [
+      "Bloco com cards por API na home do Hub",
+      "Manter atualizado quando usuário der refresh ou sempre ao acessar",
+      "Click nos links levam ao site oficial, garantir que valores sempre estajam batendo"
+    ],
+    "non_goals": [
+      "Não confundir com o controle de % de crédito das contas",
+      "Não usar gastos e créditos de API para seletor de modelos"
+    ],
+    "reachability_contract": "python -m pytest tests/test_controle_de_cr_ditos_de_a.py -v",
+    "acceptance_criteria": [
+      "Site com sessão nova e funcional com valores em $ corretos e atualizados",
+      "Links funcionais apontando para o lugar certo",
+      "Teste headless de reachability"
+    ],
+    "suggested_files": [
+      "core/usage/api_credits.py",
+      "hub/backend/api.py",
+      "hub/backend/service.py",
+      "hub/frontend/credits.js",
+      "hub/frontend/index.html",
+      "tests/test_controle_de_cr_ditos_de_a.py"
+    ],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-09-06T23:43:27.948805Z",
+    "updated_at": "2026-09-07T01:59:00.000000Z"
+  },
+  {
+    "id": "USR-13",
+    "project_id": "darkfac",
+    "title": "Implementar execução de testes com sub-agentes especializados",
+    "origin": "user",
+    "status": "completed",
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand",
+      "feature"
+    ],
+    "problem_statement": "A execução de testes atualmente não segue melhores práticas de uso de sub-agentes dedicados para execução, monitoramento e resumo de testes. Necessário implementar uma arquitetura onde agentes baratos e eficientes executem testes, interpretam resultados e reportam apenas informações relevantes ao agente que solicitou.",
+    "core_journey": [
+      "Agente ou sub-agente identifica necessidade de execução de testes",
+      "Sub-agente especializado executa testes, monitora e resume resultados relevantes"
+    ],
+    "non_goals": [
+      "Alterar a infraestrutura de execução de testes existente",
+      "Implementar novos frameworks de testes",
+      "Mudar o comportamento de agentes já existentes além do escopo de testes"
+    ],
+    "reachability_contract": "python -m pytest tests/test_implementar_execu_o_de_te.py -v",
+    "acceptance_criteria": [
+      "Sub-agentes recebem instruções específicas para execução de testes",
+      "Agentes que solicitam testes recebem apenas resultados relevantes",
+      "Implementação segue padrões de melhores práticas de execução de testes",
+      "Integração com workflows atuais e skills existentes"
+    ],
+    "suggested_files": [
+      "core/harness/test_subagent.py",
+      "hub/backend/api.py",
+      "hub/backend/service.py",
+      ".agents/skills/17-specialized-test-subagent/SKILL.md",
+      "tests/test_implementar_execu_o_de_te.py"
+    ],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-09-07T02:25:02.316930Z",
+    "updated_at": "2026-09-07T02:48:00.000000Z"
+  },
+  {
+    "id": "USR-14",
+    "project_id": "darkfac",
+    "title": "Ajustar link para Canalleto na home para iniciar .py antes de redirecionar para localhost",
+    "origin": "user",
+    "status": "completed",
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand",
+      "feature"
+    ],
+    "problem_statement": "O link para Canalleto na página inicial não está iniciando o arquivo .py necessário antes de redirecionar para o localhost, causando falha no processo de navegação.",
+    "core_journey": [
+      "Usuário clica no link para Canalleto na home",
+      "Sistema inicia o arquivo .py correspondente e depois redireciona para localhost"
+    ],
+    "non_goals": [
+      "Não alterar a estrutura do Hub",
+      "Não modificar outros links da home",
+      "Não incluir novas funcionalidades além do redirecionamento"
+    ],
+    "reachability_contract": "python -m pytest tests/test_ajustar_link_para_canalle.py -v",
+    "acceptance_criteria": [
+      "Link para Canalleto inicia o arquivo .py antes de redirecionar",
+      "Redirecionamento para localhost é realizado corretamente após a inicialização do .py",
+      "Nenhum erro ocorre durante o processo de navegação"
+    ],
+    "suggested_files": [
+      "hub/backend/models.py",
+      "hub/backend/service.py",
+      "hub/backend/api.py",
+      "hub/data/services.json",
+      "hub/data/default_services.json",
+      "hub/frontend/app.js",
+      "run_canaletto.py",
+      "tests/test_ajustar_link_para_canalle.py"
+    ],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-09-07T10:03:32.274806Z",
+    "updated_at": "2026-09-07T10:18:00.000000Z"
+  },
+  {
+    "id": "USR-15",
+    "project_id": "darkfac",
+    "title": "Adicionar cards de infraestrutura no Hub",
+    "origin": "user",
+    "status": "completed",
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand",
+      "feature"
+    ],
+    "problem_statement": "A falta de visualização centralizada dos recursos de infraestrutura (PCs, Hetzner, Tailscale, Docker, Dokploy e outros) no Hub dificulta a gestão e monitoramento eficiente dos recursos disponíveis.\n\n[Refinamentos acordados no Grill]:\n- Criar uma API REST separada para fornecer dados dos cards, mantendo o core headless e determinístico\n- Apenas exibir dados de infraestrutura, sem permitir interações ou gerenciamento\n- Criar novos testes específicos para os cards de infraestrutura",
+    "core_journey": [
+      "Usuário acessa o Hub",
+      "Sistema exibe cards de infraestrutura configurados"
+    ],
+    "non_goals": [
+      "Criar novas funcionalidades de gerenciamento de infraestrutura",
+      "Implementar autenticação e autorização para acesso aos cards"
+    ],
+    "reachability_contract": "python -m pytest tests/test_adicionar_cards_de_infrae.py -v",
+    "acceptance_criteria": [
+      "Cards de infraestrutura são exibidos corretamente no Hub",
+      "Os cards são atualizados conforme a disponibilidade dos recursos",
+      "A interface é responsiva e acessível",
+      "Links corretos para acesso dos sistemas em cada card testados"
+    ],
+    "suggested_files": [
+      "core/infra/cards.py",
+      "hub/backend/service.py",
+      "hub/backend/api.py",
+      "hub/frontend/infra.js",
+      "hub/frontend/index.html",
+      "tests/test_adicionar_cards_de_infrae.py"
+    ],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-09-08T03:12:48.051694Z",
+    "updated_at": "2026-09-08T04:27:00.000000Z"
+  }
+]

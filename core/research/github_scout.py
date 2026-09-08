@@ -6,12 +6,19 @@ Filters by license permissiveness, star count, recent activity, and test coverag
 
 import os
 import json
-import urllib.request
 import urllib.parse
+from pathlib import Path
 from typing import List, Dict, Any, Optional
-from datetime import datetime
 
 from core.research.models import ResearchSource, LicenseType
+from core.research.transport import (
+    ResearchSearchResult,
+    ResearchTransport,
+    TransportError,
+    TransportErrorKind,
+    TransportFailure,
+    get_ssl_context,
+)
 
 GITHUB_API_URL = "https://api.github.com"
 
@@ -23,25 +30,23 @@ COPYLEFT_LICENSES = {
 }
 
 
-def get_ssl_context():
-    """Returns a secure SSL context with certifi, or fallback."""
-    import ssl
-    try:
-        import certifi
-        return ssl.create_default_context(cafile=certifi.where())
-    except Exception:
-        try:
-            return ssl.create_default_context()
-        except Exception:
-            return ssl._create_unverified_context()
-
-
 class GitHubScout:
     """Headless scout for open-source codebases and reusable components."""
 
-    def __init__(self, token: Optional[str] = None, timeout_sec: int = 15):
+    def __init__(
+        self,
+        token: Optional[str] = None,
+        timeout_sec: float = 15,
+        *,
+        transport: ResearchTransport | None = None,
+        ca_bundle: str | Path | None = None,
+    ):
         self.token = token or os.environ.get("GITHUB_TOKEN")
         self.timeout_sec = timeout_sec
+        self.transport = transport or ResearchTransport(
+            timeout_sec=timeout_sec,
+            ca_bundle=ca_bundle,
+        )
 
     def _get_headers(self) -> Dict[str, str]:
         headers = {
@@ -102,13 +107,13 @@ class GitHubScout:
         min_stars: int = 30,
         limit: int = 5,
         permissive_only: bool = False,
-    ) -> List[ResearchSource]:
+    ) -> ResearchSearchResult[ResearchSource]:
         """
         Searches GitHub for top repositories matching the criteria.
         """
         clean_query = query.strip()
         if not clean_query:
-            return []
+            return ResearchSearchResult.empty()
 
         search_terms = [clean_query]
         if language:
@@ -124,17 +129,32 @@ class GitHubScout:
             "per_page": limit * 2 if permissive_only else limit,
         }
         url = f"{GITHUB_API_URL}/search/repositories?{urllib.parse.urlencode(params)}"
-        req = urllib.request.Request(url, headers=self._get_headers())
-
         try:
-            ctx = get_ssl_context()
-            with urllib.request.urlopen(req, timeout=self.timeout_sec, context=ctx) as resp:
-                data = json.loads(resp.read().decode("utf-8"))
-                items = data.get("items", [])
-                return self._process_repo_items(items, permissive_only=permissive_only, limit=limit)
-        except Exception as e:
-            print(f"[WARN] GitHub repository search failed for '{query}': {e}")
-            return []
+            response = self.transport.get(url, headers=self._get_headers())
+            data = json.loads(response.body.decode("utf-8"))
+            if not isinstance(data, dict) or not isinstance(data.get("items"), list):
+                return ResearchSearchResult.failed(
+                    TransportFailure(
+                        TransportErrorKind.INVALID_RESPONSE,
+                        "GitHub returned an invalid repository search response",
+                    )
+                )
+            sources = self._process_repo_items(
+                data["items"],
+                permissive_only=permissive_only,
+                limit=limit,
+            )
+        except TransportError as exc:
+            return ResearchSearchResult.failed(exc.failure)
+        except (AttributeError, TypeError, ValueError, UnicodeDecodeError, json.JSONDecodeError):
+            return ResearchSearchResult.failed(
+                TransportFailure(
+                    TransportErrorKind.INVALID_RESPONSE,
+                    "GitHub returned malformed JSON",
+                )
+            )
+
+        return ResearchSearchResult(sources)
 
     def _process_repo_items(
         self, items: List[Dict[str, Any]], permissive_only: bool, limit: int

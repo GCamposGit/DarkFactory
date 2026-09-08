@@ -4,44 +4,49 @@ Searches the public arXiv API for recent scientific papers, architectures, and t
 Uses Python's standard library (urllib + xml.etree.ElementTree) for zero-dependency reliability.
 """
 
-import urllib.request
 import urllib.parse
 import xml.etree.ElementTree as ET
-from typing import List, Optional
-from datetime import datetime
+from pathlib import Path
+from typing import List
 
 from core.research.models import ResearchSource, LicenseType
+from core.research.transport import (
+    ResearchSearchResult,
+    ResearchTransport,
+    TransportError,
+    TransportErrorKind,
+    TransportFailure,
+    get_ssl_context,
+)
 
-ARXIV_API_URL = "http://export.arxiv.org/api/query"
+ARXIV_API_URL = "https://export.arxiv.org/api/query"
 ATOM_NS = {"atom": "http://www.w3.org/2005/Atom"}
-
-
-def get_ssl_context():
-    import ssl
-    try:
-        import certifi
-        return ssl.create_default_context(cafile=certifi.where())
-    except Exception:
-        try:
-            return ssl.create_default_context()
-        except Exception:
-            return ssl._create_unverified_context()
 
 
 class ArxivClient:
     """Headless client for querying scientific preprints on arXiv."""
 
-    def __init__(self, timeout_sec: int = 15):
+    def __init__(
+        self,
+        timeout_sec: float = 15,
+        *,
+        transport: ResearchTransport | None = None,
+        ca_bundle: str | Path | None = None,
+    ):
         self.timeout_sec = timeout_sec
+        self.transport = transport or ResearchTransport(
+            timeout_sec=timeout_sec,
+            ca_bundle=ca_bundle,
+        )
 
-    def search_papers(self, query: str, max_results: int = 5) -> List[ResearchSource]:
+    def search_papers(self, query: str, max_results: int = 5) -> ResearchSearchResult[ResearchSource]:
         """
         Queries arXiv for papers matching the terms.
-        Returns a list of structured ResearchSource objects.
+        Returns a list-compatible result with structured empty/failure status.
         """
         clean_query = query.strip()
         if not clean_query:
-            return []
+            return ResearchSearchResult.empty()
 
         # Formulate arXiv query string
         params = {
@@ -52,30 +57,31 @@ class ArxivClient:
             "sortOrder": "descending",
         }
         url = f"{ARXIV_API_URL}?{urllib.parse.urlencode(params)}"
-        req = urllib.request.Request(
-            url,
-            headers={"User-Agent": "DarkFac-ResearchEngine/1.0 (Autonomous-Agent-Pipeline)"}
-        )
-
         try:
-            ctx = get_ssl_context()
-            with urllib.request.urlopen(req, timeout=self.timeout_sec, context=ctx) as resp:
-                xml_data = resp.read()
-                return self._parse_atom_feed(xml_data)
-        except Exception as e:
-            # Resilient fallback: return empty list on network or parsing failure
-            print(f"[WARN] arXiv search failed for '{query}': {e}")
-            return []
+            response = self.transport.get(
+                url,
+                headers={"User-Agent": "DarkFac-ResearchEngine/1.0 (Autonomous-Agent-Pipeline)"},
+            )
+            sources = self._parse_atom_feed(response.body)
+        except TransportError as exc:
+            return ResearchSearchResult.failed(exc.failure)
+        except ET.ParseError:
+            return ResearchSearchResult.failed(
+                TransportFailure(
+                    TransportErrorKind.INVALID_RESPONSE,
+                    "arXiv returned malformed Atom XML",
+                )
+            )
 
-
+        return ResearchSearchResult(sources)
 
     def _parse_atom_feed(self, xml_bytes: bytes) -> List[ResearchSource]:
         """Parses Atom XML feed returned by arXiv API."""
+        root = ET.fromstring(xml_bytes)
+        if root.tag != "{http://www.w3.org/2005/Atom}feed":
+            raise ET.ParseError("unexpected Atom root")
+
         sources: List[ResearchSource] = []
-        try:
-            root = ET.fromstring(xml_bytes)
-        except ET.ParseError:
-            return sources
 
         for entry in root.findall("atom:entry", ATOM_NS):
             id_elem = entry.find("atom:id", ATOM_NS)

@@ -3,8 +3,57 @@ Data models and schemas with strict Pydantic v2 typing for DarkHub.
 """
 
 from enum import Enum
+import re
 from typing import List, Optional, Dict, Any
-from pydantic import BaseModel, Field, HttpUrl
+import urllib.parse
+from pydantic import BaseModel, Field, field_validator
+
+COLOR_HEX_REGEX = re.compile(r"^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$")
+ID_SLUG_REGEX = re.compile(r"^[a-zA-Z0-9_-]{1,100}$")
+
+
+def validate_safe_url(v: str) -> str:
+    if not isinstance(v, str):
+        raise ValueError("URL must be a string.")
+    cleaned = v.strip()
+    if not cleaned:
+        raise ValueError("URL cannot be empty.")
+    if any(ord(c) < 32 or ord(c) == 127 for c in cleaned):
+        raise ValueError("URL contains illegal control characters.")
+    
+    parsed = urllib.parse.urlparse(cleaned)
+    scheme = parsed.scheme.lower()
+    if scheme not in ("http", "https"):
+        raise ValueError(
+            f"Invalid URL protocol '{scheme}'. Only 'http' and 'https' protocols are permitted."
+        )
+    if not parsed.netloc:
+        raise ValueError("URL must contain a valid network location/host.")
+    return cleaned
+
+
+def validate_safe_color(v: Optional[str]) -> Optional[str]:
+    if v is None:
+        return v
+    if not isinstance(v, str):
+        raise ValueError("Color must be a string.")
+    cleaned = v.strip()
+    if not COLOR_HEX_REGEX.match(cleaned):
+        raise ValueError(
+            f"Invalid color '{v}'. Expected valid hexadecimal color code (e.g. #3b82f6 or #fff)."
+        )
+    return cleaned
+
+
+def validate_safe_id(v: str) -> str:
+    if not isinstance(v, str):
+        raise ValueError("ID must be a string.")
+    cleaned = v.strip()
+    if not ID_SLUG_REGEX.match(cleaned):
+        raise ValueError(
+            f"Invalid ID '{v}'. ID must be 1-100 characters and contain only letters, numbers, dashes, or underscores."
+        )
+    return cleaned
 
 
 class ServiceCategory(str, Enum):
@@ -28,6 +77,23 @@ class ServiceItem(BaseModel):
     is_favorite: bool = Field(default=False, description="Whether marked as favorite")
     pinned: bool = Field(default=False, description="Whether pinned in quick dock")
     is_local: bool = Field(default=False, description="Whether hosted locally (e.g. localhost)")
+    launch_script: Optional[str] = Field(default=None, description="Optional relative or absolute python script to launch service if offline")
+
+    @field_validator("id")
+    @classmethod
+    def check_id(cls, v: str) -> str:
+        return validate_safe_id(v)
+
+    @field_validator("url")
+    @classmethod
+    def check_url(cls, v: str) -> str:
+        return validate_safe_url(v)
+
+    @field_validator("color")
+    @classmethod
+    def check_color(cls, v: str) -> str:
+        res = validate_safe_color(v)
+        return res or "#3b82f6"
 
 
 class ServiceCreate(BaseModel):
@@ -41,6 +107,18 @@ class ServiceCreate(BaseModel):
     is_favorite: bool = Field(default=False)
     pinned: bool = Field(default=False)
     is_local: bool = Field(default=False)
+    launch_script: Optional[str] = Field(default=None)
+
+    @field_validator("url")
+    @classmethod
+    def check_url(cls, v: str) -> str:
+        return validate_safe_url(v)
+
+    @field_validator("color")
+    @classmethod
+    def check_color(cls, v: str) -> str:
+        res = validate_safe_color(v)
+        return res or "#3b82f6"
 
 
 class ServiceUpdate(BaseModel):
@@ -54,6 +132,27 @@ class ServiceUpdate(BaseModel):
     is_favorite: Optional[bool] = None
     pinned: Optional[bool] = None
     is_local: Optional[bool] = None
+    launch_script: Optional[str] = None
+
+    @field_validator("url")
+    @classmethod
+    def check_url(cls, v: Optional[str]) -> Optional[str]:
+        if v is not None:
+            return validate_safe_url(v)
+        return v
+
+    @field_validator("color")
+    @classmethod
+    def check_color(cls, v: Optional[str]) -> Optional[str]:
+        return validate_safe_color(v)
+
+
+class ServiceLaunchResponse(BaseModel):
+    service_id: str = Field(..., description="ID of the service")
+    url: str = Field(..., description="Destination URL of the service")
+    status: str = Field(..., description="Status after launch attempt ('online', 'already_running', 'starting', 'failed')")
+    launched: bool = Field(..., description="Whether a new background process was spawned")
+    message: str = Field(default="", description="Descriptive status message")
 
 
 class HealthStatus(str, Enum):
@@ -318,6 +417,49 @@ class VisualIllustrateRequest(BaseModel):
     aspect_ratio: Optional[str] = Field(default=None, description="Optional aspect ratio override")
     offline: bool = Field(default=False, description="Whether to force $0 local procedural rendering")
 
+
+# ---------------------------------------------------------------------------
+# Task Dashboard Models (DF-21)
+# ---------------------------------------------------------------------------
+
+
+class TaskDashboardEvidence(BaseModel):
+    """Small, safe-to-render evidence reference for the task cockpit."""
+
+    label: str = Field(min_length=1, max_length=160)
+    value: str = Field(default="", max_length=500)
+    source: Optional[str] = Field(default=None, max_length=160)
+
+
+class TaskDashboardItem(BaseModel):
+    """Read-only task projection assembled from lifecycle, run and usage ledgers."""
+
+    task_id: str = Field(min_length=1, max_length=160)
+    title: str = Field(min_length=1, max_length=240)
+    status: str = Field(min_length=1, max_length=40)
+    stage: str = Field(min_length=1, max_length=120)
+    priority: int = 0
+    queue_position: int = Field(ge=1)
+    run_id: Optional[str] = None
+    run_status: Optional[str] = None
+    step_index: Optional[int] = Field(default=None, ge=0)
+    cost_usd: float = Field(default=0.0, ge=0.0)
+    updated_at: Optional[str] = None
+    evidence: List[TaskDashboardEvidence] = Field(default_factory=list)
+    exceptions: List[str] = Field(default_factory=list)
+
+
+class TaskDashboardReport(BaseModel):
+    """Stable API response for the queue/run/stage/cost evidence journey."""
+
+    generated_at: str
+    queue: List[TaskDashboardItem] = Field(default_factory=list)
+    queued_count: int = Field(default=0, ge=0)
+    running_count: int = Field(default=0, ge=0)
+    exception_count: int = Field(default=0, ge=0)
+    total_cost_usd: float = Field(default=0.0, ge=0.0)
+    sources: Dict[str, str] = Field(default_factory=dict)
+    warnings: List[str] = Field(default_factory=list)
 
 
 

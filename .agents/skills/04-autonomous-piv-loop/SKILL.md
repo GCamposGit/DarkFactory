@@ -1,77 +1,71 @@
 ---
 name: autonomous-piv-loop
-description: Executa tickets, funcionalidades e correções pelo ciclo Prime-Plan-Implement-Validate (PIV), incluindo paralelização segura em branches e worktrees isoladas quando duas ou mais frentes escrevem no mesmo repositório.
+description: Executa tickets, funcionalidades e correções pelo ciclo Prime-Plan-Implement-Validate (PIV), com protocolo fail-closed para branches e worktrees concorrentes.
 ---
 
-# Autonomous PIV Loop: O Motor de Execução
+# Autonomous PIV Loop
 
-O ciclo PIV decompõe a implementação em passos atômicos estritos, garantindo que o agente nunca gere um bloco maciço de código sem validação intermediária.
+O ciclo PIV divide a entrega em mudanças pequenas e verificáveis: preparar o contexto,
+planejar, implementar uma unidade, validar imediatamente e só então avançar.
 
-## Princípio Fundamental: isolamento de contexto e estado
-- Sessões longas degradam a atenção do modelo e geram alucinações cumulativas.
-- Cada etapa (Planejar, Codificar Tarefa 1, Codificar Tarefa 2, Validar, Auditar) roda com **contexto limpo** ou via subagentes especializados (`invoke_subagent`).
-- Isolamento de contexto não substitui isolamento Git: cada frente que escreve recebe branch, worktree, owner e lease exclusivos.
-- Nunca faça fan-out a partir de um checkout sujo sem antes criar um backup recuperável e um checkpoint de integração limpo. Copiar uma baseline suja para várias worktrees duplica deltas e torna autoria e integração ambíguas.
+## Isolamento de contexto e estado
 
-Quando houver duas ou mais frentes concorrentes, ou quando resultados de worktrees precisarem ser integrados, leia e siga integralmente [references/worktree-parallelism.md](references/worktree-parallelism.md). O protocolo é fail-closed: se não for possível provar baseline, ownership, ambiente de teste ou conclusão, não despache nem integre.
+- Contexto fresco não substitui isolamento Git.
+- Uma frente única usa branch dedicada. Cada frente concorrente que escreve recebe
+  branch, worktree, owner e lease exclusivos.
+- O checkout de integração é coordenado por um único owner e não é executor.
+- Nunca use `startingState: working-tree` para propagar uma baseline suja.
 
-## O Loop em 5 Etapas
+Ao despachar duas ou mais frentes, receber uma entrega de outra worktree ou integrar
+commits concorrentes, leia e siga integralmente
+[references/worktree-parallelism.md](references/worktree-parallelism.md). O protocolo
+é fail-closed: prova ausente de baseline, ownership, ambiente, heartbeat, conclusão ou
+integração bloqueia a próxima transição.
 
-```text
-[Prime] Contexto Mínimo Necessário
-   │
-   ▼
-[Plan] Decomposição em Micro-tarefas com comandos de validação
-   │
-   ▼
-[Implement] Tarefa N (Local com qwen-fast/qwen-deep ou Nuvem com Claude 3.7/DeepSeek)
-   │
-   ▼
-[Validate Step] python core/harness/runner.py --quick
-   │ (Se falhar: corrige imediatamente. Não acumula erros)
-   ▼
-[Loop para Tarefa N+1 até concluir todas]
-   │
-   ▼
-[Validate Full] python core/harness/runner.py
-   │
-   ▼
-[Adversarial Review] Nível 1 (gpt-review local) -> Nível 2 (Nuvem Cruzada)
-```
+## Loop por tarefa
 
-## Instruções de Execução por Tarefa
+1. Leia `AGENTS.md`, `MISSION.md` e `FACTORY_RULES.md`; identifique a origem do ticket pela tag canônica:
+   - `user-demand` (`USR-XX`): Demanda manual aberta pelo usuário/dono do projeto (prioridade de escopo).
+   - `code-review`: Ticket aberto por auditoria de revisão adversarial ou inspeção de qualidade.
+   - `agent-feature`: Melhoria autônoma ou refatoração proposta pelos próprios agentes (self-improvement).
+   Registre ticket, identidade, escopo e comandos de aceitação.
+2. Faça o preflight da unidade de trabalho e do ambiente antes da primeira escrita.
+   Valide o ambiente de terminal (`python core/harness/terminal_env.py --check` ou `scripts/init_terminal.ps1`),
+   assegurando ancoragem na raiz e imunidade contra interferências de perfis (`-NoProfile`).
+   Quando o ticket introduz o próprio teste focal, registre sua ausência esperada e
+   prove coleta não vazia da suíte existente; não execute um caminho ainda inexistente.
+3. Implemente somente os caminhos possuídos pela tarefa.
+4. Execute o teste focal e `python core/harness/runner.py --quick`; corrija a causa
+   antes de avançar se algum gate falhar.
+5. Ao concluir, execute os comandos obrigatórios do repositório e produza o contrato
+   de conclusão definido no protocolo.
 
-1. **Prepare a unidade de trabalho**:
-   - Em uma frente única, use uma branch dedicada.
-   - Em paralelismo, use o protocolo de worktrees referenciado acima; não reutilize o checkout raiz como executor.
-   - Registre o SHA-base e confirme `python`, `pytest` e os comandos focais antes da escrita.
-2. **Execute tarefa a tarefa**:
-   - Abra apenas os arquivos explicitamente listados no ticket.
-   - Escreva o código seguindo os padrões do `AGENTS.md`.
-   - **Execute o comando de validação rápida imediatamente**:
-     `python core/harness/runner.py --quick`
-   - Se falhar, corrija agora. Proibido avançar com testes rápidos em vermelho.
-3. **Validação Final da Suíte**:
-   - Execute a suíte completa com marcadores determinísticos:
-     `python core/harness/runner.py | python core/harness/markers.py`
-4. **Relatório de Implementação**:
-   Gere um sumário em `.factory/reports/<task-slug>-report.md` documentando SHA/branch/worktree, arquivos alterados, comandos executados, resultados e estado residual.
+## Relatório
 
-## Contrato de conclusão
+Registre em `.factory/reports/<task-slug>-report.md`: ticket, owner, branch, worktree,
+SHA-base e SHA final; arquivos alterados; comandos, contagens e exit codes; heartbeat
+final; e estado residual. Uma resposta textual sem commit seletivo e evidência não é
+handoff verificável.
 
-Uma frente só está pronta para integração quando entrega um commit seletivo e alcançável contendo apenas seu delta, acompanhado de: ticket e owner; SHA-base e SHA final; lista de arquivos; testes focais e obrigatórios com exit code; relatório; e `git status` residual explicado. Turno concluído sem esse contrato, título/ID ausente, teste indisponível ou commit misturado é falha de handoff, não sucesso.
+## Entrega remota obrigatória
 
----
+Um ticket de desenvolvimento não está concluído quando existe apenas um commit local.
+Depois dos gates locais verdes, o owner deve executar o fluxo completo descrito em
+[references/remote-delivery.md](references/remote-delivery.md): publicar a branch, abrir
+uma PR com o SHA correto, aguardar checks/reviews exigidos, mergear pela interface do
+GitHub e verificar que a branch de integração remota alcança o SHA final. Falha de
+autenticação, rede, criação da PR, checks, merge ou leitura do remoto é estado
+`blocked`, nunca sucesso silencioso.
 
-## 🧠 Continuous Self-Improvement & Failure RCA Integration
+O handoff final deve conter a URL/número da PR, estado `MERGED`, `mergedAt`, SHA do
+merge, SHA observado no `main` remoto e o estado residual local. Nunca declare uma
+entrega como integrada com base apenas em `git log` local, em uma branch sem upstream
+ou em uma mensagem textual do agente.
 
-1. **Gatilho de Auto-Avaliação no 2º Prompt da Sessão**:
-   - Se a implementação for desencadeada por um follow-up ou se estiver no 2º prompt da sessão, execute obrigatoriamente a verificação de intenção via `core/learning/cli.py record-turn`.
-   - Avalie a causa da necessidade de intervenção humana anterior e incorpore as preferências no plano antes de codificar.
-2. **Root Cause Analysis em Toda Quebra de Validação (`--quick` ou `Full`)**:
-   - Nunca faça tentativas aleatórias (*trial and error*) ao encontrar um teste falhando.
-   - Aplique o diagnóstico 5-Whys: Identifique a causa raiz exata (ex.: tipo incompatível, mock desatualizado, path no Windows com barras invertidas).
-   - Registre o RCA no ledger (`python core/learning/cli.py rca`) e aplique o patch de forma que o erro não possa se repetir.
-3. **Execução One-Shot com Cobertura Preventiva**:
-   - A entrega deve ser completa na primeira passada: código tipado, testes unitários para a nova funcionalidade, documentação atualizada e zero dependências soltas.
+## Continuous Self-Improvement e RCA
 
+- Em follow-up corretivo, registre a intenção e o gap no motor de aprendizagem antes
+  de implementar.
+- Toda falha de validação, ferramenta, setup, quota, lease ou handoff recebe RCA antes
+  do retry. Retry não cria silenciosamente uma nova identidade ou outro escritor.
+- Uma regra preventiva só é considerada resolvida depois de um gate determinístico.

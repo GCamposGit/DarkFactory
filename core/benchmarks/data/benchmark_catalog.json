@@ -5,6 +5,93 @@
     "standard_prompt_tokens": 25000,
     "standard_completion_tokens": 2500
   },
+  "catalog_observed_at": "2026-09-04T00:00:00+00:00",
+  "field_provenance_defaults": {
+    "context_length": {
+      "source": "OpenRouter model metadata snapshot",
+      "observed_at": "2026-09-04T00:00:00+00:00",
+      "unit": "tokens",
+      "acquisition_mode": "offline_fixture",
+      "quality": "reported"
+    },
+    "input_cost_per_m": {
+      "source": "OpenRouter pricing snapshot",
+      "observed_at": "2026-09-04T00:00:00+00:00",
+      "unit": "USD/1M input tokens",
+      "acquisition_mode": "offline_fixture",
+      "quality": "reported"
+    },
+    "output_cost_per_m": {
+      "source": "OpenRouter pricing snapshot",
+      "observed_at": "2026-09-04T00:00:00+00:00",
+      "unit": "USD/1M output tokens",
+      "acquisition_mode": "offline_fixture",
+      "quality": "reported"
+    },
+    "cache_read_cost_per_m": {
+      "source": "OpenRouter pricing snapshot",
+      "observed_at": "2026-09-04T00:00:00+00:00",
+      "unit": "USD/1M cached input tokens",
+      "acquisition_mode": "offline_fixture",
+      "quality": "reported"
+    },
+    "cost_per_task": {
+      "source": "benchmark_catalog.json",
+      "observed_at": "2026-09-04T00:00:00+00:00",
+      "unit": "USD/task",
+      "acquisition_mode": "offline_fixture",
+      "quality": "reported"
+    },
+    "coding_score": {
+      "source": "Artificial Analysis v4.2 & Coding Agent Index",
+      "observed_at": "2026-09-04T00:00:00+00:00",
+      "unit": "score (0-100)",
+      "acquisition_mode": "offline_fixture",
+      "quality": "reported"
+    },
+    "intelligence_score": {
+      "source": "Artificial Analysis Intelligence Index v4.2",
+      "observed_at": "2026-09-04T00:00:00+00:00",
+      "unit": "score (0-100)",
+      "acquisition_mode": "offline_fixture",
+      "quality": "reported"
+    },
+    "output_speed_tps": {
+      "source": "benchmark_catalog.json",
+      "observed_at": "2026-09-04T00:00:00+00:00",
+      "unit": "tokens/second",
+      "acquisition_mode": "offline_fixture",
+      "quality": "reported"
+    },
+    "latency_ttft_sec": {
+      "source": "benchmark_catalog.json",
+      "observed_at": "2026-09-04T00:00:00+00:00",
+      "unit": "seconds",
+      "acquisition_mode": "offline_fixture",
+      "quality": "reported"
+    },
+    "tokens_per_task": {
+      "source": "benchmark_catalog.json",
+      "observed_at": "2026-09-04T00:00:00+00:00",
+      "unit": "tokens/task",
+      "acquisition_mode": "offline_fixture",
+      "quality": "reported"
+    },
+    "release_date": {
+      "source": "model release metadata snapshot",
+      "observed_at": "2026-09-04T00:00:00+00:00",
+      "unit": "ISO-8601 date",
+      "acquisition_mode": "offline_fixture",
+      "quality": "reported"
+    },
+    "domain_scores": {
+      "source": "Artificial Analysis domain score snapshot",
+      "observed_at": "2026-09-04T00:00:00+00:00",
+      "unit": "score (0-100)",
+      "acquisition_mode": "offline_fixture",
+      "quality": "reported"
+    }
+  },
   "models": [
     {
       "model_id": "anthropic/claude-fable-5-1",

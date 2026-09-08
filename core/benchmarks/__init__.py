@@ -17,6 +17,10 @@ from core.benchmarks.models import (
     BenchmarkRoutingDecision,
     ModelTier,
     TaskComplexity,
+    FieldProvenance,
+    MetricProvenance,
+    MetricQuality,
+    MetricAcquisitionMode,
 )
 from core.benchmarks.frontier import (
     DOMAIN_METADATA,
@@ -56,6 +60,10 @@ __all__ = [
     "BenchmarkRoutingDecision",
     "ModelTier",
     "TaskComplexity",
+    "FieldProvenance",
+    "MetricProvenance",
+    "MetricQuality",
+    "MetricAcquisitionMode",
     "DOMAIN_METADATA",
     "compute_pareto_frontier",
     "compute_domain_pareto_frontiers",
@@ -74,4 +82,3 @@ __all__ = [
     "TaskBenchmarkRouter",
     "get_benchmark_router",
 ]
-

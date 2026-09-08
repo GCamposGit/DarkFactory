@@ -1,0 +1,241 @@
+{
+  "ledger_id": "20260905_autonomous_factory_review",
+  "query": "Práticas atuais de engenharia de software autônoma com agentes e aplicação à DarkFac",
+  "topic_type": "topic_concept",
+  "created_at": "2026-09-05",
+  "sources": [
+    {
+      "id": "anthropic-effective-agents",
+      "title": "Building effective agents",
+      "url": "https://www.anthropic.com/engineering/building-effective-agents",
+      "published_date": "2024-12-19",
+      "summary": "Complexidade de agentes deve ser justificada pela tarefa.",
+      "source_type": "engineering_blog",
+      "authority_tier": "high_credibility",
+      "metadata": {
+        "accessed_on": "2026-09-05",
+        "primary_source": true,
+        "evidence_kind": "first_party_engineering_or_documentation",
+        "limitation": "Prática relatada pelo fornecedor, não garantia universal nem benchmark independente."
+      }
+    },
+    {
+      "id": "anthropic-long-running",
+      "title": "Effective harnesses for long-running agents",
+      "url": "https://www.anthropic.com/engineering/effective-harnesses-for-long-running-agents",
+      "published_date": "2025-11-26",
+      "summary": "Requisitos verificáveis e progresso persistente ajudam sessões longas.",
+      "source_type": "engineering_blog",
+      "authority_tier": "high_credibility",
+      "metadata": {
+        "accessed_on": "2026-09-05",
+        "primary_source": true,
+        "evidence_kind": "first_party_engineering_or_documentation",
+        "limitation": "Prática relatada pelo fornecedor, não garantia universal nem benchmark independente."
+      }
+    },
+    {
+      "id": "anthropic-evals",
+      "title": "Demystifying evals for AI agents",
+      "url": "https://www.anthropic.com/engineering/demystifying-evals-for-ai-agents",
+      "published_date": "2026-01-09",
+      "summary": "Separar avaliações de capacidade e regressão; verificar resultados.",
+      "source_type": "engineering_blog",
+      "authority_tier": "high_credibility",
+      "metadata": {
+        "accessed_on": "2026-09-05",
+        "primary_source": true,
+        "evidence_kind": "first_party_engineering_or_documentation",
+        "limitation": "Prática relatada pelo fornecedor, não garantia universal nem benchmark independente."
+      }
+    },
+    {
+      "id": "anthropic-harness-design",
+      "title": "Harness design for long-running application development",
+      "url": "https://www.anthropic.com/engineering/harness-design-long-running-apps",
+      "published_date": "2026-03-24",
+      "summary": "Avaliar o valor dos componentes do harness conforme os modelos evoluem.",
+      "source_type": "engineering_blog",
+      "authority_tier": "high_credibility",
+      "metadata": {
+        "accessed_on": "2026-09-05",
+        "primary_source": true,
+        "evidence_kind": "first_party_engineering_or_documentation",
+        "limitation": "Prática relatada pelo fornecedor, não garantia universal nem benchmark independente."
+      }
+    },
+    {
+      "id": "anthropic-managed-agents",
+      "title": "Scaling Managed Agents: Decoupling the brain from the hands",
+      "url": "https://www.anthropic.com/engineering/managed-agents",
+      "published_date": "2026-04-08",
+      "summary": "Sessão, loop e ambiente de execução podem ter interfaces independentes.",
+      "source_type": "engineering_blog",
+      "authority_tier": "high_credibility",
+      "metadata": {
+        "accessed_on": "2026-09-05",
+        "primary_source": true,
+        "evidence_kind": "first_party_engineering_or_documentation",
+        "limitation": "Prática relatada pelo fornecedor, não garantia universal nem benchmark independente."
+      }
+    },
+    {
+      "id": "anthropic-containment",
+      "title": "How we contain Claude across products",
+      "url": "https://www.anthropic.com/engineering/how-we-contain-claude",
+      "published_date": "2026-05-25",
+      "summary": "Contenção limita o alcance de ações, complementando defesas probabilísticas.",
+      "source_type": "engineering_blog",
+      "authority_tier": "high_credibility",
+      "metadata": {
+        "accessed_on": "2026-09-05",
+        "primary_source": true,
+        "evidence_kind": "first_party_engineering_or_documentation",
+        "limitation": "Prática relatada pelo fornecedor, não garantia universal nem benchmark independente."
+      }
+    },
+    {
+      "id": "anthropic-context",
+      "title": "Effective context engineering for AI agents",
+      "url": "https://www.anthropic.com/engineering/effective-context-engineering-for-ai-agents",
+      "published_date": "2025-09-29",
+      "summary": "Selecionar contexto relevante e recuperar informações sob demanda.",
+      "source_type": "engineering_blog",
+      "authority_tier": "high_credibility",
+      "metadata": {
+        "accessed_on": "2026-09-05",
+        "primary_source": true,
+        "evidence_kind": "first_party_engineering_or_documentation",
+        "limitation": "Prática relatada pelo fornecedor, não garantia universal nem benchmark independente."
+      }
+    },
+    {
+      "id": "openai-harness",
+      "title": "Harness engineering: leveraging Codex in an agent-first world",
+      "url": "https://openai.com/index/harness-engineering/",
+      "published_date": "2026-02-11",
+      "summary": "Conhecimento no repositório e regras estruturais verificáveis ajudam agentes.",
+      "source_type": "engineering_blog",
+      "authority_tier": "high_credibility",
+      "metadata": {
+        "accessed_on": "2026-09-05",
+        "primary_source": true,
+        "evidence_kind": "first_party_engineering_or_documentation",
+        "limitation": "Prática relatada pelo fornecedor, não garantia universal nem benchmark independente."
+      }
+    },
+    {
+      "id": "github-agents",
+      "title": "Application card: GitHub Copilot Agents",
+      "url": "https://docs.github.com/en/copilot/responsible-use/agents",
+      "published_date": null,
+      "summary": "Ambiente efêmero, firewall e análise de segurança na execução de agentes.",
+      "source_type": "documentation",
+      "authority_tier": "high_credibility",
+      "metadata": {
+        "accessed_on": "2026-09-05",
+        "primary_source": true,
+        "evidence_kind": "first_party_engineering_or_documentation",
+        "limitation": "Prática relatada pelo fornecedor, não garantia universal nem benchmark independente."
+      }
+    },
+    {
+      "id": "langgraph-persistence",
+      "title": "Persistence",
+      "url": "https://docs.langchain.com/oss/python/langgraph/persistence",
+      "published_date": null,
+      "summary": "Checkpoints persistem o estado para inspeção e retomada.",
+      "source_type": "documentation",
+      "authority_tier": "high_credibility",
+      "metadata": {
+        "accessed_on": "2026-09-05",
+        "primary_source": true,
+        "evidence_kind": "first_party_engineering_or_documentation",
+        "limitation": "Prática relatada pelo fornecedor, não garantia universal nem benchmark independente."
+      }
+    }
+  ],
+  "insights": [
+    {
+      "source_id": "anthropic-effective-agents",
+      "source_title": "Building effective agents",
+      "key_insight": "Complexidade de agentes deve ser justificada pela tarefa.",
+      "architectural_implications": "Recomendação da revisão: consultar aplicação e tickets nos documentos REVIEW_2026-09-05.md e DEVELOPMENT_PLAN_2026-09-05.md; não confundir com afirmação da fonte.",
+      "future_reference_value": "https://www.anthropic.com/engineering/building-effective-agents",
+      "authority_tier": "high_credibility"
+    },
+    {
+      "source_id": "anthropic-long-running",
+      "source_title": "Effective harnesses for long-running agents",
+      "key_insight": "Requisitos verificáveis e progresso persistente ajudam sessões longas.",
+      "architectural_implications": "Recomendação da revisão: consultar aplicação e tickets nos documentos REVIEW_2026-09-05.md e DEVELOPMENT_PLAN_2026-09-05.md; não confundir com afirmação da fonte.",
+      "future_reference_value": "https://www.anthropic.com/engineering/effective-harnesses-for-long-running-agents",
+      "authority_tier": "high_credibility"
+    },
+    {
+      "source_id": "anthropic-evals",
+      "source_title": "Demystifying evals for AI agents",
+      "key_insight": "Separar avaliações de capacidade e regressão; verificar resultados.",
+      "architectural_implications": "Recomendação da revisão: consultar aplicação e tickets nos documentos REVIEW_2026-09-05.md e DEVELOPMENT_PLAN_2026-09-05.md; não confundir com afirmação da fonte.",
+      "future_reference_value": "https://www.anthropic.com/engineering/demystifying-evals-for-ai-agents",
+      "authority_tier": "high_credibility"
+    },
+    {
+      "source_id": "anthropic-harness-design",
+      "source_title": "Harness design for long-running application development",
+      "key_insight": "Avaliar o valor dos componentes do harness conforme os modelos evoluem.",
+      "architectural_implications": "Recomendação da revisão: consultar aplicação e tickets nos documentos REVIEW_2026-09-05.md e DEVELOPMENT_PLAN_2026-09-05.md; não confundir com afirmação da fonte.",
+      "future_reference_value": "https://www.anthropic.com/engineering/harness-design-long-running-apps",
+      "authority_tier": "high_credibility"
+    },
+    {
+      "source_id": "anthropic-managed-agents",
+      "source_title": "Scaling Managed Agents: Decoupling the brain from the hands",
+      "key_insight": "Sessão, loop e ambiente de execução podem ter interfaces independentes.",
+      "architectural_implications": "Recomendação da revisão: consultar aplicação e tickets nos documentos REVIEW_2026-09-05.md e DEVELOPMENT_PLAN_2026-09-05.md; não confundir com afirmação da fonte.",
+      "future_reference_value": "https://www.anthropic.com/engineering/managed-agents",
+      "authority_tier": "high_credibility"
+    },
+    {
+      "source_id": "anthropic-containment",
+      "source_title": "How we contain Claude across products",
+      "key_insight": "Contenção limita o alcance de ações, complementando defesas probabilísticas.",
+      "architectural_implications": "Recomendação da revisão: consultar aplicação e tickets nos documentos REVIEW_2026-09-05.md e DEVELOPMENT_PLAN_2026-09-05.md; não confundir com afirmação da fonte.",
+      "future_reference_value": "https://www.anthropic.com/engineering/how-we-contain-claude",
+      "authority_tier": "high_credibility"
+    },
+    {
+      "source_id": "anthropic-context",
+      "source_title": "Effective context engineering for AI agents",
+      "key_insight": "Selecionar contexto relevante e recuperar informações sob demanda.",
+      "architectural_implications": "Recomendação da revisão: consultar aplicação e tickets nos documentos REVIEW_2026-09-05.md e DEVELOPMENT_PLAN_2026-09-05.md; não confundir com afirmação da fonte.",
+      "future_reference_value": "https://www.anthropic.com/engineering/effective-context-engineering-for-ai-agents",
+      "authority_tier": "high_credibility"
+    },
+    {
+      "source_id": "openai-harness",
+      "source_title": "Harness engineering: leveraging Codex in an agent-first world",
+      "key_insight": "Conhecimento no repositório e regras estruturais verificáveis ajudam agentes.",
+      "architectural_implications": "Recomendação da revisão: consultar aplicação e tickets nos documentos REVIEW_2026-09-05.md e DEVELOPMENT_PLAN_2026-09-05.md; não confundir com afirmação da fonte.",
+      "future_reference_value": "https://openai.com/index/harness-engineering/",
+      "authority_tier": "high_credibility"
+    },
+    {
+      "source_id": "github-agents",
+      "source_title": "Application card: GitHub Copilot Agents",
+      "key_insight": "Ambiente efêmero, firewall e análise de segurança na execução de agentes.",
+      "architectural_implications": "Recomendação da revisão: consultar aplicação e tickets nos documentos REVIEW_2026-09-05.md e DEVELOPMENT_PLAN_2026-09-05.md; não confundir com afirmação da fonte.",
+      "future_reference_value": "https://docs.github.com/en/copilot/responsible-use/agents",
+      "authority_tier": "high_credibility"
+    },
+    {
+      "source_id": "langgraph-persistence",
+      "source_title": "Persistence",
+      "key_insight": "Checkpoints persistem o estado para inspeção e retomada.",
+      "architectural_implications": "Recomendação da revisão: consultar aplicação e tickets nos documentos REVIEW_2026-09-05.md e DEVELOPMENT_PLAN_2026-09-05.md; não confundir com afirmação da fonte.",
+      "future_reference_value": "https://docs.langchain.com/oss/python/langgraph/persistence",
+      "authority_tier": "high_credibility"
+    }
+  ],
+  "summary_executive": "Plano baseado em integridade dos controles, execução recuperável, avaliação real e autonomia seletiva. Fontes primárias consultadas em 05/09/2026; conclusões sobre a DarkFac derivam de inspeção local e reproduções isoladas."
+}
