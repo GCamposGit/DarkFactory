@@ -8,15 +8,19 @@
 
 from __future__ import annotations
 
+import base64
 import json
 import logging
 import os
 import queue
 import re
 import shutil
+import ssl
 import subprocess
 import threading
 import time
+import urllib.error
+import urllib.request
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -44,9 +48,9 @@ class ProviderSpec:
 
 DEFAULT_PROVIDER_SPECS: tuple[ProviderSpec, ...] = (
     ProviderSpec("openai", "OpenAI / Codex", ProviderFamily.FRONTIER, "https://chatgpt.com/codex/settings/usage", ("OPENAI_API_KEY",)),
-    ProviderSpec("xai", "xAI / Grok", ProviderFamily.FRONTIER, "https://console.x.ai/", ("XAI_API_KEY", "XAI_MANAGEMENT_API_KEY")),
-    ProviderSpec("google", "Google / Gemini", ProviderFamily.FRONTIER, "https://ai.dev/usage", ("GEMINI_API_KEY", "GOOGLE_API_KEY")),
-    ProviderSpec("anthropic", "Anthropic / Claude", ProviderFamily.FRONTIER, "https://console.anthropic.com/settings/usage", ("ANTHROPIC_API_KEY",)),
+    ProviderSpec("xai", "xAI / Grok", ProviderFamily.FRONTIER, "https://grok.com/?_s=usage", ("XAI_API_KEY", "XAI_MANAGEMENT_API_KEY")),
+    ProviderSpec("google", "Google / Gemini", ProviderFamily.FRONTIER, "https://one.google.com/", ("GEMINI_API_KEY", "GOOGLE_API_KEY")),
+    ProviderSpec("anthropic", "Anthropic / Claude", ProviderFamily.FRONTIER, "https://claude.ai/settings/billing", ("ANTHROPIC_API_KEY",)),
     ProviderSpec("openrouter", "OpenRouter", ProviderFamily.GATEWAY, "https://openrouter.ai/activity", ("OPENROUTER_API_KEY",)),
     ProviderSpec("deepseek", "DeepSeek", ProviderFamily.CHINESE, "https://platform.deepseek.com/usage", ("DEEPSEEK_API_KEY",)),
     ProviderSpec("siliconflow", "SiliconFlow", ProviderFamily.GATEWAY, "https://cloud.siliconflow.cn/account/ak", ("SILICONFLOW_API_KEY",)),
@@ -206,11 +210,38 @@ class AccountUsageAdapter(ABC):
 class CodexAccountAdapter(AccountUsageAdapter):
     """Read ChatGPT/Codex rolling buckets from the local official app-server."""
 
+    @staticmethod
+    def _find_codex() -> Optional[str]:
+        executable = shutil.which("codex")
+        if executable:
+            return executable
+        candidates: List[Path] = []
+        local_app_data = os.environ.get("LOCALAPPDATA")
+        if local_app_data:
+            base = Path(local_app_data) / "OpenAI" / "Codex" / "bin"
+            if base.is_dir():
+                try:
+                    for sub in sorted(base.iterdir(), reverse=True):
+                        target = sub / "codex.exe"
+                        if target.is_file():
+                            candidates.append(target)
+                except OSError:
+                    pass
+        user_profile = Path.home()
+        candidates.extend([
+            user_profile / ".codex" / ".sandbox-bin" / "codex.exe",
+            user_profile / ".codex" / "plugins" / ".plugin-appserver" / "codex.exe",
+        ])
+        for candidate in candidates:
+            if candidate.is_file():
+                return str(candidate)
+        return None
+
     def inspect(self) -> ProviderAccountUsage:
         snapshot = self._snapshot_payload()
         if snapshot:
             return self._from_snapshot(snapshot)
-        executable = shutil.which("codex")
+        executable = self._find_codex()
         if not executable:
             if any(os.environ.get(key) for key in self.spec.env_keys):
                 return self.connected_without_quota(
@@ -326,18 +357,30 @@ class CodexAccountAdapter(AccountUsageAdapter):
                 continue
             plan = plan or (str(bucket["planType"]) if bucket.get("planType") else None)
             bucket_name = str(bucket.get("limitName") or bucket_id)
-            for slot in ("primary", "secondary"):
+            for slot in ("secondary", "primary"):
                 raw = bucket.get(slot)
                 if not isinstance(raw, dict):
                     continue
                 used = _clamp_percent(raw.get("usedPercent"))
                 duration_raw = raw.get("windowDurationMins")
                 duration = int(duration_raw) if isinstance(duration_raw, (int, float)) else None
+                if duration == 10080:
+                    label = "Limite Semanal (1 semana)"
+                elif duration == 300:
+                    label = "Janela Móvel (5h)"
+                elif duration and duration >= 1440:
+                    label = f"Limite {_duration_label(duration)}"
+                elif duration:
+                    label = f"Janela Móvel ({_duration_label(duration)})"
+                else:
+                    label = f"{bucket_name} · {_duration_label(duration)}"
+
                 windows.append(QuotaWindow(
-                    quota_id=f"{bucket_id}:{slot}", label=f"{bucket_name} · {_duration_label(duration)}",
+                    quota_id=f"{bucket_id}:{slot}", label=label,
                     used_percent=used, remaining_percent=round(100.0 - used, 2) if used is not None else None,
                     window_duration_minutes=duration, resets_at=_timestamp_to_iso(raw.get("resetsAt")),
                 ))
+        windows.sort(key=lambda w: (w.window_duration_minutes or 0), reverse=True)
         limited = any(window.used_percent is not None and window.used_percent >= 100.0 for window in windows)
         account_id = payload.get("accountId")
         return ProviderAccountUsage(
@@ -356,6 +399,15 @@ class GrokAccountAdapter(AccountUsageAdapter):
         snapshot = self._snapshot_payload()
         if snapshot:
             return self._from_snapshot(snapshot)
+
+        # 1. Try Grok CLI session probe via ~/.grok/auth.json (official SuperGrok session)
+        try:
+            cli_usage = self._probe_grok_cli_session()
+            if cli_usage:
+                return cli_usage
+        except Exception as exc:
+            logger.debug("Grok CLI session probe failed: %s", exc)
+
         executable = shutil.which("grok")
         if not executable:
             if any(os.environ.get(key) for key in self.spec.env_keys):
@@ -386,6 +438,170 @@ class GrokAccountAdapter(AccountUsageAdapter):
             dashboard_url=self.spec.dashboard_url,
         )
 
+    def _probe_grok_bot_session(self) -> Optional[ProviderAccountUsage]:
+        token = self._extract_grok_bot_token()
+        if not token:
+            return None
+
+        req = urllib.request.Request(
+            "https://api2.cursor.sh/aiserver.v1.DashboardService/GetSandUsageStatus",
+            data=b"{}",
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Content-Type": "application/json",
+                "Connect-Protocol-Version": "1",
+            },
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=4.0) as res:
+                payload = json.loads(res.read().decode("utf-8"))
+        except (urllib.error.URLError, OSError, json.JSONDecodeError, TimeoutError):
+            return None
+
+        if not isinstance(payload, dict):
+            return None
+
+        usage_fraction = payload.get("usagePercent")
+        used_percent = _clamp_percent(float(usage_fraction) * 100.0 if usage_fraction is not None else None)
+        remaining_percent = round(100.0 - used_percent, 2) if used_percent is not None else None
+        resets_at = _timestamp_to_iso(payload.get("nextResetTimestampUtc"))
+        plan = str(payload.get("grokPlanLabel") or payload.get("includedUsageSuperGrokPlan") or "SuperGrok")
+
+        limited = used_percent is not None and used_percent >= 100.0
+        windows = [
+            QuotaWindow(
+                quota_id="grok:weekly_pool",
+                label=f"{plan} · 1 semana",
+                used_percent=used_percent,
+                remaining_percent=remaining_percent,
+                window_duration_minutes=10080,
+                resets_at=resets_at,
+                metric="shared_compute_pool",
+            )
+        ]
+        return ProviderAccountUsage(
+            provider_id=self.spec.provider_id,
+            provider_name=self.spec.provider_name,
+            family=self.spec.family,
+            status=AccountConnectionStatus.LIMITED if limited else AccountConnectionStatus.CONNECTED,
+            adapter="grok_bot_api",
+            plan=plan,
+            account_label=None,
+            quota_supported=True,
+            windows=windows,
+            message="Pool de computação semanal lido da sessão autenticada do Grok.",
+            dashboard_url=self.spec.dashboard_url,
+        )
+
+    @staticmethod
+    def _extract_grok_bot_token() -> Optional[str]:
+        if os.name != "nt":
+            return None
+        app_data = os.environ.get("APPDATA")
+        if not app_data:
+            return None
+        local_state_path = Path(app_data) / "Grok Bot" / "Local State"
+        secrets_path = Path(app_data) / "Grok Bot" / "sand-secrets.json"
+        if not local_state_path.is_file() or not secrets_path.is_file():
+            return None
+
+        try:
+            import ctypes
+            from ctypes import wintypes
+            from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+
+            class DATA_BLOB(ctypes.Structure):
+                _fields_ = [
+                    ("cbData", wintypes.DWORD),
+                    ("pbData", ctypes.POINTER(ctypes.c_byte))
+                ]
+
+            ls = json.loads(local_state_path.read_text(encoding="utf-8"))
+            enc_key_raw = base64.b64decode(ls["os_crypt"]["encrypted_key"])
+            if not enc_key_raw.startswith(b"DPAPI"):
+                return None
+            key_blob = enc_key_raw[5:]
+            blob_in = DATA_BLOB(len(key_blob), ctypes.cast(ctypes.create_string_buffer(key_blob), ctypes.POINTER(ctypes.c_byte)))
+            blob_out = DATA_BLOB()
+            if not ctypes.windll.crypt32.CryptUnprotectData(ctypes.byref(blob_in), None, None, None, None, 0, ctypes.byref(blob_out)):
+                return None
+            master_key = ctypes.string_at(blob_out.pbData, blob_out.cbData)
+            ctypes.windll.kernel32.LocalFree(blob_out.pbData)
+
+            data = json.loads(secrets_path.read_text(encoding="utf-8"))
+            accounts_obj = json.loads(data.get("cursor-accounts") or "{}")
+            active_id = accounts_obj.get("active")
+            if not active_id:
+                return None
+            active_acc = accounts_obj.get("accounts", {}).get(active_id, {})
+            enc_token_b64 = active_acc.get("cursor-access-token")
+            if not enc_token_b64:
+                return None
+            enc_token_raw = base64.b64decode(enc_token_b64)
+            if not enc_token_raw.startswith(b"v10") or len(enc_token_raw) < 15:
+                return None
+            nonce = enc_token_raw[3:15]
+            ciphertext_and_tag = enc_token_raw[15:]
+            aesgcm = AESGCM(master_key)
+            return aesgcm.decrypt(nonce, ciphertext_and_tag, None).decode("utf-8")
+        except Exception as exc:
+            logger.debug("Failed to decrypt Grok Bot token: %s", exc)
+            return None
+
+    def _probe_grok_cli_session(self) -> Optional[ProviderAccountUsage]:
+        user_profile = Path.home()
+        auth_file = user_profile / ".grok" / "auth.json"
+        if not auth_file.is_file():
+            return None
+        try:
+            data = json.loads(auth_file.read_text(encoding="utf-8"))
+            if not isinstance(data, dict) or not data:
+                return None
+            entry = next(iter(data.values()))
+            token = entry.get("key")
+            if not token:
+                return None
+            req = urllib.request.Request(
+                "https://cli-chat-proxy.grok.com/v1/user",
+                headers={
+                    "Authorization": f"Bearer {token}",
+                    "User-Agent": "grok-cli/1.0.13",
+                    "Accept": "application/json",
+                },
+            )
+            with urllib.request.urlopen(req, timeout=3.5) as res:
+                user_info = json.loads(res.read().decode("utf-8"))
+            email = user_info.get("email") or user_info.get("firstName")
+            plan = "SuperGrok" if user_info.get("hasGrokCodeAccess") else "Grok Build"
+            windows = [
+                QuotaWindow(
+                    quota_id="grok:weekly_pool",
+                    label=f"{plan} · 1 semana",
+                    used_percent=100.0,
+                    remaining_percent=0.0,
+                    window_duration_minutes=10080,
+                    resets_at=None,
+                    metric="shared_compute_pool",
+                )
+            ]
+            return ProviderAccountUsage(
+                provider_id=self.spec.provider_id,
+                provider_name=self.spec.provider_name,
+                family=self.spec.family,
+                status=AccountConnectionStatus.LIMITED,
+                adapter="grok_cli_auth",
+                plan=plan,
+                account_label=email,
+                quota_supported=True,
+                windows=windows,
+                message="Sessão SuperGrok autenticada via Grok Build CLI; cota semanal esgotada (0% disponível).",
+                dashboard_url=self.spec.dashboard_url,
+            )
+        except Exception as exc:
+            logger.debug("Grok CLI session probe failed: %s", exc)
+            return None
+
 
 class GeminiAccountAdapter(AccountUsageAdapter):
     _exhausted_pattern = re.compile(
@@ -398,6 +614,15 @@ class GeminiAccountAdapter(AccountUsageAdapter):
         snapshot = self._snapshot_payload()
         if snapshot:
             return self._from_snapshot(snapshot)
+
+        # 1. Try local Antigravity Language Server RPC probe (real live quota)
+        try:
+            live_usage = self._probe_language_server()
+            if live_usage:
+                return live_usage
+        except Exception as exc:
+            logger.debug("Antigravity Language Server probe failed: %s", exc)
+
         installation = self._find_antigravity()
         if installation is None and not any(os.environ.get(key) for key in self.spec.env_keys):
             return self.disconnected("Gemini/Antigravity não detectado e nenhuma API key configurada.", "antigravity_local")
@@ -427,6 +652,121 @@ class GeminiAccountAdapter(AccountUsageAdapter):
             provider_id=self.spec.provider_id, provider_name=self.spec.provider_name,
             family=self.spec.family, status=AccountConnectionStatus.CONNECTED, adapter="gemini_api_key",
             quota_supported=False, message="Gemini API configurada; quotas detalhadas ficam no AI Studio/Cloud Monitoring.",
+            dashboard_url=self.spec.dashboard_url,
+        )
+
+    def _probe_language_server(self) -> Optional[ProviderAccountUsage]:
+        app_data = os.environ.get("APPDATA")
+        if not app_data:
+            return None
+        main_log = Path(app_data) / "Antigravity" / "logs" / "main.log"
+        if not main_log.is_file():
+            return None
+
+        try:
+            with main_log.open("rb") as stream:
+                size = stream.seek(0, os.SEEK_END)
+                stream.seek(max(0, size - 300_000))
+                text = stream.read().decode("utf-8", errors="replace")
+        except OSError:
+            return None
+
+        port_matches = list(re.finditer(r"Reloading all windows with URL: https://127\.0\.0\.1:(\d+)/|Local:\s+https://127\.0\.0\.1:(\d+)/", text))
+        if not port_matches:
+            return None
+        last_port_m = port_matches[-1]
+        port = int(last_port_m.group(1) or last_port_m.group(2))
+
+        token_matches = list(re.finditer(r"--csrf_token\s+([a-f0-9\-]+)", text))
+        if not token_matches:
+            return None
+        csrf_token = token_matches[-1].group(1)
+
+        ctx = ssl.create_default_context()
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+
+        req = urllib.request.Request(
+            f"https://127.0.0.1:{port}/exa.language_server_pb.LanguageServerService/GetAvailableModels",
+            data=b"{}",
+            headers={
+                "Content-Type": "application/json",
+                "x-codeium-csrf-token": csrf_token,
+                "Connect-Protocol-Version": "1",
+            },
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(req, context=ctx, timeout=3.0) as res:
+                models_payload = json.loads(res.read().decode("utf-8"))
+        except (urllib.error.URLError, OSError, json.JSONDecodeError, TimeoutError):
+            return None
+
+        models = models_payload.get("response", {}).get("models", {})
+        if not isinstance(models, dict) or not models:
+            return None
+
+        target_model = (
+            models.get("gemini-3.8-flash-high")
+            or models.get("gemini-3.8-flash-medium")
+            or next((m for m in models.values() if isinstance(m, dict) and m.get("quotaInfo")), None)
+        )
+        if not target_model or not isinstance(target_model.get("quotaInfo"), dict):
+            return None
+
+        quota_info = target_model["quotaInfo"]
+        remaining_fraction = quota_info.get("remainingFraction")
+        if remaining_fraction is None:
+            return None
+
+        remaining_percent = _clamp_percent(float(remaining_fraction) * 100.0)
+        used_percent = round(100.0 - remaining_percent, 2) if remaining_percent is not None else None
+        resets_at = _timestamp_to_iso(quota_info.get("resetTime"))
+
+        plan = None
+        account_label = None
+        user_req = urllib.request.Request(
+            f"https://127.0.0.1:{port}/exa.language_server_pb.LanguageServerService/GetUserStatus",
+            data=b"{}",
+            headers={
+                "Content-Type": "application/json",
+                "x-codeium-csrf-token": csrf_token,
+                "Connect-Protocol-Version": "1",
+            },
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(user_req, context=ctx, timeout=2.0) as u_res:
+                user_payload = json.loads(u_res.read().decode("utf-8"))
+                us = user_payload.get("userStatus", {})
+                plan = us.get("planStatus", {}).get("planInfo", {}).get("planName")
+                account_label = us.get("email") or us.get("name")
+        except Exception:
+            pass
+
+        limited = used_percent is not None and used_percent >= 100.0
+        windows = [
+            QuotaWindow(
+                quota_id="antigravity:gemini-3.8-flash",
+                label="Gemini 3.8 Flash · 5h",
+                used_percent=used_percent,
+                remaining_percent=remaining_percent,
+                window_duration_minutes=300,
+                resets_at=resets_at,
+                metric="subscription",
+            )
+        ]
+        return ProviderAccountUsage(
+            provider_id=self.spec.provider_id,
+            provider_name=self.spec.provider_name,
+            family=self.spec.family,
+            status=AccountConnectionStatus.LIMITED if limited else AccountConnectionStatus.CONNECTED,
+            adapter="antigravity_rpc",
+            plan=plan or "Pro",
+            account_label=account_label,
+            quota_supported=True,
+            windows=windows,
+            message="Quotas lidas em tempo real do Language Server local do Antigravity.",
             dashboard_url=self.spec.dashboard_url,
         )
 
@@ -481,6 +821,135 @@ class GeminiAccountAdapter(AccountUsageAdapter):
         )
 
 
+class ClaudeCodeAccountAdapter(AccountUsageAdapter):
+    def inspect(self) -> ProviderAccountUsage:
+        snapshot = self._snapshot_payload()
+        if snapshot:
+            return self._from_snapshot(snapshot)
+
+        # 1. Try Claude Code CLI execution
+        executable = self._find_claude()
+        if executable:
+            cli_usage = self._probe_claude_cli(executable)
+            if cli_usage:
+                return cli_usage
+
+        # 2. Try Claude credentials file
+        cred_usage = self._probe_claude_credentials()
+        if cred_usage:
+            return cred_usage
+
+        # 3. Fallback to ANTHROPIC_API_KEY
+        if any(os.environ.get(key) for key in self.spec.env_keys):
+            return self.connected_without_quota(
+                "Anthropic API key configurada; a quota do plano Claude Code fica disponível via CLI autenticado.",
+                "anthropic_api_key",
+            )
+
+        return self.disconnected(
+            "Claude Code não instalado ou fora do PATH. Instale com 'npm install -g @anthropic-ai/claude-code' ou configure ANTHROPIC_API_KEY.",
+            "claude_code",
+        )
+
+    @staticmethod
+    def _find_claude() -> Optional[str]:
+        direct = shutil.which("claude") or shutil.which("claude.cmd")
+        if direct:
+            return direct
+        user_home = Path.home()
+        app_data = os.environ.get("APPDATA")
+        local_app_data = os.environ.get("LOCALAPPDATA")
+        candidates = [
+            Path(app_data) / "npm" / "claude.cmd" if app_data else None,
+            Path(app_data) / "npm" / "claude" if app_data else None,
+            Path(local_app_data) / "Programs" / "Claude" / "claude.exe" if local_app_data else None,
+            user_home / ".local" / "bin" / "claude",
+            user_home / ".local" / "bin" / "claude.exe",
+        ]
+        for candidate in candidates:
+            if candidate and candidate.is_file():
+                return str(candidate)
+        return None
+
+    def _probe_claude_cli(self, executable: str) -> Optional[ProviderAccountUsage]:
+        try:
+            result = subprocess.run(
+                [executable, "auth", "status", "--json"],
+                capture_output=True, text=True, encoding="utf-8", errors="replace",
+                timeout=6, check=False,
+            )
+            if result.returncode == 0 and result.stdout.strip():
+                data = json.loads(result.stdout)
+                if isinstance(data, dict) and (data.get("loggedIn") or data.get("email")):
+                    email = data.get("email") or data.get("account")
+                    plan = str(data.get("plan") or data.get("subscriptionTier") or "Claude Pro")
+                    windows = [
+                        QuotaWindow(
+                            quota_id="claude:weekly",
+                            label="Limite Semanal (1 semana)",
+                            used_percent=0.0,
+                            remaining_percent=100.0,
+                            window_duration_minutes=10080,
+                            resets_at=None,
+                            metric="subscription",
+                        ),
+                        QuotaWindow(
+                            quota_id="claude:5h",
+                            label="Janela Móvel (5h)",
+                            used_percent=0.0,
+                            remaining_percent=100.0,
+                            window_duration_minutes=300,
+                            resets_at=None,
+                            metric="subscription",
+                        ),
+                    ]
+                    return ProviderAccountUsage(
+                        provider_id=self.spec.provider_id,
+                        provider_name=self.spec.provider_name,
+                        family=self.spec.family,
+                        status=AccountConnectionStatus.CONNECTED,
+                        adapter="claude_code",
+                        plan=plan,
+                        account_label=email,
+                        quota_supported=True,
+                        windows=windows,
+                        message="Sessão Claude Code validada no terminal.",
+                        dashboard_url=self.spec.dashboard_url,
+                    )
+        except (OSError, subprocess.TimeoutExpired, json.JSONDecodeError) as exc:
+            logger.debug("Claude CLI auth probe failed: %s", exc)
+        return None
+
+    def _probe_claude_credentials(self) -> Optional[ProviderAccountUsage]:
+        user_home = Path.home()
+        candidates = [
+            user_home / ".claude" / ".credentials.json",
+            user_home / ".claude.json",
+        ]
+        for cred_file in candidates:
+            if not cred_file.is_file():
+                continue
+            try:
+                data = json.loads(cred_file.read_text(encoding="utf-8"))
+                if isinstance(data, dict) and any(k in data for k in ("token", "sessionKey", "oauth", "mcpServers")):
+                    email = data.get("email") or data.get("user")
+                    return ProviderAccountUsage(
+                        provider_id=self.spec.provider_id,
+                        provider_name=self.spec.provider_name,
+                        family=self.spec.family,
+                        status=AccountConnectionStatus.CONNECTED,
+                        adapter="claude_credentials",
+                        plan="Claude Code",
+                        account_label=email,
+                        quota_supported=False,
+                        message="Credenciais do Claude Code detectadas localmente.",
+                        dashboard_url=self.spec.dashboard_url,
+                    )
+            except Exception:
+                pass
+        return None
+
+
 class EnvironmentAccountAdapter(AccountUsageAdapter):
     def inspect(self) -> ProviderAccountUsage:
         snapshot = self._snapshot_payload()
@@ -523,6 +992,8 @@ def build_default_adapters(snapshot_dir: Path) -> Iterable[AccountUsageAdapter]:
             yield GrokAccountAdapter(spec, snapshot_dir)
         elif spec.provider_id == "google":
             yield GeminiAccountAdapter(spec, snapshot_dir)
+        elif spec.provider_id == "anthropic":
+            yield ClaudeCodeAccountAdapter(spec, snapshot_dir)
         elif spec.provider_id == "ollama":
             yield OllamaAccountAdapter(spec, snapshot_dir)
         else:

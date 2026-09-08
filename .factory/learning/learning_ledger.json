@@ -1,6 +1,6 @@
 {
   "session_id": "session_20260905_072924",
-  "prompt_count": 11,
+  "prompt_count": 18,
   "turns": [
     {
       "turn_id": 1,
@@ -111,6 +111,76 @@
       "one_shot_success": false,
       "missing_context_or_gap": "O protocolo antigo não exigia checkpoint limpo, preflight de ambiente, ownership, handoff verificável nem integração topológica",
       "target_skill": "autonomous-piv-loop"
+    },
+    {
+      "turn_id": 12,
+      "timestamp": "2026-09-06T23:22:12.477652+00:00",
+      "user_prompt_summary": "Retry da checagem de prontidao do proximo modulo do SegundoCerebro",
+      "perceived_intent": "Reexecutar reconhecimento e validar se o workspace local esta apto para desenvolvimento",
+      "was_followup": true,
+      "one_shot_success": false,
+      "missing_context_or_gap": "Executor sandboxed falhou na preparacao do helper; foi necessario usar execucao aprovada fora do sandbox",
+      "target_skill": "prime-intelligence"
+    },
+    {
+      "turn_id": 13,
+      "timestamp": "2026-09-07T13:19:56.719922+00:00",
+      "user_prompt_summary": "Pegue o proximo item sem conflito com DF-15",
+      "perceived_intent": "Implementar USR-14 auto-launch de servicos locais no DarkHub",
+      "was_followup": false,
+      "one_shot_success": true,
+      "missing_context_or_gap": null,
+      "target_skill": "04-autonomous-piv-loop"
+    },
+    {
+      "turn_id": 14,
+      "timestamp": "2026-09-07T14:05:55.272781+00:00",
+      "user_prompt_summary": "DF-15: Vertical de bugfix autonomo da fabrica",
+      "perceived_intent": "Avançar DF-15 no caminho critico, reaproveitando tentativa anterior sem conflito",
+      "was_followup": false,
+      "one_shot_success": true,
+      "missing_context_or_gap": null,
+      "target_skill": "04-autonomous-piv-loop"
+    },
+    {
+      "turn_id": 15,
+      "timestamp": "2026-09-07T23:07:07.931448+00:00",
+      "user_prompt_summary": "Publicar tudo no GitHub e garantir PR merged; remoto não pode ficar desatualizado",
+      "perceived_intent": "Obrigar entrega remota verificável após desenvolvimento: commit, push, PR, merge e confirmação do main",
+      "was_followup": true,
+      "one_shot_success": false,
+      "missing_context_or_gap": "O fluxo anterior permitiu concluir com commits e alterações apenas locais, sem PR nem verificação do remoto",
+      "target_skill": "autonomous-piv-loop"
+    },
+    {
+      "turn_id": 16,
+      "timestamp": "2026-09-08T03:14:26.063281+00:00",
+      "user_prompt_summary": "Desenvolver próximo item do backlog",
+      "perceived_intent": "Implementar DF-20: política de entrega e integração GitHub com checks, risco, merge queue e idempotência",
+      "was_followup": false,
+      "one_shot_success": true,
+      "missing_context_or_gap": null,
+      "target_skill": "autonomous-piv-loop"
+    },
+    {
+      "turn_id": 17,
+      "timestamp": "2026-09-08T04:37:02.227329+00:00",
+      "user_prompt_summary": "Versão atualizada do painel não subiu...",
+      "perceived_intent": "Iniciar/subir o painel DarkHub atualizado com os cards de infraestrutura e garantir cache limpo no navegador",
+      "was_followup": true,
+      "one_shot_success": false,
+      "missing_context_or_gap": "Após implementar feature no painel, o servidor não foi iniciado automaticamente nem as instruções de inicialização foram destacadas para o usuário",
+      "target_skill": "autonomous-piv-loop"
+    },
+    {
+      "turn_id": 18,
+      "timestamp": "2026-09-08T19:28:48.310016+00:00",
+      "user_prompt_summary": "Desenvolver o próximo item HF- do roadmap",
+      "perceived_intent": "Executar o ticket canônico HF-01-02 após HF-01-01, com contratos Pydantic e leitura segura de fontes",
+      "was_followup": true,
+      "one_shot_success": false,
+      "missing_context_or_gap": "Confirmar o estado compartilhado antes de editar e preservar mudanças concorrentes",
+      "target_skill": "autonomous-piv-loop"
     }
   ],
   "preferences": [
@@ -121,6 +191,32 @@
       "context_or_example": "00-continuous-self-improvement configurada como skill prioritária mestre",
       "confidence": 1.0,
       "created_at": "2026-09-05T07:29:28.354988+00:00",
+      "times_reinforced": 1,
+      "origin": "explicit_preference",
+      "status": "active",
+      "verification_gate_id": null,
+      "active": true
+    },
+    {
+      "preference_id": "pref_2168f2b5",
+      "category": "workflow",
+      "rule": "Quando o usuário pedir o próximo item do backlog, selecionar o próximo ticket canônico e executar o ciclo PIV completo sem perguntas triviais",
+      "context_or_example": "Pedido de desenvolvimento do próximo item após o DF-19; selecionar DF-20 pelo DEVELOPMENT_PLAN e validar com os gates oficiais",
+      "confidence": 1.0,
+      "created_at": "2026-09-08T03:14:42.231842+00:00",
+      "times_reinforced": 1,
+      "origin": "explicit_preference",
+      "status": "active",
+      "verification_gate_id": null,
+      "active": true
+    },
+    {
+      "preference_id": "pref_37a620c3",
+      "category": "workflow",
+      "rule": "Inviolável: Nunca dar um ticket como concluído sem teste de ponta a ponta no ambiente/hardware real. Toda configuração manual necessária deve ser demandada e realizada com o usuário ANTES dos testes finais de entrega.",
+      "context_or_example": "USR-16: validação em hardware físico on-premise desktop-g45ipem antes de marcar como delivered",
+      "confidence": 1.0,
+      "created_at": "2026-09-08T14:25:26.395997+00:00",
       "times_reinforced": 1,
       "origin": "explicit_preference",
       "status": "active",
@@ -548,6 +644,156 @@
       "origin": "rca",
       "status": "proposed",
       "active": false
+    },
+    {
+      "rca_id": "rca_3f571ead",
+      "timestamp": "2026-09-06T23:22:12.562655+00:00",
+      "category": "tool_misuse",
+      "symptom": "Comandos locais e apply_patch falham com helper_unknown_error durante setup refresh do sandbox",
+      "mechanism": "O helper de isolamento do host nao conclui a preparacao do processo, antes de executar o comando",
+      "root_cause": "Falha externa na inicializacao do sandbox desta tarefa, nao reproduzida na execucao aprovada fora do sandbox",
+      "patch_description": "Usar fallback aprovado fora do sandbox apenas para comandos necessarios e manter alteracoes de produto bloqueadas ate o helper voltar",
+      "preventative_rule": "Quando helper_unknown_error ocorrer antes da execucao, confirmar com comando minimo e fallback aprovado; classificar como ambiente e nao como regressao do repositorio",
+      "regression_test_file": null,
+      "verification_gate_id": null,
+      "origin": "rca",
+      "status": "proposed",
+      "active": false
+    },
+    {
+      "rca_id": "rca_e2691184",
+      "timestamp": "2026-09-07T03:46:11.356108+00:00",
+      "category": "tool_misuse",
+      "symptom": "Primeira leitura falhou por um erro de inicializacao do terminal com PathNotFound ou FileNotFound ao tentar ler MISSION.md",
+      "mechanism": "Perfil global do PowerShell (Microsoft.PowerShell_profile.ps1) executa Set-Location C:\\dev incondicionalmente, sequestrando o cwd de subprocessos para C:\\dev",
+      "root_cause": "Invocacao programatica de PowerShell sem -NoProfile e ausencia de guardrail de ambiente de terminal na inicializacao do DarkFac",
+      "patch_description": "Criacao do guardrail core/harness/terminal_env.py, script scripts/init_terminal.ps1, teste tests/test_bug_em_inicializa_o_do_te.py e inclusao obrigatoria de -NoProfile nas regras e skills",
+      "preventative_rule": "Invocacoes de terminal no Windows devem incluir -NoProfile e verificar ancoragem do repositorio via terminal_env antes de executar leituras relativas",
+      "regression_test_file": "tests/test_bug_em_inicializa_o_do_te.py",
+      "verification_gate_id": null,
+      "origin": "rca",
+      "status": "proposed",
+      "active": false
+    },
+    {
+      "rca_id": "rca_ac2580b0",
+      "timestamp": "2026-09-07T21:05:27.172321+00:00",
+      "category": "test_regression",
+      "symptom": "DF-18 focal test expected JSON classification but received raw decoder text",
+      "mechanism": "_parse_patch_response propagated json.JSONDecodeError directly",
+      "root_cause": "The real-mode provider boundary lacked an explicit error taxonomy for malformed JSON output",
+      "patch_description": "Translate JSONDecodeError into a stable provider response is not valid JSON ValueError",
+      "preventative_rule": "Provider output parsers must classify malformed protocol payloads before returning errors",
+      "regression_test_file": "tests/test_agent_evals.py",
+      "verification_gate_id": null,
+      "origin": "rca",
+      "status": "proposed",
+      "active": false
+    },
+    {
+      "rca_id": "rca_193b826f",
+      "timestamp": "2026-09-07T21:07:43.427519+00:00",
+      "category": "timeout",
+      "symptom": "Full pytest run exceeded RM-08 warm-cache latency threshold at 219.07 ms",
+      "mechanism": "The dense graph performance assertion is sensitive to process-wide scheduling/contention; the same test passed in 0.14 s when isolated",
+      "root_cause": "Suite-level Windows runtime contention caused an intermittent performance sample outside the DF-18 change surface",
+      "patch_description": "No source patch: rerun isolated and preserve the existing RM-08 threshold and implementation",
+      "preventative_rule": "Classify unrelated performance flakes with an isolated reproduction before changing production code",
+      "regression_test_file": "tests/test_roadmap_scale.py",
+      "verification_gate_id": null,
+      "origin": "rca",
+      "status": "proposed",
+      "active": false
+    },
+    {
+      "rca_id": "rca_bfe151ee",
+      "timestamp": "2026-09-08T04:37:21.427021+00:00",
+      "category": "assumption_error",
+      "symptom": "Painel com versoes atualizadas nao sobe ou nao reflete mudancas no navegador",
+      "mechanism": "Servidor local offline e falta de headers anti-cache para index.html no FastAPI",
+      "root_cause": "run_hub.py nao foi inicializado e Starlette FileResponse mantinha cache local do index.html sem no-cache headers",
+      "patch_description": "Adicionados headers anti-cache no serve_index, inicializacao robusta com fallback em infra.js e comando claro de inicializacao",
+      "preventative_rule": "Sempre garantir headers anti-cache em rotas de UI SPA e inicializar/oferecer comando explicito de boot do servidor",
+      "regression_test_file": "tests/test_adicionar_cards_de_infrae.py",
+      "verification_gate_id": null,
+      "origin": "rca",
+      "status": "proposed",
+      "active": false
+    },
+    {
+      "rca_id": "rca_33b08efd",
+      "timestamp": "2026-09-08T04:38:09.733904+00:00",
+      "category": "assumption_error",
+      "symptom": "Painel com versoes atualizadas nao sobe ou nao reflete mudancas no navegador",
+      "mechanism": "Servidor local offline e falta de headers anti-cache para index.html no FastAPI",
+      "root_cause": "run_hub.py nao foi inicializado e Starlette FileResponse mantinha cache local do index.html sem no-cache headers",
+      "patch_description": "Adicionados headers anti-cache no serve_index, inicializacao robusta com fallback em infra.js e comando claro de inicializacao",
+      "preventative_rule": "Sempre garantir headers anti-cache em rotas de UI SPA e inicializar/oferecer comando explicito de boot do servidor",
+      "regression_test_file": "tests/test_adicionar_cards_de_infrae.py",
+      "verification_gate_id": "gate_7980cbc7",
+      "origin": "rca",
+      "status": "active",
+      "active": true
+    },
+    {
+      "rca_id": "rca_42a7be7a",
+      "timestamp": "2026-09-08T14:25:32.956991+00:00",
+      "category": "assumption_error",
+      "symptom": "Ticket concluido sem teste funcional real no desktop fisico e sem demandar configuracoes manuais previas do usuario",
+      "mechanism": "Aceite baseado apenas em mocks/testes locais sem rodar ponta a ponta no hardware remoto via Tailscale",
+      "root_cause": "Ausencia de portao de validacao real em ambiente fisico e omissao de demanda antecipada de ajustes manuais necessarios",
+      "patch_description": "Atualizacao do subagent com CREATE_NO_WINDOW, suporte a modo headless em background e enforcamento de testes E2E reais com intervencao humana antecipada",
+      "preventative_rule": "Proibido entregar ticket distribuido sem teste real em hardware e sem solicitar configuracoes manuais ao usuario antes da conclusao",
+      "regression_test_file": "tests/test_worker_onprem_test_subagent.py",
+      "verification_gate_id": "gate_e20d19dc",
+      "origin": "rca",
+      "status": "active",
+      "active": true
+    },
+    {
+      "rca_id": "rca_0afc142f",
+      "timestamp": "2026-09-08T19:29:58.374634+00:00",
+      "category": "tool_misuse",
+      "symptom": "Consulta exploratória multiline falhou com SyntaxError no python -c e a RCA inicial recusou uma categoria inválida",
+      "mechanism": "PowerShell recebeu literal de escape de nova linha e o CLI aceita apenas categorias fechadas",
+      "root_cause": "Uso de quoting frágil e categoria não pertencente ao contrato do CLI",
+      "patch_description": "Decompor inspeções em comandos simples e usar somente categorias enumeradas pelo help",
+      "preventative_rule": "Antes de registrar RCA, consultar o contrato de argumentos; sob PowerShell evitar quoting multiline em python -c",
+      "regression_test_file": "core/harness/terminal_env.py",
+      "verification_gate_id": null,
+      "origin": "rca",
+      "status": "proposed",
+      "active": false
+    },
+    {
+      "rca_id": "rca_393ec111",
+      "timestamp": "2026-09-08T19:37:58.919911+00:00",
+      "category": "test_regression",
+      "symptom": "Teste de extra_fields não falhou como esperado",
+      "mechanism": "Pydantic model_copy(update) preserva atualização sem revalidar campos extras",
+      "root_cause": "O teste usou uma API de cópia inadequada para verificar ConfigDict extra=forbid",
+      "patch_description": "Construir BaselineSourceSpec com campo unexpected diretamente para acionar a validação do contrato",
+      "preventative_rule": "Testes de validação Pydantic devem instanciar ou usar model_validate, não model_copy, para confirmar rejeição de campos",
+      "regression_test_file": "tests/test_baseline_sources.py",
+      "verification_gate_id": null,
+      "origin": "rca",
+      "status": "proposed",
+      "active": false
+    },
+    {
+      "rca_id": "rca_44ec765f",
+      "timestamp": "2026-09-08T19:39:44.993199+00:00",
+      "category": "tool_misuse",
+      "symptom": "Ruff rejeitou os arquivos HF-01-02 por imports, anotação antecipada e datetime ingênuo no teste",
+      "mechanism": "A implementação inicial não seguiu a ordenação automática de imports e o teste intencional não documentou o datetime sem timezone",
+      "root_cause": "Faltou rodar a checagem estática antes da primeira validação focal",
+      "patch_description": "Organizar imports, remover aspas da anotação futura e construir o datetime ingênuo com comentário explícito no teste",
+      "preventative_rule": "Executar lint dos arquivos novos antes dos gates e isolar construções intencionalmente inválidas em testes",
+      "regression_test_file": "tests/test_baseline_sources.py",
+      "verification_gate_id": null,
+      "origin": "rca",
+      "status": "proposed",
+      "active": false
     }
   ],
   "transfers": [
@@ -906,6 +1152,37 @@
       "generalized_principle": "Release model memory on test exit",
       "applied_actions": [],
       "created_at": "2026-09-05T19:57:34.150655+00:00"
+    },
+    {
+      "transfer_id": "trans_1d36d975",
+      "source_domain": "hub.frontend",
+      "target_domains": [
+        "canaletto_gallery.backend",
+        "hub.backend"
+      ],
+      "specific_lesson": "Index HTML sem headers no-cache causou exibicao de versao antiga do painel",
+      "generalized_principle": "Rotas raiz que servem index.html devem declarar headers no-cache para evitar retencao de HTML obsoleto no navegador do usuario",
+      "applied_actions": [
+        "headers Cache-Control no-cache no FileResponse"
+      ],
+      "created_at": "2026-09-08T04:38:15.242371+00:00"
+    },
+    {
+      "transfer_id": "trans_441a2520",
+      "source_domain": "core.harness",
+      "target_domains": [
+        "core.infra",
+        "hub.backend",
+        "core.database",
+        "core.deployment"
+      ],
+      "specific_lesson": "Tickets com dependencia de hardware ou servicos externos precisam de teste real E2E e demanda proativa de ajustes manuais antes do encerramento",
+      "generalized_principle": "Zero-Trust Physical E2E Gate: nenhum componente distribuido e aceito sem execucao real no nó de destino com configuracoes manuais do usuario alinhadas previamente",
+      "applied_actions": [
+        "Sempre demandar do usuario quaisquer configuracoes de portas/chaves/permissoes antes dos testes finais",
+        "Validar via rede real no hardware remoto antes de marcar ticket como delivered"
+      ],
+      "created_at": "2026-09-08T14:25:43.382680+00:00"
     }
   ],
   "contrasts": [],
@@ -1173,7 +1450,23 @@
       "passed": true,
       "output_snippet": "..........                                                               [100%]\n10 passed in 0.14s\n",
       "executed_at": "2026-09-06T10:16:46.631871+00:00"
+    },
+    {
+      "gate_id": "gate_7980cbc7",
+      "target_type": "rca_patch",
+      "test_command": "python -m pytest tests/test_adicionar_cards_de_infrae.py -v",
+      "passed": true,
+      "output_snippet": "/test_adicionar_cards_de_infrae.py::test_system_access_links_integrity PASSED [ 30%]\ntests/test_adicionar_cards_de_infrae.py::test_probe_liveness_graceful_failure PASSED [ 40%]\ntests/test_adicionar_cards_de_infrae.py::test_probe_liveness_successful_mock PASSED [ 50%]\ntests/test_adicionar_cards_de_infrae.py::test_api_get_infra_cards PASSED [ 60%]\ntests/test_adicionar_cards_de_infrae.py::test_api_post_infra_cards_refresh PASSED [ 70%]\ntests/test_adicionar_cards_de_infrae.py::test_api_get_single_node_card PASSED [ 80%]\ntests/test_adicionar_cards_de_infrae.py::test_frontend_infra_assets_mounted PASSED [ 90%]\ntests/test_adicionar_cards_de_infrae.py::test_non_goals_no_administrative_mutation_endpoints PASSED [100%]\n\n============================= 10 passed in 0.65s ==============================\n",
+      "executed_at": "2026-09-08T04:38:09.730815+00:00"
+    },
+    {
+      "gate_id": "gate_e20d19dc",
+      "target_type": "rca_patch",
+      "test_command": "python -m pytest tests/test_worker_onprem_test_subagent.py -v",
+      "passed": true,
+      "output_snippet": "ASSED [ 41%]\ntests/test_worker_onprem_test_subagent.py::test_engine_execute_local_mode PASSED [ 50%]\ntests/test_worker_onprem_test_subagent.py::test_engine_execute_remote_success PASSED [ 58%]\ntests/test_worker_onprem_test_subagent.py::test_engine_execute_auto_failover_to_local_when_remote_offline PASSED [ 66%]\ntests/test_worker_onprem_test_subagent.py::test_engine_execute_remote_fail_closed_when_no_fallback PASSED [ 75%]\ntests/test_worker_onprem_test_subagent.py::test_engine_execute_remote_network_error_triggers_fallback PASSED [ 83%]\ntests/test_worker_onprem_test_subagent.py::test_hub_api_list_test_workers PASSED [ 91%]\ntests/test_worker_onprem_test_subagent.py::test_hub_api_execute_test_suite PASSED [100%]\n\n============================= 12 passed in 0.44s ==============================\n",
+      "executed_at": "2026-09-08T14:25:32.955989+00:00"
     }
   ],
-  "last_updated": "2026-09-06T10:25:50.795942+00:00"
+  "last_updated": "2026-09-08T19:39:44.993199+00:00"
 }

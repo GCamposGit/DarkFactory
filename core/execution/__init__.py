@@ -1,29 +1,42 @@
-"""Execution-domain contracts and deterministic resource controls."""
-
-from core.execution.budget import (
-    BudgetDeadlineExceeded,
-    BudgetError,
-    BudgetExceeded,
-    ExecutionBudget,
-    UnknownCostRejected,
-)
+from core.execution.budget import ExecutionBudgetManager
 from core.execution.contracts import (
+    AttemptOutcome,
+    AttemptRecord,
     Budget,
-    BudgetReservation,
-    BudgetSnapshot,
+    BudgetWindow,
+    BudgetWindowType,
+    ReservationRecord,
     ReservationStatus,
     UnknownCostPolicy,
 )
+from core.execution.providers import (
+    MockModelProvider,
+    ModelProvider,
+    OllamaModelProvider,
+    OpenRouterModelProvider,
+    ProviderResponse,
+    UnifiedModelProvider,
+    get_model_provider,
+    get_openrouter_api_key,
+)
 
 __all__ = [
+    "AttemptOutcome",
+    "AttemptRecord",
     "Budget",
-    "BudgetDeadlineExceeded",
-    "BudgetError",
-    "BudgetExceeded",
-    "BudgetReservation",
-    "BudgetSnapshot",
-    "ExecutionBudget",
+    "BudgetWindow",
+    "BudgetWindowType",
+    "ExecutionBudgetManager",
+    "MockModelProvider",
+    "ModelProvider",
+    "OllamaModelProvider",
+    "OpenRouterModelProvider",
+    "ProviderResponse",
+    "ReservationRecord",
     "ReservationStatus",
+    "UnifiedModelProvider",
     "UnknownCostPolicy",
-    "UnknownCostRejected",
+    "get_model_provider",
+    "get_openrouter_api_key",
 ]
+

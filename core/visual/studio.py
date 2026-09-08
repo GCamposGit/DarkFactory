@@ -5,6 +5,8 @@ Orchestrates prompt synthesis, semantic text illustration, procedural and cloud 
 
 import json
 from pathlib import Path
+
+from core.paths import project_root
 from typing import List, Dict, Any, Optional
 
 from core.visual.models import (
@@ -20,12 +22,15 @@ from core.usage.ledger import ModelUsageLedger, infer_model_tier
 from core.usage.models import ModelCallEvent, ModelModality, ModelTier
 
 
+from core.execution.budget import ExecutionBudgetManager
+
+
 class VisualStudio:
     """Central orchestrator for all visual artifact generation in DarkFac."""
 
     def __init__(self, output_dir: Optional[Path] = None) -> None:
         if output_dir is None:
-            self.output_dir = Path(__file__).resolve().parent.parent.parent / ".factory" / "visuals"
+            self.output_dir = project_root() / ".factory" / "visuals"
         else:
             self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
@@ -50,9 +55,14 @@ class VisualStudio:
         except Exception:
             pass
 
-    def create_asset(self, spec: VisualPromptSpec) -> VisualAssetResult:
+    def create_asset(
+        self,
+        spec: VisualPromptSpec,
+        budget_manager: Optional[ExecutionBudgetManager] = None,
+        budget_id: Optional[str] = None,
+    ) -> VisualAssetResult:
         """Generates a visual asset from explicit prompt specifications."""
-        result = self.engine.generate(spec)
+        result = self.engine.generate(spec, budget_manager=budget_manager, budget_id=budget_id)
         self._save_metadata(result)
         self._record_usage(result)
         return result
@@ -64,6 +74,8 @@ class VisualStudio:
         theme: Optional[VisualTheme] = None,
         aspect_ratio: Optional[AspectRatio] = None,
         offline: bool = False,
+        budget_manager: Optional[ExecutionBudgetManager] = None,
+        budget_id: Optional[str] = None,
     ) -> VisualAssetResult:
         """Analyzes text semantics, synthesizes prompt, and renders matching visual asset."""
         spec = VisualPromptSynthesizer.synthesize_from_text(
@@ -73,7 +85,7 @@ class VisualStudio:
             aspect_ratio=aspect_ratio,
         )
         spec.offline = offline
-        result = self.engine.generate(spec)
+        result = self.engine.generate(spec, budget_manager=budget_manager, budget_id=budget_id)
         self._save_metadata(result)
         self._record_usage(result)
         return result

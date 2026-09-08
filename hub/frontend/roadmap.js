@@ -302,9 +302,20 @@ function renderRoadmapListItem(item) {
   const flags = item.operational_flags || [];
   const dependencies = item.dependencies || [];
   const sources = item.source_refs || [];
+  const tags = item.tags || [];
   const flagMarkup = flags.length
     ? flags.map((flag) => `<span class="roadmap-tag roadmap-tag-warning">⚠ ${escapeRoadmapHtml(roadmapFlagLabel(flag))}</span>`).join(" ")
     : "";
+
+  let originBadge = "";
+  if (tags.includes("user-demand")) {
+    originBadge = `<span class="px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 text-[10px] font-mono font-medium flex items-center gap-1"><span>👤</span> Demanda do Usuário</span>`;
+  } else if (tags.includes("code-review") || tags.includes("adversarial-review")) {
+    originBadge = `<span class="px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-300 border border-amber-500/30 text-[10px] font-mono font-medium flex items-center gap-1"><span>🔍</span> Code Review</span>`;
+  } else if (tags.includes("agent-feature") || tags.includes("self-improvement") || tags.includes("autonomous-agent")) {
+    originBadge = `<span class="px-2 py-0.5 rounded-full bg-cyan-500/15 text-cyan-300 border border-cyan-500/30 text-[10px] font-mono font-medium flex items-center gap-1"><span>🤖</span> Agente</span>`;
+  }
+
   return `
     <article class="roadmap-list-item" data-roadmap-item-id="${escapeRoadmapHtml(item.id)}">
       <button type="button" class="roadmap-list-button" onclick="selectRoadmapItem('${escapeRoadmapAttribute(item.id)}')" aria-label="Abrir detalhes de ${escapeRoadmapHtml(item.title)}">
@@ -315,6 +326,7 @@ function renderRoadmapListItem(item) {
             <span class="roadmap-list-title">${escapeRoadmapHtml(item.title)}</span>
           </span>
           <span class="roadmap-list-meta">
+            ${originBadge}
             <span class="roadmap-tag roadmap-tag-status">${roadmapLabel("delivery_status", item.delivery_status)}</span>
             <span>${roadmapLabel("horizon", item.horizon)}</span>
             <span>${roadmapLabel("item_type", item.item_type)}</span>
@@ -471,12 +483,16 @@ function renderRoadmapDetail(item) {
         <button type="button" onclick="closeRoadmapDetail()" aria-label="Fechar detalhe" class="p-1.5 rounded-lg text-slate-500 hover:text-slate-200 hover:bg-slate-800">✕</button>
       </div>
       <div class="flex flex-wrap gap-1.5">
+        ${(item.tags || []).includes("user-demand") ? '<span class="px-2.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 text-[11px] font-mono font-bold flex items-center gap-1"><span>👤</span> Origem: Demanda do Usuário</span>' : ''}
+        ${(item.tags || []).includes("code-review") ? '<span class="px-2.5 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/40 text-[11px] font-mono font-bold flex items-center gap-1"><span>🔍</span> Origem: Code Review</span>' : ''}
+        ${(item.tags || []).includes("agent-feature") ? '<span class="px-2.5 py-0.5 rounded-full bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 text-[11px] font-mono font-bold flex items-center gap-1"><span>🤖</span> Origem: Iniciativa de Agente</span>' : ''}
         <span class="roadmap-tag roadmap-tag-status">${roadmapStatusSymbol(item.delivery_status)} ${roadmapLabel("delivery_status", item.delivery_status)}</span>
         <span class="roadmap-tag roadmap-tag-neutral">${roadmapLabel("horizon", item.horizon)}</span>
         <span class="roadmap-tag roadmap-tag-neutral">Confiança: ${roadmapLabel("confidence", item.confidence)}</span>
         <span class="roadmap-tag roadmap-tag-neutral">${escapeRoadmapHtml(item.confirmation_state || "unconfirmed")}</span>
       </div>
       <p class="text-xs text-slate-300 leading-relaxed">${escapeRoadmapHtml(item.description || "Sem descrição registrada.")}</p>
+      ${(item.tags || []).length ? `<section><h4 class="roadmap-detail-heading">Tags de classificação</h4><div class="flex flex-wrap gap-1 mt-1">${item.tags.map((t) => `<span class="px-2 py-0.5 rounded bg-slate-800 text-[10px] font-mono text-slate-300 border border-slate-700">${escapeRoadmapHtml(t)}</span>`).join("")}</div></section>` : ""}
       <section><h4 class="roadmap-detail-heading">Justificativa do estado</h4><p class="text-xs text-slate-400 leading-relaxed">${escapeRoadmapHtml(item.state_rationale || "A fonte canônica não registra uma justificativa adicional para este estado.")}</p></section>
       <div class="grid grid-cols-2 gap-3 text-[11px]">
         <div class="rounded-xl bg-slate-950/60 border border-slate-800 p-3"><span class="block text-slate-500">Tipo</span><span class="text-slate-200">${roadmapLabel("item_type", item.item_type)}</span></div>

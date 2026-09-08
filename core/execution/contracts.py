@@ -1,80 +1,134 @@
-"""Closed Pydantic contracts for execution-budget accounting."""
+"""Typed contracts for task execution, budgets and attempt telemetry.
+
+Conforms to Section 3 (Contratos mínimos) of the Dark Factory Development Plan:
+- Budget: currency, ceiling, reserved, spent, unknown_cost_policy, max_attempts,
+  deadline, concurrency_limit.
+- Attempt: attempt_id, invocation_id, input_artifact_hash, output_artifact_hash,
+  mode, tokens, measured_cost, estimated_cost, latency, outcome.
+"""
 
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from decimal import Decimal
 from enum import Enum
+from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class UnknownCostPolicy(str, Enum):
-    """Fail-closed policies for work whose price cannot be estimated."""
+    """Behavior when a provider returns no token or cost measurement."""
 
     REJECT = "reject"
-    RESERVE_REMAINDER = "reserve_remainder"
+    ESTIMATE = "estimate"
+    CONSERVATIVE_MAX = "conservative_max"
+
+
+class AttemptOutcome(str, Enum):
+    """Terminal or in-flight outcome of an execution attempt."""
+
+    PENDING = "pending"
+    SUCCEEDED = "succeeded"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
+    DEADLINE_EXCEEDED = "deadline_exceeded"
+    BUDGET_EXCEEDED = "budget_exceeded"
 
 
 class ReservationStatus(str, Enum):
-    """Lifecycle of one cost reservation."""
+    """Lifecycle state of a budget reservation."""
 
     ACTIVE = "active"
-    SETTLED = "settled"
+    COMMITTED = "committed"
     RELEASED = "released"
+    EXPIRED = "expired"
+
+
+class BudgetWindowType(str, Enum):
+    """Type of rolling expenditure window."""
+
+    SHORT = "short"  # e.g., 1-5 hours
+    LONG = "long"    # e.g., 7 days (weekly)
+
+
+class BudgetWindow(BaseModel):
+    """Rolling consumption window to prevent quota exhaustion."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    window_type: BudgetWindowType
+    duration_seconds: int = Field(ge=1)
+    ceiling: float = Field(ge=0.0)
+    spent: float = Field(ge=0.0, default=0.0)
+    reserved: float = Field(ge=0.0, default=0.0)
+
+    @property
+    def available(self) -> float:
+        return max(0.0, round(self.ceiling - (self.spent + self.reserved), 8))
 
 
 class Budget(BaseModel):
-    """Immutable execution envelope configured by the operator."""
+    """Deterministic budget envelope for a task or execution session.
 
-    model_config = ConfigDict(extra="forbid", frozen=True)
+    Enforces currency, ceiling, concurrency limit, maximum attempts,
+    deadline, and unknown-cost policy.
+    """
 
-    currency: str = Field(min_length=3, max_length=3, pattern=r"^[A-Z]{3}$")
-    ceiling: Decimal = Field(gt=0)
-    reserved: Decimal = Field(default=Decimal("0"), ge=0)
-    spent: Decimal = Field(default=Decimal("0"), ge=0)
+    model_config = ConfigDict(extra="forbid")
+
+    currency: str = Field(default="USD", min_length=1)
+    ceiling: float = Field(ge=0.0)
+    reserved: float = Field(ge=0.0, default=0.0)
+    spent: float = Field(ge=0.0, default=0.0)
     unknown_cost_policy: UnknownCostPolicy = UnknownCostPolicy.REJECT
-    max_attempts: int = Field(ge=1)
-    deadline: datetime
-    concurrency_limit: int = Field(ge=1)
+    max_attempts: int = Field(ge=1, default=3)
+    deadline: datetime | None = None
+    concurrency_limit: int = Field(ge=1, default=1)
+    short_window: BudgetWindow | None = None
+    long_window: BudgetWindow | None = None
 
-    @field_validator("deadline")
-    @classmethod
-    def deadline_must_be_timezone_aware(cls, value: datetime) -> datetime:
-        if value.tzinfo is None or value.utcoffset() is None:
-            raise ValueError("deadline must be timezone-aware")
-        return value.astimezone(UTC)
+    @property
+    def available_amount(self) -> float:
+        return max(0.0, round(self.ceiling - (self.spent + self.reserved), 8))
 
-    @model_validator(mode="after")
-    def totals_must_fit_ceiling(self) -> "Budget":
-        if self.spent + self.reserved > self.ceiling:
-            raise ValueError("spent plus reserved cannot exceed ceiling")
-        return self
+    def is_expired(self, at_time: datetime | None = None) -> bool:
+        if self.deadline is None:
+            return False
+        reference = at_time or datetime.now(UTC)
+        if reference.tzinfo is None:
+            reference = reference.replace(tzinfo=UTC)
+        deadline_utc = self.deadline if self.deadline.tzinfo is not None else self.deadline.replace(tzinfo=UTC)
+        return reference >= deadline_utc
 
 
-class BudgetReservation(BaseModel):
-    """Immutable evidence for one accepted reservation or settlement."""
+class ReservationRecord(BaseModel):
+    """Lease on a portion of the budget held by an active attempt."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    reservation_id: str = Field(min_length=1, max_length=200)
-    reserved_cost: Decimal = Field(ge=0)
-    actual_cost: Decimal | None = Field(default=None, ge=0)
+    reservation_id: str = Field(min_length=1)
+    budget_id: str = Field(min_length=1)
+    attempt_id: str = Field(min_length=1)
+    amount: float = Field(ge=0.0)
     status: ReservationStatus = ReservationStatus.ACTIVE
     created_at: datetime
-    settled_at: datetime | None = None
+    expires_at: datetime | None = None
+    committed_cost: float | None = None
 
 
-class BudgetSnapshot(BaseModel):
-    """Consistent point-in-time view of the mutable budget ledger."""
+class AttemptRecord(BaseModel):
+    """Immutable audit record of a single execution attempt."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    currency: str
-    ceiling: Decimal = Field(gt=0)
-    reserved: Decimal = Field(ge=0)
-    spent: Decimal = Field(ge=0)
-    available: Decimal = Field(ge=0)
-    attempts: int = Field(ge=0)
-    active_reservations: int = Field(ge=0)
-    deadline: datetime
+    attempt_id: str = Field(min_length=1)
+    invocation_id: str | None = None
+    input_artifact_hash: str = Field(min_length=1)
+    output_artifact_hash: str | None = None
+    mode: str = "live"
+    tokens: int = Field(ge=0, default=0)
+    measured_cost: float | None = None
+    estimated_cost: float = Field(ge=0.0, default=0.0)
+    latency: float = Field(ge=0.0, default=0.0)
+    outcome: AttemptOutcome = AttemptOutcome.SUCCEEDED
+    timestamp: datetime

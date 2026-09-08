@@ -1,27 +1,13 @@
-# DF-12 - Execution budget report
-
-## Identidade
-
-- Ticket: `DF-12`
-- Task/owner: `/root/df12_preflight`
-- Lease: `fencing_token=1`, expira em `2026-09-06T12:55:35Z`
-- Branch: `codex/df-12-execution-budget`
-- Worktree/cwd: `C:\dev\DarkFac_worktrees\df12`
-- SHA-base: `a4fd4817fe6f911d70bc9a45187d11ac7357940e`
-- SHA final: commit seletivo que contém este relatório; o valor exato consta no
-  contrato WT-08 porque um commit não pode conter o próprio hash.
+# DF-12 — Execution budget, concurrent reservations and quota windows
 
 ## Resultado
 
-Foi criado um envelope de execução tipado e fail-closed. Reservas de custo são
-serializadas por lock no mesmo trecho crítico que confere teto, concorrência,
-número de tentativas e deadline. Liquidação substitui reserva por custo medido;
-liberação devolve capacidade sem apagar a tentativa.
+Implementado o subsistema transacional de controle orçamentário e reservas concorrentes (**DF-12**), atendendo à Fase 1 do Plano de Desenvolvimento da Dark Factory.
 
-Custo desconhecido é recusado por padrão. A política conservadora alternativa
-reserva todo o saldo, impedindo outra admissão até a liquidação/liberação. O
-roteador passou a considerar a janela de quota conhecida mais restritiva, de
-modo que uma janela curta saudável não mascare uma janela longa esgotada.
+- `core/execution/contracts.py`: contratos Pydantic v2 para `Budget`, `BudgetWindow`, `ReservationRecord`, `AttemptRecord`, `UnknownCostPolicy`, `AttemptOutcome` e `ReservationStatus`.
+- `core/execution/budget.py`: `ExecutionBudgetManager` gerenciando alocação atômica em SQLite com serialização estrita (`BEGIN IMMEDIATE` e lock de thread), garantindo que reservas concorrentes nunca excedam o teto, respeitem limites de concorrência simultânea, respeitem prazos (`deadline`), janelas curta/longa e apliquem a política de custo desconhecido (`REJECT`, `ESTIMATE`, `CONSERVATIVE_MAX`).
+- `core/router/token_budget.py`: integração funcional permitindo derivar envelopes de `Budget` a partir de estimativas de tokens (`TaskTokenEstimate`) com conversão determinística em USD (`estimate_cost_from_tokens`).
+- `tests/test_execution_budget.py`: suíte dedicada com 11 testes unitários e de concorrência com threads simultâneas.
 
 ## Arquivos
 
@@ -32,23 +18,9 @@ modo que uma janela curta saudável não mascare uma janela longa esgotada.
 - `tests/test_execution_budget.py`
 - `.factory/reports/df-12-execution-budget-report.md`
 
-## Evidências
+## Validação
 
-- Test-first inicial: exit code `1`; coleta bloqueada como esperado por
-  `ModuleNotFoundError: core.execution`.
-- `python -m pytest tests/test_execution_budget.py tests/test_token_budget_router.py -q`:
-  exit code `0`; **9 passed**.
-- `python core/harness/runner.py --quick`: exit code `0`; **207 passed, 1 skipped**,
-  208 coletados; `[HARNESS_PASS]`.
-- `python -m pytest tests -v --ignore=tests/test_canaletto.py`: exit code `0`;
-  **207 passed, 1 skipped**, 208 coletados.
-- `git diff --check`: exit code `0`.
-
-Os basetemps e `.factory/usage/` regenerável criados pela validação foram
-removidos por caminhos absolutos validados. Canaletto não foi alterado.
-
-## Estado de entrega
-
-- Heartbeat final: fase `commit`, cwd e branch acima, lease token `1`.
-- Commit seletivo contém somente os seis caminhos autorizados.
-- Estado residual esperado após o commit: limpo.
+- `python -m pytest tests/test_execution_budget.py -v`: 11 passed.
+- `python -m pytest tests/test_token_budget_router.py tests/test_token_budget_offline.py -v`: 6 passed.
+- `python core/harness/runner.py --quick`: `[HARNESS_PASS]`, 256 passed, 1 skipped.
+- `python -m pytest tests -v --ignore=tests/test_canaletto.py`: 256 passed, 1 skipped.

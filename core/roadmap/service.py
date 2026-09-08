@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Iterable
+from typing import Any, Iterable
 
 from core.roadmap.compiler import RoadmapCompiler
 from core.roadmap.models import (
@@ -12,6 +12,8 @@ from core.roadmap.models import (
     LifecycleStage,
     PlanningHorizon,
     RoadmapHealth,
+    RoadmapSnapshotComparison,
+    RoadmapSnapshotHistory,
     RoadmapItem,
     RoadmapProjectSummary,
     RoadmapSnapshot,
@@ -22,6 +24,7 @@ from core.roadmap.sources import (
     JsonRoadmapSource,
     MarkdownDevelopmentPlanSource,
     RoadmapSource,
+    UserDemandsRoadmapSource,
 )
 from core.roadmap.store import RoadmapSnapshotStore
 
@@ -104,7 +107,34 @@ class RoadmapQueryService:
             sources_consulted=snapshot.sources_consulted,
             sources_unavailable=snapshot.sources_unavailable,
             policy=snapshot.derivation_policy,
+            telemetry=self.get_telemetry(project_id),
         )
+
+    def get_telemetry(self, project_id: str | None = None) -> dict[str, Any]:
+        """Expose operational and scale telemetry from the snapshot store."""
+        return self.store.get_telemetry(project_id)
+
+    def get_history(self, project_id: str, *, limit: int | None = None) -> RoadmapSnapshotHistory:
+        """Return retained snapshot metadata after compiling the current state."""
+
+        self._ensure_project(project_id)
+        self.store.get_or_compile(project_id, self.compiler)
+        return RoadmapSnapshotHistory(
+            project_id=project_id,
+            snapshots=self.store.get_history(project_id, limit=limit),
+        )
+
+    def compare_snapshots(
+        self,
+        project_id: str,
+        from_snapshot_id: str,
+        to_snapshot_id: str,
+    ) -> RoadmapSnapshotComparison:
+        """Compare two retained snapshots without mutating either one."""
+
+        self._ensure_project(project_id)
+        self.store.get_or_compile(project_id, self.compiler)
+        return self.store.compare(project_id, from_snapshot_id, to_snapshot_id)
 
     def get_source_document(self, project_id: str, source_id: str) -> RoadmapSourceDocument | None:
         self._ensure_project(project_id)
@@ -160,19 +190,25 @@ class RoadmapQueryService:
         return RoadmapCompiler._stats(items)
 
 
-def build_repository_roadmap_service(repository_root: Path) -> RoadmapQueryService:
+def build_repository_roadmap_service(
+    repository_root: Path,
+    *,
+    demands_path: Path | None = None,
+    include_demands: bool = False,
+) -> RoadmapQueryService:
     """Build the default DarkHub service from all versioned roadmap sources."""
 
     repository_root = Path(repository_root)
     manifest_path = repository_root / ".factory" / "roadmap" / "darkfac.json"
     development_plan_path = repository_root / "docs" / "DEVELOPMENT_PLAN_2026-09-05.md"
     evidence_dir = repository_root / ".factory" / "reports"
-    manifest_source = JsonRoadmapSource(manifest_path)
+    manifest_source = JsonRoadmapSource(manifest_path, evidence_dir=evidence_dir)
     development_plan_source = MarkdownDevelopmentPlanSource(
         development_plan_path,
         evidence_dir=evidence_dir,
     )
-    documents = {
+    sources: list[RoadmapSource] = [manifest_source]
+    documents: dict[str, RoadmapSourceDocument] = {
         manifest_source.source_id: RoadmapSourceDocument(
             source_id=manifest_source.source_id,
             label=manifest_source.label,
@@ -183,18 +219,39 @@ def build_repository_roadmap_service(repository_root: Path) -> RoadmapQueryServi
             ),
             content_type="application/json",
         ),
-        development_plan_source.source_id: RoadmapSourceDocument(
-            source_id=development_plan_source.source_id,
-            label=development_plan_source.label,
-            locator="docs/DEVELOPMENT_PLAN_2026-09-05.md",
-            content=(
-                development_plan_path.read_text(encoding="utf-8")
-                if development_plan_path.exists() else ""
-            ),
-            content_type="text/markdown",
-        ),
     }
+
+    if include_demands or demands_path is not None:
+        target_demands_path = demands_path or (repository_root / ".factory" / "demands" / "demands.json")
+        user_demands_source = UserDemandsRoadmapSource(
+            target_demands_path,
+            evidence_dir=evidence_dir,
+        )
+        sources.append(user_demands_source)
+        documents[user_demands_source.source_id] = RoadmapSourceDocument(
+            source_id=user_demands_source.source_id,
+            label=user_demands_source.label,
+            locator=target_demands_path.relative_to(repository_root).as_posix() if target_demands_path.is_relative_to(repository_root) else target_demands_path.as_posix(),
+            content=(
+                target_demands_path.read_text(encoding="utf-8")
+                if target_demands_path.exists() else ""
+            ),
+            content_type="application/json",
+        )
+
+    sources.append(development_plan_source)
+    documents[development_plan_source.source_id] = RoadmapSourceDocument(
+        source_id=development_plan_source.source_id,
+        label=development_plan_source.label,
+        locator="docs/DEVELOPMENT_PLAN_2026-09-05.md",
+        content=(
+            development_plan_path.read_text(encoding="utf-8")
+            if development_plan_path.exists() else ""
+        ),
+        content_type="text/markdown",
+    )
+
     return RoadmapQueryService(
-        compiler=RoadmapCompiler([manifest_source, development_plan_source]),
+        compiler=RoadmapCompiler(sources),
         source_documents=documents,
     )

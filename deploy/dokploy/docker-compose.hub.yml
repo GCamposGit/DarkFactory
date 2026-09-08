@@ -1,0 +1,55 @@
+# ==============================================================================
+# DarkHub 24/7 & Webhooks Gateway - Dokploy PaaS Production Compose
+# Ticket: USR-18 | INFRA-09 / DF-20 / DF-21
+# Target Host: Hetzner CX23 (darkfac-vps-primary / dokploy.ggcampos.com)
+# Domain: https://darkhub.ggcampos.com
+# ==============================================================================
+
+version: "3.8"
+
+services:
+  darkhub:
+    build:
+      context: ../..
+      dockerfile: deploy/dokploy/Dockerfile.hub
+    image: darkhub:latest
+    container_name: darkhub-cloud-247
+    restart: unless-stopped
+    environment:
+      - PORT=8000
+      - DARKHUB_ALLOWED_HOSTS=${DARKHUB_ALLOWED_HOSTS:-localhost,127.0.0.1,darkhub.ggcampos.com,dokploy.ggcampos.com,178.105.73.168,100.83.176.60}
+      - GITHUB_WEBHOOK_SECRET=${GITHUB_WEBHOOK_SECRET:-}
+      - DOKPLOY_DEPLOY_URL=${DOKPLOY_DEPLOY_URL:-}
+      - CLOUDFLARE_ZERO_TRUST_ENABLED=${CLOUDFLARE_ZERO_TRUST_ENABLED:-false}
+      - CLOUDFLARE_ZERO_TRUST_AUD=${CLOUDFLARE_ZERO_TRUST_AUD:-}
+      - DATA_DIR=/app/hub/data
+      - FACTORY_DIR=/app/.factory
+    volumes:
+      - darkhub-factory-data:/app/.factory
+      - darkhub-hub-data:/app/hub/data
+    networks:
+      - dokploy-network
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.darkhub.rule=Host(`darkhub.ggcampos.com`)"
+      - "traefik.http.routers.darkhub.entrypoints=websecure"
+      - "traefik.http.routers.darkhub.tls.certresolver=letsencrypt"
+      - "traefik.http.services.darkhub.loadbalancer.server.port=8000"
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+        reservations:
+          cpus: "0.2"
+          memory: 128M
+
+volumes:
+  darkhub-factory-data:
+    name: darkhub-factory-data
+  darkhub-hub-data:
+    name: darkhub-hub-data
+
+networks:
+  dokploy-network:
+    external: true

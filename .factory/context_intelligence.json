@@ -100,8 +100,22 @@
       "DF-01",
       "DF-02",
       "DF-03",
+      "DF-04",
       "DF-05",
-      "DF-06"
+      "DF-06",
+      "DF-07",
+      "DF-08",
+      "DF-09",
+      "DF-10",
+      "DF-11",
+      "DF-12",
+      "DF-13",
+      "DF-14",
+      "DF-15",
+      "DF-16",
+      "DF-17",
+      "DF-22",
+      "DF-23"
     ],
     "domain_contracts": [
       "core/orchestrator/models.py",
@@ -116,8 +130,8 @@
       "Only live model inference updates live racing metrics.",
       "Only evaluated passing learning policies become active context."
     ],
-    "focused_tests_passed": 47,
-    "full_tests_passed": 167
+    "focused_tests_passed": 4,
+    "full_tests_passed": 339
   },
   "e2e_reference": {
     "feature": "echo_garden_three_tier_factory",
@@ -134,7 +148,7 @@
     "report": ".factory/reports/dark-factory-e2e-game-report.md"
   },
   "roadmap_context": {
-    "generated_at": "2026-09-06T03:12:04Z",
+    "generated_at": "2026-09-07T20:48:00Z",
     "feature": "operational_roadmap_panel",
     "source": ".factory/roadmap/darkfac.json",
     "architecture": {
@@ -144,7 +158,8 @@
         "core/roadmap/compiler.py",
         "core/roadmap/checker.py",
         "core/roadmap/store.py",
-        "core/roadmap/service.py"
+        "core/roadmap/service.py",
+        "core/roadmap/cli.py"
       ],
       "interfaces": [
         "core/roadmap/cli.py",
@@ -152,17 +167,19 @@
         "hub/frontend/roadmap.js"
       ]
     },
-    "implemented_scope": ["RM-01", "RM-02", "RM-03", "RM-04", "RM-05", "RM-06", "RM-07"],
+    "implemented_scope": ["RM-01", "RM-02", "RM-03", "RM-04", "RM-05", "RM-06", "RM-07", "RM-08", "RM-09"],
     "invariants": [
       "A snapshot is scoped to one project and never includes foreign project records.",
       "Source precedence is explicit; conflicting values remain visible as issues.",
       "Causal cycles and orphan dependencies are detected before publication.",
       "Completed items require completion criteria and evidence references.",
       "An unavailable source fails closed without a cache and serves the last snapshot as stale when one exists.",
-      "The same source fixture yields the same snapshot hash in library, CLI and HTTP."
+      "The same source fixture yields the same snapshot hash in library, CLI and HTTP.",
+      "Snapshot history is bounded, read-only, and comparisons include before/after provenance."
     ],
     "validation": [
       "tests/test_roadmap.py",
+      "tests/test_roadmap_history.py",
       "python core/harness/runner.py --quick",
       "python -m pytest tests -v --ignore=tests/test_canaletto.py",
       "node --check hub/frontend/roadmap.js"
