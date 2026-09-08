@@ -44,3 +44,10 @@ O serviço fica em `http://127.0.0.1:8888` por padrão. O launcher do Canaletto 
 - Antigravity e Codex: `.agents/skills/`.
 - Claude Code: `.claude/skills/`, sincronizado pelo script `python scripts/sync_skills.py`.
 - Grok e outros harnesses: use o contrato raiz e, se houver suporte a skills, aponte-o para `.agents/skills/`.
+
+## Política de contexto seletivo e promoção de aprendizado (DF-19)
+
+Para prevenir injeção excessiva de tokens e viés de confirmação entre diferentes harnesses:
+- **Contexto Bounded (`core.orchestrator.context`)**: O orquestrador sintetiza um resumo operacional delimitado (`TaskContext`), pontuando critérios de aceitação, referências estruturadas de arquivos e marcos de progresso durável. Transcrições brutas de logs nunca são injetadas diretamente no prompt principal.
+- **Promoção Fail-Closed (`core.learning.promotion`)**: Candidatos a regras (`LearningCandidate`) permanecem no status `PROPOSED` até serem validados contra uma versão específica da suíte de avaliação (`eval_version`) com pelo menos uma execução empírica comprovada (`supporting_runs`). Regras unpromoted, não avaliadas ou com divergência de versão são estritamente rejeitadas.
+- **Rollback Atômico**: Regras ativas que manifestarem regressões são revertidas de forma auditável para `RETIRED`, associadas ao `rollback_ref` e justificativa formal.

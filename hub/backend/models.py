@@ -418,5 +418,48 @@ class VisualIllustrateRequest(BaseModel):
     offline: bool = Field(default=False, description="Whether to force $0 local procedural rendering")
 
 
+# ---------------------------------------------------------------------------
+# Task Dashboard Models (DF-21)
+# ---------------------------------------------------------------------------
+
+
+class TaskDashboardEvidence(BaseModel):
+    """Small, safe-to-render evidence reference for the task cockpit."""
+
+    label: str = Field(min_length=1, max_length=160)
+    value: str = Field(default="", max_length=500)
+    source: Optional[str] = Field(default=None, max_length=160)
+
+
+class TaskDashboardItem(BaseModel):
+    """Read-only task projection assembled from lifecycle, run and usage ledgers."""
+
+    task_id: str = Field(min_length=1, max_length=160)
+    title: str = Field(min_length=1, max_length=240)
+    status: str = Field(min_length=1, max_length=40)
+    stage: str = Field(min_length=1, max_length=120)
+    priority: int = 0
+    queue_position: int = Field(ge=1)
+    run_id: Optional[str] = None
+    run_status: Optional[str] = None
+    step_index: Optional[int] = Field(default=None, ge=0)
+    cost_usd: float = Field(default=0.0, ge=0.0)
+    updated_at: Optional[str] = None
+    evidence: List[TaskDashboardEvidence] = Field(default_factory=list)
+    exceptions: List[str] = Field(default_factory=list)
+
+
+class TaskDashboardReport(BaseModel):
+    """Stable API response for the queue/run/stage/cost evidence journey."""
+
+    generated_at: str
+    queue: List[TaskDashboardItem] = Field(default_factory=list)
+    queued_count: int = Field(default=0, ge=0)
+    running_count: int = Field(default=0, ge=0)
+    exception_count: int = Field(default=0, ge=0)
+    total_cost_usd: float = Field(default=0.0, ge=0.0)
+    sources: Dict[str, str] = Field(default_factory=dict)
+    warnings: List[str] = Field(default_factory=list)
+
 
 

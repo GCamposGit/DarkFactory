@@ -40,6 +40,7 @@ from hub.backend.models import (
     VisualGenerateRequest,
     VisualGenerateResponse,
     VisualIllustrateRequest,
+    TaskDashboardReport,
 )
 from hub.backend.service import HubService
 from core.usage.models import AccountUsageReport, ModelCallEvent, ModelUsageReport
@@ -917,6 +918,17 @@ def run_tests(
 ) -> DistilledTestReport:
     """Execute test suite via headless test subagent engine and return distilled report."""
     return service.run_tests(instruction)
+
+# ==============================================================================
+# Task Dashboard (DF-21)
+# ==============================================================================
+
+
+@router.get("/tasks/dashboard", response_model=TaskDashboardReport)
+@router.get("/tasks", response_model=TaskDashboardReport, include_in_schema=False)
+def get_task_dashboard(service: HubService = Depends(get_hub_service)) -> TaskDashboardReport:
+    """Return the read-only queue/run/stage/cost/evidence projection for DarkHub."""
+    return service.get_task_dashboard()
 
 
 
