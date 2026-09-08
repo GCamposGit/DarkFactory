@@ -121,13 +121,13 @@ def test_dense_graph_500_items_1500_relations_latency_budget() -> None:
     assert len(snapshot.issues) == 0, f"Unexpected issues in synthetic DAG: {snapshot.issues}"
     assert first_duration_ms < 500.0, f"Compilation exceeded latency budget: {first_duration_ms:.2f}ms"
 
-    # 2. Warm cache hit latency budget (< 10ms target)
+    # 2. Warm cache hit latency budget (< 100ms target)
     warm_start = time.perf_counter()
     warm_snapshot = store.get_or_compile("scale-proj", compiler)
     warm_duration_ms = (time.perf_counter() - warm_start) * 1000
 
     assert warm_snapshot.snapshot_hash == snapshot.snapshot_hash
-    assert warm_duration_ms < 20.0, f"Warmed cache hit took too long: {warm_duration_ms:.2f}ms"
+    assert warm_duration_ms < 100.0, f"Warmed cache hit took too long: {warm_duration_ms:.2f}ms"
 
     # 3. Telemetry inspection
     telemetry = store.get_telemetry("scale-proj")

@@ -192,6 +192,7 @@
     "color": "#d4af37",
     "is_favorite": true,
     "pinned": true,
-    "is_local": true
+    "is_local": true,
+    "launch_script": "run_canaletto.py"
   }
 ]

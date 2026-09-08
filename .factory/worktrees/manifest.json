@@ -2,6 +2,7 @@
   "schema_version": "1",
   "base_sha": "864f50f62e1e2e6f73b955f9e3883a08a05c2af1",
   "created_at": "2026-09-07T03:56:30Z",
+  "updated_at": "2026-09-07T04:01:00Z",
   "leases": [
     {
       "ticket_id": "DF-13",
@@ -10,9 +11,10 @@
       "branch": "codex/df-13-executor-sandbox",
       "cwd": "C:/dev/DarkFac_worktrees/df13",
       "base_sha": "864f50f62e1e2e6f73b955f9e3883a08a05c2af1",
-      "fencing_token": 1,
-      "phase": "preflight",
-      "status": "active",
+      "integrated_sha": "097db074bc99bcbe2529ad4ee5f99238ff91d1c3",
+      "fencing_token": 2,
+      "phase": "integrated",
+      "status": "completed",
       "allowed_paths": [
         "core/execution/providers.py",
         "core/execution/agent_executor.py",
@@ -21,9 +23,9 @@
         ".factory/reports/df-13-executor-sandbox-report.md"
       ],
       "heartbeat": {
-        "timestamp": "2026-09-07T03:56:30Z",
-        "head": "864f50f62e1e2e6f73b955f9e3883a08a05c2af1",
-        "last_command": "git reset --hard 864f50f"
+        "timestamp": "2026-09-07T04:01:00Z",
+        "head": "097db074bc99bcbe2529ad4ee5f99238ff91d1c3",
+        "last_command": "git cherry-pick 82ccd53"
       }
     },
     {
@@ -33,19 +35,21 @@
       "branch": "codex/rm-08-incremental-telemetry",
       "cwd": "C:/dev/DarkFac_worktrees/rm08",
       "base_sha": "864f50f62e1e2e6f73b955f9e3883a08a05c2af1",
-      "fencing_token": 1,
-      "phase": "preflight",
-      "status": "active",
+      "integrated_sha": "eab7cc132a0d7f1d530aa8572b1458e0a17441fc",
+      "fencing_token": 2,
+      "phase": "integrated",
+      "status": "completed",
       "allowed_paths": [
+        "core/roadmap/models.py",
         "core/roadmap/store.py",
         "core/roadmap/service.py",
         "tests/test_roadmap_scale.py",
         ".factory/reports/rm-08-incremental-telemetry-report.md"
       ],
       "heartbeat": {
-        "timestamp": "2026-09-07T03:56:30Z",
-        "head": "864f50f62e1e2e6f73b955f9e3883a08a05c2af1",
-        "last_command": "git reset --hard 864f50f"
+        "timestamp": "2026-09-07T04:01:00Z",
+        "head": "eab7cc132a0d7f1d530aa8572b1458e0a17441fc",
+        "last_command": "git cherry-pick f6a6060"
       }
     }
   ]

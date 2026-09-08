@@ -6,7 +6,7 @@ Este arquivo registra as fontes humanas do roadmap aprovado para o painel do Dar
 
 - `approved-roadmap`: manifesto JSON dos tickets RM-01–RM-09.
 - `development-plan`: tabela de backlog DF-01–DF-23 do plano de desenvolvimento.
-- Relatórios `df-*-*-report.md` existentes são evidências de conclusão; sem relatório, o ticket permanece planejado.
+- Relatórios `df-*-*-report.md` e `rm-*-*-report.md` existentes são evidências de conclusão; o relatório operacional também cobre RM-01–RM-07. Sem evidência vinculada, o ticket permanece planejado.
 
 ## Política de fidelidade
 
@@ -15,6 +15,7 @@ Este arquivo registra as fontes humanas do roadmap aprovado para o painel do Dar
 - Conflitos, ciclos causais, órfãos e conclusões sem evidência são avisos do snapshot.
 - O projeto `darkfac` é o núcleo compartilhado. O experimento local Canaletto não é uma fonte nem um projeto do painel.
 - O MVP termina em RM-06. RM-07 completa a experiência visual; RM-08 trata atualização incremental, telemetria e escala; RM-09 é evolução.
+- O histórico RM-09 é uma retenção local, limitada e somente leitura durante a vida do serviço; persistência durável e sincronização remota permanecem fora deste incremento.
 
 ## Tickets aprovados
 

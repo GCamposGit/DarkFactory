@@ -9,6 +9,7 @@ import logging
 import os
 import re
 import secrets
+import subprocess
 import sys
 import time
 import urllib.error
@@ -35,6 +36,7 @@ from hub.backend.models import (
     ServiceCategory,
     ServiceCreate,
     ServiceItem,
+    ServiceLaunchResponse,
     ServiceUpdate,
     UnifiedGenerateRequest,
     UnifiedGenerateResponse,
@@ -45,7 +47,11 @@ from hub.backend.models import (
     ContentLintRequest,
     VisualGenerateRequest,
     VisualIllustrateRequest,
+    TaskDashboardEvidence,
+    TaskDashboardItem,
+    TaskDashboardReport,
 )
+from core.execution.providers import get_openrouter_api_key
 from core.content import (
     ContentEngine,
     AntiSlopLinter,
@@ -107,6 +113,13 @@ from core.harness.test_subagent import (
     TestExecutionInstruction,
     TestSubagentEngine,
 )
+from core.infra.inventory import InventoryManager
+from core.infra.cards import (
+    InfraCard,
+    InfraCardsReport,
+    build_infra_cards_report,
+)
+from core.orchestrator.store import OrchestratorStore, RunRecord
 
 logger = logging.getLogger("darkhub.service")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
@@ -203,6 +216,8 @@ class HubService:
         ollama_base_url: str = "http://localhost:11434",
         usage_dir: Optional[Path] = None,
         roadmap_root: Optional[Path] = None,
+        state_path: Optional[Path] = None,
+        orchestrator_path: Optional[Path] = None,
     ) -> None:
         self._session_token = secrets.token_urlsafe(32)
         if data_dir is None:
@@ -236,6 +251,13 @@ class HubService:
         )
 
         repository_root = roadmap_root or Path(__file__).resolve().parents[2]
+        self.project_root = repository_root
+        self.task_state_path = Path(state_path) if state_path is not None else repository_root / ".factory" / "state.json"
+        self.orchestrator_path = (
+            Path(orchestrator_path)
+            if orchestrator_path is not None
+            else repository_root / ".factory" / "orchestrator.sqlite3"
+        )
         self.test_subagent_engine = TestSubagentEngine(project_root=repository_root)
         self.roadmap = build_repository_roadmap_service(
             repository_root,
@@ -243,11 +265,214 @@ class HubService:
             include_demands=True,
         )
 
+        if data_dir is not None:
+            self.infra_path = self.data_dir / "infra" / "inventory.json"
+        else:
+            self.infra_path = Path(__file__).resolve().parents[2] / ".factory" / "infra" / "inventory.json"
+        self.infra_manager = InventoryManager(self.infra_path)
+
         self._ensure_storage()
 
     def run_tests(self, instruction: TestExecutionInstruction) -> DistilledTestReport:
         """Execute test suite via headless test subagent engine and return distilled report."""
         return self.test_subagent_engine.execute(instruction)
+
+    def get_task_dashboard(self) -> TaskDashboardReport:
+        """Build a read-only projection of lifecycle, run, usage and evidence data."""
+        task_records, state_source, warnings = self._load_task_records()
+        runs, run_source, run_warnings = self._load_task_runs(task_records)
+        warnings.extend(run_warnings)
+
+        task_ids = set(task_records) | set(runs)
+        rows: list[dict[str, Any]] = []
+        for task_id in task_ids:
+            record = task_records.get(task_id, {})
+            metadata = record.get("metadata") if isinstance(record.get("metadata"), dict) else {}
+            run = runs.get(task_id)
+            checkpoint = run.checkpoint if run is not None else {}
+            status = str(record.get("status") or (run.status.value if run is not None else "UNSET"))
+            stage = str(metadata.get("stage") or checkpoint.get("stage") or status)
+            title = str(metadata.get("title") or metadata.get("name") or metadata.get("summary") or task_id)
+            priority = self._dashboard_priority(metadata.get("priority", 0))
+            rows.append(
+                {
+                    "task_id": task_id,
+                    "title": title,
+                    "status": status,
+                    "stage": stage,
+                    "priority": priority,
+                    "run": run,
+                    "cost_usd": self._dashboard_cost(metadata, checkpoint),
+                    "updated_at": record.get("updated_at") or (run.updated_at.isoformat() if run else None),
+                    "evidence": self._dashboard_evidence(record, metadata, checkpoint),
+                    "exceptions": self._dashboard_exceptions(metadata, checkpoint, run),
+                }
+            )
+
+        rows.sort(key=self._dashboard_sort_key)
+        queue: list[TaskDashboardItem] = []
+        for index, row in enumerate(rows, start=1):
+            run = row["run"]
+            queue.append(
+                TaskDashboardItem(
+                    task_id=row["task_id"],
+                    title=row["title"],
+                    status=row["status"],
+                    stage=row["stage"],
+                    priority=row["priority"],
+                    queue_position=index,
+                    run_id=run.run_id if run else None,
+                    run_status=run.status.value if run else None,
+                    step_index=run.step_index if run else None,
+                    cost_usd=row["cost_usd"],
+                    updated_at=row["updated_at"],
+                    evidence=row["evidence"],
+                    exceptions=row["exceptions"],
+                )
+            )
+
+        usage_source = "ok"
+        total_cost = 0.0
+        try:
+            total_cost = float(self.model_usage_ledger.report(recent_limit=0).total_cost_usd)
+        except Exception as exc:  # pragma: no cover - defensive boundary for a corrupt ledger
+            usage_source = "error"
+            warnings.append(f"usage ledger unavailable: {exc}")
+
+        return TaskDashboardReport(
+            generated_at=datetime.now(timezone.utc).isoformat(),
+            queue=queue,
+            queued_count=len(queue),
+            running_count=sum(1 for item in queue if item.run_status == "RUNNING"),
+            exception_count=sum(len(item.exceptions) for item in queue),
+            total_cost_usd=max(0.0, total_cost),
+            sources={"state": state_source, "runs": run_source, "usage": usage_source},
+            warnings=warnings,
+        )
+
+    def _load_task_records(self) -> tuple[dict[str, dict[str, Any]], str, list[str]]:
+        if not self.task_state_path.exists():
+            return {}, "missing", []
+        try:
+            raw = json.loads(self.task_state_path.read_text(encoding="utf-8"))
+            tasks = raw.get("tasks", {}) if isinstance(raw, dict) else {}
+            if not isinstance(tasks, dict):
+                raise ValueError("tasks must be an object")
+            return {
+                str(task_id): value
+                for task_id, value in tasks.items()
+                if isinstance(value, dict)
+            }, "ok", []
+        except (OSError, ValueError, TypeError, json.JSONDecodeError) as exc:
+            logger.warning("Task state ledger unavailable: %s", exc)
+            return {}, "error", [f"state ledger unavailable: {exc}"]
+
+    def _load_task_runs(
+        self,
+        task_records: dict[str, dict[str, Any]],
+    ) -> tuple[dict[str, RunRecord], str, list[str]]:
+        if not self.orchestrator_path.exists():
+            return {}, "missing", []
+        task_ids = set(task_records)
+        warnings: list[str] = []
+        try:
+            store = OrchestratorStore(self.orchestrator_path)
+            runs: dict[str, RunRecord] = {}
+            for task_id in task_ids:
+                run = store.get_latest_run(task_id)
+                if run is not None:
+                    runs[task_id] = run
+            for run in store.recoverable_runs():
+                runs.setdefault(run.task_id, run)
+            return runs, "ok", warnings
+        except Exception as exc:  # pragma: no cover - defensive boundary for a corrupt store
+            logger.warning("Orchestrator run store unavailable: %s", exc)
+            warnings.append(f"run store unavailable: {exc}")
+            return {}, "error", warnings
+
+    @staticmethod
+    def _dashboard_priority(value: Any) -> int:
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return 0
+
+    @staticmethod
+    def _dashboard_sort_key(row: dict[str, Any]) -> tuple[int, int, str]:
+        status_rank = {
+            "NEEDS_FIX": 0,
+            "RUNNING": 1,
+            "IMPLEMENTING": 2,
+            "VALIDATING": 3,
+            "REVIEWING": 4,
+            "PLANNED": 5,
+            "TRIAGED": 6,
+            "READY_TO_MERGE": 7,
+            "FAILED": 8,
+            "MERGED": 9,
+            "UNSET": 10,
+        }
+        return status_rank.get(row["status"], 99), -row["priority"], row["task_id"]
+
+    @staticmethod
+    def _dashboard_cost(metadata: dict[str, Any], checkpoint: dict[str, Any]) -> float:
+        for source in (checkpoint, metadata):
+            value = source.get("cost_usd") if isinstance(source, dict) else None
+            if isinstance(value, (int, float)) and value >= 0:
+                return round(float(value), 8)
+        return 0.0
+
+    @staticmethod
+    def _dashboard_evidence(
+        record: dict[str, Any],
+        metadata: dict[str, Any],
+        checkpoint: dict[str, Any],
+    ) -> list[TaskDashboardEvidence]:
+        candidates = [record.get("merge_evidence"), metadata.get("evidence"), metadata.get("evidence_refs"), checkpoint.get("evidence")]
+        evidence: list[TaskDashboardEvidence] = []
+        seen: set[tuple[str, str]] = set()
+
+        def add(label: Any, value: Any, source: Optional[str] = None) -> None:
+            if value is None or isinstance(value, (dict, list)):
+                value = json.dumps(value, ensure_ascii=False, sort_keys=True)
+            key = (str(label), str(value))
+            if key not in seen:
+                seen.add(key)
+                evidence.append(TaskDashboardEvidence(label=str(label), value=str(value), source=source))
+
+        for candidate in candidates:
+            if isinstance(candidate, dict):
+                for label, value in candidate.items():
+                    add(label, value, "ledger")
+            elif isinstance(candidate, list):
+                for item in candidate:
+                    if isinstance(item, dict):
+                        add(item.get("label", "evidence"), item.get("value", item), item.get("source"))
+                    elif item is not None:
+                        add("evidence", item, "ledger")
+        return evidence[:12]
+
+    @staticmethod
+    def _dashboard_exceptions(
+        metadata: dict[str, Any],
+        checkpoint: dict[str, Any],
+        run: Optional[RunRecord],
+    ) -> list[str]:
+        values: list[Any] = []
+        for source in (metadata, checkpoint):
+            for key in ("exception", "exceptions", "error", "errors"):
+                if isinstance(source, dict) and source.get(key) is not None:
+                    values.append(source[key])
+        if run is not None and run.last_error:
+            values.append(run.last_error)
+        flattened: list[str] = []
+        for value in values:
+            items = value if isinstance(value, list) else [value]
+            for item in items:
+                text = str(item).strip()
+                if text and text not in flattened:
+                    flattened.append(text)
+        return flattened[:12]
 
     def guide_demand(
         self,
@@ -426,6 +651,23 @@ class HubService:
     def update_credit_account(self, provider_id: str, payload: CreditAccountUpdateRequest) -> ProviderCreditCard:
         """Updates and persists credit balances or notes for a provider."""
         return self.api_credits_monitor.update_account(provider_id, payload)
+
+    def get_infra_cards_report(self, probe_liveness: bool = False, probe_timeout: float = 0.5) -> InfraCardsReport:
+        """Returns the infrastructure cards report for the Hub."""
+        inventory = self.infra_manager.load_or_initialize()
+        return build_infra_cards_report(
+            inventory,
+            probe_network_liveness=probe_liveness,
+            probe_timeout=probe_timeout,
+        )
+
+    def get_infra_card(self, node_id: str, probe_liveness: bool = False, probe_timeout: float = 0.5) -> Optional[InfraCard]:
+        """Returns a single infrastructure card by node ID."""
+        report = self.get_infra_cards_report(probe_liveness=probe_liveness, probe_timeout=probe_timeout)
+        for card in report.cards:
+            if card.id == node_id:
+                return card
+        return None
 
     def _load_services_raw(self) -> List[Dict]:
         try:
@@ -677,6 +919,26 @@ class HubService:
                     error=str(redirect_err),
                 )
             except Exception as get_exc:
+                if service_id == "canaletto-gallery" and ":8899" in url:
+                    alt_url = url.replace(":8899", ":8900")
+                    try:
+                        req_alt = urllib.request.Request(
+                            alt_url,
+                            headers={"User-Agent": "DarkHub-Ping/1.0"},
+                            method="GET",
+                        )
+                        with opener.open(req_alt, timeout=timeout_sec) as response:
+                            latency = round((time.perf_counter() - start) * 1000, 1)
+                            return HealthCheckResult(
+                                service_id=service_id,
+                                url=alt_url,
+                                status=HealthStatus.ONLINE,
+                                latency_ms=latency,
+                                status_code=response.getcode(),
+                            )
+                    except Exception:
+                        pass
+
                 return HealthCheckResult(
                     service_id=service_id,
                     url=url,
@@ -684,6 +946,121 @@ class HubService:
                     latency_ms=None,
                     error=str(get_exc),
                 )
+
+    def launch_service(
+        self,
+        service_id: str,
+        max_wait_sec: float = 5.0,
+        poll_interval: float = 0.2,
+    ) -> ServiceLaunchResponse:
+        """
+        Launches a configured local service script (e.g. run_canaletto.py) if currently offline.
+        Waits until the service is verified online via health probe before returning.
+        If already online, returns immediately with already_running status.
+        """
+        service = self.get_service(service_id)
+        if not service:
+            raise KeyError(f"Service '{service_id}' not found in catalog")
+
+        # Check if already online
+        current_health = self.ping_url(service_id=service.id, url=service.url, timeout_sec=1.0)
+        if current_health.status == HealthStatus.ONLINE:
+            return ServiceLaunchResponse(
+                service_id=service.id,
+                url=current_health.url or service.url,
+                status="already_running",
+                launched=False,
+                message=f"Service '{service.name}' is already running and accessible.",
+            )
+
+        # Resolve launch script path
+        script_name = service.launch_script
+        if not script_name and service_id == "canaletto-gallery":
+            script_name = "run_canaletto.py"
+
+        if not script_name:
+            raise ValueError(f"Service '{service_id}' does not define a launch_script.")
+
+        script_path = Path(script_name)
+        if not script_path.is_absolute():
+            script_path = (self.project_root / script_name).resolve()
+
+        if not script_path.exists():
+            raise FileNotFoundError(f"Launch script not found: {script_path}")
+
+        # Prepare environment and launch subprocess
+        env = os.environ.copy()
+        env["CANALETTO_NO_BROWSER"] = "1"
+        env["PYTHONUNBUFFERED"] = "1"
+
+        creationflags = 0
+        if sys.platform == "win32":
+            creationflags = subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
+
+        log_dir = self.project_root / ".factory" / "services"
+        log_dir.mkdir(parents=True, exist_ok=True)
+        log_file = log_dir / f"{service_id}.log"
+
+        cmd = [sys.executable, str(script_path), "--no-browser"]
+        logger.info(f"Launching service '{service_id}' with command: {' '.join(cmd)}")
+
+        with open(log_file, "a", encoding="utf-8") as out:
+            proc = subprocess.Popen(
+                cmd,
+                cwd=str(self.project_root),
+                env=env,
+                stdout=out,
+                stderr=out,
+                creationflags=creationflags,
+            )
+
+        # Wait for service to come online
+        start_wait = time.perf_counter()
+        is_online = False
+        resolved_url = service.url
+        while (time.perf_counter() - start_wait) < max_wait_sec:
+            poll_val = proc.poll() if hasattr(proc, "poll") and callable(proc.poll) else None
+            if poll_val is not None and isinstance(poll_val, int):
+                logger.error(f"Service '{service_id}' process exited prematurely (exit code: {poll_val})")
+                break
+            time.sleep(poll_interval)
+            probe = self.ping_url(service_id=service.id, url=service.url, timeout_sec=0.5)
+            if probe.status == HealthStatus.ONLINE:
+                is_online = True
+                resolved_url = probe.url or service.url
+                break
+
+        if is_online:
+            return ServiceLaunchResponse(
+                service_id=service.id,
+                url=resolved_url,
+                status="online",
+                launched=True,
+                message=f"Service '{service.name}' successfully launched (PID: {proc.pid}).",
+            )
+        else:
+            return ServiceLaunchResponse(
+                service_id=service.id,
+                url=resolved_url,
+                status="starting",
+                launched=True,
+                message=f"Service '{service.name}' process spawned (PID: {proc.pid}), still warming up.",
+            )
+
+    def get_service_launch_target(self, service_id: str, max_wait_sec: float = 5.0) -> str:
+        """
+        Ensures local service is launched if applicable and returns its destination URL.
+        """
+        service = self.get_service(service_id)
+        if not service:
+            raise KeyError(f"Service '{service_id}' not found in catalog")
+
+        if service.launch_script or service_id == "canaletto-gallery":
+            res = self.launch_service(service_id, max_wait_sec=max_wait_sec)
+            if isinstance(res, ServiceLaunchResponse) and res.url:
+                return res.url
+
+        return service.url
 
     def get_ollama_status(self) -> OllamaStatusResponse:
         """Inspects local Ollama instance and lists installed models."""
@@ -873,15 +1250,7 @@ class HubService:
 
     def get_openrouter_key(self) -> Optional[str]:
         """Recovers OpenRouter API key from environment variable or Windows registry."""
-        key = os.environ.get("OPENROUTER_API_KEY")
-        if not key and sys.platform == "win32":
-            try:
-                import winreg
-                with winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Environment") as k:
-                    key, _ = winreg.QueryValueEx(k, "OPENROUTER_API_KEY")
-            except Exception:
-                pass
-        return key.strip() if (key and key.strip()) else None
+        return get_openrouter_api_key()
 
     def get_openrouter_status(self) -> OpenRouterStatusResponse:
         """Inspects OpenRouter authentication, balance/usage, and curated frontier models."""
@@ -1338,6 +1707,3 @@ class HubService:
         """Returns catalog of all saved visual assets."""
         studio = VisualStudio()
         return studio.list_assets()
-
-
-

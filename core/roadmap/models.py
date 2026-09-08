@@ -85,6 +85,12 @@ class ConfirmationState(str, Enum):
     UNCONFIRMED = "unconfirmed"
 
 
+class RoadmapChangeType(str, Enum):
+    ADDED = "added"
+    REMOVED = "removed"
+    CHANGED = "changed"
+
+
 class RoadmapSourceRef(BaseModel):
     """Navigable provenance for a planning or execution fact."""
 
@@ -237,6 +243,54 @@ class RoadmapHealth(BaseModel):
     sources_unavailable: list[str] = Field(default_factory=list)
     policy: str
     telemetry: dict[str, Any] | None = None
+
+
+class RoadmapSnapshotSummary(BaseModel):
+    """Stable metadata for one retained roadmap snapshot."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    snapshot_id: str
+    snapshot_hash: str
+    observed_at: datetime
+    item_count: int = 0
+    relation_count: int = 0
+    issue_count: int = 0
+    source_fingerprint: str
+
+
+class RoadmapItemChange(BaseModel):
+    """A change between two snapshots, including the full provenance state."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    item_id: str
+    change_type: RoadmapChangeType
+    changed_fields: list[str] = Field(default_factory=list)
+    before: RoadmapItem | None = None
+    after: RoadmapItem | None = None
+
+
+class RoadmapSnapshotHistory(BaseModel):
+    """Chronological, bounded history metadata for one project."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    project_id: str
+    snapshots: list[RoadmapSnapshotSummary] = Field(default_factory=list)
+
+
+class RoadmapSnapshotComparison(BaseModel):
+    """Deterministic diff between two retained snapshots."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    project_id: str
+    from_snapshot: RoadmapSnapshotSummary
+    to_snapshot: RoadmapSnapshotSummary
+    added_item_ids: list[str] = Field(default_factory=list)
+    removed_item_ids: list[str] = Field(default_factory=list)
+    changed_items: list[RoadmapItemChange] = Field(default_factory=list)
 
 
 

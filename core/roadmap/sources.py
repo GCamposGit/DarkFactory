@@ -49,11 +49,13 @@ class JsonRoadmapSource:
         self,
         path: Path,
         *,
+        evidence_dir: Path | None = None,
         source_id: str = "approved-roadmap",
         label: str = "Roadmap operacional aprovado",
         priority: int = 10,
     ) -> None:
         self.path = Path(path)
+        self.evidence_dir = Path(evidence_dir) if evidence_dir else None
         self.source_id = source_id
         self.label = label
         self.priority = priority
@@ -62,7 +64,25 @@ class JsonRoadmapSource:
         locator = self.path.as_posix()
         try:
             content = self.path.read_text(encoding="utf-8")
-            content_hash = hashlib.sha256(content.encode("utf-8")).hexdigest()
+            evidence_files = self._evidence_files()
+            content_hash = hashlib.sha256(
+                json.dumps(
+                    {
+                        "manifest": content,
+                        "evidence": [
+                            {
+                                "name": report.name,
+                                "hash": hashlib.sha256(
+                                    report.read_bytes()
+                                ).hexdigest(),
+                            }
+                            for report in evidence_files
+                        ],
+                    },
+                    sort_keys=True,
+                    ensure_ascii=False,
+                ).encode("utf-8")
+            ).hexdigest()
             payload = json.loads(content)
             if not isinstance(payload, dict):
                 raise ValueError("manifest must be a JSON object")
@@ -90,6 +110,15 @@ class JsonRoadmapSource:
                     )
                 ]
                 normalized_raw = dict(raw)
+                evidence_refs = list(raw.get("evidence_refs") or [])
+                evidence_refs.extend(self._evidence_refs(str(raw.get("id", ""))))
+                if evidence_refs:
+                    normalized_raw["evidence_refs"] = evidence_refs
+                    if normalized_raw.get("delivery_status") == DeliveryStatus.PLANNED.value:
+                        normalized_raw["delivery_status"] = DeliveryStatus.COMPLETED.value
+                        normalized_raw["state_rationale"] = (
+                            "Relatório de implementação vinculado ao ticket e usado como evidência de conclusão."
+                        )
                 normalized_raw.update({
                     "source_refs": source_refs,
                     "source_revision": raw.get("source_revision") or content_hash,
@@ -122,6 +151,36 @@ class JsonRoadmapSource:
                 error=str(exc),
             )
             return RoadmapSourceResult(state=state, records=[], content="")
+
+    def _evidence_files(self) -> list[Path]:
+        if self.evidence_dir is None or not self.evidence_dir.exists():
+            return []
+        return sorted(
+            report
+            for report in self.evidence_dir.glob("*-report.md")
+            if report.is_file()
+        )
+
+    def _evidence_refs(self, item_id: str) -> list[RoadmapEvidenceRef]:
+        if not item_id or self.evidence_dir is None:
+            return []
+        slug = item_id.lower()
+        reports = list(self.evidence_dir.glob(f"{slug}-*-report.md"))
+        if item_id in {f"RM-{number:02d}" for number in range(1, 8)}:
+            operational_report = self.evidence_dir / "roadmap-operacional-report.md"
+            if operational_report.is_file():
+                reports.append(operational_report)
+        return [
+            RoadmapEvidenceRef(
+                evidence_id=f"report:{item_id}:{report.name}",
+                evidence_kind="implementation_report",
+                label=f"Relatório de implementação {item_id}",
+                locator=report.as_posix(),
+                verified=True,
+            )
+            for report in sorted(reports)
+            if report.is_file()
+        ]
 
 
 class MarkdownDevelopmentPlanSource:
@@ -459,4 +518,3 @@ class UserDemandsRoadmapSource:
             for report in reports
             if report.is_file()
         ]
-

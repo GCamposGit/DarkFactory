@@ -47,6 +47,21 @@ SHA-base e SHA final; arquivos alterados; comandos, contagens e exit codes; hear
 final; e estado residual. Uma resposta textual sem commit seletivo e evidência não é
 handoff verificável.
 
+## Entrega remota obrigatória
+
+Um ticket de desenvolvimento não está concluído quando existe apenas um commit local.
+Depois dos gates locais verdes, o owner deve executar o fluxo completo descrito em
+[references/remote-delivery.md](references/remote-delivery.md): publicar a branch, abrir
+uma PR com o SHA correto, aguardar checks/reviews exigidos, mergear pela interface do
+GitHub e verificar que a branch de integração remota alcança o SHA final. Falha de
+autenticação, rede, criação da PR, checks, merge ou leitura do remoto é estado
+`blocked`, nunca sucesso silencioso.
+
+O handoff final deve conter a URL/número da PR, estado `MERGED`, `mergedAt`, SHA do
+merge, SHA observado no `main` remoto e o estado residual local. Nunca declare uma
+entrega como integrada com base apenas em `git log` local, em uma branch sem upstream
+ou em uma mensagem textual do agente.
+
 ## Continuous Self-Improvement e RCA
 
 - Em follow-up corretivo, registre a intenção e o gap no motor de aprendizagem antes

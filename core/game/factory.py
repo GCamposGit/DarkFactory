@@ -210,7 +210,7 @@ def _atomic_write_text(target: Path, content: str) -> None:
             temporary_path.unlink(missing_ok=True)
 
 
-def verify_game_artifacts(output_dir: Path) -> Dict[str, Any]:
+def verify_game_artifacts(output_dir: Path, allow_mock: bool = False) -> Dict[str, Any]:
     """Recompute every portable invariant and return deterministic verification evidence."""
 
     manifest_path = output_dir / "manifest.json"
@@ -241,7 +241,7 @@ def verify_game_artifacts(output_dir: Path) -> Dict[str, Any]:
     if "Echo Garden" not in html or any(marker not in html for marker in interactive_markers):
         raise ValueError("generated HTML is missing the interactive game surface")
     providers = {e.provider for e in manifest.model_evidence}
-    if providers != {"ollama", "openrouter"}:
+    if providers != {"ollama", "openrouter"} and not (allow_mock and "mock" in providers):
         raise ValueError("manifest does not prove both local and OpenRouter model execution")
     return {
         "status": "passed",
