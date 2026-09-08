@@ -105,6 +105,33 @@
           <span class="hidden lg:inline">Roadmap</span>
         </button>
 
+        <!-- User Demands Trigger -->
+        <button
+          onclick="openDemandsDrawer()"
+          title="Abrir Central de Demandas do Usuário & Backlog"
+          class="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-emerald-300 border border-slate-800 hover:border-emerald-500/30 transition-all text-xs font-medium">
+          <span>📝</span>
+          <span class="hidden lg:inline">Demandas</span>
+        </button>
+
+        <!-- Infrastructure Cards Trigger -->
+        <button
+          onclick="document.getElementById('infrastructure-cards-section')?.scrollIntoView({behavior: 'smooth'})"
+          title="Recursos de Infraestrutura & Rede"
+          class="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-indigo-300 border border-slate-800 hover:border-indigo-500/30 transition-all text-xs font-medium">
+          <span>🖥️</span>
+          <span class="hidden lg:inline">Infra</span>
+        </button>
+
+        <!-- Task Dashboard Trigger -->
+        <button
+          onclick="document.getElementById('tasks-dashboard-section')?.scrollIntoView({behavior: 'smooth'})"
+          title="Fila operacional de tarefas"
+          class="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-emerald-300 border border-slate-800 hover:border-emerald-500/30 transition-all text-xs font-medium">
+          <span>✅</span>
+          <span class="hidden lg:inline">Tarefas</span>
+        </button>
+
         <!-- Playground Trigger -->
         <button 
           onclick="openPlaygroundDrawer()" 
@@ -157,6 +184,26 @@
       <div id="quick-dock-items" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
         <!-- Pinned items dynamically rendered here -->
       </div>
+    </section>
+
+    <!-- Operational Task Dashboard -->
+    <section id="tasks-dashboard-section" class="space-y-4" aria-labelledby="tasks-dashboard-title">
+      <div class="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h2 id="tasks-dashboard-title" class="text-xs font-mono font-semibold uppercase tracking-wider text-slate-400 flex items-center gap-2">
+            <span>✅ Fila operacional</span>
+            <span class="text-[10px] text-slate-600 normal-case tracking-normal">runs, etapas e evidências</span>
+          </h2>
+        </div>
+        <button id="tasks-dashboard-refresh" type="button" class="rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-1.5 text-[11px] font-medium text-emerald-300 transition hover:bg-emerald-500/20">
+          Atualizar fila
+        </button>
+      </div>
+      <div id="tasks-dashboard-alert" class="rounded-xl border border-slate-800 bg-slate-900/60 px-3 py-2 text-[11px] text-slate-400" role="status" aria-live="polite">
+        Consultando estado operacional…
+      </div>
+      <div id="tasks-dashboard-summary" class="grid grid-cols-2 gap-3 lg:grid-cols-4"></div>
+      <div id="tasks-dashboard-queue" class="grid grid-cols-1 gap-3 lg:grid-cols-2"></div>
     </section>
 
     <!-- Toolbar: Search Bar + Category Pills -->
@@ -286,6 +333,253 @@
     </div>
   </div>
 
+  <!-- User Demands & Backlog Drawer (Dedicated Screen) -->
+  <div id="demands-drawer" class="hidden fixed inset-0 z-50 bg-slate-950/90 backdrop-blur-md animate-in-quick" role="dialog" aria-modal="true" aria-labelledby="demands-title">
+    <div class="w-full h-full max-w-[1600px] mx-auto bg-slate-950 border-x border-slate-800 overflow-y-auto">
+      
+      <!-- Sticky Header -->
+      <div class="sticky top-0 z-10 border-b border-slate-800 bg-slate-950/95 backdrop-blur-xl">
+        <div class="px-5 sm:px-8 py-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div class="flex items-start gap-3">
+            <div class="w-10 h-10 rounded-xl bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-xl shadow-lg shadow-emerald-500/10">
+              📝
+            </div>
+            <div>
+              <div class="flex items-center gap-2.5 flex-wrap">
+                <h2 id="demands-title" class="text-lg font-bold text-white tracking-tight">Central de Demandas do Usuário</h2>
+                <span class="px-2.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 text-[11px] font-mono font-medium">
+                  Tag: user-demand
+                </span>
+                <span class="px-2.5 py-0.5 rounded-full bg-slate-800 text-slate-300 border border-slate-700 text-[11px] font-mono">
+                  🟢 Motor Local $0.00 Ativo
+                </span>
+              </div>
+              <p class="mt-1 text-xs text-slate-400">
+                Cadastre novas demandas do projeto. Elas são refinadas via inteligência local/heurística e inseridas no backlog operacional com tag exclusiva.
+              </p>
+            </div>
+          </div>
+          <div class="flex items-center gap-3">
+            <button
+              type="button"
+              onclick="trackDemandInRoadmap('')"
+              class="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-cyan-400 hover:text-cyan-300 border border-slate-800 hover:border-cyan-500/40 text-xs font-mono transition-all">
+              <span>🗺️</span>
+              <span class="hidden sm:inline">Ver no Roadmap</span>
+            </button>
+            <button
+              type="button"
+              onclick="closeDemandsDrawer()"
+              aria-label="Fechar tela de demandas"
+              class="p-2 rounded-xl text-slate-400 hover:text-slate-100 hover:bg-slate-800 transition-colors">
+              ✕
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Main Body Container -->
+      <div class="px-5 sm:px-8 py-6 space-y-6">
+
+        <!-- Distinction Alert Banner -->
+        <div class="p-4 rounded-2xl bg-indigo-950/30 border border-indigo-500/20 text-xs text-indigo-300 flex items-start gap-3">
+          <span class="text-lg">🛡️</span>
+          <div class="space-y-1">
+            <strong class="font-semibold text-white">Classificação Estrita de Origem da Dark Factory:</strong>
+            <p class="text-indigo-200/80 leading-relaxed font-sans">
+              Demandas abertas nesta tela recebem a classificação permanente <code class="px-1.5 py-0.5 rounded bg-emerald-900/40 border border-emerald-500/30 text-emerald-300 font-mono text-[11px]">user-demand</code>, diferenciando-se de tickets originados de revisões de código (<code class="text-amber-300 font-mono text-[11px]">code-review</code>) e iniciativas autônomas de agentes (<code class="text-cyan-300 font-mono text-[11px]">agent-feature</code>).
+            </p>
+          </div>
+        </div>
+
+        <!-- Two Column Layout: Form vs Guidance/Radar -->
+        <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
+
+          <!-- Left Column: Manual Input Form (7 cols) -->
+          <div class="lg:col-span-7 space-y-5 bg-slate-900/40 border border-slate-800/80 rounded-2xl p-5 sm:p-6">
+            <div class="flex items-center justify-between pb-3 border-b border-slate-800">
+              <h3 class="text-xs font-mono font-semibold uppercase tracking-wider text-slate-300 flex items-center gap-2">
+                <span>📋 Formulário de Demanda Manual</span>
+              </h3>
+              <span class="text-[10px] text-slate-500 font-mono">Entrada Headless</span>
+            </div>
+
+            <div class="space-y-4 text-xs">
+              <!-- Project and Priority Row -->
+              <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div>
+                  <label for="demand-project-select" class="block text-[10px] uppercase font-mono tracking-wider text-slate-400 mb-1">Projeto</label>
+                  <select id="demand-project-select" class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-indigo-500 font-mono">
+                    <option value="darkfac">DarkFac (darkfac)</option>
+                  </select>
+                </div>
+                <div>
+                  <label for="demand-horizon-select" class="block text-[10px] uppercase font-mono tracking-wider text-slate-400 mb-1">Horizonte</label>
+                  <select id="demand-horizon-select" class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-indigo-500 font-mono">
+                    <option value="now">Agora (Sprint Atual)</option>
+                    <option value="next">Próximo (Sprint Seguinte)</option>
+                    <option value="later">Mais Adiante (Backlog Futuro)</option>
+                    <option value="exploratory">Exploratório</option>
+                  </select>
+                </div>
+                <div>
+                  <label for="demand-type-select" class="block text-[10px] uppercase font-mono tracking-wider text-slate-400 mb-1">Tipo de Item</label>
+                  <select id="demand-type-select" class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-indigo-500 font-mono">
+                    <option value="feature">Feature / Funcionalidade</option>
+                    <option value="quality">Qualidade / Testes</option>
+                    <option value="infrastructure">Infraestrutura</option>
+                    <option value="operations">Operação</option>
+                    <option value="documentation">Documentação</option>
+                  </select>
+                </div>
+              </div>
+
+              <!-- Title -->
+              <div>
+                <label for="demand-title-input" class="block text-[10px] uppercase font-mono tracking-wider text-slate-400 mb-1">
+                  Título da Demanda <span class="text-rose-400">*</span>
+                </label>
+                <input
+                  id="demand-title-input"
+                  type="text"
+                  placeholder="Ex: Permitir exportação de dados analíticos para formato CSV"
+                  class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs text-slate-100 placeholder-slate-600 focus:outline-none focus:border-emerald-500 transition-colors font-sans"
+                />
+              </div>
+
+              <!-- Problem Statement -->
+              <div>
+                <label for="demand-problem-input" class="block text-[10px] uppercase font-mono tracking-wider text-slate-400 mb-1">
+                  O Problema Real (Dor do Usuário / Oportunidade)
+                </label>
+                <textarea
+                  id="demand-problem-input"
+                  rows="3"
+                  placeholder="Explique detalhadamente qual problema o usuário ou operador enfrenta atualmente..."
+                  class="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-xs text-slate-200 placeholder-slate-600 focus:outline-none focus:border-emerald-500 transition-colors resize-y font-sans"
+                ></textarea>
+              </div>
+
+              <!-- Core Journey -->
+              <div>
+                <label for="demand-journey-input" class="block text-[10px] uppercase font-mono tracking-wider text-slate-400 mb-1">
+                  Jornada Principal (Passos Observáveis)
+                </label>
+                <textarea
+                  id="demand-journey-input"
+                  rows="2"
+                  placeholder="1. Usuário clica no botão X&#10;2. Sistema processa a solicitação headless&#10;3. Arquivo é disponibilizado para download"
+                  class="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-xs text-slate-200 placeholder-slate-600 focus:outline-none focus:border-emerald-500 transition-colors resize-y font-sans"
+                ></textarea>
+              </div>
+
+              <!-- Non-Goals -->
+              <div>
+                <label for="demand-nongoals-input" class="block text-[10px] uppercase font-mono tracking-wider text-slate-400 mb-1">
+                  Non-Goals (O que NÃO faremos nesta demanda - 1 por linha)
+                </label>
+                <textarea
+                  id="demand-nongoals-input"
+                  rows="2"
+                  placeholder="Não adicionar dependências pesadas&#10;Não alterar modelos de dados fora do escopo"
+                  class="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-xs text-slate-200 placeholder-slate-600 focus:outline-none focus:border-emerald-500 transition-colors resize-y font-mono text-[11px]"
+                ></textarea>
+              </div>
+
+              <!-- Acceptance Criteria -->
+              <div>
+                <label for="demand-criteria-input" class="block text-[10px] uppercase font-mono tracking-wider text-slate-400 mb-1">
+                  Critérios de Aceitação & Validação (1 por linha)
+                </label>
+                <textarea
+                  id="demand-criteria-input"
+                  rows="2"
+                  placeholder="Arquivo CSV é gerado com encoding UTF-8&#10;python -m pytest tests/test_export.py -v passa 100%"
+                  class="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-xs text-slate-200 placeholder-slate-600 focus:outline-none focus:border-emerald-500 transition-colors resize-y font-mono text-[11px]"
+                ></textarea>
+              </div>
+
+              <!-- Action Buttons -->
+              <div class="pt-3 border-t border-slate-800/80 flex flex-col sm:flex-row items-center justify-between gap-3">
+                <button
+                  id="btn-guide-demand"
+                  type="button"
+                  onclick="runDemandGuidance()"
+                  class="w-full sm:w-auto px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white font-medium text-xs border border-slate-700 hover:border-emerald-500/50 transition-all flex items-center justify-center gap-2 shadow-sm">
+                  <span>🧠</span> Orientar & Especificar ($0.00)
+                </button>
+
+                <div class="flex items-center gap-2 w-full sm:w-auto">
+                  <button
+                    type="button"
+                    onclick="resetDemandForm()"
+                    class="px-3 py-2.5 rounded-xl text-slate-400 hover:text-slate-200 hover:bg-slate-800 text-xs font-mono transition-colors">
+                    Limpar
+                  </button>
+                  <button
+                    id="btn-save-demand"
+                    type="button"
+                    onclick="saveDemandToBacklog()"
+                    class="w-full sm:w-auto px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs shadow-lg shadow-emerald-600/30 transition-all flex items-center justify-center gap-1.5">
+                    <span>💾</span> Salvar no Backlog
+                  </button>
+                </div>
+              </div>
+
+            </div>
+          </div>
+
+          <!-- Right Column: Guidance Radar & Recent Demands (5 cols) -->
+          <div class="lg:col-span-5 space-y-6">
+            
+            <!-- Live AI/Script Guidance Card -->
+            <div id="demands-guidance-container" class="hidden bg-slate-900/60 border border-slate-800 rounded-2xl p-5 space-y-4">
+              <!-- Dynamically populated by renderDemandGuidance -->
+            </div>
+
+            <!-- Zero Credit Resilience Information Box -->
+            <div class="p-5 rounded-2xl bg-slate-900/30 border border-slate-800/80 space-y-3">
+              <div class="flex items-center gap-2">
+                <span class="text-base">⚡</span>
+                <h4 class="text-xs font-semibold text-slate-200 uppercase tracking-wider font-mono">Garantia Zero-Crédito</h4>
+              </div>
+              <p class="text-xs text-slate-400 leading-relaxed font-sans">
+                Este módulo é 100% autossuficiente e funciona sem nenhuma cota de nuvem. Se todas as contas de API estiverem sem saldo:
+              </p>
+              <ul class="text-[11px] text-slate-400 space-y-1.5 list-disc list-inside font-sans">
+                <li>Aciona automaticamente o cluster <strong class="text-slate-300">Ollama local</strong> (qwen-fast ou qwen-deep) sem cobrança.</li>
+                <li>Se o Ollama estiver desligado, executa o <strong class="text-slate-300">motor heurístico determinístico</strong> em Python puro.</li>
+                <li>Garante que nenhum usuário fique bloqueado para abrir ou especificar tickets.</li>
+              </ul>
+            </div>
+
+            <!-- Recent User Demands List -->
+            <div class="bg-slate-900/40 border border-slate-800/80 rounded-2xl p-5 space-y-3">
+              <div class="flex items-center justify-between pb-2 border-b border-slate-800">
+                <h4 class="text-xs font-mono font-semibold uppercase tracking-wider text-slate-300 flex items-center gap-1.5">
+                  <span>📌</span> Demandas Abertas Recentemente
+                </h4>
+                <button
+                  type="button"
+                  onclick="loadRecentDemands()"
+                  class="text-[10px] text-slate-500 hover:text-cyan-300 font-mono">
+                  Atualizar
+                </button>
+              </div>
+              <div id="recent-demands-list" class="space-y-2 max-h-60 overflow-y-auto pr-1">
+                <p class="text-[11px] text-slate-500 font-mono text-center p-3">Carregando demandas...</p>
+              </div>
+            </div>
+
+          </div>
+
+        </div>
+
+      </div>
+
+    </div>
+  </div>
+
   <!-- Command Palette Modal (Ctrl+K) -->
   <div id="command-palette-modal" class="hidden fixed inset-0 z-50 flex items-start justify-center pt-20 px-4 bg-slate-950/80 backdrop-blur-sm animate-in-quick">
     <div class="w-full max-w-xl bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[75vh]">
@@ -316,6 +610,49 @@
           <span>↵ Abrir link</span>
         </div>
         <span>DarkHub Command Palette</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Demand Clarification Grill Modal -->
+  <div id="demand-grill-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm animate-in-quick">
+    <div class="w-full max-w-2xl bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[85vh]">
+      <!-- Header -->
+      <div class="p-5 border-b border-slate-800 flex items-center justify-between bg-slate-950/40">
+        <div class="flex items-center gap-2.5">
+          <span class="text-xl">🔥</span>
+          <div>
+            <h3 class="font-bold text-sm text-white flex items-center gap-2 font-mono">
+              <span>Sessão de Grill & Refinamento</span>
+              <span id="grill-modal-ticket-id" class="px-2 py-0.5 rounded text-[10px] bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">USR-09</span>
+            </h3>
+            <p id="grill-modal-ticket-title" class="text-xs text-slate-400 truncate max-w-md">Carregando demanda...</p>
+          </div>
+        </div>
+        <button type="button" onclick="closeGrillModal()" class="text-slate-400 hover:text-white text-lg font-mono px-2 py-1 rounded-lg hover:bg-slate-800 transition-colors">✕</button>
+      </div>
+
+      <!-- Body: Insights & Questions -->
+      <div id="grill-modal-body" class="p-5 overflow-y-auto space-y-5 flex-1 text-xs">
+        <div class="text-center p-8 space-y-3">
+          <span class="text-3xl animate-spin inline-block">⏳</span>
+          <p class="text-slate-400 font-mono">Pesquisando contexto na documentação e gerando perguntas essenciais ($0.00)...</p>
+        </div>
+      </div>
+
+      <!-- Footer -->
+      <div class="p-4 border-t border-slate-800 flex items-center justify-between bg-slate-950/40">
+        <button type="button" onclick="closeGrillModal()" class="px-3.5 py-2 rounded-xl text-slate-400 hover:text-slate-200 hover:bg-slate-800 text-xs font-mono transition-colors">
+          Cancelar
+        </button>
+        <div class="flex items-center gap-2">
+          <button type="button" id="btn-grill-auto-accept" onclick="submitGrillModalAnswers(true)" class="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-mono border border-slate-700 transition-colors">
+            ⚡ Aceitar Recomendações
+          </button>
+          <button type="button" id="btn-grill-submit" onclick="submitGrillModalAnswers(false)" class="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs shadow-lg shadow-emerald-600/30 transition-all">
+            💾 Aplicar Refinamento
+          </button>
+        </div>
       </div>
     </div>
   </div>
@@ -750,8 +1087,12 @@
   <div id="toast-container" class="fixed bottom-6 right-6 z-50 flex flex-col gap-2 pointer-events-none"></div>
 
   <!-- Scripts -->
-  <script src="/static/app.js"></script>
-  <script src="/static/usage.js"></script>
-  <script src="/static/roadmap.js"></script>
+  <script src="/static/app.js?v=20260906b"></script>
+  <script src="/static/usage.js?v=20260906b"></script>
+  <script src="/static/credits.js?v=20260907a"></script>
+  <script src="/static/infra.js?v=20260908a"></script>
+  <script src="/static/tasks.js?v=20260908a"></script>
+  <script src="/static/roadmap.js?v=20260906b"></script>
+  <script src="/static/demands.js?v=20260906b"></script>
 </body>
 </html>

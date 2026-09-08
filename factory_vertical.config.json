@@ -1,0 +1,13 @@
+{
+  "schema_version": "1",
+  "task_id": "DF15-CALCULATOR-ADD",
+  "objective": "Fix the calculator add operation without changing the acceptance test.",
+  "issue": "The add(left, right) operation returns subtraction for positive and negative operands.",
+  "allowed_paths": ["calculator.py"],
+  "candidate_command": ["{python}", "-m", "pytest", "test_calculator.py", "-q"],
+  "holdout_module": ".factory/holdout/df15_factory_vertical.py",
+  "budget_ceiling": 0.05,
+  "max_attempts": 3,
+  "timeout_seconds": 30.0
+}
+

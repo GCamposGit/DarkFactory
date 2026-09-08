@@ -25,6 +25,7 @@ from core.usage.models import (
     ModelTier,
     ProviderAccountUsage,
     ProviderFamily,
+    QuotaWindow,
 )
 from core.usage.monitor import AccountUsageMonitor
 from hub.backend.api import get_hub_service
@@ -82,9 +83,9 @@ def test_codex_parser_preserves_5h_and_weekly_windows(tmp_path: Path) -> None:
     )
 
     assert result.status == AccountConnectionStatus.CONNECTED
-    assert result.quota_supported is True
-    assert [window.window_duration_minutes for window in result.windows] == [300, 10_080]
-    assert [window.remaining_percent for window in result.windows] == [59.0, 69.0]
+    assert [window.window_duration_minutes for window in result.windows] == [10_080, 300]
+    assert [window.remaining_percent for window in result.windows] == [69.0, 59.0]
+    assert [window.label for window in result.windows] == ["Limite Semanal (1 semana)", "Janela Móvel (5h)"]
     assert result.account_label == "…123456"
 
 
@@ -104,6 +105,9 @@ def test_snapshot_keeps_unknown_percent_distinct_from_zero(tmp_path: Path) -> No
 
 def test_openai_and_xai_api_keys_are_connected_fallbacks(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setattr("core.usage.adapters.shutil.which", lambda _: None)
+    monkeypatch.setattr(CodexAccountAdapter, "_find_codex", lambda self: None)
+    from core.usage.adapters import GrokAccountAdapter, GeminiAccountAdapter
+    monkeypatch.setattr(GrokAccountAdapter, "_probe_grok_cli_session", lambda self: None)
     monkeypatch.setenv("OPENAI_API_KEY", "configured")
     monkeypatch.setenv("XAI_API_KEY", "configured")
     openai_spec = ProviderSpec(
@@ -118,13 +122,10 @@ def test_openai_and_xai_api_keys_are_connected_fallbacks(tmp_path: Path, monkeyp
         "xai",
         "xAI / Grok",
         ProviderFamily.FRONTIER,
-        "https://console.x.ai/",
+        "https://grok.com/?_s=usage",
         ("XAI_API_KEY",),
     )
-    xai = __import__("core.usage.adapters", fromlist=["GrokAccountAdapter"]).GrokAccountAdapter(
-        xai_spec,
-        tmp_path,
-    ).inspect()
+    xai = GrokAccountAdapter(xai_spec, tmp_path).inspect()
 
     assert openai.status == AccountConnectionStatus.CONNECTED
     assert openai.adapter == "openai_api_key"
@@ -132,6 +133,173 @@ def test_openai_and_xai_api_keys_are_connected_fallbacks(tmp_path: Path, monkeyp
     assert xai.status == AccountConnectionStatus.CONNECTED
     assert xai.adapter == "xai_api_key"
     assert xai.quota_supported is False
+
+
+def test_gemini_adapter_parses_live_language_server_response(tmp_path: Path, monkeypatch) -> None:
+    from core.usage.adapters import GeminiAccountAdapter
+    spec = ProviderSpec("google", "Google / Gemini", ProviderFamily.FRONTIER, "https://one.google.com/")
+    adapter = GeminiAccountAdapter(spec, tmp_path)
+
+    dummy_usage = ProviderAccountUsage(
+        provider_id="google",
+        provider_name="Google / Gemini",
+        family=ProviderFamily.FRONTIER,
+        status=AccountConnectionStatus.CONNECTED,
+        adapter="antigravity_rpc",
+        plan="Pro",
+        account_label="user@example.com",
+        quota_supported=True,
+        windows=[
+            QuotaWindow(
+                quota_id="antigravity:gemini-3.8-flash",
+                label="Gemini 3.8 Flash · 5h",
+                used_percent=15.0,
+                remaining_percent=85.0,
+                window_duration_minutes=300,
+                resets_at="2026-09-07T01:48:27Z",
+                metric="subscription",
+            )
+        ],
+        message="Quotas lidas em tempo real do Language Server local do Antigravity.",
+        dashboard_url=spec.dashboard_url,
+    )
+    monkeypatch.setattr(GeminiAccountAdapter, "_probe_language_server", lambda self: dummy_usage)
+    result = adapter.inspect()
+
+    assert result.status == AccountConnectionStatus.CONNECTED
+    assert result.adapter == "antigravity_rpc"
+    assert result.plan == "Pro"
+    assert result.quota_supported is True
+    assert len(result.windows) == 1
+    assert result.windows[0].used_percent == 15.0
+    assert result.windows[0].remaining_percent == 85.0
+
+
+def test_grok_adapter_parses_live_supergrok_usage(tmp_path: Path, monkeypatch) -> None:
+    from core.usage.adapters import GrokAccountAdapter
+    spec = ProviderSpec("xai", "xAI / Grok", ProviderFamily.FRONTIER, "https://grok.com/?_s=usage")
+    adapter = GrokAccountAdapter(spec, tmp_path)
+
+    dummy_usage = ProviderAccountUsage(
+        provider_id="xai",
+        provider_name="xAI / Grok",
+        family=ProviderFamily.FRONTIER,
+        status=AccountConnectionStatus.LIMITED,
+        adapter="grok_cli_auth",
+        plan="SuperGrok",
+        account_label="user@example.com",
+        quota_supported=True,
+        windows=[
+            QuotaWindow(
+                quota_id="grok:weekly_pool",
+                label="SuperGrok · 1 semana",
+                used_percent=100.0,
+                remaining_percent=0.0,
+                window_duration_minutes=10080,
+                resets_at=None,
+                metric="shared_compute_pool",
+            )
+        ],
+        message="Sessão SuperGrok autenticada via Grok Build CLI; cota semanal esgotada (0% disponível).",
+        dashboard_url=spec.dashboard_url,
+    )
+    monkeypatch.setattr(GrokAccountAdapter, "_probe_grok_cli_session", lambda self: dummy_usage)
+    result = adapter.inspect()
+
+    assert result.status == AccountConnectionStatus.LIMITED
+    assert result.adapter == "grok_cli_auth"
+    assert result.plan == "SuperGrok"
+    assert result.quota_supported is True
+    assert len(result.windows) == 1
+    assert result.windows[0].used_percent == 100.0
+    assert result.windows[0].remaining_percent == 0.0
+
+
+def test_claude_adapter_detects_cli_auth(tmp_path: Path, monkeypatch) -> None:
+    from core.usage.adapters import ClaudeCodeAccountAdapter
+    spec = ProviderSpec("anthropic", "Anthropic / Claude", ProviderFamily.FRONTIER, "https://claude.ai/settings/billing")
+    adapter = ClaudeCodeAccountAdapter(spec, tmp_path)
+
+    dummy_usage = ProviderAccountUsage(
+        provider_id="anthropic",
+        provider_name="Anthropic / Claude",
+        family=ProviderFamily.FRONTIER,
+        status=AccountConnectionStatus.CONNECTED,
+        adapter="claude_code",
+        plan="Claude Pro",
+        account_label="user@example.com",
+        quota_supported=True,
+        windows=[
+            QuotaWindow(
+                quota_id="claude:5h",
+                label="Claude Pro · 5h",
+                used_percent=0.0,
+                remaining_percent=100.0,
+                window_duration_minutes=300,
+                resets_at=None,
+                metric="subscription",
+            ),
+            QuotaWindow(
+                quota_id="claude:weekly",
+                label="Claude Pro · 1 semana",
+                used_percent=0.0,
+                remaining_percent=100.0,
+                window_duration_minutes=10080,
+                resets_at=None,
+                metric="subscription",
+            ),
+        ],
+        message="Sessão Claude Code validada no terminal.",
+        dashboard_url=spec.dashboard_url,
+    )
+    monkeypatch.setattr(ClaudeCodeAccountAdapter, "_find_claude", lambda *_: "mock_claude.exe")
+    monkeypatch.setattr(ClaudeCodeAccountAdapter, "_probe_claude_cli", lambda self, exe: dummy_usage)
+    result = adapter.inspect()
+
+    assert result.status == AccountConnectionStatus.CONNECTED
+    assert result.adapter == "claude_code"
+    assert result.plan == "Claude Pro"
+    assert result.quota_supported is True
+    assert len(result.windows) == 2
+
+
+def test_claude_adapter_fallback_to_api_key(tmp_path: Path, monkeypatch) -> None:
+    from core.usage.adapters import ClaudeCodeAccountAdapter
+    monkeypatch.setattr(ClaudeCodeAccountAdapter, "_find_claude", lambda *_: None)
+    monkeypatch.setattr(ClaudeCodeAccountAdapter, "_probe_claude_credentials", lambda self: None)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
+    spec = ProviderSpec(
+        "anthropic",
+        "Anthropic / Claude",
+        ProviderFamily.FRONTIER,
+        "https://claude.ai/settings/billing",
+        ("ANTHROPIC_API_KEY",),
+    )
+    result = ClaudeCodeAccountAdapter(spec, tmp_path).inspect()
+
+    assert result.status == AccountConnectionStatus.CONNECTED
+    assert result.adapter == "anthropic_api_key"
+    assert result.quota_supported is False
+
+
+def test_claude_adapter_disconnected_when_no_auth(tmp_path: Path, monkeypatch) -> None:
+    from core.usage.adapters import ClaudeCodeAccountAdapter
+    monkeypatch.setattr(ClaudeCodeAccountAdapter, "_find_claude", lambda *_: None)
+    monkeypatch.setattr(ClaudeCodeAccountAdapter, "_probe_claude_credentials", lambda self: None)
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    spec = ProviderSpec(
+        "anthropic",
+        "Anthropic / Claude",
+        ProviderFamily.FRONTIER,
+        "https://claude.ai/settings/billing",
+        ("ANTHROPIC_API_KEY",),
+    )
+    result = ClaudeCodeAccountAdapter(spec, tmp_path).inspect()
+
+    assert result.status == AccountConnectionStatus.DISCONNECTED
+    assert result.adapter == "claude_code"
+    assert "npm install" in result.message
+
 
 def test_monitor_isolates_one_provider_failure(tmp_path: Path) -> None:
     good_spec = ProviderSpec("openai", "OpenAI", ProviderFamily.FRONTIER, "https://example.test")
@@ -252,6 +420,7 @@ def test_hub_page_loads_usage_monitor_script() -> None:
     script = (frontend / "usage.js").read_text(encoding="utf-8")
     assert "/api/usage/accounts" in script
     assert "Percentual indisponível" in script
+    assert "Saldo:" in script
 
 
 def test_replay_after_raw_event_retention_does_not_duplicate(tmp_path: Path) -> None:

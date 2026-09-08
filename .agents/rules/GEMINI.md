@@ -18,5 +18,6 @@ Seu motor primário de orquestração e contexto é o **Gemini 3.8 Flash**.
    - NUNCA modifique arquivos protegidos (`MISSION.md`, `FACTORY_RULES.md`, `FACTORY_GOVERNANCE.md`) em PRs automáticos.
    - Todo código produzido deve passar pelo `core/harness/runner.py` com marcadores determinísticos válidos.
 
-4. **Comandos de Terminal para o Usuário (Inviolável)**:
+4. **Comandos de Terminal para o Usuário e Subprocessos (Inviolável)**:
    - SEMPRE indicar comandos no PowerShell com o endereço absoluto completo (ex: `python C:\dev\DarkFac\run_canaletto.py`), prevenindo falhas de diretório de trabalho relativo no terminal do usuário.
+   - Em chamadas internas ao PowerShell, SEMPRE utilize `-NoProfile -NonInteractive -ExecutionPolicy Bypass` ou `core.harness.terminal_env` para blindar contra perfis que alteram o diretório de trabalho.

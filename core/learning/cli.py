@@ -8,6 +8,8 @@ import argparse
 import json
 from pathlib import Path
 
+from core.paths import project_root
+
 # Ensure UTF-8 output on Windows consoles
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -15,7 +17,7 @@ if hasattr(sys.stderr, "reconfigure"):
     sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
 # Ensure project root in sys.path
-_ROOT = Path(__file__).resolve().parent.parent.parent
+_ROOT = project_root()
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
@@ -57,6 +59,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_rca.add_argument("--patch", required=True, help="Description of applied patch")
     p_rca.add_argument("--rule", required=True, help="Preventative inviolable rule")
     p_rca.add_argument("--test-file", default=None, help="Associated regression test file")
+    p_rca.add_argument("--verify-cmd", default=None, help="Command for Code Judge validation")
 
     # extrapolate command
     p_ext = subparsers.add_parser("extrapolate", help="Transfer lesson to analogous domains")
@@ -154,6 +157,7 @@ def main():
             patch_description=args.patch,
             preventative_rule=args.rule,
             regression_test_file=args.test_file,
+            test_verification_cmd=args.verify_cmd,
         )
         print(
             f"[RCA RECORDED] ID: {rca.rca_id} | "

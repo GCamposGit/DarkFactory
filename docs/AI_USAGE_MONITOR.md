@@ -12,9 +12,9 @@ O Hub mostra, em um único painel, o estado das contas de IA e o consumo percent
 - `degraded`: a plataforma foi detectada, mas o probe falhou isoladamente.
 - Percentual `null` significa “não publicado”; nunca é convertido em `0%`.
 
-OpenAI/Codex usa o app-server oficial instalado para ler buckets móveis, incluindo as janelas de 5 horas e semanal. Grok valida a sessão pelo CLI; a quota do plano de consumidor não é publicada por esse CLI. Gemini valida Antigravity ou API key e registra `100%`/reset quando encontra um `RESOURCE_EXHAUSTED` estruturado; fora disso, mantém o percentual desconhecido. Essa diferença é deliberada: conexão comprovada não implica telemetria de assinatura disponível.
-
-Além das três contas prioritárias, o registro inclui Anthropic, OpenRouter, DeepSeek, SiliconFlow, Qwen, Moonshot/Kimi, Zhipu/GLM, MiniMax e Ollama. Novos provedores implementam `AccountUsageAdapter` e são adicionados por `build_default_adapters`.
+- OpenAI/Codex: localiza o executável `codex.exe` (no PATH, em `%LOCALAPPDATA%\OpenAI\Codex\bin\*\codex.exe`, ou em `~/.codex/`) e conecta-se ao `codex app-server --listen stdio://` via JSON-RPC (`account/rateLimits/read`), extraindo percentuais reais de uso e timestamps de reset para a janela de 5 horas (`primary`) e janela semanal (`secondary`).
+- Google / Gemini & Antigravity: descobre dinamicamente a porta HTTPS local e o token de segurança (`--csrf_token`) do Antigravity Language Server ativo (em `AppData\Roaming\Antigravity\logs\main.log`) e consulta via ConnectRPC os endpoints `/GetAvailableModels` e `/GetUserStatus`, obtendo o percentual real de consumo da janela de 5h e o plano ativo (`Pro`).
+- xAI / Grok: descobre a sessão autenticada do Grok Bot em `AppData\Roaming\Grok Bot`, decriptando o token de acesso protegido por DPAPI (`CryptUnprotectData`) e chave mestra AES-256-GCM de `Local State` e `sand-secrets.json`, e consulta o endpoint ConnectRPC `GetSandUsageStatus` em `api2.cursor.sh` para obter o consumo percentual real do pool semanal compartilhado (`SuperGrok`) e a data exata de reset. Caso o Grok Bot não esteja configurado, utiliza fallback autenticado via CLI (`~/.grok/auth.json`) ou API keys.
 
 ## Snapshots de quota
 

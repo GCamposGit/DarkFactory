@@ -112,7 +112,7 @@ function renderAccountUsage() {
 
 function renderAccountCard(account) {
   const styles = usageStatusStyle(account.status);
-  const windows = account.windows || [];
+  const windows = [...(account.windows || [])].sort((a, b) => (b.window_duration_minutes || 0) - (a.window_duration_minutes || 0));
   const quota = windows.length
     ? windows.map((window) => renderQuotaWindow(window)).join("")
     : `<div class="rounded-lg border border-dashed border-slate-800 px-3 py-2 text-[10px] text-slate-500">Percentual indisponível — não interpretado como 0%.</div>`;
@@ -137,18 +137,28 @@ function renderAccountCard(account) {
 }
 
 function renderQuotaWindow(window) {
-  const hasPercent = Number.isFinite(window.used_percent);
-  const percent = hasPercent ? Math.max(0, Math.min(100, window.used_percent)) : 0;
-  const color = percent >= 90 ? "bg-rose-500" : percent >= 70 ? "bg-amber-400" : "bg-emerald-400";
+  const hasUsed = Number.isFinite(window.used_percent);
+  const hasRemaining = Number.isFinite(window.remaining_percent);
+  const remaining = hasRemaining ? Math.max(0, Math.min(100, window.remaining_percent)) : (hasUsed ? 100 - window.used_percent : null);
+  const used = hasUsed ? Math.max(0, Math.min(100, window.used_percent)) : (hasRemaining ? 100 - remaining : null);
+
+  const textColor = remaining <= 10 ? "text-rose-400" : remaining <= 30 ? "text-amber-400" : "text-emerald-400";
+  const percentDisplay = remaining !== null
+    ? `<span class="text-slate-400">Saldo:</span> <span class="font-semibold ${textColor}">${remaining.toFixed(0)}%</span> <span class="text-slate-500">(${used.toFixed(0)}% usado)</span>`
+    : (used !== null ? `<span class="font-semibold text-slate-200">${used.toFixed(0)}% usado</span>` : "—");
+
+  const barPercent = remaining !== null ? remaining : (used !== null ? Math.max(0, 100 - used) : 0);
+  const color = barPercent <= 10 ? "bg-rose-500" : barPercent <= 30 ? "bg-amber-400" : "bg-emerald-400";
   const reset = window.resets_at ? `reset ${formatUsageReset(window.resets_at)}` : "reset não informado";
+
   return `
     <div>
       <div class="mb-1 flex items-center justify-between gap-2 text-[10px] font-mono">
-        <span class="truncate text-slate-400">${usageEscapeHtml(window.label)}</span>
-        <span class="font-semibold text-slate-200">${hasPercent ? `${percent.toFixed(0)}%` : "—"}</span>
+        <span class="truncate text-slate-300 font-medium">${usageEscapeHtml(window.label)}</span>
+        <div class="text-[10px] font-mono">${percentDisplay}</div>
       </div>
-      <div class="h-1.5 overflow-hidden rounded-full bg-slate-800">
-        <div class="h-full rounded-full ${color}" style="width:${percent}%"></div>
+      <div class="h-1.5 overflow-hidden rounded-full bg-slate-800" title="${remaining !== null ? `Saldo restante: ${remaining.toFixed(1)}% | Consumo: ${used.toFixed(1)}%` : ''}">
+        <div class="h-full rounded-full ${color}" style="width:${barPercent}%"></div>
       </div>
       <div class="mt-1 text-right text-[9px] text-slate-600">${usageEscapeHtml(reset)}</div>
     </div>`;

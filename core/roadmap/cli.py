@@ -5,17 +5,25 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from pathlib import Path
 
+from core.paths import project_root
 from core.roadmap.service import build_repository_roadmap_service
 from core.roadmap.store import RoadmapUnavailableError
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Inspect the DarkFac operational roadmap.")
-    parser.add_argument("command", choices=("snapshot", "health"), nargs="?", default="snapshot")
+    parser.add_argument(
+        "command",
+        choices=("snapshot", "health", "history", "compare"),
+        nargs="?",
+        default="snapshot",
+    )
     parser.add_argument("--project", default="darkfac")
     parser.add_argument("--search", default=None)
+    parser.add_argument("--limit", type=int, default=None)
+    parser.add_argument("--from-snapshot", dest="from_snapshot", default=None)
+    parser.add_argument("--to-snapshot", dest="to_snapshot", default=None)
     parser.add_argument("--pretty", action="store_true")
     return parser
 
@@ -23,13 +31,22 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
-    service = build_repository_roadmap_service(Path(__file__).resolve().parents[2])
+    service = build_repository_roadmap_service(project_root())
     try:
-        payload = (
-            service.get_health(args.project)
-            if args.command == "health"
-            else service.get_snapshot(args.project, search=args.search)
-        )
+        if args.command == "health":
+            payload = service.get_health(args.project)
+        elif args.command == "history":
+            payload = service.get_history(args.project, limit=args.limit)
+        elif args.command == "compare":
+            if not args.from_snapshot or not args.to_snapshot:
+                parser.error("compare requires --from-snapshot and --to-snapshot")
+            payload = service.compare_snapshots(
+                args.project,
+                args.from_snapshot,
+                args.to_snapshot,
+            )
+        else:
+            payload = service.get_snapshot(args.project, search=args.search)
     except (KeyError, RoadmapUnavailableError) as exc:
         print(json.dumps({"error": str(exc)}, ensure_ascii=False), file=sys.stderr)
         return 2

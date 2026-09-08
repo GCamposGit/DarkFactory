@@ -30,7 +30,12 @@ class RoadmapCompiler:
         self.sources = tuple(sorted(sources, key=lambda source: (source.priority, source.source_id)))
         self.checker = RoadmapConsistencyChecker()
 
-    def compile(self, project_id: str) -> RoadmapSnapshot:
+    def compile(
+        self,
+        project_id: str,
+        *,
+        previous_snapshot: RoadmapSnapshot | None = None,
+    ) -> RoadmapSnapshot:
         source_states: list[RoadmapSourceState] = []
         source_records: list[RoadmapCandidate] = []
         for source in self.sources:
@@ -39,6 +44,15 @@ class RoadmapCompiler:
             source_records.extend(
                 record for record in result.records if record.project_id == project_id
             )
+
+        source_fingerprint = self._source_fingerprint(source_states)
+        if (
+            previous_snapshot is not None
+            and previous_snapshot.project_id == project_id
+            and previous_snapshot.source_fingerprint == source_fingerprint
+            and not any(s.status == "unavailable" for s in source_states)
+        ):
+            return previous_snapshot
 
         grouped: dict[str, list[RoadmapCandidate]] = defaultdict(list)
         for record in source_records:

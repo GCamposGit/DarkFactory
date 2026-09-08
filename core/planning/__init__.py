@@ -1,0 +1,45 @@
+"""Contracts and safe source collection for the HF-01 planning baseline."""
+
+from .baseline_models import (
+    AssessmentDimension,
+    BaselineIssue,
+    BaselineSnapshot,
+    BaselineSourceKind,
+    BaselineSourceSpec,
+    CapabilityAssessment,
+    ClaimAssertion,
+    ClaimDimension,
+    CollectedBaseline,
+    CompletenessStatus,
+    EvidenceClaim,
+    EvidenceKind,
+    HF02Readiness,
+    IssueSeverity,
+    PlannedItem,
+    SourceObservation,
+    SourceStatus,
+)
+from .baseline_sources import BaselineCatalogError, collect_sources, load_catalog
+
+__all__ = [
+    "AssessmentDimension",
+    "BaselineCatalogError",
+    "BaselineIssue",
+    "BaselineSnapshot",
+    "BaselineSourceKind",
+    "BaselineSourceSpec",
+    "CapabilityAssessment",
+    "ClaimAssertion",
+    "ClaimDimension",
+    "CollectedBaseline",
+    "CompletenessStatus",
+    "EvidenceClaim",
+    "EvidenceKind",
+    "HF02Readiness",
+    "IssueSeverity",
+    "PlannedItem",
+    "SourceObservation",
+    "SourceStatus",
+    "collect_sources",
+    "load_catalog",
+]
