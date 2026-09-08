@@ -477,6 +477,15 @@
     "item_id_column": null
   },
   {
+    "source_id": "report-df-24-project-adoption",
+    "kind": "report",
+    "relative_path": ".factory/reports/df-24-project-adoption-report.md",
+    "required": true,
+    "section_heading": null,
+    "table_header": null,
+    "item_id_column": null
+  },
+  {
     "source_id": "usr-16-report",
     "kind": "report",
     "relative_path": ".factory/reports/usr-16-report.md",
