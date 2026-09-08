@@ -245,5 +245,134 @@
     "dependencies": [],
     "created_at": "2026-09-08T03:12:48.051694Z",
     "updated_at": "2026-09-08T04:27:00.000000Z"
+  },
+  {
+    "id": "USR-16",
+    "project_id": "darkfac",
+    "title": "Worker Dedicado de Testes e Validação Headless On-Premises (INFRA-10)",
+    "origin": "user",
+    "status": "completed",
+    "item_type": "infrastructure",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand",
+      "infrastructure",
+      "testing",
+      "on-prem"
+    ],
+    "problem_statement": "A execução de testes pesados e suítes completas ocorre na máquina de desenvolvimento local, sobrecarregando CPU/RAM e bloqueando o ciclo interativo de trabalho. O servidor on-premises desktop-g45ipem (Tailscale 100.78.181.90, i7-4790K, 16 GB, 3 TB no Drive E:) dispõe de capacidade ociosa mas não possui um worker headless conectado ao harness da fábrica.",
+    "core_journey": [
+      "Subagente ou runner dispara instrução de teste com worker_mode auto",
+      "Sistema verifica disponibilidade do nó on-premise via Tailscale mesh",
+      "Se online, executa remotamente no servidor com logs isolados em disco e retorna DistilledTestReport",
+      "Se offline ou timeout, degrada transparentemente para execução local sem falhar a suíte"
+    ],
+    "non_goals": [
+      "Não bloquear a execução local caso o servidor on-premises esteja desligado",
+      "Não alterar a API externa de DistilledTestReport consumida pelos agentes"
+    ],
+    "reachability_contract": "python -m pytest tests/test_worker_onprem_test_subagent.py -v",
+    "acceptance_criteria": [
+      "Daemon headless de testes remote_worker.py funcional com /health e /execute",
+      "Offloading automático e failover fail-safe para execução local comprovados por testes determinísticos",
+      "Status do worker exposto na API do Hub",
+      "Logs isolados em .factory/test_logs/ sem poluição de contexto"
+    ],
+    "suggested_files": [
+      "core/harness/remote_worker.py",
+      "core/harness/test_subagent.py",
+      "scripts/start_onprem_worker.ps1",
+      "hub/backend/api.py",
+      "hub/backend/service.py",
+      "tests/test_worker_onprem_test_subagent.py"
+    ],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-09-08T13:38:00.000000Z",
+    "updated_at": "2026-09-08T13:44:00.000000Z"
+  },
+  {
+    "id": "USR-17",
+    "project_id": "darkfac",
+    "title": "Camada de Persistência Híbrida PostgreSQL + Sync R2 & On-Premises (INFRA-07 / INFRA-08)",
+    "origin": "user",
+    "status": "planned",
+    "item_type": "infrastructure",
+    "lifecycle_stage": "foundations",
+    "horizon": "next",
+    "tags": [
+      "user-demand",
+      "infrastructure",
+      "database",
+      "storage"
+    ],
+    "problem_statement": "Múltiplos agentes e worktrees concorrentes causam conflitos de merge e locks em arquivos JSON planos de telemetria, demandas e aprendizado contínuo. Necessário integrar persistência transacional multi-tenant com PostgreSQL na VPS Hetzner e backup S3 no Cloudflare R2 com cópia noturna no Drive E: (3 TB).",
+    "core_journey": [
+      "Fábrica persiste dados localmente em cache com replicação transacional no PostgreSQL na VPS",
+      "Rotina noturna gera dumps criptografados enviados para o Cloudflare R2 e espelhados no desktop on-premise"
+    ],
+    "non_goals": [
+      "Não criar dependência bloqueante de rede caso a VPS esteja inacessível (manter fallback local-first)"
+    ],
+    "reachability_contract": "python -m pytest tests/test_postgres_hybrid_persistence.py -v",
+    "acceptance_criteria": [
+      "Adapter Local-First com sync no PostgreSQL 16 do Dokploy",
+      "Rotina de backup criptografado para Cloudflare R2 com zero egress cost",
+      "Cópia secundária de snapshots no servidor on-premises"
+    ],
+    "suggested_files": [
+      "core/infra/persistence.py",
+      "core/infra/backup_r2.py"
+    ],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-09-08T13:38:00.000000Z",
+    "updated_at": "2026-09-08T13:38:00.000000Z"
+  },
+  {
+    "id": "USR-18",
+    "project_id": "darkfac",
+    "title": "DarkHub 24/7 & Gateway de Webhooks Autônomos no Dokploy (INFRA-09 / DF-20/21)",
+    "origin": "user",
+    "status": "completed",
+    "item_type": "infrastructure",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand",
+      "infrastructure",
+      "hub",
+      "automation"
+    ],
+    "problem_statement": "O DarkHub roda localmente no notebook e fica offline quando a máquina é desligada, impedindo agendamentos noturnos de benchmarks, monitoramento contínuo de créditos e recepção de webhooks do GitHub para pipelines autônomos.",
+    "core_journey": [
+      "DarkHub roda 24/7 em container Docker gerenciado pelo Dokploy na VPS",
+      "Escuta webhooks do GitHub e dispara validações e benchmarks de forma autônoma"
+    ],
+    "non_goals": [
+      "Não expor portas abertas sem proteção de WAF/Cloudflare Zero Trust"
+    ],
+    "reachability_contract": "python -m pytest tests/test_darkhub_cloud_gateway.py -v",
+    "acceptance_criteria": [
+      "Deploy do DarkHub Core containerizado no Dokploy sob HTTPS",
+      "Autenticação Zero Trust via Cloudflare Access / Google OAuth",
+      "Listener de webhooks do GitHub ativo para triggers de validação autônoma"
+    ],
+    "suggested_files": [
+      "deploy/dokploy/Dockerfile.hub",
+      "deploy/dokploy/docker-compose.hub.yml",
+      "deploy/dokploy/env.hub.example",
+      "hub/backend/webhooks.py",
+      "hub/backend/main.py",
+      "hub/backend/api.py",
+      "hub/backend/service.py",
+      "hub/frontend/infra.js",
+      "tests/test_darkhub_cloud_gateway.py"
+    ],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-09-08T13:38:00.000000Z",
+    "updated_at": "2026-09-08T18:24:00.000000Z"
   }
 ]

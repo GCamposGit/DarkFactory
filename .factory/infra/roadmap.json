@@ -1,0 +1,126 @@
+{
+  "schema_version": "1",
+  "project_id": "darkfac-infra",
+  "title": "Roadmap de Infraestrutura e Escalabilidade Multi-Projeto",
+  "last_updated": "2026-09-07T20:32:00Z",
+  "phases": [
+    {
+      "phase_id": "phase-1",
+      "name": "Mapeamento, Conexão Segura & Ativação On-Premise",
+      "status": "completed",
+      "completed_at": "2026-09-07"
+    },
+    {
+      "phase_id": "phase-2",
+      "name": "Expansão Cloud VPS & Orquestração PaaS",
+      "status": "planned"
+    },
+    {
+      "phase_id": "phase-3",
+      "name": "Dados Multi-Projeto & Política de Resiliência",
+      "status": "planned"
+    },
+    {
+      "phase_id": "phase-4",
+      "name": "Automações Avançadas & Escala Multi-Projeto",
+      "status": "future"
+    }
+  ],
+  "items": [
+    {
+      "id": "INFRA-01",
+      "title": "Mapeamento de Hardware e Topologia Híbrida",
+      "phase": "phase-1",
+      "status": "delivered",
+      "completed_at": "2026-09-07",
+      "description": "Criação do módulo core.infra, modelos Pydantic v2, CLI determinística e diagnóstico técnico das GPUs Maxwell.",
+      "tags": ["core.infra", "topologia", "inventario", "pydantic"]
+    },
+    {
+      "id": "INFRA-02",
+      "title": "Rede Mesh Privada Zero-Trust (Tailscale)",
+      "phase": "phase-1",
+      "status": "delivered",
+      "completed_at": "2026-09-07",
+      "description": "Conexão de ai-notebook (100.81.84.124) e desktop-g45ipem (100.78.181.90) com ping e autenticação validados.",
+      "tags": ["tailscale", "mesh", "vpn", "seguranca"]
+    },
+    {
+      "id": "INFRA-03",
+      "title": "Ativação do Docker no Servidor On-Premises (Blindagem de SSD)",
+      "phase": "phase-1",
+      "status": "delivered",
+      "completed_at": "2026-09-07",
+      "description": "Docker Desktop instalado no desktop-g45ipem com armazenamento de dados alocado no Drive E: (3 TB), preservando o SSD de 240 GB.",
+      "tags": ["docker", "wsl2", "storage", "on-prem"]
+    },
+    {
+      "id": "INFRA-04",
+      "title": "Acesso Remoto Operacional & Headless",
+      "phase": "phase-1",
+      "status": "delivered",
+      "completed_at": "2026-09-07",
+      "description": "Google Remote Desktop ativo para gerenciamento visual do desktop-g45ipem sem necessidade de monitor ou teclado dedicados.",
+      "tags": ["remotedesktop", "google", "headless"]
+    },
+    {
+      "id": "INFRA-05",
+      "title": "Provisionamento da Cloud VPS Primária (Hetzner CX23)",
+      "phase": "phase-2",
+      "status": "delivered",
+      "completed_at": "2026-09-08",
+      "description": "VPS Hetzner CX23 (#165058444) em Falkenstein provisionada com sucesso (IPv4: 178.105.73.168, IPv6: 2a01:4f8:c014:634::/64).",
+      "tags": ["vps", "hetzner", "cx23", "cloud", "active"]
+    },
+    {
+      "id": "INFRA-06",
+      "title": "Instalação do Dokploy PaaS & Tailscale Mesh na VPS",
+      "phase": "phase-2",
+      "status": "delivered",
+      "completed_at": "2026-09-08",
+      "description": "Dokploy PaaS instalado com sucesso e ouvindo na porta 3000; Tailscale ativo e conectado no IP privado 100.83.176.60.",
+      "tags": ["dokploy", "paas", "tailscale", "active"]
+    },
+    {
+      "id": "INFRA-07",
+      "title": "PostgreSQL Multi-Tenant em Armazenamento NVMe",
+      "phase": "phase-3",
+      "status": "delivered",
+      "completed_at": "2026-09-08",
+      "description": "Instância central PostgreSQL 16+ criada e operacional no Dokploy sobre armazenamento NVMe com custo adicional zero.",
+      "tags": ["postgresql", "database", "multi-tenant", "nvme", "active"]
+    },
+    {
+      "id": "INFRA-08",
+      "title": "Automação de Backups 3-Camadas (R2 + On-Premise)",
+      "phase": "phase-3",
+      "status": "planned",
+      "description": "Rotina diária de dump criptografado para Cloudflare R2 (10 GB gratuitos, zero egress) com espelho noturno para o Drive E: (3 TB).",
+      "tags": ["backups", "r2", "storage-vault", "resiliencia"]
+    },
+    {
+      "id": "INFRA-09",
+      "title": "Pipelines de Deploy Contínuo (Git Push Webhooks)",
+      "phase": "phase-4",
+      "status": "planned",
+      "description": "Webhooks do GitHub integrados ao Dokploy para compilação e deploy contínuo sem downtime.",
+      "tags": ["ci-cd", "webhooks", "deploy"]
+    },
+    {
+      "id": "INFRA-10",
+      "title": "Runner de CI e Batch Workloads no Servidor On-Premises",
+      "phase": "phase-4",
+      "status": "planned",
+      "description": "Execução de testes pesados e compilações longas no i7-4790K via Docker, poupando a máquina de dev.",
+      "tags": ["ci-runner", "on-prem", "batch", "workloads"]
+    },
+    {
+      "id": "INFRA-11",
+      "title": "Painel Unificado de Métricas de Infraestrutura no DarkHub",
+      "phase": "phase-4",
+      "status": "planned",
+      "description": "Exposição dos nós, métricas de hardware e status de containers no painel web da Dark Factory.",
+      "tags": ["darkhub", "telemetria", "monitoramento"]
+    }
+  ]
+}

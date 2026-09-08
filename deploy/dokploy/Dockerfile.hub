@@ -1,0 +1,48 @@
+# syntax=docker/dockerfile:1
+# DarkHub 24/7 Cloud Core Dockerfile ( Dokploy PaaS / Hetzner VPS )
+# Governed by USR-18 / INFRA-09 / DF-20
+
+FROM python:3.12-slim AS base
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONPATH=/app \
+    PORT=8000 \
+    DARKHUB_ENV=production
+
+WORKDIR /app
+
+# Install minimal OS utilities for network health probes
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Python dependencies first for caching
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Create non-root system user for security
+RUN groupadd -g 1000 darkfac && \
+    useradd -u 1000 -g darkfac -m -s /bin/bash darkfac
+
+# Copy application files
+COPY core /app/core
+COPY hub /app/hub
+COPY scripts /app/scripts
+COPY deploy /app/deploy
+COPY harness.config.json /app/harness.config.json
+
+# Create data directories with appropriate permissions
+RUN mkdir -p /app/.factory /app/hub/data && \
+    chown -R darkfac:darkfac /app
+
+USER darkfac
+
+EXPOSE 8000
+
+# Health check probing the Cloud Gateway status endpoint
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/cloud/status')" || exit 1
+
+CMD ["uvicorn", "hub.backend.main:app", "--host", "0.0.0.0", "--port", "8000"]

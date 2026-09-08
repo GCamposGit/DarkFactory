@@ -115,6 +115,21 @@ def test_pareto_frontier_filtering():
             latency_ttft_sec=1.1,
             tokens_per_task=2000,
         ),
+        # Newly discovered models can have pricing before any capability score.
+        ModelBenchmarkEntry(
+            model_id="model-unknown",
+            name="Model Unknown",
+            provider="test",
+            context_length=128000,
+            input_cost_per_m=1.0,
+            output_cost_per_m=2.0,
+            cost_per_task=0.04,
+            coding_score=None,
+            intelligence_score=None,
+            output_speed_tps=None,
+            latency_ttft_sec=None,
+            tokens_per_task=None,
+        ),
     ]
 
     frontier = compute_pareto_frontier(models, metric="coding_score")
@@ -124,6 +139,7 @@ def test_pareto_frontier_filtering():
     assert "model-c" in frontier_ids
     assert "model-d" in frontier_ids
     assert "model-b-dominated" not in frontier_ids
+    assert "model-unknown" not in frontier_ids
 
 
 def test_daily_idempotency_and_caching():

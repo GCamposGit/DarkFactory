@@ -11,8 +11,9 @@ from typing import List, Dict, Any, Optional
 
 from core.learning_pack.models import SessionLearningPack
 from core.learning_pack.renderer import LearningPackRenderer
+from core.paths import project_root
 
-_ROOT_DIR = Path(__file__).resolve().parent.parent.parent
+_ROOT_DIR = project_root()
 DEFAULT_PACKS_DIR = _ROOT_DIR / ".factory" / "learning_packs"
 INDEX_FILE_NAME = "packs_index.json"
 
