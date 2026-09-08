@@ -1,0 +1,135 @@
+{
+  "schema_version": "1",
+  "ledger_id": "20260908_hybrid_workflow",
+  "consulted_on": "2026-09-08",
+  "status": "planning_research",
+  "decision_status": "DBOS preferred candidate, HF-02 spike pending",
+  "sources": [
+    {
+      "id": "dbos-architecture",
+      "url": "https://docs.dbos.dev/architecture",
+      "application": "Checkpointing, deployment shape and recovery requirements",
+      "authority_tier": "primary",
+      "source_type": "official_documentation",
+      "accessed_on": "2026-09-08"
+    },
+    {
+      "id": "dbos-workflows",
+      "url": "https://docs.dbos.dev/python/tutorials/workflow-tutorial",
+      "application": "Deterministic workflow and non-deterministic step boundaries",
+      "authority_tier": "primary",
+      "source_type": "official_documentation",
+      "accessed_on": "2026-09-08"
+    },
+    {
+      "id": "dbos-communication",
+      "url": "https://docs.dbos.dev/python/tutorials/workflow-communication",
+      "application": "Durable interaction",
+      "authority_tier": "primary",
+      "source_type": "official_documentation",
+      "accessed_on": "2026-09-08"
+    },
+    {
+      "id": "dbos-queues",
+      "url": "https://docs.dbos.dev/python/reference/queues",
+      "application": "Durable queues and concurrency",
+      "authority_tier": "primary",
+      "source_type": "official_documentation",
+      "accessed_on": "2026-09-08"
+    },
+    {
+      "id": "temporal-deployment",
+      "url": "https://docs.temporal.io/self-hosted-guide/deployment",
+      "application": "Self-hosted service operation",
+      "authority_tier": "primary",
+      "source_type": "official_documentation",
+      "accessed_on": "2026-09-08"
+    },
+    {
+      "id": "prefect-server",
+      "url": "https://docs.prefect.io/v3/concepts/server",
+      "application": "Server and persistence architecture",
+      "authority_tier": "primary",
+      "source_type": "official_documentation",
+      "accessed_on": "2026-09-08"
+    },
+    {
+      "id": "langgraph-persistence",
+      "url": "https://docs.langchain.com/oss/python/langgraph/persistence",
+      "application": "Graph persistence",
+      "authority_tier": "primary",
+      "source_type": "official_documentation",
+      "accessed_on": "2026-09-08"
+    },
+    {
+      "id": "n8n-editions",
+      "url": "https://docs.n8n.io/deploy/host-n8n/community-edition-features",
+      "application": "Community scope and excluded features",
+      "authority_tier": "primary",
+      "source_type": "official_documentation",
+      "accessed_on": "2026-09-08"
+    },
+    {
+      "id": "n8n-compose",
+      "url": "https://docs.n8n.io/deploy/host-n8n/install-options/install-using-docker-compose",
+      "application": "Recommended installation",
+      "authority_tier": "primary",
+      "source_type": "official_documentation",
+      "accessed_on": "2026-09-08"
+    },
+    {
+      "id": "dokploy-auto-deploy",
+      "url": "https://docs.dokploy.com/docs/core/auto-deploy",
+      "application": "API and webhook deployment",
+      "authority_tier": "primary",
+      "source_type": "official_documentation",
+      "accessed_on": "2026-09-08"
+    },
+    {
+      "id": "github-environments",
+      "url": "https://docs.github.com/en/actions/how-tos/deploy/configure-and-manage-deployments/manage-environments",
+      "application": "Deployment protections and plan limitations",
+      "authority_tier": "primary",
+      "source_type": "official_documentation",
+      "accessed_on": "2026-09-08"
+    },
+    {
+      "id": "openrouter-limits",
+      "url": "https://openrouter.ai/docs/api_reference/limits",
+      "application": "Balance, key limits, cumulative and monthly usage",
+      "authority_tier": "primary",
+      "source_type": "official_documentation",
+      "accessed_on": "2026-09-08"
+    },
+    {
+      "id": "telegram-bot-api",
+      "url": "https://core.telegram.org/bots/api",
+      "application": "Polling and callbacks",
+      "authority_tier": "primary",
+      "source_type": "official_documentation",
+      "accessed_on": "2026-09-08"
+    },
+    {
+      "id": "owasp-asvs",
+      "url": "https://owasp.org/www-project-application-security-verification-standard/",
+      "application": "Application security verification reference",
+      "authority_tier": "primary",
+      "source_type": "official_documentation",
+      "accessed_on": "2026-09-08"
+    },
+    {
+      "id": "slsa",
+      "url": "https://slsa.dev/spec/v1.2/",
+      "application": "Software supply-chain provenance",
+      "authority_tier": "primary",
+      "source_type": "official_documentation",
+      "accessed_on": "2026-09-08"
+    }
+  ],
+  "evidence_limits": [
+    "No runtime spike, benchmark, installation or general test suite executed",
+    "n8n installation not confirmed; Dokploy login required",
+    "OpenRouter balance observed in DarkHub; displayed monthly usage requires reconciliation"
+  ],
+  "plan_ref": "../../../docs/HYBRID_WORKFLOW_PLAN_2026-09-08.md"
+}

@@ -120,6 +120,13 @@ from core.infra.cards import (
     build_infra_cards_report,
 )
 from core.orchestrator.store import OrchestratorStore, RunRecord
+from hub.backend.webhooks import (
+    CloudGatewayStatus,
+    DokployDeployClient,
+    DokployDeployTrigger,
+    WebhookEngine,
+    WebhookEventRecord,
+)
 
 logger = logging.getLogger("darkhub.service")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
@@ -218,6 +225,7 @@ class HubService:
         roadmap_root: Optional[Path] = None,
         state_path: Optional[Path] = None,
         orchestrator_path: Optional[Path] = None,
+        project_root: Optional[Path] = None,
     ) -> None:
         self._session_token = secrets.token_urlsafe(32)
         if data_dir is None:
@@ -250,7 +258,7 @@ class HubService:
             specifier=DemandSpecifier(ollama_url=ollama_base_url),
         )
 
-        repository_root = roadmap_root or Path(__file__).resolve().parents[2]
+        repository_root = project_root or roadmap_root or Path(__file__).resolve().parents[2]
         self.project_root = repository_root
         self.task_state_path = Path(state_path) if state_path is not None else repository_root / ".factory" / "state.json"
         self.orchestrator_path = (
@@ -1707,3 +1715,108 @@ class HubService:
         """Returns catalog of all saved visual assets."""
         studio = VisualStudio()
         return studio.list_assets()
+
+    # ---------------------------------------------------------------------------
+    # Test Worker & Harness Subagent Service Methods (USR-16)
+    # ---------------------------------------------------------------------------
+
+    def get_test_workers_status(self) -> List[Dict[str, Any]]:
+        """Probes known test worker nodes (e.g. desktop-g45ipem on Tailscale) and returns status."""
+        workers = [
+            {
+                "id": "onprem-z97-server",
+                "name": "Dedicated Test Worker (desktop-g45ipem)",
+                "url": "http://100.78.181.90:8080",
+                "ip": "100.78.181.90",
+                "port": 8080,
+                "role": "onprem_worker",
+                "description": "Dedicated i7-4790K / 16GB / 3TB E: on-premises validation node via Tailscale",
+            },
+            {
+                "id": "local-notebook",
+                "name": "Local Workstation Runner",
+                "url": "http://localhost:8080",
+                "ip": "127.0.0.1",
+                "port": 8080,
+                "role": "local_worker",
+                "description": "Interactive developer laptop local test engine",
+            },
+        ]
+
+        engine = TestSubagentEngine(project_root=self.project_root)
+        results = []
+
+        for w in workers:
+            w_info = dict(w)
+            start_t = time.perf_counter()
+            health = engine.probe_remote_worker(w["url"], timeout=0.8)
+            latency_ms = round((time.perf_counter() - start_t) * 1000, 1)
+
+            if health:
+                w_info["status"] = "online"
+                w_info["healthy"] = True
+                w_info["latency_ms"] = latency_ms
+                w_info["details"] = health
+            else:
+                w_info["status"] = "offline"
+                w_info["healthy"] = False
+                w_info["latency_ms"] = None
+                w_info["details"] = None
+
+            results.append(w_info)
+
+        return results
+
+    def execute_test_run(self, instruction: TestExecutionInstruction) -> DistilledTestReport:
+        """Executes a test run via TestSubagentEngine with automatic failover."""
+        engine = TestSubagentEngine(project_root=self.project_root)
+        return engine.execute(instruction)
+
+    # ---------------------------------------------------------------------------
+    # Cloud Gateway & Autonomous Webhooks Service Methods (USR-18 / INFRA-09 / DF-20)
+    # ---------------------------------------------------------------------------
+
+    def process_github_webhook(
+        self,
+        event_type: str,
+        delivery_id: str,
+        payload: Dict[str, Any],
+        signature_header: Optional[str] = None,
+        secret: Optional[str] = None,
+        require_secret: bool = True,
+    ) -> WebhookEventRecord:
+        """Processes an incoming GitHub webhook through WebhookEngine."""
+        engine = WebhookEngine(project_root=self.project_root)
+        webhook_secret = secret or os.getenv("GITHUB_WEBHOOK_SECRET")
+        return engine.process_webhook(
+            event_type=event_type,
+            delivery_id=delivery_id,
+            payload=payload,
+            signature_header=signature_header,
+            secret=webhook_secret,
+            require_secret=require_secret,
+        )
+
+    def get_cloud_gateway_status(self) -> CloudGatewayStatus:
+        """Returns the operational status of the Cloud 24/7 Dokploy Gateway."""
+        engine = WebhookEngine(project_root=self.project_root)
+        return engine.get_gateway_status()
+
+    def get_webhook_events(
+        self,
+        limit: int = 50,
+        event_type: Optional[str] = None,
+    ) -> List[WebhookEventRecord]:
+        """Returns recent audited webhook events."""
+        engine = WebhookEngine(project_root=self.project_root)
+        return engine.audit_store.get_events(limit=limit, event_type=event_type)
+
+    def trigger_dokploy_deployment(
+        self,
+        service_name: str = "darkhub",
+        custom_url: Optional[str] = None,
+    ) -> DokployDeployTrigger:
+        """Triggers Dokploy PaaS auto-deploy webhook (INFRA-09)."""
+        client = DokployDeployClient()
+        return client.trigger_deploy(service_name=service_name, custom_url=custom_url)
+

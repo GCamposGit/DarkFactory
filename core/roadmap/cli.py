@@ -5,8 +5,8 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from pathlib import Path
 
+from core.paths import project_root
 from core.roadmap.service import build_repository_roadmap_service
 from core.roadmap.store import RoadmapUnavailableError
 
@@ -31,7 +31,7 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
-    service = build_repository_roadmap_service(Path(__file__).resolve().parents[2])
+    service = build_repository_roadmap_service(project_root())
     try:
         if args.command == "health":
             payload = service.get_health(args.project)

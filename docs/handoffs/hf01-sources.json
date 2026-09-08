@@ -1,0 +1,497 @@
+[
+  {
+    "source_id": "mission",
+    "kind": "source_file",
+    "relative_path": "MISSION.md",
+    "required": true,
+    "section_heading": null,
+    "table_header": null,
+    "item_id_column": null
+  },
+  {
+    "source_id": "factory-rules",
+    "kind": "source_file",
+    "relative_path": "FACTORY_RULES.md",
+    "required": true,
+    "section_heading": null,
+    "table_header": null,
+    "item_id_column": null
+  },
+  {
+    "source_id": "agent-contract",
+    "kind": "source_file",
+    "relative_path": "AGENTS.md",
+    "required": true,
+    "section_heading": null,
+    "table_header": null,
+    "item_id_column": null
+  },
+  {
+    "source_id": "approved-roadmap",
+    "kind": "json_items",
+    "relative_path": ".factory/roadmap/darkfac.json",
+    "required": true,
+    "section_heading": null,
+    "table_header": null,
+    "item_id_column": "id"
+  },
+  {
+    "source_id": "roadmap-operational-document",
+    "kind": "markdown_table",
+    "relative_path": "docs/ROADMAP_OPERACIONAL.md",
+    "required": true,
+    "section_heading": "## Tickets aprovados",
+    "table_header": ["ID", "Entrega", "Depende de", "Horizonte"],
+    "item_id_column": "ID"
+  },
+  {
+    "source_id": "development-plan",
+    "kind": "markdown_table",
+    "relative_path": "docs/DEVELOPMENT_PLAN_2026-09-05.md",
+    "required": true,
+    "section_heading": null,
+    "table_header": ["ID", "Escopo", "Depende", "Critério"],
+    "item_id_column": "ID"
+  },
+  {
+    "source_id": "hybrid-workflow-plan-wave-1",
+    "kind": "markdown_table",
+    "relative_path": "docs/HYBRID_WORKFLOW_PLAN_2026-09-08.md",
+    "required": true,
+    "section_heading": "### Onda 1 — decisão da ferramenta e fluxo híbrido operacional",
+    "table_header": ["ID", "Entrega de desenvolvimento", "Depende de", "Reúso / complemento", "Critério de conclusão"],
+    "item_id_column": "ID"
+  },
+  {
+    "source_id": "infra-roadmap-json",
+    "kind": "json_items",
+    "relative_path": ".factory/infra/roadmap.json",
+    "required": true,
+    "section_heading": null,
+    "table_header": null,
+    "item_id_column": "id"
+  },
+  {
+    "source_id": "infra-roadmap-phase-2",
+    "kind": "markdown_table",
+    "relative_path": ".factory/infra/roadmap.md",
+    "required": true,
+    "section_heading": "### Fase 2: Expansão Cloud VPS & Orquestração PaaS [EM ANDAMENTO 🟡]",
+    "table_header": ["ID", "Item", "Pré-requisito", "Status", "Entregas & Critérios de Aceite"],
+    "item_id_column": "ID"
+  },
+  {
+    "source_id": "infra-roadmap-phase-3",
+    "kind": "markdown_table",
+    "relative_path": ".factory/infra/roadmap.md",
+    "required": true,
+    "section_heading": "### Fase 3: Dados Multi-Projeto & Política de Resiliência [PLANEJADA ⚪]",
+    "table_header": ["ID", "Item", "Pré-requisito", "Status", "Critérios de Aceite"],
+    "item_id_column": "ID"
+  },
+  {
+    "source_id": "infra-roadmap-phase-4",
+    "kind": "markdown_table",
+    "relative_path": ".factory/infra/roadmap.md",
+    "required": true,
+    "section_heading": "### Fase 4: Automações Avançadas & Escala Multi-Projeto [FUTURA ⚪]",
+    "table_header": ["ID", "Item", "Pré-requisito", "Status", "Entregas & Critérios de Aceite"],
+    "item_id_column": "ID"
+  },
+  {
+    "source_id": "infra-inventory",
+    "kind": "inventory",
+    "relative_path": ".factory/infra/inventory.json",
+    "required": true,
+    "section_heading": null,
+    "table_header": null,
+    "item_id_column": "id"
+  },
+  {
+    "source_id": "runtime-decision",
+    "kind": "source_file",
+    "relative_path": "docs/RUNTIME_DECISION.md",
+    "required": true,
+    "section_heading": null,
+    "table_header": null,
+    "item_id_column": null
+  },
+  {
+    "source_id": "autonomy-policy",
+    "kind": "source_file",
+    "relative_path": "docs/AUTONOMY_POLICY.md",
+    "required": true,
+    "section_heading": null,
+    "table_header": null,
+    "item_id_column": null
+  },
+  {
+    "source_id": "roadmap-source-adapter",
+    "kind": "source_file",
+    "relative_path": "core/roadmap/sources.py",
+    "required": true,
+    "section_heading": null,
+    "table_header": null,
+    "item_id_column": null
+  },
+  {
+    "source_id": "runtime-core",
+    "kind": "source_file",
+    "relative_path": "core/orchestrator/runtime.py",
+    "required": true,
+    "section_heading": null,
+    "table_header": null,
+    "item_id_column": null
+  },
+  {
+    "source_id": "runtime-store",
+    "kind": "source_file",
+    "relative_path": "core/orchestrator/store.py",
+    "required": true,
+    "section_heading": null,
+    "table_header": null,
+    "item_id_column": null
+  },
+  {
+    "source_id": "onprem-worker",
+    "kind": "source_file",
+    "relative_path": "core/harness/remote_worker.py",
+    "required": true,
+    "section_heading": null,
+    "table_header": null,
+    "item_id_column": null
+  },
+  {
+    "source_id": "test-subagent",
+    "kind": "source_file",
+    "relative_path": "core/harness/test_subagent.py",
+    "required": true,
+    "section_heading": null,
+    "table_header": null,
+    "item_id_column": null
+  },
+  {
+    "source_id": "hub-api",
+    "kind": "source_file",
+    "relative_path": "hub/backend/api.py",
+    "required": true,
+    "section_heading": null,
+    "table_header": null,
+    "item_id_column": null
+  },
+  {
+    "source_id": "hub-service",
+    "kind": "source_file",
+    "relative_path": "hub/backend/service.py",
+    "required": true,
+    "section_heading": null,
+    "table_header": null,
+    "item_id_column": null
+  },
+  {
+    "source_id": "hub-task-frontend",
+    "kind": "source_file",
+    "relative_path": "hub/frontend/tasks.js",
+    "required": true,
+    "section_heading": null,
+    "table_header": null,
+    "item_id_column": null
+  },
+  {
+    "source_id": "adr-001",
+    "kind": "adr",
+    "relative_path": ".factory/infra/decisions/ADR-001-hybrid-multi-project-topology.md",
+    "required": true,
+    "section_heading": null,
+    "table_header": null,
+    "item_id_column": null
+  },
+  {
+    "source_id": "adr-002",
+    "kind": "adr",
+    "relative_path": ".factory/infra/decisions/ADR-002-vps-and-paas-orchestration.md",
+    "required": true,
+    "section_heading": null,
+    "table_header": null,
+    "item_id_column": null
+  },
+  {
+    "source_id": "adr-003",
+    "kind": "adr",
+    "relative_path": ".factory/infra/decisions/ADR-003-database-and-backup-strategy.md",
+    "required": true,
+    "section_heading": null,
+    "table_header": null,
+    "item_id_column": null
+  },
+  {
+    "source_id": "adr-004",
+    "kind": "adr",
+    "relative_path": ".factory/infra/decisions/ADR-004-secure-networking-and-edge.md",
+    "required": true,
+    "section_heading": null,
+    "table_header": null,
+    "item_id_column": null
+  },
+  {
+    "source_id": "report-df-01-state-contract",
+    "kind": "report",
+    "relative_path": ".factory/reports/df-01-state-contract-report.md",
+    "required": true,
+    "section_heading": null,
+    "table_header": null,
+    "item_id_column": null
+  },
+  {
+    "source_id": "report-df-02-governance-guard",
+    "kind": "report",
+    "relative_path": ".factory/reports/df-02-governance-guard-report.md",
+    "required": true,
+    "section_heading": null,
+    "table_header": null,
+    "item_id_column": null
+  },
+  {
+    "source_id": "report-df-03-harness-contract",
+    "kind": "report",
+    "relative_path": ".factory/reports/df-03-harness-contract-report.md",
+    "required": true,
+    "section_heading": null,
+    "table_header": null,
+    "item_id_column": null
+  },
+  {
+    "source_id": "report-df-04-ci-policy",
+    "kind": "report",
+    "relative_path": ".factory/reports/df-04-ci-policy-report.md",
+    "required": true,
+    "section_heading": null,
+    "table_header": null,
+    "item_id_column": null
+  },
+  {
+    "source_id": "report-df-05-racing-evidence",
+    "kind": "report",
+    "relative_path": ".factory/reports/df-05-racing-evidence-report.md",
+    "required": true,
+    "section_heading": null,
+    "table_header": null,
+    "item_id_column": null
+  },
+  {
+    "source_id": "report-df-06-learning-promotion",
+    "kind": "report",
+    "relative_path": ".factory/reports/df-06-learning-promotion-report.md",
+    "required": true,
+    "section_heading": null,
+    "table_header": null,
+    "item_id_column": null
+  },
+  {
+    "source_id": "report-df-07-df-08-hub-security",
+    "kind": "report",
+    "relative_path": ".factory/reports/df-07-df-08-hub-security-report.md",
+    "required": true,
+    "section_heading": null,
+    "table_header": null,
+    "item_id_column": null
+  },
+  {
+    "source_id": "report-df-08-hub-access-security",
+    "kind": "report",
+    "relative_path": ".factory/reports/df-08-hub-access-security-report.md",
+    "required": true,
+    "section_heading": null,
+    "table_header": null,
+    "item_id_column": null
+  },
+  {
+    "source_id": "report-df-09-tls-transport",
+    "kind": "report",
+    "relative_path": ".factory/reports/df-09-tls-transport-report.md",
+    "required": true,
+    "section_heading": null,
+    "table_header": null,
+    "item_id_column": null
+  },
+  {
+    "source_id": "report-df-10-usage-store",
+    "kind": "report",
+    "relative_path": ".factory/reports/df-10-usage-store-report.md",
+    "required": true,
+    "section_heading": null,
+    "table_header": null,
+    "item_id_column": null
+  },
+  {
+    "source_id": "report-df-11-runtime-recovery",
+    "kind": "report",
+    "relative_path": ".factory/reports/df-11-runtime-recovery-report.md",
+    "required": true,
+    "section_heading": null,
+    "table_header": null,
+    "item_id_column": null
+  },
+  {
+    "source_id": "report-df-12-execution-budget",
+    "kind": "report",
+    "relative_path": ".factory/reports/df-12-execution-budget-report.md",
+    "required": true,
+    "section_heading": null,
+    "table_header": null,
+    "item_id_column": null
+  },
+  {
+    "source_id": "report-df-13-executor-sandbox",
+    "kind": "report",
+    "relative_path": ".factory/reports/df-13-executor-sandbox-report.md",
+    "required": true,
+    "section_heading": null,
+    "table_header": null,
+    "item_id_column": null
+  },
+  {
+    "source_id": "report-df-14-provider-integration",
+    "kind": "report",
+    "relative_path": ".factory/reports/df-14-provider-integration-report.md",
+    "required": true,
+    "section_heading": null,
+    "table_header": null,
+    "item_id_column": null
+  },
+  {
+    "source_id": "report-df-15-factory-vertical",
+    "kind": "report",
+    "relative_path": ".factory/reports/df-15-factory-vertical-report.md",
+    "required": true,
+    "section_heading": null,
+    "table_header": null,
+    "item_id_column": null
+  },
+  {
+    "source_id": "report-df-16-portable-offline-ci",
+    "kind": "report",
+    "relative_path": ".factory/reports/df-16-portable-offline-ci-report.md",
+    "required": true,
+    "section_heading": null,
+    "table_header": null,
+    "item_id_column": null
+  },
+  {
+    "source_id": "report-df-17-field-provenance",
+    "kind": "report",
+    "relative_path": ".factory/reports/df-17-field-provenance-report.md",
+    "required": true,
+    "section_heading": null,
+    "table_header": null,
+    "item_id_column": null
+  },
+  {
+    "source_id": "report-df-18-agent-evals",
+    "kind": "report",
+    "relative_path": ".factory/reports/df-18-agent-evals-report.md",
+    "required": true,
+    "section_heading": null,
+    "table_header": null,
+    "item_id_column": null
+  },
+  {
+    "source_id": "report-df-19-context-policy",
+    "kind": "report",
+    "relative_path": ".factory/reports/df-19-context-policy-report.md",
+    "required": true,
+    "section_heading": null,
+    "table_header": null,
+    "item_id_column": null
+  },
+  {
+    "source_id": "report-df-20-delivery-policy",
+    "kind": "report",
+    "relative_path": ".factory/reports/df-20-delivery-policy-report.md",
+    "required": true,
+    "section_heading": null,
+    "table_header": null,
+    "item_id_column": null
+  },
+  {
+    "source_id": "report-df-21-task-dashboard",
+    "kind": "report",
+    "relative_path": ".factory/reports/df-21-task-dashboard-report.md",
+    "required": true,
+    "section_heading": null,
+    "table_header": null,
+    "item_id_column": null
+  },
+  {
+    "source_id": "report-df-22-content-visual-migration",
+    "kind": "report",
+    "relative_path": ".factory/reports/df-22-content-visual-migration-report.md",
+    "required": true,
+    "section_heading": null,
+    "table_header": null,
+    "item_id_column": null
+  },
+  {
+    "source_id": "report-df-23-worktree-protocol",
+    "kind": "report",
+    "relative_path": ".factory/reports/df-23-worktree-protocol-report.md",
+    "required": true,
+    "section_heading": null,
+    "table_header": null,
+    "item_id_column": null
+  },
+  {
+    "source_id": "report-rm-08-incremental-telemetry",
+    "kind": "report",
+    "relative_path": ".factory/reports/rm-08-incremental-telemetry-report.md",
+    "required": true,
+    "section_heading": null,
+    "table_header": null,
+    "item_id_column": null
+  },
+  {
+    "source_id": "report-rm-09-history",
+    "kind": "report",
+    "relative_path": ".factory/reports/rm-09-history-report.md",
+    "required": true,
+    "section_heading": null,
+    "table_header": null,
+    "item_id_column": null
+  },
+  {
+    "source_id": "report-roadmap-operacional",
+    "kind": "report",
+    "relative_path": ".factory/reports/roadmap-operacional-report.md",
+    "required": true,
+    "section_heading": null,
+    "table_header": null,
+    "item_id_column": null
+  },
+  {
+    "source_id": "report-roadmap-list-sort",
+    "kind": "report",
+    "relative_path": ".factory/reports/roadmap-list-sort-report.md",
+    "required": true,
+    "section_heading": null,
+    "table_header": null,
+    "item_id_column": null
+  },
+  {
+    "source_id": "report-df-24-project-adoption",
+    "kind": "report",
+    "relative_path": ".factory/reports/df-24-project-adoption-report.md",
+    "required": true,
+    "section_heading": null,
+    "table_header": null,
+    "item_id_column": null
+  },
+  {
+    "source_id": "usr-16-report",
+    "kind": "report",
+    "relative_path": ".factory/reports/usr-16-report.md",
+    "required": true,
+    "section_heading": null,
+    "table_header": null,
+    "item_id_column": null
+  }
+]
