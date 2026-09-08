@@ -1,5 +1,7 @@
 # Plano de desenvolvimento da Dark Factory — 05/09/2026
 
+Procedimento permanente definido pelo owner em 08/09/2026: [planejamento de alta inteligência e handoff para implementação/testes econômicos](HANDOFF_POLICY.md). Nenhum item deste backlog deve ser despachado para implementação apenas com a descrição de pacote; exige plano específico, vigente e aprovado pelo planejador qualificado. Handoffs iniciais da extensão: [HF-01](handoffs/HF-01.md) e [HF-02](handoffs/HF-02.md).
+
 Extensão de planejamento em 08/09/2026: o [plano integrado de workflow híbrido](HYBRID_WORKFLOW_PLAN_2026-09-08.md) reutiliza os componentes DF, explicita complementos de integração e conecta a infraestrutura ao ciclo até produção. Os novos IDs HF preservam este backlog e suas evidências. A extensão propõe ampliação explícita do escopo anterior de produção/operação; não altera por si só políticas executáveis, status de entrega ou configurações externas.
 
 Status: **proposta executável; não implementada nesta revisão**.

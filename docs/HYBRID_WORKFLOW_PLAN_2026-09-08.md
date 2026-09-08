@@ -112,6 +112,12 @@ Critérios de seleção: correção de recuperação e efeitos 30%; simplicidade
 
 ## 4. Contrato comum das etapas
 
+### Regra permanente de autoria do plano e execução
+
+**Toda unidade de desenvolvimento deve passar por planejamento de um modelo de alta inteligência e handoff pronto para modelo econômico implementar e testar, inclusive tarefas simples, scripts, skills e mudanças na fábrica.** Aplicar [HANDOFF_POLICY.md](HANDOFF_POLICY.md). HF-04 implementará contrato e gate de prontidão; HF-06 adaptará as skills; HF-07 fará o roteamento obrigatório de papéis. A revisão de alta inteligência resolve decisões e lacunas; o implementador econômico não reduz critérios nem troca arquitetura. Até esses módulos existirem, o coordenador aplica a regra no PIV atual.
+
+Handoffs detalhados disponíveis: [HF-01](handoffs/HF-01.md) e [HF-02](handoffs/HF-02.md). São planos condicionados ao preflight/dependências, não implementações concluídas. HF-02 termina com decisão arquitetural de alta inteligência baseada em medições produzidas pelos executores econômicos.
+
 Cada etapa vira um módulo versionado com uma ficha legível e contrato validável. A skill descreve como o agente trabalha naquele módulo; não decide por conta própria quais etapas são obrigatórias.
 
 | Dimensão | Conteúdo exigido |
@@ -253,7 +259,7 @@ IDs **HF** são uma extensão proposta e não substituem DF, RM, INFRA ou demand
 
 Caminho principal: **HF-01 → HF-02 → HF-03/04 → HF-05 → HF-06/07 → HF-08 → HF-09 → HF-11 → HF-12 → HF-15**. HF-10, HF-13 e HF-14 convergem no mesmo gate final. INFRA-08/09 não podem ficar para a onda 2 porque a primeira onda já entrega produção. INFRA-10 amplia capacidade; HF-03 garante que sua indisponibilidade não paralisa tudo.
 
-As linhas HF são pacotes de planejamento, não tickets de implementação prontos. Antes da execução, os agentes fatiam cada pacote em unidades pequenas, com escopo, dependências, comandos existentes/aplicáveis e evidência esperada. Não inventar testes inexistentes neste plano nem repetir mudanças já comprovadas.
+As linhas HF são pacotes de planejamento. HF-01 e HF-02 agora possuem tickets detalhados nos handoffs vinculados; os demais ainda exigem detalhamento por modelo de alta inteligência antes do despacho econômico. Cada unidade terá escopo, dependências, comandos existentes/aplicáveis e evidência esperada. Os comandos de testes novos nos handoffs só serão executáveis depois da implementação prevista; não repetir mudanças já comprovadas.
 
 ### Onda 2 — ampliar capacidades depois do fluxo operacional
 

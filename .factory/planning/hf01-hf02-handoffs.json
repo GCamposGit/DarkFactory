@@ -1,0 +1,338 @@
+{
+  "schema_version": "1",
+  "date": "2026-09-08",
+  "purpose": "Planning index, not a runtime authorization or implementation report",
+  "policy_ref": "docs/HANDOFF_POLICY.md",
+  "planner": {
+    "role": "high_intelligence",
+    "owner_identified_model": "Astra",
+    "session_ref": "01a08128-a6fc-79b2-b568-16ec798fef24",
+    "approval_scope": "Specification authored in this planning session; execution requires coordinator preflight",
+    "identity_attestation": "conversation_context_only_not_runtime_authenticated"
+  },
+  "baseline": {
+    "observed_head": "2241165ba24ba5a010e59f722f0ce52920f2a353",
+    "dirty_worktree_observed": true,
+    "revalidate_relevant_sources_at_dispatch": true
+  },
+  "automatic_gate_implemented": false,
+  "future_enforcement_packages": [
+    "HF-04",
+    "HF-06",
+    "HF-07"
+  ],
+  "plan_integrity": [
+    {
+      "path": "docs/HANDOFF_POLICY.md",
+      "sha256": "f318ee810bf6ca1953c2bfbd06e691176d2ab853b60b36e76e994136d6bec1d5"
+    },
+    {
+      "path": "docs/handoffs/HF-01.md",
+      "sha256": "92b58dc43e00d1edc9caafb20e277626629e1aa1555b19e3a10b9604571207ea"
+    },
+    {
+      "path": "docs/handoffs/HF-02.md",
+      "sha256": "8931b01ceae2a8c9e8596560767b558adec629bddc1ade5fe1221f7d25b68182"
+    }
+  ],
+  "tickets": [
+    {
+      "ticket_id": "HF-01-01",
+      "parent_id": "HF-01",
+      "title": "catálogo e evidências curadas",
+      "plan_ref": "docs/handoffs/HF-01.md",
+      "plan_version": "1.0",
+      "planning_status": "specified_pending_execution_preflight",
+      "implementation_status": "not_started_by_this_plan",
+      "role": "economy_implementation_or_collection",
+      "review_role": "independent_per_risk",
+      "depends_on": [],
+      "artifact_prerequisites": [],
+      "preflight": [
+        "relevant_baseline_compatible",
+        "dependencies_satisfied",
+        "scope_and_permissions_valid",
+        "qualified_role_available"
+      ]
+    },
+    {
+      "ticket_id": "HF-01-02",
+      "parent_id": "HF-01",
+      "title": "contratos e leitura segura",
+      "plan_ref": "docs/handoffs/HF-01.md",
+      "plan_version": "1.0",
+      "planning_status": "specified_pending_execution_preflight",
+      "implementation_status": "not_started_by_this_plan",
+      "role": "economy_implementation_or_collection",
+      "review_role": "independent_per_risk",
+      "depends_on": [
+        "HF-01-01"
+      ],
+      "artifact_prerequisites": [],
+      "preflight": [
+        "relevant_baseline_compatible",
+        "dependencies_satisfied",
+        "scope_and_permissions_valid",
+        "qualified_role_available"
+      ]
+    },
+    {
+      "ticket_id": "HF-01-03",
+      "parent_id": "HF-01",
+      "title": "reconciliação pura",
+      "plan_ref": "docs/handoffs/HF-01.md",
+      "plan_version": "1.0",
+      "planning_status": "specified_pending_execution_preflight",
+      "implementation_status": "not_started_by_this_plan",
+      "role": "economy_implementation_or_collection",
+      "review_role": "independent_per_risk",
+      "depends_on": [
+        "HF-01-02"
+      ],
+      "artifact_prerequisites": [],
+      "preflight": [
+        "relevant_baseline_compatible",
+        "dependencies_satisfied",
+        "scope_and_permissions_valid",
+        "qualified_role_available"
+      ]
+    },
+    {
+      "ticket_id": "HF-01-04",
+      "parent_id": "HF-01",
+      "title": "observações opcionais de serviço e Git",
+      "plan_ref": "docs/handoffs/HF-01.md",
+      "plan_version": "1.0",
+      "planning_status": "specified_pending_execution_preflight",
+      "implementation_status": "not_started_by_this_plan",
+      "role": "economy_implementation_or_collection",
+      "review_role": "independent_per_risk",
+      "depends_on": [
+        "HF-01-02"
+      ],
+      "artifact_prerequisites": [],
+      "preflight": [
+        "relevant_baseline_compatible",
+        "dependencies_satisfied",
+        "scope_and_permissions_valid",
+        "qualified_role_available"
+      ]
+    },
+    {
+      "ticket_id": "HF-01-05",
+      "parent_id": "HF-01",
+      "title": "CLI e relatório",
+      "plan_ref": "docs/handoffs/HF-01.md",
+      "plan_version": "1.0",
+      "planning_status": "specified_pending_execution_preflight",
+      "implementation_status": "not_started_by_this_plan",
+      "role": "economy_implementation_or_collection",
+      "review_role": "independent_per_risk",
+      "depends_on": [
+        "HF-01-03",
+        "HF-01-04"
+      ],
+      "artifact_prerequisites": [],
+      "preflight": [
+        "relevant_baseline_compatible",
+        "dependencies_satisfied",
+        "scope_and_permissions_valid",
+        "qualified_role_available"
+      ]
+    },
+    {
+      "ticket_id": "HF-01-06",
+      "parent_id": "HF-01",
+      "title": "baseline real e fechamento do pacote",
+      "plan_ref": "docs/handoffs/HF-01.md",
+      "plan_version": "1.0",
+      "planning_status": "specified_pending_execution_preflight",
+      "implementation_status": "not_started_by_this_plan",
+      "role": "economy_implementation_or_collection",
+      "review_role": "high_intelligence",
+      "depends_on": [
+        "HF-01-05"
+      ],
+      "artifact_prerequisites": [],
+      "preflight": [
+        "relevant_baseline_compatible",
+        "dependencies_satisfied",
+        "scope_and_permissions_valid",
+        "qualified_role_available"
+      ]
+    },
+    {
+      "ticket_id": "HF-02-01",
+      "parent_id": "HF-02",
+      "title": "congelar ambiente e preparar banco descartável",
+      "plan_ref": "docs/handoffs/HF-02.md",
+      "plan_version": "1.0",
+      "planning_status": "specified_pending_execution_preflight",
+      "implementation_status": "not_started_by_this_plan",
+      "role": "economy_implementation_or_collection",
+      "review_role": "independent_per_risk",
+      "depends_on": [
+        "HF-01-06"
+      ],
+      "artifact_prerequisites": [],
+      "preflight": [
+        "relevant_baseline_compatible",
+        "dependencies_satisfied",
+        "scope_and_permissions_valid",
+        "qualified_role_available"
+      ]
+    },
+    {
+      "ticket_id": "HF-02-02",
+      "parent_id": "HF-02",
+      "title": "contratos e protocolo de processo",
+      "plan_ref": "docs/handoffs/HF-02.md",
+      "plan_version": "1.0",
+      "planning_status": "specified_pending_execution_preflight",
+      "implementation_status": "not_started_by_this_plan",
+      "role": "economy_implementation_or_collection",
+      "review_role": "independent_per_risk",
+      "depends_on": [
+        "HF-01-06"
+      ],
+      "artifact_prerequisites": [
+        "HF-02-01: Python environment metadata (database connection not required)"
+      ],
+      "preflight": [
+        "relevant_baseline_compatible",
+        "dependencies_satisfied",
+        "scope_and_permissions_valid",
+        "qualified_role_available"
+      ]
+    },
+    {
+      "ticket_id": "HF-02-03",
+      "parent_id": "HF-02",
+      "title": "serviço externo e catálogo de oráculos",
+      "plan_ref": "docs/handoffs/HF-02.md",
+      "plan_version": "1.0",
+      "planning_status": "specified_pending_execution_preflight",
+      "implementation_status": "not_started_by_this_plan",
+      "role": "economy_implementation_or_collection",
+      "review_role": "independent_per_risk",
+      "depends_on": [
+        "HF-02-02"
+      ],
+      "artifact_prerequisites": [],
+      "preflight": [
+        "relevant_baseline_compatible",
+        "dependencies_satisfied",
+        "scope_and_permissions_valid",
+        "qualified_role_available"
+      ]
+    },
+    {
+      "ticket_id": "HF-02-04",
+      "parent_id": "HF-02",
+      "title": "adaptador da baseline atual",
+      "plan_ref": "docs/handoffs/HF-02.md",
+      "plan_version": "1.0",
+      "planning_status": "specified_pending_execution_preflight",
+      "implementation_status": "not_started_by_this_plan",
+      "role": "economy_implementation_or_collection",
+      "review_role": "independent_per_risk",
+      "depends_on": [
+        "HF-02-03"
+      ],
+      "artifact_prerequisites": [],
+      "preflight": [
+        "relevant_baseline_compatible",
+        "dependencies_satisfied",
+        "scope_and_permissions_valid",
+        "qualified_role_available"
+      ]
+    },
+    {
+      "ticket_id": "HF-02-05",
+      "parent_id": "HF-02",
+      "title": "adaptador DBOS isolado",
+      "plan_ref": "docs/handoffs/HF-02.md",
+      "plan_version": "1.0",
+      "planning_status": "specified_pending_execution_preflight",
+      "implementation_status": "not_started_by_this_plan",
+      "role": "economy_implementation_or_collection",
+      "review_role": "independent_per_risk",
+      "depends_on": [
+        "HF-02-01",
+        "HF-02-03",
+        "HF-02-04"
+      ],
+      "artifact_prerequisites": [],
+      "preflight": [
+        "relevant_baseline_compatible",
+        "dependencies_satisfied",
+        "scope_and_permissions_valid",
+        "qualified_role_available"
+      ]
+    },
+    {
+      "ticket_id": "HF-02-06",
+      "parent_id": "HF-02",
+      "title": "controlador de falhas e verificador",
+      "plan_ref": "docs/handoffs/HF-02.md",
+      "plan_version": "1.0",
+      "planning_status": "specified_pending_execution_preflight",
+      "implementation_status": "not_started_by_this_plan",
+      "role": "economy_implementation_or_collection",
+      "review_role": "independent_per_risk",
+      "depends_on": [
+        "HF-02-04",
+        "HF-02-05"
+      ],
+      "artifact_prerequisites": [],
+      "preflight": [
+        "relevant_baseline_compatible",
+        "dependencies_satisfied",
+        "scope_and_permissions_valid",
+        "qualified_role_available"
+      ]
+    },
+    {
+      "ticket_id": "HF-02-07",
+      "parent_id": "HF-02",
+      "title": "rodadas reais e comparação",
+      "plan_ref": "docs/handoffs/HF-02.md",
+      "plan_version": "1.0",
+      "planning_status": "specified_pending_execution_preflight",
+      "implementation_status": "not_started_by_this_plan",
+      "role": "economy_implementation_or_collection",
+      "review_role": "independent_per_risk",
+      "depends_on": [
+        "HF-02-06"
+      ],
+      "artifact_prerequisites": [],
+      "preflight": [
+        "relevant_baseline_compatible",
+        "dependencies_satisfied",
+        "scope_and_permissions_valid",
+        "qualified_role_available"
+      ]
+    },
+    {
+      "ticket_id": "HF-02-08",
+      "parent_id": "HF-02",
+      "title": "decisão e handoff arquitetural",
+      "plan_ref": "docs/handoffs/HF-02.md",
+      "plan_version": "1.0",
+      "planning_status": "specified_pending_execution_preflight",
+      "implementation_status": "not_started_by_this_plan",
+      "role": "high_intelligence_decision",
+      "review_role": "high_intelligence",
+      "depends_on": [
+        "HF-02-07"
+      ],
+      "artifact_prerequisites": [],
+      "preflight": [
+        "relevant_baseline_compatible",
+        "dependencies_satisfied",
+        "scope_and_permissions_valid",
+        "qualified_role_available"
+      ]
+    }
+  ]
+}

@@ -199,6 +199,19 @@
       "status": "active",
       "verification_gate_id": null,
       "active": true
+    },
+    {
+      "preference_id": "pref_37a620c3",
+      "category": "workflow",
+      "rule": "Inviolável: Nunca dar um ticket como concluído sem teste de ponta a ponta no ambiente/hardware real. Toda configuração manual necessária deve ser demandada e realizada com o usuário ANTES dos testes finais de entrega.",
+      "context_or_example": "USR-16: validação em hardware físico on-premise desktop-g45ipem antes de marcar como delivered",
+      "confidence": 1.0,
+      "created_at": "2026-09-08T14:25:26.395997+00:00",
+      "times_reinforced": 1,
+      "origin": "explicit_preference",
+      "status": "active",
+      "verification_gate_id": null,
+      "active": true
     }
   ],
   "mistakes": [
@@ -711,6 +724,21 @@
       "origin": "rca",
       "status": "active",
       "active": true
+    },
+    {
+      "rca_id": "rca_42a7be7a",
+      "timestamp": "2026-09-08T14:25:32.956991+00:00",
+      "category": "assumption_error",
+      "symptom": "Ticket concluido sem teste funcional real no desktop fisico e sem demandar configuracoes manuais previas do usuario",
+      "mechanism": "Aceite baseado apenas em mocks/testes locais sem rodar ponta a ponta no hardware remoto via Tailscale",
+      "root_cause": "Ausencia de portao de validacao real em ambiente fisico e omissao de demanda antecipada de ajustes manuais necessarios",
+      "patch_description": "Atualizacao do subagent com CREATE_NO_WINDOW, suporte a modo headless em background e enforcamento de testes E2E reais com intervencao humana antecipada",
+      "preventative_rule": "Proibido entregar ticket distribuido sem teste real em hardware e sem solicitar configuracoes manuais ao usuario antes da conclusao",
+      "regression_test_file": "tests/test_worker_onprem_test_subagent.py",
+      "verification_gate_id": "gate_e20d19dc",
+      "origin": "rca",
+      "status": "active",
+      "active": true
     }
   ],
   "transfers": [
@@ -1083,6 +1111,23 @@
         "headers Cache-Control no-cache no FileResponse"
       ],
       "created_at": "2026-09-08T04:38:15.242371+00:00"
+    },
+    {
+      "transfer_id": "trans_441a2520",
+      "source_domain": "core.harness",
+      "target_domains": [
+        "core.infra",
+        "hub.backend",
+        "core.database",
+        "core.deployment"
+      ],
+      "specific_lesson": "Tickets com dependencia de hardware ou servicos externos precisam de teste real E2E e demanda proativa de ajustes manuais antes do encerramento",
+      "generalized_principle": "Zero-Trust Physical E2E Gate: nenhum componente distribuido e aceito sem execucao real no nó de destino com configuracoes manuais do usuario alinhadas previamente",
+      "applied_actions": [
+        "Sempre demandar do usuario quaisquer configuracoes de portas/chaves/permissoes antes dos testes finais",
+        "Validar via rede real no hardware remoto antes de marcar ticket como delivered"
+      ],
+      "created_at": "2026-09-08T14:25:43.382680+00:00"
     }
   ],
   "contrasts": [],
@@ -1358,7 +1403,15 @@
       "passed": true,
       "output_snippet": "/test_adicionar_cards_de_infrae.py::test_system_access_links_integrity PASSED [ 30%]\ntests/test_adicionar_cards_de_infrae.py::test_probe_liveness_graceful_failure PASSED [ 40%]\ntests/test_adicionar_cards_de_infrae.py::test_probe_liveness_successful_mock PASSED [ 50%]\ntests/test_adicionar_cards_de_infrae.py::test_api_get_infra_cards PASSED [ 60%]\ntests/test_adicionar_cards_de_infrae.py::test_api_post_infra_cards_refresh PASSED [ 70%]\ntests/test_adicionar_cards_de_infrae.py::test_api_get_single_node_card PASSED [ 80%]\ntests/test_adicionar_cards_de_infrae.py::test_frontend_infra_assets_mounted PASSED [ 90%]\ntests/test_adicionar_cards_de_infrae.py::test_non_goals_no_administrative_mutation_endpoints PASSED [100%]\n\n============================= 10 passed in 0.65s ==============================\n",
       "executed_at": "2026-09-08T04:38:09.730815+00:00"
+    },
+    {
+      "gate_id": "gate_e20d19dc",
+      "target_type": "rca_patch",
+      "test_command": "python -m pytest tests/test_worker_onprem_test_subagent.py -v",
+      "passed": true,
+      "output_snippet": "ASSED [ 41%]\ntests/test_worker_onprem_test_subagent.py::test_engine_execute_local_mode PASSED [ 50%]\ntests/test_worker_onprem_test_subagent.py::test_engine_execute_remote_success PASSED [ 58%]\ntests/test_worker_onprem_test_subagent.py::test_engine_execute_auto_failover_to_local_when_remote_offline PASSED [ 66%]\ntests/test_worker_onprem_test_subagent.py::test_engine_execute_remote_fail_closed_when_no_fallback PASSED [ 75%]\ntests/test_worker_onprem_test_subagent.py::test_engine_execute_remote_network_error_triggers_fallback PASSED [ 83%]\ntests/test_worker_onprem_test_subagent.py::test_hub_api_list_test_workers PASSED [ 91%]\ntests/test_worker_onprem_test_subagent.py::test_hub_api_execute_test_suite PASSED [100%]\n\n============================= 12 passed in 0.44s ==============================\n",
+      "executed_at": "2026-09-08T14:25:32.955989+00:00"
     }
   ],
-  "last_updated": "2026-09-08T04:38:20.356083+00:00"
+  "last_updated": "2026-09-08T14:25:43.382680+00:00"
 }

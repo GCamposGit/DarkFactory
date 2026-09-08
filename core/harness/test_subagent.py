@@ -480,6 +480,10 @@ class TestSubagentEngine:
 
         logger.info("Running tests locally: %s (Timeout: %ds)", " ".join(cmd), instruction.timeout_seconds)
 
+        subp_kwargs: Dict[str, Any] = {}
+        if sys.platform == "win32":
+            subp_kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
+
         try:
             res = subprocess.run(
                 cmd,
@@ -489,6 +493,7 @@ class TestSubagentEngine:
                 timeout=instruction.timeout_seconds,
                 encoding="utf-8",
                 errors="replace",
+                **subp_kwargs,
             )
             raw_stdout = res.stdout or ""
             raw_stderr = res.stderr or ""

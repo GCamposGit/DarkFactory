@@ -25,7 +25,8 @@ param (
     [string]$HostAddress = "0.0.0.0",
     [int]$Port = 8080,
     [string]$NodeId = "onprem-z97-server",
-    [string]$RootPath = ""
+    [string]$RootPath = "",
+    [switch]$Headless
 )
 
 $ErrorActionPreference = "Stop"
@@ -54,6 +55,31 @@ if (-not (Test-Path -LiteralPath $workerScript)) {
     exit 1
 }
 
+# 3. Headless background launch if requested
+if ($Headless) {
+    $logDir = Join-Path $candidateRoot ".factory\test_logs"
+    if (-not (Test-Path -LiteralPath $logDir)) {
+        New-Item -ItemType Directory -Force -Path $logDir | Out-Null
+    }
+    $daemonLog = Join-Path $logDir "remote_worker_daemon.log"
+    $pidDir = Join-Path $candidateRoot ".factory\pids"
+    if (-not (Test-Path -LiteralPath $pidDir)) {
+        New-Item -ItemType Directory -Force -Path $pidDir | Out-Null
+    }
+    $pidFile = Join-Path $pidDir "onprem_worker.pid"
+
+    Write-Output "[WORKER_HEADLESS] Launching remote test worker in the background (WindowStyle: Hidden)..."
+    $argList = "-NoProfile -NonInteractive -ExecutionPolicy Bypass -Command `"python -u `'$workerScript`' --host $HostAddress --port $Port --node-id $NodeId --project-root `'$candidateRoot`' *>> `'$daemonLog`'`""
+    $proc = Start-Process -FilePath "powershell.exe" -ArgumentList $argList -WindowStyle Hidden -PassThru
+
+    $proc.Id | Out-File -FilePath $pidFile -Encoding utf8 -Force
+    Write-Output "[WORKER_HEADLESS_OK] Worker daemon running in background (PID: $($proc.Id))"
+    Write-Output "  Endpoint: http://${HostAddress}:${Port}"
+    Write-Output "  Log file: $daemonLog"
+    Write-Output "  PID file: $pidFile"
+    exit 0
+}
+
 Write-Output "=================================================================="
 Write-Output " [DarkFac On-Premises Test Worker Launcher]"
 Write-Output " Node ID     : $NodeId"
@@ -63,5 +89,5 @@ Write-Output " Health Check: http://${HostAddress}:${Port}/health"
 Write-Output " Python Exec : $(Get-Command python | Select-Object -ExpandProperty Source)"
 Write-Output "=================================================================="
 
-# 3. Launch the daemon with unbuffered output
+# 4. Launch the daemon with unbuffered output
 & python -u $workerScript --host $HostAddress --port $Port --node-id $NodeId --project-root $candidateRoot
