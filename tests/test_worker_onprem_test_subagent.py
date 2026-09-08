@@ -354,3 +354,53 @@ def test_hub_api_execute_test_suite() -> None:
         assert data["verdict"] == "PASSED"
         assert data["success"] is True
         assert data["total_discovered"] == 12
+
+
+# ---------------------------------------------------------------------------
+# 5. Remote System Management Endpoints (/system/exec, /system/update)
+# ---------------------------------------------------------------------------
+
+
+def test_remote_worker_app_system_exec_endpoint() -> None:
+    """Test remote worker daemon /system/exec endpoint executing commands."""
+    worker_app = create_worker_app(node_id="test-desktop-g45ipem")
+    client = TestClient(worker_app)
+
+    # Simple echo command
+    response = client.post(
+        "/system/exec",
+        json={"command": "python -c \"print('REMOTE_OK')\"", "timeout_seconds": 10},
+    )
+    assert response.status_code == 200
+    res_data = response.json()
+    assert res_data["success"] is True
+    assert res_data["exit_code"] == 0
+    assert "REMOTE_OK" in res_data["stdout"]
+
+
+def test_remote_worker_app_system_update_endpoint() -> None:
+    """Test remote worker daemon /system/update endpoint."""
+    worker_app = create_worker_app(node_id="test-desktop-g45ipem")
+    client = TestClient(worker_app)
+
+    with patch("subprocess.run") as mock_subp:
+        mock_subp.return_value = MagicMock(returncode=0, stdout="Already up to date.", stderr="")
+        response = client.post("/system/update", json={"branch": "codex/usr-16-onprem-worker"})
+        assert response.status_code == 200
+        data = response.json()
+        assert data["success"] is True
+        assert "Already up to date" in data["output"]
+
+
+def test_remote_worker_app_system_restart_endpoint() -> None:
+    """Test remote worker daemon /system/restart endpoint returns restarting message."""
+    worker_app = create_worker_app(node_id="test-desktop-g45ipem")
+    client = TestClient(worker_app)
+
+    with patch("core.harness.remote_worker.trigger_daemon_restart") as mock_restart:
+        response = client.post("/system/restart")
+        assert response.status_code == 200
+        assert response.json()["status"] == "restarting"
+        mock_restart.assert_called_once()
+
+

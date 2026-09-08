@@ -11,7 +11,9 @@ from __future__ import annotations
 import argparse
 import logging
 import os
+import subprocess
 import sys
+import time
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -46,6 +48,56 @@ class WorkerHealthStatus(BaseModel):
     docker_ready: bool = Field(default=True, description="Whether Docker runtime is accessible on Drive E:")
     project_root: str = Field(..., description="Root directory where tests execute")
     active_runs: int = Field(default=0, description="Currently running test jobs")
+
+
+class CommandExecutionRequest(BaseModel):
+    """Payload to execute an arbitrary system command on the remote node."""
+    command: str = Field(..., description="Command string or script to run")
+    cwd: Optional[str] = Field(default=None, description="Working directory (defaults to repo root)")
+    timeout_seconds: int = Field(default=120, description="Command execution timeout in seconds")
+
+
+class CommandExecutionResponse(BaseModel):
+    """Result of command execution on remote worker node."""
+    exit_code: int = Field(..., description="Process return code")
+    stdout: str = Field(default="", description="Captured standard output")
+    stderr: str = Field(default="", description="Captured standard error")
+    duration_seconds: float = Field(..., description="Execution duration in seconds")
+    success: bool = Field(..., description="True if exit code is 0")
+
+
+class SystemUpdateRequest(BaseModel):
+    """Request to update repo on worker node via git pull."""
+    branch: Optional[str] = Field(default=None, description="Branch to checkout/pull (defaults to current)")
+
+
+class SystemUpdateResponse(BaseModel):
+    """Result of repo update on worker node."""
+    success: bool = Field(..., description="True if git pull succeeded")
+    output: str = Field(default="", description="Git command output")
+    current_commit: str = Field(default="", description="Commit SHA after update")
+
+
+def trigger_daemon_restart(root_path: Path) -> None:
+    """Spawns a new headless daemon process and terminates this instance."""
+    import threading
+
+    def _deferred():
+        time.sleep(1.0)
+        subp_kwargs: Dict[str, Any] = {}
+        if sys.platform == "win32":
+            subp_kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
+        restart_script = root_path / "scripts" / "start_onprem_worker.ps1"
+        if restart_script.exists():
+            subprocess.Popen(
+                ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(restart_script), "-Headless"],
+                cwd=str(root_path),
+                **subp_kwargs,
+            )
+        os._exit(0)
+
+    t = threading.Thread(target=_deferred, daemon=True)
+    t.start()
 
 
 def create_worker_app(
@@ -99,6 +151,110 @@ def create_worker_app(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail=f"Remote worker test execution failed: {exc}",
             ) from exc
+
+    @worker_app.post("/system/exec", response_model=CommandExecutionResponse)
+    def execute_command(req: CommandExecutionRequest) -> CommandExecutionResponse:
+        """Execute a shell command headless on the worker node."""
+        target_cwd = Path(req.cwd).resolve() if req.cwd else root_path
+        start_t = time.perf_counter()
+        logger.info("Executing remote command on node %s: %s (cwd: %s)", node_id, req.command, target_cwd)
+
+        subp_kwargs: Dict[str, Any] = {}
+        if sys.platform == "win32":
+            subp_kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
+
+        try:
+            res = subprocess.run(
+                req.command,
+                shell=True,
+                capture_output=True,
+                text=True,
+                cwd=str(target_cwd),
+                timeout=req.timeout_seconds,
+                encoding="utf-8",
+                errors="replace",
+                **subp_kwargs,
+            )
+            dur = round(time.perf_counter() - start_t, 3)
+            return CommandExecutionResponse(
+                exit_code=res.returncode,
+                stdout=res.stdout or "",
+                stderr=res.stderr or "",
+                duration_seconds=dur,
+                success=res.returncode == 0,
+            )
+        except subprocess.TimeoutExpired as exc:
+            dur = round(time.perf_counter() - start_t, 3)
+            return CommandExecutionResponse(
+                exit_code=124,
+                stdout=exc.stdout or "" if isinstance(exc.stdout, str) else "",
+                stderr=(exc.stderr or "") + "\n[COMMAND TIMEOUT]",
+                duration_seconds=dur,
+                success=False,
+            )
+        except Exception as exc:
+            dur = round(time.perf_counter() - start_t, 3)
+            return CommandExecutionResponse(
+                exit_code=1,
+                stdout="",
+                stderr=f"[EXECUTION ERROR]: {exc}",
+                duration_seconds=dur,
+                success=False,
+            )
+
+    @worker_app.post("/system/update", response_model=SystemUpdateResponse)
+    def update_system(req: Optional[SystemUpdateRequest] = None) -> SystemUpdateResponse:
+        """Perform git fetch and pull to update worker codebase."""
+        subp_kwargs: Dict[str, Any] = {}
+        if sys.platform == "win32":
+            subp_kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
+
+        try:
+            target_branch = req.branch if req and req.branch else ""
+            if target_branch:
+                subprocess.run(
+                    f"git checkout {target_branch}",
+                    shell=True,
+                    capture_output=True,
+                    text=True,
+                    cwd=str(root_path),
+                    **subp_kwargs,
+                )
+            pull_res = subprocess.run(
+                "git pull",
+                shell=True,
+                capture_output=True,
+                text=True,
+                cwd=str(root_path),
+                **subp_kwargs,
+            )
+            rev_res = subprocess.run(
+                "git rev-parse HEAD",
+                shell=True,
+                capture_output=True,
+                text=True,
+                cwd=str(root_path),
+                **subp_kwargs,
+            )
+            commit = rev_res.stdout.strip() if rev_res.returncode == 0 else "unknown"
+            output = (pull_res.stdout or "") + ("\n" + pull_res.stderr if pull_res.stderr else "")
+            return SystemUpdateResponse(
+                success=pull_res.returncode == 0,
+                output=output.strip(),
+                current_commit=commit,
+            )
+        except Exception as exc:
+            return SystemUpdateResponse(
+                success=False,
+                output=f"Update failed: {exc}",
+                current_commit="",
+            )
+
+    @worker_app.post("/system/restart")
+    def restart_daemon() -> Dict[str, str]:
+        """Spawns a new headless daemon process and terminates this instance."""
+        trigger_daemon_restart(root_path)
+        return {"status": "restarting", "node_id": node_id, "message": "Worker is restarting headless in background."}
 
     return worker_app
 
