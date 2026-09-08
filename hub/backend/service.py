@@ -113,6 +113,12 @@ from core.harness.test_subagent import (
     TestExecutionInstruction,
     TestSubagentEngine,
 )
+from core.infra.inventory import InventoryManager
+from core.infra.cards import (
+    InfraCard,
+    InfraCardsReport,
+    build_infra_cards_report,
+)
 from core.orchestrator.store import OrchestratorStore, RunRecord
 
 logger = logging.getLogger("darkhub.service")
@@ -258,6 +264,12 @@ class HubService:
             demands_path=self.demands_dir / "demands.json",
             include_demands=True,
         )
+
+        if data_dir is not None:
+            self.infra_path = self.data_dir / "infra" / "inventory.json"
+        else:
+            self.infra_path = Path(__file__).resolve().parents[2] / ".factory" / "infra" / "inventory.json"
+        self.infra_manager = InventoryManager(self.infra_path)
 
         self._ensure_storage()
 
@@ -639,6 +651,23 @@ class HubService:
     def update_credit_account(self, provider_id: str, payload: CreditAccountUpdateRequest) -> ProviderCreditCard:
         """Updates and persists credit balances or notes for a provider."""
         return self.api_credits_monitor.update_account(provider_id, payload)
+
+    def get_infra_cards_report(self, probe_liveness: bool = False, probe_timeout: float = 0.5) -> InfraCardsReport:
+        """Returns the infrastructure cards report for the Hub."""
+        inventory = self.infra_manager.load_or_initialize()
+        return build_infra_cards_report(
+            inventory,
+            probe_network_liveness=probe_liveness,
+            probe_timeout=probe_timeout,
+        )
+
+    def get_infra_card(self, node_id: str, probe_liveness: bool = False, probe_timeout: float = 0.5) -> Optional[InfraCard]:
+        """Returns a single infrastructure card by node ID."""
+        report = self.get_infra_cards_report(probe_liveness=probe_liveness, probe_timeout=probe_timeout)
+        for card in report.cards:
+            if card.id == node_id:
+                return card
+        return None
 
     def _load_services_raw(self) -> List[Dict]:
         try:
@@ -1678,4 +1707,3 @@ class HubService:
         """Returns catalog of all saved visual assets."""
         studio = VisualStudio()
         return studio.list_assets()
-

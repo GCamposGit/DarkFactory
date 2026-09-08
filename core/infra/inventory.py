@@ -28,10 +28,10 @@ def build_default_inventory() -> InfraInventory:
     """Instantiate the initial hybrid infrastructure inventory for Dark Factory."""
     now = datetime.now(timezone.utc)
 
-    # 1. Dev Machine: Predator Helios Neo 16
+    # 1. Dev Machine: Predator Helios Neo 16 (ai-notebook)
     predator_node = InfraNode(
         id="predator-neo-16",
-        name="Predator Helios Neo 16 (Dev Core)",
+        name="Predator Helios Neo 16 (ai-notebook)",
         role=NodeRole.DEV_WORKSTATION,
         status=NodeStatus.ACTIVE,
         provider="Local (Workstation)",
@@ -42,12 +42,12 @@ def build_default_inventory() -> InfraInventory:
             gpu="NVIDIA GeForce RTX 4070 Laptop (8 GB GDDR6 Ada Lovelace)",
             gpu_compute_capability="8.9",
             power_supply="Dedicated Laptop Adapter 330W",
-            notes="Primary interactive engineering environment; local high-speed AI inference (Ollama Qwen 2.5/Llama 3.3, faster-whisper).",
+            notes="Windows 11 25H2; Tailscale v1.102.3; primary interactive engineering environment; local high-speed AI inference (Ollama Qwen 2.5/Llama 3.3, faster-whisper).",
         ),
         network=NetworkSpec(
             private_ip="DHCP Local LAN",
-            tailscale_ip="100.x.y.z (Planned)",
-            notes="Direct development station; connects to on-premise and VPS via Tailscale mesh.",
+            tailscale_ip="100.81.84.124",
+            notes="Direct development station; connected to on-premise and VPS via Tailscale mesh (ai-notebook).",
         ),
         services=[
             ServiceItem(
@@ -69,113 +69,133 @@ def build_default_inventory() -> InfraInventory:
                 status=NodeStatus.ACTIVE,
                 container_engine=None,
             ),
+            ServiceItem(
+                name="tailscale-agent",
+                description="Tailscale mesh node (100.81.84.124, v1.102.3)",
+                status=NodeStatus.ACTIVE,
+                container_engine=None,
+            ),
         ],
         cost_monthly_usd=0.0,
-        tags=["workstation", "primary-dev", "gpu-ada", "active"],
+        tags=["workstation", "primary-dev", "gpu-ada", "active", "tailscale-active"],
         updated_at=now,
     )
 
-    # 2. On-Premises Server: i7-4790K / 2x GTX 980 Ti
+    # 2. On-Premises Server: i7-4790K / 2x GTX 980 Ti (desktop-g45ipem)
     onprem_node = InfraNode(
         id="onprem-z97-server",
-        name="On-Premises Z97 Dedicated Server",
+        name="On-Premises Z97 Dedicated Server (desktop-g45ipem)",
         role=NodeRole.ON_PREM_SERVER,
-        status=NodeStatus.STANDBY,
+        status=NodeStatus.ACTIVE,
         provider="Local (Home Lab / On-Prem)",
         hardware=HardwareSpec(
             cpu="Intel Core i7-4790K (4C/8T @ 4.0 GHz, Haswell)",
             ram_gb=16.0,
-            storage_primary="Kingston SSDNow V300 240 GB 2.5'' SSD",
-            storage_secondary="Hitachi HDS723030ALA640 3 TB 3.5'' 7200 RPM HDD + Samsung P3 1 TB Ext",
+            storage_primary="Kingston SSDNow V300 240 GB 2.5'' SSD (C:)",
+            storage_secondary="Hitachi HDS723030ALA640 3 TB 3.5'' 7200 RPM HDD (E:) + Samsung P3 1 TB Ext",
             gpu="2x Zotac AMP Extreme GeForce GTX 980 Ti 6 GB (Dual-GPU, Maxwell)",
             gpu_compute_capability="5.2",
             power_supply="Corsair AX1200 1200 W 80+ Gold Fully Modular",
             notes=(
-                "Compute capability 5.2 (Maxwell) does not accelerate modern FP16/BF16/INT4 LLMs efficiently. "
-                "Ideal high-value role: dense local storage (3 TB + 1 TB), local automated backup vault, "
-                "isolated CI/build runner, and background worker node under Linux (Ubuntu 24.04 LTS)."
+                "Windows 10 22H2; Tailscale v1.102.3; Docker Desktop ativo com repositório de dados no Drive E: (3 TB). "
+                "Acesso visual via Google Remote Desktop. Ideal para storage denso, backups e workers locais."
             ),
         ),
         network=NetworkSpec(
-            private_ip="Static LAN IP (Planned)",
-            tailscale_ip="100.x.y.w (Planned)",
+            private_ip="DHCP Local LAN",
+            tailscale_ip="100.78.181.90",
             cloudflare_tunnel=True,
-            notes="Secure headless server; access via Tailscale mesh and Cloudflare Tunnel without port forwarding.",
+            notes="Secure node on Tailscale mesh (desktop-g45ipem); reachable from ai-notebook at 100.78.181.90.",
         ),
         services=[
             ServiceItem(
-                name="docker-engine-onprem",
-                description="Docker container runtime for local isolated background workloads",
-                status=NodeStatus.PLANNED,
-                managed_by="Docker / Portainer",
+                name="docker-desktop-onprem",
+                description="Docker Desktop (WSL2 backend) com armazenamento alocado no Drive E: (3 TB)",
+                status=NodeStatus.ACTIVE,
+                managed_by="Docker Desktop",
+            ),
+            ServiceItem(
+                name="tailscale-agent",
+                description="Tailscale mesh node (100.78.181.90, v1.102.3)",
+                status=NodeStatus.ACTIVE,
+                container_engine=None,
+            ),
+            ServiceItem(
+                name="google-remote-desktop",
+                description="Acesso visual e controle remoto direto via Google Chrome Remote Desktop",
+                status=NodeStatus.ACTIVE,
+                container_engine=None,
             ),
             ServiceItem(
                 name="storage-backup-vault",
-                description="Local encrypted cold backup target (3 TB Hitachi HDD) for databases and git repositories",
-                status=NodeStatus.PLANNED,
-            ),
-            ServiceItem(
-                name="headless-ci-runner",
-                description="Headless test and build runner for heavy batch validation jobs",
-                status=NodeStatus.PLANNED,
+                description="Local storage target (Drive E: 3 TB Hitachi HDD) para dumps e containers",
+                status=NodeStatus.ACTIVE,
             ),
         ],
         cost_monthly_usd=0.0,
-        tags=["on-prem", "storage-vault", "ci-worker", "standby"],
+        tags=["on-prem", "storage-vault", "docker-active", "tailscale-active", "active"],
         updated_at=now,
     )
 
-    # 3. Cloud VPS: Recommended Host for Multi-Project Scaling
+    # 3. Cloud VPS: Hetzner Cloud Production Hub (darkfac-vps-primary)
     cloud_vps_node = InfraNode(
-        id="cloud-vps-primary",
-        name="Cloud VPS Production Hub (Recommended: Hetzner CPX21 / CPX31)",
+        id="darkfac-vps-primary",
+        name="Hetzner CX23 (#165058444)",
         role=NodeRole.CLOUD_VPS,
-        status=NodeStatus.PLANNED,
-        provider="Hetzner Cloud (Alternative: Hostinger KVM)",
+        status=NodeStatus.ACTIVE,
+        provider="Hetzner Cloud (Falkenstein, Germany)",
         hardware=HardwareSpec(
-            cpu="3 or 4 vCPU AMD EPYC (Hetzner CPX21/CPX31)",
-            ram_gb=8.0,
-            storage_primary="80 GB to 160 GB NVMe SSD",
-            power_supply="Cloud Datacenter Managed",
-            notes="High-availability online node with 20 TB monthly traffic, 99.9% uptime SLA, and low latency.",
+            cpu="2 vCPU x86 (Hetzner CX23)",
+            ram_gb=4.0,
+            storage_primary="40 GB NVMe SSD",
+            power_supply="Hetzner Datacenter Park Falkenstein (100% Green Energy)",
+            notes="Server ID: #165058444; 20 TB tráfego mensal; SLA 99.9%; faturamento ~US$ 7.19/mês ($0.010/h + $0.001/h IPv4).",
         ),
         network=NetworkSpec(
-            public_dns="hub.yourdomain.com / *.yourdomain.com",
+            public_ip="178.105.73.168",
+            ipv6="2a01:4f8:c014:634::/64",
+            public_dns="dokploy.ggcampos.com",
             cloudflare_tunnel=True,
-            tailscale_ip="100.x.y.k (Planned)",
-            open_ports=[80, 443],
-            notes="Protected by Cloudflare Edge proxy and WAF; internal SSH restricted to Tailscale mesh.",
+            tailscale_ip="100.83.176.60",
+            open_ports=[22, 80, 443, 3000],
+            notes="Hetzner Server #165058444. IPv4 178.105.73.168. FQDN: https://dokploy.ggcampos.com (SSL 200 OK). Tailscale: 100.83.176.60.",
         ),
         services=[
             ServiceItem(
-                name="dokploy-or-coolify",
-                description="Self-hosted PaaS orchestrator managing multi-project deployments, SSL and Git webhooks",
-                status=NodeStatus.PLANNED,
+                name="dokploy-paas",
+                description="Dokploy self-hosted PaaS orchestrator (Docker Swarm, Traefik & Git Webhooks)",
+                status=NodeStatus.ACTIVE,
                 port=3000,
                 managed_by="systemd / docker",
             ),
             ServiceItem(
+                name="tailscale-agent",
+                description="Tailscale mesh node (100.83.176.60, active point-to-point tunnel)",
+                status=NodeStatus.ACTIVE,
+                container_engine=None,
+            ),
+            ServiceItem(
                 name="multi-tenant-postgres",
-                description="Production PostgreSQL instance with isolated databases per project and NVMe volumes",
-                status=NodeStatus.PLANNED,
+                description="Instância central PostgreSQL 16+ com bancos de dados isolados por projeto em NVMe",
+                status=NodeStatus.ACTIVE,
                 port=5432,
                 managed_by="Dokploy",
             ),
             ServiceItem(
                 name="valkey-redis",
-                description="High-speed caching and background queue broker",
+                description="Broker de cache e filas de alta performance em memória",
                 status=NodeStatus.PLANNED,
                 port=6379,
                 managed_by="Dokploy",
             ),
             ServiceItem(
                 name="s3-backup-agent",
-                description="Automated encrypted database dumps dispatched to Cloudflare R2 / Google Drive",
+                description="Dumps diários automáticos para Cloudflare R2 e replicação para o desktop-g45ipem (3 TB)",
                 status=NodeStatus.PLANNED,
             ),
         ],
-        cost_monthly_usd=12.0,
-        tags=["cloud", "vps", "multi-project", "production", "planned"],
+        cost_monthly_usd=7.19,
+        tags=["cloud", "vps", "hetzner", "cx23", "falkenstein", "server-165058444", "dokploy-active", "tailscale-active", "production", "active"],
         updated_at=now,
     )
 

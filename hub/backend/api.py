@@ -76,6 +76,7 @@ from core.harness.test_subagent import (
     DistilledTestReport,
     TestExecutionInstruction,
 )
+from core.infra.cards import InfraCard, InfraCardsReport
 
 router = APIRouter(prefix="/api", tags=["DarkHub API"])
 roadmap_router = APIRouter(prefix="/projects", tags=["Operational Roadmap"])
@@ -919,6 +920,7 @@ def run_tests(
     """Execute test suite via headless test subagent engine and return distilled report."""
     return service.run_tests(instruction)
 
+
 # ==============================================================================
 # Task Dashboard (DF-21)
 # ==============================================================================
@@ -929,6 +931,44 @@ def run_tests(
 def get_task_dashboard(service: HubService = Depends(get_hub_service)) -> TaskDashboardReport:
     """Return the read-only queue/run/stage/cost/evidence projection for DarkHub."""
     return service.get_task_dashboard()
+
+
+# ==============================================================================
+# Infrastructure Nodes & Topology Cards Endpoints (USR-15)
+# ==============================================================================
+
+
+@router.get("/infra/cards", response_model=InfraCardsReport)
+def get_infra_cards_endpoint(
+    probe: bool = Query(default=False, description="Perform live network probe"),
+    timeout: float = Query(default=0.5, description="Probe timeout in seconds"),
+    service: HubService = Depends(get_hub_service),
+) -> InfraCardsReport:
+    """Returns infrastructure nodes and system links as UI-ready cards."""
+    return service.get_infra_cards_report(probe_liveness=probe, probe_timeout=timeout)
+
+
+@router.post("/infra/cards/refresh", response_model=InfraCardsReport)
+def refresh_infra_cards_endpoint(
+    timeout: float = Query(default=1.0, description="Probe timeout in seconds"),
+    service: HubService = Depends(get_hub_service),
+) -> InfraCardsReport:
+    """Forces live connectivity probes and returns refreshed infrastructure cards."""
+    return service.get_infra_cards_report(probe_liveness=True, probe_timeout=timeout)
+
+
+@router.get("/infra/cards/{node_id}", response_model=InfraCard)
+def get_infra_card_endpoint(
+    node_id: str,
+    probe: bool = Query(default=False, description="Perform live network probe"),
+    timeout: float = Query(default=0.5, description="Probe timeout in seconds"),
+    service: HubService = Depends(get_hub_service),
+) -> InfraCard:
+    """Returns a single infrastructure card by node ID."""
+    card = service.get_infra_card(node_id, probe_liveness=probe, probe_timeout=timeout)
+    if not card:
+        raise HTTPException(status_code=404, detail=f"Infrastructure node '{node_id}' not found")
+    return card
 
 
 
