@@ -9,8 +9,10 @@ import argparse
 from pathlib import Path
 from typing import Optional
 
+from core.paths import project_root
+
 # Ensure repository root is in sys.path when executed directly
-REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+REPO_ROOT = project_root()
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 

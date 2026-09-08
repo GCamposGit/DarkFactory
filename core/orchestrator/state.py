@@ -11,7 +11,9 @@ from typing import Any, Mapping
 
 from pydantic import ValidationError
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+from core.paths import project_root
+
+PROJECT_ROOT = project_root()
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 

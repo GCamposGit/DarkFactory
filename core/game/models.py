@@ -92,7 +92,7 @@ class ModelEvidence(BaseModel):
     """Auditable evidence for one real model call."""
 
     tier: Literal["local_fast", "balanced_cloud", "frontier_cloud"]
-    provider: Literal["ollama", "openrouter"]
+    provider: Literal["ollama", "openrouter", "mock", "unified"]
     requested_model: str
     returned_model: str
     response_sha256: str

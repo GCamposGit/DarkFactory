@@ -11,8 +11,9 @@ from pathlib import Path
 from typing import List, Dict, Any, Optional
 from datetime import datetime, timezone
 from core.research.models import ResearchLedger, ResearchTopicType, ResearchSource, SourceInsight
+from core.paths import project_root
 
-DEFAULT_RESEARCH_DIR = Path(__file__).resolve().parent.parent.parent / ".factory" / "research"
+DEFAULT_RESEARCH_DIR = project_root() / ".factory" / "research"
 
 
 def sanitize_slug(text: str) -> str:

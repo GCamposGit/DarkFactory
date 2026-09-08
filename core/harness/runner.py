@@ -16,9 +16,19 @@ from typing import Sequence
 
 from pydantic import ValidationError
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
-if str(PROJECT_ROOT) not in sys.path:
-    sys.path.insert(0, str(PROJECT_ROOT))
+IMPORT_ROOT = Path(__file__).resolve().parents[2]
+if str(IMPORT_ROOT) not in sys.path:
+    sys.path.insert(0, str(IMPORT_ROOT))
+
+from core.paths import project_root
+
+PROJECT_ROOT = project_root()
+
+# Ensure UTF-8 output on Windows
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+if hasattr(sys.stderr, "reconfigure"):
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
 from core.harness.markers import (
     MARKER_HARNESS_FAIL,
@@ -67,6 +77,15 @@ def sanitize_child_output(output: str) -> str:
     return sanitized
 
 
+def resolve_command(command: str) -> list[str]:
+    """Resolve an unqualified Python command to the runner's active interpreter."""
+
+    arguments = shlex.split(command, posix=os.name != "nt")
+    if arguments and arguments[0].casefold() in {"python", "python.exe"}:
+        arguments[0] = sys.executable
+    return arguments
+
+
 def _pytest_counts(output: str) -> tuple[int, int, int]:
     collected = re.search(r"collected\s+(\d+)\s+items?", output)
     passed = re.findall(r"(?:^|\s)(\d+)\s+passed(?:,|\s|$)", output)
@@ -85,7 +104,7 @@ def _is_test_step(step: HarnessStepConfig) -> bool:
 def run_step(step: HarnessStepConfig) -> StepExecution:
     print(f"{MARKER_STEP_START} {step.name}")
     try:
-        command = shlex.split(step.cmd, posix=os.name != "nt")
+        command = resolve_command(step.cmd)
         if not command:
             raise ValueError("empty command")
         process = subprocess.run(
