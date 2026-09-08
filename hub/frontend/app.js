@@ -166,14 +166,14 @@ function renderOpenRouterBadge() {
 
   if (state.openrouter.is_authenticated) {
     badgeContainer.innerHTML = `
-      <div class="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-950/60 border border-emerald-500/30 text-emerald-400 text-xs font-mono" title="OpenRouter Conectado (${state.openrouter.key_label || "Chave Ativa"})">
+      <div class="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-950/60 border border-emerald-500/30 text-emerald-400 text-xs font-mono" title="OpenRouter Conectado (${escapeHtml(state.openrouter.key_label || "Chave Ativa")})">
         <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
         <span class="hidden sm:inline">OpenRouter: Ativo ($${(state.openrouter.usage_usd || 0).toFixed(2)})</span>
       </div>
     `;
   } else if (state.openrouter.has_key) {
     badgeContainer.innerHTML = `
-      <div class="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-amber-950/60 border border-amber-500/30 text-amber-400 text-xs font-mono" title="${state.openrouter.error || "Erro de chave"}">
+      <div class="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-amber-950/60 border border-amber-500/30 text-amber-400 text-xs font-mono" title="${escapeHtml(state.openrouter.error || "Erro de chave")}">
         <span class="w-2 h-2 rounded-full bg-amber-400"></span>
         <span class="hidden sm:inline">OpenRouter: Falha Auth</span>
       </div>
@@ -302,7 +302,9 @@ function renderQuickDock() {
   const section = document.getElementById("quick-dock-section");
   if (!container || !section) return;
 
-  const pinned = state.services.filter((s) => s.pinned);
+  const pinned = state.services.filter(
+    (service) => service.pinned && isSafeServiceId(service.id)
+  );
 
   if (pinned.length === 0) {
     section.classList.add("hidden");
@@ -315,27 +317,30 @@ function renderQuickDock() {
       const health = state.health[item.id];
       const statusDotClass = getStatusDotClass(health?.status);
       const latencyText = health?.latency_ms ? `${health.latency_ms}ms` : "";
+      const color = safeServiceColor(item.color);
+      const name = escapeHtml(item.name);
+      const url = escapeHtml(safeServiceUrl(item.url) || "#");
 
       return `
       <a 
-        href="${item.url}" 
+        href="${url}"
         target="_blank" 
         rel="noopener noreferrer"
         class="group relative flex items-center gap-3 px-3.5 py-2 rounded-xl glass-card hover:border-indigo-500/50 transition-all cursor-pointer">
         <div class="w-8 h-8 rounded-lg flex items-center justify-center text-sm font-bold shadow-inner" style="background: ${
-          item.color
-        }22; color: ${item.color}; border: 1px solid ${item.color}44">
-          ${item.name.substring(0, 2).toUpperCase()}
+          color
+        }22; color: ${color}; border: 1px solid ${color}44">
+          ${escapeHtml(item.name.substring(0, 2).toUpperCase())}
         </div>
         <div class="flex flex-col min-w-0">
           <div class="flex items-center gap-1.5">
             <span class="text-xs font-semibold text-slate-200 group-hover:text-indigo-300 transition-colors truncate max-w-[120px]">${
-              item.name
+              name
             }</span>
             <span class="w-1.5 h-1.5 rounded-full ${statusDotClass}"></span>
           </div>
           <span class="text-[10px] text-slate-400 font-mono">${
-            latencyText || (item.is_local ? "Local" : "Cloud")
+            escapeHtml(latencyText || (item.is_local ? "Local" : "Cloud"))
           }</span>
         </div>
       </a>
@@ -351,6 +356,7 @@ function renderServices() {
   if (!container) return;
 
   let filtered = state.services.filter((item) => {
+    if (!isSafeServiceId(item.id)) return false;
     // Category Filter
     if (state.selectedCategory === "favorites" && !item.is_favorite)
       return false;
@@ -387,14 +393,18 @@ function renderServices() {
       const health = state.health[item.id];
       const statusDotClass = getStatusDotClass(health?.status);
       const latencyDisplay = health?.latency_ms
-        ? `<span class="text-[10px] font-mono text-slate-400">${health.latency_ms}ms</span>`
+        ? `<span class="text-[10px] font-mono text-slate-400">${escapeHtml(String(health.latency_ms))}ms</span>`
         : "";
+      const color = safeServiceColor(item.color);
+      const name = escapeHtml(item.name);
+      const serviceId = escapeHtml(item.id);
+      const url = escapeHtml(safeServiceUrl(item.url) || "#");
 
       return `
       <div class="glass-card rounded-2xl p-5 flex flex-col justify-between group relative overflow-hidden">
         <!-- Accent Glow Header line -->
         <div class="absolute top-0 left-0 right-0 h-[2px]" style="background: linear-gradient(90deg, ${
-          item.color
+          color
         }, transparent)"></div>
 
         <div>
@@ -402,22 +412,22 @@ function renderServices() {
           <div class="flex items-start justify-between gap-3 mb-3">
             <div class="flex items-center gap-3">
               <div class="w-10 h-10 rounded-xl flex items-center justify-center font-bold text-base shadow-md" style="background: ${
-                item.color
-              }25; color: ${item.color}; border: 1px solid ${item.color}50">
-                ${item.name.substring(0, 2).toUpperCase()}
+                color
+              }25; color: ${color}; border: 1px solid ${color}50">
+                ${escapeHtml(item.name.substring(0, 2).toUpperCase())}
               </div>
               <div>
                 <div class="flex items-center gap-2">
                   <h3 class="font-semibold text-slate-100 text-sm group-hover:text-indigo-300 transition-colors">${
-                    item.name
+                    name
                   }</h3>
                   <span class="w-2 h-2 rounded-full ${statusDotClass}" title="${
-        health?.status || "Status pendente"
+        escapeHtml(health?.status || "Status pendente")
       }"></span>
                 </div>
                 <div class="flex items-center gap-2 mt-0.5">
                   <span class="text-[10px] text-slate-400 font-mono">${
-                    CATEGORIES[item.category]?.label || item.category
+                    escapeHtml(CATEGORIES[item.category]?.label || item.category)
                   }</span>
                   ${latencyDisplay}
                 </div>
@@ -427,7 +437,8 @@ function renderServices() {
             <!-- Card Actions -->
             <div class="flex items-center gap-1">
               <button 
-                onclick="toggleFavorite('${item.id}')" 
+                data-service-action="favorite"
+                data-service-id="${serviceId}"
                 title="${
                   item.is_favorite
                     ? "Remover dos favoritos"
@@ -444,7 +455,8 @@ function renderServices() {
               </button>
 
               <button 
-                onclick="togglePin('${item.id}')" 
+                data-service-action="pin"
+                data-service-id="${serviceId}"
                 title="${
                   item.pinned ? "Desafixar do dock" : "Fixar no topo (dock)"
                 }"
@@ -466,14 +478,10 @@ function renderServices() {
                   </svg>
                 </button>
                 <div class="absolute right-0 top-full mt-1 w-28 bg-slate-900 border border-slate-700/80 rounded-xl shadow-xl py-1 hidden group-hover/menu:block z-20">
-                  <button onclick="editService('${
-                    item.id
-                  }')" class="w-full text-left px-3 py-1.5 text-xs text-slate-300 hover:bg-slate-800 hover:text-white flex items-center gap-2">
+                  <button data-service-action="edit" data-service-id="${serviceId}" class="w-full text-left px-3 py-1.5 text-xs text-slate-300 hover:bg-slate-800 hover:text-white flex items-center gap-2">
                     Editar
                   </button>
-                  <button onclick="deleteService('${
-                    item.id
-                  }')" class="w-full text-left px-3 py-1.5 text-xs text-red-400 hover:bg-slate-800 hover:text-red-300 flex items-center gap-2">
+                  <button data-service-action="delete" data-service-id="${serviceId}" class="w-full text-left px-3 py-1.5 text-xs text-red-400 hover:bg-slate-800 hover:text-red-300 flex items-center gap-2">
                     Excluir
                   </button>
                 </div>
@@ -483,7 +491,7 @@ function renderServices() {
 
           <!-- Description -->
           <p class="text-xs text-slate-400 leading-relaxed mb-4 line-clamp-2">
-            ${item.description || "Nenhuma descrição fornecida."}
+            ${escapeHtml(item.description || "Nenhuma descrição fornecida.")}
           </p>
         </div>
 
@@ -496,7 +504,7 @@ function renderServices() {
               .map(
                 (tag) => `
               <span class="px-2 py-0.5 rounded-md bg-slate-800/80 border border-slate-700/40 text-[10px] text-slate-400 font-mono">
-                #${tag}
+                #${escapeHtml(tag)}
               </span>
             `
               )
@@ -513,7 +521,7 @@ function renderServices() {
           <!-- Launch Button -->
           <div class="flex items-center gap-2">
             <a 
-              href="${item.url}" 
+              href="${url}"
               target="_blank" 
               rel="noopener noreferrer"
               class="flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-xl bg-slate-800/90 hover:bg-indigo-600 hover:text-white text-slate-200 text-xs font-medium border border-slate-700/60 hover:border-indigo-500 transition-all shadow-sm">
@@ -525,9 +533,8 @@ function renderServices() {
               </svg>
             </a>
             <button 
-              onclick="copyToClipboard('${
-                item.url
-              }', 'Link copiado para a área de transferência!')"
+              data-service-action="copy-url"
+              data-service-id="${serviceId}"
               title="Copiar URL"
               class="p-2 rounded-xl bg-slate-800/60 hover:bg-slate-700/80 text-slate-400 hover:text-slate-200 border border-slate-700/50 transition-colors">
               <svg class="w-3.5 h-3.5" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" fill="none">
@@ -541,6 +548,8 @@ function renderServices() {
     `;
     })
     .join("");
+
+  bindServiceActions(container);
 }
 
 function getStatusDotClass(status) {
@@ -548,6 +557,33 @@ function getStatusDotClass(status) {
   if (status === "degraded") return "status-dot-degraded";
   if (status === "offline") return "status-dot-offline";
   return "status-dot-unknown";
+}
+
+const serviceActionContainers = new WeakSet();
+
+function bindServiceActions(container) {
+  if (serviceActionContainers.has(container)) return;
+  container.addEventListener("click", (event) => {
+    const control = event.target.closest("[data-service-action]");
+    if (!control || !container.contains(control)) return;
+
+    const serviceId = control.dataset.serviceId;
+    if (!isSafeServiceId(serviceId)) return;
+
+    const actions = {
+      favorite: () => toggleFavorite(serviceId),
+      pin: () => togglePin(serviceId),
+      edit: () => editService(serviceId),
+      delete: () => deleteService(serviceId),
+      "copy-url": () => {
+        const item = state.services.find((service) => service.id === serviceId);
+        const url = item ? safeServiceUrl(item.url) : "";
+        if (url) copyToClipboard(url, "Link copiado para a área de transferência!");
+      },
+    };
+    actions[control.dataset.serviceAction]?.();
+  });
+  serviceActionContainers.add(container);
 }
 
 // Toggle Favorite
@@ -765,8 +801,9 @@ function handlePaletteKeyboardNav(e) {
   } else if (e.key === "Enter") {
     e.preventDefault();
     const selected = state.paletteResults[state.paletteSelectedIndex];
-    if (selected) {
-      window.open(selected.url, "_blank", "noopener,noreferrer");
+    const url = selected ? safeServiceUrl(selected.url) : "";
+    if (url) {
+      window.open(url, "_blank", "noopener,noreferrer");
       closeCommandPalette();
     }
   }
@@ -788,6 +825,7 @@ function renderPaletteResults() {
   list.innerHTML = state.paletteResults
     .map((item, idx) => {
       const isSelected = idx === state.paletteSelectedIndex;
+      const color = safeServiceColor(item.color);
       return `
       <div 
         onclick="launchPaletteItem(${idx})"
@@ -798,22 +836,22 @@ function renderPaletteResults() {
         }">
         <div class="flex items-center gap-3 min-w-0">
           <div class="w-8 h-8 rounded-lg flex items-center justify-center text-xs font-bold shrink-0" style="background: ${
-            item.color
-          }25; color: ${item.color}">
-            ${item.name.substring(0, 2).toUpperCase()}
+            color
+          }25; color: ${color}">
+            ${escapeHtml(item.name.substring(0, 2).toUpperCase())}
           </div>
           <div class="min-w-0">
             <div class="text-xs font-medium text-slate-200 truncate">${
-              item.name
+              escapeHtml(item.name)
             }</div>
             <div class="text-[10px] text-slate-400 truncate">${
-              item.description
+              escapeHtml(item.description)
             }</div>
           </div>
         </div>
         <div class="flex items-center gap-2 shrink-0">
           <span class="text-[10px] font-mono text-slate-500">${
-            CATEGORIES[item.category]?.label || item.category
+            escapeHtml(CATEGORIES[item.category]?.label || item.category)
           }</span>
           <span class="px-1.5 py-0.5 rounded bg-slate-800 text-[10px] font-mono text-slate-400">↵ Abrir</span>
         </div>
@@ -831,8 +869,9 @@ function renderPaletteResults() {
 
 function launchPaletteItem(idx) {
   const item = state.paletteResults[idx];
-  if (item) {
-    window.open(item.url, "_blank", "noopener,noreferrer");
+  const url = item ? safeServiceUrl(item.url) : "";
+  if (url) {
+    window.open(url, "_blank", "noopener,noreferrer");
     closeCommandPalette();
   }
 }
@@ -1088,14 +1127,14 @@ function renderPromptsList() {
     <div class="glass-panel p-4 rounded-xl border border-slate-800 flex flex-col justify-between group">
       <div>
         <div class="flex items-start justify-between gap-2 mb-1.5">
-          <h4 class="text-xs font-semibold text-slate-200">${p.title}</h4>
+          <h4 class="text-xs font-semibold text-slate-200">${escapeHtml(p.title)}</h4>
           <button 
             onclick="copyPromptContent('${p.id}')"
             class="px-2.5 py-1 rounded-lg bg-indigo-600/30 hover:bg-indigo-600 text-indigo-300 hover:text-white text-[10px] font-mono border border-indigo-500/30 transition-all">
             Copiar
           </button>
         </div>
-        <p class="text-[11px] text-slate-400 mb-3">${p.description}</p>
+        <p class="text-[11px] text-slate-400 mb-3">${escapeHtml(p.description)}</p>
         <div class="p-2.5 rounded-lg bg-slate-900/90 text-slate-300 font-mono text-[10px] whitespace-pre-wrap border border-slate-800/80 max-h-24 overflow-y-auto mb-2">
 ${escapeHtml(p.content)}
         </div>
@@ -1105,7 +1144,7 @@ ${escapeHtml(p.content)}
           ${p.tags
             .map(
               (t) =>
-                `<span class="text-[9px] text-slate-500 font-mono">#${t}</span>`
+                `<span class="text-[9px] text-slate-500 font-mono">#${escapeHtml(t)}</span>`
             )
             .join(" ")}
         </div>
@@ -1523,11 +1562,33 @@ function showToast(message, type = "info") {
 }
 
 function escapeHtml(text) {
-  if (!text) return "";
-  return text
+  if (text === null || text === undefined) return "";
+  return String(text)
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#039;");
+}
+
+function isSafeServiceId(value) {
+  return /^[a-z0-9](?:[a-z0-9_-]{0,98}[a-z0-9])?$/.test(String(value || ""));
+}
+
+function safeServiceColor(value) {
+  const color = String(value || "");
+  return /^#[0-9a-fA-F]{6}$/.test(color) ? color : "#3b82f6";
+}
+
+function safeServiceUrl(value) {
+  const candidate = String(value || "");
+  if (/\s/.test(candidate)) return "";
+  try {
+    const parsed = new URL(candidate);
+    return parsed.protocol === "http:" || parsed.protocol === "https:"
+      ? candidate
+      : "";
+  } catch (_error) {
+    return "";
+  }
 }

@@ -3,8 +3,28 @@ Data models and schemas with strict Pydantic v2 typing for DarkHub.
 """
 
 from enum import Enum
-from typing import List, Optional, Dict, Any
-from pydantic import BaseModel, Field, HttpUrl
+from typing import Annotated, Any, Dict, List, Optional
+from urllib.parse import urlsplit
+
+from pydantic import AfterValidator, BaseModel, Field, StringConstraints
+
+
+def _validate_service_url(value: str) -> str:
+    """Accept only absolute HTTP(S) URLs safe for browser navigation."""
+    if value != value.strip() or any(character.isspace() for character in value):
+        raise ValueError("service URL must not contain whitespace")
+    parsed = urlsplit(value)
+    if parsed.scheme.lower() not in {"http", "https"} or parsed.hostname is None:
+        raise ValueError("service URL must be an absolute HTTP(S) URL")
+    return value
+
+
+ServiceId = Annotated[
+    str,
+    StringConstraints(pattern=r"^[a-z0-9](?:[a-z0-9_-]{0,98}[a-z0-9])?$"),
+]
+ServiceUrl = Annotated[str, AfterValidator(_validate_service_url)]
+ServiceColor = Annotated[str, StringConstraints(pattern=r"^#[0-9a-fA-F]{6}$")]
 
 
 class ServiceCategory(str, Enum):
@@ -17,14 +37,14 @@ class ServiceCategory(str, Enum):
 
 
 class ServiceItem(BaseModel):
-    id: str = Field(..., description="Unique slug or identifier")
+    id: ServiceId = Field(..., description="Unique lowercase slug or identifier")
     name: str = Field(..., min_length=1, max_length=100, description="Display name of the tool or service")
-    url: str = Field(..., description="Target URL of the service or local web app")
+    url: ServiceUrl = Field(..., description="Absolute HTTP(S) URL of the service or local web app")
     category: ServiceCategory = Field(default=ServiceCategory.CUSTOM, description="Primary category")
     description: str = Field(default="", max_length=500, description="Brief description of the service")
     tags: List[str] = Field(default_factory=list, description="Searchable tags")
     icon: str = Field(default="globe", description="Lucide icon name or emoji")
-    color: str = Field(default="#3b82f6", description="Accent color hex code")
+    color: ServiceColor = Field(default="#3b82f6", description="Six-digit accent color hex code")
     is_favorite: bool = Field(default=False, description="Whether marked as favorite")
     pinned: bool = Field(default=False, description="Whether pinned in quick dock")
     is_local: bool = Field(default=False, description="Whether hosted locally (e.g. localhost)")
@@ -32,12 +52,12 @@ class ServiceItem(BaseModel):
 
 class ServiceCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=100)
-    url: str = Field(..., min_length=1)
+    url: ServiceUrl
     category: ServiceCategory = Field(default=ServiceCategory.CUSTOM)
     description: str = Field(default="", max_length=500)
     tags: List[str] = Field(default_factory=list)
     icon: str = Field(default="globe")
-    color: str = Field(default="#3b82f6")
+    color: ServiceColor = Field(default="#3b82f6")
     is_favorite: bool = Field(default=False)
     pinned: bool = Field(default=False)
     is_local: bool = Field(default=False)
@@ -45,12 +65,12 @@ class ServiceCreate(BaseModel):
 
 class ServiceUpdate(BaseModel):
     name: Optional[str] = Field(default=None, min_length=1, max_length=100)
-    url: Optional[str] = Field(default=None, min_length=1)
+    url: Optional[ServiceUrl] = None
     category: Optional[ServiceCategory] = None
     description: Optional[str] = Field(default=None, max_length=500)
     tags: Optional[List[str]] = None
     icon: Optional[str] = None
-    color: Optional[str] = None
+    color: Optional[ServiceColor] = None
     is_favorite: Optional[bool] = None
     pinned: Optional[bool] = None
     is_local: Optional[bool] = None
@@ -317,7 +337,6 @@ class VisualIllustrateRequest(BaseModel):
     theme: Optional[str] = Field(default=None, description="Optional visual theme override")
     aspect_ratio: Optional[str] = Field(default=None, description="Optional aspect ratio override")
     offline: bool = Field(default=False, description="Whether to force $0 local procedural rendering")
-
 
 
 
