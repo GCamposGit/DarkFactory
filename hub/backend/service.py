@@ -47,6 +47,9 @@ from hub.backend.models import (
     ContentLintRequest,
     VisualGenerateRequest,
     VisualIllustrateRequest,
+    TaskDashboardEvidence,
+    TaskDashboardItem,
+    TaskDashboardReport,
 )
 from core.execution.providers import get_openrouter_api_key
 from core.content import (
@@ -110,6 +113,7 @@ from core.harness.test_subagent import (
     TestExecutionInstruction,
     TestSubagentEngine,
 )
+from core.orchestrator.store import OrchestratorStore, RunRecord
 
 logger = logging.getLogger("darkhub.service")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
@@ -206,6 +210,8 @@ class HubService:
         ollama_base_url: str = "http://localhost:11434",
         usage_dir: Optional[Path] = None,
         roadmap_root: Optional[Path] = None,
+        state_path: Optional[Path] = None,
+        orchestrator_path: Optional[Path] = None,
     ) -> None:
         self._session_token = secrets.token_urlsafe(32)
         if data_dir is None:
@@ -240,6 +246,12 @@ class HubService:
 
         repository_root = roadmap_root or Path(__file__).resolve().parents[2]
         self.project_root = repository_root
+        self.task_state_path = Path(state_path) if state_path is not None else repository_root / ".factory" / "state.json"
+        self.orchestrator_path = (
+            Path(orchestrator_path)
+            if orchestrator_path is not None
+            else repository_root / ".factory" / "orchestrator.sqlite3"
+        )
         self.test_subagent_engine = TestSubagentEngine(project_root=repository_root)
         self.roadmap = build_repository_roadmap_service(
             repository_root,
@@ -252,6 +264,203 @@ class HubService:
     def run_tests(self, instruction: TestExecutionInstruction) -> DistilledTestReport:
         """Execute test suite via headless test subagent engine and return distilled report."""
         return self.test_subagent_engine.execute(instruction)
+
+    def get_task_dashboard(self) -> TaskDashboardReport:
+        """Build a read-only projection of lifecycle, run, usage and evidence data."""
+        task_records, state_source, warnings = self._load_task_records()
+        runs, run_source, run_warnings = self._load_task_runs(task_records)
+        warnings.extend(run_warnings)
+
+        task_ids = set(task_records) | set(runs)
+        rows: list[dict[str, Any]] = []
+        for task_id in task_ids:
+            record = task_records.get(task_id, {})
+            metadata = record.get("metadata") if isinstance(record.get("metadata"), dict) else {}
+            run = runs.get(task_id)
+            checkpoint = run.checkpoint if run is not None else {}
+            status = str(record.get("status") or (run.status.value if run is not None else "UNSET"))
+            stage = str(metadata.get("stage") or checkpoint.get("stage") or status)
+            title = str(metadata.get("title") or metadata.get("name") or metadata.get("summary") or task_id)
+            priority = self._dashboard_priority(metadata.get("priority", 0))
+            rows.append(
+                {
+                    "task_id": task_id,
+                    "title": title,
+                    "status": status,
+                    "stage": stage,
+                    "priority": priority,
+                    "run": run,
+                    "cost_usd": self._dashboard_cost(metadata, checkpoint),
+                    "updated_at": record.get("updated_at") or (run.updated_at.isoformat() if run else None),
+                    "evidence": self._dashboard_evidence(record, metadata, checkpoint),
+                    "exceptions": self._dashboard_exceptions(metadata, checkpoint, run),
+                }
+            )
+
+        rows.sort(key=self._dashboard_sort_key)
+        queue: list[TaskDashboardItem] = []
+        for index, row in enumerate(rows, start=1):
+            run = row["run"]
+            queue.append(
+                TaskDashboardItem(
+                    task_id=row["task_id"],
+                    title=row["title"],
+                    status=row["status"],
+                    stage=row["stage"],
+                    priority=row["priority"],
+                    queue_position=index,
+                    run_id=run.run_id if run else None,
+                    run_status=run.status.value if run else None,
+                    step_index=run.step_index if run else None,
+                    cost_usd=row["cost_usd"],
+                    updated_at=row["updated_at"],
+                    evidence=row["evidence"],
+                    exceptions=row["exceptions"],
+                )
+            )
+
+        usage_source = "ok"
+        total_cost = 0.0
+        try:
+            total_cost = float(self.model_usage_ledger.report(recent_limit=0).total_cost_usd)
+        except Exception as exc:  # pragma: no cover - defensive boundary for a corrupt ledger
+            usage_source = "error"
+            warnings.append(f"usage ledger unavailable: {exc}")
+
+        return TaskDashboardReport(
+            generated_at=datetime.now(timezone.utc).isoformat(),
+            queue=queue,
+            queued_count=len(queue),
+            running_count=sum(1 for item in queue if item.run_status == "RUNNING"),
+            exception_count=sum(len(item.exceptions) for item in queue),
+            total_cost_usd=max(0.0, total_cost),
+            sources={"state": state_source, "runs": run_source, "usage": usage_source},
+            warnings=warnings,
+        )
+
+    def _load_task_records(self) -> tuple[dict[str, dict[str, Any]], str, list[str]]:
+        if not self.task_state_path.exists():
+            return {}, "missing", []
+        try:
+            raw = json.loads(self.task_state_path.read_text(encoding="utf-8"))
+            tasks = raw.get("tasks", {}) if isinstance(raw, dict) else {}
+            if not isinstance(tasks, dict):
+                raise ValueError("tasks must be an object")
+            return {
+                str(task_id): value
+                for task_id, value in tasks.items()
+                if isinstance(value, dict)
+            }, "ok", []
+        except (OSError, ValueError, TypeError, json.JSONDecodeError) as exc:
+            logger.warning("Task state ledger unavailable: %s", exc)
+            return {}, "error", [f"state ledger unavailable: {exc}"]
+
+    def _load_task_runs(
+        self,
+        task_records: dict[str, dict[str, Any]],
+    ) -> tuple[dict[str, RunRecord], str, list[str]]:
+        if not self.orchestrator_path.exists():
+            return {}, "missing", []
+        task_ids = set(task_records)
+        warnings: list[str] = []
+        try:
+            store = OrchestratorStore(self.orchestrator_path)
+            runs: dict[str, RunRecord] = {}
+            for task_id in task_ids:
+                run = store.get_latest_run(task_id)
+                if run is not None:
+                    runs[task_id] = run
+            for run in store.recoverable_runs():
+                runs.setdefault(run.task_id, run)
+            return runs, "ok", warnings
+        except Exception as exc:  # pragma: no cover - defensive boundary for a corrupt store
+            logger.warning("Orchestrator run store unavailable: %s", exc)
+            warnings.append(f"run store unavailable: {exc}")
+            return {}, "error", warnings
+
+    @staticmethod
+    def _dashboard_priority(value: Any) -> int:
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return 0
+
+    @staticmethod
+    def _dashboard_sort_key(row: dict[str, Any]) -> tuple[int, int, str]:
+        status_rank = {
+            "NEEDS_FIX": 0,
+            "RUNNING": 1,
+            "IMPLEMENTING": 2,
+            "VALIDATING": 3,
+            "REVIEWING": 4,
+            "PLANNED": 5,
+            "TRIAGED": 6,
+            "READY_TO_MERGE": 7,
+            "FAILED": 8,
+            "MERGED": 9,
+            "UNSET": 10,
+        }
+        return status_rank.get(row["status"], 99), -row["priority"], row["task_id"]
+
+    @staticmethod
+    def _dashboard_cost(metadata: dict[str, Any], checkpoint: dict[str, Any]) -> float:
+        for source in (checkpoint, metadata):
+            value = source.get("cost_usd") if isinstance(source, dict) else None
+            if isinstance(value, (int, float)) and value >= 0:
+                return round(float(value), 8)
+        return 0.0
+
+    @staticmethod
+    def _dashboard_evidence(
+        record: dict[str, Any],
+        metadata: dict[str, Any],
+        checkpoint: dict[str, Any],
+    ) -> list[TaskDashboardEvidence]:
+        candidates = [record.get("merge_evidence"), metadata.get("evidence"), metadata.get("evidence_refs"), checkpoint.get("evidence")]
+        evidence: list[TaskDashboardEvidence] = []
+        seen: set[tuple[str, str]] = set()
+
+        def add(label: Any, value: Any, source: Optional[str] = None) -> None:
+            if value is None or isinstance(value, (dict, list)):
+                value = json.dumps(value, ensure_ascii=False, sort_keys=True)
+            key = (str(label), str(value))
+            if key not in seen:
+                seen.add(key)
+                evidence.append(TaskDashboardEvidence(label=str(label), value=str(value), source=source))
+
+        for candidate in candidates:
+            if isinstance(candidate, dict):
+                for label, value in candidate.items():
+                    add(label, value, "ledger")
+            elif isinstance(candidate, list):
+                for item in candidate:
+                    if isinstance(item, dict):
+                        add(item.get("label", "evidence"), item.get("value", item), item.get("source"))
+                    elif item is not None:
+                        add("evidence", item, "ledger")
+        return evidence[:12]
+
+    @staticmethod
+    def _dashboard_exceptions(
+        metadata: dict[str, Any],
+        checkpoint: dict[str, Any],
+        run: Optional[RunRecord],
+    ) -> list[str]:
+        values: list[Any] = []
+        for source in (metadata, checkpoint):
+            for key in ("exception", "exceptions", "error", "errors"):
+                if isinstance(source, dict) and source.get(key) is not None:
+                    values.append(source[key])
+        if run is not None and run.last_error:
+            values.append(run.last_error)
+        flattened: list[str] = []
+        for value in values:
+            items = value if isinstance(value, list) else [value]
+            for item in items:
+                text = str(item).strip()
+                if text and text not in flattened:
+                    flattened.append(text)
+        return flattened[:12]
 
     def guide_demand(
         self,

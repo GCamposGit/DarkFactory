@@ -114,6 +114,15 @@
           <span class="hidden lg:inline">Demandas</span>
         </button>
 
+        <!-- Task Dashboard Trigger -->
+        <button
+          onclick="document.getElementById('tasks-dashboard-section')?.scrollIntoView({behavior: 'smooth'})"
+          title="Fila operacional de tarefas"
+          class="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-emerald-300 border border-slate-800 hover:border-emerald-500/30 transition-all text-xs font-medium">
+          <span>✅</span>
+          <span class="hidden lg:inline">Tarefas</span>
+        </button>
+
         <!-- Playground Trigger -->
         <button 
           onclick="openPlaygroundDrawer()" 
@@ -166,6 +175,26 @@
       <div id="quick-dock-items" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
         <!-- Pinned items dynamically rendered here -->
       </div>
+    </section>
+
+    <!-- Operational Task Dashboard -->
+    <section id="tasks-dashboard-section" class="space-y-4" aria-labelledby="tasks-dashboard-title">
+      <div class="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h2 id="tasks-dashboard-title" class="text-xs font-mono font-semibold uppercase tracking-wider text-slate-400 flex items-center gap-2">
+            <span>✅ Fila operacional</span>
+            <span class="text-[10px] text-slate-600 normal-case tracking-normal">runs, etapas e evidências</span>
+          </h2>
+        </div>
+        <button id="tasks-dashboard-refresh" type="button" class="rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-1.5 text-[11px] font-medium text-emerald-300 transition hover:bg-emerald-500/20">
+          Atualizar fila
+        </button>
+      </div>
+      <div id="tasks-dashboard-alert" class="rounded-xl border border-slate-800 bg-slate-900/60 px-3 py-2 text-[11px] text-slate-400" role="status" aria-live="polite">
+        Consultando estado operacional…
+      </div>
+      <div id="tasks-dashboard-summary" class="grid grid-cols-2 gap-3 lg:grid-cols-4"></div>
+      <div id="tasks-dashboard-queue" class="grid grid-cols-1 gap-3 lg:grid-cols-2"></div>
     </section>
 
     <!-- Toolbar: Search Bar + Category Pills -->
@@ -1053,6 +1082,7 @@
   <script src="/static/usage.js?v=20260906b"></script>
   <script src="/static/credits.js?v=20260907a"></script>
   <script src="/static/roadmap.js?v=20260906b"></script>
+  <script src="/static/tasks.js?v=20260908a"></script>
   <script src="/static/demands.js?v=20260906b"></script>
 </body>
 </html>
