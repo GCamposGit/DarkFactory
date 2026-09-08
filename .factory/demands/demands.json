@@ -203,5 +203,47 @@
     "dependencies": [],
     "created_at": "2026-09-07T10:03:32.274806Z",
     "updated_at": "2026-09-07T10:18:00.000000Z"
+  },
+  {
+    "id": "USR-15",
+    "project_id": "darkfac",
+    "title": "Adicionar cards de infraestrutura no Hub",
+    "origin": "user",
+    "status": "completed",
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand",
+      "feature"
+    ],
+    "problem_statement": "A falta de visualização centralizada dos recursos de infraestrutura (PCs, Hetzner, Tailscale, Docker, Dokploy e outros) no Hub dificulta a gestão e monitoramento eficiente dos recursos disponíveis.\n\n[Refinamentos acordados no Grill]:\n- Criar uma API REST separada para fornecer dados dos cards, mantendo o core headless e determinístico\n- Apenas exibir dados de infraestrutura, sem permitir interações ou gerenciamento\n- Criar novos testes específicos para os cards de infraestrutura",
+    "core_journey": [
+      "Usuário acessa o Hub",
+      "Sistema exibe cards de infraestrutura configurados"
+    ],
+    "non_goals": [
+      "Criar novas funcionalidades de gerenciamento de infraestrutura",
+      "Implementar autenticação e autorização para acesso aos cards"
+    ],
+    "reachability_contract": "python -m pytest tests/test_adicionar_cards_de_infrae.py -v",
+    "acceptance_criteria": [
+      "Cards de infraestrutura são exibidos corretamente no Hub",
+      "Os cards são atualizados conforme a disponibilidade dos recursos",
+      "A interface é responsiva e acessível",
+      "Links corretos para acesso dos sistemas em cada card testados"
+    ],
+    "suggested_files": [
+      "core/infra/cards.py",
+      "hub/backend/service.py",
+      "hub/backend/api.py",
+      "hub/frontend/infra.js",
+      "hub/frontend/index.html",
+      "tests/test_adicionar_cards_de_infrae.py"
+    ],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-09-08T03:12:48.051694Z",
+    "updated_at": "2026-09-08T04:27:00.000000Z"
   }
 ]

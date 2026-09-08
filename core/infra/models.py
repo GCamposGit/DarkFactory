@@ -45,6 +45,8 @@ class NetworkSpec(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     private_ip: str | None = Field(default=None, description="Local LAN or internal IP")
+    public_ip: str | None = Field(default=None, description="Public IPv4 address")
+    ipv6: str | None = Field(default=None, description="Public IPv6 prefix/address")
     tailscale_ip: str | None = Field(default=None, description="Tailscale / WireGuard mesh IP")
     public_dns: str | None = Field(default=None, description="Public domain or subdomain")
     cloudflare_tunnel: bool = Field(default=False, description="Whether Cloudflare Tunnel is enabled")

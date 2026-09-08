@@ -80,7 +80,7 @@ def test_default_inventory_has_all_user_components() -> None:
 
     assert "predator-neo-16" in node_ids
     assert "onprem-z97-server" in node_ids
-    assert "cloud-vps-primary" in node_ids
+    assert "darkfac-vps-primary" in node_ids
     assert "cloudflare-edge" in node_ids
     assert "hostinger-web" in node_ids
     assert "n8n-automation" in node_ids
@@ -124,12 +124,12 @@ def test_inventory_manager_crud_in_temp_dir(tmp_path: Path) -> None:
     assert non_existent is None
 
     # 3. Update status
-    success = manager.update_node_status("cloud-vps-primary", NodeStatus.PROVISIONING)
+    success = manager.update_node_status("darkfac-vps-primary", NodeStatus.STANDBY)
     assert success is True
 
-    updated_vps = manager.get_node("cloud-vps-primary")
+    updated_vps = manager.get_node("darkfac-vps-primary")
     assert updated_vps is not None
-    assert updated_vps.status == NodeStatus.PROVISIONING
+    assert updated_vps.status == NodeStatus.STANDBY
 
     # 4. Export Markdown summary
     summary_md = manager.export_markdown_summary()
