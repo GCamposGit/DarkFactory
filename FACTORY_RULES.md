@@ -12,3 +12,4 @@ Estas regras valem para Codex, Antigravity, Grok e qualquer outro harness que op
 8. Prefira caminhos relativos ao repositório, `pathlib`, UTF-8 explícito e comandos equivalentes em PowerShell e POSIX.
 9. Não faça merge automático quando um portão falhar, quando a suíte não puder ser descoberta ou quando a mudança tocar governança sem justificativa.
 10. Mudanças de dependências devem atualizar `requirements.txt` (e `requirements-audio.txt` para o stack opcional de GPU) e a documentação de bootstrap.
+11. Ticket de desenvolvimento só pode ser declarado concluído após commit revisado, push da branch, PR no GitHub, checks/reviews exigidos, merge confirmado e verificação de que o `main` remoto alcança o SHA entregue; falha de autenticação, rede ou leitura do remoto é bloqueio explícito.

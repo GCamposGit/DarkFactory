@@ -7,30 +7,38 @@ State-of-the-Art Multi-Tier Orchestration:
 Integrated with the Anti-Slop Critique & Polish Loop.
 """
 
+import hashlib
+import json
+import logging
 import os
 import sys
-import json
-import uuid
-import logging
 import time
-import urllib.request
 import urllib.error
-from pathlib import Path
-
-from core.paths import project_root
-from typing import Optional, Dict, Any, Tuple
+import urllib.request
+import uuid
+from dataclasses import dataclass
 from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
 
+from core.content.anti_slop_linter import AntiSlopLinter
 from core.content.models import (
-    ContentType,
-    ToneProfile,
+    CleanlinessRating,
     ContentRequest,
     ContentResponse,
+    ContentType,
     SlopReport,
-    CleanlinessRating,
+    ToneProfile,
 )
-from core.content.anti_slop_linter import AntiSlopLinter
-from core.content.presets import get_preset, NEGATIVE_SLOP_PROMPT_INSTRUCTIONS
+from core.content.presets import NEGATIVE_SLOP_PROMPT_INSTRUCTIONS, get_preset
+from core.execution.budget import ExecutionBudgetManager
+from core.execution.contracts import AttemptOutcome, AttemptRecord
+from core.execution.providers import (
+    ModelProvider,
+    ProviderResponse,
+    get_model_provider,
+    get_openrouter_api_key,
+)
 from core.usage.ledger import ModelUsageLedger, infer_model_tier
 from core.usage.models import ModelCallEvent, ModelModality, ModelTier
 
@@ -38,18 +46,38 @@ logger = logging.getLogger("core.content.engine")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 
 
+@dataclass
+class _DraftResult:
+    content: str
+    provider: str
+    model_used: str
+    fallback_occurred: bool = False
+    original_provider_requested: Optional[str] = None
+    fallback_reason: Optional[str] = None
+    cost_usd: Optional[float] = None
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    total_tokens: int = 0
+    latency_seconds: float = 0.0
+
+
 class ContentEngine:
     """Multi-tiered, cost-efficient content generator equipped with Anti-AI-Slop loops."""
 
-    def __init__(self, storage_dir: Optional[Path] = None) -> None:
+    def __init__(
+        self,
+        storage_dir: Optional[Path] = None,
+        provider: Optional[ModelProvider] = None,
+    ) -> None:
         if storage_dir is None:
-            self.storage_dir = project_root() / ".factory" / "content"
+            self.storage_dir = Path(__file__).resolve().parent.parent.parent / ".factory" / "content"
         else:
             self.storage_dir = Path(storage_dir)
         self.storage_dir.mkdir(parents=True, exist_ok=True)
         self.linter = AntiSlopLinter()
         usage_dir = self.storage_dir.parent / "usage"
         self.model_usage_ledger = ModelUsageLedger(usage_dir)
+        self.provider = provider
 
     def _record_usage(
         self,
@@ -81,15 +109,7 @@ class ContentEngine:
     @staticmethod
     def get_openrouter_key() -> Optional[str]:
         """Detects OpenRouter API key from environment variable or Windows Registry."""
-        key = os.environ.get("OPENROUTER_API_KEY")
-        if not key and sys.platform.startswith("win"):
-            try:
-                import winreg
-                with winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Environment") as k:
-                    key, _ = winreg.QueryValueEx(k, "OPENROUTER_API_KEY")
-            except Exception:
-                pass
-        return key if key and key.strip() else None
+        return get_openrouter_api_key()
 
     @staticmethod
     def is_ollama_available() -> bool:
@@ -101,189 +121,272 @@ class ContentEngine:
         except Exception:
             return False
 
-    def generate(self, request: ContentRequest) -> ContentResponse:
+    def generate(
+        self,
+        request: ContentRequest,
+        budget_manager: Optional[ExecutionBudgetManager] = None,
+        budget_id: Optional[str] = None,
+    ) -> ContentResponse:
         """Generates content matching target persona, applies Anti-Slop linter, and scrubs cliches."""
-        preset = get_preset(request.content_type)
-        tone = request.tone_profile or preset["default_tone"]
+        attempt_id = f"content-{request.content_type.value}-{uuid.uuid4().hex[:8]}"
+        reservation = None
+        if budget_manager is not None and budget_id is not None:
+            reservation = budget_manager.reserve(
+                budget_id=budget_id,
+                attempt_id=attempt_id,
+                amount=0.05,
+            )
 
-        # Build custom linter if user specified banned words
-        linter = AntiSlopLinter(custom_banned_words=tone.banned_words)
+        try:
+            preset = get_preset(request.content_type)
+            tone = request.tone_profile or preset["default_tone"]
 
-        # 1. Generate Draft
-        raw_draft, provider, model_used = self._generate_draft(request, preset, tone)
-        if provider == "local_procedural":
-            self._record_usage(provider, model_used, success=True, latency_ms=0.0)
+            # Build custom linter if user specified banned words
+            linter = AntiSlopLinter(custom_banned_words=tone.banned_words)
 
-        # 2. Audit initial draft
-        initial_report = linter.audit(raw_draft)
-        initial_score = initial_report.slop_score
+            # 1. Generate Draft
+            draft_res = self._generate_draft(request, preset, tone)
+            raw_draft = draft_res.content
 
-        # 3. Critique & Polish Loop (if slop exceeds threshold)
-        final_content = raw_draft
-        scrubbed = False
-        iterations = 1
+            # 2. Audit initial draft
+            initial_report = linter.audit(raw_draft)
+            initial_score = initial_report.slop_score
 
-        if initial_score > request.max_slop_threshold:
-            # Deterministic Scrub Pass
-            scrubbed_draft, replacements_made = linter.scrub(raw_draft)
-            if replacements_made > 0:
-                final_content = scrubbed_draft
-                scrubbed = True
+            # 3. Critique & Polish Loop (if slop exceeds threshold)
+            final_content = raw_draft
+            scrubbed = False
+            quality_rejected = False
+            rejection_reason = None
+            iterations = 1
 
-            # Re-evaluate
-            post_scrub_report = linter.audit(final_content)
-            if post_scrub_report.slop_score < initial_score:
-                final_report = post_scrub_report
+            if initial_score > request.max_slop_threshold:
+                quality_rejected = True
+                rejection_reason = (
+                    f"Initial slop score {initial_score:.1f} exceeded max threshold "
+                    f"{request.max_slop_threshold:.1f} ({initial_report.violations_count} violation(s))."
+                )
+                # Deterministic Scrub Pass
+                scrubbed_draft, replacements_made = linter.scrub(raw_draft)
+                if replacements_made > 0:
+                    final_content = scrubbed_draft
+                    scrubbed = True
+
+                # Re-evaluate
+                post_scrub_report = linter.audit(final_content)
+                if post_scrub_report.slop_score < initial_score:
+                    final_report = post_scrub_report
+                else:
+                    final_report = initial_report
+                iterations = 2
             else:
                 final_report = initial_report
-            iterations = 2
-        else:
-            final_report = initial_report
 
-        content_id = f"cnt_{uuid.uuid4().hex[:8]}"
-        title = f"{request.content_type.value.replace('_', ' ').title()}: {request.topic[:40]}"
+            content_id = f"cnt_{uuid.uuid4().hex[:8]}"
+            title = f"{request.content_type.value.replace('_', ' ').title()}: {request.topic[:40]}"
 
-        response = ContentResponse(
-            content_id=content_id,
-            title=title,
-            content_type=request.content_type,
-            final_content=final_content,
-            initial_draft=raw_draft if scrubbed else None,
-            initial_slop_score=initial_score,
-            final_slop_score=final_report.slop_score,
-            slop_report=final_report,
-            scrubbed=scrubbed,
-            iterations_count=iterations,
-            provider=provider,
-            model_used=model_used,
-            created_at=datetime.now(timezone.utc).isoformat(),
-            word_count=len(final_content.split()),
-        )
+            response = ContentResponse(
+                content_id=content_id,
+                title=title,
+                content_type=request.content_type,
+                final_content=final_content,
+                initial_draft=raw_draft if scrubbed else None,
+                initial_slop_score=initial_score,
+                final_slop_score=final_report.slop_score,
+                slop_report=final_report,
+                scrubbed=scrubbed,
+                iterations_count=iterations,
+                provider=draft_res.provider,
+                model_used=draft_res.model_used,
+                created_at=datetime.now(timezone.utc).isoformat(),
+                word_count=len(final_content.split()),
+                quality_rejected=quality_rejected,
+                rejection_reason=rejection_reason,
+                fallback_occurred=draft_res.fallback_occurred,
+                original_provider_requested=draft_res.original_provider_requested,
+                fallback_reason=draft_res.fallback_reason,
+                cost_usd=draft_res.cost_usd,
+            )
 
-        # Save record to .factory/content/
-        self._save_record(response)
+            # Save record to .factory/content/
+            self._save_record(response)
 
-        return response
+            if budget_manager is not None and reservation is not None:
+                attempt_rec = AttemptRecord(
+                    attempt_id=attempt_id,
+                    input_artifact_hash=hashlib.sha256(request.topic.encode("utf-8")).hexdigest(),
+                    output_artifact_hash=hashlib.sha256(final_content.encode("utf-8")).hexdigest(),
+                    mode="offline" if request.offline else "live",
+                    tokens=draft_res.total_tokens,
+                    measured_cost=draft_res.cost_usd,
+                    estimated_cost=draft_res.cost_usd or 0.0,
+                    latency=draft_res.latency_seconds,
+                    outcome=AttemptOutcome.SUCCEEDED,
+                    timestamp=datetime.now(timezone.utc),
+                )
+                budget_manager.commit(reservation.reservation_id, attempt_rec)
+
+            return response
+        except Exception as exc:
+            if budget_manager is not None and reservation is not None:
+                budget_manager.release(reservation.reservation_id, reason=str(exc))
+            raise
 
     def _generate_draft(
         self,
         request: ContentRequest,
         preset: Dict[str, Any],
         tone: ToneProfile,
-    ) -> Tuple[str, str, str]:
-        """Routes generation across Ollama, OpenRouter, or Deterministic Procedural Engine."""
+    ) -> _DraftResult:
+        """Routes generation across injected provider, Ollama, OpenRouter, or Deterministic Procedural Engine."""
+        # Offline forced -> procedural deterministic synthesis ($0)
+        if request.offline:
+            content = self._procedural_generate(request, preset, tone)
+            self._record_usage("local_procedural", "darkfac-content-synth-v1", success=True, latency_ms=0.0)
+            return _DraftResult(
+                content=content,
+                provider="local_procedural",
+                model_used="darkfac-content-synth-v1",
+                cost_usd=0.0,
+            )
+
+        # 1. If explicit provider injected (e.g. MockModelProvider, UnifiedModelProvider):
+        if self.provider is not None:
+            model = request.model_override or "mock-model"
+            try:
+                system_prompt = f"{preset['system_prompt']}\n\n{NEGATIVE_SLOP_PROMPT_INSTRUCTIONS}"
+                prompt = self._compose_user_input(request, tone)
+                start_time = time.perf_counter()
+                resp: ProviderResponse = self.provider.generate(
+                    prompt=prompt,
+                    model=model,
+                    system_prompt=system_prompt,
+                    max_tokens=request.max_length_words * 2 if request.max_length_words else 2048,
+                    temperature=0.35,
+                )
+                latency = max(0.001, time.perf_counter() - start_time)
+                content = resp.text.strip()
+                if content:
+                    cost = resp.measured_cost if resp.measured_cost is not None else resp.estimated_cost
+                    provider_name = getattr(self.provider, "provider_id", "injected")
+                    return _DraftResult(
+                        content=content,
+                        provider=provider_name,
+                        model_used=resp.model or model,
+                        cost_usd=cost,
+                        prompt_tokens=resp.tokens_prompt,
+                        completion_tokens=resp.tokens_completion,
+                        total_tokens=resp.total_tokens,
+                        latency_seconds=latency,
+                    )
+            except Exception as exc:
+                logger.warning("Injected provider failed: %s; falling back to procedural", exc)
+                content = self._procedural_generate(request, preset, tone)
+                return _DraftResult(
+                    content=content,
+                    provider="local_procedural",
+                    model_used="darkfac-content-synth-v1",
+                    fallback_occurred=True,
+                    original_provider_requested=getattr(self.provider, "provider_id", "injected"),
+                    fallback_reason=str(exc),
+                    cost_usd=0.0,
+                )
+
         openrouter_key = self.get_openrouter_key()
         ollama_ok = self.is_ollama_available()
 
-        # Offline forced or no credentials available -> procedural deterministic synthesis
-        if request.offline or (not openrouter_key and not ollama_ok):
+        # No credentials or local daemon -> procedural synthesis
+        if not openrouter_key and not ollama_ok:
             content = self._procedural_generate(request, preset, tone)
-            return content, "local_procedural", "darkfac-content-synth-v1"
+            self._record_usage("local_procedural", "darkfac-content-synth-v1", success=True, latency_ms=0.0)
+            return _DraftResult(
+                content=content,
+                provider="local_procedural",
+                model_used="darkfac-content-synth-v1",
+                cost_usd=0.0,
+            )
 
-        # Try Local Ollama first if available (Local-First $0 cost principle)
+        original_requested = "ollama" if (ollama_ok and not request.model_override) else "openrouter"
+        last_error = None
+
+        # 2. Try Local Ollama first if available (Local-First $0 cost principle)
         if ollama_ok and not request.model_override:
             try:
-                content = self._call_ollama(request, preset, tone)
-                if content and len(content.strip()) > 30:
-                    return content, "ollama", "qwen-code-deep"
+                ollama_provider = get_model_provider("ollama", usage_ledger=self.model_usage_ledger)
+                model = "qwen-code-deep:latest"
+                prompt = self._compose_prompt(request, preset, tone)
+                start_time = time.perf_counter()
+                resp = ollama_provider.generate(
+                    prompt=prompt,
+                    model=model,
+                    temperature=0.4,
+                    max_tokens=2048,
+                )
+                latency = max(0.001, time.perf_counter() - start_time)
+                content = resp.text.strip()
+                if content and len(content) > 30:
+                    return _DraftResult(
+                        content=content,
+                        provider="ollama",
+                        model_used="qwen-code-deep",
+                        cost_usd=0.0,
+                        prompt_tokens=resp.tokens_prompt,
+                        completion_tokens=resp.tokens_completion,
+                        total_tokens=resp.total_tokens,
+                        latency_seconds=latency,
+                    )
             except Exception as exc:
                 logger.warning("Ollama generation failed, falling back: %s", exc)
+                last_error = f"Ollama error: {exc}"
 
-        # Try OpenRouter if key is present
+        # 3. Try OpenRouter if key is present
         if openrouter_key:
             try:
+                openrouter_provider = get_model_provider("openrouter", api_key=openrouter_key, usage_ledger=self.model_usage_ledger)
                 model = request.model_override or "anthropic/claude-3.7-sonnet"
-                content = self._call_openrouter(openrouter_key, model, request, preset, tone)
-                if content and len(content.strip()) > 30:
-                    return content, "openrouter", model
+                system_prompt = f"{preset['system_prompt']}\n\n{NEGATIVE_SLOP_PROMPT_INSTRUCTIONS}"
+                user_content = self._compose_user_input(request, tone)
+                start_time = time.perf_counter()
+                resp = openrouter_provider.generate(
+                    prompt=user_content,
+                    model=model,
+                    system_prompt=system_prompt,
+                    temperature=0.35,
+                    max_tokens=2048,
+                )
+                latency = max(0.001, time.perf_counter() - start_time)
+                content = resp.text.strip()
+                if content and len(content) > 30:
+                    cost = resp.measured_cost if resp.measured_cost is not None else resp.estimated_cost
+                    fallback_happened = (original_requested == "ollama")
+                    return _DraftResult(
+                        content=content,
+                        provider="openrouter",
+                        model_used=resp.model or model,
+                        fallback_occurred=fallback_happened,
+                        original_provider_requested="ollama" if fallback_happened else None,
+                        fallback_reason=last_error if fallback_happened else None,
+                        cost_usd=cost,
+                        prompt_tokens=resp.tokens_prompt,
+                        completion_tokens=resp.tokens_completion,
+                        total_tokens=resp.total_tokens,
+                        latency_seconds=latency,
+                    )
             except Exception as exc:
                 logger.warning("OpenRouter generation failed, falling back: %s", exc)
+                last_error = f"OpenRouter error: {exc}"
 
-        # Robust procedural fallback
+        # 4. Robust procedural fallback
         content = self._procedural_generate(request, preset, tone)
-        return content, "local_procedural", "darkfac-content-synth-v1"
-
-    def _call_ollama(self, request: ContentRequest, preset: Dict[str, Any], tone: ToneProfile) -> str:
-        """Invokes local Ollama inference."""
-        prompt = self._compose_prompt(request, preset, tone)
-        payload = {
-            "model": request.model_override or "qwen-code-deep:latest",
-            "prompt": prompt,
-            "stream": False,
-            "options": {"temperature": 0.4, "top_p": 0.9},
-        }
-        req_data = json.dumps(payload).encode("utf-8")
-        req = urllib.request.Request(
-            "http://localhost:11434/api/generate",
-            data=req_data,
-            headers={"Content-Type": "application/json"},
+        self._record_usage("local_procedural", "darkfac-content-synth-v1", success=True, latency_ms=0.0)
+        return _DraftResult(
+            content=content,
+            provider="local_procedural",
+            model_used="darkfac-content-synth-v1",
+            fallback_occurred=True,
+            original_provider_requested=original_requested,
+            fallback_reason=last_error or "All external providers unavailable or failed",
+            cost_usd=0.0,
         )
-        started = time.perf_counter()
-        try:
-            with urllib.request.urlopen(req, timeout=90) as resp:
-                data = json.loads(resp.read().decode("utf-8"))
-            self._record_usage(
-                "ollama", str(data.get("model") or payload["model"]), success=True,
-                latency_ms=round((time.perf_counter() - started) * 1000, 1),
-                input_tokens=data.get("prompt_eval_count"), output_tokens=data.get("eval_count"),
-            )
-            return data.get("response", "").strip()
-        except Exception:
-            self._record_usage(
-                "ollama", str(payload["model"]), success=False,
-                latency_ms=round((time.perf_counter() - started) * 1000, 1),
-            )
-            raise
-
-    def _call_openrouter(
-        self,
-        api_key: str,
-        model: str,
-        request: ContentRequest,
-        preset: Dict[str, Any],
-        tone: ToneProfile,
-    ) -> str:
-        """Invokes OpenRouter chat completion."""
-        system_content = f"{preset['system_prompt']}\n\n{NEGATIVE_SLOP_PROMPT_INSTRUCTIONS}"
-        user_content = self._compose_user_input(request, tone)
-
-        payload = {
-            "model": model,
-            "messages": [
-                {"role": "system", "content": system_content},
-                {"role": "user", "content": user_content},
-            ],
-            "temperature": 0.35,
-            "max_tokens": 2048,
-        }
-        req_data = json.dumps(payload).encode("utf-8")
-        req = urllib.request.Request(
-            "https://openrouter.ai/api/v1/chat/completions",
-            data=req_data,
-            headers={
-                "Authorization": f"Bearer {api_key}",
-                "Content-Type": "application/json",
-                "HTTP-Referer": "https://darkfactory.local",
-                "X-Title": "DarkFac Content Studio",
-            },
-        )
-        started = time.perf_counter()
-        try:
-            with urllib.request.urlopen(req, timeout=60) as resp:
-                data = json.loads(resp.read().decode("utf-8"))
-            usage = data.get("usage", {}) if isinstance(data.get("usage"), dict) else {}
-            self._record_usage(
-                "openrouter", str(data.get("model") or model), success=True,
-                latency_ms=round((time.perf_counter() - started) * 1000, 1),
-                input_tokens=usage.get("prompt_tokens"), output_tokens=usage.get("completion_tokens"),
-            )
-            return data["choices"][0]["message"]["content"].strip()
-        except Exception:
-            self._record_usage(
-                "openrouter", model, success=False,
-                latency_ms=round((time.perf_counter() - started) * 1000, 1),
-            )
-            raise
 
     def _compose_prompt(self, request: ContentRequest, preset: Dict[str, Any], tone: ToneProfile) -> str:
         """Builds combined prompt string for single-turn model invocation."""

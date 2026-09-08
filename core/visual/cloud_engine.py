@@ -6,17 +6,19 @@ Interfaces with:
 3. Seamless Fallback to ProceduralVisualEngine ($0, 100% offline)
 """
 
+import base64
+import binascii
+import hashlib
+import io
+import json
+import logging
 import os
 import sys
 import time
-import json
-import base64
-import binascii
-import io
-import logging
-import urllib.request
 import urllib.error
+import urllib.request
 import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 
 from core.paths import project_root
@@ -24,10 +26,13 @@ from typing import Optional
 
 from PIL import Image
 
+from core.execution.budget import ExecutionBudgetManager
+from core.execution.contracts import AttemptOutcome, AttemptRecord
+from core.execution.providers import get_openrouter_api_key
 from core.visual.models import (
-    VisualPromptSpec,
-    VisualAssetResult,
     ASPECT_DIMENSIONS,
+    VisualAssetResult,
+    VisualPromptSpec,
 )
 from core.visual.procedural_engine import ProceduralVisualEngine
 
@@ -51,15 +56,7 @@ class CloudVisualEngine:
     @staticmethod
     def get_openrouter_key() -> Optional[str]:
         """Detect OpenRouter API key from environment variable or Windows Registry."""
-        key = os.environ.get("OPENROUTER_API_KEY")
-        if not key and sys.platform.startswith("win"):
-            try:
-                import winreg
-                with winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Environment") as k:
-                    key, _ = winreg.QueryValueEx(k, "OPENROUTER_API_KEY")
-            except Exception:
-                pass
-        return key if key and key.strip() else None
+        return get_openrouter_api_key()
 
     @staticmethod
     def get_openai_key() -> Optional[str]:
@@ -74,17 +71,93 @@ class CloudVisualEngine:
                 pass
         return key if key and key.strip() else None
 
-    def generate(self, spec: VisualPromptSpec) -> VisualAssetResult:
+    def _safe_download_image(self, url: str, destination: Path) -> None:
+        """Safely downloads an image with strict MAX_IMAGE_BYTES containment."""
+        req = urllib.request.Request(url, headers={"User-Agent": "DarkFac-Visual-Studio/1.0"})
+        total_bytes = 0
+        temp_path = destination.with_suffix(destination.suffix + ".tmp")
+        try:
+            with urllib.request.urlopen(req, timeout=60) as resp, open(temp_path, "wb") as f:
+                content_len = resp.headers.get("Content-Length")
+                if content_len is not None:
+                    try:
+                        if int(content_len) > self.MAX_IMAGE_BYTES:
+                            raise ValueError(
+                                f"Content-Length {content_len} exceeds maximum safe limit of {self.MAX_IMAGE_BYTES} bytes"
+                            )
+                    except (ValueError, TypeError) as exc:
+                        if isinstance(exc, ValueError) and "exceeds maximum" in str(exc):
+                            raise
+
+                while True:
+                    chunk = resp.read(64 * 1024)
+                    if not chunk:
+                        break
+                    total_bytes += len(chunk)
+                    if total_bytes > self.MAX_IMAGE_BYTES:
+                        raise ValueError(
+                            f"Download stream exceeded maximum safe limit of {self.MAX_IMAGE_BYTES} bytes"
+                        )
+                    f.write(chunk)
+            temp_path.replace(destination)
+        finally:
+            if temp_path.exists():
+                try:
+                    temp_path.unlink()
+                except Exception:
+                    pass
+
+    def generate(
+        self,
+        spec: VisualPromptSpec,
+        budget_manager: Optional[ExecutionBudgetManager] = None,
+        budget_id: Optional[str] = None,
+    ) -> VisualAssetResult:
         """Attempts cloud generation if keys exist and not offline; otherwise falls back to procedural."""
+        attempt_id = f"visual-{spec.asset_type.value}-{uuid.uuid4().hex[:8]}"
+        reservation = None
+        if budget_manager is not None and budget_id is not None:
+            reservation = budget_manager.reserve(
+                budget_id=budget_id,
+                attempt_id=attempt_id,
+                amount=0.05,
+            )
+
+        try:
+            result = self._execute_generation(spec)
+            if budget_manager is not None and reservation is not None:
+                attempt_rec = AttemptRecord(
+                    attempt_id=attempt_id,
+                    input_artifact_hash=hashlib.sha256((spec.prompt or spec.title).encode("utf-8")).hexdigest(),
+                    output_artifact_hash=hashlib.sha256(result.file_path.encode("utf-8")).hexdigest(),
+                    mode="offline" if spec.offline else "live",
+                    tokens=0,
+                    measured_cost=result.cost_usd,
+                    estimated_cost=result.cost_usd,
+                    latency=result.generation_time_ms / 1000.0,
+                    outcome=AttemptOutcome.SUCCEEDED,
+                    timestamp=datetime.now(timezone.utc),
+                )
+                budget_manager.commit(reservation.reservation_id, attempt_rec)
+            return result
+        except Exception as exc:
+            if budget_manager is not None and reservation is not None:
+                budget_manager.release(reservation.reservation_id, reason=str(exc))
+            raise
+
+    def _execute_generation(self, spec: VisualPromptSpec) -> VisualAssetResult:
+        """Internal generation router between DALL-E 3, OpenRouter, and procedural engine."""
         if spec.offline:
             return self.local_engine.render(spec)
 
         openai_key = self.get_openai_key()
         openrouter_key = self.get_openrouter_key()
         cloud_errors = []
+        original_provider_requested = None
 
         # Try DALL-E 3 if OpenAI key available
         if openai_key and (spec.model_override == "dall-e-3" or not openrouter_key):
+            original_provider_requested = "openai_dalle3"
             try:
                 return self._generate_dalle3(spec, openai_key)
             except Exception as exc:
@@ -93,6 +166,8 @@ class CloudVisualEngine:
 
         # Try OpenRouter if key available
         if openrouter_key:
+            if original_provider_requested is None:
+                original_provider_requested = "openrouter"
             try:
                 return self._generate_openrouter_image(spec, openrouter_key)
             except Exception as exc:
@@ -106,7 +181,12 @@ class CloudVisualEngine:
             raise RuntimeError(f"strict cloud generation failed: {detail}")
 
         # High-aesthetic local procedural fallback
-        return self.local_engine.render(spec)
+        result = self.local_engine.render(spec)
+        if cloud_errors:
+            result.fallback_occurred = True
+            result.original_provider_requested = original_provider_requested or "cloud"
+            result.fallback_reason = "; ".join(cloud_errors)
+        return result
 
     def _generate_dalle3(self, spec: VisualPromptSpec, api_key: str) -> VisualAssetResult:
         start_time = time.time()
@@ -131,10 +211,10 @@ class CloudVisualEngine:
             data = json.loads(resp.read().decode("utf-8"))
             img_url = data["data"][0]["url"]
 
-        # Download and save
+        # Download and save with containment
         asset_id = f"vis_dalle_{int(start_time * 1000) % 1000000:06d}"
         file_path = self.output_dir / f"{asset_id}.png"
-        urllib.request.urlretrieve(img_url, file_path)
+        self._safe_download_image(img_url, file_path)
 
         w, h = (1792, 1024) if "16:9" in spec.aspect_ratio.value else (1024, 1024)
         elapsed_ms = int((time.time() - start_time) * 1000)

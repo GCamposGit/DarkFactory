@@ -1,0 +1,461 @@
+{
+  "version": "1.0.0",
+  "last_updated": "2026-09-08T04:13:31.616818Z",
+  "nodes": [
+    {
+      "id": "predator-neo-16",
+      "name": "Predator Helios Neo 16 (ai-notebook)",
+      "role": "dev_workstation",
+      "status": "active",
+      "provider": "Local (Workstation)",
+      "hardware": {
+        "cpu": "Intel Core i7 (13th/14th Gen HX)",
+        "ram_gb": 32.0,
+        "storage_primary": "NVMe SSD 1 TB",
+        "storage_secondary": null,
+        "gpu": "NVIDIA GeForce RTX 4070 Laptop (8 GB GDDR6 Ada Lovelace)",
+        "gpu_compute_capability": "8.9",
+        "power_supply": "Dedicated Laptop Adapter 330W",
+        "notes": "Windows 11 25H2; Tailscale v1.102.3; primary interactive engineering environment; local high-speed AI inference (Ollama Qwen 2.5/Llama 3.3, faster-whisper)."
+      },
+      "network": {
+        "private_ip": "DHCP Local LAN",
+        "public_ip": null,
+        "ipv6": null,
+        "tailscale_ip": "100.81.84.124",
+        "public_dns": null,
+        "cloudflare_tunnel": false,
+        "open_ports": [],
+        "notes": "Direct development station; connected to on-premise and VPS via Tailscale mesh (ai-notebook)."
+      },
+      "services": [
+        {
+          "name": "antigravity-ide",
+          "description": "Google Antigravity & developer environment",
+          "container_engine": null,
+          "port": null,
+          "status": "active",
+          "managed_by": null
+        },
+        {
+          "name": "ollama-local",
+          "description": "Local frontier AI acceleration via RTX 4070 (8GB VRAM FP16/INT4)",
+          "container_engine": null,
+          "port": 11434,
+          "status": "active",
+          "managed_by": null
+        },
+        {
+          "name": "darkfac-runner",
+          "description": "Dark Factory Core runtime and deterministic harness",
+          "container_engine": null,
+          "port": null,
+          "status": "active",
+          "managed_by": null
+        },
+        {
+          "name": "tailscale-agent",
+          "description": "Tailscale mesh node (100.81.84.124, v1.102.3)",
+          "container_engine": null,
+          "port": null,
+          "status": "active",
+          "managed_by": null
+        }
+      ],
+      "cost_monthly_usd": 0.0,
+      "tags": [
+        "workstation",
+        "primary-dev",
+        "gpu-ada",
+        "active",
+        "tailscale-active"
+      ],
+      "updated_at": "2026-09-08T04:13:31.616818Z"
+    },
+    {
+      "id": "onprem-z97-server",
+      "name": "On-Premises Z97 Dedicated Server (desktop-g45ipem)",
+      "role": "on_prem_server",
+      "status": "active",
+      "provider": "Local (Home Lab / On-Prem)",
+      "hardware": {
+        "cpu": "Intel Core i7-4790K (4C/8T @ 4.0 GHz, Haswell)",
+        "ram_gb": 16.0,
+        "storage_primary": "Kingston SSDNow V300 240 GB 2.5'' SSD (C:)",
+        "storage_secondary": "Hitachi HDS723030ALA640 3 TB 3.5'' 7200 RPM HDD (E:) + Samsung P3 1 TB Ext",
+        "gpu": "2x Zotac AMP Extreme GeForce GTX 980 Ti 6 GB (Dual-GPU, Maxwell)",
+        "gpu_compute_capability": "5.2",
+        "power_supply": "Corsair AX1200 1200 W 80+ Gold Fully Modular",
+        "notes": "Windows 10 22H2; Tailscale v1.102.3; Docker Desktop ativo com repositório de dados no Drive E: (3 TB). Acesso visual via Google Remote Desktop. Ideal para storage denso, backups e workers locais."
+      },
+      "network": {
+        "private_ip": "DHCP Local LAN",
+        "public_ip": null,
+        "ipv6": null,
+        "tailscale_ip": "100.78.181.90",
+        "public_dns": null,
+        "cloudflare_tunnel": true,
+        "open_ports": [],
+        "notes": "Secure node on Tailscale mesh (desktop-g45ipem); reachable from ai-notebook at 100.78.181.90."
+      },
+      "services": [
+        {
+          "name": "docker-desktop-onprem",
+          "description": "Docker Desktop (WSL2 backend) com armazenamento alocado no Drive E: (3 TB)",
+          "container_engine": "docker",
+          "port": null,
+          "status": "active",
+          "managed_by": "Docker Desktop"
+        },
+        {
+          "name": "tailscale-agent",
+          "description": "Tailscale mesh node (100.78.181.90, v1.102.3)",
+          "container_engine": null,
+          "port": null,
+          "status": "active",
+          "managed_by": null
+        },
+        {
+          "name": "google-remote-desktop",
+          "description": "Acesso visual e controle remoto direto via Google Chrome Remote Desktop",
+          "container_engine": null,
+          "port": null,
+          "status": "active",
+          "managed_by": null
+        },
+        {
+          "name": "storage-backup-vault",
+          "description": "Local storage target (Drive E: 3 TB Hitachi HDD) para dumps e containers",
+          "container_engine": "docker",
+          "port": null,
+          "status": "active",
+          "managed_by": null
+        }
+      ],
+      "cost_monthly_usd": 0.0,
+      "tags": [
+        "on-prem",
+        "storage-vault",
+        "docker-active",
+        "tailscale-active",
+        "active"
+      ],
+      "updated_at": "2026-09-08T04:13:31.616818Z"
+    },
+    {
+      "id": "darkfac-vps-primary",
+      "name": "Hetzner CX23 (#165058444)",
+      "role": "cloud_vps",
+      "status": "active",
+      "provider": "Hetzner Cloud (Falkenstein, Germany)",
+      "hardware": {
+        "cpu": "2 vCPU x86 (Hetzner CX23)",
+        "ram_gb": 4.0,
+        "storage_primary": "40 GB NVMe SSD",
+        "storage_secondary": null,
+        "gpu": null,
+        "gpu_compute_capability": null,
+        "power_supply": "Hetzner Datacenter Park Falkenstein (100% Green Energy)",
+        "notes": "Server ID: #165058444; 20 TB tráfego mensal; SLA 99.9%; faturamento ~US$ 7.19/mês ($0.010/h + $0.001/h IPv4)."
+      },
+      "network": {
+        "private_ip": null,
+        "public_ip": "178.105.73.168",
+        "ipv6": "2a01:4f8:c014:634::/64",
+        "tailscale_ip": "100.83.176.60",
+        "public_dns": "dokploy.ggcampos.com",
+        "cloudflare_tunnel": true,
+        "open_ports": [
+          22,
+          80,
+          443,
+          3000
+        ],
+        "notes": "Hetzner Server #165058444. IPv4 178.105.73.168. FQDN: https://dokploy.ggcampos.com (SSL 200 OK). Tailscale: 100.83.176.60."
+      },
+      "services": [
+        {
+          "name": "dokploy-paas",
+          "description": "Dokploy self-hosted PaaS orchestrator (Docker Swarm, Traefik & Git Webhooks)",
+          "container_engine": "docker",
+          "port": 3000,
+          "status": "active",
+          "managed_by": "systemd / docker"
+        },
+        {
+          "name": "tailscale-agent",
+          "description": "Tailscale mesh node (100.83.176.60, active point-to-point tunnel)",
+          "container_engine": null,
+          "port": null,
+          "status": "active",
+          "managed_by": null
+        },
+        {
+          "name": "multi-tenant-postgres",
+          "description": "Instância central PostgreSQL 16+ com bancos de dados isolados por projeto em NVMe",
+          "container_engine": "docker",
+          "port": 5432,
+          "status": "active",
+          "managed_by": "Dokploy"
+        },
+        {
+          "name": "valkey-redis",
+          "description": "Broker de cache e filas de alta performance em memória",
+          "container_engine": "docker",
+          "port": 6379,
+          "status": "planned",
+          "managed_by": "Dokploy"
+        },
+        {
+          "name": "s3-backup-agent",
+          "description": "Dumps diários automáticos para Cloudflare R2 e replicação para o desktop-g45ipem (3 TB)",
+          "container_engine": "docker",
+          "port": null,
+          "status": "planned",
+          "managed_by": null
+        }
+      ],
+      "cost_monthly_usd": 7.19,
+      "tags": [
+        "cloud",
+        "vps",
+        "hetzner",
+        "cx23",
+        "falkenstein",
+        "server-165058444",
+        "dokploy-active",
+        "tailscale-active",
+        "production",
+        "active"
+      ],
+      "updated_at": "2026-09-08T04:13:31.616818Z"
+    },
+    {
+      "id": "cloudflare-edge",
+      "name": "Cloudflare Global Network & Security",
+      "role": "edge_gateway",
+      "status": "active",
+      "provider": "Cloudflare",
+      "hardware": null,
+      "network": {
+        "private_ip": null,
+        "public_ip": null,
+        "ipv6": null,
+        "tailscale_ip": null,
+        "public_dns": "Managed DNS Zone",
+        "cloudflare_tunnel": true,
+        "open_ports": [],
+        "notes": "DNS management, Email Routing, DDoS mitigation, SSL Edge termination, Zero Trust Access."
+      },
+      "services": [
+        {
+          "name": "cloudflare-dns",
+          "description": "Authoritative DNS with fast propagation and proxy capabilities",
+          "container_engine": "docker",
+          "port": null,
+          "status": "active",
+          "managed_by": null
+        },
+        {
+          "name": "email-routing",
+          "description": "Inbound email forwarder to personal address without separate mail server costs",
+          "container_engine": "docker",
+          "port": null,
+          "status": "active",
+          "managed_by": null
+        },
+        {
+          "name": "cloudflare-tunnel",
+          "description": "Secure outbound-only tunnel to connect VPS and On-Prem without open firewall ports",
+          "container_engine": "docker",
+          "port": null,
+          "status": "active",
+          "managed_by": null
+        }
+      ],
+      "cost_monthly_usd": 0.0,
+      "tags": [
+        "edge",
+        "dns",
+        "security",
+        "tunnel",
+        "active"
+      ],
+      "updated_at": "2026-09-08T04:13:31.616818Z"
+    },
+    {
+      "id": "hostinger-web",
+      "name": "Hostinger Simple Web Hosting",
+      "role": "managed_service",
+      "status": "active",
+      "provider": "Hostinger",
+      "hardware": null,
+      "network": {
+        "private_ip": null,
+        "public_ip": null,
+        "ipv6": null,
+        "tailscale_ip": null,
+        "public_dns": "Public websites / landing pages",
+        "cloudflare_tunnel": false,
+        "open_ports": [],
+        "notes": "Traditional shared hosting or basic VPS account used for simple static/PHP sites."
+      },
+      "services": [
+        {
+          "name": "static-web-hosting",
+          "description": "Landing pages, showcase sites and marketing portals",
+          "container_engine": "docker",
+          "port": null,
+          "status": "active",
+          "managed_by": null
+        }
+      ],
+      "cost_monthly_usd": 4.0,
+      "tags": [
+        "hosting",
+        "web",
+        "external",
+        "active"
+      ],
+      "updated_at": "2026-09-08T04:13:31.616818Z"
+    },
+    {
+      "id": "n8n-automation",
+      "name": "n8n Automation Account / Instance",
+      "role": "managed_service",
+      "status": "active",
+      "provider": "n8n Cloud / Self-Hosted",
+      "hardware": null,
+      "network": null,
+      "services": [
+        {
+          "name": "n8n-workflows",
+          "description": "Webhook listener, asynchronous glue pipelines and third-party API orchestrations",
+          "container_engine": "docker",
+          "port": null,
+          "status": "active",
+          "managed_by": null
+        }
+      ],
+      "cost_monthly_usd": 0.0,
+      "tags": [
+        "automation",
+        "workflows",
+        "webhooks",
+        "active"
+      ],
+      "updated_at": "2026-09-08T04:13:31.616818Z"
+    },
+    {
+      "id": "google-platform",
+      "name": "Google Account (GCP & Drive Storage)",
+      "role": "managed_service",
+      "status": "active",
+      "provider": "Google",
+      "hardware": null,
+      "network": null,
+      "services": [
+        {
+          "name": "google-drive-cold-storage",
+          "description": "Off-site secondary replication destination for critical database dumps and configs",
+          "container_engine": "docker",
+          "port": null,
+          "status": "active",
+          "managed_by": null
+        },
+        {
+          "name": "google-oauth-zero-trust",
+          "description": "Identity Provider (IdP) for Cloudflare Access authentication",
+          "container_engine": "docker",
+          "port": null,
+          "status": "active",
+          "managed_by": null
+        }
+      ],
+      "cost_monthly_usd": 0.0,
+      "tags": [
+        "cloud",
+        "storage",
+        "auth",
+        "active"
+      ],
+      "updated_at": "2026-09-08T04:13:31.616818Z"
+    }
+  ],
+  "adrs": [
+    {
+      "adr_id": "ADR-001",
+      "title": "Hybrid Multi-Project Infrastructure Topology",
+      "status": "ACCEPTED",
+      "date": "2026-09-07",
+      "context": "Need to transition from managing a single isolated project to hosting and managing multiple projects simultaneously with high reliability, cost-efficiency, and security.",
+      "decision": "Adopt a 3-tier Hybrid Topology: (1) Workstation for high-speed local dev and modern RTX 4070 AI inference; (2) On-Premises i7-4790K server for dense 3TB local backups, CI runner, and staging workers; (3) Cloud VPS running Dokploy/Docker for 24/7 client-facing projects, APIs, and databases.",
+      "consequences": [
+        "Zero operational waste: existing hardware is maximized for its true strengths.",
+        "Client-facing services stay online 24/7 on high-speed datacenter fiber without domestic internet risks.",
+        "Sensitive backups exist simultaneously in the cloud and on local physical media."
+      ],
+      "alternatives_considered": [
+        "Host everything on home on-premise server: Rejected due to ISP dynamic IP, residential power cuts, and upload limitations.",
+        "Host everything on AWS/GCP hyperscalers: Rejected due to prohibitive and unpredictable costs for multi-project dev."
+      ]
+    },
+    {
+      "adr_id": "ADR-002",
+      "title": "VPS Selection & PaaS Orchestration (Dokploy vs Coolify)",
+      "status": "ACCEPTED",
+      "date": "2026-09-07",
+      "context": "Multi-project scaling requires automated container orchestration, Git-push deployments, automated SSL certificates, and multi-tenant isolation without complex Kubernetes overhead.",
+      "decision": "Provision a budget high-performance VPS (Hetzner CPX21/CPX31 or Hostinger KVM) running Dokploy (or Coolify) atop Docker Engine. Use Dokploy for lightweight resource efficiency (~350MB idle RAM).",
+      "consequences": [
+        "Instant creation of new isolated projects with dedicated subdomains and SSL in minutes.",
+        "Developers deploy via git push without manual SSH/Nginx/Certbot maintenance.",
+        "Slight learning curve for the PaaS interface."
+      ],
+      "alternatives_considered": [
+        "Manual Docker Compose per project with manual Nginx reverse proxy: Rejected due to maintenance overhead.",
+        "Kubernetes / k3s: Rejected as overly complex for initial multi-project operational scale."
+      ]
+    },
+    {
+      "adr_id": "ADR-003",
+      "title": "Database Architecture & Zero-Cost Off-Site Backups",
+      "status": "ACCEPTED",
+      "date": "2026-09-07",
+      "context": "Multiple projects require reliable SQL databases with high performance and zero data loss risk.",
+      "decision": "Standardize on PostgreSQL 16+ deployed via Dokploy on NVMe storage. Implement an automated cron worker streaming daily compressed and encrypted dumps to Cloudflare R2 (10GB free tier, zero egress fees) with mirror sync to the On-Premises 3TB storage vault.",
+      "consequences": [
+        "No per-database monthly fee on cloud providers.",
+        "RPO < 24 hours (or < 6 hours for critical tables) with zero egress egress cost.",
+        "Complete portability: database can be restored anywhere in under 10 minutes."
+      ],
+      "alternatives_considered": [
+        "Managed AWS RDS / DigitalOcean Managed DB: Rejected due to high baseline costs (~$15-30/mo per instance).",
+        "SQLite for everything: Rejected due to multi-user concurrency and API separation limits."
+      ]
+    },
+    {
+      "adr_id": "ADR-004",
+      "title": "Secure Edge Networking via Cloudflare Tunnels and Tailscale Mesh",
+      "status": "ACCEPTED",
+      "date": "2026-09-07",
+      "context": "Need to access internal administrative dashboards, on-premise staging, and VPS services securely without exposing dangerous ports (e.g. 22 SSH, 5432 Postgres, 11434 Ollama) to the internet.",
+      "decision": "Use Cloudflare Tunnels (cloudflared) for public web applications with Cloudflare WAF, and use Tailscale mesh VPN for private node-to-node management (Predator <-> On-Premise <-> VPS).",
+      "consequences": [
+        "Zero open ports required on home router or VPS management interfaces.",
+        "Cloudflare Access protects admin panels with Google OAuth single-sign-on.",
+        "End-to-end encrypted WireGuard performance between all nodes."
+      ],
+      "alternatives_considered": [
+        "Opening ports on home router with Dynamic DNS: Rejected due to severe security and scanning risks.",
+        "Traditional OpenVPN server: Rejected due to configuration overhead and certificate management."
+      ]
+    }
+  ],
+  "total_monthly_budget_usd": 11.190000000000001,
+  "metadata": {
+    "owner": "Dark Factory Core",
+    "managed_by": "core.infra",
+    "topology_type": "Hybrid (Workstation + On-Premise + Cloud VPS + Edge)"
+  }
+}

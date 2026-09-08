@@ -101,14 +101,19 @@ DOMAIN_METADATA: Dict[str, BenchmarkDomainMetadata] = {
 }
 
 
-def get_model_metric_score(model: ModelBenchmarkEntry, metric: str) -> Optional[float]:
-    """Extract a score while preserving unknown as distinct from numeric zero."""
+def get_model_metric_score(model: ModelBenchmarkEntry, metric: str) -> float:
+    """Extracts score from attribute or domain_scores dictionary."""
     if hasattr(model, metric):
         val = getattr(model, metric)
         if isinstance(val, (int, float)):
             return float(val)
-    domain_score = model.get_domain_score(metric)
-    return float(domain_score) if domain_score is not None else None
+    score = model.get_domain_score(metric)
+    if score is not None:
+        try:
+            return float(score)
+        except (ValueError, TypeError):
+            pass
+    return 0.0
 
 
 def compute_pareto_frontier(
@@ -125,18 +130,17 @@ def compute_pareto_frontier(
     if not models:
         return []
 
-    scored_models = [
-        (model, get_model_metric_score(model, metric))
-        for model in models
-        if isinstance(model.cost_per_task, (int, float))
-    ]
-    known_models = [(model, score) for model, score in scored_models if score is not None]
-    sorted_models = sorted(known_models, key=lambda item: (item[0].cost_per_task, -item[1]))
+    # Sort primarily by cost ascending, then capability descending
+    sorted_models = sorted(
+        models,
+        key=lambda m: (m.cost_per_task, -get_model_metric_score(m, metric))
+    )
 
     frontier: List[ModelBenchmarkEntry] = []
     max_capability_seen = -1.0
 
-    for model, score in sorted_models:
+    for model in sorted_models:
+        score = get_model_metric_score(model, metric)
         # If this model achieves a higher capability than any cheaper model seen so far,
         # it is Pareto-optimal (strictly expands the capability envelope).
         if score > max_capability_seen:
@@ -202,21 +206,13 @@ def compute_frontier_proximity_indices(
     if not models:
         return models
 
-    def has_known_axes(model: ModelBenchmarkEntry) -> bool:
-        return (
-            isinstance(model.cost_per_task, (int, float))
-            and get_model_metric_score(model, metric) is not None
-        )
-
-    eval_models = [
-        m for m in models if is_production_interactive_model(m, domain=metric) and has_known_axes(m)
-    ]
+    eval_models = [m for m in models if is_production_interactive_model(m, domain=metric)]
     if not eval_models:
-        eval_models = [m for m in models if metric in m.domain_scores and has_known_axes(m)]
+        eval_models = [m for m in models if metric in m.domain_scores]
     if not eval_models:
-        eval_models = [m for m in models if m.tier != ModelTier.LOCAL_ZERO_COST and has_known_axes(m)]
+        eval_models = [m for m in models if m.tier != ModelTier.LOCAL_ZERO_COST]
     if not eval_models:
-        eval_models = [m for m in models if has_known_axes(m)]
+        eval_models = models
 
     frontier = compute_pareto_frontier(eval_models, metric=metric)
     if not frontier:
@@ -225,7 +221,7 @@ def compute_frontier_proximity_indices(
     frontier_ids = {m.model_id for m in frontier}
 
     costs = [max(m.cost_per_task, 0.0001) for m in eval_models]
-    scores = [score for m in eval_models if (score := get_model_metric_score(m, metric)) is not None]
+    scores = [get_model_metric_score(m, metric) for m in eval_models]
 
     min_log_c = math.log(min(costs))
     max_log_c = math.log(max(costs))
@@ -239,24 +235,14 @@ def compute_frontier_proximity_indices(
     for f in frontier:
         log_c = math.log(max(f.cost_per_task, 0.0001))
         norm_c = (log_c - min_log_c) / log_c_range
-        frontier_score = get_model_metric_score(f, metric)
-        if frontier_score is None:
-            continue
-        norm_s = (frontier_score - min_s) / s_range
-        frontier_pts.append((norm_c, norm_s, f.cost_per_task, frontier_score))
+        norm_s = (get_model_metric_score(f, metric) - min_s) / s_range
+        frontier_pts.append((norm_c, norm_s, f.cost_per_task, get_model_metric_score(f, metric)))
 
     frontier_pts.sort(key=lambda p: p[0])
 
     for m in models:
         is_on_frontier = m.model_id in frontier_ids
         score_val = get_model_metric_score(m, metric)
-        if score_val is None or not isinstance(m.cost_per_task, (int, float)):
-            m.frontier_proximity_index = 0.0
-            m.epsilon_gap_cost = 0.0
-            m.epsilon_gap_capability = 0.0
-            m.opportunity_score = 0.0
-            m.is_near_pareto = False
-            continue
         cost_val = max(m.cost_per_task, 0.0001)
 
         if is_on_frontier:
@@ -323,13 +309,14 @@ def compute_frontier_proximity_indices(
             m.epsilon_gap_cost = max(0.0, round(cost_val - target_c, 6))
 
         bonus = 0.0
-        if m.output_speed_tps >= 110.0:
-            bonus += 0.10
-        elif m.output_speed_tps >= 80.0:
-            bonus += 0.05
-        if m.context_length >= 500_000:
+        if m.output_speed_tps is not None:
+            if m.output_speed_tps >= 110.0:
+                bonus += 0.10
+            elif m.output_speed_tps >= 80.0:
+                bonus += 0.05
+        if m.context_length and m.context_length >= 500_000:
             bonus += 0.08
-        if 0.0 < m.latency_ttft_sec <= 0.40:
+        if m.latency_ttft_sec is not None and 0.0 < m.latency_ttft_sec <= 0.40:
             bonus += 0.06
 
         m.opportunity_score = round(m.frontier_proximity_index * (1.0 + bonus), 4)
@@ -355,19 +342,9 @@ def get_top_candidates_for_tier(
             if (m.tier == ModelTier.LOCAL_ZERO_COST or m.provider == "ollama")
             and (not m.domain_scores or "coding" in m.domain_scores)
             and m.metadata.get("modality", "text") not in {"image", "video"}
-            and isinstance(m.coding_score, (int, float))
-            and isinstance(m.output_speed_tps, (int, float))
-            and isinstance(m.cost_per_task, (int, float))
         ]
         if not local_models:
-            local_models = [
-                m for m in models
-                if isinstance(m.coding_score, (int, float))
-                and isinstance(m.output_speed_tps, (int, float))
-                and isinstance(m.cost_per_task, (int, float))
-            ][:k]
-        if not local_models:
-            return []
+            local_models = models[:k]
 
         sorted_local = sorted(local_models, key=lambda m: (-m.output_speed_tps, -m.coding_score))
         roles = ["fast_drafter", "balanced_challenger", "frontier_arbiter"]
@@ -387,34 +364,26 @@ def get_top_candidates_for_tier(
             ))
         return candidates
 
-    complete_models = [
-        m for m in models
-        if isinstance(m.coding_score, (int, float))
-        and isinstance(m.output_speed_tps, (int, float))
-        and isinstance(m.cost_per_task, (int, float))
-    ]
-    prod = [m for m in complete_models if is_production_interactive_model(m)]
+    prod = [m for m in models if is_production_interactive_model(m)]
     if not prod:
-        prod = [m for m in complete_models if m.tier != ModelTier.LOCAL_ZERO_COST]
+        prod = [m for m in models if m.tier != ModelTier.LOCAL_ZERO_COST]
     if not prod:
-        prod = complete_models
-    if not prod:
-        return []
+        prod = models
 
     compute_frontier_proximity_indices(prod, metric="coding_score")
     candidates: List[SpeculativeCandidate] = []
 
     if tier == "critical":
-        arbiter = max(prod, key=lambda m: m.coding_score)
-        ch_pool = [m for m in prod if m.model_id != arbiter.model_id and m.coding_score >= 88.0]
+        arbiter = max(prod, key=lambda m: (m.coding_score or 0.0))
+        ch_pool = [m for m in prod if m.model_id != arbiter.model_id and (m.coding_score or 0.0) >= 88.0]
         if not ch_pool:
             ch_pool = [m for m in prod if m.model_id != arbiter.model_id]
-        challenger = max(ch_pool, key=lambda m: m.opportunity_score) if ch_pool else arbiter
+        challenger = max(ch_pool, key=lambda m: (m.opportunity_score or 0.0)) if ch_pool else arbiter
 
-        dr_pool = [m for m in prod if m.model_id not in (arbiter.model_id, challenger.model_id) and m.coding_score >= 86.0]
+        dr_pool = [m for m in prod if m.model_id not in (arbiter.model_id, challenger.model_id) and (m.coding_score or 0.0) >= 86.0]
         if not dr_pool:
             dr_pool = [m for m in prod if m.model_id not in (arbiter.model_id, challenger.model_id)]
-        drafter = max(dr_pool, key=lambda m: m.output_speed_tps) if dr_pool else challenger
+        drafter = max(dr_pool, key=lambda m: (m.output_speed_tps or 0.0)) if dr_pool else challenger
 
         for m, role in [(drafter, "fast_drafter"), (challenger, "balanced_challenger"), (arbiter, "frontier_arbiter")]:
             candidates.append(SpeculativeCandidate(
@@ -430,20 +399,20 @@ def get_top_candidates_for_tier(
             ))
 
     elif tier == "high":
-        high_pool = [m for m in prod if m.coding_score >= 85.0]
+        high_pool = [m for m in prod if (m.coding_score or 0.0) >= 85.0]
         if not high_pool:
             high_pool = prod
-        arbiter = max(high_pool, key=lambda m: (m.coding_score ** 2) / max(m.cost_per_task, 0.001))
+        arbiter = max(high_pool, key=lambda m: ((m.coding_score or 0.0) ** 2) / max(m.cost_per_task, 0.001))
 
         ch_pool = [m for m in high_pool if m.model_id != arbiter.model_id]
         if not ch_pool:
             ch_pool = prod
-        challenger = max(ch_pool, key=lambda m: m.opportunity_score)
+        challenger = max(ch_pool, key=lambda m: (m.opportunity_score or 0.0))
 
         dr_pool = [m for m in prod if m.model_id not in (arbiter.model_id, challenger.model_id) and m.cost_per_task <= 0.01]
         if not dr_pool:
             dr_pool = [m for m in prod if m.model_id not in (arbiter.model_id, challenger.model_id)]
-        drafter = max(dr_pool, key=lambda m: m.output_speed_tps) if dr_pool else challenger
+        drafter = max(dr_pool, key=lambda m: (m.output_speed_tps or 0.0)) if dr_pool else challenger
 
         for m, role in [(drafter, "fast_drafter"), (challenger, "balanced_challenger"), (arbiter, "frontier_arbiter")]:
             candidates.append(SpeculativeCandidate(
@@ -459,15 +428,15 @@ def get_top_candidates_for_tier(
             ))
 
     else:
-        med_pool = [m for m in prod if m.coding_score >= 80.0]
+        med_pool = [m for m in prod if (m.coding_score or 0.0) >= 80.0]
         if not med_pool:
             med_pool = prod
-        arbiter = max(med_pool, key=lambda m: m.efficiency_score_coding or float("-inf"))
+        arbiter = max(med_pool, key=lambda m: (m.efficiency_score_coding or 0.0))
 
         ch_pool = [m for m in med_pool if m.model_id != arbiter.model_id]
         if not ch_pool:
             ch_pool = prod
-        challenger = max(ch_pool, key=lambda m: m.opportunity_score)
+        challenger = max(ch_pool, key=lambda m: (m.opportunity_score or 0.0))
 
         dr_pool = [m for m in prod if m.model_id not in (arbiter.model_id, challenger.model_id)]
         drafter = min(dr_pool, key=lambda m: m.cost_per_task) if dr_pool else arbiter
@@ -534,21 +503,17 @@ def build_frontier_summary(
     if coding_frontier:
         cloud_coding = [m for m in coding_frontier if m.cost_per_task > 0]
         if cloud_coding:
-            most_efficient = max(
-                cloud_coding,
-                key=lambda m: m.efficiency_score_coding or float("-inf"),
-            )
+            most_efficient = max(cloud_coding, key=lambda m: (m.efficiency_score_coding or 0.0))
         else:
             most_efficient = coding_frontier[0]
 
     highest_capability = None
     if coding_frontier:
-        highest_capability = max(coding_frontier, key=lambda m: m.coding_score)
+        highest_capability = max(coding_frontier, key=lambda m: (m.coding_score or 0.0))
 
     fastest_model = None
-    speed_models = [m for m in models if isinstance(m.output_speed_tps, (int, float))]
-    if speed_models:
-        fastest_model = max(speed_models, key=lambda m: m.output_speed_tps)
+    if models:
+        fastest_model = max(models, key=lambda m: (m.output_speed_tps or 0.0))
 
     return ParetoFrontierSummary(
         date=date,
@@ -585,22 +550,16 @@ def select_best_model_for_task(
                 return best_local, "Local Ollama Fast Worker ($0 cost) selected for offline execution."
 
     # Compute coding frontier on clean production models (no contributor, no free-tier rate limits)
-    selectable_models = [
-        m for m in models
-        if isinstance(m.coding_score, (int, float))
-        and isinstance(m.cost_per_task, (int, float))
-        and isinstance(m.output_speed_tps, (int, float))
-    ]
-    prod_models = [m for m in selectable_models if is_production_interactive_model(m)]
+    prod_models = [m for m in models if is_production_interactive_model(m)]
     if not prod_models:
-        prod_models = [m for m in selectable_models if m.tier != ModelTier.LOCAL_ZERO_COST]
+        prod_models = [m for m in models if m.tier != ModelTier.LOCAL_ZERO_COST]
 
     coding_frontier = compute_pareto_frontier(prod_models, metric="coding_score")
     cloud_frontier = coding_frontier if coding_frontier else prod_models
 
     if complexity == "critical":
         # Critical architecture/debugging: pick the absolute frontier leader in capability
-        best = max(cloud_frontier, key=lambda m: m.coding_score)
+        best = max(cloud_frontier, key=lambda m: (m.coding_score or 0.0))
         return (
             best,
             f"Critical-tier capability leader: coding score {best.coding_score} (${best.cost_per_task}/task)."
@@ -608,12 +567,12 @@ def select_best_model_for_task(
 
     elif complexity == "high" or task_type in ["architecture", "plan"]:
         # High complexity: needs strong coding capability (>= 85.0), balancing capability and efficiency
-        candidates = [m for m in cloud_frontier if m.coding_score >= 85.0]
+        candidates = [m for m in cloud_frontier if (m.coding_score or 0.0) >= 85.0]
         if not candidates:
-            candidates = sorted(cloud_frontier, key=lambda m: m.coding_score, reverse=True)[:3]
+            candidates = sorted(cloud_frontier, key=lambda m: (m.coding_score or 0.0), reverse=True)[:3]
 
         # Quality-weighted efficiency (capability^2 / cost)
-        best = max(candidates, key=lambda m: (m.coding_score ** 2) / max(m.cost_per_task, 0.001))
+        best = max(candidates, key=lambda m: ((m.coding_score or 0.0) ** 2) / max(m.cost_per_task, 0.001))
         return (
             best,
             f"High-complexity Pareto leader: coding score {best.coding_score} at ${best.cost_per_task}/task "
@@ -622,11 +581,11 @@ def select_best_model_for_task(
 
     elif complexity == "medium" or task_type in ["review", "scout"]:
         # Medium complexity: sweet spot (coding score >= 80.0), highest efficiency score
-        candidates = [m for m in cloud_frontier if m.coding_score >= 80.0]
+        candidates = [m for m in cloud_frontier if (m.coding_score or 0.0) >= 80.0]
         if not candidates:
             candidates = cloud_frontier
 
-        best = max(candidates, key=lambda m: m.efficiency_score_coding or float("-inf"))
+        best = max(candidates, key=lambda m: (m.efficiency_score_coding or 0.0))
         return (
             best,
             f"Balanced-tier Pareto leader: coding score {best.coding_score} with optimal cost/perf ratio "
@@ -685,11 +644,9 @@ def get_domain_top3_candidates(
                 m for m in models
                 if (m.tier == ModelTier.LOCAL_ZERO_COST or m.provider in ["ollama", "local"])
                 and (domain in m.domain_scores or m.metadata.get("modality") == domain.split("_")[0])
-                and m.get_domain_score(domain) is not None
-                and isinstance(m.cost_per_task, (int, float))
             ]
             if local_domain_models:
-                sorted_local = sorted(local_domain_models, key=lambda m: -m.get_domain_score(domain))
+                sorted_local = sorted(local_domain_models, key=lambda m: -(m.get_domain_score(domain) or 0.0))
                 roles = ["fast_drafter", "balanced_challenger", "frontier_arbiter"]
                 candidates = []
                 for i, m in enumerate(sorted_local[:3]):
@@ -708,20 +665,13 @@ def get_domain_top3_candidates(
                 return candidates
         return get_top_candidates_for_tier(models, tier="local_fast", k=3)
 
-    complete_models = [
-        m for m in models
-        if m.get_domain_score(domain) is not None
-        and isinstance(m.cost_per_task, (int, float))
-    ]
-    prod = [m for m in complete_models if is_production_interactive_model(m, domain=domain)]
+    prod = [m for m in models if is_production_interactive_model(m, domain=domain)]
     if not prod:
-        prod = [m for m in complete_models if domain in m.domain_scores]
+        prod = [m for m in models if domain in m.domain_scores]
     if not prod:
-        prod = [m for m in complete_models if m.tier != ModelTier.LOCAL_ZERO_COST]
+        prod = [m for m in models if m.tier != ModelTier.LOCAL_ZERO_COST]
     if not prod:
-        prod = complete_models
-    if not prod:
-        return []
+        prod = models
 
     # Ensure proximity indices for this domain
     compute_frontier_proximity_indices(prod, metric=domain)
@@ -731,13 +681,13 @@ def get_domain_top3_candidates(
         frontier = prod
 
     # Arbiter: top capability on the domain frontier
-    arbiter = max(frontier, key=lambda m: m.get_domain_score(domain))
+    arbiter = max(frontier, key=lambda m: (m.get_domain_score(domain) or 0.0))
 
     # Challenger: highest opportunity score or quality-weighted efficiency
     ch_pool = [m for m in prod if m.model_id != arbiter.model_id]
     if not ch_pool:
         ch_pool = prod
-    challenger = max(ch_pool, key=lambda m: (m.get_domain_score(domain) ** 2) / max(m.cost_per_task, 0.001))
+    challenger = max(ch_pool, key=lambda m: ((m.get_domain_score(domain) or 0.0) ** 2) / max(m.cost_per_task, 0.001))
 
     # Drafter: fastest or cheapest with respectable capability in domain
     dr_pool = [m for m in prod if m.model_id not in (arbiter.model_id, challenger.model_id)]

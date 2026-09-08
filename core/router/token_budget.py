@@ -2,12 +2,19 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 import math
 from enum import Enum
 from typing import Iterable, Optional
 
 from pydantic import BaseModel, Field
 
+from core.execution.contracts import (
+    Budget,
+    BudgetWindow,
+    BudgetWindowType,
+    UnknownCostPolicy,
+)
 from core.usage.models import (
     AccountConnectionStatus,
     ProviderAccountUsage,
@@ -264,3 +271,85 @@ def plan_token_stress(
         estimate=estimate,
         rationale=rationale,
     )
+
+
+_PROVIDER_TOKEN_RATES: dict[str, tuple[float, float]] = {
+    # (input_rate_per_million, output_rate_per_million) in USD
+    "google": (0.10, 0.40),
+    "gemini": (0.10, 0.40),
+    "anthropic": (3.00, 15.00),
+    "claude": (3.00, 15.00),
+    "openai": (2.50, 10.00),
+    "openrouter": (0.55, 2.19),
+    "deepseek": (0.14, 0.28),
+    "ollama": (0.0, 0.0),
+    "local": (0.0, 0.0),
+}
+
+
+def estimate_cost_from_tokens(
+    estimate: TaskTokenEstimate,
+    provider: str = "google",
+) -> float:
+    """Calculate an estimated financial cost in USD from a token forecast."""
+    normalized_provider = provider.strip().lower()
+    in_rate, out_rate = _PROVIDER_TOKEN_RATES.get(normalized_provider, (0.50, 2.00))
+    cost = (estimate.input_tokens / 1_000_000.0) * in_rate + (estimate.output_tokens / 1_000_000.0) * out_rate
+    return round(max(0.000001 if (in_rate + out_rate > 0) else 0.0, cost), 6)
+
+
+def derive_task_budget(
+    task_type: str,
+    complexity: str = "medium",
+    *,
+    description: str = "",
+    expected_steps: int = 1,
+    ceiling_usd: float | None = None,
+    deadline: datetime | None = None,
+    max_attempts: int = 3,
+    concurrency_limit: int = 1,
+    unknown_cost_policy: UnknownCostPolicy = UnknownCostPolicy.ESTIMATE,
+    short_window_duration: int = 18000,  # 5 hours
+    long_window_duration: int = 604800,  # 7 days
+) -> Budget:
+    """Construct an execution Budget envelope from a deterministic token forecast."""
+    estimate = estimate_task_tokens(task_type, complexity, description, expected_steps)
+    base_cost = estimate_cost_from_tokens(estimate, provider="openrouter")
+
+    calculated_ceiling = (
+        ceiling_usd
+        if ceiling_usd is not None
+        else round(max(0.05, base_cost * max_attempts * 1.5), 4)
+    )
+
+    short_ceiling = round(calculated_ceiling * 1.2, 4)
+    long_ceiling = round(calculated_ceiling * 3.0, 4)
+
+    short_window = BudgetWindow(
+        window_type=BudgetWindowType.SHORT,
+        duration_seconds=short_window_duration,
+        ceiling=short_ceiling,
+        spent=0.0,
+        reserved=0.0,
+    )
+    long_window = BudgetWindow(
+        window_type=BudgetWindowType.LONG,
+        duration_seconds=long_window_duration,
+        ceiling=long_ceiling,
+        spent=0.0,
+        reserved=0.0,
+    )
+
+    return Budget(
+        currency="USD",
+        ceiling=calculated_ceiling,
+        reserved=0.0,
+        spent=0.0,
+        unknown_cost_policy=unknown_cost_policy,
+        max_attempts=max_attempts,
+        deadline=deadline,
+        concurrency_limit=concurrency_limit,
+        short_window=short_window,
+        long_window=long_window,
+    )
+

@@ -216,6 +216,12 @@ class ContentResponse:
     model_used: str
     created_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     word_count: int = 0
+    quality_rejected: bool = False
+    rejection_reason: Optional[str] = None
+    fallback_occurred: bool = False
+    original_provider_requested: Optional[str] = None
+    fallback_reason: Optional[str] = None
+    cost_usd: Optional[float] = None
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -233,6 +239,12 @@ class ContentResponse:
             "model_used": self.model_used,
             "created_at": self.created_at,
             "word_count": self.word_count,
+            "quality_rejected": self.quality_rejected,
+            "rejection_reason": self.rejection_reason,
+            "fallback_occurred": self.fallback_occurred,
+            "original_provider_requested": self.original_provider_requested,
+            "fallback_reason": self.fallback_reason,
+            "cost_usd": self.cost_usd,
         }
 
     @classmethod
@@ -252,4 +264,10 @@ class ContentResponse:
             model_used=data.get("model_used", "deterministic"),
             created_at=data.get("created_at", datetime.now(timezone.utc).isoformat()),
             word_count=data.get("word_count", 0),
+            quality_rejected=data.get("quality_rejected", False),
+            rejection_reason=data.get("rejection_reason"),
+            fallback_occurred=data.get("fallback_occurred", False),
+            original_provider_requested=data.get("original_provider_requested"),
+            fallback_reason=data.get("fallback_reason"),
+            cost_usd=data.get("cost_usd"),
         )

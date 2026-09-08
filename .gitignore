@@ -42,6 +42,9 @@ models/checkpoints/
 .factory/benchmarks/empirical_ledger.json
 .factory/decks/
 .factory/usage/
+.factory/services/
+.factory/test_logs/
+
 
 # Local audio samples and generated media
 audio_bench/*.wav
@@ -62,3 +65,11 @@ Thumbs.db
 
 # Embedded reference repository; not part of the portable DarkFac source.
 /_reference_skills/
+
+# Isolated worktrees
+.worktrees/
+
+# Recoverable worktree backups
+.factory/backups/
+
+
