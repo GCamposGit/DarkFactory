@@ -86,12 +86,23 @@ Zero regressões introduzidas na fábrica.
 
 ---
 
-## 3. Instruções de Operação para o Desenvolvedor
+## 3. Gestão Remota Headless & Autonomia do Nó
 
-Para iniciar o daemon worker na máquina on-premises (`desktop-g45ipem`):
-```powershell
-powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File C:\dev\DarkFac\scripts\start_onprem_worker.ps1 -HostAddress 0.0.0.0 -Port 8080
-```
+O worker foi aprimorado para operar de forma 100% autônoma e invisível:
+1. **Zero Janelas de Terminal**:
+   - `core/harness/test_subagent.py` agora enforça `creationflags = subprocess.CREATE_NO_WINDOW` em todos os subprocessos pytest no Windows.
+   - `scripts/start_onprem_worker.ps1` suporta a flag `-Headless` executando em segundo plano (`WindowStyle: Hidden`).
+2. **Auto-Update e Gestão Remota via REST API**:
+   - `POST /system/exec`: executa comandos e scripts remotamente no nó via HTTP com resposta JSON.
+   - `POST /system/update`: executa `git pull` automático no repositório do nó sem intervenção humana.
+   - `POST /system/restart`: reinicia o daemon em modo headless em segundo plano.
+3. **Inicialização Silenciosa Automática no Boot (Zero-Admin)**:
+   - `scripts/install_onprem_worker_user_startup.ps1`: instala um launcher VBScript silencioso na pasta `Startup` do usuário (`%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup\DarkFacWorker.vbs`).
+   - O worker inicializa automaticamente e invisível sempre que o Windows iniciar ou o usuário logar, sem solicitar privilégios de administrador.
+
+---
+
+## 4. Instruções de Operação para o Desenvolvedor
 
 Para rodar qualquer suíte com offloading para o worker remoto (com failover local automático):
 ```powershell
@@ -102,3 +113,12 @@ Para forçar execução estritamente remota:
 ```powershell
 python C:\dev\DarkFac\core\harness\test_subagent.py --target tests/test_roadmap_scale.py --worker-mode remote --no-fallback
 ```
+
+Para atualizar o worker no desktop remotamente direto do notebook:
+```python
+import urllib.request, json
+req = urllib.request.Request("http://100.78.181.90:8080/system/update", data=json.dumps({}).encode("utf-8"), headers={"Content-Type": "application/json"})
+res = urllib.request.urlopen(req)
+print(res.read().decode("utf-8"))
+```
+
