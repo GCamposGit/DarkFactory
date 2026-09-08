@@ -34,8 +34,11 @@ class SyntheticDenseGraphSource:
     priority: int = 10
     total_items: int = 500
     total_relations: int = 1500
+    _cached_result: RoadmapSourceResult | None = None
 
     def read(self, project_id: str) -> RoadmapSourceResult:
+        if self._cached_result is not None:
+            return self._cached_result
         records: list[RoadmapCandidate] = []
         stages = [
             LifecycleStage.FOUNDATIONS,
@@ -102,7 +105,8 @@ class SyntheticDenseGraphSource:
             revision="rev-01",
             content_hash="scale-hash-01",
         )
-        return RoadmapSourceResult(state=state, records=records)
+        self._cached_result = RoadmapSourceResult(state=state, records=records)
+        return self._cached_result
 
 
 def test_dense_graph_500_items_1500_relations_latency_budget() -> None:

@@ -1,5 +1,7 @@
 # Plano de desenvolvimento da Dark Factory — 05/09/2026
 
+Extensão de planejamento em 08/09/2026: o [plano integrado de workflow híbrido](HYBRID_WORKFLOW_PLAN_2026-09-08.md) reutiliza os componentes DF, explicita complementos de integração e conecta a infraestrutura ao ciclo até produção. Os novos IDs HF preservam este backlog e suas evidências. A extensão propõe ampliação explícita do escopo anterior de produção/operação; não altera por si só políticas executáveis, status de entrega ou configurações externas.
+
 Status: **proposta executável; não implementada nesta revisão**.
 Base: [auditoria e evidências](C:/dev/DarkFac/docs/REVIEW_2026-09-05.md).
 Horizonte inicial: **6–8 semanas**, estimativa de planejamento para um responsável técnico com assistência de agentes. Reestimar após os primeiros tickets; gates de saída prevalecem sobre datas.

@@ -10,11 +10,12 @@ Para operar múltiplos projetos em paralelo na VPS com isolamento de processos, 
 
 ## Decisão
 
-1. **Provedor de VPS**:
-   - **Recomendação Principal**: **Hetzner Cloud** (plano **CPX21** ou **CPX31** na região Ashburn/EUA com 3 a 4 vCPUs AMD EPYC, 4 a 8 GB de RAM e 80 a 160 GB de NVMe, custo ~€8 a €14/mês).
-   - **Alternativa Imediata**: **Hostinger KVM 2/4** caso se deseje manter o faturamento unificado na conta Hostinger já existente.
-2. **Orquestrador de Containers (PaaS)**:
-   - Adotar **Dokploy** (ou **Coolify**) instalado diretamente sobre o Docker Engine da VPS.
+1. **Provedor de VPS: Hetzner Cloud (Decisão Definitiva Aprovada)**:
+   - Contratação de instância na **Hetzner Cloud** na região de **Ashburn, VA (EUA)** (menor latência para o Brasil, ~110ms).
+   - Plano inicial: **CPX21** (3 vCPUs AMD EPYC, 4 GB RAM, 80 GB NVMe, ~€ 7.05 a € 8.50/mês) com possibilidade de upgrade transparente para **CPX31** (4 vCPUs, 8 GB RAM, 160 GB NVMe, ~€ 13.40/mês).
+   - Faturamento pós-pago por hora sem fidelidade contratual e com hardware enterprise de altíssimo desempenho de I/O de disco.
+2. **Orquestrador de Containers (PaaS): Dokploy**:
+   - Adotar **Dokploy** instalado diretamente sobre o Docker Engine da VPS.
    - Dokploy é escolhido como recomendação primária para servidores de 4GB a 8GB de RAM devido ao seu consumo de memória ultrabaixo em repouso (~350MB vs ~700MB do Coolify) e suporte nativo a Docker Swarm para escala horizontal futura.
 
 ## Consequências

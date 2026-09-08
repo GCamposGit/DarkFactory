@@ -1,5 +1,9 @@
 # Roadmap Operacional do Projeto
 
+## Extensão proposta — workflow híbrido (08/09/2026)
+
+O [plano integrado HF](HYBRID_WORKFLOW_PLAN_2026-09-08.md) complementa DF-01–DF-23, RM-01–RM-09 e INFRA-01–INFRA-11 com duas ondas: decisão/ativação do fluxo híbrido e expansão de capacidades. HF-01–HF-15 e HF-20–HF-25 são propostas, sem alterar o status dos tickets existentes. Esta referência integra os documentos; a ingestão de HF/INFRA no painel e a reconciliação das evidências pertencem a HF-01/HF-13 e ainda não foram implementadas. As fontes atualmente suportadas pelo painel continuam descritas abaixo.
+
 Este arquivo registra as fontes humanas do roadmap aprovado para o painel do DarkHub. A projeção read-only combina o manifesto versionado em `.factory/roadmap/darkfac.json` (tickets RM) com a tabela executável de `docs/DEVELOPMENT_PLAN_2026-09-05.md` (tickets DF); o painel não possui estado de planejamento próprio.
 
 ## Fontes canônicas combinadas

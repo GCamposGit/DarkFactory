@@ -971,4 +971,27 @@ def get_infra_card_endpoint(
     return card
 
 
+# ==============================================================================
+# Harness Test Subagent & Dedicated Worker Endpoints (USR-16)
+# ==============================================================================
+
+
+@router.get("/harness/workers", response_model=List[dict])
+def list_test_workers(
+    service: HubService = Depends(get_hub_service),
+) -> List[dict]:
+    """Returns real-time status, latency, and capabilities of available test worker nodes."""
+    return service.get_test_workers_status()
+
+
+@router.post("/harness/execute", response_model=DistilledTestReport)
+def execute_test_suite(
+    instruction: TestExecutionInstruction,
+    service: HubService = Depends(get_hub_service),
+) -> DistilledTestReport:
+    """Executes a headless test suite across remote worker or local fallback."""
+    return service.execute_test_run(instruction)
+
+
+
 

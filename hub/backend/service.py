@@ -1707,3 +1707,60 @@ class HubService:
         """Returns catalog of all saved visual assets."""
         studio = VisualStudio()
         return studio.list_assets()
+
+    # ---------------------------------------------------------------------------
+    # Test Worker & Harness Subagent Service Methods (USR-16)
+    # ---------------------------------------------------------------------------
+
+    def get_test_workers_status(self) -> List[Dict[str, Any]]:
+        """Probes known test worker nodes (e.g. desktop-g45ipem on Tailscale) and returns status."""
+        workers = [
+            {
+                "id": "onprem-z97-server",
+                "name": "Dedicated Test Worker (desktop-g45ipem)",
+                "url": "http://100.78.181.90:8080",
+                "ip": "100.78.181.90",
+                "port": 8080,
+                "role": "onprem_worker",
+                "description": "Dedicated i7-4790K / 16GB / 3TB E: on-premises validation node via Tailscale",
+            },
+            {
+                "id": "local-notebook",
+                "name": "Local Workstation Runner",
+                "url": "http://localhost:8080",
+                "ip": "127.0.0.1",
+                "port": 8080,
+                "role": "local_worker",
+                "description": "Interactive developer laptop local test engine",
+            },
+        ]
+
+        engine = TestSubagentEngine(project_root=self.project_root)
+        results = []
+
+        for w in workers:
+            w_info = dict(w)
+            start_t = time.perf_counter()
+            health = engine.probe_remote_worker(w["url"], timeout=0.8)
+            latency_ms = round((time.perf_counter() - start_t) * 1000, 1)
+
+            if health:
+                w_info["status"] = "online"
+                w_info["healthy"] = True
+                w_info["latency_ms"] = latency_ms
+                w_info["details"] = health
+            else:
+                w_info["status"] = "offline"
+                w_info["healthy"] = False
+                w_info["latency_ms"] = None
+                w_info["details"] = None
+
+            results.append(w_info)
+
+        return results
+
+    def execute_test_run(self, instruction: TestExecutionInstruction) -> DistilledTestReport:
+        """Executes a test run via TestSubagentEngine with automatic failover."""
+        engine = TestSubagentEngine(project_root=self.project_root)
+        return engine.execute(instruction)
+

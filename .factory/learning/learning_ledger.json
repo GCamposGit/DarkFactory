@@ -1,6 +1,6 @@
 {
   "session_id": "session_20260905_072924",
-  "prompt_count": 15,
+  "prompt_count": 17,
   "turns": [
     {
       "turn_id": 1,
@@ -151,6 +151,26 @@
       "one_shot_success": false,
       "missing_context_or_gap": "O fluxo anterior permitiu concluir com commits e alterações apenas locais, sem PR nem verificação do remoto",
       "target_skill": "autonomous-piv-loop"
+    },
+    {
+      "turn_id": 16,
+      "timestamp": "2026-09-08T03:14:26.063281+00:00",
+      "user_prompt_summary": "Desenvolver próximo item do backlog",
+      "perceived_intent": "Implementar DF-20: política de entrega e integração GitHub com checks, risco, merge queue e idempotência",
+      "was_followup": false,
+      "one_shot_success": true,
+      "missing_context_or_gap": null,
+      "target_skill": "autonomous-piv-loop"
+    },
+    {
+      "turn_id": 17,
+      "timestamp": "2026-09-08T04:37:02.227329+00:00",
+      "user_prompt_summary": "Versão atualizada do painel não subiu...",
+      "perceived_intent": "Iniciar/subir o painel DarkHub atualizado com os cards de infraestrutura e garantir cache limpo no navegador",
+      "was_followup": true,
+      "one_shot_success": false,
+      "missing_context_or_gap": "Após implementar feature no painel, o servidor não foi iniciado automaticamente nem as instruções de inicialização foram destacadas para o usuário",
+      "target_skill": "autonomous-piv-loop"
     }
   ],
   "preferences": [
@@ -161,6 +181,19 @@
       "context_or_example": "00-continuous-self-improvement configurada como skill prioritária mestre",
       "confidence": 1.0,
       "created_at": "2026-09-05T07:29:28.354988+00:00",
+      "times_reinforced": 1,
+      "origin": "explicit_preference",
+      "status": "active",
+      "verification_gate_id": null,
+      "active": true
+    },
+    {
+      "preference_id": "pref_2168f2b5",
+      "category": "workflow",
+      "rule": "Quando o usuário pedir o próximo item do backlog, selecionar o próximo ticket canônico e executar o ciclo PIV completo sem perguntas triviais",
+      "context_or_example": "Pedido de desenvolvimento do próximo item após o DF-19; selecionar DF-20 pelo DEVELOPMENT_PLAN e validar com os gates oficiais",
+      "confidence": 1.0,
+      "created_at": "2026-09-08T03:14:42.231842+00:00",
       "times_reinforced": 1,
       "origin": "explicit_preference",
       "status": "active",
@@ -648,6 +681,36 @@
       "origin": "rca",
       "status": "proposed",
       "active": false
+    },
+    {
+      "rca_id": "rca_bfe151ee",
+      "timestamp": "2026-09-08T04:37:21.427021+00:00",
+      "category": "assumption_error",
+      "symptom": "Painel com versoes atualizadas nao sobe ou nao reflete mudancas no navegador",
+      "mechanism": "Servidor local offline e falta de headers anti-cache para index.html no FastAPI",
+      "root_cause": "run_hub.py nao foi inicializado e Starlette FileResponse mantinha cache local do index.html sem no-cache headers",
+      "patch_description": "Adicionados headers anti-cache no serve_index, inicializacao robusta com fallback em infra.js e comando claro de inicializacao",
+      "preventative_rule": "Sempre garantir headers anti-cache em rotas de UI SPA e inicializar/oferecer comando explicito de boot do servidor",
+      "regression_test_file": "tests/test_adicionar_cards_de_infrae.py",
+      "verification_gate_id": null,
+      "origin": "rca",
+      "status": "proposed",
+      "active": false
+    },
+    {
+      "rca_id": "rca_33b08efd",
+      "timestamp": "2026-09-08T04:38:09.733904+00:00",
+      "category": "assumption_error",
+      "symptom": "Painel com versoes atualizadas nao sobe ou nao reflete mudancas no navegador",
+      "mechanism": "Servidor local offline e falta de headers anti-cache para index.html no FastAPI",
+      "root_cause": "run_hub.py nao foi inicializado e Starlette FileResponse mantinha cache local do index.html sem no-cache headers",
+      "patch_description": "Adicionados headers anti-cache no serve_index, inicializacao robusta com fallback em infra.js e comando claro de inicializacao",
+      "preventative_rule": "Sempre garantir headers anti-cache em rotas de UI SPA e inicializar/oferecer comando explicito de boot do servidor",
+      "regression_test_file": "tests/test_adicionar_cards_de_infrae.py",
+      "verification_gate_id": "gate_7980cbc7",
+      "origin": "rca",
+      "status": "active",
+      "active": true
     }
   ],
   "transfers": [
@@ -1006,6 +1069,20 @@
       "generalized_principle": "Release model memory on test exit",
       "applied_actions": [],
       "created_at": "2026-09-05T19:57:34.150655+00:00"
+    },
+    {
+      "transfer_id": "trans_1d36d975",
+      "source_domain": "hub.frontend",
+      "target_domains": [
+        "canaletto_gallery.backend",
+        "hub.backend"
+      ],
+      "specific_lesson": "Index HTML sem headers no-cache causou exibicao de versao antiga do painel",
+      "generalized_principle": "Rotas raiz que servem index.html devem declarar headers no-cache para evitar retencao de HTML obsoleto no navegador do usuario",
+      "applied_actions": [
+        "headers Cache-Control no-cache no FileResponse"
+      ],
+      "created_at": "2026-09-08T04:38:15.242371+00:00"
     }
   ],
   "contrasts": [],
@@ -1273,7 +1350,15 @@
       "passed": true,
       "output_snippet": "..........                                                               [100%]\n10 passed in 0.14s\n",
       "executed_at": "2026-09-06T10:16:46.631871+00:00"
+    },
+    {
+      "gate_id": "gate_7980cbc7",
+      "target_type": "rca_patch",
+      "test_command": "python -m pytest tests/test_adicionar_cards_de_infrae.py -v",
+      "passed": true,
+      "output_snippet": "/test_adicionar_cards_de_infrae.py::test_system_access_links_integrity PASSED [ 30%]\ntests/test_adicionar_cards_de_infrae.py::test_probe_liveness_graceful_failure PASSED [ 40%]\ntests/test_adicionar_cards_de_infrae.py::test_probe_liveness_successful_mock PASSED [ 50%]\ntests/test_adicionar_cards_de_infrae.py::test_api_get_infra_cards PASSED [ 60%]\ntests/test_adicionar_cards_de_infrae.py::test_api_post_infra_cards_refresh PASSED [ 70%]\ntests/test_adicionar_cards_de_infrae.py::test_api_get_single_node_card PASSED [ 80%]\ntests/test_adicionar_cards_de_infrae.py::test_frontend_infra_assets_mounted PASSED [ 90%]\ntests/test_adicionar_cards_de_infrae.py::test_non_goals_no_administrative_mutation_endpoints PASSED [100%]\n\n============================= 10 passed in 0.65s ==============================\n",
+      "executed_at": "2026-09-08T04:38:09.730815+00:00"
     }
   ],
-  "last_updated": "2026-09-07T23:07:07.931448+00:00"
+  "last_updated": "2026-09-08T04:38:20.356083+00:00"
 }
