@@ -16,8 +16,10 @@ import urllib.error
 from typing import Dict, Any, Optional
 from pathlib import Path
 
+from core.paths import project_root
+
 # Ensure root directory in sys.path
-_ROOT = Path(__file__).resolve().parent.parent.parent
+_ROOT = project_root()
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 

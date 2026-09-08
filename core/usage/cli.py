@@ -11,9 +11,10 @@ from typing import Optional
 from core.usage.ledger import ModelUsageLedger
 from core.usage.models import ModelCallEvent, ModelModality, ModelTier
 from core.usage.monitor import AccountUsageMonitor
+from core.paths import project_root
 
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
+PROJECT_ROOT = project_root()
 USAGE_DIR = PROJECT_ROOT / ".factory" / "usage"
 
 

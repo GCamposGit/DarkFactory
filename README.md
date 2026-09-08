@@ -22,6 +22,20 @@ python -m pytest tests -v --ignore=tests/test_canaletto.py
 
 O fluxo completo de interoperabilidade com Antigravity, Grok e outros harnesses está em [`docs/HARNESS_INTEROP.md`](docs/HARNESS_INTEROP.md). O stack opcional de transcrição GPU está em `requirements-audio.txt`.
 
+## Adotar ou iniciar um projeto
+
+A DarkFac opera outros produtos por uma Project Adoption Gateway, sem misturar o roadmap da fábrica com o roadmap do produto:
+
+```powershell
+# Brownfield: cria worktree isolada e instala runtime com lock de proveniência
+python -m core.adoption.cli adopt C:\dev\MeuProduto --branch codex/darkfac-adoption
+
+# Greenfield: cria baseline Git e instala a fábrica
+python -m core.adoption.cli init C:\dev\NovoProduto --name NovoProduto
+```
+
+O fluxo, a atualização idempotente, os seeds de governança e a preparação de tickets estão em [`docs/PROJECT_ADOPTION.md`](docs/PROJECT_ADOPTION.md).
+
 ---
 
 ## 🚀 Destaques da Arquitetura

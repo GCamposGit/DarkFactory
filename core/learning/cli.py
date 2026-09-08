@@ -8,6 +8,8 @@ import argparse
 import json
 from pathlib import Path
 
+from core.paths import project_root
+
 # Ensure UTF-8 output on Windows consoles
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -15,7 +17,7 @@ if hasattr(sys.stderr, "reconfigure"):
     sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
 # Ensure project root in sys.path
-_ROOT = Path(__file__).resolve().parent.parent.parent
+_ROOT = project_root()
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 

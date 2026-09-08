@@ -1,11 +1,11 @@
 ---
 name: build-dark-factory
-description: Instala a infraestrutura completa de uma Fábrica de Software Autônoma (Dark Factory Nível 3+) em qualquer repositório (greenfield ou brownfield). Configura a camada de orientação (MISSION.md, FACTORY_RULES.md), o harness de validação, a máquina de estados, o guardrail de arquivos protegidos e o agendador autônomo. Use quando o usuário quiser transformar um projeto em um repositório autônomo auto-gerenciável.
+description: Adota ou inicia qualquer repositório greenfield ou brownfield pela Project Adoption Gateway transacional da Dark Factory. Instala runtime namespaced com proveniência verificável, preserva contratos do produto e prepara worktrees de demanda sem misturar roadmaps. Use quando o usuário quiser começar um projeto ou colocar a fábrica para desenvolver um projeto existente.
 ---
 
-# Build Dark Factory: Engenharia de Software Autônoma (Nível 3+)
+# Build Dark Factory: adoção nativa de projetos
 
-Esta skill transforma uma base de código em uma **Dark Factory**: um repositório onde especificações entram como issues e saem como código validado e mesclado sem ninguém no teclado.
+Esta skill conecta um produto à Dark Factory compartilhada. **Nunca copie diretórios manualmente nem importe um checkout irmão.** Use `core.adoption.cli`; ele isola a operação numa worktree, instala a fábrica em `.factory/runtime`, preserva o ownership do produto e fixa proveniência em `.factory/darkfac.lock.json`.
 
 ## O Dial de Autonomia (The Autonomy Dial)
 
@@ -18,66 +18,49 @@ Esta skill transforma uma base de código em uma **Dark Factory**: um repositór
 | **4** | Sistema faz triagem e gera seus próprios testes de estresse | Escreve issues de alto nível |
 | **5** | Sistema cria as próprias issues a partir da MISSION | Apenas monitora resultados |
 
-> **Meta do Projeto**: Construir diretamente para o **Nível 3**. Níveis inferiores são etapas transitórias de calibração.
+> O nível é uma permissão do produto, não uma promessa da instalação. O padrão seguro do gateway é nível 2. Auto-merge, deploy, agendamento, credenciais e chamadas pagas permanecem fora de escopo até autorização explícita.
 
-## Ordem de Construção dos 5 Componentes
+## Fluxo obrigatório
 
 ```text
-[0. Entrada] PRD formal com lista explícita de non-goals
-      │
-      ▼
-[1. Guidance Layer] MISSION.md, FACTORY_RULES.md, AGENTS.md (Barato e de alto impacto)
-      │
-      ▼
-[1.5. Walking Skeleton] Fatia mínima vertical funcional (Apenas em greenfield)
-      │
-      ▼
-[2. Validation Harness] Runner com marcadores, E2E headless e portões determinísticos
-      │
-      ▼
-[3. Workflow Engine] Máquina de estados (state.py), Guardrail (guard.py), PIV Loop
-      │
-      ▼
-[4. Deployment & CI] Pipeline de entrega contínua
-      │
-      ▼
-[5. Trigger / Agendador] Ativação do polling automático (Task Scheduler / Cron)
+inspect -> plan -> worktree isolada -> apply -> verify -> commit -> prepare-task
 ```
 
-## Passo a Passo de Implantação
+## Brownfield
 
-### 1. Criar a Camada de Orientação (Guidance Layer)
-Copie os templates de governança para a raiz do repositório:
-- `MISSION.md`: Objetivo central e lista rígida de *out-of-scope*.
-- `FACTORY_RULES.md`: Regras de conduta autônoma e limites de gastos.
-- `AGENTS.md`: Padrões de código do projeto.
-
-### 2. Configurar o Validation Harness
-Instale o runner em `core/harness/runner.py` e configure o `harness.config.json` para mapear os comandos de teste da sua aplicação.
-
-### 3. Ativar o Guardrail Determinístico
-Garanta que nenhum agente consiga alterar a governança executando:
-```bash
-python core/orchestrator/guard.py HEAD
+```powershell
+python -m core.adoption.cli inspect C:\dev\Produto
+python -m core.adoption.cli plan C:\dev\Produto
+python -m core.adoption.cli adopt C:\dev\Produto --branch codex/darkfac-adoption
 ```
 
-### 4. Demonstrar a Primeira Volta Completa (The First Lap)
-Antes de ligar o agendador automático, execute manualmente um ciclo completo com uma issue simples:
-1. Issue cadastrada em `.factory/state.json`.
-2. Planejamento via `02-plan-product-architecture`.
-3. Implementação via `04-autonomous-piv-loop`.
-4. Validação via `05-validation-harness`.
-5. Auditoria via `06-adversarial-review`.
-6. Auto-merge realizado com sucesso.
+Mesmo que o checkout principal esteja sujo, `adopt` usa apenas o commit solicitado. Para migrar arquivos de governança já preparados, forneça explicitamente `--mission-file`, `--rules-file` e `--harness-file`. Nenhum outro overlay é aceito.
+
+## Greenfield
+
+```powershell
+python -m core.adoption.cli init C:\dev\NovoProduto --name NovoProduto
+```
+
+O destino precisa estar vazio. Sem stack/harness determinístico, a instalação não declara readiness. Revise os TODOs de governança antes de permitir trabalho autônomo.
+
+## Portões antes da primeira demanda
+
+1. `python -m core.adoption.cli verify <worktree>` precisa retornar `ready: true`.
+2. Execute `python .factory/darkfac.py harness --quick` dentro do produto e exija `[HARNESS_PASS]` com contagem positiva.
+3. Revise e faça commit da adoção.
+4. Crie a demanda com `python -m core.adoption.cli prepare-task ...`, declarando owner, caminhos e validações.
+5. Só então rode Prime-Plan-Implement-Validate e revisão adversarial.
 
 ---
 
 ## 🧠 Continuous Self-Improvement & Failure RCA Integration
 
 1. **Instalação do Loop Mestre de Aprendizado (`00-continuous-self-improvement`)**:
-   - Toda Dark Factory deve incluir o diretório `.factory/learning/` e a biblioteca `core/learning/` na sua fundação.
-   - O agendador e o orquestrador acionam o `ContinuousLearningTracker` para auditar a taxa de execução One-Shot e alimentar melhorias cumulativas.
+   - O runtime namespaced inclui `core/learning/`; sua saída é gravada no `.factory/` do produto por meio da raiz portátil.
+   - Skills copiadas têm comandos reescritos para `.factory/darkfac.py`, sem colisão com pacotes `core` do produto.
 2. **RCA de Falhas de Implantação e Transição de Estados**:
    - Se uma issue travar no estado `NEEDS_FIX` por mais de 2 voltas, o sistema dispara RCA automático para diagnosticar a causa sistêmica (especificação vaga, dependência quebrada ou teste frágil).
    - O patch é aplicado diretamente na camada de orientação ou no harness antes de retomar a execução autônoma.
 
+Contrato completo: `docs/PROJECT_ADOPTION.md`.

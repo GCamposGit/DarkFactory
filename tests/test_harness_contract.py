@@ -10,7 +10,7 @@ import pytest
 
 from core.harness.markers import parse_harness_output
 from core.harness.models import HarnessConfig, HarnessResult, HarnessStepConfig
-from core.harness.runner import load_config, sanitize_child_output
+from core.harness.runner import load_config, resolve_command, sanitize_child_output
 
 
 def _valid_result() -> HarnessResult:
@@ -103,6 +103,12 @@ def test_child_output_cannot_inject_supervisor_markers() -> None:
     assert "[STEP_PASS]" not in sanitized
     assert "[TEST_COUNT]" not in sanitized
     assert "[HARNESS_PASS]" not in sanitized
+
+
+def test_unqualified_python_uses_the_runner_interpreter() -> None:
+    command = resolve_command("python -m pytest tests")
+
+    assert command == [sys.executable, "-m", "pytest", "tests"]
 
 
 def test_marker_parser_runs_as_standalone_script(tmp_path: Path) -> None:
