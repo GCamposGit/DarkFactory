@@ -29,9 +29,11 @@ RUN groupadd -g 1000 darkfac && \
 # Copy application files and factory metadata
 COPY core /app/core
 COPY hub /app/hub
+COPY docs /app/docs
 COPY scripts /app/scripts
 COPY deploy /app/deploy
 COPY .factory /app/.factory
+COPY .factory /app/.factory_seed
 COPY harness.config.json /app/harness.config.json
 
 # Create data directories with appropriate permissions

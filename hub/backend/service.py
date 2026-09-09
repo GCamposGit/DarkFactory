@@ -260,6 +260,25 @@ class HubService:
 
         repository_root = project_root or roadmap_root or Path(__file__).resolve().parents[2]
         self.project_root = repository_root
+
+        # Self-healing volume seed restoration: if .factory is shadowed by an empty Docker volume,
+        # restore canonical metadata (roadmap, demands, infra) from .factory_seed.
+        factory_dir = repository_root / ".factory"
+        factory_seed = repository_root / ".factory_seed"
+        if factory_seed.exists() and factory_seed.is_dir():
+            import shutil
+            factory_dir.mkdir(parents=True, exist_ok=True)
+            for seed_item in factory_seed.iterdir():
+                dest = factory_dir / seed_item.name
+                if not dest.exists():
+                    try:
+                        if seed_item.is_dir():
+                            shutil.copytree(seed_item, dest)
+                        else:
+                            shutil.copy2(seed_item, dest)
+                    except Exception as exc:
+                        logger.warning(f"Failed to copy seed item {seed_item.name}: {exc}")
+
         self.task_state_path = Path(state_path) if state_path is not None else repository_root / ".factory" / "state.json"
         self.orchestrator_path = (
             Path(orchestrator_path)
