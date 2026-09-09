@@ -5,12 +5,10 @@
 # Domain: https://darkhub.ggcampos.com
 # ==============================================================================
 
-version: "3.8"
-
 services:
   darkhub:
     build:
-      context: https://github.com/GCamposGit/DarkFactory.git#main
+      context: https://${GITHUB_PAT:-}@github.com/GCamposGit/DarkFactory.git#main
       dockerfile: deploy/dokploy/Dockerfile.hub
     image: darkhub:latest
     container_name: darkhub-cloud-247
