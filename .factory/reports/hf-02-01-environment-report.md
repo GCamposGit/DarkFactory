@@ -6,7 +6,7 @@
 - Branch: `codex/hf-01-baseline`
 - Worktree: `C:\dev\DarkFac`
 - Base SHA: `1f931fcccc2f4a54cde1f0ba09825094dbe429af`
-- Final SHA: recorded after the local commit
+- Final SHA: `f9cc002`
 - Status: `waiting_access` for PostgreSQL; local implementation complete
 
 ## Scope delivered
@@ -29,8 +29,8 @@
 | dedicated venv `python -m pip check` | pass |
 | second clean venv install from `requirements.lock.txt` | pass; 42 packages |
 | second clean venv import/API smoke | pass |
-| `python core/harness/runner.py --quick` | pending final validation |
-| `python -m pytest tests -v --ignore=tests/test_canaletto.py` | pending final validation |
+| `python core/harness/runner.py --quick` | pass; 461 collected, 459 passed, 2 skipped |
+| `python -m pytest tests -v --ignore=tests/test_canaletto.py` | pass; 459 passed, 2 skipped |
 
 ## External access boundary
 
