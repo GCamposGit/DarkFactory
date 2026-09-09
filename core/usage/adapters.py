@@ -968,20 +968,49 @@ class EnvironmentAccountAdapter(AccountUsageAdapter):
 
 class OllamaAccountAdapter(AccountUsageAdapter):
     def inspect(self) -> ProviderAccountUsage:
-        try:
-            from urllib.request import urlopen
-            with urlopen("http://localhost:11434/api/tags", timeout=1.5) as response:
-                payload = json.loads(response.read().decode("utf-8"))
-            model_count = len(payload.get("models", [])) if isinstance(payload, dict) else 0
-            return ProviderAccountUsage(
-                provider_id=self.spec.provider_id, provider_name=self.spec.provider_name,
-                family=self.spec.family, status=AccountConnectionStatus.CONNECTED, adapter="ollama_api",
-                plan="local $0", quota_supported=False,
-                message=f"Cluster local online com {model_count} modelos; sem quota de assinatura.",
-                dashboard_url=self.spec.dashboard_url,
-            )
-        except Exception:
-            return self.disconnected("Ollama local não respondeu.", "ollama_api")
+        # 1. Check if an offline or synced snapshot payload exists
+        snapshot = self._snapshot_payload()
+        if snapshot:
+            return self._from_snapshot(snapshot)
+
+        # 2. Determine candidate Ollama URLs (support OLLAMA_BASE_URL, OLLAMA_HOST, or localhost)
+        configured_url = os.environ.get("OLLAMA_BASE_URL") or os.environ.get("OLLAMA_HOST")
+        candidate_urls: List[str] = []
+        if configured_url:
+            cleaned = configured_url.strip()
+            if not cleaned.startswith("http://") and not cleaned.startswith("https://"):
+                cleaned = f"http://{cleaned}"
+            candidate_urls.append(cleaned)
+
+        # Default loopback fallback
+        if "http://localhost:11434" not in candidate_urls:
+            candidate_urls.append("http://localhost:11434")
+
+        # 3. Probe candidate URLs
+        from urllib.request import Request, urlopen
+        for base_url in candidate_urls:
+            endpoint = f"{base_url.rstrip('/')}/api/tags"
+            try:
+                req = Request(endpoint, headers={"User-Agent": "DarkFac-AccountMonitor/1.0"})
+                with urlopen(req, timeout=1.5) as response:
+                    payload = json.loads(response.read().decode("utf-8"))
+                model_count = len(payload.get("models", [])) if isinstance(payload, dict) else 0
+                return ProviderAccountUsage(
+                    provider_id=self.spec.provider_id,
+                    provider_name=self.spec.provider_name,
+                    family=self.spec.family,
+                    status=AccountConnectionStatus.CONNECTED,
+                    adapter="ollama_api",
+                    plan="local $0",
+                    quota_supported=False,
+                    message=f"Cluster local online com {model_count} modelos; sem quota de assinatura.",
+                    dashboard_url=self.spec.dashboard_url,
+                )
+            except Exception as exc:
+                logger.debug("Ollama probe against %s failed: %s", endpoint, exc)
+                continue
+
+        return self.disconnected("Ollama local não respondeu.", "ollama_api")
 
 
 def build_default_adapters(snapshot_dir: Path) -> Iterable[AccountUsageAdapter]:

@@ -2,6 +2,7 @@
 Data models and schemas with strict Pydantic v2 typing for DarkHub.
 """
 
+from datetime import datetime, timezone
 from enum import Enum
 import re
 from typing import List, Optional, Dict, Any
@@ -460,6 +461,32 @@ class TaskDashboardReport(BaseModel):
     total_cost_usd: float = Field(default=0.0, ge=0.0)
     sources: Dict[str, str] = Field(default_factory=dict)
     warnings: List[str] = Field(default_factory=list)
+
+
+# ---------------------------------------------------------------------------
+# Usage & Telemetry Synchronization Models (USR-01)
+# ---------------------------------------------------------------------------
+
+
+class UsageSyncPayload(BaseModel):
+    """Payload sent by a client workstation or worker node to synchronize account quotas and credits."""
+
+    client_node_id: str = Field(default="workstation", description="Identifier of origin node (e.g. predator-neo-16)")
+    timestamp: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat(), description="RFC3339 timestamp")
+    accounts: List[Dict[str, Any]] = Field(default_factory=list, description="List of raw ProviderAccountUsage payloads")
+    credits: List[Dict[str, Any]] = Field(default_factory=list, description="List of raw ProviderCreditCard payloads")
+
+
+class UsageSyncResponse(BaseModel):
+    """Response returned by DarkHub upon successful synchronization."""
+
+    status: str = "synchronized"
+    client_node_id: str
+    accounts_updated: int
+    credits_updated: int
+    synced_at: str
+    message: str
+
 
 
 

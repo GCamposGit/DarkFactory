@@ -47,6 +47,8 @@ from hub.backend.models import (
     VisualGenerateResponse,
     VisualIllustrateRequest,
     TaskDashboardReport,
+    UsageSyncPayload,
+    UsageSyncResponse,
 )
 from hub.backend.service import HubService
 from core.usage.models import AccountUsageReport, ModelCallEvent, ModelUsageReport
@@ -778,6 +780,27 @@ def record_model_usage_endpoint(
     ):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid telemetry key.")
     return service.record_model_usage(payload)
+
+
+@router.post("/usage/sync", response_model=UsageSyncResponse)
+def sync_usage_endpoint(
+    payload: UsageSyncPayload,
+    x_darkfac_telemetry_key: Optional[str] = Header(default=None, alias="X-DarkFac-Telemetry-Key"),
+    service: HubService = Depends(get_hub_service),
+) -> UsageSyncResponse:
+    """Synchronizes account quota and credit snapshots from an authenticated local workstation or worker node."""
+    configured_key = os.environ.get("DARKFAC_TELEMETRY_KEY")
+    if not configured_key:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Usage synchronization is disabled; set DARKFAC_TELEMETRY_KEY.",
+        )
+    if not x_darkfac_telemetry_key or not secrets.compare_digest(
+        x_darkfac_telemetry_key,
+        configured_key,
+    ):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid telemetry key.")
+    return service.sync_usage_data(payload)
 
 
 @router.get("/visual/gallery")

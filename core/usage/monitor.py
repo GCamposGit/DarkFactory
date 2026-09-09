@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
-from typing import Iterable, List, Optional
+from typing import Any, Dict, Iterable, List, Optional
 
 from core.usage.adapters import AccountUsageAdapter, build_default_adapters
 from core.usage.models import AccountConnectionStatus, AccountUsageReport, ProviderAccountUsage
@@ -30,6 +31,22 @@ class AccountUsageMonitor:
         self._cache: Optional[AccountUsageReport] = None
         self._cached_at = 0.0
         self._lock = threading.RLock()
+
+    def save_snapshot(self, provider_id: str, payload: Dict[str, Any]) -> None:
+        """Persist or update an account quota snapshot JSON file and invalidate cache."""
+        self.snapshot_dir.mkdir(parents=True, exist_ok=True)
+        file_target = self.snapshot_dir / f"{provider_id}.json"
+        existing: Dict[str, Any] = {}
+        if file_target.is_file():
+            try:
+                existing = json.loads(file_target.read_text(encoding="utf-8"))
+            except Exception as exc:
+                logger.warning("Failed to read existing snapshot %s: %s", file_target, exc)
+        existing.update(payload)
+        file_target.write_text(json.dumps(existing, indent=2, ensure_ascii=False), encoding="utf-8")
+        with self._lock:
+            self._cache = None
+            self._cached_at = 0.0
 
     def inspect(self, force: bool = False) -> AccountUsageReport:
         with self._lock:

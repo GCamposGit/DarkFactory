@@ -50,6 +50,8 @@ from hub.backend.models import (
     TaskDashboardEvidence,
     TaskDashboardItem,
     TaskDashboardReport,
+    UsageSyncPayload,
+    UsageSyncResponse,
 )
 from core.execution.providers import get_openrouter_api_key
 from core.content import (
@@ -678,6 +680,47 @@ class HubService:
     def update_credit_account(self, provider_id: str, payload: CreditAccountUpdateRequest) -> ProviderCreditCard:
         """Updates and persists credit balances or notes for a provider."""
         return self.api_credits_monitor.update_account(provider_id, payload)
+
+    def sync_usage_data(self, payload: UsageSyncPayload) -> UsageSyncResponse:
+        """Persists incoming account quota and credit snapshots from a workstation or worker node."""
+        accounts_updated = 0
+        credits_updated = 0
+
+        # 1. Ingest account quota snapshots
+        for account in payload.accounts:
+            if not isinstance(account, dict):
+                continue
+            provider_id = account.get("provider_id")
+            if not provider_id:
+                continue
+            try:
+                self.account_usage_monitor.save_snapshot(str(provider_id), account)
+                accounts_updated += 1
+            except Exception as exc:
+                logger.warning("Failed to save account snapshot for %s: %s", provider_id, exc)
+
+        # 2. Ingest API credit balance snapshots
+        for credit in payload.credits:
+            if not isinstance(credit, dict):
+                continue
+            provider_id = credit.get("provider_id")
+            if not provider_id:
+                continue
+            try:
+                self.api_credits_monitor.save_snapshot(str(provider_id), credit)
+                credits_updated += 1
+            except Exception as exc:
+                logger.warning("Failed to save credit snapshot for %s: %s", provider_id, exc)
+
+        now_str = datetime.now(timezone.utc).isoformat()
+        return UsageSyncResponse(
+            status="synchronized",
+            client_node_id=payload.client_node_id,
+            accounts_updated=accounts_updated,
+            credits_updated=credits_updated,
+            synced_at=now_str,
+            message=f"Synchronized {accounts_updated} account quotas and {credits_updated} credit balances from {payload.client_node_id}.",
+        )
 
     def get_infra_cards_report(self, probe_liveness: bool = False, probe_timeout: float = 0.5) -> InfraCardsReport:
         """Returns the infrastructure cards report for the Hub."""
