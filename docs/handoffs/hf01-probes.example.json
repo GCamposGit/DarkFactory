@@ -1,0 +1,17 @@
+{
+  "schema_version": "1",
+  "probes": [
+    {
+      "probe_id": "darkhub-health-example",
+      "item_id": "DF-21",
+      "url": "https://example.invalid/health",
+      "environment": "target-vps",
+      "validation_mode": "target_environment",
+      "expected_origin": "https://example.invalid",
+      "require_connection": false,
+      "secret_ref": null,
+      "timeout_seconds": 10,
+      "max_bytes": 2097152
+    }
+  ]
+}

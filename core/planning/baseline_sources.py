@@ -377,7 +377,7 @@ def _find_declared_table(lines: list[str], expected_header: list[str]) -> tuple[
     for index in range(len(lines) - 1):
         if not lines[index].strip().startswith("|"):
             continue
-        headers = _split_row(lines[index])
+        headers = [_normalize_cell(cell) for cell in _split_row(lines[index])]
         separator = _split_row(lines[index + 1]) if lines[index + 1].strip().startswith("|") else []
         if len(headers) != len(expected) or headers != expected:
             continue

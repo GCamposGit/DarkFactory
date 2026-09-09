@@ -18,8 +18,11 @@ from .baseline_models import (
     PlannedItem,
     SourceObservation,
     SourceStatus,
+    ValidationMode,
 )
 from .baseline_sources import BaselineCatalogError, collect_sources, load_catalog
+from .baseline_reconcile import dependency_graph, reconcile_baseline, source_fingerprint
+from .baseline_probes import ProbeObservation, ProbeResponse, ProbeSpec, ProbeStatus, collect_probe_observations
 
 __all__ = [
     "AssessmentDimension",
@@ -40,6 +43,15 @@ __all__ = [
     "PlannedItem",
     "SourceObservation",
     "SourceStatus",
+    "ValidationMode",
     "collect_sources",
+    "dependency_graph",
     "load_catalog",
+    "reconcile_baseline",
+    "source_fingerprint",
+    "ProbeObservation",
+    "ProbeResponse",
+    "ProbeSpec",
+    "ProbeStatus",
+    "collect_probe_observations",
 ]

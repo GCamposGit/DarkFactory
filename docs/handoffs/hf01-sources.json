@@ -50,7 +50,7 @@
     "relative_path": "docs/DEVELOPMENT_PLAN_2026-09-05.md",
     "required": true,
     "section_heading": null,
-    "table_header": ["ID", "Escopo", "Depende", "Critério"],
+    "table_header": ["ID", "Escopo e arquivos principais", "Depende", "Critério e VALIDATE_CMD proposto"],
     "item_id_column": "ID"
   },
   {
@@ -95,7 +95,7 @@
     "relative_path": ".factory/infra/roadmap.md",
     "required": true,
     "section_heading": "### Fase 4: Automações Avançadas & Escala Multi-Projeto [FUTURA ⚪]",
-    "table_header": ["ID", "Item", "Pré-requisito", "Status", "Entregas & Critérios de Aceite"],
+    "table_header": ["ID", "Item", "Pré-requisito", "Status", "Critérios de Aceite"],
     "item_id_column": "ID"
   },
   {

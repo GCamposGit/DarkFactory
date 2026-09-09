@@ -1,0 +1,49 @@
+{
+  "schema_version": "1",
+  "ticket_id": "HF-01-03..HF-01-06",
+  "run_id": "hf01-20260909T000103Z-1e8bf83f",
+  "base_sha": "9c5ffd9fe5521cc00fac3df2cf3d3251caa35f78",
+  "snapshot_ref": ".factory/baselines/HF-01/hf01-20260909T000103Z-1e8bf83f/snapshot.json",
+  "snapshot_id": "hf01-20260909T000103Z-1e8bf83f",
+  "source_count": 55,
+  "item_count": 61,
+  "completeness": "complete",
+  "hf02_readiness": "ready",
+  "blocker_codes": [],
+  "validation": {
+    "terminal_env": "[TERMINAL_ENV_PASS]",
+    "harness": {
+      "marker": "[HARNESS_PASS]",
+      "candidate_sha": "8bd409f6aaac18ef5b490992e8ecd0611c826442",
+      "discovered_count": 457,
+      "passed_count": 455,
+      "skipped_count": 2,
+      "exit_code": 0
+    },
+    "pytest": {
+      "discovered_count": 457,
+      "passed_count": 455,
+      "skipped_count": 2,
+      "exit_code": 0
+    },
+    "baseline_verify": {
+      "marker": "[BASELINE_VERIFY_PASS]",
+      "exit_code": 0
+    },
+    "diff_check": {
+      "clean": true,
+      "exit_code": 0
+    }
+  },
+  "delivery": {
+    "local_commit": "blocked_by_git_write_permission",
+    "push": "not_run",
+    "pull_request": "not_run",
+    "merge": "not_run",
+    "main_remote_reaches_sha": "unknown"
+  },
+  "residual_state": [
+    "Remote delivery requires a checkout with writable .git metadata.",
+    "HF-02 runtime spike/ADR is the next module and is now locally unblocked by HF-01 readiness."
+  ]
+}

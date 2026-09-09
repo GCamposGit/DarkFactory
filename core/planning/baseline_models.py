@@ -26,7 +26,9 @@ def _non_blank(value: str) -> str:
     return value
 
 
-def _aware_utc(value: datetime) -> datetime:
+def _aware_utc(value: datetime | None) -> datetime | None:
+    if value is None:
+        return None
     if value.tzinfo is None or value.utcoffset() is None:
         raise ValueError("timestamp must include a timezone")
     return value.astimezone(timezone.utc)
@@ -83,6 +85,15 @@ class EvidenceKind(str, Enum):
     OWNER_STATEMENT = "owner_statement"
     REMOTE_GIT = "remote_git"
     SERVICE_PROBE = "service_probe"
+
+
+class ValidationMode(str, Enum):
+    """How evidence was obtained, without promoting its meaning."""
+
+    DOCUMENTARY = "documentary"
+    SIMULATION = "simulation"
+    TARGET_ENVIRONMENT = "target_environment"
+    NOT_APPLICABLE = "not_applicable"
 
 
 class AssessmentDimension(str, Enum):
@@ -213,11 +224,18 @@ class EvidenceClaim(_StrictModel):
     observed_at: datetime | None = None
     scope: str = Field(..., min_length=1)
     summary: str = Field(..., min_length=1, max_length=400)
+    environment: str | None = None
+    validation_mode: ValidationMode = ValidationMode.DOCUMENTARY
 
     @field_validator("claim_id", "item_id", "source_id", "locator", "scope", "summary")
     @classmethod
     def validate_text(cls, value: str) -> str:
         return _non_blank(value)
+
+    @field_validator("environment")
+    @classmethod
+    def validate_environment(cls, value: str | None) -> str | None:
+        return _non_blank(value) if value is not None else None
 
     _validate_time = field_validator("observed_at")(_aware_utc)
 
