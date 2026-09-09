@@ -1,6 +1,6 @@
 {
   "session_id": "session_20260905_072924",
-  "prompt_count": 18,
+  "prompt_count": 19,
   "turns": [
     {
       "turn_id": 1,
@@ -180,6 +180,16 @@
       "was_followup": true,
       "one_shot_success": false,
       "missing_context_or_gap": "Confirmar o estado compartilhado antes de editar e preservar mudanças concorrentes",
+      "target_skill": "autonomous-piv-loop"
+    },
+    {
+      "turn_id": 19,
+      "timestamp": "2026-09-09T00:20:53.250157+00:00",
+      "user_prompt_summary": "HF-02-next-item",
+      "perceived_intent": "HF-02-01-environment-freeze-and-lab-preparation",
+      "was_followup": true,
+      "one_shot_success": false,
+      "missing_context_or_gap": "external-DBOS-metadata-and-PostgreSQL-access-must-be-real-and-secret-free",
       "target_skill": "autonomous-piv-loop"
     }
   ],
@@ -790,6 +800,111 @@
       "patch_description": "Organizar imports, remover aspas da anotação futura e construir o datetime ingênuo com comentário explícito no teste",
       "preventative_rule": "Executar lint dos arquivos novos antes dos gates e isolar construções intencionalmente inválidas em testes",
       "regression_test_file": "tests/test_baseline_sources.py",
+      "verification_gate_id": null,
+      "origin": "rca",
+      "status": "proposed",
+      "active": false
+    },
+    {
+      "rca_id": "rca_63787189",
+      "timestamp": "2026-09-09T00:15:36.522940+00:00",
+      "category": "tool_misuse",
+      "symptom": "RCA do despacho rejeitou categoria tool_invocation",
+      "mechanism": "CLI usa enum fechado e aceita apenas categorias governadas",
+      "root_cause": "Categoria correta para falha de invocacao de ferramenta e tool_misuse",
+      "patch_description": "Usar categoria tool_misuse no registro de falhas de CLI",
+      "preventative_rule": "Consultar enums do CLI antes de registrar RCA e usar categoria governada",
+      "regression_test_file": "core/learning/cli.py",
+      "verification_gate_id": null,
+      "origin": "rca",
+      "status": "proposed",
+      "active": false
+    },
+    {
+      "rca_id": "rca_3c772a69",
+      "timestamp": "2026-09-09T00:15:58.426482+00:00",
+      "category": "tool_misuse",
+      "symptom": "Consultas PowerShell com  falharam ao listar arquivos e pesquisar dependencias",
+      "mechanism": "Interpolacao do shell externo removeu o operador  antes do PowerShell interno",
+      "root_cause": "Comandos de inventario devem evitar script blocks aninhados quando o wrapper interpreta cifro",
+      "patch_description": "Usar rg, Get-ChildItem simples ou aspas/escapamento robusto sem ",
+      "preventative_rule": "Preferir comandos sem interpolacao de shell para inventario deterministico no Windows",
+      "regression_test_file": "core/harness/terminal_env.py",
+      "verification_gate_id": null,
+      "origin": "rca",
+      "status": "proposed",
+      "active": false
+    },
+    {
+      "rca_id": "rca_799f2e6c",
+      "timestamp": "2026-09-09T00:16:32.379870+00:00",
+      "category": "tool_misuse",
+      "symptom": "pip index versions dbos falhou com WinError 10013 no socket HTTPS",
+      "mechanism": "Sandbox bloqueou acesso de rede ao PyPI antes da consulta de metadata",
+      "root_cause": "Preflight de dependencias externas precisa de acesso aprovado ou deve registrar waiting_access sem inventar versao",
+      "patch_description": "Solicitar execucao aprovada somente para metadata publica e manter fallback waiting_access",
+      "preventative_rule": "Nunca fixar versao de pacote externo sem consulta direta verificavel",
+      "regression_test_file": "spikes/runtime_choice/requirements.lock.txt",
+      "verification_gate_id": null,
+      "origin": "rca",
+      "status": "proposed",
+      "active": false
+    },
+    {
+      "rca_id": "rca_df251c4a",
+      "timestamp": "2026-09-09T00:18:08.262771+00:00",
+      "category": "tool_misuse",
+      "symptom": "python -m venv em AppData Local Temp falhou com WinError 5",
+      "mechanism": "A politica de filesystem bloqueou criacao fora da raiz gravavel do workspace",
+      "root_cause": "Ambiente de laboratorio precisa ficar em raiz gravavel ou usar destino explicitamente aprovado",
+      "patch_description": "Usar .factory/lab/hf02-venv local, mantendo venv fora do commit",
+      "preventative_rule": "Criar ambientes temporarios somente em writable_roots verificados",
+      "regression_test_file": "core/harness/terminal_env.py",
+      "verification_gate_id": null,
+      "origin": "rca",
+      "status": "proposed",
+      "active": false
+    },
+    {
+      "rca_id": "rca_bb9ee9a6",
+      "timestamp": "2026-09-09T00:22:03.724189+00:00",
+      "category": "tool_misuse",
+      "symptom": "apply_patch rejeitou o arquivo lock por hunk sem prefixo +",
+      "mechanism": "Uma linha gerada do freeze foi emitida sem marcador de adicao",
+      "root_cause": "Patch multi-arquivo precisa validar cada linha adicionada antes do envio",
+      "patch_description": "Reaplicar com todos os itens do lock marcados como linhas novas",
+      "preventative_rule": "Validar hunks de apply_patch antes de editar arquivos versionados",
+      "regression_test_file": "spikes/runtime_choice/requirements.lock.txt",
+      "verification_gate_id": null,
+      "origin": "rca",
+      "status": "proposed",
+      "active": false
+    },
+    {
+      "rca_id": "rca_5d8d6d65",
+      "timestamp": "2026-09-09T00:25:39.584715+00:00",
+      "category": "test_regression",
+      "symptom": "Comparacao do lock com pip freeze encontrou pydantic-core e typing-extensions divergentes",
+      "mechanism": "O lock foi normalizado manualmente com hifen enquanto pip freeze preserva underscore nesses nomes",
+      "root_cause": "Lock reproduzivel deve usar a saida canonica do pip freeze, nao uma normalizacao textual manual",
+      "patch_description": "Trocar pydantic-core e typing-extensions pelos nomes emitidos por pip freeze",
+      "preventative_rule": "Comparar locks usando a mesma serializacao produzida pelo gerenciador de pacotes",
+      "regression_test_file": "spikes/runtime_choice/requirements.lock.txt",
+      "verification_gate_id": null,
+      "origin": "rca",
+      "status": "proposed",
+      "active": false
+    },
+    {
+      "rca_id": "rca_988eabdf",
+      "timestamp": "2026-09-09T00:27:20.437330+00:00",
+      "category": "tool_misuse",
+      "symptom": "Secret scan nao executou porque pipe da regex foi interpretado pelo shell",
+      "mechanism": "Comando rg com regex composta atravessou um wrapper que trata | como operador",
+      "root_cause": "Scans de seguranca devem usar padroes simples separados ou regex escapada de forma shell-safe",
+      "patch_description": "Executar buscas individuais por password, secret, token, DSN e nome de variavel",
+      "preventative_rule": "Nunca passar metacaracteres de shell sem escapamento ao validar segredos",
+      "regression_test_file": "docs/handoffs/HF-02-ENVIRONMENT.md",
       "verification_gate_id": null,
       "origin": "rca",
       "status": "proposed",
@@ -1468,5 +1583,5 @@
       "executed_at": "2026-09-08T14:25:32.955989+00:00"
     }
   ],
-  "last_updated": "2026-09-08T19:39:44.993199+00:00"
+  "last_updated": "2026-09-09T00:27:20.438332+00:00"
 }

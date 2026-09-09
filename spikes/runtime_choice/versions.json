@@ -1,0 +1,56 @@
+{
+  "schema_version": "1",
+  "ticket": "HF-02-01",
+  "status": "waiting_access",
+  "collected_at": "2026-09-09T00:20:33.461071Z",
+  "base_sha": "1f931fcccc2f4a54cde1f0ba09825094dbe429af",
+  "python": {
+    "version": "3.12.10",
+    "implementation": "CPython",
+    "platform": "Windows 11 AMD64"
+  },
+  "metadata": {
+    "source": "PyPI public index",
+    "dbos_latest_stable": "2.31.1",
+    "psycopg_latest_stable": "3.3.5",
+    "psutil_latest_stable": "7.2.2",
+    "pre_release_or_yanked": false
+  },
+  "runtime": {
+    "dbos": "2.31.1",
+    "postgresql_driver": "psycopg==3.3.5 + psycopg-binary==3.3.5",
+    "process_metrics": "psutil==7.2.2",
+    "database_alias": "darkfac_hf02_lab",
+    "database_prefix": "darkfac_hf02_",
+    "database_url_env": "DARKFAC_HF02_DATABASE_URL"
+  },
+  "api_smoke": {
+    "dbos_import": "pass",
+    "psycopg_import": "pass",
+    "psutil_import": "pass",
+    "dbos_constructor_signature": "DBOS(*, config: DBOSConfig, fastapi: Optional[FastAPI] = None, flask: Optional[Flask] = None, conductor_url: Optional[str] = None, conductor_key: Optional[str] = None)",
+    "dbos_launch_signature": "DBOS.launch() -> None",
+    "dbos_workflow_signature": "DBOS.workflow(*, name=None, max_recovery_attempts=100, serialization_type=None, validate_args=None)",
+    "dbos_step_signature": "DBOS.step(*, name=None, retries_allowed=False, interval_seconds=1.0, max_attempts=3, backoff_rate=2.0, should_retry=None, preemptible=False, timeout_seconds=None)",
+    "dbos_recv_signature": "DBOS.recv(topic=None, timeout_seconds=60)",
+    "dbos_cancel_signature": "DBOS.cancel_workflow(workflow_id, *, cancel_children=False)"
+  },
+  "local_tools": {
+    "docker": "not_found",
+    "psql": "not_found",
+    "database_connection": "waiting_access"
+  },
+  "validation": {
+    "pip_check": "pass",
+    "clean_venv_reinstall": "pass",
+    "clean_venv_lock_packages": 42,
+    "clean_venv_import_smoke": "pass",
+    "postgres_select_1": "not_run_waiting_access",
+    "current_database_user": "not_run_waiting_access"
+  },
+  "secret_policy": {
+    "dsn_serialized": false,
+    "secret_values_serialized": false,
+    "secret_reference": "DARKFAC_HF02_DATABASE_URL"
+  }
+}
