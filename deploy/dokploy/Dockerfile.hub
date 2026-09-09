@@ -26,11 +26,12 @@ RUN pip install --no-cache-dir -r requirements.txt
 RUN groupadd -g 1000 darkfac && \
     useradd -u 1000 -g darkfac -m -s /bin/bash darkfac
 
-# Copy application files
+# Copy application files and factory metadata
 COPY core /app/core
 COPY hub /app/hub
 COPY scripts /app/scripts
 COPY deploy /app/deploy
+COPY .factory /app/.factory
 COPY harness.config.json /app/harness.config.json
 
 # Create data directories with appropriate permissions

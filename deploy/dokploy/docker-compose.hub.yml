@@ -23,7 +23,7 @@ services:
       - DATA_DIR=/app/hub/data
       - FACTORY_DIR=/app/.factory
     volumes:
-      - darkhub-factory-data:/app/.factory
+      - darkhub-factory-data:/app/.factory/webhooks
       - darkhub-hub-data:/app/hub/data
     networks:
       - dokploy-network

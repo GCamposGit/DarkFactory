@@ -1,0 +1,15 @@
+.git
+.pytest_cache
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.factory/backups
+.factory/worktrees
+.factory/runs
+.factory/test_logs
+venv
+.venv
+tests
+.coverage
+htmlcov
