@@ -36,14 +36,14 @@
     }
   },
   "delivery": {
-    "local_commit": "blocked_by_git_write_permission",
+    "local_commit": "c592d1c",
     "push": "not_run",
     "pull_request": "not_run",
     "merge": "not_run",
     "main_remote_reaches_sha": "unknown"
   },
   "residual_state": [
-    "Remote delivery requires a checkout with writable .git metadata.",
+    "Remote delivery requires explicit authorization because the attempted push was blocked by the safety policy.",
     "HF-02 runtime spike/ADR is the next module and is now locally unblocked by HF-01 readiness."
   ]
 }

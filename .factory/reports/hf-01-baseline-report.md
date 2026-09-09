@@ -43,7 +43,7 @@ permission cases. No Canaletto file was changed.
 
 - HF-02 can start from this local readiness result, but its spike/ADR is not part of this ticket.
 - The model router's Antigravity probe returned `WinError 5`; implementation stayed on the deterministic local route and made no paid/external call.
-- Commit/push/PR/merge remain pending because this session's `.git` directory is read-only (`git add` failed with permission denied) and no remote delivery was executed. The implementation is therefore locally validated, not remotely delivered.
+- Commit `c592d1c` was created locally. Push/PR/merge remain pending because the attempted remote export was blocked by the safety policy; the implementation is therefore locally validated, not remotely delivered.
 
 ## Evidence
 
