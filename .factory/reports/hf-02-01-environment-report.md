@@ -6,7 +6,7 @@
 - Branch: `codex/hf-01-baseline`
 - Worktree: `C:\dev\DarkFac`
 - Base SHA: `1f931fcccc2f4a54cde1f0ba09825094dbe429af`
-- Final SHA: `f9cc002`
+- Final SHA: `c27b308`
 - Status: `waiting_access` for PostgreSQL; local implementation complete
 
 ## Scope delivered
