@@ -20,6 +20,7 @@ import subprocess
 import threading
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
@@ -213,9 +214,16 @@ class CodexAccountAdapter(AccountUsageAdapter):
     @staticmethod
     def _find_codex() -> Optional[str]:
         executable = shutil.which("codex")
-        if executable:
+        is_cmd_or_bat = bool(executable and executable.lower().endswith((".cmd", ".bat")))
+        if executable and not is_cmd_or_bat:
             return executable
+
         candidates: List[Path] = []
+        user_profile = Path.home()
+        candidates.extend([
+            user_profile / ".codex" / ".sandbox-bin" / "codex.exe",
+            user_profile / ".codex" / "plugins" / ".plugin-appserver" / "codex.exe",
+        ])
         local_app_data = os.environ.get("LOCALAPPDATA")
         if local_app_data:
             base = Path(local_app_data) / "OpenAI" / "Codex" / "bin"
@@ -227,14 +235,11 @@ class CodexAccountAdapter(AccountUsageAdapter):
                             candidates.append(target)
                 except OSError:
                     pass
-        user_profile = Path.home()
-        candidates.extend([
-            user_profile / ".codex" / ".sandbox-bin" / "codex.exe",
-            user_profile / ".codex" / "plugins" / ".plugin-appserver" / "codex.exe",
-        ])
         for candidate in candidates:
             if candidate.is_file():
                 return str(candidate)
+        if executable:
+            return executable
         return None
 
     def inspect(self) -> ProviderAccountUsage:
@@ -277,6 +282,7 @@ class CodexAccountAdapter(AccountUsageAdapter):
             result = subprocess.run(
                 [executable, "doctor", "--json"], capture_output=True, text=True,
                 encoding="utf-8", errors="replace", timeout=8, check=False,
+                creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
             )
             payload = json.loads(result.stdout)
             auth = payload.get("checks", {}).get("auth.credentials", {})
@@ -290,6 +296,7 @@ class CodexAccountAdapter(AccountUsageAdapter):
             [executable, "app-server", "--listen", "stdio://"],
             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
             text=True, encoding="utf-8", errors="replace", bufsize=1,
+            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
         )
         messages: queue.Queue[Dict[str, Any]] = queue.Queue()
 
@@ -420,6 +427,7 @@ class GrokAccountAdapter(AccountUsageAdapter):
             result = subprocess.run(
                 [executable, "models"], capture_output=True, text=True, encoding="utf-8",
                 errors="replace", timeout=12, check=False,
+                creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
             )
         except (OSError, subprocess.TimeoutExpired) as exc:
             return self.degraded(f"Grok instalado, mas o probe falhou: {type(exc).__name__}.", "grok_cli")
@@ -549,6 +557,66 @@ class GrokAccountAdapter(AccountUsageAdapter):
             logger.debug("Failed to decrypt Grok Bot token: %s", exc)
             return None
 
+    @staticmethod
+    def _is_grok_token_expired(expires_at_str: Optional[str]) -> bool:
+        if not expires_at_str:
+            return False
+        try:
+            clean = expires_at_str.replace("Z", "+00:00")
+            match = re.match(r"^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})(?:\.(\d+))?(.*)$", clean)
+            if match:
+                dt_base, frac, tz = match.groups()
+                clean = f"{dt_base}.{frac[:6]}{tz or ''}" if frac else f"{dt_base}{tz or ''}"
+            exp = datetime.fromisoformat(clean)
+            if exp.tzinfo is None:
+                exp = exp.replace(tzinfo=timezone.utc)
+            return datetime.now(timezone.utc) >= (exp - timedelta(seconds=60))
+        except Exception:
+            return False
+
+    @classmethod
+    def _refresh_grok_cli_token(cls, auth_file: Path, data: dict, entry_key: str, entry: dict) -> Optional[str]:
+        refresh_token = entry.get("refresh_token")
+        oidc_client_id = entry.get("oidc_client_id")
+        oidc_issuer = entry.get("oidc_issuer")
+        if not (refresh_token and oidc_client_id and oidc_issuer):
+            return None
+        token_url = f"{oidc_issuer.rstrip('/')}/oauth2/token"
+        body = urllib.parse.urlencode({
+            "grant_type": "refresh_token",
+            "refresh_token": refresh_token,
+            "client_id": oidc_client_id,
+        }).encode("utf-8")
+        req = urllib.request.Request(
+            token_url,
+            data=body,
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=5.0) as res:
+                token_payload = json.loads(res.read().decode("utf-8"))
+        except Exception as exc:
+            logger.debug("Failed to refresh Grok token at %s: %s", token_url, exc)
+            return None
+
+        new_access_token = token_payload.get("access_token") or token_payload.get("id_token")
+        if not new_access_token:
+            return None
+
+        entry["key"] = new_access_token
+        if "refresh_token" in token_payload:
+            entry["refresh_token"] = token_payload["refresh_token"]
+        if "expires_in" in token_payload:
+            expires_at = datetime.now(timezone.utc) + timedelta(seconds=int(token_payload["expires_in"]))
+            entry["expires_at"] = expires_at.isoformat()
+        data[entry_key] = entry
+        try:
+            auth_file.write_text(json.dumps(data, indent=2), encoding="utf-8")
+        except OSError as exc:
+            logger.warning("Could not persist refreshed Grok auth to %s: %s", auth_file, exc)
+        return new_access_token
+
     def _probe_grok_cli_session(self) -> Optional[ProviderAccountUsage]:
         user_profile = Path.home()
         auth_file = user_profile / ".grok" / "auth.json"
@@ -558,44 +626,67 @@ class GrokAccountAdapter(AccountUsageAdapter):
             data = json.loads(auth_file.read_text(encoding="utf-8"))
             if not isinstance(data, dict) or not data:
                 return None
-            entry = next(iter(data.values()))
+            entry_key = next(iter(data.keys()))
+            entry = data[entry_key]
+            if not isinstance(entry, dict):
+                return None
             token = entry.get("key")
             if not token:
                 return None
-            req = urllib.request.Request(
-                "https://cli-chat-proxy.grok.com/v1/user",
-                headers={
-                    "Authorization": f"Bearer {token}",
-                    "User-Agent": "grok-cli/1.0.13",
-                    "Accept": "application/json",
-                },
-            )
-            with urllib.request.urlopen(req, timeout=3.5) as res:
-                user_info = json.loads(res.read().decode("utf-8"))
+
+            if self._is_grok_token_expired(entry.get("expires_at")):
+                refreshed = self._refresh_grok_cli_token(auth_file, data, entry_key, entry)
+                if refreshed:
+                    token = refreshed
+
+            def _query_user(access_token: str) -> dict:
+                req = urllib.request.Request(
+                    "https://cli-chat-proxy.grok.com/v1/user",
+                    headers={
+                        "Authorization": f"Bearer {access_token}",
+                        "User-Agent": "grok-cli/1.0.13",
+                        "Accept": "application/json",
+                    },
+                )
+                with urllib.request.urlopen(req, timeout=3.5) as res:
+                    return json.loads(res.read().decode("utf-8"))
+
+            try:
+                user_info = _query_user(token)
+            except urllib.error.HTTPError as err:
+                if err.code == 401:
+                    refreshed = self._refresh_grok_cli_token(auth_file, data, entry_key, entry)
+                    if refreshed:
+                        token = refreshed
+                        user_info = _query_user(token)
+                    else:
+                        return None
+                else:
+                    return None
+
+            if not isinstance(user_info, dict):
+                return None
+
             email = user_info.get("email") or user_info.get("firstName")
             plan = "SuperGrok" if user_info.get("hasGrokCodeAccess") else "Grok Build"
-            windows = [
-                QuotaWindow(
-                    quota_id="grok:weekly_pool",
-                    label=f"{plan} · 1 semana",
-                    used_percent=100.0,
-                    remaining_percent=0.0,
-                    window_duration_minutes=10080,
-                    resets_at=None,
-                    metric="shared_compute_pool",
-                )
-            ]
+
+            message = (
+                "Sessão SuperGrok autenticada; o plano não expõe medidor percentual numérico na API."
+                if plan == "SuperGrok"
+                else f"Sessão {plan} autenticada; o plano não expõe medidor percentual numérico na API."
+            )
+
             return ProviderAccountUsage(
                 provider_id=self.spec.provider_id,
                 provider_name=self.spec.provider_name,
                 family=self.spec.family,
-                status=AccountConnectionStatus.LIMITED,
+                status=AccountConnectionStatus.CONNECTED,
                 adapter="grok_cli_auth",
                 plan=plan,
                 account_label=email,
-                quota_supported=True,
-                windows=windows,
-                message="Sessão SuperGrok autenticada via Grok Build CLI; cota semanal esgotada (0% disponível).",
+                quota_supported=False,
+                windows=[],
+                message=message,
                 dashboard_url=self.spec.dashboard_url,
             )
         except Exception as exc:
@@ -877,6 +968,7 @@ class ClaudeCodeAccountAdapter(AccountUsageAdapter):
                 [executable, "auth", "status", "--json"],
                 capture_output=True, text=True, encoding="utf-8", errors="replace",
                 timeout=6, check=False,
+                creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
             )
             if result.returncode == 0 and result.stdout.strip():
                 data = json.loads(result.stdout)

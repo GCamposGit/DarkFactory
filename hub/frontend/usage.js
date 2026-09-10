@@ -1,10 +1,31 @@
 /** AI account quotas and project model-call ledger for DarkHub. */
 
+const USAGE_EXPANDED_KEY = "darkfac_usage_cards_expanded";
+
 const usageState = {
   accounts: null,
   models: null,
   loading: false,
 };
+
+function isUsageExpanded() {
+  try {
+    return localStorage.getItem(USAGE_EXPANDED_KEY) === "true";
+  } catch (_) {
+    return false;
+  }
+}
+
+function setUsageExpanded(val) {
+  try {
+    localStorage.setItem(USAGE_EXPANDED_KEY, val ? "true" : "false");
+  } catch (_) {}
+}
+
+function toggleUsageExpansion() {
+  setUsageExpanded(!isUsageExpanded());
+  renderAccountUsage();
+}
 
 document.addEventListener("DOMContentLoaded", () => {
   mountAIUsageMonitor();
@@ -28,12 +49,24 @@ function mountAIUsageMonitor() {
         </div>
         <p class="mt-1 text-[11px] text-slate-500">Cotas reais quando a plataforma as expõe; conexão e evidência honesta quando não expõe.</p>
       </div>
-      <button id="refresh-ai-usage" type="button" class="rounded-lg border border-indigo-500/30 bg-indigo-500/10 px-3 py-1.5 text-[11px] font-medium text-indigo-300 transition hover:bg-indigo-500/20">
-        Atualizar contas
-      </button>
+      <div class="flex items-center gap-2">
+        <button id="toggle-usage-expand-header" type="button" class="hidden sm:inline-flex items-center gap-1 rounded-lg border border-slate-700/80 bg-slate-800/60 px-2.5 py-1.5 text-[11px] font-medium text-slate-300 transition hover:border-slate-600 hover:text-white" title="Expandir ou recolher provedores">
+          <span id="toggle-usage-expand-header-icon" class="font-bold text-indigo-400">+</span>
+          <span id="toggle-usage-expand-header-text">Expandir</span>
+        </button>
+        <button id="refresh-ai-usage" type="button" class="rounded-lg border border-indigo-500/30 bg-indigo-500/10 px-3 py-1.5 text-[11px] font-medium text-indigo-300 transition hover:bg-indigo-500/20">
+          Atualizar contas
+        </button>
+      </div>
     </div>
     <div id="account-usage-cards" class="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
       ${usageSkeleton(3)}
+    </div>
+    <div id="account-usage-toggle-footer" class="hidden flex items-center justify-center pt-1">
+      <button id="toggle-usage-expand-footer" type="button" class="inline-flex items-center gap-1.5 rounded-xl border border-slate-800 bg-slate-950/60 px-4 py-2 text-[11px] font-medium text-slate-400 shadow-sm transition hover:border-slate-700 hover:bg-slate-900 hover:text-slate-200 active:scale-95">
+        <span id="toggle-usage-expand-footer-icon" class="text-sm font-bold text-indigo-400">+</span>
+        <span id="toggle-usage-expand-footer-text">Ver mais provedores</span>
+      </button>
     </div>
     <div class="border-t border-slate-800/80 pt-4">
       <div class="mb-3 flex items-center justify-between">
@@ -49,6 +82,8 @@ function mountAIUsageMonitor() {
     </div>`;
   quickDock.insertAdjacentElement("afterend", section);
   document.getElementById("refresh-ai-usage")?.addEventListener("click", () => loadAIUsage(true));
+  document.getElementById("toggle-usage-expand-header")?.addEventListener("click", toggleUsageExpansion);
+  document.getElementById("toggle-usage-expand-footer")?.addEventListener("click", toggleUsageExpansion);
 }
 
 function usageSkeleton(count) {
@@ -97,10 +132,55 @@ function renderAccountUsage() {
   const container = document.getElementById("account-usage-cards");
   const report = usageState.accounts;
   if (!container || !report) return;
+
   const priority = { openai: 0, xai: 1, google: 2, ollama: 3 };
-  const accounts = [...(report.accounts || [])].sort((left, right) =>
+  const allAccounts = [...(report.accounts || [])].sort((left, right) =>
     (priority[left.provider_id] ?? 10) - (priority[right.provider_id] ?? 10));
-  container.innerHTML = accounts.map(renderAccountCard).join("");
+
+  // Determine primary priority/active accounts vs secondary/disconnected
+  const isPrimary = (account) => {
+    const isTopPriority = ["openai", "xai", "google"].includes(account.provider_id);
+    const isActive = account.status === "connected" || account.status === "limited";
+    return isTopPriority || isActive;
+  };
+
+  const primaryAccounts = allAccounts.filter(isPrimary);
+  const primaryIds = new Set(primaryAccounts.map((a) => a.provider_id));
+  allAccounts.slice(0, 3).forEach((a) => primaryIds.add(a.provider_id));
+  const effectivePrimary = allAccounts.filter((a) => primaryIds.has(a.provider_id));
+  const otherAccounts = allAccounts.filter((a) => !primaryIds.has(a.provider_id));
+
+  const expanded = isUsageExpanded();
+  const visibleAccounts = expanded || otherAccounts.length === 0 ? allAccounts : effectivePrimary;
+
+  container.innerHTML = visibleAccounts.map(renderAccountCard).join("");
+
+  // Update header and footer toggle controls
+  const footerContainer = document.getElementById("account-usage-toggle-footer");
+  const headerBtn = document.getElementById("toggle-usage-expand-header");
+  const headerIcon = document.getElementById("toggle-usage-expand-header-icon");
+  const headerText = document.getElementById("toggle-usage-expand-header-text");
+  const footerIcon = document.getElementById("toggle-usage-expand-footer-icon");
+  const footerText = document.getElementById("toggle-usage-expand-footer-text");
+
+  if (otherAccounts.length > 0) {
+    if (footerContainer) footerContainer.classList.remove("hidden");
+    if (headerBtn) headerBtn.classList.remove("hidden");
+
+    const iconStr = expanded ? "−" : "+";
+    const textStr = expanded
+      ? "Recolher outros provedores"
+      : `Ver mais provedores (${otherAccounts.length})`;
+
+    if (headerIcon) headerIcon.textContent = iconStr;
+    if (headerText) headerText.textContent = expanded ? "Recolher" : `Mais (${otherAccounts.length})`;
+    if (footerIcon) footerIcon.textContent = iconStr;
+    if (footerText) footerText.textContent = textStr;
+  } else {
+    if (footerContainer) footerContainer.classList.add("hidden");
+    if (headerBtn) headerBtn.classList.add("hidden");
+  }
+
   const pill = document.getElementById("usage-health-pill");
   if (pill) {
     pill.textContent = `${report.connected_count || 0} ativas · ${report.limited_count || 0} limitadas`;

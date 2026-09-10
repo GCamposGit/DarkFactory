@@ -511,3 +511,102 @@ def test_independent_processes_serialize_usage_transactions(tmp_path: Path) -> N
         assert process.returncode == 0, stdout + stderr
 
     assert ModelUsageLedger(tmp_path).report().total_calls == 20
+
+
+def test_codex_find_prefers_native_exe_over_cmd(tmp_path: Path, monkeypatch) -> None:
+    fake_cmd = tmp_path / "codex.cmd"
+    fake_cmd.write_text("@echo off", encoding="utf-8")
+
+    monkeypatch.setattr("core.usage.adapters.shutil.which", lambda _: str(fake_cmd))
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+
+    # Place fake_exe in ~/.codex/.sandbox-bin/codex.exe
+    target = tmp_path / ".codex" / ".sandbox-bin" / "codex.exe"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text("binary", encoding="utf-8")
+
+    resolved = CodexAccountAdapter._find_codex()
+    assert resolved == str(target)
+
+
+def test_subprocess_creationflags_applied_on_windows(monkeypatch) -> None:
+    recorded_flags = []
+
+    def fake_run(*args, **kwargs):
+        recorded_flags.append(kwargs.get("creationflags"))
+        class FakeResult:
+            returncode = 0
+            stdout = '{"checks": {"auth.credentials": {"status": "ok", "summary": "auth is configured"}}}'
+        return FakeResult()
+
+    monkeypatch.setattr("core.usage.adapters.subprocess.run", fake_run)
+    monkeypatch.setattr("core.usage.adapters.os.name", "nt")
+
+    CodexAccountAdapter._codex_doctor("codex.exe")
+    expected_flag = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    assert len(recorded_flags) == 1
+    assert recorded_flags[0] == expected_flag
+
+
+def test_grok_probe_cli_session_handles_supergrok_without_forcing_zero_and_refreshes(tmp_path: Path, monkeypatch) -> None:
+    from core.usage.adapters import GrokAccountAdapter
+    auth_dir = tmp_path / ".grok"
+    auth_dir.mkdir(parents=True, exist_ok=True)
+    auth_file = auth_dir / "auth.json"
+    auth_file.write_text(json.dumps({
+        "default": {
+            "key": "expired_token",
+            "refresh_token": "valid_refresh",
+            "oidc_issuer": "https://auth.example.com",
+            "oidc_client_id": "client_123",
+            "expires_at": "2020-01-01T00:00:00Z",
+        }
+    }), encoding="utf-8")
+
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+
+    refresh_called = []
+    user_called = []
+
+    class DummyResponse:
+        def __init__(self, data: bytes):
+            self.data = data
+        def read(self):
+            return self.data
+        def __enter__(self):
+            return self
+        def __exit__(self, *args):
+            pass
+
+    def fake_urlopen(req, *args, **kwargs):
+        url = req.full_url if hasattr(req, "full_url") else str(req)
+        if "oauth2/token" in url:
+            refresh_called.append(url)
+            return DummyResponse(json.dumps({
+                "access_token": "refreshed_access_token",
+                "expires_in": 3600,
+            }).encode("utf-8"))
+        if "cli-chat-proxy.grok.com" in url:
+            user_called.append(req.headers.get("Authorization"))
+            return DummyResponse(json.dumps({
+                "email": "user@example.com",
+                "hasGrokCodeAccess": True,
+            }).encode("utf-8"))
+        raise RuntimeError(f"Unexpected url {url}")
+
+    monkeypatch.setattr("core.usage.adapters.urllib.request.urlopen", fake_urlopen)
+
+    spec = ProviderSpec("xai", "xAI / Grok", ProviderFamily.FRONTIER, "https://grok.com/?_s=usage")
+    adapter = GrokAccountAdapter(spec, tmp_path / "no_snapshot")
+    usage = adapter._probe_grok_cli_session()
+
+    assert usage is not None
+    assert usage.status == AccountConnectionStatus.CONNECTED
+    assert usage.plan == "SuperGrok"
+    assert usage.quota_supported is False
+    assert usage.windows == []
+    assert "não expõe medidor percentual numérico" in usage.message
+    assert len(refresh_called) == 1
+    assert len(user_called) == 1
+    assert user_called[0] == "Bearer refreshed_access_token"
+

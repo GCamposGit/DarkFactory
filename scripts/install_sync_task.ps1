@@ -37,15 +37,29 @@ if ([string]::IsNullOrWhiteSpace($Key)) {
 }
 
 $taskName = "DarkFac-Usage-Cloud-Sync"
-$pythonPath = (Get-Command python.exe).Source
 
-$actionArgs = "-NoProfile -NonInteractive -ExecutionPolicy Bypass -WindowStyle Hidden -Command `"`"$pythonPath`" `"$syncScript`" --target-url `"$TargetUrl`" --key `"$Key`"`""
-$action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument $actionArgs
+# Localiza pythonw.exe (GUI subsystem) para execução 100% silenciosa/headless sem janela de console
+$pythonwCmd = Get-Command pythonw.exe -ErrorAction SilentlyContinue
+if ($pythonwCmd) {
+    $pythonwPath = $pythonwCmd.Source
+} else {
+    $pythonCmd = Get-Command python.exe -ErrorAction Stop
+    $candidate = Join-Path (Split-Path -Parent $pythonCmd.Source) "pythonw.exe"
+    if (Test-Path $candidate) {
+        $pythonwPath = $candidate
+    } else {
+        $pythonwPath = $pythonCmd.Source
+    }
+}
+
+$actionArgs = "`"$syncScript`" --target-url `"$TargetUrl`" --key `"$Key`""
+$action = New-ScheduledTaskAction -Execute $pythonwPath -Argument $actionArgs
 $trigger = New-ScheduledTaskTrigger -Once -At (Get-Date) -RepetitionInterval (New-TimeSpan -Minutes $IntervalMinutes)
 $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable
 
 Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Settings $settings -Force | Out-Null
 
-Write-Host "[OK] Tarefa agendada '$taskName' instalada com sucesso no Windows!" -ForegroundColor Green
-Write-Host "     Sincronização automática a cada $IntervalMinutes minutos em segundo plano (invisível)."
-Write-Host "     Você nunca mais precisará rodar scripts manualmente no terminal."
+Write-Host "[OK] Tarefa agendada '$taskName' atualizada com sucesso para modo 100% HEADLESS (pythonw.exe)!" -ForegroundColor Green
+Write-Host "     Binário: $pythonwPath"
+Write-Host "     Sincronização automática a cada $IntervalMinutes minutos em segundo plano absoluto (zero janelas/flashes)."
+Write-Host "     Você nunca mais será interrompido por popups ou janelas do shell."
