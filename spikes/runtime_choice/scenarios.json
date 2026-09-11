@@ -1,0 +1,134 @@
+[
+  {
+    "scenario_id": "R01",
+    "required": true,
+    "capability": "durable_steps",
+    "input_payload": {"value": 7, "release_digest": "release-A"},
+    "fault_point": null,
+    "expected_terminal": "succeeded",
+    "expected_effect_count": 1,
+    "expected_step_invocations": 4,
+    "expected_block_reason": null
+  },
+  {
+    "scenario_id": "R02",
+    "required": true,
+    "capability": "resume_after_crash",
+    "input_payload": {"value": 7, "release_digest": "release-A"},
+    "fault_point": "crash_after_checkpoint",
+    "expected_terminal": "succeeded",
+    "expected_effect_count": 1,
+    "expected_step_invocations": 5,
+    "expected_block_reason": null
+  },
+  {
+    "scenario_id": "R03",
+    "required": true,
+    "capability": "external_effect_deduplication",
+    "input_payload": {"value": 7, "release_digest": "release-A"},
+    "fault_point": "commit_then_disconnect_once",
+    "expected_terminal": "succeeded",
+    "expected_effect_count": 1,
+    "expected_step_invocations": 5,
+    "expected_block_reason": null
+  },
+  {
+    "scenario_id": "R04",
+    "required": true,
+    "capability": "durable_wait",
+    "input_payload": {"value": 7, "release_digest": "release-A"},
+    "fault_point": null,
+    "expected_terminal": "succeeded",
+    "expected_effect_count": 1,
+    "expected_step_invocations": 4,
+    "expected_block_reason": "approval_required"
+  },
+  {
+    "scenario_id": "R05",
+    "required": true,
+    "capability": "deduplicated_intake",
+    "input_payload": {"value": 7, "release_digest": "release-A"},
+    "fault_point": null,
+    "expected_terminal": "succeeded",
+    "expected_effect_count": 1,
+    "expected_step_invocations": 4,
+    "expected_block_reason": null
+  },
+  {
+    "scenario_id": "R06",
+    "required": true,
+    "capability": "application_protection",
+    "input_payload": {"value": 7, "release_digest": "release-A"},
+    "fault_point": "approval_digest_mismatch",
+    "expected_terminal": "succeeded",
+    "expected_effect_count": 1,
+    "expected_step_invocations": 4,
+    "expected_block_reason": "release_digest_mismatch_rejected"
+  },
+  {
+    "scenario_id": "R07",
+    "required": true,
+    "capability": "cancel_before_next_step",
+    "input_payload": {"value": 7, "release_digest": "release-A"},
+    "fault_point": "cancel_before_effect",
+    "expected_terminal": "cancelled",
+    "expected_effect_count": 0,
+    "expected_step_invocations": 2,
+    "expected_block_reason": null
+  },
+  {
+    "scenario_id": "R08",
+    "required": true,
+    "capability": "version_isolation",
+    "input_payload": {"value": 7, "release_digest": "release-A"},
+    "fault_point": null,
+    "expected_terminal": "succeeded",
+    "expected_effect_count": 2,
+    "expected_step_invocations": 10,
+    "expected_block_reason": null
+  },
+  {
+    "scenario_id": "R09",
+    "required": true,
+    "capability": "storage_failure",
+    "input_payload": {"value": 7, "release_digest": "release-A"},
+    "fault_point": "storage_unavailable",
+    "expected_terminal": "error",
+    "expected_effect_count": 0,
+    "expected_step_invocations": 0,
+    "expected_block_reason": "storage_unavailable"
+  },
+  {
+    "scenario_id": "R10",
+    "required": true,
+    "capability": "bounded_concurrency",
+    "input_payload": {"value": 7, "release_digest": "release-A", "jobs": 10, "limit": 2},
+    "fault_point": null,
+    "expected_terminal": "succeeded",
+    "expected_effect_count": 10,
+    "expected_step_invocations": 40,
+    "expected_block_reason": null
+  },
+  {
+    "scenario_id": "R11",
+    "required": true,
+    "capability": "integrity_verification",
+    "input_payload": {"value": 7, "release_digest": "release-A"},
+    "fault_point": "corrupt_result",
+    "expected_terminal": "error",
+    "expected_effect_count": 0,
+    "expected_step_invocations": 0,
+    "expected_block_reason": "integrity_mismatch_rejected"
+  },
+  {
+    "scenario_id": "R12",
+    "required": true,
+    "capability": "durable_completion",
+    "input_payload": {"value": 7, "release_digest": "release-A"},
+    "fault_point": null,
+    "expected_terminal": "succeeded",
+    "expected_effect_count": 1,
+    "expected_step_invocations": 4,
+    "expected_block_reason": null
+  }
+]
