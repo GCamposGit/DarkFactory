@@ -2,17 +2,20 @@
 
 ## Identity
 
-- Ticket: `HF-02-02`
+- Ticket: `HF-02-02` (`user-demand`)
 - Initial implementation owner: `/root/hf02_02_luna`
 - Model: `gpt-5.6-luna`, reasoning effort `xhigh`
 - Validation coordinator after the model quota failure: `/root`
-- Branch: `codex/hf-02-02-luna`
-- Isolated checkout: `C:\dev\DarkFac\.worktrees\hf-02-02-luna`
-- Base SHA: `0f57e9c0cb3cf1a5d02d8e934c162617ebe71db9`
-- State: `blocked_validation`; implementation candidate complete, not remotely delivered
+- Source branch/worktree: `codex/hf-02-02-luna`, `C:\dev\DarkFac\.worktrees\hf-02-02-luna`
+- Delivery branch/worktree: `codex/hf-02-02-delivery`, `C:\dev\DarkFac\.worktrees\hf-02-02-delivery`
+- Delivery base SHA: `c592d1c88aba67d1944cf72e490749b2c37a3b20`
+- Functional commits: `8c25d3d` (cherry-pick of `478d407`), `ddaac5e` (cherry-pick of `4249c57`)
+- State before remote delivery: `validated_pending_publish`
 
-The implementation ran in an independent clean clone because the repository root had
-active unrelated changes. No file in the shared root was modified by this ticket.
+The implementation was produced in an independent clean clone because the shared
+workspace had unrelated active changes. The final delivery checkout is based directly
+on `origin/main` and contains only the HF-02-02 commit plus the separate Canaletto
+scope correction required to restore clean-clone test discovery.
 
 ## Scope
 
@@ -25,37 +28,56 @@ active unrelated changes. No file in the shared root was modified by this ticket
 - Added public-path JSON round-trip tests, closed enum/extra-field tests, root path
   containment, duplicate identity rejection, secret/DSN rejection and distinct
   `pass`, `unsupported` and `blocked` status coverage.
+- Removed the shared test/report pair that imported the local-only `run_canaletto`
+  module, keeping Canaletto outside the shared clone and harness as required by scope.
 - PostgreSQL access is not required for this ticket and was not used.
 
-## Files
+## Files in the delivery diff
 
-- `spikes/__init__.py`
-- `spikes/runtime_choice/__init__.py`
-- `spikes/runtime_choice/contracts.py`
-- `tests/test_runtime_spike_contracts.py`
-- `.factory/reports/hf-02-02-report.md`
+- Added: `spikes/__init__.py`
+- Added: `spikes/runtime_choice/__init__.py`
+- Added: `spikes/runtime_choice/contracts.py`
+- Added: `tests/test_runtime_spike_contracts.py`
+- Added: `.factory/reports/hf-02-02-report.md`
+- Removed: `tests/test_ajustar_link_para_canalle.py`
+- Removed: `.factory/reports/usr-14-canaletto-launcher-report.md`
 
 ## Validation
 
 | Command | Result |
 | --- | --- |
-| `python -m pytest tests/test_runtime_spike_contracts.py -v` | exit 0; 13 passed |
-| `python core/harness/runner.py --quick` | exit 1; syntax passed, suite collection blocked by pre-existing `tests/test_ajustar_link_para_canalle.py` importing local-only `run_canaletto` absent from a clean clone |
-| `python -m pytest tests -v --ignore=tests/test_canaletto.py --ignore=tests/test_ajustar_link_para_canalle.py` | exit 1; 457 passed, 2 skipped, one unrelated scale-latency assertion failed at 545.60 ms versus 500 ms |
-| `python -m pytest tests/test_roadmap_scale.py::test_dense_graph_500_items_1500_relations_latency_budget -q` | exit 0; 1 passed in 0.15 s on immediate isolated retry |
+| `python core/harness/terminal_env.py --check` | exit 0; `[TERMINAL_ENV_PASS]` |
+| `python -m pytest tests/test_runtime_spike_contracts.py -v` | exit 0; 13 passed in 0.15 s |
+| `python core/harness/runner.py --quick` | exit 0; `[HARNESS_PASS]`, 460 collected, 458 passed, 2 skipped |
+| `python -m pytest tests -v` | exit 0; 460 collected, 458 passed, 2 skipped in 109.18 s |
+| `git diff --check` | exit 0 |
+| independent public round-trip probe | exit 0; exact object round-trip passed |
+| independent strict JSON probe | exit 1 as expected; boolean rejected for numeric field |
+| independent decision-integrity probe | exit 1 as expected; self-selected runtime rejected |
 
-The official repository gate remains red because its configuration collects a test
-that imports a file intentionally excluded from the shared repository. The timing
-failure was not reproducible in isolation. Neither failure originates in or is fixed
-by HF-02-02; Canaletto and roadmap performance are outside this ticket's ownership.
+The initial gate failure was reproduced before the correction: collection found 460
+items but aborted on `tests/test_ajustar_link_para_canalle.py` importing the absent
+local-only `run_canaletto`. The separate scope correction removed that shared test and
+its local-only report. The final gate collected the same 460 core tests without the
+Canaletto collection error.
+
+## Adversarial review
+
+Verdict: `no_actionable_findings_in_reviewed_scope`.
+
+Reviewed the public exports, JSON round-trip boundary, strict boolean handling, secret
+and reference filters, duplicate result identity, and the rule forbidding a comparison
+from selecting a runtime. Limits: no DBOS/PostgreSQL integration was exercised because
+those dependencies and access are explicitly outside HF-02-02.
 
 ## Agent and delivery state
 
 The Luna implementation task ended with an account usage-limit error after producing
-the four code/test files. The coordinator preserved the isolated delta and completed
-the validation above. The clone's `origin` points to the dirty local checkout, so no
-push was attempted. There is no PR, merge receipt or remote-main reachability evidence.
+the implementation files. The coordinator preserved the isolated delta, performed the
+Canaletto scope correction, created the clean delivery branch from `origin/main`, and
+completed the mandatory gates. The delivery branch is clean after the evidence refresh;
+the report-only commit and its final SHA must be recorded here after the commit is made.
 
-HF-02-02 must not be marked delivered until the clean-clone harness contract is
-reconciled, the mandatory gates pass, and the selective commit is published, reviewed,
-merged and verified against the remote `main`.
+Remote delivery remains pending: push, PR creation, required checks/reviews, merge,
+and remote-main reachability verification are still required before declaring HF-02-02
+complete.
