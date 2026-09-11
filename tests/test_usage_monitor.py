@@ -610,3 +610,48 @@ def test_grok_probe_cli_session_handles_supergrok_without_forcing_zero_and_refre
     assert len(user_called) == 1
     assert user_called[0] == "Bearer refreshed_access_token"
 
+
+def test_grok_adapter_probes_bot_session_live_percentage(tmp_path: Path, monkeypatch) -> None:
+    from core.usage.adapters import GrokAccountAdapter
+
+    class DummyResponse:
+        def __init__(self, data: bytes):
+            self.data = data
+        def read(self):
+            return self.data
+        def __enter__(self):
+            return self
+        def __exit__(self, *args):
+            pass
+
+    bot_payload = {
+        "currentPeriodStart": "2026-09-08T22:15:57.642Z",
+        "nextResetTimestampUtc": "2026-09-15T22:15:57.642Z",
+        "usagePercent": 2.141932,
+        "hasAvailableUsage": True,
+        "hasNonZeroIncludedLimit": True,
+        "grokPlanLabel": "SuperGrok",
+    }
+
+    monkeypatch.setattr(GrokAccountAdapter, "_extract_grok_bot_token", lambda *args: "mock_jwt_token")
+    monkeypatch.setattr(GrokAccountAdapter, "_probe_grok_cli_session", lambda self: None)
+    monkeypatch.setattr(
+        "core.usage.adapters.urllib.request.urlopen",
+        lambda req, *args, **kwargs: DummyResponse(json.dumps(bot_payload).encode("utf-8")),
+    )
+
+    spec = ProviderSpec("xai", "xAI / Grok", ProviderFamily.FRONTIER, "https://grok.com/?_s=usage")
+    adapter = GrokAccountAdapter(spec, tmp_path / "no_snapshot")
+    result = adapter.inspect()
+
+    assert result.status == AccountConnectionStatus.CONNECTED
+    assert result.adapter == "grok_bot_api"
+    assert result.plan == "SuperGrok"
+    assert result.quota_supported is True
+    assert len(result.windows) == 1
+    assert result.windows[0].used_percent == 2.14
+    assert result.windows[0].remaining_percent == 97.86
+    assert result.windows[0].resets_at == "2026-09-15T22:15:57.642Z"
+    assert "Pool de computação semanal" in result.message
+
+

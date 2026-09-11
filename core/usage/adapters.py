@@ -403,17 +403,25 @@ class CodexAccountAdapter(AccountUsageAdapter):
 
 class GrokAccountAdapter(AccountUsageAdapter):
     def inspect(self) -> ProviderAccountUsage:
-        snapshot = self._snapshot_payload()
-        if snapshot:
-            return self._from_snapshot(snapshot)
+        # 1. Try Grok Bot session probe (real live quota % and weekly reset on Windows)
+        try:
+            bot_usage = self._probe_grok_bot_session()
+            if bot_usage:
+                return bot_usage
+        except Exception as exc:
+            logger.debug("Grok Bot session probe failed: %s", exc)
 
-        # 1. Try Grok CLI session probe via ~/.grok/auth.json (official SuperGrok session)
+        # 2. Try Grok CLI session probe via ~/.grok/auth.json (official SuperGrok session)
         try:
             cli_usage = self._probe_grok_cli_session()
             if cli_usage:
                 return cli_usage
         except Exception as exc:
             logger.debug("Grok CLI session probe failed: %s", exc)
+
+        snapshot = self._snapshot_payload()
+        if snapshot:
+            return self._from_snapshot(snapshot)
 
         executable = shutil.which("grok")
         if not executable:
@@ -470,13 +478,21 @@ class GrokAccountAdapter(AccountUsageAdapter):
         if not isinstance(payload, dict):
             return None
 
-        usage_fraction = payload.get("usagePercent")
-        used_percent = _clamp_percent(float(usage_fraction) * 100.0 if usage_fraction is not None else None)
+        usage_val = payload.get("usagePercent")
+        used_percent = _clamp_percent(float(usage_val) if usage_val is not None else None)
         remaining_percent = round(100.0 - used_percent, 2) if used_percent is not None else None
         resets_at = _timestamp_to_iso(payload.get("nextResetTimestampUtc"))
         plan = str(payload.get("grokPlanLabel") or payload.get("includedUsageSuperGrokPlan") or "SuperGrok")
 
-        limited = used_percent is not None and used_percent >= 100.0
+        limited = not payload.get("hasAvailableUsage", True) or (used_percent is not None and used_percent >= 100.0)
+        account_label = None
+        try:
+            cli_res = self._probe_grok_cli_session()
+            if cli_res and cli_res.account_label:
+                account_label = cli_res.account_label
+        except Exception:
+            pass
+
         windows = [
             QuotaWindow(
                 quota_id="grok:weekly_pool",
@@ -495,7 +511,7 @@ class GrokAccountAdapter(AccountUsageAdapter):
             status=AccountConnectionStatus.LIMITED if limited else AccountConnectionStatus.CONNECTED,
             adapter="grok_bot_api",
             plan=plan,
-            account_label=None,
+            account_label=account_label,
             quota_supported=True,
             windows=windows,
             message="Pool de computação semanal lido da sessão autenticada do Grok.",
