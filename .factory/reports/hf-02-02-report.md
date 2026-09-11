@@ -10,6 +10,7 @@
 - Delivery branch/worktree: `codex/hf-02-02-delivery`, `C:\dev\DarkFac\.worktrees\hf-02-02-delivery`
 - Delivery base SHA: `c592d1c88aba67d1944cf72e490749b2c37a3b20`
 - Functional commits: `8c25d3d` (cherry-pick of `478d407`), `ddaac5e` (cherry-pick of `4249c57`)
+- Functional delivery SHA: `ddaac5e`; `40c4259` is documentation-only evidence refresh
 - State before remote delivery: `validated_pending_publish`
 
 The implementation was produced in an independent clean clone because the shared
@@ -76,7 +77,8 @@ The Luna implementation task ended with an account usage-limit error after produ
 the implementation files. The coordinator preserved the isolated delta, performed the
 Canaletto scope correction, created the clean delivery branch from `origin/main`, and
 completed the mandatory gates. The delivery branch is clean after the evidence refresh;
-the report-only commit and its final SHA must be recorded here after the commit is made.
+the functional delivery SHA is `ddaac5e`; the report refresh is documentation-only and
+does not alter the implementation or test behavior.
 
 Remote delivery remains pending: push, PR creation, required checks/reviews, merge,
 and remote-main reachability verification are still required before declaring HF-02-02
