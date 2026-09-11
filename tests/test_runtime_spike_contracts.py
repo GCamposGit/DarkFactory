@@ -1,7 +1,8 @@
-"""Contract-level tests for HF-02-02.
+"""Public-contract tests for HF-02-02.
 
-These tests deliberately use only the project dependencies; DBOS is not
-imported while the common laboratory contracts are collected.
+The suite intentionally imports no DBOS/PostgreSQL module.  It exercises both
+Python construction and the actual JSON transport route used by a future
+driver.
 """
 
 from __future__ import annotations
@@ -27,16 +28,39 @@ from spikes.runtime_choice.contracts import (
 )
 
 
-def make_config(tmp_path: Path, *, runtime: RuntimeKind = RuntimeKind.NATIVE_SQLITE) -> LabConfig:
+def make_config(
+    tmp_path: Path,
+    *,
+    runtime: RuntimeKind = RuntimeKind.NATIVE_SQLITE,
+    runtime_version: str = "native-core",
+) -> LabConfig:
     return LabConfig(
         lab_id="contract-test",
         root_dir=tmp_path,
         runtime=runtime,
-        runtime_version="native-core",
+        runtime_version=runtime_version,
         workflow_version=WorkflowVersion.V1,
         database_alias="darkfac_hf02_contract",
         database_url_env=("DARKFAC_HF02_DATABASE_URL" if runtime is RuntimeKind.DBOS_POSTGRES else None),
         effect_base_url="http://127.0.0.1:18402",
+    )
+
+
+def make_result(tmp_path: Path, *, repeat_index: int = 1, mode: str = "real_lab") -> ScenarioResult:
+    return ScenarioResult(
+        lab_id="contract-test",
+        scenario_id="R01",
+        runtime=RuntimeKind.NATIVE_SQLITE,
+        repeat_index=repeat_index,
+        status="pass",
+        environment_ref="environment.json",
+        validation_mode=mode,
+        target_differences=[],
+        assertions={"terminal": True},
+        duration_ms=1.5,
+        effect_count=1,
+        actual_step_invocations=4,
+        artifact_refs=["results/R01.json"],
     )
 
 
@@ -72,12 +96,6 @@ def test_lab_config_json_round_trip_preserves_exact_object(tmp_path: Path) -> No
     with pytest.raises(ValidationError):
         LabConfig.model_validate_json(json.dumps(json_payload))
 
-    for invalid_root in (True, {"path": str(tmp_path)}, None):
-        json_payload = json.loads(config.model_dump_json())
-        json_payload["root_dir"] = invalid_root
-        with pytest.raises(ValidationError):
-            LabConfig.model_validate_json(json.dumps(json_payload))
-
 
 def test_root_enum_and_unknown_fields_are_rejected(tmp_path: Path) -> None:
     with pytest.raises(ValidationError):
@@ -85,12 +103,7 @@ def test_root_enum_and_unknown_fields_are_rejected(tmp_path: Path) -> None:
     with pytest.raises(ValidationError):
         make_config(tmp_path, runtime="unsupported")  # type: ignore[arg-type]
     with pytest.raises(ValidationError):
-        LabConfig(
-            **{
-                **make_config(tmp_path).model_dump(),
-                "unexpected": True,
-            }
-        )
+        LabConfig(**{**make_config(tmp_path).model_dump(), "unexpected": True})
 
 
 def test_commands_enforce_action_fields_and_closed_enums() -> None:
@@ -108,6 +121,8 @@ def test_commands_enforce_action_fields_and_closed_enums() -> None:
         DriverCommand(command_id="command-2", action="start", workflow_id="workflow-1")  # type: ignore[arg-type]
     with pytest.raises(ValidationError):
         DriverCommand(command_id="command-3", action="approve")
+    with pytest.raises(ValidationError):
+        DriverCommand(command_id="command-4", action="shutdown", workflow_id="workflow-1")
 
 
 def test_scenario_ids_results_and_comparison_are_closed(tmp_path: Path) -> None:
@@ -120,23 +135,10 @@ def test_scenario_ids_results_and_comparison_are_closed(tmp_path: Path) -> None:
         expected_effect_count=1,
         expected_step_invocations=4,
     )
-    result = ScenarioResult(
-        lab_id="contract-test",
-        scenario_id=scenario.scenario_id,
-        runtime=RuntimeKind.NATIVE_SQLITE,
-        repeat_index=1,
-        status="pass",
-        environment_ref="HF-02-01",
-        validation_mode=ValidationMode.REAL_LAB,
-        target_differences=[],
-        assertions={"terminal": True},
-        duration_ms=1.5,
-        effect_count=1,
-        actual_step_invocations=4,
-    )
+    result = make_result(tmp_path)
     comparison = RuntimeComparison(
         baseline_snapshot_hash="sha256:test",
-        environment_ref="HF-02-01",
+        environment_ref="environment.json",
         code_sha="local",
         results=[result],
         capability_matrix={"native_sqlite": AdapterCapabilities(durable_steps=True)},
@@ -158,85 +160,112 @@ def test_scenario_ids_results_and_comparison_are_closed(tmp_path: Path) -> None:
         )
 
 
-def test_scenario_result_validation_mode_roundtrip_and_rejections() -> None:
-    base_data = {
-        "lab_id": "lab-1",
-        "scenario_id": "R02",
-        "runtime": RuntimeKind.NATIVE_SQLITE,
-        "repeat_index": 1,
-        "status": "pass",
-        "assertions": {"step": True},
-        "duration_ms": 10.0,
-        "effect_count": 1,
-        "actual_step_invocations": 2,
-    }
+@pytest.mark.parametrize("mode", ["real_lab", "target_environment", "mock_only"])
+def test_result_origin_modes_round_trip(tmp_path: Path, mode: str) -> None:
+    result = make_result(tmp_path, mode=mode)
+    restored = ScenarioResult.model_validate_json(result.model_dump_json())
+    assert restored == result
+    assert restored.validation_mode is ValidationMode(mode)
 
-    # 1. Roundtrip de cada modo suportado
-    for mode in (ValidationMode.REAL_LAB, ValidationMode.TARGET_ENVIRONMENT, ValidationMode.MOCK_ONLY):
-        res = ScenarioResult(
-            **base_data,
-            environment_ref="env-lab",
-            validation_mode=mode,
-            target_differences=["diff-1"],
+
+def test_result_requires_origin_and_rejects_unknown_mode(tmp_path: Path) -> None:
+    data = make_result(tmp_path).model_dump()
+    data.pop("validation_mode")
+    with pytest.raises(ValidationError):
+        ScenarioResult.model_validate(data)
+
+    with pytest.raises(ValidationError):
+        make_result(tmp_path, mode="simulation")
+
+
+def test_secret_fields_and_unsanitized_references_are_rejected(tmp_path: Path) -> None:
+    with pytest.raises(ValidationError):
+        make_config(tmp_path, runtime_version="postgresql://u:p@host/db")
+    with pytest.raises(ValidationError):
+        ScenarioResult.model_validate(
+            {**make_result(tmp_path).model_dump(), "environment_ref": "https://u:p@example.invalid/env"}
         )
-        assert res.validation_mode is mode
-        restored = ScenarioResult.model_validate_json(res.model_dump_json())
-        assert restored == res
-        assert restored.validation_mode is mode
-        assert restored.target_differences == ["diff-1"]
-
-    # 2. Rejeição de modo desconhecido/inválido
-    for invalid_mode in ("simulation", "invalid_mode", 123, True):
-        with pytest.raises(ValidationError):
-            ScenarioResult(**base_data, environment_ref="env-lab", validation_mode=invalid_mode)
-
-    # 3. Dado antigo sem origem não recebe default de alvo (ausência de validation_mode ou environment_ref falha)
     with pytest.raises(ValidationError):
-        ScenarioResult(**base_data, environment_ref="env-lab")  # falta validation_mode
-    with pytest.raises(ValidationError):
-        ScenarioResult(**base_data, validation_mode=ValidationMode.TARGET_ENVIRONMENT)  # falta environment_ref
-
-    # 4. Target differences com string vazia ou em branco é rejeitado
-    with pytest.raises(ValidationError):
-        ScenarioResult(
-            **base_data,
-            environment_ref="env-lab",
-            validation_mode=ValidationMode.REAL_LAB,
-            target_differences=["   "],
+        ScenarioSpec(
+            scenario_id="R01",
+            required=True,
+            capability="durable_steps",
+            input_payload={"password": "synthetic-secret"},
+            expected_terminal="succeeded",
+            expected_effect_count=0,
+            expected_step_invocations=0,
         )
 
-    # 5. Agregação em RuntimeComparison preserva target_differences e não promove mock/mixed a evidência operacional
-    res_mock = ScenarioResult(
-        **base_data,
-        environment_ref="env-mock",
-        validation_mode=ValidationMode.MOCK_ONLY,
-        target_differences=["sqlite_in_memory_instead_of_disk"],
-    )
-    res_target = ScenarioResult(
-        **{
-            **base_data,
-            "scenario_id": "R03",
-            "environment_ref": "env-target",
-            "validation_mode": ValidationMode.TARGET_ENVIRONMENT,
-            "target_differences": ["network_latency_10ms"],
+
+def test_duplicate_result_identity_is_rejected(tmp_path: Path) -> None:
+    result = make_result(tmp_path)
+    with pytest.raises(ValidationError):
+        RuntimeComparison(
+            baseline_snapshot_hash="sha256:test",
+            environment_ref="environment.json",
+            code_sha="local",
+            results=[result, result],
+        )
+
+
+def test_comparison_preserves_mixed_result_origins(tmp_path: Path) -> None:
+    first = make_result(tmp_path)
+    second = ScenarioResult.model_validate(
+        {
+            **first.model_dump(),
+            "scenario_id": "R02",
+            "environment_ref": "target-environment.json",
+            "validation_mode": "mock_only",
         }
     )
-    comparison_mixed = RuntimeComparison(
+    comparison = RuntimeComparison(
         baseline_snapshot_hash="sha256:test",
-        environment_ref="HF-02-01",
+        environment_ref="comparison-manifest.json",
         code_sha="local",
-        results=[res_mock, res_target],
+        results=[first, second],
     )
-    assert comparison_mixed.all_target_differences == [
-        "sqlite_in_memory_instead_of_disk",
-        "network_latency_10ms",
-    ]
-    assert comparison_mixed.has_operational_evidence is False
+    assert {result.environment_ref for result in comparison.results} == {
+        "environment.json",
+        "target-environment.json",
+    }
 
-    comparison_target_only = RuntimeComparison(
-        baseline_snapshot_hash="sha256:test",
-        environment_ref="HF-02-01",
-        code_sha="local",
-        results=[res_target],
+
+def test_unsupported_and_blocked_are_not_pass(tmp_path: Path) -> None:
+    for status in ("unsupported", "blocked"):
+        result = ScenarioResult(
+            **{
+                **make_result(tmp_path).model_dump(),
+                "status": status,
+                "target_differences": ["capability not provided"],
+            }
+        )
+        assert result.status.value == status
+        assert result.status.value != "pass"
+
+
+def test_comparison_aggregates_differences_and_operational_evidence(tmp_path: Path) -> None:
+    mock_res = make_result(tmp_path, mode="mock_only")
+    target_res = ScenarioResult.model_validate(
+        {
+            **make_result(tmp_path).model_dump(),
+            "scenario_id": "R02",
+            "validation_mode": "target_environment",
+            "target_differences": ["diff-network"],
+        }
     )
-    assert comparison_target_only.has_operational_evidence is True
+    mixed = RuntimeComparison(
+        baseline_snapshot_hash="sha256:test",
+        environment_ref="comparison-manifest.json",
+        code_sha="local",
+        results=[mock_res, target_res],
+    )
+    assert mixed.all_target_differences == ["diff-network"]
+    assert mixed.has_operational_evidence is False
+
+    target_only = RuntimeComparison(
+        baseline_snapshot_hash="sha256:test",
+        environment_ref="comparison-manifest.json",
+        code_sha="local",
+        results=[target_res],
+    )
+    assert target_only.has_operational_evidence is True

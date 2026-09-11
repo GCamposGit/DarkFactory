@@ -1,8 +1,9 @@
 """Strict, dependency-light contracts for the HF-02 laboratory.
 
-The contracts are intentionally independent from DBOS.  The common test
-suite can therefore import them in an offline environment and the optional
-DBOS adapter can remain lazy until a real PostgreSQL laboratory is available.
+The contracts are transport objects for the experiment only.  They deliberately
+do not import DBOS, PostgreSQL drivers, or any production runtime.  Optional
+adapters can therefore be loaded lazily while the common test suite remains
+offline and deterministic.
 """
 
 from __future__ import annotations
@@ -11,10 +12,17 @@ import math
 import re
 from enum import IntEnum, StrEnum
 from pathlib import Path
-from typing import Any, ClassVar, Final, Mapping
+from typing import Annotated, Any, ClassVar, Final
 from urllib.parse import urlsplit
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    PlainValidator,
+    field_validator,
+    model_validator,
+)
 
 
 _ID_RE: Final[re.Pattern[str]] = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$")
@@ -25,19 +33,19 @@ _DATABASE_ALIAS_RE: Final[re.Pattern[str]] = re.compile(r"^[a-z][a-z0-9_]{0,62}$
 _SECRET_MARKERS: Final[tuple[str, ...]] = (
     "postgresql://",
     "postgres://",
+    "mysql://",
+    "mongodb://",
     "password=",
+    "passwd=",
     "sslpassword=",
     "secret=",
     "token=",
+    "authorization:",
+    "bearer ",
 )
-
-
-class ValidationMode(StrEnum):
-    """Validation modes recognized by the runtime laboratory."""
-
-    REAL_LAB = "real_lab"
-    TARGET_ENVIRONMENT = "target_environment"
-    MOCK_ONLY = "mock_only"
+_SECRET_KEYS: Final[frozenset[str]] = frozenset(
+    {"password", "passwd", "secret", "token", "dsn", "database_url", "credential"}
+)
 
 
 class RuntimeKind(StrEnum):
@@ -105,6 +113,14 @@ class DecisionStatus(StrEnum):
     PENDING_ARCHITECT_REVIEW = "pending_architect_review"
     BLOCKED = "blocked"
     NO_CANDIDATE_QUALIFIED = "no_candidate_qualified"
+
+
+class ValidationMode(StrEnum):
+    """Origin of evidence associated with a scenario result."""
+
+    REAL_LAB = "real_lab"
+    TARGET_ENVIRONMENT = "target_environment"
+    MOCK_ONLY = "mock_only"
 
 
 class CliExitCode(IntEnum):
@@ -178,18 +194,71 @@ def _ensure_json_value(value: Any, *, path: str = "payload") -> None:
     raise ValueError(f"{path} contains unsupported value type {type(value).__name__}")
 
 
-def _non_blank(value: str, *, field_name: str) -> str:
+def _reject_secret_material(value: Any, *, path: str = "value") -> None:
+    """Reject raw credentials while preserving safe secret references."""
+
+    if isinstance(value, dict):
+        for key, item in value.items():
+            if isinstance(key, str) and key.lower() in _SECRET_KEYS:
+                raise ValueError(f"{path}.{key} must be a sanitized reference")
+            _reject_secret_material(item, path=f"{path}.{key}")
+        return
+    if isinstance(value, list):
+        for index, item in enumerate(value):
+            _reject_secret_material(item, path=f"{path}[{index}]")
+        return
+    if isinstance(value, str) and any(marker in value.lower() for marker in _SECRET_MARKERS):
+        raise ValueError(f"{path} contains secret material")
+
+
+def _non_blank(value: object, *, field_name: str) -> str:
+    if not isinstance(value, str):
+        raise ValueError(f"{field_name} must be a string")
     normalized = value.strip()
     if not normalized:
         raise ValueError(f"{field_name} must not be blank")
     return normalized
 
 
-def _safe_id(value: str, *, field_name: str) -> str:
+def _safe_id(value: object, *, field_name: str) -> str:
     normalized = _non_blank(value, field_name=field_name)
     if not _ID_RE.fullmatch(normalized):
         raise ValueError(f"{field_name} contains unsupported characters")
     return normalized
+
+
+def _safe_reference(value: object, *, field_name: str) -> str:
+    """Validate an evidence/reference locator without accepting credentials."""
+
+    normalized = _non_blank(value, field_name=field_name)
+    _reject_secret_material(normalized, path=field_name)
+    parsed = urlsplit(normalized)
+    if parsed.scheme or parsed.netloc or parsed.query or parsed.fragment:
+        raise ValueError(f"{field_name} must be a relative sanitized reference")
+    path = Path(normalized)
+    if path.is_absolute() or ".." in path.parts:
+        raise ValueError(f"{field_name} must be a relative sanitized reference")
+    if "\x00" in normalized or "\\" in normalized:
+        raise ValueError(f"{field_name} contains an unsupported path character")
+    return normalized
+
+
+def _validate_root_dir(value: object) -> Path:
+    """Accept Path/string on both Python and JSON validation routes."""
+
+    if isinstance(value, bool) or not isinstance(value, (str, Path)):
+        raise ValueError("root_dir must be a path string or pathlib.Path")
+    if isinstance(value, str) and not value.strip():
+        raise ValueError("root_dir must not be blank")
+    path = Path(value)
+    if not path.exists():
+        raise ValueError("root_dir must exist")
+    if not path.is_dir():
+        raise ValueError("root_dir must be a directory")
+    return path.resolve()
+
+
+RootDirectory = Annotated[Path, PlainValidator(_validate_root_dir)]
 
 
 class StrictLabModel(BaseModel):
@@ -208,7 +277,7 @@ class LabConfig(StrictLabModel):
 
     schema_version: str = Field(default="1", frozen=True)
     lab_id: str = Field(min_length=1)
-    root_dir: Path
+    root_dir: RootDirectory
     runtime: RuntimeKind
     runtime_version: str = Field(min_length=1)
     workflow_version: WorkflowVersion
@@ -232,12 +301,18 @@ class LabConfig(StrictLabModel):
     @field_validator("runtime", mode="before")
     @classmethod
     def _runtime_enum_from_json(cls, value: object) -> RuntimeKind:
-        return value if isinstance(value, RuntimeKind) else RuntimeKind(value)
+        try:
+            return value if isinstance(value, RuntimeKind) else RuntimeKind(value)
+        except ValueError as error:
+            raise ValueError("runtime must be a supported runtime") from error
 
     @field_validator("workflow_version", mode="before")
     @classmethod
     def _workflow_version_enum_from_json(cls, value: object) -> WorkflowVersion:
-        return value if isinstance(value, WorkflowVersion) else WorkflowVersion(value)
+        try:
+            return value if isinstance(value, WorkflowVersion) else WorkflowVersion(value)
+        except ValueError as error:
+            raise ValueError("workflow_version must be a supported version") from error
 
     @field_validator("lab_id")
     @classmethod
@@ -247,25 +322,11 @@ class LabConfig(StrictLabModel):
             raise ValueError("lab_id contains unsupported characters")
         return normalized
 
-    @field_validator("root_dir", mode="before")
-    @classmethod
-    def _root_is_a_directory(cls, value: object, info: ValidationInfo) -> Path | str:
-        if not isinstance(value, (str, Path)):
-            raise ValueError("root_dir must be a path")
-        path = Path(value)
-        if not path.exists():
-            raise ValueError("root_dir must exist")
-        if not path.is_dir():
-            raise ValueError("root_dir must be a directory")
-        resolved = path.resolve()
-        return str(resolved) if info.mode == "json" else resolved
-
     @field_validator("runtime_version")
     @classmethod
     def _runtime_version_is_safe(cls, value: str) -> str:
         normalized = _non_blank(value, field_name="runtime_version")
-        if any(marker in normalized.lower() for marker in _SECRET_MARKERS):
-            raise ValueError("runtime_version must not contain a DSN or secret")
+        _reject_secret_material(normalized, path="runtime_version")
         return normalized
 
     @field_validator("database_alias")
@@ -286,20 +347,23 @@ class LabConfig(StrictLabModel):
         normalized = _non_blank(value, field_name="database_url_env")
         if not _ENV_NAME_RE.fullmatch(normalized):
             raise ValueError("database_url_env must be an uppercase environment name")
-        if any(marker in normalized.lower() for marker in _SECRET_MARKERS):
-            raise ValueError("database_url_env must be an environment reference, not a DSN")
         return normalized
 
     @field_validator("effect_base_url")
     @classmethod
     def _effect_url_is_loopback(cls, value: str) -> str:
         normalized = _non_blank(value, field_name="effect_base_url").rstrip("/")
-        parsed = urlsplit(normalized)
-        if parsed.scheme != "http" or parsed.hostname not in {"127.0.0.1", "localhost", "::1"}:
+        try:
+            parsed = urlsplit(normalized)
+            hostname = parsed.hostname
+            port = parsed.port
+        except ValueError as error:
+            raise ValueError("effect_base_url must be a valid HTTP URL") from error
+        if parsed.scheme != "http" or hostname not in {"127.0.0.1", "localhost", "::1"}:
             raise ValueError("effect_base_url must be an HTTP loopback URL")
-        if parsed.username or parsed.password:
-            raise ValueError("effect_base_url must not contain credentials")
-        if not parsed.port or not (1 <= parsed.port <= 65535):
+        if parsed.username or parsed.password or parsed.query or parsed.fragment:
+            raise ValueError("effect_base_url must not contain credentials or query data")
+        if port is None or not (1 <= port <= 65535):
             raise ValueError("effect_base_url must include a valid port")
         return normalized
 
@@ -307,8 +371,7 @@ class LabConfig(StrictLabModel):
     def _runtime_database_contract(self) -> LabConfig:
         if self.runtime is RuntimeKind.DBOS_POSTGRES and self.database_url_env is None:
             raise ValueError("dbos_postgres requires database_url_env")
-        if any(marker in self.model_dump_json().lower() for marker in _SECRET_MARKERS):
-            raise ValueError("serialized LabConfig must not contain a DSN or secret")
+        _reject_secret_material(self.model_dump(mode="json"), path="LabConfig")
         return self
 
 
@@ -328,19 +391,28 @@ class ScenarioSpec(StrictLabModel):
     @field_validator("capability", mode="before")
     @classmethod
     def _capability_enum_from_json(cls, value: object) -> ScenarioCapability:
-        return value if isinstance(value, ScenarioCapability) else ScenarioCapability(value)
+        try:
+            return value if isinstance(value, ScenarioCapability) else ScenarioCapability(value)
+        except ValueError as error:
+            raise ValueError("capability must be supported") from error
 
     @field_validator("fault_point", mode="before")
     @classmethod
     def _fault_point_enum_from_json(cls, value: object) -> FaultPoint | None:
         if value is None or isinstance(value, FaultPoint):
             return value
-        return FaultPoint(value)
+        try:
+            return FaultPoint(value)
+        except ValueError as error:
+            raise ValueError("fault_point must be supported") from error
 
     @field_validator("expected_terminal", mode="before")
     @classmethod
     def _terminal_enum_from_json(cls, value: object) -> TerminalExpectation:
-        return value if isinstance(value, TerminalExpectation) else TerminalExpectation(value)
+        try:
+            return value if isinstance(value, TerminalExpectation) else TerminalExpectation(value)
+        except ValueError as error:
+            raise ValueError("expected_terminal must be supported") from error
 
     @field_validator("scenario_id")
     @classmethod
@@ -353,6 +425,7 @@ class ScenarioSpec(StrictLabModel):
     @classmethod
     def _payload_is_json(cls, value: dict[str, Any]) -> dict[str, Any]:
         _ensure_json_value(value, path="input_payload")
+        _reject_secret_material(value, path="input_payload")
         return value
 
     @field_validator("expected_block_reason")
@@ -388,14 +461,20 @@ class DriverCommand(StrictLabModel):
     @field_validator("action", mode="before")
     @classmethod
     def _action_enum_from_json(cls, value: object) -> DriverAction:
-        return value if isinstance(value, DriverAction) else DriverAction(value)
+        try:
+            return value if isinstance(value, DriverAction) else DriverAction(value)
+        except ValueError as error:
+            raise ValueError("action must be supported") from error
 
     @field_validator("workflow_version", mode="before")
     @classmethod
     def _workflow_version_enum_from_json(cls, value: object) -> WorkflowVersion | None:
         if value is None or isinstance(value, WorkflowVersion):
             return value
-        return WorkflowVersion(value)
+        try:
+            return WorkflowVersion(value)
+        except ValueError as error:
+            raise ValueError("workflow_version must be supported") from error
 
     @field_validator("command_id")
     @classmethod
@@ -420,15 +499,19 @@ class DriverCommand(StrictLabModel):
     @classmethod
     def _command_payload_is_json(cls, value: dict[str, Any]) -> dict[str, Any]:
         _ensure_json_value(value, path="payload")
+        _reject_secret_material(value, path="payload")
         return value
 
     @model_validator(mode="after")
     def _required_fields_match_action(self) -> DriverCommand:
-        if self.action is not DriverAction.SHUTDOWN and self.workflow_id is None:
+        if self.action is DriverAction.SHUTDOWN:
+            if self.workflow_id is not None or self.scenario_id is not None or self.workflow_version is not None:
+                raise ValueError("shutdown does not accept workflow fields")
+            return self
+        if self.workflow_id is None:
             raise ValueError(f"{self.action.value} requires workflow_id")
-        if self.action is DriverAction.START:
-            if self.scenario_id is None or self.workflow_version is None:
-                raise ValueError("start requires scenario_id and workflow_version")
+        if self.action is DriverAction.START and (self.scenario_id is None or self.workflow_version is None):
+            raise ValueError("start requires scenario_id and workflow_version")
         return self
 
 
@@ -445,12 +528,18 @@ class DriverEvent(StrictLabModel):
     @field_validator("kind", mode="before")
     @classmethod
     def _kind_enum_from_json(cls, value: object) -> DriverEventKind:
-        return value if isinstance(value, DriverEventKind) else DriverEventKind(value)
+        try:
+            return value if isinstance(value, DriverEventKind) else DriverEventKind(value)
+        except ValueError as error:
+            raise ValueError("kind must be supported") from error
 
     @field_validator("runtime_status", mode="before")
     @classmethod
     def _runtime_status_enum_from_json(cls, value: object) -> RuntimeStatus:
-        return value if isinstance(value, RuntimeStatus) else RuntimeStatus(value)
+        try:
+            return value if isinstance(value, RuntimeStatus) else RuntimeStatus(value)
+        except ValueError as error:
+            raise ValueError("runtime_status must be supported") from error
 
     @field_validator("event_id", "workflow_id")
     @classmethod
@@ -460,20 +549,25 @@ class DriverEvent(StrictLabModel):
     @field_validator("step_id", "code")
     @classmethod
     def _optional_strings_are_normalized(cls, value: str | None, info: Any) -> str | None:
-        return None if value is None else _non_blank(value, field_name=info.field_name)
+        return None if value is None else _safe_id(value, field_name=info.field_name)
 
 
 class ScenarioResult(StrictLabModel):
-    """Sanitized result record for one scenario/repeat."""
+    """Sanitized result record for one scenario/repeat.
+
+    The validation-origin fields are mandatory.  A result without an explicit
+    origin cannot be promoted later into evidence for a real laboratory or a
+    target deployment.
+    """
 
     lab_id: str
     scenario_id: str
     runtime: RuntimeKind
     repeat_index: int = Field(ge=1)
     status: ResultStatus
-    environment_ref: str = Field(min_length=1)
+    environment_ref: str
     validation_mode: ValidationMode
-    target_differences: list[str] = Field(default_factory=list)
+    target_differences: list[str]
     assertions: dict[str, bool] = Field(default_factory=dict)
     duration_ms: float = Field(ge=0)
     recovery_ms: float | None = Field(default=None, ge=0)
@@ -486,17 +580,26 @@ class ScenarioResult(StrictLabModel):
     @field_validator("runtime", mode="before")
     @classmethod
     def _runtime_enum_from_json(cls, value: object) -> RuntimeKind:
-        return value if isinstance(value, RuntimeKind) else RuntimeKind(value)
+        try:
+            return value if isinstance(value, RuntimeKind) else RuntimeKind(value)
+        except ValueError as error:
+            raise ValueError("runtime must be supported") from error
 
     @field_validator("status", mode="before")
     @classmethod
     def _status_enum_from_json(cls, value: object) -> ResultStatus:
-        return value if isinstance(value, ResultStatus) else ResultStatus(value)
+        try:
+            return value if isinstance(value, ResultStatus) else ResultStatus(value)
+        except ValueError as error:
+            raise ValueError("status must be supported") from error
 
     @field_validator("validation_mode", mode="before")
     @classmethod
     def _validation_mode_enum_from_json(cls, value: object) -> ValidationMode:
-        return value if isinstance(value, ValidationMode) else ValidationMode(value)
+        try:
+            return value if isinstance(value, ValidationMode) else ValidationMode(value)
+        except ValueError as error:
+            raise ValueError("validation_mode must be real_lab, target_environment, or mock_only") from error
 
     @field_validator("lab_id")
     @classmethod
@@ -515,23 +618,29 @@ class ScenarioResult(StrictLabModel):
 
     @field_validator("environment_ref")
     @classmethod
-    def _environment_ref_is_safe(cls, value: str) -> str:
-        return _non_blank(value, field_name="environment_ref")
+    def _environment_ref_is_sanitized(cls, value: str) -> str:
+        return _safe_reference(value, field_name="environment_ref")
 
     @field_validator("target_differences")
     @classmethod
-    def _target_differences_are_safe(cls, value: list[str]) -> list[str]:
-        return [_non_blank(item, field_name="target_difference") for item in value]
+    def _target_differences_are_sanitized(cls, value: list[str]) -> list[str]:
+        normalized = [_safe_reference(item, field_name="target_difference") for item in value]
+        if len(normalized) != len(set(normalized)):
+            raise ValueError("target_differences must not contain duplicate references")
+        return normalized
+
+    @field_validator("assertions")
+    @classmethod
+    def _assertions_are_safe(cls, value: dict[str, bool]) -> dict[str, bool]:
+        _reject_secret_material(value, path="assertions")
+        return value
 
     @field_validator("artifact_refs")
     @classmethod
     def _artifact_refs_are_relative(cls, value: list[str]) -> list[str]:
-        normalized: list[str] = []
-        for ref in value:
-            clean = _non_blank(ref, field_name="artifact_ref")
-            if Path(clean).is_absolute() or ".." in Path(clean).parts:
-                raise ValueError("artifact_refs must stay relative to the lab root")
-            normalized.append(clean)
+        normalized = [_safe_reference(ref, field_name="artifact_ref") for ref in value]
+        if len(normalized) != len(set(normalized)):
+            raise ValueError("artifact_refs must not contain duplicates")
         return normalized
 
     @field_validator("error_code")
@@ -545,7 +654,7 @@ class RuntimeComparison(StrictLabModel):
 
     schema_version: str = Field(default="1", frozen=True)
     baseline_snapshot_hash: str = Field(min_length=1)
-    environment_ref: str = Field(min_length=1)
+    environment_ref: str
     code_sha: str = Field(min_length=1)
     results: list[ScenarioResult] = Field(default_factory=list)
     capability_matrix: dict[str, AdapterCapabilities] = Field(default_factory=dict)
@@ -570,7 +679,10 @@ class RuntimeComparison(StrictLabModel):
     @field_validator("decision_status", mode="before")
     @classmethod
     def _decision_status_enum_from_json(cls, value: object) -> DecisionStatus:
-        return value if isinstance(value, DecisionStatus) else DecisionStatus(value)
+        try:
+            return value if isinstance(value, DecisionStatus) else DecisionStatus(value)
+        except ValueError as error:
+            raise ValueError("decision_status must be supported") from error
 
     @field_validator("schema_version")
     @classmethod
@@ -579,16 +691,45 @@ class RuntimeComparison(StrictLabModel):
             raise ValueError("schema_version must be '1'")
         return value
 
-    @field_validator("baseline_snapshot_hash", "environment_ref", "code_sha")
+    @field_validator("baseline_snapshot_hash", "code_sha")
     @classmethod
     def _metadata_is_non_blank(cls, value: str, info: Any) -> str:
-        return _non_blank(value, field_name=info.field_name)
+        normalized = _non_blank(value, field_name=info.field_name)
+        _reject_secret_material(normalized, path=info.field_name)
+        return normalized
+
+    @field_validator("environment_ref")
+    @classmethod
+    def _comparison_environment_ref_is_sanitized(cls, value: str) -> str:
+        return _safe_reference(value, field_name="environment_ref")
+
+    @field_validator("capability_matrix")
+    @classmethod
+    def _capability_keys_are_closed(cls, value: dict[str, AdapterCapabilities]) -> dict[str, AdapterCapabilities]:
+        supported = {runtime.value for runtime in RuntimeKind}
+        unknown = set(value) - supported
+        if unknown:
+            raise ValueError(f"capability_matrix has unknown runtimes: {sorted(unknown)}")
+        return value
 
     @field_validator("eligibility", "operational_metrics")
     @classmethod
     def _comparison_metadata_is_json(cls, value: dict[str, Any]) -> dict[str, Any]:
         _ensure_json_value(value, path="comparison_metadata")
+        _reject_secret_material(value, path="comparison_metadata")
+        if "selected_runtime" in value:
+            raise ValueError("comparison must not select a runtime")
         return value
+
+    @model_validator(mode="after")
+    def _results_are_unique(self) -> RuntimeComparison:
+        seen: set[tuple[str, str, RuntimeKind, int]] = set()
+        for result in self.results:
+            key = (result.lab_id, result.scenario_id, result.runtime, result.repeat_index)
+            if key in seen:
+                raise ValueError("results must not contain repeated lab/scenario/runtime/repeat IDs")
+            seen.add(key)
+        return self
 
 
 __all__ = [

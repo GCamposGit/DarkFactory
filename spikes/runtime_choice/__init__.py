@@ -1,6 +1,7 @@
-"""Contracts and adapters for the isolated HF-02 runtime comparison lab.
+"""Contracts for the isolated HF-02 runtime comparison laboratory.
 
-Importing this package deliberately has no DBOS or PostgreSQL side effects.
+Importing this package is intentionally dependency-light: optional DBOS and
+PostgreSQL adapters are not imported during common-suite collection.
 """
 
 from spikes.runtime_choice.contracts import (
