@@ -150,13 +150,9 @@ function renderCredits() {
 
   const allAccounts = report.accounts || [];
 
-  // Active accounts with real balance/credit (OpenRouter and OpenAI)
+  // Active default accounts: strictly the 2 active billing providers (OpenRouter and OpenAI)
   const isPrimary = (account) => {
-    return (
-      ["openrouter", "openai"].includes(account.provider_id) ||
-      (account.is_connected &&
-        (account.available_credit_usd !== null || account.current_month_spend_usd !== null))
-    );
+    return ["openrouter", "openai"].includes(account.provider_id);
   };
 
   const primaryAccounts = allAccounts.filter(isPrimary);

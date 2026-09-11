@@ -137,16 +137,16 @@ function renderAccountUsage() {
   const allAccounts = [...(report.accounts || [])].sort((left, right) =>
     (priority[left.provider_id] ?? 10) - (priority[right.provider_id] ?? 10));
 
-  // Determine primary priority/active accounts vs secondary/disconnected
+  // Primary default accounts: exactly the 3 main platforms (OpenAI, Grok, Google)
   const isPrimary = (account) => {
-    const isTopPriority = ["openai", "xai", "google"].includes(account.provider_id);
-    const isActive = account.status === "connected" || account.status === "limited";
-    return isTopPriority || isActive;
+    return ["openai", "xai", "google"].includes(account.provider_id);
   };
 
   const primaryAccounts = allAccounts.filter(isPrimary);
   const primaryIds = new Set(primaryAccounts.map((a) => a.provider_id));
-  allAccounts.slice(0, 3).forEach((a) => primaryIds.add(a.provider_id));
+  if (primaryIds.size === 0) {
+    allAccounts.slice(0, 3).forEach((a) => primaryIds.add(a.provider_id));
+  }
   const effectivePrimary = allAccounts.filter((a) => primaryIds.has(a.provider_id));
   const otherAccounts = allAccounts.filter((a) => !primaryIds.has(a.provider_id));
 
