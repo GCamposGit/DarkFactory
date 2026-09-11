@@ -42,4 +42,4 @@ a163d613542ec7b08d28f9a2057457f8b6b35c52b0e333bff1ee9997fccc121f  tests/test_run
 
 ## Estado de entrega
 
-O commit local foi criado seletivamente; alterações e arquivos não relacionados já existentes no worktree foram preservados. A publicação remota está bloqueada neste ambiente: `git fetch origin main` não conseguiu criar `.git/FETCH_HEAD` por permissão, e `git ls-remote origin refs/heads/main` falhou por conectividade com `github.com:443`. Não há PR, checks, merge ou SHA remoto verificados para este ticket.
+O commit local foi criado seletivamente; alterações e arquivos não relacionados já existentes no worktree foram preservados. A publicação remota está bloqueada neste ambiente: `git fetch origin main` não conseguiu criar `.git/FETCH_HEAD` por permissão, `git ls-remote origin refs/heads/main` falhou por conectividade com `github.com:443`, e a tentativa de `git push` foi rejeitada pelo guardrail de exportação sem autorização explícita para o destino. Não há PR, checks, merge ou SHA remoto verificados para este ticket.
