@@ -49,8 +49,8 @@ scope correction required to restore clean-clone test discovery.
 | --- | --- |
 | `python core/harness/terminal_env.py --check` | exit 0; `[TERMINAL_ENV_PASS]` |
 | `python -m pytest tests/test_runtime_spike_contracts.py -v` | exit 0; 13 passed in 0.15 s |
-| `python core/harness/runner.py --quick` | exit 0; `[HARNESS_PASS]`, 460 collected, 458 passed, 2 skipped |
-| `python -m pytest tests -v` | exit 0; 460 collected, 458 passed, 2 skipped in 109.18 s |
+| `python core/harness/runner.py --quick` | exit 0; `[HARNESS_PASS]`, 451 collected, 449 passed, 2 skipped |
+| `python -m pytest tests -v` | exit 0; 451 collected, 449 passed, 2 skipped in 63.07 s |
 | `git diff --check` | exit 0 |
 | independent public round-trip probe | exit 0; exact object round-trip passed |
 | independent strict JSON probe | exit 1 as expected; boolean rejected for numeric field |
@@ -59,7 +59,7 @@ scope correction required to restore clean-clone test discovery.
 The initial gate failure was reproduced before the correction: collection found 460
 items but aborted on `tests/test_ajustar_link_para_canalle.py` importing the absent
 local-only `run_canaletto`. The separate scope correction removed that shared test and
-its local-only report. The final gate collected the same 460 core tests without the
+its local-only report. The final gate collected 451 core tests without the
 Canaletto collection error.
 
 ## Adversarial review
