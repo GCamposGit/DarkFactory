@@ -1,0 +1,181 @@
+{
+  "schema_version": 1,
+  "captured_at": "2026-09-09T18:01:48.854930+00:00",
+  "head": "0f57e9c0cb3cf1a5d02d8e934c162617ebe71db9",
+  "scope": "Working tree including relevant untracked files; capture after focal review, not an atomic checkout lock.",
+  "source_changes_since_auxiliary_review": [],
+  "files": [
+    {
+      "path": ".agents/skills/00-continuous-self-improvement/SKILL.md",
+      "sha256": "08bdd0f741b5de20de8b32a8ddbebbb44717cc0b40856806328cddbca61fb159"
+    },
+    {
+      "path": ".agents/skills/02-plan-product-architecture/SKILL.md",
+      "sha256": "8d1ea354c6efb7b558c9ed520ef26cb8934aea0f41182745c25269243a1c82df"
+    },
+    {
+      "path": ".agents/skills/02-plan-product-architecture/references/contract-review-patterns.md",
+      "sha256": "f1af2207d6c3f66165d78f2d5b636c2285f579cc1a1c67fdb96979246d05113c"
+    },
+    {
+      "path": ".agents/skills/04-autonomous-piv-loop/SKILL.md",
+      "sha256": "4bcc951fb30764c4d08bfcd50d4f5c9f3a5bc348cf03ff15d0a84045e777bb2b"
+    },
+    {
+      "path": ".agents/skills/05-validation-harness/SKILL.md",
+      "sha256": "7c1d9ec6d81c2d3ba3756662a14bca2c2a6ed9b49770bb433add33404810f385"
+    },
+    {
+      "path": ".agents/skills/06-adversarial-review/SKILL.md",
+      "sha256": "660973f3c57be6391b8a6a8f032560fa2e289471fd8e51c7331835189f8df9a0"
+    },
+    {
+      "path": "core/planning/__init__.py",
+      "sha256": "e86ed938e917a6dcf5aa5e136b1fa63108a6dffe7707f746511a57b4807d2d1b"
+    },
+    {
+      "path": "core/planning/baseline_cli.py",
+      "sha256": "bd2670b47ce28d48b078c4e0c1f8b698bbec63fce206a7006553a80210c5c09e"
+    },
+    {
+      "path": "core/planning/baseline_models.py",
+      "sha256": "7c30baae24985c32e4530e68b4cbf4f25108f7d595e1b6e234dae239a7ee0906"
+    },
+    {
+      "path": "core/planning/baseline_probes.py",
+      "sha256": "fc2c9a6620be57c088e42d1a1afa403b4cc9690b80d065030341dad0e9277654"
+    },
+    {
+      "path": "core/planning/baseline_reconcile.py",
+      "sha256": "d489b231439c902b2f1591af6d4400893df56a79bb18bdcb65724a3dadd9008a"
+    },
+    {
+      "path": "core/planning/baseline_render.py",
+      "sha256": "75137afc97e1a3490f2b389164270a5b23c6a660e342398cbde42d983ede4a39"
+    },
+    {
+      "path": "core/planning/baseline_sources.py",
+      "sha256": "c3b8b5b6f07b0e6b0b378f55eee643db04e4ba1e950996132415627cd027072b"
+    },
+    {
+      "path": "core/workflow/__init__.py",
+      "sha256": "7d178b1d5caf495bf7b2affa2fbbc0b1c59164953f4d6832e80505094667c1dd"
+    },
+    {
+      "path": "core/workflow/contracts.py",
+      "sha256": "9e8fbed7f0cb0c0bd9a741b1131d84704f00f35ef47bf3db925b6f2881e94cfc"
+    },
+    {
+      "path": "core/workflow/readiness.py",
+      "sha256": "47db73979c92d1eb3300c4b54a832d5531b5f8702267885f76c9d4f914c10648"
+    },
+    {
+      "path": "core/workflow/runtime.py",
+      "sha256": "a6e15c4a03eed52aafa555662b83d350661d1612f87c78237dad79944ff8a53b"
+    },
+    {
+      "path": "docs/HANDOFF_POLICY.md",
+      "sha256": "f9b5d0276e7620403f054e2ce994651b428de7cbe18eb11e5e60e40784612b44"
+    },
+    {
+      "path": "docs/HYBRID_AUTONOMY_REQUIREMENTS.md",
+      "sha256": "49c5637a3786055af7dbbd746ff89aaac57c53793dbdb00c3af90365b9d19424"
+    },
+    {
+      "path": "docs/handoffs/HF-01.md",
+      "sha256": "aac64085b94ee74c68dae0bb4fbb0962ac75c3e8d24e74651fff15bdae4db922"
+    },
+    {
+      "path": "docs/handoffs/HF-02.md",
+      "sha256": "5843d386035cdbbbfeea195e2018a6d6a518adf51169276e32761f7bc6fef8e3"
+    },
+    {
+      "path": "docs/handoffs/HF-04.md",
+      "sha256": "baf025a99e0481f3e8e38e58e1d9347d2f42d22d55b0e30c8b2a503d3c26becc"
+    },
+    {
+      "path": "docs/handoffs/HF-05.md",
+      "sha256": "4b224b7dd343896d6135b1fdd88aa58f83152bf78fae6a99571b63207de9e1bc"
+    },
+    {
+      "path": "docs/handoffs/HF-REVIEW-REMEDIATION-2026-09-09.md",
+      "sha256": "e510afd5ddc350757521cee4dacf334736be9e0440e996c7958a3215fd993d57"
+    },
+    {
+      "path": "docs/reviews/HF_CRITICAL_REVIEW_2026-09-09.md",
+      "sha256": "c8ce13936f595c105428b2f7dd20112724ce855f0131f8034e629410719c8e2d"
+    },
+    {
+      "path": "harness.config.json",
+      "sha256": "353078f07acaec776d317794b1effbaff38d7021d2900b852e8bbc495e5eb373"
+    },
+    {
+      "path": "spikes/runtime_choice/__init__.py",
+      "sha256": "9fe3c3f9ee65211b3110deccd89b451ba50ec5a41b7323d3d70ae5d170ebdfe9"
+    },
+    {
+      "path": "spikes/runtime_choice/contracts.py",
+      "sha256": "c82bad5b8005dbb3ff63bf3a54d51d5ee27063ca7a43916a59884bd6da9f04d5"
+    },
+    {
+      "path": "spikes/runtime_choice/driver.py",
+      "sha256": "d651a523a661653e23bc9d6aa731392f2d5aa8b7b8329c92d9028df70d6d5659"
+    },
+    {
+      "path": "spikes/runtime_choice/effect_server.py",
+      "sha256": "d0babeb2e17e8d721a08c8f1cfb1bfe131a92182f65b386e9d96e75cb9c40fa4"
+    },
+    {
+      "path": "spikes/runtime_choice/effect_store.py",
+      "sha256": "e4b9f1cb102c959f1d29ab2bc4bdf1f0bbcd21bf9fff5056a4649d8b915f7535"
+    },
+    {
+      "path": "spikes/runtime_choice/native_adapter.py",
+      "sha256": "bf68293303423a2d6e47cc747c74304a1fc67149e0860df375d9d9200b366fc5"
+    },
+    {
+      "path": "spikes/runtime_choice/scenarios.json",
+      "sha256": "4839e911119d918dd08424829972701055feb0f32999f924010b142c51c403d9"
+    },
+    {
+      "path": "tests/test_baseline_catalog.py",
+      "sha256": "390156bc34a3de6eb15ba5ccd40a51c96d4942de4df6a5cc422e2cd6a5b08ce0"
+    },
+    {
+      "path": "tests/test_baseline_cli.py",
+      "sha256": "b00640818f53ee93e7170e7055ae88cf598af8bb1f73e278ebf12df065174dbe"
+    },
+    {
+      "path": "tests/test_baseline_probes.py",
+      "sha256": "189a5f349156d230b66b99ba11e8aefce19a355872073a30306c8ba42fe6a942"
+    },
+    {
+      "path": "tests/test_baseline_reconcile.py",
+      "sha256": "32a1aefa48d95b708cbba4d537ad954e870e7b058ec87918465246ef530dc805"
+    },
+    {
+      "path": "tests/test_baseline_sources.py",
+      "sha256": "95c190d3a8b59f92ea756aa4d52c81535f4283184d8b417dfa1ba23511d32b3c"
+    },
+    {
+      "path": "tests/test_runtime_spike_contracts.py",
+      "sha256": "e980aa0d4ce067a19ba31d3f66f1d15e61b1bffb4bc9fea02f344c840d2c029d"
+    },
+    {
+      "path": "tests/test_runtime_spike_effects.py",
+      "sha256": "a5829db000aa8608d6d79614ac99014ffa49529a349d8768e8051c1596f2a4c0"
+    },
+    {
+      "path": "tests/test_runtime_spike_native.py",
+      "sha256": "1c1ba86157544161c1e88f48492e3d74a6c157bab185c8f5680ed6d9b05de631"
+    },
+    {
+      "path": "tests/test_workflow_contracts.py",
+      "sha256": "490a8dd169acf4570d632d02592bd17466045f15c91d280b0de66d90cbfd6b35"
+    },
+    {
+      "path": "tests/test_workflow_runtime.py",
+      "sha256": "9d67ab6cf5231146bbfacba0748db100ae9a7dc4a0cbb580db998d677e762652"
+    }
+  ]
+}

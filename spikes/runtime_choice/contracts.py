@@ -662,6 +662,20 @@ class RuntimeComparison(StrictLabModel):
     operational_metrics: dict[str, Any] = Field(default_factory=dict)
     decision_status: DecisionStatus = DecisionStatus.PENDING_ARCHITECT_REVIEW
 
+    @property
+    def all_target_differences(self) -> list[str]:
+        differences: list[str] = []
+        for result in self.results:
+            differences.extend(result.target_differences)
+        return differences
+
+    @property
+    def has_operational_evidence(self) -> bool:
+        """A rodada so constitui evidencia operacional se todos os resultados forem target_environment."""
+        if not self.results:
+            return False
+        return all(r.validation_mode is ValidationMode.TARGET_ENVIRONMENT for r in self.results)
+
     @field_validator("decision_status", mode="before")
     @classmethod
     def _decision_status_enum_from_json(cls, value: object) -> DecisionStatus:

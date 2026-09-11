@@ -1,130 +1,34 @@
 ---
 name: continuous-self-improvement
-description: Ciclo contínuo e prioritário de auto-aperfeiçoamento e calibração por sessão. Dispara obrigatoriamente a cada segundo prompt do usuário para avaliar a demanda, inferir preferências profundas e atualizar a skill apropriada para garantir one-shot no próximo pedido. Executa Root Cause Analysis (RCA) determinístico para cada erro e falha pregressa, sintetizando patches para eliminar reincidência e extrapolando aprendizados para casos análogos em todo o ecossistema.
+description: Reavalia preferências e falhas observadas a cada segundo prompt e em correções, rejeições ou marcos relevantes; transforma evidência em melhorias delimitadas de skills e verifica sua eficácia sem confundir testes de forma com sucesso do produto.
 ---
 
-# 00 - Continuous Self-Improvement & SOTA Recursive Learning Loop
+# Melhoria contínua orientada a evidências
 
-O **Continuous Self-Improvement Engine** é o loop mestre de auto-evolução em tempo real da DarkFac.
-Fundamentado na literatura de fronteira de **Self-Evolving Agents (2025–2026)** — integrando os paradigmas de **SICA (Self-Improving Coding Agent)**, **Gödel Agent / Darwin Gödel Machine (DGM)**, **Dual-Process Architecture (DPA System 1/2)**, **ExpeL (Experiential Learning)** e **Voyager (Executable Skill Synthesis)** — este sistema transforma a DarkFac em um agente recursivo com aprendizado contínuo empiricamente comprovado.
+Reutilize contexto e preferências explícitas desde o início. Reavalie a cada segundo prompt e quando houver feedback corretivo, incidente, revisão ou marco. Essa cadência agenda uma avaliação; não exige interromper trabalho independente, fazer perguntas artificiais ou alterar arquivos em todo turno.
 
----
+## Diagnóstico e alteração
 
-## 🏛️ Arquitetura Dual-Process (DPA)
+1. Identifique resultado esperado, observado e fonte. Separe bug reproduzido, lacuna da especificação, limitação de ambiente e preferência do owner. Pedido de continuação não é, por si só, falha do agente.
+2. Registre o mecanismo e a causa sustentados pelos fatos. Use perguntas causais adicionais quando úteis; não invente cinco causas para cumprir formato. Uma hipótese não vira conclusão nem preferência global.
+3. Escolha a menor mudança na skill responsável. Consolide a instrução contraditória; não acrescente outra regra dizendo o oposto no fim do documento. Preserve contexto, escopo, autorização e alternativas válidas.
+4. Registre origem, domínio, evidência, mudança, limites e caminho de reversão. Preferências explícitas mantêm essa origem; propostas inferidas permanecem candidatas. Extrapole apenas quando o mesmo mecanismo foi encontrado em outro módulo.
+5. Verifique sintaxe/referências/scripts e, quando o risco justificar, aplique a skill a um caso independente. O avaliador recebe pedido realista e artefatos mínimos, sem o diagnóstico ou a resposta esperada. Revisores/contas externos precisam de autorização e disponibilidade reais.
 
-```text
-               ┌──────────────────────────────────────────────────────────┐
-               │          SISTEMA 1: EXECUÇÃO RÁPIDA ONE-SHOT            │
-               │  - Primes context via get_active_system1_context()      │
-               │  - Injeta heurísticas de alta confiança e regras RCA     │
-               │  - Zero perguntas triviais, execução cirúrgica direta   │
-               └────────────────────────────┬─────────────────────────────┘
-                                            │
-                                  [Turno do Usuário]
-                                            │
-               ┌────────────────────────────▼─────────────────────────────┐
-               │         SISTEMA 2: REFLEXÃO METACONSTITUTIVA             │
-               │          (Cadência: a cada 2º prompt ou follow-up)        │
-               │                                                          │
-               │  1. Análise Contrastiva de Trajetórias (ExpeL / SICA)    │
-               │     Compara tentativa inicial vs correção do usuário     │
-               │  2. Root Cause Analysis 5-Whys Determinístico            │
-               │  3. Code Judge Verification Gate (Inviolabilidade)       │
-               │     Patch só é aceito se passar em teste executável      │
-               │  4. Extrapolação Analógica Cruzada para Módulos Irmãos   │
-               │  5. Poda Anti-Entropia de Policy Debt (Anti-Bloat)       │
-               └──────────────────────────────────────────────────────────┘
-```
+## O que conta como eficácia
 
----
+- Um teste de estrutura demonstra estrutura válida; uma busca de palavras demonstra presença de texto. Nenhum dos dois prova que um agente tomará a decisão certa.
+- Uma suíte sintética com 4/4 não significa 100% de eficácia de aprendizado em tarefas reais. Registrar amostra, modo, casos, limites e evidência independente.
+- Regressões de comportamento devem ser verificadas por entradas/saídas observáveis. Não enfraquecer o oráculo para deixar uma correção verde.
+- Melhorar uma instrução não corrige automaticamente os módulos existentes. Manter cada defeito no estado real até aplicar e validar sua correção.
+- Se uma garantia não puder ser provada, reduzir a afirmação ao que foi observado e criar o próximo passo verificável.
 
-## 🎯 Os 5 Pilares do Estado da Arte
+Em planejamento/revisão de gates, evidências ou runtimes, consultar [padrões de contratos verificáveis](../02-plan-product-architecture/references/contract-review-patterns.md). Aplicar somente os padrões pertinentes ao caso.
 
-### 1. The Universal Every-Prompt Checkpoint Cadence (Turno 1 em diante)
-- O auto-aperfeiçoamento dispara **obrigatoriamente em todas as sessões, desde o primeiro prompt (Turno 1 em diante)** e diante de qualquer follow-up corretivo:
-  - Trata o primeiro prompt como potencial continuação ou correção acumulada de sessões pregressas.
-  - O agente para imediatamente para diagnóstico e alinhamento de intenção.
-  - Registra a preferência e sintetiza a regra na skill alvo para garantir que o usuário **nunca precise pedir a mesma correção duas vezes**.
+## Persistência e permissões
 
-### 2. Análise Contrastiva de Trajetórias (Contrastive Trajectories)
-- Em vez de apenas registrar texto livre, o sistema compara $T_{inicial}$ com $T_{corrigido}$.
-- Extrai o **Key Delta** (ex.: "Verbosidade -> Tabela compacta", "Código inline -> Script headless testado") e converte o delta em preferência canônica.
+No DarkFac, `.agents/skills/` é canônico; sincronize `.claude/skills/` pelo procedimento do repositório. Atualização das cópias pessoais do Codex é separada e só ocorre no escopo autorizado. Verifique hash anterior e preserve customizações fora dos arquivos alterados.
 
-### 3. Code Judge Determinístico (Verification-Grounded Self-Patching)
-- Nenhuma alteração de skill, regra ou correção de código é promovida com base em "garantias conversacionais" de LLM.
-- O **Code Judge** executa comandos determinísticos (`verify_patch_with_code_judge`). Se o teste falhar ou o exit code for $\neq 0$, o patch é sumariamente bloqueado.
+Use o ledger de aprendizado existente quando puder escrever com ownership seguro. Se outra frente o estiver modificando, grave um registro separado com origem para reconciliação; não sobrescreva o ledger compartilhado nem marque promoção por simulação. O CLI disponível pode ser consultado com `python -m core.learning.cli --help` antes de usar flags.
 
-### 4. Extrapolação Analógica Cruzada (Cross-Domain Transfer)
-- Um aprendizado extraído em um domínio nunca fica isolado.
-- Exemplo: Um tratamento de encoding UTF-8 no Windows aprendido em `core.audio` é automaticamente projetado para `core.benchmarks`, `core.research` e `hub.backend`.
-
-### 5. Poda Anti-Entropia (Policy Debt Pruning)
-- O acúmulo desordenado de regras gera alucinações e degradação de atenção (*policy debt*).
-- O Sistema 2 consolida regras redundantes, mescla reforços e desativa heurísticas obsoletas de forma automatizada.
-
----
-
-## 🛠️ Operação Headless do Motor (`core/learning/cli.py`)
-
-### 1. Injetar Priming do Sistema 1 (Contexto de Alta Precisão)
-```bash
-# Obtém as convenções e regras de ouro ativas para o domínio atual
-python -m core.learning.cli prime --domain core.benchmarks
-```
-
-### 2. Registrar Turno e Avaliar Checkpoint
-```bash
-python -m core.learning.cli record-turn \
-  --prompt "Ajuste o timeout do runner para 120s" \
-  --intent "Prevenir timeout no pytest sob carga pesada no Windows" \
-  --followup \
-  --skill "autonomous-piv-loop" \
-  --gap "Timeout de 30s insuficiente em hardware com I/O lento"
-```
-
-### 3. Registrar Root Cause Analysis (RCA) com Code Judge
-```bash
-python -m core.learning.cli rca \
-  --category timeout \
-  --symptom "Runner travou aos 30s durante teste de áudio" \
-  --mechanism "Subprocesso sem timeout explícito no Windows PowerShell" \
-  --root-cause "Falta de parâmetro timeout=120 e bloco TimeoutExpired" \
-  --patch "Adicionado timeout padronizado em todas as invocações de runner" \
-  --rule "Todo subprocess.run deve declarar timeout explícito e tratamento de exceção" \
-  --test-file "tests/test_learning_engine.py"
-```
-
-### 4. Executar Poda Anti-Entropia de Policy Debt
-```bash
-# Consolida regras repetidas e desativa duplicatas
-python -m core.learning.cli prune
-```
-
-### 5. Rodar o Benchmark Empírico de Aprendizado
-```bash
-# Executa a suíte de testes que afere a eficácia real do loop
-python -m core.learning.cli benchmark
-# ou diretamente via módulo:
-python -m core.learning.benchmark
-```
-
----
-
-## 📊 A Suíte de Benchmarking Empírico
-
-O benchmark (`core/learning/benchmark.py`) avalia deterministicamente 4 dinâmicas essenciais:
-
-| Cenário | O que Mede | Critério de Sucesso |
-| :--- | :--- | :--- |
-| **1. Recurring Error Extinction** | Erro injetado uma vez nunca mais se repete após RCA | Taxa de extinção = **100%** |
-| **2. One-Shot Convergence** | Follow-up captura preferência e tarefa seguinte executa em 1 turno | Taxa de One-Shot = **100%** |
-| **3. Cross-Domain Transfer** | Regra aprendida em um módulo é projetada para módulos irmãos | Cobertura de domínio = **100%** |
-| **4. Policy Debt Pruning** | Eliminação de duplicatas e unificação de reforço sem conflitos | Coerência limpa = **100%** |
-
----
-
-## 🏛️ Governança Inviolável
-
-1. **Inviolabilidade de Testes de Regressão**: Toda falha corrigida adiciona um caso permanente no `tests/`. É proibido desativar ou deletar testes de regressão anteriores.
-2. **Sincronização Multi-Ambiente**: Toda evolução em `.agents/skills/` é espelhada instantaneamente para `.claude/skills/` via `python scripts/sync_skills.py`.
-3. **Persistência Centralizada**: O estado cumulativo é mantido em `.factory/learning/learning_ledger.json`.
+Uma skill não amplia permissões do sistema. Prepare o patch, valide e use o fluxo permitido para aplicar alterações protegidas. Uma recusa real permanece explícita; não criar cópia alternativa para contornar uma proibição.

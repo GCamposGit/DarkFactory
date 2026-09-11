@@ -1,0 +1,97 @@
+{
+  "purpose": "Explicitly requested improvements to canonical and personal skills; generated Claude mirrors follow repo policy.",
+  "allowed_roots": [
+    "C:\\dev\\DarkFac\\.agents\\skills",
+    "C:\\Users\\guigc\\.codex\\skills"
+  ],
+  "files": [
+    {
+      "source": "C:\\dev\\DarkFac\\.factory\\test_logs\\hf-critical-review\\skill-candidates\\00-continuous-self-improvement\\SKILL.md",
+      "destination": "C:\\dev\\DarkFac\\.agents\\skills\\00-continuous-self-improvement\\SKILL.md",
+      "before_sha256": "90615cbafad82eac196cbc16d9523f2ad28d7d8e1c127b179a2f39ff605f79ea",
+      "after_sha256": "08bdd0f741b5de20de8b32a8ddbebbb44717cc0b40856806328cddbca61fb159"
+    },
+    {
+      "source": "C:\\dev\\DarkFac\\.factory\\test_logs\\hf-critical-review\\skill-candidates\\00-continuous-self-improvement\\SKILL.md",
+      "destination": "C:\\Users\\guigc\\.codex\\skills\\00-continuous-self-improvement\\SKILL.md",
+      "before_sha256": "90615cbafad82eac196cbc16d9523f2ad28d7d8e1c127b179a2f39ff605f79ea",
+      "after_sha256": "08bdd0f741b5de20de8b32a8ddbebbb44717cc0b40856806328cddbca61fb159"
+    },
+    {
+      "source": "C:\\dev\\DarkFac\\.factory\\test_logs\\hf-critical-review\\skill-candidates\\02-plan-product-architecture\\SKILL.md",
+      "destination": "C:\\dev\\DarkFac\\.agents\\skills\\02-plan-product-architecture\\SKILL.md",
+      "before_sha256": "e3ec0180782af1010ad859296e3ee73258a5a0844d201a754409bfea7e4015de",
+      "after_sha256": "8d1ea354c6efb7b558c9ed520ef26cb8934aea0f41182745c25269243a1c82df"
+    },
+    {
+      "source": "C:\\dev\\DarkFac\\.factory\\test_logs\\hf-critical-review\\skill-candidates\\02-plan-product-architecture\\SKILL.md",
+      "destination": "C:\\Users\\guigc\\.codex\\skills\\02-plan-product-architecture\\SKILL.md",
+      "before_sha256": "e3ec0180782af1010ad859296e3ee73258a5a0844d201a754409bfea7e4015de",
+      "after_sha256": "8d1ea354c6efb7b558c9ed520ef26cb8934aea0f41182745c25269243a1c82df"
+    },
+    {
+      "source": "C:\\dev\\DarkFac\\.factory\\test_logs\\hf-critical-review\\skill-candidates\\04-autonomous-piv-loop\\SKILL.md",
+      "destination": "C:\\dev\\DarkFac\\.agents\\skills\\04-autonomous-piv-loop\\SKILL.md",
+      "before_sha256": "b453cf427a4e946d4f0dc19916341b23b780084630bcda4c84e408bbf54ac104",
+      "after_sha256": "4bcc951fb30764c4d08bfcd50d4f5c9f3a5bc348cf03ff15d0a84045e777bb2b"
+    },
+    {
+      "source": "C:\\dev\\DarkFac\\.factory\\test_logs\\hf-critical-review\\skill-candidates\\04-autonomous-piv-loop\\SKILL.md",
+      "destination": "C:\\Users\\guigc\\.codex\\skills\\04-autonomous-piv-loop\\SKILL.md",
+      "before_sha256": "fee39376499fda9e3b36eb9a4ddd2593fbd2b6ba5d8ff5794221fe936ed2627b",
+      "after_sha256": "4bcc951fb30764c4d08bfcd50d4f5c9f3a5bc348cf03ff15d0a84045e777bb2b"
+    },
+    {
+      "source": "C:\\dev\\DarkFac\\.factory\\test_logs\\hf-critical-review\\skill-candidates\\05-validation-harness\\SKILL.md",
+      "destination": "C:\\dev\\DarkFac\\.agents\\skills\\05-validation-harness\\SKILL.md",
+      "before_sha256": "d430eea9b3bb9db5c84b2513273bfe3cfb74bb9adf32ea8a1e8549afcd02fbc7",
+      "after_sha256": "7c1d9ec6d81c2d3ba3756662a14bca2c2a6ed9b49770bb433add33404810f385"
+    },
+    {
+      "source": "C:\\dev\\DarkFac\\.factory\\test_logs\\hf-critical-review\\skill-candidates\\05-validation-harness\\SKILL.md",
+      "destination": "C:\\Users\\guigc\\.codex\\skills\\05-validation-harness\\SKILL.md",
+      "before_sha256": "d430eea9b3bb9db5c84b2513273bfe3cfb74bb9adf32ea8a1e8549afcd02fbc7",
+      "after_sha256": "7c1d9ec6d81c2d3ba3756662a14bca2c2a6ed9b49770bb433add33404810f385"
+    },
+    {
+      "source": "C:\\dev\\DarkFac\\.factory\\test_logs\\hf-critical-review\\skill-candidates\\06-adversarial-review\\SKILL.md",
+      "destination": "C:\\dev\\DarkFac\\.agents\\skills\\06-adversarial-review\\SKILL.md",
+      "before_sha256": "80ccd24a8e8ae34db67c68dca763d624352fc51ee6e5360998a78617b3ebf7d2",
+      "after_sha256": "660973f3c57be6391b8a6a8f032560fa2e289471fd8e51c7331835189f8df9a0"
+    },
+    {
+      "source": "C:\\dev\\DarkFac\\.factory\\test_logs\\hf-critical-review\\skill-candidates\\06-adversarial-review\\SKILL.md",
+      "destination": "C:\\Users\\guigc\\.codex\\skills\\06-adversarial-review\\SKILL.md",
+      "before_sha256": "80ccd24a8e8ae34db67c68dca763d624352fc51ee6e5360998a78617b3ebf7d2",
+      "after_sha256": "660973f3c57be6391b8a6a8f032560fa2e289471fd8e51c7331835189f8df9a0"
+    },
+    {
+      "source": "C:\\dev\\DarkFac\\.factory\\test_logs\\hf-critical-review\\skill-candidates\\02-plan-product-architecture\\references\\contract-review-patterns.md",
+      "destination": "C:\\dev\\DarkFac\\.agents\\skills\\02-plan-product-architecture\\references\\contract-review-patterns.md",
+      "before_sha256": null,
+      "after_sha256": "f1af2207d6c3f66165d78f2d5b636c2285f579cc1a1c67fdb96979246d05113c"
+    },
+    {
+      "source": "C:\\dev\\DarkFac\\.factory\\test_logs\\hf-critical-review\\skill-candidates\\02-plan-product-architecture\\references\\contract-review-patterns.md",
+      "destination": "C:\\Users\\guigc\\.codex\\skills\\02-plan-product-architecture\\references\\contract-review-patterns.md",
+      "before_sha256": null,
+      "after_sha256": "f1af2207d6c3f66165d78f2d5b636c2285f579cc1a1c67fdb96979246d05113c"
+    },
+    {
+      "source": "C:\\dev\\DarkFac\\.agents\\skills\\04-autonomous-piv-loop\\references\\worktree-parallelism.md",
+      "destination": "C:\\Users\\guigc\\.codex\\skills\\04-autonomous-piv-loop\\references\\worktree-parallelism.md",
+      "before_sha256": null,
+      "after_sha256": "b04333206dc3ea5649de96f1e366d7a748eb781d6a55e62b2bcff4318d30ae29"
+    },
+    {
+      "source": "C:\\dev\\DarkFac\\.agents\\skills\\04-autonomous-piv-loop\\references\\remote-delivery.md",
+      "destination": "C:\\Users\\guigc\\.codex\\skills\\04-autonomous-piv-loop\\references\\remote-delivery.md",
+      "before_sha256": null,
+      "after_sha256": "757ef1087b6903eb19b54518db2056ee9e6f32e4203e018fc98cf50363efd151"
+    }
+  ],
+  "sync_script_sha256": "38f3b632914c37f05f645ca9f78d4ce86a78c27788d34b06f33ad568c25d7374",
+  "applied": true,
+  "mirrors_verified": true,
+  "backup_dir": "C:\\dev\\DarkFac\\.factory\\test_logs\\hf-critical-review\\skill-backups"
+}

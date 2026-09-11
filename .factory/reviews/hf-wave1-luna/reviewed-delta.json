@@ -1,0 +1,46 @@
+{
+  "schema_version": 1,
+  "tickets": [
+    "CR-09",
+    "CR-01"
+  ],
+  "branch": "codex/hf-remediation-wave1-luna",
+  "head": "0f57e9c0cb3cf1a5d02d8e934c162617ebe71db9",
+  "scope_check": "passed",
+  "unexplained_scope_changes": [],
+  "files": [
+    {
+      "path": "core/workflow/runtime.py",
+      "before_sha256": "a6e15c4a03eed52aafa555662b83d350661d1612f87c78237dad79944ff8a53b",
+      "after_sha256": "1ed7f86efe4e22f5ede6a0e49ebb92a2067fd27596c552d51d89a3801e5ae9c0",
+      "changed": true
+    },
+    {
+      "path": "spikes/runtime_choice/contracts.py",
+      "before_sha256": "c82bad5b8005dbb3ff63bf3a54d51d5ee27063ca7a43916a59884bd6da9f04d5",
+      "after_sha256": "13054603195f340cc0eb0d0d1bc692f6f7b30208a4b5bad49cdbfe7187caca1e",
+      "changed": true
+    },
+    {
+      "path": "tests/test_runtime_spike_contracts.py",
+      "before_sha256": "e980aa0d4ce067a19ba31d3f66f1d15e61b1bffb4bc9fea02f344c840d2c029d",
+      "after_sha256": "d34728cffd1c9e4424c0754ca69c224a4a8acf43fea880f1859ccda197ee0f58",
+      "changed": true
+    },
+    {
+      "path": "tests/test_runtime_spike_native.py",
+      "before_sha256": "1c1ba86157544161c1e88f48492e3d74a6c157bab185c8f5680ed6d9b05de631",
+      "after_sha256": "bfc7491a18dd0c895b5086e87ba8d2a98d9a4f69c2888d707de35d91e4fccd12",
+      "changed": true
+    },
+    {
+      "path": "tests/test_workflow_runtime.py",
+      "before_sha256": "9d67ab6cf5231146bbfacba0748db100ae9a7dc4a0cbb580db998d677e762652",
+      "after_sha256": "abb9acf58ce553ec8cf77a8ae3757841f396db01fa14f75bdbbdda8082ddf20d",
+      "changed": true
+    }
+  ],
+  "plan_sha256": "b9f600ee26b3caf8477c138e04248825c6163e4124ef16f4b5c1fa77d6a3e929",
+  "status": "local_delta_captured_not_a_commit",
+  "inherited_baseline": "C:\\dev\\DarkFac\\.factory\\test_logs\\hf-wave1-luna\\before-files.zip"
+}

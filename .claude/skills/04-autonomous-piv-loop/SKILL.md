@@ -34,11 +34,22 @@ integração bloqueia a próxima transição.
    assegurando ancoragem na raiz e imunidade contra interferências de perfis (`-NoProfile`).
    Quando o ticket introduz o próprio teste focal, registre sua ausência esperada e
    prove coleta não vazia da suíte existente; não execute um caminho ainda inexistente.
-3. Implemente somente os caminhos possuídos pela tarefa.
+3. Implemente somente os caminhos possuídos pela tarefa. Confira ID/versão/hash do plano disponível
+   no checkout; registre delta e revisão quando o recorte mudar. Não reinterprete o mesmo ID como
+   outro contrato nem remova dependência arquitetural para chamar a unidade de liberada.
+   Se a correção exigir mudar contrato público, autoridade de evidência, semântica de estado ou
+   oráculo, devolva ao planejador qualificado antes de prosseguir; correção interna preserva o contrato.
 4. Execute o teste focal e `python core/harness/runner.py --quick`; corrija a causa
    antes de avançar se algum gate falhar.
 5. Ao concluir, execute os comandos obrigatórios do repositório e produza o contrato
    de conclusão definido no protocolo.
+
+Para gates, evidências, persistência ou protocolos, siga os aceites de
+[contratos verificáveis](../02-plan-product-architecture/references/contract-review-patterns.md).
+Teste pelo caminho público utilizado: arquivo JSON e subprocesso para um driver CLI,
+não apenas seu helper Python. Inclua o caso válido e a contraprova relevante; fixtures
+que atribuem sucesso/freshness/revisão não demonstram que esses fatos foram verificados.
+Suíte verde não encerra um achado reproduzido por um oráculo independente.
 
 ## Relatório
 

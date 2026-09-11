@@ -5,8 +5,10 @@ Covers headless business logic, Pydantic validation, and REST API endpoints.
 
 import os
 import shutil
+import sys
 import tempfile
 from pathlib import Path
+from unittest.mock import MagicMock, patch
 import pytest
 from fastapi.testclient import TestClient
 
@@ -14,6 +16,8 @@ from hub.backend.models import (
     ServiceCategory,
     ServiceCreate,
     ServiceItem,
+    HealthCheckResult,
+    HealthStatus,
     ServiceUpdate,
 )
 from hub.backend.service import HubService
@@ -139,6 +143,163 @@ def test_crud_operations(temp_service: HubService):
     deleted = temp_service.delete_service(created.id)
     assert deleted is True
     assert temp_service.get_service(created.id) is None
+
+
+def test_local_service_metadata_round_trip(temp_service: HubService, tmp_path: Path) -> None:
+    script_path = tmp_path / "start_demo.py"
+    script_path.write_text("print('demo')\n", encoding="utf-8")
+
+    created = temp_service.create_service(
+        ServiceCreate(
+            name="Local Demo",
+            url="http://127.0.0.1:9100",
+            is_local=True,
+            launch_script=str(script_path),
+            fallback_urls=["http://127.0.0.1:9101"],
+        )
+    )
+
+    assert created.launch_script == str(script_path)
+    assert created.fallback_urls == ["http://127.0.0.1:9101"]
+
+    restored = temp_service.get_service(created.id)
+    assert restored is not None
+    assert restored.launch_script == str(script_path)
+    assert restored.fallback_urls == ["http://127.0.0.1:9101"]
+
+
+def test_local_service_launch_uses_declared_script_and_fallback_url(
+    temp_service: HubService,
+    tmp_path: Path,
+) -> None:
+    script_path = tmp_path / "start_demo.py"
+    script_path.write_text("print('demo')\n", encoding="utf-8")
+    created = temp_service.create_service(
+        ServiceCreate(
+            name="Local Demo",
+            url="http://127.0.0.1:9100",
+            is_local=True,
+            launch_script=str(script_path),
+            fallback_urls=["http://127.0.0.1:9101"],
+        )
+    )
+    temp_service.project_root = tmp_path
+
+    primary_offline = HealthCheckResult(
+        service_id=created.id,
+        url="http://127.0.0.1:9100",
+        status=HealthStatus.OFFLINE,
+    )
+    fallback_offline = HealthCheckResult(
+        service_id=created.id,
+        url="http://127.0.0.1:9101",
+        status=HealthStatus.OFFLINE,
+    )
+    fallback_online = HealthCheckResult(
+        service_id=created.id,
+        url="http://127.0.0.1:9101",
+        status=HealthStatus.ONLINE,
+        status_code=200,
+    )
+    process = MagicMock(pid=43210)
+
+    with patch.object(
+        temp_service,
+        "ping_url",
+        side_effect=[primary_offline, fallback_offline, primary_offline, fallback_online],
+    ), patch("subprocess.Popen", return_value=process) as popen:
+        result = temp_service.launch_service(created.id, max_wait_sec=1.0, poll_interval=0.01)
+
+    assert result.status == "online"
+    assert result.url == "http://127.0.0.1:9101"
+    command = popen.call_args.args[0]
+    assert command[0] == sys.executable
+    assert command[1] == str(script_path)
+    assert "--no-browser" in command
+    assert popen.call_args.kwargs["env"]["PYTHONUNBUFFERED"] == "1"
+
+
+def test_persisted_catalog_migrates_obsolete_launcher_metadata(tmp_path: Path) -> None:
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    external_script = tmp_path / "external" / "start_demo.py"
+    external_script.parent.mkdir()
+    external_script.write_text("print('demo')\n", encoding="utf-8")
+
+    default_item = {
+        "id": "local-demo",
+        "name": "Local Demo",
+        "url": "http://127.0.0.1:9100",
+        "launch_script": "external/start_demo.py",
+        "fallback_urls": ["http://127.0.0.1:9101"],
+    }
+    import json
+    (data_dir / "default_services.json").write_text(json.dumps([default_item]), encoding="utf-8")
+    (data_dir / "services.json").write_text(
+        json.dumps([{
+            **default_item,
+            "launch_script": "old_start_demo.py",
+            "fallback_urls": [],
+        }]),
+        encoding="utf-8",
+    )
+
+    service = HubService(data_dir=data_dir, project_root=tmp_path)
+    migrated = service.get_service("local-demo")
+
+    assert migrated is not None
+    assert migrated.launch_script == "external/start_demo.py"
+    assert migrated.fallback_urls == []
+
+
+def test_production_service_open_uses_external_url_without_spawning(
+    temp_service: HubService,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    script_path = tmp_path / "start_demo.py"
+    script_path.write_text("print('demo')\n", encoding="utf-8")
+    created = temp_service.create_service(
+        ServiceCreate(
+            name="External Demo",
+            url="https://demo.example.com",
+            launch_script=str(script_path),
+        )
+    )
+
+    monkeypatch.setenv("DARKHUB_ENV", "production")
+    with patch("subprocess.Popen") as popen:
+        launch_result = temp_service.launch_service(created.id)
+        target_url = temp_service.get_service_launch_target(created.id)
+
+    assert launch_result.status == "external"
+    assert launch_result.launched is False
+    assert target_url == "https://demo.example.com"
+    popen.assert_not_called()
+
+
+def test_deployment_url_override_is_applied_at_runtime(
+    temp_service: HubService,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv(
+        "DARKHUB_SERVICE_URL_OVERRIDES",
+        '{"test-claude":"https://demo.example.com/claude"}',
+    )
+
+    service = temp_service.get_service("test-claude")
+
+    assert service is not None
+    assert service.url == "https://demo.example.com/claude"
+    assert service.is_local is False
+
+
+def test_frontend_routes_any_launchable_service_through_open_endpoint() -> None:
+    frontend = Path(__file__).parents[1] / "hub" / "frontend" / "app.js"
+    content = frontend.read_text(encoding="utf-8")
+
+    assert content.count("Boolean(item.launch_script)") >= 2
+    assert "Boolean(selected.launch_script)" in content
 
 
 def test_prompts_catalog(temp_service: HubService):
@@ -407,4 +568,3 @@ def test_api_playground_and_backup_endpoints(temp_service: HubService, monkeypat
     assert res_reset.json()["count"] == 2
 
     app.dependency_overrides.clear()
-

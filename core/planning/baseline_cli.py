@@ -15,17 +15,26 @@ from typing import Any, Sequence
 
 from pydantic import ValidationError
 
-from .baseline_models import BaselineSnapshot, EvidenceClaim
+from .baseline_models import BaselineManifest, BaselineSnapshot, EvidenceClaim, SourceStatus, VerificationReport
 from .baseline_probes import collect_probe_observations, load_probe_config
 from .baseline_reconcile import reconcile_baseline, source_fingerprint
 from .baseline_render import render_baseline, render_sources
 from .baseline_sources import BaselineCatalogError, collect_sources, load_catalog
+from .baseline_verify import verify_snapshot
 
 SHA_RE = re.compile(r"^[0-9a-fA-F]{7,64}$")
 
 
 class BaselineCliError(ValueError):
     """A safe, user-actionable CLI error."""
+
+
+class BaselineRequiredSourceMissingError(BaselineCliError):
+    """Raised when one or more required sources are missing or unreadable."""
+
+
+class BaselineCorruptionError(ValueError):
+    """Integrity, forgery or corruption error requiring exit code 3."""
 
 
 def _load_claims(path: Path) -> list[EvidenceClaim]:
@@ -106,42 +115,93 @@ def _collect(args: argparse.Namespace) -> int:
         raise BaselineCliError("OUTPUT_EXISTS")
     output.parent.mkdir(parents=True, exist_ok=True)
     output.mkdir()
+
+    catalog_rel = catalog_path.relative_to(root) if catalog_path.is_relative_to(root) else Path(catalog_path.name)
+    claims_rel = claims_path.relative_to(root) if claims_path.is_relative_to(root) else Path(claims_path.name)
+    probe_cfg_rel = None
+    probe_cfg_sha = None
+    if args.probe_config:
+        probe_cfg_file = Path(args.probe_config).resolve()
+        probe_cfg_rel = probe_cfg_file.relative_to(root) if probe_cfg_file.is_relative_to(root) else Path(probe_cfg_file.name)
+        probe_cfg_sha = hashlib.sha256(probe_cfg_file.read_bytes()).hexdigest()
+
+    manifest = BaselineManifest(
+        snapshot_id=snapshot.snapshot_id,
+        base_sha=snapshot.base_sha,
+        source_fingerprint=snapshot.source_fingerprint,
+        catalog_relative_path=catalog_rel,
+        catalog_sha256=hashlib.sha256(catalog_path.read_bytes()).hexdigest(),
+        claims_relative_path=claims_rel,
+        claims_sha256=hashlib.sha256(claims_path.read_bytes()).hexdigest(),
+        probe_config_relative_path=probe_cfg_rel,
+        probe_config_sha256=probe_cfg_sha,
+        source_relative_paths=[obs.relative_path for obs in snapshot.source_observations],
+    )
+
     try:
         _write_json_atomic(output / "snapshot.json", snapshot.model_dump(mode="json"))
         _write_atomic(output / "BASELINE.md", render_baseline(snapshot))
         _write_json_atomic(output / "sources.json", render_sources(collected, claims, snapshot))
+        _write_json_atomic(output / "manifest.json", manifest.model_dump(mode="json"))
     except OSError as exc:
         raise BaselineCliError("OUTPUT_WRITE_FAILED") from exc
     print(json.dumps({"snapshot_id": snapshot.snapshot_id, "output": _relative_output(root, output), "completeness": snapshot.completeness.value, "hf02_readiness": snapshot.hf02_readiness.value, "source_count": len(snapshot.source_observations), "item_count": len(snapshot.items)}, ensure_ascii=False, sort_keys=True))
+
+    spec_by_id = {spec.source_id: spec for spec in catalog}
+    missing_required = [
+        obs
+        for obs in collected.observations
+        if spec_by_id.get(obs.source_id)
+        and spec_by_id[obs.source_id].required
+        and obs.status != SourceStatus.READ
+    ]
+    if missing_required:
+        for obs in missing_required:
+            print(
+                f"[BASELINE_ERROR] REQUIRED_SOURCE_MISSING: Source '{obs.source_id}' ({obs.relative_path.as_posix()}) status is '{obs.status.value}'",
+                file=sys.stderr,
+            )
+        return 2
+
     return 0
 
 
 def _verify(args: argparse.Namespace) -> int:
     snapshot_path = Path(args.snapshot).resolve()
+    if not snapshot_path.is_file():
+        raise BaselineCliError("SNAPSHOT_NOT_FOUND")
     try:
         payload = json.loads(snapshot_path.read_text(encoding="utf-8"))
         snapshot = BaselineSnapshot.model_validate(payload)
     except (OSError, UnicodeError, ValidationError, ValueError, json.JSONDecodeError) as exc:
         raise BaselineCliError("SNAPSHOT_INVALID") from exc
-    if snapshot.source_fingerprint != source_fingerprint(snapshot.source_observations):
-        raise BaselineCliError("SNAPSHOT_FINGERPRINT_MISMATCH")
-    source_ids = [observation.source_id for observation in snapshot.source_observations]
-    if len(source_ids) != len(set(source_ids)):
-        raise BaselineCliError("SNAPSHOT_DUPLICATE_SOURCE")
-    item_ids = [item.item_id for item in snapshot.items]
-    if len(item_ids) != len(set(item_ids)):
-        raise BaselineCliError("SNAPSHOT_DUPLICATE_ITEM")
-    if args.root:
-        root = Path(args.root).resolve()
-        for observation in snapshot.source_observations:
-            if observation.status.value != "read":
-                continue
-            source = (root / observation.relative_path).resolve()
-            if not source.is_relative_to(root) or not source.is_file():
-                raise BaselineCliError("SOURCE_NOT_REPLAYABLE")
-            if hashlib.sha256(source.read_bytes()).hexdigest() != observation.sha256:
-                raise BaselineCliError("SOURCE_HASH_CHANGED")
-    print(f"[BASELINE_VERIFY_PASS] snapshot={snapshot.snapshot_id} sources={len(source_ids)} items={len(item_ids)}")
+
+    root = Path(args.root).resolve() if args.root else None
+    manifest: BaselineManifest | None = None
+    if getattr(args, "manifest", None):
+        manifest_path = Path(args.manifest).resolve()
+        if not manifest_path.is_file():
+            raise BaselineCliError("MANIFEST_NOT_FOUND")
+        try:
+            manifest = BaselineManifest.model_validate_json(manifest_path.read_bytes())
+        except (OSError, UnicodeError, ValidationError, ValueError) as exc:
+            raise BaselineCliError("MANIFEST_INVALID") from exc
+    elif (snapshot_path.parent / "manifest.json").is_file():
+        try:
+            manifest = BaselineManifest.model_validate_json((snapshot_path.parent / "manifest.json").read_bytes())
+        except (OSError, UnicodeError, ValidationError, ValueError):
+            manifest = None
+
+    report = verify_snapshot(snapshot, root=root, manifest=manifest)
+    if not report.valid:
+        for err in report.errors:
+            if report.exit_code == 3:
+                print(f"[BASELINE_CORRUPTED] {err}", file=sys.stderr)
+            else:
+                print(f"[BASELINE_ERROR] {err}", file=sys.stderr)
+        return report.exit_code
+
+    print(f"[BASELINE_VERIFY_PASS] snapshot={snapshot.snapshot_id} sources={report.source_count} items={report.item_count}")
     return 0
 
 
@@ -161,6 +221,7 @@ def _parser() -> argparse.ArgumentParser:
     verify = subparsers.add_parser("verify", help="verify a snapshot and optionally replay source hashes")
     verify.add_argument("--snapshot", required=True)
     verify.add_argument("--root")
+    verify.add_argument("--manifest")
     verify.set_defaults(handler=_verify)
     return parser
 
@@ -169,7 +230,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     try:
         return int(args.handler(args))
-    except (BaselineCatalogError, BaselineCliError, OSError, ValueError) as exc:
+    except BaselineCorruptionError as exc:
+        print(f"[BASELINE_CORRUPTED] {exc}", file=sys.stderr)
+        return 3
+    except BaselineCliError as exc:
+        print(f"[BASELINE_ERROR] {exc}", file=sys.stderr)
+        return 2
+    except (BaselineCatalogError, OSError, ValueError) as exc:
         print(f"[BASELINE_ERROR] {type(exc).__name__}: {exc}", file=sys.stderr)
         return 2
 

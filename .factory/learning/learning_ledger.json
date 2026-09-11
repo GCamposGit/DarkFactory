@@ -1,6 +1,6 @@
 {
   "session_id": "session_20260905_072924",
-  "prompt_count": 19,
+  "prompt_count": 21,
   "turns": [
     {
       "turn_id": 1,
@@ -190,6 +190,26 @@
       "was_followup": true,
       "one_shot_success": false,
       "missing_context_or_gap": "external-DBOS-metadata-and-PostgreSQL-access-must-be-real-and-secret-free",
+      "target_skill": "autonomous-piv-loop"
+    },
+    {
+      "turn_id": 20,
+      "timestamp": "2026-09-09T11:19:48.159961+00:00",
+      "user_prompt_summary": "Desenvolver o próximo item liberado do roadmap HF após HF-02-02/03/04",
+      "perceived_intent": "Selecionar e implementar a próxima unidade HF localmente executável sem acesso PostgreSQL, preservando escopo e gates",
+      "was_followup": true,
+      "one_shot_success": false,
+      "missing_context_or_gap": "O pacote HF-04 é o próximo ramo local, mas ainda não tem handoff detalhado; materializar o contrato antes da implementação",
+      "target_skill": "autonomous-piv-loop"
+    },
+    {
+      "turn_id": 21,
+      "timestamp": "2026-09-09T12:00:07.724574+00:00",
+      "user_prompt_summary": "Concluído HF-04-01; pegar o próximo módulo liberado do roadmap HF e desenvolver.",
+      "perceived_intent": "Implementar o próximo slice local executável do HF-05 sem ultrapassar dependências waiting_access ou alegar integração externa.",
+      "was_followup": true,
+      "one_shot_success": false,
+      "missing_context_or_gap": "O roadmap HF-05 ainda precisa de um subitem local detalhado; preservar gates de HF-04 e separar runtime real de contratos determinísticos.",
       "target_skill": "autonomous-piv-loop"
     }
   ],
@@ -909,6 +929,96 @@
       "origin": "rca",
       "status": "proposed",
       "active": false
+    },
+    {
+      "rca_id": "rca_e7c37f71",
+      "timestamp": "2026-09-09T11:29:29.396235+00:00",
+      "category": "type_error",
+      "symptom": "Contratos HF-04 rejeitaram enums string vindos de payloads JSON",
+      "mechanism": "ConfigDict strict=True exige instâncias de Enum em model_validate de dicionários",
+      "root_cause": "Strictness foi aplicada ao modelo-base inteiro em vez de separar vocabulário fechado de coerção de transporte JSON",
+      "patch_description": "Remover strict=True do modelo-base e preservar extra=forbid, validators, Literals e campos restritos",
+      "preventative_rule": "Contratos JSON devem fechar enums e campos perigosos sem exigir instâncias Python ao validar dicionários",
+      "regression_test_file": "tests/test_workflow_contracts.py",
+      "verification_gate_id": null,
+      "origin": "rca",
+      "status": "proposed",
+      "active": false
+    },
+    {
+      "rca_id": "rca_3f6b5eb1",
+      "timestamp": "2026-09-09T11:30:08.477352+00:00",
+      "category": "type_error",
+      "symptom": "ReadinessGate falhou ao avaliar qualquer handoff por atributo inexistente",
+      "mechanism": "O gate comparou WorkflowState.READY_FOR_RELEASE embora ready_for_release pertença ao enum ReadinessState",
+      "root_cause": "Estados de workflow e estados de prontidão não foram separados semanticamente na condição do release",
+      "patch_description": "Usar apenas WorkflowState.DELIVERED no conjunto de estados solicitados e manter ReadinessState.READY_FOR_RELEASE no resultado",
+      "preventative_rule": "Não misturar enums de ciclo de execução e prontidão; nomes de estado devem ser resolvidos no enum dono antes do gate",
+      "regression_test_file": "tests/test_workflow_contracts.py",
+      "verification_gate_id": null,
+      "origin": "rca",
+      "status": "proposed",
+      "active": false
+    },
+    {
+      "rca_id": "rca_583904a6",
+      "timestamp": "2026-09-09T12:00:36.528842+00:00",
+      "category": "tool_misuse",
+      "symptom": "Direct execution of core/router/model_router.py failed with ModuleNotFoundError: No module named core",
+      "mechanism": "Python direct-script invocation sets sys.path to core/router instead of the repository root",
+      "root_cause": "The router command was invoked as a file rather than as a package module",
+      "patch_description": "Use python -m core.router.model_router from the repository root; no product code change required",
+      "preventative_rule": "Invoke project-internal Python modules with python -m from the repository root when imports depend on the package root",
+      "regression_test_file": "core/router/model_router.py",
+      "verification_gate_id": "gate_12558217",
+      "origin": "rca",
+      "status": "active",
+      "active": true
+    },
+    {
+      "rca_id": "rca_31819027",
+      "timestamp": "2026-09-09T17:39:41.194596+00:00",
+      "category": "type_error",
+      "symptom": "Retry de lease falhou com UNIQUE constraint failed: leases.job_id",
+      "mechanism": "A tabela de leases permitia apenas uma linha histórica por job",
+      "root_cause": "A restrição UNIQUE em job_id não modelava múltiplas tentativas do mesmo job",
+      "patch_description": "Remover UNIQUE histórico e criar índice único apenas para leases ativas por job",
+      "preventative_rule": "Persistências de leases devem preservar histórico e impedir apenas duas leases ativas simultâneas",
+      "regression_test_file": "tests/test_workflow_runtime.py",
+      "verification_gate_id": null,
+      "origin": "rca",
+      "status": "proposed",
+      "active": false
+    },
+    {
+      "rca_id": "rca_09504cb8",
+      "timestamp": "2026-09-09T17:39:41.672486+00:00",
+      "category": "assumption_error",
+      "symptom": "Teste de conflito esperava o job locked sem declarar ordem",
+      "mechanism": "Dois jobs receberam o mesmo timestamp e o desempate determinístico por job_id selecionou independent",
+      "root_cause": "O teste dependia de uma ordem incidental em vez de prioridade explícita",
+      "patch_description": "Definir prioridade explícita no job que deve ser escolhido e manter o desempate documentado",
+      "preventative_rule": "Testes de scheduler devem declarar prioridade/capacidade quando verificam um item específico",
+      "regression_test_file": "tests/test_workflow_runtime.py",
+      "verification_gate_id": null,
+      "origin": "rca",
+      "status": "proposed",
+      "active": false
+    },
+    {
+      "rca_id": "rca_01b117f6",
+      "timestamp": "2026-09-09T17:39:42.022082+00:00",
+      "category": "assumption_error",
+      "symptom": "Teste de restart esperava outbox vazio após ack de apenas um evento",
+      "mechanism": "A transição de ativação criada antes do job continuou pending",
+      "root_cause": "O teste não distinguiu ack idempotente de drenagem total da fila",
+      "patch_description": "Ackar todos os eventos restaurados e repetir o ack de um evento para verificar idempotência",
+      "preventative_rule": "Testes de outbox devem verificar sobrevivência e ack por evento sem assumir drenagem implícita",
+      "regression_test_file": "tests/test_workflow_runtime.py",
+      "verification_gate_id": null,
+      "origin": "rca",
+      "status": "proposed",
+      "active": false
     }
   ],
   "transfers": [
@@ -1269,20 +1379,6 @@
       "created_at": "2026-09-05T19:57:34.150655+00:00"
     },
     {
-      "transfer_id": "trans_1d36d975",
-      "source_domain": "hub.frontend",
-      "target_domains": [
-        "canaletto_gallery.backend",
-        "hub.backend"
-      ],
-      "specific_lesson": "Index HTML sem headers no-cache causou exibicao de versao antiga do painel",
-      "generalized_principle": "Rotas raiz que servem index.html devem declarar headers no-cache para evitar retencao de HTML obsoleto no navegador do usuario",
-      "applied_actions": [
-        "headers Cache-Control no-cache no FileResponse"
-      ],
-      "created_at": "2026-09-08T04:38:15.242371+00:00"
-    },
-    {
       "transfer_id": "trans_441a2520",
       "source_domain": "core.harness",
       "target_domains": [
@@ -1581,7 +1677,15 @@
       "passed": true,
       "output_snippet": "ASSED [ 41%]\ntests/test_worker_onprem_test_subagent.py::test_engine_execute_local_mode PASSED [ 50%]\ntests/test_worker_onprem_test_subagent.py::test_engine_execute_remote_success PASSED [ 58%]\ntests/test_worker_onprem_test_subagent.py::test_engine_execute_auto_failover_to_local_when_remote_offline PASSED [ 66%]\ntests/test_worker_onprem_test_subagent.py::test_engine_execute_remote_fail_closed_when_no_fallback PASSED [ 75%]\ntests/test_worker_onprem_test_subagent.py::test_engine_execute_remote_network_error_triggers_fallback PASSED [ 83%]\ntests/test_worker_onprem_test_subagent.py::test_hub_api_list_test_workers PASSED [ 91%]\ntests/test_worker_onprem_test_subagent.py::test_hub_api_execute_test_suite PASSED [100%]\n\n============================= 12 passed in 0.44s ==============================\n",
       "executed_at": "2026-09-08T14:25:32.955989+00:00"
+    },
+    {
+      "gate_id": "gate_12558217",
+      "target_type": "rca_patch",
+      "test_command": "python -m core.router.model_router recommend --task-type coding --complexity high --offline",
+      "passed": true,
+      "output_snippet": "ted_provider\": null,\n    \"selected_account_label\": null,\n    \"evaluated_accounts\": 0,\n    \"failover_required\": false,\n    \"use_paid_api\": false,\n    \"prefer_local\": true,\n    \"prefer_scripts\": true,\n    \"defer_frontier_work\": false,\n    \"modular_delivery\": true,\n    \"reasoning_effort\": \"minimal\",\n    \"max_output_tokens\": 596,\n    \"block_output_tokens\": 596,\n    \"task_priority\": \"normal\",\n    \"selection_objective\": \"minimize output tokens, then marginal cost, then latency\",\n    \"estimate\": {\n      \"input_tokens\": 2480,\n      \"output_tokens\": 1860,\n      \"total_tokens\": 4340,\n      \"confidence\": 0.72,\n      \"method\": \"task baseline + chars/4 + complexity + bounded step multiplier\"\n    },\n    \"rationale\": \"Offline mode forces local models/scripts and the smallest modular token budget.\"\n  }\n}\n",
+      "executed_at": "2026-09-09T12:00:36.526842+00:00"
     }
   ],
-  "last_updated": "2026-09-09T00:27:20.438332+00:00"
+  "last_updated": "2026-09-09T17:39:42.023082+00:00"
 }

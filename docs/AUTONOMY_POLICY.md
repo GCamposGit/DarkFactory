@@ -43,4 +43,4 @@ remota.
 - O módulo não faz merge, push, criação de PR ou deploy.
 - Tokens ficam somente no adaptador e nunca aparecem em mensagens de erro.
 - Testes usam transporte GitHub injetado; nenhuma credencial ou rede é necessária.
-- Canaletto continua fora do escopo compartilhado.
+- Projetos locais de demonstração continuam fora do escopo compartilhado.

@@ -177,7 +177,7 @@ def is_destination_allowed(url: str) -> Tuple[bool, str]:
 
     host_lower = host.strip("[]").lower()
 
-    # Explicitly permitted loopback endpoints for local AI clusters (Ollama, Canaletto, etc.)
+    # Explicitly permitted loopback endpoints for local services.
     if host_lower in ("localhost", "127.0.0.1", "::1", "testserver"):
         return True, "Permitted local loopback service"
 
@@ -624,6 +624,125 @@ class HubService:
                 logger.warning("Default services file missing. Creating empty list.")
                 self.services_file.write_text("[]", encoding="utf-8")
 
+        self._migrate_launch_metadata()
+
+    def _resolve_launch_script_path(self, script_name: str) -> Path:
+        """Resolve a catalog launch path relative to the shared project root."""
+        script_path = Path(script_name)
+        if not script_path.is_absolute():
+            script_path = self.project_root / script_path
+        return script_path.resolve()
+
+    def _migrate_launch_metadata(self) -> None:
+        """Refresh missing or obsolete launcher metadata from the shipped catalog.
+
+        The hub catalog is persisted in a Docker volume, so changing the versioned
+        seed file alone does not update an already-created ``services.json``. Only
+        launcher metadata is migrated, leaving user-facing catalog edits intact.
+        """
+        if not self.services_file.exists() or not self.default_services_file.exists():
+            return
+
+        try:
+            current_items = json.loads(self.services_file.read_text(encoding="utf-8"))
+            default_items = json.loads(self.default_services_file.read_text(encoding="utf-8"))
+        except (OSError, TypeError, ValueError, json.JSONDecodeError) as exc:
+            logger.warning("Service catalog migration skipped: %s", exc)
+            return
+
+        if not isinstance(current_items, list) or not isinstance(default_items, list):
+            return
+
+        defaults_by_id = {
+            item.get("id"): item
+            for item in default_items
+            if isinstance(item, dict) and item.get("id")
+        }
+        changed = False
+
+        for item in current_items:
+            if not isinstance(item, dict):
+                continue
+            default_item = defaults_by_id.get(item.get("id"))
+            if not default_item:
+                continue
+
+            default_script = default_item.get("launch_script")
+            current_script = item.get("launch_script")
+            if default_script and not current_script:
+                item["launch_script"] = default_script
+                changed = True
+            elif default_script and current_script != default_script:
+                current_path = self._resolve_launch_script_path(str(current_script))
+                default_path = self._resolve_launch_script_path(str(default_script))
+                if not current_path.exists() and default_path.exists():
+                    item["launch_script"] = default_script
+                    changed = True
+
+            if "fallback_urls" not in item and "fallback_urls" in default_item:
+                item["fallback_urls"] = default_item["fallback_urls"]
+                changed = True
+
+        if changed:
+            self._save_services_raw(current_items)
+            logger.info("Migrated persisted service launcher metadata from default catalog")
+
+    @staticmethod
+    def _env_flag(name: str, default: bool = False) -> bool:
+        value = os.getenv(name)
+        if value is None:
+            return default
+        return value.strip().lower() in {"1", "true", "yes", "on"}
+
+    def _local_service_launch_enabled(self) -> bool:
+        """Return whether this process is allowed to spawn local demo services."""
+        return self._env_flag(
+            "DARKHUB_ENABLE_LOCAL_SERVICE_LAUNCH",
+            default=os.getenv("DARKHUB_ENV", "").strip().lower() != "production",
+        )
+
+    def _service_url_overrides(self) -> Dict[str, str]:
+        """Read optional deployment-time URL overrides for externally hosted services."""
+        raw_value = os.getenv("DARKHUB_SERVICE_URL_OVERRIDES", "").strip()
+        if not raw_value:
+            return {}
+
+        try:
+            payload = json.loads(raw_value)
+        except json.JSONDecodeError as exc:
+            logger.warning("Ignoring invalid DARKHUB_SERVICE_URL_OVERRIDES: %s", exc)
+            return {}
+
+        if not isinstance(payload, dict):
+            logger.warning("Ignoring DARKHUB_SERVICE_URL_OVERRIDES because it is not an object")
+            return {}
+
+        overrides: Dict[str, str] = {}
+        for service_id, url in payload.items():
+            if not isinstance(service_id, str) or not isinstance(url, str):
+                continue
+            parsed = urllib.parse.urlparse(url.strip())
+            if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+                logger.warning("Ignoring invalid service URL override for %s", service_id)
+                continue
+            overrides[service_id] = url.strip()
+        return overrides
+
+    def _apply_service_url_overrides(self, items: List[Dict]) -> List[Dict]:
+        overrides = self._service_url_overrides()
+        if not overrides:
+            return items
+
+        resolved_items: List[Dict] = []
+        for item in items:
+            resolved_item = dict(item)
+            service_id = resolved_item.get("id")
+            if service_id in overrides:
+                resolved_item["url"] = overrides[service_id]
+                resolved_item["is_local"] = False
+            resolved_items.append(resolved_item)
+        return resolved_items
+
     def _record_model_call(
         self,
         *,
@@ -743,7 +862,8 @@ class HubService:
         try:
             with open(self.services_file, "r", encoding="utf-8") as f:
                 data = json.load(f)
-                return data if isinstance(data, list) else []
+                items = data if isinstance(data, list) else []
+                return self._apply_service_url_overrides(items)
         except Exception as exc:
             logger.error(f"Failed to read services from {self.services_file}: {exc}")
             return []
@@ -842,6 +962,8 @@ class HubService:
             is_favorite=create_data.is_favorite,
             pinned=create_data.pinned,
             is_local=create_data.is_local or is_local,
+            launch_script=create_data.launch_script,
+            fallback_urls=create_data.fallback_urls,
         )
 
         raw_items.append(new_item.model_dump())
@@ -989,26 +1111,6 @@ class HubService:
                     error=str(redirect_err),
                 )
             except Exception as get_exc:
-                if service_id == "canaletto-gallery" and ":8899" in url:
-                    alt_url = url.replace(":8899", ":8900")
-                    try:
-                        req_alt = urllib.request.Request(
-                            alt_url,
-                            headers={"User-Agent": "DarkHub-Ping/1.0"},
-                            method="GET",
-                        )
-                        with opener.open(req_alt, timeout=timeout_sec) as response:
-                            latency = round((time.perf_counter() - start) * 1000, 1)
-                            return HealthCheckResult(
-                                service_id=service_id,
-                                url=alt_url,
-                                status=HealthStatus.ONLINE,
-                                latency_ms=latency,
-                                status_code=response.getcode(),
-                            )
-                    except Exception:
-                        pass
-
                 return HealthCheckResult(
                     service_id=service_id,
                     url=url,
@@ -1017,6 +1119,23 @@ class HubService:
                     error=str(get_exc),
                 )
 
+    def _probe_service_urls(self, service: ServiceItem, timeout_sec: float) -> HealthCheckResult:
+        """Probe a service's primary URL and configured fallbacks in order."""
+        result = self.ping_url(service_id=service.id, url=service.url, timeout_sec=timeout_sec)
+        if result.status == HealthStatus.ONLINE:
+            return result
+
+        for fallback_url in service.fallback_urls:
+            fallback_result = self.ping_url(
+                service_id=service.id,
+                url=fallback_url,
+                timeout_sec=timeout_sec,
+            )
+            if fallback_result.status == HealthStatus.ONLINE:
+                return fallback_result
+
+        return result
+
     def launch_service(
         self,
         service_id: str,
@@ -1024,7 +1143,7 @@ class HubService:
         poll_interval: float = 0.2,
     ) -> ServiceLaunchResponse:
         """
-        Launches a configured local service script (e.g. run_canaletto.py) if currently offline.
+        Launches a configured local service script if currently offline.
         Waits until the service is verified online via health probe before returning.
         If already online, returns immediately with already_running status.
         """
@@ -1032,8 +1151,20 @@ class HubService:
         if not service:
             raise KeyError(f"Service '{service_id}' not found in catalog")
 
+        if not self._local_service_launch_enabled():
+            return ServiceLaunchResponse(
+                service_id=service.id,
+                url=service.url,
+                status="external",
+                launched=False,
+                message=(
+                    f"Service '{service.name}' is hosted externally; "
+                    "local process launching is disabled in this environment."
+                ),
+            )
+
         # Check if already online
-        current_health = self.ping_url(service_id=service.id, url=service.url, timeout_sec=1.0)
+        current_health = self._probe_service_urls(service, timeout_sec=1.0)
         if current_health.status == HealthStatus.ONLINE:
             return ServiceLaunchResponse(
                 service_id=service.id,
@@ -1045,22 +1176,17 @@ class HubService:
 
         # Resolve launch script path
         script_name = service.launch_script
-        if not script_name and service_id == "canaletto-gallery":
-            script_name = "run_canaletto.py"
 
         if not script_name:
             raise ValueError(f"Service '{service_id}' does not define a launch_script.")
 
-        script_path = Path(script_name)
-        if not script_path.is_absolute():
-            script_path = (self.project_root / script_name).resolve()
+        script_path = self._resolve_launch_script_path(script_name)
 
         if not script_path.exists():
             raise FileNotFoundError(f"Launch script not found: {script_path}")
 
         # Prepare environment and launch subprocess
         env = os.environ.copy()
-        env["CANALETTO_NO_BROWSER"] = "1"
         env["PYTHONUNBUFFERED"] = "1"
 
         creationflags = 0
@@ -1094,7 +1220,7 @@ class HubService:
                 logger.error(f"Service '{service_id}' process exited prematurely (exit code: {poll_val})")
                 break
             time.sleep(poll_interval)
-            probe = self.ping_url(service_id=service.id, url=service.url, timeout_sec=0.5)
+            probe = self._probe_service_urls(service, timeout_sec=0.5)
             if probe.status == HealthStatus.ONLINE:
                 is_online = True
                 resolved_url = probe.url or service.url
@@ -1125,7 +1251,10 @@ class HubService:
         if not service:
             raise KeyError(f"Service '{service_id}' not found in catalog")
 
-        if service.launch_script or service_id == "canaletto-gallery":
+        if not self._local_service_launch_enabled():
+            return service.url
+
+        if service.launch_script:
             res = self.launch_service(service_id, max_wait_sec=max_wait_sec)
             if isinstance(res, ServiceLaunchResponse) and res.url:
                 return res.url
@@ -1881,4 +2010,3 @@ class HubService:
         """Triggers Dokploy PaaS auto-deploy webhook (INFRA-09)."""
         client = DokployDeployClient()
         return client.trigger_deploy(service_name=service_name, custom_url=custom_url)
-

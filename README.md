@@ -4,7 +4,7 @@ Um framework completo para criação autônoma de software utilizando múltiplos
 
 Construído sobre o conceito de **Dark Factory** (Fábrica sem luzes / Engenharia sem supervisão no teclado), operando em **Nível 3 de Autonomia**: especificações entram como issues, passam pelo pipeline PIV, são validadas por portões determinísticos de teste e recebem *auto-merge* quando 100% dos critérios forem atingidos.
 
-> **Escopo compartilhado:** o núcleo DarkFac e o DarkHub são versionados. O Canaletto é um experimento local e fica deliberadamente fora do Git, dos clones e do harness compartilhado.
+> **Escopo compartilhado:** o núcleo DarkFac e o DarkHub são versionados. Projetos locais de demonstração ficam fora do Git, dos clones e do harness compartilhado.
 
 ## 🚀 Primeiros passos após um clone
 
@@ -17,7 +17,7 @@ python -m venv .venv
 python -m pip install --upgrade pip
 python -m pip install -r requirements.txt
 python core/harness/runner.py --quick
-python -m pytest tests -v --ignore=tests/test_canaletto.py
+python -m pytest tests -v
 ```
 
 O fluxo completo de interoperabilidade com Antigravity, Grok e outros harnesses está em [`docs/HARNESS_INTEROP.md`](docs/HARNESS_INTEROP.md). O stack opcional de transcrição GPU está em `requirements-audio.txt`.

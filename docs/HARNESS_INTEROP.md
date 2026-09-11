@@ -14,7 +14,7 @@ python -m venv .venv
 python -m pip install --upgrade pip
 python -m pip install -r requirements.txt
 python core/harness/runner.py --quick
-python -m pytest tests -v --ignore=tests/test_canaletto.py
+python -m pytest tests -v
 ```
 
 O stack de GPU/transcrição é opcional:
@@ -37,7 +37,7 @@ Abra a raiz clonada como workspace e injete `AGENTS.md` como instrução de proj
 python run_hub.py
 ```
 
-O serviço fica em `http://127.0.0.1:8888` por padrão. O launcher do Canaletto não faz parte do clone compartilhado e continua disponível apenas localmente.
+O serviço fica em `http://127.0.0.1:8888` por padrão. Projetos locais de demonstração não fazem parte do clone compartilhado e continuam disponíveis apenas em seus próprios diretórios.
 
 ## Skills em ambientes compatíveis
 

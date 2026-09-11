@@ -24,7 +24,7 @@ from spikes.runtime_choice.contracts import (
     WorkflowVersion,
 )
 from spikes.runtime_choice.effect_server import EffectServer
-from spikes.runtime_choice.native_adapter import NativeAdapter
+from spikes.runtime_choice.native_adapter import NativeAdapter, NativeAdapterError
 from spikes.runtime_choice.driver import run_jsonl
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -341,3 +341,86 @@ def test_cli_reports_unknown_run_over_real_jsonl_boundary(tmp_path: Path) -> Non
         and event["code"] == "RUN_NOT_FOUND"
         for event in events
     )
+
+
+def test_native_adapter_direct_construction_fails_cleanly_on_inaccessible_store(tmp_path: Path) -> None:
+    native_file = tmp_path / "native"
+    native_file.write_text("occupied", encoding="utf-8")
+    config_file = make_config(tmp_path, "http://127.0.0.1:18402")
+    with pytest.raises(NativeAdapterError) as exc_info_file:
+        NativeAdapter(config_file)
+    assert exc_info_file.value.code == "STORE_UNAVAILABLE"
+    assert native_file.is_file()
+
+    tmp_dir_case = tmp_path / "case_dir"
+    tmp_dir_case.mkdir()
+    db_dir = tmp_dir_case / "native" / "orchestrator.sqlite3"
+    db_dir.mkdir(parents=True)
+    config_dir = make_config(tmp_dir_case, "http://127.0.0.1:18402")
+    with pytest.raises(NativeAdapterError) as exc_info_dir:
+        NativeAdapter(config_dir)
+    assert exc_info_dir.value.code == "STORE_UNAVAILABLE"
+    assert db_dir.is_dir()
+
+
+def test_cli_reports_inaccessible_sqlite_directory_without_fallback_or_traceback(tmp_path: Path) -> None:
+    db_dir = tmp_path / "native" / "orchestrator.sqlite3"
+    db_dir.mkdir(parents=True)
+    config = make_config(tmp_path, "http://127.0.0.1:18402")
+    config_path = tmp_path / "lab-config.json"
+    config_path.write_text(config.model_dump_json(), encoding="utf-8")
+
+    result = subprocess.run(
+        [sys.executable, "-m", "spikes.runtime_choice.driver", "--config", str(config_path)],
+        cwd=PROJECT_ROOT,
+        input="",
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        timeout=10,
+        check=False,
+    )
+
+    assert result.returncode == 2
+    assert result.stdout == ""
+    assert result.stderr.strip() == "STORE_UNAVAILABLE"
+    assert "Traceback" not in result.stderr
+    assert db_dir.is_dir()
+    fallback_files = list(tmp_path.glob("*.sqlite*"))
+    assert fallback_files == []
+
+
+def test_jsonl_driver_emits_store_unavailable_when_observe_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config = make_config(tmp_path, "http://127.0.0.1:18402")
+    observe = DriverCommand(command_id="obs-1", action=DriverAction.OBSERVE, workflow_id="wf-store-fail")
+    shutdown = DriverCommand(command_id="shut-1", action=DriverAction.SHUTDOWN)
+
+    output = io.StringIO()
+    input_stream = io.StringIO(observe.model_dump_json() + "\n" + shutdown.model_dump_json() + "\n")
+
+    def fail_latest_run(_workflow_id: str) -> None:
+        raise sqlite3.OperationalError("disk I/O error")
+
+    from spikes.runtime_choice.driver import DriverSession
+
+    original_init = DriverSession.__init__
+
+    def patched_init(self, cfg: LabConfig) -> None:
+        original_init(self, cfg)
+        monkeypatch.setattr(self.adapter.store, "get_latest_run", fail_latest_run)
+
+    monkeypatch.setattr(DriverSession, "__init__", patched_init)
+
+    code = run_jsonl(config, input_stream, output)
+    events = [json.loads(line) for line in output.getvalue().splitlines()]
+
+    assert code == 0
+    assert any(
+        event["kind"] == "error"
+        and event["workflow_id"] == "wf-store-fail"
+        and event["code"] == "STORE_UNAVAILABLE"
+        for event in events
+    )
+

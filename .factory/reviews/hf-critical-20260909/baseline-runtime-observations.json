@@ -1,0 +1,77 @@
+{
+  "unattested_remote_claim": "verified",
+  "positive_negative_same_scope": {
+    "assessment": "reported",
+    "issues": [
+      "HF02_RUNTIME_EVIDENCE_INCOMPLETE"
+    ]
+  },
+  "simulation_probe": {
+    "operation": "verified",
+    "claims": 0,
+    "serialized_probe_retained": false
+  },
+  "stale_claim_hash": {
+    "collect_code": 0,
+    "verify_code": 0,
+    "actual_source_hash": "ea048557f1c247e96ea595e492e11c9c52932b027c8507aa0465b15f5e03a83f",
+    "claim_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  },
+  "forged_snapshot": {
+    "verify_code": 0,
+    "forgery": "self-cycle, missing evidence ref, operation/integration verified, readiness ready"
+  },
+  "missing_required_source_collect_code": 0,
+  "cross_prefix_dependencies": {
+    "input": "HF-01 with dependency DF-11",
+    "output": [
+      "DF-11",
+      "HF-11"
+    ]
+  },
+  "probe_64k_plus_1": {
+    "status": "ok",
+    "configured_default_timeout": 10.0
+  },
+  "divergent_workflow_approval": {
+    "accepted": true,
+    "second_digest": "release-B",
+    "same_workflow": "workflow-A"
+  },
+  "real_driver_cli": {
+    "exit_code": 2,
+    "stdout": "",
+    "stderr": "CONFIG_INVALID\n",
+    "config_path": "C:\\dev\\DarkFac\\.factory\\test_logs\\hf-critical-review\\agent-runtime\\run-3a07714b\\adapter\\valid-config.json"
+  },
+  "valid_config_json_roundtrip": {
+    "exception": "ValidationError",
+    "errors": [
+      {
+        "field": [
+          "root_dir"
+        ],
+        "type": "string_type"
+      }
+    ]
+  },
+  "observe_unknown": {
+    "exception": "AttributeError",
+    "message": "'NoneType' object has no attribute 'status'"
+  },
+  "inaccessible_native_store": {
+    "exit_code": 2
+  },
+  "inaccessible_native_store_direct": {
+    "uncaught_exception": "OperationalError",
+    "message": "unable to open database file"
+  },
+  "result_environment_fields": {
+    "exception": "ValidationError",
+    "fields": [
+      "environment_ref",
+      "target_differences",
+      "validation_mode"
+    ]
+  }
+}

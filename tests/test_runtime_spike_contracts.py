@@ -241,3 +241,31 @@ def test_unsupported_and_blocked_are_not_pass(tmp_path: Path) -> None:
         )
         assert result.status.value == status
         assert result.status.value != "pass"
+
+
+def test_comparison_aggregates_differences_and_operational_evidence(tmp_path: Path) -> None:
+    mock_res = make_result(tmp_path, mode="mock_only")
+    target_res = ScenarioResult.model_validate(
+        {
+            **make_result(tmp_path).model_dump(),
+            "scenario_id": "R02",
+            "validation_mode": "target_environment",
+            "target_differences": ["diff-network"],
+        }
+    )
+    mixed = RuntimeComparison(
+        baseline_snapshot_hash="sha256:test",
+        environment_ref="comparison-manifest.json",
+        code_sha="local",
+        results=[mock_res, target_res],
+    )
+    assert mixed.all_target_differences == ["diff-network"]
+    assert mixed.has_operational_evidence is False
+
+    target_only = RuntimeComparison(
+        baseline_snapshot_hash="sha256:test",
+        environment_ref="comparison-manifest.json",
+        code_sha="local",
+        results=[target_res],
+    )
+    assert target_only.has_operational_evidence is True

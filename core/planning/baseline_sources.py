@@ -447,40 +447,140 @@ def _parse_json_dependencies(value: Any) -> list[str]:
     return list(dict.fromkeys(dependencies))
 
 
-_FULL_ID = re.compile(r"\b(?:DF|RM|HF|USR|INFRA)-\d{1,3}[A-Z]?\b", re.IGNORECASE)
+KNOWN_PREFIXES: frozenset[str] = frozenset({"DF", "RM", "HF", "USR", "INFRA"})
+
 _PREFIXED_RANGE = re.compile(
-    r"\b(?P<prefix>DF|RM|HF|USR|INFRA)-(?P<start>\d{1,3})\s*[–-]\s*(?P<end>\d{1,3})(?P<suffix>[A-Z]?)\b",
-    re.IGNORECASE,
+    r"\b(?P<prefix>[A-Za-z][A-Za-z0-9_]*)-(?P<start>\d{1,3})\s*[-–—]\s*(?P<end>\d{1,3})(?P<suffix>[A-Za-z]?)\b"
 )
-_BARE_RANGE = re.compile(r"(?<![A-Za-z0-9])(?P<start>\d{1,3})\s*[–-]\s*(?P<end>\d{1,3})(?![A-Za-z0-9])")
-_BARE_ID = re.compile(r"(?<![A-Za-z0-9])(?P<number>\d{1,3})(?![A-Za-z0-9])")
+_PREFIXED_ID = re.compile(
+    r"\b(?P<prefix>[A-Za-z][A-Za-z0-9_]*)-(?P<number>\d{1,3})(?P<suffix>[A-Za-z]?)\b"
+)
+_OTHER_PREFIXED = re.compile(r"\b[A-Za-z][A-Za-z0-9_]*-[A-Za-z0-9_–-]+\b")
+_BARE_RANGE = re.compile(r"\b(?P<start>\d{1,3})\s*[-–—]\s*(?P<end>\d{1,3})(?P<suffix>[A-Za-z]?)\b")
+_BARE_ID = re.compile(r"\b(?P<number>\d{1,3})(?P<suffix>[A-Za-z]?)\b")
+
+
+def _is_valid_delimiter_before(text: str, pos: int) -> bool:
+    prefix = text[:pos].rstrip()
+    if not prefix:
+        return True
+    if prefix[-1] in {",", ";", "/", ":", "(", "[", "|", "—", "-"}:
+        return True
+    if prefix.endswith(" e") or prefix == "e" or prefix.endswith(" and") or prefix == "and":
+        return True
+    return False
+
+
+def _is_valid_delimiter_after(text: str, pos: int) -> bool:
+    suffix = text[pos:].lstrip()
+    if not suffix:
+        return True
+    if suffix[0] in {",", ";", "/", ":", ")", "]", "|", "—", "-"}:
+        return True
+    if suffix.startswith("e ") or suffix == "e" or suffix.startswith("and ") or suffix == "and":
+        return True
+    return False
 
 
 def _parse_markdown_dependencies(value: str, prefix: str) -> list[str]:
-    text = _strip_markdown(value)
-    if not text or text in {"—", "-"}:
+    """Parse item dependencies declared in markdown table cells.
+
+    Conforming to CR-11 / F14:
+    Tokens with full prefixes consume their spans before interpreting numbers/ranges
+    without prefixes. Known prefixes emit normalized IDs; unknown prefixes or
+    non-structural words (like UTF-8 or RFC-2119) consume their spans without
+    inventing phantom links or artificial cycles.
+    """
+    raw = _strip_markdown(value).strip()
+    if not raw or raw in {"—", "-", "none", "None", "nenhuma", "Nenhuma"}:
         return []
-    dependencies: list[str] = []
-    for match in _PREFIXED_RANGE.finditer(text):
-        dependencies.extend(
-            f"{match.group('prefix').upper()}-{number:02d}"
-            for number in range(int(match.group("start")), int(match.group("end")) + 1)
-        )
-    without_ranges = _PREFIXED_RANGE.sub("", text)
-    dependencies.extend(item.upper() for item in _FULL_ID.findall(without_ranges))
-    for match in _BARE_RANGE.finditer(without_ranges):
-        if prefix:
-            dependencies.extend(
-                f"{prefix.upper()}-{number:02d}"
-                for number in range(int(match.group("start")), int(match.group("end")) + 1)
-            )
-    without_ranges = _BARE_RANGE.sub("", without_ranges)
-    if prefix:
-        dependencies.extend(
-            f"{prefix.upper()}-{int(match.group('number')):02d}"
-            for match in _BARE_ID.finditer(without_ranges)
-        )
-    return list(dict.fromkeys(dependencies))
+
+    table_prefix = prefix.strip().upper()
+    known = set(KNOWN_PREFIXES)
+    if table_prefix:
+        known.add(table_prefix)
+
+    chars = list(raw)
+    parsed_tokens: list[tuple[int, list[str], str | None]] = []
+
+    # 1. Prefixed ranges (e.g. DF-01–04)
+    for match in _PREFIXED_RANGE.finditer(raw):
+        pref = match.group("prefix").upper()
+        if pref in known:
+            start = int(match.group("start"))
+            end = int(match.group("end"))
+            suffix = match.group("suffix").upper()
+            items = [f"{pref}-{number:02d}{suffix}" for number in range(start, end + 1)]
+            parsed_tokens.append((match.start(), items, pref))
+        else:
+            parsed_tokens.append((match.start(), [], None))
+        for i in range(match.start(), match.end()):
+            chars[i] = " "
+
+    # 2. Prefixed single IDs (e.g. DF-11, INFRA-06B)
+    text_after_p1 = "".join(chars)
+    for match in _PREFIXED_ID.finditer(text_after_p1):
+        pref = match.group("prefix").upper()
+        if pref in known:
+            number = int(match.group("number"))
+            suffix = match.group("suffix").upper()
+            items = [f"{pref}-{number:02d}{suffix}"]
+            parsed_tokens.append((match.start(), items, pref))
+        else:
+            parsed_tokens.append((match.start(), [], None))
+        for i in range(match.start(), match.end()):
+            chars[i] = " "
+
+    # 3. Other prefixed/hyphenated tokens (consume spans of UNKNOWN-11, RFC-2119, UTF-8, etc.)
+    text_after_p2 = "".join(chars)
+    for match in _OTHER_PREFIXED.finditer(text_after_p2):
+        parsed_tokens.append((match.start(), [], None))
+        for i in range(match.start(), match.end()):
+            chars[i] = " "
+
+    def _active_prefix(pos: int) -> str | None:
+        priors = [t for t in parsed_tokens if t[0] < pos and t[2] is not None]
+        if priors:
+            return max(priors, key=lambda t: t[0])[2]
+        return table_prefix if table_prefix else None
+
+    # 4. Bare ranges (e.g. 11–14)
+    text_after_p3 = "".join(chars)
+    for match in _BARE_RANGE.finditer(text_after_p3):
+        if _is_valid_delimiter_before(text_after_p3, match.start()) and _is_valid_delimiter_after(
+            text_after_p3, match.end()
+        ):
+            start = int(match.group("start"))
+            end = int(match.group("end"))
+            suffix = match.group("suffix").upper()
+            effective_prefix = _active_prefix(match.start())
+            if effective_prefix:
+                items = [f"{effective_prefix}-{number:02d}{suffix}" for number in range(start, end + 1)]
+                parsed_tokens.append((match.start(), items, effective_prefix))
+        for i in range(match.start(), match.end()):
+            chars[i] = " "
+
+    # 5. Bare IDs (e.g. 02, 13)
+    text_after_p4 = "".join(chars)
+    for match in _BARE_ID.finditer(text_after_p4):
+        if _is_valid_delimiter_before(text_after_p4, match.start()) and _is_valid_delimiter_after(
+            text_after_p4, match.end()
+        ):
+            number = int(match.group("number"))
+            suffix = match.group("suffix").upper()
+            effective_prefix = _active_prefix(match.start())
+            if effective_prefix:
+                items = [f"{effective_prefix}-{number:02d}{suffix}"]
+                parsed_tokens.append((match.start(), items, effective_prefix))
+        for i in range(match.start(), match.end()):
+            chars[i] = " "
+
+    # Sort all parsed items by original position in text and deduplicate
+    parsed_tokens.sort(key=lambda t: t[0])
+    result: list[str] = []
+    for _pos, items, _pref in parsed_tokens:
+        result.extend(items)
+    return list(dict.fromkeys(result))
 
 
 def _issue_for(spec: BaselineSourceSpec, observation: SourceObservation) -> BaselineIssue:

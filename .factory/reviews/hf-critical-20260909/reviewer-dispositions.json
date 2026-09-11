@@ -1,0 +1,33 @@
+{
+  "gpt-review": {
+    "status": "timeout",
+    "elapsed_seconds": 110.05
+  },
+  "qwen-fast": {
+    "status": "completed",
+    "confirmed_findings": 0,
+    "discarded": [
+      {
+        "claim": "Delivered handoff with missing listed required evidence not rejected",
+        "reason": "WorkflowHandoff.validate_handoff rejects required_ids - evidence_ids for delivered."
+      },
+      {
+        "claim": "Mock delivery not blocked",
+        "reason": "ReadinessGate explicitly blocks non-target/mock delivery; existing tests pass."
+      },
+      {
+        "claim": "Nonconsecutive manual steps accepted",
+        "reason": "ManualDependency validates exact consecutive sequence."
+      },
+      {
+        "claim": "Unresolved manual dependency not blocked",
+        "reason": "Gate records blocking dependency unless resolved; existing test passes."
+      }
+    ]
+  },
+  "auxiliary_agent": {
+    "scope": "HF-01/HF-02",
+    "independence": "separate pass, same model family",
+    "evidence": "baseline-runtime-observations.json"
+  }
+}

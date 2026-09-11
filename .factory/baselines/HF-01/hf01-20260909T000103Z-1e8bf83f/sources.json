@@ -1,0 +1,1727 @@
+{
+  "claims": [
+    {
+      "assertion": "negative",
+      "candidate_sha": null,
+      "claim_id": "rm07-manifest-planned",
+      "dimension": "implementation",
+      "environment": null,
+      "evidence_kind": "document",
+      "item_id": "RM-07",
+      "locator": ".factory/roadmap/darkfac.json#RM-07",
+      "observed_at": null,
+      "scope": "manifest declaration",
+      "source_hash": "9dd2e7a3c85b29b70a5acb2e83fd7cb0f52b9d4724bbb199a81255efb159c89c",
+      "source_id": "approved-roadmap",
+      "summary": "O manifesto aprovado ainda declara RM-07 como planned e com horizonte next.",
+      "validation_mode": "documentary"
+    },
+    {
+      "assertion": "positive",
+      "candidate_sha": null,
+      "claim_id": "rm07-report-implemented",
+      "dimension": "implementation",
+      "environment": null,
+      "evidence_kind": "document",
+      "item_id": "RM-07",
+      "locator": ".factory/reports/roadmap-operacional-report.md#Resultado",
+      "observed_at": null,
+      "scope": "reported implementation",
+      "source_hash": "11a41961996006ffe7f868039899a9c15cd3af7a2263386541f3596237e779f6",
+      "source_id": "report-roadmap-operacional",
+      "summary": "O relatório afirma que o painel operacional RM-01–RM-07 foi implementado no DarkHub.",
+      "validation_mode": "documentary"
+    },
+    {
+      "assertion": "negative",
+      "candidate_sha": null,
+      "claim_id": "rm07-integration-unverified",
+      "dimension": "integration",
+      "environment": null,
+      "evidence_kind": "document",
+      "item_id": "RM-07",
+      "locator": ".factory/reports/roadmap-operacional-report.md#Validação executada",
+      "observed_at": null,
+      "scope": "remote delivery",
+      "source_hash": "11a41961996006ffe7f868039899a9c15cd3af7a2263386541f3596237e779f6",
+      "source_id": "report-roadmap-operacional",
+      "summary": "A evidência lista gates locais e não fornece recibo remoto de PR, checks ou merge para RM-07.",
+      "validation_mode": "documentary"
+    },
+    {
+      "assertion": "positive",
+      "candidate_sha": null,
+      "claim_id": "rm09-reported-implementation",
+      "dimension": "implementation",
+      "environment": null,
+      "evidence_kind": "document",
+      "item_id": "RM-09",
+      "locator": ".factory/reports/rm-09-history-report.md#Resultado",
+      "observed_at": null,
+      "scope": "reported implementation",
+      "source_hash": "6ba5032d6fa8db8f42caa8d3089964fff1310e94db99eda115128f00ae4a9a5b",
+      "source_id": "report-rm-09-history",
+      "summary": "O relatório descreve contratos, retenção local e comparação determinística de snapshots para RM-09.",
+      "validation_mode": "documentary"
+    },
+    {
+      "assertion": "partial",
+      "candidate_sha": null,
+      "claim_id": "rm09-durability-limited",
+      "dimension": "operation",
+      "environment": null,
+      "evidence_kind": "document",
+      "item_id": "RM-09",
+      "locator": ".factory/reports/rm-09-history-report.md#Escopo e non-goals",
+      "observed_at": null,
+      "scope": "durable history",
+      "source_hash": "6ba5032d6fa8db8f42caa8d3089964fff1310e94db99eda115128f00ae4a9a5b",
+      "source_id": "report-rm-09-history",
+      "summary": "A retenção é bounded e local; persistência durável entre reinícios e sincronização remota permanecem fora do incremento.",
+      "validation_mode": "documentary"
+    },
+    {
+      "assertion": "positive",
+      "candidate_sha": null,
+      "claim_id": "df11-local-runtime",
+      "dimension": "implementation",
+      "environment": null,
+      "evidence_kind": "document",
+      "item_id": "DF-11",
+      "locator": ".factory/reports/df-11-runtime-recovery-report.md#Resultado",
+      "observed_at": null,
+      "scope": "local SQLite runtime",
+      "source_hash": "a609c28543cf9709c19af3dd929eed25a8ba5fd8a9d0d9f9132ef4264a24fa23",
+      "source_id": "report-df-11-runtime-recovery",
+      "summary": "O relatório descreve runtime Python com sqlite3, checkpoints duráveis, leases e fencing após queda entre etapas.",
+      "validation_mode": "documentary"
+    },
+    {
+      "assertion": "negative",
+      "candidate_sha": null,
+      "claim_id": "df20-no-remote-effects",
+      "dimension": "integration",
+      "environment": null,
+      "evidence_kind": "document",
+      "item_id": "DF-20",
+      "locator": ".factory/reports/df-20-delivery-policy-report.md#Entrega",
+      "observed_at": null,
+      "scope": "GitHub side effects",
+      "source_hash": "e0a93e82ddb0afc20ff556dcf7c64f8a14ef08b8bf4c319a10074e7796cd97d4",
+      "source_id": "report-df-20-delivery-policy",
+      "summary": "O adaptador GitHub é read-only e o módulo não faz merge, push, criação de PR ou deploy.",
+      "validation_mode": "documentary"
+    },
+    {
+      "assertion": "positive",
+      "candidate_sha": null,
+      "claim_id": "df21-dashboard-reported",
+      "dimension": "implementation",
+      "environment": null,
+      "evidence_kind": "document",
+      "item_id": "DF-21",
+      "locator": ".factory/reports/df-21-task-dashboard-report.md#Entrega",
+      "observed_at": null,
+      "scope": "read-only task dashboard",
+      "source_hash": "9879ecfc942e9578ea0a2d36b90b20e64446f3190471834049de2eed799c69a8",
+      "source_id": "report-df-21-task-dashboard",
+      "summary": "O relatório descreve a projeção headless da fila e o endpoint GET /api/tasks/dashboard com estados explícitos.",
+      "validation_mode": "documentary"
+    },
+    {
+      "assertion": "negative",
+      "candidate_sha": null,
+      "claim_id": "df21-service-contract-pending",
+      "dimension": "operation",
+      "environment": null,
+      "evidence_kind": "document",
+      "item_id": "DF-21",
+      "locator": "docs/HYBRID_WORKFLOW_PLAN_2026-09-08.md#Observações diretas nesta sessão",
+      "observed_at": null,
+      "scope": "service observation",
+      "source_hash": "be7bba0708844c9c35badc0ba756a7cf5c6d2511ffc13dd5555a2788f59c7816",
+      "source_id": "hybrid-workflow-plan-wave-1",
+      "summary": "A sessão observou Fila indisponível: HTTP 404; a incompatibilidade do serviço/interface ficou pendente do HF-01.",
+      "validation_mode": "documentary"
+    },
+    {
+      "assertion": "partial",
+      "candidate_sha": null,
+      "claim_id": "df23-protocol-only",
+      "dimension": "implementation",
+      "environment": null,
+      "evidence_kind": "document",
+      "item_id": "DF-23",
+      "locator": ".factory/reports/df-23-worktree-protocol-report.md#Escopo entregue",
+      "observed_at": null,
+      "scope": "automation coverage",
+      "source_hash": "7d68d3614f2ce69a9f56a9f398cda98084e9c84ea2cb86dccb5f059bf32abbfa",
+      "source_id": "report-df-23-worktree-protocol",
+      "summary": "O relatório entrega protocolo e espelho de skills e declara explicitamente que não iniciou automação funcional.",
+      "validation_mode": "documentary"
+    },
+    {
+      "assertion": "negative",
+      "candidate_sha": null,
+      "claim_id": "infra08-planned",
+      "dimension": "implementation",
+      "environment": null,
+      "evidence_kind": "document",
+      "item_id": "INFRA-08",
+      "locator": ".factory/infra/roadmap.json#INFRA-08",
+      "observed_at": null,
+      "scope": "declared roadmap status",
+      "source_hash": "6e90329c73ddb359188b4c181654989749ccd6a3802fe2d793eb75d9cb337487",
+      "source_id": "infra-roadmap-json",
+      "summary": "A tabela de infraestrutura mantém a automação de backups em três camadas como PLANNED.",
+      "validation_mode": "documentary"
+    },
+    {
+      "assertion": "negative",
+      "candidate_sha": null,
+      "claim_id": "infra09-planned",
+      "dimension": "implementation",
+      "environment": null,
+      "evidence_kind": "document",
+      "item_id": "INFRA-09",
+      "locator": ".factory/infra/roadmap.json#INFRA-09",
+      "observed_at": null,
+      "scope": "declared roadmap status",
+      "source_hash": "6e90329c73ddb359188b4c181654989749ccd6a3802fe2d793eb75d9cb337487",
+      "source_id": "infra-roadmap-json",
+      "summary": "A tabela de infraestrutura mantém os pipelines de deploy contínuo como PLANNED.",
+      "validation_mode": "documentary"
+    },
+    {
+      "assertion": "positive",
+      "candidate_sha": null,
+      "claim_id": "infra10-roadmap-planned",
+      "dimension": "implementation",
+      "environment": null,
+      "evidence_kind": "document",
+      "item_id": "INFRA-10",
+      "locator": ".factory/infra/roadmap.json#INFRA-10",
+      "observed_at": null,
+      "scope": "declared roadmap status",
+      "source_hash": "6e90329c73ddb359188b4c181654989749ccd6a3802fe2d793eb75d9cb337487",
+      "source_id": "infra-roadmap-json",
+      "summary": "O roadmap JSON mantém INFRA-10 como planned, em contraste com a entrega reportada por USR-16.",
+      "validation_mode": "documentary"
+    },
+    {
+      "assertion": "positive",
+      "candidate_sha": null,
+      "claim_id": "infra10-usr16-reported",
+      "dimension": "implementation",
+      "environment": null,
+      "evidence_kind": "document",
+      "item_id": "INFRA-10",
+      "locator": ".factory/reports/usr-16-report.md#Escopo e Objetivos Atingidos",
+      "observed_at": null,
+      "scope": "reported worker delivery",
+      "source_hash": "cda186d505959e46ed4ad88737502c0a0772da07bea2488fdd826c2e5ff99311",
+      "source_id": "usr-16-report",
+      "summary": "O relatório USR-16 vincula a entrega do worker headless ao ticket INFRA-10.",
+      "validation_mode": "documentary"
+    },
+    {
+      "assertion": "negative",
+      "candidate_sha": null,
+      "claim_id": "n8n-instance-unconfirmed",
+      "dimension": "operation",
+      "environment": null,
+      "evidence_kind": "document",
+      "item_id": "n8n",
+      "locator": "docs/HYBRID_WORKFLOW_PLAN_2026-09-08.md#Observações diretas nesta sessão",
+      "observed_at": null,
+      "scope": "instance identity",
+      "source_hash": "be7bba0708844c9c35badc0ba756a7cf5c6d2511ffc13dd5555a2788f59c7816",
+      "source_id": "hybrid-workflow-plan-wave-1",
+      "summary": "O cartão n8n aponta para https://n8n.io, sem identificar URL de instância ou instalação confirmada.",
+      "validation_mode": "documentary"
+    },
+    {
+      "assertion": "positive",
+      "candidate_sha": null,
+      "claim_id": "postgres-owner-statement",
+      "dimension": "operation",
+      "environment": null,
+      "evidence_kind": "owner_statement",
+      "item_id": "PostgreSQL",
+      "locator": "docs/HYBRID_WORKFLOW_PLAN_2026-09-08.md#Resultado esperado e decisões do owner",
+      "observed_at": null,
+      "scope": "owner-reported availability",
+      "source_hash": "be7bba0708844c9c35badc0ba756a7cf5c6d2511ffc13dd5555a2788f59c7816",
+      "source_id": "hybrid-workflow-plan-wave-1",
+      "summary": "O owner declarou PostgreSQL instalado, funcionando e testado no Dokploy; acesso técnico ainda precisa de conferência.",
+      "validation_mode": "documentary"
+    },
+    {
+      "assertion": "partial",
+      "candidate_sha": null,
+      "claim_id": "infra-version-divergence",
+      "dimension": "operation",
+      "environment": null,
+      "evidence_kind": "document",
+      "item_id": "INFRA-05",
+      "locator": "docs/HYBRID_WORKFLOW_PLAN_2026-09-08.md#Observações diretas nesta sessão",
+      "observed_at": null,
+      "scope": "infrastructure identity",
+      "source_hash": "be7bba0708844c9c35badc0ba756a7cf5c6d2511ffc13dd5555a2788f59c7816",
+      "source_id": "hybrid-workflow-plan-wave-1",
+      "summary": "O owner oficializou Alemanha/CX23, superando a proposta anterior de região/plano. Windows/WSL2 pertence ao servidor local; a imagem e versão da VPS exigem preflight técnico separado.",
+      "validation_mode": "documentary"
+    }
+  ],
+  "issues": [
+    {
+      "code": "access_required",
+      "issue_id": "access_required:PostgreSQL:hybrid-workflow-plan-wave-1",
+      "item_ids": [
+        "PostgreSQL"
+      ],
+      "required_action": "Use the guided access reference and repeat an authorized target probe; do not infer availability.",
+      "severity": "warning",
+      "source_ids": [
+        "hybrid-workflow-plan-wave-1"
+      ],
+      "target_package": "HF-01"
+    },
+    {
+      "code": "partial_ticket_coverage",
+      "issue_id": "partial_ticket_coverage:DF-23:report-df-23-worktree-protocol",
+      "item_ids": [
+        "DF-23"
+      ],
+      "required_action": "Complete the missing acceptance surface before declaring the ticket delivered.",
+      "severity": "warning",
+      "source_ids": [
+        "report-df-23-worktree-protocol"
+      ],
+      "target_package": "HF-01"
+    },
+    {
+      "code": "service_endpoint_missing",
+      "issue_id": "service_endpoint_missing:n8n:hybrid-workflow-plan-wave-1",
+      "item_ids": [
+        "n8n"
+      ],
+      "required_action": "Record the real instance origin and probe it from the intended environment.",
+      "severity": "warning",
+      "source_ids": [
+        "hybrid-workflow-plan-wave-1"
+      ],
+      "target_package": "HF-01"
+    },
+    {
+      "code": "source_conflict",
+      "issue_id": "source_conflict:INFRA-05:infra-roadmap-json:infra-roadmap-phase-2",
+      "item_ids": [
+        "INFRA-05"
+      ],
+      "required_action": "Review the competing declarations; do not choose a winner silently.",
+      "severity": "warning",
+      "source_ids": [
+        "infra-roadmap-json",
+        "infra-roadmap-phase-2"
+      ],
+      "target_package": "HF-01"
+    },
+    {
+      "code": "source_conflict",
+      "issue_id": "source_conflict:INFRA-06:infra-roadmap-json:infra-roadmap-phase-2",
+      "item_ids": [
+        "INFRA-06"
+      ],
+      "required_action": "Review the competing declarations; do not choose a winner silently.",
+      "severity": "warning",
+      "source_ids": [
+        "infra-roadmap-json",
+        "infra-roadmap-phase-2"
+      ],
+      "target_package": "HF-01"
+    },
+    {
+      "code": "source_conflict",
+      "issue_id": "source_conflict:INFRA-07:infra-roadmap-json:infra-roadmap-phase-3",
+      "item_ids": [
+        "INFRA-07"
+      ],
+      "required_action": "Review the competing declarations; do not choose a winner silently.",
+      "severity": "warning",
+      "source_ids": [
+        "infra-roadmap-json",
+        "infra-roadmap-phase-3"
+      ],
+      "target_package": "HF-01"
+    },
+    {
+      "code": "source_conflict",
+      "issue_id": "source_conflict:INFRA-08:infra-roadmap-json:infra-roadmap-phase-3",
+      "item_ids": [
+        "INFRA-08"
+      ],
+      "required_action": "Review the competing declarations; do not choose a winner silently.",
+      "severity": "warning",
+      "source_ids": [
+        "infra-roadmap-json",
+        "infra-roadmap-phase-3"
+      ],
+      "target_package": "HF-01"
+    },
+    {
+      "code": "source_conflict",
+      "issue_id": "source_conflict:INFRA-09:infra-roadmap-json:infra-roadmap-phase-4",
+      "item_ids": [
+        "INFRA-09"
+      ],
+      "required_action": "Review the competing declarations; do not choose a winner silently.",
+      "severity": "warning",
+      "source_ids": [
+        "infra-roadmap-json",
+        "infra-roadmap-phase-4"
+      ],
+      "target_package": "HF-01"
+    },
+    {
+      "code": "source_conflict",
+      "issue_id": "source_conflict:INFRA-10:infra-roadmap-json:infra-roadmap-phase-4",
+      "item_ids": [
+        "INFRA-10"
+      ],
+      "required_action": "Review the competing declarations; do not choose a winner silently.",
+      "severity": "warning",
+      "source_ids": [
+        "infra-roadmap-json",
+        "infra-roadmap-phase-4"
+      ],
+      "target_package": "HF-01"
+    },
+    {
+      "code": "source_conflict",
+      "issue_id": "source_conflict:INFRA-11:infra-roadmap-json:infra-roadmap-phase-4",
+      "item_ids": [
+        "INFRA-11"
+      ],
+      "required_action": "Review the competing declarations; do not choose a winner silently.",
+      "severity": "warning",
+      "source_ids": [
+        "infra-roadmap-json",
+        "infra-roadmap-phase-4"
+      ],
+      "target_package": "HF-01"
+    },
+    {
+      "code": "source_conflict",
+      "issue_id": "source_conflict:RM-01:approved-roadmap:roadmap-operational-document",
+      "item_ids": [
+        "RM-01"
+      ],
+      "required_action": "Review the competing declarations; do not choose a winner silently.",
+      "severity": "warning",
+      "source_ids": [
+        "approved-roadmap",
+        "roadmap-operational-document"
+      ],
+      "target_package": "HF-01"
+    },
+    {
+      "code": "source_conflict",
+      "issue_id": "source_conflict:RM-02:approved-roadmap:roadmap-operational-document",
+      "item_ids": [
+        "RM-02"
+      ],
+      "required_action": "Review the competing declarations; do not choose a winner silently.",
+      "severity": "warning",
+      "source_ids": [
+        "approved-roadmap",
+        "roadmap-operational-document"
+      ],
+      "target_package": "HF-01"
+    },
+    {
+      "code": "source_conflict",
+      "issue_id": "source_conflict:RM-03:approved-roadmap:roadmap-operational-document",
+      "item_ids": [
+        "RM-03"
+      ],
+      "required_action": "Review the competing declarations; do not choose a winner silently.",
+      "severity": "warning",
+      "source_ids": [
+        "approved-roadmap",
+        "roadmap-operational-document"
+      ],
+      "target_package": "HF-01"
+    },
+    {
+      "code": "source_conflict",
+      "issue_id": "source_conflict:RM-04:approved-roadmap:roadmap-operational-document",
+      "item_ids": [
+        "RM-04"
+      ],
+      "required_action": "Review the competing declarations; do not choose a winner silently.",
+      "severity": "warning",
+      "source_ids": [
+        "approved-roadmap",
+        "roadmap-operational-document"
+      ],
+      "target_package": "HF-01"
+    },
+    {
+      "code": "source_conflict",
+      "issue_id": "source_conflict:RM-05:approved-roadmap:roadmap-operational-document",
+      "item_ids": [
+        "RM-05"
+      ],
+      "required_action": "Review the competing declarations; do not choose a winner silently.",
+      "severity": "warning",
+      "source_ids": [
+        "approved-roadmap",
+        "roadmap-operational-document"
+      ],
+      "target_package": "HF-01"
+    },
+    {
+      "code": "source_conflict",
+      "issue_id": "source_conflict:RM-06:approved-roadmap:roadmap-operational-document",
+      "item_ids": [
+        "RM-06"
+      ],
+      "required_action": "Review the competing declarations; do not choose a winner silently.",
+      "severity": "warning",
+      "source_ids": [
+        "approved-roadmap",
+        "roadmap-operational-document"
+      ],
+      "target_package": "HF-01"
+    },
+    {
+      "code": "source_conflict",
+      "issue_id": "source_conflict:RM-07:approved-roadmap:roadmap-operational-document",
+      "item_ids": [
+        "RM-07"
+      ],
+      "required_action": "Review the competing declarations; do not choose a winner silently.",
+      "severity": "warning",
+      "source_ids": [
+        "approved-roadmap",
+        "roadmap-operational-document"
+      ],
+      "target_package": "HF-01"
+    },
+    {
+      "code": "source_conflict",
+      "issue_id": "source_conflict:RM-08:approved-roadmap:roadmap-operational-document",
+      "item_ids": [
+        "RM-08"
+      ],
+      "required_action": "Review the competing declarations; do not choose a winner silently.",
+      "severity": "warning",
+      "source_ids": [
+        "approved-roadmap",
+        "roadmap-operational-document"
+      ],
+      "target_package": "HF-01"
+    },
+    {
+      "code": "source_conflict",
+      "issue_id": "source_conflict:RM-09:approved-roadmap:roadmap-operational-document",
+      "item_ids": [
+        "RM-09"
+      ],
+      "required_action": "Review the competing declarations; do not choose a winner silently.",
+      "severity": "warning",
+      "source_ids": [
+        "approved-roadmap",
+        "roadmap-operational-document"
+      ],
+      "target_package": "HF-01"
+    }
+  ],
+  "planned_items": [
+    {
+      "declared_status": "planned",
+      "dependencies": [],
+      "item_id": "RM-01",
+      "locator": ".factory/roadmap/darkfac.json#RM-01",
+      "source_id": "approved-roadmap",
+      "title": "Inventário formal das fontes canônicas e regras de precedência"
+    },
+    {
+      "declared_status": "planned",
+      "dependencies": [
+        "RM-01"
+      ],
+      "item_id": "RM-02",
+      "locator": ".factory/roadmap/darkfac.json#RM-02",
+      "source_id": "approved-roadmap",
+      "title": "Contratos Pydantic e fixtures do grafo"
+    },
+    {
+      "declared_status": "planned",
+      "dependencies": [
+        "RM-02"
+      ],
+      "item_id": "RM-03",
+      "locator": ".factory/roadmap/darkfac.json#RM-03",
+      "source_id": "approved-roadmap",
+      "title": "Compilador, normalização e resolução de identidade"
+    },
+    {
+      "declared_status": "planned",
+      "dependencies": [
+        "RM-03"
+      ],
+      "item_id": "RM-04",
+      "locator": ".factory/roadmap/darkfac.json#RM-04",
+      "source_id": "approved-roadmap",
+      "title": "Validador de ciclos, conflitos, órfãos e evidências"
+    },
+    {
+      "declared_status": "planned",
+      "dependencies": [
+        "RM-03",
+        "RM-04"
+      ],
+      "item_id": "RM-05",
+      "locator": ".factory/roadmap/darkfac.json#RM-05",
+      "source_id": "approved-roadmap",
+      "title": "Snapshot store, cache e API somente leitura"
+    },
+    {
+      "declared_status": "planned",
+      "dependencies": [
+        "RM-05"
+      ],
+      "item_id": "RM-06",
+      "locator": ".factory/roadmap/darkfac.json#RM-06",
+      "source_id": "approved-roadmap",
+      "title": "Painel do Hub com visão geral, filtros e drawer"
+    },
+    {
+      "declared_status": "planned",
+      "dependencies": [
+        "RM-06"
+      ],
+      "item_id": "RM-07",
+      "locator": ".factory/roadmap/darkfac.json#RM-07",
+      "source_id": "approved-roadmap",
+      "title": "Linha do tempo, grafo de dependências e tabela acessível"
+    },
+    {
+      "declared_status": "planned",
+      "dependencies": [
+        "RM-05",
+        "RM-07"
+      ],
+      "item_id": "RM-08",
+      "locator": ".factory/roadmap/darkfac.json#RM-08",
+      "source_id": "approved-roadmap",
+      "title": "Atualização incremental, telemetria e testes de escala"
+    },
+    {
+      "declared_status": "planned",
+      "dependencies": [
+        "RM-08"
+      ],
+      "item_id": "RM-09",
+      "locator": ".factory/roadmap/darkfac.json#RM-09",
+      "source_id": "approved-roadmap",
+      "title": "Histórico de snapshots e comparação entre versões"
+    },
+    {
+      "declared_status": "planned",
+      "dependencies": [],
+      "item_id": "DF-01",
+      "locator": "docs/DEVELOPMENT_PLAN_2026-09-05.md#DF-01",
+      "source_id": "development-plan",
+      "title": "state.py; novo orchestrator/models.py; novo testorchestratorstate.py"
+    },
+    {
+      "declared_status": "planned",
+      "dependencies": [],
+      "item_id": "DF-02",
+      "locator": "docs/DEVELOPMENT_PLAN_2026-09-05.md#DF-02",
+      "source_id": "development-plan",
+      "title": "guard.py; novo testgovernanceguard.py"
+    },
+    {
+      "declared_status": "planned",
+      "dependencies": [],
+      "item_id": "DF-03",
+      "locator": "docs/DEVELOPMENT_PLAN_2026-09-05.md#DF-03",
+      "source_id": "development-plan",
+      "title": "markers.py; runner.py; novo harness/models.py; novo testharnesscontract.py"
+    },
+    {
+      "declared_status": "planned",
+      "dependencies": [
+        "DF-02",
+        "DF-03"
+      ],
+      "item_id": "DF-04",
+      "locator": "docs/DEVELOPMENT_PLAN_2026-09-05.md#DF-04",
+      "source_id": "development-plan",
+      "title": "ci.yml; harness.config.json; novo testcipolicy.py"
+    },
+    {
+      "declared_status": "planned",
+      "dependencies": [],
+      "item_id": "DF-05",
+      "locator": "docs/DEVELOPMENT_PLAN_2026-09-05.md#DF-05",
+      "source_id": "development-plan",
+      "title": "racing.py; benchmarks/models.py; testspeculativeracing.py"
+    },
+    {
+      "declared_status": "planned",
+      "dependencies": [],
+      "item_id": "DF-06",
+      "locator": "docs/DEVELOPMENT_PLAN_2026-09-05.md#DF-06",
+      "source_id": "development-plan",
+      "title": "learning/tracker.py; learning/models.py; testlearningengine.py; testselflearningbenchmark.py"
+    },
+    {
+      "declared_status": "planned",
+      "dependencies": [],
+      "item_id": "DF-07",
+      "locator": "docs/DEVELOPMENT_PLAN_2026-09-05.md#DF-07",
+      "source_id": "development-plan",
+      "title": "frontend/app.js; backend/models.py; novo testhubbrowser.py; requirements.txt"
+    },
+    {
+      "declared_status": "planned",
+      "dependencies": [],
+      "item_id": "DF-08",
+      "locator": "docs/DEVELOPMENT_PLAN_2026-09-05.md#DF-08",
+      "source_id": "development-plan",
+      "title": "backend/main.py; backend/api.py; backend/service.py; novo testhubaccess.py"
+    },
+    {
+      "declared_status": "planned",
+      "dependencies": [],
+      "item_id": "DF-09",
+      "locator": "docs/DEVELOPMENT_PLAN_2026-09-05.md#DF-09",
+      "source_id": "development-plan",
+      "title": "arxivclient.py; githubscout.py; novo research/transport.py; testresearchengine.py"
+    },
+    {
+      "declared_status": "planned",
+      "dependencies": [],
+      "item_id": "DF-10",
+      "locator": "docs/DEVELOPMENT_PLAN_2026-09-05.md#DF-10",
+      "source_id": "development-plan",
+      "title": "usage/ledger.py; novo usage/store.py; testusagemonitor.py"
+    },
+    {
+      "declared_status": "planned",
+      "dependencies": [
+        "DF-01",
+        "DF-10"
+      ],
+      "item_id": "DF-11",
+      "locator": "docs/DEVELOPMENT_PLAN_2026-09-05.md#DF-11",
+      "source_id": "development-plan",
+      "title": "novo orchestrator/store.py; novo orchestrator/runtime.py; novo testruntimerecovery.py; novo docs/RUNTIMEDECISION.md"
+    },
+    {
+      "declared_status": "planned",
+      "dependencies": [
+        "DF-10",
+        "DF-11"
+      ],
+      "item_id": "DF-12",
+      "locator": "docs/DEVELOPMENT_PLAN_2026-09-05.md#DF-12",
+      "source_id": "development-plan",
+      "title": "novo execution/contracts.py; novo execution/budget.py; novo testexecutionbudget.py; router/tokenbudget.py"
+    },
+    {
+      "declared_status": "planned",
+      "dependencies": [
+        "DF-11",
+        "DF-12"
+      ],
+      "item_id": "DF-13",
+      "locator": "docs/DEVELOPMENT_PLAN_2026-09-05.md#DF-13",
+      "source_id": "development-plan",
+      "title": "novo execution/providers.py; novo execution/agentexecutor.py; novo execution/sandbox.py; novo testexecutorcontract.py"
+    },
+    {
+      "declared_status": "planned",
+      "dependencies": [
+        "DF-13"
+      ],
+      "item_id": "DF-14",
+      "locator": "docs/DEVELOPMENT_PLAN_2026-09-05.md#DF-14",
+      "source_id": "development-plan",
+      "title": "hub/backend/service.py; core/game/cli.py; novo testproviderintegration.py"
+    },
+    {
+      "declared_status": "planned",
+      "dependencies": [
+        "DF-11",
+        "DF-12",
+        "DF-13",
+        "DF-14",
+        "DF-03"
+      ],
+      "item_id": "DF-15",
+      "locator": "docs/DEVELOPMENT_PLAN_2026-09-05.md#DF-15",
+      "source_id": "development-plan",
+      "title": "novo orchestrator/cli.py; novo testfactoryvertical.py; novo fixturefactorybug.py; novo factoryvertical.config.json"
+    },
+    {
+      "declared_status": "planned",
+      "dependencies": [
+        "DF-04"
+      ],
+      "item_id": "DF-16",
+      "locator": "docs/DEVELOPMENT_PLAN_2026-09-05.md#DF-16",
+      "source_id": "development-plan",
+      "title": "testaudiotranscriber.py; novo conftest.py; pytest.ini; ci.yml"
+    },
+    {
+      "declared_status": "planned",
+      "dependencies": [
+        "DF-05"
+      ],
+      "item_id": "DF-17",
+      "locator": "docs/DEVELOPMENT_PLAN_2026-09-05.md#DF-17",
+      "source_id": "development-plan",
+      "title": "benchmarks/fetcher.py; benchmarks/models.py; testmodelbenchmark.py; data/benchmarkcatalog.json"
+    },
+    {
+      "declared_status": "planned",
+      "dependencies": [
+        "DF-15",
+        "DF-17"
+      ],
+      "item_id": "DF-18",
+      "locator": "docs/DEVELOPMENT_PLAN_2026-09-05.md#DF-18",
+      "source_id": "development-plan",
+      "title": "novo evals/tasks.jsonl; novo evals/runner.py; novo evals/graders.py; novo testagentevals.py"
+    },
+    {
+      "declared_status": "planned",
+      "dependencies": [
+        "DF-06",
+        "DF-18"
+      ],
+      "item_id": "DF-19",
+      "locator": "docs/DEVELOPMENT_PLAN_2026-09-05.md#DF-19",
+      "source_id": "development-plan",
+      "title": "novo orchestrator/context.py; novo learning/promotion.py; novo testcontextpolicy.py; docs/HARNESSINTEROP.md"
+    },
+    {
+      "declared_status": "planned",
+      "dependencies": [
+        "DF-04",
+        "DF-15",
+        "DF-18"
+      ],
+      "item_id": "DF-20",
+      "locator": "docs/DEVELOPMENT_PLAN_2026-09-05.md#DF-20",
+      "source_id": "development-plan",
+      "title": "novo integrations/github.py; novo orchestrator/delivery.py; novo testdeliverypolicy.py; novo docs/AUTONOMYPOLICY.md"
+    },
+    {
+      "declared_status": "planned",
+      "dependencies": [
+        "DF-11",
+        "DF-18"
+      ],
+      "item_id": "DF-21",
+      "locator": "docs/DEVELOPMENT_PLAN_2026-09-05.md#DF-21",
+      "source_id": "development-plan",
+      "title": "backend/api.py; backend/service.py; frontend/index.html; novo frontend/tasks.js"
+    },
+    {
+      "declared_status": "planned",
+      "dependencies": [
+        "DF-12",
+        "DF-13",
+        "DF-14"
+      ],
+      "item_id": "DF-22",
+      "locator": "docs/DEVELOPMENT_PLAN_2026-09-05.md#DF-22",
+      "source_id": "development-plan",
+      "title": "content/engine.py; visual/cloudengine.py; testantislopengine.py; testvisualstudio.py"
+    },
+    {
+      "declared_status": "planned",
+      "dependencies": [
+        "DF-02",
+        "DF-04",
+        "DF-11"
+      ],
+      "item_id": "DF-23",
+      "locator": "docs/DEVELOPMENT_PLAN_2026-09-05.md#DF-23",
+      "source_id": "development-plan",
+      "title": ".agents/skills/04-autonomous-piv-loop/; novo orchestrator/worktree.py; novo testworktreeisolation.py; scripts/syncskills.py"
+    },
+    {
+      "declared_status": "planned",
+      "dependencies": [],
+      "item_id": "HF-01",
+      "locator": "docs/HYBRID_WORKFLOW_PLAN_2026-09-08.md#HF-01",
+      "source_id": "hybrid-workflow-plan-wave-1",
+      "title": "HF-01"
+    },
+    {
+      "declared_status": "planned",
+      "dependencies": [
+        "HF-01"
+      ],
+      "item_id": "HF-02",
+      "locator": "docs/HYBRID_WORKFLOW_PLAN_2026-09-08.md#HF-02",
+      "source_id": "hybrid-workflow-plan-wave-1",
+      "title": "HF-02"
+    },
+    {
+      "declared_status": "planned",
+      "dependencies": [
+        "HF-02"
+      ],
+      "item_id": "HF-03",
+      "locator": "docs/HYBRID_WORKFLOW_PLAN_2026-09-08.md#HF-03",
+      "source_id": "hybrid-workflow-plan-wave-1",
+      "title": "HF-03"
+    },
+    {
+      "declared_status": "planned",
+      "dependencies": [
+        "HF-02"
+      ],
+      "item_id": "HF-04",
+      "locator": "docs/HYBRID_WORKFLOW_PLAN_2026-09-08.md#HF-04",
+      "source_id": "hybrid-workflow-plan-wave-1",
+      "title": "HF-04"
+    },
+    {
+      "declared_status": "planned",
+      "dependencies": [
+        "HF-03",
+        "HF-04"
+      ],
+      "item_id": "HF-05",
+      "locator": "docs/HYBRID_WORKFLOW_PLAN_2026-09-08.md#HF-05",
+      "source_id": "hybrid-workflow-plan-wave-1",
+      "title": "HF-05"
+    },
+    {
+      "declared_status": "planned",
+      "dependencies": [
+        "HF-04"
+      ],
+      "item_id": "HF-06",
+      "locator": "docs/HYBRID_WORKFLOW_PLAN_2026-09-08.md#HF-06",
+      "source_id": "hybrid-workflow-plan-wave-1",
+      "title": "HF-06"
+    },
+    {
+      "declared_status": "planned",
+      "dependencies": [
+        "HF-03",
+        "HF-05"
+      ],
+      "item_id": "HF-07",
+      "locator": "docs/HYBRID_WORKFLOW_PLAN_2026-09-08.md#HF-07",
+      "source_id": "hybrid-workflow-plan-wave-1",
+      "title": "HF-07"
+    },
+    {
+      "declared_status": "planned",
+      "dependencies": [
+        "HF-05",
+        "HF-06",
+        "HF-07"
+      ],
+      "item_id": "HF-08",
+      "locator": "docs/HYBRID_WORKFLOW_PLAN_2026-09-08.md#HF-08",
+      "source_id": "hybrid-workflow-plan-wave-1",
+      "title": "HF-08"
+    },
+    {
+      "declared_status": "planned",
+      "dependencies": [
+        "HF-08"
+      ],
+      "item_id": "HF-09",
+      "locator": "docs/HYBRID_WORKFLOW_PLAN_2026-09-08.md#HF-09",
+      "source_id": "hybrid-workflow-plan-wave-1",
+      "title": "HF-09"
+    },
+    {
+      "declared_status": "planned",
+      "dependencies": [
+        "HF-06",
+        "HF-09"
+      ],
+      "item_id": "HF-10",
+      "locator": "docs/HYBRID_WORKFLOW_PLAN_2026-09-08.md#HF-10",
+      "source_id": "hybrid-workflow-plan-wave-1",
+      "title": "HF-10"
+    },
+    {
+      "declared_status": "planned",
+      "dependencies": [
+        "HF-09"
+      ],
+      "item_id": "HF-11",
+      "locator": "docs/HYBRID_WORKFLOW_PLAN_2026-09-08.md#HF-11",
+      "source_id": "hybrid-workflow-plan-wave-1",
+      "title": "HF-11"
+    },
+    {
+      "declared_status": "planned",
+      "dependencies": [
+        "HF-03",
+        "HF-11",
+        "INFRA-08",
+        "INFRA-09",
+        "HF-08",
+        "HF-09"
+      ],
+      "item_id": "HF-12",
+      "locator": "docs/HYBRID_WORKFLOW_PLAN_2026-09-08.md#HF-12",
+      "source_id": "hybrid-workflow-plan-wave-1",
+      "title": "HF-12"
+    },
+    {
+      "declared_status": "planned",
+      "dependencies": [
+        "HF-05"
+      ],
+      "item_id": "HF-13",
+      "locator": "docs/HYBRID_WORKFLOW_PLAN_2026-09-08.md#HF-13",
+      "source_id": "hybrid-workflow-plan-wave-1",
+      "title": "HF-13"
+    },
+    {
+      "declared_status": "planned",
+      "dependencies": [
+        "HF-03",
+        "HF-05",
+        "HF-13"
+      ],
+      "item_id": "HF-14",
+      "locator": "docs/HYBRID_WORKFLOW_PLAN_2026-09-08.md#HF-14",
+      "source_id": "hybrid-workflow-plan-wave-1",
+      "title": "HF-14"
+    },
+    {
+      "declared_status": "planned",
+      "dependencies": [
+        "HF-07",
+        "HF-09",
+        "HF-10",
+        "HF-12",
+        "HF-13",
+        "HF-14"
+      ],
+      "item_id": "HF-15",
+      "locator": "docs/HYBRID_WORKFLOW_PLAN_2026-09-08.md#HF-15",
+      "source_id": "hybrid-workflow-plan-wave-1",
+      "title": "HF-15"
+    },
+    {
+      "declared_status": "delivered",
+      "dependencies": [],
+      "item_id": "INFRA-01",
+      "locator": ".factory/infra/roadmap.json#INFRA-01",
+      "source_id": "infra-roadmap-json",
+      "title": "Mapeamento de Hardware e Topologia Híbrida"
+    },
+    {
+      "declared_status": "delivered",
+      "dependencies": [],
+      "item_id": "INFRA-02",
+      "locator": ".factory/infra/roadmap.json#INFRA-02",
+      "source_id": "infra-roadmap-json",
+      "title": "Rede Mesh Privada Zero-Trust (Tailscale)"
+    },
+    {
+      "declared_status": "delivered",
+      "dependencies": [],
+      "item_id": "INFRA-03",
+      "locator": ".factory/infra/roadmap.json#INFRA-03",
+      "source_id": "infra-roadmap-json",
+      "title": "Ativação do Docker no Servidor On-Premises (Blindagem de SSD)"
+    },
+    {
+      "declared_status": "delivered",
+      "dependencies": [],
+      "item_id": "INFRA-04",
+      "locator": ".factory/infra/roadmap.json#INFRA-04",
+      "source_id": "infra-roadmap-json",
+      "title": "Acesso Remoto Operacional & Headless"
+    },
+    {
+      "declared_status": "delivered",
+      "dependencies": [],
+      "item_id": "INFRA-05",
+      "locator": ".factory/infra/roadmap.json#INFRA-05",
+      "source_id": "infra-roadmap-json",
+      "title": "Provisionamento da Cloud VPS Primária (Hetzner CX23)"
+    },
+    {
+      "declared_status": "delivered",
+      "dependencies": [],
+      "item_id": "INFRA-06",
+      "locator": ".factory/infra/roadmap.json#INFRA-06",
+      "source_id": "infra-roadmap-json",
+      "title": "Instalação do Dokploy PaaS & Tailscale Mesh na VPS"
+    },
+    {
+      "declared_status": "delivered",
+      "dependencies": [],
+      "item_id": "INFRA-07",
+      "locator": ".factory/infra/roadmap.json#INFRA-07",
+      "source_id": "infra-roadmap-json",
+      "title": "PostgreSQL Multi-Tenant em Armazenamento NVMe"
+    },
+    {
+      "declared_status": "planned",
+      "dependencies": [],
+      "item_id": "INFRA-08",
+      "locator": ".factory/infra/roadmap.json#INFRA-08",
+      "source_id": "infra-roadmap-json",
+      "title": "Automação de Backups 3-Camadas (R2 + On-Premise)"
+    },
+    {
+      "declared_status": "planned",
+      "dependencies": [],
+      "item_id": "INFRA-09",
+      "locator": ".factory/infra/roadmap.json#INFRA-09",
+      "source_id": "infra-roadmap-json",
+      "title": "Pipelines de Deploy Contínuo (Git Push Webhooks)"
+    },
+    {
+      "declared_status": "planned",
+      "dependencies": [],
+      "item_id": "INFRA-10",
+      "locator": ".factory/infra/roadmap.json#INFRA-10",
+      "source_id": "infra-roadmap-json",
+      "title": "Runner de CI e Batch Workloads no Servidor On-Premises"
+    },
+    {
+      "declared_status": "planned",
+      "dependencies": [],
+      "item_id": "INFRA-11",
+      "locator": ".factory/infra/roadmap.json#INFRA-11",
+      "source_id": "infra-roadmap-json",
+      "title": "Painel Unificado de Métricas de Infraestrutura no DarkHub"
+    },
+    {
+      "declared_status": "✅ DELIVERED",
+      "dependencies": [],
+      "item_id": "INFRA-05",
+      "locator": ".factory/infra/roadmap.md#INFRA-05",
+      "source_id": "infra-roadmap-phase-2",
+      "title": "Provisionamento da Cloud VPS Primária (Hetzner CX23)"
+    },
+    {
+      "declared_status": "✅ DELIVERED",
+      "dependencies": [
+        "INFRA-05"
+      ],
+      "item_id": "INFRA-06",
+      "locator": ".factory/infra/roadmap.md#INFRA-06",
+      "source_id": "infra-roadmap-phase-2",
+      "title": "Instalação do Dokploy PaaS & Tailscale Mesh na VPS"
+    },
+    {
+      "declared_status": "✅ DELIVERED",
+      "dependencies": [
+        "INFRA-06"
+      ],
+      "item_id": "INFRA-06B",
+      "locator": ".factory/infra/roadmap.md#INFRA-06B",
+      "source_id": "infra-roadmap-phase-2",
+      "title": "Subdomínio Oficial com SSL (dokploy.ggcampos.com)"
+    },
+    {
+      "declared_status": "✅ DELIVERED",
+      "dependencies": [
+        "INFRA-06"
+      ],
+      "item_id": "INFRA-07",
+      "locator": ".factory/infra/roadmap.md#INFRA-07",
+      "source_id": "infra-roadmap-phase-3",
+      "title": "PostgreSQL Multi-Tenant em Armazenamento NVMe"
+    },
+    {
+      "declared_status": "🟡 PLANNED",
+      "dependencies": [
+        "INFRA-07"
+      ],
+      "item_id": "INFRA-08",
+      "locator": ".factory/infra/roadmap.md#INFRA-08",
+      "source_id": "infra-roadmap-phase-3",
+      "title": "Automação de Backups 3-Camadas (R2 + On-Premise)"
+    },
+    {
+      "declared_status": "✅ DELIVERED",
+      "dependencies": [
+        "INFRA-06"
+      ],
+      "item_id": "INFRA-09",
+      "locator": ".factory/infra/roadmap.md#INFRA-09",
+      "source_id": "infra-roadmap-phase-4",
+      "title": "Pipelines de Deploy Contínuo (Git Push Webhooks & Dokploy Gateway USR-18)"
+    },
+    {
+      "declared_status": "✅ DELIVERED",
+      "dependencies": [
+        "INFRA-03"
+      ],
+      "item_id": "INFRA-10",
+      "locator": ".factory/infra/roadmap.md#INFRA-10",
+      "source_id": "infra-roadmap-phase-4",
+      "title": "Runner de CI e Batch Workloads no Servidor On-Premises (USR-16)"
+    },
+    {
+      "declared_status": "✅ DELIVERED",
+      "dependencies": [
+        "INFRA-01"
+      ],
+      "item_id": "INFRA-11",
+      "locator": ".factory/infra/roadmap.md#INFRA-11",
+      "source_id": "infra-roadmap-phase-4",
+      "title": "Painel Unificado de Métricas de Infraestrutura no DarkHub (USR-15)"
+    },
+    {
+      "declared_status": "Agora",
+      "dependencies": [],
+      "item_id": "RM-01",
+      "locator": "docs/ROADMAP_OPERACIONAL.md#RM-01",
+      "source_id": "roadmap-operational-document",
+      "title": "Inventário formal das fontes canônicas e regras de precedência"
+    },
+    {
+      "declared_status": "Agora",
+      "dependencies": [
+        "RM-01"
+      ],
+      "item_id": "RM-02",
+      "locator": "docs/ROADMAP_OPERACIONAL.md#RM-02",
+      "source_id": "roadmap-operational-document",
+      "title": "Contratos Pydantic e fixtures do grafo"
+    },
+    {
+      "declared_status": "Agora",
+      "dependencies": [
+        "RM-02"
+      ],
+      "item_id": "RM-03",
+      "locator": "docs/ROADMAP_OPERACIONAL.md#RM-03",
+      "source_id": "roadmap-operational-document",
+      "title": "Compilador, normalização e resolução de identidade"
+    },
+    {
+      "declared_status": "Agora",
+      "dependencies": [
+        "RM-03"
+      ],
+      "item_id": "RM-04",
+      "locator": "docs/ROADMAP_OPERACIONAL.md#RM-04",
+      "source_id": "roadmap-operational-document",
+      "title": "Validador de ciclos, conflitos, órfãos e evidências"
+    },
+    {
+      "declared_status": "Agora",
+      "dependencies": [
+        "RM-03",
+        "RM-04"
+      ],
+      "item_id": "RM-05",
+      "locator": "docs/ROADMAP_OPERACIONAL.md#RM-05",
+      "source_id": "roadmap-operational-document",
+      "title": "Snapshot store, cache e API somente leitura"
+    },
+    {
+      "declared_status": "Agora",
+      "dependencies": [
+        "RM-05"
+      ],
+      "item_id": "RM-06",
+      "locator": "docs/ROADMAP_OPERACIONAL.md#RM-06",
+      "source_id": "roadmap-operational-document",
+      "title": "Painel do Hub com visão geral, filtros e drawer"
+    },
+    {
+      "declared_status": "Próximo",
+      "dependencies": [
+        "RM-06"
+      ],
+      "item_id": "RM-07",
+      "locator": "docs/ROADMAP_OPERACIONAL.md#RM-07",
+      "source_id": "roadmap-operational-document",
+      "title": "Linha do tempo, grafo de dependências e tabela acessível"
+    },
+    {
+      "declared_status": "Mais adiante",
+      "dependencies": [
+        "RM-05",
+        "RM-07"
+      ],
+      "item_id": "RM-08",
+      "locator": "docs/ROADMAP_OPERACIONAL.md#RM-08",
+      "source_id": "roadmap-operational-document",
+      "title": "Atualização incremental, telemetria e testes de escala"
+    },
+    {
+      "declared_status": "Exploratório",
+      "dependencies": [
+        "RM-08"
+      ],
+      "item_id": "RM-09",
+      "locator": "docs/ROADMAP_OPERACIONAL.md#RM-09",
+      "source_id": "roadmap-operational-document",
+      "title": "Histórico de snapshots e comparação entre versões"
+    }
+  ],
+  "schema_version": "1",
+  "snapshot_id": "hf01-20260909T000103Z-1e8bf83f",
+  "source_observations": [
+    {
+      "error_code": null,
+      "observed_at": "2026-09-09T00:01:03.144994Z",
+      "relative_path": ".factory\\infra\\decisions\\ADR-001-hybrid-multi-project-topology.md",
+      "sha256": "77a8dcfe68a162ee80b475a47c239d3d16119da5221f5dc49e209064dcfbca12",
+      "source_id": "adr-001",
+      "status": "read"
+    },
+    {
+      "error_code": null,
+      "observed_at": "2026-09-09T00:01:03.145993Z",
+      "relative_path": ".factory\\infra\\decisions\\ADR-002-vps-and-paas-orchestration.md",
+      "sha256": "f35db9ef567ca50a15b4f2b90e89ebe7d451e6ffcae047f851450f11e69eb45c",
+      "source_id": "adr-002",
+      "status": "read"
+    },
+    {
+      "error_code": null,
+      "observed_at": "2026-09-09T00:01:03.145993Z",
+      "relative_path": ".factory\\infra\\decisions\\ADR-003-database-and-backup-strategy.md",
+      "sha256": "b9208c9516ea1b8d4873287744f1fe248bf9c105896c06f79338d354be29f68b",
+      "source_id": "adr-003",
+      "status": "read"
+    },
+    {
+      "error_code": null,
+      "observed_at": "2026-09-09T00:01:03.145993Z",
+      "relative_path": ".factory\\infra\\decisions\\ADR-004-secure-networking-and-edge.md",
+      "sha256": "e2ba0ceea4ecd104e4562214bc75c09e7114ad3f6cc9317032880453df3b7387",
+      "source_id": "adr-004",
+      "status": "read"
+    },
+    {
+      "error_code": null,
+      "observed_at": "2026-09-09T00:01:03.146994Z",
+      "relative_path": "AGENTS.md",
+      "sha256": "4bbd4af34e88fc745ef83930fd5215dcbb8308111666b16ece3eebe8e34eb183",
+      "source_id": "agent-contract",
+      "status": "read"
+    },
+    {
+      "error_code": null,
+      "observed_at": "2026-09-09T00:01:03.146994Z",
+      "relative_path": ".factory\\roadmap\\darkfac.json",
+      "sha256": "9dd2e7a3c85b29b70a5acb2e83fd7cb0f52b9d4724bbb199a81255efb159c89c",
+      "source_id": "approved-roadmap",
+      "status": "read"
+    },
+    {
+      "error_code": null,
+      "observed_at": "2026-09-09T00:01:03.146994Z",
+      "relative_path": "docs\\AUTONOMY_POLICY.md",
+      "sha256": "4800070ed1f8fa53c09fbb81d2f8a593c8f49a68dededfa873879a0ab59e92c7",
+      "source_id": "autonomy-policy",
+      "status": "read"
+    },
+    {
+      "error_code": null,
+      "observed_at": "2026-09-09T00:01:03.147995Z",
+      "relative_path": "docs\\DEVELOPMENT_PLAN_2026-09-05.md",
+      "sha256": "0ca50a2fae0cefe774029bb670cdbfa1c4d89bcae9e12cef1e0ef30e4fc266e3",
+      "source_id": "development-plan",
+      "status": "read"
+    },
+    {
+      "error_code": null,
+      "observed_at": "2026-09-09T00:01:03.148994Z",
+      "relative_path": "FACTORY_RULES.md",
+      "sha256": "42be8891535c50bdebd38ed6d5face7222bd0990e5a49550dbd1504af29bccac",
+      "source_id": "factory-rules",
+      "status": "read"
+    },
+    {
+      "error_code": null,
+      "observed_at": "2026-09-09T00:01:03.148994Z",
+      "relative_path": "hub\\backend\\api.py",
+      "sha256": "e531196dc0ec999d7784149b42e04613af6da00df1b78f60c496dce94508e5b8",
+      "source_id": "hub-api",
+      "status": "read"
+    },
+    {
+      "error_code": null,
+      "observed_at": "2026-09-09T00:01:03.148994Z",
+      "relative_path": "hub\\backend\\service.py",
+      "sha256": "0a450634d1a8c7275bbb9f0ca89ff75cae503f9fd248aab81b8bcf37b5c133f9",
+      "source_id": "hub-service",
+      "status": "read"
+    },
+    {
+      "error_code": null,
+      "observed_at": "2026-09-09T00:01:03.149994Z",
+      "relative_path": "hub\\frontend\\tasks.js",
+      "sha256": "9231959ee7e6831248a7f5370d60a03a940843e258632dad36a5198c04f13c72",
+      "source_id": "hub-task-frontend",
+      "status": "read"
+    },
+    {
+      "error_code": null,
+      "observed_at": "2026-09-09T00:01:03.149994Z",
+      "relative_path": "docs\\HYBRID_WORKFLOW_PLAN_2026-09-08.md",
+      "sha256": "be7bba0708844c9c35badc0ba756a7cf5c6d2511ffc13dd5555a2788f59c7816",
+      "source_id": "hybrid-workflow-plan-wave-1",
+      "status": "read"
+    },
+    {
+      "error_code": null,
+      "observed_at": "2026-09-09T00:01:03.150994Z",
+      "relative_path": ".factory\\infra\\inventory.json",
+      "sha256": "fa3d43fe1433d2975818b68b659ecdae8a38a4ed9a6f9e1b4f72feee6df02da7",
+      "source_id": "infra-inventory",
+      "status": "read"
+    },
+    {
+      "error_code": null,
+      "observed_at": "2026-09-09T00:01:03.151995Z",
+      "relative_path": ".factory\\infra\\roadmap.json",
+      "sha256": "6e90329c73ddb359188b4c181654989749ccd6a3802fe2d793eb75d9cb337487",
+      "source_id": "infra-roadmap-json",
+      "status": "read"
+    },
+    {
+      "error_code": null,
+      "observed_at": "2026-09-09T00:01:03.151995Z",
+      "relative_path": ".factory\\infra\\roadmap.md",
+      "sha256": "169f610bebdf0322fc9566fa86605af252aa25edcea9cd0e972a715f51373890",
+      "source_id": "infra-roadmap-phase-2",
+      "status": "read"
+    },
+    {
+      "error_code": null,
+      "observed_at": "2026-09-09T00:01:03.152992Z",
+      "relative_path": ".factory\\infra\\roadmap.md",
+      "sha256": "169f610bebdf0322fc9566fa86605af252aa25edcea9cd0e972a715f51373890",
+      "source_id": "infra-roadmap-phase-3",
+      "status": "read"
+    },
+    {
+      "error_code": null,
+      "observed_at": "2026-09-09T00:01:03.152992Z",
+      "relative_path": ".factory\\infra\\roadmap.md",
+      "sha256": "169f610bebdf0322fc9566fa86605af252aa25edcea9cd0e972a715f51373890",
+      "source_id": "infra-roadmap-phase-4",
+      "status": "read"
+    },
+    {
+      "error_code": null,
+      "observed_at": "2026-09-09T00:01:03.153992Z",
+      "relative_path": "MISSION.md",
+      "sha256": "6f668b886d5a2e4c428279247e43afa2504fb02ba662cb0ff2c5bf1e43a0c648",
+      "source_id": "mission",
+      "status": "read"
+    },
+    {
+      "error_code": null,
+      "observed_at": "2026-09-09T00:01:03.153992Z",
+      "relative_path": "core\\harness\\remote_worker.py",
+      "sha256": "4de5dd89b82ef2c39988477261f658fc2bd20bc6010c92131e2b7d65c6cc3a2c",
+      "source_id": "onprem-worker",
+      "status": "read"
+    },
+    {
+      "error_code": null,
+      "observed_at": "2026-09-09T00:01:03.153992Z",
+      "relative_path": ".factory\\reports\\df-01-state-contract-report.md",
+      "sha256": "cbc082bfa51295789db69f9782e75f15662024e2c94e3e032511d5e2f78b4228",
+      "source_id": "report-df-01-state-contract",
+      "status": "read"
+    },
+    {
+      "error_code": null,
+      "observed_at": "2026-09-09T00:01:03.154993Z",
+      "relative_path": ".factory\\reports\\df-02-governance-guard-report.md",
+      "sha256": "3c7c43f4f04a5c8d0f83ed7e5a44e7fd932ba24df9fa7c79a7c220e225e42954",
+      "source_id": "report-df-02-governance-guard",
+      "status": "read"
+    },
+    {
+      "error_code": null,
+      "observed_at": "2026-09-09T00:01:03.154993Z",
+      "relative_path": ".factory\\reports\\df-03-harness-contract-report.md",
+      "sha256": "3093292a28211da0f36d3cb13db3efddae60b25f2cafb541fa700be71ccd372a",
+      "source_id": "report-df-03-harness-contract",
+      "status": "read"
+    },
+    {
+      "error_code": null,
+      "observed_at": "2026-09-09T00:01:03.155993Z",
+      "relative_path": ".factory\\reports\\df-04-ci-policy-report.md",
+      "sha256": "ad85c319131009e5a9f14b6da44cbf40f46c05e25323783b31ea5f583ae8f605",
+      "source_id": "report-df-04-ci-policy",
+      "status": "read"
+    },
+    {
+      "error_code": null,
+      "observed_at": "2026-09-09T00:01:03.155993Z",
+      "relative_path": ".factory\\reports\\df-05-racing-evidence-report.md",
+      "sha256": "c9dcd519a492414a73a34154337b478402b1ffcdc965de5e01cf12c579c93973",
+      "source_id": "report-df-05-racing-evidence",
+      "status": "read"
+    },
+    {
+      "error_code": null,
+      "observed_at": "2026-09-09T00:01:03.155993Z",
+      "relative_path": ".factory\\reports\\df-06-learning-promotion-report.md",
+      "sha256": "21050efe71097f7f8232907207ef379e2199c569eb143841a44c15737ea9d6e7",
+      "source_id": "report-df-06-learning-promotion",
+      "status": "read"
+    },
+    {
+      "error_code": null,
+      "observed_at": "2026-09-09T00:01:03.156992Z",
+      "relative_path": ".factory\\reports\\df-07-df-08-hub-security-report.md",
+      "sha256": "7f64a6c9c6cc87eab2c3a3aa5ada891a574e1cbf982beb527c5020a1beba83e7",
+      "source_id": "report-df-07-df-08-hub-security",
+      "status": "read"
+    },
+    {
+      "error_code": null,
+      "observed_at": "2026-09-09T00:01:03.156992Z",
+      "relative_path": ".factory\\reports\\df-08-hub-access-security-report.md",
+      "sha256": "7f64a6c9c6cc87eab2c3a3aa5ada891a574e1cbf982beb527c5020a1beba83e7",
+      "source_id": "report-df-08-hub-access-security",
+      "status": "read"
+    },
+    {
+      "error_code": null,
+      "observed_at": "2026-09-09T00:01:03.156992Z",
+      "relative_path": ".factory\\reports\\df-09-tls-transport-report.md",
+      "sha256": "e3b413e666869c7c23931c5553152640797a213feda577a4d9e649db3511a019",
+      "source_id": "report-df-09-tls-transport",
+      "status": "read"
+    },
+    {
+      "error_code": null,
+      "observed_at": "2026-09-09T00:01:03.156992Z",
+      "relative_path": ".factory\\reports\\df-10-usage-store-report.md",
+      "sha256": "eadc945e7c6f63cd998fccaaf110d0c527ada6bb7ed8a75e4d1d2b07a7dc26b1",
+      "source_id": "report-df-10-usage-store",
+      "status": "read"
+    },
+    {
+      "error_code": null,
+      "observed_at": "2026-09-09T00:01:03.157999Z",
+      "relative_path": ".factory\\reports\\df-11-runtime-recovery-report.md",
+      "sha256": "a609c28543cf9709c19af3dd929eed25a8ba5fd8a9d0d9f9132ef4264a24fa23",
+      "source_id": "report-df-11-runtime-recovery",
+      "status": "read"
+    },
+    {
+      "error_code": null,
+      "observed_at": "2026-09-09T00:01:03.157999Z",
+      "relative_path": ".factory\\reports\\df-12-execution-budget-report.md",
+      "sha256": "e899772ddd8fa09849737dd158b34f476389c3f73c8f5509f3f538c5c0c3aba7",
+      "source_id": "report-df-12-execution-budget",
+      "status": "read"
+    },
+    {
+      "error_code": null,
+      "observed_at": "2026-09-09T00:01:03.157999Z",
+      "relative_path": ".factory\\reports\\df-13-executor-sandbox-report.md",
+      "sha256": "3c6f849a959d401890d0b917faacf66a622936c74d84f05d6d8b5c579d8c9653",
+      "source_id": "report-df-13-executor-sandbox",
+      "status": "read"
+    },
+    {
+      "error_code": null,
+      "observed_at": "2026-09-09T00:01:03.158999Z",
+      "relative_path": ".factory\\reports\\df-14-provider-integration-report.md",
+      "sha256": "ae154991d04d15e0773ee3516b03d0938f88c7b74d32ed0be4c46a5de75af19c",
+      "source_id": "report-df-14-provider-integration",
+      "status": "read"
+    },
+    {
+      "error_code": null,
+      "observed_at": "2026-09-09T00:01:03.158999Z",
+      "relative_path": ".factory\\reports\\df-15-factory-vertical-report.md",
+      "sha256": "65c7e230f3f8357049b7a5250331da3599eb65a14c8b850e3300dbc55a91a74e",
+      "source_id": "report-df-15-factory-vertical",
+      "status": "read"
+    },
+    {
+      "error_code": null,
+      "observed_at": "2026-09-09T00:01:03.158999Z",
+      "relative_path": ".factory\\reports\\df-16-portable-offline-ci-report.md",
+      "sha256": "7ed7c9adc81e23b0e5157ed94dbe62fd7629f9daeef7481c3d091076086952db",
+      "source_id": "report-df-16-portable-offline-ci",
+      "status": "read"
+    },
+    {
+      "error_code": null,
+      "observed_at": "2026-09-09T00:01:03.158999Z",
+      "relative_path": ".factory\\reports\\df-17-field-provenance-report.md",
+      "sha256": "6ecb03b1b7f64115428c41270ac13c46d28ea1c49532f5a56301869ba0581074",
+      "source_id": "report-df-17-field-provenance",
+      "status": "read"
+    },
+    {
+      "error_code": null,
+      "observed_at": "2026-09-09T00:01:03.159992Z",
+      "relative_path": ".factory\\reports\\df-18-agent-evals-report.md",
+      "sha256": "e68ec3276f6ebfc72711390d6c267b24ddd0fa9b6167602a6b9125af7b86e158",
+      "source_id": "report-df-18-agent-evals",
+      "status": "read"
+    },
+    {
+      "error_code": null,
+      "observed_at": "2026-09-09T00:01:03.159992Z",
+      "relative_path": ".factory\\reports\\df-19-context-policy-report.md",
+      "sha256": "eb819f3cb1f0c8540e6a9e0f90119ed2c513961bab86e18c8dbd1e71dcdf8c9f",
+      "source_id": "report-df-19-context-policy",
+      "status": "read"
+    },
+    {
+      "error_code": null,
+      "observed_at": "2026-09-09T00:01:03.159992Z",
+      "relative_path": ".factory\\reports\\df-20-delivery-policy-report.md",
+      "sha256": "e0a93e82ddb0afc20ff556dcf7c64f8a14ef08b8bf4c319a10074e7796cd97d4",
+      "source_id": "report-df-20-delivery-policy",
+      "status": "read"
+    },
+    {
+      "error_code": null,
+      "observed_at": "2026-09-09T00:01:03.160992Z",
+      "relative_path": ".factory\\reports\\df-21-task-dashboard-report.md",
+      "sha256": "9879ecfc942e9578ea0a2d36b90b20e64446f3190471834049de2eed799c69a8",
+      "source_id": "report-df-21-task-dashboard",
+      "status": "read"
+    },
+    {
+      "error_code": null,
+      "observed_at": "2026-09-09T00:01:03.160992Z",
+      "relative_path": ".factory\\reports\\df-22-content-visual-migration-report.md",
+      "sha256": "61245feb20a52e100703024992928cd06facbbfb3c2ad3aff8885c9f08aea8af",
+      "source_id": "report-df-22-content-visual-migration",
+      "status": "read"
+    },
+    {
+      "error_code": null,
+      "observed_at": "2026-09-09T00:01:03.160992Z",
+      "relative_path": ".factory\\reports\\df-23-worktree-protocol-report.md",
+      "sha256": "7d68d3614f2ce69a9f56a9f398cda98084e9c84ea2cb86dccb5f059bf32abbfa",
+      "source_id": "report-df-23-worktree-protocol",
+      "status": "read"
+    },
+    {
+      "error_code": null,
+      "observed_at": "2026-09-09T00:01:03.160992Z",
+      "relative_path": ".factory\\reports\\df-24-project-adoption-report.md",
+      "sha256": "5e22c36231d52366942d4be8317a4b226127dce2edde0b7b49614b50b8d59096",
+      "source_id": "report-df-24-project-adoption",
+      "status": "read"
+    },
+    {
+      "error_code": null,
+      "observed_at": "2026-09-09T00:01:03.161996Z",
+      "relative_path": ".factory\\reports\\rm-08-incremental-telemetry-report.md",
+      "sha256": "34254265a1f7919386693d0380da2c5b3187c008b2b99210d77cc1da06581c12",
+      "source_id": "report-rm-08-incremental-telemetry",
+      "status": "read"
+    },
+    {
+      "error_code": null,
+      "observed_at": "2026-09-09T00:01:03.161996Z",
+      "relative_path": ".factory\\reports\\rm-09-history-report.md",
+      "sha256": "6ba5032d6fa8db8f42caa8d3089964fff1310e94db99eda115128f00ae4a9a5b",
+      "source_id": "report-rm-09-history",
+      "status": "read"
+    },
+    {
+      "error_code": null,
+      "observed_at": "2026-09-09T00:01:03.161996Z",
+      "relative_path": ".factory\\reports\\roadmap-list-sort-report.md",
+      "sha256": "4ad55d3d72fa8acdeb66d1e4767e76b483de758fd3d3c0595a0414488e4d342a",
+      "source_id": "report-roadmap-list-sort",
+      "status": "read"
+    },
+    {
+      "error_code": null,
+      "observed_at": "2026-09-09T00:01:03.162998Z",
+      "relative_path": ".factory\\reports\\roadmap-operacional-report.md",
+      "sha256": "11a41961996006ffe7f868039899a9c15cd3af7a2263386541f3596237e779f6",
+      "source_id": "report-roadmap-operacional",
+      "status": "read"
+    },
+    {
+      "error_code": null,
+      "observed_at": "2026-09-09T00:01:03.162998Z",
+      "relative_path": "docs\\ROADMAP_OPERACIONAL.md",
+      "sha256": "0a491c2e9456a15caa2e58536aad21e9a06d6431d4b5fe82f42584bddab9e995",
+      "source_id": "roadmap-operational-document",
+      "status": "read"
+    },
+    {
+      "error_code": null,
+      "observed_at": "2026-09-09T00:01:03.162998Z",
+      "relative_path": "core\\roadmap\\sources.py",
+      "sha256": "bdc2d9d2ad34f7b710ab3aa351388a95c8b256031472cf07d1393ca682f4dc94",
+      "source_id": "roadmap-source-adapter",
+      "status": "read"
+    },
+    {
+      "error_code": null,
+      "observed_at": "2026-09-09T00:01:03.163992Z",
+      "relative_path": "core\\orchestrator\\runtime.py",
+      "sha256": "03cc05a382f19af57e2624f007f6f11ff5d8dbfdad5be6e05eb5412118c36650",
+      "source_id": "runtime-core",
+      "status": "read"
+    },
+    {
+      "error_code": null,
+      "observed_at": "2026-09-09T00:01:03.163992Z",
+      "relative_path": "docs\\RUNTIME_DECISION.md",
+      "sha256": "bdac3f62679cc1ea98feb3b9c4a8d40035eb2300be1ac9704b4d252f1c701c51",
+      "source_id": "runtime-decision",
+      "status": "read"
+    },
+    {
+      "error_code": null,
+      "observed_at": "2026-09-09T00:01:03.163992Z",
+      "relative_path": "core\\orchestrator\\store.py",
+      "sha256": "42476767d8a5317b6d6d1f6e4587b367026c5e6c1dfc1a906afb4891ee3b9f0c",
+      "source_id": "runtime-store",
+      "status": "read"
+    },
+    {
+      "error_code": null,
+      "observed_at": "2026-09-09T00:01:03.164992Z",
+      "relative_path": "core\\harness\\test_subagent.py",
+      "sha256": "7fc59683851c725d79682af706c197689bb23771c6a242f59ce00af1d2d93b50",
+      "source_id": "test-subagent",
+      "status": "read"
+    },
+    {
+      "error_code": null,
+      "observed_at": "2026-09-09T00:01:03.164992Z",
+      "relative_path": ".factory\\reports\\usr-16-report.md",
+      "sha256": "cda186d505959e46ed4ad88737502c0a0772da07bea2488fdd826c2e5ff99311",
+      "source_id": "usr-16-report",
+      "status": "read"
+    }
+  ]
+}

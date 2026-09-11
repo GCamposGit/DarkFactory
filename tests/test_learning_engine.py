@@ -99,7 +99,7 @@ def test_register_and_reinforce_preference(temp_tracker):
     pref2 = temp_tracker.register_preference(
         category=PreferenceCategory.ARCHITECTURE,
         rule="Always design headless APIs with CLI/HTTP access before writing UI",
-        context_or_example="Canaletto gallery backend",
+        context_or_example="DarkHub local service backend",
         confidence=0.9,
     )
     assert pref2.preference_id == pref1.preference_id

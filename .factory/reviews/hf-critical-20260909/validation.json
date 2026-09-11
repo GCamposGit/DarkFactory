@@ -1,0 +1,169 @@
+{
+  "schema_version": 1,
+  "date": "2026-09-09",
+  "scope": "Local review, instructions and skills. Existing product defects remain open.",
+  "harness": {
+    "command": "python core/harness/runner.py --quick",
+    "exit_code": 0,
+    "structured_result": {
+      "schema_version": "1",
+      "candidate_sha": "0f57e9c0cb3cf1a5d02d8e934c162617ebe71db9",
+      "config_hash": "353078f07acaec776d317794b1effbaff38d7021d2900b852e8bbc495e5eb373",
+      "required_steps": [
+        "syntax_and_types",
+        "unit_and_integration_tests"
+      ],
+      "started_steps": [
+        "syntax_and_types",
+        "unit_and_integration_tests"
+      ],
+      "passed_steps": [
+        "syntax_and_types",
+        "unit_and_integration_tests"
+      ],
+      "failed_steps": [],
+      "discovered_count": 501,
+      "passed_count": 499,
+      "skipped_count": 2,
+      "exit_codes": {
+        "syntax_and_types": 0,
+        "unit_and_integration_tests": 0
+      },
+      "artifact_refs": [
+        "C:\\dev\\DarkFac\\harness.config.json"
+      ]
+    },
+    "duration_seconds_tests": 128.44,
+    "log": ".factory/test_logs/hf-critical-review/harness-final.log"
+  },
+  "full_suite": {
+    "command": "python -m pytest tests -v --ignore=tests/test_canaletto.py",
+    "exit_code": 0,
+    "passed": 499,
+    "skipped": 2,
+    "duration_seconds": 130.84,
+    "log": ".factory/test_logs/hf-critical-review/suite-final.log"
+  },
+  "test_environment_overrides": {
+    "PYTHONDONTWRITEBYTECODE": "1",
+    "PYTEST_ADDOPTS": "-p no:cacheprovider --basetemp <unique local review temp>"
+  },
+  "skips": [
+    "Live audio opt-in disabled",
+    "Symlink creation unavailable on this Windows host"
+  ],
+  "count_delta": "11 HF-05 tests appeared in the concurrent working tree; baseline owner report was 488 passed, 2 skipped.",
+  "audit_counterexamples": {
+    "command": "python -m pytest .factory/reviews/hf-critical-20260909/test_gate_regressions.py .factory/reviews/hf-critical-20260909/test_runtime_regressions.py -q -p no:cacheprovider",
+    "exit_code": 1,
+    "failed": 15,
+    "passed": 1,
+    "duration_seconds": 0.29,
+    "interpretation": "Expected desired-behavior assertions fail against current product. Not 15 independent mechanisms.",
+    "log": ".factory/test_logs/hf-critical-review/audit-regressions.log"
+  },
+  "focal_existing_tests": [
+    {
+      "scope": "HF-04",
+      "passed": 13
+    },
+    {
+      "scope": "auxiliary HF-01/HF-02 selection",
+      "passed": 30
+    }
+  ],
+  "baseline_runtime_reproduction": {
+    "command": "python -B .factory/reviews/hf-critical-20260909/reproduce_baseline_runtime.py",
+    "exit_code": 0,
+    "meaning": "Observation script completed; observed product behavior still contains defects.",
+    "log": ".factory/test_logs/hf-critical-review/bundled-reproduction.log"
+  },
+  "installed_skill_validations": [
+    {
+      "path": "C:\\dev\\DarkFac\\.agents\\skills\\00-continuous-self-improvement",
+      "exit_code": 0,
+      "result": "Skill is valid!"
+    },
+    {
+      "path": "C:\\dev\\DarkFac\\.agents\\skills\\02-plan-product-architecture",
+      "exit_code": 0,
+      "result": "Skill is valid!"
+    },
+    {
+      "path": "C:\\dev\\DarkFac\\.agents\\skills\\04-autonomous-piv-loop",
+      "exit_code": 0,
+      "result": "Skill is valid!"
+    },
+    {
+      "path": "C:\\dev\\DarkFac\\.agents\\skills\\05-validation-harness",
+      "exit_code": 0,
+      "result": "Skill is valid!"
+    },
+    {
+      "path": "C:\\dev\\DarkFac\\.agents\\skills\\06-adversarial-review",
+      "exit_code": 0,
+      "result": "Skill is valid!"
+    },
+    {
+      "path": "C:\\dev\\DarkFac\\.claude\\skills\\00-continuous-self-improvement",
+      "exit_code": 0,
+      "result": "Skill is valid!"
+    },
+    {
+      "path": "C:\\dev\\DarkFac\\.claude\\skills\\02-plan-product-architecture",
+      "exit_code": 0,
+      "result": "Skill is valid!"
+    },
+    {
+      "path": "C:\\dev\\DarkFac\\.claude\\skills\\04-autonomous-piv-loop",
+      "exit_code": 0,
+      "result": "Skill is valid!"
+    },
+    {
+      "path": "C:\\dev\\DarkFac\\.claude\\skills\\05-validation-harness",
+      "exit_code": 0,
+      "result": "Skill is valid!"
+    },
+    {
+      "path": "C:\\dev\\DarkFac\\.claude\\skills\\06-adversarial-review",
+      "exit_code": 0,
+      "result": "Skill is valid!"
+    },
+    {
+      "path": "C:\\Users\\guigc\\.codex\\skills\\00-continuous-self-improvement",
+      "exit_code": 0,
+      "result": "Skill is valid!"
+    },
+    {
+      "path": "C:\\Users\\guigc\\.codex\\skills\\02-plan-product-architecture",
+      "exit_code": 0,
+      "result": "Skill is valid!"
+    },
+    {
+      "path": "C:\\Users\\guigc\\.codex\\skills\\04-autonomous-piv-loop",
+      "exit_code": 0,
+      "result": "Skill is valid!"
+    },
+    {
+      "path": "C:\\Users\\guigc\\.codex\\skills\\05-validation-harness",
+      "exit_code": 0,
+      "result": "Skill is valid!"
+    },
+    {
+      "path": "C:\\Users\\guigc\\.codex\\skills\\06-adversarial-review",
+      "exit_code": 0,
+      "result": "Skill is valid!"
+    }
+  ],
+  "skill_file_hashes_match_install_manifest": true,
+  "canonical_mirrors_match": true,
+  "reviewed_source_changes_since_manifest": [],
+  "behavioral_skill_qualification": "Failed single local-model trial; final revision not independently requalified.",
+  "git_delivery": "not_committed_or_pushed; .git read-only in current task",
+  "preserved_concurrent_paths": [
+    ".factory/context_intelligence.json",
+    ".factory/learning/learning_ledger.json",
+    "scripts/install_sync_task.ps1",
+    "HF-04/HF-05 and HF-02 untracked product files"
+  ]
+}

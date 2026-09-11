@@ -10,9 +10,7 @@
     "hub/backend/main.py"
   ],
   "local_only_components": [
-    "run_canaletto.py",
-    "canaletto_gallery/",
-    "tests/test_canaletto.py",
+    "external_demo_projects/",
     "audio_bench/*.wav"
   ],
   "domain_layers": [
@@ -35,9 +33,9 @@
       "cli"
     ],
     "quick_validation_command": "python core/harness/runner.py --quick",
-    "test_command": "python -m pytest tests -v --ignore=tests/test_canaletto.py",
+    "test_command": "python -m pytest tests -v",
     "test_files": 19,
-    "local_only_test_files": 1
+    "local_only_test_files": 0
   },
   "skills": {
     "source": ".agents/skills",
@@ -92,7 +90,7 @@
     "validation": [
       "tests/test_usage_monitor.py",
       "python core/harness/runner.py --quick",
-      "python -m pytest tests -v --ignore=tests/test_canaletto.py"
+      "python -m pytest tests -v"
     ]
   },
   "roadmap_delivery": {
@@ -181,8 +179,40 @@
       "tests/test_roadmap.py",
       "tests/test_roadmap_history.py",
       "python core/harness/runner.py --quick",
-      "python -m pytest tests -v --ignore=tests/test_canaletto.py",
+      "python -m pytest tests -v",
       "node --check hub/frontend/roadmap.js"
     ]
+  },
+  "workflow_context": {
+    "generated_at": "2026-09-09T12:05:00Z",
+    "feature": "hf05_local_runtime_slice",
+    "architecture": {
+      "contracts": [
+        "core/workflow/contracts.py",
+        "core/workflow/readiness.py"
+      ],
+      "runtime": [
+        "core/workflow/runtime.py"
+      ],
+      "persistence": "SQLite single-store transaction boundary with durable outbox"
+    },
+    "scope": ["HF-05-01"],
+    "invariants": [
+      "Run transitions and successor events commit in one transaction.",
+      "Event and job submission replays are idempotent by stable deduplication keys.",
+      "Only the owning unexpired lease may complete a job; expired leases are reconciled before redispatch.",
+      "Conflict keys, stage capacity and per-project fairness constrain dispatch without a global barrier.",
+      "Budget reservations are atomic and released on completion, expiration or cancellation.",
+      "Simulation/local runtime evidence does not imply operational delivery or external integration."
+    ],
+    "validation": [
+      "tests/test_workflow_runtime.py",
+      "python core/harness/runner.py --quick",
+      "python -m pytest tests -v"
+    ],
+    "dependencies": {
+      "blocked_external": ["HF-02-05", "HF-02-07", "HF-03 target worker access"],
+      "local_available": ["HF-04 contracts", "Python 3.12", "SQLite standard library"]
+    }
   }
 }

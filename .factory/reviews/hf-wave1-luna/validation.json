@@ -1,0 +1,141 @@
+{
+  "schema_version": 1,
+  "date": "2026-09-10",
+  "tickets": [
+    "CR-09",
+    "CR-01"
+  ],
+  "verdict": "accepted_for_local_scope",
+  "implementer": {
+    "task": "/root/luna_wave1",
+    "requested_model": "gpt-5.6-luna",
+    "reasoning_effort": "xhigh"
+  },
+  "reviewer": {
+    "task": "/root",
+    "independence": "separate review pass; same model family"
+  },
+  "plan_sha256": "b9f600ee26b3caf8477c138e04248825c6163e4124ef16f4b5c1fa77d6a3e929",
+  "files": [
+    {
+      "path": "core/workflow/runtime.py",
+      "before_sha256": "a6e15c4a03eed52aafa555662b83d350661d1612f87c78237dad79944ff8a53b",
+      "after_sha256": "1ed7f86efe4e22f5ede6a0e49ebb92a2067fd27596c552d51d89a3801e5ae9c0",
+      "changed": true
+    },
+    {
+      "path": "spikes/runtime_choice/contracts.py",
+      "before_sha256": "c82bad5b8005dbb3ff63bf3a54d51d5ee27063ca7a43916a59884bd6da9f04d5",
+      "after_sha256": "13054603195f340cc0eb0d0d1bc692f6f7b30208a4b5bad49cdbfe7187caca1e",
+      "changed": true
+    },
+    {
+      "path": "tests/test_runtime_spike_contracts.py",
+      "before_sha256": "e980aa0d4ce067a19ba31d3f66f1d15e61b1bffb4bc9fea02f344c840d2c029d",
+      "after_sha256": "d34728cffd1c9e4424c0754ca69c224a4a8acf43fea880f1859ccda197ee0f58",
+      "changed": true
+    },
+    {
+      "path": "tests/test_runtime_spike_native.py",
+      "before_sha256": "1c1ba86157544161c1e88f48492e3d74a6c157bab185c8f5680ed6d9b05de631",
+      "after_sha256": "bfc7491a18dd0c895b5086e87ba8d2a98d9a4f69c2888d707de35d91e4fccd12",
+      "changed": true
+    },
+    {
+      "path": "tests/test_workflow_runtime.py",
+      "before_sha256": "9d67ab6cf5231146bbfacba0748db100ae9a7dc4a0cbb580db998d677e762652",
+      "after_sha256": "abb9acf58ce553ec8cf77a8ae3757841f396db01fa14f75bdbbdda8082ddf20d",
+      "changed": true
+    }
+  ],
+  "cr09_harness": {
+    "schema_version": "1",
+    "candidate_sha": "0f57e9c0cb3cf1a5d02d8e934c162617ebe71db9",
+    "config_hash": "353078f07acaec776d317794b1effbaff38d7021d2900b852e8bbc495e5eb373",
+    "required_steps": [
+      "syntax_and_types",
+      "unit_and_integration_tests"
+    ],
+    "started_steps": [
+      "syntax_and_types",
+      "unit_and_integration_tests"
+    ],
+    "passed_steps": [
+      "syntax_and_types",
+      "unit_and_integration_tests"
+    ],
+    "failed_steps": [],
+    "discovered_count": 503,
+    "passed_count": 501,
+    "skipped_count": 2,
+    "exit_codes": {
+      "syntax_and_types": 0,
+      "unit_and_integration_tests": 0
+    },
+    "artifact_refs": [
+      "C:\\dev\\DarkFac\\harness.config.json"
+    ]
+  },
+  "final_harness": {
+    "schema_version": "1",
+    "candidate_sha": "0f57e9c0cb3cf1a5d02d8e934c162617ebe71db9",
+    "config_hash": "353078f07acaec776d317794b1effbaff38d7021d2900b852e8bbc495e5eb373",
+    "required_steps": [
+      "syntax_and_types",
+      "unit_and_integration_tests"
+    ],
+    "started_steps": [
+      "syntax_and_types",
+      "unit_and_integration_tests"
+    ],
+    "passed_steps": [
+      "syntax_and_types",
+      "unit_and_integration_tests"
+    ],
+    "failed_steps": [],
+    "discovered_count": 508,
+    "passed_count": 506,
+    "skipped_count": 2,
+    "exit_codes": {
+      "syntax_and_types": 0,
+      "unit_and_integration_tests": 0
+    },
+    "artifact_refs": [
+      "C:\\dev\\DarkFac\\harness.config.json"
+    ]
+  },
+  "final_suite": {
+    "command": "python -m pytest tests -v --ignore=tests/test_canaletto.py",
+    "exit_code": 0,
+    "passed": 506,
+    "skipped": 2,
+    "raw_log": ".factory/test_logs/hf-wave1-luna/cr01-pytest-suite.raw.log"
+  },
+  "independent_checks": {
+    "command": "python -m pytest .factory/reviews/hf-wave1-luna/test_wave1_independent.py -v -p no:cacheprovider",
+    "exit_code": 0,
+    "passed": 15,
+    "raw_log": ".factory/test_logs/hf-wave1-luna/coordinator-independent.raw.log"
+  },
+  "historical_audit_recheck": {
+    "command": "python -m pytest .factory/reviews/hf-critical-20260909/test_gate_regressions.py .factory/reviews/hf-critical-20260909/test_runtime_regressions.py -q -p no:cacheprovider",
+    "exit_code": 1,
+    "failed": 13,
+    "passed": 3,
+    "interpretation": "Two CR-09 counterexamples now pass. Remaining HF-04/CR-10 defects are outside this wave and remain open.",
+    "raw_log": ".factory/test_logs/hf-wave1-luna/remaining-audit.raw.log"
+  },
+  "review_feedback_resolved": [
+    "Invalid root types now raise validation errors and become sanitized CONFIG_INVALID at the real CLI.",
+    "Subprocess tests derive cwd from repository path, join reader threads and avoid requiring STARTED at list index zero."
+  ],
+  "scope_check": "passed",
+  "unexpected_changes": [],
+  "history": "The original run was interrupted by usage limits; recovered summary logs are distinguished from fresh raw validation logs.",
+  "delivery": "Local patch only. Inherited untracked baseline prevents representing only these corrections as a selective commit without preceding baseline consolidation.",
+  "limitations": [
+    "No remote integration or deployment",
+    "No DBOS/cloud validation",
+    "Other remediation units remain open"
+  ]
+}

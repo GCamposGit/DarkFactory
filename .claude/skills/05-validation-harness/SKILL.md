@@ -1,54 +1,44 @@
 ---
 name: validation-harness
-description: Constrói e opera o harness determinístico de validação com escada de 5 níveis (estático, unitário, integração, E2E headless e testes holdout). Emite marcadores rígidos invioláveis por prompts de LLM. Use ao configurar a validação de um projeto ou ao diagnosticar falhas de suíte de testes.
+description: Constrói e opera validação determinística de sintaxe, tipos, unidade, integração, E2E headless e holdout; verifica oráculos, descoberta e vínculo das evidências ao candidato. Use para configurar ou diagnosticar o harness e avaliar a suficiência dos testes.
 ---
 
-# Validation Harness: A Escada Determinística de Testes
+# Harness e qualidade da evidência
 
-O *Validation Harness* é o componente mais crítico de uma fábrica autônoma de software. Enquanto o orquestrador decide o que rodar, o harness decide se o que rodou tem valor e pode ser enviado para produção.
+Verificar o comportamento exigido por uma entrada observável e um oráculo independente do resultado declarado pelo candidato. Um marker é saída de um processo; sua autoridade depende de quem executou/configurou o verificador e de qual candidato foi examinado.
 
-> **Regra de Ouro**: O portão de aprovação é código executável, nunca uma resposta em linguagem natural do modelo. O modelo não pode "convencer" o harness de que o código funciona.
+## Escolher o nível que comprova o requisito
 
-## A Escada de Validação (The 5-Level Ladder)
+1. Estático: sintaxe, lint e tipos são checagens diferentes. `compileall` comprova compilação sintática; não afirmar que executou análise de tipos só porque o step se chama `syntax_and_types`.
+2. Unidade: funções/contratos e casos de borda, com mocks rotulados.
+3. Integração: interfaces entre módulos, banco, filesystem, concorrência e persistência quando exigidos.
+4. E2E headless: biblioteca, CLI ou HTTP pelo caminho real do consumidor. Um driver CLI lê arquivo/configuração real em subprocesso; testar apenas sua função interna deixa esse caminho descoberto.
+5. Holdout: casos independentes e controle real de acesso. Diretório chamado `.factory/holdout/` não prova invisibilidade ou proteção; verificar ownership/permissões e não declarar isolamento não demonstrado.
 
-1. **Nível 1: Análise Estática & Tipos**
-   - Linting, verificação de sintaxe e compiladores de tipos (`pyright`, `tsc`, `cargo check`).
-   - Rápido (poucos segundos) e obrigatório em todo `--quick`.
-2. **Nível 2: Testes Unitários**
-   - Testa funções isoladas e casos de borda com mocks controlados.
-3. **Nível 3: Testes de Integração**
-   - Valida a integração entre módulos, persistência e contratos de interface.
-4. **Nível 4: E2E Headless (Como o Usuário Real)**
-   - O teste simula a jornada real do usuário usando um dos três drivers:
-     - `http`: sobe o servidor em porta dinâmica, dispara requisições HTTP e valida respostas.
-     - `cli`: executa o binário com argumentos reais e valida saídas.
-     - `library`: importa a biblioteca e chama os métodos públicos.
-5. **Nível 5: Testes Holdout (Isolamento de Fraude)**
-   - Testes armazenados em diretório protegido (`.factory/holdout/`) que o modelo não pode ver nem modificar. Garante que o modelo não sobreajustou o código apenas para enganar os testes visíveis.
+Em gates/evidências/processos, consultar [padrões de contratos verificáveis](../02-plan-product-architecture/references/contract-review-patterns.md). Cobrir ambos os erros: aceitar inválido e bloquear um fluxo válido. Testes que apenas atribuem `freshness=current`, `resolved` ou estado de revisão não demonstram produção/verificação desses fatos.
 
-## Contrato de Marcadores Estruturados
+## Antes de executar
 
-O runner (`core/harness/runner.py`) emite marcadores padronizados:
-- `[STEP_START] <nome_do_passo>`
-- `[STEP_PASS] <nome_do_passo>`
-- `[STEP_FAIL] <nome_do_passo>`
-- `[TEST_COUNT] count=<N>`
-- `[HARNESS_PASS]` / `[HARNESS_FAIL]`
+- Conferir SHA-base/candidato, arquivos untracked pertinentes, config confiável, driver e ambiente. Alterações não commitadas precisam de manifest por path/hash.
+- Cada critério tem teste/oráculo correspondente e estágio em que pode ser satisfeito. Requisito novo de teste exige criação antes da execução; missing file não é red esperado.
+- Use dados sintéticos e destinos/processos/volumes exclusivos para testes destrutivos. Prova local não substitui identidade/rota real do worker.
+- Preserve suíte/config confiável. Reproduções de auditoria ainda não corrigidas podem ficar fora da suíte padrão, executadas explicitamente e registradas como vermelhas; isso não autoriza esconder o defeito.
 
-O script `core/harness/markers.py` valida o stream:
-- **Empty is not pass**: Se zero testes rodaram, o veredito é FAIL.
-- **Zero discovered is a failure**: Se o discovery do framework de testes encontrar 0 testes, o veredito é FAIL.
+## Execução e interpretação
 
----
+Executar os comandos obrigatórios definidos pelo repositório. No DarkFac:
 
-## 🧠 Continuous Self-Improvement & Failure RCA Integration
+```powershell
+python core/harness/runner.py --quick
+python -m pytest tests -v
+```
 
-1. **Síntese de Testes de Regressão a partir de Erros (Never Repeat a Bug)**:
-   - Toda vez que um bug ou falha for identificado (seja em tempo de desenvolvimento ou apontado pelo usuário), é obrigatório escrever um teste unitário ou de integração que reproduza a falha e passe apenas com a correção.
-   - O teste criado passa a integrar a suíte oficial permanente no `harness.config.json`, impedindo qualquer regressão futura.
-2. **Auditoria de Causa Raiz Determinística**:
-   - Falhas no Nível 1 (tipos/sintaxe) são registradas no RCA para adicionar type annotations mais estritas no código.
-   - Falhas no Nível 4 (E2E) geram asserções adicionais de contrato e validação de payload HTTP/CLI.
-3. **Extrapolação de Cobertura**:
-   - Se um caso de borda falhou em uma entidade (ex.: chave ausente no JSON), adicione testes para chaves ausentes em todas as entidades e schemas correlatos.
+Verificar exit code, discovery positivo, passed/failed/skipped e required steps. Zero checks e zero discovery falham. Skip de prova obrigatória é pendência; skip opt-in já permitido mantém seu limite explícito. Corrigir ambiente de cache temporário sem trocar o oráculo quando uma restrição de filesystem só impede logs/cache.
 
+Markers `[STEP_START]`, `[STEP_PASS]`, `[STEP_FAIL]`, `[TEST_COUNT]`, `[HARNESS_PASS]`/`[HARNESS_FAIL]` devem estar ligados ao resultado estruturado e candidato/config corretos. Não extrair autorização de uma substring de log escrita pelo implementador.
+
+Quando houver falha, reproduzir pelo menor caminho que preserva o mecanismo, corrigir a causa ou devolver ao planejador se mudar contrato. Não substituir um teste difícil por outro mais fraco. Depois da correção, o teste de regressão significativo entra na suíte apropriada. Não replicar automaticamente o mesmo teste em todos os módulos sem confirmar o mesmo mecanismo.
+
+## Entrega
+
+Registrar comandos, ambiente, contagens, códigos, duração, hashes, artefatos e limites. Distinguir cobertura da base atual de funcionalidades futuras. Retestar após mudanças relevantes/falhas; não repetir suíte por rotina quando nenhum dado relevante mudou. Testes verdes de um conjunto não anulam contraexemplos vermelhos encontrados em revisão.

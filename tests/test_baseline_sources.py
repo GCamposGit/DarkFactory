@@ -204,3 +204,104 @@ def test_contract_forbids_extra_fields_and_naive_timestamps() -> None:
             status=SourceStatus.READ,
             observed_at=datetime.fromisoformat("2026-09-08T00:00:00"),
         )
+
+
+def test_cr11_positive_control_df11_in_hf_table_and_no_ghost_cycle(tmp_path: Path) -> None:
+    # 1. Direct parser check: DF-11 in HF table must yield only DF-11
+    parsed = baseline_sources._parse_markdown_dependencies("DF-11", "HF")
+    assert parsed == ["DF-11"]
+
+    # 2. Ingestion of table where HF-11 depends on DF-11
+    plan_file = tmp_path / "plan.md"
+    plan_file.write_text(
+        "# Plano\n\n| ID | Entrega | Depende | Horizonte |\n| --- | --- | --- | --- |\n| HF-11 | Spec | DF-11 | Agora |\n",
+        encoding="utf-8",
+    )
+    collected = collect_sources(
+        tmp_path,
+        [
+            _spec(
+                "plan.md",
+                kind=BaselineSourceKind.MARKDOWN_TABLE,
+                source_id="plan-markdown",
+                table_header=["ID", "Entrega", "Depende", "Horizonte"],
+                item_id_column="ID",
+            )
+        ],
+    )
+    item = collected.planned_items[0]
+    assert item.item_id == "HF-11"
+    assert item.dependencies == ["DF-11"]
+
+
+def test_cr11_real_catalog_hf12_drops_ghost_dependencies() -> None:
+    # In HF-12, 'HF-03, HF-11, INFRA-08, INFRA-09' must not generate 'HF-08' or 'HF-09'
+    raw = "HF-03, HF-11, INFRA-08, INFRA-09"
+    parsed = baseline_sources._parse_markdown_dependencies(raw, "HF")
+    assert parsed == ["HF-03", "HF-11", "INFRA-08", "INFRA-09"]
+
+
+def test_cr11_grammar_prefix_inheritance_and_bare_tokens() -> None:
+    # HF-01, 02 in HF table -> HF-01 and HF-02
+    assert baseline_sources._parse_markdown_dependencies("HF-01, 02", "HF") == ["HF-01", "HF-02"]
+    # HF-01, 02 in DF table -> HF-01 and HF-02 (inherits HF from preceding token)
+    assert baseline_sources._parse_markdown_dependencies("HF-01, 02", "DF") == ["HF-01", "HF-02"]
+    # 02,03 in DF table -> DF-02, DF-03
+    assert baseline_sources._parse_markdown_dependencies("02,03", "DF") == ["DF-02", "DF-03"]
+    # 03, 11–14 in DF table -> DF-03, DF-11, DF-12, DF-13, DF-14
+    assert baseline_sources._parse_markdown_dependencies("03, 11–14", "DF") == [
+        "DF-03",
+        "DF-11",
+        "DF-12",
+        "DF-13",
+        "DF-14",
+    ]
+    # Single bare ID
+    assert baseline_sources._parse_markdown_dependencies("13", "DF") == ["DF-13"]
+    # Slash separated
+    assert baseline_sources._parse_markdown_dependencies("DF-08/13", "DF") == ["DF-08", "DF-13"]
+    # Conjunction 'e'
+    assert baseline_sources._parse_markdown_dependencies("DF-11 e 12", "HF") == ["DF-11", "DF-12"]
+    assert baseline_sources._parse_markdown_dependencies("DF-11 e HF-02", "HF") == ["DF-11", "HF-02"]
+    # Semicolon separated
+    assert baseline_sources._parse_markdown_dependencies("DF-11; 12; 13", "HF") == ["DF-11", "DF-12", "DF-13"]
+
+
+def test_cr11_mixed_prefixes_and_ranges() -> None:
+    # Mixed prefixes: HF-01, 02, DF-05, 06 in RM table
+    assert baseline_sources._parse_markdown_dependencies("HF-01, 02, DF-05, 06", "RM") == [
+        "HF-01",
+        "HF-02",
+        "DF-05",
+        "DF-06",
+    ]
+    # Prefixed range
+    assert baseline_sources._parse_markdown_dependencies("DF-01–03", "HF") == ["DF-01", "DF-02", "DF-03"]
+    # Suffix in ID
+    assert baseline_sources._parse_markdown_dependencies("INFRA-06B", "INFRA") == ["INFRA-06B"]
+
+
+def test_cr11_repeated_tokens_deduplicated() -> None:
+    assert baseline_sources._parse_markdown_dependencies("HF-01, HF-01", "HF") == ["HF-01"]
+    assert baseline_sources._parse_markdown_dependencies("02, 02", "HF") == ["HF-02"]
+
+
+def test_cr11_unknown_prefixes_and_prose_do_not_invent_links() -> None:
+    # Unknown prefix alone
+    assert baseline_sources._parse_markdown_dependencies("UNKNOWN-11", "HF") == []
+    # Mixed with unknown prefix
+    assert baseline_sources._parse_markdown_dependencies("DF-11, UNKNOWN-05, HF-02", "HF") == ["DF-11", "HF-02"]
+    # Common technical terms with hyphens
+    assert baseline_sources._parse_markdown_dependencies("UTF-8 e RFC-2119", "HF") == []
+    assert baseline_sources._parse_markdown_dependencies("ISO-9001, SHA-256", "DF") == []
+    # Prose with numbers
+    assert baseline_sources._parse_markdown_dependencies("Python 3.12, porta 8080, ver nota 42", "HF") == []
+    # Prose annotation after valid item
+    assert baseline_sources._parse_markdown_dependencies("DF-11 (ver nota 1 e revisão 2)", "HF") == ["DF-11"]
+    # Non-structural text
+    assert baseline_sources._parse_markdown_dependencies("Nenhuma dependência identificada", "HF") == []
+    # Empty and dashes
+    assert baseline_sources._parse_markdown_dependencies("—", "HF") == []
+    assert baseline_sources._parse_markdown_dependencies("-", "HF") == []
+    assert baseline_sources._parse_markdown_dependencies("", "HF") == []
+

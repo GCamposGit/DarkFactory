@@ -79,6 +79,10 @@ class ServiceItem(BaseModel):
     pinned: bool = Field(default=False, description="Whether pinned in quick dock")
     is_local: bool = Field(default=False, description="Whether hosted locally (e.g. localhost)")
     launch_script: Optional[str] = Field(default=None, description="Optional relative or absolute python script to launch service if offline")
+    fallback_urls: List[str] = Field(
+        default_factory=list,
+        description="Optional additional URLs to probe when the primary URL is unavailable",
+    )
 
     @field_validator("id")
     @classmethod
@@ -89,6 +93,11 @@ class ServiceItem(BaseModel):
     @classmethod
     def check_url(cls, v: str) -> str:
         return validate_safe_url(v)
+
+    @field_validator("fallback_urls")
+    @classmethod
+    def check_fallback_urls(cls, values: List[str]) -> List[str]:
+        return [validate_safe_url(value) for value in values]
 
     @field_validator("color")
     @classmethod
@@ -109,11 +118,17 @@ class ServiceCreate(BaseModel):
     pinned: bool = Field(default=False)
     is_local: bool = Field(default=False)
     launch_script: Optional[str] = Field(default=None)
+    fallback_urls: List[str] = Field(default_factory=list)
 
     @field_validator("url")
     @classmethod
     def check_url(cls, v: str) -> str:
         return validate_safe_url(v)
+
+    @field_validator("fallback_urls")
+    @classmethod
+    def check_fallback_urls(cls, values: List[str]) -> List[str]:
+        return [validate_safe_url(value) for value in values]
 
     @field_validator("color")
     @classmethod
@@ -134,6 +149,7 @@ class ServiceUpdate(BaseModel):
     pinned: Optional[bool] = None
     is_local: Optional[bool] = None
     launch_script: Optional[str] = None
+    fallback_urls: Optional[List[str]] = None
 
     @field_validator("url")
     @classmethod
@@ -141,6 +157,13 @@ class ServiceUpdate(BaseModel):
         if v is not None:
             return validate_safe_url(v)
         return v
+
+    @field_validator("fallback_urls")
+    @classmethod
+    def check_fallback_urls(cls, values: Optional[List[str]]) -> Optional[List[str]]:
+        if values is None:
+            return values
+        return [validate_safe_url(value) for value in values]
 
     @field_validator("color")
     @classmethod
@@ -151,7 +174,7 @@ class ServiceUpdate(BaseModel):
 class ServiceLaunchResponse(BaseModel):
     service_id: str = Field(..., description="ID of the service")
     url: str = Field(..., description="Destination URL of the service")
-    status: str = Field(..., description="Status after launch attempt ('online', 'already_running', 'starting', 'failed')")
+    status: str = Field(..., description="Status after launch attempt ('online', 'already_running', 'starting', 'external', 'failed')")
     launched: bool = Field(..., description="Whether a new background process was spawned")
     message: str = Field(default="", description="Descriptive status message")
 
@@ -486,7 +509,5 @@ class UsageSyncResponse(BaseModel):
     credits_updated: int
     synced_at: str
     message: str
-
-
 
 

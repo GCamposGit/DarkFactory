@@ -50,11 +50,6 @@ models/checkpoints/
 audio_bench/*.wav
 audio_bench/output/
 
-# Canaletto is a local-only visual experiment; keep it out of shared clones.
-/canaletto_gallery/
-/run_canaletto.py
-/tests/test_canaletto.py
-
 # OS/editor files
 .DS_Store
 Thumbs.db
@@ -71,5 +66,4 @@ Thumbs.db
 
 # Recoverable worktree backups
 .factory/backups/
-
 

@@ -7,7 +7,7 @@ and generates dedicated, deeply articulated Learning Packs for each architectura
   3. Edge CUDA Audio Transcription & Stereo Separation Pipeline
   4. Autonomous Knowledge Ledger & ArXiv / GitHub Scout Engine
   5. SICA Dual-Process Metacognition & Continuous Self-Improvement Loop
-  6. Decoupled Web Hub & Canaletto SOTA Dual-Engine Art Platform
+  6. Decoupled Web Hub & Local Service Catalog
   7. Cognitive Uplift Engine & Grand Unified Architecture of DarkFac
 """
 
@@ -286,7 +286,7 @@ def build_historical_packs() -> list[SessionLearningPack]:
     packs.append(pack_4)
 
     # =========================================================================
-    # PACK 5: Decoupled Web Hub & Canaletto SOTA Dual-Engine Art Platform
+    # PACK 5: Decoupled Web Hub & Local Service Catalog
     # =========================================================================
     reachability_concept = LearningConcept(
         concept_id="hist_headless_reachability",
@@ -295,7 +295,7 @@ def build_historical_packs() -> list[SessionLearningPack]:
         mental_anchor="A modern car engine that can be controlled either by dashboard pedals or by an external diagnostic computer via the OBD-II port.",
         tiers=ExplanationTier(
             pitch_30s="We built all business logic into headless, testable services completely separated from web routers and UIs, allowing automated scripts and web browsers to access identical functionality.",
-            staff_architect="Universal Reachability standard (AGENTS.md). Domain logic lives in pure singleton classes (`HubService`, `CanalettoCatalog`). Web layers are thin FastAPI adapters with dependency injection (`Depends(get_hub_service)`), enabling 100% in-memory testing without spin-up overhead.",
+            staff_architect="Universal Reachability standard (AGENTS.md). Domain logic lives in pure service classes (`HubService`, service catalog models). Web layers are thin FastAPI adapters with dependency injection (`Depends(get_hub_service)`), enabling 100% in-memory testing without spin-up overhead.",
             under_the_hood="Pydantic v2 strict schemas, thread-safe service caching, unified playground routing to local Ollama (`localhost:11434`) or cloud OpenRouter, and glassmorphism CSS frontend.",
         ),
         trade_offs=[
@@ -317,11 +317,11 @@ def build_historical_packs() -> list[SessionLearningPack]:
     )
 
     pack_5 = SessionLearningPack(
-        pack_id="pack_hist_05_headless_hub_canaletto",
-        session_id="epic_hub_canaletto",
+        pack_id="pack_hist_05_headless_hub_services",
+        session_id="epic_hub_services",
         timestamp=now_iso,
-        title="Pillar 5: Decoupled Headless Hub & Canaletto Art Engine",
-        executive_summary="The reachability architecture of DarkHub and Canaletto Gallery: pure business logic decoupling, dual-engine local/cloud playgrounds, and glassmorphism interface engineering.",
+        title="Pillar 5: Decoupled Headless Hub & Local Services",
+        executive_summary="The reachability architecture of DarkHub and its service catalog: pure business logic decoupling, local/cloud playgrounds, and glassmorphism interface engineering.",
         concepts=[reachability_concept],
         flashcards=[
             ActiveRecallCard(
@@ -333,7 +333,7 @@ def build_historical_packs() -> list[SessionLearningPack]:
                 tags=["Architecture", "Standards", "Headless"],
             )
         ],
-        files_analyzed=["hub/backend/service.py", "hub/backend/api.py", "canaletto_gallery/backend/catalog.py", "canaletto_gallery/backend/ai_engine.py"],
+        files_analyzed=["hub/backend/service.py", "hub/backend/api.py", "hub/backend/models.py"],
         metrics={"read_time_min": 3, "concepts_count": 1, "layer": "Web & Services"},
     )
     packs.append(pack_5)
