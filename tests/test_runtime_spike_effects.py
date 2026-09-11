@@ -13,6 +13,7 @@ import pytest
 
 from spikes.runtime_choice.effect_server import EffectServer
 from spikes.runtime_choice.effect_store import (
+    EXPECTED_SCENARIO_CATALOG_SHA256,
     ApprovalSubjectConflictError,
     ApprovalSubjectNotBoundError,
     MAX_REQUEST_BYTES,
@@ -115,7 +116,16 @@ def test_observations_are_not_deduplicated_and_catalog_is_frozen(tmp_path: Path)
 
     catalog = load_scenario_catalog()
     assert [item.scenario_id for item in catalog] == [f"R{index:02d}" for index in range(1, 13)]
-    assert scenario_catalog_hash() == "daba0f9e6304c3c84ad653b0e0a2011b36b4749caf6eb5c2f69537300bd39ce8"
+    assert scenario_catalog_hash() == EXPECTED_SCENARIO_CATALOG_SHA256
+    assert EXPECTED_SCENARIO_CATALOG_SHA256 == "daba0f9e6304c3c84ad653b0e0a2011b36b4749caf6eb5c2f69537300bd39ce8"
+
+    # Mutar resultado esperado no catálogo sem reaprovação deve falhar
+    mutated_path = tmp_path / "mutated_scenarios.json"
+    raw_catalog = json.loads(Path("spikes/runtime_choice/scenarios.json").read_text(encoding="utf-8"))
+    raw_catalog[0]["expected_terminal"] = "failed"
+    mutated_path.write_text(json.dumps(raw_catalog), encoding="utf-8")
+    with pytest.raises(ValueError, match="scenario catalogue digest mismatch"):
+        load_scenario_catalog(mutated_path)
 
 
 def test_approval_requires_stable_subject_binding_and_is_scoped(tmp_path: Path) -> None:
@@ -144,9 +154,40 @@ def test_approval_requires_stable_subject_binding_and_is_scoped(tmp_path: Path) 
     replay = store.record_approval(approval)
     assert replay == valid
 
-    other_workflow = {**approval, "decision_id": "decision-2", "workflow_id": "workflow-2"}
+    # Novo ID / digest errado falha sem efeito
+    new_decision_wrong_digest = {
+        "decision_id": "decision-2",
+        "workflow_id": "workflow-1",
+        "release_digest": "release-B",
+        "choice": "approved",
+    }
+    with pytest.raises(ApprovalSubjectConflictError):
+        store.record_approval(new_decision_wrong_digest)
+
+    # Verificar que decision-2 não foi persistida e subject binding permanece intacto
+    with store._connect() as connection:
+        assert connection.execute("SELECT COUNT(*) FROM approvals WHERE decision_id = 'decision-2'").fetchone()[0] == 0
+        assert connection.execute("SELECT payload_digest FROM approval_subjects WHERE workflow_id = 'workflow-1'").fetchone()[0] == "release-A"
+
+    # Scope de outro workflow não contamina o primeiro
+    other_workflow = {**approval, "decision_id": "decision-w2-unbound", "workflow_id": "workflow-2"}
     with pytest.raises(ApprovalSubjectNotBoundError):
         store.record_approval(other_workflow)
+
+    store.bind_approval_subject("workflow-2", "release-B")
+    approval_w2 = {
+        "decision_id": "decision-w2-1",
+        "workflow_id": "workflow-2",
+        "release_digest": "release-B",
+        "choice": "approved",
+    }
+    valid_w2 = store.record_approval(approval_w2)
+    assert valid_w2.workflow_id == "workflow-2"
+    assert valid_w2.release_digest == "release-B"
+
+    # workflow-2 não aceita release-A e não afeta workflow-1
+    with pytest.raises(ApprovalSubjectConflictError):
+        store.record_approval({**approval_w2, "decision_id": "decision-w2-2", "release_digest": "release-A"})
 
 
 def test_http_approval_only_forwards_to_bound_subject(tmp_path: Path) -> None:
@@ -157,6 +198,10 @@ def test_http_approval_only_forwards_to_bound_subject(tmp_path: Path) -> None:
         "choice": "approved",
     }
     with EffectServer(tmp_path) as server:
+        # Endpoints de binding não são expostos ao candidato
+        status_bind, _ = request_json("POST", f"{server.base_url}/approval_subjects", {"workflow_id": "w1"})
+        assert status_bind == 404
+
         unbound = request_json("POST", f"{server.base_url}/approvals", approval)
         assert unbound == (409, {"error_code": "APPROVAL_SUBJECT_NOT_BOUND"})
 
@@ -172,6 +217,14 @@ def test_http_approval_only_forwards_to_bound_subject(tmp_path: Path) -> None:
         replay_status, replay = request_json("POST", f"{server.base_url}/approvals", approval)
         assert valid_status == replay_status == 201
         assert replay == valid
+
+        # Novo ID / digest errado via HTTP também falha com conflito sem efeito
+        wrong_new_id = request_json(
+            "POST",
+            f"{server.base_url}/approvals",
+            {**approval, "decision_id": "decision-http-2", "release_digest": "release-B"},
+        )
+        assert wrong_new_id == (409, {"error_code": "APPROVAL_SUBJECT_CONFLICT"})
 
         server.stop()
         server.start()

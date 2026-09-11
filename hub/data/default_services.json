@@ -193,6 +193,7 @@
     "is_favorite": true,
     "pinned": true,
     "is_local": true,
-    "launch_script": "run_canaletto.py"
+    "launch_script": "../Canaletto/run_canaletto.py",
+    "fallback_urls": ["http://127.0.0.1:8900"]
   }
 ]

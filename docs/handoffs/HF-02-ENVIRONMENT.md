@@ -3,7 +3,7 @@
 Status: `waiting_access` for PostgreSQL; local dependency/API preparation is complete.
 
 This document is the reproducible environment handoff for HF-02-01. It does not select a
-runtime and does not modify the production runtime, Hub, PostgreSQL service, or Canaletto.
+runtime and does not modify the production runtime, Hub, PostgreSQL service, or local demonstration projects.
 
 ## Frozen local environment
 

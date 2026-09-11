@@ -3,6 +3,7 @@
 from .baseline_models import (
     AssessmentDimension,
     BaselineIssue,
+    BaselineManifest,
     BaselineSnapshot,
     BaselineSourceKind,
     BaselineSourceSpec,
@@ -19,15 +20,18 @@ from .baseline_models import (
     SourceObservation,
     SourceStatus,
     ValidationMode,
+    VerificationReport,
 )
 from .baseline_sources import BaselineCatalogError, collect_sources, load_catalog
 from .baseline_reconcile import dependency_graph, reconcile_baseline, source_fingerprint
 from .baseline_probes import ProbeObservation, ProbeResponse, ProbeSpec, ProbeStatus, collect_probe_observations
+from .baseline_verify import verify_snapshot
 
 __all__ = [
     "AssessmentDimension",
     "BaselineCatalogError",
     "BaselineIssue",
+    "BaselineManifest",
     "BaselineSnapshot",
     "BaselineSourceKind",
     "BaselineSourceSpec",
@@ -44,6 +48,7 @@ __all__ = [
     "SourceObservation",
     "SourceStatus",
     "ValidationMode",
+    "VerificationReport",
     "collect_sources",
     "dependency_graph",
     "load_catalog",
@@ -54,4 +59,5 @@ __all__ = [
     "ProbeSpec",
     "ProbeStatus",
     "collect_probe_observations",
+    "verify_snapshot",
 ]

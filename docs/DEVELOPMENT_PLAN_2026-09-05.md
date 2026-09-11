@@ -29,7 +29,7 @@ Horizonte inicial: **6–8 semanas**, estimativa de planejamento para um respons
 7. Produzir patch/PR e pacote de evidência; integração segue autorização vigente e política de risco.
 8. Registrar resultado real e propor melhorias de skill apenas quando houver evidência de ganho.
 
-**Fora do escopo deste ciclo:** Canaletto; deploy de produção/billing; expansão para novos produtos de conteúdo/mídia; reescrita integral dos módulos; treinamento/fine-tuning próprio; plataforma distribuída multi-tenant; torneio de todos os provedores a cada execução. Extensões futuras exigem decisão de escopo própria.
+**Fora do escopo deste ciclo:** deploy de produção/billing; expansão para novos produtos de conteúdo/mídia; reescrita integral dos módulos; treinamento/fine-tuning próprio; plataforma distribuída multi-tenant; torneio de todos os provedores a cada execução. Extensões futuras exigem decisão de escopo própria.
 
 ## 2. Arquitetura proposta
 
@@ -117,7 +117,7 @@ Fases 2 e 3 não devem mascarar pendências P1 da fase 0. As semanas são previs
 
 Os nomes de arquivos novos e testes abaixo são **propostos**. Comandos de teste novos passam a existir ao implementar cada ticket; não foram executados nesta revisão. Cada ticket lista até quatro arquivos principais. Espelhar alteração de skill é artefato gerado obrigatório em ticket próprio quando necessário.
 
-Todos os tickets também devem cumprir os dois comandos oficiais: python core/harness/runner.py --quick e python -m pytest tests -v --ignore=tests/test_canaletto.py. Criar primeiro a reprodução do comportamento esperado e confirmar que a versão anterior falha.
+Todos os tickets também devem cumprir os dois comandos oficiais: python core/harness/runner.py --quick e python -m pytest tests -v. Criar primeiro a reprodução do comportamento esperado e confirmar que a versão anterior falha.
 
 | ID | Escopo e arquivos principais | Depende | Critério e VALIDATE_CMD proposto |
 | --- | --- | --- | --- |

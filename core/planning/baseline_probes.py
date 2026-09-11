@@ -5,33 +5,22 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-from typing import Any, Mapping, Protocol
+from typing import Any, Callable, Mapping, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from .baseline_models import ValidationMode, _aware_utc, _non_blank, utc_now
+from .baseline_models import ProbeObservation, ProbeStatus, ValidationMode, _aware_utc, _non_blank, utc_now
 
 logger = logging.getLogger(__name__)
-MAX_PROBE_BYTES = 2 * 1024 * 1024
-
-
-class ProbeStatus(str, Enum):
-    OK = "ok"
-    NOT_FOUND = "not_found"
-    UNAUTHORIZED = "unauthorized"
-    TIMEOUT = "timeout"
-    REDIRECT = "redirect"
-    RESPONSE_TOO_LARGE = "response_too_large"
-    TOO_LARGE = "response_too_large"
-    NETWORK_ERROR = "network_error"
-    HTTP_ERROR = "http_error"
-    INVALID_CONFIG = "invalid_config"
+MAX_PROBE_BYTES: int = 65_536  # 64 KiB
+MAX_PROBE_TIMEOUT_SECONDS: float = 3.0  # 3 seconds
 
 
 class ProbeSpec(BaseModel):
@@ -47,7 +36,7 @@ class ProbeSpec(BaseModel):
     expected_origin: str | None = None
     require_connection: bool = False
     secret_ref: str | None = None
-    timeout_seconds: float = Field(default=10.0, gt=0, le=60)
+    timeout_seconds: float = Field(default=MAX_PROBE_TIMEOUT_SECONDS, gt=0, le=MAX_PROBE_TIMEOUT_SECONDS)
     max_bytes: int = Field(default=MAX_PROBE_BYTES, gt=0, le=MAX_PROBE_BYTES)
 
     @field_validator("probe_id", "item_id", "environment", "secret_ref")
@@ -77,31 +66,6 @@ class ProbeSpec(BaseModel):
         if parsed.scheme not in {"http", "https"} or not parsed.netloc or parsed.path not in {"", "/"}:
             raise ValueError("expected_origin must contain only scheme and authority")
         return f"{parsed.scheme}://{parsed.netloc}"
-
-
-class ProbeObservation(BaseModel):
-    """Sanitized probe result; raw payload and authorization are never retained."""
-
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-    probe_id: str = Field(..., min_length=1)
-    item_id: str = Field(..., min_length=1)
-    origin: str = Field(..., min_length=1)
-    status: ProbeStatus
-    status_code: int | None = Field(default=None, ge=100, le=599)
-    response_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
-    response_size: int | None = Field(default=None, ge=0)
-    error_code: str | None = None
-    observed_at: datetime = Field(default_factory=utc_now)
-    environment: str = Field(..., min_length=1)
-    validation_mode: ValidationMode = ValidationMode.TARGET_ENVIRONMENT
-
-    @field_validator("probe_id", "item_id", "origin", "environment", "error_code")
-    @classmethod
-    def validate_text(cls, value: str | None) -> str | None:
-        return _non_blank(value) if value is not None else None
-
-    _validate_time = field_validator("observed_at")(_aware_utc)
 
 
 @dataclass(frozen=True)
@@ -152,14 +116,28 @@ def _observation(spec: ProbeSpec, *, status: ProbeStatus, status_code: int | Non
     )
 
 
-def probe_endpoint(spec: ProbeSpec, transport: GetTransport | None = None) -> ProbeObservation:
+def probe_endpoint(
+    spec: ProbeSpec,
+    transport: GetTransport | None = None,
+    *,
+    timer: Callable[[], float] | None = None,
+) -> ProbeObservation:
     """Perform one bounded GET and return only sanitized metadata."""
 
     if spec.expected_origin and spec.expected_origin != _origin(spec.url):
         return _observation(spec, status=ProbeStatus.INVALID_CONFIG, error_code="PROBE_ORIGIN_MISMATCH")
+
+    clock = timer or time.monotonic
+    start_time = clock()
     try:
         response = (transport or _urllib_get)(spec.url, spec.timeout_seconds, spec.max_bytes)
+        elapsed = clock() - start_time
+        if elapsed > spec.timeout_seconds:
+            return _observation(spec, status=ProbeStatus.TIMEOUT, error_code="TIMEOUT")
     except urllib.error.HTTPError as exc:
+        elapsed = clock() - start_time
+        if elapsed > spec.timeout_seconds:
+            return _observation(spec, status=ProbeStatus.TIMEOUT, error_code="TIMEOUT")
         if 300 <= exc.code < 400:
             status = ProbeStatus.REDIRECT
         elif exc.code in {401, 403}:
@@ -190,8 +168,13 @@ def probe_endpoint(spec: ProbeSpec, transport: GetTransport | None = None) -> Pr
     return _observation(spec, status=ProbeStatus.HTTP_ERROR, status_code=response.status_code, error_code=f"HTTP_{response.status_code}")
 
 
-def collect_probe_observations(specs: list[ProbeSpec] | tuple[ProbeSpec, ...], *, transport: GetTransport | None = None) -> tuple[ProbeObservation, ...]:
-    observations = [probe_endpoint(spec, transport) for spec in sorted(specs, key=lambda item: item.probe_id)]
+def collect_probe_observations(
+    specs: list[ProbeSpec] | tuple[ProbeSpec, ...],
+    *,
+    transport: GetTransport | None = None,
+    timer: Callable[[], float] | None = None,
+) -> tuple[ProbeObservation, ...]:
+    observations = [probe_endpoint(spec, transport, timer=timer) for spec in sorted(specs, key=lambda item: item.probe_id)]
     return deduplicate_observations(observations)
 
 
@@ -250,4 +233,19 @@ def load_probe_config(path: str | Any) -> tuple[ProbeSpec, ...]:
     return tuple(ProbeSpec.model_validate(item) for item in raw["probes"])
 
 
-__all__ = ["GitReceipt", "GetTransport", "ProbeObservation", "ProbeResponse", "ProbeSpec", "ProbeStatus", "collect_probe_observations", "deduplicate_git_receipts", "deduplicate_observations", "load_probe_config", "parse_git_receipt", "probe_endpoint"]
+__all__ = [
+    "MAX_PROBE_BYTES",
+    "MAX_PROBE_TIMEOUT_SECONDS",
+    "GitReceipt",
+    "GetTransport",
+    "ProbeObservation",
+    "ProbeResponse",
+    "ProbeSpec",
+    "ProbeStatus",
+    "collect_probe_observations",
+    "deduplicate_git_receipts",
+    "deduplicate_observations",
+    "load_probe_config",
+    "parse_git_receipt",
+    "probe_endpoint",
+]

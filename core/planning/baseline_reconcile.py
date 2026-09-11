@@ -6,6 +6,7 @@ import hashlib
 import json
 from collections import defaultdict
 from datetime import datetime
+from pathlib import Path
 from typing import Iterable, Sequence
 
 from .baseline_models import (
@@ -22,12 +23,13 @@ from .baseline_models import (
     HF02Readiness,
     IssueSeverity,
     PlannedItem,
+    ProbeObservation,
+    ProbeStatus,
     SourceObservation,
     SourceStatus,
     ValidationMode,
     utc_now,
 )
-from .baseline_probes import ProbeObservation, ProbeStatus
 
 
 def source_fingerprint(observations: Iterable[SourceObservation]) -> str:
@@ -45,14 +47,18 @@ def dependency_graph(items: Iterable[PlannedItem]) -> dict[str, tuple[str, ...]]
 
 def reconcile_baseline(collected: CollectedBaseline, claims: Sequence[EvidenceClaim], *, base_sha: str, snapshot_id: str, observed_at: datetime | None = None, probe_observations: Sequence[ProbeObservation] = ()) -> BaselineSnapshot:
     observations = tuple(collected.observations)
+    obs_by_id = {obs.source_id: obs for obs in observations}
+    all_probes = _dedupe_probes([*collected.probe_observations, *probe_observations])
     merged_claims = _dedupe_claims([*collected.claims, *claims])
-    items_by_id = _merge_items(collected.planned_items, merged_claims)
+    items_by_id = _merge_items(collected.planned_items, merged_claims, all_probes)
     issues = _dedupe_issues(collected.issues)
     issues.extend(_declaration_conflict_issues(collected.planned_items))
-    issues.extend(_assessment_issues(merged_claims, base_sha, probe_observations))
+    issues.extend(_claim_validation_issues(merged_claims, obs_by_id))
+    issues.extend(_assessment_issues(merged_claims, base_sha, all_probes))
+    issues.extend(_claim_conflict_issues(merged_claims, obs_by_id, base_sha))
     issues.extend(_dependency_issues(items_by_id.values()))
-    issues.extend(_probe_issues(probe_observations))
-    assessments = [_assessment_for(item, merged_claims, base_sha, probe_observations, issues) for item in sorted(items_by_id.values(), key=lambda value: value.item_id)]
+    issues.extend(_probe_issues(all_probes))
+    assessments = [_assessment_for(item, merged_claims, base_sha, all_probes, issues, obs_by_id) for item in sorted(items_by_id.values(), key=lambda value: value.item_id)]
     issues = _dedupe_issues(issues)
     readiness, readiness_issues = _hf02_readiness(observations, assessments)
     issues = _dedupe_issues([*issues, *readiness_issues])
@@ -64,7 +70,12 @@ def reconcile_baseline(collected: CollectedBaseline, claims: Sequence[EvidenceCl
     else:
         completeness = CompletenessStatus.PARTIAL
     blocker_codes = sorted({issue.code for issue in issues if issue.severity == IssueSeverity.ERROR})
-    return BaselineSnapshot(snapshot_id=snapshot_id, observed_at=observed_at or utc_now(), base_sha=base_sha.strip().lower(), source_fingerprint=source_fingerprint(observations), source_observations=list(observations), items=assessments, claims=list(merged_claims), issues=issues, completeness=completeness, hf02_readiness=readiness, blocker_codes=blocker_codes)
+    return BaselineSnapshot(snapshot_id=snapshot_id, observed_at=observed_at or utc_now(), base_sha=base_sha.strip().lower(), source_fingerprint=source_fingerprint(observations), source_observations=list(observations), items=assessments, claims=list(merged_claims), issues=issues, probe_observations=list(all_probes), completeness=completeness, hf02_readiness=readiness, blocker_codes=blocker_codes)
+
+
+def _dedupe_probes(probes: Sequence[ProbeObservation]) -> list[ProbeObservation]:
+    unique = {probe.probe_id: probe for probe in probes}
+    return [unique[key] for key in sorted(unique)]
 
 
 def _dedupe_claims(claims: Sequence[EvidenceClaim]) -> list[EvidenceClaim]:
@@ -72,13 +83,16 @@ def _dedupe_claims(claims: Sequence[EvidenceClaim]) -> list[EvidenceClaim]:
     return [unique[key] for key in sorted(unique)]
 
 
-def _merge_items(items: Sequence[PlannedItem], claims: Sequence[EvidenceClaim]) -> dict[str, PlannedItem]:
+def _merge_items(items: Sequence[PlannedItem], claims: Sequence[EvidenceClaim], probes: Sequence[ProbeObservation] = ()) -> dict[str, PlannedItem]:
     grouped: dict[str, list[PlannedItem]] = defaultdict(list)
     for item in items:
         grouped[item.item_id].append(item)
     for claim in claims:
         if claim.item_id not in grouped:
             grouped[claim.item_id].append(PlannedItem(item_id=claim.item_id, title=claim.item_id, declared_status="unknown", dependencies=[], source_id=claim.source_id, locator=claim.locator))
+    for probe in probes:
+        if probe.item_id not in grouped:
+            grouped[probe.item_id].append(PlannedItem(item_id=probe.item_id, title=probe.item_id, declared_status="unknown", dependencies=[], source_id=probe.probe_id, locator=probe.origin))
     result: dict[str, PlannedItem] = {}
     for item_id, declarations in grouped.items():
         statuses = sorted({item.declared_status for item in declarations})
@@ -107,6 +121,104 @@ def _declaration_conflict_issues(items: Sequence[PlannedItem]) -> list[BaselineI
     return [_issue("source_conflict", item_ids=[item_id], source_ids=sorted(sources[item_id]), required_action="Review the competing declarations; do not choose a winner silently.") for item_id in sorted(statuses) if len(statuses[item_id]) > 1]
 
 
+def _is_locator_matching(locator: str, relative_path: Path) -> bool:
+    raw_path = locator.split("#", 1)[0].strip()
+    if not raw_path:
+        return False
+    return Path(raw_path).as_posix() == relative_path.as_posix()
+
+
+def _is_claim_valid(claim: EvidenceClaim, obs_by_id: dict[str, SourceObservation], base_sha: str) -> bool:
+    obs = obs_by_id.get(claim.source_id)
+    if obs is None:
+        return False
+    if obs.status != SourceStatus.READ:
+        return False
+    if obs.sha256 != claim.source_hash:
+        return False
+    if not _is_locator_matching(claim.locator, obs.relative_path):
+        return False
+    if (
+        claim.dimension == ClaimDimension.INTEGRATION
+        and claim.evidence_kind == EvidenceKind.REMOTE_GIT
+        and claim.candidate_sha
+        and claim.candidate_sha.lower() != base_sha.strip().lower()
+    ):
+        return False
+    return True
+
+
+def _claim_validation_issues(claims: Sequence[EvidenceClaim], obs_by_id: dict[str, SourceObservation]) -> list[BaselineIssue]:
+    issues: list[BaselineIssue] = []
+    for claim in claims:
+        obs = obs_by_id.get(claim.source_id)
+        if obs is None:
+            issues.append(
+                _issue(
+                    "claim_source_missing",
+                    item_ids=[claim.item_id],
+                    source_ids=[claim.source_id],
+                    required_action="Ensure the claim references an authorized, catalogued source observation.",
+                )
+            )
+        else:
+            if obs.status != SourceStatus.READ:
+                issues.append(
+                    _issue(
+                        "claim_source_unreadable",
+                        item_ids=[claim.item_id],
+                        source_ids=[claim.source_id],
+                        required_action=f"Source observation is '{obs.status.value}'; ensure it is readable before relying on its claims.",
+                    )
+                )
+            if obs.sha256 != claim.source_hash:
+                issues.append(
+                    _issue(
+                        "stale_evidence",
+                        item_ids=[claim.item_id],
+                        source_ids=[claim.source_id],
+                        required_action="Collect fresh evidence; the observed source hash does not match the claim source hash.",
+                    )
+                )
+            if not _is_locator_matching(claim.locator, obs.relative_path):
+                issues.append(
+                    _issue(
+                        "claim_locator_invalid",
+                        item_ids=[claim.item_id],
+                        source_ids=[claim.source_id],
+                        required_action="Align the claim locator with the source observation relative path.",
+                    )
+                )
+    return issues
+
+
+def _claim_conflict_issues(
+    claims: Sequence[EvidenceClaim],
+    obs_by_id: dict[str, SourceObservation],
+    base_sha: str,
+) -> list[BaselineIssue]:
+    issues: list[BaselineIssue] = []
+    grouped: dict[tuple[str, ClaimDimension, str], list[EvidenceClaim]] = defaultdict(list)
+    for claim in claims:
+        if _is_claim_valid(claim, obs_by_id, base_sha):
+            grouped[(claim.item_id, claim.dimension, claim.scope)].append(claim)
+
+    for (item_id, dimension, scope), group in sorted(grouped.items(), key=lambda x: (x[0][0], x[0][1].value, x[0][2])):
+        has_pos = any(c.assertion == ClaimAssertion.POSITIVE for c in group)
+        has_neg = any(c.assertion == ClaimAssertion.NEGATIVE for c in group)
+        if has_pos and has_neg:
+            source_ids = sorted({c.source_id for c in group})
+            issues.append(
+                _issue(
+                    "claim_conflict",
+                    item_ids=[item_id],
+                    source_ids=source_ids,
+                    required_action=f"Resolve contradicting positive and negative evidence claims in scope '{scope}'.",
+                )
+            )
+    return issues
+
+
 def _assessment_issues(claims: Sequence[EvidenceClaim], base_sha: str, probes: Sequence[ProbeObservation]) -> list[BaselineIssue]:
     issues: list[BaselineIssue] = []
     for claim in claims:
@@ -133,26 +245,63 @@ def _probe_issues(probes: Sequence[ProbeObservation]) -> list[BaselineIssue]:
     return issues
 
 
-def _assessment_for(item: PlannedItem, claims: Sequence[EvidenceClaim], base_sha: str, probes: Sequence[ProbeObservation], issues: Sequence[BaselineIssue]) -> CapabilityAssessment:
+def _assessment_for(
+    item: PlannedItem,
+    claims: Sequence[EvidenceClaim],
+    base_sha: str,
+    probes: Sequence[ProbeObservation],
+    issues: Sequence[BaselineIssue],
+    obs_by_id: dict[str, SourceObservation],
+) -> CapabilityAssessment:
     item_claims = [claim for claim in claims if claim.item_id == item.item_id]
     values: dict[ClaimDimension, AssessmentDimension] = {}
     for dimension in ClaimDimension:
         dimension_claims = [claim for claim in item_claims if claim.dimension == dimension]
-        usable = [claim for claim in dimension_claims if not (dimension == ClaimDimension.INTEGRATION and claim.evidence_kind == EvidenceKind.REMOTE_GIT and claim.candidate_sha and claim.candidate_sha.lower() != base_sha.strip().lower())]
-        if any(claim.assertion == ClaimAssertion.PARTIAL for claim in usable):
-            values[dimension] = AssessmentDimension.PARTIAL
-        elif any(claim.assertion == ClaimAssertion.POSITIVE for claim in usable):
-            if dimension == ClaimDimension.INTEGRATION and any(claim.evidence_kind == EvidenceKind.REMOTE_GIT and claim.candidate_sha for claim in usable):
-                values[dimension] = AssessmentDimension.VERIFIED
-            elif dimension == ClaimDimension.OPERATION and any(claim.validation_mode == ValidationMode.TARGET_ENVIRONMENT for claim in usable):
-                values[dimension] = AssessmentDimension.VERIFIED
-            else:
-                values[dimension] = AssessmentDimension.REPORTED
+        usable = [claim for claim in dimension_claims if _is_claim_valid(claim, obs_by_id, base_sha)]
+
+        scope_groups: dict[str, list[EvidenceClaim]] = defaultdict(list)
+        for claim in usable:
+            scope_groups[claim.scope].append(claim)
+
+        has_same_scope_conflict = any(
+            any(c.assertion == ClaimAssertion.POSITIVE for c in group)
+            and any(c.assertion == ClaimAssertion.NEGATIVE for c in group)
+            for group in scope_groups.values()
+        )
+
+        if has_same_scope_conflict:
+            values[dimension] = AssessmentDimension.CONTRADICTED
         else:
-            values[dimension] = AssessmentDimension.UNKNOWN
-    if any(probe.item_id == item.item_id and probe.status == ProbeStatus.OK for probe in probes):
-        values[ClaimDimension.OPERATION] = AssessmentDimension.VERIFIED
-    return CapabilityAssessment(item_id=item.item_id, title=item.title, declared_status=item.declared_status, implementation=values[ClaimDimension.IMPLEMENTATION], integration=values[ClaimDimension.INTEGRATION], operation=values[ClaimDimension.OPERATION], evidence_ids=sorted(claim.claim_id for claim in item_claims), issue_ids=sorted(issue.issue_id for issue in issues if item.item_id in issue.item_ids), dependencies=sorted(item.dependencies))
+            has_pos = any(c.assertion == ClaimAssertion.POSITIVE for c in usable)
+            has_neg = any(c.assertion == ClaimAssertion.NEGATIVE for c in usable)
+            has_partial = any(c.assertion == ClaimAssertion.PARTIAL for c in usable)
+
+            if has_partial or (has_pos and has_neg):
+                values[dimension] = AssessmentDimension.PARTIAL
+            elif has_pos:
+                values[dimension] = AssessmentDimension.REPORTED
+            else:
+                values[dimension] = AssessmentDimension.UNKNOWN
+
+    item_probes = [probe for probe in probes if probe.item_id == item.item_id]
+    if any(probe.status == ProbeStatus.OK for probe in item_probes):
+        if values[ClaimDimension.OPERATION] == AssessmentDimension.UNKNOWN:
+            values[ClaimDimension.OPERATION] = AssessmentDimension.REPORTED
+
+    evidence_ids = sorted(set([claim.claim_id for claim in item_claims] + [probe.probe_id for probe in item_probes]))
+    issue_ids = sorted(issue.issue_id for issue in issues if item.item_id in issue.item_ids)
+
+    return CapabilityAssessment(
+        item_id=item.item_id,
+        title=item.title,
+        declared_status=item.declared_status,
+        implementation=values[ClaimDimension.IMPLEMENTATION],
+        integration=values[ClaimDimension.INTEGRATION],
+        operation=values[ClaimDimension.OPERATION],
+        evidence_ids=evidence_ids,
+        issue_ids=issue_ids,
+        dependencies=sorted(item.dependencies),
+    )
 
 
 def _dependency_issues(items: Iterable[PlannedItem]) -> list[BaselineIssue]:

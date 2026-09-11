@@ -121,8 +121,46 @@ class HF02Readiness(str, Enum):
     BLOCKED = "blocked"
 
 
+class ProbeStatus(str, Enum):
+    OK = "ok"
+    NOT_FOUND = "not_found"
+    UNAUTHORIZED = "unauthorized"
+    TIMEOUT = "timeout"
+    REDIRECT = "redirect"
+    RESPONSE_TOO_LARGE = "response_too_large"
+    TOO_LARGE = "response_too_large"
+    NETWORK_ERROR = "network_error"
+    HTTP_ERROR = "http_error"
+    INVALID_CONFIG = "invalid_config"
+
+
 class _StrictModel(BaseModel):
     model_config = ConfigDict(extra="forbid")
+
+
+class ProbeObservation(BaseModel):
+    """Sanitized probe result; raw payload and authorization are never retained."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    probe_id: str = Field(..., min_length=1)
+    item_id: str = Field(..., min_length=1)
+    origin: str = Field(..., min_length=1)
+    status: ProbeStatus
+    status_code: int | None = Field(default=None, ge=100, le=599)
+    response_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    response_size: int | None = Field(default=None, ge=0)
+    error_code: str | None = None
+    observed_at: datetime = Field(default_factory=utc_now)
+    environment: str = Field(..., min_length=1)
+    validation_mode: ValidationMode = ValidationMode.TARGET_ENVIRONMENT
+
+    @field_validator("probe_id", "item_id", "origin", "environment", "error_code")
+    @classmethod
+    def validate_text(cls, value: str | None) -> str | None:
+        return _non_blank(value) if value is not None else None
+
+    _validate_time = field_validator("observed_at")(_aware_utc)
 
 
 class BaselineSourceSpec(_StrictModel):
@@ -141,7 +179,7 @@ class BaselineSourceSpec(_StrictModel):
     def validate_non_blank_text(cls, value: str | None) -> str | None:
         return _non_blank(value) if value is not None else None
 
-    @field_validator("relative_path", mode="before")
+    @field_validator("relative_path")
     @classmethod
     def validate_relative_path(cls, value: Path | str) -> Path:
         return _relative_path(value)
@@ -203,7 +241,7 @@ class SourceObservation(_StrictModel):
     def validate_source_id(cls, value: str) -> str:
         return _non_blank(value)
 
-    @field_validator("relative_path", mode="before")
+    @field_validator("relative_path")
     @classmethod
     def validate_observation_path(cls, value: Path | str) -> Path:
         return _relative_path(value)
@@ -282,6 +320,7 @@ class CollectedBaseline(_StrictModel):
     planned_items: list[PlannedItem] = Field(default_factory=list)
     claims: list[EvidenceClaim] = Field(default_factory=list)
     issues: list[BaselineIssue] = Field(default_factory=list)
+    probe_observations: list[ProbeObservation] = Field(default_factory=list)
 
 
 class BaselineSnapshot(_StrictModel):
@@ -294,8 +333,53 @@ class BaselineSnapshot(_StrictModel):
     items: list[CapabilityAssessment] = Field(default_factory=list)
     claims: list[EvidenceClaim] = Field(default_factory=list)
     issues: list[BaselineIssue] = Field(default_factory=list)
+    probe_observations: list[ProbeObservation] = Field(default_factory=list)
     completeness: CompletenessStatus
     hf02_readiness: HF02Readiness
     blocker_codes: list[str] = Field(default_factory=list)
 
     _validate_time = field_validator("observed_at")(_aware_utc)
+
+
+class BaselineManifest(_StrictModel):
+    schema_version: str = Field(default="1", pattern=r"^1$")
+    policy_version: str = Field(default="1", min_length=1)
+    snapshot_id: str = Field(..., min_length=1)
+    base_sha: str = Field(..., pattern=r"^(?:[0-9a-fA-F]{40}|[0-9a-fA-F]{64})$")
+    source_fingerprint: str = Field(..., min_length=1)
+    catalog_relative_path: Path
+    catalog_sha256: str = Field(..., pattern=r"^[0-9a-f]{64}$")
+    claims_relative_path: Path
+    claims_sha256: str = Field(..., pattern=r"^[0-9a-f]{64}$")
+    probe_config_relative_path: Path | None = None
+    probe_config_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    source_relative_paths: list[Path] = Field(default_factory=list)
+    created_at: datetime = Field(default_factory=utc_now)
+
+    @field_validator("catalog_relative_path", "claims_relative_path")
+    @classmethod
+    def validate_mandatory_rel_path(cls, value: Path | str) -> Path:
+        return _relative_path(value)
+
+    @field_validator("probe_config_relative_path")
+    @classmethod
+    def validate_optional_rel_path(cls, value: Path | str | None) -> Path | None:
+        return _relative_path(value) if value is not None else None
+
+    @field_validator("source_relative_paths")
+    @classmethod
+    def validate_source_paths(cls, value: list[Path | str]) -> list[Path]:
+        return [_relative_path(p) for p in value]
+
+    _validate_time = field_validator("created_at")(_aware_utc)
+
+
+class VerificationReport(_StrictModel):
+    valid: bool
+    snapshot_id: str
+    error_type: str | None = None
+    errors: list[str] = Field(default_factory=list)
+    replayed: bool = False
+    exit_code: int = 0
+    source_count: int = 0
+    item_count: int = 0

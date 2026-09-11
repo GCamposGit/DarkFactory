@@ -23,7 +23,7 @@ from uuid import uuid4
 from pydantic import ValidationError
 
 from core.orchestrator.runtime import OrchestratorRuntime, RuntimeContext
-from core.orchestrator.store import RunStatus
+from core.orchestrator.store import OrchestratorStore, RunStatus, StoreError
 from spikes.runtime_choice.contracts import (
     AdapterCapabilities,
     DriverAction,
@@ -112,16 +112,17 @@ class NativeAdapter:
             raise ValueError("NativeAdapter requires runtime=native_sqlite")
         self.config = config
         self.native_root = config.root_dir / "native"
-        self.native_root.mkdir(parents=True, exist_ok=True)
-        self.database_path = self.native_root / "orchestrator.sqlite3"
-        from core.orchestrator.store import OrchestratorStore
-
-        self.store = OrchestratorStore(self.database_path, timeout_seconds=30.0)
-        self.runtime = OrchestratorRuntime(
-            self.store,
-            owner=f"native-{os.getpid()}-{uuid4().hex[:8]}",
-            lease_seconds=config.lease_seconds,
-        )
+        try:
+            self.native_root.mkdir(parents=True, exist_ok=True)
+            self.database_path = self.native_root / "orchestrator.sqlite3"
+            self.store = OrchestratorStore(self.database_path, timeout_seconds=30.0)
+            self.runtime = OrchestratorRuntime(
+                self.store,
+                owner=f"native-{os.getpid()}-{uuid4().hex[:8]}",
+                lease_seconds=config.lease_seconds,
+            )
+        except (OSError, sqlite3.Error, StoreError) as error:
+            raise NativeAdapterError("STORE_UNAVAILABLE") from error
         self.effects = EffectClient(config.effect_base_url)
         self._events: queue.Queue[DriverEvent] = queue.Queue()
         self._threads: dict[str, threading.Thread] = {}
@@ -208,8 +209,18 @@ class NativeAdapter:
             current = self._threads.get(command.workflow_id)
             if current is not None and current.is_alive():
                 return [self._unsupported(command.workflow_id, capability="deduplicated_intake")]
-            if self._latest_is_duplicate(command.workflow_id):
-                return [self._unsupported(command.workflow_id, capability="deduplicated_intake")]
+            try:
+                if self._latest_is_duplicate(command.workflow_id):
+                    return [self._unsupported(command.workflow_id, capability="deduplicated_intake")]
+            except (sqlite3.Error, OSError, StoreError):
+                return [
+                    self._event(
+                        command.workflow_id,
+                        DriverEventKind.ERROR,
+                        RuntimeStatus.ERROR,
+                        code="STORE_UNAVAILABLE",
+                    )
+                ]
             started = self._event(
                 command.workflow_id,
                 DriverEventKind.STARTED,
@@ -263,6 +274,8 @@ class NativeAdapter:
             self._emit(self._event(workflow_id, DriverEventKind.COMPLETED, status))
         except NativeAdapterError as error:
             self._emit(self._event(workflow_id, DriverEventKind.ERROR, RuntimeStatus.ERROR, code=error.code))
+        except (sqlite3.Error, OSError, StoreError):
+            self._emit(self._event(workflow_id, DriverEventKind.ERROR, RuntimeStatus.ERROR, code="STORE_UNAVAILABLE"))
         except Exception:
             self._emit(self._event(workflow_id, DriverEventKind.ERROR, RuntimeStatus.ERROR, code="NATIVE_RUNTIME_ERROR"))
         finally:
@@ -273,7 +286,7 @@ class NativeAdapter:
         assert command.workflow_id is not None
         try:
             record = self.store.get_latest_run(command.workflow_id)
-        except sqlite3.Error:
+        except (sqlite3.Error, OSError, StoreError):
             return [
                 self._event(
                     command.workflow_id,

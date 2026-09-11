@@ -1,11 +1,23 @@
 """Focused tests for the opt-in read-only HF-01 probes."""
 
 from datetime import timezone
+import hashlib
+import urllib.error
 
 import pytest
 from pydantic import ValidationError
 
-from core.planning.baseline_probes import ProbeResponse, ProbeSpec, ProbeStatus, deduplicate_git_receipts, deduplicate_observations, parse_git_receipt, probe_endpoint
+from core.planning.baseline_probes import (
+    MAX_PROBE_BYTES,
+    MAX_PROBE_TIMEOUT_SECONDS,
+    ProbeResponse,
+    ProbeSpec,
+    ProbeStatus,
+    deduplicate_git_receipts,
+    deduplicate_observations,
+    parse_git_receipt,
+    probe_endpoint,
+)
 
 
 def spec(**overrides: object) -> ProbeSpec:
@@ -54,3 +66,119 @@ def test_git_receipt_parser_keeps_only_sanitized_metadata() -> None:
     assert receipt.head_sha == "a" * 40
     assert "do-not-copy" not in receipt.model_dump_json()
     assert len(deduplicate_git_receipts([receipt, receipt])) == 1
+
+
+def test_cr13_spec_rejects_timeout_above_3_seconds() -> None:
+    with pytest.raises(ValidationError):
+        spec(timeout_seconds=3.001)
+    with pytest.raises(ValidationError):
+        spec(timeout_seconds=5.0)
+    with pytest.raises(ValidationError):
+        spec(timeout_seconds=10.0)
+    with pytest.raises(ValidationError):
+        spec(timeout_seconds=0)
+    with pytest.raises(ValidationError):
+        spec(timeout_seconds=-1.0)
+    s = spec(timeout_seconds=3.0)
+    assert s.timeout_seconds == 3.0
+    default_s = spec()
+    assert default_s.timeout_seconds == 3.0
+    assert MAX_PROBE_TIMEOUT_SECONDS == 3.0
+
+
+def test_cr13_spec_rejects_max_bytes_above_65536() -> None:
+    with pytest.raises(ValidationError):
+        spec(max_bytes=65537)
+    with pytest.raises(ValidationError):
+        spec(max_bytes=100000)
+    with pytest.raises(ValidationError):
+        spec(max_bytes=0)
+    with pytest.raises(ValidationError):
+        spec(max_bytes=-1)
+    s = spec(max_bytes=65536)
+    assert s.max_bytes == 65536
+    default_s = spec()
+    assert default_s.max_bytes == 65536
+    assert MAX_PROBE_BYTES == 65536
+
+
+def test_cr13_payload_boundary_exact_65536_accepted() -> None:
+    payload = b"A" * 65536
+    observation = probe_endpoint(spec(), lambda url, timeout, max_bytes: ProbeResponse(200, payload))
+    assert observation.status == ProbeStatus.OK
+    assert observation.status_code == 200
+    assert observation.response_size == 65536
+    assert observation.response_sha256 == hashlib.sha256(payload).hexdigest()
+
+
+def test_cr13_payload_boundary_65537_rejected_without_body_leak() -> None:
+    sensitive_marker = b"SENSITIVE_SECRET_TOKEN_XYZ_123"
+    payload = b"B" * (65537 - len(sensitive_marker)) + sensitive_marker
+    assert len(payload) == 65537
+    observation = probe_endpoint(spec(), lambda url, timeout, max_bytes: ProbeResponse(200, payload))
+    assert observation.status == ProbeStatus.RESPONSE_TOO_LARGE
+    assert observation.error_code == "PROBE_RESPONSE_TOO_LARGE"
+    assert observation.response_sha256 is None
+    assert observation.response_size is None
+    dumped = observation.model_dump_json()
+    assert "SENSITIVE_SECRET_TOKEN" not in dumped
+
+
+def test_cr13_controlled_clock_exact_deadline_and_exceeded() -> None:
+    # Prazo exato: elapsed == 3.0 -> OK
+    times = [0.0, 3.0]
+    clock = lambda: times.pop(0) if times else 3.0
+    exact_obs = probe_endpoint(
+        spec(),
+        lambda url, timeout, max_bytes: ProbeResponse(200, b"ok"),
+        timer=clock,
+    )
+    assert exact_obs.status == ProbeStatus.OK
+
+    # Prazo excedido: elapsed == 3.001 -> TIMEOUT
+    times_over = [0.0, 3.001]
+    clock_over = lambda: times_over.pop(0) if times_over else 3.001
+    exceeded_obs = probe_endpoint(
+        spec(),
+        lambda url, timeout, max_bytes: ProbeResponse(200, b"ok"),
+        timer=clock_over,
+    )
+    assert exceeded_obs.status == ProbeStatus.TIMEOUT
+    assert exceeded_obs.error_code == "TIMEOUT"
+
+    # Prazo excedido com falha HTTP tardia: elapsed > 3.0 -> TIMEOUT
+    times_late_err = [0.0, 3.1]
+    clock_late_err = lambda: times_late_err.pop(0) if times_late_err else 3.1
+    late_err_obs = probe_endpoint(
+        spec(),
+        lambda url, timeout, max_bytes: (_ for _ in ()).throw(
+            urllib.error.HTTPError("https://hub.example.test/health", 500, "Server Error", {}, None)
+        ),
+        timer=clock_late_err,
+    )
+    assert late_err_obs.status == ProbeStatus.TIMEOUT
+    assert late_err_obs.error_code == "TIMEOUT"
+
+
+def test_cr13_transport_failure_structured_without_sensitive_leak() -> None:
+    # Connection refused
+    conn_refused = probe_endpoint(
+        spec(),
+        lambda url, timeout, max_bytes: (_ for _ in ()).throw(
+            ConnectionRefusedError("Connection refused to internal secret-host:8080")
+        ),
+    )
+    assert conn_refused.status == ProbeStatus.NETWORK_ERROR
+    assert conn_refused.error_code == "PROBE_TRANSPORT_ERROR"
+    assert "secret-host" not in conn_refused.model_dump_json()
+
+    # URLError without timeout
+    url_err = probe_endpoint(
+        spec(),
+        lambda url, timeout, max_bytes: (_ for _ in ()).throw(
+            urllib.error.URLError("getaddrinfo failed for private-db.internal")
+        ),
+    )
+    assert url_err.status == ProbeStatus.NETWORK_ERROR
+    assert "private-db" not in url_err.model_dump_json()
+

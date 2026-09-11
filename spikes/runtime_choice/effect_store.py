@@ -455,10 +455,26 @@ class NativeEffectStore:
             connection.commit()
 
 
-def load_scenario_catalog(path: Path | str = CATALOG_PATH) -> list[ScenarioSpec]:
-    """Load the frozen catalogue and reject duplicate or missing IDs."""
+EXPECTED_SCENARIO_CATALOG_SHA256 = "daba0f9e6304c3c84ad653b0e0a2011b36b4749caf6eb5c2f69537300bd39ce8"
+
+
+def load_scenario_catalog(
+    path: Path | str = CATALOG_PATH,
+    *,
+    expected_digest: str | None = EXPECTED_SCENARIO_CATALOG_SHA256,
+) -> list[ScenarioSpec]:
+    """Load the frozen catalogue and reject duplicate or missing IDs.
+
+    Verifies the exact SHA-256 digest against the approved hash to prevent
+    unauthorized mutations of expected scenario outcomes.
+    """
 
     catalog_path = Path(path)
+    actual_hash = hashlib.sha256(catalog_path.read_bytes()).hexdigest()
+    if expected_digest is not None and actual_hash != expected_digest:
+        raise ValueError(
+            f"scenario catalogue digest mismatch: expected {expected_digest}, got {actual_hash}"
+        )
     raw = json.loads(catalog_path.read_text(encoding="utf-8"))
     if not isinstance(raw, list):
         raise ValueError("scenario catalogue must be a JSON array")
@@ -486,6 +502,7 @@ __all__ = [
     "EffectReceipt",
     "EffectRequest",
     "EffectStoreError",
+    "EXPECTED_SCENARIO_CATALOG_SHA256",
     "MAX_REQUEST_BYTES",
     "NativeEffectStore",
     "ObservationRecord",

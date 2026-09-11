@@ -27,7 +27,7 @@ Este arquivo registra as fontes humanas do roadmap aprovado para o painel do Dar
 - Cada item aponta para a fonte que o produziu.
 - Datas ausentes continuam ausentes; horizonte não é data.
 - Conflitos, ciclos causais, órfãos e conclusões sem evidência são avisos do snapshot.
-- O projeto `darkfac` é o núcleo compartilhado. O experimento local Canaletto não é uma fonte nem um projeto do painel.
+- O projeto `darkfac` é o núcleo compartilhado. Projetos locais de demonstração não são fontes nem projetos do painel.
 - O MVP termina em RM-06. RM-07 completa a experiência visual; RM-08 trata atualização incremental, telemetria e escala; RM-09 é evolução.
 - O histórico RM-09 é uma retenção local, limitada e somente leitura durante a vida do serviço; persistência durável e sincronização remota permanecem fora deste incremento.
 

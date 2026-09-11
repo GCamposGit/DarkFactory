@@ -19,8 +19,35 @@ def observation(source_id: str, status: SourceStatus = SourceStatus.READ, sha256
     return SourceObservation(source_id=source_id, relative_path=Path(f"{source_id}.md"), sha256=sha256, status=status, observed_at=NOW, error_code=error_code)
 
 
-def claim(claim_id: str, item_id: str, dimension: ClaimDimension, assertion: ClaimAssertion, *, evidence_kind: EvidenceKind = EvidenceKind.DOCUMENT, candidate_sha: str | None = None, summary: str = "fixture evidence", validation_mode: ValidationMode = ValidationMode.DOCUMENTARY) -> EvidenceClaim:
-    return EvidenceClaim(claim_id=claim_id, item_id=item_id, dimension=dimension, assertion=assertion, evidence_kind=evidence_kind, source_id="fixture", locator="fixture.md#evidence", source_hash=HASH, candidate_sha=candidate_sha, scope="fixture", summary=summary, validation_mode=validation_mode)
+def claim(
+    claim_id: str,
+    item_id: str,
+    dimension: ClaimDimension,
+    assertion: ClaimAssertion,
+    *,
+    evidence_kind: EvidenceKind = EvidenceKind.DOCUMENT,
+    source_id: str = "fixture",
+    locator: str = "fixture.md#evidence",
+    source_hash: str = HASH,
+    candidate_sha: str | None = None,
+    scope: str = "fixture",
+    summary: str = "fixture evidence",
+    validation_mode: ValidationMode = ValidationMode.DOCUMENTARY,
+) -> EvidenceClaim:
+    return EvidenceClaim(
+        claim_id=claim_id,
+        item_id=item_id,
+        dimension=dimension,
+        assertion=assertion,
+        evidence_kind=evidence_kind,
+        source_id=source_id,
+        locator=locator,
+        source_hash=source_hash,
+        candidate_sha=candidate_sha,
+        scope=scope,
+        summary=summary,
+        validation_mode=validation_mode,
+    )
 
 
 def reconcile(items: list[PlannedItem], claims: list[EvidenceClaim] | None = None, observations: list[SourceObservation] | None = None, probes: tuple[ProbeObservation, ...] = ()):
@@ -96,3 +123,73 @@ def test_dependency_graph_is_stable_and_flags_missing_and_cycles() -> None:
     assert dependency_graph(entries) == {"A": ("B",), "B": ("A",), "C": ("MISSING",)}
     codes = {issue.code for issue in reconcile(entries).issues}
     assert {"dependency_cycle", "dependency_unknown"} <= codes
+
+
+def test_unattested_remote_git_claim_remains_reported_never_verified() -> None:
+    base_sha = "b" * 40
+    remote_claim = claim(
+        "remote-1",
+        "DF-11",
+        ClaimDimension.INTEGRATION,
+        ClaimAssertion.POSITIVE,
+        evidence_kind=EvidenceKind.REMOTE_GIT,
+        candidate_sha=base_sha,
+    )
+    result = reconcile([item("DF-11")], [remote_claim])
+    assert result.items[0].integration.value == "reported"
+    assert result.items[0].integration.value != "verified"
+
+
+def test_simulation_probe_remains_reported_and_is_retained_in_snapshot() -> None:
+    probe = ProbeObservation(
+        probe_id="mock-probe",
+        item_id="DF-11",
+        origin="http://fixture.invalid",
+        status=ProbeStatus.OK,
+        status_code=200,
+        environment="unit-test",
+        validation_mode=ValidationMode.SIMULATION,
+    )
+    result = reconcile([item("DF-11")], probes=(probe,))
+    assert result.items[0].operation.value == "reported"
+    assert result.items[0].operation.value != "verified"
+    assert "mock-probe" in result.items[0].evidence_ids
+    assert len(result.probe_observations) == 1
+    assert result.probe_observations[0].probe_id == "mock-probe"
+    assert "unit-test" in result.model_dump_json()
+
+
+def test_positive_and_negative_claims_in_same_scope_yield_contradicted_and_issue() -> None:
+    pos = claim("c-pos", "DF-11", ClaimDimension.IMPLEMENTATION, ClaimAssertion.POSITIVE, scope="same-scope")
+    neg = claim("c-neg", "DF-11", ClaimDimension.IMPLEMENTATION, ClaimAssertion.NEGATIVE, scope="same-scope")
+    result = reconcile([item("DF-11")], [pos, neg])
+    assert result.items[0].implementation.value == "contradicted"
+    issue_codes = {issue.code for issue in result.issues}
+    assert "claim_conflict" in issue_codes
+
+
+def test_positive_and_negative_claims_in_distinct_scopes_yield_partial_without_conflict() -> None:
+    pos = claim("c-pos", "DF-11", ClaimDimension.IMPLEMENTATION, ClaimAssertion.POSITIVE, scope="scope-declared")
+    neg = claim("c-neg", "DF-11", ClaimDimension.IMPLEMENTATION, ClaimAssertion.NEGATIVE, scope="scope-observed")
+    result = reconcile([item("DF-11")], [pos, neg])
+    assert result.items[0].implementation.value == "partial"
+    issue_codes = {issue.code for issue in result.issues}
+    assert "claim_conflict" not in issue_codes
+
+
+def test_claim_with_mismatched_source_hash_or_missing_source_fails_positive_use() -> None:
+    stale = claim("c-stale", "DF-11", ClaimDimension.IMPLEMENTATION, ClaimAssertion.POSITIVE, source_hash="f" * 64)
+    missing = claim("c-missing", "DF-11", ClaimDimension.IMPLEMENTATION, ClaimAssertion.POSITIVE, source_id="absent")
+    bad_locator = claim("c-bad-loc", "DF-11", ClaimDimension.IMPLEMENTATION, ClaimAssertion.POSITIVE, locator="wrong.md#claim")
+
+    result_stale = reconcile([item("DF-11")], [stale])
+    assert result_stale.items[0].implementation.value == "unknown"
+    assert "stale_evidence" in {i.code for i in result_stale.issues}
+
+    result_missing = reconcile([item("DF-11")], [missing])
+    assert result_missing.items[0].implementation.value == "unknown"
+    assert "claim_source_missing" in {i.code for i in result_missing.issues}
+
+    result_loc = reconcile([item("DF-11")], [bad_locator])
+    assert result_loc.items[0].implementation.value == "unknown"
+    assert "claim_locator_invalid" in {i.code for i in result_loc.issues}

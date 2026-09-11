@@ -1,0 +1,22 @@
+{
+  "schema_version": "1",
+  "question": "Official Pydantic semantics supporting review of local JSON/contract failures",
+  "sources": [
+    {
+      "canonical_url": "https://docs.pydantic.dev/latest/concepts/strict_mode/",
+      "title": "Strict Mode",
+      "organization": "Pydantic",
+      "consulted_at": "2026-09-09",
+      "insight": "Strict validation depends on input mode and field type; test the actual Python and JSON paths."
+    },
+    {
+      "canonical_url": "https://docs.pydantic.dev/latest/concepts/models/",
+      "title": "Models",
+      "organization": "Pydantic",
+      "consulted_at": "2026-09-09",
+      "insight": "Data validation, construction and copying are different operations; define and test the trust boundary."
+    }
+  ],
+  "revalidate": "On changes of installed Pydantic version or public transport contracts",
+  "limits": "Documentation supports language/library interpretation; observed bugs are established by local reproductions, not by source authority alone."
+}

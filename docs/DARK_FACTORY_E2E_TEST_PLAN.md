@@ -25,7 +25,7 @@ The test product is **Echo Garden**, a dependency-free six-turn puzzle. Each mov
 
 ## Non-goals
 
-- No changes to Canaletto or its local-only tests.
+- Local demonstration projects and their tests are outside this plan.
 - No game engine dependency, package manager, database, production deploy, or user account.
 - No execution of arbitrary model-generated source code.
 - No claim that a simulated race is a live model invocation.
@@ -36,7 +36,7 @@ The test product is **Echo Garden**, a dependency-free six-turn puzzle. Each mov
 
 | Gate | Workflow | Driver | Pass condition |
 | --- | --- | --- | --- |
-| G0 | Governance and clean scope | git/library | Protected files unchanged; Canaletto untouched |
+| G0 | Governance and clean scope | git/library | Protected files unchanged; local demonstrations remain outside the candidate |
 | G1 | Prime + daily benchmark | CLI | Current ledger loaded once; at least one routed model per tier |
 | G2 | Research + code scout | CLI/files | Both ledgers persist; canonical research has sources; scout records permissive repositories |
 | G3 | Game domain | library | Deterministic replay, invariants, win/loss, invalid move and turn-budget tests pass |
@@ -68,7 +68,7 @@ Every live result records requested model, returned model, provider, latency, to
 
 ```powershell
 python core/harness/runner.py --quick
-python -m pytest tests -v --ignore=tests/test_canaletto.py
+python -m pytest tests -v
 python core/harness/runner.py --config harness.live.config.json
 python -m core.learning.cli benchmark
 python core/orchestrator/guard.py HEAD

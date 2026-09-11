@@ -45,11 +45,11 @@ def build_adapter(config: LabConfig):
     """Select an adapter lazily so common imports never load DBOS."""
 
     if config.runtime is RuntimeKind.NATIVE_SQLITE:
-        from spikes.runtime_choice.native_adapter import NativeAdapter
+        from spikes.runtime_choice.native_adapter import NativeAdapter, NativeAdapterError
 
         try:
             return NativeAdapter(config)
-        except (OSError, sqlite3.Error) as error:
+        except (OSError, sqlite3.Error, NativeAdapterError) as error:
             raise DriverConfigurationError("STORE_UNAVAILABLE") from error
     if config.runtime is RuntimeKind.DBOS_POSTGRES:
         try:
@@ -70,10 +70,10 @@ class DriverSession:
         return self.adapter.dispatch(command)
 
 
-def _protocol_error(code: str) -> DriverEvent:
+def _protocol_error(code: str, workflow_id: str = "driver-error") -> DriverEvent:
     return DriverEvent(
         event_id="event-driver-error",
-        workflow_id="driver-error",
+        workflow_id=workflow_id,
         kind=DriverEventKind.ERROR,
         runtime_status=RuntimeStatus.ERROR,
         code=code,
@@ -116,6 +116,15 @@ def run_jsonl(config: LabConfig, input_stream: TextIO, output_stream: TextIO) ->
                 exit_code = 2
                 write(_protocol_error(error.code))
                 continue
+            except Exception as error:
+                from spikes.runtime_choice.native_adapter import NativeAdapterError
+
+                if isinstance(error, NativeAdapterError):
+                    exit_code = 2
+                    target_id = getattr(command, "workflow_id", None) or "driver-error"
+                    write(_protocol_error(error.code, workflow_id=target_id))
+                    continue
+                raise
             for event in events:
                 write(event)
             if command.action is DriverAction.SHUTDOWN:

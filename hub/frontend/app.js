@@ -383,7 +383,7 @@ function renderQuickDock() {
       const safeColor = sanitizeColor(item.color);
       const safeName = escapeHtml(item.name);
       const initials = escapeHtml(item.name.substring(0, 2).toUpperCase());
-      const isLaunchable = Boolean(item.launch_script || item.id === "canaletto-gallery");
+      const isLaunchable = Boolean(item.launch_script);
       const targetHref = isLaunchable ? `${API_BASE}/services/${sanitizeId(item.id)}/open` : safeUrl;
 
       return `
@@ -489,7 +489,7 @@ function renderServices() {
       const initials = escapeHtml(item.name.substring(0, 2).toUpperCase());
       const safeCategory = escapeHtml(CATEGORIES[item.category]?.label || item.category);
       const safeDescription = escapeHtml(item.description || "Nenhuma descrição fornecida.");
-      const isLaunchable = Boolean(item.launch_script || item.id === "canaletto-gallery");
+      const isLaunchable = Boolean(item.launch_script);
       const targetHref = isLaunchable ? `${API_BASE}/services/${safeId}/open` : safeUrl;
       const safeTags = (item.tags || [])
         .slice(0, 3)
@@ -877,7 +877,7 @@ function handlePaletteKeyboardNav(e) {
     e.preventDefault();
     const selected = state.paletteResults[state.paletteSelectedIndex];
     if (selected) {
-      const isLaunchable = Boolean(selected.launch_script || selected.id === "canaletto-gallery");
+      const isLaunchable = Boolean(selected.launch_script);
       const safeUrl = sanitizeUrl(selected.url);
       const targetUrl = isLaunchable ? `${API_BASE}/services/${sanitizeId(selected.id)}/open` : safeUrl;
       if (targetUrl && targetUrl !== "#") {
@@ -946,7 +946,7 @@ function renderPaletteResults() {
 function launchPaletteItem(idx) {
   const item = state.paletteResults[idx];
   if (item) {
-    const isLaunchable = Boolean(item.launch_script || item.id === "canaletto-gallery");
+    const isLaunchable = Boolean(item.launch_script);
     const safeUrl = sanitizeUrl(item.url);
     const targetUrl = isLaunchable ? `${API_BASE}/services/${sanitizeId(item.id)}/open` : safeUrl;
     if (targetUrl && targetUrl !== "#") {
