@@ -264,6 +264,14 @@ def execute(
         print(MARKER_HARNESS_FAIL)
         return False
 
+    try:
+        candidate_sha = _candidate_sha()
+    except RuntimeError as exc:
+        print(f"[ERROR] {exc}")
+        print(f"{MARKER_TEST_COUNT} count=0")
+        print(MARKER_HARNESS_FAIL)
+        return False
+
     executions: list[StepExecution] = []
     for step in steps:
         execution = run_step(step)
@@ -279,9 +287,16 @@ def execute(
     print(f"{MARKER_TEST_COUNT} count={discovered_count}")
 
     try:
-        candidate_sha = _candidate_sha()
+        final_candidate_sha = _candidate_sha()
     except RuntimeError as exc:
         print(f"[ERROR] {exc}")
+        print(MARKER_HARNESS_FAIL)
+        return False
+    if final_candidate_sha != candidate_sha:
+        print(
+            "[ERROR] Candidate HEAD changed during harness execution; refusing "
+            "to emit evidence"
+        )
         print(MARKER_HARNESS_FAIL)
         return False
 

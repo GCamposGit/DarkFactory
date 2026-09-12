@@ -79,3 +79,45 @@ def test_execute_rejects_dirty_worktree_before_running_steps(
     assert "Candidate worktree is dirty" in output
     assert "[HARNESS_FAIL]" in output
     assert "[HARNESS_RESULT]" not in output
+
+
+def test_execute_rejects_head_change_during_steps(
+    clean_git_repository: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setattr(runner, "PROJECT_ROOT", clean_git_repository)
+    candidate_shas = iter(("a" * 40, "b" * 40))
+    monkeypatch.setattr(runner, "_candidate_sha", lambda: next(candidate_shas))
+    monkeypatch.setattr(
+        runner,
+        "run_step",
+        lambda step: runner.StepExecution(step.name, 0, 1, 1, 0),
+    )
+    config = HarnessConfig(
+        steps=[
+            HarnessStepConfig(
+                name="probe",
+                cmd="python -c pass",
+                quick=True,
+                kind="check",
+            )
+        ]
+    )
+
+    assert (
+        runner.execute(
+            config,
+            config_hash="a" * 64,
+            quick=True,
+            include_holdout=False,
+            config_path=clean_git_repository / "harness.config.json",
+        )
+        is False
+    )
+
+    output = capsys.readouterr().out
+    assert "HEAD changed during harness execution" in output
+    assert "[HARNESS_FAIL]" in output
+    assert "[HARNESS_RESULT]" not in output
+    assert "[HARNESS_PASS]" not in output
