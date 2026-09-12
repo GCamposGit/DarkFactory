@@ -236,59 +236,62 @@ def test_hub_backend_n8n_endpoints(temp_project_dir: Path) -> None:
     app.dependency_overrides[get_hub_service] = lambda: service
     client = TestClient(app)
 
-    # 1. GET /api/integrations/n8n/workflows (with mock client)
-    with mock.patch.object(
-        N8nApiClient,
-        "list_workflows",
-        return_value=N8nApiResult(success=True, status_code=200, data={"data": [{"id": "w1", "name": "Sync"}]}),
-    ):
-        resp = client.get("/api/integrations/n8n/workflows?limit=10")
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["success"] is True
-        assert len(data["data"]["data"]) == 1
+    try:
+        # 1. GET /api/integrations/n8n/workflows (with mock client)
+        with mock.patch.object(
+            N8nApiClient,
+            "list_workflows",
+            return_value=N8nApiResult(success=True, status_code=200, data={"data": [{"id": "w1", "name": "Sync"}]}),
+        ):
+            resp = client.get("/api/integrations/n8n/workflows?limit=10")
+            assert resp.status_code == 200
+            data = resp.json()
+            assert data["success"] is True
+            assert len(data["data"]["data"]) == 1
 
-    # 2. POST /api/integrations/n8n/sync
-    with mock.patch.object(
-        N8nApiClient,
-        "sync_all_workflows",
-        return_value={"sample.json": N8nApiResult(success=True, status_code=200)},
-    ):
-        unauthenticated = client.post("/api/integrations/n8n/sync", json={"activate": True})
-        assert unauthenticated.status_code == 401
+        # 2. POST /api/integrations/n8n/sync
+        with mock.patch.object(
+            N8nApiClient,
+            "sync_all_workflows",
+            return_value={"sample.json": N8nApiResult(success=True, status_code=200)},
+        ):
+            unauthenticated = client.post("/api/integrations/n8n/sync", json={"activate": True})
+            assert unauthenticated.status_code == 401
 
-        resp = client.post(
-            "/api/integrations/n8n/sync",
-            json={"activate": True},
-            headers={"X-Hub-Session": service.session_token},
-        )
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["success"] is True
-        assert "sample.json" in data["results"]
+            resp = client.post(
+                "/api/integrations/n8n/sync",
+                json={"activate": True},
+                headers={"X-Hub-Session": service.session_token},
+            )
+            assert resp.status_code == 200
+            data = resp.json()
+            assert data["success"] is True
+            assert "sample.json" in data["results"]
 
-    # 3. POST /api/integrations/n8n/trigger
-    with mock.patch.object(
-        N8nApiClient,
-        "trigger_webhook",
-        return_value=N8nApiResult(success=True, status_code=200, data={"status": "dispatched"}),
-    ) as trigger_webhook:
-        unauthenticated = client.post(
-            "/api/integrations/n8n/trigger",
-            json={"path": "webhook/darkfac", "payload": {"status": "healthy"}},
-        )
-        assert unauthenticated.status_code == 401
-        trigger_webhook.assert_not_called()
+        # 3. POST /api/integrations/n8n/trigger
+        with mock.patch.object(
+            N8nApiClient,
+            "trigger_webhook",
+            return_value=N8nApiResult(success=True, status_code=200, data={"status": "dispatched"}),
+        ) as trigger_webhook:
+            unauthenticated = client.post(
+                "/api/integrations/n8n/trigger",
+                json={"path": "webhook/darkfac", "payload": {"status": "healthy"}},
+            )
+            assert unauthenticated.status_code == 401
+            trigger_webhook.assert_not_called()
 
-        resp = client.post(
-            "/api/integrations/n8n/trigger",
-            json={"path": "webhook/darkfac", "payload": {"status": "healthy"}},
-            headers={"X-Hub-Session": service.session_token},
-        )
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["success"] is True
-        assert data["data"]["status"] == "dispatched"
+            resp = client.post(
+                "/api/integrations/n8n/trigger",
+                json={"path": "webhook/darkfac", "payload": {"status": "healthy"}},
+                headers={"X-Hub-Session": service.session_token},
+            )
+            assert resp.status_code == 200
+            data = resp.json()
+            assert data["success"] is True
+            assert data["data"]["status"] == "dispatched"
+    finally:
+        app.dependency_overrides.clear()
 
 
 def test_hub_n8n_sync_rejects_path_outside_workflows(temp_project_dir: Path) -> None:
