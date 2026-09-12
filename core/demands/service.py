@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 from pathlib import Path
 
 from core.demands.grill import DemandGrillEngine
@@ -167,6 +168,9 @@ class DemandsService:
 
 
 def build_default_demands_service(repository_root: Path | str | None = None) -> DemandsService:
+    override = os.environ.get("DARKFAC_DEMANDS_PATH")
+    if override:
+        return DemandsService(store=DemandsStore(Path(override)))
     root = Path(repository_root) if repository_root else Path.cwd()
     store_path = root / ".factory" / "demands" / "demands.json"
     return DemandsService(store=DemandsStore(store_path))

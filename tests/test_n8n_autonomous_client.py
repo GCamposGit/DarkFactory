@@ -272,7 +272,14 @@ def test_hub_backend_n8n_endpoints(temp_project_dir: Path) -> None:
         N8nApiClient,
         "trigger_webhook",
         return_value=N8nApiResult(success=True, status_code=200, data={"status": "dispatched"}),
-    ):
+    ) as trigger_webhook:
+        unauthenticated = client.post(
+            "/api/integrations/n8n/trigger",
+            json={"path": "webhook/darkfac", "payload": {"status": "healthy"}},
+        )
+        assert unauthenticated.status_code == 401
+        trigger_webhook.assert_not_called()
+
         resp = client.post(
             "/api/integrations/n8n/trigger",
             json={"path": "webhook/darkfac", "payload": {"status": "healthy"}},

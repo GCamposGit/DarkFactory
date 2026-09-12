@@ -17,6 +17,7 @@ Covers:
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -404,6 +405,9 @@ def test_audio_demand_intake_flow(hf08_env):
 def test_cli_headless_hf08_commands(tmp_path: Path):
     """Verify that CLI subcommands (intake, grill, plan, bootstrap) execute cleanly via headless JSON on Windows."""
     repo_root = Path(__file__).resolve().parents[1]
+    test_demands_store = tmp_path / "test_demands.json"
+    test_demands_store.write_text("[]", encoding="utf-8")
+    test_env = {**os.environ, "DARKFAC_DEMANDS_PATH": str(test_demands_store)}
 
     # 1. CLI intake (Scenario G1 clear demand)
     proc_intake = subprocess.run(
@@ -429,6 +433,7 @@ def test_cli_headless_hf08_commands(tmp_path: Path):
         encoding="utf-8",
         errors="replace",
         check=True,
+        env=test_env,
     )
     data_intake = json.loads(proc_intake.stdout)
     assert data_intake["ready_for_spec"] is True
@@ -450,6 +455,7 @@ def test_cli_headless_hf08_commands(tmp_path: Path):
         encoding="utf-8",
         errors="replace",
         check=True,
+        env=test_env,
     )
     data_plan = json.loads(proc_plan.stdout)
     assert data_plan["ticket_id"] == ticket_id
@@ -476,6 +482,7 @@ def test_cli_headless_hf08_commands(tmp_path: Path):
         encoding="utf-8",
         errors="replace",
         check=True,
+        env=test_env,
     )
     data_boot = json.loads(proc_boot.stdout)
     assert data_boot["project"] == "CliBootProject"
