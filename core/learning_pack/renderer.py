@@ -80,6 +80,14 @@ class LearningPackRenderer:
                 md.append("</details>")
                 md.append("")
 
+        if pack.discussion_topics:
+            md.append("## 💬 Tópicos para Alinhamento & Discussão do Owner (Opcional)")
+            md.append("> ℹ️ *A leitura e discussão destes tópicos é opcional e NÃO bloqueia a produção nem o próximo ticket.*")
+            md.append("")
+            for idx, topic in enumerate(pack.discussion_topics, 1):
+                md.append(f"{idx}. {topic}")
+            md.append("")
+
         return "\n".join(md)
 
     @staticmethod
@@ -461,6 +469,24 @@ class LearningPackRenderer:
         html_out += f"""
       </div>
     </div>
+"""
+        if pack.discussion_topics:
+            html_out += """
+    <!-- Optional Discussion Topics -->
+    <div style="margin-top: 3rem; border-top: 1px solid var(--card-border); padding-top: 2rem;">
+      <h2 style="font-size: 1.3rem; margin-bottom: 0.5rem;">💬 Tópicos de Alinhamento & Discussão (Opcionais)</h2>
+      <p style="color: var(--text-muted); font-size: 0.85rem; margin-bottom: 1rem;">
+        <em>A leitura é 100% opcional e não bloqueia produção nem pipelines subsequentes.</em>
+      </p>
+      <ul style="list-style-type: decimal; padding-left: 1.5rem; color: #cbd5e1; line-height: 1.7;">
+"""
+            for topic in pack.discussion_topics:
+                html_out += f"        <li style=\"margin-bottom: 0.5rem;\">{html.escape(topic)}</li>\n"
+            html_out += """      </ul>
+    </div>
+"""
+
+        html_out += """
   </div>
 
   <div id="toast" class="toast">Elevator pitch copied to clipboard!</div>

@@ -3,80 +3,78 @@ name: autonomous-piv-loop
 description: Executa tickets, funcionalidades e correções pelo ciclo Prime-Plan-Implement-Validate (PIV), com protocolo fail-closed para branches e worktrees concorrentes.
 ---
 
-# Autonomous PIV Loop
+# 04 - Autonomous PIV Loop: Ciclo de Execução e Entrega
 
-O ciclo PIV divide a entrega em mudanças pequenas e verificáveis: preparar o contexto,
-planejar, implementar uma unidade, validar imediatamente e só então avançar.
+O ciclo PIV divide a entrega em mudanças pequenas, isoladas e estritamente verificáveis: preparar contexto, planejar, implementar uma unidade no executor econômico, validar via testes determinísticos e submeter à revisão independente antes da entrega final.
 
-## Isolamento de contexto e estado
+---
 
-- Contexto fresco não substitui isolamento Git.
-- Uma frente única usa branch dedicada. Cada frente concorrente que escreve recebe
-  branch, worktree, owner e lease exclusivos.
-- O checkout de integração é coordenado por um único owner e não é executor.
-- Nunca use `startingState: working-tree` para propagar uma baseline suja.
+## 1. Contratos Normativos da Etapa
 
-Ao despachar duas ou mais frentes, receber uma entrega de outra worktree ou integrar
-commits concorrentes, leia e siga integralmente
-[references/worktree-parallelism.md](references/worktree-parallelism.md). O protocolo
-é fail-closed: prova ausente de baseline, ownership, ambiente, heartbeat, conclusão ou
-integração bloqueia a próxima transição.
+### Inputs (Entradas)
+- **Contrato de Handoff Aprovado**: `WorkflowHandoff` em estado `WorkflowState.READY_FOR_HANDOFF`.
+- **Fencing de Isolamento Git**: Branch dedicada e worktree exclusiva com lease de ownership (`references/worktree-parallelism.md`).
+- **Baseline SHA**: Hash do commit base limpo e verificado.
+- **Governança**: `MISSION.md`, `FACTORY_RULES.md`, `AGENTS.md`.
 
-## Loop por tarefa
+### Ações e Procedimento Executável
+1. **Transição para Implementação (`IMPLEMENTING_ECONOMY`)**:
+   - Valide a transição legal de estado: `READY_FOR_HANDOFF -> IMPLEMENTING_ECONOMY`.
+   - Realize o preflight de terminal com `-NoProfile -NonInteractive -ExecutionPolicy Bypass`.
+   - Confirme ausência de estado sujo na árvore de trabalho (`startingState: working-tree` é expressamente proibido).
+2. **Implementação Estrita nos Caminhos Permitidos**:
+   - Modifique exclusivamente os caminhos declarados em `allowed_paths` do handoff.
+   - Respeite `read_only_paths`. Se for necessário alterar contratos públicos ou oráculos, devolva ao planejador qualificado (`NEEDS_REPLAN`).
+3. **Validação Determinística Local (`VALIDATING`)**:
+   - Transicione para `WorkflowState.VALIDATING`.
+   - Execute testes focais da unidade e a suíte rápida:
+     ```powershell
+     python core/harness/runner.py --quick
+     ```
+   - Gere registros de `EnvironmentEvidence` associando cada teste executado à sua versão de configuração, build digest e resultado (`PASSED`/`FAILED`).
+4. **Encaminhamento para Revisão Independente (`INDEPENDENT_REVIEW`)**:
+   - Submeta o candidato com sua suíte verde e evidências completas para revisão adversarial independente (`06-adversarial-review`).
 
-1. Leia `AGENTS.md`, `MISSION.md` e `FACTORY_RULES.md`; identifique a origem do ticket pela tag canônica:
-   - `user-demand` (`USR-XX`): Demanda manual aberta pelo usuário/dono do projeto (prioridade de escopo).
-   - `code-review`: Ticket aberto por auditoria de revisão adversarial ou inspeção de qualidade.
-   - `agent-feature`: Melhoria autônoma ou refatoração proposta pelos próprios agentes (self-improvement).
-   Registre ticket, identidade, escopo e comandos de aceitação.
-2. Faça o preflight da unidade de trabalho e do ambiente antes da primeira escrita.
-   Valide o ambiente de terminal (`python core/harness/terminal_env.py --check` ou `scripts/init_terminal.ps1`),
-   assegurando ancoragem na raiz e imunidade contra interferências de perfis (`-NoProfile`).
-   Quando o ticket introduz o próprio teste focal, registre sua ausência esperada e
-   prove coleta não vazia da suíte existente; não execute um caminho ainda inexistente.
-3. Implemente somente os caminhos possuídos pela tarefa. Confira ID/versão/hash do plano disponível
-   no checkout; registre delta e revisão quando o recorte mudar. Não reinterprete o mesmo ID como
-   outro contrato nem remova dependência arquitetural para chamar a unidade de liberada.
-   Se a correção exigir mudar contrato público, autoridade de evidência, semântica de estado ou
-   oráculo, devolva ao planejador qualificado antes de prosseguir; correção interna preserva o contrato.
-4. Execute o teste focal e `python core/harness/runner.py --quick`; corrija a causa
-   antes de avançar se algum gate falhar.
-5. Ao concluir, execute os comandos obrigatórios do repositório e produza o contrato
-   de conclusão definido no protocolo.
+### Outputs Estruturados
+- **Código e Commits Seletivos**: Commits isolados com mensagens rastreáveis vinculadas ao ticket.
+- **Evidências de Ambiente**: Instâncias de `EnvironmentEvidence` geradas durante a validação.
+- **Relatório de Execução da Unidade**: `.factory/reports/<task-slug>-report.md` contendo ticket, branch, SHA base/final, arquivos alterados, contagens de testes, códigos de saída e heartbeat final.
+- **Handoff Atualizado**: Objeto pronto para avaliação do portão de revisão.
 
-Para gates, evidências, persistência ou protocolos, siga os aceites de
-[contratos verificáveis](../02-plan-product-architecture/references/contract-review-patterns.md).
-Teste pelo caminho público utilizado: arquivo JSON e subprocesso para um driver CLI,
-não apenas seu helper Python. Inclua o caso válido e a contraprova relevante; fixtures
-que atribuem sucesso/freshness/revisão não demonstram que esses fatos foram verificados.
-Suíte verde não encerra um achado reproduzido por um oráculo independente.
+### Portões, Política e Validação
+- **Conformidade com ReadinessGate**: O avanço entre estágios obedece rigorosamente às transições legais (`ALLOWED_TRANSITIONS`).
+- **Protocolo Fail-Closed de Worktrees**: Ausência de heartbeat, colisão de arquivos ou branch suja bloqueiam o ciclo imediatamente.
+- **Entrega Remota Obrigatória**: Conforme `references/remote-delivery.md`, um ticket de desenvolvimento só é concluído após PR aberta, checks de CI verdes, merge aprovado e confirmação do SHA no `main` remoto.
+- **Proibição de Atalhos**: Nenhum artefato é marcado como entregue sem aprovação do `ReadinessGate`.
 
-## Relatório
+---
 
-Registre em `.factory/reports/<task-slug>-report.md`: ticket, owner, branch, worktree,
-SHA-base e SHA final; arquivos alterados; comandos, contagens e exit codes; heartbeat
-final; e estado residual. Uma resposta textual sem commit seletivo e evidência não é
-handoff verificável.
+## 2. Continuous Self-Improvement & RCA
 
-## Entrega remota obrigatória
+- **RCA Antes de Qualquer Retry**: Falhas de validação, timeout, erro de compilação ou rejeição em portão exigem RCA estruturado antes de nova tentativa.
+- **Teto de Tentativas**: Duas correções focais sem progresso exigem replanejamento com alta inteligência (`WorkflowState.NEEDS_REPLAN`).
 
-Um ticket de desenvolvimento não está concluído quando existe apenas um commit local.
-Depois dos gates locais verdes, o owner deve executar o fluxo completo descrito em
-[references/remote-delivery.md](references/remote-delivery.md): publicar a branch, abrir
-uma PR com o SHA correto, aguardar checks/reviews exigidos, mergear pela interface do
-GitHub e verificar que a branch de integração remota alcança o SHA final. Falha de
-autenticação, rede, criação da PR, checks, merge ou leitura do remoto é estado
-`blocked`, nunca sucesso silencioso.
+---
 
-O handoff final deve conter a URL/número da PR, estado `MERGED`, `mergedAt`, SHA do
-merge, SHA observado no `main` remoto e o estado residual local. Nunca declare uma
-entrega como integrada com base apenas em `git log` local, em uma branch sem upstream
-ou em uma mensagem textual do agente.
+## 3. Step V-5 — Hub Sync (obrigatório após HARNESS_PASS)
 
-## Continuous Self-Improvement e RCA
+Após receber `[HARNESS_PASS]` do runner, execute o seguinte passo antes de marcar o ticket como entregue:
 
-- Em follow-up corretivo, registre a intenção e o gap no motor de aprendizagem antes
-  de implementar.
-- Toda falha de validação, ferramenta, setup, quota, lease ou handoff recebe RCA antes
-  do retry. Retry não cria silenciosamente uma nova identidade ou outro escritor.
-- Uma regra preventiva só é considerada resolvida depois de um gate determinístico.
+```powershell
+# Notifica o DarkHub para atualizar benchmarks e fronteiras de Pareto com os novos dados.
+# - Se o hub estiver rodando: retorna 200 e confirma atualização.
+# - Se o hub não estiver rodando: falha silenciosa, nunca bloqueia a entrega.
+Invoke-RestMethod -Method POST `
+    -Uri "${env:DARKHUB_URL:-https://darkhub.ggcampos.com}/api/benchmarks/refresh" `
+    -ContentType "application/json" `
+    -ErrorAction SilentlyContinue
+```
+
+**Regras:**
+- ✅ Retorno 200 → logar `[HUB] Benchmark refresh OK` e prosseguir.
+- ⚠️ Qualquer erro (connection refused, timeout) → logar `[HUB] Hub offline, skipping refresh` e prosseguir normalmente. **Não bloquear entrega.**
+- 🔧 Para sobrescrever a URL padrão, definir `DARKHUB_URL` no ambiente (ex.: `https://darkhub.ggcampos.com` ou `http://localhost:8000`).
+
+
+> **Nota:** O runner.py já executa este refresh automaticamente via `_notify_hub_on_pass()`. Este step existe para harnesses que chamam o runner indiretamente ou orquestram testes sem usar `runner.py` diretamente (ex.: Grok, Claude Code, scripts CI).
+

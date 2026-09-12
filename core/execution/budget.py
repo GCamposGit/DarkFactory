@@ -407,6 +407,18 @@ class ExecutionBudgetManager:
                 if not res_row:
                     raise InvalidReservationError(f"reservation not found: {reservation_id}")
 
+                # Check for idempotent attempt replay
+                existing_att = self._conn.execute(
+                    "SELECT charged_cost, outcome FROM attempts WHERE attempt_id = ?",
+                    (attempt.attempt_id,),
+                ).fetchone()
+                if existing_att:
+                    if existing_att["outcome"] == attempt.outcome.value:
+                        return float(existing_att["charged_cost"])
+                    raise InvalidReservationError(
+                        f"attempt {attempt.attempt_id} already committed with different outcome"
+                    )
+
                 if res_row["status"] != ReservationStatus.ACTIVE.value:
                     raise InvalidReservationError(
                         f"cannot commit reservation in status {res_row['status']}"
@@ -518,6 +530,100 @@ class ExecutionBudgetManager:
                         "UPDATE budgets SET reserved = ?, updated_at = ? WHERE budget_id = ?",
                         (new_reserved, now_str, budget_id),
                     )
+
+    def upgrade_reservation(
+        self,
+        reservation_id: str,
+        new_amount: float,
+    ) -> ReservationRecord:
+        """Atomically upgrade an active reservation amount (e.g. on cloud fallback)."""
+        if new_amount < 0.0:
+            raise ValueError("reservation amount must be non-negative")
+
+        now = self._clock()
+        now_str = _iso(now)
+
+        with self._thread_lock:
+            with self._conn:
+                cursor = self._conn.execute(
+                    "SELECT * FROM reservations WHERE reservation_id = ?",
+                    (reservation_id,),
+                )
+                res_row = cursor.fetchone()
+                if not res_row:
+                    raise InvalidReservationError(f"reservation not found: {reservation_id}")
+
+                if res_row["status"] != ReservationStatus.ACTIVE.value:
+                    raise InvalidReservationError(
+                        f"cannot upgrade reservation in status {res_row['status']}"
+                    )
+
+                budget_id = res_row["budget_id"]
+                budget_row = self._conn.execute(
+                    "SELECT * FROM budgets WHERE budget_id = ?",
+                    (budget_id,),
+                ).fetchone()
+                if not budget_row:
+                    raise BudgetNotFoundError(f"budget not found: {budget_id}")
+
+                old_amount = float(res_row["amount"])
+                additional = round(new_amount - old_amount, 8)
+
+                if additional > 0:
+                    current_spent = float(budget_row["spent"])
+                    current_reserved = float(budget_row["reserved"])
+                    ceiling = float(budget_row["ceiling"])
+
+                    if round(current_spent + current_reserved + additional, 8) > ceiling:
+                        raise BudgetExceededError(
+                            f"reservation upgrade of +{additional} would exceed ceiling {ceiling} "
+                            f"(spent={current_spent}, reserved={current_reserved})"
+                        )
+
+                    # Check windows if configured
+                    if budget_row["short_window_duration"] is not None and budget_row["short_window_ceiling"] is not None:
+                        short_spent = self._compute_window_spent_unlocked(budget_id, budget_row["short_window_duration"])
+                        short_ceiling = float(budget_row["short_window_ceiling"])
+                        if round(short_spent + current_reserved + additional, 8) > short_ceiling:
+                            raise WindowBudgetExceededError(
+                                f"reservation upgrade of +{additional} would exceed short window ceiling {short_ceiling}"
+                            )
+
+                    if budget_row["long_window_duration"] is not None and budget_row["long_window_ceiling"] is not None:
+                        long_spent = self._compute_window_spent_unlocked(budget_id, budget_row["long_window_duration"])
+                        long_ceiling = float(budget_row["long_window_ceiling"])
+                        if round(long_spent + current_reserved + additional, 8) > long_ceiling:
+                            raise WindowBudgetExceededError(
+                                f"reservation upgrade of +{additional} would exceed long window ceiling {long_ceiling}"
+                            )
+
+                new_reserved = max(0.0, round(float(budget_row["reserved"]) + additional, 8))
+                self._conn.execute(
+                    "UPDATE reservations SET amount = ? WHERE reservation_id = ?",
+                    (new_amount, reservation_id),
+                )
+                self._conn.execute(
+                    "UPDATE budgets SET reserved = ?, updated_at = ? WHERE budget_id = ?",
+                    (new_reserved, now_str, budget_id),
+                )
+
+                return ReservationRecord(
+                    reservation_id=reservation_id,
+                    budget_id=budget_id,
+                    attempt_id=res_row["attempt_id"],
+                    amount=new_amount,
+                    status=ReservationStatus.ACTIVE,
+                    created_at=_parse_datetime(res_row["created_at"]),  # type: ignore[arg-type]
+                    expires_at=_parse_datetime(res_row["expires_at"]),
+                )
+
+    def release_if_active(self, reservation_id: str, *, reason: str = "") -> bool:
+        """Idempotently release a reservation if active; return True if released, False otherwise."""
+        try:
+            self.release(reservation_id, reason=reason)
+            return True
+        except (InvalidReservationError, BudgetNotFoundError):
+            return False
 
     def expire_stale_reservations(self, budget_id: str | None = None) -> int:
         """Transition timed-out active reservations to EXPIRED and restore reserved balance."""

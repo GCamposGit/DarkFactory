@@ -33,6 +33,7 @@ class LearningPackGenerator:
         session_id: Optional[str] = None,
         files_analyzed: Optional[List[str]] = None,
         custom_concepts: Optional[List[LearningConcept]] = None,
+        discussion_topics: Optional[List[str]] = None,
     ) -> SessionLearningPack:
         """Synthesizes a full learning pack from session context and detected code patterns."""
         now_str = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
@@ -136,6 +137,15 @@ class LearningPackGenerator:
 
         pack_title = title or f"Technical Mastery Pack: {concept_names[0] if concept_names else 'Dark Factory Engineering'}"
 
+        if discussion_topics is None:
+            topics = [
+                f"How can we further stress-test the deterministic invariants of {concept_names[0] if concept_names else 'the newly introduced components'} under high concurrency?",
+                "Are there additional edge-case boundaries in distributed state reconciliation that warrant explicit holding gates?",
+                "What telemetry or alert thresholds should be calibrated before expanding deployment scope?",
+            ]
+        else:
+            topics = list(discussion_topics)
+
         metrics = {
             "concepts_count": len(concepts),
             "flashcards_count": len(flashcards),
@@ -154,4 +164,7 @@ class LearningPackGenerator:
             flashcards=flashcards,
             files_analyzed=target_files,
             metrics=metrics,
+            discussion_topics=topics,
+            reading_is_optional=True,
+            blocks_production=False,
         )

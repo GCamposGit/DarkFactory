@@ -5,6 +5,8 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
+from core.demands.grill import DemandGrillEngine
+from core.demands.integrated_service import IntegratedIntakeService
 from core.demands.models import (
     DemandInput,
     DemandSpecificationGuidance,
@@ -12,7 +14,6 @@ from core.demands.models import (
     GrillSession,
     UserTicket,
 )
-from core.demands.grill import DemandGrillEngine
 from core.demands.specifier import DemandSpecifier
 from core.demands.store import DemandsStore
 from core.roadmap.models import DeliveryStatus
@@ -28,10 +29,16 @@ class DemandsService:
         store: DemandsStore | None = None,
         specifier: DemandSpecifier | None = None,
         grill_engine: DemandGrillEngine | None = None,
+        intake_service: IntegratedIntakeService | None = None,
     ) -> None:
         self.store = store or DemandsStore()
         self.specifier = specifier or DemandSpecifier()
         self.grill_engine = grill_engine or DemandGrillEngine(specifier=self.specifier)
+        self.intake = intake_service or IntegratedIntakeService(
+            store=self.store,
+            grill_engine=self.grill_engine,
+            specifier=self.specifier,
+        )
 
     def guide_demand(
         self,
@@ -129,6 +136,34 @@ class DemandsService:
         self.store.save_ticket(result.refined_ticket)
         logger.info(f"Refined ticket {ticket_id} with grill answers: {len(result.summary_of_changes)} changes")
         return result
+
+    # --- Integrated Intake & Hybrid Autonomy (HF-08) ---
+
+    def receive_integrated_demand(self, demand: DemandInput, **kwargs: Any) -> dict[str, Any]:
+        """Orchestrate demand ingestion, clarity check (Scenario G1), and run registration."""
+        return self.intake.receive_demand(demand, **kwargs)
+
+    def submit_integrated_grill_answers(
+        self,
+        ticket_id: str,
+        answers: dict[str, str],
+        session: GrillSession,
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        """Apply answers, finalize GrillRecord, and resume run."""
+        return self.intake.submit_grill_answers(ticket_id, answers, session, **kwargs)
+
+    def plan_and_resolve_dependencies(self, ticket_id: str, grill_record: Any, **kwargs: Any) -> dict[str, Any]:
+        """Resolve dependencies (Scenario G2), generate manifest, and compile WorkflowHandoff."""
+        return self.intake.plan_and_resolve_dependencies(ticket_id, grill_record, **kwargs)
+
+    def bootstrap_project(self, project_name: str, target_dir: Path | str, **kwargs: Any) -> dict[str, Any]:
+        """Bootstrap greenfield or brownfield project using Skill 07 and register runtime."""
+        return self.intake.bootstrap_new_project(project_name, target_dir, **kwargs)
+
+    def receive_audio_demand(self, audio_path: Path | str, project_id: str, title: str, **kwargs: Any) -> dict[str, Any]:
+        """Ingest demand via audio file transcription (Skill 09)."""
+        return self.intake.receive_audio_demand(audio_path, project_id, title, **kwargs)
 
 
 def build_default_demands_service(repository_root: Path | str | None = None) -> DemandsService:

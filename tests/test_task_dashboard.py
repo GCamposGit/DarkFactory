@@ -117,6 +117,26 @@ def test_task_dashboard_api_and_static_journey(tmp_path: Path):
         alias_response = client.get("/api/tasks")
         assert alias_response.status_code == 200
 
+        # HF-13: Verify root aliases and trailing-slash variants prevent 404
+        root_response = client.get("/tasks/dashboard")
+        assert root_response.status_code == 200
+        assert root_response.json()["queue"][0]["run_id"] == "run-001"
+
+        root_slash = client.get("/tasks/dashboard/")
+        assert root_slash.status_code == 200
+
+        api_slash = client.get("/api/tasks/dashboard/")
+        assert api_slash.status_code == 200
+
+        root_alias = client.get("/tasks")
+        assert root_alias.status_code == 200
+
+        root_alias_slash = client.get("/tasks/")
+        assert root_alias_slash.status_code == 200
+
+        api_alias_slash = client.get("/api/tasks/")
+        assert api_alias_slash.status_code == 200
+
         page = client.get("/")
         assert page.status_code == 200
         assert 'id="tasks-dashboard-section"' in page.text

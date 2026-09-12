@@ -211,8 +211,9 @@
       "python -m pytest tests -v"
     ],
     "dependencies": {
-      "blocked_external": ["HF-02-05", "HF-02-07", "HF-03 target worker access"],
-      "local_available": ["HF-04 contracts", "Python 3.12", "SQLite standard library"]
+      "blocked_external": [],
+      "completed_prerequisites": ["HF-01", "HF-02 (ADR-HF-001)", "HF-03 (Dokploy PostgreSQL ready)", "HF-04", "HF-05-01"],
+      "local_available": ["HF-04 contracts", "Python 3.12", "SQLite standard library", "Dokploy PostgreSQL darkfac_hf02_prod"]
     }
   }
 }

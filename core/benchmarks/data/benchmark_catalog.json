@@ -422,6 +422,30 @@
       }
     },
     {
+      "model_id": "deepseek/deepseek-v4.1-flash",
+      "name": "DeepSeek V4.1 Flash",
+      "provider": "deepseek",
+      "context_length": 1048576,
+      "input_cost_per_m": 0.15,
+      "output_cost_per_m": 0.6,
+      "cache_read_cost_per_m": 0.003,
+      "coding_score": 87.2,
+      "intelligence_score": 88.5,
+      "output_speed_tps": 120.0,
+      "latency_ttft_sec": 0.4,
+      "tokens_per_task": 2200,
+      "tier": "balanced_mid",
+      "release_date": "2026-09-10",
+      "domain_scores": {
+        "coding": 87.2,
+        "deep_research": 86.5,
+        "legal_contract": 85.0,
+        "business_automation": 87.5,
+        "formal_reasoning": 89.0,
+        "multimodal_audio": 82.0
+      }
+    },
+    {
       "model_id": "deepseek/deepseek-r1",
       "name": "DeepSeek R1 (Reasoning)",
       "provider": "deepseek",

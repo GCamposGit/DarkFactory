@@ -21,6 +21,13 @@ import re
 from pathlib import Path
 from typing import Any
 
+from core.demands.contracts_adapter import (
+    GrillAlternative,
+    GrillDecision,
+    GrillPendingQuestion,
+    GrillRecord,
+    build_grill_record,
+)
 from core.demands.models import (
     GrillAnswersPayload,
     GrillQuestion,
@@ -410,3 +417,171 @@ class DemandGrillEngine:
             applied_answers=applied_answers,
             summary_of_changes=changes,
         )
+
+    def evaluate_ambiguity(
+        self,
+        ticket: UserTicket,
+        doc_insights: list[str] | None = None,
+    ) -> tuple[bool, list[str]]:
+        """Evaluate if demand has material ambiguities requiring human clarification (Scenario G1).
+        
+        Returns (is_clear, reasons).
+        """
+        reasons: list[str] = []
+        prob = (ticket.problem_statement or "").strip()
+
+        # 1. Problem statement completeness
+        if len(prob) < 20:
+            reasons.append("Problem statement muito breve ou ausente")
+        elif any(marker in prob.lower() for marker in ("todo", "tbd", "a definir", "não sei", "ambíguo", "???")):
+            reasons.append("Problem statement contém marcadores explícitos de indefinição (TODO/TBD)")
+
+        # 2. Non-goals boundaries
+        if not ticket.non_goals or len([ng for ng in ticket.non_goals if ng.strip()]) == 0:
+            reasons.append("Fronteiras explícitas de escopo (non-goals) não foram delimitadas")
+
+        # 3. Measurable acceptance criteria
+        if not ticket.acceptance_criteria or len([ac for ac in ticket.acceptance_criteria if ac.strip()]) == 0:
+            reasons.append("Critérios de aceitação verificáveis ausentes")
+
+        is_clear = len(reasons) == 0
+        if is_clear:
+            reasons = ["Demanda clara e contextualizada; escopo, non-goals e critérios delimitados sem lacunas materiais."]
+        return is_clear, reasons
+
+    def conduct_integrated_grill(
+        self,
+        ticket: UserTicket,
+        *,
+        force_heuristic: bool = False,
+        timeout: float | None = None,
+    ) -> tuple[GrillRecord, GrillSession | None]:
+        """Conduct integrated Grill returning strict GrillRecord and optional pending GrillSession (Scenario G1).
+
+        If demand is already clear, returns (GrillRecord(ready_for_spec=True), None) without redundant questions.
+        If ambiguous, returns (GrillRecord(ready_for_spec=False), GrillSession) and suspends for human input.
+        """
+        doc_insights = self.doc_scout.scout_insights()
+        is_clear, reasons = self.evaluate_ambiguity(ticket, doc_insights)
+
+        if is_clear:
+            logger.info(f"Demand {ticket.id} is unambiguous. Passing Grill without redundant questions (Scenario G1).")
+            record = build_grill_record(
+                ticket,
+                doc_insights=doc_insights,
+                ready_for_spec=True,
+                readiness_justification="Demanda clara pelo contexto; requisitos, escopo e non-goals delimitados.",
+            )
+            return record, None
+
+        logger.info(f"Demand {ticket.id} has material ambiguities: {reasons}. Initiating clarifying Grill questions.")
+        session = self.start_grill(ticket, force_heuristic=force_heuristic, timeout=timeout)
+
+        pending_questions: list[GrillPendingQuestion] = []
+        candidate_decisions: list[GrillDecision] = []
+
+        for q in session.questions:
+            pending_questions.append(
+                GrillPendingQuestion(
+                    question_id=q.id,
+                    question=q.question[:240],
+                    impact=(q.context_reason or "Define escopo e validação")[:240],
+                    depends_on_human=True,
+                )
+            )
+            alternatives = [
+                GrillAlternative(
+                    alternative_id=opt.id,
+                    label=opt.label[:240],
+                    consequence=(opt.description or opt.label)[:240],
+                )
+                for opt in q.options
+            ]
+            if len(alternatives) < 2:
+                alternatives.append(
+                    GrillAlternative(
+                        alternative_id=f"{q.id}_fallback",
+                        label="Adotar padrão conservador da Dark Factory",
+                        consequence="Mantém execução mínima segura",
+                    )
+                )
+            candidate_decisions.append(
+                GrillDecision(
+                    decision_id=f"dec_{q.id}",
+                    question=q.question[:240],
+                    alternatives=alternatives,
+                    selected_alternative_id=None,
+                    response=None,
+                    decision_source="pending_grill",
+                    is_material=True,
+                )
+            )
+
+        record = build_grill_record(
+            ticket,
+            doc_insights=doc_insights,
+            decisions=candidate_decisions,
+            pending_questions=pending_questions,
+            ready_for_spec=False,
+            readiness_justification=f"Demanda aguardando esclarecimento de {len(pending_questions)} questão(ões) pelo owner.",
+        )
+        return record, session
+
+    def resolve_grill_answers(
+        self,
+        ticket: UserTicket,
+        session: GrillSession,
+        answers: dict[str, str],
+        *,
+        auto_accept_unanswered: bool = True,
+    ) -> tuple[UserTicket, GrillRecord, GrillRefinementResult]:
+        """Apply answers to session and produce refined ticket and completed GrillRecord."""
+        refinement = self.refine_ticket(ticket, answers, session=session)
+        effective_answers = dict(refinement.applied_answers)
+
+        decisions: list[GrillDecision] = []
+        for q in session.questions:
+            ans = effective_answers.get(q.id, "").strip()
+            matched_opt = next((opt for opt in q.options if opt.id == ans or opt.label == ans), None)
+
+            alternatives = [
+                GrillAlternative(
+                    alternative_id=opt.id,
+                    label=opt.label[:240],
+                    consequence=(opt.description or opt.label)[:240],
+                )
+                for opt in q.options
+            ]
+            if len(alternatives) < 2:
+                alternatives.append(
+                    GrillAlternative(
+                        alternative_id=f"{q.id}_fallback",
+                        label="Padrão conservador DarkFac",
+                        consequence="Execução headless mínima",
+                    )
+                )
+
+            selected_id = matched_opt.id if matched_opt else (alternatives[0].alternative_id if alternatives else None)
+            source = "human_response" if q.id in answers else "auto_recommended"
+
+            decisions.append(
+                GrillDecision(
+                    decision_id=f"dec_{q.id}",
+                    question=q.question[:240],
+                    alternatives=alternatives,
+                    selected_alternative_id=selected_id,
+                    response=ans or (matched_opt.label if matched_opt else alternatives[0].label),
+                    decision_source=source,
+                    is_material=True,
+                )
+            )
+
+        grill_record = build_grill_record(
+            refinement.refined_ticket,
+            doc_insights=session.doc_insights,
+            decisions=decisions,
+            pending_questions=[],
+            ready_for_spec=True,
+            readiness_justification="Grill concluído com todas as decisões materiais respondidas e critérios consolidados.",
+        )
+        return refinement.refined_ticket, grill_record, refinement

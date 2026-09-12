@@ -42,6 +42,7 @@ class TaskContext(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     task_id: str = Field(min_length=1)
+    project_id: str = Field(default="default")
     operational_summary: str = Field(default="")
     pertinent_facts: list[str] = Field(default_factory=list)
     active_rules: list[str] = Field(default_factory=list)
@@ -86,10 +87,22 @@ class ContextSelector:
 
         return False
 
+    @staticmethod
+    def _is_project_match(item_project_id: str | None, target_project_id: str | None) -> bool:
+        """Check project isolation: items belonging to another project cannot be injected."""
+        if not target_project_id or not item_project_id:
+            return True
+        norm_item = item_project_id.strip().lower()
+        norm_target = target_project_id.strip().lower()
+        if norm_item in ("global", "general", "*"):
+            return True
+        return norm_item == norm_target
+
     def assemble_context(
         self,
         task_spec: TaskSpec,
         *,
+        project_id: str | None = None,
         tracker: Any | None = None,
         promotion_engine: LearningPromotionEngine | None = None,
         checkpoint: dict[str, Any] | None = None,
@@ -124,7 +137,7 @@ class ContextSelector:
         for idx, criterion in enumerate(task_spec.acceptance_criteria, start=1):
             pertinent_facts.append(f"Criterion {idx}: {criterion}")
 
-        # 3. Active rules selection (strictly ACTIVE and scoped)
+        # 3. Active rules selection (strictly ACTIVE, project-isolated, and scoped)
         active_rules: list[str] = []
         engine = promotion_engine or self.promotion_engine
         if engine is not None:
@@ -133,6 +146,9 @@ class ContextSelector:
             for candidate in all_active:
                 if candidate.status != PolicyStatus.ACTIVE:
                     continue
+                cand_project = candidate.metadata.get("project_id") if candidate.metadata else None
+                if not self._is_project_match(cand_project, project_id):
+                    continue
                 if self._is_scope_relevant(candidate.scope, task_spec.allowed_paths, task_spec.objective):
                     content = candidate.rule_content or f"Rule [{candidate.rule_id}] scoped to {candidate.scope}"
                     active_rules.append(f"[{candidate.rule_id}][{candidate.scope}] {content}")
@@ -140,6 +156,11 @@ class ContextSelector:
         if tracker is not None and hasattr(tracker, "ledger") and hasattr(tracker.ledger, "preferences"):
             for pref in tracker.ledger.preferences:
                 if pref.status == PolicyStatus.ACTIVE and getattr(pref, "active", True):
+                    pref_project = getattr(pref, "project_id", None)
+                    if hasattr(pref, "metadata") and isinstance(pref.metadata, dict):
+                        pref_project = pref.metadata.get("project_id", pref_project)
+                    if not self._is_project_match(pref_project, project_id):
+                        continue
                     category = getattr(pref.category, "value", str(pref.category))
                     if self._is_scope_relevant(category, task_spec.allowed_paths, task_spec.objective):
                         active_rules.append(f"[{pref.preference_id}][{category}] {pref.rule}")
@@ -178,6 +199,7 @@ class ContextSelector:
 
         return TaskContext(
             task_id=task_spec.task_id,
+            project_id=project_id or "default",
             operational_summary=operational_summary,
             pertinent_facts=pertinent_facts,
             active_rules=active_rules,

@@ -101,6 +101,8 @@ class ResearchLedger:
     sources: List[ResearchSource] = field(default_factory=list)
     insights: List[SourceInsight] = field(default_factory=list)
     summary_executive: str = ""
+    decisions_linked: List[str] = field(default_factory=list)
+    related_tickets: List[str] = field(default_factory=list)
 
     def add_source(self, source: ResearchSource) -> None:
         # Avoid duplicate source URLs or IDs
@@ -119,6 +121,8 @@ class ResearchLedger:
             "summary_executive": self.summary_executive,
             "sources": [s.to_dict() for s in self.sources],
             "insights": [i.to_dict() for i in self.insights],
+            "decisions_linked": list(self.decisions_linked),
+            "related_tickets": list(self.related_tickets),
         }
 
     @classmethod
@@ -133,6 +137,8 @@ class ResearchLedger:
             sources=sources,
             insights=insights,
             summary_executive=data.get("summary_executive", ""),
+            decisions_linked=list(data.get("decisions_linked", [])),
+            related_tickets=list(data.get("related_tickets", [])),
         )
 
     def to_markdown(self) -> str:
@@ -221,6 +227,26 @@ class ResearchLedger:
                 for pat in ins.code_patterns_or_algorithms:
                     md.append(f"- `{pat}`")
                 md.append("")
+
+        if self.decisions_linked:
+            md.extend([
+                "",
+                "## 5. Decisões Arquiteturais Vinculadas",
+                "",
+            ])
+            for d in self.decisions_linked:
+                md.append(f"- {d}")
+            md.append("")
+
+        if self.related_tickets:
+            md.extend([
+                "",
+                "## 6. Tickets Relacionados",
+                "",
+            ])
+            for t in self.related_tickets:
+                md.append(f"- `{t}`")
+            md.append("")
 
         return "\n".join(md)
 

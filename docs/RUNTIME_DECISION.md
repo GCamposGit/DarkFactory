@@ -83,3 +83,17 @@ DF-11 não migra nem altera esses arquivos. Para desabilitar o runtime novo,
 basta não despachar novas execuções para `.factory/orchestrator.sqlite3`; os
 ledgers anteriores permanecem utilizáveis.
 
+## Evolução Híbrida: ADR-HF-001 (Cloud e Espera Durável)
+
+Para a expansão da Dark Factory rumo à operação contínua e híbrida (Onda 1 / HF-03 a HF-15),
+a decisão do DF-11 foi complementada pelo [ADR-HF-001: Seleção do Runtime de Workflows Duráveis](decisions/ADR-HF-001-runtime.md)
+(resultado do spike comparativo HF-02).
+
+O DF-11 permanece como a **decisão canônica e runtime padrão para o ambiente de desenvolvimento
+local, clones limpos offline e testes unitários instantâneos a custo $0**.
+O ADR-HF-001 estabelece a adoção de **DBOS Python sobre PostgreSQL** exclusivamente para o
+coordenador cloud e workers na VPS, atendendo aos requisitos de suspensão durável (`durable_wait`),
+idempotência no ingresso, cancelamento cooperativo e concorrência limitada, condicionado à validação
+de ambiente no HF-03.
+
+

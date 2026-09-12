@@ -526,5 +526,15 @@ def get_model_provider(
             openrouter_provider=openrouter,
             mock_provider=mock,
         )
-    raise ValueError(f"Unknown provider_id: {provider_id}. Must be 'ollama', 'openrouter', 'mock', or 'auto'.")
+    if pid in ("resilient", "fault_tolerant"):
+        from core.execution.resilience import ResilientModelProvider
+
+        ollama = OllamaModelProvider(base_url=base_url or "http://localhost:11434", usage_ledger=usage_ledger)
+        openrouter = OpenRouterModelProvider(api_key=api_key, usage_ledger=usage_ledger)
+        return ResilientModelProvider(
+            local_provider=ollama,
+            cloud_provider=openrouter,
+            **kwargs,
+        )
+    raise ValueError(f"Unknown provider_id: {provider_id}. Must be 'ollama', 'openrouter', 'mock', 'resilient', or 'auto'.")
 

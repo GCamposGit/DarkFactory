@@ -15,11 +15,10 @@ Manter um núcleo Python headless, determinístico e portátil para orquestraç�
 
 ## Fora do escopo compartilhado
 
-- `canaletto_gallery/`, `run_canaletto.py` e `tests/test_canaletto.py`: experimento visual local, mantido apenas na máquina do operador.
 - Chaves, tokens, credenciais, dados pessoais e configurações específicas de uma máquina.
 - Pesos de modelos, caches, imagens/áudios gerados e outros artefatos grandes ou regeneráveis.
 - Deploy de produção, billing ou qualquer ação externa não descrita em uma issue.
 
 ## Critério de sucesso
 
-Um clone limpo deve conseguir instalar as dependências, executar a validação sintática e os testes do núcleo, iniciar o DarkHub e descobrir as skills sem depender do Canaletto ou de credenciais privadas.
+Um clone limpo deve conseguir instalar as dependências, executar a validação sintática e os testes do núcleo, iniciar o DarkHub e descobrir as skills sem depender de credenciais privadas.

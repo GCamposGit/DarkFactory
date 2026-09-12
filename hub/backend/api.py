@@ -956,7 +956,9 @@ def run_tests(
 
 
 @router.get("/tasks/dashboard", response_model=TaskDashboardReport)
+@router.get("/tasks/dashboard/", response_model=TaskDashboardReport, include_in_schema=False)
 @router.get("/tasks", response_model=TaskDashboardReport, include_in_schema=False)
+@router.get("/tasks/", response_model=TaskDashboardReport, include_in_schema=False)
 def get_task_dashboard(service: HubService = Depends(get_hub_service)) -> TaskDashboardReport:
     """Return the read-only queue/run/stage/cost/evidence projection for DarkHub."""
     return service.get_task_dashboard()
@@ -1116,6 +1118,53 @@ def trigger_cloud_deploy(
     service_name = (body or {}).get("service_name", "darkhub")
     custom_url = (body or {}).get("deploy_url")
     return service.trigger_dokploy_deployment(service_name=service_name, custom_url=custom_url)
+
+
+# ==============================================================================
+# Telegram Gateway & n8n Community Endpoints (HF-14)
+# ==============================================================================
+
+
+@router.post("/webhooks/telegram")
+async def handle_telegram_webhook(
+    request: Request,
+    service: HubService = Depends(get_hub_service),
+    secret_token: Optional[str] = Header(None, alias="X-Telegram-Bot-Api-Secret-Token"),
+) -> Dict[str, Any]:
+    """Receives and processes incoming Telegram Bot Webhook updates (HF-14)."""
+    try:
+        payload = await request.json()
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid JSON payload: {exc}",
+        )
+
+    result = service.process_telegram_webhook(payload=payload, secret_token_header=secret_token)
+    if not result.get("authorized") and result.get("error"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=result["error"],
+        )
+    return result
+
+
+@router.get("/integrations/telegram/status")
+def get_telegram_status_endpoint(
+    service: HubService = Depends(get_hub_service),
+) -> Dict[str, Any]:
+    """Returns the operational status of the Telegram Gateway (HF-14)."""
+    return service.get_telegram_gateway_status()
+
+
+@router.get("/integrations/n8n/status")
+def get_n8n_status_endpoint(
+    url: Optional[str] = Query(None, description="n8n instance URL to probe"),
+    service: HubService = Depends(get_hub_service),
+) -> Dict[str, Any]:
+    """Probes n8n endpoint and returns verification report (HF-14)."""
+    return service.get_n8n_status(target_url=url)
+
 
 
 

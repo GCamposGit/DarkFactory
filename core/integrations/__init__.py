@@ -2,9 +2,24 @@
 
 from core.integrations.github import (
     GitHubApiError,
-    GitHubClient,
     GitHubCheck,
+    GitHubClient,
     PullRequestSnapshot,
+)
+from core.integrations.n8n import (
+    N8nConfig,
+    N8nInstanceReport,
+    N8nManifestGenerator,
+    N8nProbe,
+    N8nWorkflowManager,
+)
+from core.integrations.telegram import (
+    TelegramActionType,
+    TelegramConfig,
+    TelegramDispatchResult,
+    TelegramGateway,
+    TelegramUpdate,
+    redact_secrets,
 )
 
 __all__ = [
@@ -12,4 +27,16 @@ __all__ = [
     "GitHubCheck",
     "GitHubClient",
     "PullRequestSnapshot",
+    "N8nConfig",
+    "N8nInstanceReport",
+    "N8nManifestGenerator",
+    "N8nProbe",
+    "N8nWorkflowManager",
+    "TelegramActionType",
+    "TelegramConfig",
+    "TelegramDispatchResult",
+    "TelegramGateway",
+    "TelegramUpdate",
+    "redact_secrets",
 ]
+

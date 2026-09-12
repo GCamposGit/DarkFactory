@@ -1,0 +1,47 @@
+# syntax=docker/dockerfile:1
+# Dark Factory Cloud Coordinator & Worker Dockerfile (Dokploy PaaS / Hetzner VPS)
+# Ticket: HF-03-01 | ADR-HF-001 / INFRA-05 / INFRA-06 / INFRA-07
+
+FROM python:3.12-slim AS base
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONPATH=/app \
+    DARKFAC_ENV=production
+
+WORKDIR /app
+
+# Install minimal OS utilities for health probes and process inspection
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    ca-certificates \
+    procps \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install core requirements and pinned durable execution libraries
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt && \
+    pip install --no-cache-dir "dbos==2.31.1" "psycopg[binary]>=3.2.0,<3.3.0" "psutil>=6.0.0"
+
+# Create non-root system user for security
+RUN groupadd -g 1000 darkfac && \
+    useradd -u 1000 -g darkfac -m -s /bin/bash darkfac
+
+# Copy application files and factory metadata
+COPY core /app/core
+COPY hub /app/hub
+COPY docs /app/docs
+COPY scripts /app/scripts
+COPY deploy /app/deploy
+COPY spikes /app/spikes
+COPY .factory /app/.factory
+COPY harness.config.json /app/harness.config.json
+
+# Create artifact and log directories with appropriate ownership
+RUN mkdir -p /app/.factory/artifacts /app/.factory/test_logs /app/data && \
+    chown -R darkfac:darkfac /app
+
+USER darkfac
+
+# Default entrypoint delegating to specified command in docker-compose
+CMD ["python", "-m", "core.orchestrator.cloud_coordinator"]

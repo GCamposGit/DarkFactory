@@ -12,6 +12,7 @@ from core.learning.models import (
     LearningLedger,
 )
 from core.learning.tracker import ContinuousLearningTracker
+from core.learning.service import PersistentMemoryService
 
 __all__ = [
     "InteractionTurn",
@@ -20,4 +21,5 @@ __all__ = [
     "AnalogousTransfer",
     "LearningLedger",
     "ContinuousLearningTracker",
+    "PersistentMemoryService",
 ]

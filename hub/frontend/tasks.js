@@ -25,9 +25,14 @@ async function loadTaskDashboard(force = false) {
 
   try {
     const request = typeof hubFetch === "function" ? hubFetch : fetch;
-    const response = await request("/api/tasks/dashboard", {
+    let response = await request("/api/tasks/dashboard", {
       headers: { Accept: "application/json" },
     });
+    if (response.status === 404) {
+      response = await request("/tasks/dashboard", {
+        headers: { Accept: "application/json" },
+      });
+    }
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     taskDashboardState.report = await response.json();
     renderTaskDashboard();

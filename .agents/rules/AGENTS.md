@@ -17,6 +17,8 @@ Este documento governa a qualidade técnica de todo código produzido pelos agen
 - **Test-Driven / Test-First**: Toda nova funcionalidade deve ser acompanhada de testes unitários ou de integração que falhem antes da implementação e passem depois.
 - **Isolamento de Estado**: Testes não devem depender da ordem de execução nem deixar artefatos temporários órfãos no filesystem.
 - **Portões Determinísticos**: A validação é decidida por comandos executáveis emitindo marcadores estruturados, nunca por um resumo conversacional de LLM.
+- **Entrega com Operação no Mundo Real (Live End-to-End)**: Todo componente ou integração externa (ex: Telegram, n8n, GitHub, Dokploy, Provedores) só é considerado entregue após configuração ativa e validação operacional end-to-end no mundo real com o owner. É terminantemente proibido declarar entregas apenas com base em simulações/mocks sintéticos postergando a validação e setup real para o final.
+
 
 ## 3. Padrões de Comunicação e Comandos para o Usuário
 

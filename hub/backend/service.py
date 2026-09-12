@@ -129,6 +129,10 @@ from hub.backend.webhooks import (
     WebhookEngine,
     WebhookEventRecord,
 )
+from core.integrations.telegram import TelegramGateway, TelegramConfig
+from core.integrations.n8n import N8nProbe, N8nConfig
+from core.orchestrator.release_pipeline import ReleasePipelineService
+
 
 logger = logging.getLogger("darkhub.service")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
@@ -292,6 +296,8 @@ class HubService:
             repository_root,
             demands_path=self.demands_dir / "demands.json",
             include_demands=True,
+            include_hf=True,
+            include_infra=True,
         )
 
         if data_dir is not None:
@@ -2010,3 +2016,93 @@ class HubService:
         """Triggers Dokploy PaaS auto-deploy webhook (INFRA-09)."""
         client = DokployDeployClient()
         return client.trigger_deploy(service_name=service_name, custom_url=custom_url)
+
+    def _build_telegram_gateway(self) -> TelegramGateway:
+        """Constructs TelegramGateway with bound handlers to DarkHub core services."""
+        token = os.environ.get("TELEGRAM_BOT_TOKEN")
+        users = [int(u.strip()) for u in os.environ.get("TELEGRAM_AUTHORIZED_USERS", "").split(",") if u.strip().isdigit()]
+        chats = [int(c.strip()) for c in os.environ.get("TELEGRAM_AUTHORIZED_CHATS", "").split(",") if c.strip().isdigit()]
+        secret = os.environ.get("TELEGRAM_WEBHOOK_SECRET")
+        config = TelegramConfig(
+            bot_token=token,
+            authorized_user_ids=users,
+            authorized_chat_ids=chats,
+            webhook_secret_token=secret,
+        )
+
+        def _handle_demand(text: str, user_id: int) -> Dict[str, Any]:
+            ticket = self.create_demand_ticket(
+                UserTicket(
+                    title=f"Telegram Demand: {text[:40]}...",
+                    description=text,
+                    source="telegram",
+                    metadata={"author_id": str(user_id)},
+                )
+            )
+            return {"ticket_id": ticket.id}
+
+        def _handle_status(ticket_id: Optional[str]) -> Dict[str, Any]:
+            if ticket_id:
+                ticket = self.get_demand_ticket(ticket_id)
+                if ticket:
+                    return {"summary": f"Ticket {ticket.id}: status={ticket.status}, title={ticket.title}"}
+                return {"summary": f"Ticket '{ticket_id}' not found."}
+            dash = self.get_task_dashboard()
+            return {"summary": f"Tasks in queue: {dash.total_tasks}, active: {dash.running_tasks}, completed: {dash.completed_tasks}"}
+
+        def _handle_grill(ticket_id: str, choice: str, user_id: int) -> Dict[str, Any]:
+            try:
+                self.submit_demand_grill(ticket_id, answers=[f"Option: {choice}"])
+                return {"resumed": True, "ticket_id": ticket_id}
+            except Exception as e:
+                return {"resumed": False, "error": str(e)}
+
+        def _handle_approval(project_id: str, digest: str, user_id: int) -> Dict[str, Any]:
+            pipeline = ReleasePipelineService(storage_dir=self.project_root / ".factory" / "releases")
+            receipt = pipeline.record_client_acceptance(
+                project_id=project_id,
+                artifact_digest=digest,
+                client_id="telegram-owner",
+                approved_by=f"telegram-user-{user_id}",
+            )
+            return {"receipt_id": receipt.receipt_id, "project_id": project_id, "digest": digest}
+
+        return TelegramGateway(
+            config=config,
+            state_dir=self.project_root / ".factory" / "telegram",
+            demand_handler=_handle_demand,
+            status_handler=_handle_status,
+            grill_handler=_handle_grill,
+            approval_handler=_handle_approval,
+        )
+
+    def process_telegram_webhook(
+        self,
+        payload: Dict[str, Any],
+        secret_token_header: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Processes an incoming Telegram webhook update."""
+        expected_secret = os.environ.get("TELEGRAM_WEBHOOK_SECRET")
+        if expected_secret and secret_token_header != expected_secret:
+            return {
+                "update_id": payload.get("update_id", 0),
+                "action": "unauthorized",
+                "authorized": False,
+                "error": "Invalid X-Telegram-Bot-Api-Secret-Token",
+            }
+        gateway = self._build_telegram_gateway()
+        result = gateway.process_update(payload)
+        return result.model_dump()
+
+    def get_telegram_gateway_status(self) -> Dict[str, Any]:
+        """Returns diagnostic status of Telegram Gateway."""
+        gateway = self._build_telegram_gateway()
+        return gateway.get_status()
+
+    def get_n8n_status(self, target_url: Optional[str] = None) -> Dict[str, Any]:
+        """Probes n8n endpoint and returns health/instance report."""
+        url = target_url or os.environ.get("N8N_URL", "https://n8n.io")
+        probe = N8nProbe()
+        report = probe.probe(target_url=url)
+        return report.model_dump()
+

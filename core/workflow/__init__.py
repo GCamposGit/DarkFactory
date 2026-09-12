@@ -48,6 +48,18 @@ from core.workflow.runtime import (
     RuntimeNotFoundError,
     WorkflowRuntime,
 )
+from core.workflow.cycle import (
+    CorrectionLoopTracker,
+    ExternalTargetProbe,
+    ImplementationCandidate,
+    ImplementationCycleService,
+    IndependentReviewVerdict,
+    ValidationCycleResult,
+)
+from core.workflow.reconciliation import (
+    ManifestDiff,
+    reconcile_environment_manifest,
+)
 from core.workflow.verification import (
     EvidenceReceipt,
     GatePolicy,
@@ -106,4 +118,12 @@ __all__ = [
     "PolicyExemption",
     "ValidationMode",
     "VerificationContext",
+    "CorrectionLoopTracker",
+    "ExternalTargetProbe",
+    "ImplementationCandidate",
+    "ImplementationCycleService",
+    "IndependentReviewVerdict",
+    "ValidationCycleResult",
+    "ManifestDiff",
+    "reconcile_environment_manifest",
 ]

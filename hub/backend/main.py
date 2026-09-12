@@ -3,7 +3,7 @@ Main FastAPI application entrypoint for DarkHub.
 """
 
 from pathlib import Path
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -13,7 +13,9 @@ import urllib.parse
 from starlette.types import ASGIApp, Scope, Receive, Send
 from starlette.responses import Response, JSONResponse
 
-from hub.backend.api import roadmap_router, router as api_router
+from hub.backend.api import get_hub_service, roadmap_router, router as api_router
+from hub.backend.models import TaskDashboardReport
+from hub.backend.service import HubService
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 FRONTEND_DIR = BASE_DIR / "frontend"
@@ -119,11 +121,36 @@ class SecurityContainmentMiddleware:
         await self.app(scope, receive, send)
 
 
+from contextlib import asynccontextmanager
+
+_logger_hub = __import__("logging").getLogger("dark_factory.hub")
+
+
+@asynccontextmanager
+async def _lifespan(app: FastAPI):
+    """
+    Hub startup: ensures the benchmark ledger is fresh before serving traffic.
+    Runs in a background thread to avoid blocking the event loop.
+    Failures are logged as warnings only — never block startup.
+    """
+    import asyncio
+    try:
+        from core.benchmarks.fetcher import ensure_daily_benchmark
+        await asyncio.to_thread(ensure_daily_benchmark)
+        _logger_hub.info("[STARTUP] Benchmark ledger refreshed on hub start.")
+    except Exception as exc:
+        _logger_hub.warning(f"[STARTUP] Benchmark refresh skipped at startup: {exc}")
+    yield
+    # Teardown (none needed)
+
+
 app = FastAPI(
     title="DarkHub - AI & Dev Command Center",
     version="1.0.0",
     description="Cockpit centralizado para ferramentas de IA e desenvolvimento com monitoramento ativo e inferência local.",
+    lifespan=_lifespan,
 )
+
 
 # Restrict CORS to trusted loopback origins
 app.add_middleware(
@@ -141,6 +168,15 @@ app.add_middleware(SecurityContainmentMiddleware)
 app.include_router(api_router)
 app.include_router(roadmap_router, prefix="/api")
 app.include_router(roadmap_router)
+
+# Root-level aliases for operational task dashboard (eliminating 404 on reverse proxy / direct calls)
+@app.get("/tasks/dashboard", response_model=TaskDashboardReport, tags=["DarkHub Tasks"], include_in_schema=False)
+@app.get("/tasks/dashboard/", response_model=TaskDashboardReport, include_in_schema=False)
+@app.get("/tasks", response_model=TaskDashboardReport, include_in_schema=False)
+@app.get("/tasks/", response_model=TaskDashboardReport, include_in_schema=False)
+def get_task_dashboard_root(service: HubService = Depends(get_hub_service)) -> TaskDashboardReport:
+    """Root alias for the operational task dashboard projection (DF-21 / HF-13)."""
+    return service.get_task_dashboard()
 
 
 # Root route serving index.html

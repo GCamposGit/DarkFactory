@@ -1,0 +1,56 @@
+{
+  "name": "DarkFac Pipeline & Incident Telegram Alerts",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "pipeline-alerts",
+        "options": {}
+      },
+      "id": "node-alert-webhook",
+      "name": "Alert Inbound Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [240, 300],
+      "webhookId": "darkfac-pipeline-alerts"
+    },
+    {
+      "parameters": {
+        "operation": "sendMessage",
+        "chatId": "={{ $json.body.chat_id }}",
+        "text": "=🔔 <b>DarkFac Alert [{{ $json.body.project_id }}]</b>\n\nEvent: <code>{{ $json.body.event_type }}</code>\nStatus: <b>{{ $json.body.status }}</b>\nDetails: {{ $json.body.message }}\n\nTimestamp: {{ $json.body.timestamp }}",
+        "additionalFields": {
+          "parse_mode": "HTML"
+        }
+      },
+      "id": "node-telegram-send",
+      "name": "Send Alert to Telegram",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [480, 300],
+      "credentials": {
+        "telegramApi": {
+          "id": "REDACTED",
+          "name": "REDACTED"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Alert Inbound Webhook": {
+      "main": [
+        [
+          {
+            "node": "Send Alert to Telegram",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

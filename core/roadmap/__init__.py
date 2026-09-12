@@ -21,7 +21,13 @@ from core.roadmap.models import (
     RoadmapSourceRef,
 )
 from core.roadmap.service import RoadmapQueryService
-from core.roadmap.sources import JsonRoadmapSource, MarkdownDevelopmentPlanSource, RoadmapSource
+from core.roadmap.sources import (
+    HybridWorkflowPlanSource,
+    InfraRoadmapJsonSource,
+    JsonRoadmapSource,
+    MarkdownDevelopmentPlanSource,
+    RoadmapSource,
+)
 from core.roadmap.store import RoadmapSnapshotStore, RoadmapUnavailableError
 
 __all__ = [
@@ -29,6 +35,8 @@ __all__ = [
     "DeliveryStatus",
     "DependencyType",
     "FreshnessStatus",
+    "HybridWorkflowPlanSource",
+    "InfraRoadmapJsonSource",
     "JsonRoadmapSource",
     "MarkdownDevelopmentPlanSource",
     "LifecycleStage",

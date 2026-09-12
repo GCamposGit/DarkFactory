@@ -160,6 +160,9 @@ class SessionLearningPack:
     flashcards: List[ActiveRecallCard] = field(default_factory=list)
     files_analyzed: List[str] = field(default_factory=list)
     metrics: Dict[str, Any] = field(default_factory=dict)
+    discussion_topics: List[str] = field(default_factory=list)
+    reading_is_optional: bool = True
+    blocks_production: bool = False
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -172,6 +175,9 @@ class SessionLearningPack:
             "flashcards": [f.to_dict() for f in self.flashcards],
             "files_analyzed": self.files_analyzed,
             "metrics": self.metrics,
+            "discussion_topics": list(self.discussion_topics),
+            "reading_is_optional": self.reading_is_optional,
+            "blocks_production": self.blocks_production,
         }
 
     @classmethod
@@ -186,4 +192,7 @@ class SessionLearningPack:
             flashcards=[ActiveRecallCard.from_dict(f) for f in data.get("flashcards", [])],
             files_analyzed=data.get("files_analyzed", []),
             metrics=data.get("metrics", {}),
+            discussion_topics=list(data.get("discussion_topics", [])),
+            reading_is_optional=data.get("reading_is_optional", True),
+            blocks_production=data.get("blocks_production", False),
         )

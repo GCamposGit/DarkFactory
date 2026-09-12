@@ -1,0 +1,15 @@
+{
+  "schema_version": "1",
+  "lab_id": "lab-acceptance-20260911",
+  "root_dir": "C:\\dev\\DarkFac\\.factory\\experiments\\HF-02\\lab-acceptance-20260911\\native_sqlite",
+  "runtime": "native_sqlite",
+  "runtime_version": "core-v1",
+  "workflow_version": "v1",
+  "database_alias": "darkfac_hf02_native_sql",
+  "database_url_env": null,
+  "effect_base_url": "http://127.0.0.1:57072",
+  "lease_seconds": 1.0,
+  "scenario_timeout_seconds": 30.0,
+  "process_start_timeout_seconds": 20.0,
+  "sample_interval_ms": 100
+}

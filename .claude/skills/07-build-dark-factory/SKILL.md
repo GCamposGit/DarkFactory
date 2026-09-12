@@ -3,64 +3,59 @@ name: build-dark-factory
 description: Adota ou inicia qualquer repositório greenfield ou brownfield pela Project Adoption Gateway transacional da Dark Factory. Instala runtime namespaced com proveniência verificável, preserva contratos do produto e prepara worktrees de demanda sem misturar roadmaps. Use quando o usuário quiser começar um projeto ou colocar a fábrica para desenvolver um projeto existente.
 ---
 
-# Build Dark Factory: adoção nativa de projetos
+# 07 - Build Dark Factory: Adoção Nativa de Projetos
 
-Esta skill conecta um produto à Dark Factory compartilhada. **Nunca copie diretórios manualmente nem importe um checkout irmão.** Use `core.adoption.cli`; ele isola a operação numa worktree, instala a fábrica em `.factory/runtime`, preserva o ownership do produto e fixa proveniência em `.factory/darkfac.lock.json`.
-
-## O Dial de Autonomia (The Autonomy Dial)
-
-| Nível | O que é Automático | O que o Humano Faz |
-| :--- | :--- | :--- |
-| **0** | Workflows e scripts existem | Executa tudo manualmente |
-| **1** | Issue rotulada -> PR abre | Revisa diff e faz merge manual |
-| **2** | Validador roda e emite veredito | Faz merge manual |
-| **3 (Padrão)** | **Auto-merge quando todos os portões e revisões forem verdes** | Escreve issues/PRD e faz releases |
-| **4** | Sistema faz triagem e gera seus próprios testes de estresse | Escreve issues de alto nível |
-| **5** | Sistema cria as próprias issues a partir da MISSION | Apenas monitora resultados |
-
-> O nível é uma permissão do produto, não uma promessa da instalação. O padrão seguro do gateway é nível 2. Auto-merge, deploy, agendamento, credenciais e chamadas pagas permanecem fora de escopo até autorização explícita.
-
-## Fluxo obrigatório
-
-```text
-inspect -> plan -> worktree isolada -> apply -> verify -> commit -> prepare-task
-```
-
-## Brownfield
-
-```powershell
-python -m core.adoption.cli inspect C:\dev\Produto
-python -m core.adoption.cli plan C:\dev\Produto
-python -m core.adoption.cli adopt C:\dev\Produto --branch codex/darkfac-adoption
-```
-
-Mesmo que o checkout principal esteja sujo, `adopt` usa apenas o commit solicitado. Para migrar arquivos de governança já preparados, forneça explicitamente `--mission-file`, `--rules-file` e `--harness-file`. Nenhum outro overlay é aceito.
-
-## Greenfield
-
-```powershell
-python -m core.adoption.cli init C:\dev\NovoProduto --name NovoProduto
-```
-
-O destino precisa estar vazio. Sem stack/harness determinístico, a instalação não declara readiness. Revise os TODOs de governança antes de permitir trabalho autônomo.
-
-## Portões antes da primeira demanda
-
-1. `python -m core.adoption.cli verify <worktree>` precisa retornar `ready: true`.
-2. Execute `python .factory/darkfac.py harness --quick` dentro do produto e exija `[HARNESS_PASS]` com contagem positiva.
-3. Revise e faça commit da adoção.
-4. Crie a demanda com `python -m core.adoption.cli prepare-task ...`, declarando owner, caminhos e validações.
-5. Só então rode Prime-Plan-Implement-Validate e revisão adversarial.
+Esta skill conecta qualquer produto de software à Dark Factory compartilhada de forma transacional e namespaced, fixando proveniência auditável sem contaminar a árvore de trabalho principal.
 
 ---
 
-## 🧠 Continuous Self-Improvement & Failure RCA Integration
+## 1. Contratos Normativos da Etapa
 
-1. **Instalação do Loop Mestre de Aprendizado (`00-continuous-self-improvement`)**:
-   - O runtime namespaced inclui `core/learning/`; sua saída é gravada no `.factory/` do produto por meio da raiz portátil.
-   - Skills copiadas têm comandos reescritos para `.factory/darkfac.py`, sem colisão com pacotes `core` do produto.
-2. **RCA de Falhas de Implantação e Transição de Estados**:
-   - Se uma issue travar no estado `NEEDS_FIX` por mais de 2 voltas, o sistema dispara RCA automático para diagnosticar a causa sistêmica (especificação vaga, dependência quebrada ou teste frágil).
-   - O patch é aplicado diretamente na camada de orientação ou no harness antes de retomar a execução autônoma.
+### Inputs (Entradas)
+- **Diretório do Produto Alvo**: Caminho do repositório brownfield ou pasta vazia para greenfield.
+- **Configurações de Adoção**: Arquivos opcionais de missão (`--mission-file`), regras (`--rules-file`) e harness (`--harness-file`).
+- **Branch de Adoção**: Nome da branch dedicada (ex: `codex/darkfac-adoption`).
 
-Contrato completo: `docs/PROJECT_ADOPTION.md`.
+### Ações e Procedimento Executável
+1. **Fluxo Obrigatório Transacional**:
+   ```text
+   inspect -> plan -> worktree isolada -> apply -> verify -> commit -> prepare-task
+   ```
+2. **Execução Headless para Brownfield**:
+   ```powershell
+   python -m core.adoption.cli inspect C:\dev\Produto
+   python -m core.adoption.cli plan C:\dev\Produto
+   python -m core.adoption.cli adopt C:\dev\Produto --branch codex/darkfac-adoption
+   ```
+3. **Execução Headless para Greenfield**:
+   ```powershell
+   python -m core.adoption.cli init C:\dev\NovoProduto --name NovoProduto
+   ```
+4. **Validação de Portão de Prontidão da Adoção**:
+   - Execute a checagem formal:
+     ```powershell
+     python -m core.adoption.cli verify <worktree>
+     ```
+   - Execute o harness isolado do produto:
+     ```powershell
+     python .factory/darkfac.py harness --quick
+     ```
+
+### Outputs Estruturados
+- **Runtime Namespaced**: Instalação isolada em `.factory/runtime/` no produto.
+- **Lockfile de Proveniência**: `.factory/darkfac.lock.json` registrando hashes exatos e contratos preservados.
+- **Relatório de Adoção**: Confirmação estruturada com `ready: true` e diagnóstico do harness.
+
+### Portões, Política e Validação
+- **Portão Pré-Demanda**: O `ReadinessGate` do produto rejeita qualquer ticket se `core.adoption.cli verify` não retornar `ready: true` ou se o harness não emitir `[HARNESS_PASS]`.
+- **Dial de Autonomia Controlado**:
+  - Nível 2 (Padrão Seguro): Testes e validações rodam de forma autônoma; o merge é manual.
+  - Nível 3: Auto-merge estritamente condicionado a portões e revisões verdes, após autorização explícita do owner.
+- **Isolamento em Worktrees**: Proibida qualquer cópia manual de pastas ou operação em branch suja.
+
+---
+
+## 2. Continuous Self-Improvement & RCA de Adoção
+
+- **Instalação do Loop Mestre**: O runtime adotado inclui o pacote `core.learning`, com registros direcionados para o `.factory/` do produto.
+- **RCA em Travamento de Implantação**: Se uma adoção falhar por dependências de sistema ou oráculos incompatíveis, execute RCA imediatamente antes de qualquer nova tentativa.

@@ -74,6 +74,30 @@ def main() -> int:
     grill_p.add_argument("--answers", default=None, help="JSON string with custom answers dict")
     grill_p.add_argument("--json", action="store_true", help="Output raw JSON")
 
+    # intake command (HF-08)
+    intake_p = subparsers.add_parser("intake", help="Submit a demand, evaluate Grill clarity (G1), and register run")
+    intake_p.add_argument("--title", required=True, help="Demand title")
+    intake_p.add_argument("--problem", default="", help="Problem statement")
+    intake_p.add_argument("--journey", default="", help="Core user journey")
+    intake_p.add_argument("--non-goals", nargs="*", default=[], help="List of non-goals")
+    intake_p.add_argument("--criteria", nargs="*", default=[], help="Acceptance criteria")
+    intake_p.add_argument("--audio-file", default=None, help="Audio file to transcribe via Skill 09")
+    intake_p.add_argument("--project", default="darkfac", help="Project identifier")
+    intake_p.add_argument("--force-heuristic", action="store_true", help="Force deterministic script")
+    intake_p.add_argument("--json", action="store_true", help="Output raw JSON")
+
+    # plan command (HF-08)
+    plan_p = subparsers.add_parser("plan", help="Resolve dependencies (G2), generate manifest and WorkflowHandoff")
+    plan_p.add_argument("ticket_id", help="Ticket ID (e.g. USR-01)")
+    plan_p.add_argument("--json", action="store_true", help="Output raw JSON")
+
+    # bootstrap command (HF-08)
+    boot_p = subparsers.add_parser("bootstrap", help="Bootstrap a greenfield or brownfield project with Skill 07")
+    boot_p.add_argument("name", help="Project name")
+    boot_p.add_argument("path", help="Target directory")
+    boot_p.add_argument("--kind", choices=["greenfield", "brownfield"], default="greenfield", help="Bootstrap mode")
+    boot_p.add_argument("--json", action="store_true", help="Output raw JSON")
+
     args = parser.parse_args()
     service = build_default_demands_service(PROJECT_ROOT)
 
@@ -229,6 +253,74 @@ def main() -> int:
             print(f"\nNon-goals atuais:")
             for ng in result.refined_ticket.non_goals:
                 print(f"  - {ng}")
+        return 0
+
+    elif args.command == "intake":
+        if args.audio_file:
+            res = service.receive_audio_demand(
+                args.audio_file,
+                args.project,
+                args.title,
+                force_heuristic=args.force_heuristic,
+            )
+        else:
+            inp = DemandInput(
+                project_id=args.project,
+                title=args.title,
+                problem_statement=args.problem,
+                core_journey=args.journey,
+                non_goals=args.non_goals,
+                acceptance_criteria=args.criteria,
+            )
+            res = service.receive_integrated_demand(inp, force_heuristic=args.force_heuristic)
+
+        if args.json:
+            out_dict = {
+                "ticket": res["ticket"].model_dump(mode="json"),
+                "run_id": res["run_id"],
+                "status": res["status"],
+                "ready_for_spec": res["grill_record"].ready_for_spec,
+                "pending_questions": [q.model_dump(mode="json") for q in res["grill_record"].pending_questions],
+            }
+            print(json.dumps(out_dict, indent=2))
+        else:
+            print(f"[OK] Demanda {res['ticket'].id} recebida com sucesso! (Run: {res['run_id']})")
+            print(f"Status do Grill: {res['status']} - {res['grill_record'].readiness_justification}")
+            if res.get("grill_session"):
+                print(f"Aviso: {len(res['grill_session'].questions)} pergunta(s) pendente(s). Execute `grill {res['ticket'].id}` para responder.")
+        return 0
+
+    elif args.command == "plan":
+        ticket = service.get_ticket(args.ticket_id)
+        if not ticket:
+            print(f"[ERRO] Ticket {args.ticket_id} não encontrado", file=sys.stderr)
+            return 1
+        from core.demands.contracts_adapter import build_grill_record
+        grill_rec = build_grill_record(ticket, ready_for_spec=True)
+        res = service.plan_and_resolve_dependencies(args.ticket_id, grill_rec)
+        if args.json:
+            print(res["handoff"].model_dump_json(indent=2))
+        else:
+            print(f"[OK] Handoff compilado para {args.ticket_id}!")
+            print(f"Gate de Prontidão: {res['readiness_report'].state.value}")
+            print(f"Manifesto de Ambiente: {res['environment_manifest'].environment_ref}")
+            print(f"Critérios de validação: {len(res['handoff'].validate_commands)} comando(s)")
+        return 0
+
+    elif args.command == "bootstrap":
+        res = service.bootstrap_project(args.name, args.path, kind=args.kind)
+        if args.json:
+            print(json.dumps({
+                "project": res["project_name"],
+                "target_dir": str(res["target_dir"]),
+                "environment_ref": res["environment_manifest"].environment_ref,
+                "lock_path": str(res["lock_path"]),
+            }, indent=2))
+        else:
+            print(f"[OK] Projeto '{res['project_name']}' inicializado ({args.kind})!")
+            print(f"Diretório: {res['target_dir']}")
+            print(f"Manifesto de Ambiente: {res['environment_manifest'].environment_ref}")
+            print(f"Lock de proveniência: {res['lock_path']}")
         return 0
 
     return 0

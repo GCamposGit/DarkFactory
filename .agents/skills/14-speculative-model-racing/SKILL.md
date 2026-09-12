@@ -5,126 +5,48 @@ description: Executa corridas especulativas A/B/n em cascata e torneios empíric
 
 # 14 - Speculative Model Racing & Empirical Tournament Engine
 
-O **Speculative Model Racing Engine** implementa o estado da arte em seleção dinâmica custo-efetiva e avaliação empírica contínua de LLMs para a Dark Factory.
-Inspirado nos avanços de **RouteLLM** (LMSYS / UC Berkeley 2024), **FrugalGPT** (Stanford 2023), **Speculative Cascades** (Google Research 2024) e **Multi-Objective Epsilon-Dominance**:
-- O sistema vai além de números estáticos de SWE-bench sintético, aferindo a capacidade real dos modelos no ambiente de produção do usuário (Windows PowerShell, AST checks, pytest fixtures e determinismo estrito).
-- Executa cascatas especulativas com os **Top 3 modelos** por nível de capacidade, aceitando a solução do modelo rápido/econômico apenas quando aprovada deterministicamente no harness de validação.
+O **Speculative Model Racing Engine** implementa a seleção dinâmica custo-efetiva e a avaliação empírica contínua de LLMs para a Dark Factory, combinando cascatas especulativas com validação estrita no ambiente de produção.
 
 ---
 
-## 🏛️ Arquitetura da Corrida Especulativa
+## 1. Contratos Normativos da Etapa
 
-```text
-               ┌────────────────────────────────────────────────────────┐
-               │                TAREFA DA DARK FACTORY                  │
-               │   (Complexidade: Critical | High | Medium | Local)     │
-               └───────────────────────────┬────────────────────────────┘
-                                           │
-                                           ▼
-               ┌────────────────────────────────────────────────────────┐
-               │         TOP 3 SELEÇÃO POR TIER & PROXIMIDADE           │
-               │  1. Fast Drafter       (Baixo custo / Alta velocidade) │
-               │  2. Balanced Challenger (Near-Pareto FPI >= 95%)       │
-               │  3. Frontier Arbiter   (Líder absoluto de capacidade)  │
-               └───────────────────────────┬────────────────────────────┘
-                                           │
-                        [Etapa 1: Geração Especulativa]
-                                           │
-                                           ▼
-               ┌────────────────────────────────────────────────────────┐
-               │           FAST DRAFTER (ou Challenger Local $0)        │
-               │          Gera a primeira tentativa em < 2s             │
-               └───────────────────────────┬────────────────────────────┘
-                                           │
-                                           ▼
-               ┌────────────────────────────────────────────────────────┐
-               │       PORTÃO DE VALIDAÇÃO DETERMINÍSTICO (Code Judge)  │
-               │  - py_compile & Type hints (AGENTS.md)                 │
-               │  - AST Check & Linter determinístico                   │
-               │  - Execução de Testes Unitários de Regressão           │
-               └───────────────────────────┬────────────────────────────┘
-                                           │
-                       ┌───────────────────┴───────────────────┐
-                       │                                       │
-                  [Passou 100%]                           [Falhou / Bug]
-                       │                                       │
-                       ▼                                       ▼
-       ┌───────────────────────────────┐       ┌───────────────────────────────┐
-       │     VITÓRIA DO DRAFTER        │       │    ESCALONAMENTO INVISÍVEL    │
-       │ - Custo marginal: ~$0.005     │       │ - Arbiter Frontier (ex: Astra)│
-       │ - Latência: ultra-baixa       │       │ - Regenera e valida solução   │
-       │ - Economia de até 98%         │       │ - Garante entrega sem falhas  │
-       └───────────────┬───────────────┘       └───────────────┬───────────────┘
-                       │                                       │
-                       └───────────────────┬───────────────────┘
-                                           │
-                                           ▼
-               ┌────────────────────────────────────────────────────────┐
-               │              EMPIRICAL BENCHMARK LEDGER                │
-               │  - Atualiza Pass@1 real na Dark Factory                │
-               │  - Atualiza Elo Rating (Bradley-Terry)                 │
-               │  - Registra economia acumulada ($ saved)               │
-               │  - Persiste em .factory/benchmarks/empirical_ledger.json│
-               └────────────────────────────────────────────────────────┘
-```
+### Inputs (Entradas)
+- **Especificação da Tarefa**: Requisito, caminhos de arquivo e critérios de aceitação.
+- **Top 3 Modelos por Tier de Pareto**:
+  1. *Fast Drafter*: Baixo custo e altíssima velocidade (ex.: modelo local $0 ou light cloud).
+  2. *Balanced Challenger*: Near-Pareto com alta proximidade de fronteira (FPI >= 95%).
+  3. *Frontier Arbiter*: Líder absoluto de capacidade para a classe da tarefa.
+- **Comandos de Teste**: Suíte determinística para verificação da solução.
+
+### Ações e Procedimento Executável
+1. **Execução em Cascata Especulativa**:
+   - O *Fast Drafter* gera a primeira tentativa de código em baixa latência.
+   - O código gerado é submetido imediatamente ao **Code Judge Determinístico**:
+     - Compilação sintática AST (`py_compile` / linting estrito).
+     - Execução da suíte de testes unitários relevante.
+   - **Vitória do Drafter**: Se aprovado com 100% de sucesso determinístico, a tarefa é concluída com custo e latência mínimos.
+   - **Escalação Transparente**: Se houver falha, a tarefa escala para o *Challenger* ou *Arbiter* de fronteira, garantindo a entrega sem falhas.
+2. **Torneio Empírico de Desempenho (Shadow Tournament)**:
+   - Avalia modelos concorrentes em micro-tarefas reais (AST, edge cases de UTF-8, mocks para pytest).
+   - Calcula taxa de Pass@1 empírico e calibra o Elo Rating (Bradley-Terry).
+3. **Análise de Fronteira via CLI**:
+   ```powershell
+   python -m core.benchmarks.cli status
+   python -m core.benchmarks.cli frontier
+   ```
+
+### Outputs Estruturados
+- **Código Validado**: Solução que passou integralmente no portão determinístico.
+- **Empirical Benchmark Ledger**: `.factory/benchmarks/empirical_ledger.json` contendo Pass@1 real, Elo Rating atualizado e telemetria de economia financeira.
+
+### Portões, Política e Validação
+- **Portão Determinístico Inviolável**: Nenhuma solução gerada por modelo especulativo ou econômico pode ser aceita sem passar em 100% dos testes e checagens estáticas.
+- **Seleção Dinâmica de Modelos**: Proibida a fixação de nomes legados estáticos como defaults; a composição da tríade (Drafter, Challenger, Arbiter) deve ser resolvida dinamicamente a partir do catálogo diário da Fronteira de Pareto.
+- **Isolamento de Efeitos**: Execuções especulativas concorrentes operam em worktrees ou sandboxes limpos, sem colisão de estado.
 
 ---
 
-## 🎯 Os 3 Modos Operacionais
+## 2. Continuous Self-Improvement & Calibração de Elo
 
-### 1. Live Speculative Racing (Produção em Tempo Real)
-- Ao receber uma tarefa na fábrica, em vez de enviar cegamente para o modelo mais caro:
-  - O **Fast Drafter** (ex.: `qwen3-8-flash` ou `qwen-code-fast` local) tenta gerar a solução.
-  - O código gerado é submetido imediatamente ao Code Judge determinístico.
-  - Se aprovado, a tarefa conclui em fração do tempo e custo.
-  - Se reprovado, a tarefa escala para o **Frontier Arbiter** (ex.: `gpt-5-6-luna-high` ou `gpt-6-astra`), garantindo 100% de sucesso final.
-
-### 2. Torneio Empírico de Desempenho (Shadow Tournament)
-- Avalia os Top 3 modelos em micro-tarefas canônicas da fábrica:
-  - Transpilação e validação de AST.
-  - Resolução de edge cases de UTF-8 no Windows.
-  - Geração de fixtures e mocks para pytest.
-- Calcula a taxa de **Pass@1 Empírico** e ajusta o **Elo Rating (Bradley-Terry)** de cada modelo.
-
-### 3. Índice de Proximidade da Fronteira (Frontier Proximity Index - FPI)
-- Modela a envoltória contínua da fronteira de Pareto em espaço normalizado log-linear.
-- Categorias de modelos:
-  - **Frontier Leader (FPI = 100%)**: Define a curva ótima de custo-benefício.
-  - **Near-Pareto Challenger (FPI >= 95%)**: Modelos a poucos passos da fronteira com alta oportunidade (ex.: altíssimo throughput ou janela de contexto massiva).
-  - **Dominated (FPI < 85%)**: Modelos superados em custo e qualidade por alternativas superiores.
-
----
-
-## 🛠️ Comandos de CLI (`core.benchmarks.cli`)
-
-### 1. Analisar Distância da Fronteira e Epsilon-Gap
-```bash
-python -m core.benchmarks.cli proximity
-```
-Exibe a tabela completa com FPI (%), $\epsilon$-gap de capacidade (pts), $\epsilon$-gap de custo (\$), Opportunity Score e classificação (Pareto Optimal vs Near-Challenger).
-
-### 2. Listar os Top 3 Candidatos por Tier
-```bash
-python -m core.benchmarks.cli top3 --complexity high
-python -m core.benchmarks.cli top3 --complexity critical
-python -m core.benchmarks.cli top3 --complexity local_fast
-```
-
-### 3. Executar Corrida Especulativa
-```bash
-python -m core.benchmarks.cli race --complexity high --prompt "Implementar função com type hints e docstring"
-python -m core.benchmarks.cli race --complexity critical
-```
-
-### 4. Rodar Torneio Empírico e Atualizar Elo Leaderboard
-```bash
-python -m core.benchmarks.cli tournament --complexity high
-```
-
----
-
-## 🏛️ Governança Inviolável
-
-1. **Zero Data-Sharing**: Endpoints com retenção ou compartilhamento de dados (`contributor`, `data-sharing`) são banidos de todas as corridas especulativas.
-2. **Local-First ($0) Sempre Disponível**: O tier `local_fast` disputa exclusivamente entre instâncias locais do Ollama (`qwen-code-deep`, `qwen-code-fast`, `deepseek-coder`).
-3. **Portão Determinístico Obrigatório**: Nenhuma vitória especulativa é concedida sem aprovação no Code Judge (`py_compile` ou testes executáveis).
+- **Fechamento do Loop Empírico**: Se um modelo com alto índice em benchmarks sintéticos falhar repetidamente no ambiente Windows local da fábrica, seu Elo empírico é rebaixado no ledger, reduzindo sua prioridade nas cascatas especulativas.

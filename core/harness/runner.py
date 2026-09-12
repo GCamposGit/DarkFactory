@@ -43,6 +43,39 @@ from core.harness.markers import (
 from core.harness.models import HarnessConfig, HarnessResult, HarnessStepConfig
 
 
+def _notify_hub_on_pass() -> None:
+    """
+    Fire-and-forget: POST /api/benchmarks/refresh after HARNESS_PASS.
+
+    - Uses only stdlib (urllib) — no external dependencies.
+    - Reads DARKHUB_URL env var; defaults to "https://darkhub.ggcampos.com".
+    - Also attempts localhost:8000 if DARKHUB_URL is not explicitly set to local,
+      ensuring both production hub and local dev hub receive the refresh signal.
+    - Timeout: 4 s. Any failure is swallowed silently — never blocks or alters the
+      harness exit code. This is a best-effort notification, not a gate.
+    """
+    import urllib.request
+
+    primary_url = os.environ.get("DARKHUB_URL", "https://darkhub.ggcampos.com").rstrip("/")
+    target_urls = [primary_url]
+    if "localhost" not in primary_url and "127.0.0.1" not in primary_url:
+        target_urls.append("http://localhost:8000")
+
+    for hub_url in target_urls:
+        try:
+            req = urllib.request.Request(
+                f"{hub_url}/api/benchmarks/refresh",
+                data=b"",
+                method="POST",
+                headers={"Content-Type": "application/json", "User-Agent": "DarkFactory-Harness/1.0"},
+            )
+            with urllib.request.urlopen(req, timeout=4) as resp:
+                print(f"[HUB] Benchmark refresh triggered → {hub_url} ({resp.status})")
+        except Exception:
+            pass  # Hub unreachable or offline — that's fine, fail-closed isolation preserved
+
+
+
 @dataclass(frozen=True)
 class StepExecution:
     name: str
@@ -213,7 +246,10 @@ def execute(
         and passed_count > 0
     )
     print(MARKER_HARNESS_PASS if success else MARKER_HARNESS_FAIL)
+    if success:
+        _notify_hub_on_pass()
     return success
+
 
 
 def main(argv: Sequence[str] | None = None) -> int:

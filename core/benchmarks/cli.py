@@ -62,6 +62,8 @@ def print_frontier_table(models: List[ModelBenchmarkEntry], title: str = "PARETO
         plan_str = m.subscription_name if m.has_subscription_plan and m.subscription_name else "-"
         quota_save = f"+{format_currency(m.cost_per_task)}" if m.has_subscription_plan else "$0.00"
         cost_in_out = f"{format_currency(m.input_cost_per_m)}/{format_currency(m.output_cost_per_m)}"
+        coding_str = f"{m.coding_score:<5.1f}" if m.coding_score is not None else "  n/a"
+        tps_str = f"{m.output_speed_tps:<5.0f}" if m.output_speed_tps is not None else "  n/a"
 
         row = (
             f"{m.model_id[:30]:<30} | "
@@ -69,8 +71,8 @@ def print_frontier_table(models: List[ModelBenchmarkEntry], title: str = "PARETO
             f"{cost_in_out:<13} | "
             f"{format_currency(m.cost_per_task):<8} | "
             f"{plan_str[:18]:<18} | "
-            f"{m.coding_score:<5.1f} | "
-            f"{m.output_speed_tps:<5.0f} | "
+            f"{coding_str:<5} | "
+            f"{tps_str:<5} | "
             f"{quota_save:<10}"
         )
         print(row)

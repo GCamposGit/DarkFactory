@@ -260,11 +260,17 @@ def test_speculative_race_escalation_on_failure():
         ledger = EmpiricalBenchmarkLedger(file_path=temp_dir / "empirical_ledger.json")
         engine = SpeculativeRacingEngine(ledger=ledger)
 
-        # Custom validator: drafter fails, arbiter passes
+        # Custom validator: only the FIRST model tried (the fast_drafter) fails.
+        # Using a closure-captured set avoids coupling the validator to brittle model-name
+        # substrings — which broke when deepseek-v4.1-flash (containing "flash") became
+        # the frontier_arbiter in the Pareto catalog.
+        _seen: set = set()
+
         def custom_validator(model_id: str):
-            if "flash" in model_id or "fast" in model_id:
+            if not _seen:          # first call -> drafter
+                _seen.add(model_id)
                 return False, {"error": "syntax_error_in_drafter"}
-            return True, {"verified": True}
+            return True, {"verified": True}  # subsequent call -> arbiter passes
 
         race = engine.execute_speculative_race(
             task_id="test_task_escalate",
@@ -283,6 +289,7 @@ def test_speculative_race_escalation_on_failure():
     finally:
         import shutil
         shutil.rmtree(temp_dir, ignore_errors=True)
+
 
 
 def test_empirical_tournament_and_elo():

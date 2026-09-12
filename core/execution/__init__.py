@@ -19,6 +19,16 @@ from core.execution.providers import (
     get_model_provider,
     get_openrouter_api_key,
 )
+from core.execution.resilience import (
+    FORBIDDEN_FALLBACK_MODELS,
+    CircuitBreaker,
+    CircuitState,
+    FallbackEvent,
+    FallbackReason,
+    JobModelPin,
+    ResilientModelProvider,
+    classify_error,
+)
 
 __all__ = [
     "AttemptOutcome",
@@ -26,7 +36,13 @@ __all__ = [
     "Budget",
     "BudgetWindow",
     "BudgetWindowType",
+    "CircuitBreaker",
+    "CircuitState",
     "ExecutionBudgetManager",
+    "FORBIDDEN_FALLBACK_MODELS",
+    "FallbackEvent",
+    "FallbackReason",
+    "JobModelPin",
     "MockModelProvider",
     "ModelProvider",
     "OllamaModelProvider",
@@ -34,8 +50,10 @@ __all__ = [
     "ProviderResponse",
     "ReservationRecord",
     "ReservationStatus",
+    "ResilientModelProvider",
     "UnifiedModelProvider",
     "UnknownCostPolicy",
+    "classify_error",
     "get_model_provider",
     "get_openrouter_api_key",
 ]

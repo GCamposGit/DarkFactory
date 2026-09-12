@@ -47,6 +47,8 @@ class ProviderCreditCard(BaseModel):
     status: CreditAccountStatus
     is_connected: bool
     current_month_spend_usd: Optional[float] = None
+    cumulative_spend_usd: Optional[float] = None
+    credit_limit_usd: Optional[float] = None
     available_credit_usd: Optional[float] = None
     currency: str = "USD"
     official_links: List[CreditOfficialLink] = Field(default_factory=list)
@@ -63,6 +65,8 @@ class ApiCreditsReport(BaseModel):
 
 class CreditAccountUpdateRequest(BaseModel):
     current_month_spend_usd: Optional[float] = None
+    cumulative_spend_usd: Optional[float] = None
+    credit_limit_usd: Optional[float] = None
     available_credit_usd: Optional[float] = None
     notes: Optional[str] = None
 
@@ -172,6 +176,8 @@ class ApiCreditsMonitor:
                     status=CreditAccountStatus(snapshot.get("status", "active")),
                     is_connected=True,
                     current_month_spend_usd=snapshot.get("current_month_spend_usd"),
+                    cumulative_spend_usd=snapshot.get("cumulative_spend_usd"),
+                    credit_limit_usd=snapshot.get("credit_limit_usd"),
                     available_credit_usd=snapshot.get("available_credit_usd"),
                     official_links=official_links,
                     notes=snapshot.get("notes", "Valores obtidos de snapshot offline"),
@@ -182,12 +188,16 @@ class ApiCreditsMonitor:
                 status=CreditAccountStatus.DISCONNECTED,
                 is_connected=False,
                 current_month_spend_usd=None,
+                cumulative_spend_usd=None,
+                credit_limit_usd=None,
                 available_credit_usd=None,
                 official_links=official_links,
                 notes="Chave OPENROUTER_API_KEY não configurada no sistema.",
             )
 
         spend_usd: Optional[float] = None
+        cumulative_usd: Optional[float] = None
+        credit_limit_usd: Optional[float] = None
         available_credit_usd: Optional[float] = None
         status = CreditAccountStatus.ACTIVE
         notes: Optional[str] = None
@@ -222,10 +232,17 @@ class ApiCreditsMonitor:
             )
             with urllib.request.urlopen(req_auth, timeout=6.0) as resp:
                 auth_data = json.loads(resp.read().decode("utf-8")).get("data", {})
-                spend_usd = round(float(auth_data.get("usage", 0.0)), 2)
-                limit_usd = auth_data.get("limit")
-                if available_credit_usd is None and limit_usd is not None:
-                    available_credit_usd = round(max(0.0, float(limit_usd) - spend_usd), 2)
+                cumulative_usd = round(float(auth_data.get("usage", 0.0)), 2)
+                limit_val = auth_data.get("limit")
+                if limit_val is not None:
+                    credit_limit_usd = round(float(limit_val), 2)
+                # HF-07 / Seção 2: Reconciliar 'usage' acumulado vs 'usage_monthly'
+                if "usage_monthly" in auth_data and auth_data.get("usage_monthly") is not None:
+                    spend_usd = round(float(auth_data["usage_monthly"]), 2)
+                else:
+                    spend_usd = cumulative_usd
+                if available_credit_usd is None and credit_limit_usd is not None:
+                    available_credit_usd = round(max(0.0, credit_limit_usd - cumulative_usd), 2)
                 if status == CreditAccountStatus.DEGRADED and available_credit_usd is not None:
                     status = CreditAccountStatus.ACTIVE
         except Exception as exc:
@@ -239,6 +256,8 @@ class ApiCreditsMonitor:
             snapshot = self._read_snapshot("openrouter")
             if snapshot:
                 spend_usd = snapshot.get("current_month_spend_usd")
+                cumulative_usd = snapshot.get("cumulative_spend_usd")
+                credit_limit_usd = snapshot.get("credit_limit_usd")
                 available_credit_usd = snapshot.get("available_credit_usd")
                 notes = "Valores de fallback obtidos de snapshot offline."
 
@@ -248,6 +267,8 @@ class ApiCreditsMonitor:
             status=status,
             is_connected=True,
             current_month_spend_usd=spend_usd,
+            cumulative_spend_usd=cumulative_usd,
+            credit_limit_usd=credit_limit_usd,
             available_credit_usd=available_credit_usd,
             official_links=official_links,
             notes=notes,
@@ -275,6 +296,8 @@ class ApiCreditsMonitor:
             )
 
         spend_usd: Optional[float] = snapshot.get("current_month_spend_usd") if snapshot else None
+        cumulative_usd: Optional[float] = snapshot.get("cumulative_spend_usd") if snapshot else None
+        credit_limit_usd: Optional[float] = snapshot.get("credit_limit_usd") if snapshot else None
         available_usd: Optional[float] = snapshot.get("available_credit_usd") if snapshot else None
         notes: Optional[str] = snapshot.get("notes") if snapshot else None
         status = CreditAccountStatus.ACTIVE
@@ -305,6 +328,8 @@ class ApiCreditsMonitor:
             status=status,
             is_connected=(status == CreditAccountStatus.ACTIVE),
             current_month_spend_usd=spend_usd,
+            cumulative_spend_usd=cumulative_usd,
+            credit_limit_usd=credit_limit_usd,
             available_credit_usd=available_usd,
             official_links=official_links,
             notes=notes,

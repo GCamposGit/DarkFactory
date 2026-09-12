@@ -1,0 +1,80 @@
+# ==============================================================================
+# Dark Factory Cloud Coordinator & Isolated Worker - Dokploy PaaS Production Compose
+# Ticket: HF-03-01 | ADR-HF-001 / INFRA-05 / INFRA-06 / INFRA-07
+# Target Host: Hetzner CX23 (darkfac-vps-primary / dokploy.ggcampos.com)
+# ==============================================================================
+
+services:
+  darkfac-coordinator:
+    build:
+      context: https://${GITHUB_PAT:-}@github.com/GCamposGit/DarkFactory.git#main
+      dockerfile: deploy/dokploy/Dockerfile.cloud
+    image: darkfac-cloud:latest
+    container_name: darkfac-coordinator
+    restart: unless-stopped
+    command: ["python", "-m", "core.orchestrator.cloud_coordinator"]
+    environment:
+      - DARKFAC_ROLE=coordinator
+      - DARKFAC_HF02_DATABASE_URL=${DARKFAC_HF02_DATABASE_URL}
+      - DARKFAC_MAX_CONCURRENT_SLOTS=${DARKFAC_MAX_CONCURRENT_SLOTS:-2}
+      - DARKFAC_COORDINATOR_PORT=8001
+      - DATA_DIR=/app/data
+      - FACTORY_DIR=/app/.factory
+      - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-}
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+    volumes:
+      - darkfac-artifacts:/app/.factory/artifacts
+      - darkfac-test-logs:/app/.factory/test_logs
+    networks:
+      - dokploy-network
+    deploy:
+      resources:
+        limits:
+          cpus: "1.5"
+          memory: 1536M
+        reservations:
+          cpus: "0.2"
+          memory: 512M
+
+  darkfac-worker:
+    build:
+      context: https://${GITHUB_PAT:-}@github.com/GCamposGit/DarkFactory.git#main
+      dockerfile: deploy/dokploy/Dockerfile.cloud
+    image: darkfac-cloud:latest
+    container_name: darkfac-worker-1
+    restart: unless-stopped
+    command: ["python", "-m", "core.orchestrator.cloud_worker"]
+    environment:
+      - DARKFAC_ROLE=worker
+      - DARKFAC_WORKER_ID=${DARKFAC_WORKER_ID:-cloud-worker-1}
+      - DARKFAC_HF02_DATABASE_URL=${DARKFAC_HF02_DATABASE_URL}
+      - DARKFAC_MAX_CONCURRENT_SLOTS=${DARKFAC_MAX_CONCURRENT_SLOTS:-2}
+      - DATA_DIR=/app/data
+      - FACTORY_DIR=/app/.factory
+      - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-}
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+    volumes:
+      - darkfac-artifacts:/app/.factory/artifacts
+      - darkfac-test-logs:/app/.factory/test_logs
+    networks:
+      - dokploy-network
+    deploy:
+      resources:
+        limits:
+          cpus: "1.5"
+          memory: 1536M
+        reservations:
+          cpus: "0.2"
+          memory: 256M
+
+volumes:
+  darkfac-artifacts:
+    name: darkfac-artifacts
+  darkfac-test-logs:
+    name: darkfac-test-logs
+
+networks:
+  dokploy-network:
+    external: true

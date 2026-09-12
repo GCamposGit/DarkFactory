@@ -21,6 +21,8 @@ from core.roadmap.models import (
     RoadmapStats,
 )
 from core.roadmap.sources import (
+    HybridWorkflowPlanSource,
+    InfraRoadmapJsonSource,
     JsonRoadmapSource,
     MarkdownDevelopmentPlanSource,
     RoadmapSource,
@@ -195,6 +197,10 @@ def build_repository_roadmap_service(
     *,
     demands_path: Path | None = None,
     include_demands: bool = False,
+    include_hf: bool = False,
+    include_infra: bool = False,
+    hf_plan_path: Path | None = None,
+    infra_roadmap_path: Path | None = None,
 ) -> RoadmapQueryService:
     """Build the default DarkHub service from all versioned roadmap sources."""
 
@@ -250,6 +256,42 @@ def build_repository_roadmap_service(
         ),
         content_type="text/markdown",
     )
+
+    if include_infra or infra_roadmap_path is not None:
+        target_infra_path = infra_roadmap_path or (repository_root / ".factory" / "infra" / "roadmap.json")
+        infra_source = InfraRoadmapJsonSource(
+            target_infra_path,
+            evidence_dir=evidence_dir,
+        )
+        sources.append(infra_source)
+        documents[infra_source.source_id] = RoadmapSourceDocument(
+            source_id=infra_source.source_id,
+            label=infra_source.label,
+            locator=target_infra_path.relative_to(repository_root).as_posix() if target_infra_path.is_relative_to(repository_root) else target_infra_path.as_posix(),
+            content=(
+                target_infra_path.read_text(encoding="utf-8")
+                if target_infra_path.exists() else ""
+            ),
+            content_type="application/json",
+        )
+
+    if include_hf or hf_plan_path is not None:
+        target_hf_path = hf_plan_path or (repository_root / "docs" / "HYBRID_WORKFLOW_PLAN_2026-09-08.md")
+        hf_source = HybridWorkflowPlanSource(
+            target_hf_path,
+            evidence_dir=evidence_dir,
+        )
+        sources.append(hf_source)
+        documents[hf_source.source_id] = RoadmapSourceDocument(
+            source_id=hf_source.source_id,
+            label=hf_source.label,
+            locator=target_hf_path.relative_to(repository_root).as_posix() if target_hf_path.is_relative_to(repository_root) else target_hf_path.as_posix(),
+            content=(
+                target_hf_path.read_text(encoding="utf-8")
+                if target_hf_path.exists() else ""
+            ),
+            content_type="text/markdown",
+        )
 
     return RoadmapQueryService(
         compiler=RoadmapCompiler(sources),

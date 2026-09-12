@@ -205,6 +205,8 @@ class NativeAdapter:
             return [self._unsupported(command.workflow_id, capability="version_isolation")]
         if not bool(command.payload.get("approval_pre_resolved", False)):
             return [self._unsupported(command.workflow_id, capability="durable_wait")]
+        if "limit" in command.payload or "jobs" in command.payload:
+            return [self._unsupported(command.workflow_id, capability="bounded_concurrency")]
         with self._lock:
             current = self._threads.get(command.workflow_id)
             if current is not None and current.is_alive():

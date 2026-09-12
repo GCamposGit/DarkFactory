@@ -5,128 +5,49 @@ description: Apresenta ao usuário, ao término de cada sessão ou marco arquite
 
 # 13 - Session Learning Pack & Cognitive Uplift Engine
 
-O **Session Learning Pack** é o motor de co-evolução cognitiva e ampliação de capacidades humanas da Dark Factory.
-Conforme a fábrica de software avança para os Níveis 3 e 4 de autonomia, agentes constroem abstrações complexas, heurísticas matemáticas e infraestruturas distribuídas em segundos.
-Para prevenir o *cognitive offloading* (atrofia intelectual do desenvolvedor) e transformar cada turno de pair programming em uma **micro-academia de alta voltagem**, este motor gera e entrega ao usuário sínteses executivas e arquiteturais de classe mundial.
+O **Session Learning Pack** é o motor de co-evolução cognitiva e ampliação de capacidades da Dark Factory. Ele traduz arquiteturas e códigos complexos recém-construídos em sínteses didáticas de múltiplos níveis Feynman, garantindo a retenção intelectual do desenvolvedor.
 
 ---
 
-## 🏛️ Fundamentação Científica & Pedagógica
+## 1. Contratos Normativos da Etapa
 
-```text
-       ┌─────────────────────────────────────────────────────────────┐
-       │             COGNITIVE LOAD THEORY (John Sweller)             │
-       │  - Zero Extraneous Load: Sem rodeios ou jargões vazios      │
-       │  - Maximize Germane Load: Construção de esquemas mentais    │
-       └──────────────────────────────┬──────────────────────────────┘
-                                      │
-       ┌──────────────────────────────▼──────────────────────────────┐
-       │             FEYNMAN MULTI-TIER TRANSLATION                  │
-       │                                                             │
-       │  [Tier 1: 30-Second Cocktail/Elevator Pitch]                │
-       │  → Explicação em linguagem natural para clientes/PM/CEO     │
-       │                                                             │
-       │  [Tier 2: Staff+ Architectural Defense]                     │
-       │  → Trade-offs técnicos, invariantes e garantias não-funcionais│
-       │                                                             │
-       │  [Tier 3: Engine Room Mechanics]                            │
-       │  → Algoritmos, estruturas de dados e protocolo de execução │
-       └──────────────────────────────┬──────────────────────────────┘
-                                      │
-       ┌──────────────────────────────▼──────────────────────────────┐
-       │             ACTIVE RECALL & DEFENSE SHIELD                  │
-       │  - Mental Anchor: Metáfora viva do mundo real               │
-       │  - Defense Shield: Respostas à prova de bala para o CTO     │
-       │  - Flashcards Anki/Spaced Repetition: Retenção a longo prazo│
-       └─────────────────────────────────────────────────────────────┘
-```
+### Inputs (Entradas)
+- **Diff de Código e Commits**: Alterações introduzidas pela tarefa ou marco arquitetural.
+- **Contrato de Handoff Concluído**: `WorkflowHandoff` com seus objetivos e critérios de aceitação.
+- **Evento Sucessor**: Acionado após a conclusão e validação de um ticket ou sessão.
 
----
-
-## 🎯 Os 5 Componentes de Todo Learning Pack
-
-1. **🎙️ The 30-Second Cocktail/Elevator Pitch**:
-   - Como explicar o que foi feito em 30 segundos para um cliente, CEO ou investidor, focando em valor e impacto sem enrolação técnica.
-2. **🏛️ Staff+ Architectural Defense**:
-   - O racional de engenharia sênior: por que a abordagem X foi escolhida sobre Y, quais classes de falhas foram neutralizadas e quais garantias determinísticas foram estabelecidas.
-3. **⚓ The Mental Anchor (Metáfora Viva)**:
-   - Uma analogia vívida e intuitiva do mundo físico (ex: "como uma caixa-preta de avião" ou "como a curva de calorias de um buffet") que fixa o conceito no cérebro.
-4. **🛡️ Third-Party Defense Shield (Escudo contra Céticos)**:
-   - Antecipação de 1 ou 2 perguntas espinhosas que um Tech Lead, revisor de PR ou CTO faria (ex: "Por que não usar um dicionário simples?", "Como isso lida com concorrência?") com respostas técnicas irrefutáveis.
-5. **🃏 Active Recall Flashcards**:
-   - 2 a 4 perguntas e respostas em formato de flashcard para auto-teste imediato, com exportação nativa para Anki (`.tsv`), Markdown e HTML interativo.
-
----
-
-## 🤖 Protocolo Obrigatório para Agentes (Ao Final de Cada Sessão)
-
-Ao concluir uma tarefa, épico, correção de bug ou ao preparar a passagem de bastão de uma sessão, o agente deve:
-
-1. **Disparar a Extração Headless**:
+### Ações e Procedimento Executável
+1. **Extração Headless dos 5 Componentes Feynman**:
    ```powershell
-   python -m core.learning_pack.cli generate --title "<Nome do Épico / Funcionalidade>"
+   python -m core.learning_pack.cli generate --title "Nome da Funcionalidade / Épico"
    ```
-2. **Apresentar o Brief Cognitivo no Chat**:
-   - Incluir a saudação amigável e destacar o pitch de 30s.
-   - Fornecer o Mental Anchor e o Defense Shield.
-   - Apresentar os flashcards para auto-avaliação do usuário.
-   - Fornecer o link clicável para o widget HTML interativo gerado em `.factory/learning_packs/`.
+2. **Estruturação Cognitiva Obrigatória**:
+   - **🎙️ The 30-Second Elevator Pitch**: Explicação em linguagem acessível focada em valor para clientes e executivos.
+   - **🏛️ Staff+ Architectural Defense**: Trade-offs de engenharia, garantias não-funcionais e classes de falhas neutralizadas.
+   - **⚓ The Mental Anchor**: Analogia intuitiva do mundo físico que fixa o conceito mentalmente.
+   - **🛡️ Third-Party Defense Shield**: Respostas técnicas a perguntas espinhosas de revisores ou Tech Leads.
+   - **🃏 Active Recall Flashcards**: 2 a 4 perguntas e respostas para auto-teste imediato.
+3. **Apresentação e Quiz**:
+   ```powershell
+   # Exibir resumo no terminal
+   python -m core.learning_pack.cli show latest --brief
+
+   # Sessão interativa de auto-avaliação
+   python -m core.learning_pack.cli flashcards latest -i
+   ```
+
+### Outputs Estruturados
+- **Artefato Consolidado do Pack**: `.factory/learning_packs/<slug>/pack.json`.
+- **Cartões de Repetição Espaçada**: Arquivo `.tsv` compatível com Anki/Obsidian.
+- **Widget HTML Interativo**: Página autônoma com quiz interativo para auto-estudo.
+
+### Portões, Política e Validação
+- **Não-Bloqueio do Pipeline**: A geração do Learning Pack é um evento sucessor pós-entrega; a confirmação de leitura pelo usuário **NUNCA bloqueia** o despacho do próximo ticket ou pipeline autônomo.
+- **Segurança de Conteúdo**: Nenhum segredo, credencial ou token deve ser incluído em analogias ou flashcards didáticos.
+- **Qualidade Conceitual**: As explicações devem refletir o código efetivamente comitado, sem simplismos incorretos.
 
 ---
 
-## 🛠️ Comandos da CLI (`core/learning_pack/cli.py`)
+## 2. Continuous Self-Improvement & Calibração Didática
 
-### 1. Gerar Novo Learning Pack a partir do Git Diff
-```powershell
-python -m core.learning_pack.cli generate --title "Implementação do State Machine Determinístico"
-```
-
-### 2. Listar Packs Anteriores
-```powershell
-python -m core.learning_pack.cli list
-```
-
-### 3. Exibir Pack Específico no Terminal
-```powershell
-python -m core.learning_pack.cli show latest
-# Ou em modo compacto:
-python -m core.learning_pack.cli show latest --brief
-```
-
-### 4. Sessão de Quiz Interativo no Terminal
-```powershell
-python -m core.learning_pack.cli flashcards latest -i
-```
-
-### 5. Exportar Baralho para o Anki
-```powershell
-python -m core.learning_pack.cli export-anki latest --out .factory/decks/session_anki.tsv
-```
-
-### 6. Abrir Widget HTML Standalone no Navegador
-```powershell
-python -m core.learning_pack.cli html latest --open
-```
-
----
-
-## 🌐 Endpoints REST do DarkHub
-
-O DarkHub (`hub/backend/api.py`) expõe nativamente os seguintes endpoints:
-
-| Método | Rota | Descrição |
-| :--- | :--- | :--- |
-| `GET` | `/api/learning-packs` | Lista o índice de todos os learning packs registrados |
-| `GET` | `/api/learning-packs/latest` | Retorna o último pack completo em JSON |
-| `GET` | `/api/learning-packs/{pack_id}` | Retorna o pack especificado por ID |
-| `POST`| `/api/learning-packs/generate` | Gera um novo pack a partir do estado atual |
-| `GET` | `/api/learning-packs/{pack_id}/export-anki` | Baixa o deck TSV formatado para o Anki |
-| `GET` | `/api/learning-packs/{pack_id}/html` | Retorna o HTML interativo com flip cards 3D |
-
----
-
-## 🏛️ Governança & Padrões
-
-1. **Local-First & $0 Cost**: O extrator padrão roda deterministicamente via AST e análise de diffs sem custo de tokens, com enriquecimento opcional via Ollama local (`qwen-fast`/`qwen-deep`).
-2. **Inviolabilidade de Artefatos**: Todos os packs são persistidos de forma permanente e auditável em `.factory/learning_packs/`.
-3. **Compatibilidade Multi-Agente**: Espelhado automaticamente para `.claude/skills/13-session-learning-pack/` via `python scripts/sync_skills.py`.
+- **Calibração de Nível**: Ajuste a densidade técnica dos flashcards e da defesa arquitetural com base no feedback explícito do usuário sobre a profundidade desejada.

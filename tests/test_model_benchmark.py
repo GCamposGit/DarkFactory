@@ -380,3 +380,75 @@ def test_live_price_update_does_not_relabel_baseline_score_source():
         assert entry.field_provenance["input_cost_per_m"].source == "https://openrouter.ai/api/v1/models"
         assert entry.field_provenance["coding_score"].source == "Artificial Analysis v4.2 & Coding Agent Index"
         assert entry.field_provenance["coding_score"].acquisition_mode is MetricAcquisitionMode.OFFLINE_FIXTURE
+
+
+def test_deepseek_v41_flash_present_in_catalog_and_pareto_frontier():
+    """
+    Regression test: deepseek/deepseek-v4.1-flash must be in the baseline catalog,
+    must be rankable (has coding_score, intelligence_score, cost_per_task),
+    and must appear on the Pareto coding frontier when no external API is available.
+    """
+    import tempfile
+    from core.benchmarks.fetcher import DailyBenchmarkService
+    from core.benchmarks.frontier import compute_pareto_frontier
+    from unittest.mock import patch
+
+    with tempfile.TemporaryDirectory(prefix="benchmark_v41_flash_") as folder:
+        service = DailyBenchmarkService(Path(folder))
+        # Simulate no external API (no Artificial Analysis key, no OpenRouter)
+        with patch.object(service, "fetch_artificial_analysis_api", return_value=[]):
+            with patch.object(service, "fetch_openrouter_catalog", return_value=[]):
+                ledger = service.build_daily_ledger(offline=False)
+
+    model_id = "deepseek/deepseek-v4.1-flash"
+    assert model_id in ledger.models, (
+        f"{model_id} must be in the benchmark catalog — it was not found in the ledger."
+    )
+    entry = ledger.models[model_id]
+
+    # Must have scores so is_rankable() returns True
+    assert entry.coding_score is not None, "V4.1-Flash must have coding_score in baseline catalog"
+    assert entry.intelligence_score is not None, "V4.1-Flash must have intelligence_score in baseline catalog"
+    assert entry.cost_per_task is not None, "V4.1-Flash must have cost_per_task"
+    assert entry.is_rankable(), f"{model_id} must be rankable (all three fields populated)"
+
+    # Must appear in the Pareto frontier
+    assert model_id in ledger.pareto_coding_models, (
+        f"{model_id} should be on the Pareto coding frontier given its high score and low cost, "
+        f"but it was not found. Frontier: {ledger.pareto_coding_models}"
+    )
+
+    # Confirm it is NOT in unknown_capability_models
+    assert model_id not in ledger.metadata.get("unknown_capability_models", []), (
+        f"{model_id} must NOT be in unknown_capability_models list."
+    )
+
+
+def test_router_resolves_deepseek_v41_flash_provider_as_openrouter():
+    """
+    Regression test: when the daily benchmark picks deepseek/deepseek-v4.1-flash
+    as the Pareto leader, the router must resolve its provider to 'openrouter'
+    (not the old hardcoded 'siliconflow').
+    """
+    rec = recommend_model("coding", complexity="high", offline=False)
+    assert "model" in rec
+    # If V4.1-Flash is the Pareto leader (it should be given catalog scores)
+    if rec.get("model") == "deepseek/deepseek-v4.1-flash":
+        assert rec.get("provider") == "openrouter", (
+            f"deepseek/deepseek-v4.1-flash must be routed via 'openrouter', got: {rec.get('provider')}"
+        )
+    # Frontier data must always be present
+    assert "daily_efficiency_frontier" in rec
+    frontier = rec["daily_efficiency_frontier"]
+    assert "optimal_cloud_model" in frontier
+
+
+def test_adversarial_review_uses_deepseek_v41_flash():
+    """
+    Regression test: the adversarial_review task type must return
+    deepseek/deepseek-v4.1-flash as tier2_cloud reviewer via openrouter.
+    """
+    rec = recommend_model("review", complexity="high", offline=False)
+    assert rec.get("tier2_cloud") == "deepseek/deepseek-v4.1-flash", (
+        f"adversarial review tier2_cloud must be 'deepseek/deepseek-v4.1-flash', got: {rec.get('tier2_cloud')}"
+    )

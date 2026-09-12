@@ -3,7 +3,7 @@
 ## Antes de começar
 
 - Leia `MISSION.md` e `FACTORY_RULES.md`.
-- Preserve o escopo: o núcleo DarkFac é compartilhado; Canaletto é local.
+- Preserve o escopo: o núcleo DarkFac é compartilhado.
 - Use `.agents/skills/` como catálogo de skills. Grok e outros harnesses devem seguir este contrato mesmo que não carreguem skills automaticamente.
 
 ## Convenções de código
@@ -21,8 +21,6 @@
 python core/harness/runner.py --quick
 python -m pytest tests -v --ignore=tests/test_canaletto.py
 ```
-
-O harness compartilhado não inclui o experimento Canaletto. Para depurá-lo, use os arquivos locais diretamente nesta máquina.
 
 ## Compatibilidade entre harnesses
 

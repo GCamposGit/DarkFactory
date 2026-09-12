@@ -222,11 +222,37 @@ class AgentExecutor:
             return attempt
 
         # Execute inference call
-        resp: ProviderResponse = self.provider.generate(
-            step_prompt,
-            model=model,
-            unknown_cost_policy=budget.unknown_cost_policy,
-        )
+        try:
+            resp: ProviderResponse = self.provider.generate(
+                step_prompt,
+                model=model,
+                unknown_cost_policy=budget.unknown_cost_policy,
+            )
+        except Exception as exc:
+            # Clean up active reservation to prevent orphan budget locks
+            if run.active_reservation and run.active_reservation.status == ReservationStatus.ACTIVE:
+                self.budget_manager.release_if_active(
+                    run.active_reservation.reservation_id,
+                    reason=f"Execution error: {exc}",
+                )
+                run.active_reservation = None
+            run.status = ExecutionStatus.FAILED
+            latency = max(0.001, time.perf_counter() - start_time)
+            failed_attempt = AttemptRecord(
+                attempt_id=attempt_id,
+                invocation_id=f"inv_{uuid.uuid4().hex[:8]}",
+                input_artifact_hash=input_hash,
+                mode="simulated",
+                tokens=0,
+                measured_cost=None,
+                estimated_cost=0.0,
+                latency=latency,
+                outcome=AttemptOutcome.FAILED,
+                timestamp=datetime.now(UTC),
+            )
+            run.attempts.append(failed_attempt)
+            run.updated_at = datetime.now(UTC)
+            raise
 
         latency = max(0.001, time.perf_counter() - start_time)
         output_hash = hashlib.sha256(resp.text.encode("utf-8")).hexdigest()

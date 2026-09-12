@@ -1,0 +1,587 @@
+{
+  "schema_version": "1",
+  "baseline_snapshot_hash": "1f931fcccc2f4a54cde1f0ba09825094dbe429af",
+  "environment_ref": "docs/handoffs/HF-02-ENVIRONMENT.md",
+  "code_sha": "3ba5bdb3e291e4bcc7b0fbb1c807a85cc6174e12",
+  "results": [
+    {
+      "lab_id": "lab-acceptance-20260911",
+      "scenario_id": "R01",
+      "runtime": "native_sqlite",
+      "repeat_index": 1,
+      "status": "pass",
+      "environment_ref": "docs/handoffs/HF-02-ENVIRONMENT.md",
+      "validation_mode": "real_lab",
+      "target_differences": [],
+      "assertions": {
+        "effect_count_matches_spec": true,
+        "step_invocations_matches_spec": true,
+        "driver_truthfulness": true,
+        "terminal_matches": true
+      },
+      "duration_ms": 389.99999999987267,
+      "recovery_ms": null,
+      "rss_peak_mib": 34.1796875,
+      "effect_count": 1,
+      "actual_step_invocations": 4,
+      "artifact_refs": [
+        "run_R01_1/lab-config.json"
+      ],
+      "error_code": null
+    },
+    {
+      "lab_id": "lab-acceptance-20260911",
+      "scenario_id": "R02",
+      "runtime": "native_sqlite",
+      "repeat_index": 1,
+      "status": "pass",
+      "environment_ref": "docs/handoffs/HF-02-ENVIRONMENT.md",
+      "validation_mode": "real_lab",
+      "target_differences": [],
+      "assertions": {
+        "effect_count_matches_spec": true,
+        "step_invocations_matches_spec": true,
+        "driver_truthfulness": true,
+        "distinct_process_restart": true,
+        "recovery_duration_measured": true,
+        "terminal_matches": true
+      },
+      "duration_ms": 1657.0000000001528,
+      "recovery_ms": 1391.0000000000764,
+      "rss_peak_mib": 34.1171875,
+      "effect_count": 1,
+      "actual_step_invocations": 5,
+      "artifact_refs": [
+        "run_R02_1/lab-config.json"
+      ],
+      "error_code": null
+    },
+    {
+      "lab_id": "lab-acceptance-20260911",
+      "scenario_id": "R03",
+      "runtime": "native_sqlite",
+      "repeat_index": 1,
+      "status": "pass",
+      "environment_ref": "docs/handoffs/HF-02-ENVIRONMENT.md",
+      "validation_mode": "real_lab",
+      "target_differences": [],
+      "assertions": {
+        "effect_count_matches_spec": true,
+        "step_invocations_matches_spec": true,
+        "driver_truthfulness": true,
+        "terminal_matches": true
+      },
+      "duration_ms": 1750.0,
+      "recovery_ms": 1375.0,
+      "rss_peak_mib": 34.1015625,
+      "effect_count": 1,
+      "actual_step_invocations": 5,
+      "artifact_refs": [
+        "run_R03_1/lab-config.json"
+      ],
+      "error_code": null
+    },
+    {
+      "lab_id": "lab-acceptance-20260911",
+      "scenario_id": "R04",
+      "runtime": "native_sqlite",
+      "repeat_index": 1,
+      "status": "unsupported",
+      "environment_ref": "docs/handoffs/HF-02-ENVIRONMENT.md",
+      "validation_mode": "real_lab",
+      "target_differences": [],
+      "assertions": {
+        "effect_count_matches_spec": false,
+        "step_invocations_matches_spec": false,
+        "driver_truthfulness": true,
+        "expected_block_reason_verified": false,
+        "terminal_matches": false
+      },
+      "duration_ms": 217.9999999998472,
+      "recovery_ms": null,
+      "rss_peak_mib": 23.69921875,
+      "effect_count": 0,
+      "actual_step_invocations": 0,
+      "artifact_refs": [
+        "run_R04_1/lab-config.json"
+      ],
+      "error_code": "CAPABILITY_UNSUPPORTED:durable_wait"
+    },
+    {
+      "lab_id": "lab-acceptance-20260911",
+      "scenario_id": "R05",
+      "runtime": "native_sqlite",
+      "repeat_index": 1,
+      "status": "unsupported",
+      "environment_ref": "docs/handoffs/HF-02-ENVIRONMENT.md",
+      "validation_mode": "real_lab",
+      "target_differences": [],
+      "assertions": {
+        "effect_count_matches_spec": true,
+        "step_invocations_matches_spec": true,
+        "driver_truthfulness": true,
+        "terminal_matches": false
+      },
+      "duration_ms": 454.00000000017826,
+      "recovery_ms": null,
+      "rss_peak_mib": 31.29296875,
+      "effect_count": 1,
+      "actual_step_invocations": 4,
+      "artifact_refs": [
+        "run_R05_1/lab-config.json"
+      ],
+      "error_code": "CAPABILITY_UNSUPPORTED:deduplicated_intake"
+    },
+    {
+      "lab_id": "lab-acceptance-20260911",
+      "scenario_id": "R06",
+      "runtime": "native_sqlite",
+      "repeat_index": 1,
+      "status": "unsupported",
+      "environment_ref": "docs/handoffs/HF-02-ENVIRONMENT.md",
+      "validation_mode": "real_lab",
+      "target_differences": [],
+      "assertions": {
+        "effect_count_matches_spec": false,
+        "step_invocations_matches_spec": false,
+        "driver_truthfulness": true,
+        "expected_block_reason_verified": false,
+        "terminal_matches": false
+      },
+      "duration_ms": 217.9999999998472,
+      "recovery_ms": null,
+      "rss_peak_mib": 24.40234375,
+      "effect_count": 0,
+      "actual_step_invocations": 0,
+      "artifact_refs": [
+        "run_R06_1/lab-config.json"
+      ],
+      "error_code": "CAPABILITY_UNSUPPORTED:durable_wait"
+    },
+    {
+      "lab_id": "lab-acceptance-20260911",
+      "scenario_id": "R07",
+      "runtime": "native_sqlite",
+      "repeat_index": 1,
+      "status": "unsupported",
+      "environment_ref": "docs/handoffs/HF-02-ENVIRONMENT.md",
+      "validation_mode": "real_lab",
+      "target_differences": [],
+      "assertions": {
+        "effect_count_matches_spec": true,
+        "step_invocations_matches_spec": false,
+        "driver_truthfulness": true,
+        "terminal_matches": false
+      },
+      "duration_ms": 219.00000000005093,
+      "recovery_ms": null,
+      "rss_peak_mib": 24.8828125,
+      "effect_count": 0,
+      "actual_step_invocations": 0,
+      "artifact_refs": [
+        "run_R07_1/lab-config.json"
+      ],
+      "error_code": "CAPABILITY_UNSUPPORTED:durable_wait"
+    },
+    {
+      "lab_id": "lab-acceptance-20260911",
+      "scenario_id": "R08",
+      "runtime": "native_sqlite",
+      "repeat_index": 1,
+      "status": "unsupported",
+      "environment_ref": "docs/handoffs/HF-02-ENVIRONMENT.md",
+      "validation_mode": "real_lab",
+      "target_differences": [],
+      "assertions": {
+        "effect_count_matches_spec": false,
+        "step_invocations_matches_spec": false,
+        "driver_truthfulness": true,
+        "terminal_matches": false
+      },
+      "duration_ms": 202.99999999997453,
+      "recovery_ms": null,
+      "rss_peak_mib": 24.1640625,
+      "effect_count": 0,
+      "actual_step_invocations": 0,
+      "artifact_refs": [
+        "run_R08_1/lab-config.json"
+      ],
+      "error_code": "CAPABILITY_UNSUPPORTED:version_isolation"
+    },
+    {
+      "lab_id": "lab-acceptance-20260911",
+      "scenario_id": "R09",
+      "runtime": "native_sqlite",
+      "repeat_index": 1,
+      "status": "pass",
+      "environment_ref": "docs/handoffs/HF-02-ENVIRONMENT.md",
+      "validation_mode": "real_lab",
+      "target_differences": [],
+      "assertions": {
+        "effect_count_matches_spec": true,
+        "driver_truthfulness": true,
+        "expected_block_reason_verified": true,
+        "terminal_matches": true
+      },
+      "duration_ms": 188.00000000010186,
+      "recovery_ms": null,
+      "rss_peak_mib": null,
+      "effect_count": 0,
+      "actual_step_invocations": 0,
+      "artifact_refs": [],
+      "error_code": "STORE_UNAVAILABLE"
+    },
+    {
+      "lab_id": "lab-acceptance-20260911",
+      "scenario_id": "R10",
+      "runtime": "native_sqlite",
+      "repeat_index": 1,
+      "status": "unsupported",
+      "environment_ref": "docs/handoffs/HF-02-ENVIRONMENT.md",
+      "validation_mode": "real_lab",
+      "target_differences": [],
+      "assertions": {
+        "effect_count_matches_spec": false,
+        "step_invocations_matches_spec": false,
+        "driver_truthfulness": true,
+        "terminal_matches": false
+      },
+      "duration_ms": 217.9999999998472,
+      "recovery_ms": null,
+      "rss_peak_mib": 23.94140625,
+      "effect_count": 0,
+      "actual_step_invocations": 0,
+      "artifact_refs": [
+        "run_R10_1/lab-config.json"
+      ],
+      "error_code": "CAPABILITY_UNSUPPORTED:bounded_concurrency"
+    },
+    {
+      "lab_id": "lab-acceptance-20260911",
+      "scenario_id": "R11",
+      "runtime": "native_sqlite",
+      "repeat_index": 1,
+      "status": "pass",
+      "environment_ref": "docs/handoffs/HF-02-ENVIRONMENT.md",
+      "validation_mode": "real_lab",
+      "target_differences": [],
+      "assertions": {
+        "effect_count_matches_spec": true,
+        "driver_truthfulness": true,
+        "expected_block_reason_verified": true,
+        "terminal_matches": true
+      },
+      "duration_ms": 1.0,
+      "recovery_ms": null,
+      "rss_peak_mib": null,
+      "effect_count": 0,
+      "actual_step_invocations": 0,
+      "artifact_refs": [],
+      "error_code": "integrity_mismatch_rejected"
+    },
+    {
+      "lab_id": "lab-acceptance-20260911",
+      "scenario_id": "R12",
+      "runtime": "native_sqlite",
+      "repeat_index": 1,
+      "status": "pass",
+      "environment_ref": "docs/handoffs/HF-02-ENVIRONMENT.md",
+      "validation_mode": "real_lab",
+      "target_differences": [],
+      "assertions": {
+        "effect_count_matches_spec": true,
+        "step_invocations_matches_spec": true,
+        "driver_truthfulness": true,
+        "terminal_matches": true
+      },
+      "duration_ms": 375.0,
+      "recovery_ms": null,
+      "rss_peak_mib": 34.234375,
+      "effect_count": 1,
+      "actual_step_invocations": 4,
+      "artifact_refs": [
+        "run_R12_1/lab-config.json"
+      ],
+      "error_code": null
+    },
+    {
+      "lab_id": "lab-acceptance-20260911",
+      "scenario_id": "R01",
+      "runtime": "dbos_postgres",
+      "repeat_index": 1,
+      "status": "blocked",
+      "environment_ref": "docs/handoffs/HF-02-ENVIRONMENT.md",
+      "validation_mode": "real_lab",
+      "target_differences": [],
+      "assertions": {
+        "database_available": false
+      },
+      "duration_ms": 0.0,
+      "recovery_ms": null,
+      "rss_peak_mib": null,
+      "effect_count": 0,
+      "actual_step_invocations": 0,
+      "artifact_refs": [],
+      "error_code": "STORE_UNAVAILABLE"
+    },
+    {
+      "lab_id": "lab-acceptance-20260911",
+      "scenario_id": "R02",
+      "runtime": "dbos_postgres",
+      "repeat_index": 1,
+      "status": "blocked",
+      "environment_ref": "docs/handoffs/HF-02-ENVIRONMENT.md",
+      "validation_mode": "real_lab",
+      "target_differences": [],
+      "assertions": {
+        "database_available": false
+      },
+      "duration_ms": 0.0,
+      "recovery_ms": null,
+      "rss_peak_mib": null,
+      "effect_count": 0,
+      "actual_step_invocations": 0,
+      "artifact_refs": [],
+      "error_code": "STORE_UNAVAILABLE"
+    },
+    {
+      "lab_id": "lab-acceptance-20260911",
+      "scenario_id": "R03",
+      "runtime": "dbos_postgres",
+      "repeat_index": 1,
+      "status": "blocked",
+      "environment_ref": "docs/handoffs/HF-02-ENVIRONMENT.md",
+      "validation_mode": "real_lab",
+      "target_differences": [],
+      "assertions": {
+        "database_available": false
+      },
+      "duration_ms": 0.0,
+      "recovery_ms": null,
+      "rss_peak_mib": null,
+      "effect_count": 0,
+      "actual_step_invocations": 0,
+      "artifact_refs": [],
+      "error_code": "STORE_UNAVAILABLE"
+    },
+    {
+      "lab_id": "lab-acceptance-20260911",
+      "scenario_id": "R04",
+      "runtime": "dbos_postgres",
+      "repeat_index": 1,
+      "status": "blocked",
+      "environment_ref": "docs/handoffs/HF-02-ENVIRONMENT.md",
+      "validation_mode": "real_lab",
+      "target_differences": [],
+      "assertions": {
+        "database_available": false
+      },
+      "duration_ms": 0.0,
+      "recovery_ms": null,
+      "rss_peak_mib": null,
+      "effect_count": 0,
+      "actual_step_invocations": 0,
+      "artifact_refs": [],
+      "error_code": "STORE_UNAVAILABLE"
+    },
+    {
+      "lab_id": "lab-acceptance-20260911",
+      "scenario_id": "R05",
+      "runtime": "dbos_postgres",
+      "repeat_index": 1,
+      "status": "blocked",
+      "environment_ref": "docs/handoffs/HF-02-ENVIRONMENT.md",
+      "validation_mode": "real_lab",
+      "target_differences": [],
+      "assertions": {
+        "database_available": false
+      },
+      "duration_ms": 0.0,
+      "recovery_ms": null,
+      "rss_peak_mib": null,
+      "effect_count": 0,
+      "actual_step_invocations": 0,
+      "artifact_refs": [],
+      "error_code": "STORE_UNAVAILABLE"
+    },
+    {
+      "lab_id": "lab-acceptance-20260911",
+      "scenario_id": "R06",
+      "runtime": "dbos_postgres",
+      "repeat_index": 1,
+      "status": "blocked",
+      "environment_ref": "docs/handoffs/HF-02-ENVIRONMENT.md",
+      "validation_mode": "real_lab",
+      "target_differences": [],
+      "assertions": {
+        "database_available": false
+      },
+      "duration_ms": 0.0,
+      "recovery_ms": null,
+      "rss_peak_mib": null,
+      "effect_count": 0,
+      "actual_step_invocations": 0,
+      "artifact_refs": [],
+      "error_code": "STORE_UNAVAILABLE"
+    },
+    {
+      "lab_id": "lab-acceptance-20260911",
+      "scenario_id": "R07",
+      "runtime": "dbos_postgres",
+      "repeat_index": 1,
+      "status": "blocked",
+      "environment_ref": "docs/handoffs/HF-02-ENVIRONMENT.md",
+      "validation_mode": "real_lab",
+      "target_differences": [],
+      "assertions": {
+        "database_available": false
+      },
+      "duration_ms": 0.0,
+      "recovery_ms": null,
+      "rss_peak_mib": null,
+      "effect_count": 0,
+      "actual_step_invocations": 0,
+      "artifact_refs": [],
+      "error_code": "STORE_UNAVAILABLE"
+    },
+    {
+      "lab_id": "lab-acceptance-20260911",
+      "scenario_id": "R08",
+      "runtime": "dbos_postgres",
+      "repeat_index": 1,
+      "status": "blocked",
+      "environment_ref": "docs/handoffs/HF-02-ENVIRONMENT.md",
+      "validation_mode": "real_lab",
+      "target_differences": [],
+      "assertions": {
+        "database_available": false
+      },
+      "duration_ms": 0.0,
+      "recovery_ms": null,
+      "rss_peak_mib": null,
+      "effect_count": 0,
+      "actual_step_invocations": 0,
+      "artifact_refs": [],
+      "error_code": "STORE_UNAVAILABLE"
+    },
+    {
+      "lab_id": "lab-acceptance-20260911",
+      "scenario_id": "R09",
+      "runtime": "dbos_postgres",
+      "repeat_index": 1,
+      "status": "blocked",
+      "environment_ref": "docs/handoffs/HF-02-ENVIRONMENT.md",
+      "validation_mode": "real_lab",
+      "target_differences": [],
+      "assertions": {
+        "database_available": false
+      },
+      "duration_ms": 0.0,
+      "recovery_ms": null,
+      "rss_peak_mib": null,
+      "effect_count": 0,
+      "actual_step_invocations": 0,
+      "artifact_refs": [],
+      "error_code": "STORE_UNAVAILABLE"
+    },
+    {
+      "lab_id": "lab-acceptance-20260911",
+      "scenario_id": "R10",
+      "runtime": "dbos_postgres",
+      "repeat_index": 1,
+      "status": "blocked",
+      "environment_ref": "docs/handoffs/HF-02-ENVIRONMENT.md",
+      "validation_mode": "real_lab",
+      "target_differences": [],
+      "assertions": {
+        "database_available": false
+      },
+      "duration_ms": 0.0,
+      "recovery_ms": null,
+      "rss_peak_mib": null,
+      "effect_count": 0,
+      "actual_step_invocations": 0,
+      "artifact_refs": [],
+      "error_code": "STORE_UNAVAILABLE"
+    },
+    {
+      "lab_id": "lab-acceptance-20260911",
+      "scenario_id": "R11",
+      "runtime": "dbos_postgres",
+      "repeat_index": 1,
+      "status": "blocked",
+      "environment_ref": "docs/handoffs/HF-02-ENVIRONMENT.md",
+      "validation_mode": "real_lab",
+      "target_differences": [],
+      "assertions": {
+        "database_available": false
+      },
+      "duration_ms": 0.0,
+      "recovery_ms": null,
+      "rss_peak_mib": null,
+      "effect_count": 0,
+      "actual_step_invocations": 0,
+      "artifact_refs": [],
+      "error_code": "STORE_UNAVAILABLE"
+    },
+    {
+      "lab_id": "lab-acceptance-20260911",
+      "scenario_id": "R12",
+      "runtime": "dbos_postgres",
+      "repeat_index": 1,
+      "status": "blocked",
+      "environment_ref": "docs/handoffs/HF-02-ENVIRONMENT.md",
+      "validation_mode": "real_lab",
+      "target_differences": [],
+      "assertions": {
+        "database_available": false
+      },
+      "duration_ms": 0.0,
+      "recovery_ms": null,
+      "rss_peak_mib": null,
+      "effect_count": 0,
+      "actual_step_invocations": 0,
+      "artifact_refs": [],
+      "error_code": "STORE_UNAVAILABLE"
+    }
+  ],
+  "capability_matrix": {
+    "native_sqlite": {
+      "durable_steps": true,
+      "resume_after_crash": true,
+      "durable_wait": false,
+      "deduplicated_intake": false,
+      "cancel_before_next_step": false,
+      "version_isolation": false,
+      "bounded_concurrency": false
+    },
+    "dbos_postgres": {
+      "durable_steps": true,
+      "resume_after_crash": true,
+      "durable_wait": true,
+      "deduplicated_intake": true,
+      "cancel_before_next_step": true,
+      "version_isolation": true,
+      "bounded_concurrency": true
+    }
+  },
+  "eligibility": {
+    "native_sqlite": {
+      "eligible": false,
+      "unsupported_count": 6,
+      "blocked_count": 0,
+      "fail_count": 0
+    },
+    "dbos_postgres": {
+      "eligible": false,
+      "unsupported_count": 0,
+      "blocked_count": 12,
+      "fail_count": 0
+    }
+  },
+  "operational_metrics": {
+    "total_scenarios_run": 24,
+    "total_duration_ms": 5890.999999999873
+  },
+  "decision_status": "pending_architect_review"
+}

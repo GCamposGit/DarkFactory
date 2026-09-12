@@ -56,7 +56,11 @@ def build_adapter(config: LabConfig):
             from spikes.runtime_choice.dbos_adapter import DBOSAdapter  # type: ignore[import-not-found]
         except ImportError as error:
             raise DriverConfigurationError("DBOS_ADAPTER_UNAVAILABLE") from error
-        return DBOSAdapter(config)
+        try:
+            return DBOSAdapter(config)
+        except Exception as error:
+            code = getattr(error, "code", "STORE_UNAVAILABLE")
+            raise DriverConfigurationError(code) from error
     raise DriverConfigurationError("RUNTIME_UNSUPPORTED")
 
 
@@ -117,12 +121,11 @@ def run_jsonl(config: LabConfig, input_stream: TextIO, output_stream: TextIO) ->
                 write(_protocol_error(error.code))
                 continue
             except Exception as error:
-                from spikes.runtime_choice.native_adapter import NativeAdapterError
-
-                if isinstance(error, NativeAdapterError):
+                code = getattr(error, "code", None)
+                if code is not None and isinstance(code, str):
                     exit_code = 2
                     target_id = getattr(command, "workflow_id", None) or "driver-error"
-                    write(_protocol_error(error.code, workflow_id=target_id))
+                    write(_protocol_error(code, workflow_id=target_id))
                     continue
                 raise
             for event in events:

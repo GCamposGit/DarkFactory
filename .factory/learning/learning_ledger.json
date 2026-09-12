@@ -252,6 +252,19 @@
       "status": "active",
       "verification_gate_id": null,
       "active": true
+    },
+    {
+      "preference_id": "pref_f2df08bf",
+      "category": "workflow",
+      "rule": "Sempre que um componente for dado como entregue, ele tem que funcionar end-to-end no mundo real com configuracoes e testes operacionais executados no momento da entrega, e nao apenas simulacoes postergando a verificacao live para o final.",
+      "context_or_example": "HF-14: Telegram e n8n devem ser configurados passo a passo com o owner e validados no mundo real imediatamente ao inves de postergar para o HF-15.",
+      "confidence": 1.0,
+      "created_at": "2026-09-12T01:01:40.693837+00:00",
+      "times_reinforced": 1,
+      "origin": "explicit_preference",
+      "status": "active",
+      "verification_gate_id": null,
+      "active": true
     }
   ],
   "mistakes": [
@@ -1019,6 +1032,21 @@
       "origin": "rca",
       "status": "proposed",
       "active": false
+    },
+    {
+      "rca_id": "rca_8f54480a",
+      "timestamp": "2026-09-12T01:01:46.368455+00:00",
+      "category": "assumption_error",
+      "symptom": "Componente considerado entregue apenas com mocks e testes unitarios sem configuracao e teste live no mundo real",
+      "mechanism": "Suposicao de que a implementacao de codigo e suites sinteticas fechavam o ticket, postergando o setup com o owner para o HF-15",
+      "root_cause": "Falta de obrigatoriedade de validacao live end-to-end com credenciais e instancias reais no momento da entrega do componente",
+      "patch_description": "Exigir configuracao ativa e teste operacional live passo a passo no mundo real antes de declarar o componente entregue",
+      "preventative_rule": "Nenhum componente e dado como entregue sem validacao end-to-end no mundo real executada no momento da entrega.",
+      "regression_test_file": null,
+      "verification_gate_id": null,
+      "origin": "rca",
+      "status": "proposed",
+      "active": false
     }
   ],
   "transfers": [
@@ -1687,5 +1715,5 @@
       "executed_at": "2026-09-09T12:00:36.526842+00:00"
     }
   ],
-  "last_updated": "2026-09-09T17:39:42.023082+00:00"
+  "last_updated": "2026-09-12T01:01:46.368455+00:00"
 }

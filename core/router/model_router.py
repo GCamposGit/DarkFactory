@@ -110,10 +110,10 @@ MODEL_MATRIX = {
     "adversarial_review": {
         "tier1_local": "gpt-oss-clean:latest",
         "tier1_provider": "ollama",
-        "tier2_cloud": "deepseek-r1",
-        "tier2_provider": "siliconflow",
+        "tier2_cloud": "deepseek/deepseek-v4.1-flash",
+        "tier2_provider": "openrouter",
         "tier2_alt": "grok-4.6",
-        "notes": "Cross-model review rule: The reviewer MUST belong to a different model family than the implementer."
+        "notes": "Cross-model review rule: The reviewer MUST belong to a different model family than the implementer. DeepSeek-V4.1-Flash via OpenRouter as primary cloud reviewer (1M context, $0.15/M); Grok-4.6 as alt."
     },
     "content_generation": {
         "primary": "claude-3.7-sonnet",
@@ -143,14 +143,44 @@ MODEL_MATRIX = {
     }
 }
 
+HIGH_INTELLIGENCE_BY_HARNESS: Dict[str, Dict[str, str]] = {
+    "antigravity": {"model": "gemini-3.8-flash", "provider": "google", "default_effort": "high"},
+    "grok_build": {"model": "grok-4.6", "provider": "xai", "default_effort": "high"},
+    "claude_code": {"model": "opus-5.1", "provider": "anthropic", "default_effort": "high"},
+    "codex": {"model": "gpt-6-astra", "provider": "openai", "default_effort": "high"},
+}
+
+ALLOWED_REASONING_EFFORTS = {"minimal", "low", "medium", "high", "max"}
+FORBIDDEN_REASONING_EFFORTS = {"xhigh", "extra-high", "extra_high", "ultra"}
+
+
+def sanitize_reasoning_effort(effort: Optional[str], complexity: str = "medium") -> str:
+    """Enforce HF-07 / Section 4 reasoning effort constraints.
+
+    Allowed: 'high' by default for planning; 'max' when complexity justifies and supported.
+    Never 'xhigh', 'extra-high', or 'ultra' (sanitized to 'max' without sending invalid parameters).
+    """
+    if not effort:
+        return "max" if complexity in {"critical", "high"} else "high"
+    normalized = effort.strip().lower()
+    if normalized in FORBIDDEN_REASONING_EFFORTS:
+        return "max"
+    if normalized in ALLOWED_REASONING_EFFORTS:
+        return normalized
+    return "high"
+
+
 _QUOTA_FAILOVER_MODELS = {
     "antigravity": "gemini-3.8-flash",
     "google": "gemini-3.8-flash",
     "xai": "grok-4.6",
     "anthropic": "claude-3.7-sonnet",
-    "openai": "gpt-5-6-sol",
-    "deepseek": "deepseek-v4-pro",
-    "siliconflow": "deepseek-v4-pro",
+    "claude_code": "opus-5.1",
+    "openai": "gpt-6-astra",
+    "codex": "gpt-6-astra",
+    "deepseek": "deepseek/deepseek-v4.1-flash",   # openrouter: V4.1-Flash replaces V4-Pro as default DeepSeek failover
+    "openrouter": "deepseek/deepseek-v4.1-flash",  # explicit openrouter failover
+    "siliconflow": "deepseek-r1",                   # siliconflow still routes to R1 (reasoning tasks)
     "qwen": "qwen3-8-flash-next",
 }
 
@@ -348,24 +378,28 @@ def recommend_model(
         primary_model = MODEL_MATRIX["coding"][tier]["primary"]
         primary_provider = MODEL_MATRIX["coding"][tier]["primary_provider"]
 
-        # If daily benchmark identified a Pareto leader with superior cost-benefit, highlight it
+        # If daily benchmark identified a Pareto leader with superior cost-benefit, highlight it.
+        # We resolve the provider from the ledger entry itself (not a family-name heuristic)
+        # so that models like deepseek-v4.1-flash that live on openrouter are mapped correctly.
         if frontier_data and "optimal_cloud_model" in frontier_data:
             opt_model = frontier_data["optimal_cloud_model"]
-            if "deepseek" in opt_model:
-                primary_model = opt_model.split("/")[-1]
-                primary_provider = "siliconflow"
-            elif "claude" in opt_model:
-                primary_model = opt_model.split("/")[-1]
-                primary_provider = "anthropic"
-            elif "openai" in opt_model or "gpt" in opt_model:
-                primary_model = opt_model.split("/")[-1]
-                primary_provider = "openai"
-            elif "gemini" in opt_model:
-                primary_model = opt_model.split("/")[-1]
-                primary_provider = "google"
-            elif "qwen" in opt_model:
-                primary_model = opt_model.split("/")[-1]
-                primary_provider = "qwen"
+            # Resolve provider from live ledger entry first
+            try:
+                entry = ledger.models.get(opt_model)
+                if entry is not None:
+                    # Map provider field to routing provider key
+                    _PROVIDER_MAP = {
+                        "deepseek": "openrouter",
+                        "anthropic": "anthropic",
+                        "openai": "openai",
+                        "google": "google",
+                        "qwen": "qwen",
+                        "xai": "xai",
+                    }
+                    primary_model = opt_model  # use fully qualified id
+                    primary_provider = _PROVIDER_MAP.get(entry.provider, entry.provider)
+            except Exception:
+                pass  # keep MODEL_MATRIX defaults if ledger lookup fails
 
         result = {
             "model": primary_model,

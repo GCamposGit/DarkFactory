@@ -3,104 +3,61 @@ name: local-audio-transcription
 description: Transcreve reuniões, chamadas e podcasts locais com alta performance utilizando faster-whisper (Large-v3-Turbo em CUDA FP16). Suporta áudios estéreo (dual-channel) com separação nativa de falantes, normalização de volume para vozes baixas e remoção de ruído via VAD. Use sempre que uma tarefa envolver transcrição, atas de reunião, extração de action items ou áudio.
 ---
 
-# Local Audio Transcription (faster-whisper)
+# 09 - Local Audio Transcription (faster-whisper)
 
-Esta skill orienta agentes e modelos de linguagem (Claude, Gemini, Grok, Qwen, Ollama) sobre como executar transcrições de áudio de reuniões localmente na GPU (RTX 4070) de forma headless (sem CLI, via biblioteca Python).
-
-## 🚀 Quando Usar Esta Skill
-- Transcrever reuniões, entrevistas ou podcasts gravados localmente.
-- Processar áudios **estéreo / dual-channel** (onde um canal é o microfone local e o outro é o áudio remoto).
-- Resolver áudios com **sobreposição de vozes**, ruídos de fundo e **diferenças acentuadas de volume**.
-- Preparar atas de reunião estruturadas e extração de *action items*.
+Esta skill orienta a execução de transcrições de áudio locais de alta velocidade e fidelidade na GPU (RTX 4070) de forma headless (via biblioteca Python), gerando notas estruturadas e action items com custo financeiro zero.
 
 ---
 
-## 🛠️ Como Chamar o Módulo Localmente (Headless)
+## 1. Contratos Normativos da Etapa
 
-O serviço está implementado em `core/audio/transcriber.py` e gerencia o modelo na GPU em modo singleton (sem recarga desnecessária na VRAM).
+### Inputs (Entradas)
+- **Arquivo de Áudio**: Caminho absoluto para gravação local (`.wav`, `.mp3`, `.m4a`), mono ou estéreo (dual-channel).
+- **Rótulos de Falantes**: Identificadores opcionais (`speaker_0_label`, `speaker_1_label`).
+- **Parâmetros de Detecção**: Idioma (ex: `"pt"`, `"en"` ou `None` para detecção automática) e flag VAD.
 
-### 1. Transcrição One-Shot de Reunião Estéreo (Dual-Channel)
+### Ações e Procedimento Executável
+1. **Invocação Headless via Biblioteca**:
+   O serviço reside em `core/audio/transcriber.py` e gerencia o modelo na GPU em modo singleton:
+   ```python
+   from core.audio.transcriber import transcriber
 
-```python
-from core.audio.transcriber import transcriber
+   # Transcrição estéreo / dual-channel com normalização automática de ganho
+   transcript = transcriber.transcribe_file(
+       audio_path="caminho/para/reuniao.wav",
+       speaker_0_label="Maria (Local)",
+       speaker_1_label="Participantes (Remoto)"
+   )
+   ```
+2. **Transcrição Mono Simples**:
+   ```python
+   transcript = transcriber.transcribe_file(
+       audio_path="nota_de_voz.mp3",
+       is_dual_channel=False,
+       language="pt"
+   )
+   ```
+3. **Pós-Processamento e Extração de Action Items**:
+   Formate o texto em Markdown e submeta a um modelo local ou econômico para gerar:
+   - Resumo executivo das decisões.
+   - Tabela estruturada de tarefas e responsáveis.
+   - Pontos de divergência ou itens em aberto.
 
-# Transcreve o arquivo com detecção automática de canais e normalização de volume
-transcript = transcriber.transcribe_file(
-    audio_path="caminho/para/reuniao.wav",
-    speaker_0_label="Maria (Local)",
-    speaker_1_label="Participantes (Remoto)"
-)
+### Outputs Estruturados
+- **Objeto `TranscriptResult`**:
+  - `to_markdown()`: Diálogo formatado com timestamps e falantes identificados.
+  - `full_text`: Texto corrido integral.
+  - `duration_sec`: Duração do áudio original.
+  - `processing_time_sec` e `realtime_factor`: Métricas de telemetria de processamento.
+- **Artefato de Ata**: Arquivo Markdown persistido para consumo de agentes ou usuários.
 
-# 1. Obter o texto formatado em Markdown pronto para o contexto da LLM:
-print(transcript.to_markdown())
-
-# 2. Obter metadados da execução:
-print(f"Duração: {transcript.duration_sec}s | Tempo de GPU: {transcript.processing_time_sec}s ({transcript.realtime_factor}x tempo real)")
-```
-
-### 2. Transcrição Mono Simples
-
-```python
-from core.audio.transcriber import transcriber
-
-transcript = transcriber.transcribe_file(
-    audio_path="nota_de_voz.mp3",
-    is_dual_channel=False,
-    language="pt" # ou None para auto-detecção
-)
-
-print(transcript.full_text)
-```
-
----
-
-## 📋 Como Integrar o Resultado no Workflow da LLM
-
-Quando uma LLM receber a tarefa de "gerar ata de reunião" ou "resumir discussão técnica":
-
-```python
-from core.audio.transcriber import transcriber
-from core.router.model_router import query_ollama
-
-# 1. Transcreve o áudio na GPU local (~23x mais rápido que tempo real)
-transcript = transcriber.transcribe_file("meeting.wav")
-markdown_notes = transcript.to_markdown()
-
-# 2. Envia o markdown estruturado para uma LLM local (ex: qwen-code-deep ou gpt-oss-clean) ou nuvem
-prompt = f"""Analise a seguinte transcrição de reunião e gere:
-1. Resumo executivo das decisões tomadas.
-2. Tabela de Action Items com responsável e prazo.
-3. Principais divergências e pontos em aberto.
-
-Transcrição:
-{markdown_notes}
-"""
-
-# Exemplo de chamada local no Ollama:
-# response = query_ollama("/api/generate", {"model": "qwen-code-deep:latest", "prompt": prompt})
-```
+### Portões, Política e Validação
+- **Desacoplamento Headless**: A chamada deve operar como biblioteca pura ou script CLI sem exigir servidor visual ativo.
+- **Privacidade e Segurança**: Áudios e transcrições permanecem locais; proibido envio de dados confidenciais a APIs públicas não autorizadas.
+- **Eficiência de VRAM**: Modelo fixado em CUDA FP16 consumindo ~2.2 GB de VRAM, preservando recursos para modelos LLM do Ollama em paralelo.
 
 ---
 
-## ⚙️ Diretrizes de Engenharia e Performance
+## 2. Continuous Self-Improvement & RCA de Áudio
 
-1. **Hardware & VRAM**:
-   - O modelo opera em `cuda` com `compute_type="float16"`.
-   - Consumo de VRAM na RTX 4070: **~2.2 GB** (deixando >5.5 GB livres para modelos LLM do Ollama rodarem em paralelo).
-2. **Normalização Automática**:
-   - O método `transcribe_file` aplica normalização de ganho individual por canal. Se um participante estiver com microfone muito baixo, o volume é elevado automaticamente antes de entrar no Whisper.
-3. **Filtro VAD (Voice Activity Detection)**:
-   - Mantido como `vad_filter=True` por padrão para ignorar silêncios longos e ruídos de respiração/cliques.
-
----
-
-## 🧠 Continuous Self-Improvement & Failure RCA Integration
-
-1. **RCA de Falhas em Áudio (Clipping, Sample Rate, Canais)**:
-   - Falhas comuns (áudios mono tratados como estéreo, arquivos corrompidos, VAD cortando início de frases baixas) são diagnosticadas via 5-Whys.
-   - Sempre que um usuário reclamar de perda de fala ou atraso, registre no RCA (`python core/learning/cli.py rca`) e ajuste os limiares de VAD e ganho estéreo para que se tornem o padrão do módulo.
-2. **One-Shot em Tarefas de Ata e Resumo**:
-   - Ao transcrever, gere o Markdown de notas com sumário executivo e action items estruturados na primeira passagem, evitando que o usuário precise pedir formatações adicionais.
-3. **Extrapolação de Performance GPU**:
-   - As lições de gerenciamento de VRAM na RTX 4070 (isolamento singleton, libertação de memória) devem ser transferidas para qualquer outro módulo local de inferência ou modelos de visão.
-
+- **RCA em Problemas de Áudio**: Se ocorrer corte de fala baixa por VAD ou desbalanceamento entre canais, ajuste os parâmetros de normalização no transcriber e registre a causa raiz via `python -m core.learning.cli rca`.

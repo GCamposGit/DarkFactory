@@ -25,13 +25,22 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--from-snapshot", dest="from_snapshot", default=None)
     parser.add_argument("--to-snapshot", dest="to_snapshot", default=None)
     parser.add_argument("--pretty", action="store_true")
+    parser.add_argument("--include-hf", action="store_true", help="Include hybrid workflow plan (HF)")
+    parser.add_argument("--include-infra", action="store_true", help="Include infrastructure roadmap (INFRA)")
+    parser.add_argument("--include-demands", action="store_true", help="Include user demand tickets")
+    parser.add_argument("--all", action="store_true", help="Include all sources (RM, DF, Demands, INFRA, HF)")
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
-    service = build_repository_roadmap_service(project_root())
+    service = build_repository_roadmap_service(
+        project_root(),
+        include_hf=args.include_hf or args.all,
+        include_infra=args.include_infra or args.all,
+        include_demands=args.include_demands or args.all,
+    )
     try:
         if args.command == "health":
             payload = service.get_health(args.project)

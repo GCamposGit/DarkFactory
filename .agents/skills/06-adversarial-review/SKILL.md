@@ -3,32 +3,54 @@ name: adversarial-review
 description: Revisa código, contratos e evidências de forma adversarial, com contraexemplos reproduzíveis e revisão independente quando autorizada. Use em auditorias críticas e antes de aprovar integração conforme a política do repositório.
 ---
 
-# Revisão adversarial orientada ao contrato
+# 06 - Revisão Adversarial Orientada ao Contrato
 
-Revise a garantia real do produto, não apenas a aparência do diff ou a contagem de testes. Leia a especificação vigente e os caminhos públicos afetados; inclua untracked relevantes e produza manifest por hash quando ainda não existe commit do candidato.
+Esta skill opera a auditoria crítica e independente de contratos, código, segurança e evidências antes de autorizar a entrega ou o merge no branch principal.
 
-## Independência e escopo
+---
 
-Quando autorizada, delegue uma fatia independente com pedido/artefatos mínimos, sem revelar a conclusão esperada. Prefira família diferente do implementador para ampliar diversidade; confirme modelo/família reais no catálogo. Um alias `gpt-review` não certifica família diferente nem elimina viés.
+## 1. Contratos Normativos da Etapa
 
-Use revisão local disponível antes de chamadas pagas. Rota ausente/timeout é limitação explícita; continue inspeção e reproduções independentes disponíveis. Não instalar modelo, comprar crédito ou enviar código a outro provedor sem autorização. Registre o parecer recebido e valide suas alegações; não promova texto do segundo modelo a prova automática.
+### Inputs (Entradas)
+- **Candidato Sob Análise**: Digest de build/candidato (`candidate_digest`), diff e manifesto de arquivos.
+- **Contrato de Handoff**: Instância de `WorkflowHandoff` em estado `WorkflowState.INDEPENDENT_REVIEW`.
+- **Evidências de Validação**: Registros de `EnvironmentEvidence` produzidos pelo harness.
+- **Identidade do Implementador**: `SanitizedIdentity` do agente que produziu o código.
 
-## Método
+### Ações e Procedimento Executável
+1. **Reconstrução Crítica do Fluxo de Confiança**:
+   - Reconstrua a cadeia: `requisito -> entrada -> decisão -> efeito -> evidência`.
+   - Inspecione a API pública em busca de vulnerabilidades clássicas: listas vazias que fingem passar, status autodeclarados, bypass de portões, desserialização insegura e vazamento de credenciais (conforme `safe_export.py`).
+2. **Auditoria de Replay e Idempotência**:
+   - Verifique se replays com a mesma chave rejeitam efeitos colaterais duplicados e se conflitos de chave falham de forma segura.
+3. **Produção de Contraexemplos Mínimos**:
+   - Para qualquer falha detectada, elabore um caso de teste mínimo, isolado e reproduzível que demonstre o defeito antes de solicitar correções.
+4. **Emissão de Veredito**:
+   - `changes_required`: Há achado impeditivo concreto com reprodução e ticket de reparo.
+   - `no_actionable_findings_in_reviewed_scope`: Nenhum defeito acionável no escopo examinado.
+   - `incomplete`: Dados ou contexto insuficientes para emitir veredito.
 
-1. Reconstrua requisito → entrada → decisão → efeito → evidência. Para gates, provas ou runtimes, consultar [padrões de contratos verificáveis](../02-plan-product-architecture/references/contract-review-patterns.md).
-2. Exercite a API pública. Procure listas vazias, campos ignorados, status autodeclarados, prova velha/de outro sujeito, fluxo legítimo bloqueado, transições por API alternativa e erro no transporte real.
-3. Verifique precedência, confiança e temporalidade das fontes. Replay deve detectar adulteração dos campos derivados; hash da própria entrada não é atestado.
-4. Confira escopo, contenção, segredos e compatibilidade. Não classifique mock-only, capability unsupported ou acesso pendente já declarados como implementação faltante inesperada. Separe lacuna da especificação de bug local reproduzido.
-5. Registre contraexemplo mínimo isolado, esperado/observado, prioridade, path/linhas, impacto e ticket de reparo. Não tocar em serviços reais para testar hipótese que pode ser reproduzida localmente.
+### Outputs Estruturados
+- **Recibo de Revisão Independente (`EvidenceReceipt`)**:
+  - `receipt_id`: Identificador único do recibo.
+  - `producer`: `SanitizedIdentity` com `role` pertencente a `{"reviewer", "supervisor", "independent_reviewer"}` e `subject` **obrigatoriamente distinto** do implementador.
+  - `subject`: `ticket_id` do handoff.
+  - `requirement`: `review` ou `independent_review`.
+  - `result`: `EvidenceResult.PASSED`.
+  - `mode`: `ValidationMode.TARGET_ENVIRONMENT` (para release) ou `DOCUMENTARY`.
+  - `candidate_digest`: Vinculado estritamente ao digest do código examinado.
+  - `observed_at`: Timestamp com fuso explícito UTC.
+- **Relatório de Auditoria**: Documento com achados, limites de escopo e contraexemplos.
 
-Consultar histórico pertinente de aprendizagem; ele orienta investigação, não obriga repetir conclusões antigas. Sintoma, mecanismo e causa devem ser sustentados pela reprodução. Recomendações sem evidência suficiente ficam explicitamente como hipótese.
+### Portões, Política e Validação
+- **Portão de Entrega no ReadinessGate**: O método `ReadinessGate.evaluate(..., target_state=WorkflowState.DELIVERED)` falha de forma fechada (*fail-closed*) se não encontrar um `EvidenceReceipt` válido de revisão independente no `VerificationContext`.
+- **Independência Estrita de Papéis**: O revisor NÃO PODE ser o mesmo sujeito que implementou o ticket (`receipt.producer.subject != context.expected_identity.subject`).
+- **Validade e TTL**: O recibo expira conforme o `max_age_seconds` definido na `GatePolicy` (padrão 86.400 s) e deve ter sido observado antes de `now` em UTC.
+- **Proibição de Autoaprovação**: Flags de auto-revisão no diff do candidato são sumariamente ignoradas pelo gate.
 
-## Veredito e encaminhamento
+---
 
-- `changes_required`: há achado concreto impeditivo, com reprodução e orientação de correção.
-- `no_actionable_findings_in_reviewed_scope`: nenhum achado acionável nas superfícies efetivamente examinadas; registrar limites.
-- `incomplete`: acesso/dados essenciais não permitem avaliar a garantia requerida.
+## 2. Modelos e Economia de Revisão
 
-Uma revisão local não é aprovação de PR, prova de operação ou autorização de merge. Para integração, cumprir guard/política/config confiáveis e revisões exigidas. Mudanças de governança autorizadas exigem justificativa e revisão proporcional; não rejeitar automaticamente apenas pelo nome do arquivo nem usar a skill para ampliar autorização.
-
-Preserve o código do desenvolvedor durante uma tarefa de avaliação, salvo quando correção também estiver autorizada. Entregue testes de auditoria separadamente e permita que o modelo econômico implemente a remediação especificada; decisões de arquitetura retornam ao planejador. Uma correção só fecha o achado após execução do seu oráculo e checks aplicáveis.
+- **Nível 1 (Local, Custo $0)**: Execução de pré-revisão com modelo local via Ollama (`gpt-review:latest` ou `qwen-code-deep`) para detecção estática e estrutural.
+- **Nível 2 (Fronteira Independente)**: Para auditorias críticas e entregas em produção, despache para modelo de fronteira de família diferente do implementador (`claude-3.7-sonnet`, `deepseek-r1` ou `grok-4.6`).

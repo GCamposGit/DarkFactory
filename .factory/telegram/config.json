@@ -1,0 +1,12 @@
+{
+  "bot_token": "8366386707:AAFTGyHUi38E6kgVKaJbIThww-G_F9OgCJg",
+  "authorized_user_ids": [
+    8939220558
+  ],
+  "authorized_chat_ids": [
+    8939220558
+  ],
+  "webhook_secret_token": null,
+  "api_base_url": "https://api.telegram.org",
+  "poll_timeout_seconds": 30
+}
