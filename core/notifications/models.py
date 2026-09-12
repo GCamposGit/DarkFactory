@@ -65,3 +65,5 @@ class TokenAlertThresholds(BaseModel):
     warning_threshold_percent: float = Field(default=25.0, ge=1.0, le=99.0)
     critical_threshold_percent: float = Field(default=10.0, ge=0.1, le=50.0)
     cooldown_minutes: int = Field(default=30, ge=1, le=1440)
+    edge_triggered: bool = Field(default=True, description="Notify once on threshold crossing (25% and 10%)")
+

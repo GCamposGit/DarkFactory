@@ -154,6 +154,7 @@ class NotificationService:
         provider_name: Optional[str] = None,
         severity: Optional[AlertSeverity] = None,
         message: Optional[str] = None,
+        force: bool = False,
     ) -> Optional[NotificationEvent]:
         """Convenience method to trigger a token quota warning or critical alert."""
         p_name = provider_name or provider_id
@@ -172,4 +173,5 @@ class NotificationService:
             provider_id=provider_id,
             remaining_percent=remaining_percent,
             details={"provider_name": p_name, "threshold_eval": sev.value},
+            force=force,
         )

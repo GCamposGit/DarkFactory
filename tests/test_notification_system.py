@@ -290,6 +290,57 @@ def test_token_quota_watcher_evaluations(temp_notification_service: Notification
     )
     assert watcher.evaluate_account(local_account) is None
 
+    # 5. Edge-triggered single notification (Grill requirement: notify only ONCE on crossing 25% and 10%)
+    # Re-evaluating warn_account (still at 22%) must return None (already notified)
+    assert watcher.evaluate_account(warn_account) is None
+
+    # Dropping further from 22% to 8% crosses into CRITICAL: must fire CRITICAL exactly once
+    warn_to_crit = ProviderAccountUsage(
+        provider_id="anthropic",
+        provider_name="Anthropic Build",
+        family=ProviderFamily.FRONTIER,
+        status=AccountConnectionStatus.CONNECTED,
+        adapter="anthropic_adapter",
+        quota_supported=True,
+        windows=[QuotaWindow(quota_id="q2", label="hourly", used_percent=92.0, remaining_percent=8.0)],
+        message="Operational",
+    )
+    alert_crit2 = watcher.evaluate_account(warn_to_crit)
+    assert alert_crit2 is not None
+    assert alert_crit2.severity == AlertSeverity.CRITICAL
+
+    # Re-evaluating still at 8% returns None
+    assert watcher.evaluate_account(warn_to_crit) is None
+
+    # Quota recovery above 25% (e.g. 70%) resets/re-arms the trigger
+    recovered = ProviderAccountUsage(
+        provider_id="anthropic",
+        provider_name="Anthropic Build",
+        family=ProviderFamily.FRONTIER,
+        status=AccountConnectionStatus.CONNECTED,
+        adapter="anthropic_adapter",
+        quota_supported=True,
+        windows=[QuotaWindow(quota_id="q2", label="hourly", used_percent=30.0, remaining_percent=70.0)],
+        message="Operational",
+    )
+    assert watcher.evaluate_account(recovered) is None
+
+    # Crossing down again to 20% fires WARNING again
+    drop_again = ProviderAccountUsage(
+        provider_id="anthropic",
+        provider_name="Anthropic Build",
+        family=ProviderFamily.FRONTIER,
+        status=AccountConnectionStatus.CONNECTED,
+        adapter="anthropic_adapter",
+        quota_supported=True,
+        windows=[QuotaWindow(quota_id="q2", label="hourly", used_percent=80.0, remaining_percent=20.0)],
+        message="Operational",
+    )
+    alert_warn2 = watcher.evaluate_account(drop_again)
+    assert alert_warn2 is not None
+    assert alert_warn2.severity == AlertSeverity.WARNING
+
+
 
 def test_telegram_alerts_command(tmp_path: Path) -> None:
     """Tests that Telegram command /alerts returns active alerts to authorized owner."""
