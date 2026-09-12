@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 from pathlib import Path
 from threading import RLock
@@ -20,8 +21,12 @@ DEFAULT_DEMANDS_PATH = Path(".factory/demands/demands.json")
 class DemandsStore:
     """Thread-safe, atomic persistence for user demands in JSON format."""
 
-    def __init__(self, path: Path | str = DEFAULT_DEMANDS_PATH) -> None:
-        self.path = Path(path)
+    def __init__(self, path: Path | str | None = None) -> None:
+        if path is not None:
+            self.path = Path(path)
+        else:
+            override = os.environ.get("DARKFAC_DEMANDS_PATH")
+            self.path = Path(override) if override else DEFAULT_DEMANDS_PATH
         self._lock = RLock()
         self._ensure_storage()
 
