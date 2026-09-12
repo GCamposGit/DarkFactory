@@ -1230,6 +1230,39 @@ def trigger_hf15_rollback_drill_endpoint(
     return service.trigger_hf15_rollback_drill(project_id=project_id)
 
 
+@router.get("/notifications")
+def list_notifications_endpoint(
+    limit: int = Query(50, ge=1, le=200),
+    severity: Optional[str] = Query(None, description="Filter by severity (info, warning, critical)"),
+    unread_only: bool = Query(False, description="Only unacknowledged alerts"),
+    service: HubService = Depends(get_hub_service),
+) -> Dict[str, Any]:
+    """Lists recent operational alerts and notifications."""
+    items = service.list_notifications(limit=limit, severity=severity, unread_only=unread_only)
+    return {"notifications": items, "count": len(items)}
+
+
+@router.post("/notifications/{notification_id}/acknowledge")
+def acknowledge_notification_endpoint(
+    notification_id: str,
+    service: HubService = Depends(require_owner_session),
+) -> Dict[str, Any]:
+    """Marks an operational alert as acknowledged by the owner."""
+    ok = service.acknowledge_notification(notification_id)
+    return {"notification_id": notification_id, "acknowledged": ok}
+
+
+@router.post("/notifications/check-quotas")
+def check_token_quotas_endpoint(
+    force: bool = Query(False, description="Force fresh inspection bypassing cache"),
+    service: HubService = Depends(require_owner_session),
+) -> Dict[str, Any]:
+    """Triggers an active inspection of all connected accounts and fires alerts for near-critical limits."""
+    alerts = service.check_token_quotas(force=force)
+    return {"emitted_alerts": alerts, "count": len(alerts)}
+
+
+
 
 
 

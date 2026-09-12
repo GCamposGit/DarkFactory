@@ -37,7 +37,7 @@ SECRET_PATTERNS = [
     re.compile(r"bot\d+:[A-Za-z0-9_-]{20,}", re.IGNORECASE),
     re.compile(r"ghp_[A-Za-z0-9]{20,}", re.IGNORECASE),
     re.compile(r"github_pat_[A-Za-z0-9_]{20,}", re.IGNORECASE),
-    re.compile(r"sk-[A-Za-z0-9]{20,}", re.IGNORECASE),
+    re.compile(r"sk-[A-Za-z0-9_-]{20,}", re.IGNORECASE),
     re.compile(r"password=([^\s&]+)", re.IGNORECASE),
     re.compile(r"Bearer\s+([A-Za-z0-9._~+/-]{15,})", re.IGNORECASE),
 ]
@@ -84,7 +84,7 @@ class TelegramChat(BaseModel):
 class TelegramMessage(BaseModel):
     """Incoming or outgoing Telegram message."""
 
-    model_config = ConfigDict(extra="ignore")
+    model_config = ConfigDict(extra="ignore", populate_by_name=True)
 
     message_id: int
     from_user: Optional[TelegramUser] = Field(default=None, alias="from")
@@ -96,7 +96,7 @@ class TelegramMessage(BaseModel):
 class TelegramCallbackQuery(BaseModel):
     """Inline keyboard button callback query."""
 
-    model_config = ConfigDict(extra="ignore")
+    model_config = ConfigDict(extra="ignore", populate_by_name=True)
 
     id: str
     from_user: TelegramUser = Field(alias="from")
@@ -156,8 +156,10 @@ class TelegramActionType(str, Enum):
     STATUS = "status"
     GRILL = "grill"
     APPROVE = "approve"
+    ALERTS = "alerts"
     UNKNOWN = "unknown"
     UNAUTHORIZED = "unauthorized"
+
 
 
 class TelegramDispatchResult(BaseModel):
@@ -352,10 +354,11 @@ class TelegramGateway:
             result.response_text = (
                 "\U0001f44b Dark Factory Autonomous Control Bot\n\n"
                 "Available commands:\n"
-                "\u2022 /demand &lt;text&gt; - Ingest a new demand into backlog\n"
-                "\u2022 /status [ticket_id] - Check status of runs and pipelines\n"
-                "\u2022 /grill &lt;ticket_id&gt; &lt;choice&gt; - Answer Grill clarification questions\n"
-                "\u2022 /approve &lt;project_id&gt; &lt;artifact_digest&gt; - Approve production release\n"
+                "• /demand &lt;text&gt; - Ingest a new demand into backlog\n"
+                "• /status [ticket_id] - Check status of runs and pipelines\n"
+                "• /alerts - Check active token quota and operational alerts\n"
+                "• /grill &lt;ticket_id&gt; &lt;choice&gt; - Answer Grill clarification questions\n"
+                "• /approve &lt;project_id&gt; &lt;artifact_digest&gt; - Approve production release\n"
             )
 
         elif cmd_str == "/demand":
@@ -437,8 +440,28 @@ class TelegramGateway:
                     result.resumed = True
                     result.response_text = f"🚀 Release approved for {p_id} ({digest[:8]})."
 
+        elif cmd_str == "/alerts":
+            result.action = TelegramActionType.ALERTS
+            try:
+                from core.notifications.models import AlertSeverity
+                from core.notifications.store import NotificationStore
+                store = NotificationStore()
+                events = store.list_notifications(limit=5)
+                if not events:
+                    result.response_text = "✅ <b>Nenhum alerta operacional ativo.</b> Todas as cotas e serviços estão saudáveis."
+                else:
+                    lines = ["🔔 <b>Alertas Operacionais Recentes:</b>\n"]
+                    for ev in events:
+                        icon = "🚨" if ev.severity == AlertSeverity.CRITICAL else ("⚠️" if ev.severity == AlertSeverity.WARNING else "ℹ️")
+                        lines.append(f"{icon} <b>[{ev.severity.value.upper()}] {ev.title}</b>\n   {ev.message}")
+                    result.response_text = "\n\n".join(lines)
+            except Exception as exc:
+                result.error = str(exc)
+                result.response_text = f"❌ Erro ao consultar alertas: {exc}"
+
         else:
             result.response_text = f"❓ Unknown command: {cmd_str}. Send /help for command list."
+
 
         self.processed_update_ids.add(update.update_id)
         self._save_state()
@@ -613,3 +636,8 @@ class TelegramGateway:
             "processed_callbacks": len(self.processed_callback_ids),
             "pending_outbox_notifications": outbox_count,
         }
+
+
+# Interop alias
+TelegramService = TelegramGateway
+

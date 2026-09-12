@@ -2210,3 +2210,31 @@ class HubService:
             },
         )
         return record.model_dump(mode="json")
+
+    def list_notifications(
+        self,
+        limit: int = 50,
+        severity: Optional[str] = None,
+        unread_only: bool = False,
+    ) -> List[Dict[str, Any]]:
+        """Returns recent operational notifications from the store."""
+        from core.notifications.models import AlertSeverity
+        from core.notifications.store import NotificationStore
+        store = NotificationStore()
+        sev = AlertSeverity(severity) if severity else None
+        events = store.list_notifications(limit=limit, severity=sev, unread_only=unread_only)
+        return [e.model_dump(mode="json") for e in events]
+
+    def acknowledge_notification(self, notification_id: str) -> bool:
+        """Marks an operational notification as acknowledged."""
+        from core.notifications.store import NotificationStore
+        store = NotificationStore()
+        return store.mark_acknowledged(notification_id)
+
+    def check_token_quotas(self, force: bool = False) -> List[Dict[str, Any]]:
+        """Inspects all connected provider accounts and emits alerts for critical limits."""
+        from core.notifications.token_watcher import TokenQuotaWatcher
+        watcher = TokenQuotaWatcher()
+        emitted = watcher.check_all_quotas(force=force)
+        return [e.model_dump(mode="json") for e in emitted]
+

@@ -50,6 +50,8 @@ models/checkpoints/
 .factory/test_logs/
 .factory/hf15/workspace/
 .factory/reports/
+.factory/notifications/
+
 
 
 # Local audio samples and generated media
