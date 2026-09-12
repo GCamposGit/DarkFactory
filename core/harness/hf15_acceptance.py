@@ -85,6 +85,11 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Output structured JSON report to stdout",
     )
+    parser.add_argument(
+        "--interactive",
+        action="store_true",
+        help="Run human-in-the-loop gates (e.g. G1 Grill intake) interactively with user prompts",
+    )
     return parser
 
 
@@ -114,7 +119,9 @@ def run_hf15_runner(argv: Optional[Sequence[str]] = None) -> int:
     report: HF15AcceptanceReport = engine.run_acceptance(
         gate_filter=gate_filter,
         scenario_filter=args.scenario,
+        interactive=args.interactive,
     )
+
 
     # Output formatting with secret sanitization
     report_dict = sanitize_payload(report.model_dump(mode="json"))

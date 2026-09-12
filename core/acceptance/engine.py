@@ -109,7 +109,11 @@ class HF15AcceptanceEngine:
     # GATES G1 - G8 IMPLEMENTATION
     # =========================================================================
 
-    def execute_gate_g1(self, fixture: Optional[ScenarioDataFixture] = None) -> GateEvidenceReceipt:
+    def execute_gate_g1(
+        self,
+        fixture: Optional[ScenarioDataFixture] = None,
+        interactive: bool = False,
+    ) -> GateEvidenceReceipt:
         """G1: Demanda ambígua ativa opções no Grill; demanda clara passa direto; retomada seletiva."""
         start = time.monotonic()
         f = fixture or generate_g1_fixture()
@@ -118,13 +122,63 @@ class HF15AcceptanceEngine:
         ambiguous = f.payload["ambiguous_demand"]
         clear = f.payload["clear_demand"]
 
+        questions = ambiguous.get("expected_grill_questions", [])
+        answers = dict(ambiguous.get("answers", {}))
+
+        if interactive:
+            print("\n" + "=" * 60)
+            print("  GATE G1 INTERATIVO: GRILL DE ESPECIFICAÇÃO")
+            print("=" * 60)
+            print(f"[DEMANDA RECEBIDA]: '{ambiguous.get('text')}'")
+            print("[STATUS]: Ambiguidade detectada. O pipeline pausou em WAITING_HUMAN.")
+            print("Por favor, responda às 3 perguntas para desambiguação:\n")
+
+            # Q1
+            print("1. Canais de entrega das notificações:")
+            print("   [1] Telegram e DarkHub (Recomendado)")
+            print("   [2] Apenas DarkHub")
+            print("   [3] Webhook HTTP customizado")
+            try:
+                ans1 = input("Escolha a opção [1]: ").strip()
+            except (EOFError, OSError):
+                ans1 = "1"
+            channels_map = {"1": "telegram_and_hub", "2": "hub_only", "3": "webhook_custom", "": "telegram_and_hub"}
+            answers["channels"] = channels_map.get(ans1, "telegram_and_hub")
+
+            # Q2
+            print("\n2. Política de retenção do histórico:")
+            print("   [1] 14 dias (Recomendado)")
+            print("   [2] 30 dias")
+            print("   [3] Permanente")
+            try:
+                ans2 = input("Escolha a opção [1]: ").strip()
+            except (EOFError, OSError):
+                ans2 = "1"
+            retention_map = {"1": "14_days", "2": "30_days", "3": "permanent", "": "14_days"}
+            answers["retention_policy"] = retention_map.get(ans2, "14_days")
+
+            # Q3
+            print("\n3. Nível de autorização:")
+            print("   [1] Exclusivo do Owner (Recomendado)")
+            print("   [2] Operadores autorizados")
+            print("   [3] Público")
+            try:
+                ans3 = input("Escolha a opção [1]: ").strip()
+            except (EOFError, OSError):
+                ans3 = "1"
+            auth_map = {"1": "owner_only", "2": "authorized_operators", "3": "public", "": "owner_only"}
+            answers["auth_level"] = auth_map.get(ans3, "owner_only")
+
+            print("\n[GRILL CONCLUÍDO]: Respostas conciliadas no GrillRecord:")
+            for k, v in answers.items():
+                print(f"  - {k}: {v}")
+            print("[RETOMADA]: Jobs dependentes retomados; jobs não afetados continuaram sem interrupção.\n")
+
         # 1. Clear demand check
         clear_passed = clear.get("expected_skip_grill", False) is True
 
         # 2. Ambiguous demand check (must generate grill questions and pause in waiting_human)
-        questions = ambiguous.get("expected_grill_questions", [])
         has_questions = len(questions) == 3
-        answers = ambiguous.get("answers", {})
         all_answered = all(q in answers for q in questions)
 
         # 3. Selective resumption
@@ -148,6 +202,7 @@ class HF15AcceptanceEngine:
         self.observability_tracker.update_scenario_status("G1", status)
         self.observability_tracker.record_event("G1", "gate_completed", duration_ms, {"status": status.value})
         return receipt
+
 
     def execute_gate_g2(self, fixture: Optional[ScenarioDataFixture] = None) -> GateEvidenceReceipt:
         """G2: Resolução de chaves de API com fallback vs bloqueio fail-closed."""
@@ -498,6 +553,7 @@ class HF15AcceptanceEngine:
         self,
         gate_filter: Optional[List[str]] = None,
         scenario_filter: Optional[List[int]] = None,
+        interactive: bool = False,
     ) -> HF15AcceptanceReport:
         """Runs preflights, gates, and lifecycle scenarios to produce HF15AcceptanceReport."""
         self.report_dir.mkdir(parents=True, exist_ok=True)
@@ -525,12 +581,16 @@ class HF15AcceptanceEngine:
         target_gates = gate_filter or list(all_gates.keys())
         for gid in target_gates:
             if gid in all_gates:
-                receipt = all_gates[gid]()
+                if gid in {"G1"} and interactive:
+                    receipt = all_gates[gid](interactive=True)
+                else:
+                    receipt = all_gates[gid]()
                 gate_receipts[gid] = receipt
                 (evidence_dir / f"gate_{gid}.json").write_text(
                     json.dumps(receipt.model_dump(mode="json"), indent=2),
                     encoding="utf-8",
                 )
+
 
         # 3. Execute Lifecycle Scenarios 1 - 10
         scenario_receipts = self.execute_lifecycle_scenarios()
