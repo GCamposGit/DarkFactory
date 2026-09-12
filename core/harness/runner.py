@@ -170,6 +170,7 @@ def run_step(step: HarnessStepConfig) -> StepExecution:
 
 
 def _candidate_sha() -> str:
+    _ensure_clean_worktree()
     process = subprocess.run(
         ["git", "rev-parse", "HEAD"],
         cwd=PROJECT_ROOT,
@@ -183,6 +184,51 @@ def _candidate_sha() -> str:
     if process.returncode != 0 or not re.fullmatch(r"[0-9a-f]{7,64}", sha):
         raise RuntimeError(f"Unable to bind harness result to candidate SHA: {process.stderr.strip()}")
     return sha
+
+
+def _ensure_clean_worktree() -> None:
+    """Reject evidence that cannot be bound to the exact tested checkout.
+
+    ``git rev-parse HEAD`` identifies only the committed tree.  Running the
+    harness from a dirty checkout would therefore let a green result claim
+    the commit while tests actually exercised local edits or untracked files.
+    Porcelain status is used so both tracked changes and untracked paths are
+    covered, and any inability to query Git fails closed.
+    """
+
+    command = [
+        "git",
+        "status",
+        "--porcelain=v1",
+        "--untracked-files=all",
+        "--ignore-submodules=none",
+    ]
+    try:
+        process = subprocess.run(
+            command,
+            cwd=PROJECT_ROOT,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            check=False,
+        )
+    except OSError as exc:
+        raise RuntimeError(
+            f"Unable to verify candidate worktree cleanliness: {exc}"
+        ) from exc
+
+    if process.returncode != 0:
+        detail = process.stderr.strip() or process.stdout.strip() or "unknown git error"
+        raise RuntimeError(
+            f"Unable to verify candidate worktree cleanliness: {detail}"
+        )
+
+    if process.stdout.strip():
+        raise RuntimeError(
+            "Candidate worktree is dirty; commit or use a clean checkout before "
+            "running the official harness"
+        )
 
 
 def _selected_steps(
@@ -203,6 +249,14 @@ def execute(
     include_holdout: bool,
     config_path: Path,
 ) -> bool:
+    try:
+        _ensure_clean_worktree()
+    except RuntimeError as exc:
+        print(f"[ERROR] {exc}")
+        print(f"{MARKER_TEST_COUNT} count=0")
+        print(MARKER_HARNESS_FAIL)
+        return False
+
     steps = _selected_steps(config, quick=quick, include_holdout=include_holdout)
     if not steps:
         print("[ERROR] Zero checks selected. Empty is not a pass.")
@@ -224,8 +278,15 @@ def execute(
     failed_steps = [item.name for item in executions if not item.passed]
     print(f"{MARKER_TEST_COUNT} count={discovered_count}")
 
+    try:
+        candidate_sha = _candidate_sha()
+    except RuntimeError as exc:
+        print(f"[ERROR] {exc}")
+        print(MARKER_HARNESS_FAIL)
+        return False
+
     result = HarnessResult(
-        candidate_sha=_candidate_sha(),
+        candidate_sha=candidate_sha,
         config_hash=config_hash,
         required_steps=[step.name for step in steps],
         started_steps=[item.name for item in executions],
