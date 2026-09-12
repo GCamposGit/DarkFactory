@@ -18,6 +18,7 @@ Este documento governa a qualidade técnica de todo código produzido pelos agen
 - **Isolamento de Estado**: Testes não devem depender da ordem de execução nem deixar artefatos temporários órfãos no filesystem.
 - **Portões Determinísticos**: A validação é decidida por comandos executáveis emitindo marcadores estruturados, nunca por um resumo conversacional de LLM.
 - **Entrega com Operação no Mundo Real (Live End-to-End)**: Todo componente ou integração externa (ex: Telegram, n8n, GitHub, Dokploy, Provedores) só é considerado entregue após configuração ativa e validação operacional end-to-end no mundo real com o owner. É terminantemente proibido declarar entregas apenas com base em simulações/mocks sintéticos postergando a validação e setup real para o final.
+- **Portão de Ambiguidade e Grill Mandatório (Gate G1)**: Nenhum agente pode avançar para o planejamento executável ou implementação de uma demanda aberta em linguagem natural sem antes submetê-la ao crivo de ambiguidade. Se houver lacunas materiais (canais, limiares, permissões, regras de negócio não especificadas), o agente deve obrigatoriamente pausar em `WAITING_HUMAN` com perguntas estruturadas de desambiguação até a manifestação do Owner. Inferir ou inventar parâmetros materiais sem validação é uma quebra estrita de governança.
 
 
 ## 3. Padrões de Comunicação e Comandos para o Usuário

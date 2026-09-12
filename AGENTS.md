@@ -21,6 +21,11 @@
 - Forneça sugestões de conteúdo para absolutamente todos os campos que precisam ser preenchidos e seletores.
 - Nunca assuma que o usuário tem experiência na configuração ou sabe o que está fazendo; o guia deve ser à prova de falhas e retrabalho.
 
+## Intake e Portão de Ambiguidade (Gate G1)
+
+- Toda nova demanda em linguagem natural que possua ambiguidades materiais (canais, limiares numéricos, permissões, regras de negócio não especificadas) exige pausa imediata em `WAITING_HUMAN`.
+- O agente nunca deve assumir parâmetros ou iniciar código antes de executar o Grill estruturado e receber as decisões explícitas do Owner.
+
 ## Validação obrigatória
 
 ```powershell
