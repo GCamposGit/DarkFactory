@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 import urllib.error
 import urllib.parse
@@ -124,6 +125,29 @@ class TelegramConfig(BaseModel):
     webhook_secret_token: Optional[str] = None
     api_base_url: str = "https://api.telegram.org"
     poll_timeout_seconds: int = 30
+
+
+def load_telegram_config(config_file: Optional[Path] = None) -> TelegramConfig:
+    """Loads TelegramConfig from .factory/telegram/config.json or environment variables."""
+    cfg_path = config_file or (Path(__file__).resolve().parents[2] / ".factory" / "telegram" / "config.json")
+    if cfg_path.exists():
+        try:
+            data = json.loads(cfg_path.read_text(encoding="utf-8"))
+            return TelegramConfig.model_validate(data)
+        except Exception:
+            pass
+
+    token = os.environ.get("TELEGRAM_BOT_TOKEN")
+    users = [int(u.strip()) for u in os.environ.get("TELEGRAM_AUTHORIZED_USERS", "").split(",") if u.strip().isdigit()]
+    chats = [int(c.strip()) for c in os.environ.get("TELEGRAM_AUTHORIZED_CHATS", "").split(",") if c.strip().isdigit()]
+    secret = os.environ.get("TELEGRAM_WEBHOOK_SECRET")
+    return TelegramConfig(
+        bot_token=token,
+        authorized_user_ids=users,
+        authorized_chat_ids=chats,
+        webhook_secret_token=secret,
+        api_base_url=os.environ.get("TELEGRAM_API_BASE_URL", "https://api.telegram.org"),
+    )
 
 
 class TelegramActionType(str, Enum):

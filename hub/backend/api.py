@@ -100,6 +100,16 @@ def get_hub_service() -> HubService:
     return _service_instance
 
 
+def require_owner_session(
+    x_hub_session: Optional[str] = Header(default=None, alias="X-Hub-Session"),
+    service: HubService = Depends(get_hub_service),
+) -> HubService:
+    """Require the active local owner session for state-changing integrations."""
+    if not service.validate_session(x_hub_session):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required")
+    return service
+
+
 def _roadmap_project_or_404(service: HubService, project_id: str) -> None:
     if not any(project.id == project_id for project in service.list_roadmap_projects()):
         raise HTTPException(status_code=404, detail=f"Project '{project_id}' not found")
@@ -1179,7 +1189,7 @@ def get_n8n_workflows_endpoint(
 def sync_n8n_workflows_endpoint(
     custom_path: Optional[str] = Body(None, embed=True, description="Custom path to workflow JSON or dir"),
     activate: bool = Body(True, embed=True, description="Activate workflows after uploading"),
-    service: HubService = Depends(get_hub_service),
+    service: HubService = Depends(require_owner_session),
 ) -> Dict[str, Any]:
     """Synchronizes sanitized workflow definitions from repository into n8n."""
     return service.sync_n8n_workflows(custom_path=custom_path, activate=activate)
@@ -1189,10 +1199,35 @@ def sync_n8n_workflows_endpoint(
 def trigger_n8n_webhook_endpoint(
     path: str = Body(..., embed=True, description="Webhook slug or full URL"),
     payload: Dict[str, Any] = Body(..., embed=True, description="JSON payload to dispatch"),
-    service: HubService = Depends(get_hub_service),
+    service: HubService = Depends(require_owner_session),
 ) -> Dict[str, Any]:
     """Triggers an autonomous webhook workflow in n8n."""
     return service.trigger_n8n_webhook(path_or_url=path, payload=payload)
+
+
+@router.get("/hf15/status")
+def get_hf15_status_endpoint(
+    service: HubService = Depends(get_hub_service),
+) -> Dict[str, Any]:
+    """Returns HF-15 acceptance readiness status, preflight report and SLA tracking."""
+    return service.get_hf15_status()
+
+
+@router.get("/hf15/metrics")
+def get_hf15_metrics_endpoint(
+    service: HubService = Depends(get_hub_service),
+) -> Dict[str, Any]:
+    """Returns aggregate metrics and SLA performance for HF-15 acceptance."""
+    return service.get_hf15_metrics()
+
+
+@router.post("/hf15/rollback/drill")
+def trigger_hf15_rollback_drill_endpoint(
+    project_id: str = Body("proj-drill-01", embed=True, description="Project ID for rollback drill"),
+    service: HubService = Depends(require_owner_session),
+) -> Dict[str, Any]:
+    """Triggers an auditable, isolated rollback drill measuring RPO and RTO."""
+    return service.trigger_hf15_rollback_drill(project_id=project_id)
 
 
 

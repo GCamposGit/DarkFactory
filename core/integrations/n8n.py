@@ -40,6 +40,39 @@ class N8nConfig(BaseModel):
     encryption_key: Optional[str] = None
 
 
+def _normalise_origin(url: str) -> Optional[tuple[str, str, int]]:
+    """Return a comparable HTTP origin, rejecting URLs carrying userinfo."""
+    try:
+        parsed = urllib.parse.urlsplit(url.strip())
+        scheme = parsed.scheme.lower()
+        hostname = (parsed.hostname or "").rstrip(".").lower()
+        if scheme not in {"http", "https"} or not hostname:
+            return None
+        if parsed.username is not None or parsed.password is not None:
+            return None
+        port = parsed.port
+    except (AttributeError, ValueError):
+        return None
+
+    if port is None:
+        port = 443 if scheme == "https" else 80
+    return scheme, hostname, port
+
+
+def _is_webhook_path(path: str) -> bool:
+    """Allow only n8n's public webhook routes, never arbitrary API/admin paths."""
+    decoded_path = urllib.parse.unquote(path or "")
+    segments = [segment for segment in decoded_path.split("/") if segment]
+    if any(segment in {".", ".."} or "\\" in segment for segment in segments):
+        return False
+    return any(
+        segment.lower() in {"webhook", "webhook-test"}
+        and index + 1 < len(segments)
+        and bool(segments[index + 1])
+        for index, segment in enumerate(segments)
+    )
+
+
 class N8nInstanceReport(BaseModel):
     """Report produced by probing an n8n endpoint."""
 
@@ -84,12 +117,12 @@ class N8nProbe:
             try:
                 res = self._http_client(url, timeout)
                 return N8nInstanceReport.model_validate(res)
-            except Exception as exc:
+            except Exception:
                 return N8nInstanceReport(
                     url=url,
                     is_generic_placeholder=False,
                     operational=False,
-                    error=str(exc),
+                    error="n8n health probe failed",
                 )
 
         # Default live HTTP probe
@@ -128,14 +161,14 @@ class N8nProbe:
                 is_generic_placeholder=False,
                 operational=False,
                 status_code=exc.code,
-                error=f"HTTP Error {exc.code}: {exc.reason}",
+                error=f"HTTP Error {exc.code}",
             )
-        except Exception as exc:
+        except Exception:
             return N8nInstanceReport(
                 url=url,
                 is_generic_placeholder=False,
                 operational=False,
-                error=f"Connection failed: {exc}",
+                error="n8n health probe connection failed",
             )
 
 
@@ -312,15 +345,60 @@ class N8nApiClient:
         self.config = config or load_n8n_config()
         self._http_client = http_client
 
-    def _get_headers(self) -> Dict[str, str]:
+    def _get_headers(self, *, include_api_key: bool = True) -> Dict[str, str]:
         headers = {
             "Content-Type": "application/json",
             "Accept": "application/json",
             "User-Agent": "DarkFac-Autonomous-Agent/1.0",
         }
-        if self.config.api_key:
+        if include_api_key and self.config.api_key:
             headers["X-N8N-API-KEY"] = self.config.api_key
         return headers
+
+    def _allowed_origins(self) -> set[tuple[str, str, int]]:
+        """Build the n8n origin allowlist from explicitly configured endpoints."""
+        configured_urls = [self.config.base_url]
+        if self.config.webhook_url:
+            configured_urls.append(self.config.webhook_url)
+        return {
+            origin
+            for configured_url in configured_urls
+            if (origin := _normalise_origin(configured_url)) is not None
+        }
+
+    def _resolve_allowed_url(self, path_or_url: str) -> Optional[str]:
+        """Resolve a request URL and reject origins outside the configured n8n allowlist."""
+        if not isinstance(path_or_url, str) or not path_or_url.strip():
+            return None
+
+        raw_url = path_or_url.strip()
+        try:
+            parsed = urllib.parse.urlsplit(raw_url)
+        except ValueError:
+            return None
+
+        if parsed.scheme:
+            if parsed.scheme.lower() not in {"http", "https"}:
+                return None
+            candidate = raw_url
+        else:
+            # Treat all relative paths as paths on the configured API origin.
+            base = self.config.base_url.rstrip("/")
+            if not base or raw_url.startswith("//"):
+                return None
+            candidate = f"{base}/{raw_url.lstrip('/')}"
+
+        try:
+            candidate_parts = urllib.parse.urlsplit(candidate)
+            if candidate_parts.fragment:
+                return None
+        except ValueError:
+            return None
+
+        origin = _normalise_origin(candidate)
+        if origin is None or origin not in self._allowed_origins():
+            return None
+        return candidate
 
     def _request(
         self,
@@ -329,25 +407,28 @@ class N8nApiClient:
         payload: Optional[Dict[str, Any]] = None,
         timeout: float = 10.0,
     ) -> N8nApiResult:
-        if path_or_url.startswith("http://") or path_or_url.startswith("https://"):
-            full_url = path_or_url
-        else:
-            base = self.config.base_url.rstrip("/")
-            path = path_or_url.lstrip("/")
-            full_url = f"{base}/{path}"
+        full_url = self._resolve_allowed_url(path_or_url)
+        if full_url is None:
+            return N8nApiResult(
+                success=False,
+                status_code=None,
+                error="n8n destination is outside the configured allowlist",
+            )
 
-        headers = self._get_headers()
+        # _resolve_allowed_url guarantees that credentials can only be sent to
+        # an explicitly configured n8n origin.
+        headers = self._get_headers(include_api_key=True)
         body_bytes = json.dumps(payload).encode("utf-8") if payload is not None else None
 
         if self._http_client:
             try:
                 res = self._http_client(method, full_url, headers, body_bytes, timeout)
                 return N8nApiResult.model_validate(res)
-            except Exception as exc:
+            except Exception:
                 return N8nApiResult(
                     success=False,
                     status_code=None,
-                    error=f"Mock HTTP client error: {exc}",
+                    error="n8n HTTP client request failed",
                 )
 
         req = urllib.request.Request(full_url, data=body_bytes, headers=headers, method=method)
@@ -363,17 +444,16 @@ class N8nApiClient:
                         data = raw.decode("utf-8", errors="replace")
                 return N8nApiResult(success=status < 400, status_code=status, data=data)
         except urllib.error.HTTPError as exc:
-            err_body = exc.read().decode("utf-8", errors="replace") if exc.fp else str(exc.reason)
             return N8nApiResult(
                 success=False,
                 status_code=exc.code,
-                error=f"HTTP {exc.code}: {err_body[:300]}",
+                error=f"n8n request returned HTTP {exc.code}",
             )
-        except Exception as exc:
+        except Exception:
             return N8nApiResult(
                 success=False,
                 status_code=None,
-                error=f"Connection failed to {full_url}: {exc}",
+                error="n8n connection failed",
             )
 
     def get_health(self) -> N8nInstanceReport:
@@ -462,12 +542,30 @@ class N8nApiClient:
         timeout: float = 15.0,
     ) -> N8nApiResult:
         """Triggers an n8n webhook workflow with JSON payload."""
-        if path_or_url.startswith("http://") or path_or_url.startswith("https://"):
-            url = path_or_url
+        if not isinstance(path_or_url, str) or not path_or_url.strip():
+            return N8nApiResult(success=False, error="n8n webhook path is empty")
+
+        raw_path = path_or_url.strip()
+        try:
+            raw_parts = urllib.parse.urlsplit(raw_path)
+        except ValueError:
+            return N8nApiResult(success=False, error="n8n webhook URL is malformed")
+
+        if raw_parts.scheme:
+            # Full URLs are accepted only when their origin is configured below.
+            url = raw_path
         else:
+            if raw_path.startswith("//") or any(part == ".." for part in raw_path.split("/")):
+                return N8nApiResult(success=False, error="n8n webhook path is invalid")
             base = (self.config.webhook_url or self.config.base_url).rstrip("/")
-            path = path_or_url.lstrip("/")
-            url = f"{base}/{path}"
+            url = f"{base}/{raw_path.lstrip('/')}"
+
+        try:
+            url_parts = urllib.parse.urlsplit(url)
+        except ValueError:
+            return N8nApiResult(success=False, error="n8n webhook URL is malformed")
+        if not _is_webhook_path(url_parts.path):
+            return N8nApiResult(success=False, error="n8n webhook path is not allowed")
         return self._request(method=method, path_or_url=url, payload=payload, timeout=timeout)
 
     def list_executions(self, workflow_id: Optional[str] = None, limit: int = 10) -> N8nApiResult:
@@ -529,7 +627,16 @@ class N8nApiClient:
         if not workflows_dir.exists():
             return results
 
+        resolved_root = workflows_dir.resolve()
         for json_file in sorted(workflows_dir.glob("*.json")):
-            results[json_file.name] = self.sync_workflow_file(json_file, activate=activate)
+            try:
+                resolved_file = json_file.resolve()
+                resolved_file.relative_to(resolved_root)
+            except (OSError, RuntimeError, ValueError):
+                results[json_file.name] = N8nApiResult(
+                    success=False,
+                    error="workflow file resolves outside the n8n workflows directory",
+                )
+                continue
+            results[json_file.name] = self.sync_workflow_file(resolved_file, activate=activate)
         return results
-

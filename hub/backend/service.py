@@ -132,6 +132,10 @@ from hub.backend.webhooks import (
 from core.integrations.telegram import TelegramGateway, TelegramConfig
 from core.integrations.n8n import N8nProbe, N8nConfig, N8nApiClient
 from core.orchestrator.release_pipeline import ReleasePipelineService
+from core.acceptance.environment import HF15EnvironmentManager, load_hf15_config
+from core.acceptance.observability import HF15ObservabilityTracker
+from core.acceptance.rollback import HF15RollbackCoordinator
+from core.acceptance.models import HF15MetricsSummary, RollbackExecutionRecord
 
 
 logger = logging.getLogger("darkhub.service")
@@ -2114,17 +2118,38 @@ class HubService:
 
     def sync_n8n_workflows(self, custom_path: Optional[str] = None, activate: bool = True) -> Dict[str, Any]:
         """Synchronizes workflow definitions to remote n8n instance."""
+        workflows_root = (self.project_root / ".factory" / "n8n" / "workflows").resolve()
+        requested_path = Path(custom_path) if custom_path else workflows_root
+        if not requested_path.is_absolute():
+            requested_path = self.project_root / requested_path
+        try:
+            p = requested_path.resolve()
+            p.relative_to(workflows_root)
+        except (OSError, RuntimeError, ValueError):
+            return {
+                "success": False,
+                "results": {},
+                "error": "custom_path must be inside the n8n workflows directory",
+            }
+
+        if not p.exists():
+            return {
+                "success": False,
+                "results": {},
+                "error": "n8n workflow path does not exist",
+            }
+
         client = N8nApiClient()
-        p = Path(custom_path) if custom_path else (self.project_root / ".factory" / "n8n" / "workflows")
         if p.is_file():
             res = client.sync_workflow_file(p, activate=activate)
             return {"success": res.success, "results": {p.name: res.model_dump()}}
-        else:
+        if p.is_dir():
             results = client.sync_all_workflows(p, activate=activate)
             return {
                 "success": all(r.success for r in results.values()) if results else False,
                 "results": {k: v.model_dump() for k, v in results.items()},
             }
+        return {"success": False, "results": {}, "error": "n8n workflow path is not a file or directory"}
 
     def trigger_n8n_webhook(self, path_or_url: str, payload: Dict[str, Any]) -> Dict[str, Any]:
         """Dispatches an autonomous event to an n8n webhook."""
@@ -2132,4 +2157,56 @@ class HubService:
         res = client.trigger_webhook(path_or_url=path_or_url, payload=payload)
         return res.model_dump()
 
+    def get_hf15_status(self) -> Dict[str, Any]:
+        """Returns HF-15 acceptance environment status and preflight report."""
+        env_mgr = HF15EnvironmentManager()
+        root = env_mgr.provision_environment()
+        preflight = env_mgr.run_preflights()
+        tracker = HF15ObservabilityTracker(
+            ledger_path=root / "telemetry" / "observability_ledger.jsonl"
+        )
+        metrics = tracker.get_metrics_summary()
+        return {
+            "environment": {
+                "sandbox_root": str(root),
+                "mode": preflight.environment_mode,
+                "all_preflights_passed": preflight.all_passed,
+                "checks": [c.model_dump() for c in preflight.checks],
+            },
+            "metrics": metrics.model_dump(mode="json"),
+        }
 
+    def get_hf15_metrics(self) -> Dict[str, Any]:
+        """Returns HF-15 metrics summary and SLA compliance."""
+        env_mgr = HF15EnvironmentManager()
+        root = env_mgr.provision_environment()
+        tracker = HF15ObservabilityTracker(
+            ledger_path=root / "telemetry" / "observability_ledger.jsonl"
+        )
+        return tracker.get_metrics_summary().model_dump(mode="json")
+
+    def trigger_hf15_rollback_drill(self, project_id: str = "proj-drill-01") -> Dict[str, Any]:
+        """Triggers a verified rollback drill and returns the execution record."""
+        env_mgr = HF15EnvironmentManager()
+        root = env_mgr.provision_environment()
+        coordinator = HF15RollbackCoordinator(backup_root=root / "backups")
+        tracker = HF15ObservabilityTracker(
+            ledger_path=root / "telemetry" / "observability_ledger.jsonl"
+        )
+        with tracker.measure_latency("G8", "rollback_drill_invoked"):
+            record = coordinator.run_rollback_drill(
+                project_id=project_id,
+                sandbox_dir=root / "backups" / "drill_workspace",
+            )
+        tracker.record_event(
+            scenario_id="G8",
+            event_type="rollback_completed",
+            duration_ms=record.rto_seconds * 1000.0,
+            details={
+                "rollback_id": record.rollback_id,
+                "rto_seconds": record.rto_seconds,
+                "rpo_seconds": record.rpo_seconds,
+                "success": record.success,
+            },
+        )
+        return record.model_dump(mode="json")

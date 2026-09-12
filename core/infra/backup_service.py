@@ -292,6 +292,10 @@ class CloudBackupService:
         logger.info("Retention applied for %s: kept %d, pruned %d", project_id, len(to_keep), len(to_delete))
         return to_delete
 
+    def get_snapshot(self, snapshot_id: str) -> BackupSnapshot | None:
+        with self._lock:
+            return self._snapshots.get(snapshot_id)
+
     def list_snapshots(self, project_id: str | None = None) -> list[BackupSnapshot]:
         with self._lock:
             if project_id:
