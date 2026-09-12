@@ -71,6 +71,9 @@ class ModelProvider(Protocol):
         max_tokens: int | None = None,
         temperature: float = 0.0,
         unknown_cost_policy: UnknownCostPolicy = UnknownCostPolicy.REJECT,
+        ticket_id: str | None = None,
+        execution_mode: str | None = None,
+        **kwargs: Any,
     ) -> ProviderResponse:
         """Execute a text generation call within budget constraints."""
         ...
@@ -108,6 +111,9 @@ class MockModelProvider:
         max_tokens: int | None = None,
         temperature: float = 0.0,
         unknown_cost_policy: UnknownCostPolicy = UnknownCostPolicy.REJECT,
+        ticket_id: str | None = None,
+        execution_mode: str | None = None,
+        **kwargs: Any,
     ) -> ProviderResponse:
         start_time = time.perf_counter()
 
@@ -173,6 +179,53 @@ class MockModelProvider:
         )
 
 
+def _safe_record_telemetry(
+    provider: str,
+    model: str,
+    tier: str,
+    harness: str,
+    execution_mode: str | None,
+    ticket_id: str | None,
+    input_tokens: int,
+    processing_tokens: int,
+    output_tokens: int,
+    cost_usd: float,
+    latency_ms: float,
+    success: bool,
+    error_message: str | None = None,
+) -> None:
+    try:
+        from core.telemetry.models import ExecutionMode, TelemetryRecordCreate
+        from core.telemetry.store import TelemetryStore
+
+        mode = ExecutionMode.HEADLESS
+        if execution_mode:
+            try:
+                mode = ExecutionMode(execution_mode.lower())
+            except ValueError:
+                mode = ExecutionMode.HEADLESS
+        store = TelemetryStore()
+        store.record(
+            TelemetryRecordCreate(
+                ticket_id=ticket_id,
+                provider=provider,
+                model=model,
+                tier=tier,
+                harness=harness,
+                execution_mode=mode,
+                input_tokens=input_tokens,
+                processing_tokens=processing_tokens,
+                output_tokens=output_tokens,
+                cost_usd=cost_usd,
+                latency_ms=latency_ms,
+                success=success,
+                error_message=error_message,
+            )
+        )
+    except Exception as exc:
+        logger.debug("Safe telemetry recording failed: %s", exc)
+
+
 class OllamaModelProvider:
     """Ollama local model provider executing inference via HTTP API."""
 
@@ -198,6 +251,9 @@ class OllamaModelProvider:
         max_tokens: int | None = None,
         temperature: float = 0.0,
         unknown_cost_policy: UnknownCostPolicy = UnknownCostPolicy.REJECT,
+        ticket_id: str | None = None,
+        execution_mode: str | None = None,
+        **kwargs: Any,
     ) -> ProviderResponse:
         url = f"{self.base_url}/api/generate"
         payload: dict[str, Any] = {
@@ -229,6 +285,7 @@ class OllamaModelProvider:
                 prompt_tokens = data.get("prompt_eval_count") or 0
                 completion_tokens = data.get("eval_count") or 0
                 total_tokens = prompt_tokens + completion_tokens
+                tier_val = infer_model_tier("ollama", returned_model)
 
                 if self.usage_ledger is not None:
                     try:
@@ -236,19 +293,37 @@ class OllamaModelProvider:
                             ModelCallEvent(
                                 provider="ollama",
                                 model=returned_model,
-                                tier=ModelTier(infer_model_tier("ollama", returned_model)),
+                                tier=ModelTier(tier_val),
                                 harness="core.execution",
                                 modality=ModelModality.TEXT,
                                 success=True,
                                 input_tokens=prompt_tokens,
+                                processing_tokens=0,
                                 output_tokens=completion_tokens,
                                 cost_usd=0.0,
                                 latency_ms=round(latency * 1000, 1),
                                 source="core.execution.providers.ollama",
+                                ticket_id=ticket_id,
+                                execution_mode=execution_mode,
                             )
                         )
                     except Exception as exc:
                         logger.debug("Failed to record ollama usage: %s", exc)
+                else:
+                    _safe_record_telemetry(
+                        provider="ollama",
+                        model=returned_model,
+                        tier=tier_val,
+                        harness="core.execution",
+                        execution_mode=execution_mode,
+                        ticket_id=ticket_id,
+                        input_tokens=prompt_tokens,
+                        processing_tokens=0,
+                        output_tokens=completion_tokens,
+                        cost_usd=0.0,
+                        latency_ms=round(latency * 1000, 1),
+                        success=True,
+                    )
 
                 return ProviderResponse(
                     text=text,
@@ -264,22 +339,41 @@ class OllamaModelProvider:
                 )
         except Exception as exc:
             latency = max(0.001, time.perf_counter() - start)
+            tier_val = infer_model_tier("ollama", model)
             if self.usage_ledger is not None:
                 try:
                     self.usage_ledger.record(
                         ModelCallEvent(
                             provider="ollama",
                             model=model,
-                            tier=ModelTier(infer_model_tier("ollama", model)),
+                            tier=ModelTier(tier_val),
                             harness="core.execution",
                             modality=ModelModality.TEXT,
                             success=False,
                             latency_ms=round(latency * 1000, 1),
                             source="core.execution.providers.ollama",
+                            ticket_id=ticket_id,
+                            execution_mode=execution_mode,
                         )
                     )
                 except Exception:
                     pass
+            else:
+                _safe_record_telemetry(
+                    provider="ollama",
+                    model=model,
+                    tier=tier_val,
+                    harness="core.execution",
+                    execution_mode=execution_mode,
+                    ticket_id=ticket_id,
+                    input_tokens=0,
+                    processing_tokens=0,
+                    output_tokens=0,
+                    cost_usd=0.0,
+                    latency_ms=round(latency * 1000, 1),
+                    success=False,
+                    error_message=str(exc),
+                )
             logger.error("Ollama generation failed for %s: %s", model, exc)
             raise RuntimeError(f"Ollama generation failed: {exc}") from exc
 
@@ -311,6 +405,9 @@ class OpenRouterModelProvider:
         max_tokens: int | None = None,
         temperature: float = 0.0,
         unknown_cost_policy: UnknownCostPolicy = UnknownCostPolicy.REJECT,
+        ticket_id: str | None = None,
+        execution_mode: str | None = None,
+        **kwargs: Any,
     ) -> ProviderResponse:
         key = self.api_key or get_openrouter_api_key()
         if not key:
@@ -354,6 +451,12 @@ class OpenRouterModelProvider:
                 completion_tokens = usage.get("completion_tokens") or 0
                 total_tokens = usage.get("total_tokens") or (prompt_tokens + completion_tokens)
 
+                prompt_details = usage.get("prompt_tokens_details") or {}
+                cached_tokens = prompt_details.get("cached_tokens") or 0
+                comp_details = usage.get("completion_tokens_details") or {}
+                reasoning_tokens = comp_details.get("reasoning_tokens") or 0
+                processing_tokens = cached_tokens + reasoning_tokens
+
                 # Cost lookup in daily benchmarks catalog
                 cost_usd: float | None = None
                 try:
@@ -386,25 +489,44 @@ class OpenRouterModelProvider:
                 else:
                     estimated_cost = cost_usd
 
+                tier_val = infer_model_tier("openrouter", returned_model)
                 if self.usage_ledger is not None:
                     try:
                         self.usage_ledger.record(
                             ModelCallEvent(
                                 provider="openrouter",
                                 model=returned_model,
-                                tier=ModelTier(infer_model_tier("openrouter", returned_model)),
+                                tier=ModelTier(tier_val),
                                 harness="core.execution",
                                 modality=ModelModality.TEXT,
                                 success=True,
                                 input_tokens=prompt_tokens,
+                                processing_tokens=processing_tokens,
                                 output_tokens=completion_tokens,
                                 cost_usd=cost_usd,
                                 latency_ms=round(latency * 1000, 1),
                                 source="core.execution.providers.openrouter",
+                                ticket_id=ticket_id,
+                                execution_mode=execution_mode,
                             )
                         )
                     except Exception as exc:
                         logger.debug("Failed to record openrouter usage: %s", exc)
+                else:
+                    _safe_record_telemetry(
+                        provider="openrouter",
+                        model=returned_model,
+                        tier=tier_val,
+                        harness="core.execution",
+                        execution_mode=execution_mode,
+                        ticket_id=ticket_id,
+                        input_tokens=prompt_tokens,
+                        processing_tokens=processing_tokens,
+                        output_tokens=completion_tokens,
+                        cost_usd=cost_usd or 0.0,
+                        latency_ms=round(latency * 1000, 1),
+                        success=True,
+                    )
 
                 return ProviderResponse(
                     text=response_text,
@@ -420,22 +542,41 @@ class OpenRouterModelProvider:
                 )
         except Exception as exc:
             latency = max(0.001, time.perf_counter() - start)
+            tier_val = infer_model_tier("openrouter", model)
             if self.usage_ledger is not None:
                 try:
                     self.usage_ledger.record(
                         ModelCallEvent(
                             provider="openrouter",
                             model=model,
-                            tier=ModelTier(infer_model_tier("openrouter", model)),
+                            tier=ModelTier(tier_val),
                             harness="core.execution",
                             modality=ModelModality.TEXT,
                             success=False,
                             latency_ms=round(latency * 1000, 1),
                             source="core.execution.providers.openrouter",
+                            ticket_id=ticket_id,
+                            execution_mode=execution_mode,
                         )
                     )
                 except Exception:
                     pass
+            else:
+                _safe_record_telemetry(
+                    provider="openrouter",
+                    model=model,
+                    tier=tier_val,
+                    harness="core.execution",
+                    execution_mode=execution_mode,
+                    ticket_id=ticket_id,
+                    input_tokens=0,
+                    processing_tokens=0,
+                    output_tokens=0,
+                    cost_usd=0.0,
+                    latency_ms=round(latency * 1000, 1),
+                    success=False,
+                    error_message=str(exc),
+                )
             if not isinstance(exc, ValueError):
                 logger.error("OpenRouter generation failed for %s: %s", model, exc)
                 raise RuntimeError(f"OpenRouter generation failed: {exc}") from exc
@@ -466,6 +607,9 @@ class UnifiedModelProvider:
         max_tokens: int | None = None,
         temperature: float = 0.0,
         unknown_cost_policy: UnknownCostPolicy = UnknownCostPolicy.REJECT,
+        ticket_id: str | None = None,
+        execution_mode: str | None = None,
+        **kwargs: Any,
     ) -> ProviderResponse:
         # Route to mock if configured and model starts with mock
         if self.mock is not None and (model.startswith("mock") or model == "mock"):
@@ -476,6 +620,9 @@ class UnifiedModelProvider:
                 max_tokens=max_tokens,
                 temperature=temperature,
                 unknown_cost_policy=unknown_cost_policy,
+                ticket_id=ticket_id,
+                execution_mode=execution_mode,
+                **kwargs,
             )
 
         # Route cloud models (containing slash) to OpenRouter
@@ -487,6 +634,9 @@ class UnifiedModelProvider:
                 max_tokens=max_tokens,
                 temperature=temperature,
                 unknown_cost_policy=unknown_cost_policy,
+                ticket_id=ticket_id,
+                execution_mode=execution_mode,
+                **kwargs,
             )
 
         # Route local models to Ollama
@@ -497,6 +647,9 @@ class UnifiedModelProvider:
             max_tokens=max_tokens,
             temperature=temperature,
             unknown_cost_policy=unknown_cost_policy,
+            ticket_id=ticket_id,
+            execution_mode=execution_mode,
+            **kwargs,
         )
 
 

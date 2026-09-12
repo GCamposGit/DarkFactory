@@ -52,6 +52,14 @@ from hub.backend.models import (
 )
 from hub.backend.service import HubService
 from core.usage.models import AccountUsageReport, ModelCallEvent, ModelUsageReport
+from core.telemetry.models import (
+    ExecutionMode,
+    TelemetryFilters,
+    TelemetryQueryResult,
+    TelemetryRecord,
+    TelemetryRecordCreate,
+    TelemetryStats,
+)
 from core.usage.api_credits import (
     ApiCreditsReport,
     CreditAccountUpdateRequest,
@@ -819,6 +827,86 @@ def list_visual_gallery_endpoint(
 ) -> list:
     """List all previously generated visual assets and their metadata."""
     return service.list_visual_assets()
+
+
+# ==============================================================================
+# Structured AI Model Telemetry Endpoints
+# ==============================================================================
+
+
+@router.get("/telemetry/runs", response_model=TelemetryQueryResult)
+def get_telemetry_runs_endpoint(
+    ticket_id: Optional[str] = Query(default=None),
+    model: Optional[str] = Query(default=None),
+    provider: Optional[str] = Query(default=None),
+    execution_mode: Optional[ExecutionMode] = Query(default=None),
+    start_date: Optional[str] = Query(default=None),
+    end_date: Optional[str] = Query(default=None),
+    success: Optional[bool] = Query(default=None),
+    limit: int = Query(default=50, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
+    service: HubService = Depends(get_hub_service),
+) -> TelemetryQueryResult:
+    """Query paginated model telemetry runs with rich filters."""
+    filters = TelemetryFilters(
+        ticket_id=ticket_id,
+        model=model,
+        provider=provider,
+        execution_mode=execution_mode,
+        start_date=start_date,
+        end_date=end_date,
+        success=success,
+        limit=limit,
+        offset=offset,
+    )
+    return service.get_telemetry_runs(filters)
+
+
+@router.get("/telemetry/stats", response_model=TelemetryStats)
+def get_telemetry_stats_endpoint(
+    ticket_id: Optional[str] = Query(default=None),
+    model: Optional[str] = Query(default=None),
+    provider: Optional[str] = Query(default=None),
+    execution_mode: Optional[ExecutionMode] = Query(default=None),
+    start_date: Optional[str] = Query(default=None),
+    end_date: Optional[str] = Query(default=None),
+    service: HubService = Depends(get_hub_service),
+) -> TelemetryStats:
+    """Return aggregated statistical summaries across AI runs."""
+    filters = TelemetryFilters(
+        ticket_id=ticket_id,
+        model=model,
+        provider=provider,
+        execution_mode=execution_mode,
+        start_date=start_date,
+        end_date=end_date,
+    )
+    return service.get_telemetry_stats(filters)
+
+
+@router.get("/telemetry/tickets", response_model=List[str])
+def list_telemetry_tickets_endpoint(
+    service: HubService = Depends(get_hub_service),
+) -> List[str]:
+    """Return distinct tickets that have recorded AI model executions."""
+    return service.list_telemetry_tickets()
+
+
+@router.post("/telemetry/events", response_model=TelemetryRecord)
+def record_telemetry_event_endpoint(
+    payload: TelemetryRecordCreate,
+    x_darkfac_telemetry_key: Optional[str] = Header(default=None, alias="X-DarkFac-Telemetry-Key"),
+    service: HubService = Depends(get_hub_service),
+) -> TelemetryRecord:
+    """Ingest a model execution event from a remote/local harness or external workstation."""
+    configured_key = os.environ.get("DARKFAC_TELEMETRY_KEY")
+    if configured_key:
+        if not x_darkfac_telemetry_key or not secrets.compare_digest(
+            x_darkfac_telemetry_key,
+            configured_key,
+        ):
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid telemetry key.")
+    return service.record_telemetry_run(payload)
 
 
 # ==============================================================================

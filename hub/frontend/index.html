@@ -114,6 +114,15 @@
           <span class="hidden lg:inline">Demandas</span>
         </button>
 
+        <!-- Telemetry Trigger -->
+        <button
+          onclick="openTelemetryDrawer()"
+          title="Abrir Telemetria Estruturada de Modelos de IA"
+          class="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-purple-300 border border-slate-800 hover:border-purple-500/30 transition-all text-xs font-medium">
+          <span>📈</span>
+          <span class="hidden lg:inline">Telemetria</span>
+        </button>
+
         <!-- Infrastructure Cards Trigger -->
         <button
           onclick="document.getElementById('infrastructure-cards-section')?.scrollIntoView({behavior: 'smooth'})"
@@ -329,6 +338,226 @@
         </section>
 
         <aside id="roadmap-detail" class="hidden rounded-2xl border border-cyan-500/25 bg-slate-900/80" aria-label="Detalhe do item selecionado"></aside>
+      </div>
+    </div>
+  </div>
+
+  <!-- AI Model Telemetry Drawer (Dedicated Screen) -->
+  <div id="telemetry-drawer" class="hidden fixed inset-0 z-50 bg-slate-950/90 backdrop-blur-md animate-in-quick" role="dialog" aria-modal="true" aria-labelledby="telemetry-title">
+    <div class="w-full h-full max-w-[1700px] mx-auto bg-slate-950 border-x border-slate-800 overflow-y-auto flex flex-col">
+      
+      <!-- Sticky Header -->
+      <div class="sticky top-0 z-10 border-b border-slate-800 bg-slate-950/95 backdrop-blur-xl">
+        <div class="px-5 sm:px-8 py-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div class="flex items-start gap-3">
+            <div class="w-10 h-10 rounded-xl bg-purple-500/10 border border-purple-500/30 flex items-center justify-center text-xl shadow-lg shadow-purple-500/10">
+              📈
+            </div>
+            <div>
+              <div class="flex items-center gap-2.5 flex-wrap">
+                <h2 id="telemetry-title" class="text-lg font-bold text-white tracking-tight">Telemetria de Modelos de IA</h2>
+                <span class="px-2.5 py-0.5 rounded-full bg-purple-500/10 text-purple-400 border border-purple-500/30 text-[11px] font-mono font-medium">
+                  DarkFac Engine
+                </span>
+                <span class="px-2.5 py-0.5 rounded-full bg-slate-800 text-slate-300 border border-slate-700 text-[11px] font-mono">
+                  🟢 SQLite WAL em tempo real
+                </span>
+              </div>
+              <p class="mt-1 text-xs text-slate-400">
+                Registro estruturado de todas as execuções de IA da fábrica: hardware, ticket, tokens de entrada/processamento/saída, latência e custo financeiro.
+              </p>
+            </div>
+          </div>
+
+          <!-- Controls -->
+          <div class="flex items-center gap-2.5 flex-wrap">
+            <button
+              id="telemetry-autorefresh-btn"
+              onclick="toggleTelemetryAutoRefresh()"
+              type="button"
+              class="flex items-center gap-2 px-3 py-1.5 rounded-xl border border-slate-700 bg-slate-900 text-slate-300 hover:text-white text-xs font-mono transition-all">
+              <span id="telemetry-autorefresh-dot" class="w-2 h-2 rounded-full bg-slate-600 transition-colors"></span>
+              <span>Auto-refresh (10s)</span>
+            </button>
+            <button
+              id="telemetry-refresh-btn"
+              onclick="loadTelemetryData()"
+              type="button"
+              class="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-slate-700 bg-slate-900 hover:bg-slate-800 text-slate-300 text-xs font-medium transition-all">
+              <span>🔄</span>
+              <span>Atualizar</span>
+            </button>
+            <button
+              onclick="exportTelemetryJSON()"
+              type="button"
+              class="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-slate-700 bg-slate-900 hover:bg-slate-800 text-slate-300 text-xs font-medium transition-all">
+              <span>📥</span>
+              <span>Exportar</span>
+            </button>
+            <button
+              onclick="closeTelemetryDrawer()"
+              type="button"
+              class="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-medium transition-colors">
+              ✕ Fechar (Esc)
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Main Content Container -->
+      <div class="p-5 sm:p-8 space-y-6 flex-1">
+        
+        <!-- KPI Cards Grid -->
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          <!-- Total Runs -->
+          <div class="p-4 rounded-2xl border border-slate-800/90 bg-slate-900/40 space-y-2">
+            <div class="flex items-center justify-between text-xs text-slate-400 font-mono uppercase tracking-wider">
+              <span>Invocations</span>
+              <span id="telemetry-stat-success-rate" class="text-[11px] font-mono text-emerald-400">100% sucesso</span>
+            </div>
+            <div id="telemetry-stat-total-runs" class="text-2xl font-bold text-white font-mono">0</div>
+            <p class="text-[11px] text-slate-500">Total de execuções registradas</p>
+          </div>
+
+          <!-- Tokens Consumed -->
+          <div class="p-4 rounded-2xl border border-slate-800/90 bg-slate-900/40 space-y-2">
+            <div class="flex items-center justify-between text-xs text-slate-400 font-mono uppercase tracking-wider">
+              <span>Tokens Totais</span>
+              <span>📊</span>
+            </div>
+            <div id="telemetry-stat-total-tokens" class="text-2xl font-bold text-indigo-300 font-mono">0</div>
+            <p id="telemetry-stat-token-breakdown" class="text-[11px] text-slate-500 truncate font-mono">0 in · 0 proc · 0 out</p>
+          </div>
+
+          <!-- Total Cost -->
+          <div class="p-4 rounded-2xl border border-slate-800/90 bg-slate-900/40 space-y-2">
+            <div class="flex items-center justify-between text-xs text-slate-400 font-mono uppercase tracking-wider">
+              <span>Custo Financeiro</span>
+              <span>💵</span>
+            </div>
+            <div id="telemetry-stat-total-cost" class="text-2xl font-bold text-emerald-400 font-mono">$0.0000</div>
+            <p class="text-[11px] text-slate-500">$0.00 local (Ollama) / apis tarifadas</p>
+          </div>
+
+          <!-- Latency -->
+          <div class="p-4 rounded-2xl border border-slate-800/90 bg-slate-900/40 space-y-2">
+            <div class="flex items-center justify-between text-xs text-slate-400 font-mono uppercase tracking-wider">
+              <span>Latência Média</span>
+              <span id="telemetry-stat-p95-latency" class="text-[11px] font-mono text-slate-400">p95: 0 ms</span>
+            </div>
+            <div id="telemetry-stat-avg-latency" class="text-2xl font-bold text-cyan-300 font-mono">0 ms</div>
+            <p class="text-[11px] text-slate-500">Tempo de resposta da inferência</p>
+          </div>
+        </div>
+
+        <!-- Filter Toolbar -->
+        <div class="p-4 rounded-2xl border border-slate-800/90 bg-slate-900/30 space-y-3">
+          <div class="flex items-center justify-between">
+            <h3 class="text-xs font-semibold text-slate-300 uppercase tracking-wider font-mono">Filtros de Telemetria</h3>
+            <button
+              onclick="resetTelemetryFilters()"
+              type="button"
+              class="text-[11px] text-indigo-400 hover:text-indigo-300 font-medium">
+              Limpar Filtros
+            </button>
+          </div>
+          <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
+            <div>
+              <label class="block text-[11px] text-slate-400 mb-1">Ticket / Demanda</label>
+              <select
+                id="telemetry-filter-ticket"
+                onchange="applyTelemetryFilters()"
+                class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-purple-500 font-mono">
+                <option value="">Todos os Tickets</option>
+              </select>
+            </div>
+            <div>
+              <label class="block text-[11px] text-slate-400 mb-1">Modelo</label>
+              <input
+                id="telemetry-filter-model"
+                type="text"
+                placeholder="Ex: claude, qwen, deepseek..."
+                onchange="applyTelemetryFilters()"
+                class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-purple-500 font-mono"
+              />
+            </div>
+            <div>
+              <label class="block text-[11px] text-slate-400 mb-1">Provedor</label>
+              <select
+                id="telemetry-filter-provider"
+                onchange="applyTelemetryFilters()"
+                class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-purple-500 font-mono">
+                <option value="">Todos os Provedores</option>
+                <option value="ollama">Ollama (Local)</option>
+                <option value="openrouter">OpenRouter (Gateway)</option>
+                <option value="antigravity">Antigravity</option>
+                <option value="openai">OpenAI</option>
+                <option value="anthropic">Anthropic</option>
+                <option value="xai">xAI</option>
+              </select>
+            </div>
+            <div>
+              <label class="block text-[11px] text-slate-400 mb-1">Modo de Execução</label>
+              <select
+                id="telemetry-filter-mode"
+                onchange="applyTelemetryFilters()"
+                class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-purple-500 font-mono">
+                <option value="">Todos os Modos</option>
+                <option value="headless">Headless (Harnesses / CLI / Autonomia)</option>
+                <option value="ui">UI (Playground / Chat)</option>
+              </select>
+            </div>
+          </div>
+        </div>
+
+        <!-- Runs Table -->
+        <div class="rounded-2xl border border-slate-800/90 bg-slate-900/30 overflow-hidden shadow-xl">
+          <div class="overflow-x-auto">
+            <table class="w-full text-left border-collapse">
+              <thead>
+                <tr class="border-b border-slate-800 bg-slate-950/70 text-[11px] font-mono text-slate-400 uppercase tracking-wider">
+                  <th class="px-4 py-3">Data / Hora</th>
+                  <th class="px-4 py-3">Ticket</th>
+                  <th class="px-4 py-3">Modelo & Provedor</th>
+                  <th class="px-4 py-3">Hardware & Modo</th>
+                  <th class="px-4 py-3">Latência</th>
+                  <th class="px-4 py-3">Tokens (Total / in-proc-out)</th>
+                  <th class="px-4 py-3">Custo ($)</th>
+                  <th class="px-4 py-3 text-right">Status</th>
+                </tr>
+              </thead>
+              <tbody id="telemetry-runs-tbody">
+                <tr>
+                  <td colspan="8" class="p-8 text-center text-xs text-slate-500">Carregando telemetria...</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <!-- Pagination Bar -->
+          <div class="px-5 py-3 border-t border-slate-800/80 bg-slate-950/50 flex items-center justify-between">
+            <span id="telemetry-pagination-info" class="text-xs font-mono text-slate-500">Exibindo 0 de 0</span>
+            <div class="flex items-center gap-2">
+              <button
+                id="telemetry-page-prev"
+                onclick="changeTelemetryPage(-1)"
+                disabled
+                type="button"
+                class="px-3 py-1.5 rounded-lg border border-slate-800 bg-slate-900 text-slate-300 hover:bg-slate-800 disabled:opacity-40 disabled:pointer-events-none text-xs font-medium">
+                Anterior
+              </button>
+              <button
+                id="telemetry-page-next"
+                onclick="changeTelemetryPage(1)"
+                disabled
+                type="button"
+                class="px-3 py-1.5 rounded-lg border border-slate-800 bg-slate-900 text-slate-300 hover:bg-slate-800 disabled:opacity-40 disabled:pointer-events-none text-xs font-medium">
+                Próxima
+              </button>
+            </div>
+          </div>
+        </div>
+
       </div>
     </div>
   </div>
@@ -1094,5 +1323,6 @@
   <script src="/static/tasks.js?v=20260910c"></script>
   <script src="/static/roadmap.js?v=20260910c"></script>
   <script src="/static/demands.js?v=20260910c"></script>
+  <script src="/static/telemetry.js?v=20260912"></script>
 </body>
 </html>

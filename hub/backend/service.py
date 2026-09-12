@@ -257,6 +257,12 @@ class HubService:
         self.model_usage_ledger = ModelUsageLedger(self.usage_dir)
         self.account_usage_monitor = AccountUsageMonitor(self.usage_dir / "providers")
         self.api_credits_monitor = ApiCreditsMonitor(self.usage_dir / "credits")
+        from core.telemetry.store import TelemetryStore
+        self.telemetry_store = TelemetryStore(self.usage_dir.parent / "telemetry.db")
+        try:
+            self.telemetry_store.import_legacy_if_empty(self.usage_dir / "model_usage.json")
+        except Exception:
+            pass
 
         if data_dir is not None:
             self.demands_dir = self.data_dir / "demands"
@@ -762,10 +768,13 @@ class HubService:
         modality: ModelModality = ModelModality.TEXT,
         success: bool = True,
         input_tokens: Optional[int] = None,
+        processing_tokens: Optional[int] = None,
         output_tokens: Optional[int] = None,
         cost_usd: Optional[float] = None,
         latency_ms: Optional[float] = None,
         source: str,
+        ticket_id: Optional[str] = None,
+        execution_mode: Optional[str] = "ui",
     ) -> None:
         """Persist telemetry fail-open so observability never breaks inference."""
         try:
@@ -777,13 +786,32 @@ class HubService:
                 modality=modality,
                 success=success,
                 input_tokens=input_tokens,
+                processing_tokens=processing_tokens or 0,
                 output_tokens=output_tokens,
                 cost_usd=cost_usd,
                 latency_ms=latency_ms,
                 source=source,
+                ticket_id=ticket_id,
+                execution_mode=execution_mode,
             ))
         except Exception as exc:
             logger.warning("Model telemetry write failed: %s", exc)
+
+    def get_telemetry_runs(self, filters: Any = None) -> Any:
+        """Query paginated model telemetry runs with filters."""
+        return self.telemetry_store.query_runs(filters)
+
+    def get_telemetry_stats(self, filters: Any = None) -> Any:
+        """Calculate analytical statistics across telemetry runs."""
+        return self.telemetry_store.get_stats(filters)
+
+    def list_telemetry_tickets(self) -> list[str]:
+        """Return distinct tickets with recorded runs."""
+        return self.telemetry_store.list_tickets()
+
+    def record_telemetry_run(self, payload: Any) -> Any:
+        """Record an incoming telemetry run directly into SQLite store."""
+        return self.telemetry_store.record(payload)
 
     def get_account_usage(self, force: bool = False) -> Any:
         """Return a partial-success report for every known AI platform."""

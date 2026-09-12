@@ -79,6 +79,41 @@ class ModelUsageLedger:
             aggregates[key] = row
             data["aggregates"] = aggregates
 
+        # Mirror event to SQLite telemetry store
+        try:
+            from core.telemetry.models import ExecutionMode, TelemetryRecordCreate
+            from core.telemetry.store import TelemetryStore
+
+            db_path = self.storage_dir.parent / "telemetry.db"
+            store = TelemetryStore(db_path)
+            mode = ExecutionMode.HEADLESS
+            if event.execution_mode:
+                try:
+                    mode = ExecutionMode(event.execution_mode.lower())
+                except ValueError:
+                    mode = ExecutionMode.HEADLESS
+
+            store.record(
+                TelemetryRecordCreate(
+                    id=event.invocation_id,
+                    timestamp=event.timestamp,
+                    ticket_id=event.ticket_id,
+                    provider=event.provider,
+                    model=event.model,
+                    tier=event.tier.value if hasattr(event.tier, "value") else str(event.tier),
+                    harness=event.harness,
+                    execution_mode=mode,
+                    input_tokens=event.input_tokens or 0,
+                    processing_tokens=event.processing_tokens or 0,
+                    output_tokens=event.output_tokens or 0,
+                    latency_ms=event.latency_ms or 0.0,
+                    cost_usd=event.cost_usd or 0.0,
+                    success=event.success,
+                )
+            )
+        except Exception:
+            pass
+
     def recompute_aggregates(self) -> int:
         """Rebuild lifetime aggregates from the durable invocation evidence."""
         with self._store.transaction() as data:

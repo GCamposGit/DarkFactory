@@ -83,6 +83,8 @@ class AccountUsageReport(BaseModel):
 
 class ModelCallEvent(BaseModel):
     invocation_id: str = Field(default_factory=lambda: uuid4().hex, min_length=8, max_length=128)
+    ticket_id: Optional[str] = Field(default=None, max_length=120)
+    execution_mode: Optional[str] = Field(default=None, max_length=50)
     provider: str = Field(min_length=1, max_length=80)
     model: str = Field(min_length=1, max_length=200)
     tier: ModelTier = ModelTier.UNKNOWN
@@ -90,6 +92,7 @@ class ModelCallEvent(BaseModel):
     modality: ModelModality = ModelModality.TEXT
     success: bool = True
     input_tokens: Optional[int] = Field(default=None, ge=0)
+    processing_tokens: Optional[int] = Field(default=0, ge=0)
     output_tokens: Optional[int] = Field(default=None, ge=0)
     cost_usd: Optional[float] = Field(default=None, ge=0.0)
     latency_ms: Optional[float] = Field(default=None, ge=0.0)
