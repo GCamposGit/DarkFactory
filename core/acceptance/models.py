@@ -139,3 +139,76 @@ class HF15MetricsSummary(BaseModel):
     max_active_slots_used: int = 0
     total_budget_spent_usd: float = 0.0
     all_slas_met: bool = False
+
+
+class GateEvidenceReceipt(BaseModel):
+    """Structured evidence receipt for an individual HF-15 gate (G1-G8)."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    gate_id: str = Field(min_length=1)
+    title: str = Field(min_length=1)
+    status: ScenarioStatus
+    details: str = ""
+    evidence_data: Dict[str, Any] = Field(default_factory=dict)
+    error_code: Optional[str] = None
+    duration_ms: float = Field(default=0.0, ge=0.0)
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(UTC))
+
+
+class ScenarioEvidenceReceipt(BaseModel):
+    """Structured evidence receipt for an individual operational lifecycle scenario (1-10)."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    scenario_number: int = Field(ge=1, le=10)
+    title: str = Field(min_length=1)
+    status: ScenarioStatus
+    details: str = ""
+    duration_ms: float = Field(default=0.0, ge=0.0)
+    receipt_ref: Optional[str] = None
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(UTC))
+
+
+class OwnerAcceptanceReceipt(BaseModel):
+    """Cryptographically verifiable receipt of human owner acceptance for release promotion."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    project_id: str = Field(min_length=1)
+    run_id: str = Field(min_length=1)
+    artifact_digest: str = Field(min_length=1)
+    policy_version: str = "v1"
+    approved_by: str = "owner"
+    decision: str = "approved"
+    evidence_hash: str = Field(min_length=64, max_length=64)
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(UTC))
+
+
+class HF15AcceptanceReport(BaseModel):
+    """Consolidated immutable acceptance report for Wave 1 closure and factory operation."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    report_version: str = "hf15-report-v1"
+    ticket_id: str = "HF-15"
+    run_id: str = Field(min_length=1)
+    plan_digest: str = Field(min_length=1)
+    baseline_sha: str = Field(min_length=1)
+    workflow_version: str = "1.0.0"
+    status: str = Field(min_length=1)  # "PASS", "BLOCKED", "FAILED", "NOT_RUN"
+    scenarios: Dict[str, str] = Field(default_factory=dict)
+    gates: Dict[str, str] = Field(default_factory=dict)
+    dependency_receipts: List[str] = Field(default_factory=list)
+    environment_evidence: List[Dict[str, Any]] = Field(default_factory=list)
+    candidate_digest: str = Field(min_length=1)
+    staging_digest: str = Field(min_length=1)
+    production_digest: str = Field(min_length=1)
+    owner_acceptance_receipt: Optional[OwnerAcceptanceReceipt] = None
+    cost_ledger: Dict[str, Any] = Field(default_factory=dict)
+    timings: Dict[str, Any] = Field(default_factory=dict)
+    recovery: Dict[str, Any] = Field(default_factory=dict)
+    limitations: List[str] = Field(default_factory=list)
+    evidence_refs: List[str] = Field(default_factory=list)
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(UTC))
+

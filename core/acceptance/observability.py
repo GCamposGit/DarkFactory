@@ -139,8 +139,39 @@ class HF15ObservabilityTracker:
                 details=details,
             )
 
+    def update_scenario_status(self, scenario_id: str, status: ScenarioStatus) -> None:
+        """Explicitly sets the outcome status of a scenario or gate."""
+        with self._lock:
+            self._scenario_statuses[scenario_id] = status
+
+    def record_dispatch_latency(self, duration_ms: float) -> None:
+        """Records a measured dispatch latency sample."""
+        with self._lock:
+            self._dispatch_latencies.append(duration_ms)
+
+    def record_reconciliation_latency(self, duration_ms: float) -> None:
+        """Records a measured reconciliation latency sample."""
+        with self._lock:
+            self._reconciliation_latencies.append(duration_ms)
+
+    def record_active_slots(self, slots: int) -> None:
+        """Updates maximum observed concurrent worker slots."""
+        with self._lock:
+            self._max_slots = max(self._max_slots, int(slots))
+
+    def record_rto(self, rto_seconds: float) -> None:
+        """Records a measured rollback Recovery Time Objective duration."""
+        with self._lock:
+            self._rto_durations.append(float(rto_seconds))
+
+    def record_budget_spent(self, cost_usd: float) -> None:
+        """Accumulates compute/model budget expenditure in USD."""
+        with self._lock:
+            self._budget_spent += float(cost_usd)
+
     def get_metrics_summary(self) -> HF15MetricsSummary:
         """Computes aggregate performance metrics and verifies compliance with SLAs."""
+
         with self._lock:
             passed = sum(1 for s in self._scenario_statuses.values() if s == ScenarioStatus.PASSED)
             failed = sum(1 for s in self._scenario_statuses.values() if s == ScenarioStatus.FAILED)

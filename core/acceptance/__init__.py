@@ -7,24 +7,33 @@ Governed by:
 
 from core.acceptance.models import (
     AcceptanceTelemetryEvent,
+    HF15AcceptanceReport,
     HF15EnvironmentConfig,
     HF15MetricsSummary,
     HF15PreflightCheck,
     HF15PreflightReport,
     HF15Scenario,
+    GateEvidenceReceipt,
+    OwnerAcceptanceReceipt,
     RollbackExecutionRecord,
     ScenarioDataFixture,
+    ScenarioEvidenceReceipt,
     ScenarioStatus,
 )
 
 __all__ = [
     "AcceptanceTelemetryEvent",
+    "GateEvidenceReceipt",
+    "HF15AcceptanceReport",
     "HF15EnvironmentConfig",
     "HF15MetricsSummary",
     "HF15PreflightCheck",
     "HF15PreflightReport",
     "HF15Scenario",
+    "OwnerAcceptanceReceipt",
     "RollbackExecutionRecord",
     "ScenarioDataFixture",
+    "ScenarioEvidenceReceipt",
     "ScenarioStatus",
 ]
+

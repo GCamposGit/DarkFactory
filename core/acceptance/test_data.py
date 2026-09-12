@@ -233,6 +233,16 @@ def get_all_hf15_fixtures() -> List[ScenarioDataFixture]:
     ]
 
 
+def get_scenario_fixture(scenario_id: str | HF15Scenario) -> ScenarioDataFixture:
+    """Retrieves a specific scenario fixture by ID."""
+    sid = scenario_id.value if isinstance(scenario_id, HF15Scenario) else str(scenario_id).upper()
+    fixtures = {f.scenario_id.value: f for f in get_all_hf15_fixtures()}
+    if sid not in fixtures:
+        raise ValueError(f"Unknown scenario ID: {scenario_id}")
+    return fixtures[sid]
+
+
+
 def seed_test_data(target_dir: Path) -> Dict[str, Path]:
     """Generates and writes all test fixtures into target directory as JSON files."""
     target_dir.mkdir(parents=True, exist_ok=True)

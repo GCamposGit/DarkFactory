@@ -23,10 +23,12 @@ if hasattr(sys.stdout, "reconfigure"):
 if hasattr(sys.stderr, "reconfigure"):
     sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
+from core.acceptance.engine import HF15AcceptanceEngine
 from core.acceptance.environment import HF15EnvironmentManager, load_hf15_config
 from core.acceptance.observability import HF15ObservabilityTracker
 from core.acceptance.rollback import HF15RollbackCoordinator
 from core.acceptance.test_data import seed_test_data
+
 
 
 def cmd_preflight(args: argparse.Namespace) -> int:
@@ -174,6 +176,28 @@ def cmd_metrics(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_run(args: argparse.Namespace) -> int:
+    """Executes full acceptance testing suite and outputs final report."""
+    engine = HF15AcceptanceEngine(
+        run_id=args.run_id,
+        report_dir=args.report_dir,
+    )
+    report = engine.run_acceptance()
+    if args.json:
+        print(json.dumps(report.model_dump(mode="json"), indent=2))
+    else:
+        print(f"=== HF-15 Acceptance Completed ({report.status}) ===")
+        print(f"Run ID: {report.run_id}")
+        print(f"Plan Digest: {report.plan_digest[:16]}...")
+        print(f"Baseline SHA: {report.baseline_sha[:16]}...")
+        for gid, res in report.gates.items():
+            print(f"  Gate {gid}: {res}")
+        for snum, sres in report.scenarios.items():
+            print(f"  Scenario {snum}: {sres}")
+
+    return 0 if report.status == "PASS" else 1
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="HF-15 Acceptance Environment, Rollback, and Observability CLI"
@@ -204,6 +228,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     # Subcommand: metrics
     subparsers.add_parser("metrics", parents=[json_parent], help="Get observability metrics and SLA report")
 
+    # Subcommand: run
+    run_parser = subparsers.add_parser("run", parents=[json_parent], help="Execute full acceptance test run")
+    run_parser.add_argument("--run-id", default=None, help="Unique run identifier")
+    run_parser.add_argument("--report-dir", type=Path, default=None, help="Report directory")
+
     args = parser.parse_args(argv)
     args.json = bool(getattr(args, "json", False))
 
@@ -213,6 +242,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         "rollback-drill": cmd_rollback_drill,
         "status": cmd_status,
         "metrics": cmd_metrics,
+        "run": cmd_run,
     }
 
     return dispatch_map[args.command](args)
@@ -220,3 +250,4 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
+
