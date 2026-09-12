@@ -34,6 +34,12 @@ O ciclo PIV divide a entrega em mudanças pequenas, isoladas e estritamente veri
    - Gere registros de `EnvironmentEvidence` associando cada teste executado à sua versão de configuração, build digest e resultado (`PASSED`/`FAILED`).
 4. **Encaminhamento para Revisão Independente (`INDEPENDENT_REVIEW`)**:
    - Submeta o candidato com sua suíte verde e evidências completas para revisão adversarial independente (`06-adversarial-review`).
+5. **Orientações de Configuração Manual ao Usuário**:
+   - Sempre que uma etapa, dependência (`ManualDependency`) ou integração exigir configuração manual pelo usuário (portais, dashboards, chaves de API, arquivos `.env`, toggles, etc.):
+     - Forneça instruções passo a passo, tela por tela na versão atual da interface da plataforma.
+     - Forneça sugestão explícita de conteúdo para absolutamente todos os campos a serem preenchidos, seletores, dropdowns e checkboxes.
+     - Nunca assuma que o usuário tem experiência prévia na configuração ou sabe o que está fazendo.
+     - O guia deve ser à prova de falhas e de retrabalho antes de disparar probes de resolução.
 
 ### Outputs Estruturados
 - **Código e Commits Seletivos**: Commits isolados com mensagens rastreáveis vinculadas ao ticket.

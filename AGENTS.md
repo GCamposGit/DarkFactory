@@ -15,6 +15,12 @@
 - Mantenha domínio e I/O separados para permitir testes `library`, `cli` e `http`.
 - Trate falhas externas (Ollama, OpenRouter, GitHub, arXiv) com fallback ou erro estruturado, sem vazar credenciais.
 
+## Instruções ao Usuário e Configurações Manuais
+
+- Sempre que um passo envolver configuração manual pelo usuário (dashboards, portais, integrações, arquivos de ambiente, etc.), forneça instruções passo a passo, tela por tela na versão atual da interface da plataforma.
+- Forneça sugestões de conteúdo para absolutamente todos os campos que precisam ser preenchidos e seletores.
+- Nunca assuma que o usuário tem experiência na configuração ou sabe o que está fazendo; o guia deve ser à prova de falhas e retrabalho.
+
 ## Validação obrigatória
 
 ```powershell

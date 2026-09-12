@@ -7,7 +7,7 @@ import os
 import secrets
 from typing import Any, Dict, List, Optional
 from pydantic import BaseModel
-from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, Response, status
+from fastapi import APIRouter, Body, Depends, Header, HTTPException, Query, Request, Response, status
 from fastapi.responses import RedirectResponse
 
 from hub.backend.webhooks import (
@@ -1164,6 +1164,36 @@ def get_n8n_status_endpoint(
 ) -> Dict[str, Any]:
     """Probes n8n endpoint and returns verification report (HF-14)."""
     return service.get_n8n_status(target_url=url)
+
+
+@router.get("/integrations/n8n/workflows")
+def get_n8n_workflows_endpoint(
+    limit: int = Query(50, ge=1, le=100, description="Max workflows to return"),
+    service: HubService = Depends(get_hub_service),
+) -> Dict[str, Any]:
+    """Lists registered workflows from the n8n Community instance."""
+    return service.get_n8n_workflows(limit=limit)
+
+
+@router.post("/integrations/n8n/sync")
+def sync_n8n_workflows_endpoint(
+    custom_path: Optional[str] = Body(None, embed=True, description="Custom path to workflow JSON or dir"),
+    activate: bool = Body(True, embed=True, description="Activate workflows after uploading"),
+    service: HubService = Depends(get_hub_service),
+) -> Dict[str, Any]:
+    """Synchronizes sanitized workflow definitions from repository into n8n."""
+    return service.sync_n8n_workflows(custom_path=custom_path, activate=activate)
+
+
+@router.post("/integrations/n8n/trigger")
+def trigger_n8n_webhook_endpoint(
+    path: str = Body(..., embed=True, description="Webhook slug or full URL"),
+    payload: Dict[str, Any] = Body(..., embed=True, description="JSON payload to dispatch"),
+    service: HubService = Depends(get_hub_service),
+) -> Dict[str, Any]:
+    """Triggers an autonomous webhook workflow in n8n."""
+    return service.trigger_n8n_webhook(path_or_url=path, payload=payload)
+
 
 
 

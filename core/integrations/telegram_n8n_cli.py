@@ -31,6 +31,7 @@ from core.integrations.n8n import (
     N8nManifestGenerator,
     N8nProbe,
     N8nWorkflowManager,
+    load_n8n_config,
 )
 from core.integrations.telegram import (
     TelegramConfig,
@@ -216,10 +217,12 @@ def cmd_n8n_import_workflow(args: argparse.Namespace) -> int:
 
 def cmd_n8n_workflows(args: argparse.Namespace) -> int:
     """List workflows on n8n instance via API."""
-    cfg = N8nConfig(
-        base_url=args.url or os.environ.get("N8N_URL", "https://n8n.ggcampos.com"),
-        api_key=args.api_key or os.environ.get("N8N_API_KEY"),
-    )
+    cfg = load_n8n_config()
+    if args.url:
+        cfg.base_url = args.url
+    if args.api_key:
+        cfg.api_key = args.api_key
+
     client = N8nApiClient(config=cfg)
     res = client.list_workflows(limit=args.limit)
     if args.json:
@@ -238,10 +241,12 @@ def cmd_n8n_workflows(args: argparse.Namespace) -> int:
 
 def cmd_n8n_sync(args: argparse.Namespace) -> int:
     """Sync workflows from directory or file to n8n instance."""
-    cfg = N8nConfig(
-        base_url=args.url or os.environ.get("N8N_URL", "https://n8n.ggcampos.com"),
-        api_key=args.api_key or os.environ.get("N8N_API_KEY"),
-    )
+    cfg = load_n8n_config()
+    if args.url:
+        cfg.base_url = args.url
+    if args.api_key:
+        cfg.api_key = args.api_key
+
     client = N8nApiClient(config=cfg)
     target_path = Path(args.path or (REPO_ROOT / ".factory" / "n8n" / "workflows"))
 
@@ -265,11 +270,14 @@ def cmd_n8n_sync(args: argparse.Namespace) -> int:
 
 def cmd_n8n_trigger(args: argparse.Namespace) -> int:
     """Trigger an n8n webhook workflow."""
-    cfg = N8nConfig(
-        base_url=args.url or os.environ.get("N8N_URL", "https://n8n.ggcampos.com"),
-        webhook_url=args.webhook_url or os.environ.get("N8N_WEBHOOK_URL"),
-        api_key=args.api_key or os.environ.get("N8N_API_KEY"),
-    )
+    cfg = load_n8n_config()
+    if args.url:
+        cfg.base_url = args.url
+    if args.webhook_url:
+        cfg.webhook_url = args.webhook_url
+    if args.api_key:
+        cfg.api_key = args.api_key
+
     client = N8nApiClient(config=cfg)
     try:
         if args.payload.startswith("@") or Path(args.payload).exists():

@@ -40,6 +40,8 @@ Esta skill conecta qualquer produto de software à Dark Factory compartilhada de
      ```powershell
      python .factory/darkfac.py harness --quick
      ```
+5. **Configurações Manuais Externas à Prova de Falhas**:
+   - Caso a adoção envolva configuração manual pelo usuário (ex.: chaves de API, webhooks, GitHub Apps, variáveis de ambiente ou painéis externos), forneça instruções passo a passo detalhadas tela por tela na versão atual da interface da plataforma, com sugestão de conteúdo para absolutamente todos os campos e seletores, sem assumir experiência prévia do usuário.
 
 ### Outputs Estruturados
 - **Runtime Namespaced**: Instalação isolada em `.factory/runtime/` no produto.

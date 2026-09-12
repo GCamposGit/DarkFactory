@@ -916,5 +916,167 @@
     "dependencies": [],
     "created_at": "2026-09-12T10:24:42.518884Z",
     "updated_at": "2026-09-12T10:24:42.518884Z"
+  },
+  {
+    "id": "USR-39",
+    "project_id": "darkfac",
+    "title": "CLI Pipeline de Testes",
+    "origin": "user",
+    "status": "planned",
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "Problema bem especificado para validação de comandos headless",
+    "core_journey": [],
+    "non_goals": [
+      "Não criar frontends"
+    ],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Passar no pytest com exit code 0"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-09-12T10:28:58.318618Z",
+    "updated_at": "2026-09-12T10:28:58.318618Z"
+  },
+  {
+    "id": "USR-40",
+    "project_id": "darkfac",
+    "title": "CLI Pipeline de Testes",
+    "origin": "user",
+    "status": "planned",
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "Problema bem especificado para validação de comandos headless",
+    "core_journey": [],
+    "non_goals": [
+      "Não criar frontends"
+    ],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Passar no pytest com exit code 0"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-09-12T10:52:50.574760Z",
+    "updated_at": "2026-09-12T10:52:50.574760Z"
+  },
+  {
+    "id": "USR-41",
+    "project_id": "darkfac",
+    "title": "CLI Pipeline de Testes",
+    "origin": "user",
+    "status": "planned",
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "Problema bem especificado para validação de comandos headless",
+    "core_journey": [],
+    "non_goals": [
+      "Não criar frontends"
+    ],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Passar no pytest com exit code 0"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-09-12T10:56:07.638091Z",
+    "updated_at": "2026-09-12T10:56:07.638091Z"
+  },
+  {
+    "id": "USR-42",
+    "project_id": "darkfac",
+    "title": "CLI Pipeline de Testes",
+    "origin": "user",
+    "status": "planned",
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "Problema bem especificado para validação de comandos headless",
+    "core_journey": [],
+    "non_goals": [
+      "Não criar frontends"
+    ],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Passar no pytest com exit code 0"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-09-12T11:11:19.735875Z",
+    "updated_at": "2026-09-12T11:11:19.735875Z"
+  },
+  {
+    "id": "USR-43",
+    "project_id": "darkfac",
+    "title": "CLI Pipeline de Testes",
+    "origin": "user",
+    "status": "planned",
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "Problema bem especificado para validação de comandos headless",
+    "core_journey": [],
+    "non_goals": [
+      "Não criar frontends"
+    ],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Passar no pytest com exit code 0"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-09-12T11:40:58.361608Z",
+    "updated_at": "2026-09-12T11:40:58.361608Z"
+  },
+  {
+    "id": "USR-44",
+    "project_id": "darkfac",
+    "title": "CLI Pipeline de Testes",
+    "origin": "user",
+    "status": "planned",
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "Problema bem especificado para validação de comandos headless",
+    "core_journey": [],
+    "non_goals": [
+      "Não criar frontends"
+    ],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Passar no pytest com exit code 0"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-09-12T11:49:18.585918Z",
+    "updated_at": "2026-09-12T11:49:18.585918Z"
   }
 ]

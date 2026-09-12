@@ -130,7 +130,7 @@ from hub.backend.webhooks import (
     WebhookEventRecord,
 )
 from core.integrations.telegram import TelegramGateway, TelegramConfig
-from core.integrations.n8n import N8nProbe, N8nConfig
+from core.integrations.n8n import N8nProbe, N8nConfig, N8nApiClient
 from core.orchestrator.release_pipeline import ReleasePipelineService
 
 
@@ -2105,4 +2105,31 @@ class HubService:
         probe = N8nProbe()
         report = probe.probe(target_url=url)
         return report.model_dump()
+
+    def get_n8n_workflows(self, limit: int = 50) -> Dict[str, Any]:
+        """Lists active workflows from remote n8n instance."""
+        client = N8nApiClient()
+        res = client.list_workflows(limit=limit)
+        return res.model_dump()
+
+    def sync_n8n_workflows(self, custom_path: Optional[str] = None, activate: bool = True) -> Dict[str, Any]:
+        """Synchronizes workflow definitions to remote n8n instance."""
+        client = N8nApiClient()
+        p = Path(custom_path) if custom_path else (self.project_root / ".factory" / "n8n" / "workflows")
+        if p.is_file():
+            res = client.sync_workflow_file(p, activate=activate)
+            return {"success": res.success, "results": {p.name: res.model_dump()}}
+        else:
+            results = client.sync_all_workflows(p, activate=activate)
+            return {
+                "success": all(r.success for r in results.values()) if results else False,
+                "results": {k: v.model_dump() for k, v in results.items()},
+            }
+
+    def trigger_n8n_webhook(self, path_or_url: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+        """Dispatches an autonomous event to an n8n webhook."""
+        client = N8nApiClient()
+        res = client.trigger_webhook(path_or_url=path_or_url, payload=payload)
+        return res.model_dump()
+
 

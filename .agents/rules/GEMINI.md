@@ -21,3 +21,9 @@ Seu motor primário de orquestração e contexto é o **Gemini 3.8 Flash**.
 4. **Comandos de Terminal para o Usuário e Subprocessos (Inviolável)**:
    - SEMPRE indicar comandos no PowerShell com o endereço absoluto completo (ex: `python C:\dev\DarkFac\run_canaletto.py`), prevenindo falhas de diretório de trabalho relativo no terminal do usuário.
    - Em chamadas internas ao PowerShell, SEMPRE utilize `-NoProfile -NonInteractive -ExecutionPolicy Bypass` ou `core.harness.terminal_env` para blindar contra perfis que alteram o diretório de trabalho.
+
+5. **Configurações Manuais à Prova de Falhas e Retrabalho (Inviolável)**:
+   - Sempre que um passo envolver configuração manual pelo usuário (painéis web, consoles, bots, tokens, `.env`, seletores e formulários):
+     - NUNCA assuma que o usuário tem experiência ou sabe o que está fazendo.
+     - Forneça instruções passo a passo detalhadas, tela por tela na versão atual da interface da plataforma.
+     - Sugira o conteúdo exato/recomendado para absolutamente todos os campos a preencher, toggles, dropdowns e seletores, tornando o procedimento 100% à prova de falhas e de retrabalho.

@@ -266,19 +266,33 @@ def build_default_inventory() -> InfraInventory:
     # 6. n8n Automation Engine
     n8n_node = InfraNode(
         id="n8n-automation",
-        name="n8n Automation Account / Instance",
+        name="n8n Community Self-Hosted (VPS Hetzner CX23)",
         role=NodeRole.MANAGED_SERVICE,
         status=NodeStatus.ACTIVE,
-        provider="n8n Cloud / Self-Hosted",
+        provider="Dokploy PaaS / Docker (darkfac-vps-primary)",
+        network=NetworkSpec(
+            public_dns="n8n.ggcampos.com",
+            open_ports=[5678],
+            notes="Traefik TLS reverse proxy on dokploy-network. Automated Let's Encrypt certificates. Webhooks enabled.",
+        ),
         services=[
             ServiceItem(
-                name="n8n-workflows",
-                description="Webhook listener, asynchronous glue pipelines and third-party API orchestrations",
+                name="n8n-app",
+                description="n8n Community workflow automation engine for autonomous DarkFac agents",
                 status=NodeStatus.ACTIVE,
-            )
+                port=5678,
+                managed_by="Dokploy / Docker Compose",
+            ),
+            ServiceItem(
+                name="n8n-postgres",
+                description="Dedicated PostgreSQL 16 database for n8n workflow state and credentials",
+                status=NodeStatus.ACTIVE,
+                port=5432,
+                managed_by="Dokploy / Docker Compose",
+            ),
         ],
         cost_monthly_usd=0.0,
-        tags=["automation", "workflows", "webhooks", "active"],
+        tags=["automation", "workflows", "webhooks", "n8n-community", "dokploy", "vps", "active"],
         updated_at=now,
     )
 

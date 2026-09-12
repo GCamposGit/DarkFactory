@@ -280,6 +280,23 @@ class N8nApiResult(BaseModel):
     error: Optional[str] = None
 
 
+def load_n8n_config(config_file: Optional[Path] = None) -> N8nConfig:
+    """Loads N8nConfig from .factory/n8n/config.json or environment variables."""
+    cfg_path = config_file or (Path(__file__).resolve().parents[2] / ".factory" / "n8n" / "config.json")
+    if cfg_path.exists():
+        try:
+            data = json.loads(cfg_path.read_text(encoding="utf-8"))
+            return N8nConfig.model_validate(data)
+        except Exception:
+            pass
+    return N8nConfig(
+        base_url=os.environ.get("N8N_URL", "https://n8n.ggcampos.com"),
+        api_key=os.environ.get("N8N_API_KEY"),
+        webhook_url=os.environ.get("N8N_WEBHOOK_URL"),
+        encryption_key=os.environ.get("N8N_ENCRYPTION_KEY"),
+    )
+
+
 class N8nApiClient:
     """Autonomous API Client for DarkFac agents interacting with n8n Community.
 
@@ -292,12 +309,7 @@ class N8nApiClient:
         config: Optional[N8nConfig] = None,
         http_client: Optional[Callable[[str, str, Dict[str, str], Optional[bytes], float], Dict[str, Any]]] = None,
     ) -> None:
-        self.config = config or N8nConfig(
-            base_url=os.environ.get("N8N_URL", "https://n8n.ggcampos.com"),
-            api_key=os.environ.get("N8N_API_KEY"),
-            webhook_url=os.environ.get("N8N_WEBHOOK_URL"),
-            encryption_key=os.environ.get("N8N_ENCRYPTION_KEY"),
-        )
+        self.config = config or load_n8n_config()
         self._http_client = http_client
 
     def _get_headers(self) -> Dict[str, str]:
@@ -386,14 +398,27 @@ class N8nApiClient:
         active: bool = False,
     ) -> N8nApiResult:
         """Creates a new workflow via n8n API."""
+        clean_nodes = []
+        for n in nodes:
+            node_copy = dict(n)
+            if "credentials" in node_copy:
+                creds = node_copy["credentials"]
+                if isinstance(creds, dict) and any(
+                    isinstance(v, dict) and v.get("id") == "REDACTED" for v in creds.values()
+                ):
+                    del node_copy["credentials"]
+            clean_nodes.append(node_copy)
+
         payload = {
             "name": name,
-            "nodes": nodes,
+            "nodes": clean_nodes,
             "connections": connections,
             "settings": settings or {},
-            "active": active,
         }
-        return self._request("POST", "/api/v1/workflows", payload=payload)
+        res = self._request("POST", "/api/v1/workflows", payload=payload)
+        if res.success and active and isinstance(res.data, dict) and "id" in res.data:
+            self.activate_workflow(res.data["id"])
+        return res
 
     def update_workflow(
         self,
@@ -401,7 +426,21 @@ class N8nApiClient:
         workflow_data: Dict[str, Any],
     ) -> N8nApiResult:
         """Updates an existing workflow by ID."""
-        return self._request("PUT", f"/api/v1/workflows/{workflow_id}", payload=workflow_data)
+        clean_data = dict(workflow_data)
+        clean_data.pop("active", None)
+        if "nodes" in clean_data and isinstance(clean_data["nodes"], list):
+            clean_nodes = []
+            for n in clean_data["nodes"]:
+                node_copy = dict(n)
+                if "credentials" in node_copy:
+                    creds = node_copy["credentials"]
+                    if isinstance(creds, dict) and any(
+                        isinstance(v, dict) and v.get("id") == "REDACTED" for v in creds.values()
+                    ):
+                        del node_copy["credentials"]
+                clean_nodes.append(node_copy)
+            clean_data["nodes"] = clean_nodes
+        return self._request("PUT", f"/api/v1/workflows/{workflow_id}", payload=clean_data)
 
     def activate_workflow(self, workflow_id: str) -> N8nApiResult:
         """Activates a workflow by ID."""

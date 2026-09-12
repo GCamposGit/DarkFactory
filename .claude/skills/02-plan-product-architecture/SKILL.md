@@ -29,7 +29,7 @@ O produto do planejamento é um contrato normativo verificável que um implement
    - Declare ferramentas, portas e serviços via `EnvironmentManifest`, garantindo ausência total de credenciais ou tokens em URLs/DSNs (utilize `SecretReference`).
 3. **Mapeamento de Requisitos e Dependências**:
    - Especifique cada `EvidenceRequirement` associado ao respectivo estágio de prontidão (`ReadinessState`).
-   - Se houver ação humana indispensável, formule um `ManualDependency` estrito com passos numerados consecutivos, comando de probe final (`final_probe`), critério de retomada e estágios bloqueados (`blocked_stages`).
+   - Se houver ação humana indispensável, formule um `ManualDependency` estrito com passos numerados consecutivos detalhados tela por tela na versão atual da interface da plataforma, sugestão de conteúdo para absolutamente todos os campos que precisam ser preenchidos e seletores (nunca assumindo experiência prévia do usuário, tornando o guia à prova de falhas e retrabalho), comando de probe final (`final_probe`), critério de retomada e estágios bloqueados (`blocked_stages`).
 4. **Fatiamento em Tickets**:
    - Cada ticket de execução deve cobrir de 1 a 4 arquivos principais, declarando objetivo, critérios de aceitação e `validate_commands` exatos.
 
