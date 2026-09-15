@@ -1,0 +1,79 @@
+{
+  "ledger_id": "20260915_161236_real-time-speech-recognition-web-speech-api-vs-deepgram-vs-w",
+  "query": "Real-time speech recognition Web Speech API vs Deepgram vs Whisper streaming browser",
+  "topic_type": "topic_concept",
+  "created_at": "2026-09-15T16:12:36.415635+00:00",
+  "summary_executive": "Pesquisa conceitual estruturada sobre 'Real-time speech recognition Web Speech API vs Deepgram vs Whisper streaming browser'. Catalogadas 0 publicações acadêmicas de alta relevância com DOI/arXiv IDs.",
+  "sources": [
+    {
+      "id": "trend:hn:42452443",
+      "title": "Moonshine Web: real-time speech recognition running 100% locally in the browser",
+      "url": "https://bsky.app/profile/xenova.bsky.social/post/3ldlswuvnxs2i",
+      "source_type": "expert_trend",
+      "authors_or_maintainers": [
+        "nmstoker"
+      ],
+      "published_date": "2024-12-18T17:13:24Z",
+      "summary": "Discussão de engenharia com alta repercussão (3 pontos, 1 comentários). Foco em ferramentas modernas e adoção por desenvolvedores.",
+      "license": "N/A (Trend Discussion)",
+      "license_category": "unknown",
+      "authority_tier": "trend_signal",
+      "credibility_score": 0.75,
+      "stars": null,
+      "has_test_suite": null,
+      "metadata": {
+        "points": 3,
+        "comments": 1,
+        "community": "HackerNews / Elite Developers"
+      }
+    },
+    {
+      "id": "trend:hn:44673737",
+      "title": "Show HN: Snacker News; a hands-free HN. The more you eat, the more you learn",
+      "url": "https://twitter.com/measure_plan/status/1948435017559949764",
+      "source_type": "expert_trend",
+      "authors_or_maintainers": [
+        "getToTheChopin"
+      ],
+      "published_date": "2025-07-24T17:46:34Z",
+      "summary": "Discussão de engenharia com alta repercussão (3 pontos, 3 comentários). Foco em ferramentas modernas e adoção por desenvolvedores.",
+      "license": "N/A (Trend Discussion)",
+      "license_category": "unknown",
+      "authority_tier": "trend_signal",
+      "credibility_score": 0.75,
+      "stars": null,
+      "has_test_suite": null,
+      "metadata": {
+        "points": 3,
+        "comments": 3,
+        "community": "HackerNews / Elite Developers"
+      }
+    }
+  ],
+  "insights": [
+    {
+      "source_id": "trend:hn:42452443",
+      "source_title": "Moonshine Web: real-time speech recognition running 100% locally in the browser",
+      "key_insight": "Recurso/discussão com forte tração na comunidade: 'Moonshine Web: real-time speech recognition running 100% locally in the browser'. Engenheiros e experts estão priorizando esta abordagem para ganho de ergonomia e velocidade.",
+      "architectural_implications": "IDEIA DE FEATURE: Avaliar a inclusão dessa funcionalidade no roadmap. ATENÇÃO: A arquitetura concreta, schemas e testes DEVEM ser fundamentados nas fontes canônicas de alta credibilidade.",
+      "future_reference_value": "Sinal de mercado e preferência de desenvolvedores documentado em https://bsky.app/profile/xenova.bsky.social/post/3ldlswuvnxs2i.",
+      "authority_tier": "trend_signal",
+      "code_patterns_or_algorithms": [
+        "Moonshine Web: real-time speech recognit"
+      ]
+    },
+    {
+      "source_id": "trend:hn:44673737",
+      "source_title": "Show HN: Snacker News; a hands-free HN. The more you eat, the more you learn",
+      "key_insight": "Recurso/discussão com forte tração na comunidade: 'Show HN: Snacker News; a hands-free HN. The more you eat, the more you learn'. Engenheiros e experts estão priorizando esta abordagem para ganho de ergonomia e velocidade.",
+      "architectural_implications": "IDEIA DE FEATURE: Avaliar a inclusão dessa funcionalidade no roadmap. ATENÇÃO: A arquitetura concreta, schemas e testes DEVEM ser fundamentados nas fontes canônicas de alta credibilidade.",
+      "future_reference_value": "Sinal de mercado e preferência de desenvolvedores documentado em https://twitter.com/measure_plan/status/1948435017559949764.",
+      "authority_tier": "trend_signal",
+      "code_patterns_or_algorithms": [
+        "Show HN: Snacker News; a hands-free HN. "
+      ]
+    }
+  ],
+  "decisions_linked": [],
+  "related_tickets": []
+}

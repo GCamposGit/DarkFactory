@@ -40,20 +40,34 @@ DEFAULT_PROJECTS = (
 )
 
 
+def _load_registered_projects() -> list[RoadmapProjectSummary]:
+    try:
+        from core.projects.registry import get_project_registry
+        return [p.to_roadmap_summary() for p in get_project_registry().list_projects()]
+    except Exception:
+        return list(DEFAULT_PROJECTS)
+
+
 class RoadmapQueryService:
     def __init__(
         self,
-        compiler: RoadmapCompiler,
+        compiler: RoadmapCompiler | None = None,
         store: RoadmapSnapshotStore | None = None,
-        projects: Iterable[RoadmapProjectSummary] = DEFAULT_PROJECTS,
+        projects: Iterable[RoadmapProjectSummary] | None = None,
         source_documents: dict[str, RoadmapSourceDocument] | None = None,
     ) -> None:
-        self.compiler = compiler
+        self.compiler = compiler or RoadmapCompiler([])
         self.store = store or RoadmapSnapshotStore()
-        self.projects = {project.id: project for project in projects}
+        initial_projects = projects if projects is not None else _load_registered_projects()
+        self.projects = {project.id: project for project in initial_projects}
         self.source_documents = source_documents or {}
 
     def list_projects(self) -> list[RoadmapProjectSummary]:
+        # Refresh from registry to pick up newly added projects without server restart
+        registered = _load_registered_projects()
+        for p in registered:
+            if p.id not in self.projects:
+                self.projects[p.id] = p
         return [self.projects[key] for key in sorted(self.projects)]
 
     def get_snapshot(

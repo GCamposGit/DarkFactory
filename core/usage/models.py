@@ -84,6 +84,7 @@ class AccountUsageReport(BaseModel):
 class ModelCallEvent(BaseModel):
     invocation_id: str = Field(default_factory=lambda: uuid4().hex, min_length=8, max_length=128)
     ticket_id: Optional[str] = Field(default=None, max_length=120)
+    project_id: str = Field(default="darkfac", max_length=80)
     execution_mode: Optional[str] = Field(default=None, max_length=50)
     provider: str = Field(min_length=1, max_length=80)
     model: str = Field(min_length=1, max_length=200)

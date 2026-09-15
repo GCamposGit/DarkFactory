@@ -103,6 +103,7 @@ async function initSession() {
 
 async function initApp() {
   await initSession();
+  await initGlobalProjectSwitcher();
   setupEventListeners();
   await Promise.all([
     loadServices(),
@@ -113,6 +114,84 @@ async function initApp() {
   ]);
   renderCategoryTabs();
   triggerBackgroundPings();
+}
+
+async function initGlobalProjectSwitcher() {
+  const select = document.getElementById("global-project-select");
+  if (!select) return;
+
+  try {
+    const res = await fetch("/api/projects");
+    if (res.ok) {
+      const projects = await res.json();
+      if (Array.isArray(projects) && projects.length > 0) {
+        select.innerHTML = projects
+          .map(
+            (p) =>
+              `<option value="${escapeHtml(p.id)}" class="bg-slate-900 text-white">${escapeHtml(p.name)}</option>`
+          )
+          .join("");
+      }
+    }
+  } catch (err) {
+    console.warn("Could not fetch projects for global switcher:", err);
+  }
+
+  const saved = localStorage.getItem("darkhub_active_project");
+  let active = saved || "darkfac";
+
+  let hasActive = false;
+  for (let i = 0; i < select.options.length; i++) {
+    if (select.options[i].value === active) {
+      hasActive = true;
+      break;
+    }
+  }
+  if (!hasActive && select.options.length > 0) {
+    active = select.options[0].value;
+  }
+
+  select.value = active;
+  window.currentActiveProjectId = active;
+  syncActiveProjectToComponents(active);
+
+  select.addEventListener("change", (e) => {
+    const newProj = e.target.value;
+    localStorage.setItem("darkhub_active_project", newProj);
+    window.currentActiveProjectId = newProj;
+    syncActiveProjectToComponents(newProj);
+    showToast(`Projeto ativo: ${newProj}`, "info");
+  });
+}
+
+function syncActiveProjectToComponents(projectId) {
+  if (typeof roadmapUi !== "undefined") {
+    roadmapUi.projectId = projectId;
+    const rSelect = document.getElementById("roadmap-project-select");
+    if (rSelect) rSelect.value = projectId;
+    if (typeof loadRoadmapSnapshot === "function") {
+      const drawer = document.getElementById("roadmap-drawer");
+      if (drawer && !drawer.classList.contains("hidden")) {
+        loadRoadmapSnapshot();
+      }
+    }
+  }
+
+  if (typeof demandsUi !== "undefined") {
+    demandsUi.projectId = projectId;
+    const dSelect = document.getElementById("demand-project-select");
+    if (dSelect) dSelect.value = projectId;
+    if (typeof loadRecentDemands === "function") {
+      const drawer = document.getElementById("demands-drawer");
+      if (drawer && !drawer.classList.contains("hidden")) {
+        loadRecentDemands();
+      }
+    }
+  }
+
+  if (typeof loadInfraCards === "function") {
+    loadInfraCards(false);
+  }
 }
 
 // Event Listeners Setup

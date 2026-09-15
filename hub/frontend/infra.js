@@ -98,7 +98,11 @@ async function loadInfraCards(force = false) {
   }
 
   try {
-    const endpoint = force ? "/api/infra/cards/refresh" : "/api/infra/cards";
+    const activeProj = window.currentActiveProjectId || localStorage.getItem("darkhub_active_project") || "";
+    let endpoint = force ? "/api/infra/cards/refresh" : "/api/infra/cards";
+    if (activeProj) {
+      endpoint += `?project_id=${encodeURIComponent(activeProj)}`;
+    }
     const method = force ? "POST" : "GET";
     const response = await fetch(endpoint, { method });
     if (!response.ok) throw new Error(`Infra API error: ${response.status}`);

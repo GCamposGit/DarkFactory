@@ -54,6 +54,19 @@ async function loadDemandsProjects() {
         .map((p) => `<option value="${escapeDemandsHtml(p.id)}">${escapeDemandsHtml(p.name)} (${escapeDemandsHtml(p.id)})</option>`)
         .join("");
       select.value = demandsUi.projectId;
+      select.onchange = () => {
+        demandsUi.projectId = select.value;
+        const globalSel = document.getElementById("global-project-select");
+        if (globalSel && globalSel.value !== select.value) {
+          globalSel.value = select.value;
+          localStorage.setItem("darkhub_active_project", select.value);
+          window.currentActiveProjectId = select.value;
+          if (typeof syncActiveProjectToComponents === "function") {
+            syncActiveProjectToComponents(select.value);
+          }
+        }
+        loadRecentDemands();
+      };
     }
   } catch (err) {
     console.warn("Could not load projects for demands:", err);

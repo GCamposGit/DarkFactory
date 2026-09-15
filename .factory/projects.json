@@ -1,0 +1,35 @@
+[
+  {
+    "id": "darkfac",
+    "name": "Dark Factory (Core)",
+    "description": "Núcleo compartilhado da fábrica autônoma e do DarkHub.",
+    "path": "C:\\dev\\DarkFac",
+    "kind": "core",
+    "prefix": "DF",
+    "domain": "darkhub.ggcampos.com",
+    "deploy_target": "dokploy_docker",
+    "created_at": "2026-09-01T00:00:00Z"
+  },
+  {
+    "id": "site-ggcampos",
+    "name": "Site Pessoal (ATRIUM)",
+    "description": "Portfólio executivo e showcase de IA em produção.",
+    "path": "C:\\dev\\Site_ggcampos",
+    "kind": "client_portfolio",
+    "prefix": "SIT",
+    "domain": "ggcampos.com",
+    "deploy_target": "hostinger_ftp",
+    "created_at": "2026-09-14T22:00:00Z"
+  },
+  {
+    "id": "segundo-cerebro",
+    "name": "Segundo Cérebro",
+    "description": "Base de conhecimento multimodal e inteligência pessoal.",
+    "path": "C:\\dev\\SegundoCerebro",
+    "kind": "internal_product",
+    "prefix": "SC",
+    "domain": "brain.local",
+    "deploy_target": "local_service",
+    "created_at": "2026-09-05T00:00:00Z"
+  }
+]

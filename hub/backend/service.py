@@ -774,6 +774,7 @@ class HubService:
         latency_ms: Optional[float] = None,
         source: str,
         ticket_id: Optional[str] = None,
+        project_id: str = "darkfac",
         execution_mode: Optional[str] = "ui",
     ) -> None:
         """Persist telemetry fail-open so observability never breaks inference."""
@@ -792,6 +793,7 @@ class HubService:
                 latency_ms=latency_ms,
                 source=source,
                 ticket_id=ticket_id,
+                project_id=project_id,
                 execution_mode=execution_mode,
             ))
         except Exception as exc:
@@ -817,9 +819,9 @@ class HubService:
         """Return a partial-success report for every known AI platform."""
         return self.account_usage_monitor.inspect(force=force)
 
-    def get_model_usage(self) -> Any:
+    def get_model_usage(self, project_id: Optional[str] = None) -> Any:
         """Return project-wide model counters and recent attempts."""
-        return self.model_usage_ledger.report()
+        return self.model_usage_ledger.report(project_id=project_id)
 
     def record_model_usage(self, event: ModelCallEvent) -> Any:
         """Allow Codex, Grok, Gemini and other harnesses to report calls."""
@@ -879,13 +881,19 @@ class HubService:
             message=f"Synchronized {accounts_updated} account quotas and {credits_updated} credit balances from {payload.client_node_id}.",
         )
 
-    def get_infra_cards_report(self, probe_liveness: bool = False, probe_timeout: float = 0.5) -> InfraCardsReport:
+    def get_infra_cards_report(
+        self,
+        probe_liveness: bool = False,
+        probe_timeout: float = 0.5,
+        project_id: Optional[str] = None,
+    ) -> InfraCardsReport:
         """Returns the infrastructure cards report for the Hub."""
         inventory = self.infra_manager.load_or_initialize()
         return build_infra_cards_report(
             inventory,
             probe_network_liveness=probe_liveness,
             probe_timeout=probe_timeout,
+            project_id=project_id,
         )
 
     def get_infra_card(self, node_id: str, probe_liveness: bool = False, probe_timeout: float = 0.5) -> Optional[InfraCard]:

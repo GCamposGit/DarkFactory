@@ -107,14 +107,22 @@ class DemandsStore:
 
     def next_ticket_id(self, project_id: str = "darkfac") -> str:
         with self._lock:
+            from core.projects.registry import get_project_registry
+
+            prefix = get_project_registry().get_ticket_prefix(project_id)
             tickets = self.list_tickets(project_id=project_id)
             existing_numbers: list[int] = []
+            pattern = re.compile(rf"{re.escape(prefix)}-(\d+)")
             for t in tickets:
-                match = re.search(r"USR-(\d+)", t.id)
+                match = pattern.search(t.id)
                 if match:
                     existing_numbers.append(int(match.group(1)))
+                elif project_id == "darkfac":
+                    match_usr = re.search(r"(?:USR|DF)-(\d+)", t.id)
+                    if match_usr:
+                        existing_numbers.append(int(match_usr.group(1)))
             next_num = max(existing_numbers, default=0) + 1
-            return f"USR-{next_num:02d}"
+            return f"{prefix}-{next_num:02d}"
 
     def update_status(
         self,

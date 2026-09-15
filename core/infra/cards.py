@@ -302,15 +302,31 @@ def probe_liveness(card: InfraCard, timeout: float = 0.5) -> bool:
     return False
 
 
+def _matches_project(node: InfraNode, project_id: Optional[str]) -> bool:
+    if not project_id:
+        return True
+    tag_set = {t.lower() for t in node.tags}
+    target_tag = f"project:{project_id.lower()}"
+    if target_tag in tag_set or "project:all" in tag_set or "shared" in tag_set:
+        return True
+    has_any_project_tag = any(t.startswith("project:") for t in tag_set)
+    if not has_any_project_tag and project_id == "darkfac":
+        return True
+    return False
+
+
 def build_infra_cards_report(
     inventory: InfraInventory,
     probe_network_liveness: bool = False,
     probe_timeout: float = 0.5,
+    project_id: Optional[str] = None,
 ) -> InfraCardsReport:
     """Transform an InfraInventory into a UI-ready, headless InfraCardsReport."""
     cards: List[InfraCard] = []
 
     for node in inventory.nodes:
+        if not _matches_project(node, project_id):
+            continue
         service_summaries = [
             InfraServiceSummary(
                 name=s.name,

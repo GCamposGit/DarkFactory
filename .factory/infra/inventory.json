@@ -68,7 +68,10 @@
         "primary-dev",
         "gpu-ada",
         "active",
-        "tailscale-active"
+        "tailscale-active",
+        "project:darkfac",
+        "project:all",
+        "shared"
       ],
       "updated_at": "2026-09-08T04:13:31.616818Z"
     },
@@ -138,7 +141,10 @@
         "storage-vault",
         "docker-active",
         "tailscale-active",
-        "active"
+        "active",
+        "project:darkfac",
+        "project:segundo-cerebro",
+        "shared"
       ],
       "updated_at": "2026-09-08T04:13:31.616818Z"
     },
@@ -234,7 +240,9 @@
         "dokploy-active",
         "tailscale-active",
         "production",
-        "active"
+        "active",
+        "project:darkfac",
+        "shared"
       ],
       "updated_at": "2026-09-08T04:13:31.616818Z"
     },
@@ -287,7 +295,10 @@
         "dns",
         "security",
         "tunnel",
-        "active"
+        "active",
+        "project:darkfac",
+        "project:site-ggcampos",
+        "shared"
       ],
       "updated_at": "2026-09-08T04:13:31.616818Z"
     },
@@ -323,7 +334,8 @@
         "hosting",
         "web",
         "external",
-        "active"
+        "active",
+        "project:site-ggcampos"
       ],
       "updated_at": "2026-09-08T04:13:31.616818Z"
     },

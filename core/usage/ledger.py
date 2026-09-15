@@ -157,13 +157,54 @@ class ModelUsageLedger:
                 aggregates[key] = row
             data["aggregates"] = aggregates
             return len(invocations)
-    def report(self, recent_limit: int = 25) -> ModelUsageReport:
+    def report(self, recent_limit: int = 25, project_id: Optional[str] = None) -> ModelUsageReport:
         """Return stable aggregates sorted by call count and recency."""
         data = self._store.read()
 
-        aggregates = [ModelUsageAggregate.model_validate(row) for row in data.get("aggregates", {}).values()]
+        if project_id:
+            invocations = dict(data.get("invocations", {}))
+            filtered_aggregates: Dict[str, Dict[str, Any]] = {}
+            for event_data in invocations.values():
+                event_proj = event_data.get("project_id", "darkfac")
+                if event_proj != project_id:
+                    continue
+                event = ModelCallEvent.model_validate(event_data)
+                key = self._aggregate_key(event)
+                row = filtered_aggregates.get(
+                    key,
+                    {
+                        "provider": event.provider,
+                        "model": event.model,
+                        "tier": event.tier.value,
+                        "harness": event.harness,
+                        "modality": event.modality.value,
+                        "call_count": 0,
+                        "success_count": 0,
+                        "failure_count": 0,
+                        "input_tokens": 0,
+                        "output_tokens": 0,
+                        "cost_usd": 0.0,
+                        "latency_ms": 0.0,
+                        "first_seen_at": event.timestamp,
+                        "last_seen_at": event.timestamp,
+                    },
+                )
+                row["call_count"] += 1
+                row["success_count" if event.success else "failure_count"] += 1
+                row["input_tokens"] += event.input_tokens or 0
+                row["output_tokens"] += event.output_tokens or 0
+                row["cost_usd"] = round(float(row["cost_usd"]) + (event.cost_usd or 0.0), 8)
+                row["latency_ms"] = round(float(row["latency_ms"]) + (event.latency_ms or 0.0), 3)
+                row["last_seen_at"] = event.timestamp
+                filtered_aggregates[key] = row
+
+            aggregates = [ModelUsageAggregate.model_validate(row) for row in filtered_aggregates.values()]
+            raw_events = [e for e in data.get("events", []) if e.get("project_id", "darkfac") == project_id][-max(0, recent_limit):]
+        else:
+            aggregates = [ModelUsageAggregate.model_validate(row) for row in data.get("aggregates", {}).values()]
+            raw_events = list(data.get("events", []))[-max(0, recent_limit):]
+
         aggregates.sort(key=lambda row: (-row.call_count, row.provider.lower(), row.model.lower()))
-        raw_events = list(data.get("events", []))[-max(0, recent_limit) :]
         recent_events = [ModelCallEvent.model_validate(row) for row in reversed(raw_events)]
         total_calls = sum(row.call_count for row in aggregates)
         successful = sum(row.success_count for row in aggregates)

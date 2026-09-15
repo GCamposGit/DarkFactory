@@ -773,10 +773,11 @@ def refresh_account_usage_endpoint(
 
 @router.get("/usage/models", response_model=ModelUsageReport)
 def get_model_usage_endpoint(
+    project_id: Optional[str] = Query(default=None, description="Filter usage report by project"),
     service: HubService = Depends(get_hub_service),
 ) -> ModelUsageReport:
     """Return aggregate and recent model usage for this project."""
-    return service.get_model_usage()
+    return service.get_model_usage(project_id=project_id)
 
 
 @router.post("/usage/models/events", response_model=ModelUsageReport)
@@ -1071,19 +1072,21 @@ def get_task_dashboard(service: HubService = Depends(get_hub_service)) -> TaskDa
 def get_infra_cards_endpoint(
     probe: bool = Query(default=False, description="Perform live network probe"),
     timeout: float = Query(default=0.5, description="Probe timeout in seconds"),
+    project_id: Optional[str] = Query(default=None, description="Filter infrastructure cards by project"),
     service: HubService = Depends(get_hub_service),
 ) -> InfraCardsReport:
     """Returns infrastructure nodes and system links as UI-ready cards."""
-    return service.get_infra_cards_report(probe_liveness=probe, probe_timeout=timeout)
+    return service.get_infra_cards_report(probe_liveness=probe, probe_timeout=timeout, project_id=project_id)
 
 
 @router.post("/infra/cards/refresh", response_model=InfraCardsReport)
 def refresh_infra_cards_endpoint(
     timeout: float = Query(default=1.0, description="Probe timeout in seconds"),
+    project_id: Optional[str] = Query(default=None, description="Filter infrastructure cards by project"),
     service: HubService = Depends(get_hub_service),
 ) -> InfraCardsReport:
     """Forces live connectivity probes and returns refreshed infrastructure cards."""
-    return service.get_infra_cards_report(probe_liveness=True, probe_timeout=timeout)
+    return service.get_infra_cards_report(probe_liveness=True, probe_timeout=timeout, project_id=project_id)
 
 
 @router.get("/infra/cards/{node_id}", response_model=InfraCard)
