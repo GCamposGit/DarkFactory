@@ -280,7 +280,7 @@ jobs:
           password: ${{ secrets.FTP_PASSWORD }}
           port: 21
           local-dir: ./dist/
-          server-dir: public_html/
+          server-dir: ./
           dangerous-clean-slate: false
 """
         files.append(self._write_file(target, ".github/workflows/deploy.yml", github_workflow))
