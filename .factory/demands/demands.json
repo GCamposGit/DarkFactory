@@ -997,5 +997,38 @@
     "dependencies": [],
     "created_at": "2026-09-12T10:56:07.638091Z",
     "updated_at": "2026-09-12T10:56:07.638091Z"
+  },
+  {
+    "id": "JRV-01",
+    "project_id": "jarvis",
+    "title": "Configurar e Homologar Fallback do Groq Cloud Whisper",
+    "origin": "user",
+    "status": "planned",
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand",
+      "audio",
+      "groq"
+    ],
+    "problem_statement": "O portal console.groq.com apresentou instabilidade e tela em branco no cadastro/profile. Deixar em standby e configurar a chave GROQ_API_KEY e homologar a rota de contingencia em nuvem na proxima oportunidade.",
+    "core_journey": [
+      "Submitted through Jarvis Assistant"
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Validar GROQ_API_KEY ativa em .env",
+      "Testar contingencia Groq Whisper whisper-large-v3-turbo com sucesso"
+    ],
+    "suggested_files": [
+      "jarvis/core/audio.py",
+      "jarvis/core/config.py"
+    ],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-09-15T16:25:13.208701Z",
+    "updated_at": "2026-09-15T16:25:13.208719Z"
   }
 ]

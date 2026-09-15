@@ -31,5 +31,16 @@
     "domain": "brain.local",
     "deploy_target": "local_service",
     "created_at": "2026-09-05T00:00:00Z"
+  },
+  {
+    "id": "jarvis",
+    "name": "Jarvis (AI Assistant)",
+    "description": "Assistente executivo inteligente com áudio neural e orquestração MCP.",
+    "path": "C:\\dev\\Jarvis",
+    "kind": "internal_product",
+    "prefix": "JRV",
+    "domain": "jarvis.local",
+    "deploy_target": "local_service",
+    "created_at": "2026-09-12T11:00:00Z"
   }
 ]

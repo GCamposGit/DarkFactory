@@ -85,6 +85,7 @@ def test_roadmap_query_service_discovers_all_projects():
     assert "darkfac" in project_ids
     assert "site-ggcampos" in project_ids
     assert "segundo-cerebro" in project_ids
+    assert "jarvis" in project_ids
 
 
 def test_model_usage_ledger_project_segregation():
@@ -199,6 +200,7 @@ def test_darkhub_api_multi_project_integration():
     assert "darkfac" in project_ids
     assert "site-ggcampos" in project_ids
     assert "segundo-cerebro" in project_ids
+    assert "jarvis" in project_ids
 
     # 2. Demand next-id with project_id
     resp_site_id = client.get("/api/demands/next-id?project_id=site-ggcampos")
@@ -221,3 +223,10 @@ def test_darkhub_api_multi_project_integration():
     assert resp_usage.status_code == 200
     usage_data = resp_usage.json()
     assert "total_calls" in usage_data
+
+    # 5. Jarvis tickets in backlog
+    resp_demands = client.get("/api/demands/tickets?project_id=jarvis")
+    assert resp_demands.status_code == 200
+    demands_data = resp_demands.json()
+    assert len(demands_data) >= 1
+    assert any("Groq" in d["title"] for d in demands_data)
