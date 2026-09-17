@@ -71,8 +71,9 @@ def mock_telegram_gateway(tmp_path: Path) -> TelegramGateway:
 # ==============================================================================
 
 
-def test_publish_blog_post_clean(temp_site_dir: Path) -> None:
-    publisher = ContentPublisher(target_site_dir=temp_site_dir, max_slop_score=15.0)
+def test_publish_blog_post_clean(temp_site_dir: Path, tmp_path: Path) -> None:
+    staging_dir = tmp_path / "staged_posts"
+    publisher = ContentPublisher(target_site_dir=temp_site_dir, staging_dir=staging_dir, max_slop_score=15.0)
     post = BlogPost(
         title="Arquitetura de Agentes Autônomos",
         description="Como estruturar um harness determinístico de IA.",
@@ -84,12 +85,29 @@ def test_publish_blog_post_clean(temp_site_dir: Path) -> None:
         content_md="Apresentamos a arquitetura do harness determinístico com validação em três etapas.",
     )
 
-    result = publisher.publish_blog_post(post, auto_scrub=True)
+    # 1. Gate G1: Without explicit human approval, post must be staged
+    result = publisher.publish_blog_post(post, auto_scrub=True, approved=False)
     assert result.success is True
-    assert result.collection == "thinking"
+    assert result.status == "staged_pending_approval"
+    assert result.requires_human_approval is True
     assert Path(result.file_path).is_file()
+    assert Path(result.file_path).parent == staging_dir
 
-    written_text = Path(result.file_path).read_text(encoding="utf-8")
+    # Staged post is not yet in live collection
+    live_file = temp_site_dir / "src" / "content" / "thinking" / "arquitetura-de-agentes-autonomos.md"
+    assert not live_file.is_file()
+
+    # 2. Gate G1 Human Approval: Explicit approval promotes post to production
+    slug = post.slug or "arquitetura-de-agentes-autonomos"
+    app_result = publisher.approve_post(slug=slug, approver="guilherme")
+    assert app_result.success is True
+    assert app_result.status == "published"
+    assert app_result.requires_human_approval is False
+    assert app_result.approver == "guilherme"
+    assert live_file.is_file()
+    assert not Path(result.file_path).is_file()  # Cleaned up from staging
+
+    written_text = live_file.read_text(encoding="utf-8")
     assert 'title: "Arquitetura de Agentes Autônomos"' in written_text
     assert "date: 2026-09-17" in written_text
     assert "featured: true" in written_text
@@ -362,7 +380,7 @@ def test_google_ads_report_and_budget_guardrail(tmp_path: Path) -> None:
 
 
 def test_marketing_cli_publish_and_leads(temp_site_dir: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    # Test CLI post publish
+    # 1. Test CLI post publish (defaults to staging without --approve)
     code = cli_main([
         "publish-post",
         "--title", "Estratégia de Crescimento B2B",
@@ -371,6 +389,20 @@ def test_marketing_cli_publish_and_leads(temp_site_dir: Path, tmp_path: Path, mo
         "--tags", "growth,strategy",
     ])
     assert code == 0
+
+    # 2. Test CLI list drafts (must show staged post)
+    code = cli_main(["list-drafts", "--site-dir", str(temp_site_dir)])
+    assert code == 0
+
+    # 3. Test CLI approve-post (human gate approval)
+    code = cli_main([
+        "approve-post",
+        "--slug", "estrategia-de-crescimento-b2b",
+        "--approver", "owner",
+        "--site-dir", str(temp_site_dir),
+    ])
+    assert code == 0
+    assert (temp_site_dir / "src" / "content" / "thinking" / "estrategia-de-crescimento-b2b.md").is_file()
 
     # Test CLI case publish
     code = cli_main([

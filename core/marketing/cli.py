@@ -40,6 +40,18 @@ def build_parser() -> argparse.ArgumentParser:
     p_post.add_argument("--featured", action="store_true", help="Mark article as featured.")
     p_post.add_argument("--site-dir", default=None, help="Target site root directory (defaults to Atrium).")
     p_post.add_argument("--no-scrub", action="store_true", help="Reject high-slop content instead of auto-scrubbing.")
+    p_post.add_argument("--approve", action="store_true", help="Explicit human approval flag to publish directly to production.")
+    p_post.add_argument("--approver", default="owner", help="Identifier of approving human operator.")
+
+    # Subcommand: approve-post
+    p_app = subparsers.add_parser("approve-post", help="Approve a staged draft blog article and promote to production.")
+    p_app.add_argument("--slug", required=True, help="Slug of the staged post.")
+    p_app.add_argument("--approver", default="owner", help="Identifier of approving operator.")
+    p_app.add_argument("--site-dir", default=None, help="Target site root directory.")
+
+    # Subcommand: list-drafts
+    p_drafts = subparsers.add_parser("list-drafts", help="List staged draft blog posts awaiting human gate.")
+    p_drafts.add_argument("--site-dir", default=None, help="Target site root directory.")
 
     # Subcommand: publish-case
     p_case = subparsers.add_parser("publish-case", help="Publish a case study to Astro content collection.")
@@ -124,9 +136,28 @@ def main(argv: Optional[List[str]] = None) -> int:
         )
         target_dir = Path(args.site_dir) if args.site_dir else None
         publisher = ContentPublisher(target_site_dir=target_dir)
-        res = publisher.publish_blog_post(post, auto_scrub=not args.no_scrub)
+        res = publisher.publish_blog_post(
+            post,
+            auto_scrub=not args.no_scrub,
+            approved=args.approve,
+            approver=args.approver if args.approve else None,
+        )
         print(res.model_dump_json(indent=2))
         return 0 if res.success else 1
+
+    elif args.command == "approve-post":
+        target_dir = Path(args.site_dir) if args.site_dir else None
+        publisher = ContentPublisher(target_site_dir=target_dir)
+        res = publisher.approve_post(slug=args.slug, approver=args.approver)
+        print(res.model_dump_json(indent=2))
+        return 0 if res.success else 1
+
+    elif args.command == "list-drafts":
+        target_dir = Path(args.site_dir) if args.site_dir else None
+        publisher = ContentPublisher(target_site_dir=target_dir)
+        drafts = publisher.list_staged_posts()
+        print(json.dumps(drafts, indent=2))
+        return 0
 
     elif args.command == "publish-case":
         content_md = ""

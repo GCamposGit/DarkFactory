@@ -65,6 +65,9 @@ class PublishResult(BaseModel):
     collection: Literal["thinking", "cases"]
     title: str
     slop_score: float = 0.0
+    status: Literal["published", "staged_pending_approval", "rejected"] = "published"
+    requires_human_approval: bool = False
+    approver: Optional[str] = None
     error_message: Optional[str] = None
 
 
