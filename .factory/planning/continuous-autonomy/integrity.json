@@ -7,7 +7,7 @@
     ".factory/planning/continuous-autonomy/initial-handoff.json": "2725a53c3033457a4b4bd800a9da2efb6fa2db928f441824fd2ccbe37c49b418",
     ".factory/planning/continuous-autonomy/plan.json": "148bdbf9424f2bf7fe6122c3d91a006a954a611c747f26a1be162fac450932dd",
     ".factory/planning/continuous-autonomy/source-review.md": "cbe38636435822b39472f694013a6f3b6625b5eb3602ca45683e16e27eca2ed5",
-    ".factory/planning/continuous-autonomy/verify.py": "68e80babcdc978de205e57b526b2207e0c75c09003bd7a989c695a516f4f49fb",
+    ".factory/planning/continuous-autonomy/verify.py": "3a64e51fc7f809f6a6ddc77c839313f2123dac3ff7600f7c91bd14fdb04ef549",
     ".factory/roadmap/darkfac.json": "020a36ba68d1423c204ca95ccd2d2192a5bab6c652acbd250babdda270aac2c6",
     "docs/CONTINUOUS_AUTONOMY_PLAN_2026-09-18.md": "b077a2420eaa292e7dc90bd22ccaca0044de605a34de098c590da84ed525cb8d",
     "docs/handoffs/continuous-autonomy/CONTRACTS.md": "1cb4365724d4c0a9c7db67faa242d0da7fdd72268824210199553e1cbe372d11",
@@ -45,12 +45,13 @@
     "docs/handoffs/continuous-autonomy/HF-26-02.md": "dcc38ccf4e950f852de7d6f8764fb40d49e1726b093a2be2cdb1d814cc3260a6",
     "docs/handoffs/continuous-autonomy/HF-26-03.md": "c78f59150de4320da4de5a0d6513ff70e5251f074b9f45589605f32a58cf29bd",
     "docs/handoffs/continuous-autonomy/INDEX.md": "d8c7ed383c9622e0ce709b20646de45f171f0699018f14f732de36a6e6f10bce",
-    "docs/handoffs/continuous-autonomy/REVIEW.md": "2f46e90364a6087cd90f568ebbd9f44f79dbc278df3e634aebb57ad4133c9774",
+    "docs/handoffs/continuous-autonomy/REVIEW.md": "c11e38f1e2280e95c64af062ab4dcb152dc7e87e081cfd810d8ce5c61b4c9ebb",
     "docs/handoffs/HF-05.md": "3dc911af90b185b6db241cfd913cf273ab9947526d1fb54e191b903c48ebefc4",
     "docs/handoffs/hf01-claims.json": "657d17cf1838b169836ebcea031268ee894bcea7881a9a877091ac44e4921f41",
     "docs/HYBRID_WORKFLOW_PLAN_2026-09-08.md": "c06fb1a935116a4079ae55f827d53959420dc90c1ebd3f54bde3abde39d49efc",
     "docs/ROADMAP_OPERACIONAL.md": "7760a0e4beba33ab144c9072f5e43d0e20380974ab3893fef7be864bb4fbd047",
     "tests/test_baseline_catalog.py": "1811dbe0d7af930632dc341bbc2778cfaaf31983f5ee31727ec7d8ba31338aa2",
+    "tests/test_melhoria_no_m_dulo_de_dem.py": "5e8da0a949d9e2108823f5460193bdbe2837d4a89438acc4e471531e47391526",
     "tests/test_roadmap.py": "4342904b99a4a273bec69d14cfcbba76d7a9bac7622ec9a2b55cb86b5ddf6197"
   }
 }

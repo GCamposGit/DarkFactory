@@ -20,7 +20,8 @@
     ".factory/worktrees/autonomy-plan.json",
     "tests/test_roadmap.py",
     "tests/test_baseline_catalog.py",
-    "docs/handoffs/hf01-claims.json"
+    "docs/handoffs/hf01-claims.json",
+    "tests/test_melhoria_no_m_dulo_de_dem.py"
   ],
   "ownership_check": "Existing .factory/worktrees/manifest.json leases are completed; no overlapping active writer recorded. Main checkout untouched.",
   "heartbeat": {
@@ -29,5 +30,5 @@
     "phase": "remote_delivery",
     "last_command": "Both final gates passed sequentially"
   },
-  "scope_expansion_reason": "Canonical roadmap gained34 items; update exact expected membership and grounded claim hashes without weakening oracles."
+  "scope_expansion_reason": "Canonical roadmap gained34 items; update exact expected membership and grounded claim hashes without weakening oracles. CI exposed pre-existing machine-specific fixture path; preserve all assertions and use candidate checkout."
 }
