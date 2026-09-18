@@ -11,12 +11,20 @@ import argparse
 import json
 import sys
 from pathlib import Path
-from typing import List, Optional
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
 
-from .budget_manager import PortfolioBudgetManager
-from .models import JobSlotKind, PortfolioEfficiencyReport, utc_now_iso
-from .router_optimizer import PortfolioModelRouter
-from .scheduler import PortfolioScheduler
+try:
+    from .budget_manager import PortfolioBudgetManager
+    from .models import JobSlotKind, PortfolioEfficiencyReport, utc_now_iso
+    from .router_optimizer import PortfolioModelRouter
+    from .scheduler import PortfolioScheduler
+except ImportError:
+    from core.portfolio.budget_manager import PortfolioBudgetManager
+    from core.portfolio.models import JobSlotKind, PortfolioEfficiencyReport, utc_now_iso
+    from core.portfolio.router_optimizer import PortfolioModelRouter
+    from core.portfolio.scheduler import PortfolioScheduler
 
 
 def build_parser() -> argparse.ArgumentParser:

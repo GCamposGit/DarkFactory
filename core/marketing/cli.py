@@ -12,13 +12,22 @@ import json
 import sys
 import uuid
 from pathlib import Path
-from typing import List, Optional
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
 
-from .crm_n8n import LeadManager
-from .google_ads import GoogleAdsManager
-from .models import BlogPost, CaseStudy, GA4Event, LeadCapture
-from .publisher import ContentPublisher
-from .seo_analytics import GA4Client, SEOValidator
+try:
+    from .crm_n8n import LeadManager
+    from .google_ads import GoogleAdsManager
+    from .models import BlogPost, CaseStudy, GA4Event, LeadCapture
+    from .publisher import ContentPublisher
+    from .seo_analytics import GA4Client, SEOValidator
+except ImportError:
+    from core.marketing.crm_n8n import LeadManager
+    from core.marketing.google_ads import GoogleAdsManager
+    from core.marketing.models import BlogPost, CaseStudy, GA4Event, LeadCapture
+    from core.marketing.publisher import ContentPublisher
+    from core.marketing.seo_analytics import GA4Client, SEOValidator
 
 
 def build_parser() -> argparse.ArgumentParser:
