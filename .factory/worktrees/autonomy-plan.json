@@ -7,7 +7,7 @@
   "cwd": "C:/Users/guigc/.codex/worktrees/b305/DarkFac",
   "base_sha": "83e5298eb231599076811802dceac8575c7f6feb",
   "fencing_token": 1,
-  "status": "active",
+  "status": "planning_complete_publication_in_progress",
   "lease_scope": "this planning worktree only; not a runtime dispatch lease",
   "allowed_paths": [
     "docs/CONTINUOUS_AUTONOMY_PLAN_2026-09-18.md",
@@ -24,10 +24,10 @@
   ],
   "ownership_check": "Existing .factory/worktrees/manifest.json leases are completed; no overlapping active writer recorded. Main checkout untouched.",
   "heartbeat": {
-    "timestamp": "2026-09-18T13:55:30Z",
-    "head": "83e5298eb231599076811802dceac8575c7f6feb",
-    "phase": "planning",
-    "last_command": "git rev-list --left-right --count origin/main...HEAD"
+    "timestamp": "2026-09-18T23:51:48.938275+00:00",
+    "head": "13710aa3b9db0b04c177acf6c054f5d333128ea6",
+    "phase": "remote_delivery",
+    "last_command": "Both final gates passed sequentially"
   },
   "scope_expansion_reason": "Canonical roadmap gained34 items; update exact expected membership and grounded claim hashes without weakening oracles."
 }
