@@ -17,8 +17,17 @@
     "docs/ROADMAP_OPERACIONAL.md",
     "docs/HYBRID_WORKFLOW_PLAN_2026-09-08.md",
     "docs/handoffs/HF-05.md",
-    ".factory/worktrees/autonomy-plan.json"
+    ".factory/worktrees/autonomy-plan.json",
+    "tests/test_roadmap.py",
+    "tests/test_baseline_catalog.py",
+    "docs/handoffs/hf01-claims.json"
   ],
   "ownership_check": "Existing .factory/worktrees/manifest.json leases are completed; no overlapping active writer recorded. Main checkout untouched.",
-  "heartbeat": {"timestamp": "2026-09-18T13:55:30Z", "head": "83e5298eb231599076811802dceac8575c7f6feb", "phase": "planning", "last_command": "git rev-list --left-right --count origin/main...HEAD"}
+  "heartbeat": {
+    "timestamp": "2026-09-18T13:55:30Z",
+    "head": "83e5298eb231599076811802dceac8575c7f6feb",
+    "phase": "planning",
+    "last_command": "git rev-list --left-right --count origin/main...HEAD"
+  },
+  "scope_expansion_reason": "Canonical roadmap gained34 items; update exact expected membership and grounded claim hashes without weakening oracles."
 }

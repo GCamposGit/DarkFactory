@@ -40,3 +40,7 @@ O supervisor qualificado deve admitir o contrato; é tarefa técnica, não pergu
 Riscos abertos com destino: API DBOS/locks/schema (HF-05-02); rotas tool-calling (HF-07-01);
 conversões reais por handler (HF-09-01); API/status/digest e rollback por target (HF-12-01);
 capacidade/secret refs instaladas (HF-03-07). Econômico não começa essas folhas antes do binding.
+
+## Compatibilidade de fixtures após projeção
+
+O snapshot default passa de32 para66 itens. Duas expectativas exatas em tests/test_roadmap.py foram atualizadas; asserções adicionais exigem planned e ausência de evidence_refs nos34 itens novos. Atualizados source_hash dos5 claims referentes ao manifesto e ao plano HF (conteúdo histórico preservado, apenas extensão adicionada) e hash fixo do arquivo de claims. Sem alteração no limiar500ms ou critério de entrega. A execução intermediária em73b11bf foi invalidada por mudança de HEAD e não vale como evidência. Gates finais usam candidato congelado.
