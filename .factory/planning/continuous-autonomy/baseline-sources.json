@@ -38,6 +38,14 @@
     ".agents/skills/03-model-router/SKILL.md": "ac611ef98d5101b402c8d9d816b012bac5b5fdab17447c55c9eef0b70d010034",
     ".agents/skills/04-autonomous-piv-loop/SKILL.md": "74acf8394a761580cf2a99258a240b56602ec43aaa1b46bdaad3b32bdd7250bf",
     ".agents/skills/05-validation-harness/SKILL.md": "0fac53b33c0da62640308e8a1fd69eb2f04e52875a9759f96d1a43ea154dfb95",
-    ".agents/skills/06-adversarial-review/SKILL.md": "7a56071c18837492da610884bc00ca6a02ca4ce32fa4cbfc7db7ced5fd208742"
+    ".agents/skills/06-adversarial-review/SKILL.md": "7a56071c18837492da610884bc00ca6a02ca4ce32fa4cbfc7db7ced5fd208742",
+    "core/portfolio/budget_manager.py": "7f5634eda7d93c0b3a3162b83dba74d316146eddc894234214f24f90e3a03a31",
+    "hub/backend/service.py": "9d26e5be548d880689fa7999edfac9a0a6fefaea31bfaa56c3b2811c0ce19ad2",
+    "hub/backend/api.py": "85d4eef366ef2dbbd798f41f8fa7ac50e9ab445fe6a6e44e924f6718c72c2e11",
+    "core/integrations/telegram.py": "e34c0d9cd40b89b068d3b70d175fda230889d9e2ec497a90ced9c2e08c6accb9",
+    "core/demands/specifier.py": "609ae333d08276862fbbb6ccc4fd33edc177187a8873cef99b63eb80fccc4d6c",
+    "core/orchestrator/delivery_executor.py": "7b767b02a3672b7bfcdadb0dd15f068dc40efeaba3be0aec7e0c2d2580bc1181",
+    "core/acceptance/rollback.py": "e12e6e59f0e8703a56f955db7982c20de2ffe40f8ea0217878575e51c0570bb6",
+    "hub/frontend/roadmap.js": "f971a331907f31530f8c13ac1be4f4a7ebb439787b651212ac29a1c4849740e7"
   }
 }
