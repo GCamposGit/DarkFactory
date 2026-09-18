@@ -19,6 +19,7 @@ import logging
 from typing import Dict, Optional
 
 from core.usage.api_credits import ApiCreditsMonitor
+from core.workflow.qualified_routes import RouteDecision, select_route
 from .budget_manager import PortfolioBudgetManager
 from .models import ModelTier, RoutingPolicyResult
 
@@ -151,3 +152,18 @@ class PortfolioModelRouter:
             reason="Paid cloud accounts and OpenRouter credits exhausted; fail-closed to $0 local Ollama.",
             fallback_model=None,
         )
+
+    def select_qualified_route(
+        self,
+        job: Any,
+        catalog: Optional[Any] = None,
+        quota_report: Optional[Any] = None,
+    ) -> RouteDecision:
+        """HF-07-02: Qualified route selection integrating with canonical contracts."""
+        return select_route(
+            job=job,
+            catalog=catalog,
+            quota_report=quota_report,
+            budget_manager=self.budget_manager,
+        )
+
