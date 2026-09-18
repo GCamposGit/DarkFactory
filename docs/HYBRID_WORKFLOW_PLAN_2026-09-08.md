@@ -339,3 +339,7 @@ Primeiro executar HF-01/HF-02 e fechar ferramenta, capacidade cloud, custos e mi
 O dimensionamento será revisto após o spike. Como estimativa de planejamento, a onda 1 pode exigir 4–8 semanas de calendário com agentes e disponibilidade do owner para acessos iniciais; isso não substitui os gates nem considera trabalho já entregue como reimplementação. A onda 2 não recebe prazo antes da demanda real.
 
 Este documento registra as preferências explícitas desta sessão e é a fonte proposta dos IDs HF. O [índice operacional](ROADMAP_OPERACIONAL.md) e o [plano DF](DEVELOPMENT_PLAN_2026-09-05.md) apontam para esta extensão; a ingestão funcional do novo backlog continua planejada. Nenhuma instalação de n8n foi declarada realizada: a localização da instância permanece não confirmada e a sessão Dokploy disponível exige autenticação.
+
+## Extensão de composição — 18/09/2026
+
+O [plano de autonomia contínua](CONTINUOUS_AUTONOMY_PLAN_2026-09-18.md) registra ajustes de integração das capacidades existentes, com [33 handoffs](handoffs/continuous-autonomy/INDEX.md). Não reentrega HF-01–25. Reutiliza HF-05-02 e introduz marco HF-26 e subtickets sem colisão no manifesto `.factory/roadmap/darkfac.json`, já consumido pelo Hub. As tabelas históricas acima e seus estados são preservados; conclusão documental de componente não comprova operação contínua. O DAG completo está em `.factory/planning/continuous-autonomy/plan.json`.

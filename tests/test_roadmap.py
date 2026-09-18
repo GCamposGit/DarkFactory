@@ -39,6 +39,45 @@ from hub.backend.main import app
 from hub.backend.service import HubService
 
 
+# Exact expected IDs of the 2026-09-18 planning extension; independent of its loader.
+CONTINUOUS_AUTONOMY_IDS = {
+    'HF-26',
+    'HF-26-01',
+    'HF-26-02',
+    'HF-26-03',
+    'HF-05-02',
+    'HF-05-03',
+    'HF-05-04',
+    'HF-05-05',
+    'HF-05-06',
+    'HF-23-01',
+    'HF-08-01',
+    'HF-08-02',
+    'HF-08-03',
+    'HF-08-04',
+    'HF-08-05',
+    'HF-07-01',
+    'HF-07-02',
+    'HF-07-03',
+    'HF-09-01',
+    'HF-09-02',
+    'HF-11-01',
+    'HF-12-01',
+    'HF-12-02',
+    'HF-12-03',
+    'HF-12-04',
+    'HF-10-01',
+    'HF-10-02',
+    'HF-25-01',
+    'HF-13-01',
+    'HF-13-02',
+    'HF-15-01',
+    'HF-03-07',
+    'HF-03-08',
+    'HF-15-02',
+}
+
+
 def make_item(
     item_id: str,
     *,
@@ -124,19 +163,22 @@ def test_repository_sources_compile_with_stable_hash() -> None:
 
     expected_rm_ids = {f"RM-{number:02d}" for number in range(1, 10)}
     expected_df_ids = {f"DF-{number:02d}" for number in range(1, 24)}
-    assert {item.id for item in first.items} == expected_rm_ids | expected_df_ids
+    assert {item.id for item in first.items} == expected_rm_ids | expected_df_ids | CONTINUOUS_AUTONOMY_IDS
     assert {item.id for item in first.items if item.id.startswith("DF-")} == expected_df_ids
     assert first.snapshot_hash == second.snapshot_hash
     assert first.snapshot_id == second.snapshot_id
     assert direct_first.snapshot_hash == direct_second.snapshot_hash
-    assert first.stats.total_items == 32
-    assert first.stats.confirmed_items == 32
+    assert first.stats.total_items == 66
+    assert first.stats.confirmed_items == 66
     assert {state.source_id for state in first.sources_consulted} == {
         "approved-roadmap",
         "development-plan",
     }
     assert not any(issue.code == "orphan_dependency" for issue in first.issues)
     assert not first.sources_unavailable
+    new_items = [item for item in first.items if item.id in CONTINUOUS_AUTONOMY_IDS]
+    assert all(item.delivery_status == DeliveryStatus.PLANNED for item in new_items)
+    assert all(not item.evidence_refs for item in new_items)
 
 
 def test_development_plan_source_parses_ticket_dependencies() -> None:
@@ -352,4 +394,4 @@ def test_cli_and_library_expose_the_same_snapshot_hash() -> None:
         *(f"RM-{number:02d}" for number in range(1, 10)),
         *(f"DF-{number:02d}" for number in range(1, 24)),
     }
-    assert {item["id"] for item in payload["items"]} == expected_ids
+    assert {item["id"] for item in payload["items"]} == expected_ids | CONTINUOUS_AUTONOMY_IDS

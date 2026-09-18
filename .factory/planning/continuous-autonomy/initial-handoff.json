@@ -1,0 +1,133 @@
+{
+  "schema_version": 1,
+  "ticket_id": "HF-26-01",
+  "parent_id": "HF-26",
+  "objective": "Resolvedor puro de política efetiva",
+  "origin": "user-demand",
+  "plan_version": "1.0",
+  "planner_id": "codex-planner-01a0b4c8",
+  "planner_tier": "high",
+  "approval_reference": "supervisor:continuous-autonomy:HF-26-01:v1:pending",
+  "baseline_sha": "83e5298eb231599076811802dceac8575c7f6feb",
+  "grill": {
+    "schema_version": 1,
+    "demand_id": "HF-26-01",
+    "demand_version": 1,
+    "intent_summary": "Resolver política por projeto sem novas aprovações técnicas e sem ampliar grants.",
+    "known_facts": [
+      {
+        "fact_id": "owner-intent",
+        "statement": "Planejamento e handoff autorizados; intenção completa na tarefa de origem.",
+        "source": "user-demand",
+        "locator": "01a0b49f-68a7-7af0-9367-113ecd1b14c1"
+      }
+    ],
+    "decisions": [],
+    "assumptions": [
+      "Função pura nova; binding do store confiável no sucessor."
+    ],
+    "pending_questions": [],
+    "example_criteria": [
+      "Grant exato permite; deny, pausa, teto e aceite ausente bloqueiam."
+    ],
+    "ready_for_spec": true,
+    "readiness_justification": "Grill satisfeito por contexto; nenhuma lacuna exclusiva do owner.",
+    "created_at": "2026-09-18T18:40:45.733403Z",
+    "updated_at": "2026-09-18T18:40:45.733403Z"
+  },
+  "environment": {
+    "schema_version": 1,
+    "environment_ref": "local-policy-unit",
+    "ticket_id": "HF-26-01",
+    "kind": "real_lab",
+    "tools": [
+      {
+        "name": "python",
+        "version": "3.12+",
+        "source": "observed local Python 3.12.10; revalidate executor"
+      }
+    ],
+    "system": "Windows ou Linux; Python 3.12+",
+    "architecture": "host local; sem dependência de GPU",
+    "services": [],
+    "accounts": [],
+    "secret_refs": [],
+    "permission_scopes": [],
+    "required_env_vars": [],
+    "endpoints": [],
+    "ports": [],
+    "connection_origins": [
+      "worktree exclusiva"
+    ],
+    "network_policy": "Sem rede na função; gates existentes podem sondar serviços opcionais conforme configuração.",
+    "proxy": null,
+    "tailscale": null,
+    "volumes": [
+      "workspace e tmp exclusivo"
+    ],
+    "quotas": [
+      "Sem custo externo autorizado por esta unidade"
+    ],
+    "worker_identity": {
+      "subject": "executor-to-be-bound",
+      "role": "implementer",
+      "host": null,
+      "account_ref": null
+    },
+    "installation": [
+      "Usar dependências existentes; Python 3.12.10 e pytest 9.1.1 observados nesta sessão."
+    ],
+    "probes": [
+      "python -m pytest tests/test_workflow_contracts.py --collect-only -q"
+    ],
+    "rollback": [
+      "Revert dos dois arquivos novos."
+    ],
+    "cleanup": [],
+    "target_differences": [
+      "Validação local não certifica integração do loader nem política ativa."
+    ],
+    "observed_at": "2026-09-18T18:40:45.733403Z"
+  },
+  "environment_evidence": [],
+  "manual_dependencies": [],
+  "required_evidence": [],
+  "state": "ready_for_handoff",
+  "allowed_paths": [
+    "core/workflow/effective_policy.py",
+    "tests/test_effective_policy.py"
+  ],
+  "read_only_paths": [
+    "MISSION.md",
+    "FACTORY_RULES.md",
+    "AGENTS.md",
+    "core/workflow/readiness.py",
+    "core/workflow/verification.py"
+  ],
+  "non_goals": [
+    "Alterar política ativa, HTTP, merge ou implantar."
+  ],
+  "acceptance_criteria": [
+    "Grant exato autoriza; deny, pausa, revogação, teto, receipt inválido e aceite comercial ausente vencem grant.",
+    "Tabela completa de precedência e Decimal/UTC no handoff normativo."
+  ],
+  "validate_commands": [
+    "python -m pytest tests/test_effective_policy.py -v",
+    "python core/harness/runner.py --quick",
+    "python -m pytest tests -v --ignore=tests/test_canaletto.py"
+  ],
+  "trigger_events": [
+    "plan.admitted"
+  ],
+  "successor_event": "HF-26-01.completed",
+  "conflict_keys": [
+    "core/workflow/effective_policy.py",
+    "tests/test_effective_policy.py"
+  ],
+  "resource_requirements": [
+    "Uma worktree exclusiva e executor econômico qualificado"
+  ],
+  "retry_policy": "Duas correções focais sem progresso devolvem ao high; heartbeat10s lease45s no executor.",
+  "resume_strategy": "Revalidar baseline e continuar worktree com owner vigente.",
+  "rollback_plan": "Revert seletivo dos dois arquivos; nenhum efeito externo."
+}
