@@ -326,7 +326,13 @@
       "state_rationale": "Planejado; marco de composição; implementação não iniciada; operacionalmente não verificado. Registro não autoriza despacho.",
       "horizon": "now",
       "confidence": "high",
-      "dependencies": [],
+      "dependencies": [
+        {
+          "item_id": "HF-15-02",
+          "type": "requires",
+          "label": "Marco só fecha após aceitação operacional completa"
+        }
+      ],
       "tags": [
         "continuous-autonomy",
         "planning-only",
