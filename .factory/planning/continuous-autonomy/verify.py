@@ -14,7 +14,7 @@ from core.roadmap.service import build_repository_roadmap_service
 PACKAGE = ROOT / '.factory/planning/continuous-autonomy'
 DOCS = ROOT / 'docs/handoffs/continuous-autonomy'
 def digest(path: Path) -> str:
-    return hashlib.sha256(path.read_bytes()).hexdigest()
+    return hashlib.sha256(path.read_text(encoding='utf-8-sig').encode('utf-8')).hexdigest()
 def artifacts() -> list[Path]:
     paths = list(DOCS.glob('*.md')) + [ROOT/'docs/CONTINUOUS_AUTONOMY_PLAN_2026-09-18.md',ROOT/'docs/ROADMAP_OPERACIONAL.md',ROOT/'docs/HYBRID_WORKFLOW_PLAN_2026-09-08.md',ROOT/'docs/handoffs/HF-05.md',ROOT/'.factory/roadmap/darkfac.json',PACKAGE/'plan.json',PACKAGE/'initial-handoff.json',PACKAGE/'source-review.md',PACKAGE/'baseline-sources.json',Path(__file__)]
     return sorted(paths)
@@ -44,6 +44,10 @@ def main() -> int:
             visit(dep)
         visiting.remove(id); visited.add(id)
     for id in sorted(ids):visit(id)
+    missing_baseline_paths=[]
+    baseline_sources=json.loads((PACKAGE/'baseline-sources.json').read_text(encoding='utf-8'))['sources']
+    def ancestors(id):
+        return {dep for direct in by_id[id]['depends_on'] for dep in ({direct} | ancestors(direct))}
     for u in units:
         assert len(u['allowed_paths'])<=4
         assert (ROOT/u['handoff_ref']).is_file()
@@ -52,7 +56,9 @@ def main() -> int:
         if u['new_test']:assert u['new_test'] in u['new_paths'], 'new test must be marked new'
         for path in u['allowed_paths']:
             assert not Path(path).is_absolute() and '..' not in Path(path).parts
-            if path not in u['new_paths']:assert (ROOT/path).exists(), 'existing path missing: '+path
+            if path not in u['new_paths'] and not (ROOT/path).exists():
+                assert path in baseline_sources and 'HF-26-03' in ancestors(u['ticket_id']), 'unbound missing source: '+path
+                missing_baseline_paths.append({'ticket_id':u['ticket_id'],'path':path,'blocking_binding':'HF-26-03'})
     h=WorkflowHandoff.model_validate_json((PACKAGE/'initial-handoff.json').read_text(encoding='utf-8'))
     result=ReadinessGate().evaluate(h)
     assert not result.eligible, 'no trusted context must not authorize dispatch'
@@ -80,11 +86,11 @@ def main() -> int:
     manifest_path=PACKAGE/'integrity.json'
     actual={p.relative_to(ROOT).as_posix():digest(p) for p in artifacts()}
     if args.write_manifest:
-        manifest_path.write_text(json.dumps(dict(schema_version='1',purpose='integrity_not_approval',artifacts=actual),ensure_ascii=False,indent=2)+'\n',encoding='utf-8')
+        manifest_path.write_text(json.dumps(dict(schema_version='1',purpose='integrity_not_approval',hash_mode='UTF-8 text normalized LF without BOM',artifacts=actual),ensure_ascii=False,indent=2)+'\n',encoding='utf-8')
     else:
         expected=json.loads(manifest_path.read_text(encoding='utf-8'))['artifacts']
         assert actual==expected, 'integrity mismatch'
-    result=dict(units=len(units),edges=sum(len(u['depends_on']) for u in units),projected_new_items=len(ids)+1,links_checked=checked_links,new_scope_issues=new_issues,ready_without_dependencies=[u['ticket_id'] for u in units if not u['depends_on']],workflow_handoff_schema='valid',gate_without_context='correctly_rejected',runtime_approval='not_attested',scope='documentary_not_operational')
+    result=dict(units=len(units),edges=sum(len(u['depends_on']) for u in units),projected_new_items=len(ids)+1,links_checked=checked_links,new_scope_issues=new_issues,ready_without_dependencies=[u['ticket_id'] for u in units if not u['depends_on']],workflow_handoff_schema='valid',gate_without_context='correctly_rejected',runtime_approval='not_attested',missing_baseline_paths=missing_baseline_paths,scope='documentary_not_operational')
     print(json.dumps(result,ensure_ascii=False,indent=2))
     return 0
 if __name__=='__main__':
