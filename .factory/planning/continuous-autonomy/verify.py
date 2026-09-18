@@ -81,6 +81,7 @@ def main() -> int:
         assert not item.evidence_refs
         assert sorted(d.item_id for d in item.dependencies)==sorted(u['depends_on'])
     assert projected['HF-26'].delivery_status.value=='planned'
+    assert [d.item_id for d in projected['HF-26'].dependencies]==['HF-15-02']
     new_issues=[i.model_dump(mode='json') for i in snapshot.issues if set(i.item_ids)&(ids|{'HF-26'})]
     assert not [i for i in new_issues if i['code'] in {'causal_cycle','orphan_dependency','conflicting_state'}], new_issues
     manifest_path=PACKAGE/'integrity.json'
