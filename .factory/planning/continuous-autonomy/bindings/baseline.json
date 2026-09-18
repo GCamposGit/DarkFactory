@@ -1,0 +1,119 @@
+{
+  "schema_version": "1.0",
+  "ticket_id": "HF-26-03",
+  "purpose": "Reconcile local baseline and remote origin/main ancestry, contract hashes and unintegrated commits",
+  "local_sha": "3dea0e23fb70ffff05c5c2e87cecc3a891750f6f",
+  "baseline_plan_sha": "83e5298eb231599076811802dceac8575c7f6feb",
+  "remote_main_sha": "00133f6093d0b78090b04deacc61c82dcee5abb7",
+  "git_ancestry_verified": true,
+  "ancestry_relation": "remote_main is strict ancestor of local HEAD",
+  "unintegrated_commits_count": 7,
+  "unintegrated_commits": [
+    {
+      "sha": "b0c31d076525b7ed8e5e79ab8c5877fdd491fcd8",
+      "milestone": "HF-22",
+      "title": "feat(knowledge): implement Segundo Cerebro MCP client, fail-closed provenance, and HF-22 handoff",
+      "feature_area": "knowledge",
+      "remote_impact": "Segundo Cerebro MCP client; does not block core workflow runtime",
+      "blocks_dependent_units": []
+    },
+    {
+      "sha": "17305371da354052f828807e0035f4e2addf15a9",
+      "milestone": "HF-21",
+      "title": "feat(marketing): implement HF-21 enterprise brand, CMS, CRM, SEO, GA4 and Google Ads engine",
+      "feature_area": "marketing",
+      "remote_impact": "Marketing engine; strictly decoupled from core autonomy",
+      "blocks_dependent_units": []
+    },
+    {
+      "sha": "3f2a832071fc63f154d9529b8bd18915862e999d",
+      "milestone": "HF-21",
+      "title": "feat(marketing): enforce mandatory Gate G1 human approval before publishing blog posts to production",
+      "feature_area": "marketing",
+      "remote_impact": "Marketing publication gate; decoupled from factory execution",
+      "blocks_dependent_units": []
+    },
+    {
+      "sha": "8ca2cf171214c081320ede864d04314f2cb08f1f",
+      "milestone": "HF-23",
+      "title": "feat(portfolio): implement HF-23 portfolio efficiency, capacity slots, budgets, and paid-first routing",
+      "feature_area": "portfolio",
+      "remote_impact": "Portfolio capacity slots and budget manager",
+      "blocks_dependent_units": ["HF-23-01", "HF-05-06"]
+    },
+    {
+      "sha": "10aaaf707ee0bb8e20c4e11a64e88c05d13c2cca",
+      "milestone": "HF-25",
+      "title": "feat(evolution): implement HF-25 factory self-evolution and cross-project reusable catalog",
+      "feature_area": "evolution",
+      "remote_impact": "Factory evolution engine and reusable catalog",
+      "blocks_dependent_units": ["HF-25-01"]
+    },
+    {
+      "sha": "d58c06a126e6d5cecaab01991bdfa33ab94231d6",
+      "milestone": "HF-24",
+      "title": "feat(enterprise): implement HF-24 enterprise profile, residency, cryptographic audit chain and SLA",
+      "feature_area": "enterprise",
+      "remote_impact": "Enterprise SLA and audit chain; decoupled from core runtime",
+      "blocks_dependent_units": []
+    },
+    {
+      "sha": "83e5298eb231599076811802dceac8575c7f6feb",
+      "milestone": "HF-23",
+      "title": "feat(portfolio): integrate live activation tests and runner for ATRIUM and JARVIS",
+      "feature_area": "portfolio",
+      "remote_impact": "Multi-project live runner integration; local activation verification",
+      "blocks_dependent_units": ["HF-03-08"]
+    }
+  ],
+  "contract_hashes": {
+    "core/workflow/contracts.py": "13b77111960cbd7d5716e3b93953fb956fa0436630389daa283af676ca9b65db",
+    "core/workflow/effective_policy.py": "5403be7589cb7a39b2e8152414694b04e990f9a178a3a0ff5d33acf55619b774",
+    "core/workflow/policy_binding.py": "884e333451cc961dc7740166c168cb841737163a37fffc33229ffe22d9eecc81",
+    "core/orchestrator/delivery.py": "bd4e63d8f6ed084dfc3d3ad624e7e5680e9145572dde22ef5b4b772f4ef25ea6",
+    "core/workflow/readiness.py": "f6e9bc17a84fd8852a8eee5cd2e63f0a36a55189acf70500c4840e90eac4d038",
+    "core/workflow/verification.py": "2bf281835520a0632ac5a1f74c740d78625cf546af6c63aba951321d1fe52fcc",
+    "core/workflow/runtime.py": "13bdc344e70ba40b7ceb583d667040a4c7a73df24bce80d887f694a0188e4055"
+  },
+  "compatible_units": [
+    "HF-26-01",
+    "HF-26-02",
+    "HF-26-03",
+    "HF-05-02",
+    "HF-05-03",
+    "HF-05-04",
+    "HF-05-05",
+    "HF-08-01",
+    "HF-08-02",
+    "HF-08-03",
+    "HF-08-04",
+    "HF-08-05",
+    "HF-07-01",
+    "HF-07-02",
+    "HF-07-03",
+    "HF-09-01",
+    "HF-09-02",
+    "HF-11-01",
+    "HF-12-01",
+    "HF-12-02",
+    "HF-12-03",
+    "HF-12-04",
+    "HF-10-01",
+    "HF-10-02",
+    "HF-13-01",
+    "HF-13-02",
+    "HF-15-01"
+  ],
+  "integration_units": [
+    "HF-23-01",
+    "HF-25-01",
+    "HF-05-06",
+    "HF-03-07",
+    "HF-03-08",
+    "HF-15-02"
+  ],
+  "selective_handoff_policy": {
+    "rule": "Do not publish incidental inheritance; remote absence of portfolio/evolution blocks only their direct and transitive dependents.",
+    "unintegrated_blocking_rule": "HF-23-01 requires commit 8ca2cf1 on target host; HF-25-01 requires commit 10aaaf7 on target host; general runtime and policy units proceed with local contract verification."
+  }
+}
