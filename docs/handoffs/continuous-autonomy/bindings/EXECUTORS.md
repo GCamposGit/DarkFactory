@@ -49,15 +49,15 @@ O presente documento estabelece o **binding formal e determinístico de executor
 * **Tipo de Autenticação**: `ANTHROPIC_API_KEY` (SecretReference: `env:ANTHROPIC_API_KEY`)
 * **Mecanismo de Tool-Calling**: Native Tool Use (`text_editor`, `bash`, schemas JSON)
 * **Modelos**:
-  * `anthropic/claude-3.7-sonnet` (`claude-3-7-sonnet`): Modelo de fronteira para planejamento arquitetural superior, PRDs, definição de non-goals e decomposição de DAGs complexos com Thinking tokens.
+  * `anthropic/claude-opus-5` (`claude-opus-5`): Modelo de fronteira para planejamento arquitetural superior, PRDs, definição de non-goals e decomposição de DAGs complexos com Thinking tokens.
 
 #### C. OpenRouter Gateway
 * **Host**: `https://openrouter.ai/api/v1`
 * **Tipo de Autenticação**: `OPENROUTER_API_KEY` (SecretReference: `env:OPENROUTER_API_KEY`)
 * **Mecanismo de Tool-Calling**: OpenAI Function Calling Compatible
 * **Modelos**:
-  * `deepseek/deepseek-r1` (`deepseek-r1`): 671B MoE. Raciocínio matemático, invariantes de concorrência e oráculos formais com custo extremamente competitivo.
-  * `deepseek/deepseek-v4.1-flash` (`deepseek-v4.1-flash`): Contexto de 1M de tokens, ideal para revisão independente em nuvem com identidade isolada (cross-model family).
+  * `deepseek/deepseek-v4-pro` (`deepseek-v4-pro`): Raciocínio estruturado, análise de concorrência e síntese lógica de alta capacidade em nuvem com excelente custo-benefício.
+  * `deepseek/deepseek-v4.1-flash` (`deepseek-v4.1-flash`): Contexto de 1M de tokens, ideal para revisão independente em nuvem com identidade isolada (cross-model family) e líder absoluto da fronteira de Pareto ($0.15/M).
 
 #### D. xAI Grok Engine
 * **Host**: `https://api.x.ai/v1`
@@ -79,8 +79,8 @@ A tabela a seguir consolida a matriz operacional de custos (por 1k tokens) e cap
 | `gpt-review:latest` | GPT-OSS | 16.384 tokens | **$0,00000** | **$0,00000** | $0,00000 | ~50 tps | Sim (Diff/Linter) |
 | `google/gemini-3.8-flash` | Gemini | 1.048.576 tokens | $0,00015 | $0,00060 | $0,0000375 | ~150 tps | Sim (Native MCP) |
 | `google/gemini-3.1-pro` | Gemini | 1.048.576 tokens | $0,00125 | $0,00500 | $0,0003125 | ~65 tps | Sim (Native MCP) |
-| `anthropic/claude-3.7-sonnet` | Claude | 200.000 tokens | $0,00300 | $0,01500 | $0,0003000 | ~75 tps | Sim (Native Tools) |
-| `deepseek/deepseek-r1` | DeepSeek | 163.840 tokens | $0,00055 | $0,00219 | $0,0001400 | ~40 tps | Sim (OpenAI JSON) |
+| `anthropic/claude-opus-5` | Claude | 200.000 tokens | $0,00500 | $0,02500 | $0,0005000 | ~54 tps | Sim (Native Tools) |
+| `deepseek/deepseek-v4-pro` | DeepSeek | 256.000 tokens | $0,00045 | $0,00180 | $0,0000500 | ~90 tps | Sim (OpenAI JSON) |
 | `deepseek/deepseek-v4.1-flash`| DeepSeek | 1.048.576 tokens | $0,00015 | $0,00060 | $0,0000375 | ~110 tps | Sim (OpenAI JSON) |
 | `xai/grok-4.6` | Grok | 131.072 tokens | $0,00200 | $0,01000 | $0,0005000 | ~85 tps | Sim (Web & Tools) |
 
@@ -100,7 +100,7 @@ graph TD
     end
 
     subgraph "Papel: high_architecture"
-        A1["anthropic/claude-3.7-sonnet (Planejamento Superior)"] -->|Fallback 1| A2["deepseek/deepseek-r1 (Raciocínio Nuvem)"]
+        A1["anthropic/claude-opus-5 (Planejamento Superior)"] -->|Fallback 1| A2["deepseek/deepseek-v4-pro (Raciocínio Nuvem)"]
         A2 -->|Fallback 2| A3["google/gemini-3.1-pro (Arquitetura Multi-Passo)"]
         A3 -->|Sem Cotas| BL["Bloqueio em WAITING_RESOURCE (Anti-Degradação)"]
     end
@@ -118,14 +118,14 @@ graph TD
 
 ### 4.2. Papel `high_architecture`
 * **Atribuição**: Elaboração de PRDs, handoffs de arquitetura, resolução de DAGs de dependências, especificação de interfaces e protocolos.
-* **Modelo Primário**: `anthropic/claude-3.7-sonnet`.
-* **Ordem de Failover**: `anthropic/claude-3.7-sonnet` → `deepseek/deepseek-r1` → `google/gemini-3.1-pro`.
+* **Modelo Primário**: `anthropic/claude-opus-5`.
+* **Ordem de Failover**: `anthropic/claude-opus-5` → `deepseek/deepseek-v4-pro` → `google/gemini-3.1-pro`.
 * **Regra Anti-Degradação**: **Nunca rebaixar para `economy`**. Caso todas as opções estejam com cotas esgotadas, suspender o job em `WAITING_RESOURCE` até o próximo reset de janela.
 
 ### 4.3. Papel `verifier` / `independent_review`
 * **Atribuição**: Revisão independente de código, auditoria adversarial de segurança e geração de `EvidenceReceipt`.
 * **Isolamento Mandatório de Família**: O revisor **DEVE pertencer a uma família de modelos distinta do implementador**.
-  * Se o implementador foi `anthropic/claude-3.7-sonnet`, o revisor deve ser `gpt-review:latest` ou `deepseek/deepseek-v4.1-flash`.
+  * Se o implementador foi `anthropic/claude-opus-5`, o revisor deve ser `gpt-review:latest` ou `deepseek/deepseek-v4.1-flash`.
   * Se o implementador foi `qwen-fast`, o revisor pode ser `gpt-review:latest` ou `google/gemini-3.8-flash`.
 
 ---
@@ -138,7 +138,7 @@ graph TD
 
 ### 5.2. Proibição Estrita de Rebaixamento Silencioso (Anti-Degradação)
 * Se um ticket requer `high_architecture` e a conta Anthropic atingir limite de cota horária:
-  1. O sistema tenta acionar `deepseek-r1` via OpenRouter (com reserva prévia).
+  1. O sistema tenta acionar `deepseek-v4-pro` via OpenRouter (com reserva prévia).
   2. Caso indisponível, tenta `gemini-pro`.
   3. Caso todos falhem, **não há fallback para `qwen-fast`**. O executor emite status `WAITING_RESOURCE`, registra o evento no ledger e agenda um wakeup automático para a expiração do reset da cota mais próxima.
 

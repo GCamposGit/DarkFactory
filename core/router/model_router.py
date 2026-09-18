@@ -4,7 +4,7 @@ Model Router CLI & Engine (2026 Edition)
 Routes tasks dynamically between:
 - Local Ollama Cluster (qwen-fast, qwen-deep, gpt-review) -> Cost $0, Latency 0ms
 - Antigravity Native Engine (Gemini 3.8 Flash) -> High context, 1M+ tokens
-- Cloud Frontier Tier (Grok 4.6, Claude 3.7 Sonnet, DeepSeek-R1, Qwen3-Max)
+- Cloud Frontier Tier (Grok 4.6, Claude Opus 5, GPT-6 Astra, DeepSeek V4.1 Flash)
 """
 
 import sys
@@ -62,23 +62,22 @@ MODEL_MATRIX = {
     "code_scout": {
         "primary": "gemini-3.8-flash",
         "primary_provider": "antigravity",
-        "secondary": "claude-3.7-sonnet",
+        "secondary": "claude-opus-5",
         "secondary_provider": "anthropic",
         "local_fallback": "qwen-code-fast:latest",
-        "notes": "Gemini 3.8 Flash for repository tree inspection & AST checks; Claude 3.7 Sonnet for component reuse safety & license audits."
+        "notes": "Gemini 3.8 Flash for repository tree inspection & AST checks; Claude Opus 5 for component reuse safety & license audits."
     },
     "architecture": {
-
-        "primary": "claude-3.7-sonnet",
+        "primary": "claude-opus-5",
         "primary_provider": "anthropic",
-        "secondary": "deepseek-r1",
-        "secondary_provider": "siliconflow",
+        "secondary": "gpt-6-astra",
+        "secondary_provider": "openai",
         "local_fallback": "qwen-code-deep:latest",
-        "notes": "Claude 3.7 Sonnet w/ Thinking for PRD and strict non-goals; DeepSeek-R1 for cost-effective deep reasoning."
+        "notes": "Claude Opus 5 / GPT-6 Astra for PRD and strict non-goals; DeepSeek-V4.1-Flash for cost-effective deep reasoning."
     },
     "coding": {
         "high_complexity": {
-            "primary": "claude-3.7-sonnet",
+            "primary": "claude-opus-5",
             "primary_provider": "anthropic",
             "secondary": "deepseek-v4-pro",
             "secondary_provider": "siliconflow",
@@ -116,12 +115,12 @@ MODEL_MATRIX = {
         "notes": "Cross-model review rule: The reviewer MUST belong to a different model family than the implementer. DeepSeek-V4.1-Flash via OpenRouter as primary cloud reviewer (1M context, $0.15/M); Grok-4.6 as alt."
     },
     "content_generation": {
-        "primary": "claude-3.7-sonnet",
+        "primary": "claude-opus-5",
         "primary_provider": "anthropic",
         "secondary": "gemini-3.8-flash",
         "secondary_provider": "antigravity",
         "local_fallback": "qwen-code-deep:latest",
-        "notes": "Claude 3.7 Sonnet for high-signal, anti-slop prose; Gemini 3.8 Flash for high-speed drafting; Qwen-deep for $0 local offline."
+        "notes": "Claude Opus 5 for high-signal, anti-slop prose; Gemini 3.8 Flash for high-speed drafting; Qwen-deep for $0 local offline."
     },
     "anti_slop_scrub": {
         "primary": "gpt-oss-clean:latest",
@@ -174,13 +173,13 @@ _QUOTA_FAILOVER_MODELS = {
     "antigravity": "gemini-3.8-flash",
     "google": "gemini-3.8-flash",
     "xai": "grok-4.6",
-    "anthropic": "claude-3.7-sonnet",
+    "anthropic": "claude-opus-5",
     "claude_code": "opus-5.1",
     "openai": "gpt-6-astra",
     "codex": "gpt-6-astra",
     "deepseek": "deepseek/deepseek-v4.1-flash",   # openrouter: V4.1-Flash replaces V4-Pro as default DeepSeek failover
     "openrouter": "deepseek/deepseek-v4.1-flash",  # explicit openrouter failover
-    "siliconflow": "deepseek-r1",                   # siliconflow still routes to R1 (reasoning tasks)
+    "siliconflow": "deepseek/deepseek-v4.1-flash", # siliconflow routes to Pareto leader V4.1-Flash
     "qwen": "qwen3-8-flash-next",
 }
 

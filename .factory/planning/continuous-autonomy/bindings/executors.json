@@ -174,14 +174,14 @@
       "status": "active",
       "models": [
         {
-          "model_id": "anthropic/claude-3.7-sonnet",
-          "alias": "claude-3-7-sonnet",
+          "model_id": "anthropic/claude-opus-5",
+          "alias": "claude-opus-5",
           "family": "claude",
           "parameter_size": "frontier_high",
           "context_window": 200000,
-          "cost_per_1k_input_usd": 0.003,
-          "cost_per_1k_output_usd": 0.015,
-          "cost_per_1k_cache_read_usd": 0.0003,
+          "cost_per_1k_input_usd": 0.005,
+          "cost_per_1k_output_usd": 0.025,
+          "cost_per_1k_cache_read_usd": 0.0005,
           "supported_roles": [
             "high_architecture"
           ],
@@ -195,7 +195,7 @@
           ],
           "default_reasoning_effort": "high",
           "max_reasoning_effort": "max",
-          "typical_throughput_tps": 75.0
+          "typical_throughput_tps": 54.0
         }
       ]
     },
@@ -215,26 +215,28 @@
       "status": "active",
       "models": [
         {
-          "model_id": "deepseek/deepseek-r1",
-          "alias": "deepseek-r1",
+          "model_id": "deepseek/deepseek-v4-pro",
+          "alias": "deepseek-v4-pro",
           "family": "deepseek",
-          "parameter_size": "671B MoE",
-          "context_window": 163840,
-          "cost_per_1k_input_usd": 0.00055,
-          "cost_per_1k_output_usd": 0.00219,
-          "cost_per_1k_cache_read_usd": 0.00014,
+          "parameter_size": "frontier_balanced",
+          "context_window": 256000,
+          "cost_per_1k_input_usd": 0.00045,
+          "cost_per_1k_output_usd": 0.0018,
+          "cost_per_1k_cache_read_usd": 0.00005,
           "supported_roles": [
-            "high_architecture"
+            "high_architecture",
+            "coding"
           ],
-          "primary_use": "Raciocínio complexo em nuvem, verificação de invariantes formais e oráculos matemáticos/algorítmicos",
+          "primary_use": "Raciocínio complexo e coding em nuvem, síntese lógica e verificação algorítmica de alta capacidade",
           "tool_calling_supported": true,
           "tool_capabilities": [
             "read_file",
+            "write_file",
             "run_command"
           ],
           "default_reasoning_effort": "high",
           "max_reasoning_effort": "max",
-          "typical_throughput_tps": 40.0
+          "typical_throughput_tps": 90.0
         },
         {
           "model_id": "deepseek/deepseek-v4.1-flash",
@@ -324,15 +326,15 @@
       "description": "Planejamento arquitetural superior, PRDs, contratos de interface, design de DAGs e decisões de alto impacto",
       "cost_floor_usd": 0.0,
       "strict_floor_enforcement": true,
-      "primary_model": "anthropic/claude-3.7-sonnet",
+      "primary_model": "anthropic/claude-opus-5",
       "allowed_models": [
-        "anthropic/claude-3.7-sonnet",
-        "deepseek/deepseek-r1",
+        "anthropic/claude-opus-5",
+        "deepseek/deepseek-v4-pro",
         "google/gemini-3.1-pro"
       ],
       "fallback_order": [
-        "anthropic/claude-3.7-sonnet",
-        "deepseek/deepseek-r1",
+        "anthropic/claude-opus-5",
+        "deepseek/deepseek-v4-pro",
         "google/gemini-3.1-pro"
       ]
     },
