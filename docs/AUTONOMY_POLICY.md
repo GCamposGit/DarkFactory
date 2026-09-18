@@ -38,9 +38,19 @@ O contrato não promete exactly-once no provedor externo. Ele impede duplicaçã
 local e exige reconciliação posterior caso o processo caia depois de uma operação
 remota.
 
+## Precedência de política efetiva e classes C/D (HF-26-02)
+
+Quando um pedido de entrega é avaliado com uma decisão vinculada (`policy_decision: PolicyDecision`) ou um contexto confiável (`policy_context: PolicyContext`), a decisão da política efetiva prevalece sobre a classificação de risco estática:
+
+- **Tickets técnicos autorizados**: Se a política efetiva conceder autorização (`status == "allowed"` com `PolicyGrant` explícito e confiável para o escopo e SHA da tarefa), a entrega avança para `eligible` sem exigir intervenção humana manual, mesmo para classes C ou D.
+- **Não permitir C/D global**: É estritamente proibido configurar `DeliveryPolicy` com bypass global para as classes C e D (ex: via `autonomous_risk_classes`). Qualquer tentativa dispara erro em tempo de instanciação. O avanço de classes C e D é exclusivamente por ticket via concessão verificada.
+- **Fail-closed inviolável**: Checks vermelhos ou stale no GitHub (`PullRequestSnapshot`), divergências de hash, e projetos comerciais pagos sem prova de aceite formal do cliente continuam bloqueando terminantemente a entrega, independentemente de concessões.
+- **Preservação de legado**: Sem contexto ou decisão de política vinculada, a política opera em modo legado, exigindo revisão manual para classes C e D.
+
 ## Limites
 
 - O módulo não faz merge, push, criação de PR ou deploy.
 - Tokens ficam somente no adaptador e nunca aparecem em mensagens de erro.
 - Testes usam transporte GitHub injetado; nenhuma credencial ou rede é necessária.
 - Projetos locais de demonstração continuam fora do escopo compartilhado.
+

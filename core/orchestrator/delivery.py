@@ -129,6 +129,7 @@ class DeliveryDecision(BaseModel):
     stale_checks: tuple[str, ...] = ()
     failed_checks: tuple[str, ...] = ()
     evaluated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    policy_decision: Any | None = None
 
     _normalize_candidate_sha = field_validator("candidate_sha", "observed_head_sha")(_normalize_sha)
 
@@ -141,6 +142,14 @@ class DeliveryPolicy:
     """Evaluate whether a PR may enter the automated merge queue."""
 
     def __init__(self, *, autonomous_risk_classes: set[DeliveryRisk] | None = None) -> None:
+        if autonomous_risk_classes is not None:
+            forbidden = set(autonomous_risk_classes) & {DeliveryRisk.C, DeliveryRisk.D}
+            if forbidden:
+                forbidden_str = ", ".join(sorted(f.value for f in forbidden))
+                raise ValueError(
+                    f"Global bypass for risk classes {forbidden_str} is forbidden; "
+                    "classes C and D require an explicit bound PolicyDecision per ticket"
+                )
         self.autonomous_risk_classes = frozenset(
             autonomous_risk_classes or {DeliveryRisk.A, DeliveryRisk.B}
         )
@@ -149,8 +158,29 @@ class DeliveryPolicy:
         self,
         request: DeliveryRequest,
         snapshot: PullRequestSnapshot,
+        policy_decision: Any | None = None,
+        policy_context: Any | None = None,
     ) -> DeliveryDecision:
         """Return a decision; no blocked or stale state is treated as success."""
+        from decimal import Decimal
+        from core.workflow.effective_policy import (
+            Operation,
+            PolicyDecision as EPDecision,
+            PolicyRequest as EPRequest,
+            resolve_effective_policy,
+        )
+
+        if policy_decision is None and policy_context is not None:
+            ep_request = EPRequest(
+                project_id=policy_context.project_id,
+                operation=Operation.MERGE,
+                scope_ref=request.task_id,
+                candidate_digest=request.candidate_sha,
+                policy_version=policy_context.policy_version,
+                estimated_cost_usd=Decimal("0"),
+            )
+            policy_decision = resolve_effective_policy(ep_request, policy_context)
+
         checks_by_name = {check.name: check for check in snapshot.checks}
         missing = tuple(name for name in request.required_checks if name not in checks_by_name)
         stale = tuple(
@@ -196,6 +226,18 @@ class DeliveryPolicy:
         if blockers:
             status = DeliveryStatus.BLOCKED
             reason = "Delivery blocked: " + "; ".join(blockers)
+        elif policy_decision is not None:
+            if isinstance(policy_decision, EPDecision) and policy_decision.status == "allowed":
+                status = DeliveryStatus.ELIGIBLE
+                reason = (
+                    f"All required checks passed on the exact candidate SHA; "
+                    f"authorized by policy grant {policy_decision.matched_grant_id}"
+                )
+            else:
+                p_status = getattr(policy_decision, "status", "unknown")
+                p_reason = getattr(policy_decision, "reason_code", "policy_rejected")
+                status = DeliveryStatus.BLOCKED
+                reason = f"Delivery blocked by policy ({p_status}): {p_reason}"
         elif request.risk_class not in self.autonomous_risk_classes:
             status = DeliveryStatus.MANUAL_REVIEW
             reason = f"Risk class {request.risk_class.value} requires manual review"
@@ -213,6 +255,7 @@ class DeliveryPolicy:
             missing_checks=missing,
             stale_checks=stale,
             failed_checks=failed,
+            policy_decision=policy_decision,
         )
 
 
