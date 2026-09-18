@@ -1,0 +1,1457 @@
+{
+  "schema_version": "1.0",
+  "origin": "user-demand",
+  "package_id": "HF-26-PLAN",
+  "source_task": "01a0b49f-68a7-7af0-9367-113ecd1b14c1",
+  "planning_task": "01a0b4c8-f4a3-7dc2-b9c0-a0d9945333c9",
+  "baseline_sha": "83e5298eb231599076811802dceac8575c7f6feb",
+  "remote_observed_sha": "00133f6093d0b78090b04deacc61c82dcee5abb7",
+  "scope": "planning_only",
+  "first_handoff": "HF-26-01",
+  "units": [
+    {
+      "ticket_id": "HF-26-01",
+      "parent_id": "HF-26",
+      "title": "Resolvedor puro de política efetiva",
+      "depends_on": [],
+      "allowed_paths": [
+        "core/workflow/effective_policy.py",
+        "tests/test_effective_policy.py"
+      ],
+      "new_test": "tests/test_effective_policy.py",
+      "executor_role": "economy",
+      "environment_profile": "local",
+      "binding": null,
+      "api": "resolve_effective_policy(PolicyRequest,PolicyContext)->PolicyDecision puro; esquema e precedência detalhados em HF-26-01.md.",
+      "oracle": "Grant exato autoriza; deny, pausa, revogação, teto, receipt inválido e aceite comercial ausente vencem grant.",
+      "priority": "P0",
+      "origin": "user-demand",
+      "plan_version": "1.0",
+      "baseline_sha": "83e5298eb231599076811802dceac8575c7f6feb",
+      "implementation_status": "not_started",
+      "operational_status": "not_verified",
+      "canonical_plan": "docs/CONTINUOUS_AUTONOMY_PLAN_2026-09-18.md",
+      "handoff_ref": "docs/handoffs/continuous-autonomy/HF-26-01.md",
+      "planning_status": "ready_for_handoff",
+      "design_status": "design_specified",
+      "new_paths": [
+        "core/workflow/effective_policy.py",
+        "tests/test_effective_policy.py"
+      ],
+      "read_only_paths": [
+        "All paths outside allowed_paths; especially governance, verifiers and other project checkouts"
+      ],
+      "successors": [
+        "HF-26-02",
+        "HF-26-03",
+        "HF-13-01",
+        "HF-15-01"
+      ],
+      "validate_cmd": "python -m pytest tests/test_effective_policy.py -v",
+      "validation_availability": "new_test_must_be_created_and_collected_first",
+      "admission": "trusted supervisor PlanApproval + qualified role + preflight; not attested by file"
+    },
+    {
+      "ticket_id": "HF-26-02",
+      "parent_id": "HF-26",
+      "title": "Aplicar precedência sem ampliar permissões",
+      "depends_on": [
+        "HF-26-01"
+      ],
+      "allowed_paths": [
+        "docs/AUTONOMY_POLICY.md",
+        "core/orchestrator/delivery.py",
+        "core/workflow/policy_binding.py",
+        "tests/test_policy_binding.py"
+      ],
+      "new_test": "tests/test_policy_binding.py",
+      "executor_role": "economy",
+      "environment_profile": "local",
+      "binding": null,
+      "api": "build_policy_context(project_id,operation,trusted_grants,evidence)->PolicyContext novo; DeliveryPolicy recebe decisão vinculada. Sem contexto preserva legado. Não permitir C/D global.",
+      "oracle": "Ticket técnico autorizado não pede humano; checks vermelhos e cliente pago sem aceite bloqueiam. Política declara precedência e limites.",
+      "priority": "P0",
+      "origin": "user-demand",
+      "plan_version": "1.0",
+      "baseline_sha": "83e5298eb231599076811802dceac8575c7f6feb",
+      "implementation_status": "not_started",
+      "operational_status": "not_verified",
+      "canonical_plan": "docs/CONTINUOUS_AUTONOMY_PLAN_2026-09-18.md",
+      "handoff_ref": "docs/handoffs/continuous-autonomy/HF-26-02.md",
+      "planning_status": "waiting_dependency",
+      "design_status": "design_specified",
+      "new_paths": [
+        "core/workflow/policy_binding.py",
+        "tests/test_policy_binding.py"
+      ],
+      "read_only_paths": [
+        "All paths outside allowed_paths; especially governance, verifiers and other project checkouts"
+      ],
+      "successors": [
+        "HF-05-02",
+        "HF-11-01"
+      ],
+      "validate_cmd": "python -m pytest tests/test_policy_binding.py -v",
+      "validation_availability": "new_test_must_be_created_and_collected_first",
+      "admission": "trusted supervisor PlanApproval + qualified role + preflight; not attested by file"
+    },
+    {
+      "ticket_id": "HF-26-03",
+      "parent_id": "HF-26",
+      "title": "Reconciliar baseline local e remota",
+      "depends_on": [
+        "HF-26-01"
+      ],
+      "allowed_paths": [
+        ".factory/planning/continuous-autonomy/bindings/baseline.json",
+        "docs/handoffs/continuous-autonomy/bindings/BASELINE.md"
+      ],
+      "new_test": "",
+      "executor_role": "high_architecture",
+      "environment_profile": "binding",
+      "binding": null,
+      "api": "baseline.json contém local_sha,remote_main_sha,unintegrated_commits,contract_hashes,compatible_units,integration_units; verificar git ancestry e APIs. Handoffs seletivos para commits herdados.",
+      "oracle": "Sete commits examinados individualmente; ausência remota de portfolio/evolution bloqueia só dependentes. Não publicar herança incidental.",
+      "priority": "P0",
+      "origin": "user-demand",
+      "plan_version": "1.0",
+      "baseline_sha": "83e5298eb231599076811802dceac8575c7f6feb",
+      "implementation_status": "not_started",
+      "operational_status": "not_verified",
+      "canonical_plan": "docs/CONTINUOUS_AUTONOMY_PLAN_2026-09-18.md",
+      "handoff_ref": "docs/handoffs/continuous-autonomy/HF-26-03.md",
+      "planning_status": "waiting_dependency",
+      "design_status": "design_specified",
+      "new_paths": [
+        ".factory/planning/continuous-autonomy/bindings/baseline.json",
+        "docs/handoffs/continuous-autonomy/bindings/BASELINE.md"
+      ],
+      "read_only_paths": [
+        "All paths outside allowed_paths; especially governance, verifiers and other project checkouts"
+      ],
+      "successors": [
+        "HF-05-02",
+        "HF-07-01",
+        "HF-12-01",
+        "HF-25-01"
+      ],
+      "validate_cmd": "python .factory/planning/continuous-autonomy/verify.py --binding HF-26-03",
+      "validation_availability": "binding_artifacts_must_exist_first; structure_not_acceptance",
+      "admission": "trusted supervisor PlanApproval + qualified role + preflight; not attested by file"
+    },
+    {
+      "ticket_id": "HF-05-02",
+      "parent_id": "HF-05",
+      "title": "Binding do controle cloud e ownership",
+      "depends_on": [
+        "HF-26-02",
+        "HF-26-03"
+      ],
+      "allowed_paths": [
+        "docs/handoffs/continuous-autonomy/bindings/CONTROL.md",
+        ".factory/planning/continuous-autonomy/bindings/control.json"
+      ],
+      "new_test": "",
+      "executor_role": "high_architecture",
+      "environment_profile": "cloud-binding",
+      "binding": null,
+      "api": "Fechar tipos Python ControlStore, DDL, migração e locks; verificar API launch/queue/recovery/version/shutdown DBOS instalada. Store PostgreSQL transacional + outbox para DBOS; manter DF11/HF05 owners sem conversão.",
+      "oracle": "Transcript real ou waiting_access técnico; imports reais e documentação primária por versão. Binding define reserva única e crash points, não importa DBOS como prova de execução.",
+      "priority": "P0",
+      "origin": "user-demand",
+      "plan_version": "1.0",
+      "baseline_sha": "83e5298eb231599076811802dceac8575c7f6feb",
+      "implementation_status": "not_started",
+      "operational_status": "not_verified",
+      "canonical_plan": "docs/CONTINUOUS_AUTONOMY_PLAN_2026-09-18.md",
+      "handoff_ref": "docs/handoffs/continuous-autonomy/HF-05-02.md",
+      "planning_status": "waiting_dependency",
+      "design_status": "design_specified",
+      "new_paths": [
+        "docs/handoffs/continuous-autonomy/bindings/CONTROL.md",
+        ".factory/planning/continuous-autonomy/bindings/control.json"
+      ],
+      "read_only_paths": [
+        "All paths outside allowed_paths; especially governance, verifiers and other project checkouts"
+      ],
+      "successors": [
+        "HF-05-03",
+        "HF-03-07"
+      ],
+      "validate_cmd": "python .factory/planning/continuous-autonomy/verify.py --binding HF-05-02",
+      "validation_availability": "binding_artifacts_must_exist_first; structure_not_acceptance",
+      "admission": "trusted supervisor PlanApproval + qualified role + preflight; not attested by file"
+    },
+    {
+      "ticket_id": "HF-05-03",
+      "parent_id": "HF-05",
+      "title": "Persistência canônica e adaptadores",
+      "depends_on": [
+        "HF-05-02"
+      ],
+      "allowed_paths": [
+        "core/workflow/control_contracts.py",
+        "core/workflow/control_store.py",
+        "core/orchestrator/adapters/control_postgres.py",
+        "tests/test_control_store.py"
+      ],
+      "new_test": "tests/test_control_store.py",
+      "executor_role": "economy",
+      "environment_profile": "local+cloud",
+      "binding": "HF-05-02",
+      "api": "Implementar Protocol de CONTRACTS.md e binding CONTROL; SQLite local e PostgreSQL opcional com demandas/jobs/outbox/inbox/leases/reservas/operations, transações curtas sem LLM sob lock.",
+      "oracle": "Crash antes/depois commit, claims concorrentes por conexões/processos, dedupe conflitante e stale fencing. Suite parametrizada real nos dois backends; skip cloud não comprova cloud.",
+      "priority": "P0",
+      "origin": "user-demand",
+      "plan_version": "1.0",
+      "baseline_sha": "83e5298eb231599076811802dceac8575c7f6feb",
+      "implementation_status": "not_started",
+      "operational_status": "not_verified",
+      "canonical_plan": "docs/CONTINUOUS_AUTONOMY_PLAN_2026-09-18.md",
+      "handoff_ref": "docs/handoffs/continuous-autonomy/HF-05-03.md",
+      "planning_status": "needs_architecture_binding",
+      "design_status": "design_specified",
+      "new_paths": [
+        "core/workflow/control_contracts.py",
+        "core/workflow/control_store.py",
+        "core/orchestrator/adapters/control_postgres.py",
+        "tests/test_control_store.py"
+      ],
+      "read_only_paths": [
+        "All paths outside allowed_paths; especially governance, verifiers and other project checkouts"
+      ],
+      "successors": [
+        "HF-05-04",
+        "HF-23-01",
+        "HF-08-01",
+        "HF-07-02"
+      ],
+      "validate_cmd": "python -m pytest tests/test_control_store.py -v",
+      "validation_availability": "new_test_must_be_created_and_collected_first",
+      "admission": "trusted supervisor PlanApproval + qualified role + preflight; not attested by file"
+    },
+    {
+      "ticket_id": "HF-05-04",
+      "parent_id": "HF-05",
+      "title": "Handlers e materialização de sucessores",
+      "depends_on": [
+        "HF-05-03"
+      ],
+      "allowed_paths": [
+        "core/workflow/handlers.py",
+        "core/workflow/successors.py",
+        "tests/test_workflow_handlers.py"
+      ],
+      "new_test": "tests/test_workflow_handlers.py",
+      "executor_role": "economy",
+      "environment_profile": "local",
+      "binding": null,
+      "api": "build_handlers(bindings,services); handle(StageContext)->StageResult; materialize_result(job_key,result,store). Inbox+sucessores atomicamente; fan-out produtivo e memória; versão fixada e allowlist.",
+      "oracle": "Evento perdido e duplicado convergem ao mesmo JobKey; success vazio e handler ausente falham; WAITING_HUMAN não suspende irmãos; learning interno não recursa.",
+      "priority": "P0",
+      "origin": "user-demand",
+      "plan_version": "1.0",
+      "baseline_sha": "83e5298eb231599076811802dceac8575c7f6feb",
+      "implementation_status": "not_started",
+      "operational_status": "not_verified",
+      "canonical_plan": "docs/CONTINUOUS_AUTONOMY_PLAN_2026-09-18.md",
+      "handoff_ref": "docs/handoffs/continuous-autonomy/HF-05-04.md",
+      "planning_status": "waiting_dependency",
+      "design_status": "design_specified",
+      "new_paths": [
+        "core/workflow/handlers.py",
+        "core/workflow/successors.py",
+        "tests/test_workflow_handlers.py"
+      ],
+      "read_only_paths": [
+        "All paths outside allowed_paths; especially governance, verifiers and other project checkouts"
+      ],
+      "successors": [
+        "HF-05-05",
+        "HF-08-03",
+        "HF-08-04",
+        "HF-08-05",
+        "HF-07-03",
+        "HF-09-01",
+        "HF-12-04",
+        "HF-10-01"
+      ],
+      "validate_cmd": "python -m pytest tests/test_workflow_handlers.py -v",
+      "validation_availability": "new_test_must_be_created_and_collected_first",
+      "admission": "trusted supervisor PlanApproval + qualified role + preflight; not attested by file"
+    },
+    {
+      "ticket_id": "HF-05-05",
+      "parent_id": "HF-05",
+      "title": "Supervisor de todo portfólio",
+      "depends_on": [
+        "HF-05-04"
+      ],
+      "allowed_paths": [
+        "core/workflow/supervisor.py",
+        "core/workflow/reconciliation.py",
+        "tests/test_continuous_supervisor.py"
+      ],
+      "new_test": "tests/test_continuous_supervisor.py",
+      "executor_role": "economy",
+      "environment_profile": "local",
+      "binding": null,
+      "api": "Supervisor.run(stop_event),tick(now),next_wakeup(now): scan paginado estável do registry, outbox+state repair, ready-age e leases; tick 30s, espera interrompível até15s, zero LLM ocioso.",
+      "oracle": "100+ projetos e inserção durante scan não perdem jobs; <=60s de recuperação com clock falso; cancelamento impede efeitos e ausência consumidor é detectada.",
+      "priority": "P0",
+      "origin": "user-demand",
+      "plan_version": "1.0",
+      "baseline_sha": "83e5298eb231599076811802dceac8575c7f6feb",
+      "implementation_status": "not_started",
+      "operational_status": "not_verified",
+      "canonical_plan": "docs/CONTINUOUS_AUTONOMY_PLAN_2026-09-18.md",
+      "handoff_ref": "docs/handoffs/continuous-autonomy/HF-05-05.md",
+      "planning_status": "waiting_dependency",
+      "design_status": "design_specified",
+      "new_paths": [
+        "core/workflow/supervisor.py",
+        "tests/test_continuous_supervisor.py"
+      ],
+      "read_only_paths": [
+        "All paths outside allowed_paths; especially governance, verifiers and other project checkouts"
+      ],
+      "successors": [
+        "HF-05-06",
+        "HF-13-02"
+      ],
+      "validate_cmd": "python -m pytest tests/test_continuous_supervisor.py -v",
+      "validation_availability": "new_test_must_be_created_and_collected_first",
+      "admission": "trusted supervisor PlanApproval + qualified role + preflight; not attested by file"
+    },
+    {
+      "ticket_id": "HF-05-06",
+      "parent_id": "HF-05",
+      "title": "Entrypoints cloud permanentes",
+      "depends_on": [
+        "HF-05-05",
+        "HF-23-01"
+      ],
+      "allowed_paths": [
+        "core/orchestrator/cloud_coordinator.py",
+        "core/orchestrator/cloud_worker.py",
+        "deploy/dokploy/docker-compose.cloud.yml",
+        "tests/test_continuous_cloud.py"
+      ],
+      "new_test": "tests/test_continuous_cloud.py",
+      "executor_role": "economy",
+      "environment_profile": "local+cloud",
+      "binding": "HF-05-02",
+      "api": "main serviço default lança engine/supervisor/worker e drain SIGTERM; --status preserva diagnóstico. Compose fixa imagem/digest e health de progresso; remover token de build URL.",
+      "oracle": "PID vivo ocioso sem IA; input avança; import/connect sem consumo dá not_ready. Kill após efeito recupera, notebook desligado não para cloud.",
+      "priority": "P0",
+      "origin": "user-demand",
+      "plan_version": "1.0",
+      "baseline_sha": "83e5298eb231599076811802dceac8575c7f6feb",
+      "implementation_status": "not_started",
+      "operational_status": "not_verified",
+      "canonical_plan": "docs/CONTINUOUS_AUTONOMY_PLAN_2026-09-18.md",
+      "handoff_ref": "docs/handoffs/continuous-autonomy/HF-05-06.md",
+      "planning_status": "needs_architecture_binding",
+      "design_status": "design_specified",
+      "new_paths": [
+        "tests/test_continuous_cloud.py"
+      ],
+      "read_only_paths": [
+        "All paths outside allowed_paths; especially governance, verifiers and other project checkouts"
+      ],
+      "successors": [
+        "HF-03-08"
+      ],
+      "validate_cmd": "python -m pytest tests/test_continuous_cloud.py -v",
+      "validation_availability": "new_test_must_be_created_and_collected_first",
+      "admission": "trusted supervisor PlanApproval + qualified role + preflight; not attested by file"
+    },
+    {
+      "ticket_id": "HF-23-01",
+      "parent_id": "HF-23",
+      "title": "Reserva única e justiça de portfólio",
+      "depends_on": [
+        "HF-05-03",
+        "HF-07-02"
+      ],
+      "allowed_paths": [
+        "core/portfolio/scheduler.py",
+        "core/portfolio/budget_manager.py",
+        "core/workflow/capacity_policy.py",
+        "tests/test_canonical_reservations.py"
+      ],
+      "new_test": "tests/test_canonical_reservations.py",
+      "executor_role": "economy",
+      "environment_profile": "local",
+      "binding": "HF-05-02",
+      "api": "rank_eligible(snapshot,now)->list[JobKey] puro; composed mode proíbe slots JSON e delega claim ao store. Limites existentes conta/projeto/run/pool, custos em unidades inteiras; aliases canônicos.",
+      "oracle": "Dois schedulers não gastam último crédito/slot duas vezes; expiração libera espaço mas mantém custo incerto; starvation protegido sem inventar budget.",
+      "priority": "P0",
+      "origin": "user-demand",
+      "plan_version": "1.0",
+      "baseline_sha": "83e5298eb231599076811802dceac8575c7f6feb",
+      "implementation_status": "not_started",
+      "operational_status": "not_verified",
+      "canonical_plan": "docs/CONTINUOUS_AUTONOMY_PLAN_2026-09-18.md",
+      "handoff_ref": "docs/handoffs/continuous-autonomy/HF-23-01.md",
+      "planning_status": "needs_architecture_binding",
+      "design_status": "design_specified",
+      "new_paths": [
+        "core/workflow/capacity_policy.py",
+        "tests/test_canonical_reservations.py"
+      ],
+      "read_only_paths": [
+        "All paths outside allowed_paths; especially governance, verifiers and other project checkouts"
+      ],
+      "successors": [
+        "HF-05-06",
+        "HF-03-08"
+      ],
+      "validate_cmd": "python -m pytest tests/test_canonical_reservations.py -v",
+      "validation_availability": "new_test_must_be_created_and_collected_first",
+      "admission": "trusted supervisor PlanApproval + qualified role + preflight; not attested by file"
+    },
+    {
+      "ticket_id": "HF-08-01",
+      "parent_id": "HF-08",
+      "title": "Intake atômico e documental explícito",
+      "depends_on": [
+        "HF-05-03"
+      ],
+      "allowed_paths": [
+        "core/demands/autonomous_intake.py",
+        "core/demands/integrated_service.py",
+        "tests/test_transactional_intake.py"
+      ],
+      "new_test": "tests/test_transactional_intake.py",
+      "executor_role": "economy",
+      "environment_profile": "local",
+      "binding": null,
+      "api": "AutonomousIntakeService.accept(IntakeCommand)->IntakeReceipt; receive_demand modo autonomous exige store, documental não retorna run fictício. Grill vira job posterior; DemandsStore JSON projeção pós-commit.",
+      "oracle": "Crash não deixa accepted sem job; replay retorna mesmos IDs; documentary IDs de execução null. Falha na projeção não duplica demanda.",
+      "priority": "P0",
+      "origin": "user-demand",
+      "plan_version": "1.0",
+      "baseline_sha": "83e5298eb231599076811802dceac8575c7f6feb",
+      "implementation_status": "not_started",
+      "operational_status": "not_verified",
+      "canonical_plan": "docs/CONTINUOUS_AUTONOMY_PLAN_2026-09-18.md",
+      "handoff_ref": "docs/handoffs/continuous-autonomy/HF-08-01.md",
+      "planning_status": "waiting_dependency",
+      "design_status": "design_specified",
+      "new_paths": [
+        "core/demands/autonomous_intake.py",
+        "tests/test_transactional_intake.py"
+      ],
+      "read_only_paths": [
+        "All paths outside allowed_paths; especially governance, verifiers and other project checkouts"
+      ],
+      "successors": [
+        "HF-08-02"
+      ],
+      "validate_cmd": "python -m pytest tests/test_transactional_intake.py -v",
+      "validation_availability": "new_test_must_be_created_and_collected_first",
+      "admission": "trusted supervisor PlanApproval + qualified role + preflight; not attested by file"
+    },
+    {
+      "ticket_id": "HF-08-02",
+      "parent_id": "HF-08",
+      "title": "Hub e CLI usam intake canônico",
+      "depends_on": [
+        "HF-08-01"
+      ],
+      "allowed_paths": [
+        "core/demands/cli.py",
+        "hub/backend/service.py",
+        "hub/backend/api.py",
+        "tests/test_public_autonomous_intake.py"
+      ],
+      "new_test": "tests/test_public_autonomous_intake.py",
+      "executor_role": "economy",
+      "environment_profile": "local",
+      "binding": null,
+      "api": "CLI mantém args e adiciona --mode/--external-id para replay; Hub Idempotency-Key e service injetado nas rotas atuais. HTTP202 pós-commit,409 conflito,503 store ausente; autorização antes de persistir.",
+      "oracle": "CLI subprocesso e HTTP geram job; indisponibilidade nunca accepted; progressão sem chamada manual de fases. Retries reutilizam external_id.",
+      "priority": "P0",
+      "origin": "user-demand",
+      "plan_version": "1.0",
+      "baseline_sha": "83e5298eb231599076811802dceac8575c7f6feb",
+      "implementation_status": "not_started",
+      "operational_status": "not_verified",
+      "canonical_plan": "docs/CONTINUOUS_AUTONOMY_PLAN_2026-09-18.md",
+      "handoff_ref": "docs/handoffs/continuous-autonomy/HF-08-02.md",
+      "planning_status": "waiting_dependency",
+      "design_status": "design_specified",
+      "new_paths": [
+        "tests/test_public_autonomous_intake.py"
+      ],
+      "read_only_paths": [
+        "All paths outside allowed_paths; especially governance, verifiers and other project checkouts"
+      ],
+      "successors": [
+        "HF-08-03"
+      ],
+      "validate_cmd": "python -m pytest tests/test_public_autonomous_intake.py -v",
+      "validation_availability": "new_test_must_be_created_and_collected_first",
+      "admission": "trusted supervisor PlanApproval + qualified role + preflight; not attested by file"
+    },
+    {
+      "ticket_id": "HF-08-03",
+      "parent_id": "HF-08",
+      "title": "Telegram e importação de legado",
+      "depends_on": [
+        "HF-08-02",
+        "HF-05-04"
+      ],
+      "allowed_paths": [
+        "core/integrations/telegram.py",
+        "core/demands/backfill.py",
+        "tests/test_intake_channels_backfill.py"
+      ],
+      "new_test": "tests/test_intake_channels_backfill.py",
+      "executor_role": "economy",
+      "environment_profile": "local",
+      "binding": null,
+      "api": "backfill(store,legacy_tickets,cursor)->ImportPage com project/ticket/version/fingerprint; Telegram chat autorizado+update_id e offset pós-commit. n8n gateway do mesmo endpoint.",
+      "oracle": "Restart antes cursor não duplica; legado terminal não reexecuta; sem prova terminal vai reconciliation_required. Canal não cria segunda fila.",
+      "priority": "P0",
+      "origin": "user-demand",
+      "plan_version": "1.0",
+      "baseline_sha": "83e5298eb231599076811802dceac8575c7f6feb",
+      "implementation_status": "not_started",
+      "operational_status": "not_verified",
+      "canonical_plan": "docs/CONTINUOUS_AUTONOMY_PLAN_2026-09-18.md",
+      "handoff_ref": "docs/handoffs/continuous-autonomy/HF-08-03.md",
+      "planning_status": "waiting_dependency",
+      "design_status": "design_specified",
+      "new_paths": [
+        "core/demands/backfill.py",
+        "tests/test_intake_channels_backfill.py"
+      ],
+      "read_only_paths": [
+        "All paths outside allowed_paths; especially governance, verifiers and other project checkouts"
+      ],
+      "successors": [
+        "HF-03-08"
+      ],
+      "validate_cmd": "python -m pytest tests/test_intake_channels_backfill.py -v",
+      "validation_availability": "new_test_must_be_created_and_collected_first",
+      "admission": "trusted supervisor PlanApproval + qualified role + preflight; not attested by file"
+    },
+    {
+      "ticket_id": "HF-08-04",
+      "parent_id": "HF-08",
+      "title": "Planejamento contínuo do escopo conhecido",
+      "depends_on": [
+        "HF-05-04",
+        "HF-07-02"
+      ],
+      "allowed_paths": [
+        "core/workflow/planning_jobs.py",
+        "core/demands/specifier.py",
+        "tests/test_continuous_planning.py"
+      ],
+      "new_test": "tests/test_continuous_planning.py",
+      "executor_role": "economy",
+      "environment_profile": "local",
+      "binding": "HF-07-01",
+      "api": "PlanningHandler.handle(context) lê registry/demand/memory; produz WorkflowHandoff e graph revision. Stop quando todas folhas têm ready/design/dependency/binding justificados. Dedupe por demand_version+relevant_contract_digest.",
+      "oracle": "Visita todos projetos e novos registros; folhas prontas liberam sem carteira inteira; hash igual não decompõe infinitamente; lacuna gera binding high, não economia decidindo.",
+      "priority": "P0",
+      "origin": "user-demand",
+      "plan_version": "1.0",
+      "baseline_sha": "83e5298eb231599076811802dceac8575c7f6feb",
+      "implementation_status": "not_started",
+      "operational_status": "not_verified",
+      "canonical_plan": "docs/CONTINUOUS_AUTONOMY_PLAN_2026-09-18.md",
+      "handoff_ref": "docs/handoffs/continuous-autonomy/HF-08-04.md",
+      "planning_status": "needs_architecture_binding",
+      "design_status": "design_specified",
+      "new_paths": [
+        "core/workflow/planning_jobs.py",
+        "tests/test_continuous_planning.py"
+      ],
+      "read_only_paths": [
+        "All paths outside allowed_paths; especially governance, verifiers and other project checkouts"
+      ],
+      "successors": [
+        "HF-09-02"
+      ],
+      "validate_cmd": "python -m pytest tests/test_continuous_planning.py -v",
+      "validation_availability": "new_test_must_be_created_and_collected_first",
+      "admission": "trusted supervisor PlanApproval + qualified role + preflight; not attested by file"
+    },
+    {
+      "ticket_id": "HF-08-05",
+      "parent_id": "HF-08",
+      "title": "Probe e retomada de dependências manuais",
+      "depends_on": [
+        "HF-05-04"
+      ],
+      "allowed_paths": [
+        "core/workflow/manual_resolution.py",
+        "core/workflow/reconciliation.py",
+        "tests/test_manual_resume.py"
+      ],
+      "new_test": "tests/test_manual_resume.py",
+      "executor_role": "economy",
+      "environment_profile": "local",
+      "binding": null,
+      "api": "submit_resolution(dependency_id,response_ref,version)->ProbeJob; só receipt na identidade/rota certa resolve e gera outbox. ManualDependency guia todos campos, canal seguro, blocked_stages e resume_criteria.",
+      "oracle": "Resposta incorreta/antiga não libera; correta retoma automaticamente só descendentes. Segredo em conversa não persiste; outro projeto avança.",
+      "priority": "P0",
+      "origin": "user-demand",
+      "plan_version": "1.0",
+      "baseline_sha": "83e5298eb231599076811802dceac8575c7f6feb",
+      "implementation_status": "not_started",
+      "operational_status": "not_verified",
+      "canonical_plan": "docs/CONTINUOUS_AUTONOMY_PLAN_2026-09-18.md",
+      "handoff_ref": "docs/handoffs/continuous-autonomy/HF-08-05.md",
+      "planning_status": "waiting_dependency",
+      "design_status": "design_specified",
+      "new_paths": [
+        "core/workflow/manual_resolution.py",
+        "tests/test_manual_resume.py"
+      ],
+      "read_only_paths": [
+        "All paths outside allowed_paths; especially governance, verifiers and other project checkouts"
+      ],
+      "successors": [
+        "HF-03-08"
+      ],
+      "validate_cmd": "python -m pytest tests/test_manual_resume.py -v",
+      "validation_availability": "new_test_must_be_created_and_collected_first",
+      "admission": "trusted supervisor PlanApproval + qualified role + preflight; not attested by file"
+    },
+    {
+      "ticket_id": "HF-07-01",
+      "parent_id": "HF-07",
+      "title": "Binding de executores e contas reais",
+      "depends_on": [
+        "HF-26-03"
+      ],
+      "allowed_paths": [
+        "docs/handoffs/continuous-autonomy/bindings/EXECUTORS.md",
+        ".factory/planning/continuous-autonomy/bindings/executors.json"
+      ],
+      "new_test": "",
+      "executor_role": "high_architecture",
+      "environment_profile": "executor-binding",
+      "binding": null,
+      "api": "Inventariar model IDs/effort high/max, contas/hosts, tools/edit/test/resume/cancel, quota/reset/preço; microtarefa real autorizada; adapter mapping providers/AgentExecutor, TTL24h.",
+      "oracle": "Nome textual sem tool calling reprova; assinatura desktop não prova VPS; sem rota qualificada registrar reset/reavaliação. Sem compra ou chamada paga sem reserva.",
+      "priority": "P0",
+      "origin": "user-demand",
+      "plan_version": "1.0",
+      "baseline_sha": "83e5298eb231599076811802dceac8575c7f6feb",
+      "implementation_status": "not_started",
+      "operational_status": "not_verified",
+      "canonical_plan": "docs/CONTINUOUS_AUTONOMY_PLAN_2026-09-18.md",
+      "handoff_ref": "docs/handoffs/continuous-autonomy/HF-07-01.md",
+      "planning_status": "waiting_dependency",
+      "design_status": "design_specified",
+      "new_paths": [
+        "docs/handoffs/continuous-autonomy/bindings/EXECUTORS.md",
+        ".factory/planning/continuous-autonomy/bindings/executors.json"
+      ],
+      "read_only_paths": [
+        "All paths outside allowed_paths; especially governance, verifiers and other project checkouts"
+      ],
+      "successors": [
+        "HF-07-02",
+        "HF-09-01",
+        "HF-03-07"
+      ],
+      "validate_cmd": "python .factory/planning/continuous-autonomy/verify.py --binding HF-07-01",
+      "validation_availability": "binding_artifacts_must_exist_first; structure_not_acceptance",
+      "admission": "trusted supervisor PlanApproval + qualified role + preflight; not attested by file"
+    },
+    {
+      "ticket_id": "HF-07-02",
+      "parent_id": "HF-07",
+      "title": "Rotas qualificadas e fallback",
+      "depends_on": [
+        "HF-07-01",
+        "HF-05-03"
+      ],
+      "allowed_paths": [
+        "core/portfolio/router_optimizer.py",
+        "core/workflow/qualified_routes.py",
+        "tests/test_qualified_routes.py"
+      ],
+      "new_test": "tests/test_qualified_routes.py",
+      "executor_role": "economy",
+      "environment_profile": "local",
+      "binding": "HF-07-01",
+      "api": "select_route(job,catalog,quota,budget)->RouteDecision; checar papel/qualidade/tools/host/custo antes claim. Avaliar outras assinaturas, APIs autorizadas, local; unknown não available.",
+      "oracle": "Quota mudou antes claim exige reseleção sem dupla reserva. Local não qualificado high não planeja; nenhuma rota gera espera com motivo/wakeup, tarefas locais seguem.",
+      "priority": "P0",
+      "origin": "user-demand",
+      "plan_version": "1.0",
+      "baseline_sha": "83e5298eb231599076811802dceac8575c7f6feb",
+      "implementation_status": "not_started",
+      "operational_status": "not_verified",
+      "canonical_plan": "docs/CONTINUOUS_AUTONOMY_PLAN_2026-09-18.md",
+      "handoff_ref": "docs/handoffs/continuous-autonomy/HF-07-02.md",
+      "planning_status": "needs_architecture_binding",
+      "design_status": "design_specified",
+      "new_paths": [
+        "core/workflow/qualified_routes.py",
+        "tests/test_qualified_routes.py"
+      ],
+      "read_only_paths": [
+        "All paths outside allowed_paths; especially governance, verifiers and other project checkouts"
+      ],
+      "successors": [
+        "HF-23-01",
+        "HF-08-04",
+        "HF-07-03",
+        "HF-10-02"
+      ],
+      "validate_cmd": "python -m pytest tests/test_qualified_routes.py -v",
+      "validation_availability": "new_test_must_be_created_and_collected_first",
+      "admission": "trusted supervisor PlanApproval + qualified role + preflight; not attested by file"
+    },
+    {
+      "ticket_id": "HF-07-03",
+      "parent_id": "HF-07",
+      "title": "Catálogo diário recuperável",
+      "depends_on": [
+        "HF-05-04",
+        "HF-07-02"
+      ],
+      "allowed_paths": [
+        "core/workflow/catalog_jobs.py",
+        "core/benchmarks/qualification.py",
+        "tests/test_catalog_jobs.py"
+      ],
+      "new_test": "tests/test_catalog_jobs.py",
+      "executor_role": "economy",
+      "environment_profile": "local",
+      "binding": "HF-07-01",
+      "api": "CatalogRefreshHandler timer24h persistido e boot catchup; fontes oficiais, smoke/eval por papel; promoção só novos jobs e rollback catálogo. Falha mantém último válido com idade.",
+      "oracle": "Timer perdido executa uma vez; modelo ativo não muda; preço ausente não zero; effort incompatível não enviado.",
+      "priority": "P1",
+      "origin": "user-demand",
+      "plan_version": "1.0",
+      "baseline_sha": "83e5298eb231599076811802dceac8575c7f6feb",
+      "implementation_status": "not_started",
+      "operational_status": "not_verified",
+      "canonical_plan": "docs/CONTINUOUS_AUTONOMY_PLAN_2026-09-18.md",
+      "handoff_ref": "docs/handoffs/continuous-autonomy/HF-07-03.md",
+      "planning_status": "needs_architecture_binding",
+      "design_status": "design_specified",
+      "new_paths": [
+        "core/workflow/catalog_jobs.py",
+        "core/benchmarks/qualification.py",
+        "tests/test_catalog_jobs.py"
+      ],
+      "read_only_paths": [
+        "All paths outside allowed_paths; especially governance, verifiers and other project checkouts"
+      ],
+      "successors": [
+        "HF-03-08"
+      ],
+      "validate_cmd": "python -m pytest tests/test_catalog_jobs.py -v",
+      "validation_availability": "new_test_must_be_created_and_collected_first",
+      "admission": "trusted supervisor PlanApproval + qualified role + preflight; not attested by file"
+    },
+    {
+      "ticket_id": "HF-09-01",
+      "parent_id": "HF-09",
+      "title": "Binding de agentes e revisão por etapa",
+      "depends_on": [
+        "HF-07-01",
+        "HF-05-04"
+      ],
+      "allowed_paths": [
+        "docs/handoffs/continuous-autonomy/bindings/HANDLERS.md",
+        ".factory/planning/continuous-autonomy/bindings/handlers.json"
+      ],
+      "new_test": "",
+      "executor_role": "high_architecture",
+      "environment_profile": "executor-binding",
+      "binding": null,
+      "api": "Fechar service/method/signature/conversion e schemas por estágio; mapear AgentExecutor.start/resume e ImplementationCycleService; tools/prompts/worktree versionados e authority do VerificationContext.",
+      "oracle": "Smoke com edição e teste real; só texto não qualifica. Sujeito revisor distinto. Adapter ausente gera leaf de implementação específica com APIs resolvidas.",
+      "priority": "P0",
+      "origin": "user-demand",
+      "plan_version": "1.0",
+      "baseline_sha": "83e5298eb231599076811802dceac8575c7f6feb",
+      "implementation_status": "not_started",
+      "operational_status": "not_verified",
+      "canonical_plan": "docs/CONTINUOUS_AUTONOMY_PLAN_2026-09-18.md",
+      "handoff_ref": "docs/handoffs/continuous-autonomy/HF-09-01.md",
+      "planning_status": "waiting_dependency",
+      "design_status": "design_specified",
+      "new_paths": [
+        "docs/handoffs/continuous-autonomy/bindings/HANDLERS.md",
+        ".factory/planning/continuous-autonomy/bindings/handlers.json"
+      ],
+      "read_only_paths": [
+        "All paths outside allowed_paths; especially governance, verifiers and other project checkouts"
+      ],
+      "successors": [
+        "HF-09-02",
+        "HF-25-01"
+      ],
+      "validate_cmd": "python .factory/planning/continuous-autonomy/verify.py --binding HF-09-01",
+      "validation_availability": "binding_artifacts_must_exist_first; structure_not_acceptance",
+      "admission": "trusted supervisor PlanApproval + qualified role + preflight; not attested by file"
+    },
+    {
+      "ticket_id": "HF-09-02",
+      "parent_id": "HF-09",
+      "title": "Consumers de desenvolvimento e qualidade",
+      "depends_on": [
+        "HF-09-01",
+        "HF-08-04"
+      ],
+      "allowed_paths": [
+        "core/workflow/development_handlers.py",
+        "core/workflow/quality_handlers.py",
+        "tests/test_agent_stage_handlers.py"
+      ],
+      "new_test": "tests/test_agent_stage_handlers.py",
+      "executor_role": "economy",
+      "environment_profile": "local+executor",
+      "binding": "HF-09-01",
+      "api": "Handlers do binding, worktree/lease exclusiva, econômico, SHA+bytes e validação/revisão distintas. Defeito gera iteration; lacuna replan; duas tentativas sem progresso encerram causa.",
+      "oracle": "Defeito funcional reprova mesmo com self-PASS; mesmo sujeito não revisa; crash retoma owner original sem editar outra worktree.",
+      "priority": "P0",
+      "origin": "user-demand",
+      "plan_version": "1.0",
+      "baseline_sha": "83e5298eb231599076811802dceac8575c7f6feb",
+      "implementation_status": "not_started",
+      "operational_status": "not_verified",
+      "canonical_plan": "docs/CONTINUOUS_AUTONOMY_PLAN_2026-09-18.md",
+      "handoff_ref": "docs/handoffs/continuous-autonomy/HF-09-02.md",
+      "planning_status": "needs_architecture_binding",
+      "design_status": "design_specified",
+      "new_paths": [
+        "core/workflow/development_handlers.py",
+        "core/workflow/quality_handlers.py",
+        "tests/test_agent_stage_handlers.py"
+      ],
+      "read_only_paths": [
+        "All paths outside allowed_paths; especially governance, verifiers and other project checkouts"
+      ],
+      "successors": [
+        "HF-11-01",
+        "HF-03-08"
+      ],
+      "validate_cmd": "python -m pytest tests/test_agent_stage_handlers.py -v",
+      "validation_availability": "new_test_must_be_created_and_collected_first",
+      "admission": "trusted supervisor PlanApproval + qualified role + preflight; not attested by file"
+    },
+    {
+      "ticket_id": "HF-11-01",
+      "parent_id": "HF-11",
+      "title": "Integração GitHub reconciliada",
+      "depends_on": [
+        "HF-09-02",
+        "HF-26-02"
+      ],
+      "allowed_paths": [
+        "core/orchestrator/delivery_executor.py",
+        "core/workflow/integration_handler.py",
+        "tests/test_integration_handler.py"
+      ],
+      "new_test": "tests/test_integration_handler.py",
+      "executor_role": "economy",
+      "environment_profile": "release-binding",
+      "binding": "HF-09-01",
+      "api": "IntegrationHandler usa request/snapshot reais: commit seletivo,push,PR por branch/checks/head,merge permitido e ancestry remota; lookup repo+PR após timeout.",
+      "oracle": "Resposta PR perdida não duplica; draft/checks SHA antigo bloqueiam; main sem ancestry não entregue; token não aparece; sem autoapprove.",
+      "priority": "P0",
+      "origin": "user-demand",
+      "plan_version": "1.0",
+      "baseline_sha": "83e5298eb231599076811802dceac8575c7f6feb",
+      "implementation_status": "not_started",
+      "operational_status": "not_verified",
+      "canonical_plan": "docs/CONTINUOUS_AUTONOMY_PLAN_2026-09-18.md",
+      "handoff_ref": "docs/handoffs/continuous-autonomy/HF-11-01.md",
+      "planning_status": "needs_architecture_binding",
+      "design_status": "design_specified",
+      "new_paths": [
+        "core/workflow/integration_handler.py",
+        "tests/test_integration_handler.py"
+      ],
+      "read_only_paths": [
+        "All paths outside allowed_paths; especially governance, verifiers and other project checkouts"
+      ],
+      "successors": [
+        "HF-12-02"
+      ],
+      "validate_cmd": "python -m pytest tests/test_integration_handler.py -v",
+      "validation_availability": "new_test_must_be_created_and_collected_first",
+      "admission": "trusted supervisor PlanApproval + qualified role + preflight; not attested by file"
+    },
+    {
+      "ticket_id": "HF-12-01",
+      "parent_id": "HF-12",
+      "title": "Binding de build e targets reais",
+      "depends_on": [
+        "HF-26-03"
+      ],
+      "allowed_paths": [
+        "docs/handoffs/continuous-autonomy/bindings/RELEASE.md",
+        ".factory/planning/continuous-autonomy/bindings/release.json"
+      ],
+      "new_test": "",
+      "executor_role": "high_architecture",
+      "environment_profile": "release-binding",
+      "binding": null,
+      "api": "Inspecionar Dokploy/FTP/local_service por projeto; fixar build command,bytes/OCI digest,op ID lookup/status,installed digest,journey write/read e backup/rollback. Reusar DokployDeployClient e sanitizar.",
+      "oracle": "Webhook200 sem ID/término não satisfaz binding; requests/responses reais sanitizados, comandos por target. Nenhum endpoint adivinhado; target sem correlação exige binding high.",
+      "priority": "P0",
+      "origin": "user-demand",
+      "plan_version": "1.0",
+      "baseline_sha": "83e5298eb231599076811802dceac8575c7f6feb",
+      "implementation_status": "not_started",
+      "operational_status": "not_verified",
+      "canonical_plan": "docs/CONTINUOUS_AUTONOMY_PLAN_2026-09-18.md",
+      "handoff_ref": "docs/handoffs/continuous-autonomy/HF-12-01.md",
+      "planning_status": "waiting_dependency",
+      "design_status": "design_specified",
+      "new_paths": [
+        "docs/handoffs/continuous-autonomy/bindings/RELEASE.md",
+        ".factory/planning/continuous-autonomy/bindings/release.json"
+      ],
+      "read_only_paths": [
+        "All paths outside allowed_paths; especially governance, verifiers and other project checkouts"
+      ],
+      "successors": [
+        "HF-12-02",
+        "HF-15-01",
+        "HF-03-07"
+      ],
+      "validate_cmd": "python .factory/planning/continuous-autonomy/verify.py --binding HF-12-01",
+      "validation_availability": "binding_artifacts_must_exist_first; structure_not_acceptance",
+      "admission": "trusted supervisor PlanApproval + qualified role + preflight; not attested by file"
+    },
+    {
+      "ticket_id": "HF-12-02",
+      "parent_id": "HF-12",
+      "title": "Build real e adapter de deploy",
+      "depends_on": [
+        "HF-12-01",
+        "HF-11-01"
+      ],
+      "allowed_paths": [
+        "core/orchestrator/build_artifacts.py",
+        "core/orchestrator/deployment_adapter.py",
+        "hub/backend/webhooks.py",
+        "tests/test_real_deployment_adapter.py"
+      ],
+      "new_test": "tests/test_real_deployment_adapter.py",
+      "executor_role": "economy",
+      "environment_profile": "release-binding",
+      "binding": "HF-12-01",
+      "api": "BuildService.build(source_sha,recipe,claim)->ArtifactRef hashing bytes; DeploymentAdapter.start/reconcile/installed_digest do binding; domínio headless e wrapper Hub compatível.",
+      "oracle": "SHA metadata igual com bytes diferentes falha; timeout consulta remoto; HTTP não basta; mesmo artefato promove sem rebuild.",
+      "priority": "P0",
+      "origin": "user-demand",
+      "plan_version": "1.0",
+      "baseline_sha": "83e5298eb231599076811802dceac8575c7f6feb",
+      "implementation_status": "not_started",
+      "operational_status": "not_verified",
+      "canonical_plan": "docs/CONTINUOUS_AUTONOMY_PLAN_2026-09-18.md",
+      "handoff_ref": "docs/handoffs/continuous-autonomy/HF-12-02.md",
+      "planning_status": "needs_architecture_binding",
+      "design_status": "design_specified",
+      "new_paths": [
+        "core/orchestrator/build_artifacts.py",
+        "core/orchestrator/deployment_adapter.py",
+        "tests/test_real_deployment_adapter.py"
+      ],
+      "read_only_paths": [
+        "All paths outside allowed_paths; especially governance, verifiers and other project checkouts"
+      ],
+      "successors": [
+        "HF-12-03"
+      ],
+      "validate_cmd": "python -m pytest tests/test_real_deployment_adapter.py -v",
+      "validation_availability": "new_test_must_be_created_and_collected_first",
+      "admission": "trusted supervisor PlanApproval + qualified role + preflight; not attested by file"
+    },
+    {
+      "ticket_id": "HF-12-03",
+      "parent_id": "HF-12",
+      "title": "Jornada e rollback observados",
+      "depends_on": [
+        "HF-12-02"
+      ],
+      "allowed_paths": [
+        "core/orchestrator/target_journey.py",
+        "core/acceptance/rollback.py",
+        "tests/test_target_journey_rollback.py"
+      ],
+      "new_test": "tests/test_target_journey_rollback.py",
+      "executor_role": "economy",
+      "environment_profile": "release-binding",
+      "binding": "HF-12-01",
+      "api": "JourneyObserver.observe(artifact,target,nonce)->EvidenceReceipt com escrita/leitura/persistência após restart e digest; RollbackAdapter.restore(previous,backup) verifica bytes/dados e RPO/RTO.",
+      "oracle": "Health200 código velho ou nonce não persistido reprova; rollback só JSON reprova. Restore no alvo, sem tratar dados cliente como descartáveis.",
+      "priority": "P0",
+      "origin": "user-demand",
+      "plan_version": "1.0",
+      "baseline_sha": "83e5298eb231599076811802dceac8575c7f6feb",
+      "implementation_status": "not_started",
+      "operational_status": "not_verified",
+      "canonical_plan": "docs/CONTINUOUS_AUTONOMY_PLAN_2026-09-18.md",
+      "handoff_ref": "docs/handoffs/continuous-autonomy/HF-12-03.md",
+      "planning_status": "needs_architecture_binding",
+      "design_status": "design_specified",
+      "new_paths": [
+        "core/orchestrator/target_journey.py",
+        "tests/test_target_journey_rollback.py"
+      ],
+      "read_only_paths": [
+        "All paths outside allowed_paths; especially governance, verifiers and other project checkouts"
+      ],
+      "successors": [
+        "HF-12-04"
+      ],
+      "validate_cmd": "python -m pytest tests/test_target_journey_rollback.py -v",
+      "validation_availability": "new_test_must_be_created_and_collected_first",
+      "admission": "trusted supervisor PlanApproval + qualified role + preflight; not attested by file"
+    },
+    {
+      "ticket_id": "HF-12-04",
+      "parent_id": "HF-12",
+      "title": "Release automática por evidência",
+      "depends_on": [
+        "HF-12-03",
+        "HF-05-04"
+      ],
+      "allowed_paths": [
+        "core/orchestrator/release_pipeline.py",
+        "core/workflow/release_handlers.py",
+        "tests/test_release_evidence_chain.py"
+      ],
+      "new_test": "tests/test_release_evidence_chain.py",
+      "executor_role": "economy",
+      "environment_profile": "release-binding",
+      "binding": "HF-12-01",
+      "api": "Composed release exige receipts confiáveis preflight/build/deploy/digest/journey; booleanos legados só simulation rotulada. build→staging→aceite pago→produção→journey; falha abre reparo/rollback.",
+      "oracle": "True do chamador,stale ou outro digest não promovem; cliente aceitou mesmo digest; outros projetos continuam.",
+      "priority": "P0",
+      "origin": "user-demand",
+      "plan_version": "1.0",
+      "baseline_sha": "83e5298eb231599076811802dceac8575c7f6feb",
+      "implementation_status": "not_started",
+      "operational_status": "not_verified",
+      "canonical_plan": "docs/CONTINUOUS_AUTONOMY_PLAN_2026-09-18.md",
+      "handoff_ref": "docs/handoffs/continuous-autonomy/HF-12-04.md",
+      "planning_status": "needs_architecture_binding",
+      "design_status": "design_specified",
+      "new_paths": [
+        "core/workflow/release_handlers.py",
+        "tests/test_release_evidence_chain.py"
+      ],
+      "read_only_paths": [
+        "All paths outside allowed_paths; especially governance, verifiers and other project checkouts"
+      ],
+      "successors": [
+        "HF-03-08"
+      ],
+      "validate_cmd": "python -m pytest tests/test_release_evidence_chain.py -v",
+      "validation_availability": "new_test_must_be_created_and_collected_first",
+      "admission": "trusted supervisor PlanApproval + qualified role + preflight; not attested by file"
+    },
+    {
+      "ticket_id": "HF-10-01",
+      "parent_id": "HF-10",
+      "title": "Memória por eventos e contexto fixado",
+      "depends_on": [
+        "HF-05-04"
+      ],
+      "allowed_paths": [
+        "core/workflow/learning_handlers.py",
+        "core/learning/service.py",
+        "tests/test_learning_event_chain.py"
+      ],
+      "new_test": "tests/test_learning_event_chain.py",
+      "executor_role": "economy",
+      "environment_profile": "local",
+      "binding": null,
+      "api": "ObservationHandler por event_id+consumer_version; ContextLoader.get(job) usa get_selective_context e fixa memory_version; scope project/global explícito; Pack saída sem ack humano.",
+      "oracle": "Restart preserva regra; proposta/rejeitada não entra prompt; própria notificação não recursa; pack falhou não bloqueia; dados privados não cruzam projetos.",
+      "priority": "P1",
+      "origin": "user-demand",
+      "plan_version": "1.0",
+      "baseline_sha": "83e5298eb231599076811802dceac8575c7f6feb",
+      "implementation_status": "not_started",
+      "operational_status": "not_verified",
+      "canonical_plan": "docs/CONTINUOUS_AUTONOMY_PLAN_2026-09-18.md",
+      "handoff_ref": "docs/handoffs/continuous-autonomy/HF-10-01.md",
+      "planning_status": "waiting_dependency",
+      "design_status": "design_specified",
+      "new_paths": [
+        "core/workflow/learning_handlers.py",
+        "tests/test_learning_event_chain.py"
+      ],
+      "read_only_paths": [
+        "All paths outside allowed_paths; especially governance, verifiers and other project checkouts"
+      ],
+      "successors": [
+        "HF-10-02",
+        "HF-25-01"
+      ],
+      "validate_cmd": "python -m pytest tests/test_learning_event_chain.py -v",
+      "validation_availability": "new_test_must_be_created_and_collected_first",
+      "admission": "trusted supervisor PlanApproval + qualified role + preflight; not attested by file"
+    },
+    {
+      "ticket_id": "HF-10-02",
+      "parent_id": "HF-10",
+      "title": "Pesquisa ligada às decisões",
+      "depends_on": [
+        "HF-10-01",
+        "HF-07-02"
+      ],
+      "allowed_paths": [
+        "core/workflow/research_handler.py",
+        "core/learning/research_dispatch.py",
+        "tests/test_research_dispatch.py"
+      ],
+      "new_test": "tests/test_research_dispatch.py",
+      "executor_role": "economy",
+      "environment_profile": "local",
+      "binding": "HF-07-01",
+      "api": "ResearchHandler por question/version/scope; ledger fontes primárias,trecho/hash/data/decisão/licença; bloqueante só da decisão,exploratória budget/pool separado.",
+      "oracle": "Fonte indisponível não vira fato; pesquisa vencida agenda; mudar contrato só por high; query deduplicada não esgota cota.",
+      "priority": "P1",
+      "origin": "user-demand",
+      "plan_version": "1.0",
+      "baseline_sha": "83e5298eb231599076811802dceac8575c7f6feb",
+      "implementation_status": "not_started",
+      "operational_status": "not_verified",
+      "canonical_plan": "docs/CONTINUOUS_AUTONOMY_PLAN_2026-09-18.md",
+      "handoff_ref": "docs/handoffs/continuous-autonomy/HF-10-02.md",
+      "planning_status": "needs_architecture_binding",
+      "design_status": "design_specified",
+      "new_paths": [
+        "core/workflow/research_handler.py",
+        "core/learning/research_dispatch.py",
+        "tests/test_research_dispatch.py"
+      ],
+      "read_only_paths": [
+        "All paths outside allowed_paths; especially governance, verifiers and other project checkouts"
+      ],
+      "successors": [
+        "HF-03-08"
+      ],
+      "validate_cmd": "python -m pytest tests/test_research_dispatch.py -v",
+      "validation_availability": "new_test_must_be_created_and_collected_first",
+      "admission": "trusted supervisor PlanApproval + qualified role + preflight; not attested by file"
+    },
+    {
+      "ticket_id": "HF-25-01",
+      "parent_id": "HF-25",
+      "title": "Evolução avaliada e aplicada após restart",
+      "depends_on": [
+        "HF-10-01",
+        "HF-09-01",
+        "HF-26-03"
+      ],
+      "allowed_paths": [
+        "core/workflow/evolution_handlers.py",
+        "core/evolution/engine.py",
+        "tests/test_evolution_event_chain.py"
+      ],
+      "new_test": "tests/test_evolution_event_chain.py",
+      "executor_role": "economy",
+      "environment_profile": "local",
+      "binding": "HF-09-01",
+      "api": "propose→evaluate_candidate por distinto→promote_candidate→context/catalog version→measurement/rollback; holdout/política congelados; não alterar jobs correntes; export sanitizado elegível.",
+      "oracle": "Candidato mudando próprio verificador rejeitado; ruim falha holdout; bom consumido após restart; regressão restaura snapshot e bloqueia nova aplicação.",
+      "priority": "P1",
+      "origin": "user-demand",
+      "plan_version": "1.0",
+      "baseline_sha": "83e5298eb231599076811802dceac8575c7f6feb",
+      "implementation_status": "not_started",
+      "operational_status": "not_verified",
+      "canonical_plan": "docs/CONTINUOUS_AUTONOMY_PLAN_2026-09-18.md",
+      "handoff_ref": "docs/handoffs/continuous-autonomy/HF-25-01.md",
+      "planning_status": "needs_architecture_binding",
+      "design_status": "design_specified",
+      "new_paths": [
+        "core/workflow/evolution_handlers.py",
+        "tests/test_evolution_event_chain.py"
+      ],
+      "read_only_paths": [
+        "All paths outside allowed_paths; especially governance, verifiers and other project checkouts"
+      ],
+      "successors": [
+        "HF-03-08"
+      ],
+      "validate_cmd": "python -m pytest tests/test_evolution_event_chain.py -v",
+      "validation_availability": "new_test_must_be_created_and_collected_first",
+      "admission": "trusted supervisor PlanApproval + qualified role + preflight; not attested by file"
+    },
+    {
+      "ticket_id": "HF-13-01",
+      "parent_id": "HF-13",
+      "title": "Prontidão e evidência no roadmap",
+      "depends_on": [
+        "HF-26-01"
+      ],
+      "allowed_paths": [
+        "core/roadmap/sources.py",
+        "core/roadmap/models.py",
+        "core/roadmap/service.py",
+        "tests/test_roadmap_operational_evidence.py"
+      ],
+      "new_test": "tests/test_roadmap_operational_evidence.py",
+      "executor_role": "economy",
+      "environment_profile": "local",
+      "binding": null,
+      "api": "Campos opcionais planning/implementation/operational_status, enrich plan.json por ID completo; glob relatório é documentary_unverified não completed. Conclusão só receipt vinculado e confiável.",
+      "oracle": "Relatório falso/prefixo pai-filho não concluem; fonte offline stale; IDs/DAG sem truncar. Ajuste de expectativa histórica requer high em vez de enfraquecer teste.",
+      "priority": "P0",
+      "origin": "user-demand",
+      "plan_version": "1.0",
+      "baseline_sha": "83e5298eb231599076811802dceac8575c7f6feb",
+      "implementation_status": "not_started",
+      "operational_status": "not_verified",
+      "canonical_plan": "docs/CONTINUOUS_AUTONOMY_PLAN_2026-09-18.md",
+      "handoff_ref": "docs/handoffs/continuous-autonomy/HF-13-01.md",
+      "planning_status": "waiting_dependency",
+      "design_status": "design_specified",
+      "new_paths": [
+        "tests/test_roadmap_operational_evidence.py"
+      ],
+      "read_only_paths": [
+        "All paths outside allowed_paths; especially governance, verifiers and other project checkouts"
+      ],
+      "successors": [
+        "HF-13-02"
+      ],
+      "validate_cmd": "python -m pytest tests/test_roadmap_operational_evidence.py -v",
+      "validation_availability": "new_test_must_be_created_and_collected_first",
+      "admission": "trusted supervisor PlanApproval + qualified role + preflight; not attested by file"
+    },
+    {
+      "ticket_id": "HF-13-02",
+      "parent_id": "HF-13",
+      "title": "Painel de progresso e estagnação",
+      "depends_on": [
+        "HF-13-01",
+        "HF-05-05"
+      ],
+      "allowed_paths": [
+        "hub/backend/service.py",
+        "hub/frontend/roadmap.js",
+        "tests/test_continuous_progress_view.py"
+      ],
+      "new_test": "tests/test_continuous_progress_view.py",
+      "executor_role": "economy",
+      "environment_profile": "local",
+      "binding": null,
+      "api": "ProgressProjection do store: oldest_eligible_age,last_dispatch/reconcile,heartbeats,ready/running/blocked,wait_reason,next_wakeup,reservas/evidence chain. Alerta deduplicado por incidente.",
+      "oracle": "Ready com slot livre >30s stalled mesmo health200; capacidade ausente tem causa/probe; offline não saudável; estados separados.",
+      "priority": "P0",
+      "origin": "user-demand",
+      "plan_version": "1.0",
+      "baseline_sha": "83e5298eb231599076811802dceac8575c7f6feb",
+      "implementation_status": "not_started",
+      "operational_status": "not_verified",
+      "canonical_plan": "docs/CONTINUOUS_AUTONOMY_PLAN_2026-09-18.md",
+      "handoff_ref": "docs/handoffs/continuous-autonomy/HF-13-02.md",
+      "planning_status": "waiting_dependency",
+      "design_status": "design_specified",
+      "new_paths": [
+        "tests/test_continuous_progress_view.py"
+      ],
+      "read_only_paths": [
+        "All paths outside allowed_paths; especially governance, verifiers and other project checkouts"
+      ],
+      "successors": [
+        "HF-03-08"
+      ],
+      "validate_cmd": "python -m pytest tests/test_continuous_progress_view.py -v",
+      "validation_availability": "new_test_must_be_created_and_collected_first",
+      "admission": "trusted supervisor PlanApproval + qualified role + preflight; not attested by file"
+    },
+    {
+      "ticket_id": "HF-15-01",
+      "parent_id": "HF-15",
+      "title": "Observador e protocolo negativo",
+      "depends_on": [
+        "HF-26-01",
+        "HF-12-01"
+      ],
+      "allowed_paths": [
+        "core/acceptance/continuous_observer.py",
+        "tests/test_continuous_observer.py",
+        "docs/handoffs/continuous-autonomy/acceptance-protocol.json"
+      ],
+      "new_test": "tests/test_continuous_observer.py",
+      "executor_role": "economy",
+      "environment_profile": "local",
+      "binding": "HF-12-01",
+      "api": "Observer separado read-only audit+target probes; correlate run/JobKey/nonce; controller só input/answer/falha autorizada, proíbe invocar fases. Congelar V01–V13 antes candidato.",
+      "oracle": "Consumidor off health200 reprova; fases manuais reprovam; evidência só candidato reprova; relógio/capacidade ausentes não PASS. Janela24h futura.",
+      "priority": "P0",
+      "origin": "user-demand",
+      "plan_version": "1.0",
+      "baseline_sha": "83e5298eb231599076811802dceac8575c7f6feb",
+      "implementation_status": "not_started",
+      "operational_status": "not_verified",
+      "canonical_plan": "docs/CONTINUOUS_AUTONOMY_PLAN_2026-09-18.md",
+      "handoff_ref": "docs/handoffs/continuous-autonomy/HF-15-01.md",
+      "planning_status": "needs_architecture_binding",
+      "design_status": "design_specified",
+      "new_paths": [
+        "core/acceptance/continuous_observer.py",
+        "tests/test_continuous_observer.py",
+        "docs/handoffs/continuous-autonomy/acceptance-protocol.json"
+      ],
+      "read_only_paths": [
+        "All paths outside allowed_paths; especially governance, verifiers and other project checkouts"
+      ],
+      "successors": [
+        "HF-03-08"
+      ],
+      "validate_cmd": "python -m pytest tests/test_continuous_observer.py -v",
+      "validation_availability": "new_test_must_be_created_and_collected_first",
+      "admission": "trusted supervisor PlanApproval + qualified role + preflight; not attested by file"
+    },
+    {
+      "ticket_id": "HF-03-07",
+      "parent_id": "HF-03",
+      "title": "Preflight por host e projeto",
+      "depends_on": [
+        "HF-05-02",
+        "HF-07-01",
+        "HF-12-01"
+      ],
+      "allowed_paths": [
+        ".factory/planning/continuous-autonomy/bindings/environments.json",
+        "docs/handoffs/continuous-autonomy/bindings/ACTIVATION.md"
+      ],
+      "new_test": "",
+      "executor_role": "high_architecture",
+      "environment_profile": "cloud-binding",
+      "binding": null,
+      "api": "Inventariar SHA/versões/identidade/rota/secret refs/scopes/ports/DNS/TLS/volumes/capacidade/backup; comandos exatos install/start/status/restart/rollback verificados dentro de grants. Alternativas antes ManualDependency.",
+      "oracle": "Notebook probe não certifica cloud; manifesto incompleto bloqueia deploy; estimativa15–35 não compra; SHA local ausente no host é dependência técnica.",
+      "priority": "P0",
+      "origin": "user-demand",
+      "plan_version": "1.0",
+      "baseline_sha": "83e5298eb231599076811802dceac8575c7f6feb",
+      "implementation_status": "not_started",
+      "operational_status": "not_verified",
+      "canonical_plan": "docs/CONTINUOUS_AUTONOMY_PLAN_2026-09-18.md",
+      "handoff_ref": "docs/handoffs/continuous-autonomy/HF-03-07.md",
+      "planning_status": "waiting_dependency",
+      "design_status": "design_specified",
+      "new_paths": [
+        ".factory/planning/continuous-autonomy/bindings/environments.json",
+        "docs/handoffs/continuous-autonomy/bindings/ACTIVATION.md"
+      ],
+      "read_only_paths": [
+        "All paths outside allowed_paths; especially governance, verifiers and other project checkouts"
+      ],
+      "successors": [
+        "HF-03-08"
+      ],
+      "validate_cmd": "python .factory/planning/continuous-autonomy/verify.py --binding HF-03-07",
+      "validation_availability": "binding_artifacts_must_exist_first; structure_not_acceptance",
+      "admission": "trusted supervisor PlanApproval + qualified role + preflight; not attested by file"
+    },
+    {
+      "ticket_id": "HF-03-08",
+      "parent_id": "HF-03",
+      "title": "Ativação isolada e fatia vertical",
+      "depends_on": [
+        "HF-03-07",
+        "HF-05-06",
+        "HF-23-01",
+        "HF-08-03",
+        "HF-08-05",
+        "HF-09-02",
+        "HF-12-04",
+        "HF-10-02",
+        "HF-25-01",
+        "HF-13-02",
+        "HF-15-01",
+        "HF-07-03"
+      ],
+      "allowed_paths": [
+        ".factory/planning/continuous-autonomy/activation-receipts.json",
+        "docs/handoffs/continuous-autonomy/ACTIVATION-RESULT.md"
+      ],
+      "new_test": "",
+      "executor_role": "operations",
+      "environment_profile": "target",
+      "binding": null,
+      "api": "Executar binding ACTIVATION imagem fixa/namespace autorizado; único input até jornada; restart controlado e rollback gate falho; operacional só escopo observado.",
+      "oracle": "Leitura externa PID/heartbeat/job/digest/jornada; sandbox não PASS real; sem fases manuais; componente não integrado impede ativação.",
+      "priority": "P0",
+      "origin": "user-demand",
+      "plan_version": "1.0",
+      "baseline_sha": "83e5298eb231599076811802dceac8575c7f6feb",
+      "implementation_status": "not_started",
+      "operational_status": "not_verified",
+      "canonical_plan": "docs/CONTINUOUS_AUTONOMY_PLAN_2026-09-18.md",
+      "handoff_ref": "docs/handoffs/continuous-autonomy/HF-03-08.md",
+      "planning_status": "waiting_dependency",
+      "design_status": "design_specified",
+      "new_paths": [
+        ".factory/planning/continuous-autonomy/activation-receipts.json",
+        "docs/handoffs/continuous-autonomy/ACTIVATION-RESULT.md"
+      ],
+      "read_only_paths": [
+        "All paths outside allowed_paths; especially governance, verifiers and other project checkouts"
+      ],
+      "successors": [
+        "HF-15-02"
+      ],
+      "validate_cmd": "python .factory/planning/continuous-autonomy/verify.py --binding HF-03-08",
+      "validation_availability": "binding_artifacts_must_exist_first; structure_not_acceptance",
+      "admission": "trusted supervisor PlanApproval + qualified role + preflight; not attested by file"
+    },
+    {
+      "ticket_id": "HF-15-02",
+      "parent_id": "HF-15",
+      "title": "Aceitação24h e expansão multi-projeto",
+      "depends_on": [
+        "HF-03-08"
+      ],
+      "allowed_paths": [
+        ".factory/planning/continuous-autonomy/acceptance-results.json",
+        "docs/handoffs/continuous-autonomy/ACCEPTANCE-RESULT.md"
+      ],
+      "new_test": "",
+      "executor_role": "independent_observer",
+      "environment_profile": "target",
+      "binding": null,
+      "api": "Executar V01–V13 com observador fixado,portfólio e novos inputs; timings/custos/incidentes/digest/rollback; capacidade insuficiente 4dev+5tests não exercitado, nunca PASS.",
+      "oracle": "Zero impulsos administrativos; aprendizado pós-restart; ruim rejeitado; bloqueio seletivo; todos gates e integração para entrega final.",
+      "priority": "P0",
+      "origin": "user-demand",
+      "plan_version": "1.0",
+      "baseline_sha": "83e5298eb231599076811802dceac8575c7f6feb",
+      "implementation_status": "not_started",
+      "operational_status": "not_verified",
+      "canonical_plan": "docs/CONTINUOUS_AUTONOMY_PLAN_2026-09-18.md",
+      "handoff_ref": "docs/handoffs/continuous-autonomy/HF-15-02.md",
+      "planning_status": "waiting_dependency",
+      "design_status": "design_specified",
+      "new_paths": [
+        ".factory/planning/continuous-autonomy/acceptance-results.json",
+        "docs/handoffs/continuous-autonomy/ACCEPTANCE-RESULT.md"
+      ],
+      "read_only_paths": [
+        "All paths outside allowed_paths; especially governance, verifiers and other project checkouts"
+      ],
+      "successors": [],
+      "validate_cmd": "python .factory/planning/continuous-autonomy/verify.py --binding HF-15-02",
+      "validation_availability": "binding_artifacts_must_exist_first; structure_not_acceptance",
+      "admission": "trusted supervisor PlanApproval + qualified role + preflight; not attested by file"
+    }
+  ]
+}
