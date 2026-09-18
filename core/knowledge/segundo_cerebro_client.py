@@ -168,6 +168,7 @@ except Exception as exc:
 
         try:
             cmd = [python_bin, "-c", script, json.dumps(arguments), tool_name]
+            timeout_sec = int(os.getenv("SEGUNDO_CEREBRO_TIMEOUT", "60"))
             result = subprocess.run(
                 cmd,
                 cwd=str(self.repo_root),
@@ -175,7 +176,7 @@ except Exception as exc:
                 text=True,
                 encoding="utf-8",
                 errors="replace",
-                timeout=30,
+                timeout=timeout_sec,
                 check=False,
             )
             if result.returncode != 0:
