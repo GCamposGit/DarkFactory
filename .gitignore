@@ -53,6 +53,8 @@ models/checkpoints/
 .factory/notifications/
 .factory/marketing/
 .factory/portfolio/
+.factory/catalog/
+.factory/evolution/
 .factory/*.db*
 
 

@@ -1353,6 +1353,146 @@ def check_token_quotas_endpoint(
     return {"emitted_alerts": alerts, "count": len(alerts)}
 
 
+# =====================================================================
+# HF-25: Factory Self-Evolution & Cross-Project Reusable Catalog
+# =====================================================================
+
+@router.get("/evolution/status")
+def get_evolution_status_endpoint(
+    status: Optional[str] = Query(None, description="Filter proposals by status"),
+) -> Dict[str, Any]:
+    """Returns status report of the factory self-evolution subsystem."""
+    from core.evolution.engine import FactoryEvolutionEngine
+    from core.evolution.models import EvolutionStatus
+    engine = FactoryEvolutionEngine()
+    filter_status = EvolutionStatus(status) if status else None
+    report = engine.get_report()
+    proposals = engine.list_proposals(status=filter_status)
+    return {
+        "total_proposals": report.total_proposals,
+        "active_promotions": report.active_promotions,
+        "rejected_count": report.rejected_count,
+        "proposals": [p.model_dump(mode="json") for p in proposals],
+    }
+
+
+@router.post("/evolution/propose")
+def create_evolution_proposal_endpoint(
+    target_kind: str = Body(..., description="Target category (skill_instruction, context_rule, etc.)"),
+    target_path: str = Body(..., description="Relative path in repo"),
+    trigger: str = Body(..., description="Evolution trigger"),
+    patch_content: str = Body(..., description="Complete replacement text or patch"),
+    rationale: str = Body(..., description="Justification and RCA evidence"),
+    service: HubService = Depends(require_owner_session),
+) -> Dict[str, Any]:
+    """Registers a new evolutionary mutation proposal."""
+    from core.evolution.engine import FactoryEvolutionEngine
+    engine = FactoryEvolutionEngine()
+    try:
+        prop = engine.propose(
+            target_kind=target_kind,
+            target_path=target_path,
+            trigger=trigger,
+            patch_content=patch_content,
+            rationale=rationale,
+        )
+        return {"success": True, "proposal": prop.model_dump(mode="json")}
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@router.post("/evolution/evaluate")
+def evaluate_evolution_proposal_endpoint(
+    proposal_id: str = Body(..., embed=True, description="Proposal ID to evaluate"),
+    holdout_cmd: Optional[str] = Body(None, embed=True, description="Optional custom holdout command"),
+    service: HubService = Depends(require_owner_session),
+) -> Dict[str, Any]:
+    """Evaluates a candidate proposal in the isolated holdout sandbox."""
+    from core.evolution.engine import FactoryEvolutionEngine
+    engine = FactoryEvolutionEngine()
+    try:
+        result = engine.evaluate_candidate(proposal_id, holdout_cmd=holdout_cmd)
+        return {"success": result.passed, "result": result.model_dump(mode="json")}
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@router.post("/evolution/promote")
+def promote_evolution_proposal_endpoint(
+    proposal_id: str = Body(..., embed=True, description="Approved proposal ID to promote"),
+    service: HubService = Depends(require_owner_session),
+) -> Dict[str, Any]:
+    """Promotes an approved proposal to active status and captures a rollback snapshot."""
+    from core.evolution.engine import FactoryEvolutionEngine
+    engine = FactoryEvolutionEngine()
+    try:
+        snapshot = engine.promote_candidate(proposal_id)
+        return {"success": True, "snapshot": snapshot.model_dump(mode="json")}
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@router.post("/evolution/rollback")
+def rollback_evolution_proposal_endpoint(
+    proposal_id: str = Body(..., embed=True, description="Proposal ID to revert"),
+    service: HubService = Depends(require_owner_session),
+) -> Dict[str, Any]:
+    """Rolls back an evolutionary mutation, restoring previous file state."""
+    from core.evolution.engine import FactoryEvolutionEngine
+    engine = FactoryEvolutionEngine()
+    try:
+        ok = engine.rollback_candidate(proposal_id)
+        return {"success": ok, "proposal_id": proposal_id}
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@router.get("/catalog/components")
+def list_catalog_components_endpoint(
+    kind: Optional[str] = Query(None, description="Filter components by kind"),
+) -> Dict[str, Any]:
+    """Returns reusable cross-project components available in the catalog."""
+    from core.catalog.manager import CrossProjectCatalogManager
+    from core.catalog.models import ComponentKind
+    manager = CrossProjectCatalogManager()
+    filter_kind = ComponentKind(kind) if kind else None
+    components = manager.list_components(kind=filter_kind)
+    return {
+        "count": len(components),
+        "components": [c.model_dump(mode="json") for c in components],
+    }
+
+
+@router.post("/catalog/sync")
+def sync_catalog_component_endpoint(
+    component_id: str = Body(..., description="Component ID to synchronize"),
+    target_project_id: str = Body(..., description="Target project identifier"),
+    overwrite: bool = Body(True, description="Whether to overwrite existing files"),
+    service: HubService = Depends(require_owner_session),
+) -> Dict[str, Any]:
+    """Synchronizes a reusable catalog component into a target registered project."""
+    from core.catalog.manager import CrossProjectCatalogManager
+    manager = CrossProjectCatalogManager()
+    try:
+        result = manager.sync_to_project(
+            component_id=component_id,
+            target_project_id=target_project_id,
+            overwrite=overwrite,
+        )
+        return {"success": result.success, "result": result.model_dump(mode="json")}
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+
 
 
 
