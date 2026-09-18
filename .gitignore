@@ -55,6 +55,7 @@ models/checkpoints/
 .factory/portfolio/
 .factory/catalog/
 .factory/evolution/
+.factory/enterprise/
 .factory/*.db*
 
 

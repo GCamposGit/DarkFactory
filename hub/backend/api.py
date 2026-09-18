@@ -1492,6 +1492,101 @@ def sync_catalog_component_endpoint(
         raise HTTPException(status_code=400, detail=str(exc))
 
 
+# =====================================================================
+# HF-24: Enterprise Profile On-Demand (Residency, Audit Chain, SLA)
+# =====================================================================
+
+@router.get("/enterprise/status")
+def get_enterprise_status_endpoint(
+    project: str = Query(..., description="Target project identifier"),
+) -> Dict[str, Any]:
+    """Returns enterprise profile status, configuration, audit chain and SLA health."""
+    from core.enterprise.policy import EnterprisePolicyGuard
+    guard = EnterprisePolicyGuard()
+    cfg = guard.get_config(project)
+    sla = guard.sla_guard.check_sla(cfg)
+    audit = guard.audit_chain.verify_integrity(project)
+    return {
+        "project_id": project,
+        "config": cfg.model_dump(mode="json"),
+        "sla": sla.model_dump(mode="json"),
+        "audit_chain": audit.model_dump(mode="json"),
+    }
+
+
+@router.post("/enterprise/configure")
+def configure_enterprise_endpoint(
+    project_id: str = Body(..., description="Project identifier"),
+    enabled: bool = Body(True, description="Enable enterprise profile"),
+    residency_mode: str = Body("local_only", description="Residency mode"),
+    max_rpo_minutes: int = Body(60, description="Max acceptable RPO window"),
+    max_rto_minutes: int = Body(30, description="Max acceptable RTO window"),
+    require_owner_signoff: bool = Body(True, description="Strict owner approval for production"),
+    service: HubService = Depends(require_owner_session),
+) -> Dict[str, Any]:
+    """Configures enterprise security and residency parameters for a project."""
+    from core.enterprise.policy import EnterprisePolicyGuard
+    from core.enterprise.models import DataResidencyMode, EnterpriseProjectConfig
+    guard = EnterprisePolicyGuard()
+    cfg = EnterpriseProjectConfig(
+        project_id=project_id,
+        enabled=enabled,
+        residency_mode=DataResidencyMode(residency_mode),
+        max_rpo_minutes=max_rpo_minutes,
+        max_rto_minutes=max_rto_minutes,
+        require_owner_signoff=require_owner_signoff,
+    )
+    guard.set_config(cfg)
+    return {"success": True, "config": cfg.model_dump(mode="json")}
+
+
+@router.get("/enterprise/audit-trail")
+def get_enterprise_audit_trail_endpoint(
+    project: Optional[str] = Query(None, description="Optional project filter"),
+    service: HubService = Depends(require_owner_session),
+) -> Dict[str, Any]:
+    """Retrieves immutable audit chain records."""
+    from core.enterprise.policy import EnterprisePolicyGuard
+    guard = EnterprisePolicyGuard()
+    events = guard.audit_chain.load_events(project_id=project)
+    return {
+        "count": len(events),
+        "events": [e.model_dump(mode="json") for e in events[-100:]],
+    }
+
+
+@router.post("/enterprise/verify-audit")
+def verify_enterprise_audit_endpoint(
+    project: Optional[str] = Body(None, embed=True, description="Optional project filter"),
+) -> Dict[str, Any]:
+    """Mathematically verifies cryptographic audit chain integrity."""
+    from core.enterprise.policy import EnterprisePolicyGuard
+    guard = EnterprisePolicyGuard()
+    res = guard.audit_chain.verify_integrity(project_id=project)
+    return res.model_dump(mode="json")
+
+
+@router.post("/enterprise/evaluate-deploy")
+def evaluate_enterprise_deploy_endpoint(
+    project_id: str = Body(..., description="Project identifier"),
+    target_environment: str = Body("production", description="Target environment"),
+    owner_approved: bool = Body(False, description="Owner signoff confirmation"),
+    actor_role: str = Body("operator", description="Actor role"),
+    service: HubService = Depends(require_owner_session),
+) -> Dict[str, Any]:
+    """Evaluates enterprise production deployment gate under Scenario G8."""
+    from core.enterprise.policy import EnterprisePolicyGuard
+    guard = EnterprisePolicyGuard()
+    dec = guard.evaluate_production_release(
+        project_id=project_id,
+        target_environment=target_environment,
+        owner_approved=owner_approved,
+        actor_role=actor_role,
+    )
+    return dec.model_dump(mode="json")
+
+
+
 
 
 
