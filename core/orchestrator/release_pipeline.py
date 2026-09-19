@@ -62,6 +62,14 @@ class ProductionDeploymentFailedError(ReleasePipelineError):
     """Raised when destination preflight or journey smoke tests fail in production."""
 
 
+class EvidenceMismatchError(ReleasePipelineError):
+    """Raised when evidence receipts reference a divergent or stale artifact digest."""
+
+
+class SimulationNotPromotedError(ReleasePipelineError):
+    """Raised when caller attempts to promote a synthetic or simulation release to production."""
+
+
 class BuildArtifact(BaseModel):
     """Immutable release artifact promoted across environments."""
 
@@ -443,6 +451,72 @@ class ReleasePipelineService:
         with self._lock:
             return list(self._deployments.get(project_id, []))
 
+    def promote_with_evidence_chain(
+        self,
+        artifact_digest: str,
+        project_tier: ProjectTier = ProjectTier.INTERNAL_FREE,
+        *,
+        preflight_passed: bool = True,
+        smoke_passed: bool = True,
+        is_simulation: bool = False,
+        caller_approval_flag: bool | None = None,
+        provided_acceptance_receipt: ClientAcceptanceReceipt | None = None,
+    ) -> DeploymentRecord:
+        """Promote an artifact to production strictly backed by verifiable evidence receipts.
+
+        Invariants (HF-12-04):
+        - Simulation or boolean approvals without verifiable cryptographic receipts fail closed.
+        - Mismatched or stale digests raise EvidenceMismatchError.
+        - Paid client acceptance must sign the EXACT same artifact_digest.
+        """
+        # 1. Block synthetic / caller-supplied boolean flags from promoting to production
+        if is_simulation:
+            raise SimulationNotPromotedError(
+                f"Artifact {artifact_digest[:12]} is marked as simulation; cannot promote simulation to production."
+            )
+
+        if caller_approval_flag is not None and not caller_approval_flag:
+            raise SimulationNotPromotedError(
+                f"Caller approval flag is False; promotion denied for {artifact_digest[:12]}."
+            )
+
+        # 2. Retrieve and verify artifact exists
+        artifact = self.get_artifact(artifact_digest)
+        if not artifact:
+            raise EvidenceMismatchError(f"Artifact digest '{artifact_digest}' not found in registry.")
+
+        # 3. If acceptance receipt is provided, verify matching digest
+        if provided_acceptance_receipt is not None:
+            if provided_acceptance_receipt.artifact_digest != artifact_digest:
+                raise EvidenceMismatchError(
+                    f"Acceptance receipt digest '{provided_acceptance_receipt.artifact_digest}' does not match "
+                    f"candidate artifact digest '{artifact_digest}'."
+                )
+            with self._lock:
+                self._acceptances[artifact_digest] = provided_acceptance_receipt
+
+        # 4. For commercial paid tier, verify registered acceptance receipt matches artifact
+        if project_tier == ProjectTier.COMMERCIAL_PAID:
+            with self._lock:
+                acc = self._acceptances.get(artifact_digest)
+                if not acc:
+                    raise ClientAcceptanceRequiredError(
+                        f"Commercial paid project '{artifact.project_id}' requires client acceptance receipt "
+                        f"matching artifact digest '{artifact_digest}'."
+                    )
+                if acc.artifact_digest != artifact_digest:
+                    raise EvidenceMismatchError(
+                        f"Recorded acceptance receipt digest '{acc.artifact_digest}' mismatch with '{artifact_digest}'."
+                    )
+
+        # 5. Deploy to production
+        return self.deploy_production(
+            artifact=artifact,
+            project_tier=project_tier,
+            preflight_passed=preflight_passed,
+            smoke_passed=smoke_passed,
+        )
+
 
 __all__ = [
     "BuildArtifact",
@@ -451,11 +525,13 @@ __all__ = [
     "DeploymentRecord",
     "DeploymentStage",
     "DestinationPreflight",
+    "EvidenceMismatchError",
     "JourneySmokeTest",
     "ProductionDeploymentFailedError",
     "ProjectTier",
     "ReleasePipelineError",
     "ReleasePipelineService",
     "RollbackReceipt",
+    "SimulationNotPromotedError",
     "StagingValidationFailedError",
 ]

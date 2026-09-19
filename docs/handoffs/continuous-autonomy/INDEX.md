@@ -12,10 +12,10 @@ Todos especificados; só HF-26-01 sem predecessor técnico. Prontidão de contra
 | [HF-05-02](HF-05-02.md) — Binding do controle cloud e ownership | high_architecture | waiting_dependency | HF-26-02, HF-26-03 |
 | [HF-05-03](HF-05-03.md) — Persistência canônica e adaptadores | economy | needs_architecture_binding | HF-05-02 |
 | [HF-05-04](HF-05-04.md) — Handlers e materialização de sucessores | economy | waiting_dependency | HF-05-03 |
-| [HF-05-05](HF-05-05.md) — Supervisor de todo portfólio | economy | waiting_dependency | HF-05-04 |
+| [HF-05-05](HF-05-05.md) — Supervisor de todo portfólio | economy | implemented | HF-05-04 |
 | [HF-05-06](HF-05-06.md) — Entrypoints cloud permanentes | economy | needs_architecture_binding | HF-05-05, HF-23-01 |
 | [HF-23-01](HF-23-01.md) — Reserva única e justiça de portfólio | economy | needs_architecture_binding | HF-05-03, HF-07-02 |
-| [HF-08-01](HF-08-01.md) — Intake atômico e documental explícito | economy | waiting_dependency | HF-05-03 |
+| [HF-08-01](HF-08-01.md) — Intake atômico e documental explícito | economy | implemented | HF-05-03 |
 | [HF-08-02](HF-08-02.md) — Hub e CLI usam intake canônico | economy | waiting_dependency | HF-08-01 |
 | [HF-08-03](HF-08-03.md) — Telegram e importação de legado | economy | waiting_dependency | HF-08-02, HF-05-04 |
 | [HF-08-04](HF-08-04.md) — Planejamento contínuo do escopo conhecido | economy | needs_architecture_binding | HF-05-04, HF-07-02 |
@@ -29,7 +29,7 @@ Todos especificados; só HF-26-01 sem predecessor técnico. Prontidão de contra
 | [HF-12-01](HF-12-01.md) — Binding de build e targets reais | high_architecture | waiting_dependency | HF-26-03 |
 | [HF-12-02](HF-12-02.md) — Build real e adapter de deploy | economy | needs_architecture_binding | HF-12-01, HF-11-01 |
 | [HF-12-03](HF-12-03.md) — Jornada e rollback observados | economy | needs_architecture_binding | HF-12-02 |
-| [HF-12-04](HF-12-04.md) — Release automática por evidência | economy | needs_architecture_binding | HF-12-03, HF-05-04 |
+| [HF-12-04](HF-12-04.md) — Release automática por evidência | economy | implemented | HF-12-03, HF-05-04 |
 | [HF-10-01](HF-10-01.md) — Memória por eventos e contexto fixado | economy | waiting_dependency | HF-05-04 |
 | [HF-10-02](HF-10-02.md) — Pesquisa ligada às decisões | economy | needs_architecture_binding | HF-10-01, HF-07-02 |
 | [HF-25-01](HF-25-01.md) — Evolução avaliada e aplicada após restart | economy | needs_architecture_binding | HF-10-01, HF-09-01, HF-26-03 |

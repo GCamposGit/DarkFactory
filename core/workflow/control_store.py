@@ -69,6 +69,18 @@ class ControlStore(Protocol):
         """Atomically emit an event to the outbox queue."""
         ...
 
+    def list_active_projects(self, cursor: str | None = None, limit: int = 100) -> tuple[list[str], str | None]:
+        """Stable paginated query of active project IDs ordered deterministically."""
+        ...
+
+    def get_ready_age_metrics(self, now: datetime) -> dict[str, Any]:
+        """Query ready-age and claim distribution for pending jobs."""
+        ...
+
+    def get_pending_outbox(self, limit: int = 100) -> list[dict[str, Any]]:
+        """Query pending outbox events for publication/materialization."""
+        ...
+
 
 class SQLiteControlStore:
     """Canonical SQLite implementation of ControlStore for local-first execution.
@@ -1099,5 +1111,115 @@ class SQLiteControlStore:
         except Exception:
             conn.rollback()
             raise
+        finally:
+            conn.close()
+
+    def list_active_projects(self, cursor: str | None = None, limit: int = 100) -> tuple[list[str], str | None]:
+        """Stable paginated query of active project IDs ordered deterministically."""
+        conn = self._connect()
+        try:
+            cur = conn.cursor()
+            if cursor:
+                cur.execute(
+                    """
+                    SELECT DISTINCT project_id FROM runs
+                    WHERE status = 'active' AND project_id > ?
+                    ORDER BY project_id ASC
+                    LIMIT ?
+                    """,
+                    (cursor, limit),
+                )
+            else:
+                cur.execute(
+                    """
+                    SELECT DISTINCT project_id FROM runs
+                    WHERE status = 'active'
+                    ORDER BY project_id ASC
+                    LIMIT ?
+                    """,
+                    (limit,),
+                )
+            rows = [r[0] for r in cur.fetchall()]
+            next_cursor = rows[-1] if len(rows) == limit else None
+            return rows, next_cursor
+        finally:
+            conn.close()
+
+    def get_ready_age_metrics(self, now: datetime) -> dict[str, Any]:
+        """Query ready-age and claim distribution for pending jobs."""
+        conn = self._connect()
+        try:
+            cur = conn.cursor()
+            cur.execute("SELECT COUNT(*) FROM runs WHERE status = 'active'")
+            active_runs = cur.fetchone()[0]
+
+            cur.execute(
+                """
+                SELECT j.run_id, r.project_id, j.ticket_id, j.stage, j.status, j.created_at, j.updated_at
+                FROM jobs j
+                JOIN runs r ON j.run_id = r.run_id
+                WHERE j.status IN ('pending', 'running')
+                """
+            )
+            rows = cur.fetchall()
+
+            pending_count = 0
+            running_count = 0
+            max_ready_age_sec = 0.0
+            starved_projects: set[str] = set()
+
+            for row in rows:
+                status = row["status"]
+                created_dt = datetime.fromisoformat(row["created_at"])
+                age_sec = max(0.0, (now - created_dt).total_seconds())
+                if status == "pending":
+                    pending_count += 1
+                    if age_sec > max_ready_age_sec:
+                        max_ready_age_sec = age_sec
+                    if age_sec >= 30.0:
+                        starved_projects.add(row["project_id"])
+                elif status == "running":
+                    running_count += 1
+
+            return {
+                "active_runs": active_runs,
+                "pending_count": pending_count,
+                "running_count": running_count,
+                "max_ready_age_sec": max_ready_age_sec,
+                "starved_projects": sorted(starved_projects),
+            }
+        finally:
+            conn.close()
+
+    def get_pending_outbox(self, limit: int = 100) -> list[dict[str, Any]]:
+        """Query pending outbox events for publication/materialization."""
+        conn = self._connect()
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                """
+                SELECT outbox_id, event_type, aggregate_type, aggregate_id, payload,
+                       target_system, status, retry_count, created_at
+                FROM outbox
+                WHERE status = 'pending'
+                ORDER BY outbox_id ASC
+                LIMIT ?
+                """,
+                (limit,),
+            )
+            out: list[dict[str, Any]] = []
+            for row in cur.fetchall():
+                out.append({
+                    "outbox_id": row["outbox_id"],
+                    "event_type": row["event_type"],
+                    "aggregate_type": row["aggregate_type"],
+                    "aggregate_id": row["aggregate_id"],
+                    "payload": json.loads(row["payload"]),
+                    "target_system": row["target_system"],
+                    "status": row["status"],
+                    "retry_count": row["retry_count"],
+                    "created_at": row["created_at"],
+                })
+            return out
         finally:
             conn.close()

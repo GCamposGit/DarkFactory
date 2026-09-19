@@ -256,3 +256,42 @@ def reconcile_environment_manifest(
     )
 
     return merged_manifest, diff
+
+
+class PortfolioReconciliationReport(BaseModel):
+    """Structured report of portfolio-level lease, state, and outbox reconciliation."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    cycle_id: str
+    reconciled_at: datetime
+    visited_projects: list[str] = Field(default_factory=list)
+    repaired_keys_count: int = 0
+    repaired_details: list[dict[str, Any]] = Field(default_factory=list)
+    duration_ms: float = 0.0
+    sla_met: bool = True
+
+
+def reconcile_portfolio_state(
+    store: Any,
+    now: datetime | None = None,
+    *,
+    cursor: str | None = None,
+    limit: int = 100,
+) -> PortfolioReconciliationReport:
+    """Execute a portfolio-wide reconciliation sweep of expired leases and state repairs."""
+    effective_now = now or datetime.now(UTC)
+    start_time = datetime.now(UTC)
+
+    page = store.reconcile(effective_now, cursor=cursor, limit=limit)
+    duration_ms = (datetime.now(UTC) - start_time).total_seconds() * 1000.0
+
+    return PortfolioReconciliationReport(
+        cycle_id=page.cycle_id,
+        reconciled_at=effective_now,
+        visited_projects=list(page.visited_projects),
+        repaired_keys_count=len(page.repaired_keys),
+        repaired_details=list(page.repaired_keys),
+        duration_ms=round(duration_ms, 2),
+        sla_met=duration_ms <= 60000.0,
+    )

@@ -85,12 +85,18 @@ class IntegratedIntakeService:
         self,
         demand: DemandInput,
         *,
+        mode: str | None = None,
         runtime: WorkflowRuntime | None = None,
+        control_store: Any | None = None,
         force_heuristic: bool = False,
         timeout: float | None = None,
         budget_ceiling: float = 10.0,
     ) -> dict[str, Any]:
         """Receive a user demand, evaluate Grill clarity (Scenario G1), and register durable run."""
+        effective_mode = mode or ("autonomous" if (runtime is not None or control_store is not None) else "documentary")
+        if effective_mode == "autonomous" and runtime is None and control_store is None:
+            raise ValueError("Autonomous mode requires a durable control store or WorkflowRuntime.")
+
         # 1. Generate or assign ticket ID and create ticket
         ticket_id = self.store.next_ticket_id(demand.project_id)
         raw_ticket = UserTicket(
@@ -106,27 +112,33 @@ class IntegratedIntakeService:
         )
         saved_ticket = self.store.save_ticket(raw_ticket)
 
-        # 2. Register run in durable WorkflowRuntime if present
+        # 2. Register run in durable WorkflowRuntime if present and in autonomous mode
         run_record: RunRecord | None = None
-        run_id = f"run_{saved_ticket.id.lower().replace('-', '_')}"
-        if runtime is not None:
-            run_record = runtime.register_run(
-                run_id=run_id,
-                project_id=saved_ticket.project_id,
-                initial_state=WorkflowState.PLANNING_HIGH,
-                budget_ceiling=budget_ceiling,
-            )
-            # Register initial intake/grill job
-            runtime.enqueue_job(
-                JobSpec(
-                    job_id=f"job_grill_{saved_ticket.id.lower().replace('-', '_')}",
+        run_id: str | None = None
+        if effective_mode == "autonomous":
+            run_id = f"run_{saved_ticket.id.lower().replace('-', '_')}"
+            if runtime is not None:
+                run_record = runtime.register_run(
                     run_id=run_id,
                     project_id=saved_ticket.project_id,
-                    stage="grill",
-                    priority=100,
-                    dedupe_key=f"grill_intake:{saved_ticket.id}",
+                    initial_state=WorkflowState.PLANNING_HIGH,
+                    budget_ceiling=budget_ceiling,
                 )
-            )
+                # Register initial intake/grill job
+                runtime.enqueue_job(
+                    JobSpec(
+                        job_id=f"job_grill_{saved_ticket.id.lower().replace('-', '_')}",
+                        run_id=run_id,
+                        project_id=saved_ticket.project_id,
+                        stage="grill",
+                        priority=100,
+                        dedupe_key=f"grill_intake:{saved_ticket.id}",
+                    )
+                )
+        else:
+            # Documentary mode: execution IDs are null (no fictitious run created)
+            run_id = None
+            run_record = None
 
         # 3. Conduct integrated Grill (Scenario G1)
         grill_record, grill_session = self.grill_engine.conduct_integrated_grill(
@@ -138,7 +150,7 @@ class IntegratedIntakeService:
         status = "ready_for_spec"
         if not grill_record.ready_for_spec:
             status = "waiting_human"
-            if runtime is not None and run_record is not None:
+            if effective_mode == "autonomous" and runtime is not None and run_record is not None and run_id is not None:
                 runtime.transition_run(
                     run_id=run_id,
                     target_state=WorkflowState.WAITING_HUMAN,
@@ -153,6 +165,7 @@ class IntegratedIntakeService:
             "grill_record": grill_record,
             "grill_session": grill_session,
             "status": status,
+            "mode": effective_mode,
         }
 
     def submit_grill_answers(
