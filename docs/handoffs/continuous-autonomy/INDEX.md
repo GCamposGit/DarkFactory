@@ -9,8 +9,8 @@ Todos especificados; só HF-26-01 sem predecessor técnico. Prontidão de contra
 | [HF-26-01](HF-26-01.md) — Resolvedor puro de política efetiva | economy | implemented | — |
 | [HF-26-02](HF-26-02.md) — Aplicar precedência sem ampliar permissões | economy | implemented | HF-26-01 |
 | [HF-26-03](HF-26-03.md) — Reconciliar baseline local e remota | high_architecture | implemented | HF-26-01 |
-| [HF-05-02](HF-05-02.md) — Binding do controle cloud e ownership | high_architecture | ready_for_handoff | HF-26-02, HF-26-03 |
-| [HF-05-03](HF-05-03.md) — Persistência canônica e adaptadores | economy | needs_architecture_binding | HF-05-02 |
+| [HF-05-02](HF-05-02.md) — Binding do controle cloud e ownership | high_architecture | implemented | HF-26-02, HF-26-03 |
+| [HF-05-03](HF-05-03.md) — Persistência canônica e adaptadores | economy | ready_for_handoff | HF-05-02 |
 | [HF-05-04](HF-05-04.md) — Handlers e materialização de sucessores | economy | waiting_dependency | HF-05-03 |
 | [HF-05-05](HF-05-05.md) — Supervisor de todo portfólio | economy | implemented | HF-05-04 |
 | [HF-05-06](HF-05-06.md) — Entrypoints cloud permanentes | economy | implemented | HF-05-05, HF-23-01 |
