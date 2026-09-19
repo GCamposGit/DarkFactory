@@ -13,7 +13,10 @@ import os
 import re
 import urllib.error
 import urllib.request
+from datetime import UTC, datetime
 from typing import Any
+
+from pydantic import BaseModel, ConfigDict, Field
 
 from core.demands.models import (
     DemandInput,
@@ -28,6 +31,20 @@ from core.roadmap.models import (
     PlanningHorizon,
     RoadmapItemType,
     utc_now,
+)
+from core.workflow.contracts import (
+    EnvironmentKind,
+    EnvironmentManifest,
+    EnvironmentTool,
+    GrillAlternative,
+    GrillDecision,
+    GrillFact,
+    GrillRecord,
+    HandoffOrigin,
+    PlannerTier,
+    SanitizedIdentity,
+    WorkflowHandoff,
+    WorkflowState,
 )
 
 logger = logging.getLogger(__name__)
@@ -358,3 +375,404 @@ class DemandSpecifier:
                 engine_used=f"ollama:{model}",
                 cost_usd=0.0,
             )
+
+    def build_handoff(
+        self,
+        ticket: UserTicket,
+        *,
+        baseline_sha: str = "83e5298eb231599076811802dceac8575c7f6feb",
+        plan_version: str = "1.0",
+        planner_id: str = "hf08-planner",
+        planner_tier: PlannerTier | str = PlannerTier.ECONOMY,
+        approval_reference: str = "continuous-autonomy-planning",
+        parent_id: str = "HF-08",
+        environment_ref: str | None = None,
+    ) -> WorkflowHandoff:
+        """Convenience method delegating to build_handoff_from_ticket."""
+        return build_handoff_from_ticket(
+            ticket,
+            baseline_sha=baseline_sha,
+            plan_version=plan_version,
+            planner_id=planner_id,
+            planner_tier=planner_tier,
+            approval_reference=approval_reference,
+            parent_id=parent_id,
+            environment_ref=environment_ref,
+        )
+
+    def extract_dag(
+        self,
+        demand: DemandInput | UserTicket | dict[str, Any],
+        *,
+        bindings_registry: dict[str, Any] | None = None,
+        baseline_sha: str = "83e5298eb231599076811802dceac8575c7f6feb",
+        demand_version: int = 1,
+        parent_id: str = "HF-08",
+    ) -> IntermediateDAG:
+        """Convenience method delegating to extract_intermediate_dag."""
+        return extract_intermediate_dag(
+            demand,
+            bindings_registry=bindings_registry,
+            baseline_sha=baseline_sha,
+            demand_version=demand_version,
+            parent_id=parent_id,
+        )
+
+
+# ==============================================================================
+# Intermediate Planning DAG & Handoff Generation (HF-08-04)
+# ==============================================================================
+
+
+class PlannedLeaf(BaseModel):
+    """An atomic execution leaf within the intermediate planning DAG."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    ticket_id: str = Field(..., min_length=1)
+    parent_id: str = Field(default="HF-08")
+    project_id: str = Field(default="darkfac")
+    title: str = Field(..., min_length=1)
+    state: str = Field(
+        default="ready_for_handoff",
+        description="Leaf planning state: ready_for_handoff, design_specified, waiting_dependency, needs_architecture_binding",
+    )
+    dependencies: list[str] = Field(default_factory=list)
+    allowed_paths: list[str] = Field(default_factory=list)
+    reachability_contract: str = Field(default="")
+    acceptance_criteria: list[str] = Field(default_factory=list)
+    non_goals: list[str] = Field(default_factory=list)
+    architecture_binding: str | None = Field(default=None)
+    handoff: WorkflowHandoff | None = Field(default=None)
+    target_role: str = Field(default="economy")
+
+
+class IntermediateDAG(BaseModel):
+    """Intermediate Directed Acyclic Graph connecting decomposed demand units."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    project_id: str = Field(default="darkfac")
+    root_ticket_id: str = Field(..., min_length=1)
+    demand_version: int = Field(default=1)
+    leaves: dict[str, PlannedLeaf] = Field(default_factory=dict)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+    def ready_leaves(self) -> list[PlannedLeaf]:
+        """Return leaves ready to be handed off without unmet dependencies."""
+        return [
+            leaf
+            for leaf in self.leaves.values()
+            if leaf.state in ("ready_for_handoff", "design_specified")
+            and not self._has_unmet_dependencies(leaf)
+        ]
+
+    def blocked_leaves(self) -> list[PlannedLeaf]:
+        """Return leaves waiting on explicit dependencies."""
+        return [
+            leaf
+            for leaf in self.leaves.values()
+            if leaf.state == "waiting_dependency" or self._has_unmet_dependencies(leaf)
+        ]
+
+    def architecture_gap_leaves(self) -> list[PlannedLeaf]:
+        """Return leaves that require architectural binding resolution."""
+        return [
+            leaf
+            for leaf in self.leaves.values()
+            if leaf.state == "needs_architecture_binding"
+        ]
+
+    def _has_unmet_dependencies(self, leaf: PlannedLeaf) -> bool:
+        for dep in leaf.dependencies:
+            if dep in self.leaves:
+                dep_leaf = self.leaves[dep]
+                if dep_leaf.state != "ready_for_handoff" and dep_leaf.handoff is None:
+                    return True
+            else:
+                return True
+        return False
+
+    def is_complete(self) -> bool:
+        """Check if all leaves have a justified, valid terminal state."""
+        valid_states = {
+            "ready_for_handoff",
+            "design_specified",
+            "waiting_dependency",
+            "needs_architecture_binding",
+        }
+        return bool(self.leaves) and all(
+            leaf.state in valid_states for leaf in self.leaves.values()
+        )
+
+
+def build_handoff_from_ticket(
+    ticket: UserTicket,
+    *,
+    baseline_sha: str = "83e5298eb231599076811802dceac8575c7f6feb",
+    plan_version: str = "1.0",
+    planner_id: str = "hf08-planner",
+    planner_tier: PlannerTier | str = PlannerTier.ECONOMY,
+    approval_reference: str = "continuous-autonomy-planning",
+    parent_id: str = "HF-08",
+    environment_ref: str | None = None,
+) -> WorkflowHandoff:
+    """Transform a UserTicket into a fully validated WorkflowHandoff instance."""
+    clean_id = re.sub(r"[^A-Za-z0-9._:/-]", "-", ticket.id)
+    if not clean_id or not clean_id[0].isalnum():
+        clean_id = f"TICK-{clean_id.lstrip('._:/-') or '1'}"
+
+    env_ref = environment_ref or f"env-{clean_id.lower()}"
+    tier = PlannerTier(planner_tier) if isinstance(planner_tier, str) else planner_tier
+
+    criteria = [c.strip() for c in ticket.acceptance_criteria if c.strip()]
+    if not criteria:
+        criteria = [f"A entrega descrita em '{ticket.title}' passa em todos os testes determinísticos."]
+
+    non_goals = [g.strip() for g in ticket.non_goals if g.strip()]
+    if not non_goals:
+        non_goals = ["Não modificar arquivos ou contratos fora dos allowed_paths."]
+
+    validate_cmds = [ticket.reachability_contract.strip()] if ticket.reachability_contract.strip() else ["python core/harness/runner.py --quick"]
+
+    allowed_paths = [p.strip() for p in ticket.suggested_files if p.strip()]
+    if not allowed_paths:
+        slug = re.sub(r"[^a-z0-9]+", "_", ticket.title.lower()).strip("_")[:30] or "task"
+        allowed_paths = [f"core/{slug}/service.py", f"tests/test_{slug}.py"]
+
+    grill = GrillRecord(
+        demand_id=clean_id,
+        demand_version=1,
+        intent_summary=ticket.problem_statement or ticket.title,
+        known_facts=[
+            GrillFact(
+                fact_id=f"fact-{clean_id}-1",
+                statement=f"Demanda do projeto {ticket.project_id}: {ticket.title}",
+                source="demands_specifier",
+            )
+        ],
+        decisions=[
+            GrillDecision(
+                decision_id=f"dec-{clean_id}-1",
+                question=f"Qual é o contrato de validação determinística para {clean_id}?",
+                alternatives=[
+                    GrillAlternative(
+                        alternative_id="alt-headless",
+                        label="Validação Headless",
+                        consequence="Garante teste automatizado e determinístico.",
+                    ),
+                    GrillAlternative(
+                        alternative_id="alt-interactive",
+                        label="Validação Interativa",
+                        consequence="Requer ambiente com intervenção humana.",
+                    ),
+                ],
+                selected_alternative_id="alt-headless",
+                response=validate_cmds[0],
+                decision_source="owner-demand",
+            )
+        ],
+        assumptions=["Ambiente de execução local configurado conforme CONTRACTS.md."],
+        pending_questions=[],
+        example_criteria=criteria,
+        ready_for_spec=True,
+        readiness_justification="Demanda especificada e pronta para decomposição em handoff.",
+        created_at=datetime.now(UTC),
+        updated_at=datetime.now(UTC),
+    )
+
+    environment = EnvironmentManifest(
+        environment_ref=env_ref,
+        ticket_id=clean_id,
+        kind=EnvironmentKind.TARGET_ENVIRONMENT,
+        tools=[EnvironmentTool(name="python", version="3.12", source="runtime")],
+        system="Windows 11 with WSL2",
+        architecture="x86_64",
+        services=["local workflow runner"],
+        accounts=["local-operator"],
+        network_policy="Only declared endpoints; no implicit egress.",
+        worker_identity=SanitizedIdentity(subject="worker-local", role=tier.value, host="local"),
+        installation=["Use the repository environment."],
+        probes=validate_cmds,
+        rollback=["Discard the candidate worktree."],
+        cleanup=["Remove temporary test fixtures."],
+        target_differences=["None for local target environment."],
+        observed_at=datetime.now(UTC),
+    )
+
+    return WorkflowHandoff(
+        ticket_id=clean_id,
+        parent_id=parent_id,
+        objective=ticket.problem_statement or ticket.title,
+        origin=HandoffOrigin.USER_DEMAND,
+        plan_version=plan_version,
+        planner_id=planner_id,
+        planner_tier=tier,
+        approval_reference=approval_reference,
+        baseline_sha=baseline_sha,
+        grill=grill,
+        environment=environment,
+        state=WorkflowState.READY_FOR_HANDOFF,
+        allowed_paths=allowed_paths,
+        read_only_paths=["docs/"],
+        non_goals=non_goals,
+        acceptance_criteria=criteria,
+        validate_commands=validate_cmds,
+        trigger_events=["demand.specified"],
+        successor_event=f"workflow.{clean_id.lower()}.validated",
+        conflict_keys=[f"ticket:{clean_id}"],
+        resource_requirements=["local Python 3.12"],
+        retry_policy="Retry up to 2 times on transient failures.",
+        resume_strategy="Re-read handoff and reconcile evidence by ID.",
+        rollback_plan="Revert modified files from allowed_paths.",
+    )
+
+
+def extract_intermediate_dag(
+    demand: DemandInput | UserTicket | dict[str, Any],
+    *,
+    bindings_registry: dict[str, Any] | None = None,
+    baseline_sha: str = "83e5298eb231599076811802dceac8575c7f6feb",
+    demand_version: int = 1,
+    parent_id: str = "HF-08",
+) -> IntermediateDAG:
+    """Decompose a demand or ticket into an IntermediateDAG of planned leaves."""
+    if isinstance(demand, dict):
+        t_id = demand.get("id") or demand.get("ticket_id") or "USR-DRAFT"
+        ticket = UserTicket(
+            id=t_id,
+            project_id=demand.get("project_id", "darkfac"),
+            title=demand.get("title", f"Demand {t_id}"),
+            problem_statement=demand.get("problem_statement", ""),
+            core_journey=demand.get("core_journey", []),
+            non_goals=demand.get("non_goals", []),
+            reachability_contract=demand.get("reachability_contract", ""),
+            acceptance_criteria=demand.get("acceptance_criteria", []),
+            suggested_files=demand.get("suggested_files", []),
+            dependencies=demand.get("dependencies", []),
+        )
+        raw_subtasks = demand.get("subtasks", [])
+        architecture_binding = demand.get("architecture_binding") or demand.get("binding")
+        requires_binding = bool(demand.get("requires_binding", False)) or ("architecture" in demand.get("tags", []))
+    elif isinstance(demand, DemandInput):
+        guidance = HeuristicDemandSpecifier().analyze(demand)
+        ticket = guidance.suggested_ticket or UserTicket(
+            id="USR-DRAFT",
+            project_id=demand.project_id,
+            title=demand.title,
+        )
+        raw_subtasks = []
+        architecture_binding = None
+        requires_binding = "architecture" in demand.extra_tags
+    elif isinstance(demand, UserTicket):
+        ticket = demand
+        raw_subtasks = []
+        architecture_binding = None
+        requires_binding = "architecture" in ticket.tags
+    else:
+        raise TypeError(f"Unsupported demand input type: {type(demand).__name__}")
+
+    dag = IntermediateDAG(
+        project_id=ticket.project_id,
+        root_ticket_id=ticket.id,
+        demand_version=demand_version,
+    )
+
+    if raw_subtasks:
+        for sub in raw_subtasks:
+            sub_id = sub.get("id") or f"{ticket.id}-{len(dag.leaves)+1}"
+            sub_deps = sub.get("dependencies", [])
+            sub_binding = sub.get("architecture_binding") or sub.get("binding")
+            sub_req_binding = bool(sub.get("requires_binding", False)) or (sub_binding is not None)
+
+            if sub_req_binding:
+                if not sub_binding or (bindings_registry is not None and sub_binding not in bindings_registry):
+                    state = "needs_architecture_binding"
+                    target_role = "high_architecture"
+                else:
+                    state = "waiting_dependency" if sub_deps else "ready_for_handoff"
+                    target_role = "economy"
+            elif sub_deps:
+                state = "waiting_dependency"
+                target_role = "economy"
+            else:
+                state = "ready_for_handoff"
+                target_role = "economy"
+
+            leaf_ticket = UserTicket(
+                id=sub_id,
+                project_id=ticket.project_id,
+                title=sub.get("title", f"Subtask {sub_id}"),
+                problem_statement=sub.get("problem_statement", ticket.problem_statement),
+                acceptance_criteria=sub.get("acceptance_criteria", ticket.acceptance_criteria),
+                reachability_contract=sub.get("reachability_contract", ticket.reachability_contract),
+                suggested_files=sub.get("suggested_files", ticket.suggested_files),
+                non_goals=sub.get("non_goals", ticket.non_goals),
+                dependencies=sub_deps,
+            )
+
+            handoff = None
+            if state == "ready_for_handoff":
+                handoff = build_handoff_from_ticket(
+                    leaf_ticket,
+                    baseline_sha=baseline_sha,
+                    parent_id=ticket.id,
+                    planner_tier=PlannerTier.ECONOMY,
+                )
+
+            dag.leaves[sub_id] = PlannedLeaf(
+                ticket_id=sub_id,
+                parent_id=ticket.id,
+                project_id=ticket.project_id,
+                title=leaf_ticket.title,
+                state=state,
+                dependencies=sub_deps,
+                allowed_paths=leaf_ticket.suggested_files,
+                reachability_contract=leaf_ticket.reachability_contract,
+                acceptance_criteria=leaf_ticket.acceptance_criteria,
+                non_goals=leaf_ticket.non_goals,
+                architecture_binding=sub_binding,
+                handoff=handoff,
+                target_role=target_role,
+            )
+    else:
+        if requires_binding or architecture_binding is not None:
+            if not architecture_binding or (bindings_registry is not None and architecture_binding not in bindings_registry):
+                state = "needs_architecture_binding"
+                target_role = "high_architecture"
+            else:
+                state = "waiting_dependency" if ticket.dependencies else "ready_for_handoff"
+                target_role = "economy"
+        elif ticket.dependencies:
+            state = "waiting_dependency"
+            target_role = "economy"
+        else:
+            state = "ready_for_handoff"
+            target_role = "economy"
+
+        handoff = None
+        if state == "ready_for_handoff":
+            handoff = build_handoff_from_ticket(
+                ticket,
+                baseline_sha=baseline_sha,
+                parent_id=parent_id,
+                planner_tier=PlannerTier.ECONOMY,
+            )
+
+        dag.leaves[ticket.id] = PlannedLeaf(
+            ticket_id=ticket.id,
+            parent_id=parent_id,
+            project_id=ticket.project_id,
+            title=ticket.title,
+            state=state,
+            dependencies=ticket.dependencies,
+            allowed_paths=ticket.suggested_files,
+            reachability_contract=ticket.reachability_contract,
+            acceptance_criteria=ticket.acceptance_criteria,
+            non_goals=ticket.non_goals,
+            architecture_binding=architecture_binding,
+            handoff=handoff,
+            target_role=target_role,
+        )
+
+    return dag

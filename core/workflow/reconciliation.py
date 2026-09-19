@@ -21,6 +21,8 @@ from core.workflow.contracts import (
     EnvironmentManifest,
     EnvironmentPort,
     EnvironmentTool,
+    ManualDependency,
+    ManualDependencyStatus,
     SecretReference,
 )
 
@@ -39,6 +41,7 @@ class ManifestDiff(BaseModel):
     added_endpoints: list[EnvironmentEndpoint] = Field(default_factory=list)
     added_secret_refs: list[SecretReference] = Field(default_factory=list)
     added_permission_scopes: list[str] = Field(default_factory=list)
+    resolved_manual_dependencies: list[str] = Field(default_factory=list)
 
 
 _ENV_VAR_REGEX = re.compile(
@@ -93,6 +96,7 @@ def reconcile_environment_manifest(
     *,
     code_or_diff: str | None = None,
     declared_additions: dict[str, Any] | None = None,
+    resolved_dependencies: Sequence[ManualDependency] | None = None,
 ) -> tuple[EnvironmentManifest, ManifestDiff]:
     """Reconcile an existing EnvironmentManifest against candidate code and declared changes.
 
@@ -160,15 +164,40 @@ def reconcile_environment_manifest(
     existing_scopes = set(manifest.permission_scopes)
     diff_scopes = sorted(s for s in new_scopes if s not in existing_scopes)
 
-    existing_secrets = {s.secret_id for s in manifest.secret_refs}
+    existing_secrets = {
+        getattr(s, "ref_id", getattr(s, "secret_id", None))
+        for s in manifest.secret_refs
+    }
     diff_secrets: list[SecretReference] = []
     for s in new_secrets:
         if isinstance(s, SecretReference):
-            if s.secret_id not in existing_secrets:
+            sid = getattr(s, "ref_id", getattr(s, "secret_id", None))
+            if sid not in existing_secrets:
                 diff_secrets.append(s)
+                existing_secrets.add(sid)
         elif isinstance(s, dict):
-            if s["secret_id"] not in existing_secrets:
+            sid = s.get("ref_id") or s.get("secret_id")
+            if sid not in existing_secrets:
                 diff_secrets.append(SecretReference(**s))
+                existing_secrets.add(sid)
+
+    resolved_deps_list = resolved_dependencies or []
+    resolved_dep_ids: list[str] = []
+    diff_probes: list[str] = []
+    existing_probes = set(manifest.probes)
+
+    for dep in resolved_deps_list:
+        if dep.status is ManualDependencyStatus.RESOLVED:
+            resolved_dep_ids.append(dep.dependency_id)
+            if dep.secret_ref is not None:
+                s_ref = dep.secret_ref
+                sid = getattr(s_ref, "ref_id", getattr(s_ref, "secret_id", None))
+                if sid not in existing_secrets:
+                    diff_secrets.append(s_ref)
+                    existing_secrets.add(sid)
+            if dep.final_probe and dep.final_probe not in existing_probes:
+                diff_probes.append(dep.final_probe)
+                existing_probes.add(dep.final_probe)
 
     has_changes = any([
         diff_vars,
@@ -178,6 +207,8 @@ def reconcile_environment_manifest(
         diff_services,
         diff_scopes,
         diff_secrets,
+        diff_probes,
+        resolved_dep_ids,
     ])
 
     if not has_changes:
@@ -218,7 +249,7 @@ def reconcile_environment_manifest(
         quotas=manifest.quotas,
         worker_identity=manifest.worker_identity,
         installation=manifest.installation,
-        probes=manifest.probes,
+        probes=list(manifest.probes) + diff_probes,
         rollback=manifest.rollback,
         cleanup=manifest.cleanup,
         target_differences=manifest.target_differences,
@@ -240,6 +271,10 @@ def reconcile_environment_manifest(
         summary_parts.append(f"+{len(diff_scopes)} scopes")
     if diff_secrets:
         summary_parts.append(f"+{len(diff_secrets)} secret refs")
+    if diff_probes:
+        summary_parts.append(f"+{len(diff_probes)} probes")
+    if resolved_dep_ids:
+        summary_parts.append(f"+{len(resolved_dep_ids)} resolved manual deps")
 
     summary = f"Reconciliation updated {manifest.environment_ref} -> {new_ref}: " + "; ".join(summary_parts)
 
@@ -253,6 +288,7 @@ def reconcile_environment_manifest(
         added_endpoints=diff_endpoints,
         added_secret_refs=diff_secrets,
         added_permission_scopes=diff_scopes,
+        resolved_manual_dependencies=resolved_dep_ids,
     )
 
     return merged_manifest, diff
@@ -270,6 +306,8 @@ class PortfolioReconciliationReport(BaseModel):
     repaired_details: list[dict[str, Any]] = Field(default_factory=list)
     duration_ms: float = 0.0
     sla_met: bool = True
+    resolved_dependencies_count: int = 0
+    resolved_dependency_ids: list[str] = Field(default_factory=list)
 
 
 def reconcile_portfolio_state(
@@ -278,12 +316,26 @@ def reconcile_portfolio_state(
     *,
     cursor: str | None = None,
     limit: int = 100,
+    manual_probes: Sequence[tuple[Any, ManualDependency]] | None = None,
 ) -> PortfolioReconciliationReport:
-    """Execute a portfolio-wide reconciliation sweep of expired leases and state repairs."""
+    """Execute a portfolio-wide reconciliation sweep of expired leases, state repairs, and manual probes."""
     effective_now = now or datetime.now(UTC)
     start_time = datetime.now(UTC)
 
     page = store.reconcile(effective_now, cursor=cursor, limit=limit)
+
+    # Process pending manual probes during state reconciliation
+    resolved_count = 0
+    resolved_ids: list[str] = []
+    if manual_probes:
+        from core.workflow.manual_resolution import execute_manual_probe
+
+        for job, dep in manual_probes:
+            res_dep, res_job = execute_manual_probe(job, dep, store=store)
+            if res_dep.status is ManualDependencyStatus.RESOLVED:
+                resolved_count += 1
+                resolved_ids.append(res_dep.dependency_id)
+
     duration_ms = (datetime.now(UTC) - start_time).total_seconds() * 1000.0
 
     return PortfolioReconciliationReport(
@@ -294,4 +346,24 @@ def reconcile_portfolio_state(
         repaired_details=list(page.repaired_keys),
         duration_ms=round(duration_ms, 2),
         sla_met=duration_ms <= 60000.0,
+        resolved_dependencies_count=resolved_count,
+        resolved_dependency_ids=resolved_ids,
     )
+
+
+def reconcile_manual_dependencies(
+    dependencies: Sequence[ManualDependency],
+    probe_jobs: Sequence[Any],
+    *,
+    store: Any = None,
+) -> list[tuple[ManualDependency, Any]]:
+    """Reconcile a collection of manual dependencies with their submitted probe jobs."""
+    from core.workflow.manual_resolution import execute_manual_probe
+
+    results: list[tuple[ManualDependency, Any]] = []
+    jobs_by_dep = {job.dependency_id: job for job in probe_jobs}
+    for dep in dependencies:
+        job = jobs_by_dep.get(dep.dependency_id)
+        if job is not None:
+            results.append(execute_manual_probe(job, dep, store=store))
+    return results

@@ -1,0 +1,462 @@
+{
+  "schema_version": "1.0",
+  "ticket_id": "HF-09-01",
+  "parent_id": "HF-09",
+  "baseline_sha": "83e5298eb231599076811802dceac8575c7f6feb",
+  "purpose": "Binding determinístico de handlers, ciclo de vida de agentes, conversão de contratos, matriz de ferramentas, oráculos de aceitação e isolamento de revisão independente",
+  "created_at": "2026-09-18T22:00:00.000000+00:00",
+  "environment_profile": "executor-binding",
+  "role": "high_architecture",
+  "depends_on": [
+    "HF-07-01",
+    "HF-05-04"
+  ],
+  "successors": [
+    "HF-09-02",
+    "HF-25-01"
+  ],
+  "governing_rules": [
+    "AGENTS.md",
+    "CONTRACTS.md",
+    "MISSION.md",
+    "FACTORY_RULES.md"
+  ],
+  "operational_parameters": {
+    "lease_duration_sec": 45,
+    "heartbeat_interval_sec": 10,
+    "max_job_timeout_sec": 1800,
+    "binding_probe_timeout_sec": 300,
+    "planning_timeout_sec": 600,
+    "review_timeout_sec": 600,
+    "validation_timeout_sec": 900,
+    "release_timeout_sec": 900,
+    "acceptance_run_timeout_sec": 86400,
+    "max_retries_default": 3,
+    "retry_backoff_base_sec": [5, 20, 60],
+    "retry_jitter_pct": 20,
+    "fencing_strategy": "monotonic_increasing_per_job",
+    "fencing_reset_policy": "never_reset_after_release_or_expiry"
+  },
+  "worktree_isolation_rules": {
+    "isolation_mode": "dedicated_git_worktree",
+    "path_pattern": ".worktrees/job_{run_id}_{ticket_id}_{iteration}",
+    "boundary_protection": "Fail-closed; nenhuma gravação fora da worktree atribuída ou caminhos explicitamente declarados em allowed_paths",
+    "clean_on_finish": true,
+    "preserve_on_failure": true,
+    "concurrency_guarantee": "Processos concorrentes operam em worktrees disjuntas sem interferência em working copies principais ou entre irmãos"
+  },
+  "verification_authority_rules": {
+    "context_authority": "O candidato (ImplementationCandidate) é terminantemente proibido de gerar, assinar ou atestar seu próprio VerificationContext",
+    "plan_approval_authority": "Deve provir de um supervisor qualificado de tier superior (supervisor_antigravity ou high_architecture)",
+    "review_receipt_authority": "Deve provir de sujeito formalmente distinto do implementador (reviewer.subject != developer.subject)",
+    "cross_model_family_isolation": "O revisor DEVE pertencer a uma família de modelos distinta daquela utilizada na implementação (ex: Gemini Developer -> DeepSeek/GPT-Review Verifier)"
+  },
+  "stages": {
+    "grill": {
+      "stage_name": "grill",
+      "version": "v1",
+      "role": "grill_engine",
+      "description": "Intake transacional e crivo de ambiguidade estruturado (Gate G1) com formulação de 2 a 4 perguntas essenciais e avaliação de prontidão",
+      "service_class": "core.demands.integrated_service.IntegratedIntakeService",
+      "engine_class": "core.demands.grill.DemandGrillEngine",
+      "method_signature": "IntegratedIntakeService.receive_command(command: IntakeCommand) -> IntakeReceipt / DemandGrillEngine.generate_questions(demand: DemandRecord) -> list[GrillDecision]",
+      "input_contract": {
+        "schema_ref": "schema://contracts/IntakeCommand",
+        "type": "core.workflow.control_contracts.IntakeCommand",
+        "serialization": "canonical_utf8_sorted_keys"
+      },
+      "output_contract": {
+        "schema_ref": "schema://contracts/GrillRecord",
+        "type": "core.workflow.contracts.GrillRecord",
+        "validation_invariants": [
+          "ready_for_spec=True exige pending_questions vazia",
+          "ready_for_spec=True exige example_criteria não vazia",
+          "decisões materiais respondidas com alternativa válida"
+        ]
+      },
+      "timeout_seconds": 300,
+      "conflict_scope": "demand",
+      "tool_allowlist": [
+        "read_demands",
+        "read_codebase_context",
+        "generate_questions",
+        "evaluate_ambiguity"
+      ]
+    },
+    "planning": {
+      "stage_name": "planning",
+      "version": "v1",
+      "role": "planner",
+      "description": "Especificação arquitetural, decomposição de DAGs acíclicos e emissão de WorkflowHandoff validado pelo ReadinessGate",
+      "service_class": "core.workflow.planning_jobs.PlanningHandler",
+      "gate_class": "core.workflow.readiness.ReadinessGate",
+      "method_signature": "PlanningHandler.handle(context: StageContext) -> StageResult (produzindo WorkflowHandoff avaliado por ReadinessGate.evaluate)",
+      "input_contract": {
+        "schema_ref": "schema://contracts/GrillRecord",
+        "type": "core.workflow.contracts.GrillRecord"
+      },
+      "output_contract": {
+        "schema_ref": "schema://contracts/WorkflowHandoff",
+        "type": "core.workflow.contracts.WorkflowHandoff",
+        "validation_invariants": [
+          "objective não vazio com non_goals e acceptance_criteria explícitos",
+          "allowed_paths com cardinalidade máxima de 4 arquivos",
+          "validate_commands executáveis declarados",
+          "ReadinessGate.evaluate retorna eligible=True para avanço operacional"
+        ]
+      },
+      "timeout_seconds": 600,
+      "conflict_scope": "run",
+      "tool_allowlist": [
+        "read_codebase",
+        "inspect_architecture",
+        "emit_handoff_dag",
+        "read_project_ledger"
+      ]
+    },
+    "research": {
+      "stage_name": "research",
+      "version": "v1",
+      "role": "researcher",
+      "description": "Pesquisa profunda, estado da arte, arXiv e catálogo open-source com fontes canônicas persistidas no Knowledge Ledger",
+      "service_class": "core.learning.service.PersistentMemoryService",
+      "manager_class": "core.learning.research.KnowledgeLedgerManager",
+      "method_signature": "PersistentMemoryService.record_research(query: str, topic_type: ResearchTopicType, sources: list[ResearchSource], insights: list[SourceInsight], summary_executive: str, decisions_linked: list[str], related_tickets: list[str]) -> ResearchLedger",
+      "input_contract": {
+        "schema_ref": "schema://contracts/ResearchQuery",
+        "type": "core.learning.research.ResearchQuery"
+      },
+      "output_contract": {
+        "schema_ref": "schema://contracts/ResearchLedger",
+        "type": "core.learning.research.ResearchLedger",
+        "validation_invariants": [
+          "fontes com URLs canônicas verificáveis",
+          "insights rastreados por fonte com hash de citação",
+          "decisões arquiteturais formalmente vinculadas"
+        ]
+      },
+      "timeout_seconds": 600,
+      "conflict_scope": "topic",
+      "tool_allowlist": [
+        "read_sources",
+        "web_search",
+        "arxiv_search",
+        "record_ledger"
+      ]
+    },
+    "environment": {
+      "stage_name": "environment",
+      "version": "v1",
+      "role": "environment_probe",
+      "description": "Reconciliação determinística de manifesto de ambiente contra código e sondagem real de portas, serviços e rede",
+      "service_class": "core.workflow.reconciliation.reconcile_environment_manifest",
+      "probe_class": "core.workflow.probes.ExternalTargetProbe",
+      "method_signature": "reconcile_environment_manifest(manifest: EnvironmentManifest, code_or_diff: str, declared_additions: dict) -> tuple[EnvironmentManifest, ManifestDiff]",
+      "input_contract": {
+        "schema_ref": "schema://contracts/EnvironmentManifest",
+        "type": "core.workflow.contracts.EnvironmentManifest"
+      },
+      "output_contract": {
+        "schema_ref": "schema://contracts/EnvironmentEvidence_or_ManualDependency",
+        "type": "core.workflow.contracts.EnvironmentEvidence | core.workflow.contracts.ManualDependency",
+        "validation_invariants": [
+          "Zero credenciais embutidas em URLs, endpoints ou serviços",
+          "ManualDependency emitida apenas quando intervenção humana for estritamente necessária (com guia tela a tela exaustivo)",
+          "EnvironmentEvidence com freshness=CURRENT e build_digest correspondente"
+        ]
+      },
+      "timeout_seconds": 300,
+      "conflict_scope": "environment",
+      "tool_allowlist": [
+        "inspect_manifest",
+        "probe_network",
+        "probe_ports",
+        "probe_services",
+        "reconcile_diff"
+      ]
+    },
+    "development": {
+      "stage_name": "development",
+      "version": "v1",
+      "role": "developer",
+      "description": "Implementação técnica estrita restrita aos allowed_paths sob sandbox de processo, worktree exclusiva e reserva de orçamento ativa",
+      "service_class": "core.execution.agent_executor.AgentExecutor",
+      "lifecycle_service": "core.workflow.cycle.ImplementationCycleService",
+      "method_signature": "AgentExecutor.start(spec: TaskSpec) -> ExecutionRun / AgentExecutor.resume(checkpoint: Checkpoint) -> ExecutionRun / ImplementationCycleService.start_development(handoff: WorkflowHandoff, developer: SanitizedIdentity) -> tuple[RunRecord, JobRecord]",
+      "input_contract": {
+        "schema_ref": "schema://contracts/WorkflowHandoff",
+        "type": "core.workflow.contracts.WorkflowHandoff"
+      },
+      "output_contract": {
+        "schema_ref": "schema://contracts/ImplementationCandidate",
+        "type": "core.workflow.cycle.ImplementationCandidate",
+        "validation_invariants": [
+          "candidate_digest computado como SHA-256 dos diffs gerados",
+          "gravações estritamente restritas aos allowed_paths",
+          "zero edição em arquivos protegidos ou verificadores globais"
+        ]
+      },
+      "timeout_seconds": 1800,
+      "conflict_scope": "ticket",
+      "tool_allowlist": [
+        "read_file",
+        "write_to_file",
+        "replace_file_content",
+        "run_command"
+      ],
+      "tool_constraints": {
+        "working_dir_enforcement": "Obrigatório operar dentro da worktree isolada",
+        "read_only_protection": "Arquivos fora de allowed_paths são estritamente somente leitura",
+        "command_boundary": "Comandos executados em subprocesso sem elevação de privilégios"
+      }
+    },
+    "validation": {
+      "stage_name": "validation",
+      "version": "v1",
+      "role": "validator",
+      "description": "Execução determinística de suítes de testes, linters e harness com oráculos estruturados",
+      "service_class": "core.workflow.cycle.ImplementationCycleService",
+      "harness_module": "core.harness.runner",
+      "method_signature": "ImplementationCycleService.run_validation(handoff: WorkflowHandoff, candidate: ImplementationCandidate, unit_tests_pass: bool, target_probe: ExternalTargetProbe, reconciled_manifest: EnvironmentManifest, manifest_diff: ManifestDiff, tester_identity: SanitizedIdentity, context: VerificationContext) -> ValidationCycleResult",
+      "input_contract": {
+        "schema_ref": "schema://contracts/ImplementationCandidate",
+        "type": "core.workflow.cycle.ImplementationCandidate"
+      },
+      "output_contract": {
+        "schema_ref": "schema://contracts/ValidationReport",
+        "type": "core.workflow.cycle.ValidationCycleResult",
+        "validation_invariants": [
+          "unit_tests_pass=True e target_probe_pass=True comprovados por saída de comando",
+          "relatório contém evidence_refs com hashes e timestamps auditáveis",
+          "falha transiciona o run para FAILED_VALIDATION e aciona loop limitado de correção"
+        ]
+      },
+      "timeout_seconds": 900,
+      "conflict_scope": "ticket",
+      "tool_allowlist": [
+        "run_command",
+        "read_logs",
+        "inspect_test_results"
+      ],
+      "tool_constraints": {
+        "no_source_mutation": "Ferramentas de escrita em código são estritamente proibidas para o validador",
+        "deterministic_commands": "Apenas comandos de teste, linters e oráculos declarados no handoff"
+      }
+    },
+    "independent_review": {
+      "stage_name": "independent_review",
+      "version": "v1",
+      "role": "reviewer",
+      "description": "Revisão adversarial e auditoria independente de invariantes por sujeito formalmente isolado, emitindo EvidenceReceipt normativo",
+      "service_class": "core.workflow.cycle.ImplementationCycleService",
+      "method_signature": "ImplementationCycleService.conduct_independent_review(handoff: WorkflowHandoff, candidate: ImplementationCandidate, reviewer: SanitizedIdentity, developer: SanitizedIdentity, approve: bool, findings: list[str], counterexamples: list[str], context: VerificationContext) -> tuple[IndependentReviewVerdict, ReadinessReport]",
+      "input_contract": {
+        "schema_ref": "schema://contracts/ValidationReport",
+        "type": "core.workflow.cycle.ValidationCycleResult"
+      },
+      "output_contract": {
+        "schema_ref": "schema://contracts/EvidenceReceipt",
+        "type": "core.workflow.contracts.EvidenceReceipt",
+        "validation_invariants": [
+          "Invariante inviolável: reviewer.subject != developer.subject",
+          "Cross-Model Family Isolation obrigatório",
+          "Aprovação emite EvidenceReceipt com requirement='independent_review' e hash assinado",
+          "Rejeição aciona loop limitado de correções (máximo 2 tentativas de revisão)"
+        ]
+      },
+      "timeout_seconds": 600,
+      "conflict_scope": "ticket",
+      "tool_allowlist": [
+        "read_file",
+        "git_diff",
+        "run_linter",
+        "inspect_evidence"
+      ],
+      "tool_constraints": {
+        "strictly_read_only": "Proibição estrita de qualquer mutação em arquivos da codebase ou worktree",
+        "adversarial_probing": "Permitida execução de linters e analisadores estáticos em modo somente leitura"
+      }
+    },
+    "integration": {
+      "stage_name": "integration",
+      "version": "v1",
+      "role": "integrator",
+      "description": "Reconciliação de entrega remota via GitHub Pull Request, fila durável de merge e verificação de commit head",
+      "service_class": "core.orchestrator.delivery_executor.RemoteDeliveryReconciler",
+      "delivery_policy": "core.orchestrator.delivery.DeliveryPolicy",
+      "method_signature": "RemoteDeliveryReconciler.reconcile_and_evaluate(request: DeliveryRequest, snapshot: PullRequestSnapshot, confirm_merged: bool) -> RemoteDeliveryResult",
+      "input_contract": {
+        "schema_ref": "schema://contracts/EvidenceReceipt",
+        "type": "core.orchestrator.delivery.DeliveryRequest"
+      },
+      "output_contract": {
+        "schema_ref": "schema://contracts/IntegrationSnapshot",
+        "type": "core.orchestrator.delivery_executor.RemoteDeliveryResult",
+        "validation_invariants": [
+          "candidato aprovado em independent_review",
+          "checks remotos verdes e compatíveis com o candidate_sha",
+          "reconciliação remota confirmada antes de liberar sucessores de release"
+        ]
+      },
+      "timeout_seconds": 600,
+      "conflict_scope": "repository",
+      "tool_allowlist": [
+        "github_pr_snapshot",
+        "git_merge",
+        "git_push",
+        "verify_remote_head"
+      ]
+    },
+    "memory_observation": {
+      "stage_name": "memory_observation",
+      "version": "v1",
+      "role": "memory_agent",
+      "description": "Captura estruturada de aprendizados, falhas e hipóteses derivadas da execução, com prevenção estrita de auto-reforço recursivo",
+      "service_class": "core.learning.service.PersistentMemoryService",
+      "method_signature": "PersistentMemoryService.register_candidate(rule_id: str, origin: PolicyOrigin, scope: str, rule_content: str, supporting_runs: list[str], eval_version: str, project_id: str, metadata: dict) -> LearningCandidate",
+      "input_contract": {
+        "schema_ref": "schema://contracts/StageResult",
+        "type": "core.workflow.control_contracts.StageResult"
+      },
+      "output_contract": {
+        "schema_ref": "schema://contracts/MemoryHypothesis",
+        "type": "core.learning.models.LearningCandidate",
+        "validation_invariants": [
+          "Deduplicação de hipóteses por rule_id e conteúdo normalizado",
+          "Registro obrigatório de causation_id apontando para o run de origem",
+          "Anti-Recursão: exclusão sumária de eventos de bookkeeping interno da fábrica",
+          "Proibição de ciclos no grafo de causalidade"
+        ]
+      },
+      "timeout_seconds": 300,
+      "conflict_scope": "learning_ledger",
+      "tool_allowlist": [
+        "inspect_run_result",
+        "extract_failure_pattern",
+        "register_candidate_rule",
+        "audit_causation_id"
+      ]
+    },
+    "learning_eval": {
+      "stage_name": "learning_eval",
+      "version": "v1",
+      "role": "evaluator",
+      "description": "Avaliação isolada em holdout sandbox e promoção/rollback atômico de regras e skills de auto-evolução",
+      "service_class": "core.evolution.engine.FactoryEvolutionEngine",
+      "sandbox_class": "core.evolution.holdout.EvolutionHoldoutSandbox",
+      "method_signature": "FactoryEvolutionEngine.evaluate_candidate(proposal_id: str, holdout_cmd: str, timeout_sec: int) -> HoldoutEvaluationResult / FactoryEvolutionEngine.promote_candidate(proposal_id: str) -> RollbackSnapshot",
+      "input_contract": {
+        "schema_ref": "schema://contracts/MemoryHypothesis",
+        "type": "core.evolution.models.EvolutionProposal"
+      },
+      "output_contract": {
+        "schema_ref": "schema://contracts/PromotionReceipt",
+        "type": "core.evolution.models.RollbackSnapshot",
+        "validation_invariants": [
+          "Avaliação em sandbox isolada com holdout determinístico",
+          "Captura atômica de RollbackSnapshot contendo hash e conteúdo prévios",
+          "Sincronização de skills (.agents/skills/) ativada sob promoção aprovada",
+          "Rollback garantido em caso de regressão operacional"
+        ]
+      },
+      "timeout_seconds": 900,
+      "conflict_scope": "evolution_target",
+      "tool_allowlist": [
+        "sandbox_evaluate",
+        "run_holdout",
+        "promote_skill",
+        "rollback_skill"
+      ]
+    },
+    "catalog_refresh": {
+      "stage_name": "catalog_refresh",
+      "version": "v1",
+      "role": "catalog_refresh",
+      "description": "Qualificação de rotas, sondagem de latência/preço e atualização determinística do catálogo de modelos a cada 24 horas",
+      "service_class": "core.workflow.catalog_jobs.CatalogRefreshHandler",
+      "engine_class": "core.portfolio.router_optimizer.QualificationEngine",
+      "method_signature": "CatalogRefreshHandler.handle(context: StageContext) -> StageResult (produzindo CatalogRefreshState atualizado)",
+      "input_contract": {
+        "schema_ref": "schema://contracts/BenchmarkTrigger",
+        "type": "core.workflow.catalog_jobs.CatalogRefreshState"
+      },
+      "output_contract": {
+        "schema_ref": "schema://contracts/CatalogMatrix",
+        "type": "core.workflow.catalog_jobs.CatalogRefreshState",
+        "validation_invariants": [
+          "Timer de 24 horas persistido em disco",
+          "Boot catchup automático em caso de inicialização atrasada",
+          "Fixação de versão de catálogo por run (run-level model pinning)",
+          "Preservação do último catálogo válido em caso de falha externa"
+        ]
+      },
+      "timeout_seconds": 1800,
+      "conflict_scope": "catalog",
+      "tool_allowlist": [
+        "probe_provider_latency",
+        "probe_model_cost",
+        "execute_model_smoke",
+        "promote_catalog"
+      ]
+    }
+  },
+  "tool_allowlist_matrix": {
+    "developer": {
+      "allowed_tools": [
+        "read_file",
+        "write_to_file",
+        "replace_file_content",
+        "run_command"
+      ],
+      "forbidden_tools": [
+        "git_push_main",
+        "delete_repository",
+        "bypass_gate",
+        "modify_governance"
+      ],
+      "scope": "Restrito exclusivamente aos allowed_paths dentro da worktree isolada"
+    },
+    "validator": {
+      "allowed_tools": [
+        "run_command",
+        "read_logs",
+        "inspect_test_results"
+      ],
+      "forbidden_tools": [
+        "write_to_file",
+        "replace_file_content",
+        "git_commit"
+      ],
+      "scope": "Execução de testes (pytest), linters e harness em modo somente leitura"
+    },
+    "reviewer": {
+      "allowed_tools": [
+        "read_file",
+        "git_diff",
+        "run_linter",
+        "inspect_evidence"
+      ],
+      "forbidden_tools": [
+        "write_to_file",
+        "replace_file_content",
+        "git_commit",
+        "git_push"
+      ],
+      "scope": "Auditoria de código e evidências sem qualquer permissão de escrita"
+    },
+    "planner": {
+      "allowed_tools": [
+        "read_codebase",
+        "inspect_architecture",
+        "emit_handoff_dag",
+        "read_project_ledger"
+      ],
+      "forbidden_tools": [
+        "write_source_code",
+        "run_deployment",
+        "modify_secrets"
+      ],
+      "scope": "Leitura da codebase e persistência de especificações e grafos acíclicos de tarefas"
+    }
+  }
+}
