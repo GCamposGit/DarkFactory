@@ -10,6 +10,7 @@ Provides a unified facade coordinating:
 
 from __future__ import annotations
 
+import hashlib
 import os
 from datetime import datetime, timezone
 from pathlib import Path
@@ -32,7 +33,10 @@ from core.learning.tracker import ContinuousLearningTracker
 from core.learning_pack.generator import LearningPackGenerator
 from core.learning_pack.models import LearningConcept, SessionLearningPack
 from core.learning_pack.storage import LearningPackStore
-from core.orchestrator.context import ContextSelector, TaskContext
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from core.orchestrator.context import ContextSelector, TaskContext
 from core.execution.agent_executor import TaskSpec
 from core.paths import project_root
 from core.research.ledger import KnowledgeLedgerManager
@@ -75,6 +79,8 @@ class PersistentMemoryService:
         self.promotion_engine = LearningPromotionEngine(
             storage_path=self.learning_dir / "candidates.json"
         )
+        from core.orchestrator.context import ContextSelector
+
         self.context_selector = ContextSelector(promotion_engine=self.promotion_engine)
         self.research_manager = KnowledgeLedgerManager(base_dir=self.research_dir)
         self.pack_generator = LearningPackGenerator()
@@ -182,6 +188,22 @@ class PersistentMemoryService:
             if not cand_proj or cand_proj in ("global", "general", "*") or cand_proj == norm_target:
                 matched.append(c)
         return matched
+
+    def compute_memory_version(self, project_id: Optional[str] = None) -> str:
+        """Compute a deterministic hash representing the active memory rules state."""
+        active_rules = self.list_active_rules(project_id=project_id)
+        if not active_rules:
+            scope_tag = (project_id or "global").strip().lower()
+            digest = hashlib.sha256(f"empty:{scope_tag}".encode("utf-8")).hexdigest()
+            return f"mem-v1:{digest[:16]}"
+
+        sorted_rules = sorted(active_rules, key=lambda r: r.rule_id)
+        tokens: list[str] = []
+        for r in sorted_rules:
+            tokens.append(f"{r.rule_id}:{r.eval_version}:{r.scope}:{r.rule_content}")
+        payload = "|".join(tokens)
+        digest = hashlib.sha256(payload.encode("utf-8")).hexdigest()
+        return f"mem-v1:{digest[:16]}"
 
     # -------------------------------------------------------------
     # Research Dossier Persistence (Scenario G7)

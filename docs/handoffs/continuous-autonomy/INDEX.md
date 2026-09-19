@@ -30,7 +30,7 @@ Todos especificados; só HF-26-01 sem predecessor técnico. Prontidão de contra
 | [HF-12-02](HF-12-02.md) — Build real e adapter de deploy | economy | needs_architecture_binding | HF-12-01, HF-11-01 |
 | [HF-12-03](HF-12-03.md) — Jornada e rollback observados | economy | needs_architecture_binding | HF-12-02 |
 | [HF-12-04](HF-12-04.md) — Release automática por evidência | economy | implemented | HF-12-03, HF-05-04 |
-| [HF-10-01](HF-10-01.md) — Memória por eventos e contexto fixado | economy | waiting_dependency | HF-05-04 |
+| [HF-10-01](HF-10-01.md) — Memória por eventos e contexto fixado | economy | implemented | HF-05-04 |
 | [HF-10-02](HF-10-02.md) — Pesquisa ligada às decisões | economy | needs_architecture_binding | HF-10-01, HF-07-02 |
 | [HF-25-01](HF-25-01.md) — Evolução avaliada e aplicada após restart | economy | needs_architecture_binding | HF-10-01, HF-09-01, HF-26-03 |
 | [HF-13-01](HF-13-01.md) — Prontidão e evidência no roadmap | economy | implemented | HF-26-01 |
