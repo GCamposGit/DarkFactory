@@ -15,7 +15,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Any
 
@@ -52,6 +52,8 @@ from hub.backend.models import (
     TaskDashboardReport,
     UsageSyncPayload,
     UsageSyncResponse,
+    IncidentAlert,
+    ProgressProjection,
 )
 from core.execution.providers import get_openrouter_api_key
 from core.content import (

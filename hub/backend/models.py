@@ -511,3 +511,40 @@ class UsageSyncResponse(BaseModel):
     message: str
 
 
+# ---------------------------------------------------------------------------
+# Continuous Autonomy Progress & Stagnation Models (HF-13-02)
+# ---------------------------------------------------------------------------
+
+
+class IncidentAlert(BaseModel):
+    """Deduplicated operational alert for an active incident."""
+
+    incident_id: str = Field(description="Unique deduplication key for the incident, e.g. stalled:darkfac")
+    severity: str = Field(default="warning", description="Severity level: info, warning, error, critical")
+    message: str = Field(description="Human-readable incident summary")
+    detected_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat(), description="ISO 8601 UTC timestamp")
+    details: Dict[str, Any] = Field(default_factory=dict, description="Structured diagnostics context")
+
+
+class ProgressProjection(BaseModel):
+    """Analytical projection of portfolio execution progress and stagnation indicators."""
+
+    project_id: str = Field(description="Identifier of target project")
+    oldest_eligible_age: float = Field(default=0.0, ge=0.0, description="Age in seconds of oldest ready/pending job")
+    last_dispatch: Optional[str] = Field(default=None, description="ISO 8601 timestamp of most recent job dispatch")
+    last_reconcile: Optional[str] = Field(default=None, description="ISO 8601 timestamp of last supervisor reconciliation")
+    heartbeats_count: int = Field(default=0, ge=0, description="Count of currently active heartbeats / leases")
+    ready_count: int = Field(default=0, ge=0, description="Count of jobs currently in pending/ready state")
+    running_count: int = Field(default=0, ge=0, description="Count of jobs currently being executed")
+    blocked_count: int = Field(default=0, ge=0, description="Count of jobs waiting on dependencies or human input")
+    wait_reasons: Dict[str, str] = Field(default_factory=dict, description="Mapping from job/ticket ID to cause or waiting reason")
+    next_wakeup: Optional[str] = Field(default=None, description="Scheduled ISO 8601 timestamp for next supervisor tick")
+    reservations: List[Dict[str, Any]] = Field(default_factory=list, description="Active portfolio reservations")
+    evidence_chain: List[str] = Field(default_factory=list, description="Recent evidence URIs produced by completed stages")
+    stalled: bool = Field(default=False, description="True if ready jobs wait >30s with available worker capacity")
+    alerts: List[IncidentAlert] = Field(default_factory=list, description="Deduplicated operational alerts")
+    healthy: bool = Field(default=True, description="Overall health of the project execution pipeline")
+    capacity_available: bool = Field(default=True, description="Whether worker capacity is available for new dispatches")
+
+
+

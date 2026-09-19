@@ -180,7 +180,7 @@
       "database": {
         "engine": "postgresql",
         "version": "16-alpine",
-        "host": "postgres-primary",
+        "host": "darkfaccore-postgresprimary-aebh67",
         "port": 5432,
         "database_name": "darkfac_hf02_prod",
         "user": "darkfac_worker",
@@ -190,7 +190,7 @@
           "variable_name": "DARKFAC_HF02_DATABASE_URL",
           "provider": "dokploy",
           "locator": "DARKFAC_HF02_DATABASE_URL",
-          "format": "postgresql://darkfac_worker:***@postgres-primary:5432/darkfac_hf02_prod",
+          "format": "postgresql://darkfac_worker:***@darkfaccore-postgresprimary-aebh67:5432/darkfac_hf02_prod",
           "description": "String de conexão transacional do PostgreSQL interno via dokploy-network para o usuário desprivilegiado darkfac_worker"
         },
         "probe_command": "SELECT current_database(), current_user, version();"
