@@ -16,7 +16,7 @@ DOCS = ROOT / 'docs/handoffs/continuous-autonomy'
 def digest(path: Path) -> str:
     return hashlib.sha256(path.read_text(encoding='utf-8-sig').encode('utf-8')).hexdigest()
 def artifacts() -> list[Path]:
-    paths = list(DOCS.glob('*.md')) + [ROOT/'docs/CONTINUOUS_AUTONOMY_PLAN_2026-09-18.md',ROOT/'docs/ROADMAP_OPERACIONAL.md',ROOT/'docs/HYBRID_WORKFLOW_PLAN_2026-09-08.md',ROOT/'docs/handoffs/HF-05.md',ROOT/'.factory/roadmap/darkfac.json',PACKAGE/'plan.json',PACKAGE/'initial-handoff.json',PACKAGE/'source-review.md',PACKAGE/'baseline-sources.json',ROOT/'tests/test_roadmap.py',ROOT/'tests/test_baseline_catalog.py',ROOT/'docs/handoffs/hf01-claims.json',Path(__file__)]
+    paths = list(DOCS.glob('*.md')) + [ROOT/'docs/CONTINUOUS_AUTONOMY_PLAN_2026-09-18.md',ROOT/'docs/ROADMAP_OPERACIONAL.md',ROOT/'docs/HYBRID_WORKFLOW_PLAN_2026-09-08.md',ROOT/'docs/handoffs/HF-05.md',ROOT/'.factory/roadmap/darkfac.json',PACKAGE/'plan.json',PACKAGE/'initial-handoff.json',PACKAGE/'source-review.md',PACKAGE/'baseline-sources.json',ROOT/'tests/test_roadmap.py',ROOT/'tests/test_baseline_catalog.py',ROOT/'tests/test_melhoria_no_m_dulo_de_dem.py',ROOT/'docs/handoffs/hf01-claims.json',Path(__file__)]
     return sorted(paths)
 def main() -> int:
     parser=argparse.ArgumentParser(description=__doc__)

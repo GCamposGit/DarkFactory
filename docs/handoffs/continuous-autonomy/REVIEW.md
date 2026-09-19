@@ -44,3 +44,7 @@ capacidade/secret refs instaladas (HF-03-07). Econômico não começa essas folh
 ## Compatibilidade de fixtures após projeção
 
 O snapshot default passa de32 para66 itens. Duas expectativas exatas em tests/test_roadmap.py foram atualizadas; asserções adicionais exigem planned e ausência de evidence_refs nos34 itens novos. Atualizados source_hash dos5 claims referentes ao manifesto e ao plano HF (conteúdo histórico preservado, apenas extensão adicionada) e hash fixo do arquivo de claims. Sem alteração no limiar500ms ou critério de entrega. A execução intermediária em73b11bf foi invalidada por mudança de HEAD e não vale como evidência. Gates finais usam candidato congelado.
+
+## Falha de portabilidade descoberta na candidata remota
+
+CI Windows do SHA5a86077 encontrou867 passed,1 failed,1 skipped: test_production_demands_integrity_and_no_leakage exigia c:/dev/DarkFac, caminho também presente em main00133f6. A correção usa a raiz do checkout do teste e esclarece que o oráculo verifica snapshot versionado, sem comprovar host de produção. Todos os asserts de USR-09,USR-12,USR-AUTO e ausência de tickets fictícios foram preservados; nenhum skip ou tolerância acrescentado. O resultado local926/2 anterior permanece associado somente a13710aa, não à candidata remota.
