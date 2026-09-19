@@ -1,0 +1,392 @@
+{
+  "created_at": "2026-09-19T10:22:32.316140+00:00",
+  "model_requested": "typesafe/jev-1.13",
+  "endpoint": "https://openrouter.ai/api/alpha/decisions",
+  "synthetic_cases": true,
+  "records": [
+    {
+      "id": "localized_windows_fix",
+      "task": "Implementar correção localizada em um CLI Python 3.12: saída UTF-8 falha apenas no console Windows. Há contrato e teste de regressão definidos; um arquivo de produção e um teste mudam. Após implementar, rodar o harness determinístico.",
+      "expected_stage": "coding",
+      "expected_complexity": "low",
+      "model": "typesafe/jev-1.13-20260917",
+      "provider": "TypeSafe",
+      "answers": {
+        "stage": {
+          "type": "choice",
+          "choice": "coding",
+          "probabilities": {
+            "testing": 0,
+            "unknown": 0,
+            "planning": 0,
+            "coding": 1,
+            "research": 0,
+            "review": 0
+          },
+          "confidence": 0.99
+        },
+        "complexity": {
+          "type": "choice",
+          "choice": "low",
+          "probabilities": {
+            "high": 0,
+            "low": 0.98,
+            "medium": 0.02,
+            "critical": 0
+          },
+          "confidence": 0.97
+        },
+        "needs_owner_decision": {
+          "type": "noul",
+          "noul": 0.3
+        },
+        "must_stay_local": {
+          "type": "noul",
+          "noul": 0.25
+        }
+      },
+      "usage": {
+        "input_tokens": 813,
+        "output_tokens": 145,
+        "cost": 3.4146e-05
+      },
+      "latency_ms": 609.7
+    },
+    {
+      "id": "budget_architecture",
+      "task": "Planejar mudança no contrato de reserva de orçamento para jobs concorrentes em três projetos, com idempotência após crash e reconciliação. Definir interfaces, invariantes e migração antes de escrever código. O planejador precisa ser modelo de alta inteligência qualificado.",
+      "expected_stage": "planning",
+      "expected_complexity": "high",
+      "model": "typesafe/jev-1.13-20260917",
+      "provider": "TypeSafe",
+      "answers": {
+        "stage": {
+          "type": "choice",
+          "choice": "planning",
+          "probabilities": {
+            "testing": 0,
+            "unknown": 0,
+            "coding": 0,
+            "review": 0,
+            "research": 0,
+            "planning": 1
+          },
+          "confidence": 1
+        },
+        "complexity": {
+          "type": "choice",
+          "choice": "high",
+          "probabilities": {
+            "high": 1,
+            "critical": 0,
+            "medium": 0,
+            "low": 0
+          },
+          "confidence": 0.99
+        },
+        "needs_owner_decision": {
+          "type": "noul",
+          "noul": 0.76
+        },
+        "must_stay_local": {
+          "type": "noul",
+          "noul": 0.12
+        }
+      },
+      "usage": {
+        "input_tokens": 812,
+        "output_tokens": 147,
+        "cost": 3.4104e-05
+      },
+      "latency_ms": 419.8
+    },
+    {
+      "id": "independent_review",
+      "task": "Fazer revisão adversarial independente do patch já implementado por DeepSeek, buscando contraexemplos reproduzíveis de dupla reserva. Não alterar o código. O revisor precisa ser de outra família de modelos.",
+      "expected_stage": "review",
+      "expected_complexity": "medium",
+      "model": "typesafe/jev-1.13-20260917",
+      "provider": "TypeSafe",
+      "answers": {
+        "stage": {
+          "type": "choice",
+          "choice": "review",
+          "probabilities": {
+            "review": 1,
+            "research": 0,
+            "coding": 0,
+            "testing": 0,
+            "unknown": 0,
+            "planning": 0
+          },
+          "confidence": 1
+        },
+        "complexity": {
+          "type": "choice",
+          "choice": "medium",
+          "probabilities": {
+            "low": 0.12,
+            "critical": 0.06,
+            "medium": 0.42,
+            "high": 0.4
+          },
+          "confidence": 0.23
+        },
+        "needs_owner_decision": {
+          "type": "noul",
+          "noul": 0.48
+        },
+        "must_stay_local": {
+          "type": "noul",
+          "noul": 0.13
+        }
+      },
+      "usage": {
+        "input_tokens": 797,
+        "output_tokens": 145,
+        "cost": 3.3474e-05
+      },
+      "latency_ms": 345.0
+    },
+    {
+      "id": "deterministic_tests",
+      "task": "Executar python core/harness/runner.py --quick e pytest no checkout pronto, coletar marcadores e códigos de saída e registrar falhas. Não gerar código novo nem usar modelo como oráculo dos testes.",
+      "expected_stage": "testing",
+      "expected_complexity": "low",
+      "model": "typesafe/jev-1.13-20260917",
+      "provider": "TypeSafe",
+      "answers": {
+        "stage": {
+          "type": "choice",
+          "choice": "testing",
+          "probabilities": {
+            "review": 0,
+            "unknown": 0,
+            "planning": 0,
+            "testing": 1,
+            "research": 0,
+            "coding": 0
+          },
+          "confidence": 1
+        },
+        "complexity": {
+          "type": "choice",
+          "choice": "low",
+          "probabilities": {
+            "critical": 0,
+            "high": 0.02,
+            "low": 0.74,
+            "medium": 0.24
+          },
+          "confidence": 0.65
+        },
+        "needs_owner_decision": {
+          "type": "noul",
+          "noul": 0.35
+        },
+        "must_stay_local": {
+          "type": "noul",
+          "noul": 0.14
+        }
+      },
+      "usage": {
+        "input_tokens": 796,
+        "output_tokens": 145,
+        "cost": 3.3432e-05
+      },
+      "latency_ms": 329.0
+    },
+    {
+      "id": "confidential_offline_fix",
+      "task": "Corrigir serialização Pydantic em módulo com dados confidenciais de cliente. O conteúdo não pode sair da máquina; usar apenas executor local/offline. Contrato aprovado, dois arquivos afetados, validação focal definida.",
+      "expected_stage": "coding",
+      "expected_complexity": "medium",
+      "model": "typesafe/jev-1.13-20260917",
+      "provider": "TypeSafe",
+      "answers": {
+        "stage": {
+          "type": "choice",
+          "choice": "coding",
+          "probabilities": {
+            "research": 0,
+            "coding": 1,
+            "review": 0,
+            "testing": 0,
+            "planning": 0,
+            "unknown": 0
+          },
+          "confidence": 1
+        },
+        "complexity": {
+          "type": "choice",
+          "choice": "medium",
+          "probabilities": {
+            "medium": 0.38,
+            "low": 0.31,
+            "high": 0.03,
+            "critical": 0.28
+          },
+          "confidence": 0.19
+        },
+        "needs_owner_decision": {
+          "type": "noul",
+          "noul": 0.46
+        },
+        "must_stay_local": {
+          "type": "noul",
+          "noul": 0.96
+        }
+      },
+      "usage": {
+        "input_tokens": 802,
+        "output_tokens": 145,
+        "cost": 3.3684e-05
+      },
+      "latency_ms": 378.6
+    },
+    {
+      "id": "live_docs_research",
+      "task": "Pesquisar na documentação oficial atual de uma biblioteca Python recém-atualizada quais mudanças da API afetam o adaptador HTTP, registrar links e diferenças. Sem implementação neste ticket.",
+      "expected_stage": "research",
+      "expected_complexity": "medium",
+      "model": "typesafe/jev-1.13-20260917",
+      "provider": "TypeSafe",
+      "answers": {
+        "stage": {
+          "type": "choice",
+          "choice": "research",
+          "probabilities": {
+            "review": 0,
+            "coding": 0,
+            "unknown": 0,
+            "testing": 0,
+            "planning": 0,
+            "research": 1
+          },
+          "confidence": 1
+        },
+        "complexity": {
+          "type": "choice",
+          "choice": "low",
+          "probabilities": {
+            "critical": 0,
+            "medium": 0.32,
+            "high": 0.01,
+            "low": 0.67
+          },
+          "confidence": 0.57
+        },
+        "needs_owner_decision": {
+          "type": "noul",
+          "noul": 0.32
+        },
+        "must_stay_local": {
+          "type": "noul",
+          "noul": 0.11
+        }
+      },
+      "usage": {
+        "input_tokens": 786,
+        "output_tokens": 145,
+        "cost": 3.3012e-05
+      },
+      "latency_ms": 480.4
+    },
+    {
+      "id": "ambiguous_payment_feature",
+      "task": "Adicionar pagamentos recorrentes e reembolsos ao produto. O owner ainda não definiu provedor, países, moedas, prazos de reembolso ou quem pode aprovar estornos. Preparar Grill antes de especificar ou codificar.",
+      "expected_stage": "planning",
+      "expected_complexity": "high",
+      "model": "typesafe/jev-1.13-20260917",
+      "provider": "TypeSafe",
+      "answers": {
+        "stage": {
+          "type": "choice",
+          "choice": "planning",
+          "probabilities": {
+            "unknown": 0,
+            "planning": 1,
+            "coding": 0,
+            "testing": 0,
+            "review": 0,
+            "research": 0
+          },
+          "confidence": 1
+        },
+        "complexity": {
+          "type": "choice",
+          "choice": "high",
+          "probabilities": {
+            "critical": 0.02,
+            "low": 0,
+            "medium": 0.08,
+            "high": 0.9
+          },
+          "confidence": 0.86
+        },
+        "needs_owner_decision": {
+          "type": "noul",
+          "noul": 0.96
+        },
+        "must_stay_local": {
+          "type": "noul",
+          "noul": 0.08
+        }
+      },
+      "usage": {
+        "input_tokens": 806,
+        "output_tokens": 147,
+        "cost": 3.3852e-05
+      },
+      "latency_ms": 434.5
+    },
+    {
+      "id": "critical_auth_incident",
+      "task": "Produção apresentou aparente falha de isolamento entre tenants após alteração de autenticação. Ainda não se conhece o alcance. Planejar contenção, diagnóstico e critérios de verificação com modelo de alta inteligência antes de mudanças irreversíveis.",
+      "expected_stage": "planning",
+      "expected_complexity": "critical",
+      "model": "typesafe/jev-1.13-20260917",
+      "provider": "TypeSafe",
+      "answers": {
+        "stage": {
+          "type": "choice",
+          "choice": "planning",
+          "probabilities": {
+            "coding": 0,
+            "planning": 1,
+            "review": 0,
+            "testing": 0,
+            "research": 0,
+            "unknown": 0
+          },
+          "confidence": 1
+        },
+        "complexity": {
+          "type": "choice",
+          "choice": "critical",
+          "probabilities": {
+            "high": 0,
+            "medium": 0,
+            "critical": 1,
+            "low": 0
+          },
+          "confidence": 1
+        },
+        "needs_owner_decision": {
+          "type": "noul",
+          "noul": 0.7
+        },
+        "must_stay_local": {
+          "type": "noul",
+          "noul": 0.13
+        }
+      },
+      "usage": {
+        "input_tokens": 803,
+        "output_tokens": 147,
+        "cost": 3.3726e-05
+      },
+      "latency_ms": 435.1
+    }
+  ]
+}

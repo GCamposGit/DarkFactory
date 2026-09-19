@@ -1,0 +1,140 @@
+{
+  "created_at": "2026-09-19T10:24:17.416141+00:00",
+  "records": [
+    {
+      "id": "economy_local_first",
+      "expected": "qwen-code-fast:latest",
+      "state": {
+        "task": "Implementar correção localizada de UTF-8 em CLI Python, contrato e teste focal prontos.",
+        "role": "economy",
+        "policy": "Preferir primeiro executor local qualificado e disponível; modelos cloud só se local não servir.",
+        "eligible_candidates": [
+          {
+            "id": "qwen-code-fast:latest",
+            "provider": "ollama",
+            "available": true,
+            "cost_usd": 0,
+            "catalog_order": 1
+          },
+          {
+            "id": "qwen-code-deep:latest",
+            "provider": "ollama",
+            "available": true,
+            "cost_usd": 0,
+            "catalog_order": 2
+          },
+          {
+            "id": "google/gemini-3.8-flash",
+            "provider": "google",
+            "available": true,
+            "catalog_order": 3
+          }
+        ]
+      },
+      "answer": {
+        "type": "choice",
+        "choice": "qwen-code-fast:latest",
+        "probabilities": {
+          "qwen-code-fast:latest": 1,
+          "google/gemini-3.8-flash": 0,
+          "qwen-code-deep:latest": 0
+        },
+        "confidence": 1
+      },
+      "model": "typesafe/jev-1.13-20260917",
+      "usage": {
+        "input_tokens": 597,
+        "output_tokens": 63,
+        "cost": 2.5074e-05
+      },
+      "latency_ms": 557.1
+    },
+    {
+      "id": "architecture_quota_failover",
+      "expected": "deepseek/deepseek-v4-pro",
+      "state": {
+        "task": "Planejar contrato transacional de reservas de orçamento e idempotência após crash para três projetos.",
+        "role": "high_architecture",
+        "policy": "Piso de alta arquitetura obrigatório. Claude Opus é primário mas está indisponível por cota; selecionar primeiro fallback qualificado disponível. Nunca degradar para economy.",
+        "ineligible_primary": {
+          "id": "anthropic/claude-opus-5",
+          "reason": "quota_exhausted"
+        },
+        "eligible_candidates": [
+          {
+            "id": "deepseek/deepseek-v4-pro",
+            "available": true,
+            "catalog_order": 2
+          },
+          {
+            "id": "google/gemini-3.1-pro",
+            "available": true,
+            "catalog_order": 3
+          }
+        ]
+      },
+      "answer": {
+        "type": "choice",
+        "choice": "deepseek/deepseek-v4-pro",
+        "probabilities": {
+          "deepseek/deepseek-v4-pro": 1,
+          "google/gemini-3.1-pro": 0
+        },
+        "confidence": 1
+      },
+      "model": "typesafe/jev-1.13-20260917",
+      "usage": {
+        "input_tokens": 565,
+        "output_tokens": 53,
+        "cost": 2.373e-05
+      },
+      "latency_ms": 316.8
+    },
+    {
+      "id": "independent_review_family",
+      "expected": "gpt-review:latest",
+      "state": {
+        "task": "Revisar patch implementado por DeepSeek sem alterar o código; buscar contraexemplos reproduzíveis.",
+        "role": "verifier",
+        "implementer_family": "deepseek",
+        "policy": "Revisor deve ser de outra família; preferir primeiro revisor local qualificado disponível.",
+        "ineligible_candidate": {
+          "id": "deepseek/deepseek-v4.1-flash",
+          "reason": "same_family_as_implementer"
+        },
+        "eligible_candidates": [
+          {
+            "id": "gpt-review:latest",
+            "family": "gpt-oss",
+            "provider": "ollama",
+            "available": true,
+            "catalog_order": 1
+          },
+          {
+            "id": "xai/grok-4.6",
+            "family": "grok",
+            "provider": "xai",
+            "available": true,
+            "catalog_order": 3
+          }
+        ]
+      },
+      "answer": {
+        "type": "choice",
+        "choice": "gpt-review:latest",
+        "probabilities": {
+          "xai/grok-4.6": 0,
+          "gpt-review:latest": 1
+        },
+        "confidence": 1
+      },
+      "model": "typesafe/jev-1.13-20260917",
+      "usage": {
+        "input_tokens": 596,
+        "output_tokens": 46,
+        "cost": 2.5032e-05
+      },
+      "latency_ms": 371.6
+    }
+  ]
+}
