@@ -13,7 +13,7 @@ Todos especificados; só HF-26-01 sem predecessor técnico. Prontidão de contra
 | [HF-05-03](HF-05-03.md) — Persistência canônica e adaptadores | economy | needs_architecture_binding | HF-05-02 |
 | [HF-05-04](HF-05-04.md) — Handlers e materialização de sucessores | economy | waiting_dependency | HF-05-03 |
 | [HF-05-05](HF-05-05.md) — Supervisor de todo portfólio | economy | implemented | HF-05-04 |
-| [HF-05-06](HF-05-06.md) — Entrypoints cloud permanentes | economy | needs_architecture_binding | HF-05-05, HF-23-01 |
+| [HF-05-06](HF-05-06.md) — Entrypoints cloud permanentes | economy | implemented | HF-05-05, HF-23-01 |
 | [HF-23-01](HF-23-01.md) — Reserva única e justiça de portfólio | economy | needs_architecture_binding | HF-05-03, HF-07-02 |
 | [HF-08-01](HF-08-01.md) — Intake atômico e documental explícito | economy | implemented | HF-05-03 |
 | [HF-08-02](HF-08-02.md) — Hub e CLI usam intake canônico | economy | waiting_dependency | HF-08-01 |
@@ -34,9 +34,9 @@ Todos especificados; só HF-26-01 sem predecessor técnico. Prontidão de contra
 | [HF-10-02](HF-10-02.md) — Pesquisa ligada às decisões | economy | needs_architecture_binding | HF-10-01, HF-07-02 |
 | [HF-25-01](HF-25-01.md) — Evolução avaliada e aplicada após restart | economy | needs_architecture_binding | HF-10-01, HF-09-01, HF-26-03 |
 | [HF-13-01](HF-13-01.md) — Prontidão e evidência no roadmap | economy | implemented | HF-26-01 |
-| [HF-13-02](HF-13-02.md) — Painel de progresso e estagnação | economy | waiting_dependency | HF-13-01, HF-05-05 |
-| [HF-15-01](HF-15-01.md) — Observador e protocolo negativo | economy | needs_architecture_binding | HF-26-01, HF-12-01 |
-| [HF-03-07](HF-03-07.md) — Preflight por host e projeto | high_architecture | waiting_dependency | HF-05-02, HF-07-01, HF-12-01 |
+| [HF-13-02](HF-13-02.md) — Painel de progresso e estagnação | economy | implemented | HF-13-01, HF-05-05 |
+| [HF-15-01](HF-15-01.md) — Observador e protocolo negativo | economy | implemented | HF-26-01, HF-12-01 |
+| [HF-03-07](HF-03-07.md) — Preflight por host e projeto | high_architecture | implemented | HF-05-02, HF-07-01, HF-12-01 |
 | [HF-03-08](HF-03-08.md) — Ativação isolada e fatia vertical | operations | waiting_dependency | HF-03-07, HF-05-06, HF-23-01, HF-08-03, HF-08-05, HF-09-02, HF-12-04, HF-10-02, HF-25-01, HF-13-02, HF-15-01, HF-07-03 |
 | [HF-15-02](HF-15-02.md) — Aceitação24h e expansão multi-projeto | independent_observer | waiting_dependency | HF-03-08 |
 
