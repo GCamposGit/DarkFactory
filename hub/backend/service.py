@@ -238,8 +238,10 @@ class HubService:
         state_path: Optional[Path] = None,
         orchestrator_path: Optional[Path] = None,
         project_root: Optional[Path] = None,
+        control_store: Optional[Any] = None,
     ) -> None:
         self._session_token = secrets.token_urlsafe(32)
+        self._control_store = control_store
         if data_dir is None:
             # Default to hub/data relative to this file
             self.data_dir = Path(__file__).resolve().parent.parent / "data"
@@ -321,6 +323,16 @@ class HubService:
 
         self._ensure_storage()
 
+    @property
+    def control_store(self) -> Any:
+        """Accessor for canonical SQLiteControlStore (HF-13-02)."""
+        if self._control_store is None:
+            from core.workflow.control_store import SQLiteControlStore
+            control_db = self.project_root / ".factory" / "control.db"
+            control_db.parent.mkdir(parents=True, exist_ok=True)
+            self._control_store = SQLiteControlStore(db_path=control_db)
+        return self._control_store
+
     def set_autonomous_intake_service(self, service: Any) -> None:
         """Inject an AutonomousIntakeService instance (HF-08-02)."""
         self._autonomous_intake_service = service
@@ -328,14 +340,11 @@ class HubService:
     def get_autonomous_intake_service(self) -> Any:
         """Get or initialize the autonomous intake service with ControlStore (HF-08-02)."""
         if self._autonomous_intake_service is None:
-            from core.workflow.control_store import SQLiteControlStore
             from core.demands.autonomous_intake import AutonomousIntakeService
             from core.workflow.control_contracts import StoreUnavailableError
 
-            db_path = self.project_root / ".factory" / "control.db"
             try:
-                db_path.parent.mkdir(parents=True, exist_ok=True)
-                store = SQLiteControlStore(db_path=db_path)
+                store = self.control_store
             except Exception as exc:
                 raise StoreUnavailableError(f"Underlying control store unavailable: {exc}") from exc
 
@@ -2309,4 +2318,205 @@ class HubService:
         watcher = TokenQuotaWatcher()
         emitted = watcher.check_all_quotas(force=force)
         return [e.model_dump(mode="json") for e in emitted]
+
+    def get_progress_projection(
+        self,
+        project_id: str,
+        now: Optional[datetime] = None,
+        max_capacity: int = 2,
+        running_override: Optional[int] = None,
+    ) -> ProgressProjection:
+        """Calculates operational progress and stagnation indicators for a project (HF-13-02)."""
+        if now is None:
+            now = datetime.now(timezone.utc)
+        elif now.tzinfo is None:
+            now = now.replace(tzinfo=timezone.utc)
+        now_iso = now.isoformat()
+
+        store = self.control_store
+        if store is None or not hasattr(store, "_connect"):
+            return ProgressProjection(
+                project_id=project_id,
+                healthy=True,
+                capacity_available=True,
+            )
+
+        conn = store._connect()
+        try:
+            cur = conn.cursor()
+
+            cur.execute(
+                """
+                SELECT j.run_id, j.ticket_id, j.plan_version, j.stage, j.iteration, j.status,
+                       j.cause_code, j.created_at, j.updated_at, j.started_at, j.finished_at,
+                       j.output_refs, j.evidence_refs
+                FROM jobs j
+                JOIN runs r ON j.run_id = r.run_id
+                WHERE r.project_id = ?
+                ORDER BY j.created_at ASC
+                """,
+                (project_id,),
+            )
+            job_rows = cur.fetchall()
+
+            cur.execute(
+                """
+                SELECT c.lease_id, c.reservation_id, c.owner, c.route_ref, c.acquired_at, c.expires_at, c.status
+                FROM claims c
+                JOIN runs r ON c.run_id = r.run_id
+                WHERE r.project_id = ? AND c.status = 'active'
+                """,
+                (project_id,),
+            )
+            claim_rows = cur.fetchall()
+
+            last_reconcile = None
+            try:
+                cur.execute("SELECT MAX(recorded_at) FROM reconciliation_ledger")
+                row = cur.fetchone()
+                if row and row[0]:
+                    last_reconcile = row[0]
+            except Exception:
+                pass
+
+        finally:
+            conn.close()
+
+        ready_count = 0
+        running_count_db = 0
+        blocked_count = 0
+        oldest_eligible_age = 0.0
+        wait_reasons: Dict[str, str] = {}
+        evidence_chain: List[str] = []
+        last_dispatch = None
+
+        for j in job_rows:
+            status = j["status"]
+            ticket_id = j["ticket_id"]
+            created_at_str = j["created_at"]
+            started_at_str = j["started_at"]
+            evidence_refs_str = j["evidence_refs"]
+
+            if started_at_str:
+                if last_dispatch is None or started_at_str > last_dispatch:
+                    last_dispatch = started_at_str
+
+            if status in ("pending", "retry", "replan"):
+                ready_count += 1
+                try:
+                    dt = datetime.fromisoformat(created_at_str)
+                    if dt.tzinfo is None:
+                        dt = dt.replace(tzinfo=timezone.utc)
+                    age = max(0.0, (now - dt).total_seconds())
+                    if age > oldest_eligible_age:
+                        oldest_eligible_age = age
+                except Exception:
+                    pass
+            elif status == "running":
+                running_count_db += 1
+            elif status in ("waiting_dependency", "waiting_human"):
+                blocked_count += 1
+                wait_reasons[ticket_id] = j["cause_code"] or f"Waiting on {status}"
+            elif status == "succeeded" and evidence_refs_str:
+                try:
+                    refs = json.loads(evidence_refs_str)
+                    if isinstance(refs, list):
+                        for r in refs:
+                            if isinstance(r, str) and r not in evidence_chain:
+                                evidence_chain.append(r)
+                except Exception:
+                    pass
+
+            if j["cause_code"] and ticket_id not in wait_reasons:
+                wait_reasons[ticket_id] = j["cause_code"]
+
+        for c in claim_rows:
+            acq = c["acquired_at"]
+            if acq and (last_dispatch is None or acq > last_dispatch):
+                last_dispatch = acq
+
+        running_count = running_override if running_override is not None else running_count_db
+
+        heartbeats_count = 0
+        reservations: List[Dict[str, Any]] = []
+        for c in claim_rows:
+            exp_str = c["expires_at"]
+            is_active_lease = True
+            if exp_str:
+                try:
+                    exp_dt = datetime.fromisoformat(exp_str)
+                    if exp_dt.tzinfo is None:
+                        exp_dt = exp_dt.replace(tzinfo=timezone.utc)
+                    if exp_dt <= now:
+                        is_active_lease = False
+                except Exception:
+                    pass
+            if is_active_lease:
+                heartbeats_count += 1
+                if c["reservation_id"]:
+                    reservations.append({
+                        "reservation_id": c["reservation_id"],
+                        "owner": c["owner"],
+                        "route_ref": c["route_ref"],
+                        "expires_at": c["expires_at"],
+                    })
+
+        capacity_available = running_count < max_capacity
+        stalled = ready_count > 0 and capacity_available and oldest_eligible_age >= 30.0
+
+        alert_map: Dict[str, IncidentAlert] = {}
+        if stalled:
+            inc_id = f"stalled:{project_id}"
+            alert_map[inc_id] = IncidentAlert(
+                incident_id=inc_id,
+                severity="warning",
+                message=(
+                    f"Project '{project_id}' execution is stalled: {ready_count} ready job(s) "
+                    f"waiting for {oldest_eligible_age:.1f}s with available capacity ({max_capacity - running_count} slot(s) free)"
+                ),
+                detected_at=now_iso,
+                details={
+                    "ready_count": ready_count,
+                    "oldest_eligible_age": oldest_eligible_age,
+                    "running_count": running_count,
+                    "max_capacity": max_capacity,
+                },
+            )
+
+        if blocked_count > 0:
+            inc_id = f"blocked:{project_id}"
+            alert_map[inc_id] = IncidentAlert(
+                incident_id=inc_id,
+                severity="info",
+                message=f"Project '{project_id}' has {blocked_count} job(s) waiting on dependencies or human input",
+                detected_at=now_iso,
+                details={"blocked_count": blocked_count, "wait_reasons": wait_reasons},
+            )
+
+        alerts = list(alert_map.values())
+        healthy = not stalled and not any(a.severity in ("error", "critical") for a in alerts)
+        next_wakeup = (now + timedelta(seconds=10)).isoformat() if ready_count > 0 or running_count > 0 else None
+
+        return ProgressProjection(
+            project_id=project_id,
+            oldest_eligible_age=oldest_eligible_age,
+            last_dispatch=last_dispatch,
+            last_reconcile=last_reconcile,
+            heartbeats_count=heartbeats_count,
+            ready_count=ready_count,
+            running_count=running_count,
+            blocked_count=blocked_count,
+            wait_reasons=wait_reasons,
+            next_wakeup=next_wakeup,
+            reservations=reservations,
+            evidence_chain=evidence_chain,
+            stalled=stalled,
+            alerts=alerts,
+            healthy=healthy,
+            capacity_available=capacity_available,
+        )
+
+
+# Canonical alias for DarkHubService (HF-13-02)
+DarkHubService = HubService
 

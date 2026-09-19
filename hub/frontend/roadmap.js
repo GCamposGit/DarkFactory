@@ -167,6 +167,7 @@ async function loadRoadmapSnapshot() {
     roadmapUi.snapshot = await response.json();
     roadmapUi.loading = false;
     renderRoadmapSnapshot();
+    loadRoadmapProgress(roadmapUi.projectId);
   } catch (error) {
     roadmapUi.loading = false;
     roadmapUi.snapshot = null;
@@ -559,6 +560,47 @@ function clearRoadmapFilters() {
     if (element) element.value = "";
   });
   loadRoadmapSnapshot();
+}
+
+async function loadRoadmapProgress(projectId) {
+  if (!projectId) return;
+  try {
+    const response = await fetch(`/api/projects/${encodeURIComponent(projectId)}/roadmap/progress`);
+    if (!response.ok) return;
+    const progress = await response.json();
+    renderRoadmapProgress(progress);
+  } catch (error) {
+    console.warn("Roadmap progress unavailable:", error);
+  }
+}
+
+function renderRoadmapProgress(progress) {
+  if (!progress) return;
+  const banner = document.getElementById("roadmap-stagnation-banner");
+  if (banner) {
+    if (progress.stalled) {
+      banner.classList.remove("hidden");
+      const ageStr = progress.oldest_eligible_age ? `${progress.oldest_eligible_age.toFixed(1)}s` : ">30s";
+      banner.innerHTML = `
+        <div class="flex items-center gap-2">
+          <span class="text-rose-400 font-bold text-sm">⚠️ Estagnação Operacional</span>
+          <span>Job pronto aguardando há <strong>${escapeRoadmapHtml(ageStr)}</strong> com capacidade disponível.</span>
+        </div>
+        <div class="flex items-center gap-3 text-[11px] font-mono">
+          <span class="text-amber-300">Prontos: ${progress.ready_count}</span>
+          <span class="text-emerald-300">Executando: ${progress.running_count}</span>
+          <span class="text-slate-400">Heartbeats: ${progress.heartbeats_count}</span>
+        </div>
+      `;
+    } else {
+      banner.classList.add("hidden");
+    }
+  }
+
+  const alertsLive = document.getElementById("roadmap-alerts");
+  if (alertsLive && progress.alerts && progress.alerts.length) {
+    alertsLive.textContent = progress.alerts.map((a) => a.message).join(". ");
+  }
 }
 
 function renderRoadmapAlert(message, type) {

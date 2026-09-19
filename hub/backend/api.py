@@ -49,6 +49,7 @@ from hub.backend.models import (
     TaskDashboardReport,
     UsageSyncPayload,
     UsageSyncResponse,
+    ProgressProjection,
 )
 from hub.backend.service import HubService
 from core.usage.models import AccountUsageReport, ModelCallEvent, ModelUsageReport
@@ -244,6 +245,15 @@ def get_project_roadmap_source(
     if document is None:
         raise HTTPException(status_code=404, detail=f"Roadmap source '{source_id}' not found")
     return document
+
+
+@roadmap_router.get("/{project_id}/roadmap/progress", response_model=ProgressProjection)
+def get_project_roadmap_progress(
+    project_id: str,
+    service: HubService = Depends(get_hub_service),
+) -> ProgressProjection:
+    """Return the selected project's continuous progress and stagnation projection (HF-13-02)."""
+    return service.get_progress_projection(project_id)
 
 
 @router.get("/services", response_model=List[ServiceItem])

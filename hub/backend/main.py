@@ -14,7 +14,7 @@ from starlette.types import ASGIApp, Scope, Receive, Send
 from starlette.responses import Response, JSONResponse
 
 from hub.backend.api import get_hub_service, roadmap_router, router as api_router
-from hub.backend.models import TaskDashboardReport
+from hub.backend.models import ProgressProjection, TaskDashboardReport
 from hub.backend.service import HubService
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -177,6 +177,17 @@ app.include_router(roadmap_router)
 def get_task_dashboard_root(service: HubService = Depends(get_hub_service)) -> TaskDashboardReport:
     """Root alias for the operational task dashboard projection (DF-21 / HF-13)."""
     return service.get_task_dashboard()
+
+
+# Root-level aliases for continuous progress projection (HF-13-02)
+@app.get("/{project_id}/roadmap/progress", response_model=ProgressProjection, tags=["Operational Roadmap"], include_in_schema=False)
+@app.get("/{project_id}/roadmap/progress/", response_model=ProgressProjection, include_in_schema=False)
+def get_project_roadmap_progress_root(
+    project_id: str,
+    service: HubService = Depends(get_hub_service),
+) -> ProgressProjection:
+    """Root alias for the continuous progress and stagnation projection (HF-13-02)."""
+    return service.get_progress_projection(project_id)
 
 
 # Root route serving index.html
