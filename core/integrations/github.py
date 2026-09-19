@@ -95,6 +95,24 @@ def _parse_datetime(value: Any) -> datetime | None:
         return None
 
 
+def _read_env_github_token() -> str | None:
+    """Reads GITHUB_TOKEN from .env if present in root."""
+    try:
+        from pathlib import Path
+        root_dir = Path(__file__).resolve().parents[2]
+        env_file = root_dir / ".env"
+        if env_file.exists():
+            for line in env_file.read_text(encoding="utf-8", errors="replace").splitlines():
+                line = line.strip()
+                if line and not line.startswith("#") and "=" in line:
+                    k, v = line.split("=", 1)
+                    if k.strip() == "GITHUB_TOKEN":
+                        return v.strip().strip('"').strip("'")
+    except Exception:
+        pass
+    return None
+
+
 class GitHubClient:
     """Read-only GitHub API client with an injectable JSON transport."""
 
@@ -113,7 +131,7 @@ class GitHubClient:
         if timeout_seconds <= 0:
             raise ValueError("timeout_seconds must be positive")
         self.base_url = normalized_base
-        self.token = token if token is not None else os.environ.get("GITHUB_TOKEN")
+        self.token = token if token is not None else (os.environ.get("GITHUB_TOKEN") or _read_env_github_token())
         self.transport = transport
         self.timeout_seconds = float(timeout_seconds)
 
