@@ -51,6 +51,11 @@ models/checkpoints/
 .factory/hf15/workspace/
 .factory/reports/
 .factory/notifications/
+.factory/marketing/
+.factory/portfolio/
+.factory/catalog/
+.factory/evolution/
+.factory/enterprise/
 .factory/*.db*
 
 

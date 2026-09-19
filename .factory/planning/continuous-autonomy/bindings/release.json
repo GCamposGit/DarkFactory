@@ -1,0 +1,573 @@
+{
+  "schema_version": "1.0",
+  "ticket_id": "HF-12-01",
+  "purpose": "Binding normativo de build real, captura de OCI/bytes digest, mapeamento de targets de deploy por projeto registrado, despacho com tracking de operação e salvaguardas de jornada sintética e rollback automatizado",
+  "created_at": "2026-09-18T18:25:00Z",
+  "baseline_sha": "83e5298eb231599076811802dceac8575c7f6feb",
+  "depends_on": [
+    "HF-26-03"
+  ],
+  "successors": [
+    "HF-12-02",
+    "HF-15-01",
+    "HF-03-07"
+  ],
+  "environment_profile": "release-binding",
+  "governing_rules": [
+    "AGENTS.md",
+    "CONTRACTS.md",
+    "MISSION.md",
+    "FACTORY_RULES.md"
+  ],
+  "release_protocol": {
+    "name": "FiveStageAutonomousReleaseProtocol",
+    "version": "1.0",
+    "invariants": [
+      "Zero deploy without confirmed OCI/bytes digest; synthetic/speculative deployments without confirmed digest are strictly rejected",
+      "Webhook HTTP 200 without deterministic external_operation_id does not satisfy deployment binding",
+      "Merge or deployment is not operational proof; release is only complete after deterministic synthetic journey succeeds",
+      "Every secret reference must be strictly sanitized (provider, locator, variable_name) with zero plaintext tokens in storage or logs",
+      "Scenario G8: Commercial paid projects enforce client acceptance before production; failure in production triggers automated rollback to last_known_good_digest without blocking independent projects"
+    ],
+    "stages": [
+      {
+        "stage_number": 1,
+        "stage_id": "build_and_digest_capture",
+        "name": "Build Real e Captura de Bytes/OCI Digest",
+        "description": "Execução determinística do comando de build do alvo com cálculo e validação do digest imutável do artefato antes de qualquer avanço.",
+        "preconditions": [
+          "Preflight de worktree limpa e branch compatível verificado",
+          "Manifesto de build e dependências resolvidos"
+        ],
+        "actions": [
+          "Executa build command específico do target",
+          "Captura digest OCI da imagem (ex: sha256:...) ou hash SHA-256 da árvore de bytes (dist/manifest)",
+          "Rejeita imediatamente avanço se digest não for confirmado ou estiver divergente"
+        ],
+        "output_contract": "BuildArtifact(build_id, project_id, git_sha, artifact_digest, manifest_digest, image_tag, created_at)"
+      },
+      {
+        "stage_number": 2,
+        "stage_id": "deploy_dispatch_operation_id",
+        "name": "Disparo de Deploy via DokployDeployClient / API com External Operation ID",
+        "description": "Despacho da instrução de deploy ao provedor de infraestrutura (Dokploy PaaS / local runner) obtendo identificador rastreável da operação.",
+        "preconditions": [
+          "Digest confirmado na Etapa 1",
+          "SecretReferences sanitizadas resolvidas apenas na fronteira de I/O"
+        ],
+        "actions": [
+          "Invoca DokployDeployClient ou adapter local autenticado",
+          "Captura external_operation_id único emitido pelo orquestrador/PaaS",
+          "Grava registro ExternalOperation com status 'prepared' ou 'sent' no ControlStore"
+        ],
+        "output_contract": "ExternalOperation(operation_key, request_digest, provider, external_id, status='sent', observed_at)"
+      },
+      {
+        "stage_number": 3,
+        "stage_id": "deterministic_monitoring",
+        "name": "Monitoramento de Operação até Término Determinístico",
+        "description": "Polling com backoff exponencial limitado e timeout rígido até a operação atingir estado terminal 'succeeded' ou 'failed'.",
+        "preconditions": [
+          "external_operation_id válido registrado no ControlStore"
+        ],
+        "actions": [
+          "Consulta status da operação no provedor pelo external_operation_id",
+          "Enforça timeout de 15 minutos (release-binding)",
+          "Rejeita respostas intermediárias ou Webhook 200 genérico sem status terminal comprovado",
+          "Atualiza ExternalOperation para 'succeeded' ou 'failed'"
+        ],
+        "output_contract": "ExternalOperation(status='succeeded', observed_at) ou disparo de Rollback se 'failed'"
+      },
+      {
+        "stage_number": 4,
+        "stage_id": "synthetic_user_journey",
+        "name": "Execução de Jornada Sintética do Usuário Final em Produção/Staging",
+        "description": "Execução de testes operacionais de ponta a ponta (smoke journey) contra os endpoints públicos/locais para comprovar viabilidade em produção.",
+        "preconditions": [
+          "Etapa 3 terminada com status 'succeeded'",
+          "DestinationPreflight aprovado (conectividade, portas, certificados)"
+        ],
+        "actions": [
+          "Dispara testes funcionais de leitura e escrita (health, roundtrip de dados, autenticação, renderização de assets)",
+          "Mede latência de resposta operacional",
+          "Emite JourneySmokeTest evidenciando sucesso operacional"
+        ],
+        "output_contract": "JourneySmokeTest(test_id, target_environment, artifact_digest, scenarios_executed, passed=True, latency_ms)"
+      },
+      {
+        "stage_number": 5,
+        "stage_id": "automated_rollback",
+        "name": "Protocolo de Rollback Automatizado",
+        "description": "Reversão atômica e autônoma para last_known_good_digest em caso de falha no preflight, deploy ou jornada sintética.",
+        "preconditions": [
+          "Falha detectada na Etapa 3 (status 'failed' / timeout) ou Etapa 4 (JourneySmokeTest.passed == False)"
+        ],
+        "actions": [
+          "Recupera last_known_good_digest registrado no release pipeline",
+          "Executa comando de redeploy do digest estável anterior sem reconstrução",
+          "Executa journey de verificação no alvo restaurado",
+          "Registra RollbackReceipt no histórico de auditoria",
+          "Mantém integridade dos logs e outbox; não afeta outros projetos em execução"
+        ],
+        "output_contract": "RollbackReceipt(rollback_id, project_id, failed_artifact_digest, restored_artifact_digest, trigger_reason, restored_at)"
+      }
+    ]
+  },
+  "projects": {
+    "darkfac": {
+      "project_id": "darkfac",
+      "name": "Dark Factory (Core)",
+      "kind": "core",
+      "target_type": "dokploy_docker_compose",
+      "target_classification": "cloud_paas",
+      "host": {
+        "provider": "hetzner_cloud",
+        "instance": "Hetzner CX23 (darkfac-vps-primary)",
+        "ip": "178.105.73.168",
+        "tailscale_ip": "100.83.176.60",
+        "paas_domain": "dokploy.ggcampos.com",
+        "service_domain": "darkhub.ggcampos.com"
+      },
+      "build": {
+        "working_directory": ".",
+        "build_command": "docker compose -f deploy/dokploy/docker-compose.cloud.yml build",
+        "dockerfile": "deploy/dokploy/Dockerfile.cloud",
+        "compose_file": "deploy/dokploy/docker-compose.cloud.yml",
+        "image_tag": "darkfac-cloud:latest",
+        "context_url": "https://${GITHUB_PAT:-}@github.com/GCamposGit/DarkFactory.git#main",
+        "timeout_seconds": 600
+      },
+      "artifact_capture": {
+        "capture_type": "oci_image_digest",
+        "inspection_command": "docker inspect --format='{{index .RepoDigests 0}}' darkfac-cloud:latest",
+        "digest_algorithm": "sha256",
+        "require_confirmed_digest": true,
+        "rejection_policy": "reject_deployment_without_confirmed_digest"
+      },
+      "sanitized_secret_references": [
+        {
+          "variable_name": "DOKPLOY_API_URL",
+          "provider": "env",
+          "locator": "DOKPLOY_API_URL",
+          "description": "URL base da API Dokploy PaaS (ex: https://dokploy.ggcampos.com/api)"
+        },
+        {
+          "variable_name": "DOKPLOY_API_KEY",
+          "provider": "env",
+          "locator": "DOKPLOY_API_KEY",
+          "description": "Chave de autenticação da API de automação Dokploy"
+        },
+        {
+          "variable_name": "DOKPLOY_DEPLOY_URL",
+          "provider": "env",
+          "locator": "DOKPLOY_DEPLOY_URL",
+          "description": "Webhook URL de trigger de deploy no Dokploy"
+        },
+        {
+          "variable_name": "DARKFAC_HF02_DATABASE_URL",
+          "provider": "env",
+          "locator": "DARKFAC_HF02_DATABASE_URL",
+          "description": "DSN do banco de dados relacional PostgreSQL do cluster Dokploy"
+        },
+        {
+          "variable_name": "GITHUB_PAT",
+          "provider": "env",
+          "locator": "GITHUB_PAT",
+          "description": "Personal Access Token do GitHub para clone autenticado em build de container"
+        }
+      ],
+      "deployment_adapter": {
+        "adapter_class": "DokployComposeDeployAdapter",
+        "client_class": "DokployDeployClient",
+        "dispatch_method": "POST",
+        "endpoint": "https://dokploy.ggcampos.com/api/trpc/compose.deploy",
+        "operation_id_json_path": "result.data.json.operationId",
+        "status_check_endpoint": "https://dokploy.ggcampos.com/api/trpc/compose.getDeploymentStatus?input={\"json\":{\"operationId\":\"{external_operation_id}\"}}",
+        "poll_interval_seconds": 5,
+        "max_poll_seconds": 900
+      },
+      "healthcheck": {
+        "endpoint": "http://127.0.0.1:8001/health",
+        "public_endpoint": "https://darkhub.ggcampos.com/health",
+        "method": "GET",
+        "expected_status": 200,
+        "timeout_seconds": 15,
+        "retries": 3
+      },
+      "synthetic_journey": {
+        "target_environment": "production",
+        "scenarios": [
+          {
+            "name": "coordinator_health_probe",
+            "type": "http_probe",
+            "url": "https://darkhub.ggcampos.com/health",
+            "expected_status": 200,
+            "assertion": "response.json().status == 'healthy' and response.json().coordinator_alive == True"
+          },
+          {
+            "name": "dbos_database_connectivity",
+            "type": "db_probe",
+            "target": "DARKFAC_HF02_DATABASE_URL",
+            "assertion": "SELECT 1 returns 1 and control_store tables accessible"
+          },
+          {
+            "name": "worker_execution_roundtrip",
+            "type": "ipc_roundtrip",
+            "action": "enqueue_ping_job_and_verify_result",
+            "max_latency_ms": 3000
+          },
+          {
+            "name": "metrics_telemetry_emit",
+            "type": "telemetry_probe",
+            "endpoint": "https://darkhub.ggcampos.com/api/telemetry/metrics",
+            "expected_status": 200
+          }
+        ],
+        "acceptance_criteria": "All scenarios must return passed=True; latency <= 5000ms"
+      },
+      "rollback_safeguards": {
+        "strategy": "revert_to_last_known_good_digest",
+        "restore_command": "docker compose -f deploy/dokploy/docker-compose.cloud.yml up -d --no-build",
+        "requires_state_preservation": true,
+        "preserved_volumes": [
+          "darkfac-artifacts",
+          "darkfac-test-logs",
+          "darkhub-factory-data"
+        ],
+        "verification_after_rollback": "healthcheck.public_endpoint returns 200 within 60s"
+      }
+    },
+    "site-ggcampos": {
+      "project_id": "site-ggcampos",
+      "name": "Site Pessoal (ATRIUM)",
+      "kind": "client_portfolio",
+      "target_type": "static_web",
+      "target_classification": "static_cdn_and_dokploy_webhook",
+      "host": {
+        "canonical_path": "C:\\dev\\Site_ggcampos",
+        "production_domain": "ggcampos.com",
+        "hosting_provider": "Hostinger / Dokploy Static Webhook",
+        "staging_url": "https://staging.ggcampos.com"
+      },
+      "build": {
+        "working_directory": "C:\\dev\\Site_ggcampos",
+        "build_command": "npm run build",
+        "dist_directory": "C:\\dev\\Site_ggcampos\\dist",
+        "dist_verification_required": true,
+        "timeout_seconds": 300
+      },
+      "artifact_capture": {
+        "capture_type": "dist_manifest_hash",
+        "inspection_method": "sha256_tree_hash_of_dist_directory",
+        "dist_path": "C:\\dev\\Site_ggcampos\\dist",
+        "require_confirmed_digest": true,
+        "rejection_policy": "reject_deployment_without_valid_dist"
+      },
+      "sanitized_secret_references": [
+        {
+          "variable_name": "DOKPLOY_STATIC_WEBHOOK_URL",
+          "provider": "env",
+          "locator": "DOKPLOY_STATIC_WEBHOOK_URL",
+          "description": "Webhook Dokploy para acionamento de pull e deploy estático"
+        },
+        {
+          "variable_name": "HOSTINGER_FTP_HOST",
+          "provider": "env",
+          "locator": "HOSTINGER_FTP_HOST",
+          "description": "Servidor de deploy FTP Hostinger"
+        },
+        {
+          "variable_name": "HOSTINGER_FTP_USER",
+          "provider": "env",
+          "locator": "HOSTINGER_FTP_USER",
+          "description": "Usuário de publicação FTP Hostinger"
+        },
+        {
+          "variable_name": "HOSTINGER_FTP_PASSWORD",
+          "provider": "env",
+          "locator": "HOSTINGER_FTP_PASSWORD",
+          "description": "Senha cifrada de publicação FTP Hostinger"
+        }
+      ],
+      "deployment_adapter": {
+        "adapter_class": "StaticWebDeployAdapter",
+        "client_class": "DokployDeployClient",
+        "dispatch_method": "POST",
+        "webhook_url_ref": "DOKPLOY_STATIC_WEBHOOK_URL",
+        "operation_id_json_path": "deployment_id",
+        "fallback_adapter": "FtpDeployAdapter",
+        "poll_interval_seconds": 3,
+        "max_poll_seconds": 300
+      },
+      "healthcheck": {
+        "endpoint": "https://ggcampos.com",
+        "method": "GET",
+        "expected_status": 200,
+        "timeout_seconds": 10,
+        "retries": 3
+      },
+      "synthetic_journey": {
+        "target_environment": "production",
+        "scenarios": [
+          {
+            "name": "homepage_http_200",
+            "type": "http_probe",
+            "url": "https://ggcampos.com",
+            "expected_status": 200,
+            "assertion": "response.status_code == 200 and 'Guilherme Campos' in response.text"
+          },
+          {
+            "name": "asset_integrity_audit",
+            "type": "asset_integrity",
+            "assertion": "All linked CSS and JS files in HTML head return HTTP 200 with non-zero bytes and no 404"
+          },
+          {
+            "name": "seo_and_opengraph_validation",
+            "type": "seo_probe",
+            "url": "https://ggcampos.com",
+            "assertion": "Canonical URL, og:title, og:image, and og:description present and valid"
+          },
+          {
+            "name": "astro_thinking_collection_route",
+            "type": "http_probe",
+            "url": "https://ggcampos.com/thinking",
+            "expected_status": 200
+          }
+        ],
+        "acceptance_criteria": "HTTP 200 on all pages, assets intact, zero 404 errors"
+      },
+      "rollback_safeguards": {
+        "strategy": "revert_to_last_known_good_dist",
+        "restore_command": "restore_dist_snapshot(last_known_good_dist_hash)",
+        "backup_retention_count": 5,
+        "verification_after_rollback": "https://ggcampos.com returns 200 with previous dist asset hashes"
+      }
+    },
+    "segundo-cerebro": {
+      "project_id": "segundo-cerebro",
+      "name": "Segundo Cérebro",
+      "kind": "internal_product",
+      "target_type": "local_service",
+      "target_classification": "mcp_knowledge_daemon",
+      "host": {
+        "canonical_path": "C:\\dev\\SegundoCerebro",
+        "platform": "windows_local",
+        "python_executable": "C:\\dev\\SegundoCerebro\\.venv\\Scripts\\python.exe",
+        "mcp_server_entrypoint": "src/segundocerebro/mcp/server.py"
+      },
+      "build": {
+        "working_directory": "C:\\dev\\SegundoCerebro",
+        "build_command": "C:\\dev\\SegundoCerebro\\.venv\\Scripts\\python.exe -m pip install -e . --no-deps",
+        "verification_command": "C:\\dev\\SegundoCerebro\\.venv\\Scripts\\python.exe -c \"import segundocerebro; print(segundocerebro.__version__)\"",
+        "timeout_seconds": 180
+      },
+      "artifact_capture": {
+        "capture_type": "git_sha_and_schema_hash",
+        "inspection_method": "git_rev_parse_head_and_sqlite_schema_hash",
+        "require_confirmed_digest": true,
+        "rejection_policy": "reject_deployment_if_git_or_schema_dirty"
+      },
+      "sanitized_secret_references": [
+        {
+          "variable_name": "OPENAI_API_KEY",
+          "provider": "env",
+          "locator": "OPENAI_API_KEY",
+          "description": "API Key para embeddings neurais de ingestão no Segundo Cérebro"
+        },
+        {
+          "variable_name": "SEGUNDO_CEREBRO_STORAGE_KEY",
+          "provider": "env",
+          "locator": "SEGUNDO_CEREBRO_STORAGE_KEY",
+          "description": "Chave de criptografia para índices locais do banco de conhecimento"
+        }
+      ],
+      "deployment_adapter": {
+        "adapter_class": "LocalMCPServiceAdapter",
+        "client_class": "SegundoCerebroClient",
+        "restart_method": "restart_mcp_subprocess",
+        "operation_id_json_path": "process_pid_and_session_id",
+        "poll_interval_seconds": 1,
+        "max_poll_seconds": 60
+      },
+      "healthcheck": {
+        "probe_type": "mcp_protocol_probe",
+        "command": "C:\\dev\\SegundoCerebro\\.venv\\Scripts\\python.exe -m core.knowledge.segundo_cerebro_client --health",
+        "expected_tools": [
+          "search",
+          "read_note",
+          "neighbors",
+          "list_folder",
+          "outline",
+          "get_document",
+          "pack_folder"
+        ],
+        "timeout_seconds": 10
+      },
+      "storage_integrity": {
+        "sqlite": {
+          "database_path": "C:\\dev\\SegundoCerebro\\data\\brain.db",
+          "integrity_command": "PRAGMA integrity_check;",
+          "expected_result": "ok"
+        },
+        "chroma": {
+          "persist_directory": "C:\\dev\\SegundoCerebro\\data\\chroma",
+          "collection_check": "collection.count() > 0 and vector_dim == 1536",
+          "expected_result": "valid"
+        }
+      },
+      "synthetic_journey": {
+        "target_environment": "local_daemon",
+        "scenarios": [
+          {
+            "name": "mcp_client_health_available",
+            "type": "client_health",
+            "assertion": "SegundoCerebroClient().check_health().available == True"
+          },
+          {
+            "name": "semantic_retrieval_query",
+            "type": "semantic_search",
+            "query": "Dark Factory disaggregated inference architecture",
+            "project_id": "shared",
+            "assertion": "result.status == 'FOUND' and len(result.citations) > 0"
+          },
+          {
+            "name": "rag_provenance_audit",
+            "type": "provenance_check",
+            "assertion": "citations[0].provenance_hash == sha256(chunk_bytes)"
+          },
+          {
+            "name": "sqlite_database_integrity",
+            "type": "db_integrity",
+            "assertion": "PRAGMA integrity_check returns 'ok'"
+          }
+        ],
+        "acceptance_criteria": "MCP tools responsive, semantic retrieval returns verified SHA-256 provenance, SQLite integrity ok"
+      },
+      "rollback_safeguards": {
+        "strategy": "revert_git_and_restore_sqlite_snapshot",
+        "restore_command": "git checkout {last_known_good_sha} && restore_sqlite_db_snapshot()",
+        "snapshot_location": "C:\\dev\\SegundoCerebro\\data\\backups\\",
+        "verification_after_rollback": "mcp_probe succeeds and PRAGMA integrity_check is ok"
+      }
+    },
+    "jarvis": {
+      "project_id": "jarvis",
+      "name": "Jarvis (AI Assistant)",
+      "kind": "internal_product",
+      "target_type": "local_service",
+      "target_classification": "daemon_local_assistant",
+      "host": {
+        "canonical_path": "C:\\dev\\Jarvis",
+        "platform": "windows_local",
+        "service_port": 8088,
+        "python_executable": "C:\\dev\\Jarvis\\.venv\\Scripts\\python.exe"
+      },
+      "build": {
+        "working_directory": "C:\\dev\\Jarvis",
+        "build_command": "C:\\dev\\Jarvis\\.venv\\Scripts\\python.exe -m pip install -e .",
+        "timeout_seconds": 180
+      },
+      "artifact_capture": {
+        "capture_type": "git_sha_and_service_manifest_digest",
+        "inspection_method": "git_rev_parse_head_and_config_manifest_sha256",
+        "require_confirmed_digest": true,
+        "rejection_policy": "reject_deployment_without_verified_git_head"
+      },
+      "sanitized_secret_references": [
+        {
+          "variable_name": "OPENROUTER_API_KEY",
+          "provider": "env",
+          "locator": "OPENROUTER_API_KEY",
+          "description": "API Key para fallback de raciocínio profundo no Jarvis"
+        },
+        {
+          "variable_name": "ELEVENLABS_API_KEY",
+          "provider": "env",
+          "locator": "ELEVENLABS_API_KEY",
+          "description": "API Key de síntese de voz neural do Jarvis"
+        },
+        {
+          "variable_name": "JARVIS_DAEMON_TOKEN",
+          "provider": "env",
+          "locator": "JARVIS_DAEMON_TOKEN",
+          "description": "Token secreto de autenticação da porta local do daemon Jarvis"
+        }
+      ],
+      "deployment_adapter": {
+        "adapter_class": "LocalDaemonServiceAdapter",
+        "service_name": "jarvis-daemon",
+        "restart_method": "system_service_or_subprocess_restart",
+        "operation_id_json_path": "process_pid",
+        "poll_interval_seconds": 1,
+        "max_poll_seconds": 60
+      },
+      "healthcheck": {
+        "probe_type": "http_port_probe",
+        "endpoint": "http://127.0.0.1:8088/health",
+        "method": "GET",
+        "expected_status": 200,
+        "timeout_seconds": 5,
+        "retries": 5
+      },
+      "synthetic_journey": {
+        "target_environment": "local_daemon",
+        "scenarios": [
+          {
+            "name": "daemon_process_running",
+            "type": "process_alive_check",
+            "assertion": "Get-Process jarvis | where {$_.Responding -eq $true}"
+          },
+          {
+            "name": "local_port_http_200",
+            "type": "http_probe",
+            "url": "http://127.0.0.1:8088/health",
+            "expected_status": 200,
+            "assertion": "response.status_code == 200 and response.json().status == 'online'"
+          },
+          {
+            "name": "audio_neural_pipeline_ready",
+            "type": "component_probe",
+            "assertion": "voice_engine.is_initialized() == True"
+          },
+          {
+            "name": "budget_fail_closed_validation",
+            "type": "portfolio_budget_check",
+            "assertion": "PortfolioBudgetManager().get_project_budget('jarvis').status == 'active'"
+          }
+        ],
+        "acceptance_criteria": "Daemon alive, HTTP 200 on port 8088, voice pipeline ready, budget strictly respected"
+      },
+      "rollback_safeguards": {
+        "strategy": "restart_previous_version_daemon",
+        "restore_command": "git checkout {last_known_good_sha} && restart_daemon()",
+        "verification_after_rollback": "http://127.0.0.1:8088/health returns 200 within 30s"
+      }
+    }
+  },
+  "rollback_matrix": {
+    "darkfac": {
+      "trigger": "Coordinator/Worker crash, migration failure, synthetic journey failure",
+      "target_action": "docker compose down && docker compose -f deploy/dokploy/docker-compose.cloud.yml up -d with last_known_good_digest",
+      "max_acceptable_downtime_seconds": 120,
+      "data_loss_tolerance": "zero_rpo_for_control_store"
+    },
+    "site-ggcampos": {
+      "trigger": "HTTP != 200, broken assets, SEO audit failure, layout collapse",
+      "target_action": "atomic symlink or FTP overwrite to last_known_good_dist",
+      "max_acceptable_downtime_seconds": 60,
+      "data_loss_tolerance": "stateless_zero_data_loss"
+    },
+    "segundo-cerebro": {
+      "trigger": "SQLite corruption, Chroma vector mismatch, MCP server crash",
+      "target_action": "restore SQLite snapshot from .factory/backups/ and checkout last_known_good_sha",
+      "max_acceptable_downtime_seconds": 60,
+      "data_loss_tolerance": "zero_rpo_with_wal_replay"
+    },
+    "jarvis": {
+      "trigger": "Port 8088 unresponsive, voice pipeline exception, budget overrun",
+      "target_action": "kill PID and relaunch last_known_good_sha daemon",
+      "max_acceptable_downtime_seconds": 30,
+      "data_loss_tolerance": "stateless_daemon_zero_loss"
+    }
+  }
+}

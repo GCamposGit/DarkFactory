@@ -13,9 +13,18 @@ if hasattr(sys.stdout, "reconfigure"):
 if hasattr(sys.stderr, "reconfigure"):
     sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
-from .models import ScaffoldRequest
-from .registry import get_registry
-from .scaffolder import ArchetypeScaffolder
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+
+try:
+    from .models import ScaffoldRequest
+    from .registry import get_registry
+    from .scaffolder import ArchetypeScaffolder
+except ImportError:
+    from core.archetypes.models import ScaffoldRequest
+    from core.archetypes.registry import get_registry
+    from core.archetypes.scaffolder import ArchetypeScaffolder
 
 
 def main(argv: list[str] | None = None) -> int:

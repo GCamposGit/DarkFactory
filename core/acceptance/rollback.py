@@ -10,11 +10,14 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import os
+import shutil
+import tarfile
 import time
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional, Union
 
 from core.acceptance.models import RollbackExecutionRecord
 from core.infra.backup_service import (
@@ -22,9 +25,12 @@ from core.infra.backup_service import (
     BackupStorageTarget,
     CloudBackupService,
 )
+from core.orchestrator.build_artifacts import ArtifactRef
+from core.orchestrator.deployment_adapter import TargetConfig
 from core.orchestrator.release_pipeline import ReleasePipelineService, RollbackReceipt
 
 logger = logging.getLogger("darkfac.acceptance.rollback")
+
 
 
 class HF15RollbackCoordinator:
@@ -177,3 +183,173 @@ class HF15RollbackCoordinator:
         if project_id:
             return [r for r in self._execution_history if r.project_id == project_id]
         return list(self._execution_history)
+
+
+class RollbackAdapter:
+    """Adapter for restoring release targets and executing atomic rollback drills."""
+
+    def __init__(
+        self,
+        backup_service: Optional[CloudBackupService] = None,
+        coordinator: Optional[HF15RollbackCoordinator] = None,
+    ) -> None:
+        self.backup_service = backup_service or CloudBackupService()
+        self.coordinator = coordinator
+
+    def restore(
+        self,
+        previous: Union[ArtifactRef, str],
+        backup: Union[Path, BackupSnapshot],
+        target: Union[TargetConfig, Path],
+        trigger_reason: str = "automated_rollback_restore",
+        pre_rollback_digest: Optional[str] = None,
+    ) -> RollbackExecutionRecord:
+        """Restores target to previous version using backup snapshot.
+
+        MANDATORY COUNTER-PROOF:
+        'Rollback só JSON reprova. Restore no alvo, sem tratar dados cliente como descartáveis':
+        - If the backup snapshot contains ONLY JSON configuration files without real data/database/state files
+          -> raises ValueError("Rollback rejected: backup contains only JSON configuration; client data missing").
+        - Verifies actual data files restoration and byte checksums.
+        - Measures RTO and RPO accurately.
+        """
+        start_time = time.perf_counter()
+
+        # 1. Resolve previous digest
+        if isinstance(previous, str):
+            previous_digest = previous
+        else:
+            previous_digest = (
+                getattr(previous, "digest", None)
+                or getattr(previous, "byte_digest", None)
+                or getattr(previous, "oci_digest", None)
+                or str(previous)
+            )
+
+        # 2. Resolve target directory and project ID
+        if isinstance(target, TargetConfig):
+            project_id = target.project_id
+            target_dir = Path(
+                target.metadata.get("state_directory")
+                or target.metadata.get("data_dir")
+                or target.metadata.get("restore_target")
+                or (Path.cwd() / ".factory" / "workspace" / project_id)
+            ).resolve()
+        else:
+            target_dir = Path(target).resolve()
+            project_id = target_dir.name or "target_project"
+
+        target_dir.mkdir(parents=True, exist_ok=True)
+
+        # 3. Resolve backup metadata, manifest, and archive location
+        archive_path: Optional[Path] = None
+        created_at: datetime = datetime.now(UTC)
+        snapshot_id: str = f"snp_manual_{uuid.uuid4().hex[:8]}"
+        manifest: dict[str, str] = {}
+
+        if isinstance(backup, BackupSnapshot):
+            snapshot_id = backup.snapshot_id
+            project_id = backup.project_id or project_id
+            created_at = backup.created_at
+            archive_path = Path(backup.storage_location).resolve()
+            manifest = dict(backup.file_manifest)
+        elif isinstance(backup, Path):
+            backup_path = Path(backup).resolve()
+            if not backup_path.exists():
+                raise FileNotFoundError(f"Backup path does not exist: {backup_path}")
+
+            created_at = datetime.fromtimestamp(backup_path.stat().st_mtime, tz=UTC)
+            if backup_path.is_file():
+                archive_path = backup_path
+                snapshot_id = backup_path.stem.replace(".tar", "")
+                with tarfile.open(archive_path, "r:*") as tar:
+                    for member in tar.getmembers():
+                        if member.isfile():
+                            extracted = tar.extractfile(member)
+                            if extracted:
+                                manifest[member.name] = hashlib.sha256(extracted.read()).hexdigest()
+            elif backup_path.is_dir():
+                snapshot_id = f"snp_dir_{backup_path.name}"
+                for p in sorted(backup_path.rglob("*")):
+                    if p.is_file():
+                        rel = p.relative_to(backup_path).as_posix()
+                        manifest[rel] = hashlib.sha256(p.read_bytes()).hexdigest()
+        else:
+            raise TypeError(f"Unsupported backup type: {type(backup)}")
+
+        # 4. MANDATORY COUNTER-PROOF: 'Rollback só JSON reprova'
+        # If backup contains ONLY JSON configuration files without real data/database/state files,
+        # fail-closed immediately before mutating destination.
+        if not manifest:
+            raise ValueError("Rollback rejected: backup contains only JSON configuration; client data missing")
+
+        file_names = list(manifest.keys())
+        json_extensions = {".json", ".jsonc", ".json5"}
+        all_json = all(Path(f).suffix.lower() in json_extensions for f in file_names)
+
+        if all_json:
+            logger.error("Rollback aborted: backup snapshot %s contains only JSON files", snapshot_id)
+            raise ValueError("Rollback rejected: backup contains only JSON configuration; client data missing")
+
+        # 5. Extract / Restore into target destination
+        if archive_path and archive_path.is_file():
+            with tarfile.open(archive_path, "r:*") as tar:
+                try:
+                    tar.extractall(target_dir, filter="data")
+                except TypeError:
+                    tar.extractall(target_dir)
+        elif isinstance(backup, Path) and backup.is_dir():
+            for rel_path in manifest:
+                src_file = backup / rel_path
+                dst_file = target_dir / rel_path
+                dst_file.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(src_file, dst_file)
+
+        # 6. Verify actual data files restoration and byte checksums
+        for rel_path, expected_checksum in manifest.items():
+            restored_file = target_dir / rel_path
+            if not restored_file.is_file():
+                raise RuntimeError(f"Rollback verification failed: missing restored file '{rel_path}' in {target_dir}")
+            actual_checksum = hashlib.sha256(restored_file.read_bytes()).hexdigest()
+            if actual_checksum != expected_checksum:
+                raise RuntimeError(
+                    f"Rollback verification failed: checksum mismatch for '{rel_path}' "
+                    f"(expected {expected_checksum}, got {actual_checksum})"
+                )
+
+        # 7. Measure accurate RTO and RPO
+        rto_seconds = round(time.perf_counter() - start_time, 4)
+        rpo_seconds = round(max(0.0, (datetime.now(UTC) - created_at).total_seconds()), 4)
+
+        # 8. Cryptographic restoration evidence hash
+        evidence_payload = f"{project_id}:{snapshot_id}:{previous_digest}:{rto_seconds}:{rpo_seconds}"
+        evidence_hash = hashlib.sha256(evidence_payload.encode("utf-8")).hexdigest()
+
+        # 9. Update target config last known good digest if applicable
+        if isinstance(target, TargetConfig):
+            target.last_known_good_digest = previous_digest
+
+        record = RollbackExecutionRecord(
+            rollback_id=f"rb_adapter_{uuid.uuid4().hex[:10]}",
+            project_id=project_id,
+            snapshot_id=snapshot_id,
+            trigger_reason=trigger_reason,
+            pre_rollback_digest=pre_rollback_digest or "failing_unverified",
+            post_rollback_digest=previous_digest,
+            rpo_seconds=rpo_seconds,
+            rto_seconds=rto_seconds,
+            success=True,
+            evidence_hash=evidence_hash,
+            timestamp=datetime.now(UTC),
+        )
+
+        logger.info(
+            "RollbackAdapter restored target %s to digest %s (RTO=%.4fs, RPO=%.4fs)",
+            project_id,
+            previous_digest[:12],
+            rto_seconds,
+            rpo_seconds,
+        )
+
+        return record
+

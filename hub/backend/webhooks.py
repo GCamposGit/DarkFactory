@@ -32,6 +32,11 @@ from core.orchestrator.delivery import (
     DeliveryStatus,
     MergeQueue,
 )
+from core.orchestrator.deployment_adapter import (
+    DeploymentAdapter,
+    DeploymentStatus as AdapterDeploymentStatus,
+    DokployDeploymentAdapter,
+)
 
 logger = logging.getLogger("darkhub.webhooks")
 
@@ -289,8 +294,19 @@ class WebhookAuditStore:
 class DokployDeployClient:
     """Dispatches continuous deployment webhooks to Dokploy PaaS."""
 
-    def __init__(self, deploy_url: Optional[str] = None) -> None:
+    def __init__(
+        self,
+        deploy_url: Optional[str] = None,
+        deployment_adapter: Optional[DeploymentAdapter] = None,
+    ) -> None:
         self.deploy_url = deploy_url or os.getenv("DOKPLOY_DEPLOY_URL", "")
+        self.deployment_adapter = deployment_adapter
+
+    def reconcile_deployment(self, operation_id: str) -> Optional[AdapterDeploymentStatus]:
+        """Reconciles deployment status if adapter is attached."""
+        if not self.deployment_adapter:
+            return None
+        return self.deployment_adapter.reconcile(operation_id)
 
     def trigger_deploy(
         self,

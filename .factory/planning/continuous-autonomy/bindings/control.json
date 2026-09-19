@@ -1,0 +1,601 @@
+{
+  "schema_version": "1.0",
+  "ticket_id": "HF-05-02",
+  "purpose": "Cloud control binding, transactional PostgreSQL schema, ControlStore protocol, and immutable run ownership",
+  "baseline_plan_sha": "83e5298eb231599076811802dceac8575c7f6feb",
+  "parent_ticket": "HF-05",
+  "role": "high_architecture",
+  "environment_profile": "cloud-binding",
+  "dependencies": [
+    "HF-26-02",
+    "HF-26-03"
+  ],
+  "successors": [
+    "HF-05-03",
+    "HF-03-07"
+  ],
+  "operational_parameters": {
+    "heartbeat_interval_sec": 10,
+    "lease_duration_sec": 45,
+    "sweep_interval_sec": 30,
+    "idle_wait_sec": 15,
+    "max_job_timeout_sec": 1800,
+    "binding_probe_timeout_sec": 300,
+    "release_timeout_sec": 900,
+    "acceptance_run_timeout_sec": 86400,
+    "max_retries_default": 3,
+    "retry_backoff_base_sec": [5, 20, 60],
+    "retry_jitter_pct": 20,
+    "reconcile_batch_limit": 100,
+    "fencing_strategy": "monotonic_increasing_per_job",
+    "fencing_reset_policy": "never_reset_after_release_or_expiry"
+  },
+  "ownership_model": {
+    "rule": "Immutable ownership per run; set at creation, never altered or migrated across runtimes",
+    "checkpoint_conversion_policy": "strictly_prohibited",
+    "runtime_owners": {
+      "hf05_sqlite": {
+        "description": "Local standalone SQLite runtime for local development, offline mode, and zero-cost fast tests",
+        "db_engine": "sqlite3",
+        "connection_mode": "embedded_file_wal",
+        "default_path": ".factory/orchestrator_hf05.sqlite3",
+        "supports_async_sleep": false,
+        "concurrency_limit": 1
+      },
+      "df11_legacy": {
+        "description": "Historical legacy runs executed under DF-11 native SQLite orchestrator; read-only preservation",
+        "db_engine": "sqlite3",
+        "connection_mode": "embedded_file_legacy",
+        "default_path": ".factory/orchestrator.sqlite3",
+        "supports_async_sleep": false,
+        "concurrency_limit": 1
+      },
+      "cloud_dbos_postgres": {
+        "description": "Production and VPS durable runtime powered by PostgreSQL 16+ and DBOS Python v2.31.1",
+        "db_engine": "postgresql",
+        "connection_mode": "pooled_transactor",
+        "secret_ref": "DARKFAC_HF02_DATABASE_URL",
+        "supports_async_sleep": true,
+        "concurrency_limit": 2
+      }
+    },
+    "invariants": [
+      "No migration script or binary converter transforms SQLite checkpoints into DBOS/PostgreSQL rows.",
+      "Runs initiated in hf05_sqlite conclude in hf05_sqlite.",
+      "Runs initiated in cloud_dbos_postgres conclude in cloud_dbos_postgres.",
+      "Runs originating from df11_legacy remain immutable and archived for audit trail purposes.",
+      "Fallback from cloud to local switches runner engine for NEW runs, leaving in-flight cloud runs preserved in PostgreSQL."
+    ]
+  },
+  "canonical_types": {
+    "IntakeCommand": {
+      "module": "core.workflow.control_contracts",
+      "description": "Canonical intake command submitted via external channels (Telegram, DarkHub, CLI, Webhook)",
+      "fields": {
+        "project_id": {
+          "type": "str",
+          "constraints": "min_length=1, max_length=160, pattern=^[A-Za-z0-9][A-Za-z0-9._:/-]*$",
+          "description": "Target project identifier (e.g. 'darkfac', 'atrium', 'jarvis')"
+        },
+        "channel": {
+          "type": "str",
+          "constraints": "min_length=1, max_length=64",
+          "description": "Originating ingestion channel (e.g. 'telegram', 'darkhub', 'cli', 'webhook')"
+        },
+        "external_id": {
+          "type": "str",
+          "constraints": "min_length=1, max_length=256",
+          "description": "External message or event ID for idempotency deduplication"
+        },
+        "payload": {
+          "type": "dict[str, Any]",
+          "description": "Structured demand specification containing title, problem, journey, non_goals, and criteria",
+          "required_keys": [
+            "title",
+            "problem",
+            "journey",
+            "non_goals",
+            "criteria"
+          ],
+          "serialization_invariants": {
+            "format": "canonical_json_utf8",
+            "sorted_keys": true,
+            "separators": [",", ":"],
+            "allow_nan": false,
+            "hash_algorithm": "sha256",
+            "array_ordering": "preserve_exact_order_do_not_sort",
+            "text_normalization": "preserve_raw_intent_do_not_normalize"
+          }
+        },
+        "mode": {
+          "type": "Literal['autonomous', 'documentary']",
+          "description": "Execution mode: autonomous launches orchestrator run; documentary creates record without launching run"
+        },
+        "policy_ref": {
+          "type": "str",
+          "description": "Reference to active policy snapshot (e.g. 'HF-26-01:v1.0')"
+        }
+      }
+    },
+    "IntakeReceipt": {
+      "module": "core.workflow.control_contracts",
+      "description": "Deterministic receipt issued upon intake acceptance",
+      "fields": {
+        "demand_id": {
+          "type": "str",
+          "description": "Unique demand identifier, derived or assigned deterministically"
+        },
+        "demand_version": {
+          "type": "str",
+          "description": "Version of the demand payload"
+        },
+        "run_id": {
+          "type": "str | None",
+          "description": "Assigned orchestrator run ID; non-empty in autonomous mode, null in documentary mode"
+        },
+        "initial_job_id": {
+          "type": "str | None",
+          "description": "Assigned initial job ID (e.g. Grill stage); non-empty in autonomous mode, null in documentary mode"
+        },
+        "mode": {
+          "type": "Literal['autonomous', 'documentary']",
+          "description": "Execution mode applied"
+        },
+        "committed_at": {
+          "type": "str",
+          "format": "iso8601_utc",
+          "description": "UTC timestamp of transactional persistence"
+        }
+      }
+    },
+    "JobKey": {
+      "module": "core.workflow.control_contracts",
+      "description": "Strict composite key identifying an atomic stage execution unit; never represented as an ambiguous delimited string",
+      "fields": {
+        "run_id": {
+          "type": "str",
+          "description": "Associated orchestrator run identifier"
+        },
+        "ticket_id": {
+          "type": "str",
+          "description": "Workflow ticket or unit identifier (e.g. 'HF-05-02')"
+        },
+        "plan_version": {
+          "type": "str",
+          "description": "Version of the executing plan (e.g. '1.0')"
+        },
+        "stage": {
+          "type": "str",
+          "description": "Stage name (e.g. 'grill', 'planning', 'development', 'validation', 'independent_review', 'integration', 'build', 'deploy')"
+        },
+        "iteration": {
+          "type": "int",
+          "constraints": "iteration >= 0",
+          "description": "Zero-indexed execution attempt or replanning iteration"
+        }
+      },
+      "db_representation": "Composite 5-tuple (run_id, ticket_id, plan_version, stage, iteration)"
+    },
+    "Claim": {
+      "module": "core.workflow.control_contracts",
+      "description": "Exclusive distributed lease awarded to an identified worker for a specific JobKey",
+      "fields": {
+        "job_key": {
+          "type": "JobKey",
+          "description": "Target job composite key"
+        },
+        "lease_id": {
+          "type": "str",
+          "description": "Unique lease identifier (UUID v4 or nanoid)"
+        },
+        "owner": {
+          "type": "str",
+          "description": "Worker identifier possessing the claim (e.g. 'worker-cloud-01:pid-1234')"
+        },
+        "fencing_token": {
+          "type": "int",
+          "constraints": "fencing_token > 0, monotonic_strictly_increasing",
+          "description": "Monotonic fencing token for optimistic concurrency and fencing against zombie workers"
+        },
+        "expires_at": {
+          "type": "str",
+          "format": "iso8601_utc",
+          "description": "Lease expiration deadline (now + lease_duration_sec)"
+        },
+        "reservation_id": {
+          "type": "str",
+          "description": "Portfolio capacity reservation identifier"
+        },
+        "route_ref": {
+          "type": "str",
+          "description": "Routing qualification reference used to claim the job"
+        }
+      }
+    },
+    "StageContext": {
+      "module": "core.workflow.control_contracts",
+      "description": "Immutable context provided to StageHandler for execution",
+      "fields": {
+        "claim": {
+          "type": "Claim",
+          "description": "Active claim proving lease ownership and fencing token"
+        },
+        "plan_ref": {
+          "type": "str",
+          "description": "Canonical path or identifier of plan artifact"
+        },
+        "plan_digest": {
+          "type": "str",
+          "description": "SHA-256 digest of plan artifact"
+        },
+        "candidate_digest": {
+          "type": "str | None",
+          "description": "Git commit SHA or candidate digest under test, if applicable"
+        },
+        "config_version": {
+          "type": "str",
+          "description": "Active configuration version"
+        },
+        "environment_ref": {
+          "type": "str",
+          "description": "Environment profile name (e.g. 'local', 'cloud-binding', 'release-binding')"
+        },
+        "identity": {
+          "type": "str",
+          "description": "Sanitized agent identity string"
+        },
+        "route_ref": {
+          "type": "str",
+          "description": "Resolved model routing key or profile"
+        },
+        "memory_version": {
+          "type": "str",
+          "description": "Persistent memory version snapshot"
+        },
+        "input_refs": {
+          "type": "list[str]",
+          "description": "List of input artifact references required by stage"
+        }
+      }
+    },
+    "StageResult": {
+      "module": "core.workflow.control_contracts",
+      "description": "Terminal or intermediate outcome emitted by StageHandler",
+      "fields": {
+        "outcome": {
+          "type": "Literal['success', 'retry', 'replan', 'waiting_dependency', 'waiting_human', 'cancelled', 'failed']",
+          "description": "Stage execution outcome"
+        },
+        "output_refs": {
+          "type": "list[str]",
+          "description": "Produced artifact paths or hashes; required for outcome=success"
+        },
+        "evidence_refs": {
+          "type": "list[str]",
+          "description": "Verification logs, receipts, or test evidence"
+        },
+        "operation_refs": {
+          "type": "list[str]",
+          "description": "Keys of external operations performed during stage"
+        },
+        "actual_cost": {
+          "type": "float",
+          "constraints": "actual_cost >= 0.0",
+          "description": "Total monetary cost in USD consumed during stage execution"
+        },
+        "cause_code": {
+          "type": "str | None",
+          "description": "Error or categorization code explaining failure or retry reason"
+        }
+      },
+      "validation_invariants": [
+        "outcome == 'success' requires output_refs to be non-empty",
+        "approved=true is strictly forbidden as an evidence substitute"
+      ]
+    },
+    "ExternalOperation": {
+      "module": "core.workflow.control_contracts",
+      "description": "Idempotent record of side-effecting external operations (e.g. Telegram send, GitHub PR, Dokploy deploy)",
+      "fields": {
+        "operation_key": {
+          "type": "str",
+          "description": "Globally unique deterministic idempotency key for the operation"
+        },
+        "request_digest": {
+          "type": "str",
+          "description": "SHA-256 hash of the canonical request payload"
+        },
+        "provider": {
+          "type": "str",
+          "description": "External provider name (e.g. 'telegram', 'github', 'dokploy', 'openrouter')"
+        },
+        "external_id": {
+          "type": "str | None",
+          "description": "Provider-assigned identifier once acknowledged (e.g. message_id, pr_number, deploy_id)"
+        },
+        "status": {
+          "type": "Literal['prepared', 'sent', 'unknown', 'succeeded', 'failed']",
+          "description": "State of the external transaction"
+        },
+        "observed_at": {
+          "type": "str",
+          "format": "iso8601_utc",
+          "description": "UTC timestamp when operation state was recorded"
+        }
+      }
+    },
+    "ReconcilePage": {
+      "module": "core.workflow.control_contracts",
+      "description": "Paginated report generated by reconciliation sweeper",
+      "fields": {
+        "cursor": {
+          "type": "str | None",
+          "description": "Starting pagination cursor"
+        },
+        "visited_projects": {
+          "type": "list[str]",
+          "description": "Projects inspected during this sweep"
+        },
+        "repaired_keys": {
+          "type": "list[dict[str, Any]]",
+          "description": "List of jobs, claims, or outbox records repaired during sweep"
+        },
+        "next_cursor": {
+          "type": "str | None",
+          "description": "Next pagination cursor, null if sweep completed"
+        },
+        "cycle_id": {
+          "type": "str",
+          "description": "Unique identifier of the reconciliation sweep cycle"
+        }
+      }
+    }
+  },
+  "protocol_specification": {
+    "protocol_name": "ControlStore",
+    "module": "core.workflow.control_contracts",
+    "description": "Canonical transactional control store interface abstracting PostgreSQL (cloud) and SQLite (local)",
+    "methods": {
+      "accept": {
+        "signature": "accept(command: IntakeCommand, now: datetime) -> IntakeReceipt",
+        "description": "Accepts an intake command transactionally with idempotency checking. If the same external_id exists with identical payload hash, returns existing receipt. If payload differs, raises IdempotencyConflict. In autonomous mode, atomically inserts run, initial job, and outbox event.",
+        "raises": ["IdempotencyConflict", "InvalidPayloadError", "UnknownProjectError"]
+      },
+      "claim": {
+        "signature": "claim(worker: str, capabilities: list[str], now: datetime) -> Claim | None",
+        "description": "Atomically queries and locks the next pending job matching worker capabilities (using SELECT FOR UPDATE SKIP LOCKED in PostgreSQL). Advances fencing_token by +1, establishes lease with expires_at = now + lease_duration_sec, and returns Claim. Returns None if no eligible job exists.",
+        "raises": ["StoreUnavailableError"]
+      },
+      "heartbeat": {
+        "signature": "heartbeat(claim: Claim, now: datetime) -> Claim",
+        "description": "Extends claim expiration to now + lease_duration_sec iff claim.fencing_token matches current database state and lease has not expired/been stolen. Returns updated Claim. Raises StaleLeaseError if token is stale.",
+        "raises": ["StaleLeaseError", "StoreUnavailableError"]
+      },
+      "finish": {
+        "signature": "finish(claim: Claim, result: StageResult, now: datetime) -> None",
+        "description": "Concludes active job execution in a single atomic transaction iff fencing_token is current. Records StageResult, releases claim, updates job status, registers successors if success, or triggers retry/replan logic, and writes successor dispatch events to outbox.",
+        "raises": ["StaleLeaseError", "InvalidResultError", "StoreUnavailableError"]
+      },
+      "materialize": {
+        "signature": "materialize(event: dict[str, Any], now: datetime) -> None",
+        "description": "Marks an outbox event as dispatched or processed. Used by the background outbox publisher after successfully launching a DBOS workflow or notifying external services.",
+        "raises": ["OutboxNotFoundError", "StoreUnavailableError"]
+      },
+      "reconcile": {
+        "signature": "reconcile(now: datetime, cursor: str | None = None, limit: int = 100) -> ReconcilePage",
+        "description": "Scans for expired claims (now > expires_at with status 'active'), transitions them to 'expired', and re-queues affected jobs if retries remain or marks them failed. Sweeps unmaterialized outbox rows and resolves unknown external operations.",
+        "raises": ["StoreUnavailableError"]
+      },
+      "get_operation": {
+        "signature": "get_operation(key: str) -> ExternalOperation | None",
+        "description": "Fetches recorded ExternalOperation by operation_key to ensure external side effects are never re-executed blindly upon crash recovery or retry.",
+        "raises": ["StoreUnavailableError"]
+      },
+      "record_operation": {
+        "signature": "record_operation(operation: ExternalOperation, claim: Claim) -> None",
+        "description": "Atomically inserts or updates an ExternalOperation within the context of an active claim and fencing token. Validates that claim is current before saving.",
+        "raises": ["StaleLeaseError", "StoreUnavailableError"]
+      }
+    }
+  },
+  "ddl_schema_postgresql": {
+    "version": "1.0",
+    "target_rdbms": "PostgreSQL 16+",
+    "tables": [
+      {
+        "table_name": "runs",
+        "description": "Master execution runs instantiated from accepted autonomous intake commands",
+        "primary_key": ["run_id"],
+        "columns": [
+          {"name": "run_id", "type": "VARCHAR(160)", "nullable": false},
+          {"name": "project_id", "type": "VARCHAR(160)", "nullable": false},
+          {"name": "demand_id", "type": "VARCHAR(160)", "nullable": false},
+          {"name": "demand_version", "type": "VARCHAR(64)", "nullable": false},
+          {"name": "runtime_owner", "type": "VARCHAR(32)", "nullable": false, "check": "runtime_owner IN ('hf05_sqlite', 'df11_legacy', 'cloud_dbos_postgres')"},
+          {"name": "mode", "type": "VARCHAR(32)", "nullable": false, "check": "mode IN ('autonomous', 'documentary')"},
+          {"name": "status", "type": "VARCHAR(32)", "nullable": false, "default": "'active'"},
+          {"name": "plan_digest", "type": "VARCHAR(64)", "nullable": false},
+          {"name": "config_version", "type": "VARCHAR(64)", "nullable": false},
+          {"name": "created_at", "type": "TIMESTAMPTZ", "nullable": false, "default": "CURRENT_TIMESTAMP"},
+          {"name": "updated_at", "type": "TIMESTAMPTZ", "nullable": false, "default": "CURRENT_TIMESTAMP"},
+          {"name": "completed_at", "type": "TIMESTAMPTZ", "nullable": true}
+        ],
+        "indices": [
+          {"name": "idx_runs_project_demand", "columns": ["project_id", "demand_id", "demand_version"], "unique": true},
+          {"name": "idx_runs_status", "columns": ["status"]}
+        ]
+      },
+      {
+        "table_name": "jobs",
+        "description": "Atomic execution stages belonging to a run, identified by composite 5-tuple",
+        "primary_key": ["run_id", "ticket_id", "plan_version", "stage", "iteration"],
+        "foreign_keys": [
+          {"columns": ["run_id"], "references": "runs(run_id)", "on_delete": "RESTRICT"}
+        ],
+        "columns": [
+          {"name": "run_id", "type": "VARCHAR(160)", "nullable": false},
+          {"name": "ticket_id", "type": "VARCHAR(64)", "nullable": false},
+          {"name": "plan_version", "type": "VARCHAR(64)", "nullable": false},
+          {"name": "stage", "type": "VARCHAR(64)", "nullable": false},
+          {"name": "iteration", "type": "INTEGER", "nullable": false, "check": "iteration >= 0"},
+          {"name": "status", "type": "VARCHAR(32)", "nullable": false, "default": "'pending'", "check": "status IN ('pending', 'running', 'succeeded', 'retry', 'replan', 'waiting_dependency', 'waiting_human', 'cancelled', 'failed')"},
+          {"name": "role", "type": "VARCHAR(64)", "nullable": false},
+          {"name": "required_capabilities", "type": "JSONB", "nullable": false, "default": "'[]'::jsonb"},
+          {"name": "fencing_token", "type": "INTEGER", "nullable": false, "default": 0},
+          {"name": "current_lease_id", "type": "VARCHAR(160)", "nullable": true},
+          {"name": "timeout_seconds", "type": "INTEGER", "nullable": false, "default": 1800},
+          {"name": "retry_count", "type": "INTEGER", "nullable": false, "default": 0},
+          {"name": "max_retries", "type": "INTEGER", "nullable": false, "default": 3},
+          {"name": "cause_code", "type": "VARCHAR(64)", "nullable": true},
+          {"name": "actual_cost", "type": "NUMERIC(10, 4)", "nullable": false, "default": "0.0000"},
+          {"name": "output_refs", "type": "JSONB", "nullable": false, "default": "'[]'::jsonb"},
+          {"name": "evidence_refs", "type": "JSONB", "nullable": false, "default": "'[]'::jsonb"},
+          {"name": "created_at", "type": "TIMESTAMPTZ", "nullable": false, "default": "CURRENT_TIMESTAMP"},
+          {"name": "updated_at", "type": "TIMESTAMPTZ", "nullable": false, "default": "CURRENT_TIMESTAMP"},
+          {"name": "started_at", "type": "TIMESTAMPTZ", "nullable": true},
+          {"name": "finished_at", "type": "TIMESTAMPTZ", "nullable": true}
+        ],
+        "indices": [
+          {"name": "idx_jobs_claim_lookup", "columns": ["status", "role"], "where": "status = 'pending'"},
+          {"name": "idx_jobs_run_id", "columns": ["run_id"]}
+        ]
+      },
+      {
+        "table_name": "claims",
+        "description": "Distributed leases awarded to workers for exclusive job execution",
+        "primary_key": ["lease_id"],
+        "foreign_keys": [
+          {"columns": ["run_id", "ticket_id", "plan_version", "stage", "iteration"], "references": "jobs(run_id, ticket_id, plan_version, stage, iteration)", "on_delete": "RESTRICT"}
+        ],
+        "columns": [
+          {"name": "lease_id", "type": "VARCHAR(160)", "nullable": false},
+          {"name": "run_id", "type": "VARCHAR(160)", "nullable": false},
+          {"name": "ticket_id", "type": "VARCHAR(64)", "nullable": false},
+          {"name": "plan_version", "type": "VARCHAR(64)", "nullable": false},
+          {"name": "stage", "type": "VARCHAR(64)", "nullable": false},
+          {"name": "iteration", "type": "INTEGER", "nullable": false},
+          {"name": "owner", "type": "VARCHAR(160)", "nullable": false},
+          {"name": "fencing_token", "type": "INTEGER", "nullable": false},
+          {"name": "reservation_id", "type": "VARCHAR(160)", "nullable": false},
+          {"name": "route_ref", "type": "VARCHAR(160)", "nullable": false},
+          {"name": "acquired_at", "type": "TIMESTAMPTZ", "nullable": false, "default": "CURRENT_TIMESTAMP"},
+          {"name": "expires_at", "type": "TIMESTAMPTZ", "nullable": false},
+          {"name": "status", "type": "VARCHAR(32)", "nullable": false, "default": "'active'", "check": "status IN ('active', 'released', 'expired', 'stolen')"}
+        ],
+        "indices": [
+          {"name": "idx_claims_job_fencing", "columns": ["run_id", "ticket_id", "plan_version", "stage", "iteration", "fencing_token"], "unique": true},
+          {"name": "idx_claims_expiry_sweep", "columns": ["expires_at", "status"], "where": "status = 'active'"}
+        ]
+      },
+      {
+        "table_name": "outbox",
+        "description": "Transactional outbox for reliable at-least-once event delivery to DBOS and external workers",
+        "primary_key": ["outbox_id"],
+        "columns": [
+          {"name": "outbox_id", "type": "BIGSERIAL", "nullable": false},
+          {"name": "event_type", "type": "VARCHAR(64)", "nullable": false},
+          {"name": "aggregate_type", "type": "VARCHAR(64)", "nullable": false},
+          {"name": "aggregate_id", "type": "VARCHAR(160)", "nullable": false},
+          {"name": "payload", "type": "JSONB", "nullable": false},
+          {"name": "target_system", "type": "VARCHAR(64)", "nullable": false, "default": "'cloud_dbos'"},
+          {"name": "status", "type": "VARCHAR(32)", "nullable": false, "default": "'pending'", "check": "status IN ('pending', 'published', 'failed', 'dead_letter')"},
+          {"name": "retry_count", "type": "INTEGER", "nullable": false, "default": 0},
+          {"name": "created_at", "type": "TIMESTAMPTZ", "nullable": false, "default": "CURRENT_TIMESTAMP"},
+          {"name": "published_at", "type": "TIMESTAMPTZ", "nullable": true},
+          {"name": "error_message", "type": "TEXT", "nullable": true}
+        ],
+        "indices": [
+          {"name": "idx_outbox_pending_dispatch", "columns": ["status", "created_at"], "where": "status = 'pending'"}
+        ]
+      },
+      {
+        "table_name": "external_operations",
+        "description": "Idempotency ledger for external side-effect operations executed by stages",
+        "primary_key": ["operation_key"],
+        "columns": [
+          {"name": "operation_key", "type": "VARCHAR(256)", "nullable": false},
+          {"name": "request_digest", "type": "VARCHAR(64)", "nullable": false},
+          {"name": "provider", "type": "VARCHAR(64)", "nullable": false},
+          {"name": "external_id", "type": "VARCHAR(256)", "nullable": true},
+          {"name": "status", "type": "VARCHAR(32)", "nullable": false, "check": "status IN ('prepared', 'sent', 'unknown', 'succeeded', 'failed')"},
+          {"name": "claim_lease_id", "type": "VARCHAR(160)", "nullable": true},
+          {"name": "fencing_token", "type": "INTEGER", "nullable": false},
+          {"name": "observed_at", "type": "TIMESTAMPTZ", "nullable": false, "default": "CURRENT_TIMESTAMP"},
+          {"name": "response_digest", "type": "VARCHAR(64)", "nullable": true},
+          {"name": "error_details", "type": "TEXT", "nullable": true}
+        ],
+        "indices": [
+          {"name": "idx_ext_ops_provider_status", "columns": ["provider", "status"]}
+        ]
+      },
+      {
+        "table_name": "reconciliation_ledger",
+        "description": "Audit trail of automated self-healing sweeps and lease expirations",
+        "primary_key": ["entry_id"],
+        "columns": [
+          {"name": "entry_id", "type": "BIGSERIAL", "nullable": false},
+          {"name": "cycle_id", "type": "VARCHAR(160)", "nullable": false},
+          {"name": "action_type", "type": "VARCHAR(64)", "nullable": false},
+          {"name": "target_key", "type": "JSONB", "nullable": false},
+          {"name": "reason", "type": "VARCHAR(256)", "nullable": false},
+          {"name": "status", "type": "VARCHAR(32)", "nullable": false, "check": "status IN ('success', 'failed', 'skipped')"},
+          {"name": "recorded_at", "type": "TIMESTAMPTZ", "nullable": false, "default": "CURRENT_TIMESTAMP"}
+        ],
+        "indices": [
+          {"name": "idx_recon_cycle_time", "columns": ["cycle_id", "recorded_at"]}
+        ]
+      }
+    ],
+    "ddl_script": "CREATE TABLE IF NOT EXISTS runs (\n    run_id VARCHAR(160) PRIMARY KEY,\n    project_id VARCHAR(160) NOT NULL,\n    demand_id VARCHAR(160) NOT NULL,\n    demand_version VARCHAR(64) NOT NULL,\n    runtime_owner VARCHAR(32) NOT NULL CHECK (runtime_owner IN ('hf05_sqlite', 'df11_legacy', 'cloud_dbos_postgres')),\n    mode VARCHAR(32) NOT NULL CHECK (mode IN ('autonomous', 'documentary')),\n    status VARCHAR(32) NOT NULL DEFAULT 'active',\n    plan_digest VARCHAR(64) NOT NULL,\n    config_version VARCHAR(64) NOT NULL,\n    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,\n    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,\n    completed_at TIMESTAMPTZ,\n    CONSTRAINT uq_runs_project_demand UNIQUE (project_id, demand_id, demand_version)\n);\n\nCREATE TABLE IF NOT EXISTS jobs (\n    run_id VARCHAR(160) NOT NULL REFERENCES runs(run_id) ON DELETE RESTRICT,\n    ticket_id VARCHAR(64) NOT NULL,\n    plan_version VARCHAR(64) NOT NULL,\n    stage VARCHAR(64) NOT NULL,\n    iteration INTEGER NOT NULL CHECK (iteration >= 0),\n    status VARCHAR(32) NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'running', 'succeeded', 'retry', 'replan', 'waiting_dependency', 'waiting_human', 'cancelled', 'failed')),\n    role VARCHAR(64) NOT NULL,\n    required_capabilities JSONB NOT NULL DEFAULT '[]'::jsonb,\n    fencing_token INTEGER NOT NULL DEFAULT 0,\n    current_lease_id VARCHAR(160),\n    timeout_seconds INTEGER NOT NULL DEFAULT 1800,\n    retry_count INTEGER NOT NULL DEFAULT 0,\n    max_retries INTEGER NOT NULL DEFAULT 3,\n    cause_code VARCHAR(64),\n    actual_cost NUMERIC(10, 4) NOT NULL DEFAULT 0.0000,\n    output_refs JSONB NOT NULL DEFAULT '[]'::jsonb,\n    evidence_refs JSONB NOT NULL DEFAULT '[]'::jsonb,\n    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,\n    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,\n    started_at TIMESTAMPTZ,\n    finished_at TIMESTAMPTZ,\n    PRIMARY KEY (run_id, ticket_id, plan_version, stage, iteration)\n);\n\nCREATE INDEX IF NOT EXISTS idx_jobs_claim_lookup ON jobs (status, role) WHERE status = 'pending';\nCREATE INDEX IF NOT EXISTS idx_jobs_run_id ON jobs (run_id);\n\nCREATE TABLE IF NOT EXISTS claims (\n    lease_id VARCHAR(160) PRIMARY KEY,\n    run_id VARCHAR(160) NOT NULL,\n    ticket_id VARCHAR(64) NOT NULL,\n    plan_version VARCHAR(64) NOT NULL,\n    stage VARCHAR(64) NOT NULL,\n    iteration INTEGER NOT NULL,\n    owner VARCHAR(160) NOT NULL,\n    fencing_token INTEGER NOT NULL,\n    reservation_id VARCHAR(160) NOT NULL,\n    route_ref VARCHAR(160) NOT NULL,\n    acquired_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,\n    expires_at TIMESTAMPTZ NOT NULL,\n    status VARCHAR(32) NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'released', 'expired', 'stolen')),\n    FOREIGN KEY (run_id, ticket_id, plan_version, stage, iteration) REFERENCES jobs(run_id, ticket_id, plan_version, stage, iteration) ON DELETE RESTRICT,\n    CONSTRAINT uq_claims_job_fencing UNIQUE (run_id, ticket_id, plan_version, stage, iteration, fencing_token)\n);\n\nCREATE INDEX IF NOT EXISTS idx_claims_expiry_sweep ON claims (expires_at, status) WHERE status = 'active';\n\nCREATE TABLE IF NOT EXISTS outbox (\n    outbox_id BIGSERIAL PRIMARY KEY,\n    event_type VARCHAR(64) NOT NULL,\n    aggregate_type VARCHAR(64) NOT NULL,\n    aggregate_id VARCHAR(160) NOT NULL,\n    payload JSONB NOT NULL,\n    target_system VARCHAR(64) NOT NULL DEFAULT 'cloud_dbos',\n    status VARCHAR(32) NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'published', 'failed', 'dead_letter')),\n    retry_count INTEGER NOT NULL DEFAULT 0,\n    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,\n    published_at TIMESTAMPTZ,\n    error_message TEXT\n);\n\nCREATE INDEX IF NOT EXISTS idx_outbox_pending_dispatch ON outbox (status, created_at) WHERE status = 'pending';\n\nCREATE TABLE IF NOT EXISTS external_operations (\n    operation_key VARCHAR(256) PRIMARY KEY,\n    request_digest VARCHAR(64) NOT NULL,\n    provider VARCHAR(64) NOT NULL,\n    external_id VARCHAR(256),\n    status VARCHAR(32) NOT NULL CHECK (status IN ('prepared', 'sent', 'unknown', 'succeeded', 'failed')),\n    claim_lease_id VARCHAR(160),\n    fencing_token INTEGER NOT NULL,\n    observed_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,\n    response_digest VARCHAR(64),\n    error_details TEXT\n);\n\nCREATE INDEX IF NOT EXISTS idx_ext_ops_provider_status ON external_operations (provider, status);\n\nCREATE TABLE IF NOT EXISTS reconciliation_ledger (\n    entry_id BIGSERIAL PRIMARY KEY,\n    cycle_id VARCHAR(160) NOT NULL,\n    action_type VARCHAR(64) NOT NULL,\n    target_key JSONB NOT NULL,\n    reason VARCHAR(256) NOT NULL,\n    status VARCHAR(32) NOT NULL CHECK (status IN ('success', 'failed', 'skipped')),\n    recorded_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP\n);\n\nCREATE INDEX IF NOT EXISTS idx_recon_cycle_time ON reconciliation_ledger (cycle_id, recorded_at);"
+  },
+  "outbox_pattern": {
+    "target_engine": "DBOS Python v2.31.1",
+    "delivery_semantics": "at_least_once_with_deterministic_deduplication",
+    "workflow_id_derivation": "{run_id}:{ticket_id}:{stage}:{iteration}",
+    "dispatch_flow": [
+      "1. Business transaction in PostgreSQL mutates jobs/runs and writes event row to outbox in single BEGIN...COMMIT.",
+      "2. Background outbox publisher polls outbox WHERE status = 'pending' ORDER BY outbox_id ASC LIMIT 50 FOR UPDATE SKIP LOCKED.",
+      "3. Publisher invokes DBOS.start_workflow(workflow_name, *args, workflow_id=derived_id).",
+      "4. Upon DBOS acknowledgement, publisher updates outbox row to status = 'published', published_at = CURRENT_TIMESTAMP.",
+      "5. On transient failure, publisher increments retry_count with exponential backoff.",
+      "6. If worker crashes after DBOS launch but before outbox update, subsequent dispatch with identical workflow_id is safely deduplicated by DBOS system tables."
+    ]
+  },
+  "crash_recovery_matrix": {
+    "crash_before_commit": {
+      "detection": "PostgreSQL transaction abort / rollback",
+      "state_impact": "Zero state change in database; no locks held; no outbox events written",
+      "recovery_action": "Client receives connection error; safely retries transaction with identical idempotency key"
+    },
+    "crash_during_execution_post_claim": {
+      "detection": "Worker heartbeat ceases; now > expires_at (45s lease expired)",
+      "state_impact": "Job remains in status 'running' with expired claim",
+      "recovery_action": "Reconciliation sweeper identifies expired claim, updates claim status to 'expired', resets job status to 'pending' with retry_count incremented, and advances fencing_token."
+    },
+    "zombie_worker_resurrection": {
+      "detection": "Stale worker attempts finish() or heartbeat() with old fencing_token",
+      "state_impact": "fencing_token check fails (current_token > stale_token)",
+      "recovery_action": "ControlStore rejects operation immediately with StaleLeaseError; no outputs, evidence, or state changes written"
+    },
+    "crash_during_external_operation": {
+      "detection": "ExternalOperation status remains 'prepared' or 'sent' without terminal outcome",
+      "state_impact": "External operation status is 'unknown'",
+      "recovery_action": "Retrying worker or reconciler executes get_operation(key), queries external provider before initiating call; never blindly re-executes external side effect"
+    },
+    "crash_during_outbox_publish": {
+      "detection": "Outbox row remains 'pending' while DBOS workflow may have been launched",
+      "state_impact": "Potential duplicate dispatch attempt",
+      "recovery_action": "DBOS deterministic workflow_id deduplication guarantees duplicate launch is a no-op returning existing workflow handle"
+    }
+  },
+  "adr_compliance": {
+    "adr_id": "ADR-HF-001",
+    "status": "fully_compliant",
+    "points": [
+      "Hybrid local-first architecture strictly preserved: Native SQLite for local development and CI, PostgreSQL + DBOS for VPS cloud.",
+      "Zero checkpoint conversion: SQLite checkpoints and PostgreSQL databases remain distinct and unmerged.",
+      "Zero domain contamination: No DBOS imports, decorators, or schemas in core/workflow/ domain types.",
+      "Secret handling: Database URL passed strictly via SecretReference(DARKFAC_HF02_DATABASE_URL), never printed in logs or CLI arguments."
+    ]
+  }
+}

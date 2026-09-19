@@ -1,0 +1,435 @@
+{
+  "schema_version": "1.0",
+  "ticket_id": "HF-07-01",
+  "parent_id": "HF-07",
+  "baseline_sha": "83e5298eb231599076811802dceac8575c7f6feb",
+  "purpose": "Binding determinístico de executores, modelos, contas reais, cotas, ferramentas e governança de roteamento",
+  "created_at": "2026-09-18T21:25:00.000000+00:00",
+  "ttl_seconds": 86400,
+  "environment_profile": "executor-binding",
+  "providers": {
+    "local_ollama": {
+      "provider_id": "ollama",
+      "provider_name": "Ollama Local Cluster",
+      "host": "http://localhost:11434",
+      "tier": "local",
+      "cost_mode": "zero_cost",
+      "auth_mode": "none_local",
+      "tool_calling_mode": "subprocess_cli_headless",
+      "status": "active",
+      "health_check_endpoint": "http://localhost:11434/api/tags",
+      "models": [
+        {
+          "model_id": "qwen-code-fast:latest",
+          "alias": "qwen-fast",
+          "family": "qwen",
+          "parameter_size": "30B MoE",
+          "context_window": 4096,
+          "cost_per_1k_input_usd": 0.0,
+          "cost_per_1k_output_usd": 0.0,
+          "cost_per_1k_cache_read_usd": 0.0,
+          "supported_roles": [
+            "economy"
+          ],
+          "primary_use": "Microtarefas, geração de mocks, fixtures, testes rápidos e verificações sintáticas",
+          "tool_calling_supported": true,
+          "tool_capabilities": [
+            "read_file",
+            "write_file",
+            "run_command",
+            "git_ops"
+          ],
+          "default_reasoning_effort": null,
+          "max_reasoning_effort": null,
+          "typical_throughput_tps": 80.0
+        },
+        {
+          "model_id": "qwen-code-deep:latest",
+          "alias": "qwen-deep",
+          "family": "qwen",
+          "parameter_size": "30B MoE",
+          "context_window": 16384,
+          "cost_per_1k_input_usd": 0.0,
+          "cost_per_1k_output_usd": 0.0,
+          "cost_per_1k_cache_read_usd": 0.0,
+          "supported_roles": [
+            "economy"
+          ],
+          "primary_use": "Análise sintática e lógica local, coding offline de média e alta complexidade",
+          "tool_calling_supported": true,
+          "tool_capabilities": [
+            "read_file",
+            "write_file",
+            "run_command",
+            "ast_analysis"
+          ],
+          "default_reasoning_effort": null,
+          "max_reasoning_effort": null,
+          "typical_throughput_tps": 45.0
+        },
+        {
+          "model_id": "gpt-review:latest",
+          "alias": "gpt-review",
+          "family": "gpt-oss",
+          "parameter_size": "20B",
+          "context_window": 16384,
+          "cost_per_1k_input_usd": 0.0,
+          "cost_per_1k_output_usd": 0.0,
+          "cost_per_1k_cache_read_usd": 0.0,
+          "supported_roles": [
+            "verifier",
+            "independent_review"
+          ],
+          "primary_use": "Revisão adversarial local de diffs, verificação de invariantes de código e oráculos",
+          "tool_calling_supported": true,
+          "tool_capabilities": [
+            "read_file",
+            "git_diff",
+            "run_command",
+            "linter"
+          ],
+          "default_reasoning_effort": null,
+          "max_reasoning_effort": null,
+          "typical_throughput_tps": 50.0
+        }
+      ]
+    },
+    "cloud_antigravity_google": {
+      "provider_id": "google",
+      "provider_name": "Google / Antigravity Native Engine",
+      "host": "antigravity_core_harness",
+      "tier": "frontier_orchestration",
+      "cost_mode": "covered_by_subscription_or_api",
+      "auth_mode": "antigravity_session",
+      "tool_calling_mode": "native_function_calling_and_mcp",
+      "status": "active",
+      "models": [
+        {
+          "model_id": "google/gemini-3.8-flash",
+          "alias": "gemini-flash",
+          "family": "gemini",
+          "parameter_size": "frontier_dense",
+          "context_window": 1048576,
+          "cost_per_1k_input_usd": 0.00015,
+          "cost_per_1k_output_usd": 0.0006,
+          "cost_per_1k_cache_read_usd": 0.0000375,
+          "supported_roles": [
+            "economy",
+            "orchestrator"
+          ],
+          "primary_use": "Orquestração central, tool-calling massivo, ingestão de repositórios e contextos de até 1M+ tokens",
+          "tool_calling_supported": true,
+          "tool_capabilities": [
+            "read_file",
+            "write_file",
+            "replace_file_content",
+            "run_command",
+            "invoke_subagent",
+            "schedule",
+            "manage_task"
+          ],
+          "default_reasoning_effort": "high",
+          "max_reasoning_effort": "high",
+          "typical_throughput_tps": 150.0
+        },
+        {
+          "model_id": "google/gemini-3.1-pro",
+          "alias": "gemini-pro",
+          "family": "gemini",
+          "parameter_size": "frontier_high",
+          "context_window": 1048576,
+          "cost_per_1k_input_usd": 0.00125,
+          "cost_per_1k_output_usd": 0.005,
+          "cost_per_1k_cache_read_usd": 0.0003125,
+          "supported_roles": [
+            "high_architecture"
+          ],
+          "primary_use": "Raciocínio arquitetural multi-passo de alta capacidade e síntese conceitual",
+          "tool_calling_supported": true,
+          "tool_capabilities": [
+            "read_file",
+            "write_file",
+            "run_command",
+            "invoke_subagent"
+          ],
+          "default_reasoning_effort": "high",
+          "max_reasoning_effort": "max",
+          "typical_throughput_tps": 65.0
+        }
+      ]
+    },
+    "cloud_anthropic": {
+      "provider_id": "anthropic",
+      "provider_name": "Anthropic Claude Engine",
+      "host": "https://api.anthropic.com/v1",
+      "tier": "frontier_high",
+      "cost_mode": "metered_api",
+      "auth_mode": "api_key",
+      "secret_ref": {
+        "provider": "anthropic",
+        "variable_name": "ANTHROPIC_API_KEY",
+        "locator": "env:ANTHROPIC_API_KEY"
+      },
+      "tool_calling_mode": "native_tool_use",
+      "status": "active",
+      "models": [
+        {
+          "model_id": "anthropic/claude-opus-5",
+          "alias": "claude-opus-5",
+          "family": "claude",
+          "parameter_size": "frontier_high",
+          "context_window": 200000,
+          "cost_per_1k_input_usd": 0.005,
+          "cost_per_1k_output_usd": 0.025,
+          "cost_per_1k_cache_read_usd": 0.0005,
+          "supported_roles": [
+            "high_architecture"
+          ],
+          "primary_use": "Planejamento e arquitetura superior, PRDs rigorosos, contratos de interface e non-goals explícitos",
+          "tool_calling_supported": true,
+          "tool_capabilities": [
+            "read_file",
+            "write_file",
+            "replace_file_content",
+            "run_command"
+          ],
+          "default_reasoning_effort": "high",
+          "max_reasoning_effort": "max",
+          "typical_throughput_tps": 54.0
+        }
+      ]
+    },
+    "cloud_openrouter": {
+      "provider_id": "openrouter",
+      "provider_name": "OpenRouter Gateway",
+      "host": "https://openrouter.ai/api/v1",
+      "tier": "frontier_cloud_gateway",
+      "cost_mode": "metered_api",
+      "auth_mode": "api_key",
+      "secret_ref": {
+        "provider": "openrouter",
+        "variable_name": "OPENROUTER_API_KEY",
+        "locator": "env:OPENROUTER_API_KEY"
+      },
+      "tool_calling_mode": "openai_function_calling_compatible",
+      "status": "active",
+      "models": [
+        {
+          "model_id": "deepseek/deepseek-v4-pro",
+          "alias": "deepseek-v4-pro",
+          "family": "deepseek",
+          "parameter_size": "frontier_balanced",
+          "context_window": 256000,
+          "cost_per_1k_input_usd": 0.00045,
+          "cost_per_1k_output_usd": 0.0018,
+          "cost_per_1k_cache_read_usd": 0.00005,
+          "supported_roles": [
+            "high_architecture",
+            "coding"
+          ],
+          "primary_use": "Raciocínio complexo e coding em nuvem, síntese lógica e verificação algorítmica de alta capacidade",
+          "tool_calling_supported": true,
+          "tool_capabilities": [
+            "read_file",
+            "write_file",
+            "run_command"
+          ],
+          "default_reasoning_effort": "high",
+          "max_reasoning_effort": "max",
+          "typical_throughput_tps": 90.0
+        },
+        {
+          "model_id": "deepseek/deepseek-v4.1-flash",
+          "alias": "deepseek-v4.1-flash",
+          "family": "deepseek",
+          "parameter_size": "frontier_efficient",
+          "context_window": 1048576,
+          "cost_per_1k_input_usd": 0.00015,
+          "cost_per_1k_output_usd": 0.0006,
+          "cost_per_1k_cache_read_usd": 0.0000375,
+          "supported_roles": [
+            "verifier",
+            "independent_review"
+          ],
+          "primary_use": "Revisão independente em nuvem com identidade isolada e custo extremamente eficiente",
+          "tool_calling_supported": true,
+          "tool_capabilities": [
+            "read_file",
+            "run_command"
+          ],
+          "default_reasoning_effort": "high",
+          "max_reasoning_effort": "high",
+          "typical_throughput_tps": 110.0
+        }
+      ]
+    },
+    "cloud_xai": {
+      "provider_id": "xai",
+      "provider_name": "xAI Grok Engine",
+      "host": "https://api.x.ai/v1",
+      "tier": "frontier_search_intelligence",
+      "cost_mode": "subscription_or_api",
+      "plan": "SuperGrok",
+      "auth_mode": "session_or_api_key",
+      "secret_ref": {
+        "provider": "xai",
+        "variable_name": "XAI_API_KEY",
+        "locator": "env:XAI_API_KEY"
+      },
+      "tool_calling_mode": "live_search_and_tools",
+      "status": "active",
+      "models": [
+        {
+          "model_id": "xai/grok-4.6",
+          "alias": "grok-4.6",
+          "family": "grok",
+          "parameter_size": "frontier_high",
+          "context_window": 131072,
+          "cost_per_1k_input_usd": 0.002,
+          "cost_per_1k_output_usd": 0.01,
+          "cost_per_1k_cache_read_usd": 0.0005,
+          "supported_roles": [
+            "researcher",
+            "verifier"
+          ],
+          "primary_use": "Pesquisa web viva e dinâmica, inspeção de documentações recentes e verificação cruzada externa",
+          "tool_calling_supported": true,
+          "tool_capabilities": [
+            "web_search",
+            "read_url",
+            "run_command"
+          ],
+          "default_reasoning_effort": "high",
+          "max_reasoning_effort": "high",
+          "typical_throughput_tps": 85.0
+        }
+      ]
+    }
+  },
+  "roles_mapping": {
+    "economy": {
+      "description": "Microtarefas, geração de mocks, fixtures, testes rápidos e execução de baixo custo operacional",
+      "cost_floor_usd": 0.0,
+      "primary_model": "qwen-code-fast:latest",
+      "allowed_models": [
+        "qwen-code-fast:latest",
+        "qwen-code-deep:latest",
+        "google/gemini-3.8-flash"
+      ],
+      "fallback_order": [
+        "qwen-code-fast:latest",
+        "qwen-code-deep:latest",
+        "google/gemini-3.8-flash"
+      ]
+    },
+    "high_architecture": {
+      "description": "Planejamento arquitetural superior, PRDs, contratos de interface, design de DAGs e decisões de alto impacto",
+      "cost_floor_usd": 0.0,
+      "strict_floor_enforcement": true,
+      "primary_model": "anthropic/claude-opus-5",
+      "allowed_models": [
+        "anthropic/claude-opus-5",
+        "deepseek/deepseek-v4-pro",
+        "google/gemini-3.1-pro"
+      ],
+      "fallback_order": [
+        "anthropic/claude-opus-5",
+        "deepseek/deepseek-v4-pro",
+        "google/gemini-3.1-pro"
+      ]
+    },
+    "verifier": {
+      "description": "Revisão independente de diffs, contraprovas, auditoria adversarial e conformidade de oráculos",
+      "cost_floor_usd": 0.0,
+      "primary_local": "gpt-review:latest",
+      "primary_cloud": "deepseek/deepseek-v4.1-flash",
+      "allowed_models": [
+        "gpt-review:latest",
+        "deepseek/deepseek-v4.1-flash",
+        "xai/grok-4.6"
+      ],
+      "fallback_order": [
+        "gpt-review:latest",
+        "deepseek/deepseek-v4.1-flash",
+        "xai/grok-4.6"
+      ],
+      "isolation_rule": "Cross-Model Family Isolation: O revisor DEVE obrigatoriamente pertencer a uma família de modelos distinta daquela usada pelo implementador da etapa."
+    },
+    "independent_review": {
+      "description": "Revisão formal independente exigida pelos portões de qualidade para emissão de EvidenceReceipt",
+      "alias_of": "verifier",
+      "primary_local": "gpt-review:latest",
+      "primary_cloud": "deepseek/deepseek-v4.1-flash",
+      "allowed_models": [
+        "gpt-review:latest",
+        "deepseek/deepseek-v4.1-flash",
+        "xai/grok-4.6"
+      ],
+      "fallback_order": [
+        "gpt-review:latest",
+        "deepseek/deepseek-v4.1-flash",
+        "xai/grok-4.6"
+      ]
+    }
+  },
+  "routing_rules": {
+    "strategy": "local_first_ordered_failover",
+    "zero_cost_priority": true,
+    "local_first_policy": "Tarefas com papel economy ou de teste sintético iniciam sempre pelo cluster local Ollama ($0). Nuvem é acionada apenas sob estouro de capacidade local ou exigência de contexto massivo.",
+    "architectural_floor_protection": {
+      "rule": "INVIOLABILIDADE DO PISO ARQUITETURAL",
+      "behavior": "É terminantemente proibido rebaixar silenciosamente uma tarefa rotulada como 'high_architecture' para modelos de tier 'economy'. Se todos os modelos do tier high_architecture estiverem sem cota ou indisponíveis, o job transiciona para status 'WAITING_RESOURCE' com motivo e timestamp de wakeup explícitos."
+    },
+    "quota_and_budget_precheck": {
+      "rule": "Verificar quota, saldo e reserva orçamentária prévia antes de submeter claim ou chamada à nuvem.",
+      "on_quota_exhausted": "Rotacionar imediatamente para a próxima rota qualificada dentro do papel permitido, sem retenção de duplo lock."
+    }
+  },
+  "control_policies": {
+    "ttl_route_evaluation_seconds": 86400,
+    "ttl_rule": "Toda qualificação de rota e estimativa de latência/custo possui validade máxima de 24 horas. Expirado o TTL, executa-se novo preflight de sondagem.",
+    "tool_calling_verification": {
+      "probe_required": true,
+      "disqualification_rule": "Nome textual sem suporte comprovado a tool calling estruturado reprova a rota imediatamente.",
+      "environment_isolation_rule": "Assinatura ou credencial em ambiente desktop de desenvolvimento NÃO comprova disponibilidade nem qualificação em host VPS de produção.",
+      "probe_frequency_hours": 24,
+      "probe_timeout_seconds": 30
+    },
+    "budget_reservation_policy": {
+      "strict_budget_pre_reservation": true,
+      "rule": "PROIBIÇÃO ESTRITA DE CHAMADAS PAGAS SEM RESERVA PRÉVIA.",
+      "details": "Nenhum executor ou adapter tem permissão para emitir requisições HTTP a provedores pagos (Anthropic, OpenRouter, xAI) sem um ReservationRecord emitido com status ACTIVE pelo ExecutionBudgetManager.",
+      "unknown_cost_handling": "UnknownCostPolicy.REJECT ou ESTIMATE com commit conservador."
+    },
+    "reasoning_effort_policy": {
+      "allowed_efforts": [
+        "minimal",
+        "low",
+        "medium",
+        "high",
+        "max"
+      ],
+      "forbidden_efforts": [
+        "xhigh",
+        "extra-high",
+        "extra_high",
+        "ultra"
+      ],
+      "sanitization_behavior": "Valores não autorizados são automaticamente sanitizados para 'max' sem emissão de payload com parâmetro inválido.",
+      "default_planning_effort": "high",
+      "critical_complexity_effort": "max"
+    }
+  },
+  "adapter_mapping": {
+    "executor_class": "core.execution.agent_executor.AgentExecutor",
+    "provider_protocol": "core.execution.providers.ModelProvider",
+    "response_contract": "core.execution.providers.ProviderResponse",
+    "budget_manager": "core.execution.budget.ExecutionBudgetManager",
+    "lifecycle_methods": {
+      "start": "Inicia novo ExecutionRun com envelope orçamentário e isolamento em sandbox",
+      "resume": "Retoma a partir de Checkpoint serializado com revalidação de reserva ativa",
+      "cancel": "Cancela execução em andamento e libera reservas de orçamento imediatamente",
+      "execute_step": "Executa passo delimitado sob medição estrita de tokens e latência"
+    }
+  }
+}

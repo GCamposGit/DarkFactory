@@ -1353,6 +1353,241 @@ def check_token_quotas_endpoint(
     return {"emitted_alerts": alerts, "count": len(alerts)}
 
 
+# =====================================================================
+# HF-25: Factory Self-Evolution & Cross-Project Reusable Catalog
+# =====================================================================
+
+@router.get("/evolution/status")
+def get_evolution_status_endpoint(
+    status: Optional[str] = Query(None, description="Filter proposals by status"),
+) -> Dict[str, Any]:
+    """Returns status report of the factory self-evolution subsystem."""
+    from core.evolution.engine import FactoryEvolutionEngine
+    from core.evolution.models import EvolutionStatus
+    engine = FactoryEvolutionEngine()
+    filter_status = EvolutionStatus(status) if status else None
+    report = engine.get_report()
+    proposals = engine.list_proposals(status=filter_status)
+    return {
+        "total_proposals": report.total_proposals,
+        "active_promotions": report.active_promotions,
+        "rejected_count": report.rejected_count,
+        "proposals": [p.model_dump(mode="json") for p in proposals],
+    }
+
+
+@router.post("/evolution/propose")
+def create_evolution_proposal_endpoint(
+    target_kind: str = Body(..., description="Target category (skill_instruction, context_rule, etc.)"),
+    target_path: str = Body(..., description="Relative path in repo"),
+    trigger: str = Body(..., description="Evolution trigger"),
+    patch_content: str = Body(..., description="Complete replacement text or patch"),
+    rationale: str = Body(..., description="Justification and RCA evidence"),
+    service: HubService = Depends(require_owner_session),
+) -> Dict[str, Any]:
+    """Registers a new evolutionary mutation proposal."""
+    from core.evolution.engine import FactoryEvolutionEngine
+    engine = FactoryEvolutionEngine()
+    try:
+        prop = engine.propose(
+            target_kind=target_kind,
+            target_path=target_path,
+            trigger=trigger,
+            patch_content=patch_content,
+            rationale=rationale,
+        )
+        return {"success": True, "proposal": prop.model_dump(mode="json")}
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@router.post("/evolution/evaluate")
+def evaluate_evolution_proposal_endpoint(
+    proposal_id: str = Body(..., embed=True, description="Proposal ID to evaluate"),
+    holdout_cmd: Optional[str] = Body(None, embed=True, description="Optional custom holdout command"),
+    service: HubService = Depends(require_owner_session),
+) -> Dict[str, Any]:
+    """Evaluates a candidate proposal in the isolated holdout sandbox."""
+    from core.evolution.engine import FactoryEvolutionEngine
+    engine = FactoryEvolutionEngine()
+    try:
+        result = engine.evaluate_candidate(proposal_id, holdout_cmd=holdout_cmd)
+        return {"success": result.passed, "result": result.model_dump(mode="json")}
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@router.post("/evolution/promote")
+def promote_evolution_proposal_endpoint(
+    proposal_id: str = Body(..., embed=True, description="Approved proposal ID to promote"),
+    service: HubService = Depends(require_owner_session),
+) -> Dict[str, Any]:
+    """Promotes an approved proposal to active status and captures a rollback snapshot."""
+    from core.evolution.engine import FactoryEvolutionEngine
+    engine = FactoryEvolutionEngine()
+    try:
+        snapshot = engine.promote_candidate(proposal_id)
+        return {"success": True, "snapshot": snapshot.model_dump(mode="json")}
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@router.post("/evolution/rollback")
+def rollback_evolution_proposal_endpoint(
+    proposal_id: str = Body(..., embed=True, description="Proposal ID to revert"),
+    service: HubService = Depends(require_owner_session),
+) -> Dict[str, Any]:
+    """Rolls back an evolutionary mutation, restoring previous file state."""
+    from core.evolution.engine import FactoryEvolutionEngine
+    engine = FactoryEvolutionEngine()
+    try:
+        ok = engine.rollback_candidate(proposal_id)
+        return {"success": ok, "proposal_id": proposal_id}
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@router.get("/catalog/components")
+def list_catalog_components_endpoint(
+    kind: Optional[str] = Query(None, description="Filter components by kind"),
+) -> Dict[str, Any]:
+    """Returns reusable cross-project components available in the catalog."""
+    from core.catalog.manager import CrossProjectCatalogManager
+    from core.catalog.models import ComponentKind
+    manager = CrossProjectCatalogManager()
+    filter_kind = ComponentKind(kind) if kind else None
+    components = manager.list_components(kind=filter_kind)
+    return {
+        "count": len(components),
+        "components": [c.model_dump(mode="json") for c in components],
+    }
+
+
+@router.post("/catalog/sync")
+def sync_catalog_component_endpoint(
+    component_id: str = Body(..., description="Component ID to synchronize"),
+    target_project_id: str = Body(..., description="Target project identifier"),
+    overwrite: bool = Body(True, description="Whether to overwrite existing files"),
+    service: HubService = Depends(require_owner_session),
+) -> Dict[str, Any]:
+    """Synchronizes a reusable catalog component into a target registered project."""
+    from core.catalog.manager import CrossProjectCatalogManager
+    manager = CrossProjectCatalogManager()
+    try:
+        result = manager.sync_to_project(
+            component_id=component_id,
+            target_project_id=target_project_id,
+            overwrite=overwrite,
+        )
+        return {"success": result.success, "result": result.model_dump(mode="json")}
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+# =====================================================================
+# HF-24: Enterprise Profile On-Demand (Residency, Audit Chain, SLA)
+# =====================================================================
+
+@router.get("/enterprise/status")
+def get_enterprise_status_endpoint(
+    project: str = Query(..., description="Target project identifier"),
+) -> Dict[str, Any]:
+    """Returns enterprise profile status, configuration, audit chain and SLA health."""
+    from core.enterprise.policy import EnterprisePolicyGuard
+    guard = EnterprisePolicyGuard()
+    cfg = guard.get_config(project)
+    sla = guard.sla_guard.check_sla(cfg)
+    audit = guard.audit_chain.verify_integrity(project)
+    return {
+        "project_id": project,
+        "config": cfg.model_dump(mode="json"),
+        "sla": sla.model_dump(mode="json"),
+        "audit_chain": audit.model_dump(mode="json"),
+    }
+
+
+@router.post("/enterprise/configure")
+def configure_enterprise_endpoint(
+    project_id: str = Body(..., description="Project identifier"),
+    enabled: bool = Body(True, description="Enable enterprise profile"),
+    residency_mode: str = Body("local_only", description="Residency mode"),
+    max_rpo_minutes: int = Body(60, description="Max acceptable RPO window"),
+    max_rto_minutes: int = Body(30, description="Max acceptable RTO window"),
+    require_owner_signoff: bool = Body(True, description="Strict owner approval for production"),
+    service: HubService = Depends(require_owner_session),
+) -> Dict[str, Any]:
+    """Configures enterprise security and residency parameters for a project."""
+    from core.enterprise.policy import EnterprisePolicyGuard
+    from core.enterprise.models import DataResidencyMode, EnterpriseProjectConfig
+    guard = EnterprisePolicyGuard()
+    cfg = EnterpriseProjectConfig(
+        project_id=project_id,
+        enabled=enabled,
+        residency_mode=DataResidencyMode(residency_mode),
+        max_rpo_minutes=max_rpo_minutes,
+        max_rto_minutes=max_rto_minutes,
+        require_owner_signoff=require_owner_signoff,
+    )
+    guard.set_config(cfg)
+    return {"success": True, "config": cfg.model_dump(mode="json")}
+
+
+@router.get("/enterprise/audit-trail")
+def get_enterprise_audit_trail_endpoint(
+    project: Optional[str] = Query(None, description="Optional project filter"),
+    service: HubService = Depends(require_owner_session),
+) -> Dict[str, Any]:
+    """Retrieves immutable audit chain records."""
+    from core.enterprise.policy import EnterprisePolicyGuard
+    guard = EnterprisePolicyGuard()
+    events = guard.audit_chain.load_events(project_id=project)
+    return {
+        "count": len(events),
+        "events": [e.model_dump(mode="json") for e in events[-100:]],
+    }
+
+
+@router.post("/enterprise/verify-audit")
+def verify_enterprise_audit_endpoint(
+    project: Optional[str] = Body(None, embed=True, description="Optional project filter"),
+) -> Dict[str, Any]:
+    """Mathematically verifies cryptographic audit chain integrity."""
+    from core.enterprise.policy import EnterprisePolicyGuard
+    guard = EnterprisePolicyGuard()
+    res = guard.audit_chain.verify_integrity(project_id=project)
+    return res.model_dump(mode="json")
+
+
+@router.post("/enterprise/evaluate-deploy")
+def evaluate_enterprise_deploy_endpoint(
+    project_id: str = Body(..., description="Project identifier"),
+    target_environment: str = Body("production", description="Target environment"),
+    owner_approved: bool = Body(False, description="Owner signoff confirmation"),
+    actor_role: str = Body("operator", description="Actor role"),
+    service: HubService = Depends(require_owner_session),
+) -> Dict[str, Any]:
+    """Evaluates enterprise production deployment gate under Scenario G8."""
+    from core.enterprise.policy import EnterprisePolicyGuard
+    guard = EnterprisePolicyGuard()
+    dec = guard.evaluate_production_release(
+        project_id=project_id,
+        target_environment=target_environment,
+        owner_approved=owner_approved,
+        actor_role=actor_role,
+    )
+    return dec.model_dump(mode="json")
+
+
+
+
 
 
 

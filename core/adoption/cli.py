@@ -9,19 +9,36 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
-from .service import (
-    AdoptionBlockedError,
-    AdoptionError,
-    apply_adoption,
-    initialize_project,
-    inspect_project,
-    plan_adoption,
-    prepare_adoption_worktree,
-    prepare_task,
-    verify_adoption,
-)
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
 
-SOURCE_ROOT = Path(__file__).resolve().parents[2]
+try:
+    from .service import (
+        AdoptionBlockedError,
+        AdoptionError,
+        apply_adoption,
+        initialize_project,
+        inspect_project,
+        plan_adoption,
+        prepare_adoption_worktree,
+        prepare_task,
+        verify_adoption,
+    )
+except ImportError:
+    from core.adoption.service import (
+        AdoptionBlockedError,
+        AdoptionError,
+        apply_adoption,
+        initialize_project,
+        inspect_project,
+        plan_adoption,
+        prepare_adoption_worktree,
+        prepare_task,
+        verify_adoption,
+    )
+
+SOURCE_ROOT = _REPO_ROOT
 
 
 def _emit(value: Any) -> None:
