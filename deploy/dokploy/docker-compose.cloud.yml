@@ -33,6 +33,8 @@ services:
     volumes:
       - darkfac-artifacts:/app/.factory/artifacts
       - darkfac-test-logs:/app/.factory/test_logs
+    ports:
+      - "8001:8001"
     networks:
       - dokploy-network
     deploy:
