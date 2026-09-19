@@ -151,8 +151,8 @@ def test_api_guide_timeout_query_param():
 
 
 def test_production_demands_integrity_and_no_leakage():
-    """Verify that real user demands (USR-09, USR-12, USR-AUTO) exist and no fake test tickets leaked."""
-    prod_path = Path("c:/dev/DarkFac/.factory/demands/demands.json")
+    """Verify the versioned demands snapshot; this is not a probe of a production host."""
+    prod_path = Path(__file__).resolve().parents[1] / ".factory" / "demands" / "demands.json"
     assert prod_path.exists(), "Production demands.json must exist"
 
     store = DemandsStore(prod_path)

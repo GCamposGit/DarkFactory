@@ -1,0 +1,84 @@
+{
+  "scope": "planning_only",
+  "status": "local_validated_remote_publication_pending",
+  "initial_parallel_suites": {
+    "harness": {
+      "passed": 925,
+      "failed": 1,
+      "skipped": 2,
+      "exit_code": 1
+    },
+    "pytest": {
+      "passed": 925,
+      "failed": 1,
+      "skipped": 2,
+      "exit_code": 1
+    },
+    "failure": "test_dense_graph_500_items_1500_relations_latency_budget exceeded500ms under competing suites",
+    "rca": "Both commands execute full suites; simultaneous runs competed for CPU. No implementation delta. Isolated focal passed1 in0.16s. Re-run sequentially after selective commit required by harness clean-tree gate."
+  },
+  "remote": {
+    "observed_main": "00133f6093d0b78090b04deacc61c82dcee5abb7",
+    "local_baseline": "83e5298eb231599076811802dceac8575c7f6feb",
+    "ahead_commits": 7,
+    "publication": "not_started"
+  },
+  "independent_review": "not_performed",
+  "deployment": "not_performed",
+  "documentary_validation": {
+    "units": 33,
+    "unit_dependency_edges": 62,
+    "milestone_dependency_edges": 1,
+    "new_projected_items": 34,
+    "links_checked": 107,
+    "new_scope_issues": 0,
+    "typed_handoff": "valid",
+    "gate_without_trusted_context": "correctly_rejected"
+  },
+  "focused_tests": {
+    "command": "python -m pytest tests/test_roadmap.py tests/test_baseline_catalog.py -q",
+    "passed": 18,
+    "exit_code": 0
+  },
+  "local_harness": {
+    "candidate_sha": "13710aa3b9db0b04c177acf6c054f5d333128ea6",
+    "command": "python core/harness/runner.py --quick",
+    "passed": 926,
+    "skipped": 2,
+    "failed": 0,
+    "exit_code": 0,
+    "marker": "[HARNESS_PASS]",
+    "log_sha256": "d205210e7552570dd8f0e78598254b2cf4c26a883dcf0423beee820d2b3bffa6"
+  },
+  "intermediate_attempt": {
+    "candidate": "73b11bf",
+    "valid_evidence": false,
+    "reason": "HEAD changed during execution; also exposed stale expected roadmap IDs and claim source hashes, repaired with exact fixture updates."
+  },
+  "remote_baseline_gaps": [
+    "core/portfolio/scheduler.py",
+    "core/portfolio/budget_manager.py",
+    "core/portfolio/router_optimizer.py",
+    "core/evolution/engine.py"
+  ],
+  "return_to_origin": {
+    "status": "blocked_by_automatic_approval_review",
+    "reason": "reviewer rejected destination authorization despite origin inspection; awaiting explicit user permission, no workaround attempted"
+  },
+  "full_suite": {
+    "command": "python -m pytest tests -v --ignore=tests/test_canaletto.py",
+    "candidate_sha": "13710aa3b9db0b04c177acf6c054f5d333128ea6",
+    "passed": 926,
+    "skipped": 2,
+    "failed": 0,
+    "exit_code": 0,
+    "log_sha256": "6b584cc92fdc5d7f689149544237d0fe0cbae58f2bbbf7fad6765568e974f054"
+  },
+  "validated_at": "2026-09-18T23:51:48.938275+00:00",
+  "tested_candidate_clean": true,
+  "guard": "passed; no protected governance paths modified",
+  "remote_publish_branch": "codex/continuous-autonomy-plan-publish",
+  "remote_publish_base": "00133f6093d0b78090b04deacc61c82dcee5abb7",
+  "exclusions": "Seven inherited implementation commits are absent from the publish branch; no production deployment.",
+  "current_status_location": "Delivery copy in outputs and PR are the current publication record; this file records pre-publication validation."
+}

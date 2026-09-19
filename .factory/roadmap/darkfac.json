@@ -14,8 +14,14 @@
       "horizon": "now",
       "confidence": "unknown",
       "dependencies": [],
-      "tags": ["roadmap", "fontes", "governança"],
-      "completion_criteria": ["Inventário versionado e política de precedência publicada."],
+      "tags": [
+        "roadmap",
+        "fontes",
+        "governança"
+      ],
+      "completion_criteria": [
+        "Inventário versionado e política de precedência publicada."
+      ],
       "source_refs": [
         {
           "source_id": "approved-roadmap",
@@ -36,9 +42,20 @@
       "delivery_status": "planned",
       "horizon": "now",
       "confidence": "unknown",
-      "dependencies": [{"item_id": "RM-01", "type": "requires"}],
-      "tags": ["contratos", "pydantic", "fixtures"],
-      "completion_criteria": ["Contratos rejeitam dados inválidos e fixtures cobrem o grafo base."],
+      "dependencies": [
+        {
+          "item_id": "RM-01",
+          "type": "requires"
+        }
+      ],
+      "tags": [
+        "contratos",
+        "pydantic",
+        "fixtures"
+      ],
+      "completion_criteria": [
+        "Contratos rejeitam dados inválidos e fixtures cobrem o grafo base."
+      ],
       "source_refs": [
         {
           "source_id": "approved-roadmap",
@@ -59,9 +76,20 @@
       "delivery_status": "planned",
       "horizon": "now",
       "confidence": "unknown",
-      "dependencies": [{"item_id": "RM-02", "type": "requires"}],
-      "tags": ["compiler", "normalização", "identidade"],
-      "completion_criteria": ["O mesmo conjunto de fontes produz o mesmo snapshot lógico."],
+      "dependencies": [
+        {
+          "item_id": "RM-02",
+          "type": "requires"
+        }
+      ],
+      "tags": [
+        "compiler",
+        "normalização",
+        "identidade"
+      ],
+      "completion_criteria": [
+        "O mesmo conjunto de fontes produz o mesmo snapshot lógico."
+      ],
       "source_refs": [
         {
           "source_id": "approved-roadmap",
@@ -82,9 +110,21 @@
       "delivery_status": "planned",
       "horizon": "now",
       "confidence": "unknown",
-      "dependencies": [{"item_id": "RM-03", "type": "requires"}],
-      "tags": ["validação", "ciclos", "conflitos", "evidência"],
-      "completion_criteria": ["Ciclos causais, conflitos, órfãos e conclusões sem evidência aparecem como issues."],
+      "dependencies": [
+        {
+          "item_id": "RM-03",
+          "type": "requires"
+        }
+      ],
+      "tags": [
+        "validação",
+        "ciclos",
+        "conflitos",
+        "evidência"
+      ],
+      "completion_criteria": [
+        "Ciclos causais, conflitos, órfãos e conclusões sem evidência aparecem como issues."
+      ],
       "source_refs": [
         {
           "source_id": "approved-roadmap",
@@ -106,11 +146,24 @@
       "horizon": "now",
       "confidence": "unknown",
       "dependencies": [
-        {"item_id": "RM-03", "type": "requires"},
-        {"item_id": "RM-04", "type": "requires"}
+        {
+          "item_id": "RM-03",
+          "type": "requires"
+        },
+        {
+          "item_id": "RM-04",
+          "type": "requires"
+        }
       ],
-      "tags": ["snapshot", "cache", "api", "proveniência"],
-      "completion_criteria": ["API read-only preserva o último snapshot quando uma fonte fica indisponível."],
+      "tags": [
+        "snapshot",
+        "cache",
+        "api",
+        "proveniência"
+      ],
+      "completion_criteria": [
+        "API read-only preserva o último snapshot quando uma fonte fica indisponível."
+      ],
       "source_refs": [
         {
           "source_id": "approved-roadmap",
@@ -131,9 +184,21 @@
       "delivery_status": "planned",
       "horizon": "now",
       "confidence": "unknown",
-      "dependencies": [{"item_id": "RM-05", "type": "requires"}],
-      "tags": ["hub", "painel", "acessibilidade", "mvp"],
-      "completion_criteria": ["A troca de projeto não vaza itens e a visão tabular é navegável por teclado."],
+      "dependencies": [
+        {
+          "item_id": "RM-05",
+          "type": "requires"
+        }
+      ],
+      "tags": [
+        "hub",
+        "painel",
+        "acessibilidade",
+        "mvp"
+      ],
+      "completion_criteria": [
+        "A troca de projeto não vaza itens e a visão tabular é navegável por teclado."
+      ],
       "source_refs": [
         {
           "source_id": "approved-roadmap",
@@ -154,9 +219,20 @@
       "delivery_status": "planned",
       "horizon": "next",
       "confidence": "unknown",
-      "dependencies": [{"item_id": "RM-06", "type": "requires"}],
-      "tags": ["timeline", "grafo", "teclado"],
-      "completion_criteria": ["As três visões representam o mesmo snapshot e o grafo destaca caminho crítico."],
+      "dependencies": [
+        {
+          "item_id": "RM-06",
+          "type": "requires"
+        }
+      ],
+      "tags": [
+        "timeline",
+        "grafo",
+        "teclado"
+      ],
+      "completion_criteria": [
+        "As três visões representam o mesmo snapshot e o grafo destaca caminho crítico."
+      ],
       "source_refs": [
         {
           "source_id": "approved-roadmap",
@@ -178,11 +254,23 @@
       "horizon": "later",
       "confidence": "unknown",
       "dependencies": [
-        {"item_id": "RM-05", "type": "requires"},
-        {"item_id": "RM-07", "type": "requires"}
+        {
+          "item_id": "RM-05",
+          "type": "requires"
+        },
+        {
+          "item_id": "RM-07",
+          "type": "requires"
+        }
       ],
-      "tags": ["incremental", "telemetria", "escala"],
-      "completion_criteria": ["500 itens e 1.500 relações atendem ao orçamento de latência definido."],
+      "tags": [
+        "incremental",
+        "telemetria",
+        "escala"
+      ],
+      "completion_criteria": [
+        "500 itens e 1.500 relações atendem ao orçamento de latência definido."
+      ],
       "source_refs": [
         {
           "source_id": "approved-roadmap",
@@ -203,9 +291,20 @@
       "delivery_status": "planned",
       "horizon": "exploratory",
       "confidence": "unknown",
-      "dependencies": [{"item_id": "RM-08", "type": "requires"}],
-      "tags": ["histórico", "diff", "evolução"],
-      "completion_criteria": ["Comparações preservam snapshots anteriores e sua proveniência."],
+      "dependencies": [
+        {
+          "item_id": "RM-08",
+          "type": "requires"
+        }
+      ],
+      "tags": [
+        "histórico",
+        "diff",
+        "evolução"
+      ],
+      "completion_criteria": [
+        "Comparações preservam snapshots anteriores e sua proveniência."
+      ],
       "source_refs": [
         {
           "source_id": "approved-roadmap",
@@ -215,6 +314,1345 @@
           "produced_by": "project-owner"
         }
       ]
+    },
+    {
+      "id": "HF-26",
+      "project_id": "darkfac",
+      "title": "Composição da autonomia contínua",
+      "description": "Planejamento de composição. Marco agregador; entrega exige HF-15-02 e gates.",
+      "item_type": "epic",
+      "lifecycle_stage": "execution",
+      "delivery_status": "planned",
+      "state_rationale": "Planejado; marco de composição; implementação não iniciada; operacionalmente não verificado. Registro não autoriza despacho.",
+      "horizon": "now",
+      "confidence": "high",
+      "dependencies": [
+        {
+          "item_id": "HF-15-02",
+          "type": "requires",
+          "label": "Marco só fecha após aceitação operacional completa"
+        }
+      ],
+      "tags": [
+        "continuous-autonomy",
+        "planning-only",
+        "milestone"
+      ],
+      "completion_criteria": [
+        "HF-15-02 verificado no caminho público, revisão e integração remota."
+      ],
+      "source_refs": [
+        {
+          "source_id": "approved-roadmap",
+          "source_kind": "document",
+          "label": "Plano de autonomia contínua 2026-09-18",
+          "locator": "docs/CONTINUOUS_AUTONOMY_PLAN_2026-09-18.md",
+          "produced_by": "codex-planner-01a0b4c8"
+        }
+      ]
+    },
+    {
+      "id": "HF-26-01",
+      "project_id": "darkfac",
+      "title": "Resolvedor puro de política efetiva",
+      "description": "Planejamento de composição. resolve_effective_policy(PolicyRequest,PolicyContext)->PolicyDecision puro; esquema e precedência detalhados em HF-26-01.md.",
+      "item_type": "feature",
+      "lifecycle_stage": "execution",
+      "delivery_status": "planned",
+      "state_rationale": "Planejado; ready_for_handoff; implementação não iniciada; operacionalmente não verificado. Registro não autoriza despacho.",
+      "horizon": "now",
+      "confidence": "high",
+      "dependencies": [],
+      "tags": [
+        "continuous-autonomy",
+        "planning-only",
+        "ready_for_handoff"
+      ],
+      "completion_criteria": [
+        "Grant exato autoriza; deny, pausa, revogação, teto, receipt inválido e aceite comercial ausente vencem grant."
+      ],
+      "source_refs": [
+        {
+          "source_id": "approved-roadmap",
+          "source_kind": "document",
+          "label": "Plano de autonomia contínua 2026-09-18",
+          "locator": "docs/handoffs/continuous-autonomy/HF-26-01.md",
+          "produced_by": "codex-planner-01a0b4c8"
+        }
+      ],
+      "parent_id": "HF-26"
+    },
+    {
+      "id": "HF-26-02",
+      "project_id": "darkfac",
+      "title": "Aplicar precedência sem ampliar permissões",
+      "description": "Planejamento de composição. build_policy_context(project_id,operation,trusted_grants,evidence)->PolicyContext novo; DeliveryPolicy recebe decisão vinculada. Sem contexto preserva legado. Não permitir C/D global.",
+      "item_type": "feature",
+      "lifecycle_stage": "execution",
+      "delivery_status": "planned",
+      "state_rationale": "Planejado; waiting_dependency; implementação não iniciada; operacionalmente não verificado. Registro não autoriza despacho.",
+      "horizon": "now",
+      "confidence": "high",
+      "dependencies": [
+        {
+          "item_id": "HF-26-01",
+          "type": "requires"
+        }
+      ],
+      "tags": [
+        "continuous-autonomy",
+        "planning-only",
+        "waiting_dependency"
+      ],
+      "completion_criteria": [
+        "Ticket técnico autorizado não pede humano; checks vermelhos e cliente pago sem aceite bloqueiam. Política declara precedência e limites."
+      ],
+      "source_refs": [
+        {
+          "source_id": "approved-roadmap",
+          "source_kind": "document",
+          "label": "Plano de autonomia contínua 2026-09-18",
+          "locator": "docs/handoffs/continuous-autonomy/HF-26-02.md",
+          "produced_by": "codex-planner-01a0b4c8"
+        }
+      ],
+      "parent_id": "HF-26"
+    },
+    {
+      "id": "HF-26-03",
+      "project_id": "darkfac",
+      "title": "Reconciliar baseline local e remota",
+      "description": "Planejamento de composição. baseline.json contém local_sha,remote_main_sha,unintegrated_commits,contract_hashes,compatible_units,integration_units; verificar git ancestry e APIs. Handoffs seletivos para commits herdados.",
+      "item_type": "research",
+      "lifecycle_stage": "execution",
+      "delivery_status": "planned",
+      "state_rationale": "Planejado; waiting_dependency; implementação não iniciada; operacionalmente não verificado. Registro não autoriza despacho.",
+      "horizon": "now",
+      "confidence": "high",
+      "dependencies": [
+        {
+          "item_id": "HF-26-01",
+          "type": "requires"
+        }
+      ],
+      "tags": [
+        "continuous-autonomy",
+        "planning-only",
+        "waiting_dependency"
+      ],
+      "completion_criteria": [
+        "Sete commits examinados individualmente; ausência remota de portfolio/evolution bloqueia só dependentes. Não publicar herança incidental."
+      ],
+      "source_refs": [
+        {
+          "source_id": "approved-roadmap",
+          "source_kind": "document",
+          "label": "Plano de autonomia contínua 2026-09-18",
+          "locator": "docs/handoffs/continuous-autonomy/HF-26-03.md",
+          "produced_by": "codex-planner-01a0b4c8"
+        }
+      ],
+      "parent_id": "HF-26"
+    },
+    {
+      "id": "HF-05-02",
+      "project_id": "darkfac",
+      "title": "Binding do controle cloud e ownership",
+      "description": "Planejamento de composição. Fechar tipos Python ControlStore, DDL, migração e locks; verificar API launch/queue/recovery/version/shutdown DBOS instalada. Store PostgreSQL transacional + outbox para DBOS; manter DF11/HF05 owners sem conversão.",
+      "item_type": "research",
+      "lifecycle_stage": "execution",
+      "delivery_status": "planned",
+      "state_rationale": "Planejado; waiting_dependency; implementação não iniciada; operacionalmente não verificado. Registro não autoriza despacho.",
+      "horizon": "now",
+      "confidence": "high",
+      "dependencies": [
+        {
+          "item_id": "HF-26-02",
+          "type": "requires"
+        },
+        {
+          "item_id": "HF-26-03",
+          "type": "requires"
+        }
+      ],
+      "tags": [
+        "continuous-autonomy",
+        "planning-only",
+        "waiting_dependency"
+      ],
+      "completion_criteria": [
+        "Transcript real ou waiting_access técnico; imports reais e documentação primária por versão. Binding define reserva única e crash points, não importa DBOS como prova de execução."
+      ],
+      "source_refs": [
+        {
+          "source_id": "approved-roadmap",
+          "source_kind": "document",
+          "label": "Plano de autonomia contínua 2026-09-18",
+          "locator": "docs/handoffs/continuous-autonomy/HF-05-02.md",
+          "produced_by": "codex-planner-01a0b4c8"
+        }
+      ],
+      "parent_id": "HF-05"
+    },
+    {
+      "id": "HF-05-03",
+      "project_id": "darkfac",
+      "title": "Persistência canônica e adaptadores",
+      "description": "Planejamento de composição. Implementar Protocol de CONTRACTS.md e binding CONTROL; SQLite local e PostgreSQL opcional com demandas/jobs/outbox/inbox/leases/reservas/operations, transações curtas sem LLM sob lock.",
+      "item_type": "feature",
+      "lifecycle_stage": "execution",
+      "delivery_status": "planned",
+      "state_rationale": "Planejado; needs_architecture_binding; implementação não iniciada; operacionalmente não verificado. Registro não autoriza despacho.",
+      "horizon": "now",
+      "confidence": "high",
+      "dependencies": [
+        {
+          "item_id": "HF-05-02",
+          "type": "requires"
+        }
+      ],
+      "tags": [
+        "continuous-autonomy",
+        "planning-only",
+        "needs_architecture_binding"
+      ],
+      "completion_criteria": [
+        "Crash antes/depois commit, claims concorrentes por conexões/processos, dedupe conflitante e stale fencing. Suite parametrizada real nos dois backends; skip cloud não comprova cloud."
+      ],
+      "source_refs": [
+        {
+          "source_id": "approved-roadmap",
+          "source_kind": "document",
+          "label": "Plano de autonomia contínua 2026-09-18",
+          "locator": "docs/handoffs/continuous-autonomy/HF-05-03.md",
+          "produced_by": "codex-planner-01a0b4c8"
+        }
+      ],
+      "parent_id": "HF-05"
+    },
+    {
+      "id": "HF-05-04",
+      "project_id": "darkfac",
+      "title": "Handlers e materialização de sucessores",
+      "description": "Planejamento de composição. build_handlers(bindings,services); handle(StageContext)->StageResult; materialize_result(job_key,result,store). Inbox+sucessores atomicamente; fan-out produtivo e memória; versão fixada e allowlist.",
+      "item_type": "feature",
+      "lifecycle_stage": "execution",
+      "delivery_status": "planned",
+      "state_rationale": "Planejado; waiting_dependency; implementação não iniciada; operacionalmente não verificado. Registro não autoriza despacho.",
+      "horizon": "now",
+      "confidence": "high",
+      "dependencies": [
+        {
+          "item_id": "HF-05-03",
+          "type": "requires"
+        }
+      ],
+      "tags": [
+        "continuous-autonomy",
+        "planning-only",
+        "waiting_dependency"
+      ],
+      "completion_criteria": [
+        "Evento perdido e duplicado convergem ao mesmo JobKey; success vazio e handler ausente falham; WAITING_HUMAN não suspende irmãos; learning interno não recursa."
+      ],
+      "source_refs": [
+        {
+          "source_id": "approved-roadmap",
+          "source_kind": "document",
+          "label": "Plano de autonomia contínua 2026-09-18",
+          "locator": "docs/handoffs/continuous-autonomy/HF-05-04.md",
+          "produced_by": "codex-planner-01a0b4c8"
+        }
+      ],
+      "parent_id": "HF-05"
+    },
+    {
+      "id": "HF-05-05",
+      "project_id": "darkfac",
+      "title": "Supervisor de todo portfólio",
+      "description": "Planejamento de composição. Supervisor.run(stop_event),tick(now),next_wakeup(now): scan paginado estável do registry, outbox+state repair, ready-age e leases; tick 30s, espera interrompível até15s, zero LLM ocioso.",
+      "item_type": "feature",
+      "lifecycle_stage": "execution",
+      "delivery_status": "planned",
+      "state_rationale": "Planejado; waiting_dependency; implementação não iniciada; operacionalmente não verificado. Registro não autoriza despacho.",
+      "horizon": "now",
+      "confidence": "high",
+      "dependencies": [
+        {
+          "item_id": "HF-05-04",
+          "type": "requires"
+        }
+      ],
+      "tags": [
+        "continuous-autonomy",
+        "planning-only",
+        "waiting_dependency"
+      ],
+      "completion_criteria": [
+        "100+ projetos e inserção durante scan não perdem jobs; <=60s de recuperação com clock falso; cancelamento impede efeitos e ausência consumidor é detectada."
+      ],
+      "source_refs": [
+        {
+          "source_id": "approved-roadmap",
+          "source_kind": "document",
+          "label": "Plano de autonomia contínua 2026-09-18",
+          "locator": "docs/handoffs/continuous-autonomy/HF-05-05.md",
+          "produced_by": "codex-planner-01a0b4c8"
+        }
+      ],
+      "parent_id": "HF-05"
+    },
+    {
+      "id": "HF-05-06",
+      "project_id": "darkfac",
+      "title": "Entrypoints cloud permanentes",
+      "description": "Planejamento de composição. main serviço default lança engine/supervisor/worker e drain SIGTERM; --status preserva diagnóstico. Compose fixa imagem/digest e health de progresso; remover token de build URL.",
+      "item_type": "feature",
+      "lifecycle_stage": "execution",
+      "delivery_status": "planned",
+      "state_rationale": "Planejado; needs_architecture_binding; implementação não iniciada; operacionalmente não verificado. Registro não autoriza despacho.",
+      "horizon": "now",
+      "confidence": "high",
+      "dependencies": [
+        {
+          "item_id": "HF-05-05",
+          "type": "requires"
+        },
+        {
+          "item_id": "HF-23-01",
+          "type": "requires"
+        }
+      ],
+      "tags": [
+        "continuous-autonomy",
+        "planning-only",
+        "needs_architecture_binding"
+      ],
+      "completion_criteria": [
+        "PID vivo ocioso sem IA; input avança; import/connect sem consumo dá not_ready. Kill após efeito recupera, notebook desligado não para cloud."
+      ],
+      "source_refs": [
+        {
+          "source_id": "approved-roadmap",
+          "source_kind": "document",
+          "label": "Plano de autonomia contínua 2026-09-18",
+          "locator": "docs/handoffs/continuous-autonomy/HF-05-06.md",
+          "produced_by": "codex-planner-01a0b4c8"
+        }
+      ],
+      "parent_id": "HF-05"
+    },
+    {
+      "id": "HF-23-01",
+      "project_id": "darkfac",
+      "title": "Reserva única e justiça de portfólio",
+      "description": "Planejamento de composição. rank_eligible(snapshot,now)->list[JobKey] puro; composed mode proíbe slots JSON e delega claim ao store. Limites existentes conta/projeto/run/pool, custos em unidades inteiras; aliases canônicos.",
+      "item_type": "feature",
+      "lifecycle_stage": "execution",
+      "delivery_status": "planned",
+      "state_rationale": "Planejado; needs_architecture_binding; implementação não iniciada; operacionalmente não verificado. Registro não autoriza despacho.",
+      "horizon": "now",
+      "confidence": "high",
+      "dependencies": [
+        {
+          "item_id": "HF-05-03",
+          "type": "requires"
+        },
+        {
+          "item_id": "HF-07-02",
+          "type": "requires"
+        }
+      ],
+      "tags": [
+        "continuous-autonomy",
+        "planning-only",
+        "needs_architecture_binding"
+      ],
+      "completion_criteria": [
+        "Dois schedulers não gastam último crédito/slot duas vezes; expiração libera espaço mas mantém custo incerto; starvation protegido sem inventar budget."
+      ],
+      "source_refs": [
+        {
+          "source_id": "approved-roadmap",
+          "source_kind": "document",
+          "label": "Plano de autonomia contínua 2026-09-18",
+          "locator": "docs/handoffs/continuous-autonomy/HF-23-01.md",
+          "produced_by": "codex-planner-01a0b4c8"
+        }
+      ],
+      "parent_id": "HF-23"
+    },
+    {
+      "id": "HF-08-01",
+      "project_id": "darkfac",
+      "title": "Intake atômico e documental explícito",
+      "description": "Planejamento de composição. AutonomousIntakeService.accept(IntakeCommand)->IntakeReceipt; receive_demand modo autonomous exige store, documental não retorna run fictício. Grill vira job posterior; DemandsStore JSON projeção pós-commit.",
+      "item_type": "feature",
+      "lifecycle_stage": "execution",
+      "delivery_status": "planned",
+      "state_rationale": "Planejado; waiting_dependency; implementação não iniciada; operacionalmente não verificado. Registro não autoriza despacho.",
+      "horizon": "now",
+      "confidence": "high",
+      "dependencies": [
+        {
+          "item_id": "HF-05-03",
+          "type": "requires"
+        }
+      ],
+      "tags": [
+        "continuous-autonomy",
+        "planning-only",
+        "waiting_dependency"
+      ],
+      "completion_criteria": [
+        "Crash não deixa accepted sem job; replay retorna mesmos IDs; documentary IDs de execução null. Falha na projeção não duplica demanda."
+      ],
+      "source_refs": [
+        {
+          "source_id": "approved-roadmap",
+          "source_kind": "document",
+          "label": "Plano de autonomia contínua 2026-09-18",
+          "locator": "docs/handoffs/continuous-autonomy/HF-08-01.md",
+          "produced_by": "codex-planner-01a0b4c8"
+        }
+      ],
+      "parent_id": "HF-08"
+    },
+    {
+      "id": "HF-08-02",
+      "project_id": "darkfac",
+      "title": "Hub e CLI usam intake canônico",
+      "description": "Planejamento de composição. CLI mantém args e adiciona --mode/--external-id para replay; Hub Idempotency-Key e service injetado nas rotas atuais. HTTP202 pós-commit,409 conflito,503 store ausente; autorização antes de persistir.",
+      "item_type": "feature",
+      "lifecycle_stage": "execution",
+      "delivery_status": "planned",
+      "state_rationale": "Planejado; waiting_dependency; implementação não iniciada; operacionalmente não verificado. Registro não autoriza despacho.",
+      "horizon": "now",
+      "confidence": "high",
+      "dependencies": [
+        {
+          "item_id": "HF-08-01",
+          "type": "requires"
+        }
+      ],
+      "tags": [
+        "continuous-autonomy",
+        "planning-only",
+        "waiting_dependency"
+      ],
+      "completion_criteria": [
+        "CLI subprocesso e HTTP geram job; indisponibilidade nunca accepted; progressão sem chamada manual de fases. Retries reutilizam external_id."
+      ],
+      "source_refs": [
+        {
+          "source_id": "approved-roadmap",
+          "source_kind": "document",
+          "label": "Plano de autonomia contínua 2026-09-18",
+          "locator": "docs/handoffs/continuous-autonomy/HF-08-02.md",
+          "produced_by": "codex-planner-01a0b4c8"
+        }
+      ],
+      "parent_id": "HF-08"
+    },
+    {
+      "id": "HF-08-03",
+      "project_id": "darkfac",
+      "title": "Telegram e importação de legado",
+      "description": "Planejamento de composição. backfill(store,legacy_tickets,cursor)->ImportPage com project/ticket/version/fingerprint; Telegram chat autorizado+update_id e offset pós-commit. n8n gateway do mesmo endpoint.",
+      "item_type": "feature",
+      "lifecycle_stage": "execution",
+      "delivery_status": "planned",
+      "state_rationale": "Planejado; waiting_dependency; implementação não iniciada; operacionalmente não verificado. Registro não autoriza despacho.",
+      "horizon": "now",
+      "confidence": "high",
+      "dependencies": [
+        {
+          "item_id": "HF-08-02",
+          "type": "requires"
+        },
+        {
+          "item_id": "HF-05-04",
+          "type": "requires"
+        }
+      ],
+      "tags": [
+        "continuous-autonomy",
+        "planning-only",
+        "waiting_dependency"
+      ],
+      "completion_criteria": [
+        "Restart antes cursor não duplica; legado terminal não reexecuta; sem prova terminal vai reconciliation_required. Canal não cria segunda fila."
+      ],
+      "source_refs": [
+        {
+          "source_id": "approved-roadmap",
+          "source_kind": "document",
+          "label": "Plano de autonomia contínua 2026-09-18",
+          "locator": "docs/handoffs/continuous-autonomy/HF-08-03.md",
+          "produced_by": "codex-planner-01a0b4c8"
+        }
+      ],
+      "parent_id": "HF-08"
+    },
+    {
+      "id": "HF-08-04",
+      "project_id": "darkfac",
+      "title": "Planejamento contínuo do escopo conhecido",
+      "description": "Planejamento de composição. PlanningHandler.handle(context) lê registry/demand/memory; produz WorkflowHandoff e graph revision. Stop quando todas folhas têm ready/design/dependency/binding justificados. Dedupe por demand_version+relevant_contract_digest.",
+      "item_type": "feature",
+      "lifecycle_stage": "execution",
+      "delivery_status": "planned",
+      "state_rationale": "Planejado; needs_architecture_binding; implementação não iniciada; operacionalmente não verificado. Registro não autoriza despacho.",
+      "horizon": "now",
+      "confidence": "high",
+      "dependencies": [
+        {
+          "item_id": "HF-05-04",
+          "type": "requires"
+        },
+        {
+          "item_id": "HF-07-02",
+          "type": "requires"
+        }
+      ],
+      "tags": [
+        "continuous-autonomy",
+        "planning-only",
+        "needs_architecture_binding"
+      ],
+      "completion_criteria": [
+        "Visita todos projetos e novos registros; folhas prontas liberam sem carteira inteira; hash igual não decompõe infinitamente; lacuna gera binding high, não economia decidindo."
+      ],
+      "source_refs": [
+        {
+          "source_id": "approved-roadmap",
+          "source_kind": "document",
+          "label": "Plano de autonomia contínua 2026-09-18",
+          "locator": "docs/handoffs/continuous-autonomy/HF-08-04.md",
+          "produced_by": "codex-planner-01a0b4c8"
+        }
+      ],
+      "parent_id": "HF-08"
+    },
+    {
+      "id": "HF-08-05",
+      "project_id": "darkfac",
+      "title": "Probe e retomada de dependências manuais",
+      "description": "Planejamento de composição. submit_resolution(dependency_id,response_ref,version)->ProbeJob; só receipt na identidade/rota certa resolve e gera outbox. ManualDependency guia todos campos, canal seguro, blocked_stages e resume_criteria.",
+      "item_type": "feature",
+      "lifecycle_stage": "execution",
+      "delivery_status": "planned",
+      "state_rationale": "Planejado; waiting_dependency; implementação não iniciada; operacionalmente não verificado. Registro não autoriza despacho.",
+      "horizon": "now",
+      "confidence": "high",
+      "dependencies": [
+        {
+          "item_id": "HF-05-04",
+          "type": "requires"
+        }
+      ],
+      "tags": [
+        "continuous-autonomy",
+        "planning-only",
+        "waiting_dependency"
+      ],
+      "completion_criteria": [
+        "Resposta incorreta/antiga não libera; correta retoma automaticamente só descendentes. Segredo em conversa não persiste; outro projeto avança."
+      ],
+      "source_refs": [
+        {
+          "source_id": "approved-roadmap",
+          "source_kind": "document",
+          "label": "Plano de autonomia contínua 2026-09-18",
+          "locator": "docs/handoffs/continuous-autonomy/HF-08-05.md",
+          "produced_by": "codex-planner-01a0b4c8"
+        }
+      ],
+      "parent_id": "HF-08"
+    },
+    {
+      "id": "HF-07-01",
+      "project_id": "darkfac",
+      "title": "Binding de executores e contas reais",
+      "description": "Planejamento de composição. Inventariar model IDs/effort high/max, contas/hosts, tools/edit/test/resume/cancel, quota/reset/preço; microtarefa real autorizada; adapter mapping providers/AgentExecutor, TTL24h.",
+      "item_type": "research",
+      "lifecycle_stage": "execution",
+      "delivery_status": "planned",
+      "state_rationale": "Planejado; waiting_dependency; implementação não iniciada; operacionalmente não verificado. Registro não autoriza despacho.",
+      "horizon": "now",
+      "confidence": "high",
+      "dependencies": [
+        {
+          "item_id": "HF-26-03",
+          "type": "requires"
+        }
+      ],
+      "tags": [
+        "continuous-autonomy",
+        "planning-only",
+        "waiting_dependency"
+      ],
+      "completion_criteria": [
+        "Nome textual sem tool calling reprova; assinatura desktop não prova VPS; sem rota qualificada registrar reset/reavaliação. Sem compra ou chamada paga sem reserva."
+      ],
+      "source_refs": [
+        {
+          "source_id": "approved-roadmap",
+          "source_kind": "document",
+          "label": "Plano de autonomia contínua 2026-09-18",
+          "locator": "docs/handoffs/continuous-autonomy/HF-07-01.md",
+          "produced_by": "codex-planner-01a0b4c8"
+        }
+      ],
+      "parent_id": "HF-07"
+    },
+    {
+      "id": "HF-07-02",
+      "project_id": "darkfac",
+      "title": "Rotas qualificadas e fallback",
+      "description": "Planejamento de composição. select_route(job,catalog,quota,budget)->RouteDecision; checar papel/qualidade/tools/host/custo antes claim. Avaliar outras assinaturas, APIs autorizadas, local; unknown não available.",
+      "item_type": "feature",
+      "lifecycle_stage": "execution",
+      "delivery_status": "planned",
+      "state_rationale": "Planejado; needs_architecture_binding; implementação não iniciada; operacionalmente não verificado. Registro não autoriza despacho.",
+      "horizon": "now",
+      "confidence": "high",
+      "dependencies": [
+        {
+          "item_id": "HF-07-01",
+          "type": "requires"
+        },
+        {
+          "item_id": "HF-05-03",
+          "type": "requires"
+        }
+      ],
+      "tags": [
+        "continuous-autonomy",
+        "planning-only",
+        "needs_architecture_binding"
+      ],
+      "completion_criteria": [
+        "Quota mudou antes claim exige reseleção sem dupla reserva. Local não qualificado high não planeja; nenhuma rota gera espera com motivo/wakeup, tarefas locais seguem."
+      ],
+      "source_refs": [
+        {
+          "source_id": "approved-roadmap",
+          "source_kind": "document",
+          "label": "Plano de autonomia contínua 2026-09-18",
+          "locator": "docs/handoffs/continuous-autonomy/HF-07-02.md",
+          "produced_by": "codex-planner-01a0b4c8"
+        }
+      ],
+      "parent_id": "HF-07"
+    },
+    {
+      "id": "HF-07-03",
+      "project_id": "darkfac",
+      "title": "Catálogo diário recuperável",
+      "description": "Planejamento de composição. CatalogRefreshHandler timer24h persistido e boot catchup; fontes oficiais, smoke/eval por papel; promoção só novos jobs e rollback catálogo. Falha mantém último válido com idade.",
+      "item_type": "feature",
+      "lifecycle_stage": "execution",
+      "delivery_status": "planned",
+      "state_rationale": "Planejado; needs_architecture_binding; implementação não iniciada; operacionalmente não verificado. Registro não autoriza despacho.",
+      "horizon": "now",
+      "confidence": "high",
+      "dependencies": [
+        {
+          "item_id": "HF-05-04",
+          "type": "requires"
+        },
+        {
+          "item_id": "HF-07-02",
+          "type": "requires"
+        }
+      ],
+      "tags": [
+        "continuous-autonomy",
+        "planning-only",
+        "needs_architecture_binding"
+      ],
+      "completion_criteria": [
+        "Timer perdido executa uma vez; modelo ativo não muda; preço ausente não zero; effort incompatível não enviado."
+      ],
+      "source_refs": [
+        {
+          "source_id": "approved-roadmap",
+          "source_kind": "document",
+          "label": "Plano de autonomia contínua 2026-09-18",
+          "locator": "docs/handoffs/continuous-autonomy/HF-07-03.md",
+          "produced_by": "codex-planner-01a0b4c8"
+        }
+      ],
+      "parent_id": "HF-07"
+    },
+    {
+      "id": "HF-09-01",
+      "project_id": "darkfac",
+      "title": "Binding de agentes e revisão por etapa",
+      "description": "Planejamento de composição. Fechar service/method/signature/conversion e schemas por estágio; mapear AgentExecutor.start/resume e ImplementationCycleService; tools/prompts/worktree versionados e authority do VerificationContext.",
+      "item_type": "research",
+      "lifecycle_stage": "execution",
+      "delivery_status": "planned",
+      "state_rationale": "Planejado; waiting_dependency; implementação não iniciada; operacionalmente não verificado. Registro não autoriza despacho.",
+      "horizon": "now",
+      "confidence": "high",
+      "dependencies": [
+        {
+          "item_id": "HF-07-01",
+          "type": "requires"
+        },
+        {
+          "item_id": "HF-05-04",
+          "type": "requires"
+        }
+      ],
+      "tags": [
+        "continuous-autonomy",
+        "planning-only",
+        "waiting_dependency"
+      ],
+      "completion_criteria": [
+        "Smoke com edição e teste real; só texto não qualifica. Sujeito revisor distinto. Adapter ausente gera leaf de implementação específica com APIs resolvidas."
+      ],
+      "source_refs": [
+        {
+          "source_id": "approved-roadmap",
+          "source_kind": "document",
+          "label": "Plano de autonomia contínua 2026-09-18",
+          "locator": "docs/handoffs/continuous-autonomy/HF-09-01.md",
+          "produced_by": "codex-planner-01a0b4c8"
+        }
+      ],
+      "parent_id": "HF-09"
+    },
+    {
+      "id": "HF-09-02",
+      "project_id": "darkfac",
+      "title": "Consumers de desenvolvimento e qualidade",
+      "description": "Planejamento de composição. Handlers do binding, worktree/lease exclusiva, econômico, SHA+bytes e validação/revisão distintas. Defeito gera iteration; lacuna replan; duas tentativas sem progresso encerram causa.",
+      "item_type": "feature",
+      "lifecycle_stage": "execution",
+      "delivery_status": "planned",
+      "state_rationale": "Planejado; needs_architecture_binding; implementação não iniciada; operacionalmente não verificado. Registro não autoriza despacho.",
+      "horizon": "now",
+      "confidence": "high",
+      "dependencies": [
+        {
+          "item_id": "HF-09-01",
+          "type": "requires"
+        },
+        {
+          "item_id": "HF-08-04",
+          "type": "requires"
+        }
+      ],
+      "tags": [
+        "continuous-autonomy",
+        "planning-only",
+        "needs_architecture_binding"
+      ],
+      "completion_criteria": [
+        "Defeito funcional reprova mesmo com self-PASS; mesmo sujeito não revisa; crash retoma owner original sem editar outra worktree."
+      ],
+      "source_refs": [
+        {
+          "source_id": "approved-roadmap",
+          "source_kind": "document",
+          "label": "Plano de autonomia contínua 2026-09-18",
+          "locator": "docs/handoffs/continuous-autonomy/HF-09-02.md",
+          "produced_by": "codex-planner-01a0b4c8"
+        }
+      ],
+      "parent_id": "HF-09"
+    },
+    {
+      "id": "HF-11-01",
+      "project_id": "darkfac",
+      "title": "Integração GitHub reconciliada",
+      "description": "Planejamento de composição. IntegrationHandler usa request/snapshot reais: commit seletivo,push,PR por branch/checks/head,merge permitido e ancestry remota; lookup repo+PR após timeout.",
+      "item_type": "feature",
+      "lifecycle_stage": "execution",
+      "delivery_status": "planned",
+      "state_rationale": "Planejado; needs_architecture_binding; implementação não iniciada; operacionalmente não verificado. Registro não autoriza despacho.",
+      "horizon": "now",
+      "confidence": "high",
+      "dependencies": [
+        {
+          "item_id": "HF-09-02",
+          "type": "requires"
+        },
+        {
+          "item_id": "HF-26-02",
+          "type": "requires"
+        }
+      ],
+      "tags": [
+        "continuous-autonomy",
+        "planning-only",
+        "needs_architecture_binding"
+      ],
+      "completion_criteria": [
+        "Resposta PR perdida não duplica; draft/checks SHA antigo bloqueiam; main sem ancestry não entregue; token não aparece; sem autoapprove."
+      ],
+      "source_refs": [
+        {
+          "source_id": "approved-roadmap",
+          "source_kind": "document",
+          "label": "Plano de autonomia contínua 2026-09-18",
+          "locator": "docs/handoffs/continuous-autonomy/HF-11-01.md",
+          "produced_by": "codex-planner-01a0b4c8"
+        }
+      ],
+      "parent_id": "HF-11"
+    },
+    {
+      "id": "HF-12-01",
+      "project_id": "darkfac",
+      "title": "Binding de build e targets reais",
+      "description": "Planejamento de composição. Inspecionar Dokploy/FTP/local_service por projeto; fixar build command,bytes/OCI digest,op ID lookup/status,installed digest,journey write/read e backup/rollback. Reusar DokployDeployClient e sanitizar.",
+      "item_type": "research",
+      "lifecycle_stage": "execution",
+      "delivery_status": "planned",
+      "state_rationale": "Planejado; waiting_dependency; implementação não iniciada; operacionalmente não verificado. Registro não autoriza despacho.",
+      "horizon": "now",
+      "confidence": "high",
+      "dependencies": [
+        {
+          "item_id": "HF-26-03",
+          "type": "requires"
+        }
+      ],
+      "tags": [
+        "continuous-autonomy",
+        "planning-only",
+        "waiting_dependency"
+      ],
+      "completion_criteria": [
+        "Webhook200 sem ID/término não satisfaz binding; requests/responses reais sanitizados, comandos por target. Nenhum endpoint adivinhado; target sem correlação exige binding high."
+      ],
+      "source_refs": [
+        {
+          "source_id": "approved-roadmap",
+          "source_kind": "document",
+          "label": "Plano de autonomia contínua 2026-09-18",
+          "locator": "docs/handoffs/continuous-autonomy/HF-12-01.md",
+          "produced_by": "codex-planner-01a0b4c8"
+        }
+      ],
+      "parent_id": "HF-12"
+    },
+    {
+      "id": "HF-12-02",
+      "project_id": "darkfac",
+      "title": "Build real e adapter de deploy",
+      "description": "Planejamento de composição. BuildService.build(source_sha,recipe,claim)->ArtifactRef hashing bytes; DeploymentAdapter.start/reconcile/installed_digest do binding; domínio headless e wrapper Hub compatível.",
+      "item_type": "feature",
+      "lifecycle_stage": "execution",
+      "delivery_status": "planned",
+      "state_rationale": "Planejado; needs_architecture_binding; implementação não iniciada; operacionalmente não verificado. Registro não autoriza despacho.",
+      "horizon": "now",
+      "confidence": "high",
+      "dependencies": [
+        {
+          "item_id": "HF-12-01",
+          "type": "requires"
+        },
+        {
+          "item_id": "HF-11-01",
+          "type": "requires"
+        }
+      ],
+      "tags": [
+        "continuous-autonomy",
+        "planning-only",
+        "needs_architecture_binding"
+      ],
+      "completion_criteria": [
+        "SHA metadata igual com bytes diferentes falha; timeout consulta remoto; HTTP não basta; mesmo artefato promove sem rebuild."
+      ],
+      "source_refs": [
+        {
+          "source_id": "approved-roadmap",
+          "source_kind": "document",
+          "label": "Plano de autonomia contínua 2026-09-18",
+          "locator": "docs/handoffs/continuous-autonomy/HF-12-02.md",
+          "produced_by": "codex-planner-01a0b4c8"
+        }
+      ],
+      "parent_id": "HF-12"
+    },
+    {
+      "id": "HF-12-03",
+      "project_id": "darkfac",
+      "title": "Jornada e rollback observados",
+      "description": "Planejamento de composição. JourneyObserver.observe(artifact,target,nonce)->EvidenceReceipt com escrita/leitura/persistência após restart e digest; RollbackAdapter.restore(previous,backup) verifica bytes/dados e RPO/RTO.",
+      "item_type": "feature",
+      "lifecycle_stage": "execution",
+      "delivery_status": "planned",
+      "state_rationale": "Planejado; needs_architecture_binding; implementação não iniciada; operacionalmente não verificado. Registro não autoriza despacho.",
+      "horizon": "now",
+      "confidence": "high",
+      "dependencies": [
+        {
+          "item_id": "HF-12-02",
+          "type": "requires"
+        }
+      ],
+      "tags": [
+        "continuous-autonomy",
+        "planning-only",
+        "needs_architecture_binding"
+      ],
+      "completion_criteria": [
+        "Health200 código velho ou nonce não persistido reprova; rollback só JSON reprova. Restore no alvo, sem tratar dados cliente como descartáveis."
+      ],
+      "source_refs": [
+        {
+          "source_id": "approved-roadmap",
+          "source_kind": "document",
+          "label": "Plano de autonomia contínua 2026-09-18",
+          "locator": "docs/handoffs/continuous-autonomy/HF-12-03.md",
+          "produced_by": "codex-planner-01a0b4c8"
+        }
+      ],
+      "parent_id": "HF-12"
+    },
+    {
+      "id": "HF-12-04",
+      "project_id": "darkfac",
+      "title": "Release automática por evidência",
+      "description": "Planejamento de composição. Composed release exige receipts confiáveis preflight/build/deploy/digest/journey; booleanos legados só simulation rotulada. build→staging→aceite pago→produção→journey; falha abre reparo/rollback.",
+      "item_type": "feature",
+      "lifecycle_stage": "execution",
+      "delivery_status": "planned",
+      "state_rationale": "Planejado; needs_architecture_binding; implementação não iniciada; operacionalmente não verificado. Registro não autoriza despacho.",
+      "horizon": "now",
+      "confidence": "high",
+      "dependencies": [
+        {
+          "item_id": "HF-12-03",
+          "type": "requires"
+        },
+        {
+          "item_id": "HF-05-04",
+          "type": "requires"
+        }
+      ],
+      "tags": [
+        "continuous-autonomy",
+        "planning-only",
+        "needs_architecture_binding"
+      ],
+      "completion_criteria": [
+        "True do chamador,stale ou outro digest não promovem; cliente aceitou mesmo digest; outros projetos continuam."
+      ],
+      "source_refs": [
+        {
+          "source_id": "approved-roadmap",
+          "source_kind": "document",
+          "label": "Plano de autonomia contínua 2026-09-18",
+          "locator": "docs/handoffs/continuous-autonomy/HF-12-04.md",
+          "produced_by": "codex-planner-01a0b4c8"
+        }
+      ],
+      "parent_id": "HF-12"
+    },
+    {
+      "id": "HF-10-01",
+      "project_id": "darkfac",
+      "title": "Memória por eventos e contexto fixado",
+      "description": "Planejamento de composição. ObservationHandler por event_id+consumer_version; ContextLoader.get(job) usa get_selective_context e fixa memory_version; scope project/global explícito; Pack saída sem ack humano.",
+      "item_type": "feature",
+      "lifecycle_stage": "execution",
+      "delivery_status": "planned",
+      "state_rationale": "Planejado; waiting_dependency; implementação não iniciada; operacionalmente não verificado. Registro não autoriza despacho.",
+      "horizon": "now",
+      "confidence": "high",
+      "dependencies": [
+        {
+          "item_id": "HF-05-04",
+          "type": "requires"
+        }
+      ],
+      "tags": [
+        "continuous-autonomy",
+        "planning-only",
+        "waiting_dependency"
+      ],
+      "completion_criteria": [
+        "Restart preserva regra; proposta/rejeitada não entra prompt; própria notificação não recursa; pack falhou não bloqueia; dados privados não cruzam projetos."
+      ],
+      "source_refs": [
+        {
+          "source_id": "approved-roadmap",
+          "source_kind": "document",
+          "label": "Plano de autonomia contínua 2026-09-18",
+          "locator": "docs/handoffs/continuous-autonomy/HF-10-01.md",
+          "produced_by": "codex-planner-01a0b4c8"
+        }
+      ],
+      "parent_id": "HF-10"
+    },
+    {
+      "id": "HF-10-02",
+      "project_id": "darkfac",
+      "title": "Pesquisa ligada às decisões",
+      "description": "Planejamento de composição. ResearchHandler por question/version/scope; ledger fontes primárias,trecho/hash/data/decisão/licença; bloqueante só da decisão,exploratória budget/pool separado.",
+      "item_type": "feature",
+      "lifecycle_stage": "execution",
+      "delivery_status": "planned",
+      "state_rationale": "Planejado; needs_architecture_binding; implementação não iniciada; operacionalmente não verificado. Registro não autoriza despacho.",
+      "horizon": "now",
+      "confidence": "high",
+      "dependencies": [
+        {
+          "item_id": "HF-10-01",
+          "type": "requires"
+        },
+        {
+          "item_id": "HF-07-02",
+          "type": "requires"
+        }
+      ],
+      "tags": [
+        "continuous-autonomy",
+        "planning-only",
+        "needs_architecture_binding"
+      ],
+      "completion_criteria": [
+        "Fonte indisponível não vira fato; pesquisa vencida agenda; mudar contrato só por high; query deduplicada não esgota cota."
+      ],
+      "source_refs": [
+        {
+          "source_id": "approved-roadmap",
+          "source_kind": "document",
+          "label": "Plano de autonomia contínua 2026-09-18",
+          "locator": "docs/handoffs/continuous-autonomy/HF-10-02.md",
+          "produced_by": "codex-planner-01a0b4c8"
+        }
+      ],
+      "parent_id": "HF-10"
+    },
+    {
+      "id": "HF-25-01",
+      "project_id": "darkfac",
+      "title": "Evolução avaliada e aplicada após restart",
+      "description": "Planejamento de composição. propose→evaluate_candidate por distinto→promote_candidate→context/catalog version→measurement/rollback; holdout/política congelados; não alterar jobs correntes; export sanitizado elegível.",
+      "item_type": "feature",
+      "lifecycle_stage": "execution",
+      "delivery_status": "planned",
+      "state_rationale": "Planejado; needs_architecture_binding; implementação não iniciada; operacionalmente não verificado. Registro não autoriza despacho.",
+      "horizon": "now",
+      "confidence": "high",
+      "dependencies": [
+        {
+          "item_id": "HF-10-01",
+          "type": "requires"
+        },
+        {
+          "item_id": "HF-09-01",
+          "type": "requires"
+        },
+        {
+          "item_id": "HF-26-03",
+          "type": "requires"
+        }
+      ],
+      "tags": [
+        "continuous-autonomy",
+        "planning-only",
+        "needs_architecture_binding"
+      ],
+      "completion_criteria": [
+        "Candidato mudando próprio verificador rejeitado; ruim falha holdout; bom consumido após restart; regressão restaura snapshot e bloqueia nova aplicação."
+      ],
+      "source_refs": [
+        {
+          "source_id": "approved-roadmap",
+          "source_kind": "document",
+          "label": "Plano de autonomia contínua 2026-09-18",
+          "locator": "docs/handoffs/continuous-autonomy/HF-25-01.md",
+          "produced_by": "codex-planner-01a0b4c8"
+        }
+      ],
+      "parent_id": "HF-25"
+    },
+    {
+      "id": "HF-13-01",
+      "project_id": "darkfac",
+      "title": "Prontidão e evidência no roadmap",
+      "description": "Planejamento de composição. Campos opcionais planning/implementation/operational_status, enrich plan.json por ID completo; glob relatório é documentary_unverified não completed. Conclusão só receipt vinculado e confiável.",
+      "item_type": "feature",
+      "lifecycle_stage": "execution",
+      "delivery_status": "planned",
+      "state_rationale": "Planejado; waiting_dependency; implementação não iniciada; operacionalmente não verificado. Registro não autoriza despacho.",
+      "horizon": "now",
+      "confidence": "high",
+      "dependencies": [
+        {
+          "item_id": "HF-26-01",
+          "type": "requires"
+        }
+      ],
+      "tags": [
+        "continuous-autonomy",
+        "planning-only",
+        "waiting_dependency"
+      ],
+      "completion_criteria": [
+        "Relatório falso/prefixo pai-filho não concluem; fonte offline stale; IDs/DAG sem truncar. Ajuste de expectativa histórica requer high em vez de enfraquecer teste."
+      ],
+      "source_refs": [
+        {
+          "source_id": "approved-roadmap",
+          "source_kind": "document",
+          "label": "Plano de autonomia contínua 2026-09-18",
+          "locator": "docs/handoffs/continuous-autonomy/HF-13-01.md",
+          "produced_by": "codex-planner-01a0b4c8"
+        }
+      ],
+      "parent_id": "HF-13"
+    },
+    {
+      "id": "HF-13-02",
+      "project_id": "darkfac",
+      "title": "Painel de progresso e estagnação",
+      "description": "Planejamento de composição. ProgressProjection do store: oldest_eligible_age,last_dispatch/reconcile,heartbeats,ready/running/blocked,wait_reason,next_wakeup,reservas/evidence chain. Alerta deduplicado por incidente.",
+      "item_type": "feature",
+      "lifecycle_stage": "execution",
+      "delivery_status": "planned",
+      "state_rationale": "Planejado; waiting_dependency; implementação não iniciada; operacionalmente não verificado. Registro não autoriza despacho.",
+      "horizon": "now",
+      "confidence": "high",
+      "dependencies": [
+        {
+          "item_id": "HF-13-01",
+          "type": "requires"
+        },
+        {
+          "item_id": "HF-05-05",
+          "type": "requires"
+        }
+      ],
+      "tags": [
+        "continuous-autonomy",
+        "planning-only",
+        "waiting_dependency"
+      ],
+      "completion_criteria": [
+        "Ready com slot livre >30s stalled mesmo health200; capacidade ausente tem causa/probe; offline não saudável; estados separados."
+      ],
+      "source_refs": [
+        {
+          "source_id": "approved-roadmap",
+          "source_kind": "document",
+          "label": "Plano de autonomia contínua 2026-09-18",
+          "locator": "docs/handoffs/continuous-autonomy/HF-13-02.md",
+          "produced_by": "codex-planner-01a0b4c8"
+        }
+      ],
+      "parent_id": "HF-13"
+    },
+    {
+      "id": "HF-15-01",
+      "project_id": "darkfac",
+      "title": "Observador e protocolo negativo",
+      "description": "Planejamento de composição. Observer separado read-only audit+target probes; correlate run/JobKey/nonce; controller só input/answer/falha autorizada, proíbe invocar fases. Congelar V01–V13 antes candidato.",
+      "item_type": "feature",
+      "lifecycle_stage": "execution",
+      "delivery_status": "planned",
+      "state_rationale": "Planejado; needs_architecture_binding; implementação não iniciada; operacionalmente não verificado. Registro não autoriza despacho.",
+      "horizon": "now",
+      "confidence": "high",
+      "dependencies": [
+        {
+          "item_id": "HF-26-01",
+          "type": "requires"
+        },
+        {
+          "item_id": "HF-12-01",
+          "type": "requires"
+        }
+      ],
+      "tags": [
+        "continuous-autonomy",
+        "planning-only",
+        "needs_architecture_binding"
+      ],
+      "completion_criteria": [
+        "Consumidor off health200 reprova; fases manuais reprovam; evidência só candidato reprova; relógio/capacidade ausentes não PASS. Janela24h futura."
+      ],
+      "source_refs": [
+        {
+          "source_id": "approved-roadmap",
+          "source_kind": "document",
+          "label": "Plano de autonomia contínua 2026-09-18",
+          "locator": "docs/handoffs/continuous-autonomy/HF-15-01.md",
+          "produced_by": "codex-planner-01a0b4c8"
+        }
+      ],
+      "parent_id": "HF-15"
+    },
+    {
+      "id": "HF-03-07",
+      "project_id": "darkfac",
+      "title": "Preflight por host e projeto",
+      "description": "Planejamento de composição. Inventariar SHA/versões/identidade/rota/secret refs/scopes/ports/DNS/TLS/volumes/capacidade/backup; comandos exatos install/start/status/restart/rollback verificados dentro de grants. Alternativas antes ManualDependency.",
+      "item_type": "research",
+      "lifecycle_stage": "execution",
+      "delivery_status": "planned",
+      "state_rationale": "Planejado; waiting_dependency; implementação não iniciada; operacionalmente não verificado. Registro não autoriza despacho.",
+      "horizon": "now",
+      "confidence": "high",
+      "dependencies": [
+        {
+          "item_id": "HF-05-02",
+          "type": "requires"
+        },
+        {
+          "item_id": "HF-07-01",
+          "type": "requires"
+        },
+        {
+          "item_id": "HF-12-01",
+          "type": "requires"
+        }
+      ],
+      "tags": [
+        "continuous-autonomy",
+        "planning-only",
+        "waiting_dependency"
+      ],
+      "completion_criteria": [
+        "Notebook probe não certifica cloud; manifesto incompleto bloqueia deploy; estimativa15–35 não compra; SHA local ausente no host é dependência técnica."
+      ],
+      "source_refs": [
+        {
+          "source_id": "approved-roadmap",
+          "source_kind": "document",
+          "label": "Plano de autonomia contínua 2026-09-18",
+          "locator": "docs/handoffs/continuous-autonomy/HF-03-07.md",
+          "produced_by": "codex-planner-01a0b4c8"
+        }
+      ],
+      "parent_id": "HF-03"
+    },
+    {
+      "id": "HF-03-08",
+      "project_id": "darkfac",
+      "title": "Ativação isolada e fatia vertical",
+      "description": "Planejamento de composição. Executar binding ACTIVATION imagem fixa/namespace autorizado; único input até jornada; restart controlado e rollback gate falho; operacional só escopo observado.",
+      "item_type": "feature",
+      "lifecycle_stage": "execution",
+      "delivery_status": "planned",
+      "state_rationale": "Planejado; waiting_dependency; implementação não iniciada; operacionalmente não verificado. Registro não autoriza despacho.",
+      "horizon": "now",
+      "confidence": "high",
+      "dependencies": [
+        {
+          "item_id": "HF-03-07",
+          "type": "requires"
+        },
+        {
+          "item_id": "HF-05-06",
+          "type": "requires"
+        },
+        {
+          "item_id": "HF-23-01",
+          "type": "requires"
+        },
+        {
+          "item_id": "HF-08-03",
+          "type": "requires"
+        },
+        {
+          "item_id": "HF-08-05",
+          "type": "requires"
+        },
+        {
+          "item_id": "HF-09-02",
+          "type": "requires"
+        },
+        {
+          "item_id": "HF-12-04",
+          "type": "requires"
+        },
+        {
+          "item_id": "HF-10-02",
+          "type": "requires"
+        },
+        {
+          "item_id": "HF-25-01",
+          "type": "requires"
+        },
+        {
+          "item_id": "HF-13-02",
+          "type": "requires"
+        },
+        {
+          "item_id": "HF-15-01",
+          "type": "requires"
+        },
+        {
+          "item_id": "HF-07-03",
+          "type": "requires"
+        }
+      ],
+      "tags": [
+        "continuous-autonomy",
+        "planning-only",
+        "waiting_dependency"
+      ],
+      "completion_criteria": [
+        "Leitura externa PID/heartbeat/job/digest/jornada; sandbox não PASS real; sem fases manuais; componente não integrado impede ativação."
+      ],
+      "source_refs": [
+        {
+          "source_id": "approved-roadmap",
+          "source_kind": "document",
+          "label": "Plano de autonomia contínua 2026-09-18",
+          "locator": "docs/handoffs/continuous-autonomy/HF-03-08.md",
+          "produced_by": "codex-planner-01a0b4c8"
+        }
+      ],
+      "parent_id": "HF-03"
+    },
+    {
+      "id": "HF-15-02",
+      "project_id": "darkfac",
+      "title": "Aceitação24h e expansão multi-projeto",
+      "description": "Planejamento de composição. Executar V01–V13 com observador fixado,portfólio e novos inputs; timings/custos/incidentes/digest/rollback; capacidade insuficiente 4dev+5tests não exercitado, nunca PASS.",
+      "item_type": "feature",
+      "lifecycle_stage": "execution",
+      "delivery_status": "planned",
+      "state_rationale": "Planejado; waiting_dependency; implementação não iniciada; operacionalmente não verificado. Registro não autoriza despacho.",
+      "horizon": "now",
+      "confidence": "high",
+      "dependencies": [
+        {
+          "item_id": "HF-03-08",
+          "type": "requires"
+        }
+      ],
+      "tags": [
+        "continuous-autonomy",
+        "planning-only",
+        "waiting_dependency"
+      ],
+      "completion_criteria": [
+        "Zero impulsos administrativos; aprendizado pós-restart; ruim rejeitado; bloqueio seletivo; todos gates e integração para entrega final."
+      ],
+      "source_refs": [
+        {
+          "source_id": "approved-roadmap",
+          "source_kind": "document",
+          "label": "Plano de autonomia contínua 2026-09-18",
+          "locator": "docs/handoffs/continuous-autonomy/HF-15-02.md",
+          "produced_by": "codex-planner-01a0b4c8"
+        }
+      ],
+      "parent_id": "HF-15"
     }
   ]
 }

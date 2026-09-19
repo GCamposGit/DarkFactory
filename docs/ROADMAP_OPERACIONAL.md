@@ -12,13 +12,13 @@ Até a implementação dos gates em HF-04/HF-06/HF-07, o coordenador deve aplica
 
 ## Extensão proposta — workflow híbrido (08/09/2026)
 
-O [plano integrado HF](HYBRID_WORKFLOW_PLAN_2026-09-08.md) complementa DF-01–DF-23, RM-01–RM-09 e INFRA-01–INFRA-11 com duas ondas: decisão/ativação do fluxo híbrido e expansão de capacidades. HF-01–HF-15 e HF-20–HF-25 são propostas, sem alterar o status dos tickets existentes. Esta referência integra os documentos; a ingestão de HF/INFRA no painel e a reconciliação das evidências pertencem a HF-01/HF-13 e ainda não foram implementadas. As fontes atualmente suportadas pelo painel continuam descritas abaixo.
+O [plano integrado HF](HYBRID_WORKFLOW_PLAN_2026-09-08.md) complementa DF-01–DF-23, RM-01–RM-09 e INFRA-01–INFRA-11 com duas ondas: decisão/ativação do fluxo híbrido e expansão de capacidades. HF-01–HF-15 e HF-20–HF-25 são propostas, sem alterar o status dos tickets existentes. Correção verificada em 18/09/2026: a ingestão de pais HF e INFRA já existe em core/roadmap/sources.py e é habilitada pelo Hub. O parser HF aceita somente HF-NN; os subtickets de composição usam o manifesto JSON. Presença de relatório ainda pode ser interpretada como conclusão; HF-13-01 corrige essa semântica. Isso não prova estado do painel instalado.
 
 Este arquivo registra as fontes humanas do roadmap aprovado para o painel do DarkHub. A projeção read-only combina o manifesto versionado em `.factory/roadmap/darkfac.json` (tickets RM) com a tabela executável de `docs/DEVELOPMENT_PLAN_2026-09-05.md` (tickets DF); o painel não possui estado de planejamento próprio.
 
 ## Fontes canônicas combinadas
 
-- `approved-roadmap`: manifesto JSON dos tickets RM-01–RM-09.
+- `approved-roadmap`: manifesto JSON dos tickets RM-01–RM-09 e subtickets de composição da autonomia contínua (18/09/2026).
 - `development-plan`: tabela de backlog DF-01–DF-23 do plano de desenvolvimento.
 - Relatórios `df-*-*-report.md` e `rm-*-*-report.md` existentes são evidências de conclusão; o relatório operacional também cobre RM-01–RM-07. Sem evidência vinculada, o ticket permanece planejado.
 
@@ -44,3 +44,9 @@ Este arquivo registra as fontes humanas do roadmap aprovado para o painel do Dar
 | RM-07 | Linha do tempo, grafo de dependências e tabela acessível | RM-06 | Próximo |
 | RM-08 | Atualização incremental, telemetria e testes de escala | RM-05, RM-07 | Mais adiante |
 | RM-09 | Histórico de snapshots e comparação entre versões | RM-08 | Exploratório |
+
+## Composição da autonomia contínua — 18/09/2026
+
+[Plano mestre](CONTINUOUS_AUTONOMY_PLAN_2026-09-18.md), [33 handoffs e DAG](handoffs/continuous-autonomy/INDEX.md), [fonte estruturada](../.factory/planning/continuous-autonomy/plan.json). HF-26 agrega a composição; HF-05-02 reutiliza o sucessor já reservado. Os novos IDs estão no manifesto JSON consumido pelo compilador, sem alteração de status dos pais históricos. Snapshot local não prova painel publicado.
+
+Primeiro contrato: HF-26-01, resolvedor puro de política, sem dependência técnica; admissão por supervisor qualificado e preflight permanecem obrigatórios. Nenhum novo item está implementado ou operacionalmente verificado.

@@ -1,0 +1,34 @@
+{
+  "ticket_id": "HF-26-PLAN",
+  "title": "Plano de composição da autonomia contínua",
+  "task_id": "01a0b4c8-f4a3-7dc2-b9c0-a0d9945333c9",
+  "owner": "codex-planner-01a0b4c8",
+  "branch": "codex/continuous-autonomy-plan",
+  "cwd": "C:/Users/guigc/.codex/worktrees/b305/DarkFac",
+  "base_sha": "83e5298eb231599076811802dceac8575c7f6feb",
+  "fencing_token": 1,
+  "status": "planning_complete_publication_in_progress",
+  "lease_scope": "this planning worktree only; not a runtime dispatch lease",
+  "allowed_paths": [
+    "docs/CONTINUOUS_AUTONOMY_PLAN_2026-09-18.md",
+    "docs/handoffs/continuous-autonomy/",
+    ".factory/planning/continuous-autonomy/",
+    ".factory/roadmap/darkfac.json",
+    "docs/ROADMAP_OPERACIONAL.md",
+    "docs/HYBRID_WORKFLOW_PLAN_2026-09-08.md",
+    "docs/handoffs/HF-05.md",
+    ".factory/worktrees/autonomy-plan.json",
+    "tests/test_roadmap.py",
+    "tests/test_baseline_catalog.py",
+    "docs/handoffs/hf01-claims.json",
+    "tests/test_melhoria_no_m_dulo_de_dem.py"
+  ],
+  "ownership_check": "Existing .factory/worktrees/manifest.json leases are completed; no overlapping active writer recorded. Main checkout untouched.",
+  "heartbeat": {
+    "timestamp": "2026-09-18T23:51:48.938275+00:00",
+    "head": "13710aa3b9db0b04c177acf6c054f5d333128ea6",
+    "phase": "remote_delivery",
+    "last_command": "Both final gates passed sequentially"
+  },
+  "scope_expansion_reason": "Canonical roadmap gained34 items; update exact expected membership and grounded claim hashes without weakening oracles. CI exposed pre-existing machine-specific fixture path; preserve all assertions and use candidate checkout."
+}
