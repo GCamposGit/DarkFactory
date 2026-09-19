@@ -36,30 +36,13 @@ from core.integrations.n8n import (
 from core.integrations.telegram import (
     TelegramConfig,
     TelegramGateway,
+    load_telegram_config,
     redact_secrets,
 )
 
 
-def _load_telegram_config(config_file: Optional[Path] = None) -> TelegramConfig:
-    cfg_path = config_file or (REPO_ROOT / ".factory" / "telegram" / "config.json")
-    if cfg_path.exists():
-        try:
-            data = json.loads(cfg_path.read_text(encoding="utf-8"))
-            return TelegramConfig.model_validate(data)
-        except Exception:
-            pass
-
-    # Read from environment variables if present
-    token = os.environ.get("TELEGRAM_BOT_TOKEN")
-    users = [int(u.strip()) for u in os.environ.get("TELEGRAM_AUTHORIZED_USERS", "").split(",") if u.strip().isdigit()]
-    chats = [int(c.strip()) for c in os.environ.get("TELEGRAM_AUTHORIZED_CHATS", "").split(",") if c.strip().isdigit()]
-    secret = os.environ.get("TELEGRAM_WEBHOOK_SECRET")
-    return TelegramConfig(
-        bot_token=token,
-        authorized_user_ids=users,
-        authorized_chat_ids=chats,
-        webhook_secret_token=secret,
-    )
+def _load_telegram_config(config_file: Optional[Path] = None, role: str = "ops") -> TelegramConfig:
+    return load_telegram_config(config_file=config_file, role=role)
 
 
 def cmd_telegram_process_update(args: argparse.Namespace) -> int:
@@ -78,7 +61,7 @@ def cmd_telegram_process_update(args: argparse.Namespace) -> int:
             print(f"Error: {err_obj['error']}", file=sys.stderr)
         return 2
 
-    config = _load_telegram_config(args.config)
+    config = _load_telegram_config(args.config, role=getattr(args, "role", "ops"))
     if args.user_id:
         config.authorized_user_ids.append(args.user_id)
 
@@ -99,7 +82,7 @@ def cmd_telegram_process_update(args: argparse.Namespace) -> int:
 
 def cmd_telegram_status(args: argparse.Namespace) -> int:
     """Check Telegram gateway status."""
-    config = _load_telegram_config(args.config)
+    config = _load_telegram_config(args.config, role=getattr(args, "role", "ops"))
     gateway = TelegramGateway(config=config, state_dir=REPO_ROOT / ".factory" / "telegram")
     status = gateway.get_status()
 
@@ -118,7 +101,7 @@ def cmd_telegram_status(args: argparse.Namespace) -> int:
 
 def cmd_telegram_send(args: argparse.Namespace) -> int:
     """Send a notification message via Telegram Gateway."""
-    config = _load_telegram_config(args.config)
+    config = _load_telegram_config(args.config, role=getattr(args, "role", "ops"))
     gateway = TelegramGateway(config=config, state_dir=REPO_ROOT / ".factory" / "telegram")
     success = gateway.send_message(chat_id=args.chat_id, text=args.text)
 
@@ -310,6 +293,7 @@ def build_parser() -> argparse.ArgumentParser:
     common_parser = argparse.ArgumentParser(add_help=False)
     common_parser.add_argument("--json", action="store_true", help="Emit structured JSON output")
     common_parser.add_argument("--config", type=Path, default=None, help="Path to Telegram config JSON")
+    common_parser.add_argument("--role", choices=["ops", "owner", "all"], default="ops", help="Target Telegram bot role")
 
     parser = argparse.ArgumentParser(
         description="Headless Telegram Gateway and n8n Community CLI (HF-14)",

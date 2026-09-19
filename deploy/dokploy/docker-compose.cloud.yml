@@ -7,11 +7,12 @@
 services:
   darkfac-coordinator:
     build:
-      context: https://${GITHUB_PAT:-}@github.com/GCamposGit/DarkFactory.git#main
+      context: https://github.com/GCamposGit/DarkFactory.git#main
       dockerfile: deploy/dokploy/Dockerfile.cloud
-    image: darkfac-cloud:latest
+    image: ghcr.io/gcamposgit/darkfac-cloud:latest
     container_name: darkfac-coordinator
     restart: unless-stopped
+    stop_grace_period: 35s
     command: ["python", "-m", "core.orchestrator.cloud_coordinator"]
     environment:
       - DARKFAC_ROLE=coordinator
@@ -23,6 +24,12 @@ services:
       - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-}
       - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+    healthcheck:
+      test: ["CMD", "python", "-m", "core.orchestrator.cloud_coordinator", "--status"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
     volumes:
       - darkfac-artifacts:/app/.factory/artifacts
       - darkfac-test-logs:/app/.factory/test_logs
@@ -39,11 +46,12 @@ services:
 
   darkfac-worker:
     build:
-      context: https://${GITHUB_PAT:-}@github.com/GCamposGit/DarkFactory.git#main
+      context: https://github.com/GCamposGit/DarkFactory.git#main
       dockerfile: deploy/dokploy/Dockerfile.cloud
-    image: darkfac-cloud:latest
+    image: ghcr.io/gcamposgit/darkfac-cloud:latest
     container_name: darkfac-worker-1
     restart: unless-stopped
+    stop_grace_period: 35s
     command: ["python", "-m", "core.orchestrator.cloud_worker"]
     environment:
       - DARKFAC_ROLE=worker
@@ -55,6 +63,12 @@ services:
       - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-}
       - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+    healthcheck:
+      test: ["CMD", "python", "-m", "core.orchestrator.cloud_worker", "--status"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
     volumes:
       - darkfac-artifacts:/app/.factory/artifacts
       - darkfac-test-logs:/app/.factory/test_logs

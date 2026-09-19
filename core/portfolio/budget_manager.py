@@ -46,7 +46,7 @@ class PortfolioBudgetManager:
     def _get_telegram_gateway(self) -> Optional[TelegramGateway]:
         if self._telegram_gateway is None:
             try:
-                cfg = load_telegram_config()
+                cfg = load_telegram_config(role="owner")
                 if cfg.bot_token:
                     self._telegram_gateway = TelegramGateway(config=cfg)
             except Exception:

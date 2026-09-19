@@ -1,0 +1,656 @@
+{
+  "schema_version": "1.0",
+  "ticket_id": "HF-03-07",
+  "parent_ticket": "HF-03",
+  "title": "Preflight por host e projeto",
+  "purpose": "Inventário normativo de ambientes de execução suportados (local_dev e hetzner_dokploy_prod), especificações de pré-voo determinístico por host e por projeto, isolamento de recursos, mapeamento estrito de SecretReference e comandos operacionais canônicos",
+  "created_at": "2026-09-19T12:00:00Z",
+  "baseline_plan_sha": "83e5298eb231599076811802dceac8575c7f6feb",
+  "role": "high_architecture",
+  "environment_profile": "cloud-binding",
+  "dependencies": [
+    "HF-05-02",
+    "HF-07-01",
+    "HF-12-01"
+  ],
+  "successors": [
+    "HF-03-08"
+  ],
+  "governing_invariants": [
+    "Notebook probe não certifica cloud: evidência de execução em máquina local jamais substitui pré-voo e probes no host de produção",
+    "Manifesto incompleto bloqueia deploy de forma fail-closed: variáveis ausentes ou não mapeadas no SecretReference impedem o despacho",
+    "Zero credenciais em texto claro: senhas, DSNs e tokens devem ser representados exclusivamente por SecretReference(provider, locator, variable_name)",
+    "Usuário desprivilegiado mandatório no PostgreSQL de produção ('darkfac_worker'): superusuários ('postgres', 'root', 'admin') são estritamente rejeitados pela política HF-03",
+    "Limites de recursos respeitam estritamente a capacidade do host Hetzner CX23 (4GB RAM total, limite de 1536MB e 1.5 CPUs por serviço)",
+    "SHA local ausente no repositório remoto/host é dependência técnica impeditiva de deploy (G1/G8)",
+    "Estimativa conversacional (15-35) não compra: alocação financeira e despacho de modelos pagos exigem reserva orçamentária prévia formal"
+  ],
+  "environments": {
+    "local_dev": {
+      "environment_id": "local_dev",
+      "name": "Local Windows Development Workstation",
+      "platform": "windows_x86_64",
+      "host_type": "workstation_local",
+      "os": "Windows 11 / Windows Server",
+      "description": "Ambiente de desenvolvimento local e execução offline na estação de trabalho do operador no Windows, com custo $0, ferramentas de desenvolvimento e isolamento por processo",
+      "filesystem": {
+        "root_path": "C:\\dev\\DarkFac",
+        "data_dir": "C:\\dev\\DarkFac\\data",
+        "factory_dir": "C:\\dev\\DarkFac\\.factory",
+        "artifacts_dir": "C:\\dev\\DarkFac\\.factory\\artifacts",
+        "test_logs_dir": "C:\\dev\\DarkFac\\.factory\\test_logs",
+        "permissions_required": "read_write_execute"
+      },
+      "runtime": {
+        "python_executable": "C:\\dev\\DarkFac\\.venv\\Scripts\\python.exe",
+        "python_version_min": "3.12.0",
+        "shell": "powershell.exe",
+        "shell_security_flags": "-NoProfile -NonInteractive -ExecutionPolicy Bypass"
+      },
+      "networking": {
+        "bind_host": "127.0.0.1",
+        "ports": {
+          "hub_http": 8000,
+          "coordinator_internal": 8001,
+          "mcp_knowledge": 8080,
+          "jarvis_daemon": 8088,
+          "ollama_local": 11434
+        },
+        "dns_resolution": "local_hosts_or_loopback",
+        "tls_required": false
+      },
+      "database": {
+        "engine": "sqlite3",
+        "modes": [
+          "in_memory",
+          "file_wal"
+        ],
+        "default_connection_uri": "sqlite:///C:/dev/DarkFac/.factory/orchestrator_hf05.sqlite3",
+        "wal_mode_enabled": true,
+        "concurrency_limit": 1
+      },
+      "inference_endpoints": {
+        "local_ollama": {
+          "url": "http://127.0.0.1:11434",
+          "models": [
+            "qwen2.5-coder:7b",
+            "gpt-review:latest"
+          ],
+          "cost_per_m": 0.0
+        },
+        "tailscale_mesh_ollama": {
+          "url": "http://100.81.84.124:11434",
+          "description": "Nó GPU dedicado acessível via malha Tailscale",
+          "cost_per_m": 0.0
+        }
+      },
+      "secret_resolution": {
+        "provider": "local_env",
+        "source": "C:\\dev\\DarkFac\\.env",
+        "plaintext_in_manifests": false
+      },
+      "supported_projects": [
+        "darkfac",
+        "site-ggcampos",
+        "segundo-cerebro",
+        "jarvis"
+      ],
+      "operations": {
+        "install": "python -m venv C:\\dev\\DarkFac\\.venv && C:\\dev\\DarkFac\\.venv\\Scripts\\python.exe -m pip install -e .",
+        "start": "C:\\dev\\DarkFac\\.venv\\Scripts\\python.exe -m uvicorn hub.backend.main:app --host 127.0.0.1 --port 8000",
+        "status": "C:\\dev\\DarkFac\\.venv\\Scripts\\python.exe C:\\dev\\DarkFac\\core\\orchestrator\\cloud_coordinator.py --status",
+        "restart": "powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command \"Get-Process -Name python | Where-Object {$_.Path -like '*DarkFac*'} | Stop-Process -Force; Start-Process C:\\dev\\DarkFac\\.venv\\Scripts\\python.exe -ArgumentList '-m uvicorn hub.backend.main:app --host 127.0.0.1 --port 8000'\"",
+        "rollback": "git -C C:\\dev\\DarkFac checkout {last_known_good_sha}"
+      }
+    },
+    "hetzner_dokploy_prod": {
+      "environment_id": "hetzner_dokploy_prod",
+      "name": "Hetzner Cloud VPS Production (Dokploy PaaS)",
+      "platform": "linux_x86_64",
+      "host_type": "cloud_vps",
+      "provider": "hetzner_cloud",
+      "instance_name": "darkfac-vps-primary",
+      "server_type": "CX23",
+      "datacenter": "fsn1-dc14 (Falkenstein, Germany)",
+      "hardware_specs": {
+        "vcpus": 2,
+        "ram_mb": 4096,
+        "disk_gb": 40,
+        "disk_type": "nvme_ssd",
+        "architecture": "x86_64"
+      },
+      "paas_orchestrator": {
+        "name": "Dokploy",
+        "version_minimum": "v0.8.0",
+        "deployment_type": "docker_compose",
+        "compose_manifest_path": "deploy/dokploy/docker-compose.cloud.yml",
+        "dockerfile_path": "deploy/dokploy/Dockerfile.cloud",
+        "api_endpoint": "https://dokploy.ggcampos.com/api",
+        "ui_endpoint": "https://dokploy.ggcampos.com"
+      },
+      "networking": {
+        "public_ipv4": "178.105.73.168",
+        "tailscale_ipv4": "100.83.176.60",
+        "docker_network": "dokploy-network",
+        "docker_network_external": true,
+        "exposed_service_ports": {
+          "coordinator_internal": 8001,
+          "hub_http": 8000
+        },
+        "internal_database_port": 5432,
+        "dns_records": {
+          "paas_domain": "dokploy.ggcampos.com",
+          "service_domain": "darkhub.ggcampos.com"
+        },
+        "ingress_reverse_proxy": {
+          "engine": "traefik",
+          "tls_resolver": "letsencrypt",
+          "acme_challenge": "http-01",
+          "hsts_enabled": true,
+          "force_https_redirect": true
+        }
+      },
+      "storage_and_volumes": {
+        "named_volumes": [
+          {
+            "name": "darkfac-artifacts",
+            "container_mount_point": "/app/.factory/artifacts",
+            "lifecycle": "persistent_across_deployments",
+            "backup_target": "s3_or_hetzner_snapshot",
+            "description": "Armazenamento durável de artefatos de workflows, relatórios e evidências de validação"
+          },
+          {
+            "name": "darkfac-test-logs",
+            "container_mount_point": "/app/.factory/test_logs",
+            "lifecycle": "persistent_with_retention_policy",
+            "retention_days": 14,
+            "description": "Logs detalhados de execuções de testes e diagnósticos emitidos por subagentes"
+          }
+        ],
+        "bind_mounts": [
+          {
+            "host_directory": "/var/lib/dokploy/data/darkfac",
+            "container_mount_point": "/app/data",
+            "ownership": "darkfac:darkfac (uid 1001:gid 1001)",
+            "description": "Persistência de dados operacionais, caches de estado e chaves de sessão locais"
+          }
+        ]
+      },
+      "database": {
+        "engine": "postgresql",
+        "version": "16-alpine",
+        "host": "dokploy-postgres",
+        "port": 5432,
+        "database_name": "darkfac_db",
+        "user": "darkfac_worker",
+        "user_privilege_level": "unprivileged",
+        "superuser_forbidden": true,
+        "secret_reference": {
+          "variable_name": "DARKFAC_HF02_DATABASE_URL",
+          "provider": "dokploy",
+          "locator": "DARKFAC_HF02_DATABASE_URL",
+          "format": "postgresql://darkfac_worker:***@dokploy-postgres:5432/darkfac_db",
+          "description": "String de conexão transacional do PostgreSQL interno via dokploy-network para o usuário desprivilegiado darkfac_worker"
+        },
+        "probe_command": "SELECT current_database(), current_user, version();"
+      },
+      "resource_bounds": {
+        "host_total_ram_mb": 4096,
+        "host_total_vcpus": 2,
+        "vps_safety_headroom_mb": 1024,
+        "services": {
+          "darkfac-coordinator": {
+            "container_name": "darkfac-coordinator",
+            "limits": {
+              "cpus": "1.5",
+              "memory": "1536M"
+            },
+            "reservations": {
+              "cpus": "0.2",
+              "memory": "512M"
+            },
+            "restart_policy": "unless-stopped"
+          },
+          "darkfac-worker": {
+            "container_name": "darkfac-worker-1",
+            "limits": {
+              "cpus": "1.5",
+              "memory": "1536M"
+            },
+            "reservations": {
+              "cpus": "0.2",
+              "memory": "256M"
+            },
+            "restart_policy": "unless-stopped"
+          }
+        },
+        "combined_limits_memory_mb": 3072,
+        "combined_limits_cpus": 3.0,
+        "concurrency_slots_per_worker": 2
+      },
+      "sanitized_secret_references": [
+        {
+          "variable_name": "DARKFAC_HF02_DATABASE_URL",
+          "provider": "dokploy",
+          "locator": "DARKFAC_HF02_DATABASE_URL",
+          "is_sensitive": true,
+          "description": "DSN transacional PostgreSQL (porta 5432, unprivileged user)"
+        },
+        {
+          "variable_name": "DARKFAC_MAX_CONCURRENT_SLOTS",
+          "provider": "dokploy",
+          "locator": "DARKFAC_MAX_CONCURRENT_SLOTS",
+          "is_sensitive": false,
+          "default_value": "2",
+          "description": "Slots simultâneos de execução suportados pela memória do VPS"
+        },
+        {
+          "variable_name": "DARKFAC_COORDINATOR_PORT",
+          "provider": "dokploy",
+          "locator": "DARKFAC_COORDINATOR_PORT",
+          "is_sensitive": false,
+          "default_value": "8001",
+          "description": "Porta interna do daemon supervisor Cloud Coordinator"
+        },
+        {
+          "variable_name": "DARKFAC_WORKER_ID",
+          "provider": "dokploy",
+          "locator": "DARKFAC_WORKER_ID",
+          "is_sensitive": false,
+          "default_value": "cloud-worker-1",
+          "description": "Identificador do worker instanciado no Dokploy"
+        },
+        {
+          "variable_name": "GITHUB_PAT",
+          "provider": "dokploy",
+          "locator": "GITHUB_PAT",
+          "is_sensitive": true,
+          "description": "Personal Access Token para clone seguro do repositório no build do container"
+        },
+        {
+          "variable_name": "OPENROUTER_API_KEY",
+          "provider": "dokploy",
+          "locator": "OPENROUTER_API_KEY",
+          "is_sensitive": true,
+          "description": "Token de acesso às APIs de inferência em nuvem"
+        },
+        {
+          "variable_name": "OPENAI_API_KEY",
+          "provider": "dokploy",
+          "locator": "OPENAI_API_KEY",
+          "is_sensitive": true,
+          "description": "Token para embeddings e inferência OpenAI se configurado"
+        },
+        {
+          "variable_name": "OLLAMA_BASE_URL",
+          "provider": "dokploy",
+          "locator": "OLLAMA_BASE_URL",
+          "is_sensitive": false,
+          "default_value": "http://100.81.84.124:11434",
+          "description": "Endpoint de inferência local via malha Tailscale"
+        },
+        {
+          "variable_name": "DARKHUB_ALLOWED_HOSTS",
+          "provider": "dokploy",
+          "locator": "DARKHUB_ALLOWED_HOSTS",
+          "is_sensitive": false,
+          "default_value": "darkhub.ggcampos.com,127.0.0.1,localhost,100.83.176.60",
+          "description": "Hostnames autorizados pelo middleware de segurança do DarkHub"
+        },
+        {
+          "variable_name": "CLOUDFLARE_ZERO_TRUST_REQUIRED",
+          "provider": "dokploy",
+          "locator": "CLOUDFLARE_ZERO_TRUST_REQUIRED",
+          "is_sensitive": false,
+          "default_value": "false",
+          "description": "Controle de ativação de identidade Zero Trust em endpoints públicos"
+        },
+        {
+          "variable_name": "DOKPLOY_API_URL",
+          "provider": "dokploy",
+          "locator": "DOKPLOY_API_URL",
+          "is_sensitive": false,
+          "default_value": "https://dokploy.ggcampos.com/api",
+          "description": "URL base da API Dokploy para webhook de deploy e consulta de status"
+        },
+        {
+          "variable_name": "DOKPLOY_API_KEY",
+          "provider": "dokploy",
+          "locator": "DOKPLOY_API_KEY",
+          "is_sensitive": true,
+          "description": "Chave de automação de chamadas à API Dokploy"
+        },
+        {
+          "variable_name": "DOKPLOY_DEPLOY_URL",
+          "provider": "dokploy",
+          "locator": "DOKPLOY_DEPLOY_URL",
+          "is_sensitive": true,
+          "description": "Webhook endpoint para gatilho determinístico de deploy"
+        }
+      ],
+      "supported_projects": [
+        "darkfac",
+        "site-ggcampos"
+      ],
+      "operations": {
+        "install": "ssh -i ~/.ssh/id_ed25519 root@178.105.73.168 'docker network create dokploy-network || true && docker volume create darkfac-artifacts && docker volume create darkfac-test-logs'",
+        "start": "docker compose -f deploy/dokploy/docker-compose.cloud.yml up -d --build",
+        "status": "ssh -i ~/.ssh/id_ed25519 root@178.105.73.168 'docker compose -f /etc/dokploy/compose/darkfac/docker-compose.yml ps && curl -fsS http://127.0.0.1:8001/health || true'",
+        "restart": "ssh -i ~/.ssh/id_ed25519 root@178.105.73.168 'docker compose -f /etc/dokploy/compose/darkfac/docker-compose.yml restart darkfac-coordinator darkfac-worker'",
+        "rollback": "ssh -i ~/.ssh/id_ed25519 root@178.105.73.168 'docker compose -f /etc/dokploy/compose/darkfac/docker-compose.yml down && docker compose -f /etc/dokploy/compose/darkfac/docker-compose.yml up -d --no-build'"
+      }
+    }
+  },
+  "preflight_matrix": {
+    "by_host": {
+      "local_workstation": {
+        "host_identifier": "workstation-windows-guigc",
+        "os": "Windows 11 (64-bit)",
+        "checks": [
+          {
+            "check_id": "HOST-LOCAL-01",
+            "name": "Python 3.12+ Interpreter and Virtual Environment",
+            "command": "powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command \"& C:\\dev\\DarkFac\\.venv\\Scripts\\python.exe --version\"",
+            "expected_pattern": "^Python 3\\.12",
+            "criticality": "BLOCKING"
+          },
+          {
+            "check_id": "HOST-LOCAL-02",
+            "name": "Git Repository Working Tree and Upstream Tracking",
+            "command": "powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command \"git -C C:\\dev\\DarkFac status --porcelain; git -C C:\\dev\\DarkFac rev-parse --abbrev-ref --symbolic-full-name @{u}\"",
+            "expected_pattern": "origin/main",
+            "criticality": "BLOCKING"
+          },
+          {
+            "check_id": "HOST-LOCAL-03",
+            "name": "Port Availability (8000 Hub, 8001 Coordinator, 8088 Jarvis)",
+            "command": "powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command \"Get-NetTCPConnection -LocalPort 8000,8001,8088 -ErrorAction SilentlyContinue | Select-Object LocalAddress,LocalPort,State\"",
+            "expected_result": "No conflicting LISTENING sockets held by foreign processes",
+            "criticality": "WARNING_RECOVERABLE"
+          },
+          {
+            "check_id": "HOST-LOCAL-04",
+            "name": "SQLite File System Write Access and WAL Mode",
+            "command": "powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command \"& C:\\dev\\DarkFac\\.venv\\Scripts\\python.exe -c 'import sqlite3, pathlib; p = pathlib.Path(r\\\"C:\\dev\\DarkFac\\.factory\\test_wal.db\\\"); c = sqlite3.connect(p); c.execute(\\\"PRAGMA journal_mode=WAL;\\\"); c.close(); p.unlink()'\"",
+            "expected_result": "Exit code 0 without PermissionError",
+            "criticality": "BLOCKING"
+          },
+          {
+            "check_id": "HOST-LOCAL-05",
+            "name": "Local Ollama Inference Daemon",
+            "command": "powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command \"Invoke-RestMethod -Uri http://127.0.0.1:11434/api/tags -Method GET -TimeoutSec 3\"",
+            "expected_result": "models array returned with at least 1 local model",
+            "criticality": "DEGRADED_PERMISSIBLE"
+          }
+        ]
+      },
+      "darkfac-vps-primary": {
+        "host_identifier": "darkfac-vps-primary (Hetzner CX23)",
+        "ip_public": "178.105.73.168",
+        "ip_tailscale": "100.83.176.60",
+        "checks": [
+          {
+            "check_id": "HOST-VPS-01",
+            "name": "Host Reachability via SSH (Public IPv4 & Tailscale Mesh)",
+            "command": "ssh -o BatchMode=yes -o ConnectTimeout=5 root@100.83.176.60 'hostname && uname -a'",
+            "expected_pattern": "darkfac-vps-primary.*Linux",
+            "criticality": "BLOCKING"
+          },
+          {
+            "check_id": "HOST-VPS-02",
+            "name": "Docker Engine and Docker Compose Plugin Version",
+            "command": "ssh root@100.83.176.60 'docker --version && docker compose version'",
+            "expected_pattern": "Docker version 2[0-9]\\..*Docker Compose version v2\\.",
+            "criticality": "BLOCKING"
+          },
+          {
+            "check_id": "HOST-VPS-03",
+            "name": "Dokploy Network Presence",
+            "command": "ssh root@100.83.176.60 'docker network inspect dokploy-network --format \"{{.Name}} (external)\"'",
+            "expected_pattern": "dokploy-network \\(external\\)",
+            "criticality": "BLOCKING"
+          },
+          {
+            "check_id": "HOST-VPS-04",
+            "name": "Shared Named Volumes Existence",
+            "command": "ssh root@100.83.176.60 'docker volume ls --filter name=darkfac-artifacts --filter name=darkfac-test-logs --format \"{{.Name}}\"'",
+            "expected_lines": [
+              "darkfac-artifacts",
+              "darkfac-test-logs"
+            ],
+            "criticality": "BLOCKING"
+          },
+          {
+            "check_id": "HOST-VPS-05",
+            "name": "PostgreSQL 16 Internal Connectivity and Non-Root User Probe",
+            "command": "ssh root@100.83.176.60 'docker exec -i dokploy-postgres psql -U darkfac_worker -d darkfac_db -c \"SELECT current_database(), current_user, version();\"'",
+            "expected_pattern": "darkfac_db.*darkfac_worker.*PostgreSQL 16",
+            "criticality": "BLOCKING"
+          },
+          {
+            "check_id": "HOST-VPS-06",
+            "name": "Traefik Ingress Routing and Let's Encrypt TLS Certificate Health",
+            "command": "curl -Iv --resolve darkhub.ggcampos.com:443:178.105.73.168 https://darkhub.ggcampos.com/health",
+            "expected_pattern": "HTTP/2 200|HTTP/1.1 200",
+            "criticality": "BLOCKING"
+          },
+          {
+            "check_id": "HOST-VPS-07",
+            "name": "VPS Memory Headroom Verification (At Least 1.5GB Free)",
+            "command": "ssh root@100.83.176.60 'free -m | awk \"/Mem:/ {print \\$7}\"'",
+            "expected_threshold": ">= 1536",
+            "criticality": "BLOCKING"
+          },
+          {
+            "check_id": "HOST-VPS-08",
+            "name": "Tailscale Mesh Ollama GPU Node Reachability",
+            "command": "ssh root@100.83.176.60 'curl -fsS --max-time 3 http://100.81.84.124:11434/api/tags || echo unreachable'",
+            "expected_pattern": "models",
+            "criticality": "WARNING_RECOVERABLE"
+          }
+        ]
+      }
+    },
+    "by_project": {
+      "darkfac": {
+        "project_id": "darkfac",
+        "name": "Dark Factory Core & Cloud Services",
+        "checks": [
+          {
+            "check_id": "PROJ-DARKFAC-01",
+            "name": "Baseline Git SHA Alignment",
+            "description": "Garante que o commit local é idêntico ao commit remoto rastreado e não há alterações não commitadas em arquivos protegidos",
+            "command": "git rev-parse HEAD",
+            "expected_result": "Must match approved baseline sha or valid descendant in remote main branch",
+            "criticality": "BLOCKING"
+          },
+          {
+            "check_id": "PROJ-DARKFAC-02",
+            "name": "Cloud Deployment Manifest Syntax and Hardening",
+            "description": "Valida docker-compose.cloud.yml e Dockerfile.cloud contra limites de memória, usuário não-root e dependências fixadas",
+            "command": "python -m pytest tests/test_cloud_deployment_manifest.py -v",
+            "expected_result": "PASSED (100% assertions satisfied)",
+            "criticality": "BLOCKING"
+          },
+          {
+            "check_id": "PROJ-DARKFAC-03",
+            "name": "Cloud Database Secret Reference Resolution and Non-Superuser Boundary",
+            "description": "Executa sonda estruturada em DARKFAC_HF02_DATABASE_URL rejeitando estritamente 'postgres'/'root' e mascarando senhas",
+            "command": "python -m pytest tests/test_cloud_db.py -v",
+            "expected_result": "PASSED (unprivileged user confirmed, zero leaked secrets in exception traces)",
+            "criticality": "BLOCKING"
+          },
+          {
+            "check_id": "PROJ-DARKFAC-04",
+            "name": "Cloud Coordinator and Worker Isolated Execution Cycle",
+            "description": "Testa despacho de workflow, slots de concorrência e armazenamento de artefatos em CloudArtifactStore",
+            "command": "python -m pytest tests/test_cloud_coordinator.py tests/test_cloud_worker.py -v",
+            "expected_result": "PASSED",
+            "criticality": "BLOCKING"
+          },
+          {
+            "check_id": "PROJ-DARKFAC-05",
+            "name": "OCI Container Digest Capture",
+            "description": "Garante que a imagem darkfac-cloud:latest possui um digest sha256 imutável antes do despacho de release",
+            "command": "docker inspect --format='{{index .RepoDigests 0}}' darkfac-cloud:latest",
+            "expected_pattern": "^.+@sha256:[a-f0-9]{64}$",
+            "criticality": "BLOCKING"
+          }
+        ]
+      },
+      "site-ggcampos": {
+        "project_id": "site-ggcampos",
+        "name": "ATRIUM (Site Pessoal ggcampos.com)",
+        "checks": [
+          {
+            "check_id": "PROJ-SITE-01",
+            "name": "Astro Static Build and Dist Directory Integrity",
+            "description": "Executa compilação limpa do Astro e valida hash da árvore de bytes gerada em dist/",
+            "command": "npm --prefix C:\\dev\\Site_ggcampos run build",
+            "expected_result": "Exit code 0 and non-empty C:\\dev\\Site_ggcampos\\dist",
+            "criticality": "BLOCKING"
+          },
+          {
+            "check_id": "PROJ-SITE-02",
+            "name": "Dokploy Static Webhook Secret Reference Resolution",
+            "description": "Verifica presença de DOKPLOY_STATIC_WEBHOOK_URL sem exposição no código",
+            "command": "powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command \"if ($env:DOKPLOY_STATIC_WEBHOOK_URL) { 'CONFIGURED' } else { 'MISSING' }\"",
+            "expected_result": "CONFIGURED",
+            "criticality": "BLOCKING"
+          },
+          {
+            "check_id": "PROJ-SITE-03",
+            "name": "Production and Staging DNS Reachability",
+            "description": "Verifica resolução de ggcampos.com e staging.ggcampos.com",
+            "command": "curl -Is https://ggcampos.com | head -n 1",
+            "expected_pattern": "HTTP/2 200|HTTP/1.1 200",
+            "criticality": "WARNING_RECOVERABLE"
+          }
+        ]
+      },
+      "segundo-cerebro": {
+        "project_id": "segundo-cerebro",
+        "name": "Segundo Cérebro (Knowledge Daemon)",
+        "checks": [
+          {
+            "check_id": "PROJ-BRAIN-01",
+            "name": "SQLite Knowledge Database Integrity Check",
+            "description": "Executa PRAGMA integrity_check no arquivo brain.db",
+            "command": "C:\\dev\\SegundoCerebro\\.venv\\Scripts\\python.exe -c \"import sqlite3; con = sqlite3.connect('C:\\dev\\SegundoCerebro\\data\\brain.db'); res = con.execute('PRAGMA integrity_check;').fetchall(); print(res[0][0]); con.close()\"",
+            "expected_result": "ok",
+            "criticality": "BLOCKING"
+          },
+          {
+            "check_id": "PROJ-BRAIN-02",
+            "name": "MCP Server Protocol Probe",
+            "description": "Dispara checagem headless de ferramentas expostas pelo protocolo MCP",
+            "command": "C:\\dev\\SegundoCerebro\\.venv\\Scripts\\python.exe -m core.knowledge.segundo_cerebro_client --health",
+            "expected_result": "available: true, tools: 7 registered",
+            "criticality": "BLOCKING"
+          }
+        ]
+      },
+      "jarvis": {
+        "project_id": "jarvis",
+        "name": "Jarvis (Local Assistant Daemon)",
+        "checks": [
+          {
+            "check_id": "PROJ-JARVIS-01",
+            "name": "Jarvis Python Virtual Environment and Service Package",
+            "description": "Verifica ambiente isolado do daemon local e versão instalada",
+            "command": "C:\\dev\\Jarvis\\.venv\\Scripts\\python.exe -c \"import jarvis; print(jarvis.__version__)\"",
+            "expected_pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+",
+            "criticality": "BLOCKING"
+          },
+          {
+            "check_id": "PROJ-JARVIS-02",
+            "name": "Jarvis Local HTTP Port 8088 Health Probe",
+            "description": "Testa endpoint local de saúde do daemon",
+            "command": "curl -fsS http://127.0.0.1:8088/health",
+            "expected_pattern": "healthy|ok",
+            "criticality": "WARNING_RECOVERABLE"
+          }
+        ]
+      }
+    }
+  },
+  "secret_references_directory": [
+    {
+      "key": "DARKFAC_HF02_DATABASE_URL",
+      "target_environments": [
+        "hetzner_dokploy_prod"
+      ],
+      "provider": "dokploy",
+      "locator": "DARKFAC_HF02_DATABASE_URL",
+      "injection_target": "environment_variable",
+      "is_sensitive": true,
+      "format_template": "postgresql://darkfac_worker:<PASSWORD>@dokploy-postgres:5432/darkfac_db",
+      "audit_policy": "Zero credentials logged; credentials masked with '***' across all exception traces"
+    },
+    {
+      "key": "GITHUB_PAT",
+      "target_environments": [
+        "hetzner_dokploy_prod"
+      ],
+      "provider": "dokploy",
+      "locator": "GITHUB_PAT",
+      "injection_target": "build_argument_and_environment",
+      "is_sensitive": true,
+      "format_template": "ghp_<alphanumeric_40_chars>",
+      "audit_policy": "Required only during docker compose build context clone; excluded from runtime container logs"
+    },
+    {
+      "key": "OPENROUTER_API_KEY",
+      "target_environments": [
+        "local_dev",
+        "hetzner_dokploy_prod"
+      ],
+      "provider": "dokploy_and_env",
+      "locator": "OPENROUTER_API_KEY",
+      "injection_target": "environment_variable",
+      "is_sensitive": true,
+      "format_template": "sk-or-v1-<hex_64_chars>",
+      "audit_policy": "Sanitized via core.orchestrator.cloud_db._SECRET_PATTERNS"
+    },
+    {
+      "key": "DOKPLOY_API_KEY",
+      "target_environments": [
+        "local_dev"
+      ],
+      "provider": "env",
+      "locator": "DOKPLOY_API_KEY",
+      "injection_target": "environment_variable",
+      "is_sensitive": true,
+      "format_template": "<hex_or_alphanumeric_key>",
+      "audit_policy": "Utilizada pelo DokployDeployClient local para consultar status de deploys remotos"
+    },
+    {
+      "key": "DOKPLOY_DEPLOY_URL",
+      "target_environments": [
+        "local_dev"
+      ],
+      "provider": "env",
+      "locator": "DOKPLOY_DEPLOY_URL",
+      "injection_target": "environment_variable",
+      "is_sensitive": true,
+      "format_template": "https://dokploy.ggcampos.com/api/trpc/compose.deploy",
+      "audit_policy": "Webhook assinado com token de autorização no header"
+    }
+  ],
+  "operational_commands_summary": {
+    "hetzner_dokploy_prod": {
+      "install": "ssh root@178.105.73.168 'docker network create dokploy-network || true && docker volume create darkfac-artifacts && docker volume create darkfac-test-logs'",
+      "start": "docker compose -f deploy/dokploy/docker-compose.cloud.yml up -d --build",
+      "status": "ssh root@178.105.73.168 'docker compose -f /etc/dokploy/compose/darkfac/docker-compose.yml ps && curl -fsS http://127.0.0.1:8001/health'",
+      "restart": "ssh root@178.105.73.168 'docker compose -f /etc/dokploy/compose/darkfac/docker-compose.yml restart darkfac-coordinator darkfac-worker'",
+      "rollback": "ssh root@178.105.73.168 'docker compose -f /etc/dokploy/compose/darkfac/docker-compose.yml down && docker compose -f /etc/dokploy/compose/darkfac/docker-compose.yml up -d --no-build'"
+    },
+    "local_dev": {
+      "install": "python -m venv C:\\dev\\DarkFac\\.venv && C:\\dev\\DarkFac\\.venv\\Scripts\\python.exe -m pip install -e .",
+      "start": "C:\\dev\\DarkFac\\.venv\\Scripts\\python.exe -m uvicorn hub.backend.main:app --host 127.0.0.1 --port 8000",
+      "status": "C:\\dev\\DarkFac\\.venv\\Scripts\\python.exe C:\\dev\\DarkFac\\core\\orchestrator\\cloud_coordinator.py --status",
+      "restart": "powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command \"Get-Process -Name python | Where-Object {$_.Path -like '*DarkFac*'} | Stop-Process -Force; Start-Process C:\\dev\\DarkFac\\.venv\\Scripts\\python.exe -ArgumentList '-m uvicorn hub.backend.main:app --host 127.0.0.1 --port 8000'\"",
+      "rollback": "git -C C:\\dev\\DarkFac checkout {last_known_good_sha}"
+    }
+  }
+}

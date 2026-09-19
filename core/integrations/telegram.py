@@ -120,6 +120,7 @@ class TelegramConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     bot_token: Optional[str] = None
+    role: str = "all"  # "owner", "ops", or "all"
     authorized_user_ids: List[int] = Field(default_factory=list)
     authorized_chat_ids: List[int] = Field(default_factory=list)
     webhook_secret_token: Optional[str] = None
@@ -144,25 +145,109 @@ def _read_env_fallback() -> dict[str, str]:
     return env_vars
 
 
-def load_telegram_config(config_file: Optional[Path] = None) -> TelegramConfig:
-    """Loads TelegramConfig from .factory/telegram/config.json, environment variables, or .env."""
-    cfg_path = config_file or (Path(__file__).resolve().parents[2] / ".factory" / "telegram" / "config.json")
-    if cfg_path.exists():
-        try:
-            data = json.loads(cfg_path.read_text(encoding="utf-8"))
-            return TelegramConfig.model_validate(data)
-        except Exception:
-            pass
+def load_telegram_config(
+    config_file: Optional[Path] = None,
+    role: str = "ops",
+) -> TelegramConfig:
+    """Loads TelegramConfig from role-specific configs, environment variables, or .env."""
+    root_dir = Path(__file__).resolve().parents[2]
+    if config_file is not None:
+        if config_file.exists():
+            try:
+                data = json.loads(config_file.read_text(encoding="utf-8"))
+                return TelegramConfig.model_validate(data)
+            except Exception:
+                pass
 
     env_vars = _read_env_fallback()
-    token = os.environ.get("TELEGRAM_BOT_TOKEN") or env_vars.get("TELEGRAM_BOT_TOKEN")
+
+    # Determine token based on requested role
+    token = None
+    if role == "owner":
+        token = os.environ.get("TELEGRAM_OWNER_BOT_TOKEN") or env_vars.get("TELEGRAM_OWNER_BOT_TOKEN")
+        if not token:
+            owner_cfg = root_dir / ".factory" / "telegram" / "owner_config.json"
+            if owner_cfg.exists():
+                try:
+                    data = json.loads(owner_cfg.read_text(encoding="utf-8"))
+                    token = data.get("bot_token")
+                except Exception:
+                    pass
+        if not token:
+            legacy_cfg = root_dir / ".factory" / "telegram" / "config.json"
+            if legacy_cfg.exists():
+                try:
+                    data = json.loads(legacy_cfg.read_text(encoding="utf-8"))
+                    token = data.get("bot_token")
+                except Exception:
+                    pass
+    elif role == "ops":
+        token = (
+            os.environ.get("TELEGRAM_OPS_BOT_TOKEN")
+            or env_vars.get("TELEGRAM_OPS_BOT_TOKEN")
+            or os.environ.get("TELEGRAM_BOT_TOKEN")
+            or env_vars.get("TELEGRAM_BOT_TOKEN")
+        )
+        if not token:
+            ops_cfg = root_dir / ".factory" / "telegram" / "ops_config.json"
+            if ops_cfg.exists():
+                try:
+                    data = json.loads(ops_cfg.read_text(encoding="utf-8"))
+                    token = data.get("bot_token")
+                except Exception:
+                    pass
+        if not token:
+            legacy_cfg = root_dir / ".factory" / "telegram" / "config.json"
+            if legacy_cfg.exists():
+                try:
+                    data = json.loads(legacy_cfg.read_text(encoding="utf-8"))
+                    token = data.get("bot_token")
+                except Exception:
+                    pass
+    else:  # role == "all" or generic
+        token = (
+            os.environ.get("TELEGRAM_BOT_TOKEN")
+            or env_vars.get("TELEGRAM_BOT_TOKEN")
+            or os.environ.get("TELEGRAM_OPS_BOT_TOKEN")
+            or env_vars.get("TELEGRAM_OPS_BOT_TOKEN")
+            or os.environ.get("TELEGRAM_OWNER_BOT_TOKEN")
+            or env_vars.get("TELEGRAM_OWNER_BOT_TOKEN")
+        )
+        if not token:
+            legacy_cfg = root_dir / ".factory" / "telegram" / "config.json"
+            if legacy_cfg.exists():
+                try:
+                    data = json.loads(legacy_cfg.read_text(encoding="utf-8"))
+                    token = data.get("bot_token")
+                except Exception:
+                    pass
+
     users_raw = os.environ.get("TELEGRAM_AUTHORIZED_USERS") or env_vars.get("TELEGRAM_AUTHORIZED_USERS", "")
     users = [int(u.strip()) for u in users_raw.split(",") if u.strip().isdigit()]
     chats_raw = os.environ.get("TELEGRAM_AUTHORIZED_CHATS") or env_vars.get("TELEGRAM_AUTHORIZED_CHATS", "")
     chats = [int(c.strip()) for c in chats_raw.split(",") if c.strip().isdigit()]
     secret = os.environ.get("TELEGRAM_WEBHOOK_SECRET") or env_vars.get("TELEGRAM_WEBHOOK_SECRET")
+
+    # If no users/chats in env, check if role-specific config file has them
+    if not users or not chats:
+        specific_cfg = (
+            root_dir / ".factory" / "telegram" / "owner_config.json"
+            if role == "owner"
+            else (root_dir / ".factory" / "telegram" / "ops_config.json" if role == "ops" else root_dir / ".factory" / "telegram" / "config.json")
+        )
+        if specific_cfg.exists():
+            try:
+                data = json.loads(specific_cfg.read_text(encoding="utf-8"))
+                if not users:
+                    users = data.get("authorized_user_ids", [])
+                if not chats:
+                    chats = data.get("authorized_chat_ids", [])
+            except Exception:
+                pass
+
     return TelegramConfig(
         bot_token=token,
+        role=role,
         authorized_user_ids=users,
         authorized_chat_ids=chats,
         webhook_secret_token=secret,
@@ -223,6 +308,7 @@ class TelegramGateway:
         self,
         config: TelegramConfig,
         state_dir: Optional[Path] = None,
+        state_file: Optional[Path] = None,
         intake_service: Optional[Any] = None,
         demand_handler: Optional[Callable[[str, int], Dict[str, Any]]] = None,
         grill_handler: Optional[Callable[[str, str, int], Dict[str, Any]]] = None,
@@ -232,8 +318,18 @@ class TelegramGateway:
         self.config = config
         self.state_dir = state_dir or Path(".factory/telegram")
         self.state_dir.mkdir(parents=True, exist_ok=True)
-        self.state_file = self.state_dir / "gateway_state.json"
-        self.outbox_file = self.state_dir / "outbox.json"
+        if state_file is not None:
+            self.state_file = state_file
+            self.outbox_file = self.state_dir / f"{state_file.stem}_outbox.json"
+        elif self.config.role == "owner":
+            self.state_file = self.state_dir / "gateway_state_owner.json"
+            self.outbox_file = self.state_dir / "outbox_owner.json"
+        elif self.config.role == "ops":
+            self.state_file = self.state_dir / "gateway_state_ops.json"
+            self.outbox_file = self.state_dir / "outbox_ops.json"
+        else:
+            self.state_file = self.state_dir / "gateway_state.json"
+            self.outbox_file = self.state_dir / "outbox.json"
 
         self.intake_service = intake_service
         self.demand_handler = demand_handler
@@ -401,15 +497,38 @@ class TelegramGateway:
 
         if cmd_str in ("/start", "/help"):
             result.action = TelegramActionType.START
-            result.response_text = (
-                "👋 Dark Factory Autonomous Control Bot\n\n"
-                "Available commands:\n"
-                "• /demand <text> - Ingest a new demand into backlog\n"
-                "• /status [ticket_id] - Check status of runs and pipelines\n"
-                "• /alerts - Check active token quota and operational alerts\n"
-                "• /grill <ticket_id> <choice> - Answer Grill clarification questions\n"
-                "• /approve <project_id> <artifact_digest> - Approve production release\n"
-            )
+            if self.config.role == "owner":
+                result.response_text = (
+                    "👑 <b>Dark Factory Owner Governance Bot (@darkfac_bot)</b>\n\n"
+                    "Canal oficial para governança estratégica, decisões humanas e aprovações do Owner.\n\n"
+                    "Comandos disponíveis:\n"
+                    "• /grill <ticket_id> <resposta> - Responder alinhamento e desbloquear WAITING_HUMAN\n"
+                    "• /approve <project_id> <digest> - Aprovar release para deploy em produção\n"
+                    "• /alerts - Consultar alertas de segurança, orçamento e cotas\n"
+                    "• /status [ticket_id] - Consultar status de pipelines e jobs\n"
+                    "• /demand <texto> - Registrar demanda prioritária do Owner\n\n"
+                    "ℹ️ <i>Demandas operacionais e backlog geral são gerenciadas no @darkfac_ops_bot</i>"
+                )
+            elif self.config.role == "ops":
+                result.response_text = (
+                    "⚙️ <b>Dark Factory Autonomous Orchestrator Bot (@darkfac_ops_bot)</b>\n\n"
+                    "Canal oficial de operações autônomas, fila de demandas e status da fábrica.\n\n"
+                    "Comandos disponíveis:\n"
+                    "• /demand <texto> - Ingerir nova demanda no backlog autônomo\n"
+                    "• /status [ticket_id] - Consultar status de pipelines e jobs\n"
+                    "• /alerts - Consultar telemetria operacional\n\n"
+                    "🔒 <i>Aprovações de release e governança (/grill, /approve): exclusivas no @darkfac_bot</i>"
+                )
+            else:
+                result.response_text = (
+                    "👋 Dark Factory Autonomous Control Bot\n\n"
+                    "Available commands:\n"
+                    "• /demand <text> - Ingest a new demand into backlog\n"
+                    "• /status [ticket_id] - Check status of runs and pipelines\n"
+                    "• /alerts - Check active token quota and operational alerts\n"
+                    "• /grill <ticket_id> <choice> - Answer Grill clarification questions\n"
+                    "• /approve <project_id> <artifact_digest> - Approve production release\n"
+                )
 
         elif cmd_str == "/demand":
             result.action = TelegramActionType.DEMAND
@@ -437,7 +556,8 @@ class TelegramGateway:
                         receipt = self.intake_service.accept(cmd, datetime.now(UTC))
                         demand_id = receipt.demand_id
                         result.target_id = demand_id
-                        result.response_text = f"✅ Demand registered successfully: <b>{demand_id}</b>"
+                        prefix = "👑 [Owner Demand] " if self.config.role == "owner" else ""
+                        result.response_text = f"✅ {prefix}Demand registered successfully: <b>{demand_id}</b>"
                     except Exception as exc:
                         logger.error("Telegram intake_service error: %s", exc)
                         result.error = str(exc)
@@ -447,7 +567,8 @@ class TelegramGateway:
                         res = self.demand_handler(arg_str, user_id or 0)
                         ticket_id = res.get("ticket_id", "TICKET-AUTO")
                         result.target_id = ticket_id
-                        result.response_text = f"✅ Demand registered successfully: <b>{ticket_id}</b>"
+                        prefix = "👑 [Owner Demand] " if self.config.role == "owner" else ""
+                        result.response_text = f"✅ {prefix}Demand registered successfully: <b>{ticket_id}</b>"
                     except Exception as exc:
                         logger.error("Demand handler error: %s", exc)
                         result.error = str(exc)
@@ -472,6 +593,14 @@ class TelegramGateway:
 
         elif cmd_str == "/grill":
             result.action = TelegramActionType.GRILL
+            if self.config.role == "ops":
+                result.response_text = (
+                    "🔒 <b>Canal Restrito à Governança:</b>\n"
+                    "Respostas de Grill e alinhamentos de requisitos devem ser enviados "
+                    "ao bot oficial do Owner: <b>@darkfac_bot</b>."
+                )
+                return result
+
             subparts = arg_str.split(maxsplit=1)
             if len(subparts) < 2:
                 result.response_text = "⚠️ Usage: /grill <ticket_id> <your answer / choice>"
@@ -492,6 +621,14 @@ class TelegramGateway:
 
         elif cmd_str == "/approve":
             result.action = TelegramActionType.APPROVE
+            if self.config.role == "ops":
+                result.response_text = (
+                    "🔒 <b>Canal Restrito à Governança:</b>\n"
+                    "Aprovações de release e promoção em produção devem ser executadas "
+                    "exclusivamente no bot oficial do Owner: <b>@darkfac_bot</b>."
+                )
+                return result
+
             subparts = arg_str.split(maxsplit=1)
             if len(subparts) < 2:
                 result.response_text = "⚠️ Usage: /approve <project_id> <artifact_digest>"
@@ -570,6 +707,10 @@ class TelegramGateway:
             ticket_id, choice = parts[2], parts[3]
             result.action = TelegramActionType.GRILL
             result.target_id = ticket_id
+            if self.config.role == "ops":
+                result.response_text = "🔒 Decisões de alinhamento pertencem ao canal @darkfac_bot."
+                self.processed_callback_ids.add(cb.id)
+                return result
             if self.grill_handler:
                 try:
                     res = self.grill_handler(ticket_id, choice, user_id)
@@ -587,6 +728,10 @@ class TelegramGateway:
             project_id, digest, choice = parts[2], parts[3], parts[4] if len(parts) > 4 else "approved"
             result.action = TelegramActionType.APPROVE
             result.target_id = f"{project_id}:{digest}"
+            if self.config.role == "ops":
+                result.response_text = "🔒 Aprovações de release pertencem ao canal @darkfac_bot."
+                self.processed_callback_ids.add(cb.id)
+                return result
             if choice.lower() in ("approve", "approved", "yes"):
                 if self.approval_handler:
                     try:
@@ -690,13 +835,19 @@ class TelegramGateway:
             method="POST",
         )
 
-        try:
-            with urllib.request.urlopen(req, timeout=10.0) as resp:
-                return resp.status == 200
-        except Exception as exc:
-            logger.warning("Failed to send Telegram message: %s. Enqueuing to outbox.", exc)
-            self._enqueue_outbox(chat_id, safe_text, buttons, str(exc))
-            return False
+        for attempt in range(2):
+            try:
+                with urllib.request.urlopen(req, timeout=10.0) as resp:
+                    return resp.status == 200
+            except Exception as exc:
+                if attempt == 0:
+                    import time
+                    time.sleep(0.5)
+                    continue
+                logger.warning("Failed to send Telegram message: %s. Enqueuing to outbox.", exc)
+                self._enqueue_outbox(chat_id, safe_text, buttons, str(exc))
+                return False
+        return False
 
     def _enqueue_outbox(
         self,

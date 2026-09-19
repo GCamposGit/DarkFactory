@@ -1,0 +1,116 @@
+{
+  "protocol_version": "1.0.0",
+  "ticket_id": "HF-15-01",
+  "title": "Protocolo Negativo de Aceitação e Fiscalização Invariante",
+  "description": "Especificação normativa das 13 regras invariantes de fiscalização negativa (V01–V13) para autonomia contínua, auditoria fail-closed e observabilidade estrita.",
+  "governed_by": [
+    "docs/handoffs/continuous-autonomy/CONTRACTS.md",
+    "docs/handoffs/continuous-autonomy/HF-15-01.md"
+  ],
+  "rules": [
+    {
+      "rule_id": "V01",
+      "name": "consumer_off_health200_rejected",
+      "severity": "critical",
+      "description": "Consumidor inativo ou desligado com endpoint de health retornando HTTP 200 deve ser reprovado para evitar falsos positivos de disponibilidade.",
+      "fail_closed": true,
+      "remediation": "Verificar status real de execução do worker/consumidor nos probes antes de emitir status HTTP 200 ou marcar o componente como degradado/unhealthy."
+    },
+    {
+      "rule_id": "V02",
+      "name": "manual_stage_advance_rejected",
+      "severity": "critical",
+      "description": "Tentativa do controlador ou processo automatizado de invocar ou avançar diretamente fases manuais reservadas a humanos deve ser reprovada.",
+      "fail_closed": true,
+      "remediation": "Pausar a execução em WAITING_HUMAN e exigir recibo formal de aprovação assinado pelo Owner antes de avançar fases manuais."
+    },
+    {
+      "rule_id": "V03",
+      "name": "self_served_evidence_rejected",
+      "severity": "critical",
+      "description": "Evidência produzida ou atestada unicamente pelo próprio candidato sob teste é inválida e deve ser reprovada.",
+      "fail_closed": true,
+      "remediation": "Exigir oráculo auditor independente ou probe externo qualificado com identidade sanitizada distinta para emitir o EvidenceReceipt."
+    },
+    {
+      "rule_id": "V04",
+      "name": "anomalous_clock_rejected",
+      "severity": "critical",
+      "description": "Timestamp futuro, regressivo ou desvio de relógio além da tolerância máxima configurada deve ser reprovado.",
+      "fail_closed": true,
+      "remediation": "Sincronizar o relógio do sistema via NTP e rejeitar eventos com timestamps fora da janela de tolerância temporal estrita."
+    },
+    {
+      "rule_id": "V05",
+      "name": "expired_lease_claim_rejected",
+      "severity": "critical",
+      "description": "Claim com lease vencido ou fencing token defasado não produz efeito e qualquer mutação tentada sob ele deve ser reprovada.",
+      "fail_closed": true,
+      "remediation": "Renovar o lease antes da expiração através de batimentos de heartbeat ou abortar a operação e devolver o job ao ControlStore."
+    },
+    {
+      "rule_id": "V06",
+      "name": "idempotency_payload_mismatch_rejected",
+      "severity": "critical",
+      "description": "Resubmissão com a mesma chave de idempotência mas com payload ou digest divergente do original deve ser reprovada com IdempotencyConflict.",
+      "fail_closed": true,
+      "remediation": "Reenviar exatamente o mesmo payload ou emitir um novo comando com nova chave de identificação/iteração."
+    },
+    {
+      "rule_id": "V07",
+      "name": "credential_leak_in_logs_rejected",
+      "severity": "critical",
+      "description": "Presença de segredos, chaves de API, senhas, tokens privados ou credenciais em texto claro em logs ou payloads deve ser reprovada.",
+      "fail_closed": true,
+      "remediation": "Substituir credenciais por referências opacas (SecretReference), mascarar saídas sensíveis e expurgar dados confidenciais dos streams de log."
+    },
+    {
+      "rule_id": "V08",
+      "name": "missing_independent_oracle_rejected",
+      "severity": "critical",
+      "description": "Falta de sujeito auditor distinto ou oráculo independente formalmente designado para validação e revisão deve ser reprovada.",
+      "fail_closed": true,
+      "remediation": "Designar e vincular um oráculo de validação com identidade independente e distinta do sujeito executor antes da emissão de resultados."
+    },
+    {
+      "rule_id": "V09",
+      "name": "timeout_without_checkpoint_rejected",
+      "severity": "critical",
+      "description": "Ocorrência de timeout em job ou estágio sem o devido registro prévio de checkpoint de progresso deve ser reprovada.",
+      "fail_closed": true,
+      "remediation": "Persistir checkpoints incrementais periódicos durante a execução para viabilizar recuperação determinística e auditoria de progresso."
+    },
+    {
+      "rule_id": "V10",
+      "name": "resource_starvation_rejected",
+      "severity": "critical",
+      "description": "Esgotamento de recursos, esgotamento de quota ou rate-limiting sem política ativa de backoff ou failover deve ser reprovado.",
+      "fail_closed": true,
+      "remediation": "Aplicar política de backoff com jitter, chaveamento para modelos/hosts locais de custo zero ou redução de concorrência ativa."
+    },
+    {
+      "rule_id": "V11",
+      "name": "out_of_bounds_mutation_rejected",
+      "severity": "critical",
+      "description": "Tentativa ou ocorrência de alteração de arquivos ou recursos fora do conjunto restrito de caminhos permitidos (allowed_paths) deve ser reprovada.",
+      "fail_closed": true,
+      "remediation": "Reverter modificações que excedam os caminhos permitidos e restringir a escrita exclusivamente aos arquivos delimitados no contrato da tarefa."
+    },
+    {
+      "rule_id": "V12",
+      "name": "heartbeat_silence_window_rejected",
+      "severity": "critical",
+      "description": "Janela de silêncio de heartbeat além do limite tolerado de 45 segundos deve ser reprovada.",
+      "fail_closed": true,
+      "remediation": "Emitir batimentos cardíacos (heartbeats) em intervalos regulares de 10 segundos para manter o lease ativo e atestar vivacidade."
+    },
+    {
+      "rule_id": "V13",
+      "name": "dirty_worktree_rejected",
+      "severity": "critical",
+      "description": "Execução com worktree contendo alterações não comitadas, arquivos não rastreados não permitidos ou baseline incorreta deve ser reprovada.",
+      "fail_closed": true,
+      "remediation": "Garantir worktree limpa (git status clean) e sincronizada com o commit SHA de baseline antes de autorizar qualquer execução de workflow."
+    }
+  ]
+}

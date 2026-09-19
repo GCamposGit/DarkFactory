@@ -10,6 +10,8 @@ from __future__ import annotations
 import os
 import sys
 import logging
+import signal
+import threading
 from typing import Any
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -51,6 +53,7 @@ class CloudCoordinator:
         self.application_version = application_version
         self._dbos_instance: Any = None
         self._running = False
+        self._stop_event: threading.Event | None = None
         self._recovered_ids: list[str] = []
 
     def inspect_status(self) -> CoordinatorStatus:
@@ -95,9 +98,72 @@ class CloudCoordinator:
             logger.error("Error during workflow recovery scan: %s", exc)
         return self._recovered_ids
 
+    def run_forever(
+        self,
+        stop_event: threading.Event | None = None,
+        poll_interval_sec: float = 5.0,
+    ) -> int:
+        """Continuous supervision loop with SIGTERM and SIGINT interception."""
+        if stop_event is None:
+            stop_event = threading.Event()
+        self._stop_event = stop_event
+        self._running = True
+
+        def _signal_handler(signum: int, frame: Any) -> None:
+            logger.info("Signal %s received; initiating coordinator shutdown", signum)
+            stop_event.set()
+
+        orig_sigint = None
+        orig_sigterm = None
+        try:
+            orig_sigint = signal.signal(signal.SIGINT, _signal_handler)
+        except (ValueError, AttributeError):
+            pass
+
+        try:
+            orig_sigterm = signal.signal(signal.SIGTERM, _signal_handler)
+        except (ValueError, AttributeError):
+            pass
+
+        logger.info(
+            "Cloud coordinator started supervision loop (poll_interval=%.1fs)",
+            poll_interval_sec,
+        )
+        try:
+            while not stop_event.is_set():
+                try:
+                    status = self.inspect_status()
+                    if status.database_status == "ready":
+                        self.scan_and_recover_pending()
+                    else:
+                        logger.warning(
+                            "Database not ready (status=%s, error=%s); coordinator standing by",
+                            status.database_status,
+                            status.error_message,
+                        )
+                except Exception as exc:
+                    logger.warning("Transient error in coordinator supervision loop: %s", exc)
+                stop_event.wait(timeout=poll_interval_sec)
+        finally:
+            self.shutdown()
+            if orig_sigint is not None:
+                try:
+                    signal.signal(signal.SIGINT, orig_sigint)
+                except (ValueError, AttributeError):
+                    pass
+            if orig_sigterm is not None:
+                try:
+                    signal.signal(signal.SIGTERM, orig_sigterm)
+                except (ValueError, AttributeError):
+                    pass
+            logger.info("Cloud coordinator supervision loop terminated cleanly")
+        return 0
+
     def shutdown(self) -> None:
         """Clean shutdown of coordinator background threads and connections."""
         self._running = False
+        if self._stop_event is not None and not self._stop_event.is_set():
+            self._stop_event.set()
         if self._dbos_instance is not None:
             try:
                 import dbos  # type: ignore[import-not-found]
@@ -107,12 +173,32 @@ class CloudCoordinator:
             self._dbos_instance = None
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Dark Factory Cloud Coordinator")
+    parser.add_argument(
+        "--status",
+        action="store_true",
+        help="Inspect and output CoordinatorStatus in JSON and exit without starting daemon loop",
+    )
+    parser.add_argument(
+        "--poll-interval",
+        type=float,
+        default=5.0,
+        help="Polling interval in seconds for the supervision loop",
+    )
+    args = parser.parse_args(argv)
+
     logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
     coordinator = CloudCoordinator()
-    status = coordinator.inspect_status()
-    print(status.model_dump_json(indent=2))
-    return 0 if status.database_status == "ready" else 2
+
+    if args.status:
+        status = coordinator.inspect_status()
+        print(status.model_dump_json(indent=2))
+        return 0 if status.database_status == "ready" else 2
+
+    return coordinator.run_forever(poll_interval_sec=args.poll_interval)
 
 
 if __name__ == "__main__":

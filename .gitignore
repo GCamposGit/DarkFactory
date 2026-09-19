@@ -27,9 +27,7 @@ build/
 *.key
 *.secret
 .factory/n8n/config.json
-.factory/telegram/config.json
-.factory/telegram/gateway_state.json
-.factory/telegram/outbox.json
+.factory/telegram/*.json
 
 # Local model/runtime data
 models/*.bin
