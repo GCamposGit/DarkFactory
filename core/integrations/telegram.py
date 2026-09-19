@@ -638,7 +638,11 @@ class TelegramGateway:
 
         timeout_sec = timeout if timeout is not None else self.config.poll_timeout_seconds
         url = f"{self.config.api_base_url}/bot{self.config.bot_token}/getUpdates?offset={self.last_offset}&limit={limit}&timeout={timeout_sec}"
-        req = urllib.request.Request(url, headers={"Content-Type": "application/json"}, method="GET")
+        req = urllib.request.Request(
+            url,
+            headers={"Content-Type": "application/json", "User-Agent": "DarkFac/1.0"},
+            method="GET",
+        )
         try:
             with urllib.request.urlopen(req, timeout=timeout_sec + 5) as resp:
                 data = json.loads(resp.read().decode("utf-8"))
@@ -682,7 +686,7 @@ class TelegramGateway:
         req = urllib.request.Request(
             url,
             data=json.dumps(payload).encode("utf-8"),
-            headers={"Content-Type": "application/json"},
+            headers={"Content-Type": "application/json", "User-Agent": "DarkFac/1.0"},
             method="POST",
         )
 
