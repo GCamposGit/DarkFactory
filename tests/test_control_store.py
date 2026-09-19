@@ -25,8 +25,10 @@ from core.workflow.control_contracts import (
     IdempotencyConflict,
     IntakeCommand,
     IntakeReceipt,
+    InvalidResultError,
     JobKey,
     OutboxEvent,
+    OutboxNotFoundError,
     ReconcilePage,
     RuntimeOwner,
     StageResult,
@@ -59,11 +61,13 @@ def _sample_intake_command(
     channel: str = "cli",
     external_id: str = "ext-001",
     payload_text: str = "Run continuous autonomy unit test",
+    project_id: str = "darkfac",
+    mode: str = "autonomous",
 ) -> IntakeCommand:
     return IntakeCommand(
         channel=channel,
         external_id=external_id,
-        project_id="darkfac",
+        project_id=project_id,
         payload={
             "title": "Continuous Autonomy Task",
             "problem": payload_text,
@@ -71,7 +75,7 @@ def _sample_intake_command(
             "non_goals": ["No manual deployment"],
             "criteria": ["Test must pass deterministically"],
         },
-        mode="autonomous",
+        mode=mode,
         policy_ref="policy-v1",
     )
 
@@ -246,3 +250,147 @@ def test_reconciliation_sweep_recovers_orphaned_jobs(store: ControlStore) -> Non
     assert reclaimed is not None
     assert reclaimed.owner_worker == "recovery-worker"
     assert reclaimed.fencing_token >= 2
+
+
+def test_outbox_materialize_lifecycle(store: ControlStore) -> None:
+    now = datetime(2026, 9, 18, 12, 0, 0, tzinfo=UTC)
+    cmd = _sample_intake_command(external_id="outbox-lifecycle-1")
+    receipt = store.accept(cmd, now)
+
+    pending = store.get_pending_outbox()
+    assert len(pending) >= 1
+    intake_event = next(e for e in pending if e["aggregate_id"] == receipt.run_id)
+    assert intake_event["status"] == "pending"
+
+    # Materialize the pending outbox event
+    store.materialize(intake_event, now)
+
+    # Verify event is no longer pending
+    remaining = store.get_pending_outbox()
+    assert not any(e["outbox_id"] == intake_event["outbox_id"] for e in remaining)
+
+    # Emit and materialize custom event
+    custom_event = OutboxEvent(
+        event_type="test_custom_dispatch",
+        aggregate_type="run",
+        aggregate_id=receipt.run_id or "run-1",
+        payload={"step": "validation"},
+    )
+    emitted = store.emit_outbox(custom_event, now)
+    assert emitted.outbox_id is not None
+    store.materialize({"outbox_id": emitted.outbox_id}, now)
+
+    # Materializing non-existent outbox event fails with OutboxNotFoundError
+    with pytest.raises(OutboxNotFoundError):
+        store.materialize({"outbox_id": 999999}, now)
+
+
+def test_crash_before_commit_rollback_leaves_store_intact(store: ControlStore) -> None:
+    now = datetime(2026, 9, 18, 12, 0, 0, tzinfo=UTC)
+    cmd = _sample_intake_command(external_id="crash-test-1")
+    store.accept(cmd, now)
+    claim = store.claim("worker-crash", ["economy", "coding"], now)
+    assert claim is not None
+    assert claim.fencing_token == 1
+
+    # Attempt finish with stale fencing token (simulating concurrent mismatch/corruption)
+    stale_claim = Claim(
+        job_key=claim.job_key,
+        lease_id=claim.lease_id,
+        owner=claim.owner,
+        fencing_token=999,
+        expires_at=claim.expires_at,
+    )
+    result = StageResult(outcome="success", output_refs=["ref:out-1"])
+    with pytest.raises(StaleLeaseError):
+        store.finish(stale_claim, result, now + timedelta(seconds=5))
+
+    # Verify atomic rollback: valid claim is intact and can still be heartbeat and finished
+    refreshed = store.heartbeat(claim, now + timedelta(seconds=10))
+    assert refreshed.fencing_token == 1
+
+    store.finish(claim, result, now + timedelta(seconds=15))
+
+
+def test_intake_mode_documentary(store: ControlStore) -> None:
+    now = datetime(2026, 9, 18, 12, 0, 0, tzinfo=UTC)
+    cmd = _sample_intake_command(external_id="doc-mode-1", mode="documentary")
+    receipt = store.accept(cmd, now)
+
+    assert receipt.mode == "documentary"
+    assert receipt.run_id is None
+    assert receipt.initial_job_id is None
+
+    # Documentary mode must not create claimable pending jobs
+    claim = store.claim("worker-doc", ["economy", "coding"], now)
+    assert claim is None
+
+
+def test_stage_result_retry_and_terminal_outcomes(store: ControlStore) -> None:
+    t0 = datetime(2026, 9, 18, 12, 0, 0, tzinfo=UTC)
+    cmd = _sample_intake_command(external_id="retry-lifecycle-1")
+    store.accept(cmd, t0)
+
+    # Claim 1 -> retry
+    claim1 = store.claim("w1", ["economy", "coding"], t0)
+    assert claim1 is not None
+    assert claim1.fencing_token == 1
+    retry_res = StageResult(outcome="retry", cause_code="TRANSIENT_ERR")
+    store.finish(claim1, retry_res, t0 + timedelta(seconds=5))
+
+    # Job is re-enqueued as pending; Claim 2 gets incremented fencing token
+    claim2 = store.claim("w2", ["economy", "coding"], t0 + timedelta(seconds=6))
+    assert claim2 is not None
+    assert claim2.fencing_token == 2
+
+    # Retry 2
+    store.finish(claim2, retry_res, t0 + timedelta(seconds=10))
+
+    # Claim 3
+    claim3 = store.claim("w3", ["economy", "coding"], t0 + timedelta(seconds=11))
+    assert claim3 is not None
+    assert claim3.fencing_token == 3
+
+    # Retry 3 -> hits max_retries default (3)
+    store.finish(claim3, retry_res, t0 + timedelta(seconds=15))
+
+    # Exceeded max_retries -> status is failed, no further claim possible
+    claim_after_fail = store.claim("w4", ["economy", "coding"], t0 + timedelta(seconds=20))
+    assert claim_after_fail is None
+
+    # Test waiting_human outcome on a separate command
+    cmd_wh = _sample_intake_command(external_id="wh-lifecycle-1")
+    store.accept(cmd_wh, t0)
+    claim_wh = store.claim("w-wh", ["economy", "coding"], t0)
+    assert claim_wh is not None
+    wh_res = StageResult(outcome="waiting_human", cause_code="GATE_G1_DECISION_PENDING")
+    store.finish(claim_wh, wh_res, t0 + timedelta(seconds=5))
+
+    # Waiting human is paused; cannot be claimed until unblocked
+    assert store.claim("w-wh2", ["economy", "coding"], t0 + timedelta(seconds=6)) is None
+
+
+def test_list_active_projects_and_metrics(store: ControlStore) -> None:
+    now = datetime(2026, 9, 18, 12, 0, 0, tzinfo=UTC)
+    for p in ["alpha", "beta", "gamma"]:
+        cmd = _sample_intake_command(project_id=p, external_id=f"proj-{p}")
+        store.accept(cmd, now)
+
+    projects, cursor = store.list_active_projects(limit=2)
+    assert len(projects) == 2
+    assert cursor is not None
+
+    next_projects, next_cursor = store.list_active_projects(cursor=cursor, limit=2)
+    assert len(next_projects) >= 1
+    all_projects = sorted(set(projects + next_projects))
+    assert "alpha" in all_projects
+    assert "beta" in all_projects
+    assert "gamma" in all_projects
+
+    # Check metrics after 45s (older than starved threshold 30s)
+    metrics = store.get_ready_age_metrics(now + timedelta(seconds=45))
+    assert metrics["active_runs"] >= 3
+    assert metrics["pending_count"] >= 3
+    assert metrics["max_ready_age_sec"] >= 45.0
+    assert len(metrics["starved_projects"]) >= 3
+
