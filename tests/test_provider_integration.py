@@ -30,6 +30,7 @@ from core.execution.providers import (
     OllamaModelProvider,
     OpenRouterModelProvider,
     ProviderResponse,
+    RemoteCodexModelProvider,
     UnifiedModelProvider,
     get_model_provider,
     get_openrouter_api_key,
@@ -245,6 +246,9 @@ def test_get_model_provider_factory() -> None:
 
     openrouter_p = get_model_provider("openrouter", api_key="test-key")
     assert isinstance(openrouter_p, OpenRouterModelProvider)
+
+    codex_p = get_model_provider("codex", base_url="http://127.0.0.1:8080")
+    assert isinstance(codex_p, RemoteCodexModelProvider)
 
     auto_p = get_model_provider("auto", api_key="test-key")
     assert isinstance(auto_p, UnifiedModelProvider)

@@ -653,6 +653,109 @@ class UnifiedModelProvider:
         )
 
 
+class RemoteCodexModelProvider:
+    """Invokes local Codex non-interactively via the remote worker daemon."""
+
+    provider_id: str = "codex"
+
+    def __init__(
+        self,
+        base_url: str | None = None,
+        *,
+        timeout: float = 120.0,
+        usage_ledger: ModelUsageLedger | None = None,
+    ) -> None:
+        self.base_url = (
+            base_url
+            or os.environ.get("REMOTE_HARNESS_URL")
+            or os.environ.get("DARKFAC_ONPREM_URL")
+            or "http://100.81.84.124:8080"
+        ).rstrip("/")
+        self.timeout = timeout
+        self.usage_ledger = usage_ledger
+
+    def generate(
+        self,
+        prompt: str,
+        *,
+        model: str = "codex",
+        system_prompt: str | None = None,
+        max_tokens: int | None = None,
+        temperature: float = 0.0,
+        unknown_cost_policy: UnknownCostPolicy = UnknownCostPolicy.REJECT,
+        ticket_id: str | None = None,
+        execution_mode: str | None = None,
+        **kwargs: Any,
+    ) -> ProviderResponse:
+        endpoint = f"{self.base_url}/harness/codex"
+        payload = {
+            "prompt": prompt,
+            "system_prompt": system_prompt,
+            "timeout_seconds": int(self.timeout),
+            "model": model if model and model != "codex" else None,
+        }
+        req_data = json.dumps(payload).encode("utf-8")
+        req = urllib.request.Request(
+            endpoint,
+            data=req_data,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        start = time.perf_counter()
+        try:
+            with urllib.request.urlopen(req, timeout=self.timeout + 5.0) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+            latency = max(0.001, time.perf_counter() - start)
+            if not data.get("success", False):
+                err = data.get("error") or "Codex execution failed"
+                raise RuntimeError(f"Remote Codex execution failed: {err}")
+
+            response_text = data.get("text", "")
+            returned_model = data.get("model") or "gpt-5.6-sol"
+            tokens_used = data.get("tokens_used") or (len(prompt.split()) + len(response_text.split()))
+
+            # Record telemetry / ledger with $0 cost (subscription covered)
+            if self.usage_ledger is not None:
+                try:
+                    self.usage_ledger.record(
+                        ModelCallEvent(
+                            provider="openai",
+                            model=returned_model,
+                            tier=ModelTier.FRONTIER,
+                            harness="remote_codex",
+                            modality=ModelModality.TEXT,
+                            success=True,
+                            input_tokens=len(prompt.split()),
+                            processing_tokens=0,
+                            output_tokens=len(response_text.split()),
+                            cost_usd=0.0,
+                            latency_ms=round(latency * 1000, 1),
+                            source="core.execution.providers.remote_codex",
+                            ticket_id=ticket_id,
+                            execution_mode=execution_mode,
+                        )
+                    )
+                except Exception as exc:
+                    logger.debug("Failed to record codex usage: %s", exc)
+
+            return ProviderResponse(
+                text=response_text,
+                model=returned_model,
+                tokens_prompt=len(prompt.split()),
+                tokens_completion=len(response_text.split()),
+                total_tokens=tokens_used,
+                latency_seconds=latency,
+                measured_cost=0.0,
+                estimated_cost=0.0,
+                is_measured=True,
+                metadata={"backend": "remote_codex", "remote_url": self.base_url},
+            )
+        except Exception as exc:
+            latency = max(0.001, time.perf_counter() - start)
+            logger.error("Remote Codex execution failed against %s: %s", endpoint, exc)
+            raise RuntimeError(f"Remote Codex error ({endpoint}): {exc}") from exc
+
+
 def get_model_provider(
     provider_id: str = "auto",
     *,
@@ -670,6 +773,8 @@ def get_model_provider(
         return OllamaModelProvider(base_url=url, usage_ledger=usage_ledger, **kwargs)
     if pid == "openrouter":
         return OpenRouterModelProvider(api_key=api_key, usage_ledger=usage_ledger, **kwargs)
+    if pid in ("codex", "remote_codex"):
+        return RemoteCodexModelProvider(base_url=base_url, usage_ledger=usage_ledger, **kwargs)
     if pid in ("auto", "unified"):
         ollama = OllamaModelProvider(base_url=base_url or "http://localhost:11434", usage_ledger=usage_ledger)
         openrouter = OpenRouterModelProvider(api_key=api_key, usage_ledger=usage_ledger)
@@ -689,5 +794,5 @@ def get_model_provider(
             cloud_provider=openrouter,
             **kwargs,
         )
-    raise ValueError(f"Unknown provider_id: {provider_id}. Must be 'ollama', 'openrouter', 'mock', 'resilient', or 'auto'.")
+    raise ValueError(f"Unknown provider_id: {provider_id}. Must be 'ollama', 'openrouter', 'codex', 'mock', 'resilient', or 'auto'.")
 

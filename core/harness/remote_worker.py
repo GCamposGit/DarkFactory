@@ -78,6 +78,42 @@ class SystemUpdateResponse(BaseModel):
     current_commit: str = Field(default="", description="Commit SHA after update")
 
 
+class CodexExecutionRequest(BaseModel):
+    """Payload to execute prompt non-interactively using local Codex CLI."""
+    prompt: str = Field(..., description="Prompt or instructions for Codex agent")
+    system_prompt: Optional[str] = Field(default=None, description="Optional system instructions")
+    timeout_seconds: int = Field(default=120, description="Execution timeout in seconds")
+    model: Optional[str] = Field(default=None, description="Optional model override")
+    cwd: Optional[str] = Field(default=None, description="Working directory")
+
+
+class CodexExecutionResponse(BaseModel):
+    """Result of Codex execution on the node."""
+    success: bool = Field(..., description="True if Codex executed successfully")
+    text: str = Field(default="", description="Generated text / code / patch")
+    model: str = Field(default="gpt-5.6-sol", description="Actual model used by Codex")
+    tokens_used: int = Field(default=0, description="Tokens recorded by Codex CLI")
+    duration_seconds: float = Field(..., description="Duration of execution in seconds")
+    error: Optional[str] = Field(default=None, description="Error message if failed")
+
+
+def find_codex_binary() -> Optional[str]:
+    """Locate official Codex CLI executable on Windows or Linux."""
+    executable = shutil.which("codex")
+    if executable:
+        return executable
+    user_profile = Path.home()
+    candidates = [
+        user_profile / ".codex" / "environment" / "bin" / "codex.cmd",
+        user_profile / ".codex" / ".sandbox-bin" / "codex.exe",
+        user_profile / ".codex" / "plugins" / ".plugin-appserver" / "codex.exe",
+    ]
+    for c in candidates:
+        if c.is_file():
+            return str(c)
+    return None
+
+
 def trigger_daemon_restart(root_path: Path) -> None:
     """Spawns a new headless daemon process and terminates this instance."""
     import threading
@@ -255,6 +291,108 @@ def create_worker_app(
         """Spawns a new headless daemon process and terminates this instance."""
         trigger_daemon_restart(root_path)
         return {"status": "restarting", "node_id": node_id, "message": "Worker is restarting headless in background."}
+
+    @worker_app.post("/harness/codex", response_model=CodexExecutionResponse)
+    def execute_codex(req: CodexExecutionRequest) -> CodexExecutionResponse:
+        """Execute non-interactive prompt using official local Codex CLI."""
+        import tempfile
+        import uuid
+
+        executable = find_codex_binary()
+        if not executable:
+            return CodexExecutionResponse(
+                success=False,
+                error="Codex executable not found on host. Check PATH or installation in ~/.codex/",
+                duration_seconds=0.0,
+            )
+
+        full_prompt = req.prompt
+        if req.system_prompt:
+            full_prompt = f"System Instructions:\n{req.system_prompt}\n\nUser Prompt:\n{req.prompt}"
+
+        tmp_dir = root_path / ".factory" / "tmp"
+        tmp_dir.mkdir(parents=True, exist_ok=True)
+        tmp_out = tmp_dir / f"codex_out_{uuid.uuid4().hex[:8]}.txt"
+
+        subp_kwargs: Dict[str, Any] = {}
+        if sys.platform == "win32":
+            subp_kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
+
+        start_t = time.perf_counter()
+        target_cwd = Path(req.cwd).resolve() if req.cwd else root_path
+        model_flag = f'-m "{req.model}"' if req.model else ""
+        cmd = f'"{executable}" exec --sandbox read-only --ephemeral --skip-git-repo-check {model_flag} -o "{tmp_out}" -'
+
+        try:
+            logger.info("Executing Codex non-interactively on node %s (prompt length: %d)", node_id, len(full_prompt))
+            proc = subprocess.run(
+                cmd,
+                shell=True,
+                input=full_prompt,
+                capture_output=True,
+                text=True,
+                cwd=str(target_cwd),
+                timeout=req.timeout_seconds,
+                encoding="utf-8",
+                errors="replace",
+                **subp_kwargs,
+            )
+            duration = round(time.perf_counter() - start_t, 3)
+
+            output_text = ""
+            if tmp_out.is_file():
+                try:
+                    output_text = tmp_out.read_text(encoding="utf-8").strip()
+                except Exception as exc:
+                    logger.debug("Failed to read tmp_out: %s", exc)
+
+            if not output_text and proc.stdout.strip():
+                output_text = proc.stdout.strip()
+
+            detected_model = req.model or "gpt-5.6-sol"
+            tokens_used = 0
+            if proc.stderr:
+                for line in proc.stderr.splitlines():
+                    if line.startswith("model:"):
+                        detected_model = line.split(":", 1)[1].strip()
+
+            if proc.returncode != 0 and not output_text:
+                return CodexExecutionResponse(
+                    success=False,
+                    text="",
+                    model=detected_model,
+                    tokens_used=tokens_used,
+                    duration_seconds=duration,
+                    error=f"Codex exited with code {proc.returncode}: {proc.stderr[:500]}",
+                )
+
+            return CodexExecutionResponse(
+                success=True,
+                text=output_text,
+                model=detected_model,
+                tokens_used=tokens_used,
+                duration_seconds=duration,
+            )
+        except subprocess.TimeoutExpired:
+            dur = round(time.perf_counter() - start_t, 3)
+            return CodexExecutionResponse(
+                success=False,
+                error=f"Codex execution timed out after {req.timeout_seconds}s",
+                duration_seconds=dur,
+            )
+        except Exception as exc:
+            dur = round(time.perf_counter() - start_t, 3)
+            return CodexExecutionResponse(
+                success=False,
+                error=f"Codex execution error: {exc}",
+                duration_seconds=dur,
+            )
+        finally:
+            if tmp_out.exists():
+                try:
+                    tmp_out.unlink()
+                except Exception:
+                    pass
 
     return worker_app
 

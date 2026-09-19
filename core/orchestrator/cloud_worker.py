@@ -183,6 +183,36 @@ class CloudWorker:
         run_id = claim.job_key.run_id
 
         def _execute_stage() -> dict[str, Any]:
+            generated_text = None
+            measured_cost = 0.0
+            provider_backend = "deterministic_mock"
+
+            # When remote harness is configured, execute via remote Codex
+            remote_harness_url = os.environ.get("REMOTE_HARNESS_URL") or os.environ.get("DARKFAC_ONPREM_URL")
+            if (remote_harness_url or os.environ.get("USE_REMOTE_CODEX") == "true") and stage in ("planning", "development"):
+                try:
+                    from core.execution.providers import get_model_provider
+
+                    provider = get_model_provider("codex", base_url=remote_harness_url)
+                    prompt = (
+                        f"Dark Factory Task Dispatch\n"
+                        f"Run ID: {run_id}\n"
+                        f"Stage: {stage}\n"
+                        f"Ticket: {claim.job_key.ticket_id}\n\n"
+                        f"Por favor implemente a solucao completa para o ticket solicitado com codigo e testes."
+                    )
+                    resp = provider.generate(prompt, model="codex", ticket_id=claim.job_key.ticket_id)
+                    generated_text = resp.text
+                    measured_cost = resp.measured_cost or 0.0
+                    provider_backend = (resp.metadata or {}).get("backend", "remote_codex")
+                    logger.info("CloudWorker executed stage %s via remote provider (%s)", stage, provider_backend)
+                except Exception as exc:
+                    logger.warning(
+                        "Stage %s remote provider execution failed: %s; using deterministic fallback",
+                        stage,
+                        exc,
+                    )
+
             task_payload = {
                 "run_id": run_id,
                 "ticket_id": claim.job_key.ticket_id,
@@ -192,6 +222,8 @@ class CloudWorker:
                 "worker_id": self.worker_id,
                 "executed_at": effective_now.isoformat(),
                 "status": "APPROVED",
+                "provider": provider_backend,
+                "generated_output": generated_text,
             }
             raw_content = json.dumps(task_payload, indent=2)
             filename = f"{stage}_deliverable.json"
@@ -212,8 +244,9 @@ class CloudWorker:
                     f"sha256:{art_ref.sha256}",
                     f"lease:{claim.lease_id}",
                     f"fencing:{claim.fencing_token}",
+                    f"provider:{provider_backend}",
                 ],
-                actual_cost=0.0,
+                actual_cost=measured_cost,
             )
 
             self.store.finish(claim, stage_result, now=effective_now)
