@@ -147,9 +147,12 @@ def materialize_result(
         # failed, cancelled, waiting_dependency
         successors = []
 
-    # 2. Atomically persist to storage backend if SQLiteControlStore
-    if hasattr(store, "_connect"):
-        conn = store._connect()
+    # 2. Atomically persist to storage backend
+    sqlite_backend = getattr(store, "_backend", None) if getattr(store, "mock_mode", False) else (store if hasattr(store, "_connect") else None)
+    is_postgres = hasattr(store, "raw_url") and not getattr(store, "mock_mode", False) and hasattr(store, "_psycopg")
+
+    if sqlite_backend is not None:
+        conn = sqlite_backend._connect()
         try:
             conn.execute("BEGIN IMMEDIATE")
             cur = conn.cursor()
@@ -294,12 +297,200 @@ def materialize_result(
                 (job_key.run_id, json.dumps(outbox_payload), now_iso),
             )
 
+            # D. Check if workflow run has completed or failed
+            cur.execute(
+                "SELECT COUNT(*) FROM jobs WHERE run_id = ? AND status IN ('pending', 'running')",
+                (job_key.run_id,),
+            )
+            active_jobs_remaining = cur.fetchone()[0]
+            if active_jobs_remaining == 0:
+                cur.execute(
+                    "SELECT COUNT(*) FROM jobs WHERE run_id = ? AND status = 'failed'",
+                    (job_key.run_id,),
+                )
+                failed_jobs_count = cur.fetchone()[0]
+                final_run_status = "failed" if failed_jobs_count > 0 else "completed"
+                cur.execute(
+                    "UPDATE runs SET status = ?, completed_at = ?, updated_at = ? WHERE run_id = ?",
+                    (final_run_status, now_iso, now_iso, job_key.run_id),
+                )
+
             conn.commit()
         except Exception:
             conn.rollback()
             raise
         finally:
             conn.close()
+
+    elif is_postgres:
+        now_utc = now_dt.astimezone(UTC)
+        try:
+            with store._psycopg.connect(store.raw_url) as conn:
+                with conn.cursor() as cur:
+                    # Ensure run exists in runs table
+                    cur.execute("SELECT run_id FROM runs WHERE run_id = %s", (job_key.run_id,))
+                    if not cur.fetchone():
+                        runtime_owner = getattr(store, "runtime_owner", "cloud_dbos_postgres")
+                        cur.execute(
+                            """
+                            INSERT INTO runs (
+                                run_id, project_id, demand_id, demand_version, runtime_owner,
+                                mode, status, plan_digest, config_version, created_at, updated_at
+                            ) VALUES (%s, %s, %s, '1.0', %s, 'autonomous', 'active', 'plan-digest-default', '1.0', %s, %s)
+                            ON CONFLICT (run_id) DO NOTHING
+                            """,
+                            (
+                                job_key.run_id,
+                                job_key.ticket_id,
+                                f"dem-{job_key.run_id}",
+                                runtime_owner,
+                                now_utc,
+                                now_utc,
+                            ),
+                        )
+
+                    # A. Update/record the current job status
+                    cur.execute(
+                        """
+                        SELECT status, fencing_token, current_lease_id
+                        FROM jobs
+                        WHERE run_id = %s AND ticket_id = %s AND plan_version = %s AND stage = %s AND iteration = %s
+                        FOR UPDATE
+                        """,
+                        job_key.to_tuple(),
+                    )
+                    job_row = cur.fetchone()
+                    db_status = "succeeded" if result.outcome == "success" else result.outcome
+                    finished_at_utc = now_utc if db_status in ("succeeded", "failed", "cancelled") else None
+
+                    if job_row:
+                        cur_status = job_row[0]
+                        if cur_status in ("pending", "running"):
+                            cur.execute(
+                                """
+                                UPDATE jobs
+                                SET status = %s,
+                                    cause_code = %s,
+                                    actual_cost = actual_cost + %s,
+                                    output_refs = %s::jsonb,
+                                    evidence_refs = %s::jsonb,
+                                    finished_at = COALESCE(%s, finished_at),
+                                    updated_at = %s,
+                                    current_lease_id = NULL
+                                WHERE run_id = %s AND ticket_id = %s AND plan_version = %s AND stage = %s AND iteration = %s
+                                """,
+                                (
+                                    db_status,
+                                    result.cause_code,
+                                    result.actual_cost,
+                                    json.dumps(result.output_refs),
+                                    json.dumps(result.evidence_refs),
+                                    finished_at_utc,
+                                    now_utc,
+                                    *job_key.to_tuple(),
+                                ),
+                            )
+                            if job_row[2]:
+                                cur.execute(
+                                    "UPDATE claims SET status = 'released' WHERE lease_id = %s",
+                                    (job_row[2],),
+                                )
+                    else:
+                        cur.execute(
+                            """
+                            INSERT INTO jobs (
+                                run_id, ticket_id, plan_version, stage, iteration, status,
+                                role, required_capabilities, fencing_token, timeout_seconds,
+                                retry_count, max_retries, cause_code, actual_cost, output_refs, evidence_refs,
+                                created_at, updated_at, finished_at
+                            ) VALUES (%s, %s, %s, %s, %s, %s, %s, '[]'::jsonb, 0, 1800, 0, 3, %s, %s, %s::jsonb, %s::jsonb, %s, %s, %s)
+                            ON CONFLICT (run_id, ticket_id, plan_version, stage, iteration) DO NOTHING
+                            """,
+                            (
+                                job_key.run_id,
+                                job_key.ticket_id,
+                                job_key.plan_version,
+                                job_key.stage,
+                                job_key.iteration,
+                                db_status,
+                                STAGE_ROLES.get(job_key.stage, f"{job_key.stage}_worker"),
+                                result.cause_code,
+                                result.actual_cost,
+                                json.dumps(result.output_refs),
+                                json.dumps(result.evidence_refs),
+                                now_utc,
+                                now_utc,
+                                finished_at_utc,
+                            ),
+                        )
+
+                    # B. Idempotently insert successor jobs
+                    for succ in successors:
+                        succ_role = STAGE_ROLES.get(succ.stage, f"{succ.stage}_worker")
+                        cur.execute(
+                            """
+                            INSERT INTO jobs (
+                                run_id, ticket_id, plan_version, stage, iteration, status,
+                                role, required_capabilities, fencing_token, timeout_seconds,
+                                retry_count, max_retries, actual_cost, output_refs, evidence_refs,
+                                created_at, updated_at
+                            ) VALUES (%s, %s, %s, %s, %s, 'pending', %s, '[]'::jsonb, 0, 1800, 0, 3, 0.0, '[]'::jsonb, '[]'::jsonb, %s, %s)
+                            ON CONFLICT (run_id, ticket_id, plan_version, stage, iteration) DO NOTHING
+                            """,
+                            (
+                                succ.run_id,
+                                succ.ticket_id,
+                                succ.plan_version,
+                                succ.stage,
+                                succ.iteration,
+                                succ_role,
+                                now_utc,
+                                now_utc,
+                            ),
+                        )
+
+                    # C. Outbox record for materialization
+                    outbox_payload = {
+                        "run_id": job_key.run_id,
+                        "ticket_id": job_key.ticket_id,
+                        "source_job": job_key.canonical_key(),
+                        "outcome": result.outcome,
+                        "successors": [s.canonical_key() for s in successors],
+                    }
+                    cur.execute(
+                        """
+                        INSERT INTO outbox (
+                            event_type, aggregate_type, aggregate_id, payload,
+                            target_system, status, retry_count, created_at
+                        ) VALUES ('stage_materialized', 'run', %s, %s::jsonb, 'cloud_dbos', 'pending', 0, %s)
+                        """,
+                        (job_key.run_id, json.dumps(outbox_payload), now_utc),
+                    )
+
+                    # D. Check if workflow run has completed or failed
+                    cur.execute(
+                        "SELECT COUNT(*) FROM jobs WHERE run_id = %s AND status IN ('pending', 'running')",
+                        (job_key.run_id,),
+                    )
+                    row = cur.fetchone()
+                    active_jobs_remaining = row[0] if row else 0
+                    if active_jobs_remaining == 0:
+                        cur.execute(
+                            "SELECT COUNT(*) FROM jobs WHERE run_id = %s AND status = 'failed'",
+                            (job_key.run_id,),
+                        )
+                        f_row = cur.fetchone()
+                        failed_jobs_count = f_row[0] if f_row else 0
+                        final_run_status = "failed" if failed_jobs_count > 0 else "completed"
+                        cur.execute(
+                            "UPDATE runs SET status = %s, completed_at = %s, updated_at = %s WHERE run_id = %s",
+                            (final_run_status, now_utc, now_utc, job_key.run_id),
+                        )
+
+                    conn.commit()
+        except Exception as exc:
+            logger.error("PostgreSQL materialize_result failed: %s", exc)
+            raise
 
     elif hasattr(store, "emit_outbox"):
         store.emit_outbox(

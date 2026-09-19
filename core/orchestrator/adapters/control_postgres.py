@@ -926,3 +926,261 @@ class PostgresControlStore:
                     )
         except Exception as exc:
             raise StoreUnavailableError(f"PostgreSQL emit_outbox failed: {exc}") from exc
+
+    def get_pending_outbox(self, limit: int = 100) -> list[dict[str, Any]]:
+        """Query pending outbox events for publication or processing."""
+        if self.mock_mode:
+            return self._backend.get_pending_outbox(limit=limit)
+
+        try:
+            with self._psycopg.connect(self.raw_url) as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        SELECT outbox_id, event_type, aggregate_type, aggregate_id, payload,
+                               target_system, status, retry_count, created_at
+                        FROM outbox
+                        WHERE status = 'pending'
+                        ORDER BY created_at ASC
+                        LIMIT %s
+                        """,
+                        (limit,),
+                    )
+                    rows = cur.fetchall()
+                    out = []
+                    for r in rows:
+                        p = r[4] if isinstance(r[4], dict) else json.loads(r[4])
+                        c_at = r[8].isoformat() if hasattr(r[8], "isoformat") else str(r[8])
+                        out.append({
+                            "outbox_id": r[0],
+                            "event_type": r[1],
+                            "aggregate_type": r[2],
+                            "aggregate_id": r[3],
+                            "payload": p,
+                            "target_system": r[5],
+                            "status": r[6],
+                            "retry_count": r[7],
+                            "created_at": c_at,
+                        })
+                    return out
+        except Exception as exc:
+            logger.warning("PostgreSQL get_pending_outbox failed: %s", exc)
+            return []
+
+    def get_run_status(self, run_id: str) -> dict[str, Any] | None:
+        """Query full status of a run and its jobs."""
+        if self.mock_mode:
+            conn = self._backend._connect()
+            try:
+                cur = conn.cursor()
+                cur.execute("SELECT * FROM runs WHERE run_id = ?", (run_id,))
+                run_row = cur.fetchone()
+                if not run_row:
+                    return None
+                cur.execute("SELECT * FROM jobs WHERE run_id = ? ORDER BY created_at ASC", (run_id,))
+                jobs = []
+                for j in cur.fetchall():
+                    job_d = dict(j)
+                    if isinstance(job_d.get("output_refs"), str):
+                        try:
+                            job_d["output_refs"] = json.loads(job_d["output_refs"])
+                        except Exception:
+                            job_d["output_refs"] = []
+                    if isinstance(job_d.get("evidence_refs"), str):
+                        try:
+                            job_d["evidence_refs"] = json.loads(job_d["evidence_refs"])
+                        except Exception:
+                            job_d["evidence_refs"] = []
+                    jobs.append(job_d)
+                res = dict(run_row)
+                res["jobs"] = jobs
+                return res
+            finally:
+                conn.close()
+
+        try:
+            with self._psycopg.connect(self.raw_url) as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        SELECT run_id, project_id, demand_id, demand_version, runtime_owner,
+                               mode, status, plan_digest, config_version, created_at, updated_at, completed_at
+                        FROM runs
+                        WHERE run_id = %s
+                        """,
+                        (run_id,),
+                    )
+                    r = cur.fetchone()
+                    if not r:
+                        return None
+                    run_info = {
+                        "run_id": r[0],
+                        "project_id": r[1],
+                        "demand_id": r[2],
+                        "demand_version": r[3],
+                        "runtime_owner": r[4],
+                        "mode": r[5],
+                        "status": r[6],
+                        "plan_digest": r[7],
+                        "config_version": r[8],
+                        "created_at": r[9].isoformat() if hasattr(r[9], "isoformat") else str(r[9]),
+                        "updated_at": r[10].isoformat() if hasattr(r[10], "isoformat") else str(r[10]),
+                        "completed_at": r[11].isoformat() if r[11] and hasattr(r[11], "isoformat") else (str(r[11]) if r[11] else None),
+                    }
+                    cur.execute(
+                        """
+                        SELECT ticket_id, plan_version, stage, iteration, status, role,
+                               fencing_token, current_lease_id, actual_cost, output_refs, evidence_refs,
+                               created_at, updated_at, started_at, finished_at
+                        FROM jobs
+                        WHERE run_id = %s
+                        ORDER BY created_at ASC
+                        """,
+                        (run_id,),
+                    )
+                    jobs = []
+                    for j in cur.fetchall():
+                        o_refs = j[9] if isinstance(j[9], list) else (json.loads(j[9]) if j[9] else [])
+                        e_refs = j[10] if isinstance(j[10], list) else (json.loads(j[10]) if j[10] else [])
+                        jobs.append({
+                            "ticket_id": j[0],
+                            "plan_version": j[1],
+                            "stage": j[2],
+                            "iteration": j[3],
+                            "status": j[4],
+                            "role": j[5],
+                            "fencing_token": j[6],
+                            "current_lease_id": j[7],
+                            "actual_cost": float(j[8]) if j[8] is not None else 0.0,
+                            "output_refs": o_refs,
+                            "evidence_refs": e_refs,
+                            "created_at": j[11].isoformat() if hasattr(j[11], "isoformat") else str(j[11]),
+                            "updated_at": j[12].isoformat() if hasattr(j[12], "isoformat") else str(j[12]),
+                            "started_at": j[13].isoformat() if j[13] and hasattr(j[13], "isoformat") else (str(j[13]) if j[13] else None),
+                            "finished_at": j[14].isoformat() if j[14] and hasattr(j[14], "isoformat") else (str(j[14]) if j[14] else None),
+                        })
+                    run_info["jobs"] = jobs
+                    return run_info
+        except Exception as exc:
+            logger.warning("PostgreSQL get_run_status failed: %s", exc)
+            return None
+
+    def materialize(self, event: dict[str, Any], now: datetime) -> None:
+        """Confirm processing and dispatch of an outbox event."""
+        if self.mock_mode:
+            return self._backend.materialize(event, now)
+
+        now_utc = now.astimezone(UTC)
+        outbox_id = event.get("outbox_id") or event.get("event_id")
+        if outbox_id is None:
+            raise OutboxNotFoundError("Event dictionary must contain 'outbox_id' or 'event_id'.")
+
+        try:
+            with self._psycopg.connect(self.raw_url) as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        "UPDATE outbox SET status = 'published', published_at = %s WHERE outbox_id = %s",
+                        (now_utc, int(outbox_id)),
+                    )
+                    if cur.rowcount == 0:
+                        cur.execute("SELECT status FROM outbox WHERE outbox_id = %s", (int(outbox_id),))
+                        if not cur.fetchone():
+                            raise OutboxNotFoundError(f"Outbox event '{outbox_id}' not found.")
+                    conn.commit()
+        except OutboxNotFoundError:
+            raise
+        except Exception as exc:
+            raise StoreUnavailableError(f"PostgreSQL materialize failed: {exc}") from exc
+
+    def list_active_projects(self, cursor: str | None = None, limit: int = 100) -> tuple[list[str], str | None]:
+        """Stable paginated query of active project IDs ordered deterministically."""
+        if self.mock_mode:
+            return self._backend.list_active_projects(cursor=cursor, limit=limit)
+
+        try:
+            with self._psycopg.connect(self.raw_url) as conn:
+                with conn.cursor() as cur:
+                    if cursor:
+                        cur.execute(
+                            """
+                            SELECT DISTINCT project_id FROM runs
+                            WHERE status = 'active' AND project_id > %s
+                            ORDER BY project_id ASC
+                            LIMIT %s
+                            """,
+                            (cursor, limit),
+                        )
+                    else:
+                        cur.execute(
+                            """
+                            SELECT DISTINCT project_id FROM runs
+                            WHERE status = 'active'
+                            ORDER BY project_id ASC
+                            LIMIT %s
+                            """,
+                            (limit,),
+                        )
+                    rows = [r[0] for r in cur.fetchall()]
+                    next_cursor = rows[-1] if len(rows) == limit else None
+                    return rows, next_cursor
+        except Exception as exc:
+            logger.warning("PostgreSQL list_active_projects failed: %s", exc)
+            return [], None
+
+    def get_ready_age_metrics(self, now: datetime) -> dict[str, Any]:
+        """Query ready-age and claim distribution for pending jobs."""
+        if self.mock_mode:
+            return self._backend.get_ready_age_metrics(now)
+
+        now_utc = now.astimezone(UTC)
+        try:
+            with self._psycopg.connect(self.raw_url) as conn:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT COUNT(*) FROM runs WHERE status = 'active'")
+                    row = cur.fetchone()
+                    active_runs = row[0] if row else 0
+
+                    cur.execute(
+                        """
+                        SELECT j.run_id, r.project_id, j.ticket_id, j.stage, j.status, j.created_at, j.updated_at
+                        FROM jobs j
+                        JOIN runs r ON j.run_id = r.run_id
+                        WHERE j.status IN ('pending', 'running')
+                        """
+                    )
+                    rows = cur.fetchall()
+
+                    pending_count = 0
+                    running_count = 0
+                    max_ready_age_sec = 0.0
+                    starved_projects: set[str] = set()
+
+                    for r in rows:
+                        status = r[4]
+                        created_dt = r[5] if hasattr(r[5], "astimezone") else datetime.fromisoformat(str(r[5])).astimezone(UTC)
+                        age_sec = max(0.0, (now_utc - created_dt).total_seconds())
+                        if status == "pending":
+                            pending_count += 1
+                            if age_sec > max_ready_age_sec:
+                                max_ready_age_sec = age_sec
+                            if age_sec >= 30.0:
+                                starved_projects.add(r[1])
+                        elif status == "running":
+                            running_count += 1
+
+                    return {
+                        "active_runs": active_runs,
+                        "pending_count": pending_count,
+                        "running_count": running_count,
+                        "max_ready_age_sec": max_ready_age_sec,
+                        "starved_projects": sorted(starved_projects),
+                    }
+        except Exception as exc:
+            logger.warning("PostgreSQL get_ready_age_metrics failed: %s", exc)
+            return {
+                "active_runs": 0,
+                "pending_count": 0,
+                "running_count": 0,
+                "max_ready_age_sec": 0.0,
+                "starved_projects": [],
+            }
