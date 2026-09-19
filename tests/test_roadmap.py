@@ -77,6 +77,8 @@ CONTINUOUS_AUTONOMY_IDS = {
     'HF-15-02',
 }
 
+FUTURE_PILOT_IDS = {'HF-23-02'}
+
 
 def make_item(
     item_id: str,
@@ -163,13 +165,13 @@ def test_repository_sources_compile_with_stable_hash() -> None:
 
     expected_rm_ids = {f"RM-{number:02d}" for number in range(1, 10)}
     expected_df_ids = {f"DF-{number:02d}" for number in range(1, 24)}
-    assert {item.id for item in first.items} == expected_rm_ids | expected_df_ids | CONTINUOUS_AUTONOMY_IDS
+    assert {item.id for item in first.items} == expected_rm_ids | expected_df_ids | CONTINUOUS_AUTONOMY_IDS | FUTURE_PILOT_IDS
     assert {item.id for item in first.items if item.id.startswith("DF-")} == expected_df_ids
     assert first.snapshot_hash == second.snapshot_hash
     assert first.snapshot_id == second.snapshot_id
     assert direct_first.snapshot_hash == direct_second.snapshot_hash
-    assert first.stats.total_items == 66
-    assert first.stats.confirmed_items == 66
+    assert first.stats.total_items == 67
+    assert first.stats.confirmed_items == 67
     assert {state.source_id for state in first.sources_consulted} == {
         "approved-roadmap",
         "development-plan",
@@ -179,6 +181,10 @@ def test_repository_sources_compile_with_stable_hash() -> None:
     new_items = [item for item in first.items if item.id in CONTINUOUS_AUTONOMY_IDS]
     assert all(item.delivery_status == DeliveryStatus.PLANNED for item in new_items)
     assert all(not item.evidence_refs for item in new_items)
+    pilot = next(item for item in first.items if item.id == 'HF-23-02')
+    assert pilot.delivery_status == DeliveryStatus.PLANNED
+    assert pilot.horizon == PlanningHorizon.LATER
+    assert not pilot.evidence_refs
 
 
 def test_development_plan_source_parses_ticket_dependencies() -> None:
@@ -394,4 +400,4 @@ def test_cli_and_library_expose_the_same_snapshot_hash() -> None:
         *(f"RM-{number:02d}" for number in range(1, 10)),
         *(f"DF-{number:02d}" for number in range(1, 24)),
     }
-    assert {item["id"] for item in payload["items"]} == expected_ids | CONTINUOUS_AUTONOMY_IDS
+    assert {item["id"] for item in payload["items"]} == expected_ids | CONTINUOUS_AUTONOMY_IDS | FUTURE_PILOT_IDS

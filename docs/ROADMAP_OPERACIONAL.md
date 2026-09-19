@@ -50,3 +50,14 @@ Este arquivo registra as fontes humanas do roadmap aprovado para o painel do Dar
 [Plano mestre](CONTINUOUS_AUTONOMY_PLAN_2026-09-18.md), [33 handoffs e DAG](handoffs/continuous-autonomy/INDEX.md), [fonte estruturada](../.factory/planning/continuous-autonomy/plan.json). HF-26 agrega a composição; HF-05-02 reutiliza o sucessor já reservado. Os novos IDs estão no manifesto JSON consumido pelo compilador, sem alteração de status dos pais históricos. Snapshot local não prova painel publicado.
 
 Primeiro contrato: HF-26-01, resolvedor puro de política, sem dependência técnica; admissão por supervisor qualificado e preflight permanecem obrigatórios. Nenhum novo item está implementado ou operacionalmente verificado.
+
+## Ticket futuro — piloto Jev e método de pilotos
+
+[HF-23-02](handoffs/HF-23-02.md) está registrado no manifesto
+`.factory/roadmap/darkfac.json` como item **planned / later**, filho de HF-23.
+Ele formaliza um contrato headless mínimo de piloto reutilizável e usa a
+pré-classificação Jev como primeiro caso em shadow mode. Depende do intake
+canônico HF-08-01 e das rotas qualificadas HF-07-02 para observação integrada.
+Não pertence às 33 unidades do plano de composição de 18/09, não altera o
+despacho atual e requer handoff tipado, fatiamento e aprovação técnica antes da
+implementação.

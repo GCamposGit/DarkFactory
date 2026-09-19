@@ -683,6 +683,51 @@
       "parent_id": "HF-23"
     },
     {
+      "id": "HF-23-02",
+      "project_id": "darkfac",
+      "title": "Pilotos reutilizáveis e pré-classificação Jev",
+      "description": "Planejar e implementar, em etapa futura, contrato mínimo de pilotos headless reutilizável; Jev é o primeiro candidato em shadow mode para classificar etapa e complexidade antes do roteador. Comparação pareada com baseline, holdout, incerteza e guardrails sem alterar despacho durante o piloto.",
+      "item_type": "feature",
+      "lifecycle_stage": "execution",
+      "delivery_status": "planned",
+      "state_rationale": "Ticket futuro planejado; decisão do owner permite descrições reais completas em tarefas elegíveis para nuvem. Ainda sem WorkflowHandoff/PlanApproval, implementação, shadow operacional ou promoção. Registro não autoriza despacho.",
+      "horizon": "later",
+      "confidence": "medium",
+      "dependencies": [
+        {
+          "item_id": "HF-08-01",
+          "type": "requires"
+        },
+        {
+          "item_id": "HF-07-02",
+          "type": "requires"
+        }
+      ],
+      "tags": [
+        "model-routing",
+        "jev",
+        "pilot",
+        "shadow-mode",
+        "planning-only"
+      ],
+      "completion_criteria": [
+        "Contrato de piloto reutilizável com hipótese, população, versões, holdout, métricas, incerteza, orçamento, riscos sentinela e relatório sem promoção automática.",
+        "Jev observado em demandas reais elegíveis pela API direta, comparado em pares ao classificador atual sem alterar executor, Grill ou gates.",
+        "Relatório inclui erros por estrato, calibração quando rotulada, intervalos, custo/latência e inconclusivo quando faltarem dados; tarefas offline e segredos não são enviados.",
+        "Handoff tipado e fatiamento em unidades pequenas aprovados antes de qualquer implementação; testes e gates da fábrica passam no candidato limpo."
+      ],
+      "source_refs": [
+        {
+          "source_id": "approved-roadmap",
+          "source_kind": "document",
+          "label": "Demanda do owner — piloto Jev e método reutilizável, 19/09/2026",
+          "locator": "docs/handoffs/HF-23-02.md",
+          "produced_by": "codex-planner-2026-09-19"
+        }
+      ],
+      "parent_id": "HF-23"
+    },
+    {
       "id": "HF-08-01",
       "project_id": "darkfac",
       "title": "Intake atômico e documental explícito",
