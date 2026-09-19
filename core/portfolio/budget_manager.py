@@ -111,6 +111,16 @@ class PortfolioBudgetManager:
         self._save()
         return budget
 
+    @staticmethod
+    def to_integer_units(amount_usd: float, unit_rate: int = 1000) -> int:
+        """Convert USD amount to integer accounting units (e.g. millicents)."""
+        return int(round(max(0.0, amount_usd) * unit_rate))
+
+    def get_remaining_units(self, project_id: str, unit_rate: int = 1000) -> int:
+        """Get remaining budget in integer units for the project."""
+        budget = self.get_budget(project_id)
+        return self.to_integer_units(budget.remaining_usd, unit_rate)
+
     def _evaluate_thresholds(self, budget: ProjectBudgetConfig) -> None:
         """Check spend against alert and cutoff thresholds and trigger notifications."""
         pct = budget.utilization_pct

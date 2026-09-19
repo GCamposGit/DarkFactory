@@ -83,6 +83,9 @@ def main() -> int:
     intake_p.add_argument("--criteria", nargs="*", default=[], help="Acceptance criteria")
     intake_p.add_argument("--audio-file", default=None, help="Audio file to transcribe via Skill 09")
     intake_p.add_argument("--project", default="darkfac", help="Project identifier")
+    intake_p.add_argument("--mode", choices=["autonomous", "documentary"], default="autonomous", help="Intake execution mode")
+    intake_p.add_argument("--external-id", default=None, help="External ID for idempotency and replay")
+    intake_p.add_argument("--store-path", default=None, help="Path to control database")
     intake_p.add_argument("--force-heuristic", action="store_true", help="Force deterministic script")
     intake_p.add_argument("--json", action="store_true", help="Output raw JSON")
 
@@ -256,39 +259,64 @@ def main() -> int:
         return 0
 
     elif args.command == "intake":
-        if args.audio_file:
-            res = service.receive_audio_demand(
-                args.audio_file,
-                args.project,
-                args.title,
-                force_heuristic=args.force_heuristic,
-            )
-        else:
-            inp = DemandInput(
-                project_id=args.project,
-                title=args.title,
-                problem_statement=args.problem,
-                core_journey=args.journey,
-                non_goals=args.non_goals,
-                acceptance_criteria=args.criteria,
-            )
-            res = service.receive_integrated_demand(inp, force_heuristic=args.force_heuristic)
+        import hashlib
+        from datetime import UTC, datetime
+        from core.workflow.control_contracts import (
+            IdempotencyConflict,
+            IntakeCommand,
+            StoreUnavailableError,
+        )
+        from core.workflow.control_store import SQLiteControlStore
+        from core.demands.autonomous_intake import AutonomousIntakeService
 
-        if args.json:
-            out_dict = {
-                "ticket": res["ticket"].model_dump(mode="json"),
-                "run_id": res["run_id"],
-                "status": res["status"],
-                "ready_for_spec": res["grill_record"].ready_for_spec,
-                "pending_questions": [q.model_dump(mode="json") for q in res["grill_record"].pending_questions],
-            }
-            print(json.dumps(out_dict, indent=2))
-        else:
-            print(f"[OK] Demanda {res['ticket'].id} recebida com sucesso! (Run: {res['run_id']})")
-            print(f"Status do Grill: {res['status']} - {res['grill_record'].readiness_justification}")
-            if res.get("grill_session"):
-                print(f"Aviso: {len(res['grill_session'].questions)} pergunta(s) pendente(s). Execute `grill {res['ticket'].id}` para responder.")
-        return 0
+        ext_id = args.external_id or f"cli-{args.project}-{hashlib.sha256(args.title.encode('utf-8')).hexdigest()[:12]}"
+        db_path = Path(args.store_path) if args.store_path else PROJECT_ROOT / ".factory" / "control.db"
+
+        try:
+            db_path.parent.mkdir(parents=True, exist_ok=True)
+            store = SQLiteControlStore(db_path=db_path)
+            auto_service = AutonomousIntakeService(store=store, demands_store=service.store)
+
+            cmd = IntakeCommand(
+                channel="cli",
+                external_id=ext_id,
+                project_id=args.project,
+                payload={
+                    "title": args.title,
+                    "problem": args.problem,
+                    "journey": args.journey,
+                    "non_goals": args.non_goals,
+                    "criteria": args.criteria,
+                },
+                mode=args.mode,
+                policy_ref="policy-v1",
+            )
+            receipt = auto_service.accept(cmd, datetime.now(UTC))
+
+            if args.json:
+                ticket = service.store.get_ticket(receipt.demand_id)
+                ticket_dict = ticket.model_dump(mode="json") if ticket else {"id": receipt.demand_id, "title": args.title}
+                out_dict = {
+                    **receipt.model_dump(mode="json"),
+                    "receipt": receipt.model_dump(mode="json"),
+                    "ticket": ticket_dict,
+                    "ready_for_spec": True,
+                    "status": "accepted",
+                    "pending_questions": [],
+                }
+                print(json.dumps(out_dict, indent=2))
+            else:
+                print(f"[OK] Demanda {receipt.demand_id} aceita atomicamente no ControlStore!")
+                print(f"Run ID: {receipt.run_id} | Initial Job: {receipt.initial_job_id}")
+                print(f"External ID: {ext_id} | Modo: {receipt.mode}")
+            return 0
+        except IdempotencyConflict as err:
+            print(f"[CONFLITO] Conflito de idempotência na demanda '{ext_id}': {err}", file=sys.stderr)
+            return 1
+        except Exception as exc:
+            # Undisposable store must never pretend to accept
+            print(f"[ERRO] Falha na persistência transacional da demanda: {exc}", file=sys.stderr)
+            return 1
 
     elif args.command == "plan":
         ticket = service.get_ticket(args.ticket_id)

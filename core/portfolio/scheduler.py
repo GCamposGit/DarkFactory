@@ -45,17 +45,21 @@ class PortfolioScheduler:
         capacity_config: Optional[SlotCapacityConfig] = None,
         weight_config: Optional[ProjectWeightConfig] = None,
         storage_file: Optional[Path] = None,
+        composed_mode: bool = False,
     ) -> None:
         self.capacity = capacity_config or SlotCapacityConfig()
         self.weights = weight_config or ProjectWeightConfig()
         self.storage_file = storage_file or DEFAULT_SCHEDULER_FILE
-        self.storage_file.parent.mkdir(parents=True, exist_ok=True)
+        self.composed_mode = composed_mode
+        if not self.composed_mode:
+            self.storage_file.parent.mkdir(parents=True, exist_ok=True)
 
         self._active_slots: Dict[str, SlotAllocation] = {}
         self._queues: Dict[str, List[Dict[str, Any]]] = {}
         self._starvation_ticks: Dict[str, int] = {}
         self._deficit_credits: Dict[str, float] = {}
-        self._load()
+        if not self.composed_mode:
+            self._load()
 
     def _load(self) -> None:
         """Load state from persistent JSON file."""
@@ -125,6 +129,8 @@ class PortfolioScheduler:
         lease_seconds: float = 30.0,
     ) -> Optional[SlotAllocation]:
         """Attempt to claim a capacity slot. Returns SlotAllocation if successful, None if saturated."""
+        if self.composed_mode:
+            raise RuntimeError("Composed mode forbids JSON slot allocations; delegate claims to ControlStore.")
         self._reconcile_expired_slots()
         if not self.can_acquire_slot(kind):
             logger.warning(

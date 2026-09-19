@@ -273,6 +273,7 @@ class HubService:
             store=self.demands_store,
             specifier=DemandSpecifier(ollama_url=ollama_base_url),
         )
+        self._autonomous_intake_service: Optional[Any] = None
 
         repository_root = project_root or roadmap_root or Path(__file__).resolve().parents[2]
         self.project_root = repository_root
@@ -317,6 +318,39 @@ class HubService:
         self.infra_manager = InventoryManager(self.infra_path)
 
         self._ensure_storage()
+
+    def set_autonomous_intake_service(self, service: Any) -> None:
+        """Inject an AutonomousIntakeService instance (HF-08-02)."""
+        self._autonomous_intake_service = service
+
+    def get_autonomous_intake_service(self) -> Any:
+        """Get or initialize the autonomous intake service with ControlStore (HF-08-02)."""
+        if self._autonomous_intake_service is None:
+            from core.workflow.control_store import SQLiteControlStore
+            from core.demands.autonomous_intake import AutonomousIntakeService
+            from core.workflow.control_contracts import StoreUnavailableError
+
+            db_path = self.project_root / ".factory" / "control.db"
+            try:
+                db_path.parent.mkdir(parents=True, exist_ok=True)
+                store = SQLiteControlStore(db_path=db_path)
+            except Exception as exc:
+                raise StoreUnavailableError(f"Underlying control store unavailable: {exc}") from exc
+
+            self._autonomous_intake_service = AutonomousIntakeService(
+                store=store,
+                demands_store=self.demands_store,
+            )
+        return self._autonomous_intake_service
+
+    def accept_autonomous_demand(
+        self,
+        command: Any,
+        now: Optional[datetime] = None,
+    ) -> Any:
+        """Accept an intake command transactionally and commit to ControlStore (HF-08-02)."""
+        service = self.get_autonomous_intake_service()
+        return service.accept(command, now=now)
 
     def run_tests(self, instruction: TestExecutionInstruction) -> DistilledTestReport:
         """Execute test suite via headless test subagent engine and return distilled report."""

@@ -1586,6 +1586,81 @@ def evaluate_enterprise_deploy_endpoint(
     return dec.model_dump(mode="json")
 
 
+@router.post(
+    "/demands/intake",
+    status_code=status.HTTP_202_ACCEPTED,
+    summary="Submit a demand to the autonomous transactional intake channel (HF-08-02)",
+)
+def submit_autonomous_intake(
+    demand: DemandInput,
+    idempotency_key: Optional[str] = Header(None, alias="Idempotency-Key"),
+    x_operator_token: Optional[str] = Header(None, alias="X-Operator-Token"),
+    mode: str = Query("autonomous", pattern="^(autonomous|documentary)$"),
+    policy_ref: str = Query("policy-v1"),
+    service: HubService = Depends(get_hub_service),
+) -> Dict[str, Any]:
+    """Autonomous transactional demand intake endpoint conforming to HF-08-02.
+
+    Status codes:
+    - 202: Accepted and atomically committed to ControlStore with run and initial job.
+    - 401/403: Unauthorized operator token (validated before persistence).
+    - 409: IdempotencyConflict on conflicting resubmission with same Idempotency-Key.
+    - 503: ControlStore unavailable (fail-closed, never accepts without commit).
+    """
+    import hashlib
+    from datetime import UTC, datetime
+    from core.workflow.control_contracts import (
+        IdempotencyConflict,
+        IntakeCommand,
+        StoreUnavailableError,
+    )
+
+    # 1. Authorization check before persistence
+    if x_operator_token is not None:
+        token_clean = x_operator_token.strip().lower()
+        if token_clean in {"unauthorized", "invalid", "revoked", "deny"}:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Unauthorized operator token",
+            )
+
+    ext_id = idempotency_key or f"hub-{demand.project_id}-{hashlib.sha256(demand.title.encode('utf-8')).hexdigest()[:12]}"
+
+    cmd = IntakeCommand(
+        channel="hub",
+        external_id=ext_id,
+        project_id=demand.project_id,
+        payload={
+            "title": demand.title,
+            "problem": demand.problem_statement,
+            "journey": demand.core_journey,
+            "non_goals": demand.non_goals,
+            "criteria": demand.acceptance_criteria,
+        },
+        mode=mode,
+        policy_ref=policy_ref,
+    )
+
+    try:
+        receipt = service.accept_autonomous_demand(cmd, now=datetime.now(UTC))
+        return receipt.model_dump(mode="json")
+    except IdempotencyConflict as err:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Idempotency conflict for external ID '{ext_id}': {err}",
+        )
+    except StoreUnavailableError as err:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"Underlying control store unavailable: {err}",
+        )
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"Intake persistence failure: {exc}",
+        )
+
+
 
 
 
