@@ -48,6 +48,10 @@ def main() -> int:
     create_p.add_argument("--horizon", default="now", choices=["now", "next", "later", "exploratory", "unscheduled"])
     create_p.add_argument("--type", default="feature", choices=["feature", "quality", "infrastructure", "operations", "documentation"])
     create_p.add_argument("--force-heuristic", action="store_true", help="Force deterministic script without Ollama")
+    create_p.add_argument("--mode", choices=["autonomous", "documentary"], default="documentary", help="Intake execution mode")
+    create_p.add_argument("--external-id", default=None, help="External ID for idempotency and replay")
+    create_p.add_argument("--store-path", default=None, help="Path to control database")
+    create_p.add_argument("--json", action="store_true", help="Output raw JSON")
 
     # list command
     list_p = subparsers.add_parser("list", help="List user demand tickets")
@@ -135,6 +139,65 @@ def main() -> int:
         return 0
 
     elif args.command == "create":
+        if args.mode == "autonomous":
+            import hashlib
+            from datetime import UTC, datetime
+            from core.workflow.control_contracts import (
+                IdempotencyConflict,
+                IntakeCommand,
+                StoreUnavailableError,
+            )
+            from core.workflow.control_store import SQLiteControlStore
+            from core.demands.autonomous_intake import AutonomousIntakeService
+
+            ext_id = args.external_id or f"cli-{args.project}-{hashlib.sha256(args.title.encode('utf-8')).hexdigest()[:12]}"
+            db_path = Path(args.store_path) if args.store_path else PROJECT_ROOT / ".factory" / "control.db"
+
+            try:
+                db_path.parent.mkdir(parents=True, exist_ok=True)
+                store = SQLiteControlStore(db_path=db_path)
+                auto_service = AutonomousIntakeService(store=store, demands_store=service.store)
+
+                cmd = IntakeCommand(
+                    channel="cli",
+                    external_id=ext_id,
+                    project_id=args.project,
+                    payload={
+                        "title": args.title,
+                        "problem": args.problem,
+                        "journey": args.journey,
+                        "non_goals": args.non_goals,
+                        "criteria": args.criteria,
+                    },
+                    mode="autonomous",
+                    policy_ref="policy-v1",
+                )
+                receipt = auto_service.accept(cmd, datetime.now(UTC))
+
+                if args.json:
+                    ticket = service.store.get_ticket(receipt.demand_id)
+                    ticket_dict = ticket.model_dump(mode="json") if ticket else {"id": receipt.demand_id, "title": args.title}
+                    out_dict = {
+                        **receipt.model_dump(mode="json"),
+                        "receipt": receipt.model_dump(mode="json"),
+                        "ticket": ticket_dict,
+                        "ready_for_spec": True,
+                        "status": "accepted",
+                        "pending_questions": [],
+                    }
+                    print(json.dumps(out_dict, indent=2))
+                else:
+                    print(f"[OK] Ticket {receipt.demand_id} criado de forma autônoma no ControlStore!")
+                    print(f"Run ID: {receipt.run_id} | Initial Job: {receipt.initial_job_id}")
+                    print(f"External ID: {ext_id} | Modo: {receipt.mode}")
+                return 0
+            except IdempotencyConflict as err:
+                print(f"[CONFLITO] Conflito de idempotência na demanda '{ext_id}': {err}", file=sys.stderr)
+                return 1
+            except Exception as exc:
+                print(f"[ERRO] Falha na persistência transacional da demanda: {exc}", file=sys.stderr)
+                return 1
+
         inp = DemandInput(
             project_id=args.project,
             title=args.title,
@@ -146,10 +209,13 @@ def main() -> int:
             item_type=RoadmapItemType(args.type),
         )
         ticket = service.create_ticket_from_input(inp, force_heuristic=args.force_heuristic)
-        print(f"[OK] Ticket {ticket.id} criado com sucesso e incluído no backlog!")
-        print(f"Título: {ticket.title}")
-        print(f"Tags: {', '.join(ticket.tags)}")
-        print(f"Status: {ticket.status.value}")
+        if args.json:
+            print(ticket.model_dump_json(indent=2))
+        else:
+            print(f"[OK] Ticket {ticket.id} criado com sucesso e incluído no backlog!")
+            print(f"Título: {ticket.title}")
+            print(f"Tags: {', '.join(ticket.tags)}")
+            print(f"Status: {ticket.status.value}")
         return 0
 
     elif args.command == "list":

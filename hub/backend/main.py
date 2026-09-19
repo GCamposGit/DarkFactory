@@ -3,7 +3,8 @@ Main FastAPI application entrypoint for DarkHub.
 """
 
 from pathlib import Path
-from fastapi import Depends, FastAPI
+from typing import Any, Dict, Optional
+from fastapi import Depends, FastAPI, Header, Query, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -13,6 +14,7 @@ import urllib.parse
 from starlette.types import ASGIApp, Scope, Receive, Send
 from starlette.responses import Response, JSONResponse
 
+from core.demands.models import DemandInput
 from hub.backend.api import get_hub_service, roadmap_router, router as api_router
 from hub.backend.models import ProgressProjection, TaskDashboardReport
 from hub.backend.service import HubService
@@ -188,6 +190,29 @@ def get_project_roadmap_progress_root(
 ) -> ProgressProjection:
     """Root alias for the continuous progress and stagnation projection (HF-13-02)."""
     return service.get_progress_projection(project_id)
+
+
+# Root-level aliases for autonomous intake (HF-08-02)
+@app.post("/demands/intake", status_code=status.HTTP_202_ACCEPTED, tags=["DarkHub Demands"], include_in_schema=False)
+@app.post("/demands/intake/", status_code=status.HTTP_202_ACCEPTED, include_in_schema=False)
+def submit_autonomous_intake_root(
+    demand: DemandInput,
+    idempotency_key: Optional[str] = Header(None, alias="Idempotency-Key"),
+    x_operator_token: Optional[str] = Header(None, alias="X-Operator-Token"),
+    mode: str = Query("autonomous", pattern="^(autonomous|documentary)$"),
+    policy_ref: str = Query("policy-v1"),
+    service: HubService = Depends(get_hub_service),
+) -> Dict[str, Any]:
+    """Root alias for the autonomous transactional intake endpoint (HF-08-02)."""
+    from hub.backend.api import submit_autonomous_intake
+    return submit_autonomous_intake(
+        demand=demand,
+        idempotency_key=idempotency_key,
+        x_operator_token=x_operator_token,
+        mode=mode,
+        policy_ref=policy_ref,
+        service=service,
+    )
 
 
 # Root route serving index.html
