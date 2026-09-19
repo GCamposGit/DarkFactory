@@ -131,7 +131,14 @@ class GitHubClient:
         if timeout_seconds <= 0:
             raise ValueError("timeout_seconds must be positive")
         self.base_url = normalized_base
-        self.token = token if token is not None else (os.environ.get("GITHUB_TOKEN") or _read_env_github_token())
+        if token is not None:
+            self.token = token
+        elif os.environ.get("GITHUB_TOKEN"):
+            self.token = os.environ.get("GITHUB_TOKEN")
+        elif transport is None:
+            self.token = _read_env_github_token()
+        else:
+            self.token = None
         self.transport = transport
         self.timeout_seconds = float(timeout_seconds)
 
