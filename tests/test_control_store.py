@@ -346,16 +346,20 @@ def test_stage_result_retry_and_terminal_outcomes(store: ControlStore) -> None:
     # Retry 2
     store.finish(claim2, retry_res, t0 + timedelta(seconds=10))
 
-    # Claim 3
+    # Claim 3 (retry 2)
     claim3 = store.claim("w3", ["economy", "coding"], t0 + timedelta(seconds=11))
     assert claim3 is not None
     assert claim3.fencing_token == 3
-
-    # Retry 3 -> hits max_retries default (3)
     store.finish(claim3, retry_res, t0 + timedelta(seconds=15))
 
-    # Exceeded max_retries -> status is failed, no further claim possible
-    claim_after_fail = store.claim("w4", ["economy", "coding"], t0 + timedelta(seconds=20))
+    # Claim 4 (retry 3 - final allowed retry attempt)
+    claim4 = store.claim("w4", ["economy", "coding"], t0 + timedelta(seconds=16))
+    assert claim4 is not None
+    assert claim4.fencing_token == 4
+    store.finish(claim4, retry_res, t0 + timedelta(seconds=20))
+
+    # Exceeded max_retries (3 retries completed) -> status is failed, no further claim possible
+    claim_after_fail = store.claim("w5", ["economy", "coding"], t0 + timedelta(seconds=25))
     assert claim_after_fail is None
 
     # Test waiting_human outcome on a separate command
