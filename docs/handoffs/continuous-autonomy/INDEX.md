@@ -16,7 +16,7 @@ Todos especificados; só HF-26-01 sem predecessor técnico. Prontidão de contra
 | [HF-05-06](HF-05-06.md) — Entrypoints cloud permanentes | economy | implemented | HF-05-05, HF-23-01 |
 | [HF-23-01](HF-23-01.md) — Reserva única e justiça de portfólio | economy | needs_architecture_binding | HF-05-03, HF-07-02 |
 | [HF-08-01](HF-08-01.md) — Intake atômico e documental explícito | economy | implemented | HF-05-03 |
-| [HF-08-02](HF-08-02.md) — Hub e CLI usam intake canônico | economy | waiting_dependency | HF-08-01 |
+| [HF-08-02](HF-08-02.md) — Hub e CLI usam intake canônico | economy | implemented | HF-08-01 |
 | [HF-08-03](HF-08-03.md) — Telegram e importação de legado | economy | implemented | HF-08-02, HF-05-04 |
 | [HF-08-04](HF-08-04.md) — Planejamento contínuo do escopo conhecido | economy | needs_architecture_binding | HF-05-04, HF-07-02 |
 | [HF-08-05](HF-08-05.md) — Probe e retomada de dependências manuais | economy | waiting_dependency | HF-05-04 |
