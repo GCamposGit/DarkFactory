@@ -167,6 +167,10 @@ class RoadmapItem(BaseModel):
     downstream_item_ids: list[str] = Field(default_factory=list)
     confirmation_state: ConfirmationState = ConfirmationState.CONFIRMED
 
+    planning_status: str | None = None
+    implementation_status: str | None = None
+    operational_status: str | None = None
+
 
 class RoadmapCandidate(RoadmapItem):
     """Internal source record with precedence metadata."""
@@ -174,6 +178,9 @@ class RoadmapCandidate(RoadmapItem):
     id: str = ""
     source_id: str = Field(..., min_length=1)
     source_priority: int = 100
+    planning_status: str | None = None
+    implementation_status: str | None = None
+    operational_status: str | None = None
 
 
 class RoadmapConsistencyIssue(BaseModel):

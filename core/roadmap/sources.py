@@ -42,6 +42,28 @@ class RoadmapSourceResult:
     content: str = ""
 
 
+def is_report_for_ticket(report_name: str, ticket_id: str) -> bool:
+    """Deterministic check if a report file belongs to a ticket, preventing parent-child false positives.
+
+    For example, 'hf-05-02-runtime-report.md' belongs to 'HF-05-02', and MUST NEVER match parent 'HF-05'.
+    """
+    slug = ticket_id.lower().strip()
+    name = report_name.lower().strip()
+    if not (name.endswith("-report.md") or name.endswith(".md")):
+        return False
+    if name == f"{slug}-report.md":
+        return True
+    prefix = f"{slug}-"
+    if not name.startswith(prefix):
+        return False
+    remainder = name[len(prefix):]
+    # If the remainder immediately starts with digits followed by '-', '_', or '.',
+    # it belongs to a child sub-ticket (e.g. hf-05-02 belongs to HF-05-02, not HF-05).
+    if re.match(r"^\d{1,3}(?:-|_|\.|$)", remainder):
+        return False
+    return True
+
+
 class JsonRoadmapSource:
     """Load an explicit, versioned roadmap source without executing its text."""
 
@@ -50,12 +72,18 @@ class JsonRoadmapSource:
         path: Path,
         *,
         evidence_dir: Path | None = None,
+        plan_path: Path | None = None,
+        receipts: list[Any] | None = None,
+        receipts_dir: Path | None = None,
         source_id: str = "approved-roadmap",
         label: str = "Roadmap operacional aprovado",
         priority: int = 10,
     ) -> None:
         self.path = Path(path)
         self.evidence_dir = Path(evidence_dir) if evidence_dir else None
+        self.plan_path = Path(plan_path) if plan_path else None
+        self.receipts = list(receipts) if receipts is not None else []
+        self.receipts_dir = Path(receipts_dir) if receipts_dir else None
         self.source_id = source_id
         self.label = label
         self.priority = priority
@@ -65,10 +93,25 @@ class JsonRoadmapSource:
         try:
             content = self.path.read_text(encoding="utf-8")
             evidence_files = self._evidence_files()
+            plan_hash = ""
+            plan_units: dict[str, dict[str, Any]] = {}
+            if self.plan_path and self.plan_path.exists():
+                try:
+                    plan_content = self.plan_path.read_text(encoding="utf-8")
+                    plan_hash = hashlib.sha256(plan_content.encode("utf-8")).hexdigest()
+                    plan_data = json.loads(plan_content)
+                    if isinstance(plan_data, dict):
+                        for u in plan_data.get("units", []):
+                            if isinstance(u, dict) and "ticket_id" in u:
+                                plan_units[str(u["ticket_id"]).strip()] = u
+                except Exception:
+                    pass
+
             content_hash = hashlib.sha256(
                 json.dumps(
                     {
                         "manifest": content,
+                        "plan_hash": plan_hash,
                         "evidence": [
                             {
                                 "name": report.name,
@@ -110,11 +153,23 @@ class JsonRoadmapSource:
                     )
                 ]
                 normalized_raw = dict(raw)
+                item_id = str(raw.get("id", "")).strip()
+
+                if item_id in plan_units:
+                    unit = plan_units[item_id]
+                    if unit.get("planning_status"):
+                        normalized_raw["planning_status"] = str(unit["planning_status"])
+                    if unit.get("implementation_status"):
+                        normalized_raw["implementation_status"] = str(unit["implementation_status"])
+                    if unit.get("operational_status"):
+                        normalized_raw["operational_status"] = str(unit["operational_status"])
+
                 evidence_refs = list(raw.get("evidence_refs") or [])
-                evidence_refs.extend(self._evidence_refs(str(raw.get("id", ""))))
+                evidence_refs.extend(self._evidence_refs(item_id))
                 if evidence_refs:
                     normalized_raw["evidence_refs"] = evidence_refs
-                    if normalized_raw.get("delivery_status") == DeliveryStatus.PLANNED.value:
+                    has_verified = any(ref.verified for ref in evidence_refs)
+                    if normalized_raw.get("delivery_status") == DeliveryStatus.PLANNED.value and has_verified:
                         normalized_raw["delivery_status"] = DeliveryStatus.COMPLETED.value
                         normalized_raw["state_rationale"] = (
                             "Relatório de implementação vinculado ao ticket e usado como evidência de conclusão."
@@ -162,25 +217,61 @@ class JsonRoadmapSource:
         )
 
     def _evidence_refs(self, item_id: str) -> list[RoadmapEvidenceRef]:
-        if not item_id or self.evidence_dir is None:
+        if not item_id:
             return []
-        slug = item_id.lower()
-        reports = list(self.evidence_dir.glob(f"{slug}-*-report.md"))
+        refs: list[RoadmapEvidenceRef] = []
+        for r in self.receipts:
+            if hasattr(r, "subject") and r.subject == item_id:
+                res = getattr(r, "result", None)
+                is_passed = str(res) in ("passed", "EvidenceResult.PASSED") or (hasattr(res, "value") and res.value == "passed")
+                is_verified = getattr(r, "verified", True) and is_passed
+                receipt_id = getattr(r, "receipt_id", f"receipt-{item_id}")
+                refs.append(
+                    RoadmapEvidenceRef(
+                        evidence_id=f"receipt:{item_id}:{receipt_id}",
+                        evidence_kind="verified_receipt",
+                        label=f"Recibo verificado {item_id}",
+                        locator=getattr(r, "locator", f"receipt://{receipt_id}"),
+                        observed_at=getattr(r, "observed_at", None),
+                        verified=is_verified,
+                    )
+                )
+
+        if self.evidence_dir is None or not self.evidence_dir.exists():
+            return refs
+
+        reports: list[Path] = [
+            report for report in self._evidence_files()
+            if is_report_for_ticket(report.name, item_id)
+        ]
         if item_id in {f"RM-{number:02d}" for number in range(1, 8)}:
             operational_report = self.evidence_dir / "roadmap-operacional-report.md"
-            if operational_report.is_file():
+            if operational_report.is_file() and operational_report not in reports:
                 reports.append(operational_report)
-        return [
-            RoadmapEvidenceRef(
-                evidence_id=f"report:{item_id}:{report.name}",
-                evidence_kind="implementation_report",
-                label=f"Relatório de implementação {item_id}",
-                locator=report.as_posix(),
-                verified=True,
-            )
-            for report in sorted(reports)
-            if report.is_file()
-        ]
+
+        is_hf = item_id.startswith("HF-")
+        for report in sorted(reports):
+            if is_hf:
+                refs.append(
+                    RoadmapEvidenceRef(
+                        evidence_id=f"doc:{item_id}:{report.name}",
+                        evidence_kind="documentary_unverified",
+                        label=f"Relatório documental não verificado {item_id}",
+                        locator=report.as_posix(),
+                        verified=False,
+                    )
+                )
+            else:
+                refs.append(
+                    RoadmapEvidenceRef(
+                        evidence_id=f"report:{item_id}:{report.name}",
+                        evidence_kind="implementation_report",
+                        label=f"Relatório de implementação {item_id}",
+                        locator=report.as_posix(),
+                        verified=True,
+                    )
+                )
+        return refs
 
 
 class MarkdownDevelopmentPlanSource:
@@ -892,3 +983,271 @@ class InfraRoadmapJsonSource:
             for report in reports
             if report.is_file()
         ]
+
+
+class ContinuousAutonomyPlanSource:
+    """Roadmap source adapter for continuous autonomy plan (plan.json).
+
+    - Chaveamento por ID completo (ex: HF-13-01 é tratado por seu ID completo e não truncado ou confundido com pai HF-13).
+    - Relatórios markdown globbed em .factory/reports/ (ex: slug-*-report.md) DEVEM ser rotulados como documentais
+      não verificados (evidence_kind="documentary_unverified" e verified=False), NUNCA conferindo status completed.
+    - Status de conclusão (completed) requer obrigatoriamente um recibo vinculado e confiável (EvidenceReceipt / verified=True).
+    - Proteção contra falso positivo pai-filho: evidência de HF-05-02 JAMAIS conclui HF-05.
+    - Fonte offline ou com erro é marcada como stale ou unavailable sem quebrar nem truncar o grafo do DAG.
+    """
+
+    def __init__(
+        self,
+        path: Path,
+        *,
+        evidence_dir: Path | None = None,
+        receipts: list[Any] | None = None,
+        receipts_dir: Path | None = None,
+        source_id: str = "continuous-autonomy-plan",
+        label: str = "Plano de Autonomia Contínua",
+        priority: int = 15,
+    ) -> None:
+        self.path = Path(path)
+        self.evidence_dir = Path(evidence_dir) if evidence_dir else None
+        self.receipts = list(receipts) if receipts is not None else []
+        self.receipts_dir = Path(receipts_dir) if receipts_dir else None
+        self.source_id = source_id
+        self.label = label
+        self.priority = priority
+        self._cached_records: list[RoadmapCandidate] | None = None
+        self._cached_hash: str | None = None
+
+    def read(self, project_id: str) -> RoadmapSourceResult:
+        locator = self.path.as_posix()
+        if not self.path.exists():
+            status = "stale" if self._cached_records is not None else "unavailable"
+            records = self._cached_records or []
+            state = RoadmapSourceState(
+                source_id=self.source_id,
+                label=self.label,
+                source_kind="document",
+                locator=locator,
+                status=status,
+                revision=self._cached_hash,
+                content_hash=self._cached_hash,
+                error=f"file not found: {locator}",
+            )
+            return RoadmapSourceResult(state=state, records=records, content="")
+
+        try:
+            content = self.path.read_text(encoding="utf-8")
+            payload = json.loads(content)
+            if not isinstance(payload, dict):
+                raise ValueError("plan manifest must be a JSON object")
+
+            raw_units = payload.get("units", [])
+            if not isinstance(raw_units, list):
+                raise ValueError("plan units must be a list")
+
+            evidence_files = self._evidence_files()
+            content_hash = hashlib.sha256(
+                json.dumps(
+                    {
+                        "manifest": content,
+                        "evidence": [
+                            {
+                                "name": r.name,
+                                "hash": hashlib.sha256(r.read_bytes()).hexdigest(),
+                            }
+                            for r in evidence_files
+                        ],
+                    },
+                    sort_keys=True,
+                    ensure_ascii=False,
+                ).encode("utf-8")
+            ).hexdigest()
+
+            records: list[RoadmapCandidate] = []
+            for unit in raw_units:
+                if not isinstance(unit, dict):
+                    continue
+                ticket_id = str(unit.get("ticket_id", "")).strip()
+                if not ticket_id:
+                    continue
+
+                parent_id = str(unit.get("parent_id", "")).strip() or None
+                title = str(unit.get("title", ticket_id)).strip()
+                oracle = str(unit.get("oracle", "")).strip()
+                api_desc = str(unit.get("api", "")).strip()
+                criteria = [oracle] if oracle else ([api_desc] if api_desc else [])
+
+                planning_status = unit.get("planning_status")
+                implementation_status = unit.get("implementation_status")
+                operational_status = unit.get("operational_status")
+
+                dependencies = [
+                    RoadmapDependency(
+                        item_id=str(dep_id).strip(),
+                        type=DependencyType.REQUIRES,
+                        label="Dependência declarada no plano de autonomia contínua",
+                    )
+                    for dep_id in unit.get("depends_on", [])
+                    if str(dep_id).strip()
+                ]
+
+                evidence_refs = self._evidence_refs(ticket_id)
+                has_verified_receipt = any(ref.verified for ref in evidence_refs)
+
+                if has_verified_receipt:
+                    status = DeliveryStatus.COMPLETED
+                    rationale = f"Concluído com recibo de evidência vinculado e confiável ({ticket_id})."
+                elif evidence_refs:
+                    status = DeliveryStatus.PLANNED
+                    rationale = f"Ticket {ticket_id} possui relatório documental não verificado; conclusão requer recibo verificado."
+                else:
+                    status = DeliveryStatus.PLANNED
+                    rationale = f"Planejado no plano de autonomia contínua com planning_status={planning_status}."
+
+                source_ref = RoadmapSourceRef(
+                    source_id=self.source_id,
+                    source_kind="document",
+                    label=f"{self.label} — {ticket_id}",
+                    locator=f"{locator}#{ticket_id}",
+                    revision=content_hash,
+                    produced_by="continuous-autonomy-planner",
+                )
+
+                candidate = RoadmapCandidate(
+                    id=ticket_id,
+                    project_id=project_id,
+                    title=f"{ticket_id} — {title}",
+                    description=f"API: {api_desc}\nOracle: {oracle}".strip(),
+                    state_rationale=rationale,
+                    item_type=RoadmapItemType.FEATURE,
+                    lifecycle_stage=LifecycleStage.EXECUTION,
+                    delivery_status=status,
+                    horizon=PlanningHorizon.NOW,
+                    confidence=ConfidenceLevel.HIGH,
+                    dependencies=dependencies,
+                    parent_id=parent_id,
+                    planning_status=str(planning_status) if planning_status else None,
+                    implementation_status=str(implementation_status) if implementation_status else None,
+                    operational_status=str(operational_status) if operational_status else None,
+                    tags=["continuous-autonomy"] + ([f"parent:{parent_id}"] if parent_id else []),
+                    completion_criteria=criteria,
+                    source_refs=[source_ref],
+                    evidence_refs=evidence_refs,
+                    source_revision=content_hash,
+                    source_id=self.source_id,
+                    source_priority=self.priority,
+                )
+                records.append(candidate)
+
+            self._cached_records = records
+            self._cached_hash = content_hash
+
+            state = RoadmapSourceState(
+                source_id=self.source_id,
+                label=self.label,
+                source_kind="document",
+                locator=locator,
+                revision=content_hash,
+                content_hash=content_hash,
+            )
+            return RoadmapSourceResult(state=state, records=records, content=content)
+        except Exception as exc:
+            status = "stale" if self._cached_records is not None else "unavailable"
+            records = self._cached_records or []
+            state = RoadmapSourceState(
+                source_id=self.source_id,
+                label=self.label,
+                source_kind="document",
+                locator=locator,
+                status=status,
+                revision=self._cached_hash,
+                content_hash=self._cached_hash,
+                error=str(exc),
+            )
+            return RoadmapSourceResult(state=state, records=records, content="")
+
+    def _evidence_files(self) -> list[Path]:
+        if self.evidence_dir is None or not self.evidence_dir.exists():
+            return []
+        return sorted(
+            report
+            for report in self.evidence_dir.glob("*-report.md")
+            if report.is_file()
+        )
+
+    def _evidence_refs(self, item_id: str) -> list[RoadmapEvidenceRef]:
+        refs: list[RoadmapEvidenceRef] = []
+        refs.extend(self._find_receipts_for_item(item_id))
+
+        if self.evidence_dir is not None and self.evidence_dir.exists():
+            for report in self._evidence_files():
+                if is_report_for_ticket(report.name, item_id):
+                    refs.append(
+                        RoadmapEvidenceRef(
+                            evidence_id=f"doc:{item_id}:{report.name}",
+                            evidence_kind="documentary_unverified",
+                            label=f"Relatório documental não verificado {item_id}",
+                            locator=report.as_posix(),
+                            verified=False,
+                        )
+                    )
+        return refs
+
+    def _find_receipts_for_item(self, item_id: str) -> list[RoadmapEvidenceRef]:
+        receipt_refs: list[RoadmapEvidenceRef] = []
+        for r in self.receipts:
+            if isinstance(r, RoadmapEvidenceRef):
+                if (hasattr(r, "subject") and r.subject == item_id) or r.evidence_id.startswith(f"receipt:{item_id}:"):
+                    receipt_refs.append(r)
+            elif isinstance(r, dict):
+                if r.get("subject") == item_id:
+                    res = r.get("result", "passed")
+                    is_passed = str(res) in ("passed", "EvidenceResult.PASSED") or getattr(res, "value", None) == "passed"
+                    is_verified = r.get("verified", True) and is_passed
+                    receipt_refs.append(
+                        RoadmapEvidenceRef(
+                            evidence_id=r.get("receipt_id") or f"receipt:{item_id}:{len(receipt_refs)}",
+                            evidence_kind="verified_receipt",
+                            label=r.get("label") or f"Recibo verificado {item_id}",
+                            locator=r.get("locator") or f"receipt://{r.get('receipt_id', 'receipt')}",
+                            observed_at=r.get("observed_at"),
+                            verified=is_verified,
+                        )
+                    )
+            elif hasattr(r, "subject") and r.subject == item_id:
+                res = getattr(r, "result", None)
+                is_passed = str(res) in ("passed", "EvidenceResult.PASSED") or (hasattr(res, "value") and res.value == "passed")
+                is_verified = getattr(r, "verified", True) and is_passed
+                receipt_id = getattr(r, "receipt_id", f"receipt-{item_id}")
+                receipt_refs.append(
+                    RoadmapEvidenceRef(
+                        evidence_id=f"receipt:{item_id}:{receipt_id}",
+                        evidence_kind="verified_receipt",
+                        label=f"Recibo verificado {item_id}",
+                        locator=getattr(r, "locator", f"receipt://{receipt_id}"),
+                        observed_at=getattr(r, "observed_at", None),
+                        verified=is_verified,
+                    )
+                )
+
+        if self.receipts_dir is not None and self.receipts_dir.exists():
+            for f in sorted(self.receipts_dir.glob("*.json")):
+                try:
+                    data = json.loads(f.read_text(encoding="utf-8"))
+                    if isinstance(data, dict) and data.get("subject") == item_id:
+                        res = data.get("result", "passed")
+                        is_passed = str(res) in ("passed", "EvidenceResult.PASSED") or getattr(res, "value", None) == "passed"
+                        is_verified = data.get("verified", True) and is_passed
+                        receipt_refs.append(
+                            RoadmapEvidenceRef(
+                                evidence_id=data.get("receipt_id") or f"receipt:{item_id}:{f.name}",
+                                evidence_kind="verified_receipt",
+                                label=data.get("label") or f"Recibo verificado {item_id}",
+                                locator=f.as_posix(),
+                                observed_at=data.get("observed_at"),
+                                verified=is_verified,
+                            )
+                        )
+                except Exception:
+                    continue
+
+        return receipt_refs

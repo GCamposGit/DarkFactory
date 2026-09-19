@@ -21,6 +21,7 @@ from core.roadmap.models import (
     RoadmapStats,
 )
 from core.roadmap.sources import (
+    ContinuousAutonomyPlanSource,
     HybridWorkflowPlanSource,
     InfraRoadmapJsonSource,
     JsonRoadmapSource,
@@ -213,8 +214,10 @@ def build_repository_roadmap_service(
     include_demands: bool = False,
     include_hf: bool = False,
     include_infra: bool = False,
+    include_continuous_autonomy: bool = False,
     hf_plan_path: Path | None = None,
     infra_roadmap_path: Path | None = None,
+    continuous_autonomy_plan_path: Path | None = None,
 ) -> RoadmapQueryService:
     """Build the default DarkHub service from all versioned roadmap sources."""
 
@@ -222,7 +225,17 @@ def build_repository_roadmap_service(
     manifest_path = repository_root / ".factory" / "roadmap" / "darkfac.json"
     development_plan_path = repository_root / "docs" / "DEVELOPMENT_PLAN_2026-09-05.md"
     evidence_dir = repository_root / ".factory" / "reports"
-    manifest_source = JsonRoadmapSource(manifest_path, evidence_dir=evidence_dir)
+
+    target_continuous_path = continuous_autonomy_plan_path or (
+        repository_root / ".factory" / "planning" / "continuous-autonomy" / "plan.json"
+    )
+    plan_to_enrich = target_continuous_path if target_continuous_path.exists() else None
+
+    manifest_source = JsonRoadmapSource(
+        manifest_path,
+        evidence_dir=evidence_dir,
+        plan_path=plan_to_enrich,
+    )
     development_plan_source = MarkdownDevelopmentPlanSource(
         development_plan_path,
         evidence_dir=evidence_dir,
@@ -305,6 +318,23 @@ def build_repository_roadmap_service(
                 if target_hf_path.exists() else ""
             ),
             content_type="text/markdown",
+        )
+
+    if include_continuous_autonomy:
+        ca_source = ContinuousAutonomyPlanSource(
+            target_continuous_path,
+            evidence_dir=evidence_dir,
+        )
+        sources.append(ca_source)
+        documents[ca_source.source_id] = RoadmapSourceDocument(
+            source_id=ca_source.source_id,
+            label=ca_source.label,
+            locator=target_continuous_path.relative_to(repository_root).as_posix() if target_continuous_path.is_relative_to(repository_root) else target_continuous_path.as_posix(),
+            content=(
+                target_continuous_path.read_text(encoding="utf-8")
+                if target_continuous_path.exists() else ""
+            ),
+            content_type="application/json",
         )
 
     return RoadmapQueryService(

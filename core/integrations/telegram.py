@@ -203,6 +203,7 @@ class TelegramGateway:
         self,
         config: TelegramConfig,
         state_dir: Optional[Path] = None,
+        intake_service: Optional[Any] = None,
         demand_handler: Optional[Callable[[str, int], Dict[str, Any]]] = None,
         grill_handler: Optional[Callable[[str, str, int], Dict[str, Any]]] = None,
         approval_handler: Optional[Callable[[str, str, int], Dict[str, Any]]] = None,
@@ -214,6 +215,7 @@ class TelegramGateway:
         self.state_file = self.state_dir / "gateway_state.json"
         self.outbox_file = self.state_dir / "outbox.json"
 
+        self.intake_service = intake_service
         self.demand_handler = demand_handler
         self.grill_handler = grill_handler
         self.approval_handler = approval_handler
@@ -222,6 +224,7 @@ class TelegramGateway:
         self.last_offset: int = 0
         self.processed_update_ids: Set[int] = set()
         self.processed_callback_ids: Set[str] = set()
+        self.processed_message_ids: Set[str] = set()
         self._load_state()
 
     def _load_state(self) -> None:
@@ -232,6 +235,7 @@ class TelegramGateway:
                 self.last_offset = int(data.get("last_offset", 0))
                 self.processed_update_ids = set(data.get("processed_update_ids", []))
                 self.processed_callback_ids = set(data.get("processed_callback_ids", []))
+                self.processed_message_ids = set(data.get("processed_message_ids", []))
             except Exception as exc:
                 logger.warning("Failed to load Telegram gateway state: %s", exc)
 
@@ -241,6 +245,7 @@ class TelegramGateway:
             "last_offset": self.last_offset,
             "processed_update_ids": list(self.processed_update_ids)[-1000:],  # keep last 1000
             "processed_callback_ids": list(self.processed_callback_ids)[-1000:],
+            "processed_message_ids": list(self.processed_message_ids)[-1000:],
             "updated_at": datetime.now(UTC).isoformat(),
         }
         temp_path = self.state_file.with_suffix(".tmp")
@@ -248,13 +253,24 @@ class TelegramGateway:
         temp_path.replace(self.state_file)
 
     def is_authorized(self, user_id: Optional[int], chat_id: Optional[int]) -> bool:
-        """Enforce strict authorization: sender must match authorized_user_ids or chat_ids."""
+        """Enforce strict authorization: sender must match authorized_user_ids and authorized_chat_ids."""
         if not self.config.authorized_user_ids and not self.config.authorized_chat_ids:
             return False  # Fail-closed if no authorized IDs are configured
 
-        user_allowed = bool(user_id and user_id in self.config.authorized_user_ids)
-        chat_allowed = bool(chat_id and chat_id in self.config.authorized_chat_ids)
-        return user_allowed or chat_allowed
+        # If authorized_user_ids is configured, user_id must be in it
+        if self.config.authorized_user_ids:
+            if user_id is None or user_id not in self.config.authorized_user_ids:
+                return False
+
+        # If authorized_chat_ids is configured, chat_id must be in it when chat_id is present
+        if self.config.authorized_chat_ids:
+            if chat_id is not None and chat_id not in self.config.authorized_chat_ids:
+                return False
+            # If chat_id is not present (e.g. inline callback query without chat), user_id must have been authorized
+            if chat_id is None and not self.config.authorized_user_ids:
+                return False
+
+        return True
 
     def process_update(self, update_data: Dict[str, Any]) -> TelegramDispatchResult:
         """Ingest, verify, deduplicate, and route a Telegram update payload."""
@@ -292,40 +308,22 @@ class TelegramGateway:
                 response_text="Duplicate update already processed.",
             )
 
-
-        # 2. Advance offset tracking
-        if update.update_id >= self.last_offset:
-            self.last_offset = update.update_id + 1
-
-        # 3. Handle Message
+        # 2. Deduplication check on message (chat_id, message_id)
         if update.message:
-            return self._handle_message(update)
+            msg_key = f"{update.message.chat.id}:{update.message.message_id}"
+            if msg_key in self.processed_message_ids:
+                return TelegramDispatchResult(
+                    update_id=update.update_id,
+                    action=TelegramActionType.UNKNOWN,
+                    authorized=is_auth,
+                    duplicate=True,
+                    response_text="Duplicate message already processed.",
+                )
 
-        # 4. Handle Callback Query
-        if update.callback_query:
-            return self._handle_callback(update)
-
-        # Unknown update type
-        self.processed_update_ids.add(update.update_id)
-        self._save_state()
-        return TelegramDispatchResult(
-            update_id=update.update_id,
-            action=TelegramActionType.UNKNOWN,
-            authorized=False,
-            response_text="Unsupported update event type.",
-        )
-
-    def _handle_message(self, update: TelegramUpdate) -> TelegramDispatchResult:
-        msg = update.message
-        assert msg is not None
-        user_id = msg.from_user.id if msg.from_user else None
-        chat_id = msg.chat.id
-        raw_text = (msg.text or "").strip()
-
-        # Authorization check
-        if not self.is_authorized(user_id, chat_id):
+        # 3. Strict authorization gate
+        if not is_auth:
             logger.warning(
-                "Unauthorized Telegram message attempt from user_id=%s, chat_id=%s",
+                "Unauthorized Telegram update attempt from user_id=%s, chat_id=%s",
                 user_id,
                 chat_id,
             )
@@ -338,7 +336,39 @@ class TelegramGateway:
                 response_text="Access Denied: You are not authorized to command Dark Factory.",
             )
 
-        # Parse command
+        # 4. Dispatch update
+        if update.message:
+            result = self._handle_message(update)
+        elif update.callback_query:
+            result = self._handle_callback(update)
+        else:
+            result = TelegramDispatchResult(
+                update_id=update.update_id,
+                action=TelegramActionType.UNKNOWN,
+                authorized=True,
+                response_text="Unsupported update event type.",
+            )
+
+        # 5. Post-commit persistence: only advance offset and record IDs if transaction succeeded
+        if result.error:
+            # Transaction failed -> do NOT advance offset or record update as processed
+            return result
+
+        self.processed_update_ids.add(update.update_id)
+        if update.message:
+            self.processed_message_ids.add(f"{update.message.chat.id}:{update.message.message_id}")
+        if update.update_id >= self.last_offset:
+            self.last_offset = update.update_id + 1
+        self._save_state()
+        return result
+
+    def _handle_message(self, update: TelegramUpdate) -> TelegramDispatchResult:
+        msg = update.message
+        assert msg is not None
+        user_id = msg.from_user.id if msg.from_user else None
+        chat_id = msg.chat.id
+        raw_text = (msg.text or "").strip()
+
         parts = raw_text.split(maxsplit=1)
         cmd_str = parts[0].lower() if parts else ""
         arg_str = parts[1] if len(parts) > 1 else ""
@@ -352,21 +382,47 @@ class TelegramGateway:
         if cmd_str in ("/start", "/help"):
             result.action = TelegramActionType.START
             result.response_text = (
-                "\U0001f44b Dark Factory Autonomous Control Bot\n\n"
+                "👋 Dark Factory Autonomous Control Bot\n\n"
                 "Available commands:\n"
-                "• /demand &lt;text&gt; - Ingest a new demand into backlog\n"
+                "• /demand <text> - Ingest a new demand into backlog\n"
                 "• /status [ticket_id] - Check status of runs and pipelines\n"
                 "• /alerts - Check active token quota and operational alerts\n"
-                "• /grill &lt;ticket_id&gt; &lt;choice&gt; - Answer Grill clarification questions\n"
-                "• /approve &lt;project_id&gt; &lt;artifact_digest&gt; - Approve production release\n"
+                "• /grill <ticket_id> <choice> - Answer Grill clarification questions\n"
+                "• /approve <project_id> <artifact_digest> - Approve production release\n"
             )
 
         elif cmd_str == "/demand":
             result.action = TelegramActionType.DEMAND
             if not arg_str:
-                result.response_text = "\u26a0\ufe0f Usage: /demand &lt;description of feature or bugfix&gt;"
+                result.response_text = "⚠️ Usage: /demand <description of feature or bugfix>"
             else:
-                if self.demand_handler:
+                if self.intake_service is not None:
+                    try:
+                        from core.workflow.control_contracts import IntakeCommand
+                        ext_id = f"tg-msg-{chat_id}-{msg.message_id}"
+                        cmd = IntakeCommand(
+                            project_id="darkfac",
+                            channel="telegram",
+                            external_id=ext_id,
+                            payload={
+                                "title": arg_str[:80],
+                                "problem": arg_str,
+                                "journey": [f"Telegram user {user_id} in chat {chat_id}"],
+                                "non_goals": [],
+                                "criteria": ["Autonomous intake verification"],
+                            },
+                            mode="autonomous",
+                            policy_ref="telegram-policy-v1",
+                        )
+                        receipt = self.intake_service.accept(cmd, datetime.now(UTC))
+                        demand_id = receipt.demand_id
+                        result.target_id = demand_id
+                        result.response_text = f"✅ Demand registered successfully: <b>{demand_id}</b>"
+                    except Exception as exc:
+                        logger.error("Telegram intake_service error: %s", exc)
+                        result.error = str(exc)
+                        result.response_text = f"❌ Failed to register demand: {exc}"
+                elif self.demand_handler:
                     try:
                         res = self.demand_handler(arg_str, user_id or 0)
                         ticket_id = res.get("ticket_id", "TICKET-AUTO")
@@ -398,7 +454,7 @@ class TelegramGateway:
             result.action = TelegramActionType.GRILL
             subparts = arg_str.split(maxsplit=1)
             if len(subparts) < 2:
-                result.response_text = "\u26a0\ufe0f Usage: /grill &lt;ticket_id&gt; &lt;your answer / choice&gt;"
+                result.response_text = "⚠️ Usage: /grill <ticket_id> <your answer / choice>"
             else:
                 t_id, answer = subparts[0].strip(), subparts[1].strip()
                 result.target_id = t_id
@@ -418,7 +474,7 @@ class TelegramGateway:
             result.action = TelegramActionType.APPROVE
             subparts = arg_str.split(maxsplit=1)
             if len(subparts) < 2:
-                result.response_text = "\u26a0\ufe0f Usage: /approve &lt;project_id&gt; &lt;artifact_digest&gt;"
+                result.response_text = "⚠️ Usage: /approve <project_id> <artifact_digest>"
             else:
                 p_id, digest = subparts[0].strip(), subparts[1].strip()
                 result.target_id = f"{p_id}:{digest}"
@@ -462,15 +518,13 @@ class TelegramGateway:
         else:
             result.response_text = f"❓ Unknown command: {cmd_str}. Send /help for command list."
 
-
-        self.processed_update_ids.add(update.update_id)
-        self._save_state()
         return result
 
     def _handle_callback(self, update: TelegramUpdate) -> TelegramDispatchResult:
         cb = update.callback_query
         assert cb is not None
         user_id = cb.from_user.id
+        chat_id = cb.message.chat.id if cb.message else None
         data_str = cb.data or ""
 
         # Check duplicate callback query ID
@@ -481,19 +535,6 @@ class TelegramGateway:
                 authorized=True,
                 duplicate=True,
                 response_text="Callback already handled.",
-            )
-
-        # Authorization check
-        if not self.is_authorized(user_id, None):
-            logger.warning("Unauthorized callback attempt from user_id=%s", user_id)
-            self.processed_callback_ids.add(cb.id)
-            self.processed_update_ids.add(update.update_id)
-            self._save_state()
-            return TelegramDispatchResult(
-                update_id=update.update_id,
-                action=TelegramActionType.UNAUTHORIZED,
-                authorized=False,
-                response_text="Unauthorized callback action.",
             )
 
         # Format: cb:<action>:<arg1>:<arg2>...
@@ -546,9 +587,53 @@ class TelegramGateway:
             result.response_text = f"Action received: {data_str}"
 
         self.processed_callback_ids.add(cb.id)
-        self.processed_update_ids.add(update.update_id)
-        self._save_state()
         return result
+
+    def handle_webhook(
+        self,
+        payload: Dict[str, Any],
+        secret_token: Optional[str] = None,
+    ) -> TelegramDispatchResult:
+        """Handle incoming webhook update with secret token verification and durable dispatch."""
+        if self.config.webhook_secret_token and secret_token != self.config.webhook_secret_token:
+            logger.warning("Rejected webhook update: secret token mismatch")
+            return TelegramDispatchResult(
+                update_id=payload.get("update_id", 0),
+                action=TelegramActionType.UNAUTHORIZED,
+                authorized=False,
+                error="Invalid webhook secret token",
+                response_text="Access Denied: Invalid webhook secret token.",
+            )
+        return self.process_update(payload)
+
+    def poll_updates(
+        self,
+        limit: int = 100,
+        timeout: Optional[int] = None,
+    ) -> List[TelegramDispatchResult]:
+        """Poll updates from Telegram using durable last_offset."""
+        if not self.config.bot_token:
+            logger.debug("Telegram polling skipped: no bot_token configured")
+            return []
+
+        timeout_sec = timeout if timeout is not None else self.config.poll_timeout_seconds
+        url = f"{self.config.api_base_url}/bot{self.config.bot_token}/getUpdates?offset={self.last_offset}&limit={limit}&timeout={timeout_sec}"
+        req = urllib.request.Request(url, headers={"Content-Type": "application/json"}, method="GET")
+        try:
+            with urllib.request.urlopen(req, timeout=timeout_sec + 5) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+                if not data.get("ok"):
+                    logger.warning("Telegram getUpdates returned error: %s", data)
+                    return []
+                updates = data.get("result", [])
+                results: List[TelegramDispatchResult] = []
+                for u in updates:
+                    res = self.process_update(u)
+                    results.append(res)
+                return results
+        except Exception as exc:
+            logger.warning("Failed to poll Telegram updates: %s", exc)
+            return []
 
     def send_message(
         self,
