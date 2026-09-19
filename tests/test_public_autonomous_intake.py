@@ -282,3 +282,88 @@ def test_cli_intake_conflict_fails_closed(tmp_path: Path) -> None:
     )
     assert proc2.returncode == 1
     assert "conflito" in proc2.stderr.lower() or "conflito" in proc2.stdout.lower()
+
+
+def test_cli_create_subprocess_autonomous_and_replay(tmp_path: Path) -> None:
+    """CLI create with --mode autonomous creates run and initial job, with idempotent replay."""
+    db_path = tmp_path / "cli_create_control.db"
+    demands_json = tmp_path / "cli_create_demands.json"
+    demands_json.write_text("[]", encoding="utf-8")
+
+    env = {**os.environ, "DARKFAC_DEMANDS_PATH": str(demands_json)}
+
+    base_args = [
+        sys.executable,
+        "-m",
+        "core.demands.cli",
+        "create",
+        "--mode",
+        "autonomous",
+        "--external-id",
+        "ext-create-replay",
+        "--store-path",
+        str(db_path),
+        "--json",
+    ]
+
+    # 1. First execution succeeds
+    proc1 = subprocess.run(
+        base_args + ["--title", "Create Auto Title", "--problem", "Problem description"],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        check=True,
+        env=env,
+    )
+    out1 = json.loads(proc1.stdout)
+    assert out1["demand_id"].startswith("dem-")
+    assert out1["run_id"].startswith("run-")
+    assert out1["initial_job_id"].startswith("job-")
+    assert out1["mode"] == "autonomous"
+
+    # 2. Idempotent replay with same title returns identical IDs
+    proc2 = subprocess.run(
+        base_args + ["--title", "Create Auto Title", "--problem", "Problem description"],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        check=True,
+        env=env,
+    )
+    out2 = json.loads(proc2.stdout)
+    assert out1["demand_id"] == out2["demand_id"]
+    assert out1["run_id"] == out2["run_id"]
+    assert out1["initial_job_id"] == out2["initial_job_id"]
+
+    # 3. Conflicting replay fails closed
+    proc3 = subprocess.run(
+        base_args + ["--title", "Different Conflict Title", "--problem", "Altered problem"],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        env=env,
+    )
+    assert proc3.returncode == 1
+    assert "conflito" in proc3.stderr.lower() or "conflito" in proc3.stdout.lower()
+
+
+def test_hub_api_root_intake_alias_202(isolated_hub) -> None:
+    """POST /demands/intake (root-level alias) returns 202 Accepted and commits run."""
+    client: TestClient = isolated_hub["client"]
+
+    headers = {"Idempotency-Key": "req-intake-root-alias"}
+    resp = client.post("/demands/intake", json=_sample_demand_payload("Root Alias Feature"), headers=headers)
+
+    assert resp.status_code == status.HTTP_202_ACCEPTED
+    data = resp.json()
+    assert data["mode"] == "autonomous"
+    assert data["demand_id"].startswith("dem-")
+    assert data["run_id"].startswith("run-")
+    assert data["initial_job_id"].startswith("job-")
+
