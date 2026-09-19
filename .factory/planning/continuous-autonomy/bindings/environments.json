@@ -122,6 +122,7 @@
       "paas_orchestrator": {
         "name": "Dokploy",
         "version_minimum": "v0.8.0",
+        "project_name": "darkfac-core",
         "deployment_type": "docker_compose",
         "compose_manifest_path": "deploy/dokploy/docker-compose.cloud.yml",
         "dockerfile_path": "deploy/dokploy/Dockerfile.cloud",
@@ -179,9 +180,9 @@
       "database": {
         "engine": "postgresql",
         "version": "16-alpine",
-        "host": "dokploy-postgres",
+        "host": "postgres-primary",
         "port": 5432,
-        "database_name": "darkfac_db",
+        "database_name": "darkfac_hf02_prod",
         "user": "darkfac_worker",
         "user_privilege_level": "unprivileged",
         "superuser_forbidden": true,
@@ -189,7 +190,7 @@
           "variable_name": "DARKFAC_HF02_DATABASE_URL",
           "provider": "dokploy",
           "locator": "DARKFAC_HF02_DATABASE_URL",
-          "format": "postgresql://darkfac_worker:***@dokploy-postgres:5432/darkfac_db",
+          "format": "postgresql://darkfac_worker:***@postgres-primary:5432/darkfac_hf02_prod",
           "description": "String de conexão transacional do PostgreSQL interno via dokploy-network para o usuário desprivilegiado darkfac_worker"
         },
         "probe_command": "SELECT current_database(), current_user, version();"
