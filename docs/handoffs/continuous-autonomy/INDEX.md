@@ -7,7 +7,7 @@ Todos especificados; só HF-26-01 sem predecessor técnico. Prontidão de contra
 | Ticket | Papel | Estado | Depende de |
 | --- | --- | --- | --- |
 | [HF-26-01](HF-26-01.md) — Resolvedor puro de política efetiva | economy | implemented | — |
-| [HF-26-02](HF-26-02.md) — Aplicar precedência sem ampliar permissões | economy | ready_for_handoff | HF-26-01 |
+| [HF-26-02](HF-26-02.md) — Aplicar precedência sem ampliar permissões | economy | implemented | HF-26-01 |
 | [HF-26-03](HF-26-03.md) — Reconciliar baseline local e remota | high_architecture | ready_for_handoff | HF-26-01 |
 | [HF-05-02](HF-05-02.md) — Binding do controle cloud e ownership | high_architecture | waiting_dependency | HF-26-02, HF-26-03 |
 | [HF-05-03](HF-05-03.md) — Persistência canônica e adaptadores | economy | needs_architecture_binding | HF-05-02 |
