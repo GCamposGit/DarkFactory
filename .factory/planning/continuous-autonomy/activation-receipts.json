@@ -1,0 +1,73 @@
+{
+  "schema_version": "1.0",
+  "ticket_id": "HF-03-08",
+  "attempt_id": "hf-03-08-20260920T161344Z",
+  "observed_at_utc": "2026-09-20T16:13:44Z",
+  "decision": "needs_replan",
+  "operationally_verified": false,
+  "successor_released": false,
+  "baseline": {
+    "branch": "codex/hf-03-08-activation",
+    "candidate_sha": "87d1424a9bbfe6a2cce92369a200838c8977b3e4",
+    "plan_file_sha256": "148bdbf9424f2bf7fe6122c3d91a006a954a611c747f26a1be162fac450932dd",
+    "handoff_file_sha256": "daded5c37c4f771ff2502381bc054b3928eaa79c1422db6e1eba5e60c8e20238"
+  },
+  "target": {
+    "environment_ref": "hetzner_dokploy_prod",
+    "health_endpoint": "http://178.105.73.168:8001/healthz",
+    "health_http_status": 200,
+    "coordinator_role": "coordinator",
+    "application_version": "v1",
+    "database_status": "ready",
+    "dbos_engine": "active",
+    "run_id": "run-dde02a573f38",
+    "run_project_id": "darkfac",
+    "run_mode": "autonomous",
+    "run_status": "completed",
+    "run_plan_digest": "350c7667a90ac93dfc9f58bd6ea657ff67815339c368a595a5964dfa56e7624b",
+    "run_config_version": "1.0",
+    "stage_providers": {
+      "planning": "remote_codex",
+      "development": "remote_codex",
+      "integration": "deterministic_mock",
+      "build_deploy": "deterministic_mock",
+      "target_journey": "deterministic_mock"
+    }
+  },
+  "negative_evidence": [
+    {
+      "code": "MOCK_TERMINAL_STAGES",
+      "source": "GET /api/v1/tasks/run-dde02a573f38, jobs[*].evidence_refs",
+      "observation": "integration, build_deploy and target_journey report provider:deterministic_mock while marked succeeded"
+    },
+    {
+      "code": "GENERIC_WORKER_SUCCESS",
+      "source": "core/orchestrator/cloud_worker.py, dispatch_claimed_job",
+      "source_sha256": "ee4ada4d990d417e26d41c45d1b97cdc686689870285c22eed7d88f5accb443c",
+      "observation": "the generic path stores a stage_deliverable.json artifact and returns StageResult(outcome=success) without invoking the stage-specific integration, release or journey handlers"
+    },
+    {
+      "code": "MUTABLE_DEPLOY_SOURCE",
+      "source": "deploy/dokploy/docker-compose.cloud.yml",
+      "source_sha256": "fc9df452a3f34c02523e6c57ef0709955c475c3c5df57e65056ff70e47087ccd",
+      "observation": "build context uses Git #main and image uses :latest; no approved immutable image digest was observed"
+    },
+    {
+      "code": "TARGET_PROOF_INCOMPLETE",
+      "source": "HF-03-08 acceptance oracle",
+      "observation": "PID, worker heartbeat, installed image digest, external deployment operation, persisted target journey and rollback were not independently observed"
+    },
+    {
+      "code": "PACKAGE_INTEGRITY_SCOPE_CONFLICT",
+      "source": ".factory/planning/continuous-autonomy/verify.py and integrity.json",
+      "observation": "the required new ACTIVATION-RESULT.md is included by the verifier's docs glob, so package-wide verification reports integrity mismatch until integrity.json is updated; that manifest is outside HF-03-08 allowed_paths"
+    }
+  ],
+  "effectful_activation_attempted": false,
+  "required_before_retry": [
+    "high-tier replan with new allowed paths for cloud dispatcher, real stage bindings, immutable deployment and external acceptance probes",
+    "resolve the package integrity manifest scope for this required result artifact without relaxing the verifier",
+    "independent review and deterministic gates for the corrected candidate",
+    "target access and observer evidence for PID, heartbeat, operation, installed digest, journey and controlled rollback"
+  ]
+}

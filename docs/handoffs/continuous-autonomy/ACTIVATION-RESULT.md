@@ -1,0 +1,31 @@
+# HF-03-08 — resultado do preflight de ativação
+
+Observado em 2026-09-20 16:13:44 UTC. Estado: `needs_replan`. A ativação operacional não foi executada e `HF-15-02` permanece bloqueado. O recibo estruturado está em `.factory/planning/continuous-autonomy/activation-receipts.json`.
+
+## Baseline e observação do alvo
+
+- Branch isolada: `codex/hf-03-08-activation`; SHA-base: `87d1424a9bbfe6a2cce92369a200838c8977b3e4` (`origin/main` observado nesta sessão).
+- `GET http://178.105.73.168:8001/healthz` retornou HTTP 200, `database_status=ready`, `dbos_engine=active`, versão `v1`. Isso comprova a disponibilidade consultada do coordenador, não a execução funcional de cada etapa.
+- `GET /api/v1/tasks/run-dde02a573f38` retornou `project_id=darkfac`, `mode=autonomous`, `status=completed`, `config_version=1.0` e `plan_digest=350c7667a90ac93dfc9f58bd6ea657ff67815339c368a595a5964dfa56e7624b`. O run informado pelo owner foi consultado somente para leitura; nenhum job novo foi enviado.
+- Os recibos do próprio run indicam `provider:remote_codex` para `planning` e `development`, mas `provider:deterministic_mock` para `integration`, `build_deploy` e `target_journey`. Portanto, `status=completed` não satisfaz o oráculo de jornada real.
+
+## Contraprova e causa técnica
+
+`core/orchestrator/cloud_worker.py::dispatch_claimed_job` percorre as etapas pelo mesmo caminho genérico: grava `<stage>_deliverable.json`, verifica o hash desse arquivo e finaliza com `StageResult(outcome="success")`. Apenas `planning` e `development` tentam um provedor remoto; as demais etapas recebem `deterministic_mock`. O caminho ativo não chama os handlers específicos já existentes para integração, release ou jornada. Além disso, `core/workflow/handlers.py::DefaultStageHandler._default_execute` também pode produzir `success` com referências sintéticas se um serviço não estiver vinculado. É necessário fechar ambos os caminhos de sucesso sem efeito real.
+
+O manifesto `deploy/dokploy/docker-compose.cloud.yml` usa o contexto Git `#main` e a tag `:latest` para coordinator e worker. Esses identificadores são mutáveis e não atendem à exigência de imagem fixada do handoff. O endpoint `/health` citado no binding retornou 404 nesta sessão; o coordenador implementa `/healthz`. A resposta 404, isoladamente, não indica que o serviço está fora do ar.
+
+O comando focal `python .factory/planning/continuous-autonomy/verify.py --binding HF-03-08` passou apenas na checagem de existência dos dois outputs. O verificador do pacote completo falhou com `integrity mismatch`: ele inclui todo `docs/handoffs/continuous-autonomy/*.md`, portanto este novo resultado altera o conjunto assinado em `integrity.json`. O manifesto é somente leitura no escopo atual. Esse conflito também precisa de replanejamento; não cabe editar o verificador ou o manifesto por este ticket.
+
+Não foram observados externamente PID, heartbeat do worker, operação remota de deploy, digest da imagem instalada, escrita/leitura persistida da jornada ou rollback controlado. A tentativa SSH somente leitura falhou por autenticação (`Permission denied`). Nenhum restart, deploy, rollback, novo intake ou alteração em outro projeto foi realizado.
+
+## Replanejamento técnico necessário
+
+O handoff atual permite escrever apenas este resultado e `activation-receipts.json`; `core/`, `deploy/`, testes e o verificador são somente leitura. A lacuna exige retorno ao planejador high, preservando os oráculos atuais. Proposta de fatiamento para validação do planejador:
+
+1. Vincular o worker cloud ao registry de handlers reais por estágio, versão e política; ausência de binding deve falhar sem materializar sucessor. Incluir contraprovas de `integration`, `build_deploy` e `target_journey` com serviço ausente.
+2. Fixar build e imagem por SHA/digest, conferir no alvo o digest instalado e obter recibos da operação externa. Alinhar o probe de saúde ao endpoint efetivo sem usar HTTP 200 como único critério.
+3. Executar canário em namespace autorizado com observador independente: um único intake público até PR/merge, build, deploy, jornada persistida e memória; em seguida restart e falha controlada para observar recuperação e rollback. Registrar PID, heartbeat, job, SHA, digest, operação e dados lidos do alvo.
+4. Atualizar o contrato de integridade do pacote para admitir os dois outputs obrigatórios, preservando a detecção de drift dos artefatos de planejamento.
+
+Cada unidade nova precisa de `allowed_paths`, testes focais, ambiente, ownership e aprovação vinculados à baseline. O resultado deste preflight não libera `HF-15-02` nem declara `HF-03-08` entregue.
