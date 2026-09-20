@@ -7,7 +7,6 @@ and isolates task execution inside container boundaries.
 
 from __future__ import annotations
 
-import json
 import logging
 import os
 import signal
@@ -19,30 +18,13 @@ from pathlib import Path
 from typing import Any, Callable
 from pydantic import BaseModel, ConfigDict, Field
 
-from core.acceptance.continuous_observer import ContinuousObserver
 from core.orchestrator.adapters.control_postgres import PostgresControlStore
 from core.orchestrator.cloud_artifacts import CloudArtifactStore
 from core.workflow.control_contracts import Claim, JobKey, RuntimeOwner, StageResult
-from core.workflow.successors import materialize_result
+from core.workflow.handlers import STANDARD_STAGES
+from core.workflow.successors import STAGE_ROLES, materialize_result
 
 logger = logging.getLogger("darkfac.cloud_worker")
-
-DEFAULT_CAPABILITIES: tuple[str, ...] = (
-    "grill_engine",
-    "planner",
-    "researcher",
-    "environment_probe",
-    "developer",
-    "validator",
-    "reviewer",
-    "integrator",
-    "deployer",
-    "journey_tester",
-    "memory_agent",
-    "evaluator",
-    "benchmarker",
-)
-
 
 class WorkerSlotStatus(BaseModel):
     """Status of worker concurrency slots and allocation."""
@@ -55,6 +37,8 @@ class WorkerSlotStatus(BaseModel):
     available_slots: int
     is_saturated: bool
     is_draining: bool = False
+    bound_stages: list[str] = Field(default_factory=list)
+    is_ready: bool = False
 
 
 class StepExecutionResult(BaseModel):
@@ -81,6 +65,9 @@ class CloudWorker:
         capabilities: list[str] | None = None,
         store: PostgresControlStore | None = None,
         artifact_store: CloudArtifactStore | None = None,
+        stage_executors: dict[str, Callable[[Claim], StageResult]] | None = None,
+        evidence_verifier: Callable[[Claim, StageResult], bool] | None = None,
+        heartbeat_interval_sec: float = 10.0,
     ) -> None:
         self.worker_id = worker_id or os.environ.get("DARKFAC_WORKER_ID", "cloud-worker-1")
         self.max_slots = (
@@ -89,7 +76,19 @@ class CloudWorker:
             else int(os.environ.get("DARKFAC_MAX_CONCURRENT_SLOTS", "2"))
         )
         self.database_url = database_url or os.environ.get("DARKFAC_HF02_DATABASE_URL")
-        self.capabilities = capabilities or list(DEFAULT_CAPABILITIES)
+        self._stage_executors = dict(stage_executors or {})
+        self._evidence_verifier = evidence_verifier
+        if heartbeat_interval_sec <= 0:
+            raise ValueError("heartbeat_interval_sec must be positive")
+        self._heartbeat_interval_sec = heartbeat_interval_sec
+        bound_capabilities = {
+            STAGE_ROLES[stage] for stage in self._stage_executors if stage in STAGE_ROLES
+        }
+        if capabilities is not None and not set(capabilities) <= bound_capabilities:
+            raise ValueError("Worker capabilities must have a bound stage executor")
+        self.capabilities = (
+            list(capabilities) if capabilities is not None else sorted(bound_capabilities)
+        )
         self._store = store
         self._artifact_store = artifact_store
         self._active_tasks: dict[str, float] = {}
@@ -125,6 +124,9 @@ class CloudWorker:
             available_slots=available,
             is_saturated=(allocated >= self.max_slots) or self._draining,
             is_draining=self._draining,
+            bound_stages=sorted(self._stage_executors),
+            is_ready=set(STANDARD_STAGES) <= self._stage_executors.keys()
+            and self._evidence_verifier is not None,
         )
 
     def try_acquire_slot(self, task_id: str) -> bool:
@@ -177,130 +179,92 @@ class CloudWorker:
         return True
 
     def dispatch_claimed_job(self, claim: Claim, now: datetime | None = None) -> StepExecutionResult:
-        """Execute a claimed stage, store artifacts, finish the job, and materialize successors."""
-        effective_now = now or datetime.now(UTC)
+        """Execute an explicitly bound stage and persist only its real result."""
+        start_now = now or datetime.now(UTC)
         stage = claim.job_key.stage
         run_id = claim.job_key.run_id
 
+        try:
+            if datetime.fromisoformat(claim.expires_at.replace("Z", "+00:00")) <= start_now:
+                return StepExecutionResult(
+                    step_id=stage, workflow_id=run_id, success=False,
+                    duration_ms=0.0, error="stale_lease",
+                )
+        except (TypeError, ValueError):
+            return StepExecutionResult(
+                step_id=stage, workflow_id=run_id, success=False,
+                duration_ms=0.0, error="invalid_lease_expiry",
+            )
+
         def _execute_stage() -> dict[str, Any]:
-            generated_text = None
-            measured_cost = 0.0
-            provider_backend = "deterministic_mock"
+            executor = self._stage_executors.get(stage)
+            if executor is None:
+                stage_result = StageResult(outcome="failed", cause_code="missing_stage_executor")
+            else:
+                heartbeat_stop = threading.Event()
+                heartbeat_errors: list[str] = []
 
-            # When remote harnesses are configured, execute via RemoteMultiHarnessModelProvider
-            remote_urls = os.environ.get("REMOTE_HARNESS_URLS") or os.environ.get("REMOTE_HARNESS_URL") or os.environ.get("DARKFAC_ONPREM_URL")
-            if (remote_urls or os.environ.get("USE_REMOTE_CODEX") == "true") and stage in ("planning", "development"):
+                def keep_lease() -> None:
+                    while not heartbeat_stop.wait(self._heartbeat_interval_sec):
+                        try:
+                            self.store.heartbeat(claim, datetime.now(UTC))
+                        except Exception as exc:
+                            heartbeat_errors.append(type(exc).__name__)
+                            return
+
+                heartbeat_thread = threading.Thread(
+                    target=keep_lease, name="cloud-worker-lease", daemon=True
+                )
+                heartbeat_thread.start()
                 try:
-                    from core.execution.providers import get_model_provider
-                    from core.router.harness_router import resolve_harness_candidates
-
-                    candidate_harnesses = resolve_harness_candidates(
-                        stage=stage,
-                        metadata={"ticket_id": claim.job_key.ticket_id, "run_id": run_id},
-                    )
-
-                    provider = get_model_provider("remote_harness", node_urls=remote_urls)
-                    prompt = (
-                        f"Dark Factory Task Dispatch\n"
-                        f"Run ID: {run_id}\n"
-                        f"Stage: {stage}\n"
-                        f"Ticket: {claim.job_key.ticket_id}\n\n"
-                        f"Por favor implemente a solucao completa para o ticket solicitado com codigo e testes."
-                    )
-                    resp = provider.generate(
-                        prompt,
-                        candidate_harnesses=candidate_harnesses,
-                        ticket_id=claim.job_key.ticket_id,
-                    )
-                    generated_text = resp.text
-                    measured_cost = resp.measured_cost or 0.0
-                    meta = resp.metadata or {}
-                    provider_backend = meta.get("backend", "remote_harness")
-                    logger.info(
-                        "CloudWorker executed stage %s via remote provider (%s, node=%s, harness=%s)",
-                        stage,
-                        provider_backend,
-                        meta.get("remote_url"),
-                        meta.get("harness"),
-                    )
+                    stage_result = executor(claim)
                 except Exception as exc:
-                    logger.warning(
-                        "Stage %s remote provider execution failed: %s; using deterministic fallback",
-                        stage,
-                        exc,
+                    logger.error("Stage executor failed (%s)", type(exc).__name__)
+                    stage_result = StageResult(outcome="failed", cause_code="stage_executor_error")
+                finally:
+                    heartbeat_stop.set()
+                    heartbeat_thread.join(timeout=self._heartbeat_interval_sec + 1.0)
+                if heartbeat_errors or heartbeat_thread.is_alive():
+                    raise RuntimeError("Lease heartbeat failed; refusing stage result")
+            if not isinstance(stage_result, StageResult):
+                raise TypeError(f"Executor for {stage} did not return StageResult")
+            if stage_result.outcome == "success":
+                refs = [*stage_result.output_refs, *stage_result.evidence_refs]
+                if not stage_result.evidence_refs or any(
+                    ref.startswith("ref://") or "deterministic_mock" in ref
+                    for ref in refs
+                ) or self._evidence_verifier is None:
+                    stage_result = StageResult(
+                        outcome="failed", cause_code="untrusted_stage_evidence"
                     )
+                else:
+                    try:
+                        verified = self._evidence_verifier(claim, stage_result)
+                    except Exception as exc:
+                        logger.error("Stage evidence verification failed (%s)", type(exc).__name__)
+                        verified = False
+                    if not verified:
+                        stage_result = StageResult(
+                            outcome="failed", cause_code="untrusted_stage_evidence"
+                        )
 
-            task_payload = {
-                "run_id": run_id,
-                "ticket_id": claim.job_key.ticket_id,
-                "stage": stage,
-                "iteration": claim.job_key.iteration,
-                "fencing_token": claim.fencing_token,
-                "worker_id": self.worker_id,
-                "executed_at": effective_now.isoformat(),
-                "status": "APPROVED",
-                "provider": provider_backend,
-                "generated_output": generated_text,
-            }
-            raw_content = json.dumps(task_payload, indent=2)
-            filename = f"{stage}_deliverable.json"
-            art_ref = self.artifact_store.store_artifact(
-                workflow_id=run_id,
-                filename=filename,
-                content=raw_content,
-                content_type="application/json",
-            )
-            integrity_ok = self.artifact_store.verify_integrity(art_ref)
-            if not integrity_ok:
-                raise ValueError(f"Artifact integrity verification failed for {filename}")
-
-            stage_result = StageResult(
-                outcome="success",
-                output_refs=[art_ref.relative_path],
-                evidence_refs=[
-                    f"sha256:{art_ref.sha256}",
-                    f"lease:{claim.lease_id}",
-                    f"fencing:{claim.fencing_token}",
-                    f"provider:{provider_backend}",
-                ],
-                actual_cost=measured_cost,
-            )
-
-            self.store.finish(claim, stage_result, now=effective_now)
-            materialize_result(claim.job_key, stage_result, self.store, now=effective_now)
-
-            try:
-                observer = ContinuousObserver()
-                token = observer.correlate(run_id, claim.job_key.canonical_key(), str(claim.fencing_token))
-                ctx = {
-                    "consumer_active": True,
-                    "manual_stage": False,
-                    "external_oracle": True,
-                    "timestamp": effective_now.isoformat(),
-                    "fencing_token": claim.fencing_token,
-                    "idempotency_digest": f"digest-{claim.job_key.canonical_key()}",
-                    "claimed_digest": f"digest-{claim.job_key.canonical_key()}",
-                    "has_secrets": False,
-                    "timeout_checkpoint": True,
-                    "resources_exhausted": False,
-                    "allowed_paths": [str(self.artifact_store.root_dir)],
-                    "mutated_paths": [str(self.artifact_store.root_dir / art_ref.relative_path)],
-                    "last_heartbeat_ago": 1.0,
-                    "worktree_clean": True,
-                    "correlation_token": token,
-                }
-                logs = f"Worker {self.worker_id} executed stage {claim.job_key.canonical_key()}"
-                observer.audit_run(ctx, logs)
-            except Exception as exc:
-                logger.debug("ContinuousObserver audit record: %s", exc)
+            finish_now = datetime.now(UTC)
+            self.store.finish(claim, stage_result, now=finish_now)
+            materialize_result(claim.job_key, stage_result, self.store, now=finish_now)
 
             return {
-                "artifact_ref": art_ref.model_dump(),
-                "integrity_verified": integrity_ok,
                 "stage_result": stage_result.model_dump(),
             }
 
-        return self.execute_step(run_id, stage, _execute_stage)
+        execution = self.execute_step(run_id, stage, _execute_stage)
+        if execution.success and execution.output is not None:
+            outcome = execution.output["stage_result"]["outcome"]
+            if outcome != "success":
+                return execution.model_copy(update={
+                    "success": False,
+                    "error": execution.output["stage_result"].get("cause_code") or outcome,
+                })
+        return execution
 
     def poll_and_execute_once(self, now: datetime | None = None) -> bool:
         """Attempt to claim one pending job and execute it.
@@ -308,6 +272,8 @@ class CloudWorker:
         Returns True if a job was claimed and executed; False otherwise.
         """
         if self._draining:
+            return False
+        if not self._stage_executors or self._evidence_verifier is None:
             return False
         if len(self._active_tasks) >= self.max_slots:
             return False
@@ -463,7 +429,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.status:
         status = worker.slot_status()
         print(status.model_dump_json(indent=2))
-        return 0
+        return 0 if status.is_ready else 2
 
     return worker.run_forever(poll_interval_sec=args.poll_interval)
 

@@ -1,5 +1,13 @@
 # HF-03-08 — resultado do preflight de ativação
 
+## Continuação após autorização de escopo (20/09/2026)
+
+O `main` remoto foi reconfirmado em `e3b93cc90fc6368b3f23792ad4b6d3db2f1a543a` e a branch isolada foi atualizada sobre ele. O candidato local removeu o fallback `deterministic_mock` do worker e a execução padrão sintética do registry. Sem executor e verificador de evidência vinculados, o worker não toma jobs; o `--status` devolve código não-pronto enquanto os 13 estágios não estiverem vinculados. Resultados `success` sem verificação são rebaixados para `failed`; o lease recebe heartbeat durante a execução e a finalização usa o horário real. O coordenador exige Bearer token de 32+ caracteres nas rotas de intake, status detalhado e runs; sem configuração retorna 503 e sem credencial válida retorna 401. O intake fica desligado por padrão, limita o projeto a `darkfac` e não expõe runs de outros projetos. `/healthz` é apenas liveness; `/readyz` autenticado verifica banco e chave de intake. O Compose exige digest de imagem e restringe a porta 8001 ao loopback do host. As contraprovas focais passaram; a suíte completa e o harness devem ser repetidos sobre o SHA final.
+
+Essas mudanças são contenção e preparação, não a fatia vertical aceita. Ainda não há executores produtivos vinculados aos 13 estágios nem recibos externos de PR/merge, build/deploy, jornada persistida, PID/heartbeat, digest instalado, restart e rollback. Não foi feito deploy ou novo intake; o alvo consultado permanece na versão anterior. O valor do digest imutável, o segredo da API e o acesso operacional ao Dokploy não foram obtidos. `DARKFAC_INTAKE_ENABLED` deve continuar `false` até a cadeia real e seus oráculos estarem comprovados. `HF-15-02` permanece bloqueado.
+
+A revisão adversarial independente retornou `changes_required`. Os achados locais sobre recibo inexistente, expiração do lease, healthcheck do worker, isolamento de projeto e exposição de erro foram corrigidos e cobertos por contraprovas. Permanecem abertos os achados que exigem build aprovado, digest instalado e observação externa da jornada; portanto não há aprovação de integração operacional.
+
 Observado em 2026-09-20 16:13:44 UTC. Estado: `needs_replan`. A ativação operacional não foi executada e `HF-15-02` permanece bloqueado. O recibo estruturado está em `.factory/planning/continuous-autonomy/activation-receipts.json`.
 
 ## Baseline e observação do alvo

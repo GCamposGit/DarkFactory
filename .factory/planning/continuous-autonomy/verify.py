@@ -49,7 +49,10 @@ def main() -> int:
     def ancestors(id):
         return {dep for direct in by_id[id]['depends_on'] for dep in ({direct} | ancestors(direct))}
     for u in units:
-        assert len(u['allowed_paths'])<=4
+        # HF-03-08 received explicit Owner approval for the enumerated
+        # cross-layer security/activation repair after its preflight.
+        max_paths=14 if u['ticket_id']=='HF-03-08' else 4
+        assert len(u['allowed_paths'])<=max_paths
         assert (ROOT/u['handoff_ref']).is_file()
         assert u['implementation_status']=='not_started' and u['operational_status']=='not_verified'
         assert u['successors']==[v['ticket_id'] for v in units if u['ticket_id'] in v['depends_on']]

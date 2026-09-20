@@ -4,6 +4,7 @@ import os
 import sys
 import logging
 import signal
+import secrets
 import threading
 from datetime import UTC, datetime
 from typing import Any
@@ -159,12 +160,12 @@ class CloudCoordinator:
         enable_http: bool = True,
     ) -> int:
         """Run continuous supervision loop and optional background HTTP API ingress."""
-        import uvicorn
-
         if stop_event is None:
             stop_event = threading.Event()
         self._stop_event = stop_event
         self._running = True
+
+        import uvicorn
 
         def _signal_handler(signum: int, frame: Any) -> None:
             logger.info("Signal %s received; initiating coordinator shutdown", signum)
@@ -232,17 +233,46 @@ class CloudCoordinator:
 
     def create_app(self) -> Any:
         """Create FastAPI application for cloud coordinator health, ingress, and status."""
-        from fastapi import FastAPI, HTTPException
+        from fastapi import Depends, FastAPI, Header, HTTPException
+
+        def require_api_token(authorization: str | None = Header(default=None)) -> None:
+            token = os.environ.get("DARKFAC_COORDINATOR_API_TOKEN", "")
+            if len(token) < 32:
+                raise HTTPException(status_code=503, detail="Coordinator API credentials are not configured")
+            expected = f"Bearer {token}"
+            if authorization is None or not secrets.compare_digest(authorization, expected):
+                raise HTTPException(
+                    status_code=401,
+                    detail="Unauthorized",
+                    headers={"WWW-Authenticate": "Bearer"},
+                )
 
         app = FastAPI(title="Dark Factory Cloud Coordinator", version=self.application_version)
 
         @app.get("/healthz")
-        @app.get("/status")
+        def get_health() -> dict[str, str]:
+            """Process liveness only; never an activation or dependency oracle."""
+            return {"status": "ok"}
+
+        @app.get("/readyz", dependencies=[Depends(require_api_token)])
+        def get_readiness() -> CoordinatorStatus:
+            status = self.inspect_status()
+            if status.database_status != "ready" or os.environ.get(
+                "DARKFAC_INTAKE_ENABLED", "false"
+            ).lower() != "true":
+                raise HTTPException(status_code=503, detail="Coordinator is not ready for intake")
+            return status
+
+        @app.get("/status", dependencies=[Depends(require_api_token)])
         def get_status() -> CoordinatorStatus:
             return self.inspect_status()
 
-        @app.post("/api/v1/tasks", status_code=202)
+        @app.post("/api/v1/tasks", status_code=202, dependencies=[Depends(require_api_token)])
         def submit_task(command: IntakeCommand) -> dict[str, Any]:
+            if os.environ.get("DARKFAC_INTAKE_ENABLED", "false").lower() != "true":
+                raise HTTPException(status_code=503, detail="Autonomous intake is not activated")
+            if command.project_id != os.environ.get("DARKFAC_ALLOWED_PROJECT_ID", "darkfac"):
+                raise HTTPException(status_code=403, detail="Project is not authorized")
             try:
                 receipt = self.store.accept(command, datetime.now(UTC))
                 logger.info(
@@ -260,16 +290,18 @@ class CloudCoordinator:
                     "committed_at": receipt.committed_at,
                 }
             except IdempotencyConflict as exc:
-                raise HTTPException(status_code=409, detail=str(exc))
+                raise HTTPException(status_code=409, detail="Idempotency conflict") from exc
             except Exception as exc:
-                logger.error("Failed to accept intake command: %s", exc)
-                raise HTTPException(status_code=500, detail=f"Failed to accept task: {exc}")
+                logger.error("Failed to accept intake command (%s)", type(exc).__name__)
+                raise HTTPException(status_code=500, detail="Task intake failed") from exc
 
-        @app.get("/api/v1/tasks/{run_id}")
+        @app.get("/api/v1/tasks/{run_id}", dependencies=[Depends(require_api_token)])
         def get_task_status(run_id: str) -> dict[str, Any]:
             status = self.store.get_run_status(run_id)
             if not status:
                 raise HTTPException(status_code=404, detail=f"Run '{run_id}' not found")
+            if status.get("project_id") != os.environ.get("DARKFAC_ALLOWED_PROJECT_ID", "darkfac"):
+                raise HTTPException(status_code=404, detail="Run not found")
             return status
 
         return app

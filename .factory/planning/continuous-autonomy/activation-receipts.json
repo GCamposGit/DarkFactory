@@ -3,10 +3,11 @@
   "ticket_id": "HF-03-08",
   "attempt_id": "hf-03-08-20260920T161344Z",
   "observed_at_utc": "2026-09-20T16:13:44Z",
-  "updated_at_utc": "2026-09-20T16:37:22Z",
+  "updated_at_utc": "2026-09-20T19:27:25Z",
   "decision": "needs_replan",
   "operationally_verified": false,
   "successor_released": false,
+  "baseline_scope": "historical_preflight_only; not the remediation candidate",
   "baseline": {
     "branch": "codex/hf-03-08-activation",
     "candidate_sha": "87d1424a9bbfe6a2cce92369a200838c8977b3e4",
@@ -69,6 +70,20 @@
       "observation": "the coordinator status API was reachable on the public host without a credential and the task submission route in this candidate has no authentication dependency; no POST was attempted"
     }
   ],
+  "local_remediation": {
+    "rebased_on_origin_main": "e3b93cc90fc6368b3f23792ad4b6d3db2f1a543a",
+    "synthetic_worker_success_removed": true,
+    "unbound_default_handler_fails_closed": true,
+    "coordinator_auth_added": true,
+    "intake_disabled_by_default": true,
+    "cloud_image_digest_required": true,
+    "stage_evidence_verifier_required": true,
+    "lease_heartbeat_and_current_finish_time": true,
+    "cross_project_status_denied": true,
+    "worker_healthcheck_unready_without_bindings": true,
+    "target_deployment_verified": false,
+    "real_stage_executors_bound": false
+  },
   "effectful_activation_attempted": false,
   "required_before_retry": [
     "high-tier replan with new allowed paths for cloud dispatcher, real stage bindings, immutable deployment and external acceptance probes",
