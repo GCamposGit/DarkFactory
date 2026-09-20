@@ -3,6 +3,7 @@
   "ticket_id": "HF-03-08",
   "attempt_id": "hf-03-08-20260920T161344Z",
   "observed_at_utc": "2026-09-20T16:13:44Z",
+  "updated_at_utc": "2026-09-20T16:37:22Z",
   "decision": "needs_replan",
   "operationally_verified": false,
   "successor_released": false,
@@ -61,11 +62,17 @@
       "code": "PACKAGE_INTEGRITY_SCOPE_CONFLICT",
       "source": ".factory/planning/continuous-autonomy/verify.py and integrity.json",
       "observation": "the required new ACTIVATION-RESULT.md is included by the verifier's docs glob, so package-wide verification reports integrity mismatch until integrity.json is updated; that manifest is outside HF-03-08 allowed_paths"
+    },
+    {
+      "code": "PUBLIC_INGRESS_AUTH_GAP",
+      "source": "core/orchestrator/cloud_coordinator.py, create_app; unauthenticated GET /api/v1/tasks/run-dde02a573f38",
+      "observation": "the coordinator status API was reachable on the public host without a credential and the task submission route in this candidate has no authentication dependency; no POST was attempted"
     }
   ],
   "effectful_activation_attempted": false,
   "required_before_retry": [
     "high-tier replan with new allowed paths for cloud dispatcher, real stage bindings, immutable deployment and external acceptance probes",
+    "bind coordinator ingress and status routes to an approved authentication and network boundary before any new autonomous intake",
     "resolve the package integrity manifest scope for this required result artifact without relaxing the verifier",
     "independent review and deterministic gates for the corrected candidate",
     "target access and observer evidence for PID, heartbeat, operation, installed digest, journey and controlled rollback"

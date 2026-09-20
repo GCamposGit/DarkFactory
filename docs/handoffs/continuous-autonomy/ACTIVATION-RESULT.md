@@ -15,6 +15,8 @@ Observado em 2026-09-20 16:13:44 UTC. Estado: `needs_replan`. A ativação opera
 
 O manifesto `deploy/dokploy/docker-compose.cloud.yml` usa o contexto Git `#main` e a tag `:latest` para coordinator e worker. Esses identificadores são mutáveis e não atendem à exigência de imagem fixada do handoff. O endpoint `/health` citado no binding retornou 404 nesta sessão; o coordenador implementa `/healthz`. A resposta 404, isoladamente, não indica que o serviço está fora do ar.
 
+A consulta ao status do run funcionou pela porta pública 8001 sem credencial. No candidato local, `CloudCoordinator.create_app` declara `POST /api/v1/tasks` e `GET /api/v1/tasks/{run_id}` sem dependência de autenticação nessa camada. O envio de tarefas não foi testado, pois criaria um job. A fronteira de acesso deve ser verificada e corrigida antes de permitir novos intakes autônomos no alvo.
+
 O comando focal `python .factory/planning/continuous-autonomy/verify.py --binding HF-03-08` passou apenas na checagem de existência dos dois outputs. O verificador do pacote completo falhou com `integrity mismatch`: ele inclui todo `docs/handoffs/continuous-autonomy/*.md`, portanto este novo resultado altera o conjunto assinado em `integrity.json`. O manifesto é somente leitura no escopo atual. Esse conflito também precisa de replanejamento; não cabe editar o verificador ou o manifesto por este ticket.
 
 Não foram observados externamente PID, heartbeat do worker, operação remota de deploy, digest da imagem instalada, escrita/leitura persistida da jornada ou rollback controlado. A tentativa SSH somente leitura falhou por autenticação (`Permission denied`). Nenhum restart, deploy, rollback, novo intake ou alteração em outro projeto foi realizado.
@@ -27,5 +29,6 @@ O handoff atual permite escrever apenas este resultado e `activation-receipts.js
 2. Fixar build e imagem por SHA/digest, conferir no alvo o digest instalado e obter recibos da operação externa. Alinhar o probe de saúde ao endpoint efetivo sem usar HTTP 200 como único critério.
 3. Executar canário em namespace autorizado com observador independente: um único intake público até PR/merge, build, deploy, jornada persistida e memória; em seguida restart e falha controlada para observar recuperação e rollback. Registrar PID, heartbeat, job, SHA, digest, operação e dados lidos do alvo.
 4. Atualizar o contrato de integridade do pacote para admitir os dois outputs obrigatórios, preservando a detecção de drift dos artefatos de planejamento.
+5. Vincular as rotas de intake/status do coordenador a autenticação e rede autorizadas, com teste externo de negação sem credencial e aceite somente da identidade operacional prevista.
 
 Cada unidade nova precisa de `allowed_paths`, testes focais, ambiente, ownership e aprovação vinculados à baseline. O resultado deste preflight não libera `HF-15-02` nem declara `HF-03-08` entregue.
