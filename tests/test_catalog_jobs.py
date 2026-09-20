@@ -536,3 +536,141 @@ def test_stage_handler_handle_conforms_to_contracts(
     assert len(result.evidence_refs) > 0
     assert str(state_file.resolve()) in result.evidence_refs
     assert result.actual_cost == 0.0
+
+
+def test_run_level_pinning_survives_restart(
+    tmp_path: Path,
+    local_economy_candidate: ModelCandidate,
+    cloud_frontier_candidate: ModelCandidate,
+    verifier_candidate: ModelCandidate,
+) -> None:
+    """A restarted handler must not silently move an active run to a new catalog."""
+    state_file = tmp_path / "state.json"
+    catalog_file = tmp_path / "catalog.json"
+    first_candidates = [local_economy_candidate, cloud_frontier_candidate, verifier_candidate]
+
+    handler = CatalogRefreshHandler(state_path=state_file, catalog_path=catalog_file)
+    t0 = datetime(2026, 9, 18, 10, 0, 0, tzinfo=UTC)
+    handler.refresh_catalog(now=t0, candidates=first_candidates, force=True)
+    old_catalog = handler.get_catalog_for_run("run-persisted")
+    old_version = handler.get_version_for_run("run-persisted")
+
+    replacement = ModelCandidate(
+        model_id="deepseek/deepseek-v4-pro",
+        alias="deepseek-v4-pro",
+        provider_id="openrouter",
+        family="deepseek",
+        cost_per_1k_input_usd=0.00045,
+        cost_per_1k_output_usd=0.0018,
+        tool_calling_supported=True,
+        tool_capabilities=["read_file", "write_file", "run_command"],
+        supported_roles=["high_architecture"],
+        coding_score=95.0,
+    )
+    handler.refresh_catalog(
+        now=t0 + timedelta(hours=25),
+        candidates=[local_economy_candidate, replacement, verifier_candidate],
+    )
+    new_version = handler.active_version
+
+    restarted = CatalogRefreshHandler(state_path=state_file, catalog_path=catalog_file)
+    assert restarted.get_version_for_run("run-persisted") == old_version
+    assert restarted.get_catalog_for_run("run-persisted") == old_catalog
+    assert "deepseek/deepseek-v4-pro" not in restarted.get_catalog_for_run(
+        "run-persisted"
+    )["roles_mapping"]["high_architecture"]["allowed_models"]
+    assert restarted.get_version_for_run("run-new") == new_version
+
+
+def test_generated_catalog_does_not_fabricate_price_or_send_effort() -> None:
+    """Unknown pricing stays unknown and unsupported effort is omitted entirely."""
+    candidate = ModelCandidate(
+        model_id="cloud/unpriced-architecture",
+        alias="unpriced-architecture",
+        provider_id="cloud",
+        family="unknown",
+        cost_per_1k_input_usd=None,
+        cost_per_1k_output_usd=None,
+        tool_calling_supported=True,
+        tool_capabilities=["read_file", "write_file", "run_command"],
+        supported_roles=["high_architecture"],
+        coding_score=90.0,
+        supports_reasoning_effort=False,
+        default_reasoning_effort="xhigh",
+        allowed_reasoning_efforts=["xhigh"],
+    )
+
+    catalog = QualificationEngine().generate_catalog(
+        [QualificationEngine().qualify_candidate(candidate)]
+    )
+    model = catalog["providers"]["provider_cloud"]["models"][0]
+
+    assert model["cost_per_1k_input_usd"] is None
+    assert model["cost_per_1k_output_usd"] is None
+    assert model["has_valid_pricing"] is False
+    assert "default_reasoning_effort" not in model
+    assert "allowed_reasoning_efforts" not in model
+    assert "max_reasoning_effort" not in model
+
+
+def test_generated_catalog_preserves_binding_metadata() -> None:
+    """Refreshes replace qualification data but retain binding policy metadata."""
+    base_catalog = {
+        "schema_version": "1.0",
+        "policy_ref": "hf-07-01",
+        "providers": {
+            "provider_ollama": {
+                "provider_id": "ollama",
+                "provider_name": "Local Ollama",
+                "models": [],
+            }
+        },
+        "roles_mapping": {
+            "economy": {"binding_scope": "local-only"},
+            "high_architecture": {"binding_scope": "qualified-only"},
+        },
+    }
+    candidate = ModelCandidate(
+        model_id="qwen-code-fast:latest",
+        provider_id="ollama",
+        family="qwen",
+        cost_per_1k_input_usd=0.0,
+        cost_per_1k_output_usd=0.0,
+        tool_capabilities=["read_file", "write_file", "run_command"],
+        supported_roles=["economy", "high_architecture"],
+        coding_score=80.0,
+    )
+
+    engine = QualificationEngine()
+    catalog = engine.generate_catalog(
+        engine.qualify_all([candidate]),
+        base_catalog=base_catalog,
+    )
+
+    assert catalog["schema_version"] == "1.0"
+    assert catalog["policy_ref"] == "hf-07-01"
+    assert catalog["roles_mapping"]["economy"]["binding_scope"] == "local-only"
+    assert catalog["providers"]["provider_ollama"]["provider_name"] == "Local Ollama"
+
+
+def test_failure_persists_degradation_timestamp(
+    tmp_path: Path,
+    standard_candidates: list[ModelCandidate],
+) -> None:
+    """A retained catalog exposes when the failed refresh was observed."""
+    state_file = tmp_path / "state.json"
+    catalog_file = tmp_path / "catalog.json"
+    handler = CatalogRefreshHandler(state_path=state_file, catalog_path=catalog_file)
+    t0 = datetime(2026, 9, 18, 10, 0, 0, tzinfo=UTC)
+    handler.refresh_catalog(now=t0, candidates=standard_candidates, force=True)
+
+    t1 = t0 + timedelta(hours=12)
+    handler.candidate_provider = lambda: (_ for _ in ()).throw(
+        ConnectionError("provider unavailable")
+    )
+    handler.refresh_catalog(now=t1, candidates=None, force=True)
+
+    assert handler.state.last_attempt_timestamp == t1.isoformat()
+    assert handler.state.degraded_at == t1.isoformat()
+    restored = CatalogRefreshHandler(state_path=state_file, catalog_path=catalog_file)
+    assert restored.state.degraded_at == t1.isoformat()

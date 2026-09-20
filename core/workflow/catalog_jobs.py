@@ -13,9 +13,11 @@ from __future__ import annotations
 
 import json
 import logging
+from copy import deepcopy
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
+from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -48,7 +50,11 @@ class CatalogRefreshState(BaseModel):
     age_hours_at_last_attempt: float = 0.0
     warning: Optional[str] = None
     refresh_count: int = 0
+    last_attempt_timestamp: Optional[str] = None
+    degraded_at: Optional[str] = None
     pinned_run_ids: List[str] = Field(default_factory=list)
+    pinned_catalogs: Dict[str, Dict[str, Any]] = Field(default_factory=dict)
+    pinned_versions: Dict[str, str] = Field(default_factory=dict)
 
 
 class CatalogRefreshHandler:
@@ -84,7 +90,7 @@ class CatalogRefreshHandler:
         self.catalog_path = Path(catalog_path)
         self.engine = engine or QualificationEngine()
         self.candidate_provider = candidate_provider
-        self.base_catalog = base_catalog or _EMBEDDED_DEFAULT_CATALOG
+        self.base_catalog = deepcopy(base_catalog if base_catalog is not None else _EMBEDDED_DEFAULT_CATALOG)
 
         # Active catalog and version promoted to new jobs
         self.active_catalog: Dict[str, Any] = {}
@@ -107,8 +113,8 @@ class CatalogRefreshHandler:
             try:
                 data = json.loads(self.catalog_path.read_text(encoding="utf-8"))
                 if self._validate_catalog(data):
-                    self.active_catalog = data
-                    self._last_valid_catalog = data
+                    self.active_catalog = deepcopy(data)
+                    self._last_valid_catalog = deepcopy(data)
             except Exception as exc:
                 logger.warning("Failed to load catalog from %s: %s", self.catalog_path, exc)
 
@@ -121,9 +127,21 @@ class CatalogRefreshHandler:
                 state_data = json.loads(self.state_path.read_text(encoding="utf-8"))
                 self.state = CatalogRefreshState.model_validate(state_data)
                 self.active_version = self.state.catalog_version
+                self._pinned_catalogs_by_run = {
+                    run_id: deepcopy(catalog)
+                    for run_id, catalog in self.state.pinned_catalogs.items()
+                    if isinstance(run_id, str)
+                    and run_id
+                    and self._validate_catalog(catalog)
+                }
+                self._pinned_versions_by_run = {
+                    run_id: version
+                    for run_id, version in self.state.pinned_versions.items()
+                    if run_id in self._pinned_catalogs_by_run and version
+                }
                 if self.state.last_refresh_timestamp:
-                    self._last_valid_timestamp = datetime.fromisoformat(
-                        self.state.last_refresh_timestamp
+                    self._last_valid_timestamp = self._as_utc(
+                        datetime.fromisoformat(self.state.last_refresh_timestamp)
                     )
             except Exception as exc:
                 logger.warning("Failed to load state from %s: %s", self.state_path, exc)
@@ -135,15 +153,25 @@ class CatalogRefreshHandler:
 
         self.state.catalog_version = self.active_version
         self.state.pinned_run_ids = list(self._pinned_catalogs_by_run.keys())
+        self.state.pinned_catalogs = deepcopy(self._pinned_catalogs_by_run)
+        self.state.pinned_versions = dict(self._pinned_versions_by_run)
 
-        self.catalog_path.write_text(
-            json.dumps(self.active_catalog, indent=2, ensure_ascii=False),
-            encoding="utf-8",
-        )
-        self.state_path.write_text(
-            json.dumps(self.state.model_dump(), indent=2, ensure_ascii=False),
-            encoding="utf-8",
-        )
+        self._atomic_write_json(self.catalog_path, self.active_catalog)
+        self._atomic_write_json(self.state_path, self.state.model_dump())
+
+    @staticmethod
+    def _atomic_write_json(path: Path, payload: Dict[str, Any]) -> None:
+        """Write a JSON artifact through a same-directory temporary file."""
+        temporary_path = path.with_name(f".{path.name}.{uuid4().hex}.tmp")
+        try:
+            temporary_path.write_text(
+                json.dumps(payload, indent=2, ensure_ascii=False, sort_keys=True),
+                encoding="utf-8",
+            )
+            temporary_path.replace(path)
+        finally:
+            if temporary_path.exists():
+                temporary_path.unlink()
 
     def _validate_catalog(self, catalog: Dict[str, Any]) -> bool:
         """Verify catalog contains required providers and roles structure."""
@@ -151,22 +179,43 @@ class CatalogRefreshHandler:
             return False
         if "providers" not in catalog or "roles_mapping" not in catalog:
             return False
-        if not catalog["providers"]:
-            return False
+        providers = catalog["providers"]
         roles = catalog["roles_mapping"]
+        if not isinstance(providers, dict) or not providers:
+            return False
+        if not isinstance(roles, dict):
+            return False
         # Must define at least economy and high_architecture
         if "economy" not in roles or "high_architecture" not in roles:
             return False
+        for provider in providers.values():
+            if not isinstance(provider, dict) or not isinstance(provider.get("models"), list):
+                return False
+            if not provider.get("provider_id"):
+                return False
+        for role_name in ("economy", "high_architecture"):
+            role = roles[role_name]
+            if not isinstance(role, dict) or not isinstance(role.get("allowed_models"), list):
+                return False
+            if not all(isinstance(model_id, str) and model_id for model_id in role["allowed_models"]):
+                return False
         return True
+
+    @staticmethod
+    def _as_utc(value: datetime) -> datetime:
+        """Normalize caller-provided timestamps for deterministic age checks."""
+        if value.tzinfo is None:
+            return value.replace(tzinfo=UTC)
+        return value.astimezone(UTC)
 
     def check_boot_catchup(self, now: Optional[datetime] = None) -> bool:
         """Check if 24h refresh is overdue or required on startup."""
-        current_time = now or datetime.now(UTC)
+        current_time = self._as_utc(now or datetime.now(UTC))
         if not self.state.last_refresh_timestamp:
             return True
 
         try:
-            last_dt = datetime.fromisoformat(self.state.last_refresh_timestamp)
+            last_dt = self._as_utc(datetime.fromisoformat(self.state.last_refresh_timestamp))
         except Exception:
             return True
 
@@ -178,11 +227,11 @@ class CatalogRefreshHandler:
 
     def get_catalog_age_hours(self, now: Optional[datetime] = None) -> float:
         """Calculate age of current catalog in hours."""
-        current_time = now or datetime.now(UTC)
+        current_time = self._as_utc(now or datetime.now(UTC))
         ts = self._last_valid_timestamp
         if not ts and self.state.last_refresh_timestamp:
             try:
-                ts = datetime.fromisoformat(self.state.last_refresh_timestamp)
+                ts = self._as_utc(datetime.fromisoformat(self.state.last_refresh_timestamp))
             except Exception:
                 ts = None
 
@@ -198,13 +247,14 @@ class CatalogRefreshHandler:
         Active jobs retain their pinned version; new jobs receive the active catalog.
         """
         if run_id in self._pinned_catalogs_by_run:
-            return self._pinned_catalogs_by_run[run_id]
+            return deepcopy(self._pinned_catalogs_by_run[run_id])
 
         # Pin this run to the current active catalog and version
         pinned = json.loads(json.dumps(self.active_catalog))
         self._pinned_catalogs_by_run[run_id] = pinned
         self._pinned_versions_by_run[run_id] = self.active_version
-        return pinned
+        self._save_state_and_catalog()
+        return deepcopy(pinned)
 
     def get_version_for_run(self, run_id: str) -> str:
         """Return the pinned version string for a run."""
@@ -226,7 +276,7 @@ class CatalogRefreshHandler:
         - Promotion: Newly generated catalog is promoted to self.active_catalog (affects only new jobs).
         - Fallback: If qualification or validation fails, preserves last valid catalog with age and warning.
         """
-        current_time = now or datetime.now(UTC)
+        current_time = self._as_utc(now or datetime.now(UTC))
 
         # Idempotency check: 24h window
         if not force and not self.is_refresh_due(current_time):
@@ -261,14 +311,18 @@ class CatalogRefreshHandler:
 
             # Successful promotion!
             new_version = f"v{current_time.strftime('%Y%m%d%H%M%S')}"
+            if new_version == self.active_version:
+                new_version = f"{new_version}-r{self.state.refresh_count + 1}"
             self.active_catalog = new_catalog
             self.active_version = new_version
-            self._last_valid_catalog = new_catalog
+            self._last_valid_catalog = deepcopy(new_catalog)
             self._last_valid_timestamp = current_time
 
             self.state.last_refresh_timestamp = current_time.isoformat()
+            self.state.last_attempt_timestamp = current_time.isoformat()
             self.state.last_status = "success"
             self.state.warning = None
+            self.state.degraded_at = None
             self.state.age_hours_at_last_attempt = 0.0
             self.state.refresh_count += 1
             self._save_state_and_catalog()
@@ -291,6 +345,8 @@ class CatalogRefreshHandler:
             self.state.last_status = "fallback_retained"
             self.state.warning = warning_msg
             self.state.age_hours_at_last_attempt = age_hours
+            self.state.last_attempt_timestamp = current_time.isoformat()
+            self.state.degraded_at = current_time.isoformat()
             self._save_state_and_catalog()
 
             return self.active_catalog
@@ -298,7 +354,6 @@ class CatalogRefreshHandler:
     def handle(self, context: StageContext) -> StageResult:
         """Handle execution of stage ('catalog_refresh', 'v1')."""
         current_time = datetime.now(UTC)
-        run_id = context.claim.job_key.run_id
 
         # Execute refresh (boot catchup or scheduled trigger)
         catalog = self.refresh_catalog(now=current_time)

@@ -17,9 +17,12 @@ Invariants:
 from __future__ import annotations
 
 import logging
+import math
 from datetime import UTC, datetime
 from typing import Any, Dict, List, Optional, Set
-from pydantic import BaseModel, ConfigDict, Field
+from copy import deepcopy
+
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 logger = logging.getLogger("darkfac.benchmarks.qualification")
 
@@ -57,6 +60,16 @@ class ModelCandidate(BaseModel):
     intelligence_score: Optional[float] = None
     metadata: Dict[str, Any] = Field(default_factory=dict)
 
+    @field_validator("cost_per_1k_input_usd", "cost_per_1k_output_usd")
+    @classmethod
+    def validate_cost(cls, value: Optional[float]) -> Optional[float]:
+        """Reject invalid measurements without turning them into free models."""
+        if value is None:
+            return None
+        if not math.isfinite(value) or value < 0:
+            raise ValueError("model pricing must be a finite non-negative number")
+        return float(value)
+
     @property
     def has_explicit_pricing(self) -> bool:
         return self.cost_per_1k_input_usd is not None and self.cost_per_1k_output_usd is not None
@@ -85,20 +98,29 @@ class ModelCandidate(BaseModel):
         if not self.supports_reasoning_effort:
             return None
 
-        if not requested_effort:
-            return self.default_reasoning_effort
+        allowed = set(self.allowed_reasoning_efforts) & ALLOWED_REASONING_EFFORTS
 
-        cleaned = requested_effort.strip().lower()
-        if cleaned in FORBIDDEN_REASONING_EFFORTS:
-            cleaned = "max"
+        def _normalize(value: Optional[str]) -> Optional[str]:
+            if not value:
+                return None
+            cleaned = value.strip().lower()
+            if cleaned in FORBIDDEN_REASONING_EFFORTS:
+                cleaned = "max"
+            if cleaned not in ALLOWED_REASONING_EFFORTS:
+                return None
+            if allowed and cleaned not in allowed:
+                return None
+            return cleaned
 
-        if cleaned not in ALLOWED_REASONING_EFFORTS:
-            return self.default_reasoning_effort
+        default = _normalize(self.default_reasoning_effort)
+        if default is None:
+            effective_allowed = allowed or ALLOWED_REASONING_EFFORTS
+            default = next(
+                (effort for effort in ("high", "medium", "low", "minimal", "max") if effort in effective_allowed),
+                None,
+            )
 
-        if self.allowed_reasoning_efforts and cleaned not in self.allowed_reasoning_efforts:
-            return self.default_reasoning_effort
-
-        return cleaned
+        return _normalize(requested_effort) or default
 
 
 class ModelQualificationRecord(BaseModel):
@@ -262,8 +284,10 @@ class QualificationEngine:
         # Filter for models that have valid pricing and metric score
         rankable = [
             r for r in records
-            if r.has_valid_pricing
+            if r.qualified_roles
+            and r.has_valid_pricing
             and r.estimated_task_cost_usd is not None
+            and math.isfinite(r.estimated_task_cost_usd)
             and getattr(r, metric, None) is not None
         ]
 
@@ -272,20 +296,33 @@ class QualificationEngine:
                 r.is_pareto_optimal = False
             return []
 
-        # Sort primarily by cost ascending, then score descending
+        # Sort primarily by cost ascending, then score descending.  The final
+        # frontier is computed pairwise so equal-cost/equal-score candidates are
+        # retained: neither strictly dominates the other.
         sorted_records = sorted(
             rankable,
             key=lambda r: (r.estimated_task_cost_usd, -float(getattr(r, metric) or 0.0)),
         )
 
-        frontier: List[ModelQualificationRecord] = []
-        max_score_seen = -1.0
+        def dominates(
+            left: ModelQualificationRecord,
+            right: ModelQualificationRecord,
+        ) -> bool:
+            left_cost = float(left.estimated_task_cost_usd or 0.0)
+            right_cost = float(right.estimated_task_cost_usd or 0.0)
+            left_score = float(getattr(left, metric) or 0.0)
+            right_score = float(getattr(right, metric) or 0.0)
+            return (
+                left_cost <= right_cost
+                and left_score >= right_score
+                and (left_cost < right_cost or left_score > right_score)
+            )
 
-        for record in sorted_records:
-            score = float(getattr(record, metric) or 0.0)
-            if score > max_score_seen:
-                frontier.append(record)
-                max_score_seen = score
+        frontier = [
+            record
+            for record in sorted_records
+            if not any(other is not record and dominates(other, record) for other in sorted_records)
+        ]
 
         frontier_ids = {r.model_id for r in frontier}
         for r in records:
@@ -299,50 +336,79 @@ class QualificationEngine:
         base_catalog: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """Generate canonical executors catalog dictionary from qualification records."""
-        catalog: Dict[str, Any] = {
-            "providers": {},
-            "roles_mapping": {
-                "economy": {"primary_model": "", "allowed_models": [], "fallback_order": []},
-                "high_architecture": {
-                    "primary_model": "",
-                    "strict_floor_enforcement": True,
-                    "allowed_models": [],
-                    "fallback_order": [],
-                },
-                "verifier": {
-                    "primary_local": "",
-                    "primary_cloud": "",
-                    "allowed_models": [],
-                    "fallback_order": [],
-                    "isolation_rule": "Cross-Model Family Isolation",
-                },
-                "independent_review": {
-                    "alias_of": "verifier",
-                    "allowed_models": [],
-                    "fallback_order": [],
-                },
+        source_catalog = deepcopy(base_catalog) if isinstance(base_catalog, dict) else {}
+        source_roles = source_catalog.get("roles_mapping", {})
+        catalog: Dict[str, Any] = deepcopy(source_catalog)
+        catalog["providers"] = {}
+        catalog["roles_mapping"] = {}
+
+        default_roles: Dict[str, Dict[str, Any]] = {
+            "economy": {"primary_model": "", "allowed_models": [], "fallback_order": []},
+            "high_architecture": {
+                "primary_model": "",
+                "strict_floor_enforcement": True,
+                "allowed_models": [],
+                "fallback_order": [],
+            },
+            "verifier": {
+                "primary_local": "",
+                "primary_cloud": "",
+                "allowed_models": [],
+                "fallback_order": [],
+                "isolation_rule": "Cross-Model Family Isolation",
+            },
+            "independent_review": {
+                "alias_of": "verifier",
+                "allowed_models": [],
+                "fallback_order": [],
             },
         }
+        for role, defaults in default_roles.items():
+            inherited = source_roles.get(role, {}) if isinstance(source_roles, dict) else {}
+            role_mapping = {
+                **(deepcopy(inherited) if isinstance(inherited, dict) else {}),
+                **defaults,
+            }
+            catalog["roles_mapping"][role] = role_mapping
 
         # Populate providers
-        for r in records:
+        for r in sorted(records, key=lambda item: item.model_id):
             p_id = r.provider_id
             p_key = f"provider_{p_id}"
             if p_key not in catalog["providers"]:
-                catalog["providers"][p_key] = {"provider_id": p_id, "models": []}
+                inherited_provider = source_catalog.get("providers", {}).get(p_key, {})
+                catalog["providers"][p_key] = {
+                    **(deepcopy(inherited_provider) if isinstance(inherited_provider, dict) else {}),
+                    "provider_id": p_id,
+                    "models": [],
+                }
 
-            catalog["providers"][p_key]["models"].append({
+            model_entry: Dict[str, Any] = {
                 "model_id": r.model_id,
                 "alias": r.alias,
                 "family": r.family,
-                "cost_per_1k_input_usd": r.cost_per_1k_input_usd or 0.0,
-                "cost_per_1k_output_usd": r.cost_per_1k_output_usd or 0.0,
+                "cost_per_1k_input_usd": r.cost_per_1k_input_usd,
+                "cost_per_1k_output_usd": r.cost_per_1k_output_usd,
                 "supported_roles": r.qualified_roles,
                 "tool_calling_supported": r.tool_calling_supported,
                 "tool_capabilities": r.tool_capabilities,
-                "default_reasoning_effort": r.default_reasoning_effort,
-                "max_reasoning_effort": r.allowed_reasoning_efforts[-1] if r.allowed_reasoning_efforts else None,
-            })
+                "has_valid_pricing": r.has_valid_pricing,
+                "estimated_task_cost_usd": r.estimated_task_cost_usd,
+                "is_pareto_optimal": r.is_pareto_optimal,
+            }
+            if r.supports_reasoning_effort:
+                model_entry["default_reasoning_effort"] = r.default_reasoning_effort
+                model_entry["allowed_reasoning_efforts"] = [
+                    effort
+                    for effort in r.allowed_reasoning_efforts
+                    if effort in ALLOWED_REASONING_EFFORTS
+                ]
+                model_entry["max_reasoning_effort"] = (
+                    model_entry["allowed_reasoning_efforts"][-1]
+                    if model_entry["allowed_reasoning_efforts"]
+                    else None
+                )
+            catalog["providers"][p_key]["models"].append(model_entry)
 
             # Populate role mappings for qualified roles
             for role in r.qualified_roles:
@@ -353,5 +419,9 @@ class QualificationEngine:
                         mapping["fallback_order"].append(r.model_id)
                         if not mapping.get("primary_model"):
                             mapping["primary_model"] = r.model_id
+                        if role in {"verifier", "independent_review"}:
+                            primary_key = "primary_local" if r.provider_id in {"ollama", "local"} else "primary_cloud"
+                            if not mapping.get(primary_key):
+                                mapping[primary_key] = r.model_id
 
         return catalog
