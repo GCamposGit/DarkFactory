@@ -31,11 +31,16 @@ from core.workflow.control_contracts import (
 )
 from core.workflow.cycle import ImplementationCandidate
 from core.workflow.development_handlers import DevelopmentStageHandler
-from core.workflow.handlers import StageHandler
+from core.workflow.handlers import (
+    StageHandler,
+    build_handlers,
+    dispatch_stage,
+)
 from core.workflow.quality_handlers import (
     ReviewStageHandler,
     ValidationStageHandler,
 )
+from core.workflow.verification import VerificationContext
 
 
 def _make_context(
@@ -255,3 +260,226 @@ def test_review_handler_rejection_requests_changes():
     result = handler.handle(ctx)
     assert result.outcome == "retry"
     assert result.cause_code == "review_changes_required"
+
+
+def test_development_handler_worktree_isolation_per_iteration(tmp_path: Path):
+    handler = DevelopmentStageHandler(base_worktree_dir=tmp_path)
+    ctx_it1 = _make_context(ticket_id="HF-ISO-IT", stage="development", iteration=1)
+    ctx_it2 = _make_context(ticket_id="HF-ISO-IT", stage="development", iteration=2)
+
+    res1 = handler.handle(ctx_it1)
+    res2 = handler.handle(ctx_it2)
+
+    wt1 = next(r for r in res1.output_refs if "ref://worktree/" in r)
+    wt2 = next(r for r in res2.output_refs if "ref://worktree/" in r)
+    assert wt1 != wt2
+    assert "_1" in wt1
+    assert "_2" in wt2
+
+    # Physical directory creation
+    wt1_dir = tmp_path / wt1.replace("ref://worktree/", "")
+    wt2_dir = tmp_path / wt2.replace("ref://worktree/", "")
+    assert wt1_dir.is_dir()
+    assert wt2_dir.is_dir()
+
+
+def test_development_handler_replan_from_handoff_state(tmp_path: Path):
+    class MockHandoff:
+        state = "needs_architecture_binding"
+        allowed_paths = ["core/workflow/contracts.py"]
+
+    handler = DevelopmentStageHandler(
+        base_worktree_dir=tmp_path,
+        handoff_provider=lambda tid: MockHandoff(),
+    )
+    ctx = _make_context(ticket_id="HF-HANDOFF-GAP", stage="development")
+
+    result = handler.handle(ctx)
+    assert result.outcome == "replan"
+    assert result.cause_code == "needs_architecture_binding"
+    assert "ref://planning/needs_architecture_binding/HF-HANDOFF-GAP" in result.output_refs
+
+
+def test_validation_handler_stale_lease():
+    handler = ValidationStageHandler()
+    ctx = _make_context(ticket_id="HF-VAL-STALE", stage="validation", expires_delta_seconds=-10)
+
+    result = handler.handle(ctx)
+    assert result.outcome == "failed"
+    assert result.cause_code == "stale_lease"
+
+
+def test_validation_handler_stores_and_retrieves_report():
+    handler = ValidationStageHandler(validator_func=lambda ctx, sha: {"passed": True, "actual_cost": 0.03})
+    ctx = _make_context(ticket_id="HF-REPORT-LOOKUP", stage="validation")
+
+    result = handler.handle(ctx)
+    assert result.outcome == "success"
+
+    # Lookup by ticket_id
+    report_by_ticket = handler.get_report("HF-REPORT-LOOKUP")
+    assert report_by_ticket is not None
+    assert report_by_ticket["passed"] is True
+    assert report_by_ticket["actual_cost"] == 0.03
+
+    # Lookup by report_id
+    report_ref = next(r for r in result.output_refs if "ref://validation-report/" in r)
+    report_id = report_ref.replace("ref://validation-report/", "")
+    report_by_id = handler.get_report(report_id)
+    assert report_by_id is not None
+    assert report_by_id["ticket_id"] == "HF-REPORT-LOOKUP"
+
+
+def test_review_handler_verification_context_authority_and_receipt_retrieval():
+    fixed_now = datetime(2026, 9, 20, 10, 0, 0, tzinfo=UTC)
+    cand_digest = "cand_digest_verified_123456"
+    v_ctx = VerificationContext(
+        now=fixed_now,
+        policy_version="1.0",
+        plan_digest="a" * 64,
+        candidate_digest=cand_digest,
+        config_version="v1.0",
+        expected_environment_ref="env-local-test",
+        expected_identity=SanitizedIdentity(subject="reviewer-auth", role="reviewer"),
+        expected_route="route://economy/local",
+    )
+
+    handler = ReviewStageHandler(
+        reviewer_identity=SanitizedIdentity(subject="reviewer-auth", role="reviewer"),
+        reviewer_model_family="gpt-review",
+        developer_model_family="qwen-fast",
+        verification_context=v_ctx,
+    )
+
+    # 1. Matching candidate digest succeeds with fixed_now and canonical requirement
+    ctx_pass = _make_context(
+        ticket_id="HF-AUTH-REVIEW",
+        stage="independent_review",
+        identity="dev-alice",
+        candidate_digest=cand_digest,
+    )
+    res_pass = handler.handle(ctx_pass)
+    assert res_pass.outcome == "success"
+
+    receipt = handler.get_receipt("HF-AUTH-REVIEW")
+    assert receipt is not None
+    assert receipt.observed_at == fixed_now
+    assert receipt.requirement == "independent_review"
+    assert receipt.candidate_digest == cand_digest
+
+    # 2. Mismatched candidate digest under VerificationContext authority fails closed
+    ctx_mismatch = _make_context(
+        ticket_id="HF-AUTH-MISMATCH",
+        stage="independent_review",
+        identity="dev-alice",
+        candidate_digest="cand_digest_TAMPERED",
+    )
+    res_mismatch = handler.handle(ctx_mismatch)
+    assert res_mismatch.outcome == "failed"
+    assert res_mismatch.cause_code == "candidate_digest_mismatch_with_verification_context"
+
+
+def test_build_handlers_integration_canonical_flow(tmp_path: Path):
+    ticket_id = "HF-E2E-CANONICAL"
+    dev_handler = DevelopmentStageHandler(base_worktree_dir=tmp_path)
+    val_handler = ValidationStageHandler(
+        candidate_provider=dev_handler.get_candidate,
+        validator_func=lambda ctx, sha: {"passed": True, "actual_cost": 0.05},
+    )
+    rev_handler = ReviewStageHandler(
+        reviewer_identity=SanitizedIdentity(subject="reviewer-carol", role="reviewer"),
+        reviewer_model_family="deepseek-v4",
+        developer_model_family="qwen-fast",
+        candidate_provider=dev_handler.get_candidate,
+    )
+
+    registry = build_handlers(
+        bindings={
+            "development": dev_handler,
+            "validation": val_handler,
+            "independent_review": rev_handler,
+        }
+    )
+
+    # Verify registered in registry
+    assert ("development", "v1") in registry
+    assert ("validation", "v1") in registry
+    assert ("independent_review", "v1") in registry
+
+    # Stage 1: Development
+    dev_ctx = _make_context(ticket_id=ticket_id, stage="development", identity="developer-alice")
+    dev_res = dispatch_stage(registry, dev_ctx)
+    assert dev_res.outcome == "success"
+    cand = dev_handler.get_candidate(ticket_id)
+    assert cand is not None
+    assert len(cand.candidate_sha) >= 7
+
+    # Stage 2: Validation
+    val_ctx = _make_context(
+        ticket_id=ticket_id,
+        stage="validation",
+        identity="validator-bob",
+        candidate_digest=cand.candidate_digest,
+    )
+    val_res = dispatch_stage(registry, val_ctx)
+    assert val_res.outcome == "success"
+    report = val_handler.get_report(ticket_id)
+    assert report is not None
+    assert report["passed"] is True
+
+    # Stage 3: Independent Review
+    rev_ctx = _make_context(
+        ticket_id=ticket_id,
+        stage="independent_review",
+        identity="developer-alice",
+        candidate_digest=cand.candidate_digest,
+    )
+    rev_res = dispatch_stage(registry, rev_ctx)
+    assert rev_res.outcome == "success"
+    receipt = rev_handler.get_receipt(ticket_id)
+    assert receipt is not None
+    assert receipt.producer.subject == "reviewer-carol"
+    assert receipt.requirement == "independent_review"
+
+
+def test_build_handlers_integration_dispatches_replan_and_retry(tmp_path: Path):
+    ticket_id = "HF-E2E-FAILURES"
+    dev_handler = DevelopmentStageHandler(
+        base_worktree_dir=tmp_path,
+        executor_func=lambda ctx, wt: {"status": "replan", "cause_code": "needs_architecture_binding"},
+    )
+    val_handler = ValidationStageHandler(
+        validator_func=lambda ctx, sha: {"passed": False, "error": "unit tests failed"},
+    )
+    rev_handler = ReviewStageHandler(
+        reviewer_identity=SanitizedIdentity(subject="dev-alice", role="reviewer"),  # same subject
+        reviewer_model_family="deepseek-v4",
+        developer_model_family="qwen-fast",
+    )
+
+    registry = build_handlers(
+        bindings={
+            "development": dev_handler,
+            "validation": val_handler,
+            "independent_review": rev_handler,
+        }
+    )
+
+    # Replan dispatch in development
+    dev_ctx = _make_context(ticket_id=ticket_id, stage="development", identity="dev-alice")
+    dev_res = dispatch_stage(registry, dev_ctx)
+    assert dev_res.outcome == "replan"
+    assert dev_res.cause_code == "needs_architecture_binding"
+
+    # Retry dispatch in validation
+    val_ctx = _make_context(ticket_id=ticket_id, stage="validation", identity="validator-bob")
+    val_res = dispatch_stage(registry, val_ctx)
+    assert val_res.outcome == "retry"
+    assert "test_failure" in (val_res.cause_code or "")
+
+    # Failed dispatch in review (self-approval prohibited)
+    rev_ctx = _make_context(ticket_id=ticket_id, stage="independent_review", identity="dev-alice")
+    rev_res = dispatch_stage(registry, rev_ctx)
+    assert rev_res.outcome == "failed"
+    assert rev_res.cause_code == "self_approval_prohibited"
+

@@ -473,7 +473,7 @@ class JourneyObserver:
         target: TargetConfig,
     ) -> JourneyEvidenceReceipt:
         """Executes observation sequence over live HTTP connection."""
-        health_url = target.healthcheck_endpoint or f"{target.api_url}/health" if target.api_url else None
+        health_url = target.healthcheck_endpoint or (f"{target.api_url}/health" if target.api_url else None)
         if not health_url:
             return JourneyEvidenceReceipt(
                 receipt_id=receipt_id,

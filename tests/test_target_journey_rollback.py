@@ -21,6 +21,7 @@ import json
 import time
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import Any
 import pytest
 
 from core.acceptance.models import RollbackExecutionRecord
@@ -407,6 +408,324 @@ def test_rollback_adapter_rejects_empty_backup(tmp_path: Path) -> None:
         )
 
     assert "client data missing" in str(excinfo.value)
+
+
+# ---------------------------------------------------------------------------
+# 6. Comprehensive Matrix for All 4 Supported Targets
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize(
+    "project_id,target_type,health_endpoint",
+    [
+        ("darkfac", "dokploy_docker_compose", "https://darkhub.ggcampos.com/health"),
+        ("site-ggcampos", "static_web", "https://ggcampos.com"),
+        ("segundo-cerebro", "local_service", "http://127.0.0.1:8765/health"),
+        ("jarvis", "local_service", "http://127.0.0.1:8088/health"),
+    ],
+)
+def test_all_supported_targets_journey_observation(
+    project_id: str,
+    target_type: str,
+    health_endpoint: str,
+) -> None:
+    """Verifies that JourneyObserver successfully validates each of the 4 canonical targets."""
+    digest = hashlib.sha256(f"{project_id}-golden-code-v1".encode()).hexdigest()
+    artifact = ArtifactRef(
+        artifact_id=f"art_{project_id}",
+        source_sha=f"sha_{project_id}",
+        byte_digest=digest,
+        byte_size=2048,
+    )
+    sim = SimulatedJourneyTarget(
+        installed_digest=digest,
+        health_status=200,
+        persist_nonce_on_restart=True,
+    )
+    target = TargetConfig(
+        project_id=project_id,
+        target_type=target_type,
+        environment="production",
+        healthcheck_endpoint=health_endpoint,
+        metadata={"simulator": sim},
+    )
+
+    observer = JourneyObserver()
+    nonce = f"nonce-{project_id}-matrix-run"
+    receipt = observer.observe(artifact=artifact, target=target, nonce=nonce)
+
+    assert receipt.valid is True
+    assert receipt.status == "succeeded"
+    assert receipt.project_id == project_id
+    assert receipt.artifact_digest == digest
+    assert receipt.served_digest == digest
+    assert receipt.nonce_verified is True
+    assert receipt.persistence_verified is True
+    assert receipt.digest_verified is True
+    assert receipt.health_status == 200
+    assert sim.restart_count == 1
+
+
+@pytest.mark.parametrize(
+    "project_id,target_type,files_data",
+    [
+        (
+            "darkfac",
+            "dokploy_docker_compose",
+            {
+                "docker-compose.cloud.yml": b"version: '3.8'\nservices:\n  darkfac:\n    image: darkfac-cloud:latest",
+                "control_store.db": b"CONTROL_STORE_SQLITE_POSTGRES_STATE_V1_VERIFIED",
+                "config.json": b'{"service": "darkhub", "port": 8001}',
+            },
+        ),
+        (
+            "site-ggcampos",
+            "static_web",
+            {
+                "index.html": b"<!doctype html><html><head><title>ATRIUM</title></head><body>Home</body></html>",
+                "assets/style.css": b"body { margin: 0; font-family: sans-serif; }",
+                "assets/bundle.js": b"console.log('site initialized');",
+                "manifest.json": b'{"name": "ATRIUM Portfolio", "short_name": "ATRIUM"}',
+            },
+        ),
+        (
+            "segundo-cerebro",
+            "local_service",
+            {
+                "knowledge_base.sqlite": b"SQLITE_FORMAT_3\x00\x10\x00\x01\x01\x00\x00SEGUNDO_CEREBRO_NOTES",
+                "chroma_index.bin": b"\x00\x01\x02\x03\x04CHROMA_VECTOR_COLLECTION_1536_DIM",
+                "metadata.json": b'{"provider": "openai", "dims": 1536}',
+            },
+        ),
+        (
+            "jarvis",
+            "local_service",
+            {
+                "voice_pipeline.dat": b"WHISPER_LARGE_V3_TURBO_WEIGHTS_AND_BIASES_HEADER",
+                "service_state.db": b"SQLITE_FORMAT_3\x00\x10JARVIS_LOCAL_DAEMON_STATE_DB",
+                "daemon.json": b'{"port": 8088, "status": "online"}',
+            },
+        ),
+    ],
+)
+def test_all_supported_targets_rollback_adapter_restoration(
+    tmp_path: Path,
+    project_id: str,
+    target_type: str,
+    files_data: dict[str, bytes],
+) -> None:
+    """Verifies that RollbackAdapter successfully restores real data state for all 4 targets."""
+    backup_root = tmp_path / "backups" / project_id
+    backup_service = CloudBackupService(backup_root=backup_root)
+    adapter = RollbackAdapter(backup_service=backup_service)
+
+    # 1. Populate source state with real data & config
+    source_dir = tmp_path / "source" / project_id
+    source_dir.mkdir(parents=True, exist_ok=True)
+    for rel_path, data in files_data.items():
+        file_path = source_dir / rel_path
+        file_path.parent.mkdir(parents=True, exist_ok=True)
+        file_path.write_bytes(data)
+
+    # 2. Create backup snapshot
+    snapshot = backup_service.create_backup(project_id, source_dir)
+
+    # 3. Restore to target directory
+    target_dir = tmp_path / "target" / project_id
+    target_dir.mkdir(parents=True, exist_ok=True)
+
+    previous_digest = hashlib.sha256(f"previous-stable-{project_id}".encode()).hexdigest()
+    target_config = TargetConfig(
+        project_id=project_id,
+        target_type=target_type,
+        last_known_good_digest="failing-head-digest",
+        metadata={"state_directory": str(target_dir)},
+    )
+
+    record = adapter.restore(
+        previous=previous_digest,
+        backup=snapshot,
+        target=target_config,
+        trigger_reason="synthetic_smoke_failure",
+        pre_rollback_digest="failing-head-digest",
+    )
+
+    assert record.success is True
+    assert record.project_id == project_id
+    assert record.post_rollback_digest == previous_digest
+    assert record.pre_rollback_digest == "failing-head-digest"
+    assert target_config.last_known_good_digest == previous_digest
+    assert record.rto_seconds >= 0.0
+    assert record.rpo_seconds >= 0.0
+
+    # 4. Verify 100% byte fidelity
+    for rel_path, expected_bytes in files_data.items():
+        restored_file = target_dir / rel_path
+        assert restored_file.exists()
+        assert restored_file.read_bytes() == expected_bytes
+
+
+# ---------------------------------------------------------------------------
+# 7. Additional Counter-Proofs & Failure Modes
+# ---------------------------------------------------------------------------
+
+def test_counter_proof_rollback_fails_on_checksum_corruption(tmp_path: Path) -> None:
+    """Verifies that byte corruption in restored files triggers fail-closed error."""
+    backup_dir = tmp_path / "corrupt_test_backup"
+    backup_dir.mkdir(parents=True, exist_ok=True)
+    (backup_dir / "valid_data.db").write_bytes(b"initial_db_bytes")
+    (backup_dir / "meta.json").write_text('{"db": true}', encoding="utf-8")
+
+    target_dir = tmp_path / "corrupt_test_target"
+    target_dir.mkdir(parents=True, exist_ok=True)
+
+    backup_service = CloudBackupService(backup_root=tmp_path / "backups")
+    snapshot = backup_service.create_backup("proj-corrupt", backup_dir)
+
+    # Artificially tamper with the snapshot file manifest checksum to simulate corrupted extraction
+    tampered_manifest = dict(snapshot.file_manifest)
+    tampered_manifest["valid_data.db"] = "corrupted_expected_hash_00000000000000000000000000000000"
+
+    tampered_snapshot = snapshot.model_copy(update={"file_manifest": tampered_manifest})
+
+    adapter = RollbackAdapter(backup_service=backup_service)
+    with pytest.raises(RuntimeError) as excinfo:
+        adapter.restore(
+            previous="prev_stable_123",
+            backup=tampered_snapshot,
+            target=target_dir,
+        )
+
+    assert "checksum mismatch" in str(excinfo.value)
+
+
+def test_counter_proof_rollback_fails_on_missing_restored_file(tmp_path: Path) -> None:
+    """Verifies that missing file in restored target triggers fail-closed error."""
+    backup_dir = tmp_path / "missing_file_backup"
+    backup_dir.mkdir(parents=True, exist_ok=True)
+    (backup_dir / "existing.db").write_bytes(b"existing_db")
+    (backup_dir / "config.json").write_text('{"v": 1}', encoding="utf-8")
+
+    target_dir = tmp_path / "missing_file_target"
+    target_dir.mkdir(parents=True, exist_ok=True)
+
+    backup_service = CloudBackupService(backup_root=tmp_path / "backups")
+    snapshot = backup_service.create_backup("proj-missing", backup_dir)
+
+    # Add ghost file to manifest that won't exist in archive
+    tampered_manifest = dict(snapshot.file_manifest)
+    tampered_manifest["ghost_table.db"] = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+
+    tampered_snapshot = snapshot.model_copy(update={"file_manifest": tampered_manifest})
+
+    adapter = RollbackAdapter(backup_service=backup_service)
+    with pytest.raises(RuntimeError) as excinfo:
+        adapter.restore(
+            previous="prev_stable_123",
+            backup=tampered_snapshot,
+            target=target_dir,
+        )
+
+    assert "missing restored file" in str(excinfo.value)
+
+
+def test_counter_proof_journey_observer_probe_fn_stale_code_fails_closed() -> None:
+    """Verifies that custom probe_fn returning stale code digest fails closed."""
+    expected_digest = hashlib.sha256(b"probe-fn-expected").hexdigest()
+    stale_digest = hashlib.sha256(b"probe-fn-stale").hexdigest()
+
+    target = TargetConfig(
+        project_id="darkfac",
+        target_type="dokploy_docker_compose",
+    )
+
+    def stale_probe_fn(t: TargetConfig) -> tuple[int, str]:
+        return 200, stale_digest
+
+    observer = JourneyObserver(probe_fn=stale_probe_fn)
+    receipt = observer.observe(artifact=expected_digest, target=target, nonce="nonce-probe-fn")
+
+    assert receipt.valid is False
+    assert receipt.status == "failed"
+    assert receipt.digest_verified is False
+    assert "código velho" in receipt.error.lower()
+
+
+def test_counter_proof_journey_observer_transport_nonce_mismatch_fails_closed() -> None:
+    """Verifies that transport callable returning mismatched nonce fails closed."""
+    expected_digest = hashlib.sha256(b"transport-nonce-code").hexdigest()
+    target = TargetConfig(project_id="segundo-cerebro", target_type="local_service")
+
+    def corrupt_nonce_transport(method: str, path: str, body: Any, headers: Any) -> dict[str, Any]:
+        if method == "GET" and path == "/health":
+            return {"status": 200, "digest": expected_digest}
+        elif method == "POST" and path == "/journey/nonce":
+            return {"status": 200}
+        elif method == "GET" and path == "/journey/nonce":
+            return {"nonce": "wrong-corrupted-nonce"}
+        return {"status": 200}
+
+    observer = JourneyObserver(transport=corrupt_nonce_transport)
+    receipt = observer.observe(artifact=expected_digest, target=target, nonce="expected-nonce")
+
+    assert receipt.valid is False
+    assert receipt.status == "failed"
+    assert receipt.nonce_verified is False
+    assert "mismatch" in receipt.error.lower()
+
+
+def test_counter_proof_journey_observer_transport_lost_nonce_on_restart_fails_closed() -> None:
+    """Verifies that transport callable losing nonce after restart fails closed."""
+    expected_digest = hashlib.sha256(b"transport-restart-code").hexdigest()
+    target = TargetConfig(project_id="jarvis", target_type="local_service")
+
+    state = {"nonce": None, "restarted": False}
+
+    def losing_restart_transport(method: str, path: str, body: Any, headers: Any) -> dict[str, Any]:
+        if method == "GET" and path == "/health":
+            return {"status": 200, "digest": expected_digest}
+        elif method == "POST" and path == "/journey/nonce":
+            state["nonce"] = body["nonce"]
+            return {"status": 200}
+        elif method == "GET" and path == "/journey/nonce":
+            if state["restarted"]:
+                return {"nonce": None}
+            return {"nonce": state["nonce"]}
+        elif method == "POST" and path == "/restart":
+            state["restarted"] = True
+            return {"status": 200}
+        return {"status": 200}
+
+    observer = JourneyObserver(transport=losing_restart_transport)
+    receipt = observer.observe(artifact=expected_digest, target=target, nonce="nonce-to-lose")
+
+    assert receipt.valid is False
+    assert receipt.status == "failed"
+    assert receipt.nonce_verified is True
+    assert receipt.persistence_verified is False
+    assert "não persistido" in receipt.error.lower()
+
+
+def test_journey_observer_http_connection_failure_fails_closed() -> None:
+    """Verifies that unreachable HTTP endpoint fails closed without crashing."""
+    artifact = ArtifactRef(
+        artifact_id="art_unreachable",
+        source_sha="sha_unreachable",
+        byte_digest="e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        byte_size=10,
+    )
+    # Using a non-routable dummy address to trigger connection error
+    target = TargetConfig(
+        project_id="darkfac",
+        target_type="dokploy_docker_compose",
+        healthcheck_endpoint="http://127.0.0.1:59999/health",
+    )
+    observer = JourneyObserver()
+    receipt = observer.observe(artifact=artifact, target=target, nonce="nonce-conn-fail")
+
+    assert receipt.valid is False
+    assert receipt.status == "failed"
+    assert receipt.error is not None
+    assert "error" in receipt.error.lower()
 
 
 def test_workflow_contracts_collection_preflight_passes() -> None:

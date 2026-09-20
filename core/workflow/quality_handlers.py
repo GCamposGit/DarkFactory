@@ -43,6 +43,7 @@ from core.workflow.verification import (
     EvidenceReceipt,
     EvidenceResult,
     ValidationMode,
+    VerificationContext,
 )
 
 logger = logging.getLogger("darkfac.workflow.quality_handlers")
@@ -84,6 +85,11 @@ class ValidationStageHandler:
     ) -> None:
         self.validator_func = validator_func
         self.candidate_provider = candidate_provider
+        self._reports: dict[str, Any] = {}
+
+    def get_report(self, report_key: str) -> dict[str, Any] | None:
+        """Lookup stored validation report by report_id or ticket_id."""
+        return self._reports.get(report_key)
 
     def handle(self, context: StageContext) -> StageResult:
         """Execute test validation over candidate."""
@@ -129,6 +135,18 @@ class ValidationStageHandler:
 
         if not passed:
             logger.warning("Validation failed for %s (candidate: %s): %s", ticket_id, candidate_sha, error_detail)
+            failed_report_id = f"val_report_failed_{ticket_id}_{candidate_sha[:8]}"
+            report_data = {
+                "report_id": failed_report_id,
+                "ticket_id": ticket_id,
+                "candidate_sha": candidate_sha,
+                "passed": False,
+                "error": error_detail,
+                "actual_cost": actual_cost,
+            }
+            self._reports[failed_report_id] = report_data
+            self._reports[ticket_id] = report_data
+
             return StageResult(
                 outcome="retry",
                 cause_code=f"test_failure: {error_detail}" if error_detail else "test_failure",
@@ -138,6 +156,17 @@ class ValidationStageHandler:
             )
 
         report_id = f"val_report_{ticket_id}_{candidate_sha[:8]}"
+        report_data = {
+            "report_id": report_id,
+            "ticket_id": ticket_id,
+            "candidate_sha": candidate_sha,
+            "passed": True,
+            "error": "",
+            "actual_cost": actual_cost,
+        }
+        self._reports[report_id] = report_data
+        self._reports[ticket_id] = report_data
+
         output_refs = [
             f"ref://validation-report/{report_id}",
             f"ref://candidate/{candidate_sha}",
@@ -184,6 +213,7 @@ class ReviewStageHandler:
         developer_model_family: str = "qwen-fast",
         review_evaluator: Callable[[StageContext, ImplementationCandidate | None], dict[str, Any]] | None = None,
         candidate_provider: Callable[[str], ImplementationCandidate | None] | None = None,
+        verification_context: VerificationContext | None = None,
     ) -> None:
         self.reviewer_identity = reviewer_identity or SanitizedIdentity(
             subject="independent-reviewer",
@@ -194,6 +224,12 @@ class ReviewStageHandler:
         self.developer_model_family = developer_model_family
         self.review_evaluator = review_evaluator
         self.candidate_provider = candidate_provider
+        self.verification_context = verification_context
+        self._receipts: dict[str, EvidenceReceipt] = {}
+
+    def get_receipt(self, receipt_key: str) -> EvidenceReceipt | None:
+        """Lookup stored evidence receipt by receipt_id or ticket_id."""
+        return self._receipts.get(receipt_key)
 
     def handle(self, context: StageContext) -> StageResult:
         """Execute independent adversarial review."""
@@ -233,12 +269,30 @@ class ReviewStageHandler:
                 actual_cost=0.0,
             )
 
-        # 3. Retrieve candidate if available
+        # 3. VerificationContext digest mismatch check if context provided
+        if self.verification_context is not None:
+            expected_cand_digest = self.verification_context.candidate_digest
+            if expected_cand_digest and context.candidate_digest and expected_cand_digest != context.candidate_digest:
+                logger.error(
+                    "Candidate digest mismatch under VerificationContext authority for %s: expected %s, got %s",
+                    ticket_id,
+                    expected_cand_digest,
+                    context.candidate_digest,
+                )
+                return StageResult(
+                    outcome="failed",
+                    cause_code="candidate_digest_mismatch_with_verification_context",
+                    output_refs=[],
+                    evidence_refs=[],
+                    actual_cost=0.0,
+                )
+
+        # 4. Retrieve candidate if available
         candidate: ImplementationCandidate | None = None
         if self.candidate_provider is not None:
             candidate = self.candidate_provider(ticket_id)
 
-        # 4. Evaluate review
+        # 5. Evaluate review
         approved = True
         findings: list[str] = []
         actual_cost = 0.0
@@ -262,26 +316,29 @@ class ReviewStageHandler:
                 actual_cost=actual_cost,
             )
 
-        # 5. Create verifiable EvidenceReceipt
-        now = datetime.now(UTC)
+        # 6. Create verifiable EvidenceReceipt under VerificationContext authority
+        now = self.verification_context.now if self.verification_context else datetime.now(UTC)
         candidate_sha = candidate.candidate_sha if candidate else (context.candidate_digest or "sha_verified")
+        candidate_digest = candidate.candidate_digest if candidate else context.candidate_digest
         receipt_id = f"receipt://review/{ticket_id}/{now.strftime('%Y%m%d%H%M%S')}"
 
         receipt = EvidenceReceipt(
             receipt_id=receipt_id,
             producer=self.reviewer_identity,
             subject=ticket_id,
-            requirement="independent_code_and_oracle_review",
+            requirement="independent_review",
             artifact_hash=candidate_sha,
             result=EvidenceResult.PASSED,
             mode=ValidationMode.TARGET_ENVIRONMENT,
             observed_at=now,
             environment_ref=context.environment_ref,
             plan_digest=context.plan_digest,
-            candidate_digest=context.candidate_digest,
+            candidate_digest=candidate_digest,
             config_version=context.config_version,
             route=context.route_ref,
         )
+        self._receipts[receipt_id] = receipt
+        self._receipts[ticket_id] = receipt
 
         return StageResult(
             outcome="success",

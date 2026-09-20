@@ -143,11 +143,15 @@ class DevelopmentStageHandler:
 
         # 4. Check for architectural gaps requiring replanning
         if handoff is not None:
-            if hasattr(handoff, "state") and str(handoff.state) == "needs_architecture_binding":
+            if hasattr(handoff, "state") and str(handoff.state) in {
+                "needs_architecture_binding",
+                "needs_spec",
+                "needs_replan",
+            }:
                 return StageResult(
                     outcome="replan",
-                    cause_code="needs_architecture_binding",
-                    output_refs=[f"ref://planning/needs_architecture_binding/{ticket_id}"],
+                    cause_code=str(handoff.state),
+                    output_refs=[f"ref://planning/{handoff.state}/{ticket_id}"],
                     evidence_refs=[f"ref://evidence/architecture_gap/{ticket_id}"],
                     actual_cost=0.0,
                 )
@@ -156,6 +160,7 @@ class DevelopmentStageHandler:
         worktree_path = (
             self.base_worktree_dir / f"job_{run_id}_{ticket_id}_{iteration}"
         ).resolve()
+        worktree_path.mkdir(parents=True, exist_ok=True)
 
         # 6. Execute implementation via executor_func or default synthesizer
         baseline_sha = (
@@ -215,6 +220,7 @@ class DevelopmentStageHandler:
             diff=diff_content,
         )
         self._candidates[candidate.candidate_id] = candidate
+        self._candidates[ticket_id] = candidate
         tracker.record_success()
 
         output_refs = [

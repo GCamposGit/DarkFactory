@@ -24,11 +24,11 @@ Todos especificados; só HF-26-01 sem predecessor técnico. Prontidão de contra
 | [HF-07-02](HF-07-02.md) — Rotas qualificadas e fallback | economy | implemented | HF-07-01, HF-05-03 |
 | [HF-07-03](HF-07-03.md) — Catálogo diário recuperável | economy | ready_for_handoff | HF-05-04, HF-07-02 |
 | [HF-09-01](HF-09-01.md) — Binding de agentes e revisão por etapa | high_architecture | implemented | HF-07-01, HF-05-04 |
-| [HF-09-02](HF-09-02.md) — Consumers de desenvolvimento e qualidade | economy | ready_for_handoff | HF-09-01, HF-08-04 |
+| [HF-09-02](HF-09-02.md) — Consumers de desenvolvimento e qualidade | economy | implemented | HF-09-01, HF-08-04 |
 | [HF-11-01](HF-11-01.md) — Integração GitHub reconciliada | economy | implemented | HF-09-02, HF-26-02 |
 | [HF-12-01](HF-12-01.md) — Binding de build e targets reais | high_architecture | implemented | HF-26-03 |
 | [HF-12-02](HF-12-02.md) — Build real e adapter de deploy | economy | implemented | HF-12-01, HF-11-01 |
-| [HF-12-03](HF-12-03.md) — Jornada e rollback observados | economy | ready_for_handoff | HF-12-02 |
+| [HF-12-03](HF-12-03.md) — Jornada e rollback observados | economy | implemented | HF-12-02 |
 | [HF-12-04](HF-12-04.md) — Release automática por evidência | economy | implemented | HF-12-03, HF-05-04 |
 | [HF-10-01](HF-10-01.md) — Memória por eventos e contexto fixado | economy | implemented | HF-05-04 |
 | [HF-10-02](HF-10-02.md) — Pesquisa ligada às decisões | economy | ready_for_handoff | HF-10-01, HF-07-02 |
