@@ -187,6 +187,19 @@ class QualificationEngine:
                 has_pricing = False
                 task_cost = None
 
+        normalized_efforts: List[str] = []
+        normalized_default_effort: Optional[str] = None
+        if candidate.supports_reasoning_effort:
+            for raw_effort in candidate.allowed_reasoning_efforts:
+                cleaned = raw_effort.strip().lower()
+                if cleaned in FORBIDDEN_REASONING_EFFORTS:
+                    cleaned = "max"
+                if cleaned in ALLOWED_REASONING_EFFORTS and cleaned not in normalized_efforts:
+                    normalized_efforts.append(cleaned)
+            normalized_default_effort = candidate.sanitize_reasoning_effort(
+                candidate.default_reasoning_effort
+            )
+
         for role in target_roles:
             is_qual, reason = self._evaluate_role(candidate, role, has_pricing, task_cost)
             if is_qual:
@@ -210,8 +223,8 @@ class QualificationEngine:
             tool_calling_supported=candidate.tool_calling_supported,
             tool_capabilities=candidate.tool_capabilities,
             supports_reasoning_effort=candidate.supports_reasoning_effort,
-            allowed_reasoning_efforts=candidate.allowed_reasoning_efforts,
-            default_reasoning_effort=candidate.default_reasoning_effort,
+            allowed_reasoning_efforts=normalized_efforts,
+            default_reasoning_effort=normalized_default_effort,
             metadata=candidate.metadata,
         )
 

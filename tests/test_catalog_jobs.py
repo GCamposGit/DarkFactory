@@ -612,6 +612,22 @@ def test_generated_catalog_does_not_fabricate_price_or_send_effort() -> None:
     assert "allowed_reasoning_efforts" not in model
     assert "max_reasoning_effort" not in model
 
+    supported_candidate = candidate.model_copy(
+        update={
+            "model_id": "cloud/supported-architecture",
+            "supports_reasoning_effort": True,
+            "default_reasoning_effort": "xhigh",
+            "allowed_reasoning_efforts": ["xhigh"],
+        }
+    )
+    supported_record = QualificationEngine().qualify_candidate(supported_candidate)
+    supported_model = QualificationEngine().generate_catalog([supported_record])["providers"][
+        "provider_cloud"
+    ]["models"][0]
+    assert supported_model["default_reasoning_effort"] == "max"
+    assert supported_model["allowed_reasoning_efforts"] == ["max"]
+    assert supported_model["max_reasoning_effort"] == "max"
+
 
 def test_generated_catalog_preserves_binding_metadata() -> None:
     """Refreshes replace qualification data but retain binding policy metadata."""
