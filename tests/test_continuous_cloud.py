@@ -255,10 +255,10 @@ def test_coordinator_cli_status_ready() -> None:
 
 
 def test_worker_cli_status() -> None:
-    """Worker CLI --status outputs JSON and exits with code 0."""
+    """Unbound worker reports unready and fails its Compose healthcheck."""
     # Programmatic entrypoint test
     exit_code = worker_main(["--status"])
-    assert exit_code == 0
+    assert exit_code == 2
 
     # CLI subprocess invocation
     proc = subprocess.run(
@@ -268,13 +268,15 @@ def test_worker_cli_status() -> None:
         text=True,
         timeout=10,
     )
-    assert proc.returncode == 0
+    assert proc.returncode == 2
     data = json.loads(proc.stdout)
     assert "worker_id" in data
     assert data["max_slots"] == 2
     assert data["allocated_slots"] == 0
     assert data["is_saturated"] is False
     assert data["is_draining"] is False
+    assert data["is_ready"] is False
+    assert data["bound_stages"] == []
 
 
 def test_coordinator_resilience_waiting_access() -> None:
@@ -316,10 +318,13 @@ def test_docker_compose_cloud_spec() -> None:
 
     # 1. No GITHUB_PAT token in context
     assert "${GITHUB_PAT" not in content
-    assert "context: https://github.com/GCamposGit/DarkFactory.git#main" in content
+    assert "context: https://github.com/GCamposGit/DarkFactory.git#main" not in content
 
     # 2. Pinned image
-    assert "image: ghcr.io/gcamposgit/darkfac-cloud:latest" in content
+    assert "image: ghcr.io/gcamposgit/darkfac-cloud@${DARKFAC_CLOUD_IMAGE_DIGEST:?" in content
+    assert "image: ghcr.io/gcamposgit/darkfac-cloud:latest" not in content
+    assert "DARKFAC_COORDINATOR_API_TOKEN=${DARKFAC_COORDINATOR_API_TOKEN:?" in content
+    assert '"127.0.0.1:8001:8001"' in content
 
     # 3. Stop grace period 35s
     assert "stop_grace_period: 35s" in content

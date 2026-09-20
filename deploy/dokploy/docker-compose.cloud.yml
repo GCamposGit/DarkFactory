@@ -6,10 +6,7 @@
 
 services:
   darkfac-coordinator:
-    build:
-      context: https://github.com/GCamposGit/DarkFactory.git#main
-      dockerfile: deploy/dokploy/Dockerfile.cloud
-    image: ghcr.io/gcamposgit/darkfac-cloud:latest
+    image: ghcr.io/gcamposgit/darkfac-cloud@${DARKFAC_CLOUD_IMAGE_DIGEST:?Set an approved sha256 image digest}
     container_name: darkfac-coordinator
     restart: unless-stopped
     stop_grace_period: 35s
@@ -19,6 +16,9 @@ services:
       - DARKFAC_HF02_DATABASE_URL=${DARKFAC_HF02_DATABASE_URL}
       - DARKFAC_MAX_CONCURRENT_SLOTS=${DARKFAC_MAX_CONCURRENT_SLOTS:-2}
       - DARKFAC_COORDINATOR_PORT=8001
+      - DARKFAC_COORDINATOR_API_TOKEN=${DARKFAC_COORDINATOR_API_TOKEN:?Set a 32+ character secret}
+      - DARKFAC_INTAKE_ENABLED=${DARKFAC_INTAKE_ENABLED:-false}
+      - DARKFAC_ALLOWED_PROJECT_ID=darkfac
       - DATA_DIR=/app/data
       - FACTORY_DIR=/app/.factory
       - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-}
@@ -34,7 +34,7 @@ services:
       - darkfac-artifacts:/app/.factory/artifacts
       - darkfac-test-logs:/app/.factory/test_logs
     ports:
-      - "8001:8001"
+      - "127.0.0.1:8001:8001"
     networks:
       - dokploy-network
     deploy:
@@ -47,10 +47,7 @@ services:
           memory: 512M
 
   darkfac-worker:
-    build:
-      context: https://github.com/GCamposGit/DarkFactory.git#main
-      dockerfile: deploy/dokploy/Dockerfile.cloud
-    image: ghcr.io/gcamposgit/darkfac-cloud:latest
+    image: ghcr.io/gcamposgit/darkfac-cloud@${DARKFAC_CLOUD_IMAGE_DIGEST:?Set an approved sha256 image digest}
     container_name: darkfac-worker-1
     restart: unless-stopped
     stop_grace_period: 35s

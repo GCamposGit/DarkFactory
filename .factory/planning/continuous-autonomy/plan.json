@@ -1382,7 +1382,19 @@
       ],
       "allowed_paths": [
         ".factory/planning/continuous-autonomy/activation-receipts.json",
-        "docs/handoffs/continuous-autonomy/ACTIVATION-RESULT.md"
+        "docs/handoffs/continuous-autonomy/ACTIVATION-RESULT.md",
+        "docs/handoffs/continuous-autonomy/HF-03-08.md",
+        ".factory/planning/continuous-autonomy/plan.json",
+        ".factory/planning/continuous-autonomy/verify.py",
+        ".factory/planning/continuous-autonomy/integrity.json",
+        "core/orchestrator/cloud_worker.py",
+        "core/orchestrator/cloud_coordinator.py",
+        "core/workflow/handlers.py",
+        "deploy/dokploy/docker-compose.cloud.yml",
+        "tests/test_cloud_worker_active_loop.py",
+        "tests/test_cloud_coordinator_api.py",
+        "tests/test_workflow_handlers.py",
+        "tests/test_continuous_cloud.py"
       ],
       "new_test": "",
       "executor_role": "operations",
@@ -1405,7 +1417,7 @@
         "docs/handoffs/continuous-autonomy/ACTIVATION-RESULT.md"
       ],
       "read_only_paths": [
-        "All paths outside allowed_paths; especially governance, verifiers and other project checkouts"
+        "All paths outside allowed_paths; especially other project checkouts"
       ],
       "successors": [
         "HF-15-02"

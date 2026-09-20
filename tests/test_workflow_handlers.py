@@ -82,8 +82,9 @@ def test_handler_dispatch_default_execution() -> None:
     handlers = build_handlers()
     ctx = _make_context(stage="planning")
     result = handlers[("planning", "v1")].handle(ctx)
-    assert result.outcome == "success"
-    assert len(result.output_refs) > 0
+    assert result.outcome == "failed"
+    assert result.cause_code == "missing_stage_service"
+    assert not result.output_refs
 
 
 def test_handler_dispatch_custom_service() -> None:
@@ -522,4 +523,3 @@ def test_default_stage_handler_invalid_return_type_fails_closed() -> None:
     ctx = _make_context(stage="grill")
     with pytest.raises(InvalidResultError):
         registry[("grill", "v1")].handle(ctx)
-

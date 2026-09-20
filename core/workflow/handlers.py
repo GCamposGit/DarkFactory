@@ -196,14 +196,9 @@ class DefaultStageHandler:
         return result
 
     def _default_execute(self, context: StageContext) -> StageResult:
-        """Default stage execution logic returning valid outputs."""
-        jk = context.claim.job_key
+        """Reject an unbound stage instead of fabricating output/evidence refs."""
         return StageResult(
-            outcome="success",
-            output_refs=[f"ref://outputs/{self.stage}/{jk.canonical_key()}"],
-            evidence_refs=[f"ref://evidence/{self.stage}/{jk.canonical_key()}"],
-            operation_refs=[],
-            actual_cost=0.0,
+            outcome="failed", cause_code="missing_stage_service"
         )
 
 
