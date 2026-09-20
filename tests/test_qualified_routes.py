@@ -416,3 +416,146 @@ def test_portfolio_model_router_integration(tmp_path: Path) -> None:
     # Backwards compatibility: existing route_task continues to function
     res = router.route_task("research", project_id="atrium")
     assert res.selected_model == "gemini-3.8-flash"
+
+
+# ==============================================================================
+# 8. HF-07-02 Extended Acceptance Contraproofs
+# ==============================================================================
+
+
+def test_unknown_status_is_treated_as_unavailable() -> None:
+    """Unknown provider or model status MUST NOT be treated as available (unknown != available)."""
+    # Scenario A: Anthropic is UNKNOWN, OpenRouter is CONNECTED
+    report_unknown = AccountUsageReport(
+        accounts=[
+            ProviderAccountUsage(
+                provider_id="anthropic",
+                provider_name="Anthropic Claude",
+                family=ProviderFamily.FRONTIER,
+                status=AccountConnectionStatus.UNKNOWN,
+                adapter="anthropic",
+                message="Probe unconfirmed",
+            ),
+            ProviderAccountUsage(
+                provider_id="openrouter",
+                provider_name="OpenRouter Gateway",
+                family=ProviderFamily.GATEWAY,
+                status=AccountConnectionStatus.CONNECTED,
+                adapter="openrouter",
+                message="Healthy",
+            ),
+            ProviderAccountUsage(
+                provider_id="google",
+                provider_name="Google",
+                family=ProviderFamily.FRONTIER,
+                status=AccountConnectionStatus.CONNECTED,
+                adapter="google",
+                message="Healthy",
+            ),
+        ],
+        connected_count=2,
+        limited_count=0,
+        disconnected_count=0,
+    )
+
+    job = {"role": "high_architecture", "project_id": "darkfac"}
+    dec = select_route(job=job, quota_report=report_unknown)
+
+    assert dec.status == "QUALIFIED"
+    # Anthropic (primary) was skipped due to UNKNOWN status; routed to deepseek-v4-pro
+    assert dec.selected_model == "deepseek/deepseek-v4-pro"
+    assert dec.selected_provider == "openrouter"
+
+    # Scenario B: Dictionary with status="unknown"
+    quota_dict = {
+        "anthropic": {"status": "unknown"},
+        "openrouter": False,
+        "google": {"available": "unknown"},
+    }
+    dec_all_unknown = select_route(job=job, quota_report=quota_dict)
+    assert dec_all_unknown.status == "WAITING_RESOURCE"
+    assert dec_all_unknown.selected_model is None
+
+
+def test_context_window_failover() -> None:
+    """Economy tasks requiring larger context windows failover to higher capacity models."""
+    # 1. Standard economy task (<= 4k tokens) -> qwen-fast
+    job_small = {"role": "economy", "project_id": "darkfac", "context_window_required": 3000}
+    dec_small = select_route(job=job_small)
+    assert dec_small.status == "QUALIFIED"
+    assert dec_small.selected_model == "qwen-code-fast:latest"
+
+    # 2. Medium context task (10k tokens) -> skips qwen-fast (4k), selects qwen-deep (16k)
+    job_med = {"role": "economy", "project_id": "darkfac", "context_window_required": 10000}
+    dec_med = select_route(job=job_med)
+    assert dec_med.status == "QUALIFIED"
+    assert dec_med.selected_model == "qwen-code-deep:latest"
+
+    # 3. Large context task (50k tokens) -> skips both local models, selects cloud gemini-3.8-flash (1M)
+    job_large = {"role": "economy", "project_id": "darkfac", "context_window_required": 50000}
+    dec_large = select_route(job=job_large)
+    assert dec_large.status == "QUALIFIED"
+    assert dec_large.selected_model == "google/gemini-3.8-flash"
+    assert dec_large.estimated_cost_usd > 0.0
+
+
+def test_local_tasks_proceed_while_high_architecture_waits() -> None:
+    """High architecture pausing in WAITING_RESOURCE does not block local economy tasks."""
+    # All cloud accounts exhausted
+    cloud_exhausted_report = {
+        "anthropic": False,
+        "openrouter": False,
+        "google": False,
+        "xai": False,
+        "ollama": True,
+    }
+
+    # High architecture job must wait
+    job_high = {"role": "high_architecture", "project_id": "darkfac"}
+    dec_high = select_route(job=job_high, quota_report=cloud_exhausted_report)
+    assert dec_high.status == "WAITING_RESOURCE"
+    assert dec_high.wakeup_at is not None
+
+    # Simultaneously, economy task proceeds locally with zero cost and no wait
+    job_econ = {"role": "economy", "project_id": "darkfac"}
+    dec_econ = select_route(job=job_econ, quota_report=cloud_exhausted_report)
+    assert dec_econ.status == "QUALIFIED"
+    assert dec_econ.selected_model == "qwen-code-fast:latest"
+    assert dec_econ.estimated_cost_usd == 0.0
+
+
+def test_stage_name_resolution_to_role() -> None:
+    """select_route seamlessly resolves stage name when role is omitted (ControlStore integration)."""
+    # stage='planning' -> high_architecture
+    dec_plan = select_route({"stage": "planning", "project_id": "darkfac"})
+    assert dec_plan.status == "QUALIFIED"
+    assert dec_plan.selected_model == "anthropic/claude-opus-5"
+
+    # stage='independent_review' -> verifier
+    dec_review = select_route({
+        "stage": "independent_review",
+        "project_id": "darkfac",
+        "implementer_model": "anthropic/claude-opus-5",
+    })
+    assert dec_review.status == "QUALIFIED"
+    assert dec_review.selected_model == "gpt-review:latest"
+
+    # stage='validation' -> economy
+    dec_val = select_route({"stage": "validation", "project_id": "darkfac"})
+    assert dec_val.status == "QUALIFIED"
+    assert dec_val.selected_model == "qwen-code-fast:latest"
+
+
+def test_cloud_host_isolation_rejects_desktop_local() -> None:
+    """Cloud host execution cannot silently route to desktop local Ollama."""
+    job_cloud = {
+        "role": "economy",
+        "project_id": "darkfac",
+        "host": "cloud",
+    }
+    # Cloud host skips local Ollama models and routes to cloud gemini-3.8-flash
+    dec = select_route(job=job_cloud)
+    assert dec.status == "QUALIFIED"
+    assert dec.selected_model == "google/gemini-3.8-flash"
+    assert dec.selected_provider == "google"
+

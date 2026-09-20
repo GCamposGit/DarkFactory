@@ -160,6 +160,12 @@ class PortfolioModelRouter:
         quota_report: Optional[Any] = None,
     ) -> RouteDecision:
         """HF-07-02: Qualified route selection integrating with canonical contracts."""
+        if quota_report is None and self.credits_monitor is not None:
+            try:
+                quota_report = self.credits_monitor.get_report(force_refresh=False)
+            except Exception as exc:
+                logger.debug("Failed getting quota report from monitor: %s", exc)
+
         return select_route(
             job=job,
             catalog=catalog,

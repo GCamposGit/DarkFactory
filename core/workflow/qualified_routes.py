@@ -437,8 +437,8 @@ class QuotaState:
                 status = getattr(acc, "status", None)
                 status_val = status.value if hasattr(status, "value") else str(status).lower()
 
-                # Treat limited, degraded, or disconnected as exhausted
-                if status_val in {"limited", "degraded", "disconnected"}:
+                # Treat limited, degraded, disconnected, or unknown as exhausted/unavailable
+                if status_val in {"limited", "degraded", "disconnected", "unknown"}:
                     self.exhausted_providers.add(provider_id)
 
                 # Check windows
@@ -461,7 +461,7 @@ class QuotaState:
                 for acc in self.report["accounts"]:
                     provider_id = acc.get("provider_id", "").lower()
                     status_val = str(acc.get("status", "")).lower()
-                    if status_val in {"limited", "degraded", "disconnected"}:
+                    if status_val in {"limited", "degraded", "disconnected", "unknown"}:
                         self.exhausted_providers.add(provider_id)
                     for win in acc.get("windows", []):
                         if win.get("used_percent", 0.0) >= 100.0 or win.get("remaining_percent", 100.0) <= 0.0:
@@ -476,8 +476,16 @@ class QuotaState:
                 if isinstance(val, bool):
                     if not val:
                         self.exhausted_providers.add(p_clean)
+                elif isinstance(val, str):
+                    if val.lower() in {"limited", "degraded", "disconnected", "unknown", "unavailable"}:
+                        self.exhausted_providers.add(p_clean)
                 elif isinstance(val, dict):
-                    if val.get("available") is False or val.get("status") in {"limited", "degraded", "disconnected"}:
+                    status_val = str(val.get("status", "")).lower()
+                    if (
+                        val.get("available") is False
+                        or val.get("available") == "unknown"
+                        or status_val in {"limited", "degraded", "disconnected", "unknown"}
+                    ):
                         self.exhausted_providers.add(p_clean)
                     if "models_available" in val and isinstance(val["models_available"], list):
                         self.model_whitelist_by_provider[p_clean] = {
@@ -487,17 +495,22 @@ class QuotaState:
                         self.resets_by_provider[p_clean] = str(val["resets_at"])
 
     def is_provider_available(self, provider_id: str) -> bool:
-        """Check if provider is not quota exhausted."""
+        """Check if provider is not quota exhausted or in unknown status."""
         return provider_id.lower() not in self.exhausted_providers
 
     def is_model_available(self, provider_id: str, model_id: str, alias: str) -> bool:
-        """Check if specific model is available for provider."""
+        """Check if specific model is available for provider (unknown is not available)."""
         p_clean = provider_id.lower()
         if p_clean in self.exhausted_providers:
             return False
         if p_clean in self.model_whitelist_by_provider:
             allowed = self.model_whitelist_by_provider[p_clean]
             if model_id.lower() not in allowed and alias.lower() not in allowed:
+                return False
+        if isinstance(self.report, dict) and p_clean in self.report and isinstance(self.report[p_clean], dict):
+            models_status = self.report[p_clean].get("models_status", {})
+            m_stat = str(models_status.get(model_id, models_status.get(alias, ""))).lower()
+            if m_stat in {"unavailable", "limited", "unknown"}:
                 return False
         return True
 
@@ -539,7 +552,19 @@ def select_route(
     """
     # 1. Normalize job inputs
     job_dict = job if isinstance(job, dict) else (job.model_dump() if hasattr(job, "model_dump") else getattr(job, "__dict__", {}))
-    role = job_dict.get("role") or job_dict.get("task_type") or "economy"
+    raw_role = job_dict.get("role") or job_dict.get("task_type")
+    if not raw_role and job_dict.get("stage"):
+        stg = str(job_dict["stage"]).lower().strip()
+        if stg in {"planning", "plan", "architecture"}:
+            raw_role = "high_architecture"
+        elif stg in {"independent_review", "review", "audit", "verifier"}:
+            raw_role = "verifier"
+        elif stg in {"research"}:
+            raw_role = "researcher"
+        else:
+            raw_role = "economy"
+    role = raw_role or "economy"
+
     # Map task_type synonyms to roles if needed
     clean_role = str(role).lower().strip().replace("-", "_")
     if clean_role in {"architecture", "plan", "prd", "high_architecture"}:
@@ -607,7 +632,33 @@ def select_route(
         cand_provider = model_spec.provider_id
         is_local = (cand_provider == "ollama" or model_spec.cost_per_1k_input_usd == 0.0)
 
-        # A. Tool-Calling Capability Check
+        # A. Context Window and Quality Check
+        req_context = (
+            job_dict.get("context_window_required")
+            or job_dict.get("context_required")
+            or (job_dict.get("estimated_input_tokens") if job_dict.get("estimated_input_tokens", 0) > 4000 else None)
+        )
+        if req_context is not None and req_context > model_spec.context_window:
+            rejection_reasons.append(
+                f"Model '{cand_id}' context window ({model_spec.context_window}) is insufficient for required tokens ({req_context})."
+            )
+            continue
+
+        # B. Host / Environment Isolation Check
+        target_env = str(
+            job_dict.get("host")
+            or job_dict.get("environment_ref")
+            or job_dict.get("environment")
+            or ""
+        ).lower().strip()
+        if target_env in {"cloud", "vps", "headless_vps", "cloud-binding", "docker_cloud"}:
+            if is_local and not job_dict.get("allow_local_on_cloud", False):
+                rejection_reasons.append(
+                    f"Host/environment '{target_env}' cannot access desktop local Ollama model '{cand_id}'."
+                )
+                continue
+
+        # C. Tool-Calling Capability Check
         if tool_calling_required and not model_spec.tool_calling_supported:
             rejection_reasons.append(f"Model '{cand_id}' does not support structured tool calling.")
             disqualified_by_tools = True
@@ -620,7 +671,7 @@ def select_route(
                 disqualified_by_tools = True
                 continue
 
-        # B. Cross-Model Family Isolation (verifier / independent_review)
+        # D. Cross-Model Family Isolation (verifier / independent_review)
         if target_role in {"verifier", "independent_review"} and implementer_family:
             cand_family = normalize_family(model_spec.family)
             if cand_family == implementer_family:
@@ -629,14 +680,14 @@ def select_route(
                 )
                 continue
 
-        # C. Budget Ceiling / LOCAL_ONLY Enforcement
+        # E. Budget Ceiling / LOCAL_ONLY Enforcement
         if not is_local and not paid_cloud_allowed:
             rejection_reasons.append(
                 f"Project '{project_id}' budget reached 100% ceiling (LOCAL_ONLY); cloud model '{cand_id}' blocked."
             )
             continue
 
-        # D. Quota and Availability Check
+        # F. Quota and Availability Check
         if not quota.is_model_available(cand_provider, model_spec.model_id, model_spec.alias):
             rejection_reasons.append(f"Provider '{cand_provider}' or model '{cand_id}' exhausted by quota limit.")
             quota_blocked_providers.add(cand_provider)
