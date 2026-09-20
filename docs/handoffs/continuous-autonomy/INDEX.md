@@ -11,23 +11,23 @@ Todos especificados; só HF-26-01 sem predecessor técnico. Prontidão de contra
 | [HF-26-03](HF-26-03.md) — Reconciliar baseline local e remota | high_architecture | implemented | HF-26-01 |
 | [HF-05-02](HF-05-02.md) — Binding do controle cloud e ownership | high_architecture | implemented | HF-26-02, HF-26-03 |
 | [HF-05-03](HF-05-03.md) — Persistência canônica e adaptadores | economy | implemented | HF-05-02 |
-| [HF-05-04](HF-05-04.md) — Handlers e materialização de sucessores | economy | ready_for_handoff | HF-05-03 |
+| [HF-05-04](HF-05-04.md) — Handlers e materialização de sucessores | economy | implemented | HF-05-03 |
 | [HF-05-05](HF-05-05.md) — Supervisor de todo portfólio | economy | implemented | HF-05-04 |
 | [HF-05-06](HF-05-06.md) — Entrypoints cloud permanentes | economy | implemented | HF-05-05, HF-23-01 |
-| [HF-23-01](HF-23-01.md) — Reserva única e justiça de portfólio | economy | ready_for_handoff | HF-05-03, HF-07-02 |
+| [HF-23-01](HF-23-01.md) — Reserva única e justiça de portfólio | economy | implemented | HF-05-03, HF-07-02 |
 | [HF-08-01](HF-08-01.md) — Intake atômico e documental explícito | economy | implemented | HF-05-03 |
 | [HF-08-02](HF-08-02.md) — Hub e CLI usam intake canônico | economy | implemented | HF-08-01 |
 | [HF-08-03](HF-08-03.md) — Telegram e importação de legado | economy | implemented | HF-08-02, HF-05-04 |
-| [HF-08-04](HF-08-04.md) — Planejamento contínuo do escopo conhecido | economy | needs_architecture_binding | HF-05-04, HF-07-02 |
-| [HF-08-05](HF-08-05.md) — Probe e retomada de dependências manuais | economy | waiting_dependency | HF-05-04 |
+| [HF-08-04](HF-08-04.md) — Planejamento contínuo do escopo conhecido | economy | ready_for_handoff | HF-05-04, HF-07-02 |
+| [HF-08-05](HF-08-05.md) — Probe e retomada de dependências manuais | economy | ready_for_handoff | HF-05-04 |
 | [HF-07-01](HF-07-01.md) — Binding de executores e contas reais | high_architecture | implemented | HF-26-03 |
 | [HF-07-02](HF-07-02.md) — Rotas qualificadas e fallback | economy | implemented | HF-07-01, HF-05-03 |
-| [HF-07-03](HF-07-03.md) — Catálogo diário recuperável | economy | needs_architecture_binding | HF-05-04, HF-07-02 |
-| [HF-09-01](HF-09-01.md) — Binding de agentes e revisão por etapa | high_architecture | waiting_dependency | HF-07-01, HF-05-04 |
+| [HF-07-03](HF-07-03.md) — Catálogo diário recuperável | economy | ready_for_handoff | HF-05-04, HF-07-02 |
+| [HF-09-01](HF-09-01.md) — Binding de agentes e revisão por etapa | high_architecture | ready_for_handoff | HF-07-01, HF-05-04 |
 | [HF-09-02](HF-09-02.md) — Consumers de desenvolvimento e qualidade | economy | needs_architecture_binding | HF-09-01, HF-08-04 |
 | [HF-11-01](HF-11-01.md) — Integração GitHub reconciliada | economy | implemented | HF-09-02, HF-26-02 |
-| [HF-12-01](HF-12-01.md) — Binding de build e targets reais | high_architecture | ready_for_handoff | HF-26-03 |
-| [HF-12-02](HF-12-02.md) — Build real e adapter de deploy | economy | needs_architecture_binding | HF-12-01, HF-11-01 |
+| [HF-12-01](HF-12-01.md) — Binding de build e targets reais | high_architecture | implemented | HF-26-03 |
+| [HF-12-02](HF-12-02.md) — Build real e adapter de deploy | economy | ready_for_handoff | HF-12-01, HF-11-01 |
 | [HF-12-03](HF-12-03.md) — Jornada e rollback observados | economy | needs_architecture_binding | HF-12-02 |
 | [HF-12-04](HF-12-04.md) — Release automática por evidência | economy | implemented | HF-12-03, HF-05-04 |
 | [HF-10-01](HF-10-01.md) — Memória por eventos e contexto fixado | economy | implemented | HF-05-04 |
