@@ -31,6 +31,7 @@ from core.workflow.control_contracts import (
     StageContext,
     StageResult,
 )
+from core.workflow.handlers import StageHandler
 from core.workflow.qualified_routes import _EMBEDDED_DEFAULT_CATALOG
 
 logger = logging.getLogger("darkfac.workflow.catalog_jobs")
@@ -85,12 +86,14 @@ class CatalogRefreshHandler:
         engine: Optional[QualificationEngine] = None,
         candidate_provider: Optional[Callable[[], List[ModelCandidate]]] = None,
         base_catalog: Optional[Dict[str, Any]] = None,
+        expected_fencing_token: Optional[int] = None,
     ) -> None:
         self.state_path = Path(state_path)
         self.catalog_path = Path(catalog_path)
         self.engine = engine or QualificationEngine()
         self.candidate_provider = candidate_provider
         self.base_catalog = deepcopy(base_catalog if base_catalog is not None else _EMBEDDED_DEFAULT_CATALOG)
+        self.expected_fencing_token = expected_fencing_token
 
         # Active catalog and version promoted to new jobs
         self.active_catalog: Dict[str, Any] = {}
@@ -264,6 +267,14 @@ class CatalogRefreshHandler:
         self.get_catalog_for_run(run_id)
         return self._pinned_versions_by_run[run_id]
 
+    def unpin_run(self, run_id: str) -> None:
+        """Remove pinning for a completed run to prevent unbounded memory growth."""
+        if run_id in self._pinned_catalogs_by_run:
+            del self._pinned_catalogs_by_run[run_id]
+        if run_id in self._pinned_versions_by_run:
+            del self._pinned_versions_by_run[run_id]
+        self._save_state_and_catalog()
+
     def refresh_catalog(
         self,
         now: Optional[datetime] = None,
@@ -352,7 +363,55 @@ class CatalogRefreshHandler:
             return self.active_catalog
 
     def handle(self, context: StageContext) -> StageResult:
-        """Handle execution of stage ('catalog_refresh', 'v1')."""
+        """Handle execution of stage ('catalog_refresh', 'v1') with stale lease failsafe."""
+        # 1. Failsafe: Stale lease check (fail-closed)
+        if context.claim and context.claim.expires_at:
+            try:
+                exp_clean = context.claim.expires_at.replace("Z", "+00:00")
+                exp_dt = datetime.fromisoformat(exp_clean)
+                if exp_dt.tzinfo is None:
+                    exp_dt = exp_dt.replace(tzinfo=UTC)
+                if exp_dt < datetime.now(UTC):
+                    logger.warning(
+                        "CatalogRefreshHandler rejected due to stale lease for ticket %s",
+                        context.claim.job_key.ticket_id if context.claim.job_key else "catalog_refresh",
+                    )
+                    return StageResult(
+                        outcome="failed",
+                        cause_code="stale_lease",
+                        output_refs=[],
+                        evidence_refs=[],
+                        actual_cost=0.0,
+                    )
+            except Exception as exc:
+                logger.warning("Invalid lease expires_at '%s': %s", context.claim.expires_at, exc)
+                return StageResult(
+                    outcome="failed",
+                    cause_code="stale_lease",
+                    output_refs=[],
+                    evidence_refs=[],
+                    actual_cost=0.0,
+                )
+
+        # 2. Failsafe: Fencing token check
+        if (
+            self.expected_fencing_token is not None
+            and context.claim
+            and context.claim.fencing_token != self.expected_fencing_token
+        ):
+            logger.warning(
+                "CatalogRefreshHandler rejected due to stale lease (fencing token mismatch: %s != %s)",
+                context.claim.fencing_token,
+                self.expected_fencing_token,
+            )
+            return StageResult(
+                outcome="failed",
+                cause_code="stale_lease",
+                output_refs=[],
+                evidence_refs=[],
+                actual_cost=0.0,
+            )
+
         current_time = datetime.now(UTC)
 
         # Execute refresh (boot catchup or scheduled trigger)
@@ -369,3 +428,25 @@ class CatalogRefreshHandler:
             actual_cost=0.0,
             cause_code=None,
         )
+
+
+def create_catalog_refresh_bindings(
+    handler: Optional[CatalogRefreshHandler] = None,
+    version: str = "v1",
+    **kwargs: Any,
+) -> Dict[str | tuple[str, str], StageHandler]:
+    """Factory providing canonical catalog_refresh stage handler for build_handlers() registry."""
+    h = handler or CatalogRefreshHandler(**kwargs)
+    return {
+        "catalog_refresh": h,
+        ("catalog_refresh", version): h,
+    }
+
+
+__all__ = [
+    "DEFAULT_CATALOG_PATH",
+    "DEFAULT_STATE_PATH",
+    "CatalogRefreshHandler",
+    "CatalogRefreshState",
+    "create_catalog_refresh_bindings",
+]

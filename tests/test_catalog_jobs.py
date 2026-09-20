@@ -28,12 +28,18 @@ from core.benchmarks.qualification import (
 from core.workflow.catalog_jobs import (
     CatalogRefreshHandler,
     CatalogRefreshState,
+    create_catalog_refresh_bindings,
 )
 from core.workflow.control_contracts import (
     Claim,
     JobKey,
     StageContext,
     StageResult,
+)
+from core.workflow.handlers import (
+    StageHandler,
+    build_handlers,
+    dispatch_stage,
 )
 
 
@@ -690,3 +696,445 @@ def test_failure_persists_degradation_timestamp(
     assert handler.state.degraded_at == t1.isoformat()
     restored = CatalogRefreshHandler(state_path=state_file, catalog_path=catalog_file)
     assert restored.state.degraded_at == t1.isoformat()
+
+
+# ==============================================================================
+# 7. Stale Lease Failsafe Tests (HF-07-03)
+# ==============================================================================
+
+
+def test_catalog_refresh_handler_stale_lease_past_timestamp_fails_closed(
+    tmp_path: Path,
+    standard_candidates: list[ModelCandidate],
+) -> None:
+    """Claim with expired expires_at is rejected with stale_lease outcome."""
+    state_file = tmp_path / "state.json"
+    catalog_file = tmp_path / "catalog.json"
+    handler = CatalogRefreshHandler(
+        state_path=state_file,
+        catalog_path=catalog_file,
+        candidate_provider=lambda: standard_candidates,
+    )
+
+    past_expires_at = (datetime.now(UTC) - timedelta(minutes=10)).isoformat()
+    claim = Claim(
+        job_key=JobKey(
+            run_id="run-stale-01",
+            ticket_id="HF-07-03",
+            plan_version="1.0",
+            stage="catalog_refresh",
+            iteration=0,
+        ),
+        lease_id="lease-expired",
+        owner="worker-stale",
+        fencing_token=1,
+        expires_at=past_expires_at,
+    )
+    context = StageContext(
+        claim=claim,
+        plan_ref="plan-hf07-03",
+        plan_digest="digest-test",
+        config_version="v1",
+        environment_ref="local-env",
+        identity="worker-stale:economy",
+        route_ref="ollama:qwen-fast",
+        memory_version="mem-v1",
+    )
+
+    result = handler.handle(context)
+    assert result.outcome == "failed"
+    assert result.cause_code == "stale_lease"
+    assert result.output_refs == []
+    assert result.evidence_refs == []
+
+
+def test_catalog_refresh_handler_stale_lease_naive_datetime_and_malformed_fails_closed(
+    tmp_path: Path,
+    standard_candidates: list[ModelCandidate],
+) -> None:
+    """Naive past datetime or unparseable expires_at string fails closed with stale_lease."""
+    handler = CatalogRefreshHandler(
+        state_path=tmp_path / "state.json",
+        catalog_path=tmp_path / "catalog.json",
+        candidate_provider=lambda: standard_candidates,
+    )
+
+    # 1. Naive past datetime string (without timezone offset)
+    naive_past = (datetime.now() - timedelta(hours=2)).strftime("%Y-%m-%dT%H:%M:%S")
+    claim_naive = Claim(
+        job_key=JobKey(
+            run_id="run-naive",
+            ticket_id="HF-07-03",
+            plan_version="1.0",
+            stage="catalog_refresh",
+            iteration=0,
+        ),
+        lease_id="lease-naive",
+        owner="worker-test",
+        fencing_token=1,
+        expires_at=naive_past,
+    )
+    ctx_naive = StageContext(
+        claim=claim_naive,
+        plan_ref="p",
+        plan_digest="d",
+        config_version="1",
+        environment_ref="e",
+        identity="i",
+        route_ref="r",
+        memory_version="m",
+    )
+    res_naive = handler.handle(ctx_naive)
+    assert res_naive.outcome == "failed"
+    assert res_naive.cause_code == "stale_lease"
+
+    # 2. Malformed expires_at string
+    claim_malformed = Claim(
+        job_key=JobKey(
+            run_id="run-malformed",
+            ticket_id="HF-07-03",
+            plan_version="1.0",
+            stage="catalog_refresh",
+            iteration=0,
+        ),
+        lease_id="lease-malformed",
+        owner="worker-test",
+        fencing_token=1,
+        expires_at="not-a-valid-iso-date",
+    )
+    ctx_malformed = StageContext(
+        claim=claim_malformed,
+        plan_ref="p",
+        plan_digest="d",
+        config_version="1",
+        environment_ref="e",
+        identity="i",
+        route_ref="r",
+        memory_version="m",
+    )
+    res_malformed = handler.handle(ctx_malformed)
+    assert res_malformed.outcome == "failed"
+    assert res_malformed.cause_code == "stale_lease"
+
+
+def test_catalog_refresh_handler_fencing_token_mismatch_fails_closed(
+    tmp_path: Path,
+    standard_candidates: list[ModelCandidate],
+) -> None:
+    """Fencing token mismatch fails closed with stale_lease."""
+    handler = CatalogRefreshHandler(
+        state_path=tmp_path / "state.json",
+        catalog_path=tmp_path / "catalog.json",
+        candidate_provider=lambda: standard_candidates,
+        expected_fencing_token=42,
+    )
+
+    future_expires = (datetime.now(UTC) + timedelta(minutes=15)).isoformat()
+    claim_mismatch = Claim(
+        job_key=JobKey(
+            run_id="run-fencing-mismatch",
+            ticket_id="HF-07-03",
+            plan_version="1.0",
+            stage="catalog_refresh",
+            iteration=0,
+        ),
+        lease_id="lease-mismatch",
+        owner="worker-test",
+        fencing_token=41,  # Stale fencing token!
+        expires_at=future_expires,
+    )
+    ctx = StageContext(
+        claim=claim_mismatch,
+        plan_ref="p",
+        plan_digest="d",
+        config_version="1",
+        environment_ref="e",
+        identity="i",
+        route_ref="r",
+        memory_version="m",
+    )
+    result = handler.handle(ctx)
+    assert result.outcome == "failed"
+    assert result.cause_code == "stale_lease"
+
+
+# ==============================================================================
+# 8. build_handlers and dispatch_stage Integration Tests
+# ==============================================================================
+
+
+def test_build_handlers_and_dispatch_stage_integration(
+    tmp_path: Path,
+    standard_candidates: list[ModelCandidate],
+) -> None:
+    """Direct integration with build_handlers(bindings={'catalog_refresh': handler}) and dispatch_stage()."""
+    state_file = tmp_path / "state.json"
+    catalog_file = tmp_path / "catalog.json"
+
+    handler = CatalogRefreshHandler(
+        state_path=state_file,
+        catalog_path=catalog_file,
+        candidate_provider=lambda: standard_candidates,
+    )
+
+    # 1. Register with build_handlers via bindings mapping
+    registry = build_handlers(bindings={"catalog_refresh": handler})
+    assert ("catalog_refresh", "v1") in registry
+    assert registry[("catalog_refresh", "v1")] is handler
+
+    # 2. Dispatch with valid context
+    future_expires = (datetime.now(UTC) + timedelta(minutes=30)).isoformat()
+    claim = Claim(
+        job_key=JobKey(
+            run_id="run-dispatch-01",
+            ticket_id="HF-07-03",
+            plan_version="1.0",
+            stage="catalog_refresh",
+            iteration=0,
+        ),
+        lease_id="lease-dispatch-ok",
+        owner="worker-dispatch",
+        fencing_token=1,
+        expires_at=future_expires,
+    )
+    context = StageContext(
+        claim=claim,
+        plan_ref="plan-01",
+        plan_digest="digest-01",
+        config_version="v1",
+        environment_ref="local",
+        identity="worker:economy",
+        route_ref="ollama:qwen",
+        memory_version="mem-01",
+    )
+
+    res = dispatch_stage(registry, context)
+    assert res.outcome == "success"
+    assert str(catalog_file.resolve()) in res.output_refs
+    assert str(state_file.resolve()) in res.evidence_refs
+
+    # 3. Dispatch with expired lease fails closed with stale_lease
+    past_expires = (datetime.now(UTC) - timedelta(minutes=5)).isoformat()
+    claim_expired = Claim(
+        job_key=JobKey(
+            run_id="run-dispatch-expired",
+            ticket_id="HF-07-03",
+            plan_version="1.0",
+            stage="catalog_refresh",
+            iteration=0,
+        ),
+        lease_id="lease-dispatch-stale",
+        owner="worker-dispatch",
+        fencing_token=1,
+        expires_at=past_expires,
+    )
+    context_expired = StageContext(
+        claim=claim_expired,
+        plan_ref="plan-01",
+        plan_digest="digest-01",
+        config_version="v1",
+        environment_ref="local",
+        identity="worker:economy",
+        route_ref="ollama:qwen",
+        memory_version="mem-01",
+    )
+
+    res_stale = dispatch_stage(registry, context_expired)
+    assert res_stale.outcome == "failed"
+    assert res_stale.cause_code == "stale_lease"
+
+
+def test_create_catalog_refresh_bindings_helper(
+    tmp_path: Path,
+    standard_candidates: list[ModelCandidate],
+) -> None:
+    """create_catalog_refresh_bindings factory integrates seamlessly with build_handlers."""
+    handler = CatalogRefreshHandler(
+        state_path=tmp_path / "state.json",
+        catalog_path=tmp_path / "catalog.json",
+        candidate_provider=lambda: standard_candidates,
+    )
+    bindings = create_catalog_refresh_bindings(handler=handler)
+    registry = build_handlers(bindings=bindings)
+
+    assert registry[("catalog_refresh", "v1")] is handler
+
+
+# ==============================================================================
+# 9. Extended Counter-Proof Validations (HF-07-03 Rigorous Checks)
+# ==============================================================================
+
+
+def test_lost_timer_boot_catchup_executes_only_once_across_reboots(
+    tmp_path: Path,
+    standard_candidates: list[ModelCandidate],
+) -> None:
+    """When a timer was lost/delayed (e.g. system down for 30 hours), boot catchup executes once."""
+    state_file = tmp_path / "state.json"
+    catalog_file = tmp_path / "catalog.json"
+
+    # Initial state from 30 hours ago
+    t0 = datetime(2026, 9, 15, 8, 0, 0, tzinfo=UTC)
+    state = CatalogRefreshState(
+        last_refresh_timestamp=t0.isoformat(),
+        catalog_version="v-initial",
+        last_status="success",
+        refresh_count=1,
+    )
+    state_file.write_text(json.dumps(state.model_dump()))
+
+    # System starts up 30 hours later
+    t_boot = t0 + timedelta(hours=30)
+    handler1 = CatalogRefreshHandler(
+        state_path=state_file,
+        catalog_path=catalog_file,
+        candidate_provider=lambda: standard_candidates,
+    )
+
+    assert handler1.is_refresh_due(now=t_boot)
+    handler1.refresh_catalog(now=t_boot)
+    assert handler1.state.refresh_count == 2
+    assert handler1.state.last_status == "success"
+
+    # Subsequent re-check 5 minutes later: NOT due, does not execute again
+    t_subsequent = t_boot + timedelta(minutes=5)
+    assert not handler1.is_refresh_due(now=t_subsequent)
+    handler1.refresh_catalog(now=t_subsequent)
+    assert handler1.state.refresh_count == 2
+
+    # Another process or reboot 2 hours later: loads from disk, still NOT due
+    handler2 = CatalogRefreshHandler(
+        state_path=state_file,
+        catalog_path=catalog_file,
+        candidate_provider=lambda: standard_candidates,
+    )
+    t_reboot = t_boot + timedelta(hours=2)
+    assert not handler2.is_refresh_due(now=t_reboot)
+    handler2.refresh_catalog(now=t_reboot)
+    assert handler2.state.refresh_count == 2
+
+
+def test_active_models_never_change_across_multiple_refresh_cycles(
+    tmp_path: Path,
+    local_economy_candidate: ModelCandidate,
+    cloud_frontier_candidate: ModelCandidate,
+    verifier_candidate: ModelCandidate,
+) -> None:
+    """Multiple concurrent jobs pinned at different cycles NEVER mutate their assigned models."""
+    state_file = tmp_path / "state.json"
+    catalog_file = tmp_path / "catalog.json"
+
+    handler = CatalogRefreshHandler(state_path=state_file, catalog_path=catalog_file)
+    t0 = datetime(2026, 9, 18, 0, 0, 0, tzinfo=UTC)
+
+    # Cycle 1: initial catalog
+    handler.refresh_catalog(
+        now=t0,
+        candidates=[local_economy_candidate, cloud_frontier_candidate, verifier_candidate],
+        force=True,
+    )
+    v1 = handler.active_version
+
+    # Job 1 starts under v1
+    j1_cat = handler.get_catalog_for_run("job-1")
+    j1_ver = handler.get_version_for_run("job-1")
+    assert j1_ver == v1
+
+    # Cycle 2: new model DeepSeek qualified
+    deepseek_candidate = ModelCandidate(
+        model_id="deepseek/deepseek-v4-pro",
+        provider_id="openrouter",
+        cost_per_1k_input_usd=0.00045,
+        cost_per_1k_output_usd=0.0018,
+        tool_calling_supported=True,
+        tool_capabilities=["read_file", "write_file", "run_command"],
+        supported_roles=["high_architecture"],
+        coding_score=95.0,
+    )
+    t1 = t0 + timedelta(hours=25)
+    handler.refresh_catalog(
+        now=t1,
+        candidates=[local_economy_candidate, deepseek_candidate, verifier_candidate],
+    )
+    v2 = handler.active_version
+
+    # Job 2 starts under v2
+    j2_cat = handler.get_catalog_for_run("job-2")
+    j2_ver = handler.get_version_for_run("job-2")
+    assert j2_ver == v2
+
+    # Cycle 3: another model Qwen Max qualified
+    qwen_max_candidate = ModelCandidate(
+        model_id="qwen/qwen-2.5-max",
+        provider_id="alibaba",
+        cost_per_1k_input_usd=0.001,
+        cost_per_1k_output_usd=0.003,
+        tool_calling_supported=True,
+        tool_capabilities=["read_file", "write_file", "run_command"],
+        supported_roles=["high_architecture"],
+        coding_score=97.0,
+    )
+    t2 = t1 + timedelta(hours=25)
+    handler.refresh_catalog(
+        now=t2,
+        candidates=[local_economy_candidate, qwen_max_candidate, verifier_candidate],
+    )
+    v3 = handler.active_version
+
+    # Job 3 starts under v3
+    j3_cat = handler.get_catalog_for_run("job-3")
+    j3_ver = handler.get_version_for_run("job-3")
+    assert j3_ver == v3
+
+    # CRITICAL INVARIANT: Job 1 and Job 2 MUST retain their original pinned models!
+    assert handler.get_version_for_run("job-1") == v1
+    assert handler.get_catalog_for_run("job-1") == j1_cat
+    assert "anthropic/claude-opus-5" in handler.get_catalog_for_run("job-1")["roles_mapping"]["high_architecture"]["allowed_models"]
+    assert "deepseek/deepseek-v4-pro" not in handler.get_catalog_for_run("job-1")["roles_mapping"]["high_architecture"]["allowed_models"]
+    assert "qwen/qwen-2.5-max" not in handler.get_catalog_for_run("job-1")["roles_mapping"]["high_architecture"]["allowed_models"]
+
+    assert handler.get_version_for_run("job-2") == v2
+    assert handler.get_catalog_for_run("job-2") == j2_cat
+    assert "deepseek/deepseek-v4-pro" in handler.get_catalog_for_run("job-2")["roles_mapping"]["high_architecture"]["allowed_models"]
+    assert "qwen/qwen-2.5-max" not in handler.get_catalog_for_run("job-2")["roles_mapping"]["high_architecture"]["allowed_models"]
+
+    # Job 1 finishes and is unpinned
+    handler.unpin_run("job-1")
+    # Subsequent inquiry for job-1 would pin to CURRENT version (v3)
+    assert handler.get_version_for_run("job-1") == v3
+
+
+def test_partial_pricing_is_not_treated_as_zero() -> None:
+    """Candidate with partial pricing (e.g. input set, output None) must NEVER default to 0.0."""
+    candidate_partial = ModelCandidate(
+        model_id="partial/half-priced",
+        provider_id="cloud",
+        cost_per_1k_input_usd=0.002,
+        cost_per_1k_output_usd=None,  # Missing output cost!
+        tool_calling_supported=True,
+        tool_capabilities=["read_file", "write_file", "run_command"],
+        supported_roles=["economy"],
+    )
+    assert not candidate_partial.has_explicit_pricing
+    with pytest.raises(MissingPriceError):
+        candidate_partial.get_task_cost()
+
+    engine = QualificationEngine()
+    record = engine.qualify_candidate(candidate_partial)
+    assert not record.has_valid_pricing
+    assert "economy" not in record.qualified_roles
+    assert "economy" in record.disqualified_roles
+
+    # Record method get_effective_reasoning_effort
+    record_effort = ModelCandidate(
+        model_id="effort/test",
+        provider_id="cloud",
+        tool_calling_supported=True,
+        supports_reasoning_effort=True,
+        allowed_reasoning_efforts=["minimal", "low", "medium"],
+        default_reasoning_effort="medium",
+    )
+    rec = engine.qualify_candidate(record_effort)
+    assert rec.get_effective_reasoning_effort("low") == "low"
+    assert rec.get_effective_reasoning_effort("xhigh") == "medium"  # Sanitized to max, not in allowed, so default
+    assert rec.get_effective_reasoning_effort(None) == "medium"

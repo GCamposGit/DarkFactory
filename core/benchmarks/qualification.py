@@ -149,6 +149,18 @@ class ModelQualificationRecord(BaseModel):
     qualified_at: str = Field(default_factory=lambda: datetime.now(UTC).isoformat())
     metadata: Dict[str, Any] = Field(default_factory=dict)
 
+    def get_effective_reasoning_effort(self, requested_effort: Optional[str] = None) -> Optional[str]:
+        """Return sanitized reasoning effort, or None if unsupported (effort incompatível não enviado)."""
+        if not self.supports_reasoning_effort:
+            return None
+        if requested_effort:
+            cleaned = requested_effort.strip().lower()
+            if cleaned in FORBIDDEN_REASONING_EFFORTS:
+                cleaned = "max"
+            if cleaned in self.allowed_reasoning_efforts:
+                return cleaned
+        return self.default_reasoning_effort
+
 
 class QualificationEngine:
     """Evaluates candidates across roles, enforces invariants, and calculates Pareto frontier."""
