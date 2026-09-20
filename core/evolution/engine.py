@@ -51,6 +51,7 @@ class FactoryEvolutionEngine:
         self.sandbox = EvolutionHoldoutSandbox(self.root)
         self._proposals: dict[str, EvolutionProposal] = {}
         self._snapshots: dict[str, RollbackSnapshot] = {}
+        self._running_jobs: dict[str, dict[str, str]] = {}
         self._load()
 
     def _load(self) -> None:
@@ -104,6 +105,19 @@ class FactoryEvolutionEngine:
         # Fail-closed boundary check
         self.sandbox.audit_boundaries(norm_path)
 
+        # Check against blocked / rolled back proposals to prevent spurious re-proposals
+        for existing in self._proposals.values():
+            if (
+                existing.target_path == norm_path
+                and existing.status == EvolutionStatus.ROLLED_BACK
+                and existing.metadata.get("blocked", False)
+                and existing.patch_content == patch_content
+            ):
+                raise ValueError(
+                    f"Spurious evolution proposal rejected: '{norm_path}' was previously rolled back "
+                    f"for regression (proposal: {existing.proposal_id}) and is blocked."
+                )
+
         pid = proposal_id or f"evo_{uuid.uuid4().hex[:8]}"
         proposal = EvolutionProposal(
             proposal_id=pid,
@@ -143,12 +157,22 @@ class FactoryEvolutionEngine:
         self._save()
         return result
 
-    def promote_candidate(self, proposal_id: str) -> RollbackSnapshot:
+    def promote_candidate(
+        self,
+        proposal_id: str,
+        *,
+        defer_to_restart: bool = False,
+    ) -> RollbackSnapshot:
         """Safely promote an approved candidate, capturing an atomic rollback snapshot."""
         if proposal_id not in self._proposals:
             raise KeyError(f"Unknown evolution proposal: {proposal_id}")
 
         prop = self._proposals[proposal_id]
+        if prop.status == EvolutionStatus.ROLLED_BACK or prop.metadata.get("blocked", False):
+            raise ValueError(
+                f"Cannot promote proposal '{proposal_id}' with status '{prop.status}'. "
+                "It was rolled back and is blocked against spurious re-application."
+            )
         if prop.status != EvolutionStatus.APPROVED:
             raise ValueError(f"Cannot promote proposal with status '{prop.status}'. Must be 'approved'.")
 
@@ -173,13 +197,24 @@ class FactoryEvolutionEngine:
         snap_file.write_text(snapshot.model_dump_json(indent=2), encoding="utf-8")
         self._snapshots[proposal_id] = snapshot
 
-        # Apply mutation
+        # If deferred to restart, do NOT mutate the active file immediately
+        if defer_to_restart:
+            prop.status = EvolutionStatus.PROMOTED
+            prop.promoted_at = datetime.now(timezone.utc)
+            prop.metadata["pending_restart"] = True
+            prop.metadata["applied_at_restart"] = None
+            self._save()
+            return snapshot
+
+        # Apply mutation immediately
         target_abs.parent.mkdir(parents=True, exist_ok=True)
         target_abs.write_text(prop.patch_content, encoding="utf-8")
 
         # Update status
         prop.status = EvolutionStatus.PROMOTED
         prop.promoted_at = datetime.now(timezone.utc)
+        prop.metadata["pending_restart"] = False
+        prop.metadata["applied_at_restart"] = datetime.now(timezone.utc).isoformat()
         self._save()
 
         # If skill modified, trigger skill sync
@@ -188,7 +223,57 @@ class FactoryEvolutionEngine:
 
         return snapshot
 
-    def rollback_candidate(self, proposal_id: str) -> bool:
+    def apply_pending_promotions(self) -> list[str]:
+        """Apply all approved promotions that were deferred to restart."""
+        applied = []
+        for pid, prop in list(self._proposals.items()):
+            if prop.status == EvolutionStatus.PROMOTED and prop.metadata.get("pending_restart", False):
+                if prop.metadata.get("blocked", False) or prop.status == EvolutionStatus.ROLLED_BACK:
+                    continue
+                # Fail-closed audit before writing
+                self.sandbox.audit_boundaries(prop.target_path)
+                target_abs = self.root / prop.target_path
+                target_abs.parent.mkdir(parents=True, exist_ok=True)
+                target_abs.write_text(prop.patch_content, encoding="utf-8")
+                prop.metadata["pending_restart"] = False
+                prop.metadata["applied_at_restart"] = datetime.now(timezone.utc).isoformat()
+                applied.append(pid)
+                if prop.target_path.startswith(".agents/skills/"):
+                    self._sync_skills()
+        if applied:
+            self._save()
+        return applied
+
+    def restart(self) -> list[str]:
+        """Simulate system/worker restart: clear running jobs and apply pending promotions."""
+        self._running_jobs.clear()
+        applied = self.apply_pending_promotions()
+        self._load()
+        return applied
+
+    def register_running_job(self, run_id: str, paths: list[str] | None = None) -> None:
+        """Register an active job run, pinning its observed file contents."""
+        pinned = {}
+        for p in (paths or []):
+            norm_p = p.replace("\\", "/").strip().lstrip("/")
+            abs_p = self.root / norm_p
+            if abs_p.is_file():
+                pinned[norm_p] = abs_p.read_text(encoding="utf-8")
+        self._running_jobs[run_id] = pinned
+
+    def get_content_for_run(self, run_id: str, target_path: str) -> str:
+        """Retrieve target file content for a run, isolating running jobs from mid-flight mutations."""
+        norm_path = target_path.replace("\\", "/").strip().lstrip("/")
+        if run_id in self._running_jobs and norm_path in self._running_jobs[run_id]:
+            return self._running_jobs[run_id][norm_path]
+        abs_p = self.root / norm_path
+        return abs_p.read_text(encoding="utf-8") if abs_p.is_file() else ""
+
+    def finish_running_job(self, run_id: str) -> None:
+        """Unregister a finished running job."""
+        self._running_jobs.pop(run_id, None)
+
+    def rollback_candidate(self, proposal_id: str, reason: str = "") -> bool:
         """Rollback an active or promoted mutation using its captured snapshot."""
         if proposal_id not in self._snapshots:
             raise KeyError(f"No rollback snapshot found for proposal: {proposal_id}")
@@ -206,12 +291,24 @@ class FactoryEvolutionEngine:
             prop = self._proposals[proposal_id]
             prop.status = EvolutionStatus.ROLLED_BACK
             prop.retired_at = datetime.now(timezone.utc)
+            prop.metadata["blocked"] = True
+            prop.metadata["pending_restart"] = False
+            if reason:
+                prop.metadata["rollback_reason"] = reason
             self._save()
 
         if snapshot.target_path.startswith(".agents/skills/"):
             self._sync_skills()
 
         return True
+
+    def record_regression(self, proposal_id: str, reason: str = "") -> RollbackSnapshot:
+        """Operational regression detected: rollback exact snapshot and block re-application."""
+        if proposal_id not in self._snapshots:
+            raise KeyError(f"No rollback snapshot found for proposal: {proposal_id}")
+
+        self.rollback_candidate(proposal_id, reason=reason or "Operational regression detected")
+        return self._snapshots[proposal_id]
 
     def _sync_skills(self) -> None:
         """Run scripts/sync_skills.py to keep .claude/skills synchronized with .agents/skills."""

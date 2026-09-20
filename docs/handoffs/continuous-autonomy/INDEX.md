@@ -32,12 +32,12 @@ Todos especificados; só HF-26-01 sem predecessor técnico. Prontidão de contra
 | [HF-12-04](HF-12-04.md) — Release automática por evidência | economy | implemented | HF-12-03, HF-05-04 |
 | [HF-10-01](HF-10-01.md) — Memória por eventos e contexto fixado | economy | implemented | HF-05-04 |
 | [HF-10-02](HF-10-02.md) — Pesquisa ligada às decisões | economy | implemented | HF-10-01, HF-07-02 |
-| [HF-25-01](HF-25-01.md) — Evolução avaliada e aplicada após restart | economy | ready_for_handoff | HF-10-01, HF-09-01, HF-26-03 |
+| [HF-25-01](HF-25-01.md) — Evolução avaliada e aplicada após restart | economy | implemented | HF-10-01, HF-09-01, HF-26-03 |
 | [HF-13-01](HF-13-01.md) — Prontidão e evidência no roadmap | economy | implemented | HF-26-01 |
 | [HF-13-02](HF-13-02.md) — Painel de progresso e estagnação | economy | implemented | HF-13-01, HF-05-05 |
 | [HF-15-01](HF-15-01.md) — Observador e protocolo negativo | economy | implemented | HF-26-01, HF-12-01 |
 | [HF-03-07](HF-03-07.md) — Preflight por host e projeto | high_architecture | implemented | HF-05-02, HF-07-01, HF-12-01 |
-| [HF-03-08](HF-03-08.md) — Ativação isolada e fatia vertical | operations | waiting_dependency | HF-03-07, HF-05-06, HF-23-01, HF-08-03, HF-08-05, HF-09-02, HF-12-04, HF-10-02, HF-25-01, HF-13-02, HF-15-01, HF-07-03 |
+| [HF-03-08](HF-03-08.md) — Ativação isolada e fatia vertical | operations | ready_for_handoff | HF-03-07, HF-05-06, HF-23-01, HF-08-03, HF-08-05, HF-09-02, HF-12-04, HF-10-02, HF-25-01, HF-13-02, HF-15-01, HF-07-03 |
 | [HF-15-02](HF-15-02.md) — Aceitação24h e expansão multi-projeto | independent_observer | waiting_dependency | HF-03-08 |
 
 ## DAG normativo

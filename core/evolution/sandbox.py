@@ -27,9 +27,13 @@ PROTECTED_GOVERNANCE_FILES = {
     "MISSION.md",
     "FACTORY_RULES.md",
     "FACTORY_GOVERNANCE.md",
+    "AGENTS.md",
 }
 
 VERIFIER_GUARD_PREFIXES = (
+    "tests/",
+    "core/evolution/sandbox.py",
+    "core/evolution/engine.py",
     "core/harness/",
     "harness.config.json",
     "core/orchestrator/guard.py",
@@ -47,18 +51,27 @@ class EvolutionHoldoutSandbox:
 
     def audit_boundaries(self, target_path: str) -> None:
         """Enforce inviolable boundaries against verifier tampering or governance mutation."""
-        norm_path = target_path.replace("\\", "/").strip().lstrip("/")
+        norm_path = target_path.replace("\\", "/").strip()
+        while norm_path.startswith("./") or norm_path.startswith("/"):
+            norm_path = norm_path.lstrip("./")
 
         # 1. Check protected governance files
         for protected in PROTECTED_GOVERNANCE_FILES:
-            if norm_path.lower() == protected.lower() or norm_path.endswith("/" + protected.lower()):
+            if norm_path.lower() == protected.lower() or norm_path.lower().endswith("/" + protected.lower()):
                 raise SecurityViolationError(
                     f"Forbidden self-evolution target: '{target_path}' is an immutable governance file."
                 )
 
         # 2. Check active verifier code and harness guards
         for prefix in VERIFIER_GUARD_PREFIXES:
-            if norm_path.lower().startswith(prefix.lower()) or norm_path.lower() == prefix.lower():
+            pref_clean = prefix.rstrip("/").lower()
+            norm_clean = norm_path.rstrip("/").lower()
+            if (
+                norm_clean == pref_clean
+                or norm_clean.startswith(pref_clean + "/")
+                or norm_path.lower().startswith(prefix.lower())
+                or norm_path.lower() == prefix.lower()
+            ):
                 raise SecurityViolationError(
                     f"Forbidden self-evolution target: '{target_path}' touches active verifier or guard code ({prefix})."
                 )
