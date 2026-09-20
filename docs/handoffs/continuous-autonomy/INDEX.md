@@ -18,8 +18,8 @@ Todos especificados; só HF-26-01 sem predecessor técnico. Prontidão de contra
 | [HF-08-01](HF-08-01.md) — Intake atômico e documental explícito | economy | implemented | HF-05-03 |
 | [HF-08-02](HF-08-02.md) — Hub e CLI usam intake canônico | economy | implemented | HF-08-01 |
 | [HF-08-03](HF-08-03.md) — Telegram e importação de legado | economy | implemented | HF-08-02, HF-05-04 |
-| [HF-08-04](HF-08-04.md) — Planejamento contínuo do escopo conhecido | economy | ready_for_handoff | HF-05-04, HF-07-02 |
-| [HF-08-05](HF-08-05.md) — Probe e retomada de dependências manuais | economy | ready_for_handoff | HF-05-04 |
+| [HF-08-04](HF-08-04.md) — Planejamento contínuo do escopo conhecido | economy | implemented | HF-05-04, HF-07-02 |
+| [HF-08-05](HF-08-05.md) — Probe e retomada de dependências manuais | economy | implemented | HF-05-04 |
 | [HF-07-01](HF-07-01.md) — Binding de executores e contas reais | high_architecture | implemented | HF-26-03 |
 | [HF-07-02](HF-07-02.md) — Rotas qualificadas e fallback | economy | implemented | HF-07-01, HF-05-03 |
 | [HF-07-03](HF-07-03.md) — Catálogo diário recuperável | economy | ready_for_handoff | HF-05-04, HF-07-02 |
