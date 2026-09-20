@@ -34,6 +34,79 @@ class ProjectTier(str, Enum):
     INTERNAL_FREE = "internal_free"      # Internal or open-source: automated gates sufficient
 
 
+class CanonicalProjectProfile(BaseModel):
+    """Canonical deployment specification for a recognized factory target."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    project_id: str
+    target_type: str
+    preflight_checks: tuple[str, ...]
+    staging_scenarios: tuple[str, ...]
+    production_scenarios: tuple[str, ...]
+    health_endpoint: str
+    rollback_action: str
+
+
+CANONICAL_TARGET_PROFILES: dict[str, CanonicalProjectProfile] = {
+    "darkfac": CanonicalProjectProfile(
+        project_id="darkfac",
+        target_type="dokploy_docker_compose",
+        preflight_checks=("db_connectivity", "port_available", "env_vars_set", "ssl_cert_active"),
+        staging_scenarios=("coordinator_health_probe", "dbos_database_connectivity"),
+        production_scenarios=(
+            "coordinator_health_probe",
+            "dbos_database_connectivity",
+            "worker_execution_roundtrip",
+            "metrics_telemetry_emit",
+        ),
+        health_endpoint="https://darkhub.ggcampos.com/health",
+        rollback_action="docker compose -f deploy/dokploy/docker-compose.cloud.yml up -d --no-build",
+    ),
+    "site-ggcampos": CanonicalProjectProfile(
+        project_id="site-ggcampos",
+        target_type="static_web",
+        preflight_checks=("dokploy_webhook", "static_dist_ready", "dns_resolved"),
+        staging_scenarios=("homepage_http_200", "asset_integrity_audit"),
+        production_scenarios=(
+            "homepage_http_200",
+            "asset_integrity_audit",
+            "seo_and_opengraph_validation",
+            "astro_thinking_collection_route",
+        ),
+        health_endpoint="https://ggcampos.com",
+        rollback_action="atomic_symlink_reversion_or_dist_redeploy",
+    ),
+    "segundo-cerebro": CanonicalProjectProfile(
+        project_id="segundo-cerebro",
+        target_type="local_mcp_service",
+        preflight_checks=("sqlite_integrity", "chroma_collection", "mcp_stdio_available"),
+        staging_scenarios=("mcp_client_health_available", "semantic_retrieval_query"),
+        production_scenarios=(
+            "mcp_client_health_available",
+            "semantic_retrieval_query",
+            "rag_provenance_audit",
+        ),
+        health_endpoint="stdio://python -m segundocerebro.mcp.server",
+        rollback_action="git_checkout_and_sqlite_backup_restore",
+    ),
+    "jarvis": CanonicalProjectProfile(
+        project_id="jarvis",
+        target_type="local_daemon_service",
+        preflight_checks=("process_probe", "port_8088_available", "whisper_model_cached"),
+        staging_scenarios=("daemon_process_running", "local_port_http_200"),
+        production_scenarios=(
+            "daemon_process_running",
+            "local_port_http_200",
+            "audio_neural_pipeline_ready",
+            "budget_fail_closed_validation",
+        ),
+        health_endpoint="http://127.0.0.1:8088/health",
+        rollback_action="terminate_and_restart_stable_binary",
+    ),
+}
+
+
 class DeploymentStage(str, Enum):
     """Lifecycle stage of an artifact within the pipeline."""
 
@@ -167,6 +240,7 @@ class ReleasePipelineService:
         self._acceptances: dict[str, ClientAcceptanceReceipt] = {}  # artifact_digest -> ClientAcceptanceReceipt
         self._deployments: dict[str, list[DeploymentRecord]] = {}  # project_id -> list[DeploymentRecord]
         self._current_stable_artifact: dict[str, str] = {}  # project_id -> artifact_digest
+        self._stable_history: dict[str, list[str]] = {}  # project_id -> list[artifact_digest]
         self._rollbacks: list[RollbackReceipt] = []
 
         if self.storage_path and self.storage_path.exists():
@@ -181,6 +255,7 @@ class ReleasePipelineService:
             "artifacts": [art.model_dump(mode="json") for art in self._artifacts.values()],
             "acceptances": [acc.model_dump(mode="json") for acc in self._acceptances.values()],
             "current_stable": self._current_stable_artifact,
+            "stable_history": self._stable_history,
             "rollbacks": [r.model_dump(mode="json") for r in self._rollbacks],
         }
         self.storage_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
@@ -195,6 +270,7 @@ class ReleasePipelineService:
                 acc = ClientAcceptanceReceipt.model_validate(c)
                 self._acceptances[acc.artifact_digest] = acc
             self._current_stable_artifact = dict(raw.get("current_stable", {}))
+            self._stable_history = {k: list(v) for k, v in raw.get("stable_history", {}).items()}
             for r in raw.get("rollbacks", []):
                 self._rollbacks.append(RollbackReceipt.model_validate(r))
         except Exception as exc:
@@ -242,11 +318,18 @@ class ReleasePipelineService:
         self,
         artifact: BuildArtifact,
         *,
-        preflight_checks: tuple[str, ...] = ("db_connectivity", "port_available", "env_vars_set"),
+        preflight_checks: tuple[str, ...] | None = None,
         preflight_passed: bool = True,
+        scenarios_executed: tuple[str, ...] | None = None,
         smoke_passed: bool = True,
     ) -> DeploymentRecord:
         """Deploys artifact to staging, verifying preflight and executing journey smoke tests."""
+        profile = CANONICAL_TARGET_PROFILES.get(artifact.project_id)
+        if preflight_checks is None:
+            preflight_checks = profile.preflight_checks if profile else ("db_connectivity", "port_available", "env_vars_set")
+        if scenarios_executed is None:
+            scenarios_executed = profile.staging_scenarios if profile else ("health_probe", "data_roundtrip", "auth_smoke")
+
         preflight = DestinationPreflight(
             environment_name="staging",
             passed=preflight_passed,
@@ -260,7 +343,7 @@ class ReleasePipelineService:
             test_id=f"smk_{uuid.uuid4().hex[:8]}",
             target_environment="staging",
             artifact_digest=artifact.artifact_digest,
-            scenarios_executed=("health_probe", "data_roundtrip", "auth_smoke"),
+            scenarios_executed=scenarios_executed,
             passed=smoke_passed,
             latency_ms=12.5,
             diagnostic_summary="All staging journey smoke checks completed" if smoke_passed else "Staging smoke failed",
@@ -324,10 +407,26 @@ class ReleasePipelineService:
         artifact: BuildArtifact,
         project_tier: ProjectTier = ProjectTier.INTERNAL_FREE,
         *,
+        preflight_checks: tuple[str, ...] | None = None,
         preflight_passed: bool = True,
+        scenarios_executed: tuple[str, ...] | None = None,
         smoke_passed: bool = True,
     ) -> DeploymentRecord:
         """Promotes the exact same artifact to production, enforcing Scenario G8 invariants."""
+        profile = CANONICAL_TARGET_PROFILES.get(artifact.project_id)
+        if preflight_checks is None:
+            preflight_checks = (
+                profile.preflight_checks
+                if profile
+                else ("db_connectivity", "port_available", "env_vars_set", "ssl_cert_active")
+            )
+        if scenarios_executed is None:
+            scenarios_executed = (
+                profile.production_scenarios
+                if profile
+                else ("health_probe", "customer_flow", "order_lifecycle", "metrics_telemetry")
+            )
+
         # 1. Check Scenario G8 commercial paid client acceptance requirement
         acceptance_receipt_id: str | None = None
         if project_tier == ProjectTier.COMMERCIAL_PAID:
@@ -349,7 +448,7 @@ class ReleasePipelineService:
         preflight = DestinationPreflight(
             environment_name="production",
             passed=preflight_passed,
-            checks=("db_connectivity", "port_available", "env_vars_set", "ssl_cert_active"),
+            checks=preflight_checks,
             details={"host": "api.darkfactory.prod", "network": "dokploy-production"},
         )
         if not preflight_passed:
@@ -364,7 +463,7 @@ class ReleasePipelineService:
             test_id=f"smk_prd_{uuid.uuid4().hex[:8]}",
             target_environment="production",
             artifact_digest=artifact.artifact_digest,
-            scenarios_executed=("health_probe", "customer_flow", "order_lifecycle", "metrics_telemetry"),
+            scenarios_executed=scenarios_executed,
             passed=smoke_passed,
             latency_ms=18.4,
             diagnostic_summary="All production journey smoke tests passed" if smoke_passed else "Production smoke failed",
@@ -395,6 +494,9 @@ class ReleasePipelineService:
 
         with self._lock:
             self._current_stable_artifact[artifact.project_id] = artifact.artifact_digest
+            history = self._stable_history.setdefault(artifact.project_id, [])
+            if not history or history[-1] != artifact.artifact_digest:
+                history.append(artifact.artifact_digest)
             self._deployments.setdefault(artifact.project_id, []).append(record)
             self._save()
 
@@ -441,6 +543,45 @@ class ReleasePipelineService:
         with self._lock:
             return self._current_stable_artifact.get(project_id)
 
+    def get_stable_history(self, project_id: str) -> list[str]:
+        """Returns the chronological list of successfully delivered artifact digests for a project."""
+        with self._lock:
+            return list(self._stable_history.get(project_id, []))
+
+    def rollback_to_previous(
+        self,
+        project_id: str,
+        reason: str = "Rollback to preceding stable version in history",
+    ) -> RollbackReceipt:
+        """Rollback current stable artifact to the preceding stable version in history."""
+        with self._lock:
+            history = self._stable_history.get(project_id, [])
+            current = self._current_stable_artifact.get(project_id)
+            if not current:
+                raise ReleasePipelineError(f"No stable artifact found for project {project_id}")
+
+            target: str | None = None
+            if len(history) >= 2:
+                # current is history[-1], previous is history[-2]
+                target = history[-2]
+                self._stable_history[project_id] = history[:-1]
+                self._current_stable_artifact[project_id] = target
+            else:
+                target = None
+                self._stable_history[project_id] = []
+                self._current_stable_artifact.pop(project_id, None)
+
+            rollback = RollbackReceipt(
+                rollback_id=f"rb_{uuid.uuid4().hex[:12]}",
+                project_id=project_id,
+                failed_artifact_digest=current,
+                restored_artifact_digest=target,
+                trigger_reason=reason,
+            )
+            self._rollbacks.append(rollback)
+            self._save()
+            return rollback
+
     def get_rollbacks(self, project_id: str | None = None) -> list[RollbackReceipt]:
         with self._lock:
             if project_id:
@@ -456,7 +597,9 @@ class ReleasePipelineService:
         artifact_digest: str,
         project_tier: ProjectTier = ProjectTier.INTERNAL_FREE,
         *,
+        preflight_checks: tuple[str, ...] | None = None,
         preflight_passed: bool = True,
+        scenarios_executed: tuple[str, ...] | None = None,
         smoke_passed: bool = True,
         is_simulation: bool = False,
         caller_approval_flag: bool | None = None,
@@ -513,13 +656,17 @@ class ReleasePipelineService:
         return self.deploy_production(
             artifact=artifact,
             project_tier=project_tier,
+            preflight_checks=preflight_checks,
             preflight_passed=preflight_passed,
+            scenarios_executed=scenarios_executed,
             smoke_passed=smoke_passed,
         )
 
 
 __all__ = [
     "BuildArtifact",
+    "CANONICAL_TARGET_PROFILES",
+    "CanonicalProjectProfile",
     "ClientAcceptanceReceipt",
     "ClientAcceptanceRequiredError",
     "DeploymentRecord",

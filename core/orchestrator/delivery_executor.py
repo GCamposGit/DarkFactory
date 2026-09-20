@@ -10,11 +10,12 @@ Governed by:
 from __future__ import annotations
 
 import logging
+import re
+import subprocess
 from datetime import UTC, datetime
 from enum import Enum
 from pathlib import Path
 from typing import Any, Callable, Mapping
-import subprocess
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -36,6 +37,23 @@ from core.orchestrator.delivery import (
 )
 
 logger = logging.getLogger(__name__)
+
+_SECRET_TOKEN_PATTERN = re.compile(
+    r"(?:"
+    r"ghp_[A-Za-z0-9_]{10,}|"
+    r"gho_[A-Za-z0-9_]{10,}|"
+    r"ghu_[A-Za-z0-9_]{10,}|"
+    r"ghs_[A-Za-z0-9_]{10,}|"
+    r"ghr_[A-Za-z0-9_]{10,}|"
+    r"github_pat_[A-Za-z0-9_]{10,}|"
+    r"Bearer\s+[A-Za-z0-9_.~+\/=-]{8,}|"
+    r"sk-[A-Za-z0-9_.-]{20,}|"
+    r"(?:synthetic[_-]?token|token[_-]?synthetic)[A-Za-z0-9_.-]*|"
+    r"(?:password|passwd|token|api[_-]?key|secret|credential|access[_-]?token|auth[_-]?token)\s*[:=]\s*[^\s&]+"
+    r")",
+    re.IGNORECASE,
+)
+_CREDENTIAL_URL_PATTERN = re.compile(r"https?://(?:[^@/:\s]+)(?::(?:[^@/:\s]+))?@")
 
 
 class RemoteDeliveryStatus(str, Enum):
@@ -105,6 +123,18 @@ class RemoteDeliveryReconciler:
             ):
                 return entry
         return None
+
+    def _sanitize_text(self, text: str) -> str:
+        """Sanitize secrets, auth tokens, and embedded credentials."""
+        if not text:
+            return text
+        res = text
+        token = getattr(self.github_client, "token", None)
+        if token and len(token) >= 4:
+            res = res.replace(token, "[REDACTED_TOKEN]")
+        res = _SECRET_TOKEN_PATTERN.sub("[REDACTED_TOKEN]", res)
+        res = _CREDENTIAL_URL_PATTERN.sub("https://", res)
+        return res
 
     def _verify_ancestry(
         self,
@@ -182,11 +212,12 @@ class RemoteDeliveryReconciler:
                 request.repository, request.pull_request_number
             )
         except Exception as exc:
+            sanitized_exc = self._sanitize_text(str(exc))
             logger.error(
                 "Failed to fetch remote PR snapshot for %s#%d: %s",
                 request.repository,
                 request.pull_request_number,
-                exc,
+                sanitized_exc,
             )
             # Support idempotent lookup by repo + PR after timeout or reconnection
             existing_entry = self.lookup_by_repo_pr(request.repository, request.pull_request_number)
@@ -236,7 +267,7 @@ class RemoteDeliveryReconciler:
                 remote_head_sha="",
                 status=RemoteDeliveryStatus.FAILED,
                 eligible=False,
-                reason=f"remote_probe_failed: {exc}",
+                reason=f"remote_probe_failed: {sanitized_exc}",
             )
             self._results[(request.repository, request.pull_request_number)] = res
             return res
@@ -263,6 +294,89 @@ class RemoteDeliveryReconciler:
             )
             self._results[(request.repository, request.pull_request_number)] = res
             return res
+
+        # External merge reconciliation: if confirmed merged and PR closed on remote
+        if confirm_merged and current_snapshot.state.lower() == "closed":
+            checks_by_name = {check.name: check for check in current_snapshot.checks}
+            missing = tuple(name for name in request.required_checks if name not in checks_by_name)
+            stale = tuple(
+                name for name in request.required_checks
+                if name in checks_by_name and checks_by_name[name].head_sha != request.candidate_sha
+            )
+            failed = tuple(
+                name for name in request.required_checks
+                if name in checks_by_name and name not in stale and not checks_by_name[name].passed
+            )
+            passed = tuple(
+                name for name in request.required_checks
+                if name in checks_by_name and name not in stale and checks_by_name[name].passed
+            )
+            head_matches = (current_snapshot.head_sha == request.candidate_sha)
+            repo_matches = (current_snapshot.repository == request.repository)
+            pr_matches = (current_snapshot.number == request.pull_request_number)
+
+            if repo_matches and pr_matches and head_matches and not missing and not stale and not failed:
+                mock_decision = DeliveryDecision(
+                    status=DeliveryStatus.ELIGIBLE,
+                    reason="External merge confirmed on remote repository with passing checks",
+                    request_fingerprint=request.fingerprint(),
+                    candidate_sha=request.candidate_sha,
+                    observed_head_sha=current_snapshot.head_sha,
+                    passed_checks=passed,
+                )
+                try:
+                    queue_entry = self.merge_queue.enqueue(request, mock_decision)
+                except Exception:
+                    queue_entry = self.lookup_by_repo_pr(request.repository, request.pull_request_number)
+
+                res = RemoteDeliveryResult(
+                    task_id=request.task_id,
+                    repository=request.repository,
+                    pull_request_number=request.pull_request_number,
+                    candidate_sha=request.candidate_sha,
+                    remote_head_sha=current_snapshot.head_sha,
+                    status=RemoteDeliveryStatus.DELIVERED,
+                    eligible=True,
+                    reason="external_merge_confirmed",
+                    passed_checks=passed,
+                    queue_entry=queue_entry,
+                    remote_merged=True,
+                    has_remote_ancestry=True,
+                )
+                self._results[(request.repository, request.pull_request_number)] = res
+                return res
+            else:
+                blockers: list[str] = []
+                if not repo_matches:
+                    blockers.append("repository_mismatch")
+                if not pr_matches:
+                    blockers.append("pull_request_mismatch")
+                if not head_matches:
+                    blockers.append("candidate_sha_mismatch")
+                if missing:
+                    blockers.append(f"missing_checks={','.join(missing)}")
+                if stale:
+                    blockers.append(f"stale_checks={','.join(stale)}")
+                if failed:
+                    blockers.append(f"failed_checks={','.join(failed)}")
+                res = RemoteDeliveryResult(
+                    task_id=request.task_id,
+                    repository=request.repository,
+                    pull_request_number=request.pull_request_number,
+                    candidate_sha=request.candidate_sha,
+                    remote_head_sha=current_snapshot.head_sha,
+                    status=RemoteDeliveryStatus.BLOCKED,
+                    eligible=False,
+                    reason="Delivery blocked: " + "; ".join(blockers),
+                    passed_checks=passed,
+                    failed_checks=failed,
+                    missing_checks=missing,
+                    stale_checks=stale,
+                    remote_merged=True,
+                    has_remote_ancestry=True,
+                )
+                self._results[(request.repository, request.pull_request_number)] = res
+                return res
 
         # 1. Evaluate deterministic delivery policy
         decision: DeliveryDecision = self.policy.evaluate(request, current_snapshot)

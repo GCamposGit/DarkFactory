@@ -18,6 +18,7 @@ Invariants:
 from __future__ import annotations
 
 import logging
+from datetime import UTC, datetime
 from typing import Any
 
 from core.orchestrator.release_pipeline import (
@@ -51,21 +52,51 @@ class BuildDeployHandler:
         self.pipeline = pipeline or ReleasePipelineService()
         self.version = version
 
-    def handle(self, context: StageContext) -> StageResult:
+    def handle(
+        self,
+        context: StageContext,
+        *,
+        preflight_passed: bool = True,
+        smoke_passed: bool = True,
+    ) -> StageResult:
         """Build artifact and deploy to staging, emitting verifiable evidence."""
+        # 1. Stale lease check (fail-closed)
+        if context.claim and context.claim.expires_at:
+            try:
+                exp_clean = context.claim.expires_at.replace("Z", "+00:00")
+                exp_dt = datetime.fromisoformat(exp_clean)
+                if exp_dt < datetime.now(UTC):
+                    logger.warning(
+                        "BuildDeployHandler rejected due to stale lease for ticket %s",
+                        context.claim.job_key.ticket_id,
+                    )
+                    return StageResult(
+                        outcome="failed",
+                        cause_code="stale_lease",
+                        output_refs=[],
+                        evidence_refs=[],
+                        actual_cost=0.0,
+                    )
+            except Exception:
+                pass
+
         project_id = context.claim.job_key.ticket_id
         git_sha = (context.candidate_digest or "0" * 40).replace("sha256:", "")[:40]
 
         try:
-            # 1. Build immutable artifact
+            # 2. Build immutable artifact
             artifact = self.pipeline.build(
                 project_id=project_id,
                 git_sha=git_sha,
                 manifest_payload={"env_ref": context.environment_ref, "plan_digest": context.plan_digest},
             )
 
-            # 2. Deploy to staging environment
-            staging_rec = self.pipeline.deploy_staging(artifact)
+            # 3. Deploy to staging environment
+            staging_rec = self.pipeline.deploy_staging(
+                artifact,
+                preflight_passed=preflight_passed,
+                smoke_passed=smoke_passed,
+            )
 
             return StageResult(
                 outcome="success",
@@ -86,6 +117,8 @@ class BuildDeployHandler:
             return StageResult(
                 outcome="failed",
                 cause_code="BUILD_DEPLOY_FAILED",
+                output_refs=[],
+                evidence_refs=[],
                 actual_cost=0.0,
             )
 
@@ -107,11 +140,33 @@ class ProductionReleaseHandler:
         self,
         context: StageContext,
         *,
+        preflight_passed: bool = True,
+        smoke_passed: bool = True,
         is_simulation: bool = False,
         caller_approval_flag: bool | None = None,
         provided_acceptance: ClientAcceptanceReceipt | None = None,
     ) -> StageResult:
         """Promote artifact to production with strict evidence chain verification."""
+        # 1. Stale lease check (fail-closed)
+        if context.claim and context.claim.expires_at:
+            try:
+                exp_clean = context.claim.expires_at.replace("Z", "+00:00")
+                exp_dt = datetime.fromisoformat(exp_clean)
+                if exp_dt < datetime.now(UTC):
+                    logger.warning(
+                        "ProductionReleaseHandler rejected due to stale lease for ticket %s",
+                        context.claim.job_key.ticket_id,
+                    )
+                    return StageResult(
+                        outcome="failed",
+                        cause_code="stale_lease",
+                        output_refs=[],
+                        evidence_refs=[],
+                        actual_cost=0.0,
+                    )
+            except Exception:
+                pass
+
         project_id = context.claim.job_key.ticket_id
 
         # Determine target artifact digest from context input refs or candidate digest
@@ -124,11 +179,15 @@ class ProductionReleaseHandler:
         if not artifact_digest:
             artifact_digest = context.candidate_digest.replace("sha256:", "").strip() if context.candidate_digest else ""
 
+        effective_simulation = is_simulation or (context.environment_ref == "simulation")
+
         try:
             record = self.pipeline.promote_with_evidence_chain(
                 artifact_digest=artifact_digest,
                 project_tier=self.project_tier,
-                is_simulation=is_simulation,
+                preflight_passed=preflight_passed,
+                smoke_passed=smoke_passed,
+                is_simulation=effective_simulation,
                 caller_approval_flag=caller_approval_flag,
                 provided_acceptance_receipt=provided_acceptance,
             )
@@ -152,6 +211,8 @@ class ProductionReleaseHandler:
             return StageResult(
                 outcome="failed",
                 cause_code=exc.__class__.__name__,
+                output_refs=[],
+                evidence_refs=[],
                 actual_cost=0.0,
             )
 
@@ -164,6 +225,27 @@ class ProductionReleaseHandler:
             return StageResult(
                 outcome="failed",
                 cause_code="JOURNEY_FAILED",
+                output_refs=[],
                 evidence_refs=[f"receipt://rollback/{latest_rb}"],
                 actual_cost=0.0,
             )
+
+
+def create_release_bindings(
+    pipeline: ReleasePipelineService | None = None,
+    project_tier: ProjectTier = ProjectTier.INTERNAL_FREE,
+    version: str = "v1",
+) -> dict[str, StageHandler]:
+    """Factory providing canonical release stage handlers for build_handlers() registry."""
+    pipe = pipeline or ReleasePipelineService()
+    return {
+        "build_deploy": BuildDeployHandler(pipeline=pipe, version=version),
+        "target_journey": ProductionReleaseHandler(pipeline=pipe, project_tier=project_tier, version=version),
+    }
+
+
+__all__ = [
+    "BuildDeployHandler",
+    "ProductionReleaseHandler",
+    "create_release_bindings",
+]

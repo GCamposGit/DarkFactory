@@ -63,30 +63,57 @@ INTEGRATION_STAGE: str = "integration"
 VERSION: str = "v1"
 
 _TOKEN_PATTERN = re.compile(
-    r"(?:ghp_[A-Za-z0-9_]{10,}|gho_[A-Za-z0-9_]{10,}|ghu_[A-Za-z0-9_]{10,}|ghs_[A-Za-z0-9_]{10,}|ghr_[A-Za-z0-9_]{10,}|github_pat_[A-Za-z0-9_]{10,}|Bearer\s+[A-Za-z0-9_.-]{10,}|(?:token|password|secret|api[_-]?key)\s*[:=]\s*[^\s&]+)",
+    r"(?:"
+    r"ghp_[A-Za-z0-9_]{10,}|"
+    r"gho_[A-Za-z0-9_]{10,}|"
+    r"ghu_[A-Za-z0-9_]{10,}|"
+    r"ghs_[A-Za-z0-9_]{10,}|"
+    r"ghr_[A-Za-z0-9_]{10,}|"
+    r"github_pat_[A-Za-z0-9_]{10,}|"
+    r"Bearer\s+[A-Za-z0-9_.~+\/=-]{8,}|"
+    r"sk-[A-Za-z0-9_.-]{20,}|"
+    r"(?:synthetic[_-]?token|token[_-]?synthetic)[A-Za-z0-9_.-]*|"
+    r"(?:password|passwd|token|api[_-]?key|secret|credential|access[_-]?token|auth[_-]?token)\s*[:=]\s*[^\s&]+"
+    r")",
     re.IGNORECASE,
 )
-_CREDENTIAL_URL_PATTERN = re.compile(r"https?://(?:[^@/:\s]+):(?:[^@/:\s]+)@")
+_CREDENTIAL_URL_PATTERN = re.compile(r"https?://(?:[^@/:\s]+)(?::(?:[^@/:\s]+))?@")
 
 
-def sanitize_text(text: str, token_hint: str | None = None) -> str:
+def sanitize_text(
+    text: str,
+    token_hint: str | None = None,
+    extra_tokens: tuple[str, ...] | list[str] | None = None,
+) -> str:
     """Sanitize secret tokens or embedded credentials from string."""
     if not text:
         return text
     result = text
+    all_hints: list[str] = []
     if token_hint and len(token_hint) >= 4:
-        result = result.replace(token_hint, "[REDACTED_TOKEN]")
+        all_hints.append(token_hint)
+    if extra_tokens:
+        for t in extra_tokens:
+            if t and len(t) >= 4 and t not in all_hints:
+                all_hints.append(t)
+    for hint in all_hints:
+        result = result.replace(hint, "[REDACTED_TOKEN]")
     result = _TOKEN_PATTERN.sub("[REDACTED_TOKEN]", result)
     result = _CREDENTIAL_URL_PATTERN.sub("https://", result)
     return result
 
 
-def sanitize_ref(ref: str, token_hint: str | None = None) -> str:
+def sanitize_ref(
+    ref: str,
+    token_hint: str | None = None,
+    extra_tokens: tuple[str, ...] | list[str] | None = None,
+) -> str:
     """Sanitize reference string, verifying that no secret pattern remains."""
-    cleaned = sanitize_text(ref, token_hint=token_hint)
+    cleaned = sanitize_text(ref, token_hint=token_hint, extra_tokens=extra_tokens)
     if _looks_like_secret_value(cleaned):
         raise ValueError(f"Sanitized reference still looks like a secret value: {cleaned}")
     return cleaned
+
 
 
 class IntegrationStageHandler:
@@ -126,6 +153,7 @@ class IntegrationStageHandler:
         confirm_merged: bool = False,
         remote_main_sha: str | None = None,
         ancestry_verified: bool | None = None,
+        token_hints: tuple[str, ...] = (),
     ) -> None:
         self.github_client = github_client or (reconciler.github_client if reconciler else GitHubClient())
         self.reconciler = reconciler or RemoteDeliveryReconciler(
@@ -144,6 +172,7 @@ class IntegrationStageHandler:
         self.confirm_merged = confirm_merged
         self.remote_main_sha = remote_main_sha
         self.ancestry_verified = ancestry_verified
+        self.token_hints = token_hints
 
     def _extract_pr_number(self, context: StageContext) -> int:
         """Extract PR number from input_refs, route_ref, or default."""
@@ -162,7 +191,13 @@ class IntegrationStageHandler:
         return 1
 
     def _sanitize_refs(self, refs: list[str], token_hint: str | None = None) -> list[str]:
-        return [sanitize_ref(ref, token_hint=token_hint) for ref in refs]
+        return [
+            sanitize_ref(ref, token_hint=token_hint, extra_tokens=self.token_hints)
+            for ref in refs
+        ]
+
+    def _sanitize_text(self, text: str, token_hint: str | None = None) -> str:
+        return sanitize_text(text, token_hint=token_hint, extra_tokens=self.token_hints)
 
     def handle(self, context: StageContext) -> StageResult:
         """Execute integration reconciliation stage under strict fail-closed rules."""
@@ -175,6 +210,8 @@ class IntegrationStageHandler:
             try:
                 exp_clean = context.claim.expires_at.replace("Z", "+00:00")
                 exp_dt = datetime.fromisoformat(exp_clean)
+                if exp_dt.tzinfo is None:
+                    exp_dt = exp_dt.replace(tzinfo=UTC)
                 if exp_dt < datetime.now(UTC):
                     logger.warning("Integration stage rejected due to stale lease for ticket %s", ticket_id)
                     return StageResult(
@@ -184,8 +221,15 @@ class IntegrationStageHandler:
                         evidence_refs=[],
                         actual_cost=0.0,
                     )
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.warning("Invalid lease expires_at '%s' for ticket %s: %s", context.claim.expires_at, ticket_id, exc)
+                return StageResult(
+                    outcome="failed",
+                    cause_code="stale_lease",
+                    output_refs=[],
+                    evidence_refs=[],
+                    actual_cost=0.0,
+                )
 
         # 2. Candidate digest requirement
         candidate_sha = (context.candidate_digest or "").strip().lower()
@@ -205,7 +249,7 @@ class IntegrationStageHandler:
             try:
                 receipt = self.receipt_provider(ticket_id)
             except Exception as exc:
-                logger.error("Error invoking receipt_provider: %s", exc)
+                logger.error("Error invoking receipt_provider: %s", self._sanitize_text(str(exc), token_hint))
 
         if receipt is None and self.receipt_map is not None:
             receipt = self.receipt_map.get(ticket_id) or self.receipt_map.get(candidate_sha)
@@ -323,6 +367,11 @@ class IntegrationStageHandler:
                 delivery_req.pull_request_number,
                 delivery_req.candidate_sha,
             )
+            op_ref = (
+                f"op://github/external_merge/{existing_entry.queue_id}"
+                if self.confirm_merged
+                else f"op://github/merge_queue/{existing_entry.queue_id}"
+            )
             return StageResult(
                 outcome="success",
                 output_refs=self._sanitize_refs(
@@ -343,7 +392,7 @@ class IntegrationStageHandler:
                 ),
                 operation_refs=self._sanitize_refs(
                     [
-                        f"op://github/merge_queue/{existing_entry.queue_id}",
+                        op_ref,
                     ],
                     token_hint,
                 ),
@@ -372,7 +421,7 @@ class IntegrationStageHandler:
             )
             return StageResult(
                 outcome="failed",
-                cause_code=sanitize_text(
+                cause_code=self._sanitize_text(
                     f"delivery_blocked: {reconciler_result.reason}", token_hint
                 ),
                 output_refs=[],
@@ -385,6 +434,11 @@ class IntegrationStageHandler:
                 reconciler_result.queue_entry.queue_id
                 if reconciler_result.queue_entry
                 else f"mq_{delivery_req.pull_request_number}"
+            )
+            op_ref = (
+                f"op://github/external_merge/{queue_id}"
+                if reconciler_result.reason == "external_merge_confirmed"
+                else f"op://github/merge_queue/{queue_id}"
             )
             return StageResult(
                 outcome="success",
@@ -406,7 +460,7 @@ class IntegrationStageHandler:
                 ),
                 operation_refs=self._sanitize_refs(
                     [
-                        f"op://github/merge_queue/{queue_id}",
+                        op_ref,
                     ],
                     token_hint,
                 ),
@@ -416,7 +470,7 @@ class IntegrationStageHandler:
         if reconciler_result.status == RemoteDeliveryStatus.WAITING_CHECKS:
             return StageResult(
                 outcome="waiting_dependency",
-                cause_code=sanitize_text(
+                cause_code=self._sanitize_text(
                     f"waiting_checks: {reconciler_result.reason}", token_hint
                 ),
                 output_refs=[],
@@ -427,7 +481,7 @@ class IntegrationStageHandler:
         if reconciler_result.status == RemoteDeliveryStatus.MANUAL_REVIEW:
             return StageResult(
                 outcome="waiting_human",
-                cause_code=sanitize_text(
+                cause_code=self._sanitize_text(
                     f"manual_review_required: {reconciler_result.reason}", token_hint
                 ),
                 output_refs=[],
@@ -438,7 +492,7 @@ class IntegrationStageHandler:
         # RemoteDeliveryStatus.BLOCKED or FAILED
         return StageResult(
             outcome="failed",
-            cause_code=sanitize_text(
+            cause_code=self._sanitize_text(
                 f"delivery_blocked: {reconciler_result.reason}", token_hint
             ),
             output_refs=[],
