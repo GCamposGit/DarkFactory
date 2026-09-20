@@ -36,5 +36,6 @@ python -m pytest tests -v --ignore=tests/test_canaletto.py
 ## Compatibilidade entre harnesses
 
 - Antigravity: carrega `.agents/skills/`.
+- Claude Code: carrega `.claude/skills/`, espelho sincronizado de `.agents/skills/` via `scripts/sync_skills.py`; trata este `AGENTS.md` como seu contrato equivalente a um `CLAUDE.md`.
 - Grok: use a raiz clonada como workspace, leia `AGENTS.md` e `FACTORY_RULES.md` e execute os comandos acima.
 - Outros agentes: `AGENTS.md` é o contrato mínimo; `docs/HARNESS_INTEROP.md` contém o fluxo de bootstrap.

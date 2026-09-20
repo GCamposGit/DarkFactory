@@ -31,6 +31,10 @@ Abra a raiz clonada como workspace. O catálogo `.agents/skills/` é a fonte can
 
 Abra a raiz clonada como workspace e injete `AGENTS.md` como instrução de projeto quando o harness oferecer essa opção. Mesmo sem carregamento automático de skills, o agente pode seguir `FACTORY_RULES.md` e executar o harness determinístico.
 
+## Claude Code
+
+Abra a raiz clonada como workspace. Não há `CLAUDE.md` próprio neste repositório: `AGENTS.md`, `MISSION.md` e `FACTORY_RULES.md` funcionam como o contrato equivalente. O catálogo `.claude/skills/` é o espelho sincronizado de `.agents/skills/` (via `scripts/sync_skills.py`) e é carregado automaticamente. Use o subagente declarativo `.claude/agents/test-runner.md` para delegar execução de testes conforme a skill `17-specialized-test-subagent`.
+
 ## DarkHub
 
 ```bash

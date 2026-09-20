@@ -1,6 +1,6 @@
 # DarkFac Factory Rules
 
-Estas regras valem para Codex, Antigravity, Grok e qualquer outro harness que opere neste repositório.
+Estas regras valem para Codex, Antigravity, Grok, Claude Code e qualquer outro harness que opere neste repositório.
 
 1. Leia `MISSION.md` e `AGENTS.md` antes de alterar código.
 2. Trate `.agents/skills/` como fonte canônica; mantenha `.claude/skills/` sincronizado com `python scripts/sync_skills.py` quando houver mudança de skill.

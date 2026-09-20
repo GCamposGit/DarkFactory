@@ -864,8 +864,13 @@ def get_model_provider(
         return OllamaModelProvider(base_url=url, usage_ledger=usage_ledger, **kwargs)
     if pid == "openrouter":
         return OpenRouterModelProvider(api_key=api_key, usage_ledger=usage_ledger, **kwargs)
-    if pid in ("codex", "remote_codex", "grok", "remote_grok", "antigravity", "remote_antigravity", "remote_harness"):
-        default_harness = "grok" if "grok" in pid else ("antigravity" if "antigravity" in pid else "codex")
+    if pid in ("codex", "remote_codex", "grok", "remote_grok", "antigravity", "remote_antigravity", "claude", "remote_claude", "remote_harness"):
+        default_harness = (
+            "claude" if "claude" in pid
+            else "grok" if "grok" in pid
+            else "antigravity" if "antigravity" in pid
+            else "codex"
+        )
         return RemoteMultiHarnessModelProvider(
             node_urls=kwargs.get("node_urls"),
             base_url=base_url,
