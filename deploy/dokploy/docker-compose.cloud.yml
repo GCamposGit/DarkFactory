@@ -64,8 +64,8 @@ services:
       - FACTORY_DIR=/app/.factory
       - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-}
       - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
-      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
-      - REMOTE_HARNESS_URL=${REMOTE_HARNESS_URL:-http://100.81.84.124:8080}
+      - REMOTE_HARNESS_URLS=${REMOTE_HARNESS_URLS:-http://100.78.181.90:8080,http://100.81.84.124:8080}
+      - REMOTE_HARNESS_URL=${REMOTE_HARNESS_URL:-http://100.78.181.90:8080}
     healthcheck:
       test: ["CMD", "python", "-m", "core.orchestrator.cloud_worker", "--status"]
       interval: 30s

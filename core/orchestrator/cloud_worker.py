@@ -187,13 +187,19 @@ class CloudWorker:
             measured_cost = 0.0
             provider_backend = "deterministic_mock"
 
-            # When remote harness is configured, execute via remote Codex
-            remote_harness_url = os.environ.get("REMOTE_HARNESS_URL") or os.environ.get("DARKFAC_ONPREM_URL")
-            if (remote_harness_url or os.environ.get("USE_REMOTE_CODEX") == "true") and stage in ("planning", "development"):
+            # When remote harnesses are configured, execute via RemoteMultiHarnessModelProvider
+            remote_urls = os.environ.get("REMOTE_HARNESS_URLS") or os.environ.get("REMOTE_HARNESS_URL") or os.environ.get("DARKFAC_ONPREM_URL")
+            if (remote_urls or os.environ.get("USE_REMOTE_CODEX") == "true") and stage in ("planning", "development"):
                 try:
                     from core.execution.providers import get_model_provider
+                    from core.router.harness_router import resolve_harness_candidates
 
-                    provider = get_model_provider("codex", base_url=remote_harness_url)
+                    candidate_harnesses = resolve_harness_candidates(
+                        stage=stage,
+                        metadata={"ticket_id": claim.job_key.ticket_id, "run_id": run_id},
+                    )
+
+                    provider = get_model_provider("remote_harness", node_urls=remote_urls)
                     prompt = (
                         f"Dark Factory Task Dispatch\n"
                         f"Run ID: {run_id}\n"
@@ -201,11 +207,22 @@ class CloudWorker:
                         f"Ticket: {claim.job_key.ticket_id}\n\n"
                         f"Por favor implemente a solucao completa para o ticket solicitado com codigo e testes."
                     )
-                    resp = provider.generate(prompt, model="codex", ticket_id=claim.job_key.ticket_id)
+                    resp = provider.generate(
+                        prompt,
+                        candidate_harnesses=candidate_harnesses,
+                        ticket_id=claim.job_key.ticket_id,
+                    )
                     generated_text = resp.text
                     measured_cost = resp.measured_cost or 0.0
-                    provider_backend = (resp.metadata or {}).get("backend", "remote_codex")
-                    logger.info("CloudWorker executed stage %s via remote provider (%s)", stage, provider_backend)
+                    meta = resp.metadata or {}
+                    provider_backend = meta.get("backend", "remote_harness")
+                    logger.info(
+                        "CloudWorker executed stage %s via remote provider (%s, node=%s, harness=%s)",
+                        stage,
+                        provider_backend,
+                        meta.get("remote_url"),
+                        meta.get("harness"),
+                    )
                 except Exception as exc:
                     logger.warning(
                         "Stage %s remote provider execution failed: %s; using deterministic fallback",

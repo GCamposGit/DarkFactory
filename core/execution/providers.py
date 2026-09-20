@@ -653,26 +653,58 @@ class UnifiedModelProvider:
         )
 
 
-class RemoteCodexModelProvider:
-    """Invokes local Codex non-interactively via the remote worker daemon."""
+class RemoteMultiHarnessModelProvider:
+    """Invokes local/on-premises AI harnesses (Codex, Grok, Antigravity, Claude, DeepSeek)
+    via remote worker daemons with multi-node failover (Desktop -> Notebook).
+    """
 
-    provider_id: str = "codex"
+    provider_id: str = "remote_harness"
 
     def __init__(
         self,
-        base_url: str | None = None,
+        node_urls: list[str] | str | None = None,
         *,
+        base_url: str | None = None,
+        default_harness: str = "codex",
         timeout: float = 120.0,
+        failover_probe_timeout: float = 3.0,
         usage_ledger: ModelUsageLedger | None = None,
     ) -> None:
-        self.base_url = (
-            base_url
-            or os.environ.get("REMOTE_HARNESS_URL")
-            or os.environ.get("DARKFAC_ONPREM_URL")
-            or "http://100.81.84.124:8080"
-        ).rstrip("/")
+        urls: list[str] = []
+        if isinstance(node_urls, list) and node_urls:
+            urls = [u.rstrip("/") for u in node_urls if u]
+        elif isinstance(node_urls, str) and node_urls.strip():
+            urls = [u.strip().rstrip("/") for u in node_urls.split(",") if u.strip()]
+        elif base_url and base_url.strip():
+            urls = [base_url.rstrip("/")]
+        else:
+            env_urls = os.environ.get("REMOTE_HARNESS_URLS")
+            if env_urls:
+                urls = [u.strip().rstrip("/") for u in env_urls.split(",") if u.strip()]
+            else:
+                single_env = os.environ.get("REMOTE_HARNESS_URL") or os.environ.get("DARKFAC_ONPREM_URL")
+                if single_env:
+                    urls = [single_env.rstrip("/")]
+                else:
+                    # Default cascade topology: Desktop primary -> Notebook fallback
+                    urls = ["http://100.78.181.90:8080", "http://100.81.84.124:8080"]
+
+        self.node_urls = urls
+        self.default_harness = default_harness
         self.timeout = timeout
+        self.failover_probe_timeout = failover_probe_timeout
         self.usage_ledger = usage_ledger
+
+    def _probe_node_alive(self, node_url: str) -> bool:
+        """Probe /health with fast timeout (3.0s) to detect offline/unreachable nodes."""
+        health_url = f"{node_url}/health"
+        try:
+            req = urllib.request.Request(health_url, method="GET")
+            with urllib.request.urlopen(req, timeout=self.failover_probe_timeout) as resp:
+                return resp.status == 200
+        except Exception as exc:
+            logger.warning("Node %s health probe failed (%s)", node_url, exc)
+            return False
 
     def generate(
         self,
@@ -685,75 +717,134 @@ class RemoteCodexModelProvider:
         unknown_cost_policy: UnknownCostPolicy = UnknownCostPolicy.REJECT,
         ticket_id: str | None = None,
         execution_mode: str | None = None,
+        candidate_harnesses: list[str] | None = None,
+        harness: str | None = None,
         **kwargs: Any,
     ) -> ProviderResponse:
-        endpoint = f"{self.base_url}/harness/codex"
-        payload = {
-            "prompt": prompt,
-            "system_prompt": system_prompt,
-            "timeout_seconds": int(self.timeout),
-            "model": model if model and model != "codex" else None,
-        }
-        req_data = json.dumps(payload).encode("utf-8")
-        req = urllib.request.Request(
-            endpoint,
-            data=req_data,
-            headers={"Content-Type": "application/json"},
-            method="POST",
-        )
-        start = time.perf_counter()
-        try:
-            with urllib.request.urlopen(req, timeout=self.timeout + 5.0) as resp:
-                data = json.loads(resp.read().decode("utf-8"))
-            latency = max(0.001, time.perf_counter() - start)
-            if not data.get("success", False):
-                err = data.get("error") or "Codex execution failed"
-                raise RuntimeError(f"Remote Codex execution failed: {err}")
+        candidates: list[str] = []
+        if candidate_harnesses:
+            candidates = list(candidate_harnesses)
+        elif harness:
+            candidates = [harness]
+        elif model:
+            norm_m = model.lower().replace("remote_", "").strip()
+            candidates = [norm_m] if norm_m in ("codex", "grok", "antigravity", "claude", "deepseek") else [self.default_harness]
+        else:
+            candidates = [self.default_harness]
 
-            response_text = data.get("text", "")
-            returned_model = data.get("model") or "gpt-5.6-sol"
-            tokens_used = data.get("tokens_used") or (len(prompt.split()) + len(response_text.split()))
+        errors_encountered: list[str] = []
+        start_overall = time.perf_counter()
 
-            # Record telemetry / ledger with $0 cost (subscription covered)
-            if self.usage_ledger is not None:
+        for target_harness in candidates:
+            for node_url in self.node_urls:
+                if len(self.node_urls) > 1:
+                    is_alive = self._probe_node_alive(node_url)
+                    if not is_alive:
+                        errors_encountered.append(f"Node {node_url} unresponsive on health probe")
+                        logger.info("Failover: Node %s is down; trying next node...", node_url)
+                        continue
+
+                endpoint = f"{node_url}/harness/execute"
+                payload = {
+                    "harness": target_harness,
+                    "prompt": prompt,
+                    "system_prompt": system_prompt,
+                    "timeout_seconds": int(self.timeout),
+                    "model": model if model not in ("codex", "grok", "antigravity", "claude", "deepseek", "remote_codex", "remote_grok", "remote_antigravity") else None,
+                }
+                req_data = json.dumps(payload).encode("utf-8")
+                req = urllib.request.Request(
+                    endpoint,
+                    data=req_data,
+                    headers={"Content-Type": "application/json"},
+                    method="POST",
+                )
+                start_req = time.perf_counter()
                 try:
-                    self.usage_ledger.record(
-                        ModelCallEvent(
-                            provider="openai",
-                            model=returned_model,
-                            tier=ModelTier.FRONTIER,
-                            harness="remote_codex",
-                            modality=ModelModality.TEXT,
-                            success=True,
-                            input_tokens=len(prompt.split()),
-                            processing_tokens=0,
-                            output_tokens=len(response_text.split()),
-                            cost_usd=0.0,
-                            latency_ms=round(latency * 1000, 1),
-                            source="core.execution.providers.remote_codex",
-                            ticket_id=ticket_id,
-                            execution_mode=execution_mode,
+                    with urllib.request.urlopen(req, timeout=self.timeout + 5.0) as resp:
+                        data = json.loads(resp.read().decode("utf-8"))
+                    latency = max(0.001, time.perf_counter() - start_req)
+
+                    if not data.get("success", False):
+                        err_msg = data.get("error") or f"{target_harness} execution returned failure"
+                        errors_encountered.append(f"[{target_harness}@{node_url}] {err_msg}")
+                        logger.warning(
+                            "Harness '%s' on node '%s' returned error: %s; cascading to next candidate...",
+                            target_harness,
+                            node_url,
+                            err_msg,
                         )
+                        break
+
+                    response_text = data.get("text", "")
+                    returned_model = data.get("model") or f"{target_harness}-harness"
+                    tokens_used = data.get("tokens_used") or (len(prompt.split()) + len(response_text.split()))
+
+                    provider_tag = "xai" if target_harness == "grok" else ("google" if target_harness == "antigravity" else "openai")
+                    if self.usage_ledger is not None:
+                        try:
+                            self.usage_ledger.record(
+                                ModelCallEvent(
+                                    provider=provider_tag,
+                                    model=returned_model,
+                                    tier=ModelTier.FRONTIER,
+                                    harness=f"remote_{target_harness}",
+                                    modality=ModelModality.TEXT,
+                                    success=True,
+                                    input_tokens=len(prompt.split()),
+                                    processing_tokens=0,
+                                    output_tokens=len(response_text.split()),
+                                    cost_usd=0.0,
+                                    latency_ms=round(latency * 1000, 1),
+                                    source=f"core.execution.providers.remote_{target_harness}",
+                                    ticket_id=ticket_id,
+                                    execution_mode=execution_mode,
+                                )
+                            )
+                        except Exception as exc:
+                            logger.debug("Failed to record usage: %s", exc)
+
+                    logger.info(
+                        "Remote harness execution succeeded: harness=%s, node=%s, latency=%.2fs",
+                        target_harness,
+                        node_url,
+                        latency,
+                    )
+                    return ProviderResponse(
+                        text=response_text,
+                        model=returned_model,
+                        tokens_prompt=len(prompt.split()),
+                        tokens_completion=len(response_text.split()),
+                        total_tokens=tokens_used,
+                        latency_seconds=latency,
+                        measured_cost=0.0,
+                        estimated_cost=0.0,
+                        is_measured=True,
+                        metadata={
+                            "backend": f"remote_{target_harness}",
+                            "harness": target_harness,
+                            "remote_url": node_url,
+                            "node_id": data.get("node_id", ""),
+                        },
                     )
                 except Exception as exc:
-                    logger.debug("Failed to record codex usage: %s", exc)
+                    latency = max(0.001, time.perf_counter() - start_req)
+                    errors_encountered.append(f"[{target_harness}@{node_url}] {exc}")
+                    logger.warning(
+                        "Node '%s' failed executing harness '%s': %s; failing over...",
+                        node_url,
+                        target_harness,
+                        exc,
+                    )
+                    continue
 
-            return ProviderResponse(
-                text=response_text,
-                model=returned_model,
-                tokens_prompt=len(prompt.split()),
-                tokens_completion=len(response_text.split()),
-                total_tokens=tokens_used,
-                latency_seconds=latency,
-                measured_cost=0.0,
-                estimated_cost=0.0,
-                is_measured=True,
-                metadata={"backend": "remote_codex", "remote_url": self.base_url},
-            )
-        except Exception as exc:
-            latency = max(0.001, time.perf_counter() - start)
-            logger.error("Remote Codex execution failed against %s: %s", endpoint, exc)
-            raise RuntimeError(f"Remote Codex error ({endpoint}): {exc}") from exc
+        overall_dur = time.perf_counter() - start_overall
+        detailed_errors = "; ".join(errors_encountered)
+        logger.error("All remote harness candidates and nodes failed in %.2fs: %s", overall_dur, detailed_errors)
+        raise RuntimeError(f"Remote harness execution failed across all nodes and candidates: {detailed_errors}")
+
+
+RemoteCodexModelProvider = RemoteMultiHarnessModelProvider
 
 
 def get_model_provider(
@@ -773,8 +864,15 @@ def get_model_provider(
         return OllamaModelProvider(base_url=url, usage_ledger=usage_ledger, **kwargs)
     if pid == "openrouter":
         return OpenRouterModelProvider(api_key=api_key, usage_ledger=usage_ledger, **kwargs)
-    if pid in ("codex", "remote_codex"):
-        return RemoteCodexModelProvider(base_url=base_url, usage_ledger=usage_ledger, **kwargs)
+    if pid in ("codex", "remote_codex", "grok", "remote_grok", "antigravity", "remote_antigravity", "remote_harness"):
+        default_harness = "grok" if "grok" in pid else ("antigravity" if "antigravity" in pid else "codex")
+        return RemoteMultiHarnessModelProvider(
+            node_urls=kwargs.get("node_urls"),
+            base_url=base_url,
+            default_harness=default_harness,
+            usage_ledger=usage_ledger,
+            **{k: v for k, v in kwargs.items() if k != "node_urls"},
+        )
     if pid in ("auto", "unified"):
         ollama = OllamaModelProvider(base_url=base_url or "http://localhost:11434", usage_ledger=usage_ledger)
         openrouter = OpenRouterModelProvider(api_key=api_key, usage_ledger=usage_ledger)
