@@ -217,8 +217,77 @@ def test_runner_cli_selective_gate(tmp_path: Path, capsys: pytest.CaptureFixture
     assert exit_code == 1
     captured = capsys.readouterr()
     data = json.loads(captured.out)
+    assert data["status"] == "NOT_RUN"
     assert "G1" in data["gates"]
     assert len(data["gates"]) == 1
+    assert data["owner_acceptance_receipt"] is None
+    assert data["dependency_receipts"] == []
+
+
+def test_runner_live_mode_without_external_receipts_blocks(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    hermetic_runner: None,
+) -> None:
+    """Live probes cannot mint owner or predecessor authority inside the runner."""
+    monkeypatch.setattr(
+        N8nProbe,
+        "probe",
+        lambda self, target_url=None, timeout=3.0: N8nInstanceReport(
+            url=target_url or self.config.base_url,
+            operational=True,
+            status_code=200,
+            db_connected=True,
+        ),
+    )
+
+    exit_code = run_hf15_runner([
+        "--run-id", "hf15_live_without_receipts",
+        "--report-dir", str(tmp_path / "reports" / "live_blocked"),
+        "--mode", "live",
+        "--json",
+    ])
+
+    assert exit_code == 1
+    data = json.loads(capsys.readouterr().out)
+    assert data["status"] == "BLOCKED"
+    assert data["owner_acceptance_receipt"] is None
+    assert data["dependency_receipts"] == []
+
+
+def test_runner_selective_live_mode_is_not_operational(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    hermetic_runner: None,
+) -> None:
+    """A selective live diagnostic cannot be promoted to an acceptance result."""
+    monkeypatch.setattr(
+        N8nProbe,
+        "probe",
+        lambda self, target_url=None, timeout=3.0: N8nInstanceReport(
+            url=target_url or self.config.base_url,
+            operational=True,
+            status_code=200,
+            db_connected=True,
+        ),
+    )
+
+    exit_code = run_hf15_runner([
+        "--run-id", "hf15_live_g1_only",
+        "--report-dir", str(tmp_path / "reports" / "live_partial"),
+        "--mode", "live",
+        "--gate", "G1",
+        "--json",
+    ])
+
+    assert exit_code == 1
+    data = json.loads(capsys.readouterr().out)
+    assert data["status"] == "NOT_RUN"
+    assert data["gates"] == {"G1": "PASSED"}
+    assert data["owner_acceptance_receipt"] is None
+    assert data["dependency_receipts"] == []
 
 
 def test_runner_preflight_fail_closed(tmp_path: Path) -> None:

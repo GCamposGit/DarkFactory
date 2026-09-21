@@ -26,7 +26,6 @@ from core.acceptance.models import (
     HF15EnvironmentConfig,
     HF15PreflightReport,
     HF15Scenario,
-    OwnerAcceptanceReceipt,
     RollbackExecutionRecord,
     ScenarioDataFixture,
     ScenarioEvidenceReceipt,
@@ -606,36 +605,39 @@ class HF15AcceptanceEngine:
         # 4. Check statuses
         gates_passed = all(r.status == ScenarioStatus.PASSED for r in gate_receipts.values())
         scenarios_passed = all(r.status == ScenarioStatus.PASSED for r in scenario_receipts)
-        overall_pass = preflight_report.all_passed and gates_passed and scenarios_passed
+        complete_run = (
+            set(gate_receipts) == set(all_gates)
+            and {receipt.scenario_number for receipt in scenario_receipts} == set(range(1, 11))
+        )
 
-        status_str = "PASS" if overall_pass else "FAILED"
         if not preflight_report.all_passed:
             status_str = "BLOCKED"
+        elif not complete_run:
+            status_str = "NOT_RUN"
+        elif not gates_passed or not scenarios_passed:
+            status_str = "FAILED"
         elif not self.config.live_mode:
             # Sandbox fixtures exercise mechanics but are never operational evidence.
             status_str = "NOT_RUN"
+        else:
+            # Live mode selects target probes; it cannot mint owner/dependency authority.
+            # Until externally issued receipts are accepted and verified, release stays blocked.
+            status_str = "BLOCKED"
 
         # Deterministic candidate and staging digests
         candidate_digest = hashlib.sha256(f"darkfac-wave1-{self.run_id}".encode("utf-8")).hexdigest()
         staging_digest = candidate_digest
         production_digest = candidate_digest
 
-        # Owner acceptance receipt for commercial release (Scenario G8)
-        owner_evidence_hash = hashlib.sha256(f"{self.run_id}:{production_digest}:owner_approved".encode("utf-8")).hexdigest()
-        owner_receipt = None
-        if self.config.live_mode and overall_pass:
-            owner_receipt = OwnerAcceptanceReceipt(
-                project_id="proj-commercial-demo",
-                run_id=self.run_id,
-                artifact_digest=production_digest,
-                policy_version="v1",
-                approved_by="owner",
-                decision="approved",
-                evidence_hash=owner_evidence_hash,
-                timestamp=datetime.now(UTC),
-            )
-
         metrics = self.observability_tracker.get_metrics_summary()
+        limitations = (
+            ["Live acceptance blocked: externally issued owner and dependency receipts are not wired."]
+            if self.config.live_mode
+            else [
+                "Modo sandbox/controlado ativo para preservação de custos e contas cloud.",
+                "VPS Hetzner CX23 medida com 9 slots de concorrência sintética.",
+            ]
+        )
 
         report = HF15AcceptanceReport(
             report_version="hf15-report-v1",
@@ -647,23 +649,12 @@ class HF15AcceptanceEngine:
             status=status_str,
             scenarios={str(s.scenario_number): s.status.value.upper() for s in scenario_receipts},
             gates={gid: r.status.value.upper() for gid, r in gate_receipts.items()},
-            dependency_receipts=(
-                [
-                    "receipt_hf07_model_router_ok",
-                    "receipt_hf09_implementation_quality_ok",
-                    "receipt_hf10_memory_learning_pack_ok",
-                    "receipt_hf12_release_pipeline_backup_ok",
-                    "receipt_hf13_darkhub_canonical_state_ok",
-                    "receipt_hf14_telegram_n8n_ok",
-                ]
-                if self.config.live_mode and overall_pass
-                else []
-            ),
+            dependency_receipts=[],
             environment_evidence=[c.model_dump(mode="json") for c in preflight_report.checks],
             candidate_digest=candidate_digest,
             staging_digest=staging_digest,
             production_digest=production_digest,
-            owner_acceptance_receipt=owner_receipt,
+            owner_acceptance_receipt=None,
             cost_ledger={
                 "currency": "USD",
                 "measured": True,
@@ -681,10 +672,7 @@ class HF15AcceptanceEngine:
                 "rpo_seconds": 0.0,
                 "rollback_drill_success": True,
             },
-            limitations=[
-                "Modo sandbox/controlado ativo para preservação de custos e contas cloud.",
-                "VPS Hetzner CX23 medida com 9 slots de concorrência sintética.",
-            ],
+            limitations=limitations,
             evidence_refs=[
                 (str(p.relative_to(Path.cwd())) if p.is_relative_to(Path.cwd()) else p.name)
                 for p in evidence_dir.glob("*.json")
