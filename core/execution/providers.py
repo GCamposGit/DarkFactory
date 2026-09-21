@@ -769,12 +769,16 @@ class RemoteMultiHarnessModelProvider:
                         err_msg = data.get("error") or f"{target_harness} execution returned failure"
                         errors_encountered.append(f"[{target_harness}@{node_url}] {err_msg}")
                         logger.warning(
-                            "Harness '%s' on node '%s' returned error: %s; cascading to next candidate...",
+                            "Harness '%s' on node '%s' returned error: %s; failing over to next node/candidate...",
                             target_harness,
                             node_url,
                             err_msg,
                         )
-                        break
+                        # A structured harness failure (for example, Claude is
+                        # intentionally absent on Desktop) must still try the
+                        # next node with the same harness before changing
+                        # harnesses. Transport failures already use continue.
+                        continue
 
                     response_text = data.get("text", "")
                     returned_model = data.get("model") or f"{target_harness}-harness"
@@ -898,4 +902,3 @@ def get_model_provider(
             **kwargs,
         )
     raise ValueError(f"Unknown provider_id: {provider_id}. Must be 'ollama', 'openrouter', 'codex', 'mock', 'resilient', or 'auto'.")
-

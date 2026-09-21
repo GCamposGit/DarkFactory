@@ -100,6 +100,55 @@ def test_multi_harness_cascade_grok_exhausted_codex_succeeds() -> None:
     assert res.measured_cost == 0.0
 
 
+def test_structured_harness_failure_fails_over_to_next_node() -> None:
+    """A structured failure on Desktop must retry the same harness on Notebook."""
+    provider = RemoteMultiHarnessModelProvider(
+        node_urls=["http://100.78.181.90:8080", "http://100.81.84.124:8080"],
+    )
+
+    def fake_urlopen(req, timeout=None):
+        url = req.full_url if hasattr(req, "full_url") else str(req)
+        if "/health" in url:
+            response = MagicMock()
+            response.status = 200
+            response.__enter__.return_value = response
+            return response
+
+        if "/harness/execute" in url and "100.78.181.90" in url:
+            response = MagicMock()
+            response.read.return_value = json.dumps({
+                "success": False,
+                "harness": "claude",
+                "error": "Claude Code executable not installed on this host",
+            }).encode("utf-8")
+            response.__enter__.return_value = response
+            return response
+
+        if "/harness/execute" in url and "100.81.84.124" in url:
+            response = MagicMock()
+            response.read.return_value = json.dumps({
+                "success": True,
+                "harness": "claude",
+                "text": "Notebook Claude response",
+                "model": "claude-sonnet",
+                "node_id": "ai-notebook",
+            }).encode("utf-8")
+            response.__enter__.return_value = response
+            return response
+
+        raise ValueError(f"Unexpected URL in test: {url}")
+
+    with patch("urllib.request.urlopen", side_effect=fake_urlopen):
+        result = provider.generate(
+            "Run Claude headless probe",
+            candidate_harnesses=["claude"],
+        )
+
+    assert result.text == "Notebook Claude response"
+    assert result.metadata["harness"] == "claude"
+    assert result.metadata["remote_url"] == "http://100.81.84.124:8080"
+
+
 def test_all_nodes_offline_raises_clean_error() -> None:
     """Verifies that if all nodes are offline, RuntimeError is raised with diagnostic context."""
     provider = RemoteMultiHarnessModelProvider(
