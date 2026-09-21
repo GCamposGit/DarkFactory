@@ -29,8 +29,20 @@ from core.integrations.telegram import TelegramConfig
 
 
 @pytest.fixture
-def temp_acceptance_engine(tmp_path: Path) -> HF15AcceptanceEngine:
+def temp_acceptance_engine(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> HF15AcceptanceEngine:
     """Fixture providing an isolated HF15AcceptanceEngine using temp directory."""
+    monkeypatch.setattr(
+        N8nProbe,
+        "probe",
+        lambda self, target_url=None, timeout=3.0: N8nInstanceReport(
+            url=target_url or self.config.base_url,
+            operational=False,
+            error="sandbox probe disabled",
+        ),
+    )
     config = HF15EnvironmentConfig(
         sandbox_root=tmp_path / "sandbox",
         db_type="sqlite_sandbox",
@@ -157,18 +169,18 @@ def test_engine_run_acceptance_full(temp_acceptance_engine: HF15AcceptanceEngine
     report = engine.run_acceptance()
 
     assert isinstance(report, HF15AcceptanceReport)
-    assert report.status == "PASS"
+    assert report.status == "NOT_RUN"
     assert len(report.gates) == 8
     assert len(report.scenarios) == 10
     assert report.staging_digest == report.production_digest
-    assert report.owner_acceptance_receipt is not None
-    assert report.owner_acceptance_receipt.decision == "approved"
+    assert report.owner_acceptance_receipt is None
+    assert report.dependency_receipts == []
 
     report_file = engine.report_dir / "report.json"
     assert report_file.exists()
     content = json.loads(report_file.read_text(encoding="utf-8"))
     assert content["ticket_id"] == "HF-15"
-    assert content["status"] == "PASS"
+    assert content["status"] == "NOT_RUN"
 
     evidence_files = list((engine.report_dir / "evidence").glob("*.json"))
     assert len(evidence_files) >= 18  # 8 gates + 10 scenarios
@@ -183,11 +195,11 @@ def test_runner_cli_json_output(tmp_path: Path, capsys: pytest.CaptureFixture[st
         "--json",
     ])
 
-    assert exit_code == 0
+    assert exit_code == 1
     captured = capsys.readouterr()
     data = json.loads(captured.out)
     assert data["ticket_id"] == "HF-15"
-    assert data["status"] == "PASS"
+    assert data["status"] == "NOT_RUN"
     assert data["run_id"] == "hf15_cli_test"
     assert any("sandbox" in item.lower() for item in data["limitations"])
 
@@ -202,7 +214,7 @@ def test_runner_cli_selective_gate(tmp_path: Path, capsys: pytest.CaptureFixture
         "--json",
     ])
 
-    assert exit_code == 0
+    assert exit_code == 1
     captured = capsys.readouterr()
     data = json.loads(captured.out)
     assert "G1" in data["gates"]
@@ -279,7 +291,7 @@ def test_runner_secret_sanitization(tmp_path: Path, capsys: pytest.CaptureFixtur
         "--report-dir", str(report_dir),
         "--json",
     ])
-    assert exit_code == 0
+    assert exit_code == 1
     output = capsys.readouterr().out
     assert "sk-" not in output
     assert "ghp_" not in output

@@ -611,6 +611,9 @@ class HF15AcceptanceEngine:
         status_str = "PASS" if overall_pass else "FAILED"
         if not preflight_report.all_passed:
             status_str = "BLOCKED"
+        elif not self.config.live_mode:
+            # Sandbox fixtures exercise mechanics but are never operational evidence.
+            status_str = "NOT_RUN"
 
         # Deterministic candidate and staging digests
         candidate_digest = hashlib.sha256(f"darkfac-wave1-{self.run_id}".encode("utf-8")).hexdigest()
@@ -619,16 +622,18 @@ class HF15AcceptanceEngine:
 
         # Owner acceptance receipt for commercial release (Scenario G8)
         owner_evidence_hash = hashlib.sha256(f"{self.run_id}:{production_digest}:owner_approved".encode("utf-8")).hexdigest()
-        owner_receipt = OwnerAcceptanceReceipt(
-            project_id="proj-commercial-demo",
-            run_id=self.run_id,
-            artifact_digest=production_digest,
-            policy_version="v1",
-            approved_by="owner",
-            decision="approved",
-            evidence_hash=owner_evidence_hash,
-            timestamp=datetime.now(UTC),
-        )
+        owner_receipt = None
+        if self.config.live_mode and overall_pass:
+            owner_receipt = OwnerAcceptanceReceipt(
+                project_id="proj-commercial-demo",
+                run_id=self.run_id,
+                artifact_digest=production_digest,
+                policy_version="v1",
+                approved_by="owner",
+                decision="approved",
+                evidence_hash=owner_evidence_hash,
+                timestamp=datetime.now(UTC),
+            )
 
         metrics = self.observability_tracker.get_metrics_summary()
 
@@ -642,14 +647,18 @@ class HF15AcceptanceEngine:
             status=status_str,
             scenarios={str(s.scenario_number): s.status.value.upper() for s in scenario_receipts},
             gates={gid: r.status.value.upper() for gid, r in gate_receipts.items()},
-            dependency_receipts=[
-                "receipt_hf07_model_router_ok",
-                "receipt_hf09_implementation_quality_ok",
-                "receipt_hf10_memory_learning_pack_ok",
-                "receipt_hf12_release_pipeline_backup_ok",
-                "receipt_hf13_darkhub_canonical_state_ok",
-                "receipt_hf14_telegram_n8n_ok",
-            ],
+            dependency_receipts=(
+                [
+                    "receipt_hf07_model_router_ok",
+                    "receipt_hf09_implementation_quality_ok",
+                    "receipt_hf10_memory_learning_pack_ok",
+                    "receipt_hf12_release_pipeline_backup_ok",
+                    "receipt_hf13_darkhub_canonical_state_ok",
+                    "receipt_hf14_telegram_n8n_ok",
+                ]
+                if self.config.live_mode and overall_pass
+                else []
+            ),
             environment_evidence=[c.model_dump(mode="json") for c in preflight_report.checks],
             candidate_digest=candidate_digest,
             staging_digest=staging_digest,

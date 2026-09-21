@@ -97,7 +97,14 @@ def test_worker_and_coordinator_subprocess_pid_alive_idle() -> None:
         stderr=subprocess.PIPE,
     )
     coord_proc = subprocess.Popen(
-        [sys.executable, "-m", "core.orchestrator.cloud_coordinator", "--poll-interval", "0.1"],
+        [
+            sys.executable,
+            "-m",
+            "core.orchestrator.cloud_coordinator",
+            "--poll-interval",
+            "0.1",
+            "--no-http",
+        ],
         cwd=str(REPO_ROOT),
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
