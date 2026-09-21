@@ -318,6 +318,7 @@ def test_cli_headless_commands(capsys: pytest.CaptureFixture[str], monkeypatch: 
     captured = capsys.readouterr()
     preflight_json = json.loads(captured.out)
     assert preflight_json["all_passed"] is True
+    assert preflight_json["environment_mode"] == "sandbox"
 
     # 2. Seed Data
     code = cli_main(["seed-data", "--json"])
@@ -341,6 +342,7 @@ def test_cli_headless_commands(capsys: pytest.CaptureFixture[str], monkeypatch: 
     captured = capsys.readouterr()
     status_json = json.loads(captured.out)
     assert status_json["environment"]["all_preflights_passed"] is True
+    assert status_json["environment"]["mode"] == "sandbox"
 
     # 5. Metrics
     code = cli_main(["metrics", "--json"])
@@ -384,6 +386,7 @@ def test_hub_endpoints_hf15(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> 
     assert "environment" in data_status
     assert "metrics" in data_status
     assert data_status["environment"]["all_preflights_passed"] is True
+    assert data_status["environment"]["mode"] == "sandbox"
 
     # 2. GET /api/hf15/metrics
     res_metrics = client.get("/api/hf15/metrics")

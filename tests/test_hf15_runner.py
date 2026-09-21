@@ -189,6 +189,7 @@ def test_runner_cli_json_output(tmp_path: Path, capsys: pytest.CaptureFixture[st
     assert data["ticket_id"] == "HF-15"
     assert data["status"] == "PASS"
     assert data["run_id"] == "hf15_cli_test"
+    assert any("sandbox" in item.lower() for item in data["limitations"])
 
 
 def test_runner_cli_selective_gate(tmp_path: Path, capsys: pytest.CaptureFixture[str], hermetic_runner: None) -> None:
