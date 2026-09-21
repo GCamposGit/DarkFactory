@@ -93,6 +93,13 @@ def test_preflight_verifications_fail_closed(sandbox_env: HF15EnvironmentConfig)
     assert slot_check.passed is False
     assert "Insufficient slots" in (slot_check.error or "")
 
+    # A synthetic sandbox user is only test input; missing authorization still blocks readiness.
+    no_users_config = sandbox_env.model_copy(update={"telegram_authorized_users": []})
+    no_users_report = HF15EnvironmentManager(config=no_users_config).run_preflights()
+    assert no_users_report.all_passed is False
+    auth_check = next(c for c in no_users_report.checks if c.name == "telegram_gateway_auth")
+    assert auth_check.passed is False
+
 
 # ---------------------------------------------------------------------------
 # 2. Dados de Teste Determinísticos (Cenários G1 a G8)
@@ -279,6 +286,7 @@ def test_observability_ledger_and_sla_tracking(tmp_path: Path) -> None:
 def test_cli_headless_commands(capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """CLI commands operate headlessly and return valid JSON."""
     monkeypatch.setenv("DARKFAC_HF15_SANDBOX_ROOT", str(tmp_path / "cli_sandbox"))
+    monkeypatch.setenv("TELEGRAM_AUTHORIZED_USERS", "12345678")
 
     # 1. Preflight
     code = cli_main(["--json", "preflight"])
@@ -323,10 +331,11 @@ def test_cli_headless_commands(capsys: pytest.CaptureFixture[str], monkeypatch: 
 # ---------------------------------------------------------------------------
 
 
-def test_hub_endpoints_hf15() -> None:
+def test_hub_endpoints_hf15(monkeypatch: pytest.MonkeyPatch) -> None:
     """DarkHub REST API exposes status, metrics, and rollback drill endpoints."""
     from hub.backend.api import get_hub_service
 
+    monkeypatch.setenv("TELEGRAM_AUTHORIZED_USERS", "12345678")
     client = TestClient(app)
     service = get_hub_service()
 

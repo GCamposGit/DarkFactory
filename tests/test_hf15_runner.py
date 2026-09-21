@@ -152,8 +152,9 @@ def test_engine_run_acceptance_full(temp_acceptance_engine: HF15AcceptanceEngine
     assert len(evidence_files) >= 18  # 8 gates + 10 scenarios
 
 
-def test_runner_cli_json_output(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+def test_runner_cli_json_output(tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch) -> None:
     """Tests canonical runner invocation with --json and validates exit code 0."""
+    monkeypatch.setenv("TELEGRAM_AUTHORIZED_USERS", "12345678")
     report_dir = tmp_path / "reports" / "cli_run"
     exit_code = run_hf15_runner([
         "--run-id", "hf15_cli_test",
@@ -169,8 +170,9 @@ def test_runner_cli_json_output(tmp_path: Path, capsys: pytest.CaptureFixture[st
     assert data["run_id"] == "hf15_cli_test"
 
 
-def test_runner_cli_selective_gate(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+def test_runner_cli_selective_gate(tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch) -> None:
     """Tests selective gate execution via --gate G1."""
+    monkeypatch.setenv("TELEGRAM_AUTHORIZED_USERS", "12345678")
     report_dir = tmp_path / "reports" / "cli_selective"
     exit_code = run_hf15_runner([
         "--run-id", "hf15_selective_test",
@@ -210,8 +212,9 @@ def test_runner_preflight_fail_closed(tmp_path: Path) -> None:
         assert exit_code == 1
 
 
-def test_runner_secret_sanitization(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+def test_runner_secret_sanitization(tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch) -> None:
     """Verifies that secrets are masked from runner output."""
+    monkeypatch.setenv("TELEGRAM_AUTHORIZED_USERS", "12345678")
     report_dir = tmp_path / "reports" / "cli_sanitization"
     exit_code = run_hf15_runner([
         "--run-id", "hf15_secret_test",
