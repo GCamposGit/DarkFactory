@@ -24,6 +24,8 @@ from core.acceptance.models import (
     ScenarioStatus,
 )
 from core.harness.hf15_acceptance import build_parser, run_hf15_runner
+from core.integrations.n8n import N8nInstanceReport, N8nProbe
+from core.integrations.telegram import TelegramConfig
 
 
 @pytest.fixture
@@ -41,6 +43,26 @@ def temp_acceptance_engine(tmp_path: Path) -> HF15AcceptanceEngine:
         config=config,
         run_id="test_run_001",
         report_dir=report_dir,
+    )
+
+
+@pytest.fixture
+def hermetic_runner(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Isolate runner tests from workstation config and external n8n traffic."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("DARKFAC_HF15_SANDBOX_ROOT", str(tmp_path / "runner_sandbox"))
+    monkeypatch.setattr(
+        "core.acceptance.environment.load_telegram_config",
+        lambda: TelegramConfig(authorized_user_ids=[12345678]),
+    )
+    monkeypatch.setattr(
+        N8nProbe,
+        "probe",
+        lambda self, target_url=None, timeout=3.0: N8nInstanceReport(
+            url=target_url or self.config.base_url,
+            operational=False,
+            error="sandbox probe disabled",
+        ),
     )
 
 
@@ -152,9 +174,8 @@ def test_engine_run_acceptance_full(temp_acceptance_engine: HF15AcceptanceEngine
     assert len(evidence_files) >= 18  # 8 gates + 10 scenarios
 
 
-def test_runner_cli_json_output(tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch) -> None:
+def test_runner_cli_json_output(tmp_path: Path, capsys: pytest.CaptureFixture[str], hermetic_runner: None) -> None:
     """Tests canonical runner invocation with --json and validates exit code 0."""
-    monkeypatch.setenv("TELEGRAM_AUTHORIZED_USERS", "12345678")
     report_dir = tmp_path / "reports" / "cli_run"
     exit_code = run_hf15_runner([
         "--run-id", "hf15_cli_test",
@@ -170,9 +191,8 @@ def test_runner_cli_json_output(tmp_path: Path, capsys: pytest.CaptureFixture[st
     assert data["run_id"] == "hf15_cli_test"
 
 
-def test_runner_cli_selective_gate(tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch) -> None:
+def test_runner_cli_selective_gate(tmp_path: Path, capsys: pytest.CaptureFixture[str], hermetic_runner: None) -> None:
     """Tests selective gate execution via --gate G1."""
-    monkeypatch.setenv("TELEGRAM_AUTHORIZED_USERS", "12345678")
     report_dir = tmp_path / "reports" / "cli_selective"
     exit_code = run_hf15_runner([
         "--run-id", "hf15_selective_test",
@@ -212,9 +232,46 @@ def test_runner_preflight_fail_closed(tmp_path: Path) -> None:
         assert exit_code == 1
 
 
-def test_runner_secret_sanitization(tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch) -> None:
+def test_runner_blocks_without_authorized_gateway(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A sandbox fixture must not turn missing gateway authorization into PASS."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("DARKFAC_HF15_SANDBOX_ROOT", str(tmp_path / "blocked_sandbox"))
+    monkeypatch.setattr(
+        "core.acceptance.environment.load_telegram_config",
+        lambda: TelegramConfig(authorized_user_ids=[]),
+    )
+    monkeypatch.setattr(
+        N8nProbe,
+        "probe",
+        lambda self, target_url=None, timeout=3.0: N8nInstanceReport(
+            url=target_url or self.config.base_url,
+            operational=False,
+            error="sandbox probe disabled",
+        ),
+    )
+
+    exit_code = run_hf15_runner([
+        "--run-id", "hf15_missing_gateway",
+        "--report-dir", str(tmp_path / "reports" / "blocked"),
+        "--json",
+    ])
+
+    assert exit_code == 1
+    output = json.loads(capsys.readouterr().out)
+    assert output["status"] == "BLOCKED"
+    gateway_check = next(
+        item for item in output["environment_evidence"]
+        if item["name"] == "telegram_gateway_auth"
+    )
+    assert gateway_check["passed"] is False
+
+
+def test_runner_secret_sanitization(tmp_path: Path, capsys: pytest.CaptureFixture[str], hermetic_runner: None) -> None:
     """Verifies that secrets are masked from runner output."""
-    monkeypatch.setenv("TELEGRAM_AUTHORIZED_USERS", "12345678")
     report_dir = tmp_path / "reports" / "cli_sanitization"
     exit_code = run_hf15_runner([
         "--run-id", "hf15_secret_test",
