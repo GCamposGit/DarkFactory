@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import sys
 import time
 from pathlib import Path
@@ -104,11 +105,20 @@ def test_process_sandbox_timeout_and_tree_kill(temp_workspace: Path) -> None:
     sandbox = ProcessSandbox(working_dir=temp_workspace, default_timeout_seconds=0.5)
 
     # Quick fast command succeeds
-    cmd_quick = [sys.executable, "-c", "print('quick output')"]
+    quick_script = "print('quick output')"
+    if sys.platform != "win32":
+        quick_script += "; import os; print(f'pgrp={os.getpgrp()}')"
+    cmd_quick = [sys.executable, "-c", quick_script]
     res_quick = sandbox.run_command(cmd_quick, timeout_seconds=2.0)
     assert res_quick.exit_code == 0
     assert "quick output" in res_quick.stdout
     assert not res_quick.timed_out
+    if sys.platform != "win32":
+        child_group = int(
+            next(line for line in res_quick.stdout.splitlines() if line.startswith("pgrp="))
+            .split("=", 1)[1]
+        )
+        assert child_group != os.getpgrp()
 
     # Long running command that exceeds timeout gets killed
     cmd_sleep = [
@@ -217,4 +227,3 @@ def test_provider_inference_and_unknown_cost_policy() -> None:
     assert not resp.is_measured
     assert resp.measured_cost is None
     assert resp.estimated_cost > 0.0
-

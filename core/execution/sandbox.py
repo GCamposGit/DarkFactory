@@ -148,8 +148,19 @@ def kill_process_tree(pid: int) -> None:
             logger.debug(f"taskkill failed for pid {pid}: {exc}")
     else:
         try:
-            # Send SIGTERM then SIGKILL to process group if possible
-            os.killpg(os.getpgid(pid), signal.SIGKILL)
+            target_group = os.getpgid(pid)
+            if target_group == os.getpgrp():
+                # Never terminate the caller's own process group.  A child that
+                # was not isolated must be killed individually so a timeout
+                # cannot take down pytest, the shell, or a CI runner.
+                logger.warning(
+                    "Refusing to kill caller process group %s for child %s",
+                    target_group,
+                    pid,
+                )
+                os.kill(pid, signal.SIGKILL)
+            else:
+                os.killpg(target_group, signal.SIGKILL)
         except Exception:
             try:
                 os.kill(pid, signal.SIGKILL)
@@ -201,6 +212,7 @@ class ProcessSandbox:
                 encoding="utf-8",
                 errors="replace",
                 shell=shell,
+                start_new_session=sys.platform != "win32",
             )
             stdout, stderr = proc.communicate(timeout=timeout)
             duration = max(0.001, time.perf_counter() - start_time)
