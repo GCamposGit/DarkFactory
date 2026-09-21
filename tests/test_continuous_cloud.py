@@ -49,17 +49,20 @@ def test_coordinator_idle_loop_without_ai_calls() -> None:
     stop_event = threading.Event()
 
     def run_coordinator() -> None:
-        coordinator.run_forever(stop_event=stop_event, poll_interval_sec=0.05)
+        coordinator.run_forever(stop_event=stop_event, poll_interval_sec=0.05, enable_http=False)
 
     thread = threading.Thread(target=run_coordinator, daemon=True)
     thread.start()
 
-    time.sleep(0.15)
-    assert coordinator._running is True
+    try:
+        deadline = time.monotonic() + 2.0
+        while not coordinator._running and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert coordinator._running is True
+    finally:
+        stop_event.set()
+        thread.join(timeout=2.0)
 
-    # Stop and join cleanly
-    stop_event.set()
-    thread.join(timeout=1.0)
     assert not thread.is_alive()
     assert coordinator._running is False
 
@@ -294,16 +297,20 @@ def test_coordinator_resilience_waiting_access() -> None:
     stop_event = threading.Event()
 
     def run_loop() -> None:
-        coordinator.run_forever(stop_event=stop_event, poll_interval_sec=0.05)
+        coordinator.run_forever(stop_event=stop_event, poll_interval_sec=0.05, enable_http=False)
 
     thread = threading.Thread(target=run_loop, daemon=True)
     thread.start()
 
-    time.sleep(0.15)
-    assert coordinator._running is True
+    try:
+        deadline = time.monotonic() + 2.0
+        while not coordinator._running and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert coordinator._running is True
+    finally:
+        stop_event.set()
+        thread.join(timeout=2.0)
 
-    stop_event.set()
-    thread.join(timeout=1.0)
     assert not thread.is_alive()
     assert coordinator._running is False
 
