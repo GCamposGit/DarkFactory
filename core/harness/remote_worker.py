@@ -16,7 +16,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
-from typing import Any, Dict, Literal, Optional
+from typing import Any, Dict, Optional
 
 from fastapi import FastAPI, HTTPException, status
 from fastapi.responses import JSONResponse
@@ -88,11 +88,6 @@ class HarnessExecutionRequest(BaseModel):
     timeout_seconds: int = Field(default=120, description="Execution timeout in seconds")
     model: Optional[str] = Field(default=None, description="Optional model override")
     cwd: Optional[str] = Field(default=None, description="Working directory")
-    mode: Literal["read", "write"] = Field(
-        default="read",
-        description="Execution mode: 'read' preserves today's flags (unchanged), "
-        "'write' lets the agent modify files (workspace-write / bypassPermissions).",
-    )
     options: Dict[str, Any] = Field(default_factory=dict, description="Arbitrary harness options")
 
 
@@ -469,52 +464,23 @@ def create_worker_app(
 
         start_t = time.perf_counter()
         target_cwd = Path(req_data.cwd).resolve() if req_data.cwd else root_path
-        mode = getattr(req_data, "mode", "read") or "read"
+        model_flag = f'-m "{req_data.model}"' if req_data.model else ""
+        cmd = f'"{executable}" exec --sandbox read-only --ephemeral --skip-git-repo-check {model_flag} -o "{tmp_out}" -'
 
         try:
-            if mode == "write":
-                # Reuse the HF-27-03 argv builder so the line and this ad hoc
-                # endpoint agree on the write-mode flags (workspace-write, --json).
-                from core.line.agent_cli import AgentRequest, build_codex_argv
-
-                agent_req = AgentRequest(
-                    prompt=full_prompt,
-                    cwd=target_cwd,
-                    mode="write",
-                    harness="codex",
-                    model=req_data.model,
-                    timeout_s=req_data.timeout_seconds,
-                )
-                cmd_argv = build_codex_argv(executable, agent_req, tmp_out)
-                logger.info("Executing Codex (write) non-interactively on node %s (prompt length: %d)", node_id, len(full_prompt))
-                proc = subprocess.run(
-                    cmd_argv,
-                    input=full_prompt,
-                    capture_output=True,
-                    text=True,
-                    cwd=str(target_cwd),
-                    timeout=req_data.timeout_seconds,
-                    encoding="utf-8",
-                    errors="replace",
-                    **subp_kwargs,
-                )
-            else:
-                # Unchanged default behaviour: read-only, ephemeral.
-                model_flag = f'-m "{req_data.model}"' if req_data.model else ""
-                cmd = f'"{executable}" exec --sandbox read-only --ephemeral --skip-git-repo-check {model_flag} -o "{tmp_out}" -'
-                logger.info("Executing Codex non-interactively on node %s (prompt length: %d)", node_id, len(full_prompt))
-                proc = subprocess.run(
-                    cmd,
-                    shell=True,
-                    input=full_prompt,
-                    capture_output=True,
-                    text=True,
-                    cwd=str(target_cwd),
-                    timeout=req_data.timeout_seconds,
-                    encoding="utf-8",
-                    errors="replace",
-                    **subp_kwargs,
-                )
+            logger.info("Executing Codex non-interactively on node %s (prompt length: %d)", node_id, len(full_prompt))
+            proc = subprocess.run(
+                cmd,
+                shell=True,
+                input=full_prompt,
+                capture_output=True,
+                text=True,
+                cwd=str(target_cwd),
+                timeout=req_data.timeout_seconds,
+                encoding="utf-8",
+                errors="replace",
+                **subp_kwargs,
+            )
             duration = round(time.perf_counter() - start_t, 3)
 
             output_text = ""
@@ -754,48 +720,19 @@ def create_worker_app(
             subp_kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
         start_t = time.perf_counter()
         target_cwd = Path(req_data.cwd).resolve() if req_data.cwd else root_path
-        mode = getattr(req_data, "mode", "read") or "read"
+        cmd_args = [executable, "-p", full_prompt]
         try:
-            if mode == "write":
-                # Reuse the HF-27-03 argv builder so the line and this ad hoc
-                # endpoint agree on the write-mode flags (--permission-mode bypassPermissions).
-                from core.line.agent_cli import AgentRequest, build_claude_argv
-
-                agent_req = AgentRequest(
-                    prompt=full_prompt,
-                    cwd=target_cwd,
-                    mode="write",
-                    harness="claude",
-                    model=req_data.model,
-                    timeout_s=req_data.timeout_seconds,
-                )
-                cmd_args = build_claude_argv(executable, agent_req)
-                logger.info("Executing Claude Code (write) on node %s (prompt length: %d)", node_id, len(full_prompt))
-                proc = subprocess.run(
-                    cmd_args,
-                    input=full_prompt,
-                    capture_output=True,
-                    text=True,
-                    cwd=str(target_cwd),
-                    timeout=req_data.timeout_seconds,
-                    encoding="utf-8",
-                    errors="replace",
-                    **subp_kwargs,
-                )
-            else:
-                # Unchanged default behaviour.
-                cmd_args = [executable, "-p", full_prompt]
-                logger.info("Executing Claude Code on node %s (prompt length: %d)", node_id, len(full_prompt))
-                proc = subprocess.run(
-                    cmd_args,
-                    capture_output=True,
-                    text=True,
-                    cwd=str(target_cwd),
-                    timeout=req_data.timeout_seconds,
-                    encoding="utf-8",
-                    errors="replace",
-                    **subp_kwargs,
-                )
+            logger.info("Executing Claude Code on node %s (prompt length: %d)", node_id, len(full_prompt))
+            proc = subprocess.run(
+                cmd_args,
+                capture_output=True,
+                text=True,
+                cwd=str(target_cwd),
+                timeout=req_data.timeout_seconds,
+                encoding="utf-8",
+                errors="replace",
+                **subp_kwargs,
+            )
             duration = round(time.perf_counter() - start_t, 3)
             output_text = proc.stdout.strip()
             if proc.returncode != 0 and not output_text:

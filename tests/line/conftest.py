@@ -55,6 +55,22 @@ if __name__ == "__main__":
 '''
 
 
+def write_python_shim(base: Path, script_path: Path) -> Path:
+    """Executable shim running `script_path` with this interpreter.
+
+    `.cmd` on Windows, a `#!/bin/sh` script elsewhere (CI runs Ubuntu too);
+    both work as argv[0] without `shell=True`.
+    """
+    if sys.platform == "win32":
+        shim = base.with_suffix(".cmd")
+        shim.write_text(f'@echo off\r\n"{sys.executable}" "{script_path}" %*\r\n', encoding="utf-8")
+    else:
+        shim = base.with_suffix(".sh")
+        shim.write_text(f'#!/bin/sh\nexec "{sys.executable}" "{script_path}" "$@"\n', encoding="utf-8")
+        shim.chmod(0o755)
+    return shim
+
+
 @pytest.fixture
 def make_fake_cli(tmp_path: Path) -> Callable[[str], tuple[str, str]]:
     """Return a factory `(name) -> (cmd_path, env_var_name)` for a fake CLI binary."""
@@ -67,11 +83,7 @@ def make_fake_cli(tmp_path: Path) -> Callable[[str], tuple[str, str]]:
         env_var = f"FAKE_CLI_RESPONSE_{name.upper()}"
         script_path = tmp_path / f"fake_{name}.py"
         script_path.write_text(_FAKE_CLI_SCRIPT.format(env_var=env_var), encoding="utf-8")
-        cmd_path = tmp_path / f"fake_{name}.cmd"
-        cmd_path.write_text(
-            f'@echo off\r\n"{sys.executable}" "{script_path}" %*\r\n',
-            encoding="utf-8",
-        )
+        cmd_path = write_python_shim(tmp_path / f"fake_{name}", script_path)
         created[name] = (str(cmd_path), env_var)
         return created[name]
 

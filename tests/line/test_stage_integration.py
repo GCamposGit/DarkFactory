@@ -28,6 +28,7 @@ from core.line.stage_integration import IntegrationStageHandler
 from core.line.workspace import checkout
 from core.projects.models import ProjectDescriptor
 from core.workflow.control_contracts import Claim, JobKey, StageContext
+from tests.line.conftest import write_python_shim
 
 # --------------------------------------------------------------------------
 # git helpers (mirrors tests/line/test_workspace.py; no network)
@@ -226,8 +227,7 @@ def fake_gh(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     env_var = "FAKE_GH_RESPONSE"
     script_path = tmp_path / "fake_gh.py"
     script_path.write_text(_FAKE_GH_SCRIPT.format(env_var=env_var), encoding="utf-8")
-    cmd_path = tmp_path / "fake_gh.cmd"
-    cmd_path.write_text(f'@echo off\r\n"{sys.executable}" "{script_path}" %*\r\n', encoding="utf-8")
+    cmd_path = write_python_shim(tmp_path / "fake_gh", script_path)
 
     calls_path = tmp_path / "gh_calls.json"
     state_path = tmp_path / "gh_state.json"
