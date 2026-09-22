@@ -37,7 +37,10 @@ def load_hf15_config(config_path: Optional[Path] = None) -> HF15EnvironmentConfi
     if target.exists():
         try:
             data = json.loads(target.read_text(encoding="utf-8"))
-            return HF15EnvironmentConfig.model_validate(data)
+            loaded = HF15EnvironmentConfig.model_validate(data)
+            # A configuration file describes the target but cannot authorize
+            # live execution. The canonical runner must opt in explicitly.
+            return loaded.model_copy(update={"live_mode": False})
         except Exception as exc:
             logger.warning("Failed to parse %s: %s; falling back to environment", target, exc)
 
