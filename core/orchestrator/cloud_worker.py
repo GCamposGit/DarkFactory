@@ -194,9 +194,17 @@ class CloudWorker:
                     from core.execution.providers import get_model_provider
                     from core.router.harness_router import resolve_harness_candidates
 
+                    harness_metadata: dict[str, Any] = {
+                        "ticket_id": claim.job_key.ticket_id,
+                        "run_id": run_id,
+                    }
+                    forced_harness = os.environ.get("REMOTE_HARNESS_PREFERENCE")
+                    if forced_harness:
+                        harness_metadata["preferred_harness"] = forced_harness.strip().lower()
+
                     candidate_harnesses = resolve_harness_candidates(
                         stage=stage,
-                        metadata={"ticket_id": claim.job_key.ticket_id, "run_id": run_id},
+                        metadata=harness_metadata,
                     )
 
                     provider = get_model_provider("remote_harness", node_urls=remote_urls)

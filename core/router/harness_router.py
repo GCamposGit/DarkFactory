@@ -44,9 +44,9 @@ class HarnessRoutingPolicy(Protocol):
 class SpecializedCascadePolicy:
     """Routes by domain specialization with automatic fallback cascade.
 
-    - Development / Code / Validation: Codex (primary) -> Grok -> Antigravity
-    - Planning / Architecture / Research: Grok (primary) -> Codex -> Antigravity
-    - Context / Memory / Evaluation / Default: Antigravity (primary) -> Codex -> Grok
+    - Development / Code / Validation: Codex (primary) -> Grok -> Antigravity -> Claude Code -> DeepSeek
+    - Planning / Architecture / Research: Grok (primary) -> Claude Code -> Codex -> Antigravity -> DeepSeek
+    - Context / Memory / Evaluation / Default: Antigravity (primary) -> Codex -> Grok -> Claude Code -> DeepSeek
     """
 
     def __init__(
@@ -76,7 +76,7 @@ class SpecializedCascadePolicy:
         if normalized_stage in ("development", "validation", "integration", "build_deploy"):
             candidates = [HARNESS_CODEX, HARNESS_GROK, HARNESS_ANTIGRAVITY, HARNESS_CLAUDE, HARNESS_DEEPSEEK]
         elif normalized_stage in ("planning", "grill", "research", "architecture"):
-            candidates = [HARNESS_GROK, HARNESS_CODEX, HARNESS_ANTIGRAVITY, HARNESS_CLAUDE, HARNESS_DEEPSEEK]
+            candidates = [HARNESS_GROK, HARNESS_CLAUDE, HARNESS_CODEX, HARNESS_ANTIGRAVITY, HARNESS_DEEPSEEK]
         else:
             candidates = [HARNESS_ANTIGRAVITY, HARNESS_CODEX, HARNESS_GROK, HARNESS_CLAUDE, HARNESS_DEEPSEEK]
 

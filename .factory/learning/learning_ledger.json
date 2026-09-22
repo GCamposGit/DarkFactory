@@ -1047,6 +1047,21 @@
       "origin": "rca",
       "status": "proposed",
       "active": false
+    },
+    {
+      "rca_id": "rca_1f842b1a",
+      "timestamp": "2026-09-21T10:59:55.577981+00:00",
+      "category": "tool_misuse",
+      "symptom": "Usuario recebeu 5+ comandos PowerShell manuais para reinstalar/validar o Claude CLI no node 100.81.84.124, mesmo com o node acessivel via HTTP pela propria sessao",
+      "mechanism": "Secao 5 da skill 04-autonomous-piv-loop mandava sempre fornecer instrucoes passo-a-passo para qualquer configuracao manual, sem antes checar se o host alvo era alcancavel pela sessao (curl bem-sucedido em /health) ou se remote_worker.py ja expunha /system/exec e /system/update para a mesma acao",
+      "root_cause": "A skill nao distinguia 'exige interacao humana inerente' (OAuth) de 'exige apenas execucao de comando', entao toda configuracao manual era tratada com o mesmo protocolo de instrucao textual ao usuario, mesmo quando a sessao ja tinha acesso direto ao node",
+      "patch_description": "Adicionada Secao 5 'Automacao Antes de Instrucao Manual' em .agents/skills/04-autonomous-piv-loop/SKILL.md (sincronizada para .claude/skills/): checar alcancabilidade HTTP/script antes de pedir comando manual, executar diretamente quando nao envolver credenciais/infra compartilhada, e reservar instrucao manual para OAuth/2FA ou acoes que exigem autorizacao explicita (SSH, VPS, secrets)",
+      "preventative_rule": "Antes de instruir o usuario a rodar um comando, verificar se o alvo e alcancavel pela sessao ou se ha endpoint/script equivalente; so pedir acao manual para interacao humana inerente ou quando a politica de seguranca exige confirmacao explicita por credenciais/infra compartilhada",
+      "regression_test_file": null,
+      "verification_gate_id": "gate_c5fb0e75",
+      "origin": "rca",
+      "status": "active",
+      "active": true
     }
   ],
   "transfers": [
@@ -1713,7 +1728,15 @@
       "passed": true,
       "output_snippet": "ted_provider\": null,\n    \"selected_account_label\": null,\n    \"evaluated_accounts\": 0,\n    \"failover_required\": false,\n    \"use_paid_api\": false,\n    \"prefer_local\": true,\n    \"prefer_scripts\": true,\n    \"defer_frontier_work\": false,\n    \"modular_delivery\": true,\n    \"reasoning_effort\": \"minimal\",\n    \"max_output_tokens\": 596,\n    \"block_output_tokens\": 596,\n    \"task_priority\": \"normal\",\n    \"selection_objective\": \"minimize output tokens, then marginal cost, then latency\",\n    \"estimate\": {\n      \"input_tokens\": 2480,\n      \"output_tokens\": 1860,\n      \"total_tokens\": 4340,\n      \"confidence\": 0.72,\n      \"method\": \"task baseline + chars/4 + complexity + bounded step multiplier\"\n    },\n    \"rationale\": \"Offline mode forces local models/scripts and the smallest modular token budget.\"\n  }\n}\n",
       "executed_at": "2026-09-09T12:00:36.526842+00:00"
+    },
+    {
+      "gate_id": "gate_c5fb0e75",
+      "target_type": "rca_patch",
+      "test_command": "python -m pytest tests/test_remote_provider_failover.py tests/test_harness_router.py -q",
+      "passed": true,
+      "output_snippet": ".............                                                            [100%]\n13 passed in 0.26s\n",
+      "executed_at": "2026-09-21T10:59:55.573982+00:00"
     }
   ],
-  "last_updated": "2026-09-12T01:01:46.368455+00:00"
+  "last_updated": "2026-09-21T10:59:55.577981+00:00"
 }

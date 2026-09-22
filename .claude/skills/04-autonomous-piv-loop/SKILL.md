@@ -34,7 +34,11 @@ O ciclo PIV divide a entrega em mudanças pequenas, isoladas e estritamente veri
    - Gere registros de `EnvironmentEvidence` associando cada teste executado à sua versão de configuração, build digest e resultado (`PASSED`/`FAILED`).
 4. **Encaminhamento para Revisão Independente (`INDEPENDENT_REVIEW`)**:
    - Submeta o candidato com sua suíte verde e evidências completas para revisão adversarial independente (`06-adversarial-review`).
-5. **Orientações de Configuração Manual ao Usuário**:
+5. **Automação Antes de Instrução Manual**:
+   - Antes de pedir que o usuário execute qualquer comando, verifique se o host/serviço alvo já é alcançável pela própria sessão (ex.: probe HTTP em `/health` de um node do `core/harness/remote_worker.py`) ou se existe script/endpoint equivalente (`/system/exec`, `/system/update`, `/harness/execute`, scripts em `scripts/`).
+   - Se alcançável e a ação não envolver credenciais nem infraestrutura compartilhada sensível (VPS, chaves SSH, secrets), execute diretamente via esse endpoint/script em vez de instruir o usuário a digitar comandos.
+   - Reserve orientação manual estritamente para: (a) etapas que exigem interação humana inerente (login/OAuth interativo, aceite de termos, 2FA); (b) ações que a política de segurança classifica como exigindo autorização explícita por passo (uso de chaves SSH, deploy em VPS/infra compartilhada, credenciais) — nesses casos, confirme com o usuário antes de agir, nunca contorne a checagem de credenciais para "automatizar".
+6. **Orientações de Configuração Manual ao Usuário** (quando o item 5 não se aplica):
    - Sempre que uma etapa, dependência (`ManualDependency`) ou integração exigir configuração manual pelo usuário (portais, dashboards, chaves de API, arquivos `.env`, toggles, etc.):
      - Forneça instruções passo a passo, tela por tela na versão atual da interface da plataforma.
      - Forneça sugestão explícita de conteúdo para absolutamente todos os campos a serem preenchidos, seletores, dropdowns e checkboxes.

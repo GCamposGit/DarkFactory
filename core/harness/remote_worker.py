@@ -122,19 +122,54 @@ class CodexExecutionResponse(BaseModel):
     error: Optional[str] = Field(default=None, description="Error message if failed")
 
 
+def _safe_is_file(path: Path) -> bool:
+    """Safely check if a path is a file without raising PermissionError on Windows."""
+    try:
+        return path.is_file()
+    except (OSError, PermissionError):
+        return False
+
+
 def find_codex_binary() -> Optional[str]:
     """Locate official Codex CLI executable on Windows or Linux."""
-    executable = shutil.which("codex")
+    executable = shutil.which("codex") or shutil.which("codex.cmd") or shutil.which("codex.exe")
     if executable:
         return executable
     user_profile = Path.home()
+
+    # 1. Inspect ~/.codex/config.toml for explicit CODEX_CLI_PATH
+    config_toml = user_profile / ".codex" / "config.toml"
+    if _safe_is_file(config_toml):
+        try:
+            for line in config_toml.read_text(encoding="utf-8", errors="replace").splitlines():
+                if "CODEX_CLI_PATH" in line and "=" in line:
+                    parts = line.split("=", 1)
+                    raw_val = parts[1].strip().strip("'\"")
+                    if raw_val:
+                        candidate_p = Path(raw_val)
+                        if _safe_is_file(candidate_p):
+                            return str(candidate_p)
+        except Exception as exc:
+            logger.debug("Failed reading ~/.codex/config.toml: %s", exc)
+
+    # 2. Check AppData/Local/OpenAI/Codex/bin/*/codex.exe
+    openai_bin = user_profile / "AppData" / "Local" / "OpenAI" / "Codex" / "bin"
+    try:
+        if openai_bin.is_dir():
+            for p in openai_bin.glob("*/codex.exe"):
+                if _safe_is_file(p):
+                    return str(p)
+    except Exception as exc:
+        logger.debug("Error probing OpenAI Codex bin dir: %s", exc)
+
+    # 3. Known standard install locations
     candidates = [
         user_profile / ".codex" / "environment" / "bin" / "codex.cmd",
         user_profile / ".codex" / ".sandbox-bin" / "codex.exe",
         user_profile / ".codex" / "plugins" / ".plugin-appserver" / "codex.exe",
     ]
     for c in candidates:
-        if c.is_file():
+        if _safe_is_file(c):
             return str(c)
     return None
 
@@ -150,7 +185,7 @@ def find_grok_binary() -> Optional[str]:
         user_profile / ".grok" / "bin" / "grok.EXE",
     ]
     for c in candidates:
-        if c.is_file():
+        if _safe_is_file(c):
             return str(c)
     return None
 
@@ -167,7 +202,7 @@ def find_antigravity_binary() -> Optional[str]:
         user_profile / "AppData" / "Local" / "Programs" / "antigravity" / "resources" / "bin" / "language_server.exe",
     ]
     for c in candidates:
-        if c.is_file():
+        if _safe_is_file(c):
             return str(c)
     return None
 
@@ -183,7 +218,7 @@ def find_claude_binary() -> Optional[str]:
         user_profile / "AppData" / "Roaming" / "npm" / "claude.cmd",
     ]
     for c in candidates:
-        if c.is_file():
+        if _safe_is_file(c):
             return str(c)
     return None
 
@@ -198,7 +233,7 @@ def find_deepseek_binary() -> Optional[str]:
         user_profile / ".deepseek" / "bin" / "deepseek.exe",
     ]
     for c in candidates:
-        if c.is_file():
+        if _safe_is_file(c):
             return str(c)
     return None
 
@@ -206,16 +241,19 @@ def find_deepseek_binary() -> Optional[str]:
 def get_available_harnesses() -> list[str]:
     """Return list of supported AI harnesses installed and ready on this node."""
     available: list[str] = []
-    if find_codex_binary():
-        available.append("codex")
-    if find_grok_binary():
-        available.append("grok")
-    if find_antigravity_binary():
-        available.append("antigravity")
-    if find_claude_binary():
-        available.append("claude")
-    if find_deepseek_binary():
-        available.append("deepseek")
+    finders = [
+        ("codex", find_codex_binary),
+        ("grok", find_grok_binary),
+        ("antigravity", find_antigravity_binary),
+        ("claude", find_claude_binary),
+        ("deepseek", find_deepseek_binary),
+    ]
+    for name, fn in finders:
+        try:
+            if fn():
+                available.append(name)
+        except Exception as exc:
+            logger.warning("Error detecting %s harness on this host: %s", name, exc)
     return available
 
 
