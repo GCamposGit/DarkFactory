@@ -1,0 +1,38 @@
+{
+  "pressure_thresholds": {"guarded": 50, "stressed": 25, "critical": 10},
+  "cooldown_default_minutes": 60,
+  "stages": {
+    "grill": {
+      "cascade": [["claude", "sonnet"], ["codex", null]],
+      "openrouter_ok": true,
+      "openrouter_model": "deepseek/deepseek-v4.1-flash"
+    },
+    "planning": {
+      "cascade": [["claude", "opus"], ["codex", null]],
+      "effort": "high",
+      "openrouter_ok": false
+    },
+    "development": {
+      "cascade": [["claude", "sonnet"], ["codex", null], ["grok", null], ["antigravity", null]],
+      "openrouter_ok": false
+    },
+    "review": {
+      "cascade": "other_family_than_development",
+      "openrouter_ok": true,
+      "openrouter_model": "deepseek/deepseek-v4.1-flash"
+    },
+    "distill": {
+      "cascade": [],
+      "openrouter_ok": true,
+      "local_ok": true,
+      "openrouter_model": "deepseek/deepseek-v4.1-flash"
+    }
+  },
+  "run_caps": {
+    "agent_calls": 14,
+    "validate_iterations_per_ticket": 3,
+    "review_rounds": 2,
+    "wall_clock_hours": 6,
+    "openrouter_usd": 2.0
+  }
+}
