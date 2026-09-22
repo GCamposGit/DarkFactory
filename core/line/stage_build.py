@@ -84,6 +84,9 @@ _NO_EDIT_RUNS_INSTRUCTION = (
 _FALLBACK_DEVELOP_TEMPLATE = """\
 Voce e um agente de desenvolvimento autonomo da DarkFac.
 
+## SPEC do run
+{spec}
+
 ## Ticket
 ID: {ticket_id}
 Titulo: {ticket_title}
@@ -164,6 +167,23 @@ def _load_prompt_template(name: str, fallback: str) -> str:
         except OSError as exc:
             logger.warning("Failed to read prompt template %s (%s); using fallback", candidate, exc)
     return fallback
+
+
+class _KeepMissing(dict):
+    """`format_map` mapping that leaves unknown `{name}` placeholders intact."""
+
+    def __missing__(self, key: str) -> str:
+        return "{" + key + "}"
+
+
+def fill_template(template: str, **values: str) -> str:
+    """Tolerant `str.format`: a `prompts/*.md` with extra placeholders never raises."""
+    return template.format_map(_KeepMissing(values))
+
+
+# Agent failures that say nothing about the ticket: retry the stage later
+# instead of burning one of the ticket's validate iterations.
+_TRANSIENT_AGENT_ERRORS = frozenset({"rate_limited", "auth_expired", "not_installed"})
 
 
 def _win_kwargs() -> dict[str, Any]:
@@ -365,9 +385,12 @@ class DevelopmentStage:
         extra_instruction: str,
         last_validate_log: Optional[str],
         last_review_log: Optional[str],
+        spec_text: str = "",
     ) -> str:
         template = _load_prompt_template("develop.md", _FALLBACK_DEVELOP_TEMPLATE)
-        return template.format(
+        return fill_template(
+            template,
+            spec=spec_text or "(SPEC.md ausente)",
             ticket_id=ticket.id,
             ticket_title=ticket.title,
             ticket_goal=ticket.goal or "(nao informado)",
@@ -391,11 +414,14 @@ class DevelopmentStage:
         ticket: TicketSpec,
         ticket_index: int,
         progress: DevelopmentProgress,
+        *,
+        initial_feedback: Optional[str] = None,
     ) -> StageResult:
         job_key = f"{run_id}:{ticket.id}"
         max_iterations = self.routing_config.run_caps.validate_iterations_per_ticket
-        last_validate_log: Optional[str] = None
+        last_validate_log: Optional[str] = initial_feedback
         last_review_log = _latest_review_log(ws)
+        spec_text = _read_context_text(ws, "SPEC.md")
 
         for iteration in range(1, max_iterations + 1):
             commands = resolve_commands(project, ws.path)
@@ -409,6 +435,7 @@ class DevelopmentStage:
                 extra_instruction=extra_instruction,
                 last_validate_log=last_validate_log,
                 last_review_log=last_review_log,
+                spec_text=spec_text,
             )
 
             route = self.pick_func(
@@ -432,6 +459,10 @@ class DevelopmentStage:
             )
             record_result(agent_result, config=self.routing_config)
 
+            if not agent_result.ok and agent_result.error_kind in _TRANSIENT_AGENT_ERRORS:
+                return StageResult(
+                    outcome="retry", cause_code=f"agent_{agent_result.error_kind}", output_refs=[]
+                )
             if not agent_result.ok:
                 last_validate_log = (
                     f"Falha ao invocar agente ({agent_result.error_kind}): {agent_result.text}"
@@ -469,13 +500,16 @@ class DevelopmentStage:
             _write_validate_log(ws, ticket.id, iteration, distilled)
 
             if validate_result.ok:
-                sha = workspace.commit(ws, f"feat: {ticket.title}", job_key=job_key)
-                workspace.push(ws)
+                # progress.json goes into the same commit: review (possibly on
+                # another host) reads the implementing harness from the branch,
+                # and it keeps a fix-up commit non-empty so its trailer lands.
                 progress.harness = harness
                 progress.model = model
                 if ticket.id not in progress.tickets_done:
                     progress.tickets_done.append(ticket.id)
                 _write_progress(ws, progress)
+                sha = workspace.commit(ws, f"feat: {ticket.title}", job_key=job_key)
+                workspace.push(ws)
                 return StageResult(outcome="success", output_refs=[sha])
 
             last_validate_log = distilled
@@ -512,7 +546,78 @@ class DevelopmentStage:
                 return result
             last_sha = result.output_refs[0]
 
+        # Every ticket is committed. If review or clean validation sent the
+        # run back here, address that feedback in one fix-up pass; otherwise
+        # the retry would be a no-op and the loop would never converge.
+        fixup = _pending_fixup(ws, run_id)
+        if fixup is not None:
+            fix_ticket, feedback = fixup
+            result = self._develop_ticket(
+                ws, run_id, project, fix_ticket, len(tickets), progress, initial_feedback=feedback
+            )
+            if result.outcome != "success":
+                return result
+            last_sha = result.output_refs[0]
+
         return StageResult(outcome="success", output_refs=[last_sha] if last_sha else [])
+
+
+def _read_context_text(ws: RunWorkspace, name: str) -> str:
+    path = workspace.context_dir(ws) / name
+    if not path.is_file():
+        return ""
+    try:
+        return path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return ""
+
+
+def _read_context_json(ws: RunWorkspace, name: str) -> dict[str, Any]:
+    try:
+        data = json.loads(_read_context_text(ws, name) or "{}")
+    except json.JSONDecodeError:
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _pending_fixup(ws: RunWorkspace, run_id: str) -> Optional[tuple[TicketSpec, str]]:
+    """Unaddressed feedback from review (`changes_required`) or a red clean validation.
+
+    Returns a synthetic fix-up ticket whose job key (`<run_id>:fix-...`) is
+    unique per feedback item, so each item is addressed exactly once.
+    """
+    rounds = _read_context_json(ws, "review_state.json").get("rounds")
+    if isinstance(rounds, list) and rounds and isinstance(rounds[-1], dict):
+        last = rounds[-1]
+        round_num = last.get("round")
+        if last.get("verdict") == "changes_required" and round_num is not None:
+            ticket = TicketSpec(
+                id=f"fix-review-{round_num}",
+                title=f"address review round {round_num}",
+                goal="Corrigir todos os itens bloqueantes da ultima revisao.",
+            )
+            if not workspace.find_commit_by_job(ws, f"{run_id}:{ticket.id}"):
+                return ticket, _read_context_text(ws, f"review-{round_num}.md")
+
+    validation = _read_context_json(ws, "validation.json")
+    commands = validation.get("commands")
+    sha = str(validation.get("sha") or "")[:12]
+    if isinstance(commands, dict) and sha:
+        failed = {
+            name: entry
+            for name, entry in commands.items()
+            if isinstance(entry, dict) and entry.get("ran") and not entry.get("ok", True)
+        }
+        if failed:
+            ticket = TicketSpec(
+                id=f"fix-validation-{sha}",
+                title=f"fix clean-checkout validation at {sha}",
+                goal="A validacao em clone limpo falhou; corrija (ex.: arquivo nao commitado).",
+            )
+            if not workspace.find_commit_by_job(ws, f"{run_id}:{ticket.id}"):
+                logs = "\n\n".join(f"## {name}\n{entry.get('log', '')}" for name, entry in failed.items())
+                return ticket, f"Validacao em clone limpo falhou:\n{logs}"
+    return None
 
 
 def _write_validate_log(ws: RunWorkspace, ticket_id: str, iteration: int, content: str) -> None:

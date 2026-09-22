@@ -345,3 +345,78 @@ def test_clean_validation_success_when_everything_is_committed(
 
     assert result.outcome == "success"
     assert result.output_refs
+
+
+# --------------------------------------------------------------------------
+# Review/validation feedback reaches development (fix-up pass)
+# --------------------------------------------------------------------------
+
+
+def test_changes_required_triggers_one_fixup_pass_with_review_feedback(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    origin = _init_bare_origin(
+        tmp_path, extra_files={"requirements.txt": "", "check_status.py": _CHECK_STATUS_SCRIPT}
+    )
+    project = _project(str(origin), commands=_CHECK_COMMANDS)
+    run_id = "run-fix"
+    _write_tickets(tmp_path / "root", monkeypatch, project, run_id, [{"id": "T1", "title": "Add calc"}])
+
+    def behavior(call_no: int, req: AgentRequest) -> None:
+        (req.cwd / "STATUS_OK").write_text("ok\n", encoding="utf-8")
+        if call_no == 2:
+            (req.cwd / "calc.py").write_text("fixed = True\n", encoding="utf-8")
+
+    fake_agent = _RecordingFakeAgent(behavior)
+    stage = DevelopmentStage(
+        run_agent_func=fake_agent, pick_func=_fixed_route(), routing_config=load_routing_config()
+    )
+    assert stage.run(project, run_id).outcome == "success"
+    assert len(fake_agent.calls) == 1
+
+    # Review round 1 asks for changes (as ReviewStage would persist it).
+    ws = ws_mod.checkout(project, run_id)
+    ws_mod.write_context(ws, "review-1.md", "# Review round 1\n\n- calc.py:1 — BUG_MARKER_42\n")
+    ws_mod.write_context(
+        ws, "review_state.json", json.dumps({"rounds": [{"round": 1, "verdict": "changes_required"}]})
+    )
+    ws_mod.commit(ws, "docs: review round 1", job_key=f"{run_id}:review:1")
+    ws_mod.push(ws)
+
+    result = stage.run(project, run_id)
+    assert result.outcome == "success"
+    assert len(fake_agent.calls) == 2
+    assert "BUG_MARKER_42" in fake_agent.calls[1].prompt
+    ws = ws_mod.checkout(project, run_id)
+    assert ws_mod.find_commit_by_job(ws, f"{run_id}:fix-review-1") is not None
+
+    # Replay: the feedback was already addressed, so no new agent call.
+    assert stage.run(project, run_id).outcome == "success"
+    assert len(fake_agent.calls) == 2
+
+
+def test_rate_limited_agent_retries_without_burning_iterations(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    origin = _init_bare_origin(
+        tmp_path, extra_files={"requirements.txt": "", "check_status.py": _CHECK_STATUS_SCRIPT}
+    )
+    project = _project(str(origin), commands=_CHECK_COMMANDS)
+    run_id = "run-rl"
+    _write_tickets(tmp_path / "root", monkeypatch, project, run_id, [{"id": "T1", "title": "Add calc"}])
+
+    calls: list[AgentRequest] = []
+
+    def limited(req: AgentRequest) -> AgentResult:
+        calls.append(req)
+        return AgentResult(
+            ok=False, text="429", harness=req.harness, duration_s=0.01, error_kind="rate_limited"
+        )
+
+    stage = DevelopmentStage(
+        run_agent_func=limited, pick_func=_fixed_route(), routing_config=load_routing_config()
+    )
+    result = stage.run(project, run_id)
+    assert result.outcome == "retry"
+    assert result.cause_code == "agent_rate_limited"
+    assert len(calls) == 1

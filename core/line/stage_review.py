@@ -33,6 +33,7 @@ from pydantic import BaseModel, Field, ValidationError
 from core.line import workspace
 from core.line.agent_cli import AgentRequest, AgentResult, run_agent
 from core.line.routing import RoutingConfig, load_routing_config, pick, record_result
+from core.line.stage_build import fill_template
 from core.line.workspace import RunWorkspace
 from core.projects.models import ProjectDescriptor
 from core.workflow.control_contracts import StageResult
@@ -50,6 +51,8 @@ _DEFAULT_HOST_CAPS: tuple[str, ...] = (
 )
 
 _MAX_DIFF_BYTES = 60 * 1024
+# The run's own context files (logs, reviews, progress) are not product code.
+_DIFF_PATHSPEC = (".", ":(exclude).darkfac/runs")
 
 _FALLBACK_REVIEW_TEMPLATE = """\
 Voce e um revisor independente de codigo da DarkFac, de familia diferente de quem
@@ -60,6 +63,9 @@ implementou esta mudanca. Responda apenas com um objeto JSON no formato:
 
 So marque como bloqueante: bug de correcao, teste que nao testa o aceite,
 requisito do ticket nao atendido, ou quebra de contrato.
+
+A SPEC e os tickets (com criterios de aceite) estao em `{context_dir}/SPEC.md`
+e `{context_dir}/tickets.json` neste repositorio; leia-os antes de julgar.
 
 ## Diff (rodada {round_num})
 {diff_text}
@@ -155,14 +161,16 @@ def _write_review_state(ws: RunWorkspace, state: ReviewState) -> None:
 def _get_diff(ws: RunWorkspace, default_branch: str) -> str:
     """`git diff origin/<default>...HEAD`, summarized when larger than 60 KB."""
     proc = workspace._run_git(
-        ["diff", f"origin/{default_branch}...HEAD"], cwd=ws.path, check=False
+        ["diff", f"origin/{default_branch}...HEAD", "--", *_DIFF_PATHSPEC], cwd=ws.path, check=False
     )
     diff_text = proc.stdout or ""
     if len(diff_text.encode("utf-8")) <= _MAX_DIFF_BYTES:
         return diff_text
 
     stat_proc = workspace._run_git(
-        ["diff", "--numstat", f"origin/{default_branch}...HEAD"], cwd=ws.path, check=False
+        ["diff", "--numstat", f"origin/{default_branch}...HEAD", "--", *_DIFF_PATHSPEC],
+        cwd=ws.path,
+        check=False,
     )
     rows: list[tuple[int, str]] = []
     for line in (stat_proc.stdout or "").splitlines():
@@ -268,7 +276,12 @@ class ReviewStage:
 
         diff_text = _get_diff(ws, project.default_branch or "main")
         template = _load_prompt_template("review.md", _FALLBACK_REVIEW_TEMPLATE)
-        prompt = template.format(round_num=round_num, diff_text=diff_text)
+        prompt = fill_template(
+            template,
+            round_num=str(round_num),
+            diff_text=diff_text,
+            context_dir=f".darkfac/runs/{run_id}",
+        )
 
         agent_result = self.run_agent_func(
             AgentRequest(
