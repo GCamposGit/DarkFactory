@@ -11,7 +11,7 @@
       "evidence_kind": "document",
       "source_id": "approved-roadmap",
       "locator": ".factory/roadmap/darkfac.json#RM-07",
-      "source_hash": "c555b102ce50e17c20a6e98a85507ac7a41526bebe7b415458e0e753aaf28b7b",
+      "source_hash": "52d7b851050a191fb8764a0fcd4c8eaf0c85137ed75213824d88c8c923903bb4",
       "candidate_sha": null,
       "observed_at": null,
       "scope": "manifest declaration",

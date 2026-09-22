@@ -1698,6 +1698,408 @@
         }
       ],
       "parent_id": "HF-15"
+    },
+    {
+      "id": "HF-27",
+      "project_id": "darkfac",
+      "title": "Linha de produção autônoma (composição dos executores reais)",
+      "description": "Liga executores reais (agente CLI, git, gh, deploy, smoke) ao plano de controle HF-26. Uma demanda vira PR, merge, deploy e smoke sem ação humana além do intake e do Grill.",
+      "item_type": "feature",
+      "lifecycle_stage": "next_steps",
+      "delivery_status": "planned",
+      "state_rationale": "Planejado em 22/09; binding high resolvido no plano; implementação não iniciada.",
+      "horizon": "now",
+      "confidence": "high",
+      "dependencies": [
+        {
+          "item_id": "HF-03-08",
+          "type": "requires"
+        }
+      ],
+      "tags": [
+        "production-line",
+        "autonomy"
+      ],
+      "completion_criteria": [
+        "Critérios V1–V4 do plano de linha de produção"
+      ],
+      "source_refs": [
+        {
+          "source_id": "approved-roadmap",
+          "source_kind": "document",
+          "label": "Plano da linha de produção 2026-09-22",
+          "locator": "docs/PRODUCTION_LINE_PLAN_2026-09-22.md",
+          "produced_by": "claude-opus-5-planner"
+        }
+      ]
+    },
+    {
+      "id": "HF-27-01",
+      "project_id": "darkfac",
+      "title": "Registry de projetos executável",
+      "description": "Ver handoff docs/handoffs/production-line/HF-27-01.md.",
+      "item_type": "feature",
+      "lifecycle_stage": "execution",
+      "delivery_status": "planned",
+      "state_rationale": "Planejado; ready_for_handoff; implementação não iniciada.",
+      "horizon": "now",
+      "confidence": "high",
+      "dependencies": [],
+      "tags": [
+        "production-line",
+        "ready_for_handoff"
+      ],
+      "completion_criteria": [
+        "Critérios de aceite de docs/handoffs/production-line/HF-27-01.md"
+      ],
+      "source_refs": [
+        {
+          "source_id": "approved-roadmap",
+          "source_kind": "document",
+          "label": "Plano da linha de produção 2026-09-22",
+          "locator": "docs/handoffs/production-line/HF-27-01.md",
+          "produced_by": "claude-opus-5-planner"
+        }
+      ],
+      "parent_id": "HF-27"
+    },
+    {
+      "id": "HF-27-02",
+      "project_id": "darkfac",
+      "title": "Workspace Git por run",
+      "description": "Ver handoff docs/handoffs/production-line/HF-27-02.md.",
+      "item_type": "feature",
+      "lifecycle_stage": "execution",
+      "delivery_status": "planned",
+      "state_rationale": "Planejado; ready_for_handoff; implementação não iniciada.",
+      "horizon": "now",
+      "confidence": "high",
+      "dependencies": [
+        {
+          "item_id": "HF-27-01",
+          "type": "requires"
+        }
+      ],
+      "tags": [
+        "production-line",
+        "ready_for_handoff"
+      ],
+      "completion_criteria": [
+        "Critérios de aceite de docs/handoffs/production-line/HF-27-02.md"
+      ],
+      "source_refs": [
+        {
+          "source_id": "approved-roadmap",
+          "source_kind": "document",
+          "label": "Plano da linha de produção 2026-09-22",
+          "locator": "docs/handoffs/production-line/HF-27-02.md",
+          "produced_by": "claude-opus-5-planner"
+        }
+      ],
+      "parent_id": "HF-27"
+    },
+    {
+      "id": "HF-27-03",
+      "project_id": "darkfac",
+      "title": "AgentCLI real + roteamento por quota",
+      "description": "Ver handoff docs/handoffs/production-line/HF-27-03.md.",
+      "item_type": "feature",
+      "lifecycle_stage": "execution",
+      "delivery_status": "planned",
+      "state_rationale": "Planejado; ready_for_handoff; implementação não iniciada.",
+      "horizon": "now",
+      "confidence": "high",
+      "dependencies": [],
+      "tags": [
+        "production-line",
+        "ready_for_handoff"
+      ],
+      "completion_criteria": [
+        "Critérios de aceite de docs/handoffs/production-line/HF-27-03.md"
+      ],
+      "source_refs": [
+        {
+          "source_id": "approved-roadmap",
+          "source_kind": "document",
+          "label": "Plano da linha de produção 2026-09-22",
+          "locator": "docs/handoffs/production-line/HF-27-03.md",
+          "produced_by": "claude-opus-5-planner"
+        }
+      ],
+      "parent_id": "HF-27"
+    },
+    {
+      "id": "HF-27-04",
+      "project_id": "darkfac",
+      "title": "Grill de rodada única + Planning com SPEC/tickets/marcos",
+      "description": "Ver handoff docs/handoffs/production-line/HF-27-04.md.",
+      "item_type": "feature",
+      "lifecycle_stage": "execution",
+      "delivery_status": "planned",
+      "state_rationale": "Planejado; ready_for_handoff; implementação não iniciada.",
+      "horizon": "now",
+      "confidence": "high",
+      "dependencies": [
+        {
+          "item_id": "HF-27-02",
+          "type": "requires"
+        },
+        {
+          "item_id": "HF-27-03",
+          "type": "requires"
+        }
+      ],
+      "tags": [
+        "production-line",
+        "ready_for_handoff"
+      ],
+      "completion_criteria": [
+        "Critérios de aceite de docs/handoffs/production-line/HF-27-04.md"
+      ],
+      "source_refs": [
+        {
+          "source_id": "approved-roadmap",
+          "source_kind": "document",
+          "label": "Plano da linha de produção 2026-09-22",
+          "locator": "docs/handoffs/production-line/HF-27-04.md",
+          "produced_by": "claude-opus-5-planner"
+        }
+      ],
+      "parent_id": "HF-27"
+    },
+    {
+      "id": "HF-27-05",
+      "project_id": "darkfac",
+      "title": "Development + validate loop + review cruzada",
+      "description": "Ver handoff docs/handoffs/production-line/HF-27-05.md.",
+      "item_type": "feature",
+      "lifecycle_stage": "execution",
+      "delivery_status": "planned",
+      "state_rationale": "Planejado; ready_for_handoff; implementação não iniciada.",
+      "horizon": "now",
+      "confidence": "high",
+      "dependencies": [
+        {
+          "item_id": "HF-27-02",
+          "type": "requires"
+        },
+        {
+          "item_id": "HF-27-03",
+          "type": "requires"
+        }
+      ],
+      "tags": [
+        "production-line",
+        "ready_for_handoff"
+      ],
+      "completion_criteria": [
+        "Critérios de aceite de docs/handoffs/production-line/HF-27-05.md"
+      ],
+      "source_refs": [
+        {
+          "source_id": "approved-roadmap",
+          "source_kind": "document",
+          "label": "Plano da linha de produção 2026-09-22",
+          "locator": "docs/handoffs/production-line/HF-27-05.md",
+          "produced_by": "claude-opus-5-planner"
+        }
+      ],
+      "parent_id": "HF-27"
+    },
+    {
+      "id": "HF-27-06",
+      "project_id": "darkfac",
+      "title": "Integração GitHub via gh",
+      "description": "Ver handoff docs/handoffs/production-line/HF-27-06.md.",
+      "item_type": "feature",
+      "lifecycle_stage": "execution",
+      "delivery_status": "planned",
+      "state_rationale": "Planejado; ready_for_handoff; implementação não iniciada.",
+      "horizon": "now",
+      "confidence": "high",
+      "dependencies": [
+        {
+          "item_id": "HF-27-02",
+          "type": "requires"
+        }
+      ],
+      "tags": [
+        "production-line",
+        "ready_for_handoff"
+      ],
+      "completion_criteria": [
+        "Critérios de aceite de docs/handoffs/production-line/HF-27-06.md"
+      ],
+      "source_refs": [
+        {
+          "source_id": "approved-roadmap",
+          "source_kind": "document",
+          "label": "Plano da linha de produção 2026-09-22",
+          "locator": "docs/handoffs/production-line/HF-27-06.md",
+          "produced_by": "claude-opus-5-planner"
+        }
+      ],
+      "parent_id": "HF-27"
+    },
+    {
+      "id": "HF-27-07",
+      "project_id": "darkfac",
+      "title": "Deploy + smoke + rollback por target",
+      "description": "Ver handoff docs/handoffs/production-line/HF-27-07.md.",
+      "item_type": "feature",
+      "lifecycle_stage": "execution",
+      "delivery_status": "planned",
+      "state_rationale": "Planejado; ready_for_handoff; implementação não iniciada.",
+      "horizon": "now",
+      "confidence": "high",
+      "dependencies": [
+        {
+          "item_id": "HF-27-01",
+          "type": "requires"
+        },
+        {
+          "item_id": "HF-27-06",
+          "type": "requires"
+        }
+      ],
+      "tags": [
+        "production-line",
+        "ready_for_handoff"
+      ],
+      "completion_criteria": [
+        "Critérios de aceite de docs/handoffs/production-line/HF-27-07.md"
+      ],
+      "source_refs": [
+        {
+          "source_id": "approved-roadmap",
+          "source_kind": "document",
+          "label": "Plano da linha de produção 2026-09-22",
+          "locator": "docs/handoffs/production-line/HF-27-07.md",
+          "produced_by": "claude-opus-5-planner"
+        }
+      ],
+      "parent_id": "HF-27"
+    },
+    {
+      "id": "HF-27-08",
+      "project_id": "darkfac",
+      "title": "Ligar a linha no worker + DAG enxuto + canal humano",
+      "description": "Ver handoff docs/handoffs/production-line/HF-27-08.md.",
+      "item_type": "feature",
+      "lifecycle_stage": "execution",
+      "delivery_status": "planned",
+      "state_rationale": "Planejado; ready_for_handoff; implementação não iniciada.",
+      "horizon": "now",
+      "confidence": "high",
+      "dependencies": [
+        {
+          "item_id": "HF-27-04",
+          "type": "requires"
+        },
+        {
+          "item_id": "HF-27-05",
+          "type": "requires"
+        },
+        {
+          "item_id": "HF-27-06",
+          "type": "requires"
+        },
+        {
+          "item_id": "HF-27-07",
+          "type": "requires"
+        }
+      ],
+      "tags": [
+        "production-line",
+        "ready_for_handoff"
+      ],
+      "completion_criteria": [
+        "Critérios de aceite de docs/handoffs/production-line/HF-27-08.md"
+      ],
+      "source_refs": [
+        {
+          "source_id": "approved-roadmap",
+          "source_kind": "document",
+          "label": "Plano da linha de produção 2026-09-22",
+          "locator": "docs/handoffs/production-line/HF-27-08.md",
+          "produced_by": "claude-opus-5-planner"
+        }
+      ],
+      "parent_id": "HF-27"
+    },
+    {
+      "id": "HF-27-09",
+      "project_id": "darkfac",
+      "title": "Topologia VPS com CLIs + workers on-prem via Postgres",
+      "description": "Ver handoff docs/handoffs/production-line/HF-27-09.md.",
+      "item_type": "feature",
+      "lifecycle_stage": "execution",
+      "delivery_status": "planned",
+      "state_rationale": "Planejado; ready_for_handoff; implementação não iniciada.",
+      "horizon": "now",
+      "confidence": "high",
+      "dependencies": [
+        {
+          "item_id": "HF-27-03",
+          "type": "requires"
+        }
+      ],
+      "tags": [
+        "production-line",
+        "ready_for_handoff"
+      ],
+      "completion_criteria": [
+        "Critérios de aceite de docs/handoffs/production-line/HF-27-09.md"
+      ],
+      "source_refs": [
+        {
+          "source_id": "approved-roadmap",
+          "source_kind": "document",
+          "label": "Plano da linha de produção 2026-09-22",
+          "locator": "docs/handoffs/production-line/HF-27-09.md",
+          "produced_by": "claude-opus-5-planner"
+        }
+      ],
+      "parent_id": "HF-27"
+    },
+    {
+      "id": "HF-27-10",
+      "project_id": "darkfac",
+      "title": "Canário E2E diário + dogfood",
+      "description": "Ver handoff docs/handoffs/production-line/HF-27-10.md.",
+      "item_type": "feature",
+      "lifecycle_stage": "execution",
+      "delivery_status": "planned",
+      "state_rationale": "Planejado; ready_for_handoff; implementação não iniciada.",
+      "horizon": "now",
+      "confidence": "high",
+      "dependencies": [
+        {
+          "item_id": "HF-27-08",
+          "type": "requires"
+        },
+        {
+          "item_id": "HF-27-09",
+          "type": "requires"
+        }
+      ],
+      "tags": [
+        "production-line",
+        "ready_for_handoff"
+      ],
+      "completion_criteria": [
+        "Critérios de aceite de docs/handoffs/production-line/HF-27-10.md"
+      ],
+      "source_refs": [
+        {
+          "source_id": "approved-roadmap",
+          "source_kind": "document",
+          "label": "Plano da linha de produção 2026-09-22",
+          "locator": "docs/handoffs/production-line/HF-27-10.md",
+          "produced_by": "claude-opus-5-planner"
+        }
+      ],
+      "parent_id": "HF-27"
     }
   ]
 }
