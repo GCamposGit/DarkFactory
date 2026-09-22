@@ -36,6 +36,7 @@ from core.usage.models import (
 )
 
 logger = logging.getLogger(__name__)
+_CREATE_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
 
 @dataclass(frozen=True)
@@ -282,7 +283,7 @@ class CodexAccountAdapter(AccountUsageAdapter):
             result = subprocess.run(
                 [executable, "doctor", "--json"], capture_output=True, text=True,
                 encoding="utf-8", errors="replace", timeout=8, check=False,
-                creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+                creationflags=_CREATE_NO_WINDOW if os.name == "nt" else 0,
             )
             payload = json.loads(result.stdout)
             auth = payload.get("checks", {}).get("auth.credentials", {})
@@ -296,7 +297,7 @@ class CodexAccountAdapter(AccountUsageAdapter):
             [executable, "app-server", "--listen", "stdio://"],
             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
             text=True, encoding="utf-8", errors="replace", bufsize=1,
-            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+            creationflags=_CREATE_NO_WINDOW if os.name == "nt" else 0,
         )
         messages: queue.Queue[Dict[str, Any]] = queue.Queue()
 
@@ -435,7 +436,7 @@ class GrokAccountAdapter(AccountUsageAdapter):
             result = subprocess.run(
                 [executable, "models"], capture_output=True, text=True, encoding="utf-8",
                 errors="replace", timeout=12, check=False,
-                creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+                creationflags=_CREATE_NO_WINDOW if os.name == "nt" else 0,
             )
         except (OSError, subprocess.TimeoutExpired) as exc:
             return self.degraded(f"Grok instalado, mas o probe falhou: {type(exc).__name__}.", "grok_cli")
@@ -984,7 +985,7 @@ class ClaudeCodeAccountAdapter(AccountUsageAdapter):
                 [executable, "auth", "status", "--json"],
                 capture_output=True, text=True, encoding="utf-8", errors="replace",
                 timeout=6, check=False,
-                creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+                creationflags=_CREATE_NO_WINDOW if os.name == "nt" else 0,
             )
             if result.returncode == 0 and result.stdout.strip():
                 data = json.loads(result.stdout)
