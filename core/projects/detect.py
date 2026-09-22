@@ -24,7 +24,8 @@ def detect_commands(repo_dir: Path) -> ProjectCommands:
     """Inspect a repository checkout and return the commands DarkFac can run.
 
     Detection order:
-    1. `harness.config.json` present (DarkFac-adopted project) -> harness quick validate.
+    1. `harness.config.json` present (DarkFac-adopted project) -> Python pip install
+       setup (if requirements.txt/pyproject.toml present) + harness quick validate.
     2. `package.json` present -> Node setup/test/build, package manager picked from lockfile.
     3. `pyproject.toml` or `requirements.txt` present -> Python pip install + pytest.
     4. Nothing recognized (including an empty repo) -> all-empty `ProjectCommands()`.
@@ -32,7 +33,9 @@ def detect_commands(repo_dir: Path) -> ProjectCommands:
     repo_dir = Path(repo_dir)
 
     if (repo_dir / "harness.config.json").is_file():
-        return ProjectCommands(validate=list(_HARNESS_QUICK_VALIDATE))
+        # A fresh clone still needs its Python deps installed before
+        # `runner.py --quick` can import anything.
+        return ProjectCommands(setup=_detect_python_setup(repo_dir), validate=list(_HARNESS_QUICK_VALIDATE))
 
     package_json = repo_dir / "package.json"
     if package_json.is_file():
@@ -75,12 +78,18 @@ def _detect_node_commands(repo_dir: Path, package_json: Path) -> ProjectCommands
     return ProjectCommands(setup=setup, validate=validate, build=build)
 
 
-def _detect_python_commands(repo_dir: Path) -> ProjectCommands:
-    setup: list[str] = []
+def _detect_python_setup(repo_dir: Path) -> list[str]:
+    """Return the pip install command for a Python repo, or [] if neither
+    requirements.txt nor pyproject.toml is present."""
     if (repo_dir / "requirements.txt").is_file():
-        setup.append("python -m pip install -r requirements.txt")
-    elif (repo_dir / "pyproject.toml").is_file():
-        setup.append("python -m pip install -e .")
+        return ["python -m pip install -r requirements.txt"]
+    if (repo_dir / "pyproject.toml").is_file():
+        return ["python -m pip install -e ."]
+    return []
+
+
+def _detect_python_commands(repo_dir: Path) -> ProjectCommands:
+    setup = _detect_python_setup(repo_dir)
 
     has_tests = (
         (repo_dir / "tests").is_dir()

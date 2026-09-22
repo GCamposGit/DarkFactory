@@ -6,7 +6,7 @@ import re
 from enum import Enum
 from typing import Optional
 from datetime import datetime, timezone
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from core.roadmap.models import RoadmapProjectSummary
 
@@ -39,8 +39,19 @@ class ProjectCommands(BaseModel):
     (see `core.projects.registry.resolve_commands`). A non-empty explicit
     list always wins over autodetection.
     """
+    # `validate` is the field's public/JSON name (per HF-27-01 spec), but a
+    # field literally named "validate" shadows BaseModel's own deprecated
+    # `validate` classmethod (pydantic emits a UserWarning at class creation
+    # time). The attribute is renamed to `validate_cmds` with alias="validate"
+    # so the JSON/dict key and constructor keyword stay "validate" while the
+    # Python attribute is collision-free; populate_by_name also accepts
+    # "validate_cmds" as an input key.
+    model_config = ConfigDict(populate_by_name=True)
+
     setup: list[str] = Field(default_factory=list, description="Commands to install dependencies")
-    validate: list[str] = Field(default_factory=list, description="Commands to run the test suite")
+    validate_cmds: list[str] = Field(
+        default_factory=list, alias="validate", description="Commands to run the test suite"
+    )
     build: list[str] = Field(default_factory=list, description="Commands to produce a deployable artifact")
     smoke: list[str] = Field(default_factory=list, description="Local smoke/sanity commands run before deploy")
 

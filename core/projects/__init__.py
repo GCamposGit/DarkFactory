@@ -9,7 +9,7 @@ from .models import (
     ProjectKind,
     SmokeCheck,
 )
-from .registry import ProjectRegistry, get_project_registry, resolve_commands
+from .registry import ProjectRegistry, get_project_registry, normalize_repo_url, resolve_commands
 
 __all__ = [
     "DeployConfig",
@@ -21,5 +21,6 @@ __all__ = [
     "ProjectRegistry",
     "get_project_registry",
     "detect_commands",
+    "normalize_repo_url",
     "resolve_commands",
 ]

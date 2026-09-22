@@ -9,7 +9,7 @@
     "domain": "darkhub.ggcampos.com",
     "deploy_target": "dokploy_docker",
     "created_at": "2026-09-01T00:00:00Z",
-    "repo_url": "https://github.com/GCamposGit/DarkFactory",
+    "repo_url": "https://github.com/GCamposGit/DarkFactory.git",
     "default_branch": "main",
     "deploy": {
       "type": "dokploy",
@@ -55,7 +55,7 @@
     "domain": "brain.local",
     "deploy_target": "local_service",
     "created_at": "2026-09-05T00:00:00Z",
-    "repo_url": "git@github.com:GCamposGit/SegundoCerebro.git",
+    "repo_url": "https://github.com/GCamposGit/SegundoCerebro.git",
     "default_branch": "main",
     "deploy": {
       "type": "local_service",
