@@ -503,8 +503,11 @@ class HF15AcceptanceEngine:
     # LIFECYCLE SCENARIOS 1 - 10 IMPLEMENTATION
     # =========================================================================
 
-    def execute_lifecycle_scenarios(self) -> List[ScenarioEvidenceReceipt]:
-        """Executes the 10 operational lifecycle scenarios required by Section 7 of HF-15.md."""
+    def execute_lifecycle_scenarios(
+        self,
+        scenario_filter: Optional[List[int]] = None,
+    ) -> List[ScenarioEvidenceReceipt]:
+        """Executes only the requested lifecycle scenarios from Section 7 of HF-15.md."""
         scenarios_def = [
             (1, "Demanda textual inicia projeto descartável (Grill e spec autônomos)"),
             (2, "Cadeia completa: código, testes, revisão independente, PR, staging e pacote"),
@@ -518,8 +521,11 @@ class HF15AcceptanceEngine:
             (10, "Reprovação de aprendizado e governança de regras concorrentes"),
         ]
 
+        requested_scenarios = set(scenario_filter) if scenario_filter else None
         receipts: List[ScenarioEvidenceReceipt] = []
         for num, title in scenarios_def:
+            if requested_scenarios is not None and num not in requested_scenarios:
+                continue
             start = time.monotonic()
             # In sandbox mode, each lifecycle scenario verifies contracts, dependencies and ledger
             self.observability_tracker.record_event(f"S{num}", "scenario_started", 0.0, {"title": title})
@@ -558,6 +564,14 @@ class HF15AcceptanceEngine:
         self.report_dir.mkdir(parents=True, exist_ok=True)
         evidence_dir = self.report_dir / "evidence"
         evidence_dir.mkdir(parents=True, exist_ok=True)
+        for managed_name in [
+            *(f"gate_G{gate_number}.json" for gate_number in range(1, 9)),
+            *(f"scenario_{scenario_number}.json" for scenario_number in range(1, 11)),
+        ]:
+            managed_path = evidence_dir / managed_name
+            if managed_path.exists():
+                managed_path.unlink()
+        written_evidence: List[Path] = []
 
         # 1. Execute Preflights
         preflight_report = self.env_manager.run_preflights()
@@ -577,30 +591,34 @@ class HF15AcceptanceEngine:
         }
 
         gate_receipts: Dict[str, GateEvidenceReceipt] = {}
-        target_gates = gate_filter or list(all_gates.keys())
-        for gid in target_gates:
-            if gid in all_gates:
-                if gid in {"G1"} and interactive:
-                    receipt = all_gates[gid](interactive=True)
-                else:
-                    receipt = all_gates[gid]()
-                gate_receipts[gid] = receipt
-                (evidence_dir / f"gate_{gid}.json").write_text(
-                    json.dumps(receipt.model_dump(mode="json"), indent=2),
+        scenario_receipts: List[ScenarioEvidenceReceipt] = []
+        if preflight_report.all_passed:
+            target_gates = gate_filter or list(all_gates.keys())
+            for gid in target_gates:
+                if gid in all_gates:
+                    if gid == "G1" and interactive:
+                        receipt = all_gates[gid](interactive=True)
+                    else:
+                        receipt = all_gates[gid]()
+                    gate_receipts[gid] = receipt
+                    evidence_path = evidence_dir / f"gate_{gid}.json"
+                    evidence_path.write_text(
+                        json.dumps(receipt.model_dump(mode="json"), indent=2),
+                        encoding="utf-8",
+                    )
+                    written_evidence.append(evidence_path)
+
+            # 3. Execute only the requested Lifecycle Scenarios 1 - 10
+            scenario_receipts = self.execute_lifecycle_scenarios(scenario_filter)
+            for scenario in scenario_receipts:
+                evidence_path = evidence_dir / f"scenario_{scenario.scenario_number}.json"
+                evidence_path.write_text(
+                    json.dumps(scenario.model_dump(mode="json"), indent=2),
                     encoding="utf-8",
                 )
-
-
-        # 3. Execute Lifecycle Scenarios 1 - 10
-        scenario_receipts = self.execute_lifecycle_scenarios()
-        if scenario_filter:
-            scenario_receipts = [s for s in scenario_receipts if s.scenario_number in scenario_filter]
-        
-        for s in scenario_receipts:
-            (evidence_dir / f"scenario_{s.scenario_number}.json").write_text(
-                json.dumps(s.model_dump(mode="json"), indent=2),
-                encoding="utf-8",
-            )
+                written_evidence.append(evidence_path)
+        else:
+            logger.error("HF-15 execution skipped because preflight did not pass")
 
         # 4. Check statuses
         gates_passed = all(r.status == ScenarioStatus.PASSED for r in gate_receipts.values())
@@ -630,14 +648,15 @@ class HF15AcceptanceEngine:
         production_digest = candidate_digest
 
         metrics = self.observability_tracker.get_metrics_summary()
-        limitations = (
-            ["Live acceptance blocked: externally issued owner and dependency receipts are not wired."]
-            if self.config.live_mode
-            else [
+        if not preflight_report.all_passed:
+            limitations = ["Preflight failed; gates and lifecycle scenarios were not executed."]
+        elif self.config.live_mode:
+            limitations = ["Live acceptance blocked: externally issued owner and dependency receipts are not wired."]
+        else:
+            limitations = [
                 "Modo sandbox/controlado ativo para preservação de custos e contas cloud.",
                 "VPS Hetzner CX23 medida com 9 slots de concorrência sintética.",
             ]
-        )
 
         report = HF15AcceptanceReport(
             report_version="hf15-report-v1",
@@ -675,7 +694,7 @@ class HF15AcceptanceEngine:
             limitations=limitations,
             evidence_refs=[
                 (str(p.relative_to(Path.cwd())) if p.is_relative_to(Path.cwd()) else p.name)
-                for p in evidence_dir.glob("*.json")
+                for p in written_evidence
             ],
             timestamp=datetime.now(UTC),
         )

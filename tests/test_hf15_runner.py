@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -19,8 +18,6 @@ from core.acceptance.models import (
     GateEvidenceReceipt,
     HF15AcceptanceReport,
     HF15EnvironmentConfig,
-    HF15PreflightCheck,
-    HF15PreflightReport,
     ScenarioStatus,
 )
 from core.harness.hf15_acceptance import build_parser, run_hf15_runner
@@ -290,30 +287,6 @@ def test_runner_selective_live_mode_is_not_operational(
     assert data["dependency_receipts"] == []
 
 
-def test_runner_preflight_fail_closed(tmp_path: Path) -> None:
-    """Verifies fail-closed behavior when preflight checks fail."""
-    report_dir = tmp_path / "reports" / "cli_preflight_fail"
-    with patch.object(
-        HF15AcceptanceEngine,
-        "run_acceptance",
-        return_value=HF15AcceptanceReport(
-            ticket_id="HF-15",
-            run_id="hf15_failed",
-            plan_digest="0" * 64,
-            baseline_sha="0" * 40,
-            status="BLOCKED",
-            candidate_digest="0" * 64,
-            staging_digest="0" * 64,
-            production_digest="0" * 64,
-        ),
-    ):
-        exit_code = run_hf15_runner([
-            "--run-id", "hf15_failed",
-            "--report-dir", str(report_dir),
-        ])
-        assert exit_code == 1
-
-
 def test_runner_blocks_without_authorized_gateway(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
@@ -335,21 +308,81 @@ def test_runner_blocks_without_authorized_gateway(
             error="sandbox probe disabled",
         ),
     )
+    monkeypatch.setattr(
+        HF15AcceptanceEngine,
+        "execute_gate_g1",
+        lambda self, interactive=False: pytest.fail("gate executed after failed preflight"),
+    )
+    monkeypatch.setattr(
+        HF15AcceptanceEngine,
+        "execute_lifecycle_scenarios",
+        lambda self, scenario_filter=None: pytest.fail("scenario executed after failed preflight"),
+    )
+
+    report_dir = tmp_path / "reports" / "blocked"
+    stale_evidence_dir = report_dir / "evidence"
+    stale_evidence_dir.mkdir(parents=True)
+    stale_gate = stale_evidence_dir / "gate_G1.json"
+    stale_scenario = stale_evidence_dir / "scenario_1.json"
+    stale_gate.write_text("{}", encoding="utf-8")
+    stale_scenario.write_text("{}", encoding="utf-8")
 
     exit_code = run_hf15_runner([
         "--run-id", "hf15_missing_gateway",
-        "--report-dir", str(tmp_path / "reports" / "blocked"),
+        "--report-dir", str(report_dir),
+        "--gate", "G1",
+        "--scenario", "1",
         "--json",
     ])
 
     assert exit_code == 1
     output = json.loads(capsys.readouterr().out)
     assert output["status"] == "BLOCKED"
+    assert output["gates"] == {}
+    assert output["scenarios"] == {}
+    assert output["evidence_refs"] == []
     gateway_check = next(
         item for item in output["environment_evidence"]
         if item["name"] == "telegram_gateway_auth"
     )
     assert gateway_check["passed"] is False
+    assert not stale_gate.exists()
+    assert not stale_scenario.exists()
+
+
+def test_runner_sandbox_mode_overrides_live_config(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    hermetic_runner: None,
+) -> None:
+    """An explicit sandbox CLI mode cannot inherit live execution from a config file."""
+    config_path = tmp_path / "live-config.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "sandbox_root": str(tmp_path / "sandbox_override"),
+                "db_type": "sqlite_sandbox",
+                "n8n_url": "https://n8n.invalid",
+                "telegram_authorized_users": [12345678],
+                "worker_slots": 9,
+                "live_mode": True,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    exit_code = run_hf15_runner([
+        "--config", str(config_path),
+        "--run-id", "hf15_sandbox_override",
+        "--report-dir", str(tmp_path / "reports" / "sandbox_override"),
+        "--mode", "sandbox",
+        "--json",
+    ])
+
+    assert exit_code == 1
+    output = json.loads(capsys.readouterr().out)
+    assert output["status"] == "NOT_RUN"
+    assert any("sandbox" in item.lower() for item in output["limitations"])
 
 
 def test_runner_secret_sanitization(tmp_path: Path, capsys: pytest.CaptureFixture[str], hermetic_runner: None) -> None:
