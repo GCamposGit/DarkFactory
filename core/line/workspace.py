@@ -31,6 +31,7 @@ failure.
 
 from __future__ import annotations
 
+import base64
 import logging
 import os
 import re
@@ -57,7 +58,7 @@ _MIRROR_DIRNAME = ".mirror"
 _RUNS_DIRNAME = "runs"
 _CONTEXT_DIRNAME = ".darkfac/runs"
 
-_AUTH_HEADER_PATTERN = re.compile(r"(AUTHORIZATION:\s*bearer\s+)\S+", re.IGNORECASE)
+_AUTH_HEADER_PATTERN = re.compile(r"(AUTHORIZATION:\s*basic\s+)\S+", re.IGNORECASE)
 
 
 class WorkspaceError(RuntimeError):
@@ -105,6 +106,7 @@ def _sanitize(text: str, token: Optional[str]) -> str:
     sanitized = text
     if token:
         sanitized = sanitized.replace(token, "***")
+        sanitized = sanitized.replace(_basic_auth_value(token), "***")
     return _AUTH_HEADER_PATTERN.sub(r"\1***", sanitized)
 
 
@@ -120,11 +122,16 @@ def _github_token_for(repo_url: Optional[str]) -> Optional[str]:
     return None
 
 
+def _basic_auth_value(token: str) -> str:
+    """Base64 of `x-access-token:<token>` — the form `actions/checkout` uses for HTTPS."""
+    return base64.b64encode(f"x-access-token:{token}".encode("utf-8")).decode("ascii")
+
+
 def _auth_args(token: Optional[str]) -> list[str]:
     if not token:
         return []
     # Never written to disk or into the remote URL; passed per-command only.
-    return ["-c", f"http.extraheader=AUTHORIZATION: bearer {token}"]
+    return ["-c", f"http.extraheader=AUTHORIZATION: basic {_basic_auth_value(token)}"]
 
 
 def _run_git(
@@ -385,17 +392,30 @@ def push(ws: RunWorkspace, *, sleep: Callable[[float], None] = time.sleep) -> No
 
 
 def find_commit_by_job(ws: RunWorkspace, job_key: str) -> Optional[str]:
-    """Return the SHA of the commit carrying `DarkFac-Job: <job_key>`, if any."""
-    needle = f"{_JOB_TRAILER}: {job_key.strip()}"
+    """Return the SHA of the commit carrying an exact `DarkFac-Job: <job_key>` trailer.
+
+    Matches the trailer *value* exactly (via `%(trailers:key=...,valueonly)`),
+    not as a substring — job keys like `<run>:T1` and `<run>:T10` must not
+    collide, since HF-27-05 uses per-ticket keys of exactly that shape.
+    """
+    needle = job_key.strip()
+    if not needle:
+        return None
     proc = _run_git(
-        ["log", "--fixed-strings", f"--grep={needle}", "--format=%H", "-n", "1"],
+        ["log", f"--format=%H%x00%(trailers:key={_JOB_TRAILER},valueonly)%x1e"],
         cwd=ws.path,
         check=False,
     )
     if proc.returncode != 0:
         return None
-    lines = (proc.stdout or "").strip().splitlines()
-    return lines[0] if lines else None
+    for record in (proc.stdout or "").split("\x1e"):
+        record = record.strip("\n")
+        if "\x00" not in record:
+            continue
+        sha, _, value = record.partition("\x00")
+        if value.strip() == needle:
+            return sha.strip()
+    return None
 
 
 def cleanup(ws: RunWorkspace, keep_days: int = 7) -> list[str]:

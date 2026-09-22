@@ -251,6 +251,26 @@ def test_find_commit_by_job_returns_none_when_missing(
     assert find_commit_by_job(ws, "does-not-exist") is None
 
 
+def test_find_commit_by_job_matches_trailer_exactly_not_as_substring(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`run:T1` must not match the commit for `run:T10` (or vice versa)."""
+    origin = _init_bare_origin(tmp_path)
+    project = _project(str(origin))
+    monkeypatch.setenv("DARKFAC_WORKSPACES", str(tmp_path / "root"))
+
+    ws = checkout(project, "run")
+    write_context(ws, "T1.md", "ticket 1\n")
+    sha_t1 = commit(ws, "implement T1", job_key="run:T1")
+    write_context(ws, "T10.md", "ticket 10\n")
+    sha_t10 = commit(ws, "implement T10", job_key="run:T10")
+
+    assert sha_t1 != sha_t10
+    assert find_commit_by_job(ws, "run:T1") == sha_t1
+    assert find_commit_by_job(ws, "run:T10") == sha_t10
+    assert find_commit_by_job(ws, "run:T100") is None
+
+
 def test_commit_requires_job_key(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     origin = _init_bare_origin(tmp_path)
     project = _project(str(origin))
@@ -460,7 +480,28 @@ def test_github_token_only_applied_for_https_github_remote(
     assert ws_mod._github_token_for("https://github.com/acme/repo.git") is None
 
 
-def test_sanitize_redacts_token_value() -> None:
-    text = "fatal: could not read Username: AUTHORIZATION: bearer secret-token-value"
-    sanitized = ws_mod._sanitize(text, "secret-token-value")
-    assert "secret-token-value" not in sanitized
+def test_auth_args_use_basic_scheme_with_x_access_token(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Matches the header shape `actions/checkout` uses for HTTPS + a GitHub token."""
+    import base64
+
+    token = "secret-token-value"
+    expected_value = base64.b64encode(f"x-access-token:{token}".encode("utf-8")).decode("ascii")
+
+    assert ws_mod._basic_auth_value(token) == expected_value
+    args = ws_mod._auth_args(token)
+    assert args == ["-c", f"http.extraheader=AUTHORIZATION: basic {expected_value}"]
+
+
+def test_sanitize_redacts_raw_token_and_basic_auth_value() -> None:
+    token = "secret-token-value"
+    encoded = ws_mod._basic_auth_value(token)
+    text = (
+        f"fatal: could not read Username: AUTHORIZATION: basic {encoded}\n"
+        f"debug: raw token was {token}"
+    )
+
+    sanitized = ws_mod._sanitize(text, token)
+
+    assert token not in sanitized
+    assert encoded not in sanitized
+    assert "AUTHORIZATION: basic ***" in sanitized
