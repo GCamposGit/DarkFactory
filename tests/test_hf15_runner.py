@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -19,16 +18,28 @@ from core.acceptance.models import (
     GateEvidenceReceipt,
     HF15AcceptanceReport,
     HF15EnvironmentConfig,
-    HF15PreflightCheck,
-    HF15PreflightReport,
     ScenarioStatus,
 )
 from core.harness.hf15_acceptance import build_parser, run_hf15_runner
+from core.integrations.n8n import N8nInstanceReport, N8nProbe
+from core.integrations.telegram import TelegramConfig
 
 
 @pytest.fixture
-def temp_acceptance_engine(tmp_path: Path) -> HF15AcceptanceEngine:
+def temp_acceptance_engine(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> HF15AcceptanceEngine:
     """Fixture providing an isolated HF15AcceptanceEngine using temp directory."""
+    monkeypatch.setattr(
+        N8nProbe,
+        "probe",
+        lambda self, target_url=None, timeout=3.0: N8nInstanceReport(
+            url=target_url or self.config.base_url,
+            operational=False,
+            error="sandbox probe disabled",
+        ),
+    )
     config = HF15EnvironmentConfig(
         sandbox_root=tmp_path / "sandbox",
         db_type="sqlite_sandbox",
@@ -41,6 +52,26 @@ def temp_acceptance_engine(tmp_path: Path) -> HF15AcceptanceEngine:
         config=config,
         run_id="test_run_001",
         report_dir=report_dir,
+    )
+
+
+@pytest.fixture
+def hermetic_runner(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Isolate runner tests from workstation config and external n8n traffic."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("DARKFAC_HF15_SANDBOX_ROOT", str(tmp_path / "runner_sandbox"))
+    monkeypatch.setattr(
+        "core.acceptance.environment.load_telegram_config",
+        lambda: TelegramConfig(authorized_user_ids=[12345678]),
+    )
+    monkeypatch.setattr(
+        N8nProbe,
+        "probe",
+        lambda self, target_url=None, timeout=3.0: N8nInstanceReport(
+            url=target_url or self.config.base_url,
+            operational=False,
+            error="sandbox probe disabled",
+        ),
     )
 
 
@@ -135,24 +166,24 @@ def test_engine_run_acceptance_full(temp_acceptance_engine: HF15AcceptanceEngine
     report = engine.run_acceptance()
 
     assert isinstance(report, HF15AcceptanceReport)
-    assert report.status == "PASS"
+    assert report.status == "NOT_RUN"
     assert len(report.gates) == 8
     assert len(report.scenarios) == 10
     assert report.staging_digest == report.production_digest
-    assert report.owner_acceptance_receipt is not None
-    assert report.owner_acceptance_receipt.decision == "approved"
+    assert report.owner_acceptance_receipt is None
+    assert report.dependency_receipts == []
 
     report_file = engine.report_dir / "report.json"
     assert report_file.exists()
     content = json.loads(report_file.read_text(encoding="utf-8"))
     assert content["ticket_id"] == "HF-15"
-    assert content["status"] == "PASS"
+    assert content["status"] == "NOT_RUN"
 
     evidence_files = list((engine.report_dir / "evidence").glob("*.json"))
     assert len(evidence_files) >= 18  # 8 gates + 10 scenarios
 
 
-def test_runner_cli_json_output(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+def test_runner_cli_json_output(tmp_path: Path, capsys: pytest.CaptureFixture[str], hermetic_runner: None) -> None:
     """Tests canonical runner invocation with --json and validates exit code 0."""
     report_dir = tmp_path / "reports" / "cli_run"
     exit_code = run_hf15_runner([
@@ -161,15 +192,16 @@ def test_runner_cli_json_output(tmp_path: Path, capsys: pytest.CaptureFixture[st
         "--json",
     ])
 
-    assert exit_code == 0
+    assert exit_code == 1
     captured = capsys.readouterr()
     data = json.loads(captured.out)
     assert data["ticket_id"] == "HF-15"
-    assert data["status"] == "PASS"
+    assert data["status"] == "NOT_RUN"
     assert data["run_id"] == "hf15_cli_test"
+    assert any("sandbox" in item.lower() for item in data["limitations"])
 
 
-def test_runner_cli_selective_gate(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+def test_runner_cli_selective_gate(tmp_path: Path, capsys: pytest.CaptureFixture[str], hermetic_runner: None) -> None:
     """Tests selective gate execution via --gate G1."""
     report_dir = tmp_path / "reports" / "cli_selective"
     exit_code = run_hf15_runner([
@@ -179,38 +211,181 @@ def test_runner_cli_selective_gate(tmp_path: Path, capsys: pytest.CaptureFixture
         "--json",
     ])
 
-    assert exit_code == 0
+    assert exit_code == 1
     captured = capsys.readouterr()
     data = json.loads(captured.out)
+    assert data["status"] == "NOT_RUN"
     assert "G1" in data["gates"]
     assert len(data["gates"]) == 1
+    assert data["owner_acceptance_receipt"] is None
+    assert data["dependency_receipts"] == []
 
 
-def test_runner_preflight_fail_closed(tmp_path: Path) -> None:
-    """Verifies fail-closed behavior when preflight checks fail."""
-    report_dir = tmp_path / "reports" / "cli_preflight_fail"
-    with patch.object(
-        HF15AcceptanceEngine,
-        "run_acceptance",
-        return_value=HF15AcceptanceReport(
-            ticket_id="HF-15",
-            run_id="hf15_failed",
-            plan_digest="0" * 64,
-            baseline_sha="0" * 40,
-            status="BLOCKED",
-            candidate_digest="0" * 64,
-            staging_digest="0" * 64,
-            production_digest="0" * 64,
+def test_runner_live_mode_without_external_receipts_blocks(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    hermetic_runner: None,
+) -> None:
+    """Live probes cannot mint owner or predecessor authority inside the runner."""
+    monkeypatch.setattr(
+        N8nProbe,
+        "probe",
+        lambda self, target_url=None, timeout=3.0: N8nInstanceReport(
+            url=target_url or self.config.base_url,
+            operational=True,
+            status_code=200,
+            db_connected=True,
         ),
-    ):
-        exit_code = run_hf15_runner([
-            "--run-id", "hf15_failed",
-            "--report-dir", str(report_dir),
-        ])
-        assert exit_code == 1
+    )
+
+    exit_code = run_hf15_runner([
+        "--run-id", "hf15_live_without_receipts",
+        "--report-dir", str(tmp_path / "reports" / "live_blocked"),
+        "--mode", "live",
+        "--json",
+    ])
+
+    assert exit_code == 1
+    data = json.loads(capsys.readouterr().out)
+    assert data["status"] == "BLOCKED"
+    assert data["owner_acceptance_receipt"] is None
+    assert data["dependency_receipts"] == []
 
 
-def test_runner_secret_sanitization(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+def test_runner_selective_live_mode_is_not_operational(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    hermetic_runner: None,
+) -> None:
+    """A selective live diagnostic cannot be promoted to an acceptance result."""
+    monkeypatch.setattr(
+        N8nProbe,
+        "probe",
+        lambda self, target_url=None, timeout=3.0: N8nInstanceReport(
+            url=target_url or self.config.base_url,
+            operational=True,
+            status_code=200,
+            db_connected=True,
+        ),
+    )
+
+    exit_code = run_hf15_runner([
+        "--run-id", "hf15_live_g1_only",
+        "--report-dir", str(tmp_path / "reports" / "live_partial"),
+        "--mode", "live",
+        "--gate", "G1",
+        "--json",
+    ])
+
+    assert exit_code == 1
+    data = json.loads(capsys.readouterr().out)
+    assert data["status"] == "NOT_RUN"
+    assert data["gates"] == {"G1": "PASSED"}
+    assert data["owner_acceptance_receipt"] is None
+    assert data["dependency_receipts"] == []
+
+
+def test_runner_blocks_without_authorized_gateway(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A sandbox fixture must not turn missing gateway authorization into PASS."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("DARKFAC_HF15_SANDBOX_ROOT", str(tmp_path / "blocked_sandbox"))
+    monkeypatch.setattr(
+        "core.acceptance.environment.load_telegram_config",
+        lambda: TelegramConfig(authorized_user_ids=[]),
+    )
+    monkeypatch.setattr(
+        N8nProbe,
+        "probe",
+        lambda self, target_url=None, timeout=3.0: N8nInstanceReport(
+            url=target_url or self.config.base_url,
+            operational=False,
+            error="sandbox probe disabled",
+        ),
+    )
+    monkeypatch.setattr(
+        HF15AcceptanceEngine,
+        "execute_gate_g1",
+        lambda self, interactive=False: pytest.fail("gate executed after failed preflight"),
+    )
+    monkeypatch.setattr(
+        HF15AcceptanceEngine,
+        "execute_lifecycle_scenarios",
+        lambda self, scenario_filter=None: pytest.fail("scenario executed after failed preflight"),
+    )
+
+    report_dir = tmp_path / "reports" / "blocked"
+    stale_evidence_dir = report_dir / "evidence"
+    stale_evidence_dir.mkdir(parents=True)
+    stale_gate = stale_evidence_dir / "gate_G1.json"
+    stale_scenario = stale_evidence_dir / "scenario_1.json"
+    stale_gate.write_text("{}", encoding="utf-8")
+    stale_scenario.write_text("{}", encoding="utf-8")
+
+    exit_code = run_hf15_runner([
+        "--run-id", "hf15_missing_gateway",
+        "--report-dir", str(report_dir),
+        "--gate", "G1",
+        "--scenario", "1",
+        "--json",
+    ])
+
+    assert exit_code == 1
+    output = json.loads(capsys.readouterr().out)
+    assert output["status"] == "BLOCKED"
+    assert output["gates"] == {}
+    assert output["scenarios"] == {}
+    assert output["evidence_refs"] == []
+    gateway_check = next(
+        item for item in output["environment_evidence"]
+        if item["name"] == "telegram_gateway_auth"
+    )
+    assert gateway_check["passed"] is False
+    assert not stale_gate.exists()
+    assert not stale_scenario.exists()
+
+
+def test_runner_sandbox_mode_overrides_live_config(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    hermetic_runner: None,
+) -> None:
+    """An explicit sandbox CLI mode cannot inherit live execution from a config file."""
+    config_path = tmp_path / "live-config.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "sandbox_root": str(tmp_path / "sandbox_override"),
+                "db_type": "sqlite_sandbox",
+                "n8n_url": "https://n8n.invalid",
+                "telegram_authorized_users": [12345678],
+                "worker_slots": 9,
+                "live_mode": True,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    exit_code = run_hf15_runner([
+        "--config", str(config_path),
+        "--run-id", "hf15_sandbox_override",
+        "--report-dir", str(tmp_path / "reports" / "sandbox_override"),
+        "--mode", "sandbox",
+        "--json",
+    ])
+
+    assert exit_code == 1
+    output = json.loads(capsys.readouterr().out)
+    assert output["status"] == "NOT_RUN"
+    assert any("sandbox" in item.lower() for item in output["limitations"])
+
+
+def test_runner_secret_sanitization(tmp_path: Path, capsys: pytest.CaptureFixture[str], hermetic_runner: None) -> None:
     """Verifies that secrets are masked from runner output."""
     report_dir = tmp_path / "reports" / "cli_sanitization"
     exit_code = run_hf15_runner([
@@ -218,7 +393,7 @@ def test_runner_secret_sanitization(tmp_path: Path, capsys: pytest.CaptureFixtur
         "--report-dir", str(report_dir),
         "--json",
     ])
-    assert exit_code == 0
+    assert exit_code == 1
     output = capsys.readouterr().out
     assert "sk-" not in output
     assert "ghp_" not in output

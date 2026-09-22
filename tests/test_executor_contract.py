@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import sys
 import time
 from pathlib import Path
@@ -104,11 +105,20 @@ def test_process_sandbox_timeout_and_tree_kill(temp_workspace: Path) -> None:
     sandbox = ProcessSandbox(working_dir=temp_workspace, default_timeout_seconds=0.5)
 
     # Quick fast command succeeds
-    cmd_quick = [sys.executable, "-c", "print('quick output')"]
+    quick_script = "print('quick output')"
+    if sys.platform != "win32":
+        quick_script += "; import os; print(f'pgrp={os.getpgrp()}')"
+    cmd_quick = [sys.executable, "-c", quick_script]
     res_quick = sandbox.run_command(cmd_quick, timeout_seconds=2.0)
     assert res_quick.exit_code == 0
     assert "quick output" in res_quick.stdout
     assert not res_quick.timed_out
+    if sys.platform != "win32":
+        child_group = int(
+            next(line for line in res_quick.stdout.splitlines() if line.startswith("pgrp="))
+            .split("=", 1)[1]
+        )
+        assert child_group != os.getpgrp()
 
     # Long running command that exceeds timeout gets killed
     cmd_sleep = [
@@ -119,6 +129,44 @@ def test_process_sandbox_timeout_and_tree_kill(temp_workspace: Path) -> None:
     res_sleep = sandbox.run_command(cmd_sleep, timeout_seconds=0.3)
     assert res_sleep.timed_out
     assert res_sleep.exit_code == -1
+
+
+@pytest.mark.skipif(
+    not sys.platform.startswith("linux"),
+    reason="POSIX descendant regression requires Linux /proc",
+)
+def test_process_sandbox_kills_descendant_after_leader_exits(temp_workspace: Path) -> None:
+    """A dead session leader must not prevent its surviving child from being killed."""
+    sandbox = ProcessSandbox(working_dir=temp_workspace, default_timeout_seconds=0.5)
+    pid_path = temp_workspace / "grandchild.pid"
+    launcher = (
+        "import pathlib, subprocess, sys; "
+        "child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)']); "
+        "pathlib.Path(sys.argv[1]).write_text(str(child.pid), encoding='utf-8')"
+    )
+
+    result = sandbox.run_command(
+        [sys.executable, "-c", launcher, str(pid_path)],
+        timeout_seconds=0.5,
+    )
+
+    assert result.timed_out is True
+    grandchild_pid = int(pid_path.read_text(encoding="utf-8"))
+    deadline = time.monotonic() + 2.0
+    while time.monotonic() < deadline:
+        stat_path = Path(f"/proc/{grandchild_pid}/stat")
+        if not stat_path.exists():
+            break
+        try:
+            fields = stat_path.read_text(encoding="utf-8").split()
+        except FileNotFoundError:
+            # The process may be reaped between exists() and read_text().
+            break
+        if len(fields) >= 3 and fields[2] == "Z":
+            break
+        time.sleep(0.05)
+    else:
+        pytest.fail(f"descendant process {grandchild_pid} survived sandbox timeout")
 
 
 def test_executor_start_cancel_and_budget(temp_workspace: Path) -> None:
@@ -217,4 +265,3 @@ def test_provider_inference_and_unknown_cost_policy() -> None:
     assert not resp.is_measured
     assert resp.measured_cost is None
     assert resp.estimated_cost > 0.0
-

@@ -29,12 +29,23 @@ from core.acceptance.models import (
 from core.acceptance.observability import HF15ObservabilityTracker, sanitize_payload
 from core.acceptance.rollback import HF15RollbackCoordinator
 from core.acceptance.test_data import get_all_hf15_fixtures, seed_test_data
+from core.integrations.n8n import N8nInstanceReport, N8nProbe
+from core.integrations.telegram import TelegramConfig
 from hub.backend.main import app
 
 
 @pytest.fixture
-def sandbox_env(tmp_path: Path) -> HF15EnvironmentConfig:
+def sandbox_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> HF15EnvironmentConfig:
     """Fixture providing isolated sandbox configuration."""
+    monkeypatch.setattr(
+        N8nProbe,
+        "probe",
+        lambda self, target_url=None, timeout=3.0: N8nInstanceReport(
+            url=target_url or self.config.base_url,
+            operational=False,
+            error="sandbox probe disabled",
+        ),
+    )
     return HF15EnvironmentConfig(
         sandbox_root=tmp_path / "hf15_sandbox",
         db_type="sqlite_sandbox",
@@ -92,6 +103,13 @@ def test_preflight_verifications_fail_closed(sandbox_env: HF15EnvironmentConfig)
     slot_check = next(c for c in bad_report.checks if c.name == "worker_concurrency_slots")
     assert slot_check.passed is False
     assert "Insufficient slots" in (slot_check.error or "")
+
+    # A synthetic sandbox user is only test input; missing authorization still blocks readiness.
+    no_users_config = sandbox_env.model_copy(update={"telegram_authorized_users": []})
+    no_users_report = HF15EnvironmentManager(config=no_users_config).run_preflights()
+    assert no_users_report.all_passed is False
+    auth_check = next(c for c in no_users_report.checks if c.name == "telegram_gateway_auth")
+    assert auth_check.passed is False
 
 
 # ---------------------------------------------------------------------------
@@ -278,7 +296,21 @@ def test_observability_ledger_and_sla_tracking(tmp_path: Path) -> None:
 
 def test_cli_headless_commands(capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """CLI commands operate headlessly and return valid JSON."""
+    monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("DARKFAC_HF15_SANDBOX_ROOT", str(tmp_path / "cli_sandbox"))
+    monkeypatch.setattr(
+        "core.acceptance.environment.load_telegram_config",
+        lambda: TelegramConfig(authorized_user_ids=[12345678]),
+    )
+    monkeypatch.setattr(
+        N8nProbe,
+        "probe",
+        lambda self, target_url=None, timeout=3.0: N8nInstanceReport(
+            url=target_url or self.config.base_url,
+            operational=False,
+            error="sandbox probe disabled",
+        ),
+    )
 
     # 1. Preflight
     code = cli_main(["--json", "preflight"])
@@ -286,6 +318,7 @@ def test_cli_headless_commands(capsys: pytest.CaptureFixture[str], monkeypatch: 
     captured = capsys.readouterr()
     preflight_json = json.loads(captured.out)
     assert preflight_json["all_passed"] is True
+    assert preflight_json["environment_mode"] == "sandbox"
 
     # 2. Seed Data
     code = cli_main(["seed-data", "--json"])
@@ -309,6 +342,7 @@ def test_cli_headless_commands(capsys: pytest.CaptureFixture[str], monkeypatch: 
     captured = capsys.readouterr()
     status_json = json.loads(captured.out)
     assert status_json["environment"]["all_preflights_passed"] is True
+    assert status_json["environment"]["mode"] == "sandbox"
 
     # 5. Metrics
     code = cli_main(["metrics", "--json"])
@@ -323,10 +357,25 @@ def test_cli_headless_commands(capsys: pytest.CaptureFixture[str], monkeypatch: 
 # ---------------------------------------------------------------------------
 
 
-def test_hub_endpoints_hf15() -> None:
+def test_hub_endpoints_hf15(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """DarkHub REST API exposes status, metrics, and rollback drill endpoints."""
     from hub.backend.api import get_hub_service
 
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("DARKFAC_HF15_SANDBOX_ROOT", str(tmp_path / "hub_sandbox"))
+    monkeypatch.setattr(
+        "core.acceptance.environment.load_telegram_config",
+        lambda: TelegramConfig(authorized_user_ids=[12345678]),
+    )
+    monkeypatch.setattr(
+        N8nProbe,
+        "probe",
+        lambda self, target_url=None, timeout=3.0: N8nInstanceReport(
+            url=target_url or self.config.base_url,
+            operational=False,
+            error="sandbox probe disabled",
+        ),
+    )
     client = TestClient(app)
     service = get_hub_service()
 
@@ -337,6 +386,7 @@ def test_hub_endpoints_hf15() -> None:
     assert "environment" in data_status
     assert "metrics" in data_status
     assert data_status["environment"]["all_preflights_passed"] is True
+    assert data_status["environment"]["mode"] == "sandbox"
 
     # 2. GET /api/hf15/metrics
     res_metrics = client.get("/api/hf15/metrics")
