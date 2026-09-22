@@ -43,8 +43,10 @@ only persists the answer into the pending state on disk so the next
 
 from __future__ import annotations
 
+import html
 import json
 import logging
+import re
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable, Iterable, Literal, Optional
@@ -115,6 +117,7 @@ class PendingGrill(BaseModel):
     questions: list[_PendingQuestion] = Field(default_factory=list)
     deadline: datetime
     answers: dict[str, str] = Field(default_factory=dict)
+    notified: bool = False
 
 
 # --------------------------------------------------------------------------
@@ -141,11 +144,26 @@ def load_prompt(name: str) -> str:
     return (PROMPTS_DIR / name).read_text(encoding="utf-8")
 
 
+_PROMPT_TOKEN = re.compile(r"\{\{|\}\}|\{(\w+)\}")
+
+
 def render_prompt(template: str, **values: str) -> str:
-    rendered = template
-    for key, value in values.items():
-        rendered = rendered.replace("{" + key + "}", value)
-    return rendered
+    """Fill `{name}` placeholders and unescape `{{`/`}}` in a single pass.
+
+    Single pass so braces inside substituted values (e.g. JSON in a demand)
+    are never re-interpreted; unknown `{name}` tokens are left untouched.
+    """
+
+    def _replace(match: re.Match[str]) -> str:
+        token = match.group(0)
+        if token == "{{":
+            return "{"
+        if token == "}}":
+            return "}"
+        name = match.group(1)
+        return values[name] if name in values else token
+
+    return _PROMPT_TOKEN.sub(_replace, template)
 
 
 def read_lessons(repo_path: Path, max_lines: int = 20) -> str:
@@ -302,7 +320,12 @@ def submit_grill_answers(project: ProjectDescriptor, run_id: str, answers: dict[
     pending = _load_pending(ws)
     if pending is None:
         return False
-    pending.answers.update(answers)
+    by_id = {q.id: q for q in pending.questions}
+    for question_id, choice in answers.items():
+        question = by_id.get(question_id)
+        pending.answers[question_id] = (
+            resolve_callback_choice(question, choice) if question is not None else choice
+        )
     _save_pending(ws, pending)
     workspace.commit(ws, "grill: owner answers received", _pending_job_key(run_id))
     workspace.push(ws)
@@ -339,16 +362,29 @@ def default_telegram_sender() -> Optional[TelegramSender]:
     return _send
 
 
+def resolve_callback_choice(question: _PendingQuestion, choice: str) -> str:
+    """Map a callback `<choice>` (option index) back to the option text."""
+    if choice.isdigit() and int(choice) < len(question.options):
+        return question.options[int(choice)]
+    return choice
+
+
 def _build_message(run_id: str, questions: list[_PendingQuestion]) -> tuple[str, list[list[dict[str, str]]]]:
-    lines = [f"Grill pendente para o run {run_id} (uma rodada, prazo de {GRILL_DEADLINE_HOURS}h):", ""]
+    # The gateway sends with parse_mode=HTML, so agent text must be escaped.
+    # Buttons carry the option *index*: Telegram caps callback_data at 64 bytes.
+    lines = [
+        f"Grill pendente para o run {html.escape(run_id)} "
+        f"(uma rodada, prazo de {GRILL_DEADLINE_HOURS}h):",
+        "",
+    ]
     buttons: list[list[dict[str, str]]] = []
     for question in questions:
-        lines.append(f"- [{question.kind}] {question.text}")
+        lines.append(f"- [{question.kind}] {html.escape(question.text)}")
         if question.recommended:
-            lines.append(f"  recomendado: {question.recommended}")
+            lines.append(f"  recomendado: {html.escape(question.recommended)}")
         row = [
-            {"text": option, "callback_data": f"cb:grill:{run_id}#{question.id}:{option}"}
-            for option in question.options
+            {"text": option[:64], "callback_data": f"cb:grill:{run_id}#{question.id}:{index}"}
+            for index, option in enumerate(question.options)
         ]
         if row:
             buttons.append(row)
@@ -370,11 +406,14 @@ def run_grill(
     routing_config: Optional[RoutingConfig] = None,
     send_message: Optional[TelegramSender] = None,
     now: Optional[datetime] = None,
+    parent_grill: Optional[str] = None,
 ) -> StageResult:
     """Run (or reconcile) the single-round grill for `run_id`.
 
     Idempotent: a finished grill is never re-run; a pending grill is
-    resolved (fully or partially) rather than restarted.
+    resolved (fully or partially) rather than restarted. `parent_grill` is
+    the parent run's `GRILL.md` for milestone child demands (payload key
+    `parent_grill`), so the agent only asks what is new.
     """
     current_time = _now(now)
     ws = workspace.checkout(project, run_id)
@@ -385,14 +424,14 @@ def run_grill(
 
     pending = _load_pending(ws)
     if pending is not None:
-        return _reconcile_pending(ws, run_id, pending, current_time)
+        return _reconcile_pending(ws, run_id, pending, current_time, send_message)
 
     workspace.write_context(ws, _DEMAND_FILE, _render_demand_markdown(project, channel, demand_text))
 
     prompt = render_prompt(
         load_prompt("grill.md"),
         demand=demand_text,
-        grill="(nenhuma premissa anterior)",
+        grill=parent_grill or "(nenhuma premissa anterior)",
         lessons=read_lessons(ws.path) or "(nenhuma)",
     )
     result = run_read_agent(STAGE, prompt, ws.path, host_caps=host_caps, routing_config=routing_config)
@@ -429,13 +468,7 @@ def run_grill(
     sha = workspace.commit(ws, "grill: awaiting owner decisions", _pending_job_key(run_id))
     workspace.push(ws)
 
-    sender = send_message if send_message is not None else default_telegram_sender()
-    if sender is not None:
-        text, buttons = _build_message(run_id, blocking)
-        try:
-            sender(text, buttons)
-        except Exception as exc:  # pragma: no cover - notification must never break the stage
-            logger.warning("Failed to send grill Telegram message for run %s: %s", run_id, exc)
+    sha = _notify_owner(ws, run_id, pending_state, send_message) or sha
 
     return StageResult(
         outcome="waiting_human",
@@ -444,8 +477,40 @@ def run_grill(
     )
 
 
+def _notify_owner(
+    ws: workspace.RunWorkspace,
+    run_id: str,
+    pending: PendingGrill,
+    send_message: Optional[TelegramSender],
+) -> Optional[str]:
+    """Send the single grill message once; record `notified` so a crash or a
+    failed send is retried on the next reconcile instead of silently lost."""
+    if pending.notified:
+        return None
+    sender = send_message if send_message is not None else default_telegram_sender()
+    if sender is None:
+        return None
+    text, buttons = _build_message(run_id, pending.questions)
+    try:
+        sent = bool(sender(text, buttons))
+    except Exception as exc:  # notification must never break the stage
+        logger.warning("Failed to send grill Telegram message for run %s: %s", run_id, exc)
+        sent = False
+    if not sent:
+        return None
+    pending.notified = True
+    _save_pending(ws, pending)
+    sha = workspace.commit(ws, "grill: owner notified", _pending_job_key(run_id))
+    workspace.push(ws)
+    return sha
+
+
 def _reconcile_pending(
-    ws: workspace.RunWorkspace, run_id: str, pending: PendingGrill, current_time: datetime
+    ws: workspace.RunWorkspace,
+    run_id: str,
+    pending: PendingGrill,
+    current_time: datetime,
+    send_message: Optional[TelegramSender] = None,
 ) -> StageResult:
     deadline = pending.deadline
     if deadline.tzinfo is None:
@@ -479,6 +544,7 @@ def _reconcile_pending(
     ready_to_finalize = deadline_passed or all(q.id in pending.answers for q in pending.questions)
 
     if not ready_to_finalize:
+        _notify_owner(ws, run_id, pending, send_message)
         return StageResult(
             outcome="waiting_human",
             evidence_refs=[f"grill_deadline:{deadline.isoformat()}"],

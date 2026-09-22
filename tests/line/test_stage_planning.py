@@ -270,6 +270,7 @@ def test_product_scale_demand_submits_n_minus_1_children_once(project, monkeypat
     assert external_ids == {"run-6:m2", "run-6:m3"}
     for cmd in intake.accept_calls:
         assert cmd.payload["depends_on"] == "run-6"
+        assert "Usar Python 3.12" in cmd.payload["parent_grill"]
 
     ws = ws_mod.checkout(project, "run-6")
     milestones = json.loads((ws_mod.context_dir(ws) / "milestones.json").read_text(encoding="utf-8"))

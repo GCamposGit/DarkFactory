@@ -68,6 +68,12 @@ def project(tmp_path, monkeypatch) -> ProjectDescriptor:
     return _project(str(origin))
 
 
+@pytest.fixture(autouse=True)
+def _no_real_telegram(monkeypatch):
+    """Never reach a real owner bot, even on hosts with Telegram configured."""
+    monkeypatch.setattr(stage_grill, "default_telegram_sender", lambda: None)
+
+
 def _fake_agent_reply(payload: dict) -> AgentResult:
     return AgentResult(ok=True, text=json.dumps(payload), harness="claude", duration_s=0.01)
 
@@ -161,14 +167,14 @@ def test_business_question_waits_then_defaults_after_timeout(project, monkeypatc
 
     first = run_grill(
         project, "run-3", "Nova feature de billing",
-        send_message=lambda text, buttons: sent.append((text, buttons)),
+        send_message=lambda text, buttons: sent.append((text, buttons)) or True,
         now=start,
     )
     assert first.outcome == "waiting_human"
     assert len(sent) == 1
     text, buttons = sent[0]
     assert "Deve cobrar assinatura mensal?" in text
-    assert buttons and buttons[0][0]["callback_data"] == "cb:grill:run-3#q1:sim"
+    assert buttons and buttons[0][0]["callback_data"] == "cb:grill:run-3#q1:0"
 
     # Before the deadline and with no answer yet: still waiting, no new commit.
     still_waiting = run_grill(project, "run-3", "Nova feature de billing", now=start + timedelta(hours=1))
@@ -210,7 +216,8 @@ def test_answers_submitted_before_deadline_finalize_immediately(project, monkeyp
     first = run_grill(project, "run-4", "Landing page nova", now=start)
     assert first.outcome == "waiting_human"
 
-    submitted = submit_grill_answers(project, "run-4", {"q1": "verde"})
+    # The Telegram button carries the option index ("1" -> "verde").
+    submitted = submit_grill_answers(project, "run-4", {"q1": "1"})
     assert submitted is True
 
     resolved = run_grill(project, "run-4", "Landing page nova", now=start + timedelta(minutes=5))
@@ -262,3 +269,55 @@ def test_secret_question_never_receives_a_default(project, monkeypatch):
     grill_md = (ws_mod.context_dir(ws) / "GRILL.md").read_text(encoding="utf-8")
     assert "default_after_timeout" not in grill_md
     assert "Aguardando decisao do owner" in grill_md
+
+
+# --------------------------------------------------------------------------
+# Review follow-ups: prompt rendering and durable owner notification
+# --------------------------------------------------------------------------
+
+
+def test_render_prompt_unescapes_braces_and_keeps_values_literal():
+    rendered = stage_grill.render_prompt('{demand} -> {{"a":{{"b":1}}}} {unknown}', demand="x {grill} {{y}}")
+    assert rendered == 'x {grill} {{y}} -> {"a":{"b":1}} {unknown}'
+
+
+def test_shipped_prompts_render_valid_json_examples():
+    for name in ("grill.md", "planning.md"):
+        rendered = stage_grill.render_prompt(
+            stage_grill.load_prompt(name), demand="d", grill="g", commands="c", lessons="l"
+        )
+        assert "{{" not in rendered and "}}" not in rendered
+        example = rendered.split("```json", 1)[1].split("```", 1)[0]
+        json.loads(example)
+
+
+def test_failed_notification_is_retried_on_next_reconcile(project, monkeypatch):
+    reply = _fake_agent_reply(
+        {
+            "questions": [
+                {"id": "q1", "text": "Cobrar <assinatura> & taxa?", "kind": "business",
+                 "options": ["sim", "nao"], "recommended": "nao"}
+            ],
+            "assumptions": [],
+            "is_product_scale": False,
+        }
+    )
+    monkeypatch.setattr(stage_grill, "run_read_agent", lambda *a, **k: reply)
+    start = datetime(2026, 9, 22, 12, 0, tzinfo=timezone.utc)
+    attempts = []
+
+    first = run_grill(project, "run-9", "x", send_message=lambda t, b: attempts.append(t) and False, now=start)
+    assert first.outcome == "waiting_human"
+    assert len(attempts) == 1
+    assert "&lt;assinatura&gt; &amp; taxa" in attempts[0]
+
+    ok = []
+    again = run_grill(project, "run-9", "x", send_message=lambda t, b: ok.append(t) or True,
+                      now=start + timedelta(hours=1))
+    assert again.outcome == "waiting_human"
+    assert len(ok) == 1
+
+    third = run_grill(project, "run-9", "x", send_message=lambda t, b: ok.append(t) or True,
+                      now=start + timedelta(hours=2))
+    assert third.outcome == "waiting_human"
+    assert len(ok) == 1  # already notified; not sent twice

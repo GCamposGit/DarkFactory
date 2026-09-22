@@ -170,6 +170,7 @@ def _submit_milestone_children(
     policy_ref: str,
     milestones: list[PlanningMilestone],
     now: Optional[datetime],
+    parent_grill: str,
 ) -> list[IntakeReceipt]:
     """Submit milestones 2..N as idempotent child demands (`depends_on=run_id`)."""
     receipts: list[IntakeReceipt] = []
@@ -185,6 +186,9 @@ def _submit_milestone_children(
                 "non_goals": [],
                 "criteria": [],
                 "depends_on": run_id,
+                # Embedded (not referenced) because the parent's branch and
+                # context dir are gone once its PR merges.
+                "parent_grill": parent_grill,
             },
             mode="autonomous",
             policy_ref=policy_ref,
@@ -275,7 +279,8 @@ def run_planning(
         )
         if intake_service is not None:
             _submit_milestone_children(
-                intake_service, project, run_id, channel, policy_ref, remaining_milestones, now
+                intake_service, project, run_id, channel, policy_ref, remaining_milestones, now,
+                grill_text,
             )
         else:
             logger.warning(
