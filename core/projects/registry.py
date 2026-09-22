@@ -8,7 +8,8 @@ from pathlib import Path
 from typing import Dict, List, Optional
 
 from core.paths import project_root
-from .models import ProjectDescriptor, ProjectKind
+from .detect import detect_commands
+from .models import ProjectCommands, ProjectDescriptor, ProjectKind
 
 logger = logging.getLogger(__name__)
 
@@ -74,6 +75,23 @@ class ProjectRegistry:
         if proj and proj.prefix:
             return proj.prefix.upper()
         return "USR"
+
+
+def resolve_commands(project: ProjectDescriptor, repo_dir: Path) -> ProjectCommands:
+    """Merge a project's explicit commands with offline autodetection.
+
+    Each of setup/validate/build/smoke is resolved independently: an explicit,
+    non-empty list on `project.commands` always wins; an empty one falls back
+    to whatever `core.projects.detect.detect_commands` finds in `repo_dir`.
+    """
+    explicit = project.commands
+    detected = detect_commands(repo_dir)
+    return ProjectCommands(
+        setup=list(explicit.setup) if explicit.setup else list(detected.setup),
+        validate=list(explicit.validate) if explicit.validate else list(detected.validate),
+        build=list(explicit.build) if explicit.build else list(detected.build),
+        smoke=list(explicit.smoke) if explicit.smoke else list(detected.smoke),
+    )
 
 
 _GLOBAL_REGISTRY: Optional[ProjectRegistry] = None
