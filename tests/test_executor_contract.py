@@ -131,6 +131,40 @@ def test_process_sandbox_timeout_and_tree_kill(temp_workspace: Path) -> None:
     assert res_sleep.exit_code == -1
 
 
+@pytest.mark.skipif(
+    not sys.platform.startswith("linux"),
+    reason="POSIX descendant regression requires Linux /proc",
+)
+def test_process_sandbox_kills_descendant_after_leader_exits(temp_workspace: Path) -> None:
+    """A dead session leader must not prevent its surviving child from being killed."""
+    sandbox = ProcessSandbox(working_dir=temp_workspace, default_timeout_seconds=0.5)
+    pid_path = temp_workspace / "grandchild.pid"
+    launcher = (
+        "import pathlib, subprocess, sys; "
+        "child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)']); "
+        "pathlib.Path(sys.argv[1]).write_text(str(child.pid), encoding='utf-8')"
+    )
+
+    result = sandbox.run_command(
+        [sys.executable, "-c", launcher, str(pid_path)],
+        timeout_seconds=0.5,
+    )
+
+    assert result.timed_out is True
+    grandchild_pid = int(pid_path.read_text(encoding="utf-8"))
+    deadline = time.monotonic() + 2.0
+    while time.monotonic() < deadline:
+        stat_path = Path(f"/proc/{grandchild_pid}/stat")
+        if not stat_path.exists():
+            break
+        fields = stat_path.read_text(encoding="utf-8").split()
+        if len(fields) >= 3 and fields[2] == "Z":
+            break
+        time.sleep(0.05)
+    else:
+        pytest.fail(f"descendant process {grandchild_pid} survived sandbox timeout")
+
+
 def test_executor_start_cancel_and_budget(temp_workspace: Path) -> None:
     provider = MockModelProvider()
     budget_mgr = ExecutionBudgetManager()

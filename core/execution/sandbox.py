@@ -130,7 +130,7 @@ class NetworkContainment:
             )
 
 
-def kill_process_tree(pid: int) -> None:
+def kill_process_tree(pid: int, *, process_group_id: int | None = None) -> None:
     """Reliably terminates a process and all its descendants on Windows and POSIX."""
     if pid <= 0:
         return
@@ -148,7 +148,11 @@ def kill_process_tree(pid: int) -> None:
             logger.debug(f"taskkill failed for pid {pid}: {exc}")
     else:
         try:
-            target_group = os.getpgid(pid)
+            target_group = (
+                process_group_id
+                if process_group_id is not None
+                else os.getpgid(pid)
+            )
             if target_group == os.getpgrp():
                 # Never terminate the caller's own process group.  A child that
                 # was not isolated must be killed individually so a timeout
@@ -201,7 +205,9 @@ class ProcessSandbox:
 
         start_time = time.perf_counter()
         proc = None
+        process_group_id: int | None = None
         try:
+            starts_new_session = sys.platform != "win32"
             proc = subprocess.Popen(
                 command,
                 cwd=str(self.working_dir),
@@ -212,8 +218,13 @@ class ProcessSandbox:
                 encoding="utf-8",
                 errors="replace",
                 shell=shell,
-                start_new_session=sys.platform != "win32",
+                start_new_session=starts_new_session,
             )
+            if starts_new_session:
+                # A new POSIX session makes the child both session leader and
+                # process-group leader, so PGID == PID.  Retain it now: the
+                # leader may exit while descendants keep inherited pipes open.
+                process_group_id = proc.pid
             stdout, stderr = proc.communicate(timeout=timeout)
             duration = max(0.001, time.perf_counter() - start_time)
             return ProcessExecutionResult(
@@ -226,7 +237,7 @@ class ProcessSandbox:
         except subprocess.TimeoutExpired:
             duration = max(0.001, time.perf_counter() - start_time)
             if proc is not None:
-                kill_process_tree(proc.pid)
+                kill_process_tree(proc.pid, process_group_id=process_group_id)
                 try:
                     stdout, stderr = proc.communicate(timeout=2.0)
                 except Exception:
@@ -243,7 +254,7 @@ class ProcessSandbox:
         except Exception as exc:
             duration = max(0.001, time.perf_counter() - start_time)
             if proc is not None:
-                kill_process_tree(proc.pid)
+                kill_process_tree(proc.pid, process_group_id=process_group_id)
             return ProcessExecutionResult(
                 exit_code=1,
                 stdout="",
