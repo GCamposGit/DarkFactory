@@ -140,6 +140,10 @@ _FAKE_GH_SCRIPT = textwrap.dedent(
             names = list(names)
             return argv[: len(names)] == names
 
+        if starts("pr", "list") and "merged" in argv:
+            sys.stdout.write(json.dumps(spec.get("pr_list_merged", [])))
+            sys.exit(0)
+
         if starts("pr", "list"):
             sys.stdout.write(json.dumps(spec.get("pr_list", [])))
             sys.exit(int(spec.get("pr_list_returncode", 0)))
@@ -363,55 +367,157 @@ def test_red_check_returns_retry_with_log_and_does_not_merge(
 # --------------------------------------------------------------------------
 
 
-def test_merge_conflict_calls_agent_once_then_fails(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def _advance_main(tmp_path: Path, origin: Path, content: str, name: str) -> None:
+    clone = tmp_path / name
+    _git(["clone", str(origin), str(clone)], cwd=tmp_path)
+    _git(["checkout", "-B", "main", "origin/main"], cwd=clone)
+    _git(["config", "user.email", "seed@example.com"], cwd=clone)
+    _git(["config", "user.name", "Seed"], cwd=clone)
+    (clone / "shared.txt").write_text(content, encoding="utf-8")
+    _git(["add", "shared.txt"], cwd=clone)
+    _git(["commit", "-m", f"advance main: {content.strip()}"], cwd=clone)
+    _git(["push", "origin", "main"], cwd=clone)
+
+
+def _merging_agent(call_count: dict[str, int]):
+    """Stub agent that really merges origin/main and resolves shared.txt."""
+
+    def _run(req: AgentRequest) -> AgentResult:
+        call_count["n"] += 1
+        subprocess.run(
+            [
+                "git", "-c", "user.name=Agent", "-c", "user.email=agent@example.com",
+                "merge", "--no-commit", "origin/main",
+            ],
+            cwd=str(req.cwd), capture_output=True, text=True, **_win_kwargs(),
+        )
+        (req.cwd / "shared.txt").write_text("both-behaviours\n", encoding="utf-8")
+        return AgentResult(ok=True, text="resolved", harness=req.harness, duration_s=0.1)
+
+    return _run
+
+
+def _conflicting_run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, run_id: str):
     origin = _init_bare_origin(tmp_path)
     project = _project(str(origin))
     monkeypatch.setenv("DARKFAC_WORKSPACES", str(tmp_path / "root"))
-
-    ws = checkout(project, "run-4")
-
-    # Diverge origin/main and the run branch on the same line of shared.txt
-    # so the rebase always conflicts, no matter how many times it is tried.
-    mirror_seed = tmp_path / "_advance_main"
-    _git(["clone", str(origin), str(mirror_seed)], cwd=tmp_path)
-    _git(["checkout", "-B", "main", "origin/main"], cwd=mirror_seed)
-    _git(["config", "user.email", "seed@example.com"], cwd=mirror_seed)
-    _git(["config", "user.name", "Seed"], cwd=mirror_seed)
-    (mirror_seed / "shared.txt").write_text("changed-on-main\n", encoding="utf-8")
-    _git(["add", "shared.txt"], cwd=mirror_seed)
-    _git(["commit", "-m", "advance main"], cwd=mirror_seed)
-    _git(["push", "origin", "main"], cwd=mirror_seed)
-
+    ws = checkout(project, run_id)
+    _advance_main(tmp_path, origin, "changed-on-main\n", "_advance_1")
     (ws.path / "shared.txt").write_text("changed-on-branch\n", encoding="utf-8")
-    ws_mod.commit(ws, "feat: conflicting change", "run-4:T1")
+    ws_mod.commit(ws, "feat: conflicting change", f"{run_id}:T1")
+    return origin, project, ws
 
+
+def test_resolved_conflict_is_not_replayed_on_later_calls(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _, project, ws = _conflicting_run(tmp_path, monkeypatch, "run-4")
     call_count = {"n": 0}
-
-    def _stub_agent_no_real_fix(req: AgentRequest) -> AgentResult:
-        call_count["n"] += 1
-        # "Resolves" the conflict-marker state without ever matching origin's
-        # content, so a second rebase attempt (simulating a later retry)
-        # conflicts again.
-        (req.cwd / "shared.txt").write_text("still-not-matching-main\n", encoding="utf-8")
-        return AgentResult(ok=True, text="resolved", harness=req.harness, duration_s=0.1)
-
     handler = IntegrationStageHandler(
-        project,
-        gh_executable="gh-not-used",
-        host_caps=["harness:claude"],
-        agent_runner=_stub_agent_no_real_fix,
+        project, gh_executable="gh-not-used", host_caps=["harness:claude"],
+        agent_runner=_merging_agent(call_count),
     )
 
-    first = handler._rebase_onto_default(ws, "main")
-    assert first is None  # resolved (from the stage's point of view) on the first attempt
+    assert handler._rebase_onto_default(ws, "main") is None
+    assert call_count["n"] == 1
+    # The attempt marker was pushed before the agent ran (durable cap).
+    remote_log = _git(["log", "--format=%B", "origin/df/run-4"], cwd=ws.path).stdout
+    assert "run-4:integration:conflict_attempt" in remote_log
+
+    # A later call (e.g. CI polling retry) must not rebase the merge away.
+    assert handler._rebase_onto_default(ws, "main") is None
     assert call_count["n"] == 1
 
-    # A fresh conflict against origin/main is still there (the stub never
-    # truly reconciled it), so the branch conflicts with origin/main again.
+
+def test_merge_conflict_calls_agent_once_then_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    origin, project, ws = _conflicting_run(tmp_path, monkeypatch, "run-5")
+    call_count = {"n": 0}
+    handler = IntegrationStageHandler(
+        project, gh_executable="gh-not-used", host_caps=["harness:claude"],
+        agent_runner=_merging_agent(call_count),
+    )
+
+    assert handler._rebase_onto_default(ws, "main") is None
+    assert call_count["n"] == 1
+
+    # main moves again on the same line: a second conflict is terminal.
+    _advance_main(tmp_path, origin, "changed-on-main-again\n", "_advance_2")
     second = handler._rebase_onto_default(ws, "main")
     assert second is not None
     assert second.outcome == "failed"
     assert second.cause_code == "merge_conflict"
     assert call_count["n"] == 1  # the agent was NOT invoked a second time
+
+
+def test_agent_that_does_not_merge_fails_merge_conflict(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _, project, ws = _conflicting_run(tmp_path, monkeypatch, "run-6")
+
+    def _no_merge(req: AgentRequest) -> AgentResult:
+        (req.cwd / "shared.txt").write_text("edited-only\n", encoding="utf-8")
+        return AgentResult(ok=True, text="resolved", harness=req.harness, duration_s=0.1)
+
+    handler = IntegrationStageHandler(
+        project, gh_executable="gh-not-used", host_caps=["harness:claude"], agent_runner=_no_merge,
+    )
+    result = handler._rebase_onto_default(ws, "main")
+    assert result is not None and result.outcome == "failed"
+    assert result.cause_code == "merge_conflict"
+
+
+def test_already_merged_pr_short_circuits_to_success(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fake_gh
+) -> None:
+    origin = _init_bare_origin(tmp_path)
+    project = _project(str(origin))
+    monkeypatch.setenv("DARKFAC_WORKSPACES", str(tmp_path / "root"))
+    gh_path, set_spec, calls = fake_gh
+
+    ws = checkout(project, "run-7")
+    main_sha = _git(["rev-parse", "origin/main"], cwd=ws.path).stdout.strip()
+    set_spec(
+        {
+            "pr_list_merged": [
+                {
+                    "number": 11,
+                    "url": "https://github.com/acme/repo/pull/11",
+                    "state": "MERGED",
+                    "mergeCommit": {"oid": main_sha},
+                }
+            ],
+        }
+    )
+
+    handler = IntegrationStageHandler(project, gh_executable=gh_path, host_caps=["harness:claude"])
+    result = handler.handle(_context("run-7"))
+
+    assert result.outcome == "success", result.cause_code
+    assert result.output_refs == ["https://github.com/acme/repo/pull/11", main_sha]
+    call_names = [" ".join(c[:2]) for c in calls()]
+    assert "pr create" not in call_names
+    assert "pr merge" not in call_names
+
+
+def test_pr_body_is_recovered_after_context_already_stripped(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fake_gh
+) -> None:
+    origin = _init_bare_origin(tmp_path)
+    project = _project(str(origin))
+    monkeypatch.setenv("DARKFAC_WORKSPACES", str(tmp_path / "root"))
+    gh_path, set_spec, _ = fake_gh
+
+    ws = checkout(project, "run-8")
+    ws_mod.write_context(ws, "SPEC.md", "# Widget spec\n\nDetails.\n")
+    ws_mod.commit(ws, "feat: widget", "run-8:T1")
+    ws_mod.push(ws)
+
+    handler = IntegrationStageHandler(project, gh_executable=gh_path, host_caps=["harness:claude"])
+    first_title, first_body, err = handler._strip_context(ws, _context("run-8"))
+    assert err is None
+    second_title, second_body, err = handler._strip_context(ws, _context("run-8"))
+    assert err is None
+    assert second_title == first_title == "Widget spec"
+    assert "Details." in second_body

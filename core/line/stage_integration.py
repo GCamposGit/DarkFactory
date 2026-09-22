@@ -47,6 +47,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -302,25 +303,45 @@ class IntegrationStageHandler:
                 cause_code=_sanitize(f"git_fetch_failed: {fetch.stderr.strip()}"),
             )
 
-        rebase = self._git(["rebase", f"origin/{default_branch}"], ws)
+        upstream = f"origin/{default_branch}"
+        # Already up to date: skip the rebase (and the force-push it implies),
+        # so CI polling retries do not rewrite the branch on every call.
+        if self._git(["merge-base", "--is-ancestor", upstream, "HEAD"], ws).returncode == 0:
+            return None
+
+        run_id = ws.run_id
+        identity = ws_mod._identity_args(ws.path)
+        resolved_key = self._job_key(run_id, _RESOLVED_JOB_SUFFIX)
+        if ws_mod.find_commit_by_job(ws, resolved_key) is not None:
+            # The branch carries an agent-made merge commit; a rebase would
+            # linearize it away and replay the original conflict. Merge instead.
+            merge = self._git([*identity, "merge", "--no-edit", upstream], ws)
+            if merge.returncode == 0:
+                return None
+            self._git(["merge", "--abort"], ws)
+            return StageResult(outcome="failed", cause_code="merge_conflict")
+
+        rebase = self._git([*identity, "rebase", upstream], ws)
         if rebase.returncode == 0:
             return None
 
         # Conflict (or another rebase failure): always abort cleanly first.
         self._git(["rebase", "--abort"], ws)
 
-        run_id = ws.run_id
         attempt_key = self._job_key(run_id, _ATTEMPT_JOB_SUFFIX)
         already_attempted = ws_mod.find_commit_by_job(ws, attempt_key) is not None
         if already_attempted:
             return StageResult(outcome="failed", cause_code="merge_conflict")
 
-        # Record the attempt marker before invoking the agent so a second
-        # conflict (even after a crash mid-resolution) never retries again.
+        # Record and push the attempt marker before invoking the agent so the
+        # one-attempt cap survives a crash or a retry picked up by another host.
         ws_mod.write_context(
             ws, "integration_conflict_attempt.marker", f"attempted for {run_id}\n"
         )
         ws_mod.commit(ws, "chore(line): record integration conflict-resolution attempt", attempt_key)
+        marker_push = self._push_force_with_lease(ws)
+        if marker_push is not None:
+            return marker_push
 
         agent_result = self._resolve_conflict(ws, default_branch)
         if not agent_result.ok:
@@ -339,8 +360,15 @@ class IntegrationStageHandler:
                 cause_code=_sanitize(f"merge_conflict_validate_failed:\n{validate_log}"),
             )
 
-        resolved_key = self._job_key(run_id, _RESOLVED_JOB_SUFFIX)
+        # The marker keeps the commit non-empty even when the agent already
+        # committed its merge, so the resolved trailer always lands.
+        ws_mod.write_context(
+            ws, "integration_conflict_resolved.marker", f"resolved for {run_id}\n"
+        )
         ws_mod.commit(ws, "fix(line): resolve merge conflict with origin/" + default_branch, resolved_key)
+        if self._git(["merge-base", "--is-ancestor", upstream, "HEAD"], ws).returncode != 0:
+            # The agent edited files but never merged origin/<default>.
+            return StageResult(outcome="failed", cause_code="merge_conflict")
         return None
 
     def _push_force_with_lease(self, ws: RunWorkspace) -> Optional[StageResult]:
@@ -407,6 +435,22 @@ class IntegrationStageHandler:
                     return _truncate(stripped, 120)
         return f"DarkFac run {run_id}"
 
+    def _restore_context(self, ws: RunWorkspace, strip_sha: str, dest: Path) -> Optional[Path]:
+        """Copy `.darkfac/runs/<run_id>/` as of `<strip_sha>^` into `dest`."""
+        prefix = f".darkfac/runs/{ws.run_id}/"
+        listing = self._git(["ls-tree", "-r", "--name-only", f"{strip_sha}^", "--", prefix], ws)
+        names = [n for n in (listing.stdout or "").splitlines() if n.startswith(prefix)]
+        if listing.returncode != 0 or not names:
+            return None
+        for name in names:
+            shown = self._git(["show", f"{strip_sha}^:{name}"], ws)
+            if shown.returncode != 0:
+                continue
+            target = dest / name[len(prefix):]
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(shown.stdout or "", encoding="utf-8")
+        return dest
+
     def _strip_context(
         self, ws: RunWorkspace, context: StageContext
     ) -> tuple[str, str, Optional[StageResult]]:
@@ -421,12 +465,23 @@ class IntegrationStageHandler:
         strip_key = self._job_key(run_id, _STRIP_JOB_SUFFIX)
         directory = ws_mod.context_dir(ws)
 
-        if ws_mod.find_commit_by_job(ws, strip_key) is not None:
-            return (
-                f"DarkFac run {run_id}",
-                "(contexto do run ja removido em uma tentativa anterior desta integracao)",
-                None,
-            )
+        strip_sha = ws_mod.find_commit_by_job(ws, strip_key)
+        if strip_sha is not None:
+            # Already stripped by an earlier call (e.g. `gh pr create` failed
+            # afterwards): rebuild title/body from the strip commit's parent.
+            with tempfile.TemporaryDirectory() as tmp:
+                restored = self._restore_context(ws, strip_sha, Path(tmp))
+                if restored is None:
+                    return (
+                        f"DarkFac run {run_id}",
+                        "(contexto do run ja removido em uma tentativa anterior desta integracao)",
+                        None,
+                    )
+                return (
+                    self._derive_title(restored, run_id),
+                    self._compose_report_body(restored, context),
+                    None,
+                )
 
         title = self._derive_title(directory, run_id) if directory.exists() else f"DarkFac run {run_id}"
         body = (
@@ -457,6 +512,25 @@ class IntegrationStageHandler:
             return None
         for item in items:
             if isinstance(item, dict) and item.get("state") == "OPEN":
+                return item
+        return None
+
+    def _find_merged_pr(self, ws: RunWorkspace) -> Optional[dict[str, Any]]:
+        result = self._gh(
+            [
+                "pr", "list", "--head", ws.branch, "--state", "merged",
+                "--json", "number,url,state,mergeCommit",
+            ],
+            ws,
+        )
+        if not result.ok:
+            return None
+        try:
+            items = json.loads(result.stdout or "[]")
+        except json.JSONDecodeError:
+            return None
+        for item in items:
+            if isinstance(item, dict) and item.get("state") == "MERGED":
                 return item
         return None
 
@@ -654,6 +728,17 @@ class IntegrationStageHandler:
             ws = ws_mod.checkout(self.project, run_id)
         except WorkspaceError as exc:
             return StageResult(outcome="retry", cause_code=_sanitize(f"workspace_checkout_failed: {exc}"))
+
+        # Idempotency: a previous call may have merged (or queued `--auto`)
+        # and deleted the branch before returning; never redo the work.
+        merged = self._find_merged_pr(ws)
+        if merged is not None:
+            merged_sha = (merged.get("mergeCommit") or {}).get("oid")
+            if merged_sha:
+                ancestry_error = self._confirm_remote_ancestry(ws, default_branch, merged_sha)
+                if ancestry_error is not None:
+                    return ancestry_error
+                return StageResult(outcome="success", output_refs=[merged.get("url") or "", merged_sha])
 
         rebase_result = self._rebase_onto_default(ws, default_branch)
         if rebase_result is not None:
