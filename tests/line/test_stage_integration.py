@@ -21,6 +21,7 @@ from typing import Any
 
 import pytest
 
+from core.line import stage_integration
 from core.line import workspace as ws_mod
 from core.line.agent_cli import AgentRequest, AgentResult
 from core.line.stage_integration import IntegrationStageHandler
@@ -401,6 +402,10 @@ def _conflicting_run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, run_id: st
     origin = _init_bare_origin(tmp_path)
     project = _project(str(origin))
     monkeypatch.setenv("DARKFAC_WORKSPACES", str(tmp_path / "root"))
+    # Pin the route and skip cooldown bookkeeping: the result must not depend
+    # on which agent CLIs or quota state the test host happens to have.
+    monkeypatch.setattr(stage_integration, "pick", lambda *a, **k: ("claude", "sonnet"))
+    monkeypatch.setattr(stage_integration, "record_result", lambda *a, **k: None)
     ws = checkout(project, run_id)
     _advance_main(tmp_path, origin, "changed-on-main\n", "_advance_1")
     (ws.path / "shared.txt").write_text("changed-on-branch\n", encoding="utf-8")
