@@ -100,7 +100,8 @@ def run_hf15_runner(argv: Optional[Sequence[str]] = None) -> int:
 
     # Resolve environment config
     base_config = load_hf15_config(args.config)
-    base_config = base_config.model_copy(update={"live_mode": args.mode == "live"})
+    if args.mode == "live":
+        base_config = base_config.model_copy(update={"live_mode": True})
 
     # Resolve gate filters
     gate_filter: Optional[List[str]] = None
