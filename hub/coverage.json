@@ -126,7 +126,7 @@
       "pending": "DH-11"
     },
     "GET /api/harness/workers": {
-      "pending": "DH-01"
+      "surface": "factory-health-block"
     },
     "GET /api/health/ping": {
       "surface": "services-grid"
@@ -135,13 +135,13 @@
       "surface": "services-grid"
     },
     "GET /api/hf15/metrics": {
-      "pending": "DH-01"
+      "surface": "factory-health-block"
     },
     "POST /api/hf15/rollback/drill": {
-      "pending": "DH-01"
+      "pending": "DH-17"
     },
     "GET /api/hf15/status": {
-      "pending": "DH-01"
+      "surface": "factory-health-block"
     },
     "GET /api/infra/cards": {
       "surface": "infrastructure-cards-section"
@@ -153,19 +153,19 @@
       "surface": "infrastructure-cards-section"
     },
     "GET /api/integrations/n8n/status": {
-      "pending": "DH-01"
+      "surface": "factory-health-block"
     },
     "POST /api/integrations/n8n/sync": {
-      "pending": "DH-01"
+      "pending": "DH-17"
     },
     "POST /api/integrations/n8n/trigger": {
-      "pending": "DH-01"
+      "pending": "DH-17"
     },
     "GET /api/integrations/n8n/workflows": {
-      "pending": "DH-01"
+      "surface": "factory-health-block"
     },
     "GET /api/integrations/telegram/status": {
-      "pending": "DH-01"
+      "surface": "factory-health-block"
     },
     "GET /api/learning-packs": {
       "pending": "DH-06"
@@ -186,13 +186,13 @@
       "pending": "DH-06"
     },
     "GET /api/notifications": {
-      "pending": "DH-01"
+      "surface": "factory-alerts-strip"
     },
     "POST /api/notifications/check-quotas": {
-      "pending": "DH-01"
+      "pending": "DH-17"
     },
     "POST /api/notifications/{notification_id}/acknowledge": {
-      "pending": "DH-01"
+      "pending": "DH-17"
     },
     "POST /api/ollama/generate": {
       "machine": "Proxy de inferência para scripts; a UI usa /api/playground/generate"
@@ -312,7 +312,7 @@
       "pending": "DH-07"
     },
     "GET /api/webhooks/events": {
-      "pending": "DH-01"
+      "surface": "factory-health-block"
     },
     "POST /api/webhooks/github": {
       "machine": "Webhook do GitHub assinado por HMAC; eventos aparecem via /api/webhooks/events"
@@ -326,7 +326,7 @@
   },
   "core_modules": {
     "acceptance": {
-      "pending": "DH-01"
+      "surface": "factory-health-block"
     },
     "adoption": {
       "pending": "DH-08"
@@ -368,7 +368,7 @@
       "surface": "infrastructure-cards-section"
     },
     "integrations": {
-      "pending": "DH-01"
+      "surface": "factory-health-block"
     },
     "knowledge": {
       "pending": "DH-06"
@@ -386,7 +386,7 @@
       "pending": "DH-07"
     },
     "notifications": {
-      "pending": "DH-01"
+      "surface": "factory-health-block"
     },
     "orchestrator": {
       "surface": "tasks-dashboard-section"
