@@ -259,7 +259,19 @@ def materialize_result(
                     ticket_id=job_key.ticket_id,
                     plan_version=job_key.plan_version,
                     stage=next_stage,
-                    iteration=0,
+                    # HF-27-08 review item 1/11(d): mirror the *source*
+                    # job's own iteration, not a hardcoded 0. A D-b
+                    # cross-stage bounce back to development creates it at
+                    # iteration N>0; its own eventual success must route
+                    # through validation/independent_review/integration/
+                    # build_deploy at that same iteration N, or the
+                    # successor JobKey collides with the already-succeeded
+                    # iteration-0 row from the first pass (ON CONFLICT DO
+                    # NOTHING would silently swallow it, stalling the run).
+                    # Still fully idempotent: replaying the SAME job_key's
+                    # success always derives the same iteration, independent
+                    # of store state.
+                    iteration=job_key.iteration,
                 )
             )
         if job_key.stage == "build_deploy":
