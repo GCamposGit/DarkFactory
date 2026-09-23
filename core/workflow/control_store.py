@@ -365,14 +365,23 @@ class SQLiteControlStore:
                     ),
                 )
 
-                # HF-27-08 review item 9: stamp the initial grill job with
-                # the line's required_capabilities (git + harness:any for a
-                # registered line project; '[]' -- unchanged prior behaviour
-                # -- for anything else), so a worker without any harness
-                # never claims it, same as every later line stage.
-                from core.workflow.successors import _required_capabilities_json
-
-                grill_caps = _required_capabilities_json(command.project_id, "grill")
+                # HF-27-08 review item 9: attempted (see git history) to
+                # stamp the initial grill job's required_capabilities from
+                # the registered project, mirroring every later line stage.
+                # REVERTED: ControlStore.accept() is the shared HF-05 intake
+                # entrypoint, used by many non-line callers/tests with
+                # project_id="darkfac" as a convenient default string, and
+                # the *real* registered "darkfac" project (.factory/projects.json)
+                # legitimately has its own repo_url/deploy/smoke config --
+                # the factory manages itself through the line. There is no
+                # reliable signal at accept() time to tell "a genuine line
+                # demand for a line-capable project" apart from "a generic
+                # HF-05 test/caller that happens to reuse project_id=darkfac
+                # with no intention of the line's capability gating"; gating
+                # unconditionally broke 25 pre-existing, unrelated tests
+                # across test_control_store.py, test_public_autonomous_intake.py,
+                # etc. Left as a documented gap for a future ticket to close
+                # properly (e.g. an explicit is_line flag on IntakeCommand).
                 cur.execute(
                     """
                     INSERT INTO jobs (
@@ -380,12 +389,11 @@ class SQLiteControlStore:
                         role, required_capabilities, fencing_token, timeout_seconds,
                         retry_count, max_retries, actual_cost, output_refs, evidence_refs,
                         created_at, updated_at, ready_at
-                    ) VALUES (?, ?, '1.0', 'grill', 0, 'pending', 'grill_engine', ?, 0, 1800, 0, 3, 0.0, '[]', '[]', ?, ?, ?)
+                    ) VALUES (?, ?, '1.0', 'grill', 0, 'pending', 'grill_engine', '[]', 0, 1800, 0, 3, 0.0, '[]', '[]', ?, ?, ?)
                     """,
                     (
                         run_id,
                         command.project_id,
-                        grill_caps,
                         now_iso,
                         now_iso,
                         now_iso,

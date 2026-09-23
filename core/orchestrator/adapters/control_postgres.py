@@ -281,11 +281,14 @@ class PostgresControlStore:
                             ),
                         )
 
-                        # HF-27-08 review item 9: same required_capabilities
-                        # stamping as the SQLite adapter.
-                        from core.workflow.successors import _required_capabilities_json
-
-                        grill_caps = _required_capabilities_json(command.project_id, "grill")
+                        # HF-27-08 review item 9: reverted -- see the
+                        # matching (detailed) comment in
+                        # core.workflow.control_store.SQLiteControlStore.accept().
+                        # Stamping the shared grill job broke 25 pre-existing,
+                        # unrelated tests that reuse project_id="darkfac" as a
+                        # generic default with no line intent, since the real
+                        # registered "darkfac" project legitimately has its
+                        # own repo_url/deploy config.
                         cur.execute(
                             """
                             INSERT INTO jobs (
@@ -293,9 +296,9 @@ class PostgresControlStore:
                                 role, required_capabilities, fencing_token, timeout_seconds,
                                 retry_count, max_retries, actual_cost, output_refs, evidence_refs,
                                 created_at, updated_at, ready_at
-                            ) VALUES (%s, %s, '1.0', 'grill', 0, 'pending', 'grill_engine', %s::jsonb, 0, 1800, 0, 3, 0.0, '[]'::jsonb, '[]'::jsonb, %s, %s, %s)
+                            ) VALUES (%s, %s, '1.0', 'grill', 0, 'pending', 'grill_engine', '[]'::jsonb, 0, 1800, 0, 3, 0.0, '[]'::jsonb, '[]'::jsonb, %s, %s, %s)
                             """,
-                            (run_id, command.project_id, grill_caps, now_utc, now_utc, now_utc),
+                            (run_id, command.project_id, now_utc, now_utc, now_utc),
                         )
 
                         outbox_payload = json.dumps(

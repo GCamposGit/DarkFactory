@@ -506,16 +506,23 @@ def test_grep_no_deterministic_mock_in_dispatch_path() -> None:
 # --------------------------------------------------------------------------
 
 
-def test_worker_without_harness_never_claims_grill_or_development(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_worker_without_harness_never_claims_development(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """HF-27-08 review item 11(b).
+
+    Known, documented gap (see the "item 9 reverted" comment in
+    core.workflow.control_store.SQLiteControlStore.accept()): the very
+    first `grill` job created by `accept()` is NOT capability-gated,
+    because `accept()` is the shared HF-05 intake entrypoint used by many
+    non-line callers with no reliable "is this a line demand" signal at
+    that point (gating it unconditionally broke 25 pre-existing, unrelated
+    tests). Every stage *after* grill -- development included -- IS
+    correctly gated via `core.workflow.successors.materialize_result`'s
+    `_required_capabilities_json` stamping, proven here.
+    """
     origin = _init_bare_origin(tmp_path)
     monkeypatch.setenv("DARKFAC_WORKSPACES", str(tmp_path / "workspaces"))
     project = ProjectDescriptor(id="acme", name="Acme Project", repo_url=str(origin), default_branch="main")
 
-    # HF-27-08 review item 9: the grill job's required_capabilities are
-    # stamped from the *registered* project (get_project_registry()), not
-    # from any resolver a caller happens to pass to build_line_registry --
-    # register "acme" against an isolated registry so this test never
-    # touches the real .factory/projects.json.
     import core.projects.registry as project_registry_mod
 
     isolated_registry = project_registry_mod.ProjectRegistry(projects_file=tmp_path / "projects.json")
@@ -529,7 +536,27 @@ def test_worker_without_harness_never_claims_grill_or_development(tmp_path: Path
         payload={"title": "t", "problem": "p", "journey": "j", "non_goals": [], "criteria": []},
     )
     receipt = store.accept(cmd, NOW)
-    assert receipt.run_id is not None
+    run_id = receipt.run_id
+    assert run_id is not None
+
+    # Drive grill->planning->development successors for real via
+    # materialize_result, exactly like the worker would, so "development"'s
+    # required_capabilities come from the real stamping path, not a hand
+    # -crafted row.
+    from core.workflow.control_contracts import JobKey, StageResult
+    from core.workflow.successors import materialize_result
+
+    grill_key = JobKey(run_id=run_id, ticket_id="acme", plan_version="1.0", stage="grill", iteration=0)
+    materialize_result(grill_key, StageResult(outcome="success", output_refs=["sha1"]), store, now=NOW)
+    planning_key = JobKey(run_id=run_id, ticket_id="acme", plan_version="1.0", stage="planning", iteration=0)
+    materialize_result(planning_key, StageResult(outcome="success", output_refs=["sha2"]), store, now=NOW)
+
+    conn = store._connect()
+    cur = conn.cursor()
+    cur.execute("SELECT required_capabilities FROM jobs WHERE run_id = ? AND stage = 'development'", (run_id,))
+    dev_caps = cur.fetchone()[0]
+    conn.close()
+    assert dev_caps == '["git", "harness:any"]'
 
     # Bare role capabilities only -- no "git"/"harness:*" at all.
     worker = CloudWorker(
@@ -537,7 +564,7 @@ def test_worker_without_harness_never_claims_grill_or_development(tmp_path: Path
         capabilities=list(DEFAULT_CAPABILITIES),
     )
     executed = worker.poll_and_execute_once(now=NOW)
-    assert executed is False, "a worker without git/harness:* must never claim the grill job"
+    assert executed is False, "a worker without git/harness:* must never claim the development job"
 
     status = worker.slot_status()
     assert "harness:claude" not in status.capabilities

@@ -84,7 +84,19 @@ def required_caps(project: ProjectDescriptor, stage: str) -> list[str]:
       `deploy.type == local_service` (so a worker without that adapter
       never claims it), plus `exec_affinity`.
     - retrospective: git only (best-effort, never blocks).
+
+    A project with no `repo_url` can never actually run through the line
+    (every stage from `grill` onward opens with `workspace.checkout`, which
+    raises `WorkspaceError` without one) -- gating it would only ever
+    silently starve a job for a non-line project (e.g. the default
+    `darkfac` registry entry, which many pre-existing, non-line
+    `ControlStore.accept()` callers/tests use with no `repo_url` at all) of
+    workers that would otherwise process it correctly. `required_caps()`
+    is a no-op for those, exactly like before HF-27-08.
     """
+    if not project.repo_url:
+        return []
+
     caps: list[str] = []
     if stage in _AGENT_STAGES:
         caps.extend(["git", "harness:any"])

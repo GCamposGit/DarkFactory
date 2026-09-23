@@ -55,8 +55,11 @@ def test_legacy_stage_dispatch_is_missing_handler(legacy_stage: str) -> None:
 # --------------------------------------------------------------------------
 
 
+_REPO_URL = "https://github.com/acme/acme.git"
+
+
 def test_required_caps_agent_stages_need_git_and_harness_any() -> None:
-    project = ProjectDescriptor(id="acme", name="Acme")
+    project = ProjectDescriptor(id="acme", name="Acme", repo_url=_REPO_URL)
     for stage in ("grill", "planning", "development", "independent_review", "integration"):
         caps = bindings.required_caps(project, stage)
         assert "git" in caps
@@ -64,7 +67,7 @@ def test_required_caps_agent_stages_need_git_and_harness_any() -> None:
 
 
 def test_required_caps_validation_needs_git_no_harness() -> None:
-    project = ProjectDescriptor(id="acme", name="Acme")
+    project = ProjectDescriptor(id="acme", name="Acme", repo_url=_REPO_URL)
     caps = bindings.required_caps(project, "validation")
     assert "git" in caps
     assert "harness:any" not in caps
@@ -72,7 +75,7 @@ def test_required_caps_validation_needs_git_no_harness() -> None:
 
 def test_required_caps_build_deploy_local_service_needs_target_capability() -> None:
     project = ProjectDescriptor(
-        id="acme", name="Acme", deploy=DeployConfig(type=DeployTargetType.LOCAL_SERVICE, params={})
+        id="acme", name="Acme", repo_url=_REPO_URL, deploy=DeployConfig(type=DeployTargetType.LOCAL_SERVICE, params={})
     )
     caps = bindings.required_caps(project, "build_deploy")
     assert "target:local_service" in caps
@@ -80,8 +83,20 @@ def test_required_caps_build_deploy_local_service_needs_target_capability() -> N
 
 
 def test_required_caps_retrospective_needs_only_git() -> None:
-    project = ProjectDescriptor(id="acme", name="Acme")
+    project = ProjectDescriptor(id="acme", name="Acme", repo_url=_REPO_URL)
     assert bindings.required_caps(project, "retrospective") == ["git"]
+
+
+def test_required_caps_no_repo_url_is_never_gated() -> None:
+    """A project with no repo_url can never run through the line
+    (workspace.checkout requires one), so gating it would only starve a
+    non-line project (e.g. the default 'darkfac' registry entry, used by
+    many pre-existing non-line ControlStore.accept() callers/tests) of
+    workers. required_caps() must stay a no-op for it, as before HF-27-08."""
+    project = ProjectDescriptor(id="darkfac", name="Dark Factory (Core)")
+    assert project.repo_url is None
+    for stage in bindings.LINE_STAGES:
+        assert bindings.required_caps(project, stage) == []
 
 
 # --------------------------------------------------------------------------
