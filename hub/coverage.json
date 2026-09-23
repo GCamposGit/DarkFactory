@@ -171,22 +171,22 @@
       "surface": "factory-health-block"
     },
     "GET /api/learning-packs": {
-      "pending": "DH-06"
+      "surface": "learning-drawer"
     },
     "POST /api/learning-packs/generate": {
-      "pending": "DH-06"
+      "machine": "Geracao autonoma de Learning Packs acionada via hooks de sessao, CLI e agentes da fabrica (DH-06)."
     },
     "GET /api/learning-packs/latest": {
-      "pending": "DH-06"
+      "surface": "learning-drawer"
     },
     "GET /api/learning-packs/{pack_id}": {
-      "pending": "DH-06"
+      "surface": "learning-drawer"
     },
     "GET /api/learning-packs/{pack_id}/export-anki": {
-      "pending": "DH-06"
+      "surface": "learning-drawer"
     },
     "GET /api/learning-packs/{pack_id}/html": {
-      "pending": "DH-06"
+      "surface": "learning-drawer"
     },
     "GET /api/notifications": {
       "surface": "factory-alerts-strip"
@@ -338,7 +338,7 @@
       "pending": "DH-08"
     },
     "audio": {
-      "pending": "DH-06"
+      "internal": "Motor headless de transcricao local faster-whisper e contingencia Groq acionado por CLI (DH-06)."
     },
     "benchmarks": {
       "surface": "benchmarks-modal"
@@ -374,13 +374,13 @@
       "surface": "factory-health-block"
     },
     "knowledge": {
-      "pending": "DH-06"
+      "surface": "learning-drawer"
     },
     "learning": {
-      "pending": "DH-06"
+      "surface": "learning-drawer"
     },
     "learning_pack": {
-      "pending": "DH-06"
+      "surface": "learning-drawer"
     },
     "line": {
       "pending": "DH-08"
@@ -410,7 +410,7 @@
       "pending": "DH-08"
     },
     "research": {
-      "pending": "DH-06"
+      "surface": "learning-drawer"
     },
     "roadmap": {
       "surface": "roadmap-drawer"

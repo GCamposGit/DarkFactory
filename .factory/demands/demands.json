@@ -823,7 +823,7 @@
     "project_id": "darkfac",
     "title": "DH-06 Aprendizado e conhecimento no DarkHub",
     "origin": "user",
-    "status": "planned",
+    "status": "completed",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "next",
@@ -839,7 +839,7 @@
     "non_goals": [
       "Não acoplar geração pesada síncrona na requisição HTTP"
     ],
-    "reachability_contract": "",
+    "reachability_contract": "python -m pytest tests/test_learning_knowledge_consultation.py -v",
     "acceptance_criteria": [
       "Central de Learning Packs operacional no DarkHub em modo somente-leitura",
       "Visualizador HTML e exportação acessíveis"
@@ -850,6 +850,6 @@
       "USR-52"
     ],
     "created_at": "2026-09-23T20:45:00.000000Z",
-    "updated_at": "2026-09-23T20:45:00.000000Z"
+    "updated_at": "2026-09-23T22:30:00.000000Z"
   }
 ]
