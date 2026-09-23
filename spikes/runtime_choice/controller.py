@@ -300,7 +300,7 @@ class ScenarioController:
                     # Monotonic recovery timing
                     recovery_start = time.monotonic()
                     # Wait for lease to expire
-                    time.sleep(self.config.lease_seconds + 0.1)
+                    time.sleep(self.config.lease_seconds + 0.35)
 
                     # Spawn second driver process to resume workflow
                     process2 = self._spawn_driver(config_path)
@@ -372,7 +372,7 @@ class ScenarioController:
                     exit_codes.append(process.poll() or 1)
 
                     recovery_start = time.monotonic()
-                    time.sleep(self.config.lease_seconds + 0.1)
+                    time.sleep(self.config.lease_seconds + 0.35)
 
                     process2 = self._spawn_driver(config_path)
                     pids.append(process2.pid)
