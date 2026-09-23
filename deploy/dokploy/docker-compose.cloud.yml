@@ -58,8 +58,15 @@ services:
     environment:
       - DARKFAC_ROLE=worker
       - DARKFAC_WORKER_ID=${DARKFAC_WORKER_ID:-cloud-worker-1}
+      # HF-27-09 topology: VPS caps/priority. Desktop and Notebook run the
+      # same image/command on-prem via scripts/start_onprem_worker.ps1 with
+      # their own DARKFAC_WORKER_CAPS/DARKFAC_WORKER_PRIORITY instead.
+      - DARKFAC_WORKER_CAPS=${DARKFAC_WORKER_CAPS:-git,gh,node,python,harness:claude,harness:codex}
+      - DARKFAC_WORKER_PRIORITY=${DARKFAC_WORKER_PRIORITY:-primary}
+      - DARKFAC_WORKSPACES=/workspaces
+      - CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN:-}
       - DARKFAC_HF02_DATABASE_URL=${DARKFAC_HF02_DATABASE_URL}
-      - DARKFAC_MAX_CONCURRENT_SLOTS=${DARKFAC_MAX_CONCURRENT_SLOTS:-2}
+      - DARKFAC_MAX_CONCURRENT_SLOTS=${DARKFAC_MAX_CONCURRENT_SLOTS:-1}
       - DATA_DIR=/app/data
       - FACTORY_DIR=/app/.factory
       - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-}
@@ -75,13 +82,17 @@ services:
     volumes:
       - darkfac-artifacts:/app/.factory/artifacts
       - darkfac-test-logs:/app/.factory/test_logs
+      - darkfac-codex-auth:/home/darkfac/.codex
+      - darkfac-workspaces:/workspaces
     networks:
       - dokploy-network
     deploy:
       resources:
         limits:
           cpus: "1.5"
-          memory: 1536M
+          # CX23 (2 vCPU, 4 GB): 1 agent slot; 2 GB + coordinator 1.5 GB leaves
+          # headroom for Dokploy/OS. Raise only after a VPS upgrade.
+          memory: 2048M
         reservations:
           cpus: "0.2"
           memory: 256M
@@ -91,6 +102,10 @@ volumes:
     name: darkfac-artifacts
   darkfac-test-logs:
     name: darkfac-test-logs
+  darkfac-codex-auth:
+    name: darkfac-codex-auth
+  darkfac-workspaces:
+    name: darkfac-workspaces
 
 networks:
   dokploy-network:

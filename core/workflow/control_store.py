@@ -30,6 +30,24 @@ from core.workflow.control_contracts import (
 )
 
 
+def _is_ready_enough(created_at_raw: Any, now: datetime, ready_age_sec: float) -> bool:
+    """True if `created_at_raw` (an isoformat timestamp) is at least `ready_age_sec` old.
+
+    Any parse failure is treated as "ready" so a malformed/legacy timestamp
+    never blocks a claim outright (HF-27-09 filter is a soft priority hint,
+    not a correctness gate).
+    """
+    try:
+        created_at = datetime.fromisoformat(str(created_at_raw))
+    except (TypeError, ValueError):
+        return True
+    if created_at.tzinfo is None and now.tzinfo is not None:
+        created_at = created_at.replace(tzinfo=now.tzinfo)
+    elif created_at.tzinfo is not None and now.tzinfo is None:
+        now = now.replace(tzinfo=created_at.tzinfo)
+    return (now - created_at).total_seconds() >= ready_age_sec
+
+
 class ControlStore(Protocol):
     """Canonical transactional control store interface abstracting storage backends."""
 
@@ -37,8 +55,15 @@ class ControlStore(Protocol):
         """Accept an intake command transactionally with idempotency checking."""
         ...
 
-    def claim(self, worker: str, capabilities: list[str], now: datetime) -> Claim | None:
-        """Atomically query and lock the next pending job matching worker capabilities."""
+    def claim(
+        self, worker: str, capabilities: list[str], now: datetime, ready_age_sec: float = 0.0
+    ) -> Claim | None:
+        """Atomically query and lock the next pending job matching worker capabilities.
+
+        `ready_age_sec` (HF-27-09, default 0.0 preserves prior behaviour) skips
+        jobs created less than that many seconds ago, so a lower-priority
+        worker only claims what a higher-priority one left behind.
+        """
         ...
 
     def heartbeat(self, claim: Claim, now: datetime) -> Claim:
@@ -420,8 +445,14 @@ class SQLiteControlStore:
         finally:
             conn.close()
 
-    def claim(self, worker: str, capabilities: list[str], now: datetime) -> Claim | None:
-        """Atomically query and lock the next pending job matching worker capabilities."""
+    def claim(
+        self, worker: str, capabilities: list[str], now: datetime, ready_age_sec: float = 0.0
+    ) -> Claim | None:
+        """Atomically query and lock the next pending job matching worker capabilities.
+
+        `ready_age_sec` (HF-27-09, default 0.0 preserves prior behaviour) skips
+        jobs created less than that many seconds ago.
+        """
         now_iso = now.isoformat()
         expires_at = (now + timedelta(seconds=self.lease_duration_sec)).isoformat()
 
@@ -431,7 +462,8 @@ class SQLiteControlStore:
             cur = conn.cursor()
             cur.execute(
                 """
-                SELECT run_id, ticket_id, plan_version, stage, iteration, fencing_token, role, required_capabilities
+                SELECT run_id, ticket_id, plan_version, stage, iteration, fencing_token, role,
+                       required_capabilities, created_at
                 FROM jobs
                 WHERE status = 'pending'
                 ORDER BY created_at ASC
@@ -441,9 +473,12 @@ class SQLiteControlStore:
             chosen_row = None
             for row in rows:
                 req = json.loads(row["required_capabilities"])
-                if all(c in capabilities for c in req):
-                    chosen_row = row
-                    break
+                if not all(c in capabilities for c in req):
+                    continue
+                if ready_age_sec > 0.0 and not _is_ready_enough(row["created_at"], now, ready_age_sec):
+                    continue
+                chosen_row = row
+                break
 
             if not chosen_row:
                 conn.commit()

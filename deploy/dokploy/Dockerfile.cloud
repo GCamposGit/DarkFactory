@@ -1,22 +1,57 @@
 # syntax=docker/dockerfile:1
 # Dark Factory Cloud Coordinator & Worker Dockerfile (Dokploy PaaS / Hetzner VPS)
 # Ticket: HF-03-01 | ADR-HF-001 / INFRA-05 / INFRA-06 / INFRA-07
+# HF-27-09 adds the agent-CLI toolchain (git, gh, Node, Claude Code, Codex,
+# lftp) so the same image can run a `core.orchestrator.cloud_worker` with
+# `harness:claude` / `harness:codex` capabilities on the VPS.
 
 FROM python:3.12-slim AS base
+
+# Pinned versions (HF-27-09). Bump deliberately; see
+# docs/runbooks/HF-27-09_topology.md for how to check for/apply updates.
+ARG NODE_MAJOR=20
+ARG GH_CLI_VERSION=2.63.2
+ARG CLAUDE_CODE_VERSION=2.0.1
+ARG CODEX_CLI_VERSION=0.48.0
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONPATH=/app \
-    DARKFAC_ENV=production
+    DARKFAC_ENV=production \
+    HOME=/home/darkfac
 
 WORKDIR /app
 
-# Install minimal OS utilities for health probes and process inspection
+# Install minimal OS utilities for health probes/process inspection, plus
+# git (workspace checkouts), lftp (FTP-target deploys) and gnupg (gh apt key).
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     ca-certificates \
+    gnupg \
     procps \
+    git \
+    lftp \
     && rm -rf /var/lib/apt/lists/*
+
+# Install GitHub CLI (gh) from the official apt repository, version pinned.
+RUN mkdir -p -m 755 /etc/apt/keyrings \
+    && curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg -o /etc/apt/keyrings/githubcli-archive-keyring.gpg \
+    && chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg \
+    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" > /etc/apt/sources.list.d/github-cli.list \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends "gh=${GH_CLI_VERSION}*" \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Node.js LTS from NodeSource (major version pinned via build arg).
+RUN curl -fsSL "https://deb.nodesource.com/setup_${NODE_MAJOR}.x" | bash - \
+    && apt-get install -y --no-install-recommends nodejs \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install pinned agent CLIs globally via npm: Claude Code and Codex.
+RUN npm install -g \
+    "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}" \
+    "@openai/codex@${CODEX_CLI_VERSION}" \
+    && npm cache clean --force
 
 # Install core requirements and pinned durable execution libraries
 COPY requirements.txt .
@@ -37,11 +72,20 @@ COPY spikes /app/spikes
 COPY .factory /app/.factory
 COPY harness.config.json /app/harness.config.json
 
-# Create artifact and log directories with appropriate ownership
-RUN mkdir -p /app/.factory/artifacts /app/.factory/test_logs /app/data && \
-    chown -R darkfac:darkfac /app
+# Create artifact/log directories plus the CLI auth and workspace volumes
+# (HF-27-09): /home/darkfac/.codex holds Codex's auth.json across restarts,
+# /workspaces holds the per-run Git worktrees (core.line.workspace).
+RUN mkdir -p /app/.factory/artifacts /app/.factory/test_logs /app/data \
+             /home/darkfac/.codex /workspaces && \
+    chown -R darkfac:darkfac /app /home/darkfac /workspaces
+
+VOLUME ["/home/darkfac/.codex", "/workspaces"]
 
 USER darkfac
+
+# CLAUDE_CODE_OAUTH_TOKEN is injected at runtime via the Dokploy service's
+# Environment tab (a secret, never baked into the image); see
+# docs/runbooks/HF-27-09_topology.md for the exact screen and field name.
 
 # Default entrypoint delegating to specified command in docker-compose
 CMD ["python", "-m", "core.orchestrator.cloud_coordinator"]
