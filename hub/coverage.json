@@ -1,0 +1,431 @@
+{
+  "version": 1,
+  "description": "Gate de cobertura do DarkHub (USR-42). Veja docs/DARKHUB_ROADMAP.md e rode python scripts/hub_coverage.py.",
+  "api_routes": {
+    "GET /api/benchmarks/domains": {
+      "pending": "DH-05"
+    },
+    "GET /api/benchmarks/domains/{domain}/frontier": {
+      "pending": "DH-05"
+    },
+    "GET /api/benchmarks/empirical": {
+      "pending": "DH-05"
+    },
+    "GET /api/benchmarks/frontier": {
+      "pending": "DH-05"
+    },
+    "GET /api/benchmarks/latest": {
+      "surface": "benchmarks-modal"
+    },
+    "GET /api/benchmarks/proximity": {
+      "pending": "DH-05"
+    },
+    "POST /api/benchmarks/refresh": {
+      "surface": "benchmarks-modal"
+    },
+    "POST /api/benchmarks/route-task": {
+      "pending": "DH-05"
+    },
+    "POST /api/benchmarks/speculative/race": {
+      "pending": "DH-05"
+    },
+    "GET /api/benchmarks/speculative/top3": {
+      "pending": "DH-05"
+    },
+    "GET /api/catalog/components": {
+      "surface": "cross-catalog-section"
+    },
+    "POST /api/catalog/sync": {
+      "pending": "DH-04"
+    },
+    "POST /api/cloud/deploy": {
+      "pending": "DH-09"
+    },
+    "GET /api/cloud/status": {
+      "surface": "infrastructure-cards-section"
+    },
+    "POST /api/content/generate": {
+      "pending": "DH-07"
+    },
+    "POST /api/content/lint": {
+      "pending": "DH-07"
+    },
+    "GET /api/content/presets": {
+      "pending": "DH-07"
+    },
+    "GET /api/credits": {
+      "surface": "api-credits-section"
+    },
+    "POST /api/credits/accounts/{provider_id}": {
+      "surface": "api-credits-section"
+    },
+    "POST /api/credits/refresh": {
+      "surface": "api-credits-section"
+    },
+    "POST /api/demands/guide": {
+      "surface": "demands-drawer"
+    },
+    "POST /api/demands/intake": {
+      "pending": "DH-02"
+    },
+    "GET /api/demands/next-id": {
+      "surface": "demands-drawer"
+    },
+    "GET /api/demands/tickets": {
+      "surface": "demands-drawer"
+    },
+    "POST /api/demands/tickets": {
+      "surface": "demands-drawer"
+    },
+    "GET /api/demands/tickets/{ticket_id}": {
+      "surface": "demands-drawer"
+    },
+    "POST /api/demands/tickets/{ticket_id}/grill": {
+      "surface": "demands-drawer"
+    },
+    "POST /api/demands/tickets/{ticket_id}/grill/submit": {
+      "surface": "demands-drawer"
+    },
+    "PATCH /api/demands/tickets/{ticket_id}/status": {
+      "pending": "DH-03"
+    },
+    "GET /api/enterprise/audit-trail": {
+      "pending": "DH-09"
+    },
+    "POST /api/enterprise/configure": {
+      "pending": "DH-09"
+    },
+    "POST /api/enterprise/evaluate-deploy": {
+      "pending": "DH-09"
+    },
+    "GET /api/enterprise/status": {
+      "surface": "enterprise-security-section"
+    },
+    "POST /api/enterprise/verify-audit": {
+      "surface": "enterprise-security-section"
+    },
+    "POST /api/evolution/evaluate": {
+      "pending": "DH-04"
+    },
+    "POST /api/evolution/promote": {
+      "pending": "DH-04"
+    },
+    "POST /api/evolution/propose": {
+      "pending": "DH-04"
+    },
+    "POST /api/evolution/rollback": {
+      "pending": "DH-04"
+    },
+    "GET /api/evolution/status": {
+      "surface": "evolution-status-container"
+    },
+    "POST /api/harness/execute": {
+      "pending": "DH-11"
+    },
+    "POST /api/harness/run-tests": {
+      "pending": "DH-11"
+    },
+    "GET /api/harness/workers": {
+      "pending": "DH-01"
+    },
+    "GET /api/health/ping": {
+      "surface": "services-grid"
+    },
+    "GET /api/health/ping-all": {
+      "surface": "services-grid"
+    },
+    "GET /api/hf15/metrics": {
+      "pending": "DH-01"
+    },
+    "POST /api/hf15/rollback/drill": {
+      "pending": "DH-01"
+    },
+    "GET /api/hf15/status": {
+      "pending": "DH-01"
+    },
+    "GET /api/infra/cards": {
+      "surface": "infrastructure-cards-section"
+    },
+    "POST /api/infra/cards/refresh": {
+      "surface": "infrastructure-cards-section"
+    },
+    "GET /api/infra/cards/{node_id}": {
+      "surface": "infrastructure-cards-section"
+    },
+    "GET /api/integrations/n8n/status": {
+      "pending": "DH-01"
+    },
+    "POST /api/integrations/n8n/sync": {
+      "pending": "DH-01"
+    },
+    "POST /api/integrations/n8n/trigger": {
+      "pending": "DH-01"
+    },
+    "GET /api/integrations/n8n/workflows": {
+      "pending": "DH-01"
+    },
+    "GET /api/integrations/telegram/status": {
+      "pending": "DH-01"
+    },
+    "GET /api/learning-packs": {
+      "pending": "DH-06"
+    },
+    "POST /api/learning-packs/generate": {
+      "pending": "DH-06"
+    },
+    "GET /api/learning-packs/latest": {
+      "pending": "DH-06"
+    },
+    "GET /api/learning-packs/{pack_id}": {
+      "pending": "DH-06"
+    },
+    "GET /api/learning-packs/{pack_id}/export-anki": {
+      "pending": "DH-06"
+    },
+    "GET /api/learning-packs/{pack_id}/html": {
+      "pending": "DH-06"
+    },
+    "GET /api/notifications": {
+      "pending": "DH-01"
+    },
+    "POST /api/notifications/check-quotas": {
+      "pending": "DH-01"
+    },
+    "POST /api/notifications/{notification_id}/acknowledge": {
+      "pending": "DH-01"
+    },
+    "POST /api/ollama/generate": {
+      "machine": "Proxy de inferência para scripts; a UI usa /api/playground/generate"
+    },
+    "GET /api/ollama/status": {
+      "surface": "playground-drawer"
+    },
+    "GET /api/openrouter/status": {
+      "surface": "playground-drawer"
+    },
+    "POST /api/playground/generate": {
+      "surface": "playground-drawer"
+    },
+    "GET /api/projects": {
+      "surface": "roadmap-drawer"
+    },
+    "GET /api/projects/{project_id}/roadmap": {
+      "surface": "roadmap-drawer"
+    },
+    "GET /api/projects/{project_id}/roadmap/health": {
+      "pending": "DH-10"
+    },
+    "GET /api/projects/{project_id}/roadmap/history": {
+      "pending": "DH-10"
+    },
+    "GET /api/projects/{project_id}/roadmap/history/compare": {
+      "pending": "DH-10"
+    },
+    "GET /api/projects/{project_id}/roadmap/items/{item_id}": {
+      "surface": "roadmap-drawer"
+    },
+    "GET /api/projects/{project_id}/roadmap/progress": {
+      "surface": "roadmap-drawer"
+    },
+    "GET /api/projects/{project_id}/roadmap/sources/{source_id}": {
+      "surface": "roadmap-drawer"
+    },
+    "GET /api/prompts": {
+      "surface": "prompt-vault-drawer"
+    },
+    "GET /api/services": {
+      "surface": "services-grid"
+    },
+    "POST /api/services": {
+      "surface": "services-grid"
+    },
+    "GET /api/services/export": {
+      "surface": "services-grid"
+    },
+    "POST /api/services/import": {
+      "surface": "services-grid"
+    },
+    "POST /api/services/reset-defaults": {
+      "surface": "services-grid"
+    },
+    "DELETE /api/services/{service_id}": {
+      "surface": "services-grid"
+    },
+    "GET /api/services/{service_id}": {
+      "surface": "services-grid"
+    },
+    "PUT /api/services/{service_id}": {
+      "surface": "services-grid"
+    },
+    "POST /api/services/{service_id}/launch": {
+      "machine": "Launcher programático; a UI usa GET /open, que dispara o mesmo fluxo no servidor"
+    },
+    "GET /api/services/{service_id}/open": {
+      "surface": "services-grid"
+    },
+    "POST /api/services/{service_id}/toggle-favorite": {
+      "surface": "services-grid"
+    },
+    "POST /api/services/{service_id}/toggle-pin": {
+      "surface": "services-grid"
+    },
+    "GET /api/session": {
+      "surface": "services-grid"
+    },
+    "GET /api/tasks/dashboard": {
+      "surface": "tasks-dashboard-section"
+    },
+    "POST /api/telemetry/events": {
+      "machine": "Ingestão de telemetria enviada pelos runners, protegida por chave"
+    },
+    "GET /api/telemetry/runs": {
+      "surface": "telemetry-drawer"
+    },
+    "GET /api/telemetry/stats": {
+      "surface": "telemetry-drawer"
+    },
+    "GET /api/telemetry/tickets": {
+      "surface": "telemetry-drawer"
+    },
+    "GET /api/usage/accounts": {
+      "surface": "ai-usage-section"
+    },
+    "POST /api/usage/accounts/refresh": {
+      "surface": "ai-usage-section"
+    },
+    "GET /api/usage/models": {
+      "surface": "ai-usage-section"
+    },
+    "POST /api/usage/models/events": {
+      "machine": "Ingestão de eventos de uso enviados por workers e harnesses (chave compartilhada)"
+    },
+    "POST /api/usage/sync": {
+      "machine": "Sincronização de cotas pela estação local via scripts/sync_usage_to_cloud.py"
+    },
+    "GET /api/visual/gallery": {
+      "pending": "DH-07"
+    },
+    "POST /api/visual/generate": {
+      "pending": "DH-07"
+    },
+    "POST /api/visual/illustrate": {
+      "pending": "DH-07"
+    },
+    "GET /api/webhooks/events": {
+      "pending": "DH-01"
+    },
+    "POST /api/webhooks/github": {
+      "machine": "Webhook do GitHub assinado por HMAC; eventos aparecem via /api/webhooks/events"
+    },
+    "POST /api/webhooks/telegram": {
+      "machine": "Webhook do bot do Telegram consumido pelo gateway n8n"
+    },
+    "POST /api/webhooks/test": {
+      "surface": "infrastructure-cards-section"
+    }
+  },
+  "core_modules": {
+    "acceptance": {
+      "pending": "DH-01"
+    },
+    "adoption": {
+      "pending": "DH-08"
+    },
+    "archetypes": {
+      "pending": "DH-08"
+    },
+    "audio": {
+      "pending": "DH-06"
+    },
+    "benchmarks": {
+      "surface": "benchmarks-modal"
+    },
+    "catalog": {
+      "surface": "cross-catalog-section"
+    },
+    "content": {
+      "pending": "DH-07"
+    },
+    "demands": {
+      "surface": "demands-drawer"
+    },
+    "enterprise": {
+      "surface": "enterprise-security-section"
+    },
+    "evolution": {
+      "surface": "evolution-status-container"
+    },
+    "execution": {
+      "surface": "playground-drawer"
+    },
+    "game": {
+      "pending": "DH-08"
+    },
+    "harness": {
+      "pending": "DH-11"
+    },
+    "infra": {
+      "surface": "infrastructure-cards-section"
+    },
+    "integrations": {
+      "pending": "DH-01"
+    },
+    "knowledge": {
+      "pending": "DH-06"
+    },
+    "learning": {
+      "pending": "DH-06"
+    },
+    "learning_pack": {
+      "pending": "DH-06"
+    },
+    "line": {
+      "pending": "DH-08"
+    },
+    "marketing": {
+      "pending": "DH-07"
+    },
+    "notifications": {
+      "pending": "DH-01"
+    },
+    "orchestrator": {
+      "surface": "tasks-dashboard-section"
+    },
+    "paths": {
+      "internal": "Resolução de caminhos do repositório; utilitário sem estado próprio"
+    },
+    "pilots": {
+      "pending": "DH-08"
+    },
+    "planning": {
+      "pending": "DH-12"
+    },
+    "portfolio": {
+      "pending": "DH-08"
+    },
+    "projects": {
+      "pending": "DH-08"
+    },
+    "research": {
+      "pending": "DH-06"
+    },
+    "roadmap": {
+      "surface": "roadmap-drawer"
+    },
+    "router": {
+      "pending": "DH-05"
+    },
+    "telemetry": {
+      "surface": "telemetry-drawer"
+    },
+    "usage": {
+      "surface": "ai-usage-section"
+    },
+    "visual": {
+      "pending": "DH-07"
+    },
+    "workflow": {
+      "surface": "tasks-dashboard-section"
+    }
+  }
+}

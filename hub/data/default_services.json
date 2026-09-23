@@ -5,7 +5,12 @@
     "url": "http://localhost:11434",
     "category": "local_cluster",
     "description": "Cluster local de inferência (qwen-deep, gpt-review, qwen-fast) rodando a custo $0 e 0ms de latência externa.",
-    "tags": ["local", "ollama", "offline", "inference"],
+    "tags": [
+      "local",
+      "ollama",
+      "offline",
+      "inference"
+    ],
     "icon": "cpu",
     "color": "#10b981",
     "is_favorite": true,
@@ -14,68 +19,138 @@
   },
   {
     "id": "antigravity-core",
-    "name": "Antigravity (Gemini 3.8 Flash)",
+    "name": "Antigravity",
     "url": "https://aistudio.google.com/",
     "category": "code_agents",
-    "description": "Orquestrador central de contexto massivo (1M-2M tokens) e pair programming agentic.",
-    "tags": ["agent", "gemini", "orchestration", "ide"],
+    "description": "Harness agentic do Google com contexto massivo. Carrega o catálogo canônico .agents/skills/ e opera a fábrica pelo contrato AGENTS.md.",
+    "tags": [
+      "google",
+      "gemini",
+      "harness",
+      "agentic",
+      "long-context"
+    ],
     "icon": "sparkles",
     "color": "#3b82f6",
     "is_favorite": true,
     "pinned": true,
-    "is_local": false
+    "is_local": false,
+    "catalog_revision": "2026-09-23"
+  },
+  {
+    "id": "claude-code",
+    "name": "Claude Code",
+    "url": "https://claude.ai/code",
+    "category": "code_agents",
+    "description": "Harness de primeira classe da fábrica. Carrega .claude/skills/ (espelho de .agents/skills/) e usa AGENTS.md como contrato de engenharia.",
+    "tags": [
+      "anthropic",
+      "claude",
+      "harness",
+      "agentic",
+      "piv-loop"
+    ],
+    "icon": "terminal",
+    "color": "#d97706",
+    "is_favorite": true,
+    "pinned": true,
+    "is_local": false,
+    "catalog_revision": "2026-09-23"
+  },
+  {
+    "id": "openai-codex",
+    "name": "OpenAI Codex",
+    "url": "https://chatgpt.com/codex",
+    "category": "code_agents",
+    "description": "Harness Codex da OpenAI usado em planejamento e implementação de tickets HF, com worktrees e PRs próprios.",
+    "tags": [
+      "openai",
+      "codex",
+      "harness",
+      "agentic"
+    ],
+    "icon": "code",
+    "color": "#10a37f",
+    "is_favorite": true,
+    "pinned": false,
+    "is_local": false,
+    "catalog_revision": "2026-09-23"
   },
   {
     "id": "claude-console",
     "name": "Claude Console & Chat",
     "url": "https://claude.ai/",
     "category": "llm_chat",
-    "description": "Claude 3.7 Sonnet com Extended Thinking para planejamento arquitetural profundo e refatorações complexas.",
-    "tags": ["anthropic", "claude", "architecture", "frontier"],
+    "description": "Chat e Console da Anthropic para planejamento arquitetural, revisão profunda e gestão de API keys. Modelos e preços atuais: painel de Benchmarks.",
+    "tags": [
+      "anthropic",
+      "claude",
+      "architecture",
+      "frontier"
+    ],
     "icon": "brain",
     "color": "#d97706",
     "is_favorite": true,
     "pinned": true,
-    "is_local": false
+    "is_local": false,
+    "catalog_revision": "2026-09-23"
   },
   {
     "id": "chatgpt-platform",
     "name": "ChatGPT & OpenAI Platform",
     "url": "https://chatgpt.com/",
     "category": "llm_chat",
-    "description": "Console oficial da OpenAI (GPT-4o, o1, o3-mini) para chat, prototipação e gerenciamento de API keys.",
-    "tags": ["openai", "chatgpt", "gpt-4o", "api"],
+    "description": "Chat e plataforma da OpenAI para prototipação, revisão e gestão de API keys. Modelos e preços atuais: painel de Benchmarks.",
+    "tags": [
+      "openai",
+      "chatgpt",
+      "api-keys",
+      "frontier"
+    ],
     "icon": "bot",
     "color": "#10a37f",
     "is_favorite": true,
     "pinned": true,
-    "is_local": false
+    "is_local": false,
+    "catalog_revision": "2026-09-23"
   },
   {
     "id": "xai-grok",
     "name": "xAI Grok",
     "url": "https://grok.com/",
     "category": "llm_chat",
-    "description": "Grok 4.6 para busca dinâmica em tempo real na web, documentações atualizadas e raciocínio veloz.",
-    "tags": ["grok", "xai", "real-time", "search"],
+    "description": "Chat e harness Grok para busca em tempo real e raciocínio rápido. Opera a fábrica lendo AGENTS.md e FACTORY_RULES.md.",
+    "tags": [
+      "xai",
+      "grok",
+      "harness",
+      "realtime-search"
+    ],
     "icon": "zap",
     "color": "#ef4444",
     "is_favorite": true,
     "pinned": false,
-    "is_local": false
+    "is_local": false,
+    "catalog_revision": "2026-09-23"
   },
   {
     "id": "deepseek-platform",
     "name": "DeepSeek Platform & Chat",
     "url": "https://chat.deepseek.com/",
     "category": "llm_chat",
-    "description": "DeepSeek-R1 e V4 Pro com raciocínio de alta densidade e excelente custo-benefício para lógica complexa.",
-    "tags": ["deepseek", "r1", "reasoning", "cost-effective"],
+    "description": "Chat e API da DeepSeek com raciocínio de alta densidade e ótimo custo-benefício. Modelos e preços atuais: painel de Benchmarks.",
+    "tags": [
+      "deepseek",
+      "r1",
+      "reasoning",
+      "cost-effective"
+    ],
     "icon": "shield-check",
     "color": "#0284c7",
     "is_favorite": false,
     "pinned": false,
-    "is_local": false
+    "is_local": false,
+    "catalog_revision": "2026-09-23"
   },
   {
     "id": "openrouter",
@@ -83,7 +158,12 @@
     "url": "https://openrouter.ai/",
     "category": "infra_apis",
     "description": "Gateway unificado para centenas de modelos de IA com fallback automático e monitoramento de custos.",
-    "tags": ["router", "api", "gateway", "multi-model"],
+    "tags": [
+      "router",
+      "api",
+      "gateway",
+      "multi-model"
+    ],
     "icon": "network",
     "color": "#8b5cf6",
     "is_favorite": true,
@@ -96,7 +176,12 @@
     "url": "https://cloud.siliconflow.cn/",
     "category": "infra_apis",
     "description": "Infraestrutura de inferência ultra-rápida na Ásia para modelos DeepSeek-R1, Qwen3 e FLUX.",
-    "tags": ["siliconflow", "fast-inference", "cloud", "qwen"],
+    "tags": [
+      "siliconflow",
+      "fast-inference",
+      "cloud",
+      "qwen"
+    ],
     "icon": "activity",
     "color": "#06b6d4",
     "is_favorite": false,
@@ -109,7 +194,12 @@
     "url": "https://github.com/",
     "category": "code_agents",
     "description": "Controle de versão, issues, pull requests, GitHub Actions e automação CI/CD.",
-    "tags": ["git", "vcs", "ci-cd", "repo"],
+    "tags": [
+      "git",
+      "vcs",
+      "ci-cd",
+      "repo"
+    ],
     "icon": "git-branch",
     "color": "#6e5494",
     "is_favorite": true,
@@ -122,7 +212,12 @@
     "url": "https://huggingface.co/",
     "category": "code_agents",
     "description": "Repositório global de modelos open-source, datasets, Spaces e pesos GGUF/Safetensors.",
-    "tags": ["models", "open-source", "datasets", "spaces"],
+    "tags": [
+      "models",
+      "open-source",
+      "datasets",
+      "spaces"
+    ],
     "icon": "smile",
     "color": "#f59e0b",
     "is_favorite": false,
@@ -135,7 +230,11 @@
     "url": "https://www.perplexity.ai/",
     "category": "llm_chat",
     "description": "Mecanismo de busca conversacional baseado em IA com citações diretas de fontes científicas e técnicas.",
-    "tags": ["search", "citations", "research"],
+    "tags": [
+      "search",
+      "citations",
+      "research"
+    ],
     "icon": "compass",
     "color": "#14b8a6",
     "is_favorite": false,
@@ -148,7 +247,12 @@
     "url": "https://supabase.com/dashboard",
     "category": "infra_apis",
     "description": "Backend como serviço com Postgres, autenticação, Edge Functions, Realtime e pgvector.",
-    "tags": ["database", "postgres", "auth", "vector"],
+    "tags": [
+      "database",
+      "postgres",
+      "auth",
+      "vector"
+    ],
     "icon": "database",
     "color": "#3ecf8e",
     "is_favorite": false,
@@ -161,7 +265,12 @@
     "url": "https://dash.cloudflare.com/",
     "category": "infra_apis",
     "description": "Gerenciamento de DNS, Workers, D1, KV, Vectorize e túneis de conexão Cloudflare.",
-    "tags": ["edge", "workers", "dns", "cdn"],
+    "tags": [
+      "edge",
+      "workers",
+      "dns",
+      "cdn"
+    ],
     "icon": "cloud",
     "color": "#f38020",
     "is_favorite": false,
@@ -174,7 +283,12 @@
     "url": "https://vercel.com/dashboard",
     "category": "infra_apis",
     "description": "Deploy contínuo e hosting para aplicações frontend e funções serverless.",
-    "tags": ["deploy", "hosting", "serverless", "frontend"],
+    "tags": [
+      "deploy",
+      "hosting",
+      "serverless",
+      "frontend"
+    ],
     "icon": "triangle",
     "color": "#ffffff",
     "is_favorite": false,
@@ -187,13 +301,61 @@
     "url": "http://127.0.0.1:8899",
     "category": "image_audio",
     "description": "Galeria do mestre Giovanni Antonio Canaletto (1697-1768) em alta definição com ranking por data e fama, visualizador HD e ateliê de IA para transformar fotos em vedutas venezianas.",
-    "tags": ["canaletto", "arte", "vedutismo", "galeria", "ai-studio", "alta-definicao"],
+    "tags": [
+      "canaletto",
+      "arte",
+      "vedutismo",
+      "galeria",
+      "ai-studio",
+      "alta-definicao"
+    ],
     "icon": "palette",
     "color": "#d4af37",
     "is_favorite": true,
     "pinned": true,
     "is_local": true,
     "launch_script": "../Canaletto/run_canaletto.py",
-    "fallback_urls": ["http://127.0.0.1:8900"]
+    "fallback_urls": [
+      "http://127.0.0.1:8900"
+    ]
+  },
+  {
+    "id": "dokploy-console",
+    "name": "Dokploy (VPS)",
+    "url": "https://dokploy.ggcampos.com/",
+    "category": "infra_apis",
+    "description": "PaaS da VPS Hetzner onde rodam o DarkHub 24/7, o coordenador e os workers cloud e o n8n. Deploys, logs e variáveis de ambiente.",
+    "tags": [
+      "dokploy",
+      "deploy",
+      "vps",
+      "hetzner",
+      "cloud"
+    ],
+    "icon": "server",
+    "color": "#6366f1",
+    "is_favorite": true,
+    "pinned": false,
+    "is_local": false,
+    "catalog_revision": "2026-09-23"
+  },
+  {
+    "id": "n8n-workflows",
+    "name": "n8n Workflows",
+    "url": "https://n8n.ggcampos.com/",
+    "category": "infra_apis",
+    "description": "Automação de integrações da fábrica (gateway de webhooks do Telegram e gatilhos autônomos).",
+    "tags": [
+      "n8n",
+      "automation",
+      "telegram",
+      "webhooks"
+    ],
+    "icon": "workflow",
+    "color": "#ea4b71",
+    "is_favorite": false,
+    "pinned": false,
+    "is_local": false,
+    "catalog_revision": "2026-09-23"
   }
 ]

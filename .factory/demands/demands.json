@@ -1030,5 +1030,43 @@
     "dependencies": [],
     "created_at": "2026-09-15T16:25:13.208701Z",
     "updated_at": "2026-09-15T16:25:13.208719Z"
+  },
+  {
+    "id": "USR-42",
+    "project_id": "darkfac",
+    "title": "DarkHub sempre alinhado a fabrica: gate de cobertura + revisao e fixes imediatos",
+    "origin": "user",
+    "status": "planned",
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand",
+      "feature"
+    ],
+    "problem_statement": "O DarkHub, interface principal do owner, nao acompanha as evolucoes da fabrica: ~35 endpoints e 12 modulos do core sem representacao, painel de tarefas lendo fonte superada (state.json) e catalogo de servicos desatualizado.",
+    "core_journey": [
+      "Owner abre o DarkHub (Dokploy) e observa o estado real da fabrica; toda nova capacidade entregue aparece no Hub ou tem isencao justificada"
+    ],
+    "non_goals": [
+      "Nao alterar .github/workflows nem arquivos de governanca",
+      "Nao construir todos os paineis ausentes nesta sessao"
+    ],
+    "reachability_contract": "python -m pytest tests/test_darkhub_sempre_alinhado_a_fabr.py -v",
+    "acceptance_criteria": [
+      "Gate pytest tests/test_hub_coverage.py falha quando rota /api ou modulo core novo nao esta mapeado em hub/coverage.json",
+      "Skill 04 PIV loop exige reflexo no Hub no Definition of Done",
+      "Painel de Tarefas le control store canonico (Postgres na nuvem, control.db local)",
+      "Catalogo de servicos e harnesses atualizados",
+      "Roadmap de evolucao do DarkHub publicado em docs/"
+    ],
+    "suggested_files": [
+      "core/darkhub_sempre_alinhado_a_fabr/service.py",
+      "tests/test_darkhub_sempre_alinhado_a_fabr.py"
+    ],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-09-23T06:26:35.118086Z",
+    "updated_at": "2026-09-23T06:26:35.118086Z"
   }
 ]

@@ -1,5 +1,5 @@
 /**
- * DarkHub - Operational task dashboard (DF-21).
+ * DarkHub - Operational task dashboard (DF-21, USR-42: canonical control store).
  *
  * This file only renders the read-only projection returned by the backend;
  * lifecycle mutations stay in the orchestrator and are never inferred here.
@@ -60,8 +60,9 @@ function renderTaskDashboard() {
     ? `Fila disponível com ${warningCount} aviso(s): ${report.warnings.join(" · ")}`
     : `Estado atualizado · fontes: ${formatTaskSources(report.sources)}`;
 
+  const waitingHuman = queue.filter((item) => item.status === "WAITING_HUMAN").length;
   summary.innerHTML = [
-    taskSummaryCard("Na fila", report.queued_count || queue.length, "tarefas visíveis", "text-indigo-300"),
+    taskSummaryCard("Na fila", report.queued_count || queue.length, waitingHuman ? `${waitingHuman} aguardando o owner` : "tarefas visíveis", "text-indigo-300"),
     taskSummaryCard("Em execução", report.running_count || 0, "runs ativos", "text-emerald-300"),
     taskSummaryCard("Custo", formatTaskCost(report.total_cost_usd), "ledger de uso", "text-amber-300"),
     taskSummaryCard("Exceções", report.exception_count || 0, "sinais registrados", "text-rose-300"),
@@ -108,8 +109,9 @@ function taskSummaryCard(label, value, note, color) {
 
 function taskStatusStyle(status) {
   if (["FAILED", "NEEDS_FIX"].includes(status)) return "border-rose-500/30 bg-rose-500/10 text-rose-300";
+  if (["WAITING_HUMAN", "RETRY", "REPLAN", "WAITING_DEPENDENCY"].includes(status)) return "border-amber-500/30 bg-amber-500/10 text-amber-300";
   if (["RUNNING", "IMPLEMENTING", "VALIDATING"].includes(status)) return "border-emerald-500/30 bg-emerald-500/10 text-emerald-300";
-  if (["MERGED", "READY_TO_MERGE"].includes(status)) return "border-cyan-500/30 bg-cyan-500/10 text-cyan-300";
+  if (["MERGED", "READY_TO_MERGE", "SUCCEEDED"].includes(status)) return "border-cyan-500/30 bg-cyan-500/10 text-cyan-300";
   return "border-slate-700 bg-slate-800/70 text-slate-300";
 }
 
