@@ -22,7 +22,14 @@ from typing import Callable, Optional
 
 import pytest
 
-from core.line.stage_release import ReleaseStageHandler, ReleaseStateStore
+from core.line.stage_release import (
+    GitRefReleaseStateStore,
+    ReleaseRunState,
+    ReleaseStageHandler,
+    ReleaseState,
+    ReleaseStateStore,
+    record_commercial_acceptance,
+)
 from core.orchestrator.deployment_adapter import (
     DeploymentOperation,
     DeploymentStatus,
@@ -193,8 +200,8 @@ def test_smoke_failure_rolls_back_and_retries_with_log(tmp_path: Path) -> None:
     handler.handle(_context("run-1", "https://github.com/acme/acme/pull/1", sha_good))
     assert handler.state_store.load(project.id).last_good_sha == sha_good
 
-    # Next deploy: smoke fails (HTTP 500).
-    handler.smoke_opener = _opener_factory([(500, b"boom")])
+    # Next deploy: smoke fails (HTTP 500); after rollback the old SHA answers 200.
+    handler.smoke_opener = _opener_factory([(500, b"boom"), (200, b"ok")])
     sha_bad = "sha_bad_" + "b" * 32
     result = handler.handle(_context("run-1", "https://github.com/acme/acme/pull/1", sha_bad))
 
@@ -222,8 +229,8 @@ def test_two_consecutive_smoke_failures_give_up(tmp_path: Path) -> None:
     sha_good = "sha_good" + "a" * 32
     handler.handle(_context("run-1", "https://github.com/acme/acme/pull/1", sha_good))
 
-    bad_opener = _opener_factory([(500, b"boom")])
-    handler.smoke_opener = bad_opener
+    # bad smoke -> restored smoke ok -> bad smoke again (terminal).
+    handler.smoke_opener = _opener_factory([(500, b"boom"), (200, b"ok"), (500, b"boom")])
     sha_bad = "sha_bad_" + "b" * 32
 
     first = handler.handle(_context("run-1", "https://github.com/acme/acme/pull/1", sha_bad))
@@ -253,6 +260,16 @@ def test_requires_commercial_acceptance_pauses_before_deploy(tmp_path: Path) -> 
     assert "pull/1" in result.cause_code
     assert sha in result.cause_code
     assert adapter.start_calls == []  # never deployed
+
+    # Re-invoking without an owner decision must not open the gate.
+    again = handler.handle(_context("run-1", "https://github.com/acme/acme/pull/1", sha))
+    assert again.outcome == "waiting_human"
+    assert adapter.start_calls == []
+
+    record_commercial_acceptance(handler.state_store, project.id, "run-1", sha)
+    accepted = handler.handle(_context("run-1", "https://github.com/acme/acme/pull/1", sha))
+    assert accepted.outcome == "success", accepted.cause_code
+    assert len(adapter.start_calls) == 1
 
 
 def test_missing_merge_sha_is_terminal_failure(tmp_path: Path) -> None:
@@ -354,3 +371,62 @@ def test_local_service_claim_requires_capability(tmp_path: Path) -> None:
     claimed = store.claim(worker="desktop-worker", capabilities=["economy", "target:local_service"], now=now)
     assert claimed is not None
     assert claimed.job_key.stage == "release"
+
+
+# --------------------------------------------------------------------------
+# Review follow-ups: failed rollback, shared git-ref state
+# --------------------------------------------------------------------------
+
+
+def test_restored_sha_failing_smoke_is_terminal(tmp_path: Path) -> None:
+    project = _project()
+    adapter = FakeAdapter()
+    handler = _handler(project, adapter, tmp_path, _opener_factory([(200, b"ok")]))
+    sha_good = "sha_good" + "a" * 32
+    handler.handle(_context("run-1", "https://github.com/acme/acme/pull/1", sha_good))
+
+    handler.smoke_opener = _opener_factory([(500, b"boom")])  # old SHA is down too
+    result = handler.handle(_context("run-1", "https://github.com/acme/acme/pull/1", "sha_bad_" + "b" * 32))
+    assert result.outcome == "failed"
+    assert result.cause_code.startswith("rollback_smoke_failed:")
+
+
+def _bare_origin_with_commits(tmp_path: Path, count: int) -> tuple[Path, list[str]]:
+    import subprocess
+
+    def git(args: list[str], cwd: Path) -> str:
+        proc = subprocess.run(["git", *args], cwd=str(cwd), capture_output=True, text=True, check=True)
+        return proc.stdout.strip()
+
+    origin = tmp_path / "origin.git"
+    git(["init", "--bare", str(origin)], tmp_path)
+    seed = tmp_path / "_seed"
+    git(["clone", str(origin), str(seed)], tmp_path)
+    git(["checkout", "-B", "main"], seed)
+    shas = []
+    for i in range(count):
+        (seed / "f.txt").write_text(str(i), encoding="utf-8")
+        git(["add", "."], seed)
+        git(["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-m", f"c{i}"], seed)
+        shas.append(git(["rev-parse", "HEAD"], seed))
+    git(["push", "origin", "main"], seed)
+    return origin, shas
+
+
+def test_git_ref_state_is_shared_between_hosts(tmp_path: Path, monkeypatch) -> None:
+    origin, (sha_a, sha_b) = _bare_origin_with_commits(tmp_path, 2)
+    project = ProjectDescriptor(id="acme", name="Acme", repo_url=str(origin), default_branch="main")
+
+    monkeypatch.setenv("DARKFAC_WORKSPACES", str(tmp_path / "host_vps"))
+    vps = GitRefReleaseStateStore(project)
+    vps.save("acme", ReleaseState(
+        last_good_sha=sha_a,
+        runs={"run-1": ReleaseRunState(last_sha=sha_b, consecutive_smoke_failures=1)},
+    ))
+    record_commercial_acceptance(vps, "acme", "run-2", sha_b)
+
+    monkeypatch.setenv("DARKFAC_WORKSPACES", str(tmp_path / "host_desktop"))
+    desktop = GitRefReleaseStateStore(project).load("acme")
+    assert desktop.last_good_sha == sha_a
+    assert desktop.runs["run-1"].consecutive_smoke_failures == 1
+    assert desktop.runs["run-2"].commercial_accepted_sha == sha_b

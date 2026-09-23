@@ -228,3 +228,34 @@ def test_rollback_without_last_known_good_digest_fails(tmp_path: Path) -> None:
 
     assert result.status == DeploymentStatus.FAILED
     assert result.restored_digest is None
+
+
+def test_real_connection_uses_ftps_and_requires_credentials(monkeypatch) -> None:
+    import ftplib
+
+    calls: list[str] = []
+
+    class _FakeTLS:
+        def connect(self, host, port, timeout):
+            calls.append(f"connect:{host}:{port}")
+
+        def login(self, user, password):
+            calls.append(f"login:{user}")
+
+        def prot_p(self):
+            calls.append("prot_p")
+
+    monkeypatch.setattr(ftplib, "FTP_TLS", _FakeTLS)
+    config = TargetConfig(project_id="atrium", target_type="hostinger_ftp", metadata={})
+    adapter = FtpMirrorDeploymentAdapter()
+
+    for name in ("FTP_HOST", "FTP_USER", "FTP_PASS"):
+        monkeypatch.delenv(name, raising=False)
+    with pytest.raises(RuntimeError, match="FTP_HOST, FTP_USER, FTP_PASS"):
+        adapter._connect(config)
+
+    monkeypatch.setenv("FTP_HOST", "ftp.example.com")
+    monkeypatch.setenv("FTP_USER", "deploy")
+    monkeypatch.setenv("FTP_PASS", "secret")
+    adapter._connect(config)
+    assert calls == ["connect:ftp.example.com:21", "login:deploy", "prot_p"]

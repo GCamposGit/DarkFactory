@@ -510,9 +510,19 @@ class FtpMirrorDeploymentAdapter:
         host = target_config.host or os.environ.get(host_env, "")
         user = os.environ.get(user_env, "")
         password = os.environ.get(pass_env, "")
-        ftp = ftplib.FTP()
+        missing = [name for name, value in ((host_env, host), (user_env, user), (pass_env, password)) if not value]
+        if missing:
+            raise RuntimeError(f"FTP deploy credentials not set: {', '.join(missing)}")
+        # Explicit TLS (FTPS) by default: plain FTP would send the password in
+        # cleartext. Opt out only with deploy.params.ftp_tls = "false".
+        use_tls = str(target_config.metadata.get("ftp_tls", "true")).lower() not in ("false", "0", "no")
+        ftp = ftplib.FTP_TLS() if use_tls else ftplib.FTP()
         ftp.connect(host, target_config.port or 21, timeout=30)
         ftp.login(user, password)
+        if use_tls:
+            ftp.prot_p()  # encrypt the data channel too, not only the login
+        else:
+            logger.warning("FTP deploy for %s uses plain FTP (ftp_tls=false)", target_config.project_id)
         return ftp
 
     @staticmethod

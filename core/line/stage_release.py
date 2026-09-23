@@ -20,7 +20,8 @@ Flow (`ReleaseStageHandler.handle`):
    deploying again.
 2. **Commercial acceptance gate** — `project.requires_commercial_acceptance`
    pauses in `waiting_human(kind=commercial_acceptance)` with the PR link and
-   (when configured) a preview URL, before touching the deploy target.
+   (when configured) a preview URL, before touching the deploy target. Only
+   `record_commercial_acceptance()` (called by the human channel) opens it.
 3. **Deploy** — dispatches to the adapter matching `project.deploy.type`:
    - `dokploy`: `DokployDeploymentAdapter`, reconciled via
      `core.orchestrator.deployment_adapter.execute_deployment_with_safeguards`-style
@@ -46,12 +47,13 @@ Flow (`ReleaseStageHandler.handle`):
    route it back to `development` for "corrigir regressao em producao". A
    second consecutive smoke failure for the same `run_id` is terminal
    (`failed(prod_smoke_failed)`) instead of retrying forever.
-6. **State** — `last_good_sha` (and the small bit of per-run failure-streak
-   bookkeeping needed for step 5) is persisted to a small JSON file under
-   `core.line.workspace.workspace_root()/<project_id>/release_state.json` —
-   project-level state that must outlive the per-run `df/<run_id>` branch
-   (which HF-27-06 deletes on merge), so it cannot live on that branch like
-   the rest of the line's per-run context.
+6. **State** — `last_good_sha`, the per-run smoke-failure streak and the
+   commercial acceptance must outlive the `df/<run_id>` branch (deleted on
+   merge) and be visible to every host, so `GitRefReleaseStateStore` keeps
+   them as `refs/darkfac/release/*` in the target repo. The JSON-file
+   `ReleaseStateStore` is host-local and only for tests or repo-less projects.
+   A rollback is verified by smoking the restored SHA; if that fails the
+   stage returns `failed` (production needs a human), never another retry.
 """
 
 from __future__ import annotations
@@ -79,7 +81,7 @@ from core.orchestrator.deployment_adapter import (
     TargetConfig,
 )
 from core.projects.models import DeployTargetType, ProjectDescriptor, SmokeCheck
-from core.projects.registry import resolve_commands
+from core.projects.registry import normalize_repo_url, resolve_commands
 from core.workflow.control_contracts import HandlerDescriptor, StageContext, StageResult
 
 logger = logging.getLogger(__name__)
@@ -130,7 +132,11 @@ class ReleaseState(BaseModel):
 
 
 class ReleaseStateStore:
-    """Loads/saves `ReleaseState` as JSON, one file per project."""
+    """Loads/saves `ReleaseState` as JSON, one file per project.
+
+    Host-local: only for tests and projects without a `repo_url`. Hosts share
+    work (VPS, Desktop, Notebook), so production uses `GitRefReleaseStateStore`.
+    """
 
     def __init__(self, state_dir: Optional[Path] = None) -> None:
         self.state_dir = state_dir or (ws_mod.workspace_root() / "_release_state")
@@ -152,6 +158,103 @@ class ReleaseStateStore:
         path = self._path(project_id)
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(state.model_dump_json(indent=2), encoding="utf-8")
+
+
+_REF_ROOT = "refs/darkfac/release"
+
+
+class GitRefReleaseStateStore:
+    """`ReleaseState` kept as refs in the target repo, shared by every host.
+
+    - `refs/darkfac/release/last-good` -> the last SHA that passed smoke.
+    - `refs/darkfac/release/runs/<run_id>/smoke-fail-<n>` -> each failed SHA.
+    - `refs/darkfac/release/runs/<run_id>/accepted` -> commercially accepted SHA.
+
+    Custom refs are not branches or tags, so they stay out of clones and the
+    GitHub UI. Every value is a commit SHA already on the remote.
+    """
+
+    def __init__(self, project: ProjectDescriptor) -> None:
+        if not project.repo_url:
+            raise ReleaseError(f"project '{project.id}' has no repo_url for release state")
+        self.project = project
+        self.repo_url = normalize_repo_url(project.repo_url)
+
+    def _mirror(self) -> Path:
+        root = ws_mod.workspace_root()
+        root.mkdir(parents=True, exist_ok=True)
+        return ws_mod._ensure_mirror(self.project.id, self.repo_url, root)
+
+    def _remote_refs(self, mirror: Path) -> dict[str, str]:
+        proc = ws_mod._run_git(
+            ["ls-remote", "origin", f"{_REF_ROOT}/*"], cwd=mirror, repo_url=self.repo_url
+        )
+        refs: dict[str, str] = {}
+        for line in (proc.stdout or "").splitlines():
+            sha, _, name = line.partition("\t")
+            if name:
+                refs[name.strip()] = sha.strip()
+        return refs
+
+    def _push(self, mirror: Path, updates: dict[str, str]) -> None:
+        if not updates:
+            return
+        specs = [f"+{sha}:{ref}" for ref, sha in updates.items()]
+        ws_mod._run_git(["push", "origin", *specs], cwd=mirror, repo_url=self.repo_url)
+
+    def load(self, project_id: str) -> ReleaseState:
+        refs = self._remote_refs(self._mirror())
+        state = ReleaseState(last_good_sha=refs.get(f"{_REF_ROOT}/last-good"))
+        prefix = f"{_REF_ROOT}/runs/"
+        for name, sha in refs.items():
+            if not name.startswith(prefix):
+                continue
+            run_id, _, leaf = name[len(prefix):].rpartition("/")
+            run_state = state.runs.setdefault(run_id, ReleaseRunState())
+            if leaf.startswith("smoke-fail-"):
+                run_state.consecutive_smoke_failures += 1
+                run_state.last_sha = sha
+            elif leaf == "accepted":
+                run_state.commercial_accepted_sha = sha
+        return state
+
+    def save(self, project_id: str, state: ReleaseState) -> None:
+        mirror = self._mirror()
+        current = self._remote_refs(mirror)
+        updates: dict[str, str] = {}
+        if state.last_good_sha and current.get(f"{_REF_ROOT}/last-good") != state.last_good_sha:
+            updates[f"{_REF_ROOT}/last-good"] = state.last_good_sha
+        for run_id, run_state in state.runs.items():
+            base = f"{_REF_ROOT}/runs/{run_id}"
+            for n in range(1, run_state.consecutive_smoke_failures + 1):
+                ref = f"{base}/smoke-fail-{n}"
+                if ref not in current and run_state.last_sha:
+                    updates[ref] = run_state.last_sha
+            accepted = run_state.commercial_accepted_sha
+            if accepted and current.get(f"{base}/accepted") != accepted:
+                updates[f"{base}/accepted"] = accepted
+        self._push(mirror, updates)
+
+
+def default_state_store(project: ProjectDescriptor) -> "ReleaseStateStore | GitRefReleaseStateStore":
+    """Shared git-ref store when the project has a repo; host-local file otherwise."""
+    if project.repo_url:
+        return GitRefReleaseStateStore(project)
+    logger.warning("project %s has no repo_url; release state is host-local", project.id)
+    return ReleaseStateStore()
+
+
+def record_commercial_acceptance(
+    store: "ReleaseStateStore | GitRefReleaseStateStore", project_id: str, run_id: str, sha: str
+) -> None:
+    """Record the owner's commercial acceptance of `sha` for `run_id`.
+
+    Called by the human channel (HF-27-08) when the owner approves; the
+    release stage never records acceptance on its own.
+    """
+    state = store.load(project_id)
+    state.runs.setdefault(run_id, ReleaseRunState()).commercial_accepted_sha = sha
+    store.save(project_id, state)
 
 
 def _run_smoke_http(
@@ -213,7 +316,7 @@ class ReleaseStageHandler:
         dokploy_adapter: Optional[DeploymentAdapter] = None,
         local_service_adapter: Optional[DeploymentAdapter] = None,
         ftp_adapter: Optional[DeploymentAdapter] = None,
-        state_store: Optional[ReleaseStateStore] = None,
+        state_store: "Optional[ReleaseStateStore | GitRefReleaseStateStore]" = None,
         smoke_opener: Callable[[str, float], tuple[int, bytes]] = _default_opener,
         smoke_retries: int = _SMOKE_RETRIES,
         smoke_delay_s: float = _SMOKE_DELAY_S,
@@ -226,7 +329,7 @@ class ReleaseStageHandler:
         self.dokploy_adapter = dokploy_adapter or DokployDeploymentAdapter()
         self.local_service_adapter = local_service_adapter or LocalServiceDeploymentAdapter()
         self.ftp_adapter = ftp_adapter or FtpMirrorDeploymentAdapter()
-        self.state_store = state_store or ReleaseStateStore()
+        self.state_store = state_store or default_state_store(project)
         self.smoke_opener = smoke_opener
         self.smoke_retries = smoke_retries
         self.smoke_delay_s = smoke_delay_s
@@ -431,17 +534,19 @@ class ReleaseStageHandler:
         state = self.state_store.load(self.project.id)
         run_state = state.runs.get(run_id, ReleaseRunState())
 
-        # Idempotency: this exact SHA was already deployed successfully.
-        if state.last_good_sha == merge_sha and state.last_success_operation_id:
+        # Idempotency: this exact SHA was already deployed and passed smoke.
+        if state.last_good_sha == merge_sha:
             return StageResult(
                 outcome="success",
-                output_refs=[state.last_success_operation_id, state.last_success_smoke_ref or ""],
+                output_refs=[
+                    state.last_success_operation_id or f"release:{self.project.id}:{merge_sha[:12]}",
+                    state.last_success_smoke_ref or f"smoke:{run_id}:{merge_sha[:12]}",
+                ],
             )
 
+        # Only an acceptance recorded by the owner (record_commercial_acceptance)
+        # opens the gate; re-invoking the stage must never open it by itself.
         if self.project.requires_commercial_acceptance and run_state.commercial_accepted_sha != merge_sha:
-            run_state.commercial_accepted_sha = merge_sha
-            state.runs[run_id] = run_state
-            self.state_store.save(self.project.id, state)
             return self._commercial_acceptance_guide(pr_url, merge_sha)
 
         operation, target_config, deploy_error = self._deploy(merge_sha, state.last_good_sha)
@@ -485,13 +590,29 @@ class ReleaseStageHandler:
             return StageResult(outcome="retry", cause_code=f"smoke_failed_no_rollback_target:\n{smoke_log}")
 
         target_config.last_known_good_digest = state.last_good_sha
-        adapter.rollback(
+        self.state_store.save(self.project.id, state)
+        rollback = adapter.rollback(
             target_config=target_config,
             failed_digest=merge_sha,
             reason="post-deploy smoke check failed",
             claim=context.claim,
         )
-        self.state_store.save(self.project.id, state)
+        # Production must be proven back up: a failed rollback, or a previous
+        # SHA that no longer passes smoke, needs a human, not another retry.
+        if rollback.status == DeploymentStatus.FAILED or rollback.restored_digest != state.last_good_sha:
+            return StageResult(
+                outcome="failed",
+                cause_code=(
+                    f"rollback_failed:status={rollback.status.value},"
+                    f"restored={rollback.restored_digest}\n{smoke_log}"
+                ),
+            )
+        restored_ok, restored_log = self._smoke(state.last_good_sha, target_config, adapter)
+        if not restored_ok:
+            return StageResult(
+                outcome="failed",
+                cause_code=f"rollback_smoke_failed:{state.last_good_sha[:12]}\n{restored_log}\n{smoke_log}",
+            )
         return StageResult(
             outcome="retry",
             cause_code=f"prod_smoke_failed_rolled_back_to_{state.last_good_sha[:12]}:\n{smoke_log}",
