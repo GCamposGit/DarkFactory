@@ -47,10 +47,9 @@ def test_cloud_compose_manifest_structure() -> None:
     assert worker["restart"] == "unless-stopped"
     assert "dokploy-network" in worker.get("networks", [])
     worker_res = worker.get("deploy", {}).get("resources", {})
-    # HF-27-09: worker memory raised to 2.5 GB (2560M) to fit the agent-CLI
-    # toolchain (Claude Code / Codex) added to Dockerfile.cloud, within the
-    # CX23's 4 GB budget alongside the coordinator.
-    assert worker_res["limits"]["memory"] == "2560M"
+    # HF-27-09: worker memory raised to 2 GB (2048M) for the agent-CLI
+    # toolchain, leaving headroom on the CX23's 4 GB next to the coordinator.
+    assert worker_res["limits"]["memory"] == "2048M"
     assert worker_res["reservations"]["memory"] == "256M"
 
     # Verify shared volumes and external network

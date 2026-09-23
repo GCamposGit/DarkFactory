@@ -80,9 +80,9 @@ def test_compose_worker_max_slots_defaults_to_one():
     assert "DARKFAC_MAX_CONCURRENT_SLOTS:-1" in text
 
 
-def test_compose_worker_memory_limit_is_2_5gb():
+def test_compose_worker_memory_limit_is_2gb():
     text = _read(DOKPLOY_DIR / "docker-compose.cloud.yml")
-    assert "memory: 2560M" in text
+    assert "memory: 2048M" in text
 
 
 def test_compose_declares_codex_auth_and_workspace_volumes():

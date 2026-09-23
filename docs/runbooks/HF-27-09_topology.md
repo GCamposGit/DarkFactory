@@ -96,7 +96,11 @@ publica.
 5. Cole/edite as seguintes variaveis (uma por linha, formato `CHAVE=valor`;
    veja `deploy/dokploy/env.cloud.example` para a lista completa e
    comentarios):
-   - `DARKFAC_HF02_DATABASE_URL` = a URL Tailscale do passo 2.4.
+   - `DARKFAC_HF02_DATABASE_URL`: se o Postgres roda **na propria VPS**
+     (mesmo Dokploy), mantenha a URL interna que o worker ja usa hoje (rede
+     `dokploy-network`); nao troque. A URL Tailscale do passo 2.4 e para os
+     hosts on-prem (secao 6). So use a URL Tailscale aqui se o Postgres
+     estiver em outra maquina.
    - `DARKFAC_WORKER_CAPS` = `git,gh,node,python,harness:claude,harness:codex`
    - `DARKFAC_WORKER_PRIORITY` = `primary`
    - `DARKFAC_WORKSPACES` = `/workspaces`

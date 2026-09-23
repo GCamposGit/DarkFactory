@@ -90,8 +90,9 @@ services:
       resources:
         limits:
           cpus: "1.5"
-          # CX23 (2 vCPU, 4 GB) budget: 1 agent slot alongside the coordinator.
-          memory: 2560M
+          # CX23 (2 vCPU, 4 GB): 1 agent slot; 2 GB + coordinator 1.5 GB leaves
+          # headroom for Dokploy/OS. Raise only after a VPS upgrade.
+          memory: 2048M
         reservations:
           cpus: "0.2"
           memory: 256M
