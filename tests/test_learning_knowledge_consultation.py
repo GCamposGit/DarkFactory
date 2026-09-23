@@ -12,9 +12,21 @@ from pathlib import Path
 import pytest
 from starlette.testclient import TestClient
 
+from core.learning_pack.generator import LearningPackGenerator
+from core.learning_pack.storage import LearningPackStore
 from hub.backend.main import app
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
+
+
+@pytest.fixture(autouse=True)
+def ensure_learning_pack():
+    """Ensure at least one learning pack is available in the store for testing."""
+    store = LearningPackStore()
+    if not store.list_packs():
+        generator = LearningPackGenerator()
+        pack = generator.generate_pack(title="DH-06 Verification Pack")
+        store.save_pack(pack)
 
 
 @pytest.fixture
