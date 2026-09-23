@@ -37,7 +37,7 @@ capacidades pendentes que apontem para um id existente aqui.
 | R6 | Módulos do core sem nenhuma presença no Hub (adoption, portfolio, projects, planning, pilots, research, knowledge, router, line, marketing, game, archetypes) | Capacidades invisíveis | Roadmap DH-06, DH-08, DH-12 |
 | R7 | 23 tickets duplicados "CLI Pipeline de Testes" (USR-19…USR-41) no ledger versionado | Central de Demandas poluída | DH-15 |
 | R8 | Tailwind via CDN em produção, `index.html` com 1.343 linhas e versões de cache inconsistentes por script | Aviso no console, sem build reproduzível, cache velho após deploy | DH-13 |
-| R9 | Nenhum sinal de drift visível no próprio Hub | Owner não percebe quando o Hub fica para trás | DH-14 |
+| R9 | Nenhum sinal de drift visível no próprio Hub | Owner não percebe quando o Hub fica para trás | **Corrigido** (USR-45 / DH-14) |
 | R10 | No Dokploy, `darkhub-hub-data` monta `/app/hub/data` como volume, escondendo os `default_services.json`/`default_prompts.json` atualizados da imagem; e a Fila operacional mostrava `ticket_id`/`demand_id` (`darkfac`, `dem-xxxx`) em vez do título real da demanda | Catálogo/prompt seeds da nuvem congelados mesmo após deploys com `catalog_revision` novo; owner não reconhece as tarefas na fila | **Corrigido** (USR-44) |
 
 ## Entregue em USR-42
@@ -72,7 +72,7 @@ Prioridade: **Agora** = próximo ciclo; **Depois** = após os itens Agora;
 | DH-11 | Depois | **Validação sob demanda**: rodar suíte/harness remoto a partir do Hub com relatório destilado | `harness/run-tests`, `harness/execute` | Resultado com `[HARNESS_PASS]` e link para logs isolados |
 | DH-12 | Futuro | **Plano e DAG da autonomia contínua**: visualizar plano, gates de prontidão, rotas qualificadas e política efetiva | `core/planning`, `core/workflow` | DAG navegável com o estado de cada nó |
 | DH-13 | Agora | **Fundação do frontend**: CSS compilado localmente no lugar do Tailwind CDN, `index.html` modular, versão de assets única servida pelo backend | frontend | Nenhum aviso de CDN no console; um deploy invalida todos os assets |
-| DH-14 | Agora | **Cobertura visível no Hub**: endpoint e badge com o placar do gate e a lista de pendências | `hub/backend/coverage.py` | Badge mostra a % coberta e abre a lista de pendências por `DH-xx` |
+| DH-14 | Agora | **Cobertura visível no Hub**: endpoint e badge com o placar do gate e a lista de pendências | `hub/backend/coverage.py`, `hub/backend/api.py`, `hub/frontend/coverage.js` | Entregue em `USR-45`; badge mostra a % coberta e abre a lista de pendências por `DH-xx` em drawer slide-over |
 | DH-15 | Agora | **Higiene do ledger de demandas**: remover USR-19…USR-41 e isolar o teste que grava no ledger real | `.factory/demands/demands.json`, testes da CLI | Suíte roda sem alterar arquivos versionados |
 | DH-16 | Depois | **Aposentar fontes legadas do Painel de Tarefas** (`state.json`, `orchestrator.sqlite3`) depois de validar o painel na nuvem | `hub/backend/service.py` | Painel usa só o control store; testes legados migrados |
 | DH-17 | Depois | **Ações operacionais de saúde**: reconhecer alerta, checar cotas (pode enviar Telegram), sync/trigger n8n (produção), drill HF-15 — cada uma com diálogo de confirmação | `POST notifications/{notification_id}/acknowledge`, `POST notifications/check-quotas`, `POST integrations/n8n/sync`, `POST integrations/n8n/trigger`, `POST hf15/rollback/drill` | Toda ação mostra o efeito antes, exige confirmação explícita e registra auditoria |
@@ -117,6 +117,15 @@ Prioridade: **Agora** = próximo ciclo; **Depois** = após os itens Agora;
   `ticket_id == project_id` (linhas reais da nuvem, ex.: `"darkfac"`), o
   `task_id` exibido passa a ser o `demand_id` (único e legível), preservando o
   desempate `ticket@run` para colisões.
+
+## Entregue em USR-45 (DH-14)
+
+- **Cobertura visível no Hub e prevenção contínua de drift (R9):**
+  - Adicionado endpoint `GET /api/hub/coverage` servindo `CoverageSummaryResponse` com percentual de cobertura, contagem de superfícies ativas, waivers e lista completa de pendências agrupadas por item de roadmap (`DH-xx`), com títulos e horizontes extraídos de `docs/DARKHUB_ROADMAP.md`.
+  - Cache em memória com TTL de 30 segundos (`get_coverage_summary`) para respostas sub-milissegundo, suportando parâmetro `?force_refresh=true`.
+  - Badge no cabeçalho do DarkHub (`#hub-coverage-badge`) com percentual em tempo real, semáforo de estado (verde para conformidade com o gate, vermelho se houver drift não registrado) e ponto pulsante.
+  - Drawer lateral deslizante (`#hub-coverage-drawer`) com barra de progresso visual, cards de resumo (Entregues, Pendentes, Waivers), alertas de conformidade e acordião de pendências por item de roadmap com separação entre rotas `/api` e módulos `core/`.
+  - Módulo frontend modular `hub/frontend/coverage.js` e cobertura 100% no gate `tests/test_hub_coverage.py` e testes de integração `tests/test_hub_coverage_api.py`.
 
 ## Configuração manual no Dokploy (para ativar R2 na nuvem)
 
