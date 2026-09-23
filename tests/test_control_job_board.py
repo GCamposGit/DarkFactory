@@ -36,6 +36,29 @@ def _seed_control_db(path: Path) -> None:
         conn.commit()
 
 
+def _seed_intake_command(
+    path: Path,
+    *,
+    run_id: str,
+    payload: str,
+    demand_id: str,
+    channel: str = "cli",
+    external_id: str = "ext-1",
+    project_id: str = "darkfac",
+    committed_at: str = NOW,
+) -> None:
+    """Seed one raw intake_commands row, as the intake pipeline would have written it."""
+    store = SQLiteControlStore(db_path=path)
+    with store._connect() as conn:
+        conn.execute(
+            "INSERT INTO intake_commands (channel, external_id, project_id, payload_digest, payload, mode,"
+            " policy_ref, demand_id, demand_version, run_id, initial_job_id, committed_at)"
+            " VALUES (?, ?, ?, 'digest', ?, 'autonomous', 'policy-1', ?, 'v1', ?, 'job-1', ?)",
+            (channel, external_id, project_id, payload, demand_id, run_id, committed_at),
+        )
+        conn.commit()
+
+
 def _make_service(tmp_path: Path, control_db: Path) -> HubService:
     data_dir = tmp_path / "data"
     data_dir.mkdir()
@@ -116,3 +139,90 @@ def test_task_dashboard_surfaces_control_jobs_first_when_waiting_human(tmp_path:
     assert first.exceptions and "missing_secret" in first.exceptions[0]
     assert {item.label for item in first.evidence} >= {"projeto", "papel", "etapas", "evidência"}
     assert report.exception_count == 1
+
+
+def test_job_board_extracts_title_from_intake_payload(tmp_path: Path) -> None:
+    db = tmp_path / "control.db"
+    _seed_control_db(db)
+    _seed_intake_command(
+        db,
+        run_id="run-1",
+        demand_id="USR-42",
+        payload=json.dumps(
+            {
+                "title": "Painel de vendas Q4",
+                "problem": "p",
+                "journey": "j",
+                "non_goals": "n",
+                "criteria": "c",
+            }
+        ),
+    )
+
+    snapshot = read_sqlite_job_board(db)
+
+    [entry] = snapshot.entries
+    assert entry.title == "Painel de vendas Q4"
+
+
+def test_job_board_falls_back_to_none_on_malformed_intake_payload(tmp_path: Path) -> None:
+    db = tmp_path / "control.db"
+    _seed_control_db(db)
+    _seed_intake_command(db, run_id="run-1", demand_id="USR-42", payload="not-json")
+
+    snapshot = read_sqlite_job_board(db)
+
+    [entry] = snapshot.entries
+    assert entry.title is None
+
+
+def test_task_dashboard_title_prefers_intake_payload_over_demand_id(tmp_path: Path) -> None:
+    db = tmp_path / "control.db"
+    _seed_control_db(db)
+    _seed_intake_command(
+        db,
+        run_id="run-1",
+        demand_id="USR-42",
+        payload=json.dumps(
+            {
+                "title": "Painel de vendas Q4",
+                "problem": "p",
+                "journey": "j",
+                "non_goals": "n",
+                "criteria": "c",
+            }
+        ),
+    )
+    service = _make_service(tmp_path, db)
+
+    report = service.get_task_dashboard()
+
+    first = report.queue[0]
+    assert first.title == "Painel de vendas Q4"
+
+
+def test_task_dashboard_uses_demand_id_as_task_id_when_ticket_equals_project(tmp_path: Path) -> None:
+    """Real cloud rows carry ticket_id = project_id ("darkfac"); demand_id is the meaningful id."""
+    db = tmp_path / "control.db"
+    store = SQLiteControlStore(db_path=db)
+    with store._connect() as conn:
+        conn.execute(
+            "INSERT INTO runs (run_id, project_id, demand_id, demand_version, runtime_owner, mode, status,"
+            " plan_digest, config_version, created_at, updated_at)"
+            " VALUES ('run-2', 'darkfac', 'dem-331d68d8836f', 'v1', 'hf05_sqlite', 'autonomous', 'active',"
+            " 'd', 'c', ?, ?)",
+            (NOW, NOW),
+        )
+        conn.execute(
+            "INSERT INTO jobs (run_id, ticket_id, plan_version, stage, iteration, status, role, actual_cost,"
+            " evidence_refs, created_at, updated_at)"
+            " VALUES ('run-2', 'darkfac', 'p1', 'development', 0, 'running', 'developer', 0.10, '[]', ?, ?)",
+            (NOW, NOW),
+        )
+        conn.commit()
+    service = _make_service(tmp_path, db)
+
+    report = service.get_task_dashboard()
+
+    entry = next(item for item in report.queue if item.run_id == "run-2")
+    assert entry.task_id == "dem-331d68d8836f"

@@ -38,6 +38,7 @@ capacidades pendentes que apontem para um id existente aqui.
 | R7 | 23 tickets duplicados "CLI Pipeline de Testes" (USR-19…USR-41) no ledger versionado | Central de Demandas poluída | DH-15 |
 | R8 | Tailwind via CDN em produção, `index.html` com 1.343 linhas e versões de cache inconsistentes por script | Aviso no console, sem build reproduzível, cache velho após deploy | DH-13 |
 | R9 | Nenhum sinal de drift visível no próprio Hub | Owner não percebe quando o Hub fica para trás | DH-14 |
+| R10 | No Dokploy, `darkhub-hub-data` monta `/app/hub/data` como volume, escondendo os `default_services.json`/`default_prompts.json` atualizados da imagem; e a Fila operacional mostrava `ticket_id`/`demand_id` (`darkfac`, `dem-xxxx`) em vez do título real da demanda | Catálogo/prompt seeds da nuvem congelados mesmo após deploys com `catalog_revision` novo; owner não reconhece as tarefas na fila | **Corrigido** (USR-44) |
 
 ## Entregue em USR-42
 
@@ -88,6 +89,35 @@ Prioridade: **Agora** = próximo ciclo; **Depois** = após os itens Agora;
   falha isolada nunca apague as demais. Nenhuma ação mutável foi exposta nesta entrega; elas
   ficam registradas em DH-17.
 
+## Entregue em USR-44
+
+- **Seeds da nuvem chegam ao volume persistido (R10):** `deploy/dokploy/Dockerfile.hub`
+  agora também copia `hub/data` para `/app/hub_seed` (fora do volume
+  `darkhub-hub-data`, que só monta `/app/hub/data`) e define
+  `DARKHUB_SEED_DIR=/app/hub_seed`. Em `HubService.__init__` (ou via o argumento
+  opcional `seed_dir`, que tem prioridade sobre a variável de ambiente), antes de
+  `_ensure_storage()` rodar, `default_services.json` e `default_prompts.json` do
+  `data_dir` são sobrescritos pelo conteúdo do seed sempre que ele existir e
+  diferir — apenas esses dois arquivos versionados, nunca `services.json` (edição
+  do owner) nem `catalog_meta.json`. Falha de I/O é fail-open (log de aviso,
+  Hub nunca deixa de subir por isso). Isso faz `_apply_catalog_revisions` (USR-42)
+  enxergar revisões novas mesmo com o volume antigo montado, e `list_prompts` já
+  lê `default_prompts.json` diretamente do `data_dir`, então o prompt atualizado é
+  servido na mesma leitura.
+- **Fila operacional mostra o título real da demanda:** `core/workflow/job_board.py`
+  projeta o `payload` de `intake_commands` em cada linha de `jobs` via subconsulta
+  correlacionada por `run_id` (`ORDER BY committed_at DESC LIMIT 1`) — um valor
+  escalar por linha existente de `jobs`, então nunca multiplica ou duplica linhas.
+  O título é extraído em Python (`_extract_title`), aceitando `str` (SQLite TEXT
+  ou JSON serializado), `bytes` e `dict` (psycopg pode decodificar JSONB antes da
+  leitura); JSON malformado ou sem `title` cai para `None` sem quebrar o painel.
+  `JobBoardEntry.title` é o novo campo opcional. Em
+  `hub/backend/service.py::_control_dashboard_row`, a prioridade de título passou a
+  ser `entry.title` → título do ledger de demandas → `demand_id`; e quando
+  `ticket_id == project_id` (linhas reais da nuvem, ex.: `"darkfac"`), o
+  `task_id` exibido passa a ser o `demand_id` (único e legível), preservando o
+  desempate `ticket@run` para colisões.
+
 ## Configuração manual no Dokploy (para ativar R2 na nuvem)
 
 Sem este passo o painel na nuvem mostra `control: sqlite:missing` e continua vazio.
@@ -99,7 +129,8 @@ Sem este passo o painel na nuvem mostra `control: sqlite:missing` e continua vaz
    `DARKHUB_CONTROL_DATABASE_URL=<mesmo valor de DARKFAC_HF02_DATABASE_URL do compose darkfac-coordinator>`
    - Para copiar o valor: abra o compose do **darkfac-coordinator** → aba **Environment** → copie o valor de `DARKFAC_HF02_DATABASE_URL`.
    - Recomendado (menor privilégio): criar no PostgreSQL um papel só de leitura e usá-lo aqui:
-     `CREATE ROLE darkhub_ro LOGIN PASSWORD '<senha forte>'; GRANT CONNECT ON DATABASE <db> TO darkhub_ro; GRANT USAGE ON SCHEMA public TO darkhub_ro; GRANT SELECT ON runs, jobs TO darkhub_ro;`
+     `CREATE ROLE darkhub_ro LOGIN PASSWORD '<senha forte>'; GRANT CONNECT ON DATABASE <db> TO darkhub_ro; GRANT USAGE ON SCHEMA public TO darkhub_ro; GRANT SELECT ON runs, jobs, intake_commands TO darkhub_ro;`
+     (desde USR-44 o Painel de Tarefas também lê `intake_commands` para exibir o título real da demanda; sem esse `GRANT` a leitura falha com `control:postgres:error`)
 5. Clique em **Save** e depois em **Deploy** (ou **Redeploy**) no serviço **darkhub**.
 6. Validação: abra `https://darkhub.ggcampos.com`. Na **Fila operacional**, a faixa de status deve mostrar `control:postgres:ok`.
    Se aparecer `postgres:error`, confira se o host do banco é acessível pela rede `dokploy-network`.
