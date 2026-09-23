@@ -474,8 +474,10 @@ def test_ticket_smoke_entry_failure_triggers_rollback(tmp_path: Path, monkeypatc
     project = _project()
     adapter = FakeAdapter()
     adapter.installed["acme"] = "sha_v0_" + "a" * 33
-    # project.smoke's own check passes (200); the extra ticket entry fails (500).
-    opener = _opener_factory([(200, b"ok"), (500, b"boom")])
+    # project.smoke's own check passes (200); the extra ticket entry fails
+    # (500); the rollback-verification smoke (project.smoke only, on the
+    # restored sha) then passes again (200).
+    opener = _opener_factory([(200, b"ok"), (500, b"boom"), (200, b"ok")])
     handler = _handler(project, adapter, tmp_path, opener)
     handler.state_store.save(
         "acme",
