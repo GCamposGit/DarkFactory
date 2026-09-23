@@ -318,7 +318,10 @@ def test_clean_validation_catches_gitignored_file_needed_by_test(
     result = ValidationStage().run(project, run_id)
 
     assert result.outcome == "retry"
-    assert result.cause_code == "clean_validate_failed"
+    # HF-27-08 review item 1: routes back to development, not another
+    # validation pass; validation.json (already consumed by
+    # DevelopmentStage._pending_fixup) carries the detail, not the cause_code.
+    assert result.cause_code.startswith("retry:development\nclean_validate_failed:")
 
     ws2 = ws_mod.checkout(project, run_id)
     validation_path = ws_mod.context_dir(ws2) / "validation.json"
