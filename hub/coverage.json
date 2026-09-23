@@ -66,7 +66,7 @@
       "surface": "demands-drawer"
     },
     "POST /api/demands/intake": {
-      "pending": "DH-02"
+      "machine": "Canal de intake transacional headless acionado por CLI e agentes; a UI do Hub opera estritamente em modo de consulta (DH-02)."
     },
     "GET /api/demands/next-id": {
       "surface": "demands-drawer"
@@ -87,7 +87,7 @@
       "surface": "demands-drawer"
     },
     "PATCH /api/demands/tickets/{ticket_id}/status": {
-      "pending": "DH-03"
+      "machine": "Operacao programatica de status via CLI/harness; a UI do Hub opera estritamente em modo de consulta (DH-03)."
     },
     "GET /api/enterprise/audit-trail": {
       "pending": "DH-09"
