@@ -15,6 +15,7 @@ import json
 import os
 import subprocess
 import sys
+import time
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Sequence
@@ -214,6 +215,7 @@ def cmd_run(args: argparse.Namespace) -> int:
                         validation_mode=validation_mode,
                     )
                     all_results.append(result)
+                    time.sleep(0.15)
 
     # Serialize results.json
     results_path = out_dir / "results.json"

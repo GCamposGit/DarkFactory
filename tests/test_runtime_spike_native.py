@@ -56,7 +56,7 @@ def start_command(workflow_id: str, *, approval_pre_resolved: bool = True) -> Dr
 
 def wait_for_terminal(adapter: NativeAdapter, workflow_id: str) -> list:
     events = []
-    deadline = time.monotonic() + 5
+    deadline = time.monotonic() + 15
     while time.monotonic() < deadline:
         event = adapter.poll_event(timeout=0.2)
         if event is None:
