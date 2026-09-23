@@ -13,6 +13,7 @@
       "quick": true,
       "kind": "test",
       "timeout_sec": 1200
+      
     }
   ]
 }
