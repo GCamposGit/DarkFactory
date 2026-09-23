@@ -292,11 +292,13 @@
             <button id="roadmap-mode-timeline" type="button" role="tab" aria-selected="false" onclick="selectRoadmapMode('timeline')" class="roadmap-mode-button">Linha do tempo</button>
             <button id="roadmap-mode-dependencies" type="button" role="tab" aria-selected="false" onclick="selectRoadmapMode('dependencies')" class="roadmap-mode-button">Dependências</button>
             <button id="roadmap-mode-table" type="button" role="tab" aria-selected="false" onclick="selectRoadmapMode('table')" class="roadmap-mode-button">Tabela acessível</button>
+            <button id="roadmap-mode-health" type="button" role="tab" aria-selected="false" onclick="selectRoadmapMode('health')" class="roadmap-mode-button">Saúde</button>
+            <button id="roadmap-mode-history" type="button" role="tab" aria-selected="false" onclick="selectRoadmapMode('history')" class="roadmap-mode-button">Histórico & Comparação</button>
           </div>
           <div class="text-[10px] text-slate-500 font-mono text-right">Observado: <span id="roadmap-observed-at">—</span> · Hash: <span id="roadmap-snapshot-hash">—</span></div>
         </div>
 
-        <section class="rounded-2xl border border-slate-800 bg-slate-900/50 p-4" aria-labelledby="roadmap-filters-title">
+        <section id="roadmap-filters-section" class="rounded-2xl border border-slate-800 bg-slate-900/50 p-4" aria-labelledby="roadmap-filters-title">
           <div class="flex items-center justify-between gap-3 mb-3">
             <h3 id="roadmap-filters-title" class="text-xs font-semibold uppercase tracking-wider text-slate-400">Filtros</h3>
             <button type="button" onclick="clearRoadmapFilters()" class="text-[10px] text-slate-500 hover:text-cyan-300 font-mono">Limpar filtros</button>
@@ -326,6 +328,8 @@
         <div id="roadmap-timeline-view" class="hidden"></div>
         <div id="roadmap-dependencies-view" class="hidden"></div>
         <div id="roadmap-table-view" class="hidden"></div>
+        <div id="roadmap-health-view" class="hidden space-y-6"></div>
+        <div id="roadmap-history-view" class="hidden space-y-6"></div>
 
         <section class="pt-2 border-t border-slate-800/80" aria-labelledby="roadmap-sources-title">
           <div class="flex items-center gap-2 mb-2"><h3 id="roadmap-sources-title" class="text-[10px] uppercase tracking-wider text-slate-500 font-mono">Fontes consultadas</h3><span class="text-[10px] text-slate-600">·</span><span class="text-[10px] text-slate-600">proveniência operacional</span></div>
