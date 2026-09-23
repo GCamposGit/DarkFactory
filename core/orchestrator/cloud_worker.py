@@ -7,9 +7,9 @@ and isolates task execution inside container boundaries.
 
 from __future__ import annotations
 
-import json
 import logging
 import os
+import shutil
 import signal
 import sys
 import threading
@@ -19,13 +19,26 @@ from pathlib import Path
 from typing import Any, Callable
 from pydantic import BaseModel, ConfigDict, Field
 
-from core.acceptance.continuous_observer import ContinuousObserver
 from core.orchestrator.adapters.control_postgres import PostgresControlStore
 from core.orchestrator.cloud_artifacts import CloudArtifactStore
-from core.workflow.control_contracts import Claim, JobKey, RuntimeOwner, StageResult
+from core.workflow.control_contracts import Claim, RuntimeOwner, StageContext
+from core.workflow.handlers import HandlerRegistry
 from core.workflow.successors import materialize_result
 
 logger = logging.getLogger("darkfac.cloud_worker")
+
+# HF-27-08: agent-CLI binaries the worker autodetects on PATH. A binary being
+# present does not by itself grant the `harness:<name>` capability -- an
+# (optional) auth prober must also pass, so the worker never publishes a
+# capability it cannot actually honor.
+_HARNESS_BINARIES: dict[str, str] = {
+    "claude": "claude",
+    "codex": "codex",
+    "grok": "grok",
+    "antigravity": "antigravity",
+}
+_TOOLING_BINARIES: tuple[str, ...] = ("git", "gh", "node", "python")
+_CAPABILITY_PROBE_INTERVAL_SEC = 3600.0
 
 DEFAULT_CAPABILITIES: tuple[str, ...] = (
     "grill_engine",
@@ -60,6 +73,24 @@ _PRIORITY_READY_AGE_SEC: dict[str, float] = {
 }
 
 
+def _autodetect_tooling_caps() -> list[str]:
+    """`git`/`gh`/`node`/`python` present on PATH, plus `harness:<x>` for each
+    agent CLI binary found on PATH.
+
+    Only whether the *binary* is discoverable, not whether it is
+    authenticated -- `capability_prober` (applied afterwards, same as the
+    pre-existing `DARKFAC_WORKER_CAPS` path) is what drops an unauthenticated
+    `harness:x`. Opt-in via `CloudWorker(..., autodetect_tooling=True)` (set
+    by `main()` for the real worker loop) so every existing capability unit
+    test, which asserts an exact capability list, is unaffected.
+    """
+    caps: list[str] = [tool for tool in _TOOLING_BINARIES if shutil.which(tool)]
+    for harness, binary in _HARNESS_BINARIES.items():
+        if shutil.which(binary):
+            caps.append(f"harness:{harness}")
+    return caps
+
+
 def _priority_defaults(priority: str | None) -> tuple[float | None, float]:
     """Return (poll_interval_sec, ready_age_sec) for a `DARKFAC_WORKER_PRIORITY` value.
 
@@ -81,6 +112,9 @@ class WorkerSlotStatus(BaseModel):
     available_slots: int
     is_saturated: bool
     is_draining: bool = False
+    # HF-27-08 item D: published so a panel/heartbeat consumer can tell
+    # "no worker with harness:claude" apart from "all workers saturated".
+    capabilities: list[str] = Field(default_factory=list)
 
 
 class StepExecutionResult(BaseModel):
@@ -109,6 +143,11 @@ class CloudWorker:
         artifact_store: CloudArtifactStore | None = None,
         ready_age_sec: float | None = None,
         capability_prober: Callable[[str], bool] | None = None,
+        registry: HandlerRegistry | None = None,
+        intake_service: Any = None,
+        routing_config: Any = None,
+        capability_probe_interval_s: float = _CAPABILITY_PROBE_INTERVAL_SEC,
+        autodetect_tooling: bool = False,
     ) -> None:
         self.worker_id = worker_id or os.environ.get("DARKFAC_WORKER_ID", "cloud-worker-1")
         self.max_slots = (
@@ -118,22 +157,20 @@ class CloudWorker:
         )
         self.database_url = database_url or os.environ.get("DARKFAC_HF02_DATABASE_URL")
 
+        self._capability_prober = capability_prober
+        self._autodetect_tooling = autodetect_tooling
+        self._capability_probe_interval_s = capability_probe_interval_s
+        self._last_capability_probe_monotonic: float | None = None
+
         if capabilities is not None:
             self.capabilities = list(capabilities)
         else:
-            # DARKFAC_WORKER_CAPS adds host capabilities (git, harness:*,
-            # target:*) on top of the role capabilities every existing
-            # workflow job requires; replacing them would stop this worker
-            # from claiming any of today's jobs.
-            env_caps = [c.strip() for c in os.environ.get("DARKFAC_WORKER_CAPS", "").split(",") if c.strip()]
-            self.capabilities = list(DEFAULT_CAPABILITIES) + [
-                c for c in env_caps if c not in DEFAULT_CAPABILITIES
-            ]
+            self.capabilities = self._compute_capabilities()
 
-        # HF-27-09: an auth probe failing at boot drops the `harness:x`
-        # capability instead of publishing it and later failing the claim.
-        if capability_prober is not None:
-            self.capabilities = self._filter_capabilities(self.capabilities, capability_prober)
+        self._registry: HandlerRegistry | None = registry
+        self._registry_caps: tuple[str, ...] = tuple(self.capabilities) if registry is not None else ()
+        self._intake_service = intake_service
+        self._routing_config = routing_config
 
         # HF-27-09: priority topology. Explicit `ready_age_sec` wins; then an
         # explicit env override; then the DARKFAC_WORKER_PRIORITY default;
@@ -171,6 +208,75 @@ class CloudWorker:
             kept.append(cap)
         return kept
 
+    def _compute_capabilities(self) -> list[str]:
+        """DARKFAC_WORKER_CAPS host caps on top of role caps, plus (opt-in,
+        HF-27-08) autodetected tooling/harnesses, then the auth-probe filter.
+
+        `harness:any` is appended only in the autodetect path, and only for
+        whatever `harness:*` capability actually survived the auth-probe
+        filter -- never a stale claim about a harness that was just dropped.
+        """
+        env_caps = [c.strip() for c in os.environ.get("DARKFAC_WORKER_CAPS", "").split(",") if c.strip()]
+        capabilities = list(DEFAULT_CAPABILITIES) + [c for c in env_caps if c not in DEFAULT_CAPABILITIES]
+
+        if self._autodetect_tooling:
+            for cap in _autodetect_tooling_caps():
+                if cap not in capabilities:
+                    capabilities.append(cap)
+
+        if self._capability_prober is not None:
+            capabilities = self._filter_capabilities(capabilities, self._capability_prober)
+
+        if self._autodetect_tooling and "harness:any" not in capabilities:
+            if any(c.startswith("harness:") for c in capabilities):
+                capabilities.append("harness:any")
+
+        self._last_capability_probe_monotonic = time.monotonic()
+        return capabilities
+
+    def refresh_capabilities(self, *, force: bool = False) -> bool:
+        """Re-run `_compute_capabilities()` if the probe interval has elapsed.
+
+        No-op (returns False) when autodetection/probing was never
+        requested, so a worker started with an explicit `capabilities` list
+        or without `autodetect_tooling`/`capability_prober` never re-probes.
+        Returns True when capabilities actually changed.
+        """
+        if not self._autodetect_tooling and self._capability_prober is None:
+            return False
+        if not force:
+            elapsed = time.monotonic() - (self._last_capability_probe_monotonic or 0.0)
+            if elapsed < self._capability_probe_interval_s:
+                return False
+        new_caps = self._compute_capabilities()
+        changed = new_caps != self.capabilities
+        self.capabilities = new_caps
+        return changed
+
+    @property
+    def registry(self) -> HandlerRegistry:
+        """Line stage handler registry (HF-27-08), rebuilt when capabilities change."""
+        if self._registry is None or self._registry_caps != tuple(self.capabilities):
+            from core.line.bindings import build_line_registry
+
+            self._registry = build_line_registry(
+                self.capabilities,
+                store=self.store,
+                routing_config=self._routing_config,
+                intake_service=self.intake_service,
+            )
+            self._registry_caps = tuple(self.capabilities)
+        return self._registry
+
+    @property
+    def intake_service(self) -> Any:
+        """`AutonomousIntakeService` bound to this worker's store (for planning's milestone children)."""
+        if self._intake_service is None:
+            from core.demands.autonomous_intake import AutonomousIntakeService
+
+            self._intake_service = AutonomousIntakeService(self.store)
+        return self._intake_service
+
     @property
     def store(self) -> PostgresControlStore:
         if self._store is None:
@@ -199,6 +305,7 @@ class CloudWorker:
             available_slots=available,
             is_saturated=(allocated >= self.max_slots) or self._draining,
             is_draining=self._draining,
+            capabilities=list(self.capabilities),
         )
 
     def try_acquire_slot(self, task_id: str) -> bool:
@@ -250,137 +357,79 @@ class CloudWorker:
         logger.info("Worker %s drain completed cleanly; all active tasks finished", self.worker_id)
         return True
 
+    def _build_stage_context(self, claim: Claim) -> StageContext:
+        """Assemble a `StageContext` for `claim` (HF-27-08 item D).
+
+        `input_refs` (D-f) comes from the most recently succeeded job of
+        this run -- exactly the shape each `core/line/stage_*.py` handler's
+        own docstring already documents (e.g. `ReleaseStageHandler` expects
+        `[pr_url, merge_sha]`, `IntegrationStageHandler`'s own output_refs).
+        The other `StageContext` fields (plan_ref/plan_digest/...) are line
+        placeholders: the line's real state lives on the run's git branch
+        (`core.line.workspace`), not in these HF-05 plan/candidate digests.
+        """
+        run_id = claim.job_key.run_id
+        try:
+            input_refs = self.store.get_latest_success_output_refs(run_id, exclude_stage=claim.job_key.stage)
+        except Exception as exc:  # pragma: no cover - defensive, must never block dispatch
+            logger.warning("Failed to resolve input_refs for run %s: %s", run_id, exc)
+            input_refs = []
+        return StageContext(
+            claim=claim,
+            plan_ref=f"plan://line/{run_id}",
+            plan_digest="sha256:" + "0" * 64,
+            config_version="1.0",
+            environment_ref="env-local",
+            identity=self.worker_id,
+            route_ref=claim.route_ref,
+            memory_version="1.0",
+            input_refs=input_refs,
+        )
+
+    def _start_lease_heartbeat(self, claim: Claim) -> tuple[threading.Event, threading.Thread]:
+        """Background thread renewing `claim`'s lease while a (possibly ~30min) handler runs."""
+        stop_event = threading.Event()
+        interval = max(5.0, getattr(self.store, "lease_duration_sec", 45) / 3.0)
+
+        def _loop() -> None:
+            while not stop_event.wait(interval):
+                try:
+                    self.store.heartbeat(claim, datetime.now(UTC))
+                except Exception as exc:
+                    logger.warning("Lease heartbeat failed for %s: %s", claim.lease_id, exc)
+                    return
+
+        thread = threading.Thread(target=_loop, name=f"lease-heartbeat-{claim.lease_id}", daemon=True)
+        thread.start()
+        return stop_event, thread
+
     def dispatch_claimed_job(self, claim: Claim, now: datetime | None = None) -> StepExecutionResult:
-        """Execute a claimed stage, store artifacts, finish the job, and materialize successors."""
+        """Execute a claimed stage via the line's HandlerRegistry, finish the job, and materialize successors.
+
+        HF-27-08 item D: the old generic-prompt/`deterministic_mock` path
+        and the `<stage>_deliverable.json` artifact-as-result are gone.
+        `registry.dispatch(context)` calls the real `core/line/stage_*.py`
+        handler (via `core.line.bindings.build_line_registry`); a stage
+        with no real executor is `missing_handler` (fail-closed), never a
+        synthetic success.
+        """
         effective_now = now or datetime.now(UTC)
         stage = claim.job_key.stage
         run_id = claim.job_key.run_id
 
         def _execute_stage() -> dict[str, Any]:
-            generated_text = None
-            measured_cost = 0.0
-            provider_backend = "deterministic_mock"
-
-            # When remote harnesses are configured, execute via RemoteMultiHarnessModelProvider
-            remote_urls = os.environ.get("REMOTE_HARNESS_URLS") or os.environ.get("REMOTE_HARNESS_URL") or os.environ.get("DARKFAC_ONPREM_URL")
-            if (remote_urls or os.environ.get("USE_REMOTE_CODEX") == "true") and stage in ("planning", "development"):
-                try:
-                    from core.execution.providers import get_model_provider
-                    from core.router.harness_router import resolve_harness_candidates
-
-                    harness_metadata: dict[str, Any] = {
-                        "ticket_id": claim.job_key.ticket_id,
-                        "run_id": run_id,
-                    }
-                    forced_harness = os.environ.get("REMOTE_HARNESS_PREFERENCE")
-                    if forced_harness:
-                        harness_metadata["preferred_harness"] = forced_harness.strip().lower()
-
-                    candidate_harnesses = resolve_harness_candidates(
-                        stage=stage,
-                        metadata=harness_metadata,
-                    )
-
-                    provider = get_model_provider("remote_harness", node_urls=remote_urls)
-                    prompt = (
-                        f"Dark Factory Task Dispatch\n"
-                        f"Run ID: {run_id}\n"
-                        f"Stage: {stage}\n"
-                        f"Ticket: {claim.job_key.ticket_id}\n\n"
-                        f"Por favor implemente a solucao completa para o ticket solicitado com codigo e testes."
-                    )
-                    resp = provider.generate(
-                        prompt,
-                        candidate_harnesses=candidate_harnesses,
-                        ticket_id=claim.job_key.ticket_id,
-                    )
-                    generated_text = resp.text
-                    measured_cost = resp.measured_cost or 0.0
-                    meta = resp.metadata or {}
-                    provider_backend = meta.get("backend", "remote_harness")
-                    logger.info(
-                        "CloudWorker executed stage %s via remote provider (%s, node=%s, harness=%s)",
-                        stage,
-                        provider_backend,
-                        meta.get("remote_url"),
-                        meta.get("harness"),
-                    )
-                except Exception as exc:
-                    logger.warning(
-                        "Stage %s remote provider execution failed: %s; using deterministic fallback",
-                        stage,
-                        exc,
-                    )
-
-            task_payload = {
-                "run_id": run_id,
-                "ticket_id": claim.job_key.ticket_id,
-                "stage": stage,
-                "iteration": claim.job_key.iteration,
-                "fencing_token": claim.fencing_token,
-                "worker_id": self.worker_id,
-                "executed_at": effective_now.isoformat(),
-                "status": "APPROVED",
-                "provider": provider_backend,
-                "generated_output": generated_text,
-            }
-            raw_content = json.dumps(task_payload, indent=2)
-            filename = f"{stage}_deliverable.json"
-            art_ref = self.artifact_store.store_artifact(
-                workflow_id=run_id,
-                filename=filename,
-                content=raw_content,
-                content_type="application/json",
-            )
-            integrity_ok = self.artifact_store.verify_integrity(art_ref)
-            if not integrity_ok:
-                raise ValueError(f"Artifact integrity verification failed for {filename}")
-
-            stage_result = StageResult(
-                outcome="success",
-                output_refs=[art_ref.relative_path],
-                evidence_refs=[
-                    f"sha256:{art_ref.sha256}",
-                    f"lease:{claim.lease_id}",
-                    f"fencing:{claim.fencing_token}",
-                    f"provider:{provider_backend}",
-                ],
-                actual_cost=measured_cost,
-            )
+            context = self._build_stage_context(claim)
+            stop_heartbeat, heartbeat_thread = self._start_lease_heartbeat(claim)
+            try:
+                stage_result = self.registry.dispatch(context)
+            finally:
+                stop_heartbeat.set()
+                heartbeat_thread.join(timeout=2.0)
 
             self.store.finish(claim, stage_result, now=effective_now)
             materialize_result(claim.job_key, stage_result, self.store, now=effective_now)
 
-            try:
-                observer = ContinuousObserver()
-                token = observer.correlate(run_id, claim.job_key.canonical_key(), str(claim.fencing_token))
-                ctx = {
-                    "consumer_active": True,
-                    "manual_stage": False,
-                    "external_oracle": True,
-                    "timestamp": effective_now.isoformat(),
-                    "fencing_token": claim.fencing_token,
-                    "idempotency_digest": f"digest-{claim.job_key.canonical_key()}",
-                    "claimed_digest": f"digest-{claim.job_key.canonical_key()}",
-                    "has_secrets": False,
-                    "timeout_checkpoint": True,
-                    "resources_exhausted": False,
-                    "allowed_paths": [str(self.artifact_store.root_dir)],
-                    "mutated_paths": [str(self.artifact_store.root_dir / art_ref.relative_path)],
-                    "last_heartbeat_ago": 1.0,
-                    "worktree_clean": True,
-                    "correlation_token": token,
-                }
-                logs = f"Worker {self.worker_id} executed stage {claim.job_key.canonical_key()}"
-                observer.audit_run(ctx, logs)
-            except Exception as exc:
-                logger.debug("ContinuousObserver audit record: %s", exc)
-
-            return {
-                "artifact_ref": art_ref.model_dump(),
-                "integrity_verified": integrity_ok,
-                "stage_result": stage_result.model_dump(),
-            }
+            return {"stage_result": stage_result.model_dump()}
 
         return self.execute_step(run_id, stage, _execute_stage)
 
@@ -455,6 +504,8 @@ class CloudWorker:
         try:
             while not stop_event.is_set():
                 try:
+                    if self.refresh_capabilities():
+                        logger.info("Worker %s capabilities refreshed: %s", self.worker_id, self.capabilities)
                     executed = self.poll_and_execute_once()
                     if executed:
                         # Process immediately next stage if available
@@ -546,6 +597,16 @@ def main(argv: list[str] | None = None) -> int:
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 
+    if args.status:
+        # Cheap inspection path: no autodetect/auth-probe subprocesses, so
+        # `--status` stays fast even when real harness CLIs are installed
+        # on the host (a full probe -- by design, per HF-27-09/HF-27-08 --
+        # runs real subprocesses and can take tens of seconds per harness).
+        worker = CloudWorker()
+        status = worker.slot_status()
+        print(status.model_dump_json(indent=2))
+        return 0
+
     # HF-27-09: drop a `harness:x` capability whose auth probe fails instead
     # of publishing it and later failing the claim. Best-effort: any import
     # or probe failure here just skips capability filtering.
@@ -557,12 +618,10 @@ def main(argv: list[str] | None = None) -> int:
     except Exception as exc:  # pragma: no cover - defensive, optional dependency
         logger.debug("Capability auth probing unavailable: %s", exc)
 
-    worker = CloudWorker(capability_prober=capability_prober)
-
-    if args.status:
-        status = worker.slot_status()
-        print(status.model_dump_json(indent=2))
-        return 0
+    # HF-27-08: real worker processes autodetect git/gh/node/python plus
+    # harness:<x> on PATH (opt-in flag so unit tests constructing CloudWorker
+    # directly keep their exact, environment-independent capability lists).
+    worker = CloudWorker(capability_prober=capability_prober, autodetect_tooling=True)
 
     poll_interval_sec = args.poll_interval
     if poll_interval_sec is None:
