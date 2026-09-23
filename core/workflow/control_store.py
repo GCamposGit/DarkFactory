@@ -1183,6 +1183,69 @@ class SQLiteControlStore:
         finally:
             conn.close()
 
+    def get_run_payload(self, run_id: str) -> dict[str, Any] | None:
+        """The `IntakeCommand.payload` that created `run_id` (HF-27-08 bindings.py).
+
+        Line stage handlers (grill, planning) resolve the demand text and
+        `parent_grill` (for milestone child runs) from this instead of
+        carrying them in `StageContext`, which has no payload field.
+        """
+        conn = self._connect()
+        try:
+            cur = conn.cursor()
+            cur.execute("SELECT payload FROM intake_commands WHERE run_id = ?", (run_id,))
+            row = cur.fetchone()
+            if not row:
+                return None
+            try:
+                data = json.loads(row["payload"])
+            except (TypeError, json.JSONDecodeError):
+                return None
+            return data if isinstance(data, dict) else None
+        finally:
+            conn.close()
+
+    def find_job(self, run_id: str, stage: str, status: str | None = None) -> JobKey | None:
+        """The highest-iteration job for `(run_id, stage)`, optionally filtered by `status`.
+
+        Used by `core.line.human` and the Telegram callback routing to
+        resolve the exact `JobKey` (including its current `iteration`) to
+        resume for a `waiting_human` job, without either side guessing it.
+        """
+        conn = self._connect()
+        try:
+            cur = conn.cursor()
+            if status:
+                cur.execute(
+                    """
+                    SELECT ticket_id, plan_version, iteration FROM jobs
+                    WHERE run_id = ? AND stage = ? AND status = ?
+                    ORDER BY iteration DESC LIMIT 1
+                    """,
+                    (run_id, stage, status),
+                )
+            else:
+                cur.execute(
+                    """
+                    SELECT ticket_id, plan_version, iteration FROM jobs
+                    WHERE run_id = ? AND stage = ?
+                    ORDER BY iteration DESC LIMIT 1
+                    """,
+                    (run_id, stage),
+                )
+            row = cur.fetchone()
+            if not row:
+                return None
+            return JobKey(
+                run_id=run_id,
+                ticket_id=row["ticket_id"],
+                plan_version=row["plan_version"],
+                stage=stage,
+                iteration=row["iteration"],
+            )
+        finally:
+            conn.close()
+
     def resume_job(self, job_key: JobKey, now: datetime) -> bool:
         """Transition a `waiting_human`/`waiting_dependency` job back to `pending` (HF-27-08 D-d).
 

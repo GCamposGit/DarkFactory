@@ -1149,6 +1149,58 @@ class PostgresControlStore:
             logger.warning("PostgreSQL list_active_projects failed: %s", exc)
             return [], None
 
+    def get_run_payload(self, run_id: str) -> dict[str, Any] | None:
+        """The `IntakeCommand.payload` that created `run_id` (HF-27-08 bindings.py)."""
+        if self.mock_mode:
+            return self._backend.get_run_payload(run_id)
+
+        try:
+            with self._psycopg.connect(self.raw_url) as conn:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT payload FROM intake_commands WHERE run_id = %s", (run_id,))
+                    row = cur.fetchone()
+                    if not row:
+                        return None
+                    data = row[0] if isinstance(row[0], dict) else json.loads(row[0])
+                    return data if isinstance(data, dict) else None
+        except Exception as exc:
+            logger.warning("PostgreSQL get_run_payload failed: %s", exc)
+            return None
+
+    def find_job(self, run_id: str, stage: str, status: str | None = None) -> JobKey | None:
+        """The highest-iteration job for `(run_id, stage)`, optionally filtered by `status`."""
+        if self.mock_mode:
+            return self._backend.find_job(run_id, stage, status=status)
+
+        try:
+            with self._psycopg.connect(self.raw_url) as conn:
+                with conn.cursor() as cur:
+                    if status:
+                        cur.execute(
+                            """
+                            SELECT ticket_id, plan_version, iteration FROM jobs
+                            WHERE run_id = %s AND stage = %s AND status = %s
+                            ORDER BY iteration DESC LIMIT 1
+                            """,
+                            (run_id, stage, status),
+                        )
+                    else:
+                        cur.execute(
+                            """
+                            SELECT ticket_id, plan_version, iteration FROM jobs
+                            WHERE run_id = %s AND stage = %s
+                            ORDER BY iteration DESC LIMIT 1
+                            """,
+                            (run_id, stage),
+                        )
+                    row = cur.fetchone()
+                    if not row:
+                        return None
+                    return JobKey(run_id=run_id, ticket_id=row[0], plan_version=row[1], stage=stage, iteration=row[2])
+        except Exception as exc:
+            logger.warning("PostgreSQL find_job failed: %s", exc)
+            return None
+
     def resume_job(self, job_key: JobKey, now: datetime) -> bool:
         """Transition a `waiting_human`/`waiting_dependency` job back to `pending` (HF-27-08 D-d)."""
         if self.mock_mode:

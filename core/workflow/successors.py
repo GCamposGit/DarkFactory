@@ -157,6 +157,28 @@ def _max_iteration_for_stage(
     return -1
 
 
+def _required_capabilities_json(ticket_id: str, stage: str) -> str:
+    """Best-effort `required_capabilities` for a freshly created job (HF-27-08 item D).
+
+    `ticket_id` holds the project id for line runs (`ControlStore.accept()`
+    stores it there). Lazily imports `core.line.bindings` so this generic
+    HF-05 module has no hard dependency on the line package; any failure
+    (project unknown, core.line unavailable, non-line ticket_id) falls back
+    to the historical `'[]'` (no gating), matching pre-HF-27-08 behaviour
+    for every caller outside the production line.
+    """
+    try:
+        from core.line.bindings import required_caps
+        from core.projects.registry import get_project_registry
+
+        project = get_project_registry().get_project(ticket_id)
+        if project is None:
+            return "[]"
+        return json.dumps(required_caps(project, stage))
+    except Exception:  # pragma: no cover - defensive, must never break materialization
+        return "[]"
+
+
 def materialize_result(
     job_key: JobKey,
     result: StageResult,
@@ -407,7 +429,7 @@ def materialize_result(
                         role, required_capabilities, fencing_token, timeout_seconds,
                         retry_count, max_retries, actual_cost, output_refs, evidence_refs,
                         created_at, updated_at, not_before, ready_at
-                    ) VALUES (?, ?, ?, ?, ?, 'pending', ?, '[]', 0, 1800, 0, 3, 0.0, '[]', '[]', ?, ?, ?, ?)
+                    ) VALUES (?, ?, ?, ?, ?, 'pending', ?, ?, 0, 1800, 0, 3, 0.0, '[]', '[]', ?, ?, ?, ?)
                     ON CONFLICT (run_id, ticket_id, plan_version, stage, iteration) DO NOTHING
                     """,
                     (
@@ -417,6 +439,7 @@ def materialize_result(
                         succ.stage,
                         succ.iteration,
                         succ_role,
+                        _required_capabilities_json(succ.ticket_id, succ.stage),
                         now_iso,
                         now_iso,
                         _not_before_for(succ),
@@ -578,7 +601,7 @@ def materialize_result(
                                 role, required_capabilities, fencing_token, timeout_seconds,
                                 retry_count, max_retries, actual_cost, output_refs, evidence_refs,
                                 created_at, updated_at, not_before, ready_at
-                            ) VALUES (%s, %s, %s, %s, %s, 'pending', %s, '[]'::jsonb, 0, 1800, 0, 3, 0.0, '[]'::jsonb, '[]'::jsonb, %s, %s, %s, %s)
+                            ) VALUES (%s, %s, %s, %s, %s, 'pending', %s, %s::jsonb, 0, 1800, 0, 3, 0.0, '[]'::jsonb, '[]'::jsonb, %s, %s, %s, %s)
                             ON CONFLICT (run_id, ticket_id, plan_version, stage, iteration) DO NOTHING
                             """,
                             (
@@ -588,6 +611,7 @@ def materialize_result(
                                 succ.stage,
                                 succ.iteration,
                                 succ_role,
+                                _required_capabilities_json(succ.ticket_id, succ.stage),
                                 now_utc,
                                 now_utc,
                                 _not_before_for(succ),
