@@ -20,7 +20,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # Install Python dependencies first for caching
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt &&     pip install --no-cache-dir "psycopg[binary]>=3.2.0,<3.3.0"
 
 # Create non-root system user for security
 RUN groupadd -g 1000 darkfac && \

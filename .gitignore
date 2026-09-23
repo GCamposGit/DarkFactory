@@ -81,3 +81,6 @@ Thumbs.db
 # Recoverable worktree backups
 .factory/backups/
 
+
+# DarkHub runtime marker for applied catalog revisions (USR-42)
+hub/data/catalog_meta.json

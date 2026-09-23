@@ -56,6 +56,7 @@ O ciclo PIV divide a entrega em mudanças pequenas, isoladas e estritamente veri
 - **Protocolo Fail-Closed de Worktrees**: Ausência de heartbeat, colisão de arquivos ou branch suja bloqueiam o ciclo imediatamente.
 - **Entrega Remota Obrigatória**: Conforme `references/remote-delivery.md`, um ticket de desenvolvimento só é concluído após PR aberta, checks de CI verdes, merge aprovado e confirmação do SHA no `main` remoto.
 - **Proibição de Atalhos**: Nenhum artefato é marcado como entregue sem aprovação do `ReadinessGate`.
+- **Reflexo no DarkHub**: Nenhuma entrega que crie, altere ou remova rota `/api`, pacote de `core/` ou capacidade visível ao owner é concluída sem o Step V-4 (seção 3).
 
 ---
 
@@ -66,7 +67,24 @@ O ciclo PIV divide a entrega em mudanças pequenas, isoladas e estritamente veri
 
 ---
 
-## 3. Step V-5 — Hub Sync (obrigatório após HARNESS_PASS)
+## 3. Step V-4 — Reflexo no DarkHub (Definition of Done, USR-42)
+
+O DarkHub é a interface principal do owner e precisa acompanhar toda evolução da fábrica.
+Antes de abrir a PR:
+
+1. Rode o diagnóstico: `python scripts/hub_coverage.py`. O mesmo gate roda no CI via `tests/test_hub_coverage.py`.
+2. Para cada rota `/api` ou pacote de `core/` novo, alterado ou removido, atualize `hub/coverage.json` com **uma** opção:
+   - `surface`: a capacidade ganhou tela no Hub (id de DOM existente e chamada no frontend). **Preferencial.**
+   - `pending`: a tela fica para depois; referencie um item `DH-xx` de `docs/DARKHUB_ROADMAP.md` (crie o item se nenhum servir).
+   - `machine` (rota) ou `internal` (pacote): só para capacidades sem interesse direto do owner, com justificativa real.
+3. Se a entrega mudar comportamento já exibido (estados, campos, fontes de dados), atualize a tela correspondente na mesma PR.
+4. Registre no relatório da unidade o placar antes/depois (`surfaced`/`pending`/`waived`).
+
+Remover uma entrada do manifesto para "passar no gate" sem remover a capacidade é violação de governança.
+
+---
+
+## 4. Step V-5 — Hub Sync (obrigatório após HARNESS_PASS)
 
 Após receber `[HARNESS_PASS]` do runner, execute o seguinte passo antes de marcar o ticket como entregue:
 
@@ -75,7 +93,7 @@ Após receber `[HARNESS_PASS]` do runner, execute o seguinte passo antes de marc
 # - Se o hub estiver rodando: retorna 200 e confirma atualização.
 # - Se o hub não estiver rodando: falha silenciosa, nunca bloqueia a entrega.
 Invoke-RestMethod -Method POST `
-    -Uri "${env:DARKHUB_URL:-https://darkhub.ggcampos.com}/api/benchmarks/refresh" `
+    -Uri "$(if ($env:DARKHUB_URL) { $env:DARKHUB_URL } else { 'https://darkhub.ggcampos.com' })/api/benchmarks/refresh" `
     -ContentType "application/json" `
     -ErrorAction SilentlyContinue
 ```

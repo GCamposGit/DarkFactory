@@ -124,6 +124,7 @@ from core.infra.cards import (
     build_infra_cards_report,
 )
 from core.orchestrator.store import OrchestratorStore, RunRecord
+from core.workflow.job_board import JobBoardEntry, read_job_board
 from hub.backend.webhooks import (
     CloudGatewayStatus,
     DokployDeployClient,
@@ -239,6 +240,8 @@ class HubService:
         orchestrator_path: Optional[Path] = None,
         project_root: Optional[Path] = None,
         control_store: Optional[Any] = None,
+        control_db_path: Optional[Path] = None,
+        control_database_url: Optional[str] = None,
     ) -> None:
         self._session_token = secrets.token_urlsafe(32)
         self._control_store = control_store
@@ -306,6 +309,12 @@ class HubService:
             if orchestrator_path is not None
             else repository_root / ".factory" / "orchestrator.sqlite3"
         )
+        # Canonical HF-05 control store read by the task dashboard (USR-42).
+        # ``control_database_url=None`` defers to DARKHUB_CONTROL_DATABASE_URL, then DARKFAC_HF02_DATABASE_URL.
+        self.control_db_path = (
+            Path(control_db_path) if control_db_path is not None else repository_root / ".factory" / "control.db"
+        )
+        self.control_database_url = control_database_url
         self.test_subagent_engine = TestSubagentEngine(project_root=repository_root)
         self.roadmap = build_repository_roadmap_service(
             repository_root,
@@ -391,7 +400,9 @@ class HubService:
                     "status": status,
                     "stage": stage,
                     "priority": priority,
-                    "run": run,
+                    "run_id": run.run_id if run else None,
+                    "run_status": run.status.value if run else None,
+                    "step_index": run.step_index if run else None,
                     "cost_usd": self._dashboard_cost(metadata, checkpoint),
                     "updated_at": record.get("updated_at") or (run.updated_at.isoformat() if run else None),
                     "evidence": self._dashboard_evidence(record, metadata, checkpoint),
@@ -399,10 +410,19 @@ class HubService:
                 }
             )
 
+        control = read_job_board(self.control_db_path, database_url=self.control_database_url)
+        warnings.extend(control.warnings)
+        legacy_ids = {row["task_id"] for row in rows}
+        titles = self._dashboard_demand_titles() if control.entries else {}
+        for entry in control.entries:
+            row = self._control_dashboard_row(entry, titles)
+            if row["task_id"] in legacy_ids:
+                row["task_id"] = f"{entry.ticket_id}@{entry.run_id}"
+            rows.append(row)
+
         rows.sort(key=self._dashboard_sort_key)
         queue: list[TaskDashboardItem] = []
         for index, row in enumerate(rows, start=1):
-            run = row["run"]
             queue.append(
                 TaskDashboardItem(
                     task_id=row["task_id"],
@@ -411,9 +431,9 @@ class HubService:
                     stage=row["stage"],
                     priority=row["priority"],
                     queue_position=index,
-                    run_id=run.run_id if run else None,
-                    run_status=run.status.value if run else None,
-                    step_index=run.step_index if run else None,
+                    run_id=row["run_id"],
+                    run_status=row["run_status"],
+                    step_index=row["step_index"],
                     cost_usd=row["cost_usd"],
                     updated_at=row["updated_at"],
                     evidence=row["evidence"],
@@ -436,9 +456,54 @@ class HubService:
             running_count=sum(1 for item in queue if item.run_status == "RUNNING"),
             exception_count=sum(len(item.exceptions) for item in queue),
             total_cost_usd=max(0.0, total_cost),
-            sources={"state": state_source, "runs": run_source, "usage": usage_source},
+            sources={
+                "control": control.source if control.backend == "none" else f"{control.backend}:{control.source}",
+                "state": state_source,
+                "runs": run_source,
+                "usage": usage_source,
+            },
             warnings=warnings,
         )
+
+    def _dashboard_demand_titles(self) -> dict[str, str]:
+        try:
+            return {ticket.id: ticket.title for ticket in self.demands_service.list_tickets()}
+        except Exception as exc:  # pragma: no cover - titles are cosmetic, never block the board
+            logger.warning("Demand titles unavailable for task dashboard: %s", exc)
+            return {}
+
+    @staticmethod
+    def _control_dashboard_row(entry: JobBoardEntry, titles: dict[str, str]) -> dict[str, Any]:
+        """Project one canonical control-store entry onto the dashboard row shape (USR-42)."""
+        evidence = [
+            TaskDashboardEvidence(label="projeto", value=entry.project_id, source="control"),
+            TaskDashboardEvidence(label="papel", value=entry.role, source="control"),
+            TaskDashboardEvidence(label="etapas", value=" → ".join(entry.stages_seen)[:500], source="control"),
+        ]
+        evidence.extend(
+            TaskDashboardEvidence(label="evidência", value=ref[:500], source="control")
+            for ref in entry.evidence_refs[:9]
+        )
+        exceptions: list[str] = []
+        if entry.needs_attention:
+            reason = entry.cause_code or "sem cause_code registrado"
+            exceptions.append(f"{entry.status}: {reason} (tentativa {entry.retry_count}/{entry.max_retries})")
+        status = entry.status.upper()
+        title = titles.get(entry.demand_id) or titles.get(entry.ticket_id) or entry.demand_id
+        return {
+            "task_id": entry.ticket_id,
+            "title": title[:240],
+            "status": status,
+            "stage": entry.stage,
+            "priority": 0,
+            "run_id": entry.run_id,
+            "run_status": status,
+            "step_index": entry.iteration,
+            "cost_usd": round(entry.total_cost_usd, 8),
+            "updated_at": entry.updated_at,
+            "evidence": evidence,
+            "exceptions": exceptions,
+        }
 
     def _load_task_records(self) -> tuple[dict[str, dict[str, Any]], str, list[str]]:
         if not self.task_state_path.exists():
@@ -490,7 +555,10 @@ class HubService:
     @staticmethod
     def _dashboard_sort_key(row: dict[str, Any]) -> tuple[int, int, str]:
         status_rank = {
+            "WAITING_HUMAN": 0,
             "NEEDS_FIX": 0,
+            "RETRY": 1,
+            "REPLAN": 1,
             "RUNNING": 1,
             "IMPLEMENTING": 2,
             "VALIDATING": 3,
@@ -498,8 +566,12 @@ class HubService:
             "PLANNED": 5,
             "TRIAGED": 6,
             "READY_TO_MERGE": 7,
+            "PENDING": 5,
+            "WAITING_DEPENDENCY": 6,
             "FAILED": 8,
             "MERGED": 9,
+            "SUCCEEDED": 9,
+            "CANCELLED": 10,
             "UNSET": 10,
         }
         return status_rank.get(row["status"], 99), -row["priority"], row["task_id"]
@@ -744,9 +816,52 @@ class HubService:
                 item["fallback_urls"] = default_item["fallback_urls"]
                 changed = True
 
+        if self._apply_catalog_revisions(current_items, default_items):
+            changed = True
+
         if changed:
             self._save_services_raw(current_items)
             logger.info("Migrated persisted service launcher metadata from default catalog")
+
+    # Fields a catalog revision may refresh; URLs, favorites and pins stay owned by the user.
+    _CATALOG_REVISION_FIELDS: tuple[str, ...] = ("name", "description", "tags", "category", "icon", "color")
+
+    def _apply_catalog_revisions(self, current_items: List[Dict], default_items: List[Dict]) -> bool:
+        """Propagate shipped catalog evolutions into a persisted ``services.json`` once (USR-42).
+
+        Default items carrying ``catalog_revision`` newer than the last applied revision are
+        appended when absent or have their descriptive fields refreshed. Each revision is
+        applied only once, so services deleted by the owner afterwards are not resurrected.
+        """
+        meta_file = self.data_dir / "catalog_meta.json"
+        try:
+            meta = json.loads(meta_file.read_text(encoding="utf-8")) if meta_file.exists() else {}
+        except (OSError, ValueError, json.JSONDecodeError):
+            meta = {}
+        applied = str(meta.get("applied_revision") or "") if isinstance(meta, dict) else ""
+        newest = applied
+        by_id = {item.get("id"): item for item in current_items if isinstance(item, dict)}
+        changed = False
+        for default_item in default_items:
+            revision = str(default_item.get("catalog_revision") or "") if isinstance(default_item, dict) else ""
+            if not revision or revision <= applied:
+                continue
+            newest = max(newest, revision)
+            existing = by_id.get(default_item.get("id"))
+            if existing is None:
+                current_items.append({key: value for key, value in default_item.items() if key != "catalog_revision"})
+                changed = True
+                continue
+            for field in self._CATALOG_REVISION_FIELDS:
+                if field in default_item and existing.get(field) != default_item[field]:
+                    existing[field] = default_item[field]
+                    changed = True
+        if newest != applied:
+            try:
+                meta_file.write_text(json.dumps({"applied_revision": newest}, indent=2), encoding="utf-8")
+            except OSError as exc:
+                logger.warning("Catalog revision marker not persisted: %s", exc)
+        return changed
 
     @staticmethod
     def _env_flag(name: str, default: bool = False) -> bool:
