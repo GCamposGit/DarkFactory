@@ -34,6 +34,9 @@ models/*.bin
 models/*.gguf
 models/*.safetensors
 models/checkpoints/
+models/models--*/
+models/CACHEDIR.TAG
+models/.locks/
 
 # Generated DarkFac state/assets (source ledgers remain versionable)
 .factory/visuals/

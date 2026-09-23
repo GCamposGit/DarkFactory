@@ -123,7 +123,6 @@ from core.infra.cards import (
     InfraCardsReport,
     build_infra_cards_report,
 )
-from core.orchestrator.store import OrchestratorStore, RunRecord
 from core.workflow.job_board import JobBoardEntry, read_job_board
 from hub.backend.webhooks import (
     CloudGatewayStatus,
@@ -242,6 +241,7 @@ class HubService:
         control_store: Optional[Any] = None,
         control_db_path: Optional[Path] = None,
         control_database_url: Optional[str] = None,
+        seed_dir: Optional[Path] = None,
     ) -> None:
         self._session_token = secrets.token_urlsafe(32)
         self._control_store = control_store
@@ -254,6 +254,14 @@ class HubService:
         self.services_file = self.data_dir / "services.json"
         self.default_services_file = self.data_dir / "default_services.json"
         self.prompts_file = self.data_dir / "default_prompts.json"
+        # Cloud seed dir (USR-44): an image-level copy of hub/data that a Dokploy
+        # volume mount cannot shadow. The explicit constructor argument wins over
+        # DARKHUB_SEED_DIR so tests and callers can be deterministic.
+        if seed_dir is not None:
+            self.seed_dir: Optional[Path] = Path(seed_dir)
+        else:
+            env_seed_dir = os.environ.get("DARKHUB_SEED_DIR", "").strip()
+            self.seed_dir = Path(env_seed_dir) if env_seed_dir else None
         self.ollama_base_url = ollama_base_url
         if usage_dir is not None:
             self.usage_dir = Path(usage_dir)
@@ -377,48 +385,11 @@ class HubService:
         return self.test_subagent_engine.execute(instruction)
 
     def get_task_dashboard(self) -> TaskDashboardReport:
-        """Build a read-only projection of lifecycle, run, usage and evidence data."""
-        task_records, state_source, warnings = self._load_task_records()
-        runs, run_source, run_warnings = self._load_task_runs(task_records)
-        warnings.extend(run_warnings)
-
-        task_ids = set(task_records) | set(runs)
-        rows: list[dict[str, Any]] = []
-        for task_id in task_ids:
-            record = task_records.get(task_id, {})
-            metadata = record.get("metadata") if isinstance(record.get("metadata"), dict) else {}
-            run = runs.get(task_id)
-            checkpoint = run.checkpoint if run is not None else {}
-            status = str(record.get("status") or (run.status.value if run is not None else "UNSET"))
-            stage = str(metadata.get("stage") or checkpoint.get("stage") or status)
-            title = str(metadata.get("title") or metadata.get("name") or metadata.get("summary") or task_id)
-            priority = self._dashboard_priority(metadata.get("priority", 0))
-            rows.append(
-                {
-                    "task_id": task_id,
-                    "title": title,
-                    "status": status,
-                    "stage": stage,
-                    "priority": priority,
-                    "run_id": run.run_id if run else None,
-                    "run_status": run.status.value if run else None,
-                    "step_index": run.step_index if run else None,
-                    "cost_usd": self._dashboard_cost(metadata, checkpoint),
-                    "updated_at": record.get("updated_at") or (run.updated_at.isoformat() if run else None),
-                    "evidence": self._dashboard_evidence(record, metadata, checkpoint),
-                    "exceptions": self._dashboard_exceptions(metadata, checkpoint, run),
-                }
-            )
-
+        """Build a read-only projection of lifecycle, run, usage and evidence data from the canonical control store (DH-16)."""
         control = read_job_board(self.control_db_path, database_url=self.control_database_url)
-        warnings.extend(control.warnings)
-        legacy_ids = {row["task_id"] for row in rows}
+        warnings = list(control.warnings)
         titles = self._dashboard_demand_titles() if control.entries else {}
-        for entry in control.entries:
-            row = self._control_dashboard_row(entry, titles)
-            if row["task_id"] in legacy_ids:
-                row["task_id"] = f"{entry.ticket_id}@{entry.run_id}"
-            rows.append(row)
+        rows = [self._control_dashboard_row(entry, titles) for entry in control.entries]
 
         rows.sort(key=self._dashboard_sort_key)
         queue: list[TaskDashboardItem] = []
@@ -438,17 +409,24 @@ class HubService:
                     updated_at=row["updated_at"],
                     evidence=row["evidence"],
                     exceptions=row["exceptions"],
+                    cause_code=row.get("cause_code"),
+                    diagnostic=row.get("diagnostic"),
                 )
             )
 
         usage_source = "ok"
-        total_cost = 0.0
-        try:
-            total_cost = float(self.model_usage_ledger.report(recent_limit=0).total_cost_usd)
-        except Exception as exc:  # pragma: no cover - defensive boundary for a corrupt ledger
-            usage_source = "error"
-            warnings.append(f"usage ledger unavailable: {exc}")
+        total_cost = sum(item.cost_usd for item in queue)
+        if total_cost == 0.0:
+            try:
+                usage_summary = self.model_usage_ledger.report(recent_limit=0)
+                total_cost = float(usage_summary.total_cost_usd)
+            except Exception as exc:  # pragma: no cover - defensive boundary for a corrupt ledger
+                usage_source = "error"
+                warnings.append(f"usage ledger unavailable: {exc}")
+        else:
+            usage_source = "control"
 
+        control_source = control.source if control.backend == "none" else f"{control.backend}:{control.source}"
         return TaskDashboardReport(
             generated_at=datetime.now(timezone.utc).isoformat(),
             queue=queue,
@@ -457,9 +435,7 @@ class HubService:
             exception_count=sum(len(item.exceptions) for item in queue),
             total_cost_usd=max(0.0, total_cost),
             sources={
-                "control": control.source if control.backend == "none" else f"{control.backend}:{control.source}",
-                "state": state_source,
-                "runs": run_source,
+                "control": control_source,
                 "usage": usage_source,
             },
             warnings=warnings,
@@ -480,6 +456,8 @@ class HubService:
             TaskDashboardEvidence(label="papel", value=entry.role, source="control"),
             TaskDashboardEvidence(label="etapas", value=" → ".join(entry.stages_seen)[:500], source="control"),
         ]
+        if entry.diagnostic:
+            evidence.append(TaskDashboardEvidence(label="diagnóstico", value=entry.diagnostic[:500], source="control"))
         evidence.extend(
             TaskDashboardEvidence(label="evidência", value=ref[:500], source="control")
             for ref in entry.evidence_refs[:9]
@@ -489,9 +467,12 @@ class HubService:
             reason = entry.cause_code or "sem cause_code registrado"
             exceptions.append(f"{entry.status}: {reason} (tentativa {entry.retry_count}/{entry.max_retries})")
         status = entry.status.upper()
-        title = titles.get(entry.demand_id) or titles.get(entry.ticket_id) or entry.demand_id
+        title = entry.title or titles.get(entry.demand_id) or titles.get(entry.ticket_id) or entry.demand_id
+        # Real cloud rows carry ticket_id = project_id (e.g. "darkfac"), which is not a
+        # meaningful task identifier; use the unique demand_id instead in that case (USR-44).
+        task_id = entry.demand_id if entry.ticket_id == entry.project_id else entry.ticket_id
         return {
-            "task_id": entry.ticket_id,
+            "task_id": task_id,
             "title": title[:240],
             "status": status,
             "stage": entry.stage,
@@ -503,48 +484,9 @@ class HubService:
             "updated_at": entry.updated_at,
             "evidence": evidence,
             "exceptions": exceptions,
+            "cause_code": entry.cause_code,
+            "diagnostic": entry.diagnostic,
         }
-
-    def _load_task_records(self) -> tuple[dict[str, dict[str, Any]], str, list[str]]:
-        if not self.task_state_path.exists():
-            return {}, "missing", []
-        try:
-            raw = json.loads(self.task_state_path.read_text(encoding="utf-8"))
-            tasks = raw.get("tasks", {}) if isinstance(raw, dict) else {}
-            if not isinstance(tasks, dict):
-                raise ValueError("tasks must be an object")
-            return {
-                str(task_id): value
-                for task_id, value in tasks.items()
-                if isinstance(value, dict)
-            }, "ok", []
-        except (OSError, ValueError, TypeError, json.JSONDecodeError) as exc:
-            logger.warning("Task state ledger unavailable: %s", exc)
-            return {}, "error", [f"state ledger unavailable: {exc}"]
-
-    def _load_task_runs(
-        self,
-        task_records: dict[str, dict[str, Any]],
-    ) -> tuple[dict[str, RunRecord], str, list[str]]:
-        if not self.orchestrator_path.exists():
-            return {}, "missing", []
-        task_ids = set(task_records)
-        warnings: list[str] = []
-        try:
-            store = OrchestratorStore(self.orchestrator_path)
-            runs: dict[str, RunRecord] = {}
-            for task_id in task_ids:
-                run = store.get_latest_run(task_id)
-                if run is not None:
-                    runs[task_id] = run
-            for run in store.recoverable_runs():
-                runs.setdefault(run.task_id, run)
-            return runs, "ok", warnings
-        except Exception as exc:  # pragma: no cover - defensive boundary for a corrupt store
-            logger.warning("Orchestrator run store unavailable: %s", exc)
-            warnings.append(f"run store unavailable: {exc}")
-            return {}, "error", warnings
-
     @staticmethod
     def _dashboard_priority(value: Any) -> int:
         try:
@@ -575,66 +517,6 @@ class HubService:
             "UNSET": 10,
         }
         return status_rank.get(row["status"], 99), -row["priority"], row["task_id"]
-
-    @staticmethod
-    def _dashboard_cost(metadata: dict[str, Any], checkpoint: dict[str, Any]) -> float:
-        for source in (checkpoint, metadata):
-            value = source.get("cost_usd") if isinstance(source, dict) else None
-            if isinstance(value, (int, float)) and value >= 0:
-                return round(float(value), 8)
-        return 0.0
-
-    @staticmethod
-    def _dashboard_evidence(
-        record: dict[str, Any],
-        metadata: dict[str, Any],
-        checkpoint: dict[str, Any],
-    ) -> list[TaskDashboardEvidence]:
-        candidates = [record.get("merge_evidence"), metadata.get("evidence"), metadata.get("evidence_refs"), checkpoint.get("evidence")]
-        evidence: list[TaskDashboardEvidence] = []
-        seen: set[tuple[str, str]] = set()
-
-        def add(label: Any, value: Any, source: Optional[str] = None) -> None:
-            if value is None or isinstance(value, (dict, list)):
-                value = json.dumps(value, ensure_ascii=False, sort_keys=True)
-            key = (str(label), str(value))
-            if key not in seen:
-                seen.add(key)
-                evidence.append(TaskDashboardEvidence(label=str(label), value=str(value), source=source))
-
-        for candidate in candidates:
-            if isinstance(candidate, dict):
-                for label, value in candidate.items():
-                    add(label, value, "ledger")
-            elif isinstance(candidate, list):
-                for item in candidate:
-                    if isinstance(item, dict):
-                        add(item.get("label", "evidence"), item.get("value", item), item.get("source"))
-                    elif item is not None:
-                        add("evidence", item, "ledger")
-        return evidence[:12]
-
-    @staticmethod
-    def _dashboard_exceptions(
-        metadata: dict[str, Any],
-        checkpoint: dict[str, Any],
-        run: Optional[RunRecord],
-    ) -> list[str]:
-        values: list[Any] = []
-        for source in (metadata, checkpoint):
-            for key in ("exception", "exceptions", "error", "errors"):
-                if isinstance(source, dict) and source.get(key) is not None:
-                    values.append(source[key])
-        if run is not None and run.last_error:
-            values.append(run.last_error)
-        flattened: list[str] = []
-        for value in values:
-            items = value if isinstance(value, list) else [value]
-            for item in items:
-                text = str(item).strip()
-                if text and text not in flattened:
-                    flattened.append(text)
-        return flattened[:12]
 
     def guide_demand(
         self,
@@ -745,9 +627,45 @@ class HubService:
     def get_roadmap_source(self, project_id: str, source_id: str) -> Optional[RoadmapSourceDocument]:
         return self.roadmap.get_source_document(project_id, source_id)
 
+    # Shipped seed files a Dokploy volume mount can shadow; never touched: services.json,
+    # catalog_meta.json, or anything else the owner may have edited in data_dir.
+    _CLOUD_SEED_FILES: tuple[str, ...] = ("default_services.json", "default_prompts.json")
+
+    def _apply_cloud_seed(self) -> None:
+        """Overlay shipped catalog/prompt seeds from an image-level seed dir (USR-44).
+
+        In Dokploy, ``darkhub-hub-data`` is a named volume mounted at ``/app/hub/data``,
+        so a redeploy that ships an updated ``default_services.json`` /
+        ``default_prompts.json`` never reaches the running container: the volume's old
+        copies keep shadowing the image's new ones, which means ``_apply_catalog_revisions``
+        below never sees new revisions and ``list_prompts`` keeps serving stale content.
+        ``DARKHUB_SEED_DIR`` (or an explicit ``seed_dir`` constructor argument, which wins)
+        points at an image-only copy of ``hub/data`` outside the volume; when set, this
+        copies the two shipped seed files over ``data_dir``'s copies before storage is
+        initialized, but only when the seed file exists and its content actually differs.
+        This is a cosmetic, fail-open path: any OSError is logged and swallowed so a
+        seeding hiccup never prevents the Hub from starting.
+        """
+        if self.seed_dir is None:
+            return
+        for filename in self._CLOUD_SEED_FILES:
+            seed_file = self.seed_dir / filename
+            try:
+                if not seed_file.exists():
+                    continue
+                seed_content = seed_file.read_text(encoding="utf-8")
+                target_file = self.data_dir / filename
+                if target_file.exists() and target_file.read_text(encoding="utf-8") == seed_content:
+                    continue
+                target_file.write_text(seed_content, encoding="utf-8")
+                logger.info("Refreshed %s from cloud seed dir %s", filename, self.seed_dir)
+            except OSError as exc:
+                logger.warning("Cloud seed refresh failed for %s: %s", filename, exc)
+
     def _ensure_storage(self) -> None:
         """Ensures the storage directory and initial files exist."""
         self.data_dir.mkdir(parents=True, exist_ok=True)
+        self._apply_cloud_seed()
         if not self.services_file.exists():
             if self.default_services_file.exists():
                 logger.info("Initializing services.json from default_services.json")

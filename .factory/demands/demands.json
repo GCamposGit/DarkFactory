@@ -378,627 +378,6 @@
     "updated_at": "2026-09-08T22:00:00.000000Z"
   },
   {
-    "id": "USR-19",
-    "project_id": "darkfac",
-    "title": "CLI Pipeline de Testes",
-    "origin": "user",
-    "status": "planned",
-    "item_type": "feature",
-    "lifecycle_stage": "execution",
-    "horizon": "now",
-    "tags": [
-      "user-demand"
-    ],
-    "problem_statement": "Problema bem especificado para validação de comandos headless",
-    "core_journey": [],
-    "non_goals": [
-      "Não criar frontends"
-    ],
-    "reachability_contract": "",
-    "acceptance_criteria": [
-      "Passar no pytest com exit code 0"
-    ],
-    "suggested_files": [],
-    "estimated_complexity": "medium",
-    "dependencies": [],
-    "created_at": "2026-09-11T23:34:58.171031Z",
-    "updated_at": "2026-09-11T23:34:58.171031Z"
-  },
-  {
-    "id": "USR-20",
-    "project_id": "darkfac",
-    "title": "CLI Pipeline de Testes",
-    "origin": "user",
-    "status": "planned",
-    "item_type": "feature",
-    "lifecycle_stage": "execution",
-    "horizon": "now",
-    "tags": [
-      "user-demand"
-    ],
-    "problem_statement": "Problema bem especificado para validação de comandos headless",
-    "core_journey": [],
-    "non_goals": [
-      "Não criar frontends"
-    ],
-    "reachability_contract": "",
-    "acceptance_criteria": [
-      "Passar no pytest com exit code 0"
-    ],
-    "suggested_files": [],
-    "estimated_complexity": "medium",
-    "dependencies": [],
-    "created_at": "2026-09-11T23:37:21.777081Z",
-    "updated_at": "2026-09-11T23:37:21.777081Z"
-  },
-  {
-    "id": "USR-21",
-    "project_id": "darkfac",
-    "title": "CLI Pipeline de Testes",
-    "origin": "user",
-    "status": "planned",
-    "item_type": "feature",
-    "lifecycle_stage": "execution",
-    "horizon": "now",
-    "tags": [
-      "user-demand"
-    ],
-    "problem_statement": "Problema bem especificado para validação de comandos headless",
-    "core_journey": [],
-    "non_goals": [
-      "Não criar frontends"
-    ],
-    "reachability_contract": "",
-    "acceptance_criteria": [
-      "Passar no pytest com exit code 0"
-    ],
-    "suggested_files": [],
-    "estimated_complexity": "medium",
-    "dependencies": [],
-    "created_at": "2026-09-11T23:38:57.415078Z",
-    "updated_at": "2026-09-11T23:38:57.415078Z"
-  },
-  {
-    "id": "USR-22",
-    "project_id": "darkfac",
-    "title": "CLI Pipeline de Testes",
-    "origin": "user",
-    "status": "planned",
-    "item_type": "feature",
-    "lifecycle_stage": "execution",
-    "horizon": "now",
-    "tags": [
-      "user-demand"
-    ],
-    "problem_statement": "Problema bem especificado para validação de comandos headless",
-    "core_journey": [],
-    "non_goals": [
-      "Não criar frontends"
-    ],
-    "reachability_contract": "",
-    "acceptance_criteria": [
-      "Passar no pytest com exit code 0"
-    ],
-    "suggested_files": [],
-    "estimated_complexity": "medium",
-    "dependencies": [],
-    "created_at": "2026-09-11T23:40:06.817979Z",
-    "updated_at": "2026-09-11T23:40:06.817979Z"
-  },
-  {
-    "id": "USR-23",
-    "project_id": "darkfac",
-    "title": "CLI Pipeline de Testes",
-    "origin": "user",
-    "status": "planned",
-    "item_type": "feature",
-    "lifecycle_stage": "execution",
-    "horizon": "now",
-    "tags": [
-      "user-demand"
-    ],
-    "problem_statement": "Problema bem especificado para validação de comandos headless",
-    "core_journey": [],
-    "non_goals": [
-      "Não criar frontends"
-    ],
-    "reachability_contract": "",
-    "acceptance_criteria": [
-      "Passar no pytest com exit code 0"
-    ],
-    "suggested_files": [],
-    "estimated_complexity": "medium",
-    "dependencies": [],
-    "created_at": "2026-09-11T23:41:25.480021Z",
-    "updated_at": "2026-09-11T23:41:25.480021Z"
-  },
-  {
-    "id": "USR-24",
-    "project_id": "darkfac",
-    "title": "CLI Pipeline de Testes",
-    "origin": "user",
-    "status": "planned",
-    "item_type": "feature",
-    "lifecycle_stage": "execution",
-    "horizon": "now",
-    "tags": [
-      "user-demand"
-    ],
-    "problem_statement": "Problema bem especificado para validação de comandos headless",
-    "core_journey": [],
-    "non_goals": [
-      "Não criar frontends"
-    ],
-    "reachability_contract": "",
-    "acceptance_criteria": [
-      "Passar no pytest com exit code 0"
-    ],
-    "suggested_files": [],
-    "estimated_complexity": "medium",
-    "dependencies": [],
-    "created_at": "2026-09-11T23:51:13.030286Z",
-    "updated_at": "2026-09-11T23:51:13.030286Z"
-  },
-  {
-    "id": "USR-25",
-    "project_id": "darkfac",
-    "title": "CLI Pipeline de Testes",
-    "origin": "user",
-    "status": "planned",
-    "item_type": "feature",
-    "lifecycle_stage": "execution",
-    "horizon": "now",
-    "tags": [
-      "user-demand"
-    ],
-    "problem_statement": "Problema bem especificado para validação de comandos headless",
-    "core_journey": [],
-    "non_goals": [
-      "Não criar frontends"
-    ],
-    "reachability_contract": "",
-    "acceptance_criteria": [
-      "Passar no pytest com exit code 0"
-    ],
-    "suggested_files": [],
-    "estimated_complexity": "medium",
-    "dependencies": [],
-    "created_at": "2026-09-11T23:52:02.892102Z",
-    "updated_at": "2026-09-11T23:52:02.892102Z"
-  },
-  {
-    "id": "USR-26",
-    "project_id": "darkfac",
-    "title": "CLI Pipeline de Testes",
-    "origin": "user",
-    "status": "planned",
-    "item_type": "feature",
-    "lifecycle_stage": "execution",
-    "horizon": "now",
-    "tags": [
-      "user-demand"
-    ],
-    "problem_statement": "Problema bem especificado para validação de comandos headless",
-    "core_journey": [],
-    "non_goals": [
-      "Não criar frontends"
-    ],
-    "reachability_contract": "",
-    "acceptance_criteria": [
-      "Passar no pytest com exit code 0"
-    ],
-    "suggested_files": [],
-    "estimated_complexity": "medium",
-    "dependencies": [],
-    "created_at": "2026-09-12T00:10:28.520540Z",
-    "updated_at": "2026-09-12T00:10:28.520540Z"
-  },
-  {
-    "id": "USR-27",
-    "project_id": "darkfac",
-    "title": "CLI Pipeline de Testes",
-    "origin": "user",
-    "status": "planned",
-    "item_type": "feature",
-    "lifecycle_stage": "execution",
-    "horizon": "now",
-    "tags": [
-      "user-demand"
-    ],
-    "problem_statement": "Problema bem especificado para validação de comandos headless",
-    "core_journey": [],
-    "non_goals": [
-      "Não criar frontends"
-    ],
-    "reachability_contract": "",
-    "acceptance_criteria": [
-      "Passar no pytest com exit code 0"
-    ],
-    "suggested_files": [],
-    "estimated_complexity": "medium",
-    "dependencies": [],
-    "created_at": "2026-09-12T00:22:43.901876Z",
-    "updated_at": "2026-09-12T00:22:43.901876Z"
-  },
-  {
-    "id": "USR-28",
-    "project_id": "darkfac",
-    "title": "CLI Pipeline de Testes",
-    "origin": "user",
-    "status": "planned",
-    "item_type": "feature",
-    "lifecycle_stage": "execution",
-    "horizon": "now",
-    "tags": [
-      "user-demand"
-    ],
-    "problem_statement": "Problema bem especificado para validação de comandos headless",
-    "core_journey": [],
-    "non_goals": [
-      "Não criar frontends"
-    ],
-    "reachability_contract": "",
-    "acceptance_criteria": [
-      "Passar no pytest com exit code 0"
-    ],
-    "suggested_files": [],
-    "estimated_complexity": "medium",
-    "dependencies": [],
-    "created_at": "2026-09-12T00:28:26.142267Z",
-    "updated_at": "2026-09-12T00:28:26.142267Z"
-  },
-  {
-    "id": "USR-29",
-    "project_id": "darkfac",
-    "title": "CLI Pipeline de Testes",
-    "origin": "user",
-    "status": "planned",
-    "item_type": "feature",
-    "lifecycle_stage": "execution",
-    "horizon": "now",
-    "tags": [
-      "user-demand"
-    ],
-    "problem_statement": "Problema bem especificado para validação de comandos headless",
-    "core_journey": [],
-    "non_goals": [
-      "Não criar frontends"
-    ],
-    "reachability_contract": "",
-    "acceptance_criteria": [
-      "Passar no pytest com exit code 0"
-    ],
-    "suggested_files": [],
-    "estimated_complexity": "medium",
-    "dependencies": [],
-    "created_at": "2026-09-12T00:29:06.069655Z",
-    "updated_at": "2026-09-12T00:29:06.069655Z"
-  },
-  {
-    "id": "USR-30",
-    "project_id": "darkfac",
-    "title": "CLI Pipeline de Testes",
-    "origin": "user",
-    "status": "planned",
-    "item_type": "feature",
-    "lifecycle_stage": "execution",
-    "horizon": "now",
-    "tags": [
-      "user-demand"
-    ],
-    "problem_statement": "Problema bem especificado para validação de comandos headless",
-    "core_journey": [],
-    "non_goals": [
-      "Não criar frontends"
-    ],
-    "reachability_contract": "",
-    "acceptance_criteria": [
-      "Passar no pytest com exit code 0"
-    ],
-    "suggested_files": [],
-    "estimated_complexity": "medium",
-    "dependencies": [],
-    "created_at": "2026-09-12T00:34:58.917877Z",
-    "updated_at": "2026-09-12T00:34:58.917877Z"
-  },
-  {
-    "id": "USR-31",
-    "project_id": "darkfac",
-    "title": "CLI Pipeline de Testes",
-    "origin": "user",
-    "status": "planned",
-    "item_type": "feature",
-    "lifecycle_stage": "execution",
-    "horizon": "now",
-    "tags": [
-      "user-demand"
-    ],
-    "problem_statement": "Problema bem especificado para validação de comandos headless",
-    "core_journey": [],
-    "non_goals": [
-      "Não criar frontends"
-    ],
-    "reachability_contract": "",
-    "acceptance_criteria": [
-      "Passar no pytest com exit code 0"
-    ],
-    "suggested_files": [],
-    "estimated_complexity": "medium",
-    "dependencies": [],
-    "created_at": "2026-09-12T00:36:32.494302Z",
-    "updated_at": "2026-09-12T00:36:32.494302Z"
-  },
-  {
-    "id": "USR-32",
-    "project_id": "darkfac",
-    "title": "CLI Pipeline de Testes",
-    "origin": "user",
-    "status": "planned",
-    "item_type": "feature",
-    "lifecycle_stage": "execution",
-    "horizon": "now",
-    "tags": [
-      "user-demand"
-    ],
-    "problem_statement": "Problema bem especificado para validação de comandos headless",
-    "core_journey": [],
-    "non_goals": [
-      "Não criar frontends"
-    ],
-    "reachability_contract": "",
-    "acceptance_criteria": [
-      "Passar no pytest com exit code 0"
-    ],
-    "suggested_files": [],
-    "estimated_complexity": "medium",
-    "dependencies": [],
-    "created_at": "2026-09-12T00:49:48.368107Z",
-    "updated_at": "2026-09-12T00:49:48.368107Z"
-  },
-  {
-    "id": "USR-33",
-    "project_id": "darkfac",
-    "title": "CLI Pipeline de Testes",
-    "origin": "user",
-    "status": "planned",
-    "item_type": "feature",
-    "lifecycle_stage": "execution",
-    "horizon": "now",
-    "tags": [
-      "user-demand"
-    ],
-    "problem_statement": "Problema bem especificado para validação de comandos headless",
-    "core_journey": [],
-    "non_goals": [
-      "Não criar frontends"
-    ],
-    "reachability_contract": "",
-    "acceptance_criteria": [
-      "Passar no pytest com exit code 0"
-    ],
-    "suggested_files": [],
-    "estimated_complexity": "medium",
-    "dependencies": [],
-    "created_at": "2026-09-12T01:19:52.212682Z",
-    "updated_at": "2026-09-12T01:19:52.212682Z"
-  },
-  {
-    "id": "USR-34",
-    "project_id": "darkfac",
-    "title": "CLI Pipeline de Testes",
-    "origin": "user",
-    "status": "planned",
-    "item_type": "feature",
-    "lifecycle_stage": "execution",
-    "horizon": "now",
-    "tags": [
-      "user-demand"
-    ],
-    "problem_statement": "Problema bem especificado para validação de comandos headless",
-    "core_journey": [],
-    "non_goals": [
-      "Não criar frontends"
-    ],
-    "reachability_contract": "",
-    "acceptance_criteria": [
-      "Passar no pytest com exit code 0"
-    ],
-    "suggested_files": [],
-    "estimated_complexity": "medium",
-    "dependencies": [],
-    "created_at": "2026-09-12T01:20:07.879838Z",
-    "updated_at": "2026-09-12T01:20:07.879838Z"
-  },
-  {
-    "id": "USR-35",
-    "project_id": "darkfac",
-    "title": "CLI Pipeline de Testes",
-    "origin": "user",
-    "status": "planned",
-    "item_type": "feature",
-    "lifecycle_stage": "execution",
-    "horizon": "now",
-    "tags": [
-      "user-demand"
-    ],
-    "problem_statement": "Problema bem especificado para validação de comandos headless",
-    "core_journey": [],
-    "non_goals": [
-      "Não criar frontends"
-    ],
-    "reachability_contract": "",
-    "acceptance_criteria": [
-      "Passar no pytest com exit code 0"
-    ],
-    "suggested_files": [],
-    "estimated_complexity": "medium",
-    "dependencies": [],
-    "created_at": "2026-09-12T01:22:24.346423Z",
-    "updated_at": "2026-09-12T01:22:24.346423Z"
-  },
-  {
-    "id": "USR-36",
-    "project_id": "darkfac",
-    "title": "CLI Pipeline de Testes",
-    "origin": "user",
-    "status": "planned",
-    "item_type": "feature",
-    "lifecycle_stage": "execution",
-    "horizon": "now",
-    "tags": [
-      "user-demand"
-    ],
-    "problem_statement": "Problema bem especificado para validação de comandos headless",
-    "core_journey": [],
-    "non_goals": [
-      "Não criar frontends"
-    ],
-    "reachability_contract": "",
-    "acceptance_criteria": [
-      "Passar no pytest com exit code 0"
-    ],
-    "suggested_files": [],
-    "estimated_complexity": "medium",
-    "dependencies": [],
-    "created_at": "2026-09-12T10:20:05.260751Z",
-    "updated_at": "2026-09-12T10:20:05.260751Z"
-  },
-  {
-    "id": "USR-37",
-    "project_id": "darkfac",
-    "title": "CLI Pipeline de Testes",
-    "origin": "user",
-    "status": "planned",
-    "item_type": "feature",
-    "lifecycle_stage": "execution",
-    "horizon": "now",
-    "tags": [
-      "user-demand"
-    ],
-    "problem_statement": "Problema bem especificado para validação de comandos headless",
-    "core_journey": [],
-    "non_goals": [
-      "Não criar frontends"
-    ],
-    "reachability_contract": "",
-    "acceptance_criteria": [
-      "Passar no pytest com exit code 0"
-    ],
-    "suggested_files": [],
-    "estimated_complexity": "medium",
-    "dependencies": [],
-    "created_at": "2026-09-12T10:22:58.933492Z",
-    "updated_at": "2026-09-12T10:22:58.933492Z"
-  },
-  {
-    "id": "USR-38",
-    "project_id": "darkfac",
-    "title": "CLI Pipeline de Testes",
-    "origin": "user",
-    "status": "planned",
-    "item_type": "feature",
-    "lifecycle_stage": "execution",
-    "horizon": "now",
-    "tags": [
-      "user-demand"
-    ],
-    "problem_statement": "Problema bem especificado para validação de comandos headless",
-    "core_journey": [],
-    "non_goals": [
-      "Não criar frontends"
-    ],
-    "reachability_contract": "",
-    "acceptance_criteria": [
-      "Passar no pytest com exit code 0"
-    ],
-    "suggested_files": [],
-    "estimated_complexity": "medium",
-    "dependencies": [],
-    "created_at": "2026-09-12T10:24:42.518884Z",
-    "updated_at": "2026-09-12T10:24:42.518884Z"
-  },
-  {
-    "id": "USR-39",
-    "project_id": "darkfac",
-    "title": "CLI Pipeline de Testes",
-    "origin": "user",
-    "status": "planned",
-    "item_type": "feature",
-    "lifecycle_stage": "execution",
-    "horizon": "now",
-    "tags": [
-      "user-demand"
-    ],
-    "problem_statement": "Problema bem especificado para validação de comandos headless",
-    "core_journey": [],
-    "non_goals": [
-      "Não criar frontends"
-    ],
-    "reachability_contract": "",
-    "acceptance_criteria": [
-      "Passar no pytest com exit code 0"
-    ],
-    "suggested_files": [],
-    "estimated_complexity": "medium",
-    "dependencies": [],
-    "created_at": "2026-09-12T10:28:58.318618Z",
-    "updated_at": "2026-09-12T10:28:58.318618Z"
-  },
-  {
-    "id": "USR-40",
-    "project_id": "darkfac",
-    "title": "CLI Pipeline de Testes",
-    "origin": "user",
-    "status": "planned",
-    "item_type": "feature",
-    "lifecycle_stage": "execution",
-    "horizon": "now",
-    "tags": [
-      "user-demand"
-    ],
-    "problem_statement": "Problema bem especificado para validação de comandos headless",
-    "core_journey": [],
-    "non_goals": [
-      "Não criar frontends"
-    ],
-    "reachability_contract": "",
-    "acceptance_criteria": [
-      "Passar no pytest com exit code 0"
-    ],
-    "suggested_files": [],
-    "estimated_complexity": "medium",
-    "dependencies": [],
-    "created_at": "2026-09-12T10:52:50.574760Z",
-    "updated_at": "2026-09-12T10:52:50.574760Z"
-  },
-  {
-    "id": "USR-41",
-    "project_id": "darkfac",
-    "title": "CLI Pipeline de Testes",
-    "origin": "user",
-    "status": "planned",
-    "item_type": "feature",
-    "lifecycle_stage": "execution",
-    "horizon": "now",
-    "tags": [
-      "user-demand"
-    ],
-    "problem_statement": "Problema bem especificado para validação de comandos headless",
-    "core_journey": [],
-    "non_goals": [
-      "Não criar frontends"
-    ],
-    "reachability_contract": "",
-    "acceptance_criteria": [
-      "Passar no pytest com exit code 0"
-    ],
-    "suggested_files": [],
-    "estimated_complexity": "medium",
-    "dependencies": [],
-    "created_at": "2026-09-12T10:56:07.638091Z",
-    "updated_at": "2026-09-12T10:56:07.638091Z"
-  },
-  {
     "id": "JRV-01",
     "project_id": "jarvis",
     "title": "Configurar e Homologar Fallback do Groq Cloud Whisper",
@@ -1074,7 +453,7 @@
     "project_id": "darkfac",
     "title": "DH-01 Saude da Fabrica no DarkHub (somente leitura)",
     "origin": "user",
-    "status": "planned",
+    "status": "completed",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -1106,6 +485,371 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-09-23T07:55:36.782130Z",
-    "updated_at": "2026-09-23T07:55:36.782130Z"
+    "updated_at": "2026-09-23T14:42:43.774998Z"
+  },
+  {
+    "id": "USR-44",
+    "project_id": "darkfac",
+    "title": "Catalogo e prompts do DarkHub nao chegam a nuvem (volume esconde seeds) + titulo real na Fila",
+    "origin": "user",
+    "status": "completed",
+    "item_type": "quality",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand",
+      "quality"
+    ],
+    "problem_statement": "No Dokploy hub/data inteiro e um volume; o default_services.json/default_prompts.json da imagem fica escondido, entao catalog_revision (USR-42) nunca e aplicado. Na Fila operacional os runs aparecem como 'darkfac' / 'dem-xxxx' sem o titulo da demanda.",
+    "core_journey": [
+      "Owner faz deploy e ve o catalogo atualizado; na Fila cada run mostra o titulo da demanda"
+    ],
+    "non_goals": [
+      "Nao alterar o volume nem apagar dados do owner"
+    ],
+    "reachability_contract": "python -m pytest tests/test_hub_cloud_seed.py tests/test_control_job_board.py -v",
+    "acceptance_criteria": [
+      "Seeds do catalogo e prompts vem da imagem mesmo com hub/data montado como volume",
+      "catalog_revision aplicado na primeira subida apos deploy",
+      "Fila mostra o titulo do payload do intake",
+      "Teste headless de reachability: `python -m pytest tests/test_hub_cloud_seed.py tests/test_control_job_board.py -v`"
+    ],
+    "suggested_files": [
+      "core/workflow/job_board.py",
+      "deploy/dokploy/Dockerfile.hub",
+      "hub/backend/service.py",
+      "tests/test_control_job_board.py",
+      "tests/test_hub_cloud_seed.py"
+    ],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-09-23T14:42:44.219451Z",
+    "updated_at": "2026-09-23T16:45:00.000000Z"
+  },
+  {
+    "id": "USR-45",
+    "project_id": "darkfac",
+    "title": "DH-14 Cobertura visivel no DarkHub (badge + drawer de pendencias)",
+    "origin": "user",
+    "status": "completed",
+    "item_type": "quality",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand",
+      "quality",
+      "governance"
+    ],
+    "problem_statement": "Nenhum sinal de drift de cobertura visivel no proprio DarkHub (achado R9 do DARKHUB_ROADMAP.md). O owner nao consegue acompanhar o percentual de capacidades cobertas nem as pendencias da fabrica sem rodar o CLI no terminal.",
+    "core_journey": [
+      "Owner abre o DarkHub e ve o badge de cobertura no topo com % atualizada; clica no badge e um drawer exibe o placar e as pendencias agrupadas por item de roadmap DH-xx"
+    ],
+    "non_goals": [
+      "Nao alterar contratos dos outros itens de roadmap nem remover o gate offline do CI"
+    ],
+    "reachability_contract": "python -m pytest tests/test_hub_coverage.py tests/test_hub_coverage_api.py -v",
+    "acceptance_criteria": [
+      "Endpoint GET /api/hub/coverage retorna resumo estruturado com coverage_ratio, surfaced, pending, waived, problems e pending_by_roadmap",
+      "Badge visual no cabecalho do Hub exibe percentual e semaforo de estado",
+      "Drawer slide-over exibe o placar completo e a lista de capacidades pendentes por DH-xx",
+      "Gate de cobertura tests/test_hub_coverage.py passa 100% com a nova rota e superficie",
+      "Teste headless de reachability: `python -m pytest tests/test_hub_coverage.py tests/test_hub_coverage_api.py -v`"
+    ],
+    "suggested_files": [
+      "hub/backend/coverage.py",
+      "hub/backend/api.py",
+      "hub/frontend/coverage.js",
+      "hub/frontend/index.html",
+      "hub/coverage.json",
+      "tests/test_hub_coverage_api.py"
+    ],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-09-23T17:45:00.000000Z",
+    "updated_at": "2026-09-23T17:45:00.000000Z"
+  },
+  {
+    "id": "USR-46",
+    "project_id": "darkfac",
+    "title": "DH-15 Higiene do ledger de demandas",
+    "origin": "user",
+    "status": "completed",
+    "item_type": "quality",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand",
+      "quality",
+      "governance"
+    ],
+    "problem_statement": "23 entradas duplicadas idênticas 'CLI Pipeline de Testes' (USR-19 a USR-41) geradas por execuções antigas de testes estavam poluindo o ledger de demandas versionado (.factory/demands/demands.json).",
+    "core_journey": [
+      "Owner inspeciona o ledger de demandas no Hub ou via CLI e encontra apenas demandas reais e sem duplicações"
+    ],
+    "non_goals": [
+      "Não remover demandas reais históricas",
+      "Não alterar outros ledgers ou arquivos de governança"
+    ],
+    "reachability_contract": "python -m pytest tests/test_demands_hygiene.py -v",
+    "acceptance_criteria": [
+      "demands.json é um JSON perfeitamente válido",
+      "Nenhum ID de ticket está duplicado",
+      "Nenhum título de demanda está duplicado",
+      "Todas as demandas reais históricas continuam presentes",
+      "Teste headless de reachability: python -m pytest tests/test_demands_hygiene.py -v"
+    ],
+    "suggested_files": [
+      ".factory/demands/demands.json",
+      "tests/test_demands_hygiene.py"
+    ],
+    "estimated_complexity": "small",
+    "dependencies": [],
+    "created_at": "2026-09-23T18:45:00.000000Z",
+    "updated_at": "2026-09-23T18:50:00.000000Z"
+  },
+  {
+    "id": "USR-47",
+    "project_id": "darkfac",
+    "title": "DH-03 Consulta a decisoes do owner e bloqueios WAITING_HUMAN",
+    "origin": "user",
+    "status": "completed",
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand",
+      "governance"
+    ],
+    "problem_statement": "Consulta a decisões do owner e bloqueios WAITING_HUMAN no DarkHub em modo estritamente somente-leitura, mantendo o controle operacional headless.",
+    "core_journey": [
+      "Owner consulta decisões pendentes e resoluções do Grill diretamente pelo DarkHub"
+    ],
+    "non_goals": [
+      "Não criar ações de mutação na interface do Hub sem confirmação",
+      "Não violar o princípio somente-leitura do DarkHub"
+    ],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Visualização das decisões do owner no Hub",
+      "Indicação clara de bloqueios WAITING_HUMAN"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-09-23T18:45:00.000000Z",
+    "updated_at": "2026-09-23T18:45:00.000000Z"
+  },
+  {
+    "id": "USR-48",
+    "project_id": "darkfac",
+    "title": "DH-02 Adequacao de intake canonico e alinhamento de governanca machine-only",
+    "origin": "user",
+    "status": "completed",
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand",
+      "governance"
+    ],
+    "problem_statement": "Adequação do canal de intake transacional canônico via CLI/agentes e alinhamento de governança machine-only conforme diretriz do owner.",
+    "core_journey": [
+      "Agentes e CLI submetem demandas de forma transacional e canônica para o coordenador da fábrica"
+    ],
+    "non_goals": [
+      "Não expor formulários de intake na interface do Hub sem validação prévia"
+    ],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Rotas de mutação marcadas como machine em hub/coverage.json",
+      "Intake canônico headless operacional via CLI e agentes"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-09-23T18:45:00.000000Z",
+    "updated_at": "2026-09-23T18:45:00.000000Z"
+  },
+  {
+    "id": "USR-49",
+    "project_id": "darkfac",
+    "title": "DH-13 Fundacao do frontend (CSS local sem CDN e modularizacao)",
+    "origin": "user",
+    "status": "completed",
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand",
+      "frontend"
+    ],
+    "problem_statement": "Tailwind via CDN em produção e falta de modularização de estilos causam avisos no console e impedem cache determinístico dos assets no deploy.",
+    "core_journey": [
+      "DarkHub carrega assets locais compilados sem dependência externa de CDN e com versionamento unificado de cache"
+    ],
+    "non_goals": [
+      "Não reescrever a arquitetura frontend para frameworks pesados (React, Vue)",
+      "Preservar vanillajs e simplicidade operacional"
+    ],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Eliminação do aviso de Tailwind CDN no console",
+      "CSS compilado localmente servido pelo FastAPI",
+      "Modularização do CSS e index.html"
+    ],
+    "suggested_files": [
+      "hub/frontend/index.html",
+      "hub/frontend/style.css"
+    ],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-09-23T18:45:00.000000Z",
+    "updated_at": "2026-09-23T18:45:00.000000Z"
+  },
+  {
+    "id": "USR-50",
+    "project_id": "darkfac",
+    "title": "DH-16 Aposentadoria de fontes legadas do Painel de Tarefas",
+    "origin": "user",
+    "status": "completed",
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand",
+      "quality",
+      "governance"
+    ],
+    "problem_statement": "Aposentar fontes legadas do Painel de Tarefas (state.json e orchestrator.sqlite3) consolidando a leitura exclusivamente no control store canônico.",
+    "core_journey": [
+      "DarkHub projeta a Fila Operacional exclusivamente a partir do control store canônico (PostgreSQL na nuvem e SQLite local)"
+    ],
+    "non_goals": [
+      "Não alterar a assinatura pública externa da API /api/tasks/dashboard",
+      "Não reintroduzir dependências legadas"
+    ],
+    "reachability_contract": "python -m pytest tests/test_hub_service_legacy_cleanup.py tests/test_task_dashboard.py -v",
+    "acceptance_criteria": [
+      "Painel de Tarefas opera sem consultar state.json ou orchestrator.sqlite3",
+      "Testes legados migrados para SQLiteControlStore canônico",
+      "sources do TaskDashboardReport inclui apenas control e usage"
+    ],
+    "suggested_files": [
+      "hub/backend/service.py",
+      "tests/test_task_dashboard.py",
+      "tests/test_hub_service_legacy_cleanup.py"
+    ],
+    "estimated_complexity": "small",
+    "dependencies": [
+      "USR-42"
+    ],
+    "created_at": "2026-09-23T20:45:00.000000Z",
+    "updated_at": "2026-09-23T20:45:00.000000Z"
+  },
+  {
+    "id": "USR-51",
+    "project_id": "darkfac",
+    "title": "DH-10 Saude e historico do roadmap no DarkHub",
+    "origin": "user",
+    "status": "completed",
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "next",
+    "tags": [
+      "user-demand",
+      "roadmap",
+      "frontend"
+    ],
+    "problem_statement": "Expor no DarkHub a visualização temporal da saúde do roadmap e histórico comparativo de versões dos projetos.",
+    "core_journey": [
+      "Owner consulta no drawer de roadmap o histórico cronológico de transições e compara diffs entre versões"
+    ],
+    "non_goals": [
+      "Não introduzir ações de edição manual de roadmap via UI nesta etapa"
+    ],
+    "reachability_contract": "python -m pytest tests/test_roadmap_history_consultation.py -v",
+    "acceptance_criteria": [
+      "Rotas de saúde e histórico do roadmap consumidas pela UI",
+      "Visualizador de diff e histórico operacional no DarkHub"
+    ],
+    "suggested_files": [
+      "hub/frontend/roadmap.js",
+      "hub/frontend/index.html",
+      "tests/test_roadmap_history_consultation.py"
+    ],
+    "estimated_complexity": "medium",
+    "dependencies": [
+      "USR-50"
+    ],
+    "created_at": "2026-09-23T20:45:00.000000Z",
+    "updated_at": "2026-09-23T21:35:00.000000Z"
+  },
+  {
+    "id": "USR-52",
+    "project_id": "darkfac",
+    "title": "DH-05 Benchmarks e roteamento no DarkHub",
+    "origin": "user",
+    "status": "completed",
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "next",
+    "tags": [
+      "user-demand",
+      "benchmarks",
+      "frontend"
+    ],
+    "problem_statement": "Expor no DarkHub a consulta à Fronteira de Eficiência de Pareto, ranking empírico e Top 3 modelos por domínio.",
+    "core_journey": [
+      "Owner visualiza a matriz de benchmarks e justificativas de roteamento de modelos no DarkHub"
+    ],
+    "non_goals": [
+      "Não executar corridas empíricas síncronas a partir da interface web"
+    ],
+    "reachability_contract": "python -m pytest tests/test_benchmarks_routing_consultation.py -v",
+    "acceptance_criteria": [
+      "Exibição dos dados de benchmark no DarkHub em modo somente-leitura",
+      "Rotas operacionais classificadas adequadamente"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [
+      "USR-51"
+    ],
+    "created_at": "2026-09-23T20:45:00.000000Z",
+    "updated_at": "2026-09-23T22:00:00.000000Z"
+  },
+  {
+    "id": "USR-53",
+    "project_id": "darkfac",
+    "title": "DH-06 Aprendizado e conhecimento no DarkHub",
+    "origin": "user",
+    "status": "completed",
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "next",
+    "tags": [
+      "user-demand",
+      "learning",
+      "frontend"
+    ],
+    "problem_statement": "Expor no DarkHub a biblioteca de Learning Packs gerados e consulta aos tópicos minerados no Knowledge Ledger.",
+    "core_journey": [
+      "Owner consulta o último Learning Pack em 1 clique, visualiza HTML e consulta a base de conhecimento perpétua"
+    ],
+    "non_goals": [
+      "Não acoplar geração pesada síncrona na requisição HTTP"
+    ],
+    "reachability_contract": "python -m pytest tests/test_learning_knowledge_consultation.py -v",
+    "acceptance_criteria": [
+      "Central de Learning Packs operacional no DarkHub em modo somente-leitura",
+      "Visualizador HTML e exportação acessíveis"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [
+      "USR-52"
+    ],
+    "created_at": "2026-09-23T20:45:00.000000Z",
+    "updated_at": "2026-09-23T22:30:00.000000Z"
   }
 ]

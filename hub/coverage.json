@@ -3,34 +3,34 @@
   "description": "Gate de cobertura do DarkHub (USR-42). Veja docs/DARKHUB_ROADMAP.md e rode python scripts/hub_coverage.py.",
   "api_routes": {
     "GET /api/benchmarks/domains": {
-      "pending": "DH-05"
+      "surface": "benchmarks-modal"
     },
     "GET /api/benchmarks/domains/{domain}/frontier": {
-      "pending": "DH-05"
+      "surface": "benchmarks-modal"
     },
     "GET /api/benchmarks/empirical": {
-      "pending": "DH-05"
+      "surface": "benchmarks-modal"
     },
     "GET /api/benchmarks/frontier": {
-      "pending": "DH-05"
+      "surface": "benchmarks-modal"
     },
     "GET /api/benchmarks/latest": {
       "surface": "benchmarks-modal"
     },
     "GET /api/benchmarks/proximity": {
-      "pending": "DH-05"
+      "surface": "benchmarks-modal"
     },
     "POST /api/benchmarks/refresh": {
       "surface": "benchmarks-modal"
     },
     "POST /api/benchmarks/route-task": {
-      "pending": "DH-05"
+      "surface": "benchmarks-modal"
     },
     "POST /api/benchmarks/speculative/race": {
-      "pending": "DH-05"
+      "machine": "Execucao de corridas empiricas headless acionada por testes, CLI e benchmarks de modelo (DH-05)."
     },
     "GET /api/benchmarks/speculative/top3": {
-      "pending": "DH-05"
+      "surface": "benchmarks-modal"
     },
     "GET /api/catalog/components": {
       "surface": "cross-catalog-section"
@@ -66,7 +66,7 @@
       "surface": "demands-drawer"
     },
     "POST /api/demands/intake": {
-      "pending": "DH-02"
+      "machine": "Canal de intake transacional headless acionado por CLI e agentes; a UI do Hub opera estritamente em modo de consulta (DH-02)."
     },
     "GET /api/demands/next-id": {
       "surface": "demands-drawer"
@@ -87,7 +87,7 @@
       "surface": "demands-drawer"
     },
     "PATCH /api/demands/tickets/{ticket_id}/status": {
-      "pending": "DH-03"
+      "machine": "Operacao programatica de status via CLI/harness; a UI do Hub opera estritamente em modo de consulta (DH-03)."
     },
     "GET /api/enterprise/audit-trail": {
       "pending": "DH-09"
@@ -143,6 +143,9 @@
     "GET /api/hf15/status": {
       "surface": "factory-health-block"
     },
+    "GET /api/hub/coverage": {
+      "surface": "hub-coverage-badge"
+    },
     "GET /api/infra/cards": {
       "surface": "infrastructure-cards-section"
     },
@@ -168,22 +171,22 @@
       "surface": "factory-health-block"
     },
     "GET /api/learning-packs": {
-      "pending": "DH-06"
+      "surface": "learning-drawer"
     },
     "POST /api/learning-packs/generate": {
-      "pending": "DH-06"
+      "machine": "Geracao autonoma de Learning Packs acionada via hooks de sessao, CLI e agentes da fabrica (DH-06)."
     },
     "GET /api/learning-packs/latest": {
-      "pending": "DH-06"
+      "surface": "learning-drawer"
     },
     "GET /api/learning-packs/{pack_id}": {
-      "pending": "DH-06"
+      "surface": "learning-drawer"
     },
     "GET /api/learning-packs/{pack_id}/export-anki": {
-      "pending": "DH-06"
+      "surface": "learning-drawer"
     },
     "GET /api/learning-packs/{pack_id}/html": {
-      "pending": "DH-06"
+      "surface": "learning-drawer"
     },
     "GET /api/notifications": {
       "surface": "factory-alerts-strip"
@@ -213,13 +216,13 @@
       "surface": "roadmap-drawer"
     },
     "GET /api/projects/{project_id}/roadmap/health": {
-      "pending": "DH-10"
+      "surface": "roadmap-drawer"
     },
     "GET /api/projects/{project_id}/roadmap/history": {
-      "pending": "DH-10"
+      "surface": "roadmap-drawer"
     },
     "GET /api/projects/{project_id}/roadmap/history/compare": {
-      "pending": "DH-10"
+      "surface": "roadmap-drawer"
     },
     "GET /api/projects/{project_id}/roadmap/items/{item_id}": {
       "surface": "roadmap-drawer"
@@ -335,7 +338,7 @@
       "pending": "DH-08"
     },
     "audio": {
-      "pending": "DH-06"
+      "internal": "Motor headless de transcricao local faster-whisper e contingencia Groq acionado por CLI (DH-06)."
     },
     "benchmarks": {
       "surface": "benchmarks-modal"
@@ -371,13 +374,13 @@
       "surface": "factory-health-block"
     },
     "knowledge": {
-      "pending": "DH-06"
+      "surface": "learning-drawer"
     },
     "learning": {
-      "pending": "DH-06"
+      "surface": "learning-drawer"
     },
     "learning_pack": {
-      "pending": "DH-06"
+      "surface": "learning-drawer"
     },
     "line": {
       "pending": "DH-08"
@@ -407,13 +410,13 @@
       "pending": "DH-08"
     },
     "research": {
-      "pending": "DH-06"
+      "surface": "learning-drawer"
     },
     "roadmap": {
       "surface": "roadmap-drawer"
     },
     "router": {
-      "pending": "DH-05"
+      "surface": "benchmarks-modal"
     },
     "telemetry": {
       "surface": "telemetry-drawer"

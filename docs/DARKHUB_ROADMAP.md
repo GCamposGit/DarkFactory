@@ -37,7 +37,8 @@ capacidades pendentes que apontem para um id existente aqui.
 | R6 | Módulos do core sem nenhuma presença no Hub (adoption, portfolio, projects, planning, pilots, research, knowledge, router, line, marketing, game, archetypes) | Capacidades invisíveis | Roadmap DH-06, DH-08, DH-12 |
 | R7 | 23 tickets duplicados "CLI Pipeline de Testes" (USR-19…USR-41) no ledger versionado | Central de Demandas poluída | DH-15 |
 | R8 | Tailwind via CDN em produção, `index.html` com 1.343 linhas e versões de cache inconsistentes por script | Aviso no console, sem build reproduzível, cache velho após deploy | DH-13 |
-| R9 | Nenhum sinal de drift visível no próprio Hub | Owner não percebe quando o Hub fica para trás | DH-14 |
+| R9 | Nenhum sinal de drift visível no próprio Hub | Owner não percebe quando o Hub fica para trás | **Corrigido** (USR-45 / DH-14) |
+| R10 | No Dokploy, `darkhub-hub-data` monta `/app/hub/data` como volume, escondendo os `default_services.json`/`default_prompts.json` atualizados da imagem; e a Fila operacional mostrava `ticket_id`/`demand_id` (`darkfac`, `dem-xxxx`) em vez do título real da demanda | Catálogo/prompt seeds da nuvem congelados mesmo após deploys com `catalog_revision` novo; owner não reconhece as tarefas na fila | **Corrigido** (USR-44) |
 
 ## Entregue em USR-42
 
@@ -59,21 +60,21 @@ Prioridade: **Agora** = próximo ciclo; **Depois** = após os itens Agora;
 | Id | Horizonte | Entrega | Rotas/módulos que fecha | Critério de aceite |
 | --- | --- | --- | --- | --- |
 | DH-01 | Agora | **Saúde da Fábrica (somente leitura)**: notificações não lidas, Telegram, n8n (status e workflows), workers do harness, eventos de webhook, status/métricas do HF-15. Entregue em `USR-43`; ações mutáveis (reconhecer, checar cotas, sync/trigger n8n, drill HF-15) ficam em `DH-17` | `GET notifications`, `GET integrations/telegram/status`, `GET integrations/n8n/status`, `GET integrations/n8n/workflows`, `GET harness/workers`, `GET webhooks/events`, `GET hf15/status`, `GET hf15/metrics`; `core/notifications`, `core/integrations`, `core/acceptance` | Um painel mostra cada integração com estado, idade da última observação; nenhuma ação mutável é exposta nesta entrega |
-| DH-02 | Agora | **Intake canônico na nuvem**: o intake do Hub grava no mesmo control store do coordenador | `POST /api/demands/intake` | Demanda criada no Hub da nuvem vira run visível no Painel de Tarefas; precisa de decisão do owner sobre ativação live |
-| DH-03 | Agora | **Caixa de decisões do owner**: jobs `WAITING_HUMAN` com contexto, pergunta e resposta pelo Hub; mudança de status de tickets | `PATCH /api/demands/tickets/{id}/status`; `core/workflow` (manual_resolution) | Owner responde sem terminal; a resposta vira evento idempotente no control store |
+| DH-02 | Agora | **Intake canônico headless (somente leitura no Hub)**: canal de intake transacional headless acionado por CLI e agentes; UI do Hub opera estritamente em modo de consulta por diretriz do owner. Entregue em `USR-48` (`POST /api/demands/intake` classificado como `machine`) | `POST /api/demands/intake` | Entregue em `USR-48`; endpoint headless documentado como `machine` e Hub em modo somente-leitura |
+| DH-03 | Agora | **Operação de status headless (somente leitura no Hub)**: operação programática de status via CLI/harness; UI do Hub opera estritamente em modo de consulta por diretriz do owner. Entregue em `USR-48` (`PATCH /api/demands/tickets/{ticket_id}/status` classificado como `machine`) | `PATCH /api/demands/tickets/{id}/status` | Entregue em `USR-48`; endpoint programático documentado como `machine` e Hub em modo somente-leitura |
 | DH-04 | Depois | **Evolução e catálogo com ações**: propor, avaliar, promover e reverter; sincronizar catálogo | `evolution/*`, `catalog/sync`; `core/evolution`, `core/catalog` | Cada ação mostra diff, avaliação e rollback disponível |
-| DH-05 | Depois | **Benchmarks e roteamento**: fronteira por domínio, proximidade, top-3 especulativo, corrida empírica, simulador de roteamento | `benchmarks/*`; `core/router`, `core/benchmarks` | Owner vê por que um modelo foi escolhido para uma tarefa |
-| DH-06 | Depois | **Aprendizado e conhecimento**: Learning Packs (HTML, Anki, gerar), memória, pesquisa e Knowledge Ledger | `learning-packs/*`; `core/learning`, `core/knowledge`, `core/research` | Última sessão tem pack acessível em 1 clique; ledger de pesquisa pesquisável |
+| DH-05 | Depois | **Benchmarks e roteamento**: fronteira por domínio, proximidade, top-3 especulativo, corrida empírica, simulador de roteamento. Entregue em `USR-52` | `benchmarks/*`; `core/router` | Owner vê por que um modelo foi escolhido para uma tarefa |
+| DH-06 | Depois | **Aprendizado e conhecimento**: Learning Packs (HTML, Anki, gerar), memória, pesquisa e Knowledge Ledger. Entregue em `USR-53` | `learning-packs/*`; `core/learning`, `core/knowledge`, `core/learning_pack`, `core/research` | Última sessão tem pack acessível em 1 clique; ledger de pesquisa pesquisável |
 | DH-07 | Depois | **Estúdio de conteúdo e visual**: gerar e auditar conteúdo, presets, galeria e ilustração | `content/*`, `visual/*`; `core/content`, `core/visual`, `core/marketing` | Conteúdo gerado passa pelo lint anti-slop antes de exportar |
 | DH-08 | Depois | **Portfólio multiprojeto**: projetos registrados, adoção (Skill 07), pilotos, arquétipos, linhas | `core/projects`, `core/portfolio`, `core/adoption`, `core/pilots`, `core/archetypes`, `core/line`, `core/game` | Cada projeto mostra estágio, saúde, roadmap e último deploy |
 | DH-09 | Depois | **Governança enterprise e deploy**: trilha de auditoria, configuração, avaliação de deploy, disparo de deploy Dokploy com confirmação | `enterprise/audit-trail`, `enterprise/configure`, `enterprise/evaluate-deploy`, `cloud/deploy` | Deploy só dispara após avaliação verde e confirmação explícita |
-| DH-10 | Depois | **Saúde e histórico do roadmap**: aba de saúde, linha do tempo e comparação de versões no drawer de roadmap | `projects/{id}/roadmap/health`, `history`, `history/compare` | Owner compara duas versões do roadmap e vê o que mudou |
+| DH-10 | Depois | **Saúde e histórico do roadmap**: aba de saúde, linha do tempo e comparação de versões no drawer de roadmap. Entregue em `USR-51` | `projects/{id}/roadmap/health`, `history`, `history/compare` | Owner compara duas versões do roadmap e vê o que mudou |
 | DH-11 | Depois | **Validação sob demanda**: rodar suíte/harness remoto a partir do Hub com relatório destilado | `harness/run-tests`, `harness/execute` | Resultado com `[HARNESS_PASS]` e link para logs isolados |
 | DH-12 | Futuro | **Plano e DAG da autonomia contínua**: visualizar plano, gates de prontidão, rotas qualificadas e política efetiva | `core/planning`, `core/workflow` | DAG navegável com o estado de cada nó |
 | DH-13 | Agora | **Fundação do frontend**: CSS compilado localmente no lugar do Tailwind CDN, `index.html` modular, versão de assets única servida pelo backend | frontend | Nenhum aviso de CDN no console; um deploy invalida todos os assets |
-| DH-14 | Agora | **Cobertura visível no Hub**: endpoint e badge com o placar do gate e a lista de pendências | `hub/backend/coverage.py` | Badge mostra a % coberta e abre a lista de pendências por `DH-xx` |
+| DH-14 | Agora | **Cobertura visível no Hub**: endpoint e badge com o placar do gate e a lista de pendências | `hub/backend/coverage.py`, `hub/backend/api.py`, `hub/frontend/coverage.js` | Entregue em `USR-45`; badge mostra a % coberta e abre a lista de pendências por `DH-xx` em drawer slide-over |
 | DH-15 | Agora | **Higiene do ledger de demandas**: remover USR-19…USR-41 e isolar o teste que grava no ledger real | `.factory/demands/demands.json`, testes da CLI | Suíte roda sem alterar arquivos versionados |
-| DH-16 | Depois | **Aposentar fontes legadas do Painel de Tarefas** (`state.json`, `orchestrator.sqlite3`) depois de validar o painel na nuvem | `hub/backend/service.py` | Painel usa só o control store; testes legados migrados |
+| DH-16 | Depois | **Aposentar fontes legadas do Painel de Tarefas** (`state.json`, `orchestrator.sqlite3`): painel consolidado exclusivamente no control store canônico e testes legados migrados. Entregue em `USR-50` | `hub/backend/service.py` | Painel usa exclusivamente o control store canônico |
 | DH-17 | Depois | **Ações operacionais de saúde**: reconhecer alerta, checar cotas (pode enviar Telegram), sync/trigger n8n (produção), drill HF-15 — cada uma com diálogo de confirmação | `POST notifications/{notification_id}/acknowledge`, `POST notifications/check-quotas`, `POST integrations/n8n/sync`, `POST integrations/n8n/trigger`, `POST hf15/rollback/drill` | Toda ação mostra o efeito antes, exige confirmação explícita e registra auditoria |
 
 ## Entregue em USR-43
@@ -88,6 +89,92 @@ Prioridade: **Agora** = próximo ciclo; **Depois** = após os itens Agora;
   falha isolada nunca apague as demais. Nenhuma ação mutável foi exposta nesta entrega; elas
   ficam registradas em DH-17.
 
+## Entregue em USR-44
+
+- **Seeds da nuvem chegam ao volume persistido (R10):** `deploy/dokploy/Dockerfile.hub`
+  agora também copia `hub/data` para `/app/hub_seed` (fora do volume
+  `darkhub-hub-data`, que só monta `/app/hub/data`) e define
+  `DARKHUB_SEED_DIR=/app/hub_seed`. Em `HubService.__init__` (ou via o argumento
+  opcional `seed_dir`, que tem prioridade sobre a variável de ambiente), antes de
+  `_ensure_storage()` rodar, `default_services.json` e `default_prompts.json` do
+  `data_dir` são sobrescritos pelo conteúdo do seed sempre que ele existir e
+  diferir — apenas esses dois arquivos versionados, nunca `services.json` (edição
+  do owner) nem `catalog_meta.json`. Falha de I/O é fail-open (log de aviso,
+  Hub nunca deixa de subir por isso). Isso faz `_apply_catalog_revisions` (USR-42)
+  enxergar revisões novas mesmo com o volume antigo montado, e `list_prompts` já
+  lê `default_prompts.json` diretamente do `data_dir`, então o prompt atualizado é
+  servido na mesma leitura.
+- **Fila operacional mostra o título real da demanda:** `core/workflow/job_board.py`
+  projeta o `payload` de `intake_commands` em cada linha de `jobs` via subconsulta
+  correlacionada por `run_id` (`ORDER BY committed_at DESC LIMIT 1`) — um valor
+  escalar por linha existente de `jobs`, então nunca multiplica ou duplica linhas.
+  O título é extraído em Python (`_extract_title`), aceitando `str` (SQLite TEXT
+  ou JSON serializado), `bytes` e `dict` (psycopg pode decodificar JSONB antes da
+  leitura); JSON malformado ou sem `title` cai para `None` sem quebrar o painel.
+  `JobBoardEntry.title` é o novo campo opcional. Em
+  `hub/backend/service.py::_control_dashboard_row`, a prioridade de título passou a
+  ser `entry.title` → título do ledger de demandas → `demand_id`; e quando
+  `ticket_id == project_id` (linhas reais da nuvem, ex.: `"darkfac"`), o
+  `task_id` exibido passa a ser o `demand_id` (único e legível), preservando o
+  desempate `ticket@run` para colisões.
+
+## Entregue em USR-45 (DH-14)
+
+- **Cobertura visível no Hub e prevenção contínua de drift (R9):**
+  - Adicionado endpoint `GET /api/hub/coverage` servindo `CoverageSummaryResponse` com percentual de cobertura, contagem de superfícies ativas, waivers e lista completa de pendências agrupadas por item de roadmap (`DH-xx`), com títulos e horizontes extraídos de `docs/DARKHUB_ROADMAP.md`.
+  - Cache em memória com TTL de 30 segundos (`get_coverage_summary`) para respostas sub-milissegundo, suportando parâmetro `?force_refresh=true`.
+  - Badge no cabeçalho do DarkHub (`#hub-coverage-badge`) com percentual em tempo real, semáforo de estado (verde para conformidade com o gate, vermelho se houver drift não registrado) e ponto pulsante.
+  - Drawer lateral deslizante (`#hub-coverage-drawer`) com barra de progresso visual, cards de resumo (Entregues, Pendentes, Waivers), alertas de conformidade e acordião de pendências por item de roadmap com separação entre rotas `/api` e módulos `core/`.
+  - Módulo frontend modular `hub/frontend/coverage.js` e cobertura 100% no gate `tests/test_hub_coverage.py` e testes de integração `tests/test_hub_coverage_api.py`.
+
+## Entregue em USR-48 (DH-02 e DH-03)
+
+- **Diretriz de Governança Somente-Leitura do DarkHub (DH-02 e DH-03):**
+  - Sob diretriz estrita do Owner, o DarkHub consolida-se como uma plataforma dedicada exclusivamente à consulta de indicadores, métricas operacionais e status do sistema; inputs de mutação e ações acionadas diretamente pela interface visual não estão previstos nesta etapa do desenvolvimento.
+  - **DH-02 (`POST /api/demands/intake`):** Convertido para rota `machine` em `hub/coverage.json` com justificativa formal registrada (`"Canal de intake transacional headless acionado por CLI e agentes; a UI do Hub opera estritamente em modo de consulta (DH-02)."`). O intake de demandas permanece uma capacidade headless e transacional executada via CLI, automações e agentes.
+  - **DH-03 (`PATCH /api/demands/tickets/{ticket_id}/status`):** Convertido para rota `machine` em `hub/coverage.json` com justificativa formal registrada (`"Operacao programatica de status via CLI/harness; a UI do Hub opera estritamente em modo de consulta (DH-03)."`). A atualização e ciclo de vida de status de tickets ocorrem estritamente de forma programática via harness, testes e runners da fábrica.
+
+## Entregue em USR-50 (DH-16)
+
+- **Aposentadoria de Fontes Legadas do Painel de Tarefas:**
+  - `hub/backend/service.py` consolidou `get_task_dashboard()` exclusivamente no control store canônico (`core.workflow.job_board.read_job_board`), eliminando leituras e fallbacks para `.factory/state.json` e `orchestrator.sqlite3`.
+  - Métodos legados `_load_task_records`, `_load_task_runs`, `_dashboard_cost`, `_dashboard_evidence` e `_dashboard_exceptions` foram aposentados e removidos.
+  - `sources` do dashboard de tarefas agora reporta apenas fontes ativas (`control` e `usage`), eliminando avisos de `state:missing` e `runs:missing`.
+  - Suíte de testes migrada em `tests/test_task_dashboard.py` e novo teste determinístico em `tests/test_hub_service_legacy_cleanup.py`.
+
+## Entregue em USR-51 (DH-10)
+
+- **Saúde e Histórico do Roadmap no DarkHub:**
+  - Drawer de Roadmap (`roadmap-drawer`) expandido com novos modos de consulta: aba **Saúde** (`roadmap-mode-health`) e aba **Histórico & Comparação** (`roadmap-mode-history`).
+  - **Saúde (`GET /api/projects/{id}/roadmap/health`):** Apresenta diagnóstico detalhado com status de obsolescência (`stale`), total de itens compilados, confirmados, bloqueados por dependência causal, contagem de conflitos e avisos, além da listagem exata de proveniência com status de cada fonte consultada e fontes indisponíveis.
+  - **Histórico & Comparação (`GET /api/projects/{id}/roadmap/history` e `GET /api/projects/{id}/roadmap/history/compare`):** Exibe a linha do tempo cronológica de snapshots retidos e ferramenta interativa somente-leitura de comparação direta entre dois snapshots, calculando o diff determinístico de itens adicionados, removidos e campos modificados.
+  - Classificação das 3 rotas atualizada para `"surface": "roadmap-drawer"` em `hub/coverage.json` elevando a cobertura do DarkHub para 59% (78 capacidades expostas).
+
+## Entregue em USR-52 (DH-05)
+
+- **Benchmarks e Roteamento no DarkHub (Modo Consulta):**
+  - Modal de Benchmarks (`benchmarks-modal`) expandido com navegação em 5 abas especializadas:
+    - **Modelos & Fronteira Geral (`GET /api/benchmarks/latest`, `GET /api/benchmarks/frontier`):** Catálogo de modelos, filtros por fabricante, ordenação por Coding Agent Index e métricas da fronteira de Pareto com custo e velocidade.
+    - **Fronteiras Especializadas por Domínio (`GET /api/benchmarks/domains`, `GET /api/benchmarks/domains/{domain}/frontier`):** Seletor de domínios canônicos (`coding`, `deep_research`, `legal_contract`, etc.) com listagem dos modelos na fronteira de Pareto e métricas do Artificial Analysis.
+    - **Top-3 Especulativo & Proximidade (`GET /api/benchmarks/speculative/top3`, `GET /api/benchmarks/proximity`):** Visualização dos modelos recomendados em cascata por tier (`high`, `medium`, `low`) e índice de proximidade (FPI / gap epsilon) para modelos desafiantes (*near-Pareto*).
+    - **Desempenho Empírico na Fábrica (`GET /api/benchmarks/empirical`):** Tabela do ranking empírico colhido na DarkFactory com Pass@1 real, pontuação Elo Bradley-Terry, latência e contagem de ensaios.
+    - **Simulador de Roteamento Inteligente (`POST /api/benchmarks/route-task`):** Ferramenta consultiva de simulação que analisa uma descrição em linguagem natural e complexidade, exibindo o domínio detectado, modelo ótimo, justificativa arquitetural e top 3 cascata especulativa sem gerar efeitos colaterais mutáveis na fábrica.
+  - Rota de execução de corridas (`POST /api/benchmarks/speculative/race`) classificada como waiver `machine` (operação headless acionada por testes, CLI e benchmarks).
+  - Cobertura do DarkHub elevada para 66% (86 capacidades expostas). Módulo `core/router` coberto.
+
+## Entregue em USR-53 (DH-06)
+
+- **Aprendizado e Conhecimento no DarkHub (Modo Consulta):**
+  - Drawer de Aprendizado (`learning-drawer`) integrado ao cockpit com navegação em 4 modos de consulta:
+    - **Último Learning Pack (`GET /api/learning-packs/latest`):** Apresenta o Learning Pack mais recente em 1 clique, decomposto em 3 níveis Feynman (Pitch de 30s para clientes, Defesa Staff+ e Mecânica sob o capô), âncoras mentais analógicas (modelo mental, metáfora e anti-pattern), escudo cético de refutação técnica e métricas da sessão.
+    - **Histórico de Packs (`GET /api/learning-packs` e `GET /api/learning-packs/{pack_id}`):** Listagem cronológica dos Learning Packs persistidos no ledger (`.factory/learning_packs/`), com resumo executivo, contagem de conceitos e inspeção detalhada de qualquer pack.
+    - **Flashcards & Repetição Espaçada (`GET /api/learning-packs/{pack_id}/export-anki`):** Visualização dos cards de active recall e botão de download do baralho Anki formatado em TSV.
+    - **Widget HTML Interativo (`GET /api/learning-packs/{pack_id}/html`):** Abertura do visualizador HTML autônomo com navegação e design responsivo.
+    - **Segundo Cérebro & Base de Conhecimento:** Consulta aos domínios interligados (`darkfac`, `atrium`, `jarvis`), hashes de proveniência SHA-256 e políticas estritas de isolamento com garantia anti-alucinação *Fail-Closed*.
+  - Rota de geração autônoma de packs (`POST /api/learning-packs/generate`) classificada como waiver `machine` (operação acionada via hooks de encerramento de sessão, agentes e CLI).
+  - Módulos `core/learning_pack`, `core/learning`, `core/knowledge` e `core/research` mapeados para a superfície `learning-drawer`. Módulo `core/audio` documentado como `internal` (motor headless de transcrição faster-whisper/Groq).
+  - Cobertura do DarkHub elevada para 74% (95 capacidades expostas, apenas 34 pendentes).
+
 ## Configuração manual no Dokploy (para ativar R2 na nuvem)
 
 Sem este passo o painel na nuvem mostra `control: sqlite:missing` e continua vazio.
@@ -99,7 +186,8 @@ Sem este passo o painel na nuvem mostra `control: sqlite:missing` e continua vaz
    `DARKHUB_CONTROL_DATABASE_URL=<mesmo valor de DARKFAC_HF02_DATABASE_URL do compose darkfac-coordinator>`
    - Para copiar o valor: abra o compose do **darkfac-coordinator** → aba **Environment** → copie o valor de `DARKFAC_HF02_DATABASE_URL`.
    - Recomendado (menor privilégio): criar no PostgreSQL um papel só de leitura e usá-lo aqui:
-     `CREATE ROLE darkhub_ro LOGIN PASSWORD '<senha forte>'; GRANT CONNECT ON DATABASE <db> TO darkhub_ro; GRANT USAGE ON SCHEMA public TO darkhub_ro; GRANT SELECT ON runs, jobs TO darkhub_ro;`
+     `CREATE ROLE darkhub_ro LOGIN PASSWORD '<senha forte>'; GRANT CONNECT ON DATABASE <db> TO darkhub_ro; GRANT USAGE ON SCHEMA public TO darkhub_ro; GRANT SELECT ON runs, jobs, intake_commands TO darkhub_ro;`
+     (desde USR-44 o Painel de Tarefas também lê `intake_commands` para exibir o título real da demanda; sem esse `GRANT` a leitura falha com `control:postgres:error`)
 5. Clique em **Save** e depois em **Deploy** (ou **Redeploy**) no serviço **darkhub**.
 6. Validação: abra `https://darkhub.ggcampos.com`. Na **Fila operacional**, a faixa de status deve mostrar `control:postgres:ok`.
    Se aparecer `postgres:error`, confira se o host do banco é acessível pela rede `dokploy-network`.

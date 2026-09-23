@@ -15,6 +15,7 @@ import json
 import os
 import subprocess
 import sys
+import time
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Sequence
@@ -214,6 +215,7 @@ def cmd_run(args: argparse.Namespace) -> int:
                         validation_mode=validation_mode,
                     )
                     all_results.append(result)
+                    time.sleep(0.15)
 
     # Serialize results.json
     results_path = out_dir / "results.json"
@@ -261,8 +263,16 @@ def cmd_run(args: argparse.Namespace) -> int:
     has_fails = any(r.status is ResultStatus.FAIL for r in all_results)
     has_unsupported = any(r.status is ResultStatus.UNSUPPORTED for r in all_results)
     if has_blocked:
+        print("[ERROR] Scenarios blocked by environment", file=sys.stderr)
         return CliExitCode.ENVIRONMENT_BLOCKED
     if has_fails or has_unsupported:
+        failed_items = [r for r in all_results if r.status in {ResultStatus.FAIL, ResultStatus.UNSUPPORTED}]
+        for fi in failed_items:
+            print(
+                f"[FAIL] Scenario {fi.scenario_id} on {fi.runtime.value}: status={fi.status.value}, "
+                f"error={fi.error_code}, diffs={fi.target_differences}",
+                file=sys.stderr,
+            )
         return CliExitCode.ASSERTION_FAILED
     return CliExitCode.SUCCESS
 

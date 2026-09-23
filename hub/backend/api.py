@@ -15,6 +15,7 @@ from hub.backend.webhooks import (
     DokployDeployTrigger,
     WebhookEventRecord,
 )
+from hub.backend.coverage import CoverageSummaryResponse, get_coverage_summary
 
 from hub.backend.models import (
     ExportCatalogResponse,
@@ -1669,6 +1670,15 @@ def submit_autonomous_intake(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail=f"Intake persistence failure: {exc}",
         )
+
+
+@router.get("/hub/coverage", response_model=CoverageSummaryResponse)
+def get_hub_coverage(
+    force_refresh: bool = Query(default=False, description="Bypass cache and force re-evaluation"),
+) -> CoverageSummaryResponse:
+    """Return DarkHub capability coverage report and pending roadmap items (USR-42 / DH-14)."""
+    return get_coverage_summary(force_refresh=force_refresh)
+
 
 
 

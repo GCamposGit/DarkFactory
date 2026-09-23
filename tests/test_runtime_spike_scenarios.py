@@ -82,7 +82,12 @@ def test_cli_run_verify_and_summarize_native_core(tmp_path: Path) -> None:
         check=False,
         timeout=60,
     )
-    assert run_res.returncode == 0, f"run failed: {run_res.stderr}\n{run_res.stdout}"
+    details = ""
+    if run_res.returncode != 0:
+        results_file = run_out / "results.json"
+        if results_file.exists():
+            details = f"\nResults:\n{results_file.read_text(encoding='utf-8')}"
+    assert run_res.returncode == 0, f"run failed: {run_res.stderr}\n{run_res.stdout}{details}"
 
     manifest_file = run_out / "manifest.json"
     results_file = run_out / "results.json"

@@ -60,7 +60,10 @@ function renderTaskDashboard() {
     ? `Fila disponível com ${warningCount} aviso(s): ${report.warnings.join(" · ")}`
     : `Estado atualizado · fontes: ${formatTaskSources(report.sources)}`;
 
-  const waitingHuman = queue.filter((item) => item.status === "WAITING_HUMAN").length;
+  const waitingHumanJobs = queue.filter(
+    (item) => String(item.status || "").toUpperCase() === "WAITING_HUMAN"
+  );
+  const waitingHuman = waitingHumanJobs.length;
   summary.innerHTML = [
     taskSummaryCard("Na fila", report.queued_count || queue.length, waitingHuman ? `${waitingHuman} aguardando o owner` : "tarefas visíveis", "text-indigo-300"),
     taskSummaryCard("Em execução", report.running_count || 0, "runs ativos", "text-emerald-300"),
@@ -72,7 +75,64 @@ function renderTaskDashboard() {
     queueContainer.innerHTML = '<div class="lg:col-span-2 rounded-2xl border border-dashed border-slate-800 bg-slate-900/40 p-8 text-center text-xs text-slate-500">Nenhuma tarefa registrada na fila operacional.</div>';
     return;
   }
-  queueContainer.innerHTML = queue.map(renderTaskCard).join("");
+  const observationCards = waitingHumanJobs.map(renderWaitingHumanObservationCard).join("");
+  const regularCards = queue.map(renderTaskCard).join("");
+  queueContainer.innerHTML = observationCards + regularCards;
+}
+
+function getSuspensionReason(item) {
+  if (item.diagnostic) return item.diagnostic;
+  if (item.cause_code) return item.cause_code;
+  if (Array.isArray(item.evidence)) {
+    const diag = item.evidence.find((e) => e && e.label === "diagnóstico");
+    if (diag && diag.value) return diag.value;
+  }
+  if (Array.isArray(item.exceptions) && item.exceptions.length > 0) {
+    return item.exceptions[0];
+  }
+  return item.stage ? `Suspenso na etapa ${item.stage}` : "Alinhamento Grill pendente com o Owner";
+}
+
+const CANONICAL_GRILL_INSTRUCTION = "Resolução pelo terminal canônico: python -m core.demands.cli grill <ticket_id>";
+
+function renderWaitingHumanObservationCard(item) {
+  const reason = getSuspensionReason(item);
+  const ticketId = tasksEscapeHtml(item.task_id || "<ticket_id>");
+  const runId = tasksEscapeHtml(item.run_id || "sem run");
+  const title = tasksEscapeHtml(item.title || item.task_id || "Demanda sem título");
+
+  return `<section class="lg:col-span-2 rounded-2xl border-2 border-amber-500/50 bg-gradient-to-r from-amber-950/40 via-slate-900/90 to-amber-950/30 p-5 shadow-xl shadow-amber-950/20" data-waiting-human-card="${ticketId}">
+    <div class="flex flex-wrap items-center justify-between gap-2 border-b border-amber-500/20 pb-3">
+      <div class="flex items-center gap-2">
+        <span class="flex h-3 w-3 relative">
+          <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
+          <span class="relative inline-flex rounded-full h-3 w-3 bg-amber-500"></span>
+        </span>
+        <h3 class="text-xs font-bold uppercase tracking-wider text-amber-300">Aguardando Decisão do Owner (WAITING_HUMAN)</h3>
+      </div>
+      <span class="font-mono text-[10px] text-amber-400/90 bg-amber-500/10 border border-amber-500/30 px-2.5 py-0.5 rounded-full font-medium">Somente Leitura</span>
+    </div>
+    <div class="mt-3 grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
+      <div>
+        <div class="text-[10px] uppercase tracking-wider text-slate-500 font-semibold">Demanda / Título</div>
+        <div class="mt-1 text-sm font-semibold text-slate-100">${title}</div>
+        <div class="mt-0.5 text-[10px] font-mono text-slate-400">ID: ${ticketId}</div>
+      </div>
+      <div>
+        <div class="text-[10px] uppercase tracking-wider text-slate-500 font-semibold">Run ID</div>
+        <div class="mt-1 font-mono text-xs text-slate-200">${runId}</div>
+      </div>
+    </div>
+    <div class="mt-3 rounded-lg bg-amber-500/10 border border-amber-500/20 p-3">
+      <div class="text-[10px] uppercase tracking-wider font-semibold text-amber-300">Motivo da Suspensão</div>
+      <div class="mt-1 text-xs text-amber-200 font-medium">${tasksEscapeHtml(reason)}</div>
+    </div>
+    <div class="mt-3 rounded-lg bg-slate-950/80 border border-slate-800 p-3">
+      <div class="text-[10px] uppercase tracking-wider font-semibold text-slate-400">Instrução de Resolução</div>
+      <div class="mt-1 text-xs font-mono text-emerald-400 select-all" data-instruction="${CANONICAL_GRILL_INSTRUCTION}">Resolução pelo terminal canônico: python -m core.demands.cli grill ${ticketId}</div>
+      <div class="mt-1 text-[10px] text-slate-500 font-mono">Padrão canônico: Resolução pelo terminal canônico: python -m core.demands.cli grill &lt;ticket_id&gt;</div>
+    </div>
+  </section>`;
 }
 
 function renderTaskCard(item) {
