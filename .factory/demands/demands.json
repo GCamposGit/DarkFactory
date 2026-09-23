@@ -1074,7 +1074,7 @@
     "project_id": "darkfac",
     "title": "DH-01 Saude da Fabrica no DarkHub (somente leitura)",
     "origin": "user",
-    "status": "planned",
+    "status": "completed",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -1106,6 +1106,42 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-09-23T07:55:36.782130Z",
-    "updated_at": "2026-09-23T07:55:36.782130Z"
+    "updated_at": "2026-09-23T14:42:43.774998Z"
+  },
+  {
+    "id": "USR-44",
+    "project_id": "darkfac",
+    "title": "Catalogo e prompts do DarkHub nao chegam a nuvem (volume esconde seeds) + titulo real na Fila",
+    "origin": "user",
+    "status": "planned",
+    "item_type": "quality",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand",
+      "quality"
+    ],
+    "problem_statement": "No Dokploy hub/data inteiro e um volume; o default_services.json/default_prompts.json da imagem fica escondido, entao catalog_revision (USR-42) nunca e aplicado. Na Fila operacional os runs aparecem como 'darkfac' / 'dem-xxxx' sem o titulo da demanda.",
+    "core_journey": [
+      "Owner faz deploy e ve o catalogo atualizado; na Fila cada run mostra o titulo da demanda"
+    ],
+    "non_goals": [
+      "Nao alterar o volume nem apagar dados do owner"
+    ],
+    "reachability_contract": "python -m pytest tests/test_catalogo_e_prompts_do_darkhub_.py -v",
+    "acceptance_criteria": [
+      "Seeds do catalogo e prompts vem da imagem mesmo com hub/data montado como volume",
+      "catalog_revision aplicado na primeira subida apos deploy",
+      "Fila mostra o titulo do payload do intake",
+      "Teste headless de reachability: `python -m pytest tests/test_catalogo_e_prompts_do_darkhub_.py -v`"
+    ],
+    "suggested_files": [
+      "core/catalogo_e_prompts_do_darkhub_/service.py",
+      "tests/test_catalogo_e_prompts_do_darkhub_.py"
+    ],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-09-23T14:42:44.219451Z",
+    "updated_at": "2026-09-23T14:42:44.219451Z"
   }
 ]
