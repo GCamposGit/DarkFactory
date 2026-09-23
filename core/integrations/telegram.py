@@ -261,6 +261,7 @@ class TelegramActionType(str, Enum):
     STATUS = "status"
     GRILL = "grill"
     APPROVE = "approve"
+    ACCEPT = "accept"
     ALERTS = "alerts"
     UNKNOWN = "unknown"
     UNAUTHORIZED = "unauthorized"
@@ -314,6 +315,8 @@ class TelegramGateway:
         grill_handler: Optional[Callable[[str, str, int], Dict[str, Any]]] = None,
         approval_handler: Optional[Callable[[str, str, int], Dict[str, Any]]] = None,
         status_handler: Optional[Callable[[Optional[str]], Dict[str, Any]]] = None,
+        line_grill_handler: Optional[Callable[[str, str, str, int], Dict[str, Any]]] = None,
+        commercial_acceptance_handler: Optional[Callable[[str, int], Dict[str, Any]]] = None,
     ) -> None:
         self.config = config
         self.state_dir = state_dir or Path(".factory/telegram")
@@ -336,6 +339,11 @@ class TelegramGateway:
         self.grill_handler = grill_handler
         self.approval_handler = approval_handler
         self.status_handler = status_handler
+        # HF-27-08 F: production-line grill answers (cb:grill:<run_id>#<qid>:<idx>,
+        # disambiguated from the legacy cb:grill:<ticket_id>:<choice> by the
+        # "#") and commercial-acceptance (cb:accept:<run_id>) callbacks.
+        self.line_grill_handler = line_grill_handler
+        self.commercial_acceptance_handler = commercial_acceptance_handler
 
         self.last_offset: int = 0
         self.processed_update_ids: Set[int] = set()
@@ -702,7 +710,31 @@ class TelegramGateway:
             authorized=True,
         )
 
-        if len(parts) >= 4 and parts[1] == "grill":
+        if len(parts) >= 4 and parts[1] == "grill" and "#" in parts[2]:
+            # HF-27-08 F: cb:grill:<run_id>#<question_id>:<index>, produced
+            # by core.line.stage_grill._build_message. Disambiguated from
+            # the legacy cb:grill:<ticket_id>:<choice> format by the "#".
+            run_id, question_id = parts[2].split("#", 1)
+            index = parts[3]
+            result.action = TelegramActionType.GRILL
+            result.target_id = run_id
+            if self.config.role == "ops":
+                result.response_text = "🔒 Decisões de alinhamento pertencem ao canal @darkfac_bot."
+                self.processed_callback_ids.add(cb.id)
+                return result
+            if self.line_grill_handler:
+                try:
+                    res = self.line_grill_handler(run_id, question_id, index, user_id)
+                    result.resumed = res.get("resumed", True)
+                    result.response_text = f"✅ Resposta registrada para {run_id} (pergunta {question_id})."
+                except Exception as exc:
+                    result.error = str(exc)
+                    result.response_text = f"❌ Failed to submit grill answer: {exc}"
+            else:
+                result.resumed = True
+                result.response_text = f"Answer '{index}' recorded for {run_id}#{question_id}."
+
+        elif len(parts) >= 4 and parts[1] == "grill":
             # cb:grill:<ticket_id>:<choice>
             ticket_id, choice = parts[2], parts[3]
             result.action = TelegramActionType.GRILL
@@ -722,6 +754,28 @@ class TelegramGateway:
             else:
                 result.resumed = True
                 result.response_text = f"Choice '{choice}' recorded for {ticket_id}."
+
+        elif len(parts) >= 3 and parts[1] == "accept":
+            # HF-27-08 D-g/F: cb:accept:<run_id> -- commercial acceptance.
+            run_id = parts[2]
+            result.action = TelegramActionType.ACCEPT
+            result.target_id = run_id
+            if self.config.role == "ops":
+                result.response_text = "🔒 Aceite comercial pertence ao canal @darkfac_bot."
+                self.processed_callback_ids.add(cb.id)
+                return result
+            if self.commercial_acceptance_handler:
+                try:
+                    res = self.commercial_acceptance_handler(run_id, user_id)
+                    result.resumed = res.get("resumed", True)
+                    sha = res.get("sha", "")
+                    result.response_text = f"✅ Aceite comercial registrado para {run_id} ({sha[:12]}). Deploy liberado."
+                except Exception as exc:
+                    result.error = str(exc)
+                    result.response_text = f"❌ Failed to record commercial acceptance: {exc}"
+            else:
+                result.resumed = True
+                result.response_text = f"Commercial acceptance recorded for {run_id}."
 
         elif len(parts) >= 4 and parts[1] == "release":
             # cb:release:<project_id>:<digest>:<choice>

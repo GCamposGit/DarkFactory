@@ -228,6 +228,80 @@ def probe_and_resume(
     return resume_blocked_job(store, run_id, request.blocking_stage, now=now)
 
 
+# --------------------------------------------------------------------------
+# Telegram callback wiring (HF-27-08 item F)
+# --------------------------------------------------------------------------
+
+
+def build_telegram_line_grill_handler(
+    store: ControlStore, *, project_resolver: Optional[Callable[[str], Optional[ProjectDescriptor]]] = None
+) -> Callable[[str, str, str, int], dict[str, Any]]:
+    """`TelegramGateway.line_grill_handler` for `cb:grill:<run_id>#<question_id>:<index>`.
+
+    Resolves the project from the run's grill job (`ControlStore.find_job`,
+    `ticket_id` is the project id for line runs), calls
+    `stage_grill.submit_grill_answers`, then resumes only the grill job --
+    per stage_grill's own docstring, the next `run_grill()` reconciles
+    partial answers (not every question needs to be answered before the
+    job resumes; a still-incomplete set returns `waiting_human` again).
+    """
+    from core.line.bindings import default_project_resolver
+
+    resolver = project_resolver or default_project_resolver()
+
+    def _handler(run_id: str, question_id: str, index: str, user_id: int) -> dict[str, Any]:
+        del user_id
+        from core.line import stage_grill
+
+        job_key = store.find_job(run_id, "grill")
+        if job_key is None:
+            return {"resumed": False}
+        project = resolver(job_key.ticket_id)
+        if project is None:
+            return {"resumed": False}
+        submitted = stage_grill.submit_grill_answers(project, run_id, {question_id: index})
+        if not submitted:
+            return {"resumed": False}
+        resumed = resume_blocked_job(store, run_id, "grill")
+        return {"resumed": resumed}
+
+    return _handler
+
+
+def build_telegram_commercial_acceptance_handler(
+    store: ControlStore, *, project_resolver: Optional[Callable[[str], Optional[ProjectDescriptor]]] = None
+) -> Callable[[str, int], dict[str, Any]]:
+    """`TelegramGateway.commercial_acceptance_handler` for `cb:accept:<run_id>` (D-g).
+
+    Resolves the project and `merge_sha` from the waiting `build_deploy`
+    job's `input_refs` (`[pr_url, merge_sha]`, per `stage_release`'s own
+    docstring), records the acceptance, then resumes only that job.
+    """
+    from core.line.bindings import default_project_resolver
+
+    resolver = project_resolver or default_project_resolver()
+
+    def _handler(run_id: str, user_id: int) -> dict[str, Any]:
+        del user_id
+        from core.line.stage_release import default_state_store, record_commercial_acceptance
+
+        job_key = store.find_job(run_id, "build_deploy", status="waiting_human")
+        if job_key is None:
+            return {"resumed": False}
+        project = resolver(job_key.ticket_id)
+        if project is None:
+            return {"resumed": False}
+        input_refs = store.get_latest_success_output_refs(run_id, exclude_stage="build_deploy")
+        sha = input_refs[-1] if input_refs else ""
+        if not sha:
+            return {"resumed": False}
+        record_commercial_acceptance(default_state_store(project), project.id, run_id, sha)
+        resumed = resume_blocked_job(store, run_id, "build_deploy")
+        return {"resumed": resumed, "sha": sha}
+
+    return _handler
+
+
 __all__ = [
     "HumanRequest",
     "HumanRequestKind",
@@ -238,4 +312,6 @@ __all__ = [
     "run_probe",
     "resume_blocked_job",
     "probe_and_resume",
+    "build_telegram_line_grill_handler",
+    "build_telegram_commercial_acceptance_handler",
 ]
