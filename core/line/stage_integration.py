@@ -417,6 +417,21 @@ class IntegrationStageHandler:
             ]
             if lines:
                 parts.append("## Tickets\n\n" + "\n".join(lines))
+            # HF-27-08 item G: tickets.json is stripped from the branch right
+            # after this (context is folded into the PR body, never carried
+            # past merge), but the release stage still needs each ticket's
+            # `smoke` list. Carried as a hidden JSON comment the release
+            # stage parses back out of the merged PR's body (see
+            # stage_release._fetch_ticket_smoke_entries).
+            ticket_smoke = {
+                t.get("id", "?"): t.get("smoke")
+                for t in tickets
+                if isinstance(t, dict) and t.get("smoke")
+            }
+            if ticket_smoke:
+                parts.append(
+                    "<!-- darkfac:ticket_smoke:" + json.dumps(ticket_smoke, ensure_ascii=False) + " -->"
+                )
         for review in sorted(directory.glob("review-*.md")):
             parts.append(f"## {review.name}\n\n{_truncate(_read_if_exists(review), 2000)}")
         validation_raw = _read_if_exists(directory / "validation.json")

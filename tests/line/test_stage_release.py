@@ -16,6 +16,7 @@ list:
 
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Callable, Optional
@@ -430,3 +431,62 @@ def test_git_ref_state_is_shared_between_hosts(tmp_path: Path, monkeypatch) -> N
     assert desktop.last_good_sha == sha_a
     assert desktop.runs["run-1"].consecutive_smoke_failures == 1
     assert desktop.runs["run-2"].commercial_accepted_sha == sha_b
+
+
+# --------------------------------------------------------------------------
+# HF-27-08 item G: ticket smoke checks reach the release stage
+# --------------------------------------------------------------------------
+
+
+def test_ticket_smoke_entry_parsed_from_pr_body_comment(tmp_path: Path) -> None:
+    """`_fetch_ticket_smoke_entries` extracts the hidden JSON comment stage_integration writes."""
+    from core.line.stage_release import _fetch_ticket_smoke_entries
+
+    body = (
+        "## Tickets\n\n- **T1**: do the thing\n\n"
+        '<!-- darkfac:ticket_smoke:{"T1": ["https://acme.example/api/ok", "/health"]} -->'
+    )
+
+    class _FakeCompletedProcess:
+        returncode = 0
+        stdout = json.dumps({"body": body})
+        stderr = ""
+
+    def _fake_run(*args, **kwargs):
+        return _FakeCompletedProcess()
+
+    import core.line.stage_release as stage_release_mod
+
+    original = stage_release_mod.subprocess.run
+    stage_release_mod.subprocess.run = _fake_run  # type: ignore[assignment]
+    try:
+        entries = _fetch_ticket_smoke_entries("https://github.com/acme/acme/pull/7", tmp_path)
+    finally:
+        stage_release_mod.subprocess.run = original  # type: ignore[assignment]
+
+    assert entries == ["https://acme.example/api/ok", "/health"]
+
+
+def test_ticket_smoke_entry_failure_triggers_rollback(tmp_path: Path, monkeypatch) -> None:
+    """A failing extra ticket-smoke URL fails the whole smoke check, same as project.smoke."""
+    import core.line.stage_release as stage_release_mod
+
+    project = _project()
+    adapter = FakeAdapter()
+    adapter.installed["acme"] = "sha_v0_" + "a" * 33
+    # project.smoke's own check passes (200); the extra ticket entry fails (500).
+    opener = _opener_factory([(200, b"ok"), (500, b"boom")])
+    handler = _handler(project, adapter, tmp_path, opener)
+    handler.state_store.save(
+        "acme",
+        ReleaseState(last_good_sha="sha_v0_" + "a" * 33),
+    )
+
+    monkeypatch.setattr(stage_release_mod, "_fetch_ticket_smoke_entries", lambda *a, **k: ["https://acme.example/extra"])
+
+    context = _context("run-ticket-smoke", "https://github.com/acme/acme/pull/9", "sha_v1_" + "b" * 33)
+    result = handler.handle(context)
+
+    assert result.outcome == "retry"
+    assert "prod_smoke_failed_rolled_back_to_" in (result.cause_code or "")
+    assert adapter.rollback_calls, "a failing ticket smoke entry must trigger the same rollback path"

@@ -60,6 +60,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import subprocess
 import sys
 import time
@@ -94,6 +95,13 @@ _SMOKE_DELAY_S = 10.0
 _RECONCILE_POLLS = 30
 _RECONCILE_DELAY_S = 1.0
 _MAX_CONSECUTIVE_SMOKE_FAILURES = 2
+
+# HF-27-08 item G: PlanningTicket.smoke entries embedded by stage_integration
+# as a hidden JSON comment in the PR body (tickets.json itself never
+# survives the merge -- stage_integration strips `.darkfac/runs/<run_id>/`
+# right after folding it into the PR body).
+_TICKET_SMOKE_COMMENT_RE = re.compile(r"<!--\s*darkfac:ticket_smoke:(?P<json>.*?)-->", re.DOTALL)
+_PR_NUMBER_RE = re.compile(r"/pull/(\d+)")
 
 
 class ReleaseError(RuntimeError):
@@ -292,6 +300,65 @@ def _default_opener(url: str, timeout: float) -> tuple[int, bytes]:
         return resp.status, resp.read()
 
 
+def _win_kwargs_for_gh() -> dict[str, Any]:
+    return _win_kwargs()
+
+
+def _fetch_ticket_smoke_entries(pr_url: str, cwd: Path, *, gh_executable: str = "gh") -> list[str]:
+    """Every ticket's `smoke` entry, parsed back out of the merged PR's body.
+
+    Best-effort: any `gh` failure (not authenticated, PR already deleted,
+    no repo context at `cwd`, ...) returns `[]` rather than raising -- ticket
+    smoke checks are additive to `project.smoke`, never a hard requirement.
+    """
+    match = _PR_NUMBER_RE.search(pr_url or "")
+    if not match:
+        return []
+    try:
+        proc = subprocess.run(
+            [gh_executable, "pr", "view", match.group(1), "--json", "body"],
+            cwd=str(cwd),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=30,
+            **_win_kwargs_for_gh(),
+        )
+    except (subprocess.TimeoutExpired, OSError) as exc:
+        logger.debug("gh pr view failed while fetching ticket smoke entries: %s", exc)
+        return []
+    if proc.returncode != 0:
+        return []
+    try:
+        body = json.loads(proc.stdout or "{}").get("body", "")
+    except json.JSONDecodeError:
+        return []
+    comment_match = _TICKET_SMOKE_COMMENT_RE.search(body or "")
+    if not comment_match:
+        return []
+    try:
+        data = json.loads(comment_match.group("json"))
+    except json.JSONDecodeError:
+        return []
+    entries: list[str] = []
+    if isinstance(data, dict):
+        for values in data.values():
+            if isinstance(values, list):
+                entries.extend(str(v) for v in values)
+    return entries
+
+
+def _smoke_base_url(project: ProjectDescriptor, target_config: Optional["TargetConfig"]) -> Optional[str]:
+    if project.domain:
+        return f"https://{project.domain}"
+    if target_config is not None and target_config.deploy_url:
+        return target_config.deploy_url
+    if target_config is not None and target_config.api_url:
+        return target_config.api_url
+    return None
+
+
 class ReleaseStageHandler:
     """StageHandler for the deploy/smoke/rollback release stage (HF-27-07)."""
 
@@ -448,13 +515,74 @@ class ReleaseStageHandler:
     # smoke
     # ----------------------------------------------------------------
 
-    def _smoke(self, sha: str, target_config: Optional[TargetConfig], adapter: Optional[DeploymentAdapter]) -> tuple[bool, str]:
+    def _run_extra_smoke_entries(
+        self, entries: list[str], target_config: Optional[TargetConfig]
+    ) -> tuple[bool, str]:
+        """HF-27-08 item G: run each ticket's `smoke` entry after `project.smoke`.
+
+        An entry that parses as an absolute URL, or a `/`-rooted path (joined
+        onto the deploy's base URL), becomes an HTTP `SmokeCheck`; anything
+        else runs as a shell command, the same convention `commands.smoke`
+        already uses. Same retry/rollback semantics as every other smoke
+        check: any failure here fails the whole `_smoke()` call.
+        """
+        if not entries:
+            return True, ""
+        base_url = _smoke_base_url(self.project, target_config)
+        logs: list[str] = []
+        for raw_entry in entries:
+            entry = raw_entry.strip()
+            if not entry:
+                continue
+            if entry.startswith("http://") or entry.startswith("https://"):
+                url = entry
+            elif entry.startswith("/") and base_url:
+                url = base_url.rstrip("/") + entry
+            else:
+                try:
+                    proc = subprocess.run(
+                        entry,
+                        cwd=self.project.path or ".",
+                        shell=True,
+                        capture_output=True,
+                        text=True,
+                        encoding="utf-8",
+                        errors="replace",
+                        timeout=self.validate_timeout_s,
+                        **_win_kwargs(),
+                    )
+                except subprocess.TimeoutExpired:
+                    logs.append(f"$ {entry}\n(timed out)")
+                    return False, _truncate("\n".join(logs), 8000)
+                logs.append(f"$ {entry}\n{proc.stdout}\n{proc.stderr}")
+                if proc.returncode != 0:
+                    return False, _truncate("\n".join(logs), 8000)
+                continue
+            ok, log = _run_smoke_http(
+                SmokeCheck(url=url),
+                retries=self.smoke_retries,
+                delay_s=self.smoke_delay_s,
+                sleep=self.sleep,
+                opener=self.smoke_opener,
+            )
+            logs.append(log)
+            if not ok:
+                return False, _truncate("\n".join(logs), 8000)
+        return True, _truncate("\n".join(logs), 4000)
+
+    def _smoke(
+        self,
+        sha: str,
+        target_config: Optional[TargetConfig],
+        adapter: Optional[DeploymentAdapter],
+        extra_entries: list[str] = (),
+    ) -> tuple[bool, str]:
         deploy = self.project.deploy
         if deploy is None or deploy.type == DeployTargetType.NONE:
             commands = resolve_commands(self.project, Path(self.project.path or "."))
-            if not commands.smoke:
-                return True, "(sem smoke local configurado; deploy 'none' considerado ok)"
             logs: list[str] = []
+            if not commands.smoke and not extra_entries:
+                return True, "(sem smoke local configurado; deploy 'none' considerado ok)"
             for cmd in commands.smoke:
                 try:
                     proc = subprocess.run(
@@ -474,12 +602,17 @@ class ReleaseStageHandler:
                 logs.append(f"$ {cmd}\n{proc.stdout}\n{proc.stderr}")
                 if proc.returncode != 0:
                     return False, _truncate("\n".join(logs), 8000)
+            extra_ok, extra_log = self._run_extra_smoke_entries(list(extra_entries), target_config)
+            if extra_log:
+                logs.append(extra_log)
+            if not extra_ok:
+                return False, _truncate("\n".join(logs), 8000)
             return True, _truncate("\n".join(logs), 4000)
 
-        if not self.project.smoke:
+        if not self.project.smoke and not extra_entries:
             return True, "(sem SmokeCheck configurado para o projeto)"
 
-        logs: list[str] = []
+        logs = []
         for check in self.project.smoke:
             ok, log = _run_smoke_http(
                 check,
@@ -491,6 +624,12 @@ class ReleaseStageHandler:
             logs.append(log)
             if not ok:
                 return False, _truncate("\n".join(logs), 8000)
+
+        extra_ok, extra_log = self._run_extra_smoke_entries(list(extra_entries), target_config)
+        if extra_log:
+            logs.append(extra_log)
+        if not extra_ok:
+            return False, _truncate("\n".join(logs), 8000)
 
         if target_config is not None and adapter is not None and target_config.healthcheck_endpoint:
             active_digest = adapter.installed_digest(target_config)
@@ -555,7 +694,8 @@ class ReleaseStageHandler:
 
         deploy_type = self.project.deploy.type if self.project.deploy else DeployTargetType.NONE
         adapter = self._adapter_for(deploy_type)
-        smoke_ok, smoke_log = self._smoke(merge_sha, target_config, adapter)
+        ticket_smoke_entries = _fetch_ticket_smoke_entries(pr_url, Path(self.project.path or "."))
+        smoke_ok, smoke_log = self._smoke(merge_sha, target_config, adapter, extra_entries=ticket_smoke_entries)
 
         if smoke_ok:
             state.last_good_sha = merge_sha
