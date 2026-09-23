@@ -143,6 +143,9 @@
     "GET /api/hf15/status": {
       "surface": "factory-health-block"
     },
+    "GET /api/hub/coverage": {
+      "surface": "hub-coverage-badge"
+    },
     "GET /api/infra/cards": {
       "surface": "infrastructure-cards-section"
     },

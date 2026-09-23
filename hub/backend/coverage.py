@@ -14,6 +14,8 @@ from __future__ import annotations
 
 import json
 import re
+import time
+from collections import defaultdict
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -28,6 +30,7 @@ CORE_DIR = REPO_ROOT / "core"
 HTTP_METHODS = ("get", "post", "put", "patch", "delete")
 MIN_REASON_LENGTH = 12
 _ROADMAP_ID = re.compile(r"\bDH-\d{2,3}\b")
+_ROADMAP_ROW = re.compile(r"\|\s*(DH-\d{2,3})\s*\|\s*([^|]+)\|\s*\*\*([^*]+)\*\*")
 _PATH_PARAM = re.compile(r"\{[^}]+\}")
 _DOM_ID = re.compile(r"""\bid\s*=\s*["']([A-Za-z][\w-]*)["']""")
 
@@ -75,6 +78,41 @@ class CoverageReport(BaseModel):
     def coverage_ratio(self) -> float:
         owner_facing = self.surfaced + self.pending
         return 1.0 if owner_facing == 0 else self.surfaced / owner_facing
+
+
+class RoadmapItemDetail(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    id: str = Field(description="Roadmap ID (e.g. DH-02)")
+    title: str = Field(description="Human readable title from roadmap")
+    horizon: str = Field(default="Agora", description="Priority horizon: Agora, Depois, Futuro")
+
+
+class PendingCapability(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    kind: str = Field(description="'api' or 'core'")
+    key: str = Field(description="Route key or core module name")
+    roadmap_id: str = Field(description="Associated roadmap ID")
+
+
+class CoverageSummaryResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    coverage_ratio: float = Field(description="Ratio of surfaced capabilities among owner-facing (0.0 to 1.0)")
+    coverage_percentage: int = Field(description="Percentage 0-100 rounded")
+    surfaced: int = Field(description="Number of capabilities with an active UI surface")
+    pending: int = Field(description="Number of capabilities pending roadmap implementation")
+    waived: int = Field(description="Number of machine or internal waived capabilities")
+    total_owner_facing: int = Field(description="surfaced + pending")
+    ok: bool = Field(description="True if zero problems found in gate evaluation")
+    problems: list[str] = Field(default_factory=list, description="List of gate diagnostic problems if any")
+    pending_by_roadmap: dict[str, list[PendingCapability]] = Field(
+        default_factory=dict, description="Pending capabilities grouped by DH-xx id"
+    )
+    roadmap_items: dict[str, RoadmapItemDetail] = Field(
+        default_factory=dict, description="Roadmap metadata for pending items"
+    )
 
 
 def load_manifest(path: Path = MANIFEST_PATH) -> CoverageManifest:
@@ -202,3 +240,71 @@ def evaluate_repository(manifest_path: Path = MANIFEST_PATH) -> CoverageReport:
         text=frontend_text(),
         roadmap=roadmap_ids(),
     )
+
+
+def load_roadmap_details(path: Path = ROADMAP_PATH) -> dict[str, RoadmapItemDetail]:
+    if not path.exists():
+        return {}
+    text = path.read_text(encoding="utf-8")
+    details: dict[str, RoadmapItemDetail] = {}
+    for match in _ROADMAP_ROW.finditer(text):
+        r_id, horizon, title = match.groups()
+        details[r_id] = RoadmapItemDetail(
+            id=r_id,
+            title=title.strip(),
+            horizon=horizon.strip(),
+        )
+    return details
+
+
+_CACHE_SUMMARY: CoverageSummaryResponse | None = None
+_CACHE_TIME: float = 0.0
+
+
+def get_coverage_summary(
+    manifest_path: Path = MANIFEST_PATH,
+    *,
+    force_refresh: bool = False,
+    cache_ttl_seconds: float = 30.0,
+) -> CoverageSummaryResponse:
+    global _CACHE_SUMMARY, _CACHE_TIME
+    now = time.monotonic()
+    if not force_refresh and _CACHE_SUMMARY is not None and (now - _CACHE_TIME) < cache_ttl_seconds:
+        return _CACHE_SUMMARY
+
+    report = evaluate_repository(manifest_path)
+    manifest = load_manifest(manifest_path)
+    roadmap_details = load_roadmap_details()
+
+    pending_by_roadmap: dict[str, list[PendingCapability]] = defaultdict(list)
+    for kind, entries in (("api", manifest.api_routes), ("core", manifest.core_modules)):
+        for key, entry in entries.items():
+            if entry.pending:
+                pending_by_roadmap[entry.pending].append(
+                    PendingCapability(kind=kind, key=key, roadmap_id=entry.pending)
+                )
+
+    for r_id in pending_by_roadmap:
+        pending_by_roadmap[r_id].sort(key=lambda c: (c.kind, c.key))
+
+    sorted_pending = {k: pending_by_roadmap[k] for k in sorted(pending_by_roadmap)}
+    ratio = report.coverage_ratio
+    percentage = round(ratio * 100)
+
+    summary = CoverageSummaryResponse(
+        coverage_ratio=round(ratio, 4),
+        coverage_percentage=percentage,
+        surfaced=report.surfaced,
+        pending=report.pending,
+        waived=report.waived,
+        total_owner_facing=report.surfaced + report.pending,
+        ok=report.ok,
+        problems=report.problems,
+        pending_by_roadmap=sorted_pending,
+        roadmap_items=roadmap_details,
+    )
+
+    _CACHE_SUMMARY = summary
+    _CACHE_TIME = now
+    return summary
+
