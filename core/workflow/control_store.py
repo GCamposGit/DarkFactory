@@ -200,6 +200,8 @@ class SQLiteControlStore:
                     updated_at TEXT NOT NULL,
                     started_at TEXT,
                     finished_at TEXT,
+                    not_before TEXT,
+                    ready_at TEXT,
                     PRIMARY KEY (run_id, ticket_id, plan_version, stage, iteration)
                 );
 
@@ -287,6 +289,21 @@ class SQLiteControlStore:
                 );
                 """
             )
+            self._migrate_jobs_columns(conn)
+
+    def _migrate_jobs_columns(self, conn: sqlite3.Connection) -> None:
+        """Idempotent ALTERs for columns added after the initial CREATE TABLE (HF-27-08).
+
+        `CREATE TABLE IF NOT EXISTS` never retrofits an existing table, so a
+        DB created before `not_before`/`ready_at` existed needs an explicit
+        `ALTER TABLE`. Each is wrapped so an already-migrated DB (or a
+        brand-new one where the CREATE above already included the column)
+        is a silent no-op.
+        """
+        existing = {row[1] for row in conn.execute("PRAGMA table_info(jobs)").fetchall()}
+        for column in ("not_before", "ready_at"):
+            if column not in existing:
+                conn.execute(f"ALTER TABLE jobs ADD COLUMN {column} TEXT")
 
     def accept(self, command: IntakeCommand, now: datetime) -> IntakeReceipt:
         """Accept an intake command transactionally with idempotency checking."""
@@ -354,12 +371,13 @@ class SQLiteControlStore:
                         run_id, ticket_id, plan_version, stage, iteration, status,
                         role, required_capabilities, fencing_token, timeout_seconds,
                         retry_count, max_retries, actual_cost, output_refs, evidence_refs,
-                        created_at, updated_at
-                    ) VALUES (?, ?, '1.0', 'grill', 0, 'pending', 'grill_engine', '[]', 0, 1800, 0, 3, 0.0, '[]', '[]', ?, ?)
+                        created_at, updated_at, ready_at
+                    ) VALUES (?, ?, '1.0', 'grill', 0, 'pending', 'grill_engine', '[]', 0, 1800, 0, 3, 0.0, '[]', '[]', ?, ?, ?)
                     """,
                     (
                         run_id,
                         command.project_id,
+                        now_iso,
                         now_iso,
                         now_iso,
                     ),
@@ -463,7 +481,7 @@ class SQLiteControlStore:
             cur.execute(
                 """
                 SELECT run_id, ticket_id, plan_version, stage, iteration, fencing_token, role,
-                       required_capabilities, created_at
+                       required_capabilities, created_at, not_before, ready_at
                 FROM jobs
                 WHERE status = 'pending'
                 ORDER BY created_at ASC
@@ -475,8 +493,24 @@ class SQLiteControlStore:
                 req = json.loads(row["required_capabilities"])
                 if not all(c in capabilities for c in req):
                     continue
-                if ready_age_sec > 0.0 and not _is_ready_enough(row["created_at"], now, ready_age_sec):
-                    continue
+                not_before = row["not_before"]
+                if not_before:
+                    try:
+                        not_before_dt = datetime.fromisoformat(str(not_before))
+                    except ValueError:
+                        not_before_dt = None
+                    if not_before_dt is not None:
+                        compare_now = now
+                        if not_before_dt.tzinfo is None and compare_now.tzinfo is not None:
+                            not_before_dt = not_before_dt.replace(tzinfo=compare_now.tzinfo)
+                        elif not_before_dt.tzinfo is not None and compare_now.tzinfo is None:
+                            compare_now = compare_now.replace(tzinfo=not_before_dt.tzinfo)
+                        if not_before_dt > compare_now:
+                            continue
+                if ready_age_sec > 0.0:
+                    ready_reference = row["ready_at"] or row["created_at"]
+                    if not _is_ready_enough(ready_reference, now, ready_age_sec):
+                        continue
                 chosen_row = row
                 break
 
@@ -1149,6 +1183,79 @@ class SQLiteControlStore:
         finally:
             conn.close()
 
+    def resume_job(self, job_key: JobKey, now: datetime) -> bool:
+        """Transition a `waiting_human`/`waiting_dependency` job back to `pending` (HF-27-08 D-d).
+
+        Sets `ready_at = now` so the resumed job's claim-wait is measured from
+        this resume, not from its original `created_at`. Returns `True` if a
+        matching job in a waiting state was found and resumed, `False`
+        otherwise (already resumed, wrong stage, or unknown job).
+        """
+        now_iso = now.isoformat()
+        conn = self._connect()
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            cur = conn.cursor()
+            cur.execute(
+                """
+                UPDATE jobs
+                SET status = 'pending', ready_at = ?, not_before = NULL, updated_at = ?
+                WHERE run_id = ? AND ticket_id = ? AND plan_version = ? AND stage = ? AND iteration = ?
+                  AND status IN ('waiting_human', 'waiting_dependency')
+                """,
+                (now_iso, now_iso, job_key.run_id, job_key.ticket_id, job_key.plan_version, job_key.stage, job_key.iteration),
+            )
+            resumed = cur.rowcount > 0
+            conn.commit()
+            return resumed
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+
+    def get_latest_success_output_refs(self, run_id: str, exclude_stage: str | None = None) -> list[str]:
+        """`output_refs` of the most recently succeeded job for `run_id` (HF-27-08 D-f).
+
+        Used to build the next stage handler's `StageContext.input_refs` from
+        its predecessor's outputs without either side depending on process
+        memory. `exclude_stage` skips jobs on that stage (e.g. so a stage
+        cannot pick up its own prior success as its own input on a retry).
+        """
+        conn = self._connect()
+        try:
+            cur = conn.cursor()
+            if exclude_stage:
+                cur.execute(
+                    """
+                    SELECT output_refs FROM jobs
+                    WHERE run_id = ? AND status = 'succeeded' AND stage != ?
+                    ORDER BY finished_at DESC, updated_at DESC
+                    LIMIT 1
+                    """,
+                    (run_id, exclude_stage),
+                )
+            else:
+                cur.execute(
+                    """
+                    SELECT output_refs FROM jobs
+                    WHERE run_id = ? AND status = 'succeeded'
+                    ORDER BY finished_at DESC, updated_at DESC
+                    LIMIT 1
+                    """,
+                    (run_id,),
+                )
+            row = cur.fetchone()
+            if not row:
+                return []
+            try:
+                refs = json.loads(row["output_refs"])
+            except (TypeError, json.JSONDecodeError):
+                return []
+            return refs if isinstance(refs, list) else []
+        finally:
+            conn.close()
+
     def list_active_projects(self, cursor: str | None = None, limit: int = 100) -> tuple[list[str], str | None]:
         """Stable paginated query of active project IDs ordered deterministically."""
         conn = self._connect()
@@ -1190,7 +1297,8 @@ class SQLiteControlStore:
 
             cur.execute(
                 """
-                SELECT j.run_id, r.project_id, j.ticket_id, j.stage, j.status, j.created_at, j.updated_at
+                SELECT j.run_id, r.project_id, j.ticket_id, j.stage, j.status, j.created_at, j.updated_at,
+                       j.ready_at
                 FROM jobs j
                 JOIN runs r ON j.run_id = r.run_id
                 WHERE j.status IN ('pending', 'running')
@@ -1205,7 +1313,9 @@ class SQLiteControlStore:
 
             for row in rows:
                 status = row["status"]
-                created_dt = datetime.fromisoformat(row["created_at"])
+                # HF-27-08 D-d: ready-age counts from ready_at (reset on every
+                # waiting_* -> pending transition), falling back to created_at.
+                created_dt = datetime.fromisoformat(row["ready_at"] or row["created_at"])
                 age_sec = max(0.0, (now - created_dt).total_seconds())
                 if status == "pending":
                     pending_count += 1

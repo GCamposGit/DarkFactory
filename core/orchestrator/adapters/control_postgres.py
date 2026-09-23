@@ -78,8 +78,13 @@ CREATE TABLE IF NOT EXISTS jobs (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     started_at TIMESTAMPTZ,
     finished_at TIMESTAMPTZ,
+    not_before TIMESTAMPTZ,
+    ready_at TIMESTAMPTZ,
     PRIMARY KEY (run_id, ticket_id, plan_version, stage, iteration)
 );
+
+ALTER TABLE jobs ADD COLUMN IF NOT EXISTS not_before TIMESTAMPTZ;
+ALTER TABLE jobs ADD COLUMN IF NOT EXISTS ready_at TIMESTAMPTZ;
 
 CREATE INDEX IF NOT EXISTS idx_jobs_claim_lookup ON jobs (status, role) WHERE status = 'pending';
 CREATE INDEX IF NOT EXISTS idx_jobs_run_id ON jobs (run_id);
@@ -282,10 +287,10 @@ class PostgresControlStore:
                                 run_id, ticket_id, plan_version, stage, iteration, status,
                                 role, required_capabilities, fencing_token, timeout_seconds,
                                 retry_count, max_retries, actual_cost, output_refs, evidence_refs,
-                                created_at, updated_at
-                            ) VALUES (%s, %s, '1.0', 'grill', 0, 'pending', 'grill_engine', '[]'::jsonb, 0, 1800, 0, 3, 0.0, '[]'::jsonb, '[]'::jsonb, %s, %s)
+                                created_at, updated_at, ready_at
+                            ) VALUES (%s, %s, '1.0', 'grill', 0, 'pending', 'grill_engine', '[]'::jsonb, 0, 1800, 0, 3, 0.0, '[]'::jsonb, '[]'::jsonb, %s, %s, %s)
                             """,
-                            (run_id, command.project_id, now_utc, now_utc),
+                            (run_id, command.project_id, now_utc, now_utc, now_utc),
                         )
 
                         outbox_payload = json.dumps(
@@ -386,7 +391,7 @@ class PostgresControlStore:
                     cur.execute(
                         """
                         SELECT run_id, ticket_id, plan_version, stage, iteration, fencing_token, role,
-                               required_capabilities, created_at
+                               required_capabilities, created_at, not_before, ready_at
                         FROM jobs
                         WHERE status = 'pending'
                         ORDER BY created_at ASC
@@ -399,8 +404,16 @@ class PostgresControlStore:
                         req = r[7] if isinstance(r[7], list) else json.loads(r[7])
                         if not all(c in capabilities for c in req):
                             continue
-                        if ready_age_sec > 0.0 and not _is_ready_enough(r[8], now_utc, ready_age_sec):
-                            continue
+                        not_before = r[9]
+                        if not_before is not None:
+                            nb_dt = not_before if hasattr(not_before, "astimezone") else datetime.fromisoformat(str(not_before))
+                            nb_dt = nb_dt.astimezone(UTC) if nb_dt.tzinfo else nb_dt.replace(tzinfo=UTC)
+                            if nb_dt > now_utc:
+                                continue
+                        if ready_age_sec > 0.0:
+                            ready_reference = r[10] or r[8]
+                            if not _is_ready_enough(ready_reference, now_utc, ready_age_sec):
+                                continue
                         chosen = r
                         break
 
@@ -408,7 +421,7 @@ class PostgresControlStore:
                         conn.commit()
                         return None
 
-                    run_id, ticket_id, plan_version, stage, iteration, old_token, role, _req, _created_at = chosen
+                    run_id, ticket_id, plan_version, stage, iteration, old_token, role, _req, _created_at, _nb, _ra = chosen
                     new_token = old_token + 1
                     lease_id = f"lease-{uuid4().hex[:12]}"
                     reservation_id = f"res-{uuid4().hex[:8]}"
@@ -1136,6 +1149,75 @@ class PostgresControlStore:
             logger.warning("PostgreSQL list_active_projects failed: %s", exc)
             return [], None
 
+    def resume_job(self, job_key: JobKey, now: datetime) -> bool:
+        """Transition a `waiting_human`/`waiting_dependency` job back to `pending` (HF-27-08 D-d)."""
+        if self.mock_mode:
+            return self._backend.resume_job(job_key, now)
+
+        now_utc = now.astimezone(UTC)
+        try:
+            with self._psycopg.connect(self.raw_url) as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        UPDATE jobs
+                        SET status = 'pending', ready_at = %s, not_before = NULL, updated_at = %s
+                        WHERE run_id = %s AND ticket_id = %s AND plan_version = %s AND stage = %s AND iteration = %s
+                          AND status IN ('waiting_human', 'waiting_dependency')
+                        """,
+                        (
+                            now_utc,
+                            now_utc,
+                            job_key.run_id,
+                            job_key.ticket_id,
+                            job_key.plan_version,
+                            job_key.stage,
+                            job_key.iteration,
+                        ),
+                    )
+                    resumed = cur.rowcount > 0
+                    conn.commit()
+                    return resumed
+        except Exception as exc:
+            raise StoreUnavailableError(f"PostgreSQL resume_job failed: {exc}") from exc
+
+    def get_latest_success_output_refs(self, run_id: str, exclude_stage: str | None = None) -> list[str]:
+        """`output_refs` of the most recently succeeded job for `run_id` (HF-27-08 D-f)."""
+        if self.mock_mode:
+            return self._backend.get_latest_success_output_refs(run_id, exclude_stage=exclude_stage)
+
+        try:
+            with self._psycopg.connect(self.raw_url) as conn:
+                with conn.cursor() as cur:
+                    if exclude_stage:
+                        cur.execute(
+                            """
+                            SELECT output_refs FROM jobs
+                            WHERE run_id = %s AND status = 'succeeded' AND stage != %s
+                            ORDER BY finished_at DESC, updated_at DESC
+                            LIMIT 1
+                            """,
+                            (run_id, exclude_stage),
+                        )
+                    else:
+                        cur.execute(
+                            """
+                            SELECT output_refs FROM jobs
+                            WHERE run_id = %s AND status = 'succeeded'
+                            ORDER BY finished_at DESC, updated_at DESC
+                            LIMIT 1
+                            """,
+                            (run_id,),
+                        )
+                    row = cur.fetchone()
+                    if not row:
+                        return []
+                    refs = row[0] if isinstance(row[0], list) else json.loads(row[0])
+                    return refs if isinstance(refs, list) else []
+        except Exception as exc:
+            logger.warning("PostgreSQL get_latest_success_output_refs failed: %s", exc)
+            return []
+
     def get_ready_age_metrics(self, now: datetime) -> dict[str, Any]:
         """Query ready-age and claim distribution for pending jobs."""
         if self.mock_mode:
@@ -1151,7 +1233,8 @@ class PostgresControlStore:
 
                     cur.execute(
                         """
-                        SELECT j.run_id, r.project_id, j.ticket_id, j.stage, j.status, j.created_at, j.updated_at
+                        SELECT j.run_id, r.project_id, j.ticket_id, j.stage, j.status, j.created_at, j.updated_at,
+                               j.ready_at
                         FROM jobs j
                         JOIN runs r ON j.run_id = r.run_id
                         WHERE j.status IN ('pending', 'running')
@@ -1166,7 +1249,11 @@ class PostgresControlStore:
 
                     for r in rows:
                         status = r[4]
-                        created_dt = r[5] if hasattr(r[5], "astimezone") else datetime.fromisoformat(str(r[5])).astimezone(UTC)
+                        # HF-27-08 D-d: ready-age counts from the last time the job
+                        # became claimable (ready_at), falling back to created_at
+                        # for a job that has never been through waiting_* -> pending.
+                        ready_raw = r[7] or r[5]
+                        created_dt = ready_raw if hasattr(ready_raw, "astimezone") else datetime.fromisoformat(str(ready_raw)).astimezone(UTC)
                         age_sec = max(0.0, (now_utc - created_dt).total_seconds())
                         if status == "pending":
                             pending_count += 1
