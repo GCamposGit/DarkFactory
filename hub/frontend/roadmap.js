@@ -9,6 +9,8 @@ const roadmapUi = {
   projectId: "darkfac",
   projects: [],
   snapshot: null,
+  health: null,
+  history: null,
   mode: "overview",
   selectedItemId: null,
   loading: false,
@@ -118,6 +120,8 @@ function renderRoadmapProjects() {
   select.onchange = () => {
     roadmapUi.projectId = select.value;
     roadmapUi.selectedItemId = null;
+    roadmapUi.health = null;
+    roadmapUi.history = null;
     const globalSel = document.getElementById("global-project-select");
     if (globalSel && globalSel.value !== select.value) {
       globalSel.value = select.value;
@@ -127,7 +131,13 @@ function renderRoadmapProjects() {
         syncActiveProjectToComponents(select.value);
       }
     }
-    loadRoadmapSnapshot();
+    if (roadmapUi.mode === "health") {
+      loadRoadmapHealth(roadmapUi.projectId);
+    } else if (roadmapUi.mode === "history") {
+      loadRoadmapHistory(roadmapUi.projectId);
+    } else {
+      loadRoadmapSnapshot();
+    }
   };
 }
 
@@ -531,27 +541,319 @@ function selectRoadmapMode(mode, reload = true) {
   const timeline = document.getElementById("roadmap-timeline-view");
   const dependencies = document.getElementById("roadmap-dependencies-view");
   const table = document.getElementById("roadmap-table-view");
+  const health = document.getElementById("roadmap-health-view");
+  const history = document.getElementById("roadmap-history-view");
+  const filtersSection = document.getElementById("roadmap-filters-section");
+
   const overviewButton = document.getElementById("roadmap-mode-overview");
   const timelineButton = document.getElementById("roadmap-mode-timeline");
   const dependenciesButton = document.getElementById("roadmap-mode-dependencies");
   const tableButton = document.getElementById("roadmap-mode-table");
+  const healthButton = document.getElementById("roadmap-mode-health");
+  const historyButton = document.getElementById("roadmap-mode-history");
+
   const isOverview = mode === "overview";
   const isTimeline = mode === "timeline";
   const isDependencies = mode === "dependencies";
   const isTable = mode === "table";
+  const isHealth = mode === "health";
+  const isHistory = mode === "history";
+
   overview?.classList.toggle("hidden", !isOverview);
   timeline?.classList.toggle("hidden", !isTimeline);
   dependencies?.classList.toggle("hidden", !isDependencies);
   table?.classList.toggle("hidden", !isTable);
+  health?.classList.toggle("hidden", !isHealth);
+  history?.classList.toggle("hidden", !isHistory);
+  filtersSection?.classList.toggle("hidden", isHealth || isHistory);
+
   overviewButton?.classList.toggle("roadmap-mode-active", isOverview);
   timelineButton?.classList.toggle("roadmap-mode-active", isTimeline);
   dependenciesButton?.classList.toggle("roadmap-mode-active", isDependencies);
   tableButton?.classList.toggle("roadmap-mode-active", isTable);
+  healthButton?.classList.toggle("roadmap-mode-active", isHealth);
+  historyButton?.classList.toggle("roadmap-mode-active", isHistory);
+
   overviewButton?.setAttribute("aria-selected", String(isOverview));
   timelineButton?.setAttribute("aria-selected", String(isTimeline));
   dependenciesButton?.setAttribute("aria-selected", String(isDependencies));
   tableButton?.setAttribute("aria-selected", String(isTable));
-  if (reload && roadmapUi.snapshot) renderRoadmapContent();
+  healthButton?.setAttribute("aria-selected", String(isHealth));
+  historyButton?.setAttribute("aria-selected", String(isHistory));
+
+  if (isHealth) {
+    loadRoadmapHealth(roadmapUi.projectId);
+  } else if (isHistory) {
+    loadRoadmapHistory(roadmapUi.projectId);
+  } else if (reload && roadmapUi.snapshot) {
+    renderRoadmapContent();
+  }
+}
+
+async function loadRoadmapHealth(projectId) {
+  if (!projectId) return;
+  const container = document.getElementById("roadmap-health-view");
+  if (container) container.innerHTML = '<div class="roadmap-empty-state">Consultando saúde do roadmap canônico…</div>';
+  try {
+    const response = await fetch(`/api/projects/${encodeURIComponent(projectId)}/roadmap/health`);
+    if (!response.ok) {
+      const detail = await response.json().catch(() => ({}));
+      throw new Error(detail.detail || "Não foi possível consultar a saúde do roadmap");
+    }
+    const health = await response.json();
+    roadmapUi.health = health;
+    renderRoadmapHealth(health);
+  } catch (error) {
+    if (container) container.innerHTML = `<div class="roadmap-alert roadmap-alert-error">Erro ao consultar saúde: ${escapeRoadmapHtml(error.message)}</div>`;
+  }
+}
+
+function renderRoadmapHealth(health) {
+  const container = document.getElementById("roadmap-health-view");
+  if (!container) return;
+
+  const staleBadge = health.stale
+    ? '<span class="px-2.5 py-1 rounded-full bg-rose-500/15 text-rose-300 border border-rose-500/30 text-xs font-mono font-medium">⚠️ Obsoleto (Stale)</span>'
+    : '<span class="px-2.5 py-1 rounded-full bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 text-xs font-mono font-medium">✓ Atualizado</span>';
+
+  const sourcesList = (health.sources_consulted || []).map((source) => {
+    const statusClass = source.status === "available" ? "text-emerald-400 border-emerald-500/30 bg-emerald-500/10" : "text-amber-400 border-amber-500/30 bg-amber-500/10";
+    return `
+      <div class="p-3 rounded-xl border border-slate-800 bg-slate-900/60 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+        <div class="space-y-1">
+          <div class="flex items-center gap-2">
+            <span class="text-xs font-semibold text-slate-200">${escapeRoadmapHtml(source.label || source.source_id)}</span>
+            <span class="px-2 py-0.5 rounded text-[10px] font-mono border ${statusClass}">${escapeRoadmapHtml(source.status)}</span>
+          </div>
+          <div class="text-[11px] text-slate-400 font-mono">${escapeRoadmapHtml(source.locator)}</div>
+        </div>
+        <div class="text-right text-[10px] text-slate-500 font-mono">
+          Obs: ${formatRoadmapDate(source.observed_at)}
+        </div>
+      </div>
+    `;
+  }).join("") || '<p class="text-xs text-slate-500">Nenhuma fonte registrada.</p>';
+
+  const unavailableBlock = (health.sources_unavailable || []).length
+    ? `
+      <div class="p-4 rounded-xl border border-rose-500/30 bg-rose-950/20 text-xs text-rose-200 space-y-1">
+        <strong class="font-semibold">Fontes Indisponíveis:</strong>
+        <p>${escapeRoadmapHtml(health.sources_unavailable.join(", "))}</p>
+      </div>
+    `
+    : "";
+
+  container.innerHTML = `
+    <div class="p-5 rounded-2xl border border-slate-800 bg-slate-900/40 space-y-4">
+      <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800/80 pb-4">
+        <div>
+          <h3 class="text-sm font-bold text-white flex items-center gap-2">
+            Diagnóstico de Saúde do Roadmap
+            ${staleBadge}
+          </h3>
+          <p class="text-xs text-slate-400 mt-1">Snapshot ${escapeRoadmapHtml((health.snapshot_hash || "").slice(0, 12))} · Política: <code class="text-cyan-400">${escapeRoadmapHtml(health.policy)}</code></p>
+        </div>
+        <button type="button" onclick="loadRoadmapHealth(roadmapUi.projectId)" class="px-3 py-1.5 rounded-xl border border-slate-700 bg-slate-800 hover:bg-slate-700 text-xs font-medium text-slate-200 transition-colors">
+          Atualizar Diagnóstico
+        </button>
+      </div>
+
+      <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <div class="p-3 rounded-xl border border-slate-800 bg-slate-950/50">
+          <span class="block text-[11px] text-slate-500 font-mono uppercase">Total de Itens</span>
+          <span class="text-lg font-bold text-slate-100 font-mono">${health.total_items}</span>
+        </div>
+        <div class="p-3 rounded-xl border border-slate-800 bg-slate-950/50">
+          <span class="block text-[11px] text-slate-500 font-mono uppercase">Confirmados</span>
+          <span class="text-lg font-bold text-emerald-400 font-mono">${health.confirmed_items}</span>
+        </div>
+        <div class="p-3 rounded-xl border border-slate-800 bg-slate-950/50">
+          <span class="block text-[11px] text-slate-500 font-mono uppercase">Bloqueados</span>
+          <span class="text-lg font-bold text-amber-400 font-mono">${health.blocked_items}</span>
+        </div>
+        <div class="p-3 rounded-xl border border-slate-800 bg-slate-950/50">
+          <span class="block text-[11px] text-slate-500 font-mono uppercase">Conflitos / Avisos</span>
+          <span class="text-lg font-bold text-rose-400 font-mono">${health.conflicts} / ${health.warnings}</span>
+        </div>
+      </div>
+
+      ${unavailableBlock}
+
+      <div class="space-y-2 pt-2">
+        <h4 class="text-xs font-semibold uppercase tracking-wider text-slate-400 font-mono">Fontes de Projeção</h4>
+        <div class="space-y-2">
+          ${sourcesList}
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+async function loadRoadmapHistory(projectId) {
+  if (!projectId) return;
+  const container = document.getElementById("roadmap-history-view");
+  if (container) container.innerHTML = '<div class="roadmap-empty-state">Consultando histórico de snapshots…</div>';
+  try {
+    const response = await fetch(`/api/projects/${encodeURIComponent(projectId)}/roadmap/history`);
+    if (!response.ok) {
+      const detail = await response.json().catch(() => ({}));
+      throw new Error(detail.detail || "Não foi possível consultar o histórico do roadmap");
+    }
+    const history = await response.json();
+    roadmapUi.history = history;
+    renderRoadmapHistory(history);
+  } catch (error) {
+    if (container) container.innerHTML = `<div class="roadmap-alert roadmap-alert-error">Erro ao consultar histórico: ${escapeRoadmapHtml(error.message)}</div>`;
+  }
+}
+
+function renderRoadmapHistory(history) {
+  const container = document.getElementById("roadmap-history-view");
+  if (!container) return;
+
+  const snapshots = history.snapshots || [];
+  if (!snapshots.length) {
+    container.innerHTML = '<div class="roadmap-empty-state">Nenhum snapshot histórico retido para este projeto.</div>';
+    return;
+  }
+
+  const optionsHtml = snapshots.map((s, idx) => {
+    const label = `${(s.snapshot_hash || "").slice(0, 10)} (${formatRoadmapDate(s.observed_at)}) - ${s.item_count} itens`;
+    return `<option value="${escapeRoadmapAttribute(s.snapshot_id)}" ${idx === 1 ? 'selected' : ''}>${escapeRoadmapHtml(label)}</option>`;
+  }).join("");
+
+  const firstOptionHtml = snapshots.map((s, idx) => {
+    const label = `${(s.snapshot_hash || "").slice(0, 10)} (${formatRoadmapDate(s.observed_at)}) - ${s.item_count} itens`;
+    return `<option value="${escapeRoadmapAttribute(s.snapshot_id)}" ${idx === 0 ? 'selected' : ''}>${escapeRoadmapHtml(label)}</option>`;
+  }).join("");
+
+  const historyCards = snapshots.map((s) => `
+    <div class="p-3.5 rounded-xl border border-slate-800 bg-slate-900/50 hover:bg-slate-900/80 transition-all flex flex-col md:flex-row md:items-center justify-between gap-3">
+      <div class="space-y-1">
+        <div class="flex items-center gap-2">
+          <span class="text-xs font-mono font-bold text-cyan-400">${escapeRoadmapHtml((s.snapshot_hash || "").slice(0, 12))}</span>
+          <span class="text-[10px] text-slate-500 font-mono">ID: ${escapeRoadmapHtml(s.snapshot_id)}</span>
+        </div>
+        <div class="text-xs text-slate-300">
+          <span class="font-medium">${s.item_count} itens</span> · 
+          <span class="text-slate-400">${s.relation_count} relações</span> · 
+          <span class="${s.issue_count > 0 ? 'text-amber-400' : 'text-slate-500'}">${s.issue_count} aviso(s)</span>
+        </div>
+      </div>
+      <div class="text-right text-[11px] text-slate-400 font-mono">
+        ${formatRoadmapDate(s.observed_at)}
+      </div>
+    </div>
+  `).join("");
+
+  container.innerHTML = `
+    <div class="p-5 rounded-2xl border border-slate-800 bg-slate-900/40 space-y-4">
+      <div class="border-b border-slate-800/80 pb-3">
+        <h3 class="text-sm font-bold text-white flex items-center gap-2">
+          Comparação Entre Versões de Snapshot
+          <span class="roadmap-tag roadmap-tag-neutral">Somente leitura</span>
+        </h3>
+        <p class="text-xs text-slate-400 mt-1">Selecione dois snapshots retidos para inspecionar os deltas exatos calculados deterministicamente pelo motor do core.</p>
+      </div>
+
+      <div class="grid grid-cols-1 md:grid-cols-5 gap-3 items-end">
+        <div class="md:col-span-2">
+          <label class="block text-[11px] text-slate-400 mb-1 font-mono">Snapshot Base (From)</label>
+          <select id="roadmap-compare-from" class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-cyan-500 font-mono">
+            ${optionsHtml}
+          </select>
+        </div>
+        <div class="md:col-span-2">
+          <label class="block text-[11px] text-slate-400 mb-1 font-mono">Snapshot Alvo (To)</label>
+          <select id="roadmap-compare-to" class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-cyan-500 font-mono">
+            ${firstOptionHtml}
+          </select>
+        </div>
+        <div>
+          <button type="button" onclick="executeRoadmapCompare()" class="w-full px-4 py-2 rounded-xl bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-300 border border-cyan-500/30 text-xs font-semibold transition-all">
+            Comparar
+          </button>
+        </div>
+      </div>
+
+      <div id="roadmap-compare-results" class="hidden pt-3 border-t border-slate-800/80 space-y-3"></div>
+    </div>
+
+    <div class="space-y-3">
+      <div class="flex items-center justify-between">
+        <h4 class="text-xs font-semibold uppercase tracking-wider text-slate-400 font-mono">Linha do Tempo de Snapshots Retidos</h4>
+        <span class="text-xs text-slate-500 font-mono">${snapshots.length} retido(s)</span>
+      </div>
+      <div class="space-y-2">
+        ${historyCards}
+      </div>
+    </div>
+  `;
+}
+
+async function executeRoadmapCompare() {
+  const fromSel = document.getElementById("roadmap-compare-from");
+  const toSel = document.getElementById("roadmap-compare-to");
+  const resultsDiv = document.getElementById("roadmap-compare-results");
+  if (!fromSel || !toSel || !resultsDiv) return;
+
+  const fromSnapshot = fromSel.value;
+  const toSnapshot = toSel.value;
+  if (!fromSnapshot || !toSnapshot) return;
+
+  resultsDiv.classList.remove("hidden");
+  resultsDiv.innerHTML = '<div class="text-xs text-slate-400 font-mono p-4 text-center">Calculando diff determinístico…</div>';
+
+  try {
+    const url = `/api/projects/${encodeURIComponent(roadmapUi.projectId)}/roadmap/history/compare?from_snapshot=${encodeURIComponent(fromSnapshot)}&to_snapshot=${encodeURIComponent(toSnapshot)}`;
+    const response = await fetch(url);
+    if (!response.ok) {
+      const detail = await response.json().catch(() => ({}));
+      throw new Error(detail.detail || "Falha na comparação de snapshots");
+    }
+    const diff = await response.json();
+    renderRoadmapComparisonResult(diff, resultsDiv);
+  } catch (error) {
+    resultsDiv.innerHTML = `<div class="roadmap-alert roadmap-alert-error">Erro na comparação: ${escapeRoadmapHtml(error.message)}</div>`;
+  }
+}
+
+function renderRoadmapComparisonResult(diff, container) {
+  const added = diff.added_item_ids || [];
+  const removed = diff.removed_item_ids || [];
+  const changed = diff.changed_items || [];
+
+  const addedMarkup = added.length
+    ? `<div class="space-y-1"><span class="text-[11px] font-mono font-semibold text-emerald-400">+ Adicionados (${added.length}):</span><div class="flex flex-wrap gap-1.5">${added.map(id => `<span class="px-2 py-0.5 rounded bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 text-[10px] font-mono">${escapeRoadmapHtml(id)}</span>`).join("")}</div></div>`
+    : '<div class="text-[11px] text-slate-500 font-mono">Nenhum item adicionado.</div>';
+
+  const removedMarkup = removed.length
+    ? `<div class="space-y-1"><span class="text-[11px] font-mono font-semibold text-rose-400">- Removidos (${removed.length}):</span><div class="flex flex-wrap gap-1.5">${removed.map(id => `<span class="px-2 py-0.5 rounded bg-rose-500/10 border border-rose-500/30 text-rose-300 text-[10px] font-mono">${escapeRoadmapHtml(id)}</span>`).join("")}</div></div>`
+    : '<div class="text-[11px] text-slate-500 font-mono">Nenhum item removido.</div>';
+
+  const changedMarkup = changed.length
+    ? `<div class="space-y-2"><span class="text-[11px] font-mono font-semibold text-amber-400">~ Modificados (${changed.length}):</span><div class="space-y-1.5">${changed.map(c => `
+        <div class="p-2.5 rounded-lg border border-slate-800 bg-slate-950/60 text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-1.5">
+          <div class="font-mono text-cyan-300 font-medium">${escapeRoadmapHtml(c.item_id)}</div>
+          <div class="text-slate-400 text-[11px]">Campos alterados: <span class="font-mono text-amber-300">${escapeRoadmapHtml((c.changed_fields || []).join(", "))}</span></div>
+        </div>
+      `).join("")}</div></div>`
+    : '<div class="text-[11px] text-slate-500 font-mono">Nenhum item modificado.</div>';
+
+  container.innerHTML = `
+    <div class="p-4 rounded-xl border border-cyan-500/20 bg-slate-950/80 space-y-3">
+      <div class="flex items-center justify-between text-xs font-mono text-slate-400 border-b border-slate-800 pb-2">
+        <span>De: <strong class="text-slate-200">${escapeRoadmapHtml((diff.from_snapshot?.snapshot_hash || "").slice(0, 10))}</strong></span>
+        <span>→</span>
+        <span>Para: <strong class="text-slate-200">${escapeRoadmapHtml((diff.to_snapshot?.snapshot_hash || "").slice(0, 10))}</strong></span>
+      </div>
+      <div class="space-y-3">
+        ${addedMarkup}
+        ${removedMarkup}
+        ${changedMarkup}
+      </div>
+    </div>
+  `;
 }
 
 function clearRoadmapFilters() {

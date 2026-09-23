@@ -68,7 +68,7 @@ Prioridade: **Agora** = próximo ciclo; **Depois** = após os itens Agora;
 | DH-07 | Depois | **Estúdio de conteúdo e visual**: gerar e auditar conteúdo, presets, galeria e ilustração | `content/*`, `visual/*`; `core/content`, `core/visual`, `core/marketing` | Conteúdo gerado passa pelo lint anti-slop antes de exportar |
 | DH-08 | Depois | **Portfólio multiprojeto**: projetos registrados, adoção (Skill 07), pilotos, arquétipos, linhas | `core/projects`, `core/portfolio`, `core/adoption`, `core/pilots`, `core/archetypes`, `core/line`, `core/game` | Cada projeto mostra estágio, saúde, roadmap e último deploy |
 | DH-09 | Depois | **Governança enterprise e deploy**: trilha de auditoria, configuração, avaliação de deploy, disparo de deploy Dokploy com confirmação | `enterprise/audit-trail`, `enterprise/configure`, `enterprise/evaluate-deploy`, `cloud/deploy` | Deploy só dispara após avaliação verde e confirmação explícita |
-| DH-10 | Depois | **Saúde e histórico do roadmap**: aba de saúde, linha do tempo e comparação de versões no drawer de roadmap | `projects/{id}/roadmap/health`, `history`, `history/compare` | Owner compara duas versões do roadmap e vê o que mudou |
+| DH-10 | Depois | **Saúde e histórico do roadmap**: aba de saúde, linha do tempo e comparação de versões no drawer de roadmap. Entregue em `USR-51` | `projects/{id}/roadmap/health`, `history`, `history/compare` | Owner compara duas versões do roadmap e vê o que mudou |
 | DH-11 | Depois | **Validação sob demanda**: rodar suíte/harness remoto a partir do Hub com relatório destilado | `harness/run-tests`, `harness/execute` | Resultado com `[HARNESS_PASS]` e link para logs isolados |
 | DH-12 | Futuro | **Plano e DAG da autonomia contínua**: visualizar plano, gates de prontidão, rotas qualificadas e política efetiva | `core/planning`, `core/workflow` | DAG navegável com o estado de cada nó |
 | DH-13 | Agora | **Fundação do frontend**: CSS compilado localmente no lugar do Tailwind CDN, `index.html` modular, versão de assets única servida pelo backend | frontend | Nenhum aviso de CDN no console; um deploy invalida todos os assets |
@@ -141,6 +141,14 @@ Prioridade: **Agora** = próximo ciclo; **Depois** = após os itens Agora;
   - Métodos legados `_load_task_records`, `_load_task_runs`, `_dashboard_cost`, `_dashboard_evidence` e `_dashboard_exceptions` foram aposentados e removidos.
   - `sources` do dashboard de tarefas agora reporta apenas fontes ativas (`control` e `usage`), eliminando avisos de `state:missing` e `runs:missing`.
   - Suíte de testes migrada em `tests/test_task_dashboard.py` e novo teste determinístico em `tests/test_hub_service_legacy_cleanup.py`.
+
+## Entregue em USR-51 (DH-10)
+
+- **Saúde e Histórico do Roadmap no DarkHub:**
+  - Drawer de Roadmap (`roadmap-drawer`) expandido com novos modos de consulta: aba **Saúde** (`roadmap-mode-health`) e aba **Histórico & Comparação** (`roadmap-mode-history`).
+  - **Saúde (`GET /api/projects/{id}/roadmap/health`):** Apresenta diagnóstico detalhado com status de obsolescência (`stale`), total de itens compilados, confirmados, bloqueados por dependência causal, contagem de conflitos e avisos, além da listagem exata de proveniência com status de cada fonte consultada e fontes indisponíveis.
+  - **Histórico & Comparação (`GET /api/projects/{id}/roadmap/history` e `GET /api/projects/{id}/roadmap/history/compare`):** Exibe a linha do tempo cronológica de snapshots retidos e ferramenta interativa somente-leitura de comparação direta entre dois snapshots, calculando o diff determinístico de itens adicionados, removidos e campos modificados.
+  - Classificação das 3 rotas atualizada para `"surface": "roadmap-drawer"` em `hub/coverage.json` elevando a cobertura do DarkHub para 59% (78 capacidades expostas).
 
 ## Configuração manual no Dokploy (para ativar R2 na nuvem)
 

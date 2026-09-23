@@ -216,13 +216,13 @@
       "surface": "roadmap-drawer"
     },
     "GET /api/projects/{project_id}/roadmap/health": {
-      "pending": "DH-10"
+      "surface": "roadmap-drawer"
     },
     "GET /api/projects/{project_id}/roadmap/history": {
-      "pending": "DH-10"
+      "surface": "roadmap-drawer"
     },
     "GET /api/projects/{project_id}/roadmap/history/compare": {
-      "pending": "DH-10"
+      "surface": "roadmap-drawer"
     },
     "GET /api/projects/{project_id}/roadmap/items/{item_id}": {
       "surface": "roadmap-drawer"
