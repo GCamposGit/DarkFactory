@@ -27,10 +27,13 @@ def test_capabilities_default_when_unset(monkeypatch):
     assert worker.capabilities == list(DEFAULT_CAPABILITIES)
 
 
-def test_capabilities_from_env_var(monkeypatch):
-    monkeypatch.setenv("DARKFAC_WORKER_CAPS", "git,gh,node,python,harness:claude")
+def test_capabilities_from_env_var_add_to_role_defaults(monkeypatch):
+    monkeypatch.setenv("DARKFAC_WORKER_CAPS", "git,gh,node,python,harness:claude,developer")
     worker = CloudWorker(worker_id="w1")
-    assert worker.capabilities == ["git", "gh", "node", "python", "harness:claude"]
+    # Role caps stay (existing workflow jobs require them); host caps are added once.
+    assert worker.capabilities == list(DEFAULT_CAPABILITIES) + [
+        "git", "gh", "node", "python", "harness:claude"
+    ]
 
 
 def test_explicit_capabilities_param_wins_over_env(monkeypatch):
@@ -109,7 +112,7 @@ def test_poll_and_execute_once_forwards_ready_age_sec(monkeypatch):
 def test_capability_prober_drops_failed_harness(monkeypatch):
     monkeypatch.setenv("DARKFAC_WORKER_CAPS", "git,gh,harness:claude,harness:codex")
     worker = CloudWorker(worker_id="w1", capability_prober=lambda h: h != "codex")
-    assert worker.capabilities == ["git", "gh", "harness:claude"]
+    assert worker.capabilities == list(DEFAULT_CAPABILITIES) + ["git", "gh", "harness:claude"]
 
 
 def test_capability_prober_none_by_default_keeps_harness_caps(monkeypatch):
@@ -117,7 +120,7 @@ def test_capability_prober_none_by_default_keeps_harness_caps(monkeypatch):
     # (and, critically, no subprocess/probe is ever invoked).
     monkeypatch.setenv("DARKFAC_WORKER_CAPS", "git,harness:claude")
     worker = CloudWorker(worker_id="w1")
-    assert worker.capabilities == ["git", "harness:claude"]
+    assert worker.capabilities == list(DEFAULT_CAPABILITIES) + ["git", "harness:claude"]
 
 
 def test_capability_prober_exception_drops_capability(monkeypatch):
@@ -126,7 +129,7 @@ def test_capability_prober_exception_drops_capability(monkeypatch):
 
     monkeypatch.setenv("DARKFAC_WORKER_CAPS", "git,harness:claude")
     worker = CloudWorker(worker_id="w1", capability_prober=_boom)
-    assert worker.capabilities == ["git"]
+    assert worker.capabilities == list(DEFAULT_CAPABILITIES) + ["git"]
 
 
 # --------------------------------------------------------------------------

@@ -121,12 +121,14 @@ class CloudWorker:
         if capabilities is not None:
             self.capabilities = list(capabilities)
         else:
-            env_caps = os.environ.get("DARKFAC_WORKER_CAPS")
-            self.capabilities = (
-                [c.strip() for c in env_caps.split(",") if c.strip()]
-                if env_caps
-                else list(DEFAULT_CAPABILITIES)
-            )
+            # DARKFAC_WORKER_CAPS adds host capabilities (git, harness:*,
+            # target:*) on top of the role capabilities every existing
+            # workflow job requires; replacing them would stop this worker
+            # from claiming any of today's jobs.
+            env_caps = [c.strip() for c in os.environ.get("DARKFAC_WORKER_CAPS", "").split(",") if c.strip()]
+            self.capabilities = list(DEFAULT_CAPABILITIES) + [
+                c for c in env_caps if c not in DEFAULT_CAPABILITIES
+            ]
 
         # HF-27-09: an auth probe failing at boot drops the `harness:x`
         # capability instead of publishing it and later failing the claim.

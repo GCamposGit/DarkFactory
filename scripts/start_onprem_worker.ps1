@@ -158,11 +158,11 @@ if ($Headless) {
     $pidFile = Join-Path $pidDir "onprem_worker.pid"
 
     Write-Output "[WORKER_HEADLESS] Launching on-prem cloud_worker in the background (WindowStyle: Hidden)..."
+    # The DARKFAC_* variables (including the Postgres URL and its password) are
+    # already set in this process and inherited by the child; never put them on
+    # the command line, which any local user can read from the process list.
     $argList = "-NoProfile -NonInteractive -ExecutionPolicy Bypass -Command `"" +
         "`$env:PYTHONIOENCODING='utf-8'; `$env:PYTHONUTF8='1'; `$env:PYTHONPATH='$candidateRoot'; " +
-        "`$env:DARKFAC_HF02_DATABASE_URL='$resolvedDatabaseUrl'; `$env:DARKFAC_WORKER_ID='$resolvedWorkerId'; " +
-        "`$env:DARKFAC_WORKER_CAPS='$resolvedCaps'; `$env:DARKFAC_WORKER_PRIORITY='$Priority'; " +
-        "`$env:DARKFAC_MAX_CONCURRENT_SLOTS='$MaxSlots'; " +
         "python -u -m core.orchestrator.cloud_worker *>> `'$daemonLog`'`""
     $proc = Start-Process -FilePath "powershell.exe" -WorkingDirectory $candidateRoot -ArgumentList $argList -WindowStyle Hidden -PassThru
 
