@@ -155,12 +155,12 @@ def test_process_sandbox_kills_descendant_after_leader_exits(temp_workspace: Pat
     deadline = time.monotonic() + 2.0
     while time.monotonic() < deadline:
         stat_path = Path(f"/proc/{grandchild_pid}/stat")
-        if not stat_path.exists():
-            break
         try:
+            if not stat_path.exists():
+                break
             fields = stat_path.read_text(encoding="utf-8").split()
         except (FileNotFoundError, ProcessLookupError):
-            # The process may be reaped between exists() and read_text().
+            # The process may be reaped during exists() or read_text() on procfs.
             break
         if len(fields) >= 3 and fields[2] == "Z":
             break

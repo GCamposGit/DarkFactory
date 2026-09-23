@@ -612,7 +612,7 @@
     "project_id": "darkfac",
     "title": "DH-03 Consulta a decisoes do owner e bloqueios WAITING_HUMAN",
     "origin": "user",
-    "status": "planned",
+    "status": "completed",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -644,7 +644,7 @@
     "project_id": "darkfac",
     "title": "DH-02 Adequacao de intake canonico e alinhamento de governanca machine-only",
     "origin": "user",
-    "status": "planned",
+    "status": "completed",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -675,7 +675,7 @@
     "project_id": "darkfac",
     "title": "DH-13 Fundacao do frontend (CSS local sem CDN e modularizacao)",
     "origin": "user",
-    "status": "planned",
+    "status": "completed",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -705,5 +705,149 @@
     "dependencies": [],
     "created_at": "2026-09-23T18:45:00.000000Z",
     "updated_at": "2026-09-23T18:45:00.000000Z"
+  },
+  {
+    "id": "USR-50",
+    "project_id": "darkfac",
+    "title": "DH-16 Aposentadoria de fontes legadas do Painel de Tarefas",
+    "origin": "user",
+    "status": "completed",
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand",
+      "quality",
+      "governance"
+    ],
+    "problem_statement": "Aposentar fontes legadas do Painel de Tarefas (state.json e orchestrator.sqlite3) consolidando a leitura exclusivamente no control store canônico.",
+    "core_journey": [
+      "DarkHub projeta a Fila Operacional exclusivamente a partir do control store canônico (PostgreSQL na nuvem e SQLite local)"
+    ],
+    "non_goals": [
+      "Não alterar a assinatura pública externa da API /api/tasks/dashboard",
+      "Não reintroduzir dependências legadas"
+    ],
+    "reachability_contract": "python -m pytest tests/test_hub_service_legacy_cleanup.py tests/test_task_dashboard.py -v",
+    "acceptance_criteria": [
+      "Painel de Tarefas opera sem consultar state.json ou orchestrator.sqlite3",
+      "Testes legados migrados para SQLiteControlStore canônico",
+      "sources do TaskDashboardReport inclui apenas control e usage"
+    ],
+    "suggested_files": [
+      "hub/backend/service.py",
+      "tests/test_task_dashboard.py",
+      "tests/test_hub_service_legacy_cleanup.py"
+    ],
+    "estimated_complexity": "small",
+    "dependencies": [
+      "USR-42"
+    ],
+    "created_at": "2026-09-23T20:45:00.000000Z",
+    "updated_at": "2026-09-23T20:45:00.000000Z"
+  },
+  {
+    "id": "USR-51",
+    "project_id": "darkfac",
+    "title": "DH-10 Saude e historico do roadmap no DarkHub",
+    "origin": "user",
+    "status": "planned",
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "next",
+    "tags": [
+      "user-demand",
+      "roadmap",
+      "frontend"
+    ],
+    "problem_statement": "Expor no DarkHub a visualização temporal da saúde do roadmap e histórico comparativo de versões dos projetos.",
+    "core_journey": [
+      "Owner consulta no drawer de roadmap o histórico cronológico de transições e compara diffs entre versões"
+    ],
+    "non_goals": [
+      "Não introduzir ações de edição manual de roadmap via UI nesta etapa"
+    ],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Rotas de saúde e histórico do roadmap consumidas pela UI",
+      "Visualizador de diff e histórico operacional no DarkHub"
+    ],
+    "suggested_files": [
+      "hub/frontend/roadmap.js"
+    ],
+    "estimated_complexity": "medium",
+    "dependencies": [
+      "USR-50"
+    ],
+    "created_at": "2026-09-23T20:45:00.000000Z",
+    "updated_at": "2026-09-23T20:45:00.000000Z"
+  },
+  {
+    "id": "USR-52",
+    "project_id": "darkfac",
+    "title": "DH-05 Benchmarks e roteamento no DarkHub",
+    "origin": "user",
+    "status": "planned",
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "next",
+    "tags": [
+      "user-demand",
+      "benchmarks",
+      "frontend"
+    ],
+    "problem_statement": "Expor no DarkHub a consulta à Fronteira de Eficiência de Pareto, ranking empírico e Top 3 modelos por domínio.",
+    "core_journey": [
+      "Owner visualiza a matriz de benchmarks e justificativas de roteamento de modelos no DarkHub"
+    ],
+    "non_goals": [
+      "Não executar corridas empíricas síncronas a partir da interface web"
+    ],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Exibição dos dados de benchmark no DarkHub em modo somente-leitura",
+      "Rotas operacionais classificadas adequadamente"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [
+      "USR-51"
+    ],
+    "created_at": "2026-09-23T20:45:00.000000Z",
+    "updated_at": "2026-09-23T20:45:00.000000Z"
+  },
+  {
+    "id": "USR-53",
+    "project_id": "darkfac",
+    "title": "DH-06 Aprendizado e conhecimento no DarkHub",
+    "origin": "user",
+    "status": "planned",
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "next",
+    "tags": [
+      "user-demand",
+      "learning",
+      "frontend"
+    ],
+    "problem_statement": "Expor no DarkHub a biblioteca de Learning Packs gerados e consulta aos tópicos minerados no Knowledge Ledger.",
+    "core_journey": [
+      "Owner consulta o último Learning Pack em 1 clique, visualiza HTML e consulta a base de conhecimento perpétua"
+    ],
+    "non_goals": [
+      "Não acoplar geração pesada síncrona na requisição HTTP"
+    ],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Central de Learning Packs operacional no DarkHub em modo somente-leitura",
+      "Visualizador HTML e exportação acessíveis"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [
+      "USR-52"
+    ],
+    "created_at": "2026-09-23T20:45:00.000000Z",
+    "updated_at": "2026-09-23T20:45:00.000000Z"
   }
 ]

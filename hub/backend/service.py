@@ -123,7 +123,6 @@ from core.infra.cards import (
     InfraCardsReport,
     build_infra_cards_report,
 )
-from core.orchestrator.store import OrchestratorStore, RunRecord
 from core.workflow.job_board import JobBoardEntry, read_job_board
 from hub.backend.webhooks import (
     CloudGatewayStatus,
@@ -386,48 +385,11 @@ class HubService:
         return self.test_subagent_engine.execute(instruction)
 
     def get_task_dashboard(self) -> TaskDashboardReport:
-        """Build a read-only projection of lifecycle, run, usage and evidence data."""
-        task_records, state_source, warnings = self._load_task_records()
-        runs, run_source, run_warnings = self._load_task_runs(task_records)
-        warnings.extend(run_warnings)
-
-        task_ids = set(task_records) | set(runs)
-        rows: list[dict[str, Any]] = []
-        for task_id in task_ids:
-            record = task_records.get(task_id, {})
-            metadata = record.get("metadata") if isinstance(record.get("metadata"), dict) else {}
-            run = runs.get(task_id)
-            checkpoint = run.checkpoint if run is not None else {}
-            status = str(record.get("status") or (run.status.value if run is not None else "UNSET"))
-            stage = str(metadata.get("stage") or checkpoint.get("stage") or status)
-            title = str(metadata.get("title") or metadata.get("name") or metadata.get("summary") or task_id)
-            priority = self._dashboard_priority(metadata.get("priority", 0))
-            rows.append(
-                {
-                    "task_id": task_id,
-                    "title": title,
-                    "status": status,
-                    "stage": stage,
-                    "priority": priority,
-                    "run_id": run.run_id if run else None,
-                    "run_status": run.status.value if run else None,
-                    "step_index": run.step_index if run else None,
-                    "cost_usd": self._dashboard_cost(metadata, checkpoint),
-                    "updated_at": record.get("updated_at") or (run.updated_at.isoformat() if run else None),
-                    "evidence": self._dashboard_evidence(record, metadata, checkpoint),
-                    "exceptions": self._dashboard_exceptions(metadata, checkpoint, run),
-                }
-            )
-
+        """Build a read-only projection of lifecycle, run, usage and evidence data from the canonical control store (DH-16)."""
         control = read_job_board(self.control_db_path, database_url=self.control_database_url)
-        warnings.extend(control.warnings)
-        legacy_ids = {row["task_id"] for row in rows}
+        warnings = list(control.warnings)
         titles = self._dashboard_demand_titles() if control.entries else {}
-        for entry in control.entries:
-            row = self._control_dashboard_row(entry, titles)
-            if row["task_id"] in legacy_ids:
-                row["task_id"] = f"{entry.ticket_id}@{entry.run_id}"
-            rows.append(row)
+        rows = [self._control_dashboard_row(entry, titles) for entry in control.entries]
 
         rows.sort(key=self._dashboard_sort_key)
         queue: list[TaskDashboardItem] = []
@@ -453,13 +415,18 @@ class HubService:
             )
 
         usage_source = "ok"
-        total_cost = 0.0
-        try:
-            total_cost = float(self.model_usage_ledger.report(recent_limit=0).total_cost_usd)
-        except Exception as exc:  # pragma: no cover - defensive boundary for a corrupt ledger
-            usage_source = "error"
-            warnings.append(f"usage ledger unavailable: {exc}")
+        total_cost = sum(item.cost_usd for item in queue)
+        if total_cost == 0.0:
+            try:
+                usage_summary = self.model_usage_ledger.report(recent_limit=0)
+                total_cost = float(usage_summary.total_cost_usd)
+            except Exception as exc:  # pragma: no cover - defensive boundary for a corrupt ledger
+                usage_source = "error"
+                warnings.append(f"usage ledger unavailable: {exc}")
+        else:
+            usage_source = "control"
 
+        control_source = control.source if control.backend == "none" else f"{control.backend}:{control.source}"
         return TaskDashboardReport(
             generated_at=datetime.now(timezone.utc).isoformat(),
             queue=queue,
@@ -468,9 +435,7 @@ class HubService:
             exception_count=sum(len(item.exceptions) for item in queue),
             total_cost_usd=max(0.0, total_cost),
             sources={
-                "control": control.source if control.backend == "none" else f"{control.backend}:{control.source}",
-                "state": state_source,
-                "runs": run_source,
+                "control": control_source,
                 "usage": usage_source,
             },
             warnings=warnings,
@@ -522,47 +487,6 @@ class HubService:
             "cause_code": entry.cause_code,
             "diagnostic": entry.diagnostic,
         }
-
-    def _load_task_records(self) -> tuple[dict[str, dict[str, Any]], str, list[str]]:
-        if not self.task_state_path.exists():
-            return {}, "missing", []
-        try:
-            raw = json.loads(self.task_state_path.read_text(encoding="utf-8"))
-            tasks = raw.get("tasks", {}) if isinstance(raw, dict) else {}
-            if not isinstance(tasks, dict):
-                raise ValueError("tasks must be an object")
-            return {
-                str(task_id): value
-                for task_id, value in tasks.items()
-                if isinstance(value, dict)
-            }, "ok", []
-        except (OSError, ValueError, TypeError, json.JSONDecodeError) as exc:
-            logger.warning("Task state ledger unavailable: %s", exc)
-            return {}, "error", [f"state ledger unavailable: {exc}"]
-
-    def _load_task_runs(
-        self,
-        task_records: dict[str, dict[str, Any]],
-    ) -> tuple[dict[str, RunRecord], str, list[str]]:
-        if not self.orchestrator_path.exists():
-            return {}, "missing", []
-        task_ids = set(task_records)
-        warnings: list[str] = []
-        try:
-            store = OrchestratorStore(self.orchestrator_path)
-            runs: dict[str, RunRecord] = {}
-            for task_id in task_ids:
-                run = store.get_latest_run(task_id)
-                if run is not None:
-                    runs[task_id] = run
-            for run in store.recoverable_runs():
-                runs.setdefault(run.task_id, run)
-            return runs, "ok", warnings
-        except Exception as exc:  # pragma: no cover - defensive boundary for a corrupt store
-            logger.warning("Orchestrator run store unavailable: %s", exc)
-            warnings.append(f"run store unavailable: {exc}")
-            return {}, "error", warnings
-
     @staticmethod
     def _dashboard_priority(value: Any) -> int:
         try:
@@ -593,66 +517,6 @@ class HubService:
             "UNSET": 10,
         }
         return status_rank.get(row["status"], 99), -row["priority"], row["task_id"]
-
-    @staticmethod
-    def _dashboard_cost(metadata: dict[str, Any], checkpoint: dict[str, Any]) -> float:
-        for source in (checkpoint, metadata):
-            value = source.get("cost_usd") if isinstance(source, dict) else None
-            if isinstance(value, (int, float)) and value >= 0:
-                return round(float(value), 8)
-        return 0.0
-
-    @staticmethod
-    def _dashboard_evidence(
-        record: dict[str, Any],
-        metadata: dict[str, Any],
-        checkpoint: dict[str, Any],
-    ) -> list[TaskDashboardEvidence]:
-        candidates = [record.get("merge_evidence"), metadata.get("evidence"), metadata.get("evidence_refs"), checkpoint.get("evidence")]
-        evidence: list[TaskDashboardEvidence] = []
-        seen: set[tuple[str, str]] = set()
-
-        def add(label: Any, value: Any, source: Optional[str] = None) -> None:
-            if value is None or isinstance(value, (dict, list)):
-                value = json.dumps(value, ensure_ascii=False, sort_keys=True)
-            key = (str(label), str(value))
-            if key not in seen:
-                seen.add(key)
-                evidence.append(TaskDashboardEvidence(label=str(label), value=str(value), source=source))
-
-        for candidate in candidates:
-            if isinstance(candidate, dict):
-                for label, value in candidate.items():
-                    add(label, value, "ledger")
-            elif isinstance(candidate, list):
-                for item in candidate:
-                    if isinstance(item, dict):
-                        add(item.get("label", "evidence"), item.get("value", item), item.get("source"))
-                    elif item is not None:
-                        add("evidence", item, "ledger")
-        return evidence[:12]
-
-    @staticmethod
-    def _dashboard_exceptions(
-        metadata: dict[str, Any],
-        checkpoint: dict[str, Any],
-        run: Optional[RunRecord],
-    ) -> list[str]:
-        values: list[Any] = []
-        for source in (metadata, checkpoint):
-            for key in ("exception", "exceptions", "error", "errors"):
-                if isinstance(source, dict) and source.get(key) is not None:
-                    values.append(source[key])
-        if run is not None and run.last_error:
-            values.append(run.last_error)
-        flattened: list[str] = []
-        for value in values:
-            items = value if isinstance(value, list) else [value]
-            for item in items:
-                text = str(item).strip()
-                if text and text not in flattened:
-                    flattened.append(text)
-        return flattened[:12]
 
     def guide_demand(
         self,

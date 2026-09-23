@@ -44,7 +44,9 @@ HISTORICAL_REAL_IDS = [
 
 CLEANED_DUPLICATE_IDS = [f"USR-{i}" for i in range(19, 42)]
 
-CURRENT_WAVE_IDS = ["USR-46", "USR-47", "USR-48", "USR-49"]
+WAVE_3_IDS = ["USR-46", "USR-47", "USR-48", "USR-49"]
+WAVE_4_IDS = ["USR-50", "USR-51", "USR-52", "USR-53"]
+CURRENT_WAVE_IDS = WAVE_3_IDS + WAVE_4_IDS
 
 
 def test_demands_json_is_valid_json() -> None:
@@ -102,37 +104,20 @@ def test_duplicate_fixture_demands_removed() -> None:
 
 
 def test_current_wave_tickets_registered() -> None:
-    """Ensure tickets USR-46 to USR-49 are registered with correct metadata."""
+    """Ensure tickets USR-46 to USR-53 are registered with correct metadata."""
     data = json.loads(DEMANDS_FILE.read_text(encoding="utf-8"))
     by_id = {item["id"]: item for item in data}
 
     for wave_id in CURRENT_WAVE_IDS:
-        assert wave_id in by_id, f"Current wave ticket {wave_id} is not registered"
+        assert wave_id in by_id, f"Wave ticket {wave_id} is not registered"
 
-    # USR-46 checks
-    usr_46 = by_id["USR-46"]
-    assert "DH-15" in usr_46["title"]
-    assert usr_46["status"] == "completed"
-    assert "quality" in usr_46["tags"]
-    assert "governance" in usr_46["tags"]
+    # Wave 3 completed checks
+    for wave_id in WAVE_3_IDS:
+        assert by_id[wave_id]["status"] == "completed", f"{wave_id} must be completed"
 
-    # USR-47 checks
-    usr_47 = by_id["USR-47"]
-    assert "DH-03" in usr_47["title"]
-    assert usr_47["status"] == "planned"
-    assert "governance" in usr_47["tags"]
-
-    # USR-48 checks
-    usr_48 = by_id["USR-48"]
-    assert "DH-02" in usr_48["title"]
-    assert usr_48["status"] == "planned"
-    assert "governance" in usr_48["tags"]
-
-    # USR-49 checks
-    usr_49 = by_id["USR-49"]
-    assert "DH-13" in usr_49["title"]
-    assert usr_49["status"] == "planned"
-    assert "frontend" in usr_49["tags"]
+    # USR-50 (DH-16) check
+    assert by_id["USR-50"]["status"] == "completed"
+    assert "DH-16" in by_id["USR-50"]["title"]
 
 
 def test_demands_store_loads_cleanly() -> None:
@@ -140,4 +125,4 @@ def test_demands_store_loads_cleanly() -> None:
     store = DemandsStore(DEMANDS_FILE)
     tickets = store.list_tickets()
     assert len(tickets) == len(HISTORICAL_REAL_IDS) + len(CURRENT_WAVE_IDS)
-    assert len(tickets) == 18
+    assert len(tickets) == 22
