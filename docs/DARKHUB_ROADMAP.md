@@ -63,7 +63,7 @@ Prioridade: **Agora** = próximo ciclo; **Depois** = após os itens Agora;
 | DH-02 | Agora | **Intake canônico headless (somente leitura no Hub)**: canal de intake transacional headless acionado por CLI e agentes; UI do Hub opera estritamente em modo de consulta por diretriz do owner. Entregue em `USR-48` (`POST /api/demands/intake` classificado como `machine`) | `POST /api/demands/intake` | Entregue em `USR-48`; endpoint headless documentado como `machine` e Hub em modo somente-leitura |
 | DH-03 | Agora | **Operação de status headless (somente leitura no Hub)**: operação programática de status via CLI/harness; UI do Hub opera estritamente em modo de consulta por diretriz do owner. Entregue em `USR-48` (`PATCH /api/demands/tickets/{ticket_id}/status` classificado como `machine`) | `PATCH /api/demands/tickets/{id}/status` | Entregue em `USR-48`; endpoint programático documentado como `machine` e Hub em modo somente-leitura |
 | DH-04 | Depois | **Evolução e catálogo com ações**: propor, avaliar, promover e reverter; sincronizar catálogo | `evolution/*`, `catalog/sync`; `core/evolution`, `core/catalog` | Cada ação mostra diff, avaliação e rollback disponível |
-| DH-05 | Depois | **Benchmarks e roteamento**: fronteira por domínio, proximidade, top-3 especulativo, corrida empírica, simulador de roteamento | `benchmarks/*`; `core/router`, `core/benchmarks` | Owner vê por que um modelo foi escolhido para uma tarefa |
+| DH-05 | Depois | **Benchmarks e roteamento**: fronteira por domínio, proximidade, top-3 especulativo, corrida empírica, simulador de roteamento. Entregue em `USR-52` | `benchmarks/*`; `core/router` | Owner vê por que um modelo foi escolhido para uma tarefa |
 | DH-06 | Depois | **Aprendizado e conhecimento**: Learning Packs (HTML, Anki, gerar), memória, pesquisa e Knowledge Ledger | `learning-packs/*`; `core/learning`, `core/knowledge`, `core/research` | Última sessão tem pack acessível em 1 clique; ledger de pesquisa pesquisável |
 | DH-07 | Depois | **Estúdio de conteúdo e visual**: gerar e auditar conteúdo, presets, galeria e ilustração | `content/*`, `visual/*`; `core/content`, `core/visual`, `core/marketing` | Conteúdo gerado passa pelo lint anti-slop antes de exportar |
 | DH-08 | Depois | **Portfólio multiprojeto**: projetos registrados, adoção (Skill 07), pilotos, arquétipos, linhas | `core/projects`, `core/portfolio`, `core/adoption`, `core/pilots`, `core/archetypes`, `core/line`, `core/game` | Cada projeto mostra estágio, saúde, roadmap e último deploy |
@@ -149,6 +149,18 @@ Prioridade: **Agora** = próximo ciclo; **Depois** = após os itens Agora;
   - **Saúde (`GET /api/projects/{id}/roadmap/health`):** Apresenta diagnóstico detalhado com status de obsolescência (`stale`), total de itens compilados, confirmados, bloqueados por dependência causal, contagem de conflitos e avisos, além da listagem exata de proveniência com status de cada fonte consultada e fontes indisponíveis.
   - **Histórico & Comparação (`GET /api/projects/{id}/roadmap/history` e `GET /api/projects/{id}/roadmap/history/compare`):** Exibe a linha do tempo cronológica de snapshots retidos e ferramenta interativa somente-leitura de comparação direta entre dois snapshots, calculando o diff determinístico de itens adicionados, removidos e campos modificados.
   - Classificação das 3 rotas atualizada para `"surface": "roadmap-drawer"` em `hub/coverage.json` elevando a cobertura do DarkHub para 59% (78 capacidades expostas).
+
+## Entregue em USR-52 (DH-05)
+
+- **Benchmarks e Roteamento no DarkHub (Modo Consulta):**
+  - Modal de Benchmarks (`benchmarks-modal`) expandido com navegação em 5 abas especializadas:
+    - **Modelos & Fronteira Geral (`GET /api/benchmarks/latest`, `GET /api/benchmarks/frontier`):** Catálogo de modelos, filtros por fabricante, ordenação por Coding Agent Index e métricas da fronteira de Pareto com custo e velocidade.
+    - **Fronteiras Especializadas por Domínio (`GET /api/benchmarks/domains`, `GET /api/benchmarks/domains/{domain}/frontier`):** Seletor de domínios canônicos (`coding`, `deep_research`, `legal_contract`, etc.) com listagem dos modelos na fronteira de Pareto e métricas do Artificial Analysis.
+    - **Top-3 Especulativo & Proximidade (`GET /api/benchmarks/speculative/top3`, `GET /api/benchmarks/proximity`):** Visualização dos modelos recomendados em cascata por tier (`high`, `medium`, `low`) e índice de proximidade (FPI / gap epsilon) para modelos desafiantes (*near-Pareto*).
+    - **Desempenho Empírico na Fábrica (`GET /api/benchmarks/empirical`):** Tabela do ranking empírico colhido na DarkFactory com Pass@1 real, pontuação Elo Bradley-Terry, latência e contagem de ensaios.
+    - **Simulador de Roteamento Inteligente (`POST /api/benchmarks/route-task`):** Ferramenta consultiva de simulação que analisa uma descrição em linguagem natural e complexidade, exibindo o domínio detectado, modelo ótimo, justificativa arquitetural e top 3 cascata especulativa sem gerar efeitos colaterais mutáveis na fábrica.
+  - Rota de execução de corridas (`POST /api/benchmarks/speculative/race`) classificada como waiver `machine` (operação headless acionada por testes, CLI e benchmarks).
+  - Cobertura do DarkHub elevada para 66% (86 capacidades expostas). Módulo `core/router` coberto.
 
 ## Configuração manual no Dokploy (para ativar R2 na nuvem)
 

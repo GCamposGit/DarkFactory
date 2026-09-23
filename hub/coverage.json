@@ -3,34 +3,34 @@
   "description": "Gate de cobertura do DarkHub (USR-42). Veja docs/DARKHUB_ROADMAP.md e rode python scripts/hub_coverage.py.",
   "api_routes": {
     "GET /api/benchmarks/domains": {
-      "pending": "DH-05"
+      "surface": "benchmarks-modal"
     },
     "GET /api/benchmarks/domains/{domain}/frontier": {
-      "pending": "DH-05"
+      "surface": "benchmarks-modal"
     },
     "GET /api/benchmarks/empirical": {
-      "pending": "DH-05"
+      "surface": "benchmarks-modal"
     },
     "GET /api/benchmarks/frontier": {
-      "pending": "DH-05"
+      "surface": "benchmarks-modal"
     },
     "GET /api/benchmarks/latest": {
       "surface": "benchmarks-modal"
     },
     "GET /api/benchmarks/proximity": {
-      "pending": "DH-05"
+      "surface": "benchmarks-modal"
     },
     "POST /api/benchmarks/refresh": {
       "surface": "benchmarks-modal"
     },
     "POST /api/benchmarks/route-task": {
-      "pending": "DH-05"
+      "surface": "benchmarks-modal"
     },
     "POST /api/benchmarks/speculative/race": {
-      "pending": "DH-05"
+      "machine": "Execucao de corridas empiricas headless acionada por testes, CLI e benchmarks de modelo (DH-05)."
     },
     "GET /api/benchmarks/speculative/top3": {
-      "pending": "DH-05"
+      "surface": "benchmarks-modal"
     },
     "GET /api/catalog/components": {
       "surface": "cross-catalog-section"
@@ -416,7 +416,7 @@
       "surface": "roadmap-drawer"
     },
     "router": {
-      "pending": "DH-05"
+      "surface": "benchmarks-modal"
     },
     "telemetry": {
       "surface": "telemetry-drawer"
