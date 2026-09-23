@@ -12,7 +12,7 @@
       "cmd": "python -m pytest tests -v --ignore=tests/test_canaletto.py",
       "quick": true,
       "kind": "test",
-      "timeout_sec": 1200
+      "timeout_sec": 600
     }
   ]
 }
