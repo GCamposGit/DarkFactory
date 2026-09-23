@@ -242,6 +242,7 @@ class HubService:
         control_store: Optional[Any] = None,
         control_db_path: Optional[Path] = None,
         control_database_url: Optional[str] = None,
+        seed_dir: Optional[Path] = None,
     ) -> None:
         self._session_token = secrets.token_urlsafe(32)
         self._control_store = control_store
@@ -254,6 +255,14 @@ class HubService:
         self.services_file = self.data_dir / "services.json"
         self.default_services_file = self.data_dir / "default_services.json"
         self.prompts_file = self.data_dir / "default_prompts.json"
+        # Cloud seed dir (USR-44): an image-level copy of hub/data that a Dokploy
+        # volume mount cannot shadow. The explicit constructor argument wins over
+        # DARKHUB_SEED_DIR so tests and callers can be deterministic.
+        if seed_dir is not None:
+            self.seed_dir: Optional[Path] = Path(seed_dir)
+        else:
+            env_seed_dir = os.environ.get("DARKHUB_SEED_DIR", "").strip()
+            self.seed_dir = Path(env_seed_dir) if env_seed_dir else None
         self.ollama_base_url = ollama_base_url
         if usage_dir is not None:
             self.usage_dir = Path(usage_dir)
@@ -489,9 +498,12 @@ class HubService:
             reason = entry.cause_code or "sem cause_code registrado"
             exceptions.append(f"{entry.status}: {reason} (tentativa {entry.retry_count}/{entry.max_retries})")
         status = entry.status.upper()
-        title = titles.get(entry.demand_id) or titles.get(entry.ticket_id) or entry.demand_id
+        title = entry.title or titles.get(entry.demand_id) or titles.get(entry.ticket_id) or entry.demand_id
+        # Real cloud rows carry ticket_id = project_id (e.g. "darkfac"), which is not a
+        # meaningful task identifier; use the unique demand_id instead in that case (USR-44).
+        task_id = entry.demand_id if entry.ticket_id == entry.project_id else entry.ticket_id
         return {
-            "task_id": entry.ticket_id,
+            "task_id": task_id,
             "title": title[:240],
             "status": status,
             "stage": entry.stage,
@@ -745,9 +757,45 @@ class HubService:
     def get_roadmap_source(self, project_id: str, source_id: str) -> Optional[RoadmapSourceDocument]:
         return self.roadmap.get_source_document(project_id, source_id)
 
+    # Shipped seed files a Dokploy volume mount can shadow; never touched: services.json,
+    # catalog_meta.json, or anything else the owner may have edited in data_dir.
+    _CLOUD_SEED_FILES: tuple[str, ...] = ("default_services.json", "default_prompts.json")
+
+    def _apply_cloud_seed(self) -> None:
+        """Overlay shipped catalog/prompt seeds from an image-level seed dir (USR-44).
+
+        In Dokploy, ``darkhub-hub-data`` is a named volume mounted at ``/app/hub/data``,
+        so a redeploy that ships an updated ``default_services.json`` /
+        ``default_prompts.json`` never reaches the running container: the volume's old
+        copies keep shadowing the image's new ones, which means ``_apply_catalog_revisions``
+        below never sees new revisions and ``list_prompts`` keeps serving stale content.
+        ``DARKHUB_SEED_DIR`` (or an explicit ``seed_dir`` constructor argument, which wins)
+        points at an image-only copy of ``hub/data`` outside the volume; when set, this
+        copies the two shipped seed files over ``data_dir``'s copies before storage is
+        initialized, but only when the seed file exists and its content actually differs.
+        This is a cosmetic, fail-open path: any OSError is logged and swallowed so a
+        seeding hiccup never prevents the Hub from starting.
+        """
+        if self.seed_dir is None:
+            return
+        for filename in self._CLOUD_SEED_FILES:
+            seed_file = self.seed_dir / filename
+            try:
+                if not seed_file.exists():
+                    continue
+                seed_content = seed_file.read_text(encoding="utf-8")
+                target_file = self.data_dir / filename
+                if target_file.exists() and target_file.read_text(encoding="utf-8") == seed_content:
+                    continue
+                target_file.write_text(seed_content, encoding="utf-8")
+                logger.info("Refreshed %s from cloud seed dir %s", filename, self.seed_dir)
+            except OSError as exc:
+                logger.warning("Cloud seed refresh failed for %s: %s", filename, exc)
+
     def _ensure_storage(self) -> None:
         """Ensures the storage directory and initial files exist."""
         self.data_dir.mkdir(parents=True, exist_ok=True)
+        self._apply_cloud_seed()
         if not self.services_file.exists():
             if self.default_services_file.exists():
                 logger.info("Initializing services.json from default_services.json")
