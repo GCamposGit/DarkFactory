@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from pathlib import Path
 from typing import Dict, List, Optional
 
 from core.paths import project_root
-from .models import ProjectDescriptor, ProjectKind
+from .detect import detect_commands
+from .models import ProjectCommands, ProjectDescriptor, ProjectKind
 
 logger = logging.getLogger(__name__)
 
@@ -50,7 +52,9 @@ class ProjectRegistry:
     def save(self) -> None:
         """Persist registered projects to disk."""
         self.projects_file.parent.mkdir(parents=True, exist_ok=True)
-        items = [p.model_dump() for p in self.list_projects()]
+        # by_alias=True keeps ProjectCommands.validate_cmds serialized under
+        # its public JSON key "validate" (see models.ProjectCommands).
+        items = [p.model_dump(by_alias=True) for p in self.list_projects()]
         self.projects_file.write_text(json.dumps(items, indent=2, ensure_ascii=False), encoding="utf-8")
 
     def list_projects(self) -> List[ProjectDescriptor]:
@@ -74,6 +78,39 @@ class ProjectRegistry:
         if proj and proj.prefix:
             return proj.prefix.upper()
         return "USR"
+
+
+def resolve_commands(project: ProjectDescriptor, repo_dir: Path) -> ProjectCommands:
+    """Merge a project's explicit commands with offline autodetection.
+
+    Each of setup/validate/build/smoke is resolved independently: an explicit,
+    non-empty list on `project.commands` always wins; an empty one falls back
+    to whatever `core.projects.detect.detect_commands` finds in `repo_dir`.
+    """
+    explicit = project.commands
+    detected = detect_commands(repo_dir)
+    return ProjectCommands(
+        setup=list(explicit.setup) if explicit.setup else list(detected.setup),
+        validate=list(explicit.validate_cmds) if explicit.validate_cmds else list(detected.validate_cmds),
+        build=list(explicit.build) if explicit.build else list(detected.build),
+        smoke=list(explicit.smoke) if explicit.smoke else list(detected.smoke),
+    )
+
+
+_SSH_REMOTE = re.compile(r"^git@([^:]+):(.+)$")
+
+
+def normalize_repo_url(url: str) -> str:
+    """Normalize a git remote URL to the HTTPS form DarkFac clones over on the VPS.
+
+    Converts SSH shorthand (`git@host:owner/repo.git`) to `https://host/owner/repo.git`.
+    Any other form (already HTTPS, or unrecognized) is returned unchanged.
+    """
+    match = _SSH_REMOTE.match(url)
+    if not match:
+        return url
+    host, path = match.groups()
+    return f"https://{host}/{path}"
 
 
 _GLOBAL_REGISTRY: Optional[ProjectRegistry] = None

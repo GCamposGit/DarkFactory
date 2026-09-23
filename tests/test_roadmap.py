@@ -78,6 +78,7 @@ CONTINUOUS_AUTONOMY_IDS = {
 }
 
 FUTURE_PILOT_IDS = {'HF-23-02'}
+PRODUCTION_LINE_IDS = {'HF-27'} | {f'HF-27-{n:02d}' for n in range(1, 11)}
 
 
 def make_item(
@@ -165,13 +166,13 @@ def test_repository_sources_compile_with_stable_hash() -> None:
 
     expected_rm_ids = {f"RM-{number:02d}" for number in range(1, 10)}
     expected_df_ids = {f"DF-{number:02d}" for number in range(1, 24)}
-    assert {item.id for item in first.items} == expected_rm_ids | expected_df_ids | CONTINUOUS_AUTONOMY_IDS | FUTURE_PILOT_IDS
+    assert {item.id for item in first.items} == expected_rm_ids | expected_df_ids | CONTINUOUS_AUTONOMY_IDS | FUTURE_PILOT_IDS | PRODUCTION_LINE_IDS
     assert {item.id for item in first.items if item.id.startswith("DF-")} == expected_df_ids
     assert first.snapshot_hash == second.snapshot_hash
     assert first.snapshot_id == second.snapshot_id
     assert direct_first.snapshot_hash == direct_second.snapshot_hash
-    assert first.stats.total_items == 67
-    assert first.stats.confirmed_items == 67
+    assert first.stats.total_items == 78
+    assert first.stats.confirmed_items == 78
     assert {state.source_id for state in first.sources_consulted} == {
         "approved-roadmap",
         "development-plan",
@@ -400,4 +401,4 @@ def test_cli_and_library_expose_the_same_snapshot_hash() -> None:
         *(f"RM-{number:02d}" for number in range(1, 10)),
         *(f"DF-{number:02d}" for number in range(1, 24)),
     }
-    assert {item["id"] for item in payload["items"]} == expected_ids | CONTINUOUS_AUTONOMY_IDS | FUTURE_PILOT_IDS
+    assert {item["id"] for item in payload["items"]} == expected_ids | CONTINUOUS_AUTONOMY_IDS | FUTURE_PILOT_IDS | PRODUCTION_LINE_IDS
