@@ -1068,5 +1068,44 @@
     "dependencies": [],
     "created_at": "2026-09-23T06:26:35.118086Z",
     "updated_at": "2026-09-23T07:11:06.153595Z"
+  },
+  {
+    "id": "USR-43",
+    "project_id": "darkfac",
+    "title": "DH-01 Saude da Fabrica no DarkHub (somente leitura)",
+    "origin": "user",
+    "status": "planned",
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand",
+      "feature"
+    ],
+    "problem_statement": "Owner nao ve no DarkHub notificacoes, Telegram, n8n, workers do harness, eventos de webhook nem o ambiente de aceitacao HF-15, embora a API ja exponha tudo.",
+    "core_journey": [
+      "Owner abre a home do DarkHub, ve alertas nao lidos no topo e, na aba Infra, o estado de cada integracao, worker e do HF-15 com idade da observacao, atualizado a cada 60s"
+    ],
+    "non_goals": [
+      "Nenhuma acao mutavel (reconhecer alerta, checar cotas, sync/trigger n8n, drill HF-15): ficam no DH-17",
+      "Nao criar nova aba: home + aba Infra existente"
+    ],
+    "reachability_contract": "python -m pytest tests/test_dh_01_saude_da_fabrica_no_dark.py -v",
+    "acceptance_criteria": [
+      "Faixa de alertas na home lista notificacoes nao lidas por severidade, oculta quando vazia",
+      "Aba Infra mostra Telegram, n8n e workflows, workers do harness, eventos de webhook e HF-15 status/metricas, somente leitura",
+      "Polling 60s so com aba visivel; falha de uma fonte nao derruba as outras",
+      "Conteudo externo sempre escapado (sem XSS)",
+      "hub/coverage.json: rotas GET do DH-01 viram surface; POSTs de acao apontam para DH-17 no roadmap",
+      "Teste headless de reachability: `python -m pytest tests/test_dh_01_saude_da_fabrica_no_dark.py -v`"
+    ],
+    "suggested_files": [
+      "core/dh_01_saude_da_fabrica_no_dark/service.py",
+      "tests/test_dh_01_saude_da_fabrica_no_dark.py"
+    ],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-09-23T07:55:36.782130Z",
+    "updated_at": "2026-09-23T07:55:36.782130Z"
   }
 ]
