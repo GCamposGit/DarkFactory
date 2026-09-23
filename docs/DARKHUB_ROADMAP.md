@@ -74,7 +74,7 @@ Prioridade: **Agora** = próximo ciclo; **Depois** = após os itens Agora;
 | DH-13 | Agora | **Fundação do frontend**: CSS compilado localmente no lugar do Tailwind CDN, `index.html` modular, versão de assets única servida pelo backend | frontend | Nenhum aviso de CDN no console; um deploy invalida todos os assets |
 | DH-14 | Agora | **Cobertura visível no Hub**: endpoint e badge com o placar do gate e a lista de pendências | `hub/backend/coverage.py`, `hub/backend/api.py`, `hub/frontend/coverage.js` | Entregue em `USR-45`; badge mostra a % coberta e abre a lista de pendências por `DH-xx` em drawer slide-over |
 | DH-15 | Agora | **Higiene do ledger de demandas**: remover USR-19…USR-41 e isolar o teste que grava no ledger real | `.factory/demands/demands.json`, testes da CLI | Suíte roda sem alterar arquivos versionados |
-| DH-16 | Depois | **Aposentar fontes legadas do Painel de Tarefas** (`state.json`, `orchestrator.sqlite3`) depois de validar o painel na nuvem | `hub/backend/service.py` | Painel usa só o control store; testes legados migrados |
+| DH-16 | Depois | **Aposentar fontes legadas do Painel de Tarefas** (`state.json`, `orchestrator.sqlite3`): painel consolidado exclusivamente no control store canônico e testes legados migrados. Entregue em `USR-50` | `hub/backend/service.py` | Painel usa exclusivamente o control store canônico |
 | DH-17 | Depois | **Ações operacionais de saúde**: reconhecer alerta, checar cotas (pode enviar Telegram), sync/trigger n8n (produção), drill HF-15 — cada uma com diálogo de confirmação | `POST notifications/{notification_id}/acknowledge`, `POST notifications/check-quotas`, `POST integrations/n8n/sync`, `POST integrations/n8n/trigger`, `POST hf15/rollback/drill` | Toda ação mostra o efeito antes, exige confirmação explícita e registra auditoria |
 
 ## Entregue em USR-43
@@ -133,6 +133,14 @@ Prioridade: **Agora** = próximo ciclo; **Depois** = após os itens Agora;
   - Sob diretriz estrita do Owner, o DarkHub consolida-se como uma plataforma dedicada exclusivamente à consulta de indicadores, métricas operacionais e status do sistema; inputs de mutação e ações acionadas diretamente pela interface visual não estão previstos nesta etapa do desenvolvimento.
   - **DH-02 (`POST /api/demands/intake`):** Convertido para rota `machine` em `hub/coverage.json` com justificativa formal registrada (`"Canal de intake transacional headless acionado por CLI e agentes; a UI do Hub opera estritamente em modo de consulta (DH-02)."`). O intake de demandas permanece uma capacidade headless e transacional executada via CLI, automações e agentes.
   - **DH-03 (`PATCH /api/demands/tickets/{ticket_id}/status`):** Convertido para rota `machine` em `hub/coverage.json` com justificativa formal registrada (`"Operacao programatica de status via CLI/harness; a UI do Hub opera estritamente em modo de consulta (DH-03)."`). A atualização e ciclo de vida de status de tickets ocorrem estritamente de forma programática via harness, testes e runners da fábrica.
+
+## Entregue em USR-50 (DH-16)
+
+- **Aposentadoria de Fontes Legadas do Painel de Tarefas:**
+  - `hub/backend/service.py` consolidou `get_task_dashboard()` exclusivamente no control store canônico (`core.workflow.job_board.read_job_board`), eliminando leituras e fallbacks para `.factory/state.json` e `orchestrator.sqlite3`.
+  - Métodos legados `_load_task_records`, `_load_task_runs`, `_dashboard_cost`, `_dashboard_evidence` e `_dashboard_exceptions` foram aposentados e removidos.
+  - `sources` do dashboard de tarefas agora reporta apenas fontes ativas (`control` e `usage`), eliminando avisos de `state:missing` e `runs:missing`.
+  - Suíte de testes migrada em `tests/test_task_dashboard.py` e novo teste determinístico em `tests/test_hub_service_legacy_cleanup.py`.
 
 ## Configuração manual no Dokploy (para ativar R2 na nuvem)
 
