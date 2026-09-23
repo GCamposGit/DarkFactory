@@ -1,14 +1,44 @@
 """Canonical successor materialization for the HF-05 workflow boundary.
 
-Normative implementation of CONTRACTS.md and ticket HF-05-04.
+Normative implementation of CONTRACTS.md and ticket HF-05-04, extended by
+HF-27-08 for the lean production-line DAG (`docs/handoffs/production-line/
+HF-27-08.md`, decisions D-a/D-b/D-c/D-e):
+
+- D-a: the line DAG is `grill -> planning -> development -> validation ->
+  independent_review -> integration -> build_deploy -> retrospective`.
+  `target_journey` is merged into `build_deploy` (HF-27-07); the old
+  `environment`/`research` branch point is dropped for the line (those
+  stages remain valid `StageResult` targets for any other caller that still
+  emits them directly, they are simply no longer a DAG destination here).
+- D-b: a `retry` outcome routes to another stage via the cause_code
+  convention `retry:<stage>` (optionally followed by `\n<log>`), at
+  `iteration = current_max_iteration_of_that_stage_in_this_run + 1`. A plain
+  `retry` (no `retry:<stage>` prefix) keeps the historical same-stage
+  `iteration + 1` behaviour.
+- D-c: a `not_before=<iso>` token anywhere in a retry cause_code (e.g.
+  `ci_pending:not_before=...` from `stage_integration.py`) is persisted on
+  the successor job's `not_before` column; `ControlStore.claim()` skips it
+  until then.
+- D-e: the per-stage `memory_observation` fan-out is removed. A single
+  `retrospective` job (iteration 0, naturally idempotent via the jobs PK) is
+  emitted when `build_deploy` succeeds, or when any stage reaches terminal
+  `failed` (the line's DAG is strictly linear, so any stage's `failed` is
+  the run's terminal failure). `LEARNING_STAGES` and its anti-recursion
+  guard are kept as-is for any legacy caller that still enqueues
+  `memory_observation`/`learning_eval` directly.
+- Loop guard: no `RunCaps` field maps to "max iterations for a single
+  stage", so `MAX_STAGE_ITERATIONS` below is a documented module constant.
+  A retry whose resolved target iteration would exceed it never creates a
+  successor; the current job is recorded `failed(loop_cap)` instead.
 """
 
 from __future__ import annotations
 
 import json
 import logging
+import re
 from datetime import UTC, datetime
-from typing import Any
+from typing import Optional
 
 from core.workflow.control_contracts import (
     InvalidResultError,
@@ -24,14 +54,19 @@ LEARNING_STAGES: frozenset[str] = frozenset(
     {"memory_observation", "learning_eval", "promotion"}
 )
 
+# HF-27-08 D-a: the lean production-line DAG. `build_deploy` intentionally
+# has no entry here — its successor (`retrospective`) is decided by the
+# dedicated `emit_retrospective` logic below, not a simple next-stage lookup.
 PRODUCTIVE_DAG: dict[str, str] = {
     "grill": "planning",
-    "environment": "development",
+    "planning": "development",
     "development": "validation",
     "validation": "independent_review",
     "independent_review": "integration",
     "integration": "build_deploy",
-    "build_deploy": "target_journey",
+    # Legacy learning chain (HF-10), kept for any caller that still enqueues
+    # memory_observation directly (outside the HF-27-08 line, which no
+    # longer fans out to it automatically — see D-e in the module docstring).
     "memory_observation": "learning_eval",
 }
 
@@ -49,7 +84,77 @@ STAGE_ROLES: dict[str, str] = {
     "memory_observation": "memory_agent",
     "learning_eval": "evaluator",
     "catalog_refresh": "benchmarker",
+    "retrospective": "retrospective_agent",
 }
+
+# HF-27-08 loop guard (see module docstring): a retry whose resolved target
+# iteration would exceed this is terminal (`failed(loop_cap)`) rather than
+# looping forever between two disagreeing stages.
+MAX_STAGE_ITERATIONS = 10
+
+_RETRY_TARGET_RE = re.compile(r"^retry:(?P<stage>[A-Za-z_][A-Za-z0-9_]*)(?:\n(?P<log>[\s\S]*))?$")
+_NOT_BEFORE_RE = re.compile(r"not_before=(?P<iso>\S+)")
+
+
+def _parse_retry_cause_code(cause_code: Optional[str]) -> tuple[Optional[str], Optional[str]]:
+    """Parse a `retry` outcome's cause_code for D-b/D-c.
+
+    Returns `(target_stage, not_before_iso)`. `target_stage` is `None` for a
+    plain same-stage retry (no `retry:<stage>` prefix). `not_before_iso` is
+    the value of a `not_before=<iso>` token found anywhere in the
+    cause_code, present or absent independently of `target_stage`.
+    """
+    if not cause_code:
+        return None, None
+    target_stage: Optional[str] = None
+    match = _RETRY_TARGET_RE.match(cause_code)
+    if match:
+        target_stage = match.group("stage")
+    not_before_match = _NOT_BEFORE_RE.search(cause_code)
+    not_before = not_before_match.group("iso") if not_before_match else None
+    return target_stage, not_before
+
+
+def _max_iteration_for_stage(
+    store: ControlStore, run_id: str, ticket_id: str, plan_version: str, stage: str
+) -> int:
+    """Highest `iteration` already recorded for `stage` in this run, or -1 if none.
+
+    Used to resolve a cross-stage retry's target iteration (D-b): the
+    successor is `iteration = this + 1`, so a first-ever bounce back to a
+    stage that only ran once at iteration 0 lands on iteration 1.
+    """
+    sqlite_backend = getattr(store, "_backend", None) if getattr(store, "mock_mode", False) else (
+        store if hasattr(store, "_connect") else None
+    )
+    is_postgres = hasattr(store, "raw_url") and not getattr(store, "mock_mode", False) and hasattr(store, "_psycopg")
+
+    if sqlite_backend is not None:
+        conn = sqlite_backend._connect()
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                "SELECT MAX(iteration) FROM jobs WHERE run_id = ? AND ticket_id = ? AND plan_version = ? AND stage = ?",
+                (run_id, ticket_id, plan_version, stage),
+            )
+            row = cur.fetchone()
+            value = row[0] if row else None
+            return int(value) if value is not None else -1
+        finally:
+            conn.close()
+
+    if is_postgres:
+        with store._psycopg.connect(store.raw_url) as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT MAX(iteration) FROM jobs WHERE run_id = %s AND ticket_id = %s AND plan_version = %s AND stage = %s",
+                    (run_id, ticket_id, plan_version, stage),
+                )
+                row = cur.fetchone()
+                value = row[0] if row else None
+                return int(value) if value is not None else -1
+
+    return -1
 
 
 def materialize_result(
@@ -64,13 +169,17 @@ def materialize_result(
 
     Invariants:
     - Enforces fail-closed: outcome == "success" requires non-empty output_refs.
-    - Transitions through canonical productive DAG.
-    - Automatic memory fan-out: non-learning stages emit memory_observation.
-    - Anti-recursion: stages in LEARNING_STAGES never spawn memory_observation.
+    - Transitions through the canonical productive DAG (HF-27-08 D-a).
+    - `retrospective` fan-out replaces the old per-stage `memory_observation`
+      fan-out (HF-27-08 D-e); `LEARNING_STAGES` anti-recursion is preserved
+      for any legacy caller that still enqueues those stages directly.
     - Sibling isolation: WAITING_HUMAN outcome does not suspend or cancel siblings.
     - Idempotency: duplicate calls produce identical JobKey lists and converge safely.
-    - If retry: increment iteration (iteration + 1).
-    - If replan: enqueue planning stage.
+    - retry: same-stage `iteration + 1`, or (D-b) `retry:<stage>` routes to
+      `<stage>` at that stage's current max iteration + 1, optionally
+      carrying a `not_before=<iso>` claim gate (D-c). A resolved iteration
+      beyond `MAX_STAGE_ITERATIONS` is terminal (`failed(loop_cap)`).
+    - replan: enqueue planning stage at iteration 0.
     """
     if result.outcome == "success" and not result.output_refs:
         raise InvalidResultError(
@@ -81,19 +190,20 @@ def materialize_result(
     now_iso = now_dt.isoformat()
 
     successors: list[JobKey] = []
+    # HF-27-08 D-c: not_before to apply to the (single, if any) retry
+    # successor. Keyed by nothing else since a retry produces at most one
+    # non-retrospective successor.
+    retry_not_before: Optional[str] = None
+    loop_cap_exceeded = False
+    emit_retrospective = False
 
     # 1. Determine successor list based on outcome
     if result.outcome == "success":
-        # Productive transition
-        next_stage: str | None = None
-        if job_key.stage == "planning":
-            needs_env = manifest_requires_environment or any(
-                "environment" in ref.lower() for ref in result.output_refs
-            )
-            next_stage = "environment" if needs_env else "development"
-        else:
-            next_stage = PRODUCTIVE_DAG.get(job_key.stage)
-
+        # manifest_requires_environment is accepted for call-site
+        # compatibility but no longer routes anywhere (HF-27-08 D-a dropped
+        # the environment branch point from the line DAG).
+        del manifest_requires_environment
+        next_stage = PRODUCTIVE_DAG.get(job_key.stage)
         if next_stage is not None:
             successors.append(
                 JobKey(
@@ -104,29 +214,35 @@ def materialize_result(
                     iteration=0,
                 )
             )
+        if job_key.stage == "build_deploy":
+            emit_retrospective = True
 
-        # Automatic memory fan-out with anti-recursion
-        if job_key.stage not in LEARNING_STAGES:
+    elif result.outcome == "retry":
+        target_stage, retry_not_before = _parse_retry_cause_code(result.cause_code)
+        if target_stage:
+            base_iteration = _max_iteration_for_stage(
+                store, job_key.run_id, job_key.ticket_id, job_key.plan_version, target_stage
+            )
+            new_iteration = base_iteration + 1
+            successor_stage = target_stage
+        else:
+            new_iteration = job_key.iteration + 1
+            successor_stage = job_key.stage
+
+        if new_iteration > MAX_STAGE_ITERATIONS:
+            loop_cap_exceeded = True
+            emit_retrospective = True
+            retry_not_before = None
+        else:
             successors.append(
                 JobKey(
                     run_id=job_key.run_id,
                     ticket_id=job_key.ticket_id,
                     plan_version=job_key.plan_version,
-                    stage="memory_observation",
-                    iteration=job_key.iteration,
+                    stage=successor_stage,
+                    iteration=new_iteration,
                 )
             )
-
-    elif result.outcome == "retry":
-        successors.append(
-            JobKey(
-                run_id=job_key.run_id,
-                ticket_id=job_key.ticket_id,
-                plan_version=job_key.plan_version,
-                stage=job_key.stage,
-                iteration=job_key.iteration + 1,
-            )
-        )
 
     elif result.outcome == "replan":
         successors.append(
@@ -143,9 +259,37 @@ def materialize_result(
         # Sibling isolation: waiting_human produces no successors, siblings continue running
         successors = []
 
-    else:
-        # failed, cancelled, waiting_dependency
+    elif result.outcome == "failed":
+        # HF-27-08 D-e: the line DAG is strictly linear, so any stage's
+        # terminal failure is the run's terminal failure.
         successors = []
+        emit_retrospective = True
+
+    else:
+        # cancelled, waiting_dependency
+        successors = []
+
+    if emit_retrospective:
+        successors.append(
+            JobKey(
+                run_id=job_key.run_id,
+                ticket_id=job_key.ticket_id,
+                plan_version=job_key.plan_version,
+                stage="retrospective",
+                iteration=0,
+            )
+        )
+
+    db_status = "succeeded" if result.outcome == "success" else result.outcome
+    effective_cause_code = result.cause_code
+    if loop_cap_exceeded:
+        db_status = "failed"
+        effective_cause_code = f"loop_cap:{result.cause_code}" if result.cause_code else "loop_cap"
+
+    def _not_before_for(successor: JobKey) -> Optional[str]:
+        if retry_not_before and successor.stage != "retrospective" and result.outcome == "retry":
+            return retry_not_before
+        return None
 
     # 2. Atomically persist to storage backend
     sqlite_backend = getattr(store, "_backend", None) if getattr(store, "mock_mode", False) else (store if hasattr(store, "_connect") else None)
@@ -189,7 +333,6 @@ def materialize_result(
                 job_key.to_tuple(),
             )
             job_row = cur.fetchone()
-            db_status = "succeeded" if result.outcome == "success" else result.outcome
             finished_at = now_iso if db_status in ("succeeded", "failed", "cancelled") else None
 
             if job_row:
@@ -210,7 +353,7 @@ def materialize_result(
                         """,
                         (
                             db_status,
-                            result.cause_code,
+                            effective_cause_code,
                             result.actual_cost,
                             json.dumps(result.output_refs),
                             json.dumps(result.evidence_refs),
@@ -244,7 +387,7 @@ def materialize_result(
                         job_key.iteration,
                         db_status,
                         STAGE_ROLES.get(job_key.stage, f"{job_key.stage}_worker"),
-                        result.cause_code,
+                        effective_cause_code,
                         result.actual_cost,
                         json.dumps(result.output_refs),
                         json.dumps(result.evidence_refs),
@@ -263,8 +406,8 @@ def materialize_result(
                         run_id, ticket_id, plan_version, stage, iteration, status,
                         role, required_capabilities, fencing_token, timeout_seconds,
                         retry_count, max_retries, actual_cost, output_refs, evidence_refs,
-                        created_at, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, 'pending', ?, '[]', 0, 1800, 0, 3, 0.0, '[]', '[]', ?, ?)
+                        created_at, updated_at, not_before, ready_at
+                    ) VALUES (?, ?, ?, ?, ?, 'pending', ?, '[]', 0, 1800, 0, 3, 0.0, '[]', '[]', ?, ?, ?, ?)
                     ON CONFLICT (run_id, ticket_id, plan_version, stage, iteration) DO NOTHING
                     """,
                     (
@@ -275,6 +418,8 @@ def materialize_result(
                         succ.iteration,
                         succ_role,
                         now_iso,
+                        now_iso,
+                        _not_before_for(succ),
                         now_iso,
                     ),
                 )
@@ -360,7 +505,6 @@ def materialize_result(
                         job_key.to_tuple(),
                     )
                     job_row = cur.fetchone()
-                    db_status = "succeeded" if result.outcome == "success" else result.outcome
                     finished_at_utc = now_utc if db_status in ("succeeded", "failed", "cancelled") else None
 
                     if job_row:
@@ -381,7 +525,7 @@ def materialize_result(
                                 """,
                                 (
                                     db_status,
-                                    result.cause_code,
+                                    effective_cause_code,
                                     result.actual_cost,
                                     json.dumps(result.output_refs),
                                     json.dumps(result.evidence_refs),
@@ -414,7 +558,7 @@ def materialize_result(
                                 job_key.iteration,
                                 db_status,
                                 STAGE_ROLES.get(job_key.stage, f"{job_key.stage}_worker"),
-                                result.cause_code,
+                                effective_cause_code,
                                 result.actual_cost,
                                 json.dumps(result.output_refs),
                                 json.dumps(result.evidence_refs),
@@ -433,8 +577,8 @@ def materialize_result(
                                 run_id, ticket_id, plan_version, stage, iteration, status,
                                 role, required_capabilities, fencing_token, timeout_seconds,
                                 retry_count, max_retries, actual_cost, output_refs, evidence_refs,
-                                created_at, updated_at
-                            ) VALUES (%s, %s, %s, %s, %s, 'pending', %s, '[]'::jsonb, 0, 1800, 0, 3, 0.0, '[]'::jsonb, '[]'::jsonb, %s, %s)
+                                created_at, updated_at, not_before, ready_at
+                            ) VALUES (%s, %s, %s, %s, %s, 'pending', %s, '[]'::jsonb, 0, 1800, 0, 3, 0.0, '[]'::jsonb, '[]'::jsonb, %s, %s, %s, %s)
                             ON CONFLICT (run_id, ticket_id, plan_version, stage, iteration) DO NOTHING
                             """,
                             (
@@ -445,6 +589,8 @@ def materialize_result(
                                 succ.iteration,
                                 succ_role,
                                 now_utc,
+                                now_utc,
+                                _not_before_for(succ),
                                 now_utc,
                             ),
                         )

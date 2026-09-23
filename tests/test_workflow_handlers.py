@@ -159,15 +159,16 @@ def test_materialize_result_productive_dag_sequence() -> None:
         iteration=0,
     )
 
+    # HF-27-08 D-a: lean line DAG. build_deploy has no next productive stage
+    # (target_journey was merged into it); it instead emits `retrospective`
+    # (covered by test_materialize_build_deploy_emits_retrospective below).
     transitions = [
         ("grill", "planning"),
         ("planning", "development"),
-        ("environment", "development"),
         ("development", "validation"),
         ("validation", "independent_review"),
         ("independent_review", "integration"),
         ("integration", "build_deploy"),
-        ("build_deploy", "target_journey"),
     ]
 
     for current_stage, expected_next in transitions:
@@ -181,9 +182,8 @@ def test_materialize_result_productive_dag_sequence() -> None:
         res = StageResult(outcome="success", output_refs=[f"ref://{current_stage}/out"])
         successors = materialize_result(current_key, res, store, now=NOW)
 
-        # Non-learning stage produces productive successor AND memory_observation
-        productive_successors = [s for s in successors if s.stage != "memory_observation"]
-        memory_successors = [s for s in successors if s.stage == "memory_observation"]
+        # HF-27-08 D-e: no per-stage memory_observation fan-out any more.
+        productive_successors = [s for s in successors if s.stage != "retrospective"]
 
         assert len(productive_successors) == 1
         assert productive_successors[0].stage == expected_next
@@ -191,54 +191,23 @@ def test_materialize_result_productive_dag_sequence() -> None:
         assert productive_successors[0].ticket_id == jk_base.ticket_id
         assert productive_successors[0].iteration == 0
 
-        assert len(memory_successors) == 1
-        assert memory_successors[0].stage == "memory_observation"
 
-
-def test_materialize_planning_requires_environment() -> None:
+def test_materialize_build_deploy_emits_retrospective() -> None:
+    """HF-27-08 D-e: build_deploy success emits a single retrospective job, no more."""
     store = SQLiteControlStore(":memory:")
-    planning_key = JobKey(
-        run_id="run-dag-env",
-        ticket_id="TICKET-ENV",
-        plan_version="1.0",
-        stage="planning",
-        iteration=0,
-    )
-    res = StageResult(
-        outcome="success",
-        output_refs=["ref://manifest/needs_environment"],
-    )
-    successors = materialize_result(
-        planning_key,
-        res,
-        store,
-        now=NOW,
-        manifest_requires_environment=True,
-    )
-
-    prod = [s for s in successors if s.stage != "memory_observation"]
-    assert len(prod) == 1
-    assert prod[0].stage == "environment"
-
-
-def test_materialize_target_journey_terminal() -> None:
-    store = SQLiteControlStore(":memory:")
-    tj_key = JobKey(
+    bd_key = JobKey(
         run_id="run-dag-tj",
         ticket_id="TICKET-TJ",
         plan_version="1.0",
-        stage="target_journey",
+        stage="build_deploy",
         iteration=0,
     )
     res = StageResult(outcome="success", output_refs=["ref://journey/passed"])
-    successors = materialize_result(tj_key, res, store, now=NOW)
+    successors = materialize_result(bd_key, res, store, now=NOW)
 
-    # Terminal productive stage has no next productive stage, only memory observation
-    prod = [s for s in successors if s.stage != "memory_observation"]
-    assert len(prod) == 0
-
-    mem = [s for s in successors if s.stage == "memory_observation"]
-    assert len(mem) == 1
+    assert len(successors) == 1
+    assert successors[0].stage == "retrospective"
+    assert successors[0].iteration == 0
 
 
 def test_materialize_retry_increments_iteration() -> None:
@@ -428,14 +397,10 @@ def test_idempotency_duplicate_materialize_converges_safely() -> None:
             (job_key.run_id,),
         )
         val_count = cur.fetchone()[0]
+        # HF-27-08 D-e: development success no longer fans out a
+        # memory_observation job; idempotency is proven by this single
+        # `validation` row (a duplicate call must never create a second one).
         assert val_count == 1
-
-        cur.execute(
-            "SELECT COUNT(*) FROM jobs WHERE run_id = ? AND stage = 'memory_observation'",
-            (job_key.run_id,),
-        )
-        mem_count = cur.fetchone()[0]
-        assert mem_count == 1
 
 
 # ---------------------------------------------------------------------------
@@ -491,7 +456,12 @@ def test_materialize_failed_and_cancelled_outcomes() -> None:
         )
         res = StageResult(outcome=outcome, cause_code=f"TEST_{outcome.upper()}")
         successors = materialize_result(jk, res, store, now=NOW)
-        assert successors == []
+        if outcome == "failed":
+            # HF-27-08 D-e: any stage's terminal failure emits the run's
+            # single retrospective job (the line DAG is strictly linear).
+            assert [s.stage for s in successors] == ["retrospective"]
+        else:
+            assert successors == []
 
         with store._connect() as conn:
             cur = conn.cursor()
