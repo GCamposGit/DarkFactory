@@ -31,7 +31,7 @@ from core.workflow.control_contracts import (
     StaleLeaseError,
     StoreUnavailableError,
 )
-from core.workflow.control_store import ControlStore, SQLiteControlStore
+from core.workflow.control_store import ControlStore, SQLiteControlStore, _is_ready_enough
 
 logger = logging.getLogger(__name__)
 
@@ -367,9 +367,14 @@ class PostgresControlStore:
         except Exception as exc:
             raise StoreUnavailableError(f"PostgreSQL accept failed: {exc}") from exc
 
-    def claim(self, worker: str, capabilities: list[str], now: datetime) -> Claim | None:
+    def claim(
+        self, worker: str, capabilities: list[str], now: datetime, ready_age_sec: float = 0.0
+    ) -> Claim | None:
+        """`ready_age_sec` (HF-27-09, default 0.0 preserves prior behaviour) skips jobs
+        created less than that many seconds ago, so a lower-priority worker only claims
+        what a higher-priority one left behind."""
         if self.mock_mode:
-            return self._backend.claim(worker, capabilities, now)
+            return self._backend.claim(worker, capabilities, now, ready_age_sec=ready_age_sec)
 
         now_utc = now.astimezone(UTC)
         expires_at_utc = now_utc + timedelta(seconds=self.lease_duration_sec)
@@ -380,7 +385,8 @@ class PostgresControlStore:
                     # High concurrency locking via SELECT FOR UPDATE SKIP LOCKED
                     cur.execute(
                         """
-                        SELECT run_id, ticket_id, plan_version, stage, iteration, fencing_token, role, required_capabilities
+                        SELECT run_id, ticket_id, plan_version, stage, iteration, fencing_token, role,
+                               required_capabilities, created_at
                         FROM jobs
                         WHERE status = 'pending'
                         ORDER BY created_at ASC
@@ -391,15 +397,18 @@ class PostgresControlStore:
                     chosen = None
                     for r in rows:
                         req = r[7] if isinstance(r[7], list) else json.loads(r[7])
-                        if all(c in capabilities for c in req):
-                            chosen = r
-                            break
+                        if not all(c in capabilities for c in req):
+                            continue
+                        if ready_age_sec > 0.0 and not _is_ready_enough(r[8], now_utc, ready_age_sec):
+                            continue
+                        chosen = r
+                        break
 
                     if not chosen:
                         conn.commit()
                         return None
 
-                    run_id, ticket_id, plan_version, stage, iteration, old_token, role, _ = chosen
+                    run_id, ticket_id, plan_version, stage, iteration, old_token, role, _req, _created_at = chosen
                     new_token = old_token + 1
                     lease_id = f"lease-{uuid4().hex[:12]}"
                     reservation_id = f"res-{uuid4().hex[:8]}"

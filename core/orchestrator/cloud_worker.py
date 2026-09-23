@@ -43,6 +43,32 @@ DEFAULT_CAPABILITIES: tuple[str, ...] = (
     "benchmarker",
 )
 
+# HF-27-09: worker-priority topology (VPS > Desktop > Notebook). The
+# higher-priority worker polls faster and claims immediately; lower-priority
+# workers poll slower and only claim jobs a higher-priority worker had a
+# `ready_age_sec` window to grab first. Unset/unknown priority keeps prior
+# behaviour (5s poll default in `main()`, no ready_age filter).
+_PRIORITY_POLL_INTERVAL_SEC: dict[str, float] = {
+    "primary": 2.0,
+    "secondary": 10.0,
+    "fallback": 20.0,
+}
+_PRIORITY_READY_AGE_SEC: dict[str, float] = {
+    "primary": 0.0,
+    "secondary": 30.0,
+    "fallback": 30.0,
+}
+
+
+def _priority_defaults(priority: str | None) -> tuple[float | None, float]:
+    """Return (poll_interval_sec, ready_age_sec) for a `DARKFAC_WORKER_PRIORITY` value.
+
+    `poll_interval_sec` is None for an unset/unknown priority, so callers can
+    tell "no opinion" apart from an explicit value.
+    """
+    key = (priority or "").strip().lower()
+    return _PRIORITY_POLL_INTERVAL_SEC.get(key), _PRIORITY_READY_AGE_SEC.get(key, 0.0)
+
 
 class WorkerSlotStatus(BaseModel):
     """Status of worker concurrency slots and allocation."""
@@ -81,6 +107,8 @@ class CloudWorker:
         capabilities: list[str] | None = None,
         store: PostgresControlStore | None = None,
         artifact_store: CloudArtifactStore | None = None,
+        ready_age_sec: float | None = None,
+        capability_prober: Callable[[str], bool] | None = None,
     ) -> None:
         self.worker_id = worker_id or os.environ.get("DARKFAC_WORKER_ID", "cloud-worker-1")
         self.max_slots = (
@@ -89,13 +117,57 @@ class CloudWorker:
             else int(os.environ.get("DARKFAC_MAX_CONCURRENT_SLOTS", "2"))
         )
         self.database_url = database_url or os.environ.get("DARKFAC_HF02_DATABASE_URL")
-        self.capabilities = capabilities or list(DEFAULT_CAPABILITIES)
+
+        if capabilities is not None:
+            self.capabilities = list(capabilities)
+        else:
+            env_caps = os.environ.get("DARKFAC_WORKER_CAPS")
+            self.capabilities = (
+                [c.strip() for c in env_caps.split(",") if c.strip()]
+                if env_caps
+                else list(DEFAULT_CAPABILITIES)
+            )
+
+        # HF-27-09: an auth probe failing at boot drops the `harness:x`
+        # capability instead of publishing it and later failing the claim.
+        if capability_prober is not None:
+            self.capabilities = self._filter_capabilities(self.capabilities, capability_prober)
+
+        # HF-27-09: priority topology. Explicit `ready_age_sec` wins; then an
+        # explicit env override; then the DARKFAC_WORKER_PRIORITY default;
+        # unset/unknown priority keeps 0.0 (today's behaviour, unfiltered).
+        if ready_age_sec is not None:
+            self.ready_age_sec = ready_age_sec
+        else:
+            env_ready_age = os.environ.get("DARKFAC_WORKER_READY_AGE_SEC")
+            if env_ready_age:
+                self.ready_age_sec = float(env_ready_age)
+            else:
+                _, self.ready_age_sec = _priority_defaults(os.environ.get("DARKFAC_WORKER_PRIORITY"))
+
         self._store = store
         self._artifact_store = artifact_store
         self._active_tasks: dict[str, float] = {}
         self._draining = False
         self._running = False
         self._stop_event: threading.Event | None = None
+
+    @staticmethod
+    def _filter_capabilities(capabilities: list[str], prober: Callable[[str], bool]) -> list[str]:
+        kept: list[str] = []
+        for cap in capabilities:
+            if cap.startswith("harness:"):
+                harness_name = cap.split(":", 1)[1]
+                try:
+                    ok = prober(harness_name)
+                except Exception as exc:
+                    logger.warning("Capability prober raised for %s; dropping capability: %s", cap, exc)
+                    ok = False
+                if not ok:
+                    logger.warning("Dropping capability %s: auth probe failed", cap)
+                    continue
+            kept.append(cap)
+        return kept
 
     @property
     def store(self) -> PostgresControlStore:
@@ -326,6 +398,7 @@ class CloudWorker:
                 worker=self.worker_id,
                 capabilities=self.capabilities,
                 now=effective_now,
+                ready_age_sec=self.ready_age_sec,
             )
         except Exception as exc:
             logger.warning("Error querying queue for claims: %s", exc)
@@ -460,20 +533,41 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--poll-interval",
         type=float,
-        default=5.0,
-        help="Polling interval in seconds for the worker loop",
+        default=None,
+        help=(
+            "Polling interval in seconds for the worker loop. Defaults to the "
+            "DARKFAC_WORKER_PRIORITY preset (primary=2s, secondary=10s, "
+            "fallback=20s) when that env var is set, else 5s."
+        ),
     )
     args = parser.parse_args(argv)
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
-    worker = CloudWorker()
+
+    # HF-27-09: drop a `harness:x` capability whose auth probe fails instead
+    # of publishing it and later failing the claim. Best-effort: any import
+    # or probe failure here just skips capability filtering.
+    capability_prober: Callable[[str], bool] | None = None
+    try:
+        from core.line.auth_bootstrap import probe_harness_auth
+
+        capability_prober = probe_harness_auth
+    except Exception as exc:  # pragma: no cover - defensive, optional dependency
+        logger.debug("Capability auth probing unavailable: %s", exc)
+
+    worker = CloudWorker(capability_prober=capability_prober)
 
     if args.status:
         status = worker.slot_status()
         print(status.model_dump_json(indent=2))
         return 0
 
-    return worker.run_forever(poll_interval_sec=args.poll_interval)
+    poll_interval_sec = args.poll_interval
+    if poll_interval_sec is None:
+        priority_poll, _ = _priority_defaults(os.environ.get("DARKFAC_WORKER_PRIORITY"))
+        poll_interval_sec = priority_poll if priority_poll is not None else 5.0
+
+    return worker.run_forever(poll_interval_sec=poll_interval_sec)
 
 
 if __name__ == "__main__":
