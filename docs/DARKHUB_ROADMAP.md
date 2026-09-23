@@ -1,0 +1,92 @@
+# DarkHub — revisão e roadmap de evolução
+
+Versão 1.0 · 23/09/2026 · ticket `USR-42` · origem `user-demand`.
+
+O DarkHub é a interface principal do owner. Este documento registra a revisão
+completa feita em 23/09/2026, as correções já entregues e o roadmap para o Hub
+voltar a refletir toda a fábrica. Os ids `DH-xx` são normativos: o gate de
+cobertura (`hub/coverage.json` + `tests/test_hub_coverage.py`) só aceita
+capacidades pendentes que apontem para um id existente aqui.
+
+## Como o Hub passa a acompanhar a fábrica
+
+1. **Gate no CI.** `tests/test_hub_coverage.py` roda na suíte offline do CI.
+   Toda rota `/api/*` do schema OpenAPI e todo pacote de `core/` precisa estar
+   em `hub/coverage.json` com exatamente um destes status:
+   - `surface`: id de DOM do Hub que expõe a capacidade (o gate confere que o id
+     existe e que o frontend chama a rota);
+   - `machine`: rota só para máquinas (webhooks, sincronização, workers), com justificativa;
+   - `internal`: pacote do core sem estado próprio para o owner, com justificativa;
+   - `pending`: id `DH-xx` deste roadmap.
+   Rota ou módulo novo sem entrada, entrada órfã, superfície inexistente ou
+   `DH-xx` desconhecido fazem o PR falhar.
+2. **Definition of Done.** A skill `04-autonomous-piv-loop` exige, antes de
+   declarar uma entrega pronta, o reflexo no Hub ou a pendência registrada aqui.
+3. **Diagnóstico local.** `python scripts/hub_coverage.py` mostra o placar e as
+   lacunas; `--pending` lista o que falta por item do roadmap.
+
+## Revisão de 23/09/2026 — achados
+
+| # | Achado | Impacto | Tratamento |
+| --- | --- | --- | --- |
+| R1 | Painel de Tarefas lia `.factory/state.json` e `orchestrator.sqlite3`, que não existem mais | Painel vazio desde a migração para o control store HF-05 | **Corrigido** (USR-42) |
+| R2 | No Dokploy o Hub e o coordenador não compartilham estado: coordenador/worker usam PostgreSQL; o Hub criava um `control.db` efêmero no container | Painel e intake cegos para a operação real | Leitura **corrigida** (USR-42); escrita do intake em DH-02 |
+| R3 | `services.json` vive em volume Docker; mudanças no `default_services.json` nunca chegavam à nuvem | Catálogo congelado desde o primeiro deploy | **Corrigido** com `catalog_revision` (USR-42) |
+| R4 | Catálogo citava modelos desatualizados e não listava Claude Code, Codex, Dokploy nem n8n | Descrições enganosas | **Corrigido** (USR-42) |
+| R5 | 56 de 107 rotas `/api` sem nenhuma tela (49 relevantes para o owner, 7 só para máquinas) | Owner não vê notificações, HF-15, integrações, learning packs, evolução etc. | Roadmap DH-01…DH-11 |
+| R6 | Módulos do core sem nenhuma presença no Hub (adoption, portfolio, projects, planning, pilots, research, knowledge, router, line, marketing, game, archetypes) | Capacidades invisíveis | Roadmap DH-06, DH-08, DH-12 |
+| R7 | 23 tickets duplicados "CLI Pipeline de Testes" (USR-19…USR-41) no ledger versionado | Central de Demandas poluída | DH-15 |
+| R8 | Tailwind via CDN em produção, `index.html` com 1.343 linhas e versões de cache inconsistentes por script | Aviso no console, sem build reproduzível, cache velho após deploy | DH-13 |
+| R9 | Nenhum sinal de drift visível no próprio Hub | Owner não percebe quando o Hub fica para trás | DH-14 |
+
+## Entregue em USR-42
+
+- `core/workflow/job_board.py`: projeção somente-leitura do control store canônico,
+  PostgreSQL (`DARKHUB_CONTROL_DATABASE_URL`, com fallback para
+  `DARKFAC_HF02_DATABASE_URL`) ou `control.db` local, sem criar arquivo nem rodar DDL.
+- Painel de Tarefas: jobs reais por ticket e run, com `WAITING_HUMAN` no topo,
+  custo acumulado, etapas percorridas e `cause_code` como exceção.
+- Imagem do Hub com `psycopg` e variável nova no compose do Dokploy.
+- Catálogo revisado e propagação única por `catalog_revision`, preservando URL,
+  favoritos e pins do owner e sem reviver serviços excluídos.
+- Gate de cobertura, manifesto, CLI de diagnóstico e regra no PIV loop.
+
+## Roadmap
+
+Prioridade: **Agora** = próximo ciclo; **Depois** = após os itens Agora;
+**Futuro** = quando a capacidade do core amadurecer.
+
+| Id | Horizonte | Entrega | Rotas/módulos que fecha | Critério de aceite |
+| --- | --- | --- | --- | --- |
+| DH-01 | Agora | **Saúde da Fábrica**: notificações (listar, reconhecer, checar cotas), Telegram, n8n (workflows, sync, trigger), workers do harness, eventos de webhook, status/métricas/drill do HF-15 | `notifications/*`, `integrations/*`, `harness/workers`, `webhooks/events`, `hf15/*`; `core/notifications`, `core/integrations`, `core/acceptance` | Um painel mostra cada integração com estado, idade da última observação e ação segura; ações mutáveis pedem confirmação |
+| DH-02 | Agora | **Intake canônico na nuvem**: o intake do Hub grava no mesmo control store do coordenador | `POST /api/demands/intake` | Demanda criada no Hub da nuvem vira run visível no Painel de Tarefas; precisa de decisão do owner sobre ativação live |
+| DH-03 | Agora | **Caixa de decisões do owner**: jobs `WAITING_HUMAN` com contexto, pergunta e resposta pelo Hub; mudança de status de tickets | `PATCH /api/demands/tickets/{id}/status`; `core/workflow` (manual_resolution) | Owner responde sem terminal; a resposta vira evento idempotente no control store |
+| DH-04 | Depois | **Evolução e catálogo com ações**: propor, avaliar, promover e reverter; sincronizar catálogo | `evolution/*`, `catalog/sync`; `core/evolution`, `core/catalog` | Cada ação mostra diff, avaliação e rollback disponível |
+| DH-05 | Depois | **Benchmarks e roteamento**: fronteira por domínio, proximidade, top-3 especulativo, corrida empírica, simulador de roteamento | `benchmarks/*`; `core/router`, `core/benchmarks` | Owner vê por que um modelo foi escolhido para uma tarefa |
+| DH-06 | Depois | **Aprendizado e conhecimento**: Learning Packs (HTML, Anki, gerar), memória, pesquisa e Knowledge Ledger | `learning-packs/*`; `core/learning`, `core/knowledge`, `core/research` | Última sessão tem pack acessível em 1 clique; ledger de pesquisa pesquisável |
+| DH-07 | Depois | **Estúdio de conteúdo e visual**: gerar e auditar conteúdo, presets, galeria e ilustração | `content/*`, `visual/*`; `core/content`, `core/visual`, `core/marketing` | Conteúdo gerado passa pelo lint anti-slop antes de exportar |
+| DH-08 | Depois | **Portfólio multiprojeto**: projetos registrados, adoção (Skill 07), pilotos, arquétipos, linhas | `core/projects`, `core/portfolio`, `core/adoption`, `core/pilots`, `core/archetypes`, `core/line`, `core/game` | Cada projeto mostra estágio, saúde, roadmap e último deploy |
+| DH-09 | Depois | **Governança enterprise e deploy**: trilha de auditoria, configuração, avaliação de deploy, disparo de deploy Dokploy com confirmação | `enterprise/audit-trail`, `enterprise/configure`, `enterprise/evaluate-deploy`, `cloud/deploy` | Deploy só dispara após avaliação verde e confirmação explícita |
+| DH-10 | Depois | **Saúde e histórico do roadmap**: aba de saúde, linha do tempo e comparação de versões no drawer de roadmap | `projects/{id}/roadmap/health`, `history`, `history/compare` | Owner compara duas versões do roadmap e vê o que mudou |
+| DH-11 | Depois | **Validação sob demanda**: rodar suíte/harness remoto a partir do Hub com relatório destilado | `harness/run-tests`, `harness/execute` | Resultado com `[HARNESS_PASS]` e link para logs isolados |
+| DH-12 | Futuro | **Plano e DAG da autonomia contínua**: visualizar plano, gates de prontidão, rotas qualificadas e política efetiva | `core/planning`, `core/workflow` | DAG navegável com o estado de cada nó |
+| DH-13 | Agora | **Fundação do frontend**: CSS compilado localmente no lugar do Tailwind CDN, `index.html` modular, versão de assets única servida pelo backend | frontend | Nenhum aviso de CDN no console; um deploy invalida todos os assets |
+| DH-14 | Agora | **Cobertura visível no Hub**: endpoint e badge com o placar do gate e a lista de pendências | `hub/backend/coverage.py` | Badge mostra a % coberta e abre a lista de pendências por `DH-xx` |
+| DH-15 | Agora | **Higiene do ledger de demandas**: remover USR-19…USR-41 e isolar o teste que grava no ledger real | `.factory/demands/demands.json`, testes da CLI | Suíte roda sem alterar arquivos versionados |
+| DH-16 | Depois | **Aposentar fontes legadas do Painel de Tarefas** (`state.json`, `orchestrator.sqlite3`) depois de validar o painel na nuvem | `hub/backend/service.py` | Painel usa só o control store; testes legados migrados |
+
+## Configuração manual no Dokploy (para ativar R2 na nuvem)
+
+Sem este passo o painel na nuvem mostra `control: sqlite:missing` e continua vazio.
+
+1. Acesse `https://dokploy.ggcampos.com` e entre com sua conta de owner.
+2. Menu lateral **Projects** → abra o projeto que contém o compose `darkhub` (o do `docker-compose.hub.yml`).
+3. Clique no serviço **darkhub** → aba **Environment**.
+4. Adicione uma linha:
+   `DARKHUB_CONTROL_DATABASE_URL=<mesmo valor de DARKFAC_HF02_DATABASE_URL do compose darkfac-coordinator>`
+   - Para copiar o valor: abra o compose do **darkfac-coordinator** → aba **Environment** → copie o valor de `DARKFAC_HF02_DATABASE_URL`.
+   - Recomendado (menor privilégio): criar no PostgreSQL um papel só de leitura e usá-lo aqui:
+     `CREATE ROLE darkhub_ro LOGIN PASSWORD '<senha forte>'; GRANT CONNECT ON DATABASE <db> TO darkhub_ro; GRANT USAGE ON SCHEMA public TO darkhub_ro; GRANT SELECT ON runs, jobs TO darkhub_ro;`
+5. Clique em **Save** e depois em **Deploy** (ou **Redeploy**) no serviço **darkhub**.
+6. Validação: abra `https://darkhub.ggcampos.com`. Na **Fila operacional**, a faixa de status deve mostrar `control:postgres:ok`.
+   Se aparecer `postgres:error`, confira se o host do banco é acessível pela rede `dokploy-network`.

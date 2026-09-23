@@ -59,6 +59,8 @@ def _make_service(tmp_path: Path) -> HubService:
         roadmap_root=Path.cwd(),
         state_path=state_path,
         orchestrator_path=orchestrator_path,
+        control_db_path=tmp_path / "control.db",
+        control_database_url="",
     )
     service.record_model_usage(
         ModelCallEvent(
@@ -87,7 +89,7 @@ def test_task_dashboard_combines_queue_runs_cost_evidence_and_exceptions(tmp_pat
     assert report.queue[0].cost_usd == 0.25
     assert {item.label for item in report.queue[0].evidence} == {"commit", "step"}
     assert report.queue[1].exceptions == ["timeout do worker"]
-    assert report.sources == {"state": "ok", "runs": "ok", "usage": "ok"}
+    assert report.sources == {"control": "sqlite:missing", "state": "ok", "runs": "ok", "usage": "ok"}
 
 
 def test_task_dashboard_is_graceful_when_ledgers_are_missing(tmp_path: Path):
@@ -95,11 +97,21 @@ def test_task_dashboard_is_graceful_when_ledgers_are_missing(tmp_path: Path):
     data_dir.mkdir()
     (data_dir / "default_services.json").write_text("[]", encoding="utf-8")
     (data_dir / "default_prompts.json").write_text("[]", encoding="utf-8")
-    service = HubService(data_dir=data_dir, roadmap_root=Path.cwd(), usage_dir=tmp_path / "usage")
+    service = HubService(
+        data_dir=data_dir,
+        roadmap_root=Path.cwd(),
+        usage_dir=tmp_path / "usage",
+        state_path=tmp_path / "state.json",
+        orchestrator_path=tmp_path / "orchestrator.sqlite3",
+        control_db_path=tmp_path / "control.db",
+        control_database_url="",
+    )
 
     report = service.get_task_dashboard()
 
     assert report.queue == []
+    assert report.sources["control"] == "sqlite:missing"
+    assert not (tmp_path / "control.db").exists(), "the Hub must never create the control store"
     assert report.sources["state"] == "missing"
     assert report.sources["runs"] == "missing"
     assert report.warnings == []
