@@ -159,7 +159,7 @@ def test_process_sandbox_kills_descendant_after_leader_exits(temp_workspace: Pat
             break
         try:
             fields = stat_path.read_text(encoding="utf-8").split()
-        except FileNotFoundError:
+        except (FileNotFoundError, ProcessLookupError):
             # The process may be reaped between exists() and read_text().
             break
         if len(fields) >= 3 and fields[2] == "Z":
