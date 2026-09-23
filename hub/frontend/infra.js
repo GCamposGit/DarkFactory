@@ -12,6 +12,11 @@ const infraState = {
 function initInfra() {
   mountInfraMonitor();
   loadInfraCards(false);
+  mountFactoryHealthBlock();
+  loadFactoryHealth();
+  if (typeof healthStartVisibilityPolling === "function") {
+    healthStartVisibilityPolling(loadFactoryHealth, 60000);
+  }
 }
 
 if (document.readyState === "loading") {
@@ -376,3 +381,288 @@ async function renderCloudGatewayBanner() {
   }
 }
 
+// =============================================================================
+// DH-01 FACTORY HEALTH BLOCK START (USR-43) — read-only, no mutating calls.
+// Telegram gateway, n8n, harness workers, webhook events and the HF-15
+// acceptance environment, each rendered independently via Promise.allSettled
+// so a single failing source never blanks the rest of the block.
+// =============================================================================
+
+const factoryHealthState = {
+  loading: false,
+};
+
+const FACTORY_HEALTH_SOURCES = [
+  { id: "telegram", label: "Telegram Gateway", url: "/api/integrations/telegram/status", render: renderTelegramHealthCard },
+  { id: "n8n-status", label: "n8n — Status", url: "/api/integrations/n8n/status", render: renderN8nStatusHealthCard },
+  { id: "n8n-workflows", label: "n8n — Workflows", url: "/api/integrations/n8n/workflows?limit=50", render: renderN8nWorkflowsHealthCard },
+  { id: "harness-workers", label: "Workers do Harness", url: "/api/harness/workers", render: renderHarnessWorkersHealthCard },
+  { id: "webhooks", label: "Eventos de Webhook", url: "/api/webhooks/events?limit=20", render: renderWebhookEventsHealthCard },
+  { id: "hf15-status", label: "HF-15 — Ambiente", url: "/api/hf15/status", render: renderHf15StatusHealthCard },
+  { id: "hf15-metrics", label: "HF-15 — Métricas SLA", url: "/api/hf15/metrics", render: renderHf15MetricsHealthCard },
+];
+
+function mountFactoryHealthBlock() {
+  if (document.getElementById("factory-health-block")) return;
+  const section = document.getElementById("infrastructure-cards-section");
+  if (!section) return;
+
+  const block = document.createElement("div");
+  block.id = "factory-health-block";
+  block.className = "mt-4 pt-4 border-t border-slate-800/80 space-y-4";
+  block.innerHTML = `
+    <div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+      <div>
+        <h3 class="text-sm font-semibold text-white flex items-center gap-2">
+          <span>Saúde da Fábrica</span>
+          <span id="factory-health-pill" class="rounded-full border border-slate-700 bg-slate-900/60 px-2 py-0.5 text-[10px] font-mono text-slate-400">sincronizando</span>
+        </h3>
+        <p class="mt-1 text-[11px] text-slate-400">
+          Telegram, n8n, workers do harness, eventos de webhook e ambiente HF-15 — leitura direta, sem ações mutáveis.
+        </p>
+      </div>
+      <button id="factory-health-refresh" type="button" class="inline-flex items-center gap-1.5 self-start rounded-lg border border-indigo-500/40 bg-indigo-500/10 px-3 py-1.5 text-[11px] font-medium text-indigo-300 transition hover:bg-indigo-500/20 active:scale-95">
+        Atualizar
+      </button>
+    </div>
+    <div id="factory-health-grid" class="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+      ${infraSkeleton(FACTORY_HEALTH_SOURCES.length)}
+    </div>`;
+
+  section.appendChild(block);
+  document.getElementById("factory-health-refresh")?.addEventListener("click", () => loadFactoryHealth());
+}
+
+async function loadFactoryHealth() {
+  if (factoryHealthState.loading) return;
+  factoryHealthState.loading = true;
+  const button = document.getElementById("factory-health-refresh");
+  const pill = document.getElementById("factory-health-pill");
+  if (button) {
+    button.disabled = true;
+    button.classList.add("opacity-60");
+  }
+  if (pill) pill.textContent = "sincronizando";
+
+  const settled = await Promise.allSettled(
+    FACTORY_HEALTH_SOURCES.map(async (source) => {
+      const fetchedAt = new Date().toISOString();
+      const data = await healthFetchJson(source.url);
+      return { source, data, fetchedAt };
+    })
+  );
+
+  const grid = document.getElementById("factory-health-grid");
+  if (grid) {
+    grid.innerHTML = settled
+      .map((result, index) => {
+        const source = FACTORY_HEALTH_SOURCES[index];
+        if (result.status === "fulfilled") {
+          try {
+            return source.render(result.value.data, result.value.fetchedAt);
+          } catch (renderError) {
+            console.warn(`Falha ao renderizar card de saúde (${source.id}):`, renderError);
+            return renderFactoryHealthErrorCard(source.label, "Falha ao interpretar a resposta.");
+          }
+        }
+        return renderFactoryHealthErrorCard(source.label, result.reason?.message || "Falha ao consultar a fonte.");
+      })
+      .join("");
+  }
+
+  const okCount = settled.filter((r) => r.status === "fulfilled").length;
+  if (pill) {
+    const allOk = okCount === FACTORY_HEALTH_SOURCES.length;
+    pill.className = allOk
+      ? "rounded-full border border-emerald-700/60 bg-emerald-950/40 px-2 py-0.5 text-[10px] font-mono text-emerald-300"
+      : "rounded-full border border-amber-700/60 bg-amber-950/40 px-2 py-0.5 text-[10px] font-mono text-amber-300";
+    pill.textContent = `${okCount}/${FACTORY_HEALTH_SOURCES.length} fontes ok`;
+  }
+
+  factoryHealthState.loading = false;
+  if (button) {
+    button.disabled = false;
+    button.classList.remove("opacity-60");
+  }
+}
+
+function healthDotClass(state) {
+  if (state === "ok") return "bg-emerald-400";
+  if (state === "warn") return "bg-amber-400";
+  if (state === "error") return "bg-rose-400";
+  return "bg-slate-600";
+}
+
+function healthRow(label, value) {
+  const isEmpty = value === undefined || value === null || value === "";
+  const display = isEmpty ? "—" : healthEscapeHtml(value);
+  return `<div class="flex items-center justify-between gap-2"><span class="text-slate-500">${healthEscapeHtml(label)}</span><span class="font-mono text-slate-200 truncate">${display}</span></div>`;
+}
+
+function healthCardShell(title, dotClass, bodyHtml, observedAgo) {
+  return `<div class="rounded-xl border border-slate-800/90 bg-slate-950/70 p-4 flex flex-col gap-3">
+    <div class="flex items-center justify-between gap-2">
+      <h4 class="text-xs font-semibold text-white">${healthEscapeHtml(title)}</h4>
+      <span class="h-2.5 w-2.5 shrink-0 rounded-full ${dotClass}" aria-hidden="true"></span>
+    </div>
+    <div class="space-y-1.5 text-[11px] text-slate-300">${bodyHtml}</div>
+    <div class="text-[10px] font-mono text-slate-500">observado há ${healthEscapeHtml(observedAgo)}</div>
+  </div>`;
+}
+
+function renderFactoryHealthErrorCard(title, message) {
+  return `<div class="rounded-xl border border-rose-500/30 bg-rose-500/10 p-4 flex flex-col gap-2">
+    <div class="flex items-center justify-between gap-2">
+      <h4 class="text-xs font-semibold text-rose-200">${healthEscapeHtml(title)}</h4>
+      <span class="h-2.5 w-2.5 shrink-0 rounded-full bg-rose-400" aria-hidden="true"></span>
+    </div>
+    <p class="text-[11px] text-rose-300">${healthEscapeHtml(message)}</p>
+  </div>`;
+}
+
+function renderTelegramHealthCard(data, fetchedAt) {
+  const d = data || {};
+  const configured = d.configured === true;
+  const state = configured ? "ok" : "warn";
+  const rows = [
+    healthRow("Configurado", configured ? "sim" : "não"),
+    healthRow("Usuários autorizados", d.authorized_user_count),
+    healthRow("Chats autorizados", d.authorized_chat_count),
+    healthRow("Atualizações processadas", d.processed_updates),
+    healthRow("Callbacks processados", d.processed_callbacks),
+    healthRow("Outbox pendente", d.pending_outbox_notifications),
+  ].join("");
+  return healthCardShell("Telegram Gateway", healthDotClass(state), rows, healthRelativeAge(fetchedAt));
+}
+
+function renderN8nStatusHealthCard(data, fetchedAt) {
+  const d = data || {};
+  const operational = d.operational === true;
+  const placeholder = d.is_generic_placeholder === true;
+  const state = d.error ? "error" : operational && !placeholder ? "ok" : "warn";
+  const rows = [
+    healthRow("URL", d.url),
+    healthRow("Operacional", operational ? "sim" : "não"),
+    healthRow("Placeholder genérico", placeholder ? "sim" : "não"),
+    healthRow("Versão", d.version),
+    healthRow("DB conectado", d.db_connected === true ? "sim" : d.db_connected === false ? "não" : "—"),
+    healthRow("Status HTTP", d.status_code),
+    d.error ? healthRow("Erro", d.error) : "",
+  ].join("");
+  return healthCardShell("n8n — Status", healthDotClass(state), rows, healthRelativeAge(fetchedAt));
+}
+
+function normalizeN8nWorkflowsList(raw) {
+  if (!raw) return [];
+  if (Array.isArray(raw)) return raw;
+  const inner = raw.data;
+  if (Array.isArray(inner)) return inner;
+  if (inner && Array.isArray(inner.data)) return inner.data;
+  return [];
+}
+
+function renderN8nWorkflowsHealthCard(data, fetchedAt) {
+  const d = data || {};
+  const workflows = normalizeN8nWorkflowsList(d);
+  const state = d.success === false ? "error" : workflows.length ? "ok" : "warn";
+  const rows = workflows.length
+    ? workflows
+        .slice(0, 8)
+        .map((wf) => {
+          const name = wf && wf.name !== undefined ? wf.name : "—";
+          const active = !!(wf && wf.active);
+          const updated = wf && (wf.updatedAt || wf.updated_at);
+          return `<div class="flex items-center justify-between gap-2 border-b border-slate-900 pb-1 last:border-0 last:pb-0">
+            <span class="truncate text-slate-200" title="${healthEscapeHtml(name)}">${healthEscapeHtml(name)}</span>
+            <span class="shrink-0 flex items-center gap-2 text-[10px] font-mono">
+              <span class="${active ? "text-emerald-400" : "text-slate-500"}">${active ? "ativo" : "inativo"}</span>
+              <span class="text-slate-600">${updated ? healthEscapeHtml(healthRelativeAge(updated)) : "—"}</span>
+            </span>
+          </div>`;
+        })
+        .join("")
+    : `<div class="text-slate-500">${d.error ? healthEscapeHtml(d.error) : "Nenhum workflow retornado."}</div>`;
+  return healthCardShell("n8n — Workflows", healthDotClass(state), rows, healthRelativeAge(fetchedAt));
+}
+
+function renderHarnessWorkersHealthCard(data, fetchedAt) {
+  const workers = Array.isArray(data) ? data : [];
+  const onlineCount = workers.filter((w) => w && (w.status === "online" || w.healthy === true)).length;
+  const state = workers.length === 0 ? "warn" : onlineCount === workers.length ? "ok" : onlineCount > 0 ? "warn" : "error";
+  const rows = workers.length
+    ? workers
+        .map((w) => {
+          const name = (w && (w.name || w.id)) || "—";
+          const online = !!(w && (w.status === "online" || w.healthy === true));
+          const latency = w && w.latency_ms;
+          const caps = w && Array.isArray(w.capabilities) ? w.capabilities.join(", ") : "";
+          return `<div class="border-b border-slate-900 pb-1 last:border-0 last:pb-0">
+            <div class="flex items-center justify-between gap-2">
+              <span class="truncate text-slate-200" title="${healthEscapeHtml((w && w.url) || "")}">${healthEscapeHtml(name)}</span>
+              <span class="${online ? "text-emerald-400" : "text-rose-400"} text-[10px] font-mono shrink-0">${online ? "online" : "offline"}</span>
+            </div>
+            <div class="text-[10px] text-slate-500 font-mono truncate">${latency !== undefined && latency !== null ? `${healthEscapeHtml(latency)} ms` : "—"}${caps ? ` · ${healthEscapeHtml(caps)}` : ""}</div>
+          </div>`;
+        })
+        .join("")
+    : `<div class="text-slate-500">Nenhum worker registrado.</div>`;
+  return healthCardShell("Workers do Harness", healthDotClass(state), rows, healthRelativeAge(fetchedAt));
+}
+
+function renderWebhookEventsHealthCard(data, fetchedAt) {
+  const events = Array.isArray(data) ? data : [];
+  const hasErrors = events.some((e) => e && (e.status === "error" || e.status === "rejected"));
+  const state = events.length === 0 ? "warn" : hasErrors ? "warn" : "ok";
+  const rows = events.length
+    ? events
+        .slice(0, 8)
+        .map((e) => {
+          const type = (e && e.event_type) || "—";
+          const action = e && e.action ? `/${e.action}` : "";
+          const evStatus = (e && e.status) || "—";
+          const age = e && e.received_at ? healthRelativeAge(e.received_at) : "—";
+          return `<div class="flex items-center justify-between gap-2 border-b border-slate-900 pb-1 last:border-0 last:pb-0">
+            <span class="truncate text-slate-200" title="${healthEscapeHtml((e && e.delivery_id) || "")}">${healthEscapeHtml(type)}${healthEscapeHtml(action)}</span>
+            <span class="shrink-0 text-[10px] font-mono text-slate-500">${healthEscapeHtml(evStatus)} · ${healthEscapeHtml(age)}</span>
+          </div>`;
+        })
+        .join("")
+    : `<div class="text-slate-500">Nenhum evento recente.</div>`;
+  return healthCardShell("Eventos de Webhook", healthDotClass(state), rows, healthRelativeAge(fetchedAt));
+}
+
+function renderHf15StatusHealthCard(data, fetchedAt) {
+  const d = data || {};
+  const env = d.environment || {};
+  const allPassed = env.all_preflights_passed;
+  const state = allPassed === true ? "ok" : allPassed === false ? "error" : "warn";
+  const checks = Array.isArray(env.checks) ? env.checks : [];
+  const failedChecks = checks.filter((c) => c && c.passed === false);
+  const rows = [
+    healthRow("Modo", env.mode),
+    healthRow("Preflights", checks.length ? `${checks.length - failedChecks.length}/${checks.length} ok` : "—"),
+    failedChecks.length
+      ? `<div class="text-rose-300">Falhas: ${failedChecks.map((c) => healthEscapeHtml(c.name || "—")).join(", ")}</div>`
+      : "",
+  ].join("");
+  return healthCardShell("HF-15 — Ambiente", healthDotClass(state), rows, healthRelativeAge(fetchedAt));
+}
+
+function renderHf15MetricsHealthCard(data, fetchedAt) {
+  const d = data || {};
+  const slasMet = d.all_slas_met;
+  const state = slasMet === true ? "ok" : "warn";
+  const rows = [
+    healthRow("Cenários", `${d.passed_scenarios ?? "—"}/${d.total_scenarios ?? "—"}`),
+    healthRow("Falhas", d.failed_scenarios),
+    healthRow("Rollbacks", d.rolled_back_scenarios),
+    healthRow("RTO médio (s)", d.avg_rto_seconds),
+    healthRow("Orçamento gasto (US$)", d.total_budget_spent_usd),
+    healthRow("SLA atingido", slasMet === true ? "sim" : slasMet === false ? "não" : "—"),
+  ].join("");
+  return healthCardShell("HF-15 — Métricas SLA", healthDotClass(state), rows, healthRelativeAge(fetchedAt));
+}
+
+// =============================================================================
+// DH-01 FACTORY HEALTH BLOCK END
+// =============================================================================

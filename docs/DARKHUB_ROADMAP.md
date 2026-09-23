@@ -58,7 +58,7 @@ Prioridade: **Agora** = próximo ciclo; **Depois** = após os itens Agora;
 
 | Id | Horizonte | Entrega | Rotas/módulos que fecha | Critério de aceite |
 | --- | --- | --- | --- | --- |
-| DH-01 | Agora | **Saúde da Fábrica**: notificações (listar, reconhecer, checar cotas), Telegram, n8n (workflows, sync, trigger), workers do harness, eventos de webhook, status/métricas/drill do HF-15 | `notifications/*`, `integrations/*`, `harness/workers`, `webhooks/events`, `hf15/*`; `core/notifications`, `core/integrations`, `core/acceptance` | Um painel mostra cada integração com estado, idade da última observação e ação segura; ações mutáveis pedem confirmação |
+| DH-01 | Agora | **Saúde da Fábrica (somente leitura)**: notificações não lidas, Telegram, n8n (status e workflows), workers do harness, eventos de webhook, status/métricas do HF-15. Entregue em `USR-43`; ações mutáveis (reconhecer, checar cotas, sync/trigger n8n, drill HF-15) ficam em `DH-17` | `GET notifications`, `GET integrations/telegram/status`, `GET integrations/n8n/status`, `GET integrations/n8n/workflows`, `GET harness/workers`, `GET webhooks/events`, `GET hf15/status`, `GET hf15/metrics`; `core/notifications`, `core/integrations`, `core/acceptance` | Um painel mostra cada integração com estado, idade da última observação; nenhuma ação mutável é exposta nesta entrega |
 | DH-02 | Agora | **Intake canônico na nuvem**: o intake do Hub grava no mesmo control store do coordenador | `POST /api/demands/intake` | Demanda criada no Hub da nuvem vira run visível no Painel de Tarefas; precisa de decisão do owner sobre ativação live |
 | DH-03 | Agora | **Caixa de decisões do owner**: jobs `WAITING_HUMAN` com contexto, pergunta e resposta pelo Hub; mudança de status de tickets | `PATCH /api/demands/tickets/{id}/status`; `core/workflow` (manual_resolution) | Owner responde sem terminal; a resposta vira evento idempotente no control store |
 | DH-04 | Depois | **Evolução e catálogo com ações**: propor, avaliar, promover e reverter; sincronizar catálogo | `evolution/*`, `catalog/sync`; `core/evolution`, `core/catalog` | Cada ação mostra diff, avaliação e rollback disponível |
@@ -74,6 +74,19 @@ Prioridade: **Agora** = próximo ciclo; **Depois** = após os itens Agora;
 | DH-14 | Agora | **Cobertura visível no Hub**: endpoint e badge com o placar do gate e a lista de pendências | `hub/backend/coverage.py` | Badge mostra a % coberta e abre a lista de pendências por `DH-xx` |
 | DH-15 | Agora | **Higiene do ledger de demandas**: remover USR-19…USR-41 e isolar o teste que grava no ledger real | `.factory/demands/demands.json`, testes da CLI | Suíte roda sem alterar arquivos versionados |
 | DH-16 | Depois | **Aposentar fontes legadas do Painel de Tarefas** (`state.json`, `orchestrator.sqlite3`) depois de validar o painel na nuvem | `hub/backend/service.py` | Painel usa só o control store; testes legados migrados |
+| DH-17 | Depois | **Ações operacionais de saúde**: reconhecer alerta, checar cotas (pode enviar Telegram), sync/trigger n8n (produção), drill HF-15 — cada uma com diálogo de confirmação | `POST notifications/{notification_id}/acknowledge`, `POST notifications/check-quotas`, `POST integrations/n8n/sync`, `POST integrations/n8n/trigger`, `POST hf15/rollback/drill` | Toda ação mostra o efeito antes, exige confirmação explícita e registra auditoria |
+
+## Entregue em USR-43
+
+- DH-01 (somente leitura): faixa de alertas não lidos no topo do Hub (`factory-alerts-strip`,
+  `GET /api/notifications?unread_only=true`) e bloco "Saúde da Fábrica" na aba Infra
+  (`factory-health-block`) com cards para Telegram, n8n (status e workflows), workers do
+  harness, eventos de webhook e ambiente/métricas HF-15 — cada card com semáforo de estado,
+  campos-chave e idade da observação. Atualização automática a cada 60s enquanto a aba está
+  visível (pausa quando oculta, atualiza ao voltar) mais botão manual "Atualizar"; cada fonte é
+  buscada de forma independente (`Promise.allSettled` + `AbortController` de 12s) para que uma
+  falha isolada nunca apague as demais. Nenhuma ação mutável foi exposta nesta entrega; elas
+  ficam registradas em DH-17.
 
 ## Configuração manual no Dokploy (para ativar R2 na nuvem)
 
