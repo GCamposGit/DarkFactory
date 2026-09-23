@@ -64,7 +64,7 @@ Prioridade: **Agora** = próximo ciclo; **Depois** = após os itens Agora;
 | DH-03 | Agora | **Operação de status headless (somente leitura no Hub)**: operação programática de status via CLI/harness; UI do Hub opera estritamente em modo de consulta por diretriz do owner. Entregue em `USR-48` (`PATCH /api/demands/tickets/{ticket_id}/status` classificado como `machine`) | `PATCH /api/demands/tickets/{id}/status` | Entregue em `USR-48`; endpoint programático documentado como `machine` e Hub em modo somente-leitura |
 | DH-04 | Depois | **Evolução e catálogo com ações**: propor, avaliar, promover e reverter; sincronizar catálogo | `evolution/*`, `catalog/sync`; `core/evolution`, `core/catalog` | Cada ação mostra diff, avaliação e rollback disponível |
 | DH-05 | Depois | **Benchmarks e roteamento**: fronteira por domínio, proximidade, top-3 especulativo, corrida empírica, simulador de roteamento. Entregue em `USR-52` | `benchmarks/*`; `core/router` | Owner vê por que um modelo foi escolhido para uma tarefa |
-| DH-06 | Depois | **Aprendizado e conhecimento**: Learning Packs (HTML, Anki, gerar), memória, pesquisa e Knowledge Ledger | `learning-packs/*`; `core/learning`, `core/knowledge`, `core/research` | Última sessão tem pack acessível em 1 clique; ledger de pesquisa pesquisável |
+| DH-06 | Depois | **Aprendizado e conhecimento**: Learning Packs (HTML, Anki, gerar), memória, pesquisa e Knowledge Ledger. Entregue em `USR-53` | `learning-packs/*`; `core/learning`, `core/knowledge`, `core/learning_pack`, `core/research` | Última sessão tem pack acessível em 1 clique; ledger de pesquisa pesquisável |
 | DH-07 | Depois | **Estúdio de conteúdo e visual**: gerar e auditar conteúdo, presets, galeria e ilustração | `content/*`, `visual/*`; `core/content`, `core/visual`, `core/marketing` | Conteúdo gerado passa pelo lint anti-slop antes de exportar |
 | DH-08 | Depois | **Portfólio multiprojeto**: projetos registrados, adoção (Skill 07), pilotos, arquétipos, linhas | `core/projects`, `core/portfolio`, `core/adoption`, `core/pilots`, `core/archetypes`, `core/line`, `core/game` | Cada projeto mostra estágio, saúde, roadmap e último deploy |
 | DH-09 | Depois | **Governança enterprise e deploy**: trilha de auditoria, configuração, avaliação de deploy, disparo de deploy Dokploy com confirmação | `enterprise/audit-trail`, `enterprise/configure`, `enterprise/evaluate-deploy`, `cloud/deploy` | Deploy só dispara após avaliação verde e confirmação explícita |
@@ -161,6 +161,19 @@ Prioridade: **Agora** = próximo ciclo; **Depois** = após os itens Agora;
     - **Simulador de Roteamento Inteligente (`POST /api/benchmarks/route-task`):** Ferramenta consultiva de simulação que analisa uma descrição em linguagem natural e complexidade, exibindo o domínio detectado, modelo ótimo, justificativa arquitetural e top 3 cascata especulativa sem gerar efeitos colaterais mutáveis na fábrica.
   - Rota de execução de corridas (`POST /api/benchmarks/speculative/race`) classificada como waiver `machine` (operação headless acionada por testes, CLI e benchmarks).
   - Cobertura do DarkHub elevada para 66% (86 capacidades expostas). Módulo `core/router` coberto.
+
+## Entregue em USR-53 (DH-06)
+
+- **Aprendizado e Conhecimento no DarkHub (Modo Consulta):**
+  - Drawer de Aprendizado (`learning-drawer`) integrado ao cockpit com navegação em 4 modos de consulta:
+    - **Último Learning Pack (`GET /api/learning-packs/latest`):** Apresenta o Learning Pack mais recente em 1 clique, decomposto em 3 níveis Feynman (Pitch de 30s para clientes, Defesa Staff+ e Mecânica sob o capô), âncoras mentais analógicas (modelo mental, metáfora e anti-pattern), escudo cético de refutação técnica e métricas da sessão.
+    - **Histórico de Packs (`GET /api/learning-packs` e `GET /api/learning-packs/{pack_id}`):** Listagem cronológica dos Learning Packs persistidos no ledger (`.factory/learning_packs/`), com resumo executivo, contagem de conceitos e inspeção detalhada de qualquer pack.
+    - **Flashcards & Repetição Espaçada (`GET /api/learning-packs/{pack_id}/export-anki`):** Visualização dos cards de active recall e botão de download do baralho Anki formatado em TSV.
+    - **Widget HTML Interativo (`GET /api/learning-packs/{pack_id}/html`):** Abertura do visualizador HTML autônomo com navegação e design responsivo.
+    - **Segundo Cérebro & Base de Conhecimento:** Consulta aos domínios interligados (`darkfac`, `atrium`, `jarvis`), hashes de proveniência SHA-256 e políticas estritas de isolamento com garantia anti-alucinação *Fail-Closed*.
+  - Rota de geração autônoma de packs (`POST /api/learning-packs/generate`) classificada como waiver `machine` (operação acionada via hooks de encerramento de sessão, agentes e CLI).
+  - Módulos `core/learning_pack`, `core/learning`, `core/knowledge` e `core/research` mapeados para a superfície `learning-drawer`. Módulo `core/audio` documentado como `internal` (motor headless de transcrição faster-whisper/Groq).
+  - Cobertura do DarkHub elevada para 74% (95 capacidades expostas, apenas 34 pendentes).
 
 ## Configuração manual no Dokploy (para ativar R2 na nuvem)
 

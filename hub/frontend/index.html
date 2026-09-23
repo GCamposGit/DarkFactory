@@ -90,6 +90,15 @@
           <span class="hidden lg:inline">Benchmarks & Pareto</span>
         </button>
 
+        <!-- Learning Packs & Knowledge Trigger -->
+        <button
+          onclick="openLearningDrawer()"
+          title="Abrir Central de Aprendizado, Learning Packs & Segundo Cérebro"
+          class="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-amber-300 border border-slate-800 hover:border-amber-500/30 transition-all text-xs font-medium">
+          <span>🎓</span>
+          <span class="hidden lg:inline">Aprendizado</span>
+        </button>
+
         <!-- Operational Roadmap Trigger -->
         <button
           onclick="openRoadmapDrawer()"
@@ -249,6 +258,72 @@
     </section>
 
   </main>
+
+  <!-- Learning Packs & Cognitive Uplift Drawer (DH-06) -->
+  <div id="learning-drawer" class="hidden fixed inset-0 z-50 bg-slate-950/90 backdrop-blur-md animate-in-quick" role="dialog" aria-modal="true" aria-labelledby="learning-title">
+    <div class="w-full h-full max-w-[1600px] mx-auto bg-slate-950 border-x border-slate-800 overflow-y-auto">
+      <div class="sticky top-0 z-10 border-b border-slate-800 bg-slate-950/95 backdrop-blur-xl">
+        <div class="px-5 sm:px-8 py-5 flex flex-col xl:flex-row xl:items-center justify-between gap-4">
+          <div class="flex items-start gap-3">
+            <div class="w-10 h-10 rounded-xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-center text-xl">🎓</div>
+            <div>
+              <div class="flex items-center gap-2 flex-wrap">
+                <h2 id="learning-title" class="text-lg font-bold text-white">Central de Aprendizado & Conhecimento</h2>
+                <span class="roadmap-tag roadmap-tag-neutral">Somente leitura</span>
+              </div>
+              <p class="mt-1 text-xs text-slate-400">Learning Packs das sessões, níveis Feynman, analogias cognitivas, flashcards Anki e memória perpétua do Segundo Cérebro.</p>
+            </div>
+          </div>
+          <div class="flex items-center gap-2">
+            <button type="button" onclick="closeLearningDrawer()" aria-label="Fechar Central de Aprendizado" class="p-2 rounded-xl text-slate-500 hover:text-slate-200 hover:bg-slate-800">✕</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="px-5 sm:px-8 py-6 space-y-6">
+        <!-- Navigation Tabs -->
+        <div class="flex items-center justify-between border-b border-slate-800 pb-3">
+          <div class="flex items-center gap-1.5 p-1 rounded-xl bg-slate-900 border border-slate-800" role="tablist">
+            <button id="learn-tab-latest" type="button" role="tab" aria-selected="true" onclick="switchLearningTab('latest')" class="px-3 py-1.5 rounded-xl text-xs font-mono font-medium transition-all bg-amber-500/20 text-amber-300 border border-amber-500/40 font-semibold">
+              Último Learning Pack
+            </button>
+            <button id="learn-tab-history" type="button" role="tab" aria-selected="false" onclick="switchLearningTab('history')" class="px-3 py-1.5 rounded-xl text-xs font-mono font-medium transition-all text-slate-400 hover:text-slate-200 border border-transparent">
+              Histórico (<span id="learn-history-count">--</span>)
+            </button>
+            <button id="learn-tab-flashcards" type="button" role="tab" aria-selected="false" onclick="switchLearningTab('flashcards')" class="px-3 py-1.5 rounded-xl text-xs font-mono font-medium transition-all text-slate-400 hover:text-slate-200 border border-transparent">
+              Flashcards Anki
+            </button>
+            <button id="learn-tab-knowledge" type="button" role="tab" aria-selected="false" onclick="switchLearningTab('knowledge')" class="px-3 py-1.5 rounded-xl text-xs font-mono font-medium transition-all text-slate-400 hover:text-slate-200 border border-transparent">
+              Segundo Cérebro
+            </button>
+          </div>
+          <div class="text-[10px] text-slate-500 font-mono hidden sm:block">
+            Modo Consulta · Fail-Closed Anti-Alucinação
+          </div>
+        </div>
+
+        <!-- View 1: Latest Learning Pack -->
+        <div id="learn-view-latest">
+          <div id="learn-latest-content"></div>
+        </div>
+
+        <!-- View 2: History List -->
+        <div id="learn-view-history" class="hidden">
+          <div id="learn-history-list"></div>
+        </div>
+
+        <!-- View 3: Flashcards View -->
+        <div id="learn-view-flashcards" class="hidden">
+          <div id="learn-flashcards-container"></div>
+        </div>
+
+        <!-- View 4: Knowledge / Second Brain -->
+        <div id="learn-view-knowledge" class="hidden">
+          <div id="learn-knowledge-container"></div>
+        </div>
+      </div>
+    </div>
+  </div>
 
   <!-- Operational Roadmap Drawer -->
   <div id="roadmap-drawer" class="hidden fixed inset-0 z-50 bg-slate-950/90 backdrop-blur-md animate-in-quick" role="dialog" aria-modal="true" aria-labelledby="roadmap-title">
@@ -1430,5 +1505,6 @@
   <script src="/static/enterprise.js?v=20260923c"></script>
   <script src="/static/coverage.js?v=20260923c"></script>
   <script src="/static/benchmarks.js?v=20260923c"></script>
+  <script src="/static/learning.js?v=20260923c"></script>
 </body>
 </html>
