@@ -8,10 +8,12 @@ installed digest verification, and automated rollback safeguards.
 
 from __future__ import annotations
 
+import io
 import json
 import logging
 import os
 import socket
+import tempfile
 import threading
 import time
 import urllib.error
@@ -19,7 +21,8 @@ import urllib.request
 import uuid
 from datetime import UTC, datetime
 from enum import Enum
-from typing import Any, Callable, Dict, Optional, Protocol, Union, runtime_checkable
+from pathlib import Path
+from typing import Any, Callable, Dict, List, Optional, Protocol, Union, runtime_checkable
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -453,6 +456,316 @@ class LocalServiceDeploymentAdapter:
         )
 
 
+class FtpMirrorDeploymentAdapter:
+    """Deployment adapter for plain-FTP shared hosting targets (HF-27-07).
+
+    Targets Hostinger-style hosting used by projects like ATRIUM, where the
+    only available protocol is FTP (no SSH/API deploy endpoint). The adapter
+    treats `artifact_ref.byte_digest` as the release identifier (the release
+    stage passes the merged git SHA in that field, not a byte hash) and:
+
+    1. Mirrors `target_config.metadata["dist_dir"]` (the project's build
+       output, produced by `commands.build`) to `releases/<sha>/` on the
+       host, keeping every release directory (never deleted) so a later
+       rollback can re-fetch it.
+    2. Attempts a `current` symlink swap via the non-standard `SITE SYMLINK`
+       command. Most shared hosts (including Hostinger) do not implement it;
+       when it fails, the adapter falls back to mirroring the same tree
+       directly into the web root (`target_config.metadata.get("remote_root",
+       "public_html")`) with extraneous remote files deleted, matching
+       `lftp mirror -R --delete` semantics.
+    3. Records the previously active SHA in a `.darkfac-release` marker file
+       at the web root before overwriting it with the new one, so
+       `rollback()` can redeploy that previous release without depending on
+       any local state surviving between calls.
+
+    Credentials are never embedded in `TargetConfig`; `target_config.metadata`
+    carries only the *names* of environment variables holding them
+    (`ftp_host_env`, `ftp_user_env`, `ftp_pass_env`, defaulting to
+    `FTP_HOST`/`FTP_USER`/`FTP_PASS`), resolved from `os.environ` at call
+    time. Tests inject `ftp_factory` to return an in-memory fake instead of
+    opening a real socket; production code leaves it `None` and gets a real
+    `ftplib.FTP` connection.
+    """
+
+    def __init__(
+        self,
+        ftp_factory: Optional[Callable[["TargetConfig"], Any]] = None,
+    ) -> None:
+        self.ftp_factory = ftp_factory
+        self._lock = threading.Lock()
+        self._operations: Dict[str, DeploymentOperation] = {}
+        self._target_configs: Dict[str, TargetConfig] = {}
+
+    # -- connection -------------------------------------------------------
+
+    def _connect(self, target_config: TargetConfig) -> Any:
+        if self.ftp_factory:
+            return self.ftp_factory(target_config)
+        import ftplib  # imported lazily: never needed when tests inject ftp_factory
+
+        host_env = target_config.metadata.get("ftp_host_env", "FTP_HOST")
+        user_env = target_config.metadata.get("ftp_user_env", "FTP_USER")
+        pass_env = target_config.metadata.get("ftp_pass_env", "FTP_PASS")
+        host = target_config.host or os.environ.get(host_env, "")
+        user = os.environ.get(user_env, "")
+        password = os.environ.get(pass_env, "")
+        ftp = ftplib.FTP()
+        ftp.connect(host, target_config.port or 21, timeout=30)
+        ftp.login(user, password)
+        return ftp
+
+    @staticmethod
+    def _close(ftp: Any) -> None:
+        try:
+            ftp.quit()
+        except Exception:
+            pass
+
+    def _remote_root(self, target_config: TargetConfig) -> str:
+        return str(target_config.metadata.get("remote_root", "public_html")).strip("/")
+
+    def _releases_dir(self, target_config: TargetConfig) -> str:
+        return str(target_config.metadata.get("releases_dir", "releases")).strip("/")
+
+    def _marker_path(self, target_config: TargetConfig) -> str:
+        return f"{self._remote_root(target_config)}/.darkfac-release"
+
+    # -- marker file --------------------------------------------------------
+
+    def _read_marker(self, ftp: Any, target_config: TargetConfig) -> Optional[str]:
+        buf = io.BytesIO()
+        try:
+            ftp.retrbinary(f"RETR {self._marker_path(target_config)}", buf.write)
+        except Exception:
+            return None
+        value = buf.getvalue().decode("utf-8", errors="replace").strip()
+        return value or None
+
+    def _write_marker(self, ftp: Any, target_config: TargetConfig, sha: str) -> None:
+        ftp.storbinary(f"STOR {self._marker_path(target_config)}", io.BytesIO(sha.encode("utf-8")))
+
+    # -- mirroring ----------------------------------------------------------
+
+    def _ensure_dir(self, ftp: Any, remote_dir: str) -> None:
+        parts = [p for p in remote_dir.strip("/").split("/") if p]
+        path = ""
+        for part in parts:
+            path = f"{path}/{part}" if path else part
+            try:
+                ftp.mkd(path)
+            except Exception:
+                pass  # already exists, or host cannot report the difference
+
+    def _list_remote_files(self, ftp: Any, remote_dir: str) -> set[str]:
+        """Best-effort recursive listing of `remote_dir`, relative paths only."""
+        found: set[str] = set()
+
+        def _walk(current: str, prefix: str) -> None:
+            try:
+                entries = list(ftp.mlsd(current))
+            except Exception:
+                return
+            for name, facts in entries:
+                if name in (".", ".."):
+                    continue
+                rel = f"{prefix}{name}" if not prefix else f"{prefix}/{name}"
+                if (facts or {}).get("type") == "dir":
+                    _walk(f"{current}/{name}", rel)
+                else:
+                    found.add(rel)
+
+        _walk(remote_dir, "")
+        return found
+
+    def _mirror(
+        self, ftp: Any, local_dir: Path, remote_dir: str, *, delete_extraneous: bool
+    ) -> List[str]:
+        uploaded: List[str] = []
+        self._ensure_dir(ftp, remote_dir)
+        local_files: set[str] = set()
+        if local_dir.is_dir():
+            for path in sorted(local_dir.rglob("*")):
+                rel = path.relative_to(local_dir).as_posix()
+                remote_path = f"{remote_dir}/{rel}"
+                if path.is_dir():
+                    self._ensure_dir(ftp, remote_path)
+                    continue
+                local_files.add(rel)
+                self._ensure_dir(ftp, str(Path(remote_path).parent.as_posix()))
+                with path.open("rb") as fh:
+                    ftp.storbinary(f"STOR {remote_path}", fh)
+                uploaded.append(remote_path)
+        if delete_extraneous:
+            for rel in self._list_remote_files(ftp, remote_dir) - local_files:
+                try:
+                    ftp.delete(f"{remote_dir}/{rel}")
+                except Exception:
+                    pass
+        return uploaded
+
+    def _redeploy_release(self, ftp: Any, target_config: TargetConfig, sha: str) -> bool:
+        """Re-mirror an already-uploaded `releases/<sha>/` into the web root.
+
+        Downloads each file to a temporary directory and re-uploads it,
+        since plain FTP has no server-side copy verb. Used by `rollback()`.
+        """
+        release_dir = f"{self._releases_dir(target_config)}/{sha}"
+        remote_files = self._list_remote_files(ftp, release_dir)
+        if not remote_files:
+            return False
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            for rel in remote_files:
+                local_path = tmp_path / rel
+                local_path.parent.mkdir(parents=True, exist_ok=True)
+                buf = io.BytesIO()
+                try:
+                    ftp.retrbinary(f"RETR {release_dir}/{rel}", buf.write)
+                except Exception:
+                    return False
+                local_path.write_bytes(buf.getvalue())
+            self._mirror(ftp, tmp_path, self._remote_root(target_config), delete_extraneous=True)
+        self._write_marker(ftp, target_config, sha)
+        return True
+
+    # -- DeploymentAdapter protocol ------------------------------------------
+
+    def start(
+        self,
+        artifact_ref: ArtifactRef,
+        target_config: TargetConfig,
+        claim: Optional[Union[Claim, Any]] = None,
+    ) -> DeploymentOperation:
+        """Mirrors `dist_dir` to the host. Runs synchronously: FTP transfer
+        has no separate provider-side reconciliation step, so `reconcile()`
+        only ever reports the terminal status recorded here."""
+        operation_id = f"ftp_op_{uuid.uuid4().hex[:12]}"
+        sha = artifact_ref.byte_digest
+        dist_dir = Path(target_config.metadata.get("dist_dir", ""))
+        remote_root = self._remote_root(target_config)
+        releases_dir = f"{self._releases_dir(target_config)}/{sha}"
+        details: Dict[str, Any] = {}
+        status = DeploymentStatus.IN_PROGRESS
+
+        ftp = self._connect(target_config)
+        try:
+            previous_sha = self._read_marker(ftp, target_config)
+            self._mirror(ftp, dist_dir, releases_dir, delete_extraneous=False)
+            symlinked = False
+            try:
+                # Non-standard extension a handful of hosts implement; plain
+                # FTP (RFC 959) has no symlink verb. Hostinger does not
+                # support it, so this normally falls through to the mirror
+                # fallback below.
+                ftp.sendcmd(f"SITE SYMLINK {releases_dir} {remote_root}")
+                symlinked = True
+            except Exception:
+                symlinked = False
+            if not symlinked:
+                self._mirror(ftp, dist_dir, remote_root, delete_extraneous=True)
+            self._write_marker(ftp, target_config, sha)
+            status = DeploymentStatus.SUCCEEDED
+            details = {
+                "previous_sha": previous_sha,
+                "symlinked": symlinked,
+                "remote_root": remote_root,
+                "release_dir": releases_dir,
+            }
+        except Exception as exc:
+            status = DeploymentStatus.FAILED
+            details = {"error": str(exc)}
+        finally:
+            self._close(ftp)
+
+        operation = DeploymentOperation(
+            operation_id=operation_id,
+            external_operation_id=f"ext_ftp_{sha[:12] if sha else 'na'}",
+            project_id=target_config.project_id,
+            target_type=target_config.target_type,
+            artifact_ref=artifact_ref,
+            status=status,
+            details=details,
+        )
+        with self._lock:
+            self._operations[operation_id] = operation
+            self._target_configs[operation_id] = target_config
+        return operation
+
+    def reconcile(self, operation_id: str) -> DeploymentStatus:
+        with self._lock:
+            op = self._operations.get(operation_id)
+            if not op:
+                raise ValueError(f"Unknown operation ID: {operation_id}")
+            return op.status
+
+    def installed_digest(self, target_config: TargetConfig) -> Optional[str]:
+        ftp = self._connect(target_config)
+        try:
+            return self._read_marker(ftp, target_config)
+        except Exception:
+            return None
+        finally:
+            self._close(ftp)
+
+    def rollback(
+        self,
+        target_config: TargetConfig,
+        failed_digest: str,
+        reason: str,
+        claim: Optional[Union[Claim, Any]] = None,
+    ) -> RollbackResult:
+        rollback_id = f"rb_ftp_{uuid.uuid4().hex[:12]}"
+        restored = target_config.last_known_good_digest
+
+        if not restored:
+            logger.error(
+                "FTP rollback aborted: project %s has no last_known_good_digest", target_config.project_id
+            )
+            return RollbackResult(
+                rollback_id=rollback_id,
+                project_id=target_config.project_id,
+                failed_digest=failed_digest,
+                restored_digest=None,
+                status=DeploymentStatus.FAILED,
+                reason=f"Rollback failed: missing last_known_good_digest. Original cause: {reason}",
+            )
+
+        ftp = self._connect(target_config)
+        try:
+            ok = self._redeploy_release(ftp, target_config, restored)
+        except Exception as exc:
+            ok = False
+            reason = f"{reason} (rollback error: {exc})"
+        finally:
+            self._close(ftp)
+
+        if not ok:
+            return RollbackResult(
+                rollback_id=rollback_id,
+                project_id=target_config.project_id,
+                failed_digest=failed_digest,
+                restored_digest=None,
+                status=DeploymentStatus.FAILED,
+                reason=f"Rollback failed: could not redeploy release {restored}. Cause: {reason}",
+            )
+
+        with self._lock:
+            for op in self._operations.values():
+                if op.project_id == target_config.project_id and op.status == DeploymentStatus.IN_PROGRESS:
+                    op.status = DeploymentStatus.ROLLED_BACK
+                    op.updated_at = datetime.now(UTC)
+
+        return RollbackResult(
+            rollback_id=rollback_id,
+            project_id=target_config.project_id,
+            failed_digest=failed_digest,
+            restored_digest=restored,
+            status=DeploymentStatus.ROLLED_BACK,
+            reason=reason,
+        )
+
+
 def execute_deployment_with_safeguards(
     adapter: DeploymentAdapter,
     artifact_ref: ArtifactRef,
@@ -560,6 +873,7 @@ __all__ = [
     "DeploymentOperation",
     "DeploymentStatus",
     "DokployDeploymentAdapter",
+    "FtpMirrorDeploymentAdapter",
     "LocalServiceDeploymentAdapter",
     "RollbackResult",
     "TargetConfig",
