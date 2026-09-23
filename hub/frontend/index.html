@@ -1039,55 +1039,121 @@
         </div>
       </div>
 
-      <!-- Top Summary Cards -->
-      <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 p-5 border-b border-slate-800 bg-slate-950/30">
-        <div class="p-3 rounded-xl bg-slate-950 border border-slate-800">
-          <div class="text-[10px] text-slate-500 font-mono uppercase">Modelos Monitorados</div>
-          <div id="bench-stat-total" class="text-xl font-bold text-slate-200 mt-0.5">--</div>
+      <!-- Navigation Tabs -->
+      <div class="px-5 pt-3 pb-2 flex items-center gap-1.5 border-b border-slate-800 bg-slate-950/40 overflow-x-auto" role="tablist">
+        <button id="bench-tab-models" type="button" role="tab" onclick="switchBenchmarkTab('models')" class="px-3 py-1.5 rounded-xl text-xs font-mono font-medium transition-all bg-amber-500/20 text-amber-300 border border-amber-500/40 font-semibold">Modelos & Fronteira Geral</button>
+        <button id="bench-tab-domains" type="button" role="tab" onclick="switchBenchmarkTab('domains')" class="px-3 py-1.5 rounded-xl text-xs font-mono font-medium transition-all text-slate-400 hover:text-slate-200 border border-transparent">Fronteiras por Domínio</button>
+        <button id="bench-tab-speculative" type="button" role="tab" onclick="switchBenchmarkTab('speculative')" class="px-3 py-1.5 rounded-xl text-xs font-mono font-medium transition-all text-slate-400 hover:text-slate-200 border border-transparent">Top-3 & Proximidade</button>
+        <button id="bench-tab-empirical" type="button" role="tab" onclick="switchBenchmarkTab('empirical')" class="px-3 py-1.5 rounded-xl text-xs font-mono font-medium transition-all text-slate-400 hover:text-slate-200 border border-transparent">Desempenho Empírico</button>
+        <button id="bench-tab-router" type="button" role="tab" onclick="switchBenchmarkTab('router')" class="px-3 py-1.5 rounded-xl text-xs font-mono font-medium transition-all text-slate-400 hover:text-slate-200 border border-transparent">Simulador de Roteamento</button>
+      </div>
+
+      <!-- View 1: Models & General Frontier -->
+      <div id="bench-view-models" class="flex flex-col flex-1 overflow-hidden">
+        <!-- Top Summary Cards -->
+        <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 p-5 border-b border-slate-800 bg-slate-950/30">
+          <div class="p-3 rounded-xl bg-slate-950 border border-slate-800">
+            <div class="text-[10px] text-slate-500 font-mono uppercase">Modelos Monitorados</div>
+            <div id="bench-stat-total" class="text-xl font-bold text-slate-200 mt-0.5">--</div>
+          </div>
+          <div class="p-3 rounded-xl bg-slate-950 border border-slate-800">
+            <div class="text-[10px] text-indigo-400 font-mono uppercase">Fronteira Pareto (Coding)</div>
+            <div id="bench-stat-pareto-coding" class="text-xl font-bold text-indigo-300 mt-0.5">--</div>
+          </div>
+          <div class="p-3 rounded-xl bg-slate-950 border border-slate-800">
+            <div class="text-[10px] text-amber-400 font-mono uppercase">Fronteira Pareto (Geral)</div>
+            <div id="bench-stat-pareto-general" class="text-xl font-bold text-amber-300 mt-0.5">--</div>
+          </div>
+          <div class="p-3 rounded-xl bg-slate-950 border border-slate-800">
+            <div class="text-[10px] text-emerald-400 font-mono uppercase">Custo Local (Ollama)</div>
+            <div class="text-xl font-bold text-emerald-300 mt-0.5">$0.00</div>
+          </div>
         </div>
-        <div class="p-3 rounded-xl bg-slate-950 border border-slate-800">
-          <div class="text-[10px] text-indigo-400 font-mono uppercase">Fronteira Pareto (Coding)</div>
-          <div id="bench-stat-pareto-coding" class="text-xl font-bold text-indigo-300 mt-0.5">--</div>
+
+        <!-- Filter Tabs -->
+        <div class="px-5 pt-3 pb-2 flex items-center justify-between gap-3 border-b border-slate-800/80">
+          <div id="benchmarks-provider-filters" class="flex items-center gap-1.5 overflow-x-auto scrollbar-none py-1">
+            <!-- Filters populated dynamically -->
+          </div>
+          <div class="text-[11px] text-slate-500 font-mono shrink-0 hidden sm:block">
+            Classificado por Coding Agent Index
+          </div>
         </div>
-        <div class="p-3 rounded-xl bg-slate-950 border border-slate-800">
-          <div class="text-[10px] text-amber-400 font-mono uppercase">Fronteira Pareto (Geral)</div>
-          <div id="bench-stat-pareto-general" class="text-xl font-bold text-amber-300 mt-0.5">--</div>
-        </div>
-        <div class="p-3 rounded-xl bg-slate-950 border border-slate-800">
-          <div class="text-[10px] text-emerald-400 font-mono uppercase">Custo Local (Ollama)</div>
-          <div class="text-xl font-bold text-emerald-300 mt-0.5">$0.00</div>
+
+        <!-- Table Container -->
+        <div class="overflow-y-auto flex-1 p-5">
+          <table class="w-full text-left text-xs">
+            <thead>
+              <tr class="text-[10px] font-mono uppercase text-slate-500 border-b border-slate-800">
+                <th class="pb-3 font-semibold">Modelo</th>
+                <th class="pb-3 font-semibold">Fabricante</th>
+                <th class="pb-3 font-semibold">Coding Index</th>
+                <th class="pb-3 font-semibold">Intel. Index</th>
+                <th class="pb-3 font-semibold">Custo / Tarefa</th>
+                <th class="pb-3 font-semibold">Velocidade</th>
+                <th class="pb-3 font-semibold">Fronteira Pareto</th>
+                <th class="pb-3 font-semibold text-right">Ação</th>
+              </tr>
+            </thead>
+            <tbody id="benchmarks-table-body" class="divide-y divide-slate-800/50 font-mono">
+              <!-- Populated dynamically -->
+            </tbody>
+          </table>
         </div>
       </div>
 
-      <!-- Filter Tabs -->
-      <div class="px-5 pt-3 pb-2 flex items-center justify-between gap-3 border-b border-slate-800/80">
-        <div id="benchmarks-provider-filters" class="flex items-center gap-1.5 overflow-x-auto scrollbar-none py-1">
-          <!-- Filters populated dynamically -->
+      <!-- View 2: Domain Frontiers -->
+      <div id="bench-view-domains" class="hidden flex-1 overflow-y-auto p-5 space-y-4">
+        <div class="flex items-center justify-between gap-3 border-b border-slate-800 pb-3">
+          <div>
+            <h4 class="text-xs font-bold text-white uppercase font-mono">Fronteiras de Pareto Especializadas por Domínio</h4>
+            <p class="text-[11px] text-slate-400 font-mono">Modelos ótimos por categoria técnica com base nas métricas canônicas do Artificial Analysis.</p>
+          </div>
+          <select id="bench-domain-select" onchange="loadDomainFrontier(this.value)" class="bg-slate-950 border border-slate-800 rounded-xl px-3 py-1.5 text-xs text-slate-200 font-mono">
+            <option value="">Carregando domínios...</option>
+          </select>
         </div>
-        <div class="text-[11px] text-slate-500 font-mono shrink-0 hidden sm:block">
-          Classificado por Coding Agent Index
-        </div>
+        <div id="bench-domain-frontier-results"></div>
       </div>
 
-      <!-- Table Container -->
-      <div class="overflow-y-auto flex-1 p-5">
-        <table class="w-full text-left text-xs">
-          <thead>
-            <tr class="text-[10px] font-mono uppercase text-slate-500 border-b border-slate-800">
-              <th class="pb-3 font-semibold">Modelo</th>
-              <th class="pb-3 font-semibold">Fabricante</th>
-              <th class="pb-3 font-semibold">Coding Index</th>
-              <th class="pb-3 font-semibold">Intel. Index</th>
-              <th class="pb-3 font-semibold">Custo / Tarefa</th>
-              <th class="pb-3 font-semibold">Velocidade</th>
-              <th class="pb-3 font-semibold">Fronteira Pareto</th>
-              <th class="pb-3 font-semibold text-right">Ação</th>
-            </tr>
-          </thead>
-          <tbody id="benchmarks-table-body" class="divide-y divide-slate-800/50 font-mono">
-            <!-- Populated dynamically -->
-          </tbody>
-        </table>
+      <!-- View 3: Speculative & Proximity -->
+      <div id="bench-view-speculative" class="hidden flex-1 overflow-y-auto p-5">
+        <div id="bench-speculative-container"></div>
+      </div>
+
+      <!-- View 4: Empirical Benchmark Results -->
+      <div id="bench-view-empirical" class="hidden flex-1 overflow-y-auto p-5">
+        <div id="bench-empirical-container"></div>
+      </div>
+
+      <!-- View 5: Task Routing Simulator (Advisor) -->
+      <div id="bench-view-router" class="hidden flex-1 overflow-y-auto p-5 space-y-4">
+        <div class="p-4 rounded-xl border border-slate-800 bg-slate-950/50 space-y-3 font-mono">
+          <div>
+            <h4 class="text-xs font-bold text-white uppercase">Simulador de Roteamento Inteligente</h4>
+            <p class="text-[11px] text-slate-400 mt-0.5">Analise um requisito em linguagem natural e veja como o roteador da fábrica escolhe o modelo ótimo.</p>
+          </div>
+          <div class="space-y-3">
+            <div>
+              <label class="block text-[11px] text-slate-400 mb-1">Descrição da Tarefa ou Prompt</label>
+              <textarea id="bench-router-requirement" rows="3" placeholder="Ex: Refatorar módulo de pagamentos com validação Pydantic e testes de holdout..." class="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-xs text-slate-200 focus:outline-none focus:border-cyan-500 font-mono"></textarea>
+            </div>
+            <div class="flex items-center justify-between gap-3">
+              <div class="flex items-center gap-2">
+                <label class="text-[11px] text-slate-400">Complexidade:</label>
+                <select id="bench-router-complexity" class="bg-slate-950 border border-slate-800 rounded-xl px-2.5 py-1 text-xs text-slate-200 font-mono">
+                  <option value="high">Alta (Complexa / Arquitetura)</option>
+                  <option value="medium">Média (Feature padrão)</option>
+                  <option value="low">Baixa (Script simples / Fix)</option>
+                </select>
+              </div>
+              <button type="button" onclick="simulateTaskRouting()" class="px-4 py-2 rounded-xl bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-300 border border-cyan-500/30 text-xs font-semibold transition-all">
+                Analisar Roteamento
+              </button>
+            </div>
+          </div>
+        </div>
+        <div id="bench-router-results" class="hidden"></div>
       </div>
 
       <!-- Footer Info -->
@@ -1363,5 +1429,6 @@
   <script src="/static/catalog.js?v=20260923c"></script>
   <script src="/static/enterprise.js?v=20260923c"></script>
   <script src="/static/coverage.js?v=20260923c"></script>
+  <script src="/static/benchmarks.js?v=20260923c"></script>
 </body>
 </html>
