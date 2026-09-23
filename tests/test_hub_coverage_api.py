@@ -41,10 +41,10 @@ def test_hub_coverage_pending_grouped_by_roadmap(client: TestClient) -> None:
     summary = CoverageSummaryResponse.model_validate(data)
 
     assert len(summary.pending_by_roadmap) > 0
-    # DH-02 must be in pending items
-    assert "DH-02" in summary.pending_by_roadmap
-    dh02_items = summary.pending_by_roadmap["DH-02"]
-    assert any(it.key == "POST /api/demands/intake" for it in dh02_items)
+    # DH-04 is in pending items (DH-02 was delivered under machine waiver)
+    assert "DH-04" in summary.pending_by_roadmap
+    dh04_items = summary.pending_by_roadmap["DH-04"]
+    assert any(it.key == "POST /api/catalog/sync" for it in dh04_items)
 
     # Check roadmap metadata
     assert "DH-02" in summary.roadmap_items

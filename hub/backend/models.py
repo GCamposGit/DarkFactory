@@ -471,6 +471,8 @@ class TaskDashboardItem(BaseModel):
     updated_at: Optional[str] = None
     evidence: List[TaskDashboardEvidence] = Field(default_factory=list)
     exceptions: List[str] = Field(default_factory=list)
+    cause_code: Optional[str] = None
+    diagnostic: Optional[str] = None
 
 
 class TaskDashboardReport(BaseModel):

@@ -447,6 +447,8 @@ class HubService:
                     updated_at=row["updated_at"],
                     evidence=row["evidence"],
                     exceptions=row["exceptions"],
+                    cause_code=row.get("cause_code"),
+                    diagnostic=row.get("diagnostic"),
                 )
             )
 
@@ -489,6 +491,8 @@ class HubService:
             TaskDashboardEvidence(label="papel", value=entry.role, source="control"),
             TaskDashboardEvidence(label="etapas", value=" → ".join(entry.stages_seen)[:500], source="control"),
         ]
+        if entry.diagnostic:
+            evidence.append(TaskDashboardEvidence(label="diagnóstico", value=entry.diagnostic[:500], source="control"))
         evidence.extend(
             TaskDashboardEvidence(label="evidência", value=ref[:500], source="control")
             for ref in entry.evidence_refs[:9]
@@ -515,6 +519,8 @@ class HubService:
             "updated_at": entry.updated_at,
             "evidence": evidence,
             "exceptions": exceptions,
+            "cause_code": entry.cause_code,
+            "diagnostic": entry.diagnostic,
         }
 
     def _load_task_records(self) -> tuple[dict[str, dict[str, Any]], str, list[str]]:
