@@ -438,51 +438,53 @@ async function loadFactoryHealth() {
   factoryHealthState.loading = true;
   const button = document.getElementById("factory-health-refresh");
   const pill = document.getElementById("factory-health-pill");
-  if (button) {
-    button.disabled = true;
-    button.classList.add("opacity-60");
-  }
-  if (pill) pill.textContent = "sincronizando";
+  try {
+    if (button) {
+      button.disabled = true;
+      button.classList.add("opacity-60");
+    }
+    if (pill) pill.textContent = "sincronizando";
 
-  const settled = await Promise.allSettled(
-    FACTORY_HEALTH_SOURCES.map(async (source) => {
-      const fetchedAt = new Date().toISOString();
-      const data = await healthFetchJson(source.url);
-      return { source, data, fetchedAt };
-    })
-  );
-
-  const grid = document.getElementById("factory-health-grid");
-  if (grid) {
-    grid.innerHTML = settled
-      .map((result, index) => {
-        const source = FACTORY_HEALTH_SOURCES[index];
-        if (result.status === "fulfilled") {
-          try {
-            return source.render(result.value.data, result.value.fetchedAt);
-          } catch (renderError) {
-            console.warn(`Falha ao renderizar card de saúde (${source.id}):`, renderError);
-            return renderFactoryHealthErrorCard(source.label, "Falha ao interpretar a resposta.");
-          }
-        }
-        return renderFactoryHealthErrorCard(source.label, result.reason?.message || "Falha ao consultar a fonte.");
+    const settled = await Promise.allSettled(
+      FACTORY_HEALTH_SOURCES.map(async (source) => {
+        const fetchedAt = new Date().toISOString();
+        const data = await healthFetchJson(source.url);
+        return { source, data, fetchedAt };
       })
-      .join("");
-  }
+    );
 
-  const okCount = settled.filter((r) => r.status === "fulfilled").length;
-  if (pill) {
-    const allOk = okCount === FACTORY_HEALTH_SOURCES.length;
-    pill.className = allOk
-      ? "rounded-full border border-emerald-700/60 bg-emerald-950/40 px-2 py-0.5 text-[10px] font-mono text-emerald-300"
-      : "rounded-full border border-amber-700/60 bg-amber-950/40 px-2 py-0.5 text-[10px] font-mono text-amber-300";
-    pill.textContent = `${okCount}/${FACTORY_HEALTH_SOURCES.length} fontes ok`;
-  }
+    const grid = document.getElementById("factory-health-grid");
+    if (grid) {
+      grid.innerHTML = settled
+        .map((result, index) => {
+          const source = FACTORY_HEALTH_SOURCES[index];
+          if (result.status === "fulfilled") {
+            try {
+              return source.render(result.value.data, result.value.fetchedAt);
+            } catch (renderError) {
+              console.warn(`Falha ao renderizar card de saúde (${source.id}):`, renderError);
+              return renderFactoryHealthErrorCard(source.label, "Falha ao interpretar a resposta.");
+            }
+          }
+          return renderFactoryHealthErrorCard(source.label, result.reason?.message || "Falha ao consultar a fonte.");
+        })
+        .join("");
+    }
 
-  factoryHealthState.loading = false;
-  if (button) {
-    button.disabled = false;
-    button.classList.remove("opacity-60");
+    const okCount = settled.filter((r) => r.status === "fulfilled").length;
+    if (pill) {
+      const allOk = okCount === FACTORY_HEALTH_SOURCES.length;
+      pill.className = allOk
+        ? "rounded-full border border-emerald-700/60 bg-emerald-950/40 px-2 py-0.5 text-[10px] font-mono text-emerald-300"
+        : "rounded-full border border-amber-700/60 bg-amber-950/40 px-2 py-0.5 text-[10px] font-mono text-amber-300";
+      pill.textContent = `${okCount}/${FACTORY_HEALTH_SOURCES.length} fontes ok`;
+    }
+  } finally {
+    factoryHealthState.loading = false;
+    if (button) {
+      button.disabled = false;
+      button.classList.remove("opacity-60");
+    }
   }
 }
 
@@ -506,7 +508,7 @@ function healthCardShell(title, dotClass, bodyHtml, observedAgo) {
       <span class="h-2.5 w-2.5 shrink-0 rounded-full ${dotClass}" aria-hidden="true"></span>
     </div>
     <div class="space-y-1.5 text-[11px] text-slate-300">${bodyHtml}</div>
-    <div class="text-[10px] font-mono text-slate-500">observado há ${healthEscapeHtml(observedAgo)}</div>
+    <div class="text-[10px] font-mono text-slate-500">${healthEscapeHtml(healthObservedPhrase(observedAgo))}</div>
   </div>`;
 }
 
@@ -576,7 +578,7 @@ function renderN8nWorkflowsHealthCard(data, fetchedAt) {
             <span class="truncate text-slate-200" title="${healthEscapeHtml(name)}">${healthEscapeHtml(name)}</span>
             <span class="shrink-0 flex items-center gap-2 text-[10px] font-mono">
               <span class="${active ? "text-emerald-400" : "text-slate-500"}">${active ? "ativo" : "inativo"}</span>
-              <span class="text-slate-600">${updated ? healthEscapeHtml(healthRelativeAge(updated)) : "—"}</span>
+              <span class="text-slate-600">${updated ? healthEscapeHtml(healthRelativeAge(updated) || "—") : "—"}</span>
             </span>
           </div>`;
         })
@@ -620,7 +622,7 @@ function renderWebhookEventsHealthCard(data, fetchedAt) {
           const type = (e && e.event_type) || "—";
           const action = e && e.action ? `/${e.action}` : "";
           const evStatus = (e && e.status) || "—";
-          const age = e && e.received_at ? healthRelativeAge(e.received_at) : "—";
+          const age = (e && e.received_at && healthRelativeAge(e.received_at)) || "—";
           return `<div class="flex items-center justify-between gap-2 border-b border-slate-900 pb-1 last:border-0 last:pb-0">
             <span class="truncate text-slate-200" title="${healthEscapeHtml((e && e.delivery_id) || "")}">${healthEscapeHtml(type)}${healthEscapeHtml(action)}</span>
             <span class="shrink-0 text-[10px] font-mono text-slate-500">${healthEscapeHtml(evStatus)} · ${healthEscapeHtml(age)}</span>

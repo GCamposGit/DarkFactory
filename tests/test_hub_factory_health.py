@@ -93,6 +93,41 @@ def test_infra_js_factory_health_block_uses_escape_helper():
 
 
 # ---------------------------------------------------------------------------
+# (b2) Age-wording review fix: healthRelativeAge() must return a complete
+# phrase ("agora" / "há 3min") or null, never a bare fragment that a caller
+# then glues onto "... atrás" or "observado há ${...}" and produces broken
+# Portuguese like "agora atrás" or "observado há instante desconhecido".
+# ---------------------------------------------------------------------------
+
+
+def test_health_relative_age_returns_a_complete_phrase_not_a_fragment():
+    text = (FRONTEND_DIR / "health.js").read_text(encoding="utf-8")
+
+    # The old placeholder fragment and the broken " atrás" concatenation must
+    # both be gone from the whole frontend (health.js defines the helper,
+    # infra.js only consumes its return value).
+    infra_text = (FRONTEND_DIR / "infra.js").read_text(encoding="utf-8")
+    assert "instante desconhecido" not in text
+    assert "instante desconhecido" not in infra_text
+    assert "} atrás" not in text, "healthRelativeAge() result must not be suffixed with a literal ' atrás'"
+    assert "} atrás" not in infra_text
+
+    # healthRelativeAge() itself must return a self-contained phrase ("agora"
+    # or "há ${...}") or null -- never a bare number/unit fragment.
+    assert 'return "agora"' in text
+    assert "return `há ${" in text
+    assert "function healthRelativeAge(timestamp)" in text
+    assert "return null" in text
+
+    # A dedicated helper builds the "observado ..." sentence from that phrase,
+    # instead of infra.js concatenating "observado há " + age itself.
+    assert "function healthObservedPhrase(age)" in text
+    assert '"observação sem horário"' in text
+    assert "observado há ${" not in infra_text
+    assert "healthObservedPhrase(" in infra_text
+
+
+# ---------------------------------------------------------------------------
 # (c) Visibility-gated polling, 60s interval, AbortController timeout
 # ---------------------------------------------------------------------------
 
@@ -110,6 +145,26 @@ def test_infra_js_wires_health_block_into_visibility_polling():
     assert "healthStartVisibilityPolling(loadFactoryHealth, 60000)" in text
     assert "mountFactoryHealthBlock" in text
     assert "loadFactoryHealth" in text
+
+
+# ---------------------------------------------------------------------------
+# (review fix) loadFactoryHealth must reset loading state / re-enable the
+# button in a finally block, so a render or DOM-access exception can never
+# leave the poll permanently stuck ("loading" true forever, button disabled).
+# ---------------------------------------------------------------------------
+
+
+def test_load_factory_health_resets_state_in_finally():
+    text = (FRONTEND_DIR / "infra.js").read_text(encoding="utf-8")
+    start = text.index("async function loadFactoryHealth()")
+    end = text.index("\nfunction healthDotClass(", start)
+    body = text[start:end]
+
+    assert "try {" in body
+    assert "} finally {" in body
+    finally_block = body[body.index("} finally {") :]
+    assert "factoryHealthState.loading = false;" in finally_block
+    assert "button.disabled = false;" in finally_block
 
 
 # ---------------------------------------------------------------------------

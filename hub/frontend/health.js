@@ -37,21 +37,35 @@ function healthEscapeHtml(value) {
     .replace(/'/g, "&#039;");
 }
 
-/** Human relative age ("3min atrás") from an ISO timestamp, or a fetch-time ISO string. */
+/**
+ * Complete Portuguese relative-age phrase from an ISO timestamp: "agora",
+ * "há 3min", "há 2h", "há 5d". Returns null (not a placeholder string) when
+ * the timestamp is missing or invalid, so callers build their own "unknown"
+ * wording instead of concatenating a broken sentence (e.g. "observado null").
+ */
 function healthRelativeAge(timestamp) {
-  if (!timestamp) return "instante desconhecido";
+  if (!timestamp) return null;
   const date = new Date(timestamp);
-  if (Number.isNaN(date.getTime())) return "instante desconhecido";
+  if (Number.isNaN(date.getTime())) return null;
   const diffMs = Date.now() - date.getTime();
   const diffSec = Math.max(0, Math.round(diffMs / 1000));
   if (diffSec < 5) return "agora";
-  if (diffSec < 60) return `${diffSec}s`;
+  if (diffSec < 60) return `há ${diffSec}s`;
   const diffMin = Math.round(diffSec / 60);
-  if (diffMin < 60) return `${diffMin}min`;
+  if (diffMin < 60) return `há ${diffMin}min`;
   const diffHour = Math.round(diffMin / 60);
-  if (diffHour < 24) return `${diffHour}h`;
+  if (diffHour < 24) return `há ${diffHour}h`;
   const diffDay = Math.round(diffHour / 24);
-  return `${diffDay}d`;
+  return `há ${diffDay}d`;
+}
+
+/**
+ * Full "observed at" sentence for a health card footer, built from a
+ * healthRelativeAge() result: "observado agora", "observado há 3min", or
+ * "observação sem horário" when the age could not be determined.
+ */
+function healthObservedPhrase(age) {
+  return age ? `observado ${age}` : "observação sem horário";
 }
 
 /** GET-only JSON fetch with a hard 12s timeout via AbortController. Never mutates. */
@@ -149,7 +163,7 @@ function renderFactoryAlertItem(notification) {
   const meta = healthSeverityMeta(n.severity);
   const channels = Array.isArray(n.delivered_channels) ? n.delivered_channels.filter(Boolean) : [];
   const channelLabel = channels.length ? channels.join(", ") : (n.provider_id || "");
-  const age = healthRelativeAge(n.timestamp);
+  const age = healthRelativeAge(n.timestamp) || "sem horário";
   const title = n.title || n.message || "Notificação";
 
   return `<div class="flex items-start gap-3 rounded-xl border ${meta.border} ${meta.bg} px-3 py-2.5">
@@ -157,7 +171,7 @@ function renderFactoryAlertItem(notification) {
     <div class="min-w-0 flex-1">
       <div class="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
         <p class="text-xs font-semibold ${meta.text} truncate">${healthEscapeHtml(title)}</p>
-        <span class="shrink-0 text-[10px] font-mono text-slate-500" title="${healthEscapeHtml(n.timestamp || "")}">${healthEscapeHtml(meta.label)} · ${healthEscapeHtml(age)} atrás</span>
+        <span class="shrink-0 text-[10px] font-mono text-slate-500" title="${healthEscapeHtml(n.timestamp || "")}">${healthEscapeHtml(meta.label)} · ${healthEscapeHtml(age)}</span>
       </div>
       ${n.message && n.message !== title ? `<p class="mt-0.5 text-[11px] text-slate-400">${healthEscapeHtml(n.message)}</p>` : ""}
       ${channelLabel ? `<p class="mt-0.5 text-[10px] font-mono text-slate-500">Canal: ${healthEscapeHtml(channelLabel)}</p>` : ""}
