@@ -9,7 +9,7 @@ Governed by:
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 import pytest
 
 from core.workflow.control_contracts import (
@@ -225,6 +225,127 @@ def test_materialize_retry_increments_iteration() -> None:
     assert len(successors) == 1
     assert successors[0].stage == "development"
     assert successors[0].iteration == 2
+
+
+# ---------------------------------------------------------------------------
+# HF-27-08 review item 2: loop-cap boundaries by retry kind
+# ---------------------------------------------------------------------------
+
+
+def test_same_stage_retry_not_capped_below_max_same_stage_retries() -> None:
+    from core.workflow.successors import MAX_SAME_STAGE_RETRIES
+
+    store = SQLiteControlStore(":memory:")
+    jk = JobKey(
+        run_id="run-same-stage",
+        ticket_id="T-SAME",
+        plan_version="1.0",
+        stage="build_deploy",
+        iteration=MAX_SAME_STAGE_RETRIES - 1,
+    )
+    res = StageResult(outcome="retry", cause_code="deploy_failed:op-1")
+    successors = materialize_result(jk, res, store, now=NOW)
+
+    assert len(successors) == 1
+    assert successors[0].stage == "build_deploy"
+    assert successors[0].iteration == MAX_SAME_STAGE_RETRIES
+
+
+def test_same_stage_retry_capped_above_max_same_stage_retries() -> None:
+    from core.workflow.successors import MAX_SAME_STAGE_RETRIES
+
+    store = SQLiteControlStore(":memory:")
+    jk = JobKey(
+        run_id="run-same-stage-capped",
+        ticket_id="T-SAME-CAP",
+        plan_version="1.0",
+        stage="build_deploy",
+        iteration=MAX_SAME_STAGE_RETRIES,
+    )
+    res = StageResult(outcome="retry", cause_code="deploy_failed:op-1")
+    successors = materialize_result(jk, res, store, now=NOW)
+
+    assert [s.stage for s in successors] == ["retrospective"]
+
+
+def test_cross_stage_retry_capped_at_max_stage_iterations() -> None:
+    from core.workflow.successors import MAX_STAGE_ITERATIONS
+
+    store = SQLiteControlStore(":memory:")
+    run_id = "run-cross-stage-capped"
+    # Seed `development` already having run MAX_STAGE_ITERATIONS times.
+    conn = store._connect()
+    conn.execute(
+        "INSERT INTO runs (run_id, project_id, demand_id, demand_version, runtime_owner, mode, status, "
+        "plan_digest, config_version, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+        (run_id, "proj", "dem", "1.0", "hf05_sqlite", "autonomous", "active", "d", "1.0", NOW.isoformat(), NOW.isoformat()),
+    )
+    conn.execute(
+        "INSERT INTO jobs (run_id,ticket_id,plan_version,stage,iteration,status,role,required_capabilities,"
+        "fencing_token,timeout_seconds,retry_count,max_retries,actual_cost,output_refs,evidence_refs,created_at,updated_at) "
+        "VALUES (?,?,?,?,?,?,?,?,0,1800,0,3,0.0,'[]','[]',?,?)",
+        (run_id, "proj", "1.0", "development", MAX_STAGE_ITERATIONS, "succeeded", "developer", "[]", NOW.isoformat(), NOW.isoformat()),
+    )
+    conn.commit()
+    conn.close()
+
+    jk = JobKey(run_id=run_id, ticket_id="proj", plan_version="1.0", stage="independent_review", iteration=0)
+    res = StageResult(outcome="retry", cause_code="retry:development\nchanges_required")
+    successors = materialize_result(jk, res, store, now=NOW)
+
+    # development already sits at MAX_STAGE_ITERATIONS -> the bounce would
+    # land on MAX_STAGE_ITERATIONS + 1, over the cap.
+    assert [s.stage for s in successors] == ["retrospective"]
+
+
+def test_not_before_retry_not_capped_by_count_within_wall_clock() -> None:
+    """CI polling (ci_pending:not_before=..., one window every 5 min) must
+    never hit loop_cap purely from repeating past MAX_SAME_STAGE_RETRIES,
+    as long as the run is still within RunCaps.wall_clock_hours."""
+    store = SQLiteControlStore(":memory:")
+    run_id = "run-ci-poll"
+    created_at = NOW
+    conn = store._connect()
+    conn.execute(
+        "INSERT INTO runs (run_id, project_id, demand_id, demand_version, runtime_owner, mode, status, "
+        "plan_digest, config_version, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+        (run_id, "proj", "dem", "1.0", "hf05_sqlite", "autonomous", "active", "d", "1.0", created_at.isoformat(), created_at.isoformat()),
+    )
+    conn.commit()
+    conn.close()
+
+    jk = JobKey(run_id=run_id, ticket_id="proj", plan_version="1.0", stage="integration", iteration=50)
+    not_before_iso = (created_at + timedelta(minutes=5)).isoformat()
+    res = StageResult(outcome="retry", cause_code=f"ci_pending:not_before={not_before_iso}")
+    # Still well inside the default 6h wall-clock budget.
+    successors = materialize_result(jk, res, store, now=created_at + timedelta(minutes=10))
+
+    assert len(successors) == 1
+    assert successors[0].stage == "integration"
+    assert successors[0].iteration == 51
+
+
+def test_not_before_retry_capped_by_wall_clock_not_count() -> None:
+    store = SQLiteControlStore(":memory:")
+    run_id = "run-ci-poll-expired"
+    created_at = NOW
+    conn = store._connect()
+    conn.execute(
+        "INSERT INTO runs (run_id, project_id, demand_id, demand_version, runtime_owner, mode, status, "
+        "plan_digest, config_version, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+        (run_id, "proj", "dem", "1.0", "hf05_sqlite", "autonomous", "active", "d", "1.0", created_at.isoformat(), created_at.isoformat()),
+    )
+    conn.commit()
+    conn.close()
+
+    jk = JobKey(run_id=run_id, ticket_id="proj", plan_version="1.0", stage="integration", iteration=3)
+    not_before_iso = (created_at + timedelta(hours=7, minutes=5)).isoformat()
+    res = StageResult(outcome="retry", cause_code=f"ci_pending:not_before={not_before_iso}")
+    # Past the default 6h wall-clock budget, even though the retry count (4)
+    # is nowhere near MAX_SAME_STAGE_RETRIES.
+    successors = materialize_result(jk, res, store, now=created_at + timedelta(hours=7))
+
+    assert [s.stage for s in successors] == ["retrospective"]
 
 
 def test_materialize_replan_enqueues_planning() -> None:

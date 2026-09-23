@@ -7,6 +7,7 @@ and isolates task execution inside container boundaries.
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import os
 import shutil
@@ -21,7 +22,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from core.orchestrator.adapters.control_postgres import PostgresControlStore
 from core.orchestrator.cloud_artifacts import CloudArtifactStore
-from core.workflow.control_contracts import Claim, RuntimeOwner, StageContext
+from core.workflow.control_contracts import Claim, ExternalOperation, RuntimeOwner, StageContext, StageResult
 from core.workflow.handlers import HandlerRegistry
 from core.workflow.successors import materialize_result
 
@@ -403,6 +404,179 @@ class CloudWorker:
         thread.start()
         return stop_event, thread
 
+    # ----------------------------------------------------------------
+    # HF-27-08 item 4: owner-facing messages (b/c/d). (a) -- grill's own
+    # waiting_human -- is intentionally not handled here; stage_grill sends
+    # its single grill message itself.
+    # ----------------------------------------------------------------
+
+    def _notify_once(self, claim: Claim, kind: str, sender: Callable[[], bool]) -> None:
+        """Send `sender()` at most once per `(job_key, kind)`, using `external_operations` as the guard.
+
+        Recorded via `store.record_operation`, which requires an *active*
+        claim/lease -- this must be called before `store.finish()` releases
+        it. A replayed dispatch for the same job_key (e.g. after a crash and
+        lease-expiry reclaim) sees the existing operation and skips resending.
+        """
+        key = f"notify:{kind}:{claim.job_key.canonical_key()}"
+        try:
+            if self.store.get_operation(key) is not None:
+                return
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.debug("get_operation(%s) failed; sending anyway: %s", key, exc)
+
+        sent = False
+        try:
+            sent = bool(sender())
+        except Exception as exc:
+            logger.warning("Notification '%s' failed for %s: %s", kind, claim.job_key.canonical_key(), exc)
+
+        if not sent:
+            return
+        try:
+            self.store.record_operation(
+                ExternalOperation(
+                    operation_key=key,
+                    request_digest=hashlib.sha256(key.encode("utf-8")).hexdigest(),
+                    provider="notification",
+                    status="succeeded",
+                    observed_at=datetime.now(UTC).isoformat(),
+                ),
+                claim,
+            )
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.warning("Failed to record notification idempotency marker %s: %s", key, exc)
+
+    def _run_total_cost(self, run_id: str) -> float:
+        try:
+            status = self.store.get_run_status(run_id)
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.debug("get_run_status(%s) failed while summing cost: %s", run_id, exc)
+            return 0.0
+        if not status:
+            return 0.0
+        return sum(float(job.get("actual_cost") or 0.0) for job in status.get("jobs", []))
+
+    def _notify_stage_outcome(self, claim: Claim, stage_result: StageResult) -> None:
+        stage = claim.job_key.stage
+        if stage != "build_deploy":
+            if stage_result.outcome == "failed":
+                self._notify_once(claim, "failed", lambda: self._send_failure_summary(claim, stage_result))
+            return
+
+        if stage_result.outcome == "waiting_human":
+            self._notify_once(claim, "human_request", lambda: self._send_commercial_acceptance_request(claim, stage_result))
+        elif stage_result.outcome == "success":
+            self._notify_once(claim, "delivered", lambda: self._send_delivered_message(claim, stage_result))
+        elif stage_result.outcome == "failed":
+            self._notify_once(claim, "failed", lambda: self._send_failure_summary(claim, stage_result))
+
+    def _project_for(self, claim: Claim):
+        from core.line.bindings import default_project_resolver
+
+        return default_project_resolver()(claim.job_key.ticket_id)
+
+    def _send_commercial_acceptance_request(self, claim: Claim, stage_result: StageResult) -> bool:
+        from core.line.human import HumanRequest, request_human_help
+
+        project = self._project_for(claim)
+        if project is None:
+            return False
+        run_id = claim.job_key.run_id
+        refs = self.store.get_latest_success_output_refs(run_id, exclude_stage="build_deploy")
+        pr_url = refs[0] if len(refs) > 1 else ""
+        sha = refs[-1] if refs else ""
+        preview = f"\nPreview: https://{project.domain}" if project.domain else ""
+        guide = (
+            f"Revise o PR mergeado: {pr_url or '(url indisponivel)'}\n"
+            f"SHA a ser publicado: {sha}"
+            f"{preview}\n"
+            f"Confirme o aceite comercial para liberar o deploy (botao cb:accept:{run_id})."
+        )
+        request = HumanRequest(kind="commercial_acceptance", run_id=run_id, blocking_stage="build_deploy", guide_md=guide)
+        request_human_help(project, request)
+        return True
+
+    def _send_delivered_message(self, claim: Claim, stage_result: StageResult) -> bool:
+        project = self._project_for(claim)
+        run_id = claim.job_key.run_id
+        refs = self.store.get_latest_success_output_refs(run_id, exclude_stage="build_deploy")
+        pr_url = refs[0] if len(refs) > 1 else ""
+        sha = refs[-1] if refs else ""
+        total_cost = self._run_total_cost(run_id)
+        assumptions = self._fetch_grill_assumptions(project, pr_url) if project else []
+        lines = [
+            f"Entregue: run {run_id}",
+            f"PR: {pr_url or '(indisponivel)'}",
+            f"URL: {pr_url or '(indisponivel)'}",
+            f"SHA: {sha or '(indisponivel)'}",
+            f"Custo total do run: ${total_cost:.4f}",
+        ]
+        if assumptions:
+            lines.append("Premissas assumidas (GRILL):")
+            lines.extend(f"- {a}" for a in assumptions)
+        return self._send_owner_text("\n".join(lines))
+
+    def _send_failure_summary(self, claim: Claim, stage_result: StageResult) -> bool:
+        run_id = claim.job_key.run_id
+        stage = claim.job_key.stage
+        text = (
+            f"Run {run_id} falhou no estagio '{stage}'.\n"
+            f"Motivo: {stage_result.cause_code or '(sem detalhe)'}\n"
+            "Proximo passo sugerido: revise o log acima; se for um erro transitorio, "
+            "reenvie a demanda; se for um defeito de especificacao, corrija SPEC/tickets "
+            "e reenvie."
+        )
+        return self._send_owner_text(text)
+
+    @staticmethod
+    def _fetch_grill_assumptions(project: Any, pr_url: str) -> list[str]:
+        """Best-effort: the "## Grill (premissas)" section stage_integration folded into the PR body.
+
+        `.darkfac/runs/<run_id>/GRILL.md` no longer exists on the branch by
+        the time `build_deploy` succeeds (stripped before the merge that
+        produced this SHA); this re-derives a short list from the merged
+        PR's body instead. Returns `[]` on any failure -- this is cosmetic,
+        never load-bearing.
+        """
+        if not pr_url:
+            return []
+        try:
+            import json as _json
+            import re
+            import subprocess
+
+            # HF-27-08 review item 7: `gh pr view` takes the full PR URL, not
+            # a bare number extracted with the wrong cwd/repo context.
+            proc = subprocess.run(
+                ["gh", "pr", "view", pr_url, "--json", "body"],
+                cwd=project.path or ".",
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=30,
+            )
+            if proc.returncode != 0:
+                return []
+
+            body = _json.loads(proc.stdout or "{}").get("body", "")
+            section = re.search(r"## Grill \(premissas\)\s*\n\n(.*?)(?:\n##|\Z)", body, re.DOTALL)
+            if not section:
+                return []
+            return [line.lstrip("-* ").strip() for line in section.group(1).splitlines() if line.strip()]
+        except Exception:
+            return []
+
+    def _send_owner_text(self, text: str) -> bool:
+        from core.line.human import _default_sender
+
+        sender = _default_sender()
+        if sender is None:
+            logger.info("No notification sender configured; owner message dropped: %s", text[:120])
+            return False
+        return sender(text)
+
     def dispatch_claimed_job(self, claim: Claim, now: datetime | None = None) -> StepExecutionResult:
         """Execute a claimed stage via the line's HandlerRegistry, finish the job, and materialize successors.
 
@@ -412,8 +586,16 @@ class CloudWorker:
         handler (via `core.line.bindings.build_line_registry`); a stage
         with no real executor is `missing_handler` (fail-closed), never a
         synthetic success.
+
+        Review item 6: an exception raised *inside* the handler is caught
+        here and turned into a same-stage `retry(handler_error:<Type>)`
+        (governed by `successors.MAX_SAME_STAGE_RETRIES`) instead of leaving
+        the job `running` until its lease expires and gets reclaimed
+        forever. `store.finish`/`materialize_result` are called with a
+        *fresh* `datetime.now(UTC)`, taken after the handler returns/raises
+        -- a handler can run for ~30 minutes, so the claim-time `now` (used
+        only to build `StageContext`) would badly understate elapsed time.
         """
-        effective_now = now or datetime.now(UTC)
         stage = claim.job_key.stage
         run_id = claim.job_key.run_id
 
@@ -422,12 +604,30 @@ class CloudWorker:
             stop_heartbeat, heartbeat_thread = self._start_lease_heartbeat(claim)
             try:
                 stage_result = self.registry.dispatch(context)
+            except Exception as exc:
+                logger.error(
+                    "Handler for %s raised %s: %s; recording as retry(handler_error)",
+                    claim.job_key.canonical_key(), type(exc).__name__, exc,
+                )
+                stage_result = StageResult(
+                    outcome="retry",
+                    cause_code=f"handler_error:{type(exc).__name__}: {exc}"[:500],
+                )
             finally:
                 stop_heartbeat.set()
                 heartbeat_thread.join(timeout=2.0)
 
-            self.store.finish(claim, stage_result, now=effective_now)
-            materialize_result(claim.job_key, stage_result, self.store, now=effective_now)
+            # HF-27-08 item 4: owner-facing messages, sent while the claim is
+            # still active (record_operation needs it for the idempotency
+            # guard) and BEFORE finish() releases it.
+            try:
+                self._notify_stage_outcome(claim, stage_result)
+            except Exception as exc:  # pragma: no cover - defensive, must never block finish
+                logger.warning("Owner notification failed for %s: %s", claim.job_key.canonical_key(), exc)
+
+            finish_now = datetime.now(UTC)
+            self.store.finish(claim, stage_result, now=finish_now)
+            materialize_result(claim.job_key, stage_result, self.store, now=finish_now)
 
             return {"stage_result": stage_result.model_dump()}
 

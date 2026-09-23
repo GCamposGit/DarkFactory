@@ -26,7 +26,13 @@ cada.
 1. Escreva um objetivo curto, o que fica fora de escopo, um desenho tecnico
    breve, os arquivos principais a tocar e os riscos.
 2. Quebre o trabalho em 1 a 6 tickets pequenos, cada um com criterio de
-   aceite e testes a adicionar.
+   aceite e testes a adicionar. `smoke` (opcional) e uma lista de checagens
+   HTTP pos-deploy que devem responder 2xx: cada item deve ser um **path
+   absoluto começando com `/`** (ex.: `"/login"`, `"/api/health"`) ou uma
+   **URL absoluta** (ex.: `"https://exemplo.com/status"`). Nunca descreva
+   uma acao em texto livre (ex.: "abrir /login e testar o formulario") --
+   qualquer entrada que nao seja um path ou uma URL e ignorada pela fabrica
+   (nunca executada como comando).
 3. Se a demanda descrever um produto inteiro (varias telas/fluxos) ou exigir
    mais de 6 tickets, **nao** tente encaixar tudo em `tickets`: coloque ali
    somente o primeiro marco (o menor conjunto de tickets que entrega valor

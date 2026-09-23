@@ -526,3 +526,87 @@ def test_pr_body_is_recovered_after_context_already_stripped(
     assert err is None
     assert second_title == first_title == "Widget spec"
     assert "Details." in second_body
+
+
+def test_deleted_run_branch_is_recreated_and_reintegrates(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fake_gh
+) -> None:
+    """HF-27-08 review item 1: verify (not fake) the release-retry path.
+
+    `df/<run_id>` is deleted on merge (`gh pr merge --delete-branch`, which
+    the fake gh here does not itself simulate, so it is done explicitly).
+    `workspace.checkout()` for the same run_id afterwards must recreate the
+    branch from the *new* default-branch tip (which already contains the
+    original merge), and a subsequent `IntegrationStageHandler` run against
+    it must open a brand-new PR (the old one is long gone).
+
+    This does NOT prove development can meaningfully resume: the recreated
+    branch has no `.darkfac/runs/<run_id>/` any more (stripped before the
+    original merge), so `DevelopmentStage.run()` against it would find no
+    `tickets.json` and return `failed(no_tickets)`. That gap is documented
+    in this ticket's final report, not solved here.
+    """
+    origin = _init_bare_origin(tmp_path)
+    project = _project(str(origin))
+    monkeypatch.setenv("DARKFAC_WORKSPACES", str(tmp_path / "host1"))
+    gh_path, set_spec, calls = fake_gh
+
+    ws = checkout(project, "run-smoke")
+    ws_mod.write_context(ws, "DEMAND.md", "# Add widget\n")
+    ws_mod.commit(ws, "feat: add widget", "run-smoke:T1")
+    ws_mod.push(ws)
+
+    set_spec(
+        {
+            "pr_list": [],
+            "pr_create_stdout": "https://github.com/acme/repo/pull/11\n",
+            "pr_checks": [{"bucket": "pass", "name": "build", "link": ""}],
+            "default_branch": "main",
+            "pr_url": "https://github.com/acme/repo/pull/11",
+        }
+    )
+    handler1 = IntegrationStageHandler(project, gh_executable=gh_path, host_caps=["harness:claude"])
+    result1 = handler1.handle(_context("run-smoke"))
+    assert result1.outcome == "success", result1.cause_code
+    merge_sha = result1.output_refs[1]
+
+    # Simulate `gh pr merge --delete-branch` actually deleting the remote ref
+    # (the fake gh's `pr merge` only performs the squash+push, not the
+    # branch deletion) -- this is the state release's retry:development
+    # cause_code is routed into.
+    _git(["push", "origin", "--delete", "df/run-smoke"], cwd=ws.path)
+
+    # A second host (fresh DARKFAC_WORKSPACES root, as a real worker on a
+    # different machine would be) checks out the same run_id.
+    monkeypatch.setenv("DARKFAC_WORKSPACES", str(tmp_path / "host2"))
+    ws2 = checkout(project, "run-smoke")
+    assert ws2.branch == "df/run-smoke"
+    ancestry = _git(["merge-base", "--is-ancestor", merge_sha, "HEAD"], cwd=ws2.path)
+    assert ancestry.returncode == 0, "recreated branch must descend from the already-merged default tip"
+    assert not ws_mod.context_dir(ws2).exists(), (
+        "documented gap: SPEC.md/tickets.json do not survive the strip+merge, "
+        "so a resumed development pass has no ticket to resume"
+    )
+
+    # Whatever development *can* produce (here: a trivial commit standing in
+    # for real resumed work) still lets integration open a fresh PR.
+    ws_mod.write_context(ws2, "DEMAND.md", "# resumed after prod smoke failure\n")
+    ws_mod.commit(ws2, "chore: resume after prod smoke failure", "run-smoke:resume")
+    ws_mod.push(ws2)
+
+    set_spec(
+        {
+            "pr_list": [],
+            "pr_create_stdout": "https://github.com/acme/repo/pull/12\n",
+            "pr_checks": [{"bucket": "pass", "name": "build", "link": ""}],
+            "default_branch": "main",
+            "pr_url": "https://github.com/acme/repo/pull/12",
+        }
+    )
+    handler2 = IntegrationStageHandler(project, gh_executable=gh_path, host_caps=["harness:claude"])
+    result2 = handler2.handle(_context("run-smoke"))
+
+    assert result2.outcome == "success", result2.cause_code
+    assert result2.output_refs[0] == "https://github.com/acme/repo/pull/12"
+    call_names = [" ".join(c[:2]) for c in calls()]
+    assert call_names.count("pr create") == 2, "both the original and the re-integration must create a PR"

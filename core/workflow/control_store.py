@@ -365,6 +365,14 @@ class SQLiteControlStore:
                     ),
                 )
 
+                # HF-27-08 review item 9: stamp the initial grill job with
+                # the line's required_capabilities (git + harness:any for a
+                # registered line project; '[]' -- unchanged prior behaviour
+                # -- for anything else), so a worker without any harness
+                # never claims it, same as every later line stage.
+                from core.workflow.successors import _required_capabilities_json
+
+                grill_caps = _required_capabilities_json(command.project_id, "grill")
                 cur.execute(
                     """
                     INSERT INTO jobs (
@@ -372,11 +380,12 @@ class SQLiteControlStore:
                         role, required_capabilities, fencing_token, timeout_seconds,
                         retry_count, max_retries, actual_cost, output_refs, evidence_refs,
                         created_at, updated_at, ready_at
-                    ) VALUES (?, ?, '1.0', 'grill', 0, 'pending', 'grill_engine', '[]', 0, 1800, 0, 3, 0.0, '[]', '[]', ?, ?, ?)
+                    ) VALUES (?, ?, '1.0', 'grill', 0, 'pending', 'grill_engine', ?, 0, 1800, 0, 3, 0.0, '[]', '[]', ?, ?, ?)
                     """,
                     (
                         run_id,
                         command.project_id,
+                        grill_caps,
                         now_iso,
                         now_iso,
                         now_iso,
@@ -1274,6 +1283,42 @@ class SQLiteControlStore:
         except Exception:
             conn.rollback()
             raise
+        finally:
+            conn.close()
+
+    def max_iteration(self, run_id: str, ticket_id: str, plan_version: str, stage: str) -> int:
+        """Highest `iteration` already recorded for `(run_id, ticket_id, plan_version, stage)`, or -1.
+
+        Used by `core.workflow.successors.materialize_result` to resolve a
+        cross-stage retry's (`retry:<stage>`, HF-27-08 D-b) target iteration
+        without duck-typing store internals.
+        """
+        conn = self._connect()
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                "SELECT MAX(iteration) FROM jobs WHERE run_id = ? AND ticket_id = ? AND plan_version = ? AND stage = ?",
+                (run_id, ticket_id, plan_version, stage),
+            )
+            row = cur.fetchone()
+            value = row[0] if row else None
+            return int(value) if value is not None else -1
+        finally:
+            conn.close()
+
+    def get_run_created_at(self, run_id: str) -> str | None:
+        """ISO `created_at` of `run_id`'s `runs` row, or `None` if unknown.
+
+        Used to bound `not_before`-carrying retries (e.g. `ci_pending`,
+        transient deploy retries) by `RunCaps.wall_clock_hours` instead of a
+        retry count (HF-27-08 review item 2).
+        """
+        conn = self._connect()
+        try:
+            cur = conn.cursor()
+            cur.execute("SELECT created_at FROM runs WHERE run_id = ?", (run_id,))
+            row = cur.fetchone()
+            return row["created_at"] if row else None
         finally:
             conn.close()
 

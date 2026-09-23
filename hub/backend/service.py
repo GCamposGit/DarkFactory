@@ -2267,6 +2267,22 @@ class HubService:
             )
             return {"receipt_id": receipt.receipt_id, "project_id": project_id, "digest": digest}
 
+        # HF-27-08 F (review item 5): wire the production-line grill-answer
+        # and commercial-acceptance callbacks to the same ControlStore the
+        # rest of this service uses, so a resumed job is visible immediately.
+        try:
+            from core.line.human import (
+                build_telegram_commercial_acceptance_handler,
+                build_telegram_line_grill_handler,
+            )
+
+            line_grill_handler = build_telegram_line_grill_handler(self.control_store)
+            commercial_acceptance_handler = build_telegram_commercial_acceptance_handler(self.control_store)
+        except Exception as exc:  # pragma: no cover - defensive, must never break the bot
+            logger.warning("Failed to wire production-line Telegram handlers: %s", exc)
+            line_grill_handler = None
+            commercial_acceptance_handler = None
+
         return TelegramGateway(
             config=config,
             state_dir=self.project_root / ".factory" / "telegram",
@@ -2274,6 +2290,8 @@ class HubService:
             status_handler=_handle_status,
             grill_handler=_handle_grill,
             approval_handler=_handle_approval,
+            line_grill_handler=line_grill_handler,
+            commercial_acceptance_handler=commercial_acceptance_handler,
         )
 
     def process_telegram_webhook(

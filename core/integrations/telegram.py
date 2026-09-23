@@ -731,8 +731,10 @@ class TelegramGateway:
                     result.error = str(exc)
                     result.response_text = f"❌ Failed to submit grill answer: {exc}"
             else:
-                result.resumed = True
-                result.response_text = f"Answer '{index}' recorded for {run_id}#{question_id}."
+                # No handler wired: this is not a success, never claim resumed.
+                result.resumed = False
+                result.error = "line_grill_handler not configured"
+                result.response_text = "❌ Nenhum handler de grill da linha configurado; resposta NAO foi aplicada."
 
         elif len(parts) >= 4 and parts[1] == "grill":
             # cb:grill:<ticket_id>:<choice>
@@ -774,8 +776,10 @@ class TelegramGateway:
                     result.error = str(exc)
                     result.response_text = f"❌ Failed to record commercial acceptance: {exc}"
             else:
-                result.resumed = True
-                result.response_text = f"Commercial acceptance recorded for {run_id}."
+                # No handler wired: this is not a success, never claim resumed.
+                result.resumed = False
+                result.error = "commercial_acceptance_handler not configured"
+                result.response_text = "❌ Nenhum handler de aceite comercial configurado; NAO foi registrado."
 
         elif len(parts) >= 4 and parts[1] == "release":
             # cb:release:<project_id>:<digest>:<choice>

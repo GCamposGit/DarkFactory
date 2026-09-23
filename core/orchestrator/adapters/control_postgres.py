@@ -281,6 +281,11 @@ class PostgresControlStore:
                             ),
                         )
 
+                        # HF-27-08 review item 9: same required_capabilities
+                        # stamping as the SQLite adapter.
+                        from core.workflow.successors import _required_capabilities_json
+
+                        grill_caps = _required_capabilities_json(command.project_id, "grill")
                         cur.execute(
                             """
                             INSERT INTO jobs (
@@ -288,9 +293,9 @@ class PostgresControlStore:
                                 role, required_capabilities, fencing_token, timeout_seconds,
                                 retry_count, max_retries, actual_cost, output_refs, evidence_refs,
                                 created_at, updated_at, ready_at
-                            ) VALUES (%s, %s, '1.0', 'grill', 0, 'pending', 'grill_engine', '[]'::jsonb, 0, 1800, 0, 3, 0.0, '[]'::jsonb, '[]'::jsonb, %s, %s, %s)
+                            ) VALUES (%s, %s, '1.0', 'grill', 0, 'pending', 'grill_engine', %s::jsonb, 0, 1800, 0, 3, 0.0, '[]'::jsonb, '[]'::jsonb, %s, %s, %s)
                             """,
-                            (run_id, command.project_id, now_utc, now_utc, now_utc),
+                            (run_id, command.project_id, grill_caps, now_utc, now_utc, now_utc),
                         )
 
                         outbox_payload = json.dumps(
@@ -1232,6 +1237,42 @@ class PostgresControlStore:
                     return resumed
         except Exception as exc:
             raise StoreUnavailableError(f"PostgreSQL resume_job failed: {exc}") from exc
+
+    def max_iteration(self, run_id: str, ticket_id: str, plan_version: str, stage: str) -> int:
+        """Highest `iteration` already recorded for `(run_id, ticket_id, plan_version, stage)`, or -1."""
+        if self.mock_mode:
+            return self._backend.max_iteration(run_id, ticket_id, plan_version, stage)
+
+        try:
+            with self._psycopg.connect(self.raw_url) as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        "SELECT MAX(iteration) FROM jobs WHERE run_id = %s AND ticket_id = %s AND plan_version = %s AND stage = %s",
+                        (run_id, ticket_id, plan_version, stage),
+                    )
+                    row = cur.fetchone()
+                    value = row[0] if row else None
+                    return int(value) if value is not None else -1
+        except Exception as exc:
+            logger.warning("PostgreSQL max_iteration failed: %s", exc)
+            return -1
+
+    def get_run_created_at(self, run_id: str) -> str | None:
+        """ISO `created_at` of `run_id`'s `runs` row, or `None` if unknown."""
+        if self.mock_mode:
+            return self._backend.get_run_created_at(run_id)
+
+        try:
+            with self._psycopg.connect(self.raw_url) as conn:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT created_at FROM runs WHERE run_id = %s", (run_id,))
+                    row = cur.fetchone()
+                    if not row or row[0] is None:
+                        return None
+                    return row[0].isoformat() if hasattr(row[0], "isoformat") else str(row[0])
+        except Exception as exc:
+            logger.warning("PostgreSQL get_run_created_at failed: %s", exc)
+            return None
 
     def get_latest_success_output_refs(self, run_id: str, exclude_stage: str | None = None) -> list[str]:
         """`output_refs` of the most recently succeeded job for `run_id` (HF-27-08 D-f)."""

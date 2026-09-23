@@ -16,17 +16,17 @@ added in this ticket) -- `StageContext` carries no payload field, only refs.
 
 from __future__ import annotations
 
+import json
 import logging
 from typing import Any, Iterable, Optional, Protocol
 
 from core.line import routing as line_routing
 from core.line import stage_build, stage_grill, stage_integration, stage_planning, stage_release, stage_review
-from core.line import workspace as ws_mod
 from core.line.routing import RoutingConfig
 from core.projects.models import DeployTargetType, ProjectDescriptor
 from core.projects.registry import get_project_registry
 from core.workflow.control_contracts import StageContext, StageResult
-from core.workflow.handlers import HandlerRegistry, build_handlers
+from core.workflow.handlers import HandlerRegistry
 
 logger = logging.getLogger(__name__)
 
@@ -289,62 +289,86 @@ class ReleaseStageAdapter:
 class RetrospectiveStageHandler:
     """Best-effort, never-blocking retrospective (HF-27-08 item H, low priority).
 
-    Appends up to 5 lines to `.darkfac/LESSONS.md` on the project's default
-    branch when it can (a small direct commit+push -- chosen over a PR to
-    keep this genuinely low-priority path from ever needing human review;
-    documented deviation from the ticket's "PR pequeno OR next branch"
-    open choice). Any failure (no repo_url, push rejected, network, no
-    lessons produced) is swallowed and logged: this stage always returns
-    `success` and never feeds back into the DAG or blocks the delivered
-    message.
+    Review item 8: a direct push to the target repo's default branch on
+    every single run was removed -- on a project with Dokploy's
+    push-triggered auto-deploy that push itself would trigger a production
+    deploy, and it bypassed branch protection entirely. This stage now only
+    *records a run summary* (stages touched, each stage's max iteration,
+    total cost, final outcome) to `core.telemetry.store.TelemetryStore`
+    (`.factory/telemetry.db`) when available, else as a single structured
+    log line. It never writes to the target repo. Generating
+    `.darkfac/LESSONS.md` via a reviewed PR (not a direct push) is a
+    documented follow-up, not solved here.
     """
 
     STAGE = "retrospective"
 
-    def __init__(self, *, project_resolver: ProjectResolver, max_lines: int = 5) -> None:
+    def __init__(self, *, store: Any, project_resolver: ProjectResolver) -> None:
+        self.store = store
         self.project_resolver = project_resolver
-        self.max_lines = max_lines
-
-    def _distill(self, run_id: str, input_refs: list[str]) -> Optional[str]:
-        if not input_refs:
-            return None
-        sha_hint = input_refs[-1][:12] if input_refs[-1] else ""
-        return f"- run {run_id}: delivered {sha_hint} ({len(input_refs)} refs recorded)."
 
     def handle(self, context: StageContext) -> StageResult:
         run_id = context.claim.job_key.run_id
         try:
-            project = _resolve_project(context, self.project_resolver)
-            line = self._distill(run_id, context.input_refs)
-            if line and project.repo_url:
-                self._append_lesson(project, line)
+            summary = self._build_summary(context)
+            self._record_summary(run_id, summary)
         except Exception as exc:  # pragma: no cover - defensive, must never block
-            logger.warning("retrospective for run %s failed (non-blocking): %s", run_id, exc)
+            logger.warning("retrospective summary for run %s failed (non-blocking): %s", run_id, exc)
         return StageResult(outcome="success", output_refs=[f"retrospective:{run_id}"])
 
-    def _append_lesson(self, project: ProjectDescriptor, line: str) -> None:
-        root = ws_mod.workspace_root()
-        root.mkdir(parents=True, exist_ok=True)
-        repo_url = ws_mod.normalize_repo_url(project.repo_url)  # type: ignore[arg-type]
-        mirror = ws_mod._ensure_mirror(project.id, repo_url, root)
-        default_branch = project.default_branch or "main"
-        identity = ws_mod._identity_args(mirror)
+    def _build_summary(self, context: StageContext) -> dict[str, Any]:
+        run_id = context.claim.job_key.run_id
+        project_id = context.claim.job_key.ticket_id
+        status: Optional[dict[str, Any]] = None
+        getter = getattr(self.store, "get_run_status", None)
+        if getter is not None:
+            try:
+                status = getter(run_id)
+            except Exception as exc:  # pragma: no cover - defensive
+                logger.debug("get_run_status(%s) failed for retrospective: %s", run_id, exc)
 
-        ws_mod._run_git(["checkout", "-B", default_branch, f"origin/{default_branch}"], cwd=mirror, repo_url=repo_url)
-        lessons_path = mirror / ".darkfac" / "LESSONS.md"
-        lessons_path.parent.mkdir(parents=True, exist_ok=True)
-        existing = lessons_path.read_text(encoding="utf-8").splitlines() if lessons_path.is_file() else []
-        existing.append(line)
-        lessons_path.write_text("\n".join(existing[-200:]) + "\n", encoding="utf-8")
+        jobs = (status or {}).get("jobs", [])
+        stages: dict[str, dict[str, Any]] = {}
+        total_cost = 0.0
+        for job in jobs:
+            stage = job.get("stage")
+            if not stage:
+                continue
+            cost = float(job.get("actual_cost") or 0.0)
+            total_cost += cost
+            entry = stages.setdefault(stage, {"max_iteration": 0, "last_status": job.get("status")})
+            entry["max_iteration"] = max(entry["max_iteration"], int(job.get("iteration") or 0))
+            entry["last_status"] = job.get("status")
 
-        ws_mod._run_git(["add", "--", ".darkfac/LESSONS.md"], cwd=mirror)
-        diff_check = ws_mod._run_git(["diff", "--cached", "--quiet"], cwd=mirror, check=False)
-        if diff_check.returncode == 0:
-            return  # nothing new to commit (idempotent replay)
-        ws_mod._run_git(
-            [*identity, "commit", "-m", "chore(line): retrospective lesson"], cwd=mirror
-        )
-        ws_mod._run_git(["push", "origin", f"HEAD:{default_branch}"], cwd=mirror, repo_url=repo_url)
+        return {
+            "run_id": run_id,
+            "project_id": project_id,
+            "final_outcome": (status or {}).get("status", "unknown"),
+            "total_cost_usd": round(total_cost, 4),
+            "stages": stages,
+        }
+
+    def _record_summary(self, run_id: str, summary: dict[str, Any]) -> None:
+        try:
+            from core.telemetry.models import TelemetryRecordCreate
+            from core.telemetry.store import TelemetryStore
+
+            TelemetryStore().record(
+                TelemetryRecordCreate(
+                    ticket_id=run_id,
+                    provider="darkfac.line",
+                    model="retrospective-summary",
+                    harness="core.line.retrospective",
+                    cost_usd=summary["total_cost_usd"],
+                    success=summary["final_outcome"] == "completed",
+                    metadata=summary,
+                )
+            )
+            return
+        except Exception as exc:  # pragma: no cover - defensive, TelemetryStore is optional
+            logger.debug("TelemetryStore unavailable for run %s (%s); logging structured summary instead", run_id, exc)
+
+        logger.info("retrospective_run_summary %s", json.dumps(summary, ensure_ascii=False, default=str))
 
 
 # --------------------------------------------------------------------------
@@ -361,19 +385,21 @@ def build_line_registry(
     intake_service: Optional[Any] = None,
     gh_executable: str = "gh",
 ) -> HandlerRegistry:
-    """Build the `HandlerRegistry` for every `LINE_STAGES` entry.
+    """Build the `HandlerRegistry` for exactly `LINE_STAGES`, fail-closed otherwise.
 
-    `core.workflow.handlers.build_handlers` still registers a
-    `DefaultStageHandler` for every stage in `STANDARD_STAGES` (the older
-    HF-05 stage set) as a fail-closed placeholder; every stage this ticket
-    owns is overridden below with its real executor. A stage with no real
-    executor (e.g. `research`, `catalog_refresh`) is left at its
-    `DefaultStageHandler` default, which HF-27-08's acceptance requires to
-    behave as `missing_handler` -- it does, because `DefaultStageHandler`
-    with no bound `service` calls `_default_execute`, which fabricates a
-    fake success; that is the pre-existing HF-05 behaviour and out of this
-    ticket's file ownership, so the line simply never dispatches those
-    stages (they are absent from `LINE_STAGES`/`PRODUCTIVE_DAG`).
+    Review item 3: `core.workflow.handlers.build_handlers(bindings=...)`
+    (used by the older HF-05 stage set) also registers a
+    `DefaultStageHandler` for every one of `STANDARD_STAGES`, and
+    `DefaultStageHandler` with no bound `service` *fabricates a fake
+    success* (`_default_execute`) rather than failing closed. Calling
+    `build_handlers` directly here would let a legacy stage like `research`
+    or `catalog_refresh` "succeed" through the line's own worker, silently
+    breaking fail-closed. This registry is built from an empty
+    `HandlerRegistry` instead, populated with exactly the `LINE_STAGES`
+    bindings below; `HandlerRegistry.dispatch()`'s own `__missing__`/lookup
+    path already returns `StageResult(outcome="failed",
+    cause_code="missing_handler")` for any other stage key, with no
+    successor (see `core.workflow.handlers.HandlerRegistry.dispatch`).
     """
     host_caps = list(host_caps)
     cfg = routing_config or line_routing.load_routing_config()
@@ -391,10 +417,13 @@ def build_line_registry(
             project_resolver=resolver, gh_executable=gh_executable, host_caps=host_caps, routing_config=cfg
         ),
         "build_deploy": ReleaseStageAdapter(project_resolver=resolver),
-        "retrospective": RetrospectiveStageHandler(project_resolver=resolver),
+        "retrospective": RetrospectiveStageHandler(store=store, project_resolver=resolver),
     }
 
-    return build_handlers(bindings=bindings)
+    registry = HandlerRegistry()
+    for stage, handler in bindings.items():
+        registry[(stage, "v1")] = handler
+    return registry
 
 
 __all__ = [

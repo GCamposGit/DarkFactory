@@ -87,10 +87,18 @@ STAGE_ROLES: dict[str, str] = {
     "retrospective": "retrospective_agent",
 }
 
-# HF-27-08 loop guard (see module docstring): a retry whose resolved target
-# iteration would exceed this is terminal (`failed(loop_cap)`) rather than
-# looping forever between two disagreeing stages.
+# HF-27-08 loop guard (see module docstring, review item 2): only a
+# cross-stage bounce (`retry:<stage>`) counts against MAX_STAGE_ITERATIONS --
+# two stages disagreeing indefinitely is the failure mode this guards
+# against. A plain same-stage retry (e.g. a transient agent/deploy error, or
+# CI polling via `ci_pending:not_before=...`) gets its own, much larger cap
+# (MAX_SAME_STAGE_RETRIES) so a 5-minute CI poll window or a flaky deploy
+# adapter does not hit `loop_cap` well before the run's own wall-clock
+# budget. A same-stage retry that additionally carries `not_before` is
+# bounded by `RunCaps.wall_clock_hours` (from the run's `created_at`)
+# instead of a count at all -- see `_run_wall_clock_exceeded`.
 MAX_STAGE_ITERATIONS = 10
+MAX_SAME_STAGE_RETRIES = 30
 
 _RETRY_TARGET_RE = re.compile(r"^retry:(?P<stage>[A-Za-z_][A-Za-z0-9_]*)(?:\n(?P<log>[\s\S]*))?$")
 _NOT_BEFORE_RE = re.compile(r"not_before=(?P<iso>\S+)")
@@ -123,38 +131,56 @@ def _max_iteration_for_stage(
     Used to resolve a cross-stage retry's target iteration (D-b): the
     successor is `iteration = this + 1`, so a first-ever bounce back to a
     stage that only ran once at iteration 0 lands on iteration 1.
+
+    Delegates to `ControlStore.max_iteration()` (a real store method on both
+    adapters, review item 10) rather than duck-typing store internals here.
+    Any store missing that method (a test double, for instance) falls back
+    to -1, matching the historical "no prior iteration" default.
     """
-    sqlite_backend = getattr(store, "_backend", None) if getattr(store, "mock_mode", False) else (
-        store if hasattr(store, "_connect") else None
-    )
-    is_postgres = hasattr(store, "raw_url") and not getattr(store, "mock_mode", False) and hasattr(store, "_psycopg")
+    method = getattr(store, "max_iteration", None)
+    if method is None:
+        return -1
+    try:
+        return method(run_id, ticket_id, plan_version, stage)
+    except Exception:  # pragma: no cover - defensive, must never break materialization
+        return -1
 
-    if sqlite_backend is not None:
-        conn = sqlite_backend._connect()
-        try:
-            cur = conn.cursor()
-            cur.execute(
-                "SELECT MAX(iteration) FROM jobs WHERE run_id = ? AND ticket_id = ? AND plan_version = ? AND stage = ?",
-                (run_id, ticket_id, plan_version, stage),
-            )
-            row = cur.fetchone()
-            value = row[0] if row else None
-            return int(value) if value is not None else -1
-        finally:
-            conn.close()
 
-    if is_postgres:
-        with store._psycopg.connect(store.raw_url) as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    "SELECT MAX(iteration) FROM jobs WHERE run_id = %s AND ticket_id = %s AND plan_version = %s AND stage = %s",
-                    (run_id, ticket_id, plan_version, stage),
-                )
-                row = cur.fetchone()
-                value = row[0] if row else None
-                return int(value) if value is not None else -1
+def _run_wall_clock_exceeded(store: ControlStore, run_id: str, now_dt: datetime) -> bool:
+    """True if `run_id` has been open longer than `RunCaps.wall_clock_hours` (review item 2).
 
-    return -1
+    A `not_before`-carrying same-stage retry (CI polling, transient deploy
+    retries) is bounded by wall-clock time from the run's `created_at`, not
+    by a retry count -- a 5-minute CI poll window alone would hit any
+    reasonable count cap well before a slow CI run finishes.
+    """
+    method = getattr(store, "get_run_created_at", None)
+    if method is None:
+        return False
+    try:
+        created_raw = method(run_id)
+    except Exception:  # pragma: no cover - defensive
+        return False
+    if not created_raw:
+        return False
+    try:
+        created_at = datetime.fromisoformat(str(created_raw))
+    except ValueError:
+        return False
+    if created_at.tzinfo is None:
+        created_at = created_at.replace(tzinfo=UTC)
+    compare_now = now_dt if now_dt.tzinfo is not None else now_dt.replace(tzinfo=UTC)
+
+    wall_clock_hours = 6.0
+    try:
+        from core.line.routing import load_routing_config
+
+        wall_clock_hours = load_routing_config().run_caps.wall_clock_hours
+    except Exception:  # pragma: no cover - defensive, core.line may be unavailable
+        pass
+
+    elapsed_hours = (compare_now - created_at).total_seconds() / 3600.0
+    return elapsed_hours > wall_clock_hours
 
 
 def _required_capabilities_json(ticket_id: str, stage: str) -> str:
@@ -242,16 +268,25 @@ def materialize_result(
     elif result.outcome == "retry":
         target_stage, retry_not_before = _parse_retry_cause_code(result.cause_code)
         if target_stage:
+            # Cross-stage bounce (D-b): counts against MAX_STAGE_ITERATIONS.
             base_iteration = _max_iteration_for_stage(
                 store, job_key.run_id, job_key.ticket_id, job_key.plan_version, target_stage
             )
             new_iteration = base_iteration + 1
             successor_stage = target_stage
+            cap_exceeded = new_iteration > MAX_STAGE_ITERATIONS
         else:
+            # Same-stage retry: either bounded by wall-clock time (a
+            # not_before-carrying transient wait, e.g. CI polling) or by a
+            # much larger count cap (review item 2).
             new_iteration = job_key.iteration + 1
             successor_stage = job_key.stage
+            if retry_not_before:
+                cap_exceeded = _run_wall_clock_exceeded(store, job_key.run_id, now_dt)
+            else:
+                cap_exceeded = new_iteration > MAX_SAME_STAGE_RETRIES
 
-        if new_iteration > MAX_STAGE_ITERATIONS:
+        if cap_exceeded:
             loop_cap_exceeded = True
             emit_retrospective = True
             retry_not_before = None

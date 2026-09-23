@@ -207,9 +207,13 @@ def test_smoke_failure_rolls_back_and_retries_with_log(tmp_path: Path) -> None:
     result = handler.handle(_context("run-1", "https://github.com/acme/acme/pull/1", sha_bad))
 
     assert result.outcome == "retry"
+    # HF-27-08 review item 1: routes back to development, and the smoke
+    # log itself is persisted to the run's context (PROD_SMOKE_FAILURE.md),
+    # not embedded in the cause_code any more -- ReviewStage/ValidationStage
+    # already work this way (review-N.md / validation.json).
+    assert result.cause_code.startswith("retry:development\n")
     assert "prod_smoke_failed_rolled_back_to_" in result.cause_code
     assert sha_good[:12] in result.cause_code
-    assert "500" in result.cause_code
 
     # Rollback happened against the fake adapter, back to the previous good SHA.
     assert adapter.rollback_calls == [(sha_bad, sha_good, "post-deploy smoke check failed")]
@@ -392,6 +396,56 @@ def test_restored_sha_failing_smoke_is_terminal(tmp_path: Path) -> None:
     assert result.cause_code.startswith("rollback_smoke_failed:")
 
 
+def test_prod_smoke_failure_log_is_persisted_on_run_branch(tmp_path: Path, monkeypatch) -> None:
+    """HF-27-08 review item 1: the smoke failure log lands in the run's
+    committed context (PROD_SMOKE_FAILURE.md), for a resumed development
+    pass to read -- exactly like ReviewStage/ValidationStage already do."""
+    import subprocess
+
+    from core.line import workspace as ws_mod
+
+    def git(args: list[str], cwd: Path) -> str:
+        proc = subprocess.run(["git", *args], cwd=str(cwd), capture_output=True, text=True, check=True)
+        return proc.stdout.strip()
+
+    origin = tmp_path / "origin.git"
+    git(["init", "--bare", str(origin)], tmp_path)
+    seed = tmp_path / "_seed"
+    git(["clone", str(origin), str(seed)], tmp_path)
+    git(["checkout", "-B", "main"], seed)
+    (seed / "README.md").write_text("seed\n", encoding="utf-8")
+    git(["add", "."], seed)
+    git(["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-m", "seed"], seed)
+    git(["push", "origin", "main"], seed)
+
+    monkeypatch.setenv("DARKFAC_WORKSPACES", str(tmp_path / "workspaces"))
+    project = ProjectDescriptor(
+        id="acme",
+        name="Acme Project",
+        repo_url=str(origin),
+        default_branch="main",
+        deploy=DeployConfig(type=DeployTargetType.DOKPLOY, params={}),
+        smoke=[SmokeCheck(url="https://acme.example/healthz", expect_status=200)],
+    )
+    adapter = FakeAdapter()
+    handler = _handler(project, adapter, tmp_path, _opener_factory([(200, b"ok")]))
+
+    sha_good = "sha_good" + "a" * 32
+    handler.handle(_context("run-persist", "https://github.com/acme/acme/pull/1", sha_good))
+
+    handler.smoke_opener = _opener_factory([(500, b"boom"), (200, b"ok")])
+    sha_bad = "sha_bad_" + "b" * 32
+    result = handler.handle(_context("run-persist", "https://github.com/acme/acme/pull/1", sha_bad))
+    assert result.outcome == "retry"
+
+    ws = ws_mod.checkout(project, "run-persist")
+    log_path = ws_mod.context_dir(ws) / "PROD_SMOKE_FAILURE.md"
+    assert log_path.is_file(), "PROD_SMOKE_FAILURE.md must be committed to the run's branch"
+    content = log_path.read_text(encoding="utf-8")
+    assert sha_bad in content
+    assert "prod_smoke_failed_rolled_back_to_" in content
+
+
 def _bare_origin_with_commits(tmp_path: Path, count: int) -> tuple[Path, list[str]]:
     import subprocess
 
@@ -490,5 +544,39 @@ def test_ticket_smoke_entry_failure_triggers_rollback(tmp_path: Path, monkeypatc
     result = handler.handle(context)
 
     assert result.outcome == "retry"
+    assert (result.cause_code or "").startswith("retry:development\n"), (
+        "HF-27-08 review item 1: prod smoke rollback must route back to development"
+    )
     assert "prod_smoke_failed_rolled_back_to_" in (result.cause_code or "")
     assert adapter.rollback_calls, "a failing ticket smoke entry must trigger the same rollback path"
+
+
+def test_ticket_smoke_free_text_entry_is_skipped_never_executed(tmp_path: Path, monkeypatch) -> None:
+    """HF-27-08 review item 7: a planner free-text entry must never reach a shell."""
+    import core.line.stage_release as stage_release_mod
+
+    project = _project()
+    adapter = FakeAdapter()
+    # project.smoke's own check passes; no second HTTP call should ever
+    # happen for the free-text entry (it must be skipped, not run).
+    opener = _opener_factory([(200, b"ok")])
+    handler = _handler(project, adapter, tmp_path, opener)
+
+    called_subprocess = {"count": 0}
+
+    def _boom(*args, **kwargs):
+        called_subprocess["count"] += 1
+        raise AssertionError("free-text ticket smoke entry must never be passed to subprocess.run")
+
+    monkeypatch.setattr(stage_release_mod.subprocess, "run", _boom)
+    monkeypatch.setattr(
+        stage_release_mod,
+        "_fetch_ticket_smoke_entries",
+        lambda *a, **k: ["abrir /login e testar o formulario manualmente"],
+    )
+
+    context = _context("run-freetext-smoke", "https://github.com/acme/acme/pull/13", "sha_v2_" + "c" * 33)
+    result = handler.handle(context)
+
+    assert called_subprocess["count"] == 0
+    assert result.outcome == "success", result.cause_code
