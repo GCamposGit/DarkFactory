@@ -9,16 +9,26 @@ and developer workstations without cluttering the interactive laptop.
 from __future__ import annotations
 
 import argparse
+import base64
+import contextlib
+import hmac
+import json
 import logging
 import os
+import queue
+import re
 import shutil
+import socket
 import subprocess
 import sys
+import threading
 import time
+import uuid
+from dataclasses import dataclass, field as dataclass_field
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-from fastapi import FastAPI, HTTPException, status
+from fastapi import FastAPI, HTTPException, Request, status
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
@@ -27,6 +37,10 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from core.harness import cache as harness_cache
+from core.harness.markers import MARKER_HARNESS_RESULT
+from core.harness.runner import _selected_steps as _harness_selected_steps
+from core.harness.runner import load_config as _load_harness_config
 from core.harness.test_subagent import (
     DistilledTestReport,
     TestExecutionInstruction,
@@ -39,6 +53,12 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(na
 DEFAULT_WORKER_NODE_ID = "onprem-z97-server"
 DEFAULT_WORKER_PORT = 8080
 DEFAULT_WORKER_HOST = "0.0.0.0"
+ENV_WORKER_TOKEN = "DARKFAC_WORKER_TOKEN"
+ENV_WORKER_STATE_DIR = "DARKFAC_WORKER_STATE_DIR"
+JOB_LOG_KEEP = 20
+JOB_WATCHDOG_POLL_SEC = 1.0
+DEFAULT_JOB_TIMEOUT_SEC = 1800.0
+JOB_TIMEOUT_BUFFER_SEC = 120.0
 
 
 class WorkerHealthStatus(BaseModel):
@@ -50,6 +70,17 @@ class WorkerHealthStatus(BaseModel):
     project_root: str = Field(..., description="Root directory where tests execute")
     active_runs: int = Field(default=0, description="Currently running test jobs")
     available_harnesses: list[str] = Field(default_factory=list, description="Supported AI harnesses detected on this host")
+    # HF-27-11: remote dispatch of the official validation harness -----------
+    platform_family: str = Field(default="windows", description="'windows' or 'posix', for cache-key bundle negotiation")
+    python_version: str = Field(default="", description="'major.minor' of the interpreter running this worker")
+    hostname: str = Field(default="", description="socket.gethostname() of this worker, for self-dispatch detection")
+    busy: bool = Field(default=False, description="True while a harness job is actively running (single worker thread)")
+    queue_length: int = Field(default=0, description="Number of jobs queued or running on this worker")
+    known_shas: list[str] = Field(
+        default_factory=list,
+        description="origin/main SHA + recent validated candidate SHAs, for thin `git bundle --not` negotiation",
+    )
+    harness_version: str = Field(default="1", description="Remote harness job protocol version")
 
 
 class CommandExecutionRequest(BaseModel):
@@ -120,6 +151,405 @@ class CodexExecutionResponse(BaseModel):
     tokens_used: int = Field(default=0, description="Tokens recorded by Codex CLI")
     duration_seconds: float = Field(..., description="Duration of execution in seconds")
     error: Optional[str] = Field(default=None, description="Error message if failed")
+
+
+# --- HF-27-11: async harness job protocol (remote dispatch server half) ----
+
+
+def _check_auth(request: Request) -> None:
+    """Optional bearer-token auth for mutating endpoints. Constant-time
+    compare; the token itself is never logged. A no-op when
+    ``DARKFAC_WORKER_TOKEN`` is unset on this worker (``/health`` always
+    stays open, regardless)."""
+
+    token = os.environ.get(ENV_WORKER_TOKEN, "").strip()
+    if not token:
+        return
+    provided = request.headers.get("authorization", "")
+    expected = f"Bearer {token}"
+    if not hmac.compare_digest(provided, expected):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Unauthorized")
+
+
+def default_worker_state_dir() -> Path:
+    """Machine-local scratch dir for bundles/worktrees/job logs (not inside
+    the repo -- a stray worktree here must never pollute `git status`)."""
+
+    configured = os.environ.get(ENV_WORKER_STATE_DIR)
+    if configured:
+        return Path(configured).expanduser()
+    if sys.platform == "win32":
+        local_app_data = os.environ.get("LOCALAPPDATA")
+        base = Path(local_app_data) if local_app_data else Path.home() / "AppData" / "Local"
+        return base / "DarkFac" / "worker"
+    xdg_state_home = os.environ.get("XDG_STATE_HOME")
+    base = Path(xdg_state_home) if xdg_state_home else Path.home() / ".local" / "state"
+    return base / "darkfac" / "worker"
+
+
+def known_validated_shas(root_path: Path, *, limit: int = 20) -> list[str]:
+    """origin/main SHA (if resolvable) + this host's most recently cached
+    PASS candidate SHAs, for the client's thin ``git bundle --not`` bundle
+    negotiation."""
+
+    shas: list[str] = []
+    proc = subprocess.run(
+        ["git", "rev-parse", "origin/main"],
+        cwd=str(root_path),
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        check=False,
+    )
+    if proc.returncode == 0:
+        sha = proc.stdout.strip().lower()
+        if sha:
+            shas.append(sha)
+
+    with contextlib.suppress(Exception):
+        store = harness_cache._read_local_store()  # noqa: SLF001 - worker-internal negotiation only
+        dated: list[tuple[float, str]] = []
+        for record in store.values():
+            if not isinstance(record, dict):
+                continue
+            result = record.get("result") or {}
+            candidate_sha = (result.get("candidate_sha") or record.get("candidate_sha") or "").lower()
+            if candidate_sha:
+                dated.append((float(record.get("created_at", 0.0)), candidate_sha))
+        dated.sort(key=lambda item: item[0], reverse=True)
+        for _created_at, candidate_sha in dated[:limit]:
+            if candidate_sha not in shas:
+                shas.append(candidate_sha)
+
+    return shas[:limit]
+
+
+def _extract_harness_result(log_text: str) -> Optional[Dict[str, Any]]:
+    """Parse the last ``[HARNESS_RESULT] {...}`` line out of a job's log."""
+
+    result: Optional[Dict[str, Any]] = None
+    prefix = f"{MARKER_HARNESS_RESULT} "
+    for line in log_text.splitlines():
+        stripped = line.strip()
+        if stripped.startswith(prefix):
+            with contextlib.suppress(json.JSONDecodeError):
+                result = json.loads(stripped[len(prefix):])
+    return result
+
+
+def _job_timeout_sec(worktree_path: Path, *, quick: bool, include_holdout: bool) -> float:
+    try:
+        config, _config_hash = _load_harness_config(worktree_path / "harness.config.json")
+        steps = _harness_selected_steps(config, quick=quick, include_holdout=include_holdout)
+        if steps:
+            return float(sum(step.timeout_sec for step in steps)) + JOB_TIMEOUT_BUFFER_SEC
+    except Exception as exc:  # noqa: BLE001 - never let timeout computation crash a job
+        logger.warning("Could not compute job timeout from worktree config: %s", exc)
+    return DEFAULT_JOB_TIMEOUT_SEC
+
+
+@dataclass
+class HarnessJob:
+    """One remote-dispatched harness run: queued -> running -> done|failed|cancelled."""
+
+    job_id: str
+    candidate_sha: str
+    tree_sha: str
+    quick: bool
+    include_holdout: bool
+    requesting_host: str
+    ref_name: str
+    status: str = "queued"  # queued | running | done | failed | cancelled
+    log_chunks: list[str] = dataclass_field(default_factory=list)
+    result_json: Optional[Dict[str, Any]] = None
+    returncode: Optional[int] = None
+    error: Optional[str] = None
+    worktree_path: Optional[Path] = None
+    process: Optional["subprocess.Popen[str]"] = None
+    cancel_requested: bool = False
+    created_at: float = dataclass_field(default_factory=time.time)
+    lock: threading.Lock = dataclass_field(default_factory=threading.Lock)
+
+    def append_log(self, text: str) -> None:
+        with self.lock:
+            self.log_chunks.append(text)
+
+    def log_slice(self, offset: int) -> tuple[str, int]:
+        with self.lock:
+            full = "".join(self.log_chunks)
+        return full[offset:], len(full)
+
+
+class JobManager:
+    """Single FIFO worker thread executing one harness job at a time on this
+    node (the runner's own machine-wide `suite_lock` also serialises any
+    OTHER pytest/harness invocation on the box against these jobs)."""
+
+    def __init__(self, root_path: Path, state_dir: Optional[Path] = None) -> None:
+        self.root_path = root_path
+        self.state_dir = state_dir or default_worker_state_dir()
+        self.state_dir.mkdir(parents=True, exist_ok=True)
+        (self.state_dir / "logs").mkdir(parents=True, exist_ok=True)
+        (self.state_dir / "worktrees").mkdir(parents=True, exist_ok=True)
+        self.jobs: Dict[str, HarnessJob] = {}
+        self._jobs_lock = threading.Lock()
+        self._queue: "queue.Queue[str]" = queue.Queue()
+        self._worker_thread = threading.Thread(
+            target=self._worker_loop, daemon=True, name="darkfac-worker-jobs"
+        )
+        self._worker_thread.start()
+
+    # --- introspection for /health -----------------------------------------
+
+    def is_busy(self) -> bool:
+        with self._jobs_lock:
+            return any(job.status == "running" for job in self.jobs.values())
+
+    def queue_length(self) -> int:
+        with self._jobs_lock:
+            return sum(1 for job in self.jobs.values() if job.status in ("queued", "running"))
+
+    # --- submit / status / cancel -------------------------------------------
+
+    def submit(self, bundle_bytes: bytes, metadata: Dict[str, Any]) -> tuple[int, Dict[str, Any]]:
+        candidate_sha = str(metadata.get("candidate_sha", "")).strip().lower()
+        if not re.fullmatch(r"[0-9a-f]{7,64}", candidate_sha or ""):
+            return 400, {"error": "invalid or missing candidate_sha"}
+
+        bundle_path = self.state_dir / f"bundle-{uuid.uuid4().hex}.bundle"
+        bundle_path.write_bytes(bundle_bytes)
+        try:
+            # `git bundle verify` fails BOTH for a genuinely corrupt bundle
+            # AND for a well-formed *thin* bundle whose prerequisite commits
+            # this repo doesn't have yet -- the two are indistinguishable
+            # from the exit code alone. Don't hard-reject here: fall through
+            # to the actual fetch attempt below, which fails the same way
+            # for both cases and is handled uniformly (retry after `git
+            # fetch origin`, else 409 so the client resends a full bundle).
+            verify = subprocess.run(
+                ["git", "bundle", "verify", str(bundle_path)],
+                cwd=str(self.root_path),
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                check=False,
+            )
+            if verify.returncode != 0:
+                logger.info("git bundle verify (non-fatal, may just be thin): %s", verify.stderr.strip()[:500])
+
+            ref_name = f"refs/darkfac/validate/{candidate_sha}"
+            fetch = subprocess.run(
+                ["git", "fetch", str(bundle_path), f"HEAD:{ref_name}"],
+                cwd=str(self.root_path),
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                check=False,
+            )
+            if fetch.returncode != 0:
+                subprocess.run(
+                    ["git", "fetch", "origin"],
+                    cwd=str(self.root_path),
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                    errors="replace",
+                    check=False,
+                )
+                fetch_retry = subprocess.run(
+                    ["git", "fetch", str(bundle_path), f"HEAD:{ref_name}"],
+                    cwd=str(self.root_path),
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                    errors="replace",
+                    check=False,
+                )
+                if fetch_retry.returncode != 0:
+                    return 409, {
+                        "missing_prerequisites": True,
+                        "detail": fetch_retry.stderr.strip()[:500],
+                    }
+        finally:
+            with contextlib.suppress(OSError):
+                bundle_path.unlink()
+
+        job = HarnessJob(
+            job_id=uuid.uuid4().hex,
+            candidate_sha=candidate_sha,
+            tree_sha=str(metadata.get("tree_sha", "")),
+            quick=bool(metadata.get("quick", True)),
+            include_holdout=bool(metadata.get("include_holdout", False)),
+            requesting_host=str(metadata.get("requesting_host", "unknown")),
+            ref_name=ref_name,
+        )
+        with self._jobs_lock:
+            self.jobs[job.job_id] = job
+        self._queue.put(job.job_id)
+        logger.info(
+            "Queued harness job %s for candidate %s (from %s)",
+            job.job_id, candidate_sha[:12], job.requesting_host,
+        )
+        return 200, {"job_id": job.job_id}
+
+    def status(self, job_id: str, offset: int) -> Optional[Dict[str, Any]]:
+        job = self.jobs.get(job_id)
+        if job is None:
+            return None
+        log_chunk, next_offset = job.log_slice(offset)
+        return {
+            "status": job.status,
+            "log_chunk": log_chunk,
+            "next_offset": next_offset,
+            "result_json": job.result_json,
+            "returncode": job.returncode,
+            "error": job.error,
+        }
+
+    def cancel(self, job_id: str) -> bool:
+        job = self.jobs.get(job_id)
+        if job is None:
+            return False
+        job.cancel_requested = True
+        if job.status == "queued":
+            job.status = "cancelled"
+        process = job.process
+        if process is not None and process.poll() is None:
+            with contextlib.suppress(Exception):
+                process.terminate()
+        return True
+
+    # --- worker thread --------------------------------------------------------
+
+    def _worker_loop(self) -> None:
+        while True:
+            job_id = self._queue.get()
+            job = self.jobs.get(job_id)
+            if job is None:
+                continue
+            if job.cancel_requested:
+                job.status = "cancelled"
+                continue
+            try:
+                self._run_job(job)
+            except Exception as exc:  # noqa: BLE001 - the worker thread must never die
+                logger.error("Unhandled error running job %s: %s", job_id, exc, exc_info=True)
+                job.status = "failed"
+                job.error = str(exc)
+
+    def _run_job(self, job: HarnessJob) -> None:
+        job.status = "running"
+        worktree_path = self.state_dir / "worktrees" / job.job_id
+        job.worktree_path = worktree_path
+        log_file_path = self.state_dir / "logs" / f"{job.job_id}.log"
+
+        try:
+            add = subprocess.run(
+                ["git", "worktree", "add", "--detach", str(worktree_path), job.ref_name],
+                cwd=str(self.root_path),
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                check=False,
+            )
+            if add.returncode != 0:
+                job.status = "failed"
+                job.error = f"git worktree add failed: {add.stderr.strip()[:1000]}"
+                job.append_log(job.error)
+                return
+
+            timeout_sec = _job_timeout_sec(worktree_path, quick=job.quick, include_holdout=job.include_holdout)
+            cmd = [sys.executable, "core/harness/runner.py", "--quick", "--local"]
+            if job.include_holdout:
+                cmd.append("--holdout")
+            env = dict(os.environ)
+            env["DARKFAC_HARNESS_WORKER_JOB"] = "1"
+
+            with open(log_file_path, "w", encoding="utf-8") as log_fh:
+                process = subprocess.Popen(
+                    cmd,
+                    cwd=str(worktree_path),
+                    env=env,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                    encoding="utf-8",
+                    errors="replace",
+                    bufsize=1,
+                )
+                job.process = process
+                deadline = time.monotonic() + timeout_sec
+                stop_watchdog = threading.Event()
+
+                def _watchdog() -> None:
+                    while not stop_watchdog.wait(JOB_WATCHDOG_POLL_SEC):
+                        if job.cancel_requested or time.monotonic() > deadline:
+                            with contextlib.suppress(Exception):
+                                process.kill()
+                            return
+
+                watchdog = threading.Thread(target=_watchdog, daemon=True)
+                watchdog.start()
+                try:
+                    assert process.stdout is not None
+                    for line in process.stdout:
+                        job.append_log(line)
+                        log_fh.write(line)
+                finally:
+                    stop_watchdog.set()
+                    process.wait()
+
+            job.returncode = process.returncode
+
+            if job.cancel_requested:
+                job.status = "cancelled"
+                return
+
+            full_log = "".join(job.log_chunks)
+            job.result_json = _extract_harness_result(full_log)
+            job.status = "done" if process.returncode == 0 and job.result_json is not None else "failed"
+        except Exception as exc:  # noqa: BLE001
+            job.status = "failed"
+            job.error = str(exc)
+            job.append_log(f"[WORKER ERROR] {exc}")
+        finally:
+            self._cleanup_worktree(job)
+            self._prune_old_job_logs()
+
+    def _cleanup_worktree(self, job: HarnessJob) -> None:
+        if job.worktree_path is not None and job.worktree_path.exists():
+            subprocess.run(
+                ["git", "worktree", "remove", "--force", str(job.worktree_path)],
+                cwd=str(self.root_path),
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                check=False,
+            )
+        subprocess.run(
+            ["git", "update-ref", "-d", job.ref_name],
+            cwd=str(self.root_path),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            check=False,
+        )
+
+    def _prune_old_job_logs(self) -> None:
+        logs_dir = self.state_dir / "logs"
+        try:
+            log_files = sorted(logs_dir.glob("*.log"), key=lambda p: p.stat().st_mtime, reverse=True)
+        except OSError:
+            return
+        for stale in log_files[JOB_LOG_KEEP:]:
+            with contextlib.suppress(OSError):
+                stale.unlink()
 
 
 def _safe_is_file(path: Path) -> bool:
@@ -287,16 +717,21 @@ def create_worker_app(
     """Instantiate and configure the FastAPI application for the remote test worker."""
     root_path = project_root or REPO_ROOT
     engine = TestSubagentEngine(project_root=root_path)
+    job_manager = JobManager(root_path)
 
     worker_app = FastAPI(
         title="DarkFac Remote Test Execution Worker",
         version="1.0.0",
         description="Headless distributed test runner for Dark Factory infrastructure nodes.",
     )
+    worker_app.state.job_manager = job_manager
 
     @worker_app.get("/health", response_model=WorkerHealthStatus)
     def get_health() -> WorkerHealthStatus:
-        """Lightweight health check endpoint used by TestSubagentEngine for fast probing."""
+        """Lightweight health check endpoint used by TestSubagentEngine (and
+        core.harness.remote_dispatch) for fast probing. Always open, even
+        when DARKFAC_WORKER_TOKEN is set -- a client must be able to tell a
+        worker is alive before it has anything to authenticate."""
         # Detect Docker Desktop availability on Windows / Linux
         docker_available = False
         try:
@@ -306,18 +741,66 @@ def create_worker_app(
             docker_available = False
 
         return WorkerHealthStatus(
-            status="ok",
+            status="busy" if job_manager.is_busy() else "ok",
             node_id=node_id,
             version="1.0.0",
             docker_ready=docker_available,
             project_root=str(root_path),
-            active_runs=0,
+            active_runs=1 if job_manager.is_busy() else 0,
             available_harnesses=get_available_harnesses(),
+            platform_family=harness_cache.platform_family(),
+            python_version=harness_cache.python_version_tag(),
+            hostname=socket.gethostname(),
+            busy=job_manager.is_busy(),
+            queue_length=job_manager.queue_length(),
+            known_shas=known_validated_shas(root_path),
+            harness_version="1",
         )
 
+    @worker_app.post("/harness/jobs")
+    async def submit_harness_job(request: Request) -> JSONResponse:
+        """Async job submission: client sends a `git bundle` as the raw
+        binary body plus base64 JSON job metadata in the `X-Job-Meta`
+        header. Returns `{job_id}` on 200, or 409
+        `{missing_prerequisites: true}` when the bundle is too thin for
+        this worker's repo state (client retries with a full bundle)."""
+        _check_auth(request)
+        meta_header = request.headers.get("x-job-meta", "")
+        try:
+            metadata = json.loads(base64.b64decode(meta_header).decode("utf-8")) if meta_header else {}
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=f"invalid X-Job-Meta header: {exc}") from exc
+
+        bundle_bytes = await request.body()
+        if not bundle_bytes:
+            raise HTTPException(status_code=400, detail="empty bundle body")
+
+        status_code, body = job_manager.submit(bundle_bytes, metadata)
+        return JSONResponse(status_code=status_code, content=body)
+
+    @worker_app.get("/harness/jobs/{job_id}")
+    def get_harness_job(job_id: str, request: Request, offset: int = 0) -> JSONResponse:
+        """Poll a job's status; returns a log chunk starting at `offset`
+        plus `next_offset` for the following poll (streams without holding
+        one HTTP request open for the whole run)."""
+        _check_auth(request)
+        payload = job_manager.status(job_id, offset)
+        if payload is None:
+            raise HTTPException(status_code=404, detail="job not found")
+        return JSONResponse(status_code=200, content=payload)
+
+    @worker_app.delete("/harness/jobs/{job_id}")
+    def cancel_harness_job(job_id: str, request: Request) -> JSONResponse:
+        """Cancel a queued or running job (client-side Ctrl+C/timeout)."""
+        _check_auth(request)
+        if not job_manager.cancel(job_id):
+            raise HTTPException(status_code=404, detail="job not found")
+        return JSONResponse(status_code=200, content={"status": "cancelled"})
+
     @worker_app.post("/execute", response_model=DistilledTestReport)
-    def execute_test(instruction: TestExecutionInstruction) -> DistilledTestReport:
+    def execute_test(instruction: TestExecutionInstruction, request: Request) -> DistilledTestReport:
         """Receive a test instruction, execute pytest headless, and return distilled report."""
+        _check_auth(request)
         try:
             # Force local execution within this node
             local_instruction = instruction.model_copy(update={"worker_mode": "local"})
@@ -334,8 +817,9 @@ def create_worker_app(
             ) from exc
 
     @worker_app.post("/system/exec", response_model=CommandExecutionResponse)
-    def execute_command(req: CommandExecutionRequest) -> CommandExecutionResponse:
+    def execute_command(req: CommandExecutionRequest, request: Request) -> CommandExecutionResponse:
         """Execute a shell command headless on the worker node."""
+        _check_auth(request)
         target_cwd = Path(req.cwd).resolve() if req.cwd else root_path
         start_t = time.perf_counter()
         logger.info("Executing remote command on node %s: %s (cwd: %s)", node_id, req.command, target_cwd)
@@ -384,8 +868,9 @@ def create_worker_app(
             )
 
     @worker_app.post("/system/update", response_model=SystemUpdateResponse)
-    def update_system(req: Optional[SystemUpdateRequest] = None) -> SystemUpdateResponse:
+    def update_system(request: Request, req: Optional[SystemUpdateRequest] = None) -> SystemUpdateResponse:
         """Perform git fetch and pull to update worker codebase."""
+        _check_auth(request)
         subp_kwargs: Dict[str, Any] = {}
         if sys.platform == "win32":
             subp_kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
@@ -432,8 +917,9 @@ def create_worker_app(
             )
 
     @worker_app.post("/system/restart")
-    def restart_daemon() -> Dict[str, str]:
+    def restart_daemon(request: Request) -> Dict[str, str]:
         """Spawns a new headless daemon process and terminates this instance."""
+        _check_auth(request)
         trigger_daemon_restart(root_path)
         return {"status": "restarting", "node_id": node_id, "message": "Worker is restarting headless in background."}
 
@@ -841,13 +1327,15 @@ def create_worker_app(
             )
 
     @worker_app.post("/harness/execute", response_model=HarnessExecutionResponse)
-    def execute_generic_harness(req: HarnessExecutionRequest) -> HarnessExecutionResponse:
+    def execute_generic_harness(req: HarnessExecutionRequest, request: Request) -> HarnessExecutionResponse:
         """Unified endpoint to execute any supported headless AI harness."""
+        _check_auth(request)
         return _dispatch_harness(req)
 
     @worker_app.post("/harness/codex", response_model=CodexExecutionResponse)
-    def execute_codex(req: CodexExecutionRequest) -> CodexExecutionResponse:
+    def execute_codex(req: CodexExecutionRequest, request: Request) -> CodexExecutionResponse:
         """Backward-compatible endpoint specifically executing Codex."""
+        _check_auth(request)
         gen_req = HarnessExecutionRequest(
             harness="codex",
             prompt=req.prompt,
@@ -867,14 +1355,16 @@ def create_worker_app(
         )
 
     @worker_app.post("/harness/grok", response_model=HarnessExecutionResponse)
-    def execute_grok(req: HarnessExecutionRequest) -> HarnessExecutionResponse:
+    def execute_grok(req: HarnessExecutionRequest, request: Request) -> HarnessExecutionResponse:
         """Dedicated endpoint specifically executing Grok Build CLI."""
+        _check_auth(request)
         req.harness = "grok"
         return _run_grok_headless(req)
 
     @worker_app.post("/harness/antigravity", response_model=HarnessExecutionResponse)
-    def execute_antigravity(req: HarnessExecutionRequest) -> HarnessExecutionResponse:
+    def execute_antigravity(req: HarnessExecutionRequest, request: Request) -> HarnessExecutionResponse:
         """Dedicated endpoint specifically executing Antigravity CLI / agentapi."""
+        _check_auth(request)
         req.harness = "antigravity"
         return _run_antigravity_headless(req)
 

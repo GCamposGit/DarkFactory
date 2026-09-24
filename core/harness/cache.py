@@ -99,8 +99,18 @@ def compute_cache_key(
     step_names: list[str],
     quick: bool,
     include_holdout: bool,
+    platform_family_override: str | None = None,
+    python_version_override: str | None = None,
 ) -> str:
-    """Deterministic key: tree + config + selected steps + flags + platform + python."""
+    """Deterministic key: tree + config + selected steps + flags + platform + python.
+
+    ``platform_family_override``/``python_version_override`` let a caller
+    compute the key for a *different* executor than the current process --
+    e.g. ``core.harness.remote_dispatch`` checking whether a remote
+    Windows worker already produced a cached PASS for this tree, from a
+    POSIX (VPS) dispatching host. Omitted (the default), this is identical
+    to the original single-argument behavior used by every existing caller.
+    """
 
     payload = {
         "tree_sha": tree_hash,
@@ -108,8 +118,8 @@ def compute_cache_key(
         "step_names": sorted(step_names),
         "quick": quick,
         "include_holdout": include_holdout,
-        "platform_family": platform_family(),
-        "python_version": python_version_tag(),
+        "platform_family": platform_family_override or platform_family(),
+        "python_version": python_version_override or python_version_tag(),
     }
     canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()

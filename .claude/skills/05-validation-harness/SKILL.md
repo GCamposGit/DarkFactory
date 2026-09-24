@@ -38,6 +38,14 @@ Esta skill opera a validação determinística da Dark Factory, assegurando que 
    Postgres. Use `python core/harness/runner.py --quick --no-cache` para
    forçar uma execução fresca pontual. Testes que não podem paralelizar
    levam `@pytest.mark.serial` e correm num step sequencial separado.
+   Antes de tudo isso, `runner.py --quick` também tenta despachar a suíte
+   inteira para o worker primário de testes no Desktop (HF-27-11,
+   `core/harness/remote_dispatch.py` + `core/harness/remote_worker.py`,
+   `DARKFAC_TEST_WORKERS`) e cai para execução local automaticamente se o
+   worker estiver offline ou ocupado além de `DARKFAC_REMOTE_BUSY_WAIT_SEC`;
+   `--local` força execução local. Ver `docs/HARNESS_INTEROP.md`, seção
+   "Worker primário de testes (Desktop)", e o runbook
+   `docs/runbooks/desktop_test_worker.md` para o setup do worker.
 3. **Emissão de Marcadores Determinísticos**:
    - Emita estritamente: `[STEP_START]`, `[STEP_PASS]`, `[STEP_FAIL]`, `[STEP_TIME]`, `[TEST_COUNT]`, `[HARNESS_PASS]` ou `[HARNESS_FAIL]`.
    - Capture contagens exatas de testes descobertos, passados e pulados.

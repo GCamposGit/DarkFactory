@@ -34,6 +34,7 @@ if hasattr(sys.stderr, "reconfigure"):
     sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
 from core.harness import cache as harness_cache
+from core.harness import remote_dispatch
 from core.harness import suite_lock as harness_suite_lock
 from core.harness.markers import (
     MARKER_HARNESS_FAIL,
@@ -44,7 +45,7 @@ from core.harness.markers import (
     MARKER_STEP_START,
     MARKER_STEP_TIME,
     MARKER_TEST_COUNT,
-    SUPERVISOR_MARKERS,
+    sanitize_child_output,
 )
 from core.harness.models import HarnessConfig, HarnessResult, HarnessStepConfig
 
@@ -106,14 +107,6 @@ def load_config(config_path: Path) -> tuple[HarnessConfig, str]:
     except ValidationError as exc:
         raise ValueError(f"Invalid harness config {config_path}: {exc}") from exc
     return config, hashlib.sha256(raw).hexdigest()
-
-
-def sanitize_child_output(output: str) -> str:
-    """Prevent a subprocess from emitting markers owned by the supervisor."""
-    sanitized = output
-    for marker in SUPERVISOR_MARKERS:
-        sanitized = sanitized.replace(marker, marker.replace("[", "[CHILD_", 1))
-    return sanitized
 
 
 def resolve_command(command: str) -> list[str]:
@@ -504,22 +497,30 @@ def run_with_cache(
     include_holdout: bool,
     config_path: Path,
     no_cache: bool = False,
+    local_only: bool = False,
+    remote_required: bool = False,
 ) -> bool:
-    """Cache-aware, single-flighted wrapper around :func:`execute`.
+    """Cache-aware, single-flighted, remote-dispatch-aware wrapper around
+    :func:`execute`.
 
-    Flow: check cache -> if another host holds a *live* inflight claim for
-    this key, poll for its verdict WITHOUT the local machine-wide lock (so
-    this host's other suites are never blocked behind a remote wait) ->
-    acquire the local lock -> re-check cache (another process on this host,
-    or the remote host, may have just finished) -> claim inflight with a
-    short lease and start a heartbeat thread -> run steps with
-    ``DARKFAC_SUITE_LOCK_HELD=1`` in the child environment -> store the
-    verdict only on a PASS, always stop the heartbeat and release the
-    inflight claim.
+    Flow: clean-tree check -> local-platform cache lookup (as before) ->
+    :func:`core.harness.remote_dispatch.maybe_dispatch_remote` (probes the
+    primary test worker; unreachable/busy-timeout/disabled falls through
+    to the existing local path unchanged; reachable checks the cache AGAIN
+    under the worker's own platform key before shipping a job, so a
+    previously-validated tree is never re-run) -> if another host holds a
+    *live* inflight claim for this key, poll for its verdict WITHOUT the
+    local machine-wide lock (so this host's other suites are never blocked
+    behind a remote wait) -> acquire the local lock -> re-check cache
+    (another process on this host, or the remote host, may have just
+    finished) -> claim inflight with a short lease and start a heartbeat
+    thread -> run steps with ``DARKFAC_SUITE_LOCK_HELD=1`` in the child
+    environment -> store the verdict only on a PASS, always stop the
+    heartbeat and release the inflight claim.
 
     ``execute()`` itself is untouched by any of this (it has no idea the
-    cache or lock exist) so every existing direct caller/test of ``execute``
-    keeps behaving exactly as before.
+    cache, lock, or remote dispatch exist) so every existing direct
+    caller/test of ``execute`` keeps behaving exactly as before.
     """
 
     steps = _selected_steps(config, quick=quick, include_holdout=include_holdout)
@@ -543,6 +544,33 @@ def run_with_cache(
                     include_holdout=include_holdout,
                 )
 
+    if cache_key is not None:
+        hit = harness_cache.get_verdict(cache_key)
+        if hit is not None:
+            return _emit_cache_hit(hit, config_path=config_path)
+
+    # Remote dispatch is orthogonal to the local verdict cache: it is tried
+    # whether or not local caching is enabled (e.g. `--no-cache` still
+    # dispatches to the primary worker, it just never reuses/stores a
+    # verdict there either). `None` means "not resolved remotely at all",
+    # so every existing local code path below is completely unaffected.
+    if steps:
+        remote_result = remote_dispatch.maybe_dispatch_remote(
+            steps=steps,
+            config_hash=config_hash,
+            quick=quick,
+            include_holdout=include_holdout,
+            config_path=config_path,
+            project_root=PROJECT_ROOT,
+            cache_lookup_enabled=cache_key is not None,
+            local_only=local_only,
+            remote_required=remote_required,
+            emit_cache_hit=_emit_cache_hit,
+            notify_hub_on_pass=_notify_hub_on_pass,
+        )
+        if remote_result is not None:
+            return remote_result
+
     if cache_key is None:
         return execute(
             config,
@@ -551,10 +579,6 @@ def run_with_cache(
             include_holdout=include_holdout,
             config_path=config_path,
         )
-
-    hit = harness_cache.get_verdict(cache_key)
-    if hit is not None:
-        return _emit_cache_hit(hit, config_path=config_path)
 
     total_timeout_sec = float(sum(step.timeout_sec for step in steps))
     lease_sec = harness_cache.inflight_lease_sec()
@@ -649,6 +673,19 @@ def main(argv: Sequence[str] | None = None) -> int:
         action="store_true",
         help="Always run fresh; never reuse or store a cached verdict",
     )
+    parser.add_argument(
+        "--local",
+        action="store_true",
+        help="Never dispatch to a remote test worker; always run in this process/host",
+    )
+    parser.add_argument(
+        "--remote-required",
+        action="store_true",
+        help=(
+            "Require remote dispatch to a test worker (DARKFAC_TEST_WORKERS); fail "
+            "instead of silently falling back to local if no worker can run the job"
+        ),
+    )
     args = parser.parse_args(argv)
 
     config_path = Path(args.config)
@@ -663,6 +700,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             include_holdout=args.holdout,
             config_path=config_path,
             no_cache=args.no_cache,
+            local_only=args.local,
+            remote_required=args.remote_required,
         ) else 1
     except (RuntimeError, ValueError) as exc:
         print(f"[ERROR] {exc}")
