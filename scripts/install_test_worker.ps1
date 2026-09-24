@@ -159,16 +159,33 @@ if (-not (Test-Path -LiteralPath $remoteWorkerScript)) {
 
 # --- 3. Install/update Python dependencies ----------------------------------
 
-Write-Section "Step 3/7: installing Python dependencies"
+Write-Section "Step 3/7: installing Python dependencies into the worker's own venv"
+
+# A dedicated venv keeps DarkFac's pins (e.g. Pillow<12) from downgrading
+# packages other apps on this machine use from the global Python
+# (open-webui, pdfplumber, ...). Harness jobs inherit it via sys.executable.
+$VenvPath = Join-Path $env:LOCALAPPDATA "DarkFac\worker\venv"
+$venvPython = Join-Path $VenvPath "Scripts\python.exe"
+if (-not (Test-Path -LiteralPath $venvPython)) {
+    & $pythonCmd.Source -m venv $VenvPath
+    if ($LASTEXITCODE -ne 0) {
+        Write-Output "[ERROR] Could not create the worker venv at '$VenvPath'."
+        exit 1
+    }
+    Write-Output "[OK] Created worker venv: $VenvPath"
+} else {
+    Write-Output "[OK] Reusing worker venv: $VenvPath"
+}
 
 $requirementsFile = Join-Path $RepoPath "requirements.txt"
 if (Test-Path -LiteralPath $requirementsFile) {
-    & python -m pip install -q -r $requirementsFile
+    & $venvPython -m pip install -q --upgrade pip
+    & $venvPython -m pip install -q -r $requirementsFile
     if ($LASTEXITCODE -ne 0) {
-        Write-Warning "[WARN] 'pip install -r requirements.txt' exited with code $LASTEXITCODE. The worker may fail to start if a dependency (fastapi/uvicorn) is missing -- re-run 'python -m pip install -r requirements.txt' manually inside $RepoPath to see the full error."
+        Write-Warning "[WARN] 'pip install -r requirements.txt' into the worker venv exited with code $LASTEXITCODE. Re-run '$venvPython -m pip install -r requirements.txt' inside $RepoPath to see the full error."
         $overallOk = $false
     } else {
-        Write-Output "[OK] Dependencies installed/up to date."
+        Write-Output "[OK] Dependencies installed in the worker venv (the global Python was not touched)."
     }
 } else {
     Write-Warning "[WARN] '$requirementsFile' not found; skipping dependency install."
@@ -178,12 +195,11 @@ if (Test-Path -LiteralPath $requirementsFile) {
 
 Write-Section "Step 4/7: registering the Scheduled Task '$TaskName'"
 
-$pythonwCmd = Get-Command pythonw -ErrorAction SilentlyContinue
-$launchExe = if ($pythonwCmd) { $pythonwCmd.Source } else { $pythonCmd.Source }
+# The worker redirects its console-less stdout/stderr to
+# %LOCALAPPDATA%\DarkFac\worker\daemon.log (see ensure_console_streams).
+$venvPythonw = Join-Path $VenvPath "Scripts\pythonw.exe"
+$launchExe = if (Test-Path -LiteralPath $venvPythonw) { $venvPythonw } else { $venvPython }
 $launchArgs = "core\harness\remote_worker.py --host 0.0.0.0 --port $Port --node-id $NodeId"
-if (-not $pythonwCmd) {
-    Write-Output "[INFO] pythonw.exe not found next to python.exe; the task will run python.exe with a hidden window instead (functionally identical, no visible console)."
-}
 
 $action = New-ScheduledTaskAction `
     -Execute $launchExe `

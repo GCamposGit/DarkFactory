@@ -761,3 +761,28 @@ def test_end_to_end_loopback_dispatch_real_server(tmp_path: Path, monkeypatch: p
     finally:
         server.should_exit = True
         thread.join(timeout=15)
+
+
+def test_worker_redirects_missing_console_streams_to_log(tmp_path, monkeypatch):
+    """pythonw / S4U tasks start with stdout/stderr = None; uvicorn's logging
+    config then crashes the worker before it binds (exit code 1)."""
+    from core.harness import remote_worker
+
+    monkeypatch.setattr(sys, "stdout", None)
+    monkeypatch.setattr(sys, "stderr", None)
+    log_path = tmp_path / "worker" / "daemon.log"
+
+    assert remote_worker.ensure_console_streams(log_path) == log_path
+    try:
+        print("hello from a console-less worker")
+        assert sys.stdout is sys.stderr
+        assert "hello from a console-less worker" in log_path.read_text(encoding="utf-8")
+    finally:
+        sys.stdout.close()
+
+
+def test_worker_keeps_real_console_streams(tmp_path):
+    from core.harness import remote_worker
+
+    assert remote_worker.ensure_console_streams(tmp_path / "daemon.log") is None
+    assert not (tmp_path / "daemon.log").exists()

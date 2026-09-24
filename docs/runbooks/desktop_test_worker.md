@@ -189,25 +189,38 @@ escolheu **"Executar como administrador"** dessa vez, e rode o comando do
 passo 2 de novo (e seguro rodar quantas vezes precisar).
 
 **"[FAIL] http://127.0.0.1:8080/health did not respond within 20s"**
-Normalmente significa que alguma dependencia Python nao instalou direito.
-Na mesma janela do PowerShell, rode:
+Primeiro abra o log do worker, que registra o erro mesmo rodando sem
+janela:
+
+```powershell
+Get-Content "$env:LOCALAPPDATA\DarkFac\worker\daemon.log" -Tail 40
+```
+
+Se o erro falar de biblioteca faltando (`ModuleNotFoundError`), reinstale
+as dependencias no ambiente proprio do worker (o Python global da maquina
+nao e usado):
 
 ```powershell
 cd C:\dev\DarkFac
-python -m pip install -r requirements.txt
+& "$env:LOCALAPPDATA\DarkFac\worker\venv\Scripts\python.exe" -m pip install -r requirements.txt
 ```
 
 e leia o erro que aparecer. Depois de corrigir (geralmente e so rodar o
 comando de novo, ou checar a conexao com a internet), rode o instalador do
 passo 2 de novo.
 
-Se a instalacao das dependencias funcionou mas o worker ainda nao
-responde, rode manualmente para ver o erro na tela:
+Para ver o erro direto na tela, rode o worker manualmente:
 
 ```powershell
 cd C:\dev\DarkFac
-python core\harness\remote_worker.py --host 127.0.0.1 --port 8080 --node-id darkfac-desktop
+& "$env:LOCALAPPDATA\DarkFac\worker\venv\Scripts\python.exe" core\harness\remote_worker.py --host 127.0.0.1 --port 8080 --node-id darkfac-desktop
 ```
+
+**Avisos do pip sobre open-webui, pdfplumber ou Pillow**
+Versoes antigas deste instalador colocavam as dependencias da DarkFac no
+Python global e podiam rebaixar o Pillow usado por outros programas. O
+instalador atual usa um ambiente proprio em
+`%LOCALAPPDATA%\DarkFac\worker\venv` e nao mexe mais no Python global.
 
 Isso abre o worker no proprio terminal (sem esconder a janela) e mostra
 qualquer erro diretamente. Aperte `Ctrl+C` para parar depois de ver o
@@ -226,6 +239,7 @@ Abra o PowerShell como administrador e rode:
 Stop-ScheduledTask -TaskName "DarkFac Test Worker"
 Unregister-ScheduledTask -TaskName "DarkFac Test Worker" -Confirm:$false
 Remove-NetFirewallRule -DisplayName "DarkFac Test Worker (TCP 8080, Tailscale)"
+Remove-Item -Recurse -Force "$env:LOCALAPPDATA\DarkFac\worker\venv"
 ```
 
 ## Referencia tecnica

@@ -1377,8 +1377,40 @@ def create_worker_app(
 app = create_worker_app()
 
 
+WORKER_DAEMON_LOG_MAX_BYTES = 10 * 1024 * 1024
+
+
+def ensure_console_streams(log_path: Path) -> Optional[Path]:
+    """Give a console-less daemon real stdout/stderr streams.
+
+    `pythonw.exe` and "run whether the user is logged on or not" (S4U)
+    scheduled tasks start with ``sys.stdout``/``sys.stderr`` set to ``None``;
+    uvicorn's logging ``dictConfig`` then fails (``Unable to configure
+    formatter 'default'``) and the worker exits with code 1 before binding.
+    Both streams are redirected to ``log_path`` (rotated once past 10 MiB),
+    and root handlers created at import time with a ``None`` stream are
+    re-pointed at it. Returns the log path when a redirect happened.
+    """
+
+    if sys.stdout is not None and sys.stderr is not None:
+        return None
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    if log_path.exists() and log_path.stat().st_size > WORKER_DAEMON_LOG_MAX_BYTES:
+        log_path.replace(log_path.with_suffix(log_path.suffix + ".1"))
+    stream = open(log_path, "a", encoding="utf-8", errors="replace", buffering=1)  # noqa: SIM115 - lives for the process
+    if sys.stdout is None:
+        sys.stdout = stream
+    if sys.stderr is None:
+        sys.stderr = stream
+    for handler in logging.getLogger().handlers:
+        if isinstance(handler, logging.StreamHandler) and getattr(handler, "stream", None) is None:
+            handler.setStream(sys.stderr)
+    return log_path
+
+
 def main() -> int:
     """CLI entrypoint to launch the worker daemon directly via PowerShell or terminal."""
+    ensure_console_streams(default_worker_state_dir() / "daemon.log")
     parser = argparse.ArgumentParser(description="DarkFac On-Premises Remote Test Worker Daemon")
     parser.add_argument("--host", default=DEFAULT_WORKER_HOST, help=f"Host address to bind (default: {DEFAULT_WORKER_HOST})")
     parser.add_argument("--port", type=int, default=DEFAULT_WORKER_PORT, help=f"Port to listen on (default: {DEFAULT_WORKER_PORT})")
