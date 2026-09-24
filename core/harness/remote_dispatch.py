@@ -312,12 +312,16 @@ def _relative_config_path(config_path: Path, project_root: Path) -> str:
 # --- job streaming -------------------------------------------------------------
 
 
+_REMOTE_STEP_TIME_RE = re.compile(r"^\[CHILD_STEP_TIME\] (\S+) ([0-9]+(?:\.[0-9]+)?)s")
+
+
 def _stream_job(base_url: str, job_id: str, *, deadline: float) -> dict[str, Any]:
     """Poll until the job reaches a terminal status; stream sanitized log
     chunks prefixed with the worker's URL as they arrive."""
 
     offset = 0
     last_ok = time.monotonic()
+    step_times: dict[str, str] = {}
     while True:
         now = time.monotonic()
         if now > deadline:
@@ -336,10 +340,14 @@ def _stream_job(base_url: str, job_id: str, *, deadline: float) -> dict[str, Any
         if chunk:
             for line in sanitize_child_output(chunk).splitlines():
                 print(f"[REMOTE {base_url}] {line}")
+                timing = _REMOTE_STEP_TIME_RE.match(line)
+                if timing:
+                    step_times[timing.group(1)] = timing.group(2)
         offset = int(payload.get("next_offset", offset))
         status = payload.get("status")
         if status in ("done", "failed", "cancelled"):
-            return payload
+            # Display-only: remote timings never feed the verdict.
+            return {**payload, "_step_times": step_times}
         time.sleep(POLL_INTERVAL_SEC)
 
 
@@ -397,10 +405,11 @@ def _finalize_remote_result(
     }
     final_result = remote_result.model_copy(update={"executed_on": executed_on})
 
+    step_times = payload.get("_step_times") or {}
     for step_name in final_result.required_steps:
         print(f"{MARKER_STEP_START} {step_name}")
         print(f"{MARKER_STEP_PASS if step_name in final_result.passed_steps else MARKER_STEP_FAIL} {step_name}")
-        print(f"{MARKER_STEP_TIME} {step_name} 0.0s (remote: {base_url})")
+        print(f"{MARKER_STEP_TIME} {step_name} {step_times.get(step_name, '0.0')}s (remote: {base_url})")
 
     print(f"{MARKER_TEST_COUNT} count={final_result.discovered_count}")
     print(f"[REMOTE] executed on {executed_on['host']} ({base_url})")

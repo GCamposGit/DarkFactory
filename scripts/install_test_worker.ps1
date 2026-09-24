@@ -80,6 +80,16 @@ function Test-IsAdministrator {
 
 $overallOk = $true
 
+# The worker must come back after a reboot of a headless Desktop even when
+# nobody logs on, which needs a "run whether the user is logged on or not"
+# (S4U) task, and the Tailscale-only firewall rule; both require elevation.
+if (-not (Test-IsAdministrator)) {
+    Write-Output "[ERROR] This installer must run from an elevated PowerShell."
+    Write-Output "        Close this window, right-click 'Windows PowerShell' -> 'Run as administrator',"
+    Write-Output "        and run the same command again. Nothing was changed."
+    exit 1
+}
+
 Write-Output "======================================================================"
 Write-Output " DarkFac Primary Test Worker Installer (HF-27-11)"
 Write-Output " Repo path : $RepoPath"
@@ -194,6 +204,14 @@ $settings = New-ScheduledTaskSettingsSet `
     -RestartInterval (New-TimeSpan -Minutes 1) `
     -Hidden
 
+# S4U = "Run whether user is logged on or not" without storing a password:
+# the worker starts at boot on a headless Desktop, under the owner's account
+# (so it sees the same Python, repo and harness CLI logins).
+$principal = New-ScheduledTaskPrincipal `
+    -UserId ([Security.Principal.WindowsIdentity]::GetCurrent().Name) `
+    -LogonType S4U `
+    -RunLevel Limited
+
 $existingTask = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
 if ($existingTask) {
     Write-Output "[INFO] Task '$TaskName' already exists; replacing it with the current configuration."
@@ -204,6 +222,7 @@ Register-ScheduledTask `
     -TaskName $TaskName `
     -Action $action `
     -Trigger $triggers `
+    -Principal $principal `
     -Settings $settings `
     -Description "DarkFac primary validation-harness test worker (core/harness/remote_worker.py, port $Port). Registered by scripts/install_test_worker.ps1 -- see docs/runbooks/desktop_test_worker.md." `
     -Force | Out-Null

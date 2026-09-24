@@ -51,11 +51,12 @@ passo 1b. Se voce vai acessar remotamente, siga o passo 1a primeiro.
    PowerShell" na lista de resultados.
 3. **Clique com o botao direito** em cima de "Windows PowerShell" e
    escolha **"Executar como administrador"** (Run as administrator).
-   - Por que administrador? So um dos 7 passos do instalador (a regra de
-     firewall) precisa disso. Se voce abrir sem administrador, o
-     instalador funciona igual e so avisa no final que aquele passo
-     especifico precisa ser refeito depois — mas e mais simples ja abrir
-     como administrador agora.
+   - Por que administrador? O instalador cria a regra de firewall (porta
+     8080 so para o Tailscale) e registra a tarefa para rodar "mesmo sem
+     usuario conectado", para o worker voltar sozinho depois de um reboot
+     do Desktop sem ninguem fazer login. As duas coisas exigem
+     administrador. Se voce abrir sem administrador, o instalador para no
+     inicio com uma mensagem clara e nao altera nada.
 4. Uma janela azul (ou preta, dependendo da versao do Windows) vai abrir,
    com um texto tipo `PS C:\WINDOWS\system32>`. Essa e a janela onde voce
    vai colar os comandos dos proximos passos.

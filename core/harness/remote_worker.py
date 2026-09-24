@@ -468,6 +468,9 @@ class JobManager:
                 cmd.append("--holdout")
             env = dict(os.environ)
             env["DARKFAC_HARNESS_WORKER_JOB"] = "1"
+            # Stream step output to the client as it happens instead of in
+            # block-buffered bursts (stdout is a pipe here, not a console).
+            env["PYTHONUNBUFFERED"] = "1"
 
             with open(log_file_path, "w", encoding="utf-8") as log_fh:
                 process = subprocess.Popen(
