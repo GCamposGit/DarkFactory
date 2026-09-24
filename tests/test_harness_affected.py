@@ -528,7 +528,7 @@ def test_run_pytest_full_mode_runs_parallel_then_serial_pass(
     assert len(calls) == 2
     parallel_cmd, serial_cmd = calls
     assert "-n" in parallel_cmd and "auto" in parallel_cmd
-    assert "--dist" in parallel_cmd and "loadfile" in parallel_cmd
+    assert "--dist" in parallel_cmd and "worksteal" in parallel_cmd
     assert "not serial" in parallel_cmd
     assert "-n" not in serial_cmd  # serial pass never runs under xdist
     assert "serial" in serial_cmd and "not serial" not in serial_cmd

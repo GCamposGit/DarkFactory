@@ -11,7 +11,11 @@ the real Claude/Codex/Grok/Antigravity CLIs or the network.
 from __future__ import annotations
 
 import json
+import shutil
+import subprocess
 import sys
+import tempfile
+import threading
 from pathlib import Path
 from typing import Callable
 
@@ -93,3 +97,82 @@ def make_fake_cli(tmp_path: Path) -> Callable[[str], tuple[str, str]]:
 def set_fake_response(monkeypatch: pytest.MonkeyPatch, env_var: str, spec: dict) -> None:
     """Configure the next invocation of a fake CLI created by `make_fake_cli`."""
     monkeypatch.setenv(env_var, json.dumps(spec))
+
+
+# ---------------------------------------------------------------------------
+# Shared bare-origin git template (test-suite acceleration, rule C2)
+#
+# Dozens of tests across tests/line/ (and tests/test_line_e2e_hf2708.py)
+# each build their own throwaway local "origin" remote via ~8 real git
+# subprocess calls (init --bare, clone, checkout -B, config x2, add,
+# commit, push). On Windows, each subprocess costs tens of milliseconds of
+# pure process-spawn overhead (measured: `_winapi.CreateProcess` alone
+# ~85ms/call) -- multiplied by dozens of call sites, that adds up to real
+# seconds of the suite's wall time spent rebuilding byte-identical content.
+# This builds ONE such repo per worker process (lazily, on first use) and
+# lets callers get a fresh copy via a plain directory copy (no subprocess
+# at all) instead.
+# ---------------------------------------------------------------------------
+
+_BARE_ORIGIN_TEMPLATE_LOCK = threading.Lock()
+_BARE_ORIGIN_TEMPLATE: Path | None = None
+
+
+def _template_git_kwargs() -> dict:
+    if sys.platform == "win32":
+        return {"creationflags": subprocess.CREATE_NO_WINDOW}
+    return {}
+
+
+def _template_git(args: list[str], cwd: Path) -> None:
+    proc = subprocess.run(
+        ["git", *args],
+        cwd=str(cwd),
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        **_template_git_kwargs(),
+    )
+    assert proc.returncode == 0, f"git {args} failed: {proc.stderr}"
+
+
+def _build_bare_origin_template() -> Path:
+    base = Path(tempfile.mkdtemp(prefix="darkfac-bare-origin-template-"))
+    origin = base / "origin.git"
+    _template_git(["init", "--bare", str(origin)], cwd=base)
+    seed = base / "_seed"
+    _template_git(["clone", str(origin), str(seed)], cwd=base)
+    _template_git(["checkout", "-B", "main"], cwd=seed)
+    _template_git(["config", "user.email", "seed@example.com"], cwd=seed)
+    _template_git(["config", "user.name", "Seed"], cwd=seed)
+    (seed / "README.md").write_text("seed\n", encoding="utf-8")
+    _template_git(["add", "README.md"], cwd=seed)
+    _template_git(["commit", "-m", "seed commit"], cwd=seed)
+    _template_git(["push", "origin", "main"], cwd=seed)
+    shutil.rmtree(seed, ignore_errors=True)
+    return origin
+
+
+def bare_origin_template() -> Path:
+    """A bare "origin" repo (branch `main`, one `README.md` seed commit),
+    built once per worker process and reused by `copy_bare_origin` --
+    thread-safe so parallel (in-process-threaded) callers never race the
+    one-time build.
+    """
+    global _BARE_ORIGIN_TEMPLATE
+    with _BARE_ORIGIN_TEMPLATE_LOCK:
+        if _BARE_ORIGIN_TEMPLATE is None:
+            _BARE_ORIGIN_TEMPLATE = _build_bare_origin_template()
+        return _BARE_ORIGIN_TEMPLATE
+
+
+def copy_bare_origin(dest: Path) -> Path:
+    """Fast per-test "origin" remote: a plain directory copy of the shared
+    template instead of the ~8 git subprocess calls that originally built
+    it. Safe to call concurrently across tests/workers -- copytree only
+    reads the (immutable, already-fully-built) template.
+    """
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copytree(bare_origin_template(), dest)
+    return dest

@@ -19,6 +19,7 @@ from core.line.stage_grill import run_grill
 from core.projects.models import ProjectDescriptor
 from core.workflow.control_contracts import IntakeCommand, JobKey
 from core.workflow.control_store import SQLiteControlStore
+from tests.line.conftest import copy_bare_origin
 
 
 def _win_kwargs() -> dict:
@@ -38,18 +39,11 @@ def _git(args: list[str], cwd: Path) -> "subprocess.CompletedProcess[str]":
 
 
 def _init_bare_origin(tmp_path: Path) -> Path:
-    origin = tmp_path / "origin.git"
-    _git(["init", "--bare", str(origin)], cwd=tmp_path)
-    seed = tmp_path / "_seed"
-    _git(["clone", str(origin), str(seed)], cwd=tmp_path)
-    _git(["checkout", "-B", "main"], cwd=seed)
-    _git(["config", "user.email", "seed@example.com"], cwd=seed)
-    _git(["config", "user.name", "Seed"], cwd=seed)
-    (seed / "README.md").write_text("seed\n", encoding="utf-8")
-    _git(["add", "README.md"], cwd=seed)
-    _git(["commit", "-m", "seed commit"], cwd=seed)
-    _git(["push", "origin", "main"], cwd=seed)
-    return origin
+    """Fresh local "origin" remote: a directory copy of the shared
+    tests/line/conftest.py template (branch main, one README.md seed
+    commit) instead of ~8 real git subprocess calls every time.
+    """
+    return copy_bare_origin(tmp_path / "origin.git")
 
 
 def _seed_run_with_sibling(store: SQLiteControlStore, run_id: str, project_id: str, now: datetime) -> None:

@@ -21,10 +21,34 @@ logger = logging.getLogger(__name__)
 _CACHED_ACCELERATOR: Optional[str] = None
 
 
+def _skip_probe_requested() -> bool:
+    return os.environ.get("DARKFAC_SKIP_ACCELERATOR_PROBE", "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+
+
 def _detect_accelerator() -> str:
     """Detect presence of GPU/CUDA or MPS acceleration, falling back to CPU."""
     global _CACHED_ACCELERATOR
     if _CACHED_ACCELERATOR is not None:
+        return _CACHED_ACCELERATOR
+
+    if _skip_probe_requested():
+        # Test/CI mode: importing torch (a large library that can itself
+        # spin up its own thread pool on import) just to answer "is there a
+        # GPU?" costs several real seconds for a value nothing in the test
+        # suite asserts beyond truthiness -- and since this only happens
+        # once per process (see the module-level cache above), pytest
+        # attributes that whole one-time cost to whichever single test
+        # happens to touch telemetry first in a given xdist worker,
+        # distorting `--durations` output. Set by tests/conftest.py's
+        # `offline_test_environment` fixture for every default test run;
+        # production code never sets this, so real deployments still get a
+        # real probe.
+        _CACHED_ACCELERATOR = "cpu (test)"
         return _CACHED_ACCELERATOR
 
     # 1. Try PyTorch if available

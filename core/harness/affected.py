@@ -751,7 +751,7 @@ def run_pytest(
         "-n",
         "auto",
         "--dist",
-        "loadfile",
+        "worksteal",
         "-m",
         "not serial",
         *extra_args,

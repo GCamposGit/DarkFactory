@@ -101,10 +101,17 @@ todos estourando o timeout de 1200s. Três mecanismos resolvem isso, todos em
    rastro de uma falha é a linha `inflight` sendo apagada) ou crashou; de
    qualquer forma, esperar mais não tem sentido.
 4. **Paralelismo (`pytest-xdist`) + timeout por teste (`pytest-timeout`)** —
-   o step de teste roda com `-n auto --dist loadfile -m "not serial"`;
-   testes que não podem paralelizar (estado global, latência apertada,
-   porta fixa, mutação do `.factory/` real) levam `@pytest.mark.serial` e
-   correm à parte, sequencialmente. Se `pytest-xdist` não estiver instalado,
+   o step de teste roda com `-n auto --dist worksteal -m "not serial"`
+   (medido no Windows Desktop, 28 cores: `worksteal` ~120s de média contra
+   ~191s de `loadfile` em duas execuções de cada, suíte estável nas duas —
+   `worksteal` redistribui itens individuais entre workers ociosos em vez
+   de fixar cada arquivo inteiro num worker, o que equilibra melhor uma
+   suíte com arquivos de duração muito desigual como `tests/line/`; ainda
+   não medido no host Linux). `core/harness/affected.py --run` usa o mesmo
+   modo. Testes que não podem paralelizar (estado global, latência
+   apertada, porta fixa, mutação do `.factory/` real) levam
+   `@pytest.mark.serial` e correm à parte, sequencialmente. Se
+   `pytest-xdist` não estiver instalado,
    o runner remove `-n`/`--dist` sozinho com um `[WARN]` e roda serial
    (correto, só mais lento) em vez de falhar.
 

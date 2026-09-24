@@ -29,6 +29,7 @@ from core.line.workspace import (
     write_context,
 )
 from core.projects.models import ProjectDescriptor
+from tests.line.conftest import copy_bare_origin
 
 
 # --------------------------------------------------------------------------
@@ -54,7 +55,18 @@ def _git(args: list[str], cwd: Path) -> "subprocess.CompletedProcess[str]":
 
 
 def _init_bare_origin(tmp_path: Path, dirname: str = "origin.git", default_branch: str = "main") -> Path:
-    """Create a bare repo with one seed commit on `default_branch`, used as "origin"."""
+    """Create a bare repo with one seed commit on `default_branch`, used as "origin".
+
+    The overwhelming majority of call sites use the defaults (dirname
+    "origin.git", branch "main") -- for those, this is a plain directory
+    copy of a shared template (see tests/line/conftest.py) instead of ~8
+    real git subprocess calls. The few call sites that need a different
+    branch name or a path with a space still build it from scratch, since
+    that's rare enough not to be worth templating too.
+    """
+    if dirname == "origin.git" and default_branch == "main":
+        return copy_bare_origin(tmp_path / dirname)
+
     origin = tmp_path / dirname
     origin.parent.mkdir(parents=True, exist_ok=True)
     _git(["init", "--bare", str(origin)], cwd=tmp_path)

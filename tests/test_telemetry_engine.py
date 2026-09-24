@@ -57,6 +57,63 @@ def test_hardware_introspection_overrides() -> None:
     assert hw.execution_mode == ExecutionMode.UI
 
 
+def test_accelerator_probe_is_skipped_in_test_mode(monkeypatch: pytest.MonkeyPatch) -> None:
+    """DARKFAC_SKIP_ACCELERATOR_PROBE (set for every default test run by
+    tests/conftest.py) must short-circuit before importing torch or
+    shelling out to nvidia-smi -- both real costs nothing in the suite
+    needs paid on every worker process just to answer "is there a GPU?"."""
+
+    from core.telemetry import hardware as hardware_mod
+
+    monkeypatch.setattr(hardware_mod, "_CACHED_ACCELERATOR", None)
+    monkeypatch.setenv("DARKFAC_SKIP_ACCELERATOR_PROBE", "1")
+
+    accelerator = hardware_mod._detect_accelerator()
+
+    assert accelerator == "cpu (test)"
+    # Cached like the real probe would be -- a second call must not re-check
+    # the env var or do any work.
+    monkeypatch.delenv("DARKFAC_SKIP_ACCELERATOR_PROBE", raising=False)
+    assert hardware_mod._detect_accelerator() == "cpu (test)"
+
+
+def test_accelerator_probe_runs_when_not_skipped(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Without the skip flag, production behavior (the real probe) is
+    unaffected -- this suite's own conftest is the only thing that sets it.
+
+    Fakes torch as unavailable and nvidia-smi as failing (rather than
+    actually importing torch here too) so this stays a fast, deterministic
+    unit test regardless of what's installed on the machine running it --
+    the point is proving the *fallback chain* still runs, not re-testing
+    torch/nvidia-smi themselves.
+    """
+
+    import builtins
+
+    from core.telemetry import hardware as hardware_mod
+
+    monkeypatch.setattr(hardware_mod, "_CACHED_ACCELERATOR", None)
+    monkeypatch.delenv("DARKFAC_SKIP_ACCELERATOR_PROBE", raising=False)
+
+    real_import = builtins.__import__
+
+    def _no_torch(name: str, *args: object, **kwargs: object) -> object:
+        if name == "torch":
+            raise ImportError("torch intentionally unavailable for this test")
+        return real_import(name, *args, **kwargs)
+
+    def _no_nvidia_smi(*args: object, **kwargs: object) -> object:
+        raise FileNotFoundError("nvidia-smi intentionally unavailable for this test")
+
+    monkeypatch.setattr(builtins, "__import__", _no_torch)
+    monkeypatch.setattr(hardware_mod.subprocess, "run", _no_nvidia_smi)
+
+    accelerator = hardware_mod._detect_accelerator()
+
+    assert accelerator != "cpu (test)"  # fell through the real probe, not the test skip
+    assert accelerator.startswith("cpu (")
+
+
 # ---------------------------------------------------------------------------
 # 2. SQLite Store & Telemetry CRUD / Stats Tests
 # ---------------------------------------------------------------------------

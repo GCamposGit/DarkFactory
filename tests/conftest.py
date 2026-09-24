@@ -170,6 +170,11 @@ def offline_test_environment(request: pytest.FixtureRequest) -> Iterator[None]:
         "HF_HUB_OFFLINE": "1",
         "TRANSFORMERS_OFFLINE": "1",
         "TOKENIZERS_PARALLELISM": "false",
+        # Skip the real GPU/torch probe in core/telemetry/hardware.py: it
+        # can cost several real seconds (large import, its own thread pool)
+        # for a value the suite only ever asserts is truthy. See that
+        # module's `_skip_probe_requested` for the full rationale.
+        "DARKFAC_SKIP_ACCELERATOR_PROBE": "1",
     }
     previous_offline_values = {
         key: os.environ.get(key) for key in offline_values
