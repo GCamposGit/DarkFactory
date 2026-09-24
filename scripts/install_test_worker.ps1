@@ -212,6 +212,14 @@ $principal = New-ScheduledTaskPrincipal `
     -LogonType S4U `
     -RunLevel Limited
 
+# scripts/install_test_worker_startup.ps1 installs an alternative logon-only
+# launcher in the Startup folder; two launchers would fight over the port.
+$legacyLauncher = Join-Path ([System.Environment]::GetFolderPath([System.Environment+SpecialFolder]::Startup)) "DarkFacTestWorker.vbs"
+if (Test-Path -LiteralPath $legacyLauncher) {
+    Remove-Item -LiteralPath $legacyLauncher -Force
+    Write-Output "[INFO] Removed the Startup-folder launcher '$legacyLauncher'; the scheduled task below replaces it."
+}
+
 $existingTask = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
 if ($existingTask) {
     Write-Output "[INFO] Task '$TaskName' already exists; replacing it with the current configuration."
@@ -276,6 +284,15 @@ if ($Token) {
 
 Write-Section "Step 7/7: starting the worker now and verifying health"
 
+# An older worker (manual start or Startup-folder launcher) would keep the
+# port and answer the health check with stale code.
+$staleWorkers = Get-CimInstance Win32_Process -Filter "Name='python.exe' OR Name='pythonw.exe'" |
+    Where-Object { $_.CommandLine -match 'remote_worker\.py' }
+foreach ($stale in $staleWorkers) {
+    Stop-Process -Id $stale.ProcessId -Force -ErrorAction SilentlyContinue
+    Write-Output "[INFO] Stopped an already-running worker process (pid $($stale.ProcessId))."
+}
+
 Start-ScheduledTask -TaskName $TaskName
 Write-Output "[INFO] Task started. Waiting for http://127.0.0.1:$Port/health to respond ..."
 
@@ -285,7 +302,8 @@ while ((Get-Date) -lt $deadline) {
     Start-Sleep -Seconds 1
     try {
         $response = Invoke-RestMethod -Uri "http://127.0.0.1:$Port/health" -TimeoutSec 3 -ErrorAction Stop
-        if ($response.status) {
+        # Only the new worker reports platform_family; an old one must not pass.
+        if ($response.status -and $response.platform_family) {
             $healthOk = $true
             Write-Output "[OK] Worker responded: status=$($response.status) node_id=$($response.node_id) hostname=$($response.hostname) platform_family=$($response.platform_family)"
             break
