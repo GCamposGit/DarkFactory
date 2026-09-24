@@ -33,7 +33,13 @@ def test_dockerfile_installs_git_gh_node_lftp():
     assert re.search(r"^\s*git\s*\\?\s*$", text, re.MULTILINE) or " git " in text
     assert "lftp" in text
     assert "nodejs" in text
-    assert re.search(r"apt-get install.*gh=", text) or 'apt-get install -y --no-install-recommends "gh=' in text
+    # gh comes from the pinned release tarball, checksum-verified (the apt repo
+    # only keeps the latest version, so a pinned apt install breaks on bump).
+    assert "github.com/cli/cli/releases/download/v${GH_CLI_VERSION}" in text
+    assert "sha256sum -c" in text
+    assert "/usr/local/bin/gh" in text
+    assert '"gh=${GH_CLI_VERSION}' not in text
+    assert "githubcli-archive-keyring" not in text
 
 
 def test_dockerfile_pins_claude_and_codex_versions():
