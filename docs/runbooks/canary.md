@@ -133,32 +133,76 @@ O servico `darkfac-canary` em `deploy/dokploy/docker-compose.cloud.yml` fica
 do app real existir (passos 2-4). Depois que `canary.seu-dominio.com`
 responder:
 
-1. No arquivo de ambiente do coordinator/worker (Dokploy > seu app
-   `darkfac-coordinator` ou `.env` local, conforme
-   `deploy/dokploy/env.cloud.example`), defina:
+1. No arquivo de ambiente do coordinator/worker/canary (Dokploy > cada app,
+   ou `.env` local, conforme `deploy/dokploy/env.cloud.example`), defina:
    - `DARKFAC_CANARY_BASE_URL=https://canary.seu-dominio.com`
-2. Para rodar o canario manualmente uma vez (validacao):
+   - `DARKFAC_HF02_DATABASE_URL=<mesma URL do coordinator/worker>` — **sem
+     isso o canario ainda funciona, mas cai para um SQLite local dentro do
+     container** (`core.line.store_selection`, review item 2 do PR #37);
+     ele so entra na fila real que o worker le quando essa var aponta para o
+     mesmo Postgres do coordinator/worker.
+   - `TELEGRAM_OWNER_BOT_TOKEN`, `TELEGRAM_AUTHORIZED_USERS`,
+     `TELEGRAM_AUTHORIZED_CHATS` — sem isso o canario ainda escreve o
+     relatorio JSON normalmente, mas a notificacao de falha e o resumo
+     semanal silenciosamente nao saem (apenas um `logger.warning` local).
+     Veja a secao "Owner notifications" em `env.cloud.example` para como
+     obter o token/ids pelo @BotFather.
+2. Confirme que o volume `darkfac-canary-reports` existe (Dokploy cria
+   automaticamente a partir do compose na primeira vez que o servico roda;
+   sem ele, cada execucao one-shot comecaria com zero relatorios e o green
+   streak nunca passaria de 1 — review item 3 do PR #37). Em Dokploy:
+   **Volumes** (menu lateral) deve listar `darkfac-canary-reports` apos o
+   primeiro `run`.
+3. Para rodar o canario manualmente uma vez (validacao):
    ```powershell
    docker compose -f deploy/dokploy/docker-compose.cloud.yml --profile canary run --rm darkfac-canary
    ```
-3. Para agendamento diario automatico, use o recurso nativo do Dokploy
+4. Para agendamento diario automatico, use o recurso nativo do Dokploy
    ("Scheduled Tasks" / "Cron Jobs" na versao atual, dentro do app
    `darkfac-canary` ou de um app "Schedule" separado apontando para o mesmo
    compose/profile), configurando:
-   - **Schedule / Cron expression**: `0 9 * * *` (09:00 UTC todo dia — ajuste
-     ao fuso desejado).
+   - **Schedule / Cron expression**: `0 * * * *` (a cada hora — o canario e
+     idempotente e nao-bloqueante: cada execucao faz um unico
+     submit-se-preciso + observe e sai; rodar de hora em hora deixa o
+     relatorio do dia progredir de `in_progress` ate `passed`/`failed`/
+     `timeout` sem precisar de um container ficar horas rodando). Se
+     preferir uma unica vez por dia, `0 9 * * *` (09:00 UTC) tambem funciona,
+     mas um run pendente so vira `timeout` depois de `--timeout-seconds`
+     (padrao 6h) e voce so vai saber no dia seguinte.
    - **Command**: `python -m core.line.canary run --base-url $DARKFAC_CANARY_BASE_URL`.
    Se sua versao do Dokploy nao tiver cron nativo ainda, use o Windows Task
    Scheduler (host coordenador) ou `crontab` na VPS apontando para o mesmo
    comando `docker compose ... run --rm darkfac-canary`.
+5. Dogfood (opcional, so depois de validar o canario por si so): duas formas
+   de ligar, ambas desligadas por padrao (`DARKFAC_DOGFOOD_ENABLED=false`):
+   - **Embutido no canario**: defina `DARKFAC_DOGFOOD_ENABLED=true` no
+     ambiente do servico `darkfac-canary` — ao final de todo `canary run`
+     que resultar em `passed`, ele chama `core.line.dogfood` automaticamente
+     (ainda sujeito aos gates: streak >= 7, nada em andamento, item nao
+     protegido pelo `guard.py`).
+   - **Cron proprio**: mantenha `DARKFAC_DOGFOOD_ENABLED=false` no canario e
+     crie um segundo Scheduled Task/Cron Job apontando para
+     `python -m core.line.dogfood run --force` (o `--force` ignora apenas o
+     env-gate da CLI; os gates de streak/in-flight/guard continuam valendo).
+     Isso separa a cadencia do canario (pode ser horaria) da do dogfood
+     (ex.: uma vez por dia), sem duplicar submissoes -- `submit_dogfood_item`
+     tambem e idempotente por `roadmap_item_id`.
 
 ## 6. Verificacao final (aceite do ticket)
 
 - [ ] `nslookup canary.seu-dominio.com` resolve para o IP da VPS.
 - [ ] `curl https://canary.seu-dominio.com/version` responde 200 com o SHA.
 - [ ] `docker compose -f deploy/dokploy/docker-compose.cloud.yml --profile canary run --rm darkfac-canary`
-      roda sem erro e escreve `.factory/reports/canary/<hoje>.json`.
-- [ ] Depois de 7 dias corridos com relatorio verde,
+      roda sem erro e escreve `.factory/reports/canary/<hoje>.json` (dentro
+      do volume `darkfac-canary-reports`, nao perdido entre execucoes).
+- [ ] Rodar o comando acima duas vezes seguidas no mesmo dia produz o MESMO
+      `run_id` no relatorio (idempotente) e o `outcome` avanca de
+      `in_progress` para `passed`/`failed` conforme a linha progride --
+      nunca `passed=true` num relatorio com etapas pendentes.
+- [ ] Com `TELEGRAM_*` configurado, uma falha proposital (rode num dia sem
+      `DARKFAC_CANARY_BASE_URL`, por exemplo) chega no Telegram com a etapa
+      e o `cause_code`.
+- [ ] Depois de 7 dias corridos com relatorio `outcome: "passed"`,
       `python -m core.line.canary status` mostra `"v2_met": true`.
 
 ## Fora do escopo automatizado (decisao registrada no handoff)
@@ -166,6 +210,10 @@ responder:
 - Nenhum agente executa `gh repo create`, chamadas ao Dokploy, ou alteracoes
   de DNS por voce — sao acoes irreversiveis/externas fora do escopo permitido
   a um agente autonomo (contas, portais, dominios).
-- `core/line/canary.py` roda com sucesso mesmo sem esses passos: sem
-  `--base-url` ele so observa e reporta as etapas da linha (grill, planning,
-  build, review, integration, release), sem o smoke check de `/version`.
+- `core/line/canary.py` roda sem erro mesmo sem esses passos: sem
+  `--base-url` ele ainda submete a demanda e observa as etapas da linha
+  (grill, planning, development, validation, independent_review,
+  integration, build_deploy), mas o relatorio do dia fica `outcome: "failed"`
+  com `cause_code: "canary_base_url_missing"` -- o smoke check de `/version`
+  e obrigatorio para um dia contar como verde (PR #37 review item 1), nunca
+  silenciosamente pulado.

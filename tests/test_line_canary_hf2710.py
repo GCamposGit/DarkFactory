@@ -16,7 +16,8 @@ from pathlib import Path
 
 import pytest
 
-from core.line import canary, dogfood
+from core.line import canary, dogfood, store_selection
+from core.orchestrator.adapters.control_postgres import PostgresControlStore
 from core.roadmap.models import (
     ConfidenceLevel,
     DeliveryStatus,
@@ -84,13 +85,18 @@ class RecordingSender:
         return True
 
 
+# Real line stage names (core.line.bindings.LINE_STAGES minus "retrospective"
+# == canary.REQUIRED_STAGES), all terminal-succeeded -- a fully released run.
 _ALL_STAGES = [
-    canary.CanaryStageObservation(stage="grill", status="succeeded", iteration=0, harness="grill_engine", actual_cost=0.01),
-    canary.CanaryStageObservation(stage="planning", status="succeeded", iteration=0, harness="planner", actual_cost=0.02),
-    canary.CanaryStageObservation(stage="build", status="succeeded", iteration=0, harness="claude", actual_cost=0.5),
-    canary.CanaryStageObservation(stage="review", status="succeeded", iteration=0, harness="reviewer", actual_cost=0.03),
-    canary.CanaryStageObservation(stage="integration", status="succeeded", iteration=0, harness="ci", actual_cost=0.01),
-    canary.CanaryStageObservation(stage="release", status="succeeded", iteration=0, harness="release", actual_cost=0.01),
+    canary.CanaryStageObservation(stage=stage, status="succeeded", iteration=0, harness="role", actual_cost=0.01)
+    for stage in canary.REQUIRED_STAGES
+]
+
+# The same run, but stopped partway through -- e.g. only grill/planning have
+# reported in so far. Used to prove a non-terminal run is never green.
+_PENDING_STAGES = [
+    canary.CanaryStageObservation(stage="grill", status="succeeded", iteration=0),
+    canary.CanaryStageObservation(stage="planning", status="running", iteration=0),
 ]
 
 
@@ -226,7 +232,7 @@ def test_failure_path_notifies_with_stage_and_cause_code(store, reports_dir) -> 
     day = date(2026, 9, 22)
     failing_stages = [
         canary.CanaryStageObservation(stage="grill", status="succeeded", iteration=0),
-        canary.CanaryStageObservation(stage="build", status="failed", iteration=2, cause_code="test_failure"),
+        canary.CanaryStageObservation(stage="development", status="failed", iteration=2, cause_code="test_failure"),
     ]
     observer = FakeObserver(failing_stages)
     sender = RecordingSender()
@@ -236,12 +242,92 @@ def test_failure_path_notifies_with_stage_and_cause_code(store, reports_dir) -> 
         reports_dir=reports_dir, failure_sender=sender, send_weekly=False,
     )
 
+    assert report.outcome == "failed"
     assert report.passed is False
-    assert report.failing_stage == "build"
+    assert report.failing_stage == "development"
     assert report.cause_code == "test_failure"
     assert len(sender.messages) == 1
-    assert "build" in sender.messages[0]
+    assert "development" in sender.messages[0]
     assert "test_failure" in sender.messages[0]
+
+
+# --------------------------------------------------------------------------
+# HF-27-10 PR #37 review item 1: a non-terminal or unproven run must never
+# report passed=True ("false green").
+# --------------------------------------------------------------------------
+
+
+def test_pending_stages_are_not_passed_and_stay_in_progress(store, reports_dir) -> None:
+    day = date(2026, 9, 22)
+    observer = FakeObserver(_PENDING_STAGES)
+
+    report = canary.run_daily(
+        day=day, store=store, observer=observer, clock=FixedClock(day),
+        reports_dir=reports_dir, send_weekly=False,
+        timeout_seconds=canary.DEFAULT_TIMEOUT_SECONDS,  # far from elapsed -> not a timeout yet
+    )
+
+    assert report.outcome == "in_progress"
+    assert report.passed is False
+    assert report.failing_stage == "planning"
+
+
+def test_missing_base_url_on_an_otherwise_complete_run_is_not_passed(store, reports_dir) -> None:
+    day = date(2026, 9, 22)
+    observer = FakeObserver(_ALL_STAGES)
+
+    report = canary.run_daily(
+        day=day, store=store, observer=observer, clock=FixedClock(day),
+        reports_dir=reports_dir, send_weekly=False,
+        # no base_url -> smoke is mandatory and missing, not silently skipped
+    )
+
+    assert report.outcome == "failed"
+    assert report.passed is False
+    assert report.failing_stage == "smoke"
+    assert report.cause_code == "canary_base_url_missing"
+
+
+def test_non_terminal_run_past_the_deadline_times_out_and_notifies(store, reports_dir) -> None:
+    day = date(2026, 9, 22)
+    observer = FakeObserver(_PENDING_STAGES)
+    sender = RecordingSender()
+
+    report = canary.run_daily(
+        day=day, store=store, observer=observer, clock=FixedClock(day),
+        reports_dir=reports_dir, send_weekly=False, failure_sender=sender,
+        timeout_seconds=0,  # deadline is "now" -> any non-terminal run has already timed out
+    )
+
+    assert report.outcome == "timeout"
+    assert report.passed is False
+    assert report.cause_code == "canary_timeout"
+    assert report.failing_stage == "planning"
+    assert len(sender.messages) == 1
+    assert "canary_timeout" in sender.messages[0]
+    assert "TIMEOUT" in sender.messages[0]
+
+
+def test_green_streak_never_counts_in_progress_or_timeout_or_dry_run() -> None:
+    base = date(2026, 9, 1)
+    reports = [
+        canary.CanaryReport(date=base.isoformat(), scenario="normal", external_id="x", outcome="passed"),
+        canary.CanaryReport(date=(base + timedelta(days=1)).isoformat(), scenario="normal", external_id="x", outcome="in_progress"),
+        canary.CanaryReport(date=(base + timedelta(days=2)).isoformat(), scenario="normal", external_id="x", outcome="passed"),
+    ]
+    # day 1 (in_progress) breaks any streak that would otherwise bridge day 0 -> day 2
+    assert canary.green_streak(reports) == 1
+
+    timeout_reports = [
+        canary.CanaryReport(date=base.isoformat(), scenario="normal", external_id="x", outcome="passed"),
+        canary.CanaryReport(date=(base + timedelta(days=1)).isoformat(), scenario="normal", external_id="x", outcome="timeout"),
+    ]
+    assert canary.green_streak(timeout_reports) == 0
+
+    dry_run_reports = [
+        canary.CanaryReport(date=base.isoformat(), scenario="normal", external_id="x", outcome="dry_run"),
+    ]
+    assert canary.green_streak(dry_run_reports) == 0
 
 
 def test_failing_smoke_check_is_reported_when_stages_all_succeed(store, reports_dir) -> None:
@@ -291,8 +377,8 @@ def _write_fake_report(reports_dir: Path, day: date, passed: bool, scenario: str
         external_id=f"canary:{day.isoformat()}",
         run_id=f"run-{day.isoformat()}",
         demand_id=f"dem-{day.isoformat()}",
-        passed=passed,
-        failing_stage=None if passed else "build",
+        outcome="passed" if passed else "failed",
+        failing_stage=None if passed else "development",
         cause_code=None if passed else "test_failure",
     )
     (reports_dir / f"{day.isoformat()}.json").write_text(report.model_dump_json(indent=2), encoding="utf-8")
@@ -321,7 +407,7 @@ def test_weekly_summary_includes_streak_and_last_seven(reports_dir) -> None:
 def test_green_streak_counts_consecutive_passing_days() -> None:
     base = date(2026, 9, 1)
     reports = [
-        canary.CanaryReport(date=(base + timedelta(days=i)).isoformat(), scenario="normal", external_id="x", passed=True)
+        canary.CanaryReport(date=(base + timedelta(days=i)).isoformat(), scenario="normal", external_id="x", outcome="passed")
         for i in range(5)
     ]
     assert canary.green_streak(reports) == 5
@@ -331,10 +417,10 @@ def test_green_streak_counts_consecutive_passing_days() -> None:
 def test_green_streak_stops_at_a_failure() -> None:
     base = date(2026, 9, 1)
     reports = [
-        canary.CanaryReport(date=(base + timedelta(days=0)).isoformat(), scenario="normal", external_id="x", passed=True),
-        canary.CanaryReport(date=(base + timedelta(days=1)).isoformat(), scenario="normal", external_id="x", passed=False),
-        canary.CanaryReport(date=(base + timedelta(days=2)).isoformat(), scenario="normal", external_id="x", passed=True),
-        canary.CanaryReport(date=(base + timedelta(days=3)).isoformat(), scenario="normal", external_id="x", passed=True),
+        canary.CanaryReport(date=(base + timedelta(days=0)).isoformat(), scenario="normal", external_id="x", outcome="passed"),
+        canary.CanaryReport(date=(base + timedelta(days=1)).isoformat(), scenario="normal", external_id="x", outcome="failed"),
+        canary.CanaryReport(date=(base + timedelta(days=2)).isoformat(), scenario="normal", external_id="x", outcome="passed"),
+        canary.CanaryReport(date=(base + timedelta(days=3)).isoformat(), scenario="normal", external_id="x", outcome="passed"),
     ]
     assert canary.green_streak(reports) == 2
 
@@ -342,8 +428,8 @@ def test_green_streak_stops_at_a_failure() -> None:
 def test_green_streak_stops_at_a_gap_in_calendar_days() -> None:
     base = date(2026, 9, 1)
     reports = [
-        canary.CanaryReport(date=base.isoformat(), scenario="normal", external_id="x", passed=True),
-        canary.CanaryReport(date=(base + timedelta(days=2)).isoformat(), scenario="normal", external_id="x", passed=True),
+        canary.CanaryReport(date=base.isoformat(), scenario="normal", external_id="x", outcome="passed"),
+        canary.CanaryReport(date=(base + timedelta(days=2)).isoformat(), scenario="normal", external_id="x", outcome="passed"),
     ]
     assert canary.green_streak(reports) == 1
 
@@ -351,7 +437,7 @@ def test_green_streak_stops_at_a_gap_in_calendar_days() -> None:
 def test_seven_consecutive_green_days_meets_v2() -> None:
     base = date(2026, 9, 1)
     reports = [
-        canary.CanaryReport(date=(base + timedelta(days=i)).isoformat(), scenario="normal", external_id="x", passed=True)
+        canary.CanaryReport(date=(base + timedelta(days=i)).isoformat(), scenario="normal", external_id="x", outcome="passed")
         for i in range(7)
     ]
     assert canary.green_streak(reports) == 7
@@ -499,3 +585,104 @@ def test_pick_candidate_skips_non_planned_and_untagged_items() -> None:
     picked = dogfood.pick_candidate(items)
     assert picked is not None
     assert picked.id == "C"
+
+
+# --------------------------------------------------------------------------
+# HF-27-10 PR #37 review item 2: store selection must match the
+# coordinator/worker's own Postgres-iff-DATABASE_URL rule.
+# --------------------------------------------------------------------------
+
+
+def test_default_store_is_sqlite_when_no_database_url(monkeypatch, tmp_path) -> None:
+    monkeypatch.delenv("DARKFAC_HF02_DATABASE_URL", raising=False)
+    store = store_selection.default_control_store(sqlite_db_path=tmp_path / "control.db")
+    assert isinstance(store, SQLiteControlStore)
+    # And it is the persistent file, not an in-memory throwaway.
+    assert (tmp_path / "control.db").is_file()
+
+
+def test_default_store_is_postgres_when_database_url_set(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("DARKFAC_HF02_DATABASE_URL", "postgresql://darkfac_worker:x@localhost:5432/darkfac")
+    store = store_selection.default_control_store(sqlite_db_path=tmp_path / "control.db")
+    # psycopg is not installed/reachable in this environment, so
+    # PostgresControlStore falls back to its own in-memory mock -- the
+    # point of this test is only that we *asked* for Postgres, matching
+    # exactly how CloudCoordinator/CloudWorker pick their store.
+    assert isinstance(store, PostgresControlStore)
+
+
+# --------------------------------------------------------------------------
+# HF-27-10 PR #37 review item 4b: dogfood wiring is env-gated off by default.
+# --------------------------------------------------------------------------
+
+
+def test_run_daily_does_not_submit_dogfood_by_default_even_when_streak_is_met(
+    monkeypatch, store, tmp_path, reports_dir
+) -> None:
+    monkeypatch.delenv("DARKFAC_DOGFOOD_ENABLED", raising=False)
+    base = date(2026, 9, 15)
+    for i in range(6):  # 6 prior green days; today's run (below) would be the 7th
+        _write_fake_report(reports_dir, base + timedelta(days=i), passed=True)
+
+    day = base + timedelta(days=6)
+    roadmap_path = tmp_path / "roadmap.json"
+    _write_roadmap(roadmap_path, [_roadmap_item("USR-300", tags=["line-ok"])])
+    monkeypatch.setattr(dogfood, "ROADMAP_PATH", roadmap_path)
+
+    observer = FakeObserver(_ALL_STAGES)
+    smoke = FakeSmokeClient(ok=True)
+    report = canary.run_daily(
+        day=day, store=store, observer=observer, smoke_client=smoke, clock=FixedClock(day),
+        base_url="https://canary.example.test", reports_dir=reports_dir, send_weekly=False,
+    )
+    assert report.outcome == "passed"
+
+    conn = store._connect()
+    try:
+        cur = conn.cursor()
+        cur.execute("SELECT COUNT(*) FROM intake_commands WHERE channel = 'dogfood'")
+        assert cur.fetchone()[0] == 0
+    finally:
+        conn.close()
+
+
+def test_run_daily_submits_dogfood_when_enabled_and_streak_met(monkeypatch, store, tmp_path, reports_dir) -> None:
+    base = date(2026, 9, 15)
+    for i in range(6):
+        _write_fake_report(reports_dir, base + timedelta(days=i), passed=True)
+
+    day = base + timedelta(days=6)
+    roadmap_path = tmp_path / "roadmap.json"
+    _write_roadmap(roadmap_path, [_roadmap_item("USR-301", tags=["line-ok"])])
+    # `submit_dogfood_item` reads the module-level ROADMAP_PATH at call time
+    # when no explicit `roadmap_path` is passed through `run_daily`.
+    monkeypatch.setattr(dogfood, "ROADMAP_PATH", roadmap_path)
+
+    observer = FakeObserver(_ALL_STAGES)
+    smoke = FakeSmokeClient(ok=True)
+
+    report = canary.run_daily(
+        day=day, store=store, observer=observer, smoke_client=smoke, clock=FixedClock(day),
+        base_url="https://canary.example.test", reports_dir=reports_dir, send_weekly=False,
+        run_dogfood=True,  # equivalent to DARKFAC_DOGFOOD_ENABLED=true, without touching env
+    )
+
+    assert report.outcome == "passed"
+
+    conn = store._connect()
+    try:
+        cur = conn.cursor()
+        cur.execute("SELECT external_id FROM intake_commands WHERE channel = 'dogfood'")
+        rows = [r[0] for r in cur.fetchall()]
+        assert rows == ["dogfood:USR-301"]
+    finally:
+        conn.close()
+
+
+def test_dogfood_enabled_from_env(monkeypatch) -> None:
+    monkeypatch.delenv("DARKFAC_DOGFOOD_ENABLED", raising=False)
+    assert canary._dogfood_enabled_from_env() is False
+    monkeypatch.setenv("DARKFAC_DOGFOOD_ENABLED", "true")
+    assert canary._dogfood_enabled_from_env() is True
+    monkeypatch.setenv("DARKFAC_DOGFOOD_ENABLED", "0")
+    assert canary._dogfood_enabled_from_env() is False

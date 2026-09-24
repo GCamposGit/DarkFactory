@@ -73,6 +73,14 @@ services:
       - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
       - REMOTE_HARNESS_URLS=${REMOTE_HARNESS_URLS:-http://100.78.181.90:8080,http://100.81.84.124:8080}
       - REMOTE_HARNESS_URL=${REMOTE_HARNESS_URL:-http://100.78.181.90:8080}
+      # HF-27-10 PR #37 review item 4: core.line.human's owner notifications
+      # (core.notifications.service.NotificationService, role="owner") need
+      # these to actually send -- pre-existing gap, this service is the one
+      # that calls them (grill/human-in-the-loop blocks), so it gets fixed
+      # here rather than left broken alongside the canary's own wiring.
+      - TELEGRAM_OWNER_BOT_TOKEN=${TELEGRAM_OWNER_BOT_TOKEN:-}
+      - TELEGRAM_AUTHORIZED_USERS=${TELEGRAM_AUTHORIZED_USERS:-}
+      - TELEGRAM_AUTHORIZED_CHATS=${TELEGRAM_AUTHORIZED_CHATS:-}
     healthcheck:
       test: ["CMD", "python", "-m", "core.orchestrator.cloud_worker", "--status"]
       interval: 30s
@@ -102,7 +110,13 @@ services:
   # "Cron Job" / scheduled deployment targeting this service), since it
   # needs the real darkfac-canary repo + Dokploy app to be bootstrapped
   # first (see docs/runbooks/canary.md). `restart: "no"` because this is a
-  # one-shot daily job, not a long-running service.
+  # one-shot job: run it on a cron schedule (see docs/runbooks/canary.md
+  # section 5), not as a long-running service. It uses the SAME store the
+  # coordinator/worker use (Postgres iff DARKFAC_HF02_DATABASE_URL is set,
+  # via core.line.store_selection -- HF-27-10 PR #37 review item 2), so its
+  # demand enters the real public intake the worker actually reads, and its
+  # `.factory/reports/canary/` reports live on their own named volume so a
+  # streak survives across one-shot container runs (review item 3).
   darkfac-canary:
     build:
       context: https://github.com/GCamposGit/DarkFactory.git#main
@@ -116,11 +130,22 @@ services:
       - DARKFAC_ROLE=canary
       - DARKFAC_HF02_DATABASE_URL=${DARKFAC_HF02_DATABASE_URL}
       - DARKFAC_CANARY_BASE_URL=${DARKFAC_CANARY_BASE_URL:-}
+      - DARKFAC_CANARY_REPORTS_DIR=/app/.factory/reports/canary
+      # HF-27-10 review item 4b: dogfood wiring stays off unless explicitly
+      # turned on here (or standalone via `python -m core.line.dogfood run`
+      # on its own cron entry -- see docs/runbooks/canary.md section 5).
+      - DARKFAC_DOGFOOD_ENABLED=${DARKFAC_DOGFOOD_ENABLED:-false}
       - DATA_DIR=/app/data
       - FACTORY_DIR=/app/.factory
+      # Same notifier env the worker uses (review item 4) -- NotificationService
+      # (role="owner") needs these to actually send the failure/weekly alerts.
+      - TELEGRAM_OWNER_BOT_TOKEN=${TELEGRAM_OWNER_BOT_TOKEN:-}
+      - TELEGRAM_AUTHORIZED_USERS=${TELEGRAM_AUTHORIZED_USERS:-}
+      - TELEGRAM_AUTHORIZED_CHATS=${TELEGRAM_AUTHORIZED_CHATS:-}
     volumes:
       - darkfac-artifacts:/app/.factory/artifacts
       - darkfac-test-logs:/app/.factory/test_logs
+      - darkfac-canary-reports:/app/.factory/reports/canary
     networks:
       - dokploy-network
     deploy:
@@ -141,6 +166,8 @@ volumes:
     name: darkfac-codex-auth
   darkfac-workspaces:
     name: darkfac-workspaces
+  darkfac-canary-reports:
+    name: darkfac-canary-reports
 
 networks:
   dokploy-network:
