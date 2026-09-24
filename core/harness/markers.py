@@ -41,6 +41,21 @@ SUPERVISOR_MARKERS = (
 )
 
 
+def sanitize_child_output(output: str) -> str:
+    """Prevent a subprocess (or a remote worker's job log) from emitting
+    markers owned by the supervisor. Canonical implementation shared by
+    ``core.harness.runner`` (local subprocess steps) and
+    ``core.harness.remote_dispatch`` (remote job log streaming) so a
+    malicious/buggy remote log can never inject a forged
+    ``[HARNESS_PASS]``/``[HARNESS_RESULT]``/etc. into the supervisor's own
+    output stream.
+    """
+    sanitized = output
+    for marker in SUPERVISOR_MARKERS:
+        sanitized = sanitized.replace(marker, marker.replace("[", "[CHILD_", 1))
+    return sanitized
+
+
 def _payload(line: str, marker: str) -> str | None:
     prefix = f"{marker} "
     return line[len(prefix) :].strip() if line.startswith(prefix) else None

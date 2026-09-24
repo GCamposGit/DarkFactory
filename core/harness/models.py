@@ -67,6 +67,16 @@ class HarnessResult(BaseModel):
             "unaffected."
         ),
     )
+    executed_on: dict[str, Any] | None = Field(
+        default=None,
+        description=(
+            "Present only when the suite was dispatched to and actually run on "
+            "a remote test worker (core.harness.remote_dispatch): the worker's "
+            "host/url/platform_family. Absent on every locally-executed run "
+            "(and on a plain local cache-hit reuse), so existing consumers of "
+            "HARNESS_RESULT that never look at this field are unaffected."
+        ),
+    )
 
     @field_validator("candidate_sha")
     @classmethod

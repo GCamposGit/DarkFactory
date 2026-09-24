@@ -37,11 +37,16 @@ Este é o único portão oficial. `runner.py --quick` já executa a suíte intei
 `pytest-xdist`, com verdicts cacheados por árvore de commit (reaproveita um
 PASS anterior se a árvore não mudou) e enfileirados por máquina (um
 `suite_lock` global impede que dois harnesses/agentes no mesmo host rodem a
-suíte inteira ao mesmo tempo e disputem CPU/sqlite). Não rode
-`python -m pytest tests -v` separadamente como segundo portão: isso duplicava
-a mesma suíte e é a causa raiz de timeouts quando múltiplos agentes validam
-em paralelo no mesmo host. Detalhes de variáveis de ambiente, locks e cache
-cross-host em `docs/HARNESS_INTEROP.md`.
+suíte inteira ao mesmo tempo e disputem CPU/sqlite). Antes disso, o harness
+também tenta despachar a suíte inteira para o worker primário de testes no
+Desktop (`DARKFAC_TEST_WORKERS`, HF-27-11) e cai para execução local
+automaticamente se o worker estiver offline/ocupado além do tempo de
+espera; use `--local` para nunca despachar (detalhes em
+`docs/HARNESS_INTEROP.md`, seção "Worker primário de testes (Desktop)").
+Não rode `python -m pytest tests -v` separadamente como segundo portão:
+isso duplicava a mesma suíte e é a causa raiz de timeouts quando múltiplos
+agentes validam em paralelo no mesmo host. Detalhes de variáveis de
+ambiente, locks e cache cross-host em `docs/HARNESS_INTEROP.md`.
 
 ### Loop interno
 
