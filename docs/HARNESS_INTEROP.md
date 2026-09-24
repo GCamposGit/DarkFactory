@@ -102,7 +102,7 @@ todos estourando o timeout de 1200s. Três mecanismos resolvem isso, todos em
    qualquer forma, esperar mais não tem sentido.
 4. **Paralelismo (`pytest-xdist`) + timeout por teste (`pytest-timeout`)** —
    o step de teste roda com `-n auto --dist worksteal -m "not serial"`
-   (medido no Windows Desktop, 28 cores: `worksteal` ~120s de média contra
+   (medido no Notebook Windows, i7-14700HX 28 threads: `worksteal` ~120s de média contra
    ~191s de `loadfile` em duas execuções de cada, suíte estável nas duas —
    `worksteal` redistribui itens individuais entre workers ociosos em vez
    de fixar cada arquivo inteiro num worker, o que equilibra melhor uma
