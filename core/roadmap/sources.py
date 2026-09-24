@@ -164,7 +164,10 @@ class JsonRoadmapSource:
                     if unit.get("operational_status"):
                         normalized_raw["operational_status"] = str(unit["operational_status"])
 
-                evidence_refs = list(raw.get("evidence_refs") or [])
+                evidence_refs = [
+                    RoadmapEvidenceRef.model_validate(ref) if isinstance(ref, dict) else ref
+                    for ref in raw.get("evidence_refs") or []
+                ]
                 evidence_refs.extend(self._evidence_refs(item_id))
                 if evidence_refs:
                     normalized_raw["evidence_refs"] = evidence_refs
