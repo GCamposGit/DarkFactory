@@ -62,14 +62,14 @@ Prioridade: **Agora** = próximo ciclo; **Depois** = após os itens Agora;
 | DH-01 | Agora | **Saúde da Fábrica (somente leitura)**: notificações não lidas, Telegram, n8n (status e workflows), workers do harness, eventos de webhook, status/métricas do HF-15. Entregue em `USR-43`; ações mutáveis (reconhecer, checar cotas, sync/trigger n8n, drill HF-15) ficam em `DH-17` | `GET notifications`, `GET integrations/telegram/status`, `GET integrations/n8n/status`, `GET integrations/n8n/workflows`, `GET harness/workers`, `GET webhooks/events`, `GET hf15/status`, `GET hf15/metrics`; `core/notifications`, `core/integrations`, `core/acceptance` | Um painel mostra cada integração com estado, idade da última observação; nenhuma ação mutável é exposta nesta entrega |
 | DH-02 | Agora | **Intake canônico headless (somente leitura no Hub)**: canal de intake transacional headless acionado por CLI e agentes; UI do Hub opera estritamente em modo de consulta por diretriz do owner. Entregue em `USR-48` (`POST /api/demands/intake` classificado como `machine`) | `POST /api/demands/intake` | Entregue em `USR-48`; endpoint headless documentado como `machine` e Hub em modo somente-leitura |
 | DH-03 | Agora | **Operação de status headless (somente leitura no Hub)**: operação programática de status via CLI/harness; UI do Hub opera estritamente em modo de consulta por diretriz do owner. Entregue em `USR-48` (`PATCH /api/demands/tickets/{ticket_id}/status` classificado como `machine`) | `PATCH /api/demands/tickets/{id}/status` | Entregue em `USR-48`; endpoint programático documentado como `machine` e Hub em modo somente-leitura |
-| DH-04 | Depois | **Evolução e catálogo com ações**: propor, avaliar, promover e reverter; sincronizar catálogo | `evolution/*`, `catalog/sync`; `core/evolution`, `core/catalog` | Cada ação mostra diff, avaliação e rollback disponível |
+| DH-04 | Depois | **Evolução e catálogo com ações**: propor, avaliar, promover e reverter; sincronizar catálogo. Entregue em `USR-55` | `evolution/*`, `catalog/sync`; `core/evolution`, `core/catalog` | Cada ação mostra diff, avaliação e rollback disponível |
 | DH-05 | Depois | **Benchmarks e roteamento**: fronteira por domínio, proximidade, top-3 especulativo, corrida empírica, simulador de roteamento. Entregue em `USR-52` | `benchmarks/*`; `core/router` | Owner vê por que um modelo foi escolhido para uma tarefa |
 | DH-06 | Depois | **Aprendizado e conhecimento**: Learning Packs (HTML, Anki, gerar), memória, pesquisa e Knowledge Ledger. Entregue em `USR-53` | `learning-packs/*`; `core/learning`, `core/knowledge`, `core/learning_pack`, `core/research` | Última sessão tem pack acessível em 1 clique; ledger de pesquisa pesquisável |
-| DH-07 | Depois | **Estúdio de conteúdo e visual**: gerar e auditar conteúdo, presets, galeria e ilustração | `content/*`, `visual/*`; `core/content`, `core/visual`, `core/marketing` | Conteúdo gerado passa pelo lint anti-slop antes de exportar |
+| DH-07 | Depois | **Estúdio de conteúdo e visual**: gerar e auditar conteúdo, presets, galeria e ilustração. Entregue em `USR-55` | `content/*`, `visual/*`; `core/content`, `core/visual`, `core/marketing` | Conteúdo gerado passa pelo lint anti-slop antes de exportar |
 | DH-08 | Depois | **Portfólio multiprojeto**: projetos registrados, adoção (Skill 07), pilotos, arquétipos, linhas. Entregue em `USR-54` | `core/projects`, `core/portfolio`, `core/adoption`, `core/pilots`, `core/archetypes`, `core/line`, `core/game`; `GET /api/portfolio`, `GET /api/portfolio/projects/{id}`, `GET /api/portfolio/efficiency`, `GET /api/portfolio/archetypes` | Cada projeto mostra estágio, saúde, roadmap e último deploy |
-| DH-09 | Depois | **Governança enterprise e deploy**: trilha de auditoria, configuração, avaliação de deploy, disparo de deploy Dokploy com confirmação | `enterprise/audit-trail`, `enterprise/configure`, `enterprise/evaluate-deploy`, `cloud/deploy` | Deploy só dispara após avaliação verde e confirmação explícita |
+| DH-09 | Depois | **Governança enterprise e deploy**: trilha de auditoria, configuração, avaliação de deploy, disparo de deploy Dokploy com confirmação. Entregue em `USR-55` | `enterprise/audit-trail`, `enterprise/configure`, `enterprise/evaluate-deploy`, `cloud/deploy` | Deploy só dispara após avaliação verde e confirmação explícita |
 | DH-10 | Depois | **Saúde e histórico do roadmap**: aba de saúde, linha do tempo e comparação de versões no drawer de roadmap. Entregue em `USR-51` | `projects/{id}/roadmap/health`, `history`, `history/compare` | Owner compara duas versões do roadmap e vê o que mudou |
-| DH-11 | Depois | **Validação sob demanda**: rodar suíte/harness remoto a partir do Hub com relatório destilado | `harness/run-tests`, `harness/execute` | Resultado com `[HARNESS_PASS]` e link para logs isolados |
+| DH-11 | Depois | **Validação sob demanda**: rodar suíte/harness remoto a partir do Hub com relatório destilado. Entregue em `USR-55` | `harness/run-tests`, `harness/execute` | Resultado com `[HARNESS_PASS]` e link para logs isolados |
 | DH-12 | Futuro | **Plano e DAG da autonomia contínua**: visualizar plano, gates de prontidão, rotas qualificadas e política efetiva | `core/planning`, `core/workflow` | DAG navegável com o estado de cada nó |
 | DH-13 | Agora | **Fundação do frontend**: CSS compilado localmente no lugar do Tailwind CDN, `index.html` modular, versão de assets única servida pelo backend | frontend | Nenhum aviso de CDN no console; um deploy invalida todos os assets |
 | DH-14 | Agora | **Cobertura visível no Hub**: endpoint e badge com o placar do gate e a lista de pendências | `hub/backend/coverage.py`, `hub/backend/api.py`, `hub/frontend/coverage.js` | Entregue em `USR-45`; badge mostra a % coberta e abre a lista de pendências por `DH-xx` em drawer slide-over |
@@ -192,6 +192,38 @@ Prioridade: **Agora** = próximo ciclo; **Depois** = após os itens Agora;
     - `GET /api/portfolio/archetypes`: Lista de manifestos de arquétipos do catálogo da fábrica.
   - **Frontend Modular:** Módulo `hub/frontend/portfolio.js` e estrutura HTML com 4 abas interativas ("Projetos Adotados", "Eficiência & Orçamento", "Catálogo de Arquétipos" e "Esteira HF-27 & Pilotos"), modal de inspeção profunda e busca em tempo real.
   - **Gate de Cobertura:** Os 7 módulos do core (`adoption`, `archetypes`, `game`, `line`, `pilots`, `portfolio`, `projects`) e as 4 novas rotas `/api` foram mapeados para a superfície `portfolio-drawer`. A cobertura do DarkHub subiu para **80%** (106 capacidades expostas, pendências reduzidas de 34 para 27).
+
+## Entregue em USR-55 (DH-04, DH-07, DH-09, DH-11)
+
+- **DH-04 — Catálogo Cross-Projeto e Auto-Evolução com Ações:**
+  - `POST /api/catalog/sync`: Ação de sincronização direta de componentes reutilizáveis para projetos adotados (`darkfac`, `site-ggcampos`, `segundo-cerebro`, `jarvis`) com flag de sobrescrita e feedback imediato no card.
+  - `POST /api/evolution/propose`: Modal e formulário para registro de propostas de auto-evolução com validação de limites de governança (`skill_instruction`, `context_rule`, `archetype_template`, `routing_config`).
+  - `POST /api/evolution/evaluate`: Disparo de avaliação em sandbox holdout com diagnóstico.
+  - `POST /api/evolution/promote`: Promoção de candidatos aprovados com geração de snapshot atômico de reversão.
+  - `POST /api/evolution/rollback`: Reversão determinística de mutações a partir de snapshot.
+  - Superfícies mapeadas: `cross-catalog-section` e `evolution-status-container`.
+- **DH-07 — Estúdio de Conteúdo Anti-Slop e Ateliê Visual:**
+  - `GET /api/content/presets`: Listagem de presets de formato calibrados por persona (LinkedIn Post, Technical Blog, Commercial Proposal, etc.).
+  - `POST /api/content/generate`: Geração de conteúdo com salvaguardas anti-slop e calibração por persona (Staff+ Engineer, B2B Executive, Founder).
+  - `POST /api/content/lint`: Auditoria de pureza léxica, métricas de variância de comprimento de sentenças (detecção de cadência robótica) e captura de clichês de IA.
+  - `GET /api/visual/gallery`: Galeria de ativos visuais renderizados persistidos em `.factory/visuals/`.
+  - `POST /api/visual/generate`: Renderizador procedural context-aware a custo zero ($0) e suporte SVG para banners, diagramas e heros.
+  - `POST /api/visual/illustrate`: Ilustração semanticamente acoplada analisando o texto do editor e renderizando ativos contextuais em 1 clique.
+  - Módulos core cobertos: `core/content`, `core/visual`, `core/marketing`.
+  - Superfície mapeada: `content-studio-section`.
+- **DH-09 — Governança Enterprise e Portão de Deploy Dokploy (Cenário G8):**
+  - `GET /api/enterprise/audit-trail`: Tabela interativa com os eventos criptográficos da Hash Chain SHA-256 e status de integridade.
+  - `POST /api/enterprise/configure`: Formulário para definir residência de dados (`local_only`, `br_only`, `global`), janelas de RPO/RTO e obrigatoriedade de aceite do owner.
+  - `POST /api/enterprise/evaluate-deploy`: Avaliação formal dos oráculos de produção sob o Cenário G8 com veredito determinístico.
+  - `POST /api/cloud/deploy`: Disparo de deploy no Dokploy protegido por portão estrito em 2 etapas (botão habilitado apenas após veredito verde do gate e com modal de confirmação explícita).
+  - Superfície mapeada: `enterprise-security-section`.
+- **DH-11 — Validação sob Demanda e Harness Remoto:**
+  - `POST /api/harness/run-tests`: Disparo de testes remotos e headless via subagentes com oráculos e opções de timeout/fail-fast.
+  - `POST /api/harness/execute`: Execução em workers distribuídos com contingência local.
+  - Exibição de relatório destilado com marcador `[HARNESS_PASS]`, resumo de falhas isoladas e link para logs em disco.
+  - Módulo core coberto: `core/harness`.
+  - Superfície mapeada: `harness-validation-section`.
+- **Gate de Cobertura:** 21 capacidades (17 rotas `/api` e 4 módulos `core/`) transitaram de `pending` para `surface`. A cobertura do DarkHub atingiu **95%** (127 capacidades expostas, apenas 6 pendências remanescentes em DH-12 e DH-17).
 
 ## Configuração manual no Dokploy (para ativar R2 na nuvem)
 

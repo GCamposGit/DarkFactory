@@ -36,22 +36,22 @@
       "surface": "cross-catalog-section"
     },
     "POST /api/catalog/sync": {
-      "pending": "DH-04"
+      "surface": "cross-catalog-section"
     },
     "POST /api/cloud/deploy": {
-      "pending": "DH-09"
+      "surface": "enterprise-security-section"
     },
     "GET /api/cloud/status": {
       "surface": "infrastructure-cards-section"
     },
     "POST /api/content/generate": {
-      "pending": "DH-07"
+      "surface": "content-studio-section"
     },
     "POST /api/content/lint": {
-      "pending": "DH-07"
+      "surface": "content-studio-section"
     },
     "GET /api/content/presets": {
-      "pending": "DH-07"
+      "surface": "content-studio-section"
     },
     "GET /api/credits": {
       "surface": "api-credits-section"
@@ -90,13 +90,13 @@
       "machine": "Operacao programatica de status via CLI/harness; a UI do Hub opera estritamente em modo de consulta (DH-03)."
     },
     "GET /api/enterprise/audit-trail": {
-      "pending": "DH-09"
+      "surface": "enterprise-security-section"
     },
     "POST /api/enterprise/configure": {
-      "pending": "DH-09"
+      "surface": "enterprise-security-section"
     },
     "POST /api/enterprise/evaluate-deploy": {
-      "pending": "DH-09"
+      "surface": "enterprise-security-section"
     },
     "GET /api/enterprise/status": {
       "surface": "enterprise-security-section"
@@ -105,25 +105,25 @@
       "surface": "enterprise-security-section"
     },
     "POST /api/evolution/evaluate": {
-      "pending": "DH-04"
+      "surface": "evolution-status-container"
     },
     "POST /api/evolution/promote": {
-      "pending": "DH-04"
+      "surface": "evolution-status-container"
     },
     "POST /api/evolution/propose": {
-      "pending": "DH-04"
+      "surface": "evolution-status-container"
     },
     "POST /api/evolution/rollback": {
-      "pending": "DH-04"
+      "surface": "evolution-status-container"
     },
     "GET /api/evolution/status": {
       "surface": "evolution-status-container"
     },
     "POST /api/harness/execute": {
-      "pending": "DH-11"
+      "surface": "harness-validation-section"
     },
     "POST /api/harness/run-tests": {
-      "pending": "DH-11"
+      "surface": "harness-validation-section"
     },
     "GET /api/harness/workers": {
       "surface": "factory-health-block"
@@ -318,13 +318,13 @@
       "machine": "Sincronização de cotas pela estação local via scripts/sync_usage_to_cloud.py"
     },
     "GET /api/visual/gallery": {
-      "pending": "DH-07"
+      "surface": "content-studio-section"
     },
     "POST /api/visual/generate": {
-      "pending": "DH-07"
+      "surface": "content-studio-section"
     },
     "POST /api/visual/illustrate": {
-      "pending": "DH-07"
+      "surface": "content-studio-section"
     },
     "GET /api/webhooks/events": {
       "surface": "factory-health-block"
@@ -359,7 +359,7 @@
       "surface": "cross-catalog-section"
     },
     "content": {
-      "pending": "DH-07"
+      "surface": "content-studio-section"
     },
     "demands": {
       "surface": "demands-drawer"
@@ -377,7 +377,7 @@
       "surface": "portfolio-drawer"
     },
     "harness": {
-      "pending": "DH-11"
+      "surface": "harness-validation-section"
     },
     "infra": {
       "surface": "infrastructure-cards-section"
@@ -398,7 +398,7 @@
       "surface": "portfolio-drawer"
     },
     "marketing": {
-      "pending": "DH-07"
+      "surface": "content-studio-section"
     },
     "notifications": {
       "surface": "factory-health-block"
@@ -437,7 +437,7 @@
       "surface": "ai-usage-section"
     },
     "visual": {
-      "pending": "DH-07"
+      "surface": "content-studio-section"
     },
     "workflow": {
       "surface": "tasks-dashboard-section"

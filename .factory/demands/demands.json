@@ -851,5 +851,92 @@
     ],
     "created_at": "2026-09-23T20:45:00.000000Z",
     "updated_at": "2026-09-23T22:30:00.000000Z"
+  },
+  {
+    "id": "USR-54",
+    "project_id": "darkfac",
+    "title": "DH-08 Portfólio Multiprojeto no DarkHub",
+    "origin": "user",
+    "status": "completed",
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "next",
+    "tags": [
+      "user-demand",
+      "portfolio",
+      "frontend"
+    ],
+    "problem_statement": "Expor no DarkHub a visualização multiprojeto abrangendo os 7 módulos do core (adoption, archetypes, game, line, pilots, portfolio, projects).",
+    "core_journey": [
+      "Owner consulta o dashboard de portfólio multiprojeto em 5 dimensões com KPIs e telemetria"
+    ],
+    "non_goals": [
+      "Não permitir mutações arbitrárias de orçamento via UI nesta etapa"
+    ],
+    "reachability_contract": "python -m pytest tests/test_portfolio_api.py -v",
+    "acceptance_criteria": [
+      "Dashboard de portfólio operacional no DarkHub em modo consulta",
+      "7 módulos do core refletidos na superfície portfolio-drawer"
+    ],
+    "suggested_files": [
+      "hub/frontend/portfolio.js",
+      "hub/frontend/index.html",
+      "tests/test_portfolio_api.py"
+    ],
+    "estimated_complexity": "large",
+    "dependencies": [
+      "USR-53"
+    ],
+    "created_at": "2026-09-23T21:00:00.000000Z",
+    "updated_at": "2026-09-23T21:55:00.000000Z"
+  },
+  {
+    "id": "USR-55",
+    "project_id": "darkfac",
+    "title": "DH Grupo 2: DH-04, DH-07, DH-09, DH-11 no DarkHub",
+    "origin": "user",
+    "status": "completed",
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "next",
+    "tags": [
+      "user-demand",
+      "group-2",
+      "frontend",
+      "governance",
+      "harness"
+    ],
+    "problem_statement": "Entregar os 4 módulos do Grupo 2 no DarkHub: DH-04 (sincronização de catálogo e auto-evolução com ações), DH-07 (estúdio de conteúdo anti-slop e ateliê visual), DH-09 (governança enterprise, trilha de auditoria e portão de deploy Dokploy em 2 etapas) e DH-11 (validação sob demanda com harness remoto).",
+    "core_journey": [
+      "Owner sincroniza componentes e gerencia propostas de evolução em DH-04",
+      "Owner gera textos anti-slop, audita com linter e renderiza ativos visuais em DH-07",
+      "Owner audita hash chain, configura políticas enterprise e dispara deploy seguro Dokploy após validação G8 em DH-09",
+      "Owner dispara testes remotos sob demanda e visualiza relatórios destilados [HARNESS_PASS] em DH-11"
+    ],
+    "non_goals": [
+      "Ações mutáveis de saúde (DH-17) postergadas sob diretriz do owner para a etapa seguinte"
+    ],
+    "reachability_contract": "python -m pytest tests/test_dh_group2_modules_api.py -v",
+    "acceptance_criteria": [
+      "Todas as 21 capacidades do Grupo 2 refletidas em superfícies ativas no DarkHub",
+      "Gate de cobertura do DarkHub atingindo 95% sem regressões",
+      "Portão estrito de 2 etapas implementado para deploy Dokploy",
+      "Testes determinísticos passando 100%"
+    ],
+    "suggested_files": [
+      "hub/frontend/catalog.js",
+      "hub/frontend/studio.js",
+      "hub/frontend/enterprise.js",
+      "hub/frontend/harness.js",
+      "hub/frontend/index.html",
+      "hub/coverage.json",
+      "tests/test_dh_group2_modules_api.py"
+    ],
+    "estimated_complexity": "large",
+    "dependencies": [
+      "USR-54"
+    ],
+    "created_at": "2026-09-24T04:20:00.000000Z",
+    "updated_at": "2026-09-24T04:36:00.000000Z"
   }
 ]

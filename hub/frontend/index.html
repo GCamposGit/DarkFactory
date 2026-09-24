@@ -136,6 +136,24 @@
           <span class="hidden lg:inline">Telemetria</span>
         </button>
 
+        <!-- Studio & Visual Assets Trigger (DH-07) -->
+        <button
+          onclick="document.getElementById('content-studio-section')?.scrollIntoView({behavior: 'smooth'})"
+          title="Estúdio de Conteúdo Anti-Slop & Ateliê Visual (DH-07)"
+          class="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-purple-300 border border-slate-800 hover:border-purple-500/30 transition-all text-xs font-medium">
+          <span>🎨</span>
+          <span class="hidden lg:inline">Estúdio</span>
+        </button>
+
+        <!-- On-Demand Test Validation Trigger (DH-11) -->
+        <button
+          onclick="document.getElementById('harness-validation-section')?.scrollIntoView({behavior: 'smooth'})"
+          title="Validação sob Demanda & Harness Remoto (DH-11)"
+          class="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-emerald-300 border border-slate-800 hover:border-emerald-500/30 transition-all text-xs font-medium">
+          <span>🧪</span>
+          <span class="hidden lg:inline">Testes</span>
+        </button>
+
         <!-- Infrastructure Cards Trigger -->
         <button
           onclick="document.getElementById('infrastructure-cards-section')?.scrollIntoView({behavior: 'smooth'})"
@@ -1636,5 +1654,7 @@
   <script src="/static/benchmarks.js?v=20260923c"></script>
   <script src="/static/learning.js?v=20260923c"></script>
   <script src="/static/portfolio.js?v=20260923c"></script>
+  <script src="/static/studio.js?v=20260924"></script>
+  <script src="/static/harness.js?v=20260924"></script>
 </body>
 </html>
