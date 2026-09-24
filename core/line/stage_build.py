@@ -732,6 +732,13 @@ class ValidationStage:
 
             if all_ok:
                 return StageResult(outcome="success", output_refs=[commit_sha])
-            return StageResult(outcome="retry", cause_code="clean_validate_failed", output_refs=[commit_sha])
+            # HF-27-08 D-b (review fix item 1): route back to development,
+            # not another validation pass. `validation.json` (written just
+            # above) is already consumed by DevelopmentStage._pending_fixup().
+            return StageResult(
+                outcome="retry",
+                cause_code=f"retry:development\nclean_validate_failed:{sha[:12]}",
+                output_refs=[commit_sha],
+            )
         finally:
             shutil.rmtree(tmp_dir, ignore_errors=True)

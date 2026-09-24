@@ -328,4 +328,13 @@ class ReviewStage:
 
         if approved:
             return StageResult(outcome="success", output_refs=[sha])
-        return StageResult(outcome="retry", cause_code="changes_required", output_refs=[sha])
+        # HF-27-08 D-b (review fix item 1): route back to development, not
+        # to another review round. The blocking log itself is not carried in
+        # the cause_code -- it is `review-{round_num}.md`, committed on the
+        # branch above and already consumed by
+        # DevelopmentStage._pending_fixup()/_latest_review_log().
+        return StageResult(
+            outcome="retry",
+            cause_code=f"retry:development\nchanges_required:round={round_num}",
+            output_refs=[sha],
+        )

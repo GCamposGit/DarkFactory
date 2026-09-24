@@ -60,6 +60,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import subprocess
 import sys
 import time
@@ -94,6 +95,12 @@ _SMOKE_DELAY_S = 10.0
 _RECONCILE_POLLS = 30
 _RECONCILE_DELAY_S = 1.0
 _MAX_CONSECUTIVE_SMOKE_FAILURES = 2
+
+# HF-27-08 item G: PlanningTicket.smoke entries embedded by stage_integration
+# as a hidden JSON comment in the PR body (tickets.json itself never
+# survives the merge -- stage_integration strips `.darkfac/runs/<run_id>/`
+# right after folding it into the PR body).
+_TICKET_SMOKE_COMMENT_RE = re.compile(r"<!--\s*darkfac:ticket_smoke:(?P<json>.*?)-->", re.DOTALL)
 
 
 class ReleaseError(RuntimeError):
@@ -292,6 +299,70 @@ def _default_opener(url: str, timeout: float) -> tuple[int, bytes]:
         return resp.status, resp.read()
 
 
+def _win_kwargs_for_gh() -> dict[str, Any]:
+    return _win_kwargs()
+
+
+def _fetch_ticket_smoke_entries(pr_url: str, cwd: Path, *, gh_executable: str = "gh") -> list[str]:
+    """Every ticket's `smoke` entry, parsed back out of the merged PR's body.
+
+    Best-effort: any `gh` failure (not authenticated, PR already deleted,
+    ...) returns `[]` rather than raising -- ticket smoke checks are
+    additive to `project.smoke`, never a hard requirement.
+
+    HF-27-08 review item 7: `gh pr view` takes the *full PR URL*, not a bare
+    number -- a number alone is resolved against whatever repo `cwd` happens
+    to point `gh` at, which is wrong whenever `cwd` (`project.path`) is not
+    a checkout of this project's own repo (e.g. it is the factory's own
+    working directory on the VPS).
+    """
+    if not pr_url:
+        return []
+    try:
+        proc = subprocess.run(
+            [gh_executable, "pr", "view", pr_url, "--json", "body"],
+            cwd=str(cwd),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=30,
+            **_win_kwargs_for_gh(),
+        )
+    except (subprocess.TimeoutExpired, OSError) as exc:
+        logger.debug("gh pr view failed while fetching ticket smoke entries: %s", exc)
+        return []
+    if proc.returncode != 0:
+        return []
+    try:
+        body = json.loads(proc.stdout or "{}").get("body", "")
+    except json.JSONDecodeError:
+        return []
+    comment_match = _TICKET_SMOKE_COMMENT_RE.search(body or "")
+    if not comment_match:
+        return []
+    try:
+        data = json.loads(comment_match.group("json"))
+    except json.JSONDecodeError:
+        return []
+    entries: list[str] = []
+    if isinstance(data, dict):
+        for values in data.values():
+            if isinstance(values, list):
+                entries.extend(str(v) for v in values)
+    return entries
+
+
+def _smoke_base_url(project: ProjectDescriptor, target_config: Optional["TargetConfig"]) -> Optional[str]:
+    if project.domain:
+        return f"https://{project.domain}"
+    if target_config is not None and target_config.deploy_url:
+        return target_config.deploy_url
+    if target_config is not None and target_config.api_url:
+        return target_config.api_url
+    return None
+
+
 class ReleaseStageHandler:
     """StageHandler for the deploy/smoke/rollback release stage (HF-27-07)."""
 
@@ -448,13 +519,68 @@ class ReleaseStageHandler:
     # smoke
     # ----------------------------------------------------------------
 
-    def _smoke(self, sha: str, target_config: Optional[TargetConfig], adapter: Optional[DeploymentAdapter]) -> tuple[bool, str]:
+    def _run_extra_smoke_entries(
+        self, entries: list[str], target_config: Optional[TargetConfig]
+    ) -> tuple[bool, str]:
+        """HF-27-08 item G: run each ticket's `smoke` entry after `project.smoke`.
+
+        Review item 7 (safety): planner-authored `smoke` entries are free
+        text from an LLM prompt (`planning.md`), not project-owner-reviewed
+        shell commands like `commands.smoke`. Only an absolute URL, or a
+        `/`-rooted path joined onto the deploy's base URL, becomes an HTTP
+        `SmokeCheck` and is actually executed. Anything else is logged as
+        *skipped* and never run -- it is never passed to a shell. Running a
+        planner's free-text description with `shell=True` in
+        `project.path` (the factory's own working directory when unset) was
+        a real remote-command-injection surface with a production-rollback
+        blast radius; `planning.md` documents the URL/path contract so a
+        well-formed planner reply never needs the skip path in practice.
+        """
+        if not entries:
+            return True, ""
+        base_url = _smoke_base_url(self.project, target_config)
+        logs: list[str] = []
+        for raw_entry in entries:
+            entry = raw_entry.strip()
+            if not entry:
+                continue
+            if entry.startswith("http://") or entry.startswith("https://"):
+                url = entry
+            elif entry.startswith("/") and base_url:
+                url = base_url.rstrip("/") + entry
+            else:
+                logs.append(f"[skipped, not a URL or /path]: {entry}")
+                logger.warning(
+                    "Ticket smoke entry %r for project %s is not an absolute URL or /path; "
+                    "skipping (never executed as a command).",
+                    entry, self.project.id,
+                )
+                continue
+            ok, log = _run_smoke_http(
+                SmokeCheck(url=url),
+                retries=self.smoke_retries,
+                delay_s=self.smoke_delay_s,
+                sleep=self.sleep,
+                opener=self.smoke_opener,
+            )
+            logs.append(log)
+            if not ok:
+                return False, _truncate("\n".join(logs), 8000)
+        return True, _truncate("\n".join(logs), 4000)
+
+    def _smoke(
+        self,
+        sha: str,
+        target_config: Optional[TargetConfig],
+        adapter: Optional[DeploymentAdapter],
+        extra_entries: list[str] = (),
+    ) -> tuple[bool, str]:
         deploy = self.project.deploy
         if deploy is None or deploy.type == DeployTargetType.NONE:
             commands = resolve_commands(self.project, Path(self.project.path or "."))
-            if not commands.smoke:
-                return True, "(sem smoke local configurado; deploy 'none' considerado ok)"
             logs: list[str] = []
+            if not commands.smoke and not extra_entries:
+                return True, "(sem smoke local configurado; deploy 'none' considerado ok)"
             for cmd in commands.smoke:
                 try:
                     proc = subprocess.run(
@@ -474,12 +600,17 @@ class ReleaseStageHandler:
                 logs.append(f"$ {cmd}\n{proc.stdout}\n{proc.stderr}")
                 if proc.returncode != 0:
                     return False, _truncate("\n".join(logs), 8000)
+            extra_ok, extra_log = self._run_extra_smoke_entries(list(extra_entries), target_config)
+            if extra_log:
+                logs.append(extra_log)
+            if not extra_ok:
+                return False, _truncate("\n".join(logs), 8000)
             return True, _truncate("\n".join(logs), 4000)
 
-        if not self.project.smoke:
+        if not self.project.smoke and not extra_entries:
             return True, "(sem SmokeCheck configurado para o projeto)"
 
-        logs: list[str] = []
+        logs = []
         for check in self.project.smoke:
             ok, log = _run_smoke_http(
                 check,
@@ -491,6 +622,12 @@ class ReleaseStageHandler:
             logs.append(log)
             if not ok:
                 return False, _truncate("\n".join(logs), 8000)
+
+        extra_ok, extra_log = self._run_extra_smoke_entries(list(extra_entries), target_config)
+        if extra_log:
+            logs.append(extra_log)
+        if not extra_ok:
+            return False, _truncate("\n".join(logs), 8000)
 
         if target_config is not None and adapter is not None and target_config.healthcheck_endpoint:
             active_digest = adapter.installed_digest(target_config)
@@ -518,6 +655,40 @@ class ReleaseStageHandler:
             "fabrica prossiga com o deploy deste SHA."
         )
         return StageResult(outcome="waiting_human", cause_code=guide)
+
+    # ----------------------------------------------------------------
+    # HF-27-08 review item 1: persist the prod-smoke failure log so a
+    # resumed development pass has something to read, exactly like
+    # ReviewStage/ValidationStage already do via committed context files.
+    # ----------------------------------------------------------------
+
+    def _persist_smoke_failure_log(self, run_id: str, merge_sha: str, reason: str, smoke_log: str) -> None:
+        """Best-effort: write `PROD_SMOKE_FAILURE.md` on the run's branch.
+
+        `df/<run_id>` no longer exists once `IntegrationStageHandler` merges
+        and deletes it -- `workspace.checkout` recreates it fresh from the
+        default branch's tip (see `test_release_smoke_failure_recreates_branch`
+        in `tests/line/test_stage_release.py`), so this still lands
+        somewhere development can find it on its next `workspace.checkout`.
+        It does NOT restore `SPEC.md`/`tickets.json` (stripped by
+        `IntegrationStageHandler._strip_context` before the merge this SHA
+        came from) -- a real re-run of `DevelopmentStage.run()` against this
+        recreated branch has no ticket to resume and will short-circuit with
+        `failed(no_tickets)`. That gap is documented, not solved, here (see
+        this ticket's final report); this log is still useful evidence for
+        whoever/whatever handles the resulting `waiting_human`/`failed`.
+        """
+        try:
+            ws = ws_mod.checkout(self.project, run_id)
+            ws_mod.write_context(
+                ws,
+                "PROD_SMOKE_FAILURE.md",
+                f"# Production smoke failure\n\nSHA: {merge_sha}\nReason: {reason}\n\n```\n{smoke_log}\n```\n",
+            )
+            ws_mod.commit(ws, f"chore(line): record prod smoke failure ({reason})", f"{run_id}:release:smoke_failure:{merge_sha[:12]}")
+            ws_mod.push(ws)
+        except Exception as exc:  # pragma: no cover - defensive, must never block the retry
+            logger.warning("Failed to persist prod smoke failure log for run %s: %s", run_id, exc)
 
     # ----------------------------------------------------------------
     # entry point
@@ -555,7 +726,8 @@ class ReleaseStageHandler:
 
         deploy_type = self.project.deploy.type if self.project.deploy else DeployTargetType.NONE
         adapter = self._adapter_for(deploy_type)
-        smoke_ok, smoke_log = self._smoke(merge_sha, target_config, adapter)
+        ticket_smoke_entries = _fetch_ticket_smoke_entries(pr_url, Path(self.project.path or "."))
+        smoke_ok, smoke_log = self._smoke(merge_sha, target_config, adapter, extra_entries=ticket_smoke_entries)
 
         if smoke_ok:
             state.last_good_sha = merge_sha
@@ -587,7 +759,11 @@ class ReleaseStageHandler:
         if adapter is None or target_config is None or not state.last_good_sha:
             # No deploy target (local-only smoke) or nothing to roll back to.
             self.state_store.save(self.project.id, state)
-            return StageResult(outcome="retry", cause_code=f"smoke_failed_no_rollback_target:\n{smoke_log}")
+            self._persist_smoke_failure_log(run_id, merge_sha, "smoke_failed_no_rollback_target", smoke_log)
+            return StageResult(
+                outcome="retry",
+                cause_code=f"retry:development\nsmoke_failed_no_rollback_target:{merge_sha[:12]}",
+            )
 
         target_config.last_known_good_digest = state.last_good_sha
         self.state_store.save(self.project.id, state)
@@ -613,9 +789,11 @@ class ReleaseStageHandler:
                 outcome="failed",
                 cause_code=f"rollback_smoke_failed:{state.last_good_sha[:12]}\n{restored_log}\n{smoke_log}",
             )
+        rollback_reason = f"prod_smoke_failed_rolled_back_to_{state.last_good_sha[:12]}"
+        self._persist_smoke_failure_log(run_id, merge_sha, rollback_reason, smoke_log)
         return StageResult(
             outcome="retry",
-            cause_code=f"prod_smoke_failed_rolled_back_to_{state.last_good_sha[:12]}:\n{smoke_log}",
+            cause_code=f"retry:development\n{rollback_reason}:{merge_sha[:12]}",
         )
 
 

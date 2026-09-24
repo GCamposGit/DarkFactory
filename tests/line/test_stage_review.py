@@ -135,11 +135,14 @@ def test_changes_required_retries_with_review_log_then_approves_on_exhaustion(
 
     result1 = stage.run(project, run_id)
     assert result1.outcome == "retry"
-    assert result1.cause_code == "changes_required"
+    # HF-27-08 review item 1: routes back to development, not another
+    # review round; the blocking log is review-<round>.md, not the
+    # cause_code (already asserted further below).
+    assert result1.cause_code.startswith("retry:development\n")
 
     result2 = stage.run(project, run_id)
     assert result2.outcome == "retry"
-    assert result2.cause_code == "changes_required"
+    assert result2.cause_code.startswith("retry:development\n")
 
     # Round 3 exceeds run_caps.review_rounds (2); validation is green, so it
     # force-approves instead of looping forever between two opinionated models.
