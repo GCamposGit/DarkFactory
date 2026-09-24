@@ -173,10 +173,6 @@ CREATE TABLE IF NOT EXISTS harness_inflight (
 """
 
 
-class _RemoteUnavailable(RuntimeError):
-    """Internal signal: fall back to local-only silently after one warning."""
-
-
 def _sanitized_warning(prefix: str, exc: Exception) -> None:
     from core.orchestrator.cloud_db import sanitize_database_url
 

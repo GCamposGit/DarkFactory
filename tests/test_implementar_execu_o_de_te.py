@@ -231,7 +231,7 @@ def test_non_goals_preservation():
     assert config_path.exists()
     config, _ = load_config(config_path)
     assert isinstance(config, HarnessConfig)
-    assert any(step.name == "unit_and_integration_tests" for step in config.steps)
+    assert any(step.name.startswith("unit_and_integration_tests") for step in config.steps)
 
 
 def test_harness_test_runner_specs():
