@@ -1724,6 +1724,15 @@ def get_hub_coverage(
     return get_coverage_summary(force_refresh=force_refresh)
 
 
+@router.get("/autonomy/plan")
+def get_autonomy_plan_endpoint(
+    service: HubService = Depends(get_hub_service),
+) -> Dict[str, Any]:
+    """Returns the compiled Continuous Autonomy Plan and execution DAG (DH-12)."""
+    return service.get_autonomy_plan()
+
+
+
 
 
 

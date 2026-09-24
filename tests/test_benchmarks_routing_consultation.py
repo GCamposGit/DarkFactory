@@ -98,7 +98,7 @@ def test_benchmarks_frontend_modal_dom_elements():
     assert 'id="bench-router-complexity"' in index_html
     assert 'id="bench-router-results"' in index_html
     # Script tag is included
-    assert 'src="/static/benchmarks.js?v=20260923c"' in index_html
+    assert 'src="/static/benchmarks.js?v=20260924a"' in index_html
 
 
 def test_benchmarks_js_is_read_only_and_defines_handlers():

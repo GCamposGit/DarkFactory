@@ -2,6 +2,9 @@
   "version": 1,
   "description": "Gate de cobertura do DarkHub (USR-42). Veja docs/DARKHUB_ROADMAP.md e rode python scripts/hub_coverage.py.",
   "api_routes": {
+    "GET /api/autonomy/plan": {
+      "surface": "tasks-dashboard-section"
+    },
     "GET /api/benchmarks/domains": {
       "surface": "benchmarks-modal"
     },
@@ -138,7 +141,7 @@
       "surface": "factory-health-block"
     },
     "POST /api/hf15/rollback/drill": {
-      "pending": "DH-17"
+      "surface": "factory-health-block"
     },
     "GET /api/hf15/status": {
       "surface": "factory-health-block"
@@ -159,10 +162,10 @@
       "surface": "factory-health-block"
     },
     "POST /api/integrations/n8n/sync": {
-      "pending": "DH-17"
+      "surface": "factory-health-block"
     },
     "POST /api/integrations/n8n/trigger": {
-      "pending": "DH-17"
+      "surface": "factory-health-block"
     },
     "GET /api/integrations/n8n/workflows": {
       "surface": "factory-health-block"
@@ -192,10 +195,10 @@
       "surface": "factory-alerts-strip"
     },
     "POST /api/notifications/check-quotas": {
-      "pending": "DH-17"
+      "surface": "factory-health-block"
     },
     "POST /api/notifications/{notification_id}/acknowledge": {
-      "pending": "DH-17"
+      "surface": "factory-alerts-strip"
     },
     "POST /api/ollama/generate": {
       "machine": "Proxy de inferência para scripts; a UI usa /api/playground/generate"
@@ -413,7 +416,7 @@
       "surface": "portfolio-drawer"
     },
     "planning": {
-      "pending": "DH-12"
+      "surface": "tasks-dashboard-section"
     },
     "portfolio": {
       "surface": "portfolio-drawer"
