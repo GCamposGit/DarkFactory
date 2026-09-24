@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>DarkHub - AI & Dev Command Center</title>
-  <link rel="stylesheet" href="/static/styles.css?v=20260923c">
+  <link rel="stylesheet" href="/static/styles.css?v=20260924a">
 </head>
 <body class="bg-slate-950 text-slate-100 min-h-screen font-sans selection:bg-indigo-500 selection:text-white antialiased relative">
   
@@ -226,24 +226,72 @@
       </div>
     </section>
 
-    <!-- Operational Task Dashboard -->
+    <!-- Operational Task Dashboard & Autonomy DAG (DH-12) -->
     <section id="tasks-dashboard-section" class="space-y-4" aria-labelledby="tasks-dashboard-title">
       <div class="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h2 id="tasks-dashboard-title" class="text-xs font-mono font-semibold uppercase tracking-wider text-slate-400 flex items-center gap-2">
-            <span>✅ Fila operacional</span>
-            <span class="text-[10px] text-slate-600 normal-case tracking-normal">runs, etapas e evidências</span>
+            <span>✅ Fila operacional & Autonomia</span>
+            <span class="text-[10px] text-slate-600 normal-case tracking-normal">runs, DAG de execução e gates de prontidão</span>
           </h2>
         </div>
-        <button id="tasks-dashboard-refresh" type="button" class="rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-1.5 text-[11px] font-medium text-emerald-300 transition hover:bg-emerald-500/20">
-          Atualizar fila
-        </button>
+        <div class="flex items-center gap-2.5">
+          <!-- View Mode Switcher -->
+          <div class="flex items-center p-0.5 rounded-xl bg-slate-900 border border-slate-800 text-xs font-medium shadow-inner">
+            <button id="tasks-view-btn-queue" type="button" onclick="switchTaskViewMode('queue')" class="px-2.5 py-1 rounded-lg bg-indigo-600 text-white font-mono text-[11px] shadow-sm transition">
+              📋 Fila de Jobs
+            </button>
+            <button id="tasks-view-btn-dag" type="button" onclick="switchTaskViewMode('dag')" class="px-2.5 py-1 rounded-lg text-slate-400 hover:text-slate-200 font-mono text-[11px] transition">
+              🕸️ DAG & Autonomia
+            </button>
+          </div>
+          <button id="tasks-dashboard-refresh" type="button" class="rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-1.5 text-[11px] font-medium text-emerald-300 transition hover:bg-emerald-500/20 active:scale-95">
+            Atualizar
+          </button>
+        </div>
       </div>
       <div id="tasks-dashboard-alert" class="rounded-xl border border-slate-800 bg-slate-900/60 px-3 py-2 text-[11px] text-slate-400" role="status" aria-live="polite">
         Consultando estado operacional…
       </div>
-      <div id="tasks-dashboard-summary" class="grid grid-cols-2 gap-3 lg:grid-cols-4"></div>
-      <div id="tasks-dashboard-queue" class="grid grid-cols-1 gap-3 lg:grid-cols-2"></div>
+
+      <!-- Linear Queue Container -->
+      <div id="tasks-queue-container" class="space-y-4">
+        <div id="tasks-dashboard-summary" class="grid grid-cols-2 gap-3 lg:grid-cols-4"></div>
+        <div id="tasks-dashboard-queue" class="grid grid-cols-1 gap-3 lg:grid-cols-2"></div>
+      </div>
+
+      <!-- Autonomy DAG Container (DH-12) -->
+      <div id="tasks-dag-container" class="hidden space-y-4">
+        <div id="autonomy-plan-summary" class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3"></div>
+        <div id="autonomy-gates-container" class="rounded-2xl border border-slate-800 bg-slate-900/40 p-4 space-y-3">
+          <div class="flex items-center justify-between">
+            <h3 class="text-xs font-semibold text-white flex items-center gap-2">
+              <span>🛡️ Gates de Prontidão da Autonomia</span>
+              <span class="text-[10px] font-mono text-emerald-400 px-2 py-0.5 rounded-full bg-emerald-950/60 border border-emerald-700/60">Contratos HF-26</span>
+            </h3>
+            <span class="text-[10px] text-slate-500 font-mono">Preflight & Supervised Handoff</span>
+          </div>
+          <div id="autonomy-gates-grid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3"></div>
+        </div>
+        <div id="autonomy-dag-nodes-container" class="rounded-2xl border border-slate-800 bg-slate-900/40 p-4 space-y-3">
+          <div class="flex items-center justify-between flex-wrap gap-2">
+            <div>
+              <h3 class="text-xs font-semibold text-white flex items-center gap-2">
+                <span>🕸️ Grafo Causal de Unidades (33 Unidades)</span>
+                <span id="autonomy-dag-badge" class="text-[10px] font-mono text-indigo-400 px-2 py-0.5 rounded-full bg-indigo-950/60 border border-indigo-700/60">HF-26-PLAN</span>
+              </h3>
+              <p class="text-[11px] text-slate-400 mt-0.5">Topologia de dependências causais, caminhos permitidos e oráculos executáveis.</p>
+            </div>
+            <div class="flex items-center gap-2 text-[10px] font-mono">
+              <span class="flex items-center gap-1 text-slate-400"><span class="h-2 w-2 rounded-full bg-emerald-400"></span> Concluído</span>
+              <span class="flex items-center gap-1 text-slate-400"><span class="h-2 w-2 rounded-full bg-cyan-400"></span> Executando</span>
+              <span class="flex items-center gap-1 text-slate-400"><span class="h-2 w-2 rounded-full bg-indigo-400"></span> Handoff Pronto</span>
+              <span class="flex items-center gap-1 text-slate-400"><span class="h-2 w-2 rounded-full bg-slate-600"></span> Planejado</span>
+            </div>
+          </div>
+          <div id="autonomy-dag-nodes-grid" class="space-y-4 pt-2"></div>
+        </div>
+      </div>
     </section>
 
     <!-- Toolbar: Search Bar + Category Pills -->
@@ -1639,22 +1687,23 @@
   </div>
 
   <!-- Scripts -->
-  <script src="/static/app.js?v=20260923c"></script>
-  <script src="/static/usage.js?v=20260923c"></script>
-  <script src="/static/credits.js?v=20260923c"></script>
-  <script src="/static/health.js?v=20260923c"></script>
-  <script src="/static/infra.js?v=20260923c"></script>
-  <script src="/static/tasks.js?v=20260923c"></script>
-  <script src="/static/roadmap.js?v=20260923c"></script>
-  <script src="/static/demands.js?v=20260923c"></script>
-  <script src="/static/telemetry.js?v=20260923c"></script>
-  <script src="/static/catalog.js?v=20260923c"></script>
-  <script src="/static/enterprise.js?v=20260923c"></script>
-  <script src="/static/coverage.js?v=20260923c"></script>
-  <script src="/static/benchmarks.js?v=20260923c"></script>
-  <script src="/static/learning.js?v=20260923c"></script>
-  <script src="/static/portfolio.js?v=20260923c"></script>
-  <script src="/static/studio.js?v=20260923c"></script>
-  <script src="/static/harness.js?v=20260923c"></script>
+  <script src="/static/app.js?v=20260924a"></script>
+  <script src="/static/usage.js?v=20260924a"></script>
+  <script src="/static/credits.js?v=20260924a"></script>
+  <script src="/static/health.js?v=20260924a"></script>
+  <script src="/static/health_ops.js?v=20260924a"></script>
+  <script src="/static/infra.js?v=20260924a"></script>
+  <script src="/static/tasks.js?v=20260924a"></script>
+  <script src="/static/roadmap.js?v=20260924a"></script>
+  <script src="/static/demands.js?v=20260924a"></script>
+  <script src="/static/telemetry.js?v=20260924a"></script>
+  <script src="/static/catalog.js?v=20260924a"></script>
+  <script src="/static/enterprise.js?v=20260924a"></script>
+  <script src="/static/coverage.js?v=20260924a"></script>
+  <script src="/static/benchmarks.js?v=20260924a"></script>
+  <script src="/static/learning.js?v=20260924a"></script>
+  <script src="/static/portfolio.js?v=20260924a"></script>
+  <script src="/static/studio.js?v=20260924a"></script>
+  <script src="/static/harness.js?v=20260924a"></script>
 </body>
 </html>

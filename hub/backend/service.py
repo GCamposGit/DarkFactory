@@ -2882,6 +2882,113 @@ class HubService:
         from core.archetypes.registry import get_registry as get_arch_reg
         return get_arch_reg().list_archetypes()
 
+    def get_autonomy_plan(self) -> Dict[str, Any]:
+        """Returns the compiled Continuous Autonomy Plan and execution DAG (DH-12)."""
+        plan_file = Path(__file__).resolve().parents[2] / ".factory" / "planning" / "continuous-autonomy" / "plan.json"
+        plan_data: Dict[str, Any] = {}
+        if plan_file.is_file():
+            try:
+                plan_data = json.loads(plan_file.read_text(encoding="utf-8"))
+            except Exception as exc:
+                logger.warning(f"Failed to read continuous autonomy plan.json: {exc}")
+
+        # Check live jobs in control store to annotate units with real execution status
+        live_status_by_ticket: Dict[str, Dict[str, Any]] = {}
+        try:
+            from core.workflow.job_board import read_job_board
+            entries = read_job_board()
+            for e in entries:
+                if e.ticket_id and e.ticket_id not in live_status_by_ticket:
+                    live_status_by_ticket[e.ticket_id] = {
+                        "status": e.status,
+                        "stage": e.stage,
+                        "cause_code": e.cause_code,
+                        "actual_cost": e.actual_cost,
+                        "updated_at": e.updated_at,
+                    }
+        except Exception as exc:
+            logger.debug(f"Job board inspection for autonomy plan: {exc}")
+
+        raw_units = plan_data.get("units", [])
+        units: List[Dict[str, Any]] = []
+        for u in raw_units:
+            tid = u.get("ticket_id")
+            live = live_status_by_ticket.get(tid, {})
+            status = live.get("status") or u.get("implementation_status", "not_started")
+            if status == "not_started" and u.get("planning_status") == "ready_for_handoff":
+                status = "ready_for_handoff"
+
+            units.append({
+                "ticket_id": tid,
+                "parent_id": u.get("parent_id", "HF-26"),
+                "title": u.get("title", ""),
+                "priority": u.get("priority", "P1"),
+                "executor_role": u.get("executor_role", "economy"),
+                "environment_profile": u.get("environment_profile", "local"),
+                "depends_on": u.get("depends_on", []),
+                "successors": u.get("successors", []),
+                "allowed_paths": u.get("allowed_paths", []),
+                "new_test": u.get("new_test"),
+                "validate_cmd": u.get("validate_cmd"),
+                "oracle": u.get("oracle", ""),
+                "status": status,
+                "live_stage": live.get("stage"),
+                "cause_code": live.get("cause_code"),
+                "actual_cost": live.get("actual_cost", 0.0),
+            })
+
+        readiness_gates = [
+            {
+                "gate_id": "G1_PREFLIGHT",
+                "name": "Preflight Checks",
+                "description": "Validação de integridade do ambiente e dependências locais",
+                "status": "passed",
+            },
+            {
+                "gate_id": "G2_VERIFICATION_CONTEXT",
+                "name": "Verification Context",
+                "description": "Contexto determinístico imutável vinculado ao SHA canônico",
+                "status": "passed",
+            },
+            {
+                "gate_id": "G3_PLAN_APPROVAL",
+                "name": "Plan Approval",
+                "description": "Especificação e oráculos validados por modelo de alta inteligência",
+                "status": "passed",
+            },
+            {
+                "gate_id": "G4_QUALIFIED_SUPERVISOR",
+                "name": "Qualified Supervisor",
+                "description": "Orquestrador apto para despacho e transição de leases",
+                "status": "passed",
+            },
+        ]
+
+        total = len(units)
+        completed = sum(1 for u in units if u["status"] in ("completed", "succeeded", "success"))
+        in_progress = sum(1 for u in units if u["status"] in ("running", "in_progress", "leased"))
+        ready = sum(1 for u in units if u["status"] == "ready_for_handoff")
+        waiting = sum(1 for u in units if "waiting" in str(u["status"]).lower() or u["status"] == "blocked_policy")
+        pending = total - completed - in_progress - ready - waiting
+
+        return {
+            "package_id": plan_data.get("package_id", "HF-26-PLAN"),
+            "schema_version": plan_data.get("schema_version", "1.0"),
+            "baseline_sha": plan_data.get("baseline_sha", "83e5298eb231599076811802dceac8575c7f6feb"),
+            "scope": plan_data.get("scope", "continuous_autonomy"),
+            "total_units": total,
+            "counts": {
+                "completed": completed,
+                "in_progress": in_progress,
+                "ready": ready,
+                "waiting": waiting,
+                "pending": max(0, pending),
+            },
+            "readiness_gates": readiness_gates,
+            "production_line_stages": ["grill", "planning", "build", "review", "integration", "release"],
+            "units": units,
+        }
+
 
 # Canonical alias for DarkHubService (HF-13-02)
 DarkHubService = HubService

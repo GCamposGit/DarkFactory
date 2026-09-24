@@ -938,5 +938,56 @@
     ],
     "created_at": "2026-09-24T04:20:00.000000Z",
     "updated_at": "2026-09-24T04:36:00.000000Z"
+  },
+  {
+    "id": "USR-56",
+    "project_id": "darkfac",
+    "title": "DH-12, DH-17 e DH-13: DAG de Autonomia, Ações de Saúde e Fundação Frontend",
+    "origin": "user",
+    "status": "completed",
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand",
+      "autonomy-dag",
+      "health-ops",
+      "frontend-foundation",
+      "coverage-100"
+    ],
+    "problem_statement": "Entregar em paralelo os módulos DH-12 (Plano e DAG de Autonomia Contínua integrado ao painel de tarefas com gates de prontidão), DH-17 (Ações operacionais de saúde: reconhecer alertas, checar cotas, sincronizar/disparar n8n e rollback drill hermético HF-15 com confirmação em 2 passos) e DH-13 (Fundação do frontend com renovação unificada de cache v=20260924a), atingindo 100% de cobertura no DarkHub.",
+    "core_journey": [
+      "Owner alterna entre lista de tarefas e o DAG causal da autonomia contínua com nós, oráculos e dependências em DH-12",
+      "Owner reconhece alertas na faixa do topo com modal de impacto e feedback em DH-17",
+      "Owner dispara checagem ativa de cotas de provedores e sincronização/webhook n8n diretamente nos cards de saúde em DH-17",
+      "Owner exercita rollback drill hermético com medição real de RPO/RTO sem afetar containers de produção em DH-17",
+      "Assets do frontend utilizam cache unificado v=20260924a garantindo renovação imediata pós-deploy em DH-13"
+    ],
+    "non_goals": [
+      "Não reiniciar containers de produção durante o rollback drill do HF-15 (execução estritamente em sandbox isolado com proj-drill-01)"
+    ],
+    "reachability_contract": "python -m pytest tests/test_dh_autonomy_and_health_ops_api.py -v",
+    "acceptance_criteria": [
+      "100% de cobertura do DarkHub atingida no gate com 0 pendências (hub/coverage.json)",
+      "DAG interativo de 33 unidades navegável no cockpit com oráculos e caminhos permitidos",
+      "Todas as 5 ações operacionais de saúde com modal de confirmação em 2 passos",
+      "Versão de assets v=20260924a consistente em todos os scripts e links",
+      "Testes determinísticos passando 100%"
+    ],
+    "suggested_files": [
+      "hub/frontend/tasks.js",
+      "hub/frontend/health_ops.js",
+      "hub/frontend/health.js",
+      "hub/frontend/infra.js",
+      "hub/frontend/index.html",
+      "hub/coverage.json",
+      "tests/test_dh_autonomy_and_health_ops_api.py"
+    ],
+    "estimated_complexity": "large",
+    "dependencies": [
+      "USR-55"
+    ],
+    "created_at": "2026-09-24T06:25:00.000000Z",
+    "updated_at": "2026-09-24T06:35:00.000000Z"
   }
 ]

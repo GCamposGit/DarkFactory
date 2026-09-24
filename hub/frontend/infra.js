@@ -501,14 +501,19 @@ function healthRow(label, value) {
   return `<div class="flex items-center justify-between gap-2"><span class="text-slate-500">${healthEscapeHtml(label)}</span><span class="font-mono text-slate-200 truncate">${display}</span></div>`;
 }
 
-function healthCardShell(title, dotClass, bodyHtml, observedAgo) {
-  return `<div class="rounded-xl border border-slate-800/90 bg-slate-950/70 p-4 flex flex-col gap-3">
-    <div class="flex items-center justify-between gap-2">
-      <h4 class="text-xs font-semibold text-white">${healthEscapeHtml(title)}</h4>
-      <span class="h-2.5 w-2.5 shrink-0 rounded-full ${dotClass}" aria-hidden="true"></span>
+function healthCardShell(title, dotClass, bodyHtml, observedAgo, actionBtn = "") {
+  return `<div class="rounded-xl border border-slate-800/90 bg-slate-950/70 p-4 flex flex-col justify-between gap-3">
+    <div class="space-y-3">
+      <div class="flex items-center justify-between gap-2">
+        <h4 class="text-xs font-semibold text-white">${healthEscapeHtml(title)}</h4>
+        <span class="h-2.5 w-2.5 shrink-0 rounded-full ${dotClass}" aria-hidden="true"></span>
+      </div>
+      <div class="space-y-1.5 text-[11px] text-slate-300">${bodyHtml}</div>
     </div>
-    <div class="space-y-1.5 text-[11px] text-slate-300">${bodyHtml}</div>
-    <div class="text-[10px] font-mono text-slate-500">${healthEscapeHtml(healthObservedPhrase(observedAgo))}</div>
+    <div class="pt-2 border-t border-slate-900 flex items-center justify-between gap-2">
+      <div class="text-[10px] font-mono text-slate-500">${healthEscapeHtml(healthObservedPhrase(observedAgo))}</div>
+      ${actionBtn}
+    </div>
   </div>`;
 }
 
@@ -534,7 +539,8 @@ function renderTelegramHealthCard(data, fetchedAt) {
     healthRow("Callbacks processados", d.processed_callbacks),
     healthRow("Outbox pendente", d.pending_outbox_notifications),
   ].join("");
-  return healthCardShell("Telegram Gateway", healthDotClass(state), rows, healthRelativeAge(fetchedAt));
+  const actionBtn = '<button type="button" onclick="openCheckQuotasModal()" class="px-2 py-0.5 rounded text-[10px] font-mono border border-indigo-500/30 bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-300 transition active:scale-95">Checar Cotas</button>';
+  return healthCardShell("Telegram Gateway", healthDotClass(state), rows, healthRelativeAge(fetchedAt), actionBtn);
 }
 
 function renderN8nStatusHealthCard(data, fetchedAt) {
@@ -551,7 +557,8 @@ function renderN8nStatusHealthCard(data, fetchedAt) {
     healthRow("Status HTTP", d.status_code),
     d.error ? healthRow("Erro", d.error) : "",
   ].join("");
-  return healthCardShell("n8n — Status", healthDotClass(state), rows, healthRelativeAge(fetchedAt));
+  const actionBtn = '<button type="button" onclick="openN8nSyncModal()" class="px-2 py-0.5 rounded text-[10px] font-mono border border-indigo-500/30 bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-300 transition active:scale-95">Sincronizar</button>';
+  return healthCardShell("n8n — Status", healthDotClass(state), rows, healthRelativeAge(fetchedAt), actionBtn);
 }
 
 function normalizeN8nWorkflowsList(raw) {
@@ -584,7 +591,8 @@ function renderN8nWorkflowsHealthCard(data, fetchedAt) {
         })
         .join("")
     : `<div class="text-slate-500">${d.error ? healthEscapeHtml(d.error) : "Nenhum workflow retornado."}</div>`;
-  return healthCardShell("n8n — Workflows", healthDotClass(state), rows, healthRelativeAge(fetchedAt));
+  const actionBtn = '<button type="button" onclick="openN8nTriggerModal()" class="px-2 py-0.5 rounded text-[10px] font-mono border border-indigo-500/30 bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-300 transition active:scale-95">Disparar Webhook</button>';
+  return healthCardShell("n8n — Workflows", healthDotClass(state), rows, healthRelativeAge(fetchedAt), actionBtn);
 }
 
 function renderHarnessWorkersHealthCard(data, fetchedAt) {
@@ -662,7 +670,8 @@ function renderHf15MetricsHealthCard(data, fetchedAt) {
     healthRow("Orçamento gasto (US$)", d.total_budget_spent_usd),
     healthRow("SLA atingido", slasMet === true ? "sim" : slasMet === false ? "não" : "—"),
   ].join("");
-  return healthCardShell("HF-15 — Métricas SLA", healthDotClass(state), rows, healthRelativeAge(fetchedAt));
+  const actionBtn = '<button type="button" onclick="openRollbackDrillModal()" class="px-2 py-0.5 rounded text-[10px] font-mono border border-amber-500/40 bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 transition active:scale-95">Rollback Drill</button>';
+  return healthCardShell("HF-15 — Métricas SLA", healthDotClass(state), rows, healthRelativeAge(fetchedAt), actionBtn);
 }
 
 // =============================================================================

@@ -165,16 +165,21 @@ function renderFactoryAlertItem(notification) {
   const channelLabel = channels.length ? channels.join(", ") : (n.provider_id || "");
   const age = healthRelativeAge(n.timestamp) || "sem horário";
   const title = n.title || n.message || "Notificação";
+  const nid = n.notification_id || n.id || "";
 
-  return `<div class="flex items-start gap-3 rounded-xl border ${meta.border} ${meta.bg} px-3 py-2.5">
-    <span class="mt-1 h-2 w-2 shrink-0 rounded-full ${meta.dot}" aria-hidden="true"></span>
-    <div class="min-w-0 flex-1">
-      <div class="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
-        <p class="text-xs font-semibold ${meta.text} truncate">${healthEscapeHtml(title)}</p>
-        <span class="shrink-0 text-[10px] font-mono text-slate-500" title="${healthEscapeHtml(n.timestamp || "")}">${healthEscapeHtml(meta.label)} · ${healthEscapeHtml(age)}</span>
+  return `<div class="flex items-start justify-between gap-3 rounded-xl border ${meta.border} ${meta.bg} px-3 py-2.5">
+    <div class="flex items-start gap-3 min-w-0 flex-1">
+      <span class="mt-1 h-2 w-2 shrink-0 rounded-full ${meta.dot}" aria-hidden="true"></span>
+      <div class="min-w-0 flex-1">
+        <div class="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
+          <p class="text-xs font-semibold ${meta.text} truncate">${healthEscapeHtml(title)}</p>
+          <span class="shrink-0 text-[10px] font-mono text-slate-500" title="${healthEscapeHtml(n.timestamp || "")}">${healthEscapeHtml(meta.label)} · ${healthEscapeHtml(age)}</span>
+        </div>
+        ${n.message && n.message !== title ? `<p class="mt-0.5 text-[11px] text-slate-400">${healthEscapeHtml(n.message)}</p>` : ""}
+        ${channelLabel ? `<p class="mt-0.5 text-[10px] font-mono text-slate-500">Canal: ${healthEscapeHtml(channelLabel)}</p>` : ""}
       </div>
-      ${n.message && n.message !== title ? `<p class="mt-0.5 text-[11px] text-slate-400">${healthEscapeHtml(n.message)}</p>` : ""}
-      ${channelLabel ? `<p class="mt-0.5 text-[10px] font-mono text-slate-500">Canal: ${healthEscapeHtml(channelLabel)}</p>` : ""}
     </div>
+    ${nid ? `<button type="button" onclick="confirmAcknowledgeNotification('${healthEscapeHtml(nid)}', '${healthEscapeHtml(title)}')" class="shrink-0 text-[10px] font-mono px-2 py-1 rounded-lg border border-slate-700 bg-slate-900/80 hover:bg-slate-800 text-slate-300 hover:text-white transition active:scale-95 shadow-sm">Reconhecer</button>` : ""}
   </div>`;
 }
+

@@ -47,7 +47,8 @@ CLEANED_DUPLICATE_IDS = [f"USR-{i}" for i in range(19, 42)]
 WAVE_3_IDS = ["USR-46", "USR-47", "USR-48", "USR-49"]
 WAVE_4_IDS = ["USR-50", "USR-51", "USR-52", "USR-53"]
 WAVE_5_IDS = ["USR-54", "USR-55"]
-CURRENT_WAVE_IDS = WAVE_3_IDS + WAVE_4_IDS + WAVE_5_IDS
+WAVE_6_IDS = ["USR-56"]
+CURRENT_WAVE_IDS = WAVE_3_IDS + WAVE_4_IDS + WAVE_5_IDS + WAVE_6_IDS
 
 
 def test_demands_json_is_valid_json() -> None:
@@ -126,4 +127,4 @@ def test_demands_store_loads_cleanly() -> None:
     store = DemandsStore(DEMANDS_FILE)
     tickets = store.list_tickets()
     assert len(tickets) == len(HISTORICAL_REAL_IDS) + len(CURRENT_WAVE_IDS)
-    assert len(tickets) == 24
+    assert len(tickets) == 25

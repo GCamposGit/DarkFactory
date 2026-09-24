@@ -70,12 +70,12 @@ Prioridade: **Agora** = próximo ciclo; **Depois** = após os itens Agora;
 | DH-09 | Depois | **Governança enterprise e deploy**: trilha de auditoria, configuração, avaliação de deploy, disparo de deploy Dokploy com confirmação. Entregue em `USR-55` | `enterprise/audit-trail`, `enterprise/configure`, `enterprise/evaluate-deploy`, `cloud/deploy` | Deploy só dispara após avaliação verde e confirmação explícita |
 | DH-10 | Depois | **Saúde e histórico do roadmap**: aba de saúde, linha do tempo e comparação de versões no drawer de roadmap. Entregue em `USR-51` | `projects/{id}/roadmap/health`, `history`, `history/compare` | Owner compara duas versões do roadmap e vê o que mudou |
 | DH-11 | Depois | **Validação sob demanda**: rodar suíte/harness remoto a partir do Hub com relatório destilado. Entregue em `USR-55` | `harness/run-tests`, `harness/execute` | Resultado com `[HARNESS_PASS]` e link para logs isolados |
-| DH-12 | Futuro | **Plano e DAG da autonomia contínua**: visualizar plano, gates de prontidão, rotas qualificadas e política efetiva | `core/planning`, `core/workflow` | DAG navegável com o estado de cada nó |
-| DH-13 | Agora | **Fundação do frontend**: CSS compilado localmente no lugar do Tailwind CDN, `index.html` modular, versão de assets única servida pelo backend | frontend | Nenhum aviso de CDN no console; um deploy invalida todos os assets |
+| DH-12 | Futuro | **Plano e DAG da autonomia contínua**: visualizar plano, gates de prontidão, rotas qualificadas e política efetiva. Entregue em `USR-56` | `core/planning`, `core/workflow`; `GET /api/autonomy/plan` | DAG navegável com o estado de cada nó |
+| DH-13 | Agora | **Fundação do frontend**: CSS compilado localmente no lugar do Tailwind CDN, `index.html` modular, versão de assets única servida pelo backend. Entregue em `USR-49` e renovado em `USR-56` (?v=20260924a) | frontend | Nenhum aviso de CDN no console; um deploy invalida todos os assets |
 | DH-14 | Agora | **Cobertura visível no Hub**: endpoint e badge com o placar do gate e a lista de pendências | `hub/backend/coverage.py`, `hub/backend/api.py`, `hub/frontend/coverage.js` | Entregue em `USR-45`; badge mostra a % coberta e abre a lista de pendências por `DH-xx` em drawer slide-over |
 | DH-15 | Agora | **Higiene do ledger de demandas**: remover USR-19…USR-41 e isolar o teste que grava no ledger real | `.factory/demands/demands.json`, testes da CLI | Suíte roda sem alterar arquivos versionados |
 | DH-16 | Depois | **Aposentar fontes legadas do Painel de Tarefas** (`state.json`, `orchestrator.sqlite3`): painel consolidado exclusivamente no control store canônico e testes legados migrados. Entregue em `USR-50` | `hub/backend/service.py` | Painel usa exclusivamente o control store canônico |
-| DH-17 | Depois | **Ações operacionais de saúde**: reconhecer alerta, checar cotas (pode enviar Telegram), sync/trigger n8n (produção), drill HF-15 — cada uma com diálogo de confirmação | `POST notifications/{notification_id}/acknowledge`, `POST notifications/check-quotas`, `POST integrations/n8n/sync`, `POST integrations/n8n/trigger`, `POST hf15/rollback/drill` | Toda ação mostra o efeito antes, exige confirmação explícita e registra auditoria |
+| DH-17 | Depois | **Ações operacionais de saúde**: reconhecer alerta, checar cotas (pode enviar Telegram), sync/trigger n8n (produção), drill HF-15 — cada uma com diálogo de confirmação. Entregue em `USR-56` | `POST notifications/{notification_id}/acknowledge`, `POST notifications/check-quotas`, `POST integrations/n8n/sync`, `POST integrations/n8n/trigger`, `POST hf15/rollback/drill` | Toda ação mostra o efeito antes, exige confirmação explícita e registra auditoria |
 
 ## Entregue em USR-43
 
@@ -224,6 +224,29 @@ Prioridade: **Agora** = próximo ciclo; **Depois** = após os itens Agora;
   - Módulo core coberto: `core/harness`.
   - Superfície mapeada: `harness-validation-section`.
 - **Gate de Cobertura:** 21 capacidades (17 rotas `/api` e 4 módulos `core/`) transitaram de `pending` para `surface`. A cobertura do DarkHub atingiu **95%** (127 capacidades expostas, apenas 6 pendências remanescentes em DH-12 e DH-17).
+
+## Entregue em USR-56 (DH-12, DH-17, DH-13)
+
+- **DH-12 — Plano e DAG da Autonomia Contínua:**
+  - `GET /api/autonomy/plan`: Endpoint que serve o plano mestre compilado da autonomia contínua (`.factory/planning/continuous-autonomy/plan.json`), integrando as 33 unidades, dependências causais, sucessores, caminhos permitidos, oráculos e anotações de execução em tempo real colhidas do control store (`JobBoardEntry`).
+  - Seletor de modo `[📋 Fila de Jobs]` vs `[🕸️ DAG & Autonomia]` no cabeçalho do `#tasks-dashboard-section`.
+  - Grid de Gates de Prontidão da Autonomia (G1 Preflight, G2 Verification Context, G3 Plan Approval, G4 Qualified Supervisor) com indicadores de conformidade com contratos HF-26.
+  - Grafo visual e interativo de unidades agrupadas por ondas (Onda 1 a Onda 5) com identificadores, prioridades (P0/P1), papéis de execução (`economy`, `high_architecture`, `operations`), semáforos de status e dependências navegáveis.
+  - Modal `#autonomy-unit-modal` para inspeção profunda de contratos, oráculos determinísticos, comandos de validação e restrições de caminhos (`allowed_paths`).
+  - Módulo core coberto: `core/planning`.
+  - Superfície mapeada: `tasks-dashboard-section`.
+- **DH-17 — Ações Operacionais de Saúde (Mutações com Salvaguarda de 2 Passos):**
+  - Módulo modular `hub/frontend/health_ops.js` com modal de confirmação em 2 passos (`#health-ops-modal`) exibindo o impacto e parâmetros de cada operação antes da execução.
+  - `POST /api/notifications/{notification_id}/acknowledge`: Botão contextual "Reconhecer" em cada alerta da faixa superior (`#factory-alerts-strip`) com confirmação e renovação imediata.
+  - `POST /api/notifications/check-quotas`: Botão "Checar Cotas" no card de saúde do Telegram com toggle para ignorar cache e despacho de alerta imediato ao Telegram se atingir limiar crítico (&le; 10%).
+  - `POST /api/integrations/n8n/sync`: Botão "Sincronizar" no card de status do n8n permitindo caminho customizado e ativação automática de workflows higienizados.
+  - `POST /api/integrations/n8n/trigger`: Botão "Disparar Webhook" no card de workflows do n8n com editor interativo de payload JSON e feedback imediato de resposta.
+  - `POST /api/hf15/rollback/drill`: Botão "Rollback Drill" no card de métricas HF-15 executando ensaio hermético isolado (Sandbox) contra o projeto sentinela `proj-drill-01`, medindo tempos reais de RTO e RPO e registrando recibo na Hash Chain SHA-256 com RISCO ZERO de afetar containers de produção.
+  - Superfícies mapeadas: `factory-alerts-strip` e `factory-health-block`.
+- **DH-13 — Fundação do Frontend & Cache Invalidation:**
+  - Versão de cache unificada incrementada para `?v=20260924a` em todas as tags `<link>` e `<script>` de `hub/frontend/index.html` e nas suítes de teste de fundação.
+  - Total eliminação de CDNs externos mantida com `styles.css` local.
+- **Gate de Cobertura:** 7 capacidades (6 rotas `/api` e 1 módulo `core/`) transitaram de `pending` para `surface`. A cobertura do DarkHub atingiu **100% das capacidades voltadas ao owner** (134 superfícies ativas, 0 pendências, 13 waivers de máquina/interno documentados).
 
 ## Configuração manual no Dokploy (para ativar R2 na nuvem)
 
