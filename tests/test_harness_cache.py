@@ -194,6 +194,7 @@ class _FakeCursor:
     def __init__(self, tables: dict[str, dict[str, tuple]]) -> None:
         self._tables = tables
         self._last: Any = None
+        self.rowcount = 0
 
     def execute(self, sql: str, params: tuple = ()) -> None:
         normalized = " ".join(sql.split())
@@ -227,6 +228,16 @@ class _FakeCursor:
         if normalized.startswith("INSERT INTO harness_inflight"):
             key, host, pid, expires_in, _expires_in_again = params
             self._tables["harness_inflight"][key] = (host, pid, time.time() + expires_in)
+            self.rowcount = 1
+            return
+        if normalized.startswith("UPDATE harness_inflight"):
+            expires_in, key, host, pid = params
+            row = self._tables["harness_inflight"].get(key)
+            if row is not None and row[0] == host and row[1] == pid:
+                self._tables["harness_inflight"][key] = (host, pid, time.time() + expires_in)
+                self.rowcount = 1
+            else:
+                self.rowcount = 0
             return
         if normalized.startswith("DELETE FROM harness_inflight"):
             key, pid = params
@@ -333,6 +344,160 @@ def test_inflight_release_only_removes_own_pid_claim(fake_postgres: _FakePsycopg
 
 
 # --------------------------------------------------------------------------- #
+# get_inflight_claim / refresh_inflight / heartbeat (cross-host single-flight
+# defect fixes A1/A2/A3)
+# --------------------------------------------------------------------------- #
+
+
+def test_get_inflight_claim_is_none_when_no_row_exists(fake_postgres: _FakePsycopgModule) -> None:
+    assert cache.get_inflight_claim("no-such-key") is None
+
+
+def test_get_inflight_claim_returns_live_claim(fake_postgres: _FakePsycopgModule) -> None:
+    key = "live-claim"
+    cache.acquire_inflight(key, expires_in_sec=60.0)
+
+    claim = cache.get_inflight_claim(key)
+    assert claim is not None
+    assert claim["pid"] == __import__("os").getpid()
+
+
+def test_get_inflight_claim_is_none_once_expired(fake_postgres: _FakePsycopgModule) -> None:
+    key = "expired-claim"
+    cache.acquire_inflight(key, expires_in_sec=-1.0)  # already expired
+
+    assert cache.get_inflight_claim(key) is None
+
+
+def test_poll_for_remote_verdict_stops_fast_when_holder_finished_without_a_verdict(
+    fake_postgres: _FakePsycopgModule,
+) -> None:
+    """A1: the other host claimed the key, then finished with a FAILURE (so
+    no verdict was ever stored -- failures are never cached) and deleted its
+    inflight row. The waiter must notice on its very next poll and return,
+    not idle out the full deadline."""
+
+    key = "poll-fast-on-finished-failure"
+    cache.acquire_inflight(key, expires_in_sec=60.0)
+    cache.release_inflight(key)  # simulates the holder finishing (failure path)
+
+    started = time.monotonic()
+    result = cache.poll_for_remote_verdict(key, deadline_sec=30.0)
+    elapsed = time.monotonic() - started
+
+    assert result is None
+    assert elapsed < 2.0  # nowhere near the 30s deadline
+
+
+def test_poll_for_remote_verdict_stops_fast_when_nobody_is_inflight(
+    fake_postgres: _FakePsycopgModule,
+) -> None:
+    """A2 support: calling the poll when no one holds the key at all (the
+    common case for the pre-lock check) must return near-instantly."""
+
+    started = time.monotonic()
+    result = cache.poll_for_remote_verdict("never-claimed-key", deadline_sec=30.0)
+    elapsed = time.monotonic() - started
+
+    assert result is None
+    assert elapsed < 2.0
+
+
+def test_poll_for_remote_verdict_returns_verdict_once_stored(
+    fake_postgres: _FakePsycopgModule,
+) -> None:
+    key = "poll-hit-key"
+    cache.acquire_inflight(key, expires_in_sec=60.0)
+    cache.set_remote_verdict(key, _record())
+
+    result = cache.poll_for_remote_verdict(key, deadline_sec=30.0)
+    assert result is not None
+    assert result["result"] == _record()["result"]
+
+
+def test_inflight_lease_expires_without_heartbeat_and_can_be_taken_over(
+    fake_postgres: _FakePsycopgModule,
+) -> None:
+    """A3: a short lease with no heartbeat lapses quickly and another host's
+    claim attempt then succeeds (the abandoned-lease takeover path)."""
+
+    key = "lease-no-heartbeat"
+    assert cache.acquire_inflight(key, expires_in_sec=0.05) is True
+    time.sleep(0.15)
+
+    assert cache.get_inflight_claim(key) is None  # treated as abandoned
+    assert cache.acquire_inflight(key, expires_in_sec=60.0) is True  # takeover allowed
+
+
+def test_heartbeat_inflight_keeps_the_lease_alive_past_its_original_expiry(
+    fake_postgres: _FakePsycopgModule,
+) -> None:
+    """A3: while a heartbeat thread is running, the lease must stay alive far
+    longer than its own short duration would otherwise allow."""
+
+    import threading
+
+    key = "heartbeat-alive"
+    lease_sec = 0.3
+    assert cache.acquire_inflight(key, expires_in_sec=lease_sec) is True
+
+    stop_event = threading.Event()
+    thread = threading.Thread(
+        target=cache.heartbeat_inflight,
+        args=(key,),
+        kwargs={"stop_event": stop_event, "lease_sec": lease_sec},
+        daemon=True,
+    )
+    thread.start()
+    try:
+        # Without the heartbeat this lease (0.3s) would already have lapsed.
+        time.sleep(lease_sec * 2.5)
+        assert cache.get_inflight_claim(key) is not None
+    finally:
+        stop_event.set()
+        thread.join(timeout=2.0)
+
+    assert not thread.is_alive()
+
+    # Once the heartbeat has stopped, the (short) lease lapses again and the
+    # claim is abandoned like any other orphan.
+    time.sleep(lease_sec * 5)
+    assert cache.get_inflight_claim(key) is None
+
+
+def test_refresh_inflight_fails_once_another_host_has_taken_over(
+    fake_postgres: _FakePsycopgModule,
+) -> None:
+    key = "refresh-lost-ownership"
+    cache.acquire_inflight(key, expires_in_sec=-1.0)  # our claim, already expired
+    # Another host/pid takes over by mutating the table directly (as a real
+    # second acquire_inflight call from a different process would).
+    fake_postgres.tables["harness_inflight"][key] = ("other-host", 999999, time.time() + 60.0)
+
+    assert cache.refresh_inflight(key, expires_in_sec=60.0) is False
+
+
+def test_refresh_inflight_succeeds_while_still_owned(fake_postgres: _FakePsycopgModule) -> None:
+    key = "refresh-still-owned"
+    cache.acquire_inflight(key, expires_in_sec=1.0)
+
+    assert cache.refresh_inflight(key, expires_in_sec=60.0) is True
+    claim = cache.get_inflight_claim(key)
+    assert claim is not None  # extended well past the original 1s lease
+
+
+def test_inflight_lease_sec_default_and_env_override(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("DARKFAC_HARNESS_INFLIGHT_LEASE_SEC", raising=False)
+    assert cache.inflight_lease_sec() == 90.0
+
+    monkeypatch.setenv("DARKFAC_HARNESS_INFLIGHT_LEASE_SEC", "45")
+    assert cache.inflight_lease_sec() == 45.0
+
+    monkeypatch.setenv("DARKFAC_HARNESS_INFLIGHT_LEASE_SEC", "not-a-number")
+    assert cache.inflight_lease_sec() == 90.0  # invalid -> falls back to default
+
+
+# --------------------------------------------------------------------------- #
 # Degradation when psycopg (or the configured URL) is unavailable
 # --------------------------------------------------------------------------- #
 
@@ -342,6 +507,9 @@ def test_no_database_url_configured_is_local_only_silently() -> None:
     cache.set_remote_verdict("k", _record())  # must not raise
     assert cache.acquire_inflight("k", expires_in_sec=10.0) is True  # proceed locally
     cache.release_inflight("k")  # must not raise
+    assert cache.get_inflight_claim("k") is None  # nothing to see without coordination
+    assert cache.refresh_inflight("k", expires_in_sec=10.0) is True  # nothing to refresh, proceed
+    assert cache.poll_for_remote_verdict("k", deadline_sec=30.0) is None
 
 
 def test_psycopg_not_importable_degrades_to_local_only(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -352,6 +520,8 @@ def test_psycopg_not_importable_degrades_to_local_only(monkeypatch: pytest.Monke
     cache.set_remote_verdict("k", _record())  # must not raise
     assert cache.acquire_inflight("k", expires_in_sec=10.0) is True
     cache.release_inflight("k")
+    assert cache.get_inflight_claim("k") is None
+    assert cache.refresh_inflight("k", expires_in_sec=10.0) is True
 
 
 def test_remote_backend_exception_degrades_with_one_warning(
@@ -370,3 +540,61 @@ def test_remote_backend_exception_degrades_with_one_warning(
     captured = capsys.readouterr()
     assert "[WARN]" in captured.out
     assert "supersecret" not in captured.out  # credentials never leak into logs
+
+
+def test_refresh_inflight_backend_exception_degrades_with_warning_and_false(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A3: a transient DB failure during a heartbeat tick must never crash
+    the run -- it degrades to "lost ownership" (``False``) with one
+    sanitized warning, and the caller (heartbeat_inflight) just logs once
+    and keeps going or stops, but never raises."""
+
+    class _ExplodingModule:
+        def connect(self, url: str, connect_timeout: int | None = None) -> Any:
+            raise ConnectionError("simulated network failure to 10.0.0.1:5432")
+
+    monkeypatch.setenv("DARKFAC_HF02_DATABASE_URL", "postgresql://worker:supersecret@10.0.0.1:5432/darkfac")
+    monkeypatch.setattr(cache, "_import_psycopg", lambda: _ExplodingModule())
+
+    result = cache.refresh_inflight("k", expires_in_sec=60.0)
+    assert result is False
+
+    captured = capsys.readouterr()
+    assert "[WARN]" in captured.out
+    assert "supersecret" not in captured.out  # credentials never leak into logs
+
+
+def test_heartbeat_inflight_survives_refresh_exceptions_and_warns_once(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A3: heartbeat_inflight must never propagate a refresh failure -- it
+    logs once and keeps ticking (a transient outage may recover)."""
+
+    import threading
+
+    call_count = {"n": 0}
+
+    def flaky_refresh(key: str, *, expires_in_sec: float) -> bool:
+        call_count["n"] += 1
+        raise ConnectionError("simulated transient outage")
+
+    monkeypatch.setattr(cache, "refresh_inflight", flaky_refresh)
+
+    stop_event = threading.Event()
+    thread = threading.Thread(
+        target=cache.heartbeat_inflight,
+        args=("k",),
+        kwargs={"stop_event": stop_event, "lease_sec": 0.1},
+        daemon=True,
+    )
+    thread.start()
+    time.sleep(0.35)  # several heartbeat ticks at lease_sec/3 ~= 0.033s
+    stop_event.set()
+    thread.join(timeout=2.0)
+
+    assert not thread.is_alive()  # never crashed the thread, just kept looping
+    assert call_count["n"] >= 2  # it really did keep retrying past the first failure
+
+    captured = capsys.readouterr()
+    assert captured.out.count("[WARN]") == 1  # warned exactly once, not per-tick

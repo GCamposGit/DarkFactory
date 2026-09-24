@@ -8,6 +8,8 @@ verify parsing "against REAL output, not assumptions."
 
 from __future__ import annotations
 
+import contextlib
+import time
 from pathlib import Path
 
 import pytest
@@ -326,3 +328,195 @@ def test_run_with_cache_falls_through_to_execute_on_dirty_worktree(monkeypatch: 
     )
     assert result is False
     assert calls == ["execute"]
+
+
+# --------------------------------------------------------------------------- #
+# run_with_cache: cross-host single-flight restructuring (rule A2) -- the
+# remote wait must never happen while holding the local machine-wide lock.
+# --------------------------------------------------------------------------- #
+
+
+def test_run_with_cache_polls_remote_before_touching_local_lock(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A2: waiting on another host's in-flight run must happen BEFORE (and
+    without holding) the local suite lock, so this host's other suites are
+    never idled behind a remote wait."""
+
+    lock_state = {"held": False}
+    poll_observed_lock_held: list[bool] = []
+
+    @contextlib.contextmanager
+    def fake_suite_lock(**kwargs):
+        lock_state["held"] = True
+        try:
+            yield None
+        finally:
+            lock_state["held"] = False
+
+    def fake_poll_for_remote_verdict(key, *, deadline_sec):
+        poll_observed_lock_held.append(lock_state["held"])
+        return None  # nobody finished -- fall through to running it ourselves
+
+    execute_calls = {"count": 0}
+
+    def fake_execute(config, *, config_hash, quick, include_holdout, config_path, on_result=None):
+        execute_calls["count"] += 1
+        return True
+
+    monkeypatch.setattr(runner, "execute", fake_execute)
+    monkeypatch.setattr(runner, "_ensure_clean_worktree", lambda: None)
+    monkeypatch.setattr(runner, "_candidate_sha", lambda: "c" * 40)
+    monkeypatch.setattr(runner.harness_cache, "tree_sha", lambda project_root: "9" * 40)
+    monkeypatch.setattr(runner.harness_suite_lock, "suite_lock", fake_suite_lock)
+    monkeypatch.setattr(runner.harness_cache, "poll_for_remote_verdict", fake_poll_for_remote_verdict)
+    monkeypatch.setattr(runner.harness_cache, "acquire_inflight", lambda key, expires_in_sec: True)
+    monkeypatch.setattr(runner.harness_cache, "release_inflight", lambda key: None)
+    monkeypatch.setattr(runner.harness_cache, "heartbeat_inflight", lambda *a, **k: None)
+
+    config = _minimal_config()
+    result = runner.run_with_cache(
+        config,
+        config_hash="9" * 64,
+        quick=True,
+        include_holdout=False,
+        config_path=Path("harness.config.json"),
+    )
+
+    assert result is True
+    assert execute_calls["count"] == 1
+    assert poll_observed_lock_held == [False]  # the poll ran with the lock NOT held
+
+
+def test_run_with_cache_short_circuits_on_remote_poll_hit_without_local_lock(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A2: when the pre-lock poll finds a PASS from another host, the local
+    suite lock must never be entered at all -- not just "not held during the
+    poll", the whole local run is skipped."""
+
+    from core.harness.models import HarnessResult
+
+    lock_entries = {"count": 0}
+
+    @contextlib.contextmanager
+    def fake_suite_lock(**kwargs):
+        lock_entries["count"] += 1
+        yield None
+
+    cached_result = HarnessResult(
+        candidate_sha="a" * 40,
+        config_hash="a" * 64,
+        required_steps=["probe"],
+        started_steps=["probe"],
+        passed_steps=["probe"],
+        failed_steps=[],
+        discovered_count=1,
+        passed_count=1,
+        skipped_count=0,
+        exit_codes={"probe": 0},
+    )
+    remote_record = {
+        "tree_sha": "a" * 40,
+        "candidate_sha": "a" * 40,
+        "config_hash": "a" * 64,
+        "os_family": "posix",
+        "py_version": "3.12",
+        "host": "remote-host",
+        "result": cached_result.model_dump(mode="json"),
+        "created_at": time.time(),
+    }
+
+    def fake_poll(key, *, deadline_sec):
+        return remote_record
+
+    execute_calls = {"count": 0}
+
+    def fake_execute(*args, **kwargs):
+        execute_calls["count"] += 1
+        return True
+
+    monkeypatch.setattr(runner, "execute", fake_execute)
+    monkeypatch.setattr(runner, "_ensure_clean_worktree", lambda: None)
+    monkeypatch.setattr(runner, "_candidate_sha", lambda: "a" * 40)
+    monkeypatch.setattr(runner.harness_cache, "tree_sha", lambda project_root: "a" * 40)
+    monkeypatch.setattr(runner.harness_suite_lock, "suite_lock", fake_suite_lock)
+    monkeypatch.setattr(runner.harness_cache, "poll_for_remote_verdict", fake_poll)
+
+    config = _minimal_config()
+    result = runner.run_with_cache(
+        config,
+        config_hash="a" * 64,
+        quick=True,
+        include_holdout=False,
+        config_path=Path("harness.config.json"),
+    )
+
+    assert result is True
+    assert execute_calls["count"] == 0  # reused the remote verdict, never ran locally
+    assert lock_entries["count"] == 0  # local lock was never even entered
+
+
+def test_run_with_cache_starts_and_stops_a_heartbeat_thread_around_execute(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A3: a heartbeat thread must be running while `execute` is in
+    progress, and must be stopped (joined) once it returns -- verified via a
+    real threading.Event so this catches a heartbeat that never gets
+    signalled to stop (which would leak a daemon thread per run)."""
+
+    import threading
+
+    from core.harness.models import HarnessResult
+
+    heartbeat_calls: list[dict] = []
+    observed_thread_alive_during_execute = {"value": None}
+
+    def fake_heartbeat_inflight(key, *, stop_event: threading.Event, lease_sec=None):
+        heartbeat_calls.append({"key": key, "lease_sec": lease_sec})
+        stop_event.wait(5.0)  # blocks until run_with_cache signals stop
+
+    def fake_execute(config, *, config_hash, quick, include_holdout, config_path, on_result=None):
+        # The heartbeat thread should already be alive at this point.
+        observed_thread_alive_during_execute["value"] = any(
+            t.name == "darkfac-harness-inflight-heartbeat" and t.is_alive()
+            for t in threading.enumerate()
+        )
+        result = HarnessResult(
+            candidate_sha="b" * 40,
+            config_hash=config_hash,
+            required_steps=["probe"],
+            started_steps=["probe"],
+            passed_steps=["probe"],
+            failed_steps=[],
+            discovered_count=1,
+            passed_count=1,
+            skipped_count=0,
+            exit_codes={"probe": 0},
+        )
+        if on_result is not None:
+            on_result(result)
+        return True
+
+    monkeypatch.setattr(runner, "execute", fake_execute)
+    monkeypatch.setattr(runner, "_ensure_clean_worktree", lambda: None)
+    monkeypatch.setattr(runner, "_candidate_sha", lambda: "b" * 40)
+    monkeypatch.setattr(runner.harness_cache, "tree_sha", lambda project_root: "b" * 40)
+    monkeypatch.setattr(runner.harness_cache, "poll_for_remote_verdict", lambda key, *, deadline_sec: None)
+    monkeypatch.setattr(runner.harness_cache, "heartbeat_inflight", fake_heartbeat_inflight)
+
+    config = _minimal_config()
+    result = runner.run_with_cache(
+        config,
+        config_hash="b" * 64,
+        quick=True,
+        include_holdout=False,
+        config_path=Path("harness.config.json"),
+    )
+
+    assert result is True
+    assert len(heartbeat_calls) == 1
+    assert observed_thread_alive_during_execute["value"] is True
+    # After run_with_cache returns, the daemon thread must have been joined
+    # -- none left alive under that name.
+    assert not any(
+        t.name == "darkfac-harness-inflight-heartbeat" and t.is_alive() for t in threading.enumerate()
+    )

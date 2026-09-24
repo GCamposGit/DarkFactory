@@ -19,7 +19,13 @@ Two backends:
 Cross-host single-flight uses a second Postgres table (``harness_inflight``)
 so that when host B starts the same (tree, config, steps, platform) run host
 A is already running, B polls for A's verdict instead of burning its own
-CPU on a duplicate run.
+CPU on a duplicate run. That polling happens *before* (and independently
+of) the caller's local machine-wide lock, so host B never idles its own
+queue of suites while waiting on host A. Claims use a short lease
+(:func:`inflight_lease_sec`, default 90s) refreshed by a heartbeat thread
+(:func:`heartbeat_inflight`) for as long as the holder is actually running,
+so a crashed holder only blocks the key for one lease period rather than
+the whole run.
 """
 
 from __future__ import annotations
@@ -31,6 +37,7 @@ import os
 import socket
 import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
 from typing import Any
@@ -40,6 +47,8 @@ from core.harness.suite_lock import state_dir
 _CONNECT_TIMEOUT_SEC = 5
 _DEFAULT_REMOTE_WAIT_SEC = 900
 _INFLIGHT_POLL_SEC = 10
+_DEFAULT_INFLIGHT_LEASE_SEC = 90.0
+_MIN_HEARTBEAT_INTERVAL_SEC = 0.05
 
 
 def _env_truthy(name: str) -> bool:
@@ -352,8 +361,149 @@ def release_inflight(key: str) -> None:
                 conn.commit()
 
 
+def get_inflight_claim(key: str) -> dict[str, Any] | None:
+    """Return the *live* inflight claim for ``key``, or ``None``.
+
+    ``None`` covers every case in which there is nothing left to wait for:
+    no row at all, a row whose lease has already expired (abandoned --
+    crashed process/container, or a heartbeat that stopped), or the remote
+    backend being unavailable/unconfigured. Waiters use this to notice a
+    holder is gone -- including a holder that FINISHED with a failure,
+    since failures are never stored as verdicts and the holder simply
+    deletes its own inflight row -- without waiting out a full poll
+    deadline.
+    """
+
+    url = _database_url()
+    if not url:
+        return None
+    psycopg_module = _import_psycopg()
+    if psycopg_module is None:
+        return None
+    try:
+        with _connect(psycopg_module, url) as conn:
+            with conn.cursor() as cur:
+                cur.execute(INFLIGHT_DDL)
+                cur.execute(
+                    "SELECT host, pid, expires_at FROM harness_inflight WHERE key = %s",
+                    (key,),
+                )
+                row = cur.fetchone()
+                if not row:
+                    conn.commit()
+                    return None
+                host, pid, expires_at = row
+                cur.execute("SELECT %s < CURRENT_TIMESTAMP", (expires_at,))
+                is_expired = cur.fetchone()[0]
+                conn.commit()
+                if is_expired:
+                    return None
+                return {"host": host, "pid": pid, "expires_at": expires_at}
+    except Exception as exc:  # noqa: BLE001 - any remote failure degrades to "nothing to wait for"
+        _sanitized_warning("Remote inflight status unavailable", exc)
+        return None
+
+
+def refresh_inflight(key: str, *, expires_in_sec: float) -> bool:
+    """Extend ``key``'s inflight lease -- but only while this host+pid still
+    owns it. Returns ``False`` (without changing anything) once another host
+    has taken over, e.g. because a previous heartbeat tick was too slow and
+    the lease already lapsed and got claimed by someone else. When no remote
+    backend is configured there is nothing to refresh, so this degrades to
+    ``True`` (proceed locally, same convention as :func:`acquire_inflight`).
+    """
+
+    url = _database_url()
+    if not url:
+        return True
+    psycopg_module = _import_psycopg()
+    if psycopg_module is None:
+        return True
+    try:
+        with _connect(psycopg_module, url) as conn:
+            with conn.cursor() as cur:
+                cur.execute(INFLIGHT_DDL)
+                cur.execute(
+                    "UPDATE harness_inflight SET expires_at = CURRENT_TIMESTAMP + %s * INTERVAL '1 second' "
+                    "WHERE key = %s AND host = %s AND pid = %s",
+                    (expires_in_sec, key, socket.gethostname(), os.getpid()),
+                )
+                still_owned = cur.rowcount > 0
+                conn.commit()
+                return still_owned
+    except Exception as exc:  # noqa: BLE001
+        _sanitized_warning("Remote inflight heartbeat failed", exc)
+        return False
+
+
+def inflight_lease_sec() -> float:
+    """Short-lived lease duration for a fresh inflight claim (default 90s).
+
+    Deliberately much shorter than the ~20 minute sum of step timeouts used
+    previously: a crashed process/container now only blocks the key for one
+    lease, not the whole run. A heartbeat thread (:func:`heartbeat_inflight`)
+    keeps a still-alive holder's claim renewed for as long as it actually
+    runs.
+    """
+
+    raw = os.environ.get("DARKFAC_HARNESS_INFLIGHT_LEASE_SEC", "").strip()
+    if not raw:
+        return _DEFAULT_INFLIGHT_LEASE_SEC
+    try:
+        value = float(raw)
+    except ValueError:
+        return _DEFAULT_INFLIGHT_LEASE_SEC
+    return value if value > 0 else _DEFAULT_INFLIGHT_LEASE_SEC
+
+
+def heartbeat_inflight(
+    key: str,
+    *,
+    stop_event: threading.Event,
+    lease_sec: float | None = None,
+) -> None:
+    """Run in a daemon thread for as long as this host owns ``key``'s
+    inflight claim, refreshing its lease roughly every ``lease_sec / 3`` so
+    a long-running suite doesn't outlive its short lease. Stops as soon as
+    ``stop_event`` is set (the caller's ``finally``) or ownership is lost.
+
+    Any refresh failure is logged only once (not per-tick) so a flaky
+    connection during a 15-minute run doesn't spam the harness console.
+    """
+
+    effective_lease = lease_sec if lease_sec is not None else inflight_lease_sec()
+    interval = max(_MIN_HEARTBEAT_INTERVAL_SEC, effective_lease / 3)
+    warned = False
+    while not stop_event.wait(interval):
+        try:
+            still_owned = refresh_inflight(key, expires_in_sec=effective_lease)
+        except Exception as exc:  # noqa: BLE001 - heartbeat must never crash the run
+            if not warned:
+                _sanitized_warning("Inflight heartbeat failed", exc)
+                warned = True
+            continue
+        if not still_owned:
+            if not warned:
+                print(
+                    f"[WARN] Inflight heartbeat lost ownership of {key[:12]}; "
+                    "another host took over"
+                )
+                warned = True
+            return
+
+
 def poll_for_remote_verdict(key: str, *, deadline_sec: float) -> dict[str, Any] | None:
-    """Poll every ~10s (bounded by ``deadline_sec`` and the wait env var) for a PASS verdict."""
+    """Poll every ~10s (bounded by ``deadline_sec`` and the wait env var) for
+    a PASS verdict.
+
+    Each iteration also checks the holder's inflight claim
+    (:func:`get_inflight_claim`): once that claim is gone or expired *and*
+    still no verdict has been stored, the holder is done -- either it
+    finished with a failure (failures are never cached, so the only trace of
+    a finished failed run is the holder deleting its inflight row) or it
+    crashed. Either way, waiting any longer is pointless, so this returns
+    ``None`` immediately instead of idling out the rest of ``deadline_sec``.
+    """
 
     wait_cap = float(os.environ.get("DARKFAC_HARNESS_REMOTE_WAIT_SEC", str(_DEFAULT_REMOTE_WAIT_SEC)))
     effective_deadline = min(deadline_sec, wait_cap)
@@ -362,5 +512,7 @@ def poll_for_remote_verdict(key: str, *, deadline_sec: float) -> dict[str, Any] 
         verdict = get_remote_verdict(key)
         if verdict is not None:
             return verdict
+        if get_inflight_claim(key) is None:
+            return None
         time.sleep(min(_INFLIGHT_POLL_SEC, max(0.0, effective_deadline - (time.monotonic() - start))))
     return None

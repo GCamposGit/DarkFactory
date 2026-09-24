@@ -110,6 +110,17 @@ CI_POLICY_TEST = "tests/test_ci_policy.py"
 
 NON_PYTHON_MATCHABLE_ROOTS = ("core/", "hub/")
 
+#: Source roots for which a changed .py file selecting zero tests is worth
+#: flagging explicitly (``uncovered``) rather than silently reporting mode
+#: "none"/"subset" with that file simply absent from every reason. Kept
+#: narrower than SCAN_ROOT_DIRS: `tests/` changes are covered by the
+#: dedicated changed-test-file / conftest rules instead.
+COVERAGE_TRACKED_PREFIXES = ("core/", "hub/", "scripts/")
+
+#: pytest's own exit code for "valid invocation, zero tests collected" --
+#: not a failure when a selection's serial-only pass has no serial tests.
+PYTEST_EXIT_NO_TESTS_COLLECTED = 5
+
 
 # --- data model -----------------------------------------------------------
 
@@ -140,6 +151,11 @@ class Selection:
     reasons: dict[str, list[str]]
     escalations: list[str]
     changed_files: list[str]
+    #: Changed .py files under COVERAGE_TRACKED_PREFIXES that matched zero
+    #: tests (no import edge, no text reference). Informational only --
+    #: never changes `mode`, which stays whatever the rest of the selection
+    #: logic computed.
+    uncovered: list[str] = field(default_factory=list)
 
 
 class GraphBuildError(RuntimeError):
@@ -626,6 +642,7 @@ def select_affected(repo_root: Path, base_ref_requested: str) -> Selection:
 
     selected: set[str] = set()
     reasons: dict[str, list[str]] = {}
+    uncovered: list[str] = []
 
     for changed_path in changed_files:
         governance_hit = _governance_escalation(changed_path)
@@ -655,6 +672,8 @@ def select_affected(repo_root: Path, base_ref_requested: str) -> Selection:
             selected |= found
             for test_path, why in found_reasons.items():
                 reasons.setdefault(test_path, []).extend(why)
+            if not found and changed_path.startswith(COVERAGE_TRACKED_PREFIXES):
+                uncovered.append(changed_path)
         else:
             found, found_reasons, escalation = _select_tests_for_non_python_change(graph, changed_path)
             selected |= found
@@ -670,6 +689,7 @@ def select_affected(repo_root: Path, base_ref_requested: str) -> Selection:
             reasons={},
             escalations=sorted(set(escalations)),
             changed_files=changed_files,
+            uncovered=sorted(set(uncovered)),
         )
 
     for test_path in reasons:
@@ -678,6 +698,7 @@ def select_affected(repo_root: Path, base_ref_requested: str) -> Selection:
     return Selection(
         mode="subset" if selected else "none",
         tests=sorted(selected),
+        uncovered=sorted(set(uncovered)),
         reasons=reasons,
         escalations=[],
         changed_files=changed_files,
@@ -707,14 +728,44 @@ def run_pytest(
         args = selection.tests
         use_xdist = _xdist_available() and len(args) > 30
 
-    cmd = [sys.executable, "-m", "pytest", *args, "-q"]
-    if use_xdist:
-        cmd.extend(["-n", "auto", "--dist", "loadfile"])
-    cmd.extend(extra_args)
+    if not use_xdist:
+        cmd = [sys.executable, "-m", "pytest", *args, "-q", *extra_args]
+        LOGGER.info("running: %s", " ".join(cmd))
+        result = subprocess.run(cmd, cwd=str(repo_root))
+        return result.returncode
 
-    LOGGER.info("running: %s", " ".join(cmd))
-    result = subprocess.run(cmd, cwd=str(repo_root))
-    return result.returncode
+    # Mirror the official harness (harness.config.json): a parallel pass
+    # over everything not marked `serial`, then a sequential pass over just
+    # the `serial`-marked tests within the SAME selection (shared state,
+    # fixed ports, or real repo mutation can't run under xdist workers). A
+    # selection with no serial-marked tests at all is not a failure --
+    # pytest's own "no tests collected" exit code (5) counts as success for
+    # that pass, exactly like the harness config's serial step would see on
+    # a subset with nothing serial in it.
+    parallel_cmd = [
+        sys.executable,
+        "-m",
+        "pytest",
+        *args,
+        "-q",
+        "-n",
+        "auto",
+        "--dist",
+        "loadfile",
+        "-m",
+        "not serial",
+        *extra_args,
+    ]
+    LOGGER.info("running (parallel, not serial): %s", " ".join(parallel_cmd))
+    parallel_returncode = subprocess.run(parallel_cmd, cwd=str(repo_root)).returncode
+
+    serial_cmd = [sys.executable, "-m", "pytest", *args, "-q", "-m", "serial", *extra_args]
+    LOGGER.info("running (serial): %s", " ".join(serial_cmd))
+    serial_returncode = subprocess.run(serial_cmd, cwd=str(repo_root)).returncode
+    if serial_returncode == PYTEST_EXIT_NO_TESTS_COLLECTED:
+        serial_returncode = 0
+
+    return parallel_returncode if parallel_returncode != 0 else serial_returncode
 
 
 # --- CLI -----------------------------------------------------------------
@@ -776,6 +827,7 @@ def main(argv: list[str] | None = None) -> int:
             "tests": selection.tests,
             "reasons": selection.reasons,
             "escalations": selection.escalations,
+            "uncovered": selection.uncovered,
         }
         print(json.dumps(payload, indent=2, sort_keys=True))
     else:
@@ -784,6 +836,9 @@ def main(argv: list[str] | None = None) -> int:
         else:
             for test_path in selection.tests:
                 print(test_path)
+
+    for uncovered_path in selection.uncovered:
+        print(f"[WARN] no test covers {uncovered_path}", file=sys.stderr)
 
     reason_summary = _summarize_reasons(selection)
     print(

@@ -11,6 +11,7 @@ import re
 import shlex
 import subprocess
 import sys
+import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -506,12 +507,15 @@ def run_with_cache(
 ) -> bool:
     """Cache-aware, single-flighted wrapper around :func:`execute`.
 
-    Flow: check cache -> acquire the machine-wide suite lock -> re-check
-    cache (another process on this host may have just finished the same
-    key) -> cross-host single-flight via Postgres (poll another host's
-    in-flight run instead of duplicating it) -> run steps with
+    Flow: check cache -> if another host holds a *live* inflight claim for
+    this key, poll for its verdict WITHOUT the local machine-wide lock (so
+    this host's other suites are never blocked behind a remote wait) ->
+    acquire the local lock -> re-check cache (another process on this host,
+    or the remote host, may have just finished) -> claim inflight with a
+    short lease and start a heartbeat thread -> run steps with
     ``DARKFAC_SUITE_LOCK_HELD=1`` in the child environment -> store the
-    verdict only on a PASS.
+    verdict only on a PASS, always stop the heartbeat and release the
+    inflight claim.
 
     ``execute()`` itself is untouched by any of this (it has no idea the
     cache or lock exist) so every existing direct caller/test of ``execute``
@@ -552,20 +556,55 @@ def run_with_cache(
     if hit is not None:
         return _emit_cache_hit(hit, config_path=config_path)
 
+    total_timeout_sec = float(sum(step.timeout_sec for step in steps))
+    lease_sec = harness_cache.inflight_lease_sec()
+
+    # Cross-host wait for another host's in-flight run, deliberately OUTSIDE
+    # the local suite lock: `poll_for_remote_verdict` itself checks the
+    # holder's inflight claim on every iteration and returns immediately
+    # when nobody (that we can see) is running this key, so this is cheap
+    # (a couple of no-op remote lookups, or fully local/free when no
+    # DARKFAC_HF02_DATABASE_URL is configured) in the common case.
+    remote_hit = harness_cache.poll_for_remote_verdict(cache_key, deadline_sec=total_timeout_sec)
+    if remote_hit is not None:
+        harness_cache.set_local_verdict(cache_key, remote_hit)
+        return _emit_cache_hit(remote_hit, config_path=config_path)
+
     with harness_suite_lock.suite_lock() as _lock:  # noqa: F841 - context manager for its side effect
         hit = harness_cache.get_verdict(cache_key)
         if hit is not None:
             return _emit_cache_hit(hit, config_path=config_path)
 
-        total_timeout_sec = float(sum(step.timeout_sec for step in steps))
-        inflight_owned = harness_cache.acquire_inflight(cache_key, expires_in_sec=total_timeout_sec)
+        inflight_owned = harness_cache.acquire_inflight(cache_key, expires_in_sec=lease_sec)
         if not inflight_owned:
+            # Narrow race: another host claimed it between our pre-lock poll
+            # and acquiring the local lock. The wait here is unavoidable
+            # (we're already holding the lock) but short, since a lease is
+            # only ~90s by default rather than the ~20 minute step-timeout
+            # sum used previously.
             remote_hit = harness_cache.poll_for_remote_verdict(cache_key, deadline_sec=total_timeout_sec)
             if remote_hit is not None:
                 harness_cache.set_local_verdict(cache_key, remote_hit)
                 return _emit_cache_hit(remote_hit, config_path=config_path)
             # The other host's claim expired without landing a verdict; take over.
-            inflight_owned = harness_cache.acquire_inflight(cache_key, expires_in_sec=total_timeout_sec)
+            inflight_owned = harness_cache.acquire_inflight(cache_key, expires_in_sec=lease_sec)
+
+        # A short lease means a crashed process/container only blocks this
+        # key for one lease period, not the whole ~20 minute run. A daemon
+        # heartbeat thread keeps the lease alive (refreshed every
+        # lease/3) for as long as this process is actually still running
+        # the steps below, and is always stopped in `finally`.
+        stop_heartbeat = threading.Event()
+        heartbeat_thread: threading.Thread | None = None
+        if inflight_owned:
+            heartbeat_thread = threading.Thread(
+                target=harness_cache.heartbeat_inflight,
+                args=(cache_key,),
+                kwargs={"stop_event": stop_heartbeat, "lease_sec": lease_sec},
+                daemon=True,
+                name="darkfac-harness-inflight-heartbeat",
+            )
+            heartbeat_thread.start()
 
         # `suite_lock()` above already exported DARKFAC_SUITE_LOCK_HELD=1 for
         # this whole critical section (unless locking is disabled), so the
@@ -582,6 +621,9 @@ def run_with_cache(
                 on_result=lambda result: captured.setdefault("result", result),
             )
         finally:
+            stop_heartbeat.set()
+            if heartbeat_thread is not None:
+                heartbeat_thread.join(timeout=5.0)
             if inflight_owned:
                 harness_cache.release_inflight(cache_key)
 

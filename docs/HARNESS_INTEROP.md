@@ -86,7 +86,20 @@ todos estourando o timeout de 1200s. Três mecanismos resolvem isso, todos em
    árvore ao mesmo tempo, uma tabela Postgres `harness_inflight` garante que
    só um deles execute; o outro faz polling (a cada ~10s, limitado por
    `DARKFAC_HARNESS_REMOTE_WAIT_SEC`) esperando o verdict aparecer em
-   `harness_verdicts` em vez de duplicar a execução.
+   `harness_verdicts` em vez de duplicar a execução. Esse polling acontece
+   **antes** (e fora) do lock local da máquina — host B nunca fica com sua
+   fila de suítes travada enquanto espera o verdict de A; só depois de
+   parar de esperar (verdict encontrado, ou ninguém mais segurando a chave)
+   é que B tenta o lock local. A reivindicação em `harness_inflight` usa um
+   *lease* curto (`DARKFAC_HARNESS_INFLIGHT_LEASE_SEC`, default 90s) em vez
+   do tempo total dos steps (~20 min): quem está de fato rodando renova o
+   lease a cada `lease/3` numa thread de heartbeat; um processo/container
+   que crasha sem chance de liberar a chave só bloqueia por um lease, não
+   pelos ~20 min inteiros. Um poll que perceba a linha `harness_inflight`
+   ausente ou expirada e nenhum verdict PASS presente para automaticamente
+   — o dono terminou (com falha, já que falha nunca é cacheada e o único
+   rastro de uma falha é a linha `inflight` sendo apagada) ou crashou; de
+   qualquer forma, esperar mais não tem sentido.
 4. **Paralelismo (`pytest-xdist`) + timeout por teste (`pytest-timeout`)** —
    o step de teste roda com `-n auto --dist loadfile -m "not serial"`;
    testes que não podem paralelizar (estado global, latência apertada,
@@ -108,6 +121,7 @@ todos estourando o timeout de 1200s. Três mecanismos resolvem isso, todos em
 | `DARKFAC_HARNESS_CACHE` | `off` desativa o cache de verdicts (sempre roda fresco) | ligado |
 | `DARKFAC_HF02_DATABASE_URL` | Postgres compartilhado (Tailscale) para cache remoto e single-flight cross-host; ausente = local-only | — |
 | `DARKFAC_HARNESS_REMOTE_WAIT_SEC` | Teto de espera fazendo polling pelo verdict de outro host | `900` |
+| `DARKFAC_HARNESS_INFLIGHT_LEASE_SEC` | Duração do lease da reivindicação `harness_inflight`; renovado por heartbeat a cada `lease/3` enquanto os steps rodam | `90` |
 | `CI` | Truthy desativa o cache — CI continua sendo o portão de verdade, sempre fresco | — |
 | `PYTEST_XDIST_AUTO_NUM_WORKERS` | Override do nº de workers do `-n auto` (útil na VPS, 2 vCPU) | auto-detectado pelo xdist |
 
