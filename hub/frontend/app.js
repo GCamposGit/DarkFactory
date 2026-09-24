@@ -38,6 +38,7 @@ const state = {
   paletteSelectedIndex: 0,
   sessionToken: null,
 };
+window.state = state;
 
 // API Base URL
 const API_BASE = "/api";
@@ -95,6 +96,10 @@ async function initSession() {
     if (res.ok) {
       const data = await res.json();
       state.sessionToken = data.session_token;
+      window.sessionToken = data.session_token;
+      try {
+        localStorage.setItem("darkhub_session_token", data.session_token);
+      } catch (_) {}
     }
   } catch (err) {
     // Graceful offline fallback

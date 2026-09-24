@@ -2,6 +2,7 @@
 __pycache__/
 *.py[cod]
 *$py.class
+core/content/anti_slop.py
 .pytest_cache/
 .mypy_cache/
 .pyright/

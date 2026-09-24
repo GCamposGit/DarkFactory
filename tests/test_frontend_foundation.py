@@ -69,13 +69,13 @@ def test_static_styles_css_exists_and_representative_size():
     assert "text/css" in response.headers.get("content-type", "").lower()
 
 
-def test_all_script_tags_share_cache_version_20260924a():
-    """Verify that every script tag in index.html shares the expected ?v=20260924a cache version."""
+def test_all_script_tags_share_cache_version_20260924b():
+    """Verify that every script tag in index.html shares the expected ?v=20260924b cache version."""
     html = INDEX_HTML.read_text(encoding="utf-8")
     script_srcs = _SCRIPT_SRC_TAG.findall(html)
     assert len(script_srcs) >= 10, f"expected at least 10 script tags in index.html, found {len(script_srcs)}"
 
-    expected_version = "20260924a"
+    expected_version = "20260924b"
     versions = set()
     for src in script_srcs:
         assert "?v=" in src, f"Script tag '{src}' is missing ?v= cache busting parameter"
@@ -86,11 +86,11 @@ def test_all_script_tags_share_cache_version_20260924a():
     assert len(versions) == 1, f"All script tags must share a single cache version, found {versions}"
 
 
-def test_stylesheet_link_uses_cache_version_20260924a():
-    """Verify that the stylesheet link in index.html uses ?v=20260924a."""
+def test_stylesheet_link_uses_cache_version_20260924b():
+    """Verify that the stylesheet link in index.html uses ?v=20260924b."""
     html = INDEX_HTML.read_text(encoding="utf-8")
-    assert '<link rel="stylesheet" href="/static/styles.css?v=20260924a">' in html, (
-        "index.html must link styles.css with ?v=20260924a"
+    assert '<link rel="stylesheet" href="/static/styles.css?v=20260924b">' in html, (
+        "index.html must link styles.css with ?v=20260924b"
     )
 
 

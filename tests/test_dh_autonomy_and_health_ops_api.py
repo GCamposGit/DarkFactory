@@ -205,4 +205,4 @@ def test_index_html_has_dag_switchers_and_containers():
     assert 'id="autonomy-plan-summary"' in html
     assert 'id="autonomy-gates-grid"' in html
     assert 'id="autonomy-dag-nodes-grid"' in html
-    assert 'src="/static/health_ops.js?v=20260924a"' in html
+    assert 'src="/static/health_ops.js?v=20260924b"' in html

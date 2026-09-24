@@ -16,7 +16,7 @@ const enterpriseState = {
 };
 
 function getEnterpriseToken() {
-  return window.state?.sessionToken || null;
+  return window.sessionToken || window.state?.sessionToken || localStorage.getItem("darkhub_session_token") || null;
 }
 
 async function enterpriseFetch(url, options = {}) {

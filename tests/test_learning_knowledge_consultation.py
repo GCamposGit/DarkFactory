@@ -105,7 +105,7 @@ def test_learning_frontend_drawer_dom():
     assert 'id="learn-view-flashcards"' in index_html
     assert 'id="learn-view-knowledge"' in index_html
     # Script tag is included with canonical cache version
-    assert 'src="/static/learning.js?v=20260924a"' in index_html
+    assert 'src="/static/learning.js?v=20260924b"' in index_html
 
 
 def test_learning_js_is_read_only_and_defines_handlers():

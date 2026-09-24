@@ -14,7 +14,7 @@ const harnessState = {
 };
 
 function getHarnessToken() {
-  return window.state?.sessionToken || null;
+  return window.sessionToken || window.state?.sessionToken || localStorage.getItem("darkhub_session_token") || null;
 }
 
 async function harnessFetch(url, options = {}) {

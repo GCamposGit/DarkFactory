@@ -15,13 +15,31 @@ const healthOpsState = {
   loading: false,
 };
 
-function healthOpsGetSessionToken() {
-  return window.state?.sessionToken || localStorage.getItem("darkhub_session_token") || null;
+async function healthOpsGetSessionToken() {
+  if (window.sessionToken) return window.sessionToken;
+  if (window.state?.sessionToken) return window.state.sessionToken;
+  try {
+    const stored = localStorage.getItem("darkhub_session_token");
+    if (stored) return stored;
+  } catch (_) {}
+  try {
+    const res = await fetch("/api/session");
+    if (res.ok) {
+      const data = await res.json();
+      window.sessionToken = data.session_token;
+      if (window.state) window.state.sessionToken = data.session_token;
+      try {
+        localStorage.setItem("darkhub_session_token", data.session_token);
+      } catch (_) {}
+      return data.session_token;
+    }
+  } catch (_) {}
+  return null;
 }
 
 async function healthOpsAuthenticatedFetch(url, options = {}) {
   const headers = new Headers(options.headers || {});
-  const token = healthOpsGetSessionToken();
+  const token = await healthOpsGetSessionToken();
   if (token) {
     headers.set("X-Hub-Session", token);
   }
