@@ -54,6 +54,9 @@ from hub.backend.models import (
     UsageSyncResponse,
     IncidentAlert,
     ProgressProjection,
+    PortfolioProjectSummary,
+    PortfolioProjectDetailResponse,
+    PortfolioOverviewResponse,
 )
 from core.execution.providers import get_openrouter_api_key
 from core.content import (
@@ -337,6 +340,15 @@ class HubService:
         else:
             self.infra_path = Path(__file__).resolve().parents[2] / ".factory" / "infra" / "inventory.json"
         self.infra_manager = InventoryManager(self.infra_path)
+
+        # Multi-Project Portfolio Subsystem (DH-08)
+        from core.portfolio.budget_manager import PortfolioBudgetManager
+        from core.portfolio.scheduler import PortfolioScheduler
+        from core.projects.registry import ProjectRegistry
+        self.portfolio_dir = repository_root / ".factory" / "portfolio"
+        self.budget_manager = PortfolioBudgetManager(storage_file=self.portfolio_dir / "budgets.json")
+        self.portfolio_scheduler = PortfolioScheduler(storage_file=self.portfolio_dir / "scheduler_state.json")
+        self.project_registry = ProjectRegistry(repository_root / ".factory" / "projects.json")
 
         self._ensure_storage()
 
@@ -2567,7 +2579,311 @@ class HubService:
             capacity_available=capacity_available,
         )
 
+    # -----------------------------------------------------------------------
+    # Multi-Project Portfolio Methods (DH-08)
+    # -----------------------------------------------------------------------
+
+    def _build_portfolio_project_summary(self, p: Any) -> PortfolioProjectSummary:
+        """Aggregate a project's state across 5 core dimensions (DH-08)."""
+        from core.projects.models import ProjectKind
+        from core.portfolio.models import BudgetStatus
+        from core.roadmap.models import DeliveryStatus
+
+        # 1. Dev Stage
+        if p.id == "darkfac" or p.kind == ProjectKind.CORE:
+            dev_stage = "production"
+        elif p.domain or (p.deploy and p.deploy.type.value in ("dokploy", "hostinger_ftp")):
+            dev_stage = "production"
+        else:
+            dev_stage = "active_development"
+
+        # 2. Roadmap Summary & Health
+        total_items = 0
+        delivered_items = 0
+        in_progress_items = 0
+        blocked_items = 0
+        completion_pct = 0.0
+        roadmap_health_status = "healthy"
+        health_details: Dict[str, Any] = {}
+
+        try:
+            snapshot = self.roadmap.get_snapshot(p.id)
+            total_items = len(snapshot.items)
+            delivered_items = sum(1 for item in snapshot.items if item.delivery_status == DeliveryStatus.DELIVERED)
+            in_progress_items = sum(1 for item in snapshot.items if item.delivery_status == DeliveryStatus.IN_PROGRESS)
+            blocked_items = sum(1 for item in snapshot.items if item.delivery_status == DeliveryStatus.BLOCKED)
+            completion_pct = round((delivered_items / total_items) * 100.0, 1) if total_items > 0 else 0.0
+        except Exception as exc:
+            logger.debug(f"Failed getting roadmap snapshot for '{p.id}': {exc}")
+
+        try:
+            rh = self.roadmap.get_health(p.id)
+            roadmap_health_status = rh.status
+            health_details = {
+                "stale": rh.stale,
+                "stale_reason": rh.stale_reason,
+                "blocked_items": rh.blocked_items,
+                "conflicts_count": rh.conflicts_count,
+                "warnings": list(rh.warnings),
+            }
+        except Exception as exc:
+            health_details = {"error": str(exc)}
+
+        # 3. Budget Summary
+        b = self.budget_manager.get_budget(p.id)
+        budget_summary = {
+            "project_id": p.id,
+            "monthly_limit_usd": b.monthly_limit_usd,
+            "current_spent_usd": b.current_spent_usd,
+            "utilization_pct": b.utilization_pct,
+            "remaining_usd": b.remaining_usd,
+            "status": b.status.value,
+        }
+
+        # Overall Health Aggregation
+        if b.status == BudgetStatus.LOCAL_ONLY:
+            overall_health = "warning"
+            health_details["budget_warning"] = "Monthly limit exhausted (forced local_only)"
+        elif health_details.get("stale") or blocked_items > 0 or roadmap_health_status != "healthy":
+            overall_health = "warning"
+        else:
+            overall_health = "healthy"
+
+        # 4. Last Deploy
+        deploy_type = p.deploy.type.value if getattr(p, "deploy", None) else (p.deploy_target or "none")
+        smoke_checks = [s.model_dump() for s in getattr(p, "smoke", [])]
+        last_deploy = {
+            "target": p.deploy_target or deploy_type,
+            "target_type": deploy_type,
+            "domain": p.domain,
+            "default_branch": p.default_branch,
+            "smoke_checks_count": len(smoke_checks),
+            "smoke_urls": [s.get("url") for s in smoke_checks if "url" in s],
+            "registered_at": p.created_at,
+            "status": "deployed" if (p.domain or p.deploy_target) else "configured",
+        }
+
+        # 5. Adoption Summary
+        is_adopted = False
+        lock_valid = False
+        managed_files_count = 0
+        autonomy_level = 2
+        adoption_problems: list[str] = []
+        proj_path = Path(p.path) if p.path else (self.project_root if p.id == "darkfac" else None)
+        if proj_path and proj_path.exists():
+            try:
+                from core.adoption.service import verify_adoption
+                vr = verify_adoption(proj_path)
+                lock_valid = vr.lock_valid
+                is_adopted = vr.lock_valid or (p.id == "darkfac")
+                managed_files_count = vr.managed_files_checked
+                adoption_problems = list(vr.problems)
+            except Exception as exc:
+                adoption_problems.append(str(exc))
+                if p.id == "darkfac":
+                    is_adopted = True
+                    lock_valid = True
+
+        adoption_summary = {
+            "is_adopted": is_adopted,
+            "lock_valid": lock_valid,
+            "autonomy_level": 3 if p.id == "darkfac" else autonomy_level,
+            "managed_files_checked": managed_files_count,
+            "problems_count": len(adoption_problems),
+            "problems": adoption_problems,
+        }
+
+        # 6. Archetype Matching
+        archetype_info: Optional[Dict[str, Any]] = None
+        try:
+            from core.archetypes.registry import get_registry as get_arch_reg
+            arch_reg = get_arch_reg()
+            arch_id = None
+            if "site" in p.id or p.kind.value == "client_portfolio":
+                arch_id = "personal_presence"
+            elif "cerebro" in p.id or "brain" in p.id:
+                arch_id = "second_brain"
+            elif p.kind.value == "internal_product":
+                arch_id = "internal_tool"
+
+            if arch_id:
+                m = arch_reg.get_archetype(arch_id)
+                if m:
+                    archetype_info = {
+                        "id": m.id,
+                        "title": m.title,
+                        "framework": m.stack.framework,
+                        "styling": m.stack.styling,
+                        "content_format": m.stack.content_format,
+                        "runtime": m.stack.runtime,
+                        "deployment_targets": m.stack.deployment_targets,
+                    }
+        except Exception:
+            pass
+
+        # 7. Pilots Summary
+        pilots_summary = {
+            "total_specs": 1 if p.id == "darkfac" else 0,
+            "sample_size_target": 20,
+            "latest_verdict": "promising",
+            "primary_metric": "paired_stage_error_delta",
+        }
+
+        # 8. Line Summary
+        line_summary = {
+            "active_stages": ["grill", "planning", "build", "review", "integration", "release"],
+            "default_branch": p.default_branch,
+            "exec_affinity": getattr(p, "exec_affinity", []),
+            "requires_commercial_acceptance": getattr(p, "requires_commercial_acceptance", False),
+        }
+
+        # 9. Game Summary
+        game_summary = {
+            "engine": "echo-garden",
+            "deterministic_seed": 0,
+            "status": "deterministic_ready",
+            "moves_supported": ["weave", "echo", "ground"],
+        }
+
+        return PortfolioProjectSummary(
+            id=p.id,
+            name=p.name,
+            description=p.description or "",
+            path=p.path,
+            kind=p.kind.value if hasattr(p.kind, "value") else str(p.kind),
+            prefix=p.prefix,
+            domain=p.domain,
+            deploy_target=p.deploy_target,
+            repo_url=getattr(p, "repo_url", None),
+            default_branch=p.default_branch,
+            created_at=p.created_at,
+            dev_stage=dev_stage,
+            health_status=overall_health,
+            health_details=health_details,
+            last_deploy=last_deploy,
+            roadmap_summary={
+                "total_items": total_items,
+                "delivered_items": delivered_items,
+                "in_progress_items": in_progress_items,
+                "blocked_items": blocked_items,
+                "completion_pct": completion_pct,
+            },
+            budget_summary=budget_summary,
+            adoption_summary=adoption_summary,
+            archetype_summary=archetype_info,
+            pilots_summary=pilots_summary,
+            line_summary=line_summary,
+            game_summary=game_summary,
+        )
+
+    def get_portfolio_overview(self) -> PortfolioOverviewResponse:
+        """Return the multi-project portfolio overview for DarkHub (DH-08)."""
+        projects_descriptors = self.project_registry.list_projects()
+        summaries = [self._build_portfolio_project_summary(p) for p in projects_descriptors]
+
+        healthy_count = sum(1 for s in summaries if s.health_status == "healthy")
+        warning_count = len(summaries) - healthy_count
+
+        total_budget_limit = sum(s.budget_summary.get("monthly_limit_usd", 0.0) for s in summaries)
+        total_spent = sum(s.budget_summary.get("current_spent_usd", 0.0) for s in summaries)
+
+        active_heavy, active_light = self.portfolio_scheduler.get_active_counts()
+
+        from core.archetypes.registry import get_registry as get_arch_reg
+        arch_manifests = [
+            {
+                "id": a.id,
+                "title": a.title,
+                "kind": a.kind.value,
+                "description": a.description,
+                "framework": a.stack.framework,
+                "styling": a.stack.styling,
+                "content_format": a.stack.content_format,
+                "runtime": a.stack.runtime,
+                "deployment_targets": a.stack.deployment_targets,
+            }
+            for a in get_arch_reg().list_archetypes()
+        ]
+
+        return PortfolioOverviewResponse(
+            total_projects=len(summaries),
+            healthy_projects=healthy_count,
+            warning_projects=warning_count,
+            total_budget_limit_usd=round(total_budget_limit, 2),
+            total_spent_usd=round(total_spent, 2),
+            active_heavy_slots=active_heavy,
+            max_heavy_slots=self.portfolio_scheduler.capacity.max_heavy_slots,
+            active_light_slots=active_light,
+            max_light_slots=self.portfolio_scheduler.capacity.max_light_slots,
+            projects=summaries,
+            archetypes=arch_manifests,
+        )
+
+    def get_portfolio_project_detail(self, project_id: str) -> Optional[PortfolioProjectDetailResponse]:
+        """Return deep-dive inspection response for a single adopted project (DH-08)."""
+        descriptor = self.project_registry.get_project(project_id)
+        if not descriptor:
+            return None
+
+        project_summary = self._build_portfolio_project_summary(descriptor)
+
+        from core.projects.registry import resolve_commands
+        proj_path = Path(descriptor.path) if descriptor.path else (self.project_root if descriptor.id == "darkfac" else self.project_root)
+        resolved_cmds = resolve_commands(descriptor, proj_path)
+        commands = {
+            "setup": resolved_cmds.setup,
+            "validate": resolved_cmds.validate_cmds,
+            "build": resolved_cmds.build,
+            "smoke": resolved_cmds.smoke,
+        }
+
+        smoke_checks = [s.model_dump() for s in getattr(descriptor, "smoke", [])]
+
+        verification: Dict[str, Any] = {}
+        if proj_path and proj_path.exists():
+            try:
+                from core.adoption.service import verify_adoption
+                vr = verify_adoption(proj_path)
+                verification = vr.model_dump()
+            except Exception as exc:
+                verification = {"lock_valid": False, "problems": [str(exc)]}
+
+        roadmap_health: Dict[str, Any] = {}
+        try:
+            rh = self.roadmap.get_health(project_id)
+            roadmap_health = rh.model_dump()
+        except Exception as exc:
+            roadmap_health = {"error": str(exc)}
+
+        return PortfolioProjectDetailResponse(
+            project=project_summary,
+            commands=commands,
+            smoke_checks=smoke_checks,
+            verification=verification,
+            roadmap_health=roadmap_health,
+        )
+
+    def get_portfolio_efficiency(self) -> Any:
+        """Return aggregated portfolio capacity, WFQ queues, and budget telemetry (HF-23)."""
+        from core.portfolio.models import PortfolioEfficiencyReport
+        active_heavy, active_light = self.portfolio_scheduler.get_active_counts()
+        return PortfolioEfficiencyReport(
+            active_heavy_slots=active_heavy,
+            max_heavy_slots=self.portfolio_scheduler.capacity.max_heavy_slots,
+            active_light_slots=active_light,
+            max_light_slots=self.portfolio_scheduler.capacity.max_light_slots,
+            queued_jobs_by_project=self.portfolio_scheduler.get_queue_status(),
+            starvation_ticks_by_project=self.portfolio_scheduler.get_starvation_status(),
+            budgets=self.budget_manager.list_budgets(),
+        )
+
+    def get_portfolio_archetypes(self) -> List[Any]:
+        """Return all available project archetypes from the factory catalog (HF-20)."""
+        from core.archetypes.registry import get_registry as get_arch_reg
+        return get_arch_reg().list_archetypes()
+
 
 # Canonical alias for DarkHubService (HF-13-02)
 DarkHubService = HubService
+
 

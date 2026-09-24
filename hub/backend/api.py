@@ -51,8 +51,11 @@ from hub.backend.models import (
     UsageSyncPayload,
     UsageSyncResponse,
     ProgressProjection,
+    PortfolioOverviewResponse,
+    PortfolioProjectDetailResponse,
 )
 from hub.backend.service import HubService
+from core.portfolio.models import PortfolioEfficiencyReport
 from core.usage.models import AccountUsageReport, ModelCallEvent, ModelUsageReport
 from core.telemetry.models import (
     ExecutionMode,
@@ -255,6 +258,47 @@ def get_project_roadmap_progress(
 ) -> ProgressProjection:
     """Return the selected project's continuous progress and stagnation projection (HF-13-02)."""
     return service.get_progress_projection(project_id)
+
+
+# ---------------------------------------------------------------------------
+# Multi-Project Portfolio Endpoints (DH-08)
+# ---------------------------------------------------------------------------
+
+
+@router.get("/portfolio", response_model=PortfolioOverviewResponse)
+def get_portfolio_overview_endpoint(
+    service: HubService = Depends(get_hub_service),
+) -> PortfolioOverviewResponse:
+    """Return consolidated multi-project portfolio overview across 7 core modules (DH-08)."""
+    return service.get_portfolio_overview()
+
+
+@router.get("/portfolio/efficiency", response_model=PortfolioEfficiencyReport)
+def get_portfolio_efficiency_endpoint(
+    service: HubService = Depends(get_hub_service),
+) -> PortfolioEfficiencyReport:
+    """Return portfolio capacity slots, WFQ queues, and budget telemetry (HF-23)."""
+    return service.get_portfolio_efficiency()
+
+
+@router.get("/portfolio/archetypes", response_model=List[Dict[str, Any]])
+def get_portfolio_archetypes_endpoint(
+    service: HubService = Depends(get_hub_service),
+) -> List[Dict[str, Any]]:
+    """Return available project archetypes from factory catalog (HF-20)."""
+    return [a.model_dump() for a in service.get_portfolio_archetypes()]
+
+
+@router.get("/portfolio/projects/{project_id}", response_model=PortfolioProjectDetailResponse)
+def get_portfolio_project_detail_endpoint(
+    project_id: str,
+    service: HubService = Depends(get_hub_service),
+) -> PortfolioProjectDetailResponse:
+    """Return deep-dive inspection details for an adopted project (DH-08)."""
+    detail = service.get_portfolio_project_detail(project_id)
+    if detail is None:
+        raise HTTPException(status_code=404, detail=f"Project '{project_id}' not found in portfolio")
+    return detail
 
 
 @router.get("/services", response_model=List[ServiceItem])

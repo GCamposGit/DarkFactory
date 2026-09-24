@@ -99,6 +99,16 @@
           <span class="hidden lg:inline">Aprendizado</span>
         </button>
 
+        <!-- Multi-Project Portfolio Trigger (DH-08) -->
+        <button
+          id="portfolio-trigger-btn"
+          onclick="openPortfolioDrawer()"
+          title="Abrir Portfólio Multiprojeto (DH-08)"
+          class="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-indigo-300 border border-slate-800 hover:border-indigo-500/30 transition-all text-xs font-medium">
+          <span>💼</span>
+          <span class="hidden lg:inline">Portfólio</span>
+        </button>
+
         <!-- Operational Roadmap Trigger -->
         <button
           onclick="openRoadmapDrawer()"
@@ -258,6 +268,125 @@
     </section>
 
   </main>
+
+  <!-- Multi-Project Portfolio Drawer (DH-08) -->
+  <div id="portfolio-drawer" class="hidden fixed inset-0 z-50 bg-slate-950/90 backdrop-blur-md animate-in-quick" role="dialog" aria-modal="true" aria-labelledby="portfolio-title">
+    <div class="w-full h-full max-w-[1600px] mx-auto bg-slate-950 border-x border-slate-800 overflow-y-auto">
+      <div class="sticky top-0 z-10 border-b border-slate-800 bg-slate-950/95 backdrop-blur-xl">
+        <div class="px-5 sm:px-8 py-5 flex flex-col xl:flex-row xl:items-center justify-between gap-4">
+          <div class="flex items-start gap-3">
+            <div class="w-10 h-10 rounded-xl bg-indigo-500/10 border border-indigo-500/30 flex items-center justify-center text-xl">💼</div>
+            <div>
+              <div class="flex items-center gap-2 flex-wrap">
+                <h2 id="portfolio-title" class="text-lg font-bold text-white">Portfólio Multiprojeto</h2>
+                <span class="roadmap-tag roadmap-tag-neutral">Somente leitura · DH-08</span>
+              </div>
+              <p class="mt-1 text-xs text-slate-400">Estágio de desenvolvimento, saúde operacional, roadmap, último deploy e orçamentos dos repositórios adotados na Dark Factory.</p>
+            </div>
+          </div>
+          <div class="flex items-center gap-2">
+            <button type="button" onclick="closePortfolioDrawer()" aria-label="Fechar Portfólio" class="p-2 rounded-xl text-slate-500 hover:text-slate-200 hover:bg-slate-800">✕</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="px-5 sm:px-8 py-6 space-y-6">
+        <!-- KPI Summary Cards -->
+        <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          <div class="p-4 rounded-xl bg-slate-900 border border-slate-800 font-mono">
+            <span class="text-[10px] text-slate-500 uppercase block">Projetos Adotados</span>
+            <strong id="portfolio-total-count" class="text-lg text-white font-bold">—</strong>
+          </div>
+          <div class="p-4 rounded-xl bg-slate-900 border border-slate-800 font-mono">
+            <span class="text-[10px] text-slate-500 uppercase block">Saúde Geral</span>
+            <strong id="portfolio-healthy-count" class="text-lg text-emerald-400 font-bold">—</strong>
+          </div>
+          <div class="p-4 rounded-xl bg-slate-900 border border-slate-800 font-mono">
+            <span class="text-[10px] text-slate-500 uppercase block">Gasto / Teto Mensal</span>
+            <strong id="portfolio-budget-total" class="text-lg text-white font-bold">—</strong>
+          </div>
+          <div class="p-4 rounded-xl bg-slate-900 border border-slate-800 font-mono">
+            <span class="text-[10px] text-slate-500 uppercase block">Slots Ativos / Máx</span>
+            <strong id="portfolio-slots-count" class="text-lg text-indigo-300 font-bold">—</strong>
+          </div>
+        </div>
+
+        <!-- Navigation Tabs -->
+        <div class="flex items-center justify-between border-b border-slate-800 pb-3 flex-wrap gap-3">
+          <div class="flex items-center gap-1.5 p-1 rounded-xl bg-slate-900 border border-slate-800" role="tablist">
+            <button id="portfolio-tab-projects" type="button" role="tab" aria-selected="true" onclick="switchPortfolioTab('projects')" class="px-3 py-1.5 rounded-xl text-xs font-mono font-medium transition-all bg-indigo-500/20 text-indigo-300 border border-indigo-500/40 font-semibold">
+              Projetos Adotados
+            </button>
+            <button id="portfolio-tab-efficiency" type="button" role="tab" aria-selected="false" onclick="switchPortfolioTab('efficiency')" class="px-3 py-1.5 rounded-xl text-xs font-mono font-medium transition-all text-slate-400 hover:text-slate-200 border border-transparent">
+              Eficiência & Orçamento
+            </button>
+            <button id="portfolio-tab-archetypes" type="button" role="tab" aria-selected="false" onclick="switchPortfolioTab('archetypes')" class="px-3 py-1.5 rounded-xl text-xs font-mono font-medium transition-all text-slate-400 hover:text-slate-200 border border-transparent">
+              Catálogo de Arquétipos
+            </button>
+            <button id="portfolio-tab-line" type="button" role="tab" aria-selected="false" onclick="switchPortfolioTab('line')" class="px-3 py-1.5 rounded-xl text-xs font-mono font-medium transition-all text-slate-400 hover:text-slate-200 border border-transparent">
+              Esteira HF-27 & Pilotos
+            </button>
+          </div>
+          <div class="text-[10px] text-slate-500 font-mono">
+            Modo Consulta · Sem Chamadas Bloqueantes de Rede
+          </div>
+        </div>
+
+        <!-- View 1: Projects Cards -->
+        <div id="portfolio-view-projects" class="space-y-4">
+          <div class="flex items-center justify-between gap-4">
+            <div class="relative flex-1 max-w-md">
+              <input
+                type="text"
+                placeholder="Buscar projeto por nome, id ou tipo..."
+                oninput="onPortfolioSearchChange(this.value)"
+                class="w-full bg-slate-900 border border-slate-800 rounded-xl px-3.5 py-2 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-indigo-500 font-mono"
+              />
+            </div>
+            <button
+              type="button"
+              onclick="loadPortfolioOverview()"
+              class="px-3 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-800 text-xs font-mono transition-all flex items-center gap-1.5">
+              <span>🔄</span> Atualizar
+            </button>
+          </div>
+          <div id="portfolio-projects-grid" class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <!-- Project cards rendered dynamically -->
+          </div>
+        </div>
+
+        <!-- View 2: Efficiency & Capacity -->
+        <div id="portfolio-view-efficiency" class="hidden">
+          <div id="portfolio-efficiency-content"></div>
+        </div>
+
+        <!-- View 3: Archetypes Catalog -->
+        <div id="portfolio-view-archetypes" class="hidden">
+          <div id="portfolio-archetypes-content"></div>
+        </div>
+
+        <!-- View 4: Production Line & Pilots -->
+        <div id="portfolio-view-line" class="hidden">
+          <div id="portfolio-line-content"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Portfolio Project Detail Modal -->
+  <div id="portfolio-detail-modal" class="hidden fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
+    <div class="w-full max-w-4xl bg-slate-950 border border-slate-800 rounded-2xl p-6 shadow-2xl space-y-6 max-h-[90vh] overflow-y-auto">
+      <div class="flex items-center justify-between pb-4 border-b border-slate-800">
+        <h3 class="text-sm font-bold text-white font-mono flex items-center gap-2">
+          <span>🔍</span> Detalhamento do Projeto
+        </h3>
+        <button type="button" onclick="closePortfolioDetailModal()" class="p-1 rounded text-slate-400 hover:text-white">✕</button>
+      </div>
+      <div id="portfolio-detail-content">
+        <!-- Dynamically injected -->
+      </div>
+    </div>
+  </div>
 
   <!-- Learning Packs & Cognitive Uplift Drawer (DH-06) -->
   <div id="learning-drawer" class="hidden fixed inset-0 z-50 bg-slate-950/90 backdrop-blur-md animate-in-quick" role="dialog" aria-modal="true" aria-labelledby="learning-title">
@@ -1506,5 +1635,6 @@
   <script src="/static/coverage.js?v=20260923c"></script>
   <script src="/static/benchmarks.js?v=20260923c"></script>
   <script src="/static/learning.js?v=20260923c"></script>
+  <script src="/static/portfolio.js?v=20260923c"></script>
 </body>
 </html>

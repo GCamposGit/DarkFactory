@@ -66,7 +66,7 @@ Prioridade: **Agora** = próximo ciclo; **Depois** = após os itens Agora;
 | DH-05 | Depois | **Benchmarks e roteamento**: fronteira por domínio, proximidade, top-3 especulativo, corrida empírica, simulador de roteamento. Entregue em `USR-52` | `benchmarks/*`; `core/router` | Owner vê por que um modelo foi escolhido para uma tarefa |
 | DH-06 | Depois | **Aprendizado e conhecimento**: Learning Packs (HTML, Anki, gerar), memória, pesquisa e Knowledge Ledger. Entregue em `USR-53` | `learning-packs/*`; `core/learning`, `core/knowledge`, `core/learning_pack`, `core/research` | Última sessão tem pack acessível em 1 clique; ledger de pesquisa pesquisável |
 | DH-07 | Depois | **Estúdio de conteúdo e visual**: gerar e auditar conteúdo, presets, galeria e ilustração | `content/*`, `visual/*`; `core/content`, `core/visual`, `core/marketing` | Conteúdo gerado passa pelo lint anti-slop antes de exportar |
-| DH-08 | Depois | **Portfólio multiprojeto**: projetos registrados, adoção (Skill 07), pilotos, arquétipos, linhas | `core/projects`, `core/portfolio`, `core/adoption`, `core/pilots`, `core/archetypes`, `core/line`, `core/game` | Cada projeto mostra estágio, saúde, roadmap e último deploy |
+| DH-08 | Depois | **Portfólio multiprojeto**: projetos registrados, adoção (Skill 07), pilotos, arquétipos, linhas. Entregue em `USR-54` | `core/projects`, `core/portfolio`, `core/adoption`, `core/pilots`, `core/archetypes`, `core/line`, `core/game`; `GET /api/portfolio`, `GET /api/portfolio/projects/{id}`, `GET /api/portfolio/efficiency`, `GET /api/portfolio/archetypes` | Cada projeto mostra estágio, saúde, roadmap e último deploy |
 | DH-09 | Depois | **Governança enterprise e deploy**: trilha de auditoria, configuração, avaliação de deploy, disparo de deploy Dokploy com confirmação | `enterprise/audit-trail`, `enterprise/configure`, `enterprise/evaluate-deploy`, `cloud/deploy` | Deploy só dispara após avaliação verde e confirmação explícita |
 | DH-10 | Depois | **Saúde e histórico do roadmap**: aba de saúde, linha do tempo e comparação de versões no drawer de roadmap. Entregue em `USR-51` | `projects/{id}/roadmap/health`, `history`, `history/compare` | Owner compara duas versões do roadmap e vê o que mudou |
 | DH-11 | Depois | **Validação sob demanda**: rodar suíte/harness remoto a partir do Hub com relatório destilado | `harness/run-tests`, `harness/execute` | Resultado com `[HARNESS_PASS]` e link para logs isolados |
@@ -174,6 +174,24 @@ Prioridade: **Agora** = próximo ciclo; **Depois** = após os itens Agora;
   - Rota de geração autônoma de packs (`POST /api/learning-packs/generate`) classificada como waiver `machine` (operação acionada via hooks de encerramento de sessão, agentes e CLI).
   - Módulos `core/learning_pack`, `core/learning`, `core/knowledge` e `core/research` mapeados para a superfície `learning-drawer`. Módulo `core/audio` documentado como `internal` (motor headless de transcrição faster-whisper/Groq).
   - Cobertura do DarkHub elevada para 74% (95 capacidades expostas, apenas 34 pendentes).
+
+## Entregue em USR-54 (DH-08)
+
+- **Portfólio Multiprojeto no DarkHub (7 Módulos do Core):**
+  - Implementado o painel e drawer deslizante lateral (`portfolio-drawer`) acionado por botão dedicado no cabeçalho superior do cockpit.
+  - **Visão consolidada em 5 dimensões por repositório adotado:**
+    - **Dimensão 1 — Identidade & Deploy (`core/projects`):** Slug, nome, repositório Git, branch padrão, tipo arquitetural (`core`, `client_portfolio`, `internal_product`), alvos de deploy (`dokploy`, `hostinger_ftp`, `local_service`) e verificações pós-deploy HTTP (`SmokeCheck`).
+    - **Dimensão 2 — Saúde & Roadmap (`core/roadmap`):** Total de itens compilados, confirmados, em progresso, bloqueados por dependência causal, percentual de conclusão e semáforo de saúde operacional (`healthy` vs `warning` com diagnóstico de obsolescência/stale).
+    - **Dimensão 3 — Orçamento & Eficiência (`core/portfolio`):** Limites mensais USD por projeto, gasto corrente, percentual de utilização, alertas de 80% e cutoffs de 100% para `$0` local (`LOCAL_ONLY`), além de capacidade de slots concorrentes (1 Heavy, 4 Light) e métricas de fila WFQ com prevenção de starvation.
+    - **Dimensão 4 — Adoção & Governança (`core/adoption`):** Verificação de integridade e proveniência `.factory/runtime`, nível de autonomia (0-5), status do lock de adoção (`.factory/darkfac.lock.json`) e auditoria de drift de arquivos gerenciados.
+    - **Dimensão 5 — Pilotos, Arquétipos, Linha & Game (`core/pilots`, `core/archetypes`, `core/line`, `core/game`):** Especificações e vereditos de pilotos estatísticos/shadow, catálogo de blueprints (Astro 5 Personal Presence, FastAPI Internal Tooling, Second Brain), estágios ativos da esteira autônoma de produção (HF-27) e validação do motor determinístico Echo Garden (Seed 0).
+  - **Superfície e APIs REST (Somente Leitura):**
+    - `GET /api/portfolio`: Visão geral do portfólio multiprojeto com KPIs consolidados e resumos dos projetos.
+    - `GET /api/portfolio/projects/{project_id}`: Detalhamento expandido com comandos resolvidos, smoke checks e diagnósticos.
+    - `GET /api/portfolio/efficiency`: Telemetria de slots de execução heavy/light, orçamentos e filas.
+    - `GET /api/portfolio/archetypes`: Lista de manifestos de arquétipos do catálogo da fábrica.
+  - **Frontend Modular:** Módulo `hub/frontend/portfolio.js` e estrutura HTML com 4 abas interativas ("Projetos Adotados", "Eficiência & Orçamento", "Catálogo de Arquétipos" e "Esteira HF-27 & Pilotos"), modal de inspeção profunda e busca em tempo real.
+  - **Gate de Cobertura:** Os 7 módulos do core (`adoption`, `archetypes`, `game`, `line`, `pilots`, `portfolio`, `projects`) e as 4 novas rotas `/api` foram mapeados para a superfície `portfolio-drawer`. A cobertura do DarkHub subiu para **80%** (106 capacidades expostas, pendências reduzidas de 34 para 27).
 
 ## Configuração manual no Dokploy (para ativar R2 na nuvem)
 

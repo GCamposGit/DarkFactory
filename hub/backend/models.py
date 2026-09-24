@@ -549,4 +549,66 @@ class ProgressProjection(BaseModel):
     capacity_available: bool = Field(default=True, description="Whether worker capacity is available for new dispatches")
 
 
+# ---------------------------------------------------------------------------
+# Multi-Project Portfolio Models (DH-08)
+# ---------------------------------------------------------------------------
+
+
+class PortfolioProjectSummary(BaseModel):
+    """Aggregated portfolio summary of an adopted project across 5 core dimensions."""
+
+    id: str = Field(description="Unique project slug identifier")
+    name: str = Field(description="Human-readable project name")
+    description: str = Field(default="", description="Project scope and description")
+    path: Optional[str] = Field(default=None, description="Absolute workspace filesystem path")
+    kind: str = Field(description="Architectural kind: core, client_portfolio, internal_product, saas_app")
+    prefix: str = Field(default="PRJ", description="Ticket prefix for demand management")
+    domain: Optional[str] = Field(default=None, description="Public primary domain")
+    deploy_target: Optional[str] = Field(default=None, description="Deployment target identifier")
+    repo_url: Optional[str] = Field(default=None, description="Git remote repository URL")
+    default_branch: str = Field(default="main", description="Default branch name")
+    created_at: str = Field(description="Registration timestamp")
+
+    # 5 Key Dimensions (DH-08)
+    dev_stage: str = Field(default="active_development", description="Lifecycle stage: production, active_development, prototyping, governed")
+    health_status: str = Field(default="healthy", description="Aggregated health status: healthy, warning, stale, unknown")
+    health_details: Dict[str, Any] = Field(default_factory=dict, description="Detailed health diagnostics")
+    last_deploy: Dict[str, Any] = Field(default_factory=dict, description="Last deployment details and smoke check results")
+    roadmap_summary: Dict[str, Any] = Field(default_factory=dict, description="Compiled roadmap metrics (total, delivered, in_progress, completion_pct)")
+    budget_summary: Dict[str, Any] = Field(default_factory=dict, description="Monthly spending limit, spent amount, utilization and status")
+    adoption_summary: Dict[str, Any] = Field(default_factory=dict, description="Adoption lock status, autonomy level and file verification")
+    archetype_summary: Optional[Dict[str, Any]] = Field(default=None, description="Matched archetype blueprint info")
+    pilots_summary: Dict[str, Any] = Field(default_factory=dict, description="Active pilot specs and evaluation verdicts")
+    line_summary: Dict[str, Any] = Field(default_factory=dict, description="Autonomous production line stages and affinity")
+    game_summary: Dict[str, Any] = Field(default_factory=dict, description="Deterministic game engine status / simulation")
+
+
+class PortfolioProjectDetailResponse(BaseModel):
+    """Complete deep-dive inspection response for a single adopted project."""
+
+    project: PortfolioProjectSummary
+    commands: Dict[str, List[str]] = Field(default_factory=dict, description="Resolved setup, validate, build, smoke commands")
+    smoke_checks: List[Dict[str, Any]] = Field(default_factory=list, description="Configured smoke check endpoints")
+    verification: Dict[str, Any] = Field(default_factory=dict, description="Adoption verification report (lock, drift, managed files)")
+    roadmap_health: Dict[str, Any] = Field(default_factory=dict, description="Detailed roadmap health report")
+
+
+class PortfolioOverviewResponse(BaseModel):
+    """Multi-project portfolio cockpit overview response."""
+
+    total_projects: int = Field(ge=0, description="Total adopted projects count")
+    healthy_projects: int = Field(ge=0, description="Projects with healthy operational status")
+    warning_projects: int = Field(ge=0, description="Projects with warnings or blockers")
+    total_budget_limit_usd: float = Field(ge=0.0, description="Sum of monthly USD budgets")
+    total_spent_usd: float = Field(ge=0.0, description="Sum of spent USD this billing cycle")
+    active_heavy_slots: int = Field(ge=0, description="Active heavy execution slots")
+    max_heavy_slots: int = Field(ge=1, description="Maximum heavy execution slots")
+    active_light_slots: int = Field(ge=0, description="Active light execution slots")
+    max_light_slots: int = Field(ge=1, description="Maximum light execution slots")
+    projects: List[PortfolioProjectSummary] = Field(default_factory=list, description="Summary list of adopted projects")
+    archetypes: List[Dict[str, Any]] = Field(default_factory=list, description="Available project archetypes in the factory catalog")
+    generated_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat(), description="Generation timestamp")
+
+
+
 

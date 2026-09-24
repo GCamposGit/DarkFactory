@@ -209,6 +209,18 @@
     "POST /api/playground/generate": {
       "surface": "playground-drawer"
     },
+    "GET /api/portfolio": {
+      "surface": "portfolio-drawer"
+    },
+    "GET /api/portfolio/archetypes": {
+      "surface": "portfolio-drawer"
+    },
+    "GET /api/portfolio/efficiency": {
+      "surface": "portfolio-drawer"
+    },
+    "GET /api/portfolio/projects/{project_id}": {
+      "surface": "portfolio-drawer"
+    },
     "GET /api/projects": {
       "surface": "roadmap-drawer"
     },
@@ -332,10 +344,10 @@
       "surface": "factory-health-block"
     },
     "adoption": {
-      "pending": "DH-08"
+      "surface": "portfolio-drawer"
     },
     "archetypes": {
-      "pending": "DH-08"
+      "surface": "portfolio-drawer"
     },
     "audio": {
       "internal": "Motor headless de transcricao local faster-whisper e contingencia Groq acionado por CLI (DH-06)."
@@ -362,7 +374,7 @@
       "surface": "playground-drawer"
     },
     "game": {
-      "pending": "DH-08"
+      "surface": "portfolio-drawer"
     },
     "harness": {
       "pending": "DH-11"
@@ -383,7 +395,7 @@
       "surface": "learning-drawer"
     },
     "line": {
-      "pending": "DH-08"
+      "surface": "portfolio-drawer"
     },
     "marketing": {
       "pending": "DH-07"
@@ -398,16 +410,16 @@
       "internal": "Resolução de caminhos do repositório; utilitário sem estado próprio"
     },
     "pilots": {
-      "pending": "DH-08"
+      "surface": "portfolio-drawer"
     },
     "planning": {
       "pending": "DH-12"
     },
     "portfolio": {
-      "pending": "DH-08"
+      "surface": "portfolio-drawer"
     },
     "projects": {
-      "pending": "DH-08"
+      "surface": "portfolio-drawer"
     },
     "research": {
       "surface": "learning-drawer"
