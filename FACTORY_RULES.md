@@ -6,7 +6,7 @@ Estas regras valem para Codex, Antigravity, Grok, Claude Code e qualquer outro h
 2. Trate `.agents/skills/` como fonte canônica; mantenha `.claude/skills/` sincronizado com `python scripts/sync_skills.py` quando houver mudança de skill.
 3. Nunca grave segredos no repositório. Use variáveis de ambiente e mantenha `.env.example` sem valores reais.
 4. Não altere, adicione ou versione o experimento Canaletto. Ele é local por decisão de escopo.
-5. Toda mudança deve passar por `python core/harness/runner.py --quick`; alterações de comportamento também devem passar por `python -m pytest tests -v --ignore=tests/test_canaletto.py`.
+5. Toda mudança deve passar por `python core/harness/runner.py --quick`. Esse comando já executa a suíte inteira em `tests/` (paralela via `pytest-xdist`, cacheada por árvore de commit, enfileirada por máquina via `suite_lock`); não existe um segundo comando `pytest` separado a rodar como portão — isso duplicava a validação e causava timeouts quando mais de um harness validava no mesmo host simultaneamente. Para iteração local antes do portão, use testes focados ou `python -m core.harness.affected --run`.
 6. Um harness só pode declarar sucesso se houver marcadores determinísticos `[HARNESS_PASS]` e pelo menos uma checagem executada.
 7. Preserve compatibilidade headless: regras de negócio ficam em `core/` ou serviços, não em handlers de UI.
 8. Prefira caminhos relativos ao repositório, `pathlib`, UTF-8 explícito e comandos equivalentes em PowerShell e POSIX.

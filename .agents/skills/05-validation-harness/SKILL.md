@@ -23,14 +23,28 @@ Esta skill opera a validação determinística da Dark Factory, assegurando que 
    - **Nível 2 - Unidade**: Cobertura focal de funções, regras de negócio e casos de borda com oráculos determinísticos.
    - **Nível 3 - Integração**: Testes de fronteira de persistência (SQLite, outbox, transações), subprocessos e concorrência.
    - **Nível 4 - E2E Headless**: Teste de ponta a ponta via biblioteca ou CLI com argumentos e arquivos reais, sem simulação in-process.
-2. **Execução Oficial no DarkFac**:
+2. **Execução Oficial no DarkFac** (portão único; já roda a suíte inteira):
    ```powershell
    python core/harness/runner.py --quick
-   python -m pytest tests -v --ignore=tests/test_canaletto.py
    ```
+   Não existe um segundo `pytest` a rodar depois — `runner.py --quick` já
+   executa `tests/` inteiro, em paralelo (`pytest-xdist`), com verdict
+   cacheado por árvore de commit e enfileirado por máquina (`suite_lock`)
+   para que dois harnesses/agentes no mesmo host nunca disputem CPU/sqlite
+   ao mesmo tempo. Veja `core/harness/suite_lock.py`, `core/harness/cache.py`
+   e `docs/HARNESS_INTEROP.md` (seção "Aceleração da suíte de testes") para
+   as variáveis de ambiente (`DARKFAC_SUITE_LOCK`, `DARKFAC_HARNESS_CACHE`,
+   `DARKFAC_HF02_DATABASE_URL`, etc.) e o comportamento cross-host via
+   Postgres. Use `python core/harness/runner.py --quick --no-cache` para
+   forçar uma execução fresca pontual. Testes que não podem paralelizar
+   levam `@pytest.mark.serial` e correm num step sequencial separado.
 3. **Emissão de Marcadores Determinísticos**:
-   - Emita estritamente: `[STEP_START]`, `[STEP_PASS]`, `[STEP_FAIL]`, `[TEST_COUNT]`, `[HARNESS_PASS]` ou `[HARNESS_FAIL]`.
+   - Emita estritamente: `[STEP_START]`, `[STEP_PASS]`, `[STEP_FAIL]`, `[STEP_TIME]`, `[TEST_COUNT]`, `[HARNESS_PASS]` ou `[HARNESS_FAIL]`.
    - Capture contagens exatas de testes descobertos, passados e pulados.
+   - Um cache hit ainda emite o contrato completo de marcadores (com
+     `reused_from` no `HARNESS_RESULT` apontando host/candidate_sha/idade do
+     verdict original) — nenhum consumidor existente do contrato precisa
+     mudar.
 
 ### Outputs Estruturados
 - **Evidências de Ambiente (`EnvironmentEvidence`)**: Instâncias tipadas contendo:

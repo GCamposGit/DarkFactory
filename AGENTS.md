@@ -30,8 +30,32 @@
 
 ```powershell
 python core/harness/runner.py --quick
-python -m pytest tests -v --ignore=tests/test_canaletto.py
 ```
+
+Este é o único portão oficial. `runner.py --quick` já executa a suíte inteira
+(`tests/`, ignorando `tests/test_canaletto.py`) em paralelo via
+`pytest-xdist`, com verdicts cacheados por árvore de commit (reaproveita um
+PASS anterior se a árvore não mudou) e enfileirados por máquina (um
+`suite_lock` global impede que dois harnesses/agentes no mesmo host rodem a
+suíte inteira ao mesmo tempo e disputem CPU/sqlite). Não rode
+`python -m pytest tests -v` separadamente como segundo portão: isso duplicava
+a mesma suíte e é a causa raiz de timeouts quando múltiplos agentes validam
+em paralelo no mesmo host. Detalhes de variáveis de ambiente, locks e cache
+cross-host em `docs/HARNESS_INTEROP.md`.
+
+### Loop interno
+
+Para iteração rápida durante o desenvolvimento (antes do portão oficial),
+prefira testes focados no que você tocou:
+
+```powershell
+python -m pytest tests/test_meu_modulo.py -q
+```
+
+ou, quando disponível, `python -m core.harness.affected --run` (módulo
+mantido por outra frente de trabalho; calcula e roda apenas os testes
+afetados pelo diff atual). Nunca use o loop interno como substituto do portão
+oficial antes de declarar a tarefa concluída.
 
 ## Compatibilidade entre harnesses
 

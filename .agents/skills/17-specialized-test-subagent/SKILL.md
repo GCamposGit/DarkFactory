@@ -20,6 +20,12 @@ O **Specialized Test Subagent** isola a execução de testes em subagentes efici
 1. **Seleção Determinística de Executor**:
    - **Local ($0, Ollama `localhost:11434`)**: Obrigatório para micro-iterações de TDD (Red-Green-Refactor) com suítes rápidas. Modelos: `qwen-code-fast:latest` ou `qwen2.5-coder:7b`.
    - **Modelo Light do Harness**: Para marcos de branch, validações em CI/CD ou suítes extensas (>32k tokens).
+   - **Prefira alvos focados**: para iteração, aponte `--target` para o
+     arquivo/módulo tocado em vez da suíte inteira. Uma execução completa
+     (`--scope all`) passa pelo `suite_lock` global (`core/harness/suite_lock.py`,
+     via `tests/conftest.py`) e pode esperar se outro harness/agente no
+     mesmo host já estiver validando — isso é intencional (evita disputa de
+     CPU/sqlite), mas não é o caminho rápido de TDD.
 2. **Invocação Isolada por Harness**:
    - **Antigravity**: `invoke_subagent(TypeName="self", Role="Specialized Test Runner", Model="flash_lite", Prompt=...)`.
    - **OpenAI / Codex**: Modelo com `reasoning_effort: "low"` para testes rotineiros; escala para `max` apenas em falhas assíncronas complexas.

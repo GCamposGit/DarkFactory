@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import socket
+import sys
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -12,6 +13,86 @@ from typing import Any, Iterator
 import numpy as np
 import pytest
 import soundfile as sf
+
+IMPORT_ROOT = Path(__file__).resolve().parent.parent
+if str(IMPORT_ROOT) not in sys.path:
+    sys.path.insert(0, str(IMPORT_ROOT))
+
+from core.harness import suite_lock as _suite_lock
+
+_DEFAULT_SUITE_LOCK_MIN_ITEMS = 100
+
+# Set by pytest_sessionstart (xdist controller) or pytest_collection_finish
+# (plain, non-distributed run with enough items to count as "the full
+# suite"). Released in pytest_sessionfinish. A raw `pytest` invocation by ANY
+# harness/agent on this machine goes through this lock too -- not only the
+# official `core/harness/runner.py` -- so two full suites never fight over
+# CPU and sqlite state at once.
+_session_suite_lock: _suite_lock.SuiteLock | None = None
+
+
+def _is_xdist_worker(config: pytest.Config) -> bool:
+    return hasattr(config, "workerinput")
+
+
+def _lock_should_be_skipped(config: pytest.Config) -> bool:
+    return (
+        _suite_lock.is_disabled()
+        or _suite_lock.is_held_by_ancestor()
+        or _is_xdist_worker(config)
+    )
+
+
+def _requested_numprocesses(config: pytest.Config) -> int | None:
+    try:
+        value = config.getoption("numprocesses")
+    except (ValueError, AttributeError):
+        return None
+    if not value or value in ("0",):
+        return None
+    return value
+
+
+def _acquire_session_lock() -> None:
+    global _session_suite_lock
+    if _session_suite_lock is not None:
+        return
+    lock = _suite_lock.SuiteLock()
+    lock.acquire()
+    os.environ["DARKFAC_SUITE_LOCK_HELD"] = "1"
+    _session_suite_lock = lock
+
+
+def pytest_sessionstart(session: pytest.Session) -> None:
+    """xdist controller acquires the machine-wide lock before workers spawn."""
+
+    config = session.config
+    if _lock_should_be_skipped(config):
+        return
+    if _requested_numprocesses(config) is not None:
+        _acquire_session_lock()
+
+
+def pytest_collection_finish(session: pytest.Session) -> None:
+    """Non-distributed run: only queue once collection proves this is a big run."""
+
+    config = session.config
+    if _lock_should_be_skipped(config):
+        return
+    if _session_suite_lock is not None:
+        return  # already acquired at sessionstart (xdist controller path)
+    if _requested_numprocesses(config) is not None:
+        return  # xdist requested but sessionstart already handled it
+    min_items = int(os.environ.get("DARKFAC_SUITE_LOCK_MIN_ITEMS", str(_DEFAULT_SUITE_LOCK_MIN_ITEMS)))
+    if len(session.items) >= min_items:
+        _acquire_session_lock()
+
+
+def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
+    global _session_suite_lock
+    if _session_suite_lock is not None:
+        _session_suite_lock.release()
+        _session_suite_lock = None
 
 
 _SECRET_ENVIRONMENT_KEYS = (

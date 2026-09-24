@@ -109,6 +109,7 @@ class SyntheticDenseGraphSource:
         return self._cached_result
 
 
+@pytest.mark.serial
 def test_dense_graph_500_items_1500_relations_latency_budget() -> None:
     source = SyntheticDenseGraphSource(total_items=500, total_relations=1500)
     compiler = RoadmapCompiler([source])

@@ -67,15 +67,15 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+          cache: pip
       - name: Install dependencies
         working-directory: candidate
         run: python -m pip install -r requirements.txt
       - name: Run base-owned deterministic harness
         working-directory: candidate
+        env:
+          DARKFAC_HARNESS_CACHE: "off"
         run: python core/harness/runner.py --quick
-      - name: Run shared offline test suite
-        working-directory: candidate
-        run: python -m pytest tests -v --ignore=tests/test_canaletto.py
 
   main-validation:
     if: github.event_name == 'push'
@@ -95,6 +95,6 @@ jobs:
       - name: Install dependencies
         run: python -m pip install -r requirements.txt
       - name: Run deterministic harness
+        env:
+          DARKFAC_HARNESS_CACHE: "off"
         run: python core/harness/runner.py --quick
-      - name: Run shared offline test suite
-        run: python -m pytest tests -v --ignore=tests/test_canaletto.py

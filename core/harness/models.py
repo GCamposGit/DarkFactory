@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -57,6 +57,16 @@ class HarnessResult(BaseModel):
     skipped_count: int = Field(ge=0)
     exit_codes: dict[str, int]
     artifact_refs: list[str] = Field(default_factory=list)
+    reused_from: dict[str, Any] | None = Field(
+        default=None,
+        description=(
+            "Present only on a cache-hit verdict reuse: origin host, original "
+            "candidate_sha, and age of the cached PASS being replayed for this "
+            "candidate. Absent on every freshly executed run, so existing "
+            "consumers of HARNESS_RESULT that never look at this field are "
+            "unaffected."
+        ),
+    )
 
     @field_validator("candidate_sha")
     @classmethod
