@@ -97,6 +97,41 @@ services:
           cpus: "0.2"
           memory: 256M
 
+  # HF-27-10: daily E2E canary. Disabled by default -- only started with
+  # `docker compose --profile canary up -d darkfac-canary` (or a Dokploy
+  # "Cron Job" / scheduled deployment targeting this service), since it
+  # needs the real darkfac-canary repo + Dokploy app to be bootstrapped
+  # first (see docs/runbooks/canary.md). `restart: "no"` because this is a
+  # one-shot daily job, not a long-running service.
+  darkfac-canary:
+    build:
+      context: https://github.com/GCamposGit/DarkFactory.git#main
+      dockerfile: deploy/dokploy/Dockerfile.cloud
+    image: ghcr.io/gcamposgit/darkfac-cloud:latest
+    container_name: darkfac-canary
+    restart: "no"
+    profiles: ["canary"]
+    command: ["python", "-m", "core.line.canary", "run", "--base-url", "${DARKFAC_CANARY_BASE_URL:-}"]
+    environment:
+      - DARKFAC_ROLE=canary
+      - DARKFAC_HF02_DATABASE_URL=${DARKFAC_HF02_DATABASE_URL}
+      - DARKFAC_CANARY_BASE_URL=${DARKFAC_CANARY_BASE_URL:-}
+      - DATA_DIR=/app/data
+      - FACTORY_DIR=/app/.factory
+    volumes:
+      - darkfac-artifacts:/app/.factory/artifacts
+      - darkfac-test-logs:/app/.factory/test_logs
+    networks:
+      - dokploy-network
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256M
+        reservations:
+          cpus: "0.05"
+          memory: 64M
+
 volumes:
   darkfac-artifacts:
     name: darkfac-artifacts
