@@ -2062,11 +2062,11 @@ class HubService:
             {
                 "id": "local-notebook",
                 "name": "Local Workstation Runner",
-                "url": "http://localhost:8080",
-                "ip": "127.0.0.1",
+                "url": os.environ.get("LOCAL_NOTEBOOK_WORKER_URL", "http://100.81.84.124:8080"),
+                "ip": "100.81.84.124",
                 "port": 8080,
                 "role": "local_worker",
-                "description": "Interactive developer laptop local test engine",
+                "description": "Interactive developer laptop local test engine via Tailscale",
             },
         ]
 

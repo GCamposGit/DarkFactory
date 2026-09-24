@@ -1222,6 +1222,38 @@ class SQLiteControlStore:
         finally:
             conn.close()
 
+    def get_run_status(self, run_id: str) -> dict[str, Any] | None:
+        """Full status of a run and its jobs (HF-27-10 canary observer).
+
+        Mirrors `PostgresControlStore.get_run_status`'s mock-mode branch so
+        callers that only need read-only stage telemetry (timings, cost,
+        retries, cause_code) can use either backend interchangeably without
+        reimplementing the join.
+        """
+        conn = self._connect()
+        try:
+            cur = conn.cursor()
+            cur.execute("SELECT * FROM runs WHERE run_id = ?", (run_id,))
+            run_row = cur.fetchone()
+            if not run_row:
+                return None
+            cur.execute("SELECT * FROM jobs WHERE run_id = ? ORDER BY created_at ASC", (run_id,))
+            jobs = []
+            for j in cur.fetchall():
+                job_d = dict(j)
+                for ref_key in ("output_refs", "evidence_refs"):
+                    if isinstance(job_d.get(ref_key), str):
+                        try:
+                            job_d[ref_key] = json.loads(job_d[ref_key])
+                        except (TypeError, json.JSONDecodeError):
+                            job_d[ref_key] = []
+                jobs.append(job_d)
+            res = dict(run_row)
+            res["jobs"] = jobs
+            return res
+        finally:
+            conn.close()
+
     def find_job(self, run_id: str, stage: str, status: str | None = None) -> JobKey | None:
         """The highest-iteration job for `(run_id, stage)`, optionally filtered by `status`.
 

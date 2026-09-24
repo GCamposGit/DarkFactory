@@ -10,7 +10,7 @@ FROM python:3.12-slim AS base
 # Pinned versions (HF-27-09). Bump deliberately; see
 # docs/runbooks/HF-27-09_topology.md for how to check for/apply updates.
 ARG NODE_MAJOR=20
-ARG GH_CLI_VERSION=2.63.2
+ARG GH_CLI_VERSION=2.101.0
 ARG CLAUDE_CODE_VERSION=2.0.1
 ARG CODEX_CLI_VERSION=0.48.0
 
@@ -23,24 +23,33 @@ ENV PYTHONUNBUFFERED=1 \
 WORKDIR /app
 
 # Install minimal OS utilities for health probes/process inspection, plus
-# git (workspace checkouts), lftp (FTP-target deploys) and gnupg (gh apt key).
+# git (workspace checkouts), lftp (FTP-target deploys), tar (gh tarball) and gnupg (NodeSource key).
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     ca-certificates \
     gnupg \
+    tar \
     procps \
     git \
     lftp \
     && rm -rf /var/lib/apt/lists/*
 
-# Install GitHub CLI (gh) from the official apt repository, version pinned.
-RUN mkdir -p -m 755 /etc/apt/keyrings \
-    && curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg -o /etc/apt/keyrings/githubcli-archive-keyring.gpg \
-    && chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg \
-    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" > /etc/apt/sources.list.d/github-cli.list \
-    && apt-get update \
-    && apt-get install -y --no-install-recommends "gh=${GH_CLI_VERSION}*" \
-    && rm -rf /var/lib/apt/lists/*
+# Install GitHub CLI (gh) from the pinned GitHub release tarball, verified
+# against the release checksums file. (The cli.github.com apt repo only keeps
+# the latest version, so a pinned apt install breaks as soon as it is bumped.)
+RUN set -eux; \
+    arch="$(dpkg --print-architecture)"; \
+    base="https://github.com/cli/cli/releases/download/v${GH_CLI_VERSION}"; \
+    tmp="$(mktemp -d)"; \
+    curl -fsSL "${base}/gh_${GH_CLI_VERSION}_linux_${arch}.tar.gz" -o "${tmp}/gh.tar.gz"; \
+    curl -fsSL "${base}/gh_${GH_CLI_VERSION}_checksums.txt" -o "${tmp}/checksums.txt"; \
+    expected="$(grep " gh_${GH_CLI_VERSION}_linux_${arch}.tar.gz\$" "${tmp}/checksums.txt" | cut -d' ' -f1)"; \
+    test -n "${expected}"; \
+    echo "${expected}  ${tmp}/gh.tar.gz" | sha256sum -c -; \
+    tar -xzf "${tmp}/gh.tar.gz" -C "${tmp}" --strip-components=1 "gh_${GH_CLI_VERSION}_linux_${arch}/bin/gh"; \
+    install -m 755 "${tmp}/bin/gh" /usr/local/bin/gh; \
+    rm -rf "${tmp}"; \
+    gh --version
 
 # Install Node.js LTS from NodeSource (major version pinned via build arg).
 RUN curl -fsSL "https://deb.nodesource.com/setup_${NODE_MAJOR}.x" | bash - \
