@@ -540,6 +540,7 @@ def maybe_dispatch_remote(
     for base_url in urls:
         health = probe_health(base_url)
         if health is None:
+            print(f"[REMOTE] {base_url} unreachable (worker offline or port blocked)")
             continue
         if is_self_dispatch(base_url, health):
             continue
@@ -556,7 +557,8 @@ def maybe_dispatch_remote(
                 if health is not None and is_self_dispatch(base_url, health):
                     health = None
             if health is None:
-                continue  # still busy (or vanished) after waiting -- next worker / local
+                print(f"[REMOTE] {base_url} still busy after {_busy_wait_sec():.0f}s (or vanished)")
+                continue  # next worker / local
 
         worker_platform = str(health.get("platform_family") or "windows")
         worker_python = str(health.get("python_version") or "") or None
@@ -623,4 +625,6 @@ def maybe_dispatch_remote(
     if remote_required:
         reason = "no reachable, non-self worker" if not tried_any_reachable else "every worker busy/unavailable/failed"
         raise RemoteRequiredError(f"--remote-required: {reason} among {urls}")
+    # Never fall back silently: a green local run must not hide a dead worker.
+    print("[REMOTE] no remote worker used; running the suite locally on this host")
     return None
