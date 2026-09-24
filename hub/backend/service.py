@@ -2896,8 +2896,8 @@ class HubService:
         live_status_by_ticket: Dict[str, Dict[str, Any]] = {}
         try:
             from core.workflow.job_board import read_job_board
-            entries = read_job_board()
-            for e in entries:
+            snapshot = read_job_board(self.control_db_path, database_url=self.control_database_url)
+            for e in snapshot.entries:
                 if e.ticket_id and e.ticket_id not in live_status_by_ticket:
                     live_status_by_ticket[e.ticket_id] = {
                         "status": e.status,
