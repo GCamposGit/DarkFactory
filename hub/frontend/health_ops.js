@@ -15,6 +15,19 @@ const healthOpsState = {
   loading: false,
 };
 
+function healthOpsGetSessionToken() {
+  return window.state?.sessionToken || localStorage.getItem("darkhub_session_token") || null;
+}
+
+async function healthOpsAuthenticatedFetch(url, options = {}) {
+  const headers = new Headers(options.headers || {});
+  const token = healthOpsGetSessionToken();
+  if (token) {
+    headers.set("X-Hub-Session", token);
+  }
+  return fetch(url, { ...options, headers });
+}
+
 function healthOpsEscapeHtml(val) {
   if (val === null || val === undefined) return "";
   return String(val)
@@ -86,7 +99,7 @@ function confirmAcknowledgeNotification(notificationId, title) {
     confirmBtn.disabled = true;
     confirmBtn.textContent = "Processando...";
     try {
-      const res = await fetch(`/api/notifications/${encodeURIComponent(notificationId)}/acknowledge`, {
+      const res = await healthOpsAuthenticatedFetch(`/api/notifications/${encodeURIComponent(notificationId)}/acknowledge`, {
         method: "POST",
         headers: { Accept: "application/json" },
       });
@@ -141,7 +154,7 @@ function openCheckQuotasModal() {
     confirmBtn.disabled = true;
     confirmBtn.textContent = "Inspecionando provedores...";
     try {
-      const res = await fetch(`/api/notifications/check-quotas?force=${force}`, {
+      const res = await healthOpsAuthenticatedFetch(`/api/notifications/check-quotas?force=${force}`, {
         method: "POST",
         headers: { Accept: "application/json" },
       });
@@ -214,7 +227,7 @@ function openN8nSyncModal() {
     confirmBtn.disabled = true;
     confirmBtn.textContent = "Sincronizando...";
     try {
-      const res = await fetch("/api/integrations/n8n/sync", {
+      const res = await healthOpsAuthenticatedFetch("/api/integrations/n8n/sync", {
         method: "POST",
         headers: { "Content-Type": "application/json", Accept: "application/json" },
         body: JSON.stringify({ custom_path: customPath, activate }),
@@ -294,7 +307,7 @@ function openN8nTriggerModal() {
     confirmBtn.disabled = true;
     confirmBtn.textContent = "Disparando...";
     try {
-      const res = await fetch("/api/integrations/n8n/trigger", {
+      const res = await healthOpsAuthenticatedFetch("/api/integrations/n8n/trigger", {
         method: "POST",
         headers: { "Content-Type": "application/json", Accept: "application/json" },
         body: JSON.stringify({ path, payload }),
@@ -355,7 +368,7 @@ function openRollbackDrillModal() {
     confirmBtn.disabled = true;
     confirmBtn.textContent = "Executando ensaio...";
     try {
-      const res = await fetch("/api/hf15/rollback/drill", {
+      const res = await healthOpsAuthenticatedFetch("/api/hf15/rollback/drill", {
         method: "POST",
         headers: { "Content-Type": "application/json", Accept: "application/json" },
         body: JSON.stringify({ project_id: "proj-drill-01" }),
