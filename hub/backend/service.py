@@ -2249,7 +2249,7 @@ class HubService:
 
     def get_n8n_status(self, target_url: Optional[str] = None) -> Dict[str, Any]:
         """Probes n8n endpoint and returns health/instance report."""
-        url = target_url or os.environ.get("N8N_URL", "https://n8n.io")
+        url = target_url or os.environ.get("N8N_URL", "https://n8n.ggcampos.com")
         probe = N8nProbe()
         report = probe.probe(target_url=url)
         return report.model_dump()

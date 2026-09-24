@@ -31,6 +31,15 @@ services:
       - DARKHUB_SERVICE_URL_OVERRIDES=${DARKHUB_SERVICE_URL_OVERRIDES:-}
       - DATA_DIR=/app/hub/data
       - FACTORY_DIR=/app/.factory
+      # Integrations (Telegram & n8n Community)
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}
+      - TELEGRAM_AUTHORIZED_USERS=${TELEGRAM_AUTHORIZED_USERS:-}
+      - TELEGRAM_AUTHORIZED_CHATS=${TELEGRAM_AUTHORIZED_CHATS:-}
+      - TELEGRAM_WEBHOOK_SECRET=${TELEGRAM_WEBHOOK_SECRET:-}
+      - N8N_URL=${N8N_URL:-https://n8n.ggcampos.com}
+      - N8N_API_KEY=${N8N_API_KEY:-}
+      - N8N_WEBHOOK_URL=${N8N_WEBHOOK_URL:-}
+      - REMOTE_HARNESS_URLS=${REMOTE_HARNESS_URLS:-http://100.78.181.90:8080,http://100.81.84.124:8080}
     volumes:
       - darkhub-factory-data:/app/.factory/webhooks
       - darkhub-hub-data:/app/hub/data
