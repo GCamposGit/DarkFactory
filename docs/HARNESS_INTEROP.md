@@ -283,6 +283,75 @@ worker configurado — útil para depurar o próprio harness sem envolver a
 rede. `--remote-required` exige que o despacho remoto tenha sucesso (ver
 tabela acima). Nenhum dos dois altera `harness.config.json`.
 
+## Deploy pós-merge (Dokploy)
+
+Decisão do Owner: depois que qualquer mudança do DarkFac chega em `main`,
+**todo** harness (Claude Code, Codex, Grok, Antigravity) roda o mesmo
+comando para redeployar tudo que está no projeto `darkfac-core` do Dokploy
+(`https://dokploy.ggcampos.com`):
+
+```powershell
+python scripts/dokploy_redeploy.py
+```
+
+Por padrão isso descobre e redeploya **todos** os serviços compose +
+application do projeto `darkfac-core`, ambiente `production` (`darkfac-cloud`,
+`Darkhub`, `darkfac-n8n`, `darkfac-canary`, na topologia atual), e espera
+(`--wait`, ligado por padrão) cada um terminar em `done` ou `error`/timeout,
+reportando por serviço: nome, status final, título do deploy (subject do
+commit) e tempo decorrido. Também imprime o subject local de
+`git log -1 --format=%s origin/main` e se bate com o título do deploy mais
+recente (só informativo, não afeta o exit code).
+
+Uso:
+- `python scripts/dokploy_redeploy.py --list` — só lista os serviços
+  descobertos (nome, tipo, id, status, último deploy) e sai; não dispara
+  nada.
+- `python scripts/dokploy_redeploy.py --only darkfac-cloud --only Darkhub` —
+  restringe a um subconjunto (repetível, case-insensitive); nome inválido
+  sai com código 2 listando os nomes válidos.
+- `python scripts/dokploy_redeploy.py --dry-run` — mostra o que seria
+  deployado sem disparar nada.
+- `python scripts/dokploy_redeploy.py --no-wait` — dispara e sai sem
+  esperar; `--timeout SEGUNDOS` (padrão 900 por serviço) limita a espera.
+
+Exit codes: `0` só se todos os serviços selecionados terminarem `done`; `1`
+se algum falhar ou expirar; `2` para erro de uso, credencial ausente ou
+falha de discovery (projeto/ambiente não encontrado, nome de `--only`
+desconhecido).
+
+Credenciais: `DOKPLOY_API_URL` e `DOKPLOY_API_KEY` (header `x-api-key`), lidas
+de variáveis de ambiente; no Windows, se ausentes do processo (ex.: shell
+aberto antes do Owner configurar a variável), há fallback automático para o
+registro do usuário (`HKEY_CURRENT_USER\Environment`) — o mesmo padrão já
+usado por `core/execution/providers.py` para `OPENROUTER_API_KEY`. A chave
+nunca é impressa, logada ou ecoada em mensagem de erro (corpo de respostas
+HTTP de erro é sanitizado antes de aparecer em qualquer saída). Sem as duas
+variáveis o comando sai com código 2 citando os nomes das variáveis (nunca
+o valor). Configuração do token: `docs/runbooks/dokploy_redeploy.md`.
+
+Guarda de escopo: só o projeto/ambiente selecionado (`--project`, padrão
+`darkfac-core`; `--environment`, padrão `production`) é elegível — o projeto
+`My First Project` (que também tem um serviço chamado `n8n`, sem relação com
+o DarkFac) nunca é alcançado por este comando, mesmo com `--only n8n`,
+porque a descoberta filtra por nome de projeto antes de olhar os serviços.
+
+Por harness:
+- **Codex, Grok, Antigravity**: rodam exatamente o mesmo comando acima na
+  raiz clonada, como qualquer outro passo de `AGENTS.md`/`FACTORY_RULES.md`.
+- **Claude Code**: tem uma regra de permissão (`allow`) liberando a execução
+  de `python scripts/dokploy_redeploy.py` sem prompt manual, já que é um
+  passo de rotina pós-merge e o script é read-only por padrão exceto pelo
+  disparo de deploy explícito (nunca `git push`, nunca toca segredos).
+
+Implementação: `scripts/dokploy_redeploy.py` (stdlib puro — `urllib`, sem
+dependências externas) mantém a lógica de domínio (normalização das duas
+formas de resposta do `project.all`, seleção de serviços, decisão do loop de
+espera) em funções puras, separadas do transporte HTTP, testadas em
+`tests/test_dokploy_redeploy.py` com um transporte fake injetado (sem rede
+real — mesma convenção do `DokployDeploymentAdapter` em
+`core/orchestrator/deployment_adapter.py`).
+
 ## Política de contexto seletivo e promoção de aprendizado (DF-19)
 
 Para prevenir injeção excessiva de tokens e viés de confirmação entre diferentes harnesses:
