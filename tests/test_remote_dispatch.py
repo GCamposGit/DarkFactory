@@ -288,7 +288,9 @@ def test_is_self_dispatch_true_by_reported_hostname() -> None:
 
 
 def test_is_self_dispatch_false_for_a_genuinely_different_host() -> None:
-    assert remote_dispatch.is_self_dispatch("http://100.78.181.90:8080", {"hostname": "darkfac-desktop"}) is False
+    # TEST-NET-1 address and a made-up hostname: using the real Desktop's IP
+    # here made this test fail whenever the suite ran ON the Desktop worker.
+    assert remote_dispatch.is_self_dispatch("http://192.0.2.10:8080", {"hostname": "not-this-host"}) is False
 
 
 # =============================================================================
