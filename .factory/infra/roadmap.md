@@ -49,7 +49,7 @@
 | ID | Item | Pré-requisito | Status | Critérios de Aceite |
 | :--- | :--- | :--- | :--- | :--- |
 | **INFRA-07** | **PostgreSQL Multi-Tenant em Armazenamento NVMe** | INFRA-06 | ✅ **DELIVERED** | Instância PostgreSQL 16+ provisionada no Dokploy sobre NVMe de alta performance. Bancos e credenciais isolados por projeto com custo adicional zero. |
-| **INFRA-08** | **Automação de Backups 3-Camadas (R2 + On-Premise)** | INFRA-07 | ✅ **DELIVERED** | Rotina automática de dump diário compactado e criptografado com AES-256-GCM enviado via S3 API para bucket do **Cloudflare R2** (10 GB free, zero egress) com sincronização noturna para o Drive `E:` (3 TB) do `desktop-g45ipem` e retenção assimétrica (7d R2 / 120d On-Prem). |
+| **INFRA-08** | **Automação de Backups 3-Camadas (R2 + On-Premise)** | INFRA-07 | 🟡 **PLANNED** | Rotina automática de dump diário compactado e criptografado enviado via S3 API para bucket do **Cloudflare R2** (10 GB free, zero egress) com sincronização noturna para o Drive `E:` (3 TB) do `desktop-g45ipem`. |
 
 ---
 

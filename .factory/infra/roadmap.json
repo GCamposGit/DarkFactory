@@ -94,10 +94,9 @@
       "id": "INFRA-08",
       "title": "Automação de Backups 3-Camadas (R2 + On-Premise)",
       "phase": "phase-3",
-      "status": "delivered",
-      "completed_at": "2026-09-25",
+      "status": "planned",
       "description": "Rotina diária de dump criptografado para Cloudflare R2 (10 GB gratuitos, zero egress) com espelho noturno para o Drive E: (3 TB).",
-      "tags": ["backups", "r2", "storage-vault", "resiliencia", "active"]
+      "tags": ["backups", "r2", "storage-vault", "resiliencia"]
     },
     {
       "id": "INFRA-09",
