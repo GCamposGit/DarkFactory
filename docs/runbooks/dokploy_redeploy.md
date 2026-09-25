@@ -124,6 +124,16 @@ python scripts/dokploy_redeploy.py --dry-run
 python scripts/dokploy_redeploy.py --only darkfac-cloud
 ```
 
+`--project` e travado por um allowlist fixo dentro do script
+(`ALLOWED_PROJECTS`, hoje so `darkfac-core`): qualquer outro valor sai com
+erro e codigo 2 antes de fazer qualquer chamada ao Dokploy, mesmo que
+alguem passe `--project "My First Project"` por engano ou copie/cole um
+comando errado -- o script nunca vai tocar em um projeto Dokploy diferente
+de `darkfac-core`. Se um dia existir um segundo projeto legitimo do DarkFac
+que precise ser redeployado por este comando, isso exige uma mudanca
+deliberada no codigo (adicionar o nome em `ALLOWED_PROJECTS`), nao so um
+argumento de linha de comando diferente.
+
 ## 4. O que "deu certo" parece
 
 Uma saida assim, terminando sem nenhuma linha `FAILED to trigger deploy` ou

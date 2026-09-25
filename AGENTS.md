@@ -86,6 +86,9 @@ conclusão do ticket. Use `--list` para só listar os serviços descobertos
 `--only NOME` (repetível) para restringir a um subconjunto. Credenciais vêm
 de `DOKPLOY_API_URL`/`DOKPLOY_API_KEY` (variáveis de ambiente; no Windows há
 fallback automático para o registro do usuário) — nunca imprima esses
-valores. Detalhes completos, variáveis, exit codes e o runbook de
-configuração do token em `docs/HARNESS_INTEROP.md` e
-`docs/runbooks/dokploy_redeploy.md`.
+valores. `--project` é travado por um allowlist (`ALLOWED_PROJECTS` no
+script, hoje só `darkfac-core`) — qualquer outro valor sai com código 2
+antes de qualquer chamada HTTP, já que a permissão do Claude Code libera
+`python scripts/dokploy_redeploy.py *` com qualquer argumento sem prompt.
+Detalhes completos, variáveis, exit codes e o runbook de configuração do
+token em `docs/HARNESS_INTEROP.md` e `docs/runbooks/dokploy_redeploy.md`.

@@ -198,6 +198,101 @@ def test_normalize_project_services_unknown_project_returns_empty() -> None:
 
 
 # ---------------------------------------------------------------------------
+# ALLOWED_PROJECTS hard guard: --project is not a free-form argument. Claude
+# Code's own permission config allows `python scripts/dokploy_redeploy.py *`
+# with any args without a prompt (see docs/HARNESS_INTEROP.md), so this
+# check is the only thing standing between a stray/careless/malicious
+# --project value and an unrelated Dokploy project actually being
+# redeployed. Case-sensitive exact match; nothing "close" to darkfac-core
+# should ever pass.
+# ---------------------------------------------------------------------------
+
+
+def test_check_project_allowed_accepts_darkfac_core() -> None:
+    mod.check_project_allowed("darkfac-core")  # must not raise
+
+
+@pytest.mark.parametrize(
+    "project",
+    ["My First Project", "darkfac-core-evil", "DARKFAC-CORE", "darkfac-core ", " darkfac-core", ""],
+)
+def test_check_project_allowed_rejects_everything_else(project: str) -> None:
+    with pytest.raises(mod.DokployUsageError) as excinfo:
+        mod.check_project_allowed(project)
+    assert "darkfac-core" in str(excinfo.value)
+
+
+def test_resolve_services_defense_in_depth_rejects_disallowed_project_before_any_http_call() -> None:
+    transport = QueueTransport()
+    # Deliberately do NOT program a /api/project.all response: if the guard
+    # were bypassed, fetch_project_all() would raise a different, confusing
+    # error instead of the clear DokployUsageError this test expects, which
+    # would itself prove the guard ran too late (or not at all).
+    with pytest.raises(mod.DokployUsageError, match="darkfac-core"):
+        mod._resolve_services(transport, "My First Project", "production", None)
+    assert transport.calls == []  # no HTTP call of any kind was made
+
+
+@pytest.mark.parametrize("project", ["My First Project", "darkfac-core-evil", "DARKFAC-CORE"])
+def test_main_rejects_disallowed_project_exit_2_no_deploy_call(project: str) -> None:
+    def _forbidden_transport_factory(url: str, key: str) -> mod.Transport:
+        raise AssertionError("transport must never be built for a disallowed --project")
+
+    out, err = io.StringIO(), io.StringIO()
+    exit_code = mod.main(
+        ["--project", project],
+        env={"DOKPLOY_API_URL": "https://dokploy.ggcampos.com", "DOKPLOY_API_KEY": SENTINEL_KEY},
+        registry_reader=_no_registry,
+        transport_factory=_forbidden_transport_factory,
+        stdout=out,
+        stderr=err,
+    )
+    assert exit_code == mod.EXIT_USAGE_ERROR
+    assert "darkfac-core" in err.getvalue()
+    assert SENTINEL_KEY not in (out.getvalue() + err.getvalue())
+
+
+def test_main_rejects_disallowed_project_even_with_list_flag() -> None:
+    """--list must not be a way around the guard: it still means "list a
+    Dokploy project's services", so it is scoped by the same allowlist."""
+    transport = QueueTransport()  # would blow up on first call if reached
+    out, err = io.StringIO(), io.StringIO()
+    exit_code = mod.main(
+        ["--list", "--project", "My First Project"],
+        env={"DOKPLOY_API_URL": "https://dokploy.ggcampos.com", "DOKPLOY_API_KEY": SENTINEL_KEY},
+        registry_reader=_no_registry,
+        transport_factory=lambda url, key: transport,
+        stdout=out,
+        stderr=err,
+    )
+    assert exit_code == mod.EXIT_USAGE_ERROR
+    assert transport.calls == []
+    assert transport.post_calls == []
+
+
+def test_main_allows_default_project_explicitly() -> None:
+    transport = _make_transport_with_full_project()
+    for path in (
+        "/api/compose.one?composeId=compose_cloud",
+        "/api/compose.one?composeId=compose_hub",
+        "/api/compose.one?composeId=compose_n8n_darkfac",
+        "/api/application.one?applicationId=app_canary",
+    ):
+        transport.program_get(path, [{"deployments": []}])
+    out, err = io.StringIO(), io.StringIO()
+    exit_code = mod.main(
+        ["--list", "--project", "darkfac-core"],
+        env={"DOKPLOY_API_URL": "https://dokploy.ggcampos.com", "DOKPLOY_API_KEY": SENTINEL_KEY},
+        registry_reader=_no_registry,
+        transport_factory=lambda url, key: transport,
+        stdout=out,
+        stderr=err,
+    )
+    assert exit_code == mod.EXIT_OK
+    assert "darkfac-cloud" in out.getvalue()
+
+
+# ---------------------------------------------------------------------------
 # select_services (--only)
 # ---------------------------------------------------------------------------
 

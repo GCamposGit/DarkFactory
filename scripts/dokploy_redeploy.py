@@ -58,6 +58,18 @@ DEFAULT_ENVIRONMENT = "production"
 DEFAULT_TIMEOUT_SECONDS = 900.0
 DEFAULT_POLL_INTERVAL_SECONDS = 5.0
 
+# Hard allowlist: this tool may only ever act on these Dokploy projects,
+# regardless of --project. Claude Code's own permission config allows
+# `python scripts/dokploy_redeploy.py *` with any arguments (it is a routine
+# post-merge step -- see docs/HARNESS_INTEROP.md), so `--project` is not
+# gated by a human approval prompt the way an arbitrary new command would
+# be. Without this check, `--project "My First Project"` (or any other
+# unrelated Dokploy project) could be redeployed by mistake or by a
+# malicious/careless argument, with no confirmation step in between. Case-
+# sensitive exact match only; extend this set deliberately if the Owner
+# adds another project this tool should be allowed to touch.
+ALLOWED_PROJECTS = frozenset({"darkfac-core"})
+
 TERMINAL_SUCCESS_STATUSES = {"done"}
 TERMINAL_FAILURE_STATUSES = {"error", "failed"}
 
@@ -73,6 +85,21 @@ Transport = Callable[[str, str, Optional[Dict[str, Any]]], Any]
 
 class DokployUsageError(Exception):
     """Usage, credential, or discovery error -> process exit code 2."""
+
+
+def check_project_allowed(project: str) -> None:
+    """Hard guard: raises DokployUsageError unless `project` is in
+    ALLOWED_PROJECTS (exact, case-sensitive match). Called both in `main()`
+    right after argument parsing -- before credentials are even resolved or
+    any transport is built, so a disallowed --project never reaches the
+    network -- and again in `_resolve_services()` as defense in depth for
+    any other caller of the discovery/selection functions."""
+    if project not in ALLOWED_PROJECTS:
+        raise DokployUsageError(
+            f"Refusing --project {project!r}: only {', '.join(sorted(ALLOWED_PROJECTS))} may be "
+            "deployed by this tool. Ask the Owner to extend ALLOWED_PROJECTS in "
+            "scripts/dokploy_redeploy.py if this is intentional."
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -492,7 +519,14 @@ def build_arg_parser() -> argparse.ArgumentParser:
             f"(default: {DEFAULT_PROJECT}/{DEFAULT_ENVIRONMENT}) and wait for the result."
         ),
     )
-    parser.add_argument("--project", default=DEFAULT_PROJECT, help=f"Dokploy project name (default: {DEFAULT_PROJECT})")
+    parser.add_argument(
+        "--project",
+        default=DEFAULT_PROJECT,
+        help=(
+            f"Dokploy project name (default: {DEFAULT_PROJECT}). Hard-allowlisted: only "
+            f"{', '.join(sorted(ALLOWED_PROJECTS))} may be deployed by this tool."
+        ),
+    )
     parser.add_argument(
         "--environment", default=DEFAULT_ENVIRONMENT, help=f"Dokploy environment name (default: {DEFAULT_ENVIRONMENT})"
     )
@@ -553,6 +587,7 @@ def _print_service_list(transport: Transport, services: Sequence[Service], out: 
 def _resolve_services(
     transport: Transport, project: str, environment: str, only: Optional[Sequence[str]]
 ) -> List[Service]:
+    check_project_allowed(project)  # defense in depth; main() already checked before this is reached
     projects = fetch_project_all(transport)
     services = normalize_project_services(projects, project, environment)
     if not services:
@@ -582,6 +617,12 @@ def main(
     args = parser.parse_args(list(argv) if argv is not None else None)
 
     logging.basicConfig(level=logging.DEBUG if args.verbose else logging.WARNING, format="%(message)s")
+
+    try:
+        check_project_allowed(args.project)
+    except DokployUsageError as exc:
+        print(str(exc), file=err)
+        return EXIT_USAGE_ERROR
 
     try:
         api_url, api_key = resolve_credentials(env, registry_reader)

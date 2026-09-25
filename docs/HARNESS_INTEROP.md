@@ -330,11 +330,20 @@ HTTP de erro é sanitizado antes de aparecer em qualquer saída). Sem as duas
 variáveis o comando sai com código 2 citando os nomes das variáveis (nunca
 o valor). Configuração do token: `docs/runbooks/dokploy_redeploy.md`.
 
-Guarda de escopo: só o projeto/ambiente selecionado (`--project`, padrão
-`darkfac-core`; `--environment`, padrão `production`) é elegível — o projeto
-`My First Project` (que também tem um serviço chamado `n8n`, sem relação com
-o DarkFac) nunca é alcançado por este comando, mesmo com `--only n8n`,
-porque a descoberta filtra por nome de projeto antes de olhar os serviços.
+Guarda de escopo: `--project` é travado por um allowlist rígido
+(`ALLOWED_PROJECTS` em `scripts/dokploy_redeploy.py`, hoje só
+`darkfac-core`, comparação exata e case-sensitive) — qualquer outro valor
+sai com código 2 antes mesmo de resolver credenciais ou abrir qualquer
+conexão HTTP. Essa checagem existe porque a regra de permissão do Claude
+Code libera `python scripts/dokploy_redeploy.py *` com qualquer argumento
+sem prompt (é um passo de rotina), então nada além do próprio allowlist
+impediria `--project "My First Project"` de redeployar um projeto sem
+relação com o DarkFac. Dentro do projeto permitido, só o ambiente
+selecionado (`--environment`, padrão `production`) é elegível — o serviço
+`n8n` de `My First Project` nunca é alcançado por este comando, mesmo com
+`--only n8n`, porque a descoberta filtra por nome de projeto antes de olhar
+os serviços. Peça ao Owner para estender `ALLOWED_PROJECTS` caso um novo
+projeto legítimo precise ser redeployado por esta ferramenta.
 
 Por harness:
 - **Codex, Grok, Antigravity**: rodam exatamente o mesmo comando acima na
