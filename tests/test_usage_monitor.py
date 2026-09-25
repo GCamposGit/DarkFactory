@@ -750,8 +750,8 @@ def test_grok_adapter_probes_bot_session_live_percentage(tmp_path: Path, monkeyp
     assert result.quota_supported is True
     assert len(result.windows) == 2
     assert result.windows[0].quota_id == "grok:weekly_pool"
-    assert result.windows[0].used_percent == 2.14
-    assert result.windows[0].remaining_percent == 97.86
+    assert result.windows[0].used_percent == 97.86
+    assert result.windows[0].remaining_percent == 2.14
     assert result.windows[0].resets_at == "2026-09-15T22:15:57.642Z"
     assert result.windows[1].quota_id == "grok:5h"
     assert "Pool semanal e janela móvel" in result.message

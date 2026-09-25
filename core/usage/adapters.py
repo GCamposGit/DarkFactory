@@ -491,8 +491,15 @@ class GrokAccountAdapter(AccountUsageAdapter):
             return None
 
         usage_val = payload.get("usagePercent")
-        used_percent = _clamp_percent(float(usage_val) if usage_val is not None else None)
-        remaining_percent = round(100.0 - used_percent, 2) if used_percent is not None else None
+        raw_val = _clamp_percent(float(usage_val) if usage_val is not None else None)
+        # Em GetSandUsageStatus o campo usagePercent representa a capacidade residual (remaining_percent)
+        # Ex: 1.13% restante -> 98.87% (~99%) utilizado
+        if raw_val is not None:
+            remaining_percent = raw_val
+            used_percent = round(100.0 - remaining_percent, 2)
+        else:
+            remaining_percent = None
+            used_percent = None
         resets_at = _timestamp_to_iso(payload.get("nextResetTimestampUtc"))
         plan = str(payload.get("grokPlanLabel") or payload.get("includedUsageSuperGrokPlan") or "SuperGrok")
 
