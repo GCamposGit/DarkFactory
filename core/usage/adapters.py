@@ -135,6 +135,15 @@ class AccountUsageAdapter(ABC):
             message=message,
             dashboard_url=self.spec.dashboard_url,
         )
+
+    def _save_snapshot(self, usage: ProviderAccountUsage) -> None:
+        try:
+            self.snapshot_dir.mkdir(parents=True, exist_ok=True)
+            target = self.snapshot_dir / f"{self.spec.provider_id}.json"
+            target.write_text(usage.model_dump_json(indent=2), encoding="utf-8")
+        except Exception as exc:
+            logger.debug("Failed to write snapshot for %s: %s", self.spec.provider_id, exc)
+
     def _snapshot_payload(self) -> Optional[Dict[str, Any]]:
         env_name = f"DARKFAC_{self.spec.provider_id.upper()}_USAGE_JSON"
         configured = os.environ.get(env_name)
@@ -256,7 +265,9 @@ class CodexAccountAdapter(AccountUsageAdapter):
                 )
             return self.disconnected("Codex não instalado ou fora do PATH.", "codex_app_server")
         try:
-            return self._from_codex_response(self._read_rate_limits(executable))
+            usage = self._from_codex_response(self._read_rate_limits(executable))
+            self._save_snapshot(usage)
+            return usage
         except Exception as exc:
             logger.info("Codex quota probe unavailable: %s", exc)
             if self._codex_doctor(executable):
@@ -497,15 +508,24 @@ class GrokAccountAdapter(AccountUsageAdapter):
         windows = [
             QuotaWindow(
                 quota_id="grok:weekly_pool",
-                label=f"{plan} · 1 semana",
+                label="Limite Semanal (1 semana)",
                 used_percent=used_percent,
                 remaining_percent=remaining_percent,
                 window_duration_minutes=10080,
                 resets_at=resets_at,
                 metric="shared_compute_pool",
-            )
+            ),
+            QuotaWindow(
+                quota_id="grok:5h",
+                label="Janela Móvel (5h)",
+                used_percent=100.0 if limited else 0.0,
+                remaining_percent=0.0 if limited else 100.0,
+                window_duration_minutes=300,
+                resets_at=resets_at if limited else None,
+                metric="dynamic_throttle",
+            ),
         ]
-        return ProviderAccountUsage(
+        usage = ProviderAccountUsage(
             provider_id=self.spec.provider_id,
             provider_name=self.spec.provider_name,
             family=self.spec.family,
@@ -515,9 +535,11 @@ class GrokAccountAdapter(AccountUsageAdapter):
             account_label=account_label,
             quota_supported=True,
             windows=windows,
-            message="Pool de computação semanal lido da sessão autenticada do Grok.",
+            message="Pool semanal e janela móvel lidos da sessão autenticada do Grok.",
             dashboard_url=self.spec.dashboard_url,
         )
+        self._save_snapshot(usage)
+        return usage
 
     @staticmethod
     def _extract_grok_bot_token() -> Optional[str]:
@@ -794,8 +816,11 @@ class GeminiAccountAdapter(AccountUsageAdapter):
         ctx.check_hostname = False
         ctx.verify_mode = ssl.CERT_NONE
 
-        req = urllib.request.Request(
-            f"https://127.0.0.1:{port}/exa.language_server_pb.LanguageServerService/GetAvailableModels",
+        windows: List[QuotaWindow] = []
+
+        # 1. Try RetrieveUserQuotaSummary for structured weekly and 5h buckets
+        summary_req = urllib.request.Request(
+            f"https://127.0.0.1:{port}/exa.language_server_pb.LanguageServerService/RetrieveUserQuotaSummary",
             data=b"{}",
             headers={
                 "Content-Type": "application/json",
@@ -805,31 +830,94 @@ class GeminiAccountAdapter(AccountUsageAdapter):
             method="POST",
         )
         try:
-            with urllib.request.urlopen(req, context=ctx, timeout=3.0) as res:
-                models_payload = json.loads(res.read().decode("utf-8"))
-        except (urllib.error.URLError, OSError, json.JSONDecodeError, TimeoutError):
+            with urllib.request.urlopen(summary_req, context=ctx, timeout=3.0) as res:
+                summary_payload = json.loads(res.read().decode("utf-8"))
+            groups = summary_payload.get("response", {}).get("groups", [])
+            for group in groups:
+                if not isinstance(group, dict):
+                    continue
+                group_name = str(group.get("displayName", ""))
+                # Focus on primary Gemini models group
+                if "Gemini" not in group_name and windows:
+                    continue
+                for b in group.get("buckets", []):
+                    if not isinstance(b, dict):
+                        continue
+                    rem_frac = b.get("remainingFraction")
+                    if rem_frac is None:
+                        continue
+                    rem_pct = _clamp_percent(float(rem_frac) * 100.0)
+                    used_pct = round(100.0 - rem_pct, 2) if rem_pct is not None else None
+                    bucket_win = str(b.get("window", "")).lower()
+                    if bucket_win == "weekly" or "weekly" in str(b.get("bucketId", "")).lower():
+                        dur = 10080
+                        lbl = "Limite Semanal (1 semana)"
+                        qid = "antigravity:gemini-weekly"
+                    else:
+                        dur = 300
+                        lbl = "Janela Móvel (5h)"
+                        qid = "antigravity:gemini-5h"
+                    windows.append(
+                        QuotaWindow(
+                            quota_id=qid,
+                            label=lbl,
+                            used_percent=used_pct,
+                            remaining_percent=rem_pct,
+                            window_duration_minutes=dur,
+                            resets_at=_timestamp_to_iso(b.get("resetTime")),
+                            metric="subscription",
+                        )
+                    )
+        except Exception as exc:
+            logger.debug("Antigravity RetrieveUserQuotaSummary failed: %s", exc)
+
+        # 2. Fallback to GetAvailableModels if RetrieveUserQuotaSummary did not return windows
+        if not windows:
+            req = urllib.request.Request(
+                f"https://127.0.0.1:{port}/exa.language_server_pb.LanguageServerService/GetAvailableModels",
+                data=b"{}",
+                headers={
+                    "Content-Type": "application/json",
+                    "x-codeium-csrf-token": csrf_token,
+                    "Connect-Protocol-Version": "1",
+                },
+                method="POST",
+            )
+            try:
+                with urllib.request.urlopen(req, context=ctx, timeout=3.0) as res:
+                    models_payload = json.loads(res.read().decode("utf-8"))
+                models = models_payload.get("response", {}).get("models", {})
+                target_model = (
+                    models.get("gemini-3.8-flash-high")
+                    or models.get("gemini-3.8-flash-medium")
+                    or next((m for m in models.values() if isinstance(m, dict) and m.get("quotaInfo")), None)
+                )
+                if target_model and isinstance(target_model.get("quotaInfo"), dict):
+                    quota_info = target_model["quotaInfo"]
+                    remaining_fraction = quota_info.get("remainingFraction")
+                    if remaining_fraction is not None:
+                        remaining_percent = _clamp_percent(float(remaining_fraction) * 100.0)
+                        used_percent = round(100.0 - remaining_percent, 2) if remaining_percent is not None else None
+                        resets_at = _timestamp_to_iso(quota_info.get("resetTime"))
+                        windows.append(
+                            QuotaWindow(
+                                quota_id="antigravity:gemini-3.8-flash",
+                                label="Janela Móvel (5h)",
+                                used_percent=used_percent,
+                                remaining_percent=remaining_percent,
+                                window_duration_minutes=300,
+                                resets_at=resets_at,
+                                metric="subscription",
+                            )
+                        )
+            except (urllib.error.URLError, OSError, json.JSONDecodeError, TimeoutError):
+                pass
+
+        if not windows:
             return None
 
-        models = models_payload.get("response", {}).get("models", {})
-        if not isinstance(models, dict) or not models:
-            return None
-
-        target_model = (
-            models.get("gemini-3.8-flash-high")
-            or models.get("gemini-3.8-flash-medium")
-            or next((m for m in models.values() if isinstance(m, dict) and m.get("quotaInfo")), None)
-        )
-        if not target_model or not isinstance(target_model.get("quotaInfo"), dict):
-            return None
-
-        quota_info = target_model["quotaInfo"]
-        remaining_fraction = quota_info.get("remainingFraction")
-        if remaining_fraction is None:
-            return None
-
-        remaining_percent = _clamp_percent(float(remaining_fraction) * 100.0)
-        used_percent = round(100.0 - remaining_percent, 2) if remaining_percent is not None else None
-        resets_at = _timestamp_to_iso(quota_info.get("resetTime"))
+        # Sort windows: longest duration first (weekly, then 5h)
+        windows.sort(key=lambda w: (w.window_duration_minutes or 0), reverse=True)
 
         plan = None
         account_label = None
@@ -852,19 +940,8 @@ class GeminiAccountAdapter(AccountUsageAdapter):
         except Exception:
             pass
 
-        limited = used_percent is not None and used_percent >= 100.0
-        windows = [
-            QuotaWindow(
-                quota_id="antigravity:gemini-3.8-flash",
-                label="Gemini 3.8 Flash · 5h",
-                used_percent=used_percent,
-                remaining_percent=remaining_percent,
-                window_duration_minutes=300,
-                resets_at=resets_at,
-                metric="subscription",
-            )
-        ]
-        return ProviderAccountUsage(
+        limited = any(w.used_percent is not None and w.used_percent >= 100.0 for w in windows)
+        usage = ProviderAccountUsage(
             provider_id=self.spec.provider_id,
             provider_name=self.spec.provider_name,
             family=self.spec.family,
@@ -877,6 +954,8 @@ class GeminiAccountAdapter(AccountUsageAdapter):
             message="Quotas lidas em tempo real do Language Server local do Antigravity.",
             dashboard_url=self.spec.dashboard_url,
         )
+        self._save_snapshot(usage)
+        return usage
 
     @staticmethod
     def _find_antigravity() -> Optional[Path]:
@@ -931,23 +1010,31 @@ class GeminiAccountAdapter(AccountUsageAdapter):
 
 class ClaudeCodeAccountAdapter(AccountUsageAdapter):
     def inspect(self) -> ProviderAccountUsage:
+        # 1. Try real live Anthropic unified rate-limits probe
+        try:
+            live_usage = self._probe_claude_unified_ratelimits()
+            if live_usage:
+                return live_usage
+        except Exception as exc:
+            logger.debug("Claude unified ratelimits probe failed: %s", exc)
+
         snapshot = self._snapshot_payload()
         if snapshot:
             return self._from_snapshot(snapshot)
 
-        # 1. Try Claude Code CLI execution
+        # 2. Try Claude Code CLI execution
         executable = self._find_claude()
         if executable:
             cli_usage = self._probe_claude_cli(executable)
             if cli_usage:
                 return cli_usage
 
-        # 2. Try Claude credentials file
+        # 3. Try Claude credentials file
         cred_usage = self._probe_claude_credentials()
         if cred_usage:
             return cred_usage
 
-        # 3. Fallback to ANTHROPIC_API_KEY
+        # 4. Fallback to ANTHROPIC_API_KEY
         if any(os.environ.get(key) for key in self.spec.env_keys):
             return self.connected_without_quota(
                 "Anthropic API key configurada; a quota do plano Claude Code fica disponível via CLI autenticado.",
@@ -958,6 +1045,148 @@ class ClaudeCodeAccountAdapter(AccountUsageAdapter):
             "Claude Code não instalado ou fora do PATH. Instale com 'npm install -g @anthropic-ai/claude-code' ou configure ANTHROPIC_API_KEY.",
             "claude_code",
         )
+
+    @staticmethod
+    def _extract_claude_oauth_info() -> tuple[Optional[str], Optional[str], Optional[str]]:
+        """Extract (access_token, email, plan) from local Claude Code config."""
+        user_home = Path.home()
+        access_token: Optional[str] = None
+        email: Optional[str] = None
+        plan: Optional[str] = None
+
+        cred_file = user_home / ".claude" / ".credentials.json"
+        if cred_file.is_file():
+            try:
+                data = json.loads(cred_file.read_text(encoding="utf-8"))
+                oauth = data.get("claudeAiOauth", {})
+                if isinstance(oauth, dict) and oauth.get("accessToken"):
+                    access_token = str(oauth["accessToken"])
+                    if oauth.get("subscriptionType"):
+                        sub_type = str(oauth["subscriptionType"])
+                        plan = "Claude Pro" if sub_type.lower() == "pro" else f"Claude {sub_type.title()}"
+            except Exception as exc:
+                logger.debug("Failed to read Claude credentials: %s", exc)
+
+        json_file = user_home / ".claude.json"
+        if json_file.is_file():
+            try:
+                data = json.loads(json_file.read_text(encoding="utf-8"))
+                oauth_acc = data.get("oauthAccount", {})
+                if isinstance(oauth_acc, dict):
+                    email = oauth_acc.get("emailAddress") or oauth_acc.get("displayName")
+                    if not plan and oauth_acc.get("seatTier"):
+                        plan = f"Claude {str(oauth_acc['seatTier']).title()}"
+            except Exception as exc:
+                logger.debug("Failed to read Claude config: %s", exc)
+
+        return access_token, email, plan or "Claude Pro"
+
+    def _probe_claude_unified_ratelimits(self) -> Optional[ProviderAccountUsage]:
+        token, email, plan = self._extract_claude_oauth_info()
+        if not token:
+            return None
+
+        body = json.dumps({
+            "model": "claude-haiku-4-5-20251001",
+            "max_tokens": 1,
+            "messages": [{"role": "user", "content": "ping"}],
+        }).encode("utf-8")
+        req = urllib.request.Request(
+            "https://api.anthropic.com/v1/messages",
+            data=body,
+            headers={
+                "Authorization": f"Bearer {token}",
+                "anthropic-version": "2023-06-01",
+                "anthropic-beta": "claude-code-20250219",
+                "Content-Type": "application/json",
+                "User-Agent": "claude-code/0.2.29",
+            },
+            method="POST",
+        )
+
+        headers: Dict[str, str] = {}
+        try:
+            with urllib.request.urlopen(req, timeout=4.0) as resp:
+                headers = {k.lower(): str(v) for k, v in resp.headers.items()}
+        except urllib.error.HTTPError as exc:
+            headers = {k.lower(): str(v) for k, v in exc.headers.items()}
+        except Exception as exc:
+            logger.debug("Claude unified rate limit probe failed: %s", exc)
+            return None
+
+        if "anthropic-ratelimit-unified-5h-utilization" not in headers and "anthropic-ratelimit-unified-7d-utilization" not in headers:
+            return None
+
+        windows: List[QuotaWindow] = []
+
+        # Weekly limit (7 days)
+        raw_7d_util = headers.get("anthropic-ratelimit-unified-7d-utilization")
+        if raw_7d_util is not None:
+            try:
+                used_7d = _clamp_percent(float(raw_7d_util) * 100.0)
+            except (ValueError, TypeError):
+                used_7d = None
+            rem_7d = round(100.0 - used_7d, 2) if used_7d is not None else None
+            reset_7d_raw = headers.get("anthropic-ratelimit-unified-7d-reset")
+            try:
+                reset_7d = _timestamp_to_iso(int(reset_7d_raw)) if reset_7d_raw else None
+            except (ValueError, TypeError):
+                reset_7d = _timestamp_to_iso(reset_7d_raw)
+            windows.append(
+                QuotaWindow(
+                    quota_id="claude:weekly",
+                    label="Limite Semanal (1 semana)",
+                    used_percent=used_7d,
+                    remaining_percent=rem_7d,
+                    window_duration_minutes=10080,
+                    resets_at=reset_7d,
+                    metric="subscription",
+                )
+            )
+
+        # 5-hour window
+        raw_5h_util = headers.get("anthropic-ratelimit-unified-5h-utilization")
+        if raw_5h_util is not None:
+            try:
+                used_5h = _clamp_percent(float(raw_5h_util) * 100.0)
+            except (ValueError, TypeError):
+                used_5h = None
+            rem_5h = round(100.0 - used_5h, 2) if used_5h is not None else None
+            reset_5h_raw = headers.get("anthropic-ratelimit-unified-5h-reset")
+            try:
+                reset_5h = _timestamp_to_iso(int(reset_5h_raw)) if reset_5h_raw else None
+            except (ValueError, TypeError):
+                reset_5h = _timestamp_to_iso(reset_5h_raw)
+            windows.append(
+                QuotaWindow(
+                    quota_id="claude:5h",
+                    label="Janela Móvel (5h)",
+                    used_percent=used_5h,
+                    remaining_percent=rem_5h,
+                    window_duration_minutes=300,
+                    resets_at=reset_5h,
+                    metric="subscription",
+                )
+            )
+
+        windows.sort(key=lambda w: (w.window_duration_minutes or 0), reverse=True)
+        limited = any(w.used_percent is not None and w.used_percent >= 100.0 for w in windows)
+
+        usage = ProviderAccountUsage(
+            provider_id=self.spec.provider_id,
+            provider_name=self.spec.provider_name,
+            family=self.spec.family,
+            status=AccountConnectionStatus.LIMITED if limited else AccountConnectionStatus.CONNECTED,
+            adapter="claude_code_api",
+            plan=plan,
+            account_label=email,
+            quota_supported=bool(windows),
+            windows=windows,
+            message="Quotas lidas em tempo real da API unificada do Claude Code.",
+            dashboard_url=self.spec.dashboard_url,
+        )
+        self._save_snapshot(usage)
+        return usage
 
     @staticmethod
     def _find_claude() -> Optional[str]:

@@ -59,7 +59,7 @@ function mountAIUsageMonitor() {
         </button>
       </div>
     </div>
-    <div id="account-usage-cards" class="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
+    <div id="account-usage-cards" class="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
       ${usageSkeleton(3)}
     </div>
     <div id="account-usage-toggle-footer" class="hidden flex items-center justify-center pt-1">
@@ -133,13 +133,13 @@ function renderAccountUsage() {
   const report = usageState.accounts;
   if (!container || !report) return;
 
-  const priority = { openai: 0, xai: 1, google: 2, ollama: 3 };
+  const priority = { openai: 0, anthropic: 1, google: 2, xai: 3, ollama: 4 };
   const allAccounts = [...(report.accounts || [])].sort((left, right) =>
     (priority[left.provider_id] ?? 10) - (priority[right.provider_id] ?? 10));
 
-  // Primary default accounts: exactly the 3 main platforms (OpenAI, Grok, Google)
+  // Primary default accounts: exactly the 4 main harnesses (OpenAI, Claude Code, AntiGravity, Grok)
   const isPrimary = (account) => {
-    return ["openai", "xai", "google"].includes(account.provider_id);
+    return ["openai", "anthropic", "google", "xai"].includes(account.provider_id);
   };
 
   const primaryAccounts = allAccounts.filter(isPrimary);
@@ -229,7 +229,7 @@ function renderQuotaWindow(window) {
 
   const barPercent = remaining !== null ? remaining : (used !== null ? Math.max(0, 100 - used) : 0);
   const color = barPercent <= 10 ? "bg-rose-500" : barPercent <= 30 ? "bg-amber-400" : "bg-emerald-400";
-  const reset = window.resets_at ? `reset ${formatUsageReset(window.resets_at)}` : "reset não informado";
+  const reset = window.resets_at ? formatUsageReset(window.resets_at) : "restart não informado";
 
   return `
     <div>
@@ -288,8 +288,37 @@ function usageStatusStyle(status) {
 
 function formatUsageReset(value) {
   const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "não informado";
-  return new Intl.DateTimeFormat("pt-BR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }).format(date);
+  if (Number.isNaN(date.getTime())) return "restart não informado";
+  const now = new Date();
+  const diffMs = date.getTime() - now.getTime();
+  const formattedDate = new Intl.DateTimeFormat("pt-BR", {
+    day: "2-digit",
+    month: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(date);
+
+  if (diffMs <= 0) {
+    return `reiniciando agora (${formattedDate})`;
+  }
+
+  const diffSec = Math.floor(diffMs / 1000);
+  const diffMin = Math.floor(diffSec / 60);
+  const diffHours = Math.floor(diffMin / 60);
+  const diffDays = Math.floor(diffHours / 24);
+
+  let countdown = "";
+  if (diffDays > 0) {
+    const remHours = diffHours % 24;
+    countdown = `em ${diffDays}d ${remHours}h`;
+  } else if (diffHours > 0) {
+    const remMin = diffMin % 60;
+    countdown = `em ${diffHours}h ${remMin}m`;
+  } else {
+    countdown = `em ${Math.max(1, diffMin)}m`;
+  }
+
+  return `reinicia ${countdown} (${formattedDate})`;
 }
 
 function usageEscapeHtml(value) {
