@@ -298,7 +298,18 @@ def _create_bundle(project_root: Path, *, base_shas: list[str]) -> Path:
             cmd, cwd=project_root, capture_output=True, text=True, encoding="utf-8", errors="replace", check=False
         )
 
-    proc = _bundle(base_shas)
+    # The worker may advertise commits this checkout has never seen (e.g. an
+    # unpushed local commit on the worker); `--not <unknown sha>` makes git
+    # abort with "bad object", so only exclude commits that exist here.
+    known_locally = [
+        sha
+        for sha in base_shas
+        if subprocess.run(
+            ["git", "cat-file", "-e", f"{sha}^{{commit}}"], cwd=project_root, capture_output=True, check=False
+        ).returncode
+        == 0
+    ]
+    proc = _bundle(known_locally)
     if proc.returncode != 0 and "empty bundle" in proc.stderr:
         # The worker already has HEAD (typically validating the same main it
         # has checked out) or a descendant of it. git refuses an empty bundle,

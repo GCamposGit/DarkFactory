@@ -819,3 +819,26 @@ def test_bundle_when_worker_already_has_head(tmp_path):
         assert parent in (verify.stdout + verify.stderr)
     finally:
         bundle.unlink()
+
+
+def test_bundle_ignores_worker_commits_unknown_locally(tmp_path):
+    """A worker can advertise a commit this checkout never saw (e.g. an
+    unpushed commit on the Desktop); passing it to `--not` made git abort
+    with 'bad object' and the client silently ran the suite locally."""
+    from core.harness import remote_dispatch
+
+    repo = tmp_path / "repo"
+    _init_repo(repo)
+    _write(repo, "a.txt", "one\n")
+    _commit_all(repo, "first")
+    _write(repo, "a.txt", "two\n")
+    _commit_all(repo, "second")
+    head = _git(repo, "rev-parse", "HEAD").strip()
+    parent = _git(repo, "rev-parse", "HEAD~1").strip()
+    unknown = "9113b674e3e3c069cf639f5a6470e37ab71b35b5"
+
+    bundle = remote_dispatch._create_bundle(repo, base_shas=[unknown, parent])
+    try:
+        assert head in _git(repo, "bundle", "list-heads", str(bundle))
+    finally:
+        bundle.unlink()

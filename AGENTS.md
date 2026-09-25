@@ -68,3 +68,27 @@ oficial antes de declarar a tarefa concluída.
 - Claude Code: carrega `.claude/skills/`, espelho sincronizado de `.agents/skills/` via `scripts/sync_skills.py`; trata este `AGENTS.md` como seu contrato equivalente a um `CLAUDE.md`.
 - Grok: use a raiz clonada como workspace, leia `AGENTS.md` e `FACTORY_RULES.md` e execute os comandos acima.
 - Outros agentes: `AGENTS.md` é o contrato mínimo; `docs/HARNESS_INTEROP.md` contém o fluxo de bootstrap.
+
+## Deploy pós-merge
+
+Depois que qualquer mudança do DarkFac chegar em `main`, rode:
+
+```powershell
+python scripts/dokploy_redeploy.py
+```
+
+Isso redeploya todos os serviços (compose + application) do projeto
+`darkfac-core` no Dokploy (ambiente `production`) e espera cada um terminar
+(`done`/`error`/timeout), reportando o resultado por serviço. Relate o
+resultado (sucesso ou qual serviço falhou/expirou) ao Owner ou na
+conclusão do ticket. Use `--list` para só listar os serviços descobertos
+(nome, tipo, id, status, título do último deploy) sem disparar nada, e
+`--only NOME` (repetível) para restringir a um subconjunto. Credenciais vêm
+de `DOKPLOY_API_URL`/`DOKPLOY_API_KEY` (variáveis de ambiente; no Windows há
+fallback automático para o registro do usuário) — nunca imprima esses
+valores. `--project` é travado por um allowlist (`ALLOWED_PROJECTS` no
+script, hoje só `darkfac-core`) — qualquer outro valor sai com código 2
+antes de qualquer chamada HTTP, já que a permissão do Claude Code libera
+`python scripts/dokploy_redeploy.py *` com qualquer argumento sem prompt.
+Detalhes completos, variáveis, exit codes e o runbook de configuração do
+token em `docs/HARNESS_INTEROP.md` e `docs/runbooks/dokploy_redeploy.md`.
