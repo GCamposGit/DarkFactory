@@ -80,6 +80,20 @@ function Test-IsAdministrator {
 
 $overallOk = $true
 
+# Windows PowerShell 5.1 turns a native command's redirected stderr into a
+# terminating NativeCommandError under ErrorActionPreference=Stop (e.g.
+# "py -3.13" when that version is absent). Probes only need stdout + exit code.
+function Invoke-NativeProbe {
+    param([string]$Exe, [string[]]$Arguments)
+    $previous = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    try {
+        return (& $Exe @Arguments 2>$null)
+    } finally {
+        $ErrorActionPreference = $previous
+    }
+}
+
 # The worker must come back after a reboot of a headless Desktop even when
 # nobody logs on, which needs a "run whether the user is logged on or not"
 # (S4U) task, and the Tailscale-only firewall rule; both require elevation.
@@ -101,16 +115,33 @@ Write-Output "==================================================================
 
 Write-Section "Step 1/7: checking prerequisites (Python 3.12+, git)"
 
-$pythonCmd = Get-Command python -ErrorAction SilentlyContinue
-if (-not $pythonCmd) {
-    Write-Error "[FAIL] python was not found on PATH. Install Python 3.12+ from https://www.python.org/downloads/windows/ (check 'Add python.exe to PATH' during setup), then re-run this script."
+# Harness evidence must come from the Python line CI uses (3.12+). The worker
+# gets its own venv from that interpreter, so an older global Python used by
+# other apps (e.g. 3.11) stays installed and untouched.
+$pythonExe = $null
+$pyLauncher = Get-Command py -ErrorAction SilentlyContinue
+if ($pyLauncher) {
+    foreach ($selector in @("-3.12", "-3.13")) {
+        $candidate = Invoke-NativeProbe $pyLauncher.Source @($selector, "-c", "import sys; print(sys.executable)")
+        if ($LASTEXITCODE -eq 0 -and $candidate) { $pythonExe = "$candidate".Trim(); break }
+    }
+}
+if (-not $pythonExe) {
+    $pythonOnPath = Get-Command python -ErrorAction SilentlyContinue
+    if ($pythonOnPath) {
+        Invoke-NativeProbe $pythonOnPath.Source @("-c", "import sys; sys.exit(0 if sys.version_info >= (3, 12) else 1)") | Out-Null
+        if ($LASTEXITCODE -eq 0) { $pythonExe = $pythonOnPath.Source }
+    }
+}
+if (-not $pythonExe) {
+    Write-Output "[FAIL] Python 3.12 was not found (the global 'python' may be older, e.g. 3.11)."
+    Write-Output "       Install it ALONGSIDE the current one (other apps keep their Python):"
+    Write-Output "         winget install -e --id Python.Python.3.12"
+    Write-Output "       Then close this window, open a NEW elevated PowerShell and re-run this script."
     exit 1
 }
-$pythonVersionRaw = (& python --version) 2>&1
-Write-Output "[OK] Found: $pythonVersionRaw ($($pythonCmd.Source))"
-if ($pythonVersionRaw -notmatch "Python 3\.(1[2-9]|[2-9][0-9])") {
-    Write-Warning "[WARN] Expected Python 3.12+; found '$pythonVersionRaw'. Continuing, but core/harness relies on 3.12+ syntax."
-}
+$pythonCmd = Get-Command $pythonExe
+Write-Output "[OK] Found: $(& $pythonExe --version) ($pythonExe)"
 
 $gitCmd = Get-Command git -ErrorAction SilentlyContinue
 if (-not $gitCmd) {
@@ -143,8 +174,14 @@ if (-not (Test-Path -LiteralPath $RepoPath)) {
     Write-Output "[INFO] Repo already present; running 'git pull' ..."
     & git -C $RepoPath pull
     if ($LASTEXITCODE -ne 0) {
-        Write-Warning "[WARN] git pull failed (exit $LASTEXITCODE) -- continuing with whatever is currently checked out. Resolve manually (e.g. local changes blocking the pull) and re-run this script to update."
-        $overallOk = $false
+        # Continuing would install and start a stale worker that can look healthy.
+        Write-Output "[FAIL] git pull failed (exit $LASTEXITCODE); stopping so a stale worker is not installed."
+        Write-Output "       If it says 'local changes ... would be overwritten', see what changed with:"
+        Write-Output "         git -C $RepoPath status --short"
+        Write-Output "       and set those edits aside (recoverable later with 'git stash list'):"
+        Write-Output "         git -C $RepoPath stash push -u -m desktop-local-changes"
+        Write-Output "       then re-run this script."
+        exit 1
     } else {
         Write-Output "[OK] Repo up to date."
     }
@@ -166,6 +203,13 @@ Write-Section "Step 3/7: installing Python dependencies into the worker's own ve
 # (open-webui, pdfplumber, ...). Harness jobs inherit it via sys.executable.
 $VenvPath = Join-Path $env:LOCALAPPDATA "DarkFac\worker\venv"
 $venvPython = Join-Path $VenvPath "Scripts\python.exe"
+if (Test-Path -LiteralPath $venvPython) {
+    Invoke-NativeProbe $venvPython @("-c", "import sys; sys.exit(0 if sys.version_info >= (3, 12) else 1)") | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        Write-Output "[INFO] Existing worker venv uses Python < 3.12; recreating it."
+        Remove-Item -Recurse -Force -LiteralPath $VenvPath
+    }
+}
 if (-not (Test-Path -LiteralPath $venvPython)) {
     & $pythonCmd.Source -m venv $VenvPath
     if ($LASTEXITCODE -ne 0) {

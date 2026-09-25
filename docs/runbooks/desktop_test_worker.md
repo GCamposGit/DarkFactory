@@ -169,13 +169,37 @@ Tailscale e pronto para receber jobs de qualquer host.
 
 ## 6. Solucao de problemas
 
-**"[FAIL] python was not found on PATH"**
-Instale o Python 3.12 (ou mais novo) baixando de
-`https://www.python.org/downloads/windows/`. Durante a instalacao, marque
-a caixa **"Add python.exe to PATH"** na primeira tela do instalador (muito
-importante — se pular essa caixa, o Windows nao vai achar o Python depois).
-Depois de instalar, feche e reabra o PowerShell (passo 1b) e rode o
-instalador de novo (passo 2).
+**"[FAIL] Python 3.12 was not found"**
+O worker precisa do Python 3.12, a mesma versao do CI. Se a maquina tem
+outro Python (por exemplo 3.11, usado pelo open-webui), ele continua
+instalado e intocado: o 3.12 entra ao lado dele. No PowerShell de
+administrador, rode:
+
+```powershell
+winget install -e --id Python.Python.3.12
+```
+
+Se o `winget` perguntar sobre os termos da loja, digite `Y` e Enter. Depois
+**feche a janela**, abra um PowerShell de administrador novo (passo 1b) e
+rode o instalador de novo (passo 2). O instalador acha o 3.12 sozinho pelo
+lancador `py`.
+
+**"[FAIL] git pull failed ... local changes would be overwritten"**
+Alguem (outra sessao ou agente) editou arquivos do repositorio no Desktop
+sem commitar. Para ver o que mudou:
+
+```powershell
+git -C C:\dev\DarkFac status --short
+```
+
+Para guardar essas edicoes de lado sem perder nada (da para recuperar
+depois com `git stash list`):
+
+```powershell
+git -C C:\dev\DarkFac stash push -u -m desktop-local-changes
+```
+
+Depois rode o instalador de novo (passo 2).
 
 **"[FAIL] git was not found on PATH"**
 Instale o Git para Windows baixando de
