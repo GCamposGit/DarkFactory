@@ -887,3 +887,38 @@ def test_resolve_services_no_matching_project_raises_usage_error() -> None:
     transport.program_get("/api/project.all", [_new_shape_projects()])
     with pytest.raises(mod.DokployUsageError):
         mod._resolve_services(transport, "not-a-project", "production", None)
+
+
+def test_main_title_match_uses_commit_subject_only(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Dokploy titles git deployments with the full commit message (subject +
+    body); comparing it whole against origin/main's subject printed a false
+    '[does not match local origin/main]' on a correct deploy."""
+    subject = "fix(harness): subject line"
+    full_title = subject + "\n\nBody paragraph.\n\nCo-Authored-By: X <x@example.com>"
+    monkeypatch.setattr(mod, "get_local_origin_main_subject", lambda: subject)
+    transport = _make_transport_with_full_project()
+    _program_status(
+        transport,
+        "/api/compose.one?composeId=compose_cloud",
+        [
+            [{"deploymentId": "old", "status": "done", "title": "old", "createdAt": "2026-09-12T09:00:00Z"}],
+            [{"deploymentId": "new", "status": "done", "title": full_title, "createdAt": "2026-09-12T09:10:00Z"}],
+        ],
+    )
+    out, err = io.StringIO(), io.StringIO()
+    clock = FakeClock()
+    exit_code = mod.main(
+        ["--only", "darkfac-cloud"],
+        env={"DOKPLOY_API_URL": "https://dokploy.ggcampos.com", "DOKPLOY_API_KEY": SENTINEL_KEY},
+        registry_reader=_no_registry,
+        transport_factory=lambda url, key: transport,
+        sleep_fn=clock.sleep,
+        clock_fn=clock.now,
+        stdout=out,
+        stderr=err,
+    )
+    report = out.getvalue()
+    assert exit_code == mod.EXIT_OK
+    assert "[matches local origin/main]" in report
+    assert "does not match" not in report
+    assert "Body paragraph" not in report

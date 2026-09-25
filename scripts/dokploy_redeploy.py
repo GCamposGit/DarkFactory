@@ -687,12 +687,14 @@ def main(
             sleep_fn=sleep_fn,
             clock_fn=clock_fn,
         )
-        title = result.deployment.title if result.deployment else "(unknown)"
+        # Git-sourced deployments are titled with the full commit message;
+        # compare and print only its subject line.
+        title = result.deployment.title.splitlines()[0] if result.deployment and result.deployment.title else "(unknown)"
         match_note = ""
         if local_subject and result.deployment and result.deployment.title:
             match_note = (
                 " [matches local origin/main]"
-                if result.deployment.title == local_subject
+                if title.strip() == local_subject.strip()
                 else " [does not match local origin/main]"
             )
         print(
