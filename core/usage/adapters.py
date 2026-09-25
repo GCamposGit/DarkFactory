@@ -748,10 +748,6 @@ class GeminiAccountAdapter(AccountUsageAdapter):
     )
 
     def inspect(self) -> ProviderAccountUsage:
-        snapshot = self._snapshot_payload()
-        if snapshot:
-            return self._from_snapshot(snapshot)
-
         # 1. Try local Antigravity Language Server RPC probe (real live quota)
         try:
             live_usage = self._probe_language_server()
@@ -759,6 +755,10 @@ class GeminiAccountAdapter(AccountUsageAdapter):
                 return live_usage
         except Exception as exc:
             logger.debug("Antigravity Language Server probe failed: %s", exc)
+
+        snapshot = self._snapshot_payload()
+        if snapshot:
+            return self._from_snapshot(snapshot)
 
         installation = self._find_antigravity()
         if installation is None and not any(os.environ.get(key) for key in self.spec.env_keys):
