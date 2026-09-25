@@ -786,3 +786,34 @@ def test_worker_keeps_real_console_streams(tmp_path):
 
     assert remote_worker.ensure_console_streams(tmp_path / "daemon.log") is None
     assert not (tmp_path / "daemon.log").exists()
+
+
+def test_bundle_when_worker_already_has_head(tmp_path):
+    """The worker usually has the exact commit being validated (its own
+    origin/main); `HEAD --not HEAD` is empty and git refuses it, which made
+    the client silently skip the Desktop and run locally."""
+    from core.harness import remote_dispatch
+
+    repo = tmp_path / "repo"
+    _init_repo(repo)
+    _write(repo, "a.txt", "one\n")
+    _commit_all(repo, "first")
+    _write(repo, "a.txt", "two\n")
+    _commit_all(repo, "second")
+    head = _git(repo, "rev-parse", "HEAD").strip()
+    parent = _git(repo, "rev-parse", "HEAD~1").strip()
+
+    bundle = remote_dispatch._create_bundle(repo, base_shas=[head])
+    try:
+        heads = _git(repo, "bundle", "list-heads", str(bundle))
+        assert head in heads
+        # Only the HEAD commit is shipped; its parent is a prerequisite the
+        # worker is known to hold because it already has HEAD.
+        verify = subprocess.run(
+            ["git", "bundle", "verify", str(bundle)],
+            cwd=str(repo), capture_output=True, text=True, encoding="utf-8", errors="replace",
+        )
+        assert verify.returncode == 0, verify.stderr
+        assert parent in (verify.stdout + verify.stderr)
+    finally:
+        bundle.unlink()

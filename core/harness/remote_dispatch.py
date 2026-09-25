@@ -289,12 +289,22 @@ def _create_bundle(project_root: Path, *, base_shas: list[str]) -> Path:
     fd, tmp_name = tempfile.mkstemp(suffix=".bundle", prefix="darkfac-harness-")
     os.close(fd)
     tmp_path = Path(tmp_name)
-    cmd = ["git", "bundle", "create", str(tmp_path), "HEAD"]
-    if base_shas:
-        cmd += ["--not", *base_shas]
-    proc = subprocess.run(
-        cmd, cwd=project_root, capture_output=True, text=True, encoding="utf-8", errors="replace", check=False
-    )
+
+    def _bundle(negatives: list[str]) -> subprocess.CompletedProcess[str]:
+        cmd = ["git", "bundle", "create", str(tmp_path), "HEAD"]
+        if negatives:
+            cmd += ["--not", *negatives]
+        return subprocess.run(
+            cmd, cwd=project_root, capture_output=True, text=True, encoding="utf-8", errors="replace", check=False
+        )
+
+    proc = _bundle(base_shas)
+    if proc.returncode != 0 and "empty bundle" in proc.stderr:
+        # The worker already has HEAD (typically validating the same main it
+        # has checked out) or a descendant of it. git refuses an empty bundle,
+        # so ship just the HEAD commit: its parents are prerequisites the
+        # worker is known to hold, and the job still gets a ref to fetch.
+        proc = _bundle(["HEAD^@"])
     if proc.returncode != 0:
         with contextlib.suppress(OSError):
             tmp_path.unlink()
