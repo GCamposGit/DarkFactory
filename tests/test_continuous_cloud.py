@@ -55,7 +55,9 @@ def test_coordinator_idle_loop_without_ai_calls() -> None:
     thread.start()
 
     try:
-        deadline = time.monotonic() + 2.0
+        # Returns as soon as the thread is up; the generous ceiling only
+        # matters when the host is saturated (e.g. xdist with 28 workers).
+        deadline = time.monotonic() + 10.0
         while not coordinator._running and time.monotonic() < deadline:
             time.sleep(0.01)
         assert coordinator._running is True
@@ -310,7 +312,9 @@ def test_coordinator_resilience_waiting_access() -> None:
     thread.start()
 
     try:
-        deadline = time.monotonic() + 2.0
+        # Returns as soon as the thread is up; the generous ceiling only
+        # matters when the host is saturated (e.g. xdist with 28 workers).
+        deadline = time.monotonic() + 10.0
         while not coordinator._running and time.monotonic() < deadline:
             time.sleep(0.01)
         assert coordinator._running is True
