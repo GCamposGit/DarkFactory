@@ -131,9 +131,9 @@ def test_plan_enrichment_by_full_id_with_status_fields(tmp_path: Path) -> None:
     assert repo_hf13_01 is not None
     assert repo_hf13_01.id == "HF-13-01"
     assert repo_hf13_01.parent_id == "HF-13"
-    assert repo_hf13_01.planning_status == "waiting_dependency"
-    assert repo_hf13_01.implementation_status == "not_started"
-    assert repo_hf13_01.operational_status == "not_verified"
+    assert repo_hf13_01.planning_status == "ready_for_handoff"
+    assert repo_hf13_01.implementation_status == "implemented"
+    assert repo_hf13_01.operational_status == "verified"
 
 
 def test_documentary_markdown_glob_does_not_conclude_ticket_without_verified_receipt(
@@ -354,7 +354,7 @@ def test_repository_service_deterministic_snapshot_hash() -> None:
     # Verify HF-13-01 in compiled snapshot
     hf13_01 = next((item for item in first.items if item.id == "HF-13-01"), None)
     assert hf13_01 is not None
-    assert hf13_01.planning_status == "waiting_dependency"
-    assert hf13_01.implementation_status == "not_started"
-    assert hf13_01.operational_status == "not_verified"
+    assert hf13_01.planning_status == "ready_for_handoff"
+    assert hf13_01.implementation_status == "implemented"
+    assert hf13_01.operational_status == "verified"
     assert hf13_01.parent_id == "HF-13"
