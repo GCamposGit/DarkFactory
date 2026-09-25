@@ -1,15 +1,11 @@
-"""Quota-aware harness routing for the DarkFac production line (HF-27-03).
+"""Quota-aware harness routing for the DarkFac production line (HF-27-03 / HF-23).
 
-Implements the "subscription first, OpenRouter only under critical
-pressure" policy from `docs/PRODUCTION_LINE_PLAN_2026-09-22.md`
-(section 6). `pick()` walks a per-stage cascade of (harness, model)
-pairs from `.factory/config/line_routing.json`, skipping accounts the
-host cannot run, accounts in reactive cooldown (set by `record_result`
-after a `rate_limited` `AgentResult`), and accounts whose quota
-headroom is CRITICAL. OpenRouter is only offered as a fallback when the
-stage explicitly allows it (`openrouter_ok`) or when every cascade
-account is exhausted (cooldown or CRITICAL), and only within
-`run_caps.openrouter_usd`.
+Implements the unified "subscription first, OpenRouter only with verified balance,
+and fail-closed under critical pressure" policy.
+`pick()` walks a stage cascade, filtering out ineligible accounts (not in host_caps,
+in cooldown, forbidden models, unknown/stale quota, or remaining <= critical threshold 15%),
+and prioritizes eligible harnesses via Dynamic Headroom (highest remaining quota first)
+or specialized intelligence tiers.
 """
 
 from __future__ import annotations
@@ -29,11 +25,19 @@ logger = logging.getLogger(__name__)
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
-# v0 thresholds mirrored from core.router.token_budget._pressure_for
-# (guarded <= 50%, stressed <= 25%, critical <= 10% remaining). Kept here as
-# the config default so `.factory/config/line_routing.json` can override
-# them without touching code.
-_DEFAULT_PRESSURE_THRESHOLDS: dict[str, float] = {"guarded": 50.0, "stressed": 25.0, "critical": 10.0}
+# Critical pressure threshold is 15.0% (strict fail-closed)
+_DEFAULT_PRESSURE_THRESHOLDS: dict[str, float] = {
+    "guarded": 50.0,
+    "stressed": 25.0,
+    "critical": 15.0,
+}
+
+_DEFAULT_FORBIDDEN_AUTONOMOUS_MODELS: list[str] = [
+    "fable",
+    "claude-fable",
+    "astra",
+    "gpt-6-astra",
+]
 
 _HARNESS_TO_PROVIDER: dict[str, str] = {
     "claude": "anthropic",
@@ -70,6 +74,9 @@ class RoutingConfig(BaseModel):
 
     pressure_thresholds: dict[str, float] = Field(default_factory=lambda: dict(_DEFAULT_PRESSURE_THRESHOLDS))
     cooldown_default_minutes: int = 60
+    forbidden_autonomous_models: list[str] = Field(
+        default_factory=lambda: list(_DEFAULT_FORBIDDEN_AUTONOMOUS_MODELS)
+    )
     stages: dict[str, StageRoute] = Field(default_factory=dict)
     run_caps: RunCaps = Field(default_factory=RunCaps)
 
@@ -92,20 +99,23 @@ def _default_routing_config() -> RoutingConfig:
     return RoutingConfig(
         pressure_thresholds=dict(_DEFAULT_PRESSURE_THRESHOLDS),
         cooldown_default_minutes=60,
+        forbidden_autonomous_models=list(_DEFAULT_FORBIDDEN_AUTONOMOUS_MODELS),
         stages={
             "grill": StageRoute(
-                cascade=[("claude", "sonnet"), ("codex", None)],
+                cascade=[("antigravity", None), ("claude", "sonnet"), ("codex", None)],
                 openrouter_ok=True,
                 openrouter_model=cheap_model,
             ),
             "planning": StageRoute(
-                cascade=[("claude", "opus"), ("codex", None)],
+                cascade=[("claude", "opus"), ("codex", None), ("antigravity", None)],
                 effort="high",
-                openrouter_ok=False,
+                openrouter_ok=True,
+                openrouter_model=cheap_model,
             ),
             "development": StageRoute(
-                cascade=[("claude", "sonnet"), ("codex", None), ("grok", None), ("antigravity", None)],
-                openrouter_ok=False,
+                cascade=[("antigravity", None), ("claude", "sonnet"), ("codex", None), ("grok", None)],
+                openrouter_ok=True,
+                openrouter_model=cheap_model,
             ),
             "review": StageRoute(
                 cascade="other_family_than_development",
@@ -192,8 +202,17 @@ def record_result(
     *,
     config: Optional[RoutingConfig] = None,
     cooldown_path: Optional[Path] = None,
+    reservation_id: Optional[str] = None,
 ) -> None:
-    """Put `result.harness` in cooldown when the CLI reported rate_limited."""
+    """Record execution outcome, releasing reservation and setting cooldown on rate limit."""
+    if reservation_id:
+        try:
+            from core.usage.reservation import QuotaReservationManager
+
+            QuotaReservationManager().release(reservation_id)
+        except Exception as exc:
+            logger.debug("Failed releasing quota reservation %s: %s", reservation_id, exc)
+
     if result.error_kind != "rate_limited":
         return
     cfg = config or load_routing_config()
@@ -216,21 +235,46 @@ def record_result(
 
 
 # --------------------------------------------------------------------------
-# Quota headroom (optional; unknown counts as eligible)
+# Quota headroom (strict fail-closed, reads .factory/usage/providers)
 # --------------------------------------------------------------------------
 
 
 def _default_quota_headroom(provider_id: str) -> Optional[float]:
-    """Best-effort real quota probe via core.usage.adapters. Never raises."""
+    """Real quota probe via core.usage.adapters reading providers. Fail-closed on stale/missing."""
     try:
         from core.router.token_budget import _quota_headroom
         from core.usage.adapters import build_default_adapters
+        from core.usage.reservation import QuotaReservationManager
 
-        snapshot_dir = REPO_ROOT / ".factory" / "usage" / "snapshots"
-        for adapter in build_default_adapters(snapshot_dir):
+        provider_dir = REPO_ROOT / ".factory" / "usage" / "providers"
+        snapshot_file = provider_dir / f"{provider_id}.json"
+        if snapshot_file.is_file():
+            try:
+                data = json.loads(snapshot_file.read_text(encoding="utf-8"))
+                checked_at_str = data.get("checked_at")
+                if checked_at_str:
+                    checked_at = datetime.fromisoformat(str(checked_at_str).replace("Z", "+00:00"))
+                    if checked_at.tzinfo is None:
+                        checked_at = checked_at.replace(tzinfo=timezone.utc)
+                    age_seconds = (datetime.now(timezone.utc) - checked_at).total_seconds()
+                    if age_seconds > 3600:
+                        logger.warning(
+                            "Snapshot for %s is stale (%s s > 3600s); failing closed",
+                            provider_id,
+                            round(age_seconds, 1),
+                        )
+                        return None
+            except Exception as e:
+                logger.debug("Failed parsing checked_at for provider %s: %s", provider_id, e)
+
+        for adapter in build_default_adapters(provider_dir):
             if adapter.spec.provider_id == provider_id:
-                return _quota_headroom(adapter.inspect())
-    except Exception as exc:  # pragma: no cover - defensive, quota probing is best-effort
+                raw_headroom = _quota_headroom(adapter.inspect())
+                if raw_headroom is None:
+                    return None
+                reserved = QuotaReservationManager().get_active_reserved_percent(provider_id)
+                return max(0.0, raw_headroom - reserved)
+    except Exception as exc:  # pragma: no cover - defensive
         logger.debug("Quota lookup failed for provider %s: %s", provider_id, exc)
     return None
 
@@ -245,11 +289,10 @@ def _resolve_cascade(
 ) -> list[tuple[str, Optional[str]]]:
     if stage_cfg.cascade == "other_family_than_development":
         if implementing_harness == "claude":
-            return [("codex", None), ("grok", None)]
+            return [("codex", None), ("grok", None), ("antigravity", None)]
         if implementing_harness == "codex":
-            return [("claude", None), ("grok", None)]
-        # grok/antigravity/unknown implementer: default to the two Tier-1 families, then grok.
-        return [("claude", None), ("codex", None), ("grok", None)]
+            return [("claude", None), ("grok", None), ("antigravity", None)]
+        return [("claude", None), ("codex", None), ("grok", None), ("antigravity", None)]
     return list(stage_cfg.cascade)
 
 
@@ -276,15 +319,23 @@ def pick(
     config: Optional[RoutingConfig] = None,
     quota_lookup: Optional[Callable[[str], Optional[float]]] = None,
     cooldown_path: Optional[Path] = None,
+    complexity: Optional[str] = None,
+    reserve_quota: bool = False,
+    ticket_id: Optional[str] = None,
+    openrouter_balance_lookup: Optional[Callable[[], Optional[float]]] = None,
 ) -> Optional[tuple[str, Optional[str]]]:
     """Pick a (harness, model) for `stage`, or None if nothing is eligible right now.
 
-    Walks the stage cascade in order, skipping harnesses missing from
-    `host_caps` (as `harness:<name>`), accounts in cooldown, and accounts at
-    CRITICAL quota pressure (a lookup failure / unknown quota counts as
-    eligible). Falls back to OpenRouter only when the stage allows it
-    (`openrouter_ok`) or every cascade account considered is exhausted
-    (cooldown or CRITICAL), and only while `spent_usd < run_caps.openrouter_usd`.
+    Enforces:
+    1. Filter out accounts in cooldown, missing from host_caps, forbidden models,
+       and accounts with unknown or CRITICAL quota (<= 15.0%, fail-closed).
+    2. Dynamic Headroom prioritization:
+       - High complexity / planning: prefers Claude Opus / GPT Sol if eligible,
+         falling back to highest headroom.
+       - Low complexity: prefers GPT Luna xhigh / Gemini Flash if eligible.
+       - Medium complexity / default: sorts strictly by remaining headroom descending.
+    3. Fallback to OpenRouter only when stage allows it or all cascade accounts are
+       exhausted, provided OpenRouter has confirmed USD credit and spent_usd < cap.
     """
     cfg = config or load_routing_config()
     stage_cfg = cfg.stages.get(stage)
@@ -296,32 +347,104 @@ def pick(
     cooldowns = _load_cooldowns(cooldown_path or default_cooldown_path())
     lookup = quota_lookup or _default_quota_headroom
     critical_threshold = cfg.pressure_thresholds.get("critical", _DEFAULT_PRESSURE_THRESHOLDS["critical"])
+    forbidden_models = set(m.lower().strip() for m in cfg.forbidden_autonomous_models)
 
     cascade = _resolve_cascade(stage_cfg, implementing_harness)
 
-    considered: list[tuple[str, Optional[str], bool, bool]] = []  # harness, model, in_cooldown, critical
-    winner: Optional[tuple[str, Optional[str]]] = None
+    # Candidate evaluation with fail-closed semantics
+    # (harness, model, in_cooldown, is_critical_or_unknown, remaining_headroom)
+    evaluated: list[tuple[str, Optional[str], bool, bool, float]] = []
+    eligible: list[tuple[str, Optional[str], float]] = []
+
     for harness, model in cascade:
         if harness in excluded_harnesses or (harness, model) in excluded_pairs:
             continue
         if f"harness:{harness}" not in caps:
             continue
+        if model and model.lower().strip() in forbidden_models:
+            logger.info("Skipping model %s for harness %s (forbidden autonomous model)", model, harness)
+            continue
+
         cooling = _in_cooldown(harness, cooldowns)
-        remaining = None if cooling else lookup(_HARNESS_TO_PROVIDER.get(harness, harness))
-        critical = remaining is not None and remaining <= critical_threshold
-        considered.append((harness, model, cooling, critical))
-        if winner is None and not cooling and not critical:
-            winner = (harness, model)
+        provider_id = _HARNESS_TO_PROVIDER.get(harness, harness)
+        remaining = None if cooling else lookup(provider_id)
+
+        # Fail-closed: unknown quota or quota <= critical is strictly critical/ineligible
+        is_critical = remaining is None or remaining <= critical_threshold
+        evaluated.append((harness, model, cooling, is_critical, remaining or 0.0))
+
+        if not cooling and not is_critical and remaining is not None:
+            eligible.append((harness, model, remaining))
+
+    winner: Optional[tuple[str, Optional[str]]] = None
+
+    if eligible:
+        comp = (complexity or "").lower().strip()
+        if comp in ("high", "critical") or stage in ("planning", "architecture"):
+            # High Intelligence tier: prioritize Opus or Sol
+            high_intel = [
+                cand for cand in eligible
+                if cand[1] and any(m in cand[1].lower() for m in ("opus", "sol"))
+            ]
+            if high_intel:
+                high_intel.sort(key=lambda item: item[2], reverse=True)
+                winner = (high_intel[0][0], high_intel[0][1])
+            else:
+                eligible.sort(key=lambda item: item[2], reverse=True)
+                winner = (eligible[0][0], eligible[0][1])
+        elif comp == "low":
+            # Low complexity: prioritize Luna xhigh or Gemini Flash
+            low_intel = [
+                cand for cand in eligible
+                if (cand[1] and any(m in cand[1].lower() for m in ("luna", "gemini", "flash")))
+                or cand[0] == "antigravity"
+            ]
+            if low_intel:
+                low_intel.sort(key=lambda item: item[2], reverse=True)
+                winner = (low_intel[0][0], low_intel[0][1])
+            else:
+                eligible.sort(key=lambda item: item[2], reverse=True)
+                winner = (eligible[0][0], eligible[0][1])
+        else:
+            # Medium complexity / default: Headroom Dinâmico (maior cota primeiro)
+            eligible.sort(key=lambda item: item[2], reverse=True)
+            winner = (eligible[0][0], eligible[0][1])
 
     if winner is not None:
+        if reserve_quota:
+            try:
+                from core.usage.reservation import QuotaReservationManager
+
+                prov = _HARNESS_TO_PROVIDER.get(winner[0], winner[0])
+                QuotaReservationManager().reserve(prov, winner[0], ticket_id=ticket_id)
+            except Exception as exc:
+                logger.debug("Failed reserving quota for %s: %s", winner, exc)
         return winner
 
-    all_exhausted = bool(considered) and all(cooling or critical for _, _, cooling, critical in considered)
+    all_exhausted = bool(evaluated) and all(cooling or is_critical for _, _, cooling, is_critical, _ in evaluated)
     if (
         stage_cfg.openrouter_model
+        and stage_cfg.openrouter_model.lower().strip() not in forbidden_models
         and (stage_cfg.openrouter_ok or all_exhausted)
         and spent_usd < cfg.run_caps.openrouter_usd
     ):
-        return "openrouter", stage_cfg.openrouter_model
+        # OpenRouter fallback requires verified positive credit balance
+        has_credits = False
+        if openrouter_balance_lookup is not None:
+            bal = openrouter_balance_lookup()
+            has_credits = bal is not None and bal > 0.0
+        else:
+            try:
+                from core.usage.api_credits import ApiCreditsMonitor
+
+                credits_mon = ApiCreditsMonitor()
+                card = credits_mon.inspect_openrouter()
+                has_credits = card.is_connected and card.available_credit_usd is not None and card.available_credit_usd > 0.0
+            except Exception as exc:
+                logger.warning("Failed to verify OpenRouter credits: %s", exc)
+
+        if has_credits:
+            return "openrouter", stage_cfg.openrouter_model
+        logger.warning("OpenRouter fallback skipped: account disconnected or balance non-positive.")
 
     return None

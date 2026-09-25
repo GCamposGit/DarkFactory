@@ -33,7 +33,7 @@ def _isolated_pick(tmp_path: Path):
 
     def _pick(*args, **kwargs):
         kwargs.setdefault("cooldown_path", tmp_path / "cooldowns.json")
-        kwargs.setdefault("quota_lookup", lambda _provider: None)
+        kwargs.setdefault("quota_lookup", lambda _provider: 90.0)
         return real_pick(*args, **kwargs)
 
     return _pick

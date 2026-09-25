@@ -478,4 +478,49 @@ def run_agent(req: AgentRequest) -> AgentResult:
             text=f"Unsupported harness '{req.harness}'. Supported: {', '.join(sorted(_HARNESS_RUNNERS))}",
             harness=req.harness, model=req.model, duration_s=0.0, error_kind="not_installed",
         )
-    return runner(req)
+    res = runner(req)
+
+    # Telemetria ponta a ponta: Registrar evento no ModelUsageLedger
+    try:
+        from core.usage.ledger import ModelUsageLedger, infer_model_tier
+        from core.usage.models import ModelCallEvent, ModelModality, ModelTier
+
+        provider_map = {
+            "claude": "anthropic",
+            "codex": "openai",
+            "grok": "xai",
+            "antigravity": "google",
+            "openrouter": "openrouter",
+        }
+        prov = provider_map.get(harness, harness)
+        model_name = res.model or (req.model or "unknown")
+        tier_val = infer_model_tier(prov, model_name)
+
+        input_toks = None
+        output_toks = None
+        if res.usage and isinstance(res.usage, dict):
+            input_toks = res.usage.get("prompt_tokens") or res.usage.get("input_tokens")
+            output_toks = res.usage.get("completion_tokens") or res.usage.get("output_tokens")
+
+        usage_dir = REPO_ROOT / ".factory" / "usage"
+        ledger = ModelUsageLedger(usage_dir)
+        ledger.record(
+            ModelCallEvent(
+                provider=prov,
+                model=model_name,
+                tier=ModelTier(tier_val),
+                harness=harness,
+                modality=ModelModality.TEXT,
+                success=res.ok,
+                input_tokens=input_toks,
+                output_tokens=output_toks,
+                cost_usd=res.cost_usd,
+                latency_ms=round(res.duration_s * 1000, 1),
+                source=f"agent_cli.{harness}",
+            )
+        )
+    except Exception as exc:
+        logger.debug("Failed recording agent_cli call to ModelUsageLedger: %s", exc)
+
+    return res
+

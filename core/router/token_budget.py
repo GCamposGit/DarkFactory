@@ -154,6 +154,7 @@ def _pressure_for(remaining_percent: Optional[float]) -> TokenPressure:
     return TokenPressure.HEALTHY
 
 
+
 def plan_token_stress(
     task_type: str,
     complexity: str = "medium",
@@ -212,12 +213,13 @@ def plan_token_stress(
 
     pressure = TokenPressure.CRITICAL if offline else _pressure_for(best_remaining)
     stressed = pressure in {TokenPressure.STRESSED, TokenPressure.CRITICAL}
-    frontier_heavy = normalized_task in _FRONTIER_HEAVY_TASKS or normalized_complexity == "critical"
+    frontier_heavy = normalized_task in _FRONTIER_HEAVY_TASKS or normalized_complexity in {"high", "critical"}
     local_friendly = normalized_task in _LOCAL_FRIENDLY_TASKS
     prefer_local = offline or (stressed and (local_friendly or not frontier_heavy) and not use_paid_api)
     prefer_scripts = offline or local_friendly or pressure == TokenPressure.CRITICAL
     defer_frontier_work = stressed and frontier_heavy
     modular_delivery = pressure in {TokenPressure.GUARDED, TokenPressure.STRESSED, TokenPressure.CRITICAL}
+
 
     output_ratio = {
         TokenPressure.UNKNOWN: 0.85,
