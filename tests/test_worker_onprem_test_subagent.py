@@ -40,13 +40,13 @@ from hub.backend.main import app as hub_app
 def test_instruction_and_report_models_defaults_and_serialization() -> None:
     """Ensure all USR-16 fields are present with correct defaults in Pydantic models."""
     instruction = TestExecutionInstruction(target="tests/test_foo.py")
-    assert instruction.worker_mode == "auto"
+    assert instruction.worker_mode == "local"
     assert instruction.remote_worker_url == "http://100.78.181.90:8080"
     assert instruction.allow_fallback is True
     assert instruction.worker_probe_timeout == 1.0
 
     dumped = instruction.model_dump()
-    assert dumped["worker_mode"] == "auto"
+    assert dumped["worker_mode"] == "local"
     assert dumped["remote_worker_url"] == "http://100.78.181.90:8080"
     assert dumped["allow_fallback"] is True
     assert dumped["worker_probe_timeout"] == 1.0
