@@ -95,6 +95,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--project", default="darkfac", help="Project identifier (default: darkfac)")
     parser.add_argument("--dry-run", action="store_true", help="Inspect quotas and resolve route without modifying code")
     parser.add_argument("--skip-validation", action="store_true", help="Skip running runner.py --quick after development")
+    parser.add_argument("--no-commit", action="store_true", help="Do not automatically commit after validation pass")
+    parser.add_argument("--no-push", action="store_true", help="Do not automatically push to remote after validation pass")
     parser.add_argument("--json", action="store_true", help="Output raw JSON result")
     return parser
 
@@ -253,19 +255,36 @@ def main(argv: Optional[list[str]] = None) -> int:
         if not args.json:
             print("[+] Portão oficial aprovado com sucesso: [HARNESS_PASS]!")
 
-    if args.json:
-        print(
-            json.dumps(
-                {
-                    "ok": True,
-                    "ticket_id": ticket.id,
-                    "harness": selected_harness,
-                    "model": selected_model,
-                    "duration_s": agent_result.duration_s,
-                },
-                indent=2,
-            )
+    # 5. Autonomous Git Lifecycle Completion (USR-57)
+    completion_report = None
+    if not args.no_commit and not args.dry_run:
+        from core.git.autonomy import GitAutonomyManager
+
+        git_mgr = GitAutonomyManager(PROJECT_ROOT)
+        completion_report = git_mgr.complete_ticket(
+            ticket_id=ticket.id,
+            auto_push=not args.no_push,
+            auto_commit=True,
         )
+        if not args.json:
+            if completion_report.ok:
+                print(f"[+] Autonomia Git: Ticket {ticket.id} concluído, comitado ({completion_report.commit_sha}) e sincronizado com sucesso.")
+            else:
+                print(f"[!] Aviso Autonomia Git: {completion_report.message}", file=sys.stderr)
+
+    if args.json:
+        payload = {
+            "ok": True,
+            "ticket_id": ticket.id,
+            "harness": selected_harness,
+            "model": selected_model,
+            "duration_s": agent_result.duration_s,
+        }
+        if completion_report:
+            payload["commit_sha"] = completion_report.commit_sha
+            if completion_report.sync_result:
+                payload["sync_action"] = completion_report.sync_result.action
+        print(json.dumps(payload, indent=2))
     else:
         print(f"\n[SUCESSO] Ticket {ticket.id} concluído e validado pelo portão oficial.")
 

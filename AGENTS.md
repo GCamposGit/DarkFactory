@@ -33,6 +33,15 @@
 - **Bloqueio de Quota Crítica no Chat**: Se a conta associada ao harness atual estiver com cota restante <= 15.0% (semanal ou janela móvel), o agente é TERMINANTEMENTE PROIBIDO de implementar código com seu próprio modelo no chat interativo. Deve recusar no chat, informar a cota restante e delegar para o harness saudável eleito (ex.: Antigravity) ou acionar o launcher headless `python C:\dev\DarkFac\run_ticket.py <TICKET_ID>`.
 - **Exceção de Override Explícito pelo Usuário**: A execução em um harness com cota <= 15.0% SÓ É PERMITIDA se o usuário exigir EXPLICITAMENTE no prompt (ex.: "forçar execução neste harness", "ignorar limite de cota", "estou ciente da cota crítica, prossiga" ou flag `--force`). Sem essa autorização textual inequívoca, o agente deve falhar fechado (*fail-closed*).
 
+## Autonomia de Git e Sincronização Multi-Ambiente (Zero Toque Humano Pós-Grill, USR-57)
+
+- Em desenvolvimentos internos da fábrica (`project: darkfac`), o agente é expressamente proibido de orientar o usuário a executar commits, merges ou sincronizações manuais no terminal.
+- O ciclo de vida do ticket é encerrado de forma 100% autônoma pelo harness/launcher (`core.git.autonomy` / `run_ticket.py`), realizando:
+  1. Commit atômico das alterações vinculadas ao ticket (`feat(...): ... [TICKET_ID]`);
+  2. Sincronização (`git fetch` + fast-forward ou `git push`) diretamente com `origin/main`;
+  3. Atualização automática do status do ticket para `completed` em `.factory/demands/demands.json`.
+- Apenas projetos comerciais externos com flag `requires_commercial_acceptance: true` exigem autorização manual prévia para merge/deploy em produção real.
+
 ## Backups 100% Autônomos (Zero Toque Humano)
 
 - É expressamente proibido orientar o usuário a executar rotinas manuais de backup ou restauração no terminal ou PowerShell.

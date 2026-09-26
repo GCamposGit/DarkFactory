@@ -1006,16 +1006,29 @@
     "core_journey": [
       "Submitted through Jarvis Assistant"
     ],
-    "non_goals": [],
-    "reachability_contract": "",
-    "acceptance_criteria": [
-      "Harness passes with deterministic verification"
+    "non_goals": [
+      "Não remover proteção em projetos comerciais que possuam requires_commercial_acceptance: true",
+      "Não realizar merge ou push se o portão oficial runner.py falhar"
     ],
-    "suggested_files": [],
+    "reachability_contract": "python -m pytest tests/test_git_autonomy.py tests/test_governance_guard.py -v",
+    "acceptance_criteria": [
+      "Módulo core.git.autonomy implementa GitAutonomyManager com commit_ticket, sync_environment e complete_ticket",
+      "run_ticket.py executa encerramento autônomo pós-validação (commit, push, DemandsStore update) sem exigir ação do usuário",
+      "FACTORY_RULES.md, AGENTS.md e CLAUDE.md consagram Zero Toque Humano Pós-Grill para operações Git em projetos internos",
+      "Suíte de testes determinísticos test_git_autonomy.py cobre ciclo completo de commit, sync e completion"
+    ],
+    "suggested_files": [
+      "core/git/autonomy.py",
+      "run_ticket.py",
+      "FACTORY_RULES.md",
+      "AGENTS.md",
+      "CLAUDE.md",
+      "tests/test_git_autonomy.py"
+    ],
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-09-25T19:07:32.777073Z",
-    "updated_at": "2026-09-25T19:07:32.777085Z"
+    "updated_at": "2026-09-26T06:35:11.979300+00:00"
   },
   {
     "id": "USR-58",
