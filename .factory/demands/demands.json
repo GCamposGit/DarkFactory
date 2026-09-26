@@ -253,7 +253,7 @@
     "project_id": "darkfac",
     "title": "Camada de Persistência Híbrida PostgreSQL + Sync R2 & On-Premises (INFRA-07 / INFRA-08)",
     "origin": "user",
-    "status": "planned",
+    "status": "completed",
     "item_type": "infrastructure",
     "lifecycle_stage": "foundations",
     "horizon": "next",
@@ -283,8 +283,8 @@
     ],
     "estimated_complexity": "medium",
     "dependencies": [],
-    "created_at": "2026-09-08T13:38:00.000000Z",
-    "updated_at": "2026-09-08T13:38:00.000000Z"
+    "created_at": "2026-09-08T13:38:00Z",
+    "updated_at": "2026-09-26T15:23:07.880157Z"
   },
   {
     "id": "USR-18",
