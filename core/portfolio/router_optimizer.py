@@ -16,6 +16,7 @@ Enforces the mandatory hierarchy:
 from __future__ import annotations
 
 import logging
+import os
 from typing import Dict, Optional
 
 from core.usage.api_credits import ApiCreditsMonitor

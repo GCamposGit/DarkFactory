@@ -110,10 +110,9 @@
       "id": "INFRA-10",
       "title": "Runner de CI e Batch Workloads no Servidor On-Premises",
       "phase": "phase-4",
-      "status": "delivered",
-      "completed_at": "2026-09-08",
-      "description": "Daemon headless de CI e despacho remoto de validação/testes no i7-4790K via Tailscale (USR-16 / HF-27-11), poupando a máquina de dev.",
-      "tags": ["ci-runner", "on-prem", "batch", "workloads", "active"]
+      "status": "planned",
+      "description": "Execução de testes pesados e compilações longas no i7-4790K via Docker, poupando a máquina de dev.",
+      "tags": ["ci-runner", "on-prem", "batch", "workloads"]
     },
     {
       "id": "INFRA-11",
