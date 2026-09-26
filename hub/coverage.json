@@ -158,6 +158,12 @@
     "GET /api/infra/cards/{node_id}": {
       "surface": "infrastructure-cards-section"
     },
+    "GET /api/infra/metrics": {
+      "surface": "infrastructure-cards-section"
+    },
+    "POST /api/infra/metrics/refresh": {
+      "surface": "infrastructure-cards-section"
+    },
     "GET /api/integrations/n8n/status": {
       "surface": "factory-health-block"
     },

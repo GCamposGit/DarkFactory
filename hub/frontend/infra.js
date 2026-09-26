@@ -12,6 +12,7 @@ const infraState = {
 function initInfra() {
   mountInfraMonitor();
   loadInfraCards(false);
+  loadInfraMetrics(false);
   mountFactoryHealthBlock();
   loadFactoryHealth();
   if (typeof healthStartVisibilityPolling === "function") {
@@ -65,6 +66,9 @@ function mountInfraMonitor() {
     </div>
     <div id="infra-cards-grid" class="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
       ${infraSkeleton(3)}
+    </div>
+    <div id="infra-metrics-panel" class="mt-4 pt-3 border-t border-slate-800/80">
+      <div class="h-32 animate-pulse rounded-xl bg-slate-950/60 border border-slate-800/60"></div>
     </div>
     <div id="cloud-gateway-banner" class="mt-4 pt-3 border-t border-slate-800/80">
       <div class="h-16 animate-pulse rounded-xl bg-slate-950/60 border border-slate-800/60"></div>
@@ -303,6 +307,183 @@ function renderInfraError(msg) {
       "rounded-full border border-rose-700/60 bg-rose-950/40 px-2.5 py-0.5 text-[10px] font-mono text-rose-300";
     pill.textContent = "falha na API";
   }
+}
+
+async function loadInfraMetrics(force = false) {
+  const panel = document.getElementById("infra-metrics-panel");
+  if (!panel) return;
+
+  const btn = document.getElementById("btn-refresh-infra-metrics");
+  if (btn) {
+    btn.disabled = true;
+    btn.classList.add("opacity-60");
+  }
+
+  try {
+    const endpoint = force ? "/api/infra/metrics/refresh" : "/api/infra/metrics";
+    const method = force ? "POST" : "GET";
+    const res = await fetch(endpoint, { method });
+    if (!res.ok) throw new Error(`Status ${res.status}`);
+    const report = await res.json();
+    renderInfraMetrics(report);
+  } catch (err) {
+    console.warn("Falha ao carregar métricas de infraestrutura:", err);
+    renderInfraMetricsError(err.message);
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.classList.remove("opacity-60");
+    }
+  }
+}
+
+function renderInfraMetrics(data) {
+  const container = document.getElementById("infra-metrics-panel");
+  if (!container || !data) return;
+
+  const hw = data.host_hardware || {};
+  const containers = data.containers || {};
+  const items = containers.items || [];
+
+  const cpuPct = hw.cpu_percent || 0;
+  const ramPct = hw.ram_percent || 0;
+  const diskPct = hw.disk_percent || 0;
+
+  const getBarColor = (pct) => {
+    if (pct >= 85) return "bg-rose-500 text-rose-300";
+    if (pct >= 65) return "bg-amber-500 text-amber-300";
+    return "bg-emerald-500 text-emerald-300";
+  };
+
+  const healthPills = {
+    healthy: "border-emerald-600/60 bg-emerald-950/40 text-emerald-300",
+    warning: "border-amber-600/60 bg-amber-950/40 text-amber-300",
+    critical: "border-rose-600/60 bg-rose-950/40 text-rose-300",
+    degraded: "border-orange-600/60 bg-orange-950/40 text-orange-300",
+  };
+  const healthClass = healthPills[data.overall_health] || healthPills.healthy;
+
+  const uptimeHours = (hw.uptime_seconds / 3600).toFixed(1);
+  const uptimeDays = (hw.uptime_seconds / 86400).toFixed(1);
+  const uptimeStr = hw.uptime_seconds > 86400 ? `${uptimeDays} dias` : `${uptimeHours} h`;
+
+  const containerRows = items.map((item) => {
+    const isRunning = ["running", "done", "active", "healthy"].includes(item.status);
+    const statusPill = isRunning
+      ? `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-mono bg-emerald-950/60 text-emerald-400 border border-emerald-800/60"><span class="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse"></span>${item.status}</span>`
+      : `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-mono bg-slate-800 text-slate-400 border border-slate-700">${item.status}</span>`;
+
+    return `
+      <tr class="border-b border-slate-900/80 hover:bg-slate-900/40 transition">
+        <td class="py-2 px-3 text-xs font-semibold text-white flex items-center gap-2">
+          <span>📦</span>
+          <span>${item.name}</span>
+        </td>
+        <td class="py-2 px-3 text-[11px] font-mono text-slate-400">${item.service_type}</td>
+        <td class="py-2 px-3">${statusPill}</td>
+        <td class="py-2 px-3 text-[11px] font-mono text-cyan-400">${item.orchestrator}</td>
+        <td class="py-2 px-3 text-[11px] font-mono text-slate-400">${item.node_id}</td>
+        <td class="py-2 px-3 text-[11px] text-slate-400 truncate max-w-[200px]" title="${item.deployment_title || ''}">${item.deployment_title || '—'}</td>
+      </tr>`;
+  }).join("");
+
+  container.innerHTML = `
+    <div class="rounded-xl border border-indigo-900/40 bg-slate-950/70 p-4 space-y-4 shadow-sm">
+      <div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between border-b border-slate-800/80 pb-3">
+        <div>
+          <div class="flex items-center gap-2">
+            <span class="text-sm">📊</span>
+            <h3 class="text-xs font-bold text-white uppercase tracking-wider font-mono">Telemetria de Hardware & Contêineres em Tempo Real (INFRA-11)</h3>
+            <span class="rounded-full border px-2 py-0.5 text-[10px] font-mono ${healthClass}">${data.overall_health}</span>
+          </div>
+          <p class="text-[11px] text-slate-400 mt-0.5 font-mono">
+            Host: <strong class="text-slate-200">${hw.node_id}</strong> (${hw.os_platform}) · Uptime: <strong class="text-slate-200">${uptimeStr}</strong>
+          </p>
+        </div>
+        <div class="flex items-center gap-2">
+          <button id="btn-refresh-infra-metrics" type="button" class="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg border border-indigo-500/40 bg-indigo-600/10 text-indigo-300 text-xs hover:bg-indigo-600/20 transition active:scale-95">
+            <svg class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+            </svg>
+            <span>Atualizar Métricas</span>
+          </button>
+        </div>
+      </div>
+
+      <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        <div class="rounded-lg border border-slate-800 bg-slate-900/60 p-3 flex flex-col justify-between">
+          <div class="flex items-center justify-between text-xs font-mono">
+            <span class="text-slate-400">Processador (CPU)</span>
+            <span class="font-bold ${cpuPct > 80 ? 'text-rose-400' : 'text-emerald-400'}">${cpuPct.toFixed(1)}%</span>
+          </div>
+          <div class="w-full bg-slate-800 rounded-full h-2 my-2 overflow-hidden">
+            <div class="h-full rounded-full transition-all duration-500 ${getBarColor(cpuPct).split(' ')[0]}" style="width: ${Math.min(cpuPct, 100)}%"></div>
+          </div>
+          <span class="text-[10px] text-slate-500 font-mono">${hw.cpu_cores_physical || 0} núcleos físicos (${hw.cpu_cores_logical || 0} threads)</span>
+        </div>
+
+        <div class="rounded-lg border border-slate-800 bg-slate-900/60 p-3 flex flex-col justify-between">
+          <div class="flex items-center justify-between text-xs font-mono">
+            <span class="text-slate-400">Memória RAM</span>
+            <span class="font-bold ${ramPct > 85 ? 'text-rose-400' : 'text-indigo-400'}">${ramPct.toFixed(1)}%</span>
+          </div>
+          <div class="w-full bg-slate-800 rounded-full h-2 my-2 overflow-hidden">
+            <div class="h-full rounded-full transition-all duration-500 ${getBarColor(ramPct).split(' ')[0]}" style="width: ${Math.min(ramPct, 100)}%"></div>
+          </div>
+          <span class="text-[10px] text-slate-500 font-mono">${hw.ram_used_gb || 0} GB de ${hw.ram_total_gb || 0} GB (${hw.ram_free_gb || 0} GB livres)</span>
+        </div>
+
+        <div class="rounded-lg border border-slate-800 bg-slate-900/60 p-3 flex flex-col justify-between">
+          <div class="flex items-center justify-between text-xs font-mono">
+            <span class="text-slate-400">Armazenamento (${hw.disk_primary_mount || 'C:'})</span>
+            <span class="font-bold ${diskPct > 85 ? 'text-rose-400' : 'text-cyan-400'}">${diskPct.toFixed(1)}%</span>
+          </div>
+          <div class="w-full bg-slate-800 rounded-full h-2 my-2 overflow-hidden">
+            <div class="h-full rounded-full transition-all duration-500 ${getBarColor(diskPct).split(' ')[0]}" style="width: ${Math.min(diskPct, 100)}%"></div>
+          </div>
+          <span class="text-[10px] text-slate-500 font-mono">${hw.disk_used_gb || 0} GB de ${hw.disk_total_gb || 0} GB (${hw.disk_free_gb || 0} GB livres)</span>
+        </div>
+      </div>
+
+      <div class="space-y-2 pt-2 border-t border-slate-800/80">
+        <div class="flex items-center justify-between text-xs font-mono">
+          <span class="text-slate-300 font-semibold flex items-center gap-1.5">
+            <span>🐳</span> Contêineres & Cargas de Trabalho Ativas
+            <span class="text-[10px] font-normal text-slate-400">(${containers.running_containers || 0}/${containers.total_containers || 0} ativos)</span>
+          </span>
+          <span class="text-[10px] text-slate-400">Orquestradores: ${(containers.orchestrators_detected || []).join(', ') || 'Nenhum'}</span>
+        </div>
+        <div class="overflow-x-auto rounded-lg border border-slate-800 bg-slate-900/40">
+          <table class="min-w-full divide-y divide-slate-800 text-left">
+            <thead class="bg-slate-950/80 text-[10px] font-mono text-slate-400 uppercase">
+              <tr>
+                <th class="py-2 px-3">Serviço</th>
+                <th class="py-2 px-3">Tipo</th>
+                <th class="py-2 px-3">Status</th>
+                <th class="py-2 px-3">Orquestrador</th>
+                <th class="py-2 px-3">Nó</th>
+                <th class="py-2 px-3">Título / Descrição</th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-slate-900/60 font-mono">
+              ${containerRows || '<tr><td colspan="6" class="py-4 text-center text-xs text-slate-500">Nenhum contêiner registrado.</td></tr>'}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>`;
+
+  document.getElementById("btn-refresh-infra-metrics")?.addEventListener("click", () => loadInfraMetrics(true));
+}
+
+function renderInfraMetricsError(msg) {
+  const container = document.getElementById("infra-metrics-panel");
+  if (!container) return;
+  container.innerHTML = `
+    <div class="rounded-xl border border-rose-900/40 bg-slate-950/70 p-3 text-xs font-mono text-rose-300 flex items-center justify-between">
+      <span>Falha na telemetria de infraestrutura: ${msg}</span>
+      <button onclick="loadInfraMetrics(true)" class="px-2 py-0.5 rounded bg-rose-950 border border-rose-800 text-rose-200 text-[11px] hover:bg-rose-900">Tentar novamente</button>
+    </div>`;
 }
 
 async function renderCloudGatewayBanner() {

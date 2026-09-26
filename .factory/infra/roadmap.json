@@ -2,7 +2,7 @@
   "schema_version": "1",
   "project_id": "darkfac-infra",
   "title": "Roadmap de Infraestrutura e Escalabilidade Multi-Projeto",
-  "last_updated": "2026-09-07T20:32:00Z",
+  "last_updated": "2026-09-26T12:30:00Z",
   "phases": [
     {
       "phase_id": "phase-1",
@@ -13,17 +13,20 @@
     {
       "phase_id": "phase-2",
       "name": "Expansão Cloud VPS & Orquestração PaaS",
-      "status": "planned"
+      "status": "completed",
+      "completed_at": "2026-09-08"
     },
     {
       "phase_id": "phase-3",
       "name": "Dados Multi-Projeto & Política de Resiliência",
-      "status": "planned"
+      "status": "completed",
+      "completed_at": "2026-09-25"
     },
     {
       "phase_id": "phase-4",
       "name": "Automações Avançadas & Escala Multi-Projeto",
-      "status": "future"
+      "status": "completed",
+      "completed_at": "2026-09-26"
     }
   ],
   "items": [
@@ -94,33 +97,37 @@
       "id": "INFRA-08",
       "title": "Automação de Backups 3-Camadas (R2 + On-Premise)",
       "phase": "phase-3",
-      "status": "planned",
-      "description": "Rotina diária de dump criptografado para Cloudflare R2 (10 GB gratuitos, zero egress) com espelho noturno para o Drive E: (3 TB).",
-      "tags": ["backups", "r2", "storage-vault", "resiliencia"]
+      "status": "delivered",
+      "completed_at": "2026-09-25",
+      "description": "Rotina diária de dump compactado e criptografado (AES-256-GCM) para Cloudflare R2 com espelho noturno para o Drive E: (3 TB) e restore drill em sandbox.",
+      "tags": ["backups", "r2", "storage-vault", "resiliencia", "active"]
     },
     {
       "id": "INFRA-09",
       "title": "Pipelines de Deploy Contínuo (Git Push Webhooks)",
       "phase": "phase-4",
-      "status": "planned",
-      "description": "Webhooks do GitHub integrados ao Dokploy para compilação e deploy contínuo sem downtime.",
-      "tags": ["ci-cd", "webhooks", "deploy"]
+      "status": "delivered",
+      "completed_at": "2026-09-08",
+      "description": "Webhooks do GitHub integrados ao Dokploy com verificação HMAC-SHA256 para compilação e deploy contínuo sem downtime.",
+      "tags": ["ci-cd", "webhooks", "deploy", "active"]
     },
     {
       "id": "INFRA-10",
       "title": "Runner de CI e Batch Workloads no Servidor On-Premises",
       "phase": "phase-4",
-      "status": "planned",
-      "description": "Execução de testes pesados e compilações longas no i7-4790K via Docker, poupando a máquina de dev.",
-      "tags": ["ci-runner", "on-prem", "batch", "workloads"]
+      "status": "delivered",
+      "completed_at": "2026-09-08",
+      "description": "Execução de testes pesados e compilações no i7-4790K via daemon remote_worker com offloading automático e failover local.",
+      "tags": ["ci-runner", "on-prem", "batch", "workloads", "active"]
     },
     {
       "id": "INFRA-11",
       "title": "Painel Unificado de Métricas de Infraestrutura no DarkHub",
       "phase": "phase-4",
-      "status": "planned",
-      "description": "Exposição dos nós, métricas de hardware e status de containers no painel web da Dark Factory.",
-      "tags": ["darkhub", "telemetria", "monitoramento"]
+      "status": "delivered",
+      "completed_at": "2026-09-26",
+      "description": "Exposição em tempo real da telemetria de nós, métricas de hardware (CPU, RAM, Disco) e status de containers (Dokploy e Docker) no painel web da Dark Factory.",
+      "tags": ["darkhub", "telemetria", "monitoramento", "active"]
     }
   ]
 }
