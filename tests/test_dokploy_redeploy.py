@@ -922,3 +922,72 @@ def test_main_title_match_uses_commit_subject_only(monkeypatch: pytest.MonkeyPat
     assert "[matches local origin/main]" in report
     assert "does not match" not in report
     assert "Body paragraph" not in report
+
+
+def test_main_executes_autonomous_post_deploy_backup_on_success() -> None:
+    transport = _make_transport_with_full_project()
+    _program_status(
+        transport,
+        "/api/compose.one?composeId=compose_cloud",
+        [
+            [{"deploymentId": "old", "status": "done", "title": "old", "createdAt": "2026-09-12T09:00:00Z"}],
+            [{"deploymentId": "new", "status": "done", "title": "new", "createdAt": "2026-09-12T09:10:00Z"}],
+        ],
+    )
+    backup_calls: list[str] = []
+
+    def mock_backup_runner(project_id: str = "darkfac") -> dict[str, Any]:
+        backup_calls.append(project_id)
+        return {"snapshot_id": "snp_mock_123", "drill_verified": True}
+
+    out, err = io.StringIO(), io.StringIO()
+    clock = FakeClock()
+    exit_code = mod.main(
+        ["--only", "darkfac-cloud"],
+        env={"DOKPLOY_API_URL": "https://dokploy.ggcampos.com", "DOKPLOY_API_KEY": SENTINEL_KEY},
+        registry_reader=_no_registry,
+        transport_factory=lambda url, key: transport,
+        sleep_fn=clock.sleep,
+        clock_fn=clock.now,
+        backup_runner=mock_backup_runner,
+        stdout=out,
+        stderr=err,
+    )
+    assert exit_code == mod.EXIT_OK
+    assert backup_calls == ["darkfac"]
+    assert "[AUTONOMOUS POST-DEPLOY BACKUP] Done: snapshot=snp_mock_123, drill_verified=True" in out.getvalue()
+
+
+def test_main_skips_autonomous_post_deploy_backup_with_flag() -> None:
+    transport = _make_transport_with_full_project()
+    _program_status(
+        transport,
+        "/api/compose.one?composeId=compose_cloud",
+        [
+            [{"deploymentId": "old", "status": "done", "title": "old", "createdAt": "2026-09-12T09:00:00Z"}],
+            [{"deploymentId": "new", "status": "done", "title": "new", "createdAt": "2026-09-12T09:10:00Z"}],
+        ],
+    )
+    backup_calls: list[str] = []
+
+    def mock_backup_runner(project_id: str = "darkfac") -> dict[str, Any]:
+        backup_calls.append(project_id)
+        return {"snapshot_id": "snp_mock_123", "drill_verified": True}
+
+    out, err = io.StringIO(), io.StringIO()
+    clock = FakeClock()
+    exit_code = mod.main(
+        ["--only", "darkfac-cloud", "--skip-backup"],
+        env={"DOKPLOY_API_URL": "https://dokploy.ggcampos.com", "DOKPLOY_API_KEY": SENTINEL_KEY},
+        registry_reader=_no_registry,
+        transport_factory=lambda url, key: transport,
+        sleep_fn=clock.sleep,
+        clock_fn=clock.now,
+        backup_runner=mock_backup_runner,
+        stdout=out,
+        stderr=err,
+    )
+    assert exit_code == mod.EXIT_OK
+    assert backup_calls == []
+    assert "[AUTONOMOUS POST-DEPLOY BACKUP]" not in out.getvalue()
+

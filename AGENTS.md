@@ -26,6 +26,11 @@
 - Toda nova demanda em linguagem natural que possua ambiguidades materiais (canais, limiares numéricos, permissões, regras de negócio não especificadas) exige pausa imediata em `WAITING_HUMAN`.
 - O agente nunca deve assumir parâmetros ou iniciar código antes de executar o Grill estruturado e receber as decisões explícitas do Owner.
 
+## Backups 100% Autônomos (Zero Toque Humano)
+
+- É expressamente proibido orientar o usuário a executar rotinas manuais de backup ou restauração no terminal ou PowerShell.
+- A gestão de resiliência e drills de recuperação em sandbox é 100% autônoma pela Dark Factory através do daemon agendado (`core.infra.backup_cron`), hooks pós-deploy (`scripts/dokploy_redeploy.py`), retenção assimétrica (7 dias R2 / 120 dias on-premise) e alertas críticos via Telegram em caso de anomalia.
+
 ## Validação obrigatória
 
 ```powershell

@@ -32,6 +32,29 @@ from core.infra.r2_client import R2StorageClient
 
 logger = logging.getLogger(__name__)
 
+DEFAULT_BACKUP_IGNORED_DIRS: frozenset[str] = frozenset({
+    ".git",
+    ".venv",
+    "venv",
+    "env",
+    "__pycache__",
+    ".pytest_cache",
+    ".mypy_cache",
+    ".ruff_cache",
+    "node_modules",
+    ".locks",
+    "test_logs",
+    "backups",
+    "onprem",
+    "worktrees",
+    "workspaces",
+    "tmp",
+    "pids",
+    "runs",
+    "hf15",
+    "models",
+})
+
 
 class BackupStorageTarget(str, Enum):
     LOCAL = "local"
@@ -168,9 +191,16 @@ class CloudBackupService:
         file_manifest: dict[str, str] = {}
         total_bytes = 0
 
+        backup_root_res = self.backup_root.resolve()
         # Scan files and compute individual SHA-256
         with tarfile.open(target_archive_path, "w:gz") as tar:
-            for root, _, files in os.walk(src_path):
+            for root, dirs, files in os.walk(src_path):
+                root_res = Path(root).resolve()
+                dirs[:] = [
+                    d for d in dirs
+                    if d not in DEFAULT_BACKUP_IGNORED_DIRS
+                    and (root_res / d).resolve() != backup_root_res
+                ]
                 for f in sorted(files):
                     file_path = Path(root) / f
                     rel_path = file_path.relative_to(src_path).as_posix()
@@ -237,9 +267,19 @@ class CloudBackupService:
                 pg_res = self.postgres_dumper.dump(pg_dump_path)
                 pg_checksum = pg_res.checksum_sha256
 
+            backup_root_res = self.backup_root.resolve()
+            onprem_root_res = self.onprem_root.resolve()
+
             with tarfile.open(raw_archive_path, "w:gz") as tar:
                 # Add source directory files
-                for root, _, files in os.walk(src_path):
+                for root, dirs, files in os.walk(src_path):
+                    root_res = Path(root).resolve()
+                    dirs[:] = [
+                        d for d in dirs
+                        if d not in DEFAULT_BACKUP_IGNORED_DIRS
+                        and (root_res / d).resolve() != backup_root_res
+                        and (root_res / d).resolve() != onprem_root_res
+                    ]
                     for f in sorted(files):
                         file_path = Path(root) / f
                         rel_path = file_path.relative_to(src_path).as_posix()

@@ -119,6 +119,47 @@ services:
           cpus: "0.2"
           memory: 256M
 
+  # INFRA-08: Autonomous 3-tier backup & restore drill daemon (24h schedule).
+  # Operates 100% autonomously: snapshots multi-tenant postgres + .factory metadata,
+  # encrypts with AES-256-GCM, pushes to Cloudflare R2, mirrors to drive E:, executes
+  # sandbox restore drill, prunes per asymmetric retention policy (7d R2 / 120d onprem),
+  # and dispatches critical Telegram alerts on any failure.
+  darkfac-backup-cron:
+    build:
+      context: https://github.com/GCamposGit/DarkFactory.git#main
+      dockerfile: deploy/dokploy/Dockerfile.cloud
+    image: ghcr.io/gcamposgit/darkfac-cloud:latest
+    container_name: darkfac-backup-cron
+    restart: unless-stopped
+    command: ["python", "-m", "core.infra.backup_cron", "--daemon", "--interval-hours", "24"]
+    environment:
+      - DARKFAC_ROLE=backup
+      - DARKFAC_HF02_DATABASE_URL=${DARKFAC_HF02_DATABASE_URL}
+      - DATA_DIR=/app/data
+      - FACTORY_DIR=/app/.factory
+      - R2_ENDPOINT_URL=${R2_ENDPOINT_URL:-}
+      - R2_ACCESS_KEY_ID=${R2_ACCESS_KEY_ID:-}
+      - R2_SECRET_ACCESS_KEY=${R2_SECRET_ACCESS_KEY:-}
+      - R2_BUCKET_NAME=${R2_BUCKET_NAME:-darkfac-backups}
+      - DARKFAC_BACKUP_ENCRYPTION_KEY=${DARKFAC_BACKUP_ENCRYPTION_KEY:-}
+      - DARKFAC_ONPREM_BACKUP_DIR=${DARKFAC_ONPREM_BACKUP_DIR:-}
+      - TELEGRAM_OWNER_BOT_TOKEN=${TELEGRAM_OWNER_BOT_TOKEN:-}
+      - TELEGRAM_AUTHORIZED_USERS=${TELEGRAM_AUTHORIZED_USERS:-}
+      - TELEGRAM_AUTHORIZED_CHATS=${TELEGRAM_AUTHORIZED_CHATS:-}
+    volumes:
+      - darkfac-artifacts:/app/.factory/artifacts
+      - darkfac-test-logs:/app/.factory/test_logs
+    networks:
+      - dokploy-network
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 384M
+        reservations:
+          cpus: "0.05"
+          memory: 64M
+
   # HF-27-10: daily E2E canary. Disabled by default -- only started with
   # `docker compose --profile canary up -d darkfac-canary` (or a Dokploy
   # "Cron Job" / scheduled deployment targeting this service), since it

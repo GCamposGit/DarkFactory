@@ -399,3 +399,78 @@ def test_cli_backup_commands_integration(tmp_path: Path) -> None:
         "--onprem-days", "120",
     ])
     assert ret_ret == 0
+
+
+# ==============================================================================
+# 7. Autonomous Scheduled & Lifecycle Backup Daemon Tests
+# ==============================================================================
+
+
+def test_autonomous_backup_cycle_success(tmp_path: Path) -> None:
+    """Verifies that run_autonomous_backup_cycle executes end-to-end 3-tier backup,
+    runs the sandbox restore drill, and performs retention pruning without human touch."""
+    from core.infra.backup_cron import run_autonomous_backup_cycle
+
+    src_dir = tmp_path / "auto_src"
+    src_dir.mkdir()
+    (src_dir / "worker.py").write_text("class AutonomousWorker: pass", encoding="utf-8")
+
+    summary = run_autonomous_backup_cycle(
+        project_id="auto-test",
+        source_dir=src_dir,
+        encryption_key="test-auto-key-12345",
+        run_drill=True,
+    )
+
+    assert summary["status"] == "success"
+    assert summary["project_id"] == "auto-test"
+    assert summary["drill_verified"] is True
+    assert summary["files_count"] >= 1
+    assert "snp3t_auto-test_" in summary["snapshot_id"]
+
+
+def test_autonomous_backup_cycle_drill_failure_alerts(tmp_path: Path) -> None:
+    """Verifies that a failure during the autonomous cycle triggers AutonomousBackupError
+    and emergency notification."""
+    from core.infra.backup_cron import AutonomousBackupError, run_autonomous_backup_cycle
+
+    src_dir = tmp_path / "fail_src"
+    src_dir.mkdir()
+    (src_dir / "data.txt").write_text("critical data", encoding="utf-8")
+
+    with patch("core.infra.backup_service.CloudBackupService.run_restore_drill") as mock_drill, \
+         patch("core.infra.backup_cron._notify_failure") as mock_notify:
+        from core.infra.backup_service import RestoreDrillResult
+        mock_drill.return_value = RestoreDrillResult(
+            drill_id="drill_mock_999",
+            snapshot_id="mock_snap",
+            isolated_destination=str(tmp_path),
+            success=False,
+            files_restored=0,
+            integrity_verified=False,
+            duration_seconds=0.01,
+            error_message="Simulated corrupt block during drill",
+        )
+
+        with pytest.raises(AutonomousBackupError, match="Autonomous restore drill failed"):
+            run_autonomous_backup_cycle(
+                project_id="fail-test",
+                source_dir=src_dir,
+                run_drill=True,
+            )
+
+        assert mock_notify.called
+        assert "Falha no Backup Autônomo" in mock_notify.call_args[1]["title"]
+
+
+def test_autonomous_backup_cli_main(tmp_path: Path) -> None:
+    """Verifies backup_cron main CLI entrypoint with --once."""
+    from core.infra.backup_cron import main as cron_main
+
+    src_dir = tmp_path / "cli_cron_src"
+    src_dir.mkdir()
+    (src_dir / "job.json").write_text('{"job": "backup"}', encoding="utf-8")
+
+    code = cron_main(["--once", "--project-id", "cron-cli-test", "--source-dir", str(src_dir)])
+    assert code == 0
+
