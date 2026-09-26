@@ -206,31 +206,32 @@ def _apply_token_plan(
         remaining_hourly_percent=remaining_hourly_percent,
         offline=offline,
     )
-    if plan.prefer_local and preferred_provider not in {"local_process", "ollama"}:
-        result["quota_displaced_recommendation"] = {
-            "model": result.get("model"), "provider": preferred_provider,
-        }
-        result["model"] = (
-            "qwen-code-deep:latest"
-            if complexity in {"high", "critical"} or task_type in {"architecture", "plan", "prd"}
-            else "qwen-code-fast:latest"
-        )
-        result["provider"] = "ollama"
-    elif plan.failover_required and plan.selected_provider:
-        selected_provider = plan.selected_provider
-        replacement = _QUOTA_FAILOVER_MODELS.get(selected_provider)
-        if plan.use_paid_api:
-            replacement = (
-                "deepseek/deepseek-v4-pro"
-                if complexity in {"high", "critical"}
-                else "qwen/qwen3-8-flash-next"
-            )
-        if replacement:
+    if task_type not in {"visual", "visual_synthesis", "image_gen", "diagram"}:
+        if plan.prefer_local and preferred_provider not in {"local_process", "ollama"}:
             result["quota_displaced_recommendation"] = {
                 "model": result.get("model"), "provider": preferred_provider,
             }
-            result["model"] = replacement
-            result["provider"] = selected_provider
+            result["model"] = (
+                "qwen-code-deep:latest"
+                if complexity in {"high", "critical"} or task_type in {"architecture", "plan", "prd"}
+                else "qwen-code-fast:latest"
+            )
+            result["provider"] = "ollama"
+        elif plan.failover_required and plan.selected_provider:
+            selected_provider = plan.selected_provider
+            replacement = _QUOTA_FAILOVER_MODELS.get(selected_provider)
+            if plan.use_paid_api:
+                replacement = (
+                    "deepseek/deepseek-v4-pro"
+                    if complexity in {"high", "critical"}
+                    else "qwen/qwen3-8-flash-next"
+                )
+            if replacement:
+                result["quota_displaced_recommendation"] = {
+                    "model": result.get("model"), "provider": preferred_provider,
+                }
+                result["model"] = replacement
+                result["provider"] = selected_provider
     result["token_budget"] = plan.model_dump(mode="json")
     return result
 
@@ -327,6 +328,13 @@ def recommend_model(
                 "provider": "ollama",
                 "mode": "offline",
                 "reason": "Local Qwen3-Coder 30B MoE com contexto de 16k e 20 threads (sem prompt)."
+            }
+        elif task_type in ["visual", "visual_synthesis", "image_gen", "diagram"]:
+            result = {
+                "model": "darkfac-vector-v1",
+                "provider": "local_procedural",
+                "mode": "offline",
+                "reason": "Local procedural vector rendering engine (Pillow) ($0 custo)."
             }
         else:
             result = {
