@@ -282,6 +282,83 @@ def test_dokploy_deploy_client_skipped_when_empty():
     assert "not configured" in result.message
 
 
+def test_dokploy_deploy_client_multi_service_json_and_trigger_all():
+    """DokployDeployClient parses DOKPLOY_DEPLOY_URLS JSON and triggers all services."""
+    env_urls = json.dumps({
+        "darkhub": "https://dokploy.example/api/deploy/compose/hub123",
+        "worker": "https://dokploy.example/api/deploy/application/app456",
+    })
+    with mock.patch.dict(os.environ, {"DOKPLOY_DEPLOY_URLS": env_urls}):
+        client = DokployDeployClient()
+        assert "darkhub" in client.service_urls
+        assert "worker" in client.service_urls
+        assert client.service_urls["darkhub"] == "https://dokploy.example/api/deploy/compose/hub123"
+        assert client.service_urls["worker"] == "https://dokploy.example/api/deploy/application/app456"
+
+        # Mock urllib to test trigger_deploy_all
+        with mock.patch("urllib.request.urlopen") as mock_urlopen:
+            mock_resp = mock.MagicMock()
+            mock_resp.status = 200
+            mock_resp.read.return_value = b'{"success": true}'
+            mock_urlopen.return_value.__enter__.return_value = mock_resp
+
+            results = client.trigger_deploy_all()
+            assert len(results) == 2
+            assert all(r.status == "success" for r in results)
+            assert {r.service_name for r in results} == {"darkhub", "worker"}
+
+
+def test_dokploy_deploy_client_multi_service_comma_separated():
+    """DokployDeployClient parses comma-separated DOKPLOY_DEPLOY_URLS format."""
+    raw = "darkhub=https://dokploy.example/hub, worker=https://dokploy.example/worker "
+    with mock.patch.dict(os.environ, {"DOKPLOY_DEPLOY_URLS": raw}):
+        client = DokployDeployClient()
+        assert client.service_urls["darkhub"] == "https://dokploy.example/hub"
+        assert client.service_urls["worker"] == "https://dokploy.example/worker"
+
+
+def test_webhook_push_multi_service_dispatching(temp_project_dir: Path):
+    """Push event triggers deployment for all configured multi-services."""
+    engine = WebhookEngine(project_root=temp_project_dir)
+    engine.deploy_client.service_urls = {
+        "darkhub": "https://dokploy.example/hub",
+        "worker": "https://dokploy.example/worker",
+    }
+    secret = "push_multi_secret"
+    delivery_id = "push-multi-001"
+    payload = {
+        "ref": "refs/heads/main",
+        "after": "d" * 40,
+        "forced": False,
+        "commits": [{"id": "d" * 40, "message": "feat: multi-service continuous deploy"}],
+        "repository": {"full_name": "GCamposGit/DarkFactory"},
+        "sender": {"login": "octocat"},
+    }
+    sig = generate_signature(payload, secret)
+
+    with mock.patch("urllib.request.urlopen") as mock_urlopen:
+        mock_resp = mock.MagicMock()
+        mock_resp.status = 200
+        mock_resp.read.return_value = b'{"success": true}'
+        mock_urlopen.return_value.__enter__.return_value = mock_resp
+
+        record = engine.process_webhook(
+            event_type="push",
+            delivery_id=delivery_id,
+            payload=payload,
+            signature_header=sig,
+            secret=secret,
+        )
+
+        assert record.status == "processed"
+        assert record.action_taken == "push_processed_and_deploy_triggered"
+        dokploy_deploy = record.details.get("dokploy_deploy")
+        assert isinstance(dokploy_deploy, list)
+        assert len(dokploy_deploy) == 2
+        assert {d["service_name"] for d in dokploy_deploy} == {"darkhub", "worker"}
+
+
+
 def test_rest_api_webhook_github_endpoint(gateway_service: HubService):
     """POST /api/webhooks/github handles valid payload and enforces secret verification."""
     client = TestClient(app)
@@ -353,6 +430,7 @@ def test_rest_api_cloud_gateway_status_and_deploy_trigger(gateway_service: HubSe
     status_data = res_status.json()
     assert "allowed_hosts" in status_data
     assert "total_events_received" in status_data
+    assert "configured_deploy_services" in status_data
 
     # Deploy endpoint
     res_deploy = client.post(

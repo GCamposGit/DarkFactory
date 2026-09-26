@@ -96,7 +96,8 @@ class CloudGatewayStatus(BaseModel):
     allowed_hosts: List[str] = Field(default_factory=list, description="Allowed Host headers for containment")
     cloudflare_zero_trust_enabled: bool = Field(description="Whether Cloudflare Access headers are verified")
     webhook_secret_configured: bool = Field(description="Whether GITHUB_WEBHOOK_SECRET is set")
-    dokploy_deploy_configured: bool = Field(description="Whether DOKPLOY_DEPLOY_URL is set")
+    dokploy_deploy_configured: bool = Field(description="Whether DOKPLOY_DEPLOY_URL or DOKPLOY_DEPLOY_URLS is set")
+    configured_deploy_services: List[str] = Field(default_factory=list, description="List of configured Dokploy deployment services")
     total_events_received: int = Field(default=0, description="Total audited webhook events")
     last_event_at: Optional[str] = Field(default=None, description="Timestamp of last received webhook")
     last_event_type: Optional[str] = Field(default=None, description="Type of last received webhook")
@@ -292,15 +293,39 @@ class WebhookAuditStore:
 
 
 class DokployDeployClient:
-    """Dispatches continuous deployment webhooks to Dokploy PaaS."""
+    """Dispatches continuous deployment webhooks to Dokploy PaaS (single or multi-service)."""
 
     def __init__(
         self,
         deploy_url: Optional[str] = None,
         deployment_adapter: Optional[DeploymentAdapter] = None,
+        service_urls: Optional[Dict[str, str]] = None,
     ) -> None:
-        self.deploy_url = deploy_url or os.getenv("DOKPLOY_DEPLOY_URL", "")
+        self.deploy_url = (deploy_url if deploy_url is not None else os.getenv("DOKPLOY_DEPLOY_URL", "")).strip()
         self.deployment_adapter = deployment_adapter
+        self.service_urls = self._parse_service_urls(service_urls)
+
+    def _parse_service_urls(self, explicit_urls: Optional[Dict[str, str]] = None) -> Dict[str, str]:
+        if explicit_urls is not None:
+            return dict(explicit_urls)
+        env_multi = os.getenv("DOKPLOY_DEPLOY_URLS", "").strip()
+        if env_multi:
+            try:
+                parsed = json.loads(env_multi)
+                if isinstance(parsed, dict):
+                    return {str(k).strip(): str(v).strip() for k, v in parsed.items() if str(k).strip() and str(v).strip()}
+            except Exception:
+                res: Dict[str, str] = {}
+                for part in env_multi.split(","):
+                    if "=" in part:
+                        k, v = part.split("=", 1)
+                        if k.strip() and v.strip():
+                            res[k.strip()] = v.strip()
+                if res:
+                    return res
+        if self.deploy_url:
+            return {"darkhub": self.deploy_url}
+        return {}
 
     def reconcile_deployment(self, operation_id: str) -> Optional[AdapterDeploymentStatus]:
         """Reconciles deployment status if adapter is attached."""
@@ -314,7 +339,7 @@ class DokployDeployClient:
         custom_url: Optional[str] = None,
         timeout: float = 10.0,
     ) -> DokployDeployTrigger:
-        target_url = custom_url or self.deploy_url
+        target_url = custom_url or self.service_urls.get(service_name) or self.deploy_url
         if not target_url:
             return DokployDeployTrigger(
                 service_name=service_name,
@@ -360,6 +385,16 @@ class DokployDeployClient:
                 status_code=None,
                 message=f"Dokploy webhook request failed: {exc}",
             )
+
+    def trigger_deploy_all(self, timeout: float = 10.0) -> List[DokployDeployTrigger]:
+        """Triggers deployments across all configured services."""
+        if not self.service_urls:
+            return [self.trigger_deploy(service_name="darkhub", timeout=timeout)]
+
+        results: List[DokployDeployTrigger] = []
+        for name, url in self.service_urls.items():
+            results.append(self.trigger_deploy(service_name=name, custom_url=url, timeout=timeout))
+        return results
 
 
 # ==============================================================================
@@ -461,8 +496,11 @@ class WebhookEngine:
             }
 
             if is_main and not forced:
-                deploy_result = self.deploy_client.trigger_deploy(service_name="darkhub")
-                details["dokploy_deploy"] = deploy_result.model_dump()
+                deploy_triggers = self.deploy_client.trigger_deploy_all()
+                if len(deploy_triggers) == 1:
+                    details["dokploy_deploy"] = deploy_triggers[0].model_dump()
+                else:
+                    details["dokploy_deploy"] = [t.model_dump() for t in deploy_triggers]
                 action_taken = "push_processed_and_deploy_triggered"
             else:
                 action_taken = "push_registered"
@@ -631,6 +669,8 @@ class WebhookEngine:
         )
         allowed_hosts = [h.strip() for h in allowed_hosts_env.split(",") if h.strip()]
         is_cloud = os.getenv("DARKHUB_ENV") == "production" or os.path.exists("/.dockerenv")
+        configured_services = list(self.deploy_client.service_urls.keys())
+        deploy_configured = bool(os.getenv("DOKPLOY_DEPLOY_URL") or os.getenv("DOKPLOY_DEPLOY_URLS") or configured_services)
 
         return CloudGatewayStatus(
             is_cloud=is_cloud,
@@ -638,7 +678,8 @@ class WebhookEngine:
             allowed_hosts=allowed_hosts,
             cloudflare_zero_trust_enabled=os.getenv("CLOUDFLARE_ZERO_TRUST_ENABLED", "false").lower() == "true",
             webhook_secret_configured=bool(os.getenv("GITHUB_WEBHOOK_SECRET")),
-            dokploy_deploy_configured=bool(os.getenv("DOKPLOY_DEPLOY_URL")),
+            dokploy_deploy_configured=deploy_configured,
+            configured_deploy_services=configured_services,
             total_events_received=stats.get("total_events", 0),
             last_event_at=stats.get("last_event_at"),
             last_event_type=stats.get("last_event_type"),
