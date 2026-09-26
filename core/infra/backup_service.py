@@ -115,11 +115,12 @@ class CloudBackupService:
 
         self.r2_client = r2_client or R2StorageClient()
         self.postgres_dumper = postgres_dumper or PostgresDumper()
-        self.default_encryption_key = (
+        raw_enc = (
             encryption_key
             or os.getenv("DARKFAC_BACKUP_ENCRYPTION_KEY")
             or "darkfac-default-vault-key-2026"
         )
+        self.default_encryption_key = raw_enc.strip()
 
         self._lock = threading.Lock()
         self._snapshots: dict[str, BackupSnapshot] = {}

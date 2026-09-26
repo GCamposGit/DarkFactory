@@ -24,6 +24,13 @@ services:
       - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-}
       - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      # INFRA-08: Cloudflare R2 & On-Premise Backups
+      - R2_ENDPOINT_URL=${R2_ENDPOINT_URL:-}
+      - R2_ACCESS_KEY_ID=${R2_ACCESS_KEY_ID:-}
+      - R2_SECRET_ACCESS_KEY=${R2_SECRET_ACCESS_KEY:-}
+      - R2_BUCKET_NAME=${R2_BUCKET_NAME:-darkfac-backups}
+      - DARKFAC_BACKUP_ENCRYPTION_KEY=${DARKFAC_BACKUP_ENCRYPTION_KEY:-}
+      - DARKFAC_ONPREM_BACKUP_DIR=${DARKFAC_ONPREM_BACKUP_DIR:-}
     healthcheck:
       test: ["CMD", "python", "-m", "core.orchestrator.cloud_coordinator", "--status"]
       interval: 30s
@@ -81,6 +88,13 @@ services:
       - TELEGRAM_OWNER_BOT_TOKEN=${TELEGRAM_OWNER_BOT_TOKEN:-}
       - TELEGRAM_AUTHORIZED_USERS=${TELEGRAM_AUTHORIZED_USERS:-}
       - TELEGRAM_AUTHORIZED_CHATS=${TELEGRAM_AUTHORIZED_CHATS:-}
+      # INFRA-08: Cloudflare R2 & On-Premise Backups
+      - R2_ENDPOINT_URL=${R2_ENDPOINT_URL:-}
+      - R2_ACCESS_KEY_ID=${R2_ACCESS_KEY_ID:-}
+      - R2_SECRET_ACCESS_KEY=${R2_SECRET_ACCESS_KEY:-}
+      - R2_BUCKET_NAME=${R2_BUCKET_NAME:-darkfac-backups}
+      - DARKFAC_BACKUP_ENCRYPTION_KEY=${DARKFAC_BACKUP_ENCRYPTION_KEY:-}
+      - DARKFAC_ONPREM_BACKUP_DIR=${DARKFAC_ONPREM_BACKUP_DIR:-}
     healthcheck:
       test: ["CMD", "python", "-m", "core.orchestrator.cloud_worker", "--status"]
       interval: 30s

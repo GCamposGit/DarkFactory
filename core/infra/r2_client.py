@@ -48,11 +48,11 @@ class R2StorageClient:
         is_mock: bool | None = None,
         http_client: httpx.Client | None = None,
     ) -> None:
-        self.endpoint_url = (endpoint_url or os.getenv("R2_ENDPOINT_URL", "")).rstrip("/")
-        self.access_key_id = access_key_id or os.getenv("R2_ACCESS_KEY_ID", "")
-        self.secret_access_key = secret_access_key or os.getenv("R2_SECRET_ACCESS_KEY", "")
-        self.bucket_name = bucket_name or os.getenv("R2_BUCKET_NAME", "darkfac-backups")
-        self.region = region or os.getenv("R2_REGION", "auto")
+        self.endpoint_url = (endpoint_url or os.getenv("R2_ENDPOINT_URL", "")).strip().rstrip("/")
+        self.access_key_id = (access_key_id or os.getenv("R2_ACCESS_KEY_ID", "")).strip()
+        self.secret_access_key = (secret_access_key or os.getenv("R2_SECRET_ACCESS_KEY", "")).strip()
+        self.bucket_name = (bucket_name or os.getenv("R2_BUCKET_NAME", "darkfac-backups")).strip()
+        self.region = (region or os.getenv("R2_REGION", "auto")).strip()
 
         # Automatically operate in mock mode if credentials are missing and not explicitly set
         if is_mock is None:
