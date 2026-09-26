@@ -126,6 +126,10 @@ from core.infra.cards import (
     InfraCardsReport,
     build_infra_cards_report,
 )
+from core.infra.metrics import (
+    InfraMetricsReport,
+    build_infra_metrics_report,
+)
 from core.workflow.job_board import JobBoardEntry, read_job_board
 from hub.backend.webhooks import (
     CloudGatewayStatus,
@@ -351,6 +355,7 @@ class HubService:
         self.project_registry = ProjectRegistry(repository_root / ".factory" / "projects.json")
 
         self._ensure_storage()
+        self._cached_infra_metrics: Optional[Tuple[float, InfraMetricsReport]] = None
 
     @property
     def control_store(self) -> Any:
@@ -993,6 +998,18 @@ class HubService:
             if card.id == node_id:
                 return card
         return None
+
+    def get_infra_metrics_report(self, force_refresh: bool = False, timeout: float = 3.0) -> InfraMetricsReport:
+        """Returns the real-time infrastructure metrics report (INFRA-11)."""
+        now = time.time()
+        if not force_refresh and self._cached_infra_metrics is not None:
+            cached_at, cached_report = self._cached_infra_metrics
+            if now - cached_at < 5.0:
+                return cached_report
+
+        report = build_infra_metrics_report(timeout=timeout)
+        self._cached_infra_metrics = (now, report)
+        return report
 
     def _load_services_raw(self) -> List[Dict]:
         try:
