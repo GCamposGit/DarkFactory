@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import base64
 import contextlib
+import hashlib
 import hmac
 import json
 import logging
@@ -462,6 +463,8 @@ class JobManager:
                 job.append_log(job.error)
                 return
 
+            self._sync_requirements(worktree_path, job)
+
             timeout_sec = _job_timeout_sec(worktree_path, quick=job.quick, include_holdout=job.include_holdout)
             cmd = [sys.executable, "core/harness/runner.py", "--quick", "--local"]
             if job.include_holdout:
@@ -553,6 +556,37 @@ class JobManager:
         for stale in log_files[JOB_LOG_KEEP:]:
             with contextlib.suppress(OSError):
                 stale.unlink()
+
+    def _sync_requirements(self, worktree_path: Path, job: HarnessJob) -> None:
+        """HF-27-11: Ensure worker venv dependencies match worktree requirements.txt."""
+        req_file = worktree_path / "requirements.txt"
+        if not req_file.exists():
+            return
+        try:
+            content = req_file.read_bytes()
+            current_hash = hashlib.sha256(content).hexdigest()
+            hash_file = self.state_dir / ".requirements.sha256"
+            if hash_file.exists() and hash_file.read_text(encoding="utf-8").strip() == current_hash:
+                return
+            logger.info("Requirements change detected in job %s. Installing dependencies...", job.job_id)
+            res = subprocess.run(
+                [sys.executable, "-m", "pip", "install", "-q", "-r", str(req_file)],
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=180,
+                check=False,
+            )
+            if res.returncode == 0:
+                hash_file.write_text(current_hash, encoding="utf-8")
+                logger.info("Successfully updated requirements for job %s", job.job_id)
+            else:
+                warn_msg = f"[WORKER WARNING] Failed to install requirements (exit {res.returncode}): {res.stderr.strip()[:500]}"
+                logger.warning(warn_msg)
+                job.append_log(warn_msg + "\n")
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Error syncing requirements in job %s: %s", job.job_id, exc)
 
 
 def _safe_is_file(path: Path) -> bool:
