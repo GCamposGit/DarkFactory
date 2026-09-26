@@ -719,6 +719,8 @@ def main(
                 if "pytest" in sys.modules and not os.getenv("DARKFAC_TEST_REAL_BACKUP"):
                     print("[AUTONOMOUS POST-DEPLOY BACKUP] Skipped in pytest test harness.", file=out)
                 else:
+                    if str(REPO_ROOT) not in sys.path:
+                        sys.path.insert(0, str(REPO_ROOT))
                     from core.infra.backup_cron import run_autonomous_backup_cycle
 
                     runner = run_autonomous_backup_cycle
