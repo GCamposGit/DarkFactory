@@ -26,6 +26,13 @@
 - Toda nova demanda em linguagem natural que possua ambiguidades materiais (canais, limiares numéricos, permissões, regras de negócio não especificadas) exige pausa imediata em `WAITING_HUMAN`.
 - O agente nunca deve assumir parâmetros ou iniciar código antes de executar o Grill estruturado e receber as decisões explícitas do Owner.
 
+## Execução Canônica de Tickets e Roteamento Obrigatório (Skill 19-run-ticket)
+
+- Toda demanda ou ticket do backlog deve ser executado seguindo a skill `19-run-ticket`.
+- **Preflight Obrigatório de Cota**: Antes de gerar código ou iniciar o PIV loop, o agente/harness deve verificar a saúde de cota via `core.line.routing.pick('development')`.
+- **Bloqueio de Quota Crítica no Chat**: Se a conta associada ao harness atual estiver com cota restante <= 15.0% (semanal ou janela móvel), o agente é TERMINANTEMENTE PROIBIDO de implementar código com seu próprio modelo no chat interativo. Deve recusar no chat, informar a cota restante e delegar para o harness saudável eleito (ex.: Antigravity) ou acionar o launcher headless `python C:\dev\DarkFac\run_ticket.py <TICKET_ID>`.
+- **Exceção de Override Explícito pelo Usuário**: A execução em um harness com cota <= 15.0% SÓ É PERMITIDA se o usuário exigir EXPLICITAMENTE no prompt (ex.: "forçar execução neste harness", "ignorar limite de cota", "estou ciente da cota crítica, prossiga" ou flag `--force`). Sem essa autorização textual inequívoca, o agente deve falhar fechado (*fail-closed*).
+
 ## Backups 100% Autônomos (Zero Toque Humano)
 
 - É expressamente proibido orientar o usuário a executar rotinas manuais de backup ou restauração no terminal ou PowerShell.
