@@ -989,5 +989,88 @@
     ],
     "created_at": "2026-09-24T06:25:00.000000Z",
     "updated_at": "2026-09-24T06:35:00.000000Z"
+  },
+  {
+    "id": "USR-57",
+    "project_id": "darkfac",
+    "title": "Aumentar autonomia da Dark Factory em operações Git (commit, PR, merge)",
+    "origin": "user",
+    "status": "planned",
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "A Dark Factory atualmente exige aprovações humanas excessivas para operações de Git (commits, pull requests, merges), mesmo para desenvolvimentos que não são para clientes comerciais em produção real. Isso gera lentidão e burocracia desnecessária, impedindo a autonomia e agilidade da fábrica. A expectativa é que a fábrica opere de forma autônoma em todas as etapas de desenvolvimento, desde que a especificação inicial e a etapa de Grill tenham tido input humano quando necessário. As regras atuais em arquivos de edição proibida pelos Harness precisam ser revisadas para refletir essa nova diretriz, permitindo que a fábrica execute commits, PRs, merges, suba código para o GitHub, garanta integração contínua e mantenha o branch principal (main) sincronizado em todos os ambientes (VPS, desktop, notebook), assegurando que o próximo Harness trabalhe sempre com a versão mais atualizada e sem conflitos. As autorizações humanas serão fornecidas apenas quando estritamente necessário, conforme o risco do ambiente ou do projeto.",
+    "core_journey": [
+      "Submitted through Jarvis Assistant"
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Harness passes with deterministic verification"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-09-25T19:07:32.777073Z",
+    "updated_at": "2026-09-25T19:07:32.777085Z"
+  },
+  {
+    "id": "USR-58",
+    "project_id": "darkfac",
+    "title": "Seção prioritária no DarkHub para Grills e ações pendentes de intervenção do usuário",
+    "origin": "user",
+    "status": "planned",
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand",
+      "darkhub",
+      "grill",
+      "human-in-the-loop",
+      "telegram",
+      "dh-18"
+    ],
+    "problem_statement": "O Grill de demandas precisa disparar automaticamente para o Owner do projeto sempre que houver uma demanda pendente de grill, evitando que ela fique parada indefinidamente no backlog. É necessário incluir no DarkHub uma seção prioritária em destaque (Hero Strip / Faixa de Ação Fixa no topo) que consolide todas as ações pendentes de intervenção humana (Grills pendentes, aprovações G8 de deploy Dokploy e tarefas bloqueadas em WAITING_HUMAN / needs replan) com links diretos para ação e disparo ativo de notificação via Telegram.\n\n[Refinamentos acordados no Grill]:\n- Disparo de notificação ativa ao Owner via Telegram Bot com resumo da demanda e link direto para o DarkHub, somado ao destaque visual imediato no cockpit.\n- Fila unificada de intervenções humanas na seção prioritária: Grills de demandas pendentes, aprovações G8 de deploy Dokploy em 2 etapas e tarefas bloqueadas em WAITING_HUMAN (needs replan).\n- Posicionamento da seção: Faixa de ação fixa no topo do cockpit (Action Banner / Hero Strip) com contador pulsante, visível em todas as abas.\n- Mecânica de ação: Modal interativo no próprio DarkHub renderizando as perguntas do Grill para resposta e submissão direta pela interface web sem necessidade de terminal.",
+    "core_journey": [
+      "Demanda é submetida via Jarvis, CLI ou UI e entra no backlog com pendência de Grill;",
+      "Gateway do DarkHub detecta o estado pendente e dispara notificação automática no Telegram do Owner com link direto;",
+      "DarkHub exibe na faixa prioritária do topo o alerta pulsante com contador de intervenções pendentes;",
+      "Owner acessa o DarkHub e clica no link de ação da intervenção;",
+      "Para Grills, um modal interativo abre no DarkHub permitindo ao Owner responder as alternativas e enviar o refinamento instantaneamente;",
+      "Para aprovações Dokploy ou replans, o modal exibe os controles de aprovação e autorização de escopo;",
+      "Ao submeter, a pendência é resolvida, a faixa atualiza em tempo real e o ticket avança no pipeline."
+    ],
+    "non_goals": [
+      "Não alterar a lógica do harness determinístico local de testes;",
+      "Não remover os comandos existentes de Grill via CLI (python core/demands/cli.py grill);",
+      "Não permitir que demandas avancem para execução autônoma sem passar pelo Grill acordado."
+    ],
+    "reachability_contract": "python -m pytest tests/test_darkhub_priority_interventions_and_grill.py -v",
+    "acceptance_criteria": [
+      "Faixa de intervenções prioritárias visível no topo do DarkHub com contador em tempo real;",
+      "Disparo automático de notificação no Telegram quando um ticket entra em estado de Grill pendente;",
+      "Modal interativo no DarkHub com suporte a respostas do Grill e submissão via API POST /api/demands/tickets/{id}/grill/submit;",
+      "Agregação unificada de Grills, aprovações Dokploy G8 e tarefas WAITING_HUMAN na API do DarkHub;",
+      "Teste determinístico de reachability cobrindo backend e frontend sem regressões."
+    ],
+    "suggested_files": [
+      "hub/frontend/index.html",
+      "hub/frontend/demands.js",
+      "hub/frontend/tasks.js",
+      "hub/backend/api.py",
+      "hub/backend/service.py",
+      "core/integrations/telegram.py",
+      "tests/test_darkhub_priority_interventions_and_grill.py"
+    ],
+    "estimated_complexity": "medium",
+    "dependencies": [
+      "USR-57"
+    ],
+    "created_at": "2026-09-25T21:52:27.699721Z",
+    "updated_at": "2026-09-25T22:03:58.492234Z"
   }
 ]

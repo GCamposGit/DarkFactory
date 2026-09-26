@@ -2965,7 +2965,7 @@ class HubService:
         ]
 
         total = len(units)
-        completed = sum(1 for u in units if u["status"] in ("completed", "succeeded", "success"))
+        completed = sum(1 for u in units if u["status"] in ("completed", "succeeded", "success", "implemented"))
         in_progress = sum(1 for u in units if u["status"] in ("running", "in_progress", "leased"))
         ready = sum(1 for u in units if u["status"] == "ready_for_handoff")
         waiting = sum(1 for u in units if "waiting" in str(u["status"]).lower() or u["status"] == "blocked_policy")

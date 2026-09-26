@@ -1,20 +1,20 @@
 # HF-27 — Linha de produção autônoma · índice de handoffs
 
-Plano mestre: [PRODUCTION_LINE_PLAN_2026-09-22.md](../../PRODUCTION_LINE_PLAN_2026-09-22.md). Todos os tickets estão `planned`, com binding high resolvido neste pacote e prontos para papel econômico.
-Pré-requisito: integrar ao `main` a contenção do HF-03-08 (branch `codex/hf-03-08-activation`, com worker fail-closed e sem `deterministic_mock`).
+Plano mestre: [PRODUCTION_LINE_PLAN_2026-09-22.md](../../PRODUCTION_LINE_PLAN_2026-09-22.md). Todos os tickets foram implementados e integrados à baseline `main` (PRs #21, #23, #27, #33, #37).
 
-| Ticket | Título | Papel | Depende de | Onda |
-| --- | --- | --- | --- | --- |
-| [HF-27-01](HF-27-01.md) | Registry de projetos executável | economy | — | 1 |
-| [HF-27-02](HF-27-02.md) | Workspace Git por run | economy | 01 | 1 |
-| [HF-27-03](HF-27-03.md) | AgentCLI real + roteamento por quota | economy | — | 1 |
-| [HF-27-04](HF-27-04.md) | Grill de rodada única + Planning | economy | 02, 03 | 2 |
-| [HF-27-05](HF-27-05.md) | Development + validate loop + review cruzada | economy | 02, 03 | 2 |
-| [HF-27-06](HF-27-06.md) | Integração GitHub via gh | economy | 02 | 2 |
-| [HF-27-07](HF-27-07.md) | Deploy + smoke + rollback por target | economy | 01, 06 | 2 |
-| [HF-27-08](HF-27-08.md) | Ligar a linha no worker + DAG enxuto + canal humano | high_architecture (revisão) / economy | 04, 05, 06, 07 | 3 |
-| [HF-27-09](HF-27-09.md) | Topologia VPS + on-prem | operations | 03 | 2 |
-| [HF-27-10](HF-27-10.md) | Canário E2E diário + dogfood | economy | 08, 09 | 4 |
+| Ticket | Título | Papel | Estado | Depende de | Onda | Entrega / Commit |
+| --- | --- | --- | --- | --- | --- | --- |
+| [HF-27-01](HF-27-01.md) | Registry de projetos executável | economy | implemented | — | 1 | `8e075d8`, `a2d4ecd` |
+| [HF-27-02](HF-27-02.md) | Workspace Git por run | economy | implemented | 01 | 1 | `b3218a8` |
+| [HF-27-03](HF-27-03.md) | AgentCLI real + roteamento por quota | economy | implemented | — | 1 | `b3218a8` |
+| [HF-27-04](HF-27-04.md) | Grill de rodada única + Planning | economy | implemented | 02, 03 | 2 | `9c57110`, `4a6a9c5` |
+| [HF-27-05](HF-27-05.md) | Development + validate loop + review cruzada | economy | implemented | 02, 03 | 2 | `1541ce0`, `2fdcd83` |
+| [HF-27-06](HF-27-06.md) | Integração GitHub via gh | economy | implemented | 02 | 2 | `feaa2f3`, `e66c959`, `59ba932` |
+| [HF-27-07](HF-27-07.md) | Deploy + smoke + rollback por target | economy | implemented | 01, 06 | 2 | `b3218a8`, `fbefd06` |
+| [HF-27-08](HF-27-08.md) | Ligar a linha no worker + DAG enxuto + canal humano | high_architecture / economy | implemented | 04, 05, 06, 07 | 3 | PR #33 (`dd6ccce`, `48789e8`) |
+| [HF-27-09](HF-27-09.md) | Topologia VPS + on-prem | operations | implemented | 03 | 2 | `613192f`, `e1b96c9`, `21ff993` |
+| [HF-27-10](HF-27-10.md) | Canário E2E diário + dogfood | economy | implemented | 08, 09 | 4 | PR #37 (`15aca31`) |
+| [HF-27-11](../runbooks/desktop_test_worker.md) | Despacho remoto da suíte de validação | economy | implemented | 09 | 4 | `0d3e705`, `e227842` |
 
 ```mermaid
 flowchart TD

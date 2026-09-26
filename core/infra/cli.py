@@ -12,6 +12,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from core.infra.backup_service import CloudBackupService
 from core.infra.inventory import DEFAULT_INVENTORY_PATH, InventoryManager
 from core.infra.models import NodeStatus
 
@@ -126,6 +127,117 @@ def cmd_export_markdown(manager: InventoryManager, output_path: str | None = Non
     return 0
 
 
+def cmd_backup_run(
+    project_id: str,
+    source_dir: str,
+    *,
+    include_postgres: bool = True,
+    encryption_key: str | None = None,
+) -> int:
+    """Execute 3-tier backup routine (Local Staging -> AES-256-GCM -> R2 + Drive E:)."""
+    service = CloudBackupService(encryption_key=encryption_key)
+    print(f"\n[DARKFAC BACKUP 3-TIER]")
+    print(f"- Projeto: {project_id}")
+    print(f"- Diretorio fonte: {Path(source_dir).resolve()}")
+    print(f"- Incluir PostgreSQL: {'Sim' if include_postgres else 'Nao'}")
+
+    try:
+        snapshot = service.create_three_tier_backup(
+            project_id=project_id,
+            source_directory=source_dir,
+            include_postgres=include_postgres,
+            encryption_key=encryption_key,
+        )
+        print("\n[BACKUP CONCLUIDO COM SUCESSO]")
+        print(f"- Snapshot ID: {snapshot.snapshot_id}")
+        print(f"- Arquivos empacotados: {snapshot.files_count}")
+        print(f"- Tamanho bruto: {snapshot.total_bytes} bytes")
+        print(f"- Tamanho cifrado: {snapshot.encrypted_size_bytes} bytes")
+        print(f"- Checksum (SHA-256): {snapshot.archive_checksum}")
+        print(f"- R2 Object Key: {snapshot.r2_object_key}")
+        print(f"- Espelho On-Premise: {snapshot.onprem_location}\n")
+        return 0
+    except Exception as exc:
+        print(f"\n[ERRO NO BACKUP]: {exc}\n")
+        return 1
+
+
+def cmd_backup_restore(
+    snapshot_id: str,
+    destination: str,
+    *,
+    from_tier: str = "local",
+    encryption_key: str | None = None,
+) -> int:
+    """Execute restore drill and integrity verification in sandbox destination."""
+    service = CloudBackupService(encryption_key=encryption_key)
+    print(f"\n[DARKFAC RESTORE DRILL]")
+    print(f"- Snapshot ID: {snapshot_id}")
+    print(f"- Origem (Tier): {from_tier.upper()}")
+    print(f"- Destino isolado: {Path(destination).resolve()}")
+
+    try:
+        drill = service.run_restore_drill(
+            snapshot_id=snapshot_id,
+            isolated_destination=destination,
+            from_tier=from_tier,
+            encryption_key=encryption_key,
+        )
+        if drill.success:
+            print("\n[RESTAURACAO DEMONSTRADA COM SUCESSO]")
+            print(f"- Drill ID: {drill.drill_id}")
+            print(f"- Arquivos restaurados: {drill.files_restored}")
+            print(f"- Integridade 100% verificada: {drill.integrity_verified}")
+            print(f"- Duracao: {drill.duration_seconds:.3f}s\n")
+            return 0
+        else:
+            print(f"\n[FALHA NA RESTAURACAO]: {drill.error_message}\n")
+            return 1
+    except Exception as exc:
+        print(f"\n[ERRO NO RESTORE DRILL]: {exc}\n")
+        return 1
+
+
+def cmd_backup_list(project_id: str | None = None) -> int:
+    """List recorded backup snapshots."""
+    service = CloudBackupService()
+    snapshots = service.list_snapshots(project_id=project_id)
+    print(f"\n[DARKFAC REGISTRO DE BACKUPS]")
+    print("=" * 95)
+    print(f"{'SNAPSHOT ID':<35} | {'PROJETO':<12} | {'TARGET':<10} | {'ARQUIVOS':<8} | {'DATA UTC'}")
+    print("-" * 95)
+    for s in snapshots:
+        dt_str = s.created_at.strftime("%Y-%m-%d %H:%M")
+        print(f"{s.snapshot_id:<35} | {s.project_id:<12} | {s.storage_target.value:<10} | {s.files_count:<8} | {dt_str}")
+    print("-" * 95)
+    print(f"Total de snapshots: {len(snapshots)}\n")
+    return 0
+
+
+def cmd_backup_retention(
+    project_id: str,
+    *,
+    r2_days: int = 7,
+    onprem_days: int = 120,
+) -> int:
+    """Apply asymmetric retention policy (7 days R2, 120 days On-Prem Drive E:)."""
+    service = CloudBackupService()
+    print(f"\n[DARKFAC POLITICA DE RETENCAO ASSIMETRICA]")
+    print(f"- Projeto: {project_id}")
+    print(f"- R2 Retention: {r2_days} dias")
+    print(f"- On-Prem Retention: {onprem_days} dias")
+
+    result = service.apply_tiered_retention_policy(
+        project_id=project_id,
+        r2_max_age_days=r2_days,
+        onprem_max_age_days=onprem_days,
+    )
+    print("\n[RETENCAO APLICADA]")
+    print(f"- Objetos R2 expurgados: {len(result['r2_pruned'])}")
+    print(f"- Backups On-Prem expurgados: {len(result['onprem_pruned'])}\n")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     """Build command-line parser."""
     parser = argparse.ArgumentParser(description="Dark Factory Infrastructure Management CLI")
@@ -150,6 +262,35 @@ def build_parser() -> argparse.ArgumentParser:
     export_parser = subparsers.add_parser("export-markdown", help="Export summary as Markdown")
     export_parser.add_argument("--output", "-o", default=None, help="Optional output file path")
 
+    # backup-run
+    bk_run = subparsers.add_parser("backup-run", help="Run automated 3-tier backup routine")
+    bk_run.add_argument("--project-id", default="darkfac", help="Project identifier")
+    bk_run.add_argument("--source-dir", default=".", help="Source directory to backup")
+    bk_run.add_argument("--no-postgres", action="store_true", help="Do not include PostgreSQL dump")
+    bk_run.add_argument("--encryption-key", default=None, help="Encryption passphrase or key")
+
+    # backup-restore
+    bk_res = subparsers.add_parser("backup-restore", help="Run restore drill in isolated destination")
+    bk_res.add_argument("--snapshot-id", required=True, help="Snapshot ID to restore")
+    bk_res.add_argument("--destination", required=True, help="Isolated sandbox destination folder")
+    bk_res.add_argument(
+        "--from-tier",
+        choices=["local", "r2", "onprem"],
+        default="local",
+        help="Source tier to restore from (default: local)",
+    )
+    bk_res.add_argument("--encryption-key", default=None, help="Encryption passphrase or key")
+
+    # backup-list
+    bk_list = subparsers.add_parser("backup-list", help="List recorded backup snapshots")
+    bk_list.add_argument("--project-id", default=None, help="Filter by project identifier")
+
+    # backup-retention
+    bk_ret = subparsers.add_parser("backup-retention", help="Apply asymmetric retention policy")
+    bk_ret.add_argument("--project-id", default="darkfac", help="Project identifier")
+    bk_ret.add_argument("--r2-days", type=int, default=7, help="Max age for R2 snapshots in days")
+    bk_ret.add_argument("--onprem-days", type=int, default=120, help="Max age for on-prem snapshots in days")
+
     return parser
 
 
@@ -169,6 +310,28 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_inspect(manager, args.node_id)
     elif args.subcommand == "export-markdown":
         return cmd_export_markdown(manager, args.output)
+    elif args.subcommand == "backup-run":
+        return cmd_backup_run(
+            project_id=args.project_id,
+            source_dir=args.source_dir,
+            include_postgres=not args.no_postgres,
+            encryption_key=args.encryption_key,
+        )
+    elif args.subcommand == "backup-restore":
+        return cmd_backup_restore(
+            snapshot_id=args.snapshot_id,
+            destination=args.destination,
+            from_tier=args.from_tier,
+            encryption_key=args.encryption_key,
+        )
+    elif args.subcommand == "backup-list":
+        return cmd_backup_list(project_id=args.project_id)
+    elif args.subcommand == "backup-retention":
+        return cmd_backup_retention(
+            project_id=args.project_id,
+            r2_days=args.r2_days,
+            onprem_days=args.onprem_days,
+        )
 
     parser.print_help()
     return 1

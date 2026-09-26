@@ -26,6 +26,18 @@
 - Toda nova demanda em linguagem natural que possua ambiguidades materiais (canais, limiares numéricos, permissões, regras de negócio não especificadas) exige pausa imediata em `WAITING_HUMAN`.
 - O agente nunca deve assumir parâmetros ou iniciar código antes de executar o Grill estruturado e receber as decisões explícitas do Owner.
 
+## Execução Canônica de Tickets e Roteamento Obrigatório (Skill 19-run-ticket)
+
+- Toda demanda ou ticket do backlog deve ser executado seguindo a skill `19-run-ticket`.
+- **Preflight Obrigatório de Cota**: Antes de gerar código ou iniciar o PIV loop, o agente/harness deve verificar a saúde de cota via `core.line.routing.pick('development')`.
+- **Bloqueio de Quota Crítica no Chat**: Se a conta associada ao harness atual estiver com cota restante <= 15.0% (semanal ou janela móvel), o agente é TERMINANTEMENTE PROIBIDO de implementar código com seu próprio modelo no chat interativo. Deve recusar no chat, informar a cota restante e delegar para o harness saudável eleito (ex.: Antigravity) ou acionar o launcher headless `python C:\dev\DarkFac\run_ticket.py <TICKET_ID>`.
+- **Exceção de Override Explícito pelo Usuário**: A execução em um harness com cota <= 15.0% SÓ É PERMITIDA se o usuário exigir EXPLICITAMENTE no prompt (ex.: "forçar execução neste harness", "ignorar limite de cota", "estou ciente da cota crítica, prossiga" ou flag `--force`). Sem essa autorização textual inequívoca, o agente deve falhar fechado (*fail-closed*).
+
+## Backups 100% Autônomos (Zero Toque Humano)
+
+- É expressamente proibido orientar o usuário a executar rotinas manuais de backup ou restauração no terminal ou PowerShell.
+- A gestão de resiliência e drills de recuperação em sandbox é 100% autônoma pela Dark Factory através do daemon agendado (`core.infra.backup_cron`), hooks pós-deploy (`scripts/dokploy_redeploy.py`), retenção assimétrica (7 dias R2 / 120 dias on-premise) e alertas críticos via Telegram em caso de anomalia.
+
 ## Validação obrigatória
 
 ```powershell
@@ -68,3 +80,27 @@ oficial antes de declarar a tarefa concluída.
 - Claude Code: carrega `.claude/skills/`, espelho sincronizado de `.agents/skills/` via `scripts/sync_skills.py`; trata este `AGENTS.md` como seu contrato equivalente a um `CLAUDE.md`.
 - Grok: use a raiz clonada como workspace, leia `AGENTS.md` e `FACTORY_RULES.md` e execute os comandos acima.
 - Outros agentes: `AGENTS.md` é o contrato mínimo; `docs/HARNESS_INTEROP.md` contém o fluxo de bootstrap.
+
+## Deploy pós-merge
+
+Depois que qualquer mudança do DarkFac chegar em `main`, rode:
+
+```powershell
+python scripts/dokploy_redeploy.py
+```
+
+Isso redeploya todos os serviços (compose + application) do projeto
+`darkfac-core` no Dokploy (ambiente `production`) e espera cada um terminar
+(`done`/`error`/timeout), reportando o resultado por serviço. Relate o
+resultado (sucesso ou qual serviço falhou/expirou) ao Owner ou na
+conclusão do ticket. Use `--list` para só listar os serviços descobertos
+(nome, tipo, id, status, título do último deploy) sem disparar nada, e
+`--only NOME` (repetível) para restringir a um subconjunto. Credenciais vêm
+de `DOKPLOY_API_URL`/`DOKPLOY_API_KEY` (variáveis de ambiente; no Windows há
+fallback automático para o registro do usuário) — nunca imprima esses
+valores. `--project` é travado por um allowlist (`ALLOWED_PROJECTS` no
+script, hoje só `darkfac-core`) — qualquer outro valor sai com código 2
+antes de qualquer chamada HTTP, já que a permissão do Claude Code libera
+`python scripts/dokploy_redeploy.py *` com qualquer argumento sem prompt.
+Detalhes completos, variáveis, exit codes e o runbook de configuração do
+token em `docs/HARNESS_INTEROP.md` e `docs/runbooks/dokploy_redeploy.md`.

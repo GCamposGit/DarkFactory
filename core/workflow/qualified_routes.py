@@ -448,9 +448,12 @@ class QuotaState:
                     rem = getattr(win, "remaining_percent", None)
                     resets_at = getattr(win, "resets_at", None)
 
-                    if (used is not None and used >= 100.0) or (rem is not None and rem <= 0.0):
+                    is_win_exhausted = (used is not None and used >= 100.0) or (rem is not None and rem <= 0.0)
+                    if is_win_exhausted:
                         self.exhausted_providers.add(provider_id)
-                    if resets_at:
+                        if resets_at:
+                            self.resets_by_provider[provider_id] = str(resets_at)
+                    elif resets_at and provider_id not in self.resets_by_provider:
                         self.resets_by_provider[provider_id] = str(resets_at)
             return
 
@@ -464,10 +467,16 @@ class QuotaState:
                     if status_val in {"limited", "degraded", "disconnected", "unknown"}:
                         self.exhausted_providers.add(provider_id)
                     for win in acc.get("windows", []):
-                        if win.get("used_percent", 0.0) >= 100.0 or win.get("remaining_percent", 100.0) <= 0.0:
+                        used = win.get("used_percent")
+                        rem = win.get("remaining_percent")
+                        resets_at = win.get("resets_at")
+                        is_win_exhausted = (used is not None and used >= 100.0) or (rem is not None and rem <= 0.0)
+                        if is_win_exhausted:
                             self.exhausted_providers.add(provider_id)
-                        if win.get("resets_at"):
-                            self.resets_by_provider[provider_id] = win["resets_at"]
+                            if resets_at:
+                                self.resets_by_provider[provider_id] = str(resets_at)
+                        elif resets_at and provider_id not in self.resets_by_provider:
+                            self.resets_by_provider[provider_id] = str(resets_at)
                 return
 
             # Direct provider mapping dict: {"anthropic": False, "ollama": {"models_available": [...]}}

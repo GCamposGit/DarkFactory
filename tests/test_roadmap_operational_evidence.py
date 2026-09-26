@@ -131,9 +131,9 @@ def test_plan_enrichment_by_full_id_with_status_fields(tmp_path: Path) -> None:
     assert repo_hf13_01 is not None
     assert repo_hf13_01.id == "HF-13-01"
     assert repo_hf13_01.parent_id == "HF-13"
-    assert repo_hf13_01.planning_status == "waiting_dependency"
-    assert repo_hf13_01.implementation_status == "not_started"
-    assert repo_hf13_01.operational_status == "not_verified"
+    assert repo_hf13_01.planning_status == "ready_for_handoff"
+    assert repo_hf13_01.implementation_status == "implemented"
+    assert repo_hf13_01.operational_status == "verified"
 
 
 def test_documentary_markdown_glob_does_not_conclude_ticket_without_verified_receipt(
@@ -354,7 +354,64 @@ def test_repository_service_deterministic_snapshot_hash() -> None:
     # Verify HF-13-01 in compiled snapshot
     hf13_01 = next((item for item in first.items if item.id == "HF-13-01"), None)
     assert hf13_01 is not None
-    assert hf13_01.planning_status == "waiting_dependency"
-    assert hf13_01.implementation_status == "not_started"
-    assert hf13_01.operational_status == "not_verified"
+    assert hf13_01.planning_status == "ready_for_handoff"
+    assert hf13_01.implementation_status == "implemented"
+    assert hf13_01.operational_status == "verified"
     assert hf13_01.parent_id == "HF-13"
+
+
+def test_json_manifest_raw_evidence_refs_do_not_drop_source(tmp_path: Path) -> None:
+    """Raw dict evidence_refs in the manifest must be coerced, not crash read()."""
+    def _item(item_id: str, evidence_refs: list[dict] | None = None) -> dict:
+        item = {
+            "id": item_id,
+            "project_id": "darkfac",
+            "title": f"Item {item_id}",
+            "description": "Fixture item with raw manifest evidence.",
+            "item_type": "feature",
+            "lifecycle_stage": "execution",
+            "delivery_status": "planned",
+            "horizon": "now",
+            "confidence": "high",
+            "dependencies": [],
+        }
+        if evidence_refs is not None:
+            item["evidence_refs"] = evidence_refs
+        return item
+
+    manifest = tmp_path / "roadmap.json"
+    manifest.write_text(
+        json.dumps({
+            "project_id": "darkfac",
+            "items": [
+                _item(
+                    "HF-99-01",
+                    [
+                        {
+                            "evidence_id": "pr-99",
+                            "evidence_kind": "pull_request",
+                            "label": "PR #99 merged",
+                            "locator": "https://example.invalid/pull/99",
+                            "verified": True,
+                        }
+                    ],
+                ),
+                _item("HF-99-02"),
+            ],
+        }),
+        encoding="utf-8",
+    )
+
+    result = JsonRoadmapSource(manifest).read("darkfac")
+
+    assert result.state.status == "available", result.state.error
+    records_by_id = {rec.id: rec for rec in result.records}
+    assert set(records_by_id) == {"HF-99-01", "HF-99-02"}
+    with_evidence = records_by_id["HF-99-01"]
+    assert len(with_evidence.evidence_refs) == 1
+    assert isinstance(with_evidence.evidence_refs[0], RoadmapEvidenceRef)
+    assert with_evidence.evidence_refs[0].evidence_id == "pr-99"
+    assert with_evidence.delivery_status == DeliveryStatus.COMPLETED
+
+    snapshot = RoadmapCompiler([JsonRoadmapSource(manifest)]).compile("darkfac")
+    assert {"HF-99-01", "HF-99-02"} <= {item.id for item in snapshot.items}

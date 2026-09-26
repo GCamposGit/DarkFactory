@@ -124,15 +124,58 @@ class ExplicitChoicePolicy:
         return [self.primary_harness] + [h for h in fallbacks if h != self.primary_harness]
 
 
+class HeadroomDynamicPolicy:
+    """Selects and prioritizes harnesses dynamically by available quota headroom.
+
+    Reads real quota from unified provider snapshots (.factory/usage/providers/).
+    Harnesses with remaining quota <= 15% or unknown/stale are ranked lowest.
+    """
+
+    def __init__(self, allowed_harnesses: list[str] | None = None) -> None:
+        self.allowed_harnesses = allowed_harnesses or [
+            HARNESS_ANTIGRAVITY,
+            HARNESS_CODEX,
+            HARNESS_GROK,
+            HARNESS_CLAUDE,
+            HARNESS_DEEPSEEK,
+        ]
+
+    def select_candidate_harnesses(
+        self,
+        stage: str,
+        metadata: dict[str, Any] | None = None,
+    ) -> list[str]:
+        meta = metadata or {}
+        preferred = meta.get("preferred_harness") or meta.get("harness_preference")
+        if preferred and preferred in self.allowed_harnesses:
+            return [preferred] + [h for h in self.allowed_harnesses if h != preferred]
+
+        # Query unified quota headroom
+        try:
+            from core.line.routing import _HARNESS_TO_PROVIDER, _default_quota_headroom
+
+            scored: list[tuple[str, float]] = []
+            for h in self.allowed_harnesses:
+                prov = _HARNESS_TO_PROVIDER.get(h, h)
+                headroom = _default_quota_headroom(prov)
+                scored.append((h, headroom if headroom is not None else -1.0))
+            scored.sort(key=lambda item: item[1], reverse=True)
+            return [h for h, _ in scored]
+        except Exception:
+            return list(self.allowed_harnesses)
+
+
 _POLICY_REGISTRY: dict[str, type] = {
     "specialized": SpecializedCascadePolicy,
     "universal": UniversalCascadePolicy,
     "explicit": ExplicitChoicePolicy,
+    "headroom": HeadroomDynamicPolicy,
 }
 
 
 def register_harness_routing_policy(name: str, policy_cls: type) -> None:
     """Register custom routing policy class."""
+
     _POLICY_REGISTRY[name.lower()] = policy_cls
 
 

@@ -11,6 +11,7 @@ import pytest
 from core.line.agent_cli import AgentResult
 from core.line.routing import (
     RoutingConfig,
+    StageRoute,
     default_config_path,
     load_routing_config,
     pick,
@@ -25,8 +26,8 @@ def _always_healthy(_provider_id: str) -> float | None:
 def test_default_config_file_is_loadable():
     cfg = load_routing_config(default_config_path())
     assert set(cfg.stages) == {"grill", "planning", "development", "review", "distill"}
-    assert cfg.pressure_thresholds["critical"] == 10
-    assert cfg.stages["development"].openrouter_model is None
+    assert cfg.pressure_thresholds["critical"] == 15
+    assert cfg.stages["development"].openrouter_model
     assert cfg.stages["review"].openrouter_model
 
 
@@ -58,7 +59,7 @@ def test_pick_skips_critical_quota_account():
     cfg = load_routing_config(default_config_path())
 
     def lookup(provider_id: str) -> float | None:
-        return 5.0 if provider_id == "anthropic" else 80.0  # claude is CRITICAL
+        return 5.0 if provider_id == "anthropic" else 80.0  # claude is CRITICAL (<= 15)
 
     choice = pick(
         "development",
@@ -70,7 +71,7 @@ def test_pick_skips_critical_quota_account():
     assert choice == ("codex", None)
 
 
-def test_pick_unknown_quota_counts_as_eligible():
+def test_pick_unknown_quota_counts_as_ineligible_fail_closed():
     cfg = load_routing_config(default_config_path())
     choice = pick(
         "development",
@@ -79,7 +80,7 @@ def test_pick_unknown_quota_counts_as_eligible():
         quota_lookup=lambda _pid: None,
         cooldown_path=Path("does-not-exist.json"),
     )
-    assert choice == ("claude", "sonnet")
+    assert choice is None
 
 
 def test_record_result_sets_cooldown_then_next_pick_uses_next_in_cascade(tmp_path):
@@ -178,6 +179,7 @@ def test_all_cascade_accounts_in_cooldown_review_returns_openrouter(tmp_path):
         config=cfg,
         quota_lookup=_always_healthy,
         cooldown_path=cooldown_path,
+        openrouter_balance_lookup=lambda: 10.0,
     )
     assert choice == ("openrouter", cfg.stages["review"].openrouter_model)
 
@@ -198,6 +200,7 @@ def test_openrouter_respects_run_cap_budget(tmp_path):
         quota_lookup=_always_healthy,
         cooldown_path=cooldown_path,
         spent_usd=cfg.run_caps.openrouter_usd,  # cap already exhausted
+        openrouter_balance_lookup=lambda: 10.0,
     )
     assert choice is None
 
@@ -281,5 +284,73 @@ def test_load_routing_config_falls_back_to_defaults_when_file_missing(tmp_path):
     missing = tmp_path / "nope.json"
     cfg = load_routing_config(missing)
     assert isinstance(cfg, RoutingConfig)
-    assert cfg.pressure_thresholds["critical"] == 10.0
-    assert cfg.stages["development"].cascade[0] == ("claude", "sonnet")
+    assert cfg.pressure_thresholds["critical"] == 15.0
+    assert cfg.stages["development"].cascade[0] == ("antigravity", None)
+
+
+def test_pick_dynamic_headroom_prefers_antigravity_over_critical_codex_claude():
+    """Real scenario: Codex at 2%, Claude at 3%, Grok at 2.8%, Antigravity at 61.5%."""
+    cfg = load_routing_config(default_config_path())
+
+    def real_like_lookup(provider_id: str) -> float | None:
+        table = {
+            "openai": 2.0,      # codex: CRITICAL (<= 15%)
+            "anthropic": 3.0,   # claude: CRITICAL (<= 15%)
+            "xai": 2.84,        # grok: CRITICAL (<= 15%)
+            "google": 61.47,    # antigravity: HEALTHY (> 15%)
+        }
+        return table.get(provider_id)
+
+    choice = pick(
+        "development",
+        ["harness:claude", "harness:codex", "harness:grok", "harness:antigravity"],
+        config=cfg,
+        quota_lookup=real_like_lookup,
+        cooldown_path=Path("does-not-exist.json"),
+    )
+    # Antigravity must be selected since all others are critical!
+    assert choice == ("antigravity", None)
+
+
+def test_pick_skips_forbidden_autonomous_models():
+    """Models like Fable and Astra must be strictly skipped autonomously."""
+    custom_cfg = RoutingConfig(
+        forbidden_autonomous_models=["gpt-6-astra", "claude-fable"],
+        stages={
+            "planning": StageRoute(
+                cascade=[("codex", "gpt-6-astra"), ("claude", "opus")],
+            )
+        }
+    )
+
+    choice = pick(
+        "planning",
+        ["harness:codex", "harness:claude"],
+        config=custom_cfg,
+        quota_lookup=_always_healthy,
+        cooldown_path=Path("does-not-exist.json"),
+    )
+    # codex with gpt-6-astra is forbidden; falls through to claude opus
+    assert choice == ("claude", "opus")
+
+
+def test_quota_reservation_manager_reserve_and_release(tmp_path):
+    from core.usage.reservation import QuotaReservationManager
+
+    res_file = tmp_path / "reservations.json"
+    mgr = QuotaReservationManager(path=res_file)
+
+    assert mgr.get_active_reserved_percent("google") == 0.0
+
+    res_id = mgr.reserve("google", "antigravity", percent=5.0)
+    assert mgr.get_active_reserved_percent("google") == 5.0
+
+    res_id2 = mgr.reserve("google", "antigravity", percent=3.0)
+    assert mgr.get_active_reserved_percent("google") == 8.0
+
+    assert mgr.release(res_id) is True
+    assert mgr.get_active_reserved_percent("google") == 3.0
+
+    assert mgr.release(res_id2) is True
+    assert mgr.get_active_reserved_percent("google") == 0.0
+

@@ -77,7 +77,7 @@ def build_default_inventory() -> InfraInventory:
             ),
         ],
         cost_monthly_usd=0.0,
-        tags=["workstation", "primary-dev", "gpu-ada", "active", "tailscale-active"],
+        tags=["workstation", "primary-dev", "gpu-ada", "active", "tailscale-active", "project:darkfac", "project:all", "shared"],
         updated_at=now,
     )
 
@@ -131,9 +131,17 @@ def build_default_inventory() -> InfraInventory:
                 description="Local storage target (Drive E: 3 TB Hitachi HDD) para dumps e containers",
                 status=NodeStatus.ACTIVE,
             ),
+            ServiceItem(
+                name="darkfac-test-worker",
+                description="Runner headless de CI, despacho remoto de validação e batch workloads (FastAPI, porta 8080, HF-27-11 / USR-16)",
+                status=NodeStatus.ACTIVE,
+                port=8080,
+                managed_by="Windows Task Scheduler (DarkFac Test Worker)",
+                container_engine=None,
+            ),
         ],
         cost_monthly_usd=0.0,
-        tags=["on-prem", "storage-vault", "docker-active", "tailscale-active", "active"],
+        tags=["on-prem", "storage-vault", "docker-active", "tailscale-active", "active", "project:darkfac", "project:segundo-cerebro", "shared"],
         updated_at=now,
     )
 
@@ -202,7 +210,7 @@ def build_default_inventory() -> InfraInventory:
             ),
         ],
         cost_monthly_usd=7.19,
-        tags=["cloud", "vps", "hetzner", "cx23", "falkenstein", "server-165058444", "dokploy-active", "tailscale-active", "production", "active"],
+        tags=["cloud", "vps", "hetzner", "cx23", "falkenstein", "server-165058444", "dokploy-active", "tailscale-active", "production", "active", "project:darkfac", "shared"],
         updated_at=now,
     )
 
@@ -236,7 +244,7 @@ def build_default_inventory() -> InfraInventory:
             ),
         ],
         cost_monthly_usd=0.0,
-        tags=["edge", "dns", "security", "tunnel", "active"],
+        tags=["edge", "dns", "security", "tunnel", "active", "project:darkfac", "project:site-ggcampos", "shared"],
         updated_at=now,
     )
 
@@ -259,7 +267,7 @@ def build_default_inventory() -> InfraInventory:
             )
         ],
         cost_monthly_usd=4.0,
-        tags=["hosting", "web", "external", "active"],
+        tags=["hosting", "web", "external", "active", "project:site-ggcampos"],
         updated_at=now,
     )
 

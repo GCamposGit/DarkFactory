@@ -60,6 +60,7 @@ models/.locks/
 .factory/enterprise/
 .factory/artifacts/
 .factory/pids/
+.factory/tmp/
 .factory/*.db*
 
 

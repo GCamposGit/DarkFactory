@@ -1,20 +1,23 @@
 {
-  "pressure_thresholds": {"guarded": 50, "stressed": 25, "critical": 10},
+  "pressure_thresholds": {"guarded": 50, "stressed": 25, "critical": 15},
   "cooldown_default_minutes": 60,
+  "forbidden_autonomous_models": ["fable", "claude-fable", "astra", "gpt-6-astra"],
   "stages": {
     "grill": {
-      "cascade": [["claude", "sonnet"], ["codex", null]],
+      "cascade": [["antigravity", null], ["claude", "sonnet"], ["codex", null]],
       "openrouter_ok": true,
       "openrouter_model": "deepseek/deepseek-v4.1-flash"
     },
     "planning": {
-      "cascade": [["claude", "opus"], ["codex", null]],
+      "cascade": [["claude", "opus"], ["codex", null], ["antigravity", null]],
       "effort": "high",
-      "openrouter_ok": false
+      "openrouter_ok": true,
+      "openrouter_model": "deepseek/deepseek-v4.1-flash"
     },
     "development": {
-      "cascade": [["claude", "sonnet"], ["codex", null], ["grok", null], ["antigravity", null]],
-      "openrouter_ok": false
+      "cascade": [["antigravity", null], ["claude", "sonnet"], ["codex", null], ["grok", null]],
+      "openrouter_ok": true,
+      "openrouter_model": "deepseek/deepseek-v4.1-flash"
     },
     "review": {
       "cascade": "other_family_than_development",

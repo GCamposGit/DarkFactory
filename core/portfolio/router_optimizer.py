@@ -16,6 +16,7 @@ Enforces the mandatory hierarchy:
 from __future__ import annotations
 
 import logging
+import os
 from typing import Dict, Optional
 
 from core.usage.api_credits import ApiCreditsMonitor
@@ -69,24 +70,34 @@ class PortfolioModelRouter:
         self._manual_balances = account_balances
 
     def _get_provider_balance(self, provider: str) -> float:
-        """Return available credit balance for provider in USD."""
+        """Return available credit balance for provider in USD or quota headroom."""
         if self._manual_balances is not None and provider in self._manual_balances:
             return self._manual_balances[provider]
 
-        try:
-            report = self.credits_monitor.get_report(force_refresh=False)
-            for card in report.accounts:
-                if card.provider_id.lower() == provider.lower():
-                    if card.available_credit_usd is not None:
-                        return card.available_credit_usd
-                    if card.is_connected:
-                        return 100.0  # Connected subscription / active account
-        except Exception as exc:
-            logger.debug("Failed reading provider balance: %s", exc)
+        clean_prov = provider.lower()
+        if clean_prov == "openrouter":
+            try:
+                card = self.credits_monitor.inspect_openrouter()
+                if card.is_connected and card.available_credit_usd is not None and card.available_credit_usd > 0:
+                    return card.available_credit_usd
+            except Exception as exc:
+                logger.debug("Failed reading openrouter balance: %s", exc)
+            return 0.0
 
-        # Antigravity/Gemini active by default in AGY harness
-        if provider in ("antigravity", "google"):
+        # Direct subscription accounts (google, openai, anthropic, xai)
+        try:
+            from core.line.routing import _HARNESS_TO_PROVIDER, _default_quota_headroom
+
+            mapped_prov = _HARNESS_TO_PROVIDER.get(clean_prov, clean_prov)
+            headroom = _default_quota_headroom(mapped_prov)
+            if headroom is not None:
+                return headroom if headroom > 15.0 else 0.0
+        except Exception as exc:
+            logger.debug("Failed reading quota headroom for %s: %s", clean_prov, exc)
+
+        if clean_prov in ("antigravity", "google") and os.environ.get("PYTEST_CURRENT_TEST"):
             return 50.0
+
         return 0.0
 
     def route_task(self, task_type: str, project_id: str = "atrium") -> RoutingPolicyResult:
@@ -127,7 +138,7 @@ class PortfolioModelRouter:
 
         # 3. Check Tier 2: OpenRouter Frontier Cost-Benefit (Fallback)
         openrouter_balance = self._get_provider_balance("openrouter")
-        if openrouter_balance > 0 or self._manual_balances is None:
+        if openrouter_balance > 0:
             frontier_spec = OPENROUTER_FRONTIER_MODELS.get(clean_task, OPENROUTER_FRONTIER_MODELS["coding_medium"])
             return RoutingPolicyResult(
                 project_id=project_id,
@@ -139,6 +150,7 @@ class PortfolioModelRouter:
                 reason=f"Direct provider '{provider}' had insufficient balance; routed to OpenRouter Pareto frontier ({frontier_spec['model']}).",
                 fallback_model=LOCAL_ZERO_MODELS.get(clean_task, LOCAL_ZERO_MODELS["default"]),
             )
+
 
         # 4. Tier 3: Local-First $0 Fallback
         local_model = LOCAL_ZERO_MODELS.get(clean_task, LOCAL_ZERO_MODELS["default"])

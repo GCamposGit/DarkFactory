@@ -47,9 +47,9 @@ Este arquivo registra as fontes humanas do roadmap aprovado para o painel do Dar
 
 ## Composição da autonomia contínua — 18/09/2026
 
-[Plano mestre](CONTINUOUS_AUTONOMY_PLAN_2026-09-18.md), [33 handoffs e DAG](handoffs/continuous-autonomy/INDEX.md), [fonte estruturada](../.factory/planning/continuous-autonomy/plan.json). HF-26 agrega a composição; HF-05-02 reutiliza o sucessor já reservado. Os novos IDs estão no manifesto JSON consumido pelo compilador, sem alteração de status dos pais históricos. Snapshot local não prova painel publicado.
+[Plano mestre](CONTINUOUS_AUTONOMY_PLAN_2026-09-18.md), [33 handoffs e DAG](handoffs/continuous-autonomy/INDEX.md), [fonte estruturada](../.factory/planning/continuous-autonomy/plan.json). HF-26 agrega a composição; HF-05-02 reutiliza o sucessor já reservado. Os novos IDs estão no manifesto JSON consumido pelo compilador, sem alteração de status dos pais históricos.
 
-Primeiro contrato: HF-26-01, resolvedor puro de política, sem dependência técnica; admissão por supervisor qualificado e preflight permanecem obrigatórios. Nenhum novo item está implementado ou operacionalmente verificado.
+Estado da Composição e Linha de Produção (25/09/2026): A Wave 1 de Autonomia Contínua (HF-26-01 a HF-03-07, 31 unidades) e o pacote HF-27 (HF-27-01 a HF-27-11, Linha de Produção Enxuta) foram implementados, testados e integrados à baseline `main`. A fronteira corrente no DAG de autonomia contínua é o ticket HF-03-08 (ativação isolada e fatia vertical em ambiente target), cujo sucessor direto é a aceitação 24h (HF-15-02).
 
 ## Ticket futuro — piloto Jev e método de pilotos
 

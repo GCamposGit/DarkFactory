@@ -70,29 +70,29 @@ MODEL_MATRIX = {
     "architecture": {
         "primary": "claude-opus-5",
         "primary_provider": "anthropic",
-        "secondary": "gpt-6-astra",
+        "secondary": "gpt-sol",
         "secondary_provider": "openai",
         "local_fallback": "qwen-code-deep:latest",
-        "notes": "Claude Opus 5 / GPT-6 Astra for PRD and strict non-goals; DeepSeek-V4.1-Flash for cost-effective deep reasoning."
+        "notes": "Claude Opus 5 / GPT Sol for PRD and strict non-goals; DeepSeek-V4.1-Flash for cost-effective deep reasoning."
     },
     "coding": {
         "high_complexity": {
             "primary": "claude-opus-5",
             "primary_provider": "anthropic",
-            "secondary": "deepseek-v4-pro",
-            "secondary_provider": "siliconflow",
+            "secondary": "gpt-sol",
+            "secondary_provider": "openai",
             "local_fallback": "qwen-code-deep:latest",
         },
         "medium_complexity": {
-            "primary": "deepseek-v4-pro",
-            "primary_provider": "siliconflow",
-            "secondary": "qwen-code-deep:latest",
-            "secondary_provider": "ollama",
+            "primary": "gemini-3.8-flash",
+            "primary_provider": "antigravity",
+            "secondary": "deepseek/deepseek-v4.1-flash",
+            "secondary_provider": "openrouter",
             "local_fallback": "qwen-code-deep:latest",
         },
         "low_complexity": {
-            "primary": "qwen-code-fast:latest",
-            "primary_provider": "ollama",
+            "primary": "gpt-luna-xhigh",
+            "primary_provider": "openai",
             "secondary": "gemini-3.8-flash",
             "secondary_provider": "antigravity",
             "local_fallback": "qwen-code-fast:latest",
@@ -175,8 +175,8 @@ _QUOTA_FAILOVER_MODELS = {
     "xai": "grok-4.6",
     "anthropic": "claude-opus-5",
     "claude_code": "opus-5.1",
-    "openai": "gpt-6-astra",
-    "codex": "gpt-6-astra",
+    "openai": "gpt-sol",
+    "codex": "gpt-sol",
     "deepseek": "deepseek/deepseek-v4.1-flash",   # openrouter: V4.1-Flash replaces V4-Pro as default DeepSeek failover
     "openrouter": "deepseek/deepseek-v4.1-flash",  # explicit openrouter failover
     "siliconflow": "deepseek/deepseek-v4.1-flash", # siliconflow routes to Pareto leader V4.1-Flash
@@ -206,31 +206,32 @@ def _apply_token_plan(
         remaining_hourly_percent=remaining_hourly_percent,
         offline=offline,
     )
-    if plan.prefer_local and preferred_provider not in {"local_process", "ollama"}:
-        result["quota_displaced_recommendation"] = {
-            "model": result.get("model"), "provider": preferred_provider,
-        }
-        result["model"] = (
-            "qwen-code-deep:latest"
-            if complexity in {"high", "critical"} or task_type in {"architecture", "plan", "prd"}
-            else "qwen-code-fast:latest"
-        )
-        result["provider"] = "ollama"
-    elif plan.failover_required and plan.selected_provider:
-        selected_provider = plan.selected_provider
-        replacement = _QUOTA_FAILOVER_MODELS.get(selected_provider)
-        if plan.use_paid_api:
-            replacement = (
-                "deepseek/deepseek-v4-pro"
-                if complexity in {"high", "critical"}
-                else "qwen/qwen3-8-flash-next"
-            )
-        if replacement:
+    if task_type not in {"visual", "visual_synthesis", "image_gen", "diagram"}:
+        if plan.prefer_local and preferred_provider not in {"local_process", "ollama"}:
             result["quota_displaced_recommendation"] = {
                 "model": result.get("model"), "provider": preferred_provider,
             }
-            result["model"] = replacement
-            result["provider"] = selected_provider
+            result["model"] = (
+                "qwen-code-deep:latest"
+                if complexity in {"high", "critical"} or task_type in {"architecture", "plan", "prd"}
+                else "qwen-code-fast:latest"
+            )
+            result["provider"] = "ollama"
+        elif plan.failover_required and plan.selected_provider:
+            selected_provider = plan.selected_provider
+            replacement = _QUOTA_FAILOVER_MODELS.get(selected_provider)
+            if plan.use_paid_api:
+                replacement = (
+                    "deepseek/deepseek-v4-pro"
+                    if complexity in {"high", "critical"}
+                    else "qwen/qwen3-8-flash-next"
+                )
+            if replacement:
+                result["quota_displaced_recommendation"] = {
+                    "model": result.get("model"), "provider": preferred_provider,
+                }
+                result["model"] = replacement
+                result["provider"] = selected_provider
     result["token_budget"] = plan.model_dump(mode="json")
     return result
 
@@ -327,6 +328,13 @@ def recommend_model(
                 "provider": "ollama",
                 "mode": "offline",
                 "reason": "Local Qwen3-Coder 30B MoE com contexto de 16k e 20 threads (sem prompt)."
+            }
+        elif task_type in ["visual", "visual_synthesis", "image_gen", "diagram"]:
+            result = {
+                "model": "darkfac-vector-v1",
+                "provider": "local_procedural",
+                "mode": "offline",
+                "reason": "Local procedural vector rendering engine (Pillow) ($0 custo)."
             }
         else:
             result = {
@@ -458,10 +466,18 @@ def recommend_model(
             "reason": "Default versatile high-throughput orchestrator."
         }
 
+    if usage_report is None and remaining_hourly_percent is None:
+        try:
+            from core.usage.monitor import AccountUsageMonitor
+
+            usage_report = AccountUsageMonitor(_ROOT / ".factory" / "usage" / "providers").inspect(force=False)
+        except Exception:
+            pass
+
     if frontier_data and task_type not in ["visual", "visual_synthesis", "image_gen", "diagram"]:
         result["daily_efficiency_frontier"] = frontier_data
 
-    return _apply_token_plan(
+    planned_result = _apply_token_plan(
         result,
         task_type,
         complexity,
@@ -471,6 +487,13 @@ def recommend_model(
         remaining_hourly_percent,
         offline,
     )
+
+    # Strictly ban autonomous invocation of Fable and Astra
+    if planned_result.get("model") in ("gpt-6-astra", "astra", "claude-fable", "fable"):
+        planned_result["model"] = "gpt-sol" if "astra" in planned_result["model"] else "claude-opus-5"
+
+    return planned_result
+
 
 def main():
     parser = argparse.ArgumentParser(description="Model Router & Execution CLI (2026 Edition)")

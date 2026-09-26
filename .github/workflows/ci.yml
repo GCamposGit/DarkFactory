@@ -98,3 +98,25 @@ jobs:
         env:
           DARKFAC_HARNESS_CACHE: "off"
         run: python core/harness/runner.py --quick
+
+  continuous-deployment:
+    name: Continuous Deployment (Dokploy)
+    needs: main-validation
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger Dokploy Continuous Deployment Webhook
+        env:
+          DOKPLOY_DEPLOY_URL: ${{ secrets.DOKPLOY_DEPLOY_URL }}
+        run: |
+          if [ -n "$DOKPLOY_DEPLOY_URL" ]; then
+            echo "Dispatching Dokploy continuous deployment webhook..."
+            curl -s -S -X POST "$DOKPLOY_DEPLOY_URL" \
+              -H "Content-Type: application/json" \
+              -H "User-Agent: DarkFac-CI-Deployer/1.0" \
+              -d '{"source": "github_actions", "ref": "${{ github.ref }}", "sha": "${{ github.sha }}"}'
+            echo "Deployment webhook triggered successfully."
+          else
+            echo "DOKPLOY_DEPLOY_URL secret is not configured in this repository; skipping automated cloud trigger."
+          fi
+

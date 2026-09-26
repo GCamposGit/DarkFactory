@@ -175,6 +175,54 @@ def test_gemini_adapter_parses_live_language_server_response(tmp_path: Path, mon
     assert result.windows[0].remaining_percent == 85.0
 
 
+def test_gemini_adapter_parses_retrieve_user_quota_summary(tmp_path: Path, monkeypatch) -> None:
+    from core.usage.adapters import GeminiAccountAdapter
+    spec = ProviderSpec("google", "Google / Gemini", ProviderFamily.FRONTIER, "https://one.google.com/")
+    adapter = GeminiAccountAdapter(spec, tmp_path)
+
+    dummy_usage = ProviderAccountUsage(
+        provider_id="google",
+        provider_name="Google / Gemini",
+        family=ProviderFamily.FRONTIER,
+        status=AccountConnectionStatus.CONNECTED,
+        adapter="antigravity_rpc",
+        plan="Pro",
+        account_label="user@example.com",
+        quota_supported=True,
+        windows=[
+            QuotaWindow(
+                quota_id="antigravity:gemini-weekly",
+                label="Limite Semanal (1 semana)",
+                used_percent=38.5,
+                remaining_percent=61.5,
+                window_duration_minutes=10080,
+                resets_at="2026-09-30T12:24:20Z",
+                metric="subscription",
+            ),
+            QuotaWindow(
+                quota_id="antigravity:gemini-5h",
+                label="Janela Móvel (5h)",
+                used_percent=23.4,
+                remaining_percent=76.6,
+                window_duration_minutes=300,
+                resets_at="2026-09-25T20:06:53Z",
+                metric="subscription",
+            ),
+        ],
+        message="Quotas lidas em tempo real do Language Server local do Antigravity.",
+        dashboard_url=spec.dashboard_url,
+    )
+    monkeypatch.setattr(GeminiAccountAdapter, "_probe_language_server", lambda self: dummy_usage)
+    result = adapter.inspect()
+
+    assert result.status == AccountConnectionStatus.CONNECTED
+    assert len(result.windows) == 2
+    assert result.windows[0].window_duration_minutes == 10080
+    assert result.windows[0].used_percent == 38.5
+    assert result.windows[1].window_duration_minutes == 300
+    assert result.windows[1].used_percent == 23.4
+
+
 def test_grok_adapter_parses_live_supergrok_usage(tmp_path: Path, monkeypatch) -> None:
     from core.usage.adapters import GrokAccountAdapter
     spec = ProviderSpec("xai", "xAI / Grok", ProviderFamily.FRONTIER, "https://grok.com/?_s=usage")
@@ -252,6 +300,7 @@ def test_claude_adapter_detects_cli_auth(tmp_path: Path, monkeypatch) -> None:
         message="Sessão Claude Code validada no terminal.",
         dashboard_url=spec.dashboard_url,
     )
+    monkeypatch.setattr(ClaudeCodeAccountAdapter, "_probe_claude_unified_ratelimits", lambda self: None)
     monkeypatch.setattr(ClaudeCodeAccountAdapter, "_find_claude", lambda *_: "mock_claude.exe")
     monkeypatch.setattr(ClaudeCodeAccountAdapter, "_probe_claude_cli", lambda self, exe: dummy_usage)
     result = adapter.inspect()
@@ -263,8 +312,58 @@ def test_claude_adapter_detects_cli_auth(tmp_path: Path, monkeypatch) -> None:
     assert len(result.windows) == 2
 
 
+def test_claude_adapter_parses_live_unified_ratelimits(tmp_path: Path, monkeypatch) -> None:
+    from core.usage.adapters import ClaudeCodeAccountAdapter
+    spec = ProviderSpec("anthropic", "Anthropic / Claude", ProviderFamily.FRONTIER, "https://claude.ai/settings/billing")
+    adapter = ClaudeCodeAccountAdapter(spec, tmp_path)
+
+    dummy_usage = ProviderAccountUsage(
+        provider_id="anthropic",
+        provider_name="Anthropic / Claude",
+        family=ProviderFamily.FRONTIER,
+        status=AccountConnectionStatus.CONNECTED,
+        adapter="claude_code_api",
+        plan="Claude Pro",
+        account_label="test@example.com",
+        quota_supported=True,
+        windows=[
+            QuotaWindow(
+                quota_id="claude:weekly",
+                label="Limite Semanal (1 semana)",
+                used_percent=94.0,
+                remaining_percent=6.0,
+                window_duration_minutes=10080,
+                resets_at="2026-09-27T01:00:00+00:00",
+                metric="subscription",
+            ),
+            QuotaWindow(
+                quota_id="claude:5h",
+                label="Janela Móvel (5h)",
+                used_percent=45.0,
+                remaining_percent=55.0,
+                window_duration_minutes=300,
+                resets_at="2026-09-25T19:30:00+00:00",
+                metric="subscription",
+            ),
+        ],
+        message="Quotas lidas em tempo real da API unificada do Claude Code.",
+        dashboard_url=spec.dashboard_url,
+    )
+    monkeypatch.setattr(ClaudeCodeAccountAdapter, "_probe_claude_unified_ratelimits", lambda self: dummy_usage)
+    result = adapter.inspect()
+
+    assert result.status == AccountConnectionStatus.CONNECTED
+    assert result.adapter == "claude_code_api"
+    assert len(result.windows) == 2
+    assert result.windows[0].window_duration_minutes == 10080
+    assert result.windows[0].used_percent == 94.0
+    assert result.windows[1].window_duration_minutes == 300
+    assert result.windows[1].used_percent == 45.0
+
+
 def test_claude_adapter_fallback_to_api_key(tmp_path: Path, monkeypatch) -> None:
     from core.usage.adapters import ClaudeCodeAccountAdapter
+    monkeypatch.setattr(ClaudeCodeAccountAdapter, "_probe_claude_unified_ratelimits", lambda self: None)
     monkeypatch.setattr(ClaudeCodeAccountAdapter, "_find_claude", lambda *_: None)
     monkeypatch.setattr(ClaudeCodeAccountAdapter, "_probe_claude_credentials", lambda self: None)
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
@@ -284,6 +383,7 @@ def test_claude_adapter_fallback_to_api_key(tmp_path: Path, monkeypatch) -> None
 
 def test_claude_adapter_disconnected_when_no_auth(tmp_path: Path, monkeypatch) -> None:
     from core.usage.adapters import ClaudeCodeAccountAdapter
+    monkeypatch.setattr(ClaudeCodeAccountAdapter, "_probe_claude_unified_ratelimits", lambda self: None)
     monkeypatch.setattr(ClaudeCodeAccountAdapter, "_find_claude", lambda *_: None)
     monkeypatch.setattr(ClaudeCodeAccountAdapter, "_probe_claude_credentials", lambda self: None)
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
@@ -648,10 +748,12 @@ def test_grok_adapter_probes_bot_session_live_percentage(tmp_path: Path, monkeyp
     assert result.adapter == "grok_bot_api"
     assert result.plan == "SuperGrok"
     assert result.quota_supported is True
-    assert len(result.windows) == 1
-    assert result.windows[0].used_percent == 2.14
-    assert result.windows[0].remaining_percent == 97.86
+    assert len(result.windows) == 2
+    assert result.windows[0].quota_id == "grok:weekly_pool"
+    assert result.windows[0].used_percent == 97.86
+    assert result.windows[0].remaining_percent == 2.14
     assert result.windows[0].resets_at == "2026-09-15T22:15:57.642Z"
-    assert "Pool de computação semanal" in result.message
+    assert result.windows[1].quota_id == "grok:5h"
+    assert "Pool semanal e janela móvel" in result.message
 
 
