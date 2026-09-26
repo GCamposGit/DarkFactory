@@ -1,6 +1,6 @@
 {
   "version": "1.0.0",
-  "last_updated": "2026-09-26T02:52:25.859642Z",
+  "last_updated": "2026-09-26T02:53:17.585272Z",
   "nodes": [
     {
       "id": "predator-neo-16",
@@ -68,9 +68,12 @@
         "primary-dev",
         "gpu-ada",
         "active",
-        "tailscale-active"
+        "tailscale-active",
+        "project:darkfac",
+        "project:all",
+        "shared"
       ],
-      "updated_at": "2026-09-26T02:52:25.859642Z"
+      "updated_at": "2026-09-26T02:53:17.585272Z"
     },
     {
       "id": "onprem-z97-server",
@@ -146,9 +149,12 @@
         "storage-vault",
         "docker-active",
         "tailscale-active",
-        "active"
+        "active",
+        "project:darkfac",
+        "project:segundo-cerebro",
+        "shared"
       ],
-      "updated_at": "2026-09-26T02:52:25.859642Z"
+      "updated_at": "2026-09-26T02:53:17.585272Z"
     },
     {
       "id": "darkfac-vps-primary",
@@ -242,9 +248,11 @@
         "dokploy-active",
         "tailscale-active",
         "production",
-        "active"
+        "active",
+        "project:darkfac",
+        "shared"
       ],
-      "updated_at": "2026-09-26T02:52:25.859642Z"
+      "updated_at": "2026-09-26T02:53:17.585272Z"
     },
     {
       "id": "cloudflare-edge",
@@ -295,9 +303,12 @@
         "dns",
         "security",
         "tunnel",
-        "active"
+        "active",
+        "project:darkfac",
+        "project:site-ggcampos",
+        "shared"
       ],
-      "updated_at": "2026-09-26T02:52:25.859642Z"
+      "updated_at": "2026-09-26T02:53:17.585272Z"
     },
     {
       "id": "hostinger-web",
@@ -331,9 +342,10 @@
         "hosting",
         "web",
         "external",
-        "active"
+        "active",
+        "project:site-ggcampos"
       ],
-      "updated_at": "2026-09-26T02:52:25.859642Z"
+      "updated_at": "2026-09-26T02:53:17.585272Z"
     },
     {
       "id": "n8n-automation",
@@ -382,7 +394,7 @@
         "vps",
         "active"
       ],
-      "updated_at": "2026-09-26T02:52:25.859642Z"
+      "updated_at": "2026-09-26T02:53:17.585272Z"
     },
     {
       "id": "google-platform",
@@ -417,7 +429,7 @@
         "auth",
         "active"
       ],
-      "updated_at": "2026-09-26T02:52:25.859642Z"
+      "updated_at": "2026-09-26T02:53:17.585272Z"
     }
   ],
   "adrs": [
