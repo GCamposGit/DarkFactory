@@ -58,7 +58,7 @@
 | ID | Item | Pré-requisito | Status | Critérios de Aceite |
 | :--- | :--- | :--- | :--- | :--- |
 | **INFRA-09** | **Pipelines de Deploy Contínuo (Git Push Webhooks & Dokploy Gateway USR-18)** | INFRA-06 | ✅ **DELIVERED** | Webhooks configurados e testados com verificação HMAC-SHA256, deduplicação idempotente, avaliação de entrega DF-20 e trigger de auto-deploy Dokploy na Hetzner VPS. |
-| **INFRA-10** | **Runner de CI e Batch Workloads no Servidor On-Premises (USR-16)** | INFRA-03 | ✅ **DELIVERED** | Execução de suítes de teste de integração pesadas e compilações longas no i7-4790K via Docker, liberando recursos do notebook de desenvolvimento. |
+| **INFRA-10** | **Runner de CI e Batch Workloads no Servidor On-Premises (USR-16 / HF-27-11)** | INFRA-03 | ✅ **DELIVERED** | Execução headless de suítes de validação e CI no i7-4790K com despacho remoto via Tailscale (HF-27-11 / USR-16), liberando recursos do notebook de desenvolvimento. |
 | **INFRA-11** | **Painel Unificado de Métricas de Infraestrutura no DarkHub (USR-15)** | INFRA-01 | ✅ **DELIVERED** | Exposição dos dados de telemetria de nós, containers ativos e consumo de disco no painel web do DarkHub. |
 
 ---
