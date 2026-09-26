@@ -1,6 +1,6 @@
 {
   "version": "1.0.0",
-  "last_updated": "2026-09-08T04:13:31.616818Z",
+  "last_updated": "2026-09-26T02:52:25.859642Z",
   "nodes": [
     {
       "id": "predator-neo-16",
@@ -68,12 +68,9 @@
         "primary-dev",
         "gpu-ada",
         "active",
-        "tailscale-active",
-        "project:darkfac",
-        "project:all",
-        "shared"
+        "tailscale-active"
       ],
-      "updated_at": "2026-09-08T04:13:31.616818Z"
+      "updated_at": "2026-09-26T02:52:25.859642Z"
     },
     {
       "id": "onprem-z97-server",
@@ -133,6 +130,14 @@
           "port": null,
           "status": "active",
           "managed_by": null
+        },
+        {
+          "name": "darkfac-test-worker",
+          "description": "Runner headless de CI, despacho remoto de validação e batch workloads (FastAPI, porta 8080, HF-27-11 / USR-16)",
+          "container_engine": null,
+          "port": 8080,
+          "status": "active",
+          "managed_by": "Windows Task Scheduler (DarkFac Test Worker)"
         }
       ],
       "cost_monthly_usd": 0.0,
@@ -141,12 +146,9 @@
         "storage-vault",
         "docker-active",
         "tailscale-active",
-        "active",
-        "project:darkfac",
-        "project:segundo-cerebro",
-        "shared"
+        "active"
       ],
-      "updated_at": "2026-09-08T04:13:31.616818Z"
+      "updated_at": "2026-09-26T02:52:25.859642Z"
     },
     {
       "id": "darkfac-vps-primary",
@@ -240,11 +242,9 @@
         "dokploy-active",
         "tailscale-active",
         "production",
-        "active",
-        "project:darkfac",
-        "shared"
+        "active"
       ],
-      "updated_at": "2026-09-08T04:13:31.616818Z"
+      "updated_at": "2026-09-26T02:52:25.859642Z"
     },
     {
       "id": "cloudflare-edge",
@@ -295,12 +295,9 @@
         "dns",
         "security",
         "tunnel",
-        "active",
-        "project:darkfac",
-        "project:site-ggcampos",
-        "shared"
+        "active"
       ],
-      "updated_at": "2026-09-08T04:13:31.616818Z"
+      "updated_at": "2026-09-26T02:52:25.859642Z"
     },
     {
       "id": "hostinger-web",
@@ -334,27 +331,45 @@
         "hosting",
         "web",
         "external",
-        "active",
-        "project:site-ggcampos"
+        "active"
       ],
-      "updated_at": "2026-09-08T04:13:31.616818Z"
+      "updated_at": "2026-09-26T02:52:25.859642Z"
     },
     {
       "id": "n8n-automation",
-      "name": "n8n Automation Account / Instance",
+      "name": "n8n Community Self-Hosted (VPS Hetzner CX23)",
       "role": "managed_service",
       "status": "active",
-      "provider": "n8n Cloud / Self-Hosted",
+      "provider": "Dokploy PaaS / Docker (darkfac-vps-primary)",
       "hardware": null,
-      "network": null,
+      "network": {
+        "private_ip": null,
+        "public_ip": null,
+        "ipv6": null,
+        "tailscale_ip": null,
+        "public_dns": "n8n.ggcampos.com",
+        "cloudflare_tunnel": false,
+        "open_ports": [
+          5678
+        ],
+        "notes": "Traefik TLS reverse proxy on dokploy-network. Automated Let's Encrypt certificates. Webhooks enabled."
+      },
       "services": [
         {
-          "name": "n8n-workflows",
-          "description": "Webhook listener, asynchronous glue pipelines and third-party API orchestrations",
+          "name": "n8n-app",
+          "description": "n8n Community workflow automation engine for autonomous DarkFac agents",
           "container_engine": "docker",
-          "port": null,
+          "port": 5678,
           "status": "active",
-          "managed_by": null
+          "managed_by": "Dokploy / Docker Compose"
+        },
+        {
+          "name": "n8n-postgres",
+          "description": "Dedicated PostgreSQL 16 database for n8n workflow state and credentials",
+          "container_engine": "docker",
+          "port": 5432,
+          "status": "active",
+          "managed_by": "Dokploy / Docker Compose"
         }
       ],
       "cost_monthly_usd": 0.0,
@@ -362,9 +377,12 @@
         "automation",
         "workflows",
         "webhooks",
+        "n8n-community",
+        "dokploy",
+        "vps",
         "active"
       ],
-      "updated_at": "2026-09-08T04:13:31.616818Z"
+      "updated_at": "2026-09-26T02:52:25.859642Z"
     },
     {
       "id": "google-platform",
@@ -399,7 +417,7 @@
         "auth",
         "active"
       ],
-      "updated_at": "2026-09-08T04:13:31.616818Z"
+      "updated_at": "2026-09-26T02:52:25.859642Z"
     }
   ],
   "adrs": [
