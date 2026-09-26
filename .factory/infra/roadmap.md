@@ -1,18 +1,18 @@
 # Roadmap de Infraestrutura & Escalabilidade Multi-Projeto
 
 > **Módulo**: `core.infra`  
-> **Última Atualização**: 2026-09-26  
-> **Status Geral**: 100% Concluído no Mundo Real (Fases 1, 2, 3 e 4 Operacionais)
+> **Última Atualização**: 2026-09-07  
+> **Status Geral**: Fase 1 Concluída (100% dos nós locais ativos e conectados) | Fase 2 Pronta para Início
 
 ---
 
 ## Sumário Visual das Fases
 
 ```
-[FASE 1: CONCLUÍDA 🟢]           [FASE 2: CONCLUÍDA 🟢]           [FASE 3: CONCLUÍDA 🟢]           [FASE 4: CONCLUÍDA 🟢]
+[FASE 1: CONCLUÍDA 🟢]           [FASE 2: PRÓXIMA 🟡]             [FASE 3: PLANEJADA ⚪]           [FASE 4: FUTURA ⚪]
 +--------------------------+     +--------------------------+     +--------------------------+     +--------------------------+
 | Mapeamento & Topologia   |     | Cloud VPS & Dokploy PaaS |     | Postgres NVMe & Backups  |     | CI Headless & Deploys    |
-| - Mapeamento de nós/GPUs |     | - Hetzner CPX21 / CX23   |     | - Multi-Tenant DBs       |     | - Git Webhook Deploys    |
+| - Mapeamento de nós/GPUs |     | - Hetzner CPX21 / Host.  |     | - Multi-Tenant DBs       |     | - Git Webhook Deploys    |
 | - Tailscale Mesh Ativo   | ==> | - Dokploy Orchestrator   | ==> | - Cloudflare R2 Backups  | ==> | - Runner Local On-Prem   |
 | - Docker On-Prem (E: 3TB)|     | - Cloudflare Tunnels WAF |     | - Espelho Noturno 3TB    |     | - Multi-Projetos Paral.  |
 | - Google Remote Desktop  |     | - Zero Open Ports        |     | - RPO < 24h Custo Zero   |     | - Monitoramento Métricas |
@@ -34,7 +34,7 @@
 
 ---
 
-### Fase 2: Expansão Cloud VPS & Orquestração PaaS [CONCLUÍDA 🟢]
+### Fase 2: Expansão Cloud VPS & Orquestração PaaS [EM ANDAMENTO 🟡]
 
 | ID | Item | Pré-requisito | Status | Entregas & Critérios de Aceite |
 | :--- | :--- | :--- | :--- | :--- |
@@ -44,22 +44,22 @@
 
 ---
 
-### Fase 3: Dados Multi-Projeto & Política de Resiliência [CONCLUÍDA 🟢]
+### Fase 3: Dados Multi-Projeto & Política de Resiliência [PLANEJADA ⚪]
 
 | ID | Item | Pré-requisito | Status | Critérios de Aceite |
 | :--- | :--- | :--- | :--- | :--- |
 | **INFRA-07** | **PostgreSQL Multi-Tenant em Armazenamento NVMe** | INFRA-06 | ✅ **DELIVERED** | Instância PostgreSQL 16+ provisionada no Dokploy sobre NVMe de alta performance. Bancos e credenciais isolados por projeto com custo adicional zero. |
-| **INFRA-08** | **Automação de Backups 3-Camadas (R2 + On-Premise)** | INFRA-07 | ✅ **DELIVERED** | Rotina automática de dump compactado e criptografado (AES-256-GCM) para Cloudflare R2 com espelho noturno para o Drive `E:` (3 TB) do `desktop-g45ipem`, retenção assimétrica (7d R2 / 120d on-prem) e restore drills automáticos em sandbox (`core.infra.backup_cron`, `core.infra.backup_service`). |
+| **INFRA-08** | **Automação de Backups 3-Camadas (R2 + On-Premise)** | INFRA-07 | 🟡 **PLANNED** | Rotina automática de dump diário compactado e criptografado enviado via S3 API para bucket do **Cloudflare R2** (10 GB free, zero egress) com sincronização noturna para o Drive `E:` (3 TB) do `desktop-g45ipem`. |
 
 ---
 
-### Fase 4: Automações Avançadas & Escala Multi-Projeto [CONCLUÍDA 🟢]
+### Fase 4: Automações Avançadas & Escala Multi-Projeto [FUTURA ⚪]
 
 | ID | Item | Pré-requisito | Status | Critérios de Aceite |
 | :--- | :--- | :--- | :--- | :--- |
 | **INFRA-09** | **Pipelines de Deploy Contínuo (Git Push Webhooks & Dokploy Gateway USR-18)** | INFRA-06 | ✅ **DELIVERED** | Webhooks configurados e testados com verificação HMAC-SHA256, deduplicação idempotente, avaliação de entrega DF-20 e trigger de auto-deploy Dokploy na Hetzner VPS. |
 | **INFRA-10** | **Runner de CI e Batch Workloads no Servidor On-Premises (USR-16 / HF-27-11)** | INFRA-03 | ✅ **DELIVERED** | Execução headless de suítes de validação e CI no i7-4790K com despacho remoto via Tailscale (HF-27-11 / USR-16), liberando recursos do notebook de desenvolvimento. |
-| **INFRA-11** | **Painel Unificado de Métricas de Infraestrutura no DarkHub (Hardware & Contêineres)** | INFRA-01 | ✅ **DELIVERED** | Telemetria ao vivo de CPU, RAM e Disco via `psutil`, descoberta de contêineres Dokploy e Docker em tempo real, endpoints `/api/infra/metrics` e painel unificado no DarkHub (`core.infra.metrics`, `hub/frontend/infra.js`). |
+| **INFRA-11** | **Painel Unificado de Métricas de Infraestrutura no DarkHub (USR-15)** | INFRA-01 | ✅ **DELIVERED** | Exposição dos dados de telemetria de nós, containers ativos e consumo de disco no painel web do DarkHub. |
 
 ---
 
@@ -82,5 +82,5 @@ python C:\dev\DarkFac\core\infra\cli.py list
 
 - **`ai-notebook`** (`100.81.84.124`): Windows 11 25H2 | 32 GB RAM | RTX 4070 8 GB | Antigravity IDE | Status: **ACTIVE 🟢**
 - **`desktop-g45ipem`** (`100.78.181.90`): Windows 10 22H2 | 16 GB RAM | Docker Desktop no Drive E: (3 TB) | Google Remote Desktop | Status: **ACTIVE 🟢**
-- **`darkfac-vps-primary`** (`100.83.176.60` / `178.105.73.168`): Hetzner CX23 | Dokploy PaaS | PostgreSQL 16 NVMe | Status: **ACTIVE 🟢**
+- **`cloud-vps-primary`**: Hetzner CPX21 / Hostinger KVM | Status: **PLANNED 🟡**
 - **`cloudflare-edge`**: DNS, WAF, Tunnels | Status: **ACTIVE 🟢**

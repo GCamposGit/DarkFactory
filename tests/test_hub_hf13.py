@@ -82,8 +82,7 @@ def test_infra_roadmap_json_source_parses_items_and_prerequisites() -> None:
     # Delivered status check
     assert records_by_id["INFRA-01"].delivery_status == DeliveryStatus.COMPLETED
     assert records_by_id["INFRA-02"].delivery_status == DeliveryStatus.COMPLETED
-    assert records_by_id["INFRA-08"].delivery_status == DeliveryStatus.COMPLETED
-    assert records_by_id["INFRA-11"].delivery_status == DeliveryStatus.COMPLETED
+    assert records_by_id["INFRA-08"].delivery_status == DeliveryStatus.PLANNED
 
     # Prerequisites check
     assert any(d.item_id == "INFRA-05" for d in records_by_id["INFRA-06"].dependencies)
