@@ -1098,11 +1098,11 @@
     "tags": [
       "user-demand",
       "enterprise",
-      "grill-pending",
       "security",
-      "hf-24"
+      "hf-24",
+      "grill-completed"
     ],
-    "problem_statement": "A Dark Factory necessita de isolamento reforçado e governança enterprise para clientes pagantes (cenário G8 da autonomia híbrida), garantindo que dados de clientes não vazem entre projetos, cumprindo residência de dados e audit trail com signoff obrigatório do Owner antes de promoções a produção.",
+    "problem_statement": "A Dark Factory necessita de isolamento reforçado e governança enterprise para clientes pagantes (cenário G8 da autonomia híbrida), garantindo que dados de clientes não vazem entre projetos, cumprindo residência de dados e audit trail com signoff obrigatório do Owner antes de promoções a produção.\n\n[Refinamentos acordados no Grill]:\n- Fazer conforme recomendado, mas garantir que a regra não é muito rígida. Cada entrega deve ser planejada da melhor maneira possível para entregar a demanda de forma eficiente e completa.\n- Teste de integração e reachability headless via pytest exercendo CLI e endpoints HTTP.\n- Separar bem os assuntos e definir regras otimizadas para cada modo de falha. O fluxo nunca deve parar por erro, a fábrica autônoma sempre irá seguir para o próximo passo desbloqueado de qualquer projeto caso algum passo pare por pendência ou erro. Caso haja indisponibilidade de cotas de IA seguir rigorosamente o Model Router que já prioriza uso das quotas das contas por assinatura e depois o consumo via API Open Outer, se não houverem modelos capazes de construir a demanda com qualidade após todo o roteamento, registrar como pendente e seguir para próximo item da fábrica. Se a dependência externa for de drivers, softwares ou contas em alguma plataforma, tentar contornar via bash, instalação, pesquisa de soluções, Apenas se não for possível resolver o problema autonomamente, criar demanda para atuação do usuário para resolver, e seguir com próximo item de desenvolvimento. Gerar log dos problemas e decisões para melhoria futura.",
     "core_journey": [
       "Demanda entra no backlog com pendência de Grill para alinhamento de escopo;",
       "Owner recebe notificação imediata no Telegram e visualiza na seção prioritária do DarkHub;",
