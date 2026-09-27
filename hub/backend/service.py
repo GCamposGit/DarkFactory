@@ -777,18 +777,24 @@ class HubService:
         buttons = [[{"text": "⚡ Responder Grill no DarkHub", "url": action_link}]]
 
         from core.integrations.telegram import load_telegram_config
-        cfg = load_telegram_config(role="owner")
-        gw = TelegramGateway(config=cfg)
-
         sent = False
-        target_chats = list(cfg.authorized_chat_ids) or list(cfg.authorized_user_ids)
-        if not target_chats:
-            gw.send_message(chat_id=1, text=text, buttons=buttons)
-            sent = True
-        else:
-            for cid in target_chats:
-                if gw.send_message(chat_id=cid, text=text, buttons=buttons):
-                    sent = True
+        # Broadcast across owner and ops roles to ensure reachability on whichever chat the Owner is monitoring
+        for role in ("owner", "ops"):
+            try:
+                cfg = load_telegram_config(role=role)
+                if not cfg.bot_token:
+                    continue
+                gw = TelegramGateway(config=cfg)
+                target_chats = list(cfg.authorized_chat_ids) or list(cfg.authorized_user_ids)
+                if not target_chats:
+                    if gw.send_message(chat_id=1, text=text, buttons=buttons):
+                        sent = True
+                else:
+                    for cid in target_chats:
+                        if gw.send_message(chat_id=cid, text=text, buttons=buttons):
+                            sent = True
+            except Exception as exc:
+                logger.warning("Error dispatching grill notification via role %s: %s", role, exc)
 
         logger.info("Dispatched Telegram grill notification for ticket %s (sent=%s)", ticket.id, sent)
         return {

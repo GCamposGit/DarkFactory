@@ -893,14 +893,14 @@ class TelegramGateway:
             method="POST",
         )
 
-        for attempt in range(2):
+        for attempt in range(3):
             try:
                 with urllib.request.urlopen(req, timeout=10.0) as resp:
                     return resp.status == 200
             except Exception as exc:
-                if attempt == 0:
+                if attempt < 2:
                     import time
-                    time.sleep(0.5)
+                    time.sleep(0.8 * (attempt + 1))
                     continue
                 logger.warning("Failed to send Telegram message: %s. Enqueuing to outbox.", exc)
                 self._enqueue_outbox(chat_id, safe_text, buttons, str(exc))
