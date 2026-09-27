@@ -1085,5 +1085,49 @@
     ],
     "created_at": "2026-09-25T21:52:27.699721Z",
     "updated_at": "2026-09-27T00:48:18.813389Z"
+  },
+  {
+    "id": "USR-59",
+    "project_id": "darkfac",
+    "title": "Perfil Enterprise sob demanda: isolamento reforçado, residência e governança (HF-24)",
+    "origin": "user",
+    "status": "planned",
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand",
+      "enterprise",
+      "grill-pending",
+      "security",
+      "hf-24"
+    ],
+    "problem_statement": "A Dark Factory necessita de isolamento reforçado e governança enterprise para clientes pagantes (cenário G8 da autonomia híbrida), garantindo que dados de clientes não vazem entre projetos, cumprindo residência de dados e audit trail com signoff obrigatório do Owner antes de promoções a produção.",
+    "core_journey": [
+      "Demanda entra no backlog com pendência de Grill para alinhamento de escopo;",
+      "Owner recebe notificação imediata no Telegram e visualiza na seção prioritária do DarkHub;",
+      "Owner responde as perguntas essenciais no modal web e submete o refinamento do ticket."
+    ],
+    "non_goals": [
+      "Não alterar o fluxo de autonomia em projetos internos da fábrica (darkfac);",
+      "Não exigir signoff humano para tarefas internas de desenvolvimento."
+    ],
+    "reachability_contract": "python -m pytest tests/test_darkhub_priority_interventions_and_grill.py -v",
+    "acceptance_criteria": [
+      "Aparecer na seção prioritária do DarkHub com badge de Grill pendente;",
+      "Disparo automático de notificação no Telegram com link direto;",
+      "Modal de Grill no DarkHub carrega opções e permite refinamento do ticket."
+    ],
+    "suggested_files": [
+      "core/enterprise/policy.py",
+      "core/enterprise/residency.py",
+      "hub/backend/service.py"
+    ],
+    "estimated_complexity": "medium",
+    "dependencies": [
+      "USR-58"
+    ],
+    "created_at": "2026-09-27T10:07:00.000000Z",
+    "updated_at": "2026-09-27T10:07:00.000000Z"
   }
 ]

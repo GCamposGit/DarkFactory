@@ -48,7 +48,7 @@ WAVE_3_IDS = ["USR-46", "USR-47", "USR-48", "USR-49"]
 WAVE_4_IDS = ["USR-50", "USR-51", "USR-52", "USR-53"]
 WAVE_5_IDS = ["USR-54", "USR-55"]
 WAVE_6_IDS = ["USR-56"]
-WAVE_7_IDS = ["USR-57", "USR-58"]
+WAVE_7_IDS = ["USR-57", "USR-58", "USR-59"]
 CURRENT_WAVE_IDS = WAVE_3_IDS + WAVE_4_IDS + WAVE_5_IDS + WAVE_6_IDS + WAVE_7_IDS
 
 
@@ -128,4 +128,4 @@ def test_demands_store_loads_cleanly() -> None:
     store = DemandsStore(DEMANDS_FILE)
     tickets = store.list_tickets()
     assert len(tickets) == len(HISTORICAL_REAL_IDS) + len(CURRENT_WAVE_IDS)
-    assert len(tickets) == 27
+    assert len(tickets) == 28

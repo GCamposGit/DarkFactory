@@ -15,11 +15,15 @@ document.addEventListener("DOMContentLoaded", () => {
   loadPriorityInterventions();
 
   // Check URL hash for direct grill navigation (e.g. #grill=USR-09)
-  const hash = window.location.hash || "";
-  const match = hash.match(/^#grill=([A-Za-z0-9_-]+)$/);
-  if (match && match[1]) {
-    setTimeout(() => openGrillModal(match[1]), 300);
+  function handleUrlHash() {
+    const hash = window.location.hash || "";
+    const match = hash.match(/^#grill=([A-Za-z0-9_-]+)$/);
+    if (match && match[1]) {
+      setTimeout(() => openGrillModal(match[1]), 150);
+    }
   }
+  handleUrlHash();
+  window.addEventListener("hashchange", handleUrlHash);
 
   // Bind keyboard Escape for grill modal
   document.addEventListener("keydown", (event) => {
