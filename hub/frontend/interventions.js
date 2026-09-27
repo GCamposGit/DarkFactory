@@ -430,7 +430,7 @@ async function submitGrillModalAnswers(ticketId) {
 
   try {
     const request = typeof hubFetch === "function" ? hubFetch : fetch;
-    const response = await request(`/api/demands/tickets/${encodeURIComponent(ticketId)}/grill/submit`, {
+    let response = await request(`/api/demands/tickets/${encodeURIComponent(ticketId)}/grill/submit`, {
       method: "POST",
       headers: { "Content-Type": "application/json", Accept: "application/json" },
       body: JSON.stringify({
@@ -438,6 +438,31 @@ async function submitGrillModalAnswers(ticketId) {
         auto_accept_unanswered: true,
       }),
     });
+
+    if (response.status === 401) {
+      // Direct session renewal fallback
+      try {
+        const sRes = await fetch("/api/session");
+        if (sRes.ok) {
+          const sData = await sRes.json();
+          window.sessionToken = sData.session_token;
+          if (typeof state !== "undefined") state.sessionToken = sData.session_token;
+          try { localStorage.setItem("darkhub_session_token", sData.session_token); } catch (_) {}
+          response = await fetch(`/api/demands/tickets/${encodeURIComponent(ticketId)}/grill/submit`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Accept: "application/json",
+              "X-Hub-Session": sData.session_token,
+            },
+            body: JSON.stringify({
+              answers: answers,
+              auto_accept_unanswered: true,
+            }),
+          });
+        }
+      } catch (_) {}
+    }
 
     if (!response.ok) {
       const err = await response.json().catch(() => ({}));

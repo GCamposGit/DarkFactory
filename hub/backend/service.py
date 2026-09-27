@@ -256,13 +256,27 @@ class HubService:
         control_database_url: Optional[str] = None,
         seed_dir: Optional[Path] = None,
     ) -> None:
-        self._session_token = secrets.token_urlsafe(32)
         self._control_store = control_store
         if data_dir is None:
             # Default to hub/data relative to this file
             self.data_dir = Path(__file__).resolve().parent.parent / "data"
         else:
             self.data_dir = Path(data_dir)
+
+        self.session_file = self.data_dir / "session_token.txt"
+        loaded_token = ""
+        if self.session_file.exists():
+            try:
+                loaded_token = self.session_file.read_text(encoding="utf-8").strip()
+            except Exception:
+                loaded_token = ""
+        self._session_token = loaded_token or secrets.token_urlsafe(32)
+        if not loaded_token:
+            try:
+                self.session_file.parent.mkdir(parents=True, exist_ok=True)
+                self.session_file.write_text(self._session_token, encoding="utf-8")
+            except Exception:
+                pass
 
         self.services_file = self.data_dir / "services.json"
         self.default_services_file = self.data_dir / "default_services.json"
@@ -1381,6 +1395,11 @@ class HubService:
     def rotate_session(self) -> str:
         """Rotates the session token."""
         self._session_token = secrets.token_urlsafe(32)
+        if hasattr(self, "session_file") and self.session_file:
+            try:
+                self.session_file.write_text(self._session_token, encoding="utf-8")
+            except Exception:
+                pass
         return self._session_token
 
     def ping_url(self, service_id: str, url: str, timeout_sec: float = 2.5) -> HealthCheckResult:
