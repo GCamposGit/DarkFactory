@@ -98,11 +98,17 @@ from core.usage.api_credits import (
 )
 from core.roadmap.models import (
     DeliveryStatus,
+    LifecycleStage,
     RoadmapHealth,
     RoadmapItem,
     RoadmapProjectSummary,
     RoadmapSnapshot,
     RoadmapSourceDocument,
+)
+from hub.backend.models import (
+    PriorityInterventionItem,
+    PriorityInterventionKind,
+    PriorityInterventionsReport,
 )
 from core.roadmap.service import build_repository_roadmap_service
 from core.demands.models import (
@@ -554,6 +560,15 @@ class HubService:
         saved = self.demands_service.create_ticket(ticket)
         if hasattr(self.roadmap, "store") and self.roadmap.store:
             self.roadmap.store.clear(ticket.project_id)
+        
+        # Disparo automático de notificação no Telegram quando entrar em estado de Grill pendente (USR-58)
+        tags_lower = [t.lower() for t in saved.tags]
+        if "grill-pending" in tags_lower or "needs-grill" in tags_lower or "grill" in tags_lower:
+            try:
+                self.notify_pending_grill(saved.id)
+            except Exception as exc:
+                logger.warning("Failed auto-dispatching grill notification for %s: %s", saved.id, exc)
+
         return saved
 
     def list_demand_tickets(
@@ -604,6 +619,185 @@ class HubService:
         if hasattr(self.roadmap, "store") and self.roadmap.store:
             self.roadmap.store.clear(result.refined_ticket.project_id)
         return result
+
+    def get_priority_interventions(
+        self,
+        project_id: Optional[str] = None,
+    ) -> PriorityInterventionsReport:
+        """Aggregate all pending actions requiring human decision (Grills, G8 Deploys, WAITING_HUMAN)."""
+        items: List[PriorityInterventionItem] = []
+        grill_count = 0
+        deploy_count = 0
+        waiting_human_count = 0
+
+        # 1. Grills pendentes
+        try:
+            tickets = self.demands_service.list_tickets(project_id=project_id)
+            for t in tickets:
+                if t.status == DeliveryStatus.COMPLETED:
+                    continue
+                is_grill = False
+                reason = ""
+                tags_lower = [tag.lower() for tag in t.tags]
+                if getattr(t, "lifecycle_stage", None) and str(t.lifecycle_stage).lower() in ("grill", "intake_clarification"):
+                    is_grill = True
+                    reason = "Demanda em estágio formal de Grill aguardando alinhamento de escopo."
+                elif "grill-pending" in tags_lower or "needs-grill" in tags_lower or "grill" in tags_lower:
+                    is_grill = True
+                    reason = "Demanda marcada com pendência ativa de Grill."
+                elif str(t.status).lower() in ("waiting_human", "waiting-human") or "waiting-human" in tags_lower:
+                    is_grill = True
+                    reason = "Demanda pausada em WAITING_HUMAN para esclarecimento de requisitos com o Owner."
+
+                if is_grill:
+                    grill_count += 1
+                    items.append(
+                        PriorityInterventionItem(
+                            id=f"grill:{t.id}",
+                            kind=PriorityInterventionKind.GRILL,
+                            title=f"Grill Pendente: {t.title} [{t.id}]",
+                            description=t.problem_statement[:240] if t.problem_statement else reason,
+                            project_id=t.project_id,
+                            urgency="high",
+                            created_at=t.created_at.isoformat() if hasattr(t.created_at, "isoformat") else str(t.created_at),
+                            action_type="modal_grill",
+                            action_target_id=t.id,
+                            metadata={
+                                "ticket_id": t.id,
+                                "tags": t.tags,
+                                "status": t.status.value if hasattr(t.status, "value") else str(t.status),
+                                "suggested_files": t.suggested_files,
+                            },
+                        )
+                    )
+        except Exception as exc:
+            logger.warning("Error collecting pending grills: %s", exc)
+
+        # 2. Tarefas bloqueadas em WAITING_HUMAN
+        try:
+            task_rep = self.get_task_dashboard()
+            if hasattr(task_rep, "queue") and task_rep.queue:
+                for task in task_rep.queue:
+                    t_status = getattr(task, "status", None) if not isinstance(task, dict) else task.get("status")
+                    if str(t_status or "").upper() == "WAITING_HUMAN":
+                        t_id = getattr(task, "id", "") if not isinstance(task, dict) else task.get("id", "")
+                        t_ticket = getattr(task, "ticket_id", "") if not isinstance(task, dict) else task.get("ticket_id", "")
+                        t_title = getattr(task, "title", "") if not isinstance(task, dict) else task.get("title", "")
+                        t_proj = getattr(task, "project_id", "darkfac") if not isinstance(task, dict) else task.get("project_id", "darkfac")
+                        t_cause = getattr(task, "cause_code", "") if not isinstance(task, dict) else task.get("cause_code", "")
+                        if project_id and t_proj != project_id:
+                            continue
+                        if any(item.action_target_id == t_ticket and item.kind == PriorityInterventionKind.GRILL for item in items):
+                            continue
+
+                        waiting_human_count += 1
+                        items.append(
+                            PriorityInterventionItem(
+                                id=f"waiting_human:{t_id or t_ticket}",
+                                kind=PriorityInterventionKind.WAITING_HUMAN,
+                                title=f"Bloqueio WAITING_HUMAN: {t_ticket or t_id} - {t_title or 'Interrupção'}",
+                                description=f"Causa: {t_cause or 'Tarefa requer decisão humana ou replan para prosseguir.'}",
+                                project_id=t_proj,
+                                urgency="high",
+                                action_type="modal_task",
+                                action_target_id=t_ticket or t_id,
+                                metadata={
+                                    "task_id": t_id,
+                                    "ticket_id": t_ticket,
+                                    "cause_code": t_cause,
+                                },
+                            )
+                        )
+        except Exception as exc:
+            logger.warning("Error collecting WAITING_HUMAN tasks: %s", exc)
+
+        # 3. Aprovações G8 de deploy Dokploy
+        try:
+            from core.enterprise.policy import EnterprisePolicyGuard
+            guard = EnterprisePolicyGuard()
+            for p_cfg in guard._configs.values():
+                if project_id and p_cfg.project_id != project_id:
+                    continue
+                if p_cfg.enabled and p_cfg.require_owner_signoff:
+                    deploy_count += 1
+                    items.append(
+                        PriorityInterventionItem(
+                            id=f"deploy_g8:{p_cfg.project_id}",
+                            kind=PriorityInterventionKind.DEPLOY_G8,
+                            title=f"Aprovação de Deploy Dokploy (G8): {p_cfg.project_id}",
+                            description="Ambiente de produção exige aprovação em 2 etapas com signoff explícito do Owner.",
+                            project_id=p_cfg.project_id,
+                            urgency="critical",
+                            action_type="modal_deploy",
+                            action_target_id=p_cfg.project_id,
+                            metadata={
+                                "project_id": p_cfg.project_id,
+                                "tier": getattr(p_cfg, "data_residency", "standard"),
+                            },
+                        )
+                    )
+        except Exception as exc:
+            logger.warning("Error collecting G8 deploy gates: %s", exc)
+
+        urgency_rank = {"critical": 0, "high": 1, "medium": 2, "low": 3}
+        items.sort(key=lambda it: (urgency_rank.get(it.urgency, 4), it.created_at))
+
+        return PriorityInterventionsReport(
+            total_count=len(items),
+            grill_count=grill_count,
+            deploy_count=deploy_count,
+            waiting_human_count=waiting_human_count,
+            items=items,
+            generated_at=datetime.now(timezone.utc).isoformat(),
+        )
+
+    def notify_pending_grill(
+        self,
+        ticket_id: str,
+        *,
+        hub_base_url: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Dispatches an active Telegram notification to the Owner with summary and direct DarkHub link."""
+        ticket = self.demands_service.get_ticket(ticket_id)
+        if not ticket:
+            return {"ok": False, "ticket_id": ticket_id, "sent": False, "error": f"Ticket '{ticket_id}' not found"}
+
+        base_url = (hub_base_url or os.getenv("DARKHUB_BASE_URL") or "https://darkhub.ggcampos.com").rstrip("/")
+        action_link = f"{base_url}/#grill={ticket.id}"
+
+        summary = ticket.problem_statement[:200] if ticket.problem_statement else "Demanda cadastrada no backlog aguardando desambiguação."
+        text = (
+            f"🔥 <b>DarkHub: Intervenção Prioritária (Grill Pendente)</b>\n\n"
+            f"<b>Demanda:</b> {ticket.title} [<code>{ticket.id}</code>]\n"
+            f"<b>Projeto:</b> <code>{ticket.project_id}</code>\n"
+            f"<b>Resumo:</b> {summary}\n\n"
+            f"👉 <i>Clique no link abaixo para abrir o modal de Grill e submeter o alinhamento diretamente no DarkHub:</i>\n"
+            f"{action_link}"
+        )
+        buttons = [[{"text": "⚡ Responder Grill no DarkHub", "url": action_link}]]
+
+        from core.integrations.telegram import load_telegram_config
+        cfg = load_telegram_config(role="owner")
+        gw = TelegramGateway(config=cfg)
+
+        sent = False
+        target_chats = list(cfg.authorized_chat_ids) or list(cfg.authorized_user_ids)
+        if not target_chats:
+            gw.send_message(chat_id=1, text=text, buttons=buttons)
+            sent = True
+        else:
+            for cid in target_chats:
+                if gw.send_message(chat_id=cid, text=text, buttons=buttons):
+                    sent = True
+
+        logger.info("Dispatched Telegram grill notification for ticket %s (sent=%s)", ticket.id, sent)
+        return {
+            "ok": True,
+            "ticket_id": ticket.id,
+            "sent": sent,
+            "action_link": action_link,
+            "message": "Notification dispatched or enqueued to outbox.",
+        }
 
     def list_roadmap_projects(self) -> List[RoadmapProjectSummary]:
         """List projects with an isolated roadmap source."""

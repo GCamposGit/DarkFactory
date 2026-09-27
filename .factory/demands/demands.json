@@ -1035,7 +1035,7 @@
     "project_id": "darkfac",
     "title": "Seção prioritária no DarkHub para Grills e ações pendentes de intervenção do usuário",
     "origin": "user",
-    "status": "planned",
+    "status": "completed",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -1084,6 +1084,6 @@
       "USR-57"
     ],
     "created_at": "2026-09-25T21:52:27.699721Z",
-    "updated_at": "2026-09-25T22:03:58.492234Z"
+    "updated_at": "2026-09-27T00:48:18.813389Z"
   }
 ]
