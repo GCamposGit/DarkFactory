@@ -19,6 +19,9 @@ services:
       - DARKFAC_HF02_DATABASE_URL=${DARKFAC_HF02_DATABASE_URL}
       - DARKFAC_MAX_CONCURRENT_SLOTS=${DARKFAC_MAX_CONCURRENT_SLOTS:-2}
       - DARKFAC_COORDINATOR_PORT=8001
+      - DARKFAC_COORDINATOR_API_TOKEN=${DARKFAC_COORDINATOR_API_TOKEN:-}
+      - DARKFAC_INTAKE_ENABLED=${DARKFAC_INTAKE_ENABLED:-false}
+      - DARKFAC_ALLOWED_PROJECT_ID=darkfac
       - DATA_DIR=/app/data
       - FACTORY_DIR=/app/.factory
       - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-}
@@ -41,7 +44,7 @@ services:
       - darkfac-artifacts:/app/.factory/artifacts
       - darkfac-test-logs:/app/.factory/test_logs
     ports:
-      - "8001:8001"
+      - "127.0.0.1:8001:8001"
     networks:
       - dokploy-network
     deploy:
@@ -72,6 +75,24 @@ services:
       - DARKFAC_WORKER_PRIORITY=${DARKFAC_WORKER_PRIORITY:-primary}
       - DARKFAC_WORKSPACES=/workspaces
       - CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN:-}
+      # HF-27-10 canary trace (B.4): core.line.workspace only reads
+      # GITHUB_TOKEN (not the GITHUB_PAT declared in env.cloud.example) to
+      # authenticate HTTPS clone/push for a private repo -- without it, any
+      # private project (darkfac-canary included) fails workspace checkout.
+      # Pre-existing gap for every project, fixed here since this is the
+      # container that actually runs `integration`/checkout.
+      - GITHUB_TOKEN=${GITHUB_TOKEN:-}
+      # HF-27-10 canary trace (B.4): core.orchestrator.deployment_adapter's
+      # DokployDeploymentAdapter reads these for the real Dokploy API/webhook
+      # call in build_deploy (core/line/stage_release.py::_target_config
+      # falls back to them when a project's deploy.params has no api_url/
+      # deploy_url of its own). Without at least one of DOKPLOY_API_URL or
+      # DOKPLOY_DEPLOY_URL set, the adapter silently no-ops and reconcile()
+      # never leaves IN_PROGRESS -- pre-existing gap for every project,
+      # wired here (values are provisioned in the Dokploy vault, not here).
+      - DOKPLOY_API_URL=${DOKPLOY_API_URL:-}
+      - DOKPLOY_API_KEY=${DOKPLOY_API_KEY:-}
+      - DOKPLOY_DEPLOY_URL=${DOKPLOY_DEPLOY_URL:-}
       - DARKFAC_HF02_DATABASE_URL=${DARKFAC_HF02_DATABASE_URL}
       - DARKFAC_MAX_CONCURRENT_SLOTS=${DARKFAC_MAX_CONCURRENT_SLOTS:-1}
       - DATA_DIR=/app/data
@@ -173,15 +194,17 @@ services:
   # demand enters the real public intake the worker actually reads, and its
   # `.factory/reports/canary/` reports live on their own named volume so a
   # streak survives across one-shot container runs (review item 3).
+  # HF-27-10 closeout: runs continuously (no `profiles` gate, no manual
+  # cron needed) via `core.line.canary run --every-seconds`, which loops
+  # in-process -- see docs/runbooks/canary.md section 5.
   darkfac-canary:
     build:
       context: https://github.com/GCamposGit/DarkFactory.git#main
       dockerfile: deploy/dokploy/Dockerfile.cloud
     image: ghcr.io/gcamposgit/darkfac-cloud:latest
     container_name: darkfac-canary
-    restart: "no"
-    profiles: ["canary"]
-    command: ["python", "-m", "core.line.canary", "run", "--base-url", "${DARKFAC_CANARY_BASE_URL:-}"]
+    restart: unless-stopped
+    command: ["python", "-m", "core.line.canary", "run", "--base-url", "${DARKFAC_CANARY_BASE_URL:-}", "--every-seconds", "3600"]
     environment:
       - DARKFAC_ROLE=canary
       - DARKFAC_HF02_DATABASE_URL=${DARKFAC_HF02_DATABASE_URL}

@@ -334,10 +334,21 @@ def test_docker_compose_cloud_spec() -> None:
 
     # 1. No GITHUB_PAT token in context
     assert "${GITHUB_PAT" not in content
+    # Dokploy builds from git on each push to main (no CI publishing to
+    # GHCR exists), so `build:`/`:latest` is intentional here, NOT digest
+    # pinning -- see docs/handoffs/continuous-autonomy/HF-03-08.md.
     assert "context: https://github.com/GCamposGit/DarkFactory.git#main" in content
-
-    # 2. Pinned image
     assert "image: ghcr.io/gcamposgit/darkfac-cloud:latest" in content
+    assert "DARKFAC_CLOUD_IMAGE_DIGEST" not in content
+
+    # 2. Coordinator API auth (HF-03-08 closeout): token optional in compose
+    # (the code itself fails closed with 503 if unset/too short), intake and
+    # project scoping env-gated, loopback-only port binding.
+    assert "DARKFAC_COORDINATOR_API_TOKEN=${DARKFAC_COORDINATOR_API_TOKEN:-}" in content
+    assert "DARKFAC_INTAKE_ENABLED=${DARKFAC_INTAKE_ENABLED:-false}" in content
+    assert "DARKFAC_ALLOWED_PROJECT_ID=darkfac" in content
+    assert '"127.0.0.1:8001:8001"' in content
+    assert '"8001:8001"' not in content.replace('"127.0.0.1:8001:8001"', "")
 
     # 3. Stop grace period 35s
     assert "stop_grace_period: 35s" in content
@@ -345,3 +356,12 @@ def test_docker_compose_cloud_spec() -> None:
     # 4. Healthcheck with --status
     assert 'test: ["CMD", "python", "-m", "core.orchestrator.cloud_coordinator", "--status"]' in content
     assert 'test: ["CMD", "python", "-m", "core.orchestrator.cloud_worker", "--status"]' in content
+
+    # 5. HF-27-10 closeout: canary runs continuously (no manual cron / no
+    # `profiles` gate), looping in-process every hour.
+    assert 'profiles: ["canary"]' not in content
+    assert "darkfac-canary" in content
+    assert "--every-seconds" in content
+    canary_start = content.index("darkfac-canary:")
+    canary_block = content[canary_start : canary_start + 800]
+    assert "restart: unless-stopped" in canary_block

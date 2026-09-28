@@ -78,12 +78,13 @@ def test_build_handlers_registers_all_standard_stages() -> None:
         assert isinstance(handlers[key], StageHandler)
 
 
-def test_handler_dispatch_default_execution() -> None:
+def test_handler_dispatch_default_execution_fails_closed() -> None:
     handlers = build_handlers()
     ctx = _make_context(stage="planning")
     result = handlers[("planning", "v1")].handle(ctx)
-    assert result.outcome == "success"
-    assert len(result.output_refs) > 0
+    assert result.outcome == "failed"
+    assert result.cause_code == "missing_stage_service"
+    assert result.output_refs == []
 
 
 def test_handler_dispatch_custom_service() -> None:
