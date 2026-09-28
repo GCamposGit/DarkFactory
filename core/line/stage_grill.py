@@ -372,6 +372,7 @@ def resolve_callback_choice(question: _PendingQuestion, choice: str) -> str:
 def _build_message(run_id: str, questions: list[_PendingQuestion]) -> tuple[str, list[list[dict[str, str]]]]:
     # The gateway sends with parse_mode=HTML, so agent text must be escaped.
     # Buttons carry the option *index*: Telegram caps callback_data at 64 bytes.
+    hub_url = os.environ.get("DARKHUB_PUBLIC_URL") or os.environ.get("DARKHUB_BASE_URL", "http://127.0.0.1:8888")
     lines = [
         f"Grill pendente para o run {html.escape(run_id)} "
         f"(uma rodada, prazo de {GRILL_DEADLINE_HOURS}h):",
@@ -388,6 +389,10 @@ def _build_message(run_id: str, questions: list[_PendingQuestion]) -> tuple[str,
         ]
         if row:
             buttons.append(row)
+
+    lines.append("")
+    lines.append(f'🎙️ <b>Voz/Áudio:</b> Grave uma nota de voz nesta conversa ou <a href="{hub_url}">abra no DarkHub</a>.')
+    buttons.append([{"text": "🎙️ Abrir DarkHub (Voz/Grill)", "url": f"{hub_url}"}])
     return "\n".join(lines), buttons
 
 

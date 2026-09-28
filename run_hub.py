@@ -28,7 +28,26 @@ HOST = "127.0.0.1"
 
 def is_port_in_use(port: int) -> bool:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.settimeout(0.5)
         return s.connect_ex((HOST, port)) == 0
+
+
+def free_port_if_stale(port: int) -> bool:
+    """Find and terminate any stale process holding the target port so new code is always served."""
+    try:
+        import subprocess
+        output = subprocess.check_output(["netstat", "-ano", "-p", "tcp"], text=True, stderr=subprocess.DEVNULL)
+        for line in output.splitlines():
+            parts = line.strip().split()
+            if len(parts) >= 5 and f":{port}" in parts[1] and parts[3] == "LISTENING":
+                pid = int(parts[4])
+                print(f"[*] Encerrando processo anterior (PID {pid}) que segurava a porta {port}...", flush=True)
+                subprocess.run(["taskkill", "/F", "/PID", str(pid)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                time.sleep(1.2)
+                return True
+    except Exception as exc:
+        print(f"[!] Aviso ao verificar porta {port}: {exc}", flush=True)
+    return False
 
 
 def open_browser_delayed(url: str, delay: float = 1.2) -> None:
@@ -43,8 +62,11 @@ def open_browser_delayed(url: str, delay: float = 1.2) -> None:
 def main() -> None:
     port = DEFAULT_PORT
     if is_port_in_use(port):
-        print(f"[!] A porta {port} ja esta em uso. Tentando {port + 1}...", flush=True)
-        port += 1
+        freed = free_port_if_stale(port)
+        if not freed or is_port_in_use(port):
+            print(f"[!] A porta {port} segue em uso. Tentando {port + 1}...", flush=True)
+            port += 1
+
 
     url = f"http://{HOST}:{port}"
 
@@ -64,6 +86,26 @@ def main() -> None:
 
     # Launch browser in a background thread
     threading.Thread(target=open_browser_delayed, args=(url,), daemon=True).start()
+
+    # Start Telegram background poller (USR-60 / HF-14)
+    def start_telegram_listener(poll_interval: float = 2.5) -> None:
+        try:
+            from core.integrations.telegram import TelegramGateway, load_telegram_config
+            cfg = load_telegram_config(role="ops")
+            if not cfg.bot_token:
+                return
+            gw = TelegramGateway(cfg)
+            print(" [*] Telegram Listener ativo para @darkfac_ops_bot (Entradas de Voz & Grill)", flush=True)
+            while True:
+                try:
+                    gw.poll_updates(timeout=5)
+                except Exception:
+                    pass
+                time.sleep(poll_interval)
+        except Exception as exc:
+            print(f"[!] Telegram Listener desativado: {exc}", flush=True)
+
+    threading.Thread(target=start_telegram_listener, daemon=True, name="TelegramPoller").start()
 
     import uvicorn
     from hub.backend.main import app
