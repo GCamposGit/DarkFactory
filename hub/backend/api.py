@@ -96,6 +96,7 @@ from core.demands.models import (
     GrillSession,
     UserTicket,
 )
+from core.audio.engine import TranscriptionResult
 from core.harness.test_subagent import (
     DistilledTestReport,
     TestExecutionInstruction,
@@ -1097,6 +1098,16 @@ def submit_demand_grill(
         return service.submit_demand_grill(ticket_id, answers=payload.answers)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.post("/audio/transcribe", response_model=TranscriptionResult)
+async def transcribe_audio(
+    request: Request,
+    language: Optional[str] = Query(default="pt", description="Target language code ('pt', 'en')"),
+    service: HubService = Depends(get_hub_service),
+) -> TranscriptionResult:
+    """Transcribe uploaded audio data using hybrid faster-whisper and Groq Cloud fallback (USR-60)."""
+    return await service.transcribe_audio_request(request, language=language)
 
 
 @router.post("/harness/run-tests", response_model=DistilledTestReport)

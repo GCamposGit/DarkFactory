@@ -23,6 +23,9 @@
     "GET /api/benchmarks/proximity": {
       "surface": "benchmarks-modal"
     },
+    "POST /api/audio/transcribe": {
+      "surface": "demands-drawer"
+    },
     "POST /api/benchmarks/refresh": {
       "surface": "benchmarks-modal"
     },

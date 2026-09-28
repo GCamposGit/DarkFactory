@@ -1129,5 +1129,62 @@
     ],
     "created_at": "2026-09-27T10:07:00.000000Z",
     "updated_at": "2026-09-27T10:07:00.000000Z"
+  },
+  {
+    "id": "USR-60",
+    "project_id": "darkfac",
+    "title": "Entrada de demandas e respostas cirúrgicas de Grill por áudio/voz (Dark Hub, Telegram e Jarvis)",
+    "origin": "user",
+    "status": "completed",
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand",
+      "feature",
+      "audio",
+      "grill",
+      "telegram",
+      "darkhub",
+      "jarvis",
+      "grill-completed"
+    ],
+    "problem_statement": "Os inputs de novas demandas via Jarvis, Dark Hub ou Telegram necessitam do recurso de áudio/voz, permitindo ao usuário abrir demandas e responder especificamente a cada uma das perguntas do Grill por áudio, seja clicando no link do Telegram, seja diretamente no Telegram como mensagem de voz, seja na interface do Dark Hub ou no Jarvis. O módulo de reconhecimento de áudio já validado no Jarvis deve ser reaproveitado no DarkFac.\n\n[Refinamentos acordados no Grill]:\n- No Modal de Grill do Dark Hub: Preencher o campo de texto/diretriz customizada da pergunta e, caso a fala mencione uma das alternativas (ex: 'primeira opção', 'recomendada' ou título), marcar o rádio correspondente para revisão visual antes do envio final.\n- No Telegram: Roteamento Contextual. Se o áudio for enviado como resposta (reply) a uma notificação de Grill ou citar o ID do ticket, aplica como resposta do Grill; se for um áudio avulso, ingere automaticamente como uma nova demanda (/demand).\n- Arquitetura do Motor de Áudio: Portar e consolidar o AudioTranscriptionEngine do Jarvis para core/audio/engine.py no DarkFac, garantindo suporte hermético a Groq Cloud Whisper (para Dokploy/Docker na nuvem sem GPU) e faster-whisper local sem acoplamento de diretório entre repositórios.",
+    "core_journey": [
+      "Usuário clica no microfone no Drawer de Demandas do Dark Hub ou no chat do Jarvis e dita o problema para criar nova demanda;",
+      "Ao receber a notificação de Grill pendente via Telegram, usuário pode responder por mensagem de voz no Telegram (em reply à notificação) ou clicar no link para abrir o Dark Hub;",
+      "No Modal de Grill do Dark Hub, cada pergunta possui seu botão de microfone individual para ditar a resposta;",
+      "A gravação via Web Audio API (PCM 16kHz WAV puro) é enviada para /api/audio/transcribe e o texto transcrito preenche o campo customizado da questão, auto-marcando a alternativa falada se houver correspondência;",
+      "O usuário confere visualmente e clica em Salvar Respostas e Refinar Ticket, desbloqueando o ciclo de desenvolvimento autônomo."
+    ],
+    "non_goals": [
+      "Não recriar motor de reconhecimento de áudio do zero (reaproveitar AudioTranscriptionEngine e rotinas de Web Audio API do Jarvis);",
+      "Não exigir dependência binária externa de ffmpeg no browser ou na máquina cliente para gravação Web;",
+      "Não travar o Dark Hub na nuvem (Dokploy) por falta de GPU CUDA (garantir fallback para Groq Cloud Whisper large-v3-turbo)."
+    ],
+    "reachability_contract": "python -m pytest tests/test_audio_grill_and_demands.py -v",
+    "acceptance_criteria": [
+      "POST /api/audio/transcribe funcional no Dark Hub com suporte a áudio WAV/PCM e fallback Groq/local;",
+      "Modal de Grill (hub/frontend/interventions.js) com botão de microfone dedicado por questão, preenchendo o input customizado e auto-selecionando alternativa quando aplicável;",
+      "Drawer de Demandas (hub/frontend/demands.js) com botão de microfone para ditar título e problema;",
+      "TelegramGateway com suporte a download e transcrição de mensagens de voz/áudio nativas e roteamento contextual (reply de Grill vs /demand avulsa);",
+      "Motor core/audio/engine.py desacoplado, hermético e coberto por testes unitários."
+    ],
+    "suggested_files": [
+      "core/audio/engine.py",
+      "hub/backend/api.py",
+      "hub/backend/service.py",
+      "hub/frontend/interventions.js",
+      "hub/frontend/demands.js",
+      "core/integrations/telegram.py",
+      "tests/test_audio_grill_and_demands.py"
+    ],
+    "estimated_complexity": "medium",
+    "dependencies": [
+      "USR-09",
+      "USR-58"
+    ],
+    "created_at": "2026-09-28T08:53:22.968704+00:00",
+    "updated_at": "2026-09-28T09:01:15.597944+00:00"
   }
 ]

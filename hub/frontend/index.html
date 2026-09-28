@@ -987,9 +987,19 @@
 
               <!-- Problem Statement -->
               <div>
-                <label for="demand-problem-input" class="block text-[10px] uppercase font-mono tracking-wider text-slate-400 mb-1">
-                  O Problema Real (Dor do Usuário / Oportunidade)
-                </label>
+                <div class="flex items-center justify-between mb-1">
+                  <label for="demand-problem-input" class="block text-[10px] uppercase font-mono tracking-wider text-slate-400">
+                    O Problema Real (Dor do Usuário / Oportunidade)
+                  </label>
+                  <button
+                    type="button"
+                    id="btn-voice-demand-drawer"
+                    onclick="toggleDemandDrawerVoice('demand-problem-input')"
+                    class="px-2.5 py-1 rounded-lg border border-slate-700 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white text-[11px] font-mono transition-colors flex items-center gap-1.5 cursor-pointer">
+                    <span>🎙️</span>
+                    <span>Ditar Demanda por Voz</span>
+                  </button>
+                </div>
                 <textarea
                   id="demand-problem-input"
                   rows="3"
@@ -1735,6 +1745,7 @@
   <script src="/static/infra.js?v=20260924b"></script>
   <script src="/static/tasks.js?v=20260924b"></script>
   <script src="/static/roadmap.js?v=20260924b"></script>
+  <script src="/static/audio.js?v=20260924b"></script>
   <script src="/static/demands.js?v=20260924b"></script>
   <script src="/static/interventions.js?v=20260924b"></script>
   <script src="/static/telemetry.js?v=20260924b"></script>

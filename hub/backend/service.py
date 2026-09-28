@@ -58,6 +58,7 @@ from hub.backend.models import (
     PortfolioProjectDetailResponse,
     PortfolioOverviewResponse,
 )
+from core.audio.engine import TranscriptionResult
 from core.execution.providers import get_openrouter_api_key
 from core.content import (
     ContentEngine,
@@ -633,6 +634,47 @@ class HubService:
         if hasattr(self.roadmap, "store") and self.roadmap.store:
             self.roadmap.store.clear(result.refined_ticket.project_id)
         return result
+
+    async def transcribe_audio_request(
+        self,
+        request: Any,
+        language: Optional[str] = "pt",
+    ) -> TranscriptionResult:
+        """Transcribe uploaded audio data through the hybrid audio engine without multipart requirement (USR-60)."""
+        import uuid
+        from core.audio.engine import AudioTranscriptionEngine, get_audio_config
+
+        cfg = get_audio_config()
+        cfg.audio_upload_dir.mkdir(parents=True, exist_ok=True)
+        tmp_id = uuid.uuid4().hex[:8]
+
+        content_type = request.headers.get("content-type", "").lower()
+        body_bytes = b""
+
+        # 1. Try reading multipart if sent as form and multipart parser available
+        if "multipart/form-data" in content_type:
+            try:
+                form = await request.form()
+                for key in ("file", "audio"):
+                    field = form.get(key)
+                    if field and hasattr(field, "read"):
+                        body_bytes = await field.read()
+                        break
+            except Exception as exc:
+                logger.debug("Multipart parsing skipped/failed (%s); reading raw body.", exc)
+
+        # 2. Fallback to raw binary body
+        if not body_bytes:
+            body_bytes = await request.body()
+
+        ext = ".ogg" if "ogg" in content_type else (".mp3" if "mp3" in content_type else ".wav")
+        save_path = cfg.audio_upload_dir / f"hub_upload_{tmp_id}{ext}"
+        try:
+            save_path.write_bytes(body_bytes)
+            engine = AudioTranscriptionEngine(config=cfg)
+            return engine.transcribe(save_path, language=language)
+        finally:
+            save_path.unlink(missing_ok=True)
 
     def get_priority_interventions(
         self,

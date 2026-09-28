@@ -94,13 +94,41 @@ def _duration_label(minutes: Optional[int]) -> str:
 
 
 class AccountUsageAdapter(ABC):
+    SNAPSHOT_FRESHNESS_TTL_SECONDS: float = 120.0
+
     def __init__(self, spec: ProviderSpec, snapshot_dir: Path) -> None:
         self.spec = spec
         self.snapshot_dir = Path(snapshot_dir)
 
     @abstractmethod
-    def inspect(self) -> ProviderAccountUsage:
+    def inspect(self, force: bool = False) -> ProviderAccountUsage:
         """Read current status without ever returning credential material."""
+
+    def _is_snapshot_fresh(self, payload: Dict[str, Any], max_age_seconds: Optional[float] = None) -> bool:
+        ttl = max_age_seconds if max_age_seconds is not None else self.SNAPSHOT_FRESHNESS_TTL_SECONDS
+        env_name = f"DARKFAC_{self.spec.provider_id.upper()}_USAGE_JSON"
+        if os.environ.get(env_name):
+            return True
+        checked_at_raw = payload.get("checked_at")
+        if checked_at_raw:
+            try:
+                dt = datetime.fromisoformat(str(checked_at_raw).replace("Z", "+00:00"))
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=timezone.utc)
+                age = (datetime.now(timezone.utc) - dt).total_seconds()
+                if 0 <= age <= ttl:
+                    return True
+            except Exception:
+                pass
+        target = self.snapshot_dir / f"{self.spec.provider_id}.json"
+        try:
+            if target.is_file():
+                mtime_age = time.time() - target.stat().st_mtime
+                if 0 <= mtime_age <= ttl:
+                    return True
+        except Exception:
+            pass
+        return False
 
     def disconnected(self, message: str, adapter: str) -> ProviderAccountUsage:
         return ProviderAccountUsage(
@@ -252,11 +280,23 @@ class CodexAccountAdapter(AccountUsageAdapter):
             return executable
         return None
 
-    def inspect(self) -> ProviderAccountUsage:
+    def inspect(self, force: bool = False) -> ProviderAccountUsage:
         snapshot = self._snapshot_payload()
+        if snapshot and not force and self._is_snapshot_fresh(snapshot):
+            return self._from_snapshot(snapshot)
+
+        executable = self._find_codex()
+        if executable:
+            try:
+                usage = self._from_codex_response(self._read_rate_limits(executable))
+                self._save_snapshot(usage)
+                return usage
+            except Exception as exc:
+                logger.info("Codex quota probe unavailable: %s", exc)
+
         if snapshot:
             return self._from_snapshot(snapshot)
-        executable = self._find_codex()
+
         if not executable:
             if any(os.environ.get(key) for key in self.spec.env_keys):
                 return self.connected_without_quota(
@@ -264,29 +304,24 @@ class CodexAccountAdapter(AccountUsageAdapter):
                     "openai_api_key",
                 )
             return self.disconnected("Codex não instalado ou fora do PATH.", "codex_app_server")
-        try:
-            usage = self._from_codex_response(self._read_rate_limits(executable))
-            self._save_snapshot(usage)
-            return usage
-        except Exception as exc:
-            logger.info("Codex quota probe unavailable: %s", exc)
-            if self._codex_doctor(executable):
-                return ProviderAccountUsage(
-                    provider_id=self.spec.provider_id,
-                    provider_name=self.spec.provider_name,
-                    family=self.spec.family,
-                    status=AccountConnectionStatus.CONNECTED,
-                    adapter="codex_doctor",
-                    quota_supported=False,
-                    message="Codex autenticado; o app-server não devolveu os buckets nesta leitura.",
-                    dashboard_url=self.spec.dashboard_url,
-                )
-            if any(os.environ.get(key) for key in self.spec.env_keys):
-                return self.connected_without_quota(
-                    "OpenAI API configurada; a quota da assinatura ChatGPT não ficou disponível.",
-                    "openai_api_key",
-                )
-            return self.disconnected("Codex não autenticado ou app-server indisponível.", "codex_app_server")
+
+        if self._codex_doctor(executable):
+            return ProviderAccountUsage(
+                provider_id=self.spec.provider_id,
+                provider_name=self.spec.provider_name,
+                family=self.spec.family,
+                status=AccountConnectionStatus.CONNECTED,
+                adapter="codex_doctor",
+                quota_supported=False,
+                message="Codex autenticado; o app-server não devolveu os buckets nesta leitura.",
+                dashboard_url=self.spec.dashboard_url,
+            )
+        if any(os.environ.get(key) for key in self.spec.env_keys):
+            return self.connected_without_quota(
+                "OpenAI API configurada; a quota da assinatura ChatGPT não ficou disponível.",
+                "openai_api_key",
+            )
+        return self.disconnected("Codex não autenticado ou app-server indisponível.", "codex_app_server")
 
     @staticmethod
     def _codex_doctor(executable: str) -> bool:
@@ -303,7 +338,7 @@ class CodexAccountAdapter(AccountUsageAdapter):
             return False
 
     @staticmethod
-    def _read_rate_limits(executable: str, timeout_sec: float = 10.0) -> Dict[str, Any]:
+    def _read_rate_limits(executable: str, timeout_sec: float = 15.0) -> Dict[str, Any]:
         process = subprocess.Popen(
             [executable, "app-server", "--listen", "stdio://"],
             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
@@ -374,7 +409,16 @@ class CodexAccountAdapter(AccountUsageAdapter):
         for bucket_id, bucket in buckets.items():
             if not isinstance(bucket, dict):
                 continue
-            plan = plan or (str(bucket["planType"]) if bucket.get("planType") else None)
+            if bucket.get("planType"):
+                raw_pt = str(bucket["planType"]).strip()
+                if raw_pt.lower() == "plus":
+                    plan = plan or "ChatGPT Plus"
+                elif raw_pt.lower() == "pro":
+                    plan = plan or "ChatGPT Pro"
+                elif raw_pt.lower() == "team":
+                    plan = plan or "ChatGPT Team"
+                else:
+                    plan = plan or raw_pt.title()
             bucket_name = str(bucket.get("limitName") or bucket_id)
             for slot in ("secondary", "primary"):
                 raw = bucket.get(slot)
@@ -414,7 +458,11 @@ class CodexAccountAdapter(AccountUsageAdapter):
 
 
 class GrokAccountAdapter(AccountUsageAdapter):
-    def inspect(self) -> ProviderAccountUsage:
+    def inspect(self, force: bool = False) -> ProviderAccountUsage:
+        snapshot = self._snapshot_payload()
+        if snapshot and not force and self._is_snapshot_fresh(snapshot):
+            return self._from_snapshot(snapshot)
+
         # 1. Try Grok Bot session probe (real live quota % and weekly reset on Windows)
         try:
             bot_usage = self._probe_grok_bot_session()
@@ -431,7 +479,6 @@ class GrokAccountAdapter(AccountUsageAdapter):
         except Exception as exc:
             logger.debug("Grok CLI session probe failed: %s", exc)
 
-        snapshot = self._snapshot_payload()
         if snapshot:
             return self._from_snapshot(snapshot)
 
@@ -747,7 +794,11 @@ class GeminiAccountAdapter(AccountUsageAdapter):
         re.IGNORECASE,
     )
 
-    def inspect(self) -> ProviderAccountUsage:
+    def inspect(self, force: bool = False) -> ProviderAccountUsage:
+        snapshot = self._snapshot_payload()
+        if snapshot and not force and self._is_snapshot_fresh(snapshot):
+            return self._from_snapshot(snapshot)
+
         # 1. Try local Antigravity Language Server RPC probe (real live quota)
         try:
             live_usage = self._probe_language_server()
@@ -756,7 +807,6 @@ class GeminiAccountAdapter(AccountUsageAdapter):
         except Exception as exc:
             logger.debug("Antigravity Language Server probe failed: %s", exc)
 
-        snapshot = self._snapshot_payload()
         if snapshot:
             return self._from_snapshot(snapshot)
 
@@ -792,53 +842,108 @@ class GeminiAccountAdapter(AccountUsageAdapter):
             dashboard_url=self.spec.dashboard_url,
         )
 
-    def _probe_language_server(self) -> Optional[ProviderAccountUsage]:
+    @staticmethod
+    def _find_live_ls_credentials() -> tuple[Optional[str], List[int]]:
+        """Extract current csrf_token and candidate ports for Antigravity Language Server."""
+        csrf_token: Optional[str] = None
+        ports: List[int] = []
+
+        # 1. Try Windows process query for active language_server.exe
+        if os.name == "nt":
+            try:
+                res = subprocess.run(
+                    [
+                        "powershell",
+                        "-NoProfile",
+                        "-NonInteractive",
+                        "-ExecutionPolicy",
+                        "Bypass",
+                        "-Command",
+                        'Get-CimInstance Win32_Process -Filter "Name = \'language_server.exe\'" | Select-Object ProcessId, CommandLine | ConvertTo-Json',
+                    ],
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                    errors="replace",
+                    timeout=4,
+                    creationflags=_CREATE_NO_WINDOW if os.name == "nt" else 0,
+                )
+                if res.returncode == 0 and res.stdout.strip():
+                    try:
+                        raw = json.loads(res.stdout)
+                        items = raw if isinstance(raw, list) else [raw]
+                        for item in items:
+                            cl = item.get("CommandLine") or ""
+                            m_csrf = re.search(r"--csrf_token\s+([a-f0-9\-]+)", cl)
+                            if m_csrf:
+                                csrf_token = m_csrf.group(1)
+                                break
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+
+        # 2. Read main.log for ports and fallback CSRF
         app_data = os.environ.get("APPDATA")
-        if not app_data:
-            return None
-        main_log = Path(app_data) / "Antigravity" / "logs" / "main.log"
-        if not main_log.is_file():
-            return None
+        if app_data:
+            main_log = Path(app_data) / "Antigravity" / "logs" / "main.log"
+            if main_log.is_file():
+                try:
+                    with main_log.open("rb") as stream:
+                        size = stream.seek(0, os.SEEK_END)
+                        stream.seek(max(0, size - 2_000_000))
+                        text = stream.read().decode("utf-8", errors="replace")
 
-        try:
-            with main_log.open("rb") as stream:
-                size = stream.seek(0, os.SEEK_END)
-                stream.seek(max(0, size - 300_000))
-                text = stream.read().decode("utf-8", errors="replace")
-        except OSError:
-            return None
+                    port_matches = list(re.finditer(r"Reloading all windows with URL: https://127\.0\.0\.1:(\d+)/|Local:\s+https://127\.0\.0\.1:(\d+)/", text))
+                    for pm in reversed(port_matches):
+                        p = int(pm.group(1) or pm.group(2))
+                        if p not in ports:
+                            ports.append(p)
 
-        port_matches = list(re.finditer(r"Reloading all windows with URL: https://127\.0\.0\.1:(\d+)/|Local:\s+https://127\.0\.0\.1:(\d+)/", text))
-        if not port_matches:
-            return None
-        last_port_m = port_matches[-1]
-        port = int(last_port_m.group(1) or last_port_m.group(2))
+                    if not csrf_token:
+                        token_matches = list(re.finditer(r"--csrf_token\s+([a-f0-9\-]+)", text))
+                        if token_matches:
+                            csrf_token = token_matches[-1].group(1)
+                except Exception:
+                    pass
 
-        token_matches = list(re.finditer(r"--csrf_token\s+([a-f0-9\-]+)", text))
-        if not token_matches:
+        return csrf_token, ports
+
+    def _probe_language_server(self) -> Optional[ProviderAccountUsage]:
+        csrf_token, candidate_ports = self._find_live_ls_credentials()
+        if not csrf_token or not candidate_ports:
             return None
-        csrf_token = token_matches[-1].group(1)
 
         ctx = ssl.create_default_context()
         ctx.check_hostname = False
         ctx.verify_mode = ssl.CERT_NONE
 
         windows: List[QuotaWindow] = []
+        active_port: Optional[int] = None
+        summary_payload: Optional[Dict[str, Any]] = None
 
-        # 1. Try RetrieveUserQuotaSummary for structured weekly and 5h buckets
-        summary_req = urllib.request.Request(
-            f"https://127.0.0.1:{port}/exa.language_server_pb.LanguageServerService/RetrieveUserQuotaSummary",
-            data=b"{}",
-            headers={
-                "Content-Type": "application/json",
-                "x-codeium-csrf-token": csrf_token,
-                "Connect-Protocol-Version": "1",
-            },
-            method="POST",
-        )
-        try:
-            with urllib.request.urlopen(summary_req, context=ctx, timeout=3.0) as res:
-                summary_payload = json.loads(res.read().decode("utf-8"))
+        # 1. Try RetrieveUserQuotaSummary across recent candidate ports
+        for port in candidate_ports[:6]:
+            summary_req = urllib.request.Request(
+                f"https://127.0.0.1:{port}/exa.language_server_pb.LanguageServerService/RetrieveUserQuotaSummary",
+                data=b"{}",
+                headers={
+                    "Content-Type": "application/json",
+                    "x-codeium-csrf-token": csrf_token,
+                    "Connect-Protocol-Version": "1",
+                },
+                method="POST",
+            )
+            try:
+                with urllib.request.urlopen(summary_req, context=ctx, timeout=2.5) as res:
+                    if res.status == 200:
+                        summary_payload = json.loads(res.read().decode("utf-8"))
+                        active_port = port
+                        break
+            except Exception:
+                continue
+
+        if active_port and summary_payload:
             groups = summary_payload.get("response", {}).get("groups", [])
             for group in groups:
                 if not isinstance(group, dict):
@@ -875,50 +980,52 @@ class GeminiAccountAdapter(AccountUsageAdapter):
                             metric="subscription",
                         )
                     )
-        except Exception as exc:
-            logger.debug("Antigravity RetrieveUserQuotaSummary failed: %s", exc)
 
         # 2. Fallback to GetAvailableModels if RetrieveUserQuotaSummary did not return windows
         if not windows:
-            req = urllib.request.Request(
-                f"https://127.0.0.1:{port}/exa.language_server_pb.LanguageServerService/GetAvailableModels",
-                data=b"{}",
-                headers={
-                    "Content-Type": "application/json",
-                    "x-codeium-csrf-token": csrf_token,
-                    "Connect-Protocol-Version": "1",
-                },
-                method="POST",
-            )
-            try:
-                with urllib.request.urlopen(req, context=ctx, timeout=3.0) as res:
-                    models_payload = json.loads(res.read().decode("utf-8"))
-                models = models_payload.get("response", {}).get("models", {})
-                target_model = (
-                    models.get("gemini-3.8-flash-high")
-                    or models.get("gemini-3.8-flash-medium")
-                    or next((m for m in models.values() if isinstance(m, dict) and m.get("quotaInfo")), None)
+            ports_to_try = [active_port] if active_port else candidate_ports[:3]
+            for port in ports_to_try:
+                req = urllib.request.Request(
+                    f"https://127.0.0.1:{port}/exa.language_server_pb.LanguageServerService/GetAvailableModels",
+                    data=b"{}",
+                    headers={
+                        "Content-Type": "application/json",
+                        "x-codeium-csrf-token": csrf_token,
+                        "Connect-Protocol-Version": "1",
+                    },
+                    method="POST",
                 )
-                if target_model and isinstance(target_model.get("quotaInfo"), dict):
-                    quota_info = target_model["quotaInfo"]
-                    remaining_fraction = quota_info.get("remainingFraction")
-                    if remaining_fraction is not None:
-                        remaining_percent = _clamp_percent(float(remaining_fraction) * 100.0)
-                        used_percent = round(100.0 - remaining_percent, 2) if remaining_percent is not None else None
-                        resets_at = _timestamp_to_iso(quota_info.get("resetTime"))
-                        windows.append(
-                            QuotaWindow(
-                                quota_id="antigravity:gemini-3.8-flash",
-                                label="Janela Móvel (5h)",
-                                used_percent=used_percent,
-                                remaining_percent=remaining_percent,
-                                window_duration_minutes=300,
-                                resets_at=resets_at,
-                                metric="subscription",
+                try:
+                    with urllib.request.urlopen(req, context=ctx, timeout=2.5) as res:
+                        models_payload = json.loads(res.read().decode("utf-8"))
+                    models = models_payload.get("response", {}).get("models", {})
+                    target_model = (
+                        models.get("gemini-3.8-flash-high")
+                        or models.get("gemini-3.8-flash-medium")
+                        or next((m for m in models.values() if isinstance(m, dict) and m.get("quotaInfo")), None)
+                    )
+                    if target_model and isinstance(target_model.get("quotaInfo"), dict):
+                        quota_info = target_model["quotaInfo"]
+                        remaining_fraction = quota_info.get("remainingFraction")
+                        if remaining_fraction is not None:
+                            remaining_percent = _clamp_percent(float(remaining_fraction) * 100.0)
+                            used_percent = round(100.0 - remaining_percent, 2) if remaining_percent is not None else None
+                            resets_at = _timestamp_to_iso(quota_info.get("resetTime"))
+                            windows.append(
+                                QuotaWindow(
+                                    quota_id="antigravity:gemini-3.8-flash",
+                                    label="Janela Móvel (5h)",
+                                    used_percent=used_percent,
+                                    remaining_percent=remaining_percent,
+                                    window_duration_minutes=300,
+                                    resets_at=resets_at,
+                                    metric="subscription",
+                                )
                             )
-                        )
-            except (urllib.error.URLError, OSError, json.JSONDecodeError, TimeoutError):
-                pass
+                            active_port = port
+                            break
+                except (urllib.error.URLError, OSError, json.JSONDecodeError, TimeoutError):
+                    pass
 
         if not windows:
             return None
@@ -928,24 +1035,25 @@ class GeminiAccountAdapter(AccountUsageAdapter):
 
         plan = None
         account_label = None
-        user_req = urllib.request.Request(
-            f"https://127.0.0.1:{port}/exa.language_server_pb.LanguageServerService/GetUserStatus",
-            data=b"{}",
-            headers={
-                "Content-Type": "application/json",
-                "x-codeium-csrf-token": csrf_token,
-                "Connect-Protocol-Version": "1",
-            },
-            method="POST",
-        )
-        try:
-            with urllib.request.urlopen(user_req, context=ctx, timeout=2.0) as u_res:
-                user_payload = json.loads(u_res.read().decode("utf-8"))
-                us = user_payload.get("userStatus", {})
-                plan = us.get("planStatus", {}).get("planInfo", {}).get("planName")
-                account_label = us.get("email") or us.get("name")
-        except Exception:
-            pass
+        if active_port:
+            user_req = urllib.request.Request(
+                f"https://127.0.0.1:{active_port}/exa.language_server_pb.LanguageServerService/GetUserStatus",
+                data=b"{}",
+                headers={
+                    "Content-Type": "application/json",
+                    "x-codeium-csrf-token": csrf_token,
+                    "Connect-Protocol-Version": "1",
+                },
+                method="POST",
+            )
+            try:
+                with urllib.request.urlopen(user_req, context=ctx, timeout=2.0) as u_res:
+                    user_payload = json.loads(u_res.read().decode("utf-8"))
+                    us = user_payload.get("userStatus", {})
+                    plan = us.get("planStatus", {}).get("planInfo", {}).get("planName")
+                    account_label = us.get("email") or us.get("name")
+            except Exception:
+                pass
 
         limited = any(w.used_percent is not None and w.used_percent >= 100.0 for w in windows)
         usage = ProviderAccountUsage(
@@ -1016,7 +1124,11 @@ class GeminiAccountAdapter(AccountUsageAdapter):
 
 
 class ClaudeCodeAccountAdapter(AccountUsageAdapter):
-    def inspect(self) -> ProviderAccountUsage:
+    def inspect(self, force: bool = False) -> ProviderAccountUsage:
+        snapshot = self._snapshot_payload()
+        if snapshot and not force and self._is_snapshot_fresh(snapshot):
+            return self._from_snapshot(snapshot)
+
         # 1. Try real live Anthropic unified rate-limits probe
         try:
             live_usage = self._probe_claude_unified_ratelimits()
@@ -1025,7 +1137,6 @@ class ClaudeCodeAccountAdapter(AccountUsageAdapter):
         except Exception as exc:
             logger.debug("Claude unified ratelimits probe failed: %s", exc)
 
-        snapshot = self._snapshot_payload()
         if snapshot:
             return self._from_snapshot(snapshot)
 
@@ -1088,10 +1199,35 @@ class ClaudeCodeAccountAdapter(AccountUsageAdapter):
 
         return access_token, email, plan or "Claude Pro"
 
+    def _refresh_claude_token_via_cli(self) -> bool:
+        """Invokes Claude Code CLI headlessly to refresh expired OAuth credentials in ~/.claude/.credentials.json."""
+        executable = self._find_claude()
+        if not executable:
+            return False
+        try:
+            res = subprocess.run(
+                [executable, "-p", "ping"],
+                input="",
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=12,
+                creationflags=_CREATE_NO_WINDOW if os.name == "nt" else 0,
+            )
+            return res.returncode == 0 or "pong" in res.stdout.lower() or "pronto para ajudar" in res.stdout.lower()
+        except Exception as exc:
+            logger.debug("Failed to refresh Claude token via CLI: %s", exc)
+            return False
+
     def _probe_claude_unified_ratelimits(self) -> Optional[ProviderAccountUsage]:
         token, email, plan = self._extract_claude_oauth_info()
         if not token:
-            return None
+            # Attempt CLI refresh if no token exists yet
+            if self._refresh_claude_token_via_cli():
+                token, email, plan = self._extract_claude_oauth_info()
+            if not token:
+                return None
 
         body = json.dumps({
             "model": "claude-haiku-4-5-20251001",
@@ -1116,7 +1252,30 @@ class ClaudeCodeAccountAdapter(AccountUsageAdapter):
             with urllib.request.urlopen(req, timeout=4.0) as resp:
                 headers = {k.lower(): str(v) for k, v in resp.headers.items()}
         except urllib.error.HTTPError as exc:
-            headers = {k.lower(): str(v) for k, v in exc.headers.items()}
+            if exc.code == 401:
+                # Token expired; attempt automatic refresh via CLI
+                if self._refresh_claude_token_via_cli():
+                    token, email, plan = self._extract_claude_oauth_info()
+                    if token:
+                        retry_req = urllib.request.Request(
+                            "https://api.anthropic.com/v1/messages",
+                            data=body,
+                            headers={
+                                "Authorization": f"Bearer {token}",
+                                "anthropic-version": "2023-06-01",
+                                "anthropic-beta": "claude-code-20250219",
+                                "Content-Type": "application/json",
+                                "User-Agent": "claude-code/0.2.29",
+                            },
+                            method="POST",
+                        )
+                        try:
+                            with urllib.request.urlopen(retry_req, timeout=4.0) as resp:
+                                headers = {k.lower(): str(v) for k, v in resp.headers.items()}
+                        except Exception as retry_exc:
+                            headers = {k.lower(): str(v) for k, v in getattr(retry_exc, "headers", {}).items()}
+            if not headers:
+                headers = {k.lower(): str(v) for k, v in exc.headers.items()}
         except Exception as exc:
             logger.debug("Claude unified rate limit probe failed: %s", exc)
             return None
@@ -1296,7 +1455,7 @@ class ClaudeCodeAccountAdapter(AccountUsageAdapter):
 
 
 class EnvironmentAccountAdapter(AccountUsageAdapter):
-    def inspect(self) -> ProviderAccountUsage:
+    def inspect(self, force: bool = False) -> ProviderAccountUsage:
         snapshot = self._snapshot_payload()
         if snapshot:
             return self._from_snapshot(snapshot)
@@ -1312,7 +1471,7 @@ class EnvironmentAccountAdapter(AccountUsageAdapter):
 
 
 class OllamaAccountAdapter(AccountUsageAdapter):
-    def inspect(self) -> ProviderAccountUsage:
+    def inspect(self, force: bool = False) -> ProviderAccountUsage:
         # 1. Check if an offline or synced snapshot payload exists
         snapshot = self._snapshot_payload()
         if snapshot:

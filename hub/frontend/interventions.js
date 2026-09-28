@@ -328,15 +328,27 @@ function renderGrillQuestions(session) {
           ${optionsHtml}
         </div>
 
-        <!-- Custom Write-in text -->
+        <!-- Custom Write-in text with Audio/Voice dictation (USR-60) -->
         ${q.allow_custom_input ? `
           <div class="pt-2">
-            <label class="text-[10px] font-mono text-slate-400 block mb-1">Ou escreva uma diretriz customizada para esta questão:</label>
+            <div class="flex items-center justify-between mb-1">
+              <label class="text-[10px] font-mono text-slate-400">Ou escreva/dite uma diretriz customizada para esta questão:</label>
+              <button 
+                type="button" 
+                id="btn-voice-q-${escapeInterventionsHtml(q.id)}" 
+                onclick="toggleGrillQuestionVoice('${escapeInterventionsHtml(q.id)}')"
+                title="Ditar resposta por voz ($0 / Groq)"
+                class="px-2 py-0.5 rounded-lg border border-slate-700 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white text-[11px] font-mono transition-all flex items-center gap-1 cursor-pointer">
+                <span>🎙️</span>
+                <span class="text-[10px] hidden sm:inline" id="lbl-voice-q-${escapeInterventionsHtml(q.id)}">Ditar Voz</span>
+              </button>
+            </div>
             <input 
               type="text" 
               id="custom_q_${escapeInterventionsHtml(q.id)}" 
-              placeholder="Diretriz customizada opcional..." 
+              placeholder="Diretriz customizada opcional ou ditar por voz..." 
               class="w-full px-3 py-1.5 rounded-xl bg-slate-900 border border-slate-800 text-xs text-slate-200 placeholder-slate-600 focus:outline-none focus:border-indigo-500 transition-colors">
+            <div id="status-voice-q-${escapeInterventionsHtml(q.id)}" class="hidden text-[10px] text-amber-400 mt-1 font-mono"></div>
           </div>
         ` : ""}
       </div>
