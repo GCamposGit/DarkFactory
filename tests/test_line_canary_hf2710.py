@@ -686,3 +686,148 @@ def test_dogfood_enabled_from_env(monkeypatch) -> None:
     assert canary._dogfood_enabled_from_env() is True
     monkeypatch.setenv("DARKFAC_DOGFOOD_ENABLED", "0")
     assert canary._dogfood_enabled_from_env() is False
+
+
+# --------------------------------------------------------------------------
+# HF-27-10: loop mode (`run_loop`) -- the canary must actually run
+# unattended in the cloud container instead of needing a human/cron to
+# invoke it once. A fake sleeper makes the loop run instantly in tests.
+# --------------------------------------------------------------------------
+
+
+class FakeSleeper:
+    """Records sleep calls instead of actually waiting."""
+
+    def __init__(self) -> None:
+        self.calls: list[float] = []
+
+    def __call__(self, seconds: float) -> None:
+        self.calls.append(seconds)
+
+
+def test_run_loop_runs_k_iterations_with_fake_sleeper(store, reports_dir) -> None:
+    day = date(2026, 9, 22)
+    observer = FakeObserver(_ALL_STAGES)
+    smoke = FakeSmokeClient(ok=True)
+    sleeper = FakeSleeper()
+
+    reports = canary.run_loop(
+        every_seconds=3600,
+        sleeper=sleeper,
+        max_iterations=3,
+        day=day,
+        store=store,
+        observer=observer,
+        smoke_client=smoke,
+        clock=FixedClock(day),
+        base_url="https://canary.example.test",
+        reports_dir=reports_dir,
+        send_weekly=False,
+    )
+
+    assert len(reports) == 3
+    assert all(r.outcome == "passed" for r in reports)
+    # Sleeps between iterations, not after the last one.
+    assert sleeper.calls == [3600, 3600]
+
+
+def test_run_loop_exception_in_one_iteration_does_not_stop_the_loop(store, reports_dir, monkeypatch) -> None:
+    day = date(2026, 9, 22)
+    sleeper = FakeSleeper()
+    calls = {"n": 0}
+
+    def _flaky_run_daily(*args: object, **kwargs: object) -> canary.CanaryReport:
+        calls["n"] += 1
+        if calls["n"] == 2:
+            raise RuntimeError("transient failure")
+        return canary.CanaryReport(
+            date=day.isoformat(), scenario="normal", external_id="x", outcome="passed"
+        )
+
+    monkeypatch.setattr(canary, "run_daily", _flaky_run_daily)
+
+    reports = canary.run_loop(every_seconds=1, sleeper=sleeper, max_iterations=3)
+
+    # Iteration 2 raised and was swallowed, so only 2 reports were collected,
+    # but the loop still ran all 3 iterations (3 calls to run_daily) and slept
+    # between each of them, proving the exception did not stop the loop.
+    assert calls["n"] == 3
+    assert len(reports) == 2
+    assert sleeper.calls == [1, 1]
+
+
+def test_run_loop_one_shot_is_unchanged(store, reports_dir) -> None:
+    """max_iterations=1 with every_seconds set behaves like a single run_daily
+    call: no sleep happens since there is no next iteration to wait for."""
+    day = date(2026, 9, 22)
+    observer = FakeObserver(_ALL_STAGES)
+    smoke = FakeSmokeClient(ok=True)
+    sleeper = FakeSleeper()
+
+    reports = canary.run_loop(
+        every_seconds=3600,
+        sleeper=sleeper,
+        max_iterations=1,
+        day=day,
+        store=store,
+        observer=observer,
+        smoke_client=smoke,
+        clock=FixedClock(day),
+        base_url="https://canary.example.test",
+        reports_dir=reports_dir,
+        send_weekly=False,
+    )
+
+    assert len(reports) == 1
+    assert reports[0].outcome == "passed"
+    assert sleeper.calls == []
+
+
+def test_cli_run_defaults_to_one_shot_without_every_seconds(monkeypatch, reports_dir) -> None:
+    """`--every-seconds` defaults to 0, so `python -m core.line.canary run`
+    with no flag behaves exactly as it always did: one `run_daily` call, no
+    loop, no sleeping."""
+    calls: list[dict[str, object]] = []
+
+    def _fake_run_daily(**kwargs: object) -> canary.CanaryReport:
+        calls.append(kwargs)
+        return canary.CanaryReport(date="2026-09-22", scenario="normal", external_id="x", outcome="passed")
+
+    monkeypatch.setattr(canary, "run_daily", _fake_run_daily)
+    loop_calls: list[dict[str, object]] = []
+    monkeypatch.setattr(
+        canary, "run_loop", lambda **kwargs: loop_calls.append(kwargs) or []
+    )
+
+    args = canary.main.__globals__["argparse"].Namespace(
+        command="run", date=None, base_url=None, dry_run=False,
+        timeout_seconds=canary.DEFAULT_TIMEOUT_SECONDS, every_seconds=0,
+    )
+    exit_code = canary._cli_run(args)
+
+    assert exit_code == 0
+    assert len(calls) == 1
+    assert loop_calls == []
+
+
+def test_cli_run_with_every_seconds_dispatches_to_run_loop(monkeypatch) -> None:
+    loop_calls: list[dict[str, object]] = []
+
+    def _fake_run_loop(**kwargs: object) -> list[canary.CanaryReport]:
+        loop_calls.append(kwargs)
+        return []
+
+    monkeypatch.setattr(canary, "run_loop", _fake_run_loop)
+    daily_calls: list[dict[str, object]] = []
+    monkeypatch.setattr(canary, "run_daily", lambda **kwargs: daily_calls.append(kwargs))
+
+    args = canary.main.__globals__["argparse"].Namespace(
+        command="run", date=None, base_url="https://canary.example.test", dry_run=False,
+        timeout_seconds=canary.DEFAULT_TIMEOUT_SECONDS, every_seconds=3600,
+    )
+    exit_code = canary._cli_run(args)
+
+    assert exit_code == 0
+    assert len(loop_calls) == 1
+    assert loop_calls[0]["every_seconds"] == 3600
+    assert daily_calls == []

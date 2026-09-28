@@ -47,6 +47,7 @@ import json
 import logging
 import os
 import sys
+import time
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any, Callable, Literal, Optional, Protocol
@@ -669,12 +670,70 @@ def _maybe_submit_dogfood(
 
 
 # --------------------------------------------------------------------------
+# Loop mode (HF-27-10: the canary needs to actually run unattended in the
+# cloud container, not just be invocable once by a human/cron that doesn't
+# exist yet). `run_loop` wraps `run_daily` in a sleep loop; `day` is left
+# `None` by the CLI so each iteration recomputes "today" from the clock as
+# real time passes, instead of replaying the same calendar day forever.
+# --------------------------------------------------------------------------
+
+
+def run_loop(
+    *,
+    every_seconds: float,
+    sleeper: Callable[[float], None] | None = None,
+    max_iterations: int | None = None,
+    **run_daily_kwargs: Any,
+) -> list[CanaryReport]:
+    """Call `run_daily` on a fixed interval, forever (or `max_iterations`
+    times, for tests).
+
+    An exception raised by a single iteration (network hiccup, transient
+    store error, etc.) is logged and swallowed -- it must never kill the
+    long-running loop, since there is no external supervisor restarting it
+    between sleeps (unlike `restart: unless-stopped` restarting the whole
+    container on a hard crash, which would lose the sleep cadence and spam
+    restarts). `sleeper` defaults to `time.sleep` and is injectable so tests
+    can run many iterations without actually waiting.
+    """
+    sleep = sleeper if sleeper is not None else time.sleep
+    reports: list[CanaryReport] = []
+    iteration = 0
+    while max_iterations is None or iteration < max_iterations:
+        try:
+            report = run_daily(**run_daily_kwargs)
+            reports.append(report)
+            logger.info(
+                "Canary loop iteration %d: outcome=%s date=%s",
+                iteration,
+                report.outcome,
+                report.date,
+            )
+        except Exception as exc:  # noqa: BLE001 - a single bad iteration must not stop the loop
+            logger.error("Canary loop iteration %d failed: %s", iteration, exc)
+        iteration += 1
+        if max_iterations is not None and iteration >= max_iterations:
+            break
+        sleep(every_seconds)
+    return reports
+
+
+# --------------------------------------------------------------------------
 # CLI (python -m core.line.canary run|summary|status)
 # --------------------------------------------------------------------------
 
 
 def _cli_run(args: argparse.Namespace) -> int:
     day = date.fromisoformat(args.date) if args.date else None
+    if args.every_seconds and args.every_seconds > 0:
+        run_loop(
+            every_seconds=args.every_seconds,
+            day=day,
+            base_url=args.base_url,
+            dry_run=args.dry_run,
+            timeout_seconds=args.timeout_seconds,
+        )
+        return 0
     report = run_daily(
         day=day,
         base_url=args.base_url,
@@ -740,6 +799,15 @@ def main(argv: list[str] | None = None) -> int:
         type=float,
         default=DEFAULT_TIMEOUT_SECONDS,
         help="Seconds since run creation after which a non-terminal run is reported as 'timeout' (default 6h)",
+    )
+    run_p.add_argument(
+        "--every-seconds",
+        type=float,
+        default=0,
+        help=(
+            "If > 0, loop forever: run, sleep this many seconds, repeat "
+            "(each iteration recomputes 'today'). 0 (default) runs once and exits."
+        ),
     )
 
     summary_p = sub.add_parser("summary", help="Print and send the weekly summary (last 7 reports)")

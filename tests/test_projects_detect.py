@@ -227,7 +227,7 @@ def test_smoke_check_defaults() -> None:
 
 
 def test_real_registry_projects_json_loads_with_new_fields() -> None:
-    """The 4 real projects in .factory/projects.json must carry repo_url,
+    """The 5 real projects in .factory/projects.json must carry repo_url,
     deploy and smoke (or a documented reason to leave them null/empty), and
     repo_url must be HTTPS (the VPS clones over HTTPS with a token, not SSH)."""
     from core.paths import project_root
@@ -236,18 +236,24 @@ def test_real_registry_projects_json_loads_with_new_fields() -> None:
     data = json.loads(projects_file.read_text(encoding="utf-8"))
     projects = [ProjectDescriptor.model_validate(item) for item in data]
 
-    assert len(projects) == 4
+    assert len(projects) == 5
     by_id = {p.id: p for p in projects}
     assert by_id["darkfac"].repo_url is not None
     assert by_id["site-ggcampos"].repo_url is not None
     assert by_id["segundo-cerebro"].repo_url is not None
     assert by_id["jarvis"].repo_url is not None
     assert by_id["jarvis"].default_branch == "master"
+    # HF-27-10 canary target: the only project whose deploy.params is
+    # non-empty, since it needs the Dokploy application id to trigger a
+    # deploy (core.line.stage_release._target_config reads it as
+    # service_name -- see core/orchestrator/deployment_adapter.py).
+    assert by_id["darkfac-canary"].repo_url is not None
+    assert by_id["darkfac-canary"].deploy.params == {"service_name": "KCTz2USVQhNp_R6BuTxh1"}
     for project in projects:
         assert project.repo_url is not None
         assert project.repo_url.startswith("https://"), f"{project.id}: expected HTTPS repo_url"
         assert project.repo_url == normalize_repo_url(project.repo_url)
-        if project.deploy is not None:
+        if project.deploy is not None and project.id != "darkfac-canary":
             assert project.deploy.params == {}
 
 
