@@ -96,7 +96,8 @@
     "deploy": {
       "type": "dokploy",
       "params": {
-        "service_name": "KCTz2USVQhNp_R6BuTxh1"
+        "service_name": "KCTz2USVQhNp_R6BuTxh1",
+        "service_type": "application"
       }
     },
     "smoke": [

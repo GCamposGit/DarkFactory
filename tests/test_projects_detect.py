@@ -248,7 +248,10 @@ def test_real_registry_projects_json_loads_with_new_fields() -> None:
     # deploy (core.line.stage_release._target_config reads it as
     # service_name -- see core/orchestrator/deployment_adapter.py).
     assert by_id["darkfac-canary"].repo_url is not None
-    assert by_id["darkfac-canary"].deploy.params == {"service_name": "KCTz2USVQhNp_R6BuTxh1"}
+    assert by_id["darkfac-canary"].deploy.params == {
+        "service_name": "KCTz2USVQhNp_R6BuTxh1",
+        "service_type": "application",
+    }
     for project in projects:
         assert project.repo_url is not None
         assert project.repo_url.startswith("https://"), f"{project.id}: expected HTTPS repo_url"
