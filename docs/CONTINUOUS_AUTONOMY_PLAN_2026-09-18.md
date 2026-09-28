@@ -2,10 +2,12 @@
 
 Versão 1.0 · 18/09/2026 · origem `user-demand` · pacote `HF-26-PLAN`.
 
-**Entrega: planejamento e handoff. Nenhuma implantação ou autonomia operacional é certificada aqui.**
+> **Arquivo histórico de planejamento.** Para status e próxima ação, consulte a [linha de produção HF-27](PRODUCTION_LINE_PLAN_2026-09-22.md) e o [índice ativo de handoffs](handoffs/production-line/INDEX.md). Este documento registra a origem do plano HF-26.
+
+**Entrega original: planejamento e handoff. Nenhuma implantação ou autonomia operacional é certificada aqui.**
 O marco HF-26 compõe capacidades existentes; não reabre como não implementados os módulos HF-01–25.
-O [índice executável](handoffs/continuous-autonomy/INDEX.md) e o
-[DAG estruturado](../.factory/planning/continuous-autonomy/plan.json) são normativos para os subtickets.
+O [índice histórico](handoffs/continuous-autonomy/INDEX.md) e o
+[DAG estruturado](../.factory/planning/continuous-autonomy/plan.json) registram os contratos originais HF-26. Para a fila atual, vale o índice HF-27 acima.
 
 ## Origem, baseline e autoridade
 
@@ -233,10 +235,10 @@ Não se solicita ao owner escolher a ordem técnica.
    usa target `hostinger_ftp`, outros `local_service`: não substituí-los por Dokploy por
    conveniência. Binding de release deve gerar contratos por target; indisponibilidade
    de target local com notebook desligado bloqueia só jobs que o exigem.
-6. **Janela 24 h HF-15-02:** chegadas novas, pausa/cancelamento, perda de evento, bloqueio
-   seletivo, fallback e aprendizado após restart. Só emitir `operationally_verified`
-   quando todas as linhas do protocolo de aceitação tiverem evidência atual; ausências
-   ficam explicitamente não exercitadas. O marco não é entregue com apenas a fatia feliz.
+6. **HF-15-02 e janela de 24 h:** o marco original foi supersedido pelo canário contínuo
+   de HF-27-10 (conforme o [plano HF-27](PRODUCTION_LINE_PLAN_2026-09-22.md)); V01–V13
+   ficam arquivados para auditoria e não bloqueiam o roteiro HF-27.
+   `operationally_verified` continua falso até HF-27-10 reunir evidência atual do alvo.
 
 Implantação é uma fase futura: nenhum segredo/serviço foi sondado remotamente aqui.
 Não há dependência humana de configuração detectada nesta sessão, portanto não há guia
