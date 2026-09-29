@@ -30,6 +30,7 @@ from core.workflow.control_contracts import (
     StageResult,
     StaleLeaseError,
     StoreUnavailableError,
+    normalize_cause_code,
 )
 from core.workflow.control_store import ControlStore, SQLiteControlStore, _is_ready_enough
 
@@ -560,6 +561,9 @@ class PostgresControlStore:
 
         if result.outcome == "success" and not result.output_refs:
             raise InvalidResultError("outcome='success' requires non-empty output_refs")
+
+        # jobs.cause_code is VARCHAR(64) on Postgres: normalize (full text is logged).
+        result = result.model_copy(update={"cause_code": normalize_cause_code(result.cause_code)})
 
         try:
             with self._psycopg.connect(self.raw_url) as conn:
