@@ -20,6 +20,7 @@ Exit code 0 only when everything passed.
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -29,6 +30,22 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from core.harness import runner  # noqa: E402
+
+# The cloud worker that runs this script carries production credentials
+# (Postgres URL, Dokploy key, Telegram bot, GitHub/agent tokens). The test
+# suite must never see them: tests would read live config (and fail, or worse,
+# touch production). Only the remote test-worker dispatch settings survive.
+_SENSITIVE_ENV = re.compile(
+    r"(DATABASE_URL|_TOKEN$|_API_KEY$|_SECRET$|PASSWORD|ENCRYPTION_KEY|GITHUB_PAT"
+    r"|^DOKPLOY_|^TELEGRAM_|^R2_|^DARKFAC_CANARY_|^DARKFAC_DOGFOOD_)"
+)
+_KEEP_ENV = frozenset({"DARKFAC_WORKER_TOKEN", "DARKFAC_TEST_WORKERS", "DARKFAC_REMOTE_BUSY_WAIT_SEC"})
+
+
+def sanitized_env(base: dict[str, str] | None = None) -> dict[str, str]:
+    """Copy of `base` (default os.environ) without production credentials/config."""
+    source = dict(os.environ if base is None else base)
+    return {k: v for k, v in source.items() if k in _KEEP_ENV or not _SENSITIVE_ENV.search(k)}
 
 
 def is_clean_tree(root: Path) -> bool:
@@ -54,7 +71,7 @@ def run_steps_directly(root: Path, config_path: Path) -> int:
     if not steps:
         print("[line_validate] no quick steps selected; refusing to pass on an empty selection")
         return 1
-    env = dict(os.environ, PYTHONPATH=str(root))
+    env = dict(sanitized_env(), PYTHONPATH=str(root))
     for step in steps:
         print(f"[line_validate] step {step.name}: {step.cmd}", flush=True)
         try:
@@ -81,7 +98,9 @@ def main(root: Path = REPO_ROOT) -> int:
     if is_clean_tree(root):
         print("[line_validate] clean tree: running the official harness (--quick)", flush=True)
         return subprocess.call(
-            [sys.executable, str(root / "core" / "harness" / "runner.py"), "--quick"], cwd=root
+            [sys.executable, str(root / "core" / "harness" / "runner.py"), "--quick"],
+            cwd=root,
+            env=sanitized_env(),
         )
     print("[line_validate] dirty tree: running the harness quick steps directly", flush=True)
     return run_steps_directly(root, config_path)

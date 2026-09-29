@@ -26,6 +26,14 @@ from core.orchestrator.deployment_adapter import (
 API_KEY = "s3cr3t-dokploy-key-000000000000"
 
 
+@pytest.fixture(autouse=True)
+def _no_ambient_dokploy_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Hosts that deploy (the cloud worker, the owner's Notebook) export real
+    DOKPLOY_* credentials; every test here configures the adapter explicitly."""
+    for name in ("DOKPLOY_API_URL", "DOKPLOY_API_KEY", "DOKPLOY_DEPLOY_URL"):
+        monkeypatch.delenv(name, raising=False)
+
+
 class FakeResponse:
     """Minimal stand-in for `http.client.HTTPResponse` used as a context manager."""
 

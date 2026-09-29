@@ -74,10 +74,53 @@ def test_dirty_tree_passes_when_every_quick_step_passes(line_validate, tmp_path:
 
 def test_clean_tree_delegates_to_the_official_runner(line_validate, tmp_path: Path, monkeypatch) -> None:
     root = _repo(tmp_path, [{"name": "ok", "cmd": "python -c pass", "quick": True}])
-    calls: list[list[str]] = []
-    monkeypatch.setattr(line_validate.subprocess, "call", lambda argv, **kw: calls.append(list(argv)) or 0)
+    monkeypatch.setenv("DOKPLOY_API_KEY", "prod-key")
+    calls: list[tuple[list[str], dict]] = []
+    monkeypatch.setattr(line_validate.subprocess, "call", lambda argv, **kw: calls.append((list(argv), kw)) or 0)
 
     assert line_validate.main(root) == 0
     assert len(calls) == 1
-    assert calls[0][0] == sys.executable
-    assert calls[0][1].endswith("runner.py") and calls[0][-1] == "--quick"
+    argv, kwargs = calls[0]
+    assert argv[0] == sys.executable
+    assert argv[1].endswith("runner.py") and argv[-1] == "--quick"
+    assert "DOKPLOY_API_KEY" not in kwargs["env"]
+
+
+def test_sanitized_env_drops_production_credentials_but_keeps_test_worker_dispatch(line_validate) -> None:
+    base = {
+        "PATH": "/usr/bin",
+        "HOME": "/home/darkfac",
+        "DARKFAC_HF02_DATABASE_URL": "postgresql://u:p@db:5432/x",
+        "DARKHUB_CONTROL_DATABASE_URL": "postgresql://u:p@db:5432/x",
+        "DOKPLOY_API_URL": "https://dokploy.example",
+        "DOKPLOY_API_KEY": "k",
+        "TELEGRAM_OWNER_BOT_TOKEN": "t",
+        "GITHUB_TOKEN": "g",
+        "GITHUB_PAT": "g",
+        "CLAUDE_CODE_OAUTH_TOKEN": "c",
+        "OPENAI_API_KEY": "o",
+        "R2_ACCESS_KEY_ID": "r",
+        "DARKFAC_BACKUP_ENCRYPTION_KEY": "e",
+        "DARKFAC_CANARY_BASE_URL": "https://canary.example",
+        "DARKFAC_WORKER_TOKEN": "w",
+        "DARKFAC_TEST_WORKERS": "http://100.78.181.90:8080",
+        "DARKFAC_REMOTE_BUSY_WAIT_SEC": "300",
+    }
+    env = line_validate.sanitized_env(base)
+    assert set(env) == {
+        "PATH",
+        "HOME",
+        "DARKFAC_WORKER_TOKEN",
+        "DARKFAC_TEST_WORKERS",
+        "DARKFAC_REMOTE_BUSY_WAIT_SEC",
+    }
+
+
+def test_dirty_tree_steps_do_not_see_production_credentials(line_validate, tmp_path: Path, monkeypatch) -> None:
+    cmd = "python -c \"import os; open('seen', 'w').write(os.environ.get('DARKFAC_HF02_DATABASE_URL', 'absent'))\""
+    root = _repo(tmp_path, [{"name": "probe", "cmd": cmd, "quick": True}])
+    (root / "dirty.txt").write_text("x", encoding="utf-8")
+    monkeypatch.setenv("DARKFAC_HF02_DATABASE_URL", "postgresql://u:p@db:5432/x")
+
+    assert line_validate.main(root) == 0
+    assert (root / "seen").read_text(encoding="utf-8") == "absent"
