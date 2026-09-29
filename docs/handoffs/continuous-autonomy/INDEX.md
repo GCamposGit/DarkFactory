@@ -7,7 +7,9 @@
 
 33 unidades + marco HF-26. Primeiro: [HF-26-01](HF-26-01.md).
 
-Todos especificados; só HF-26-01 sem predecessor técnico. Prontidão de contrato não autentica despacho. Nenhum implementado por este pacote.
+Todos especificados; só HF-26-01 sem predecessor técnico. Prontidão de contrato não autentica despacho.
+
+**Estado (29/09/2026):** as 33 unidades estão implementadas e integradas em `main`, exceto HF-15-02, supersedido por HF-27-10 (canário E2E contínuo). HF-03-08 fechou como contenção + preparação (commits `186a5a4`, `08e8c4f`, `8c4fed6`, `1c92cca`); o alvo de produção não foi verificado por ele e é coberto por HF-27-08 e HF-27-10. O manifesto `.factory/roadmap/darkfac.json` foi reconciliado: unidades e o marco HF-26 `completed` com `evidence_refs` (commits e handoff), HF-15-02 `cancelled`.
 
 | Ticket | Papel | Estado | Depende de |
 | --- | --- | --- | --- |
