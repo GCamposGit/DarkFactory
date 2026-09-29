@@ -31,6 +31,24 @@ from core.orchestrator.build_artifacts import ArtifactRef, Claim
 
 logger = logging.getLogger(__name__)
 
+# Dokploy ids the production line must NEVER deploy: redeploying the
+# `darkfac-cloud` compose (coordinator + worker + canary + backup-cron) from
+# inside a line run would restart the very worker executing that run. The
+# DarkHub is a separate compose. Extra ids can be added (never removed) with
+# DARKFAC_LINE_FORBIDDEN_DEPLOY_IDS (comma-separated).
+SELF_DEPLOY_COMPOSE_ID = "QJK0YXPQvCgjrpdgWH0uo"
+SELF_RESTART_CAUSE_CODE = "deploy_target_forbidden_self_restart"
+
+
+def forbidden_deploy_ids() -> frozenset[str]:
+    extra = {v.strip() for v in os.environ.get("DARKFAC_LINE_FORBIDDEN_DEPLOY_IDS", "").split(",") if v.strip()}
+    return frozenset({SELF_DEPLOY_COMPOSE_ID, *extra})
+
+
+def is_forbidden_deploy_target(service_name: Optional[str]) -> bool:
+    """True when `service_name` is a Dokploy id the line must never deploy (self-restart)."""
+    return bool(service_name) and str(service_name).strip() in forbidden_deploy_ids()
+
 
 class DeploymentStatus(str, Enum):
     """Deterministic lifecycle status for deployment operations."""
@@ -276,6 +294,25 @@ class DokployDeploymentAdapter:
         provider_details: Dict[str, Any] = {}
         status = DeploymentStatus.IN_PROGRESS
 
+        if is_forbidden_deploy_target(target_config.service_name):
+            logger.error(
+                "Dokploy deploy refused for project %s: %s is the worker's own compose (%s)",
+                target_config.project_id, target_config.service_name, SELF_RESTART_CAUSE_CODE,
+            )
+            refused = DeploymentOperation(
+                operation_id=operation_id,
+                external_operation_id=external_op_id,
+                project_id=target_config.project_id,
+                target_type=target_config.target_type,
+                artifact_ref=artifact_ref,
+                status=DeploymentStatus.FAILED,
+                details={"error": SELF_RESTART_CAUSE_CODE},
+            )
+            with self._lock:
+                self._operations[operation_id] = refused
+                self._target_configs[operation_id] = target_config
+            return refused
+
         endpoint = target_config.api_url or self.api_url
         deploy_webhook = target_config.deploy_url or os.getenv("DOKPLOY_DEPLOY_URL", "")
         real_api = self._real_api_credentials(target_config)
@@ -520,6 +557,20 @@ class DokployDeploymentAdapter:
         """
         rollback_id = f"rb_dokploy_{uuid.uuid4().hex[:12]}"
         restored = target_config.last_known_good_digest
+
+        if is_forbidden_deploy_target(target_config.service_name):
+            logger.error(
+                "Dokploy rollback refused for project %s: %s is the worker's own compose",
+                target_config.project_id, target_config.service_name,
+            )
+            return RollbackResult(
+                rollback_id=rollback_id,
+                project_id=target_config.project_id,
+                failed_digest=failed_digest,
+                restored_digest=None,
+                status=DeploymentStatus.FAILED,
+                reason=f"Rollback refused: {SELF_RESTART_CAUSE_CODE}. Original cause: {reason}",
+            )
 
         if not restored:
             logger.error("Dokploy rollback aborted: project %s has no last_known_good_digest", target_config.project_id)

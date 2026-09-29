@@ -79,7 +79,9 @@ from core.orchestrator.deployment_adapter import (
     DokployDeploymentAdapter,
     FtpMirrorDeploymentAdapter,
     LocalServiceDeploymentAdapter,
+    SELF_RESTART_CAUSE_CODE,
     TargetConfig,
+    is_forbidden_deploy_target,
 )
 from core.projects.models import DeployTargetType, ProjectDescriptor, SmokeCheck
 from core.projects.registry import normalize_repo_url, resolve_commands
@@ -487,6 +489,21 @@ class ReleaseStageHandler:
             return None, None, None
 
         target_config = self._target_config(sha, last_good_sha)
+        if deploy_type == DeployTargetType.DOKPLOY and is_forbidden_deploy_target(target_config.service_name):
+            # The worker's own compose (`darkfac-cloud`): deploying it from a line run would
+            # restart the worker mid-run. Terminal misconfiguration, so `failed`, never `retry`.
+            logger.error(
+                "Release refused for project %s: deploy target %s is the worker's own compose",
+                self.project.id, target_config.service_name,
+            )
+            return None, target_config, StageResult(
+                outcome="failed",
+                cause_code=(
+                    f"{SELF_RESTART_CAUSE_CODE}:service_name={target_config.service_name} "
+                    "is the darkfac-cloud compose that runs this worker; "
+                    "fix deploy.params.service_name in .factory/projects.json"
+                ),
+            )
         adapter = self._adapter_for(deploy_type)
         if adapter is None:
             return None, None, StageResult(outcome="failed", cause_code=f"unknown_deploy_type:{deploy_type}")

@@ -252,11 +252,17 @@ def test_real_registry_projects_json_loads_with_new_fields() -> None:
         "service_name": "KCTz2USVQhNp_R6BuTxh1",
         "service_type": "application",
     }
+    # The line's V1 pilot deploys the DarkHub (a separate Dokploy compose) -- never the
+    # darkfac-cloud compose that runs the worker (see stage_release's self-restart guard).
+    assert by_id["darkfac"].deploy.params == {
+        "service_name": "wuH-sjZBig74xFGdk4IsL",
+        "service_type": "compose",
+    }
     for project in projects:
         assert project.repo_url is not None
         assert project.repo_url.startswith("https://"), f"{project.id}: expected HTTPS repo_url"
         assert project.repo_url == normalize_repo_url(project.repo_url)
-        if project.deploy is not None and project.id != "darkfac-canary":
+        if project.deploy is not None and project.id not in ("darkfac-canary", "darkfac"):
             assert project.deploy.params == {}
 
 

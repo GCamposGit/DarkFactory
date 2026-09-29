@@ -13,7 +13,18 @@
     "default_branch": "main",
     "deploy": {
       "type": "dokploy",
-      "params": {}
+      "params": {
+        "service_name": "wuH-sjZBig74xFGdk4IsL",
+        "service_type": "compose"
+      }
+    },
+    "commands": {
+      "setup": [
+        "python -c \"import pytest, xdist, pydantic, fastapi, psutil\" || python -m pip install -r requirements.txt"
+      ],
+      "validate": [
+        "python scripts/line_validate.py"
+      ]
     },
     "smoke": [
       {

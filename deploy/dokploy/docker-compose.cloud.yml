@@ -101,6 +101,12 @@ services:
       - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
       - REMOTE_HARNESS_URLS=${REMOTE_HARNESS_URLS:-http://100.78.181.90:8080,http://100.81.84.124:8080}
       - REMOTE_HARNESS_URL=${REMOTE_HARNESS_URL:-http://100.78.181.90:8080}
+      # Test offload for the official gate (`runner.py --quick`, used by the line's
+      # clean-tree validation of the darkfac project via scripts/line_validate.py):
+      # dispatched to the Desktop test worker over the tailnet, local fallback.
+      - DARKFAC_TEST_WORKERS=${DARKFAC_TEST_WORKERS:-http://100.78.181.90:8080}
+      - DARKFAC_WORKER_TOKEN=${DARKFAC_WORKER_TOKEN:-}
+      - DARKFAC_REMOTE_BUSY_WAIT_SEC=${DARKFAC_REMOTE_BUSY_WAIT_SEC:-120}
       # HF-27-10 PR #37 review item 4: core.line.human's owner notifications
       # (core.notifications.service.NotificationService, role="owner") need
       # these to actually send -- pre-existing gap, this service is the one

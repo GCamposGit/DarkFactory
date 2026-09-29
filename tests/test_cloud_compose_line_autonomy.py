@@ -80,3 +80,9 @@ def test_canary_polls_every_fifteen_minutes_with_retry_and_dogfood_env(compose: 
     assert "DARKFAC_DOGFOOD_MIN_STREAK=${DARKFAC_DOGFOOD_MIN_STREAK:-1}" in env
     assert "DARKFAC_DOGFOOD_ENABLED=${DARKFAC_DOGFOOD_ENABLED:-false}" in env  # stays off by default
     assert "DARKFAC_CANARY_MAX_ATTEMPTS_PER_DAY=${DARKFAC_CANARY_MAX_ATTEMPTS_PER_DAY:-4}" in env
+
+
+def test_worker_offloads_the_official_gate_to_the_desktop_test_worker(compose: dict) -> None:
+    env = "\n".join(compose["services"]["darkfac-worker"]["environment"])
+    assert "DARKFAC_TEST_WORKERS=${DARKFAC_TEST_WORKERS:-http://100.78.181.90:8080}" in env
+    assert "DARKFAC_WORKER_TOKEN=${DARKFAC_WORKER_TOKEN:-}" in env
