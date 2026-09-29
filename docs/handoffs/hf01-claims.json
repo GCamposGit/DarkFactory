@@ -11,11 +11,11 @@
       "evidence_kind": "document",
       "source_id": "approved-roadmap",
       "locator": ".factory/roadmap/darkfac.json#RM-07",
-      "source_hash": "52d7b851050a191fb8764a0fcd4c8eaf0c85137ed75213824d88c8c923903bb4",
+      "source_hash": "1ac39771f6494862311a04b13631032b07aa86cb6a109eb5bcaf3780c92bff54",
       "candidate_sha": null,
       "observed_at": null,
       "scope": "manifest declaration",
-      "summary": "O manifesto aprovado ainda declara RM-07 como planned e com horizonte next."
+      "summary": "Na captura do baseline o manifesto aprovado declarava RM-07 como planned e horizonte next; reconciliado em 29/09/2026 (completed, com evidencia em relatorio), o hash e o do manifesto atual."
     },
     {
       "claim_id": "rm07-report-implemented",

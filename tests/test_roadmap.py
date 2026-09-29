@@ -78,7 +78,7 @@ CONTINUOUS_AUTONOMY_IDS = {
 }
 
 FUTURE_PILOT_IDS = {'HF-23-02'}
-PRODUCTION_LINE_IDS = {'HF-27'} | {f'HF-27-{n:02d}' for n in range(1, 11)}
+PRODUCTION_LINE_IDS = {'HF-27'} | {f'HF-27-{n:02d}' for n in range(1, 12)}
 
 
 def make_item(
@@ -171,21 +171,32 @@ def test_repository_sources_compile_with_stable_hash() -> None:
     assert first.snapshot_hash == second.snapshot_hash
     assert first.snapshot_id == second.snapshot_id
     assert direct_first.snapshot_hash == direct_second.snapshot_hash
-    assert first.stats.total_items == 78
-    assert first.stats.confirmed_items == 78
+    assert first.stats.total_items == 79
+    assert first.stats.confirmed_items == 79
     assert {state.source_id for state in first.sources_consulted} == {
         "approved-roadmap",
         "development-plan",
     }
     assert not any(issue.code == "orphan_dependency" for issue in first.issues)
     assert not first.sources_unavailable
-    new_items = [item for item in first.items if item.id in CONTINUOUS_AUTONOMY_IDS]
-    assert all(item.delivery_status == DeliveryStatus.PLANNED for item in new_items)
-    assert all(not item.evidence_refs for item in new_items)
-    pilot = next(item for item in first.items if item.id == 'HF-23-02')
-    assert pilot.delivery_status == DeliveryStatus.PLANNED
-    assert pilot.horizon == PlanningHorizon.LATER
-    assert not pilot.evidence_refs
+    # Reconciled 2026-09-29: the composition units and the production line are
+    # delivered; HF-15-02 is superseded by the HF-27-10 canary (cancelled) and the
+    # HF-27 milestone waits for the 7 green canary days (validating).
+    by_id = {item.id: item for item in first.items}
+    superseded = {'HF-15-02'}
+    for item_id in (CONTINUOUS_AUTONOMY_IDS | FUTURE_PILOT_IDS | PRODUCTION_LINE_IDS) - superseded - {'HF-27'}:
+        item = by_id[item_id]
+        assert item.delivery_status == DeliveryStatus.COMPLETED, item_id
+        assert item.evidence_refs, item_id
+        assert item.completion_criteria, item_id
+    assert by_id['HF-15-02'].delivery_status == DeliveryStatus.CANCELLED
+    assert by_id['HF-27'].delivery_status == DeliveryStatus.VALIDATING
+    assert all(by_id[f"RM-{n:02d}"].delivery_status == DeliveryStatus.COMPLETED for n in range(1, 10))
+    assert not [
+        issue for issue in first.issues
+        if issue.code in {"missing_evidence", "missing_completion_criteria", "conflicting_state"}
+    ]
+    assert by_id['HF-23-02'].horizon == PlanningHorizon.LATER
 
 
 def test_development_plan_source_parses_ticket_dependencies() -> None:
