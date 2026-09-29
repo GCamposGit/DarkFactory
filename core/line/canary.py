@@ -184,6 +184,17 @@ class SmokeResult(BaseModel):
     rollback_required: bool = False
 
 
+class NotifiedAlert(BaseModel):
+    """The failure alert already sent for a day, persisted in that day's report JSON
+    (reports volume survives restarts) so a container restart / redeploy does not
+    re-send the same CRITICAL Telegram alert for an already-terminal run."""
+
+    run_id: str | None = None
+    outcome: str
+    failing_stage: str | None = None
+    at: str
+
+
 class CanaryReport(BaseModel):
     date: str
     scenario: CanaryScenario
@@ -202,6 +213,7 @@ class CanaryReport(BaseModel):
     cause_code: str | None = None
     dry_run: bool = False
     notes: str = ""
+    notified: NotifiedAlert | None = None
 
     @model_validator(mode="after")
     def _derive_passed_and_dry_run(self) -> "CanaryReport":
@@ -287,16 +299,28 @@ class ControlStoreLineObserver:
         if not status:
             return []
         observations: list[CanaryStageObservation] = []
-        for job in status.get("jobs", []):
+        jobs = status.get("jobs", [])
+        # A stage that retried (grill iteration 0, 1, 2 ...) records the reason on
+        # each attempt; the final `failed` row can lack one (retry cap / loop cap).
+        last_cause: dict[str, str] = {}
+        seen_before: set[str] = set()
+        for job in jobs:
+            stage = job.get("stage", "")
+            cause = job.get("cause_code") or None
+            if job.get("status") == "failed" and not cause:
+                cause = last_cause.get(stage) or ("retry_cap_exhausted" if stage in seen_before else None)
+            if cause:
+                last_cause[stage] = cause
+            seen_before.add(stage)
             observations.append(
                 CanaryStageObservation(
-                    stage=job.get("stage", ""),
+                    stage=stage,
                     status=job.get("status", "unknown"),
                     iteration=int(job.get("iteration") or 0),
                     started_at=job.get("started_at"),
                     finished_at=job.get("finished_at"),
                     actual_cost=float(job.get("actual_cost") or 0.0),
-                    cause_code=job.get("cause_code"),
+                    cause_code=cause,
                     harness=job.get("role"),
                 )
             )
@@ -458,10 +482,60 @@ def _elapsed_seconds(created_at_raw: str | None, now: datetime) -> float | None:
 # --------------------------------------------------------------------------
 
 
+def _read_notified(reports_dir: Path, day: date) -> NotifiedAlert | None:
+    """The alert state persisted in `day`'s existing report, if any (best-effort)."""
+    path = _report_path(reports_dir, day)
+    if not path.is_file():
+        return None
+    try:
+        return CanaryReport.model_validate_json(path.read_text(encoding="utf-8")).notified
+    except (OSError, ValueError) as exc:
+        logger.warning("Could not read prior canary alert state from %s: %s", path, exc)
+        return None
+
+
+def _notify_failure_once(
+    report: CanaryReport,
+    sender: Optional[NotifySender],
+    previous: NotifiedAlert | None,
+    now: datetime,
+) -> None:
+    """Send the failure alert only when the state changed since the last one sent.
+
+    "Same state" = same run_id + outcome + failing_stage for this report's day.
+    The state is stored in `report.notified` (persisted with the report), and is
+    carried forward unchanged while nothing new was sent -- including through
+    in_progress/passed iterations, so failed -> in_progress -> failed (same stage)
+    does not re-alert. A send that did not go out (`False`) is NOT recorded, so
+    it is retried on the next iteration.
+    """
+    report.notified = previous
+    if report.outcome not in ("failed", "timeout"):
+        return
+    if (
+        previous is not None
+        and previous.run_id == report.run_id
+        and previous.outcome == report.outcome
+        and previous.failing_stage == report.failing_stage
+    ):
+        logger.info(
+            "Canary alert for %s (%s/%s) already sent at %s; not re-sending",
+            report.date, report.outcome, report.failing_stage, previous.at,
+        )
+        return
+    if _notify_failure(report, sender):
+        report.notified = NotifiedAlert(
+            run_id=report.run_id,
+            outcome=report.outcome,
+            failing_stage=report.failing_stage,
+            at=now.isoformat(),
+        )
+
+
 def _notify_failure(report: CanaryReport, sender: Optional[NotifySender]) -> bool:
     text = (
-        f"[CANARIO {report.outcome.upper()}] {report.date} etapa={report.failing_stage} "
-        f"cause_code={report.cause_code} cenario={report.scenario} run_id={report.run_id}"
+        f"[CANARIO {report.outcome.upper()}] {report.date} etapa={report.failing_stage or 'unknown'} "
+        f"cause_code={report.cause_code or 'unknown'} cenario={report.scenario} run_id={report.run_id}"
     )
     send = sender if sender is not None else _default_failure_sender()
     if send is None:
@@ -554,6 +628,7 @@ def run_daily(
         _write_report(reports_dir, today, report)
         return report
 
+    previous_notified = _read_notified(reports_dir, today)
     store = store or default_control_store()
     service = AutonomousIntakeService(store=store, demands_store=demands_store)
 
@@ -572,8 +647,8 @@ def run_daily(
             cause_code="idempotency_conflict",
             notes=str(exc),
         )
+        _notify_failure_once(report, failure_sender, previous_notified, clock.now())
         _write_report(reports_dir, today, report)
-        _notify_failure(report, failure_sender)
         return report
 
     run_id = receipt.run_id
@@ -634,10 +709,10 @@ def run_daily(
         failing_stage=failing_stage,
         cause_code=cause_code,
     )
+    # Alert (once per state change) BEFORE the write, so the report persists the
+    # "already notified" marker that survives a restart.
+    _notify_failure_once(report, failure_sender, previous_notified, clock.now())
     _write_report(reports_dir, today, report)
-
-    if outcome in ("failed", "timeout"):
-        _notify_failure(report, failure_sender)
 
     if send_weekly and today.weekday() == 0:  # Monday
         send_weekly_summary(reports_dir=reports_dir, today=today, sender=summary_sender)

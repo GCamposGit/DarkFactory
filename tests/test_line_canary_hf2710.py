@@ -831,3 +831,173 @@ def test_cli_run_with_every_seconds_dispatches_to_run_loop(monkeypatch) -> None:
     assert len(loop_calls) == 1
     assert loop_calls[0]["every_seconds"] == 3600
     assert daily_calls == []
+
+
+# --------------------------------------------------------------------------
+# Alert dedup across restarts + cause_code never lost / never "None"
+# (production: the same CRITICAL alert arrived at 12:18 and 14:54 UTC, one per
+# container restart, saying cause_code=None)
+# --------------------------------------------------------------------------
+
+_GRILL_FAILED = [
+    canary.CanaryStageObservation(stage="grill", status="failed", iteration=2, cause_code="handler_error:X"),
+]
+_DEV_FAILED = [
+    canary.CanaryStageObservation(stage="grill", status="succeeded", iteration=0),
+    canary.CanaryStageObservation(stage="development", status="failed", iteration=1, cause_code="test_failure"),
+]
+
+
+def _run(store, reports_dir, observer_stages, sender, day=date(2026, 9, 22), **kwargs):
+    return canary.run_daily(
+        day=day, store=store, observer=FakeObserver(observer_stages), clock=FixedClock(day),
+        reports_dir=reports_dir, failure_sender=sender, send_weekly=False, **kwargs,
+    )
+
+
+def test_same_failure_is_alerted_once_even_across_restarts(store, reports_dir) -> None:
+    sender = RecordingSender()
+
+    first = _run(store, reports_dir, _GRILL_FAILED, sender)
+    # "container restart": brand-new call, nothing in memory, only the report volume survives.
+    second = _run(store, reports_dir, _GRILL_FAILED, sender)
+    third = _run(store, reports_dir, _GRILL_FAILED, sender)
+
+    assert len(sender.messages) == 1
+    assert first.notified is not None and first.notified.failing_stage == "grill"
+    assert second.notified == first.notified == third.notified  # state carried forward
+    on_disk = json.loads((reports_dir / "2026-09-22.json").read_text(encoding="utf-8"))
+    assert on_disk["notified"]["outcome"] == "failed"
+    assert on_disk["notified"]["failing_stage"] == "grill"
+    assert on_disk["notified"]["run_id"] == first.run_id
+    assert on_disk["notified"]["at"]
+
+
+def test_alert_is_resent_when_the_failing_stage_or_outcome_changes(store, reports_dir) -> None:
+    sender = RecordingSender()
+    _run(store, reports_dir, _GRILL_FAILED, sender)
+    _run(store, reports_dir, _DEV_FAILED, sender)  # different failing stage -> new alert
+    _run(store, reports_dir, _DEV_FAILED, sender)  # same again -> silent
+    assert len(sender.messages) == 2
+    assert "grill" in sender.messages[0] and "development" in sender.messages[1]
+
+    # A non-terminal run past its deadline is a different outcome (timeout) -> alerts too.
+    _run(store, reports_dir, _PENDING_STAGES, sender, timeout_seconds=0)
+    assert len(sender.messages) == 3 and "TIMEOUT" in sender.messages[2]
+
+
+def test_failed_then_in_progress_then_failed_again_does_not_realert(store, reports_dir) -> None:
+    sender = RecordingSender()
+    _run(store, reports_dir, _GRILL_FAILED, sender)
+    mid = _run(store, reports_dir, _PENDING_STAGES, sender)
+    assert mid.outcome == "in_progress" and mid.notified is not None  # marker survives non-failure iterations
+    _run(store, reports_dir, _GRILL_FAILED, sender)
+    assert len(sender.messages) == 1
+
+
+def test_undelivered_alert_is_not_recorded_and_is_retried(store, reports_dir) -> None:
+    class FlakySender:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def __call__(self, text: str) -> bool:
+            self.calls += 1
+            return self.calls > 1  # first attempt is not delivered
+
+    sender = FlakySender()
+    first = _run(store, reports_dir, _GRILL_FAILED, sender)
+    assert first.notified is None
+    second = _run(store, reports_dir, _GRILL_FAILED, sender)
+    assert second.notified is not None
+    _run(store, reports_dir, _GRILL_FAILED, sender)
+    assert sender.calls == 2
+
+
+def test_alert_text_never_contains_none(store, reports_dir) -> None:
+    sender = RecordingSender()
+    stages = [canary.CanaryStageObservation(stage="grill", status="failed", iteration=0)]  # no cause anywhere
+    report = _run(store, reports_dir, stages, sender)
+    assert report.failing_stage == "grill"
+    assert "None" not in sender.messages[0]
+    assert "cause_code=unknown" in sender.messages[0]
+
+
+class _StatusStore:
+    """Store double exposing only get_run_status, like the real observers' contract."""
+
+    def __init__(self, jobs: list[dict]) -> None:
+        self.jobs = jobs
+
+    def get_run_status(self, run_id: str) -> dict:
+        return {"run_id": run_id, "jobs": self.jobs}
+
+
+def _job(stage: str, status: str, iteration: int, cause: str | None) -> dict:
+    return {"stage": stage, "status": status, "iteration": iteration, "cause_code": cause, "role": "grill_engine"}
+
+
+def test_observer_keeps_the_failing_jobs_own_cause_code() -> None:
+    obs = canary.ControlStoreLineObserver(_StatusStore([_job("grill", "failed", 0, "handler_error:X")])).observe("r")
+    assert obs[0].cause_code == "handler_error:X"
+
+
+def test_observer_falls_back_to_last_retry_cause_when_final_failed_row_has_none() -> None:
+    jobs = [
+        _job("grill", "retry", 0, "no_authenticated_harness"),
+        _job("grill", "retry", 1, "empty_output"),
+        _job("grill", "failed", 2, None),  # loop/retry cap: final row carries no cause
+    ]
+    failed = [o for o in canary.ControlStoreLineObserver(_StatusStore(jobs)).observe("r") if o.status == "failed"]
+    assert failed[0].cause_code == "empty_output"
+
+
+def test_observer_uses_retry_cap_exhausted_when_no_earlier_cause_exists() -> None:
+    jobs = [_job("grill", "retry", 0, None), _job("grill", "failed", 1, None)]
+    failed = [o for o in canary.ControlStoreLineObserver(_StatusStore(jobs)).observe("r") if o.status == "failed"]
+    assert failed[0].cause_code == "retry_cap_exhausted"
+
+    lone = canary.ControlStoreLineObserver(_StatusStore([_job("grill", "failed", 0, None)])).observe("r")
+    assert lone[0].cause_code is None  # nothing to say: alert text falls back to "unknown"
+
+
+def test_postgres_get_run_status_returns_job_cause_code_and_retry_count() -> None:
+    """Where cause_code was lost: the Postgres get_run_status SELECT never included
+    jobs.cause_code (nor retry_count), so the canary always saw None."""
+    from core.orchestrator.adapters.control_postgres import PostgresControlStore
+    from core.workflow.control_contracts import RuntimeOwner
+
+    now = datetime(2026, 9, 29, 11, 49, tzinfo=UTC)
+    run_row = ("run-1", "darkfac-canary", "d", "1", "cloud_dbos_postgres", "autonomous", "active", "p" * 64, "1.0", now, now, None)
+    job_row = (
+        "darkfac-canary", "1.0", "grill", 2, "failed", "grill_engine", 3, None, 0.5, [], [],
+        now, now, now, now, "handler_error:ValidationError~ab12cd34", 3,
+    )
+    executed: list[str] = []
+
+    class _Cursor:
+        def __enter__(self): return self
+        def __exit__(self, *a): return None
+        def execute(self, sql, params=None): executed.append(sql)
+        def fetchone(self): return run_row
+        def fetchall(self): return [job_row]
+
+    class _Conn:
+        def __enter__(self): return self
+        def __exit__(self, *a): return None
+        def cursor(self): return _Cursor()
+
+    class _Psycopg:
+        @staticmethod
+        def connect(url): return _Conn()
+
+    store = PostgresControlStore(mock_mode=True, runtime_owner=RuntimeOwner.HF05_SQLITE.value)
+    store.mock_mode = False
+    store._psycopg = _Psycopg
+    store.raw_url = "postgresql://fake"
+
+    status = store.get_run_status("run-1")
+    assert status is not None
+    job = status["jobs"][0]
+    assert job["cause_code"] == "handler_error:ValidationError~ab12cd34"
+    assert job["retry_count"] == 3
+    assert any("cause_code" in sql for sql in executed)

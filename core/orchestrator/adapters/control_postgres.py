@@ -1065,7 +1065,8 @@ class PostgresControlStore:
                         """
                         SELECT ticket_id, plan_version, stage, iteration, status, role,
                                fencing_token, current_lease_id, actual_cost, output_refs, evidence_refs,
-                               created_at, updated_at, started_at, finished_at
+                               created_at, updated_at, started_at, finished_at,
+                               cause_code, retry_count
                         FROM jobs
                         WHERE run_id = %s
                         ORDER BY created_at ASC
@@ -1092,6 +1093,11 @@ class PostgresControlStore:
                             "updated_at": j[12].isoformat() if hasattr(j[12], "isoformat") else str(j[12]),
                             "started_at": j[13].isoformat() if j[13] and hasattr(j[13], "isoformat") else (str(j[13]) if j[13] else None),
                             "finished_at": j[14].isoformat() if j[14] and hasattr(j[14], "isoformat") else (str(j[14]) if j[14] else None),
+                            # jobs.cause_code / retry_count were never selected here, so every
+                            # Postgres-backed reader (the canary alert: "cause_code=None") lost why
+                            # a stage failed even though the row carries it.
+                            "cause_code": j[15],
+                            "retry_count": j[16],
                         })
                     run_info["jobs"] = jobs
                     return run_info
