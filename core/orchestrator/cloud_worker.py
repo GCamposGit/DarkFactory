@@ -168,6 +168,7 @@ class CloudWorker:
         autodetect_tooling: bool = False,
         clock: Callable[[], float] = time.monotonic,
         on_capabilities_probed: Callable[[list[str]], None] | None = None,
+        capability_detail_lookup: Callable[[str], str] | None = None,
     ) -> None:
         self.worker_id = worker_id or os.environ.get("DARKFAC_WORKER_ID", "cloud-worker-1")
         self.max_slots = (
@@ -183,6 +184,7 @@ class CloudWorker:
         # Codex login bootstrap when harness:codex is still missing).
         self._clock = clock
         self._on_capabilities_probed = on_capabilities_probed
+        self._capability_detail_lookup = capability_detail_lookup
         self._autodetect_tooling = autodetect_tooling
         # `capability_probe_interval_s` is the cadence for DROPPED harnesses (and
         # the tick gate); healthy ones use `healthy_probe_interval_s`.
@@ -222,7 +224,11 @@ class CloudWorker:
         self._stop_event: threading.Event | None = None
 
     @staticmethod
-    def _filter_capabilities(capabilities: list[str], prober: Callable[[str], bool]) -> list[str]:
+    def _filter_capabilities(
+        capabilities: list[str],
+        prober: Callable[[str], bool],
+        detail_lookup: Callable[[str], str] | None = None,
+    ) -> list[str]:
         kept: list[str] = []
         for cap in capabilities:
             if cap.startswith("harness:"):
@@ -233,7 +239,17 @@ class CloudWorker:
                     logger.warning("Capability prober raised for %s; dropping capability: %s", cap, exc)
                     ok = False
                 if not ok:
-                    logger.warning("Dropping capability %s: auth probe failed", cap)
+                    # `detail_lookup` (redacted probe detail: error kind + first
+                    # ~300 chars) makes a dropped harness diagnosable from logs.
+                    detail = ""
+                    if detail_lookup is not None:
+                        try:
+                            detail = detail_lookup(harness_name)
+                        except Exception:  # never let diagnostics break the filter
+                            detail = ""
+                    logger.warning(
+                        "Dropping capability %s: auth probe failed%s", cap, f" ({detail})" if detail else ""
+                    )
                     continue
             kept.append(cap)
         return kept
@@ -297,7 +313,9 @@ class CloudWorker:
                     capabilities.append(cap)
 
         if self._capability_prober is not None:
-            capabilities = self._filter_capabilities(capabilities, self._due_cached_prober(force_all))
+            capabilities = self._filter_capabilities(
+                capabilities, self._due_cached_prober(force_all), self._capability_detail_lookup
+            )
 
         if self._autodetect_tooling and "harness:any" not in capabilities:
             if any(c.startswith("harness:") for c in capabilities):
@@ -924,10 +942,12 @@ def main(argv: list[str] | None = None) -> int:
     # of publishing it and later failing the claim. Best-effort: any import
     # or probe failure here just skips capability filtering.
     capability_prober: Callable[[str], bool] | None = None
+    capability_detail_lookup: Callable[[str], str] | None = None
     try:
-        from core.line.auth_bootstrap import probe_harness_auth
+        from core.line.auth_bootstrap import last_probe_detail, probe_harness_auth
 
         capability_prober = probe_harness_auth
+        capability_detail_lookup = last_probe_detail
     except Exception as exc:  # pragma: no cover - defensive, optional dependency
         logger.debug("Capability auth probing unavailable: %s", exc)
 
@@ -954,6 +974,7 @@ def main(argv: list[str] | None = None) -> int:
         capability_prober=capability_prober,
         autodetect_tooling=True,
         on_capabilities_probed=login_hook,
+        capability_detail_lookup=capability_detail_lookup,
     )
     # Boot-time check (the constructor's probe ran before the hook existed to fire).
     worker.notify_capabilities_probed()

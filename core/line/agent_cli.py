@@ -100,6 +100,45 @@ class AgentResult(BaseModel):
 
 
 # --------------------------------------------------------------------------
+# Secret redaction (diagnostics must never leak a token into logs / detail)
+# --------------------------------------------------------------------------
+
+_SECRET_PATTERNS: tuple[re.Pattern[str], ...] = (
+    re.compile(r"sk-ant-[A-Za-z0-9_\-]+"),
+    re.compile(r"\bsk-[A-Za-z0-9_\-]{16,}"),
+    re.compile(r"(?i)\bBearer\s+[A-Za-z0-9._~+/=\-]+"),
+    re.compile(r"(?i)\b(CLAUDE_CODE_OAUTH_TOKEN|ANTHROPIC_API_KEY|OPENAI_API_KEY|OPENROUTER_API_KEY)\s*[=:]\s*\S+"),
+)
+_REDACTED = "[REDACTED]"
+_ENV_SECRET_NAMES = ("CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY", "OPENAI_API_KEY", "OPENROUTER_API_KEY")
+
+
+def redact_secrets(text: Optional[str]) -> str:
+    """Strip token-like strings (sk-ant-..., sk-..., `Bearer ...`, `NAME=value`
+    for known secret env names) and the literal value of any configured secret
+    env var. Safe to call on any diagnostic text; never raises."""
+    if not text:
+        return ""
+    out = str(text)
+    for name in _ENV_SECRET_NAMES:
+        value = os.environ.get(name, "")
+        if len(value) >= 8:
+            out = out.replace(value, _REDACTED)
+    for pattern in _SECRET_PATTERNS:
+        out = pattern.sub(_REDACTED, out)
+    return out
+
+
+def _partial_output(value: Any) -> str:
+    """`TimeoutExpired.stdout/stderr` may be None, bytes or str."""
+    if value is None:
+        return ""
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="replace")
+    return str(value)
+
+
+# --------------------------------------------------------------------------
 # Error classification
 # --------------------------------------------------------------------------
 
@@ -219,14 +258,20 @@ def _run_claude(req: AgentRequest) -> AgentResult:
             errors="replace",
             **_win_kwargs(),
         )
-    except subprocess.TimeoutExpired:
+    except subprocess.TimeoutExpired as exc:
+        # Keep whatever the CLI printed before the deadline (redacted): a bare
+        # "timeout" made a stalled auth/network call impossible to diagnose.
+        partial = redact_secrets(
+            f"{_partial_output(exc.stdout)}\n{_partial_output(exc.stderr)}".strip()
+        )
         return AgentResult(
-            ok=False, text="", harness="claude", model=req.model,
+            ok=False, text=f"timed out after {req.timeout_s}s" + (f": {partial}" if partial else ""),
+            harness="claude", model=req.model,
             duration_s=round(time.perf_counter() - start, 3), error_kind="timeout",
         )
     except OSError as exc:
         return AgentResult(
-            ok=False, text=str(exc), harness="claude", model=req.model,
+            ok=False, text=redact_secrets(str(exc)), harness="claude", model=req.model,
             duration_s=round(time.perf_counter() - start, 3), error_kind="crash",
         )
     duration = round(time.perf_counter() - start, 3)
@@ -251,7 +296,7 @@ def _run_claude(req: AgentRequest) -> AgentResult:
         if is_error or proc.returncode != 0:
             combined = f"{result_text}\n{stderr}"
             return AgentResult(
-                ok=False, text=result_text, harness="claude", model=req.model,
+                ok=False, text=redact_secrets(result_text or stderr.strip()), harness="claude", model=req.model,
                 duration_s=duration, usage=usage, cost_usd=cost_usd,
                 error_kind=_classify_error(combined), reset_at=_extract_reset_at(combined),
             )
@@ -264,7 +309,8 @@ def _run_claude(req: AgentRequest) -> AgentResult:
     if proc.returncode == 0 and stdout:
         return AgentResult(ok=True, text=stdout, harness="claude", model=req.model, duration_s=duration)
     return AgentResult(
-        ok=False, text=stdout, harness="claude", model=req.model, duration_s=duration,
+        ok=False, text=redact_secrets(stdout or stderr.strip()), harness="claude", model=req.model,
+        duration_s=duration,
         error_kind=_classify_error(combined), reset_at=_extract_reset_at(combined),
     )
 

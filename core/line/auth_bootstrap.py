@@ -35,6 +35,7 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 from pathlib import Path
@@ -43,7 +44,7 @@ from typing import Callable, Iterable, Optional
 from pydantic import BaseModel
 
 from core.harness.remote_worker import find_codex_binary
-from core.line.agent_cli import AgentRequest, run_agent
+from core.line.agent_cli import AgentRequest, redact_secrets, run_agent
 
 logger = logging.getLogger(__name__)
 
@@ -67,20 +68,45 @@ class HarnessProbeResult(BaseModel):
 # --------------------------------------------------------------------------
 
 
-def probe_claude(timeout_s: int = 60) -> HarnessProbeResult:
-    """Probe Claude Code auth by running `claude -p ok` in read mode.
+PROBE_DETAIL_MAX_CHARS = 300
+CLAUDE_PROBE_PROMPT = "Reply with the single word OK"
+
+
+def _probe_detail(kind: Optional[str], text: Optional[str]) -> str:
+    """`<error_kind>: <first ~300 chars of text/stderr>`, with secrets redacted."""
+    snippet = " ".join(redact_secrets(text).split())[:PROBE_DETAIL_MAX_CHARS]
+    label = kind or "failed"
+    return f"{label}: {snippet}" if snippet else label
+
+
+def probe_claude(timeout_s: int = 120) -> HarnessProbeResult:
+    """Probe Claude Code auth with a minimal, cheap, one-turn read call.
+
+    Runs in a NEUTRAL EMPTY temp dir rather than the repo: with cwd=/app or
+    the repo root the CLI loads CLAUDE.md/AGENTS.md/.claude/settings.json (a
+    ~$0.2 call locally) and any project hooks/settings that could stall a
+    headless run. `max_turns=1` and a trivial prompt keep the quota cost to
+    the bare system prompt. `CLAUDE_CODE_OAUTH_TOKEN` is inherited from the
+    environment (no `env=` override).
 
     Reuses `core.line.agent_cli.run_agent` (HF-27-03) so the argv, binary
-    discovery and error classification (`auth_expired`, `not_installed`,
-    `timeout`) stay in one place.
+    discovery and error classification stay in one place. On failure `detail`
+    is `<error_kind>: <first ~300 chars>` (redacted), e.g. `timeout: timed out
+    after 120s: ...`, so a dropped capability is diagnosable from the logs.
     """
-    result = run_agent(
-        AgentRequest(prompt="ok", cwd=REPO_ROOT, mode="read", harness="claude", timeout_s=timeout_s)
-    )
-    if result.error_kind in ("not_installed", "auth_expired"):
-        return HarnessProbeResult(harness="claude", ok=False, detail=result.error_kind or "")
+    with tempfile.TemporaryDirectory(prefix="darkfac-claude-probe-") as neutral_dir:
+        result = run_agent(
+            AgentRequest(
+                prompt=CLAUDE_PROBE_PROMPT,
+                cwd=Path(neutral_dir),
+                mode="read",
+                harness="claude",
+                timeout_s=timeout_s,
+                max_turns=1,
+            )
+        )
     if not result.ok:
-        return HarnessProbeResult(harness="claude", ok=False, detail=(result.text or "")[:200])
+        return HarnessProbeResult(harness="claude", ok=False, detail=_probe_detail(result.error_kind, result.text))
     return HarnessProbeResult(harness="claude", ok=True, detail="ok")
 
 
@@ -105,13 +131,26 @@ def probe_codex_status(timeout_s: int = 30) -> HarnessProbeResult:
 
     combined = f"{proc.stdout}\n{proc.stderr}".lower()
     ok = proc.returncode == 0 and "not logged in" not in combined and "logged out" not in combined
-    return HarnessProbeResult(harness="codex", ok=ok, detail=combined.strip()[:200])
+    return HarnessProbeResult(
+        harness="codex", ok=ok, detail=redact_secrets(combined.strip())[:PROBE_DETAIL_MAX_CHARS]
+    )
 
 
 _PROBES: dict[str, Callable[[], HarnessProbeResult]] = {
     "claude": probe_claude,
     "codex": probe_codex_status,
 }
+
+
+# Last probe outcome per harness. `probe_harness_auth` must keep returning a
+# bool (CloudWorker's prober contract), so the human-readable detail travels
+# through this side channel and is logged when a capability is dropped.
+_LAST_PROBE_DETAIL: dict[str, str] = {}
+
+
+def last_probe_detail(harness: str) -> str:
+    """Redacted detail of the most recent probe of `harness` ("" if none/ok)."""
+    return _LAST_PROBE_DETAIL.get(harness, "")
 
 
 def probe_harness_auth(harness: str) -> bool:
@@ -125,10 +164,13 @@ def probe_harness_auth(harness: str) -> bool:
     if probe is None:
         return True
     try:
-        return probe().ok
+        result = probe()
     except Exception as exc:  # pragma: no cover - defensive, probes already trap their own errors
-        logger.warning("Auth probe for harness %s raised: %s", harness, exc)
+        _LAST_PROBE_DETAIL[harness] = _probe_detail(type(exc).__name__, str(exc))
+        logger.warning("Auth probe for harness %s raised: %s", harness, _LAST_PROBE_DETAIL[harness])
         return False
+    _LAST_PROBE_DETAIL[harness] = "" if result.ok else redact_secrets(result.detail)
+    return result.ok
 
 
 def filter_capabilities_by_auth(
@@ -152,7 +194,8 @@ def filter_capabilities_by_auth(
                 logger.warning("Auth probe for %s raised; dropping capability: %s", cap, exc)
                 ok = False
             if not ok:
-                logger.warning("Dropping capability %s: auth probe failed", cap)
+                detail = last_probe_detail(harness_name)
+                logger.warning("Dropping capability %s: auth probe failed%s", cap, f" ({detail})" if detail else "")
                 continue
         kept.append(cap)
     return kept
