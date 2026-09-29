@@ -447,3 +447,81 @@ def test_worker_compose_passes_claude_oauth_token_and_agent_cli_inherits_env() -
     worker_block = compose[compose.index("darkfac-worker:") : compose.index("darkfac-backup-cron:")]
     assert "CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN:-}" in worker_block
     assert "env=" not in inspect.getsource(agent_cli._run_claude)
+
+
+# --------------------------------------------------------------------------
+# Two probe cadences: dropped harness every 600s, healthy harness every 3600s
+# --------------------------------------------------------------------------
+
+
+def _two_cadence_worker(monkeypatch: pytest.MonkeyPatch, clock: _Clock, state: dict[str, bool], calls: list[str]):
+    monkeypatch.setenv("DARKFAC_WORKER_CAPS", "harness:claude,harness:codex")
+
+    def prober(harness: str) -> bool:
+        calls.append(harness)
+        return state[harness]
+
+    hooks: list[list[str]] = []
+    worker = CloudWorker(
+        worker_id="w-cadence",
+        capability_prober=prober,
+        capability_probe_interval_s=600.0,
+        healthy_probe_interval_s=3600.0,
+        clock=clock,
+        on_capabilities_probed=lambda caps: hooks.append(caps),
+        store=object(),
+    )
+    return worker, hooks
+
+
+def test_dropped_harness_reprobed_at_600s_healthy_one_is_not(monkeypatch: pytest.MonkeyPatch) -> None:
+    clock, calls = _Clock(0.0), []
+    state = {"claude": True, "codex": False}
+    worker, hooks = _two_cadence_worker(monkeypatch, clock, state, calls)
+    assert sorted(calls) == ["claude", "codex"]  # boot probes everything once
+    assert "harness:claude" in worker.capabilities and "harness:codex" not in worker.capabilities
+
+    calls.clear()
+    clock.now = 599
+    assert worker.refresh_capabilities() is False  # tick gate: nothing at all
+    assert calls == []
+
+    clock.now = 600
+    state["codex"] = True  # login completed
+    assert worker.refresh_capabilities() is True
+    assert calls == ["codex"]  # ONLY the dropped harness was probed; claude was not
+    assert "harness:codex" in worker.capabilities and "harness:claude" in worker.capabilities
+    assert hooks  # hook still fires after a probe tick
+
+
+def test_healthy_harness_not_reprobed_before_3600s_and_reprobed_at_3600s(monkeypatch: pytest.MonkeyPatch) -> None:
+    clock, calls = _Clock(0.0), []
+    state = {"claude": True, "codex": True}
+    worker, hooks = _two_cadence_worker(monkeypatch, clock, state, calls)
+    calls.clear()
+
+    for tick in range(600, 3600, 600):  # +600 ... +3000: every tick, nothing is due
+        clock.now = float(tick)
+        worker.refresh_capabilities()
+    assert calls == []  # 5 ticks, zero `claude -p ok` calls for a healthy harness
+    assert len(hooks) == 5  # ...but the hook still fired on each tick
+
+    state["claude"] = False  # token expired meanwhile
+    clock.now = 3600.0
+    assert worker.refresh_capabilities() is True
+    assert sorted(calls) == ["claude", "codex"]  # healthy ones re-probed at +3600s
+    assert "harness:claude" not in worker.capabilities
+
+    calls.clear()
+    clock.now = 4200.0  # claude is now dropped -> back on the fast 600s cadence
+    worker.refresh_capabilities()
+    assert calls == ["claude"]
+
+
+def test_force_refresh_reprobes_everything(monkeypatch: pytest.MonkeyPatch) -> None:
+    clock, calls = _Clock(0.0), []
+    worker, _ = _two_cadence_worker(monkeypatch, clock, {"claude": True, "codex": True}, calls)
+    calls.clear()
+    clock.now = 10.0
+    worker.refresh_capabilities(force=True)
+    assert sorted(calls) == ["claude", "codex"]

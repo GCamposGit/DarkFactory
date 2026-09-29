@@ -47,9 +47,13 @@ _HARNESS_BINARIES: dict[str, str] = {
     "antigravity": "antigravity",
 }
 _TOOLING_BINARIES: tuple[str, ...] = ("git", "gh", "node", "python")
-# Re-probe dropped harnesses often enough that a completed login (Codex
-# device-auth, a freshly set CLAUDE_CODE_OAUTH_TOKEN) takes effect without a redeploy.
+# Two probe cadences, per harness (each probe is a real CLI call; a headless
+# `claude -p ok` loads the full system prompt and costs subscription quota):
+# - a DROPPED harness is re-probed every 600s, so a completed login (Codex
+#   device-auth, a freshly set CLAUDE_CODE_OAUTH_TOKEN) takes effect fast;
+# - a HEALTHY harness is only re-probed every 3600s, to detect expiry.
 _CAPABILITY_PROBE_INTERVAL_SEC = 600.0
+_HEALTHY_PROBE_INTERVAL_SEC = 3600.0
 # Delay before a job this worker cannot serve (no authenticated harness) is retried.
 _NO_HARNESS_RETRY_MINUTES = 10
 
@@ -160,6 +164,7 @@ class CloudWorker:
         intake_service: Any = None,
         routing_config: Any = None,
         capability_probe_interval_s: float = _CAPABILITY_PROBE_INTERVAL_SEC,
+        healthy_probe_interval_s: float = _HEALTHY_PROBE_INTERVAL_SEC,
         autodetect_tooling: bool = False,
         clock: Callable[[], float] = time.monotonic,
         on_capabilities_probed: Callable[[list[str]], None] | None = None,
@@ -179,8 +184,13 @@ class CloudWorker:
         self._clock = clock
         self._on_capabilities_probed = on_capabilities_probed
         self._autodetect_tooling = autodetect_tooling
+        # `capability_probe_interval_s` is the cadence for DROPPED harnesses (and
+        # the tick gate); healthy ones use `healthy_probe_interval_s`.
         self._capability_probe_interval_s = capability_probe_interval_s
+        self._healthy_probe_interval_s = healthy_probe_interval_s
         self._last_capability_probe_monotonic: float | None = None
+        # harness name -> (clock time of its last real probe, result)
+        self._harness_probe_state: dict[str, tuple[float, bool]] = {}
 
         if capabilities is not None:
             self.capabilities = list(capabilities)
@@ -241,7 +251,36 @@ class CloudWorker:
             openrouter_configured=bool(os.environ.get("OPENROUTER_API_KEY")),
         )
 
-    def _compute_capabilities(self) -> list[str]:
+    def _due_cached_prober(self, force_all: bool) -> Callable[[str], bool]:
+        """Wrap the configured prober so each harness is only really probed when due.
+
+        Never probed -> due. Dropped (last probe failed) -> due after
+        `_capability_probe_interval_s`. Healthy -> due after
+        `_healthy_probe_interval_s`. Otherwise the cached result is returned
+        without running the CLI. `force_all` re-probes everything.
+        """
+        assert self._capability_prober is not None
+        prober = self._capability_prober
+
+        def probe(harness: str) -> bool:
+            now = self._clock()
+            state = self._harness_probe_state.get(harness)
+            if state is not None and not force_all:
+                last, healthy = state
+                interval = self._healthy_probe_interval_s if healthy else self._capability_probe_interval_s
+                if now - last < interval:
+                    return healthy
+            try:
+                ok = bool(prober(harness))
+            except Exception as exc:
+                logger.warning("Capability prober raised for harness:%s; treating as dropped: %s", harness, exc)
+                ok = False
+            self._harness_probe_state[harness] = (now, ok)
+            return ok
+
+        return probe
+
+    def _compute_capabilities(self, *, force_all: bool = False) -> list[str]:
         """DARKFAC_WORKER_CAPS host caps on top of role caps, plus (opt-in,
         HF-27-08) autodetected tooling/harnesses, then the auth-probe filter.
 
@@ -258,7 +297,7 @@ class CloudWorker:
                     capabilities.append(cap)
 
         if self._capability_prober is not None:
-            capabilities = self._filter_capabilities(capabilities, self._capability_prober)
+            capabilities = self._filter_capabilities(capabilities, self._due_cached_prober(force_all))
 
         if self._autodetect_tooling and "harness:any" not in capabilities:
             if any(c.startswith("harness:") for c in capabilities):
@@ -268,7 +307,12 @@ class CloudWorker:
         return capabilities
 
     def refresh_capabilities(self, *, force: bool = False) -> bool:
-        """Re-run `_compute_capabilities()` if the probe interval has elapsed.
+        """Recompute capabilities once per tick (`capability_probe_interval_s`).
+
+        Only the harnesses that are *due* are actually probed: dropped ones
+        every 600s, healthy ones every 3600s (see `_due_cached_prober`);
+        `force=True` re-probes all. The `on_capabilities_probed` hook fires
+        after every tick so the Codex login trigger keeps working.
 
         No-op (returns False) when autodetection/probing was never
         requested, so a worker started with an explicit `capabilities` list
@@ -281,7 +325,7 @@ class CloudWorker:
             elapsed = self._clock() - (self._last_capability_probe_monotonic or 0.0)
             if elapsed < self._capability_probe_interval_s:
                 return False
-        new_caps = self._compute_capabilities()
+        new_caps = self._compute_capabilities(force_all=force)
         changed = new_caps != self.capabilities
         self.capabilities = new_caps
         self.notify_capabilities_probed()
