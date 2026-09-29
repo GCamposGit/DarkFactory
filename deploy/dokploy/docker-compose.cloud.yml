@@ -196,7 +196,9 @@ services:
   # streak survives across one-shot container runs (review item 3).
   # HF-27-10 closeout: runs continuously (no `profiles` gate, no manual
   # cron needed) via `core.line.canary run --every-seconds`, which loops
-  # in-process -- see docs/runbooks/canary.md section 5.
+  # in-process -- see docs/runbooks/canary.md section 5. Each iteration is
+  # cheap (DB reads + at most one HTTP GET), so it polls every 15 minutes:
+  # that is also the cadence of a same-day retry after a terminal failure.
   darkfac-canary:
     build:
       context: https://github.com/GCamposGit/DarkFactory.git#main
@@ -204,7 +206,7 @@ services:
     image: ghcr.io/gcamposgit/darkfac-cloud:latest
     container_name: darkfac-canary
     restart: unless-stopped
-    command: ["python", "-m", "core.line.canary", "run", "--base-url", "${DARKFAC_CANARY_BASE_URL:-}", "--every-seconds", "3600"]
+    command: ["python", "-m", "core.line.canary", "run", "--base-url", "${DARKFAC_CANARY_BASE_URL:-}", "--every-seconds", "900"]
     environment:
       - DARKFAC_ROLE=canary
       - DARKFAC_HF02_DATABASE_URL=${DARKFAC_HF02_DATABASE_URL}
@@ -214,6 +216,10 @@ services:
       # turned on here (or standalone via `python -m core.line.dogfood run`
       # on its own cron entry -- see docs/runbooks/canary.md section 5).
       - DARKFAC_DOGFOOD_ENABLED=${DARKFAC_DOGFOOD_ENABLED:-false}
+      # Green canary days required before dogfood feeds the backlog (code default 7).
+      - DARKFAC_DOGFOOD_MIN_STREAK=${DARKFAC_DOGFOOD_MIN_STREAK:-1}
+      # Same-day retries after a terminal failure (attempt ids canary:<date>:a2, a3...).
+      - DARKFAC_CANARY_MAX_ATTEMPTS_PER_DAY=${DARKFAC_CANARY_MAX_ATTEMPTS_PER_DAY:-4}
       - DATA_DIR=/app/data
       - FACTORY_DIR=/app/.factory
       # Same notifier env the worker uses (review item 4) -- NotificationService
@@ -235,6 +241,36 @@ services:
         reservations:
           cpus: "0.05"
           memory: 64M
+
+  # Line-autonomy unblock: expose the (separate Dokploy) Postgres service on the
+  # Tailscale interface ONLY, so on-prem workers (Desktop/Notebook) can reach the
+  # line's control store. Postgres itself is not published anywhere; this tiny
+  # TCP forwarder joins dokploy-network (where the DB's internal hostname
+  # resolves) and publishes its port bound to the VPS tailnet IP, never 0.0.0.0.
+  # Isolation: nothing depends on this service and it has no healthcheck the
+  # others wait on -- if the bind fails (e.g. tailscale down, IP not on the host)
+  # only this container crash-loops; coordinator/worker/canary are unaffected.
+  # See docs/runbooks/HF-27-09_topology.md section 2.
+  darkfac-pg-tailnet:
+    image: alpine/socat:1.8.0.3
+    container_name: darkfac-pg-tailnet
+    restart: unless-stopped
+    command:
+      - "-d"
+      - "TCP-LISTEN:5432,fork,reuseaddr"
+      - "TCP:${DARKFAC_PG_UPSTREAM:-darkfaccore-postgresprimary-aebh67:5432}"
+    ports:
+      - "${DARKFAC_TAILNET_BIND_IP:-100.83.176.60}:5432:5432"
+    networks:
+      - dokploy-network
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: 64M
+        reservations:
+          cpus: "0.01"
+          memory: 8M
 
 volumes:
   darkfac-artifacts:

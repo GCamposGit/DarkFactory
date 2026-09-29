@@ -65,24 +65,55 @@ Postgres (rodando na VPS ou em outro host da tailnet).
 Objetivo: o Postgres so aceita conexoes vindas da tailnet, nunca da internet
 publica.
 
-1. No host onde o Postgres roda (normalmente a VPS, no proprio Dokploy ou em
-   um container ao lado):
-   - Se for um container Docker/Dokploy: no `docker-compose` do Postgres,
-     troque a publicacao de porta de `"5432:5432"` para
-     `"100.x.y.z:5432:5432"`, onde `100.x.y.z` e o IP Tailscale da VPS (do
-     passo 1.9). Isso faz o Docker so escutar naquela interface.
-   - Se for um Postgres nativo (nao containerizado): edite
-     `postgresql.conf`, campo `listen_addresses`, e troque `'*'` por
-     `'localhost,100.x.y.z'`. Depois edite `pg_hba.conf` e adicione uma linha
-     `host  all  all  100.64.0.0/10  scram-sha-256` (a faixa CGNAT que o
-     Tailscale usa), removendo/comentando qualquer linha `0.0.0.0/0`.
-2. Reinicie o servico do Postgres.
-3. Do Desktop (ja na tailnet), teste:
-   `psql "postgresql://<user>:<senha>@100.x.y.z:5432/<database>" -c "select 1;"`.
+Situacao de producao: o Postgres e um servico de banco **separado** no Dokploy
+(host interno `darkfaccore-postgresprimary-aebh67:5432`, rede externa
+`dokploy-network`). Ele nao publica porta nenhuma no host (nao responde em
+`100.83.176.60:5432`), entao os workers on-prem nao o alcancam. **Nao mexa no
+servico do banco.** Em vez disso o compose `darkfac-cloud`
+(`deploy/dokploy/docker-compose.cloud.yml`) inclui o servico
+`darkfac-pg-tailnet`: um encaminhador TCP minimo (`alpine/socat`, versao
+fixada) que entra na `dokploy-network`, onde o hostname interno do banco
+resolve, e publica a porta **somente no IP Tailscale da VPS**:
+
+```yaml
+ports:
+  - "${DARKFAC_TAILNET_BIND_IP:-100.83.176.60}:5432:5432"
+```
+
+Propriedades:
+
+- Nunca publica em `0.0.0.0` (coberto por
+  `tests/test_cloud_compose_line_autonomy.py`). Para trocar o IP (ex.: a VPS
+  ganhou outro IP Tailscale), defina `DARKFAC_TAILNET_BIND_IP` no ambiente do
+  compose no Dokploy. Para apontar para outro upstream, defina
+  `DARKFAC_PG_UPSTREAM=host:porta`.
+- Isolamento de falha: nenhum outro servico depende dele e ele nao tem
+  healthcheck. Se o bind falhar (Tailscale fora do ar, IP ausente no host), so
+  o container `darkfac-pg-tailnet` fica em restart-loop;
+  coordinator/worker/canary nao sao afetados.
+- Seguranca: a autenticacao continua sendo a do proprio Postgres (usuario e
+  senha); o filtro de rede e a tailnet (ACL do Tailscale). Nao ha TLS no
+  encaminhador; o trafego trafega dentro do tunel WireGuard do Tailscale.
+
+Passos (uma vez):
+
+1. No Dokploy, abra o compose `darkfac-cloud` > **Deploy** para subir o novo
+   servico (o Dokploy so o cria quando o compose e reimplantado). Confirme na
+   aba **Logs** de `darkfac-pg-tailnet` a linha `listening on ... port 5432`.
+   Se aparecer `cannot assign requested address`, o IP de `DARKFAC_TAILNET_BIND_IP`
+   nao existe no host: confira `tailscale ip -4` na VPS.
+2. Do Desktop (ja na tailnet), teste:
+   `psql "postgresql://<user>:<senha>@100.83.176.60:5432/<database>" -c "select 1;"`.
    Deve conectar. De uma rede fora da tailnet, a mesma tentativa deve dar
    timeout/connection refused.
-4. Anote a URL final, ja no formato Tailscale, para usar nos passos 3 e 6:
-   `postgresql://<user>:<senha>@100.x.y.z:5432/<database>`.
+3. Anote a URL final, ja no formato Tailscale, para usar nos passos 3 e 6:
+   `postgresql://<user>:<senha>@100.83.176.60:5432/<database>` (mesmo usuario,
+   senha e banco que o worker da VPS ja usa em `DARKFAC_HF02_DATABASE_URL`; so o
+   host muda de `darkfaccore-postgresprimary-aebh67` para o IP Tailscale).
+
+Alternativa (Postgres nativo, fora do Dokploy): edite `postgresql.conf`,
+`listen_addresses = 'localhost,100.x.y.z'`, e em `pg_hba.conf` permita apenas
+`100.64.0.0/10` (faixa CGNAT do Tailscale).
 
 ## 3. Dokploy — variaveis de ambiente e secrets do worker VPS
 
