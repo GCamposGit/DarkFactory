@@ -47,6 +47,7 @@ from core.harness.test_subagent import (
     TestExecutionInstruction,
     TestSubagentEngine,
 )
+from core.infra.metrics import HardwareMetrics, collect_host_hardware_metrics
 
 logger = logging.getLogger("core.harness.remote_worker")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
@@ -793,6 +794,11 @@ def create_worker_app(
             known_shas=known_validated_shas(root_path),
             harness_version="1",
         )
+
+    @worker_app.get("/metrics/hardware", response_model=HardwareMetrics)
+    def get_hardware_metrics() -> HardwareMetrics:
+        """Expose live CPU, memory, disk, and uptime metrics without a UI dependency."""
+        return collect_host_hardware_metrics(node_id=node_id)
 
     @worker_app.post("/harness/jobs")
     async def submit_harness_job(request: Request) -> JSONResponse:

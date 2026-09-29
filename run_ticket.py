@@ -236,6 +236,18 @@ def main(argv: Optional[list[str]] = None) -> int:
     if not args.json:
         print(f"[+] Desenvolvimento concluído com sucesso pelo {selected_harness.upper()}.")
 
+    # 3b. Commit the agent's work on a ticket branch: the official gate refuses a dirty
+    # candidate worktree, so the gate must validate a committed SHA (never the main checkout).
+    if not args.no_commit and not args.dry_run:
+        from core.git.autonomy import GitAutonomyManager, _run_git
+
+        pre_mgr = GitAutonomyManager(PROJECT_ROOT)
+        if pre_mgr.is_dirty():
+            current = _run_git(["rev-parse", "--abbrev-ref", "HEAD"]).stdout.strip()
+            if current in ("main", "HEAD"):
+                _run_git(["switch", "-c", f"ticket/{ticket.id.lower()}"])
+            pre_mgr.commit_ticket(ticket_id=ticket.id, title=ticket.title)
+
     # 4. Official Validation Gate
     if not args.skip_validation:
         if not args.json:

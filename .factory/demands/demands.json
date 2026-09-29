@@ -1261,5 +1261,36 @@
     "dependencies": [],
     "created_at": "2026-09-29T15:19:20.681698Z",
     "updated_at": "2026-09-29T15:19:20.681698Z"
+  },
+  {
+    "id": "USR-63",
+    "project_id": "darkfac",
+    "title": "DarkHub: incluir status do Desktop na Telemetria de Hardware & Contêineres",
+    "origin": "user",
+    "status": "completed",
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "No DarkHub, o card 'Telemetria de Hardware & Contêineres em Tempo Real' (hub/frontend/infra.js, INFRA-11) mostra apenas o Notebook (host local). Deve exibir também o status de hardware do Desktop (on-prem, desktop-g45ipem, Tailscale 100.78.181.90, worker na porta 8080), lado a lado com o Notebook.",
+    "core_journey": [
+      "No DarkHub, o card 'Telemetria de Hardware & Contêineres em Tempo Real' (hub/frontend/infra.js, INFRA-11) mostra apenas o Notebook (host local). Deve exibir também o status de hardware do Desktop (on-prem, desktop-g45ipem, Tailscale 100.78.181.90, worker na porta 8080), lado a lado com o Notebook."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "O backend (core/infra/metrics.py + GET /api/infra/metrics) passa a retornar as métricas de hardware de todos os nós de host: Notebook (local) e Desktop (coletado do worker remoto via Tailscale, com timeout curto e sem derrubar o endpoint se o Desktop estiver offline)",
+      "O worker do Desktop (core/harness/remote_worker.py) expõe um endpoint headless de métricas de hardware (CPU, RAM, disco, uptime) reutilizando collect_host_hardware_metrics",
+      "Desktop offline ou inalcançável aparece como status 'offline' com último contato, nunca como erro 500 nem como dado falso",
+      "O card do DarkHub exibe uma seção por nó (Notebook e Desktop) com CPU, RAM, disco, uptime e badge de saúde; o health geral considera ambos",
+      "Testes unitários cobrindo Desktop online, offline e timeout, mais teste do endpoint do worker; portão oficial python core/harness/runner.py --quick verde"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-09-29T19:37:14.119561Z",
+    "updated_at": "2026-09-29T20:45:14.161814Z"
   }
 ]
