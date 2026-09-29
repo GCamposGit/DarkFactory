@@ -154,11 +154,11 @@ provisionar as variaveis de ambiente do servico, depois que
      semanal silenciosamente nao saem (apenas um `logger.warning` local).
      Veja a secao "Owner notifications" em `env.cloud.example` para como
      obter o token/ids pelo @BotFather.
-2. Confirme que o volume `darkfac-canary-reports` existe (Dokploy cria
+2. Confirme que o volume `darkfac-canary-reports-v2` existe (Dokploy cria
    automaticamente a partir do compose na primeira vez que o servico sobe;
    sem ele, o container perderia os relatorios anteriores a cada restart e o
    green streak nunca passaria de 1 — review item 3 do PR #37). Em Dokploy:
-   **Volumes** (menu lateral) deve listar `darkfac-canary-reports` apos o
+   **Volumes** (menu lateral) deve listar `darkfac-canary-reports-v2` apos o
    primeiro deploy.
 3. Para validar manualmente (fora do loop continuo, uma unica iteracao):
    ```powershell
@@ -188,7 +188,7 @@ provisionar as variaveis de ambiente do servico, depois que
 - [ ] `curl https://canary.seu-dominio.com/version` responde 200 com o SHA.
 - [ ] `docker compose -f deploy/dokploy/docker-compose.cloud.yml run --rm darkfac-canary python -m core.line.canary run --base-url $env:DARKFAC_CANARY_BASE_URL`
       roda sem erro e escreve `.factory/reports/canary/<hoje>.json` (dentro
-      do volume `darkfac-canary-reports`, nao perdido entre execucoes/restarts).
+      do volume `darkfac-canary-reports-v2`, nao perdido entre execucoes/restarts).
 - [ ] Rodar o comando acima duas vezes seguidas no mesmo dia produz o MESMO
       `run_id` no relatorio (idempotente) e o `outcome` avanca de
       `in_progress` para `passed`/`failed` conforme a linha progride --

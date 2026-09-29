@@ -224,7 +224,7 @@ services:
     volumes:
       - darkfac-artifacts:/app/.factory/artifacts
       - darkfac-test-logs:/app/.factory/test_logs
-      - darkfac-canary-reports:/app/.factory/reports/canary
+      - darkfac-canary-reports-v2:/app/.factory/reports/canary
     networks:
       - dokploy-network
     deploy:
@@ -245,8 +245,8 @@ volumes:
     name: darkfac-codex-auth
   darkfac-workspaces:
     name: darkfac-workspaces
-  darkfac-canary-reports:
-    name: darkfac-canary-reports
+  darkfac-canary-reports-v2:
+    name: darkfac-canary-reports-v2
 
 networks:
   dokploy-network:

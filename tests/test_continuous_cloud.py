@@ -365,3 +365,22 @@ def test_docker_compose_cloud_spec() -> None:
     canary_start = content.index("darkfac-canary:")
     canary_block = content[canary_start : canary_start + 800]
     assert "restart: unless-stopped" in canary_block
+
+
+def test_canary_reports_volume_is_writable_by_non_root_user() -> None:
+    """First production run: the canary (uid 1000) got EACCES writing its
+    report because /app/.factory/reports/canary was not created+chowned in
+    the image, so the fresh named volume mounted root-owned."""
+    dockerfile = (REPO_ROOT / "deploy" / "dokploy" / "Dockerfile.cloud").read_text(encoding="utf-8")
+    assert "/app/.factory/reports/canary" in dockerfile
+    mkdir_idx = dockerfile.index("/app/.factory/reports/canary")
+    chown_idx = dockerfile.index("chown -R darkfac:darkfac /app", mkdir_idx)
+    assert chown_idx > mkdir_idx
+    assert dockerfile.index("USER darkfac") > chown_idx
+
+    compose = (REPO_ROOT / "deploy" / "dokploy" / "docker-compose.cloud.yml").read_text(encoding="utf-8")
+    assert "darkfac-canary-reports-v2:/app/.factory/reports/canary" in compose
+    assert "name: darkfac-canary-reports-v2" in compose
+    # No leftover reference to the old, root-owned volume.
+    assert "darkfac-canary-reports:" not in compose
+    assert "name: darkfac-canary-reports\n" not in compose
