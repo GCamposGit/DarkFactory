@@ -523,7 +523,7 @@ class TelegramGateway:
             return False
         try:
             get_file_url = f"{self.config.api_base_url}/bot{self.config.bot_token}/getFile?file_id={urllib.parse.quote(file_id)}"
-            req = urllib.request.Request(get_file_url, headers={"User-Agent": "DarkFac/1.0"})
+            req = urllib.request.Request(get_file_url)
             with urllib.request.urlopen(req, timeout=15.0) as resp:
                 data = json.loads(resp.read().decode("utf-8"))
             if not data.get("ok"):
@@ -534,7 +534,7 @@ class TelegramGateway:
                 return False
 
             download_url = f"{self.config.api_base_url}/file/bot{self.config.bot_token}/{file_path}"
-            dl_req = urllib.request.Request(download_url, headers={"User-Agent": "DarkFac/1.0"})
+            dl_req = urllib.request.Request(download_url)
             dest_path.parent.mkdir(parents=True, exist_ok=True)
             with urllib.request.urlopen(dl_req, timeout=30.0) as resp, open(dest_path, "wb") as out_file:
                 while chunk := resp.read(65536):
@@ -706,8 +706,32 @@ class TelegramGateway:
                         result.error = str(exc)
                         result.response_text = f"❌ Failed to register demand: {exc}"
                 else:
-                    result.target_id = "DEMAND-RECORDED"
-                    result.response_text = "✅ Demand received and queued for intake."
+                    try:
+                        from core.demands.models import DemandInput
+                        from core.demands.service import DemandsService
+
+                        demands_svc = DemandsService()
+                        ticket = demands_svc.create_ticket_from_input(
+                            DemandInput(
+                                title=arg_str[:70],
+                                problem_statement=arg_str,
+                                project_id="darkfac",
+                            ),
+                            force_heuristic=True,
+                        )
+                        result.target_id = ticket.id
+                        prefix = "👑 [Owner Demand] " if self.config.role == "owner" else ""
+                        result.response_text = (
+                            f"✅ {prefix}Demanda registrada com sucesso!\n\n"
+                            f"📋 <b>Ticket:</b> <code>{ticket.id}</code>\n"
+                            f"📌 <b>Título:</b> {ticket.title}\n"
+                            f"📊 <b>Status:</b> {ticket.status.value}\n\n"
+                            f"<i>Demanda inserida no backlog da Dark Factory.</i>"
+                        )
+                    except Exception as exc:
+                        logger.error("Durable demand creation error: %s", exc)
+                        result.target_id = "DEMAND-RECORDED"
+                        result.response_text = f"✅ Demanda recebida e enfileirada: {arg_str[:120]}"
 
         elif cmd_str == "/status":
             result.action = TelegramActionType.STATUS
@@ -805,7 +829,35 @@ class TelegramGateway:
                 result.response_text = f"❌ Erro ao consultar alertas: {exc}"
 
         else:
-            result.response_text = f"❓ Unknown command: {cmd_str}. Send /help for command list."
+            if not cmd_str.startswith("/"):
+                lower_text = raw_text.lower()
+                if any(w in lower_text for w in ("ticket", "registrad", "confirm", "numero", "número", "status")):
+                    try:
+                        from core.demands.service import DemandsService
+
+                        demands_svc = DemandsService()
+                        tickets = demands_svc.list_tickets("darkfac")
+                        if tickets:
+                            latest = tickets[-1]
+                            result.response_text = (
+                                f"📋 <b>Último Ticket Registrado:</b>\n\n"
+                                f"🆔 <b>ID:</b> <code>{latest.id}</code>\n"
+                                f"📌 <b>Título:</b> {latest.title}\n"
+                                f"📊 <b>Status:</b> {latest.status.value}\n"
+                                f"📝 <b>Descrição:</b> {latest.problem[:140]}..."
+                            )
+                        else:
+                            result.response_text = "ℹ️ Nenhum ticket registrado no momento."
+                    except Exception as exc:
+                        result.response_text = "ℹ️ Envie /status ou /help para ver os comandos disponíveis."
+                else:
+                    result.response_text = (
+                        f"💬 Para abrir uma nova demanda, envie uma nota de voz ou digite:\n"
+                        f"<code>/demand {raw_text}</code>\n\n"
+                        f"Envie /help para ver a lista de comandos."
+                    )
+            else:
+                result.response_text = f"❓ Unknown command: {cmd_str}. Send /help for command list."
 
         return result
 
@@ -967,7 +1019,7 @@ class TelegramGateway:
         url = f"{self.config.api_base_url}/bot{self.config.bot_token}/getUpdates?offset={self.last_offset}&limit={limit}&timeout={timeout_sec}"
         req = urllib.request.Request(
             url,
-            headers={"Content-Type": "application/json", "User-Agent": "DarkFac/1.0"},
+            headers={"Content-Type": "application/json"},
             method="GET",
         )
         try:
@@ -981,6 +1033,13 @@ class TelegramGateway:
                 for u in updates:
                     res = self.process_update(u)
                     results.append(res)
+                    if res.response_text and not res.duplicate:
+                        chat_id = (
+                            u.get("message", {}).get("chat", {}).get("id")
+                            or u.get("callback_query", {}).get("message", {}).get("chat", {}).get("id")
+                        )
+                        if chat_id:
+                            self.send_message(chat_id, res.response_text)
                 return results
         except Exception as exc:
             logger.warning("Failed to poll Telegram updates: %s", exc)
@@ -1013,7 +1072,7 @@ class TelegramGateway:
         req = urllib.request.Request(
             url,
             data=json.dumps(payload).encode("utf-8"),
-            headers={"Content-Type": "application/json", "User-Agent": "DarkFac/1.0"},
+            headers={"Content-Type": "application/json"},
             method="POST",
         )
 

@@ -2518,6 +2518,11 @@ class HubService:
             }
         gateway = self._build_telegram_gateway()
         result = gateway.process_update(payload)
+        if result.response_text and not result.duplicate:
+            msg_obj = payload.get("message") or payload.get("callback_query", {}).get("message")
+            chat_id = msg_obj.get("chat", {}).get("id") if isinstance(msg_obj, dict) else None
+            if chat_id:
+                gateway.send_message(chat_id, result.response_text)
         return result.model_dump()
 
     def get_telegram_gateway_status(self) -> Dict[str, Any]:

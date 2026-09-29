@@ -1186,5 +1186,80 @@
     ],
     "created_at": "2026-09-28T08:53:22.968704+00:00",
     "updated_at": "2026-09-28T09:01:15.597944+00:00"
+  },
+  {
+    "id": "USR-61",
+    "project_id": "darkfac",
+    "title": "Melhoria nas ações do usuário no Dark Hub",
+    "origin": "user",
+    "status": "planned",
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand",
+      "feature"
+    ],
+    "problem_statement": "Na listagem de ações do usuário no Dark Hub, após a sessão de governança, os usuários enfrentam dois problemas: 1) ao clicar em 'reconhecer', é exibida uma caixa de confirmação que não é necessária; 2) não há possibilidade de selecionar múltiplas ações e reconhecer todas de uma vez.",
+    "core_journey": [
+      "Usuário acessa a listagem de ações do usuário no Dark Hub",
+      "Usuário clica em 'reconhecer' para uma única ação (sem confirmação) ou seleciona múltiplas ações e clica em 'reconhecer todas'"
+    ],
+    "non_goals": [
+      "Não alterar a estrutura de dados das notificações",
+      "Não modificar o fluxo de governança existente",
+      "Não implementar novos tipos de notificação"
+    ],
+    "reachability_contract": "python -m pytest tests/test_melhoria_nas_a_es_do_usu_.py -v",
+    "acceptance_criteria": [
+      "Ao clicar em 'reconhecer' para uma única ação, não deve aparecer caixa de confirmação",
+      "Mensagem de sucesso deve ser exibida e desaparecer automaticamente após 3 segundos",
+      "É possível selecionar múltiplas ações e reconhecer todas com um único clique",
+      "A funcionalidade de reconhecimento múltiplo deve manter o estado das ações corretamente"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-09-29T11:57:05.966732Z",
+    "updated_at": "2026-09-29T11:57:05.966732Z"
+  },
+  {
+    "id": "USR-62",
+    "project_id": "darkfac",
+    "title": "Transformar menu superior em menu vertical lateral esquerdo no DarkHub",
+    "origin": "user",
+    "status": "planned",
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand",
+      "feature"
+    ],
+    "problem_statement": "Transformar o menu superior, que está indo muito para a direita, em um menu vertical no lado esquerdo do site.",
+    "core_journey": [
+      "1. O usuário solicita a operação relacionada a: Transformar menu superior em menu vertical lateral esquerdo no DarkHub",
+      "2. O sistema executa a regra de negócio headless e emite o resultado esperado",
+      "3. A interface do DarkHub reflete o estado atualizado com sucesso"
+    ],
+    "non_goals": [
+      "Não adicionar dependências externas pesadas sem necessidade estrita",
+      "Não modificar modelos de dados ou arquivos fora do escopo desta demanda",
+      "Não acoplar lógica de negócios diretamente à apresentação gráfica"
+    ],
+    "reachability_contract": "python -m pytest tests/test_transformar_menu_superior_em_m.py -v",
+    "acceptance_criteria": [
+      "A funcionalidade descrita em 'Transformar menu superior em menu vertical lateral esquerdo no DarkHub' opera sem erros sintáticos ou de tipos.",
+      "Validação headless executada com sucesso via `python -m pytest tests/test_transformar_menu_superior_em_m.py -v`.",
+      "O status e histórico do ticket são atualizados no backlog da Dark Factory."
+    ],
+    "suggested_files": [
+      "core/transformar_menu_superior_em_m/service.py",
+      "tests/test_transformar_menu_superior_em_m.py"
+    ],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-09-29T15:19:20.681698Z",
+    "updated_at": "2026-09-29T15:19:20.681698Z"
   }
 ]
