@@ -16,6 +16,7 @@ import os
 import platform
 import shutil
 import sys
+import threading
 import time
 import urllib.error
 import urllib.parse
@@ -113,9 +114,11 @@ class NodeLiveMetrics(BaseModel):
     node_name: str
     role: str
     is_live: bool
+    status: str = Field(default="online", description="Node health: healthy, warning, critical, offline")
     hardware: Optional[HardwareMetrics] = None
     container_count: int = Field(default=0)
     latency_ms: Optional[float] = None
+    last_contact_at: Optional[datetime] = None
     reported_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
@@ -405,6 +408,67 @@ def collect_containers_metrics(
 # Unified Infrastructure Metrics Report Builder
 # ==============================================================================
 
+DESKTOP_WORKER_METRICS_URL = "http://100.78.181.90:8080/metrics/hardware"
+DESKTOP_METRICS_MAX_TIMEOUT_SECONDS = 0.75
+_desktop_last_contact_at: Optional[datetime] = None
+_desktop_contact_lock = threading.Lock()
+
+
+def _hardware_health_status(hardware: HardwareMetrics) -> str:
+    """Classify a host from its measured resource pressure."""
+    if hardware.cpu_percent > 90.0 or hardware.ram_percent > 92.0 or hardware.disk_percent > 95.0:
+        return "critical"
+    if hardware.cpu_percent > 75.0 or hardware.ram_percent > 85.0 or hardware.disk_percent > 85.0:
+        return "warning"
+    return "healthy"
+
+
+def collect_desktop_hardware_node(
+    timeout: float = DESKTOP_METRICS_MAX_TIMEOUT_SECONDS,
+    worker_url: str = DESKTOP_WORKER_METRICS_URL,
+) -> NodeLiveMetrics:
+    """Probe the Desktop worker and preserve the last successful contact time when offline."""
+    global _desktop_last_contact_at
+
+    now = datetime.now(timezone.utc)
+    bounded_timeout = min(max(timeout, 0.05), DESKTOP_METRICS_MAX_TIMEOUT_SECONDS)
+    request = urllib.request.Request(worker_url, headers={"Accept": "application/json"})
+    try:
+        with urllib.request.urlopen(request, timeout=bounded_timeout) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+        hardware = HardwareMetrics.model_validate(payload)
+        if hardware.node_id not in {"onprem-z97-server", "desktop-g45ipem"}:
+            raise ValueError("Desktop worker returned telemetry for a different node")
+        contacted_at = datetime.now(timezone.utc)
+        with _desktop_contact_lock:
+            _desktop_last_contact_at = contacted_at
+        return NodeLiveMetrics(
+            node_id="onprem-z97-server",
+            node_name="Desktop (desktop-g45ipem)",
+            role="on_prem_server",
+            is_live=True,
+            status=_hardware_health_status(hardware),
+            hardware=hardware,
+            container_count=0,
+            last_contact_at=contacted_at,
+            reported_at=now,
+        )
+    except Exception as exc:
+        logger.debug("Desktop hardware telemetry is unavailable: %s", exc)
+        with _desktop_contact_lock:
+            last_contact_at = _desktop_last_contact_at
+        return NodeLiveMetrics(
+            node_id="onprem-z97-server",
+            node_name="Desktop (desktop-g45ipem)",
+            role="on_prem_server",
+            is_live=False,
+            status="offline",
+            hardware=None,
+            container_count=0,
+            last_contact_at=last_contact_at,
+            reported_at=now,
+        )
+
 
 def build_infra_metrics_report(
     node_id: str = "predator-neo-16",
@@ -415,25 +479,30 @@ def build_infra_metrics_report(
     now = datetime.now(timezone.utc)
     hw = collect_host_hardware_metrics(node_id=node_id)
     containers = collect_containers_metrics(timeout=timeout, credentials_override=credentials_override)
+    desktop_node = collect_desktop_hardware_node(timeout=timeout)
 
-    # Determine overall health status
-    overall_health = "healthy"
-    if hw.cpu_percent > 90.0 or hw.ram_percent > 92.0 or hw.disk_percent > 95.0:
+    notebook_status = _hardware_health_status(hw)
+    node_statuses = [notebook_status, desktop_node.status]
+    if "critical" in node_statuses:
         overall_health = "critical"
-    elif hw.cpu_percent > 75.0 or hw.ram_percent > 85.0 or hw.disk_percent > 85.0:
+    elif "warning" in node_statuses:
         overall_health = "warning"
-    elif containers.stopped_containers > 0 and not containers.dokploy_api_connected:
+    elif "offline" in node_statuses or (containers.stopped_containers > 0 and not containers.dokploy_api_connected):
         overall_health = "degraded"
+    else:
+        overall_health = "healthy"
 
     # Composite node list
     nodes: List[NodeLiveMetrics] = [
         NodeLiveMetrics(
             node_id="predator-neo-16",
-            node_name="Predator Dev Workstation",
+            node_name="Notebook (predator-neo-16)",
             role="dev_workstation",
             is_live=True,
+            status=notebook_status,
             hardware=hw,
             container_count=0,
+            last_contact_at=hw.collected_at,
             reported_at=now,
         ),
         NodeLiveMetrics(
@@ -441,19 +510,12 @@ def build_infra_metrics_report(
             node_name="Hetzner CX23 Cloud VPS",
             role="cloud_vps",
             is_live=containers.dokploy_api_connected or len(containers.items) > 0,
+            status="online" if containers.dokploy_api_connected or len(containers.items) > 0 else "offline",
             hardware=None,
             container_count=containers.total_containers,
             reported_at=now,
         ),
-        NodeLiveMetrics(
-            node_id="onprem-z97-server",
-            node_name="On-Premises Dedicated Server",
-            role="on_prem_server",
-            is_live=True,
-            hardware=None,
-            container_count=1 if containers.docker_daemon_available else 0,
-            reported_at=now,
-        ),
+        desktop_node,
     ]
 
     summary = (

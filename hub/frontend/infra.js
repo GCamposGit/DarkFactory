@@ -344,10 +344,21 @@ function renderInfraMetrics(data) {
   const hw = data.host_hardware || {};
   const containers = data.containers || {};
   const items = containers.items || [];
-
-  const cpuPct = hw.cpu_percent || 0;
-  const ramPct = hw.ram_percent || 0;
-  const diskPct = hw.disk_percent || 0;
+  const nodes = data.nodes || [];
+  const notebookNode = nodes.find((node) => node.role === "dev_workstation") || {
+    node_id: hw.node_id || "predator-neo-16",
+    status: "healthy",
+    is_live: true,
+    hardware: hw,
+    last_contact_at: hw.collected_at,
+  };
+  const desktopNode = nodes.find((node) => node.role === "on_prem_server") || {
+    node_id: "onprem-z97-server",
+    status: "offline",
+    is_live: false,
+    hardware: null,
+    last_contact_at: null,
+  };
 
   const getBarColor = (pct) => {
     if (pct >= 85) return "bg-rose-500 text-rose-300";
@@ -360,12 +371,83 @@ function renderInfraMetrics(data) {
     warning: "border-amber-600/60 bg-amber-950/40 text-amber-300",
     critical: "border-rose-600/60 bg-rose-950/40 text-rose-300",
     degraded: "border-orange-600/60 bg-orange-950/40 text-orange-300",
+    offline: "border-slate-600/60 bg-slate-900/70 text-slate-300",
   };
   const healthClass = healthPills[data.overall_health] || healthPills.healthy;
+  const escapeHtml = (value) => String(value ?? "").replace(/[&<>"']/g, (char) => ({
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
+  })[char]);
+  const formatUptime = (seconds) => {
+    const value = Number(seconds);
+    if (!Number.isFinite(value) || value < 0) return "—";
+    const hours = value / 3600;
+    return value > 86400 ? `${(value / 86400).toFixed(1)} dias` : `${hours.toFixed(1)} h`;
+  };
+  const formatLastContact = (value) => {
+    if (!value) return "Nunca";
+    const parsed = new Date(value);
+    return Number.isNaN(parsed.getTime()) ? "Indisponível" : parsed.toLocaleString("pt-BR");
+  };
+  const renderHardwareNode = (node, label) => {
+    const nodeHw = node.hardware;
+    const isOnline = Boolean(node.is_live && nodeHw);
+    const nodeStatus = node.status || (isOnline ? "healthy" : "offline");
+    const nodeHealthClass = healthPills[nodeStatus] || healthPills.offline;
+    const lastContact = formatLastContact(node.last_contact_at || (nodeHw && nodeHw.collected_at));
+    const metrics = isOnline ? [
+      {
+        label: "Processador (CPU)", value: `${Number(nodeHw.cpu_percent).toFixed(1)}%`,
+        percent: nodeHw.cpu_percent,
+        detail: `${nodeHw.cpu_cores_physical || 0} núcleos físicos (${nodeHw.cpu_cores_logical || 0} threads)`,
+      },
+      {
+        label: "Memória RAM", value: `${Number(nodeHw.ram_percent).toFixed(1)}%`,
+        percent: nodeHw.ram_percent,
+        detail: `${nodeHw.ram_used_gb} GB de ${nodeHw.ram_total_gb} GB (${nodeHw.ram_free_gb} GB livres)`,
+      },
+      {
+        label: `Armazenamento (${escapeHtml(nodeHw.disk_primary_mount || "/")})`, value: `${Number(nodeHw.disk_percent).toFixed(1)}%`,
+        percent: nodeHw.disk_percent,
+        detail: `${nodeHw.disk_used_gb} GB de ${nodeHw.disk_total_gb} GB (${nodeHw.disk_free_gb} GB livres)`,
+      },
+      {
+        label: "Uptime", value: formatUptime(nodeHw.uptime_seconds), percent: null,
+        detail: `Desde ${formatLastContact(nodeHw.boot_time)}`,
+      },
+    ] : [
+      { label: "Processador (CPU)", value: "—", percent: null, detail: "Sem leitura enquanto o Desktop está offline" },
+      { label: "Memória RAM", value: "—", percent: null, detail: "Sem leitura enquanto o Desktop está offline" },
+      { label: "Armazenamento", value: "—", percent: null, detail: "Sem leitura enquanto o Desktop está offline" },
+      { label: "Uptime", value: "—", percent: null, detail: "Sem leitura enquanto o Desktop está offline" },
+    ];
+    const metricCards = metrics.map((metric) => {
+      const hasReading = metric.percent !== null;
+      const percent = Math.max(0, Math.min(Number(metric.percent) || 0, 100));
+      const accent = percent >= 85 ? "text-rose-400" : "text-indigo-400";
+      return `
+        <div class="rounded-lg border border-slate-800 bg-slate-900/60 p-3 flex flex-col justify-between min-w-0">
+          <div class="flex items-center justify-between gap-2 text-xs font-mono">
+            <span class="text-slate-400">${metric.label}</span>
+            <span class="font-bold ${hasReading ? accent : "text-slate-500"}">${metric.value}</span>
+          </div>
+          ${hasReading ? `<div class="w-full bg-slate-800 rounded-full h-2 my-2 overflow-hidden"><div class="h-full rounded-full transition-all duration-500 ${getBarColor(percent).split(" ")[0]}" style="width: ${percent}%"></div></div>` : ""}
+          <span class="text-[10px] text-slate-500 font-mono">${metric.detail}</span>
+        </div>`;
+    }).join("");
 
-  const uptimeHours = (hw.uptime_seconds / 3600).toFixed(1);
-  const uptimeDays = (hw.uptime_seconds / 86400).toFixed(1);
-  const uptimeStr = hw.uptime_seconds > 86400 ? `${uptimeDays} dias` : `${uptimeHours} h`;
+    return `
+      <section class="rounded-lg border border-slate-800 bg-slate-950/50 p-3 space-y-3">
+        <div class="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800/80 pb-2">
+          <div class="min-w-0">
+            <h4 class="text-xs font-bold text-white font-mono">${label} <span class="font-normal text-slate-500">${escapeHtml(node.node_id)}</span></h4>
+            <p class="text-[10px] text-slate-500 font-mono">${isOnline ? escapeHtml(nodeHw.os_platform) : "Último contato: " + lastContact}</p>
+          </div>
+          <span class="rounded-full border px-2 py-0.5 text-[10px] font-mono ${nodeHealthClass}">${escapeHtml(nodeStatus)}</span>
+        </div>
+        ${isOnline ? `<p class="text-[10px] text-slate-500 font-mono">Último contato: ${lastContact}</p>` : ""}
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">${metricCards}</div>
+      </section>`;
+  };
 
   const containerRows = items.map((item) => {
     const isRunning = ["running", "done", "active", "healthy"].includes(item.status);
@@ -397,7 +479,7 @@ function renderInfraMetrics(data) {
             <span class="rounded-full border px-2 py-0.5 text-[10px] font-mono ${healthClass}">${data.overall_health}</span>
           </div>
           <p class="text-[11px] text-slate-400 mt-0.5 font-mono">
-            Host: <strong class="text-slate-200">${hw.node_id}</strong> (${hw.os_platform}) · Uptime: <strong class="text-slate-200">${uptimeStr}</strong>
+            Hosts monitorados: <strong class="text-slate-200">Notebook</strong> e <strong class="text-slate-200">Desktop</strong>
           </p>
         </div>
         <div class="flex items-center gap-2">
@@ -410,39 +492,9 @@ function renderInfraMetrics(data) {
         </div>
       </div>
 
-      <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
-        <div class="rounded-lg border border-slate-800 bg-slate-900/60 p-3 flex flex-col justify-between">
-          <div class="flex items-center justify-between text-xs font-mono">
-            <span class="text-slate-400">Processador (CPU)</span>
-            <span class="font-bold ${cpuPct > 80 ? 'text-rose-400' : 'text-emerald-400'}">${cpuPct.toFixed(1)}%</span>
-          </div>
-          <div class="w-full bg-slate-800 rounded-full h-2 my-2 overflow-hidden">
-            <div class="h-full rounded-full transition-all duration-500 ${getBarColor(cpuPct).split(' ')[0]}" style="width: ${Math.min(cpuPct, 100)}%"></div>
-          </div>
-          <span class="text-[10px] text-slate-500 font-mono">${hw.cpu_cores_physical || 0} núcleos físicos (${hw.cpu_cores_logical || 0} threads)</span>
-        </div>
-
-        <div class="rounded-lg border border-slate-800 bg-slate-900/60 p-3 flex flex-col justify-between">
-          <div class="flex items-center justify-between text-xs font-mono">
-            <span class="text-slate-400">Memória RAM</span>
-            <span class="font-bold ${ramPct > 85 ? 'text-rose-400' : 'text-indigo-400'}">${ramPct.toFixed(1)}%</span>
-          </div>
-          <div class="w-full bg-slate-800 rounded-full h-2 my-2 overflow-hidden">
-            <div class="h-full rounded-full transition-all duration-500 ${getBarColor(ramPct).split(' ')[0]}" style="width: ${Math.min(ramPct, 100)}%"></div>
-          </div>
-          <span class="text-[10px] text-slate-500 font-mono">${hw.ram_used_gb || 0} GB de ${hw.ram_total_gb || 0} GB (${hw.ram_free_gb || 0} GB livres)</span>
-        </div>
-
-        <div class="rounded-lg border border-slate-800 bg-slate-900/60 p-3 flex flex-col justify-between">
-          <div class="flex items-center justify-between text-xs font-mono">
-            <span class="text-slate-400">Armazenamento (${hw.disk_primary_mount || 'C:'})</span>
-            <span class="font-bold ${diskPct > 85 ? 'text-rose-400' : 'text-cyan-400'}">${diskPct.toFixed(1)}%</span>
-          </div>
-          <div class="w-full bg-slate-800 rounded-full h-2 my-2 overflow-hidden">
-            <div class="h-full rounded-full transition-all duration-500 ${getBarColor(diskPct).split(' ')[0]}" style="width: ${Math.min(diskPct, 100)}%"></div>
-          </div>
-          <span class="text-[10px] text-slate-500 font-mono">${hw.disk_used_gb || 0} GB de ${hw.disk_total_gb || 0} GB (${hw.disk_free_gb || 0} GB livres)</span>
-        </div>
+      <div class="grid grid-cols-1 xl:grid-cols-2 gap-3">
+        ${renderHardwareNode(notebookNode, "Notebook")}
+        ${renderHardwareNode(desktopNode, "Desktop")}
       </div>
 
       <div class="space-y-2 pt-2 border-t border-slate-800/80">
