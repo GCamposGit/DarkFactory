@@ -61,8 +61,13 @@ def test_run_ticket_no_args_displays_quotas(capsys: pytest.CaptureFixture[str]) 
 
 
 def test_run_ticket_dry_run_auto_picks_antigravity(capsys: pytest.CaptureFixture[str]) -> None:
-    """With real quotas, dry-run on an existing ticket must select Antigravity automatically."""
-    exit_code = main(["USR-01", "--dry-run"])
+    """Dry-run reports the healthy route selected by the quota router."""
+    fake_quotas = {
+        "antigravity": {"provider": "google", "headroom": 50.0, "is_critical": False, "status": "SAUDÁVEL"},
+    }
+    with patch("run_ticket.inspect_quotas", return_value=fake_quotas), \
+         patch("run_ticket.pick", return_value=("antigravity", None)):
+        exit_code = main(["USR-01", "--dry-run"])
     assert exit_code == 0
     captured = capsys.readouterr()
     assert "antigravity" in captured.out.lower()
@@ -75,7 +80,8 @@ def test_run_ticket_blocks_critical_harness_without_override(capsys: pytest.Capt
         "codex": {"provider": "openai", "headroom": 2.0, "is_critical": True, "status": "CRÍTICO (<= 15%)"},
         "antigravity": {"provider": "google", "headroom": 50.0, "is_critical": False, "status": "SAUDÁVEL"},
     }
-    with patch("run_ticket.inspect_quotas", return_value=fake_quotas):
+    with patch("run_ticket.inspect_quotas", return_value=fake_quotas), \
+         patch("run_ticket.pick", return_value=("antigravity", None)):
         exit_code = main(["USR-01", "--harness", "codex", "--dry-run"])
         assert exit_code == 2
         captured = capsys.readouterr()

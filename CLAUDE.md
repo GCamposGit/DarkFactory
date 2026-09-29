@@ -39,6 +39,10 @@ Este documento governa a operação do Claude Code no repositório DarkFac, em e
 - **Comandos de Terminal para o Usuário**: SEMPRE indicar comandos no PowerShell com o endereço absoluto completo (ex.: `python C:\dev\DarkFac\run_ticket.py USR-01`).
 - **Invocação Programática do Terminal no Windows**: Toda chamada interna ou subprocesso ao PowerShell DEVE incluir `-NoProfile -NonInteractive -ExecutionPolicy Bypass`.
 - **Instruções de Configuração Manual**: Nunca assuma conhecimento prévio do usuário. Forneça instruções passo a passo, tela por tela, sugerindo valores e opções recomendadas para todos os campos e seletores.
+- **Autonomia Total de Git em Projetos Internos (Zero Toque Humano Pós-Grill, USR-57)**: É expressamente proibido orientar o usuário a executar commits, merges ou rotinas manuais de sincronização Git no terminal. Em projetos internos (`project: darkfac`), o Claude Code e a fábrica realizam o ciclo completo de forma 100% autônoma (commit atômico, merge e sincronização com `origin/main` via `core.git.autonomy` / `run_ticket.py`), atualizando a demanda para `completed`. Aprovações manuais pré-merge restringem-se exclusivamente a projetos comerciais com `requires_commercial_acceptance: true`.
+
+
+- **Ciclo de Entrega Sempre Autônomo (proibido devolver ao usuário)**: todo código produzido termina em commit → push da branch → PR → checagem de conflito com `origin/main` e outras branches → merge (squash) → limpeza de worktree/branch → deploy pós-merge, tudo sem pedir nada ao usuário. É proibido encerrar o turno pedindo: comando de push, revisão/confirmação de portão, autorização de merge ou de deploy. Única exceção: projeto com `requires_commercial_acceptance: true` (cliente pago em produção; hoje nenhum). Se uma ferramenta for negada por permissão, reporte a negação exata e a regra que precisa mudar, em vez de transformar a tarefa em pedido rotineiro ao usuário.
 
 ---
 

@@ -1,0 +1,232 @@
+{
+  "schema_version": "1.0",
+  "ticket_id": "HF-03-08",
+  "attempt_id": "hf-03-08-20260920T161344Z",
+  "observed_at_utc": "2026-09-20T16:13:44Z",
+  "updated_at_utc": "2026-09-28T00:00:00Z",
+  "decision": "contained",
+  "operationally_verified": false,
+  "successor_released": false,
+  "baseline_scope": "historical_preflight_only; not the closeout candidate",
+  "baseline": {
+    "branch": "codex/hf-03-08-activation",
+    "candidate_sha": "87d1424a9bbfe6a2cce92369a200838c8977b3e4",
+    "note": "historical preflight branch; never merged, superseded by this closeout"
+  },
+  "target": {
+    "environment_ref": "hetzner_dokploy_prod",
+    "health_endpoint": "http://178.105.73.168:8001/healthz",
+    "health_http_status": 200,
+    "coordinator_role": "coordinator",
+    "application_version": "v1",
+    "database_status": "ready",
+    "dbos_engine": "active",
+    "temporary_ingress_containment": {
+      "observed_at_utc": "2026-09-21T09:58:18Z",
+      "public_interface": "eth0",
+      "ipv4_rules": [
+        "DOCKER-USER tcp dport 8001 DROP",
+        "INPUT tcp dport 8001 DROP"
+      ],
+      "ipv6_rules": [
+        "DOCKER-USER tcp dport 8001 DROP",
+        "INPUT tcp dport 8001 DROP"
+      ],
+      "external_health_http_status": 0,
+      "external_observation": "connection timeout after containment",
+      "local_health_status": "ready",
+      "dokploy_https_status": 200,
+      "persistent_across_reboot": false,
+      "note": "historical observation from 2026-09-21; not re-verified in this session. The permanent fix (loopback port bind) is in this closeout's Compose change but has not been deployed."
+    },
+    "run_id": "run-dde02a573f38",
+    "run_project_id": "darkfac",
+    "run_mode": "autonomous",
+    "run_status": "completed",
+    "run_plan_digest": "350c7667a90ac93dfc9f58bd6ea657ff67815339c368a595a5964dfa56e7624b",
+    "run_config_version": "1.0",
+    "stage_providers_at_observation_time": {
+      "planning": "remote_codex",
+      "development": "remote_codex",
+      "integration": "deterministic_mock",
+      "build_deploy": "deterministic_mock",
+      "target_journey": "deterministic_mock",
+      "note": "this was true of the worker at 2026-09-20; the worker has since been rewired to the real per-stage handler registry by HF-27-08 (merged before this session)"
+    }
+  },
+  "negative_evidence_historical": [
+    {
+      "code": "MOCK_TERMINAL_STAGES",
+      "source": "GET /api/v1/tasks/run-dde02a573f38, jobs[*].evidence_refs",
+      "observation": "integration, build_deploy and target_journey reported provider:deterministic_mock while marked succeeded",
+      "status": "resolved_by_HF-27-08_before_this_session"
+    },
+    {
+      "code": "GENERIC_WORKER_SUCCESS",
+      "source": "core/orchestrator/cloud_worker.py, dispatch_claimed_job (as it existed 2026-09-20)",
+      "observation": "the generic path stored a stage_deliverable.json artifact and returned StageResult(outcome=success) without invoking stage-specific handlers",
+      "status": "resolved_by_HF-27-08_before_this_session"
+    },
+    {
+      "code": "DEFAULT_HANDLER_FABRICATED_SUCCESS",
+      "source": "core/workflow/handlers.py, DefaultStageHandler._default_execute",
+      "observation": "an unbound stage returned StageResult(outcome=success) with synthetic output_refs/evidence_refs instead of failing",
+      "status": "resolved_by_this_closeout: now returns outcome=failed, cause_code=missing_stage_service"
+    },
+    {
+      "code": "MUTABLE_DEPLOY_SOURCE",
+      "source": "deploy/dokploy/docker-compose.cloud.yml",
+      "observation": "build context uses Git #main and image uses :latest; no approved immutable image digest",
+      "status": "deliberately_not_resolved -- see required_before_live_activation; no CI/GHCR publish pipeline exists to make digest pinning safe"
+    },
+    {
+      "code": "PUBLIC_INGRESS_AUTH_GAP",
+      "source": "core/orchestrator/cloud_coordinator.py, create_app",
+      "observation": "the coordinator status API and task submission route had no authentication dependency",
+      "status": "resolved_by_this_closeout: Bearer token required on /readyz, /status, POST /api/v1/tasks, GET /api/v1/tasks/{run_id}"
+    },
+    {
+      "code": "TEMPORARY_FIREWALL_NOT_PERSISTENT",
+      "source": "VPS iptables/ip6tables observation, 2026-09-21",
+      "observation": "public TCP 8001 was blocked on eth0 by temporary rules, not persistent across reboot",
+      "status": "permanent_fix_in_this_closeout (127.0.0.1:8001:8001 Compose bind); not yet deployed"
+    },
+    {
+      "code": "TARGET_PROOF_INCOMPLETE",
+      "source": "HF-03-08 acceptance oracle",
+      "observation": "PID, worker heartbeat, installed image digest, external deployment operation, persisted target journey and rollback were not independently observed",
+      "status": "still_true; out of scope for containment + preparation, covered by HF-27-08/HF-27-10 acceptance instead"
+    }
+  ],
+  "canary_flow_trace_findings": [
+    {
+      "code": "MISSING_PROJECT_REGISTRY_ENTRY",
+      "source": "core/line/bindings.py:125-132 (_resolve_project raises UnknownProjectError), core/line/canary.py:65 (CANARY_PROJECT_ID = 'darkfac-canary')",
+      "observation": "no 'darkfac-canary' entry existed in .factory/projects.json; the first worker job (grill) for any canary-submitted run would fail with UnknownProjectError",
+      "status": "fixed_in_this_closeout: darkfac-canary registered in .factory/projects.json"
+    },
+    {
+      "code": "CANARY_LOOP_NEVER_SCHEDULED",
+      "source": "deploy/dokploy/docker-compose.cloud.yml (darkfac-canary service, before this closeout)",
+      "observation": "service was behind profiles: [\"canary\"] with restart: \"no\" (one-shot); nothing in the repo scheduled it, so it never ran unattended",
+      "status": "fixed_in_this_closeout: run_loop + --every-seconds 3600, profiles removed, restart: unless-stopped"
+    },
+    {
+      "code": "GITHUB_TOKEN_NOT_WIRED",
+      "source": "core/line/workspace.py:117 (reads GITHUB_TOKEN), deploy/dokploy/docker-compose.cloud.yml darkfac-worker (before this closeout)",
+      "observation": "the worker container declared no GITHUB_TOKEN at all (only GITHUB_PAT existed, in env.cloud.example, used only by the unrelated hub compose's build context); a private repo like darkfac-canary would fail HTTPS clone/push with no auth",
+      "status": "fixed_in_this_closeout: GITHUB_TOKEN=${GITHUB_TOKEN:-} added to darkfac-worker; the real value must still be provisioned in the Dokploy vault (external, out of scope)"
+    },
+    {
+      "code": "DOKPLOY_DEPLOY_CREDENTIALS_NOT_WIRED",
+      "source": "core/orchestrator/deployment_adapter.py:133-134,158 (DOKPLOY_API_URL/DOKPLOY_API_KEY/DOKPLOY_DEPLOY_URL), core/line/stage_release.py:423-437 (_target_config)",
+      "observation": "none of DOKPLOY_API_URL/DOKPLOY_API_KEY/DOKPLOY_DEPLOY_URL were wired into docker-compose.cloud.yml for any project; without at least one, DokployDeploymentAdapter.start() silently no-ops (no transport, no webhook) and reconcile() never leaves IN_PROGRESS -- build_deploy would hang for every project, not just the canary",
+      "status": "fixed_in_this_closeout: env passthroughs added to darkfac-worker; real values (incl. the canary's own Dokploy application id KCTz2USVQhNp_R6BuTxh1, already set as darkfac-canary's deploy.params.service_name) must still be provisioned externally"
+    },
+    {
+      "code": "FACTORY_DIR_VOLUME_MOUNT_CONCERN",
+      "source": "deploy/dokploy/Dockerfile.cloud:81 (COPY .factory /app/.factory), docker-compose.cloud.yml volumes",
+      "observation": "checked whether a volume mount shadows /app/.factory and hides projects.json inside the container -- it does not: only /app/.factory/artifacts, /app/.factory/test_logs and (for the canary service) /app/.factory/reports/canary are volume-mounted as subdirectories; .factory/projects.json at the root is baked into the image at build time and stays visible as long as the image is rebuilt after this PR merges",
+      "status": "checked; not a blocker, contrary to the hypothesis in the task brief"
+    },
+    {
+      "code": "COORDINATOR_PROJECT_SCOPING_DOES_NOT_APPLY",
+      "source": "core/line/canary.py:556-557 (uses core.line.store_selection.default_control_store + AutonomousIntakeService directly), core/line/store_selection.py",
+      "observation": "the canary submits its demand by writing directly to the shared ControlStore (Postgres iff DARKFAC_HF02_DATABASE_URL is set), not through the coordinator's authenticated HTTP /api/v1/tasks route -- so DARKFAC_ALLOWED_PROJECT_ID (which only gates the HTTP route) never blocks the canary's own submission path",
+      "status": "checked; not a blocker"
+    },
+    {
+      "code": "GRILL_MAY_PAUSE_ON_WAITING_HUMAN",
+      "source": "core/line/stage_grill.py:474,549 (outcome='waiting_human')",
+      "observation": "the canary's demand text is deliberately deterministic and unambiguous, but grill is a live LLM call each day and its ambiguity judgment is not guaranteed deterministic -- a day where grill pauses for clarification would break the green streak that day",
+      "status": "inherent design risk, not a code bug; not fixed (would require changing grill's own judgment logic, out of this closeout's scope) -- monitor via the canary's own outcome=in_progress/failed reports"
+    },
+    {
+      "code": "HARNESS_AUTH_ON_VPS",
+      "source": "docs/PRODUCTION_LINE_PLAN_2026-09-22.md sec.7, items 1-2",
+      "observation": "development/planning/review stages need a worker with harness:claude or harness:codex capabilities published, which requires a one-time interactive OAuth/device-code login on the VPS -- already a known, documented human-only item, unrelated to the canary specifically",
+      "status": "known pre-existing external blocker; out of scope, not re-verified in this session"
+    }
+  ],
+  "local_remediation": {
+    "rebased_on_origin_main": "502de2547c7480237585c454fa538ea8be2e0c05",
+    "synthetic_worker_success_removed": "already true on main via HF-27-08 before this session",
+    "unbound_default_handler_fails_closed": true,
+    "coordinator_auth_added": true,
+    "intake_disabled_by_default": true,
+    "cloud_image_digest_required": false,
+    "cloud_image_digest_deferred_reason": "no CI pipeline publishes to GHCR; Dokploy builds from the main SHA on every push, so digest pinning would break the autonomous deploy path",
+    "loopback_port_bind": true,
+    "canary_loop_scheduling_added": true,
+    "canary_project_registered": true,
+    "github_token_wired": true,
+    "dokploy_deploy_credentials_wired": true,
+    "cross_project_status_denied": true,
+    "target_deployment_verified": false,
+    "real_stage_executors_bound": "already true on main via HF-27-08 before this session"
+  },
+  "effectful_activation_attempted": false,
+  "historical_decision": "needs_replan",
+  "scope_disposition": "containment_preparation_closed_live_activation_superseded_by_hf_27",
+  "target_observation_current": false,
+  "historical_replan_items_superseded": [
+    "high-tier replan with new allowed paths for cloud dispatcher, real stage bindings, immutable deployment and external acceptance probes -- resolved functionally by HF-27-08 and HF-27-10 instead of a formal replan"
+  ],
+  "required_before_live_activation": [
+    "Provision DARKFAC_COORDINATOR_API_TOKEN (32+ chars) in the Dokploy secret vault -- never in the repo.",
+    "Provision GITHUB_TOKEN for the worker (private repo clone/push, incl. darkfac-canary) in the Dokploy vault.",
+    "Provision DOKPLOY_API_URL/DOKPLOY_API_KEY or DOKPLOY_DEPLOY_URL for the worker so build_deploy can actually call Dokploy instead of silently no-op'ing.",
+    "Bootstrap the darkfac-canary GitHub repo, Dokploy application (id KCTz2USVQhNp_R6BuTxh1) and canary.ggcampos.com DNS/domain per docs/runbooks/canary.md.",
+    "Decide and, if adopted, implement image digest pinning once a CI/GHCR publish pipeline exists -- deferred, not blocking.",
+    "Deploy this branch's Compose changes via Dokploy before any of the above take effect; this session made no deploy, no Dokploy call, no DNS change."
+  ],
+  "closeout": {
+    "closed_at_utc": "2026-09-28T00:00:00Z",
+    "status": "complete_for_containment_and_preparation",
+    "scope_disposition": "containment_preparation_closed_live_activation_superseded_by_hf_27",
+    "successors": [
+      "HF-27-08",
+      "HF-27-10"
+    ],
+    "hf15_02": "superseded_for_delivery; retained_for_audit",
+    "candidate_binding": {
+      "base_sha": "502de2547c7480237585c454fa538ea8be2e0c05",
+      "branch": "claude/hf-03-08-closeout",
+      "commit_1_sha": "9177904",
+      "commit_1_subject": "feat(cloud): HF-03-08 closeout — coordinator auth, fail-closed handler [HF-03-08]",
+      "commit_2_sha": "d1b52ff",
+      "commit_2_subject": "feat(line): HF-27-10 canary runs continuously + register target project [HF-27-10]",
+      "artifact_sha256_by_path": {
+        ".factory/projects.json": "f0035e3aee9c9abf79391f4aeab1cea9d5171d17177cd1d2b24d234cacee3713",
+        "core/line/canary.py": "5bf49d1205bdae9e324b4596f781036b9daa200ede1d8c1dbd09cc2c39c9249d",
+        "core/orchestrator/cloud_coordinator.py": "a25a78b74018dc0a80dc83287e5eda7025a40275ad83f9ec0bc934f1f4bdae69",
+        "core/workflow/handlers.py": "810ec32cc9b4edc28178b5c56d13b21565cc29ae34f644ddbdcdacaa3b1e3e9e",
+        "deploy/dokploy/docker-compose.cloud.yml": "2f396459c04fc318bbbdd001c1789b9c46bf4854f147093fc86a6ea1de9435f5",
+        "scripts/dispatch_cloud_task.py": "f34e060e6fbb17bddcc0864450165e40c69f2c80e5bf56bf801bcdb6960e991d",
+        "tests/test_cloud_coordinator_api.py": "d0445ed67fe515ed09ccb8441b1493b89e38d96c70d9363a981213e2232c9157",
+        "tests/test_continuous_cloud.py": "47c510a58f4316ad51b78220e49bce1d8b13199da507add7a36e3dd09392e2cb",
+        "tests/test_line_canary_hf2710.py": "1dccc044fc345d83c8706da5bf0a7f32284f1c28e96f338206fadf435fd55558",
+        "tests/test_projects_detect.py": "fcb7fab603bcd06c1a46d9036fa90258c13b9970a4a8ff31403be32247f8cca2",
+        "tests/test_workflow_handlers.py": "f8c3b846dbe55255bda42d169dddeb8e7b4f0ea925e62a9a3ad0b8a272753dda"
+      },
+      "artifact_manifest_sha256": "9163933b6e4bc140ad27fde794a15e4a22dd09b649f9155f2231c0b171949f83",
+      "manifest_hash_method": "sha256(json.dumps(artifact_sha256_by_path, sort_keys=True))",
+      "file_hash_method": "sha256 of raw file bytes as committed (not the utf-8-sig-normalized text mode verify.py uses for the docs/plan integrity.json manifest)"
+    },
+    "local_validation": {
+      "focal_tests": "python -m pytest tests/test_cloud_coordinator_api.py tests/test_workflow_handlers.py tests/test_continuous_cloud.py tests/test_line_canary_hf2710.py tests/test_projects_detect.py -q",
+      "focal_result": "98 passed",
+      "cross_project_focal": "python -m pytest tests/test_atrium_jarvis_activation.py tests/test_client_onboarding_pipeline.py tests/test_cross_project_catalog.py tests/test_multi_project_governance.py tests/test_projects_detect.py tests/test_roadmap.py -q",
+      "cross_project_focal_result": "60 passed",
+      "line_sweep": "python -m pytest tests/ -k line -q",
+      "line_sweep_result": "292 passed, 1 skipped (symlink unavailable on Windows host)",
+      "official_gate": "python core/harness/runner.py --quick",
+      "official_gate_result": "recorded by the caller session; see final report"
+    },
+    "planning_package_verify": {
+      "binding_check": "python .factory/planning/continuous-autonomy/verify.py --binding HF-03-08 -- passes (all 16 allowed_paths exist and are non-empty)",
+      "full_package_check": "python .factory/planning/continuous-autonomy/verify.py (no args) -- FAILS, but for a pre-existing reason unrelated to this closeout: 31 of the 33 units in plan.json already carry implementation_status=\"implemented\" (set by earlier main commits reconciling the HF-27 replan) while the full-package loop still asserts implementation_status==\"not_started\" for every unit. This was already broken on main before this session (verified against git show HEAD:.factory/planning/continuous-autonomy/plan.json at the pre-session tip). Fixing it would mean rewriting the whole-package verification contract for all 33 units -- exactly the kind of replan the Owner's decision (PRODUCTION_LINE_PLAN_2026-09-22.md sec.5) said not to open here. integrity.json was still regenerated and is now internally self-consistent (zero drift against the current file tree) for whatever the whole-package check does manage to reach."
+    },
+    "integration_status": "pushed to origin/claude/hf-03-08-closeout only; NOT merged to main, no deploy, no Dokploy call, per this session's instructions"
+  }
+}

@@ -23,6 +23,9 @@
     "GET /api/benchmarks/proximity": {
       "surface": "benchmarks-modal"
     },
+    "POST /api/audio/transcribe": {
+      "surface": "demands-drawer"
+    },
     "POST /api/benchmarks/refresh": {
       "surface": "benchmarks-modal"
     },
@@ -158,6 +161,12 @@
     "GET /api/infra/cards/{node_id}": {
       "surface": "infrastructure-cards-section"
     },
+    "GET /api/infra/metrics": {
+      "surface": "infrastructure-cards-section"
+    },
+    "POST /api/infra/metrics/refresh": {
+      "surface": "infrastructure-cards-section"
+    },
     "GET /api/integrations/n8n/status": {
       "surface": "factory-health-block"
     },
@@ -172,6 +181,12 @@
     },
     "GET /api/integrations/telegram/status": {
       "surface": "factory-health-block"
+    },
+    "GET /api/interventions/priority": {
+      "surface": "interventions-hero-strip"
+    },
+    "POST /api/interventions/notify-grill/{ticket_id}": {
+      "machine": "Disparo automatico e programatico de notificacao Telegram para o Owner quando demanda entra em Grill pendente (USR-58)."
     },
     "GET /api/learning-packs": {
       "surface": "learning-drawer"
@@ -378,6 +393,9 @@
     },
     "game": {
       "surface": "portfolio-drawer"
+    },
+    "git": {
+      "internal": "Autonomia de Git, commits atômicos de tickets e sincronização multi-ambiente da fábrica (USR-57)."
     },
     "harness": {
       "surface": "harness-validation-section"

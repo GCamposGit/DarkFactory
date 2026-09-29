@@ -74,6 +74,33 @@ def default_project_resolver() -> ProjectResolver:
     return get_project_registry().get_project
 
 
+# Stages whose agent must be able to WRITE to the worktree: OpenRouter is
+# read-only (core.line.agent_cli._run_openrouter), so it can never serve them.
+_WRITE_AGENT_STAGES: frozenset[str] = frozenset({"development", "integration"})
+
+
+def agent_route_unavailable(
+    stage: str, capabilities: Iterable[str], *, openrouter_configured: bool
+) -> Optional[str]:
+    """`"no_authenticated_harness"` when this worker cannot possibly run `stage`'s agent.
+
+    Root cause of the first production canary run: the initial grill job is
+    stored with `required_capabilities=[]` (documented gap in
+    `ControlStore.accept()`), so a worker whose `harness:*` caps were all
+    dropped by the auth probe still claimed it. Write stages need at least
+    one authenticated `harness:*`; read stages (grill/planning/review) also
+    accept an OpenRouter route. `None` means "runnable here".
+    """
+    if stage not in _AGENT_STAGES:
+        return None
+    has_harness = any(str(c).startswith("harness:") for c in capabilities)
+    if has_harness:
+        return None
+    if stage not in _WRITE_AGENT_STAGES and openrouter_configured:
+        return None
+    return "no_authenticated_harness"
+
+
 def required_caps(project: ProjectDescriptor, stage: str) -> list[str]:
     """Extra `required_capabilities` a job for `stage` on `project` needs.
 
@@ -444,6 +471,7 @@ __all__ = [
     "UnknownProjectError",
     "default_project_resolver",
     "required_caps",
+    "agent_route_unavailable",
     "build_line_registry",
     "GrillStageHandler",
     "PlanningStageHandler",

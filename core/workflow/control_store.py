@@ -27,6 +27,7 @@ from core.workflow.control_contracts import (
     RuntimeOwner,
     StageResult,
     StaleLeaseError,
+    normalize_cause_code,
 )
 
 
@@ -705,6 +706,9 @@ class SQLiteControlStore:
 
         if result.outcome == "success" and not result.output_refs:
             raise InvalidResultError("outcome='success' requires non-empty output_refs")
+
+        # jobs.cause_code is VARCHAR(64) on Postgres: normalize (full text is logged).
+        result = result.model_copy(update={"cause_code": normalize_cause_code(result.cause_code)})
 
         conn = self._connect()
         try:

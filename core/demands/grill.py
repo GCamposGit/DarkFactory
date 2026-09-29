@@ -401,11 +401,17 @@ class DemandGrillEngine:
                 ).strip()
                 changes.append("Problem statement enriquecido com decisões do Grill")
 
+        # Clean pending grill tags upon successful refinement (USR-58)
+        updated_tags = [t for t in ticket.tags if t not in ("grill-pending", "needs-grill")]
+        if "grill-completed" not in updated_tags:
+            updated_tags.append("grill-completed")
+
         refined_ticket = ticket.model_copy(
             update={
                 "problem_statement": refined_problem,
                 "non_goals": non_goals,
                 "acceptance_criteria": list(ticket.acceptance_criteria),
+                "tags": updated_tags,
                 "updated_at": utc_now(),
             }
         )

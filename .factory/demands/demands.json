@@ -253,7 +253,7 @@
     "project_id": "darkfac",
     "title": "Camada de Persistência Híbrida PostgreSQL + Sync R2 & On-Premises (INFRA-07 / INFRA-08)",
     "origin": "user",
-    "status": "planned",
+    "status": "completed",
     "item_type": "infrastructure",
     "lifecycle_stage": "foundations",
     "horizon": "next",
@@ -283,8 +283,8 @@
     ],
     "estimated_complexity": "medium",
     "dependencies": [],
-    "created_at": "2026-09-08T13:38:00.000000Z",
-    "updated_at": "2026-09-08T13:38:00.000000Z"
+    "created_at": "2026-09-08T13:38:00Z",
+    "updated_at": "2026-09-26T15:23:07.880157Z"
   },
   {
     "id": "USR-18",
@@ -995,7 +995,7 @@
     "project_id": "darkfac",
     "title": "Aumentar autonomia da Dark Factory em operações Git (commit, PR, merge)",
     "origin": "user",
-    "status": "planned",
+    "status": "completed",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -1006,23 +1006,36 @@
     "core_journey": [
       "Submitted through Jarvis Assistant"
     ],
-    "non_goals": [],
-    "reachability_contract": "",
-    "acceptance_criteria": [
-      "Harness passes with deterministic verification"
+    "non_goals": [
+      "Não remover proteção em projetos comerciais que possuam requires_commercial_acceptance: true",
+      "Não realizar merge ou push se o portão oficial runner.py falhar"
     ],
-    "suggested_files": [],
+    "reachability_contract": "python -m pytest tests/test_git_autonomy.py tests/test_governance_guard.py -v",
+    "acceptance_criteria": [
+      "Módulo core.git.autonomy implementa GitAutonomyManager com commit_ticket, sync_environment e complete_ticket",
+      "run_ticket.py executa encerramento autônomo pós-validação (commit, push, DemandsStore update) sem exigir ação do usuário",
+      "FACTORY_RULES.md, AGENTS.md e CLAUDE.md consagram Zero Toque Humano Pós-Grill para operações Git em projetos internos",
+      "Suíte de testes determinísticos test_git_autonomy.py cobre ciclo completo de commit, sync e completion"
+    ],
+    "suggested_files": [
+      "core/git/autonomy.py",
+      "run_ticket.py",
+      "FACTORY_RULES.md",
+      "AGENTS.md",
+      "CLAUDE.md",
+      "tests/test_git_autonomy.py"
+    ],
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-09-25T19:07:32.777073Z",
-    "updated_at": "2026-09-25T19:07:32.777085Z"
+    "updated_at": "2026-09-26T06:43:07.516782Z"
   },
   {
     "id": "USR-58",
     "project_id": "darkfac",
     "title": "Seção prioritária no DarkHub para Grills e ações pendentes de intervenção do usuário",
     "origin": "user",
-    "status": "planned",
+    "status": "completed",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -1071,6 +1084,213 @@
       "USR-57"
     ],
     "created_at": "2026-09-25T21:52:27.699721Z",
-    "updated_at": "2026-09-25T22:03:58.492234Z"
+    "updated_at": "2026-09-27T00:48:18.813389Z"
+  },
+  {
+    "id": "USR-59",
+    "project_id": "darkfac",
+    "title": "Perfil Enterprise sob demanda: isolamento reforçado, residência e governança (HF-24)",
+    "origin": "user",
+    "status": "planned",
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand",
+      "enterprise",
+      "security",
+      "hf-24",
+      "grill-completed"
+    ],
+    "problem_statement": "A Dark Factory necessita de isolamento reforçado e governança enterprise para clientes pagantes (cenário G8 da autonomia híbrida), garantindo que dados de clientes não vazem entre projetos, cumprindo residência de dados e audit trail com signoff obrigatório do Owner antes de promoções a produção.\n\n[Refinamentos acordados no Grill]:\n- Fazer conforme recomendado, mas garantir que a regra não é muito rígida. Cada entrega deve ser planejada da melhor maneira possível para entregar a demanda de forma eficiente e completa.\n- Teste de integração e reachability headless via pytest exercendo CLI e endpoints HTTP.\n- Separar bem os assuntos e definir regras otimizadas para cada modo de falha. O fluxo nunca deve parar por erro, a fábrica autônoma sempre irá seguir para o próximo passo desbloqueado de qualquer projeto caso algum passo pare por pendência ou erro. Caso haja indisponibilidade de cotas de IA seguir rigorosamente o Model Router que já prioriza uso das quotas das contas por assinatura e depois o consumo via API Open Outer, se não houverem modelos capazes de construir a demanda com qualidade após todo o roteamento, registrar como pendente e seguir para próximo item da fábrica. Se a dependência externa for de drivers, softwares ou contas em alguma plataforma, tentar contornar via bash, instalação, pesquisa de soluções, Apenas se não for possível resolver o problema autonomamente, criar demanda para atuação do usuário para resolver, e seguir com próximo item de desenvolvimento. Gerar log dos problemas e decisões para melhoria futura.",
+    "core_journey": [
+      "Demanda entra no backlog com pendência de Grill para alinhamento de escopo;",
+      "Owner recebe notificação imediata no Telegram e visualiza na seção prioritária do DarkHub;",
+      "Owner responde as perguntas essenciais no modal web e submete o refinamento do ticket."
+    ],
+    "non_goals": [
+      "Não alterar o fluxo de autonomia em projetos internos da fábrica (darkfac);",
+      "Não exigir signoff humano para tarefas internas de desenvolvimento."
+    ],
+    "reachability_contract": "python -m pytest tests/test_darkhub_priority_interventions_and_grill.py -v",
+    "acceptance_criteria": [
+      "Aparecer na seção prioritária do DarkHub com badge de Grill pendente;",
+      "Disparo automático de notificação no Telegram com link direto;",
+      "Modal de Grill no DarkHub carrega opções e permite refinamento do ticket."
+    ],
+    "suggested_files": [
+      "core/enterprise/policy.py",
+      "core/enterprise/residency.py",
+      "hub/backend/service.py"
+    ],
+    "estimated_complexity": "medium",
+    "dependencies": [
+      "USR-58"
+    ],
+    "created_at": "2026-09-27T10:07:00.000000Z",
+    "updated_at": "2026-09-27T10:07:00.000000Z"
+  },
+  {
+    "id": "USR-60",
+    "project_id": "darkfac",
+    "title": "Entrada de demandas e respostas cirúrgicas de Grill por áudio/voz (Dark Hub, Telegram e Jarvis)",
+    "origin": "user",
+    "status": "completed",
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand",
+      "feature",
+      "audio",
+      "grill",
+      "telegram",
+      "darkhub",
+      "jarvis",
+      "grill-completed"
+    ],
+    "problem_statement": "Os inputs de novas demandas via Jarvis, Dark Hub ou Telegram necessitam do recurso de áudio/voz, permitindo ao usuário abrir demandas e responder especificamente a cada uma das perguntas do Grill por áudio, seja clicando no link do Telegram, seja diretamente no Telegram como mensagem de voz, seja na interface do Dark Hub ou no Jarvis. O módulo de reconhecimento de áudio já validado no Jarvis deve ser reaproveitado no DarkFac.\n\n[Refinamentos acordados no Grill]:\n- No Modal de Grill do Dark Hub: Preencher o campo de texto/diretriz customizada da pergunta e, caso a fala mencione uma das alternativas (ex: 'primeira opção', 'recomendada' ou título), marcar o rádio correspondente para revisão visual antes do envio final.\n- No Telegram: Roteamento Contextual. Se o áudio for enviado como resposta (reply) a uma notificação de Grill ou citar o ID do ticket, aplica como resposta do Grill; se for um áudio avulso, ingere automaticamente como uma nova demanda (/demand).\n- Arquitetura do Motor de Áudio: Portar e consolidar o AudioTranscriptionEngine do Jarvis para core/audio/engine.py no DarkFac, garantindo suporte hermético a Groq Cloud Whisper (para Dokploy/Docker na nuvem sem GPU) e faster-whisper local sem acoplamento de diretório entre repositórios.",
+    "core_journey": [
+      "Usuário clica no microfone no Drawer de Demandas do Dark Hub ou no chat do Jarvis e dita o problema para criar nova demanda;",
+      "Ao receber a notificação de Grill pendente via Telegram, usuário pode responder por mensagem de voz no Telegram (em reply à notificação) ou clicar no link para abrir o Dark Hub;",
+      "No Modal de Grill do Dark Hub, cada pergunta possui seu botão de microfone individual para ditar a resposta;",
+      "A gravação via Web Audio API (PCM 16kHz WAV puro) é enviada para /api/audio/transcribe e o texto transcrito preenche o campo customizado da questão, auto-marcando a alternativa falada se houver correspondência;",
+      "O usuário confere visualmente e clica em Salvar Respostas e Refinar Ticket, desbloqueando o ciclo de desenvolvimento autônomo."
+    ],
+    "non_goals": [
+      "Não recriar motor de reconhecimento de áudio do zero (reaproveitar AudioTranscriptionEngine e rotinas de Web Audio API do Jarvis);",
+      "Não exigir dependência binária externa de ffmpeg no browser ou na máquina cliente para gravação Web;",
+      "Não travar o Dark Hub na nuvem (Dokploy) por falta de GPU CUDA (garantir fallback para Groq Cloud Whisper large-v3-turbo)."
+    ],
+    "reachability_contract": "python -m pytest tests/test_audio_grill_and_demands.py -v",
+    "acceptance_criteria": [
+      "POST /api/audio/transcribe funcional no Dark Hub com suporte a áudio WAV/PCM e fallback Groq/local;",
+      "Modal de Grill (hub/frontend/interventions.js) com botão de microfone dedicado por questão, preenchendo o input customizado e auto-selecionando alternativa quando aplicável;",
+      "Drawer de Demandas (hub/frontend/demands.js) com botão de microfone para ditar título e problema;",
+      "TelegramGateway com suporte a download e transcrição de mensagens de voz/áudio nativas e roteamento contextual (reply de Grill vs /demand avulsa);",
+      "Motor core/audio/engine.py desacoplado, hermético e coberto por testes unitários."
+    ],
+    "suggested_files": [
+      "core/audio/engine.py",
+      "hub/backend/api.py",
+      "hub/backend/service.py",
+      "hub/frontend/interventions.js",
+      "hub/frontend/demands.js",
+      "core/integrations/telegram.py",
+      "tests/test_audio_grill_and_demands.py"
+    ],
+    "estimated_complexity": "medium",
+    "dependencies": [
+      "USR-09",
+      "USR-58"
+    ],
+    "created_at": "2026-09-28T08:53:22.968704+00:00",
+    "updated_at": "2026-09-28T09:01:15.597944+00:00"
+  },
+  {
+    "id": "USR-61",
+    "project_id": "darkfac",
+    "title": "Melhoria nas ações do usuário no Dark Hub",
+    "origin": "user",
+    "status": "planned",
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand",
+      "feature"
+    ],
+    "problem_statement": "Na listagem de ações do usuário no Dark Hub, após a sessão de governança, os usuários enfrentam dois problemas: 1) ao clicar em 'reconhecer', é exibida uma caixa de confirmação que não é necessária; 2) não há possibilidade de selecionar múltiplas ações e reconhecer todas de uma vez.",
+    "core_journey": [
+      "Usuário acessa a listagem de ações do usuário no Dark Hub",
+      "Usuário clica em 'reconhecer' para uma única ação (sem confirmação) ou seleciona múltiplas ações e clica em 'reconhecer todas'"
+    ],
+    "non_goals": [
+      "Não alterar a estrutura de dados das notificações",
+      "Não modificar o fluxo de governança existente",
+      "Não implementar novos tipos de notificação"
+    ],
+    "reachability_contract": "python -m pytest tests/test_melhoria_nas_a_es_do_usu_.py -v",
+    "acceptance_criteria": [
+      "Ao clicar em 'reconhecer' para uma única ação, não deve aparecer caixa de confirmação",
+      "Mensagem de sucesso deve ser exibida e desaparecer automaticamente após 3 segundos",
+      "É possível selecionar múltiplas ações e reconhecer todas com um único clique",
+      "A funcionalidade de reconhecimento múltiplo deve manter o estado das ações corretamente"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-09-29T11:57:05.966732Z",
+    "updated_at": "2026-09-29T11:57:05.966732Z"
+  },
+  {
+    "id": "USR-62",
+    "project_id": "darkfac",
+    "title": "Transformar menu superior em menu vertical lateral esquerdo no DarkHub",
+    "origin": "user",
+    "status": "planned",
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand",
+      "feature"
+    ],
+    "problem_statement": "Transformar o menu superior, que está indo muito para a direita, em um menu vertical no lado esquerdo do site.",
+    "core_journey": [
+      "1. O usuário solicita a operação relacionada a: Transformar menu superior em menu vertical lateral esquerdo no DarkHub",
+      "2. O sistema executa a regra de negócio headless e emite o resultado esperado",
+      "3. A interface do DarkHub reflete o estado atualizado com sucesso"
+    ],
+    "non_goals": [
+      "Não adicionar dependências externas pesadas sem necessidade estrita",
+      "Não modificar modelos de dados ou arquivos fora do escopo desta demanda",
+      "Não acoplar lógica de negócios diretamente à apresentação gráfica"
+    ],
+    "reachability_contract": "python -m pytest tests/test_transformar_menu_superior_em_m.py -v",
+    "acceptance_criteria": [
+      "A funcionalidade descrita em 'Transformar menu superior em menu vertical lateral esquerdo no DarkHub' opera sem erros sintáticos ou de tipos.",
+      "Validação headless executada com sucesso via `python -m pytest tests/test_transformar_menu_superior_em_m.py -v`.",
+      "O status e histórico do ticket são atualizados no backlog da Dark Factory."
+    ],
+    "suggested_files": [
+      "core/transformar_menu_superior_em_m/service.py",
+      "tests/test_transformar_menu_superior_em_m.py"
+    ],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-09-29T15:19:20.681698Z",
+    "updated_at": "2026-09-29T15:19:20.681698Z"
+  },
+  {
+    "id": "USR-63",
+    "project_id": "darkfac",
+    "title": "DarkHub: incluir status do Desktop na Telemetria de Hardware & Contêineres",
+    "origin": "user",
+    "status": "completed",
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "No DarkHub, o card 'Telemetria de Hardware & Contêineres em Tempo Real' (hub/frontend/infra.js, INFRA-11) mostra apenas o Notebook (host local). Deve exibir também o status de hardware do Desktop (on-prem, desktop-g45ipem, Tailscale 100.78.181.90, worker na porta 8080), lado a lado com o Notebook.",
+    "core_journey": [
+      "No DarkHub, o card 'Telemetria de Hardware & Contêineres em Tempo Real' (hub/frontend/infra.js, INFRA-11) mostra apenas o Notebook (host local). Deve exibir também o status de hardware do Desktop (on-prem, desktop-g45ipem, Tailscale 100.78.181.90, worker na porta 8080), lado a lado com o Notebook."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "O backend (core/infra/metrics.py + GET /api/infra/metrics) passa a retornar as métricas de hardware de todos os nós de host: Notebook (local) e Desktop (coletado do worker remoto via Tailscale, com timeout curto e sem derrubar o endpoint se o Desktop estiver offline)",
+      "O worker do Desktop (core/harness/remote_worker.py) expõe um endpoint headless de métricas de hardware (CPU, RAM, disco, uptime) reutilizando collect_host_hardware_metrics",
+      "Desktop offline ou inalcançável aparece como status 'offline' com último contato, nunca como erro 500 nem como dado falso",
+      "O card do DarkHub exibe uma seção por nó (Notebook e Desktop) com CPU, RAM, disco, uptime e badge de saúde; o health geral considera ambos",
+      "Testes unitários cobrindo Desktop online, offline e timeout, mais teste do endpoint do worker; portão oficial python core/harness/runner.py --quick verde"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-09-29T19:37:14.119561Z",
+    "updated_at": "2026-09-29T20:45:14.161814Z"
   }
 ]

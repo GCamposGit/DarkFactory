@@ -80,5 +80,32 @@
       "params": {}
     },
     "smoke": []
+  },
+  {
+    "id": "darkfac-canary",
+    "name": "DarkFac Canary (HF-27-10)",
+    "description": "Alvo mínimo do canário E2E diário da linha de produção: app estático/HTTP com GET /version, usado só para observar a fábrica ponta a ponta sem intervir.",
+    "path": null,
+    "kind": "internal_product",
+    "prefix": "CNR",
+    "domain": "canary.ggcampos.com",
+    "deploy_target": "dokploy_docker",
+    "created_at": "2026-09-28T00:00:00Z",
+    "repo_url": "https://github.com/GCamposGit/darkfac-canary.git",
+    "default_branch": "main",
+    "deploy": {
+      "type": "dokploy",
+      "params": {
+        "service_name": "KCTz2USVQhNp_R6BuTxh1",
+        "service_type": "application"
+      }
+    },
+    "smoke": [
+      {
+        "url": "https://canary.ggcampos.com/version",
+        "expect_status": 200
+      }
+    ],
+    "requires_commercial_acceptance": false
   }
 ]

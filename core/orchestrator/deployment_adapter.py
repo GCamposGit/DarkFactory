@@ -17,6 +17,7 @@ import tempfile
 import threading
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 import uuid
 from datetime import UTC, datetime
@@ -52,6 +53,10 @@ class TargetConfig(BaseModel):
     api_key: Optional[str] = Field(default=None, description="API token or credential for deployment orchestrators")
     deploy_url: Optional[str] = Field(default=None, description="Webhook URL for triggering deployment")
     service_name: Optional[str] = Field(default=None, description="Service identifier or container name")
+    service_type: str = Field(
+        default="application",
+        description="Dokploy resource kind for the real API ('application' or 'compose'); ignored by other adapters",
+    )
     host: Optional[str] = Field(default=None, description="Host address or hostname")
     port: Optional[int] = Field(default=None, description="Service TCP listening port")
     healthcheck_endpoint: Optional[str] = Field(default=None, description="HTTP endpoint for health and digest probes")
@@ -122,7 +127,35 @@ class DeploymentAdapter(Protocol):
 
 
 class DokployDeploymentAdapter:
-    """Deployment adapter for Dokploy PaaS (Docker Compose & Static Webhooks)."""
+    """Deployment adapter for Dokploy PaaS (real tRPC-over-REST API, Docker
+    Compose & Static Webhooks).
+
+    Three transports, in precedence order (HF-27-07 closeout):
+
+    1. An injected ``transport`` callable (tests / mock harness) — unchanged
+       behavior, takes priority over everything else.
+    2. The real Dokploy API, used automatically when no ``transport`` was
+       injected and both an API base URL and API key are configured (via
+       ``DOKPLOY_API_URL``/``DOKPLOY_API_KEY`` env vars, or per-target
+       ``target_config.api_url``/``api_key``). This is the only transport
+       that can actually reach ``SUCCEEDED``/``FAILED`` for a real Dokploy
+       project instead of leaving ``reconcile()`` stuck at ``IN_PROGRESS``
+       forever.
+    3. A plain webhook POST to ``deploy_url``/``DOKPLOY_DEPLOY_URL`` (legacy
+       fallback; fires the same webhook for every project, so it never
+       actually reconciles past ``IN_PROGRESS`` -- kept only for backward
+       compatibility with existing webhook-only deployments).
+
+    The real API talks to Dokploy's tRPC-over-REST procedures
+    (``<base>/api/<procedure>``), authenticated with an ``x-api-key``
+    header (never logged). It identifies the target by
+    ``target_config.service_name`` (the Dokploy application/compose id --
+    see ``deploy.params.service_name`` in the project registry) and
+    ``target_config.service_type`` (``"application"`` default or
+    ``"compose"``). A project with no configured ``service_name`` is
+    refused outright (``FAILED``, ``cause: dokploy_service_name_missing``)
+    rather than guessing an id from the project slug.
+    """
 
     def __init__(
         self,
@@ -143,6 +176,94 @@ class DokployDeploymentAdapter:
         with self._lock:
             self._simulated_installed_digests[project_id] = digest
 
+    # ------------------------------------------------------------------
+    # real Dokploy API (tRPC-over-REST)
+    # ------------------------------------------------------------------
+
+    def _real_api_credentials(self, target_config: TargetConfig) -> Optional[tuple[str, str]]:
+        """`(base_url, api_key)` if the real API should be used, else `None`.
+
+        Never chosen when an injected `transport` is present -- that always
+        wins. Requires both a URL and a key; a URL with no key (or vice
+        versa) falls through to the legacy webhook path instead of half
+        authenticating.
+        """
+        if self.transport is not None:
+            return None
+        base_url = target_config.api_url or self.api_url
+        api_key = target_config.api_key or self.api_key
+        if not base_url or not api_key:
+            return None
+        return base_url, api_key
+
+    @staticmethod
+    def _normalize_api_base(url: str) -> str:
+        """Accepts an API_URL with or without a trailing `/api`."""
+        trimmed = url.rstrip("/")
+        return trimmed if trimmed.endswith("/api") else f"{trimmed}/api"
+
+    def _dokploy_request(
+        self,
+        base_url: str,
+        api_key: str,
+        method: str,
+        procedure: str,
+        *,
+        query: Optional[Dict[str, str]] = None,
+        json_body: Optional[Dict[str, Any]] = None,
+        timeout: float = 15.0,
+    ) -> Dict[str, Any]:
+        """One Dokploy tRPC-over-REST call. Raises `urllib.error.HTTPError`/
+        `URLError` on failure -- callers decide how to map that to a
+        `DeploymentStatus`. The API key is sent as a header and is never
+        included in any log line (callers must not log this method's args)."""
+        url = f"{self._normalize_api_base(base_url)}/{procedure}"
+        if query:
+            url = f"{url}?{urllib.parse.urlencode(query)}"
+        data = json.dumps(json_body).encode("utf-8") if json_body is not None else None
+        req = urllib.request.Request(
+            url,
+            data=data,
+            headers={
+                "Content-Type": "application/json",
+                "x-api-key": api_key,
+                "User-Agent": "DarkFac-DokployAdapter/1.0",
+            },
+            method=method,
+        )
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            body = resp.read().decode("utf-8", errors="replace")
+        return json.loads(body) if body else {}
+
+    @staticmethod
+    def _service_procedure_and_key(target_config: TargetConfig) -> tuple[str, str, str]:
+        """`(deploy_procedure, status_procedure, id_query_key)` for the
+        target's `service_type` ("application" default, or "compose")."""
+        if target_config.service_type == "compose":
+            return "compose.deploy", "compose.one", "composeId"
+        return "application.deploy", "application.one", "applicationId"
+
+    def _latest_deployment_created_at(
+        self, base_url: str, api_key: str, status_procedure: str, id_key: str, service_id: str
+    ) -> str:
+        """Best-effort baseline `createdAt` among existing deployments, used
+        by `reconcile()` to tell "our" deployment apart from an old one that
+        happens to already be `done`. Empty string (sentinel "earliest
+        possible") on any probe failure -- logged, never raised, since a
+        missing baseline degrades reconcile() rather than blocking start()."""
+        try:
+            body = self._dokploy_request(base_url, api_key, "GET", status_procedure, query={id_key: service_id})
+        except Exception as exc:
+            logger.warning(
+                "Dokploy baseline deployment probe failed for %s (%s); reconcile will treat any "
+                "deployment as new: %s",
+                service_id, status_procedure, type(exc).__name__,
+            )
+            return ""
+        deployments = body.get("deployments") or []
+        created_ats = sorted(str(d.get("createdAt", "")) for d in deployments if d.get("createdAt"))
+        return created_ats[-1] if created_ats else ""
+
     def start(
         self,
         artifact_ref: ArtifactRef,
@@ -153,9 +274,11 @@ class DokployDeploymentAdapter:
         operation_id = f"dokploy_op_{uuid.uuid4().hex[:12]}"
         external_op_id: str = f"ext_dokploy_{uuid.uuid4().hex[:8]}"
         provider_details: Dict[str, Any] = {}
+        status = DeploymentStatus.IN_PROGRESS
 
         endpoint = target_config.api_url or self.api_url
         deploy_webhook = target_config.deploy_url or os.getenv("DOKPLOY_DEPLOY_URL", "")
+        real_api = self._real_api_credentials(target_config)
 
         if self.transport:
             # Custom transport provided (e.g. unit tests / mock harness)
@@ -174,6 +297,56 @@ class DokployDeploymentAdapter:
                 or external_op_id
             )
             provider_details = res
+        elif real_api is not None:
+            base_url, api_key = real_api
+            service_id = target_config.service_name
+            if not service_id:
+                # Never guess an id from the project slug (a bogus id could
+                # silently hit an unrelated real application). Fail closed.
+                logger.error(
+                    "Dokploy deploy aborted for project %s: no deploy.params.service_name configured",
+                    target_config.project_id,
+                )
+                status = DeploymentStatus.FAILED
+                provider_details = {"error": "dokploy_service_name_missing"}
+            else:
+                deploy_procedure, status_procedure, id_key = self._service_procedure_and_key(target_config)
+                baseline_created_at = self._latest_deployment_created_at(
+                    base_url, api_key, status_procedure, id_key, service_id
+                )
+                try:
+                    res = self._dokploy_request(
+                        base_url, api_key, "POST", deploy_procedure, json_body={id_key: service_id}
+                    )
+                except urllib.error.HTTPError as exc:
+                    # HTTP 4xx: the request itself is wrong (bad id, bad
+                    # auth, etc) -- retrying identically won't help.
+                    logger.warning(
+                        "Dokploy deploy trigger for %s (%s=%s) returned HTTP %d",
+                        target_config.project_id, id_key, service_id, exc.code,
+                    )
+                    status = DeploymentStatus.FAILED
+                    provider_details = {"error": f"http_{exc.code}", "procedure": deploy_procedure}
+                except Exception as exc:
+                    # Network/5xx: we never confirmed the deploy was even
+                    # queued, so there is nothing to poll -- fail rather
+                    # than silently reconciling against a stale deployment.
+                    logger.warning(
+                        "Dokploy deploy trigger for %s (%s=%s) failed: %s",
+                        target_config.project_id, id_key, service_id, type(exc).__name__,
+                    )
+                    status = DeploymentStatus.FAILED
+                    provider_details = {"error": type(exc).__name__, "procedure": deploy_procedure}
+                else:
+                    external_op_id = f"dokploy_api_{target_config.service_type}_{service_id}"
+                    provider_details = {
+                        "deploy_response": res,
+                        "service_type": target_config.service_type,
+                        "service_id": service_id,
+                        "baseline_created_at": baseline_created_at,
+                        "status_procedure": status_procedure,
+                        "id_key": id_key,
+                    }
         elif deploy_webhook:
             # Fallback to direct webhook HTTP POST
             try:
@@ -204,7 +377,7 @@ class DokployDeploymentAdapter:
             project_id=target_config.project_id,
             target_type=target_config.target_type,
             artifact_ref=artifact_ref,
-            status=DeploymentStatus.IN_PROGRESS,
+            status=status,
             details=provider_details,
         )
 
@@ -222,6 +395,60 @@ class DokployDeploymentAdapter:
                 raise ValueError(f"Unknown operation ID: {operation_id}")
 
             if op.status in (DeploymentStatus.SUCCEEDED, DeploymentStatus.FAILED, DeploymentStatus.ROLLED_BACK):
+                return op.status
+
+            target_config = self._target_configs.get(operation_id)
+            real_api = self._real_api_credentials(target_config) if target_config is not None else None
+
+            if real_api is not None and target_config is not None and target_config.service_name:
+                base_url, api_key = real_api
+                _deploy_proc, status_procedure, id_key = self._service_procedure_and_key(target_config)
+                baseline = str(op.details.get("baseline_created_at") or "")
+                try:
+                    body = self._dokploy_request(
+                        base_url, api_key, "GET", status_procedure, query={id_key: target_config.service_name}
+                    )
+                except Exception as exc:
+                    # Transient probe failure: keep IN_PROGRESS, never FAILED
+                    # on a network blip -- the caller's poll loop retries.
+                    logger.warning(
+                        "Dokploy reconcile probe for %s (%s) failed, keeping IN_PROGRESS: %s",
+                        op.project_id, operation_id, type(exc).__name__,
+                    )
+                    op.updated_at = datetime.now(UTC)
+                    return op.status
+
+                deployments = body.get("deployments") or []
+                newer = sorted(
+                    (d for d in deployments if str(d.get("createdAt", "")) > baseline),
+                    key=lambda d: str(d.get("createdAt", "")),
+                )
+                latest = newer[-1] if newer else None
+                raw_status = str((latest or {}).get("status", "")).lower()
+
+                if latest is None:
+                    op.status = DeploymentStatus.IN_PROGRESS
+                elif raw_status == "done":
+                    op.status = DeploymentStatus.SUCCEEDED
+                    self._simulated_installed_digests[op.project_id] = op.artifact_ref.byte_digest
+                elif raw_status == "error":
+                    op.status = DeploymentStatus.FAILED
+                elif raw_status == "running":
+                    op.status = DeploymentStatus.IN_PROGRESS
+                else:
+                    logger.warning(
+                        "Dokploy reconcile for %s saw unrecognized deployment status %r; keeping IN_PROGRESS",
+                        op.project_id, raw_status,
+                    )
+                    op.status = DeploymentStatus.IN_PROGRESS
+
+                op.updated_at = datetime.now(UTC)
+                op.details["latest_reconcile"] = {
+                    "deployments_seen": len(deployments),
+                    "newer_than_baseline": len(newer),
+                    "matched_status": raw_status or None,
+                    "application_status": body.get("applicationStatus") or body.get("composeStatus"),
+                }
                 return op.status
 
             if self.transport:
@@ -278,7 +505,19 @@ class DokployDeploymentAdapter:
         reason: str,
         claim: Optional[Union[Claim, Any]] = None,
     ) -> RollbackResult:
-        """Executes automated rollback to last_known_good_digest."""
+        """Reverts to `last_known_good_digest` -- or, on the real Dokploy
+        API, triggers a best-effort redeploy and reports it honestly.
+
+        Dokploy's simple deploy API has no point-in-time digest rollback: a
+        deploy call always redeploys whatever the configured branch's
+        current HEAD is. It cannot be made to reproduce a specific past
+        digest, so a real-API rollback never claims `restored_digest` --
+        that would be fabricating proof we don't have. It comes back
+        `FAILED` with `restored_digest=None` so `stage_release.py`'s
+        existing `rollback.restored_digest != state.last_good_sha` check
+        (see its own `rollback_failed` branch) correctly treats this as
+        needing a human, not another silent retry.
+        """
         rollback_id = f"rb_dokploy_{uuid.uuid4().hex[:12]}"
         restored = target_config.last_known_good_digest
 
@@ -293,8 +532,72 @@ class DokployDeploymentAdapter:
                 reason=f"Rollback failed: missing last_known_good_digest. Original cause: {reason}",
             )
 
+        real_api = self._real_api_credentials(target_config)
+        if real_api is not None:
+            base_url, api_key = real_api
+            service_id = target_config.service_name
+            if not service_id:
+                logger.error(
+                    "Dokploy rollback aborted: project %s has no deploy.params.service_name configured",
+                    target_config.project_id,
+                )
+                return RollbackResult(
+                    rollback_id=rollback_id,
+                    project_id=target_config.project_id,
+                    failed_digest=failed_digest,
+                    restored_digest=None,
+                    status=DeploymentStatus.FAILED,
+                    reason=f"Rollback failed: missing deploy.params.service_name. Original cause: {reason}",
+                )
+            deploy_procedure, _status_procedure, id_key = self._service_procedure_and_key(target_config)
+            try:
+                self._dokploy_request(base_url, api_key, "POST", deploy_procedure, json_body={id_key: service_id})
+            except Exception as exc:
+                logger.warning(
+                    "Dokploy rollback redeploy trigger for %s (%s=%s) failed: %s",
+                    target_config.project_id, id_key, service_id, type(exc).__name__,
+                )
+                return RollbackResult(
+                    rollback_id=rollback_id,
+                    project_id=target_config.project_id,
+                    failed_digest=failed_digest,
+                    restored_digest=None,
+                    status=DeploymentStatus.FAILED,
+                    reason=(
+                        f"Rollback failed: could not trigger Dokploy redeploy ({type(exc).__name__}). "
+                        f"Original cause: {reason}"
+                    ),
+                )
+
+            with self._lock:
+                for op in self._operations.values():
+                    if op.project_id == target_config.project_id and op.status == DeploymentStatus.IN_PROGRESS:
+                        op.status = DeploymentStatus.FAILED
+                        op.updated_at = datetime.now(UTC)
+
+            logger.warning(
+                "Dokploy rollback for %s: triggered a redeploy of the configured branch HEAD via the "
+                "real API, but this is NOT verified to match last_known_good_digest %s -- reporting "
+                "as a failed rollback pending human verification.",
+                target_config.project_id, restored[:12],
+            )
+            return RollbackResult(
+                rollback_id=rollback_id,
+                project_id=target_config.project_id,
+                failed_digest=failed_digest,
+                restored_digest=None,
+                status=DeploymentStatus.FAILED,
+                reason=(
+                    f"Dokploy API has no point-in-time digest rollback; triggered a redeploy of the "
+                    f"configured branch HEAD instead, which is not verified to restore "
+                    f"last_known_good_digest={restored[:12]}. Original cause: {reason}"
+                ),
+            )
+
         logger.info(
-            "Executing Dokploy rollback for %s: restoring %s (failed: %s, reason: %s)",
+            "Executing simulated Dokploy rollback for %s: restoring %s (failed: %s, reason: %s) -- "
+            "no real API configured (DOKPLOY_API_URL/DOKPLOY_API_KEY unset), so this only updates "
+            "local bookkeeping, not a real target.",
             target_config.project_id,
             restored[:12],
             failed_digest[:12],

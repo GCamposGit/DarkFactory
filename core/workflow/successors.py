@@ -45,6 +45,7 @@ from core.workflow.control_contracts import (
     JobKey,
     OutboxEvent,
     StageResult,
+    normalize_cause_code,
 )
 from core.workflow.control_store import ControlStore
 
@@ -354,6 +355,9 @@ def materialize_result(
     if loop_cap_exceeded:
         db_status = "failed"
         effective_cause_code = f"loop_cap:{result.cause_code}" if result.cause_code else "loop_cap"
+    # jobs.cause_code is VARCHAR(64) on Postgres. Routing above already used the
+    # full original result.cause_code; only the persisted copy is normalized.
+    effective_cause_code = normalize_cause_code(effective_cause_code)
 
     def _not_before_for(successor: JobKey) -> Optional[str]:
         if retry_not_before and successor.stage != "retrospective" and result.outcome == "retry":

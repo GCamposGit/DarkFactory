@@ -44,14 +44,14 @@ def test_probe_claude_auth_expired(make_fake_cli, monkeypatch):
 
     result = auth_bootstrap.probe_claude()
     assert result.ok is False
-    assert result.detail == "auth_expired"
+    assert result.detail.startswith("auth_expired")  # `<error_kind>: <redacted text>`
 
 
 def test_probe_claude_not_installed(monkeypatch):
     monkeypatch.setattr(agent_cli, "find_claude_binary", lambda: None)
     result = auth_bootstrap.probe_claude()
     assert result.ok is False
-    assert result.detail == "not_installed"
+    assert result.detail.startswith("not_installed")
 
 
 def test_probe_codex_status_ok(tmp_path: Path, monkeypatch):

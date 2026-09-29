@@ -12,6 +12,7 @@ const infraState = {
 function initInfra() {
   mountInfraMonitor();
   loadInfraCards(false);
+  loadInfraMetrics(false);
   mountFactoryHealthBlock();
   loadFactoryHealth();
   if (typeof healthStartVisibilityPolling === "function") {
@@ -65,6 +66,9 @@ function mountInfraMonitor() {
     </div>
     <div id="infra-cards-grid" class="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
       ${infraSkeleton(3)}
+    </div>
+    <div id="infra-metrics-panel" class="mt-4 pt-3 border-t border-slate-800/80">
+      <div class="h-32 animate-pulse rounded-xl bg-slate-950/60 border border-slate-800/60"></div>
     </div>
     <div id="cloud-gateway-banner" class="mt-4 pt-3 border-t border-slate-800/80">
       <div class="h-16 animate-pulse rounded-xl bg-slate-950/60 border border-slate-800/60"></div>
@@ -303,6 +307,235 @@ function renderInfraError(msg) {
       "rounded-full border border-rose-700/60 bg-rose-950/40 px-2.5 py-0.5 text-[10px] font-mono text-rose-300";
     pill.textContent = "falha na API";
   }
+}
+
+async function loadInfraMetrics(force = false) {
+  const panel = document.getElementById("infra-metrics-panel");
+  if (!panel) return;
+
+  const btn = document.getElementById("btn-refresh-infra-metrics");
+  if (btn) {
+    btn.disabled = true;
+    btn.classList.add("opacity-60");
+  }
+
+  try {
+    const endpoint = force ? "/api/infra/metrics/refresh" : "/api/infra/metrics";
+    const method = force ? "POST" : "GET";
+    const res = await fetch(endpoint, { method });
+    if (!res.ok) throw new Error(`Status ${res.status}`);
+    const report = await res.json();
+    renderInfraMetrics(report);
+  } catch (err) {
+    console.warn("Falha ao carregar métricas de infraestrutura:", err);
+    renderInfraMetricsError(err.message);
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.classList.remove("opacity-60");
+    }
+  }
+}
+
+function renderInfraMetrics(data) {
+  const container = document.getElementById("infra-metrics-panel");
+  if (!container || !data) return;
+
+  const hw = data.host_hardware || {};
+  const containers = data.containers || {};
+  const items = containers.items || [];
+  const nodes = data.nodes || [];
+  const notebookNode = nodes.find((node) => node.role === "dev_workstation") || {
+    node_id: hw.node_id || "predator-neo-16",
+    status: "healthy",
+    is_live: true,
+    hardware: hw,
+    last_contact_at: hw.collected_at,
+  };
+  const desktopNode = nodes.find((node) => node.role === "on_prem_server") || {
+    node_id: "onprem-z97-server",
+    status: "offline",
+    is_live: false,
+    hardware: null,
+    last_contact_at: null,
+  };
+
+  const getBarColor = (pct) => {
+    if (pct >= 85) return "bg-rose-500 text-rose-300";
+    if (pct >= 65) return "bg-amber-500 text-amber-300";
+    return "bg-emerald-500 text-emerald-300";
+  };
+
+  const healthPills = {
+    healthy: "border-emerald-600/60 bg-emerald-950/40 text-emerald-300",
+    warning: "border-amber-600/60 bg-amber-950/40 text-amber-300",
+    critical: "border-rose-600/60 bg-rose-950/40 text-rose-300",
+    degraded: "border-orange-600/60 bg-orange-950/40 text-orange-300",
+    offline: "border-slate-600/60 bg-slate-900/70 text-slate-300",
+  };
+  const healthClass = healthPills[data.overall_health] || healthPills.healthy;
+  const escapeHtml = (value) => String(value ?? "").replace(/[&<>"']/g, (char) => ({
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
+  })[char]);
+  const formatUptime = (seconds) => {
+    const value = Number(seconds);
+    if (!Number.isFinite(value) || value < 0) return "—";
+    const hours = value / 3600;
+    return value > 86400 ? `${(value / 86400).toFixed(1)} dias` : `${hours.toFixed(1)} h`;
+  };
+  const formatLastContact = (value) => {
+    if (!value) return "Nunca";
+    const parsed = new Date(value);
+    return Number.isNaN(parsed.getTime()) ? "Indisponível" : parsed.toLocaleString("pt-BR");
+  };
+  const renderHardwareNode = (node, label) => {
+    const nodeHw = node.hardware;
+    const isOnline = Boolean(node.is_live && nodeHw);
+    const nodeStatus = node.status || (isOnline ? "healthy" : "offline");
+    const nodeHealthClass = healthPills[nodeStatus] || healthPills.offline;
+    const lastContact = formatLastContact(node.last_contact_at || (nodeHw && nodeHw.collected_at));
+    const metrics = isOnline ? [
+      {
+        label: "Processador (CPU)", value: `${Number(nodeHw.cpu_percent).toFixed(1)}%`,
+        percent: nodeHw.cpu_percent,
+        detail: `${nodeHw.cpu_cores_physical || 0} núcleos físicos (${nodeHw.cpu_cores_logical || 0} threads)`,
+      },
+      {
+        label: "Memória RAM", value: `${Number(nodeHw.ram_percent).toFixed(1)}%`,
+        percent: nodeHw.ram_percent,
+        detail: `${nodeHw.ram_used_gb} GB de ${nodeHw.ram_total_gb} GB (${nodeHw.ram_free_gb} GB livres)`,
+      },
+      {
+        label: `Armazenamento (${escapeHtml(nodeHw.disk_primary_mount || "/")})`, value: `${Number(nodeHw.disk_percent).toFixed(1)}%`,
+        percent: nodeHw.disk_percent,
+        detail: `${nodeHw.disk_used_gb} GB de ${nodeHw.disk_total_gb} GB (${nodeHw.disk_free_gb} GB livres)`,
+      },
+      {
+        label: "Uptime", value: formatUptime(nodeHw.uptime_seconds), percent: null,
+        detail: `Desde ${formatLastContact(nodeHw.boot_time)}`,
+      },
+    ] : [
+      { label: "Processador (CPU)", value: "—", percent: null, detail: "Sem leitura enquanto o Desktop está offline" },
+      { label: "Memória RAM", value: "—", percent: null, detail: "Sem leitura enquanto o Desktop está offline" },
+      { label: "Armazenamento", value: "—", percent: null, detail: "Sem leitura enquanto o Desktop está offline" },
+      { label: "Uptime", value: "—", percent: null, detail: "Sem leitura enquanto o Desktop está offline" },
+    ];
+    const metricCards = metrics.map((metric) => {
+      const hasReading = metric.percent !== null;
+      const percent = Math.max(0, Math.min(Number(metric.percent) || 0, 100));
+      const accent = percent >= 85 ? "text-rose-400" : "text-indigo-400";
+      return `
+        <div class="rounded-lg border border-slate-800 bg-slate-900/60 p-3 flex flex-col justify-between min-w-0">
+          <div class="flex items-center justify-between gap-2 text-xs font-mono">
+            <span class="text-slate-400">${metric.label}</span>
+            <span class="font-bold ${hasReading ? accent : "text-slate-500"}">${metric.value}</span>
+          </div>
+          ${hasReading ? `<div class="w-full bg-slate-800 rounded-full h-2 my-2 overflow-hidden"><div class="h-full rounded-full transition-all duration-500 ${getBarColor(percent).split(" ")[0]}" style="width: ${percent}%"></div></div>` : ""}
+          <span class="text-[10px] text-slate-500 font-mono">${metric.detail}</span>
+        </div>`;
+    }).join("");
+
+    return `
+      <section class="rounded-lg border border-slate-800 bg-slate-950/50 p-3 space-y-3">
+        <div class="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800/80 pb-2">
+          <div class="min-w-0">
+            <h4 class="text-xs font-bold text-white font-mono">${label} <span class="font-normal text-slate-500">${escapeHtml(node.node_id)}</span></h4>
+            <p class="text-[10px] text-slate-500 font-mono">${isOnline ? escapeHtml(nodeHw.os_platform) : "Último contato: " + lastContact}</p>
+          </div>
+          <span class="rounded-full border px-2 py-0.5 text-[10px] font-mono ${nodeHealthClass}">${escapeHtml(nodeStatus)}</span>
+        </div>
+        ${isOnline ? `<p class="text-[10px] text-slate-500 font-mono">Último contato: ${lastContact}</p>` : ""}
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">${metricCards}</div>
+      </section>`;
+  };
+
+  const containerRows = items.map((item) => {
+    const isRunning = ["running", "done", "active", "healthy"].includes(item.status);
+    const statusPill = isRunning
+      ? `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-mono bg-emerald-950/60 text-emerald-400 border border-emerald-800/60"><span class="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse"></span>${item.status}</span>`
+      : `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-mono bg-slate-800 text-slate-400 border border-slate-700">${item.status}</span>`;
+
+    return `
+      <tr class="border-b border-slate-900/80 hover:bg-slate-900/40 transition">
+        <td class="py-2 px-3 text-xs font-semibold text-white flex items-center gap-2">
+          <span>📦</span>
+          <span>${item.name}</span>
+        </td>
+        <td class="py-2 px-3 text-[11px] font-mono text-slate-400">${item.service_type}</td>
+        <td class="py-2 px-3">${statusPill}</td>
+        <td class="py-2 px-3 text-[11px] font-mono text-cyan-400">${item.orchestrator}</td>
+        <td class="py-2 px-3 text-[11px] font-mono text-slate-400">${item.node_id}</td>
+        <td class="py-2 px-3 text-[11px] text-slate-400 truncate max-w-[200px]" title="${item.deployment_title || ''}">${item.deployment_title || '—'}</td>
+      </tr>`;
+  }).join("");
+
+  container.innerHTML = `
+    <div class="rounded-xl border border-indigo-900/40 bg-slate-950/70 p-4 space-y-4 shadow-sm">
+      <div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between border-b border-slate-800/80 pb-3">
+        <div>
+          <div class="flex items-center gap-2">
+            <span class="text-sm">📊</span>
+            <h3 class="text-xs font-bold text-white uppercase tracking-wider font-mono">Telemetria de Hardware & Contêineres em Tempo Real (INFRA-11)</h3>
+            <span class="rounded-full border px-2 py-0.5 text-[10px] font-mono ${healthClass}">${data.overall_health}</span>
+          </div>
+          <p class="text-[11px] text-slate-400 mt-0.5 font-mono">
+            Hosts monitorados: <strong class="text-slate-200">Notebook</strong> e <strong class="text-slate-200">Desktop</strong>
+          </p>
+        </div>
+        <div class="flex items-center gap-2">
+          <button id="btn-refresh-infra-metrics" type="button" class="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg border border-indigo-500/40 bg-indigo-600/10 text-indigo-300 text-xs hover:bg-indigo-600/20 transition active:scale-95">
+            <svg class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+            </svg>
+            <span>Atualizar Métricas</span>
+          </button>
+        </div>
+      </div>
+
+      <div class="grid grid-cols-1 xl:grid-cols-2 gap-3">
+        ${renderHardwareNode(notebookNode, "Notebook")}
+        ${renderHardwareNode(desktopNode, "Desktop")}
+      </div>
+
+      <div class="space-y-2 pt-2 border-t border-slate-800/80">
+        <div class="flex items-center justify-between text-xs font-mono">
+          <span class="text-slate-300 font-semibold flex items-center gap-1.5">
+            <span>🐳</span> Contêineres & Cargas de Trabalho Ativas
+            <span class="text-[10px] font-normal text-slate-400">(${containers.running_containers || 0}/${containers.total_containers || 0} ativos)</span>
+          </span>
+          <span class="text-[10px] text-slate-400">Orquestradores: ${(containers.orchestrators_detected || []).join(', ') || 'Nenhum'}</span>
+        </div>
+        <div class="overflow-x-auto rounded-lg border border-slate-800 bg-slate-900/40">
+          <table class="min-w-full divide-y divide-slate-800 text-left">
+            <thead class="bg-slate-950/80 text-[10px] font-mono text-slate-400 uppercase">
+              <tr>
+                <th class="py-2 px-3">Serviço</th>
+                <th class="py-2 px-3">Tipo</th>
+                <th class="py-2 px-3">Status</th>
+                <th class="py-2 px-3">Orquestrador</th>
+                <th class="py-2 px-3">Nó</th>
+                <th class="py-2 px-3">Título / Descrição</th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-slate-900/60 font-mono">
+              ${containerRows || '<tr><td colspan="6" class="py-4 text-center text-xs text-slate-500">Nenhum contêiner registrado.</td></tr>'}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>`;
+
+  document.getElementById("btn-refresh-infra-metrics")?.addEventListener("click", () => loadInfraMetrics(true));
+}
+
+function renderInfraMetricsError(msg) {
+  const container = document.getElementById("infra-metrics-panel");
+  if (!container) return;
+  container.innerHTML = `
+    <div class="rounded-xl border border-rose-900/40 bg-slate-950/70 p-3 text-xs font-mono text-rose-300 flex items-center justify-between">
+      <span>Falha na telemetria de infraestrutura: ${msg}</span>
+      <button onclick="loadInfraMetrics(true)" class="px-2 py-0.5 rounded bg-rose-950 border border-rose-800 text-rose-200 text-[11px] hover:bg-rose-900">Tentar novamente</button>
+    </div>`;
 }
 
 async function renderCloudGatewayBanner() {

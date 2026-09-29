@@ -13,6 +13,7 @@ from core.infra.models import (
     ServiceItem,
 )
 from core.infra.inventory import DEFAULT_INVENTORY_PATH, InventoryManager, build_default_inventory
+from core.infra.persistence import HybridPersistenceAdapter, PersistenceRecord, SyncResult
 
 __all__ = [
     "ArchitectureDecisionRecord",
@@ -26,4 +27,8 @@ __all__ = [
     "DEFAULT_INVENTORY_PATH",
     "InventoryManager",
     "build_default_inventory",
+    "HybridPersistenceAdapter",
+    "PersistenceRecord",
+    "SyncResult",
 ]
+

@@ -248,7 +248,7 @@ def run_planning(
             STAGE, prompt, ws.path, host_caps=host_caps, routing_config=routing_config
         )
         if not result.ok:
-            return StageResult(outcome="retry", cause_code=result.error_kind or "planning_agent_failed")
+            return stage_grill.retry_for_agent_failure(result, "planning_agent_failed")
         try:
             plan = parse_planning_plan(result.text)
             break

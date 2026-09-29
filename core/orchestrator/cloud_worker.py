@@ -15,14 +15,22 @@ import signal
 import sys
 import threading
 import time
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, Callable
 from pydantic import BaseModel, ConfigDict, Field
 
 from core.orchestrator.adapters.control_postgres import PostgresControlStore
 from core.orchestrator.cloud_artifacts import CloudArtifactStore
-from core.workflow.control_contracts import Claim, ExternalOperation, RuntimeOwner, StageContext, StageResult
+from core.workflow.control_contracts import (
+    Claim,
+    ExternalOperation,
+    InvalidResultError,
+    RuntimeOwner,
+    StageContext,
+    StageResult,
+    StaleLeaseError,
+)
 from core.workflow.handlers import HandlerRegistry
 from core.workflow.successors import materialize_result
 
@@ -39,7 +47,15 @@ _HARNESS_BINARIES: dict[str, str] = {
     "antigravity": "antigravity",
 }
 _TOOLING_BINARIES: tuple[str, ...] = ("git", "gh", "node", "python")
-_CAPABILITY_PROBE_INTERVAL_SEC = 3600.0
+# Two probe cadences, per harness (each probe is a real CLI call; a headless
+# `claude -p ok` loads the full system prompt and costs subscription quota):
+# - a DROPPED harness is re-probed every 600s, so a completed login (Codex
+#   device-auth, a freshly set CLAUDE_CODE_OAUTH_TOKEN) takes effect fast;
+# - a HEALTHY harness is only re-probed every 3600s, to detect expiry.
+_CAPABILITY_PROBE_INTERVAL_SEC = 600.0
+_HEALTHY_PROBE_INTERVAL_SEC = 3600.0
+# Delay before a job this worker cannot serve (no authenticated harness) is retried.
+_NO_HARNESS_RETRY_MINUTES = 10
 
 DEFAULT_CAPABILITIES: tuple[str, ...] = (
     "grill_engine",
@@ -148,7 +164,11 @@ class CloudWorker:
         intake_service: Any = None,
         routing_config: Any = None,
         capability_probe_interval_s: float = _CAPABILITY_PROBE_INTERVAL_SEC,
+        healthy_probe_interval_s: float = _HEALTHY_PROBE_INTERVAL_SEC,
         autodetect_tooling: bool = False,
+        clock: Callable[[], float] = time.monotonic,
+        on_capabilities_probed: Callable[[list[str]], None] | None = None,
+        capability_detail_lookup: Callable[[str], str] | None = None,
     ) -> None:
         self.worker_id = worker_id or os.environ.get("DARKFAC_WORKER_ID", "cloud-worker-1")
         self.max_slots = (
@@ -159,9 +179,20 @@ class CloudWorker:
         self.database_url = database_url or os.environ.get("DARKFAC_HF02_DATABASE_URL")
 
         self._capability_prober = capability_prober
+        # Injectable monotonic clock (tests) and a hook fired after every real
+        # probe run with the resulting capabilities (used to kick off the
+        # Codex login bootstrap when harness:codex is still missing).
+        self._clock = clock
+        self._on_capabilities_probed = on_capabilities_probed
+        self._capability_detail_lookup = capability_detail_lookup
         self._autodetect_tooling = autodetect_tooling
+        # `capability_probe_interval_s` is the cadence for DROPPED harnesses (and
+        # the tick gate); healthy ones use `healthy_probe_interval_s`.
         self._capability_probe_interval_s = capability_probe_interval_s
+        self._healthy_probe_interval_s = healthy_probe_interval_s
         self._last_capability_probe_monotonic: float | None = None
+        # harness name -> (clock time of its last real probe, result)
+        self._harness_probe_state: dict[str, tuple[float, bool]] = {}
 
         if capabilities is not None:
             self.capabilities = list(capabilities)
@@ -193,7 +224,11 @@ class CloudWorker:
         self._stop_event: threading.Event | None = None
 
     @staticmethod
-    def _filter_capabilities(capabilities: list[str], prober: Callable[[str], bool]) -> list[str]:
+    def _filter_capabilities(
+        capabilities: list[str],
+        prober: Callable[[str], bool],
+        detail_lookup: Callable[[str], str] | None = None,
+    ) -> list[str]:
         kept: list[str] = []
         for cap in capabilities:
             if cap.startswith("harness:"):
@@ -204,12 +239,64 @@ class CloudWorker:
                     logger.warning("Capability prober raised for %s; dropping capability: %s", cap, exc)
                     ok = False
                 if not ok:
-                    logger.warning("Dropping capability %s: auth probe failed", cap)
+                    # `detail_lookup` (redacted probe detail: error kind + first
+                    # ~300 chars) makes a dropped harness diagnosable from logs.
+                    detail = ""
+                    if detail_lookup is not None:
+                        try:
+                            detail = detail_lookup(harness_name)
+                        except Exception:  # never let diagnostics break the filter
+                            detail = ""
+                    logger.warning(
+                        "Dropping capability %s: auth probe failed%s", cap, f" ({detail})" if detail else ""
+                    )
                     continue
             kept.append(cap)
         return kept
 
-    def _compute_capabilities(self) -> list[str]:
+    def _agent_route_unavailable(self, stage: str) -> str | None:
+        """Only for real autodetecting workers (explicit-caps test workers keep
+        their exact behaviour): see `core.line.bindings.agent_route_unavailable`."""
+        if not self._autodetect_tooling:
+            return None
+        from core.line.bindings import agent_route_unavailable
+
+        return agent_route_unavailable(
+            stage,
+            self.capabilities,
+            openrouter_configured=bool(os.environ.get("OPENROUTER_API_KEY")),
+        )
+
+    def _due_cached_prober(self, force_all: bool) -> Callable[[str], bool]:
+        """Wrap the configured prober so each harness is only really probed when due.
+
+        Never probed -> due. Dropped (last probe failed) -> due after
+        `_capability_probe_interval_s`. Healthy -> due after
+        `_healthy_probe_interval_s`. Otherwise the cached result is returned
+        without running the CLI. `force_all` re-probes everything.
+        """
+        assert self._capability_prober is not None
+        prober = self._capability_prober
+
+        def probe(harness: str) -> bool:
+            now = self._clock()
+            state = self._harness_probe_state.get(harness)
+            if state is not None and not force_all:
+                last, healthy = state
+                interval = self._healthy_probe_interval_s if healthy else self._capability_probe_interval_s
+                if now - last < interval:
+                    return healthy
+            try:
+                ok = bool(prober(harness))
+            except Exception as exc:
+                logger.warning("Capability prober raised for harness:%s; treating as dropped: %s", harness, exc)
+                ok = False
+            self._harness_probe_state[harness] = (now, ok)
+            return ok
+
+        return probe
+
+    def _compute_capabilities(self, *, force_all: bool = False) -> list[str]:
         """DARKFAC_WORKER_CAPS host caps on top of role caps, plus (opt-in,
         HF-27-08) autodetected tooling/harnesses, then the auth-probe filter.
 
@@ -226,17 +313,24 @@ class CloudWorker:
                     capabilities.append(cap)
 
         if self._capability_prober is not None:
-            capabilities = self._filter_capabilities(capabilities, self._capability_prober)
+            capabilities = self._filter_capabilities(
+                capabilities, self._due_cached_prober(force_all), self._capability_detail_lookup
+            )
 
         if self._autodetect_tooling and "harness:any" not in capabilities:
             if any(c.startswith("harness:") for c in capabilities):
                 capabilities.append("harness:any")
 
-        self._last_capability_probe_monotonic = time.monotonic()
+        self._last_capability_probe_monotonic = self._clock()
         return capabilities
 
     def refresh_capabilities(self, *, force: bool = False) -> bool:
-        """Re-run `_compute_capabilities()` if the probe interval has elapsed.
+        """Recompute capabilities once per tick (`capability_probe_interval_s`).
+
+        Only the harnesses that are *due* are actually probed: dropped ones
+        every 600s, healthy ones every 3600s (see `_due_cached_prober`);
+        `force=True` re-probes all. The `on_capabilities_probed` hook fires
+        after every tick so the Codex login trigger keeps working.
 
         No-op (returns False) when autodetection/probing was never
         requested, so a worker started with an explicit `capabilities` list
@@ -246,13 +340,23 @@ class CloudWorker:
         if not self._autodetect_tooling and self._capability_prober is None:
             return False
         if not force:
-            elapsed = time.monotonic() - (self._last_capability_probe_monotonic or 0.0)
+            elapsed = self._clock() - (self._last_capability_probe_monotonic or 0.0)
             if elapsed < self._capability_probe_interval_s:
                 return False
-        new_caps = self._compute_capabilities()
+        new_caps = self._compute_capabilities(force_all=force)
         changed = new_caps != self.capabilities
         self.capabilities = new_caps
+        self.notify_capabilities_probed()
         return changed
+
+    def notify_capabilities_probed(self) -> None:
+        """Fire the post-probe hook; it must never break the worker loop."""
+        if self._on_capabilities_probed is None:
+            return
+        try:
+            self._on_capabilities_probed(list(self.capabilities))
+        except Exception as exc:
+            logger.warning("Capability post-probe hook failed: %s", exc)
 
     @property
     def registry(self) -> HandlerRegistry:
@@ -603,7 +707,21 @@ class CloudWorker:
             context = self._build_stage_context(claim)
             stop_heartbeat, heartbeat_thread = self._start_lease_heartbeat(claim)
             try:
-                stage_result = self.registry.dispatch(context)
+                unavailable = self._agent_route_unavailable(stage)
+                if unavailable is not None:
+                    # The job was claimable (initial grill has no required caps)
+                    # but this worker has no authenticated harness for it: hand
+                    # it back with a delay instead of crashing/burning the agent.
+                    retry_at = (datetime.now(UTC) + timedelta(minutes=_NO_HARNESS_RETRY_MINUTES)).replace(microsecond=0)
+                    logger.warning(
+                        "Worker %s has no authenticated harness for stage %s; deferring %s until %s",
+                        self.worker_id, stage, claim.job_key.canonical_key(), retry_at.isoformat(),
+                    )
+                    stage_result = StageResult(
+                        outcome="retry", cause_code=f"{unavailable} not_before={retry_at.isoformat()}"
+                    )
+                else:
+                    stage_result = self.registry.dispatch(context)
             except Exception as exc:
                 logger.error(
                     "Handler for %s raised %s: %s; recording as retry(handler_error)",
@@ -626,7 +744,20 @@ class CloudWorker:
                 logger.warning("Owner notification failed for %s: %s", claim.job_key.canonical_key(), exc)
 
             finish_now = datetime.now(UTC)
-            self.store.finish(claim, stage_result, now=finish_now)
+            try:
+                self.store.finish(claim, stage_result, now=finish_now)
+            except (StaleLeaseError, InvalidResultError):
+                raise
+            except Exception as exc:
+                # e.g. a column overflow on the store. Never leave the job
+                # `running` until its lease expires: record a short failure
+                # (full detail stays in this log) so the run terminates visibly.
+                logger.error(
+                    "store.finish failed for %s (%s: %s); recording short failure instead",
+                    claim.job_key.canonical_key(), type(exc).__name__, exc,
+                )
+                stage_result = StageResult(outcome="failed", cause_code=f"finish_failed:{type(exc).__name__}"[:60])
+                self.store.finish(claim, stage_result, now=datetime.now(UTC))
             materialize_result(claim.job_key, stage_result, self.store, now=finish_now)
 
             return {"stage_result": stage_result.model_dump()}
@@ -811,17 +942,42 @@ def main(argv: list[str] | None = None) -> int:
     # of publishing it and later failing the claim. Best-effort: any import
     # or probe failure here just skips capability filtering.
     capability_prober: Callable[[str], bool] | None = None
+    capability_detail_lookup: Callable[[str], str] | None = None
     try:
-        from core.line.auth_bootstrap import probe_harness_auth
+        from core.line.auth_bootstrap import last_probe_detail, probe_harness_auth
 
         capability_prober = probe_harness_auth
+        capability_detail_lookup = last_probe_detail
     except Exception as exc:  # pragma: no cover - defensive, optional dependency
         logger.debug("Capability auth probing unavailable: %s", exc)
 
     # HF-27-08: real worker processes autodetect git/gh/node/python plus
     # harness:<x> on PATH (opt-in flag so unit tests constructing CloudWorker
     # directly keep their exact, environment-independent capability lists).
-    worker = CloudWorker(capability_prober=capability_prober, autodetect_tooling=True)
+    login_hook: Callable[[list[str]], None] | None = None
+    try:
+        from core.harness.remote_worker import find_codex_binary
+        from core.line.auth_bootstrap import CodexLoginTrigger
+
+        trigger = CodexLoginTrigger()
+        env_caps = [c.strip() for c in os.environ.get("DARKFAC_WORKER_CAPS", "").split(",")]
+        codex_expected = "harness:codex" in env_caps or bool(find_codex_binary())
+
+        def login_hook(caps: list[str]) -> None:
+            if trigger.maybe_start(caps, codex_expected=codex_expected):
+                logger.info("Started Codex device-auth login bootstrap (Telegram relay)")
+
+    except Exception as exc:  # pragma: no cover - defensive, optional dependency
+        logger.debug("Codex login bootstrap unavailable: %s", exc)
+
+    worker = CloudWorker(
+        capability_prober=capability_prober,
+        autodetect_tooling=True,
+        on_capabilities_probed=login_hook,
+        capability_detail_lookup=capability_detail_lookup,
+    )
+    # Boot-time check (the constructor's probe ran before the hook existed to fire).
+    worker.notify_capabilities_probed()
 
     poll_interval_sec = args.poll_interval
     if poll_interval_sec is None:

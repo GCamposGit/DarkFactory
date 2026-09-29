@@ -18,7 +18,7 @@ tende a ser estavel entre versoes.
 2. Criar o repositorio minimo `darkfac-canary` (a fabrica gera os arquivos)
 3. `gh repo create --private` (publicar no GitHub)
 4. Dokploy: criar o app e apontar `canary.<dominio>`
-5. Ligar o compose `darkfac-canary` (profile `canary`)
+5. Configurar o compose `darkfac-canary` (roda sozinho em loop, sem cron)
 6. Verificacao final (aceite do ticket)
 
 ---
@@ -126,15 +126,22 @@ Se preferir a UI em vez da CLI:
 9. Teste no navegador ou `curl https://canary.seu-dominio.com/version` — deve
    responder com o SHA do commit.
 
-## 5. Ligar o compose `darkfac-canary` (profile `canary`)
+## 5. Configurar o compose `darkfac-canary` (roda sozinho em loop, sem cron)
 
-O servico `darkfac-canary` em `deploy/dokploy/docker-compose.cloud.yml` fica
-**desligado por padrao** (Compose `profiles: ["canary"]`), porque ele depende
-do app real existir (passos 2-4). Depois que `canary.seu-dominio.com`
-responder:
+**Fechamento HF-03-08 / HF-27-10 (2026-09-28): o servico `darkfac-canary` em
+`deploy/dokploy/docker-compose.cloud.yml` nao fica mais atras de
+`profiles: ["canary"]` nem precisa de agendamento manual.** Ele agora sobe
+junto com o resto do stack (`restart: unless-stopped`) e roda em loop dentro
+do proprio processo, via `python -m core.line.canary run --base-url
+${DARKFAC_CANARY_BASE_URL:-} --every-seconds 3600` — o loop e implementado em
+`core.line.canary.run_loop` (submete/observa, loga, dorme 1h, repete; uma
+excecao numa iteracao nunca derruba as seguintes). **Nao ha mais um passo
+manual de cron/Scheduled Task para o dia-a-dia** — o que resta e so
+provisionar as variaveis de ambiente do servico, depois que
+`canary.seu-dominio.com` responder (passos 2-4):
 
-1. No arquivo de ambiente do coordinator/worker/canary (Dokploy > cada app,
-   ou `.env` local, conforme `deploy/dokploy/env.cloud.example`), defina:
+1. No ambiente do servico `darkfac-canary` (Dokploy > app > Environment, ou
+   `.env` local, conforme `deploy/dokploy/env.cloud.example`), defina:
    - `DARKFAC_CANARY_BASE_URL=https://canary.seu-dominio.com`
    - `DARKFAC_HF02_DATABASE_URL=<mesma URL do coordinator/worker>` — **sem
      isso o canario ainda funciona, mas cai para um SQLite local dentro do
@@ -147,32 +154,19 @@ responder:
      semanal silenciosamente nao saem (apenas um `logger.warning` local).
      Veja a secao "Owner notifications" em `env.cloud.example` para como
      obter o token/ids pelo @BotFather.
-2. Confirme que o volume `darkfac-canary-reports` existe (Dokploy cria
-   automaticamente a partir do compose na primeira vez que o servico roda;
-   sem ele, cada execucao one-shot comecaria com zero relatorios e o green
-   streak nunca passaria de 1 — review item 3 do PR #37). Em Dokploy:
-   **Volumes** (menu lateral) deve listar `darkfac-canary-reports` apos o
-   primeiro `run`.
-3. Para rodar o canario manualmente uma vez (validacao):
+2. Confirme que o volume `darkfac-canary-reports-v2` existe (Dokploy cria
+   automaticamente a partir do compose na primeira vez que o servico sobe;
+   sem ele, o container perderia os relatorios anteriores a cada restart e o
+   green streak nunca passaria de 1 — review item 3 do PR #37). Em Dokploy:
+   **Volumes** (menu lateral) deve listar `darkfac-canary-reports-v2` apos o
+   primeiro deploy.
+3. Para validar manualmente (fora do loop continuo, uma unica iteracao):
    ```powershell
-   docker compose -f deploy/dokploy/docker-compose.cloud.yml --profile canary run --rm darkfac-canary
+   docker compose -f deploy/dokploy/docker-compose.cloud.yml run --rm darkfac-canary python -m core.line.canary run --base-url $env:DARKFAC_CANARY_BASE_URL
    ```
-4. Para agendamento diario automatico, use o recurso nativo do Dokploy
-   ("Scheduled Tasks" / "Cron Jobs" na versao atual, dentro do app
-   `darkfac-canary` ou de um app "Schedule" separado apontando para o mesmo
-   compose/profile), configurando:
-   - **Schedule / Cron expression**: `0 * * * *` (a cada hora — o canario e
-     idempotente e nao-bloqueante: cada execucao faz um unico
-     submit-se-preciso + observe e sai; rodar de hora em hora deixa o
-     relatorio do dia progredir de `in_progress` ate `passed`/`failed`/
-     `timeout` sem precisar de um container ficar horas rodando). Se
-     preferir uma unica vez por dia, `0 9 * * *` (09:00 UTC) tambem funciona,
-     mas um run pendente so vira `timeout` depois de `--timeout-seconds`
-     (padrao 6h) e voce so vai saber no dia seguinte.
-   - **Command**: `python -m core.line.canary run --base-url $DARKFAC_CANARY_BASE_URL`.
-   Se sua versao do Dokploy nao tiver cron nativo ainda, use o Windows Task
-   Scheduler (host coordenador) ou `crontab` na VPS apontando para o mesmo
-   comando `docker compose ... run --rm darkfac-canary`.
+4. Depois que o compose for implantado pelo Dokploy com as variaveis do
+   passo 1, o servico `darkfac-canary` ja fica de pe sozinho e o loop cuida
+   da cadencia — nao ha um passo 4 de agendamento para configurar.
 5. Dogfood (opcional, so depois de validar o canario por si so): duas formas
    de ligar, ambas desligadas por padrao (`DARKFAC_DOGFOOD_ENABLED=false`):
    - **Embutido no canario**: defina `DARKFAC_DOGFOOD_ENABLED=true` no
@@ -192,13 +186,16 @@ responder:
 
 - [ ] `nslookup canary.seu-dominio.com` resolve para o IP da VPS.
 - [ ] `curl https://canary.seu-dominio.com/version` responde 200 com o SHA.
-- [ ] `docker compose -f deploy/dokploy/docker-compose.cloud.yml --profile canary run --rm darkfac-canary`
+- [ ] `docker compose -f deploy/dokploy/docker-compose.cloud.yml run --rm darkfac-canary python -m core.line.canary run --base-url $env:DARKFAC_CANARY_BASE_URL`
       roda sem erro e escreve `.factory/reports/canary/<hoje>.json` (dentro
-      do volume `darkfac-canary-reports`, nao perdido entre execucoes).
+      do volume `darkfac-canary-reports-v2`, nao perdido entre execucoes/restarts).
 - [ ] Rodar o comando acima duas vezes seguidas no mesmo dia produz o MESMO
       `run_id` no relatorio (idempotente) e o `outcome` avanca de
       `in_progress` para `passed`/`failed` conforme a linha progride --
       nunca `passed=true` num relatorio com etapas pendentes.
+- [ ] Apos o deploy do compose, o servico `darkfac-canary` fica `Up` e sem
+      `profiles` no `docker compose config` — o loop (`run_loop`,
+      `--every-seconds 3600`) roda sozinho, sem cron nem Scheduled Task.
 - [ ] Com `TELEGRAM_*` configurado, uma falha proposital (rode num dia sem
       `DARKFAC_CANARY_BASE_URL`, por exemplo) chega no Telegram com a etapa
       e o `cause_code`.

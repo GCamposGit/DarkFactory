@@ -23,12 +23,21 @@ logger = logging.getLogger("darkfac.dispatch")
 
 
 def http_request(url: str, method: str = "GET", data: dict[str, Any] | None = None, timeout: float = 10.0) -> dict[str, Any]:
-    """Execute HTTP request using standard library urllib."""
+    """Execute HTTP request using standard library urllib.
+
+    Sends `Authorization: Bearer $DARKFAC_COORDINATOR_API_TOKEN` whenever
+    that env var is set -- this dispatcher is the only HTTP client of the
+    coordinator API, and every endpoint except `/healthz` (liveness-only)
+    now requires it (see core.orchestrator.cloud_coordinator).
+    """
     body_bytes = None
     headers = {"Accept": "application/json"}
     if data is not None:
         body_bytes = json.dumps(data).encode("utf-8")
         headers["Content-Type"] = "application/json"
+    api_token = os.environ.get("DARKFAC_COORDINATOR_API_TOKEN", "")
+    if api_token:
+        headers["Authorization"] = f"Bearer {api_token}"
 
     req = Request(url, data=body_bytes, headers=headers, method=method)
     try:

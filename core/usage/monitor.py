@@ -13,6 +13,9 @@ from typing import Any, Dict, Iterable, List, Optional
 from core.usage.adapters import AccountUsageAdapter, build_default_adapters
 from core.usage.models import AccountConnectionStatus, AccountUsageReport, ProviderAccountUsage
 
+from datetime import datetime, timezone
+import inspect as py_inspect
+
 logger = logging.getLogger(__name__)
 
 
@@ -43,10 +46,21 @@ class AccountUsageMonitor:
             except Exception as exc:
                 logger.warning("Failed to read existing snapshot %s: %s", file_target, exc)
         existing.update(payload)
+        existing.setdefault("checked_at", datetime.now(timezone.utc).isoformat())
         file_target.write_text(json.dumps(existing, indent=2, ensure_ascii=False), encoding="utf-8")
         with self._lock:
             self._cache = None
             self._cached_at = 0.0
+
+    @staticmethod
+    def _run_adapter_inspect(adapter: AccountUsageAdapter, force: bool) -> ProviderAccountUsage:
+        try:
+            sig = py_inspect.signature(adapter.inspect)
+            if "force" in sig.parameters:
+                return adapter.inspect(force=force)
+            return adapter.inspect()
+        except TypeError:
+            return adapter.inspect()
 
     def inspect(self, force: bool = False) -> AccountUsageReport:
         with self._lock:
@@ -56,7 +70,7 @@ class AccountUsageMonitor:
         accounts: List[ProviderAccountUsage] = []
         workers = min(6, max(1, len(self.adapters)))
         with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="quota-probe") as executor:
-            futures = {executor.submit(adapter.inspect): adapter for adapter in self.adapters}
+            futures = {executor.submit(self._run_adapter_inspect, adapter, force): adapter for adapter in self.adapters}
             for future in as_completed(futures):
                 adapter = futures[future]
                 try:

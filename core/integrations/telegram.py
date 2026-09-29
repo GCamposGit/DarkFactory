@@ -81,6 +81,31 @@ class TelegramChat(BaseModel):
     username: Optional[str] = None
 
 
+class TelegramVoice(BaseModel):
+    """Voice note audio metadata."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    file_id: str
+    file_unique_id: str
+    duration: int = 0
+    mime_type: Optional[str] = None
+    file_size: Optional[int] = None
+
+
+class TelegramAudio(BaseModel):
+    """General audio file metadata."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    file_id: str
+    file_unique_id: str
+    duration: int = 0
+    mime_type: Optional[str] = None
+    file_size: Optional[int] = None
+    file_name: Optional[str] = None
+
+
 class TelegramMessage(BaseModel):
     """Incoming or outgoing Telegram message."""
 
@@ -91,6 +116,10 @@ class TelegramMessage(BaseModel):
     chat: TelegramChat
     date: int
     text: Optional[str] = None
+    voice: Optional[TelegramVoice] = None
+    audio: Optional[TelegramAudio] = None
+    caption: Optional[str] = None
+    reply_to_message: Optional[TelegramMessage] = None
 
 
 class TelegramCallbackQuery(BaseModel):
@@ -317,6 +346,7 @@ class TelegramGateway:
         status_handler: Optional[Callable[[Optional[str]], Dict[str, Any]]] = None,
         line_grill_handler: Optional[Callable[[str, str, str, int], Dict[str, Any]]] = None,
         commercial_acceptance_handler: Optional[Callable[[str, int], Dict[str, Any]]] = None,
+        audio_engine: Optional[Any] = None,
     ) -> None:
         self.config = config
         self.state_dir = state_dir or Path(".factory/telegram")
@@ -344,6 +374,7 @@ class TelegramGateway:
         # "#") and commercial-acceptance (cb:accept:<run_id>) callbacks.
         self.line_grill_handler = line_grill_handler
         self.commercial_acceptance_handler = commercial_acceptance_handler
+        self.audio_engine = audio_engine
 
         self.last_offset: int = 0
         self.processed_update_ids: Set[int] = set()
@@ -486,12 +517,110 @@ class TelegramGateway:
         self._save_state()
         return result
 
+    def download_telegram_file(self, file_id: str, dest_path: Path) -> bool:
+        """Download audio/voice file from Telegram Bot API using getFile (USR-60)."""
+        if not self.config.bot_token:
+            return False
+        try:
+            get_file_url = f"{self.config.api_base_url}/bot{self.config.bot_token}/getFile?file_id={urllib.parse.quote(file_id)}"
+            req = urllib.request.Request(get_file_url)
+            with urllib.request.urlopen(req, timeout=15.0) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+            if not data.get("ok"):
+                logger.warning("Telegram getFile returned error: %s", data)
+                return False
+            file_path = data.get("result", {}).get("file_path")
+            if not file_path:
+                return False
+
+            download_url = f"{self.config.api_base_url}/file/bot{self.config.bot_token}/{file_path}"
+            dl_req = urllib.request.Request(download_url)
+            dest_path.parent.mkdir(parents=True, exist_ok=True)
+            with urllib.request.urlopen(dl_req, timeout=30.0) as resp, open(dest_path, "wb") as out_file:
+                while chunk := resp.read(65536):
+                    out_file.write(chunk)
+            return True
+        except Exception as exc:
+            logger.error("Failed downloading Telegram file %s: %s", file_id, exc)
+            return False
+
     def _handle_message(self, update: TelegramUpdate) -> TelegramDispatchResult:
         msg = update.message
         assert msg is not None
         user_id = msg.from_user.id if msg.from_user else None
         chat_id = msg.chat.id
         raw_text = (msg.text or "").strip()
+
+        # Handle voice and audio input (USR-60)
+        voice_obj = msg.voice or msg.audio
+        if not raw_text and voice_obj:
+            tmp_ext = ".ogg" if msg.voice else Path(getattr(msg.audio, "file_name", "") or "audio.wav").suffix or ".wav"
+            import uuid
+            upload_dir = Path(os.environ.get("DARKFAC_AUDIO_TMP", Path(os.environ.get("TEMP", "/tmp")) / "darkfac_audio"))
+            upload_dir.mkdir(parents=True, exist_ok=True)
+            tmp_audio_path = upload_dir / f"tg_{uuid.uuid4().hex[:8]}{tmp_ext}"
+            transcribed = ""
+            try:
+                downloaded = self.download_telegram_file(voice_obj.file_id, tmp_audio_path)
+                if downloaded or tmp_audio_path.is_file():
+                    if self.audio_engine:
+                        t_res = self.audio_engine.transcribe(tmp_audio_path)
+                        transcribed = t_res.text.strip()
+                    else:
+                        from core.audio.engine import AudioTranscriptionEngine
+                        engine = AudioTranscriptionEngine()
+                        t_res = engine.transcribe(tmp_audio_path)
+                        transcribed = t_res.text.strip()
+            except Exception as exc:
+                logger.error("Failed transcribing Telegram voice message: %s", exc)
+            finally:
+                tmp_audio_path.unlink(missing_ok=True)
+
+            if not transcribed:
+                return TelegramDispatchResult(
+                    update_id=update.update_id,
+                    action=TelegramActionType.UNKNOWN,
+                    authorized=True,
+                    response_text="⚠️ Não foi possível transcrever a mensagem de voz. Verifique a qualidade do áudio ou envie como texto.",
+                )
+
+            # Contextual Routing (Gate G1 approved):
+            reply_text = msg.reply_to_message.text if (msg.reply_to_message and msg.reply_to_message.text) else ""
+            match_ticket = re.search(r"\b((?:USR|DF)-\d+|[a-zA-Z0-9_-]+:[a-zA-Z0-9_-]+)\b", reply_text + " " + transcribed, re.IGNORECASE)
+            is_grill_context = ("grill" in reply_text.lower() or "intervenção prioritária" in reply_text.lower() or "desambiguação" in reply_text.lower() or "grill" in transcribed.lower())
+
+            if is_grill_context and match_ticket:
+                target_ticket_id = match_ticket.group(1).upper()
+                result = TelegramDispatchResult(
+                    update_id=update.update_id,
+                    action=TelegramActionType.GRILL,
+                    authorized=True,
+                    target_id=target_ticket_id,
+                )
+                if self.grill_handler:
+                    try:
+                        res = self.grill_handler(target_ticket_id, transcribed, user_id or 0)
+                        result.resumed = res.get("resumed", True)
+                        result.response_text = (
+                            f"✅ Resposta de voz registrada para o Grill de <b>{target_ticket_id}</b>:\n"
+                            f"<i>\"{transcribed}\"</i>\n"
+                            f"Avanço autônomo retomado."
+                        )
+                    except Exception as exc:
+                        result.error = str(exc)
+                        result.response_text = f"❌ Falha ao aplicar resposta do Grill: {exc}"
+                else:
+                    result.resumed = True
+                    result.response_text = f"✅ Resposta de voz registrada para {target_ticket_id}."
+                return result
+
+            # Standalone voice note -> Ingest as /demand
+            is_voice_demand = True
+            voice_transcription = transcribed
+            raw_text = f"/demand {transcribed}"
+        else:
+            is_voice_demand = False
+            voice_transcription = ""
 
         parts = raw_text.split(maxsplit=1)
         cmd_str = parts[0].lower() if parts else ""
@@ -574,16 +703,70 @@ class TelegramGateway:
                     try:
                         res = self.demand_handler(arg_str, user_id or 0)
                         ticket_id = res.get("ticket_id", "TICKET-AUTO")
+                        title = res.get("title", arg_str[:60])
+                        status_val = res.get("status", "planned")
                         result.target_id = ticket_id
                         prefix = "👑 [Owner Demand] " if self.config.role == "owner" else ""
-                        result.response_text = f"✅ {prefix}Demand registered successfully: <b>{ticket_id}</b>"
+                        if is_voice_demand and voice_transcription:
+                            result.response_text = (
+                                f"✅ {prefix}Demanda por Áudio Registrada com Sucesso!\n\n"
+                                f"📋 <b>Ticket:</b> <code>{ticket_id}</code>\n"
+                                f"📌 <b>Título:</b> {title}\n"
+                                f"📊 <b>Status:</b> {status_val}\n\n"
+                                f"🎙️ <b>Transcrição Original do Áudio:</b>\n"
+                                f"<i>\"{voice_transcription}\"</i>\n\n"
+                                f"🚀 <i>Demanda adicionada ao backlog da Dark Factory.</i>"
+                            )
+                        else:
+                            result.response_text = (
+                                f"✅ {prefix}Demanda registrada com sucesso!\n\n"
+                                f"📋 <b>Ticket:</b> <code>{ticket_id}</code>\n"
+                                f"📌 <b>Título:</b> {title}\n"
+                                f"📊 <b>Status:</b> {status_val}\n\n"
+                                f"<i>Demanda inserida no backlog da Dark Factory.</i>"
+                            )
                     except Exception as exc:
                         logger.error("Demand handler error: %s", exc)
                         result.error = str(exc)
                         result.response_text = f"❌ Failed to register demand: {exc}"
                 else:
-                    result.target_id = "DEMAND-RECORDED"
-                    result.response_text = "✅ Demand received and queued for intake."
+                    try:
+                        from core.demands.models import DemandInput
+                        from core.demands.service import DemandsService
+
+                        demands_svc = DemandsService()
+                        ticket = demands_svc.create_ticket_from_input(
+                            DemandInput(
+                                title=arg_str[:70],
+                                problem_statement=arg_str,
+                                project_id="darkfac",
+                            ),
+                            force_heuristic=True,
+                        )
+                        result.target_id = ticket.id
+                        prefix = "👑 [Owner Demand] " if self.config.role == "owner" else ""
+                        if is_voice_demand and voice_transcription:
+                            result.response_text = (
+                                f"✅ {prefix}Demanda por Áudio Registrada com Sucesso!\n\n"
+                                f"📋 <b>Ticket:</b> <code>{ticket.id}</code>\n"
+                                f"📌 <b>Título:</b> {ticket.title}\n"
+                                f"📊 <b>Status:</b> {ticket.status.value}\n\n"
+                                f"🎙️ <b>Transcrição Original do Áudio:</b>\n"
+                                f"<i>\"{voice_transcription}\"</i>\n\n"
+                                f"🚀 <i>Demanda adicionada ao backlog da Dark Factory.</i>"
+                            )
+                        else:
+                            result.response_text = (
+                                f"✅ {prefix}Demanda registrada com sucesso!\n\n"
+                                f"📋 <b>Ticket:</b> <code>{ticket.id}</code>\n"
+                                f"📌 <b>Título:</b> {ticket.title}\n"
+                                f"📊 <b>Status:</b> {ticket.status.value}\n\n"
+                                f"<i>Demanda inserida no backlog da Dark Factory.</i>"
+                            )
+                    except Exception as exc:
+                        logger.error("Durable demand creation error: %s", exc)
+                        result.target_id = "DEMAND-RECORDED"
+                        result.response_text = f"✅ Demanda recebida e enfileirada: {arg_str[:120]}"
 
         elif cmd_str == "/status":
             result.action = TelegramActionType.STATUS
@@ -681,7 +864,35 @@ class TelegramGateway:
                 result.response_text = f"❌ Erro ao consultar alertas: {exc}"
 
         else:
-            result.response_text = f"❓ Unknown command: {cmd_str}. Send /help for command list."
+            if not cmd_str.startswith("/"):
+                lower_text = raw_text.lower()
+                if any(w in lower_text for w in ("ticket", "registrad", "confirm", "numero", "número", "status")):
+                    try:
+                        from core.demands.service import DemandsService
+
+                        demands_svc = DemandsService()
+                        tickets = demands_svc.list_tickets("darkfac")
+                        if tickets:
+                            latest = tickets[-1]
+                            result.response_text = (
+                                f"📋 <b>Último Ticket Registrado:</b>\n\n"
+                                f"🆔 <b>ID:</b> <code>{latest.id}</code>\n"
+                                f"📌 <b>Título:</b> {latest.title}\n"
+                                f"📊 <b>Status:</b> {latest.status.value}\n"
+                                f"📝 <b>Descrição:</b> {latest.problem[:140]}..."
+                            )
+                        else:
+                            result.response_text = "ℹ️ Nenhum ticket registrado no momento."
+                    except Exception as exc:
+                        result.response_text = "ℹ️ Envie /status ou /help para ver os comandos disponíveis."
+                else:
+                    result.response_text = (
+                        f"💬 Para abrir uma nova demanda, envie uma nota de voz ou digite:\n"
+                        f"<code>/demand {raw_text}</code>\n\n"
+                        f"Envie /help para ver a lista de comandos."
+                    )
+            else:
+                result.response_text = f"❓ Unknown command: {cmd_str}. Send /help for command list."
 
         return result
 
@@ -843,7 +1054,7 @@ class TelegramGateway:
         url = f"{self.config.api_base_url}/bot{self.config.bot_token}/getUpdates?offset={self.last_offset}&limit={limit}&timeout={timeout_sec}"
         req = urllib.request.Request(
             url,
-            headers={"Content-Type": "application/json", "User-Agent": "DarkFac/1.0"},
+            headers={"Content-Type": "application/json"},
             method="GET",
         )
         try:
@@ -857,6 +1068,13 @@ class TelegramGateway:
                 for u in updates:
                     res = self.process_update(u)
                     results.append(res)
+                    if res.response_text and not res.duplicate:
+                        chat_id = (
+                            u.get("message", {}).get("chat", {}).get("id")
+                            or u.get("callback_query", {}).get("message", {}).get("chat", {}).get("id")
+                        )
+                        if chat_id:
+                            self.send_message(chat_id, res.response_text)
                 return results
         except Exception as exc:
             logger.warning("Failed to poll Telegram updates: %s", exc)
@@ -889,18 +1107,18 @@ class TelegramGateway:
         req = urllib.request.Request(
             url,
             data=json.dumps(payload).encode("utf-8"),
-            headers={"Content-Type": "application/json", "User-Agent": "DarkFac/1.0"},
+            headers={"Content-Type": "application/json"},
             method="POST",
         )
 
-        for attempt in range(2):
+        for attempt in range(3):
             try:
                 with urllib.request.urlopen(req, timeout=10.0) as resp:
                     return resp.status == 200
             except Exception as exc:
-                if attempt == 0:
+                if attempt < 2:
                     import time
-                    time.sleep(0.5)
+                    time.sleep(0.8 * (attempt + 1))
                     continue
                 logger.warning("Failed to send Telegram message: %s. Enqueuing to outbox.", exc)
                 self._enqueue_outbox(chat_id, safe_text, buttons, str(exc))

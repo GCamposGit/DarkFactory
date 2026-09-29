@@ -46,6 +46,7 @@ from __future__ import annotations
 import html
 import json
 import logging
+import os
 import re
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -200,6 +201,31 @@ def parse_grill_plan(text: str) -> GrillPlan:
     return GrillPlan.model_validate(data)
 
 
+# Agent failures that only a human/ops action can fix (log a harness in, set a
+# token). Retrying immediately would just burn iterations, so the retry carries
+# a `not_before=<iso>` token (successors.py D-c) that also bounds the wait by
+# the run's wall clock instead of the same-stage count cap.
+_WAIT_FOR_AUTH_KINDS = frozenset({"no_authenticated_harness", "auth_expired"})
+AUTH_RETRY_BACKOFF_MINUTES = 10
+
+
+def retry_for_agent_failure(
+    result: AgentResult, fallback_cause: str, *, now: Optional[datetime] = None
+) -> StageResult:
+    """`retry` StageResult for a failed agent call, with a short cause code.
+
+    `<error_kind>` normally; for auth-type failures
+    `<error_kind> not_before=<iso>` (<= 64 chars, the persisted column width).
+    """
+    kind = result.error_kind or fallback_cause
+    if kind in _WAIT_FOR_AUTH_KINDS:
+        when = (now or datetime.now(timezone.utc)) + timedelta(minutes=AUTH_RETRY_BACKOFF_MINUTES)
+        return StageResult(
+            outcome="retry", cause_code=f"{kind} not_before={when.replace(microsecond=0).isoformat()}"
+        )
+    return StageResult(outcome="retry", cause_code=kind)
+
+
 def run_read_agent(
     stage: str,
     prompt: str,
@@ -236,8 +262,15 @@ def run_read_agent(
         excluded.add((harness, model))
     if last_result is not None:
         return last_result
+    # pick() found nothing routable at all: no `harness:*` cap survived the
+    # auth probe on this worker AND OpenRouter is unavailable/uncredited for
+    # the stage. Clear, short, retryable cause code (never a pydantic crash).
     return AgentResult(
-        ok=False, text="no agent route available", harness="none", duration_s=0.0, error_kind="not_installed"
+        ok=False,
+        text="no authenticated harness available for this stage",
+        harness="none",
+        duration_s=0.0,
+        error_kind="no_authenticated_harness",
     )
 
 
@@ -372,6 +405,7 @@ def resolve_callback_choice(question: _PendingQuestion, choice: str) -> str:
 def _build_message(run_id: str, questions: list[_PendingQuestion]) -> tuple[str, list[list[dict[str, str]]]]:
     # The gateway sends with parse_mode=HTML, so agent text must be escaped.
     # Buttons carry the option *index*: Telegram caps callback_data at 64 bytes.
+    hub_url = os.environ.get("DARKHUB_PUBLIC_URL") or os.environ.get("DARKHUB_BASE_URL", "http://127.0.0.1:8888")
     lines = [
         f"Grill pendente para o run {html.escape(run_id)} "
         f"(uma rodada, prazo de {GRILL_DEADLINE_HOURS}h):",
@@ -388,6 +422,10 @@ def _build_message(run_id: str, questions: list[_PendingQuestion]) -> tuple[str,
         ]
         if row:
             buttons.append(row)
+
+    lines.append("")
+    lines.append(f'🎙️ <b>Voz/Áudio:</b> Grave uma nota de voz nesta conversa ou <a href="{hub_url}">abra no DarkHub</a>.')
+    buttons.append([{"text": "🎙️ Abrir DarkHub (Voz/Grill)", "url": f"{hub_url}"}])
     return "\n".join(lines), buttons
 
 
@@ -436,7 +474,7 @@ def run_grill(
     )
     result = run_read_agent(STAGE, prompt, ws.path, host_caps=host_caps, routing_config=routing_config)
     if not result.ok:
-        return StageResult(outcome="retry", cause_code=result.error_kind or "grill_agent_failed")
+        return retry_for_agent_failure(result, "grill_agent_failed", now=current_time)
 
     try:
         plan = parse_grill_plan(result.text)

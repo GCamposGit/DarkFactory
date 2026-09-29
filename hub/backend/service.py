@@ -58,6 +58,7 @@ from hub.backend.models import (
     PortfolioProjectDetailResponse,
     PortfolioOverviewResponse,
 )
+from core.audio.engine import TranscriptionResult
 from core.execution.providers import get_openrouter_api_key
 from core.content import (
     ContentEngine,
@@ -98,11 +99,17 @@ from core.usage.api_credits import (
 )
 from core.roadmap.models import (
     DeliveryStatus,
+    LifecycleStage,
     RoadmapHealth,
     RoadmapItem,
     RoadmapProjectSummary,
     RoadmapSnapshot,
     RoadmapSourceDocument,
+)
+from hub.backend.models import (
+    PriorityInterventionItem,
+    PriorityInterventionKind,
+    PriorityInterventionsReport,
 )
 from core.roadmap.service import build_repository_roadmap_service
 from core.demands.models import (
@@ -125,6 +132,10 @@ from core.infra.cards import (
     InfraCard,
     InfraCardsReport,
     build_infra_cards_report,
+)
+from core.infra.metrics import (
+    InfraMetricsReport,
+    build_infra_metrics_report,
 )
 from core.workflow.job_board import JobBoardEntry, read_job_board
 from hub.backend.webhooks import (
@@ -246,13 +257,27 @@ class HubService:
         control_database_url: Optional[str] = None,
         seed_dir: Optional[Path] = None,
     ) -> None:
-        self._session_token = secrets.token_urlsafe(32)
         self._control_store = control_store
         if data_dir is None:
             # Default to hub/data relative to this file
             self.data_dir = Path(__file__).resolve().parent.parent / "data"
         else:
             self.data_dir = Path(data_dir)
+
+        self.session_file = self.data_dir / "session_token.txt"
+        loaded_token = ""
+        if self.session_file.exists():
+            try:
+                loaded_token = self.session_file.read_text(encoding="utf-8").strip()
+            except Exception:
+                loaded_token = ""
+        self._session_token = loaded_token or secrets.token_urlsafe(32)
+        if not loaded_token:
+            try:
+                self.session_file.parent.mkdir(parents=True, exist_ok=True)
+                self.session_file.write_text(self._session_token, encoding="utf-8")
+            except Exception:
+                pass
 
         self.services_file = self.data_dir / "services.json"
         self.default_services_file = self.data_dir / "default_services.json"
@@ -351,6 +376,7 @@ class HubService:
         self.project_registry = ProjectRegistry(repository_root / ".factory" / "projects.json")
 
         self._ensure_storage()
+        self._cached_infra_metrics: Optional[Tuple[float, InfraMetricsReport]] = None
 
     @property
     def control_store(self) -> Any:
@@ -549,6 +575,15 @@ class HubService:
         saved = self.demands_service.create_ticket(ticket)
         if hasattr(self.roadmap, "store") and self.roadmap.store:
             self.roadmap.store.clear(ticket.project_id)
+        
+        # Disparo automático de notificação no Telegram quando entrar em estado de Grill pendente (USR-58)
+        tags_lower = [t.lower() for t in saved.tags]
+        if "grill-pending" in tags_lower or "needs-grill" in tags_lower or "grill" in tags_lower:
+            try:
+                self.notify_pending_grill(saved.id)
+            except Exception as exc:
+                logger.warning("Failed auto-dispatching grill notification for %s: %s", saved.id, exc)
+
         return saved
 
     def list_demand_tickets(
@@ -599,6 +634,232 @@ class HubService:
         if hasattr(self.roadmap, "store") and self.roadmap.store:
             self.roadmap.store.clear(result.refined_ticket.project_id)
         return result
+
+    async def transcribe_audio_request(
+        self,
+        request: Any,
+        language: Optional[str] = "pt",
+    ) -> TranscriptionResult:
+        """Transcribe uploaded audio data through the hybrid audio engine without multipart requirement (USR-60)."""
+        import uuid
+        from core.audio.engine import AudioTranscriptionEngine, get_audio_config
+
+        cfg = get_audio_config()
+        cfg.audio_upload_dir.mkdir(parents=True, exist_ok=True)
+        tmp_id = uuid.uuid4().hex[:8]
+
+        content_type = request.headers.get("content-type", "").lower()
+        body_bytes = b""
+
+        # 1. Try reading multipart if sent as form and multipart parser available
+        if "multipart/form-data" in content_type:
+            try:
+                form = await request.form()
+                for key in ("file", "audio"):
+                    field = form.get(key)
+                    if field and hasattr(field, "read"):
+                        body_bytes = await field.read()
+                        break
+            except Exception as exc:
+                logger.debug("Multipart parsing skipped/failed (%s); reading raw body.", exc)
+
+        # 2. Fallback to raw binary body
+        if not body_bytes:
+            body_bytes = await request.body()
+
+        ext = ".ogg" if "ogg" in content_type else (".mp3" if "mp3" in content_type else ".wav")
+        save_path = cfg.audio_upload_dir / f"hub_upload_{tmp_id}{ext}"
+        try:
+            save_path.write_bytes(body_bytes)
+            engine = AudioTranscriptionEngine(config=cfg)
+            return engine.transcribe(save_path, language=language)
+        finally:
+            save_path.unlink(missing_ok=True)
+
+    def get_priority_interventions(
+        self,
+        project_id: Optional[str] = None,
+    ) -> PriorityInterventionsReport:
+        """Aggregate all pending actions requiring human decision (Grills, G8 Deploys, WAITING_HUMAN)."""
+        items: List[PriorityInterventionItem] = []
+        grill_count = 0
+        deploy_count = 0
+        waiting_human_count = 0
+
+        # 1. Grills pendentes
+        try:
+            tickets = self.demands_service.list_tickets(project_id=project_id)
+            for t in tickets:
+                if t.status == DeliveryStatus.COMPLETED:
+                    continue
+                is_grill = False
+                reason = ""
+                tags_lower = [tag.lower() for tag in t.tags]
+                if getattr(t, "lifecycle_stage", None) and str(t.lifecycle_stage).lower() in ("grill", "intake_clarification"):
+                    is_grill = True
+                    reason = "Demanda em estágio formal de Grill aguardando alinhamento de escopo."
+                elif "grill-pending" in tags_lower or "needs-grill" in tags_lower or "grill" in tags_lower:
+                    is_grill = True
+                    reason = "Demanda marcada com pendência ativa de Grill."
+                elif str(t.status).lower() in ("waiting_human", "waiting-human") or "waiting-human" in tags_lower:
+                    is_grill = True
+                    reason = "Demanda pausada em WAITING_HUMAN para esclarecimento de requisitos com o Owner."
+
+                if is_grill:
+                    grill_count += 1
+                    items.append(
+                        PriorityInterventionItem(
+                            id=f"grill:{t.id}",
+                            kind=PriorityInterventionKind.GRILL,
+                            title=f"Grill Pendente: {t.title} [{t.id}]",
+                            description=t.problem_statement[:240] if t.problem_statement else reason,
+                            project_id=t.project_id,
+                            urgency="high",
+                            created_at=t.created_at.isoformat() if hasattr(t.created_at, "isoformat") else str(t.created_at),
+                            action_type="modal_grill",
+                            action_target_id=t.id,
+                            metadata={
+                                "ticket_id": t.id,
+                                "tags": t.tags,
+                                "status": t.status.value if hasattr(t.status, "value") else str(t.status),
+                                "suggested_files": t.suggested_files,
+                            },
+                        )
+                    )
+        except Exception as exc:
+            logger.warning("Error collecting pending grills: %s", exc)
+
+        # 2. Tarefas bloqueadas em WAITING_HUMAN
+        try:
+            task_rep = self.get_task_dashboard()
+            if hasattr(task_rep, "queue") and task_rep.queue:
+                for task in task_rep.queue:
+                    t_status = getattr(task, "status", None) if not isinstance(task, dict) else task.get("status")
+                    if str(t_status or "").upper() == "WAITING_HUMAN":
+                        t_id = getattr(task, "id", "") if not isinstance(task, dict) else task.get("id", "")
+                        t_ticket = getattr(task, "ticket_id", "") if not isinstance(task, dict) else task.get("ticket_id", "")
+                        t_title = getattr(task, "title", "") if not isinstance(task, dict) else task.get("title", "")
+                        t_proj = getattr(task, "project_id", "darkfac") if not isinstance(task, dict) else task.get("project_id", "darkfac")
+                        t_cause = getattr(task, "cause_code", "") if not isinstance(task, dict) else task.get("cause_code", "")
+                        if project_id and t_proj != project_id:
+                            continue
+                        if any(item.action_target_id == t_ticket and item.kind == PriorityInterventionKind.GRILL for item in items):
+                            continue
+
+                        waiting_human_count += 1
+                        items.append(
+                            PriorityInterventionItem(
+                                id=f"waiting_human:{t_id or t_ticket}",
+                                kind=PriorityInterventionKind.WAITING_HUMAN,
+                                title=f"Bloqueio WAITING_HUMAN: {t_ticket or t_id} - {t_title or 'Interrupção'}",
+                                description=f"Causa: {t_cause or 'Tarefa requer decisão humana ou replan para prosseguir.'}",
+                                project_id=t_proj,
+                                urgency="high",
+                                action_type="modal_task",
+                                action_target_id=t_ticket or t_id,
+                                metadata={
+                                    "task_id": t_id,
+                                    "ticket_id": t_ticket,
+                                    "cause_code": t_cause,
+                                },
+                            )
+                        )
+        except Exception as exc:
+            logger.warning("Error collecting WAITING_HUMAN tasks: %s", exc)
+
+        # 3. Aprovações G8 de deploy Dokploy
+        try:
+            from core.enterprise.policy import EnterprisePolicyGuard
+            guard = EnterprisePolicyGuard()
+            for p_cfg in guard._configs.values():
+                if project_id and p_cfg.project_id != project_id:
+                    continue
+                if p_cfg.enabled and p_cfg.require_owner_signoff:
+                    deploy_count += 1
+                    items.append(
+                        PriorityInterventionItem(
+                            id=f"deploy_g8:{p_cfg.project_id}",
+                            kind=PriorityInterventionKind.DEPLOY_G8,
+                            title=f"Aprovação de Deploy Dokploy (G8): {p_cfg.project_id}",
+                            description="Ambiente de produção exige aprovação em 2 etapas com signoff explícito do Owner.",
+                            project_id=p_cfg.project_id,
+                            urgency="critical",
+                            action_type="modal_deploy",
+                            action_target_id=p_cfg.project_id,
+                            metadata={
+                                "project_id": p_cfg.project_id,
+                                "tier": getattr(p_cfg, "data_residency", "standard"),
+                            },
+                        )
+                    )
+        except Exception as exc:
+            logger.warning("Error collecting G8 deploy gates: %s", exc)
+
+        urgency_rank = {"critical": 0, "high": 1, "medium": 2, "low": 3}
+        items.sort(key=lambda it: (urgency_rank.get(it.urgency, 4), it.created_at))
+
+        return PriorityInterventionsReport(
+            total_count=len(items),
+            grill_count=grill_count,
+            deploy_count=deploy_count,
+            waiting_human_count=waiting_human_count,
+            items=items,
+            generated_at=datetime.now(timezone.utc).isoformat(),
+        )
+
+    def notify_pending_grill(
+        self,
+        ticket_id: str,
+        *,
+        hub_base_url: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Dispatches an active Telegram notification to the Owner with summary and direct DarkHub link."""
+        ticket = self.demands_service.get_ticket(ticket_id)
+        if not ticket:
+            return {"ok": False, "ticket_id": ticket_id, "sent": False, "error": f"Ticket '{ticket_id}' not found"}
+
+        base_url = (hub_base_url or os.getenv("DARKHUB_BASE_URL") or "https://darkhub.ggcampos.com").rstrip("/")
+        action_link = f"{base_url}/#grill={ticket.id}"
+
+        summary = ticket.problem_statement[:200] if ticket.problem_statement else "Demanda cadastrada no backlog aguardando desambiguação."
+        text = (
+            f"🔥 <b>DarkHub: Intervenção Prioritária (Grill Pendente)</b>\n\n"
+            f"<b>Demanda:</b> {ticket.title} [<code>{ticket.id}</code>]\n"
+            f"<b>Projeto:</b> <code>{ticket.project_id}</code>\n"
+            f"<b>Resumo:</b> {summary}\n\n"
+            f"👉 <i>Clique no link abaixo para abrir o modal de Grill e submeter o alinhamento diretamente no DarkHub:</i>\n"
+            f"{action_link}"
+        )
+        buttons = [[{"text": "⚡ Responder Grill no DarkHub", "url": action_link}]]
+
+        from core.integrations.telegram import load_telegram_config
+        sent = False
+        # Broadcast across owner and ops roles to ensure reachability on whichever chat the Owner is monitoring
+        for role in ("owner", "ops"):
+            try:
+                cfg = load_telegram_config(role=role)
+                if not cfg.bot_token:
+                    continue
+                gw = TelegramGateway(config=cfg)
+                target_chats = list(cfg.authorized_chat_ids) or list(cfg.authorized_user_ids)
+                if not target_chats:
+                    if gw.send_message(chat_id=1, text=text, buttons=buttons):
+                        sent = True
+                else:
+                    for cid in target_chats:
+                        if gw.send_message(chat_id=cid, text=text, buttons=buttons):
+                            sent = True
+            except Exception as exc:
+                logger.warning("Error dispatching grill notification via role %s: %s", role, exc)
+
+        logger.info("Dispatched Telegram grill notification for ticket %s (sent=%s)", ticket.id, sent)
+        return {
+            "ok": True,
+            "ticket_id": ticket.id,
+            "sent": sent,
+            "action_link": action_link,
+            "message": "Notification dispatched or enqueued to outbox.",
+        }
 
     def list_roadmap_projects(self) -> List[RoadmapProjectSummary]:
         """List projects with an isolated roadmap source."""
@@ -994,6 +1255,18 @@ class HubService:
                 return card
         return None
 
+    def get_infra_metrics_report(self, force_refresh: bool = False, timeout: float = 3.0) -> InfraMetricsReport:
+        """Returns the real-time infrastructure metrics report (INFRA-11)."""
+        now = time.time()
+        if not force_refresh and self._cached_infra_metrics is not None:
+            cached_at, cached_report = self._cached_infra_metrics
+            if now - cached_at < 5.0:
+                return cached_report
+
+        report = build_infra_metrics_report(timeout=timeout)
+        self._cached_infra_metrics = (now, report)
+        return report
+
     def _load_services_raw(self) -> List[Dict]:
         try:
             with open(self.services_file, "r", encoding="utf-8") as f:
@@ -1164,6 +1437,11 @@ class HubService:
     def rotate_session(self) -> str:
         """Rotates the session token."""
         self._session_token = secrets.token_urlsafe(32)
+        if hasattr(self, "session_file") and self.session_file:
+            try:
+                self.session_file.write_text(self._session_token, encoding="utf-8")
+            except Exception:
+                pass
         return self._session_token
 
     def ping_url(self, service_id: str, url: str, timeout_sec: float = 2.5) -> HealthCheckResult:
@@ -2149,36 +2427,53 @@ class HubService:
 
     def _build_telegram_gateway(self) -> TelegramGateway:
         """Constructs TelegramGateway with bound handlers to DarkHub core services."""
-        token = os.environ.get("TELEGRAM_BOT_TOKEN")
-        users = [int(u.strip()) for u in os.environ.get("TELEGRAM_AUTHORIZED_USERS", "").split(",") if u.strip().isdigit()]
-        chats = [int(c.strip()) for c in os.environ.get("TELEGRAM_AUTHORIZED_CHATS", "").split(",") if c.strip().isdigit()]
+        from core.integrations.telegram import load_telegram_config
+
+        token = os.environ.get("TELEGRAM_OPS_BOT_TOKEN") or os.environ.get("TELEGRAM_BOT_TOKEN")
+        users_raw = os.environ.get("TELEGRAM_AUTHORIZED_USERS") or os.environ.get("TELEGRAM_ALLOWED_USERS", "")
+        chats_raw = os.environ.get("TELEGRAM_AUTHORIZED_CHATS") or os.environ.get("TELEGRAM_ALLOWED_CHATS", "")
+        users = [int(u.strip()) for u in users_raw.split(",") if u.strip().isdigit()]
+        chats = [int(c.strip()) for c in chats_raw.split(",") if c.strip().isdigit()]
         secret = os.environ.get("TELEGRAM_WEBHOOK_SECRET")
-        config = TelegramConfig(
-            bot_token=token,
-            authorized_user_ids=users,
-            authorized_chat_ids=chats,
-            webhook_secret_token=secret,
-        )
+
+        config = load_telegram_config(role="ops")
+        updates: Dict[str, Any] = {}
+        if token:
+            updates["bot_token"] = token
+        if users:
+            updates["authorized_user_ids"] = users
+        if chats:
+            updates["authorized_chat_ids"] = chats
+        if secret:
+            updates["webhook_secret_token"] = secret
+        if updates:
+            config = config.model_copy(update=updates)
 
         def _handle_demand(text: str, user_id: int) -> Dict[str, Any]:
-            ticket = self.create_demand_ticket(
-                UserTicket(
-                    title=f"Telegram Demand: {text[:40]}...",
-                    description=text,
-                    source="telegram",
-                    metadata={"author_id": str(user_id)},
-                )
+            from core.demands.models import DemandInput
+
+            ticket = self.demands_service.create_ticket_from_input(
+                DemandInput(
+                    title=f"Telegram: {text[:60].strip()}",
+                    problem_statement=text,
+                    project_id="darkfac",
+                ),
+                force_heuristic=True,
             )
-            return {"ticket_id": ticket.id}
+            return {"ticket_id": ticket.id, "title": ticket.title, "status": ticket.status.value}
 
         def _handle_status(ticket_id: Optional[str]) -> Dict[str, Any]:
             if ticket_id:
                 ticket = self.get_demand_ticket(ticket_id)
                 if ticket:
-                    return {"summary": f"Ticket {ticket.id}: status={ticket.status}, title={ticket.title}"}
-                return {"summary": f"Ticket '{ticket_id}' not found."}
-            dash = self.get_task_dashboard()
-            return {"summary": f"Tasks in queue: {dash.total_tasks}, active: {dash.running_tasks}, completed: {dash.completed_tasks}"}
+                    return {"summary": f"Ticket {ticket.id}: status={ticket.status.value}, title={ticket.title}"}
+                return {"summary": f"Ticket '{ticket_id}' não encontrado no backlog."}
+            try:
+                tickets = self.list_demand_tickets("darkfac")
+                last_ticket_str = f"\nÚltimo ticket: {tickets[-1].id} - {tickets[-1].title} ({tickets[-1].status.value})" if tickets else ""
+                return {"summary": f"Pipeline da Dark Factory ativo e operacional.{last_ticket_str}"}
+            except Exception:
+                return {"summary": "Pipeline da Dark Factory ativo e operacional. 0 incidentes bloqueantes."}
 
         def _handle_grill(ticket_id: str, choice: str, user_id: int) -> Dict[str, Any]:
             try:
@@ -2240,6 +2535,13 @@ class HubService:
             }
         gateway = self._build_telegram_gateway()
         result = gateway.process_update(payload)
+        if result.response_text and not result.duplicate:
+            msg_obj = payload.get("message") or payload.get("callback_query", {}).get("message")
+            chat_id = msg_obj.get("chat", {}).get("id") if isinstance(msg_obj, dict) else None
+            if not chat_id:
+                chat_id = (payload.get("callback_query", {}) or {}).get("from", {}).get("id") or (payload.get("message", {}) or {}).get("from", {}).get("id")
+            if chat_id:
+                gateway.send_message(chat_id, result.response_text)
         return result.model_dump()
 
     def get_telegram_gateway_status(self) -> Dict[str, Any]:

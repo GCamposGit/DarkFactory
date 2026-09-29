@@ -53,6 +53,9 @@ from hub.backend.models import (
     ProgressProjection,
     PortfolioOverviewResponse,
     PortfolioProjectDetailResponse,
+    PriorityInterventionItem,
+    PriorityInterventionKind,
+    PriorityInterventionsReport,
 )
 from hub.backend.service import HubService
 from core.portfolio.models import PortfolioEfficiencyReport
@@ -93,11 +96,13 @@ from core.demands.models import (
     GrillSession,
     UserTicket,
 )
+from core.audio.engine import TranscriptionResult
 from core.harness.test_subagent import (
     DistilledTestReport,
     TestExecutionInstruction,
 )
 from core.infra.cards import InfraCard, InfraCardsReport
+from core.infra.metrics import InfraMetricsReport
 
 router = APIRouter(prefix="/api", tags=["DarkHub API"])
 roadmap_router = APIRouter(prefix="/projects", tags=["Operational Roadmap"])
@@ -1095,6 +1100,16 @@ def submit_demand_grill(
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
+@router.post("/audio/transcribe", response_model=TranscriptionResult)
+async def transcribe_audio(
+    request: Request,
+    language: Optional[str] = Query(default="pt", description="Target language code ('pt', 'en')"),
+    service: HubService = Depends(get_hub_service),
+) -> TranscriptionResult:
+    """Transcribe uploaded audio data using hybrid faster-whisper and Groq Cloud fallback (USR-60)."""
+    return await service.transcribe_audio_request(request, language=language)
+
+
 @router.post("/harness/run-tests", response_model=DistilledTestReport)
 def run_tests(
     instruction: TestExecutionInstruction,
@@ -1102,6 +1117,31 @@ def run_tests(
 ) -> DistilledTestReport:
     """Execute test suite via headless test subagent engine and return distilled report."""
     return service.run_tests(instruction)
+
+
+# ==============================================================================
+# Priority Interventions & Human-in-the-Loop Cockpit (USR-58)
+# ==============================================================================
+
+
+@router.get("/interventions/priority", response_model=PriorityInterventionsReport)
+@router.get("/interventions/priority/", response_model=PriorityInterventionsReport, include_in_schema=False)
+def get_priority_interventions_endpoint(
+    project_id: Optional[str] = Query(default=None, description="Filter interventions by project"),
+    service: HubService = Depends(get_hub_service),
+) -> PriorityInterventionsReport:
+    """Consolidate all pending human interventions (Grills, G8 Deploys, WAITING_HUMAN) into a unified queue."""
+    return service.get_priority_interventions(project_id=project_id)
+
+
+@router.post("/interventions/notify-grill/{ticket_id}")
+def notify_pending_grill_endpoint(
+    ticket_id: str,
+    hub_base_url: Optional[str] = Query(default=None, description="Optional custom DarkHub URL for action link"),
+    service: HubService = Depends(get_hub_service),
+) -> Dict[str, Any]:
+    """Dispatches an active Telegram notification to the Owner for a demand pending grill."""
+    return service.notify_pending_grill(ticket_id, hub_base_url=hub_base_url)
 
 
 # ==============================================================================
@@ -1156,6 +1196,30 @@ def get_infra_card_endpoint(
     if not card:
         raise HTTPException(status_code=404, detail=f"Infrastructure node '{node_id}' not found")
     return card
+
+
+# ==============================================================================
+# Unified Infrastructure Metrics Endpoints (INFRA-11)
+# ==============================================================================
+
+
+@router.get("/infra/metrics", response_model=InfraMetricsReport)
+def get_infra_metrics_endpoint(
+    force: bool = Query(default=False, description="Force real-time probe without cache"),
+    timeout: float = Query(default=3.0, description="Probe timeout in seconds"),
+    service: HubService = Depends(get_hub_service),
+) -> InfraMetricsReport:
+    """Returns live hardware telemetries, container states, and overall infra health (INFRA-11)."""
+    return service.get_infra_metrics_report(force_refresh=force, timeout=timeout)
+
+
+@router.post("/infra/metrics/refresh", response_model=InfraMetricsReport)
+def refresh_infra_metrics_endpoint(
+    timeout: float = Query(default=3.0, description="Probe timeout in seconds"),
+    service: HubService = Depends(get_hub_service),
+) -> InfraMetricsReport:
+    """Forces immediate re-probe of hardware and containers telemetry."""
+    return service.get_infra_metrics_report(force_refresh=True, timeout=timeout)
 
 
 # ==============================================================================

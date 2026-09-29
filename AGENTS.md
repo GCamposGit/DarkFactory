@@ -33,6 +33,19 @@
 - **Bloqueio de Quota Crítica no Chat**: Se a conta associada ao harness atual estiver com cota restante <= 15.0% (semanal ou janela móvel), o agente é TERMINANTEMENTE PROIBIDO de implementar código com seu próprio modelo no chat interativo. Deve recusar no chat, informar a cota restante e delegar para o harness saudável eleito (ex.: Antigravity) ou acionar o launcher headless `python C:\dev\DarkFac\run_ticket.py <TICKET_ID>`.
 - **Exceção de Override Explícito pelo Usuário**: A execução em um harness com cota <= 15.0% SÓ É PERMITIDA se o usuário exigir EXPLICITAMENTE no prompt (ex.: "forçar execução neste harness", "ignorar limite de cota", "estou ciente da cota crítica, prossiga" ou flag `--force`). Sem essa autorização textual inequívoca, o agente deve falhar fechado (*fail-closed*).
 
+## Autonomia de Git e Sincronização Multi-Ambiente (Zero Toque Humano Pós-Grill, USR-57)
+
+- Em desenvolvimentos internos da fábrica (`project: darkfac`), o agente é expressamente proibido de orientar o usuário a executar commits, merges ou sincronizações manuais no terminal.
+- O ciclo de vida do ticket é encerrado de forma 100% autônoma pelo harness/launcher (`core.git.autonomy` / `run_ticket.py`), em TODOS os harnesses (Claude, Codex, Grok, Antigravity, locais), realizando:
+  1. Commit atômico das alterações vinculadas ao ticket (`feat(...): ... [TICKET_ID]`);
+  2. Push da branch de trabalho e abertura de PR (`gh pr create`);
+  3. Verificação de conflito com `origin/main` e com outras branches (rebase/merge; conflito é resolvido pelo próprio agente, nunca devolvido ao usuário);
+  4. Merge (`gh pr merge --squash --delete-branch`) e confirmação de que o SHA chegou em `origin/main`;
+  5. Limpeza de worktrees e branches já mergeadas (local e remota);
+  6. Deploy pós-merge (`scripts/dokploy_redeploy.py`) e atualização do status do ticket para `completed` em `.factory/demands/demands.json`.
+- **Proibido devolver o ciclo ao usuário**: nenhum agente encerra turno pedindo comando de push, revisão/confirmação do portão, autorização de merge ou de deploy. Se uma ferramenta for negada por permissão do harness, reporte a negação exata e a regra a ajustar; não a trate como passo humano normal.
+- Apenas projetos comerciais externos com flag `requires_commercial_acceptance: true` (cliente pago em produção real; hoje nenhum) exigem autorização manual prévia para merge/deploy.
+
 ## Backups 100% Autônomos (Zero Toque Humano)
 
 - É expressamente proibido orientar o usuário a executar rotinas manuais de backup ou restauração no terminal ou PowerShell.

@@ -1,4 +1,9 @@
-# Índice de handoffs de autonomia contínua
+# Índice histórico de handoffs de autonomia contínua
+
+> **Arquivo do plano HF-26; não é a fila de trabalho ativa.** Para status e próxima ação, use a [linha de produção HF-27](../../PRODUCTION_LINE_PLAN_2026-09-22.md) e o [índice ativo](../production-line/INDEX.md).
+
+<details><summary>Registros históricos e dependências originais</summary>
+
 
 33 unidades + marco HF-26. Primeiro: [HF-26-01](HF-26-01.md).
 
@@ -37,8 +42,8 @@ Todos especificados; só HF-26-01 sem predecessor técnico. Prontidão de contra
 | [HF-13-02](HF-13-02.md) — Painel de progresso e estagnação | economy | implemented | HF-13-01, HF-05-05 |
 | [HF-15-01](HF-15-01.md) — Observador e protocolo negativo | economy | implemented | HF-26-01, HF-12-01 |
 | [HF-03-07](HF-03-07.md) — Preflight por host e projeto | high_architecture | implemented | HF-05-02, HF-07-01, HF-12-01 |
-| [HF-03-08](HF-03-08.md) — Ativação isolada e fatia vertical | operations | ready_for_handoff | HF-03-07, HF-05-06, HF-23-01, HF-08-03, HF-08-05, HF-09-02, HF-12-04, HF-10-02, HF-25-01, HF-13-02, HF-15-01, HF-07-03 |
-| [HF-15-02](HF-15-02.md) — Aceitação24h e expansão multi-projeto | independent_observer | waiting_dependency | HF-03-08 |
+| [HF-03-08](HF-03-08.md) — Contenção e preparação (fechado) | operations | implemented; alvo não verificado | HF-03-07, HF-05-06, HF-23-01, HF-08-03, HF-08-05, HF-09-02, HF-12-04, HF-10-02, HF-25-01, HF-13-02, HF-15-01, HF-07-03 |
+| [HF-15-02](HF-15-02.md) — Aceitação24h (arquivado para auditoria) | independent_observer | superseded_by_HF-27-10 | HF-03-08 (histórico) |
 
 ## DAG normativo
 
@@ -109,3 +114,5 @@ flowchart TD
 ```
 
 Concorrência exige dependências e ownership sem sobreposição. Serializar HF-05-05/HF-08-05 em reconciliation.py e HF-08-02/HF-13-02 em hub/backend/service.py. Binding high antecede econômico; observador independente aprova operação.
+
+</details>

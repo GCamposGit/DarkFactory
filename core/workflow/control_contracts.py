@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 from datetime import UTC, datetime
 from enum import Enum
 from typing import Annotated, Any, Literal
@@ -21,6 +22,8 @@ from pydantic import (
 )
 
 from core.workflow.contracts import ContractModel
+
+logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -288,6 +291,33 @@ class StageContext(ContractModel):
     route_ref: str
     memory_version: str
     input_refs: list[str] = Field(default_factory=list)
+
+
+# jobs.cause_code is VARCHAR(64) in the Postgres control store (SQLite is TEXT).
+# Persisted cause codes are normalized to this length; the full text stays in
+# logs / in-memory routing (successors parse the *original* result.cause_code).
+CAUSE_CODE_MAX_LEN = 64
+
+
+def normalize_cause_code(cause_code: str | None, limit: int = CAUSE_CODE_MAX_LEN) -> str | None:
+    """Fit `cause_code` into the persisted column without losing identity.
+
+    Short codes pass through untouched. A longer one (e.g.
+    `handler_error:ValidationError: ...`, `deploy_timed_out:dokploy_op_...`,
+    or `retry:development
+<log>`) becomes its first line truncated to
+    `limit - 9` chars plus `~` and 8 hex chars of the full text's sha1, so
+    two different long causes stay distinguishable and the result is
+    deterministic. The full value is logged at WARNING by the caller-agnostic
+    helper so the detail is never silently lost.
+    """
+    if cause_code is None or len(cause_code) <= limit:
+        return cause_code
+    digest = hashlib.sha1(cause_code.encode("utf-8", errors="replace")).hexdigest()[:8]
+    first_line = cause_code.strip().splitlines()[0] if cause_code.strip() else ""
+    normalized = f"{first_line[: limit - 9]}~{digest}"
+    logger.warning("cause_code truncated to %d chars (%s); full value: %s", limit, normalized, cause_code[:2000])
+    return normalized
 
 
 class StageResult(ContractModel):

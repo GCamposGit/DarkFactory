@@ -93,7 +93,9 @@ Estimativa grosseira: cada ticket de ~0,5 a 1 dia de agente. A onda 2 pode rodar
 Não é para apagar nada, só tirar do caminho crítico:
 
 - **HF-03-08:** concluir como **contenção + preparação**, que é o que o Codex já tem na branch: worker fail-closed, auth do coordenador, digest de imagem, heartbeat de lease. Integrar ao `main` e **não** abrir o replan de 5 unidades proposto no ACTIVATION-RESULT. HF-27-08 e HF-27-10 cobrem os itens 1–3 dele de forma funcional.
+  - **Status (fechamento):** worker fail-closed, auth do coordenador (token Bearer opcional no Compose, código falha fechado com 503 sem ele), intake desligado por padrão e escopado a `DARKFAC_ALLOWED_PROJECT_ID`, heartbeat de lease e porta 8001 em loopback estão integrados ao `main`. **Digest de imagem fica como item pendente residual**: não existe pipeline de CI publicando em GHCR, o Dokploy builda direto do SHA do `main` a cada push, então fixar por digest quebraria o deploy autônomo — ver `docs/handoffs/continuous-autonomy/HF-03-08.md`.
 - **HF-15-02 (protocolo 24 h V01–V13):** substituir como critério de "funciona" pelo **canário contínuo** de HF-27-10. O protocolo pode voltar depois como auditoria.
+  - **Status:** supersedido por HF-27-10, cujo `darkfac-canary` agora roda em loop contínuo (`core.line.canary run --every-seconds`) direto no Compose, sem cron manual.
 - **Etapas fora do caminho crítico:** `research`, `learning_eval`, `catalog_refresh` e `memory_observation` por etapa. Ficam como **um** job `retrospective` por run, de baixa prioridade e que nunca bloqueia a entrega (HF-27-08).
 - **Artefatos de contrato HF (integrity.json, verify.py, plan_digest) na linha de produto:** a linha entrega produtos e não exige handoff HF por demanda. O formalismo HF continua valendo para o roadmap do núcleo DarkFac enquanto ele não for alimentado pela própria linha (dogfood, HF-27-10).
 

@@ -78,11 +78,34 @@ function sanitizeId(id) {
 }
 
 async function hubFetch(url, options = {}) {
-  const headers = new Headers(options.headers || {});
-  if (state.sessionToken) {
-    headers.set("X-Hub-Session", state.sessionToken);
+  let token = state.sessionToken || window.sessionToken;
+  if (!token) {
+    try {
+      token = localStorage.getItem("darkhub_session_token");
+    } catch (_) {}
   }
-  return fetch(url, { ...options, headers });
+  const headers = new Headers(options.headers || {});
+  if (token) {
+    headers.set("X-Hub-Session", token);
+  }
+  let res = await fetch(url, { ...options, headers });
+  if (res.status === 401) {
+    try {
+      const sRes = await fetch("/api/session");
+      if (sRes.ok) {
+        const sData = await sRes.json();
+        state.sessionToken = sData.session_token;
+        window.sessionToken = sData.session_token;
+        try {
+          localStorage.setItem("darkhub_session_token", sData.session_token);
+        } catch (_) {}
+        const retryHeaders = new Headers(options.headers || {});
+        retryHeaders.set("X-Hub-Session", sData.session_token);
+        res = await fetch(url, { ...options, headers: retryHeaders });
+      }
+    } catch (_) {}
+  }
+  return res;
 }
 
 // Initialize App on DOM Ready

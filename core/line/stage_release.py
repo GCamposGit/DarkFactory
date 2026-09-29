@@ -429,8 +429,25 @@ class ReleaseStageHandler:
             target_type=(deploy.type.value if deploy else DeployTargetType.NONE.value),
             environment=params.get("environment", "production"),
             api_url=params.get("api_url"),
+            # Deliberately NOT api_key=params.get("api_key"): deploy.params
+            # lands in .factory/projects.json, committed to git.
+            # DeployConfig._reject_inline_secrets blocks obviously
+            # secret-shaped keys but "api_key" doesn't match that regex, so
+            # this stays wired to DOKPLOY_API_KEY (env, via
+            # DokployDeploymentAdapter.api_key) only -- never a per-project
+            # committed value. target_config.api_key exists solely for
+            # direct-construction tests.
             deploy_url=params.get("deploy_url"),
-            service_name=params.get("service_name", self.project.id),
+            # HF-27-07 closeout: no longer defaults to project.id. The real
+            # Dokploy API identifies a target by this exact id (the Dokploy
+            # application/compose id from deploy.params.service_name) --
+            # defaulting it to the project slug would let a project with no
+            # service_name configured (e.g. "darkfac", deploy.params={})
+            # silently probe/deploy a bogus/unrelated id. Left None here,
+            # DokployDeploymentAdapter.start()/rollback() refuse to call the
+            # real API and fail closed with a clear cause instead.
+            service_name=params.get("service_name"),
+            service_type=params.get("service_type", "application"),
             host=params.get("host"),
             port=int(params["port"]) if params.get("port", "").isdigit() else None,
             healthcheck_endpoint=healthcheck,

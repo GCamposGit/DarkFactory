@@ -1382,7 +1382,21 @@
       ],
       "allowed_paths": [
         ".factory/planning/continuous-autonomy/activation-receipts.json",
-        "docs/handoffs/continuous-autonomy/ACTIVATION-RESULT.md"
+        "docs/handoffs/continuous-autonomy/ACTIVATION-RESULT.md",
+        "docs/handoffs/continuous-autonomy/HF-03-08.md",
+        ".factory/planning/continuous-autonomy/plan.json",
+        ".factory/planning/continuous-autonomy/verify.py",
+        ".factory/planning/continuous-autonomy/integrity.json",
+        "core/orchestrator/cloud_coordinator.py",
+        "core/workflow/handlers.py",
+        "deploy/dokploy/docker-compose.cloud.yml",
+        "scripts/dispatch_cloud_task.py",
+        "tests/test_cloud_coordinator_api.py",
+        "tests/test_workflow_handlers.py",
+        "tests/test_continuous_cloud.py",
+        "docs/handoffs/continuous-autonomy/INDEX.md",
+        "docs/handoffs/continuous-autonomy/HF-15-02.md",
+        "docs/CONTINUOUS_AUTONOMY_PLAN_2026-09-18.md"
       ],
       "new_test": "",
       "executor_role": "operations",
@@ -1394,11 +1408,11 @@
       "origin": "user-demand",
       "plan_version": "1.0",
       "baseline_sha": "83e5298eb231599076811802dceac8575c7f6feb",
-      "implementation_status": "not_started",
+      "implementation_status": "implemented",
       "operational_status": "not_verified",
       "canonical_plan": "docs/CONTINUOUS_AUTONOMY_PLAN_2026-09-18.md",
       "handoff_ref": "docs/handoffs/continuous-autonomy/HF-03-08.md",
-      "planning_status": "ready_for_handoff",
+      "planning_status": "implemented",
       "design_status": "design_specified",
       "new_paths": [
         ".factory/planning/continuous-autonomy/activation-receipts.json",
@@ -1412,7 +1426,19 @@
       ],
       "validate_cmd": "python .factory/planning/continuous-autonomy/verify.py --binding HF-03-08",
       "validation_availability": "binding_artifacts_must_exist_first; structure_not_acceptance",
-      "admission": "trusted supervisor PlanApproval + qualified role + preflight; not attested by file"
+      "admission": "trusted supervisor PlanApproval + qualified role + preflight; not attested by file",
+      "scope_disposition": "containment_preparation_closed_live_activation_superseded_by_hf_27",
+      "superseded_by": [
+        "HF-27-08",
+        "HF-27-10"
+      ],
+      "scope_authorization": {
+        "source": "pedido explicito do Owner nesta sessao em 2026-09-28 (worktree claude/hf-03-08-closeout)",
+        "canonical_decision": "docs/PRODUCTION_LINE_PLAN_2026-09-22.md, secao 5",
+        "authorized_scope": "contencao + preparacao em worktree isolada; sem replan de cinco unidades ou efeitos no target",
+        "allowed_paths_count": 16,
+        "ownership_boundary": "docker-compose.cloud.yml recebe bind loopback (127.0.0.1:8001) e token Bearer opcional no coordenador (codigo falha fechado com 503 sem ele, nunca 'sucesso' silencioso); NAO recebe digest de imagem fixo -- nao ha pipeline de CI publicando em GHCR, o Dokploy builda direto do SHA do main a cada push, entao pin por digest quebraria o deploy autonomo (item residual, ver HF-03-08.md). env.cloud.example permanece sob HF-27-09."
+      }
     },
     {
       "ticket_id": "HF-15-02",

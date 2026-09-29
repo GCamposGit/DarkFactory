@@ -13,9 +13,15 @@ from core.orchestrator.adapters.control_postgres import PostgresControlStore
 from core.orchestrator.cloud_coordinator import CloudCoordinator
 from core.workflow.control_contracts import RuntimeOwner
 
+API_TOKEN = "test-coordinator-token-000000000000"
+AUTH_HEADERS = {"Authorization": f"Bearer {API_TOKEN}"}
+
 
 @pytest.fixture
-def coordinator_client(tmp_path: Path):
+def coordinator_client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("DARKFAC_COORDINATOR_API_TOKEN", API_TOKEN)
+    monkeypatch.setenv("DARKFAC_INTAKE_ENABLED", "true")
+    monkeypatch.setenv("DARKFAC_ALLOWED_PROJECT_ID", "darkfac")
     db_file = tmp_path / "coordinator_api.db"
     store = PostgresControlStore(
         mock_mode=True,
@@ -34,13 +40,10 @@ def test_healthz_and_status(coordinator_client):
     client, _ = coordinator_client
     resp = client.get("/healthz")
     assert resp.status_code == 200
-    data = resp.json()
-    assert data["role"] == "coordinator"
-    assert data["application_version"] == "v1"
-    assert "database_status" in data
-    assert "http_port" in data
+    assert resp.json() == {"status": "ok"}
 
-    resp_status = client.get("/status")
+    assert client.get("/status").status_code == 401
+    resp_status = client.get("/status", headers=AUTH_HEADERS)
     assert resp_status.status_code == 200
     assert resp_status.json()["role"] == "coordinator"
 
@@ -62,7 +65,7 @@ def test_submit_task_ingress(coordinator_client):
         },
     }
 
-    resp = client.post("/api/v1/tasks", json=payload)
+    resp = client.post("/api/v1/tasks", json=payload, headers=AUTH_HEADERS)
     assert resp.status_code == 202
     data = resp.json()
     assert data["status"] == "accepted"
@@ -70,7 +73,7 @@ def test_submit_task_ingress(coordinator_client):
     assert data["demand_id"] is not None
 
     # Idempotent replay returns same receipt
-    resp_replay = client.post("/api/v1/tasks", json=payload)
+    resp_replay = client.post("/api/v1/tasks", json=payload, headers=AUTH_HEADERS)
     assert resp_replay.status_code == 202
     assert resp_replay.json()["run_id"] == data["run_id"]
 
@@ -92,11 +95,11 @@ def test_get_task_status_endpoint(coordinator_client):
         },
     }
 
-    resp = client.post("/api/v1/tasks", json=payload)
+    resp = client.post("/api/v1/tasks", json=payload, headers=AUTH_HEADERS)
     assert resp.status_code == 202
     run_id = resp.json()["run_id"]
 
-    resp_status = client.get(f"/api/v1/tasks/{run_id}")
+    resp_status = client.get(f"/api/v1/tasks/{run_id}", headers=AUTH_HEADERS)
     assert resp_status.status_code == 200
     status_data = resp_status.json()
     assert status_data["run_id"] == run_id
@@ -107,5 +110,46 @@ def test_get_task_status_endpoint(coordinator_client):
 
 def test_get_task_status_not_found(coordinator_client):
     client, _ = coordinator_client
-    resp = client.get("/api/v1/tasks/run-non-existent-999")
+    resp = client.get("/api/v1/tasks/run-non-existent-999", headers=AUTH_HEADERS)
     assert resp.status_code == 404
+
+def test_missing_configured_token_fails_closed(coordinator_client, monkeypatch):
+    client, _ = coordinator_client
+    monkeypatch.setenv("DARKFAC_COORDINATOR_API_TOKEN", "")
+    response = client.get("/status")
+    assert response.status_code == 503
+
+
+def test_intake_disabled_and_project_scope(coordinator_client, monkeypatch):
+    client, store = coordinator_client
+    payload = {
+        "channel": "dokploy_ingress",
+        "external_id": f"task-{uuid4().hex[:8]}",
+        "project_id": "darkfac",
+        "mode": "autonomous",
+        "policy_ref": "policy-cloud-v1",
+        "payload": {
+            "title": "Blocked intake",
+            "problem": "Check default-off intake",
+            "journey": "Client -> authenticated ingress -> coordinator",
+            "non_goals": ["No external side effects"],
+            "criteria": ["Rejected requests do not create runs"],
+        },
+    }
+
+    monkeypatch.setenv("DARKFAC_INTAKE_ENABLED", "false")
+    disabled = client.post("/api/v1/tasks", json=payload, headers=AUTH_HEADERS)
+    assert disabled.status_code == 503
+
+    monkeypatch.setenv("DARKFAC_INTAKE_ENABLED", "true")
+    payload["project_id"] = "another-project"
+    denied = client.post("/api/v1/tasks", json=payload, headers=AUTH_HEADERS)
+    assert denied.status_code == 403
+    assert store.get_run_status(disabled.json().get("run_id", "")) is None
+
+
+def test_task_status_is_project_scoped(coordinator_client, monkeypatch):
+    client, store = coordinator_client
+    monkeypatch.setattr(store, "get_run_status", lambda _: {"project_id": "another-project"})
+    response = client.get("/api/v1/tasks/cross-project-run", headers=AUTH_HEADERS)
+    assert response.status_code == 404

@@ -610,5 +610,38 @@ class PortfolioOverviewResponse(BaseModel):
     generated_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat(), description="Generation timestamp")
 
 
+# ---------------------------------------------------------------------------
+# Priority Interventions & Human-in-the-Loop Models (USR-58)
+# ---------------------------------------------------------------------------
 
 
+class PriorityInterventionKind(str, Enum):
+    GRILL = "grill"
+    DEPLOY_G8 = "deploy_g8"
+    WAITING_HUMAN = "waiting_human"
+
+
+class PriorityInterventionItem(BaseModel):
+    """An individual action requiring owner intervention (Grill, G8 Deploy, or WAITING_HUMAN)."""
+
+    id: str = Field(description="Unique identifier of the intervention (e.g. grill:USR-09, task:job_123, deploy:site-ggcampos)")
+    kind: PriorityInterventionKind = Field(description="Intervention classification: grill, deploy_g8, waiting_human")
+    title: str = Field(description="Short human-friendly title of the required action")
+    description: str = Field(default="", description="Detailed context or why human input is mandatory")
+    project_id: str = Field(default="darkfac", description="Project identifier")
+    urgency: str = Field(default="medium", description="Urgency level: low, medium, high, critical")
+    created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat(), description="Creation timestamp")
+    action_type: str = Field(default="modal_grill", description="Suggested UI interaction: modal_grill, modal_deploy, modal_task, link")
+    action_target_id: str = Field(default="", description="Target ID for the action (e.g. ticket ID, job ID, or project ID)")
+    metadata: Dict[str, Any] = Field(default_factory=dict, description="Arbitrary domain context (tags, questions count, etc.)")
+
+
+class PriorityInterventionsReport(BaseModel):
+    """Consolidated human-in-the-loop priority intervention queue."""
+
+    total_count: int = Field(ge=0, description="Total pending actions requiring human decision")
+    grill_count: int = Field(ge=0, description="Pending clarifying grill sessions")
+    deploy_count: int = Field(ge=0, description="Pending G8 deployment gates requiring owner approval")
+    waiting_human_count: int = Field(ge=0, description="Tasks blocked in WAITING_HUMAN")
+    items: List[PriorityInterventionItem] = Field(default_factory=list, description="Ordered list of intervention items")
+    generated_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat(), description="Generation timestamp")
