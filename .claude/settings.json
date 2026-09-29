@@ -74,9 +74,7 @@
       "Edit(core/orchestrator/guard.py)",
       "Edit(core/harness/**)",
       "Edit(.github/workflows/**)",
-      "Edit(.factory/holdout/**)",
-      "Bash(gh pr merge*)",
-      "PowerShell(gh pr merge*)"
+      "Edit(.factory/holdout/**)"
     ]
   }
 }

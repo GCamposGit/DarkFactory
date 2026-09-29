@@ -2427,36 +2427,53 @@ class HubService:
 
     def _build_telegram_gateway(self) -> TelegramGateway:
         """Constructs TelegramGateway with bound handlers to DarkHub core services."""
-        token = os.environ.get("TELEGRAM_BOT_TOKEN")
-        users = [int(u.strip()) for u in os.environ.get("TELEGRAM_AUTHORIZED_USERS", "").split(",") if u.strip().isdigit()]
-        chats = [int(c.strip()) for c in os.environ.get("TELEGRAM_AUTHORIZED_CHATS", "").split(",") if c.strip().isdigit()]
+        from core.integrations.telegram import load_telegram_config
+
+        token = os.environ.get("TELEGRAM_OPS_BOT_TOKEN") or os.environ.get("TELEGRAM_BOT_TOKEN")
+        users_raw = os.environ.get("TELEGRAM_AUTHORIZED_USERS") or os.environ.get("TELEGRAM_ALLOWED_USERS", "")
+        chats_raw = os.environ.get("TELEGRAM_AUTHORIZED_CHATS") or os.environ.get("TELEGRAM_ALLOWED_CHATS", "")
+        users = [int(u.strip()) for u in users_raw.split(",") if u.strip().isdigit()]
+        chats = [int(c.strip()) for c in chats_raw.split(",") if c.strip().isdigit()]
         secret = os.environ.get("TELEGRAM_WEBHOOK_SECRET")
-        config = TelegramConfig(
-            bot_token=token,
-            authorized_user_ids=users,
-            authorized_chat_ids=chats,
-            webhook_secret_token=secret,
-        )
+
+        config = load_telegram_config(role="ops")
+        updates: Dict[str, Any] = {}
+        if token:
+            updates["bot_token"] = token
+        if users:
+            updates["authorized_user_ids"] = users
+        if chats:
+            updates["authorized_chat_ids"] = chats
+        if secret:
+            updates["webhook_secret_token"] = secret
+        if updates:
+            config = config.model_copy(update=updates)
 
         def _handle_demand(text: str, user_id: int) -> Dict[str, Any]:
-            ticket = self.create_demand_ticket(
-                UserTicket(
-                    title=f"Telegram Demand: {text[:40]}...",
-                    description=text,
-                    source="telegram",
-                    metadata={"author_id": str(user_id)},
-                )
+            from core.demands.models import DemandInput
+
+            ticket = self.demands_service.create_ticket_from_input(
+                DemandInput(
+                    title=f"Telegram: {text[:60].strip()}",
+                    problem_statement=text,
+                    project_id="darkfac",
+                ),
+                force_heuristic=True,
             )
-            return {"ticket_id": ticket.id}
+            return {"ticket_id": ticket.id, "title": ticket.title, "status": ticket.status.value}
 
         def _handle_status(ticket_id: Optional[str]) -> Dict[str, Any]:
             if ticket_id:
                 ticket = self.get_demand_ticket(ticket_id)
                 if ticket:
-                    return {"summary": f"Ticket {ticket.id}: status={ticket.status}, title={ticket.title}"}
-                return {"summary": f"Ticket '{ticket_id}' not found."}
-            dash = self.get_task_dashboard()
-            return {"summary": f"Tasks in queue: {dash.total_tasks}, active: {dash.running_tasks}, completed: {dash.completed_tasks}"}
+                    return {"summary": f"Ticket {ticket.id}: status={ticket.status.value}, title={ticket.title}"}
+                return {"summary": f"Ticket '{ticket_id}' não encontrado no backlog."}
+            try:
+                tickets = self.list_demand_tickets("darkfac")
+                last_ticket_str = f"\nÚltimo ticket: {tickets[-1].id} - {tickets[-1].title} ({tickets[-1].status.value})" if tickets else ""
+                return {"summary": f"Pipeline da Dark Factory ativo e operacional.{last_ticket_str}"}
+            except Exception:
+                return {"summary": "Pipeline da Dark Factory ativo e operacional. 0 incidentes bloqueantes."}
 
         def _handle_grill(ticket_id: str, choice: str, user_id: int) -> Dict[str, Any]:
             try:
@@ -2521,6 +2538,8 @@ class HubService:
         if result.response_text and not result.duplicate:
             msg_obj = payload.get("message") or payload.get("callback_query", {}).get("message")
             chat_id = msg_obj.get("chat", {}).get("id") if isinstance(msg_obj, dict) else None
+            if not chat_id:
+                chat_id = (payload.get("callback_query", {}) or {}).get("from", {}).get("id") or (payload.get("message", {}) or {}).get("from", {}).get("id")
             if chat_id:
                 gateway.send_message(chat_id, result.response_text)
         return result.model_dump()

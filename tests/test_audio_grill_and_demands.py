@@ -269,3 +269,114 @@ def test_telegram_voice_reply_to_grill_submits_answer(tmp_path: Path):
     assert len(grills_submitted) == 1
     assert grills_submitted[0][0] == "USR-60"
     assert "opção recomendada" in grills_submitted[0][1]
+
+
+def test_telegram_voice_demand_rich_response_formatting(tmp_path: Path):
+    cfg = TelegramConfig(
+        bot_token="test_token",
+        authorized_user_ids=[12345],
+        authorized_chat_ids=[99999],
+    )
+
+    mock_engine = mock.MagicMock()
+    mock_engine.transcribe.return_value = TranscriptionResult(
+        text="Transformar menu superior em menu vertical lateral esquerdo",
+        language="pt",
+        engine_used="mock_whisper",
+    )
+
+    gw = TelegramGateway(
+        config=cfg,
+        state_dir=tmp_path,
+        demand_handler=lambda text, uid: {"ticket_id": "USR-62", "title": "Menu vertical", "status": "planned"},
+        audio_engine=mock_engine,
+    )
+    gw.download_telegram_file = mock.MagicMock(return_value=True)
+
+    update_payload = {
+        "update_id": 103,
+        "message": {
+            "message_id": 503,
+            "date": 1720000000,
+            "chat": {"id": 99999, "type": "private"},
+            "from": {"id": 12345, "first_name": "Owner"},
+            "voice": {
+                "file_id": "voice_demand_abc",
+                "file_unique_id": "unique_abc",
+                "duration": 5,
+                "mime_type": "audio/ogg",
+            },
+        },
+    }
+
+    result = gw.process_update(update_payload)
+    assert result.authorized
+    assert result.action == TelegramActionType.DEMAND
+    assert result.target_id == "USR-62"
+    assert "Demanda por Áudio Registrada com Sucesso!" in result.response_text
+    assert "USR-62" in result.response_text
+    assert "Transcrição Original do Áudio" in result.response_text
+    assert "Transformar menu superior em menu vertical lateral esquerdo" in result.response_text
+
+
+def test_hub_service_telegram_webhook_dispatch_and_status(tmp_path: Path):
+    from hub.backend.service import HubService
+
+    service = HubService(project_root=tmp_path)
+    mock_ticket = mock.MagicMock()
+    mock_ticket.id = "USR-99"
+    mock_ticket.title = "Criar tela de métricas no DarkHub"
+    mock_ticket.status.value = "planned"
+    service.demands_service.create_ticket_from_input = mock.MagicMock(return_value=mock_ticket)
+    service.list_demand_tickets = mock.MagicMock(return_value=[mock_ticket])
+
+    # Configure environment
+    with mock.patch.dict("os.environ", {
+        "TELEGRAM_BOT_TOKEN": "test_token_123",
+        "TELEGRAM_ALLOWED_USERS": "12345",
+        "TELEGRAM_ALLOWED_CHATS": "99999",
+    }):
+        with mock.patch("core.integrations.telegram.TelegramGateway.send_message") as mock_send:
+            # 1. Test /demand via webhook
+            demand_payload = {
+                "update_id": 201,
+                "message": {
+                    "message_id": 601,
+                    "date": 1720000000,
+                    "chat": {"id": 99999, "type": "private"},
+                    "from": {"id": 12345, "first_name": "Owner"},
+                    "text": "/demand Criar tela de métricas no DarkHub",
+                },
+            }
+            res = service.process_telegram_webhook(demand_payload)
+            assert res.get("authorized") is True
+            assert res.get("action") == "demand"
+            assert "Criar tela de métricas no DarkHub" in res.get("response_text", "")
+            mock_send.assert_called_once()
+            call_chat_id, call_text = mock_send.call_args[0][:2]
+            assert call_chat_id == 99999
+            assert "Demanda registrada com sucesso!" in call_text
+            assert "Ticket:" in call_text
+
+            mock_send.reset_mock()
+
+            # 2. Test /status via webhook
+            status_payload = {
+                "update_id": 202,
+                "message": {
+                    "message_id": 602,
+                    "date": 1720000005,
+                    "chat": {"id": 99999, "type": "private"},
+                    "from": {"id": 12345, "first_name": "Owner"},
+                    "text": "/status",
+                },
+            }
+            res_status = service.process_telegram_webhook(status_payload)
+            assert res_status.get("authorized") is True
+            assert res_status.get("action") == "status"
+            assert "DarkFac Status:" in res_status.get("response_text", "")
+            mock_send.assert_called_once()
+            call_chat_id, call_text = mock_send.call_args[0][:2]
+            assert call_chat_id == 99999
+            assert "DarkFac Status:" in call_text
+

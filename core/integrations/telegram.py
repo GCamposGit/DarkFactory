@@ -615,7 +615,12 @@ class TelegramGateway:
                 return result
 
             # Standalone voice note -> Ingest as /demand
+            is_voice_demand = True
+            voice_transcription = transcribed
             raw_text = f"/demand {transcribed}"
+        else:
+            is_voice_demand = False
+            voice_transcription = ""
 
         parts = raw_text.split(maxsplit=1)
         cmd_str = parts[0].lower() if parts else ""
@@ -698,9 +703,28 @@ class TelegramGateway:
                     try:
                         res = self.demand_handler(arg_str, user_id or 0)
                         ticket_id = res.get("ticket_id", "TICKET-AUTO")
+                        title = res.get("title", arg_str[:60])
+                        status_val = res.get("status", "planned")
                         result.target_id = ticket_id
                         prefix = "👑 [Owner Demand] " if self.config.role == "owner" else ""
-                        result.response_text = f"✅ {prefix}Demand registered successfully: <b>{ticket_id}</b>"
+                        if is_voice_demand and voice_transcription:
+                            result.response_text = (
+                                f"✅ {prefix}Demanda por Áudio Registrada com Sucesso!\n\n"
+                                f"📋 <b>Ticket:</b> <code>{ticket_id}</code>\n"
+                                f"📌 <b>Título:</b> {title}\n"
+                                f"📊 <b>Status:</b> {status_val}\n\n"
+                                f"🎙️ <b>Transcrição Original do Áudio:</b>\n"
+                                f"<i>\"{voice_transcription}\"</i>\n\n"
+                                f"🚀 <i>Demanda adicionada ao backlog da Dark Factory.</i>"
+                            )
+                        else:
+                            result.response_text = (
+                                f"✅ {prefix}Demanda registrada com sucesso!\n\n"
+                                f"📋 <b>Ticket:</b> <code>{ticket_id}</code>\n"
+                                f"📌 <b>Título:</b> {title}\n"
+                                f"📊 <b>Status:</b> {status_val}\n\n"
+                                f"<i>Demanda inserida no backlog da Dark Factory.</i>"
+                            )
                     except Exception as exc:
                         logger.error("Demand handler error: %s", exc)
                         result.error = str(exc)
@@ -721,13 +745,24 @@ class TelegramGateway:
                         )
                         result.target_id = ticket.id
                         prefix = "👑 [Owner Demand] " if self.config.role == "owner" else ""
-                        result.response_text = (
-                            f"✅ {prefix}Demanda registrada com sucesso!\n\n"
-                            f"📋 <b>Ticket:</b> <code>{ticket.id}</code>\n"
-                            f"📌 <b>Título:</b> {ticket.title}\n"
-                            f"📊 <b>Status:</b> {ticket.status.value}\n\n"
-                            f"<i>Demanda inserida no backlog da Dark Factory.</i>"
-                        )
+                        if is_voice_demand and voice_transcription:
+                            result.response_text = (
+                                f"✅ {prefix}Demanda por Áudio Registrada com Sucesso!\n\n"
+                                f"📋 <b>Ticket:</b> <code>{ticket.id}</code>\n"
+                                f"📌 <b>Título:</b> {ticket.title}\n"
+                                f"📊 <b>Status:</b> {ticket.status.value}\n\n"
+                                f"🎙️ <b>Transcrição Original do Áudio:</b>\n"
+                                f"<i>\"{voice_transcription}\"</i>\n\n"
+                                f"🚀 <i>Demanda adicionada ao backlog da Dark Factory.</i>"
+                            )
+                        else:
+                            result.response_text = (
+                                f"✅ {prefix}Demanda registrada com sucesso!\n\n"
+                                f"📋 <b>Ticket:</b> <code>{ticket.id}</code>\n"
+                                f"📌 <b>Título:</b> {ticket.title}\n"
+                                f"📊 <b>Status:</b> {ticket.status.value}\n\n"
+                                f"<i>Demanda inserida no backlog da Dark Factory.</i>"
+                            )
                     except Exception as exc:
                         logger.error("Durable demand creation error: %s", exc)
                         result.target_id = "DEMAND-RECORDED"
