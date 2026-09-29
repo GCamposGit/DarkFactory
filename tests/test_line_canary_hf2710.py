@@ -218,8 +218,9 @@ def test_second_same_day_run_does_not_duplicate_demand(store, reports_dir) -> No
     finally:
         conn.close()
 
-    # Only one report file for the day, observed (not resubmitted) twice.
-    assert observer.calls == [first.run_id, second.run_id]
+    # Only one report file for the day; a passed day is sticky (observed once, not resubmitted).
+    assert observer.calls == [first.run_id]
+    assert second.passed is True
     assert len(list(reports_dir.glob("*.json"))) == 1
 
 
@@ -849,6 +850,7 @@ _DEV_FAILED = [
 
 
 def _run(store, reports_dir, observer_stages, sender, day=date(2026, 9, 22), **kwargs):
+    kwargs.setdefault("max_attempts_per_day", 1)  # these tests pin single-attempt alert dedup
     return canary.run_daily(
         day=day, store=store, observer=FakeObserver(observer_stages), clock=FixedClock(day),
         reports_dir=reports_dir, failure_sender=sender, send_weekly=False, **kwargs,
@@ -1001,3 +1003,226 @@ def test_postgres_get_run_status_returns_job_cause_code_and_retry_count() -> Non
     assert job["cause_code"] == "handler_error:ValidationError~ab12cd34"
     assert job["retry_count"] == 3
     assert any("cause_code" in sql for sql in executed)
+
+
+# --------------------------------------------------------------------------
+# Same-day retry (line-autonomy unblock)
+# --------------------------------------------------------------------------
+
+
+class RunAwareObserver:
+    """Per-run canned telemetry, so each attempt's run can have its own fate."""
+
+    def __init__(self, default: list[canary.CanaryStageObservation] | None = None) -> None:
+        self.by_run: dict[str, list[canary.CanaryStageObservation]] = {}
+        self.default = default or []
+        self.calls: list[str] = []
+
+    def observe(self, run_id: str) -> list[canary.CanaryStageObservation]:
+        self.calls.append(run_id)
+        return list(self.by_run.get(run_id, self.default))
+
+
+def _retry_run(store, reports_dir, observer, sender, **kwargs):
+    day = kwargs.pop("day", date(2026, 9, 22))
+    kwargs.setdefault("max_attempts_per_day", 4)
+    return canary.run_daily(
+        day=day, store=store, observer=observer, clock=FixedClock(day), smoke_client=FakeSmokeClient(ok=True),
+        base_url="https://canary.example.test", reports_dir=reports_dir, failure_sender=sender,
+        send_weekly=False, **kwargs,
+    )
+
+
+def _intake_count(store) -> int:
+    conn = store._connect()
+    try:
+        cur = conn.cursor()
+        cur.execute("SELECT COUNT(*) FROM intake_commands WHERE channel = 'canary'")
+        return cur.fetchone()[0]
+    finally:
+        conn.close()
+
+
+def test_attempt_external_ids_and_attempt_one_payload_is_unchanged() -> None:
+    day = date(2026, 9, 22)
+    assert canary.attempt_external_id(day, 1) == "canary:2026-09-22"
+    assert canary.attempt_external_id(day, 2) == "canary:2026-09-22:a2"
+    first = canary.build_intake_command(day, "normal")
+    assert first.external_id == "canary:2026-09-22"
+    assert "attempt" not in first.payload  # byte-identical to the pre-retry payload
+    assert canary.build_intake_command(day, "normal", attempt=1).payload_digest == first.payload_digest
+    third = canary.build_intake_command(day, "normal", attempt=3)
+    assert third.external_id == "canary:2026-09-22:a3"
+    assert third.payload["attempt"] == 3
+    assert third.payload_digest != first.payload_digest
+
+
+def test_terminal_failure_is_retried_as_a_new_attempt_on_the_next_iteration(store, reports_dir) -> None:
+    sender = RecordingSender()
+    observer = RunAwareObserver(default=_DEV_FAILED)
+
+    first = _retry_run(store, reports_dir, observer, sender)
+    assert first.attempt == 1 and first.outcome == "failed"
+    assert _intake_count(store) == 1  # the failure iteration itself never submits
+
+    second = _retry_run(store, reports_dir, observer, sender)
+    assert second.attempt == 2
+    assert second.external_id == "canary:2026-09-22:a2"
+    assert second.run_id != first.run_id
+    assert _intake_count(store) == 2
+    assert [a.attempt for a in second.attempts] == [1, 2]
+    assert second.attempts[0].outcome == "failed"
+
+
+def test_attempt_is_never_submitted_while_the_previous_is_in_flight(store, reports_dir) -> None:
+    sender = RecordingSender()
+    observer = RunAwareObserver(default=_PENDING_STAGES)
+
+    for _ in range(4):
+        report = _retry_run(store, reports_dir, observer, sender)
+        assert report.attempt == 1 and report.outcome == "in_progress"
+    assert _intake_count(store) == 1
+
+
+def test_failed_attempt_whose_run_resumed_is_not_replaced(store, reports_dir) -> None:
+    sender = RecordingSender()
+    observer = RunAwareObserver(default=_DEV_FAILED)
+    first = _retry_run(store, reports_dir, observer, sender)
+    observer.by_run[first.run_id] = _PENDING_STAGES  # the line resumed the same run
+    again = _retry_run(store, reports_dir, observer, sender)
+    assert again.attempt == 1 and again.outcome == "in_progress"
+    assert _intake_count(store) == 1
+
+
+def test_retries_are_capped_by_max_attempts_per_day(store, reports_dir) -> None:
+    sender = RecordingSender()
+    observer = RunAwareObserver(default=_DEV_FAILED)
+    reports = [_retry_run(store, reports_dir, observer, sender, max_attempts_per_day=3) for _ in range(8)]
+    assert _intake_count(store) == 3
+    assert reports[-1].attempt == 3 and reports[-1].outcome == "failed"
+    assert [a.attempt for a in reports[-1].attempts] == [1, 2, 3]
+
+
+def test_max_attempts_default_and_env(monkeypatch) -> None:
+    monkeypatch.delenv(canary.MAX_ATTEMPTS_ENV, raising=False)
+    assert canary.max_attempts_from_env() == 4
+    monkeypatch.setenv(canary.MAX_ATTEMPTS_ENV, "2")
+    assert canary.max_attempts_from_env() == 2
+    for bad in ("0", "-3", "abc", ""):
+        monkeypatch.setenv(canary.MAX_ATTEMPTS_ENV, bad)
+        assert canary.max_attempts_from_env() == 4
+
+
+def test_env_cap_is_honoured_by_run_daily(monkeypatch, store, reports_dir) -> None:
+    monkeypatch.setenv(canary.MAX_ATTEMPTS_ENV, "2")
+    sender = RecordingSender()
+    observer = RunAwareObserver(default=_DEV_FAILED)
+    for _ in range(6):
+        canary.run_daily(
+            day=date(2026, 9, 22), store=store, observer=observer, clock=FixedClock(date(2026, 9, 22)),
+            reports_dir=reports_dir, failure_sender=sender, send_weekly=False,
+        )
+    assert _intake_count(store) == 2
+
+
+def test_day_is_green_when_a_later_attempt_passes_and_then_stays_green(store, reports_dir) -> None:
+    sender = RecordingSender()
+    observer = RunAwareObserver(default=_DEV_FAILED)
+    first = _retry_run(store, reports_dir, observer, sender)
+    second = _retry_run(store, reports_dir, observer, sender)
+    observer.by_run[second.run_id] = _ALL_STAGES  # attempt 2 goes green
+    third = _retry_run(store, reports_dir, observer, sender)
+    assert first.run_id != second.run_id
+    assert third.attempt == 2 and third.passed is True
+    assert [a.outcome for a in third.attempts] == ["failed", "passed"]
+
+    # Sticky: later iterations submit nothing and keep the day green.
+    for _ in range(3):
+        again = _retry_run(store, reports_dir, observer, sender)
+        assert again.passed is True and again.attempt == 2
+    assert _intake_count(store) == 2
+
+    on_disk = canary.load_reports(reports_dir)
+    assert len(on_disk) == 1 and on_disk[0].passed is True
+    assert canary.green_streak(on_disk) == 1
+
+
+def test_alert_dedup_is_per_attempt_so_a_new_attempt_failing_alike_alerts_once(store, reports_dir) -> None:
+    sender = RecordingSender()
+    observer = RunAwareObserver(default=_DEV_FAILED)
+    _retry_run(store, reports_dir, observer, sender, max_attempts_per_day=2)  # a1 fails -> alert
+    _retry_run(store, reports_dir, observer, sender, max_attempts_per_day=2)  # a2 fails alike -> alert again
+    assert len(sender.messages) == 2
+    assert "tentativa=1" in sender.messages[0] and "tentativa=2" in sender.messages[1]
+    # Cap reached: re-observing the same failed attempt never re-alerts.
+    for _ in range(3):
+        _retry_run(store, reports_dir, observer, sender, max_attempts_per_day=2)
+    assert len(sender.messages) == 2
+
+
+def test_legacy_report_without_attempts_is_adopted_as_attempt_one(store, reports_dir) -> None:
+    sender = RecordingSender()
+    observer = RunAwareObserver(default=_DEV_FAILED)
+    first = _retry_run(store, reports_dir, observer, sender, max_attempts_per_day=1)
+    path = reports_dir / "2026-09-22.json"
+    legacy = json.loads(path.read_text(encoding="utf-8"))
+    for key in ("attempt", "attempts", "weekly_summary_sent_at"):
+        legacy.pop(key)
+    path.write_text(json.dumps(legacy), encoding="utf-8")
+
+    second = _retry_run(store, reports_dir, observer, sender)
+    assert second.attempt == 2 and second.external_id == "canary:2026-09-22:a2"
+    assert second.attempts[0].run_id == first.run_id
+    # Legacy marker adopted: attempt 1 is not re-alerted (only attempt 2's own failure alerts).
+    assert len(sender.messages) == 2
+    assert sum("tentativa=1" in m for m in sender.messages) == 1
+
+
+def test_timeout_attempt_is_retried_too(store, reports_dir) -> None:
+    sender = RecordingSender()
+    observer = RunAwareObserver(default=_PENDING_STAGES)
+    first = _retry_run(store, reports_dir, observer, sender, timeout_seconds=0)
+    assert first.outcome == "timeout"
+    second = _retry_run(store, reports_dir, observer, sender, timeout_seconds=0)
+    assert second.attempt == 2 and _intake_count(store) == 2
+
+
+def test_weekly_summary_is_sent_once_per_monday_even_when_looping(store, reports_dir) -> None:
+    monday = date(2026, 9, 21)
+    summaries = RecordingSender()
+    observer = RunAwareObserver(default=_ALL_STAGES)
+    for _ in range(4):
+        canary.run_daily(
+            day=monday, store=store, observer=observer, clock=FixedClock(monday),
+            smoke_client=FakeSmokeClient(ok=True), base_url="https://canary.example.test",
+            reports_dir=reports_dir, failure_sender=RecordingSender(), summary_sender=summaries,
+        )
+    assert len(summaries.messages) == 1
+
+
+def test_dogfood_min_streak_env(monkeypatch) -> None:
+    monkeypatch.delenv(dogfood.MIN_STREAK_ENV, raising=False)
+    assert dogfood.min_green_streak_from_env() == 7
+    monkeypatch.setenv(dogfood.MIN_STREAK_ENV, "1")
+    assert dogfood.min_green_streak_from_env() == 1
+    for bad in ("0", "-1", "x", " "):
+        monkeypatch.setenv(dogfood.MIN_STREAK_ENV, bad)
+        assert dogfood.min_green_streak_from_env() == 7
+
+
+def test_dogfood_gate_follows_env_min_streak(monkeypatch, store, tmp_path, reports_dir) -> None:
+    _write_fake_report(reports_dir, date(2026, 9, 1), passed=True)
+    roadmap_path = tmp_path / "roadmap.json"
+    _write_roadmap(roadmap_path, [_roadmap_item("USR-100", tags=["line-ok"])])
+
+    monkeypatch.delenv(dogfood.MIN_STREAK_ENV, raising=False)
+    assert dogfood.submit_dogfood_item(store=store, roadmap_path=roadmap_path, reports_dir=reports_dir) is None
+
+    monkeypatch.setenv(dogfood.MIN_STREAK_ENV, "1")
+    receipt = dogfood.submit_dogfood_item(store=store, roadmap_path=roadmap_path, reports_dir=reports_dir)
+    assert receipt is not None
+
+    # An explicit argument still wins over the env.
+    assert dogfood.submit_dogfood_item(
+        store=store, roadmap_path=roadmap_path, reports_dir=reports_dir, min_green_streak=5
+    ) is None

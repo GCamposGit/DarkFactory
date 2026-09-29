@@ -7,7 +7,8 @@ submitted through the same public intake (`AutonomousIntakeService`) used
 by every other demand, as project `darkfac`, one item at a time.
 
 Gating (all three must hold):
-- `green_streak(reports) >= MIN_GREEN_STREAK` (default 7).
+- `green_streak(reports) >= min_green_streak()` (code default 7, overridable
+  with env `DARKFAC_DOGFOOD_MIN_STREAK`; invalid values fall back to 7).
 - No `dogfood:*` demand already has an active run (one-at-a-time).
 - The candidate item does not touch a `guard.py`-protected governance path
   (reuses `core.orchestrator.guard.PROTECTED_PATTERNS` -- never a second,
@@ -43,6 +44,23 @@ DOGFOOD_CHANNEL = "dogfood"
 ROADMAP_PATH = PROJECT_ROOT / ".factory" / "roadmap" / "darkfac.json"
 LINE_OK_TAG = "line-ok"
 MIN_GREEN_STREAK = 7
+MIN_STREAK_ENV = "DARKFAC_DOGFOOD_MIN_STREAK"
+
+
+def min_green_streak_from_env() -> int:
+    """`DARKFAC_DOGFOOD_MIN_STREAK` as a positive int; unset/invalid/<1 -> `MIN_GREEN_STREAK`."""
+    raw = os.environ.get(MIN_STREAK_ENV, "").strip()
+    if not raw:
+        return MIN_GREEN_STREAK
+    try:
+        value = int(raw)
+    except ValueError:
+        logger.warning("Invalid %s=%r; using %d", MIN_STREAK_ENV, raw, MIN_GREEN_STREAK)
+        return MIN_GREEN_STREAK
+    if value < 1:
+        logger.warning("%s=%r is < 1; using %d", MIN_STREAK_ENV, raw, MIN_GREEN_STREAK)
+        return MIN_GREEN_STREAK
+    return value
 
 
 # --------------------------------------------------------------------------
@@ -196,7 +214,7 @@ def submit_dogfood_item(
     roadmap_path: Path | None = None,
     reports_dir: Path = REPORTS_DIR,
     now: datetime | None = None,
-    min_green_streak: int = MIN_GREEN_STREAK,
+    min_green_streak: int | None = None,
 ) -> IntakeReceipt | None:
     """Submit at most one dogfood demand, or `None` if the gate is closed.
 
@@ -205,6 +223,7 @@ def submit_dogfood_item(
     monkeypatch `core.line.dogfood.ROADMAP_PATH` the usual way.
     """
     roadmap_path = roadmap_path if roadmap_path is not None else ROADMAP_PATH
+    min_green_streak = min_green_streak if min_green_streak is not None else min_green_streak_from_env()
     streak = green_streak(load_reports(reports_dir, limit=min_green_streak))
     if streak < min_green_streak:
         logger.info("Dogfood gate closed: green streak %d < %d", streak, min_green_streak)

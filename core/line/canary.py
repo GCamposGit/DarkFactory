@@ -38,6 +38,13 @@ Design notes
   a terminal `passed`/`failed`, or `timeout` once `timeout_seconds` has
   elapsed since the run was created (HF-27-10 PR #37 review item 1 --
   "false green": a pending/empty run must never report `passed=True`).
+- Same-day retry (line-autonomy unblock): when a day's attempt reaches a
+  terminal failure (`failed`/`timeout`), a later iteration submits a NEW
+  attempt for the same day (`canary:<date>:a2`, `:a3`, ...), capped by
+  `DARKFAC_CANARY_MAX_ATTEMPTS_PER_DAY` (default 4). Attempt 1 keeps the
+  historical `canary:<date>` id/payload so a run already accepted before
+  this change is resumed, not duplicated. Never more than one attempt is in
+  flight, and a day is green as soon as any attempt passed.
 """
 
 from __future__ import annotations
@@ -92,6 +99,9 @@ except Exception:  # pragma: no cover - defensive fallback
     )
 
 DEFAULT_TIMEOUT_SECONDS = 6 * 60 * 60  # 6 hours
+DEFAULT_MAX_ATTEMPTS_PER_DAY = 4
+MAX_ATTEMPTS_ENV = "DARKFAC_CANARY_MAX_ATTEMPTS_PER_DAY"
+_TERMINAL_FAILURE_OUTCOMES = ("failed", "timeout")
 
 CanaryScenario = Literal["normal", "initial_test_fail", "smoke_rollback"]
 CanaryOutcome = Literal["passed", "failed", "in_progress", "timeout", "dry_run"]
@@ -126,12 +136,38 @@ def _demand_text(day: date) -> str:
     )
 
 
-def build_intake_command(day: date, scenario: CanaryScenario) -> IntakeCommand:
+def attempt_external_id(day: date, attempt: int = 1) -> str:
+    """`canary:<date>` for attempt 1 (historical id), `canary:<date>:a<n>` after."""
+    if attempt <= 1:
+        return f"canary:{day.isoformat()}"
+    return f"canary:{day.isoformat()}:a{attempt}"
+
+
+def max_attempts_from_env() -> int:
+    """`DARKFAC_CANARY_MAX_ATTEMPTS_PER_DAY`; unset/invalid/<1 falls back to 4."""
+    raw = os.environ.get(MAX_ATTEMPTS_ENV, "").strip()
+    if not raw:
+        return DEFAULT_MAX_ATTEMPTS_PER_DAY
+    try:
+        value = int(raw)
+    except ValueError:
+        logger.warning("Invalid %s=%r; using %d", MAX_ATTEMPTS_ENV, raw, DEFAULT_MAX_ATTEMPTS_PER_DAY)
+        return DEFAULT_MAX_ATTEMPTS_PER_DAY
+    if value < 1:
+        logger.warning("%s=%r is < 1; using %d", MAX_ATTEMPTS_ENV, raw, DEFAULT_MAX_ATTEMPTS_PER_DAY)
+        return DEFAULT_MAX_ATTEMPTS_PER_DAY
+    return value
+
+
+def build_intake_command(day: date, scenario: CanaryScenario, attempt: int = 1) -> IntakeCommand:
     """The exact demand text from the handoff, submitted for `darkfac-canary`.
 
-    `external_id=canary:<date>` is the idempotency key `ControlStore.accept`
-    keys off; `scenario` rides in the payload (and therefore the payload
-    digest) so a same-day replay only ever matches its own scenario.
+    `external_id=canary:<date>` (attempt 1) / `canary:<date>:a<n>` (retries)
+    is the idempotency key `ControlStore.accept` keys off; `scenario` rides
+    in the payload (and therefore the payload digest) so a same-attempt
+    replay only ever matches its own scenario. Attempt 1's payload is
+    byte-identical to the pre-retry format so an already-accepted run
+    replays instead of conflicting.
     """
     criteria = [f"GET /version contém canary_day={day.isoformat()}"]
     if scenario == "initial_test_fail":
@@ -139,20 +175,25 @@ def build_intake_command(day: date, scenario: CanaryScenario) -> IntakeCommand:
     elif scenario == "smoke_rollback":
         criteria.append("Smoke deve exigir rollback de propósito")
 
+    payload: dict[str, Any] = {
+        "title": f"Canário diário {day.isoformat()}",
+        "problem": _demand_text(day),
+        "journey": "GET /version reflete canary_day do dia",
+        "non_goals": [],
+        "criteria": criteria,
+        "scenario": scenario,
+    }
+    if attempt > 1:
+        payload["title"] = f"Canário diário {day.isoformat()} (tentativa {attempt})"
+        payload["attempt"] = attempt
+
     return IntakeCommand(
         project_id=CANARY_PROJECT_ID,
         channel=CANARY_CHANNEL,
-        external_id=f"canary:{day.isoformat()}",
+        external_id=attempt_external_id(day, attempt),
         mode="autonomous",
         policy_ref="darkfac://line/canary/v1",
-        payload={
-            "title": f"Canário diário {day.isoformat()}",
-            "problem": _demand_text(day),
-            "journey": "GET /version reflete canary_day do dia",
-            "non_goals": [],
-            "criteria": criteria,
-            "scenario": scenario,
-        },
+        payload=payload,
     )
 
 
@@ -195,7 +236,26 @@ class NotifiedAlert(BaseModel):
     at: str
 
 
+class CanaryAttempt(BaseModel):
+    """One same-day submission of the canary demand (attempt 1 = the original)."""
+
+    attempt: int
+    external_id: str
+    run_id: str | None = None
+    demand_id: str | None = None
+    outcome: CanaryOutcome = "failed"
+    failing_stage: str | None = None
+    cause_code: str | None = None
+    # Alert already sent for THIS attempt (dedup is per attempt, so a new attempt
+    # failing the same way still alerts once).
+    notified: NotifiedAlert | None = None
+
+
 class CanaryReport(BaseModel):
+    """The day report. Top-level fields mirror the *current* (latest) attempt;
+    `attempts` lists every attempt of the day. A day is green iff an attempt
+    passed, which (a pass ends the sequence) means the latest attempt passed."""
+
     date: str
     scenario: CanaryScenario
     external_id: str
@@ -214,6 +274,9 @@ class CanaryReport(BaseModel):
     dry_run: bool = False
     notes: str = ""
     notified: NotifiedAlert | None = None
+    attempt: int = 1
+    attempts: list[CanaryAttempt] = Field(default_factory=list)
+    weekly_summary_sent_at: str | None = None
 
     @model_validator(mode="after")
     def _derive_passed_and_dry_run(self) -> "CanaryReport":
@@ -482,16 +545,35 @@ def _elapsed_seconds(created_at_raw: str | None, now: datetime) -> float | None:
 # --------------------------------------------------------------------------
 
 
-def _read_notified(reports_dir: Path, day: date) -> NotifiedAlert | None:
-    """The alert state persisted in `day`'s existing report, if any (best-effort)."""
+def _load_day_report(reports_dir: Path, day: date) -> CanaryReport | None:
+    """The existing report for that day with `attempts` normalised, or None (best-effort).
+
+    Reports written before same-day retries existed carry no `attempts`; their
+    top-level fields describe attempt 1, so it is synthesised from them (this
+    also carries their `notified` marker forward across the upgrade).
+    """
     path = _report_path(reports_dir, day)
     if not path.is_file():
         return None
     try:
-        return CanaryReport.model_validate_json(path.read_text(encoding="utf-8")).notified
+        report = CanaryReport.model_validate_json(path.read_text(encoding="utf-8"))
     except (OSError, ValueError) as exc:
-        logger.warning("Could not read prior canary alert state from %s: %s", path, exc)
+        logger.warning("Could not read prior canary report from %s: %s", path, exc)
         return None
+    if not report.attempts and report.outcome != "dry_run":
+        report.attempts = [
+            CanaryAttempt(
+                attempt=1,
+                external_id=report.external_id,
+                run_id=report.run_id,
+                demand_id=report.demand_id,
+                outcome=report.outcome,
+                failing_stage=report.failing_stage,
+                cause_code=report.cause_code,
+                notified=report.notified,
+            )
+        ]
+    return report
 
 
 def _notify_failure_once(
@@ -535,7 +617,8 @@ def _notify_failure_once(
 def _notify_failure(report: CanaryReport, sender: Optional[NotifySender]) -> bool:
     text = (
         f"[CANARIO {report.outcome.upper()}] {report.date} etapa={report.failing_stage or 'unknown'} "
-        f"cause_code={report.cause_code or 'unknown'} cenario={report.scenario} run_id={report.run_id}"
+        f"cause_code={report.cause_code or 'unknown'} cenario={report.scenario} "
+        f"tentativa={report.attempt} run_id={report.run_id}"
     )
     send = sender if sender is not None else _default_failure_sender()
     if send is None:
@@ -562,6 +645,8 @@ def send_weekly_summary(
     for report in reports:
         mark = "OK" if report.passed else report.outcome.upper()
         line = f"  {report.date} [{report.scenario}] {mark}"
+        if len(report.attempts) > 1:
+            line += f" (tentativas={len(report.attempts)})"
         if not report.passed:
             line += f" etapa={report.failing_stage} cause={report.cause_code}"
         lines.append(line)
@@ -580,65 +665,29 @@ def send_weekly_summary(
         return False
 
 
-def run_daily(
+def _evaluate_attempt(
     *,
-    day: date | None = None,
-    store: ControlStore | None = None,
-    demands_store: DemandsStore | None = None,
-    observer: LineObserver | None = None,
-    smoke_client: SmokeClient | None = None,
-    clock: Clock | None = None,
-    failure_sender: Optional[NotifySender] = None,
-    summary_sender: Optional[NotifySender] = None,
-    base_url: str | None = None,
-    reports_dir: Path = REPORTS_DIR,
-    dry_run: bool = False,
-    send_weekly: bool = True,
-    timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS,
-    run_dogfood: bool | None = None,
+    attempt: int,
+    today: date,
+    scenario: CanaryScenario,
+    service: AutonomousIntakeService,
+    store: ControlStore,
+    observer: LineObserver | None,
+    smoke_client: SmokeClient | None,
+    clock: Clock,
+    base_url: str | None,
+    timeout_seconds: float,
 ) -> CanaryReport:
-    """Submit (or resume observing) today's canary demand and write a report.
-
-    Idempotent: a second call for the same `day` submits the identical
-    `IntakeCommand`, which `ControlStore.accept` resolves to the exact same
-    `IntakeReceipt` (HF-08-01 contract) instead of creating a new run --
-    this function then simply re-observes that same `run_id`.
-
-    Non-blocking: this takes exactly one observation snapshot, it never
-    sleeps/polls in a loop. A run that hasn't reached every stage in
-    `REQUIRED_STAGES` yet is reported `in_progress` (not green) unless more
-    than `timeout_seconds` have elapsed since the run was created, in which
-    case it is `timeout` (also not green, and notified like a failure). Run
-    this function again later the same day (e.g. from an hourly cron) to
-    resume observing the same idempotent run until it settles.
-    """
-    clock = clock or SystemClock()
-    today = day or clock.today()
-    scenario = select_scenario(today)
-    command = build_intake_command(today, scenario)
-
-    if dry_run:
-        report = CanaryReport(
-            date=today.isoformat(),
-            scenario=scenario,
-            external_id=command.external_id,
-            outcome="dry_run",
-            notes="dry-run: intake not submitted",
-        )
-        _write_report(reports_dir, today, report)
-        return report
-
-    previous_notified = _read_notified(reports_dir, today)
-    store = store or default_control_store()
-    service = AutonomousIntakeService(store=store, demands_store=demands_store)
+    """Submit (idempotently) and observe ONE attempt of the day; no persistence."""
+    command = build_intake_command(today, scenario, attempt)
 
     try:
         receipt = service.accept(command, clock.now())
     except IdempotencyConflict as exc:
-        # A pure function of `today` should never collide with a different
+        # A pure function of `today` + attempt should never collide with a different
         # payload, but stay fail-closed instead of crashing the daily job.
         logger.error("Canary intake conflict for %s: %s", command.external_id, exc)
-        report = CanaryReport(
+        return CanaryReport(
             date=today.isoformat(),
             scenario=scenario,
             external_id=command.external_id,
@@ -646,10 +695,8 @@ def run_daily(
             failing_stage="intake",
             cause_code="idempotency_conflict",
             notes=str(exc),
+            attempt=attempt,
         )
-        _notify_failure_once(report, failure_sender, previous_notified, clock.now())
-        _write_report(reports_dir, today, report)
-        return report
 
     run_id = receipt.run_id
     observer = observer or ControlStoreLineObserver(store)
@@ -697,7 +744,7 @@ def run_daily(
             outcome = "in_progress"
             cause_code = None
 
-    report = CanaryReport(
+    return CanaryReport(
         date=today.isoformat(),
         scenario=scenario,
         external_id=command.external_id,
@@ -708,20 +755,150 @@ def run_daily(
         outcome=outcome,
         failing_stage=failing_stage,
         cause_code=cause_code,
+        attempt=attempt,
     )
-    # Alert (once per state change) BEFORE the write, so the report persists the
-    # "already notified" marker that survives a restart.
-    _notify_failure_once(report, failure_sender, previous_notified, clock.now())
-    _write_report(reports_dir, today, report)
 
-    if send_weekly and today.weekday() == 0:  # Monday
-        send_weekly_summary(reports_dir=reports_dir, today=today, sender=summary_sender)
+
+def _attempt_record(report: CanaryReport) -> CanaryAttempt:
+    return CanaryAttempt(
+        attempt=report.attempt,
+        external_id=report.external_id,
+        run_id=report.run_id,
+        demand_id=report.demand_id,
+        outcome=report.outcome,
+        failing_stage=report.failing_stage,
+        cause_code=report.cause_code,
+        notified=report.notified,
+    )
+
+
+def _upsert_attempt(attempts: list[CanaryAttempt], record: CanaryAttempt) -> list[CanaryAttempt]:
+    kept = [a for a in attempts if a.attempt != record.attempt]
+    kept.append(record)
+    kept.sort(key=lambda a: a.attempt)
+    return kept
+
+
+def _previous_notified(attempts: list[CanaryAttempt], attempt: int) -> NotifiedAlert | None:
+    return next((a.notified for a in attempts if a.attempt == attempt), None)
+
+
+def run_daily(
+    *,
+    day: date | None = None,
+    store: ControlStore | None = None,
+    demands_store: DemandsStore | None = None,
+    observer: LineObserver | None = None,
+    smoke_client: SmokeClient | None = None,
+    clock: Clock | None = None,
+    failure_sender: Optional[NotifySender] = None,
+    summary_sender: Optional[NotifySender] = None,
+    base_url: str | None = None,
+    reports_dir: Path = REPORTS_DIR,
+    dry_run: bool = False,
+    send_weekly: bool = True,
+    timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS,
+    run_dogfood: bool | None = None,
+    max_attempts_per_day: int | None = None,
+) -> CanaryReport:
+    """Submit (or resume observing) today's canary demand and write a report.
+
+    Idempotent per attempt: a second call while an attempt is still in flight
+    submits the identical `IntakeCommand`, which `ControlStore.accept` resolves
+    to the exact same `IntakeReceipt` (HF-08-01 contract) instead of creating
+    a new run -- this function then simply re-observes that same `run_id`.
+
+    Same-day retry: once the day's latest attempt is a terminal failure
+    (`failed`/`timeout`) *as seen on two consecutive iterations* and fewer than
+    `max_attempts_per_day` (env `DARKFAC_CANARY_MAX_ATTEMPTS_PER_DAY`, default
+    4) attempts were made, a NEW attempt (`canary:<date>:a<n>`) is submitted.
+    The first iteration that sees the failure alerts and records it; the next
+    one starts the new attempt, so at most one attempt is ever in flight. A
+    passed attempt ends the day (green).
+
+    Non-blocking: this takes one observation snapshot per iteration, it never
+    sleeps/polls in a loop. A run that hasn't reached every stage in
+    `REQUIRED_STAGES` yet is reported `in_progress` (not green) unless more
+    than `timeout_seconds` have elapsed since the run was created, in which
+    case it is `timeout` (also not green, and notified like a failure).
+    """
+    clock = clock or SystemClock()
+    today = day or clock.today()
+    scenario = select_scenario(today)
+
+    if dry_run:
+        command = build_intake_command(today, scenario)
+        report = CanaryReport(
+            date=today.isoformat(),
+            scenario=scenario,
+            external_id=command.external_id,
+            outcome="dry_run",
+            notes="dry-run: intake not submitted",
+        )
+        _write_report(reports_dir, today, report)
+        return report
+
+    max_attempts = max_attempts_per_day if max_attempts_per_day is not None else max_attempts_from_env()
+    max_attempts = max(1, max_attempts)
+
+    prior = _load_day_report(reports_dir, today)
+    attempts: list[CanaryAttempt] = list(prior.attempts) if prior else []
+    weekly_sent_at = prior.weekly_summary_sent_at if prior else None
+    last = attempts[-1] if attempts else None
+
+    store = store or default_control_store()
+    service = AutonomousIntakeService(store=store, demands_store=demands_store)
+
+    def evaluate(number: int) -> CanaryReport:
+        return _evaluate_attempt(
+            attempt=number, today=today, scenario=scenario, service=service, store=store,
+            observer=observer, smoke_client=smoke_client, clock=clock,
+            base_url=base_url, timeout_seconds=timeout_seconds,
+        )
+
+    def notify(candidate: CanaryReport) -> None:
+        _notify_failure_once(
+            candidate, failure_sender, _previous_notified(attempts, candidate.attempt), clock.now()
+        )
+
+    if last is not None and last.outcome == "passed" and prior is not None:
+        # The day is already green (any attempt passed): sticky, nothing to submit or re-observe.
+        report = prior
+    else:
+        number = last.attempt if last is not None else 1
+        report = evaluate(number)
+        notify(report)
+        if (
+            last is not None
+            and last.outcome in _TERMINAL_FAILURE_OUTCOMES
+            and report.outcome in _TERMINAL_FAILURE_OUTCOMES
+            and number < max_attempts
+        ):
+            # Persist the (possibly just-delivered) alert marker of the failed attempt, then start
+            # the next attempt. Nothing is in flight: the failed one is terminal.
+            attempts = _upsert_attempt(attempts, _attempt_record(report))
+            number += 1
+            logger.info(
+                "Canary %s attempt %d ended %s (%s); submitting attempt %d/%d",
+                today, number - 1, report.outcome, report.cause_code, number, max_attempts,
+            )
+            report = evaluate(number)
+            notify(report)
+        attempts = _upsert_attempt(attempts, _attempt_record(report))
+        report.attempts = attempts
+        report.weekly_summary_sent_at = weekly_sent_at
+        _write_report(reports_dir, today, report)
+
+    if send_weekly and today.weekday() == 0 and not report.weekly_summary_sent_at:  # Monday, once
+        if send_weekly_summary(reports_dir=reports_dir, today=today, sender=summary_sender):
+            report.weekly_summary_sent_at = clock.now().isoformat()
+            _write_report(reports_dir, today, report)
 
     # HF-27-10 review item 4b: dogfood wiring, env-gated off by default so a
     # bare `canary run` never starts feeding the backlog unless explicitly
     # enabled (DARKFAC_DOGFOOD_ENABLED=true) or the caller opts in directly.
     dogfood_enabled = run_dogfood if run_dogfood is not None else _dogfood_enabled_from_env()
-    if dogfood_enabled and outcome == "passed":
+    if dogfood_enabled and report.outcome == "passed":
         _maybe_submit_dogfood(store=store, demands_store=demands_store, reports_dir=reports_dir, now=clock.now())
 
     return report
@@ -807,6 +984,7 @@ def _cli_run(args: argparse.Namespace) -> int:
             base_url=args.base_url,
             dry_run=args.dry_run,
             timeout_seconds=args.timeout_seconds,
+            max_attempts_per_day=getattr(args, "max_attempts_per_day", None),
         )
         return 0
     report = run_daily(
@@ -814,6 +992,7 @@ def _cli_run(args: argparse.Namespace) -> int:
         base_url=args.base_url,
         dry_run=args.dry_run,
         timeout_seconds=args.timeout_seconds,
+        max_attempts_per_day=getattr(args, "max_attempts_per_day", None),
     )
     print(report.model_dump_json(indent=2))
     return 0 if report.outcome in ("passed", "dry_run", "in_progress") else 1
@@ -883,6 +1062,13 @@ def main(argv: list[str] | None = None) -> int:
             "If > 0, loop forever: run, sleep this many seconds, repeat "
             "(each iteration recomputes 'today'). 0 (default) runs once and exits."
         ),
+    )
+
+    run_p.add_argument(
+        "--max-attempts-per-day",
+        type=int,
+        default=None,
+        help="Max same-day attempts after terminal failures (default: env DARKFAC_CANARY_MAX_ATTEMPTS_PER_DAY, else 4)",
     )
 
     summary_p = sub.add_parser("summary", help="Print and send the weekly summary (last 7 reports)")
