@@ -1226,7 +1226,53 @@
   {
     "id": "USR-62",
     "project_id": "darkfac",
-    "title": "Transformar menu superior em menu vertical lateral esquerdo no DarkHub",
+    "title": "Menu vertical esquerdo",
+    "origin": "user",
+    "status": "implementing",
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "Menu vertical no DarkHub",
+    "core_journey": [],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-09-29T20:06:35.972876Z",
+    "updated_at": "2026-09-29T20:06:36.509086Z"
+  },
+  {
+    "id": "USR-71",
+    "project_id": "site-ggcampos",
+    "title": "Outro projeto",
+    "origin": "user",
+    "status": "planned",
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "x",
+    "core_journey": [],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-09-29T20:06:35.868611Z",
+    "updated_at": "2026-09-29T20:06:35.868611Z"
+  },
+  {
+    "id": "USR-63",
+    "project_id": "darkfac",
+    "title": "Telegram: Adicionar um menu vertical esquerdo no DarkHub",
     "origin": "user",
     "status": "planned",
     "item_type": "feature",
@@ -1236,9 +1282,9 @@
       "user-demand",
       "feature"
     ],
-    "problem_statement": "Transformar o menu superior, que está indo muito para a direita, em um menu vertical no lado esquerdo do site.",
+    "problem_statement": "Adicionar um menu vertical esquerdo no DarkHub",
     "core_journey": [
-      "1. O usuário solicita a operação relacionada a: Transformar menu superior em menu vertical lateral esquerdo no DarkHub",
+      "1. O usuário solicita a operação relacionada a: Telegram: Adicionar um menu vertical esquerdo no DarkHub",
       "2. O sistema executa a regra de negócio headless e emite o resultado esperado",
       "3. A interface do DarkHub reflete o estado atualizado com sucesso"
     ],
@@ -1247,19 +1293,136 @@
       "Não modificar modelos de dados ou arquivos fora do escopo desta demanda",
       "Não acoplar lógica de negócios diretamente à apresentação gráfica"
     ],
-    "reachability_contract": "python -m pytest tests/test_transformar_menu_superior_em_m.py -v",
+    "reachability_contract": "python -m pytest tests/test_telegram_adicionar_um_menu_ver.py -v",
     "acceptance_criteria": [
-      "A funcionalidade descrita em 'Transformar menu superior em menu vertical lateral esquerdo no DarkHub' opera sem erros sintáticos ou de tipos.",
-      "Validação headless executada com sucesso via `python -m pytest tests/test_transformar_menu_superior_em_m.py -v`.",
+      "A funcionalidade descrita em 'Telegram: Adicionar um menu vertical esquerdo no DarkHub' opera sem erros sintáticos ou de tipos.",
+      "Validação headless executada com sucesso via `python -m pytest tests/test_telegram_adicionar_um_menu_ver.py -v`.",
       "O status e histórico do ticket são atualizados no backlog da Dark Factory."
     ],
     "suggested_files": [
-      "core/transformar_menu_superior_em_m/service.py",
-      "tests/test_transformar_menu_superior_em_m.py"
+      "core/telegram_adicionar_um_menu_ver/service.py",
+      "tests/test_telegram_adicionar_um_menu_ver.py"
     ],
     "estimated_complexity": "medium",
     "dependencies": [],
-    "created_at": "2026-09-29T15:19:20.681698Z",
-    "updated_at": "2026-09-29T15:19:20.681698Z"
+    "created_at": "2026-09-29T20:06:23.300547Z",
+    "updated_at": "2026-09-29T20:06:23.300547Z"
+  },
+  {
+    "id": "USR-64",
+    "project_id": "darkfac",
+    "title": "Telegram: Adicionar um menu vertical esquerdo no DarkHub",
+    "origin": "user",
+    "status": "implementing",
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand",
+      "feature"
+    ],
+    "problem_statement": "Adicionar um menu vertical esquerdo no DarkHub",
+    "core_journey": [
+      "1. O usuário solicita a operação relacionada a: Telegram: Adicionar um menu vertical esquerdo no DarkHub",
+      "2. O sistema executa a regra de negócio headless e emite o resultado esperado",
+      "3. A interface do DarkHub reflete o estado atualizado com sucesso"
+    ],
+    "non_goals": [
+      "Não adicionar dependências externas pesadas sem necessidade estrita",
+      "Não modificar modelos de dados ou arquivos fora do escopo desta demanda",
+      "Não acoplar lógica de negócios diretamente à apresentação gráfica"
+    ],
+    "reachability_contract": "python -m pytest tests/test_telegram_adicionar_um_menu_ver.py -v",
+    "acceptance_criteria": [
+      "A funcionalidade descrita em 'Telegram: Adicionar um menu vertical esquerdo no DarkHub' opera sem erros sintáticos ou de tipos.",
+      "Validação headless executada com sucesso via `python -m pytest tests/test_telegram_adicionar_um_menu_ver.py -v`.",
+      "O status e histórico do ticket são atualizados no backlog da Dark Factory."
+    ],
+    "suggested_files": [
+      "core/telegram_adicionar_um_menu_ver/service.py",
+      "tests/test_telegram_adicionar_um_menu_ver.py"
+    ],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-09-29T20:06:23.421838Z",
+    "updated_at": "2026-09-29T20:06:23.473198Z"
+  },
+  {
+    "id": "USR-65",
+    "project_id": "darkfac",
+    "title": "Telegram: Adicionar um menu vertical esquerdo no DarkHub",
+    "origin": "user",
+    "status": "planned",
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand",
+      "feature"
+    ],
+    "problem_statement": "Adicionar um menu vertical esquerdo no DarkHub",
+    "core_journey": [
+      "1. O usuário solicita a operação relacionada a: Telegram: Adicionar um menu vertical esquerdo no DarkHub",
+      "2. O sistema executa a regra de negócio headless e emite o resultado esperado",
+      "3. A interface do DarkHub reflete o estado atualizado com sucesso"
+    ],
+    "non_goals": [
+      "Não adicionar dependências externas pesadas sem necessidade estrita",
+      "Não modificar modelos de dados ou arquivos fora do escopo desta demanda",
+      "Não acoplar lógica de negócios diretamente à apresentação gráfica"
+    ],
+    "reachability_contract": "python -m pytest tests/test_telegram_adicionar_um_menu_ver.py -v",
+    "acceptance_criteria": [
+      "A funcionalidade descrita em 'Telegram: Adicionar um menu vertical esquerdo no DarkHub' opera sem erros sintáticos ou de tipos.",
+      "Validação headless executada com sucesso via `python -m pytest tests/test_telegram_adicionar_um_menu_ver.py -v`.",
+      "O status e histórico do ticket são atualizados no backlog da Dark Factory."
+    ],
+    "suggested_files": [
+      "core/telegram_adicionar_um_menu_ver/service.py",
+      "tests/test_telegram_adicionar_um_menu_ver.py"
+    ],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-09-29T20:06:36.730348Z",
+    "updated_at": "2026-09-29T20:06:36.730348Z"
+  },
+  {
+    "id": "USR-66",
+    "project_id": "darkfac",
+    "title": "Telegram: Adicionar um menu vertical esquerdo no DarkHub",
+    "origin": "user",
+    "status": "implementing",
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand",
+      "feature"
+    ],
+    "problem_statement": "Adicionar um menu vertical esquerdo no DarkHub",
+    "core_journey": [
+      "1. O usuário solicita a operação relacionada a: Telegram: Adicionar um menu vertical esquerdo no DarkHub",
+      "2. O sistema executa a regra de negócio headless e emite o resultado esperado",
+      "3. A interface do DarkHub reflete o estado atualizado com sucesso"
+    ],
+    "non_goals": [
+      "Não adicionar dependências externas pesadas sem necessidade estrita",
+      "Não modificar modelos de dados ou arquivos fora do escopo desta demanda",
+      "Não acoplar lógica de negócios diretamente à apresentação gráfica"
+    ],
+    "reachability_contract": "python -m pytest tests/test_telegram_adicionar_um_menu_ver.py -v",
+    "acceptance_criteria": [
+      "A funcionalidade descrita em 'Telegram: Adicionar um menu vertical esquerdo no DarkHub' opera sem erros sintáticos ou de tipos.",
+      "Validação headless executada com sucesso via `python -m pytest tests/test_telegram_adicionar_um_menu_ver.py -v`.",
+      "O status e histórico do ticket são atualizados no backlog da Dark Factory."
+    ],
+    "suggested_files": [
+      "core/telegram_adicionar_um_menu_ver/service.py",
+      "tests/test_telegram_adicionar_um_menu_ver.py"
+    ],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-09-29T20:06:36.857273Z",
+    "updated_at": "2026-09-29T20:06:36.903772Z"
   }
 ]

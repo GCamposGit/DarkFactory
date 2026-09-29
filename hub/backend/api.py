@@ -1059,6 +1059,32 @@ def get_demand_ticket(
     return ticket
 
 
+@router.post("/demands/tickets/{ticket_id}/line", status_code=status.HTTP_202_ACCEPTED)
+def submit_demand_ticket_to_line(
+    ticket_id: str,
+    service: HubService = Depends(get_hub_service),
+) -> Dict[str, Any]:
+    """Push an existing demands.json ticket into the autonomous production line.
+
+    Creates (or, idempotently, returns) the line run for `ticket:<id>` on the control store
+    the workers read; the Grill stage starts right after. 404 unknown ticket, 409 already
+    submitted with different content, 422 project not enabled for the line, 503 store down.
+    """
+    submission = service.submit_ticket_to_line(ticket_id)
+    if submission.ok:
+        return submission.model_dump(mode="json")
+    message = submission.message
+    if "nao encontrado" in message:
+        code = status.HTTP_404_NOT_FOUND
+    elif submission.replayed:
+        code = status.HTTP_409_CONFLICT
+    elif "nao esta habilitado" in message or "nada a enviar" in message:
+        code = 422
+    else:
+        code = status.HTTP_503_SERVICE_UNAVAILABLE
+    raise HTTPException(status_code=code, detail=message)
+
+
 @router.patch("/demands/tickets/{ticket_id}/status", response_model=UserTicket)
 def update_demand_ticket_status(
     ticket_id: str,
