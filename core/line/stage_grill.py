@@ -201,6 +201,31 @@ def parse_grill_plan(text: str) -> GrillPlan:
     return GrillPlan.model_validate(data)
 
 
+# Agent failures that only a human/ops action can fix (log a harness in, set a
+# token). Retrying immediately would just burn iterations, so the retry carries
+# a `not_before=<iso>` token (successors.py D-c) that also bounds the wait by
+# the run's wall clock instead of the same-stage count cap.
+_WAIT_FOR_AUTH_KINDS = frozenset({"no_authenticated_harness", "auth_expired"})
+AUTH_RETRY_BACKOFF_MINUTES = 10
+
+
+def retry_for_agent_failure(
+    result: AgentResult, fallback_cause: str, *, now: Optional[datetime] = None
+) -> StageResult:
+    """`retry` StageResult for a failed agent call, with a short cause code.
+
+    `<error_kind>` normally; for auth-type failures
+    `<error_kind> not_before=<iso>` (<= 64 chars, the persisted column width).
+    """
+    kind = result.error_kind or fallback_cause
+    if kind in _WAIT_FOR_AUTH_KINDS:
+        when = (now or datetime.now(timezone.utc)) + timedelta(minutes=AUTH_RETRY_BACKOFF_MINUTES)
+        return StageResult(
+            outcome="retry", cause_code=f"{kind} not_before={when.replace(microsecond=0).isoformat()}"
+        )
+    return StageResult(outcome="retry", cause_code=kind)
+
+
 def run_read_agent(
     stage: str,
     prompt: str,
@@ -237,8 +262,15 @@ def run_read_agent(
         excluded.add((harness, model))
     if last_result is not None:
         return last_result
+    # pick() found nothing routable at all: no `harness:*` cap survived the
+    # auth probe on this worker AND OpenRouter is unavailable/uncredited for
+    # the stage. Clear, short, retryable cause code (never a pydantic crash).
     return AgentResult(
-        ok=False, text="no agent route available", harness="none", duration_s=0.0, error_kind="not_installed"
+        ok=False,
+        text="no authenticated harness available for this stage",
+        harness="none",
+        duration_s=0.0,
+        error_kind="no_authenticated_harness",
     )
 
 
@@ -442,7 +474,7 @@ def run_grill(
     )
     result = run_read_agent(STAGE, prompt, ws.path, host_caps=host_caps, routing_config=routing_config)
     if not result.ok:
-        return StageResult(outcome="retry", cause_code=result.error_kind or "grill_agent_failed")
+        return retry_for_agent_failure(result, "grill_agent_failed", now=current_time)
 
     try:
         plan = parse_grill_plan(result.text)

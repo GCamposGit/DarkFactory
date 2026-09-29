@@ -444,7 +444,7 @@ class OpenRouterModelProvider:
                 data = json.loads(resp.read().decode("utf-8"))
                 latency = max(0.001, time.perf_counter() - start)
                 choices = data.get("choices", [])
-                response_text = choices[0].get("message", {}).get("content", "") if choices else ""
+                response_text = ((choices[0].get("message") or {}).get("content") or "") if choices else ""
                 returned_model = data.get("model", model)
                 usage = data.get("usage", {})
                 prompt_tokens = usage.get("prompt_tokens") or 0

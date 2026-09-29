@@ -209,7 +209,7 @@ def test_codex_read_mode_uses_read_only_sandbox(tmp_path, make_fake_cli, monkeyp
     set_fake_response(
         monkeypatch,
         env_var,
-        {"record_path": str(record_path), "tmp_out_content": "", "returncode": 0},
+        {"record_path": str(record_path), "tmp_out_content": "review ok", "returncode": 0},
     )
     req = AgentRequest(prompt="review", cwd=tmp_path, mode="read", harness="codex", model=None)
     result = run_agent(req)

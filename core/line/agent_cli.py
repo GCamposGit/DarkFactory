@@ -33,7 +33,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable, Literal, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from core.harness.remote_worker import (
     find_antigravity_binary,
@@ -46,7 +46,22 @@ logger = logging.getLogger(__name__)
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
-ErrorKind = Optional[Literal["rate_limited", "auth_expired", "not_installed", "timeout", "crash"]]
+ErrorKind = Optional[
+    Literal[
+        "rate_limited",
+        "auth_expired",
+        "not_installed",
+        "timeout",
+        "crash",
+        # A harness call that exited "ok" but produced no text (e.g. an
+        # OpenRouter reasoning model returning `content: null`): a classified,
+        # retryable failure instead of a pydantic crash downstream.
+        "empty_output",
+        # No route at all: no subscription harness is authenticated on this
+        # worker and OpenRouter is unavailable for the stage.
+        "no_authenticated_harness",
+    ]
+]
 
 
 class AgentRequest(BaseModel):
@@ -74,6 +89,14 @@ class AgentResult(BaseModel):
     cost_usd: Optional[float] = None
     error_kind: ErrorKind = None
     reset_at: Optional[datetime] = None
+
+    @field_validator("text", mode="before")
+    @classmethod
+    def _none_text_is_empty(cls, value: Any) -> Any:
+        """`text=None` (e.g. a provider `content: null`) must never crash the
+        contract; `run_agent` classifies an empty successful result as
+        `error_kind="empty_output"`."""
+        return "" if value is None else value
 
 
 # --------------------------------------------------------------------------
@@ -438,7 +461,9 @@ def _run_openrouter(req: AgentRequest) -> AgentResult:
     provider = OpenRouterModelProvider()
     start = time.perf_counter()
     try:
-        response = provider.generate(req.prompt, model=model)
+        # 1024 (provider default) is too small for a reasoning model: it can
+        # spend the whole budget thinking and return `content: null`.
+        response = provider.generate(req.prompt, model=model, max_tokens=4096)
     except Exception as exc:  # network/auth/model errors all surface here
         duration = round(time.perf_counter() - start, 3)
         message = str(exc)
@@ -454,7 +479,7 @@ def _run_openrouter(req: AgentRequest) -> AgentResult:
     }
     cost_usd = response.measured_cost if response.is_measured else response.estimated_cost
     return AgentResult(
-        ok=True, text=response.text, harness="openrouter", model=response.model,
+        ok=True, text=response.text or "", harness="openrouter", model=response.model,
         duration_s=duration, usage=usage, cost_usd=cost_usd,
     )
 
@@ -479,6 +504,12 @@ def run_agent(req: AgentRequest) -> AgentResult:
             harness=req.harness, model=req.model, duration_s=0.0, error_kind="not_installed",
         )
     res = runner(req)
+    # Read mode exists to *return text* (grill/planning/review answers), so an
+    # "ok" result with none is a failure to retry, not a success to parse. Write
+    # mode legitimately edits files and may print nothing.
+    if res.ok and req.mode == "read" and not (res.text or "").strip():
+        logger.warning("Harness %s returned no text for a successful read call; classifying as empty_output", harness)
+        res = res.model_copy(update={"ok": False, "error_kind": "empty_output"})
 
     # Telemetria ponta a ponta: Registrar evento no ModelUsageLedger
     try:
