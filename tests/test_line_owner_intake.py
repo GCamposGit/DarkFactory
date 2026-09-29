@@ -175,7 +175,7 @@ def test_database_url_precedence_and_autosubmit_switch(monkeypatch) -> None:
 
 @pytest.fixture
 def hub(tmp_path: Path, store: SQLiteControlStore):
-    service = HubService(project_root=tmp_path, control_store=store)
+    service = HubService(project_root=tmp_path, data_dir=tmp_path / "hub_data", control_store=store)
     app.dependency_overrides[get_hub_service] = lambda: service
     try:
         yield service, TestClient(app)
