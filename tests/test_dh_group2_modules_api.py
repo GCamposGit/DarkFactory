@@ -8,9 +8,13 @@ Deterministic integration and reachability test suite for DarkHub Group 2 module
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 from fastapi.testclient import TestClient
 
+import core.catalog.manager as catalog_manager
+from core.projects.registry import ProjectRegistry
 from hub.backend.main import app
 
 
@@ -32,14 +36,27 @@ def auth_headers(client: TestClient) -> dict[str, str]:
 # DH-04: Catálogo Cross-Projeto & Auto-Evolução
 # =====================================================================
 
-def test_dh04_catalog_sync_and_evolution_lifecycle(client: TestClient, auth_headers: dict[str, str]) -> None:
+def test_dh04_catalog_sync_and_evolution_lifecycle(
+    client: TestClient, auth_headers: dict[str, str], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The tracked .factory/projects.json registers "darkfac" at the owner's
+    # Windows path (C:\dev\DarkFac). Synced for real, that path is the owner's
+    # main checkout on Windows and, on Linux, a relative directory literally
+    # named "C:\dev\DarkFac" created inside the checkout under test. Point the
+    # registry at a throwaway clone so the sync can only write under tmp_path.
+    sync_target = tmp_path / "darkfac_clone"
+    isolated_registry = ProjectRegistry(projects_file=tmp_path / "projects.json")
+    darkfac = isolated_registry.get_project("darkfac")
+    assert darkfac is not None
+    isolated_registry.register_project(darkfac.model_copy(update={"path": str(sync_target)}))
+    monkeypatch.setattr(catalog_manager, "get_project_registry", lambda: isolated_registry)
+
     # 1. Catalog Sync
     comp_res = client.get("/api/catalog/components")
     assert comp_res.status_code == 200
     comp_data = comp_res.json()
     assert "components" in comp_data
     import uuid
-    from pathlib import Path
     unique_rule = f".agents/rules/test_rule_{uuid.uuid4().hex[:6]}.md"
     try:
         if comp_data["components"]:
@@ -55,7 +72,11 @@ def test_dh04_catalog_sync_and_evolution_lifecycle(client: TestClient, auth_head
             )
             assert sync_res.status_code in {200, 400}
             if sync_res.status_code == 200:
-                assert sync_res.json()["success"] is True
+                sync_body = sync_res.json()
+                assert sync_body["success"] is True
+                assert sync_body["result"]["target_path"] == str(sync_target)
+                for synced_path in sync_body["result"]["files_synced"]:
+                    assert (sync_target / synced_path).is_file()
 
         # 2. Evolution Proposal Lifecycle (Propose -> Evaluate -> Promote -> Rollback)
         prop_res = client.post(
@@ -102,7 +123,6 @@ def test_dh04_catalog_sync_and_evolution_lifecycle(client: TestClient, auth_head
         assert roll_res.status_code == 200
         assert roll_res.json()["success"] is True
     finally:
-        Path("core/content/anti_slop.py").unlink(missing_ok=True)
         Path(unique_rule).unlink(missing_ok=True)
 
 
