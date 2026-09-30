@@ -1705,5 +1705,35 @@
     "dependencies": [],
     "created_at": "2026-09-30T17:46:01.649669Z",
     "updated_at": "2026-09-30T17:46:01.649669Z"
+  },
+  {
+    "id": "USR-78",
+    "project_id": "darkfac",
+    "title": "Nos de producao nao podem acumular commits locais fora do fluxo de PR",
+    "origin": "user",
+    "status": "planned",
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "Em 2026-09-30 o checkout do Desktop (C:\\dev\\DarkFac) estava com main divergida (ahead 3, behind 9): um commit real 9113b67 (fix(startup): escape de aspas no launcher DarkFacWorker.vbs) e dois merges feitos localmente nunca foram enviados ao GitHub. Por isso git pull --ff-only e /system/update falhavam em silencio e o worker de testes ficou semanas sem atualizar (sem git_sha no /health), sem nenhum alerta.",
+    "core_journey": [
+      "Em 2026-09-30 o checkout do Desktop (C:\\dev\\DarkFac) estava com main divergida (ahead 3, behind 9): um commit real 9113b67 (fix(startup): escape de aspas no launcher DarkFacWorker.vbs) e dois merges feitos localmente nunca foram enviados ao GitHub. Por isso git pull --ff-only e /system/update falhavam em silencio e o worker de testes ficou semanas sem atualizar (sem git_sha no /health), sem nenhum alerta."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "node_sync detecta checkout divergente (ahead>0 ou sujo) em Desktop e Notebook e reporta divergent com a lista de commits locais e o motivo, nunca apenas 'sem git_sha'",
+      "Reparo autonomo seguro: antes de alinhar a origin/main, cria e envia branch backup/<no>-<data> com os commits locais e abre ticket/PR para o trabalho real (cherry-pick), so entao faz reset --hard",
+      "Alerta (Telegram) quando um no ficar divergente por mais de 1 ciclo de deploy",
+      "Testes com repositorios git temporarios cobrindo ahead/behind/diverged e o backup antes do reset"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-09-30T18:35:48.481396Z",
+    "updated_at": "2026-09-30T18:35:48.481396Z"
   }
 ]
