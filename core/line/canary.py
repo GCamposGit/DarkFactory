@@ -129,10 +129,20 @@ def select_scenario(day: date) -> CanaryScenario:
     return "normal"
 
 
-def _demand_text(day: date) -> str:
+def _demand_text(day: date, *, legacy: bool = False) -> str:
+    """The demand text. The legacy wording left one real ambiguity (fixed vs computed date) that
+    made the grill ask the owner a blocking `[intent]` question; the current wording removes it.
+    `legacy=True` rebuilds the exact old text, only to replay attempts accepted with it."""
+    if legacy:
+        return (
+            f"Adicione ao /version o campo `canary_day` com a data de hoje "
+            f"`{day.isoformat()}` e um teste."
+        )
     return (
-        f"Adicione ao /version o campo `canary_day` com a data de hoje "
-        f"`{day.isoformat()}` e um teste."
+        f"Adicione ao endpoint GET /version o campo `canary_day`, cujo valor e a string literal fixa "
+        f"`{day.isoformat()}` (uma constante escrita diretamente no codigo, NAO calculada a partir do "
+        f"relogio nem da data atual do servidor), mantendo o campo `sha` existente. "
+        f"Adicione tambem um teste que verifique esse valor."
     )
 
 
@@ -159,7 +169,9 @@ def max_attempts_from_env() -> int:
     return value
 
 
-def build_intake_command(day: date, scenario: CanaryScenario, attempt: int = 1) -> IntakeCommand:
+def build_intake_command(
+    day: date, scenario: CanaryScenario, attempt: int = 1, *, legacy_text: bool = False
+) -> IntakeCommand:
     """The exact demand text from the handoff, submitted for `darkfac-canary`.
 
     `external_id=canary:<date>` (attempt 1) / `canary:<date>:a<n>` (retries)
@@ -168,6 +180,11 @@ def build_intake_command(day: date, scenario: CanaryScenario, attempt: int = 1) 
     replay only ever matches its own scenario. Attempt 1's payload is
     byte-identical to the pre-retry format so an already-accepted run
     replays instead of conflicting.
+
+    The payload carries `grill_policy: "auto"`: a canary never waits for a human, so the grill
+    resolves its intent/business questions itself (see `core.line.stage_grill.is_auto_grill`).
+    `legacy_text=True` rebuilds the exact pre-`grill_policy` payload (old wording, no flag): the
+    intake replays it for an attempt that was accepted before this change, instead of conflicting.
     """
     criteria = [f"GET /version contém canary_day={day.isoformat()}"]
     if scenario == "initial_test_fail":
@@ -177,12 +194,14 @@ def build_intake_command(day: date, scenario: CanaryScenario, attempt: int = 1) 
 
     payload: dict[str, Any] = {
         "title": f"Canário diário {day.isoformat()}",
-        "problem": _demand_text(day),
+        "problem": _demand_text(day, legacy=legacy_text),
         "journey": "GET /version reflete canary_day do dia",
         "non_goals": [],
         "criteria": criteria,
         "scenario": scenario,
     }
+    if not legacy_text:
+        payload["grill_policy"] = "auto"
     if attempt > 1:
         payload["title"] = f"Canário diário {day.isoformat()} (tentativa {attempt})"
         payload["attempt"] = attempt
@@ -682,10 +701,19 @@ def _evaluate_attempt(
     command = build_intake_command(today, scenario, attempt)
 
     try:
-        receipt = service.accept(command, clock.now())
+        try:
+            receipt = service.accept(command, clock.now())
+        except IdempotencyConflict:
+            # This attempt may have been accepted with the legacy demand text (before the text and
+            # `grill_policy` changed). The conflict proves the external_id exists, so replaying the
+            # legacy command returns that same run without creating anything.
+            receipt = service.accept(
+                build_intake_command(today, scenario, attempt, legacy_text=True), clock.now()
+            )
+            logger.info("Canary %s resumed a run accepted with the legacy demand text", command.external_id)
     except IdempotencyConflict as exc:
-        # A pure function of `today` + attempt should never collide with a different
-        # payload, but stay fail-closed instead of crashing the daily job.
+        # Neither the current nor the legacy payload matches what was accepted: stay fail-closed
+        # instead of crashing the daily job.
         logger.error("Canary intake conflict for %s: %s", command.external_id, exc)
         return CanaryReport(
             date=today.isoformat(),

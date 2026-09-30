@@ -315,3 +315,174 @@ def test_failed_notification_is_retried_on_next_reconcile(project, monkeypatch):
                       now=start + timedelta(hours=2))
     assert third.outcome == "waiting_human"
     assert len(ok) == 1  # already notified; not sent twice
+
+
+# --------------------------------------------------------------------------
+# Canary auto policy: a canary never waits for a human
+# --------------------------------------------------------------------------
+
+_INTENT_Q = {
+    "id": "q1",
+    "text": "canary_day deve ser fixo ou calculado?",
+    "kind": "intent",
+    "options": ["fixo", "calculado"],
+    "recommended": "fixo",
+    "why": "constante do dia",
+}
+
+
+def _grill_md(project, run_id: str) -> str:
+    from core.line import workspace as ws_mod
+
+    ws = ws_mod.checkout(project, run_id)
+    return (ws_mod.context_dir(ws) / "GRILL.md").read_text(encoding="utf-8")
+
+
+def test_auto_policy_resolves_intent_and_business_immediately_without_telegram(project, monkeypatch):
+    reply = _fake_agent_reply(
+        {
+            "questions": [
+                _INTENT_Q,
+                {"id": "q2", "text": "Cobrar?", "kind": "business", "options": ["sim", "nao"], "recommended": "nao"},
+            ],
+            "assumptions": ["Python 3.12"],
+            "is_product_scale": False,
+        }
+    )
+    monkeypatch.setattr(stage_grill, "run_read_agent", lambda *a, **k: reply)
+    sent = []
+
+    result = run_grill(
+        project, "run-auto-1", "demanda do canario", auto_policy=True,
+        send_message=lambda text, buttons: sent.append(text) or True,
+    )
+
+    assert result.outcome == "success" and result.output_refs
+    assert not sent  # no Telegram message
+    md = _grill_md(project, "run-auto-1")
+    assert "## Decisoes do owner" in md
+    assert "[intent] canary_day deve ser fixo ou calculado? -> **fixo** (auto_canary)" in md
+    assert "[business] Cobrar? -> **nao** (auto_canary)" in md
+    assert "Aguardando decisao" not in md
+
+
+def test_auto_policy_is_idempotent_on_replay(project, monkeypatch):
+    reply = _fake_agent_reply({"questions": [_INTENT_Q], "assumptions": [], "is_product_scale": False})
+    calls = {"n": 0}
+
+    def _fake(*a, **k):
+        calls["n"] += 1
+        return reply
+
+    monkeypatch.setattr(stage_grill, "run_read_agent", _fake)
+    first = run_grill(project, "run-auto-2", "demanda", auto_policy=True)
+    second = run_grill(project, "run-auto-2", "demanda", auto_policy=True)
+    assert first.outcome == second.outcome == "success"
+    assert first.output_refs == second.output_refs and calls["n"] == 1
+
+
+def test_auto_policy_still_blocks_secret_and_account_questions(project, monkeypatch):
+    reply = _fake_agent_reply(
+        {
+            "questions": [
+                _INTENT_Q,
+                {"id": "q2", "text": "Qual a API key?", "kind": "secret", "options": [], "recommended": None},
+            ],
+            "assumptions": [],
+            "is_product_scale": False,
+        }
+    )
+    monkeypatch.setattr(stage_grill, "run_read_agent", lambda *a, **k: reply)
+    sent = []
+
+    result = run_grill(
+        project, "run-auto-3", "demanda", auto_policy=True,
+        send_message=lambda text, buttons: sent.append(text) or True,
+    )
+
+    assert result.outcome == "waiting_human"
+    assert len(sent) == 1 and "API key" in sent[0] and "canary_day" not in sent[0]  # only the secret is asked
+    md = _grill_md(project, "run-auto-3")
+    assert "(auto_canary)" in md and "Aguardando decisao do owner" in md
+
+
+def test_non_canary_demand_is_unchanged_by_the_auto_policy_code(project, monkeypatch):
+    reply = _fake_agent_reply({"questions": [_INTENT_Q], "assumptions": [], "is_product_scale": False})
+    monkeypatch.setattr(stage_grill, "run_read_agent", lambda *a, **k: reply)
+    sent = []
+    result = run_grill(
+        project, "run-normal", "demanda normal",
+        send_message=lambda text, buttons: sent.append(text) or True,
+    )
+    assert result.outcome == "waiting_human" and len(sent) == 1
+    assert "auto_canary" not in _grill_md(project, "run-normal")
+
+
+def test_already_pending_canary_grill_resolves_on_reconcile_without_the_deadline(project, monkeypatch):
+    """A grill left pending by the old flow (run-de974e80327f) resolves as soon as it is reconciled."""
+    reply = _fake_agent_reply({"questions": [_INTENT_Q], "assumptions": ["x"], "is_product_scale": False})
+    monkeypatch.setattr(stage_grill, "run_read_agent", lambda *a, **k: reply)
+    start = datetime(2026, 9, 30, 6, 0, tzinfo=timezone.utc)
+    first = run_grill(project, "run-legacy", "demanda", now=start, send_message=lambda t, b: True)
+    assert first.outcome == "waiting_human"  # accepted before the auto policy existed
+
+    # Reconciled one minute later (12h deadline far away) by a worker that now knows it is a canary.
+    second = run_grill(project, "run-legacy", "demanda", now=start + timedelta(minutes=1), auto_policy=True)
+
+    assert second.outcome == "success" and not second.evidence_refs
+    md = _grill_md(project, "run-legacy")
+    assert "-> **fixo** (auto_canary)" in md and "Aguardando decisao" not in md
+
+
+def test_reconcile_of_non_canary_pending_grill_still_waits(project, monkeypatch):
+    reply = _fake_agent_reply({"questions": [_INTENT_Q], "assumptions": [], "is_product_scale": False})
+    monkeypatch.setattr(stage_grill, "run_read_agent", lambda *a, **k: reply)
+    start = datetime(2026, 9, 30, 6, 0, tzinfo=timezone.utc)
+    run_grill(project, "run-legacy-2", "demanda", now=start, send_message=lambda t, b: True)
+    again = run_grill(project, "run-legacy-2", "demanda", now=start + timedelta(minutes=1))
+    assert again.outcome == "waiting_human"
+
+
+def test_is_auto_grill_matches_canary_project_and_payload_flag():
+    canary_project = ProjectDescriptor(id="darkfac-canary", name="Canary", repo_url="https://example.test/c.git")
+    other = ProjectDescriptor(id="darkfac", name="DarkFac", repo_url="https://example.test/d.git")
+    assert stage_grill.is_auto_grill(canary_project, {}) is True  # runs accepted before the flag existed
+    assert stage_grill.is_auto_grill(other, {"grill_policy": "auto"}) is True
+    assert stage_grill.is_auto_grill(other, {}) is False
+    assert stage_grill.is_auto_grill(other, None) is False
+
+
+def test_canary_project_id_is_in_sync_with_the_canary_module():
+    from core.line import canary
+
+    assert canary.CANARY_PROJECT_ID in stage_grill.AUTO_GRILL_PROJECT_IDS
+
+
+def test_grill_handler_passes_the_auto_policy_through_bindings(project, monkeypatch):
+    from core.line.bindings import GrillStageHandler
+
+    seen = {}
+    monkeypatch.setattr(stage_grill, "run_grill", lambda *a, **k: seen.update(k) or None)
+
+    class _Store:
+        def __init__(self, payload):
+            self.payload = payload
+
+        def get_run_payload(self, run_id):
+            return self.payload
+
+    class _Claim:
+        class job_key:
+            run_id = "run-x"
+            ticket_id = "darkfac"
+
+    class _Ctx:
+        claim = _Claim
+
+    for payload, expected in (({"grill_policy": "auto"}, True), ({}, False)):
+        handler = GrillStageHandler(
+            store=_Store({"title": "t", "problem": "p", "journey": "j", **payload}),
+            host_caps=[], routing_config=None, project_resolver=lambda pid: project.model_copy(update={"id": pid}),
+        )
+        handler.handle(_Ctx())
+        assert seen["auto_policy"] is expected

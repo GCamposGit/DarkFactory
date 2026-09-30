@@ -67,6 +67,13 @@ GRILL_DEADLINE_HOURS = 12
 MAX_QUESTIONS = 5
 _NO_DEFAULT_KINDS = frozenset({"secret", "account"})
 _BLOCKING_KINDS = frozenset({"business", "intent", "secret", "account"})
+# Canary demands must never wait for a human: their intent/business questions are resolved
+# immediately with the recommended answer (tag `auto_canary`). A run is a canary run when its
+# payload says `grill_policy: "auto"` (set by core.line.canary) or when it belongs to one of these
+# projects (covers runs accepted before the flag existed, e.g. an already-pending grill).
+AUTO_GRILL_POLICY = "auto"
+AUTO_GRILL_PROJECT_IDS = frozenset({"darkfac-canary"})
+AUTO_CANARY_NOTE = "auto_canary"
 
 PROMPTS_DIR = Path(__file__).resolve().parent / "prompts"
 _DEMAND_FILE = "DEMAND.md"
@@ -119,6 +126,8 @@ class PendingGrill(BaseModel):
     deadline: datetime
     answers: dict[str, str] = Field(default_factory=dict)
     notified: bool = False
+    # Canary auto-resolutions decided at grill time (kept so a later reconcile still renders them).
+    auto_resolved: list[dict[str, Any]] = Field(default_factory=list)
 
 
 # --------------------------------------------------------------------------
@@ -311,6 +320,39 @@ def _render_grill_markdown(
     return "\n".join(lines)
 
 
+def is_auto_grill(project: ProjectDescriptor, payload: Optional[dict[str, Any]] = None) -> bool:
+    """True when this run's grill must never wait for a human (canary demands)."""
+    if (payload or {}).get("grill_policy") == AUTO_GRILL_POLICY:
+        return True
+    return project.id in AUTO_GRILL_PROJECT_IDS
+
+
+def _auto_answer(question: _PendingQuestion) -> Optional[str]:
+    """The answer a canary auto-resolves `question` with, or None if it must keep blocking."""
+    if question.kind in _NO_DEFAULT_KINDS:
+        return None
+    if question.recommended:
+        return question.recommended
+    return question.options[0] if question.options else None
+
+
+def _split_auto_resolvable(
+    questions: list[_PendingQuestion],
+) -> tuple[list[dict[str, Any]], list[_PendingQuestion]]:
+    """(auto-resolved decisions, questions that still need a human)."""
+    resolved: list[dict[str, Any]] = []
+    remaining: list[_PendingQuestion] = []
+    for question in questions:
+        answer = _auto_answer(question)
+        if answer is None:
+            remaining.append(question)
+        else:
+            resolved.append(
+                {"id": question.id, "text": question.text, "kind": question.kind, "chosen": answer, "note": AUTO_CANARY_NOTE}
+            )
+    return resolved, remaining
+
+
 def _pending_path(ws: workspace.RunWorkspace) -> Path:
     return workspace.context_dir(ws) / _PENDING_FILE
 
@@ -445,8 +487,13 @@ def run_grill(
     send_message: Optional[TelegramSender] = None,
     now: Optional[datetime] = None,
     parent_grill: Optional[str] = None,
+    auto_policy: bool = False,
 ) -> StageResult:
     """Run (or reconcile) the single-round grill for `run_id`.
+
+    `auto_policy` (canary runs, see `is_auto_grill`): intent/business questions are resolved
+    immediately with their recommended answer, tagged `auto_canary`, with no Telegram message.
+    `secret`/`account` questions still block.
 
     Idempotent: a finished grill is never re-run; a pending grill is
     resolved (fully or partially) rather than restarted. `parent_grill` is
@@ -462,7 +509,7 @@ def run_grill(
 
     pending = _load_pending(ws)
     if pending is not None:
-        return _reconcile_pending(ws, run_id, pending, current_time, send_message)
+        return _reconcile_pending(ws, run_id, pending, current_time, send_message, auto_policy=auto_policy)
 
     workspace.write_context(ws, _DEMAND_FILE, _render_demand_markdown(project, channel, demand_text))
 
@@ -485,21 +532,30 @@ def run_grill(
     technical = [_PendingQuestion(**q.model_dump()) for q in questions if q.kind == "technical"]
     blocking = [_PendingQuestion(**q.model_dump()) for q in questions if q.kind in _BLOCKING_KINDS]
 
+    auto_resolved: list[dict[str, Any]] = []
+    if auto_policy and blocking:
+        auto_resolved, blocking = _split_auto_resolvable(blocking)
+
     if not blocking:
         markdown = _render_grill_markdown(
-            assumptions=plan.assumptions, technical=technical, resolved=[], pending=[]
+            assumptions=plan.assumptions, technical=technical, resolved=auto_resolved, pending=[]
         )
         workspace.write_context(ws, GRILL_FILE, markdown)
-        sha = workspace.commit(ws, "grill: no blocking questions", _job_key(run_id))
+        message = "grill: auto-resolved (canary)" if auto_resolved else "grill: no blocking questions"
+        sha = workspace.commit(ws, message, _job_key(run_id))
         workspace.push(ws)
         return StageResult(outcome="success", output_refs=[sha])
 
     deadline = current_time + timedelta(hours=GRILL_DEADLINE_HOURS)
     pending_state = PendingGrill(
-        assumptions=plan.assumptions, technical=technical, questions=blocking, deadline=deadline
+        assumptions=plan.assumptions,
+        technical=technical,
+        questions=blocking,
+        deadline=deadline,
+        auto_resolved=auto_resolved,
     )
     markdown = _render_grill_markdown(
-        assumptions=plan.assumptions, technical=technical, resolved=[], pending=blocking
+        assumptions=plan.assumptions, technical=technical, resolved=auto_resolved, pending=blocking
     )
     workspace.write_context(ws, GRILL_FILE, markdown)
     _save_pending(ws, pending_state)
@@ -549,19 +605,29 @@ def _reconcile_pending(
     pending: PendingGrill,
     current_time: datetime,
     send_message: Optional[TelegramSender] = None,
+    *,
+    auto_policy: bool = False,
 ) -> StageResult:
     deadline = pending.deadline
     if deadline.tzinfo is None:
         deadline = deadline.replace(tzinfo=timezone.utc)
     deadline_passed = current_time >= deadline
 
-    resolvable: list[dict[str, Any]] = []
+    resolvable: list[dict[str, Any]] = list(pending.auto_resolved)
     still_pending: list[_PendingQuestion] = []
+    auto_ids: set[str] = set()
     for question in pending.questions:
         answer = pending.answers.get(question.id)
+        auto_answer = _auto_answer(question) if auto_policy else None
         if answer is not None:
             resolvable.append(
                 {"id": question.id, "text": question.text, "kind": question.kind, "chosen": answer, "note": "respondida pelo owner"}
+            )
+        elif auto_answer is not None:
+            # Canary: never wait for the 12h deadline, resolve now with the recommended answer.
+            auto_ids.add(question.id)
+            resolvable.append(
+                {"id": question.id, "text": question.text, "kind": question.kind, "chosen": auto_answer, "note": AUTO_CANARY_NOTE}
             )
         elif deadline_passed:
             if question.kind in _NO_DEFAULT_KINDS:
@@ -579,7 +645,9 @@ def _reconcile_pending(
         else:
             still_pending.append(question)
 
-    ready_to_finalize = deadline_passed or all(q.id in pending.answers for q in pending.questions)
+    ready_to_finalize = deadline_passed or all(
+        q.id in pending.answers or q.id in auto_ids for q in pending.questions
+    )
 
     if not ready_to_finalize:
         _notify_owner(ws, run_id, pending, send_message)
