@@ -1764,5 +1764,34 @@
     "dependencies": [],
     "created_at": "2026-09-30T18:49:45.044726Z",
     "updated_at": "2026-09-30T18:49:45.044726Z"
+  },
+  {
+    "id": "USR-80",
+    "project_id": "darkfac",
+    "title": "Isolar teste do Grill de IDs reais do backlog",
+    "origin": "user",
+    "status": "planned",
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "O teste tests/test_criar_mecanismo_de_grill_.py::test_production_demands_isolation falha quando um ticket real recebe o ID USR-77. Em 30/09/2026 o portao do commit USR-79 encontrou USR-77 real e falhou apesar de 2242 testes passarem. O teste depende de IDs fixos e do caminho absoluto c:/dev/DarkFac.",
+    "core_journey": [
+      "O teste tests/test_criar_mecanismo_de_grill_.py::test_production_demands_isolation falha quando um ticket real recebe o ID USR-77. Em 30/09/2026 o portao do commit USR-79 encontrou USR-77 real e falhou apesar de 2242 testes passarem. O teste depende de IDs fixos e do caminho absoluto c:/dev/DarkFac."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Substituir IDs sintéticos por sentinelas fora do namespace USR sequencial.",
+      "Verificar isolamento do store sem depender de caminho absoluto de producao.",
+      "Executar o portao oficial e confirmar que a suite inteira passa com USR-77 real no backlog."
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-09-30T18:58:38.543172Z",
+    "updated_at": "2026-09-30T18:58:38.543172Z"
   }
 ]
