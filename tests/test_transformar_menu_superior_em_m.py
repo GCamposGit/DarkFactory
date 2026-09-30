@@ -1,17 +1,26 @@
-"""T1 (SPEC "Transformar o menu superior em sidebar vertical"): tests for extracting
+"""T1/T2 (SPEC "Transformar o menu superior em sidebar vertical"): tests for extracting
 the ~15 header action triggers of DarkHub into a fixed left sidebar.
 
-Covers:
+T1 covers:
   (a) hub/frontend/index.html has a single <aside id="darkhub-sidebar"> with a
       vertical <nav> (fixed/left-0/h-screen/flex-col classes) placed before <main>;
   (b) every migrated navigation handler is still present exactly once in the file;
   (c) the <header> keeps only brand/coverage badge, project selector, status badges
       and the Ctrl+K search trigger -- no migrated navigation button remains inside it;
   (d) the topbar (<header>) and <main> apply the sidebar content offset (md:pl-56).
+
+T2 covers:
+  (e) every hand-authored utility class used by the sidebar/topbar layout has a
+      matching definition in hub/frontend/styles.css;
+  (f) hub/frontend/styles.css and hub/frontend/static/styles.css stay byte-identical
+      (same sha256 and size), both above 10 KB, and /static/styles.css serves 200;
+  (g) the collapsed-sidebar state (hidden labels, w-16 width) and the mobile overlay
+      backdrop are expressed as plain CSS rules, with no @import/CDN added.
 """
 
 from __future__ import annotations
 
+import hashlib
 import re
 from pathlib import Path
 
@@ -22,6 +31,38 @@ from hub.backend.main import app
 REPO_ROOT = Path(__file__).resolve().parent.parent
 FRONTEND_DIR = REPO_ROOT / "hub" / "frontend"
 INDEX_HTML = FRONTEND_DIR / "index.html"
+STYLES_CSS = FRONTEND_DIR / "styles.css"
+STATIC_STYLES_CSS = FRONTEND_DIR / "static" / "styles.css"
+
+SIDEBAR_UTILITY_CLASSES = [
+    "fixed",
+    "left-0",
+    "top-0",
+    "h-screen",
+    "w-56",
+    "w-16",
+    "flex-col",
+    "overflow-y-auto",
+    "z-40",
+    "z-50",
+    "transition-transform",
+    "-translate-x-full",
+    "translate-x-0",
+    "md:pl-56",
+    "md:pl-16",
+]
+
+
+def _read_css() -> str:
+    return STYLES_CSS.read_text(encoding="utf-8")
+
+
+def _assert_utility_class_defined(css: str, class_name: str) -> None:
+    selector = "." + class_name.replace(":", r"\:")
+    pattern = re.escape(selector) + r"(?![\w-])"
+    assert re.search(pattern, css), (
+        f"expected styles.css to define a '{selector}' rule for utility class '{class_name}'"
+    )
 
 HANDLERS = [
     "openBenchmarksModal()",
@@ -124,3 +165,57 @@ def test_index_route_still_serves_restructured_html():
     response = client.get("/")
     assert response.status_code == 200
     assert 'id="darkhub-sidebar"' in response.text
+
+
+def test_sidebar_utility_classes_defined_in_styles_css():
+    css = _read_css()
+
+    for class_name in SIDEBAR_UTILITY_CLASSES:
+        _assert_utility_class_defined(css, class_name)
+
+    assert "@import" not in css, "styles.css must stay self-contained (no @import)"
+    assert "cdn." not in css.lower(), "styles.css must not reference external CDNs"
+
+
+def test_styles_css_and_static_copy_are_byte_identical():
+    css_bytes = STYLES_CSS.read_bytes()
+    static_css_bytes = STATIC_STYLES_CSS.read_bytes()
+
+    assert len(css_bytes) == len(static_css_bytes), (
+        "hub/frontend/styles.css and hub/frontend/static/styles.css must be the same size"
+    )
+    assert hashlib.sha256(css_bytes).hexdigest() == hashlib.sha256(static_css_bytes).hexdigest(), (
+        "hub/frontend/styles.css and hub/frontend/static/styles.css must be byte-identical"
+    )
+    assert len(css_bytes) > 10_000, "hub/frontend/styles.css must stay above 10 KB"
+    assert len(static_css_bytes) > 10_000, "hub/frontend/static/styles.css must stay above 10 KB"
+
+    client = TestClient(app)
+    response = client.get("/static/styles.css")
+    assert response.status_code == 200
+
+
+def test_collapsed_state_rules_present_in_css():
+    css = _read_css()
+
+    label_hidden_pattern = r"\.sidebar-collapsed\s+\.sidebar-label\s*\{[^}]*display:\s*none"
+    assert re.search(label_hidden_pattern, css), (
+        "expected a '.sidebar-collapsed .sidebar-label { display: none }' rule "
+        "so collapsing the sidebar hides labels via CSS alone"
+    )
+
+    collapsed_width_pattern = r"\.sidebar-collapsed[^{]*#darkhub-sidebar\s*\{[^}]*width:\s*4rem"
+    assert re.search(collapsed_width_pattern, css), (
+        "expected a collapsed-state rule shrinking #darkhub-sidebar to the w-16 (4rem) width"
+    )
+
+    backdrop_pattern = r"\.sidebar-backdrop\s*\{[^}]*position:\s*fixed"
+    assert re.search(backdrop_pattern, css), (
+        "expected a '.sidebar-backdrop' rule for the mobile overlay backdrop"
+    )
+
+    preexisting_last_media_block = css.rindex("@media (prefers-reduced-motion: reduce)")
+    assert css.index(".sidebar-collapsed") > preexisting_last_media_block, (
+        "collapsed-state rules must be grouped after the existing @media blocks, "
+        "at the end of the file"
+    )

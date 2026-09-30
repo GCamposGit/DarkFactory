@@ -16283,3 +16283,28 @@ body {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+
+/* Sidebar collapsed state & mobile overlay backdrop (T2) */
+.sidebar-collapsed .sidebar-label {
+  display: none;
+}
+
+.sidebar-collapsed #darkhub-sidebar {
+  width: 4rem;
+}
+
+@media (min-width: 768px) {
+  .sidebar-collapsed header.md\:pl-56,
+  .sidebar-collapsed main.md\:pl-56 {
+    padding-left: 4rem;
+  }
+}
+
+.sidebar-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  background-color: rgba(2, 6, 23, 0.7);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+}
