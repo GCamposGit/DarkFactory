@@ -31,8 +31,8 @@ def _node_verification_fake(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(mod, "get_local_origin_main_subject", lambda: None)
     monkeypatch.setattr(
         node_sync,
-        "verify",
-        lambda: node_sync.SyncReport(
+        "sync",
+        lambda **kwargs: node_sync.SyncReport(
             expected_sha="a" * 40,
             nodes=[
                 node_sync.NodeStatus(name=name, state="converged", git_sha="a" * 40)
@@ -1016,7 +1016,7 @@ def test_main_invokes_node_verification_and_fails_on_divergence(monkeypatch: pyt
 
     calls: list[str] = []
 
-    def divergent() -> node_sync.SyncReport:
+    def divergent(**kwargs: object) -> node_sync.SyncReport:
         calls.append("verify")
         return node_sync.SyncReport(
             expected_sha="a" * 40,
@@ -1027,7 +1027,7 @@ def test_main_invokes_node_verification_and_fails_on_divergence(monkeypatch: pyt
             ],
         )
 
-    monkeypatch.setattr(node_sync, "verify", divergent)
+    monkeypatch.setattr(node_sync, "sync", divergent)
     transport = _make_transport_with_full_project()
     _program_status(transport, "/api/compose.one?composeId=compose_cloud", [
         [{"deploymentId": "old", "status": "done", "title": "old", "createdAt": "2026-09-12T09:00:00Z"}],
@@ -1044,3 +1044,123 @@ def test_main_invokes_node_verification_and_fails_on_divergence(monkeypatch: pyt
     ) == mod.EXIT_DEPLOY_FAILED
     assert calls == ["verify"]
     assert "Desktop: divergent" in err.getvalue()
+
+
+# ---------------------------------------------------------------------------
+# USR-65: title check only for code-bearing services; node sync without loops
+# ---------------------------------------------------------------------------
+
+_ENV = {"DOKPLOY_API_URL": "https://dokploy.ggcampos.com", "DOKPLOY_API_KEY": SENTINEL_KEY}
+
+
+def _run_main(argv: List[str], transport: QueueTransport, monkeypatch: pytest.MonkeyPatch, subject: Optional[str]):
+    monkeypatch.setattr(mod, "get_local_origin_main_subject", lambda: subject)
+    out, err = io.StringIO(), io.StringIO()
+    code = mod.main(
+        argv, env=_ENV, registry_reader=_no_registry,
+        transport_factory=lambda url, key: transport, stdout=out, stderr=err,
+        sleep_fn=lambda _s: None,
+    )
+    return code, out.getvalue(), err.getvalue()
+
+
+def test_manual_deployment_title_only_informational_for_non_code_services(monkeypatch: pytest.MonkeyPatch) -> None:
+    transport = _make_transport_with_full_project()
+    old = {"deploymentId": "old", "status": "done", "title": "old", "createdAt": "2026-09-12T09:00:00Z"}
+    for path in (
+        "/api/compose.one?composeId=compose_hub",
+        "/api/compose.one?composeId=compose_n8n_darkfac",
+        "/api/application.one?applicationId=app_canary",
+    ):
+        new = {"deploymentId": "new", "status": "done", "title": "Manual deployment", "createdAt": "2026-09-12T09:10:00Z"}
+        _program_status(transport, path, [[old], [new]])
+    code, out, err = _run_main(
+        ["--only", "Darkhub", "--only", "darkfac-n8n", "--only", "darkfac-canary", "--skip-backup"],
+        transport, monkeypatch, "feat: algo",
+    )
+    assert code == mod.EXIT_OK, err
+    assert "does not match local origin/main" not in err
+    assert "not code-bearing" in out
+
+
+def test_cloud_service_title_mismatch_still_fails(monkeypatch: pytest.MonkeyPatch) -> None:
+    assert mod.CODE_BEARING_SERVICES == frozenset({"darkfac-cloud"})
+    transport = _make_transport_with_full_project()
+    old = {"deploymentId": "old", "status": "done", "title": "old", "createdAt": "2026-09-12T09:00:00Z"}
+    new = {"deploymentId": "new", "status": "done", "title": "Manual deployment", "createdAt": "2026-09-12T09:10:00Z"}
+    _program_status(transport, "/api/compose.one?composeId=compose_cloud", [[old], [new]])
+    code, _out, err = _run_main(["--only", "darkfac-cloud", "--skip-backup"], transport, monkeypatch, "feat: algo")
+    assert code == mod.EXIT_DEPLOY_FAILED
+    assert "darkfac-cloud: does not match local origin/main" in err
+
+
+def _cloud_transport() -> QueueTransport:
+    transport = _make_transport_with_full_project()
+    old = {"deploymentId": "old", "status": "done", "title": "old", "createdAt": "2026-09-12T09:00:00Z"}
+    new = {"deploymentId": "new", "status": "done", "title": "feat: algo", "createdAt": "2026-09-12T09:10:00Z"}
+    _program_status(transport, "/api/compose.one?composeId=compose_cloud", [[old], [new]])
+    return transport
+
+
+def test_skip_node_sync_does_not_call_node_sync(monkeypatch: pytest.MonkeyPatch) -> None:
+    from core.infra import node_sync
+
+    def boom(**kwargs: object) -> node_sync.SyncReport:
+        raise AssertionError("node sync must not re-enter")
+
+    monkeypatch.setattr(node_sync, "sync", boom)
+    monkeypatch.setattr(node_sync, "verify", boom)
+    code, out, _err = _run_main(
+        ["--only", "darkfac-cloud", "--skip-backup", "--skip-node-sync"],
+        _cloud_transport(), monkeypatch, "feat: algo",
+    )
+    assert code == mod.EXIT_OK
+    assert "skipped (--skip-node-sync)" in out
+
+
+def test_redeploy_calls_sync_once_with_no_redeploy_reentry(monkeypatch: pytest.MonkeyPatch) -> None:
+    from core.infra import node_sync
+
+    seen: List[Dict[str, Any]] = []
+
+    def fake_sync(**kwargs: Any) -> node_sync.SyncReport:
+        seen.append(kwargs)
+        assert kwargs["vps_redeploy"]() is True  # returns immediately, never spawns a redeploy
+        return node_sync.SyncReport(expected_sha="a" * 40, nodes=[
+            node_sync.NodeStatus(name=n, state="converged", git_sha="a" * 40) for n in ("Notebook", "Desktop", "VPS")
+        ])
+
+    monkeypatch.setattr(node_sync, "sync", fake_sync)
+    code, _out, _err = _run_main(["--only", "darkfac-cloud", "--skip-backup"], _cloud_transport(), monkeypatch, "feat: algo")
+    assert code == mod.EXIT_OK
+    assert len(seen) == 1
+
+
+def _report(notebook: str, vps: str) -> Any:
+    from core.infra import node_sync
+
+    return node_sync.SyncReport(expected_sha="a" * 40, nodes=[
+        node_sync.NodeStatus(name="Notebook", state=notebook, reason="main checkout is on branch 'x'"),  # type: ignore[arg-type]
+        node_sync.NodeStatus(name="Desktop", state="converged", git_sha="a" * 40),
+        node_sync.NodeStatus(name="VPS", state=vps, reason="no git_sha"),  # type: ignore[arg-type]
+    ])
+
+
+def test_notebook_outside_main_fails_once_without_loop(monkeypatch: pytest.MonkeyPatch) -> None:
+    from core.infra import node_sync
+
+    calls: List[int] = []
+    monkeypatch.setattr(node_sync, "sync", lambda **kw: (calls.append(1), _report("divergent", "converged"))[1])
+    code, _out, err = _run_main(["--only", "darkfac-cloud", "--skip-backup"], _cloud_transport(), monkeypatch, None)
+    assert code == mod.EXIT_DEPLOY_FAILED
+    assert "Notebook: divergent" in err
+    assert calls == [1]
+
+
+def test_vps_unknown_is_non_blocking_after_successful_deploy(monkeypatch: pytest.MonkeyPatch) -> None:
+    from core.infra import node_sync
+
+    monkeypatch.setattr(node_sync, "sync", lambda **kw: _report("converged", "unknown"))
+    code, _out, err = _run_main(["--only", "darkfac-cloud", "--skip-backup"], _cloud_transport(), monkeypatch, None)
+    assert code == mod.EXIT_OK
+    assert "VPS: unknown" in err and "non-blocking" in err

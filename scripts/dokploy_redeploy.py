@@ -70,6 +70,11 @@ DEFAULT_POLL_INTERVAL_SECONDS = 5.0
 # adds another project this tool should be allowed to touch.
 ALLOWED_PROJECTS = frozenset({"darkfac-core"})
 
+# Only these services are built from the git source, so only their Dokploy
+# deploy title (= commit subject) is comparable with origin/main. Others
+# (n8n, Darkhub, canary) show titles like "Manual deployment": informational.
+CODE_BEARING_SERVICES = frozenset({"darkfac-cloud"})
+
 TERMINAL_SUCCESS_STATUSES = {"done"}
 TERMINAL_FAILURE_STATUSES = {"error", "failed"}
 
@@ -562,6 +567,11 @@ def build_arg_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Skip autonomous post-deploy 3-tier backup and restore drill.",
     )
+    parser.add_argument(
+        "--skip-node-sync",
+        action="store_true",
+        help="Skip the post-deploy 3-node verification/sync (used by node_sync itself to avoid re-entry).",
+    )
     parser.add_argument("-v", "--verbose", action="store_true", help="Enable debug logging.")
     return parser
 
@@ -713,30 +723,52 @@ def main(
             all_ok = False
 
     # A completed Dokploy job is not evidence that all running nodes use main.
-    # Check the three execution nodes after the deploy settles.
-    if str(REPO_ROOT) not in sys.path:
-        sys.path.insert(0, str(REPO_ROOT))
-    from core.infra.node_sync import verify as verify_nodes
+    # Converge and verify the three execution nodes (Notebook ff-only when
+    # clean on main, Desktop update+restart, VPS = the deploy just done). The
+    # sync must not trigger another redeploy, and node_sync's own redeploy
+    # passes --skip-node-sync, so there is no re-entry loop.
+    if getattr(args, "skip_node_sync", False):
+        print("[NODE SYNC] skipped (--skip-node-sync)", file=out)
+    else:
+        if str(REPO_ROOT) not in sys.path:
+            sys.path.insert(0, str(REPO_ROOT))
+        from core.infra import node_sync
 
-    sync_report = verify_nodes()
-    for node in sync_report.nodes:
-        if node.state != "converged":
-            all_ok = False
+        sync_kwargs: Dict[str, Any] = {
+            "desktop_url": env.get("DARKFAC_DESKTOP_URL") or node_sync.DESKTOP_URL,
+            "vps_url": env.get("DARKFAC_VPS_HEALTH_URL") or node_sync.VPS_URL,
+            "token": env.get("DARKFAC_WORKER_TOKEN"),
+            "vps_redeploy": lambda: True,  # VPS was just deployed above; never redeploy again from here
+        }
+        sync_report = node_sync.sync(**sync_kwargs)
+        for node in sync_report.nodes:
+            if node.state == "converged":
+                continue
+            # A VPS whose /health reports no git_sha cannot be compared; the
+            # Dokploy deploy itself succeeded (checked above), so only warn.
+            fatal = not (node.name == "VPS" and node.state == "unknown")
+            if fatal:
+                all_ok = False
             print(
                 f"[NODE SYNC] {node.name}: {node.state} "
                 f"sha={node.git_sha or '(unknown)'} expected={sync_report.expected_sha or '(unknown)'} "
-                f"reason={node.reason or '(none)'}",
+                f"reason={node.reason or '(none)'}" + ("" if fatal else " [non-blocking]"),
                 file=err,
             )
     if local_subject:
         for svc in triggered:
-            # Every selected service must report the same source revision.
-            # Dokploy's deploy title contains the source commit subject.
-            # This is weaker than a runtime SHA, so a missing title fails closed.
             result = next((r for r in completed if r.service.name == svc.name), None)
-            if result is None or result.deployment is None or result.deployment.title.splitlines()[0].strip() != local_subject.strip():
-                all_ok = False
-                print(f"[NODE SYNC] VPS service {svc.name}: does not match local origin/main", file=err)
+            title = ""
+            if result is not None and result.deployment is not None and result.deployment.title:
+                title = result.deployment.title.splitlines()[0].strip()
+            matches = title == local_subject.strip()
+            if svc.name in CODE_BEARING_SERVICES:
+                # Weaker than a runtime SHA, so a missing/different title fails closed.
+                if not matches:
+                    all_ok = False
+                    print(f"[NODE SYNC] VPS service {svc.name}: does not match local origin/main", file=err)
+            elif not matches:
+                print(f"[{svc.name}] info: deploy title {title!r} is not a commit subject (not code-bearing; ignored)", file=out)
 
     if all_ok and not getattr(args, "skip_backup", False):
         try:

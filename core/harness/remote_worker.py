@@ -47,6 +47,7 @@ from core.harness.test_subagent import (
     TestExecutionInstruction,
     TestSubagentEngine,
 )
+from core.infra.git_sha import current_git_sha
 from core.infra.metrics import HardwareMetrics, collect_host_hardware_metrics
 
 logger = logging.getLogger("core.harness.remote_worker")
@@ -83,6 +84,10 @@ class WorkerHealthStatus(BaseModel):
         description="origin/main SHA + recent validated candidate SHAs, for thin `git bundle --not` negotiation",
     )
     harness_version: str = Field(default="1", description="Remote harness job protocol version")
+    git_sha: Optional[str] = Field(
+        default=None,
+        description="Full `git rev-parse HEAD` (40 hex) of project_root; null when it cannot be read (USR-65)",
+    )
 
 
 class CommandExecutionRequest(BaseModel):
@@ -838,6 +843,7 @@ def create_worker_app(
             queue_length=job_manager.queue_length(),
             known_shas=known_validated_shas(root_path),
             harness_version="1",
+            git_sha=current_git_sha(root_path),
         )
 
     @worker_app.get("/metrics/hardware", response_model=HardwareMetrics)

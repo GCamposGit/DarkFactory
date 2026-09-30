@@ -171,6 +171,16 @@ app.include_router(api_router)
 app.include_router(roadmap_router, prefix="/api")
 app.include_router(roadmap_router)
 
+@app.get("/health", include_in_schema=False)
+def get_health() -> Dict[str, Any]:
+    """Liveness plus the deployed commit (USR-65): `DARKFAC_GIT_SHA` when set at
+    build/deploy time, else `git rev-parse HEAD`, else null (node sync then
+    reports the VPS as 'unknown' instead of 'divergent')."""
+    from core.infra.git_sha import current_git_sha
+
+    return {"status": "ok", "git_sha": current_git_sha(BASE_DIR.parent, use_env=True)}
+
+
 # Root-level aliases for operational task dashboard (eliminating 404 on reverse proxy / direct calls)
 @app.get("/tasks/dashboard", response_model=TaskDashboardReport, tags=["DarkHub Tasks"], include_in_schema=False)
 @app.get("/tasks/dashboard/", response_model=TaskDashboardReport, include_in_schema=False)

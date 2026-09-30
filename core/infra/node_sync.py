@@ -76,7 +76,10 @@ def request_json(method: str, url: str, payload: dict[str, Any] | None, token: s
 def redeploy_vps() -> bool:
     """Use the existing Dokploy workflow for VPS convergence."""
     result = subprocess.run(
-        [sys.executable, str(REPO_ROOT / "scripts" / "dokploy_redeploy.py"), "--skip-backup"],
+        [
+            sys.executable, str(REPO_ROOT / "scripts" / "dokploy_redeploy.py"),
+            "--skip-backup", "--skip-node-sync",  # never re-enter node verification (no loop)
+        ],
         cwd=REPO_ROOT, check=False, timeout=3600,
     )
     return result.returncode == 0
@@ -87,18 +90,36 @@ def _sha(value: Any) -> str | None:
     return candidate if SHA_PATTERN.fullmatch(candidate) else None
 
 
-def _probe(name: str, url: str, expected: str, http: HttpClient) -> NodeStatus:
+def _probe(name: str, url: str, expected: str, http: HttpClient, *, unknown_without_sha: bool = False) -> NodeStatus:
     try:
         data = http("GET", url, None, None)
     except Exception:
         return NodeStatus(name=name, state="offline", reason="health endpoint unavailable; last contact unknown")
     observed = _sha(data.get("git_sha"))
-    state = "converged" if observed == expected else "divergent"
+    now = datetime.now(timezone.utc)
+    if observed is None:
+        if unknown_without_sha:
+            return NodeStatus(
+                name=name, state="unknown", last_contact=now,
+                reason="health reports no git_sha (DARKFAC_GIT_SHA not provided at deploy); cannot verify",
+            )
+        return NodeStatus(name=name, state="divergent", last_contact=now, reason="health response has no full git_sha")
     return NodeStatus(
-        name=name, state=state, git_sha=observed,
-        last_contact=datetime.now(timezone.utc),
-        reason=None if observed else "health response has no full git_sha",
+        name=name, state="converged" if observed == expected else "divergent",
+        git_sha=observed, last_contact=now,
     )
+
+
+def _notebook_blocker(root: Path, git: GitRunner) -> str | None:
+    """Why the Notebook checkout must never be touched, or ``None`` when it may be synced."""
+    git_dir = git(root, ["rev-parse", "--git-dir"])
+    common_dir = git(root, ["rev-parse", "--git-common-dir"])
+    if Path(git_dir) != Path(common_dir):
+        return "checkout is a git worktree, not the main checkout; no git operation attempted"
+    branch = git(root, ["rev-parse", "--abbrev-ref", "HEAD"])
+    if branch != "main":
+        return f"main checkout is on branch {branch!r}, not 'main'; no git operation attempted"
+    return None
 
 
 def verify(
@@ -114,13 +135,15 @@ def verify(
         return SyncReport(nodes=[NodeStatus(name=n, state="unknown", reason="origin/main unavailable") for n in ("Notebook", "Desktop", "VPS")])
     try:
         local = _sha(git(root, ["rev-parse", "HEAD"]))
-        notebook = NodeStatus(name="Notebook", state="converged" if local == expected else "divergent", git_sha=local)
+        blocker = _notebook_blocker(root, git)
+        state = "converged" if local == expected and blocker is None else "divergent"
+        notebook = NodeStatus(name="Notebook", state=state, git_sha=local, reason=blocker)
     except Exception:
         notebook = NodeStatus(name="Notebook", state="unknown", reason="checkout unavailable")
     return SyncReport(expected_sha=expected, nodes=[
         notebook,
         _probe("Desktop", f"{desktop_url.rstrip('/')}/health", expected, http),
-        _probe("VPS", vps_url, expected, http),
+        _probe("VPS", vps_url, expected, http, unknown_without_sha=True),
     ])
 
 
@@ -140,7 +163,10 @@ def sync(
     notebook = initial.nodes[0]
     if notebook.state != "converged":
         try:
-            if git(root, ["status", "--porcelain"]):
+            blocker = _notebook_blocker(root, git)
+            if blocker:
+                notebook.reason = blocker
+            elif git(root, ["status", "--porcelain"]):
                 notebook.reason = "dirty worktree; no git operation attempted"
             else:
                 git(root, ["fetch", "origin", "main"])
@@ -165,7 +191,7 @@ def sync(
                 sleep(min(interval, max(0, deadline - clock())))
         except Exception as exc:
             desktop.reason = str(exc)
-    if initial.nodes[2].state != "converged":
+    if initial.nodes[2].state in ("divergent", "offline"):
         try:
             if not vps_redeploy():
                 initial.nodes[2].reason = "Dokploy redeploy failed"
