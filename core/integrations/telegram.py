@@ -580,6 +580,16 @@ class TelegramGateway:
         chat_id = msg.chat.id
         raw_text = (msg.text or msg.caption or "").strip()
 
+        if self.config.role == "owner":
+            # Owner bot (@darkfac_bot) = alerts only. Commands, demands (text/voice), /linha and
+            # grill decisions are handled by the ops bot (@darkfac_ops_bot).
+            redirect = TelegramDispatchResult(
+                update_id=update.update_id, action=TelegramActionType.UNKNOWN, authorized=True
+            )
+            if raw_text.startswith("/"):
+                redirect.response_text = "Comandos, demandas e decisões de grill ficam no @darkfac_ops_bot. Este canal (@darkfac_bot) envia apenas alertas."
+            return redirect
+
         # Handle voice and audio input (USR-60): support voice, audio, video_note, and audio documents
         voice_obj = msg.voice or msg.audio or msg.video_note
         if not voice_obj and msg.document:
@@ -705,7 +715,9 @@ class TelegramGateway:
                     "• <code>/linha [ticket_id]</code> - Enviar um ticket existente para a linha autônoma\n"
                     "• <code>/status [ticket_id]</code> - Consultar status de pipelines e jobs\n"
                     "• <code>/alerts</code> - Consultar telemetria operacional\n\n"
-                    "🔒 <i>Aprovações de release e governança (/grill, /approve): exclusivas no @darkfac_bot</i>"
+                    "• <code>/grill [ticket_id] [resposta]</code> - Responder alinhamento (Grill)\n"
+                    "• <code>/approve [projeto] [digest]</code> - Aprovar release\n\n"
+                    "ℹ️ <i>Alertas críticos chegam pelo @darkfac_bot (somente alertas)</i>"
                 )
             else:
                 result.response_text = (
@@ -858,14 +870,6 @@ class TelegramGateway:
 
         elif cmd_str == "/grill":
             result.action = TelegramActionType.GRILL
-            if self.config.role == "ops":
-                result.response_text = (
-                    "🔒 <b>Canal Restrito à Governança:</b>\n"
-                    "Respostas de Grill e alinhamentos de requisitos devem ser enviados "
-                    "ao bot oficial do Owner: <b>@darkfac_bot</b>."
-                )
-                return result
-
             subparts = arg_str.split(maxsplit=1)
             if len(subparts) < 2:
                 result.response_text = "⚠️ Usage: /grill <ticket_id> <your answer / choice>"
@@ -886,14 +890,6 @@ class TelegramGateway:
 
         elif cmd_str == "/approve":
             result.action = TelegramActionType.APPROVE
-            if self.config.role == "ops":
-                result.response_text = (
-                    "🔒 <b>Canal Restrito à Governança:</b>\n"
-                    "Aprovações de release e promoção em produção devem ser executadas "
-                    "exclusivamente no bot oficial do Owner: <b>@darkfac_bot</b>."
-                )
-                return result
-
             subparts = arg_str.split(maxsplit=1)
             if len(subparts) < 2:
                 result.response_text = "⚠️ Usage: /approve <project_id> <artifact_digest>"
@@ -984,6 +980,16 @@ class TelegramGateway:
         chat_id = cb.message.chat.id if cb.message else None
         data_str = cb.data or ""
 
+        if self.config.role == "owner" and cb.id not in self.processed_callback_ids:
+            # Owner bot = alerts only: buttons are handled by the ops bot, never here.
+            self.processed_callback_ids.add(cb.id)
+            return TelegramDispatchResult(
+                update_id=update.update_id,
+                action=TelegramActionType.UNKNOWN,
+                authorized=True,
+                response_text="Comandos, demandas e decisões de grill ficam no @darkfac_ops_bot. Este canal (@darkfac_bot) envia apenas alertas.",
+            )
+
         # Check duplicate callback query ID
         if cb.id in self.processed_callback_ids:
             return TelegramDispatchResult(
@@ -1010,10 +1016,6 @@ class TelegramGateway:
             index = parts[3]
             result.action = TelegramActionType.GRILL
             result.target_id = run_id
-            if self.config.role == "ops":
-                result.response_text = "🔒 Decisões de alinhamento pertencem ao canal @darkfac_bot."
-                self.processed_callback_ids.add(cb.id)
-                return result
             if self.line_grill_handler:
                 try:
                     res = self.line_grill_handler(run_id, question_id, index, user_id)
@@ -1033,10 +1035,6 @@ class TelegramGateway:
             ticket_id, choice = parts[2], parts[3]
             result.action = TelegramActionType.GRILL
             result.target_id = ticket_id
-            if self.config.role == "ops":
-                result.response_text = "🔒 Decisões de alinhamento pertencem ao canal @darkfac_bot."
-                self.processed_callback_ids.add(cb.id)
-                return result
             if self.grill_handler:
                 try:
                     res = self.grill_handler(ticket_id, choice, user_id)
@@ -1054,10 +1052,6 @@ class TelegramGateway:
             run_id = parts[2]
             result.action = TelegramActionType.ACCEPT
             result.target_id = run_id
-            if self.config.role == "ops":
-                result.response_text = "🔒 Aceite comercial pertence ao canal @darkfac_bot."
-                self.processed_callback_ids.add(cb.id)
-                return result
             if self.commercial_acceptance_handler:
                 try:
                     res = self.commercial_acceptance_handler(run_id, user_id)
@@ -1078,10 +1072,6 @@ class TelegramGateway:
             project_id, digest, choice = parts[2], parts[3], parts[4] if len(parts) > 4 else "approved"
             result.action = TelegramActionType.APPROVE
             result.target_id = f"{project_id}:{digest}"
-            if self.config.role == "ops":
-                result.response_text = "🔒 Aprovações de release pertencem ao canal @darkfac_bot."
-                self.processed_callback_ids.add(cb.id)
-                return result
             if choice.lower() in ("approve", "approved", "yes"):
                 if self.approval_handler:
                     try:

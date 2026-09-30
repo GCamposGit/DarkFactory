@@ -413,13 +413,19 @@ def submit_grill_answers(project: ProjectDescriptor, run_id: str, answers: dict[
 
 
 def default_telegram_sender() -> Optional[TelegramSender]:
-    """Best-effort owner-bot sender; returns `None` (no-op) if unconfigured."""
+    """Best-effort sender of the grill message; returns `None` (no-op) if unconfigured.
+
+    Grill questions and their inline buttons belong to the ops bot (@darkfac_ops_bot), so the
+    ops token is used whenever `TELEGRAM_OPS_BOT_TOKEN` is set; otherwise the owner bot is the
+    fallback. Alerts (canary failures, human requests) stay on the owner bot elsewhere.
+    """
     try:
         from core.integrations.telegram import TelegramGateway, load_telegram_config
     except Exception:  # pragma: no cover - defensive import guard
         return None
+    role = "ops" if os.environ.get("TELEGRAM_OPS_BOT_TOKEN", "").strip() else "owner"
     try:
-        config = load_telegram_config(role="owner")
+        config = load_telegram_config(role=role)
     except Exception:  # pragma: no cover - defensive
         return None
     if not config.bot_token or not config.authorized_chat_ids:
@@ -488,12 +494,17 @@ def run_grill(
     now: Optional[datetime] = None,
     parent_grill: Optional[str] = None,
     auto_policy: bool = False,
+    answers: Optional[dict[str, str]] = None,
 ) -> StageResult:
     """Run (or reconcile) the single-round grill for `run_id`.
 
     `auto_policy` (canary runs, see `is_auto_grill`): intent/business questions are resolved
     immediately with their recommended answer, tagged `auto_canary`, with no Telegram message.
     `secret`/`account` questions still block.
+
+    `answers` are owner answers recorded in the control store (`{question_id: raw callback
+    choice}`, see `core.line.human.build_telegram_line_grill_handler`); a pending grill applies
+    them on reconcile, so a process without git access (the DarkHub) can answer a grill.
 
     Idempotent: a finished grill is never re-run; a pending grill is
     resolved (fully or partially) rather than restarted. `parent_grill` is
@@ -509,7 +520,9 @@ def run_grill(
 
     pending = _load_pending(ws)
     if pending is not None:
-        return _reconcile_pending(ws, run_id, pending, current_time, send_message, auto_policy=auto_policy)
+        return _reconcile_pending(
+            ws, run_id, pending, current_time, send_message, auto_policy=auto_policy, answers=answers
+        )
 
     workspace.write_context(ws, _DEMAND_FILE, _render_demand_markdown(project, channel, demand_text))
 
@@ -607,7 +620,14 @@ def _reconcile_pending(
     send_message: Optional[TelegramSender] = None,
     *,
     auto_policy: bool = False,
+    answers: Optional[dict[str, str]] = None,
 ) -> StageResult:
+    by_id = {q.id: q for q in pending.questions}
+    for question_id, choice in (answers or {}).items():
+        question = by_id.get(question_id)
+        if question is not None and question_id not in pending.answers:
+            pending.answers[question_id] = resolve_callback_choice(question, choice)
+
     deadline = pending.deadline
     if deadline.tzinfo is None:
         deadline = deadline.replace(tzinfo=timezone.utc)

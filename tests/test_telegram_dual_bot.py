@@ -5,7 +5,7 @@ Validates:
 2. Dedicated state files to prevent offset collision across bots.
 3. Command gating: /grill and /approve allowed on Owner Bot, redirected on Ops Bot.
 4. Role-specific start/help menus.
-5. Callback query role gating.
+5. Callback query role gating (owner bot = alerts only, ops bot = everything else).
 6. Notification service routing to Owner Bot for critical alerts.
 """
 
@@ -94,57 +94,26 @@ def test_dual_bot_state_file_isolation(tmp_path: Path) -> None:
     assert reloaded_ops.last_offset == 51
 
 
-def test_command_gating_governance_restricted_on_ops_bot(tmp_path: Path) -> None:
-    """Ops bot rejects /grill and /approve, directing owner to @darkfac_bot."""
-    cfg_ops = TelegramConfig(bot_token="tok_ops", role="ops", authorized_user_ids=[10])
-    gw_ops = TelegramGateway(config=cfg_ops, state_dir=tmp_path / "ops")
-
-    # /grill on Ops Bot -> Redirected
-    res_grill = gw_ops.process_update({
-        "update_id": 1,
+def _msg(update_id: int, text: str) -> dict:
+    return {
+        "update_id": update_id,
         "message": {
-            "message_id": 1,
+            "message_id": update_id,
             "from": {"id": 10},
             "chat": {"id": 10},
             "date": 1700000000,
-            "text": "/grill TICKET-1 Option A",
+            "text": text,
         },
-    })
-    assert "@darkfac_bot" in res_grill.response_text
-    assert "Canal Restrito" in res_grill.response_text
-
-    # /approve on Ops Bot -> Redirected
-    res_appr = gw_ops.process_update({
-        "update_id": 2,
-        "message": {
-            "message_id": 2,
-            "from": {"id": 10},
-            "chat": {"id": 10},
-            "date": 1700000000,
-            "text": "/approve darkfac abc123def456",
-        },
-    })
-    assert "@darkfac_bot" in res_appr.response_text
-    assert "Canal Restrito" in res_appr.response_text
-
-    # Callback grill on Ops Bot -> Redirected
-    res_cb = gw_ops.process_update({
-        "update_id": 3,
-        "callback_query": {
-            "id": "cb1",
-            "from": {"id": 10},
-            "data": "cb:grill:TICKET-1:OptionA",
-        },
-    })
-    assert "@darkfac_bot" in res_cb.response_text
+    }
 
 
-def test_owner_bot_executes_governance_and_accepts_priority_demands(tmp_path: Path) -> None:
-    """Owner bot handles /grill, /approve, and accepts priority demands."""
-    grill_mock = MagicMock(return_value={"resumed": True, "ticket_id": "TICKET-1"})
+def test_owner_bot_is_alerts_only_and_points_commands_to_the_ops_bot(tmp_path: Path) -> None:
+    """Owner bot (@darkfac_bot) handles nothing: commands get a pointer to @darkfac_ops_bot."""
+    grill_mock = MagicMock(return_value={"resumed": True})
     approval_mock = MagicMock(return_value={"receipt_id": "RCPT-999"})
     demand_mock = MagicMock(return_value={"ticket_id": "DF-OWNER-1"})
-
+    line_grill_mock = MagicMock(return_value={"resumed": True})
+    line_mock = MagicMock(return_value={"message": "x"})
     cfg_owner = TelegramConfig(bot_token="tok_owner", role="owner", authorized_user_ids=[10])
     gw_owner = TelegramGateway(
         config=cfg_owner,
@@ -152,50 +121,72 @@ def test_owner_bot_executes_governance_and_accepts_priority_demands(tmp_path: Pa
         grill_handler=grill_mock,
         approval_handler=approval_mock,
         demand_handler=demand_mock,
+        line_grill_handler=line_grill_mock,
+        line_handler=line_mock,
     )
 
-    # 1. /grill succeeds
-    res_grill = gw_owner.process_update({
-        "update_id": 10,
-        "message": {
-            "message_id": 1,
-            "from": {"id": 10},
-            "chat": {"id": 10},
-            "date": 1700000000,
-            "text": "/grill TICKET-1 Option B",
-        },
-    })
+    for i, text in enumerate(
+        ["/grill TICKET-1 Option B", "/approve darkfac sha256abcd", "/demand Urgent security fix", "/linha USR-62", "/help"], start=1
+    ):
+        res = gw_owner.process_update(_msg(i, text))
+        assert "@darkfac_ops_bot" in res.response_text
+        assert "apenas alertas" in res.response_text
+    # Non-commands (including plain text) are ignored silently.
+    assert not gw_owner.process_update(_msg(20, "oi tudo bem?")).response_text
+
+    # Grill/accept/release buttons are never handled on the owner bot.
+    for n, data in enumerate(["cb:grill:run-1#q1:0", "cb:grill:TICKET-1:OptionA", "cb:accept:run-1", "cb:release:darkfac:abc:approve"]):
+        res_cb = gw_owner.process_update(
+            {"update_id": 30 + n, "callback_query": {"id": f"cbo{n}", "from": {"id": 10}, "data": data}}
+        )
+        assert "@darkfac_ops_bot" in res_cb.response_text
+    for mock in (grill_mock, approval_mock, demand_mock, line_grill_mock, line_mock):
+        mock.assert_not_called()
+
+
+def test_ops_bot_executes_grill_approve_demand_and_callbacks(tmp_path: Path) -> None:
+    """Ops bot (@darkfac_ops_bot) owns grill answers, demands, /linha, approvals and every button."""
+    grill_mock = MagicMock(return_value={"resumed": True, "ticket_id": "TICKET-1"})
+    approval_mock = MagicMock(return_value={"receipt_id": "RCPT-999"})
+    demand_mock = MagicMock(return_value={"ticket_id": "DF-OPS-1"})
+    line_grill_mock = MagicMock(return_value={"resumed": True})
+    accept_mock = MagicMock(return_value={"resumed": True, "sha": "a" * 40})
+    cfg_ops = TelegramConfig(bot_token="tok_ops", role="ops", authorized_user_ids=[10])
+    gw_ops = TelegramGateway(
+        config=cfg_ops,
+        state_dir=tmp_path / "ops",
+        grill_handler=grill_mock,
+        approval_handler=approval_mock,
+        demand_handler=demand_mock,
+        line_grill_handler=line_grill_mock,
+        commercial_acceptance_handler=accept_mock,
+    )
+
+    res_grill = gw_ops.process_update(_msg(10, "/grill TICKET-1 Option B"))
     assert res_grill.resumed is True
     grill_mock.assert_called_once_with("TICKET-1", "Option B", 10)
 
-    # 2. /approve succeeds
-    res_appr = gw_owner.process_update({
-        "update_id": 11,
-        "message": {
-            "message_id": 2,
-            "from": {"id": 10},
-            "chat": {"id": 10},
-            "date": 1700000000,
-            "text": "/approve darkfac sha256abcd",
-        },
-    })
-    assert res_appr.resumed is True
-    assert "RCPT-999" in res_appr.response_text
+    res_appr = gw_ops.process_update(_msg(11, "/approve darkfac sha256abcd"))
+    assert res_appr.resumed is True and "RCPT-999" in res_appr.response_text
     approval_mock.assert_called_once_with("darkfac", "sha256abcd", 10)
 
-    # 3. /demand from Owner succeeds with Owner tag
-    res_demand = gw_owner.process_update({
-        "update_id": 12,
-        "message": {
-            "message_id": 3,
-            "from": {"id": 10},
-            "chat": {"id": 10},
-            "date": 1700000000,
-            "text": "/demand Urgent security fix",
-        },
-    })
-    assert "Owner Demand" in res_demand.response_text
-    assert "DF-OWNER-1" in res_demand.response_text
+    res_demand = gw_ops.process_update(_msg(12, "/demand Urgent security fix"))
+    assert "DF-OPS-1" in res_demand.response_text
+    demand_mock.assert_called_once()
+
+    # Inline buttons: the line grill answer (the button of a worker-sent grill message) is recorded.
+    res_cb = gw_ops.process_update(
+        {"update_id": 13, "callback_query": {"id": "cb-line", "from": {"id": 10}, "data": "cb:grill:run-abc#q1:0"}}
+    )
+    assert res_cb.resumed is True and "Resposta registrada" in res_cb.response_text
+    line_grill_mock.assert_called_once_with("run-abc", "q1", "0", 10)
+    assert "@darkfac_bot" not in res_cb.response_text
+
+    res_accept = gw_ops.process_update(
+        {"update_id": 14, "callback_query": {"id": "cb-acc", "from": {"id": 10}, "data": "cb:accept:run-abc"}}
+    )
+    assert res_accept.resumed is True
+    accept_mock.assert_called_once_with("run-abc", 10)
 
 
 def test_notification_service_defaults_to_owner_bot(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

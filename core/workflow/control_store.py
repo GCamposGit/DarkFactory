@@ -288,6 +288,14 @@ class SQLiteControlStore:
                     committed_at TEXT NOT NULL,
                     PRIMARY KEY (channel, external_id)
                 );
+
+                CREATE TABLE IF NOT EXISTS grill_answers (
+                    run_id TEXT NOT NULL,
+                    question_id TEXT NOT NULL,
+                    choice TEXT NOT NULL,
+                    recorded_at TEXT NOT NULL,
+                    PRIMARY KEY (run_id, question_id)
+                );
                 """
             )
             self._migrate_jobs_columns(conn)
@@ -1255,6 +1263,40 @@ class SQLiteControlStore:
             res = dict(run_row)
             res["jobs"] = jobs
             return res
+        finally:
+            conn.close()
+
+    def record_grill_answer(self, run_id: str, question_id: str, choice: str, now: datetime) -> None:
+        """Record an owner's grill answer for `(run_id, question_id)` (last answer wins).
+
+        The answer lives in the control store, not on the run's git branch, so a process
+        without git/workspace access (the DarkHub) can record it; the worker applies it to the
+        pending grill on the next claim (`stage_grill.run_grill(answers=...)`).
+        """
+        conn = self._connect()
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            conn.execute(
+                """
+                INSERT INTO grill_answers (run_id, question_id, choice, recorded_at) VALUES (?, ?, ?, ?)
+                ON CONFLICT (run_id, question_id) DO UPDATE SET choice = excluded.choice, recorded_at = excluded.recorded_at
+                """,
+                (run_id, question_id, choice, now.isoformat()),
+            )
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+
+    def get_grill_answers(self, run_id: str) -> dict[str, str]:
+        """Grill answers recorded for `run_id`, as `{question_id: choice}` (raw callback choice)."""
+        conn = self._connect()
+        try:
+            cur = conn.cursor()
+            cur.execute("SELECT question_id, choice FROM grill_answers WHERE run_id = ?", (run_id,))
+            return {row["question_id"]: row["choice"] for row in cur.fetchall()}
         finally:
             conn.close()
 

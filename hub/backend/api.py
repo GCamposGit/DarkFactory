@@ -1371,13 +1371,9 @@ def trigger_cloud_deploy(
 # ==============================================================================
 
 
-@router.post("/webhooks/telegram")
-async def handle_telegram_webhook(
-    request: Request,
-    service: HubService = Depends(get_hub_service),
-    secret_token: Optional[str] = Header(None, alias="X-Telegram-Bot-Api-Secret-Token"),
+async def _receive_telegram_webhook(
+    request: Request, service: HubService, secret_token: Optional[str], role: str
 ) -> Dict[str, Any]:
-    """Receives and processes incoming Telegram Bot Webhook updates (HF-14)."""
     try:
         payload = await request.json()
     except Exception as exc:
@@ -1386,13 +1382,43 @@ async def handle_telegram_webhook(
             detail=f"Invalid JSON payload: {exc}",
         )
 
-    result = service.process_telegram_webhook(payload=payload, secret_token_header=secret_token)
+    result = service.process_telegram_webhook(payload=payload, secret_token_header=secret_token, role=role)
     if not result.get("authorized") and result.get("error"):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail=result["error"],
         )
     return result
+
+
+@router.post("/webhooks/telegram")
+async def handle_telegram_webhook(
+    request: Request,
+    service: HubService = Depends(get_hub_service),
+    secret_token: Optional[str] = Header(None, alias="X-Telegram-Bot-Api-Secret-Token"),
+) -> Dict[str, Any]:
+    """Legacy Telegram webhook (HF-14); kept for compatibility and served as the ops bot."""
+    return await _receive_telegram_webhook(request, service, secret_token, "ops")
+
+
+@router.post("/webhooks/telegram/ops")
+async def handle_telegram_ops_webhook(
+    request: Request,
+    service: HubService = Depends(get_hub_service),
+    secret_token: Optional[str] = Header(None, alias="X-Telegram-Bot-Api-Secret-Token"),
+) -> Dict[str, Any]:
+    """Ops bot (@darkfac_ops_bot): demands, /linha, grill answers and all inline-button callbacks."""
+    return await _receive_telegram_webhook(request, service, secret_token, "ops")
+
+
+@router.post("/webhooks/telegram/owner")
+async def handle_telegram_owner_webhook(
+    request: Request,
+    service: HubService = Depends(get_hub_service),
+    secret_token: Optional[str] = Header(None, alias="X-Telegram-Bot-Api-Secret-Token"),
+) -> Dict[str, Any]:
+    """Owner bot (@darkfac_bot): alerts only; commands are answered with a pointer to the ops bot."""
+    return await _receive_telegram_webhook(request, service, secret_token, "owner")
 
 
 @router.get("/integrations/telegram/status")

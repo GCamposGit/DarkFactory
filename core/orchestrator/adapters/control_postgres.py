@@ -169,6 +169,14 @@ CREATE TABLE IF NOT EXISTS intake_commands (
     committed_at TIMESTAMPTZ NOT NULL,
     PRIMARY KEY (channel, external_id)
 );
+
+CREATE TABLE IF NOT EXISTS grill_answers (
+    run_id VARCHAR(160) NOT NULL,
+    question_id VARCHAR(160) NOT NULL,
+    choice TEXT NOT NULL,
+    recorded_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (run_id, question_id)
+);
 """
 
 
@@ -1184,6 +1192,39 @@ class PostgresControlStore:
         except Exception as exc:
             logger.warning("PostgreSQL get_run_payload failed: %s", exc)
             return None
+
+    def record_grill_answer(self, run_id: str, question_id: str, choice: str, now: datetime) -> None:
+        """Record an owner's grill answer for `(run_id, question_id)` (last answer wins)."""
+        if self.mock_mode:
+            return self._backend.record_grill_answer(run_id, question_id, choice, now)
+
+        try:
+            with self._psycopg.connect(self.raw_url) as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        INSERT INTO grill_answers (run_id, question_id, choice, recorded_at) VALUES (%s, %s, %s, %s)
+                        ON CONFLICT (run_id, question_id) DO UPDATE SET choice = EXCLUDED.choice, recorded_at = EXCLUDED.recorded_at
+                        """,
+                        (run_id, question_id, choice, now.astimezone(UTC)),
+                    )
+                conn.commit()
+        except Exception as exc:
+            raise StoreUnavailableError(f"PostgreSQL record_grill_answer failed: {exc}") from exc
+
+    def get_grill_answers(self, run_id: str) -> dict[str, str]:
+        """Grill answers recorded for `run_id`, as `{question_id: choice}` (raw callback choice)."""
+        if self.mock_mode:
+            return self._backend.get_grill_answers(run_id)
+
+        try:
+            with self._psycopg.connect(self.raw_url) as conn:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT question_id, choice FROM grill_answers WHERE run_id = %s", (run_id,))
+                    return {row[0]: row[1] for row in cur.fetchall()}
+        except Exception as exc:
+            logger.warning("PostgreSQL get_grill_answers failed: %s", exc)
+            return {}
 
     def find_job(self, run_id: str, stage: str, status: str | None = None) -> JobKey | None:
         """The highest-iteration job for `(run_id, stage)`, optionally filtered by `status`."""

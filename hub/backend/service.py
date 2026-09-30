@@ -256,8 +256,13 @@ class HubService:
         control_db_path: Optional[Path] = None,
         control_database_url: Optional[str] = None,
         seed_dir: Optional[Path] = None,
+        line_control_store: Optional[Any] = None,
     ) -> None:
         self._control_store = control_store
+        # Injected store for the production LINE (tests/embedded use). Never inferred from the
+        # local control store above: that one is the Hub's own SQLite, which no worker reads.
+        self._line_store_override = line_control_store
+        self._line_store_cache: Optional[Any] = None
         if data_dir is None:
             # Default to hub/data relative to this file
             self.data_dir = Path(__file__).resolve().parent.parent / "data"
@@ -391,14 +396,22 @@ class HubService:
     def _line_control_store(self) -> Any:
         """The store the production line's workers claim from.
 
-        An injected store (tests, embedded use) always wins. Otherwise Postgres when a line
-        database URL is configured (see `core.line.owner_intake`), else the local SQLite store.
+        Only an explicitly injected LINE store overrides. Otherwise, whenever a line database URL
+        is configured (`DARKHUB_LINE_DATABASE_URL` / `DARKFAC_HF02_DATABASE_URL` /
+        `DARKHUB_CONTROL_DATABASE_URL`, or the `control_database_url` constructor argument) this is
+        the Postgres store the workers claim from, even if the Hub also has its own local control
+        store. Without a URL it falls back to that local store (local development).
         """
-        if self._control_store is not None:
-            return self._control_store
-        from core.line.owner_intake import open_line_store
+        if self._line_store_override is not None:
+            return self._line_store_override
+        from core.line.owner_intake import line_database_url, open_line_store
 
-        return open_line_store(fallback=self.control_store)
+        url = self.control_database_url or line_database_url()
+        if url:
+            if self._line_store_cache is None:
+                self._line_store_cache = open_line_store(url=url)  # raises if unreachable, never a mock
+            return self._line_store_cache
+        return self._control_store if self._control_store is not None else self.control_store
 
     def submit_ticket_to_line(self, ticket_id: str) -> Any:
         """Push an existing demands.json ticket into the autonomous production line."""
@@ -2449,9 +2462,32 @@ class HubService:
         client = DokployDeployClient()
         return client.trigger_deploy(service_name=service_name, custom_url=custom_url)
 
-    def _build_telegram_gateway(self) -> TelegramGateway:
-        """Constructs TelegramGateway with bound handlers to DarkHub core services."""
+    def _build_telegram_gateway(self, role: str = "ops") -> TelegramGateway:
+        """Constructs TelegramGateway with bound handlers to DarkHub core services.
+
+        `role="ops"` is the Orchestrator bot (@darkfac_ops_bot): demands, /linha, grill and every
+        inline-button callback. `role="owner"` is the Owner bot (@darkfac_bot): alerts only, so it
+        gets no handlers and the gateway answers commands with a pointer to the ops bot.
+        """
         from core.integrations.telegram import load_telegram_config
+
+        if role == "owner":
+            users_raw = os.environ.get("TELEGRAM_AUTHORIZED_USERS") or os.environ.get("TELEGRAM_ALLOWED_USERS", "")
+            chats_raw = os.environ.get("TELEGRAM_AUTHORIZED_CHATS") or os.environ.get("TELEGRAM_ALLOWED_CHATS", "")
+            owner_updates: Dict[str, Any] = {}
+            users = [int(u.strip()) for u in users_raw.split(",") if u.strip().isdigit()]
+            chats = [int(c.strip()) for c in chats_raw.split(",") if c.strip().isdigit()]
+            if users:
+                owner_updates["authorized_user_ids"] = users
+            if chats:
+                owner_updates["authorized_chat_ids"] = chats
+            secret_owner = os.environ.get("TELEGRAM_WEBHOOK_SECRET")
+            if secret_owner:
+                owner_updates["webhook_secret_token"] = secret_owner
+            owner_config = load_telegram_config(role="owner")
+            if owner_updates:
+                owner_config = owner_config.model_copy(update=owner_updates)
+            return TelegramGateway(config=owner_config, state_dir=self.project_root / ".factory" / "telegram")
 
         token = os.environ.get("TELEGRAM_OPS_BOT_TOKEN") or os.environ.get("TELEGRAM_BOT_TOKEN")
         users_raw = os.environ.get("TELEGRAM_AUTHORIZED_USERS") or os.environ.get("TELEGRAM_ALLOWED_USERS", "")
@@ -2538,8 +2574,15 @@ class HubService:
                 build_telegram_line_grill_handler,
             )
 
-            line_grill_handler = build_telegram_line_grill_handler(self.control_store)
-            commercial_acceptance_handler = build_telegram_commercial_acceptance_handler(self.control_store)
+            # Resolved lazily against the LINE store (Postgres in production), never the Hub's
+            # local SQLite: answers and wake-ups must reach the store the workers claim from.
+            def line_grill_handler(run_id: str, question_id: str, index: str, user_id: int) -> Dict[str, Any]:
+                return build_telegram_line_grill_handler(self._line_control_store())(
+                    run_id, question_id, index, user_id
+                )
+
+            def commercial_acceptance_handler(run_id: str, user_id: int) -> Dict[str, Any]:
+                return build_telegram_commercial_acceptance_handler(self._line_control_store())(run_id, user_id)
         except Exception as exc:  # pragma: no cover - defensive, must never break the bot
             logger.warning("Failed to wire production-line Telegram handlers: %s", exc)
             line_grill_handler = None
@@ -2561,8 +2604,9 @@ class HubService:
         self,
         payload: Dict[str, Any],
         secret_token_header: Optional[str] = None,
+        role: str = "ops",
     ) -> Dict[str, Any]:
-        """Processes an incoming Telegram webhook update."""
+        """Processes an incoming Telegram webhook update for the given bot role (ops or owner)."""
         expected_secret = os.environ.get("TELEGRAM_WEBHOOK_SECRET")
         if expected_secret and secret_token_header != expected_secret:
             return {
@@ -2571,7 +2615,7 @@ class HubService:
                 "authorized": False,
                 "error": "Invalid X-Telegram-Bot-Api-Secret-Token",
             }
-        gateway = self._build_telegram_gateway()
+        gateway = self._build_telegram_gateway(role=role)
         result = gateway.process_update(payload)
         if result.response_text and not result.duplicate:
             msg_obj = payload.get("message") or payload.get("callback_query", {}).get("message")
