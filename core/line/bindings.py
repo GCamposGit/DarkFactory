@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import json
 import logging
+from datetime import datetime, timezone
 from typing import Any, Iterable, Optional, Protocol
 
 from core.line import routing as line_routing
@@ -203,7 +204,8 @@ class GrillStageHandler:
         payload = self.store.get_run_payload(run_id) or {}
         demand_text = _render_demand_text(payload)
         parent_grill = payload.get("parent_grill")
-        return stage_grill.run_grill(
+        adopt_from = self._previous_attempt_runs(payload)
+        result = stage_grill.run_grill(
             project,
             run_id,
             demand_text,
@@ -212,7 +214,36 @@ class GrillStageHandler:
             parent_grill=parent_grill,
             auto_policy=stage_grill.is_auto_grill(project, payload),
             answers=self._recorded_answers(run_id),
+            adopt_from_runs=adopt_from,
         )
+        self._carry_over_answers(run_id, result)
+        return result
+
+    def _previous_attempt_runs(self, payload: dict[str, Any]) -> list[str]:
+        """Earlier attempts of the same ticket whose resolved grill a retry attempt may adopt."""
+        from core.line.owner_intake import previous_attempt_run_ids
+
+        return previous_attempt_run_ids(self.store, payload)
+
+    def _carry_over_answers(self, run_id: str, result: StageResult) -> None:
+        """After adopting a previous attempt's grill, record its answers under this run too (best effort)."""
+        previous_run_id = next(
+            (
+                ref[len(stage_grill.ADOPTED_EVIDENCE_PREFIX) :]
+                for ref in (getattr(result, "evidence_refs", None) or [])
+                if ref.startswith(stage_grill.ADOPTED_EVIDENCE_PREFIX)
+            ),
+            "",
+        )
+        recorder = getattr(self.store, "record_grill_answer", None)
+        if not previous_run_id or recorder is None:
+            return
+        try:
+            now = datetime.now(timezone.utc)
+            for question_id, choice in self._recorded_answers(previous_run_id).items():
+                recorder(run_id, question_id, choice, now)
+        except Exception as exc:  # the adopted GRILL.md already carries the decisions
+            logger.warning("Could not copy grill answers of %s to %s: %s", previous_run_id, run_id, exc)
 
     def _recorded_answers(self, run_id: str) -> dict[str, str]:
         """Owner answers recorded in the control store (e.g. by the DarkHub), if the store keeps them."""

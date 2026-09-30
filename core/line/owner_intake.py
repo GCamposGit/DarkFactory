@@ -199,6 +199,39 @@ def _ticket_attempts(store: Any, ticket_id: str) -> list[tuple[int, str | None]]
     return sorted((a for a in attempts if a[0] >= 1), key=lambda item: item[0])
 
 
+def previous_attempt_run_ids(store: Any, payload: dict[str, Any] | None) -> list[str]:
+    """Run ids of EARLIER attempts of the ticket behind a retry run, newest first.
+
+    `payload` is the run's intake payload. Empty (fail-safe, never raises) unless it is a retry
+    attempt (`attempt` > 1) of a ticket, and only attempts whose own payload is identical to this
+    one apart from the `attempt` counter are returned: if the ticket was edited between attempts,
+    what the owner decided before may no longer apply.
+    """
+    try:
+        data = payload or {}
+        ticket_id = str(data.get("ticket_id") or "")
+        attempt = data.get("attempt")
+        if not ticket_id or not isinstance(attempt, int) or attempt <= 1:
+            return []
+        getter = getattr(store, "get_run_payload", None)
+        if getter is None:
+            return []
+        comparable = {k: v for k, v in data.items() if k != "attempt"}
+        run_ids: list[str] = []
+        for earlier, run_id in reversed(_ticket_attempts(store, ticket_id)):
+            if earlier >= attempt or not run_id:
+                continue
+            earlier_payload = getter(run_id)
+            if isinstance(earlier_payload, dict) and {
+                k: v for k, v in earlier_payload.items() if k != "attempt"
+            } == comparable:
+                run_ids.append(run_id)
+        return run_ids
+    except Exception as exc:
+        logger.warning("Could not list previous attempts of the ticket: %s", exc)
+        return []
+
+
 RunState = str  # "in_flight" | "succeeded" | "failed"
 
 

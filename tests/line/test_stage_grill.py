@@ -486,3 +486,161 @@ def test_grill_handler_passes_the_auto_policy_through_bindings(project, monkeypa
         )
         handler.handle(_Ctx())
         assert seen["auto_policy"] is expected
+
+
+# --------------------------------------------------------------------------
+# Retry attempts of a ticket adopt the previous attempt's resolved grill
+# --------------------------------------------------------------------------
+
+_BLOCKING_REPLY = {
+    "questions": [
+        {
+            "id": "q1",
+            "text": "Qual paleta de cores usar?",
+            "kind": "intent",
+            "options": ["azul", "verde"],
+            "recommended": "azul",
+        }
+    ],
+    "assumptions": ["Usar Python 3.12"],
+    "is_product_scale": False,
+}
+
+
+def _agent_must_not_run(*args, **kwargs):
+    raise AssertionError("the grill agent must not be called when a previous grill is adopted")
+
+
+def _resolve_previous_grill(project, monkeypatch, run_id="run-prev"):
+    """A first attempt whose owner-answered grill finished and is pushed to its branch."""
+    monkeypatch.setattr(stage_grill, "run_read_agent", lambda *a, **k: _fake_agent_reply(_BLOCKING_REPLY))
+    start = datetime(2026, 9, 22, 12, 0, tzinfo=timezone.utc)
+    assert run_grill(project, run_id, "Landing page nova", now=start).outcome == "waiting_human"
+    done = run_grill(project, run_id, "Landing page nova", now=start, answers={"q1": "1"})
+    assert done.outcome == "success"
+    return start
+
+
+def test_retry_attempt_adopts_the_resolved_grill_without_asking_the_owner(project, monkeypatch):
+    _resolve_previous_grill(project, monkeypatch)
+    monkeypatch.setattr(stage_grill, "run_read_agent", _agent_must_not_run)
+    sent = []
+
+    result = run_grill(
+        project, "run-new", "Landing page nova",
+        send_message=lambda text, buttons: sent.append(text) or True,
+        adopt_from_runs=["run-prev"],
+    )
+
+    assert result.outcome == "success"
+    assert result.output_refs
+    assert result.evidence_refs == [f"{stage_grill.ADOPTED_EVIDENCE_PREFIX}run-prev"]
+    assert sent == []  # the owner is not notified again
+
+    from core.line import workspace as ws_mod
+
+    ws = ws_mod.checkout(project, "run-new")
+    grill_md = (ws_mod.context_dir(ws) / "GRILL.md").read_text(encoding="utf-8")
+    assert grill_md.startswith("# GRILL")
+    assert "run-prev" in grill_md and "Qual paleta de cores usar?" in grill_md and "**verde**" in grill_md
+    assert "Aguardando decisao" not in grill_md
+    assert (ws_mod.context_dir(ws) / "DEMAND.md").is_file()
+    assert ws_mod.find_commit_by_job(ws, "run-new:grill") == result.output_refs[0]
+
+    # replay is idempotent and still never calls the agent
+    again = run_grill(project, "run-new", "Landing page nova", adopt_from_runs=["run-prev"])
+    assert again.outcome == "success" and again.output_refs == result.output_refs
+
+
+def test_retry_attempt_skips_unusable_candidates_and_adopts_the_next_one(project, monkeypatch):
+    _resolve_previous_grill(project, monkeypatch)
+    monkeypatch.setattr(stage_grill, "run_read_agent", _agent_must_not_run)
+
+    result = run_grill(project, "run-new", "Landing page nova", adopt_from_runs=["run-ghost", "run-prev"])
+
+    assert result.outcome == "success"
+    assert result.evidence_refs == [f"{stage_grill.ADOPTED_EVIDENCE_PREFIX}run-prev"]
+
+
+def test_retry_attempt_falls_back_to_the_normal_grill_when_the_previous_branch_is_missing(project, monkeypatch):
+    calls = {"n": 0}
+
+    def _agent(*a, **k):
+        calls["n"] += 1
+        return _fake_agent_reply(_BLOCKING_REPLY)
+
+    monkeypatch.setattr(stage_grill, "run_read_agent", _agent)
+    sent = []
+
+    result = run_grill(
+        project, "run-new", "Landing page nova",
+        send_message=lambda text, buttons: sent.append(text) or True,
+        adopt_from_runs=["run-never-existed"],
+    )
+
+    assert result.outcome == "waiting_human"
+    assert calls["n"] == 1 and len(sent) == 1  # asked the owner as usual
+
+
+def test_retry_attempt_does_not_adopt_a_grill_that_was_still_pending(project, monkeypatch):
+    # The previous attempt only reached the question stage (never resolved).
+    monkeypatch.setattr(stage_grill, "run_read_agent", lambda *a, **k: _fake_agent_reply(_BLOCKING_REPLY))
+    start = datetime(2026, 9, 22, 12, 0, tzinfo=timezone.utc)
+    assert run_grill(project, "run-prev", "Landing page nova", now=start).outcome == "waiting_human"
+
+    calls = {"n": 0}
+
+    def _agent(*a, **k):
+        calls["n"] += 1
+        return _fake_agent_reply(_BLOCKING_REPLY)
+
+    monkeypatch.setattr(stage_grill, "run_read_agent", _agent)
+    result = run_grill(project, "run-new", "Landing page nova", now=start, adopt_from_runs=["run-prev"])
+
+    assert result.outcome == "waiting_human"
+    assert calls["n"] == 1
+
+
+def test_retry_attempt_does_not_adopt_a_grill_with_unresolved_no_default_questions(project, monkeypatch):
+    secret_reply = {
+        "questions": [{"id": "s1", "text": "Qual a senha do banco?", "kind": "secret", "options": []}],
+        "assumptions": [],
+        "is_product_scale": False,
+    }
+    monkeypatch.setattr(stage_grill, "run_read_agent", lambda *a, **k: _fake_agent_reply(secret_reply))
+    start = datetime(2026, 9, 22, 12, 0, tzinfo=timezone.utc)
+    assert run_grill(project, "run-prev", "Demanda", now=start).outcome == "waiting_human"
+    closed = run_grill(project, "run-prev", "Demanda", now=start + timedelta(hours=13))
+    assert closed.outcome == "success" and closed.evidence_refs == ["blocked_no_default:s1"]
+
+    calls = {"n": 0}
+
+    def _agent(*a, **k):
+        calls["n"] += 1
+        return _fake_agent_reply(secret_reply)
+
+    monkeypatch.setattr(stage_grill, "run_read_agent", _agent)
+    result = run_grill(project, "run-new", "Demanda", now=start, adopt_from_runs=["run-prev"])
+
+    assert result.outcome == "waiting_human"  # the secret still has to be asked
+    assert calls["n"] == 1
+
+
+def test_adoption_never_raises_when_git_cannot_read_the_previous_grill(project, monkeypatch):
+    _resolve_previous_grill(project, monkeypatch)
+    from core.line import workspace as ws_mod
+
+    def _boom(*a, **k):
+        raise ws_mod.WorkspaceError("git exploded")
+
+    monkeypatch.setattr(ws_mod, "read_file_at", _boom)
+    calls = {"n": 0}
+
+    def _agent(*a, **k):
+        calls["n"] += 1
+        return _fake_agent_reply(_BLOCKING_REPLY)
+
+    monkeypatch.setattr(stage_grill, "run_read_agent", _agent)
+    result = run_grill(project, "run-new", "Landing page nova", adopt_from_runs=["run-prev"])
+
+    assert result.outcome == "waiting_human" and calls["n"] == 1

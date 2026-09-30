@@ -82,6 +82,10 @@ GRILL_FILE = "GRILL.md"
 _GRILL_FILE = GRILL_FILE  # internal alias
 _PENDING_FILE = "GRILL_PENDING.json"
 
+ADOPTED_EVIDENCE_PREFIX = "grill_adopted:"
+# Heading `_render_grill_markdown` adds only while questions are still unresolved.
+_PENDING_SECTION = "## Aguardando decisao do owner"
+
 TelegramSender = Callable[[str, list[list[dict[str, str]]]], bool]
 
 
@@ -570,8 +574,15 @@ def run_grill(
     parent_grill: Optional[str] = None,
     auto_policy: bool = False,
     answers: Optional[dict[str, str]] = None,
+    adopt_from_runs: Iterable[str] = (),
 ) -> StageResult:
     """Run (or reconcile) the single-round grill for `run_id`.
+
+    `adopt_from_runs` (newest first) are earlier attempts of the same ticket (see
+    `core.line.owner_intake.previous_attempt_run_ids`): when one of them has a fully resolved grill
+    on its branch, it is adopted as is (no agent call, no owner message) and the result carries a
+    `grill_adopted:<run_id>` evidence ref. Anything missing or unreadable falls back to the normal
+    grill (fail-safe: ask).
 
     `auto_policy` (canary runs, see `is_auto_grill`): intent/business questions are resolved
     immediately with their recommended answer, tagged `auto_canary`, with no Telegram message.
@@ -600,6 +611,13 @@ def run_grill(
         )
 
     workspace.write_context(ws, _DEMAND_FILE, _render_demand_markdown(project, channel, demand_text))
+
+    for previous_run_id in adopt_from_runs:
+        adopted = _adopt_previous_grill(ws, run_id, previous_run_id)
+        if adopted:
+            return StageResult(
+                outcome="success", output_refs=[adopted], evidence_refs=[f"{ADOPTED_EVIDENCE_PREFIX}{previous_run_id}"]
+            )
 
     prompt = render_prompt(
         load_prompt("grill.md"),
@@ -662,6 +680,39 @@ def run_grill(
         output_refs=[sha],
         evidence_refs=[f"grill_deadline:{deadline.isoformat()}"],
     )
+
+
+def _adopt_previous_grill(ws: workspace.RunWorkspace, run_id: str, previous_run_id: str) -> Optional[str]:
+    """Commit `previous_run_id`'s resolved GRILL.md as this run's grill; the commit SHA, or None.
+
+    Only a grill that finished on the previous run's branch (its `<run>:grill` job commit exists) and
+    has nothing left pending is adopted. Every failure (branch gone, file unreadable, git error) returns
+    None so the caller runs the normal grill.
+    """
+    if not previous_run_id or previous_run_id == run_id:
+        return None
+    ref = f"origin/df/{previous_run_id}"
+    try:
+        if workspace.find_commit_by_job(ws, _job_key(previous_run_id), ref=ref) is None:
+            return None
+        text = workspace.read_file_at(ws, ref, f".darkfac/runs/{previous_run_id}/{GRILL_FILE}")
+        if not text or not text.strip() or _PENDING_SECTION in text:
+            return None
+        body = text.lstrip("﻿").strip("\n")
+        first, _, rest = body.partition("\n")
+        if first.strip() != "# GRILL":
+            return None
+        note = (
+            f"> Decisoes adotadas da tentativa anterior do mesmo ticket (run {previous_run_id}); "
+            "o owner nao foi consultado de novo."
+        )
+        workspace.write_context(ws, GRILL_FILE, f"# GRILL\n\n{note}\n{rest}\n")
+        sha = workspace.commit(ws, f"grill: adopted from previous attempt {previous_run_id}", _job_key(run_id))
+    except Exception as exc:  # any doubt -> ask the owner through the normal grill
+        logger.warning("Could not adopt grill of %s for run %s: %s", previous_run_id, run_id, exc)
+        return None
+    workspace.push(ws)  # like the normal grill, a push failure is the stage's to retry
+    return sha
 
 
 def _notify_owner(
