@@ -1,0 +1,101 @@
+[
+  {
+    "id": "T1",
+    "title": "Criar teste headless de aceite para menu lateral",
+    "goal": "Adicionar tests/test_transformar_menu_superior_em_m.py validando estrutura do menu lateral, 14 itens e ausência do nav horizontal antigo.",
+    "files_hint": [
+      "tests/test_transformar_menu_superior_em_m.py"
+    ],
+    "acceptance": [
+      "O teste usa TestClient e regex/lxml.html sobre o HTML servido.",
+      "Valida a presença de um container lateral com os 14 botões na mesma ordem.",
+      "Valida a ausência do padrão antigo de nav horizontal no topo.",
+      "Valida a convenção de cache-busting ?v= em tags <script> e <link>."
+    ],
+    "tests_to_add": [
+      "tests/test_transformar_menu_superior_em_m.py"
+    ],
+    "smoke": []
+  },
+  {
+    "id": "T2",
+    "title": "Mover os 14 botões de navegação para aside lateral no HTML",
+    "goal": "Refatorar hub/frontend/index.html para colocar os 14 botões em um <aside> vertical, mantendo topbar fina com logo, seletor de projeto e badges.",
+    "files_hint": [
+      "hub/frontend/index.html"
+    ],
+    "acceptance": [
+      "O <aside> lateral contém os 14 botões na mesma ordem e com os mesmos onclick originais.",
+      "A topbar fina permanece com logo, seletor de projeto e badges de status.",
+      "Não existe mais o container de navegação horizontal antigo no topo.",
+      "O HTML continua válido e sem erros sintáticos."
+    ],
+    "tests_to_add": [
+      "Atualizar tests/test_transformar_menu_superior_em_m.py para assertar o aside e os 14 itens."
+    ],
+    "smoke": [
+      "/"
+    ]
+  },
+  {
+    "id": "T3",
+    "title": "Estilizar sidebar fixa e responsiva",
+    "goal": "Adicionar CSS para coluna fixa à esquerda no desktop, deslocar o conteúdo e implementar off-canvas no mobile reutilizando padrões de drawer.",
+    "files_hint": [
+      "hub/frontend/styles.css"
+    ],
+    "acceptance": [
+      "No desktop, a sidebar fica fixa à esquerda com largura fixa e o conteúdo principal recebe offset.",
+      "No mobile, a sidebar fica oculta e abre como drawer off-canvas.",
+      "O z-index não conflita com drawers existentes que usam z-30 ou superior.",
+      "A paleta slate/indigo e o estilo visual atual são mantidos."
+    ],
+    "tests_to_add": [
+      "Atualizar tests/test_transformar_menu_superior_em_m.py para validar classes/ids da sidebar e cache-busting do styles.css."
+    ],
+    "smoke": [
+      "/"
+    ]
+  },
+  {
+    "id": "T4",
+    "title": "Implementar toggle hamburger e preservar handlers",
+    "goal": "Adicionar JS para abrir/fechar a sidebar off-canvas no mobile, com aria-expanded, sem alterar os handlers existentes.",
+    "files_hint": [
+      "hub/frontend/app.js",
+      "hub/frontend/index.html"
+    ],
+    "acceptance": [
+      "O botão hamburger está presente e acessível.",
+      "O toggle adiciona/remove a classe de abertura da sidebar e alterna aria-expanded.",
+      "Os handlers open*Drawer()/open*Modal() continuam funcionando sem alteração.",
+      "Nenhuma dependência externa nova é adicionada."
+    ],
+    "tests_to_add": [
+      "Atualizar tests/test_transformar_menu_superior_em_m.py para validar o botão hamburger e cache-busting do script."
+    ],
+    "smoke": [
+      "/"
+    ]
+  },
+  {
+    "id": "T5",
+    "title": "Validar aceite e atualizar backlog",
+    "goal": "Executar o teste headless, corrigir regressões e registrar status/histórico do ticket no backlog da Dark Factory.",
+    "files_hint": [
+      "tests/test_transformar_menu_superior_em_m.py",
+      "hub/frontend/index.html",
+      "hub/frontend/styles.css",
+      "hub/frontend/app.js"
+    ],
+    "acceptance": [
+      "python -m pytest tests/test_transformar_menu_superior_em_m.py -v passa.",
+      "A validação do projeto via python scripts/line_validate.py passa.",
+      "O status e o histórico do ticket são atualizados no backlog da Dark Factory."
+    ],
+    "tests_to_add": [],
+    "smoke": [
+      "/"
+    ]
+  }
+]
