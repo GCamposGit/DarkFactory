@@ -10,11 +10,15 @@ services:
     build:
       context: https://${GITHUB_PAT:-}@github.com/GCamposGit/DarkFactory.git#main
       dockerfile: deploy/dokploy/Dockerfile.hub
+      args:
+        # USR-65: optional; when empty, GET /health reports git_sha=null (node sync: VPS 'unknown').
+        DARKFAC_GIT_SHA: ${DARKFAC_GIT_SHA:-}
     image: darkhub:v2.1
     container_name: darkhub-cloud-247
     restart: unless-stopped
     environment:
       - PORT=8000
+      - DARKFAC_GIT_SHA=${DARKFAC_GIT_SHA:-}
       - DARKHUB_ALLOWED_HOSTS=${DARKHUB_ALLOWED_HOSTS:-localhost,127.0.0.1,darkhub.ggcampos.com,dokploy.ggcampos.com,178.105.73.168,100.83.176.60}
       - GITHUB_PAT=${GITHUB_PAT:-}
       - GITHUB_WEBHOOK_SECRET=${GITHUB_WEBHOOK_SECRET:-}

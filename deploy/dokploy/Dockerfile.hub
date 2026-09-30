@@ -11,6 +11,10 @@ ENV PYTHONUNBUFFERED=1 \
     DARKHUB_ENV=production \
     DARKHUB_SEED_DIR=/app/hub_seed
 
+# USR-65: commit the image was built from, exposed by GET /health (empty = unknown).
+ARG DARKFAC_GIT_SHA=""
+ENV DARKFAC_GIT_SHA=${DARKFAC_GIT_SHA}
+
 WORKDIR /app
 
 # Install minimal OS utilities for network health probes
