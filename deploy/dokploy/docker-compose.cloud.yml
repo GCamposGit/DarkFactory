@@ -113,6 +113,9 @@ services:
       # that calls them (grill/human-in-the-loop blocks), so it gets fixed
       # here rather than left broken alongside the canary's own wiring.
       - TELEGRAM_OWNER_BOT_TOKEN=${TELEGRAM_OWNER_BOT_TOKEN:-}
+      # Grill questions and their inline buttons are sent with the OPS bot (@darkfac_ops_bot) when this is
+      # set (owner bot is the fallback); alerts stay on TELEGRAM_OWNER_BOT_TOKEN.
+      - TELEGRAM_OPS_BOT_TOKEN=${TELEGRAM_OPS_BOT_TOKEN:-}
       - TELEGRAM_AUTHORIZED_USERS=${TELEGRAM_AUTHORIZED_USERS:-}
       - TELEGRAM_AUTHORIZED_CHATS=${TELEGRAM_AUTHORIZED_CHATS:-}
       - GROQ_API_KEY=${GROQ_API_KEY:-}
@@ -231,6 +234,9 @@ services:
       # Same notifier env the worker uses (review item 4) -- NotificationService
       # (role="owner") needs these to actually send the failure/weekly alerts.
       - TELEGRAM_OWNER_BOT_TOKEN=${TELEGRAM_OWNER_BOT_TOKEN:-}
+      # Grill questions and their inline buttons are sent with the OPS bot (@darkfac_ops_bot) when this is
+      # set (owner bot is the fallback); alerts stay on TELEGRAM_OWNER_BOT_TOKEN.
+      - TELEGRAM_OPS_BOT_TOKEN=${TELEGRAM_OPS_BOT_TOKEN:-}
       - TELEGRAM_AUTHORIZED_USERS=${TELEGRAM_AUTHORIZED_USERS:-}
       - TELEGRAM_AUTHORIZED_CHATS=${TELEGRAM_AUTHORIZED_CHATS:-}
     volumes:

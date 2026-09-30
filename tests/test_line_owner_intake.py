@@ -141,9 +141,17 @@ def test_store_failure_is_reported_never_raised(demands) -> None:
 
 
 def test_configured_but_unreachable_postgres_fails_closed_never_mock(monkeypatch) -> None:
-    monkeypatch.setenv("DARKFAC_HF02_DATABASE_URL", "postgresql://u:p@127.0.0.1:1/none")
+    from core.orchestrator.adapters import control_postgres
+
+    def _unreachable(self):
+        raise StoreUnavailableError("connection refused")
+
+    monkeypatch.setattr(control_postgres.PostgresControlStore, "_init_db", _unreachable)  # no network in tests
+    monkeypatch.setenv("DARKFAC_HF02_DATABASE_URL", "postgresql://u:p@db.invalid:5432/none")
     with pytest.raises(StoreUnavailableError):
         owner_intake.open_line_store()
+    with pytest.raises(StoreUnavailableError):
+        owner_intake.open_line_store(url="postgresql://u:p@db.invalid:5432/none")
 
 
 def test_line_store_falls_back_when_no_database_url(store) -> None:
@@ -219,7 +227,7 @@ def test_hub_endpoint_error_codes(hub) -> None:
 
 
 def _gateway(tmp_path: Path, service: HubService) -> TelegramGateway:
-    config = TelegramConfig(bot_token="123:abc", authorized_user_ids=[42], authorized_chat_ids=[42], role="owner")
+    config = TelegramConfig(bot_token="123:abc", authorized_user_ids=[42], authorized_chat_ids=[42], role="ops")
     gateway = service._build_telegram_gateway()
     gateway.config = config
     gateway.state_dir = tmp_path / "tg"

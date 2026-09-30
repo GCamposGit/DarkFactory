@@ -211,7 +211,18 @@ class GrillStageHandler:
             routing_config=self.routing_config,
             parent_grill=parent_grill,
             auto_policy=stage_grill.is_auto_grill(project, payload),
+            answers=self._recorded_answers(run_id),
         )
+
+    def _recorded_answers(self, run_id: str) -> dict[str, str]:
+        """Owner answers recorded in the control store (e.g. by the DarkHub), if the store keeps them."""
+        getter = getattr(self.store, "get_grill_answers", None)
+        if getter is None:
+            return {}
+        try:
+            return dict(getter(run_id) or {})
+        except Exception:  # never let a read problem block the grill itself
+            return {}
 
 
 class PlanningStageHandler:

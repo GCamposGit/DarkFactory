@@ -83,3 +83,26 @@ Orcamento de tempo: cada comando de validate tem teto de 1800 s
 teto, o run falha em `validate_exhausted` com o log do teste na branch; a saida
 e reduzir o escopo do ticket ou subir o teto em
 `core/line/stage_build.py` (`command_timeout_s`).
+
+## 5. Dois bots, um papel cada (owner decision)
+
+| Bot | Papel |
+|---|---|
+| `@darkfac_bot` (Owner, `TELEGRAM_OWNER_BOT_TOKEN`) | Somente ALERTAS (falhas do canario, resumo semanal, pedidos de acao humana). Nao trata comandos, demandas nem botoes: responde com um ponteiro para o bot de operacoes ou ignora texto solto. |
+| `@darkfac_ops_bot` (Orchestrator, `TELEGRAM_OPS_BOT_TOKEN`) | Perguntas e respostas do Grill (botoes inline), `/demand`, voz, `/linha`, `/grill`, `/approve` e todos os callbacks. |
+
+Rotas do Hub: `POST /api/webhooks/telegram/ops` e `POST /api/webhooks/telegram/owner`
+(a rota antiga `/api/webhooks/telegram` continua valendo como ops). No startup, em
+producao (`DARKHUB_ENV=production`), o Hub registra o webhook de cada bot na propria rota
+via `setWebhook` (idempotente, com o `TELEGRAM_WEBHOOK_SECRET` existente; nenhum token e
+logado). Desligar: `DARKHUB_TELEGRAM_AUTO_WEBHOOK=false`. URL base: `DARKHUB_PUBLIC_URL`
+(padrao `https://darkhub.ggcampos.com`).
+
+O worker envia as perguntas do Grill com o token do bot de operacoes quando
+`TELEGRAM_OPS_BOT_TOKEN` esta definido (senao, com o do Owner). Variavel a adicionar no
+Dokploy, ambiente do compose `darkfac-cloud`: `TELEGRAM_OPS_BOT_TOKEN` (mesmo valor que o
+DarkHub ja recebe). O compose ja a repassa ao worker e ao canario.
+
+Resposta de Grill pelo botao: o Hub grava a resposta no store da linha (Postgres,
+tabela `grill_answers`; nao precisa de git) e acorda so o job de grill; o worker aplica a
+resposta no proximo claim. O canario acorda sozinho o proprio grill em `waiting_human`.

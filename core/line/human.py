@@ -256,6 +256,12 @@ def build_telegram_line_grill_handler(
         job_key = store.find_job(run_id, "grill")
         if job_key is None:
             return {"resumed": False}
+        recorder = getattr(store, "record_grill_answer", None)
+        if recorder is not None:
+            # Record the answer in the control store and wake only the grill job: the worker applies
+            # it on the next claim. Needs no git access, so the DarkHub (no git) can do it.
+            recorder(run_id, question_id, index, datetime.now(UTC))
+            return {"resumed": resume_blocked_job(store, run_id, "grill")}
         project = resolver(job_key.ticket_id)
         if project is None:
             return {"resumed": False}

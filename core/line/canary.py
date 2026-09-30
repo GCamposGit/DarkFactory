@@ -772,6 +772,13 @@ def _evaluate_attempt(
             outcome = "in_progress"
             cause_code = None
 
+    notes = ""
+    if outcome == "in_progress" and run_id and _stage_statuses(stages).get("grill") == "waiting_human":
+        # A canary never depends on a human: wake its grill so the auto policy resolves it on the
+        # next claim (an already-waiting grill would otherwise sit until its 12h deadline).
+        if _wake_waiting_grill(store, run_id):
+            notes = "grill was waiting_human; woken so the auto grill policy resolves it"
+
     return CanaryReport(
         date=today.isoformat(),
         scenario=scenario,
@@ -784,7 +791,23 @@ def _evaluate_attempt(
         failing_stage=failing_stage,
         cause_code=cause_code,
         attempt=attempt,
+        notes=notes,
     )
+
+
+def _wake_waiting_grill(store: ControlStore, run_id: str) -> bool:
+    """Move the run's `waiting_human` grill job back to pending (idempotent, fenced by JobKey + status).
+
+    Best-effort: a store without `find_job`/`resume_job`, or any error, just means "not woken";
+    the next loop iteration tries again.
+    """
+    try:
+        from core.line.human import resume_blocked_job
+
+        return bool(resume_blocked_job(store, run_id, "grill"))
+    except Exception as exc:  # noqa: BLE001 - waking is best-effort, observation must go on
+        logger.warning("Could not wake the waiting grill of run %s: %s", run_id, exc)
+        return False
 
 
 def _attempt_record(report: CanaryReport) -> CanaryAttempt:

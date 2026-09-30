@@ -94,14 +94,14 @@ def allowed_projects() -> frozenset[str]:
     return frozenset(part.strip() for part in raw.split(",") if part.strip())
 
 
-def open_line_store(fallback: ControlStore | None = None) -> ControlStore:
+def open_line_store(fallback: ControlStore | None = None, *, url: str | None = None) -> ControlStore:
     """The control store the line's workers read.
 
     Postgres when a line database URL is configured (raising `StoreUnavailableError`
     if it cannot be reached, never the silent in-memory mock); otherwise `fallback`
     (e.g. the Hub's local SQLite store) or the canary's `default_control_store()`.
     """
-    url = line_database_url()
+    url = url or line_database_url()
     if url:
         from core.orchestrator.adapters.control_postgres import PostgresControlStore
         from core.workflow.control_contracts import RuntimeOwner

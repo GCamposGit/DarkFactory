@@ -142,6 +142,14 @@ async def _lifespan(app: FastAPI):
         _logger_hub.info("[STARTUP] Benchmark ledger refreshed on hub start.")
     except Exception as exc:
         _logger_hub.warning(f"[STARTUP] Benchmark refresh skipped at startup: {exc}")
+    try:
+        from core.integrations.telegram_webhooks import register_telegram_webhooks
+
+        outcome = await asyncio.to_thread(register_telegram_webhooks)
+        if outcome:
+            _logger_hub.info(f"[STARTUP] Telegram webhooks: {outcome}")
+    except Exception as exc:
+        _logger_hub.warning(f"[STARTUP] Telegram webhook registration skipped: {type(exc).__name__}")
     yield
     # Teardown (none needed)
 

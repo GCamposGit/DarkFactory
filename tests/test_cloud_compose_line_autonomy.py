@@ -86,3 +86,10 @@ def test_worker_offloads_the_official_gate_to_the_desktop_test_worker(compose: d
     env = "\n".join(compose["services"]["darkfac-worker"]["environment"])
     assert "DARKFAC_TEST_WORKERS=${DARKFAC_TEST_WORKERS:-http://100.78.181.90:8080}" in env
     assert "DARKFAC_WORKER_TOKEN=${DARKFAC_WORKER_TOKEN:-}" in env
+
+
+def test_worker_and_canary_get_the_ops_bot_token_for_grill_messages(compose: dict) -> None:
+    for name in ("darkfac-worker", "darkfac-canary"):
+        env = "\n".join(compose["services"][name]["environment"])
+        assert "TELEGRAM_OPS_BOT_TOKEN=${TELEGRAM_OPS_BOT_TOKEN:-}" in env, name
+        assert "TELEGRAM_OWNER_BOT_TOKEN=${TELEGRAM_OWNER_BOT_TOKEN:-}" in env, name  # alerts stay on the owner bot

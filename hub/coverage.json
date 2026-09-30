@@ -353,6 +353,12 @@
     "POST /api/webhooks/github": {
       "machine": "Webhook do GitHub assinado por HMAC; eventos aparecem via /api/webhooks/events"
     },
+    "POST /api/webhooks/telegram/ops": {
+      "machine": "Webhook do bot Orchestrator (@darkfac_ops_bot): demandas, /linha, grill e botoes inline; registrado pelo Hub no startup"
+    },
+    "POST /api/webhooks/telegram/owner": {
+      "machine": "Webhook do bot Owner (@darkfac_bot), somente alertas; registrado pelo Hub no startup"
+    },
     "POST /api/webhooks/telegram": {
       "machine": "Webhook do bot do Telegram consumido pelo gateway n8n"
     },
