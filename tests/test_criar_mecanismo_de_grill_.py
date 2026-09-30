@@ -197,17 +197,29 @@ def test_grill_api_endpoints_isolated(temp_grill_env):
         app.dependency_overrides.clear()
 
 
-def test_production_demands_isolation():
-    """Verify production demands.json was never polluted with test tickets."""
-    prod_path = Path("c:/dev/DarkFac/.factory/demands/demands.json")
-    if prod_path.exists():
-        store = DemandsStore(prod_path)
-        tickets = store.list_tickets()
-        ticket_ids = {t.id for t in tickets}
-        assert "ZZTEST-77" not in ticket_ids
-        assert "ZZTEST-88" not in ticket_ids
-        assert "ZZTEST-99" not in ticket_ids
-        # Production tickets must be intact
-        assert "USR-09" in ticket_ids
-        assert "USR-12" in ticket_ids
-        assert "USR-AUTO" in ticket_ids
+def test_production_demands_isolation(temp_grill_env):
+    """A grill service with an injected store must not touch another backlog."""
+    production_path = temp_grill_env["dir"] / "production_demands.json"
+    production_store = DemandsStore(production_path)
+    production_store.save_ticket(
+        UserTicket(
+            id="USR-PRODUCTION",
+            project_id="darkfac",
+            title="Existing production demand",
+            problem_statement="Must remain unchanged",
+        )
+    )
+    baseline = production_path.read_bytes()
+
+    temp_grill_env["service"].create_ticket(
+        UserTicket(
+            id="ZZTEST-ISOLATION",
+            project_id="darkfac",
+            title="Synthetic grill demand",
+            problem_statement="Exercise the isolated store",
+        )
+    )
+    temp_grill_env["service"].start_grill_session("ZZTEST-ISOLATION", force_heuristic=True)
+
+    assert production_path.read_bytes() == baseline
+    assert {ticket.id for ticket in production_store.list_tickets()} == {"USR-PRODUCTION"}
