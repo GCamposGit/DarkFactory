@@ -1076,7 +1076,7 @@ def submit_demand_ticket_to_line(
     message = submission.message
     if "nao encontrado" in message:
         code = status.HTTP_404_NOT_FOUND
-    elif submission.replayed:
+    elif submission.replayed or "tentativas permitidas" in message:
         code = status.HTTP_409_CONFLICT
     elif "nao esta habilitado" in message or "nada a enviar" in message:
         code = 422

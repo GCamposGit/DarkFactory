@@ -125,11 +125,42 @@ def test_record_result_uses_default_cooldown_when_no_reset_at(tmp_path):
     assert abs((until - expected).total_seconds()) < 5
 
 
-def test_record_result_ignores_non_rate_limited(tmp_path):
+def test_record_result_ignores_kinds_that_are_not_quota_or_crash(tmp_path):
     cooldown_path = tmp_path / "cooldowns.json"
-    result = AgentResult(ok=False, text="oops", harness="claude", duration_s=1.0, error_kind="crash")
-    record_result(result, cooldown_path=cooldown_path)
+    for kind in ("timeout", "empty_output", "auth_expired", "not_installed"):
+        result = AgentResult(ok=False, text="oops", harness="claude", duration_s=1.0, error_kind=kind)
+        record_result(result, cooldown_path=cooldown_path)
     assert not cooldown_path.is_file()
+
+
+def test_record_result_puts_a_crashing_harness_in_a_short_cooldown(tmp_path):
+    cooldown_path = tmp_path / "cooldowns.json"
+    cfg = load_routing_config(default_config_path())
+    record_result(
+        AgentResult(ok=False, text="sandbox boom", harness="codex", duration_s=1.0, error_kind="crash"),
+        config=cfg, cooldown_path=cooldown_path,
+    )
+    entry = json.loads(cooldown_path.read_text(encoding="utf-8"))["codex"]
+    until = datetime.fromisoformat(entry["until"])
+    assert entry["reason"] == "crash"
+    minutes = (until - datetime.now(timezone.utc)).total_seconds() / 60
+    assert 5 < minutes <= cfg.crash_cooldown_minutes  # short, nowhere near the 60 min quota cooldown
+
+    # The next pick skips the crashing harness instead of choosing it again immediately.
+    quota = lambda provider: 90.0 if "openai" in provider or "codex" in provider else 50.0
+    choice = pick("development", ["harness:claude", "harness:codex"], cooldown_path=cooldown_path, quota_lookup=quota, config=cfg)
+    assert choice is not None and choice[0] != "codex"
+
+
+def test_a_crash_never_shortens_an_existing_longer_cooldown(tmp_path):
+    cooldown_path = tmp_path / "cooldowns.json"
+    long_until = (datetime.now(timezone.utc) + timedelta(hours=5)).isoformat()
+    cooldown_path.write_text(json.dumps({"codex": {"until": long_until, "reason": "rate_limited"}}), encoding="utf-8")
+    record_result(
+        AgentResult(ok=False, text="boom", harness="codex", duration_s=1.0, error_kind="crash"),
+        cooldown_path=cooldown_path,
+    )
+    assert json.loads(cooldown_path.read_text(encoding="utf-8"))["codex"]["until"] == long_until
 
 
 def test_all_cascade_accounts_in_cooldown_development_returns_none(tmp_path):

@@ -152,7 +152,7 @@ def test_planning_retries_when_grill_not_ready(project):
 # --------------------------------------------------------------------------
 
 
-def test_invalid_json_twice_fails_with_plan_invalid(project, monkeypatch):
+def test_invalid_json_is_retried_on_another_attempt_before_plan_invalid_is_terminal(project, monkeypatch):
     _seed_grill_outputs(project, "run-4")
     calls = {"n": 0}
 
@@ -162,11 +162,38 @@ def test_invalid_json_twice_fails_with_plan_invalid(project, monkeypatch):
 
     monkeypatch.setattr(stage_grill, "run_read_agent", _fake)
 
-    result = run_planning(project, "run-4")
+    first = run_planning(project, "run-4")
+    assert first.outcome == "retry"  # not terminal on the first bad output
+    assert first.cause_code.startswith("plan_invalid not_before=")
+    assert calls["n"] == 2  # one attempt + one reprompt inside the call
 
-    assert result.outcome == "failed"
-    assert result.cause_code == "plan_invalid"
-    assert calls["n"] == 2  # one attempt + one reprompt
+    second = run_planning(project, "run-4")
+    assert second.outcome == "retry"
+    third = run_planning(project, "run-4")
+    assert third.outcome == "failed" and third.cause_code == "plan_invalid"
+
+    # The attempts are recorded on the run branch (redacted, with harness/error info).
+    from core.line import workspace as ws_mod
+
+    ws = ws_mod.checkout(project, "run-4")
+    record = json.loads((ws_mod.context_dir(ws) / "agent-attempts-planning.json").read_text(encoding="utf-8"))
+    assert [a["note"] for a in record] == ["invalid_json"] * 3
+    assert record[0]["harness"] == "claude" and "not json at all" in record[0]["output"]
+
+
+def test_invalid_json_retry_excludes_the_harness_that_produced_it(project, monkeypatch):
+    _seed_grill_outputs(project, "run-4b")
+    seen_excludes = []
+
+    def _fake(*args, **kwargs):
+        seen_excludes.append(set(kwargs.get("exclude") or ()))
+        return AgentResult(ok=True, text="not json", harness="codex", model="gpt-x", duration_s=0.01)
+
+    monkeypatch.setattr(stage_grill, "run_read_agent", _fake)
+    run_planning(project, "run-4b")
+    run_planning(project, "run-4b")
+    assert seen_excludes[0] == set()
+    assert ("codex", "gpt-x") in seen_excludes[-1]
 
 
 def test_invalid_json_then_valid_on_reprompt_succeeds(project, monkeypatch):

@@ -41,7 +41,7 @@ from typing import Any, Callable, Iterable, Optional
 
 from pydantic import BaseModel, Field
 
-from core.line import workspace
+from core.line import diagnostics, workspace
 from core.line.agent_cli import AgentRequest, AgentResult, run_agent
 from core.line.routing import RoutingConfig, load_routing_config, pick, record_result
 from core.line.workspace import RunWorkspace, WorkspaceError
@@ -422,6 +422,9 @@ class DevelopmentStage:
         last_validate_log: Optional[str] = initial_feedback
         last_review_log = _latest_review_log(ws)
         spec_text = _read_context_text(ws, "SPEC.md")
+        # (harness, model) pairs whose agent crashed on this ticket: not picked again for its remaining
+        # iterations (falls back to them only if nothing else is routable).
+        excluded: set[tuple[str, Optional[str]]] = set()
 
         for iteration in range(1, max_iterations + 1):
             commands = resolve_commands(project, ws.path)
@@ -438,10 +441,9 @@ class DevelopmentStage:
                 spec_text=spec_text,
             )
 
-            route = self.pick_func(
-                "development", self.host_caps, config=self.routing_config
-            )
+            route = self._pick_route(excluded)
             if route is None:
+                self._persist_diagnostics(ws, run_id, ticket.id)
                 return StageResult(
                     outcome="waiting_human", cause_code="no_route_available", output_refs=[]
                 )
@@ -467,7 +469,15 @@ class DevelopmentStage:
                 last_validate_log = (
                     f"Falha ao invocar agente ({agent_result.error_kind}): {agent_result.text}"
                 )
-                _write_validate_log(ws, ticket.id, iteration, last_validate_log)
+                _write_validate_log(
+                    ws, ticket.id, iteration, last_validate_log,
+                    meta={
+                        "harness": agent_result.harness, "model": agent_result.model,
+                        "error_kind": agent_result.error_kind, "duration_s": agent_result.duration_s,
+                        "note": "agent invocation failed",
+                    },
+                )
+                excluded.add((harness, model))
                 continue
 
             # Re-detect after the agent ran: it may have just created the
@@ -497,7 +507,14 @@ class DevelopmentStage:
                 )
 
             distilled = _distill_with_test_subagent(validate_result)
-            _write_validate_log(ws, ticket.id, iteration, distilled)
+            _write_validate_log(
+                ws, ticket.id, iteration, distilled,
+                meta={
+                    "harness": harness, "model": model, "error_kind": None,
+                    "duration_s": validate_result.duration_s,
+                    "note": f"validate {'passed' if validate_result.ok else 'failed'} (exit {validate_result.exit_code})",
+                },
+            )
 
             if validate_result.ok:
                 # progress.json goes into the same commit: review (possibly on
@@ -514,9 +531,28 @@ class DevelopmentStage:
 
             last_validate_log = distilled
             if "SPEC_CONFLICT:" in agent_result.text:
+                self._persist_diagnostics(ws, run_id, ticket.id)
                 return StageResult(outcome="replan", cause_code="spec_conflict", output_refs=[])
 
+        self._persist_diagnostics(ws, run_id, ticket.id)
         return StageResult(outcome="failed", cause_code="validate_exhausted", output_refs=[])
+
+    def _pick_route(self, excluded: set[tuple[str, Optional[str]]]) -> Optional[tuple[str, Optional[str]]]:
+        """Next (harness, model), skipping pairs that crashed; falls back to them if nothing else is routable."""
+        if excluded:
+            route = self.pick_func(
+                "development", self.host_caps, config=self.routing_config, exclude=set(excluded)
+            )
+            if route is not None:
+                return route
+            logger.warning("Every development route already failed for this ticket; retrying without exclusions")
+        return self.pick_func("development", self.host_caps, config=self.routing_config)
+
+    def _persist_diagnostics(self, ws: RunWorkspace, run_id: str, ticket_id: str) -> None:
+        """Commit + push the per-iteration logs (context dir only) so a failed run is debuggable remotely."""
+        diagnostics.persist(
+            ws, f"chore(line): development diagnostics ({ticket_id})", f"{run_id}:{ticket_id}:diag"
+        )
 
     # -- full run --------------------------------------------------------
 
@@ -620,7 +656,26 @@ def _pending_fixup(ws: RunWorkspace, run_id: str) -> Optional[tuple[TicketSpec, 
     return None
 
 
-def _write_validate_log(ws: RunWorkspace, ticket_id: str, iteration: int, content: str) -> None:
+def _write_validate_log(
+    ws: RunWorkspace,
+    ticket_id: str,
+    iteration: int,
+    content: str,
+    meta: Optional[dict[str, Any]] = None,
+) -> None:
+    """Write one iteration's log. With `meta` it carries harness/model/error kind/duration and the
+    redacted first ~2000 characters of the output (so it is safe to push to the run branch)."""
+    if meta is not None:
+        content = diagnostics.format_attempt_log(
+            "development",
+            iteration=iteration,
+            harness=meta.get("harness"),
+            model=meta.get("model"),
+            error_kind=meta.get("error_kind"),
+            duration_s=meta.get("duration_s"),
+            output=content,
+            note=str(meta.get("note") or ""),
+        )
     workspace.write_context(ws, f"validate-{ticket_id}-{iteration}.log.md", content)
 
 

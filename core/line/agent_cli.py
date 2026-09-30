@@ -211,10 +211,47 @@ def build_claude_argv(executable: str, req: AgentRequest) -> list[str]:
     return argv
 
 
+CODEX_SANDBOX_ENV = "DARKFAC_CODEX_SANDBOX_MODE"
+_CODEX_SANDBOX_MODES = ("auto", "danger-full-access", "bypass")
+
+
+def codex_sandbox_mode() -> str:
+    """`DARKFAC_CODEX_SANDBOX_MODE`: `auto` (default), `danger-full-access` or `bypass`.
+
+    Codex's own Linux sandbox (landlock/seccomp) is unavailable inside an unprivileged container,
+    so every `codex exec --sandbox ...` call can fail there. In the cloud worker the container IS
+    the isolation boundary, so its compose sets `bypass`; on the Desktop/Notebook the variable is
+    unset and Codex keeps sandboxing exactly as before. Unknown values fall back to `auto`.
+    """
+    raw = os.environ.get(CODEX_SANDBOX_ENV, "").strip().lower()
+    if not raw:
+        return "auto"
+    if raw not in _CODEX_SANDBOX_MODES:
+        logger.warning("Invalid %s=%r; using 'auto'", CODEX_SANDBOX_ENV, raw)
+        return "auto"
+    return raw
+
+
 def build_codex_argv(executable: str, req: AgentRequest, tmp_out: Path) -> list[str]:
-    """Build the Codex CLI argv for read or write mode. Prompt goes on stdin via trailing '-'."""
-    sandbox = "workspace-write" if req.mode == "write" else "read-only"
-    argv = [executable, "exec", "--sandbox", sandbox, "--skip-git-repo-check", "--json"]
+    """Build the Codex CLI argv for read or write mode. Prompt goes on stdin via trailing '-'.
+
+    Sandbox flags (verified against codex-cli 0.48.0, `codex-rs/exec/src/cli.rs`):
+    `auto` keeps `--sandbox workspace-write|read-only`; `danger-full-access` passes
+    `--sandbox danger-full-access`; `bypass` passes `--dangerously-bypass-approvals-and-sandbox`
+    (alias `--yolo`) and no `--sandbox` (the flag exists to run in an externally sandboxed
+    environment).
+    """
+    mode = codex_sandbox_mode()
+    argv = [executable, "exec"]
+    if mode == "bypass":
+        argv += ["--dangerously-bypass-approvals-and-sandbox"]
+    else:
+        if mode == "danger-full-access":
+            sandbox = "danger-full-access"
+        else:
+            sandbox = "workspace-write" if req.mode == "write" else "read-only"
+        argv += ["--sandbox", sandbox]
+    argv += ["--skip-git-repo-check", "--json"]
     if req.model:
         argv += ["-m", req.model]
     argv += ["-o", str(tmp_out), "-"]

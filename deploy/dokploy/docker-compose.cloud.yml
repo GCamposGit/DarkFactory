@@ -73,6 +73,11 @@ services:
       # their own DARKFAC_WORKER_CAPS/DARKFAC_WORKER_PRIORITY instead.
       - DARKFAC_WORKER_CAPS=${DARKFAC_WORKER_CAPS:-git,gh,node,python,harness:claude,harness:codex}
       - DARKFAC_WORKER_PRIORITY=${DARKFAC_WORKER_PRIORITY:-primary}
+      # Codex's own Linux sandbox (landlock/seccomp) is unavailable in an unprivileged container, so
+      # `codex exec --sandbox ...` fails here; the container is the isolation boundary instead.
+      # `bypass` = --dangerously-bypass-approvals-and-sandbox (codex-cli 0.48.0). Desktop/Notebook leave
+      # this unset (auto) and keep Codex's sandbox.
+      - DARKFAC_CODEX_SANDBOX_MODE=${DARKFAC_CODEX_SANDBOX_MODE:-bypass}
       - DARKFAC_WORKSPACES=/workspaces
       - CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN:-}
       # HF-27-10 canary trace (B.4): core.line.workspace only reads

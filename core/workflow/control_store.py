@@ -1266,6 +1266,25 @@ class SQLiteControlStore:
         finally:
             conn.close()
 
+    def find_intake_runs(self, channel: str, external_id: str) -> list[tuple[str, str | None]]:
+        """`(external_id, run_id)` of every intake for `channel` whose external id is `external_id`
+        or one of its retry attempts (`<external_id>:a<n>`), oldest first.
+
+        Used by the owner intake to find the latest attempt of a ticket without a second table.
+        """
+        escaped = external_id.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        conn = self._connect()
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                "SELECT external_id, run_id FROM intake_commands "
+                "WHERE channel = ? AND (external_id = ? OR external_id LIKE ? ESCAPE '\\') ORDER BY committed_at, external_id",
+                (channel, external_id, f"{escaped}:a%"),
+            )
+            return [(row["external_id"], row["run_id"]) for row in cur.fetchall()]
+        finally:
+            conn.close()
+
     def record_grill_answer(self, run_id: str, question_id: str, choice: str, now: datetime) -> None:
         """Record an owner's grill answer for `(run_id, question_id)` (last answer wins).
 

@@ -75,6 +75,9 @@ class RoutingConfig(BaseModel):
 
     pressure_thresholds: dict[str, float] = Field(default_factory=lambda: dict(_DEFAULT_PRESSURE_THRESHOLDS))
     cooldown_default_minutes: int = 60
+    # A harness whose CLI crashes (not a quota/login problem) sits out briefly, so the next stage or
+    # job does not pick it again straight away.
+    crash_cooldown_minutes: int = 10
     forbidden_autonomous_models: list[str] = Field(
         default_factory=lambda: list(_DEFAULT_FORBIDDEN_AUTONOMOUS_MODELS)
     )
@@ -214,16 +217,25 @@ def record_result(
         except Exception as exc:
             logger.debug("Failed releasing quota reservation %s: %s", reservation_id, exc)
 
-    if result.error_kind != "rate_limited":
+    if result.error_kind not in ("rate_limited", "crash"):
         return
     cfg = config or load_routing_config()
     path = cooldown_path or default_cooldown_path()
 
-    until = result.reset_at
-    if until is None:
-        until = datetime.now(timezone.utc) + timedelta(minutes=cfg.cooldown_default_minutes)
-    elif until.tzinfo is None:
-        until = until.replace(tzinfo=timezone.utc)
+    if result.error_kind == "crash":
+        if result.harness in ("", "none", "openrouter"):
+            return
+        until = datetime.now(timezone.utc) + timedelta(minutes=max(cfg.crash_cooldown_minutes, 0))
+        existing = _load_cooldowns(path).get(result.harness)
+        existing_until = _parse_until(existing.get("until")) if isinstance(existing, dict) else None
+        if existing_until is not None and existing_until > until:
+            return  # never shorten a longer (e.g. rate-limit) cooldown
+    else:
+        until = result.reset_at
+        if until is None:
+            until = datetime.now(timezone.utc) + timedelta(minutes=cfg.cooldown_default_minutes)
+        elif until.tzinfo is None:
+            until = until.replace(tzinfo=timezone.utc)
 
     data = _load_cooldowns(path)
     data[result.harness] = {
