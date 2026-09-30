@@ -1500,5 +1500,34 @@
     "dependencies": [],
     "created_at": "2026-09-30T17:26:37.767276Z",
     "updated_at": "2026-09-30T17:26:37.767276Z"
+  },
+  {
+    "id": "USR-71",
+    "project_id": "darkfac",
+    "title": "Worker de testes do Desktop: processo legado na 8080 nao atualiza e nao expoe versao",
+    "origin": "user",
+    "status": "planned",
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "Apos o merge do USR-65 o Desktop continuou sem git_sha no /health mesmo depois de git pull e restart da Scheduled Task, indicando processo antigo segurando a porta 8080. O /system/restart antigo chamava start_onprem_worker.ps1 (cloud_worker) e derrubou o worker de testes em 2026-09-30.",
+    "core_journey": [
+      "Apos o merge do USR-65 o Desktop continuou sem git_sha no /health mesmo depois de git pull e restart da Scheduled Task, indicando processo antigo segurando a porta 8080. O /system/restart antigo chamava start_onprem_worker.ps1 (cloud_worker) e derrubou o worker de testes em 2026-09-30."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "node_sync detecta processo legado (health sem git_sha/restart_safe) e recupera o worker por mecanismo seguro (Scheduled Task DarkFac Test Worker), sem depender de acao manual",
+      "O /health do worker informa git_sha, restart_safe e versao do harness; node_sync verify acusa Desktop divergent ate coincidir com origin/main",
+      "Runbook curto em docs/runbooks e testes com fakes"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-09-30T17:27:02.652382Z",
+    "updated_at": "2026-09-30T17:27:02.652382Z"
   }
 ]
