@@ -130,5 +130,8 @@ def test_demands_store_loads_cleanly() -> None:
     """Ensure DemandsStore loads all tickets without error and respects ledger count."""
     store = DemandsStore(DEMANDS_FILE)
     tickets = store.list_tickets()
-    assert len(tickets) == len(HISTORICAL_REAL_IDS) + len(CURRENT_WAVE_IDS)
-    assert len(tickets) == 35
+    # Tickets queued by agents (run_ticket --queue-only) must not require editing this test:
+    # the ledger may only grow beyond the registered baseline.
+    ids = {ticket.id for ticket in tickets}
+    assert len(tickets) >= len(HISTORICAL_REAL_IDS) + len(CURRENT_WAVE_IDS)
+    assert set(HISTORICAL_REAL_IDS + CURRENT_WAVE_IDS) <= ids

@@ -113,3 +113,32 @@ def test_skills_synchronization_has_19_run_ticket() -> None:
     assert claude_skill.is_file(), f"Missing claude skill at {claude_skill}"
     assert "19 - Run Ticket" in agent_skill.read_text(encoding="utf-8")
     assert agent_skill.read_text(encoding="utf-8") == claude_skill.read_text(encoding="utf-8")
+
+
+def test_queue_only_registers_ticket_without_running_agent(capsys: pytest.CaptureFixture[str]) -> None:
+    """--create --queue-only files the ticket in the queue and never invokes an agent."""
+    queued = run_ticket.UserTicket(id="USR-99", project_id="darkfac", title="Defeito X", problem_statement="p")
+    with patch("run_ticket._queue_ticket_isolated", return_value=queued) as queue,          patch("run_ticket.run_agent") as agent:
+        exit_code = main(["--create", "--queue-only", "--title", "Defeito X", "--problem", "p"])
+    assert exit_code == 0
+    queue.assert_called_once()
+    agent.assert_not_called()
+    assert "USR-99" in capsys.readouterr().out
+
+
+def test_queue_only_fails_when_queue_delivery_fails(capsys: pytest.CaptureFixture[str]) -> None:
+    with patch("run_ticket._queue_ticket_isolated", return_value=None):
+        exit_code = main(["--create", "--queue-only", "--title", "Defeito X"])
+    assert exit_code == 1
+    assert "fila" in capsys.readouterr().err
+
+
+def test_build_ticket_uses_next_sequential_id(tmp_path: Path) -> None:
+    from core.demands.store import DemandsStore
+
+    store = DemandsStore(tmp_path / "demands.json")
+    store.save_ticket(run_ticket.UserTicket(id="USR-07", project_id="darkfac", title="alpha ticket", problem_statement="problema suficientemente longo"))
+    args = run_ticket.build_parser().parse_args(["--create", "--title", "beta ticket", "--problem", "problema suficientemente longo", "--criteria", "c1"])
+    ticket = run_ticket._build_ticket(args, store)
+    assert ticket.id == "USR-08"
+    assert ticket.acceptance_criteria == ["c1"]

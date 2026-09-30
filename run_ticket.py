@@ -98,7 +98,45 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--no-commit", action="store_true", help="Do not automatically commit after validation pass")
     parser.add_argument("--no-push", action="store_true", help="Do not automatically push to remote after validation pass")
     parser.add_argument("--json", action="store_true", help="Output raw JSON result")
+    parser.add_argument(
+        "--queue-only",
+        action="store_true",
+        help="With --create: register the ticket in the development queue (isolated worktree, PR, merge) without running it",
+    )
     return parser
+
+
+def _build_ticket(args: argparse.Namespace, store: DemandsStore) -> UserTicket:
+    """Build the next sequential planned ticket from CLI arguments."""
+    num_ids = [int(m.group(1)) for t in store.list_tickets() if (m := re.match(r"USR-(\d+)", t.id))]
+    next_num = (max(num_ids) + 1) if num_ids else 1
+    return UserTicket(
+        id=f"USR-{next_num:02d}",
+        project_id=args.project,
+        title=args.title,
+        problem_statement=args.problem,
+        core_journey=[args.problem] if args.problem else [],
+        acceptance_criteria=list(args.criteria),
+        status=DeliveryStatus.PLANNED,
+    )
+
+
+def _queue_ticket_isolated(args: argparse.Namespace) -> Optional[UserTicket]:
+    """Register a planned ticket on origin/main from a throwaway worktree (never the shared checkout)."""
+    import time
+
+    from core.git.autonomy import GitAutonomyManager, _run_git
+
+    if _run_git(["fetch", "origin", "main"]).returncode != 0:
+        return None
+    worktree = PROJECT_ROOT / ".worktrees" / f"queue-{int(time.time())}"
+    if _run_git(["worktree", "add", "-b", f"ticket/{worktree.name}", str(worktree), "origin/main"]).returncode != 0:
+        return None
+    store = DemandsStore(worktree / ".factory" / "demands" / "demands.json")
+    ticket = _build_ticket(args, store)
+    store.save_ticket(ticket)
+    report = GitAutonomyManager(PROJECT_ROOT).deliver_branch(ticket.id, ticket.title, cwd=worktree)
+    return ticket if report.ok else None
 
 
 def main(argv: Optional[list[str]] = None) -> int:
@@ -119,19 +157,14 @@ def main(argv: Optional[list[str]] = None) -> int:
         if not args.title:
             print("[ERRO] --title é obrigatório para criar um novo ticket.", file=sys.stderr)
             return 1
-        existing_tickets = store.list_tickets()
-        num_ids = [int(m.group(1)) for t in existing_tickets if (m := re.match(r"USR-(\d+)", t.id))]
-        next_num = (max(num_ids) + 1) if num_ids else 1
-        ticket_id = f"USR-{next_num:02d}"
-        ticket = UserTicket(
-            id=ticket_id,
-            project_id=args.project,
-            title=args.title,
-            problem_statement=args.problem,
-            core_journey=[args.problem] if args.problem else [],
-            acceptance_criteria=list(args.criteria),
-            status=DeliveryStatus.PLANNED,
-        )
+        if args.queue_only:
+            queued = _queue_ticket_isolated(args)
+            if queued is None:
+                print("[ERRO] Não foi possível registrar o ticket na fila (fetch/worktree/entrega falhou).", file=sys.stderr)
+                return 1
+            print(f"[+] Ticket {queued.id} registrado na fila de desenvolvimento: '{queued.title}'")
+            return 0
+        ticket = _build_ticket(args, store)
         store.save_ticket(ticket)
         if not args.json:
             print(f"\n[+] Novo ticket criado e registrado: {ticket.id} - '{ticket.title}'")
