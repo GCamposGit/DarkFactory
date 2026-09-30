@@ -1,0 +1,82 @@
+[
+  {
+    "id": "T1",
+    "title": "Extrair os 15 gatilhos do header para uma sidebar vertical fixa a esquerda",
+    "goal": "Reestruturar hub/frontend/index.html criando <aside id=\"darkhub-sidebar\"> com <nav> vertical contendo todos os botoes de navegacao movidos verbatim (onclick/title/id intactos, agora como linha icone+rotulo), deixando no <header> apenas marca, badge de cobertura, seletor global de projeto, badges Ollama/OpenRouter e o trigger de busca Ctrl+K; aplicar o offset de conteudo (md:pl-56) ao header e ao <main>.",
+    "files_hint": [
+      "hub/frontend/index.html",
+      "tests/test_transformar_menu_superior_em_m.py"
+    ],
+    "acceptance": [
+      "hub/frontend/index.html contem um unico <aside id=\"darkhub-sidebar\"> com um <nav> vertical (classes fixed/left-0/h-screen/flex-col) antes do <main>",
+      "Todos os handlers continuam presentes exatamente uma vez cada: openBenchmarksModal, openLearningDrawer, openPortfolioDrawer, openRoadmapDrawer, openDemandsDrawer, openTelemetryDrawer, openPlaygroundDrawer, openPromptVaultDrawer, openBackupModal, openServiceModal e os tres scrollIntoView (content-studio-section, harness-validation-section, infrastructure-cards-section, tasks-dashboard-section)",
+      "Os ids preservados: portfolio-trigger-btn permanece no botao de Portfolio e hub-coverage-badge permanece no header",
+      "O header nao contem mais nenhum dos botoes de navegacao migrados (nenhum openBenchmarksModal/openRoadmapDrawer/etc. dentro do bloco <header>), mas mantem global-project-select, ollama-status-badge, openrouter-status-badge e openCommandPalette",
+      "Nenhuma alteracao em hub/backend/* e nenhuma referencia a cdn.tailwindcss.com introduzida",
+      "Nenhuma logica de negocio nova no markup: apenas reorganizacao dos gatilhos existentes"
+    ],
+    "tests_to_add": [
+      "tests/test_transformar_menu_superior_em_m.py::test_sidebar_aside_exists_with_vertical_layout_classes",
+      "tests/test_transformar_menu_superior_em_m.py::test_all_navigation_handlers_preserved_exactly_once",
+      "tests/test_transformar_menu_superior_em_m.py::test_header_keeps_only_brand_project_status_and_search",
+      "tests/test_transformar_menu_superior_em_m.py::test_topbar_and_main_apply_sidebar_offset"
+    ],
+    "smoke": [
+      "/",
+      "/static/styles.css"
+    ]
+  },
+  {
+    "id": "T2",
+    "title": "Adicionar utilitarias CSS da sidebar em styles.css e manter static/styles.css byte-identico",
+    "goal": "Escrever manualmente em hub/frontend/styles.css, no padrao hand-authored existente, todas as utilitarias usadas pelo layout vertical (fixed, left-0, top-0, h-screen, w-56, w-16, flex-col, overflow-y-auto, z-40, z-50, transition-transform, -translate-x-full, translate-x-0, md:pl-56, md:pl-16) mais as regras de estado (.sidebar-collapsed .sidebar-label { display:none }, backdrop do overlay) e replicar o arquivo em hub/frontend/static/styles.css de forma byte-identica.",
+    "files_hint": [
+      "hub/frontend/styles.css",
+      "hub/frontend/static/styles.css",
+      "tests/test_transformar_menu_superior_em_m.py"
+    ],
+    "acceptance": [
+      "Toda classe CSS usada pela sidebar/topbar em index.html tem definicao correspondente em hub/frontend/styles.css",
+      "hub/frontend/styles.css e hub/frontend/static/styles.css sao byte-identicos (mesmo sha256 e mesmo tamanho), mantendo tests/test_frontend_foundation.py verde",
+      "Ambos os arquivos permanecem acima de 10 KB e /static/styles.css responde 200 via TestClient",
+      "No modo colapsado os rotulos (.sidebar-label) ficam ocultos por CSS e a largura da sidebar cai para w-16, sem JS obrigatorio para o estilo",
+      "Nenhum @import ou CDN externo adicionado; regras responsivas novas ficam agrupadas com os blocos @media existentes no fim do arquivo"
+    ],
+    "tests_to_add": [
+      "tests/test_transformar_menu_superior_em_m.py::test_sidebar_utility_classes_defined_in_styles_css",
+      "tests/test_transformar_menu_superior_em_m.py::test_styles_css_and_static_copy_are_byte_identical",
+      "tests/test_transformar_menu_superior_em_m.py::test_collapsed_state_rules_present_in_css"
+    ],
+    "smoke": [
+      "/static/styles.css"
+    ]
+  },
+  {
+    "id": "T3",
+    "title": "Colapso com persistencia em localStorage e sidebar mobile em overlay com hambúrguer",
+    "goal": "Implementar em hub/frontend/app.js um bloco isolado de apresentacao (initSidebar/toggleSidebarCollapsed/toggleSidebarMobile) que persiste o estado colapsado em localStorage['darkhub.sidebar.collapsed'], aplica a classe no boot antes do primeiro paint e, no mobile, abre/fecha a sidebar como overlay pelo botao sidebar-mobile-toggle (fechando por backdrop e Escape), com os atributos aria correspondentes no HTML.",
+    "files_hint": [
+      "hub/frontend/app.js",
+      "hub/frontend/index.html",
+      "tests/test_transformar_menu_superior_em_m.py"
+    ],
+    "acceptance": [
+      "index.html contem os botoes id=sidebar-collapse-toggle e id=sidebar-mobile-toggle, cada um com aria-label, aria-expanded e aria-controls=\"darkhub-sidebar\"",
+      "app.js define initSidebar, toggleSidebarCollapsed e toggleSidebarMobile e usa a chave localStorage 'darkhub.sidebar.collapsed' para ler e gravar o estado",
+      "initSidebar e chamado no boot existente do app.js (mesmo padrao dos outros inicializadores), aplicando a classe de colapso antes do conteudo ser exibido",
+      "O overlay mobile fecha por clique no backdrop e por tecla Escape, e o hambúrguer fica visivel apenas nos breakpoints pequenos",
+      "Nenhuma chamada de API, fetch ou logica de negocio adicionada ao bloco da sidebar; nenhum handler existente modificado",
+      "Portao oficial verde: python C:\\dev\\DarkFac\\core\\harness\\runner.py --quick, e python -m pytest tests/test_transformar_menu_superior_em_m.py -v passando"
+    ],
+    "tests_to_add": [
+      "tests/test_transformar_menu_superior_em_m.py::test_collapse_and_mobile_toggle_buttons_present_with_aria",
+      "tests/test_transformar_menu_superior_em_m.py::test_app_js_defines_sidebar_functions_and_localstorage_key",
+      "tests/test_transformar_menu_superior_em_m.py::test_init_sidebar_called_on_boot",
+      "tests/test_transformar_menu_superior_em_m.py::test_sidebar_block_has_no_fetch_or_business_logic"
+    ],
+    "smoke": [
+      "/",
+      "/static/styles.css"
+    ]
+  }
+]
