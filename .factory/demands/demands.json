@@ -1413,5 +1413,34 @@
     "dependencies": [],
     "created_at": "2026-09-30T17:25:29.151390Z",
     "updated_at": "2026-09-30T17:25:29.151390Z"
+  },
+  {
+    "id": "USR-68",
+    "project_id": "darkfac",
+    "title": "Falha do agente sem mensagem: run_ticket deve diagnosticar e repetir",
+    "origin": "user",
+    "status": "planned",
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "O codex terminou com '[FALHA NA EXECUCAO DO AGENTE]:' e texto vazio no USR-63 (primeira execucao) e no USR-67 (2026-09-30), deixando o ticket sem causa. Sem stderr, exit code ou duracao no relatorio nao ha como distinguir timeout, quota ou erro de CLI.",
+    "core_journey": [
+      "O codex terminou com '[FALHA NA EXECUCAO DO AGENTE]:' e texto vazio no USR-63 (primeira execucao) e no USR-67 (2026-09-30), deixando o ticket sem causa. Sem stderr, exit code ou duracao no relatorio nao ha como distinguir timeout, quota ou erro de CLI."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "O resultado do agente inclui exit code, duracao, tail de stderr e kind do erro (timeout, quota, cli, vazio) em toda falha",
+      "Falha transitoria (vazia ou timeout) e repetida ate 2 vezes com backoff e depois tenta outro harness saudavel",
+      "Testes com agente falso cobrindo saida vazia, timeout e retry"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-09-30T17:25:52.164549Z",
+    "updated_at": "2026-09-30T17:25:52.164549Z"
   }
 ]
