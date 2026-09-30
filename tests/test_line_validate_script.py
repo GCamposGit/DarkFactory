@@ -152,6 +152,9 @@ import os, subprocess, sys
 from pathlib import Path
 
 status = subprocess.run(["git", "status", "--porcelain=v1", "--untracked-files=all"], capture_output=True, text=True).stdout
+lines = []
+def print(text):  # stdout may not exist (pythonw.exe on the Windows test worker): report through a file
+    lines.append(text)
 print("STUB_CWD=" + os.getcwd())
 print("STUB_ARGV=" + " ".join(sys.argv[1:]))
 print("STUB_CLEAN=" + str(not status.strip()))
@@ -160,6 +163,7 @@ print("STUB_NEW=" + (Path("new.txt").read_text() if Path("new.txt").exists() els
 print("STUB_IGNORED=" + ("present" if Path("ignored.log").exists() else "absent"))
 print("STUB_SANDBOX=" + os.environ.get("DARKFAC_CODEX_SANDBOX_MODE", "absent"))
 print("STUB_DB=" + os.environ.get("DARKFAC_HF02_DATABASE_URL", "absent"))
+Path(os.environ["STUB_OUT"]).write_text("\\n".join(lines), encoding="utf-8")
 sys.exit(int(os.environ.get("STUB_EXIT", "0")))
 """
 
@@ -184,14 +188,17 @@ def _snapshot_repo(tmp_path: Path) -> Path:
     return root
 
 
-def _stub_fields(out: str) -> dict[str, str]:
-    return dict(line.split("=", 1) for line in out.splitlines() if line.startswith("STUB_"))
+def _stub_fields(out_file: Path) -> dict[str, str]:
+    text = out_file.read_text(encoding="utf-8")
+    return dict(line.split("=", 1) for line in text.splitlines() if line.startswith("STUB_"))
 
 
 def test_dirty_tree_runs_the_official_runner_on_a_clean_snapshot_commit(
-    line_validate, tmp_path: Path, monkeypatch, capfd
+    line_validate, tmp_path: Path, monkeypatch
 ) -> None:
     root = _snapshot_repo(tmp_path)
+    out_file = tmp_path / "stub_out.txt"
+    monkeypatch.setenv("STUB_OUT", str(out_file))
     monkeypatch.setenv("DARKFAC_CODEX_SANDBOX_MODE", "bypass")
     monkeypatch.setenv("DARKFAC_HF02_DATABASE_URL", "postgresql://u:p@db:5432/x")
     head_before = _git_out(root, "rev-parse", "HEAD")
@@ -200,7 +207,7 @@ def test_dirty_tree_runs_the_official_runner_on_a_clean_snapshot_commit(
 
     assert line_validate.main(root) == 0
 
-    fields = _stub_fields(capfd.readouterr().out)
+    fields = _stub_fields(out_file)
     checkout = Path(fields["STUB_CWD"])
     assert checkout.resolve() != root.resolve()
     assert fields["STUB_ARGV"] == "--quick"
@@ -223,14 +230,16 @@ def test_dirty_tree_runs_the_official_runner_on_a_clean_snapshot_commit(
 
 
 def test_snapshot_run_propagates_the_runner_exit_code_and_still_cleans_up(
-    line_validate, tmp_path: Path, monkeypatch, capfd
+    line_validate, tmp_path: Path, monkeypatch
 ) -> None:
     root = _snapshot_repo(tmp_path)
+    out_file = tmp_path / "stub_out.txt"
+    monkeypatch.setenv("STUB_OUT", str(out_file))
     monkeypatch.setenv("STUB_EXIT", "7")
 
     assert line_validate.main(root) == 7
 
-    checkout = Path(_stub_fields(capfd.readouterr().out)["STUB_CWD"])
+    checkout = Path(_stub_fields(out_file)["STUB_CWD"])
     assert not checkout.exists()
     assert _git_out(root, "worktree", "list", "--porcelain").count("worktree ") == 1
 
