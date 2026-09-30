@@ -1676,5 +1676,34 @@
     "dependencies": [],
     "created_at": "2026-09-30T17:36:18.247437Z",
     "updated_at": "2026-09-30T17:36:18.247437Z"
+  },
+  {
+    "id": "USR-77",
+    "project_id": "darkfac",
+    "title": "Teste do canario abre conexao Postgres real e trava sem rede",
+    "origin": "user",
+    "status": "planned",
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "tests/test_line_canary_hf2710.py::test_default_store_is_postgres_when_database_url_set chama psycopg.connect de verdade; em maquina sem acesso ao host o teste fica pendurado ate o timeout do pytest (visto no PC do owner em 30/09 durante o PR #61). Passa no Desktop so porque la a conexao falha rapido.",
+    "core_journey": [
+      "tests/test_line_canary_hf2710.py::test_default_store_is_postgres_when_database_url_set chama psycopg.connect de verdade; em maquina sem acesso ao host o teste fica pendurado ate o timeout do pytest (visto no PC do owner em 30/09 durante o PR #61). Passa no Desktop so porque la a conexao falha rapido."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "O teste nao abre conexao de rede real (monkeypatch da inicializacao do store Postgres)",
+      "Continua provando que DATABASE_URL definido seleciona o store Postgres",
+      "Roda em menos de 2s sem rede"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-09-30T17:46:01.649669Z",
+    "updated_at": "2026-09-30T17:46:01.649669Z"
   }
 ]
