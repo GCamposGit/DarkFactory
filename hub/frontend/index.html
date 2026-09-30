@@ -12,10 +12,143 @@
   <div class="fixed top-0 left-1/4 w-96 h-96 bg-indigo-600/10 rounded-full blur-3xl pointer-events-none -z-10"></div>
   <div class="fixed bottom-0 right-1/4 w-96 h-96 bg-blue-600/10 rounded-full blur-3xl pointer-events-none -z-10"></div>
 
-  <!-- Main Navigation Header -->
-  <header class="sticky top-0 z-30 border-b border-slate-800/80 bg-slate-950/80 backdrop-blur-xl">
+  <!-- Sidebar Navigation (vertical, fixed to the left) -->
+  <aside id="darkhub-sidebar" class="fixed left-0 top-0 h-screen w-56 flex flex-col z-40 border-r border-slate-800/80 bg-slate-950/95 backdrop-blur-xl">
+    <nav class="flex-1 flex flex-col gap-1 px-3 py-4 overflow-y-auto" aria-label="Navegação principal">
+
+      <!-- Benchmarks & Pareto Trigger -->
+      <button
+        onclick="openBenchmarksModal()"
+        title="Ver Benchmarks & Fronteira de Pareto"
+        class="flex items-center gap-3 px-3 py-2 rounded-lg bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-amber-300 border border-slate-800 hover:border-amber-500/30 transition-all text-xs font-medium">
+        <span class="w-5 text-center">📊</span>
+        <span class="sidebar-label">Benchmarks & Pareto</span>
+      </button>
+
+      <!-- Learning Packs & Knowledge Trigger -->
+      <button
+        onclick="openLearningDrawer()"
+        title="Abrir Central de Aprendizado, Learning Packs & Segundo Cérebro"
+        class="flex items-center gap-3 px-3 py-2 rounded-lg bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-amber-300 border border-slate-800 hover:border-amber-500/30 transition-all text-xs font-medium">
+        <span class="w-5 text-center">🎓</span>
+        <span class="sidebar-label">Aprendizado</span>
+      </button>
+
+      <!-- Multi-Project Portfolio Trigger (DH-08) -->
+      <button
+        id="portfolio-trigger-btn"
+        onclick="openPortfolioDrawer()"
+        title="Abrir Portfólio Multiprojeto (DH-08)"
+        class="flex items-center gap-3 px-3 py-2 rounded-lg bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-indigo-300 border border-slate-800 hover:border-indigo-500/30 transition-all text-xs font-medium">
+        <span class="w-5 text-center">💼</span>
+        <span class="sidebar-label">Portfólio</span>
+      </button>
+
+      <!-- Operational Roadmap Trigger -->
+      <button
+        onclick="openRoadmapDrawer()"
+        title="Abrir Roadmap Operacional"
+        class="flex items-center gap-3 px-3 py-2 rounded-lg bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-cyan-300 border border-slate-800 hover:border-cyan-500/30 transition-all text-xs font-medium">
+        <span class="w-5 text-center">🗺️</span>
+        <span class="sidebar-label">Roadmap</span>
+      </button>
+
+      <!-- User Demands Trigger -->
+      <button
+        onclick="openDemandsDrawer()"
+        title="Abrir Central de Demandas do Usuário & Backlog"
+        class="flex items-center gap-3 px-3 py-2 rounded-lg bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-emerald-300 border border-slate-800 hover:border-emerald-500/30 transition-all text-xs font-medium">
+        <span class="w-5 text-center">📝</span>
+        <span class="sidebar-label">Demandas</span>
+      </button>
+
+      <!-- Telemetry Trigger -->
+      <button
+        onclick="openTelemetryDrawer()"
+        title="Abrir Telemetria Estruturada de Modelos de IA"
+        class="flex items-center gap-3 px-3 py-2 rounded-lg bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-purple-300 border border-slate-800 hover:border-purple-500/30 transition-all text-xs font-medium">
+        <span class="w-5 text-center">📈</span>
+        <span class="sidebar-label">Telemetria</span>
+      </button>
+
+      <!-- Studio & Visual Assets Trigger (DH-07) -->
+      <button
+        onclick="document.getElementById('content-studio-section')?.scrollIntoView({behavior: 'smooth'})"
+        title="Estúdio de Conteúdo Anti-Slop & Ateliê Visual (DH-07)"
+        class="flex items-center gap-3 px-3 py-2 rounded-lg bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-purple-300 border border-slate-800 hover:border-purple-500/30 transition-all text-xs font-medium">
+        <span class="w-5 text-center">🎨</span>
+        <span class="sidebar-label">Estúdio</span>
+      </button>
+
+      <!-- On-Demand Test Validation Trigger (DH-11) -->
+      <button
+        onclick="document.getElementById('harness-validation-section')?.scrollIntoView({behavior: 'smooth'})"
+        title="Validação sob Demanda & Harness Remoto (DH-11)"
+        class="flex items-center gap-3 px-3 py-2 rounded-lg bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-emerald-300 border border-slate-800 hover:border-emerald-500/30 transition-all text-xs font-medium">
+        <span class="w-5 text-center">🧪</span>
+        <span class="sidebar-label">Testes</span>
+      </button>
+
+      <!-- Infrastructure Cards Trigger -->
+      <button
+        onclick="document.getElementById('infrastructure-cards-section')?.scrollIntoView({behavior: 'smooth'})"
+        title="Recursos de Infraestrutura & Rede"
+        class="flex items-center gap-3 px-3 py-2 rounded-lg bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-indigo-300 border border-slate-800 hover:border-indigo-500/30 transition-all text-xs font-medium">
+        <span class="w-5 text-center">🖥️</span>
+        <span class="sidebar-label">Infra</span>
+      </button>
+
+      <!-- Task Dashboard Trigger -->
+      <button
+        onclick="document.getElementById('tasks-dashboard-section')?.scrollIntoView({behavior: 'smooth'})"
+        title="Fila operacional de tarefas"
+        class="flex items-center gap-3 px-3 py-2 rounded-lg bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-emerald-300 border border-slate-800 hover:border-emerald-500/30 transition-all text-xs font-medium">
+        <span class="w-5 text-center">✅</span>
+        <span class="sidebar-label">Tarefas</span>
+      </button>
+
+      <!-- Playground Trigger -->
+      <button
+        onclick="openPlaygroundDrawer()"
+        title="Abrir AI Playground (Local Ollama & OpenRouter)"
+        class="flex items-center gap-3 px-3 py-2 rounded-lg bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-indigo-300 border border-slate-800 hover:border-indigo-500/30 transition-all text-xs font-medium">
+        <span class="w-5 text-center">🧠</span>
+        <span class="sidebar-label">Playground</span>
+      </button>
+
+      <!-- Prompt Vault Trigger -->
+      <button
+        onclick="openPromptVaultDrawer()"
+        title="Abrir Cofre de Prompts"
+        class="flex items-center gap-3 px-3 py-2 rounded-lg bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-indigo-300 border border-slate-800 hover:border-indigo-500/30 transition-all text-xs font-medium">
+        <span class="w-5 text-center">📋</span>
+        <span class="sidebar-label">Prompts</span>
+      </button>
+
+      <!-- Backup & Settings Trigger -->
+      <button
+        onclick="openBackupModal()"
+        title="Backup & Configurações"
+        class="flex items-center gap-3 px-3 py-2 rounded-lg bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-slate-200 border border-slate-800 transition-all text-xs font-medium">
+        <span class="w-5 text-center">⚙️</span>
+        <span class="sidebar-label">Backup & Configurações</span>
+      </button>
+
+      <!-- Add Service Button -->
+      <button
+        onclick="openServiceModal()"
+        class="flex items-center gap-3 px-3 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white font-medium text-xs shadow-lg shadow-indigo-600/30 transition-all">
+        <span class="w-5 text-center">+</span>
+        <span class="sidebar-label">Novo Serviço</span>
+      </button>
+
+    </nav>
+  </aside>
+
+  <!-- Main Navigation Header (thin topbar: brand, project selector, status, search) -->
+  <header class="sticky top-0 z-30 md:pl-56 border-b border-slate-800/80 bg-slate-950/80 backdrop-blur-xl">
     <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between gap-4">
-      
+
       <!-- Brand Logo -->
       <div class="flex items-center gap-3">
         <div class="w-9 h-9 rounded-xl bg-gradient-to-tr from-indigo-600 to-blue-500 flex items-center justify-center font-mono font-bold text-lg text-white shadow-lg shadow-indigo-500/25">
@@ -25,9 +158,9 @@
           <div class="flex items-center gap-2">
             <span class="font-bold text-base tracking-tight text-white">DarkHub</span>
             <span class="px-2 py-0.5 rounded-full bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 text-[10px] font-mono">v1.0</span>
-            <button 
-              id="hub-coverage-badge" 
-              onclick="openCoverageDrawer()" 
+            <button
+              id="hub-coverage-badge"
+              onclick="openCoverageDrawer()"
               title="Cobertura da Fábrica no DarkHub (Gate USR-42 / DH-14)"
               class="flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-[10px] font-mono hover:bg-emerald-500/20 transition-all cursor-pointer shadow-sm">
               <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
@@ -52,7 +185,7 @@
             <option value="jarvis" class="bg-slate-900 text-white">Jarvis (AI Assistant)</option>
           </select>
         </div>
-        
+
         <!-- Live Ollama Status Indicator -->
         <div id="ollama-status-badge">
           <div class="flex items-center gap-2 px-2.5 py-1 rounded-full bg-slate-900 border border-slate-800 text-slate-500 text-xs font-mono">
@@ -70,7 +203,7 @@
         </div>
 
         <!-- Search / Command Palette Trigger -->
-        <button 
+        <button
           onclick="openCommandPalette()"
           class="hidden md:flex items-center gap-2.5 px-3 py-1.5 rounded-xl bg-slate-900 border border-slate-800 hover:border-indigo-500/40 text-slate-400 hover:text-slate-200 transition-all text-xs font-mono group shadow-inner">
           <svg class="w-3.5 h-3.5 text-slate-500 group-hover:text-indigo-400 transition-colors" stroke="currentColor" fill="none" viewBox="0 0 24 24">
@@ -81,137 +214,12 @@
           <kbd class="px-1.5 py-0.5 rounded bg-slate-800 border border-slate-700 text-[10px] text-slate-400">Ctrl+K</kbd>
         </button>
 
-        <!-- Benchmarks & Pareto Trigger -->
-        <button 
-          onclick="openBenchmarksModal()" 
-          title="Ver Benchmarks & Fronteira de Pareto"
-          class="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-amber-300 border border-slate-800 hover:border-amber-500/30 transition-all text-xs font-medium">
-          <span>📊</span>
-          <span class="hidden lg:inline">Benchmarks & Pareto</span>
-        </button>
-
-        <!-- Learning Packs & Knowledge Trigger -->
-        <button
-          onclick="openLearningDrawer()"
-          title="Abrir Central de Aprendizado, Learning Packs & Segundo Cérebro"
-          class="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-amber-300 border border-slate-800 hover:border-amber-500/30 transition-all text-xs font-medium">
-          <span>🎓</span>
-          <span class="hidden lg:inline">Aprendizado</span>
-        </button>
-
-        <!-- Multi-Project Portfolio Trigger (DH-08) -->
-        <button
-          id="portfolio-trigger-btn"
-          onclick="openPortfolioDrawer()"
-          title="Abrir Portfólio Multiprojeto (DH-08)"
-          class="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-indigo-300 border border-slate-800 hover:border-indigo-500/30 transition-all text-xs font-medium">
-          <span>💼</span>
-          <span class="hidden lg:inline">Portfólio</span>
-        </button>
-
-        <!-- Operational Roadmap Trigger -->
-        <button
-          onclick="openRoadmapDrawer()"
-          title="Abrir Roadmap Operacional"
-          class="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-cyan-300 border border-slate-800 hover:border-cyan-500/30 transition-all text-xs font-medium">
-          <span>🗺️</span>
-          <span class="hidden lg:inline">Roadmap</span>
-        </button>
-
-        <!-- User Demands Trigger -->
-        <button
-          onclick="openDemandsDrawer()"
-          title="Abrir Central de Demandas do Usuário & Backlog"
-          class="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-emerald-300 border border-slate-800 hover:border-emerald-500/30 transition-all text-xs font-medium">
-          <span>📝</span>
-          <span class="hidden lg:inline">Demandas</span>
-        </button>
-
-        <!-- Telemetry Trigger -->
-        <button
-          onclick="openTelemetryDrawer()"
-          title="Abrir Telemetria Estruturada de Modelos de IA"
-          class="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-purple-300 border border-slate-800 hover:border-purple-500/30 transition-all text-xs font-medium">
-          <span>📈</span>
-          <span class="hidden lg:inline">Telemetria</span>
-        </button>
-
-        <!-- Studio & Visual Assets Trigger (DH-07) -->
-        <button
-          onclick="document.getElementById('content-studio-section')?.scrollIntoView({behavior: 'smooth'})"
-          title="Estúdio de Conteúdo Anti-Slop & Ateliê Visual (DH-07)"
-          class="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-purple-300 border border-slate-800 hover:border-purple-500/30 transition-all text-xs font-medium">
-          <span>🎨</span>
-          <span class="hidden lg:inline">Estúdio</span>
-        </button>
-
-        <!-- On-Demand Test Validation Trigger (DH-11) -->
-        <button
-          onclick="document.getElementById('harness-validation-section')?.scrollIntoView({behavior: 'smooth'})"
-          title="Validação sob Demanda & Harness Remoto (DH-11)"
-          class="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-emerald-300 border border-slate-800 hover:border-emerald-500/30 transition-all text-xs font-medium">
-          <span>🧪</span>
-          <span class="hidden lg:inline">Testes</span>
-        </button>
-
-        <!-- Infrastructure Cards Trigger -->
-        <button
-          onclick="document.getElementById('infrastructure-cards-section')?.scrollIntoView({behavior: 'smooth'})"
-          title="Recursos de Infraestrutura & Rede"
-          class="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-indigo-300 border border-slate-800 hover:border-indigo-500/30 transition-all text-xs font-medium">
-          <span>🖥️</span>
-          <span class="hidden lg:inline">Infra</span>
-        </button>
-
-        <!-- Task Dashboard Trigger -->
-        <button
-          onclick="document.getElementById('tasks-dashboard-section')?.scrollIntoView({behavior: 'smooth'})"
-          title="Fila operacional de tarefas"
-          class="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-emerald-300 border border-slate-800 hover:border-emerald-500/30 transition-all text-xs font-medium">
-          <span>✅</span>
-          <span class="hidden lg:inline">Tarefas</span>
-        </button>
-
-        <!-- Playground Trigger -->
-        <button 
-          onclick="openPlaygroundDrawer()" 
-          title="Abrir AI Playground (Local Ollama & OpenRouter)"
-          class="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-indigo-300 border border-slate-800 hover:border-indigo-500/30 transition-all text-xs font-medium">
-          <span>🧠</span>
-          <span class="hidden sm:inline">Playground</span>
-        </button>
-
-        <!-- Prompt Vault Trigger -->
-        <button 
-          onclick="openPromptVaultDrawer()" 
-          title="Abrir Cofre de Prompts"
-          class="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-indigo-300 border border-slate-800 hover:border-indigo-500/30 transition-all text-xs font-medium">
-          <span>📋</span>
-          <span class="hidden md:inline">Prompts</span>
-        </button>
-
-        <!-- Backup & Settings Trigger -->
-        <button 
-          onclick="openBackupModal()" 
-          title="Backup & Configurações"
-          class="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-slate-200 border border-slate-800 transition-all text-xs">
-          <span>⚙️</span>
-        </button>
-
-        <!-- Add Service Button -->
-        <button 
-          onclick="openServiceModal()"
-          class="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-medium text-xs shadow-lg shadow-indigo-600/30 transition-all">
-          <span>+</span>
-          <span class="hidden sm:inline">Novo</span>
-        </button>
-
       </div>
     </div>
   </header>
 
   <!-- Main Cockpit Container -->
-  <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8">
+  <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8 md:pl-56">
     
     <!-- Priority Interventions Action Banner / Hero Strip (USR-58) -->
     <section id="interventions-hero-strip" aria-label="Seção Prioritária de Intervenções Humanas">

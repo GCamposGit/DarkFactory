@@ -527,6 +527,7 @@ body {
 .w-36 { width: 9rem; }
 .w-40 { width: 10rem; }
 .w-48 { width: 12rem; }
+.w-56 { width: 14rem; }
 .w-64 { width: 16rem; }
 .w-96 { width: 24rem; }
 .w-1\/2 { width: 50%; }
@@ -15756,6 +15757,8 @@ body {
   .md\:items-center { align-items: center; }
   .md\:self-auto { align-self: auto; }
   .md\:pb-0 { padding-bottom: 0px; }
+  .md\:pl-56 { padding-left: 14rem; }
+  .md\:pl-16 { padding-left: 4rem; }
 
   .md\:grid-cols-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .md\:grid-cols-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
@@ -16272,4 +16275,11 @@ body {
   .roadmap-card:hover,
   .roadmap-card:focus-within { transform: none; }
   .roadmap-list-item { transition: none; }
+}
+
+/* Sidebar Navigation (T1) */
+.sidebar-label {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
