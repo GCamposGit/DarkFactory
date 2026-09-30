@@ -17,6 +17,10 @@ Design notes:
   rate limit/usage limit/429 -> rate_limited; login/unauthorized/401/
   expired -> auth_expired; missing binary -> not_installed;
   subprocess.TimeoutExpired -> timeout; anything else -> crash.
+- Capabilities are declared, never assumed: `HARNESS_CAPABILITIES` is the
+  single table of which harness can run which mode (`read`/`write`), so the
+  router (`core.line.routing.pick`) can refuse to elect a harness that would
+  only fail the stage with `unsupported_mode`.
 """
 
 from __future__ import annotations
@@ -60,8 +64,35 @@ ErrorKind = Optional[
         # No route at all: no subscription harness is authenticated on this
         # worker and OpenRouter is unavailable for the stage.
         "no_authenticated_harness",
+        # The harness exists and is installed but does not implement the
+        # requested mode (e.g. `write` on a read-only harness). Distinct from
+        # `not_installed` so a capability gap is never mistaken for a missing
+        # binary.
+        "unsupported_mode",
     ]
 ]
+
+AgentMode = Literal["write", "read"]
+
+# Declared capabilities per harness: `write` only where the runner below really
+# implements a mode that lets the agent edit files under `req.cwd`.
+# - claude: `--permission-mode bypassPermissions` (see `build_claude_argv`).
+# - codex: `--sandbox workspace-write` or the documented bypass (`build_codex_argv`).
+# - grok / antigravity: only one-shot print/conversation calls that return text;
+#   neither has a reliable headless write mode on this host.
+# - openrouter: a plain chat-completion gateway, it cannot touch the filesystem.
+HARNESS_CAPABILITIES: dict[str, frozenset[str]] = {
+    "claude": frozenset({"read", "write"}),
+    "codex": frozenset({"read", "write"}),
+    "grok": frozenset({"read"}),
+    "antigravity": frozenset({"read"}),
+    "openrouter": frozenset({"read"}),
+}
+
+
+def supports(harness: str, mode: str) -> bool:
+    """True when `harness` declares `mode`. An unknown harness supports nothing (fail-closed)."""
+    return mode in HARNESS_CAPABILITIES.get(harness.lower().strip(), frozenset())
 
 
 class AgentRequest(BaseModel):
@@ -89,6 +120,10 @@ class AgentResult(BaseModel):
     cost_usd: Optional[float] = None
     error_kind: ErrorKind = None
     reset_at: Optional[datetime] = None
+    # Subprocess diagnostics (claude/codex/grok/antigravity). `stderr_tail` is the redacted last
+    # ~2000 characters of stderr; both stay at their defaults for non-subprocess results.
+    exit_code: Optional[int] = None
+    stderr_tail: str = ""
 
     @field_validator("text", mode="before")
     @classmethod
@@ -136,6 +171,17 @@ def _partial_output(value: Any) -> str:
     if isinstance(value, bytes):
         return value.decode("utf-8", errors="replace")
     return str(value)
+
+
+STDERR_TAIL_CHARS = 2000
+
+
+def _stderr_tail(value: Any) -> str:
+    """Redacted last `STDERR_TAIL_CHARS` characters of a stderr blob (str, bytes or None).
+
+    Redaction runs before truncation so a token straddling the cut is never left half-visible.
+    """
+    return redact_secrets(_partial_output(value)).strip()[-STDERR_TAIL_CHARS:]
 
 
 # --------------------------------------------------------------------------
@@ -305,6 +351,7 @@ def _run_claude(req: AgentRequest) -> AgentResult:
             ok=False, text=f"timed out after {req.timeout_s}s" + (f": {partial}" if partial else ""),
             harness="claude", model=req.model,
             duration_s=round(time.perf_counter() - start, 3), error_kind="timeout",
+            stderr_tail=_stderr_tail(exc.stderr),
         )
     except OSError as exc:
         return AgentResult(
@@ -314,6 +361,7 @@ def _run_claude(req: AgentRequest) -> AgentResult:
     duration = round(time.perf_counter() - start, 3)
     stdout = (proc.stdout or "").strip()
     stderr = proc.stderr or ""
+    diag: dict[str, Any] = {"exit_code": proc.returncode, "stderr_tail": _stderr_tail(stderr)}
 
     parsed: Optional[dict[str, Any]] = None
     if stdout:
@@ -335,20 +383,20 @@ def _run_claude(req: AgentRequest) -> AgentResult:
             return AgentResult(
                 ok=False, text=redact_secrets(result_text or stderr.strip()), harness="claude", model=req.model,
                 duration_s=duration, usage=usage, cost_usd=cost_usd,
-                error_kind=_classify_error(combined), reset_at=_extract_reset_at(combined),
+                error_kind=_classify_error(combined), reset_at=_extract_reset_at(combined), **diag,
             )
         return AgentResult(
             ok=True, text=result_text, harness="claude", model=req.model,
-            duration_s=duration, usage=usage, cost_usd=cost_usd,
+            duration_s=duration, usage=usage, cost_usd=cost_usd, **diag,
         )
 
     combined = f"{stdout}\n{stderr}"
     if proc.returncode == 0 and stdout:
-        return AgentResult(ok=True, text=stdout, harness="claude", model=req.model, duration_s=duration)
+        return AgentResult(ok=True, text=stdout, harness="claude", model=req.model, duration_s=duration, **diag)
     return AgentResult(
         ok=False, text=redact_secrets(stdout or stderr.strip()), harness="claude", model=req.model,
         duration_s=duration,
-        error_kind=_classify_error(combined), reset_at=_extract_reset_at(combined),
+        error_kind=_classify_error(combined), reset_at=_extract_reset_at(combined), **diag,
     )
 
 
@@ -382,10 +430,11 @@ def _run_codex(req: AgentRequest) -> AgentResult:
             errors="replace",
             **_win_kwargs(),
         )
-    except subprocess.TimeoutExpired:
+    except subprocess.TimeoutExpired as exc:
         return AgentResult(
             ok=False, text="", harness="codex", model=req.model,
             duration_s=round(time.perf_counter() - start, 3), error_kind="timeout",
+            stderr_tail=_stderr_tail(exc.stderr),
         )
     except OSError as exc:
         return AgentResult(
@@ -429,25 +478,21 @@ def _run_codex(req: AgentRequest) -> AgentResult:
 
     stderr = proc.stderr or ""
     combined = f"{output_text}\n{stderr}"
+    diag: dict[str, Any] = {"exit_code": proc.returncode, "stderr_tail": _stderr_tail(stderr)}
     if proc.returncode != 0:
         return AgentResult(
             ok=False, text=output_text, harness="codex", model=req.model, duration_s=duration,
             usage=usage, cost_usd=cost_usd,
-            error_kind=_classify_error(combined), reset_at=_extract_reset_at(combined),
+            error_kind=_classify_error(combined), reset_at=_extract_reset_at(combined), **diag,
         )
     return AgentResult(
         ok=True, text=output_text, harness="codex", model=req.model, duration_s=duration,
-        usage=usage, cost_usd=cost_usd,
+        usage=usage, cost_usd=cost_usd, **diag,
     )
 
 
 def _run_grok(req: AgentRequest) -> AgentResult:
-    if req.mode == "write":
-        return AgentResult(
-            ok=False,
-            text="Grok Build has no reliable headless write mode on this host; only 'read' is supported.",
-            harness="grok", model=req.model, duration_s=0.0, error_kind="not_installed",
-        )
+    # Read-only: `run_agent` refuses `write` via HARNESS_CAPABILITIES before reaching this runner.
     executable = find_grok_binary()
     if not executable:
         return AgentResult(
@@ -463,10 +508,11 @@ def _run_grok(req: AgentRequest) -> AgentResult:
             argv, capture_output=True, text=True, cwd=str(req.cwd), timeout=req.timeout_s,
             encoding="utf-8", errors="replace", **_win_kwargs(),
         )
-    except subprocess.TimeoutExpired:
+    except subprocess.TimeoutExpired as exc:
         return AgentResult(
             ok=False, text="", harness="grok", model=req.model,
             duration_s=round(time.perf_counter() - start, 3), error_kind="timeout",
+            stderr_tail=_stderr_tail(exc.stderr),
         )
     except OSError as exc:
         return AgentResult(
@@ -476,22 +522,18 @@ def _run_grok(req: AgentRequest) -> AgentResult:
     duration = round(time.perf_counter() - start, 3)
     output_text = (proc.stdout or "").strip()
     stderr = proc.stderr or ""
+    diag: dict[str, Any] = {"exit_code": proc.returncode, "stderr_tail": _stderr_tail(stderr)}
     if proc.returncode != 0 and not output_text:
         combined = f"{output_text}\n{stderr}"
         return AgentResult(
             ok=False, text="", harness="grok", model=req.model, duration_s=duration,
-            error_kind=_classify_error(combined), reset_at=_extract_reset_at(combined),
+            error_kind=_classify_error(combined), reset_at=_extract_reset_at(combined), **diag,
         )
-    return AgentResult(ok=True, text=output_text, harness="grok", model=req.model, duration_s=duration)
+    return AgentResult(ok=True, text=output_text, harness="grok", model=req.model, duration_s=duration, **diag)
 
 
 def _run_antigravity(req: AgentRequest) -> AgentResult:
-    if req.mode == "write":
-        return AgentResult(
-            ok=False,
-            text="Antigravity has no reliable headless write mode on this host; only 'read' is supported.",
-            harness="antigravity", model=req.model, duration_s=0.0, error_kind="not_installed",
-        )
+    # Read-only: `run_agent` refuses `write` via HARNESS_CAPABILITIES before reaching this runner.
     executable = find_antigravity_binary()
     if not executable:
         return AgentResult(
@@ -506,10 +548,11 @@ def _run_antigravity(req: AgentRequest) -> AgentResult:
             argv, capture_output=True, text=True, cwd=str(req.cwd), timeout=req.timeout_s,
             encoding="utf-8", errors="replace", **_win_kwargs(),
         )
-    except subprocess.TimeoutExpired:
+    except subprocess.TimeoutExpired as exc:
         return AgentResult(
             ok=False, text="", harness="antigravity", model=req.model,
             duration_s=round(time.perf_counter() - start, 3), error_kind="timeout",
+            stderr_tail=_stderr_tail(exc.stderr),
         )
     except OSError as exc:
         return AgentResult(
@@ -519,13 +562,14 @@ def _run_antigravity(req: AgentRequest) -> AgentResult:
     duration = round(time.perf_counter() - start, 3)
     output_text = (proc.stdout or "").strip()
     stderr = proc.stderr or ""
+    diag: dict[str, Any] = {"exit_code": proc.returncode, "stderr_tail": _stderr_tail(stderr)}
     if proc.returncode != 0 and not output_text:
         combined = f"{output_text}\n{stderr}"
         return AgentResult(
             ok=False, text="", harness="antigravity", model=tier, duration_s=duration,
-            error_kind=_classify_error(combined), reset_at=_extract_reset_at(combined),
+            error_kind=_classify_error(combined), reset_at=_extract_reset_at(combined), **diag,
         )
-    return AgentResult(ok=True, text=output_text, harness="antigravity", model=tier, duration_s=duration)
+    return AgentResult(ok=True, text=output_text, harness="antigravity", model=tier, duration_s=duration, **diag)
 
 
 _DEFAULT_OPENROUTER_MODEL = "deepseek/deepseek-v4.1-flash"
@@ -538,12 +582,7 @@ def _openrouter_reasoning_enabled() -> bool:
 
 
 def _run_openrouter(req: AgentRequest) -> AgentResult:
-    if req.mode != "read":
-        return AgentResult(
-            ok=False,
-            text="OpenRouter agent_cli support is read-only (review/grill/distill stages only).",
-            harness="openrouter", model=req.model, duration_s=0.0, error_kind="crash",
-        )
+    # Read-only: `run_agent` refuses `write` via HARNESS_CAPABILITIES before reaching this runner.
     from core.execution.providers import OpenRouterModelProvider  # local import: keeps agent_cli import-light
 
     model = req.model or os.environ.get("DARKFAC_OPENROUTER_CHEAP_MODEL") or _DEFAULT_OPENROUTER_MODEL
@@ -596,6 +635,17 @@ _HARNESS_RUNNERS: dict[str, Callable[[AgentRequest], AgentResult]] = {
 }
 
 
+def _unsupported_mode_result(harness: str, req: AgentRequest) -> AgentResult:
+    """Refusal for a mode the harness does not declare; no binary is looked up or spawned."""
+    declared = sorted(HARNESS_CAPABILITIES.get(harness, frozenset()))
+    detail = "read-only" if declared == ["read"] else f"capabilities: {', '.join(declared) or 'none'}"
+    return AgentResult(
+        ok=False,
+        text=f"Harness '{harness}' does not support '{req.mode}' mode ({detail}).",
+        harness=harness, model=req.model, duration_s=0.0, error_kind="unsupported_mode",
+    )
+
+
 def run_agent(req: AgentRequest) -> AgentResult:
     """Run a single agent-CLI invocation and return a normalized result."""
     harness = req.harness.lower().strip()
@@ -606,6 +656,8 @@ def run_agent(req: AgentRequest) -> AgentResult:
             text=f"Unsupported harness '{req.harness}'. Supported: {', '.join(sorted(_HARNESS_RUNNERS))}",
             harness=req.harness, model=req.model, duration_s=0.0, error_kind="not_installed",
         )
+    if not supports(harness, req.mode):
+        return _unsupported_mode_result(harness, req)
     res = runner(req)
     # Read mode exists to *return text* (grill/planning/review answers), so an
     # "ok" result with none is a failure to retry, not a success to parse. Write

@@ -15,7 +15,7 @@
       "openrouter_model": "deepseek/deepseek-v4.1-flash"
     },
     "development": {
-      "cascade": [["antigravity", null], ["claude", "sonnet"], ["codex", null], ["grok", null]],
+      "cascade": [["claude", "sonnet"], ["codex", null]],
       "openrouter_ok": true,
       "openrouter_model": "deepseek/deepseek-v4.1-flash"
     },

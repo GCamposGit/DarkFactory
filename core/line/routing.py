@@ -6,6 +6,10 @@ and fail-closed under critical pressure" policy.
 in cooldown, forbidden models, unknown/stale quota, or remaining <= critical threshold 15%),
 and prioritizes eligible harnesses via Dynamic Headroom (highest remaining quota first)
 or specialized intelligence tiers.
+
+Capabilities are declared, never assumed (USR-67): a stage has a mode (`STAGE_MODES`: write for
+development/integration, read otherwise) and `pick()` only elects harnesses that declare it in
+`core.line.agent_cli.HARNESS_CAPABILITIES`, before ranking by headroom.
 """
 
 from __future__ import annotations
@@ -19,7 +23,7 @@ from typing import Any, Callable, Iterable, Literal, Optional, Union
 
 from pydantic import BaseModel, Field
 
-from core.line.agent_cli import AgentResult, _DEFAULT_OPENROUTER_MODEL
+from core.line.agent_cli import AgentResult, _DEFAULT_OPENROUTER_MODEL, supports
 
 logger = logging.getLogger(__name__)
 
@@ -46,6 +50,19 @@ _HARNESS_TO_PROVIDER: dict[str, str] = {
     "grok": "xai",
     "antigravity": "google",
 }
+
+
+# Mode each stage needs from its agent. Stages not listed are read-only (text in, text out).
+STAGE_MODES: dict[str, str] = {
+    "development": "write",
+    "integration": "write",
+}
+_DEFAULT_STAGE_MODE = "read"
+
+
+def stage_mode(stage: str) -> str:
+    """`write` when the stage's agent edits files under the worktree, else `read`."""
+    return STAGE_MODES.get(stage, _DEFAULT_STAGE_MODE)
 
 
 class StageRoute(BaseModel):
@@ -117,7 +134,7 @@ def _default_routing_config() -> RoutingConfig:
                 openrouter_model=cheap_model,
             ),
             "development": StageRoute(
-                cascade=[("antigravity", None), ("claude", "sonnet"), ("codex", None), ("grok", None)],
+                cascade=[("claude", "sonnet"), ("codex", None)],
                 openrouter_ok=True,
                 openrouter_model=cheap_model,
             ),
@@ -137,15 +154,35 @@ def _default_routing_config() -> RoutingConfig:
     )
 
 
+def validate_routing_config(config: RoutingConfig) -> list[str]:
+    """Violations of the capability contract: a cascade candidate that cannot run its stage's mode.
+
+    Empty list means consistent. Only subscription harnesses are checked; the OpenRouter fallback is
+    structurally read-only and `pick()` never offers it to a write stage.
+    """
+    violations: list[str] = []
+    for stage, stage_cfg in config.stages.items():
+        mode = stage_mode(stage)
+        for harness, model in _resolve_cascade(stage_cfg, None):
+            if not supports(harness, mode):
+                label = f"{harness}:{model}" if model else harness
+                violations.append(f"stage '{stage}' needs '{mode}' but candidate '{label}' does not declare it")
+    return violations
+
+
 def load_routing_config(path: Optional[Path] = None) -> RoutingConfig:
     """Load the routing config from JSON, falling back to v0 defaults when absent/invalid."""
     target = path or default_config_path()
     if target.is_file():
         try:
             raw = json.loads(target.read_text(encoding="utf-8"))
-            return RoutingConfig.model_validate(raw)
+            config = RoutingConfig.model_validate(raw)
         except Exception as exc:  # malformed file, wrong schema, etc.
             logger.warning("Failed to load routing config %s (%s); using v0 defaults", target, exc)
+        else:
+            for violation in validate_routing_config(config):
+                logger.warning("Routing config %s: %s (pick() will skip it)", target, violation)
+            return config
     return _default_routing_config()
 
 
@@ -340,10 +377,15 @@ def pick(
     reserve_quota: bool = False,
     ticket_id: Optional[str] = None,
     openrouter_balance_lookup: Optional[Callable[[], Optional[float]]] = None,
+    mode: Optional[str] = None,
 ) -> Optional[tuple[str, Optional[str]]]:
     """Pick a (harness, model) for `stage`, or None if nothing is eligible right now.
 
+    `mode` is the agent mode the caller will request (`read`/`write`); when None it is derived from
+    the stage (`STAGE_MODES`).
+
     Enforces:
+    0. Filter out harnesses that do not declare `mode` (before any headroom ranking).
     1. Filter out accounts in cooldown, missing from host_caps, forbidden models,
        and accounts with unknown or CRITICAL quota (<= 15.0%, fail-closed).
     2. Dynamic Headroom prioritization:
@@ -351,13 +393,14 @@ def pick(
          falling back to highest headroom.
        - Low complexity: prefers GPT Luna xhigh / Gemini Flash if eligible.
        - Medium complexity / default: sorts strictly by remaining headroom descending.
-    3. Fallback to OpenRouter only when stage allows it or all cascade accounts are
-       exhausted, provided OpenRouter has confirmed USD credit and spent_usd < cap.
+    3. Fallback to OpenRouter only for `read` mode, when stage allows it or all cascade accounts
+       are exhausted, provided OpenRouter has confirmed USD credit and spent_usd < cap.
     """
     cfg = config or load_routing_config()
     stage_cfg = cfg.stages.get(stage)
     if stage_cfg is None:
         return None
+    required_mode = mode or stage_mode(stage)
 
     caps = set(host_caps)
     excluded_harnesses, excluded_pairs = _split_exclude(exclude)
@@ -377,6 +420,11 @@ def pick(
         if harness in excluded_harnesses or (harness, model) in excluded_pairs:
             continue
         if f"harness:{harness}" not in caps:
+            continue
+        if not supports(harness, required_mode):
+            logger.info(
+                "Skipping harness %s for stage %s (does not declare '%s' mode)", harness, stage, required_mode
+            )
             continue
         if model and model.lower().strip() in forbidden_models:
             logger.info("Skipping model %s for harness %s (forbidden autonomous model)", model, harness)
@@ -440,7 +488,8 @@ def pick(
 
     all_exhausted = bool(evaluated) and all(cooling or is_critical for _, _, cooling, is_critical, _ in evaluated)
     if (
-        stage_cfg.openrouter_model
+        required_mode == "read"
+        and stage_cfg.openrouter_model
         and stage_cfg.openrouter_model.lower().strip() not in forbidden_models
         and (stage_cfg.openrouter_ok or all_exhausted)
         and spent_usd < cfg.run_caps.openrouter_usd

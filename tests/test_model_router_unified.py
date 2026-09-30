@@ -53,7 +53,11 @@ def _mock_snapshot(path: Path, provider_id: str, remaining_percent: float, age_s
 
 
 def test_dynamic_headroom_chooses_antigravity_with_real_critical_quotas(tmp_path: Path):
-    """Codex at 2%, Claude at 3%, Grok at 2.8%, Antigravity at 61.5% -> Antigravity wins."""
+    """Codex at 2%, Claude at 3%, Grok at 2.8%, Antigravity at 61.5% -> Antigravity wins a READ stage.
+
+    Antigravity has no write mode, so the same quotas leave `development` with no route (fail-closed)
+    instead of electing a harness that can only fail the stage.
+    """
     cfg = load_routing_config(default_config_path())
 
     def quota_lookup(provider_id: str) -> float | None:
@@ -65,15 +69,18 @@ def test_dynamic_headroom_chooses_antigravity_with_real_critical_quotas(tmp_path
         }
         return table.get(provider_id)
 
-    choice = pick(
-        "development",
-        ["harness:codex", "harness:claude", "harness:grok", "harness:antigravity"],
-        config=cfg,
-        quota_lookup=quota_lookup,
-        cooldown_path=tmp_path / "cooldowns.json",
-        complexity="medium",
+    caps = ["harness:codex", "harness:claude", "harness:grok", "harness:antigravity"]
+    read_choice = pick(
+        "grill", caps, config=cfg, quota_lookup=quota_lookup,
+        cooldown_path=tmp_path / "cooldowns.json", complexity="medium",
     )
-    assert choice == ("antigravity", None)
+    assert read_choice == ("antigravity", None)
+
+    write_choice = pick(
+        "development", caps, config=cfg, quota_lookup=quota_lookup,
+        cooldown_path=tmp_path / "cooldowns.json", complexity="medium",
+    )
+    assert write_choice is None
 
 
 def test_stale_snapshot_triggers_fail_closed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
