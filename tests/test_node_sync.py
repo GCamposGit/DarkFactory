@@ -86,13 +86,13 @@ def test_desktop_without_restart_safe_is_not_touched() -> None:
     class LegacyDesktop(FakeHttp):
         def __call__(self, method: str, url: str, payload: dict[str, Any] | None, token: str | None) -> dict[str, Any]:
             if method == "GET" and ":8080" in url:
-                return {"git_sha": OLD}
+                return {"status": "ok"}
             return super().__call__(method, url, payload, token)
 
     http = LegacyDesktop(desktop=OLD)
     report = mod.sync(root=Path("."), git=FakeGit(), http=http)
     assert report.nodes[1].state == "divergent"
-    assert "restart_safe=true" in (report.nodes[1].reason or "")
+    assert report.nodes[1].reason  # legacy worker is reported with a reason, never silently skipped
     assert not any(method == "POST" and ":8080" in url for method, url in http.calls)
 
 
@@ -238,3 +238,18 @@ def test_hub_health_exposes_git_sha_from_env(monkeypatch: pytest.MonkeyPatch) ->
 def test_live_nodes_match_origin_main() -> None:
     report = mod.verify()
     assert report.ok, report.model_dump_json()
+
+
+def test_desktop_with_git_sha_but_no_restart_safe_flag_is_updated() -> None:
+    """A worker exposing git_sha (USR-65+) already has the safe restart (USR-64), so it is updated."""
+    class PreFlagDesktop(FakeHttp):
+        def __call__(self, method: str, url: str, payload: dict[str, Any] | None, token: str | None) -> dict[str, Any]:
+            result = super().__call__(method, url, payload, token)
+            if method == "GET" and ":8080" in url:
+                result = {k: v for k, v in result.items() if k != "restart_safe"}
+            return result
+
+    http = PreFlagDesktop(desktop=OLD)
+    report = mod.sync(root=Path("."), git=FakeGit(), http=http)
+    assert ("POST", f"{mod.DESKTOP_URL}/system/restart") in http.calls
+    assert report.nodes[1].state == "converged"
