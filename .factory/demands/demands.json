@@ -1559,5 +1559,34 @@
     "dependencies": [],
     "created_at": "2026-09-30T17:27:32.659425Z",
     "updated_at": "2026-09-30T17:27:32.659425Z"
+  },
+  {
+    "id": "USR-73",
+    "project_id": "darkfac",
+    "title": "Tickets de deploy so podem ser concluidos com prova ao vivo de convergencia",
+    "origin": "user",
+    "status": "planned",
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "O USR-66 (injetar DARKFAC_GIT_SHA no DarkHub) foi marcado completed pelo portao de testes com fakes, mas em producao o /health do hub continuou com git_sha null e a VPS nunca convergiu. O portao nao comprova comportamento em producao.",
+    "core_journey": [
+      "O USR-66 (injetar DARKFAC_GIT_SHA no DarkHub) foi marcado completed pelo portao de testes com fakes, mas em producao o /health do hub continuou com git_sha null e a VPS nunca convergiu. O portao nao comprova comportamento em producao."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Tickets de infra/deploy declaram criterio de aceite 'live' e complete_ticket so marca completed apos o pos-deploy executar node_sync verify com todos os nos converged",
+      "Se a prova falhar, o ticket volta para planned com evidencia anexada e o defeito vira ticket automaticamente",
+      "Testes com fakes cobrindo completed condicionado a convergencia"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-09-30T17:27:55.666113Z",
+    "updated_at": "2026-09-30T17:27:55.666113Z"
   }
 ]
