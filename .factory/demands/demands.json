@@ -1850,5 +1850,34 @@
     "dependencies": [],
     "created_at": "2026-09-30T19:06:31.079479Z",
     "updated_at": "2026-09-30T19:06:31.079479Z"
+  },
+  {
+    "id": "USR-83",
+    "project_id": "darkfac",
+    "title": "Flaky: test_runtime_spike_scenarios R12 STORE_UNAVAILABLE no worker de testes",
+    "origin": "user",
+    "status": "planned",
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "No gate oficial (Desktop test worker, xdist, pre-merge de PR #72) tests/test_runtime_spike_scenarios.py::test_cli_run_verify_and_summarize_native_core falhou uma vez com 'Scenario R12 on native_sqlite: status=fail, error=STORE_UNAVAILABLE' (duracao do teste ~16s sob carga) e passou na reexecucao sem mudancas. Suspeita: timing/lock de SQLite sob paralelismo ou timeout curto no cenario R12 do runtime spike.",
+    "core_journey": [
+      "No gate oficial (Desktop test worker, xdist, pre-merge de PR #72) tests/test_runtime_spike_scenarios.py::test_cli_run_verify_and_summarize_native_core falhou uma vez com 'Scenario R12 on native_sqlite: status=fail, error=STORE_UNAVAILABLE' (duracao do teste ~16s sob carga) e passou na reexecucao sem mudancas. Suspeita: timing/lock de SQLite sob paralelismo ou timeout curto no cenario R12 do runtime spike."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Reproduzir/identificar a causa do STORE_UNAVAILABLE intermitente no cenario R12 (native_sqlite)",
+      "Teste deterministico (sem depender de timing/carga) ou retry/timeout documentado no cenario",
+      "10 execucoes consecutivas do teste sob xdist -n auto sem falha"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-09-30T20:20:52.619254Z",
+    "updated_at": "2026-09-30T20:20:52.619254Z"
   }
 ]
