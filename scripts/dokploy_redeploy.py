@@ -683,6 +683,7 @@ def main(
         print("Not waiting (--no-wait): triggered deploy(s) may still be in progress on Dokploy.", file=out)
         return EXIT_OK if all_ok else EXIT_DEPLOY_FAILED
 
+    completed: List[ServiceWaitResult] = []
     for svc in triggered:
         result = wait_for_service(
             transport,
@@ -693,6 +694,7 @@ def main(
             sleep_fn=sleep_fn,
             clock_fn=clock_fn,
         )
+        completed.append(result)
         # Git-sourced deployments are titled with the full commit message;
         # compare and print only its subject line.
         title = result.deployment.title.splitlines()[0] if result.deployment and result.deployment.title else "(unknown)"
@@ -709,6 +711,32 @@ def main(
         )
         if result.outcome != WaitOutcome.DONE:
             all_ok = False
+
+    # A completed Dokploy job is not evidence that all running nodes use main.
+    # Check the three execution nodes after the deploy settles.
+    if str(REPO_ROOT) not in sys.path:
+        sys.path.insert(0, str(REPO_ROOT))
+    from core.infra.node_sync import verify as verify_nodes
+
+    sync_report = verify_nodes()
+    for node in sync_report.nodes:
+        if node.state != "converged":
+            all_ok = False
+            print(
+                f"[NODE SYNC] {node.name}: {node.state} "
+                f"sha={node.git_sha or '(unknown)'} expected={sync_report.expected_sha or '(unknown)'} "
+                f"reason={node.reason or '(none)'}",
+                file=err,
+            )
+    if local_subject:
+        for svc in triggered:
+            # Every selected service must report the same source revision.
+            # Dokploy's deploy title contains the source commit subject.
+            # This is weaker than a runtime SHA, so a missing title fails closed.
+            result = next((r for r in completed if r.service.name == svc.name), None)
+            if result is None or result.deployment is None or result.deployment.title.splitlines()[0].strip() != local_subject.strip():
+                all_ok = False
+                print(f"[NODE SYNC] VPS service {svc.name}: does not match local origin/main", file=err)
 
     if all_ok and not getattr(args, "skip_backup", False):
         try:

@@ -22,6 +22,25 @@ import pytest
 
 from scripts import dokploy_redeploy as mod
 
+
+@pytest.fixture(autouse=True)
+def _node_verification_fake(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep Dokploy transport tests isolated from real node health probes."""
+    from core.infra import node_sync
+
+    monkeypatch.setattr(mod, "get_local_origin_main_subject", lambda: None)
+    monkeypatch.setattr(
+        node_sync,
+        "verify",
+        lambda: node_sync.SyncReport(
+            expected_sha="a" * 40,
+            nodes=[
+                node_sync.NodeStatus(name=name, state="converged", git_sha="a" * 40)
+                for name in ("Notebook", "Desktop", "VPS")
+            ],
+        ),
+    )
+
 SENTINEL_KEY = "sk-sentinel-super-secret-dokploy-key-do-not-leak-12345"
 
 
@@ -991,3 +1010,37 @@ def test_main_skips_autonomous_post_deploy_backup_with_flag() -> None:
     assert backup_calls == []
     assert "[AUTONOMOUS POST-DEPLOY BACKUP]" not in out.getvalue()
 
+
+def test_main_invokes_node_verification_and_fails_on_divergence(monkeypatch: pytest.MonkeyPatch) -> None:
+    from core.infra import node_sync
+
+    calls: list[str] = []
+
+    def divergent() -> node_sync.SyncReport:
+        calls.append("verify")
+        return node_sync.SyncReport(
+            expected_sha="a" * 40,
+            nodes=[
+                node_sync.NodeStatus(name="Notebook", state="converged", git_sha="a" * 40),
+                node_sync.NodeStatus(name="Desktop", state="divergent", git_sha="b" * 40),
+                node_sync.NodeStatus(name="VPS", state="converged", git_sha="a" * 40),
+            ],
+        )
+
+    monkeypatch.setattr(node_sync, "verify", divergent)
+    transport = _make_transport_with_full_project()
+    _program_status(transport, "/api/compose.one?composeId=compose_cloud", [
+        [{"deploymentId": "old", "status": "done", "title": "old", "createdAt": "2026-09-12T09:00:00Z"}],
+        [{"deploymentId": "new", "status": "done", "title": "new", "createdAt": "2026-09-12T09:10:00Z"}],
+    ])
+    out, err = io.StringIO(), io.StringIO()
+    assert mod.main(
+        ["--only", "darkfac-cloud", "--skip-backup"],
+        env={"DOKPLOY_API_URL": "https://dokploy.ggcampos.com", "DOKPLOY_API_KEY": SENTINEL_KEY},
+        registry_reader=_no_registry,
+        transport_factory=lambda url, key: transport,
+        stdout=out,
+        stderr=err,
+    ) == mod.EXIT_DEPLOY_FAILED
+    assert calls == ["verify"]
+    assert "Desktop: divergent" in err.getvalue()

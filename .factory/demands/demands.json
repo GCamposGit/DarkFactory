@@ -1322,5 +1322,37 @@
     "dependencies": [],
     "created_at": "2026-09-30T08:33:47.808428Z",
     "updated_at": "2026-09-30T11:55:21.864200Z"
+  },
+  {
+    "id": "USR-65",
+    "project_id": "darkfac",
+    "title": "Sincronia verificada dos 3 nos (Notebook, Desktop, VPS) apos cada entrega",
+    "origin": "user",
+    "status": "planned",
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "Apos um merge em main, so a VPS (Dokploy) e redeployada. O Desktop (worker de testes 8080, Tailscale 100.78.181.90) e o Notebook (checkout local) podem ficar com codigo antigo sem ninguem perceber (ex.: /metrics/hardware retornou 404 no Desktop desatualizado, e a fabrica so descobriu por acaso). Todo desenvolvimento entregue precisa terminar com os 3 nos rodando o mesmo SHA de origin/main, comprovado por teste, sem intervencao humana.",
+    "core_journey": [
+      "Apos um merge em main, so a VPS (Dokploy) e redeployada. O Desktop (worker de testes 8080, Tailscale 100.78.181.90) e o Notebook (checkout local) podem ficar com codigo antigo sem ninguem perceber (ex.: /metrics/hardware retornou 404 no Desktop desatualizado, e a fabrica so descobriu por acaso). Todo desenvolvimento entregue precisa terminar com os 3 nos rodando o mesmo SHA de origin/main, comprovado por teste, sem intervencao humana."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Novo modulo core/infra/node_sync.py com API tipada (pydantic v2) que obtem o SHA em execucao de cada no: Notebook (git rev-parse do checkout principal vs origin/main), Desktop (GET /health do worker 8080, que passa a expor o campo git_sha do checkout em uso) e VPS (versao/sha do servico darkfac-cloud ou darkhub via endpoint de saude/deploy)",
+      "Auto-sincronizacao: Notebook via git fetch + merge --ff-only apenas se a arvore estiver limpa (se suja, reporta divergencia sem tocar); Desktop via POST /system/update seguido de /system/restart e espera do /health com o SHA esperado (retry com timeout); VPS via o redeploy Dokploy ja existente",
+      "scripts/dokploy_redeploy.py executa a verificacao ao final e termina com codigo diferente de zero listando cada no divergente, inclusive Darkhub/n8n/canary que hoje reportam 'does not match local origin/main' sem falhar",
+      "CLI headless python -m core.infra.node_sync verify|sync com saida JSON e exit code; no offline aparece como offline com ultimo contato, nunca como sucesso",
+      "Testes unitarios com fakes para os 3 nos: todos convergem; Desktop defasado -> update+restart -> converge; Desktop nao volta no timeout -> falha; Notebook com arvore suja -> reporta sem tocar; teste garantindo que dokploy_redeploy invoca a verificacao. Mais um teste live opcional (marker/env DARKFAC_LIVE_NODES=1, fora do portao rapido) que compara /health real dos nos com origin/main",
+      "Nao editar arquivos protegidos (AGENTS.md, FACTORY_RULES.md, guard.py, core/harness/*, .github/workflows). Portao python core/harness/runner.py --quick verde"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-09-30T11:58:26.976681Z",
+    "updated_at": "2026-09-30T11:58:26.976681Z"
   }
 ]
