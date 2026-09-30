@@ -2595,5 +2595,35 @@
     "dependencies": [],
     "created_at": "2026-09-30T21:47:11.193999Z",
     "updated_at": "2026-09-30T21:47:11.193999Z"
+  },
+  {
+    "id": "USR-99",
+    "project_id": "darkfac",
+    "title": "Limitar retries consecutivos de erro de agente no stage independent_review",
+    "origin": "user",
+    "status": "planned",
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "Em producao, run-f0c98a90cf0f ficou em loop em independent_review com review_agent_empty_output (novo job a cada ~30s, iteracoes 0..10+) porque stage_review.py (linha ~300) mapeia qualquer falha do agente de review para outcome retry sem teto. Evidencia: modelo OpenRouter deepseek-v4.1-flash gastava todo o max_tokens em reasoning (corrigido no PR #77), mas qualquer falha persistente de agente reproduz o loop infinito.",
+    "core_journey": [
+      "Em producao, run-f0c98a90cf0f ficou em loop em independent_review com review_agent_empty_output (novo job a cada ~30s, iteracoes 0..10+) porque stage_review.py (linha ~300) mapeia qualquer falha do agente de review para outcome retry sem teto. Evidencia: modelo OpenRouter deepseek-v4.1-flash gastava todo o max_tokens em reasoning (corrigido no PR #77), mas qualquer falha persistente de agente reproduz o loop infinito."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Contador de falhas consecutivas de agente (review_agent_*) por rodada de review, persistido no review state e iniciado em 0 (nao derivado do numero de iteracao do job)",
+      "Apos 5 retries consecutivos de erro de agente na mesma rodada, stage retorna outcome failed com cause review_agent_exhausted",
+      "Sucesso do agente ou mudanca de rodada zera o contador",
+      "Testes cobrindo o teto e o reset, sem rede"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-09-30T21:53:25.572432Z",
+    "updated_at": "2026-09-30T21:53:25.572432Z"
   }
 ]
