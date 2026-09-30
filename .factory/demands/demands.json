@@ -1360,7 +1360,7 @@
     "project_id": "darkfac",
     "title": "VPS: injetar DARKFAC_GIT_SHA no deploy do DarkHub para comprovar a versao em execucao",
     "origin": "user",
-    "status": "planned",
+    "status": "completed",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -1383,6 +1383,6 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-09-30T12:36:41.774475Z",
-    "updated_at": "2026-09-30T12:36:41.774475Z"
+    "updated_at": "2026-09-30T12:57:17.697038Z"
   }
 ]
