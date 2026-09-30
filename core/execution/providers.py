@@ -407,6 +407,7 @@ class OpenRouterModelProvider:
         unknown_cost_policy: UnknownCostPolicy = UnknownCostPolicy.REJECT,
         ticket_id: str | None = None,
         execution_mode: str | None = None,
+        reasoning: dict[str, Any] | None = None,
         **kwargs: Any,
     ) -> ProviderResponse:
         key = self.api_key or get_openrouter_api_key()
@@ -424,6 +425,9 @@ class OpenRouterModelProvider:
             "temperature": temperature,
             "max_tokens": max_tokens or 1024,
         }
+        if reasoning is not None:
+            # OpenRouter unified reasoning control, e.g. {"enabled": False}.
+            payload["reasoning"] = reasoning
 
         body = json.dumps(payload).encode("utf-8")
         req = urllib.request.Request(

@@ -529,6 +529,12 @@ def _run_antigravity(req: AgentRequest) -> AgentResult:
 
 
 _DEFAULT_OPENROUTER_MODEL = "deepseek/deepseek-v4.1-flash"
+_OPENROUTER_MAX_TOKENS = 4096
+
+
+def _openrouter_reasoning_enabled() -> bool:
+    """Reasoning is OFF by default; DARKFAC_OPENROUTER_REASONING=on|true|1 re-enables it."""
+    return os.environ.get("DARKFAC_OPENROUTER_REASONING", "").strip().lower() in {"on", "true", "1"}
 
 
 def _run_openrouter(req: AgentRequest) -> AgentResult:
@@ -544,9 +550,16 @@ def _run_openrouter(req: AgentRequest) -> AgentResult:
     provider = OpenRouterModelProvider()
     start = time.perf_counter()
     try:
-        # 1024 (provider default) is too small for a reasoning model: it can
-        # spend the whole budget thinking and return `content: null`.
-        response = provider.generate(req.prompt, model=model, max_tokens=4096)
+        # Reasoning models (deepseek-v4.1-flash) can spend the whole completion
+        # budget thinking and return `content: null` (finish_reason=length), even
+        # at 16384 tokens. Disabling reasoning fixes it (1.5k tokens, valid JSON),
+        # so 4096 is ample; raising max_tokens does not help.
+        response = provider.generate(
+            req.prompt,
+            model=model,
+            max_tokens=_OPENROUTER_MAX_TOKENS,
+            reasoning=None if _openrouter_reasoning_enabled() else {"enabled": False},
+        )
     except Exception as exc:  # network/auth/model errors all surface here
         duration = round(time.perf_counter() - start, 3)
         message = str(exc)
@@ -561,6 +574,13 @@ def _run_openrouter(req: AgentRequest) -> AgentResult:
         "total_tokens": response.total_tokens,
     }
     cost_usd = response.measured_cost if response.is_measured else response.estimated_cost
+    if not (response.text or "").strip():
+        truncated = (response.tokens_completion or 0) >= _OPENROUTER_MAX_TOKENS
+        logger.warning(
+            "openrouter empty content: model=%s completion_tokens=%s max_tokens=%s%s",
+            model, response.tokens_completion, _OPENROUTER_MAX_TOKENS,
+            " (likely finish_reason=length: reasoning consumed the budget)" if truncated else "",
+        )
     return AgentResult(
         ok=True, text=response.text or "", harness="openrouter", model=response.model,
         duration_s=duration, usage=usage, cost_usd=cost_usd,

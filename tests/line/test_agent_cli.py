@@ -310,6 +310,44 @@ def test_openrouter_read_mode_success(tmp_path, monkeypatch):
     assert calls["prompt"] == "review this diff"
 
 
+def _capture_openrouter(monkeypatch):
+    calls = {}
+
+    class _FakeResponse:
+        text = "ok"
+        model = "m"
+        tokens_prompt = tokens_completion = total_tokens = 1
+        measured_cost = estimated_cost = 0.0
+        is_measured = True
+
+    class _FakeProvider:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def generate(self, prompt, *, model, **kwargs):
+            calls.update(kwargs)
+            return _FakeResponse()
+
+    monkeypatch.setattr("core.execution.providers.OpenRouterModelProvider", _FakeProvider)
+    return calls
+
+
+def test_openrouter_disables_reasoning_by_default(tmp_path, monkeypatch):
+    monkeypatch.delenv("DARKFAC_OPENROUTER_REASONING", raising=False)
+    calls = _capture_openrouter(monkeypatch)
+    run_agent(AgentRequest(prompt="p", cwd=tmp_path, mode="read", harness="openrouter"))
+    assert calls["reasoning"] == {"enabled": False}
+    assert calls["max_tokens"] == 4096
+
+
+@pytest.mark.parametrize("value", ["on", "true", "1", "ON"])
+def test_openrouter_reasoning_env_override(tmp_path, monkeypatch, value):
+    monkeypatch.setenv("DARKFAC_OPENROUTER_REASONING", value)
+    calls = _capture_openrouter(monkeypatch)
+    run_agent(AgentRequest(prompt="p", cwd=tmp_path, mode="read", harness="openrouter"))
+    assert calls["reasoning"] is None
+
+
 def test_not_installed_returns_error_kind_for_unknown_harness(tmp_path):
     req = AgentRequest(prompt="do work", cwd=tmp_path, mode="read", harness="totally-unknown")
     result = run_agent(req)

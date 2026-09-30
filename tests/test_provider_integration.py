@@ -201,6 +201,28 @@ def test_openrouter_model_provider_mocked_http(tmp_path: Path, monkeypatch: pyte
     assert summary.total_calls >= 1
 
 
+def _openrouter_payload(monkeypatch: pytest.MonkeyPatch, **kwargs: Any) -> dict[str, Any]:
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-v1-mock-key")
+    fake_resp = mock.MagicMock()
+    fake_resp.read.return_value = json.dumps({
+        "model": "m",
+        "choices": [{"message": {"content": "x"}}],
+        "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+    }).encode("utf-8")
+    fake_resp.__enter__.return_value = fake_resp
+    with mock.patch("urllib.request.urlopen", return_value=fake_resp) as uo:
+        OpenRouterModelProvider().generate(
+            "p", model="m", unknown_cost_policy=UnknownCostPolicy.ESTIMATE, **kwargs
+        )
+    return json.loads(uo.call_args[0][0].data.decode("utf-8"))
+
+
+def test_openrouter_payload_reasoning_only_when_passed(monkeypatch: pytest.MonkeyPatch) -> None:
+    assert "reasoning" not in _openrouter_payload(monkeypatch)
+    payload = _openrouter_payload(monkeypatch, reasoning={"enabled": False})
+    assert payload["reasoning"] == {"enabled": False}
+
+
 def test_openrouter_missing_key_raises_runtime_error(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify OpenRouterModelProvider raises RuntimeError when key is missing."""
     monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
