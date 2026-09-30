@@ -106,6 +106,30 @@ class TelegramAudio(BaseModel):
     file_name: Optional[str] = None
 
 
+class TelegramDocument(BaseModel):
+    """Document/file metadata."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    file_id: str
+    file_unique_id: str
+    file_name: Optional[str] = None
+    mime_type: Optional[str] = None
+    file_size: Optional[int] = None
+
+
+class TelegramVideoNote(BaseModel):
+    """Round video/audio note metadata."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    file_id: str
+    file_unique_id: str
+    duration: int = 0
+    length: int = 0
+    file_size: Optional[int] = None
+
+
 class TelegramMessage(BaseModel):
     """Incoming or outgoing Telegram message."""
 
@@ -118,6 +142,8 @@ class TelegramMessage(BaseModel):
     text: Optional[str] = None
     voice: Optional[TelegramVoice] = None
     audio: Optional[TelegramAudio] = None
+    document: Optional[TelegramDocument] = None
+    video_note: Optional[TelegramVideoNote] = None
     caption: Optional[str] = None
     reply_to_message: Optional[TelegramMessage] = None
 
@@ -526,7 +552,7 @@ class TelegramGateway:
             return False
         try:
             get_file_url = f"{self.config.api_base_url}/bot{self.config.bot_token}/getFile?file_id={urllib.parse.quote(file_id)}"
-            req = urllib.request.Request(get_file_url)
+            req = urllib.request.Request(get_file_url, headers={"User-Agent": "Mozilla/5.0"})
             with urllib.request.urlopen(req, timeout=15.0) as resp:
                 data = json.loads(resp.read().decode("utf-8"))
             if not data.get("ok"):
@@ -537,7 +563,7 @@ class TelegramGateway:
                 return False
 
             download_url = f"{self.config.api_base_url}/file/bot{self.config.bot_token}/{file_path}"
-            dl_req = urllib.request.Request(download_url)
+            dl_req = urllib.request.Request(download_url, headers={"User-Agent": "Mozilla/5.0"})
             dest_path.parent.mkdir(parents=True, exist_ok=True)
             with urllib.request.urlopen(dl_req, timeout=30.0) as resp, open(dest_path, "wb") as out_file:
                 while chunk := resp.read(65536):
@@ -552,12 +578,30 @@ class TelegramGateway:
         assert msg is not None
         user_id = msg.from_user.id if msg.from_user else None
         chat_id = msg.chat.id
-        raw_text = (msg.text or "").strip()
+        raw_text = (msg.text or msg.caption or "").strip()
 
-        # Handle voice and audio input (USR-60)
-        voice_obj = msg.voice or msg.audio
+        # Handle voice and audio input (USR-60): support voice, audio, video_note, and audio documents
+        voice_obj = msg.voice or msg.audio or msg.video_note
+        if not voice_obj and msg.document:
+            mime = (msg.document.mime_type or "").lower()
+            fname = (msg.document.file_name or "").lower()
+            if (
+                mime.startswith("audio/")
+                or mime.startswith("video/")
+                or mime in ("application/ogg", "application/octet-stream")
+                or any(fname.endswith(ext) for ext in (".ogg", ".oga", ".opus", ".mp3", ".wav", ".m4a", ".aac", ".flac", ".mp4", ".weba"))
+            ):
+                voice_obj = msg.document
+
         if not raw_text and voice_obj:
-            tmp_ext = ".ogg" if msg.voice else Path(getattr(msg.audio, "file_name", "") or "audio.wav").suffix or ".wav"
+            if msg.voice:
+                tmp_ext = ".ogg"
+            elif msg.video_note:
+                tmp_ext = ".mp4"
+            else:
+                fname = getattr(voice_obj, "file_name", "") or "audio.wav"
+                tmp_ext = Path(fname).suffix or ".wav"
+
             import uuid
             upload_dir = Path(os.environ.get("DARKFAC_AUDIO_TMP", Path(os.environ.get("TEMP", "/tmp")) / "darkfac_audio"))
             upload_dir.mkdir(parents=True, exist_ok=True)
@@ -627,6 +671,8 @@ class TelegramGateway:
 
         parts = raw_text.split(maxsplit=1)
         cmd_str = parts[0].lower() if parts else ""
+        if "@" in cmd_str:
+            cmd_str = cmd_str.split("@")[0]
         arg_str = parts[1] if len(parts) > 1 else ""
 
         result = TelegramDispatchResult(
@@ -642,12 +688,12 @@ class TelegramGateway:
                     "👑 <b>Dark Factory Owner Governance Bot (@darkfac_bot)</b>\n\n"
                     "Canal oficial para governança estratégica, decisões humanas e aprovações do Owner.\n\n"
                     "Comandos disponíveis:\n"
-                    "• /grill <ticket_id> <resposta> - Responder alinhamento e desbloquear WAITING_HUMAN\n"
-                    "• /approve <project_id> <digest> - Aprovar release para deploy em produção\n"
-                    "• /alerts - Consultar alertas de segurança, orçamento e cotas\n"
-                    "• /status [ticket_id] - Consultar status de pipelines e jobs\n"
-                    "• /demand <texto> - Registrar demanda prioritária do Owner\n"
-                    "• /linha <ticket_id> - Enviar um ticket existente para a linha autônoma\n\n"
+                    "• <code>/grill [ticket_id] [resposta]</code> - Responder alinhamento e desbloquear WAITING_HUMAN\n"
+                    "• <code>/approve [project_id] [digest]</code> - Aprovar release para deploy em produção\n"
+                    "• <code>/alerts</code> - Consultar alertas de segurança, orçamento e cotas\n"
+                    "• <code>/status [ticket_id]</code> - Consultar status de pipelines e jobs\n"
+                    "• <code>/demand [texto da demanda]</code> - Registrar demanda prioritária do Owner\n"
+                    "• <code>/linha [ticket_id]</code> - Enviar um ticket existente para a linha autônoma\n\n"
                     "ℹ️ <i>Demandas operacionais e backlog geral são gerenciadas no @darkfac_ops_bot</i>"
                 )
             elif self.config.role == "ops":
@@ -655,21 +701,21 @@ class TelegramGateway:
                     "⚙️ <b>Dark Factory Autonomous Orchestrator Bot (@darkfac_ops_bot)</b>\n\n"
                     "Canal oficial de operações autônomas, fila de demandas e status da fábrica.\n\n"
                     "Comandos disponíveis:\n"
-                    "• /demand <texto> - Ingerir nova demanda no backlog autônomo\n"
-                    "• /linha <ticket_id> - Enviar um ticket existente para a linha autônoma\n"
-                    "• /status [ticket_id] - Consultar status de pipelines e jobs\n"
-                    "• /alerts - Consultar telemetria operacional\n\n"
+                    "• <code>/demand [texto da demanda]</code> - Ingerir nova demanda no backlog autônomo\n"
+                    "• <code>/linha [ticket_id]</code> - Enviar um ticket existente para a linha autônoma\n"
+                    "• <code>/status [ticket_id]</code> - Consultar status de pipelines e jobs\n"
+                    "• <code>/alerts</code> - Consultar telemetria operacional\n\n"
                     "🔒 <i>Aprovações de release e governança (/grill, /approve): exclusivas no @darkfac_bot</i>"
                 )
             else:
                 result.response_text = (
-                    "👋 Dark Factory Autonomous Control Bot\n\n"
+                    "👋 <b>Dark Factory Autonomous Control Bot</b>\n\n"
                     "Available commands:\n"
-                    "• /demand <text> - Ingest a new demand into backlog\n"
-                    "• /status [ticket_id] - Check status of runs and pipelines\n"
-                    "• /alerts - Check active token quota and operational alerts\n"
-                    "• /grill <ticket_id> <choice> - Answer Grill clarification questions\n"
-                    "• /approve <project_id> <artifact_digest> - Approve production release\n"
+                    "• <code>/demand [text]</code> - Ingest a new demand into backlog\n"
+                    "• <code>/status [ticket_id]</code> - Check status of runs and pipelines\n"
+                    "• <code>/alerts</code> - Check active token quota and operational alerts\n"
+                    "• <code>/grill [ticket_id] [choice]</code> - Answer Grill clarification questions\n"
+                    "• <code>/approve [project_id] [digest]</code> - Approve production release\n"
                 )
 
         elif cmd_str == "/demand":
@@ -913,9 +959,16 @@ class TelegramGateway:
                             result.response_text = "ℹ️ Nenhum ticket registrado no momento."
                     except Exception as exc:
                         result.response_text = "ℹ️ Envie /status ou /help para ver os comandos disponíveis."
+                elif not raw_text:
+                    result.response_text = (
+                        "ℹ️ <b>Dark Factory Bot:</b> Mensagem recebida sem conteúdo textual ou de áudio reconhecido.\n\n"
+                        "Para registrar uma nova demanda, envie uma <b>mensagem de voz</b> ou digite:\n"
+                        "<code>/demand [sua ideia ou requisito]</code>\n\n"
+                        "Envie <code>/help</code> para ver a lista de comandos."
+                    )
                 else:
                     result.response_text = (
-                        f"💬 Para abrir uma nova demanda, envie uma nota de voz ou digite:\n"
+                        f"💬 Para abrir uma nova demanda com este texto, digite:\n"
                         f"<code>/demand {raw_text}</code>\n\n"
                         f"Envie /help para ver a lista de comandos."
                     )
@@ -1135,7 +1188,7 @@ class TelegramGateway:
         req = urllib.request.Request(
             url,
             data=json.dumps(payload).encode("utf-8"),
-            headers={"Content-Type": "application/json"},
+            headers={"Content-Type": "application/json", "User-Agent": "Mozilla/5.0"},
             method="POST",
         )
 
@@ -1143,6 +1196,31 @@ class TelegramGateway:
             try:
                 with urllib.request.urlopen(req, timeout=10.0) as resp:
                     return resp.status == 200
+            except urllib.error.HTTPError as http_err:
+                # If Telegram rejects HTML formatting (e.g. 400 Bad Request with unparseable entities),
+                # retry immediately in plain text without parse_mode
+                if http_err.code == 400 and payload.get("parse_mode"):
+                    logger.warning("Telegram parse_mode=%s failed: %s. Retrying without parse_mode.", payload.get("parse_mode"), http_err)
+                    payload_plain = dict(payload)
+                    payload_plain.pop("parse_mode", None)
+                    req_plain = urllib.request.Request(
+                        url,
+                        data=json.dumps(payload_plain).encode("utf-8"),
+                        headers={"Content-Type": "application/json", "User-Agent": "Mozilla/5.0"},
+                        method="POST",
+                    )
+                    try:
+                        with urllib.request.urlopen(req_plain, timeout=10.0) as resp2:
+                            return resp2.status == 200
+                    except Exception as exc2:
+                        logger.warning("Plain text retry also failed: %s", exc2)
+                if attempt < 2:
+                    import time
+                    time.sleep(0.8 * (attempt + 1))
+                    continue
+                logger.warning("Failed to send Telegram message: %s. Enqueuing to outbox.", http_err)
+                self._enqueue_outbox(chat_id, safe_text, buttons, str(http_err))
+                return False
             except Exception as exc:
                 if attempt < 2:
                     import time

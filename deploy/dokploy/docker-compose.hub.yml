@@ -10,7 +10,7 @@ services:
     build:
       context: https://${GITHUB_PAT:-}@github.com/GCamposGit/DarkFactory.git#main
       dockerfile: deploy/dokploy/Dockerfile.hub
-    image: darkhub:latest
+    image: darkhub:v2.1
     container_name: darkhub-cloud-247
     restart: unless-stopped
     environment:
@@ -40,6 +40,8 @@ services:
       - FACTORY_DIR=/app/.factory
       # Integrations (Telegram & n8n Community)
       - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}
+      - TELEGRAM_OPS_BOT_TOKEN=${TELEGRAM_OPS_BOT_TOKEN:-}
+      - TELEGRAM_OWNER_BOT_TOKEN=${TELEGRAM_OWNER_BOT_TOKEN:-}
       - TELEGRAM_AUTHORIZED_USERS=${TELEGRAM_AUTHORIZED_USERS:-}
       - TELEGRAM_AUTHORIZED_CHATS=${TELEGRAM_AUTHORIZED_CHATS:-}
       - TELEGRAM_WEBHOOK_SECRET=${TELEGRAM_WEBHOOK_SECRET:-}

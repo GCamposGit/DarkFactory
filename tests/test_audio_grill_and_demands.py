@@ -9,6 +9,7 @@ Tests:
 from __future__ import annotations
 
 import io
+import json
 from pathlib import Path
 from unittest import mock
 import httpx
@@ -379,4 +380,113 @@ def test_hub_service_telegram_webhook_dispatch_and_status(tmp_path: Path):
             call_chat_id, call_text = mock_send.call_args[0][:2]
             assert call_chat_id == 99999
             assert "DarkFac Status:" in call_text
+
+
+def test_telegram_document_audio_creates_demand(tmp_path: Path):
+    cfg = TelegramConfig(
+        bot_token="test_token",
+        authorized_user_ids=[12345],
+        authorized_chat_ids=[99999],
+    )
+
+    mock_engine = mock.MagicMock()
+    mock_engine.transcribe.return_value = TranscriptionResult(
+        text="Corrigir bug de áudio enviado como arquivo ogg ou mp3",
+        language="pt",
+        engine_used="mock_whisper",
+    )
+
+    gw = TelegramGateway(
+        config=cfg,
+        state_dir=tmp_path,
+        demand_handler=lambda text, uid: {"ticket_id": "USR-65", "title": "Áudio doc", "status": "planned"},
+        audio_engine=mock_engine,
+    )
+    gw.download_telegram_file = mock.MagicMock(return_value=True)
+
+    update_payload = {
+        "update_id": 104,
+        "message": {
+            "message_id": 504,
+            "date": 1720000000,
+            "chat": {"id": 99999, "type": "private"},
+            "from": {"id": 12345, "first_name": "Owner"},
+            "document": {
+                "file_id": "doc_audio_xyz",
+                "file_unique_id": "unique_doc_123",
+                "file_name": "voice_record.ogg",
+                "mime_type": "audio/ogg",
+                "file_size": 12345,
+            },
+        },
+    }
+
+    result = gw.process_update(update_payload)
+    assert result.authorized
+    assert result.action == TelegramActionType.DEMAND
+    assert result.target_id == "USR-65"
+    assert "Demanda por Áudio Registrada com Sucesso!" in result.response_text
+    assert "Corrigir bug de áudio enviado como arquivo ogg" in result.response_text
+
+
+def test_telegram_help_command_with_bot_username_and_valid_tags(tmp_path: Path):
+    cfg = TelegramConfig(
+        bot_token="test_token",
+        role="ops",
+        authorized_user_ids=[12345],
+        authorized_chat_ids=[99999],
+    )
+    gw = TelegramGateway(config=cfg, state_dir=tmp_path)
+
+    update_payload = {
+        "update_id": 105,
+        "message": {
+            "message_id": 505,
+            "date": 1720000000,
+            "chat": {"id": 99999, "type": "private"},
+            "from": {"id": 12345, "first_name": "Owner"},
+            "text": "/help@darkfac_ops_bot",
+        },
+    }
+
+    result = gw.process_update(update_payload)
+    assert result.authorized
+    assert result.action == TelegramActionType.START
+    assert "Dark Factory Autonomous Orchestrator Bot" in result.response_text
+    # Ensure no unsupported raw <texto> tags that break Telegram HTML parser
+    assert "<texto>" not in result.response_text
+    assert "[texto" in result.response_text or "&lt;texto" in result.response_text
+
+
+def test_telegram_send_message_html_error_falls_back_to_plain_text(tmp_path: Path):
+    import urllib.error
+    cfg = TelegramConfig(
+        bot_token="test_token",
+        authorized_user_ids=[12345],
+        authorized_chat_ids=[99999],
+    )
+    gw = TelegramGateway(config=cfg, state_dir=tmp_path)
+
+    calls = []
+
+    def mock_urlopen(req, timeout=10.0):
+        data = json.loads(req.data.decode("utf-8"))
+        calls.append(data)
+        if "parse_mode" in data:
+            # Simulate Telegram returning 400 Bad Request on HTML parse error
+            fp = io.BytesIO(b'{"ok":false,"error_code":400,"description":"Bad Request: can\'t parse entities"}')
+            raise urllib.error.HTTPError(req.full_url, 400, "Bad Request", {}, fp)
+        # Plain text succeeds
+        mock_resp = mock.MagicMock()
+        mock_resp.status = 200
+        mock_resp.__enter__.return_value.status = 200
+        return mock_resp
+
+    with mock.patch("urllib.request.urlopen", side_effect=mock_urlopen):
+        success = gw.send_message(99999, "Texto com <invalido> tag")
+        assert success is True
+        assert len(calls) == 2
+        assert "parse_mode" in calls[0]
+        assert "parse_mode" not in calls[1]
+
 

@@ -726,22 +726,65 @@ def get_available_harnesses() -> list[str]:
 
 
 
-def trigger_daemon_restart(root_path: Path) -> None:
-    """Spawns a new headless daemon process and terminates this instance."""
-    import threading
+def _wait_for_released_port(host: str, port: int, *, attempts: int = 40) -> bool:
+    """Wait briefly for the old HTTP listener to release its address."""
+    for _ in range(attempts):
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+            try:
+                probe.bind((host, port))
+            except OSError:
+                time.sleep(0.25)
+                continue
+        return True
+    return False
 
-    def _deferred():
-        time.sleep(1.0)
-        subp_kwargs: Dict[str, Any] = {}
-        if sys.platform == "win32":
-            subp_kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
-        restart_script = root_path / "scripts" / "start_onprem_worker.ps1"
-        if restart_script.exists():
-            subprocess.Popen(
-                ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(restart_script), "-Headless"],
-                cwd=str(root_path),
-                **subp_kwargs,
+
+def _restart_after_exit(root_path: Path, host: str, port: int, node_id: str) -> None:
+    """Run in a detached helper, after the previous daemon releases the port."""
+    if not _wait_for_released_port(host, port):
+        logger.error("Worker port %s remained occupied; refusing duplicate launch", port)
+        return
+
+    subp_kwargs: Dict[str, Any] = {"cwd": str(root_path), "stdin": subprocess.DEVNULL,
+                                   "stdout": subprocess.DEVNULL, "stderr": subprocess.DEVNULL}
+    if sys.platform == "win32":
+        subp_kwargs["creationflags"] = subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
+        task = subprocess.run(
+            ["powershell.exe", "-NoProfile", "-Command",
+             "if (Get-ScheduledTask -TaskName 'DarkFac Test Worker' -ErrorAction SilentlyContinue) { exit 0 } else { exit 1 }"],
+            capture_output=True, **{k: v for k, v in subp_kwargs.items() if k not in ("stdout", "stderr", "creationflags")},
+        )
+        if task.returncode == 0:
+            started = subprocess.run(
+                ["powershell.exe", "-NoProfile", "-Command", "Start-ScheduledTask -TaskName 'DarkFac Test Worker'"],
+                capture_output=True, cwd=str(root_path),
             )
+            if started.returncode == 0:
+                return
+            logger.warning("Scheduled Task start failed; relaunching worker directly")
+
+    subprocess.Popen(
+        [sys.executable, str(Path(__file__).resolve()), "--host", host, "--port", str(port),
+         "--node-id", node_id, "--project-root", str(root_path)],
+        **subp_kwargs,
+    )
+
+
+def trigger_daemon_restart(root_path: Path, host: str = DEFAULT_WORKER_HOST,
+                           port: int = DEFAULT_WORKER_PORT,
+                           node_id: str = DEFAULT_WORKER_NODE_ID) -> None:
+    """Start a detached restart helper, then terminate this daemon."""
+    def _deferred() -> None:
+        time.sleep(1.0)
+        subp_kwargs: Dict[str, Any] = {"cwd": str(root_path), "stdin": subprocess.DEVNULL,
+                                       "stdout": subprocess.DEVNULL, "stderr": subprocess.DEVNULL}
+        if sys.platform == "win32":
+            subp_kwargs["creationflags"] = subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
+        subprocess.Popen(
+            [sys.executable, str(Path(__file__).resolve()), "--restart-wait", "--project-root", str(root_path),
+             "--host", host, "--port", str(port), "--node-id", node_id],
+            **subp_kwargs,
+        )
         os._exit(0)
 
     t = threading.Thread(target=_deferred, daemon=True)
@@ -751,6 +794,8 @@ def trigger_daemon_restart(root_path: Path) -> None:
 def create_worker_app(
     project_root: Optional[Path] = None,
     node_id: str = DEFAULT_WORKER_NODE_ID,
+    host: str = DEFAULT_WORKER_HOST,
+    port: int = DEFAULT_WORKER_PORT,
 ) -> FastAPI:
     """Instantiate and configure the FastAPI application for the remote test worker."""
     root_path = project_root or REPO_ROOT
@@ -963,7 +1008,7 @@ def create_worker_app(
     def restart_daemon(request: Request) -> Dict[str, str]:
         """Spawns a new headless daemon process and terminates this instance."""
         _check_auth(request)
-        trigger_daemon_restart(root_path)
+        trigger_daemon_restart(root_path, host, port, node_id)
         return {"status": "restarting", "node_id": node_id, "message": "Worker is restarting headless in background."}
 
     def _run_codex_headless(req_data: HarnessExecutionRequest) -> HarnessExecutionResponse:
@@ -1456,11 +1501,17 @@ def main() -> int:
     parser.add_argument("--port", type=int, default=DEFAULT_WORKER_PORT, help=f"Port to listen on (default: {DEFAULT_WORKER_PORT})")
     parser.add_argument("--node-id", default=DEFAULT_WORKER_NODE_ID, help="Node ID name")
     parser.add_argument("--project-root", type=Path, default=REPO_ROOT, help="Project root directory")
+    parser.add_argument("--restart-wait", action="store_true", help=argparse.SUPPRESS)
     args = parser.parse_args()
+
+    if args.restart_wait:
+        _restart_after_exit(args.project_root, args.host, args.port, args.node_id)
+        return 0
 
     import uvicorn
 
-    worker_instance = create_worker_app(project_root=args.project_root, node_id=args.node_id)
+    worker_instance = create_worker_app(project_root=args.project_root, node_id=args.node_id,
+                                        host=args.host, port=args.port)
     print("=" * 70)
     print(f" [DarkFac Test Worker Daemon] Node: {args.node_id}")
     print(f" --> Listening on: http://{args.host}:{args.port}")

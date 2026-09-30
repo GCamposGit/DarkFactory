@@ -1292,5 +1292,35 @@
     "dependencies": [],
     "created_at": "2026-09-29T19:37:14.119561Z",
     "updated_at": "2026-09-29T20:45:14.161814Z"
+  },
+  {
+    "id": "USR-64",
+    "project_id": "darkfac",
+    "title": "Worker de testes: /system/restart deve reiniciar o daemon HTTP da porta 8080",
+    "origin": "user",
+    "status": "planned",
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "POST /system/restart em core/harness/remote_worker.py (trigger_daemon_restart) executa scripts/start_onprem_worker.ps1, que desde o HF-27-09 lanca o cloud_worker da fila de producao e nao o daemon HTTP (remote_worker.py, porta 8080). O worker de testes do Desktop morre no restart e nao volta, derrubando o worker primario de testes do portao oficial.",
+    "core_journey": [
+      "POST /system/restart em core/harness/remote_worker.py (trigger_daemon_restart) executa scripts/start_onprem_worker.ps1, que desde o HF-27-09 lanca o cloud_worker da fila de producao e nao o daemon HTTP (remote_worker.py, porta 8080). O worker de testes do Desktop morre no restart e nao volta, derrubando o worker primario de testes do portao oficial."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "trigger_daemon_restart relanca o proprio daemon HTTP (python core/harness/remote_worker.py --host 0.0.0.0 --port <porta> --node-id <node_id>, preservando host, porta e node_id da instancia atual) via processo destacado, sem depender de start_onprem_worker.ps1",
+      "Fallback: se a Scheduled Task 'DarkFac Test Worker' existir no Windows, preferir Start-ScheduledTask apos o encerramento; caso contrario usar o relancamento direto",
+      "O processo novo so e disparado apos o encerramento da instancia atual liberar a porta (espera curta com retry), sem duplicar daemons",
+      "Testes unitarios com subprocess/Popen mockado cobrindo comando montado, preservacao de host/porta/node_id e ausencia de chamada ao start_onprem_worker.ps1; portao python core/harness/runner.py --quick verde"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-09-30T08:33:47.808428Z",
+    "updated_at": "2026-09-30T08:33:47.808428Z"
   }
 ]
