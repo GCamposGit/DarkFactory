@@ -34,7 +34,7 @@ $vbsPath = Join-Path $startupFolder "DarkFacWorker.vbs"
 
 $vbsContent = @"
 Set WshShell = CreateObject("WScript.Shell")
-WshShell.Run "powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File `"$launcher`" -Headless", 0, False
+WshShell.Run "powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File ""$launcher"" -Headless", 0, False
 "@
 
 Set-Content -Path $vbsPath -Value $vbsContent -Encoding Ascii -Force

@@ -192,3 +192,11 @@ def test_install_scripts_unchanged_still_point_at_launcher():
     for name in ("install_onprem_worker_service.ps1", "install_onprem_worker_user_startup.ps1"):
         text = _read(REPO_ROOT / "scripts" / name)
         assert "start_onprem_worker.ps1" in text
+
+
+def test_install_onprem_worker_user_startup_escapes_vbscript_quotes():
+    text = _read(REPO_ROOT / "scripts" / "install_onprem_worker_user_startup.ps1")
+    # Must use doubled double quotes (""$launcher"") in VBScript string literal
+    # so that VBScript compiler does not fail with 'Fim da instrução esperado' (code 800A0401).
+    assert '""$launcher""' in text
+
