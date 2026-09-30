@@ -1442,5 +1442,34 @@
     "dependencies": [],
     "created_at": "2026-09-30T17:25:52.164549Z",
     "updated_at": "2026-09-30T17:25:52.164549Z"
+  },
+  {
+    "id": "USR-69",
+    "project_id": "darkfac",
+    "title": "run_ticket: worktree propria por ticket e limpeza confiavel no Windows",
+    "origin": "user",
+    "status": "planned",
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "Duas sessoes no mesmo checkout C:\\dev\\DarkFac se contaminaram: o git add -A do run_ticket varreu arquivos de outra sessao (USR-60) e a outra varreu os do USR-64; o portao falhou com 'worktree dirty'. Alem disso git worktree remove falha com 'Permission denied/Directory not empty' e deixa pastas em .worktrees.",
+    "core_journey": [
+      "Duas sessoes no mesmo checkout C:\\dev\\DarkFac se contaminaram: o git add -A do run_ticket varreu arquivos de outra sessao (USR-60) e a outra varreu os do USR-64; o portao falhou com 'worktree dirty'. Alem disso git worktree remove falha com 'Permission denied/Directory not empty' e deixa pastas em .worktrees."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "run_ticket cria sempre uma worktree dedicada a partir de origin/main, roda agente e portao nela e commita apenas os arquivos do ticket (nunca add -A no checkout compartilhado)",
+      "Limpeza de worktree com retry/backoff e fallback para remocao de pasta com tratamento de arquivos travados; sweep_stale remove residuos de .worktrees e .claude/worktrees",
+      "Testes cobrindo isolamento entre dois tickets simultaneos e limpeza com falha transitoria"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-09-30T17:26:14.357702Z",
+    "updated_at": "2026-09-30T17:26:14.357702Z"
   }
 ]
