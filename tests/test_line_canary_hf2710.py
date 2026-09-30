@@ -1226,3 +1226,104 @@ def test_dogfood_gate_follows_env_min_streak(monkeypatch, store, tmp_path, repor
     assert dogfood.submit_dogfood_item(
         store=store, roadmap_path=roadmap_path, reports_dir=reports_dir, min_green_streak=5
     ) is None
+
+
+# --------------------------------------------------------------------------
+# Unambiguous demand text + replay of attempts accepted with the legacy text
+# --------------------------------------------------------------------------
+
+
+def test_demand_text_states_that_canary_day_is_a_fixed_literal_and_keeps_sha() -> None:
+    day = date(2026, 9, 30)
+    text = canary._demand_text(day)
+    assert "`2026-09-30`" in text
+    assert "string literal fixa" in text and "constante" in text and "NAO calculada" in text
+    assert "`sha`" in text  # the existing field is kept
+    assert "data de hoje" not in text  # the ambiguous legacy wording is gone
+
+
+def test_intake_payload_carries_the_auto_grill_policy_but_the_legacy_one_does_not() -> None:
+    day = date(2026, 9, 30)
+    current = canary.build_intake_command(day, "normal")
+    legacy = canary.build_intake_command(day, "normal", legacy_text=True)
+    assert current.payload["grill_policy"] == "auto"
+    assert "grill_policy" not in legacy.payload
+    assert legacy.payload["problem"] == (
+        "Adicione ao /version o campo `canary_day` com a data de hoje `2026-09-30` e um teste."
+    )
+    assert current.payload_digest != legacy.payload_digest
+    assert current.external_id == legacy.external_id
+    assert canary.build_intake_command(day, "normal", 2).external_id == "canary:2026-09-30:a2"
+
+
+def _accept_legacy(store, day: date, attempt: int):
+    from datetime import datetime as _dt
+
+    from core.demands.autonomous_intake import AutonomousIntakeService
+
+    command = canary.build_intake_command(day, canary.select_scenario(day), attempt, legacy_text=True)
+    return AutonomousIntakeService(store=store).accept(command, _dt(day.year, day.month, day.day, 8, tzinfo=UTC))
+
+
+def test_attempt_accepted_with_the_legacy_text_is_replayed_not_conflicted(store, reports_dir) -> None:
+    day = date(2026, 9, 30)  # Wednesday -> "normal"
+    legacy_receipt = _accept_legacy(store, day, 2)
+    observer = RunAwareObserver(default=_PENDING_STAGES)
+    # attempt 1 was terminal in a previous iteration, attempt 2 was accepted with the old text
+    canary._write_report(
+        reports_dir, day,
+        canary.CanaryReport(
+            date=day.isoformat(), scenario="normal", external_id="canary:2026-09-30:a2",
+            run_id=legacy_receipt.run_id, demand_id=legacy_receipt.demand_id, outcome="in_progress",
+            attempt=2,
+            attempts=[
+                canary.CanaryAttempt(attempt=1, external_id="canary:2026-09-30", outcome="timeout"),
+                canary.CanaryAttempt(
+                    attempt=2, external_id="canary:2026-09-30:a2", run_id=legacy_receipt.run_id, outcome="in_progress"
+                ),
+            ],
+        ),
+    )
+
+    for _ in range(3):
+        report = _retry_run(store, reports_dir, observer, RecordingSender(), day=day)
+        assert report.attempt == 2
+        assert report.run_id == legacy_receipt.run_id  # the legacy run is still the one observed
+        assert report.outcome == "in_progress" and report.cause_code != "idempotency_conflict"
+    assert observer.calls == [legacy_receipt.run_id] * 3
+    assert _intake_count(store) == 1  # nothing new was created
+
+
+def test_legacy_attempt_that_later_passes_is_observed_to_green(store, reports_dir) -> None:
+    day = date(2026, 9, 30)
+    receipt = _accept_legacy(store, day, 1)
+    observer = RunAwareObserver(default=_ALL_STAGES)
+    report = _retry_run(store, reports_dir, observer, RecordingSender(), day=day)
+    assert report.attempt == 1 and report.run_id == receipt.run_id and report.passed is True
+
+
+def test_new_attempts_are_submitted_with_the_new_text_and_replay_cleanly(store, reports_dir) -> None:
+    day = date(2026, 9, 30)
+    observer = RunAwareObserver(default=_PENDING_STAGES)
+    first = _retry_run(store, reports_dir, observer, RecordingSender(), day=day)
+    again = _retry_run(store, reports_dir, observer, RecordingSender(), day=day)
+    assert first.run_id == again.run_id and _intake_count(store) == 1
+    payload = store.get_run_payload(first.run_id)
+    assert payload["grill_policy"] == "auto" and "string literal fixa" in payload["problem"]
+
+
+def test_a_truly_conflicting_payload_still_fails_closed(store, reports_dir) -> None:
+    from datetime import datetime as _dt
+
+    from core.demands.autonomous_intake import AutonomousIntakeService
+    from core.workflow.control_contracts import IntakeCommand
+
+    day = date(2026, 9, 30)
+    bogus = canary.build_intake_command(day, "normal")
+    other = IntakeCommand(
+        project_id=bogus.project_id, channel=bogus.channel, external_id=bogus.external_id,
+        mode="autonomous", policy_ref=bogus.policy_ref, payload={**bogus.payload, "problem": "algo totalmente diferente"},
+    )
+    AutonomousIntakeService(store=store).accept(other, _dt(2026, 9, 30, 8, tzinfo=UTC))
+    report = _retry_run(store, reports_dir, RunAwareObserver(), RecordingSender(), day=day, max_attempts_per_day=1)
+    assert report.outcome == "failed" and report.cause_code == "idempotency_conflict"

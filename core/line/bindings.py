@@ -210,6 +210,7 @@ class GrillStageHandler:
             host_caps=self.host_caps,
             routing_config=self.routing_config,
             parent_grill=parent_grill,
+            auto_policy=stage_grill.is_auto_grill(project, payload),
         )
 
 
