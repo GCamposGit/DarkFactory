@@ -133,8 +133,8 @@ Se preferir a UI em vez da CLI:
 `profiles: ["canary"]` nem precisa de agendamento manual.** Ele agora sobe
 junto com o resto do stack (`restart: unless-stopped`) e roda em loop dentro
 do proprio processo, via `python -m core.line.canary run --base-url
-${DARKFAC_CANARY_BASE_URL:-} --every-seconds 3600` — o loop e implementado em
-`core.line.canary.run_loop` (submete/observa, loga, dorme 1h, repete; uma
+${DARKFAC_CANARY_BASE_URL:-} --every-seconds 900` — o loop e implementado em
+`core.line.canary.run_loop` (submete/observa, loga, dorme 15 min, repete; uma
 excecao numa iteracao nunca derruba as seguintes). **Nao ha mais um passo
 manual de cron/Scheduled Task para o dia-a-dia** — o que resta e so
 provisionar as variaveis de ambiente do servico, depois que
@@ -195,12 +195,28 @@ provisionar as variaveis de ambiente do servico, depois que
       nunca `passed=true` num relatorio com etapas pendentes.
 - [ ] Apos o deploy do compose, o servico `darkfac-canary` fica `Up` e sem
       `profiles` no `docker compose config` — o loop (`run_loop`,
-      `--every-seconds 3600`) roda sozinho, sem cron nem Scheduled Task.
+      `--every-seconds 900`) roda sozinho, sem cron nem Scheduled Task.
 - [ ] Com `TELEGRAM_*` configurado, uma falha proposital (rode num dia sem
       `DARKFAC_CANARY_BASE_URL`, por exemplo) chega no Telegram com a etapa
       e o `cause_code`.
 - [ ] Depois de 7 dias corridos com relatorio `outcome: "passed"`,
       `python -m core.line.canary status` mostra `"v2_met": true`.
+
+### Retentativa no mesmo dia e dogfood configuravel
+
+- Quando a tentativa do dia termina em falha terminal (`failed`/`timeout`), a
+  iteracao seguinte do loop (15 min depois) submete uma **nova tentativa** para o
+  mesmo dia: `external_id` `canary:<data>:a2`, `:a3`... (a tentativa 1 mantem o id
+  historico `canary:<data>`). Nunca ha duas tentativas em voo, e o limite e
+  `DARKFAC_CANARY_MAX_ATTEMPTS_PER_DAY` (padrao 4; valor invalido volta para 4).
+- O relatorio do dia (`<data>.json`) lista as tentativas em `attempts`; o dia e
+  verde se qualquer tentativa passou (`passed=true`), o que mantem o
+  `green_streak` inalterado. O alerta de falha e deduplicado **por tentativa**:
+  uma nova tentativa que falha do mesmo jeito alerta uma vez. O resumo semanal
+  (segunda-feira) e enviado uma unica vez por dia.
+- `DARKFAC_DOGFOOD_MIN_STREAK` (padrao de codigo 7; o compose passa `1`) define
+  quantos dias verdes liberam o dogfood. `DARKFAC_DOGFOOD_ENABLED` continua
+  `false` por padrao.
 
 ## Fora do escopo automatizado (decisao registrada no handoff)
 

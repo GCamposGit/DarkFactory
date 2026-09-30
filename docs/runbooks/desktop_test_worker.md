@@ -22,6 +22,7 @@ rodar de novo se algo der errado no meio).
 4. Conferir a tarefa agendada (Task Scheduler)
 5. Testar de outra maquina (opcional, mas recomendado)
 6. Solucao de problemas
+7. Worker de LINHA no Desktop (V3): passos minimos
 
 ---
 
@@ -265,6 +266,91 @@ Unregister-ScheduledTask -TaskName "DarkFac Test Worker" -Confirm:$false
 Remove-NetFirewallRule -DisplayName "DarkFac Test Worker (TCP 8080, Tailscale)"
 Remove-Item -Recurse -Force "$env:LOCALAPPDATA\DarkFac\worker\venv"
 ```
+
+## 7. Worker de LINHA no Desktop (V3): passos minimos
+
+Alem de rodar testes (secoes 1-6), o Desktop pode processar jobs da linha de
+producao (grill, planning, development, review, integration, build_deploy) como
+um segundo worker, lendo a fila do Postgres da VPS pela tailnet. Sao dois
+programas diferentes: o worker de testes (porta 8080, tarefa "DarkFac Test
+Worker") continua como esta; o worker de linha e o `cloud_worker`.
+
+Pre-requisitos (uma vez):
+
+1. **Postgres na tailnet**: o compose `darkfac-cloud` precisa ter sido
+   reimplantado com o servico `darkfac-pg-tailnet` (ver
+   `docs/runbooks/HF-27-09_topology.md`, secao 2). Teste no PowerShell do Desktop:
+
+   ```powershell
+   Test-NetConnection 100.83.176.60 -Port 5432
+   ```
+
+   Deve mostrar `TcpTestSucceeded : True`. Se der `False`, o servico ainda nao
+   subiu (ou o Tailscale do Desktop esta desconectado): pare aqui.
+2. **Dependencias no venv do worker de testes** (o mesmo `venv` do passo 2 deste
+   runbook, que ja tem `requirements.txt`). Sem `psycopg` o worker cairia em um
+   banco em memoria e nunca veria a fila:
+
+   ```powershell
+   & "$env:LOCALAPPDATA\DarkFac\worker\venv\Scripts\python.exe" -m pip install "dbos==2.31.1" "psycopg[binary]>=3.2.0,<3.3.0" "psutil>=6.0.0"
+   ```
+
+3. **CLIs logadas** (cada comando deve responder sem pedir login):
+
+   | CLI | Como conferir | Se falhar |
+   |---|---|---|
+   | `claude` | `claude -p "ok"` | rode `claude` e faca login |
+   | `codex` | `codex login status` | rode `codex login` |
+   | `gh` | `gh auth status` | rode `gh auth login` (GitHub.com, HTTPS) |
+   | `git` | `git --version` | instale o Git for Windows |
+
+   `harness:grok` e `harness:antigravity` entram nas capacidades automaticamente
+   se `grok`/`antigravity` estiverem no PATH; nao sao obrigatorios.
+4. **Variaveis de ambiente do usuario** (defina uma vez; Iniciar > "Editar as
+   variaveis de ambiente para sua conta" > Novo...; feche e reabra o
+   PowerShell depois):
+
+   | Variavel | Valor | Para que |
+   |---|---|---|
+   | `DARKFAC_HF02_DATABASE_URL` | `postgresql://USUARIO:SENHA@100.83.176.60:5432/BANCO` (mesmo usuario/senha/banco do worker da VPS; so o host muda para o IP da tailnet) | fila da linha |
+   | `GITHUB_TOKEN` | saida de `gh auth token` | clone e push HTTPS (a linha so usa esta variavel) |
+   | `DOKPLOY_API_URL`, `DOKPLOY_API_KEY` | os mesmos do worker da VPS | o estagio `build_deploy` pode ser reivindicado pelo Desktop; sem isto o deploy falha |
+   | `TELEGRAM_OWNER_BOT_TOKEN`, `TELEGRAM_AUTHORIZED_USERS`, `TELEGRAM_AUTHORIZED_CHATS` | os mesmos do worker da VPS | perguntas do Grill e alertas no Telegram |
+   | `DARKHUB_PUBLIC_URL` | `https://darkhub.ggcampos.com` | links das mensagens do Grill |
+
+   O repositorio em `C:\dev\DarkFac` deve estar em `main` atualizado (o worker
+   executa o codigo desse checkout): no PowerShell, rode
+   `cd C:\dev\DarkFac` e depois `git pull --ff-only origin main`.
+
+Comando unico para subir o worker de linha (janela aberta, `Ctrl+C` para parar):
+
+```powershell
+$env:PATH = "$env:LOCALAPPDATA\DarkFac\worker\venv\Scripts;$env:PATH"; powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File C:\dev\DarkFac\scripts\start_onprem_worker.ps1 -Priority secondary -MaxSlots 2
+```
+
+O que voce deve ver: um quadro `[DarkFac On-Premises Worker Launcher (HF-27-09)]`
+com `Capabilities` contendo `git,gh,node,python,harness:claude,harness:codex,...`
+e depois os logs do `cloud_worker`. Uma linha `harness:claude` ausente significa
+que o `claude` nao esta no PATH ou nao esta logado.
+
+Como conferir que o worker esta lendo o banco certo (outro PowerShell):
+
+```powershell
+& "$env:LOCALAPPDATA\DarkFac\worker\venv\Scripts\python.exe" -c "import sys; sys.path.insert(0, r'C:\dev\DarkFac'); from core.line.owner_intake import open_line_store; s = open_line_store(); print(type(s).__name__, 'mock=', getattr(s, 'mock_mode', None))"
+```
+
+Deve imprimir `PostgresControlStore mock= False`. Se der erro `StoreUnavailableError`,
+a URL ou a rede estao erradas.
+
+Para deixar de pe apos reboot: `scripts\install_onprem_worker_user_startup.ps1`
+(sem administrador) ou `scripts\install_onprem_worker_service.ps1` (administrador);
+para parar: `scripts\stop_onprem_worker.ps1`. Os dois instaladores chamam o worker
+com o `python` do PATH global: se usar o venv acima, instale `dbos`, `psycopg` e
+`psutil` tambem no Python global antes.
+
+Prioridade `secondary`: o Desktop so reivindica jobs que o worker primario da
+VPS nao pegou nos primeiros ~30s, entao a VPS continua sendo a primeira
+escolha e o Desktop absorve o excesso ou assume se a VPS cair.
 
 ## Referencia tecnica
 

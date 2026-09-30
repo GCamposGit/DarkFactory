@@ -347,6 +347,7 @@ class TelegramGateway:
         line_grill_handler: Optional[Callable[[str, str, str, int], Dict[str, Any]]] = None,
         commercial_acceptance_handler: Optional[Callable[[str, int], Dict[str, Any]]] = None,
         audio_engine: Optional[Any] = None,
+        line_handler: Optional[Callable[[str, int], Dict[str, Any]]] = None,
     ) -> None:
         self.config = config
         self.state_dir = state_dir or Path(".factory/telegram")
@@ -375,6 +376,8 @@ class TelegramGateway:
         self.line_grill_handler = line_grill_handler
         self.commercial_acceptance_handler = commercial_acceptance_handler
         self.audio_engine = audio_engine
+        # `/linha <ticket_id>`: push an existing demands.json ticket into the production line.
+        self.line_handler = line_handler
 
         self.last_offset: int = 0
         self.processed_update_ids: Set[int] = set()
@@ -643,7 +646,8 @@ class TelegramGateway:
                     "• /approve <project_id> <digest> - Aprovar release para deploy em produção\n"
                     "• /alerts - Consultar alertas de segurança, orçamento e cotas\n"
                     "• /status [ticket_id] - Consultar status de pipelines e jobs\n"
-                    "• /demand <texto> - Registrar demanda prioritária do Owner\n\n"
+                    "• /demand <texto> - Registrar demanda prioritária do Owner\n"
+                    "• /linha <ticket_id> - Enviar um ticket existente para a linha autônoma\n\n"
                     "ℹ️ <i>Demandas operacionais e backlog geral são gerenciadas no @darkfac_ops_bot</i>"
                 )
             elif self.config.role == "ops":
@@ -652,6 +656,7 @@ class TelegramGateway:
                     "Canal oficial de operações autônomas, fila de demandas e status da fábrica.\n\n"
                     "Comandos disponíveis:\n"
                     "• /demand <texto> - Ingerir nova demanda no backlog autônomo\n"
+                    "• /linha <ticket_id> - Enviar um ticket existente para a linha autônoma\n"
                     "• /status [ticket_id] - Consultar status de pipelines e jobs\n"
                     "• /alerts - Consultar telemetria operacional\n\n"
                     "🔒 <i>Aprovações de release e governança (/grill, /approve): exclusivas no @darkfac_bot</i>"
@@ -725,6 +730,9 @@ class TelegramGateway:
                                 f"📊 <b>Status:</b> {status_val}\n\n"
                                 f"<i>Demanda inserida no backlog da Dark Factory.</i>"
                             )
+                        line_message = res.get("line_message")
+                        if line_message:
+                            result.response_text += f"\n\nLinha autonoma: {line_message}"
                     except Exception as exc:
                         logger.error("Demand handler error: %s", exc)
                         result.error = str(exc)
@@ -767,6 +775,26 @@ class TelegramGateway:
                         logger.error("Durable demand creation error: %s", exc)
                         result.target_id = "DEMAND-RECORDED"
                         result.response_text = f"✅ Demanda recebida e enfileirada: {arg_str[:120]}"
+
+        elif cmd_str in ("/linha", "/line"):
+            result.action = TelegramActionType.DEMAND
+            target = arg_str.strip().split()[0].upper() if arg_str.strip() else ""
+            if not target:
+                result.response_text = "Uso: /linha <ticket_id>  (ex.: /linha USR-62)"
+            elif self.line_handler is None:
+                result.target_id = target
+                result.response_text = "Envio para a linha autonoma indisponivel neste canal."
+            else:
+                result.target_id = target
+                try:
+                    res = self.line_handler(target, user_id or 0)
+                    result.response_text = str(res.get("message") or f"Ticket {target} processado.")
+                    if not res.get("ok", True):
+                        result.error = result.response_text
+                except Exception as exc:
+                    logger.error("Line handler error: %s", exc)
+                    result.error = str(exc)
+                    result.response_text = f"Falha ao enviar {target} para a linha: {exc}"
 
         elif cmd_str == "/status":
             result.action = TelegramActionType.STATUS

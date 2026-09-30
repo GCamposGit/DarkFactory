@@ -26,6 +26,14 @@ from core.orchestrator.deployment_adapter import (
 API_KEY = "s3cr3t-dokploy-key-000000000000"
 
 
+@pytest.fixture(autouse=True)
+def _no_ambient_dokploy_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Hosts that deploy (the cloud worker, the owner's Notebook) export real
+    DOKPLOY_* credentials; every test here configures the adapter explicitly."""
+    for name in ("DOKPLOY_API_URL", "DOKPLOY_API_KEY", "DOKPLOY_DEPLOY_URL"):
+        monkeypatch.delenv(name, raising=False)
+
+
 class FakeResponse:
     """Minimal stand-in for `http.client.HTTPResponse` used as a context manager."""
 
@@ -445,3 +453,55 @@ def test_api_key_never_appears_in_logs_on_failure(
     assert API_KEY not in caplog.text
     # The header itself carried it (that's the only place it may appear).
     assert calls[1]["api_key_header"] == API_KEY
+
+
+# ---------------------------------------------------------------------------
+# Self-restart guard: never deploy/rollback the worker's own compose
+# ---------------------------------------------------------------------------
+
+
+def test_adapter_refuses_the_workers_own_compose_without_any_http_call(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: List[Dict[str, Any]] = []
+    _queue_urlopen(monkeypatch, [], calls)  # any HTTP call here is a bug
+    adapter = DokployDeploymentAdapter()
+    target_config = _target_config(service_name="QJK0YXPQvCgjrpdgWH0uo", service_type="compose")
+
+    op = adapter.start(_artifact(), target_config)
+
+    assert op.status == DeploymentStatus.FAILED
+    assert op.details["error"] == "deploy_target_forbidden_self_restart"
+    assert adapter.reconcile(op.operation_id) == DeploymentStatus.FAILED
+    assert calls == []
+
+
+def test_adapter_rollback_also_refuses_the_workers_own_compose(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: List[Dict[str, Any]] = []
+    _queue_urlopen(monkeypatch, [], calls)
+    adapter = DokployDeploymentAdapter()
+    target_config = _target_config(
+        service_name="QJK0YXPQvCgjrpdgWH0uo", service_type="compose", last_known_good_digest="c" * 40
+    )
+
+    result = adapter.rollback(target_config, failed_digest="d" * 40, reason="smoke failed")
+
+    assert result.status == DeploymentStatus.FAILED
+    assert result.restored_digest is None
+    assert "deploy_target_forbidden_self_restart" in result.reason
+    assert calls == []
+
+
+def test_adapter_deploys_the_darkhub_compose_via_compose_deploy(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: List[Dict[str, Any]] = []
+    _queue_urlopen(
+        monkeypatch,
+        [{"deployments": []}, {"success": True}],
+        calls,
+    )
+    adapter = DokployDeploymentAdapter()
+    target_config = _target_config(service_name="wuH-sjZBig74xFGdk4IsL", service_type="compose")
+
+    op = adapter.start(_artifact(), target_config)
+
+    assert op.status == DeploymentStatus.IN_PROGRESS
+    assert calls[-1]["body"] == {"composeId": "wuH-sjZBig74xFGdk4IsL"}
+    assert "compose.deploy" in calls[-1]["url"]

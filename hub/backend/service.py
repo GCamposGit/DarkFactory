@@ -388,6 +388,30 @@ class HubService:
             self._control_store = SQLiteControlStore(db_path=control_db)
         return self._control_store
 
+    def _line_control_store(self) -> Any:
+        """The store the production line's workers claim from.
+
+        An injected store (tests, embedded use) always wins. Otherwise Postgres when a line
+        database URL is configured (see `core.line.owner_intake`), else the local SQLite store.
+        """
+        if self._control_store is not None:
+            return self._control_store
+        from core.line.owner_intake import open_line_store
+
+        return open_line_store(fallback=self.control_store)
+
+    def submit_ticket_to_line(self, ticket_id: str) -> Any:
+        """Push an existing demands.json ticket into the autonomous production line."""
+        from core.line.owner_intake import submit_ticket_to_line
+
+        try:
+            store = self._line_control_store()
+        except Exception as exc:
+            from core.line.owner_intake import LineSubmission
+
+            return LineSubmission(ok=False, ticket_id=ticket_id, message=f"Store da linha indisponivel: {exc}")
+        return submit_ticket_to_line(ticket_id, demands_store=self.demands_store, store=store)
+
     def set_autonomous_intake_service(self, service: Any) -> None:
         """Inject an AutonomousIntakeService instance (HF-08-02)."""
         self._autonomous_intake_service = service
@@ -399,7 +423,7 @@ class HubService:
             from core.workflow.control_contracts import StoreUnavailableError
 
             try:
-                store = self.control_store
+                store = self._line_control_store()
             except Exception as exc:
                 raise StoreUnavailableError(f"Underlying control store unavailable: {exc}") from exc
 
@@ -2460,7 +2484,20 @@ class HubService:
                 ),
                 force_heuristic=True,
             )
-            return {"ticket_id": ticket.id, "title": ticket.title, "status": ticket.status.value}
+            response: Dict[str, Any] = {"ticket_id": ticket.id, "title": ticket.title, "status": ticket.status.value}
+            from core.line.owner_intake import autosubmit_enabled
+
+            if autosubmit_enabled():
+                submission = self.submit_ticket_to_line(ticket.id)
+                response["line_message"] = submission.message
+                if submission.run_id:
+                    response["line_run_id"] = submission.run_id
+                    response["status"] = self.get_demand_ticket(ticket.id).status.value
+            return response
+
+        def _handle_line(ticket_id: str, user_id: int) -> Dict[str, Any]:
+            submission = self.submit_ticket_to_line(ticket_id)
+            return submission.model_dump()
 
         def _handle_status(ticket_id: Optional[str]) -> Dict[str, Any]:
             if ticket_id:
@@ -2512,6 +2549,7 @@ class HubService:
             config=config,
             state_dir=self.project_root / ".factory" / "telegram",
             demand_handler=_handle_demand,
+            line_handler=_handle_line,
             status_handler=_handle_status,
             grill_handler=_handle_grill,
             approval_handler=_handle_approval,

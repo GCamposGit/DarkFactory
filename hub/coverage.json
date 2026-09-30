@@ -80,6 +80,9 @@
     "GET /api/demands/tickets": {
       "surface": "demands-drawer"
     },
+    "POST /api/demands/tickets/{ticket_id}/line": {
+      "machine": "Envio de um ticket existente para a linha autonoma, acionado pelo comando /linha do Telegram e por scripts; sem controle proprio no DarkHub por enquanto (core/line/owner_intake.py)."
+    },
     "POST /api/demands/tickets": {
       "surface": "demands-drawer"
     },

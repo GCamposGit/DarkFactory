@@ -580,3 +580,90 @@ def test_ticket_smoke_free_text_entry_is_skipped_never_executed(tmp_path: Path, 
 
     assert called_subprocess["count"] == 0
     assert result.outcome == "success", result.cause_code
+
+
+# --------------------------------------------------------------------------
+# Self-restart guard: the line must never deploy the worker's own compose
+# --------------------------------------------------------------------------
+
+SELF_COMPOSE_ID = "QJK0YXPQvCgjrpdgWH0uo"
+DARKHUB_COMPOSE_ID = "wuH-sjZBig74xFGdk4IsL"
+
+
+def _project_with_service(service_name: str) -> ProjectDescriptor:
+    return ProjectDescriptor(
+        id="darkfac",
+        name="Dark Factory (Core)",
+        deploy=DeployConfig(
+            type=DeployTargetType.DOKPLOY,
+            params={"service_name": service_name, "service_type": "compose"},
+        ),
+        smoke=[SmokeCheck(url="https://darkhub.ggcampos.com/", expect_status=200)],
+    )
+
+
+def test_release_refuses_to_deploy_the_workers_own_compose(tmp_path: Path) -> None:
+    adapter = FakeAdapter()
+    handler = _handler(_project_with_service(SELF_COMPOSE_ID), adapter, tmp_path, _opener_factory([(200, b"ok")]))
+
+    result = handler.handle(_context("run-self", "https://github.com/x/y/pull/1", "sha_self_" + "a" * 31))
+
+    assert result.outcome == "failed"  # terminal misconfiguration, never retried
+    assert result.cause_code.startswith("deploy_target_forbidden_self_restart")
+    assert SELF_COMPOSE_ID in result.cause_code
+    assert adapter.start_calls == []  # the adapter was never called
+    assert handler.state_store.load("darkfac").last_good_sha is None
+
+
+def test_release_guard_also_honours_extra_forbidden_ids_from_env(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("DARKFAC_LINE_FORBIDDEN_DEPLOY_IDS", "other-id, another-id")
+    adapter = FakeAdapter()
+    handler = _handler(_project_with_service("another-id"), adapter, tmp_path, _opener_factory([(200, b"ok")]))
+    result = handler.handle(_context("run-x", "https://github.com/x/y/pull/1", "sha_x_" + "a" * 34))
+    assert result.outcome == "failed" and "forbidden_self_restart" in result.cause_code
+    assert adapter.start_calls == []
+
+
+def test_release_deploys_the_darkhub_compose_with_compose_service_type(tmp_path: Path) -> None:
+    adapter = FakeAdapter()
+    project = _project_with_service(DARKHUB_COMPOSE_ID)
+    handler = _handler(project, adapter, tmp_path, _opener_factory([(200, b"ok")]))
+
+    target = handler._target_config("sha1", None)
+    assert target.service_name == DARKHUB_COMPOSE_ID
+    assert target.service_type == "compose"
+
+    result = handler.handle(_context("run-hub", "https://github.com/x/y/pull/1", "sha_hub_" + "a" * 32))
+    assert result.outcome == "success"
+    assert len(adapter.start_calls) == 1
+
+
+def test_registered_darkfac_project_targets_darkhub_and_never_the_worker_compose() -> None:
+    from core.orchestrator.deployment_adapter import is_forbidden_deploy_target
+    from core.projects.registry import ProjectRegistry
+
+    registry = ProjectRegistry(projects_file=Path(__file__).resolve().parents[2] / ".factory" / "projects.json")
+    project = registry.get_project("darkfac")
+    assert project is not None and project.deploy is not None
+    assert project.deploy.type == DeployTargetType.DOKPLOY
+    assert project.deploy.params["service_name"] == DARKHUB_COMPOSE_ID
+    assert project.deploy.params["service_type"] == "compose"
+    assert not is_forbidden_deploy_target(project.deploy.params["service_name"])
+    assert [s.url for s in project.smoke] == ["https://darkhub.ggcampos.com/"]
+
+
+def test_darkfac_line_validate_uses_the_dirty_tree_safe_wrapper() -> None:
+    """The development stage validates a DIRTY worktree (before committing the ticket), where
+    `runner.py --quick` refuses to run ("Candidate worktree is dirty"). darkfac therefore validates
+    through scripts/line_validate.py, which picks the official runner (clean tree) or the same quick
+    steps directly (dirty tree)."""
+    from core.projects.registry import ProjectRegistry, resolve_commands
+
+    root = Path(__file__).resolve().parents[2]
+    project = ProjectRegistry(projects_file=root / ".factory" / "projects.json").get_project("darkfac")
+    assert project is not None
+    commands = resolve_commands(project, root)
+
+    assert commands.validate_cmds == ["python scripts/line_validate.py"]
+    assert (root / "scripts" / "line_validate.py").is_file()
+    assert commands.setup and "requirements.txt" in commands.setup[0]
