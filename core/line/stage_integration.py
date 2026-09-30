@@ -52,8 +52,9 @@ import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, Callable, Iterable, Optional
+from typing import Any, Callable, Iterable, Optional, Sequence
 
+from core.git import ci_checks
 from core.line import workspace as ws_mod
 from core.line.agent_cli import AgentRequest, AgentResult, run_agent
 from core.line.routing import RoutingConfig, pick, record_result
@@ -78,13 +79,9 @@ _ATTEMPT_JOB_SUFFIX = "integration:conflict_attempt"
 _RESOLVED_JOB_SUFFIX = "integration:conflict_resolved"
 _STRIP_JOB_SUFFIX = "integration:strip_context"
 
-_TOKEN_LIKE = re.compile(
-    r"(?:ghp_|gho_|ghu_|ghs_|ghr_|github_pat_)[A-Za-z0-9_]+", re.IGNORECASE
-)
 _GITHUB_REPO_PATTERN = re.compile(
     r"github\.com[:/]+([^/]+)/([^/.\s]+?)(?:\.git)?/?$", re.IGNORECASE
 )
-_RUN_LINK_PATTERN = re.compile(r"/runs/(\d+)")
 
 
 class IntegrationError(RuntimeError):
@@ -99,7 +96,7 @@ def _win_kwargs() -> dict[str, Any]:
 
 
 def _sanitize(text: str) -> str:
-    return _TOKEN_LIKE.sub("[REDACTED_TOKEN]", text or "")
+    return ci_checks.sanitize(text)
 
 
 def _truncate(text: str, limit: int) -> str:
@@ -600,58 +597,43 @@ class IntegrationStageHandler:
     # Step 4/5: CI checks
     # ----------------------------------------------------------------
 
+    def _ci_runner(self, ws: RunWorkspace, *, timeout: Optional[int] = None) -> ci_checks.GhRunner:
+        """Adapt `_gh` to the runner protocol of `core.git.ci_checks`."""
+
+        def _run(args: Sequence[str], _cwd: Path) -> GhResult:
+            return self._gh(list(args), ws, timeout=timeout)
+
+        return _run
+
     def _fetch_failed_log(self, ws: RunWorkspace, failing_check: dict[str, Any]) -> str:
-        link = str(failing_check.get("link") or "")
-        match = _RUN_LINK_PATTERN.search(link)
-        if not match:
-            return "(nao foi possivel localizar o run id do check falho)"
-        gh_run_id = match.group(1)
-        result = self._gh(["run", "view", gh_run_id, "--log-failed"], ws, timeout=120)
-        text = result.stdout if result.stdout.strip() else result.stderr
-        lines = text.splitlines()
-        return "\n".join(lines[-150:])
+        return ci_checks.fetch_failed_log(self._ci_runner(ws, timeout=120), ws.path, failing_check)
 
     def _evaluate_checks(self, ws: RunWorkspace, pr_number: int) -> Optional[StageResult]:
         """Return a terminal/retry `StageResult` unless every check is green.
 
         `None` means "no checks configured, or all green" — proceed to merge,
         matching "se o repo nao tiver checks, a validacao limpa do HF-27-05 e
-        o gate".
+        o gate". The classification itself lives in `core.git.ci_checks`, shared
+        with the autonomous merge gate of `core.git.autonomy` (USR-85).
         """
-        result = self._gh(
-            ["pr", "checks", str(pr_number), "--json", "bucket,name,link,workflow"], ws
-        )
-        if not result.ok:
-            combined = f"{result.stdout}\n{result.stderr}".lower()
-            if "no checks reported" in combined or "no commit found" in combined:
-                return None
+        snapshot = ci_checks.query_checks(pr_number, ws.path, self._ci_runner(ws))
+        if snapshot.state == "error":
             return StageResult(
                 outcome="retry",
-                cause_code=_sanitize(f"gh_pr_checks_failed: {_truncate(result.stderr, 2000)}"),
+                cause_code=_sanitize(f"gh_pr_checks_failed: {_truncate(snapshot.error, 2000)}"),
             )
-        try:
-            checks = json.loads(result.stdout or "[]")
-        except json.JSONDecodeError:
-            checks = []
-        if not checks:
-            return None
 
-        failing = [c for c in checks if isinstance(c, dict) and c.get("bucket") == "fail"]
-        if failing:
-            log = self._fetch_failed_log(ws, failing[0])
+        if snapshot.state == "failed":
+            failing = snapshot.failing[0]
+            log = self._fetch_failed_log(ws, failing)
             return StageResult(
                 outcome="retry",
                 cause_code=_sanitize(
-                    f"ci_check_failed:{failing[0].get('name')}\n{_truncate(log, 4000)}"
+                    f"ci_check_failed:{failing.get('name')}\n{_truncate(log, 4000)}"
                 ),
             )
 
-        pending = [
-            c
-            for c in checks
-            if isinstance(c, dict) and c.get("bucket") not in ("pass", "skipping", "cancel")
-        ]
-        if pending:
+        if snapshot.state == "pending":
             not_before = (
                 datetime.now(timezone.utc) + timedelta(seconds=self.ci_check_window_s)
             ).isoformat()
