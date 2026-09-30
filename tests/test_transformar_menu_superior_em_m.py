@@ -219,3 +219,68 @@ def test_collapsed_state_rules_present_in_css():
         "collapsed-state rules must be grouped after the existing @media blocks, "
         "at the end of the file"
     )
+
+
+# --- T3: collapse persistence (localStorage) + mobile overlay toggle ---
+
+def _read_app_js() -> str:
+    return (FRONTEND_DIR / "app.js").read_text(encoding="utf-8")
+
+
+def test_collapse_and_mobile_toggle_buttons_present_with_aria():
+    html = _read_html()
+
+    collapse_match = re.search(r'<button[^>]*id="sidebar-collapse-toggle"[^>]*>', html)
+    assert collapse_match, 'expected a <button id="sidebar-collapse-toggle">'
+    collapse_tag = collapse_match.group(0)
+    for attr in ("aria-label", "aria-expanded", 'aria-controls="darkhub-sidebar"'):
+        assert attr in collapse_tag, f"sidebar-collapse-toggle must declare {attr}"
+
+    mobile_match = re.search(r'<button[^>]*id="sidebar-mobile-toggle"[^>]*>', html)
+    assert mobile_match, 'expected a <button id="sidebar-mobile-toggle">'
+    mobile_tag = mobile_match.group(0)
+    for attr in ("aria-label", "aria-expanded", 'aria-controls="darkhub-sidebar"'):
+        assert attr in mobile_tag, f"sidebar-mobile-toggle must declare {attr}"
+
+    assert "md:hidden" in mobile_tag, (
+        "sidebar-mobile-toggle must only be visible on small breakpoints (md:hidden)"
+    )
+
+
+def test_app_js_defines_sidebar_functions_and_localstorage_key():
+    js = _read_app_js()
+
+    for fn in ("initSidebar", "toggleSidebarCollapsed", "toggleSidebarMobile"):
+        assert re.search(rf"function\s+{fn}\s*\(", js), f"expected app.js to define {fn}()"
+
+    assert "darkhub.sidebar.collapsed" in js, (
+        "expected app.js to read/write the 'darkhub.sidebar.collapsed' localStorage key"
+    )
+    assert "localStorage.getItem" in js and "localStorage.setItem" in js
+
+
+def test_init_sidebar_called_on_boot():
+    js = _read_app_js()
+
+    boot_match = re.search(
+        r'document\.addEventListener\("DOMContentLoaded",\s*\(\)\s*=>\s*\{(.*?)\}\);',
+        js,
+        re.DOTALL,
+    )
+    assert boot_match, "expected the existing DOMContentLoaded boot handler in app.js"
+    assert "initSidebar()" in boot_match.group(1), (
+        "initSidebar() must be invoked from the existing DOMContentLoaded boot handler"
+    )
+
+
+def test_sidebar_block_has_no_fetch_or_business_logic():
+    js = _read_app_js()
+
+    start = js.index("--- Sidebar Block Start (T3")
+    end = js.index("--- Sidebar Block End (T3")
+    sidebar_block = js[start:end]
+
+    for forbidden in ("fetch(", "hubFetch(", "XMLHttpRequest", "await "):
+        assert forbidden not in sidebar_block, (
+            f"sidebar block must stay presentation-only; found '{forbidden}'"
+        )

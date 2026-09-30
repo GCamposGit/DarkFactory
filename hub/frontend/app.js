@@ -108,8 +108,57 @@ async function hubFetch(url, options = {}) {
   return res;
 }
 
+// --- Sidebar Block Start (T3, presentation-only: collapse persistence + mobile overlay) ---
+const SIDEBAR_COLLAPSED_STORAGE_KEY = "darkhub.sidebar.collapsed";
+
+function initSidebar() {
+  let collapsed = false;
+  try {
+    collapsed = localStorage.getItem(SIDEBAR_COLLAPSED_STORAGE_KEY) === "true";
+  } catch (_) {}
+
+  document.body.classList.toggle("sidebar-collapsed", collapsed);
+
+  const collapseToggle = document.getElementById("sidebar-collapse-toggle");
+  if (collapseToggle) collapseToggle.setAttribute("aria-expanded", String(!collapsed));
+
+  window.addEventListener("keydown", (e) => {
+    if (e.key !== "Escape") return;
+    const sidebar = document.getElementById("darkhub-sidebar");
+    if (sidebar && sidebar.classList.contains("translate-x-0")) {
+      toggleSidebarMobile(false);
+    }
+  });
+}
+
+function toggleSidebarCollapsed() {
+  const collapsed = document.body.classList.toggle("sidebar-collapsed");
+  try {
+    localStorage.setItem(SIDEBAR_COLLAPSED_STORAGE_KEY, String(collapsed));
+  } catch (_) {}
+
+  const collapseToggle = document.getElementById("sidebar-collapse-toggle");
+  if (collapseToggle) collapseToggle.setAttribute("aria-expanded", String(!collapsed));
+}
+
+function toggleSidebarMobile(forceOpen) {
+  const sidebar = document.getElementById("darkhub-sidebar");
+  const backdrop = document.getElementById("sidebar-backdrop");
+  const mobileToggle = document.getElementById("sidebar-mobile-toggle");
+  if (!sidebar) return;
+
+  const shouldOpen =
+    typeof forceOpen === "boolean" ? forceOpen : !sidebar.classList.contains("translate-x-0");
+
+  sidebar.classList.toggle("translate-x-0", shouldOpen);
+  if (backdrop) backdrop.classList.toggle("hidden", !shouldOpen);
+  if (mobileToggle) mobileToggle.setAttribute("aria-expanded", String(shouldOpen));
+}
+// --- Sidebar Block End (T3) ---
+
 // Initialize App on DOM Ready
 document.addEventListener("DOMContentLoaded", () => {
+  initSidebar();
   initApp();
 });
 

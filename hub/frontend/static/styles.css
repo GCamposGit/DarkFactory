@@ -16308,3 +16308,14 @@ body {
   backdrop-filter: blur(4px);
   -webkit-backdrop-filter: blur(4px);
 }
+
+/* Sidebar mobile overlay toggle affordances (T3) */
+@media (max-width: 767px) {
+  #darkhub-sidebar {
+    transform: translateX(-100%);
+  }
+
+  #darkhub-sidebar.translate-x-0 {
+    transform: translateX(0px);
+  }
+}
