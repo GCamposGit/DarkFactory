@@ -19,6 +19,7 @@ if str(IMPORT_ROOT) not in sys.path:
     sys.path.insert(0, str(IMPORT_ROOT))
 
 from core.harness import suite_lock as _suite_lock
+from tests import _tree_hygiene
 
 _DEFAULT_SUITE_LOCK_MIN_ITEMS = 100
 
@@ -29,6 +30,13 @@ _DEFAULT_SUITE_LOCK_MIN_ITEMS = 100
 # official `core/harness/runner.py` -- so two full suites never fight over
 # CPU and sqlite state at once.
 _session_suite_lock: _suite_lock.SuiteLock | None = None
+
+# Dirty-set fingerprint of the checkout taken by the session controller at
+# sessionstart; compared at sessionfinish (see tests/_tree_hygiene.py). None
+# means the guard is off for this process (disabled, nested run, xdist worker
+# or no usable git).
+_tree_fingerprint_before: _tree_hygiene.Fingerprint | None = None
+_tree_guard_owns_env = False
 
 
 def _is_xdist_worker(config: pytest.Config) -> bool:
@@ -63,14 +71,58 @@ def _acquire_session_lock() -> None:
     _session_suite_lock = lock
 
 
+def _start_tree_guard(config: pytest.Config) -> None:
+    """Fingerprint the checkout so sessionfinish can name whatever the suite dirtied."""
+
+    global _tree_fingerprint_before, _tree_guard_owns_env
+    if (
+        _is_xdist_worker(config)
+        or _tree_hygiene.is_disabled()
+        or _tree_hygiene.is_nested_session()
+    ):
+        return
+    _tree_fingerprint_before = _tree_hygiene.take_fingerprint(IMPORT_ROOT)
+    if _tree_fingerprint_before is not None:
+        os.environ[_tree_hygiene.ENV_ACTIVE] = "1"
+        _tree_guard_owns_env = True
+
+
+def _finish_tree_guard(session: pytest.Session) -> None:
+    """Fail the session (and print each path) when the suite altered the checkout."""
+
+    global _tree_fingerprint_before, _tree_guard_owns_env
+    before, _tree_fingerprint_before = _tree_fingerprint_before, None
+    if _tree_guard_owns_env:
+        os.environ.pop(_tree_hygiene.ENV_ACTIVE, None)
+        _tree_guard_owns_env = False
+    if before is None:
+        return
+    after = _tree_hygiene.take_fingerprint(IMPORT_ROOT)
+    if after is None:
+        return
+    violations = _tree_hygiene.diff_fingerprints(before, after)
+    if not violations:
+        return
+    lines = _tree_hygiene.format_report(violations)
+    reporter = session.config.pluginmanager.get_plugin("terminalreporter")
+    if reporter is None:
+        print("\n".join(lines), file=sys.stderr)
+    else:
+        reporter.write_line("")
+        reporter.write_sep("=", "tree hygiene", red=True, bold=True)
+        for line in lines:
+            reporter.write_line(line)
+    if session.exitstatus == pytest.ExitCode.OK:
+        session.exitstatus = int(pytest.ExitCode.TESTS_FAILED)
+
+
 def pytest_sessionstart(session: pytest.Session) -> None:
     """xdist controller acquires the machine-wide lock before workers spawn."""
 
     config = session.config
-    if _lock_should_be_skipped(config):
-        return
-    if _requested_numprocesses(config) is not None:
+    if not _lock_should_be_skipped(config) and _requested_numprocesses(config) is not None:
         _acquire_session_lock()
+    _start_tree_guard(config)
 
 
 def pytest_collection_finish(session: pytest.Session) -> None:
@@ -88,11 +140,17 @@ def pytest_collection_finish(session: pytest.Session) -> None:
         _acquire_session_lock()
 
 
+@pytest.hookimpl(trylast=True)
 def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
+    # trylast: on the xdist controller this runs after DSession has shut the
+    # workers down, so none is still writing while we re-fingerprint.
     global _session_suite_lock
-    if _session_suite_lock is not None:
-        _session_suite_lock.release()
-        _session_suite_lock = None
+    try:
+        _finish_tree_guard(session)
+    finally:
+        if _session_suite_lock is not None:
+            _session_suite_lock.release()
+            _session_suite_lock = None
 
 
 _SECRET_ENVIRONMENT_KEYS = (
