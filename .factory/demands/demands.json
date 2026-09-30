@@ -1471,5 +1471,34 @@
     "dependencies": [],
     "created_at": "2026-09-30T17:26:14.357702Z",
     "updated_at": "2026-09-30T17:26:14.357702Z"
+  },
+  {
+    "id": "USR-70",
+    "project_id": "darkfac",
+    "title": "Portao oficial: falhas intermitentes e fallback local nao confiavel",
+    "origin": "user",
+    "status": "planned",
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "Em 2026-09-30: o mesmo candidato falhou numa execucao (2164 testes contados) e passou na seguinte (2166); com o worker do Desktop offline o portao caiu para execucao local e acusou 8 falhas em areas alheias (test_real_deployment_adapter, test_line_e2e_hf2708, test_hf15_acceptance_environment, test_agent_evals, test_runtime_spike_scenarios, test_target_journey_rollback, line/test_stage_build), duas reproduziveis no origin/main puro.",
+    "core_journey": [
+      "Em 2026-09-30: o mesmo candidato falhou numa execucao (2164 testes contados) e passou na seguinte (2166); com o worker do Desktop offline o portao caiu para execucao local e acusou 8 falhas em areas alheias (test_real_deployment_adapter, test_line_e2e_hf2708, test_hf15_acceptance_environment, test_agent_evals, test_runtime_spike_scenarios, test_target_journey_rollback, line/test_stage_build), duas reproduziveis no origin/main puro."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Identificar e corrigir a causa de cada teste instavel ou dependente do ambiente (isolamento de env/rede/relogio), com teste de regressao",
+      "O portao registra o motivo da troca para execucao local e nao aprova/reprova por contagem de testes divergente sem explicar",
+      "origin/main passa no portao local no Windows do Notebook"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-09-30T17:26:37.767276Z",
+    "updated_at": "2026-09-30T17:26:37.767276Z"
   }
 ]
