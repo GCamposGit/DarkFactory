@@ -1354,5 +1354,35 @@
     "dependencies": [],
     "created_at": "2026-09-30T11:58:26.976681Z",
     "updated_at": "2026-09-30T12:33:35.966119Z"
+  },
+  {
+    "id": "USR-66",
+    "project_id": "darkfac",
+    "title": "VPS: injetar DARKFAC_GIT_SHA no deploy do DarkHub para comprovar a versao em execucao",
+    "origin": "user",
+    "status": "planned",
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "Apos o USR-65, o /health do DarkHub expoe git_sha a partir da env DARKFAC_GIT_SHA, mas o deploy Dokploy nao a preenche; o no VPS fica 'unknown' e a sincronia dos 3 nos nao e comprovada. Alem disso o sync do Desktop usa /system/restart, e o restart precisa ser seguro mesmo no primeiro ciclo.",
+    "core_journey": [
+      "Apos o USR-65, o /health do DarkHub expoe git_sha a partir da env DARKFAC_GIT_SHA, mas o deploy Dokploy nao a preenche; o no VPS fica 'unknown' e a sincronia dos 3 nos nao e comprovada. Alem disso o sync do Desktop usa /system/restart, e o restart precisa ser seguro mesmo no primeiro ciclo."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "scripts/dokploy_redeploy.py define DARKFAC_GIT_SHA (SHA completo de origin/main) na env do compose do DarkHub via API do Dokploy (leitura do token pelos mecanismos ja usados pelo script, nunca logado) ANTES de disparar o deploy, e o build/restart passa a servir o SHA correto no GET /health",
+      "Apos o deploy o script confirma via GET https://darkhub.ggcampos.com/health que git_sha == origin/main e o no VPS termina converged; sha divergente apos retry com timeout falha o deploy (exit != 0)",
+      "node_sync.sync so usa /system/restart do Desktop se o /health do Desktop informar suporte ao restart seguro (campo restart_safe true); caso contrario reporta divergent com reason claro em vez de derrubar o worker",
+      "Testes unitarios com fakes (API Dokploy e /health): env definida antes do deploy, token nunca em log, VPS converged, VPS divergente falha, restart_safe ausente nao reinicia. Nao editar arquivos protegidos. Portao python core/harness/runner.py --quick verde. Atualizar tests/test_demands_hygiene.py registrando USR-66 na contagem do ledger"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-09-30T12:36:41.774475Z",
+    "updated_at": "2026-09-30T12:36:41.774475Z"
   }
 ]

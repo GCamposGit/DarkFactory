@@ -58,7 +58,7 @@ class FakeHttp:
             if method == "GET":
                 if not self.returns:
                     raise OSError("offline")
-                return {"git_sha": self.desktop}
+                return {"git_sha": self.desktop, "restart_safe": True}
             if url.endswith("/system/update"):
                 self.desktop = SHA
                 return {"success": True, "current_commit": SHA}
@@ -80,6 +80,20 @@ def test_desktop_update_and_restart_converges() -> None:
     assert report.ok
     assert ("POST", f"{mod.DESKTOP_URL}/system/update") in http.calls
     assert ("POST", f"{mod.DESKTOP_URL}/system/restart") in http.calls
+
+
+def test_desktop_without_restart_safe_is_not_touched() -> None:
+    class LegacyDesktop(FakeHttp):
+        def __call__(self, method: str, url: str, payload: dict[str, Any] | None, token: str | None) -> dict[str, Any]:
+            if method == "GET" and ":8080" in url:
+                return {"git_sha": OLD}
+            return super().__call__(method, url, payload, token)
+
+    http = LegacyDesktop(desktop=OLD)
+    report = mod.sync(root=Path("."), git=FakeGit(), http=http)
+    assert report.nodes[1].state == "divergent"
+    assert "restart_safe=true" in (report.nodes[1].reason or "")
+    assert not any(method == "POST" and ":8080" in url for method, url in http.calls)
 
 
 def test_desktop_offline_after_restart_fails() -> None:
