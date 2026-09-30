@@ -93,3 +93,18 @@ def test_worker_and_canary_get_the_ops_bot_token_for_grill_messages(compose: dic
         env = "\n".join(compose["services"][name]["environment"])
         assert "TELEGRAM_OPS_BOT_TOKEN=${TELEGRAM_OPS_BOT_TOKEN:-}" in env, name
         assert "TELEGRAM_OWNER_BOT_TOKEN=${TELEGRAM_OWNER_BOT_TOKEN:-}" in env, name  # alerts stay on the owner bot
+
+
+def test_worker_sets_the_codex_sandbox_bypass_because_the_container_is_the_sandbox(compose: dict) -> None:
+    env = "\n".join(compose["services"]["darkfac-worker"]["environment"])
+    assert "DARKFAC_CODEX_SANDBOX_MODE=${DARKFAC_CODEX_SANDBOX_MODE:-bypass}" in env
+    # Only the worker runs agents; nothing else needs the switch, and on-prem hosts keep the default (auto).
+    for name in ("darkfac-coordinator", "darkfac-canary", "darkfac-backup-cron"):
+        assert "DARKFAC_CODEX_SANDBOX_MODE" not in "\n".join(compose["services"][name]["environment"])
+
+
+def test_agent_cli_runs_as_the_non_root_user_so_claude_bypass_permissions_is_allowed() -> None:
+    """Claude Code refuses bypassPermissions for root; the image drops to uid 1000 before CMD."""
+    dockerfile = (REPO_ROOT / "deploy" / "dokploy" / "Dockerfile.cloud").read_text(encoding="utf-8")
+    assert dockerfile.index("USER darkfac") < dockerfile.index("CMD [")
+    assert "useradd -u 1000" in dockerfile

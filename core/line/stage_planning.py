@@ -26,7 +26,7 @@ from typing import Iterable, Optional, Protocol
 
 from pydantic import BaseModel, Field, ValidationError
 
-from core.line import stage_grill, workspace
+from core.line import diagnostics, stage_grill, workspace
 from core.line.routing import RoutingConfig
 from core.line.stage_grill import GRILL_FILE, load_prompt, read_lessons, render_prompt
 from core.projects.models import ProjectDescriptor
@@ -96,17 +96,7 @@ def _job_key(run_id: str) -> str:
 
 
 def _extract_json_object(text: str) -> str:
-    stripped = text.strip()
-    if stripped.startswith("```"):
-        stripped = stripped.strip("`")
-        if stripped.lower().startswith("json"):
-            stripped = stripped[4:]
-        stripped = stripped.strip()
-    start = stripped.find("{")
-    end = stripped.rfind("}")
-    if start == -1 or end == -1 or end < start:
-        raise ValueError("no JSON object found in agent output")
-    return stripped[start : end + 1]
+    return stage_grill.extract_json_object(text, ("spec", "tickets", "milestones"))
 
 
 def parse_planning_plan(text: str) -> PlanningPlan:
@@ -242,12 +232,16 @@ def run_planning(
 
     plan: Optional[PlanningPlan] = None
     last_error: str = ""
+    last_result = None
     prompt = base_prompt
+    excluded = diagnostics.failed_pairs(diagnostics.load_attempts(ws, STAGE))
     for attempt in range(MAX_REPROMPTS + 1):
         result = stage_grill.run_read_agent(
-            STAGE, prompt, ws.path, host_caps=host_caps, routing_config=routing_config
+            STAGE, prompt, ws.path, host_caps=host_caps, routing_config=routing_config, exclude=excluded
         )
+        last_result = result
         if not result.ok:
+            stage_grill._record_failed_agent(ws, run_id, STAGE, result)
             return stage_grill.retry_for_agent_failure(result, "planning_agent_failed")
         try:
             plan = parse_planning_plan(result.text)
@@ -263,7 +257,8 @@ def run_planning(
             )
 
     if plan is None:
-        return StageResult(outcome="failed", cause_code="plan_invalid")
+        # Bad JSON is retried on another harness before it is terminal (see stage_grill).
+        return stage_grill.invalid_json_outcome(ws, run_id, STAGE, last_result, "plan_invalid")
 
     workspace.write_context(ws, _SPEC_FILE, _render_spec_markdown(plan.spec))
     workspace.write_context(

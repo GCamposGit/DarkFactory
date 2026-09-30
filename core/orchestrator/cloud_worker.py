@@ -681,6 +681,26 @@ class CloudWorker:
             return False
         return sender(text)
 
+    @staticmethod
+    def _log_stage_outcome(claim: Claim, stage_result: StageResult) -> None:
+        """WARNING with cause code + a ~300-char redacted snippet for every non-success stage.
+
+        Before this the worker only logged "Job execution completed" for a stage that had failed, so
+        a failed run was invisible from the container logs.
+        """
+        if stage_result.outcome == "success":
+            return
+        try:
+            from core.line.diagnostics import worker_snippet
+
+            snippet = worker_snippet(stage_result.cause_code)
+        except Exception:  # pragma: no cover - logging must never break a job
+            snippet = "(unavailable)"
+        logger.warning(
+            "Stage %s of run %s ended %s: %s",
+            claim.job_key.stage, claim.job_key.run_id, stage_result.outcome, snippet,
+        )
+
     def dispatch_claimed_job(self, claim: Claim, now: datetime | None = None) -> StepExecutionResult:
         """Execute a claimed stage via the line's HandlerRegistry, finish the job, and materialize successors.
 
@@ -734,6 +754,8 @@ class CloudWorker:
             finally:
                 stop_heartbeat.set()
                 heartbeat_thread.join(timeout=2.0)
+
+            self._log_stage_outcome(claim, stage_result)
 
             # HF-27-08 item 4: owner-facing messages, sent while the claim is
             # still active (record_operation needs it for the idempotency

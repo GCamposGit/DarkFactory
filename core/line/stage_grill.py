@@ -55,6 +55,7 @@ from typing import Any, Callable, Iterable, Literal, Optional
 from pydantic import BaseModel, Field, ValidationError
 
 from core.line import workspace
+from core.line import diagnostics
 from core.line.agent_cli import AgentRequest, AgentResult, run_agent
 from core.line.routing import RoutingConfig, pick, record_result
 from core.projects.models import ProjectDescriptor
@@ -189,23 +190,47 @@ def read_lessons(repo_path: Path, max_lines: int = 20) -> str:
     return "\n".join(lines[-max_lines:])
 
 
+def extract_json_object(text: str, expected_keys: Iterable[str] = ()) -> str:
+    """The first top-level JSON object embedded in an agent reply.
+
+    Tolerates code fences, leading/trailing prose, several objects and stray braces in the prose:
+    every `{` is tried with `JSONDecoder.raw_decode`, nested objects of an already decoded one are
+    skipped, and the first decoded object carrying one of `expected_keys` wins (the first decodable
+    object when none does). Raises `ValueError` when nothing decodes.
+    """
+    source = (text or "").strip()
+    decoder = json.JSONDecoder()
+    wanted = set(expected_keys)
+    first: Optional[str] = None
+    index = source.find("{")
+    while index != -1:
+        try:
+            value, end = decoder.raw_decode(source, index)
+        except ValueError:
+            index = source.find("{", index + 1)
+            continue
+        if isinstance(value, dict):
+            candidate = source[index:end]
+            if not wanted or wanted & set(value):
+                return candidate
+            if first is None:
+                first = candidate
+        index = source.find("{", end)
+    if first is not None:
+        return first
+    raise ValueError("no JSON object found in agent output")
+
+
 def _extract_json_object(text: str) -> str:
-    stripped = text.strip()
-    if stripped.startswith("```"):
-        stripped = stripped.strip("`")
-        if stripped.lower().startswith("json"):
-            stripped = stripped[4:]
-        stripped = stripped.strip()
-    start = stripped.find("{")
-    end = stripped.rfind("}")
-    if start == -1 or end == -1 or end < start:
-        raise ValueError("no JSON object found in agent output")
-    return stripped[start : end + 1]
+    return extract_json_object(text)
+
+
+_GRILL_KEYS = ("questions", "assumptions", "is_product_scale")
 
 
 def parse_grill_plan(text: str) -> GrillPlan:
     """Parse and validate an agent's grill JSON reply. Raises on malformed input."""
-    candidate = _extract_json_object(text)
+    candidate = extract_json_object(text, _GRILL_KEYS)
     data = json.loads(candidate)
     return GrillPlan.model_validate(data)
 
@@ -243,6 +268,7 @@ def run_read_agent(
     host_caps: Iterable[str],
     routing_config: Optional[RoutingConfig],
     max_attempts: int = 4,
+    exclude: Iterable[tuple[str, Optional[str]]] = (),
 ) -> AgentResult:
     """Run one read-mode agent call, trying the stage's cascade until one answers.
 
@@ -250,7 +276,7 @@ def run_read_agent(
     that already failed in this call, recording cooldowns for rate-limited
     accounts. Returns the last (failing) `AgentResult` if nothing worked.
     """
-    excluded: set[tuple[str, Optional[str]]] = set()
+    excluded: set[tuple[str, Optional[str]]] = set(exclude)
     last_result: Optional[AgentResult] = None
     for _ in range(max_attempts):
         choice = pick(
@@ -259,6 +285,10 @@ def run_read_agent(
             exclude=excluded,
             config=routing_config,
         )
+        if choice is None and last_result is None and excluded:
+            # Every route was excluded by earlier failed attempts: better to retry one than wait forever.
+            excluded = set()
+            choice = pick(stage, host_caps, exclude=excluded, config=routing_config)
         if choice is None:
             break
         harness, model = choice
@@ -281,6 +311,51 @@ def run_read_agent(
         duration_s=0.0,
         error_kind="no_authenticated_harness",
     )
+
+
+# Attempts (per stage, recorded on the run branch) after which bad JSON is a terminal failure.
+MAX_INVALID_JSON_ATTEMPTS = 3
+INVALID_JSON_RETRY_MINUTES = 1
+# Failures that are not the harness's fault (login, quota, missing binary) and retry on their own
+# schedule: recording each of them would only spam the run branch.
+_QUIET_FAILURE_KINDS = frozenset({"rate_limited", "auth_expired", "not_installed", "no_authenticated_harness"})
+
+
+def _record_failed_agent(
+    ws: workspace.RunWorkspace, run_id: str, stage: str, result: AgentResult, note: str = ""
+) -> list[dict[str, Any]]:
+    """Record + publish one failed agent attempt (skipped for login/quota/missing-binary kinds)."""
+    if result.error_kind in _QUIET_FAILURE_KINDS:
+        return diagnostics.load_attempts(ws, stage)
+    attempts = diagnostics.record_attempt(
+        ws, stage, harness=result.harness, model=result.model, error_kind=result.error_kind or note or "failed",
+        duration_s=result.duration_s, output=result.text, note=note,
+    )
+    diagnostics.persist(ws, f"chore(line): {stage} agent attempt {len(attempts)} failed", f"{run_id}:{stage}:diag")
+    return attempts
+
+
+def invalid_json_outcome(
+    ws: workspace.RunWorkspace,
+    run_id: str,
+    stage: str,
+    result: AgentResult,
+    cause_code: str,
+    *,
+    now: Optional[datetime] = None,
+) -> StageResult:
+    """Outcome for an agent reply that is not valid JSON: retry (other harness, short delay), then fail.
+
+    The first bad outputs are `retry` (the store's retry count also caps it), with the offending
+    harness excluded next time through the attempts file; only after
+    `MAX_INVALID_JSON_ATTEMPTS` recorded attempts is it terminal.
+    """
+    attempts = _record_failed_agent(ws, run_id, stage, result, note="invalid_json")
+    invalid = sum(1 for a in attempts if a.get("note") == "invalid_json")
+    if invalid >= MAX_INVALID_JSON_ATTEMPTS:
+        return StageResult(outcome="failed", cause_code=cause_code)
+    when = (now or datetime.now(timezone.utc)) + timedelta(minutes=INVALID_JSON_RETRY_MINUTES)
+    return StageResult(outcome="retry", cause_code=f"{cause_code} not_before={when.replace(microsecond=0).isoformat()}")
 
 
 def _render_grill_markdown(
@@ -532,14 +607,19 @@ def run_grill(
         grill=parent_grill or "(nenhuma premissa anterior)",
         lessons=read_lessons(ws.path) or "(nenhuma)",
     )
-    result = run_read_agent(STAGE, prompt, ws.path, host_caps=host_caps, routing_config=routing_config)
+    previous = diagnostics.load_attempts(ws, STAGE)
+    result = run_read_agent(
+        STAGE, prompt, ws.path, host_caps=host_caps, routing_config=routing_config,
+        exclude=diagnostics.failed_pairs(previous),
+    )
     if not result.ok:
+        _record_failed_agent(ws, run_id, STAGE, result)
         return retry_for_agent_failure(result, "grill_agent_failed", now=current_time)
 
     try:
         plan = parse_grill_plan(result.text)
     except (ValueError, json.JSONDecodeError, ValidationError):
-        return StageResult(outcome="failed", cause_code="grill_invalid_json")
+        return invalid_json_outcome(ws, run_id, STAGE, result, "grill_invalid_json", now=current_time)
 
     questions = plan.questions[:MAX_QUESTIONS]
     technical = [_PendingQuestion(**q.model_dump()) for q in questions if q.kind == "technical"]

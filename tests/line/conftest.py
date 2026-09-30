@@ -176,3 +176,11 @@ def copy_bare_origin(dest: Path) -> Path:
     dest.parent.mkdir(parents=True, exist_ok=True)
     shutil.copytree(bare_origin_template(), dest)
     return dest
+
+
+@pytest.fixture(autouse=True)
+def _isolated_routing_cooldowns(tmp_path, monkeypatch):
+    """A crashing/rate-limited fake agent must never write the repo's real cooldown store."""
+    from core.line import routing
+
+    monkeypatch.setattr(routing, "default_cooldown_path", lambda: tmp_path / "routing_cooldowns.json")

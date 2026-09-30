@@ -367,6 +367,24 @@ def commit(ws: RunWorkspace, message: str, job_key: str) -> str:
     return _rev_parse(ws.path, "HEAD")
 
 
+def commit_paths(ws: RunWorkspace, message: str, job_key: str, paths: list[Path]) -> Optional[str]:
+    """Commit ONLY `paths` (files or directories), leaving every other working-tree change alone.
+
+    Used to publish diagnostics from a failing iteration without committing the agent's
+    half-made edits. Returns the new commit SHA, or `None` when `paths` have nothing to commit.
+    """
+    if not job_key or not job_key.strip():
+        raise WorkspaceError("job_key must be non-empty")
+    relative = [str(Path(p).resolve().relative_to(ws.path.resolve())) for p in paths]
+    _run_git(["add", "--", *relative], cwd=ws.path)
+    if _run_git(["diff", "--cached", "--quiet", "--", *relative], cwd=ws.path, check=False).returncode == 0:
+        return None
+    trailer = f"{_JOB_TRAILER}: {job_key.strip()}"
+    argv = [*_identity_args(ws.path), "commit", "-m", f"{message.rstrip()}\n\n{trailer}\n", "--", *relative]
+    _run_git(argv, cwd=ws.path)
+    return _rev_parse(ws.path, "HEAD")
+
+
 def push(ws: RunWorkspace, *, sleep: Callable[[float], None] = time.sleep) -> None:
     """`git push -u origin df/<run_id>`, retried up to 3 times with backoff.
 

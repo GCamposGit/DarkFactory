@@ -9,8 +9,10 @@ jobs from the shared Postgres control store, so nothing entered the line.
 canary and dogfood use (`AutonomousIntakeService.accept` on the Postgres store the
 workers read), creating a run whose first job is the grill stage. It is:
 
-- idempotent per ticket (`channel=owner`, `external_id=ticket:<id>`): pushing the
-  same ticket twice returns the same run instead of a second one;
+- idempotent per attempt (`channel=owner`, `external_id=ticket:<id>`, then `ticket:<id>:a<n>`):
+  pushing a ticket whose run is still in flight returns that run instead of a second one, a
+  delivered ticket is reported as delivered, and a run that ended without delivering is retried
+  as a new attempt (cap `DARKFAC_LINE_MAX_TICKET_ATTEMPTS`, default 5);
 - fail-closed on the store: when a database URL is configured but Postgres cannot
   be reached, `open_line_store` raises instead of silently accepting the demand
   into `PostgresControlStore`'s in-memory mock (which no worker would ever see);
@@ -55,6 +57,8 @@ DATABASE_URL_ENVS: tuple[str, ...] = (
 AUTOSUBMIT_ENV = "DARKFAC_LINE_AUTOSUBMIT"
 PROJECTS_ENV = "DARKFAC_LINE_INTAKE_PROJECTS"
 DEFAULT_PROJECTS = "darkfac"
+MAX_ATTEMPTS_ENV = "DARKFAC_LINE_MAX_TICKET_ATTEMPTS"
+DEFAULT_MAX_TICKET_ATTEMPTS = 5
 # Statuses from which pushing a ticket into the line moves it to `implementing`.
 _PROMOTABLE_STATUSES = frozenset({DeliveryStatus.DISCOVERED, DeliveryStatus.ACCEPTED, DeliveryStatus.PLANNED})
 
@@ -68,6 +72,8 @@ class LineSubmission(BaseModel):
     run_id: str | None = None
     demand_id: str | None = None
     replayed: bool = False
+    attempt: int = 1
+    state: str = ""  # "submitted" | "in_flight" | "delivered" ("" when refused)
     message: str = ""
 
 
@@ -124,25 +130,105 @@ def open_line_store(fallback: ControlStore | None = None, *, url: str | None = N
     return default_control_store()
 
 
-def command_for_ticket(ticket: UserTicket) -> IntakeCommand:
-    """Intake command for a demands.json ticket, keyed by the ticket id (idempotent)."""
+def ticket_external_id(ticket_id: str, attempt: int = 1) -> str:
+    """`ticket:<id>` for attempt 1 (the historical id, unchanged), `ticket:<id>:a<n>` after."""
+    if attempt <= 1:
+        return f"ticket:{ticket_id}"
+    return f"ticket:{ticket_id}:a{attempt}"
+
+
+def max_ticket_attempts_from_env() -> int:
+    """`DARKFAC_LINE_MAX_TICKET_ATTEMPTS`; unset/invalid/<1 falls back to 5."""
+    raw = os.environ.get(MAX_ATTEMPTS_ENV, "").strip()
+    if not raw:
+        return DEFAULT_MAX_TICKET_ATTEMPTS
+    try:
+        value = int(raw)
+    except ValueError:
+        logger.warning("Invalid %s=%r; using %d", MAX_ATTEMPTS_ENV, raw, DEFAULT_MAX_TICKET_ATTEMPTS)
+        return DEFAULT_MAX_TICKET_ATTEMPTS
+    return value if value >= 1 else DEFAULT_MAX_TICKET_ATTEMPTS
+
+
+def command_for_ticket(ticket: UserTicket, attempt: int = 1) -> IntakeCommand:
+    """Intake command for a demands.json ticket, keyed by the ticket id (idempotent per attempt).
+
+    Attempt 1 is byte-identical to the pre-retry command (`ticket:<id>`, no `attempt` key), so
+    a run already accepted before retries existed is replayed, never conflicted.
+    """
+    payload: dict[str, Any] = {
+        "title": ticket.title,
+        "problem": ticket.problem_statement or ticket.title,
+        "journey": list(ticket.core_journey) or [ticket.title],
+        "non_goals": list(ticket.non_goals),
+        "criteria": list(ticket.acceptance_criteria),
+        "suggested_files": list(ticket.suggested_files),
+        "reachability_contract": ticket.reachability_contract,
+        "ticket_id": ticket.id,
+    }
+    if attempt > 1:
+        payload["attempt"] = attempt
     return IntakeCommand(
         project_id=ticket.project_id,
         channel=OWNER_CHANNEL,
-        external_id=f"ticket:{ticket.id}",
+        external_id=ticket_external_id(ticket.id, attempt),
         mode="autonomous",
         policy_ref=OWNER_POLICY_REF,
-        payload={
-            "title": ticket.title,
-            "problem": ticket.problem_statement or ticket.title,
-            "journey": list(ticket.core_journey) or [ticket.title],
-            "non_goals": list(ticket.non_goals),
-            "criteria": list(ticket.acceptance_criteria),
-            "suggested_files": list(ticket.suggested_files),
-            "reachability_contract": ticket.reachability_contract,
-            "ticket_id": ticket.id,
-        },
+        payload=payload,
     )
+
+
+def _attempt_number(base_external_id: str, external_id: str) -> int:
+    if external_id == base_external_id:
+        return 1
+    suffix = external_id[len(base_external_id) :]
+    if suffix.startswith(":a") and suffix[2:].isdigit():
+        return int(suffix[2:])
+    return 0
+
+
+def _ticket_attempts(store: Any, ticket_id: str) -> list[tuple[int, str | None]]:
+    """`[(attempt, run_id)]` already accepted for this ticket, ascending. Empty if unknown/none."""
+    finder = getattr(store, "find_intake_runs", None)
+    base = ticket_external_id(ticket_id)
+    if finder is None:
+        return []
+    attempts = [
+        (_attempt_number(base, external_id), run_id) for external_id, run_id in finder(OWNER_CHANNEL, base)
+    ]
+    return sorted((a for a in attempts if a[0] >= 1), key=lambda item: item[0])
+
+
+RunState = str  # "in_flight" | "succeeded" | "failed"
+
+
+def run_state(store: Any, run_id: str | None) -> RunState:
+    """Coarse state of a line run from its jobs.
+
+    `succeeded`: every required line stage has a succeeded job; `in_flight`: anything is still
+    pending/running/waiting (or the state cannot be read: never duplicate a run we cannot see
+    the end of); `failed`: nothing is in flight and the run did not deliver.
+    """
+    getter = getattr(store, "get_run_status", None)
+    if not run_id or getter is None:
+        return "in_flight"
+    try:
+        status = getter(run_id)
+    except Exception as exc:  # unreadable: assume alive rather than start a duplicate
+        logger.warning("Could not read status of run %s: %s", run_id, exc)
+        return "in_flight"
+    jobs = (status or {}).get("jobs") or []
+    if not jobs:
+        return "in_flight"
+    from core.line.bindings import LINE_STAGES
+
+    required = [stage for stage in LINE_STAGES if stage != "retrospective"]
+    succeeded = {job.get("stage") for job in jobs if job.get("status") == "succeeded"}
+    if all(stage in succeeded for stage in required):
+        return "succeeded"
+    if any(job.get("status") not in ("succeeded", "failed", "cancelled") for job in jobs):
+        return "in_flight"
+    return "failed"
 
 
 def submit_ticket_to_line(
@@ -157,6 +243,11 @@ def submit_ticket_to_line(
     Returns `ok=False` with a human-readable `message` (never raises) when the ticket
     is unknown, its project is not enabled for the line, the ticket was already
     submitted with different content, or the control store is unavailable.
+
+    Retries mirror the canary: the first send uses `ticket:<id>`; while a run is in flight it is
+    replayed (never duplicated); a succeeded run is reported as delivered; when the latest run
+    ended without delivering, a new send starts `ticket:<id>:a<n>` (capped by
+    `DARKFAC_LINE_MAX_TICKET_ATTEMPTS`, default 5).
     """
     ticket = demands_store.get_ticket(ticket_id)
     if ticket is None:
@@ -179,89 +270,75 @@ def submit_ticket_to_line(
             message=f"Ticket {ticket.id} esta '{ticket.status.value}'; nada a enviar para a linha.",
         )
 
+    def refused(message: str, *, attempt: int = 1, replayed: bool = False) -> LineSubmission:
+        return LineSubmission(
+            ok=False, ticket_id=ticket.id, project_id=ticket.project_id, attempt=attempt, replayed=replayed,
+            message=message,
+        )
+
+    attempt = 1
+    replay = False
     try:
         line_store = store if store is not None else open_line_store()
         service = AutonomousIntakeService(store=line_store, demands_store=None)  # None: never re-project a dem-* ticket
-        command = command_for_ticket(ticket)
-        previous_run = _existing_run_id(line_store, command)
+        attempts = _ticket_attempts(line_store, ticket.id)
+        if attempts:
+            latest_attempt, latest_run = attempts[-1]
+            state = run_state(line_store, latest_run)
+            if state == "succeeded":
+                return LineSubmission(
+                    ok=True, ticket_id=ticket.id, project_id=ticket.project_id, run_id=latest_run,
+                    attempt=latest_attempt, replayed=True, state="delivered",
+                    message=f"Ticket {ticket.id} ja foi entregue (tentativa {latest_attempt}, run {latest_run}).",
+                )
+            if state == "in_flight":
+                attempt, replay = latest_attempt, True
+            else:
+                limit = max_ticket_attempts_from_env()
+                if latest_attempt >= limit:
+                    return refused(
+                        f"Ticket {ticket.id} ja usou as {limit} tentativas permitidas "
+                        f"(ultima: tentativa {latest_attempt}, run {latest_run}, terminou sem entregar).",
+                        attempt=latest_attempt,
+                    )
+                attempt = latest_attempt + 1
+        command = command_for_ticket(ticket, attempt)
         receipt = service.accept(command, now or datetime.now(UTC))
     except IdempotencyConflict:
-        return LineSubmission(
-            ok=False,
-            ticket_id=ticket.id,
-            project_id=ticket.project_id,
+        return refused(
+            f"Ticket {ticket.id} ja foi enviado a linha com outro conteudo; "
+            "crie um novo ticket para a versao editada.",
+            attempt=attempt,
             replayed=True,
-            message=(
-                f"Ticket {ticket.id} ja foi enviado a linha com outro conteudo; "
-                "crie um novo ticket para a versao editada."
-            ),
         )
     except Exception as exc:  # store down, schema, etc: fail closed, tell the caller
         logger.error("Line intake for ticket %s failed: %s", ticket.id, exc)
-        return LineSubmission(
-            ok=False,
-            ticket_id=ticket.id,
-            project_id=ticket.project_id,
-            message=f"Falha ao enfileirar {ticket.id} na linha: {exc}",
-        )
+        return refused(f"Falha ao enfileirar {ticket.id} na linha: {exc}")
 
-    replayed = previous_run is not None
-    if not replayed and ticket.status in _PROMOTABLE_STATUSES:
+    if not replay and ticket.status in _PROMOTABLE_STATUSES:
         try:  # best-effort visibility in the Hub board; the line itself never depends on it
             demands_store.update_status(ticket.id, DeliveryStatus.IMPLEMENTING)
         except Exception as exc:  # pragma: no cover - defensive
             logger.warning("Could not mark %s implementing after line submit: %s", ticket.id, exc)
 
-    logger.info("Ticket %s -> line run %s (replayed=%s)", ticket.id, receipt.run_id, replayed)
+    logger.info("Ticket %s -> line run %s (attempt %d, replayed=%s)", ticket.id, receipt.run_id, attempt, replay)
     return LineSubmission(
         ok=True,
         ticket_id=ticket.id,
         project_id=ticket.project_id,
         run_id=receipt.run_id,
         demand_id=receipt.demand_id,
-        replayed=replayed,
+        replayed=replay,
+        attempt=attempt,
+        state="in_flight" if replay else "submitted",
         message=(
-            f"Ticket {ticket.id} ja estava na linha (run {receipt.run_id})."
-            if replayed
-            else f"Ticket {ticket.id} enviado a linha (run {receipt.run_id}); o Grill comeca em seguida."
+            f"Ticket {ticket.id} ja estava na linha (tentativa {attempt}, run {receipt.run_id})."
+            if replay
+            else (
+                f"Ticket {ticket.id} enviado a linha (tentativa {attempt}, run {receipt.run_id}); "
+                "o Grill comeca em seguida."
+            )
         ),
     )
 
 
-def _existing_run_id(store: Any, command: IntakeCommand) -> str | None:
-    """`run_id` already recorded for this command's (channel, external_id), if any.
-
-    Best-effort: SQLite and Postgres stores expose different internals, so an unknown
-    store simply reports "not previously submitted" (the accept itself stays idempotent).
-    """
-    connect = getattr(store, "_connect", None)
-    backend = getattr(store, "_backend", None)
-    if connect is None and backend is not None:
-        connect = getattr(backend, "_connect", None)
-    try:
-        if connect is not None:
-            conn = connect()
-            try:
-                cur = conn.cursor()
-                cur.execute(
-                    "SELECT run_id FROM intake_commands WHERE channel = ? AND external_id = ?",
-                    (command.channel, command.external_id),
-                )
-                row = cur.fetchone()
-                return row[0] if row else None
-            finally:
-                conn.close()
-        psycopg = getattr(store, "_psycopg", None)
-        raw_url = getattr(store, "raw_url", None)
-        if psycopg is not None and raw_url:
-            with psycopg.connect(raw_url) as pg_conn:
-                with pg_conn.cursor() as cur:
-                    cur.execute(
-                        "SELECT run_id FROM intake_commands WHERE channel = %s AND external_id = %s",
-                        (command.channel, command.external_id),
-                    )
-                    row = cur.fetchone()
-                    return row[0] if row else None
-    except Exception as exc:
-        logger.debug("Could not look up prior intake for %s: %s", command.external_id, exc)
-    return None

@@ -106,3 +106,21 @@ DarkHub ja recebe). O compose ja a repassa ao worker e ao canario.
 Resposta de Grill pelo botao: o Hub grava a resposta no store da linha (Postgres,
 tabela `grill_answers`; nao precisa de git) e acorda so o job de grill; o worker aplica a
 resposta no proximo claim. O canario acorda sozinho o proprio grill em `waiting_human`.
+
+## 6. Reenvio de ticket e diagnostico de falha de agente
+
+- `/linha <ticket>` (e `POST /api/demands/tickets/<id>/line`): run em andamento e reapresentado
+  (nunca duplicado); run entregue responde "ja foi entregue"; run terminado sem entregar abre
+  uma nova tentativa `ticket:<id>:a<n>` (teto `DARKFAC_LINE_MAX_TICKET_ATTEMPTS`, padrao 5). A
+  resposta informa a tentativa. A tentativa 1 mantem o id historico `ticket:<id>`.
+- Falhas de agente ficam visiveis na branch `df/<run>`: `.darkfac/runs/<run>/validate-*.log.md`
+  (desenvolvimento) e `agent-attempts-<grill|planning>.json`, cada um com harness, modelo, tipo de
+  erro, duracao e os primeiros ~2000 caracteres (sem segredos). O worker registra um WARNING por
+  estagio sem sucesso (cause_code + trecho de ~300 caracteres).
+- Um harness que falha (crash) e excluido pelo resto das iteracoes do ticket e fica ~10 min em
+  cooldown; JSON invalido no grill/planning e reexecutado em outro harness antes de ser terminal.
+- `DARKFAC_CODEX_SANDBOX_MODE` (`auto` padrao, `danger-full-access`, `bypass`): o sandbox Linux do
+  Codex nao sobe dentro do container, entao o compose do worker usa `bypass`
+  (`--dangerously-bypass-approvals-and-sandbox`, valido no codex-cli 0.48.0); Desktop e Notebook
+  nao definem a variavel e mantem o sandbox. O Claude Code roda como usuario nao-root (uid 1000),
+  requisito do `--permission-mode bypassPermissions`.

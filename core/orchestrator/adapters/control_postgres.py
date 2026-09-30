@@ -1193,6 +1193,25 @@ class PostgresControlStore:
             logger.warning("PostgreSQL get_run_payload failed: %s", exc)
             return None
 
+    def find_intake_runs(self, channel: str, external_id: str) -> list[tuple[str, str | None]]:
+        """`(external_id, run_id)` of every intake for `channel` whose external id is `external_id`
+        or one of its retry attempts (`<external_id>:a<n>`), oldest first."""
+        if self.mock_mode:
+            return self._backend.find_intake_runs(channel, external_id)
+
+        escaped = external_id.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        try:
+            with self._psycopg.connect(self.raw_url) as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        "SELECT external_id, run_id FROM intake_commands "
+                        "WHERE channel = %s AND (external_id = %s OR external_id LIKE %s) ORDER BY committed_at, external_id",
+                        (channel, external_id, f"{escaped}:a%"),
+                    )
+                    return [(row[0], row[1]) for row in cur.fetchall()]
+        except Exception as exc:
+            raise StoreUnavailableError(f"PostgreSQL find_intake_runs failed: {exc}") from exc
+
     def record_grill_answer(self, run_id: str, question_id: str, choice: str, now: datetime) -> None:
         """Record an owner's grill answer for `(run_id, question_id)` (last answer wins)."""
         if self.mock_mode:
