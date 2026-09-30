@@ -38,6 +38,7 @@ import argparse
 import json
 import logging
 import os
+import re
 import subprocess
 import sys
 import time
@@ -57,6 +58,8 @@ DEFAULT_PROJECT = "darkfac-core"
 DEFAULT_ENVIRONMENT = "production"
 DEFAULT_TIMEOUT_SECONDS = 900.0
 DEFAULT_POLL_INTERVAL_SECONDS = 5.0
+DARKHUB_HEALTH_URL = "https://darkhub.ggcampos.com/health"
+SHA_PATTERN = re.compile(r"^[0-9a-f]{40}$")
 
 # Hard allowlist: this tool may only ever act on these Dokploy projects,
 # regardless of --project. Claude Code's own permission config allows
@@ -511,6 +514,56 @@ def get_local_origin_main_subject(repo_root: Path = REPO_ROOT) -> Optional[str]:
     return subject or None
 
 
+def get_origin_main_sha(repo_root: Path = REPO_ROOT) -> Optional[str]:
+    """Read the exact full commit that a DarkHub deployment must expose."""
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "origin/main"], cwd=repo_root,
+            capture_output=True, text=True, timeout=10, check=False,
+        )
+    except Exception:
+        return None
+    sha = result.stdout.strip().lower()
+    return sha if result.returncode == 0 and SHA_PATTERN.fullmatch(sha) else None
+
+
+def set_compose_git_sha(transport: Transport, service: Service, payload: Dict[str, Any], sha: str) -> None:
+    """Merge the SHA into Dokploy's compose env without changing other keys."""
+    if service.kind != "compose" or service.name.lower() != "darkhub":
+        return
+    env_text = payload.get("env")
+    if not isinstance(env_text, str):
+        raise DokployUsageError("Darkhub compose.one has no string env; refusing to overwrite existing settings")
+    lines = [line for line in env_text.splitlines() if not re.match(r"^\s*(?:export\s+)?DARKFAC_GIT_SHA\s*=", line)]
+    lines.append(f"DARKFAC_GIT_SHA={sha}")
+    transport("POST", "/api/compose.saveEnvironment", {"composeId": service.service_id, "env": "\n".join(lines) + "\n"})
+
+
+def fetch_darkhub_health(url: str = DARKHUB_HEALTH_URL) -> Dict[str, Any]:
+    request = urllib.request.Request(url, headers={"Accept": "application/json"}, method="GET")
+    with urllib.request.urlopen(request, timeout=5) as response:
+        data = json.load(response)
+    return data if isinstance(data, dict) else {}
+
+
+def wait_for_darkhub_sha(
+    expected_sha: str, *, health: Callable[[], Dict[str, Any]], timeout: float,
+    interval: float, sleep_fn: Callable[[float], None], clock_fn: Callable[[], float],
+) -> bool:
+    deadline = clock_fn() + timeout
+    while True:
+        try:
+            observed = health().get("git_sha")
+            if isinstance(observed, str) and observed.lower() == expected_sha:
+                return True
+        except Exception:
+            pass
+        remaining = deadline - clock_fn()
+        if remaining <= 0:
+            return False
+        sleep_fn(min(interval, remaining))
+
+
 # ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
@@ -619,6 +672,7 @@ def main(
     env: Optional[Dict[str, str]] = None,
     registry_reader: Callable[[str], Optional[str]] = _read_windows_user_env,
     transport_factory: Optional[Callable[[str, str], Transport]] = None,
+    health_client: Optional[Callable[[], Dict[str, Any]]] = None,
     sleep_fn: Callable[[float], None] = time.sleep,
     clock_fn: Callable[[], float] = time.monotonic,
     backup_runner: Optional[Callable[..., Any]] = None,
@@ -668,6 +722,11 @@ def main(
         return EXIT_OK
 
     local_subject = get_local_origin_main_subject()
+    darkhub_selected = any(svc.name.lower() == "darkhub" and svc.kind == "compose" for svc in selected)
+    expected_sha = get_origin_main_sha() if darkhub_selected else None
+    if darkhub_selected and expected_sha is None:
+        print("Cannot determine full origin/main SHA; Darkhub deploy refused", file=err)
+        return EXIT_DEPLOY_FAILED
     if local_subject:
         print(f"Local origin/main HEAD subject: {local_subject}", file=out)
 
@@ -680,6 +739,8 @@ def main(
         try:
             baseline_payload = fetch_service_status(transport, svc)
             baseline = latest_deployment(baseline_payload)
+            if svc.name.lower() == "darkhub" and svc.kind == "compose":
+                set_compose_git_sha(transport, svc, baseline_payload, expected_sha)
             trigger_deploy(transport, svc)
         except DokployUsageError as exc:
             print(f"[{svc.name}] FAILED to trigger deploy: {exc}", file=err)
@@ -722,6 +783,16 @@ def main(
         if result.outcome != WaitOutcome.DONE:
             all_ok = False
 
+    if darkhub_selected and any(svc.name.lower() == "darkhub" for svc in triggered):
+        if wait_for_darkhub_sha(
+            expected_sha, health=health_client or fetch_darkhub_health, timeout=args.timeout,
+            interval=args.poll_interval, sleep_fn=sleep_fn, clock_fn=clock_fn,
+        ):
+            print(f"[NODE SYNC] VPS: converged sha={expected_sha}", file=out)
+        else:
+            print(f"[NODE SYNC] VPS: divergent; /health did not report origin/main sha={expected_sha}", file=err)
+            all_ok = False
+
     # A completed Dokploy job is not evidence that all running nodes use main.
     # Converge and verify the three execution nodes (Notebook ff-only when
     # clean on main, Desktop update+restart, VPS = the deploy just done). The
@@ -744,15 +815,11 @@ def main(
         for node in sync_report.nodes:
             if node.state == "converged":
                 continue
-            # A VPS whose /health reports no git_sha cannot be compared; the
-            # Dokploy deploy itself succeeded (checked above), so only warn.
-            fatal = not (node.name == "VPS" and node.state == "unknown")
-            if fatal:
-                all_ok = False
+            all_ok = False
             print(
                 f"[NODE SYNC] {node.name}: {node.state} "
                 f"sha={node.git_sha or '(unknown)'} expected={sync_report.expected_sha or '(unknown)'} "
-                f"reason={node.reason or '(none)'}" + ("" if fatal else " [non-blocking]"),
+                f"reason={node.reason or '(none)'}",
                 file=err,
             )
     if local_subject:

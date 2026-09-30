@@ -179,6 +179,9 @@ def sync(
     desktop = initial.nodes[1]
     if desktop.state != "converged":
         try:
+            health = http("GET", f"{desktop_url.rstrip('/')}/health", None, None)
+            if health.get("restart_safe") is not True:
+                raise RuntimeError("Desktop /health does not advertise restart_safe=true; update and restart skipped")
             response = http("POST", f"{desktop_url.rstrip('/')}/system/update", {}, token)
             if response.get("success") is not True or _sha(response.get("current_commit")) != expected:
                 raise RuntimeError("Desktop update did not reach expected SHA")
