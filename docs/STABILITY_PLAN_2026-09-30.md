@@ -73,6 +73,10 @@ Regra: nenhum defeito fica só descrito. Cada linha tem correção imediata (PR 
 | D23 | USR-77 obsoleto | correção já está em `main` (`mock://`) | **encerrado nesta PR com evidência** | — | feito |
 | D24 | USR-78 afirmava "semanas" sem medir | texto sem evidência | **corrigido nesta PR**; medir idade do commit no USR-82 | campo `commit_date` | feito / USR-82 |
 | D25 | testes fixam contagens, IDs e hashes de arquivos vivos (roadmap, claims) | arquivos vivos tratados como fixtures seladas; editar o manifesto exige mexer em 3 arquivos | invariantes no lugar de igualdade; claim aponta para blob imutável | regra: hash literal de `.factory/` exige allowlist | **USR-97** |
+| D26 | **token de bot do Telegram versionado em repositório PÚBLICO** (`0c7514e`) | commit autônomo incluiu config local apesar do `.gitignore`; nenhum portão varre segredos; runtime lê segredo de arquivo no caminho versionado | rotação do token (owner), `git rm --cached`, env-first, varredura de segredos no portão e no commit autônomo | `tests/test_no_tracked_secrets.py` + guarda pré-commit | **USR-100** (P0, owner) |
+| D27 | `catalog.sync_to_project` reporta sucesso em caminho inexistente (VPS Linux com caminho Windows) | registro com um caminho absoluto por máquina e `mkdir` sem validar | alvo deve existir; caminho por SO | teste em Linux com caminho Windows | **USR-101** |
+| D28 | 74 arquivos rastreados e ignorados ao mesmo tempo | evidência versionada sem reconciliar com `.gitignore` | zerar o conjunto `git ls-files -ci` | teste de consistência | **USR-102** |
+| D29 | **D01 resolvido**: `test_dh04_catalog_sync…` escrevia no caminho do `darkfac` (`C:\dev\DarkFac`); no Linux criava diretório literal no checkout, no Windows escrevia no checkout principal do owner | registro real de projetos usado por teste; paliativo no `.gitignore` escondia o vazamento | registro isolado (`tmp_path`) + guarda de higiene | `tests/_tree_hygiene.py` no `conftest.py` | **feito** (PR #75, `3e88bfc`) |
 
 ## 5. Triagem do backlog existente (17 tickets `planned` em 30/09)
 
@@ -187,3 +191,21 @@ Chaves, tokens, dados pessoais, configurações específicas de máquina, pesos 
 
 Uma demanda enviada pelo Telegram ou DarkHub vira PR com testes, merge, deploy e smoke verde com relatório no Telegram; o canário diário passa; o `main` permanece verde em Linux e Windows.
 ```
+
+## Apêndice C — URGENTE (owner): revogar o token do bot do Telegram exposto (USR-100)
+
+Situação: o arquivo `.factory/telegram/config.json` está versionado num repositório **público** (commit `0c7514e`) e contém um token com formato de token real de bot do Telegram. Considere-o comprometido. Nenhum agente pode revogar tokens; o passo abaixo é exclusivamente seu e leva ~5 minutos.
+
+1. Abra o Telegram (app ou `https://web.telegram.org`) na conta que criou os bots.
+2. Na busca, digite `BotFather` e abra o contato com o selo azul de verificado.
+3. Envie a mensagem `/mybots`.
+4. Toque no bot afetado. Se não souber qual é, repita os passos 4–7 para **os dois**: `@darkfac_bot` (alertas do Owner) e `@darkfac_ops_bot` (operações/Grill). Dica: o número antes dos dois-pontos do token é o ID público do bot; para vê-lo sem expor o segredo rode no PowerShell `(Get-Content C:\dev\DarkFac\.factory\telegram\config.json | ConvertFrom-Json).bot_token.Split(':')[0]`.
+5. Toque em **API Token**.
+6. Toque em **Revoke current token** e confirme. O BotFather responde com o **novo** token. Copie-o **sem colar em chat, issue ou commit**.
+7. Repita para o outro bot, se aplicável.
+8. Dokploy (`https://dokploy.ggcampos.com`) → projeto **darkfac-core** → ambiente **production**:
+   - compose **darkfac-cloud** → aba **Environment**: atualize `TELEGRAM_OWNER_BOT_TOKEN` (bot do Owner) e/ou `TELEGRAM_OPS_BOT_TOKEN` (bot de operações) → **Save** → **Deploy**.
+   - compose **Darkhub** → aba **Environment**: atualize `TELEGRAM_BOT_TOKEN`, `TELEGRAM_OWNER_BOT_TOKEN` e/ou `TELEGRAM_OPS_BOT_TOKEN` com os mesmos valores → **Save** → **Deploy**.
+9. Em cada máquina com Telegram local (Notebook e Desktop): abra `C:\dev\DarkFac\.factory\telegram\config.json` no Bloco de Notas, troque o valor de `bot_token` pelo novo token e salve.
+10. Teste: no Telegram envie `/start` ao bot de operações e confirme a resposta. O token antigo deve falhar (HTTP 401).
+11. Depois disso a fábrica conclui sozinha o USR-100 (desversiona os `.json`, cria `config.example.json`, passa a ler o token do ambiente e adiciona a varredura de segredos ao portão). Reescrever o histórico público (`git filter-repo` + force push) é opcional após a revogação e só deve ser feito por você.
