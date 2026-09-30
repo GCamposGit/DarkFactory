@@ -1822,5 +1822,33 @@
     "dependencies": [],
     "created_at": "2026-09-30T19:05:55.175757Z",
     "updated_at": "2026-09-30T19:05:55.175757Z"
+  },
+  {
+    "id": "USR-82",
+    "project_id": "darkfac",
+    "title": "Corrigir descricao do USR-78: nao ha evidencia de 'semanas' sem atualizar",
+    "origin": "user",
+    "status": "planned",
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "A descricao do USR-78 afirma que o worker de testes do Desktop ficou 'semanas' sem atualizar, mas a unica evidencia coletada em 2026-09-30 e que o checkout estava 9 commits atras de origin/main e com 3 commits locais fora do remoto. A duracao real da defasagem nao foi medida.",
+    "core_journey": [
+      "A descricao do USR-78 afirma que o worker de testes do Desktop ficou 'semanas' sem atualizar, mas a unica evidencia coletada em 2026-09-30 e que o checkout estava 9 commits atras de origin/main e com 3 commits locais fora do remoto. A duracao real da defasagem nao foi medida."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "O texto do ticket USR-78 em .factory/demands/demands.json e ajustado para descrever apenas a evidencia (ahead 3, behind 9) sem afirmar duracao",
+      "node_sync passa a registrar a idade do commit em execucao de cada no (data do SHA) para que a defasagem seja medida e nao presumida"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-09-30T19:06:31.079479Z",
+    "updated_at": "2026-09-30T19:06:31.079479Z"
   }
 ]
