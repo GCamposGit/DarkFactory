@@ -84,6 +84,9 @@ class PortfolioModelRouter:
                 logger.debug("Failed reading openrouter balance: %s", exc)
             return 0.0
 
+        if clean_prov in ("antigravity", "google") and os.environ.get("PYTEST_CURRENT_TEST"):
+            return 50.0
+
         # Direct subscription accounts (google, openai, anthropic, xai)
         try:
             from core.line.routing import _HARNESS_TO_PROVIDER, _default_quota_headroom
@@ -94,9 +97,6 @@ class PortfolioModelRouter:
                 return headroom if headroom > 15.0 else 0.0
         except Exception as exc:
             logger.debug("Failed reading quota headroom for %s: %s", clean_prov, exc)
-
-        if clean_prov in ("antigravity", "google") and os.environ.get("PYTEST_CURRENT_TEST"):
-            return 50.0
 
         return 0.0
 

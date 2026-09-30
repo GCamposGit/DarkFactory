@@ -233,6 +233,12 @@ def run_step(step: HarnessStepConfig) -> StepExecution:
         # test step is running so a nested pytest invocation (this subprocess)
         # never re-acquires the machine-wide suite lock and deadlocks against
         # its own parent.
+        child_env = dict(os.environ)
+        if os.name == "nt" and "PYTEST_XDIST_AUTO_NUM_WORKERS" not in child_env:
+            # On Windows NTFS, unbounded xdist (-n auto on machines with many cores) causes
+            # severe git file locking and temp directory deletion collisions across worker processes.
+            child_env["PYTEST_XDIST_AUTO_NUM_WORKERS"] = str(min(8, os.cpu_count() or 4))
+
         process = subprocess.run(
             command,
             shell=False,
@@ -244,6 +250,7 @@ def run_step(step: HarnessStepConfig) -> StepExecution:
             cwd=PROJECT_ROOT,
             timeout=step.timeout_sec,
             check=False,
+            env=child_env,
         )
         output = process.stdout or ""
         if output:

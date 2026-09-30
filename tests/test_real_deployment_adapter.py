@@ -37,6 +37,14 @@ from core.orchestrator.deployment_adapter import (
 from hub.backend.webhooks import DokployDeployClient
 
 
+@pytest.fixture(autouse=True)
+def _no_ambient_dokploy_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Hosts that deploy (the cloud worker, notebook) export real DOKPLOY_*
+    credentials; tests here test mock/synthetic lifecycle unless configured."""
+    for name in ("DOKPLOY_API_URL", "DOKPLOY_API_KEY", "DOKPLOY_DEPLOY_URL"):
+        monkeypatch.delenv(name, raising=False)
+
+
 # ---------------------------------------------------------------------------
 # 1. Byte Hashing and Cryptographic Integrity
 # ---------------------------------------------------------------------------
