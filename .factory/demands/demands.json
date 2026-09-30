@@ -1735,5 +1735,34 @@
     "dependencies": [],
     "created_at": "2026-09-30T18:35:48.481396Z",
     "updated_at": "2026-09-30T18:35:48.481396Z"
+  },
+  {
+    "id": "USR-79",
+    "project_id": "darkfac",
+    "title": "Recuperar tarefa Codex apos reinicio com resposta de ferramenta ausente",
+    "origin": "user",
+    "status": "planned",
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "Em 30/09/2026 a tarefa 01a0f2bd-3bae-76e1-908e-53a84dab0bf9 foi interrompida apos a chamada call_yv1A78hyGK206kEsHXbAohqh ter sido gravada sem custom_tool_call_output. Ao retomar, codex_core::util registrou Custom tool call output is missing duas vezes e a tarefa voltou a interromper. Investigar mitigacao no fluxo DarkFac sem editar os arquivos internos de sessao do Codex.",
+    "core_journey": [
+      "Em 30/09/2026 a tarefa 01a0f2bd-3bae-76e1-908e-53a84dab0bf9 foi interrompida apos a chamada call_yv1A78hyGK206kEsHXbAohqh ter sido gravada sem custom_tool_call_output. Ao retomar, codex_core::util registrou Custom tool call output is missing duas vezes e a tarefa voltou a interromper. Investigar mitigacao no fluxo DarkFac sem editar os arquivos internos de sessao do Codex."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Detectar chamada de ferramenta sem resposta antes de retomar uma tarefa interrompida e preservar evidencias.",
+      "Oferecer recuperacao segura em tarefa nova com estado de trabalho e ultimo comando confirmado.",
+      "Validar em sessao sintetica interrompida e documentar limite de falha externa do aplicativo."
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-09-30T18:49:45.044726Z",
+    "updated_at": "2026-09-30T18:49:45.044726Z"
   }
 ]
