@@ -3053,7 +3053,7 @@ class HubService:
         managed_files_count = 0
         autonomy_level = 2
         adoption_problems: list[str] = []
-        proj_path = Path(p.path) if p.path else (self.project_root if p.id == "darkfac" else None)
+        proj_path = self._portfolio_project_path(p)
         if proj_path and proj_path.exists():
             try:
                 from core.adoption.service import verify_adoption
@@ -3203,6 +3203,19 @@ class HubService:
             archetypes=arch_manifests,
         )
 
+    def _portfolio_project_path(self, descriptor: Any) -> Optional[Path]:
+        """Checkout path of a portfolio project.
+
+        The registry stores the owner's workstation path for the core project
+        (a `C:` drive path), which does not exist on the Linux cloud worker. The core project
+        always lives in this service's own repository root, so fall back to it there.
+        """
+        raw = getattr(descriptor, "path", None)
+        candidate = Path(raw) if raw else None
+        if getattr(descriptor, "id", None) == "darkfac" and (candidate is None or not candidate.exists()):
+            return self.project_root
+        return candidate
+
     def get_portfolio_project_detail(self, project_id: str) -> Optional[PortfolioProjectDetailResponse]:
         """Return deep-dive inspection response for a single adopted project (DH-08)."""
         descriptor = self.project_registry.get_project(project_id)
@@ -3212,7 +3225,7 @@ class HubService:
         project_summary = self._build_portfolio_project_summary(descriptor)
 
         from core.projects.registry import resolve_commands
-        proj_path = Path(descriptor.path) if descriptor.path else (self.project_root if descriptor.id == "darkfac" else self.project_root)
+        proj_path = self._portfolio_project_path(descriptor) or self.project_root
         resolved_cmds = resolve_commands(descriptor, proj_path)
         commands = {
             "setup": resolved_cmds.setup,

@@ -409,18 +409,24 @@ def push(ws: RunWorkspace, *, sleep: Callable[[float], None] = time.sleep) -> No
     raise last_error
 
 
-def find_commit_by_job(ws: RunWorkspace, job_key: str) -> Optional[str]:
+def find_commit_by_job(ws: RunWorkspace, job_key: str, ref: Optional[str] = None) -> Optional[str]:
     """Return the SHA of the commit carrying an exact `DarkFac-Job: <job_key>` trailer.
 
     Matches the trailer *value* exactly (via `%(trailers:key=...,valueonly)`),
     not as a substring — job keys like `<run>:T1` and `<run>:T10` must not
     collide, since HF-27-05 uses per-ticket keys of exactly that shape.
+
+    Searches the history of `ref` (e.g. another run's `origin/df/<run>` branch)
+    instead of the worktree's HEAD when given.
     """
     needle = job_key.strip()
     if not needle:
         return None
+    log_args = ["log", f"--format=%H%x00%(trailers:key={_JOB_TRAILER},valueonly)%x1e"]
+    if ref:
+        log_args += [ref, "--"]
     proc = _run_git(
-        ["log", f"--format=%H%x00%(trailers:key={_JOB_TRAILER},valueonly)%x1e"],
+        log_args,
         cwd=ws.path,
         check=False,
     )
@@ -434,6 +440,18 @@ def find_commit_by_job(ws: RunWorkspace, job_key: str) -> Optional[str]:
         if value.strip() == needle:
             return sha.strip()
     return None
+
+
+def read_file_at(ws: RunWorkspace, ref: str, path: str) -> Optional[str]:
+    """Text of `path` at git `ref` (e.g. another run's `origin/df/<run>` branch), or None if unreadable.
+
+    The mirror is a partial clone, so a missing blob is fetched lazily; the auth header is passed
+    so that works for private repositories too.
+    """
+    proc = _run_git(["show", f"{ref}:{path}"], cwd=ws.path, repo_url=_remote_url(ws.path), check=False)
+    if proc.returncode != 0:
+        return None
+    return proc.stdout
 
 
 def cleanup(ws: RunWorkspace, keep_days: int = 7) -> list[str]:

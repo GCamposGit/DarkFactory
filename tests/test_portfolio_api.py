@@ -11,6 +11,8 @@ Validates:
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -132,3 +134,21 @@ def test_get_portfolio_archetypes(client: TestClient) -> None:
     sb = arch_map["second_brain"]
     assert sb["kind"] == "second_brain"
     assert "Faster-Whisper" in sb["stack"]["framework"]
+
+
+def test_core_project_path_falls_back_to_the_service_root_when_the_registered_path_is_missing(tmp_path) -> None:
+    """The registry stores the owner's Windows path for `darkfac`; on the Linux cloud worker it does not exist."""
+    from types import SimpleNamespace
+
+    from hub.backend.service import HubService
+
+    service = SimpleNamespace(project_root=tmp_path)
+    missing = str(tmp_path / "nowhere" / "DarkFac")
+    resolve = lambda descriptor: HubService._portfolio_project_path(service, descriptor)  # noqa: E731
+
+    assert resolve(SimpleNamespace(id="darkfac", path=missing)) == tmp_path
+    assert resolve(SimpleNamespace(id="darkfac", path=None)) == tmp_path
+    assert resolve(SimpleNamespace(id="darkfac", path=str(tmp_path))) == tmp_path
+    # other projects keep their registered path (or None) untouched
+    assert resolve(SimpleNamespace(id="other", path=missing)) == Path(missing)
+    assert resolve(SimpleNamespace(id="other", path=None)) is None

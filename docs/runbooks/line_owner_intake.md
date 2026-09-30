@@ -73,8 +73,20 @@ falharia e o run terminaria em `validate_exhausted`. Por isso o projeto declara
   ValidationStage clona a branch enviada) roda o gate oficial
   (`runner.py --quick`, com cache de verdicts e despacho para o worker de testes
   do Desktop via `DARKFAC_TEST_WORKERS`, que o compose agora injeta, com fallback
-  local). Em arvore suja (loop de desenvolvimento) roda os mesmos passos `quick`
-  de `harness.config.json` diretamente, na VPS, sem duplicar comandos.
+  local). Em arvore suja (loop de desenvolvimento) monta um *snapshot* da
+  arvore de trabalho sem tocar no indice, no HEAD nem na branch reais (indice temporario via
+  `GIT_INDEX_FILE` + `git add -A` + `write-tree` + `commit-tree -p HEAD`), faz checkout desse commit
+  em um worktree destacado temporario (`--detach`) e roda o runner oficial la
+  (`runner.py --quick`, com `sanitized_env()`): o candidato e um commit limpo, com o mesmo cache e o
+  mesmo despacho para o worker de testes do Desktop (ambiente de teste do gate oficial, nao o do
+  container de producao). O worktree temporario e sempre removido (`worktree remove --force` +
+  `prune`). So se o snapshot nao puder ser montado (sem git, repositorio quebrado, runner ausente
+  no snapshot) cai, com `WARNING` no log, nos passos `quick` de `harness.config.json` rodados
+  diretamente na arvore suja.
+  `sanitized_env()` tira do ambiente dos testes as credenciais de producao e tambem a
+  configuracao do container do worker que testes leem do ambiente
+  (`DARKFAC_CODEX_SANDBOX_MODE`, `DARKFAC_MAX_CONCURRENT_SLOTS`, `DARKFAC_WORKSPACES`, `DATA_DIR`,
+  `FACTORY_DIR`, `OLLAMA_BASE_URL`, `REMOTE_HARNESS_URL(S)`, `DARKFAC_OPENROUTER_CHEAP_MODEL`).
 
 Orcamento de tempo: cada comando de validate tem teto de 1800 s
 (`command_timeout_s`); os passos do harness somam 900 s (paralelo) + 300 s
@@ -113,6 +125,18 @@ resposta no proximo claim. O canario acorda sozinho o proprio grill em `waiting_
   (nunca duplicado); run entregue responde "ja foi entregue"; run terminado sem entregar abre
   uma nova tentativa `ticket:<id>:a<n>` (teto `DARKFAC_LINE_MAX_TICKET_ATTEMPTS`, padrao 5). A
   resposta informa a tentativa. A tentativa 1 mantem o id historico `ticket:<id>`.
+- Grill reaproveitado entre tentativas: uma tentativa `ticket:<id>:a<n>` (n > 1) nao pergunta de novo
+  ao owner o que ele ja decidiu. No estagio `grill`, o handler procura (via `find_intake_runs`) as
+  tentativas anteriores do MESMO ticket cujo payload de intake e identico ao da atual (exceto o
+  contador `attempt`; se o ticket foi editado, nada e reaproveitado) e, da mais nova para a mais
+  antiga, adota o `GRILL.md` da primeira cujo grill terminou na branch `df/<run anterior>` (commit
+  `DarkFac-Job: <run>:grill`) e nao tem a secao "Aguardando decisao do owner" (perguntas
+  `secret`/`account` sem resposta nunca sao herdadas). O `GRILL.md` adotado vai para a branch do novo
+  run (com uma linha de nota citando o run de origem), o estagio termina em `success` com a evidencia
+  `grill_adopted:<run anterior>`, sem chamar agente e sem mensagem no Telegram, e as respostas
+  gravadas em `grill_answers` do run anterior sao copiadas para o novo `run_id`. Qualquer dado
+  ausente ou ilegivel (branch sumida, arquivo vazio, erro de git/banco) cai no grill normal, ou seja,
+  pergunta ao owner (fail-safe).
 - Falhas de agente ficam visiveis na branch `df/<run>`: `.darkfac/runs/<run>/validate-*.log.md`
   (desenvolvimento) e `agent-attempts-<grill|planning>.json`, cada um com harness, modelo, tipo de
   erro, duracao e os primeiros ~2000 caracteres (sem segredos). O worker registra um WARNING por

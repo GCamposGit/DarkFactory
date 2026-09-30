@@ -133,3 +133,99 @@ def test_retrospective_never_pushes_and_records_summary(monkeypatch: pytest.Monk
     assert result.output_refs == ["retrospective:run-x"]
     assert "record" in recorded
     assert recorded["record"].ticket_id == "run-x"
+
+
+# --------------------------------------------------------------------------
+# Grill handler: retry attempts adopt the previous attempt's grill
+# --------------------------------------------------------------------------
+
+
+class _GrillStore:
+    """Minimal control-store surface the grill handler and owner_intake read/write."""
+
+    def __init__(self, payloads: dict[str, dict], answers: dict[str, dict[str, str]]) -> None:
+        self.payloads = payloads
+        self.answers = answers
+        self.recorded: list[tuple[str, str, str]] = []
+
+    def get_run_payload(self, run_id):
+        return self.payloads.get(run_id)
+
+    def find_intake_runs(self, channel, external_id):
+        return [("ticket:USR-62", "run-a1"), ("ticket:USR-62:a2", "run-a2")]
+
+    def get_grill_answers(self, run_id):
+        return dict(self.answers.get(run_id, {}))
+
+    def record_grill_answer(self, run_id, question_id, choice, now):
+        self.recorded.append((run_id, question_id, choice))
+
+
+def _grill_handler(store):
+    project = ProjectDescriptor(id="acme", name="Acme", repo_url="https://example.invalid/acme.git")
+    return bindings.GrillStageHandler(
+        store=store, host_caps=["git"], routing_config=None, project_resolver=lambda pid: project
+    )
+
+
+_BASE_PAYLOAD = {"title": "T", "problem": "P", "journey": ["j"], "ticket_id": "USR-62"}
+
+
+def test_grill_handler_passes_earlier_attempts_and_carries_over_answers_on_adoption(monkeypatch) -> None:
+    from core.line import stage_grill
+    from core.workflow.control_contracts import StageResult
+
+    store = _GrillStore(
+        payloads={"run-a1": dict(_BASE_PAYLOAD), "run-a2": {**_BASE_PAYLOAD, "attempt": 2}},
+        answers={"run-a1": {"q1": "verde", "q2": "sim"}},
+    )
+    seen: dict = {}
+
+    def _fake_run_grill(project, run_id, demand_text, **kwargs):
+        seen.update(kwargs, run_id=run_id)
+        return StageResult(
+            outcome="success", output_refs=["abc"], evidence_refs=[f"{stage_grill.ADOPTED_EVIDENCE_PREFIX}run-a1"]
+        )
+
+    monkeypatch.setattr(stage_grill, "run_grill", _fake_run_grill)
+
+    result = _grill_handler(store).handle(_ctx("grill", ticket_id="acme", run_id="run-a2"))
+
+    assert result.outcome == "success"
+    assert seen["adopt_from_runs"] == ["run-a1"]
+    assert sorted(store.recorded) == [("run-a2", "q1", "verde"), ("run-a2", "q2", "sim")]
+
+
+def test_grill_handler_does_not_copy_answers_when_nothing_was_adopted(monkeypatch) -> None:
+    from core.line import stage_grill
+    from core.workflow.control_contracts import StageResult
+
+    store = _GrillStore(
+        payloads={"run-a1": dict(_BASE_PAYLOAD), "run-a2": {**_BASE_PAYLOAD, "attempt": 2}},
+        answers={"run-a1": {"q1": "verde"}},
+    )
+    monkeypatch.setattr(
+        stage_grill, "run_grill", lambda *a, **k: StageResult(outcome="waiting_human", evidence_refs=["grill_deadline:x"])
+    )
+
+    result = _grill_handler(store).handle(_ctx("grill", ticket_id="acme", run_id="run-a2"))
+
+    assert result.outcome == "waiting_human"
+    assert store.recorded == []
+
+
+def test_grill_handler_first_attempt_has_no_adoption_candidates(monkeypatch) -> None:
+    from core.line import stage_grill
+    from core.workflow.control_contracts import StageResult
+
+    store = _GrillStore(payloads={"run-a1": dict(_BASE_PAYLOAD)}, answers={})
+    seen: dict = {}
+
+    def _fake_run_grill(project, run_id, demand_text, **kwargs):
+        seen.update(kwargs)
+        return StageResult(outcome="success", output_refs=["abc"])
+
+    monkeypatch.setattr(stage_grill, "run_grill", _fake_run_grill)
+    _grill_handler(store).handle(_ctx("grill", ticket_id="acme", run_id="run-a1"))
+
+    assert seen["adopt_from_runs"] == []

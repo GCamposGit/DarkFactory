@@ -517,3 +517,64 @@ def test_telegram_linha_reports_the_attempt_and_the_delivered_state(hub, store, 
     _deliver(store, run2)
     third = gateway.process_update(_update(32, "/linha USR-62"))
     assert "ja foi entregue" in third.response_text and third.error is None
+
+
+# --------------------------------------------------------------------------
+# Grill reuse across attempts: which earlier runs may a retry adopt from?
+# --------------------------------------------------------------------------
+
+
+def test_previous_attempt_run_ids_lists_earlier_identical_attempts_newest_first(store, demands) -> None:
+    _ticket(demands)
+    first = owner_intake.submit_ticket_to_line("USR-62", demands_store=demands, store=store)
+    _kill(store, first.run_id)
+    second = owner_intake.submit_ticket_to_line("USR-62", demands_store=demands, store=store)
+    _kill(store, second.run_id)
+    third = owner_intake.submit_ticket_to_line("USR-62", demands_store=demands, store=store)
+
+    assert owner_intake.previous_attempt_run_ids(store, store.get_run_payload(third.run_id)) == [
+        second.run_id,
+        first.run_id,
+    ]
+    assert owner_intake.previous_attempt_run_ids(store, store.get_run_payload(second.run_id)) == [first.run_id]
+    # attempt 1 has nothing before it
+    assert owner_intake.previous_attempt_run_ids(store, store.get_run_payload(first.run_id)) == []
+
+
+def test_previous_attempt_run_ids_ignores_attempts_of_an_edited_ticket(store, demands) -> None:
+    _ticket(demands)
+    first = owner_intake.submit_ticket_to_line("USR-62", demands_store=demands, store=store)
+    _kill(store, first.run_id)
+    # Same ticket content (so the retry is accepted) is the normal case; simulate an edit by
+    # rewriting the stored payload of the first attempt.
+    conn = store._connect()
+    try:
+        row = conn.execute("SELECT payload FROM intake_commands WHERE run_id = ?", (first.run_id,)).fetchone()
+        import json
+
+        edited = json.loads(row["payload"])
+        edited["problem"] = "Outro problema, editado"
+        conn.execute("UPDATE intake_commands SET payload = ? WHERE run_id = ?", (json.dumps(edited), first.run_id))
+        conn.commit()
+    finally:
+        conn.close()
+    second = owner_intake.submit_ticket_to_line("USR-62", demands_store=demands, store=store)
+
+    assert second.attempt == 2
+    assert owner_intake.previous_attempt_run_ids(store, store.get_run_payload(second.run_id)) == []
+
+
+def test_previous_attempt_run_ids_is_fail_safe(store) -> None:
+    assert owner_intake.previous_attempt_run_ids(store, None) == []
+    assert owner_intake.previous_attempt_run_ids(store, {"ticket_id": "USR-1"}) == []  # no attempt key
+    assert owner_intake.previous_attempt_run_ids(store, {"ticket_id": "USR-1", "attempt": "2"}) == []
+    assert owner_intake.previous_attempt_run_ids(object(), {"ticket_id": "USR-1", "attempt": 2}) == []
+
+    class Broken:
+        def find_intake_runs(self, channel, external_id):
+            raise RuntimeError("db down")
+
+        def get_run_payload(self, run_id):
+            return {}
+
+    assert owner_intake.previous_attempt_run_ids(Broken(), {"ticket_id": "USR-1", "attempt": 2}) == []

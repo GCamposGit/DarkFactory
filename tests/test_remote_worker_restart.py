@@ -1,12 +1,25 @@
 """Restarting the HTTP test worker must not launch the production queue worker."""
 
+import subprocess
 import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import pytest
 from fastapi.testclient import TestClient
 
 from core.harness import remote_worker
+
+
+@pytest.fixture(autouse=True)
+def _windows_process_flags(monkeypatch: pytest.MonkeyPatch) -> None:
+    """`subprocess.DETACHED_PROCESS` & co. only exist on Windows; the restart code reads them unconditionally."""
+    for name, value in (
+        ("DETACHED_PROCESS", 0x00000008),
+        ("CREATE_NEW_PROCESS_GROUP", 0x00000200),
+        ("CREATE_NO_WINDOW", 0x08000000),
+    ):
+        monkeypatch.setattr(subprocess, name, getattr(subprocess, name, value), raising=False)
 
 
 def test_restart_endpoint_preserves_listener_settings(tmp_path: Path) -> None:
