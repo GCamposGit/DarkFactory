@@ -88,6 +88,10 @@ class WorkerHealthStatus(BaseModel):
         default=None,
         description="Full `git rev-parse HEAD` (40 hex) of project_root; null when it cannot be read (USR-65)",
     )
+    restart_safe: bool = Field(
+        default=True,
+        description="True when /system/restart relaunches this HTTP daemon itself (USR-64), so node_sync may update+restart it",
+    )
 
 
 class CommandExecutionRequest(BaseModel):

@@ -180,7 +180,9 @@ def sync(
     if desktop.state != "converged":
         try:
             health = http("GET", f"{desktop_url.rstrip('/')}/health", None, None)
-            if health.get("restart_safe") is not True:
+            # `git_sha` in /health exists only from USR-65, which is after the USR-64 restart fix,
+            # so a worker exposing it restarts itself safely even if it predates `restart_safe`.
+            if health.get("restart_safe") is not True and _sha(health.get("git_sha")) is None:
                 raise RuntimeError("Desktop /health does not advertise restart_safe=true; update and restart skipped")
             response = http("POST", f"{desktop_url.rstrip('/')}/system/update", {}, token)
             if response.get("success") is not True or _sha(response.get("current_commit")) != expected:
