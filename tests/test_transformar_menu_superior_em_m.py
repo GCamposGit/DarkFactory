@@ -214,6 +214,15 @@ def test_collapsed_state_rules_present_in_css():
         "expected a '.sidebar-backdrop' rule for the mobile overlay backdrop"
     )
 
+    backdrop_block_match = re.search(r"\.sidebar-backdrop\s*\{([^}]*)\}", css)
+    assert backdrop_block_match, "expected a '.sidebar-backdrop { ... }' rule block"
+    backdrop_z_index_match = re.search(r"z-index:\s*(\d+)", backdrop_block_match.group(1))
+    assert backdrop_z_index_match, "expected '.sidebar-backdrop' to declare a z-index"
+    assert int(backdrop_z_index_match.group(1)) < 40, (
+        "the mobile backdrop must stack below #darkhub-sidebar (z-40), "
+        "otherwise it renders on top of the open sidebar and swallows clicks on its buttons"
+    )
+
     preexisting_last_media_block = css.rindex("@media (prefers-reduced-motion: reduce)")
     assert css.index(".sidebar-collapsed") > preexisting_last_media_block, (
         "collapsed-state rules must be grouped after the existing @media blocks, "
@@ -271,6 +280,21 @@ def test_init_sidebar_called_on_boot():
     assert "initSidebar()" in boot_match.group(1), (
         "initSidebar() must be invoked from the existing DOMContentLoaded boot handler"
     )
+
+
+def test_collapse_toggle_updates_aria_label_dynamically():
+    js = _read_app_js()
+
+    for fn in ("initSidebar", "toggleSidebarCollapsed"):
+        fn_match = re.search(rf"function\s+{fn}\s*\([^)]*\)\s*\{{(.*?)\n\}}", js, re.DOTALL)
+        assert fn_match, f"expected to find {fn}() body"
+        body = fn_match.group(1)
+        assert 'setAttribute(\n      "aria-label"' in body or re.search(
+            r'setAttribute\(\s*"aria-label"', body
+        ), f"{fn}() must keep the collapse toggle's aria-label in sync with the collapsed state"
+        assert "Expandir menu lateral" in body and "Recolher menu lateral" in body, (
+            f"{fn}() must toggle between the expanded/collapsed aria-label copy"
+        )
 
 
 def test_sidebar_block_has_no_fetch_or_business_logic():

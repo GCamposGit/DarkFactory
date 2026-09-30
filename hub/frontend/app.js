@@ -120,7 +120,13 @@ function initSidebar() {
   document.body.classList.toggle("sidebar-collapsed", collapsed);
 
   const collapseToggle = document.getElementById("sidebar-collapse-toggle");
-  if (collapseToggle) collapseToggle.setAttribute("aria-expanded", String(!collapsed));
+  if (collapseToggle) {
+    collapseToggle.setAttribute("aria-expanded", String(!collapsed));
+    collapseToggle.setAttribute(
+      "aria-label",
+      collapsed ? "Expandir menu lateral" : "Recolher menu lateral"
+    );
+  }
 
   window.addEventListener("keydown", (e) => {
     if (e.key !== "Escape") return;
@@ -138,7 +144,13 @@ function toggleSidebarCollapsed() {
   } catch (_) {}
 
   const collapseToggle = document.getElementById("sidebar-collapse-toggle");
-  if (collapseToggle) collapseToggle.setAttribute("aria-expanded", String(!collapsed));
+  if (collapseToggle) {
+    collapseToggle.setAttribute("aria-expanded", String(!collapsed));
+    collapseToggle.setAttribute(
+      "aria-label",
+      collapsed ? "Expandir menu lateral" : "Recolher menu lateral"
+    );
+  }
 }
 
 function toggleSidebarMobile(forceOpen) {

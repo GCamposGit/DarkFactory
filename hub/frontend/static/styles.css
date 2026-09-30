@@ -16303,7 +16303,7 @@ body {
 .sidebar-backdrop {
   position: fixed;
   inset: 0;
-  z-index: 40;
+  z-index: 39;
   background-color: rgba(2, 6, 23, 0.7);
   backdrop-filter: blur(4px);
   -webkit-backdrop-filter: blur(4px);
