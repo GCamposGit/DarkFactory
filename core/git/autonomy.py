@@ -14,6 +14,7 @@ import argparse
 import json
 from datetime import datetime, timezone
 import logging
+import os
 from pathlib import Path
 import re
 import subprocess
@@ -28,6 +29,15 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from core.demands.models import UserTicket
 from core.demands.store import DemandsStore
+from core.git.ci_checks import (
+    DEFAULT_MAIN_WORKFLOW,
+    CiVerdict,
+    MainStatus,
+    check_main,
+    ensure_green,
+    is_ledger_only,
+    sanitize,
+)
 from core.roadmap.models import DeliveryStatus
 
 logger = logging.getLogger("darkfac.git.autonomy")
@@ -48,7 +58,12 @@ class DeliveryReport(BaseModel):
 
     ok: bool
     action: str = Field(
-        description="merged, conflict, awaiting_commercial_acceptance, no_changes or error"
+        description=(
+            "merged, conflict, awaiting_commercial_acceptance, no_changes, ci_pending "
+            "(checks still pending after the wait), ci_failed (a check is red), base_red "
+            "(every red check is already red on the base branch) or error; ci_pending, "
+            "ci_failed and base_red never merge and leave the PR and branch open"
+        )
     )
     pr_url: Optional[str] = None
     merge_sha: Optional[str] = None
@@ -150,8 +165,22 @@ def _run_git(
 class GitAutonomyManager:
     """Manages autonomous Git operations for the Dark Factory."""
 
-    def __init__(self, root: Path = PROJECT_ROOT) -> None:
+    def __init__(
+        self,
+        root: Path = PROJECT_ROOT,
+        *,
+        ci_timeout_s: Optional[float] = None,
+        ci_poll_s: Optional[float] = None,
+        ci_sleep_fn: Optional[Callable[[float], None]] = None,
+        ci_clock_fn: Optional[Callable[[], float]] = None,
+    ) -> None:
         self.root = root
+        # CI gate tuning (USR-85); None keeps the ci_checks defaults
+        # (DARKFAC_CI_WAIT_SECONDS, 20 s poll, real clock). Injectable for tests.
+        self.ci_timeout_s = ci_timeout_s
+        self.ci_poll_s = ci_poll_s
+        self.ci_sleep_fn = ci_sleep_fn
+        self.ci_clock_fn = ci_clock_fn
 
     def get_current_sha(self, cwd: Optional[Path] = None) -> str:
         """Return the current HEAD commit SHA."""
@@ -396,6 +425,77 @@ class GitAutonomyManager:
         oid = merge_commit.get("oid") if isinstance(merge_commit, dict) else None
         return str(data.get("state", "")), oid
 
+    def _changed_files(self, base: str, cwd: Path) -> list[str]:
+        """Files the branch changes relative to its merge base with origin/base.
+
+        ``--no-renames`` lists both sides of a rename so a file moved into the
+        ledger directories cannot hide the path it left.
+        """
+        res = _run_git(["diff", "--name-only", "--no-renames", f"origin/{base}...HEAD"], cwd=cwd)
+        if res.returncode != 0:
+            return []
+        return [line for line in res.stdout.splitlines() if line.strip()]
+
+    def _ci_gate(
+        self, number: int, pr_url: str, branch: str, base: str, cwd: Path, runner: GhRunner
+    ) -> tuple[Optional[DeliveryReport], str]:
+        """Decide whether the PR may be merged (USR-85).
+
+        Returns ``(blocking_report, note)``. ``blocking_report`` is ``None`` when
+        the merge may proceed; ``note`` is the ``ci_gate=...`` marker for the
+        final message. PRs that only touch the ticket ledger/roadmap skip the
+        gate: no code changed, and gating them would stop defect tickets from
+        being registered while ``main`` is red.
+        """
+        if is_ledger_only(self._changed_files(base, cwd)):
+            logger.info("PR #%s touches only ledger/roadmap files: ci_gate=skipped_ledger_only", number)
+            return None, "ci_gate=skipped_ledger_only"
+        verdict = ensure_green(
+            number,
+            cwd,
+            runner,
+            timeout_s=self.ci_timeout_s,
+            poll_s=self.ci_poll_s,
+            sleep_fn=self.ci_sleep_fn,
+            clock_fn=self.ci_clock_fn,
+            base_branch=base,
+        )
+        note = f"ci_gate={verdict.status}"
+        if verdict.passed:
+            return None, note
+        return self._blocked_report(verdict, pr_url, branch, base), note
+
+    @staticmethod
+    def _blocked_report(verdict: CiVerdict, pr_url: str, branch: str, base: str) -> DeliveryReport:
+        """Build the no-merge report for a pending_timeout/failed verdict."""
+        if verdict.status == "pending_timeout":
+            waiting = ", ".join(verdict.pending_checks) or "no result"
+            return DeliveryReport(
+                ok=False,
+                action="ci_pending",
+                pr_url=pr_url,
+                branch=branch,
+                message=(
+                    f"CI still pending after {verdict.waited_s:.0f}s ({waiting}; {verdict.detail}); "
+                    "merge withheld, PR and branch left open. ci_gate=pending_timeout"
+                ),
+            )
+        checks = ", ".join(verdict.failed_checks)
+        if verdict.base_red:
+            headline = f"CI failed on {checks}; the same checks are already red on {base} (pre-existing failure)"
+        else:
+            headline = f"CI failed on {checks}"
+        message = f"{headline}; merge withheld, PR and branch left open. ci_gate=failed"
+        if verdict.log_tail:
+            message += f"\n--- failed job log tail ---\n{verdict.log_tail}"
+        return DeliveryReport(
+            ok=False,
+            action="base_red" if verdict.base_red else "ci_failed",
+            pr_url=pr_url,
+            branch=branch,
+            message=message,
+        )
+
     def deliver_branch(
         self,
         ticket_id: str,
@@ -503,7 +603,13 @@ class GitAutonomyManager:
                 message="PR opened; merge and cleanup withheld pending commercial acceptance.",
             )
 
-        # (f) merge, retrying once after re-sync when not mergeable
+        # (f) CI gate, then merge (retrying once after re-sync when not mergeable).
+        # `gh pr merge` must never be reached without the gate approving the exact
+        # head being merged (USR-85); the retry below re-runs the gate because the
+        # re-sync pushes a new head.
+        blocked, gate_note = self._ci_gate(number, pr_url, branch, base, cwd, runner)
+        if blocked is not None:
+            return blocked
         merge_args = ["pr", "merge", str(number), "--squash", "--delete-branch"]
         merge_res = runner(merge_args, cwd)
         state, merge_sha = self._pr_state(number, cwd, runner)
@@ -518,6 +624,9 @@ class GitAutonomyManager:
                         message=f"Conflict on retry: {', '.join(files) or msg}",
                     )
                 _run_git(["push", "--force-with-lease", "origin", branch], cwd=cwd, timeout_s=180.0)
+                blocked, gate_note = self._ci_gate(number, pr_url, branch, base, cwd, runner)
+                if blocked is not None:
+                    return blocked
                 merge_res = runner(merge_args, cwd)
                 state, merge_sha = self._pr_state(number, cwd, runner)
         if state != "MERGED":
@@ -538,7 +647,7 @@ class GitAutonomyManager:
         cleaned = self._cleanup(branch, base, cwd)
         return DeliveryReport(
             ok=True, action="merged", pr_url=pr_url, merge_sha=merge_sha, cleaned=cleaned, branch=branch,
-            message=f"PR {pr_url} merged into {base}.",
+            message=f"PR {pr_url} merged into {base}. {gate_note}",
         )
 
     def _cleanup(self, branch: str, base: str, cwd: Path) -> bool:
@@ -746,7 +855,229 @@ class GitAutonomyManager:
         )
 
 
-def main() -> int:
+# ----------------------------------------------------------------------
+# check-main: detect a red base branch (USR-85)
+# ----------------------------------------------------------------------
+
+TicketFinder = Callable[[str], Optional[str]]
+TicketCreator = Callable[[str, str, Sequence[str]], Optional[str]]
+Notifier = Callable[[str, str], bool]
+
+_LEDGER_RELATIVE = ".factory/demands/demands.json"
+_TICKET_ID_PATTERN = re.compile(r"\bUSR-\d+\b")
+
+
+def _ledger_entries(raw: str) -> list[dict[str, Any]]:
+    """Decode a ``demands.json`` payload (list, or ``{"demands": [...]}``)."""
+    try:
+        payload = json.loads(raw or "[]")
+    except json.JSONDecodeError:
+        return []
+    if isinstance(payload, dict):
+        payload = payload.get("demands", [])
+    return [item for item in payload if isinstance(item, dict)] if isinstance(payload, list) else []
+
+
+def find_ticket_for_sha(short_sha: str, root: Path = PROJECT_ROOT) -> Optional[str]:
+    """Return the id of an existing ticket whose title or tags mention ``short_sha``.
+
+    Looks at the local ledger and at ``origin/main`` (after a best-effort fetch):
+    a ticket queued from another machine only exists locally after a pull.
+    """
+    needle = short_sha.strip().lower()
+    if not needle:
+        return None
+    _run_git(["fetch", "origin", "main"], cwd=root)
+    sources: list[str] = []
+    shown = _run_git(["show", f"origin/main:{_LEDGER_RELATIVE}"], cwd=root)
+    if shown.returncode == 0:
+        sources.append(shown.stdout)
+    local = root / ".factory" / "demands" / "demands.json"
+    try:
+        sources.append(local.read_text(encoding="utf-8"))
+    except OSError:
+        pass
+    for raw in sources:
+        for item in _ledger_entries(raw):
+            tags = item.get("tags")
+            parts = [str(item.get("title") or "")]
+            if isinstance(tags, list):
+                parts.extend(t for t in tags if isinstance(t, str))
+            if needle in " ".join(parts).lower():
+                return str(item.get("id") or "") or None
+    return None
+
+
+def create_defect_ticket(
+    title: str, problem: str, criteria: Sequence[str], root: Path = PROJECT_ROOT
+) -> Optional[str]:
+    """Register a planned defect ticket through ``run_ticket.py --create --queue-only``."""
+    cmd = [
+        sys.executable,
+        str(root / "run_ticket.py"),
+        "--create",
+        "--queue-only",
+        "--title",
+        title,
+        "--problem",
+        problem,
+        "--criteria",
+        *criteria,
+    ]
+    env = {**os.environ, "PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8"}
+    try:
+        proc = subprocess.run(
+            cmd,
+            cwd=str(root),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=900.0,
+            env=env,
+            **_win_kwargs(),
+        )
+    except (subprocess.TimeoutExpired, OSError) as exc:
+        logger.warning("Could not queue the defect ticket: %s", exc)
+        return None
+    if proc.returncode != 0:
+        logger.warning("run_ticket --create --queue-only failed: %s", sanitize(proc.stderr.strip()))
+        return None
+    match = _TICKET_ID_PATTERN.search(proc.stdout)
+    return match.group(0) if match else None
+
+
+def notify_main_red(title: str, message: str) -> bool:
+    """Send the red-main alert through the notification service; never raises."""
+    try:
+        from core.notifications import AlertCategory, AlertSeverity, NotificationService
+
+        event = NotificationService().notify(
+            category=AlertCategory.SYSTEM_HEALTH,
+            severity=AlertSeverity.CRITICAL,
+            title=title,
+            message=message,
+            force=True,
+        )
+    except Exception as exc:  # alerting is best-effort; Telegram may be unconfigured
+        logger.warning("Red-main alert not delivered: %s", sanitize(str(exc)))
+        return False
+    return event is not None
+
+
+def build_main_red_ticket(status: MainStatus) -> tuple[str, str, list[str]]:
+    """Title, problem statement and acceptance criteria of the defect ticket."""
+    jobs = ", ".join(name for name, _ in status.red_jobs) or status.workflow
+    title = f"CI vermelho no {status.branch} @{status.short_sha}: {jobs}"
+    if len(title) > 120:
+        title = f"{title[:117].rstrip()}..."
+    problem = (
+        f"O ultimo run concluido do workflow '{status.workflow}' em {status.branch} "
+        f"(SHA {status.sha}) terminou em '{status.conclusion}'. "
+        f"Jobs vermelhos: {jobs}. Run: {status.run_url}. "
+        "Detectado por 'python -m core.git.autonomy check-main' (USR-85); PRs com CI vermelho "
+        "nao sao mais mesclados automaticamente, entao ate corrigir este defeito a entrega "
+        "de codigo fica bloqueada."
+    )
+    criteria = [
+        f"O workflow '{status.workflow}' volta a ficar verde em {status.branch} "
+        f"(novo run concluido com sucesso depois de {status.short_sha}).",
+        "A causa raiz esta corrigida ou coberta por teste de regressao.",
+    ]
+    return title, problem, criteria
+
+
+def run_check_main(
+    *,
+    runner: Optional[GhRunner] = None,
+    root: Path = PROJECT_ROOT,
+    branch: str = "main",
+    workflow: str = DEFAULT_MAIN_WORKFLOW,
+    open_ticket: bool = False,
+    notify: bool = False,
+    ticket_finder: Optional[TicketFinder] = None,
+    ticket_creator: Optional[TicketCreator] = None,
+    notifier: Optional[Notifier] = None,
+) -> tuple[int, dict[str, Any]]:
+    """Probe the base branch CI. Exit code: 0 green, 1 red, 2 unknown (gh failure).
+
+    ``open_ticket`` files ONE defect ticket per SHA (idempotent: an existing
+    ticket mentioning the short SHA is reused). ``notify`` sends an alert on every
+    invocation where the branch is red, so schedule it with a sensible cadence.
+    """
+    status = check_main(runner or _run_gh, root, branch=branch, workflow=workflow)
+    payload: dict[str, Any] = status.to_dict()
+    if status.state == "green":
+        return 0, payload
+    if status.state == "unknown":
+        return 2, payload
+
+    if open_ticket:
+        finder = ticket_finder or (lambda sha: find_ticket_for_sha(sha, root))
+        creator = ticket_creator or (lambda t, p, c: create_defect_ticket(t, p, c, root))
+        existing = finder(status.short_sha)
+        if existing:
+            payload["ticket"] = {"id": existing, "created": False}
+        else:
+            title, problem, criteria = build_main_red_ticket(status)
+            created = creator(title, problem, criteria)
+            payload["ticket"] = (
+                {"id": created, "created": True}
+                if created
+                else {"id": None, "created": False, "error": "could not queue the defect ticket"}
+            )
+    if notify:
+        alert = notifier or notify_main_red
+        jobs = ", ".join(f"{name} ({url})" if url else name for name, url in status.red_jobs)
+        text = (
+            f"O CI '{status.workflow}' esta vermelho em {status.branch} (SHA {status.short_sha}, "
+            f"conclusao {status.conclusion}). Jobs: {jobs or 'desconhecidos'}. Run: {status.run_url}"
+        )
+        try:
+            payload["notified"] = bool(alert(f"CI vermelho em {status.branch} ({status.short_sha})", text))
+        except Exception as exc:  # never fatal
+            logger.warning("Red-main alert failed: %s", sanitize(str(exc)))
+            payload["notified"] = False
+    return 1, payload
+
+
+def format_check_main(payload: dict[str, Any]) -> str:
+    """Plain-text (ASCII) rendering of a check-main payload."""
+    head = f"{payload['workflow']} on {payload['branch']}"
+    if payload["state"] == "green":
+        return f"[MAIN_GREEN] {head} is green (sha {payload['short_sha']})."
+    if payload["state"] == "unknown":
+        return f"[MAIN_UNKNOWN] {head}: {payload.get('detail') or 'state could not be determined'}"
+    lines = [
+        f"[MAIN_RED] {head}: conclusion={payload['conclusion']} sha={payload['sha']}",
+        f"  run: {payload['run_url']}",
+    ]
+    for job in payload["red_jobs"]:
+        lines.append(f"  red job: {job['name']} -> {job['url']}")
+    ticket = payload.get("ticket")
+    if ticket:
+        if ticket.get("id"):
+            lines.append(f"  ticket: {ticket['id']} ({'created' if ticket['created'] else 'already exists'})")
+        else:
+            lines.append(f"  ticket: not created ({ticket.get('error')})")
+    if "notified" in payload:
+        lines.append(f"  alert: {'sent' if payload['notified'] else 'not delivered'}")
+    return "\n".join(lines)
+
+
+def _configure_stdio() -> None:
+    """Force UTF-8 on the standard streams (Windows consoles default to cp1252)."""
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is not None:
+            try:
+                reconfigure(encoding="utf-8", errors="replace")
+            except (OSError, ValueError):
+                pass
+
+
+def main(argv: Optional[Sequence[str]] = None) -> int:
+    _configure_stdio()
     parser = argparse.ArgumentParser(description="DarkFac Git Autonomy CLI (USR-57)")
     subparsers = parser.add_subparsers(dest="command")
 
@@ -776,7 +1107,29 @@ def main() -> int:
 
     subparsers.add_parser("sweep", help="Remove merged ticket/df branches and stale worktrees")
 
-    args = parser.parse_args()
+    cm_parser = subparsers.add_parser(
+        "check-main",
+        help="Report whether CI is green on the base branch (exit 0 green, 1 red, 2 unknown)",
+    )
+    cm_parser.add_argument("--branch", default="main", help="Base branch to probe (default: main)")
+    cm_parser.add_argument(
+        "--workflow", default=DEFAULT_MAIN_WORKFLOW, help=f"Workflow name (default: {DEFAULT_MAIN_WORKFLOW})"
+    )
+    cm_parser.add_argument("--json", action="store_true", help="Print the result as JSON")
+    cm_parser.add_argument(
+        "--open-ticket", action="store_true", help="File one defect ticket per red SHA (idempotent)"
+    )
+    cm_parser.add_argument("--notify", action="store_true", help="Send an alert when the branch is red")
+
+    args = parser.parse_args(argv)
+
+    if args.command == "check-main":
+        code, payload = run_check_main(
+            branch=args.branch, workflow=args.workflow, open_ticket=args.open_ticket, notify=args.notify
+        )
+        print(json.dumps(payload, indent=2, ensure_ascii=False) if args.json else format_check_main(payload))
+        return code
+
     manager = GitAutonomyManager()
 
     if args.command == "sync":
