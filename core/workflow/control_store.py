@@ -31,6 +31,16 @@ from core.workflow.control_contracts import (
 )
 
 
+# Job statuses that keep a run open. `waiting_human` / `waiting_dependency` are
+# parked-but-resumable (the owner still has to answer), so a run whose only
+# non-terminal job is parked must NOT be closed as `completed`. `retry` and
+# `replan` are deliberately absent: they are superseded markers (the retry /
+# planning successor job is materialized as a new row). Terminal: succeeded,
+# failed, cancelled.
+RUN_OPEN_JOB_STATUSES: tuple[str, ...] = ("pending", "running", "waiting_human", "waiting_dependency")
+_RUN_OPEN_JOB_STATUSES_SQL = ", ".join(f"'{s}'" for s in RUN_OPEN_JOB_STATUSES)
+
+
 def _is_ready_enough(created_at_raw: Any, now: datetime, ready_age_sec: float) -> bool:
     """True if `created_at_raw` (an isoformat timestamp) is at least `ready_age_sec` old.
 
@@ -819,7 +829,7 @@ class SQLiteControlStore:
 
                 # Check if all jobs in run completed
                 cur.execute(
-                    "SELECT COUNT(*) FROM jobs WHERE run_id = ? AND status IN ('pending', 'running')",
+                    f"SELECT COUNT(*) FROM jobs WHERE run_id = ? AND status IN ({_RUN_OPEN_JOB_STATUSES_SQL})",
                     (jk.run_id,),
                 )
                 active_count = cur.fetchone()[0]
@@ -1383,6 +1393,14 @@ class SQLiteControlStore:
                 (now_iso, now_iso, job_key.run_id, job_key.ticket_id, job_key.plan_version, job_key.stage, job_key.iteration),
             )
             resumed = cur.rowcount > 0
+            if resumed:
+                # Heal legacy rows: a run closed as `completed` while this job was
+                # parked is live again (idempotent; same transaction).
+                cur.execute(
+                    "UPDATE runs SET status = 'active', completed_at = NULL, updated_at = ? "
+                    "WHERE run_id = ? AND status = 'completed'",
+                    (now_iso, job_key.run_id),
+                )
             conn.commit()
             return resumed
         except Exception:
