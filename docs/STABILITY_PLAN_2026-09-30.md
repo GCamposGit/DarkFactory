@@ -58,7 +58,7 @@ Regra: nenhum defeito fica só descrito. Cada linha tem correção imediata (PR 
 | D08 | ledger esvaziado por commit | nenhuma guarda pré-commit | bloqueio de diff que esvazia `.factory/*.json` | teste proíbe `rev:path` em shell | **USR-76** |
 | D09 | run parado em `waiting_human` por falta de cota | condição temporal modelada como espera humana | `retry` com `not_before` no próximo reset | contrato: sem `waiting_human` por rota | **USR-87** |
 | D10 | testes escrevem no `.factory` real | sem raiz de estado injetável | `core.paths.state_root()` + fixture autouse | guarda falha se o `.factory` real mudar | **USR-88** |
-| D11 | gate intermitente / fallback local | D01 + D12 + D10 | fechar as três causas; patch humano para registrar o motivo | contagem coletada no veredito | **USR-70** (guarda-chuva) |
+| D11 | gate intermitente / fallback local | D01 + D12 + D10 | fechar as três causas (o motivo do fallback já é impresso; persisti-lo no veredito é patch humano opcional) | guarda de higiene + raiz de estado injetável | **USR-70** (guarda-chuva) |
 | D12 | workers xdist morrem no Notebook | `-n auto` sem olhar memória; WMI no start | cap por memória fora de `core/harness` | diagnóstico de pico por worker | **USR-95** |
 | D13 | flake R12 (`STORE_UNAVAILABLE`) | timeout/lock SQLite sob carga (hipótese) | cenário determinístico | 10 execuções consecutivas | **USR-83** |
 | D14 | nó desatualizado / legado / restart lento | node_sync só compara SHA e lê `/health` uma vez | classificar ahead/diverged/dirty; reparo seguro; espera pós-restart | alerta por divergência > 1 ciclo | **USR-71, 78, 81, 82** |
@@ -138,7 +138,7 @@ A sessão interativa pode ter `gh pr merge` bloqueado pelo classificador do Clau
 
 ## 8. Entradas humanas inevitáveis (lista fechada)
 
-Além da lista do plano HF-27 §7 (tokens Claude/Codex na VPS, SSH, Tailscale, PAT, credenciais de terceiros, billing, respostas de negócio do Grill), este plano adiciona somente o **USR-96**: regra de proteção do `main`, atualização do `MISSION.md` e commit humano dos patches de `core/harness/*`. Nada mais depende do owner.
+Além da lista do plano HF-27 §7 (tokens Claude/Codex na VPS, SSH, Tailscale, PAT, credenciais de terceiros, billing, respostas de negócio do Grill), este plano adiciona somente o **USR-96**: regra de proteção do `main`, atualização do `MISSION.md` e commit humano do patch opcional de `core/harness/*`. Nada mais depende do owner.
 
 ## Apêndice A — Guia passo a passo: proteção do `main` (fazer só depois do USR-84 verde)
 
