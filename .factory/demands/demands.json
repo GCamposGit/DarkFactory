@@ -1529,5 +1529,35 @@
     "dependencies": [],
     "created_at": "2026-09-30T17:27:02.652382Z",
     "updated_at": "2026-09-30T17:27:02.652382Z"
+  },
+  {
+    "id": "USR-72",
+    "project_id": "darkfac",
+    "title": "dokploy_redeploy: saida em tempo real, sem Traceback e com backup garantido",
+    "origin": "user",
+    "status": "planned",
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "Em 2026-09-30 o dokploy_redeploy teve um Traceback intermitente (nao capturado), excedeu 590s sem nenhuma saida por causa de buffer e, com --skip-node-sync, nao exibiu o backup pos-deploy que as execucoes anteriores exibiam.",
+    "core_journey": [
+      "Em 2026-09-30 o dokploy_redeploy teve um Traceback intermitente (nao capturado), excedeu 590s sem nenhuma saida por causa de buffer e, com --skip-node-sync, nao exibiu o backup pos-deploy que as execucoes anteriores exibiam."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Saida sem buffer (flush) e timeout/progresso explicitos em cada etapa de espera",
+      "Qualquer excecao vira mensagem de erro estruturada com exit code, nunca Traceback cru",
+      "O backup pos-deploy roda ou registra explicitamente o motivo de nao rodar, inclusive com --skip-node-sync",
+      "Testes cobrindo excecao no transporte e ordem das etapas"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-09-30T17:27:32.659425Z",
+    "updated_at": "2026-09-30T17:27:32.659425Z"
   }
 ]
