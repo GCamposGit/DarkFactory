@@ -41,7 +41,7 @@ from typing import Any, Callable, Iterable, Optional
 
 from pydantic import BaseModel, Field
 
-from core.line import diagnostics, workspace
+from core.line import agent_retry, diagnostics, workspace
 from core.line.agent_cli import AgentRequest, AgentResult, run_agent
 from core.line.routing import RoutingConfig, load_routing_config, pick, record_result
 from core.line.workspace import RunWorkspace, WorkspaceError
@@ -179,11 +179,6 @@ class _KeepMissing(dict):
 def fill_template(template: str, **values: str) -> str:
     """Tolerant `str.format`: a `prompts/*.md` with extra placeholders never raises."""
     return template.format_map(_KeepMissing(values))
-
-
-# Agent failures that say nothing about the ticket: retry the stage later
-# instead of burning one of the ticket's validate iterations.
-_TRANSIENT_AGENT_ERRORS = frozenset({"rate_limited", "auth_expired", "not_installed"})
 
 
 def _win_kwargs() -> dict[str, Any]:
@@ -461,7 +456,9 @@ class DevelopmentStage:
             )
             record_result(agent_result, config=self.routing_config)
 
-            if not agent_result.ok and agent_result.error_kind in _TRANSIENT_AGENT_ERRORS:
+            # Quota/login/missing binary say nothing about the ticket: retry the stage later instead of
+            # burning a validate iteration (policy shared with run_ticket in core.line.agent_retry).
+            if agent_retry.is_stage_retryable(agent_result):
                 return StageResult(
                     outcome="retry", cause_code=f"agent_{agent_result.error_kind}", output_refs=[]
                 )
@@ -477,7 +474,7 @@ class DevelopmentStage:
                         "note": "agent invocation failed",
                     },
                 )
-                excluded.add((harness, model))
+                agent_retry.exclude_route(excluded, harness, model)
                 continue
 
             # Re-detect after the agent ran: it may have just created the
@@ -539,14 +536,9 @@ class DevelopmentStage:
 
     def _pick_route(self, excluded: set[tuple[str, Optional[str]]]) -> Optional[tuple[str, Optional[str]]]:
         """Next (harness, model), skipping pairs that crashed; falls back to them if nothing else is routable."""
-        if excluded:
-            route = self.pick_func(
-                "development", self.host_caps, config=self.routing_config, exclude=set(excluded)
-            )
-            if route is not None:
-                return route
-            logger.warning("Every development route already failed for this ticket; retrying without exclusions")
-        return self.pick_func("development", self.host_caps, config=self.routing_config)
+        return agent_retry.pick_route(
+            self.pick_func, "development", self.host_caps, self.routing_config, excluded
+        )
 
     def _persist_diagnostics(self, ws: RunWorkspace, run_id: str, ticket_id: str) -> None:
         """Commit + push the per-iteration logs (context dir only) so a failed run is debuggable remotely."""

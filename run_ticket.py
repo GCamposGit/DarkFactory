@@ -15,6 +15,7 @@ import os
 import re
 import subprocess
 import sys
+import time
 from pathlib import Path
 from typing import Any, Optional
 
@@ -30,11 +31,15 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from core.demands.models import UserTicket
 from core.demands.store import DemandsStore
-from core.line.agent_cli import AgentRequest, AgentResult, run_agent
+from core.line import agent_retry
+from core.line.agent_cli import HARNESS_CAPABILITIES, AgentRequest, AgentResult, run_agent, supports
 from core.line.routing import _HARNESS_TO_PROVIDER, _default_quota_headroom, load_routing_config, pick
 from core.roadmap.models import DeliveryStatus
 
 logger = logging.getLogger("darkfac.run_ticket")
+
+# The launcher asks the agent to edit files in the checkout, so the route must declare `write`.
+DEVELOPMENT_MODE = "write"
 
 _OVERRIDE_PATTERNS = [
     re.compile(r"\b(?:forcar|forçar|force)\b", re.IGNORECASE),
@@ -82,10 +87,48 @@ def format_quota_report(quotas: dict[str, dict[str, Any]]) -> str:
     return "\n".join(lines)
 
 
+def _format_optional(value: Any, empty: str = "-") -> str:
+    return empty if value is None or value == "" else str(value)
+
+
+def format_agent_failure(report: agent_retry.RetryReport) -> str:
+    """Human-readable failure report: never empty, always harness/model/error kind/exit code/duration/stderr."""
+    final = report.attempts[-1] if report.attempts else None
+    if final is None and report.result is not None:
+        final = agent_retry.AgentAttempt.from_result(0, report.result)
+    lines = [
+        "[FALHA NA EXECUÇÃO DO AGENTE] nenhuma tentativa concluiu com sucesso "
+        f"({len(report.attempts)} tentativa(s), {report.total_duration_s}s no total)."
+    ]
+    if final is not None:
+        stderr = final.stderr_tail.strip()
+        lines += [
+            f"  harness: {final.harness}",
+            f"  modelo: {_format_optional(final.model, 'padrão')}",
+            f"  error_kind: {_format_optional(final.error_kind)}",
+            f"  exit_code: {_format_optional(final.exit_code, 'n/d')}",
+            f"  duração: {final.duration_s}s",
+            "  stderr (final):",
+            *[f"    {line}" for line in (stderr.splitlines() if stderr else ["(vazio)"])],
+            f"  saída do agente: {_format_optional(final.output_head.strip(), '(vazia)')}",
+        ]
+    if len(report.attempts) > 1:
+        lines.append("  histórico:")
+        lines += [
+            f"    {a.number}. {a.harness}/{_format_optional(a.model, 'padrão')} error_kind={_format_optional(a.error_kind)} "
+            f"exit_code={_format_optional(a.exit_code, 'n/d')} duração={a.duration_s}s"
+            for a in report.attempts
+        ]
+    return "\n".join(lines)
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="DarkFac Canonical Ticket Runner (Skill 19-run-ticket)")
     parser.add_argument("ticket_id", nargs="?", default=None, help="Ticket ID to run (e.g. USR-59)")
-    parser.add_argument("--harness", default=None, help="Explicitly requested harness (claude, codex, grok, antigravity)")
+    parser.add_argument(
+        "--harness", default=None,
+        help="Explicitly requested harness (must support write mode: claude, codex). Never falls back to another harness",
+    )
     parser.add_argument("--force", action="store_true", help="Explicit override to allow running on a critical quota harness")
     parser.add_argument("--prompt", default="", help="User natural language prompt (checked for explicit override)")
     parser.add_argument("--create", action="store_true", help="Create a new ticket before running")
@@ -143,6 +186,20 @@ def main(argv: Optional[list[str]] = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
 
+    # Fail before any side effect (quota probe, ticket creation, agent call) when the requested harness
+    # cannot do what development needs: capabilities are declared, never assumed.
+    if args.harness and not (args.create and args.queue_only) and not supports(args.harness, DEVELOPMENT_MODE):
+        requested = args.harness.lower().strip()
+        declared = ", ".join(sorted(HARNESS_CAPABILITIES.get(requested, frozenset()))) or "nenhuma (harness desconhecido)"
+        writers = ", ".join(sorted(h for h, modes in HARNESS_CAPABILITIES.items() if DEVELOPMENT_MODE in modes))
+        print(
+            f"[ERRO] O harness '{requested}' não suporta o modo '{DEVELOPMENT_MODE}' exigido pelo desenvolvimento "
+            f"(capacidades declaradas: {declared}).\n"
+            f"Harnesses com escrita: {writers}. Nenhum agente foi consumido.",
+            file=sys.stderr,
+        )
+        return 2
+
     quotas = inspect_quotas()
     if not args.json:
         print(format_quota_report(quotas))
@@ -199,7 +256,7 @@ def main(argv: Optional[list[str]] = None) -> int:
                 file=sys.stderr,
             )
             # Find recommended healthy harness
-            rec_route = pick("development", caps)
+            rec_route = pick("development", caps, mode=DEVELOPMENT_MODE)
             if rec_route:
                 print(f"--> Recomendação do Roteador: {rec_route[0].upper()}", file=sys.stderr)
             return 2
@@ -211,8 +268,8 @@ def main(argv: Optional[list[str]] = None) -> int:
             else:
                 print(f"[+] Harness explicitamente selecionado: {target_harness}")
     else:
-        # Automatic router resolution via Dynamic Headroom
-        route = pick("development", caps)
+        # Automatic router resolution via Dynamic Headroom, among harnesses that can write
+        route = pick("development", caps, mode=DEVELOPMENT_MODE)
         if route is None:
             print(
                 "\n[ERRO] Nenhuma rota disponível: todas as contas de assinatura estão <= 15% e OpenRouter sem saldo confirmado.",
@@ -221,7 +278,10 @@ def main(argv: Optional[list[str]] = None) -> int:
             return 2
         selected_harness, selected_model = route
         if not args.json:
-            print(f"[+] Roteador selecionou automaticamente: {selected_harness.upper()} (Modelo: {selected_model or 'default'})")
+            print(
+                f"[+] Roteador selecionou automaticamente: {selected_harness.upper()} "
+                f"(Modelo: {selected_model or 'default'}, modo: {DEVELOPMENT_MODE})"
+            )
 
     if args.dry_run:
         result_payload = {
@@ -229,13 +289,17 @@ def main(argv: Optional[list[str]] = None) -> int:
             "title": ticket.title,
             "selected_harness": selected_harness,
             "selected_model": selected_model,
+            "mode": DEVELOPMENT_MODE,
             "override_granted": override_granted,
             "dry_run": True,
         }
         if args.json:
             print(json.dumps(result_payload, indent=2))
         else:
-            print(f"\n[DRY RUN] Execução concluída sem alterações. Rota validada: {selected_harness}")
+            print(
+                f"\n[DRY RUN] Execução concluída sem alterações. "
+                f"Rota validada: {selected_harness} (modo: {DEVELOPMENT_MODE})"
+            )
         return 0
 
     # 3. Execution Phase
@@ -252,19 +316,45 @@ def main(argv: Optional[list[str]] = None) -> int:
     if not args.json:
         print(f"\n--> Iniciando desenvolvimento via {selected_harness.upper()}...")
 
-    agent_req = AgentRequest(
-        prompt=dev_prompt,
-        cwd=PROJECT_ROOT,
-        mode="write",
-        harness=selected_harness,
-        model=selected_model,
-        timeout_s=1800,
-    )
+    def _build_request(harness: str, model: Optional[str]) -> AgentRequest:
+        return AgentRequest(
+            prompt=dev_prompt, cwd=PROJECT_ROOT, mode=DEVELOPMENT_MODE, harness=harness, model=model, timeout_s=1800,
+        )
 
-    agent_result = run_agent(agent_req)
-    if not agent_result.ok:
-        print(f"[FALHA NA EXECUÇÃO DO AGENTE]: {agent_result.text}", file=sys.stderr)
+    def _report_progress(message: str) -> None:
+        if not args.json:
+            print(f"[!] {message}", file=sys.stderr)
+
+    # Same failure policy as the production line (core.line.agent_retry): transient failures repeat with
+    # backoff, then the harness is excluded and the next healthy one is tried. An explicit --harness is
+    # honoured: it may retry but never falls through to another harness.
+    report = agent_retry.run_with_retry(
+        _build_request,
+        (selected_harness, selected_model),
+        host_caps=caps,
+        stage="development",
+        mode=DEVELOPMENT_MODE,
+        config=load_routing_config(),
+        run_func=run_agent,
+        pick_func=pick,
+        sleep_fn=time.sleep,
+        pinned=bool(args.harness),
+        on_event=_report_progress,
+    )
+    if not report.ok or report.result is None:
+        failure = format_agent_failure(report)
+        print(failure, file=sys.stderr)
+        if args.json:
+            print(json.dumps({
+                "ok": False,
+                "ticket_id": ticket.id,
+                "attempts": [a.model_dump() for a in report.attempts],
+            }, indent=2, ensure_ascii=False))
         return 1
+
+    agent_result = report.result
+    if report.route is not None:
+        selected_harness, selected_model = report.route  # the harness that actually did the work
 
     if not args.json:
         print(f"[+] Desenvolvimento concluído com sucesso pelo {selected_harness.upper()}.")
