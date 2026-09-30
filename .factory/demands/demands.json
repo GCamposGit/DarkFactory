@@ -1298,7 +1298,7 @@
     "project_id": "darkfac",
     "title": "Worker de testes: /system/restart deve reiniciar o daemon HTTP da porta 8080",
     "origin": "user",
-    "status": "planned",
+    "status": "completed",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -1321,6 +1321,6 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-09-30T08:33:47.808428Z",
-    "updated_at": "2026-09-30T08:33:47.808428Z"
+    "updated_at": "2026-09-30T11:55:21.864200Z"
   }
 ]
