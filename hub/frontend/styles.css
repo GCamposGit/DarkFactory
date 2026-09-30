@@ -16273,3 +16273,127 @@ body {
   .roadmap-card:focus-within { transform: none; }
   .roadmap-list-item { transition: none; }
 }
+
+/* DarkHub Vertical Sidebar — Ticket T1 (menu superior -> sidebar colapsavel) */
+.darkhub-sidebar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  width: 14rem;
+  height: 100vh;
+  background: rgba(2, 6, 23, 0.97);
+  border-right: 1px solid rgba(51, 65, 85, 0.6);
+  overflow: hidden;
+  transition: width 0.2s ease, transform 0.2s ease;
+}
+
+.darkhub-sidebar-nav {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  gap: 0.25rem;
+  padding: 0.75rem;
+  overflow-y: auto;
+}
+
+.darkhub-sidebar-item {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.6rem 0.75rem;
+  border-radius: 0.65rem;
+  color: #cbd5e1;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+.darkhub-sidebar-item:hover,
+.darkhub-sidebar-item:focus-visible {
+  background: rgba(99, 102, 241, 0.12);
+  color: #f8fafc;
+}
+
+.darkhub-sidebar-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.darkhub-sidebar-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.25rem;
+  height: 2.25rem;
+  flex: 0 0 auto;
+  border-radius: 0.65rem;
+  border: 1px solid rgba(51, 65, 85, 0.6);
+  background: rgba(15, 23, 42, 0.6);
+  color: #cbd5e1;
+  cursor: pointer;
+}
+
+.darkhub-sidebar-toggle:hover,
+.darkhub-sidebar-toggle:focus-visible {
+  background: rgba(99, 102, 241, 0.16);
+  color: #f8fafc;
+}
+
+/* Collapsed state: icons-only rail (~4rem), label hidden, tooltip via native title= */
+.darkhub-sidebar.darkhub-sidebar-collapsed {
+  width: 4rem;
+}
+
+.darkhub-sidebar.darkhub-sidebar-collapsed .darkhub-sidebar-label {
+  display: none;
+}
+
+.darkhub-sidebar.darkhub-sidebar-collapsed .darkhub-sidebar-item {
+  justify-content: center;
+}
+
+/* Main content offset so the fixed sidebar never overlaps page content */
+.darkhub-main-offset {
+  margin-left: 14rem;
+  transition: margin-left 0.2s ease;
+}
+
+.darkhub-main-offset.darkhub-main-offset-collapsed {
+  margin-left: 4rem;
+}
+
+/* Mobile overlay backdrop behind the sidebar when opened via the hamburger button */
+.darkhub-sidebar-backdrop {
+  display: none;
+  position: fixed;
+  inset: 0;
+  z-index: 35;
+  background: rgba(2, 6, 23, 0.7);
+  backdrop-filter: blur(2px);
+  -webkit-backdrop-filter: blur(2px);
+}
+
+.darkhub-sidebar-backdrop.darkhub-sidebar-backdrop-visible {
+  display: block;
+}
+
+@media (max-width: 768px) {
+  .darkhub-sidebar {
+    width: 14rem;
+    transform: translateX(-100%);
+    box-shadow: 0 0 40px rgba(2, 6, 23, 0.6);
+  }
+
+  .darkhub-sidebar.darkhub-sidebar-mobile-open {
+    z-index: 45;
+    transform: translateX(0);
+  }
+
+  .darkhub-main-offset {
+    margin-left: 0;
+  }
+}
