@@ -1618,5 +1618,34 @@
     "dependencies": [],
     "created_at": "2026-09-30T14:43:38.489048Z",
     "updated_at": "2026-09-30T17:33:01.816402Z"
+  },
+  {
+    "id": "USR-75",
+    "project_id": "darkfac",
+    "title": "IDs de ticket nao podem colidir entre worktrees e sessoes simultaneas",
+    "origin": "user",
+    "status": "planned",
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "Em 2026-09-30 o run_ticket --create (worktree do DarkHub) e o run_ticket --queue-only alocaram o mesmo ID USR-67 porque cada um calcula o proximo ID a partir do seu proprio demands.json, sem ver tickets ainda nao mergeados em outras worktrees. O ticket do DarkHub precisou ser renumerado para USR-74 manualmente.",
+    "core_journey": [
+      "Em 2026-09-30 o run_ticket --create (worktree do DarkHub) e o run_ticket --queue-only alocaram o mesmo ID USR-67 porque cada um calcula o proximo ID a partir do seu proprio demands.json, sem ver tickets ainda nao mergeados em outras worktrees. O ticket do DarkHub precisou ser renumerado para USR-74 manualmente."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "A alocacao de ID considera origin/main mais todas as worktrees locais (git worktree list) e branches ticket/* abertas, e reserva o ID por lock atomico em arquivo",
+      "Colisao detectada no merge do demands.json (mesmo ID, titulos diferentes) falha o portao com mensagem clara",
+      "Testes cobrindo duas alocacoes simultaneas e colisao detectada"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-09-30T17:35:54.781574Z",
+    "updated_at": "2026-09-30T17:35:54.781574Z"
   }
 ]
