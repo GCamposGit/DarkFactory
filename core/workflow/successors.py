@@ -47,7 +47,7 @@ from core.workflow.control_contracts import (
     StageResult,
     normalize_cause_code,
 )
-from core.workflow.control_store import ControlStore
+from core.workflow.control_store import RUN_OPEN_JOB_STATUSES, ControlStore
 
 logger = logging.getLogger(__name__)
 
@@ -517,9 +517,10 @@ def materialize_result(
             )
 
             # D. Check if workflow run has completed or failed
+            # Parked jobs (waiting_human / waiting_dependency) keep the run open.
             cur.execute(
-                "SELECT COUNT(*) FROM jobs WHERE run_id = ? AND status IN ('pending', 'running')",
-                (job_key.run_id,),
+                f"SELECT COUNT(*) FROM jobs WHERE run_id = ? AND status IN ({', '.join('?' * len(RUN_OPEN_JOB_STATUSES))})",
+                (job_key.run_id, *RUN_OPEN_JOB_STATUSES),
             )
             active_jobs_remaining = cur.fetchone()[0]
             if active_jobs_remaining == 0:
@@ -689,9 +690,10 @@ def materialize_result(
                     )
 
                     # D. Check if workflow run has completed or failed
+                    # Parked jobs (waiting_human / waiting_dependency) keep the run open.
                     cur.execute(
-                        "SELECT COUNT(*) FROM jobs WHERE run_id = %s AND status IN ('pending', 'running')",
-                        (job_key.run_id,),
+                        "SELECT COUNT(*) FROM jobs WHERE run_id = %s AND status = ANY(%s)",
+                        (job_key.run_id, list(RUN_OPEN_JOB_STATUSES)),
                     )
                     row = cur.fetchone()
                     active_jobs_remaining = row[0] if row else 0

@@ -1306,6 +1306,14 @@ class PostgresControlStore:
                         ),
                     )
                     resumed = cur.rowcount > 0
+                    if resumed:
+                        # Heal legacy rows: a run closed as `completed` while this job
+                        # was parked is live again (idempotent; same transaction).
+                        cur.execute(
+                            "UPDATE runs SET status = 'active', completed_at = NULL, updated_at = %s "
+                            "WHERE run_id = %s AND status = 'completed'",
+                            (now_utc, job_key.run_id),
+                        )
                     conn.commit()
                     return resumed
         except Exception as exc:
