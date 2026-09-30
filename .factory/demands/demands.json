@@ -1384,5 +1384,34 @@
     "dependencies": [],
     "created_at": "2026-09-30T12:36:41.774475Z",
     "updated_at": "2026-09-30T12:57:17.697038Z"
+  },
+  {
+    "id": "USR-67",
+    "project_id": "darkfac",
+    "title": "Roteador de desenvolvimento nao pode eleger harness sem modo de escrita headless",
+    "origin": "user",
+    "status": "planned",
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "Em 2026-09-30 o roteador elegeu ANTIGRAVITY para o USR-67 e o run_ticket falhou com 'Antigravity has no reliable headless write mode on this host; only read is supported'. O ticket ficou parado ate ser reexecutado manualmente com --harness codex.",
+    "core_journey": [
+      "Em 2026-09-30 o roteador elegeu ANTIGRAVITY para o USR-67 e o run_ticket falhou com 'Antigravity has no reliable headless write mode on this host; only read is supported'. O ticket ficou parado ate ser reexecutado manualmente com --harness codex."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "core.line.routing.pick e run_ticket so elegem, para mode=write, harnesses com capacidade de escrita headless comprovada (capacidade declarada, nao suposta)",
+      "Se o eleito falhar por falta de capacidade, o run_ticket tenta automaticamente o proximo harness saudavel antes de falhar",
+      "Testes cobrindo a exclusao do antigravity em write e o fallback automatico"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-09-30T17:25:29.151390Z",
+    "updated_at": "2026-09-30T17:25:29.151390Z"
   }
 ]
