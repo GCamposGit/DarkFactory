@@ -2566,5 +2566,34 @@
     ],
     "created_at": "2026-09-30T22:00:00Z",
     "updated_at": "2026-09-30T22:00:00Z"
+  },
+  {
+    "id": "USR-98",
+    "project_id": "darkfac",
+    "title": "Worker da nuvem nao conhece a cota do Codex: revisao cai sempre no OpenRouter",
+    "origin": "user",
+    "status": "planned",
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "No worker Docker do VPS, core.line.routing._default_quota_headroom devolve None para openai (sem snapshot fresco em .factory/usage/providers), entao o Codex fica inelegivel (fail-closed) e a revisao independente de runs implementados pelo Claude cai no OpenRouter deepseek-v4.1-flash. Evidencia: run-f0c98a90cf0f (USR-62 tentativa 3) em 30/09, log do worker 'Harness openrouter returned no text' em todas as iteracoes de independent_review.",
+    "core_journey": [
+      "No worker Docker do VPS, core.line.routing._default_quota_headroom devolve None para openai (sem snapshot fresco em .factory/usage/providers), entao o Codex fica inelegivel (fail-closed) e a revisao independente de runs implementados pelo Claude cai no OpenRouter deepseek-v4.1-flash. Evidencia: run-f0c98a90cf0f (USR-62 tentativa 3) em 30/09, log do worker 'Harness openrouter returned no text' em todas as iteracoes de independent_review."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "O worker da nuvem obtem headroom real do Codex (e do Claude) sem depender de snapshot do PC do owner",
+      "Revisao de run implementado pelo Claude roteia para Codex quando ha cota",
+      "Sem cota conhecida continua fail-closed; teste cobrindo os dois casos"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-09-30T21:47:11.193999Z",
+    "updated_at": "2026-09-30T21:47:11.193999Z"
   }
 ]
