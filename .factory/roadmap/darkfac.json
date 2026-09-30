@@ -2333,12 +2333,16 @@
       "item_type": "feature",
       "lifecycle_stage": "next_steps",
       "delivery_status": "validating",
-      "state_rationale": "HF-27-01 a HF-27-11 implementados e integrados em main; o canário E2E (HF-27-10) roda em produção. Falta o critério V2 do plano (7 dias verdes seguidos do canário) e o registro de verificação de V1, V3 e V4 antes de concluir o marco.",
+      "state_rationale": "HF-27-01 a HF-27-11 implementados e integrados em main; o canário E2E (HF-27-10) roda em produção. Falta o critério V2 do plano (7 dias verdes seguidos do canário) e o registro de verificação de V1, V3 e V4 antes de concluir o marco. Bloqueio identificado em 30/09/2026: o CI do main esta vermelho desde 24/09 e a etapa de integracao da linha nao fecha PRs do proprio darkfac enquanto isso durar; V1 depende do marco HF-28 (USR-84, USR-85, USR-86).",
       "horizon": "now",
       "confidence": "high",
       "dependencies": [
         {
           "item_id": "HF-03-08",
+          "type": "requires"
+        },
+        {
+          "item_id": "HF-28",
           "type": "requires"
         }
       ],
@@ -3020,6 +3024,54 @@
         }
       ],
       "parent_id": "HF-27"
+    },
+    {
+      "id": "HF-28",
+      "project_id": "darkfac",
+      "title": "Estabilidade e autonomia da fábrica (plano HF-28)",
+      "description": "Corrige de forma definitiva os defeitos que impedem a fábrica de rodar sem erros e sem surpresas em todos os ambientes: CI do main, portão de merge, roteador, ciclo interno, hermeticidade dos testes, nós/deploy, skills x esteira e consumidores de autonomia. Sem novas features. Ver docs/STABILITY_PLAN_2026-09-30.md.",
+      "item_type": "quality",
+      "lifecycle_stage": "execution",
+      "delivery_status": "planned",
+      "state_rationale": "Planejado em 30/09/2026 a partir da auditoria de tickets, roadmap e skills; tickets USR-84 a USR-96 e endurecimento dos USR-67 a USR-83 no ledger de demandas.",
+      "horizon": "now",
+      "confidence": "high",
+      "dependencies": [
+        {
+          "item_id": "HF-27",
+          "type": "related_to"
+        }
+      ],
+      "tags": [
+        "stability",
+        "autonomy"
+      ],
+      "completion_criteria": [
+        "main verde no CI em Linux e Windows e mantido verde (S1)",
+        "Nenhum merge autônomo com CI vermelho ou pendente (S2)",
+        "Nenhuma suíte altera o checkout nem o .factory real (S3)",
+        "Roteador só elege harness com a capacidade exigida (S4)",
+        "Falta de cota/rota não estaciona run em waiting_human (S5)",
+        "Skills do caminho crítico refletem a esteira e são validadas por gate de drift (S6)"
+      ],
+      "source_refs": [
+        {
+          "source_id": "approved-roadmap",
+          "source_kind": "document",
+          "label": "Plano de estabilidade e autonomia HF-28",
+          "locator": "docs/STABILITY_PLAN_2026-09-30.md",
+          "produced_by": "claude-sonnet-5-5"
+        }
+      ],
+      "evidence_refs": [
+        {
+          "evidence_id": "doc:HF-28:STABILITY_PLAN",
+          "evidence_kind": "handoff_doc",
+          "label": "Plano HF-28",
+          "locator": "docs/STABILITY_PLAN_2026-09-30.md",
+          "verified": false
+        }
+      ]
     }
   ]
 }
