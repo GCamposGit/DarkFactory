@@ -1,0 +1,85 @@
+[
+  {
+    "id": "T1",
+    "title": "CSS da sidebar vertical no DarkHub (styles.css + espelho static)",
+    "goal": "Adicionar em hub/frontend/styles.css as classes de layout e componente necessárias à barra lateral esquerda (container fixo à esquerda ocupando a altura da viewport, coluna com scroll interno, largura expandida ~14rem e colapsada ~4rem, ocultação do rótulo no modo colapsado, backdrop de overlay, offset lateral do conteúdo principal e bloco @media para esconder a sidebar por padrão em telas pequenas), sem tocar em HTML/JS e sem quebrar nenhuma regra existente, replicando o arquivo byte a byte em hub/frontend/static/styles.css.",
+    "files_hint": [
+      "hub/frontend/styles.css",
+      "hub/frontend/static/styles.css",
+      "tests/test_transformar_menu_superior_em_m.py"
+    ],
+    "acceptance": [
+      "hub/frontend/styles.css define as classes darkhub-sidebar, darkhub-sidebar-nav, darkhub-sidebar-item, darkhub-sidebar-label, darkhub-sidebar-toggle, darkhub-sidebar-backdrop e o modificador de estado colapsado, além da classe de offset aplicada ao conteúdo principal",
+      "Existe ao menos um bloco @media de largura máxima que remove a sidebar do fluxo em telas pequenas e prepara o comportamento de overlay",
+      "hub/frontend/static/styles.css é byte-idêntico a hub/frontend/styles.css (mesmo tamanho e mesmo SHA-256)",
+      "Nenhuma regra pré-existente de styles.css é removida ou redefinida: o arquivo só cresce; os testes de tests/test_frontend_foundation.py continuam passando",
+      "Nenhuma alteração em index.html, app.js ou hub/backend/*"
+    ],
+    "tests_to_add": [
+      "tests/test_transformar_menu_superior_em_m.py::test_sidebar_css_classes_present — lê styles.css e afirma a presença de cada seletor novo da sidebar",
+      "tests/test_transformar_menu_superior_em_m.py::test_sidebar_css_has_responsive_media_query — afirma que existe bloco @media (max-width: ...) cobrindo a sidebar",
+      "tests/test_transformar_menu_superior_em_m.py::test_styles_css_and_static_mirror_are_byte_identical — compara read_bytes() de styles.css e static/styles.css",
+      "tests/test_transformar_menu_superior_em_m.py::test_existing_frontend_foundation_classes_preserved — reafirma a presença de um subconjunto das utilitárias críticas já exigidas por test_frontend_foundation.py"
+    ],
+    "smoke": [
+      "/",
+      "/static/styles.css"
+    ]
+  },
+  {
+    "id": "T2",
+    "title": "Reestruturar index.html: topbar fina + <aside> de navegação vertical",
+    "goal": "Mover os ~15 gatilhos de navegação do bloco horizontal do <header> (hub/frontend/index.html:41-209) para um <aside id=\"darkhub-sidebar\"> fixo à esquerda, com <nav> em coluna e rótulos em <span class=\"darkhub-sidebar-label\">, mantendo na topbar apenas marca/versão/badge de cobertura, seletor de projeto, status Ollama/OpenRouter e busca Ctrl+K, e adicionando o botão hambúrguer (visível só em telas pequenas) e o backdrop do overlay; o <main> recebe a classe de offset lateral.",
+    "files_hint": [
+      "hub/frontend/index.html",
+      "tests/test_transformar_menu_superior_em_m.py"
+    ],
+    "acceptance": [
+      "Existe exatamente um elemento com id=\"darkhub-sidebar\" contendo um <nav>, e todos os gatilhos de navegação (openBenchmarksModal, openLearningDrawer, openPortfolioDrawer, openRoadmapDrawer, openDemandsDrawer, openTelemetryDrawer, openPlaygroundDrawer, openPromptVaultDrawer, openBackupModal, openServiceModal e os scrollIntoView de content-studio-section, harness-validation-section, infrastructure-cards-section, tasks-dashboard-section) aparecem dentro dele, cada onclick exatamente uma vez no arquivo",
+      "Os ids usados por JS (hub-coverage-badge, hub-coverage-badge-text, portfolio-trigger-btn, global-project-select, ollama-status-badge, openrouter-status-badge) continuam presentes exatamente uma vez no HTML",
+      "A topbar mantém marca DarkHub, badge de cobertura, seletor de projeto, os dois indicadores de status e o botão de busca com kbd Ctrl+K; não contém mais a fila horizontal de botões de navegação",
+      "Existem o botão hambúrguer (id=\"darkhub-sidebar-mobile-toggle\", com aria-controls=\"darkhub-sidebar\" e aria-expanded) e o backdrop (id=\"darkhub-sidebar-backdrop\"); o <main> usa a classe de offset definida no T1",
+      "Os atributos title= de cada item da sidebar são preservados para servir de tooltip no modo colapsado; a tag <link> mantém ?v=20260924b e as tags <script> permanecem inalteradas",
+      "Nenhuma alteração em hub/backend/*; tests/test_frontend_foundation.py continua passando"
+    ],
+    "tests_to_add": [
+      "tests/test_transformar_menu_superior_em_m.py::test_sidebar_container_exists_in_html",
+      "tests/test_transformar_menu_superior_em_m.py::test_all_navigation_handlers_moved_into_sidebar — extrai o bloco do <aside> e afirma que cada onclick esperado está lá",
+      "tests/test_transformar_menu_superior_em_m.py::test_navigation_handlers_appear_exactly_once — garante que nenhum gatilho foi duplicado entre topbar e sidebar",
+      "tests/test_transformar_menu_superior_em_m.py::test_topbar_keeps_brand_project_status_and_search",
+      "tests/test_transformar_menu_superior_em_m.py::test_js_referenced_ids_preserved",
+      "tests/test_transformar_menu_superior_em_m.py::test_mobile_toggle_and_backdrop_present_with_aria"
+    ],
+    "smoke": [
+      "/",
+      "/static/index.html"
+    ]
+  },
+  {
+    "id": "T3",
+    "title": "Comportamento da sidebar em app.js: colapso persistente e overlay mobile",
+    "goal": "Implementar em hub/frontend/app.js as funções toggleSidebar(), openSidebarMobile() e closeSidebarMobile(), persistindo o estado colapsado em localStorage sob a chave darkhub_sidebar_collapsed (mesmo padrão de darkhub_active_project), restaurando o estado no carregamento da página, sincronizando aria-expanded do hambúrguer e do botão de colapso, e fechando o overlay ao clicar no backdrop ou pressionar Esc — sem adicionar novo arquivo de script ao index.html.",
+    "files_hint": [
+      "hub/frontend/app.js",
+      "hub/frontend/index.html",
+      "tests/test_transformar_menu_superior_em_m.py"
+    ],
+    "acceptance": [
+      "app.js expõe globalmente toggleSidebar, openSidebarMobile e closeSidebarMobile, e usa localStorage.getItem/setItem com a chave darkhub_sidebar_collapsed",
+      "O estado colapsado é restaurado na inicialização (junto do bootstrap já existente de app.js) aplicando/removendo a classe de colapso em #darkhub-sidebar antes da primeira interação",
+      "Clique no backdrop e tecla Escape fecham o overlay mobile; aria-expanded do hambúrguer reflete o estado aberto/fechado",
+      "O código é defensivo: usa optional chaining/guardas para não lançar erro quando os elementos não existirem (mesma postura dos demais handlers do arquivo)",
+      "Nenhum novo <script> é adicionado ao index.html e todas as tags existentes mantêm ?v=20260924b; nenhuma alteração em hub/backend/*"
+    ],
+    "tests_to_add": [
+      "tests/test_transformar_menu_superior_em_m.py::test_app_js_defines_sidebar_toggle_functions",
+      "tests/test_transformar_menu_superior_em_m.py::test_app_js_persists_sidebar_state_in_localstorage — regex por darkhub_sidebar_collapsed com getItem e setItem",
+      "tests/test_transformar_menu_superior_em_m.py::test_app_js_closes_overlay_on_escape_and_backdrop",
+      "tests/test_transformar_menu_superior_em_m.py::test_index_html_script_tags_unchanged_and_versioned — reafirma versão única ?v=20260924b e ausência de script novo"
+    ],
+    "smoke": [
+      "/",
+      "/static/app.js"
+    ]
+  }
+]
