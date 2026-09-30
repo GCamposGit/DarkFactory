@@ -1,0 +1,62 @@
+{
+  "assumptions": [
+    "Nenhuma mudanca em hub/backend/* (API, modelos Pydantic) - e uma refatoracao pura de apresentacao em hub/frontend/index.html e hub/frontend/styles.css (CSS self-contained, sem Tailwind CDN, conforme DH-13/USR-49 e validado por test_frontend_foundation.py).",
+    "Todos os handlers onclick existentes (openBenchmarksModal, openLearningDrawer, openPortfolioDrawer, openRoadmapDrawer, openDemandsDrawer, openTelemetryDrawer, scrollIntoView triggers, openPlaygroundDrawer, openPromptVaultDrawer, openBackupModal, openServiceModal) permanecem inalterados; so o container/layout que os agrupa muda de horizontal para vertical.",
+    "Novas classes utilitarias usadas no layout vertical (fixed, left-0, h-screen, flex-col, w-56/w-16, etc.) serao adicionadas manualmente a hub/frontend/styles.css seguindo o padrao hand-authored existente (nao ha build step/gerador automatico a rodar).",
+    "O grupo de 'category-tabs' (pills de categoria) e a secao 'Quick Launch Dock' abaixo do header sao secoes de conteudo, nao fazem parte do 'menu superior' a ser transformado, e permanecem como estao.",
+    "Nao ha acoplamento de logica de negocio na sidebar: e apenas reorganizacao de apresentacao dos gatilhos ja existentes, mantendo os mesmos dados/estado ja controlados por app.js e demais modulos.",
+    "styles.css e static/styles.css devem permanecer byte-identicos apos a mudanca, conforme checagem existente em test_frontend_foundation.py."
+  ],
+  "technical": [
+    {
+      "id": "q2",
+      "text": "A sidebar deve ser colapsável (alternando entre ícones+rótulo e só ícones, com estado salvo) ou sempre fixa expandida com rótulos visíveis?",
+      "kind": "technical",
+      "options": [
+        "Colapsável com toggle e persistência em localStorage",
+        "Sempre expandida (ícone+rótulo), sem toggle"
+      ],
+      "recommended": "Colapsável com toggle e persistência em localStorage",
+      "why": "Com ~15 itens a coluna fica alta; permitir colapsar para icones reduz altura/rolagem e reaproveita os 'title' ja existentes nos botoes como tooltip."
+    },
+    {
+      "id": "q3",
+      "text": "Como a sidebar deve se comportar em telas pequenas (mobile), já que hoje não existe nenhum padrão de hambúrguer/drawer responsivo no código (nenhuma ocorrência de 'hamburger'/'toggleSidebar'/'mobile-menu' em hub/frontend, e o único responsivo existente são pequenos blocos '@media max-width:900px/640px' no fim de styles.css)?",
+      "kind": "technical",
+      "options": [
+        "Oculta por padrão atrás de um botão hambúrguer na topbar, abrindo como overlay",
+        "Sidebar sempre visível também no mobile, ocupando parte da tela"
+      ],
+      "recommended": "Oculta por padrão atrás de um botão hambúrguer na topbar, abrindo como overlay",
+      "why": "Reaproveita o padrao visual de drawer ja usado pelas funcoes openXDrawer() existentes em app.js e evita reduzir ainda mais o espaco de conteudo em telas pequenas."
+    },
+    {
+      "id": "q4",
+      "text": "Os testes de frontend do DarkHub hoje (tests/test_frontend_foundation.py) fazem asserts de texto/regex sobre hub/frontend/index.html.read_text() e styles.css.read_text() (mais FastAPI TestClient para rotas), sem lxml nem navegador real. O novo tests/test_transformar_menu_superior_em_m.py deve seguir esse mesmo padrão (asserts de presença do novo id/classe da sidebar, ausência do container horizontal antigo, preservação de todos os onclick/IDs dos gatilhos)?",
+      "kind": "technical",
+      "options": [
+        "Teste com read_text()+regex sobre HTML/CSS, mesmo padrão de test_frontend_foundation.py",
+        "Introduzir um novo runner de teste de navegador (Playwright/Selenium) só para este ticket"
+      ],
+      "recommended": "Teste com read_text()+regex sobre HTML/CSS, mesmo padrão de test_frontend_foundation.py",
+      "why": "Consistente com a suite de hub existente e evita adicionar dependencia pesada nova, o que esta explicitamente fora de escopo na demanda."
+    }
+  ],
+  "questions": [
+    {
+      "id": "q1",
+      "text": "O 'menu superior' de ~15 botões de ação (Buscar, Benchmarks, Aprendizado, Portfólio, Roadmap, Demandas, Telemetria, Estúdio, Testes, Infra, Tarefas, Playground, Prompts, Backup, Novo) hoje vive numa única linha flex sem quebra/scroll que estoura para a direita (hub/frontend/index.html:41-209). Ao virar menu vertical, a marca 'DarkHub', o seletor de projeto, os indicadores de status (Ollama/OpenRouter) e a busca (Ctrl+K) também devem migrar para a barra lateral, ou só os botões de navegação viram sidebar, mantendo uma topbar fina com marca/seletor/busca/status?",
+      "kind": "intent",
+      "options": [
+        "Sidebar completo: tudo (marca, seletor, status, busca, botões) move para a esquerda, sem header superior",
+        "Sidebar só para os botões de navegação; marca/seletor/status/busca permanecem numa topbar fina no topo"
+      ],
+      "recommended": "Sidebar só para os botões de navegação; marca/seletor/status/busca permanecem numa topbar fina no topo",
+      "why": "E o padrao mais comum em dashboards, resolve o estouro (que vem dos botoes de acao, nao da marca/busca) com menor risco de quebrar elementos globais de status sempre visiveis."
+    }
+  ],
+  "deadline": "2026-10-01T06:37:42.318503Z",
+  "answers": {},
+  "notified": false,
+  "auto_resolved": []
+}
