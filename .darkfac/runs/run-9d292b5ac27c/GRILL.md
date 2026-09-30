@@ -12,8 +12,5 @@
 - (technical) O menu lateral deve reservar uma coluna fixa à esquerda (empurrando o conteúdo principal) ou sobrepor o conteúdo como overlay fixo? -> **Coluna fixa reservada à esquerda; o conteúdo principal se desloca — padrão comum em dashboards admin** (Mais previsível e acessível, evita sobreposição do conteúdo existente e é consistente com o header sticky atual.)
 
 ## Decisoes do owner
-- (nenhuma pergunta bloqueante)
-
-## Aguardando decisao do owner
-- [intent] O escopo da mudança é apenas os botões de navegação (viram menu vertical), ou o header inteiro (logo, seletor de projeto, badges de status Ollama/OpenRouter) também deve migrar para o menu lateral, eliminando a barra superior? (id=q1)
-- [intent] A ordem e o conjunto dos 14 itens atuais (Benchmarks, Aprendizado, Portfólio, Roadmap, Demandas, Telemetria, Estúdio, Testes, Infra, Tarefas, Playground, Prompts, Backup/Settings, Novo) devem ser mantidos idênticos, só mudando a orientação, ou é permitido reagrupar por categoria? (id=q4)
+- [intent] O escopo da mudança é apenas os botões de navegação (viram menu vertical), ou o header inteiro (logo, seletor de projeto, badges de status Ollama/OpenRouter) também deve migrar para o menu lateral, eliminando a barra superior? -> **Apenas os 14 botões de navegação viram menu vertical; logo, seletor de projeto e badges de status permanecem numa barra superior fina** (respondida pelo owner)
+- [intent] A ordem e o conjunto dos 14 itens atuais (Benchmarks, Aprendizado, Portfólio, Roadmap, Demandas, Telemetria, Estúdio, Testes, Infra, Tarefas, Playground, Prompts, Backup/Settings, Novo) devem ser mantidos idênticos, só mudando a orientação, ou é permitido reagrupar por categoria? -> **Manter os mesmos 14 itens, na mesma ordem, apenas mudando a orientação de horizontal para vertical** (respondida pelo owner)
