@@ -1588,5 +1588,35 @@
     "dependencies": [],
     "created_at": "2026-09-30T17:27:55.666113Z",
     "updated_at": "2026-09-30T17:27:55.666113Z"
+  },
+  {
+    "id": "USR-74",
+    "project_id": "darkfac",
+    "title": "DarkHub em producao deve rodar o commit de main e provar isso no /health",
+    "origin": "user",
+    "status": "completed",
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "Apos os USR-65/66, o deploy termina 'verde' mas GET https://darkhub.ggcampos.com/health retorna git_sha null e o no VPS nunca converge. O servico Dokploy 'Darkhub' (compose deploy/dokploy/docker-compose.hub.yml, Dockerfile.hub) faz deploy em ~9s com titulo 'Manual deployment', sugerindo que NAO reconstroi a imagem a partir do commit de main, e a injecao de DARKFAC_GIT_SHA via compose.saveEnvironment nao chega ao container. E preciso descobrir por leitura (API Dokploy somente leitura, nunca imprimir env/segredos) como o hub e realmente construido/servido e corrigir o pipeline para que cada deploy reconstrua a imagem do SHA de origin/main e o container exponha esse SHA.",
+    "core_journey": [
+      "Apos os USR-65/66, o deploy termina 'verde' mas GET https://darkhub.ggcampos.com/health retorna git_sha null e o no VPS nunca converge. O servico Dokploy 'Darkhub' (compose deploy/dokploy/docker-compose.hub.yml, Dockerfile.hub) faz deploy em ~9s com titulo 'Manual deployment', sugerindo que NAO reconstroi a imagem a partir do commit de main, e a injecao de DARKFAC_GIT_SHA via compose.saveEnvironment nao chega ao container. E preciso descobrir por leitura (API Dokploy somente leitura, nunca imprimir env/segredos) como o hub e realmente construido/servido e corrigir o pipeline para que cada deploy reconstrua a imagem do SHA de origin/main e o container exponha esse SHA."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Diagnostico documentado em docs/ (curto) explicando como o servico Darkhub obtem sua imagem hoje (build git vs imagem pronta) e por que DARKFAC_GIT_SHA nao aparece no container, sem incluir nenhum segredo",
+      "Correcao em deploy/dokploy/docker-compose.hub.yml e/ou scripts/dokploy_redeploy.py para que o deploy do Darkhub reconstrua a imagem a partir do SHA exato de origin/main (build arg, sem cache quando o SHA muda) e o container exponha DARKFAC_GIT_SHA no /health",
+      "scripts/dokploy_redeploy.py falha com exit != 0 e mensagem clara se, apos o deploy e o timeout, o /health do hub nao mostrar o SHA esperado; nunca declara sucesso sem essa prova",
+      "Testes unitarios com fakes cobrindo o build por SHA e a falha quando o health nao converge. Nao editar arquivos protegidos. Portao python core/harness/runner.py --quick verde. Registrar USR-67 em tests/test_demands_hygiene.py"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-09-30T14:43:38.489048Z",
+    "updated_at": "2026-09-30T17:33:01.816402Z"
   }
 ]

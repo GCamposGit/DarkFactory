@@ -603,12 +603,10 @@ def test_default_store_is_sqlite_when_no_database_url(monkeypatch, tmp_path) -> 
 
 
 def test_default_store_is_postgres_when_database_url_set(monkeypatch, tmp_path) -> None:
-    monkeypatch.setenv("DARKFAC_HF02_DATABASE_URL", "postgresql://darkfac_worker:x@localhost:5432/darkfac")
+    monkeypatch.setenv("DARKFAC_HF02_DATABASE_URL", "mock://postgres-selection-test")
     store = store_selection.default_control_store(sqlite_db_path=tmp_path / "control.db")
-    # psycopg is not installed/reachable in this environment, so
-    # PostgresControlStore falls back to its own in-memory mock -- the
-    # point of this test is only that we *asked* for Postgres, matching
-    # exactly how CloudCoordinator/CloudWorker pick their store.
+    # Selection must be tested without attempting a real local database
+    # connection, including on machines where psycopg is installed.
     assert isinstance(store, PostgresControlStore)
 
 
