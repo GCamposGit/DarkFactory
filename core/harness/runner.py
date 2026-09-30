@@ -217,6 +217,29 @@ def _is_test_step(step: HarnessStepConfig) -> bool:
     return step.kind == "test" or (step.kind is None and "pytest" in step.cmd.casefold())
 
 
+def normalize_xdist_workers(command: list[str]) -> list[str]:
+    """On Windows, cap -n auto to min(6, os.cpu_count()) to prevent pagefile exhaustion and worker crashes."""
+    if os.name != "nt":
+        return command
+    capped: list[str] = []
+    i = 0
+    while i < len(command):
+        token = command[i]
+        if token == "-n" and i + 1 < len(command) and command[i + 1].casefold() == "auto":
+            max_workers = str(min(6, os.cpu_count() or 4))
+            capped.extend(["-n", max_workers])
+            i += 2
+            continue
+        if token.startswith("-n=") and token[3:].casefold() == "auto":
+            max_workers = str(min(6, os.cpu_count() or 4))
+            capped.append(f"-n={max_workers}")
+            i += 1
+            continue
+        capped.append(token)
+        i += 1
+    return capped
+
+
 def run_step(step: HarnessStepConfig) -> StepExecution:
     print(f"{MARKER_STEP_START} {step.name}")
     started_at = time.perf_counter()
@@ -229,15 +252,12 @@ def run_step(step: HarnessStepConfig) -> StepExecution:
         if not command:
             raise ValueError("empty command")
         command = strip_xdist_args_if_unavailable(command)
+        command = normalize_xdist_workers(command)
         # DARKFAC_SUITE_LOCK_HELD is set by the caller (run_with_cache) while a
         # test step is running so a nested pytest invocation (this subprocess)
         # never re-acquires the machine-wide suite lock and deadlocks against
         # its own parent.
         child_env = dict(os.environ)
-        if os.name == "nt" and "PYTEST_XDIST_AUTO_NUM_WORKERS" not in child_env:
-            # On Windows NTFS, unbounded xdist (-n auto on machines with many cores) causes
-            # severe git file locking and temp directory deletion collisions across worker processes.
-            child_env["PYTEST_XDIST_AUTO_NUM_WORKERS"] = str(min(8, os.cpu_count() or 4))
 
         process = subprocess.run(
             command,
