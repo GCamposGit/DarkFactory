@@ -1328,7 +1328,7 @@
     "project_id": "darkfac",
     "title": "Sincronia verificada dos 3 nos (Notebook, Desktop, VPS) apos cada entrega",
     "origin": "user",
-    "status": "planned",
+    "status": "completed",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -1353,6 +1353,6 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-09-30T11:58:26.976681Z",
-    "updated_at": "2026-09-30T11:58:26.976681Z"
+    "updated_at": "2026-09-30T12:33:35.966119Z"
   }
 ]
