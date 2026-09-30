@@ -109,8 +109,15 @@ def test_python_repo_with_pyproject_only(tmp_path: Path) -> None:
     assert commands.validate_cmds == ["python -m pytest -q"]
 
 
+def _darkfac_like(root: Path, config: str = "{}") -> None:
+    """A checkout of the DarkFac repo itself: harness.config.json plus the official runner."""
+    (root / "harness.config.json").write_text(config, encoding="utf-8")
+    (root / "core" / "harness").mkdir(parents=True)
+    (root / "core" / "harness" / "runner.py").write_text("# runner\n", encoding="utf-8")
+
+
 def test_harness_config_present_uses_quick_validate(tmp_path: Path) -> None:
-    (tmp_path / "harness.config.json").write_text("{}", encoding="utf-8")
+    _darkfac_like(tmp_path)
     # Even with a package.json present, harness.config.json takes precedence.
     (tmp_path / "package.json").write_text(json.dumps({"scripts": {"test": "vitest"}}), encoding="utf-8")
 
@@ -122,7 +129,7 @@ def test_harness_config_present_uses_quick_validate(tmp_path: Path) -> None:
 
 
 def test_harness_config_with_requirements_txt_includes_pip_install_setup(tmp_path: Path) -> None:
-    (tmp_path / "harness.config.json").write_text("{}", encoding="utf-8")
+    _darkfac_like(tmp_path)
     (tmp_path / "requirements.txt").write_text("pydantic\n", encoding="utf-8")
 
     commands = detect_commands(tmp_path)
@@ -133,7 +140,7 @@ def test_harness_config_with_requirements_txt_includes_pip_install_setup(tmp_pat
 
 
 def test_harness_config_with_pyproject_only_includes_pip_install_editable(tmp_path: Path) -> None:
-    (tmp_path / "harness.config.json").write_text("{}", encoding="utf-8")
+    _darkfac_like(tmp_path)
     (tmp_path / "pyproject.toml").write_text("[project]\nname = 'demo'\n", encoding="utf-8")
 
     commands = detect_commands(tmp_path)
@@ -143,12 +150,79 @@ def test_harness_config_with_pyproject_only_includes_pip_install_editable(tmp_pa
 
 
 def test_harness_config_without_python_manifest_leaves_setup_empty(tmp_path: Path) -> None:
-    (tmp_path / "harness.config.json").write_text("{}", encoding="utf-8")
+    _darkfac_like(tmp_path)
 
     commands = detect_commands(tmp_path)
 
     assert commands.setup == []
     assert commands.validate_cmds == ["python core/harness/runner.py --quick"]
+
+
+_ADOPTED_CONFIG = json.dumps(
+    {
+        "steps": [
+            {"name": "lint", "cmd": "python -m compileall -q .", "quick": True},
+            {"name": "unit", "cmd": "python -m pytest tests", "quick": True, "timeout_sec": 600},
+            {"name": "slow", "cmd": "python -m pytest tests_slow", "quick": False},
+            {"name": "hold", "cmd": "python holdout.py", "quick": True, "holdout": True},
+        ]
+    }
+)
+
+
+def test_adopted_repo_without_runner_uses_the_quick_steps_of_its_own_harness_config(tmp_path: Path) -> None:
+    """The adopted canary repo has the `.factory/darkfac.py` runtime but no core/harness/runner.py."""
+    (tmp_path / "harness.config.json").write_text(_ADOPTED_CONFIG, encoding="utf-8")
+    (tmp_path / ".factory").mkdir()
+    (tmp_path / ".factory" / "darkfac.py").write_text("# adopted runtime\n", encoding="utf-8")
+    (tmp_path / "requirements.txt").write_text("pytest\n", encoding="utf-8")
+
+    commands = detect_commands(tmp_path)
+
+    assert commands.setup == ["python -m pip install -r requirements.txt"]
+    assert commands.validate_cmds == ["python -m compileall -q .", "python -m pytest tests"]  # quick, in order
+    assert not any("runner.py" in cmd or "darkfac.py" in cmd for cmd in commands.validate_cmds)
+
+
+def test_darkfac_repo_keeps_the_official_runner_even_if_its_config_has_quick_steps(tmp_path: Path) -> None:
+    _darkfac_like(tmp_path, _ADOPTED_CONFIG)
+    assert detect_commands(tmp_path).validate_cmds == ["python core/harness/runner.py --quick"]
+
+
+def test_harness_config_without_usable_quick_steps_falls_through_to_other_detection(tmp_path: Path) -> None:
+    (tmp_path / "harness.config.json").write_text(
+        json.dumps({"steps": [{"name": "slow", "cmd": "pytest", "quick": False}]}), encoding="utf-8"
+    )
+    (tmp_path / "package.json").write_text(json.dumps({"scripts": {"test": "vitest run"}}), encoding="utf-8")
+    assert detect_commands(tmp_path).validate_cmds == ["npm test"]
+
+
+@pytest.mark.parametrize("content", ["{}", "not json", '{"steps": "nope"}', '{"steps": [{"quick": true}]}'])
+def test_unreadable_or_empty_harness_config_never_yields_the_missing_runner(tmp_path: Path, content: str) -> None:
+    (tmp_path / "harness.config.json").write_text(content, encoding="utf-8")
+    assert detect_commands(tmp_path).validate_cmds == []
+
+
+def test_plain_python_repo_and_repo_without_harness_config_are_unchanged(tmp_path: Path) -> None:
+    (tmp_path / "requirements.txt").write_text("pytest\n", encoding="utf-8")
+    (tmp_path / "tests").mkdir()
+    commands = detect_commands(tmp_path)
+    assert commands.setup == ["python -m pip install -r requirements.txt"]
+    assert commands.validate_cmds == ["python -m pytest -q"]
+    assert detect_commands(tmp_path / "missing") == ProjectCommands()
+
+
+def test_registered_canary_project_has_explicit_commands_that_win_over_detection(tmp_path: Path) -> None:
+    from core.projects.registry import ProjectRegistry
+
+    root = Path(__file__).resolve().parents[1]
+    registry = ProjectRegistry(projects_file=root / ".factory" / "projects.json")
+    canary = registry.get_project("darkfac-canary")
+    assert canary is not None
+    (tmp_path / "harness.config.json").write_text("{}", encoding="utf-8")  # adopted layout, no runner
+    commands = resolve_commands(canary, tmp_path)
+    assert commands.setup == ["python -m pip install -r requirements.txt"]
+    assert commands.validate_cmds == ["python -m pytest tests -q"]
 
 
 def test_resolve_commands_prefers_explicit_over_detected(tmp_path: Path) -> None:
