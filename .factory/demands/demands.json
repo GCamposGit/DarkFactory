@@ -1647,5 +1647,34 @@
     "dependencies": [],
     "created_at": "2026-09-30T17:35:54.781574Z",
     "updated_at": "2026-09-30T17:35:54.781574Z"
+  },
+  {
+    "id": "USR-76",
+    "project_id": "darkfac",
+    "title": "Git Bash no Windows: automacao nao pode depender de caminhos rev:path sem separador",
+    "origin": "user",
+    "status": "planned",
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "Em 2026-09-30 um comando 'git show origin/main:.factory/demands/demands.json' executado pelo Git Bash teve o argumento convertido em lista de caminhos (MSYS path conversion), falhou em silencio e o demands.json ficou vazio e foi commitado na worktree (-1592 linhas), so percebido por revisao manual do diff.",
+    "core_journey": [
+      "Em 2026-09-30 um comando 'git show origin/main:.factory/demands/demands.json' executado pelo Git Bash teve o argumento convertido em lista de caminhos (MSYS path conversion), falhou em silencio e o demands.json ficou vazio e foi commitado na worktree (-1592 linhas), so percebido por revisao manual do diff."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Toda chamada git da fabrica (core.git.autonomy, run_ticket, scripts) usa lista de argumentos via subprocess sem shell e nunca concatena rev:path em shell",
+      "Antes de qualquer commit, verificacao automatica bloqueia diffs que apagam mais de 50% de arquivos de estado como .factory/demands/demands.json",
+      "Testes cobrindo o bloqueio de commit que esvazia o ledger"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-09-30T17:36:18.247437Z",
+    "updated_at": "2026-09-30T17:36:18.247437Z"
   }
 ]
