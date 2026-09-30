@@ -2022,7 +2022,7 @@
     "project_id": "darkfac",
     "title": "CI do main vermelho desde 24/09: a suite suja a arvore git no Linux e o portao reprova apesar dos testes verdes",
     "origin": "agent",
-    "status": "planned",
+    "status": "completed",
     "item_type": "quality",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -2033,7 +2033,7 @@
       "ci",
       "defect"
     ],
-    "problem_statement": "EVIDENCIA (2026-09-30): 40 de 40 execucoes do workflow DarkFac CI falham; ultimo verde em 2026-09-24T07:14 (PR #33); primeiro vermelho af5a4b3 (DH-08). O job main-validation (ubuntu-latest) termina com 2276 testes passando e '[ERROR] Candidate worktree is dirty' -> HARNESS_FAIL (o runner chama _candidate_sha -> _ensure_clean_worktree DEPOIS dos testes). windows-latest passa e a suite completa no Windows local deixa 'git status' limpo => a sujeira e exclusiva do Linux e o arquivo nao esta identificado porque o runner (protegido por guard.py) nao lista os caminhos. EFEITOS: job continuous-deployment (needs: main-validation) fica skipped; pushes e PRs sao mergeados com CI vermelho (main sem protecao de branch; GitHub API 404); a etapa de integracao da linha trata check vermelho como retry do agente, entao o piloto V1 (USR-62) nunca conseguiria mergear.\n\n[Plano HF-28 | 2026-09-30] Onda 0. primeiro passo: desbloqueia todo o restante. Ver docs/STABILITY_PLAN_2026-09-30.md.\nCAUSA RAIZ: algum teste (provavelmente exclusivo de Linux/POSIX, ou que escreve em arquivo rastreado/untracked nao ignorado sob a raiz do repo) altera o checkout durante a suite; nada no repositorio detecta ou atribui a alteracao ao teste.\nSOLUCAO DEFINITIVA: (1) guarda de higiene em tests/conftest.py (arquivo nao protegido): fingerprint do 'git status --porcelain -z --untracked-files=all' + hash de conteudo no sessionstart do controller xdist e no sessionfinish; qualquer path novo/alterado vira '[TREE-HYGIENE] <status> <path>' e falha a sessao (nao dispara quando a arvore ja estava suja antes). (2) usar a propria execucao no CI Linux (PR) para listar os paths e corrigir cada teste ofensor (tmp_path ou raiz de estado redirecionada) sem enfraquecer assercoes. (3) teste de regressao do guarda com repositorio git temporario.\nNUNCA MAIS (prevencao estrutural): o guarda roda em TODA suite (local, CI, worker) e atribui a sujeira ao teste; nenhum teste novo pode sujar a arvore sem falhar com o caminho exato na mensagem.",
+    "problem_statement": "EVIDENCIA (2026-09-30): 40 de 40 execucoes do workflow DarkFac CI falham; ultimo verde em 2026-09-24T07:14 (PR #33); primeiro vermelho af5a4b3 (DH-08). O job main-validation (ubuntu-latest) termina com 2276 testes passando e '[ERROR] Candidate worktree is dirty' -> HARNESS_FAIL (o runner chama _candidate_sha -> _ensure_clean_worktree DEPOIS dos testes). windows-latest passa e a suite completa no Windows local deixa 'git status' limpo => a sujeira e exclusiva do Linux e o arquivo nao esta identificado porque o runner (protegido por guard.py) nao lista os caminhos. EFEITOS: job continuous-deployment (needs: main-validation) fica skipped; pushes e PRs sao mergeados com CI vermelho (main sem protecao de branch; GitHub API 404); a etapa de integracao da linha trata check vermelho como retry do agente, entao o piloto V1 (USR-62) nunca conseguiria mergear.\n\n[Plano HF-28 | 2026-09-30] Onda 0. primeiro passo: desbloqueia todo o restante. Ver docs/STABILITY_PLAN_2026-09-30.md.\nCAUSA RAIZ: algum teste (provavelmente exclusivo de Linux/POSIX, ou que escreve em arquivo rastreado/untracked nao ignorado sob a raiz do repo) altera o checkout durante a suite; nada no repositorio detecta ou atribui a alteracao ao teste.\nSOLUCAO DEFINITIVA: (1) guarda de higiene em tests/conftest.py (arquivo nao protegido): fingerprint do 'git status --porcelain -z --untracked-files=all' + hash de conteudo no sessionstart do controller xdist e no sessionfinish; qualquer path novo/alterado vira '[TREE-HYGIENE] <status> <path>' e falha a sessao (nao dispara quando a arvore ja estava suja antes). (2) usar a propria execucao no CI Linux (PR) para listar os paths e corrigir cada teste ofensor (tmp_path ou raiz de estado redirecionada) sem enfraquecer assercoes. (3) teste de regressao do guarda com repositorio git temporario.\nNUNCA MAIS (prevencao estrutural): o guarda roda em TODA suite (local, CI, worker) e atribui a sujeira ao teste; nenhum teste novo pode sujar a arvore sem falhar com o caminho exato na mensagem.\n\n[Plano HF-28 | lote 2] ENCERRADO COM EVIDENCIA (2026-09-30): PR #75 (merge 3e88bfc). CAUSA RAIZ CONFIRMADA pelo guarda de higiene no CI Linux: '[TREE-HYGIENE] new ?? C:\\dev\\DarkFac/core/content/anti_slop.py'. O teste tests/test_dh_group2_modules_api.py::test_dh04_catalog_sync_and_evolution_lifecycle chama POST /api/catalog/sync para o projeto 'darkfac', cujo path em .factory/projects.json e 'C:\\dev\\DarkFac': no Linux e um caminho RELATIVO (diretorio literal 'C:\\dev\\DarkFac' criado dentro do checkout) e no Windows e o checkout PRINCIPAL do owner (o teste escrevia la e o 'finally' relativo nunca limpava). A linha 'core/content/anti_slop.py' no .gitignore (d2b43a8) era um paliativo que mascarava o vazamento. Correcao: registro isolado com tmp_path + guarda tests/_tree_hygiene.py ligado em tests/conftest.py (23 testes). CI DarkFac: ubuntu e windows HARNESS_PASS (run 36782458164).",
     "core_journey": [],
     "non_goals": [
       "Nao incluir novas features: apenas estabilidade e autonomia (plano HF-28)"
@@ -2055,7 +2055,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-09-30T22:00:00Z",
-    "updated_at": "2026-09-30T22:00:00Z"
+    "updated_at": "2026-09-30T23:30:00Z"
   },
   {
     "id": "USR-85",
@@ -2192,7 +2192,7 @@
       "wave-2",
       "test-hermetic"
     ],
-    "problem_statement": "EVIDENCIA (2026-09-30): .factory/notifications/notifications.jsonl local contem alertas falsos ('Canario E2E falhou ... 2026-09-22', 'Entregue ... https://github.com/acme/repo/pull/1') gerados por testes; core/line/agent_cli.run_agent grava no ModelUsageLedger real (REPO_ROOT/.factory/usage) em qualquer teste que o chame, e as decisoes de roteamento leem esse diretorio. Risco: alertas falsos no DarkHub/Telegram, cota contaminada, testes que dependem da maquina (origem dos 'falhas em areas alheias' do USR-70).\n\n[Plano HF-28 | 2026-09-30] Onda 2. depende do guarda do USR-84. Ver docs/STABILITY_PLAN_2026-09-30.md.\nCAUSA RAIZ: nao existe raiz de estado injetavel unica: cada modulo resolve REPO_ROOT/'.factory' por conta propria e cada teste depende de monkeypatch individual.\nSOLUCAO DEFINITIVA: core.paths.state_root() (respeita DARKFAC_STATE_ROOT; padrao project_root()/.factory) usado pelos escritores de estado (notifications, usage ledger, telemetria, reports do canario); fixture autouse de sessao em tests/conftest.py aponta DARKFAC_STATE_ROOT para um diretorio temporario por worker; o guarda do USR-84 tambem falha se qualquer arquivo sob o .factory REAL mudar durante a suite. Migracao incremental com lista dos modulos migrados.\nNUNCA MAIS (prevencao estrutural): teste que varre core/ por escritores com REPO_ROOT/'.factory' hardcoded fora de uma allowlist justificada.",
+    "problem_statement": "EVIDENCIA (2026-09-30): .factory/notifications/notifications.jsonl local contem alertas falsos ('Canario E2E falhou ... 2026-09-22', 'Entregue ... https://github.com/acme/repo/pull/1') gerados por testes; core/line/agent_cli.run_agent grava no ModelUsageLedger real (REPO_ROOT/.factory/usage) em qualquer teste que o chame, e as decisoes de roteamento leem esse diretorio. Risco: alertas falsos no DarkHub/Telegram, cota contaminada, testes que dependem da maquina (origem dos 'falhas em areas alheias' do USR-70).\n\n[Plano HF-28 | 2026-09-30] Onda 2. depende do guarda do USR-84. Ver docs/STABILITY_PLAN_2026-09-30.md.\nCAUSA RAIZ: nao existe raiz de estado injetavel unica: cada modulo resolve REPO_ROOT/'.factory' por conta propria e cada teste depende de monkeypatch individual.\nSOLUCAO DEFINITIVA: core.paths.state_root() (respeita DARKFAC_STATE_ROOT; padrao project_root()/.factory) usado pelos escritores de estado (notifications, usage ledger, telemetria, reports do canario); fixture autouse de sessao em tests/conftest.py aponta DARKFAC_STATE_ROOT para um diretorio temporario por worker; o guarda do USR-84 tambem falha se qualquer arquivo sob o .factory REAL mudar durante a suite. Migracao incremental com lista dos modulos migrados.\nNUNCA MAIS (prevencao estrutural): teste que varre core/ por escritores com REPO_ROOT/'.factory' hardcoded fora de uma allowlist justificada.\n\n[Plano HF-28 | lote 2] ESCOPO ADICIONAL (achado do USR-84): o mesmo teste do DH-04 faz o evolution engine escrever '.agents/rules/test_rule_<hex>.md' na raiz REAL do repo (diretorio protegido por guard.py; um crash antes do 'finally' deixa o arquivo). O motor de evolucao e o catalog manager devem resolver a raiz por project_root()/state_root() injetavel (DARKFAC_PROJECT_ROOT=tmp_path nos testes).",
     "core_journey": [],
     "non_goals": [
       "Nao incluir novas features: apenas estabilidade e autonomia (plano HF-28)"
@@ -2201,7 +2201,8 @@
     "acceptance_criteria": [
       "state_root() unico e usado por notifications, usage ledger, telemetria e reports do canario",
       "Rodar a suite completa nao altera NENHUM arquivo do .factory real (guarda falha se alterar)",
-      "Teste de varredura impede novos escritores com caminho hardcoded fora da allowlist"
+      "Teste de varredura impede novos escritores com caminho hardcoded fora da allowlist",
+      "O teste DH-04 e o motor de evolucao nao escrevem em .agents/rules real (raiz injetavel; crash no meio nao deixa arquivo)"
     ],
     "suggested_files": [
       "core/paths.py",
@@ -2215,7 +2216,7 @@
       "USR-84"
     ],
     "created_at": "2026-09-30T22:00:00Z",
-    "updated_at": "2026-09-30T22:00:00Z"
+    "updated_at": "2026-09-30T23:30:00Z"
   },
   {
     "id": "USR-89",
@@ -2625,5 +2626,122 @@
     "dependencies": [],
     "created_at": "2026-09-30T21:53:25.572432Z",
     "updated_at": "2026-09-30T21:53:25.572432Z"
+  },
+  {
+    "id": "USR-100",
+    "project_id": "darkfac",
+    "title": "SEGURANCA P0: token de bot do Telegram rastreado no git de repositorio PUBLICO (.factory/telegram/config.json, commit 0c7514e)",
+    "origin": "agent",
+    "status": "planned",
+    "item_type": "security",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand",
+      "stability",
+      "security",
+      "needs-owner",
+      "wave-0",
+      "defect"
+    ],
+    "problem_statement": "EVIDENCIA (2026-09-30): o repositorio GCamposGit/DarkFactory e PUBLICO (gh repo view: visibility PUBLIC). O arquivo .factory/telegram/config.json esta rastreado (adicionado em 0c7514e, commit automatico 'feat(benchmarks): ingest deepseek-v4.1-flash ...', autor DarkFac) e contem bot_token com formato de token real do Telegram (46 caracteres, sem palavras de placeholder), alem de authorized_user_ids/authorized_chat_ids (dados pessoais). Varredura deterministica dos 954 arquivos rastreados (Telegram, Anthropic, OpenAI, GitHub, OpenRouter, xAI, Google, AWS, chaves privadas, URLs Postgres): nenhum outro segredo real; demais ocorrencias sao sentinelas de teste e exemplos com placeholder. Qualquer pessoa pode ler o token do historico publico e controlar o bot (ler mensagens, enviar como o bot, desviar webhooks).\n\n[Plano HF-28 | lote 2] Onda 0 (seguranca). Ver docs/STABILITY_PLAN_2026-09-30.md (Apendice C).\nCAUSA RAIZ: (1) um commit autonomo incluiu um arquivo de configuracao LOCAL da maquina apesar de '.factory/telegram/*.json' estar no .gitignore (added com -f ou antes da regra; o ciclo de commit da fabrica nao verifica conteudo); (2) nao existe varredura de segredos em nenhum portao (testes, CI, commit_ticket); (3) o runtime le o segredo de um arquivo no caminho versionado (core/integrations/telegram.py) em vez de so de variavel de ambiente/arquivo fora da arvore.\nSOLUCAO DEFINITIVA (em ordem; o passo 1 e EXCLUSIVO DO OWNER): (1) OWNER: revogar o token no @BotFather (/mybots > bot > API Token > Revoke current token), colocar o novo token no Dokploy (env do compose darkfac-cloud e Darkhub) e no .factory/telegram/config.json LOCAL de cada no (Notebook, Desktop) - guia passo a passo no Apendice C do plano; (2) AGENTE, somente APOS a rotacao (senao os nos perdem o arquivo no proximo git pull): git rm --cached dos dois arquivos .factory/telegram/*.json, criar config.example.json sem segredos, e fazer o codigo preferir TELEGRAM_*_TOKEN do ambiente e ler o arquivo local so como fallback; caminho do state_dir absoluto via project_root(); (3) AGENTE: tests/test_no_tracked_secrets.py varre 'git ls-files' com os padroes acima (allowlist explicita e justificada para sentinelas de teste e exemplos) e falha o portao; (4) AGENTE: guarda pre-commit em core/git/autonomy.commit_ticket que recusa staged content com esses padroes e recusa 'git add -f' de caminho ignorado; (5) DECISAO DO OWNER (opcional apos a revogacao): reescrever o historico (git filter-repo + force push) para remover o arquivo dos commits publicos - e destrutivo e externo, nao automatico.\nNUNCA MAIS: varredura de segredos no portao oficial e no commit autonomo; arquivos locais de maquina fora de git (example.json versionado).",
+    "core_journey": [],
+    "non_goals": [
+      "Nao incluir novas features: apenas estabilidade e autonomia (plano HF-28)"
+    ],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "OWNER: token antigo revogado no BotFather e novo token configurado em Dokploy e nos nos (evidencia: getMe do bot responde com o novo token; o antigo retorna 401)",
+      ".factory/telegram/*.json deixam de ser rastreados; config.example.json versionado sem segredos; Desktop/Notebook/VPS continuam enviando/recebendo mensagens apos o git pull",
+      "tests/test_no_tracked_secrets.py falha o portao ao versionar qualquer padrao de segredo fora da allowlist justificada (teste de mutacao: adicionar um token fake a um arquivo rastreado falha)",
+      "commit_ticket recusa conteudo staged com padrao de segredo e 'git add -f' de caminho ignorado (testes)",
+      "Decisao registrada do owner sobre reescrever o historico publico"
+    ],
+    "suggested_files": [
+      ".factory/telegram/config.json",
+      "core/integrations/telegram.py",
+      "tests/test_no_tracked_secrets.py",
+      "core/git/autonomy.py",
+      "docs/STABILITY_PLAN_2026-09-30.md"
+    ],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-09-30T23:30:00Z",
+    "updated_at": "2026-09-30T23:30:00Z"
+  },
+  {
+    "id": "USR-101",
+    "project_id": "darkfac",
+    "title": "catalog.sync_to_project cria diretorio e reporta sucesso em caminho inexistente (em producao Linux o darkfac esta registrado com caminho Windows)",
+    "origin": "agent",
+    "status": "planned",
+    "item_type": "quality",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand",
+      "stability",
+      "wave-2",
+      "catalog"
+    ],
+    "problem_statement": "EVIDENCIA (achado do USR-84): core/catalog/manager.py CrossProjectCatalogManager.sync_to_project faz mkdir(parents=True) em qualquer proj.path sem validar e devolve success=True. Em producao (VPS Linux) o projeto 'darkfac' esta registrado em .factory/projects.json como 'C:\\dev\\DarkFac', entao o sync cria uma arvore estranha no cwd do container e reporta sucesso; no Windows do owner o mesmo sync escreve no checkout principal (foi o vazamento que sujava o CI).\n\n[Plano HF-28 | lote 2] Onda 2. Ver docs/STABILITY_PLAN_2026-09-30.md.\nCAUSA RAIZ: o registro de projetos guarda UM caminho absoluto por projeto (especifico de maquina) e o manager confia nele; 'sync' nao distingue alvo existente de alvo a criar.\nSOLUCAO DEFINITIVA: sync exige diretorio-alvo existente (erro estruturado que o endpoint ja mapeia para 400) e so cria com flag explicita create=True; o descritor do projeto aceita caminhos por SO (paths: {windows, linux}) ou resolve via project_root() para o projeto darkfac; o endpoint nunca escreve fora do caminho resolvido do projeto (path traversal).",
+    "core_journey": [],
+    "non_goals": [
+      "Nao incluir novas features: apenas estabilidade e autonomia (plano HF-28)"
+    ],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "sync_to_project falha com erro estruturado (400 no endpoint) quando o alvo nao existe; so cria com create=True",
+      "Teste em Linux simulando caminho Windows do registro: nenhuma arvore e criada e o erro e claro",
+      "Descritor do projeto suporta caminho por SO ou resolve darkfac via project_root()"
+    ],
+    "suggested_files": [
+      "core/catalog/manager.py",
+      "core/projects/models.py",
+      "core/projects/registry.py",
+      "tests/test_cross_project_catalog.py"
+    ],
+    "estimated_complexity": "small",
+    "dependencies": [],
+    "created_at": "2026-09-30T23:30:00Z",
+    "updated_at": "2026-09-30T23:30:00Z"
+  },
+  {
+    "id": "USR-102",
+    "project_id": "darkfac",
+    "title": "Caminhos rastreados e ignorados ao mesmo tempo (74 arquivos) escondem escrita de teste em arquivo versionado; defaults relativos ao cwd",
+    "origin": "agent",
+    "status": "planned",
+    "item_type": "quality",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand",
+      "stability",
+      "wave-2",
+      "hygiene"
+    ],
+    "problem_statement": "EVIDENCIA (achado do USR-84): 74 arquivos estao no indice do git E casam com o .gitignore: 71 em .factory/reports/ (inclui .factory/reports/20260905_project_review) e 2 em .factory/telegram/ (ver USR-100). Git mostra 'modificado' nesses arquivos mas nao mostra arquivos NOVOS no mesmo diretorio, entao uma escrita de teste pode sujar (ou nao) a arvore conforme o caso. Alem disso core/integrations/telegram.py usa state_dir or Path('.factory/telegram') relativo ao cwd.\n\n[Plano HF-28 | lote 2] Onda 2. Ver docs/STABILITY_PLAN_2026-09-30.md.\nCAUSA RAIZ: arquivos de evidencia foram versionados depois (ou com -f) sem reconciliar com o .gitignore; defaults de pasta relativos ao cwd.\nSOLUCAO DEFINITIVA: decidir por grupo (evidencia versionavel -> remover o diretorio do .gitignore; gerado/local -> git rm --cached) e zerar o conjunto 'rastreado e ignorado'; teste tests/test_gitignore_consistency.py falha se 'git ls-files -ci --exclude-standard' nao for vazio (allowlist encolhendo, sem novas entradas); defaults de pasta de estado via project_root()/state_root() (USR-88).",
+    "core_journey": [],
+    "non_goals": [
+      "Nao incluir novas features: apenas estabilidade e autonomia (plano HF-28)"
+    ],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "'git ls-files -ci --exclude-standard' vazio (ou allowlist decrescente e justificada)",
+      "tests/test_gitignore_consistency.py no portao oficial",
+      "Nenhum default de pasta de estado relativo ao cwd em core/integrations/telegram.py"
+    ],
+    "suggested_files": [
+      ".gitignore",
+      "tests/test_gitignore_consistency.py",
+      "core/integrations/telegram.py"
+    ],
+    "estimated_complexity": "small",
+    "dependencies": [
+      "USR-100"
+    ],
+    "created_at": "2026-09-30T23:30:00Z",
+    "updated_at": "2026-09-30T23:30:00Z"
   }
 ]
