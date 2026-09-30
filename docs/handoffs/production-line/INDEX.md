@@ -2,6 +2,8 @@
 
 Plano mestre: [PRODUCTION_LINE_PLAN_2026-09-22.md](../../PRODUCTION_LINE_PLAN_2026-09-22.md). Todos os tickets foram implementados e integrados à baseline `main` (PRs #21, #23, #27, #33, #37).
 
+**Estado do marco HF-27 (29/09/2026):** `validating` no manifesto `.factory/roadmap/darkfac.json` (HF-27-01 a HF-27-11 `completed`, com commits como `evidence_refs`). O canário E2E (HF-27-10) roda em produção, com correções pós-entrega (#39 e commits `f16e078`, `9e4f649`, `e6029db`); o retry no mesmo dia está sendo adicionado. Falta o critério V2 do plano, 7 dias verdes seguidos, e o registro de verificação de V1, V3 e V4. O dogfood só submete itens `planned` com a tag `line-ok` após essa sequência verde; hoje não há item assim no manifesto.
+
 | Ticket | Título | Papel | Estado | Depende de | Onda | Entrega / Commit |
 | --- | --- | --- | --- | --- | --- | --- |
 | [HF-27-01](HF-27-01.md) | Registry de projetos executável | economy | implemented | — | 1 | `8e075d8`, `a2d4ecd` |

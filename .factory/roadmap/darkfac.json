@@ -10,7 +10,7 @@
       "description": "Registrar quais fontes operacionais alimentam o roadmap e como conflitos de precedência são tratados.",
       "item_type": "operations",
       "lifecycle_stage": "foundations",
-      "delivery_status": "planned",
+      "delivery_status": "completed",
       "horizon": "now",
       "confidence": "unknown",
       "dependencies": [],
@@ -30,7 +30,8 @@
           "locator": ".factory/roadmap/darkfac.json#RM-01",
           "produced_by": "project-owner"
         }
-      ]
+      ],
+      "state_rationale": "Implementado; evidência de conclusão: .factory/reports/roadmap-operacional-report.md (vinculada automaticamente pelo compilador). Reconciliado em 29/09/2026."
     },
     {
       "id": "RM-02",
@@ -39,7 +40,7 @@
       "description": "Definir os contratos tipados das entidades, relações, proveniência e fixtures determinísticas.",
       "item_type": "infrastructure",
       "lifecycle_stage": "foundations",
-      "delivery_status": "planned",
+      "delivery_status": "completed",
       "horizon": "now",
       "confidence": "unknown",
       "dependencies": [
@@ -64,7 +65,8 @@
           "locator": ".factory/roadmap/darkfac.json#RM-02",
           "produced_by": "project-owner"
         }
-      ]
+      ],
+      "state_rationale": "Implementado; evidência de conclusão: .factory/reports/roadmap-operacional-report.md (vinculada automaticamente pelo compilador). Reconciliado em 29/09/2026."
     },
     {
       "id": "RM-03",
@@ -73,7 +75,7 @@
       "description": "Compilar fontes reais em uma representação normalizada, preservando identidade e proveniência.",
       "item_type": "feature",
       "lifecycle_stage": "execution",
-      "delivery_status": "planned",
+      "delivery_status": "completed",
       "horizon": "now",
       "confidence": "unknown",
       "dependencies": [
@@ -98,7 +100,8 @@
           "locator": ".factory/roadmap/darkfac.json#RM-03",
           "produced_by": "project-owner"
         }
-      ]
+      ],
+      "state_rationale": "Implementado; evidência de conclusão: .factory/reports/roadmap-operacional-report.md (vinculada automaticamente pelo compilador). Reconciliado em 29/09/2026."
     },
     {
       "id": "RM-04",
@@ -107,7 +110,7 @@
       "description": "Detectar inconsistências do grafo e impedir que o painel escolha silenciosamente uma versão conflitante.",
       "item_type": "quality",
       "lifecycle_stage": "execution",
-      "delivery_status": "planned",
+      "delivery_status": "completed",
       "horizon": "now",
       "confidence": "unknown",
       "dependencies": [
@@ -133,7 +136,8 @@
           "locator": ".factory/roadmap/darkfac.json#RM-04",
           "produced_by": "project-owner"
         }
-      ]
+      ],
+      "state_rationale": "Implementado; evidência de conclusão: .factory/reports/roadmap-operacional-report.md (vinculada automaticamente pelo compilador). Reconciliado em 29/09/2026."
     },
     {
       "id": "RM-05",
@@ -142,7 +146,7 @@
       "description": "Publicar snapshots imutáveis com cache aquecido, hash, fontes consultadas e indisponibilidades explícitas.",
       "item_type": "infrastructure",
       "lifecycle_stage": "execution",
-      "delivery_status": "planned",
+      "delivery_status": "completed",
       "horizon": "now",
       "confidence": "unknown",
       "dependencies": [
@@ -172,7 +176,8 @@
           "locator": ".factory/roadmap/darkfac.json#RM-05",
           "produced_by": "project-owner"
         }
-      ]
+      ],
+      "state_rationale": "Implementado; evidência de conclusão: .factory/reports/roadmap-operacional-report.md (vinculada automaticamente pelo compilador). Reconciliado em 29/09/2026."
     },
     {
       "id": "RM-06",
@@ -181,7 +186,7 @@
       "description": "Exibir a projeção do roadmap por projeto, com visão geral, filtros acessíveis, tabela equivalente e detalhe de proveniência.",
       "item_type": "feature",
       "lifecycle_stage": "execution",
-      "delivery_status": "planned",
+      "delivery_status": "completed",
       "horizon": "now",
       "confidence": "unknown",
       "dependencies": [
@@ -207,7 +212,8 @@
           "locator": ".factory/roadmap/darkfac.json#RM-06",
           "produced_by": "project-owner"
         }
-      ]
+      ],
+      "state_rationale": "Implementado; evidência de conclusão: .factory/reports/roadmap-operacional-report.md (vinculada automaticamente pelo compilador). Reconciliado em 29/09/2026."
     },
     {
       "id": "RM-07",
@@ -216,7 +222,7 @@
       "description": "Completar as visões temporais e de dependências com progressive disclosure e alternativa tabular equivalente.",
       "item_type": "feature",
       "lifecycle_stage": "next_steps",
-      "delivery_status": "planned",
+      "delivery_status": "completed",
       "horizon": "next",
       "confidence": "unknown",
       "dependencies": [
@@ -241,7 +247,8 @@
           "locator": ".factory/roadmap/darkfac.json#RM-07",
           "produced_by": "project-owner"
         }
-      ]
+      ],
+      "state_rationale": "Implementado; evidência de conclusão: .factory/reports/roadmap-operacional-report.md (vinculada automaticamente pelo compilador). Reconciliado em 29/09/2026."
     },
     {
       "id": "RM-08",
@@ -250,7 +257,7 @@
       "description": "Tornar o painel operacionalmente confiável para mudanças incrementais, observabilidade e grafos densos.",
       "item_type": "operations",
       "lifecycle_stage": "next_steps",
-      "delivery_status": "planned",
+      "delivery_status": "completed",
       "horizon": "later",
       "confidence": "unknown",
       "dependencies": [
@@ -279,7 +286,8 @@
           "locator": ".factory/roadmap/darkfac.json#RM-08",
           "produced_by": "project-owner"
         }
-      ]
+      ],
+      "state_rationale": "Implementado; evidência de conclusão: .factory/reports/rm-08-incremental-telemetry-report.md (vinculada automaticamente pelo compilador). Reconciliado em 29/09/2026."
     },
     {
       "id": "RM-09",
@@ -288,7 +296,7 @@
       "description": "Evolução opcional para consultar versões anteriores e comparar mudanças do roadmap.",
       "item_type": "feature",
       "lifecycle_stage": "future",
-      "delivery_status": "planned",
+      "delivery_status": "completed",
       "horizon": "exploratory",
       "confidence": "unknown",
       "dependencies": [
@@ -313,7 +321,8 @@
           "locator": ".factory/roadmap/darkfac.json#RM-09",
           "produced_by": "project-owner"
         }
-      ]
+      ],
+      "state_rationale": "Implementado; evidência de conclusão: .factory/reports/rm-09-history-report.md (vinculada automaticamente pelo compilador). Reconciliado em 29/09/2026."
     },
     {
       "id": "HF-26",
@@ -322,8 +331,8 @@
       "description": "Planejamento de composição. Marco agregador; entrega exige HF-15-02 e gates.",
       "item_type": "epic",
       "lifecycle_stage": "execution",
-      "delivery_status": "planned",
-      "state_rationale": "Planejado; marco de composição; implementação não iniciada; operacionalmente não verificado. Registro não autoriza despacho.",
+      "delivery_status": "completed",
+      "state_rationale": "As 33 unidades de composição estão implementadas e integradas em main. O critério original (aceitação HF-15-02) foi supersedido por HF-27-10 (decisão do Owner, plano da linha de produção seção 5); a aceitação operacional contínua agora é acompanhada pelo marco HF-27. Reconciliado em 29/09/2026.",
       "horizon": "now",
       "confidence": "high",
       "dependencies": [
@@ -335,7 +344,6 @@
       ],
       "tags": [
         "continuous-autonomy",
-        "planning-only",
         "milestone"
       ],
       "completion_criteria": [
@@ -349,6 +357,29 @@
           "locator": "docs/CONTINUOUS_AUTONOMY_PLAN_2026-09-18.md",
           "produced_by": "codex-planner-01a0b4c8"
         }
+      ],
+      "evidence_refs": [
+        {
+          "evidence_id": "doc:HF-26:INDEX.md",
+          "evidence_kind": "handoff_doc",
+          "label": "Índice HF-26 (33 unidades implementadas)",
+          "locator": "docs/handoffs/continuous-autonomy/INDEX.md",
+          "verified": false
+        },
+        {
+          "evidence_id": "doc:HF-26:PRODUCTION_LINE_PLAN_2026-09-22.md",
+          "evidence_kind": "handoff_doc",
+          "label": "Plano da linha de produção, seção 5 (HF-03-08 encerrado; HF-15-02 supersedido)",
+          "locator": "docs/PRODUCTION_LINE_PLAN_2026-09-22.md",
+          "verified": false
+        },
+        {
+          "evidence_id": "commit:HF-26:8c4fed6",
+          "evidence_kind": "git_commit",
+          "label": "Commit 8c4fed6 em main - docs: HF-03-08 closeout package + HF-27-10 doc updates [HF-03-08][HF-27-10]",
+          "locator": "git:8c4fed6",
+          "verified": true
+        }
       ]
     },
     {
@@ -358,15 +389,13 @@
       "description": "Planejamento de composição. resolve_effective_policy(PolicyRequest,PolicyContext)->PolicyDecision puro; esquema e precedência detalhados em HF-26-01.md.",
       "item_type": "feature",
       "lifecycle_stage": "execution",
-      "delivery_status": "planned",
-      "state_rationale": "Planejado; ready_for_handoff; implementação não iniciada; operacionalmente não verificado. Registro não autoriza despacho.",
+      "delivery_status": "completed",
+      "state_rationale": "Implementado e integrado em main (`96bc0f0`); o handoff registra implementação concluída e operação verificada. Reconciliado com evidência em 29/09/2026.",
       "horizon": "now",
       "confidence": "high",
       "dependencies": [],
       "tags": [
-        "continuous-autonomy",
-        "planning-only",
-        "ready_for_handoff"
+        "continuous-autonomy"
       ],
       "completion_criteria": [
         "Grant exato autoriza; deny, pausa, revogação, teto, receipt inválido e aceite comercial ausente vencem grant."
@@ -380,7 +409,23 @@
           "produced_by": "codex-planner-01a0b4c8"
         }
       ],
-      "parent_id": "HF-26"
+      "parent_id": "HF-26",
+      "evidence_refs": [
+        {
+          "evidence_id": "commit:HF-26-01:96bc0f0",
+          "evidence_kind": "git_commit",
+          "label": "Commit 96bc0f0 em main - feat(workflow): implement HF-26-01 pure effective policy resolver",
+          "locator": "git:96bc0f0",
+          "verified": true
+        },
+        {
+          "evidence_id": "doc:HF-26-01:HF-26-01.md",
+          "evidence_kind": "handoff_doc",
+          "label": "Handoff HF-26-01 (implementado; operação verificada)",
+          "locator": "docs/handoffs/continuous-autonomy/HF-26-01.md",
+          "verified": false
+        }
+      ]
     },
     {
       "id": "HF-26-02",
@@ -389,8 +434,8 @@
       "description": "Planejamento de composição. build_policy_context(project_id,operation,trusted_grants,evidence)->PolicyContext novo; DeliveryPolicy recebe decisão vinculada. Sem contexto preserva legado. Não permitir C/D global.",
       "item_type": "feature",
       "lifecycle_stage": "execution",
-      "delivery_status": "planned",
-      "state_rationale": "Planejado; waiting_dependency; implementação não iniciada; operacionalmente não verificado. Registro não autoriza despacho.",
+      "delivery_status": "completed",
+      "state_rationale": "Implementado e integrado em main (`3dea0e2`); o handoff registra implementação concluída e operação verificada. Reconciliado com evidência em 29/09/2026.",
       "horizon": "now",
       "confidence": "high",
       "dependencies": [
@@ -400,9 +445,7 @@
         }
       ],
       "tags": [
-        "continuous-autonomy",
-        "planning-only",
-        "waiting_dependency"
+        "continuous-autonomy"
       ],
       "completion_criteria": [
         "Ticket técnico autorizado não pede humano; checks vermelhos e cliente pago sem aceite bloqueiam. Política declara precedência e limites."
@@ -416,7 +459,23 @@
           "produced_by": "codex-planner-01a0b4c8"
         }
       ],
-      "parent_id": "HF-26"
+      "parent_id": "HF-26",
+      "evidence_refs": [
+        {
+          "evidence_id": "commit:HF-26-02:3dea0e2",
+          "evidence_kind": "git_commit",
+          "label": "Commit 3dea0e2 em main - feat(workflow): implement HF-26-02 policy binding and delivery precedence",
+          "locator": "git:3dea0e2",
+          "verified": true
+        },
+        {
+          "evidence_id": "doc:HF-26-02:HF-26-02.md",
+          "evidence_kind": "handoff_doc",
+          "label": "Handoff HF-26-02 (implementado; operação verificada)",
+          "locator": "docs/handoffs/continuous-autonomy/HF-26-02.md",
+          "verified": false
+        }
+      ]
     },
     {
       "id": "HF-26-03",
@@ -425,8 +484,8 @@
       "description": "Planejamento de composição. baseline.json contém local_sha,remote_main_sha,unintegrated_commits,contract_hashes,compatible_units,integration_units; verificar git ancestry e APIs. Handoffs seletivos para commits herdados.",
       "item_type": "research",
       "lifecycle_stage": "execution",
-      "delivery_status": "planned",
-      "state_rationale": "Planejado; waiting_dependency; implementação não iniciada; operacionalmente não verificado. Registro não autoriza despacho.",
+      "delivery_status": "completed",
+      "state_rationale": "Implementado e integrado em main (`d310bbc`); o handoff registra implementação concluída e operação verificada. Reconciliado com evidência em 29/09/2026.",
       "horizon": "now",
       "confidence": "high",
       "dependencies": [
@@ -436,9 +495,7 @@
         }
       ],
       "tags": [
-        "continuous-autonomy",
-        "planning-only",
-        "waiting_dependency"
+        "continuous-autonomy"
       ],
       "completion_criteria": [
         "Sete commits examinados individualmente; ausência remota de portfolio/evolution bloqueia só dependentes. Não publicar herança incidental."
@@ -452,7 +509,23 @@
           "produced_by": "codex-planner-01a0b4c8"
         }
       ],
-      "parent_id": "HF-26"
+      "parent_id": "HF-26",
+      "evidence_refs": [
+        {
+          "evidence_id": "commit:HF-26-03:d310bbc",
+          "evidence_kind": "git_commit",
+          "label": "Commit d310bbc em main - feat(binding): implement HF-26-03 baseline reconciliation and contract hashes",
+          "locator": "git:d310bbc",
+          "verified": true
+        },
+        {
+          "evidence_id": "doc:HF-26-03:HF-26-03.md",
+          "evidence_kind": "handoff_doc",
+          "label": "Handoff HF-26-03 (implementado; operação verificada)",
+          "locator": "docs/handoffs/continuous-autonomy/HF-26-03.md",
+          "verified": false
+        }
+      ]
     },
     {
       "id": "HF-05-02",
@@ -461,8 +534,8 @@
       "description": "Planejamento de composição. Fechar tipos Python ControlStore, DDL, migração e locks; verificar API launch/queue/recovery/version/shutdown DBOS instalada. Store PostgreSQL transacional + outbox para DBOS; manter DF11/HF05 owners sem conversão.",
       "item_type": "research",
       "lifecycle_stage": "execution",
-      "delivery_status": "planned",
-      "state_rationale": "Planejado; waiting_dependency; implementação não iniciada; operacionalmente não verificado. Registro não autoriza despacho.",
+      "delivery_status": "completed",
+      "state_rationale": "Implementado e integrado em main (`bacdaec`); o handoff registra implementação concluída e operação verificada. Reconciliado com evidência em 29/09/2026.",
       "horizon": "now",
       "confidence": "high",
       "dependencies": [
@@ -476,9 +549,7 @@
         }
       ],
       "tags": [
-        "continuous-autonomy",
-        "planning-only",
-        "waiting_dependency"
+        "continuous-autonomy"
       ],
       "completion_criteria": [
         "Transcript real ou waiting_access técnico; imports reais e documentação primária por versão. Binding define reserva única e crash points, não importa DBOS como prova de execução."
@@ -492,7 +563,23 @@
           "produced_by": "codex-planner-01a0b4c8"
         }
       ],
-      "parent_id": "HF-05"
+      "parent_id": "HF-05",
+      "evidence_refs": [
+        {
+          "evidence_id": "commit:HF-05-02:bacdaec",
+          "evidence_kind": "git_commit",
+          "label": "Commit bacdaec em main - feat(bindings): implement HF-05-02, HF-07-01, and HF-12-01 architecture bindings",
+          "locator": "git:bacdaec",
+          "verified": true
+        },
+        {
+          "evidence_id": "doc:HF-05-02:HF-05-02.md",
+          "evidence_kind": "handoff_doc",
+          "label": "Handoff HF-05-02 (implementado; operação verificada)",
+          "locator": "docs/handoffs/continuous-autonomy/HF-05-02.md",
+          "verified": false
+        }
+      ]
     },
     {
       "id": "HF-05-03",
@@ -501,8 +588,8 @@
       "description": "Planejamento de composição. Implementar Protocol de CONTRACTS.md e binding CONTROL; SQLite local e PostgreSQL opcional com demandas/jobs/outbox/inbox/leases/reservas/operations, transações curtas sem LLM sob lock.",
       "item_type": "feature",
       "lifecycle_stage": "execution",
-      "delivery_status": "planned",
-      "state_rationale": "Planejado; needs_architecture_binding; implementação não iniciada; operacionalmente não verificado. Registro não autoriza despacho.",
+      "delivery_status": "completed",
+      "state_rationale": "Implementado e integrado em main (`1173487`, `2730312`); o handoff registra implementação concluída e operação verificada. Reconciliado com evidência em 29/09/2026.",
       "horizon": "now",
       "confidence": "high",
       "dependencies": [
@@ -512,9 +599,7 @@
         }
       ],
       "tags": [
-        "continuous-autonomy",
-        "planning-only",
-        "needs_architecture_binding"
+        "continuous-autonomy"
       ],
       "completion_criteria": [
         "Crash antes/depois commit, claims concorrentes por conexões/processos, dedupe conflitante e stale fencing. Suite parametrizada real nos dois backends; skip cloud não comprova cloud."
@@ -528,7 +613,30 @@
           "produced_by": "codex-planner-01a0b4c8"
         }
       ],
-      "parent_id": "HF-05"
+      "parent_id": "HF-05",
+      "evidence_refs": [
+        {
+          "evidence_id": "commit:HF-05-03:1173487",
+          "evidence_kind": "git_commit",
+          "label": "Commit 1173487 em main - feat(runtime): implement HF-05-03 control persistence, HF-07-02 qualified routes, and HF-12-02 real deployment adapter",
+          "locator": "git:1173487",
+          "verified": true
+        },
+        {
+          "evidence_id": "commit:HF-05-03:2730312",
+          "evidence_kind": "git_commit",
+          "label": "Commit 2730312 em main - feat(autonomy): implement HF-05-03 canonical persistence and unblock HF-05-04 and HF-07-02",
+          "locator": "git:2730312",
+          "verified": true
+        },
+        {
+          "evidence_id": "doc:HF-05-03:HF-05-03.md",
+          "evidence_kind": "handoff_doc",
+          "label": "Handoff HF-05-03 (implementado; operação verificada)",
+          "locator": "docs/handoffs/continuous-autonomy/HF-05-03.md",
+          "verified": false
+        }
+      ]
     },
     {
       "id": "HF-05-04",
@@ -537,8 +645,8 @@
       "description": "Planejamento de composição. build_handlers(bindings,services); handle(StageContext)->StageResult; materialize_result(job_key,result,store). Inbox+sucessores atomicamente; fan-out produtivo e memória; versão fixada e allowlist.",
       "item_type": "feature",
       "lifecycle_stage": "execution",
-      "delivery_status": "planned",
-      "state_rationale": "Planejado; waiting_dependency; implementação não iniciada; operacionalmente não verificado. Registro não autoriza despacho.",
+      "delivery_status": "completed",
+      "state_rationale": "Implementado e integrado em main (`ac3fe9d`, `93861c2`); o handoff registra implementação concluída e operação verificada. Reconciliado com evidência em 29/09/2026.",
       "horizon": "now",
       "confidence": "high",
       "dependencies": [
@@ -548,9 +656,7 @@
         }
       ],
       "tags": [
-        "continuous-autonomy",
-        "planning-only",
-        "waiting_dependency"
+        "continuous-autonomy"
       ],
       "completion_criteria": [
         "Evento perdido e duplicado convergem ao mesmo JobKey; success vazio e handler ausente falham; WAITING_HUMAN não suspende irmãos; learning interno não recursa."
@@ -564,7 +670,30 @@
           "produced_by": "codex-planner-01a0b4c8"
         }
       ],
-      "parent_id": "HF-05"
+      "parent_id": "HF-05",
+      "evidence_refs": [
+        {
+          "evidence_id": "commit:HF-05-04:ac3fe9d",
+          "evidence_kind": "git_commit",
+          "label": "Commit ac3fe9d em main - feat(workflow): implement HF-05-04 handlers/successors, HF-07-03 catalog jobs, and HF-12-03 target journey/rollback",
+          "locator": "git:ac3fe9d",
+          "verified": true
+        },
+        {
+          "evidence_id": "commit:HF-05-04:93861c2",
+          "evidence_kind": "git_commit",
+          "label": "Commit 93861c2 em main - feat(autonomy): finalize HF-23-01, HF-05-04, HF-12-01 and unblock successor nodes",
+          "locator": "git:93861c2",
+          "verified": true
+        },
+        {
+          "evidence_id": "doc:HF-05-04:HF-05-04.md",
+          "evidence_kind": "handoff_doc",
+          "label": "Handoff HF-05-04 (implementado; operação verificada)",
+          "locator": "docs/handoffs/continuous-autonomy/HF-05-04.md",
+          "verified": false
+        }
+      ]
     },
     {
       "id": "HF-05-05",
@@ -573,8 +702,8 @@
       "description": "Planejamento de composição. Supervisor.run(stop_event),tick(now),next_wakeup(now): scan paginado estável do registry, outbox+state repair, ready-age e leases; tick 30s, espera interrompível até15s, zero LLM ocioso.",
       "item_type": "feature",
       "lifecycle_stage": "execution",
-      "delivery_status": "planned",
-      "state_rationale": "Planejado; waiting_dependency; implementação não iniciada; operacionalmente não verificado. Registro não autoriza despacho.",
+      "delivery_status": "completed",
+      "state_rationale": "Implementado e integrado em main (`42b483f`); o handoff registra implementação concluída e operação verificada. Reconciliado com evidência em 29/09/2026.",
       "horizon": "now",
       "confidence": "high",
       "dependencies": [
@@ -584,9 +713,7 @@
         }
       ],
       "tags": [
-        "continuous-autonomy",
-        "planning-only",
-        "waiting_dependency"
+        "continuous-autonomy"
       ],
       "completion_criteria": [
         "100+ projetos e inserção durante scan não perdem jobs; <=60s de recuperação com clock falso; cancelamento impede efeitos e ausência consumidor é detectada."
@@ -600,7 +727,23 @@
           "produced_by": "codex-planner-01a0b4c8"
         }
       ],
-      "parent_id": "HF-05"
+      "parent_id": "HF-05",
+      "evidence_refs": [
+        {
+          "evidence_id": "commit:HF-05-05:42b483f",
+          "evidence_kind": "git_commit",
+          "label": "Commit 42b483f em main - feat(autonomy): implement HF-05-05 supervisor, HF-08-01 intake, and HF-12-04 release",
+          "locator": "git:42b483f",
+          "verified": true
+        },
+        {
+          "evidence_id": "doc:HF-05-05:HF-05-05.md",
+          "evidence_kind": "handoff_doc",
+          "label": "Handoff HF-05-05 (implementado; operação verificada)",
+          "locator": "docs/handoffs/continuous-autonomy/HF-05-05.md",
+          "verified": false
+        }
+      ]
     },
     {
       "id": "HF-05-06",
@@ -609,8 +752,8 @@
       "description": "Planejamento de composição. main serviço default lança engine/supervisor/worker e drain SIGTERM; --status preserva diagnóstico. Compose fixa imagem/digest e health de progresso; remover token de build URL.",
       "item_type": "feature",
       "lifecycle_stage": "execution",
-      "delivery_status": "planned",
-      "state_rationale": "Planejado; needs_architecture_binding; implementação não iniciada; operacionalmente não verificado. Registro não autoriza despacho.",
+      "delivery_status": "completed",
+      "state_rationale": "Implementado e integrado em main (`52c31d1`); o handoff registra implementação concluída e operação verificada. Verificação operacional em produção registrada no commit citado. Reconciliado com evidência em 29/09/2026.",
       "horizon": "now",
       "confidence": "high",
       "dependencies": [
@@ -624,9 +767,7 @@
         }
       ],
       "tags": [
-        "continuous-autonomy",
-        "planning-only",
-        "needs_architecture_binding"
+        "continuous-autonomy"
       ],
       "completion_criteria": [
         "PID vivo ocioso sem IA; input avança; import/connect sem consumo dá not_ready. Kill após efeito recupera, notebook desligado não para cloud."
@@ -640,7 +781,23 @@
           "produced_by": "codex-planner-01a0b4c8"
         }
       ],
-      "parent_id": "HF-05"
+      "parent_id": "HF-05",
+      "evidence_refs": [
+        {
+          "evidence_id": "commit:HF-05-06:52c31d1",
+          "evidence_kind": "git_commit",
+          "label": "Commit 52c31d1 em main - docs(handoffs): register live production operational verification for HF-05-06, HF-03-07, and HF-15-01",
+          "locator": "git:52c31d1",
+          "verified": true
+        },
+        {
+          "evidence_id": "doc:HF-05-06:HF-05-06.md",
+          "evidence_kind": "handoff_doc",
+          "label": "Handoff HF-05-06 (implementado; operação verificada)",
+          "locator": "docs/handoffs/continuous-autonomy/HF-05-06.md",
+          "verified": false
+        }
+      ]
     },
     {
       "id": "HF-23-01",
@@ -649,8 +806,8 @@
       "description": "Planejamento de composição. rank_eligible(snapshot,now)->list[JobKey] puro; composed mode proíbe slots JSON e delega claim ao store. Limites existentes conta/projeto/run/pool, custos em unidades inteiras; aliases canônicos.",
       "item_type": "feature",
       "lifecycle_stage": "execution",
-      "delivery_status": "planned",
-      "state_rationale": "Planejado; needs_architecture_binding; implementação não iniciada; operacionalmente não verificado. Registro não autoriza despacho.",
+      "delivery_status": "completed",
+      "state_rationale": "Implementado e integrado em main (`1210239`, `93861c2`); o handoff registra implementação concluída e operação verificada. Reconciliado com evidência em 29/09/2026.",
       "horizon": "now",
       "confidence": "high",
       "dependencies": [
@@ -664,9 +821,7 @@
         }
       ],
       "tags": [
-        "continuous-autonomy",
-        "planning-only",
-        "needs_architecture_binding"
+        "continuous-autonomy"
       ],
       "completion_criteria": [
         "Dois schedulers não gastam último crédito/slot duas vezes; expiração libera espaço mas mantém custo incerto; starvation protegido sem inventar budget."
@@ -680,7 +835,30 @@
           "produced_by": "codex-planner-01a0b4c8"
         }
       ],
-      "parent_id": "HF-23"
+      "parent_id": "HF-23",
+      "evidence_refs": [
+        {
+          "evidence_id": "commit:HF-23-01:1210239",
+          "evidence_kind": "git_commit",
+          "label": "Commit 1210239 em main - feat(autonomy): implement HF-09-02 consumers, HF-23-01 capacity policy, and HF-08-02 public intake",
+          "locator": "git:1210239",
+          "verified": true
+        },
+        {
+          "evidence_id": "commit:HF-23-01:93861c2",
+          "evidence_kind": "git_commit",
+          "label": "Commit 93861c2 em main - feat(autonomy): finalize HF-23-01, HF-05-04, HF-12-01 and unblock successor nodes",
+          "locator": "git:93861c2",
+          "verified": true
+        },
+        {
+          "evidence_id": "doc:HF-23-01:HF-23-01.md",
+          "evidence_kind": "handoff_doc",
+          "label": "Handoff HF-23-01 (implementado; operação verificada)",
+          "locator": "docs/handoffs/continuous-autonomy/HF-23-01.md",
+          "verified": false
+        }
+      ]
     },
     {
       "id": "HF-23-02",
@@ -689,8 +867,8 @@
       "description": "Planejar e implementar, em etapa futura, contrato mínimo de pilotos headless reutilizável; Jev é o primeiro candidato em shadow mode para classificar etapa e complexidade antes do roteador. Comparação pareada com baseline, holdout, incerteza e guardrails sem alterar despacho durante o piloto.",
       "item_type": "feature",
       "lifecycle_stage": "execution",
-      "delivery_status": "planned",
-      "state_rationale": "Ticket futuro planejado; decisão do owner permite descrições reais completas em tarefas elegíveis para nuvem. Ainda sem WorkflowHandoff/PlanApproval, implementação, shadow operacional ou promoção. Registro não autoriza despacho.",
+      "delivery_status": "completed",
+      "state_rationale": "Implementado (core/pilots/, tests/test_reusable_pilots.py) e integrado em main (`e3b93cc`); o adaptador Jev opera somente em shadow mode, sem promoção automática. Reconciliado com evidência em 29/09/2026.",
       "horizon": "later",
       "confidence": "medium",
       "dependencies": [
@@ -707,8 +885,7 @@
         "model-routing",
         "jev",
         "pilot",
-        "shadow-mode",
-        "planning-only"
+        "shadow-mode"
       ],
       "completion_criteria": [
         "Contrato de piloto reutilizável com hipótese, população, versões, holdout, métricas, incerteza, orçamento, riscos sentinela e relatório sem promoção automática.",
@@ -725,7 +902,23 @@
           "produced_by": "codex-planner-2026-09-19"
         }
       ],
-      "parent_id": "HF-23"
+      "parent_id": "HF-23",
+      "evidence_refs": [
+        {
+          "evidence_id": "commit:HF-23-02:e3b93cc",
+          "evidence_kind": "git_commit",
+          "label": "Commit e3b93cc em main - feat(pilots): implement HF-23-02 reusable pilots and jev shadow adapter",
+          "locator": "git:e3b93cc",
+          "verified": true
+        },
+        {
+          "evidence_id": "doc:HF-23-02:HF-23-02.md",
+          "evidence_kind": "handoff_doc",
+          "label": "Handoff HF-23-02 (implementado e validado)",
+          "locator": "docs/handoffs/HF-23-02.md",
+          "verified": false
+        }
+      ]
     },
     {
       "id": "HF-08-01",
@@ -734,8 +927,8 @@
       "description": "Planejamento de composição. AutonomousIntakeService.accept(IntakeCommand)->IntakeReceipt; receive_demand modo autonomous exige store, documental não retorna run fictício. Grill vira job posterior; DemandsStore JSON projeção pós-commit.",
       "item_type": "feature",
       "lifecycle_stage": "execution",
-      "delivery_status": "planned",
-      "state_rationale": "Planejado; waiting_dependency; implementação não iniciada; operacionalmente não verificado. Registro não autoriza despacho.",
+      "delivery_status": "completed",
+      "state_rationale": "Implementado e integrado em main (`42b483f`); o handoff registra implementação concluída e operação verificada. Reconciliado com evidência em 29/09/2026.",
       "horizon": "now",
       "confidence": "high",
       "dependencies": [
@@ -745,9 +938,7 @@
         }
       ],
       "tags": [
-        "continuous-autonomy",
-        "planning-only",
-        "waiting_dependency"
+        "continuous-autonomy"
       ],
       "completion_criteria": [
         "Crash não deixa accepted sem job; replay retorna mesmos IDs; documentary IDs de execução null. Falha na projeção não duplica demanda."
@@ -761,7 +952,23 @@
           "produced_by": "codex-planner-01a0b4c8"
         }
       ],
-      "parent_id": "HF-08"
+      "parent_id": "HF-08",
+      "evidence_refs": [
+        {
+          "evidence_id": "commit:HF-08-01:42b483f",
+          "evidence_kind": "git_commit",
+          "label": "Commit 42b483f em main - feat(autonomy): implement HF-05-05 supervisor, HF-08-01 intake, and HF-12-04 release",
+          "locator": "git:42b483f",
+          "verified": true
+        },
+        {
+          "evidence_id": "doc:HF-08-01:HF-08-01.md",
+          "evidence_kind": "handoff_doc",
+          "label": "Handoff HF-08-01 (implementado; operação verificada)",
+          "locator": "docs/handoffs/continuous-autonomy/HF-08-01.md",
+          "verified": false
+        }
+      ]
     },
     {
       "id": "HF-08-02",
@@ -770,8 +977,8 @@
       "description": "Planejamento de composição. CLI mantém args e adiciona --mode/--external-id para replay; Hub Idempotency-Key e service injetado nas rotas atuais. HTTP202 pós-commit,409 conflito,503 store ausente; autorização antes de persistir.",
       "item_type": "feature",
       "lifecycle_stage": "execution",
-      "delivery_status": "planned",
-      "state_rationale": "Planejado; waiting_dependency; implementação não iniciada; operacionalmente não verificado. Registro não autoriza despacho.",
+      "delivery_status": "completed",
+      "state_rationale": "Implementado e integrado em main (`1210239`, `a96386f`); o handoff registra implementação concluída e operação verificada. Reconciliado com evidência em 29/09/2026.",
       "horizon": "now",
       "confidence": "high",
       "dependencies": [
@@ -781,9 +988,7 @@
         }
       ],
       "tags": [
-        "continuous-autonomy",
-        "planning-only",
-        "waiting_dependency"
+        "continuous-autonomy"
       ],
       "completion_criteria": [
         "CLI subprocesso e HTTP geram job; indisponibilidade nunca accepted; progressão sem chamada manual de fases. Retries reutilizam external_id."
@@ -797,7 +1002,30 @@
           "produced_by": "codex-planner-01a0b4c8"
         }
       ],
-      "parent_id": "HF-08"
+      "parent_id": "HF-08",
+      "evidence_refs": [
+        {
+          "evidence_id": "commit:HF-08-02:1210239",
+          "evidence_kind": "git_commit",
+          "label": "Commit 1210239 em main - feat(autonomy): implement HF-09-02 consumers, HF-23-01 capacity policy, and HF-08-02 public intake",
+          "locator": "git:1210239",
+          "verified": true
+        },
+        {
+          "evidence_id": "commit:HF-08-02:a96386f",
+          "evidence_kind": "git_commit",
+          "label": "Commit a96386f em main - feat(demands): complete HF-08-02 autonomous intake cli and root alias tests",
+          "locator": "git:a96386f",
+          "verified": true
+        },
+        {
+          "evidence_id": "doc:HF-08-02:HF-08-02.md",
+          "evidence_kind": "handoff_doc",
+          "label": "Handoff HF-08-02 (implementado; operação verificada)",
+          "locator": "docs/handoffs/continuous-autonomy/HF-08-02.md",
+          "verified": false
+        }
+      ]
     },
     {
       "id": "HF-08-03",
@@ -806,8 +1034,8 @@
       "description": "Planejamento de composição. backfill(store,legacy_tickets,cursor)->ImportPage com project/ticket/version/fingerprint; Telegram chat autorizado+update_id e offset pós-commit. n8n gateway do mesmo endpoint.",
       "item_type": "feature",
       "lifecycle_stage": "execution",
-      "delivery_status": "planned",
-      "state_rationale": "Planejado; waiting_dependency; implementação não iniciada; operacionalmente não verificado. Registro não autoriza despacho.",
+      "delivery_status": "completed",
+      "state_rationale": "Implementado e integrado em main (`be1947f`); o handoff registra implementação concluída e operação verificada. Reconciliado com evidência em 29/09/2026.",
       "horizon": "now",
       "confidence": "high",
       "dependencies": [
@@ -821,9 +1049,7 @@
         }
       ],
       "tags": [
-        "continuous-autonomy",
-        "planning-only",
-        "waiting_dependency"
+        "continuous-autonomy"
       ],
       "completion_criteria": [
         "Restart antes cursor não duplica; legado terminal não reexecuta; sem prova terminal vai reconciliation_required. Canal não cria segunda fila."
@@ -837,7 +1063,23 @@
           "produced_by": "codex-planner-01a0b4c8"
         }
       ],
-      "parent_id": "HF-08"
+      "parent_id": "HF-08",
+      "evidence_refs": [
+        {
+          "evidence_id": "commit:HF-08-03:be1947f",
+          "evidence_kind": "git_commit",
+          "label": "Commit be1947f em main - feat(autonomy): implement HF-11-01 GitHub integration, HF-08-03 Telegram & backfill, and HF-13-01 roadmap evidence",
+          "locator": "git:be1947f",
+          "verified": true
+        },
+        {
+          "evidence_id": "doc:HF-08-03:HF-08-03.md",
+          "evidence_kind": "handoff_doc",
+          "label": "Handoff HF-08-03 (implementado; operação verificada)",
+          "locator": "docs/handoffs/continuous-autonomy/HF-08-03.md",
+          "verified": false
+        }
+      ]
     },
     {
       "id": "HF-08-04",
@@ -846,8 +1088,8 @@
       "description": "Planejamento de composição. PlanningHandler.handle(context) lê registry/demand/memory; produz WorkflowHandoff e graph revision. Stop quando todas folhas têm ready/design/dependency/binding justificados. Dedupe por demand_version+relevant_contract_digest.",
       "item_type": "feature",
       "lifecycle_stage": "execution",
-      "delivery_status": "planned",
-      "state_rationale": "Planejado; needs_architecture_binding; implementação não iniciada; operacionalmente não verificado. Registro não autoriza despacho.",
+      "delivery_status": "completed",
+      "state_rationale": "Implementado e integrado em main (`532fbdd`, `fda4170`); o handoff registra implementação concluída e operação verificada. Reconciliado com evidência em 29/09/2026.",
       "horizon": "now",
       "confidence": "high",
       "dependencies": [
@@ -861,9 +1103,7 @@
         }
       ],
       "tags": [
-        "continuous-autonomy",
-        "planning-only",
-        "needs_architecture_binding"
+        "continuous-autonomy"
       ],
       "completion_criteria": [
         "Visita todos projetos e novos registros; folhas prontas liberam sem carteira inteira; hash igual não decompõe infinitamente; lacuna gera binding high, não economia decidindo."
@@ -877,7 +1117,30 @@
           "produced_by": "codex-planner-01a0b4c8"
         }
       ],
-      "parent_id": "HF-08"
+      "parent_id": "HF-08",
+      "evidence_refs": [
+        {
+          "evidence_id": "commit:HF-08-04:532fbdd",
+          "evidence_kind": "git_commit",
+          "label": "Commit 532fbdd em main - feat(autonomy): implement HF-09-01 agent binding, HF-08-04 continuous planning, and HF-08-05 manual resume probe",
+          "locator": "git:532fbdd",
+          "verified": true
+        },
+        {
+          "evidence_id": "commit:HF-08-04:fda4170",
+          "evidence_kind": "git_commit",
+          "label": "Commit fda4170 em main - feat(autonomy): finalize HF-08-04 and HF-08-05 and update continuous autonomy index",
+          "locator": "git:fda4170",
+          "verified": true
+        },
+        {
+          "evidence_id": "doc:HF-08-04:HF-08-04.md",
+          "evidence_kind": "handoff_doc",
+          "label": "Handoff HF-08-04 (implementado; operação verificada)",
+          "locator": "docs/handoffs/continuous-autonomy/HF-08-04.md",
+          "verified": false
+        }
+      ]
     },
     {
       "id": "HF-08-05",
@@ -886,8 +1149,8 @@
       "description": "Planejamento de composição. submit_resolution(dependency_id,response_ref,version)->ProbeJob; só receipt na identidade/rota certa resolve e gera outbox. ManualDependency guia todos campos, canal seguro, blocked_stages e resume_criteria.",
       "item_type": "feature",
       "lifecycle_stage": "execution",
-      "delivery_status": "planned",
-      "state_rationale": "Planejado; waiting_dependency; implementação não iniciada; operacionalmente não verificado. Registro não autoriza despacho.",
+      "delivery_status": "completed",
+      "state_rationale": "Implementado e integrado em main (`532fbdd`, `fda4170`); o handoff registra implementação concluída e operação verificada. Reconciliado com evidência em 29/09/2026.",
       "horizon": "now",
       "confidence": "high",
       "dependencies": [
@@ -897,9 +1160,7 @@
         }
       ],
       "tags": [
-        "continuous-autonomy",
-        "planning-only",
-        "waiting_dependency"
+        "continuous-autonomy"
       ],
       "completion_criteria": [
         "Resposta incorreta/antiga não libera; correta retoma automaticamente só descendentes. Segredo em conversa não persiste; outro projeto avança."
@@ -913,7 +1174,30 @@
           "produced_by": "codex-planner-01a0b4c8"
         }
       ],
-      "parent_id": "HF-08"
+      "parent_id": "HF-08",
+      "evidence_refs": [
+        {
+          "evidence_id": "commit:HF-08-05:532fbdd",
+          "evidence_kind": "git_commit",
+          "label": "Commit 532fbdd em main - feat(autonomy): implement HF-09-01 agent binding, HF-08-04 continuous planning, and HF-08-05 manual resume probe",
+          "locator": "git:532fbdd",
+          "verified": true
+        },
+        {
+          "evidence_id": "commit:HF-08-05:fda4170",
+          "evidence_kind": "git_commit",
+          "label": "Commit fda4170 em main - feat(autonomy): finalize HF-08-04 and HF-08-05 and update continuous autonomy index",
+          "locator": "git:fda4170",
+          "verified": true
+        },
+        {
+          "evidence_id": "doc:HF-08-05:HF-08-05.md",
+          "evidence_kind": "handoff_doc",
+          "label": "Handoff HF-08-05 (implementado; operação verificada)",
+          "locator": "docs/handoffs/continuous-autonomy/HF-08-05.md",
+          "verified": false
+        }
+      ]
     },
     {
       "id": "HF-07-01",
@@ -922,8 +1206,8 @@
       "description": "Planejamento de composição. Inventariar model IDs/effort high/max, contas/hosts, tools/edit/test/resume/cancel, quota/reset/preço; microtarefa real autorizada; adapter mapping providers/AgentExecutor, TTL24h.",
       "item_type": "research",
       "lifecycle_stage": "execution",
-      "delivery_status": "planned",
-      "state_rationale": "Planejado; waiting_dependency; implementação não iniciada; operacionalmente não verificado. Registro não autoriza despacho.",
+      "delivery_status": "completed",
+      "state_rationale": "Implementado e integrado em main (`bacdaec`); o handoff registra implementação concluída e operação verificada. Reconciliado com evidência em 29/09/2026.",
       "horizon": "now",
       "confidence": "high",
       "dependencies": [
@@ -933,9 +1217,7 @@
         }
       ],
       "tags": [
-        "continuous-autonomy",
-        "planning-only",
-        "waiting_dependency"
+        "continuous-autonomy"
       ],
       "completion_criteria": [
         "Nome textual sem tool calling reprova; assinatura desktop não prova VPS; sem rota qualificada registrar reset/reavaliação. Sem compra ou chamada paga sem reserva."
@@ -949,7 +1231,23 @@
           "produced_by": "codex-planner-01a0b4c8"
         }
       ],
-      "parent_id": "HF-07"
+      "parent_id": "HF-07",
+      "evidence_refs": [
+        {
+          "evidence_id": "commit:HF-07-01:bacdaec",
+          "evidence_kind": "git_commit",
+          "label": "Commit bacdaec em main - feat(bindings): implement HF-05-02, HF-07-01, and HF-12-01 architecture bindings",
+          "locator": "git:bacdaec",
+          "verified": true
+        },
+        {
+          "evidence_id": "doc:HF-07-01:HF-07-01.md",
+          "evidence_kind": "handoff_doc",
+          "label": "Handoff HF-07-01 (implementado; operação verificada)",
+          "locator": "docs/handoffs/continuous-autonomy/HF-07-01.md",
+          "verified": false
+        }
+      ]
     },
     {
       "id": "HF-07-02",
@@ -958,8 +1256,8 @@
       "description": "Planejamento de composição. select_route(job,catalog,quota,budget)->RouteDecision; checar papel/qualidade/tools/host/custo antes claim. Avaliar outras assinaturas, APIs autorizadas, local; unknown não available.",
       "item_type": "feature",
       "lifecycle_stage": "execution",
-      "delivery_status": "planned",
-      "state_rationale": "Planejado; needs_architecture_binding; implementação não iniciada; operacionalmente não verificado. Registro não autoriza despacho.",
+      "delivery_status": "completed",
+      "state_rationale": "Implementado e integrado em main (`1173487`, `60ea254`); o handoff registra implementação concluída e operação verificada. Reconciliado com evidência em 29/09/2026.",
       "horizon": "now",
       "confidence": "high",
       "dependencies": [
@@ -973,9 +1271,7 @@
         }
       ],
       "tags": [
-        "continuous-autonomy",
-        "planning-only",
-        "needs_architecture_binding"
+        "continuous-autonomy"
       ],
       "completion_criteria": [
         "Quota mudou antes claim exige reseleção sem dupla reserva. Local não qualificado high não planeja; nenhuma rota gera espera com motivo/wakeup, tarefas locais seguem."
@@ -989,7 +1285,30 @@
           "produced_by": "codex-planner-01a0b4c8"
         }
       ],
-      "parent_id": "HF-07"
+      "parent_id": "HF-07",
+      "evidence_refs": [
+        {
+          "evidence_id": "commit:HF-07-02:1173487",
+          "evidence_kind": "git_commit",
+          "label": "Commit 1173487 em main - feat(runtime): implement HF-05-03 control persistence, HF-07-02 qualified routes, and HF-12-02 real deployment adapter",
+          "locator": "git:1173487",
+          "verified": true
+        },
+        {
+          "evidence_id": "commit:HF-07-02:60ea254",
+          "evidence_kind": "git_commit",
+          "label": "Commit 60ea254 em main - feat(autonomy): finalize HF-07-02 qualified routes and unblock HF-23-01 and HF-10-02",
+          "locator": "git:60ea254",
+          "verified": true
+        },
+        {
+          "evidence_id": "doc:HF-07-02:HF-07-02.md",
+          "evidence_kind": "handoff_doc",
+          "label": "Handoff HF-07-02 (implementado; operação verificada)",
+          "locator": "docs/handoffs/continuous-autonomy/HF-07-02.md",
+          "verified": false
+        }
+      ]
     },
     {
       "id": "HF-07-03",
@@ -998,8 +1317,8 @@
       "description": "Planejamento de composição. CatalogRefreshHandler timer24h persistido e boot catchup; fontes oficiais, smoke/eval por papel; promoção só novos jobs e rollback catálogo. Falha mantém último válido com idade.",
       "item_type": "feature",
       "lifecycle_stage": "execution",
-      "delivery_status": "planned",
-      "state_rationale": "Planejado; needs_architecture_binding; implementação não iniciada; operacionalmente não verificado. Registro não autoriza despacho.",
+      "delivery_status": "completed",
+      "state_rationale": "Implementado e integrado em main (`ac3fe9d`, `ffc7587`); o handoff registra implementação concluída e operação verificada. Reconciliado com evidência em 29/09/2026.",
       "horizon": "now",
       "confidence": "high",
       "dependencies": [
@@ -1013,9 +1332,7 @@
         }
       ],
       "tags": [
-        "continuous-autonomy",
-        "planning-only",
-        "needs_architecture_binding"
+        "continuous-autonomy"
       ],
       "completion_criteria": [
         "Timer perdido executa uma vez; modelo ativo não muda; preço ausente não zero; effort incompatível não enviado."
@@ -1029,7 +1346,30 @@
           "produced_by": "codex-planner-01a0b4c8"
         }
       ],
-      "parent_id": "HF-07"
+      "parent_id": "HF-07",
+      "evidence_refs": [
+        {
+          "evidence_id": "commit:HF-07-03:ac3fe9d",
+          "evidence_kind": "git_commit",
+          "label": "Commit ac3fe9d em main - feat(workflow): implement HF-05-04 handlers/successors, HF-07-03 catalog jobs, and HF-12-03 target journey/rollback",
+          "locator": "git:ac3fe9d",
+          "verified": true
+        },
+        {
+          "evidence_id": "commit:HF-07-03:ffc7587",
+          "evidence_kind": "git_commit",
+          "label": "Commit ffc7587 em main - feat(autonomy): finalize HF-07-03 and HF-10-02 via parallel sub-agents",
+          "locator": "git:ffc7587",
+          "verified": true
+        },
+        {
+          "evidence_id": "doc:HF-07-03:HF-07-03.md",
+          "evidence_kind": "handoff_doc",
+          "label": "Handoff HF-07-03 (implementado; operação verificada)",
+          "locator": "docs/handoffs/continuous-autonomy/HF-07-03.md",
+          "verified": false
+        }
+      ]
     },
     {
       "id": "HF-09-01",
@@ -1038,8 +1378,8 @@
       "description": "Planejamento de composição. Fechar service/method/signature/conversion e schemas por estágio; mapear AgentExecutor.start/resume e ImplementationCycleService; tools/prompts/worktree versionados e authority do VerificationContext.",
       "item_type": "research",
       "lifecycle_stage": "execution",
-      "delivery_status": "planned",
-      "state_rationale": "Planejado; waiting_dependency; implementação não iniciada; operacionalmente não verificado. Registro não autoriza despacho.",
+      "delivery_status": "completed",
+      "state_rationale": "Implementado e integrado em main (`532fbdd`, `675d409`); o handoff registra implementação concluída e operação verificada. Reconciliado com evidência em 29/09/2026.",
       "horizon": "now",
       "confidence": "high",
       "dependencies": [
@@ -1053,9 +1393,7 @@
         }
       ],
       "tags": [
-        "continuous-autonomy",
-        "planning-only",
-        "waiting_dependency"
+        "continuous-autonomy"
       ],
       "completion_criteria": [
         "Smoke com edição e teste real; só texto não qualifica. Sujeito revisor distinto. Adapter ausente gera leaf de implementação específica com APIs resolvidas."
@@ -1069,7 +1407,30 @@
           "produced_by": "codex-planner-01a0b4c8"
         }
       ],
-      "parent_id": "HF-09"
+      "parent_id": "HF-09",
+      "evidence_refs": [
+        {
+          "evidence_id": "commit:HF-09-01:532fbdd",
+          "evidence_kind": "git_commit",
+          "label": "Commit 532fbdd em main - feat(autonomy): implement HF-09-01 agent binding, HF-08-04 continuous planning, and HF-08-05 manual resume probe",
+          "locator": "git:532fbdd",
+          "verified": true
+        },
+        {
+          "evidence_id": "commit:HF-09-01:675d409",
+          "evidence_kind": "git_commit",
+          "label": "Commit 675d409 em main - feat(autonomy): finalize HF-09-01 and HF-12-02 and unblock HF-09-02 and HF-12-03",
+          "locator": "git:675d409",
+          "verified": true
+        },
+        {
+          "evidence_id": "doc:HF-09-01:HF-09-01.md",
+          "evidence_kind": "handoff_doc",
+          "label": "Handoff HF-09-01 (implementado; operação verificada)",
+          "locator": "docs/handoffs/continuous-autonomy/HF-09-01.md",
+          "verified": false
+        }
+      ]
     },
     {
       "id": "HF-09-02",
@@ -1078,8 +1439,8 @@
       "description": "Planejamento de composição. Handlers do binding, worktree/lease exclusiva, econômico, SHA+bytes e validação/revisão distintas. Defeito gera iteration; lacuna replan; duas tentativas sem progresso encerram causa.",
       "item_type": "feature",
       "lifecycle_stage": "execution",
-      "delivery_status": "planned",
-      "state_rationale": "Planejado; needs_architecture_binding; implementação não iniciada; operacionalmente não verificado. Registro não autoriza despacho.",
+      "delivery_status": "completed",
+      "state_rationale": "Implementado e integrado em main (`1210239`, `9434d64`); o handoff registra implementação concluída e operação verificada. Reconciliado com evidência em 29/09/2026.",
       "horizon": "now",
       "confidence": "high",
       "dependencies": [
@@ -1093,9 +1454,7 @@
         }
       ],
       "tags": [
-        "continuous-autonomy",
-        "planning-only",
-        "needs_architecture_binding"
+        "continuous-autonomy"
       ],
       "completion_criteria": [
         "Defeito funcional reprova mesmo com self-PASS; mesmo sujeito não revisa; crash retoma owner original sem editar outra worktree."
@@ -1109,7 +1468,30 @@
           "produced_by": "codex-planner-01a0b4c8"
         }
       ],
-      "parent_id": "HF-09"
+      "parent_id": "HF-09",
+      "evidence_refs": [
+        {
+          "evidence_id": "commit:HF-09-02:1210239",
+          "evidence_kind": "git_commit",
+          "label": "Commit 1210239 em main - feat(autonomy): implement HF-09-02 consumers, HF-23-01 capacity policy, and HF-08-02 public intake",
+          "locator": "git:1210239",
+          "verified": true
+        },
+        {
+          "evidence_id": "commit:HF-09-02:9434d64",
+          "evidence_kind": "git_commit",
+          "label": "Commit 9434d64 em main - feat(autonomy): finalize HF-09-02 and HF-12-03 via parallel sub-agents",
+          "locator": "git:9434d64",
+          "verified": true
+        },
+        {
+          "evidence_id": "doc:HF-09-02:HF-09-02.md",
+          "evidence_kind": "handoff_doc",
+          "label": "Handoff HF-09-02 (implementado; operação verificada)",
+          "locator": "docs/handoffs/continuous-autonomy/HF-09-02.md",
+          "verified": false
+        }
+      ]
     },
     {
       "id": "HF-11-01",
@@ -1118,8 +1500,8 @@
       "description": "Planejamento de composição. IntegrationHandler usa request/snapshot reais: commit seletivo,push,PR por branch/checks/head,merge permitido e ancestry remota; lookup repo+PR após timeout.",
       "item_type": "feature",
       "lifecycle_stage": "execution",
-      "delivery_status": "planned",
-      "state_rationale": "Planejado; needs_architecture_binding; implementação não iniciada; operacionalmente não verificado. Registro não autoriza despacho.",
+      "delivery_status": "completed",
+      "state_rationale": "Implementado e integrado em main (`be1947f`, `51cc6b4`); o handoff registra implementação concluída e operação verificada. Reconciliado com evidência em 29/09/2026.",
       "horizon": "now",
       "confidence": "high",
       "dependencies": [
@@ -1133,9 +1515,7 @@
         }
       ],
       "tags": [
-        "continuous-autonomy",
-        "planning-only",
-        "needs_architecture_binding"
+        "continuous-autonomy"
       ],
       "completion_criteria": [
         "Resposta PR perdida não duplica; draft/checks SHA antigo bloqueiam; main sem ancestry não entregue; token não aparece; sem autoapprove."
@@ -1149,7 +1529,30 @@
           "produced_by": "codex-planner-01a0b4c8"
         }
       ],
-      "parent_id": "HF-11"
+      "parent_id": "HF-11",
+      "evidence_refs": [
+        {
+          "evidence_id": "commit:HF-11-01:be1947f",
+          "evidence_kind": "git_commit",
+          "label": "Commit be1947f em main - feat(autonomy): implement HF-11-01 GitHub integration, HF-08-03 Telegram & backfill, and HF-13-01 roadmap evidence",
+          "locator": "git:be1947f",
+          "verified": true
+        },
+        {
+          "evidence_id": "commit:HF-11-01:51cc6b4",
+          "evidence_kind": "git_commit",
+          "label": "Commit 51cc6b4 em main - feat(autonomy): finalize HF-11-01 and HF-12-04 via parallel sub-agents",
+          "locator": "git:51cc6b4",
+          "verified": true
+        },
+        {
+          "evidence_id": "doc:HF-11-01:HF-11-01.md",
+          "evidence_kind": "handoff_doc",
+          "label": "Handoff HF-11-01 (implementado; operação verificada)",
+          "locator": "docs/handoffs/continuous-autonomy/HF-11-01.md",
+          "verified": false
+        }
+      ]
     },
     {
       "id": "HF-12-01",
@@ -1158,8 +1561,8 @@
       "description": "Planejamento de composição. Inspecionar Dokploy/FTP/local_service por projeto; fixar build command,bytes/OCI digest,op ID lookup/status,installed digest,journey write/read e backup/rollback. Reusar DokployDeployClient e sanitizar.",
       "item_type": "research",
       "lifecycle_stage": "execution",
-      "delivery_status": "planned",
-      "state_rationale": "Planejado; waiting_dependency; implementação não iniciada; operacionalmente não verificado. Registro não autoriza despacho.",
+      "delivery_status": "completed",
+      "state_rationale": "Implementado e integrado em main (`bacdaec`, `93861c2`); o handoff registra implementação concluída e operação verificada. Reconciliado com evidência em 29/09/2026.",
       "horizon": "now",
       "confidence": "high",
       "dependencies": [
@@ -1169,9 +1572,7 @@
         }
       ],
       "tags": [
-        "continuous-autonomy",
-        "planning-only",
-        "waiting_dependency"
+        "continuous-autonomy"
       ],
       "completion_criteria": [
         "Webhook200 sem ID/término não satisfaz binding; requests/responses reais sanitizados, comandos por target. Nenhum endpoint adivinhado; target sem correlação exige binding high."
@@ -1185,7 +1586,30 @@
           "produced_by": "codex-planner-01a0b4c8"
         }
       ],
-      "parent_id": "HF-12"
+      "parent_id": "HF-12",
+      "evidence_refs": [
+        {
+          "evidence_id": "commit:HF-12-01:bacdaec",
+          "evidence_kind": "git_commit",
+          "label": "Commit bacdaec em main - feat(bindings): implement HF-05-02, HF-07-01, and HF-12-01 architecture bindings",
+          "locator": "git:bacdaec",
+          "verified": true
+        },
+        {
+          "evidence_id": "commit:HF-12-01:93861c2",
+          "evidence_kind": "git_commit",
+          "label": "Commit 93861c2 em main - feat(autonomy): finalize HF-23-01, HF-05-04, HF-12-01 and unblock successor nodes",
+          "locator": "git:93861c2",
+          "verified": true
+        },
+        {
+          "evidence_id": "doc:HF-12-01:HF-12-01.md",
+          "evidence_kind": "handoff_doc",
+          "label": "Handoff HF-12-01 (implementado; operação verificada)",
+          "locator": "docs/handoffs/continuous-autonomy/HF-12-01.md",
+          "verified": false
+        }
+      ]
     },
     {
       "id": "HF-12-02",
@@ -1194,8 +1618,8 @@
       "description": "Planejamento de composição. BuildService.build(source_sha,recipe,claim)->ArtifactRef hashing bytes; DeploymentAdapter.start/reconcile/installed_digest do binding; domínio headless e wrapper Hub compatível.",
       "item_type": "feature",
       "lifecycle_stage": "execution",
-      "delivery_status": "planned",
-      "state_rationale": "Planejado; needs_architecture_binding; implementação não iniciada; operacionalmente não verificado. Registro não autoriza despacho.",
+      "delivery_status": "completed",
+      "state_rationale": "Implementado e integrado em main (`1173487`, `675d409`); o handoff registra implementação concluída e operação verificada. Reconciliado com evidência em 29/09/2026.",
       "horizon": "now",
       "confidence": "high",
       "dependencies": [
@@ -1209,9 +1633,7 @@
         }
       ],
       "tags": [
-        "continuous-autonomy",
-        "planning-only",
-        "needs_architecture_binding"
+        "continuous-autonomy"
       ],
       "completion_criteria": [
         "SHA metadata igual com bytes diferentes falha; timeout consulta remoto; HTTP não basta; mesmo artefato promove sem rebuild."
@@ -1225,7 +1647,30 @@
           "produced_by": "codex-planner-01a0b4c8"
         }
       ],
-      "parent_id": "HF-12"
+      "parent_id": "HF-12",
+      "evidence_refs": [
+        {
+          "evidence_id": "commit:HF-12-02:1173487",
+          "evidence_kind": "git_commit",
+          "label": "Commit 1173487 em main - feat(runtime): implement HF-05-03 control persistence, HF-07-02 qualified routes, and HF-12-02 real deployment adapter",
+          "locator": "git:1173487",
+          "verified": true
+        },
+        {
+          "evidence_id": "commit:HF-12-02:675d409",
+          "evidence_kind": "git_commit",
+          "label": "Commit 675d409 em main - feat(autonomy): finalize HF-09-01 and HF-12-02 and unblock HF-09-02 and HF-12-03",
+          "locator": "git:675d409",
+          "verified": true
+        },
+        {
+          "evidence_id": "doc:HF-12-02:HF-12-02.md",
+          "evidence_kind": "handoff_doc",
+          "label": "Handoff HF-12-02 (implementado; operação verificada)",
+          "locator": "docs/handoffs/continuous-autonomy/HF-12-02.md",
+          "verified": false
+        }
+      ]
     },
     {
       "id": "HF-12-03",
@@ -1234,8 +1679,8 @@
       "description": "Planejamento de composição. JourneyObserver.observe(artifact,target,nonce)->EvidenceReceipt com escrita/leitura/persistência após restart e digest; RollbackAdapter.restore(previous,backup) verifica bytes/dados e RPO/RTO.",
       "item_type": "feature",
       "lifecycle_stage": "execution",
-      "delivery_status": "planned",
-      "state_rationale": "Planejado; needs_architecture_binding; implementação não iniciada; operacionalmente não verificado. Registro não autoriza despacho.",
+      "delivery_status": "completed",
+      "state_rationale": "Implementado e integrado em main (`ac3fe9d`, `9434d64`); o handoff registra implementação concluída e operação verificada. Reconciliado com evidência em 29/09/2026.",
       "horizon": "now",
       "confidence": "high",
       "dependencies": [
@@ -1245,9 +1690,7 @@
         }
       ],
       "tags": [
-        "continuous-autonomy",
-        "planning-only",
-        "needs_architecture_binding"
+        "continuous-autonomy"
       ],
       "completion_criteria": [
         "Health200 código velho ou nonce não persistido reprova; rollback só JSON reprova. Restore no alvo, sem tratar dados cliente como descartáveis."
@@ -1261,7 +1704,30 @@
           "produced_by": "codex-planner-01a0b4c8"
         }
       ],
-      "parent_id": "HF-12"
+      "parent_id": "HF-12",
+      "evidence_refs": [
+        {
+          "evidence_id": "commit:HF-12-03:ac3fe9d",
+          "evidence_kind": "git_commit",
+          "label": "Commit ac3fe9d em main - feat(workflow): implement HF-05-04 handlers/successors, HF-07-03 catalog jobs, and HF-12-03 target journey/rollback",
+          "locator": "git:ac3fe9d",
+          "verified": true
+        },
+        {
+          "evidence_id": "commit:HF-12-03:9434d64",
+          "evidence_kind": "git_commit",
+          "label": "Commit 9434d64 em main - feat(autonomy): finalize HF-09-02 and HF-12-03 via parallel sub-agents",
+          "locator": "git:9434d64",
+          "verified": true
+        },
+        {
+          "evidence_id": "doc:HF-12-03:HF-12-03.md",
+          "evidence_kind": "handoff_doc",
+          "label": "Handoff HF-12-03 (implementado; operação verificada)",
+          "locator": "docs/handoffs/continuous-autonomy/HF-12-03.md",
+          "verified": false
+        }
+      ]
     },
     {
       "id": "HF-12-04",
@@ -1270,8 +1736,8 @@
       "description": "Planejamento de composição. Composed release exige receipts confiáveis preflight/build/deploy/digest/journey; booleanos legados só simulation rotulada. build→staging→aceite pago→produção→journey; falha abre reparo/rollback.",
       "item_type": "feature",
       "lifecycle_stage": "execution",
-      "delivery_status": "planned",
-      "state_rationale": "Planejado; needs_architecture_binding; implementação não iniciada; operacionalmente não verificado. Registro não autoriza despacho.",
+      "delivery_status": "completed",
+      "state_rationale": "Implementado e integrado em main (`42b483f`, `51cc6b4`); o handoff registra implementação concluída e operação verificada. Reconciliado com evidência em 29/09/2026.",
       "horizon": "now",
       "confidence": "high",
       "dependencies": [
@@ -1285,9 +1751,7 @@
         }
       ],
       "tags": [
-        "continuous-autonomy",
-        "planning-only",
-        "needs_architecture_binding"
+        "continuous-autonomy"
       ],
       "completion_criteria": [
         "True do chamador,stale ou outro digest não promovem; cliente aceitou mesmo digest; outros projetos continuam."
@@ -1301,7 +1765,30 @@
           "produced_by": "codex-planner-01a0b4c8"
         }
       ],
-      "parent_id": "HF-12"
+      "parent_id": "HF-12",
+      "evidence_refs": [
+        {
+          "evidence_id": "commit:HF-12-04:42b483f",
+          "evidence_kind": "git_commit",
+          "label": "Commit 42b483f em main - feat(autonomy): implement HF-05-05 supervisor, HF-08-01 intake, and HF-12-04 release",
+          "locator": "git:42b483f",
+          "verified": true
+        },
+        {
+          "evidence_id": "commit:HF-12-04:51cc6b4",
+          "evidence_kind": "git_commit",
+          "label": "Commit 51cc6b4 em main - feat(autonomy): finalize HF-11-01 and HF-12-04 via parallel sub-agents",
+          "locator": "git:51cc6b4",
+          "verified": true
+        },
+        {
+          "evidence_id": "doc:HF-12-04:HF-12-04.md",
+          "evidence_kind": "handoff_doc",
+          "label": "Handoff HF-12-04 (implementado; operação verificada)",
+          "locator": "docs/handoffs/continuous-autonomy/HF-12-04.md",
+          "verified": false
+        }
+      ]
     },
     {
       "id": "HF-10-01",
@@ -1310,8 +1797,8 @@
       "description": "Planejamento de composição. ObservationHandler por event_id+consumer_version; ContextLoader.get(job) usa get_selective_context e fixa memory_version; scope project/global explícito; Pack saída sem ack humano.",
       "item_type": "feature",
       "lifecycle_stage": "execution",
-      "delivery_status": "planned",
-      "state_rationale": "Planejado; waiting_dependency; implementação não iniciada; operacionalmente não verificado. Registro não autoriza despacho.",
+      "delivery_status": "completed",
+      "state_rationale": "Implementado e integrado em main (`868a16c`); o handoff registra implementação concluída e operação verificada. Reconciliado com evidência em 29/09/2026.",
       "horizon": "now",
       "confidence": "high",
       "dependencies": [
@@ -1321,9 +1808,7 @@
         }
       ],
       "tags": [
-        "continuous-autonomy",
-        "planning-only",
-        "waiting_dependency"
+        "continuous-autonomy"
       ],
       "completion_criteria": [
         "Restart preserva regra; proposta/rejeitada não entra prompt; própria notificação não recursa; pack falhou não bloqueia; dados privados não cruzam projetos."
@@ -1337,7 +1822,23 @@
           "produced_by": "codex-planner-01a0b4c8"
         }
       ],
-      "parent_id": "HF-10"
+      "parent_id": "HF-10",
+      "evidence_refs": [
+        {
+          "evidence_id": "commit:HF-10-01:868a16c",
+          "evidence_kind": "git_commit",
+          "label": "Commit 868a16c em main - feat(autonomy): implement HF-10-01 event memory and fixed context loader",
+          "locator": "git:868a16c",
+          "verified": true
+        },
+        {
+          "evidence_id": "doc:HF-10-01:HF-10-01.md",
+          "evidence_kind": "handoff_doc",
+          "label": "Handoff HF-10-01 (implementado; operação verificada)",
+          "locator": "docs/handoffs/continuous-autonomy/HF-10-01.md",
+          "verified": false
+        }
+      ]
     },
     {
       "id": "HF-10-02",
@@ -1346,8 +1847,8 @@
       "description": "Planejamento de composição. ResearchHandler por question/version/scope; ledger fontes primárias,trecho/hash/data/decisão/licença; bloqueante só da decisão,exploratória budget/pool separado.",
       "item_type": "feature",
       "lifecycle_stage": "execution",
-      "delivery_status": "planned",
-      "state_rationale": "Planejado; needs_architecture_binding; implementação não iniciada; operacionalmente não verificado. Registro não autoriza despacho.",
+      "delivery_status": "completed",
+      "state_rationale": "Implementado e integrado em main (`ffc7587`); o handoff registra implementação concluída e operação verificada. Reconciliado com evidência em 29/09/2026.",
       "horizon": "now",
       "confidence": "high",
       "dependencies": [
@@ -1361,9 +1862,7 @@
         }
       ],
       "tags": [
-        "continuous-autonomy",
-        "planning-only",
-        "needs_architecture_binding"
+        "continuous-autonomy"
       ],
       "completion_criteria": [
         "Fonte indisponível não vira fato; pesquisa vencida agenda; mudar contrato só por high; query deduplicada não esgota cota."
@@ -1377,7 +1876,23 @@
           "produced_by": "codex-planner-01a0b4c8"
         }
       ],
-      "parent_id": "HF-10"
+      "parent_id": "HF-10",
+      "evidence_refs": [
+        {
+          "evidence_id": "commit:HF-10-02:ffc7587",
+          "evidence_kind": "git_commit",
+          "label": "Commit ffc7587 em main - feat(autonomy): finalize HF-07-03 and HF-10-02 via parallel sub-agents",
+          "locator": "git:ffc7587",
+          "verified": true
+        },
+        {
+          "evidence_id": "doc:HF-10-02:HF-10-02.md",
+          "evidence_kind": "handoff_doc",
+          "label": "Handoff HF-10-02 (implementado; operação verificada)",
+          "locator": "docs/handoffs/continuous-autonomy/HF-10-02.md",
+          "verified": false
+        }
+      ]
     },
     {
       "id": "HF-25-01",
@@ -1386,8 +1901,8 @@
       "description": "Planejamento de composição. propose→evaluate_candidate por distinto→promote_candidate→context/catalog version→measurement/rollback; holdout/política congelados; não alterar jobs correntes; export sanitizado elegível.",
       "item_type": "feature",
       "lifecycle_stage": "execution",
-      "delivery_status": "planned",
-      "state_rationale": "Planejado; needs_architecture_binding; implementação não iniciada; operacionalmente não verificado. Registro não autoriza despacho.",
+      "delivery_status": "completed",
+      "state_rationale": "Implementado e integrado em main (`87d1424`); o handoff registra implementação concluída e operação verificada. Reconciliado com evidência em 29/09/2026.",
       "horizon": "now",
       "confidence": "high",
       "dependencies": [
@@ -1405,9 +1920,7 @@
         }
       ],
       "tags": [
-        "continuous-autonomy",
-        "planning-only",
-        "needs_architecture_binding"
+        "continuous-autonomy"
       ],
       "completion_criteria": [
         "Candidato mudando próprio verificador rejeitado; ruim falha holdout; bom consumido após restart; regressão restaura snapshot e bloqueia nova aplicação."
@@ -1421,7 +1934,23 @@
           "produced_by": "codex-planner-01a0b4c8"
         }
       ],
-      "parent_id": "HF-25"
+      "parent_id": "HF-25",
+      "evidence_refs": [
+        {
+          "evidence_id": "commit:HF-25-01:87d1424",
+          "evidence_kind": "git_commit",
+          "label": "Commit 87d1424 em main - feat(autonomy): finalize HF-25-01 and unblock HF-03-08 activation milestone",
+          "locator": "git:87d1424",
+          "verified": true
+        },
+        {
+          "evidence_id": "doc:HF-25-01:HF-25-01.md",
+          "evidence_kind": "handoff_doc",
+          "label": "Handoff HF-25-01 (implementado; operação verificada)",
+          "locator": "docs/handoffs/continuous-autonomy/HF-25-01.md",
+          "verified": false
+        }
+      ]
     },
     {
       "id": "HF-13-01",
@@ -1430,8 +1959,8 @@
       "description": "Planejamento de composição. Campos opcionais planning/implementation/operational_status, enrich plan.json por ID completo; glob relatório é documentary_unverified não completed. Conclusão só receipt vinculado e confiável.",
       "item_type": "feature",
       "lifecycle_stage": "execution",
-      "delivery_status": "planned",
-      "state_rationale": "Planejado; waiting_dependency; implementação não iniciada; operacionalmente não verificado. Registro não autoriza despacho.",
+      "delivery_status": "completed",
+      "state_rationale": "Implementado e integrado em main (`be1947f`); o handoff registra implementação concluída e operação verificada. Reconciliado com evidência em 29/09/2026.",
       "horizon": "now",
       "confidence": "high",
       "dependencies": [
@@ -1441,9 +1970,7 @@
         }
       ],
       "tags": [
-        "continuous-autonomy",
-        "planning-only",
-        "waiting_dependency"
+        "continuous-autonomy"
       ],
       "completion_criteria": [
         "Relatório falso/prefixo pai-filho não concluem; fonte offline stale; IDs/DAG sem truncar. Ajuste de expectativa histórica requer high em vez de enfraquecer teste."
@@ -1457,7 +1984,23 @@
           "produced_by": "codex-planner-01a0b4c8"
         }
       ],
-      "parent_id": "HF-13"
+      "parent_id": "HF-13",
+      "evidence_refs": [
+        {
+          "evidence_id": "commit:HF-13-01:be1947f",
+          "evidence_kind": "git_commit",
+          "label": "Commit be1947f em main - feat(autonomy): implement HF-11-01 GitHub integration, HF-08-03 Telegram & backfill, and HF-13-01 roadmap evidence",
+          "locator": "git:be1947f",
+          "verified": true
+        },
+        {
+          "evidence_id": "doc:HF-13-01:HF-13-01.md",
+          "evidence_kind": "handoff_doc",
+          "label": "Handoff HF-13-01 (implementado; operação verificada)",
+          "locator": "docs/handoffs/continuous-autonomy/HF-13-01.md",
+          "verified": false
+        }
+      ]
     },
     {
       "id": "HF-13-02",
@@ -1466,8 +2009,8 @@
       "description": "Planejamento de composição. ProgressProjection do store: oldest_eligible_age,last_dispatch/reconcile,heartbeats,ready/running/blocked,wait_reason,next_wakeup,reservas/evidence chain. Alerta deduplicado por incidente.",
       "item_type": "feature",
       "lifecycle_stage": "execution",
-      "delivery_status": "planned",
-      "state_rationale": "Planejado; waiting_dependency; implementação não iniciada; operacionalmente não verificado. Registro não autoriza despacho.",
+      "delivery_status": "completed",
+      "state_rationale": "Implementado e integrado em main (`8005492`); o handoff registra implementação concluída e operação verificada. Reconciliado com evidência em 29/09/2026.",
       "horizon": "now",
       "confidence": "high",
       "dependencies": [
@@ -1481,9 +2024,7 @@
         }
       ],
       "tags": [
-        "continuous-autonomy",
-        "planning-only",
-        "waiting_dependency"
+        "continuous-autonomy"
       ],
       "completion_criteria": [
         "Ready com slot livre >30s stalled mesmo health200; capacidade ausente tem causa/probe; offline não saudável; estados separados."
@@ -1497,7 +2038,23 @@
           "produced_by": "codex-planner-01a0b4c8"
         }
       ],
-      "parent_id": "HF-13"
+      "parent_id": "HF-13",
+      "evidence_refs": [
+        {
+          "evidence_id": "commit:HF-13-02:8005492",
+          "evidence_kind": "git_commit",
+          "label": "Commit 8005492 em main - feat(hub): implement HF-13-02 continuous progress projection and stagnation panel",
+          "locator": "git:8005492",
+          "verified": true
+        },
+        {
+          "evidence_id": "doc:HF-13-02:HF-13-02.md",
+          "evidence_kind": "handoff_doc",
+          "label": "Handoff HF-13-02 (implementado; operação verificada)",
+          "locator": "docs/handoffs/continuous-autonomy/HF-13-02.md",
+          "verified": false
+        }
+      ]
     },
     {
       "id": "HF-15-01",
@@ -1506,8 +2063,8 @@
       "description": "Planejamento de composição. Observer separado read-only audit+target probes; correlate run/JobKey/nonce; controller só input/answer/falha autorizada, proíbe invocar fases. Congelar V01–V13 antes candidato.",
       "item_type": "feature",
       "lifecycle_stage": "execution",
-      "delivery_status": "planned",
-      "state_rationale": "Planejado; needs_architecture_binding; implementação não iniciada; operacionalmente não verificado. Registro não autoriza despacho.",
+      "delivery_status": "completed",
+      "state_rationale": "Implementado e integrado em main (`52c31d1`); o handoff registra implementação concluída e operação verificada. Verificação operacional em produção registrada no commit citado. Reconciliado com evidência em 29/09/2026.",
       "horizon": "now",
       "confidence": "high",
       "dependencies": [
@@ -1521,9 +2078,7 @@
         }
       ],
       "tags": [
-        "continuous-autonomy",
-        "planning-only",
-        "needs_architecture_binding"
+        "continuous-autonomy"
       ],
       "completion_criteria": [
         "Consumidor off health200 reprova; fases manuais reprovam; evidência só candidato reprova; relógio/capacidade ausentes não PASS. Janela24h futura."
@@ -1537,7 +2092,23 @@
           "produced_by": "codex-planner-01a0b4c8"
         }
       ],
-      "parent_id": "HF-15"
+      "parent_id": "HF-15",
+      "evidence_refs": [
+        {
+          "evidence_id": "commit:HF-15-01:52c31d1",
+          "evidence_kind": "git_commit",
+          "label": "Commit 52c31d1 em main - docs(handoffs): register live production operational verification for HF-05-06, HF-03-07, and HF-15-01",
+          "locator": "git:52c31d1",
+          "verified": true
+        },
+        {
+          "evidence_id": "doc:HF-15-01:HF-15-01.md",
+          "evidence_kind": "handoff_doc",
+          "label": "Handoff HF-15-01 (implementado; operação verificada)",
+          "locator": "docs/handoffs/continuous-autonomy/HF-15-01.md",
+          "verified": false
+        }
+      ]
     },
     {
       "id": "HF-03-07",
@@ -1546,8 +2117,8 @@
       "description": "Planejamento de composição. Inventariar SHA/versões/identidade/rota/secret refs/scopes/ports/DNS/TLS/volumes/capacidade/backup; comandos exatos install/start/status/restart/rollback verificados dentro de grants. Alternativas antes ManualDependency.",
       "item_type": "research",
       "lifecycle_stage": "execution",
-      "delivery_status": "planned",
-      "state_rationale": "Planejado; waiting_dependency; implementação não iniciada; operacionalmente não verificado. Registro não autoriza despacho.",
+      "delivery_status": "completed",
+      "state_rationale": "Implementado e integrado em main (`52c31d1`); o handoff registra implementação concluída e operação verificada. Verificação operacional em produção registrada no commit citado. Reconciliado com evidência em 29/09/2026.",
       "horizon": "now",
       "confidence": "high",
       "dependencies": [
@@ -1565,9 +2136,7 @@
         }
       ],
       "tags": [
-        "continuous-autonomy",
-        "planning-only",
-        "waiting_dependency"
+        "continuous-autonomy"
       ],
       "completion_criteria": [
         "Notebook probe não certifica cloud; manifesto incompleto bloqueia deploy; estimativa15–35 não compra; SHA local ausente no host é dependência técnica."
@@ -1581,7 +2150,23 @@
           "produced_by": "codex-planner-01a0b4c8"
         }
       ],
-      "parent_id": "HF-03"
+      "parent_id": "HF-03",
+      "evidence_refs": [
+        {
+          "evidence_id": "commit:HF-03-07:52c31d1",
+          "evidence_kind": "git_commit",
+          "label": "Commit 52c31d1 em main - docs(handoffs): register live production operational verification for HF-05-06, HF-03-07, and HF-15-01",
+          "locator": "git:52c31d1",
+          "verified": true
+        },
+        {
+          "evidence_id": "doc:HF-03-07:HF-03-07.md",
+          "evidence_kind": "handoff_doc",
+          "label": "Handoff HF-03-07 (implementado; operação verificada)",
+          "locator": "docs/handoffs/continuous-autonomy/HF-03-07.md",
+          "verified": false
+        }
+      ]
     },
     {
       "id": "HF-03-08",
@@ -1590,8 +2175,8 @@
       "description": "Planejamento de composição. Executar binding ACTIVATION imagem fixa/namespace autorizado; único input até jornada; restart controlado e rollback gate falho; operacional só escopo observado.",
       "item_type": "feature",
       "lifecycle_stage": "execution",
-      "delivery_status": "planned",
-      "state_rationale": "Planejado; waiting_dependency; implementação não iniciada; operacionalmente não verificado. Registro não autoriza despacho.",
+      "delivery_status": "completed",
+      "state_rationale": "Escopo fechado como contenção + preparação (decisão do Owner, plano da linha de produção seção 5) e integrado em main. Operação no alvo não verificada por este item; a ativação produtiva é coberta por HF-27-08 e pelo canário contínuo de HF-27-10.",
       "horizon": "now",
       "confidence": "high",
       "dependencies": [
@@ -1645,9 +2230,7 @@
         }
       ],
       "tags": [
-        "continuous-autonomy",
-        "planning-only",
-        "waiting_dependency"
+        "continuous-autonomy"
       ],
       "completion_criteria": [
         "Leitura externa PID/heartbeat/job/digest/jornada; sandbox não PASS real; sem fases manuais; componente não integrado impede ativação."
@@ -1661,7 +2244,44 @@
           "produced_by": "codex-planner-01a0b4c8"
         }
       ],
-      "parent_id": "HF-03"
+      "parent_id": "HF-03",
+      "evidence_refs": [
+        {
+          "evidence_id": "commit:HF-03-08:186a5a4",
+          "evidence_kind": "git_commit",
+          "label": "Commit 186a5a4 em main - feat(cloud): HF-03-08 closeout — coordinator auth, fail-closed handler [HF-03-08]",
+          "locator": "git:186a5a4",
+          "verified": true
+        },
+        {
+          "evidence_id": "commit:HF-03-08:08e8c4f",
+          "evidence_kind": "git_commit",
+          "label": "Commit 08e8c4f em main - feat(line): HF-27-10 canary runs continuously + register target project [HF-27-10]",
+          "locator": "git:08e8c4f",
+          "verified": true
+        },
+        {
+          "evidence_id": "commit:HF-03-08:8c4fed6",
+          "evidence_kind": "git_commit",
+          "label": "Commit 8c4fed6 em main - docs: HF-03-08 closeout package + HF-27-10 doc updates [HF-03-08][HF-27-10]",
+          "locator": "git:8c4fed6",
+          "verified": true
+        },
+        {
+          "evidence_id": "commit:HF-03-08:1c92cca",
+          "evidence_kind": "git_commit",
+          "label": "Commit 1c92cca em main - feat(deploy): real Dokploy API transport for build_deploy [HF-27-07]",
+          "locator": "git:1c92cca",
+          "verified": true
+        },
+        {
+          "evidence_id": "doc:HF-03-08:HF-03-08.md",
+          "evidence_kind": "handoff_doc",
+          "label": "Handoff HF-03-08 (escopo encerrado; alvo não verificado)",
+          "locator": "docs/handoffs/continuous-autonomy/HF-03-08.md",
+          "verified": false
+        }
+      ]
     },
     {
       "id": "HF-15-02",
@@ -1670,8 +2290,8 @@
       "description": "Planejamento de composição. Executar V01–V13 com observador fixado,portfólio e novos inputs; timings/custos/incidentes/digest/rollback; capacidade insuficiente 4dev+5tests não exercitado, nunca PASS.",
       "item_type": "feature",
       "lifecycle_stage": "execution",
-      "delivery_status": "planned",
-      "state_rationale": "Planejado; waiting_dependency; implementação não iniciada; operacionalmente não verificado. Registro não autoriza despacho.",
+      "delivery_status": "cancelled",
+      "state_rationale": "Supersedido por HF-27-10 (canário E2E contínuo), conforme decisão do Owner no plano da linha de produção seção 5; o ensaio fixo de 24 h não bloqueia mais a entrega. Arquivado para auditoria, sem implementação. Status cancelled = supersedido.",
       "horizon": "now",
       "confidence": "high",
       "dependencies": [
@@ -1682,8 +2302,7 @@
       ],
       "tags": [
         "continuous-autonomy",
-        "planning-only",
-        "waiting_dependency"
+        "superseded"
       ],
       "completion_criteria": [
         "Zero impulsos administrativos; aprendizado pós-restart; ruim rejeitado; bloqueio seletivo; todos gates e integração para entrega final."
@@ -1695,6 +2314,13 @@
           "label": "Plano de autonomia contínua 2026-09-18",
           "locator": "docs/handoffs/continuous-autonomy/HF-15-02.md",
           "produced_by": "codex-planner-01a0b4c8"
+        },
+        {
+          "source_id": "approved-roadmap",
+          "source_kind": "document",
+          "label": "Supersessão por HF-27-10 (plano da linha de produção, seção 5)",
+          "locator": "docs/handoffs/production-line/HF-27-10.md",
+          "produced_by": "project-owner"
         }
       ],
       "parent_id": "HF-15"
@@ -1706,8 +2332,8 @@
       "description": "Liga executores reais (agente CLI, git, gh, deploy, smoke) ao plano de controle HF-26. Uma demanda vira PR, merge, deploy e smoke sem ação humana além do intake e do Grill.",
       "item_type": "feature",
       "lifecycle_stage": "next_steps",
-      "delivery_status": "planned",
-      "state_rationale": "Planejado em 22/09; binding high resolvido no plano; implementação não iniciada.",
+      "delivery_status": "validating",
+      "state_rationale": "HF-27-01 a HF-27-11 implementados e integrados em main; o canário E2E (HF-27-10) roda em produção. Falta o critério V2 do plano (7 dias verdes seguidos do canário) e o registro de verificação de V1, V3 e V4 antes de concluir o marco.",
       "horizon": "now",
       "confidence": "high",
       "dependencies": [
@@ -1731,6 +2357,15 @@
           "locator": "docs/PRODUCTION_LINE_PLAN_2026-09-22.md",
           "produced_by": "claude-opus-5-planner"
         }
+      ],
+      "evidence_refs": [
+        {
+          "evidence_id": "doc:HF-27:INDEX.md",
+          "evidence_kind": "handoff_doc",
+          "label": "Índice HF-27 (11 tickets implementados)",
+          "locator": "docs/handoffs/production-line/INDEX.md",
+          "verified": false
+        }
       ]
     },
     {
@@ -1740,14 +2375,13 @@
       "description": "Ver handoff docs/handoffs/production-line/HF-27-01.md.",
       "item_type": "feature",
       "lifecycle_stage": "execution",
-      "delivery_status": "planned",
-      "state_rationale": "Planejado; ready_for_handoff; implementação não iniciada.",
+      "delivery_status": "completed",
+      "state_rationale": "Implementado e integrado em main (`8e075d8`, `a2d4ecd`); ver docs/handoffs/production-line/INDEX.md. Reconciliado com evidência em 29/09/2026.",
       "horizon": "now",
       "confidence": "high",
       "dependencies": [],
       "tags": [
-        "production-line",
-        "ready_for_handoff"
+        "production-line"
       ],
       "completion_criteria": [
         "Critérios de aceite de docs/handoffs/production-line/HF-27-01.md"
@@ -1761,7 +2395,30 @@
           "produced_by": "claude-opus-5-planner"
         }
       ],
-      "parent_id": "HF-27"
+      "parent_id": "HF-27",
+      "evidence_refs": [
+        {
+          "evidence_id": "commit:HF-27-01:8e075d8",
+          "evidence_kind": "git_commit",
+          "label": "Commit 8e075d8 em main - feat(projects): HF-27-01 executable project registry and command autodetection",
+          "locator": "git:8e075d8",
+          "verified": true
+        },
+        {
+          "evidence_id": "commit:HF-27-01:a2d4ecd",
+          "evidence_kind": "git_commit",
+          "label": "Commit a2d4ecd em main - fix(projects): HF-27-01 review follow-ups (python setup, https urls, validate alias)",
+          "locator": "git:a2d4ecd",
+          "verified": true
+        },
+        {
+          "evidence_id": "doc:HF-27-01:HF-27-01.md",
+          "evidence_kind": "handoff_doc",
+          "label": "Handoff HF-27-01",
+          "locator": "docs/handoffs/production-line/HF-27-01.md",
+          "verified": false
+        }
+      ]
     },
     {
       "id": "HF-27-02",
@@ -1770,8 +2427,8 @@
       "description": "Ver handoff docs/handoffs/production-line/HF-27-02.md.",
       "item_type": "feature",
       "lifecycle_stage": "execution",
-      "delivery_status": "planned",
-      "state_rationale": "Planejado; ready_for_handoff; implementação não iniciada.",
+      "delivery_status": "completed",
+      "state_rationale": "Implementado e integrado em main (`b3218a8`); ver docs/handoffs/production-line/INDEX.md. Reconciliado com evidência em 29/09/2026.",
       "horizon": "now",
       "confidence": "high",
       "dependencies": [
@@ -1781,8 +2438,7 @@
         }
       ],
       "tags": [
-        "production-line",
-        "ready_for_handoff"
+        "production-line"
       ],
       "completion_criteria": [
         "Critérios de aceite de docs/handoffs/production-line/HF-27-02.md"
@@ -1796,7 +2452,23 @@
           "produced_by": "claude-opus-5-planner"
         }
       ],
-      "parent_id": "HF-27"
+      "parent_id": "HF-27",
+      "evidence_refs": [
+        {
+          "evidence_id": "commit:HF-27-02:b3218a8",
+          "evidence_kind": "git_commit",
+          "label": "Commit b3218a8 em main - feat(line): HF-27-07 release stage with deploy, smoke and rollback",
+          "locator": "git:b3218a8",
+          "verified": true
+        },
+        {
+          "evidence_id": "doc:HF-27-02:HF-27-02.md",
+          "evidence_kind": "handoff_doc",
+          "label": "Handoff HF-27-02",
+          "locator": "docs/handoffs/production-line/HF-27-02.md",
+          "verified": false
+        }
+      ]
     },
     {
       "id": "HF-27-03",
@@ -1805,14 +2477,13 @@
       "description": "Ver handoff docs/handoffs/production-line/HF-27-03.md.",
       "item_type": "feature",
       "lifecycle_stage": "execution",
-      "delivery_status": "planned",
-      "state_rationale": "Planejado; ready_for_handoff; implementação não iniciada.",
+      "delivery_status": "completed",
+      "state_rationale": "Implementado e integrado em main (`b3218a8`); ver docs/handoffs/production-line/INDEX.md. Reconciliado com evidência em 29/09/2026.",
       "horizon": "now",
       "confidence": "high",
       "dependencies": [],
       "tags": [
-        "production-line",
-        "ready_for_handoff"
+        "production-line"
       ],
       "completion_criteria": [
         "Critérios de aceite de docs/handoffs/production-line/HF-27-03.md"
@@ -1826,7 +2497,23 @@
           "produced_by": "claude-opus-5-planner"
         }
       ],
-      "parent_id": "HF-27"
+      "parent_id": "HF-27",
+      "evidence_refs": [
+        {
+          "evidence_id": "commit:HF-27-03:b3218a8",
+          "evidence_kind": "git_commit",
+          "label": "Commit b3218a8 em main - feat(line): HF-27-07 release stage with deploy, smoke and rollback",
+          "locator": "git:b3218a8",
+          "verified": true
+        },
+        {
+          "evidence_id": "doc:HF-27-03:HF-27-03.md",
+          "evidence_kind": "handoff_doc",
+          "label": "Handoff HF-27-03",
+          "locator": "docs/handoffs/production-line/HF-27-03.md",
+          "verified": false
+        }
+      ]
     },
     {
       "id": "HF-27-04",
@@ -1835,8 +2522,8 @@
       "description": "Ver handoff docs/handoffs/production-line/HF-27-04.md.",
       "item_type": "feature",
       "lifecycle_stage": "execution",
-      "delivery_status": "planned",
-      "state_rationale": "Planejado; ready_for_handoff; implementação não iniciada.",
+      "delivery_status": "completed",
+      "state_rationale": "Implementado e integrado em main (`9c57110`, `4a6a9c5`); ver docs/handoffs/production-line/INDEX.md. Reconciliado com evidência em 29/09/2026.",
       "horizon": "now",
       "confidence": "high",
       "dependencies": [
@@ -1850,8 +2537,7 @@
         }
       ],
       "tags": [
-        "production-line",
-        "ready_for_handoff"
+        "production-line"
       ],
       "completion_criteria": [
         "Critérios de aceite de docs/handoffs/production-line/HF-27-04.md"
@@ -1865,7 +2551,30 @@
           "produced_by": "claude-opus-5-planner"
         }
       ],
-      "parent_id": "HF-27"
+      "parent_id": "HF-27",
+      "evidence_refs": [
+        {
+          "evidence_id": "commit:HF-27-04:9c57110",
+          "evidence_kind": "git_commit",
+          "label": "Commit 9c57110 em main - feat(line): HF-27-04 single-round grill and planning stages",
+          "locator": "git:9c57110",
+          "verified": true
+        },
+        {
+          "evidence_id": "commit:HF-27-04:4a6a9c5",
+          "evidence_kind": "git_commit",
+          "label": "Commit 4a6a9c5 em main - fix(line): HF-27-04 review follow-ups (prompt braces, Telegram limits, durable notify)",
+          "locator": "git:4a6a9c5",
+          "verified": true
+        },
+        {
+          "evidence_id": "doc:HF-27-04:HF-27-04.md",
+          "evidence_kind": "handoff_doc",
+          "label": "Handoff HF-27-04",
+          "locator": "docs/handoffs/production-line/HF-27-04.md",
+          "verified": false
+        }
+      ]
     },
     {
       "id": "HF-27-05",
@@ -1874,8 +2583,8 @@
       "description": "Ver handoff docs/handoffs/production-line/HF-27-05.md.",
       "item_type": "feature",
       "lifecycle_stage": "execution",
-      "delivery_status": "planned",
-      "state_rationale": "Planejado; ready_for_handoff; implementação não iniciada.",
+      "delivery_status": "completed",
+      "state_rationale": "Implementado e integrado em main (`1541ce0`, `2fdcd83`); ver docs/handoffs/production-line/INDEX.md. Reconciliado com evidência em 29/09/2026.",
       "horizon": "now",
       "confidence": "high",
       "dependencies": [
@@ -1889,8 +2598,7 @@
         }
       ],
       "tags": [
-        "production-line",
-        "ready_for_handoff"
+        "production-line"
       ],
       "completion_criteria": [
         "Critérios de aceite de docs/handoffs/production-line/HF-27-05.md"
@@ -1904,7 +2612,30 @@
           "produced_by": "claude-opus-5-planner"
         }
       ],
-      "parent_id": "HF-27"
+      "parent_id": "HF-27",
+      "evidence_refs": [
+        {
+          "evidence_id": "commit:HF-27-05:1541ce0",
+          "evidence_kind": "git_commit",
+          "label": "Commit 1541ce0 em main - feat(line): HF-27-05 development stage with validate loop and cross review",
+          "locator": "git:1541ce0",
+          "verified": true
+        },
+        {
+          "evidence_id": "commit:HF-27-05:2fdcd83",
+          "evidence_kind": "git_commit",
+          "label": "Commit 2fdcd83 em main - fix(line): HF-27-05 review follow-ups (feedback reaches development)",
+          "locator": "git:2fdcd83",
+          "verified": true
+        },
+        {
+          "evidence_id": "doc:HF-27-05:HF-27-05.md",
+          "evidence_kind": "handoff_doc",
+          "label": "Handoff HF-27-05",
+          "locator": "docs/handoffs/production-line/HF-27-05.md",
+          "verified": false
+        }
+      ]
     },
     {
       "id": "HF-27-06",
@@ -1913,8 +2644,8 @@
       "description": "Ver handoff docs/handoffs/production-line/HF-27-06.md.",
       "item_type": "feature",
       "lifecycle_stage": "execution",
-      "delivery_status": "planned",
-      "state_rationale": "Planejado; ready_for_handoff; implementação não iniciada.",
+      "delivery_status": "completed",
+      "state_rationale": "Implementado e integrado em main (`feaa2f3`, `e66c959`, `59ba932`); ver docs/handoffs/production-line/INDEX.md. Reconciliado com evidência em 29/09/2026.",
       "horizon": "now",
       "confidence": "high",
       "dependencies": [
@@ -1924,8 +2655,7 @@
         }
       ],
       "tags": [
-        "production-line",
-        "ready_for_handoff"
+        "production-line"
       ],
       "completion_criteria": [
         "Critérios de aceite de docs/handoffs/production-line/HF-27-06.md"
@@ -1939,7 +2669,37 @@
           "produced_by": "claude-opus-5-planner"
         }
       ],
-      "parent_id": "HF-27"
+      "parent_id": "HF-27",
+      "evidence_refs": [
+        {
+          "evidence_id": "commit:HF-27-06:feaa2f3",
+          "evidence_kind": "git_commit",
+          "label": "Commit feaa2f3 em main - feat(line): HF-27-06 GitHub integration stage via gh",
+          "locator": "git:feaa2f3",
+          "verified": true
+        },
+        {
+          "evidence_id": "commit:HF-27-06:e66c959",
+          "evidence_kind": "git_commit",
+          "label": "Commit e66c959 em main - fix(line): HF-27-06 review follow-ups (idempotent re-entry, durable conflict cap)",
+          "locator": "git:e66c959",
+          "verified": true
+        },
+        {
+          "evidence_id": "commit:HF-27-06:59ba932",
+          "evidence_kind": "git_commit",
+          "label": "Commit 59ba932 em main - test(line): HF-27-06 pin agent route in conflict tests",
+          "locator": "git:59ba932",
+          "verified": true
+        },
+        {
+          "evidence_id": "doc:HF-27-06:HF-27-06.md",
+          "evidence_kind": "handoff_doc",
+          "label": "Handoff HF-27-06",
+          "locator": "docs/handoffs/production-line/HF-27-06.md",
+          "verified": false
+        }
+      ]
     },
     {
       "id": "HF-27-07",
@@ -1948,8 +2708,8 @@
       "description": "Ver handoff docs/handoffs/production-line/HF-27-07.md.",
       "item_type": "feature",
       "lifecycle_stage": "execution",
-      "delivery_status": "planned",
-      "state_rationale": "Planejado; ready_for_handoff; implementação não iniciada.",
+      "delivery_status": "completed",
+      "state_rationale": "Implementado e integrado em main (`b3218a8`, `fbefd06`); ver docs/handoffs/production-line/INDEX.md. Reconciliado com evidência em 29/09/2026.",
       "horizon": "now",
       "confidence": "high",
       "dependencies": [
@@ -1963,8 +2723,7 @@
         }
       ],
       "tags": [
-        "production-line",
-        "ready_for_handoff"
+        "production-line"
       ],
       "completion_criteria": [
         "Critérios de aceite de docs/handoffs/production-line/HF-27-07.md"
@@ -1978,7 +2737,30 @@
           "produced_by": "claude-opus-5-planner"
         }
       ],
-      "parent_id": "HF-27"
+      "parent_id": "HF-27",
+      "evidence_refs": [
+        {
+          "evidence_id": "commit:HF-27-07:b3218a8",
+          "evidence_kind": "git_commit",
+          "label": "Commit b3218a8 em main - feat(line): HF-27-07 release stage with deploy, smoke and rollback",
+          "locator": "git:b3218a8",
+          "verified": true
+        },
+        {
+          "evidence_id": "commit:HF-27-07:fbefd06",
+          "evidence_kind": "git_commit",
+          "label": "Commit fbefd06 em main - fix(line): HF-27-07 review follow-ups (shared state, acceptance gate, FTPS)",
+          "locator": "git:fbefd06",
+          "verified": true
+        },
+        {
+          "evidence_id": "doc:HF-27-07:HF-27-07.md",
+          "evidence_kind": "handoff_doc",
+          "label": "Handoff HF-27-07",
+          "locator": "docs/handoffs/production-line/HF-27-07.md",
+          "verified": false
+        }
+      ]
     },
     {
       "id": "HF-27-08",
@@ -1987,8 +2769,8 @@
       "description": "Ver handoff docs/handoffs/production-line/HF-27-08.md.",
       "item_type": "feature",
       "lifecycle_stage": "execution",
-      "delivery_status": "planned",
-      "state_rationale": "Planejado; ready_for_handoff; implementação não iniciada.",
+      "delivery_status": "completed",
+      "state_rationale": "Implementado e integrado em main (`dd6ccce`, `48789e8`); ver docs/handoffs/production-line/INDEX.md. Reconciliado com evidência em 29/09/2026.",
       "horizon": "now",
       "confidence": "high",
       "dependencies": [
@@ -2010,8 +2792,7 @@
         }
       ],
       "tags": [
-        "production-line",
-        "ready_for_handoff"
+        "production-line"
       ],
       "completion_criteria": [
         "Critérios de aceite de docs/handoffs/production-line/HF-27-08.md"
@@ -2025,7 +2806,30 @@
           "produced_by": "claude-opus-5-planner"
         }
       ],
-      "parent_id": "HF-27"
+      "parent_id": "HF-27",
+      "evidence_refs": [
+        {
+          "evidence_id": "commit:HF-27-08:dd6ccce",
+          "evidence_kind": "git_commit",
+          "label": "Commit dd6ccce em main - feat(line): HF-27-08 lean production-line DAG in successors.py",
+          "locator": "git:dd6ccce",
+          "verified": true
+        },
+        {
+          "evidence_id": "commit:HF-27-08:48789e8",
+          "evidence_kind": "git_commit",
+          "label": "Commit 48789e8 em main - feat(line): HF-27-08 core/line/bindings.py stage registry + capability wiring",
+          "locator": "git:48789e8",
+          "verified": true
+        },
+        {
+          "evidence_id": "doc:HF-27-08:HF-27-08.md",
+          "evidence_kind": "handoff_doc",
+          "label": "Handoff HF-27-08",
+          "locator": "docs/handoffs/production-line/HF-27-08.md",
+          "verified": false
+        }
+      ]
     },
     {
       "id": "HF-27-09",
@@ -2034,8 +2838,8 @@
       "description": "Ver handoff docs/handoffs/production-line/HF-27-09.md.",
       "item_type": "feature",
       "lifecycle_stage": "execution",
-      "delivery_status": "planned",
-      "state_rationale": "Planejado; ready_for_handoff; implementação não iniciada.",
+      "delivery_status": "completed",
+      "state_rationale": "Implementado e integrado em main (`613192f`, `e1b96c9`, `21ff993`); ver docs/handoffs/production-line/INDEX.md. Reconciliado com evidência em 29/09/2026.",
       "horizon": "now",
       "confidence": "high",
       "dependencies": [
@@ -2045,8 +2849,7 @@
         }
       ],
       "tags": [
-        "production-line",
-        "ready_for_handoff"
+        "production-line"
       ],
       "completion_criteria": [
         "Critérios de aceite de docs/handoffs/production-line/HF-27-09.md"
@@ -2060,7 +2863,37 @@
           "produced_by": "claude-opus-5-planner"
         }
       ],
-      "parent_id": "HF-27"
+      "parent_id": "HF-27",
+      "evidence_refs": [
+        {
+          "evidence_id": "commit:HF-27-09:613192f",
+          "evidence_kind": "git_commit",
+          "label": "Commit 613192f em main - feat(infra): HF-27-09 VPS image with agent CLIs and on-prem workers",
+          "locator": "git:613192f",
+          "verified": true
+        },
+        {
+          "evidence_id": "commit:HF-27-09:e1b96c9",
+          "evidence_kind": "git_commit",
+          "label": "Commit e1b96c9 em main - fix(infra): HF-27-09 review follow-ups (additive caps, no secret in argv)",
+          "locator": "git:e1b96c9",
+          "verified": true
+        },
+        {
+          "evidence_id": "commit:HF-27-09:21ff993",
+          "evidence_kind": "git_commit",
+          "label": "Commit 21ff993 em main - chore(infra): HF-27-09 worker memory 2 GB and VPS DB URL guidance",
+          "locator": "git:21ff993",
+          "verified": true
+        },
+        {
+          "evidence_id": "doc:HF-27-09:HF-27-09.md",
+          "evidence_kind": "handoff_doc",
+          "label": "Handoff HF-27-09",
+          "locator": "docs/handoffs/production-line/HF-27-09.md",
+          "verified": false
+        }
+      ]
     },
     {
       "id": "HF-27-10",
@@ -2069,8 +2902,8 @@
       "description": "Ver handoff docs/handoffs/production-line/HF-27-10.md.",
       "item_type": "feature",
       "lifecycle_stage": "execution",
-      "delivery_status": "planned",
-      "state_rationale": "Planejado; ready_for_handoff; implementação não iniciada.",
+      "delivery_status": "completed",
+      "state_rationale": "Implementado e integrado em main (`15aca31`, `08e8c4f`); ver docs/handoffs/production-line/INDEX.md. Reconciliado com evidência em 29/09/2026. Canário em produção; retry no mesmo dia em andamento.",
       "horizon": "now",
       "confidence": "high",
       "dependencies": [
@@ -2084,8 +2917,7 @@
         }
       ],
       "tags": [
-        "production-line",
-        "ready_for_handoff"
+        "production-line"
       ],
       "completion_criteria": [
         "Critérios de aceite de docs/handoffs/production-line/HF-27-10.md"
@@ -2097,6 +2929,94 @@
           "label": "Plano da linha de produção 2026-09-22",
           "locator": "docs/handoffs/production-line/HF-27-10.md",
           "produced_by": "claude-opus-5-planner"
+        }
+      ],
+      "parent_id": "HF-27",
+      "evidence_refs": [
+        {
+          "evidence_id": "commit:HF-27-10:15aca31",
+          "evidence_kind": "git_commit",
+          "label": "Commit 15aca31 em main - feat(line): HF-27-10 daily E2E canary + dogfood submitter (#37)",
+          "locator": "git:15aca31",
+          "verified": true
+        },
+        {
+          "evidence_id": "commit:HF-27-10:08e8c4f",
+          "evidence_kind": "git_commit",
+          "label": "Commit 08e8c4f em main - feat(line): HF-27-10 canary runs continuously + register target project [HF-27-10]",
+          "locator": "git:08e8c4f",
+          "verified": true
+        },
+        {
+          "evidence_id": "doc:HF-27-10:HF-27-10.md",
+          "evidence_kind": "handoff_doc",
+          "label": "Handoff HF-27-10",
+          "locator": "docs/handoffs/production-line/HF-27-10.md",
+          "verified": false
+        }
+      ]
+    },
+    {
+      "id": "HF-27-11",
+      "project_id": "darkfac",
+      "title": "Despacho remoto da suíte de validação",
+      "description": "Despacha a suíte do portão oficial (core/harness/runner.py --quick) para um worker primário de testes remoto (Desktop) via bundle e Tailscale, liberando as demais máquinas. Ver docs/runbooks/desktop_test_worker.md.",
+      "item_type": "feature",
+      "lifecycle_stage": "execution",
+      "delivery_status": "completed",
+      "state_rationale": "Implementado e integrado em main (`0d3e705`, `e227842`, `8636204`); ver docs/handoffs/production-line/INDEX.md. Registrado no manifesto em 29/09/2026 (ausente até então).",
+      "horizon": "now",
+      "confidence": "high",
+      "dependencies": [
+        {
+          "item_id": "HF-27-09",
+          "type": "requires"
+        }
+      ],
+      "tags": [
+        "production-line"
+      ],
+      "completion_criteria": [
+        "runner.py --quick despacha a suíte inteira ao worker primário remoto e devolve o veredito ao harness de origem.",
+        "Nunca há fallback silencioso para execução local; o instalador do worker exige Python 3.12 e checkout limpo."
+      ],
+      "source_refs": [
+        {
+          "source_id": "approved-roadmap",
+          "source_kind": "document",
+          "label": "Runbook do worker primário de testes (HF-27-11)",
+          "locator": "docs/runbooks/desktop_test_worker.md",
+          "produced_by": "project-owner"
+        }
+      ],
+      "evidence_refs": [
+        {
+          "evidence_id": "commit:HF-27-11:0d3e705",
+          "evidence_kind": "git_commit",
+          "label": "Commit 0d3e705 em main - feat(harness): remote dispatch of the validation suite to a primary test worker (HF-27-11)",
+          "locator": "git:0d3e705",
+          "verified": true
+        },
+        {
+          "evidence_id": "commit:HF-27-11:e227842",
+          "evidence_kind": "git_commit",
+          "label": "Commit e227842 em main - fix(harness): worker installer requires Python 3.12 and a clean pull",
+          "locator": "git:e227842",
+          "verified": true
+        },
+        {
+          "evidence_id": "commit:HF-27-11:8636204",
+          "evidence_kind": "git_commit",
+          "label": "Commit 8636204 em main - fix(harness): never fall back to a local run silently",
+          "locator": "git:8636204",
+          "verified": true
+        },
+        {
+          "evidence_id": "doc:HF-27-11:desktop_test_worker.md",
+          "evidence_kind": "handoff_doc",
+          "label": "Runbook HF-27-11 (worker primário de testes)",
+          "locator": "docs/runbooks/desktop_test_worker.md",
+          "verified": false
         }
       ],
       "parent_id": "HF-27"

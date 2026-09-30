@@ -45,19 +45,23 @@ Este arquivo registra as fontes humanas do roadmap aprovado para o painel do Dar
 | RM-08 | Atualização incremental, telemetria e testes de escala | RM-05, RM-07 | Mais adiante |
 | RM-09 | Histórico de snapshots e comparação entre versões | RM-08 | Exploratório |
 
+Status (29/09/2026): RM-01 a RM-09 estão `completed` no manifesto. A evidência é o relatório `.factory/reports/roadmap-operacional-report.md` (RM-01–RM-07), `rm-08-incremental-telemetry-report.md` (RM-08) e `rm-09-history-report.md` (RM-09), vinculados automaticamente pelo compilador.
+
 ## Composição da autonomia contínua — 18/09/2026
 
 [Plano mestre](CONTINUOUS_AUTONOMY_PLAN_2026-09-18.md), [33 handoffs e DAG](handoffs/continuous-autonomy/INDEX.md), [fonte estruturada](../.factory/planning/continuous-autonomy/plan.json). HF-26 agrega a composição; HF-05-02 reutiliza o sucessor já reservado. Os novos IDs estão no manifesto JSON consumido pelo compilador, sem alteração de status dos pais históricos.
 
 Estado da Composição e Linha de Produção (28/09/2026): A Wave 1 de Autonomia Contínua (HF-26-01 a HF-03-07, 31 unidades) e o pacote HF-27 (HF-27-01 a HF-27-11, Linha de Produção Enxuta) foram implementados, testados e integrados à baseline `main`. O ticket HF-03-08 (antes "ativação isolada e fatia vertical em ambiente target") fechou como **contenção + preparação** — worker fail-closed, autenticação do coordenador, handler legado fail-closed e bind de porta em loopback integrados a `main` — sem abrir o replan de cinco unidades; a ativação produtiva real é coberta por HF-27-08 (já `implemented`) e pelo canário contínuo de HF-27-10, que agora roda em loop no Compose (`core.line.canary run --every-seconds`). O protocolo de aceitação 24h (HF-15-02) fica supersedido como critério de entrega pelo canário e arquivado para auditoria; ver [PRODUCTION_LINE_PLAN_2026-09-22.md](PRODUCTION_LINE_PLAN_2026-09-22.md) seção 5 e [HF-03-08.md](handoffs/continuous-autonomy/HF-03-08.md).
 
-## Ticket futuro — piloto Jev e método de pilotos
+Reconciliação do manifesto (29/09/2026): `.factory/roadmap/darkfac.json` passou a refletir a entrega. HF-26 e todas as 33 unidades, HF-23-02 e HF-27-01 a HF-27-11 (HF-27-11 foi incluído agora no manifesto) estão `completed`, cada um com `evidence_refs` (commits em `main` e handoff). HF-15-02 está `cancelled` (supersedido por HF-27-10). O marco HF-27 está `validating`: falta o critério V2 do plano, 7 dias verdes seguidos do canário (HF-27-10), que já roda em produção; o retry no mesmo dia está sendo adicionado. Não há item `planned` no manifesto; portanto nenhum item recebeu a tag `line-ok` e o dogfood não submete nada até que novos itens sejam registrados. `HF-03-08` fechou como contenção + preparação (commits `186a5a4`, `08e8c4f`, `8c4fed6`, `1c92cca`).
 
-[HF-23-02](handoffs/HF-23-02.md) está registrado no manifesto
-`.factory/roadmap/darkfac.json` como item **planned / later**, filho de HF-23.
+## Piloto Jev e método de pilotos (entregue)
+
+[HF-23-02](handoffs/HF-23-02.md) está `completed` no manifesto
+`.factory/roadmap/darkfac.json` (horizonte original **later**), filho de HF-23.
 Ele formaliza um contrato headless mínimo de piloto reutilizável e usa a
 pré-classificação Jev como primeiro caso em shadow mode. Depende do intake
 canônico HF-08-01 e das rotas qualificadas HF-07-02 para observação integrada.
-Não pertence às 33 unidades do plano de composição de 18/09, não altera o
-despacho atual e requer handoff tipado, fatiamento e aprovação técnica antes da
-implementação.
+Não pertence às 33 unidades do plano de composição de 18/09 e não altera o
+despacho atual: o adaptador Jev opera somente em shadow mode, sem promoção
+automática (commit `e3b93cc`, biblioteca `core/pilots/`).
