@@ -184,3 +184,10 @@ def _isolated_routing_cooldowns(tmp_path, monkeypatch):
     from core.line import routing
 
     monkeypatch.setattr(routing, "default_cooldown_path", lambda: tmp_path / "routing_cooldowns.json")
+
+
+@pytest.fixture(autouse=True)
+def _hermetic_agent_env(monkeypatch):
+    """Line tests must not depend on the host's agent/routing config (the cloud worker sets these)."""
+    for name in ("DARKFAC_CODEX_SANDBOX_MODE", "DARKFAC_OPENROUTER_CHEAP_MODEL"):
+        monkeypatch.delenv(name, raising=False)

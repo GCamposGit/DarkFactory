@@ -34,6 +34,22 @@ from core.integrations.telegram import TelegramConfig
 from hub.backend.main import app
 
 
+@pytest.fixture(autouse=True)
+def _hermetic_hf15_ambient_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Acceptance config is read from the environment; the cloud worker container sets
+    DARKFAC_MAX_CONCURRENT_SLOTS=1 (< the 9 slots G4 requires), which turns every preflight
+    into BLOCKED. Tests must not depend on the host's ambient configuration."""
+    for name in (
+        "DARKFAC_MAX_CONCURRENT_SLOTS",
+        "DARKFAC_HF15_SANDBOX_ROOT",
+        "DARKFAC_HF15_LIVE_MODE",
+        "DARKFAC_HF15_DB_TYPE",
+        "DARKFAC_HF02_DATABASE_URL",
+        "DARKFAC_COORDINATOR_URL",
+    ):
+        monkeypatch.delenv(name, raising=False)
+
+
 @pytest.fixture
 def sandbox_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> HF15EnvironmentConfig:
     """Fixture providing isolated sandbox configuration."""
