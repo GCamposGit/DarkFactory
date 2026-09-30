@@ -73,9 +73,8 @@ SHA_PATTERN = re.compile(r"^[0-9a-f]{40}$")
 # adds another project this tool should be allowed to touch.
 ALLOWED_PROJECTS = frozenset({"darkfac-core"})
 
-# Only these services are built from the git source, so only their Dokploy
-# deploy title (= commit subject) is comparable with origin/main. Others
-# (n8n, Darkhub, canary) show titles like "Manual deployment": informational.
+# Only these services have Dokploy deploy titles comparable with origin/main.
+# Darkhub's raw compose instead proves its commit through /health.
 CODE_BEARING_SERVICES = frozenset({"darkfac-cloud"})
 
 TERMINAL_SUCCESS_STATUSES = {"done"}
@@ -527,16 +526,47 @@ def get_origin_main_sha(repo_root: Path = REPO_ROOT) -> Optional[str]:
     return sha if result.returncode == 0 and SHA_PATTERN.fullmatch(sha) else None
 
 
-def set_compose_git_sha(transport: Transport, service: Service, payload: Dict[str, Any], sha: str) -> None:
-    """Merge the SHA into Dokploy's compose env without changing other keys."""
+def get_origin_main_compose(sha: str, repo_root: Path = REPO_ROOT) -> str:
+    """Read the hub compose file from the exact commit selected for deployment."""
+    if not SHA_PATTERN.fullmatch(sha):
+        raise DokployUsageError("Darkhub build requires a full origin/main SHA")
+    try:
+        result = subprocess.run(
+            ["git", "show", f"{sha}:deploy/dokploy/docker-compose.hub.yml"],
+            cwd=repo_root, capture_output=True, text=True, timeout=10, check=False,
+            encoding="utf-8",
+        )
+    except Exception:
+        raise DokployUsageError("Cannot read Darkhub compose from origin/main") from None
+    if result.returncode != 0 or not result.stdout:
+        raise DokployUsageError("Cannot read Darkhub compose from origin/main")
+    return result.stdout
+
+
+def render_darkhub_compose(source: str, sha: str) -> str:
+    """Bind both the Git build context and container environment to one SHA."""
+    if not SHA_PATTERN.fullmatch(sha):
+        raise DokployUsageError("Darkhub build requires a full origin/main SHA")
+    context = "DarkFactory.git#${DARKFAC_GIT_SHA}"
+    placeholder = "${DARKFAC_GIT_SHA}"
+    if context not in source or source.count(placeholder) != 3 or "no_cache: true" not in source or "pull_policy: build" not in source:
+        raise DokployUsageError("Darkhub compose lacks the pinned Git build and SHA contract")
+    return source.replace(placeholder, sha)
+
+
+def set_compose_git_sha(transport: Transport, service: Service, payload: Dict[str, Any], sha: str, source: str) -> None:
+    """Install a raw compose file from main; preserve Dokploy's existing env."""
     if service.kind != "compose" or service.name.lower() != "darkhub":
         return
-    env_text = payload.get("env")
-    if not isinstance(env_text, str):
-        raise DokployUsageError("Darkhub compose.one has no string env; refusing to overwrite existing settings")
-    lines = [line for line in env_text.splitlines() if not re.match(r"^\s*(?:export\s+)?DARKFAC_GIT_SHA\s*=", line)]
-    lines.append(f"DARKFAC_GIT_SHA={sha}")
-    transport("POST", "/api/compose.saveEnvironment", {"composeId": service.service_id, "env": "\n".join(lines) + "\n"})
+    if not isinstance(payload.get("env"), str):
+        raise DokployUsageError("Darkhub compose.one has no string env; refusing to replace its settings")
+    compose_file = render_darkhub_compose(source, sha)
+    transport("POST", "/api/compose.update", {
+        "composeId": service.service_id,
+        "sourceType": "raw",
+        "composePath": "docker-compose.yml",
+        "composeFile": compose_file,
+    })
 
 
 def fetch_darkhub_health(url: str = DARKHUB_HEALTH_URL) -> Dict[str, Any]:
@@ -727,6 +757,17 @@ def main(
     if darkhub_selected and expected_sha is None:
         print("Cannot determine full origin/main SHA; Darkhub deploy refused", file=err)
         return EXIT_DEPLOY_FAILED
+    if darkhub_selected and not args.wait:
+        print("Darkhub deploy requires --wait so /health can prove the origin/main SHA", file=err)
+        return EXIT_USAGE_ERROR
+    darkhub_compose = None
+    if darkhub_selected:
+        try:
+            darkhub_compose = get_origin_main_compose(expected_sha)
+            render_darkhub_compose(darkhub_compose, expected_sha)
+        except DokployUsageError as exc:
+            print(f"Darkhub deploy refused: {exc}", file=err)
+            return EXIT_DEPLOY_FAILED
     if local_subject:
         print(f"Local origin/main HEAD subject: {local_subject}", file=out)
 
@@ -740,7 +781,7 @@ def main(
             baseline_payload = fetch_service_status(transport, svc)
             baseline = latest_deployment(baseline_payload)
             if svc.name.lower() == "darkhub" and svc.kind == "compose":
-                set_compose_git_sha(transport, svc, baseline_payload, expected_sha)
+                set_compose_git_sha(transport, svc, baseline_payload, expected_sha, darkhub_compose)
             trigger_deploy(transport, svc)
         except DokployUsageError as exc:
             print(f"[{svc.name}] FAILED to trigger deploy: {exc}", file=err)

@@ -611,6 +611,7 @@ def _make_transport_with_full_project(project_path: str = "/api/project.all") ->
 @pytest.fixture(autouse=True)
 def _fake_darkhub_health(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(mod, "get_origin_main_sha", lambda: "a" * 40)
+    monkeypatch.setattr(mod, "get_origin_main_compose", lambda sha: (mod.REPO_ROOT / "deploy/dokploy/docker-compose.hub.yml").read_text(encoding="utf-8"))
     monkeypatch.setattr(mod, "fetch_darkhub_health", lambda: {"status": "ok", "git_sha": "a" * 40})
 
 
@@ -728,9 +729,9 @@ def test_main_deploy_and_wait_all_done_exit_0() -> None:
         stderr=err,
     )
     assert exit_code == mod.EXIT_OK
-    # 4 deploys plus the DarkHub environment update.
+    # 4 deploys plus the DarkHub pinned compose update.
     assert len(transport.post_calls) == 5
-    assert {c[1] for c in transport.post_calls} == {"/api/compose.saveEnvironment", "/api/compose.deploy", "/api/application.deploy"}
+    assert {c[1] for c in transport.post_calls} == {"/api/compose.update", "/api/compose.deploy", "/api/application.deploy"}
     report = out.getvalue()
     assert "status=done" in report
     assert SENTINEL_KEY not in report
@@ -786,7 +787,7 @@ def test_main_no_wait_triggers_and_exits_0_without_polling() -> None:
 
     out, err = io.StringIO(), io.StringIO()
     exit_code = mod.main(
-        ["--no-wait"],
+        ["--no-wait", "--only", "darkfac-cloud"],
         env={"DOKPLOY_API_URL": "https://dokploy.ggcampos.com", "DOKPLOY_API_KEY": SENTINEL_KEY},
         registry_reader=_no_registry,
         transport_factory=lambda url, key: transport,
@@ -794,7 +795,7 @@ def test_main_no_wait_triggers_and_exits_0_without_polling() -> None:
         stderr=err,
     )
     assert exit_code == mod.EXIT_OK
-    assert len(transport.post_calls) == 5
+    assert len(transport.post_calls) == 1
     assert "Not waiting" in out.getvalue()
 
 
@@ -1172,7 +1173,7 @@ def test_vps_unknown_fails_after_successful_deploy(monkeypatch: pytest.MonkeyPat
     assert "VPS: unknown" in err
 
 
-def test_darkhub_env_saved_before_deploy_and_health_converges(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_darkhub_build_pinned_before_deploy_and_health_converges(monkeypatch: pytest.MonkeyPatch) -> None:
     from core.infra import node_sync
 
     transport = _make_transport_with_full_project()
@@ -1191,15 +1192,52 @@ def test_darkhub_env_saved_before_deploy_and_health_converges(monkeypatch: pytes
     )
     assert code == mod.EXIT_OK, err.getvalue()
     posts = transport.post_calls
-    assert posts[0][1] == "/api/compose.saveEnvironment"
-    assert posts[0][2] == {"composeId": "compose_hub", "env": "KEEP=secret-value\nDARKFAC_GIT_SHA=" + "a" * 40 + "\n"}
+    assert posts[0][1] == "/api/compose.update"
+    body = posts[0][2]
+    assert body["composeId"] == "compose_hub"
+    assert body["sourceType"] == "raw"
+    assert body["composePath"] == "docker-compose.yml"
+    assert "DarkFactory.git#" + "a" * 40 in body["composeFile"]
+    assert "DARKFAC_GIT_SHA: " + "a" * 40 in body["composeFile"]
+    assert "DARKFAC_GIT_SHA=" + "a" * 40 in body["composeFile"]
+    assert "no_cache: true" in body["composeFile"]
+    assert "pull_policy: build" in body["composeFile"]
+    assert "env" not in body  # existing Dokploy secrets are untouched
     assert posts[1][1] == "/api/compose.deploy"
     assert "VPS: converged" in out.getvalue()
     assert SENTINEL_KEY not in out.getvalue() + err.getvalue()
     assert "secret-value" not in out.getvalue() + err.getvalue()
 
 
-def test_darkhub_divergent_health_times_out_and_fails() -> None:
+def test_darkhub_no_wait_refused_before_any_mutation() -> None:
+    transport = _make_transport_with_full_project()
+    out, err = io.StringIO(), io.StringIO()
+    code = mod.main(
+        ["--only", "Darkhub", "--no-wait"], env=_ENV,
+        registry_reader=_no_registry, transport_factory=lambda url, key: transport,
+        stdout=out, stderr=err,
+    )
+    assert code != mod.EXIT_OK
+    assert "/health" in err.getvalue()
+    assert transport.post_calls == []
+
+
+def test_darkhub_rejects_compose_without_pinned_build_contract(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(mod, "get_origin_main_compose", lambda sha: "services:\n  darkhub:\n    image: darkhub:v2.1\n")
+    transport = _make_transport_with_full_project()
+    out, err = io.StringIO(), io.StringIO()
+    code = mod.main(
+        ["--only", "Darkhub"], env=_ENV,
+        registry_reader=_no_registry, transport_factory=lambda url, key: transport,
+        stdout=out, stderr=err,
+    )
+    assert code == mod.EXIT_DEPLOY_FAILED
+    assert "pinned Git build" in err.getvalue()
+    assert transport.post_calls == []
+
+
+@pytest.mark.parametrize("observed_sha", [None, "b" * 40])
+def test_darkhub_divergent_health_times_out_and_fails(observed_sha: Optional[str]) -> None:
     transport = _make_transport_with_full_project()
     old = {"deploymentId": "old", "status": "done", "title": "old", "createdAt": "2026-09-12T09:00:00Z"}
     new = {"deploymentId": "new", "status": "done", "title": "new", "createdAt": "2026-09-12T09:10:00Z"}
@@ -1209,7 +1247,7 @@ def test_darkhub_divergent_health_times_out_and_fails() -> None:
 
     def wrong_health() -> Dict[str, Any]:
         probes.append(1)
-        return {"git_sha": "b" * 40}
+        return {"git_sha": observed_sha}
 
     out, err = io.StringIO(), io.StringIO()
     code = mod.main(
