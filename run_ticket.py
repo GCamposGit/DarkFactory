@@ -477,7 +477,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     if not args.json:
         print(f"[+] Desenvolvimento concluído com sucesso pelo {selected_harness.upper()}.")
 
-    from core.git.autonomy import GitAutonomyManager, infer_change_type, infer_commit_scope
+    from core.git.autonomy import GitAutonomyManager
 
     git_mgr = GitAutonomyManager(PROJECT_ROOT)
 
@@ -487,9 +487,8 @@ def main(argv: Optional[list[str]] = None) -> int:
         git_mgr.commit_ticket(
             ticket_id=ticket.id,
             title=ticket.title,
-            scope=infer_commit_scope(ticket),
+            scope="core" if not ticket.tags else ticket.tags[0].replace("user-", ""),
             cwd=workspace.path,
-            change_type=infer_change_type(ticket),
         )
 
     # 5. Official Validation Gate, run inside the ticket worktree
