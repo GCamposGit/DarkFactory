@@ -140,6 +140,21 @@ Fluxo de entrega por frente: worktree → testes focais → commit → portão o
 
 A sessão interativa pode ter `gh pr merge` bloqueado pelo classificador do Claude Code (`autoMode.soft_deny` em `~/.claude/settings.json`, verificado em 29–30/09). Isso não é passo humano rotineiro: é uma regra de permissão que o agente não pode editar. Se ocorrer, o PR fica aberto com CI verde e o relatório cita a regra exata a ajustar (USR-96 item 4). A linha na VPS faz merge por conta própria.
 
+## 7.1 Status de execução (atualizado em 01/10/2026)
+
+| PR | Tickets | Resultado |
+| --- | --- | --- |
+| #74 `75fe5eb` | plano HF-28 + 14 tickets | integrado |
+| #75 `3e88bfc` | USR-84 | **CI do `main` volta a verde** (causa: teste DH-04 escrevia no caminho do `darkfac`); guarda de higiene da árvore ativo |
+| #79 `efe3c42` | lote 2 (USR-100/101/102) | integrado; Apêndice C (rotação do token) |
+| #80 `4b7a318` | USR-67, USR-68 | roteador só elege harness com a capacidade exigida; `run_ticket` com diagnóstico e retry compartilhado |
+| #81 `527c7e7` | USR-85 | merge autônomo só com CI verde; `check-main` |
+| #82 `42032bf` | USR-100 (gate), USR-102 (gate) | gate de segredos e de consistência tracked/ignored |
+| #83 `39ba3cf` | USR-100 (fixtures) | token real removido de duas fixtures |
+| #84 `7bd5896` | USR-86, USR-87 | `base_red` e espera de rota sem humano |
+
+Novos defeitos apontados pelos próprios subagentes durante a execução (todos com ticket): USR-103 (CI vermelho não volta ao desenvolvimento), USR-104 (sem janela de graça de checks), USR-105 (nenhum varredor retoma `waiting_human` não-Grill), USR-106 (sem rota no worker/conflito).
+
 ## 8. Entradas humanas inevitáveis (lista fechada)
 
 Além da lista do plano HF-27 §7 (tokens Claude/Codex na VPS, SSH, Tailscale, PAT, credenciais de terceiros, billing, respostas de negócio do Grill), este plano adiciona somente o **USR-96**: regra de proteção do `main`, atualização do `MISSION.md` e commit humano do patch opcional de `core/harness/*`. Nada mais depende do owner.
