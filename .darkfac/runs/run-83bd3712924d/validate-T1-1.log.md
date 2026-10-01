@@ -4,13 +4,13 @@
 - harness: codex
 - model: -
 - error_kind: crash
-- duration_s: 8.364
+- duration_s: 8.621
 - note: agent invocation failed
 
 ## Output (redacted, first 2000 chars)
 
 ```text
-Falha ao invocar agente (crash): {"type":"thread.started","thread_id":"01a0f84d-6273-70b0-80b4-ce38ac9b4e39"}
+Falha ao invocar agente (crash): {"type":"thread.started","thread_id":"01a0f856-f0a3-7343-a1b8-3cde89f24d25"}
 {"type":"turn.started"}
 {"type":"error","message":"Re-connecting... 1/5"}
 {"type":"error","message":"Re-connecting... 2/5"}
