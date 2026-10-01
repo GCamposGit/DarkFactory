@@ -927,6 +927,29 @@ class GitAutonomyManager:
                 message=f"Ticket '{ticket_id}' not found in demands store.",
             )
 
+        # A previous implementation commit is visible in the branch diff; an as-yet
+        # uncommitted implementation is visible in status. Check both before touching
+        # the ledger so a ledger-only branch cannot be delivered as a completed ticket.
+        base_ref = "origin/main"
+        branch_diff = _run_git(["diff", "--name-only", "-z", f"{base_ref}...HEAD"], cwd=target_dir)
+        if branch_diff.returncode != 0:
+            return TicketCompletionReport(
+                ok=False,
+                ticket_id=ticket_id,
+                message=f"Could not inspect ticket changes against {base_ref}: {branch_diff.stderr.strip()}",
+            )
+        changed = set(branch_diff.stdout.split("\0")) | set(self.changed_paths(target_dir))
+        if not any(path and path != ".factory/demands/demands.json" for path in changed):
+            message = "Ticket branch has no implementation changes outside the demands ledger."
+            return TicketCompletionReport(
+                ok=False,
+                ticket_id=ticket_id,
+                delivery=DeliveryReport(
+                    ok=False, action="no_changes", branch=self._current_branch(target_dir), message=message
+                ),
+                message=message,
+            )
+
         # 1. Update ticket in DemandsStore
         ticket.status = DeliveryStatus.COMPLETED
         ticket.updated_at = datetime.now(timezone.utc)

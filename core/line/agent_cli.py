@@ -90,6 +90,21 @@ HARNESS_CAPABILITIES: dict[str, frozenset[str]] = {
 }
 
 
+HEADLESS_DEVELOPMENT_PREAMBLE = (
+    "CONTEXTO DE EXECUCAO HEADLESS: O orquestrador/launcher ja fez o preflight de cota "
+    "e roteou esta tarefa para o harness {harness}{headroom}. A regra de bloqueio de cota "
+    "do chat interativo nao se aplica a este agente headless roteado. Nao repita o preflight "
+    "nem peca override. Se nao conseguir implementar por qualquer motivo, diga isso "
+    "claramente: a fabrica trata uma execucao sem alteracoes de implementacao como falha.\n\n"
+)
+
+
+def headless_development_preamble(harness: str, headroom: Optional[float] = None) -> str:
+    """Explain the already completed routing decision to a headless development agent."""
+    quota = f" (headroom {headroom:.1f}%)" if headroom is not None else ""
+    return HEADLESS_DEVELOPMENT_PREAMBLE.format(harness=harness, headroom=quota)
+
+
 def supports(harness: str, mode: str) -> bool:
     """True when `harness` declares `mode`. An unknown harness supports nothing (fail-closed)."""
     return mode in HARNESS_CAPABILITIES.get(harness.lower().strip(), frozenset())

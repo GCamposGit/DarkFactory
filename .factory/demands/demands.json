@@ -1483,7 +1483,7 @@
     "project_id": "darkfac",
     "title": "run_ticket: worktree propria por ticket e limpeza confiavel no Windows",
     "origin": "user",
-    "status": "planned",
+    "status": "completed",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -1494,7 +1494,7 @@
       "run-ticket",
       "windows"
     ],
-    "problem_statement": "Duas sessoes no mesmo checkout C:\\dev\\DarkFac se contaminaram: o git add -A do run_ticket varreu arquivos de outra sessao (USR-60) e a outra varreu os do USR-64; o portao falhou com 'worktree dirty'. Alem disso git worktree remove falha com 'Permission denied/Directory not empty' e deixa pastas em .worktrees.\n\n[Plano HF-28 | 2026-09-30] Onda 1. no mesmo agente/PR do USR-68 (arquivos comuns: run_ticket.py e core/git/autonomy.py). Ver docs/STABILITY_PLAN_2026-09-30.md.\nCAUSA RAIZ: run_ticket executa o agente com cwd=PROJECT_ROOT (checkout compartilhado) e commit_ticket faz 'git add -A' nele: duas sessoes simultaneas varrem os arquivos uma da outra. No Windows, 'git worktree remove' falha (arquivos travados por indexador/antivirus/processos) e deixa diretorios: hoje existem ~14 pastas mortas em .worktrees/ (sem .git, milhares de arquivos) e ~15 worktrees registradas em .claude/worktrees e ~/.codex/worktrees.\nSOLUCAO DEFINITIVA: core/git/ticket_workspace.py: toda execucao cria worktree dedicada a partir de origin/main (.worktrees/<ticket>-<ts>, branch ticket/<id>), o agente e o portao rodam NELA (candidato = commit limpo), o commit inclui apenas caminhos alterados nessa worktree (nunca 'git add -A' no checkout compartilhado); limpeza com retry/backoff, 'git worktree prune', rmtree robusto (onerror chmod) e fallback de renomear para lixeira (.factory/backups/trash) removida no proximo sweep; sweep_stale passa a cobrir .worktrees, .claude/worktrees e diretorios orfaos (sem .git) com retencao de 7 dias.\nNUNCA MAIS (prevencao estrutural): run_ticket recusa iniciar se o cwd for o checkout compartilhado com alteracoes de outro ticket; teste de isolamento com dois tickets simultaneos; teste de limpeza com falha transitoria injetada.",
+    "problem_statement": "Duas sessoes no mesmo checkout C:\\dev\\DarkFac se contaminaram: o git add -A do run_ticket varreu arquivos de outra sessao (USR-60) e a outra varreu os do USR-64; o portao falhou com 'worktree dirty'. Alem disso git worktree remove falha com 'Permission denied/Directory not empty' e deixa pastas em .worktrees.\n\n[Plano HF-28 | 2026-09-30] Onda 1. no mesmo agente/PR do USR-68 (arquivos comuns: run_ticket.py e core/git/autonomy.py). Ver docs/STABILITY_PLAN_2026-09-30.md.\nCAUSA RAIZ: run_ticket executa o agente com cwd=PROJECT_ROOT (checkout compartilhado) e commit_ticket faz 'git add -A' nele: duas sessoes simultaneas varrem os arquivos uma da outra. No Windows, 'git worktree remove' falha (arquivos travados por indexador/antivirus/processos) e deixa diretorios: hoje existem ~14 pastas mortas em .worktrees/ (sem .git, milhares de arquivos) e ~15 worktrees registradas em .claude/worktrees e ~/.codex/worktrees.\nSOLUCAO DEFINITIVA: core/git/ticket_workspace.py: toda execucao cria worktree dedicada a partir de origin/main (.worktrees/<ticket>-<ts>, branch ticket/<id>), o agente e o portao rodam NELA (candidato = commit limpo), o commit inclui apenas caminhos alterados nessa worktree (nunca 'git add -A' no checkout compartilhado); limpeza com retry/backoff, 'git worktree prune', rmtree robusto (onerror chmod) e fallback de renomear para lixeira (.factory/backups/trash) removida no proximo sweep; sweep_stale passa a cobrir .worktrees, .claude/worktrees e diretorios orfaos (sem .git) com retencao de 7 dias.\nNUNCA MAIS (prevencao estrutural): run_ticket recusa iniciar se o cwd for o checkout compartilhado com alteracoes de outro ticket; teste de isolamento com dois tickets simultaneos; teste de limpeza com falha transitoria injetada.\n\n[Plano HF-28 | lote 4] FECHADO COM EVIDENCIA (2026-10-01): entregue pelo PR #86 (0e0c8af, worktree propria por ticket e limpeza confiavel); o ledger ficou planned por falha de fechamento.",
     "core_journey": [
       "Duas sessoes no mesmo checkout C:\\dev\\DarkFac se contaminaram: o git add -A do run_ticket varreu arquivos de outra sessao (USR-60) e a outra varreu os do USR-64; o portao falhou com 'worktree dirty'. Alem disso git worktree remove falha com 'Permission denied/Directory not empty' e deixa pastas em .worktrees."
     ],
@@ -1517,7 +1517,7 @@
       "USR-68"
     ],
     "created_at": "2026-09-30T17:26:14.357702Z",
-    "updated_at": "2026-09-30T22:00:00Z"
+    "updated_at": "2026-10-01T09:30:00Z"
   },
   {
     "id": "USR-70",
@@ -2422,7 +2422,7 @@
     "project_id": "darkfac",
     "title": "PRs de fila (queue-only) com titulo feat(core) parecem entregas: distinguir registro de ticket de implementacao e fechar o ledger no mesmo commit",
     "origin": "agent",
-    "status": "completed",
+    "status": "planned",
     "item_type": "quality",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -2432,7 +2432,7 @@
       "wave-1",
       "ledger"
     ],
-    "problem_statement": "EVIDENCIA: PRs #51-#73 'feat(core): <titulo> [USR-N]' contem apenas +29 linhas em demands.json (registro na fila) e sao indistinguiveis de implementacoes em git log/DarkHub/relatorios; na auditoria de 2026-09-30, 16 tickets pareciam 'mergeados' e estavam planned. Alem disso nenhuma PR de implementacao marca o ticket completed no mesmo commit (so por edicao manual).\n\n[Plano HF-28 | 2026-09-30] Onda 1. mesma frente do USR-69/75/76. Ver docs/STABILITY_PLAN_2026-09-30.md.\nCAUSA RAIZ: deliver_branch usa o mesmo formato de titulo para dois eventos diferentes e nao conhece o tipo de entrega.\nSOLUCAO DEFINITIVA: deliver_branch(kind='queue'|'implementation'): queue -> 'chore(backlog): registrar USR-N - <titulo>' com label queue; implementation -> 'feat|fix(<escopo>): <titulo> [USR-N]' e grava status completed + delivery_evidence (PR/SHA) no ledger NO MESMO commit; ticket completed sem evidencia falha o teste de higiene do ledger.\nNUNCA MAIS (prevencao estrutural): teste de higiene do ledger: completed exige evidencia; PR de fila nunca usa prefixo feat/fix.",
+    "problem_statement": "EVIDENCIA: PRs #51-#73 'feat(core): <titulo> [USR-N]' contem apenas +29 linhas em demands.json (registro na fila) e sao indistinguiveis de implementacoes em git log/DarkHub/relatorios; na auditoria de 2026-09-30, 16 tickets pareciam 'mergeados' e estavam planned. Alem disso nenhuma PR de implementacao marca o ticket completed no mesmo commit (so por edicao manual).\n\n[Plano HF-28 | 2026-09-30] Onda 1. mesma frente do USR-69/75/76. Ver docs/STABILITY_PLAN_2026-09-30.md.\nCAUSA RAIZ: deliver_branch usa o mesmo formato de titulo para dois eventos diferentes e nao conhece o tipo de entrega.\nSOLUCAO DEFINITIVA: deliver_branch(kind='queue'|'implementation'): queue -> 'chore(backlog): registrar USR-N - <titulo>' com label queue; implementation -> 'feat|fix(<escopo>): <titulo> [USR-N]' e grava status completed + delivery_evidence (PR/SHA) no ledger NO MESMO commit; ticket completed sem evidencia falha o teste de higiene do ledger.\nNUNCA MAIS (prevencao estrutural): teste de higiene do ledger: completed exige evidencia; PR de fila nunca usa prefixo feat/fix.\n\n[Plano HF-28 | lote 4] FALSO SUCESSO REVERTIDO (2026-10-01): run_ticket.py USR-94 --harness codex terminou com '[SUCESSO]' e o PR #89 foi mergeado alterando SOMENTE 2 linhas de demands.json (status do ticket): nenhuma implementacao (core/git/autonomy.py sem 'kind', models.py sem 'delivery_evidence', nenhum 'chore(backlog)'). Causa e correcao em USR-107. ESCOPO ADICIONAL: a isencao 'PR so de ledger' do portao de CI (core/git/autonomy._ci_gate, USR-85) deve valer APENAS para kind='queue'; um PR de implementacao que so altera o ledger nunca pode ser mergeado.",
     "core_journey": [],
     "non_goals": [
       "Nao incluir novas features: apenas estabilidade e autonomia (plano HF-28)"
@@ -2441,7 +2441,8 @@
     "acceptance_criteria": [
       "Titulo e label distintos para queue x implementation",
       "Implementacao grava completed+evidencia no mesmo commit",
-      "Higiene do ledger: completed sem evidencia falha (tickets antigos migrados com evidencia de commit quando existir)"
+      "Higiene do ledger: completed sem evidencia falha (tickets antigos migrados com evidencia de commit quando existir)",
+      "A isencao ledger-only do portao de CI so vale para kind='queue'; PR de implementacao so de ledger e rejeitado (teste)"
     ],
     "suggested_files": [
       "core/git/autonomy.py",
@@ -2454,7 +2455,7 @@
       "USR-75"
     ],
     "created_at": "2026-09-30T22:00:00Z",
-    "updated_at": "2026-10-01T09:05:05.086478Z"
+    "updated_at": "2026-10-01T09:30:00Z"
   },
   {
     "id": "USR-95",
@@ -2573,14 +2574,14 @@
     "project_id": "darkfac",
     "title": "Worker da nuvem nao conhece a cota do Codex: revisao cai sempre no OpenRouter",
     "origin": "user",
-    "status": "planned",
+    "status": "completed",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
     "tags": [
       "user-demand"
     ],
-    "problem_statement": "No worker Docker do VPS, core.line.routing._default_quota_headroom devolve None para openai (sem snapshot fresco em .factory/usage/providers), entao o Codex fica inelegivel (fail-closed) e a revisao independente de runs implementados pelo Claude cai no OpenRouter deepseek-v4.1-flash. Evidencia: run-f0c98a90cf0f (USR-62 tentativa 3) em 30/09, log do worker 'Harness openrouter returned no text' em todas as iteracoes de independent_review.",
+    "problem_statement": "No worker Docker do VPS, core.line.routing._default_quota_headroom devolve None para openai (sem snapshot fresco em .factory/usage/providers), entao o Codex fica inelegivel (fail-closed) e a revisao independente de runs implementados pelo Claude cai no OpenRouter deepseek-v4.1-flash. Evidencia: run-f0c98a90cf0f (USR-62 tentativa 3) em 30/09, log do worker 'Harness openrouter returned no text' em todas as iteracoes de independent_review.\n\n[Plano HF-28 | lote 4] FECHADO COM EVIDENCIA (2026-10-01): entregue pelo PR #90 (19c9864). Headroom real do Codex no worker via session files (core/usage/adapters.py), fail-closed por padrao e revisao de run do Claude roteada para Codex (tests/line/test_line_unblock.py); o ledger ficou planned por falha de fechamento.",
     "core_journey": [
       "No worker Docker do VPS, core.line.routing._default_quota_headroom devolve None para openai (sem snapshot fresco em .factory/usage/providers), entao o Codex fica inelegivel (fail-closed) e a revisao independente de runs implementados pelo Claude cai no OpenRouter deepseek-v4.1-flash. Evidencia: run-f0c98a90cf0f (USR-62 tentativa 3) em 30/09, log do worker 'Harness openrouter returned no text' em todas as iteracoes de independent_review."
     ],
@@ -2595,7 +2596,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-09-30T21:47:11.193999Z",
-    "updated_at": "2026-09-30T21:47:11.193999Z"
+    "updated_at": "2026-10-01T09:30:00Z"
   },
   {
     "id": "USR-99",
@@ -2898,5 +2899,47 @@
     ],
     "created_at": "2026-10-01T07:00:00Z",
     "updated_at": "2026-10-01T07:00:00Z"
+  },
+  {
+    "id": "USR-107",
+    "project_id": "darkfac",
+    "title": "Fabrica declara sucesso sem implementacao: agente no-op vira ticket completed e PR so de ledger e mergeado sem CI",
+    "origin": "agent",
+    "status": "completed",
+    "item_type": "quality",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand",
+      "stability",
+      "wave-0",
+      "autonomy",
+      "defect"
+    ],
+    "problem_statement": "EVIDENCIA (2026-10-01): 'python run_ticket.py USR-94 --harness codex' terminou com '[SUCESSO]'; o PR #89 foi MERGEADO alterando SOMENTE 2 linhas de .factory/demands/demands.json (status). Nenhuma implementacao. O agente (Codex) retornou ok sem alterar arquivos; run_ticket nao teve o que commitar, o portao oficial passou (nada mudou), GitAutonomyManager.complete_ticket marcou o ticket completed e o portao de CI isentou o PR por ser 'so de ledger' (ci_gate=skipped_ledger_only).\n\n[Plano HF-28 | lote 4] Onda 0. Ver docs/STABILITY_PLAN_2026-09-30.md.\nCAUSA RAIZ (tres falhas compostas): (1) RAIZ: o agente headless leu o AGENTS.md/skill 19, tentou o preflight de cota INTERATIVO ('bloqueio de cota critica no chat'), nao conseguiu medir a cota dentro do sandbox (timeout de 45 s) e SE RECUSOU a implementar, pedindo autorizacao de override; o prompt headless nao dizia que o orquestrador ja havia feito o preflight e o roteamento. O mesmo risco existe no prompt do desenvolvimento da linha (core/line/stage_build.py) - possivel causa de falhas silenciosas 'agente sem alteracoes' na VPS. (2) run_ticket aceita agente 'ok' sem verificar efeito e complete_ticket marca completed sem nenhuma mudanca de implementacao. (3) a isencao 'ledger-only' do portao de CI (USR-85) nao distingue registro de ticket (queue) de implementacao.\nSOLUCAO DEFINITIVA: (a) preambulo verdadeiro e unico (constante compartilhada) no inicio do prompt de run_ticket e do stage_build: o launcher ja fez o preflight/roteamento, a regra do chat interativo nao se aplica a agentes headless roteados, nao repetir o preflight nem pedir override, e dizer claramente se nao conseguir implementar; (b) run_ticket trata 'agente ok sem mudancas fora do ledger' como FALHA (exit 4, imprime o final do texto do agente redigido, descarta a worktree) e imprime um resumo do que o agente afirmou no sucesso; (c) complete_ticket recusa marcar completed sem mudancas de implementacao (action='no_changes'); (d) a isencao ledger-only so vale para kind='queue' (USR-94).\nNUNCA MAIS: testes para (a)-(c) com agente falso; o pump/dogfood verifica que o commit mergeado contem arquivos fora do ledger; USR-92 deve reutilizar essa verificacao.\n\n[Plano HF-28 | lote 4] ENCERRADO COM EVIDENCIA (2026-10-01): itens (a), (b) e (c) entregues pelo PR da branch claude/fix-agent-no-changes (testes em tests/test_run_ticket_routing.py, tests/test_git_delivery.py e tests/line/test_stage_build.py). O item (d) fica no USR-94 (reaberto). USR-94 voltou a planned.",
+    "core_journey": [],
+    "non_goals": [
+      "Nao incluir novas features: apenas estabilidade e autonomia (plano HF-28)"
+    ],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Agente ok sem alterar arquivos fora do ledger -> run_ticket exit 4, ticket NAO completed, nenhuma entrega",
+      "complete_ticket sem mudancas de implementacao -> ok=False/no_changes",
+      "Prompt do run_ticket e do stage_build contem o preambulo (constante unica)",
+      "Isencao ledger-only so para kind=queue (movido para USR-94)"
+    ],
+    "suggested_files": [
+      "run_ticket.py",
+      "core/git/autonomy.py",
+      "core/line/agent_cli.py",
+      "core/line/stage_build.py",
+      "tests/test_run_ticket_routing.py",
+      "tests/test_git_delivery.py",
+      "tests/line/test_stage_build.py"
+    ],
+    "estimated_complexity": "small",
+    "dependencies": [],
+    "created_at": "2026-10-01T09:30:00Z",
+    "updated_at": "2026-10-01T09:30:00Z"
   }
 ]

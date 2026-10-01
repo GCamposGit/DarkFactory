@@ -12,6 +12,7 @@ tickets, cooldowns and agents are all injected.
 from __future__ import annotations
 
 import json
+import subprocess
 from pathlib import Path
 from typing import Any, Optional
 from unittest.mock import MagicMock
@@ -21,6 +22,8 @@ import pytest
 import run_ticket
 from core.line import agent_retry, routing
 from core.git.autonomy import GitAutonomyManager, TicketCompletionReport
+from core.demands.store import DemandsStore
+from core.roadmap.models import DeliveryStatus
 from core.git.ticket_workspace import TicketWorkspace
 from core.line.agent_cli import AgentRequest, AgentResult
 from core.line.routing import _HARNESS_TO_PROVIDER
@@ -74,6 +77,10 @@ def env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> dict[str, Any]:
     )
     prepared: list[str] = []
     monkeypatch.setattr(run_ticket, "_prepare_workspace", lambda args, ticket: prepared.append(ticket.id) or workspace)
+    # Existing routing tests use a plain directory, not a git repository. They exercise
+    # successful routing with a synthetic implementation path; the real-git cases below
+    # cover the no-changes boundary.
+    monkeypatch.setattr(GitAutonomyManager, "changed_paths", lambda self, cwd: ["feature.py"])
     return {
         "agent": agent, "sleeps": sleeps, "cooldowns": tmp_path / "cooldowns.json",
         "workspace": workspace, "prepared": prepared,
@@ -286,6 +293,7 @@ def test_an_auto_routed_ticket_falls_back_to_the_next_healthy_harness(
     assert env["sleeps"] == []  # `not_installed` is skipped at once, without backoff
     requests: list[AgentRequest] = [c.args[0] for c in env["agent"].call_args_list]
     assert [r.harness for r in requests] == ["claude", "codex"] and all(r.mode == "write" for r in requests)
+    assert all(f"harness {r.harness}" in r.prompt.splitlines()[0] for r in requests)
 
 
 def test_a_rate_limited_harness_gets_a_cooldown_recorded_by_the_launcher(
@@ -358,3 +366,97 @@ def test_a_blocked_delivery_is_an_error_not_a_success(
     assert "[SUCESSO]" not in captured.out
     assert "CI failed on build" in captured.err and str(env["workspace"].path) in captured.err
     assert seen["cwd"] == env["workspace"].path  # completion also happens inside the worktree
+
+
+def _git(repo: Path, *args: str) -> str:
+    """Run local git against a disposable repository."""
+    proc = subprocess.run(
+        ["git", *args], cwd=str(repo), capture_output=True, text=True,
+        encoding="utf-8", errors="replace", check=True,
+    )
+    return proc.stdout.strip()
+
+
+@pytest.fixture
+def real_workspace(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> TicketWorkspace:
+    """Use a local bare origin and ticket worktree; never touch the checkout ledger."""
+    bare = tmp_path / "origin.git"
+    bare.mkdir()
+    _git(bare, "init", "--bare", "--quiet", "-b", "main")
+    main_repo = tmp_path / "main"
+    main_repo.mkdir()
+    _git(main_repo, "init", "--quiet", "-b", "main")
+    _git(main_repo, "config", "user.name", "DarkFac Test")
+    _git(main_repo, "config", "user.email", "test@darkfac.internal")
+    _git(main_repo, "config", "commit.gpgsign", "false")
+    store = DemandsStore(main_repo / ".factory" / "demands" / "demands.json")
+    store.save_ticket(_TICKET.model_copy(deep=True))
+    _git(main_repo, "add", "-A")
+    _git(main_repo, "commit", "--quiet", "-m", "seed")
+    _git(main_repo, "remote", "add", "origin", str(bare))
+    _git(main_repo, "push", "--quiet", "-u", "origin", "main")
+    path = tmp_path / "ticket"
+    _git(main_repo, "worktree", "add", "--quiet", "-b", "ticket/usr-99", str(path), "main")
+    workspace = TicketWorkspace(
+        ticket_id=_TICKET.id, path=path, branch="ticket/usr-99", main_root=main_repo,
+        base_ref="origin/main", base_sha=_git(main_repo, "rev-parse", "HEAD"),
+    )
+    monkeypatch.setattr(run_ticket, "PROJECT_ROOT", main_repo)
+    monkeypatch.setattr(run_ticket, "DemandsStore", DemandsStore)
+    monkeypatch.setattr(run_ticket, "inspect_quotas", lambda: _quotas(codex=64.0))
+    monkeypatch.setattr(run_ticket, "_prepare_workspace", lambda args, ticket: workspace)
+    return workspace
+
+
+@pytest.mark.parametrize("ledger_only", [False, True])
+def test_ok_agent_without_implementation_is_rejected_before_delivery(
+    real_workspace: TicketWorkspace, ledger_only: bool, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """An ok agent cannot complete a ticket with no code, even if it edits the ledger."""
+    def fake_agent(req: AgentRequest) -> AgentResult:
+        if ledger_only:
+            store = DemandsStore(req.cwd / ".factory" / "demands" / "demands.json")
+            ticket = store.get_ticket(_TICKET.id)
+            assert ticket is not None
+            ticket.problem_statement = "ledger-only edit"
+            store.save_ticket(ticket)
+        return AgentResult(
+            ok=True, text="sk-ant-api03-SECRETSECRETSECRET nao implementei", harness=req.harness,
+            duration_s=1.0,
+        )
+
+    monkeypatch.setattr(run_ticket, "run_agent", fake_agent)
+    delivery = MagicMock(side_effect=AssertionError("delivery must not run"))
+    monkeypatch.setattr(GitAutonomyManager, "complete_ticket", delivery)
+    assert main(["USR-99", "--harness", "codex", "--skip-validation", "--json"]) == 4
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+    assert payload["ok"] is False and payload["cause"] == "agent_no_changes"
+    assert "sem alterar nenhum arquivo de implementacao" in captured.err
+    assert "[REDACTED]" in captured.err and "SECRETSECRETSECRET" not in captured.err
+    assert not real_workspace.path.exists()
+    assert DemandsStore(real_workspace.main_root / ".factory" / "demands" / "demands.json").get_ticket(_TICKET.id).status == DeliveryStatus.PLANNED
+    delivery.assert_not_called()
+
+
+def test_ok_agent_with_implementation_reaches_normal_completion(
+    real_workspace: TicketWorkspace, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A real implementation is committed and the ticket can be completed."""
+    def fake_agent(req: AgentRequest) -> AgentResult:
+        assert req.prompt.startswith("CONTEXTO DE EXECUCAO HEADLESS")
+        assert "codex (headroom 64.0%)" in req.prompt
+        (req.cwd / "feature.py").write_text("value = 1\n", encoding="utf-8")
+        return AgentResult(
+            ok=True, text="Implemented feature.py sk-ant-api03-SECRETSECRETSECRET",
+            harness=req.harness, duration_s=1.0,
+        )
+
+    monkeypatch.setattr(run_ticket, "run_agent", fake_agent)
+    assert main(["USR-99", "--harness", "codex", "--skip-validation", "--no-push", "--json"]) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["ok"] is True and payload["agent_summary"] == "Implemented feature.py [REDACTED]"
+    assert (real_workspace.path / "feature.py").is_file()
+    assert DemandsStore(real_workspace.path / ".factory" / "demands" / "demands.json").get_ticket(_TICKET.id).status == DeliveryStatus.COMPLETED
