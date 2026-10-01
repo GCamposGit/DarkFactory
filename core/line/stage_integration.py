@@ -26,7 +26,16 @@ Flow (`IntegrationStageHandler.handle`), per
 4. Poll CI (`gh pr checks --json`); pending checks return `retry` with a
    `not_before` hint rather than blocking the stage for 30 minutes.
 5. A red check downloads the failing job's log and returns `retry` (for the
-   `development` stage) with that log attached.
+   `development` stage) with that log attached -- unless the very same check
+   is already red on the base branch (`base_red`, USR-86): then no change the
+   agent makes can fix it, so the stage returns
+   `retry("base_red not_before=<now + 60 min>")` without touching the agent
+   or its call budget, at most `ci_checks.BASE_RED_MAX_RETRIES` times (the
+   cap is counted per run, see `base_red_attempts`); after that it parks the
+   run in `waiting_human` with a `HumanRequest(kind="infra")` and, only for
+   the `darkfac` project, best-effort opens the defect ticket for the red
+   base (`core.git.autonomy.run_check_main`). Each wait re-runs the stage from
+   the top, so a fix landed on the base is rebased into the PR by itself.
 6. Merge (`gh pr merge --squash --delete-branch`); falls back to `--auto`
    when a required review blocks it, and to `waiting_human` (repo-setting
    guide) when even that is blocked.
@@ -57,6 +66,7 @@ from typing import Any, Callable, Iterable, Optional, Sequence
 from core.git import ci_checks
 from core.line import workspace as ws_mod
 from core.line.agent_cli import AgentRequest, AgentResult, run_agent
+from core.line.human import HumanRequest, notify_human_request
 from core.line.routing import RoutingConfig, pick, record_result
 from core.line.workspace import RunWorkspace, WorkspaceError
 from core.projects.models import ProjectDescriptor
@@ -82,6 +92,16 @@ _STRIP_JOB_SUFFIX = "integration:strip_context"
 _GITHUB_REPO_PATTERN = re.compile(
     r"github\.com[:/]+([^/]+)/([^/.\s]+?)(?:\.git)?/?$", re.IGNORECASE
 )
+
+# `base_red` escalation (USR-86). The factory's own project: the only one whose red base is a defect
+# of this repository's ticket queue (a client's red CI is the client's to fix).
+_FACTORY_PROJECT_ID = "darkfac"
+# The `check-main` probe (exit 0 only when the base CI is green) a resume loop can run for `darkfac`.
+_FACTORY_BASE_PROBE = "python -m core.git.autonomy check-main --branch {branch}"
+
+BaseRedAttempts = Callable[[str], int]
+HumanNotifier = Callable[[HumanRequest], Any]
+DefectTicketFunc = Callable[[ci_checks.GhRunner, str], Optional[dict[str, Any]]]
 
 
 class IntegrationError(RuntimeError):
@@ -123,6 +143,26 @@ def owner_repo(repo_url: Optional[str]) -> str:
     if not match:
         return "<owner>/<repo>"
     return f"{match.group(1)}/{match.group(2)}"
+
+
+def open_base_red_ticket(runner: ci_checks.GhRunner, base_branch: str) -> Optional[dict[str, Any]]:
+    """Best-effort: file ONE defect ticket for the red `base_branch` of the factory repository.
+
+    Reuses `core.git.autonomy.run_check_main` (PR #81): it probes the last conclusive `DarkFac CI`
+    run of the branch, files a `planned` ticket through `run_ticket.py --create --queue-only`
+    (idempotent per SHA) and returns the `check-main` payload (`payload["ticket"]["id"]`). Never
+    raises: a failed probe or ticket only costs the ticket, never the stage outcome.
+    """
+    try:
+        from core.git import autonomy
+
+        _code, payload = autonomy.run_check_main(
+            runner=runner, branch=base_branch, open_ticket=True, notify=False
+        )
+    except Exception as exc:
+        logger.warning("Could not open the defect ticket for the red %s: %s", base_branch, _sanitize(str(exc)))
+        return None
+    return payload
 
 
 @dataclass
@@ -198,7 +238,18 @@ class IntegrationStageHandler:
         gh_timeout_s: int = _GH_DEFAULT_TIMEOUT_S,
         validate_timeout_s: int = _VALIDATE_DEFAULT_TIMEOUT_S,
         sleep: Callable[[float], None] = time.sleep,
+        base_red_attempts: Optional[BaseRedAttempts] = None,
+        base_red_wait_minutes: int = ci_checks.BASE_RED_RETRY_MINUTES,
+        base_red_max_retries: int = ci_checks.BASE_RED_MAX_RETRIES,
+        human_notifier: Optional[HumanNotifier] = None,
+        defect_ticket_func: Optional[DefectTicketFunc] = None,
+        clock: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
     ) -> None:
+        """`base_red_attempts(run_id)` counts the `base_red` waits this run already spent (the store
+        backed counter lives in `core.line.bindings`); without it the job's own iteration is the
+        (over-)estimate, which can only shorten the wait, never extend it. `human_notifier` and
+        `defect_ticket_func` default to the owner bot and `open_base_red_ticket`; tests inject fakes.
+        """
         self.project = project
         self.gh_executable = gh_executable
         self.host_caps = list(host_caps)
@@ -210,6 +261,12 @@ class IntegrationStageHandler:
         self.gh_timeout_s = gh_timeout_s
         self.validate_timeout_s = validate_timeout_s
         self.sleep = sleep
+        self.base_red_attempts = base_red_attempts
+        self.base_red_wait_minutes = base_red_wait_minutes
+        self.base_red_max_retries = base_red_max_retries
+        self.human_notifier = human_notifier
+        self.defect_ticket_func = defect_ticket_func
+        self.clock = clock
 
     # ----------------------------------------------------------------
     # git helpers (reuse workspace's auth/sanitization plumbing)
@@ -608,13 +665,18 @@ class IntegrationStageHandler:
     def _fetch_failed_log(self, ws: RunWorkspace, failing_check: dict[str, Any]) -> str:
         return ci_checks.fetch_failed_log(self._ci_runner(ws, timeout=120), ws.path, failing_check)
 
-    def _evaluate_checks(self, ws: RunWorkspace, pr_number: int) -> Optional[StageResult]:
+    def _evaluate_checks(
+        self, ws: RunWorkspace, pr_number: int, context: Optional[StageContext] = None
+    ) -> Optional[StageResult]:
         """Return a terminal/retry `StageResult` unless every check is green.
 
         `None` means "no checks configured, or all green" — proceed to merge,
         matching "se o repo nao tiver checks, a validacao limpa do HF-27-05 e
         o gate". The classification itself lives in `core.git.ci_checks`, shared
         with the autonomous merge gate of `core.git.autonomy` (USR-85).
+
+        A red check that is ALSO red on the base branch is not the agent's fault
+        (`base_red`, USR-86): see `_base_red_outcome`.
         """
         snapshot = ci_checks.query_checks(pr_number, ws.path, self._ci_runner(ws))
         if snapshot.state == "error":
@@ -624,6 +686,11 @@ class IntegrationStageHandler:
             )
 
         if snapshot.state == "failed":
+            default_branch = self.project.default_branch or "main"
+            if ci_checks.classify_base_red(
+                self._ci_runner(ws), ws.path, default_branch, snapshot.failing
+            ):
+                return self._base_red_outcome(ws, pr_number, snapshot, default_branch, context)
             failing = snapshot.failing[0]
             log = self._fetch_failed_log(ws, failing)
             return StageResult(
@@ -640,6 +707,133 @@ class IntegrationStageHandler:
             return StageResult(outcome="retry", cause_code=f"ci_pending:not_before={not_before}")
 
         return None
+
+    # ----------------------------------------------------------------
+    # base_red: every red check is already red on the base branch (USR-86)
+    # ----------------------------------------------------------------
+
+    def _base_red_waits_spent(self, ws: RunWorkspace, context: Optional[StageContext]) -> int:
+        """`base_red` waits this run already returned (store counter, else the job iteration)."""
+        if self.base_red_attempts is not None:
+            try:
+                return max(int(self.base_red_attempts(ws.run_id)), 0)
+            except Exception as exc:  # a counter failure must not turn into an endless wait
+                logger.warning("base_red attempt counter failed for %s: %s", ws.run_id, _sanitize(str(exc)))
+        # Every earlier retry of this stage bumped the iteration, so it never undercounts.
+        return context.claim.job_key.iteration if context is not None else 0
+
+    def _base_red_outcome(
+        self,
+        ws: RunWorkspace,
+        pr_number: int,
+        snapshot: ci_checks.CheckSnapshot,
+        base_branch: str,
+        context: Optional[StageContext],
+    ) -> StageResult:
+        """Wait for a red base instead of re-iterating development (no agent call is made here).
+
+        `retry("base_red not_before=<now + base_red_wait_minutes>")` while the run still has waits
+        left; once they are spent, `waiting_human(infra)`.
+        """
+        labels = ", ".join(ci_checks.check_label(c) for c in snapshot.failing)
+        spent = self._base_red_waits_spent(ws, context)
+        if spent < self.base_red_max_retries:
+            not_before = self.clock() + timedelta(minutes=self.base_red_wait_minutes)
+            logger.warning(
+                "PR #%s is red only where %s is already red (%s): waiting %d min (wait %d/%d) "
+                "instead of re-iterating development",
+                pr_number, base_branch, labels, self.base_red_wait_minutes,
+                spent + 1, self.base_red_max_retries,
+            )
+            return StageResult(outcome="retry", cause_code=ci_checks.base_red_cause_code(not_before))
+
+        logger.warning(
+            "PR #%s: %s is still red after %d waits (%s); escalating to the owner",
+            pr_number, base_branch, spent, labels,
+        )
+        ticket_id = self._open_base_red_ticket(ws, base_branch)
+        probe = (
+            _FACTORY_BASE_PROBE.format(branch=base_branch)
+            if self.project.id == _FACTORY_PROJECT_ID
+            else None
+        )
+        request = HumanRequest(
+            kind="infra",
+            run_id=ws.run_id,
+            blocking_stage=STAGE,
+            guide_md=self._base_red_guide(pr_number, snapshot.failing, base_branch, ticket_id),
+            probe_cmd=probe,
+        )
+        self._notify_human(request)
+        return StageResult(outcome="waiting_human", cause_code="base_red_exhausted")
+
+    def _open_base_red_ticket(self, ws: RunWorkspace, base_branch: str) -> Optional[str]:
+        """`darkfac` only: best-effort defect ticket for its own red base. Never raises."""
+        if self.project.id != _FACTORY_PROJECT_ID:
+            return None
+        opener = self.defect_ticket_func or open_base_red_ticket
+        try:
+            payload = opener(self._ci_runner(ws), base_branch)
+        except Exception as exc:
+            logger.warning("Defect ticket for the red %s not opened: %s", base_branch, _sanitize(str(exc)))
+            return None
+        ticket = (payload or {}).get("ticket")
+        ticket_id = ticket.get("id") if isinstance(ticket, dict) else None
+        return str(ticket_id) if ticket_id else None
+
+    def _notify_human(self, request: HumanRequest) -> None:
+        """Owner message for the request. Not persisted on the branch: the run context is already
+        stripped from it (step 2), and writing it back would leak into the merge. Never raises."""
+        notifier = self.human_notifier or notify_human_request
+        try:
+            notifier(request)
+        except Exception as exc:
+            logger.warning("Owner notification for run %s failed: %s", request.run_id, _sanitize(str(exc)))
+
+    def _base_red_guide(
+        self,
+        pr_number: int,
+        failing: Sequence[dict[str, Any]],
+        base_branch: str,
+        ticket_id: Optional[str],
+    ) -> str:
+        repo = owner_repo(self.project.repo_url)
+        waited_h = self.base_red_wait_minutes * self.base_red_max_retries / 60
+        checks = "\n".join(
+            f"   - {ci_checks.check_label(c)}: {c.get('link') or '(sem link)'}" for c in failing
+        )
+        steps = [
+            f"Abra https://github.com/{repo}/actions?query=branch%3A{base_branch}, logado com "
+            "acesso ao repositorio.",
+            "Clique no run mais recente com a marca vermelha e abra o job vermelho para ler o log "
+            "e achar a causa.",
+            "Se a falha for passageira (runner indisponivel, limite do GitHub Actions), clique em "
+            "'Re-run all jobs' no canto superior direito do run.",
+            f"Se for defeito de codigo ou de configuracao, corrija na branch '{base_branch}' (ou "
+            f"abra um PR de correcao); o PR #{pr_number} da fabrica fica aberto esperando.",
+        ]
+        if self.project.id == _FACTORY_PROJECT_ID:
+            steps.append(
+                f"A fabrica abriu o ticket {ticket_id} na fila de desenvolvimento para corrigir a base."
+                if ticket_id
+                else "A fabrica nao conseguiu abrir o ticket de defeito da base sozinha; registre-o "
+                "na fila de desenvolvimento com o link do run vermelho."
+            )
+        steps.append(
+            f"Nao precisa fazer mais nada depois que o run da branch '{base_branch}' ficar verde: "
+            f"a fabrica retoma sozinha este run, atualiza o PR #{pr_number} com a base corrigida "
+            "e conclui o merge."
+        )
+        numbered = "\n".join(f"{i}. {text}" for i, text in enumerate(steps, start=1))
+        return (
+            f"kind=infra: o CI da branch base '{base_branch}' ({repo}) ja estava vermelho nos mesmos "
+            f"checks que reprovaram o PR #{pr_number}. Nenhuma mudanca do agente resolve isso, entao a "
+            f"fabrica parou de re-iterar o desenvolvimento e esperou {waited_h:g}h "
+            f"({self.base_red_max_retries} verificacoes de {self.base_red_wait_minutes} min) a base "
+            "voltar a ficar verde, sem sucesso.\n"
+            f"Checks vermelhos (link do check no PR):\n{checks}\n"
+            f"Passo a passo (GitHub, interface atual):\n{numbered}"
+        )
 
     # ----------------------------------------------------------------
     # Step 6/7: merge, human fallback, ancestry confirmation
@@ -757,7 +951,7 @@ class IntegrationStageHandler:
         if not isinstance(pr_number, int):
             return StageResult(outcome="failed", cause_code="gh_pr_missing_number")
 
-        ci_result = self._evaluate_checks(ws, pr_number)
+        ci_result = self._evaluate_checks(ws, pr_number, context)
         if ci_result is not None:
             return ci_result
 
@@ -780,4 +974,5 @@ __all__ = [
     "GhResult",
     "run_gh",
     "owner_repo",
+    "open_base_red_ticket",
 ]

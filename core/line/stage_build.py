@@ -43,6 +43,7 @@ from pydantic import BaseModel, Field
 
 from core.line import agent_retry, diagnostics, workspace
 from core.line.agent_cli import AgentRequest, AgentResult, run_agent
+from core.line.route_wait import RouteWaiter
 from core.line.routing import RoutingConfig, load_routing_config, pick, record_result
 from core.line.workspace import RunWorkspace, WorkspaceError
 from core.projects.models import ProjectCommands, ProjectDescriptor
@@ -362,6 +363,7 @@ class DevelopmentStage:
         routing_config: Optional[RoutingConfig] = None,
         agent_timeout_s: int = 1800,
         command_timeout_s: int = 1800,
+        route_waiter: Optional[RouteWaiter] = None,
     ) -> None:
         self.run_agent_func = run_agent_func
         self.pick_func = pick_func
@@ -369,6 +371,7 @@ class DevelopmentStage:
         self.routing_config = routing_config or load_routing_config()
         self.agent_timeout_s = agent_timeout_s
         self.command_timeout_s = command_timeout_s
+        self.route_waiter = route_waiter or RouteWaiter()
 
     # -- prompt building ---------------------------------------------------
 
@@ -439,8 +442,11 @@ class DevelopmentStage:
             route = self._pick_route(excluded)
             if route is None:
                 self._persist_diagnostics(ws, run_id, ticket.id)
-                return StageResult(
-                    outcome="waiting_human", cause_code="no_route_available", output_refs=[]
+                # No route is a matter of time (cooldown / quota reset), not of the owner (USR-87):
+                # wait for it with `retry` + `not_before`; `waiting_human` only past the run budget.
+                return self.route_waiter.no_route_result(
+                    "development", project, run_id,
+                    host_caps=self.host_caps, config=self.routing_config, mode="write",
                 )
             harness, model = route
 

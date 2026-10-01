@@ -363,6 +363,41 @@ def _split_exclude(
     return harnesses, pairs
 
 
+def _routable_candidates(
+    stage: str,
+    stage_cfg: StageRoute,
+    cfg: RoutingConfig,
+    caps: set[str],
+    required_mode: str,
+    excluded_harnesses: set[str],
+    excluded_pairs: set[tuple[str, Optional[str]]],
+    implementing_harness: Optional[str],
+) -> list[tuple[str, Optional[str]]]:
+    """Cascade candidates that could serve `stage` on this host, before cooldown/quota (pick() steps 0-1).
+
+    Shared by `pick()` and `earliest_route_available_at()` so a candidate is "eligible" in exactly the
+    same sense in both: not excluded, present in `host_caps`, declaring `required_mode`, not a
+    forbidden model.
+    """
+    forbidden_models = set(m.lower().strip() for m in cfg.forbidden_autonomous_models)
+    candidates: list[tuple[str, Optional[str]]] = []
+    for harness, model in _resolve_cascade(stage_cfg, implementing_harness):
+        if harness in excluded_harnesses or (harness, model) in excluded_pairs:
+            continue
+        if f"harness:{harness}" not in caps:
+            continue
+        if not supports(harness, required_mode):
+            logger.info(
+                "Skipping harness %s for stage %s (does not declare '%s' mode)", harness, stage, required_mode
+            )
+            continue
+        if model and model.lower().strip() in forbidden_models:
+            logger.info("Skipping model %s for harness %s (forbidden autonomous model)", model, harness)
+            continue
+        candidates.append((harness, model))
+    return candidates
+
+
 def pick(
     stage: str,
     host_caps: Iterable[str],
@@ -409,27 +444,14 @@ def pick(
     critical_threshold = cfg.pressure_thresholds.get("critical", _DEFAULT_PRESSURE_THRESHOLDS["critical"])
     forbidden_models = set(m.lower().strip() for m in cfg.forbidden_autonomous_models)
 
-    cascade = _resolve_cascade(stage_cfg, implementing_harness)
-
     # Candidate evaluation with fail-closed semantics
     # (harness, model, in_cooldown, is_critical_or_unknown, remaining_headroom)
     evaluated: list[tuple[str, Optional[str], bool, bool, float]] = []
     eligible: list[tuple[str, Optional[str], float]] = []
 
-    for harness, model in cascade:
-        if harness in excluded_harnesses or (harness, model) in excluded_pairs:
-            continue
-        if f"harness:{harness}" not in caps:
-            continue
-        if not supports(harness, required_mode):
-            logger.info(
-                "Skipping harness %s for stage %s (does not declare '%s' mode)", harness, stage, required_mode
-            )
-            continue
-        if model and model.lower().strip() in forbidden_models:
-            logger.info("Skipping model %s for harness %s (forbidden autonomous model)", model, harness)
-            continue
-
+    for harness, model in _routable_candidates(
+        stage, stage_cfg, cfg, caps, required_mode, excluded_harnesses, excluded_pairs, implementing_harness
+    ):
         cooling = _in_cooldown(harness, cooldowns)
         provider_id = _HARNESS_TO_PROVIDER.get(harness, harness)
         remaining = None if cooling else lookup(provider_id)
@@ -514,3 +536,111 @@ def pick(
         logger.warning("OpenRouter fallback skipped: account disconnected or balance non-positive.")
 
     return None
+
+
+# --------------------------------------------------------------------------
+# When can a route come back? (USR-87)
+# --------------------------------------------------------------------------
+
+# Never ask a job to wake up sooner than this: a cooldown that ends "in 5 seconds" would otherwise
+# turn the wait into a busy loop of claims.
+MIN_ROUTE_WAIT_SECONDS = 60.0
+
+ResetLookup = Callable[[str], Optional[datetime]]
+
+
+def _aware_utc(value: datetime) -> datetime:
+    return value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value.astimezone(timezone.utc)
+
+
+def _default_quota_reset(provider_id: str, critical_threshold: float = 15.0) -> Optional[datetime]:
+    """When `provider_id` is expected back above the critical quota threshold, per `core.usage`.
+
+    The account's snapshot lists quota windows with an optional `resets_at`; the account is usable
+    again once EVERY window at or under the threshold has reset, so this is the latest of those
+    resets. `None` when the account is not exhausted, a limiting window has no known reset, or the
+    snapshot is unavailable (the caller then falls back to the default wait).
+    """
+    try:
+        from core.usage.adapters import build_default_adapters
+
+        provider_dir = REPO_ROOT / ".factory" / "usage" / "providers"
+        for adapter in build_default_adapters(provider_dir):
+            if adapter.spec.provider_id != provider_id:
+                continue
+            exhausted = [
+                window
+                for window in adapter.inspect().windows
+                if window.remaining_percent is not None and window.remaining_percent <= critical_threshold
+            ]
+            resets = [_parse_until(window.resets_at) for window in exhausted]
+            if not resets or any(reset is None for reset in resets):
+                return None
+            return max(reset for reset in resets if reset is not None)
+    except Exception as exc:  # pragma: no cover - defensive, a snapshot problem only costs precision
+        logger.debug("Quota reset lookup failed for provider %s: %s", provider_id, exc)
+    return None
+
+
+def earliest_route_available_at(
+    stage: str,
+    host_caps: Iterable[str],
+    config: Optional[RoutingConfig] = None,
+    *,
+    now: Optional[datetime] = None,
+    mode: Optional[str] = None,
+    implementing_harness: Optional[str] = None,
+    exclude: Iterable[Any] = (),
+    cooldown_path: Optional[Path] = None,
+    reset_lookup: Optional[ResetLookup] = None,
+) -> datetime:
+    """When to look for a route again after `pick(stage, ...)` found none (timezone-aware UTC).
+
+    The earliest of
+      * the end of the cooldown of each cascade candidate that is eligible for this host/mode (the
+        same filter `pick()` applies before cooldown/quota),
+      * the next known quota reset of each eligible candidate that is not cooling but sits at or
+        under the critical threshold (`reset_lookup(provider_id)`, default: the `core.usage`
+        snapshot's `resets_at`),
+      * `now + cooldown_default_minutes` (60 by default), which is therefore also the answer when
+        nothing is known.
+
+    Times in the past are ignored and the result is never sooner than `MIN_ROUTE_WAIT_SECONDS`
+    from `now`. Callers turn it into `retry` with `not_before=<iso>` instead of parking the run on a
+    human: no route is a condition of time, not a decision of the owner.
+    """
+    cfg = config or load_routing_config()
+    current = _aware_utc(now or datetime.now(timezone.utc))
+    fallback = current + timedelta(minutes=max(cfg.cooldown_default_minutes, 0))
+    floor = current + timedelta(seconds=MIN_ROUTE_WAIT_SECONDS)
+
+    stage_cfg = cfg.stages.get(stage)
+    if stage_cfg is None:
+        return max(fallback, floor)
+
+    excluded_harnesses, excluded_pairs = _split_exclude(exclude)
+    candidates = _routable_candidates(
+        stage, stage_cfg, cfg, set(host_caps), mode or stage_mode(stage),
+        excluded_harnesses, excluded_pairs, implementing_harness,
+    )
+    cooldowns = _load_cooldowns(cooldown_path or default_cooldown_path())
+    critical = cfg.pressure_thresholds.get("critical", _DEFAULT_PRESSURE_THRESHOLDS["critical"])
+    lookup = reset_lookup or (lambda provider_id: _default_quota_reset(provider_id, critical))
+
+    times: list[datetime] = [fallback]
+    for harness, _model in candidates:
+        entry = cooldowns.get(harness)
+        until = _parse_until(entry.get("until")) if isinstance(entry, dict) else None
+        if until is not None and until > current:
+            times.append(until)
+            continue
+        try:
+            reset = lookup(_HARNESS_TO_PROVIDER.get(harness, harness))
+        except Exception as exc:  # a broken probe must not stop the wait from being scheduled
+            logger.debug("Quota reset lookup failed for harness %s: %s", harness, exc)
+            reset = None
+        if reset is not None:
+            reset = _aware_utc(reset)
+            if reset > current:
+                times.append(reset)
+    return max(min(times), floor)

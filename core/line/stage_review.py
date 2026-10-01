@@ -32,6 +32,7 @@ from pydantic import BaseModel, Field, ValidationError
 
 from core.line import workspace
 from core.line.agent_cli import AgentRequest, AgentResult, run_agent
+from core.line.route_wait import RouteWaiter
 from core.line.routing import RoutingConfig, load_routing_config, pick, record_result
 from core.line.stage_build import fill_template
 from core.line.workspace import RunWorkspace
@@ -244,12 +245,14 @@ class ReviewStage:
         host_caps: list[str] | tuple[str, ...] = _DEFAULT_HOST_CAPS,
         routing_config: Optional[RoutingConfig] = None,
         agent_timeout_s: int = 1800,
+        route_waiter: Optional[RouteWaiter] = None,
     ) -> None:
         self.run_agent_func = run_agent_func
         self.pick_func = pick_func
         self.host_caps = list(host_caps)
         self.routing_config = routing_config or load_routing_config()
         self.agent_timeout_s = agent_timeout_s
+        self.route_waiter = route_waiter or RouteWaiter()
 
     def run(self, project: ProjectDescriptor, run_id: str) -> StageResult:
         ws = workspace.checkout(project, run_id)
@@ -271,7 +274,12 @@ class ReviewStage:
             config=self.routing_config,
         )
         if route is None:
-            return StageResult(outcome="waiting_human", cause_code="no_route_available", output_refs=[])
+            # No route is a matter of time, not of the owner (USR-87): retry at the earliest reset.
+            return self.route_waiter.no_route_result(
+                "review", project, run_id,
+                host_caps=self.host_caps, config=self.routing_config, mode="read",
+                implementing_harness=implementing_harness,
+            )
         harness, model = route
 
         diff_text = _get_diff(ws, project.default_branch or "main")

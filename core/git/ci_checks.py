@@ -17,6 +17,8 @@ network. It provides
   check is already red on the last conclusive run of the base branch);
 * :func:`check_main`, the read-only probe of the base branch CI that backs
   ``python -m core.git.autonomy check-main``;
+* :func:`classify_base_red` and the ``base_red`` wait policy (USR-86): what a caller does when
+  the only red checks are the ones already red on the base branch;
 * :func:`is_ledger_only`, the predicate behind the ledger-only exception.
 """
 
@@ -28,6 +30,7 @@ import os
 import re
 import time
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Iterable, Literal, Optional, Protocol, Sequence
 
@@ -306,6 +309,54 @@ def base_branch_is_red(
     return True
 
 
+def classify_base_red(
+    runner: GhRunner, cwd: Path, base_branch: str, failing: Sequence[dict[str, Any]]
+) -> bool:
+    """:func:`base_branch_is_red` that never raises and never waits for CI.
+
+    Every ``gh`` failure (timeout, missing binary, malformed JSON) means "could not prove the base is
+    red", so it returns False: the caller then treats the red check as the PR's own fault, which is
+    the conservative reading (the agent gets the log and iterates).
+    """
+    try:
+        return base_branch_is_red(runner, cwd, base_branch, failing)
+    except Exception as exc:
+        logger.warning("Could not compare with %s: %s", base_branch, sanitize(str(exc)))
+        return False
+
+
+# ----------------------------------------------------------------------
+# `base_red` wait policy (USR-86)
+# ----------------------------------------------------------------------
+#
+# A PR whose only red checks are already red on the base branch is not the agent's fault: no change
+# the agent makes can fix it, so iterating the development stage would only burn agent calls. The
+# production line therefore returns `retry` with ``base_red not_before=<iso>`` (an hourly wait, the
+# same ``not_before`` convention as ``ci_pending``) up to BASE_RED_MAX_RETRIES times, and escalates
+# to `waiting_human(kind=infra)` afterwards. The wait owns its cap (counted by the integration
+# stage), so ``core.workflow.successors`` exempts it from the run wall-clock bound that rules
+# ``ci_pending``: six hourly waits would otherwise be cut short by the 6 h run budget.
+
+BASE_RED_CAUSE = "base_red"
+BASE_RED_RETRY_MINUTES = 60
+BASE_RED_MAX_RETRIES = 6
+
+_BASE_RED_CAUSE_PATTERN = re.compile(rf"^{BASE_RED_CAUSE}(?:\s|$)")
+
+
+def base_red_cause_code(not_before: datetime) -> str:
+    """``base_red not_before=<iso>`` (45 characters, well under the 64 persisted)."""
+    if not_before.tzinfo is None:
+        not_before = not_before.replace(tzinfo=timezone.utc)
+    stamp = not_before.astimezone(timezone.utc).replace(microsecond=0).isoformat()
+    return f"{BASE_RED_CAUSE} not_before={stamp}"
+
+
+def is_base_red_cause(cause_code: Optional[str]) -> bool:
+    """True for a `retry` cause code produced by :func:`base_red_cause_code`."""
+    return bool(cause_code) and _BASE_RED_CAUSE_PATTERN.match(cause_code or "") is not None
+
+
 # ----------------------------------------------------------------------
 # The gate
 # ----------------------------------------------------------------------
@@ -415,11 +466,7 @@ def ensure_green(
         if snapshot.state == "failed":
             labels = tuple(check_label(c) for c in snapshot.failing)
             log_tail = _failed_log_tail(runner, cwd, snapshot.failing)
-            try:
-                base_red = base_branch_is_red(runner, cwd, base_branch, snapshot.failing)
-            except Exception as exc:
-                logger.warning("Could not compare with %s: %s", base_branch, sanitize(str(exc)))
-                base_red = False
+            base_red = classify_base_red(runner, cwd, base_branch, snapshot.failing)
             logger.warning(
                 "CI failed on PR #%s: %s (base_red=%s)", pr_number, ", ".join(labels), base_red
             )

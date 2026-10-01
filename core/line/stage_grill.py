@@ -57,6 +57,7 @@ from pydantic import BaseModel, Field, ValidationError
 from core.line import workspace
 from core.line import diagnostics
 from core.line.agent_cli import AgentRequest, AgentResult, run_agent
+from core.line.route_wait import RouteWaiter
 from core.line.routing import RoutingConfig, pick, record_result
 from core.projects.models import ProjectDescriptor
 from core.workflow.control_contracts import StageResult
@@ -248,14 +249,25 @@ AUTH_RETRY_BACKOFF_MINUTES = 10
 
 
 def retry_for_agent_failure(
-    result: AgentResult, fallback_cause: str, *, now: Optional[datetime] = None
+    result: AgentResult,
+    fallback_cause: str,
+    *,
+    now: Optional[datetime] = None,
+    on_no_route: Optional[Callable[[], StageResult]] = None,
 ) -> StageResult:
     """`retry` StageResult for a failed agent call, with a short cause code.
 
     `<error_kind>` normally; for auth-type failures
     `<error_kind> not_before=<iso>` (<= 64 chars, the persisted column width).
+
+    `on_no_route` (USR-87) answers the "`pick()` found nothing routable" result of `run_read_agent`
+    (`no_authenticated_harness`, `harness="none"`): the stage hands over its `RouteWaiter`, which
+    waits for the earliest cooldown/quota reset (`no_route_available not_before=<iso>`) and only
+    parks the run past its wall-clock budget. Without it the legacy 10-minute auth wait applies.
     """
     kind = result.error_kind or fallback_cause
+    if on_no_route is not None and result.error_kind == "no_authenticated_harness":
+        return on_no_route()
     if kind in _WAIT_FOR_AUTH_KINDS:
         when = (now or datetime.now(timezone.utc)) + timedelta(minutes=AUTH_RETRY_BACKOFF_MINUTES)
         return StageResult(
@@ -575,8 +587,13 @@ def run_grill(
     auto_policy: bool = False,
     answers: Optional[dict[str, str]] = None,
     adopt_from_runs: Iterable[str] = (),
+    route_waiter: Optional[RouteWaiter] = None,
 ) -> StageResult:
     """Run (or reconcile) the single-round grill for `run_id`.
+
+    `route_waiter` decides what "no agent route right now" means (USR-87): `retry` until the
+    earliest cooldown/quota reset while the run is inside its wall-clock budget, `waiting_human`
+    (infra) only after it. Defaults to a waiter that cannot see the run's start (it keeps waiting).
 
     `adopt_from_runs` (newest first) are earlier attempts of the same ticket (see
     `core.line.owner_intake.previous_attempt_run_ids`): when one of them has a fully resolved grill
@@ -632,7 +649,13 @@ def run_grill(
     )
     if not result.ok:
         _record_failed_agent(ws, run_id, STAGE, result)
-        return retry_for_agent_failure(result, "grill_agent_failed", now=current_time)
+        waiter = route_waiter or RouteWaiter()
+        return retry_for_agent_failure(
+            result, "grill_agent_failed", now=current_time,
+            on_no_route=lambda: waiter.no_route_result(
+                STAGE, project, run_id, host_caps=host_caps, config=routing_config
+            ),
+        )
 
     try:
         plan = parse_grill_plan(result.text)
