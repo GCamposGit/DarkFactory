@@ -64,6 +64,7 @@ from pathlib import Path
 from typing import Any, Callable, Iterable, Optional, Sequence
 
 from core.git import ci_checks
+from core.git.safe_show import safe_show
 from core.line import workspace as ws_mod
 from core.line.agent_cli import AgentRequest, AgentResult, run_agent
 from core.line.human import HumanRequest, notify_human_request
@@ -512,7 +513,10 @@ class IntegrationStageHandler:
         if listing.returncode != 0 or not names:
             return None
         for name in names:
-            shown = self._git(["show", f"{strip_sha}^:{name}"], ws)
+            shown = safe_show(
+                f"{strip_sha}^", name, cwd=ws.path,
+                runner=lambda args, _directory: self._git(list(args), ws),
+            )
             if shown.returncode != 0:
                 continue
             target = dest / name[len(prefix):]

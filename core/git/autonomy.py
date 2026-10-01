@@ -30,6 +30,8 @@ if str(PROJECT_ROOT) not in sys.path:
 from core.demands.models import UserTicket
 from core.demands.store import DemandsStore
 from core.git import ticket_workspace
+from core.git.safe_show import safe_show
+from core.git.state_guard import DEFAULT_PROTECTED_STATE_PATHS, check_staged_state_files
 from core.git.ci_checks import (
     DEFAULT_MAIN_WORKFLOW,
     CiVerdict,
@@ -190,6 +192,7 @@ class GitAutonomyManager:
         now_fn: Optional[Callable[[], datetime]] = None,
         sweep_grace_s: float = ticket_workspace.ORPHAN_MIN_AGE_S,
         trash_retention_days: float = ticket_workspace.TRASH_RETENTION_DAYS,
+        protected_state_paths: Sequence[str] = DEFAULT_PROTECTED_STATE_PATHS,
     ) -> None:
         self.root = root
         # CI gate tuning (USR-85); None keeps the ci_checks defaults
@@ -206,6 +209,14 @@ class GitAutonomyManager:
         # may be a worktree that is being created right now.
         self.sweep_grace_s = sweep_grace_s
         self.trash_retention_days = trash_retention_days
+        self.protected_state_paths = tuple(protected_state_paths)
+
+    def _check_staged_state_files(self, cwd: Path) -> None:
+        check_staged_state_files(
+            cwd,
+            lambda args, directory: _run_git(args, cwd=directory),
+            self.protected_state_paths,
+        )
 
     def get_current_sha(self, cwd: Optional[Path] = None) -> str:
         """Return the current HEAD commit SHA."""
@@ -267,20 +278,26 @@ class GitAutonomyManager:
         # 1. Stage changes
         if paths:
             stage_args = ["add", "--"] + [str(p) for p in paths]
-            _run_git(stage_args, cwd=target_dir)
+            add = _run_git(stage_args, cwd=target_dir)
+            if add.returncode != 0:
+                raise RuntimeError(f"Git add failed: {add.stderr.strip()}")
         else:
             changed = self.changed_paths(target_dir)
             for start in range(0, len(changed), _ADD_CHUNK):
                 chunk = changed[start : start + _ADD_CHUNK]
                 add = _run_git(["--literal-pathspecs", "add", "-A", "--", *chunk], cwd=target_dir)
                 if add.returncode != 0:
-                    logger.warning("git add failed for %s: %s", chunk[:3], add.stderr.strip())
+                    raise RuntimeError(f"Git add failed for {chunk[:3]}: {add.stderr.strip()}")
 
         # 2. Check if anything is staged
         staged_check = _run_git(["diff", "--cached", "--quiet"], cwd=target_dir)
         if staged_check.returncode == 0:
             logger.info("No staged changes to commit for ticket %s.", ticket_id)
             return self.get_current_sha(cwd=target_dir)
+        if staged_check.returncode != 1:
+            raise RuntimeError(f"Cannot inspect staged changes: {staged_check.stderr.strip()}")
+
+        self._check_staged_state_files(target_dir)
 
         # 3. Format message
         clean_title = title.strip().replace("\n", " ")
@@ -981,7 +998,7 @@ def find_ticket_for_sha(short_sha: str, root: Path = PROJECT_ROOT) -> Optional[s
         return None
     _run_git(["fetch", "origin", "main"], cwd=root)
     sources: list[str] = []
-    shown = _run_git(["show", f"origin/main:{_LEDGER_RELATIVE}"], cwd=root)
+    shown = safe_show("origin/main", _LEDGER_RELATIVE, cwd=root, runner=lambda args, directory: _run_git(args, cwd=directory))
     if shown.returncode == 0:
         sources.append(shown.stdout)
     local = root / ".factory" / "demands" / "demands.json"

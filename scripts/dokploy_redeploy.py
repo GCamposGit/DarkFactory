@@ -53,6 +53,10 @@ from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 logger = logging.getLogger("dokploy_redeploy")
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from core.git.safe_show import safe_show
 
 DEFAULT_PROJECT = "darkfac-core"
 DEFAULT_ENVIRONMENT = "production"
@@ -531,11 +535,7 @@ def get_origin_main_compose(sha: str, repo_root: Path = REPO_ROOT) -> str:
     if not SHA_PATTERN.fullmatch(sha):
         raise DokployUsageError("Darkhub build requires a full origin/main SHA")
     try:
-        result = subprocess.run(
-            ["git", "show", f"{sha}:deploy/dokploy/docker-compose.hub.yml"],
-            cwd=repo_root, capture_output=True, text=True, timeout=10, check=False,
-            encoding="utf-8",
-        )
+        result = safe_show(sha, "deploy/dokploy/docker-compose.hub.yml", cwd=repo_root)
     except Exception:
         raise DokployUsageError("Cannot read Darkhub compose from origin/main") from None
     if result.returncode != 0 or not result.stdout:

@@ -44,6 +44,8 @@ from typing import Callable, Optional
 
 from pydantic import BaseModel
 
+from core.git.safe_show import safe_show
+from core.git.state_guard import check_staged_state_files
 from core.projects.models import ProjectDescriptor
 from core.projects.registry import normalize_repo_url
 
@@ -360,6 +362,14 @@ def commit(ws: RunWorkspace, message: str, job_key: str) -> str:
     diff_check = _run_git(["diff", "--cached", "--quiet"], cwd=ws.path, check=False)
     if diff_check.returncode == 0:
         return _rev_parse(ws.path, "HEAD")
+    if diff_check.returncode != 1:
+        raise WorkspaceError(f"Cannot inspect staged changes: {diff_check.stderr.strip()}")
+    try:
+        check_staged_state_files(
+            ws.path, lambda args, directory: _run_git(list(args), cwd=directory, check=False)
+        )
+    except RuntimeError as exc:
+        raise WorkspaceError(str(exc)) from exc
     trailer = f"{_JOB_TRAILER}: {job_key.strip()}"
     full_message = f"{message.rstrip()}\n\n{trailer}\n"
     argv = [*_identity_args(ws.path), "commit", "-m", full_message]
@@ -377,8 +387,17 @@ def commit_paths(ws: RunWorkspace, message: str, job_key: str, paths: list[Path]
         raise WorkspaceError("job_key must be non-empty")
     relative = [str(Path(p).resolve().relative_to(ws.path.resolve())) for p in paths]
     _run_git(["add", "--", *relative], cwd=ws.path)
-    if _run_git(["diff", "--cached", "--quiet", "--", *relative], cwd=ws.path, check=False).returncode == 0:
+    diff_check = _run_git(["diff", "--cached", "--quiet", "--", *relative], cwd=ws.path, check=False)
+    if diff_check.returncode == 0:
         return None
+    if diff_check.returncode != 1:
+        raise WorkspaceError(f"Cannot inspect staged changes: {diff_check.stderr.strip()}")
+    try:
+        check_staged_state_files(
+            ws.path, lambda args, directory: _run_git(list(args), cwd=directory, check=False)
+        )
+    except RuntimeError as exc:
+        raise WorkspaceError(str(exc)) from exc
     trailer = f"{_JOB_TRAILER}: {job_key.strip()}"
     argv = [*_identity_args(ws.path), "commit", "-m", f"{message.rstrip()}\n\n{trailer}\n", "--", *relative]
     _run_git(argv, cwd=ws.path)
@@ -448,7 +467,14 @@ def read_file_at(ws: RunWorkspace, ref: str, path: str) -> Optional[str]:
     The mirror is a partial clone, so a missing blob is fetched lazily; the auth header is passed
     so that works for private repositories too.
     """
-    proc = _run_git(["show", f"{ref}:{path}"], cwd=ws.path, repo_url=_remote_url(ws.path), check=False)
+    proc = safe_show(
+        ref,
+        path,
+        cwd=ws.path,
+        runner=lambda args, directory: _run_git(
+            list(args), cwd=directory, repo_url=_remote_url(directory), check=False
+        ),
+    )
     if proc.returncode != 0:
         return None
     return proc.stdout
