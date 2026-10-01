@@ -402,8 +402,8 @@ class CodexAccountAdapter(AccountUsageAdapter):
                 return usage
             except Exception as exc:
                 logger.info("Codex quota probe unavailable: %s", exc)
-                # An old CLI (the cloud image pins 0.48.0) has no usable app-server: do not pay its
-                # 15 s timeout on every routing decision.
+                # If the app-server is unavailable, avoid paying its 15 s timeout on every
+                # routing decision.
                 CodexAccountAdapter._app_server_retry_after = time.monotonic() + _APP_SERVER_BACKOFF_SECONDS
 
         # No live probe (e.g. the cloud worker's container): the rate limits Codex itself recorded in

@@ -3,7 +3,7 @@
 - DevelopmentStage excludes a crashing (harness, model) for the rest of the ticket and publishes the
   per-iteration logs (context dir only, redacted) to the run branch;
 - grill/planning retry bad JSON on another harness before failing, and tolerate fences/prose;
-- the Codex sandbox switch maps to the flags of codex-cli 0.48.0;
+- the Codex sandbox switch maps to the flags of codex-cli 0.159.3;
 - the cloud worker logs a redacted WARNING for every non-success stage.
 """
 
@@ -272,7 +272,7 @@ def test_run_read_agent_retries_a_fully_excluded_cascade_instead_of_giving_up(mo
 
 
 # --------------------------------------------------------------------------
-# 3. Codex sandbox switch (flags verified against codex-cli 0.48.0)
+# 3. Codex sandbox switch (flags verified against codex-cli 0.159.3)
 # --------------------------------------------------------------------------
 
 
@@ -306,6 +306,16 @@ def test_codex_bypass_mode_uses_the_documented_flag_and_no_sandbox_flag(monkeypa
         assert argv[:3] == ["codex", "exec", "--dangerously-bypass-approvals-and-sandbox"]
         assert "--sandbox" not in argv
         assert argv[-1] == "-" and "--skip-git-repo-check" in argv and "--json" in argv
+
+
+def test_codex_bypass_keeps_cli_default_model_and_writes_last_message(monkeypatch) -> None:
+    monkeypatch.setenv(agent_cli.CODEX_SANDBOX_ENV, "bypass")
+    req = AgentRequest(prompt="implement", cwd=Path("."), mode="write", harness="codex")
+
+    assert agent_cli.build_codex_argv("codex", req, Path("out.txt")) == [
+        "codex", "exec", "--dangerously-bypass-approvals-and-sandbox",
+        "--skip-git-repo-check", "--json", "-o", "out.txt", "-",
+    ]
 
 
 # --------------------------------------------------------------------------

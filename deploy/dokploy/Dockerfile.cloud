@@ -16,7 +16,8 @@ ARG GH_CLI_VERSION=2.101.0
 # CLI (`claude setup-token` on 2.1.x) with "Invalid API key - Please run /login".
 # Keep this at least as new as the CLI the owner runs `setup-token` with.
 ARG CLAUDE_CODE_VERSION=2.1.278
-ARG CODEX_CLI_VERSION=0.48.0
+# 0.48.0 defaults to gpt-5-codex, which ChatGPT accounts no longer accept.
+ARG CODEX_CLI_VERSION=0.159.3
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \

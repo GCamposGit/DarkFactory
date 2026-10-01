@@ -65,11 +65,12 @@ def test_dockerfile_claude_code_is_new_enough_for_setup_token_and_node_supports_
     assert tuple(int(p) for p in match.groups()) >= (2, 1, 278)
     node_major = re.search(r"^ARG NODE_MAJOR=(\d+)\s*$", text, re.MULTILINE)
     assert node_major and int(node_major.group(1)) >= 22
-    assert "ARG CODEX_CLI_VERSION=0.48.0" in text  # Codex is authenticated and working: untouched
+    assert "ARG CODEX_CLI_VERSION=0.159.3" in text
 
 
 def test_dockerfile_declares_codex_auth_and_workspaces_volumes():
     text = _read(DOKPLOY_DIR / "Dockerfile.cloud")
+    assert "HOME=/home/darkfac" in text
     assert "/home/darkfac/.codex" in text
     assert "/workspaces" in text
     assert re.search(r"VOLUME\s*\[.*\.codex.*\]", text)
@@ -199,4 +200,3 @@ def test_install_onprem_worker_user_startup_escapes_vbscript_quotes():
     # Must use doubled double quotes (""$launcher"") in VBScript string literal
     # so that VBScript compiler does not fail with 'Fim da instrução esperado' (code 800A0401).
     assert '""$launcher""' in text
-

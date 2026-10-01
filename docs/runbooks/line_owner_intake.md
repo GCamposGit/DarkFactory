@@ -145,6 +145,6 @@ resposta no proximo claim. O canario acorda sozinho o proprio grill em `waiting_
   cooldown; JSON invalido no grill/planning e reexecutado em outro harness antes de ser terminal.
 - `DARKFAC_CODEX_SANDBOX_MODE` (`auto` padrao, `danger-full-access`, `bypass`): o sandbox Linux do
   Codex nao sobe dentro do container, entao o compose do worker usa `bypass`
-  (`--dangerously-bypass-approvals-and-sandbox`, valido no codex-cli 0.48.0); Desktop e Notebook
+  (`--dangerously-bypass-approvals-and-sandbox`, valido no codex-cli 0.159.3); Desktop e Notebook
   nao definem a variavel e mantem o sandbox. O Claude Code roda como usuario nao-root (uid 1000),
   requisito do `--permission-mode bypassPermissions`.
