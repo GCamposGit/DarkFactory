@@ -264,3 +264,105 @@ def test_governance_evolution_authorized_flag(monkeypatch: pytest.MonkeyPatch, t
     # With authorized flag, guard passes
     monkeypatch.setenv("DARKFAC_ALLOW_GOVERNANCE_EVOLUTION", "true")
     assert guard_main(["HEAD", "--repo", str(test_git_repo)]) == 0
+
+
+def test_sync_with_base_auto_merges_demands_json_concurrent_registrations(test_remote_pair: tuple[Path, Path]):
+    """USR-112 Criterion 1 & 3: Real Git repo integration test with concurrent ticket registrations."""
+    local, bare = test_remote_pair
+    mgr = GitAutonomyManager(local)
+
+    ledger_file = local / ".factory" / "demands" / "demands.json"
+    ledger_file.parent.mkdir(parents=True, exist_ok=True)
+    initial_demands = [
+        {"id": "USR-01", "project_id": "darkfac", "title": "Base Ticket", "status": "planned"},
+    ]
+    ledger_file.write_text(json.dumps(initial_demands, indent=2) + "\n", encoding="utf-8")
+    _git(local, "add", ".factory/demands/demands.json")
+    _git(local, "commit", "-m", "chore: initialize demands ledger")
+    _git(local, "push", "origin", "main")
+
+    # Create ticket branch
+    _git(local, "checkout", "-b", "ticket/usr-01")
+
+    # Branch finishes USR-01
+    branch_demands = [
+        {
+            "id": "USR-01",
+            "project_id": "darkfac",
+            "title": "Base Ticket",
+            "status": "completed",
+            "delivery_evidence": "abc1234",
+        },
+    ]
+    ledger_file.write_text(json.dumps(branch_demands, indent=2) + "\n", encoding="utf-8")
+    _git(local, "commit", "-am", "feat: complete USR-01")
+
+    # Concurrently on main: clone or switch to main and add USR-02 and USR-03
+    _git(local, "checkout", "main")
+    main_demands = [
+        {"id": "USR-01", "project_id": "darkfac", "title": "Base Ticket", "status": "planned"},
+        {"id": "USR-02", "project_id": "darkfac", "title": "Concurrent Ticket 2", "status": "planned"},
+        {"id": "USR-03", "project_id": "darkfac", "title": "Concurrent Ticket 3", "status": "planned"},
+    ]
+    ledger_file.write_text(json.dumps(main_demands, indent=2) + "\n", encoding="utf-8")
+    _git(local, "commit", "-am", "chore: register USR-02 and USR-03 on main")
+    _git(local, "push", "origin", "main")
+
+    # Switch back to ticket branch
+    _git(local, "checkout", "ticket/usr-01")
+
+    # Run _sync_with_base with preserve_commits=True (implementation PR mode)
+    ok, files, msg = mgr._sync_with_base("main", local, preserve_commits=True)
+    assert ok is True
+    assert files == []
+    assert "merged" in msg
+
+    # Verify both the branch update (USR-01 completed) and main additions (USR-02, USR-03) are preserved
+    merged_content = json.loads(ledger_file.read_text(encoding="utf-8"))
+    assert len(merged_content) == 3
+    assert merged_content[0]["id"] == "USR-01"
+    assert merged_content[0]["status"] == "completed"
+    assert merged_content[0]["delivery_evidence"] == "abc1234"
+    assert merged_content[1]["id"] == "USR-02"
+    assert merged_content[2]["id"] == "USR-03"
+
+
+def test_sync_with_base_fails_closed_on_conflicting_ticket_mutation(test_remote_pair: tuple[Path, Path]):
+    """USR-112 Criterion 2 & 3: Fail-closed with ticket ID when same ticket modified incompatibly."""
+    local, bare = test_remote_pair
+    mgr = GitAutonomyManager(local)
+
+    ledger_file = local / ".factory" / "demands" / "demands.json"
+    ledger_file.parent.mkdir(parents=True, exist_ok=True)
+    initial_demands = [
+        {"id": "USR-01", "project_id": "darkfac", "title": "Base Ticket", "status": "planned"},
+    ]
+    ledger_file.write_text(json.dumps(initial_demands, indent=2) + "\n", encoding="utf-8")
+    _git(local, "add", ".factory/demands/demands.json")
+    _git(local, "commit", "-m", "chore: initialize demands ledger")
+    _git(local, "push", "origin", "main")
+
+    _git(local, "checkout", "-b", "ticket/usr-01-conflict")
+
+    # Branch modifies USR-01
+    branch_demands = [
+        {"id": "USR-01", "project_id": "darkfac", "title": "Base Ticket", "status": "completed"},
+    ]
+    ledger_file.write_text(json.dumps(branch_demands, indent=2) + "\n", encoding="utf-8")
+    _git(local, "commit", "-am", "feat: branch change USR-01")
+
+    # Main modifies same ticket USR-01 with different status
+    _git(local, "checkout", "main")
+    main_demands = [
+        {"id": "USR-01", "project_id": "darkfac", "title": "Base Ticket", "status": "cancelled"},
+    ]
+    ledger_file.write_text(json.dumps(main_demands, indent=2) + "\n", encoding="utf-8")
+    _git(local, "commit", "-am", "chore: cancel USR-01 on main")
+    _git(local, "push", "origin", "main")
+
+    _git(local, "checkout", "ticket/usr-01-conflict")
+
+    ok, files, msg = mgr._sync_with_base("main", local, preserve_commits=True)
+    assert ok is False
+    assert "USR-01" in msg
+    assert "Conflict for ticket USR-01" in msg
