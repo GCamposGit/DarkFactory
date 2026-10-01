@@ -3346,5 +3346,36 @@
     "dependencies": [],
     "created_at": "2026-10-01T14:10:54.865673Z",
     "updated_at": "2026-10-01T14:10:54.865673Z"
+  },
+  {
+    "id": "USR-119",
+    "project_id": "darkfac",
+    "title": "node_sync: Notebook com worktree suja fica divergente e o redeploy pos-merge sai com codigo 1 sem dizer o que esta sujo nem como remediar",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "EVIDENCIA (2026-10-01, python scripts/dokploy_redeploy.py apos o merge do #106): darkfac-cloud convergiu no main (fcc7a69) e o VPS tambem, mas '[NODE SYNC] Notebook: divergent sha=afdced173a35 expected=fcc7a69695bd reason=dirty worktree; no git operation attempted' e o script saiu com codigo 1. O no fica atras do main ate alguem limpar a worktree a mao; o log nao diz QUAIS caminhos estao sujos nem se sao seguros de descartar, e nenhum passo automatico remedeia. Isto e diferente do USR-117 (falso 'Desktop offline' por sonda unica): aqui o no esta online e a recusa de sincronizar e correta, mas incompleta. \n\n[Plano HF-28 | lote 5] Onda 1. SOLUCAO: (a) node_sync lista (somente nomes de caminho, nunca conteudo) os arquivos sujos do no e classifica em rastreados modificados, nao rastreados e ignorados; (b) remediacao segura sem git destrutivo no que e do operador: se so ha arquivos gerados/ignorados conhecidos, atualizar via worktree nova + troca atomica de diretorio ou checkout limpo em outro caminho; se ha alteracao rastreada de origem desconhecida, nao tocar e registrar ticket/alerta com a lista de nomes; (c) o codigo de saida do redeploy deve distinguir 'no divergente por sujeira' de falha de deploy. NUNCA MAIS: teste com repositorio git real e diretorio sujo (rastreado e nao rastreado) cobrindo cada classe.",
+    "core_journey": [
+      "EVIDENCIA (2026-10-01, python scripts/dokploy_redeploy.py apos o merge do #106): darkfac-cloud convergiu no main (fcc7a69) e o VPS tambem, mas '[NODE SYNC] Notebook: divergent sha=afdced173a35 expected=fcc7a69695bd reason=dirty worktree; no git operation attempted' e o script saiu com codigo 1. O no fica atras do main ate alguem limpar a worktree a mao; o log nao diz QUAIS caminhos estao sujos nem se sao seguros de descartar, e nenhum passo automatico remedeia. Isto e diferente do USR-117 (falso 'Desktop offline' por sonda unica): aqui o no esta online e a recusa de sincronizar e correta, mas incompleta. \n\n[Plano HF-28 | lote 5] Onda 1. SOLUCAO: (a) node_sync lista (somente nomes de caminho, nunca conteudo) os arquivos sujos do no e classifica em rastreados modificados, nao rastreados e ignorados; (b) remediacao segura sem git destrutivo no que e do operador: se so ha arquivos gerados/ignorados conhecidos, atualizar via worktree nova + troca atomica de diretorio ou checkout limpo em outro caminho; se ha alteracao rastreada de origem desconhecida, nao tocar e registrar ticket/alerta com a lista de nomes; (c) o codigo de saida do redeploy deve distinguir 'no divergente por sujeira' de falha de deploy. NUNCA MAIS: teste com repositorio git real e diretorio sujo (rastreado e nao rastreado) cobrindo cada classe."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Log do node_sync lista os nomes dos caminhos sujos por classe (rastreado modificado, nao rastreado, ignorado) sem imprimir conteudo",
+      "Worktree suja so com arquivos gerados/ignorados conhecidos e atualizada sem comando git destrutivo e o no converge",
+      "Alteracao rastreada desconhecida nao e tocada e gera ticket/alerta com a lista de caminhos",
+      "Teste com repositorio git real cobrindo as tres classes de sujeira"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-01T14:14:43.505704Z",
+    "updated_at": "2026-10-01T14:14:43.505704Z"
   }
 ]
