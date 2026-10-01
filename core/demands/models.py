@@ -55,6 +55,9 @@ class UserTicket(BaseModel):
     title: str = Field(..., min_length=3)
     origin: DemandOrigin = Field(default=DemandOrigin.USER)
     status: DeliveryStatus = Field(default=DeliveryStatus.PLANNED)
+    delivery_evidence: str | None = Field(
+        default=None, description="Implementation commit SHA or PR URL; historical ledger evidence is marked legacy:"
+    )
     item_type: RoadmapItemType = Field(default=RoadmapItemType.FEATURE)
     lifecycle_stage: LifecycleStage = Field(default=LifecycleStage.EXECUTION)
     horizon: PlanningHorizon = Field(default=PlanningHorizon.NOW)

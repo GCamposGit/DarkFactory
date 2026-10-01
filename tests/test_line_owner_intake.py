@@ -120,7 +120,7 @@ def test_editing_a_submitted_ticket_is_refused_not_duplicated(store, demands) ->
 def test_unknown_completed_and_out_of_scope_tickets_are_refused(store, demands) -> None:
     assert owner_intake.submit_ticket_to_line("USR-404", demands_store=demands, store=store).ok is False
 
-    _ticket(demands, "USR-70", status=DeliveryStatus.COMPLETED)
+    _ticket(demands, "USR-70", status=DeliveryStatus.COMPLETED, delivery_evidence="legacy:ledger:test")
     assert "nada a enviar" in owner_intake.submit_ticket_to_line("USR-70", demands_store=demands, store=store).message
 
     _ticket(demands, "USR-71", project_id="site-ggcampos")
