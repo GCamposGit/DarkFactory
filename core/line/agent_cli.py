@@ -188,7 +188,15 @@ def _stderr_tail(value: Any) -> str:
 # Error classification
 # --------------------------------------------------------------------------
 
-_RATE_LIMIT_PATTERN = re.compile(r"rate[\s_-]?limit|usage[\s_-]?limit|\b429\b", re.IGNORECASE)
+_RATE_LIMIT_PATTERN = re.compile(
+    r"rate[\s_-]?limit|usage[\s_-]?limit|\b429\b"
+    # Claude Code subscription messages: "You've hit your session limit", "weekly limit reached",
+    # "Opus limit reached", "5-hour limit reached".
+    r"|\b(?:session|weekly|monthly|daily|hourly|\d+[\s-]?hour|opus|sonnet)\s+limit"
+    r"|hit\s+your\s+(?:\w+\s+){0,2}limit"
+    r"|\blimit\s+(?:reached|exceeded|hit)\b",
+    re.IGNORECASE,
+)
 _AUTH_PATTERN = re.compile(r"\blogin\b|unauthorized|\b401\b|\bexpired\b", re.IGNORECASE)
 _RESET_ISO_PATTERN = re.compile(
     r'reset\w*["\']?\s*[:=]\s*["\']?(\d{4}-\d{2}-\d{2}T[0-9:.,+Zz-]+)',
@@ -199,6 +207,76 @@ _RESET_RELATIVE_PATTERN = re.compile(
     r"(hour|hr|h|minute|min|m|second|sec|s)s?\b",
     re.IGNORECASE,
 )
+
+
+# "resets 1:50am (UTC)", "resets 13:50 (UTC)", "resets 9am (America/Sao_Paulo)", "resets Oct 3, 9am (UTC)",
+# "resets Oct 3 at 9:30am (UTC)". Date optional; time is 12h (am/pm) or 24h (HH:MM).
+_RESET_CLOCK_PATTERN = re.compile(
+    r"\bresets?\s+(?:at\s+)?"
+    r"(?:(?P<mon>[A-Za-z]{3,9})\.?\s+(?P<day>\d{1,2})(?:st|nd|rd|th)?,?\s*(?:at\s+)?)?"
+    r"(?P<hour>\d{1,2})(?::(?P<minute>\d{2}))?\s*(?P<ampm>[ap]\.?m\.?)?"
+    r"(?:\s*\((?P<tz>[^)]{1,64})\))?",
+    re.IGNORECASE,
+)
+_MONTHS = {
+    name: index
+    for index, name in enumerate(
+        ("jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"), start=1
+    )
+}
+
+
+def _resolve_tz(name: Optional[str]) -> Optional[Any]:
+    """tzinfo for a `(UTC)` / `(America/Sao_Paulo)` suffix; None when it cannot be resolved."""
+    if not name or not name.strip():
+        return timezone.utc
+    clean = name.strip()
+    if clean.upper() in {"UTC", "GMT", "Z", "UTC+0", "UTC+00:00"}:
+        return timezone.utc
+    try:
+        from zoneinfo import ZoneInfo
+
+        return ZoneInfo(clean)
+    except Exception:  # unknown zone or no tzdata on this host
+        return None
+
+
+def _extract_clock_reset_at(text: str, now: datetime) -> Optional[datetime]:
+    """Next UTC instant matching a wall-clock reset such as `resets 1:50am (UTC)`; None if unparseable."""
+    match = _RESET_CLOCK_PATTERN.search(text)
+    if not match:
+        return None
+    hour = int(match.group("hour"))
+    minute = int(match.group("minute") or 0)
+    ampm = (match.group("ampm") or "").lower().replace(".", "")
+    if ampm:
+        if not 1 <= hour <= 12:
+            return None
+        hour = hour % 12 + (12 if ampm == "pm" else 0)
+    elif match.group("minute") is None:
+        return None  # a bare number ("resets 3") is not a clock time
+    if hour > 23 or minute > 59:
+        return None
+    tz = _resolve_tz(match.group("tz"))
+    if tz is None:
+        return None
+    local_now = now.astimezone(tz)
+    mon_raw = match.group("mon")
+    try:
+        if mon_raw:
+            month = _MONTHS.get(mon_raw[:3].lower())
+            if month is None:
+                return None
+            candidate = datetime(local_now.year, month, int(match.group("day")), hour, minute, tzinfo=tz)
+            if candidate < local_now - timedelta(days=1):
+                candidate = candidate.replace(year=candidate.year + 1)
+        else:
+            candidate = local_now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+            if candidate <= local_now:
+                candidate += timedelta(days=1)
+    except ValueError:
+        return None
+    return candidate.astimezone(timezone.utc)
 
 
 def _classify_error(text: str) -> ErrorKind:
@@ -212,7 +290,7 @@ def _classify_error(text: str) -> ErrorKind:
     return "crash"
 
 
-def _extract_reset_at(text: str) -> Optional[datetime]:
+def _extract_reset_at(text: str, *, now: Optional[datetime] = None) -> Optional[datetime]:
     """Best-effort extraction of a quota reset time from free-form CLI output."""
     if not text:
         return None
@@ -237,7 +315,7 @@ def _extract_reset_at(text: str) -> Optional[datetime]:
         else:
             delta = timedelta(seconds=amount)
         return datetime.now(timezone.utc) + delta
-    return None
+    return _extract_clock_reset_at(text, now or datetime.now(timezone.utc))
 
 
 # --------------------------------------------------------------------------

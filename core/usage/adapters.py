@@ -246,8 +246,106 @@ class AccountUsageAdapter(ABC):
         )
 
 
+_APP_SERVER_BACKOFF_SECONDS = 600.0
+_SESSION_FILES_SCANNED = 6
+_SESSION_TAIL_BYTES = 512 * 1024
+
+
+def codex_home() -> Path:
+    """`$CODEX_HOME` or `~/.codex` (the cloud worker's `/home/darkfac/.codex` volume)."""
+    configured = os.environ.get("CODEX_HOME", "").strip()
+    return Path(configured).expanduser() if configured else Path.home() / ".codex"
+
+
+def latest_codex_rate_limits(
+    sessions_dir: Path, *, now: Optional[datetime] = None
+) -> Optional[tuple[datetime, Dict[str, Any]]]:
+    """Newest `rate_limits` block Codex logged in a rollout file under `sessions_dir`.
+
+    Codex writes `{"timestamp": ..., "payload": {"type": "token_count", "rate_limits": {"primary":
+    {"used_percent", "window_minutes", "resets_at"}, "secondary": {...}, "plan_type"}}}` after every
+    model turn. Returns `(event time, response-shaped payload for `_from_codex_response`)`. A window whose
+    `resets_at` already passed is dropped (what it holds now is unknown, never assumed healthy); None when
+    no usable window is left.
+    """
+    current = now or datetime.now(timezone.utc)
+    try:
+        files = sorted(
+            (f for f in sessions_dir.rglob("rollout-*.jsonl") if f.is_file()),
+            key=lambda f: f.stat().st_mtime,
+            reverse=True,
+        )[:_SESSION_FILES_SCANNED]
+    except OSError:
+        return None
+    for path in files:
+        try:
+            with path.open("rb") as handle:
+                handle.seek(0, os.SEEK_END)
+                size = handle.tell()
+                handle.seek(max(0, size - _SESSION_TAIL_BYTES))
+                tail = handle.read().decode("utf-8", errors="replace")
+        except OSError:
+            continue
+        for line in reversed(tail.splitlines()):
+            if '"rate_limits"' not in line:
+                continue
+            try:
+                event = json.loads(line)
+            except json.JSONDecodeError:
+                continue  # first line of the tail may be cut in half
+            payload = event.get("payload") if isinstance(event, dict) else None
+            limits = payload.get("rate_limits") if isinstance(payload, dict) else None
+            if not isinstance(limits, dict):
+                continue
+            try:
+                stamp = datetime.fromisoformat(str(event.get("timestamp")).replace("Z", "+00:00"))
+            except ValueError:
+                continue
+            if stamp.tzinfo is None:
+                stamp = stamp.replace(tzinfo=timezone.utc)
+            slots: Dict[str, Any] = {}
+            for slot in ("primary", "secondary"):
+                raw = limits.get(slot)
+                if not isinstance(raw, dict) or raw.get("used_percent") is None:
+                    continue
+                resets_at = raw.get("resets_at")
+                if isinstance(resets_at, (int, float)) and datetime.fromtimestamp(float(resets_at), tz=timezone.utc) <= current:
+                    continue
+                slots[slot] = {
+                    "usedPercent": raw.get("used_percent"),
+                    "windowDurationMins": raw.get("window_minutes"),
+                    "resetsAt": resets_at,
+                }
+            if not slots:
+                return None  # newest event is the authority: all its windows already rolled over
+            slots["planType"] = limits.get("plan_type")
+            return stamp, {"rateLimits": slots}
+    return None
+
+
 class CodexAccountAdapter(AccountUsageAdapter):
     """Read ChatGPT/Codex rolling buckets from the local official app-server."""
+
+    # `time.monotonic()` before which the app-server probe is not retried (it failed recently).
+    _app_server_retry_after: float = 0.0
+
+    def _from_session_files(self) -> Optional[ProviderAccountUsage]:
+        found = latest_codex_rate_limits(codex_home() / "sessions")
+        if found is None:
+            return None
+        stamp, payload = found
+        try:
+            usage = self._from_codex_response(payload)
+        except Exception as exc:  # no windows
+            logger.debug("Codex session rate limits unusable: %s", exc)
+            return None
+        return usage.model_copy(
+            update={
+                "adapter": "codex_session_files",
+                "checked_at": stamp.isoformat(),
+                "message": "Limites lidos do ultimo evento token_count das sessoes do Codex.",
+            }
+        )
 
     @staticmethod
     def _find_codex() -> Optional[str]:
@@ -286,13 +384,22 @@ class CodexAccountAdapter(AccountUsageAdapter):
             return self._from_snapshot(snapshot)
 
         executable = self._find_codex()
-        if executable:
+        if executable and time.monotonic() >= CodexAccountAdapter._app_server_retry_after:
             try:
                 usage = self._from_codex_response(self._read_rate_limits(executable))
                 self._save_snapshot(usage)
                 return usage
             except Exception as exc:
                 logger.info("Codex quota probe unavailable: %s", exc)
+                # An old CLI (the cloud image pins 0.48.0) has no usable app-server: do not pay its
+                # 15 s timeout on every routing decision.
+                CodexAccountAdapter._app_server_retry_after = time.monotonic() + _APP_SERVER_BACKOFF_SECONDS
+
+        # No live probe (e.g. the cloud worker's container): the rate limits Codex itself recorded in
+        # its own session logs on the last call it made are the only real data this host has.
+        session_usage = self._from_session_files()
+        if session_usage is not None:
+            return session_usage
 
         if snapshot:
             return self._from_snapshot(snapshot)
@@ -1197,6 +1304,12 @@ class ClaudeCodeAccountAdapter(AccountUsageAdapter):
             except Exception as exc:
                 logger.debug("Failed to read Claude config: %s", exc)
 
+        if not access_token:
+            # Cloud worker: the long-lived token from `claude setup-token` arrives as an env var, there is
+            # no ~/.claude/.credentials.json. It is the same OAuth bearer, so the live probe works with it.
+            env_token = os.environ.get("CLAUDE_CODE_OAUTH_TOKEN", "").strip()
+            if env_token:
+                access_token = env_token
         return access_token, email, plan or "Claude Pro"
 
     def _refresh_claude_token_via_cli(self) -> bool:

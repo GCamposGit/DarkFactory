@@ -489,7 +489,9 @@ class DevelopmentStage:
             setup_result = ensure_setup(ws, project, commands)
             if not setup_result.ok:
                 last_validate_log = "Falha no setup:\n" + _distill_with_test_subagent(setup_result)
-                _write_validate_log(ws, ticket.id, iteration, last_validate_log)
+                _write_validate_log(
+                    ws, ticket.id, iteration, last_validate_log, raw_output=setup_result.combined_output
+                )
                 continue
 
             if not commands.validate_cmds:
@@ -517,6 +519,7 @@ class DevelopmentStage:
                     "duration_s": validate_result.duration_s,
                     "note": f"validate {'passed' if validate_result.ok else 'failed'} (exit {validate_result.exit_code})",
                 },
+                raw_output=validate_result.combined_output,
             )
 
             if validate_result.ok:
@@ -532,7 +535,12 @@ class DevelopmentStage:
                 workspace.push(ws)
                 return StageResult(outcome="success", output_refs=[sha])
 
-            last_validate_log = distilled
+            # The distilled report only knows pytest lines: a failure outside the tests (the runner's own
+            # checks, a launch error) would reach the agent as "FAILED (N passed)". Give it the raw tail.
+            last_validate_log = (
+                f"{distilled}\n\n## Saida bruta do validate (ultimos {diagnostics.RAW_TAIL_CHARS} caracteres)\n"
+                f"{diagnostics.redacted_tail(validate_result.combined_output)}"
+            )
             if "SPEC_CONFLICT:" in agent_result.text:
                 self._persist_diagnostics(ws, run_id, ticket.id)
                 return StageResult(outcome="replan", cause_code="spec_conflict", output_refs=[])
@@ -660,9 +668,11 @@ def _write_validate_log(
     iteration: int,
     content: str,
     meta: Optional[dict[str, Any]] = None,
+    raw_output: Optional[str] = None,
 ) -> None:
     """Write one iteration's log. With `meta` it carries harness/model/error kind/duration and the
-    redacted first ~2000 characters of the output (so it is safe to push to the run branch)."""
+    redacted first ~2000 characters of the output (so it is safe to push to the run branch); with
+    `raw_output` also the redacted last ~3000 characters of the raw command output."""
     if meta is not None:
         content = diagnostics.format_attempt_log(
             "development",
@@ -673,6 +683,12 @@ def _write_validate_log(
             duration_s=meta.get("duration_s"),
             output=content,
             note=str(meta.get("note") or ""),
+            raw_tail=raw_output,
+        )
+    elif raw_output is not None:
+        content = (
+            f"{content}\n\n## Raw output tail (redacted, last {diagnostics.RAW_TAIL_CHARS} chars)\n\n"
+            f"```text\n{diagnostics.redacted_tail(raw_output)}\n```\n"
         )
     workspace.write_context(ws, f"validate-{ticket_id}-{iteration}.log.md", content)
 
