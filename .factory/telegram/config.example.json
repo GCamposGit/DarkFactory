@@ -1,0 +1,6 @@
+{
+  "bot_token": null,
+  "authorized_user_ids": [],
+  "authorized_chat_ids": [],
+  "webhook_secret_token": null
+}

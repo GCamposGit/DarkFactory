@@ -47,6 +47,45 @@ def test_load_telegram_config_role_resolution(monkeypatch: pytest.MonkeyPatch, t
     assert cfg_ops.authorized_user_ids == [999]
 
 
+def test_telegram_environment_precedes_local_config(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("DARKFAC_PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setenv("TELEGRAM_OPS_BOT_TOKEN", "env-token")
+    monkeypatch.setenv("TELEGRAM_AUTHORIZED_USERS", "7")
+    config_dir = tmp_path / ".factory" / "telegram"
+    config_dir.mkdir(parents=True)
+    (config_dir / "ops_config.json").write_text(
+        json.dumps({"bot_token": "local-token", "authorized_user_ids": [8], "authorized_chat_ids": [9]}),
+        encoding="utf-8",
+    )
+
+    config = load_telegram_config(role="ops")
+    assert config.bot_token == "env-token"
+    assert config.authorized_user_ids == [7]
+    assert config.authorized_chat_ids == [9]
+    monkeypatch.delenv("TELEGRAM_OPS_BOT_TOKEN")
+    assert load_telegram_config(role="ops").bot_token == "local-token"
+
+
+def test_telegram_default_state_dir_uses_project_root(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("DARKFAC_PROJECT_ROOT", str(tmp_path))
+    gateway = TelegramGateway(config=TelegramConfig(role="ops"))
+    assert gateway.state_dir == tmp_path / ".factory" / "telegram"
+    assert gateway.state_dir.is_absolute()
+
+
+def test_role_config_without_token_falls_back_to_local_legacy_file(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("DARKFAC_PROJECT_ROOT", str(tmp_path))
+    for key in ("TELEGRAM_OPS_BOT_TOKEN", "TELEGRAM_BOT_TOKEN"):
+        monkeypatch.delenv(key, raising=False)
+    config_dir = tmp_path / ".factory" / "telegram"
+    config_dir.mkdir(parents=True)
+    (config_dir / "ops_config.json").write_text('{"bot_token": null}', encoding="utf-8")
+    (config_dir / "config.json").write_text('{"bot_token": "legacy-local"}', encoding="utf-8")
+    assert load_telegram_config(role="ops").bot_token == "legacy-local"
+
+
 def test_dual_bot_state_file_isolation(tmp_path: Path) -> None:
     """Owner and Ops bots persist to independent state files to avoid offset collisions."""
     cfg_owner = TelegramConfig(bot_token="tok1", role="owner", authorized_user_ids=[10])

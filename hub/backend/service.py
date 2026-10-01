@@ -2484,7 +2484,7 @@ class HubService:
             secret_owner = os.environ.get("TELEGRAM_WEBHOOK_SECRET")
             if secret_owner:
                 owner_updates["webhook_secret_token"] = secret_owner
-            owner_config = load_telegram_config(role="owner")
+            owner_config = load_telegram_config(role="owner", config_dir=self.project_root / ".factory" / "telegram")
             if owner_updates:
                 owner_config = owner_config.model_copy(update=owner_updates)
             return TelegramGateway(config=owner_config, state_dir=self.project_root / ".factory" / "telegram")
@@ -2496,7 +2496,7 @@ class HubService:
         chats = [int(c.strip()) for c in chats_raw.split(",") if c.strip().isdigit()]
         secret = os.environ.get("TELEGRAM_WEBHOOK_SECRET")
 
-        config = load_telegram_config(role="ops")
+        config = load_telegram_config(role="ops", config_dir=self.project_root / ".factory" / "telegram")
         updates: Dict[str, Any] = {}
         if token:
             updates["bot_token"] = token

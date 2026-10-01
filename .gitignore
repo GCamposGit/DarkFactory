@@ -28,6 +28,7 @@ build/
 *.secret
 .factory/n8n/config.json
 .factory/telegram/*.json
+!.factory/telegram/config.example.json
 hub/data/session_token.txt
 
 # Local model/runtime data
