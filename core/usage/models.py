@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from enum import Enum
-from typing import List, Optional
+from typing import Any, List, Optional
 from uuid import uuid4
 
 from pydantic import BaseModel, Field
@@ -71,6 +71,9 @@ class ProviderAccountUsage(BaseModel):
     message: str
     dashboard_url: Optional[str] = None
     checked_at: str = Field(default_factory=utc_now_iso)
+    raw_fields: dict[str, Any] = Field(default_factory=dict)
+    period_start: Optional[str] = None
+    plausibility_flags: List[str] = Field(default_factory=list)
 
 
 class AccountUsageReport(BaseModel):
