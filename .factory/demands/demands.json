@@ -3153,5 +3153,35 @@
     "dependencies": [],
     "created_at": "2026-10-01T12:01:55.341233Z",
     "updated_at": "2026-10-01T12:01:55.341233Z"
+  },
+  {
+    "id": "USR-113",
+    "project_id": "darkfac",
+    "title": "run_ticket: timeout de 30 min do agente seguido de retry do zero dobra o custo (USR-94 gastou 28% da cota OpenAI)",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "EVIDENCIA (2026-10-01): USR-94 via Codex: a tentativa 1 estourou o timeout de 1800 s (error_kind=timeout, class=transient), a mesma rota foi repetida do zero e concluiu com 48 min no total; a cota OpenAI foi de 44% para 16% (estimativa anterior: ~2% por ticket) e o piso de 30% do pump parou a fila. \n\n[Plano HF-28 | lote 5] Onda 0. SOLUCAO: (a) ticket grande deve ser quebrado ou sinalizado antes de gastar cota (tamanho/complexidade estimada no intake e aviso no run_ticket); (b) retry apos timeout continua na mesma worktree com prompt de continuacao (sessao retomada do harness quando suportada) em vez de recomecar do zero; (c) custo de cota por ticket (antes/depois) registrado na saida do run_ticket e no relatorio do pump para calibrar a estimativa.",
+    "core_journey": [
+      "EVIDENCIA (2026-10-01): USR-94 via Codex: a tentativa 1 estourou o timeout de 1800 s (error_kind=timeout, class=transient), a mesma rota foi repetida do zero e concluiu com 48 min no total; a cota OpenAI foi de 44% para 16% (estimativa anterior: ~2% por ticket) e o piso de 30% do pump parou a fila. \n\n[Plano HF-28 | lote 5] Onda 0. SOLUCAO: (a) ticket grande deve ser quebrado ou sinalizado antes de gastar cota (tamanho/complexidade estimada no intake e aviso no run_ticket); (b) retry apos timeout continua na mesma worktree com prompt de continuacao (sessao retomada do harness quando suportada) em vez de recomecar do zero; (c) custo de cota por ticket (antes/depois) registrado na saida do run_ticket e no relatorio do pump para calibrar a estimativa."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Retry apos timeout preserva o trabalho ja feito na worktree e usa prompt de continuacao",
+      "Custo de cota por ticket (antes/depois) gravado na saida do run_ticket e no relatorio do pump",
+      "Ticket estimado como grande e sinalizado antes de gastar cota"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-01T12:02:27.409844Z",
+    "updated_at": "2026-10-01T12:02:27.409844Z"
   }
 ]
