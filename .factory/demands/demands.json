@@ -3015,5 +3015,37 @@
     "dependencies": [],
     "created_at": "2026-10-01T10:31:19.702331Z",
     "updated_at": "2026-10-01T10:31:19.702331Z"
+  },
+  {
+    "id": "USR-110",
+    "project_id": "darkfac",
+    "title": "Telegram: webhooks ausentes apos rotacao de token, tokens locais obsoletos e falhas silenciosas no poller/registro",
+    "origin": "user",
+    "status": "planned",
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "EVIDENCIA (2026-10-01, pos-rotacao do token do USR-100): /start enviado a @darkfac_bot e @darkfac_ops_bot nao teve resposta. Diagnostico: (1) os tokens no Dokploy (darkfac-cloud e Darkhub) sao validos (getMe ok), mas getWebhookInfo dos DOIS bots retorna url vazia; /api/integrations/telegram/status do Hub mostra processed_updates=0. O Hub foi redeployado em 2026-10-01 10:49 (DARKHUB_ENV=production vem do Dockerfile.hub) e mesmo assim o registro no startup (hub/backend/main.py _lifespan -> core/integrations/telegram_webhooks.register_telegram_webhooks) nao deixou webhook; falha so gera logger.warning, invisivel para o owner. (2) Nos locais, .env, .factory/telegram/owner_config.json e ops_config.json ainda tem tokens revogados (HTTP 401); load_telegram_config prioriza env/.env sobre config.json; run_hub.py start_telegram_listener engole erros (except Exception: pass) e poll_updates so loga warning, entao o 401 e silencioso; o poller local so cobre o bot ops, nunca o owner. (3) O Apendice C do plano de rotacao omitiu .env/owner_config/ops_config e propoe /start como verificacao sem checar webhook/poller.",
+    "core_journey": [
+      "EVIDENCIA (2026-10-01, pos-rotacao do token do USR-100): /start enviado a @darkfac_bot e @darkfac_ops_bot nao teve resposta. Diagnostico: (1) os tokens no Dokploy (darkfac-cloud e Darkhub) sao validos (getMe ok), mas getWebhookInfo dos DOIS bots retorna url vazia; /api/integrations/telegram/status do Hub mostra processed_updates=0. O Hub foi redeployado em 2026-10-01 10:49 (DARKHUB_ENV=production vem do Dockerfile.hub) e mesmo assim o registro no startup (hub/backend/main.py _lifespan -> core/integrations/telegram_webhooks.register_telegram_webhooks) nao deixou webhook; falha so gera logger.warning, invisivel para o owner. (2) Nos locais, .env, .factory/telegram/owner_config.json e ops_config.json ainda tem tokens revogados (HTTP 401); load_telegram_config prioriza env/.env sobre config.json; run_hub.py start_telegram_listener engole erros (except Exception: pass) e poll_updates so loga warning, entao o 401 e silencioso; o poller local so cobre o bot ops, nunca o owner. (3) O Apendice C do plano de rotacao omitiu .env/owner_config/ops_config e propoe /start como verificacao sem checar webhook/poller."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Apos a rotacao, getWebhookInfo de cada bot retorna a URL da rota /api/webhooks/telegram/ops e /owner do Hub e um /start no bot ops e respondido (evidencia: resposta no chat e pending_update_count=0)",
+      "Falha do registro de webhook no startup fica visivel: /api/integrations/telegram/status expoe, por papel, a URL registrada e o ultimo erro (codigo HTTP, sem token), e o log sobe para nivel error",
+      "run_hub.start_telegram_listener e poll_updates deixam de engolir erros: HTTP 401/409 geram log e alerta explicitos sem expor o token",
+      "load_telegram_config avisa (sem expor token) quando fontes de token divergem (env, .env, owner_config.json, ops_config.json, config.json)",
+      "Script novo C:\\dev\\DarkFac\\scripts\\telegram_rotate_check.py verifica getMe e getWebhookInfo de cada fonte local imprimindo somente fingerprint e nunca o token",
+      "Runbook de rotacao atualizado listando todas as fontes locais de token e o passo de verificacao correto; testes cobrindo os itens acima passam no portao oficial"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-01T11:08:50.916654Z",
+    "updated_at": "2026-10-01T11:08:50.916654Z"
   }
 ]
