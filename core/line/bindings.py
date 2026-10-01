@@ -19,8 +19,9 @@ from __future__ import annotations
 import json
 import logging
 from datetime import datetime, timezone
-from typing import Any, Iterable, Optional, Protocol
+from typing import Any, Callable, Iterable, Optional, Protocol
 
+from core.git import ci_checks
 from core.line import routing as line_routing
 from core.line import stage_build, stage_grill, stage_integration, stage_planning, stage_release, stage_review
 from core.line.routing import RoutingConfig
@@ -146,6 +147,25 @@ def required_caps(project: ProjectDescriptor, stage: str) -> list[str]:
                 caps.append(affinity)
 
     return caps
+
+
+def base_red_attempt_counter(store: Any) -> Callable[[str], int]:
+    """`run_id -> integration waits already returned as ``base_red``` (USR-86).
+
+    Counts the run's finished `integration` jobs whose persisted cause code is a `base_red` wait;
+    `ci_pending` polls and other retries do not count. A store without `get_run_status` raises, and
+    the integration stage then falls back to the job iteration.
+    """
+
+    def _count(run_id: str) -> int:
+        status = store.get_run_status(run_id) or {}
+        return sum(
+            1
+            for job in status.get("jobs", [])
+            if job.get("stage") == "integration" and ci_checks.is_base_red_cause(job.get("cause_code"))
+        )
+
+    return _count
 
 
 # --------------------------------------------------------------------------
@@ -499,7 +519,8 @@ def build_line_registry(
         "validation": ValidationStageHandler(project_resolver=resolver),
         "independent_review": ReviewStageHandler(project_resolver=resolver, host_caps=host_caps, routing_config=cfg),
         "integration": IntegrationStageAdapter(
-            project_resolver=resolver, gh_executable=gh_executable, host_caps=host_caps, routing_config=cfg
+            project_resolver=resolver, gh_executable=gh_executable, host_caps=host_caps, routing_config=cfg,
+            base_red_attempts=base_red_attempt_counter(store),
         ),
         "build_deploy": ReleaseStageAdapter(project_resolver=resolver),
         "retrospective": RetrospectiveStageHandler(store=store, project_resolver=resolver),
@@ -518,6 +539,7 @@ __all__ = [
     "default_project_resolver",
     "required_caps",
     "agent_route_unavailable",
+    "base_red_attempt_counter",
     "build_line_registry",
     "GrillStageHandler",
     "PlanningStageHandler",

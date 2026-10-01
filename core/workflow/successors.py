@@ -40,6 +40,7 @@ import re
 from datetime import UTC, datetime
 from typing import Optional
 
+from core.git.ci_checks import is_base_red_cause
 from core.workflow.control_contracts import (
     InvalidResultError,
     JobKey,
@@ -98,6 +99,15 @@ STAGE_ROLES: dict[str, str] = {
 # budget. A same-stage retry that additionally carries `not_before` is
 # bounded by `RunCaps.wall_clock_hours` (from the run's `created_at`)
 # instead of a count at all -- see `_run_wall_clock_exceeded`.
+#
+# Retry kinds and their caps (USR-86):
+# - plain same-stage retry: MAX_SAME_STAGE_RETRIES iterations;
+# - `retry:<stage>` bounce: MAX_STAGE_ITERATIONS on the target stage;
+# - same-stage retry with `not_before` (`ci_pending`, auth waits): the run's wall clock
+#   (`RunCaps.wall_clock_hours`);
+# - `base_red not_before=...` (CI already red on the base branch): its OWN cap, counted by the
+#   integration stage (`ci_checks.BASE_RED_MAX_RETRIES` hourly waits, then `waiting_human`), so it is
+#   exempt from the wall clock and keeps only the MAX_SAME_STAGE_RETRIES backstop.
 MAX_STAGE_ITERATIONS = 10
 MAX_SAME_STAGE_RETRIES = 30
 
@@ -294,7 +304,12 @@ def materialize_result(
             # much larger count cap (review item 2).
             new_iteration = job_key.iteration + 1
             successor_stage = job_key.stage
-            if retry_not_before:
+            if is_base_red_cause(result.cause_code):
+                # USR-86: the integration stage counts its own hourly `base_red` waits and escalates
+                # to `waiting_human` after BASE_RED_MAX_RETRIES, so the run wall clock must not cut
+                # them short; only the absolute same-stage backstop remains.
+                cap_exceeded = new_iteration > MAX_SAME_STAGE_RETRIES
+            elif retry_not_before:
                 cap_exceeded = _run_wall_clock_exceeded(store, job_key.run_id, now_dt)
             else:
                 cap_exceeded = new_iteration > MAX_SAME_STAGE_RETRIES
