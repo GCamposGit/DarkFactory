@@ -16,10 +16,12 @@ Este documento governa a operação do Claude Code no repositório DarkFac, em e
   O agente deve:
   1. Recusar a implementação local no chat;
   2. Informar ao usuário que a cota do Claude está em estado crítico ($\le 15\%$);
-  3. Indicar o harness saudável eleito com maior margem (atualmente Antigravity) ou acionar o launcher headless canônico:
+  3. Indicar o harness saudável eleito para desenvolvimento (o roteador só elege harnesses com modo `write`: Claude, Codex e Grok Build; o Antigravity é somente leitura e nunca é eleito para `development`) ou acionar o launcher headless canônico:
      ```powershell
      python C:\dev\DarkFac\run_ticket.py <TICKET_ID>
      ```
+- **Harness de Operação como Desenvolvedor Principal (USR-109)**:
+  Se o usuário opera a fábrica por um harness específico (`DARKFAC_OPERATING_HARNESS` ou autodetecção), esse harness é eleito como desenvolvedor do estágio `development` sempre que sua cota estiver acima de $15\%$ (vence maior headroom e faixa de complexidade); se estiver crítico, vale o Dynamic Headroom. A preferência nunca relaxa o piso de $15\%$, não altera planning/grill/review/integration e não impede subagentes mais simples nem testes no desktop. Especificação completa na skill `19-run-ticket` (seção 2b).
 - **Exceção de Override Explícito pelo Usuário**:
   A implementação com cota $\le 15.0\%$ **SÓ É PERMITIDA se o usuário exigir EXPLICITAMENTE no prompt** (ex.: *"forçar execução no Claude"*, *"ignorar limite de cota"*, *"estou ciente da cota crítica, prossiga"* ou flag `--force`). Sem essa instrução textual inequívoca, o agente deve falhar fechado (*fail-closed*).
 

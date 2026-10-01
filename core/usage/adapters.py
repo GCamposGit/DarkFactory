@@ -34,6 +34,7 @@ from core.usage.models import (
     ProviderFamily,
     QuotaWindow,
 )
+from core.usage.history import record_probe, sanitize_raw
 
 logger = logging.getLogger(__name__)
 _CREATE_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
@@ -52,7 +53,7 @@ DEFAULT_PROVIDER_SPECS: tuple[ProviderSpec, ...] = (
     ProviderSpec("openai", "OpenAI / Codex", ProviderFamily.FRONTIER, "https://chatgpt.com/codex/settings/usage", ("OPENAI_API_KEY",)),
     ProviderSpec("xai", "xAI / Grok", ProviderFamily.FRONTIER, "https://grok.com/?_s=usage", ("XAI_API_KEY", "XAI_MANAGEMENT_API_KEY")),
     ProviderSpec("google", "Google / Gemini", ProviderFamily.FRONTIER, "https://one.google.com/", ("GEMINI_API_KEY", "GOOGLE_API_KEY")),
-    ProviderSpec("anthropic", "Anthropic / Claude", ProviderFamily.FRONTIER, "https://claude.ai/settings/billing", ("ANTHROPIC_API_KEY",)),
+    ProviderSpec("anthropic", "Anthropic / Claude", ProviderFamily.FRONTIER, "https://claude.ai/settings/usage", ("ANTHROPIC_API_KEY",)),
     ProviderSpec("openrouter", "OpenRouter", ProviderFamily.GATEWAY, "https://openrouter.ai/activity", ("OPENROUTER_API_KEY",)),
     ProviderSpec("deepseek", "DeepSeek", ProviderFamily.CHINESE, "https://platform.deepseek.com/usage", ("DEEPSEEK_API_KEY",)),
     ProviderSpec("siliconflow", "SiliconFlow", ProviderFamily.GATEWAY, "https://cloud.siliconflow.cn/account/ak", ("SILICONFLOW_API_KEY",)),
@@ -81,6 +82,21 @@ def _timestamp_to_iso(value: Any) -> Optional[str]:
     return str(value)
 
 
+def _valid_quota_reset(value: Any) -> bool:
+    if type(value) in (int, float):
+        try:
+            return datetime.fromtimestamp(float(value), tz=timezone.utc).timestamp() > 0
+        except (ValueError, OverflowError, OSError):
+            return False
+    if isinstance(value, str):
+        try:
+            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+            return parsed.tzinfo is not None
+        except ValueError:
+            return False
+    return False
+
+
 def _duration_label(minutes: Optional[int]) -> str:
     if not minutes:
         return "Quota"
@@ -106,9 +122,6 @@ class AccountUsageAdapter(ABC):
 
     def _is_snapshot_fresh(self, payload: Dict[str, Any], max_age_seconds: Optional[float] = None) -> bool:
         ttl = max_age_seconds if max_age_seconds is not None else self.SNAPSHOT_FRESHNESS_TTL_SECONDS
-        env_name = f"DARKFAC_{self.spec.provider_id.upper()}_USAGE_JSON"
-        if os.environ.get(env_name):
-            return True
         checked_at_raw = payload.get("checked_at")
         if checked_at_raw:
             try:
@@ -120,14 +133,7 @@ class AccountUsageAdapter(ABC):
                     return True
             except Exception:
                 pass
-        target = self.snapshot_dir / f"{self.spec.provider_id}.json"
-        try:
-            if target.is_file():
-                mtime_age = time.time() - target.stat().st_mtime
-                if 0 <= mtime_age <= ttl:
-                    return True
-        except Exception:
-            pass
+            return False
         return False
 
     def disconnected(self, message: str, adapter: str) -> ProviderAccountUsage:
@@ -242,7 +248,10 @@ class AccountUsageAdapter(ABC):
             windows=windows,
             message=str(payload.get("message") or ("Snapshot de quota carregado." if windows else "Conta detectada; quota não informada.")),
             dashboard_url=str(payload.get("dashboard_url") or self.spec.dashboard_url),
-            checked_at=str(payload.get("checked_at") or datetime.now(timezone.utc).isoformat()),
+            checked_at=str(payload.get("checked_at") or "1970-01-01T00:00:00Z"),
+            raw_fields=sanitize_raw(self.spec.provider_id, payload.get("raw_fields") or {}),
+            period_start=payload.get("period_start"),
+            plausibility_flags=payload.get("plausibility_flags") or [],
         )
 
 
@@ -339,13 +348,14 @@ class CodexAccountAdapter(AccountUsageAdapter):
         except Exception as exc:  # no windows
             logger.debug("Codex session rate limits unusable: %s", exc)
             return None
-        return usage.model_copy(
+        usage = usage.model_copy(
             update={
                 "adapter": "codex_session_files",
                 "checked_at": stamp.isoformat(),
                 "message": "Limites lidos do ultimo evento token_count das sessoes do Codex.",
             }
         )
+        return record_probe(usage, self.snapshot_dir)
 
     @staticmethod
     def _find_codex() -> Optional[str]:
@@ -387,6 +397,7 @@ class CodexAccountAdapter(AccountUsageAdapter):
         if executable and time.monotonic() >= CodexAccountAdapter._app_server_retry_after:
             try:
                 usage = self._from_codex_response(self._read_rate_limits(executable))
+                usage = record_probe(usage, self.snapshot_dir)
                 self._save_snapshot(usage)
                 return usage
             except Exception as exc:
@@ -510,7 +521,8 @@ class CodexAccountAdapter(AccountUsageAdapter):
             single = payload.get("rateLimits")
             buckets = {"codex": single} if isinstance(single, dict) else {}
         if not buckets:
-            raise RuntimeError("Codex returned no rate-limit buckets")
+            logger.warning("Invalid OpenAI quota payload; received fields: %s", list(payload))
+            return self.degraded("Sem medidor: buckets OpenAI ausentes.", "codex_app_server")
         windows: List[QuotaWindow] = []
         plan: Optional[str] = None
         for bucket_id, bucket in buckets.items():
@@ -531,7 +543,16 @@ class CodexAccountAdapter(AccountUsageAdapter):
                 raw = bucket.get(slot)
                 if not isinstance(raw, dict):
                     continue
-                used = _clamp_percent(raw.get("usedPercent"))
+                if type(raw.get("usedPercent")) not in (int, float) or not 0 <= raw["usedPercent"] <= 100:
+                    logger.warning("Invalid OpenAI quota payload fields: %s", list(raw))
+                    return self.degraded("OpenAI quota payload inválido; sem medidor.", "codex_app_server")
+                if (type(raw.get("windowDurationMins")) not in (int, float)
+                        or raw["windowDurationMins"] <= 0
+                        or int(raw["windowDurationMins"]) != raw["windowDurationMins"]
+                        or not _valid_quota_reset(raw.get("resetsAt"))):
+                    logger.warning("Invalid OpenAI quota window; received fields: %s", list(raw))
+                    return self.degraded("OpenAI quota window inválida; sem medidor.", "codex_app_server")
+                used = _clamp_percent(raw["usedPercent"])
                 duration_raw = raw.get("windowDurationMins")
                 duration = int(duration_raw) if isinstance(duration_raw, (int, float)) else None
                 if duration == 10080:
@@ -551,8 +572,21 @@ class CodexAccountAdapter(AccountUsageAdapter):
                     window_duration_minutes=duration, resets_at=_timestamp_to_iso(raw.get("resetsAt")),
                 ))
         windows.sort(key=lambda w: (w.window_duration_minutes or 0), reverse=True)
+        if not windows:
+            logger.warning("Invalid OpenAI quota buckets; received fields: %s", list(buckets))
+            return self.degraded("Sem medidor: janelas OpenAI ausentes.", "codex_app_server")
         limited = any(window.used_percent is not None and window.used_percent >= 100.0 for window in windows)
         account_id = payload.get("accountId")
+        raw_fields: Dict[str, Any] = {}
+        for bucket in buckets.values():
+            if not isinstance(bucket, dict):
+                continue
+            for slot in ("primary", "secondary"):
+                values = bucket.get(slot)
+                if isinstance(values, dict):
+                    for key in ("usedPercent", "windowDurationMins", "resetsAt"):
+                        if key in values:
+                            raw_fields[f"{slot}{key[0].upper()}{key[1:]}"] = values[key]
         return ProviderAccountUsage(
             provider_id=self.spec.provider_id, provider_name=self.spec.provider_name,
             family=self.spec.family, status=AccountConnectionStatus.LIMITED if limited else AccountConnectionStatus.CONNECTED,
@@ -561,12 +595,16 @@ class CodexAccountAdapter(AccountUsageAdapter):
             quota_supported=bool(windows), windows=windows,
             message="Limites lidos da sessão local do Codex." if windows else "Codex conectado; sem buckets ativos.",
             dashboard_url=self.spec.dashboard_url,
+            raw_fields=sanitize_raw("openai", raw_fields),
         )
 
 
 class GrokAccountAdapter(AccountUsageAdapter):
     def inspect(self, force: bool = False) -> ProviderAccountUsage:
         snapshot = self._snapshot_payload()
+        if snapshot and snapshot.get("adapter") == "grok_bot_api" and type((snapshot.get("raw_fields") or {}).get("usagePercent")) not in (int, float):
+            logger.warning("Discarding legacy Grok snapshot without verifiable raw usagePercent")
+            snapshot = None
         if snapshot and not force and self._is_snapshot_fresh(snapshot):
             return self._from_snapshot(snapshot)
 
@@ -576,7 +614,7 @@ class GrokAccountAdapter(AccountUsageAdapter):
             if bot_usage:
                 return bot_usage
         except Exception as exc:
-            logger.debug("Grok Bot session probe failed: %s", exc)
+            logger.warning("Grok Bot quota probe failed: %s", type(exc).__name__)
 
         # 2. Try Grok CLI session probe via ~/.grok/auth.json (official SuperGrok session)
         try:
@@ -587,7 +625,10 @@ class GrokAccountAdapter(AccountUsageAdapter):
             logger.debug("Grok CLI session probe failed: %s", exc)
 
         if snapshot:
-            return self._from_snapshot(snapshot)
+            if self._is_snapshot_fresh(snapshot):
+                return self._from_snapshot(snapshot)
+            logger.warning("Grok quota probe unavailable and snapshot stale")
+            return self.degraded("Sem medidor: sonda Grok indisponível e snapshot expirado.", "grok_bot_api")
 
         executable = shutil.which("grok")
         if not executable:
@@ -623,6 +664,7 @@ class GrokAccountAdapter(AccountUsageAdapter):
     def _probe_grok_bot_session(self) -> Optional[ProviderAccountUsage]:
         token = self._extract_grok_bot_token()
         if not token:
+            logger.warning("Grok Bot quota probe unavailable: token or app missing")
             return None
 
         req = urllib.request.Request(
@@ -638,26 +680,35 @@ class GrokAccountAdapter(AccountUsageAdapter):
         try:
             with urllib.request.urlopen(req, timeout=4.0) as res:
                 payload = json.loads(res.read().decode("utf-8"))
-        except (urllib.error.URLError, OSError, json.JSONDecodeError, TimeoutError):
+        except (urllib.error.URLError, OSError, json.JSONDecodeError, TimeoutError) as exc:
+            logger.warning("Grok Bot quota probe unavailable: %s", type(exc).__name__)
             return None
 
         if not isinstance(payload, dict):
-            return None
-
-        usage_val = payload.get("usagePercent")
-        raw_val = _clamp_percent(float(usage_val) if usage_val is not None else None)
-        # Em GetSandUsageStatus o campo usagePercent representa a capacidade residual (remaining_percent)
-        # Ex: 1.13% restante -> 98.87% (~99%) utilizado
-        if raw_val is not None:
-            remaining_percent = raw_val
-            used_percent = round(100.0 - remaining_percent, 2)
-        else:
-            remaining_percent = None
-            used_percent = None
-        resets_at = _timestamp_to_iso(payload.get("nextResetTimestampUtc"))
+            logger.warning("Invalid Grok quota payload fields: root is not object")
+            return self.degraded("Sem medidor: payload Grok inválido.", "grok_bot_api")
+        required = ("usagePercent", "currentPeriodStart", "nextResetTimestampUtc", "hasAvailableUsage", "hasNonZeroIncludedLimit")
+        valid = (type(payload.get("usagePercent")) in (float, int)
+                 and 0 <= payload["usagePercent"] <= 100
+                 and type(payload.get("hasAvailableUsage")) is bool
+                 and type(payload.get("hasNonZeroIncludedLimit")) is bool
+                 and all(isinstance(payload.get(key), str) and payload[key] for key in ("currentPeriodStart", "nextResetTimestampUtc")))
+        if valid:
+            try:
+                period_start = datetime.fromisoformat(payload["currentPeriodStart"].replace("Z", "+00:00"))
+                reset_at = datetime.fromisoformat(payload["nextResetTimestampUtc"].replace("Z", "+00:00"))
+                valid = period_start.tzinfo is not None and reset_at.tzinfo is not None and reset_at > period_start
+            except ValueError:
+                valid = False
+        if not valid:
+            logger.warning("Invalid Grok quota payload; received fields: %s; required: %s", list(payload), required)
+            return self.degraded("Sem medidor: campos obrigatórios Grok ausentes ou inválidos.", "grok_bot_api")
+        used_percent = round(float(payload["usagePercent"]), 2)
+        remaining_percent = round(100.0 - used_percent, 2)
+        resets_at = payload["nextResetTimestampUtc"]
         plan = str(payload.get("grokPlanLabel") or payload.get("includedUsageSuperGrokPlan") or "SuperGrok")
 
-        limited = not payload.get("hasAvailableUsage", True) or (used_percent is not None and used_percent >= 100.0)
+        limited = not payload["hasAvailableUsage"] or not payload["hasNonZeroIncludedLimit"] or used_percent >= 100.0
         account_label = None
         try:
             cli_res = self._probe_grok_cli_session()
@@ -679,8 +730,8 @@ class GrokAccountAdapter(AccountUsageAdapter):
             QuotaWindow(
                 quota_id="grok:5h",
                 label="Janela Móvel (5h)",
-                used_percent=100.0 if limited else 0.0,
-                remaining_percent=0.0 if limited else 100.0,
+                used_percent=100.0 if limited else None,
+                remaining_percent=0.0 if limited else None,
                 window_duration_minutes=300,
                 resets_at=resets_at if limited else None,
                 metric="dynamic_throttle",
@@ -698,7 +749,10 @@ class GrokAccountAdapter(AccountUsageAdapter):
             windows=windows,
             message="Pool semanal e janela móvel lidos da sessão autenticada do Grok.",
             dashboard_url=self.spec.dashboard_url,
+            raw_fields=sanitize_raw("xai", payload),
+            period_start=payload["currentPeriodStart"],
         )
+        usage = record_probe(usage, self.snapshot_dir)
         self._save_snapshot(usage)
         return usage
 
@@ -1026,6 +1080,7 @@ class GeminiAccountAdapter(AccountUsageAdapter):
         ctx.verify_mode = ssl.CERT_NONE
 
         windows: List[QuotaWindow] = []
+        raw_quota: Dict[str, Any] = {}
         active_port: Optional[int] = None
         summary_payload: Optional[Dict[str, Any]] = None
 
@@ -1051,7 +1106,12 @@ class GeminiAccountAdapter(AccountUsageAdapter):
                 continue
 
         if active_port and summary_payload:
-            groups = summary_payload.get("response", {}).get("groups", [])
+            response = summary_payload.get("response") if isinstance(summary_payload, dict) else None
+            groups = response.get("groups") if isinstance(response, dict) else None
+            if not isinstance(groups, list):
+                logger.warning("Invalid Google quota summary; received fields: %s",
+                               list(summary_payload) if isinstance(summary_payload, dict) else [])
+                return self.degraded("Sem medidor: resumo Google inválido.", "antigravity_rpc")
             for group in groups:
                 if not isinstance(group, dict):
                     continue
@@ -1064,8 +1124,13 @@ class GeminiAccountAdapter(AccountUsageAdapter):
                         continue
                     rem_frac = b.get("remainingFraction")
                     if rem_frac is None:
-                        continue
-                    rem_pct = _clamp_percent(float(rem_frac) * 100.0)
+                        logger.warning("Invalid Google quota bucket; received fields: %s", list(b))
+                        return self.degraded("Sem medidor: remainingFraction ausente.", "antigravity_rpc")
+                    if type(rem_frac) not in (float, int) or not 0 <= rem_frac <= 1:
+                        logger.warning("Invalid Google quota bucket; received fields: %s", list(b))
+                        return self.degraded("Sem medidor: remainingFraction inválido.", "antigravity_rpc")
+                    raw_quota = sanitize_raw("google", b)
+                    rem_pct = _clamp_percent(rem_frac * 100.0)
                     used_pct = round(100.0 - rem_pct, 2) if rem_pct is not None else None
                     bucket_win = str(b.get("window", "")).lower()
                     if bucket_win == "weekly" or "weekly" in str(b.get("bucketId", "")).lower():
@@ -1114,8 +1179,15 @@ class GeminiAccountAdapter(AccountUsageAdapter):
                     if target_model and isinstance(target_model.get("quotaInfo"), dict):
                         quota_info = target_model["quotaInfo"]
                         remaining_fraction = quota_info.get("remainingFraction")
+                        if remaining_fraction is None:
+                            logger.warning("Invalid Google quotaInfo; received fields: %s", list(quota_info))
+                            return self.degraded("Sem medidor: remainingFraction ausente.", "antigravity_rpc")
                         if remaining_fraction is not None:
-                            remaining_percent = _clamp_percent(float(remaining_fraction) * 100.0)
+                            if type(remaining_fraction) not in (int, float) or not 0 <= remaining_fraction <= 1:
+                                logger.warning("Invalid Google quotaInfo; received fields: %s", list(quota_info))
+                                return self.degraded("Sem medidor: remainingFraction inválido.", "antigravity_rpc")
+                            raw_quota = sanitize_raw("google", quota_info)
+                            remaining_percent = _clamp_percent(remaining_fraction * 100.0)
                             used_percent = round(100.0 - remaining_percent, 2) if remaining_percent is not None else None
                             resets_at = _timestamp_to_iso(quota_info.get("resetTime"))
                             windows.append(
@@ -1175,7 +1247,9 @@ class GeminiAccountAdapter(AccountUsageAdapter):
             windows=windows,
             message="Quotas lidas em tempo real do Language Server local do Antigravity.",
             dashboard_url=self.spec.dashboard_url,
+            raw_fields=raw_quota,
         )
+        usage = record_probe(usage, self.snapshot_dir)
         self._save_snapshot(usage)
         return usage
 
@@ -1393,8 +1467,28 @@ class ClaudeCodeAccountAdapter(AccountUsageAdapter):
             logger.debug("Claude unified rate limit probe failed: %s", exc)
             return None
 
-        if "anthropic-ratelimit-unified-5h-utilization" not in headers and "anthropic-ratelimit-unified-7d-utilization" not in headers:
-            return None
+        utilization_keys = ("anthropic-ratelimit-unified-5h-utilization", "anthropic-ratelimit-unified-7d-utilization")
+        reset_keys = ("anthropic-ratelimit-unified-5h-reset", "anthropic-ratelimit-unified-7d-reset")
+        if not any(key in headers for key in utilization_keys):
+            logger.warning("Anthropic quota headers unavailable; received fields: %s", list(headers))
+            return self.degraded("Sem medidor: headers Anthropic ausentes.", "claude_code_api")
+        try:
+            if any(key not in headers for key in utilization_keys + reset_keys):
+                raise ValueError("missing fields")
+            if any(not 0 <= float(headers[key]) <= 1 for key in utilization_keys):
+                raise ValueError("utilization outside 0..1")
+            for key in reset_keys:
+                value = headers[key]
+                try:
+                    if int(value) <= 0:
+                        raise ValueError("invalid reset")
+                except ValueError:
+                    parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+                    if parsed.tzinfo is None:
+                        raise ValueError("reset without timezone")
+        except (TypeError, ValueError):
+            logger.warning("Invalid Anthropic quota payload; received fields: %s", list(headers))
+            return self.degraded("Sem medidor: campos Anthropic ausentes ou inválidos.", "claude_code_api")
 
         windows: List[QuotaWindow] = []
 
@@ -1463,7 +1557,9 @@ class ClaudeCodeAccountAdapter(AccountUsageAdapter):
             windows=windows,
             message="Quotas lidas em tempo real da API unificada do Claude Code.",
             dashboard_url=self.spec.dashboard_url,
+            raw_fields=sanitize_raw("anthropic", headers),
         )
+        usage = record_probe(usage, self.snapshot_dir)
         self._save_snapshot(usage)
         return usage
 
@@ -1504,8 +1600,8 @@ class ClaudeCodeAccountAdapter(AccountUsageAdapter):
                         QuotaWindow(
                             quota_id="claude:weekly",
                             label="Limite Semanal (1 semana)",
-                            used_percent=0.0,
-                            remaining_percent=100.0,
+                            used_percent=None,
+                            remaining_percent=None,
                             window_duration_minutes=10080,
                             resets_at=None,
                             metric="subscription",
@@ -1513,8 +1609,8 @@ class ClaudeCodeAccountAdapter(AccountUsageAdapter):
                         QuotaWindow(
                             quota_id="claude:5h",
                             label="Janela Móvel (5h)",
-                            used_percent=0.0,
-                            remaining_percent=100.0,
+                            used_percent=None,
+                            remaining_percent=None,
                             window_duration_minutes=300,
                             resets_at=None,
                             metric="subscription",

@@ -136,6 +136,10 @@ def _quota_headroom(account: ProviderAccountUsage) -> Optional[float]:
     A healthy short window cannot compensate for an exhausted weekly/monthly
     window (or vice versa), so routing must respect both horizons.
     """
+    if account.status.value not in {"connected", "limited"} or account.plausibility_flags:
+        return None
+    if account.status.value == "limited":
+        return 0.0
     known = [window for window in account.windows if window.remaining_percent is not None]
     if not known:
         return None
@@ -353,4 +357,3 @@ def derive_task_budget(
         short_window=short_window,
         long_window=long_window,
     )
-

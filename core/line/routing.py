@@ -10,6 +10,11 @@ or specialized intelligence tiers.
 Capabilities are declared, never assumed (USR-67): a stage has a mode (`STAGE_MODES`: write for
 development/integration, read otherwise) and `pick()` only elects harnesses that declare it in
 `core.line.agent_cli.HARNESS_CAPABILITIES`, before ranking by headroom.
+
+Operating harness (USR-109): when the owner drives the factory through a specific harness (explicit
+argument, `DARKFAC_OPERATING_HARNESS` or autodetection, see `core.line.operating_harness`), that harness is
+elected for the `development` stage whenever it survives the same filters and its quota is above the
+critical floor, ahead of the headroom ranking. The 15% floor is never relaxed.
 """
 
 from __future__ import annotations
@@ -24,6 +29,7 @@ from typing import Any, Callable, Iterable, Literal, Optional, Union
 from pydantic import BaseModel, Field
 
 from core.line.agent_cli import AgentResult, _DEFAULT_OPENROUTER_MODEL, supports
+from core.line.operating_harness import resolve_operating_harness
 
 logger = logging.getLogger(__name__)
 
@@ -385,6 +391,11 @@ def _resolve_cascade(
             return [("codex", None), ("grok", None), ("antigravity", None)]
         if implementing_harness == "codex":
             return [("claude", None), ("grok", None), ("antigravity", None)]
+        # The reviewer never shares the implementer's family, including for Grok and Antigravity.
+        if implementing_harness == "grok":
+            return [("claude", None), ("codex", None), ("antigravity", None)]
+        if implementing_harness == "antigravity":
+            return [("claude", None), ("codex", None), ("grok", None)]
         return [("claude", None), ("codex", None), ("grok", None), ("antigravity", None)]
     return list(stage_cfg.cascade)
 
@@ -402,6 +413,15 @@ def _split_exclude(
     return harnesses, pairs
 
 
+def _extra_operating_candidate(
+    cascade: list[tuple[str, Optional[str]]], operating_harness: Optional[str]
+) -> Optional[tuple[str, Optional[str]]]:
+    """`(operating_harness, None)` when that harness is not in `cascade` at all, else None."""
+    if operating_harness and all(harness != operating_harness for harness, _ in cascade):
+        return operating_harness, None
+    return None
+
+
 def _routable_candidates(
     stage: str,
     stage_cfg: StageRoute,
@@ -411,16 +431,23 @@ def _routable_candidates(
     excluded_harnesses: set[str],
     excluded_pairs: set[tuple[str, Optional[str]]],
     implementing_harness: Optional[str],
+    operating_harness: Optional[str] = None,
 ) -> list[tuple[str, Optional[str]]]:
     """Cascade candidates that could serve `stage` on this host, before cooldown/quota (pick() steps 0-1).
 
     Shared by `pick()` and `earliest_route_available_at()` so a candidate is "eligible" in exactly the
     same sense in both: not excluded, present in `host_caps`, declaring `required_mode`, not a
     forbidden model.
+
+    `operating_harness` (USR-109) that is not in the stage cascade is appended as one EXTRA candidate
+    (model None) after the cascade ones, through the very same filters; callers must treat it as electable
+    by the operating-harness preference only (`_extra_operating_candidate`), never as a ranked cascade member.
     """
     forbidden_models = set(m.lower().strip() for m in cfg.forbidden_autonomous_models)
     candidates: list[tuple[str, Optional[str]]] = []
-    for harness, model in _resolve_cascade(stage_cfg, implementing_harness):
+    cascade = _resolve_cascade(stage_cfg, implementing_harness)
+    extra = _extra_operating_candidate(cascade, operating_harness)
+    for harness, model in cascade + ([extra] if extra is not None else []):
         if harness in excluded_harnesses or (harness, model) in excluded_pairs:
             continue
         if f"harness:{harness}" not in caps:
@@ -435,6 +462,32 @@ def _routable_candidates(
             continue
         candidates.append((harness, model))
     return candidates
+
+
+def _rank_eligible(
+    stage: str, complexity: Optional[str], eligible: list[tuple[str, Optional[str], float]]
+) -> tuple[str, Optional[str]]:
+    """Winner among eligible `(harness, model, remaining)` candidates: complexity tier, then headroom."""
+    comp = (complexity or "").lower().strip()
+    if comp in ("high", "critical") or stage in ("planning", "architecture"):
+        # High Intelligence tier: prioritize Opus or Sol
+        tier = [
+            cand for cand in eligible
+            if cand[1] and any(m in cand[1].lower() for m in ("opus", "sol"))
+        ]
+    elif comp == "low":
+        # Low complexity: prioritize Luna xhigh or Gemini Flash
+        tier = [
+            cand for cand in eligible
+            if (cand[1] and any(m in cand[1].lower() for m in ("luna", "gemini", "flash")))
+            or cand[0] == "antigravity"
+        ]
+    else:
+        # Medium complexity / default: Headroom Dinâmico (maior cota primeiro)
+        tier = []
+    pool = tier or eligible
+    pool.sort(key=lambda item: item[2], reverse=True)
+    return pool[0][0], pool[0][1]
 
 
 def pick(
@@ -453,16 +506,26 @@ def pick(
     openrouter_balance_lookup: Optional[Callable[[], Optional[float]]] = None,
     mode: Optional[str] = None,
     unknown_quota_last_resort_ok: Optional[bool] = None,
+    operating_harness: Optional[str] = None,
 ) -> Optional[tuple[str, Optional[str]]]:
     """Pick a (harness, model) for `stage`, or None if nothing is eligible right now.
 
     `mode` is the agent mode the caller will request (`read`/`write`); when None it is derived from
     the stage (`STAGE_MODES`).
 
+    `operating_harness` is the harness the owner is operating the factory through (USR-109); when None it
+    comes from `DARKFAC_OPERATING_HARNESS` or autodetection (`core.line.operating_harness`), and with no
+    signal there is none. It only matters for the `development` stage.
+
     Enforces:
     0. Filter out harnesses that do not declare `mode` (before any headroom ranking).
     1. Filter out accounts in cooldown, missing from host_caps, forbidden models,
        and accounts with unknown or CRITICAL quota (<= 15.0%, fail-closed).
+    1b. Operating-harness preference (`development` only): when the operating harness survived every
+       filter above with known quota above the critical floor and no cooldown, it is elected before any
+       headroom or complexity ranking. A harness outside the stage cascade takes part as an extra
+       candidate that only this step can elect. If it did not survive, nothing changes (the 15% floor is
+       never relaxed).
     2. Dynamic Headroom prioritization:
        - High complexity / planning: prefers Claude Opus / GPT Sol if eligible,
          falling back to highest headroom.
@@ -488,14 +551,20 @@ def pick(
     critical_threshold = cfg.pressure_thresholds.get("critical", _DEFAULT_PRESSURE_THRESHOLDS["critical"])
     forbidden_models = set(m.lower().strip() for m in cfg.forbidden_autonomous_models)
 
+    # The operating-harness preference is a development-only rule; other stages never even look it up.
+    operating = resolve_operating_harness(operating_harness) if stage == "development" else None
+    extra_candidate = _extra_operating_candidate(_resolve_cascade(stage_cfg, implementing_harness), operating)
+
     # Candidate evaluation with fail-closed semantics
     # (harness, model, in_cooldown, is_critical_or_unknown, remaining_headroom)
     evaluated: list[tuple[str, Optional[str], bool, bool, float]] = []
     eligible: list[tuple[str, Optional[str], float]] = []
+    extra_eligible: list[tuple[str, Optional[str], float]] = []
     unknown_quota: list[tuple[str, Optional[str]]] = []
 
     for harness, model in _routable_candidates(
-        stage, stage_cfg, cfg, caps, required_mode, excluded_harnesses, excluded_pairs, implementing_harness
+        stage, stage_cfg, cfg, caps, required_mode, excluded_harnesses, excluded_pairs, implementing_harness,
+        operating,
     ):
         cooling = _in_cooldown(harness, cooldowns)
         provider_id = _HARNESS_TO_PROVIDER.get(harness, harness)
@@ -503,6 +572,14 @@ def pick(
 
         # Fail-closed: unknown quota or quota <= critical is strictly critical/ineligible
         is_critical = remaining is None or remaining <= critical_threshold
+
+        if (harness, model) == extra_candidate:
+            # Outside the cascade: electable only by the operating-harness preference below. It takes no
+            # part in the headroom ranking, the unknown-quota bootstrap or the "all exhausted" fallback.
+            if not cooling and not is_critical and remaining is not None:
+                extra_eligible.append((harness, model, remaining))
+            continue
+
         evaluated.append((harness, model, cooling, is_critical, remaining or 0.0))
 
         if not cooling and not is_critical and remaining is not None:
@@ -512,37 +589,16 @@ def pick(
 
     winner: Optional[tuple[str, Optional[str]]] = None
 
-    if eligible:
-        comp = (complexity or "").lower().strip()
-        if comp in ("high", "critical") or stage in ("planning", "architecture"):
-            # High Intelligence tier: prioritize Opus or Sol
-            high_intel = [
-                cand for cand in eligible
-                if cand[1] and any(m in cand[1].lower() for m in ("opus", "sol"))
-            ]
-            if high_intel:
-                high_intel.sort(key=lambda item: item[2], reverse=True)
-                winner = (high_intel[0][0], high_intel[0][1])
-            else:
-                eligible.sort(key=lambda item: item[2], reverse=True)
-                winner = (eligible[0][0], eligible[0][1])
-        elif comp == "low":
-            # Low complexity: prioritize Luna xhigh or Gemini Flash
-            low_intel = [
-                cand for cand in eligible
-                if (cand[1] and any(m in cand[1].lower() for m in ("luna", "gemini", "flash")))
-                or cand[0] == "antigravity"
-            ]
-            if low_intel:
-                low_intel.sort(key=lambda item: item[2], reverse=True)
-                winner = (low_intel[0][0], low_intel[0][1])
-            else:
-                eligible.sort(key=lambda item: item[2], reverse=True)
-                winner = (eligible[0][0], eligible[0][1])
-        else:
-            # Medium complexity / default: Headroom Dinâmico (maior cota primeiro)
-            eligible.sort(key=lambda item: item[2], reverse=True)
-            winner = (eligible[0][0], eligible[0][1])
+    preferred = ([cand for cand in eligible if cand[0] == operating] or extra_eligible) if operating else []
+    if preferred:
+        # Same ranking as below, restricted to the operating harness (picks among its own cascade models).
+        winner = _rank_eligible(stage, complexity, preferred)
+        logger.info(
+            "operating_harness_preferred harness=%s remaining=%.1f stage=%s",
+            winner[0], next(item[2] for item in preferred if (item[0], item[1]) == winner), stage,
+        )
+    elif eligible:
+        winner = _rank_eligible(stage, complexity, eligible)
 
     allow_unknown = unknown_quota_last_resort() if unknown_quota_last_resort_ok is None else unknown_quota_last_resort_ok
     if winner is None and allow_unknown and unknown_quota:
@@ -648,6 +704,7 @@ def earliest_route_available_at(
     exclude: Iterable[Any] = (),
     cooldown_path: Optional[Path] = None,
     reset_lookup: Optional[ResetLookup] = None,
+    operating_harness: Optional[str] = None,
 ) -> datetime:
     """When to look for a route again after `pick(stage, ...)` found none (timezone-aware UTC).
 
@@ -659,6 +716,9 @@ def earliest_route_available_at(
         snapshot's `resets_at`),
       * `now + cooldown_default_minutes` (60 by default), which is therefore also the answer when
         nothing is known.
+
+    For the `development` stage the operating harness (USR-109), when it is not in the cascade, counts as
+    one more candidate, since `pick()` would elect it the moment it is usable again.
 
     Times in the past are ignored and the result is never sooner than `MIN_ROUTE_WAIT_SECONDS`
     from `now`. Callers turn it into `retry` with `not_before=<iso>` instead of parking the run on a
@@ -674,9 +734,10 @@ def earliest_route_available_at(
         return max(fallback, floor)
 
     excluded_harnesses, excluded_pairs = _split_exclude(exclude)
+    operating = resolve_operating_harness(operating_harness) if stage == "development" else None
     candidates = _routable_candidates(
         stage, stage_cfg, cfg, set(host_caps), mode or stage_mode(stage),
-        excluded_harnesses, excluded_pairs, implementing_harness,
+        excluded_harnesses, excluded_pairs, implementing_harness, operating,
     )
     cooldowns = _load_cooldowns(cooldown_path or default_cooldown_path())
     critical = cfg.pressure_thresholds.get("critical", _DEFAULT_PRESSURE_THRESHOLDS["critical"])

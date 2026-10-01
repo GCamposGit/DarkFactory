@@ -2995,7 +2995,8 @@
     "project_id": "darkfac",
     "title": "Medidor de cotas nao confiavel: Grok le 1,4% restante com 98,6% disponivel; auditar os 4 provedores com contrato, fixtures reais, historico e autoteste",
     "origin": "user",
-    "status": "planned",
+    "status": "completed",
+    "delivery_evidence": "41978ca084879add00d5178a3c4cae675a2564bc",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -3025,14 +3026,15 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-01T10:30:39.461763Z",
-    "updated_at": "2026-10-01T10:30:39.461763Z"
+    "updated_at": "2026-10-01T13:08:52.219553Z"
   },
   {
     "id": "USR-109",
     "project_id": "darkfac",
     "title": "Roteador: preferir o harness de operacao como desenvolvedor principal (cota acima do piso) e habilitar escrita no Grok Build",
     "origin": "user",
-    "status": "planned",
+    "status": "completed",
+    "delivery_evidence": "5e7c848ded30b87a55916d609c55dff96387e2c6",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -3062,7 +3064,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-01T10:31:19.702331Z",
-    "updated_at": "2026-10-01T10:31:19.702331Z"
+    "updated_at": "2026-10-01T13:57:29.562041Z"
   },
   {
     "id": "USR-110",
@@ -3248,5 +3250,37 @@
     "dependencies": [],
     "created_at": "2026-10-01T12:55:19.726914Z",
     "updated_at": "2026-10-01T12:55:19.726914Z"
+  },
+  {
+    "id": "USR-116",
+    "project_id": "darkfac",
+    "title": "run_ticket longo mistura versoes de codigo: importa modulos tarde de um checkout compartilhado que outra sessao atualizou e a entrega quebra depois do portao aprovado",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "EVIDENCIA (2026-10-01, run_ticket USR-108 --harness codex, 08:18 a 10:04): o agente terminou, o commit foi feito e o portao oficial passou ([HARNESS_PASS]); em seguida a entrega quebrou com 'Traceback ... core/git/autonomy.py line 566, in _record_completion: ticket.delivery_evidence = implementation_sha ... ValueError: \"UserTicket\" object has no field \"delivery_evidence\"'. Causa: durante os 94 min da execucao outra sessao mergeou o USR-94 (#96, 385f3c1, que adiciona delivery_evidence a core/demands/models.py e usa o campo em core/git/autonomy.py) e atualizou por fast-forward o checkout compartilhado C:\\dev\\DarkFac. O processo do run_ticket ja tinha carregado o core/demands/models.py ANTIGO na memoria (import no topo de run_ticket.py) e importou o core/git/autonomy.py NOVO do disco so na fase de entrega (import tardio dentro de main(): 'from core.git.autonomy import GitAutonomyManager'). Resultado: duas versoes do codigo no mesmo processo. O trabalho nao foi perdido (commit na branch ticket/usr-108, worktree preservada), mas a entrega exigiu resgate manual: rebase no origin/main e um script avulso chamando GitAutonomyManager.complete_ticket em processo novo. Nao existe comando oficial para retomar so a entrega.\n\nPOR QUE VAI REPETIR: o checkout compartilhado e atualizado por qualquer sessao que faca pull; com tickets de 60-95 min (ver USR-113/USR-114) e varias sessoes ativas, a janela de corrida e grande; qualquer ticket que altere um modelo/contrato compartilhado reproduz o erro.\n\nSOLUCAO: (a) a fase de entrega (portao pos-agente, complete_ticket, deliver_branch, limpeza) roda sempre em PROCESSO NOVO, que importa o codigo atual do disco de forma consistente (ex.: run_ticket reexecuta a si mesmo com um subcomando interno, ou chama python -m core.git.autonomy complete); (b) novo comando oficial `python C:\\dev\\DarkFac\\run_ticket.py --resume-delivery <TICKET_ID> [--worktree <caminho>]` que reaplica so os passos de rebase em origin/main, portao/CI e complete_ticket para uma worktree ja desenvolvida e preservada (substitui o script avulso); (c) antes da entrega, rebase automatico da branch em origin/main com mensagem clara se houver conflito (nao deixar a entrega quebrar com ValueError); (d) se a entrega falhar depois de o portao passar, o launcher imprime o estado exato (branch, SHA, worktree) e o comando --resume-delivery a usar, e retorna codigo !=0 sem descartar a worktree.\n\nNAO-OBJETIVOS: nao mudar o fluxo de desenvolvimento nem o portao.",
+    "core_journey": [
+      "EVIDENCIA (2026-10-01, run_ticket USR-108 --harness codex, 08:18 a 10:04): o agente terminou, o commit foi feito e o portao oficial passou ([HARNESS_PASS]); em seguida a entrega quebrou com 'Traceback ... core/git/autonomy.py line 566, in _record_completion: ticket.delivery_evidence = implementation_sha ... ValueError: \"UserTicket\" object has no field \"delivery_evidence\"'. Causa: durante os 94 min da execucao outra sessao mergeou o USR-94 (#96, 385f3c1, que adiciona delivery_evidence a core/demands/models.py e usa o campo em core/git/autonomy.py) e atualizou por fast-forward o checkout compartilhado C:\\dev\\DarkFac. O processo do run_ticket ja tinha carregado o core/demands/models.py ANTIGO na memoria (import no topo de run_ticket.py) e importou o core/git/autonomy.py NOVO do disco so na fase de entrega (import tardio dentro de main(): 'from core.git.autonomy import GitAutonomyManager'). Resultado: duas versoes do codigo no mesmo processo. O trabalho nao foi perdido (commit na branch ticket/usr-108, worktree preservada), mas a entrega exigiu resgate manual: rebase no origin/main e um script avulso chamando GitAutonomyManager.complete_ticket em processo novo. Nao existe comando oficial para retomar so a entrega.\n\nPOR QUE VAI REPETIR: o checkout compartilhado e atualizado por qualquer sessao que faca pull; com tickets de 60-95 min (ver USR-113/USR-114) e varias sessoes ativas, a janela de corrida e grande; qualquer ticket que altere um modelo/contrato compartilhado reproduz o erro.\n\nSOLUCAO: (a) a fase de entrega (portao pos-agente, complete_ticket, deliver_branch, limpeza) roda sempre em PROCESSO NOVO, que importa o codigo atual do disco de forma consistente (ex.: run_ticket reexecuta a si mesmo com um subcomando interno, ou chama python -m core.git.autonomy complete); (b) novo comando oficial `python C:\\dev\\DarkFac\\run_ticket.py --resume-delivery <TICKET_ID> [--worktree <caminho>]` que reaplica so os passos de rebase em origin/main, portao/CI e complete_ticket para uma worktree ja desenvolvida e preservada (substitui o script avulso); (c) antes da entrega, rebase automatico da branch em origin/main com mensagem clara se houver conflito (nao deixar a entrega quebrar com ValueError); (d) se a entrega falhar depois de o portao passar, o launcher imprime o estado exato (branch, SHA, worktree) e o comando --resume-delivery a usar, e retorna codigo !=0 sem descartar a worktree.\n\nNAO-OBJETIVOS: nao mudar o fluxo de desenvolvimento nem o portao."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "A fase de entrega do run_ticket roda em processo novo (ou com imports consistentes do disco atual); teste que simula a troca de versao de core/demands/models.py entre o desenvolvimento e a entrega e prova que nao ha ValueError",
+      "Existe `run_ticket.py --resume-delivery <TICKET_ID> [--worktree <caminho>]`, documentado no --help e testado: rebase em origin/main, entrega e limpeza para uma worktree ja desenvolvida",
+      "Conflito de rebase na entrega produz mensagem clara com a lista de arquivos conflitantes e preserva a worktree (teste)",
+      "Falha de entrega apos o portao aprovado imprime branch, SHA, caminho da worktree e o comando --resume-delivery exato, e retorna codigo != 0 sem remover a worktree (teste)",
+      "O gate oficial (python C:\\dev\\DarkFac\\core\\harness\\runner.py --quick) passa"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-01T13:18:43.247706Z",
+    "updated_at": "2026-10-01T13:18:43.247706Z"
   }
 ]

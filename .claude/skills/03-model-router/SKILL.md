@@ -39,6 +39,9 @@ Esta skill governa o despacho eficiente e custo-efetivo de modelos de linguagem 
   - `token_budget`: Contrato operacional com teto de tokens, nível de esforço (`low`, `high`, `max`) e estratégia de chunking.
   - `worker_identity`: Instância de `SanitizedIdentity` com `subject`, `role` e `account_ref`.
 
+### Preferência pelo Harness de Operação (USR-109)
+- No estágio `development`, o roteador (`core.line.routing.pick`) elege o harness pelo qual o usuário está operando a fábrica sempre que ele estiver elegível (cota > 15%, sem cooldown, modo `write` declarado), à frente do maior headroom e da preferência por complexidade. Se não estiver elegível, vale o Dynamic Headroom. Detalhes e precedência da detecção na skill 19-run-ticket (seção 2b).
+
 ### Portões, Política e Validação
 - **Conformidade com GatePolicy**: O modelo e o papel atribuídos devem pertencer aos papéis habilitados na política do supervisor (`GatePolicy.is_role_enabled(role)`).
 - **Proibição de Fable como Default**: Modelos caros exigem justificativa empírica de Pareto; Fable não é rota de contingência padrão.

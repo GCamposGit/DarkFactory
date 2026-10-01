@@ -46,7 +46,9 @@ from core.line.agent_cli import (
     supports,
 )
 from core.line.diagnostics import redacted_head
+from core.line.operating_harness import detect_operating_harness
 from core.line.routing import _HARNESS_TO_PROVIDER, _default_quota_headroom, load_routing_config, pick
+from core.usage.history import history_path, read_history
 from core.roadmap.models import DeliveryStatus
 
 if TYPE_CHECKING:
@@ -79,12 +81,37 @@ def inspect_quotas() -> dict[str, dict[str, Any]]:
     quotas: dict[str, dict[str, Any]] = {}
     for harness, provider in _HARNESS_TO_PROVIDER.items():
         headroom = _default_quota_headroom(provider)
+        rows = read_history(history_path(PROJECT_ROOT / ".factory" / "usage" / "providers", provider))
+        latest = rows[-1] if rows else {}
+        snapshot_file = PROJECT_ROOT / ".factory" / "usage" / "providers" / f"{provider}.json"
+        if snapshot_file.is_file():
+            try:
+                snapshot = json.loads(snapshot_file.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                snapshot = {}
+        else:
+            snapshot = {}
+        source = snapshot.get("adapter") or latest.get("adapter") or "sem fonte"
+        checked_at = snapshot.get("checked_at") or latest.get("checked_at")
+        try:
+            from datetime import datetime, timezone
+            age_seconds = max(0, (datetime.now(timezone.utc) - datetime.fromisoformat(str(checked_at).replace("Z", "+00:00"))).total_seconds())
+            age = f"{age_seconds / 60:.0f} min" if age_seconds < 3600 else f"{age_seconds / 3600:.1f} h"
+        except (TypeError, ValueError):
+            age = "idade desconhecida"
+        raw = snapshot.get("raw_fields") or latest.get("raw_fields") or {}
+        from core.usage.history import sanitize_raw
+        raw = sanitize_raw(provider, raw)
+        flags = snapshot.get("plausibility_flags") or latest.get("flags") or []
+        # Unknown remains ineligible for the launch guard, while the report
+        # labels it separately from a measured critical percentage.
         is_critical = headroom is None or headroom <= 15.0
         quotas[harness] = {
             "provider": provider,
             "headroom": headroom,
             "is_critical": is_critical,
-            "status": "CRÍTICO (<= 15%)" if is_critical else "SAUDÁVEL",
+            "status": "SEM MEDIDOR / SUSPEITA" if headroom is None else ("CRÍTICO (<= 15%)" if is_critical else "SAUDÁVEL"),
+            "source": source, "age": age, "raw_fields": raw, "flags": flags,
         }
     return quotas
 
@@ -98,7 +125,14 @@ def format_quota_report(quotas: dict[str, dict[str, Any]]) -> str:
     ]
     for harness, info in sorted(quotas.items()):
         val_str = f"{info['headroom']:.1f}%" if info["headroom"] is not None else "DESCONHECIDO / STALE"
-        lines.append(f" - {harness:<12} ({info['provider']:<10}): {val_str:<10} [{info['status']}]")
+        raw = ", ".join(
+            f"{key}={value}" + (" usado" if info.get("provider") == "xai" and key == "usagePercent" else "")
+            for key, value in info.get("raw_fields", {}).items()
+        ) or "sem leitura bruta"
+        flags = "; ".join(info.get("flags", []))
+        lines.append(f" - {harness:<12} ({info['provider']:<10}): {val_str:<10} [{info['status']}] "
+                     f"[{info.get('source', 'sem fonte')}, {info.get('age', 'idade desconhecida')}, raw {raw}]"
+                     + (f" ALERTA: {flags}" if flags else ""))
     lines.append("=" * 68)
     return "\n".join(lines)
 
@@ -347,15 +381,20 @@ def main(argv: Optional[list[str]] = None) -> int:
     caps = ["harness:claude", "harness:codex", "harness:grok", "harness:antigravity"]
     selected_harness: Optional[str] = None
     selected_model: Optional[str] = None
+    # The harness the owner operates the factory through is the preferred developer while its quota is
+    # above the critical floor (USR-109); None when no signal exists (pump, worker, cloud).
+    operating_harness = detect_operating_harness()
+    route_reason = "headroom"
 
     if args.harness:
         target_harness = args.harness.lower().strip()
         harness_info = quotas.get(target_harness)
         if harness_info and harness_info["is_critical"] and not override_granted:
+            quota_reason = ("sem medidor verificável" if harness_info["headroom"] is None
+                            else f"cota crítica ({harness_info['headroom']}% restante <= 15.0%)")
             print(
                 f"\n[BLOQUEIO DE SEGURANÇA - FAIL-CLOSED]\n"
-                f"O harness solicitado '{target_harness}' está com cota crítica "
-                f"({harness_info['headroom']} restante <= 15.0%).\n"
+                f"O harness solicitado '{target_harness}' está {quota_reason}.\n"
                 f"Execução recusada para proteger o saldo da conta.\n"
                 f"Para forçar mesmo assim, forneça --force ou inclua autorização explícita no prompt.\n",
                 file=sys.stderr,
@@ -367,14 +406,17 @@ def main(argv: Optional[list[str]] = None) -> int:
             return 2
 
         selected_harness = target_harness
+        route_reason = "explicit_harness"
         if not args.json:
             if harness_info and harness_info["is_critical"] and override_granted:
-                print(f"[AVISO] Override explícito do usuário ativo: executando em {target_harness} mesmo com cota crítica.")
+                print(f"[AVISO] Override explícito do usuário ativo: executando em {target_harness} com quota crítica ou desconhecida.")
             else:
                 print(f"[+] Harness explicitamente selecionado: {target_harness}")
     else:
         # Automatic router resolution via Dynamic Headroom, among harnesses that can write
-        route = pick("development", caps, mode=DEVELOPMENT_MODE)
+        if operating_harness and not args.json:
+            print(f"[+] Harness de operacao detectado: {operating_harness}")
+        route = pick("development", caps, mode=DEVELOPMENT_MODE, operating_harness=operating_harness)
         if route is None:
             print(
                 "\n[ERRO] Nenhuma rota disponível: todas as contas de assinatura estão <= 15% e OpenRouter sem saldo confirmado.",
@@ -382,10 +424,14 @@ def main(argv: Optional[list[str]] = None) -> int:
             )
             return 2
         selected_harness, selected_model = route
+        preferred_operating = operating_harness is not None and selected_harness == operating_harness
+        if preferred_operating:
+            route_reason = "operating_harness_preferred"
         if not args.json:
             print(
                 f"[+] Roteador selecionou automaticamente: {selected_harness.upper()} "
                 f"(Modelo: {selected_model or 'default'}, modo: {DEVELOPMENT_MODE})"
+                + (" (preferencia: harness de operacao)" if preferred_operating else "")
             )
 
     if args.dry_run:
@@ -396,6 +442,8 @@ def main(argv: Optional[list[str]] = None) -> int:
             "selected_model": selected_model,
             "mode": DEVELOPMENT_MODE,
             "override_granted": override_granted,
+            "operating_harness": operating_harness,
+            "route_reason": route_reason,
             "dry_run": True,
         }
         if args.json:

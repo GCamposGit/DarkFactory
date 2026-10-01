@@ -237,14 +237,7 @@ def test_codex_rate_limited_from_stderr(tmp_path, make_fake_cli, monkeypatch):
     assert result.reset_at is not None
 
 
-def test_grok_write_mode_unsupported(tmp_path, monkeypatch):
-    # find_grok_binary should not even be consulted for write mode.
-    monkeypatch.setattr(agent_cli, "find_grok_binary", lambda: (_ for _ in ()).throw(AssertionError("should not be called")))
-    req = AgentRequest(prompt="do work", cwd=tmp_path, mode="write", harness="grok")
-    result = run_agent(req)
-
-    assert result.ok is False
-    assert result.error_kind is not None
+# Grok write mode (USR-109) is covered in tests/line/test_grok_runner.py.
 
 
 def test_antigravity_write_mode_unsupported(tmp_path, monkeypatch):
