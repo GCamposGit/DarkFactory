@@ -12,7 +12,4 @@
 - (technical) Há alguma restrição de stack/UI (framework, biblioteca de componentes) que deva ser respeitada para a sidebar? -> **Usar apenas o que já está no projeto (sem novas deps)** (O fora de escopo proíbe dependências externas pesadas; reutilizar o stack atual reduz risco e mantém o CI verde.)
 
 ## Decisoes do owner
-- (nenhuma pergunta bloqueante)
-
-## Aguardando decisao do owner
-- [intent] O menu vertical lateral esquerdo deve substituir completamente o menu superior ou coexistir com ele (ex.: topbar com logo/busca + sidebar de navegação)? (id=q1)
+- [intent] O menu vertical lateral esquerdo deve substituir completamente o menu superior ou coexistir com ele (ex.: topbar com logo/busca + sidebar de navegação)? -> **Manter topbar enxuta (logo/busca) e mover apenas os links de navegação para a sidebar** (respondida pelo owner)
