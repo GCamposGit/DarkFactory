@@ -3134,8 +3134,8 @@
     "project_id": "darkfac",
     "title": "Entrega: conflito textual no demands.json quando outro ticket e registrado durante a execucao derruba a entrega depois do trabalho pronto",
     "origin": "user",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "9cb024c0d0a79ec035f2998f8284568600021b1b",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -3157,7 +3157,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-01T12:01:55.341233Z",
-    "updated_at": "2026-10-01T12:01:55.341233Z"
+    "updated_at": "2026-10-01T17:11:00Z"
   },
   {
     "id": "USR-113",
