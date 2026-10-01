@@ -146,6 +146,10 @@ _FAKE_GH_SCRIPT = textwrap.dedent(
             sys.exit(0)
 
         if starts("pr", "view"):
+            if "headRefOid" in argv:
+                head = spec.get("pr_head_sha") or _git(["rev-parse", "HEAD"], cwd).stdout.strip()
+                sys.stdout.write(json.dumps({{"headRefOid": head}}))
+                sys.exit(0)
             state_path = spec.get("state_path")
             merge_sha = ""
             if state_path and os.path.exists(state_path):

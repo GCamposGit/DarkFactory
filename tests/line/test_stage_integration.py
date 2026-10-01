@@ -202,6 +202,10 @@ _FAKE_GH_SCRIPT = textwrap.dedent(
             sys.exit(0)
 
         if starts("pr", "view"):
+            if "headRefOid" in argv:
+                head = spec.get("pr_head_sha") or _git(["rev-parse", "HEAD"], cwd).stdout.strip()
+                sys.stdout.write(json.dumps({{"headRefOid": head}}))
+                sys.exit(0)
             state_path = spec.get("state_path")
             merge_sha = ""
             if state_path and os.path.exists(state_path):
@@ -371,12 +375,132 @@ def test_checks_query_error_waits_before_retrying_integration(
         "pr_checks_stderr": "HTTP 502",
     })
     now = datetime(2026, 10, 1, 12, 0, tzinfo=UTC)
-    handler = IntegrationStageHandler(project, gh_executable=gh_path, clock=lambda: now)
+    handler = IntegrationStageHandler(
+        project, gh_executable=gh_path, clock=lambda: now, ci_check_window_s=0
+    )
     result = handler.handle(_context("run-query-error"))
     assert result.outcome == "retry"
     assert _parse_retry_cause_code(result.cause_code) == (
         None, (now + timedelta(seconds=handler.ci_check_window_s)).isoformat()
     )
+
+
+def test_rebase_push_with_no_checks_does_not_merge_when_ci_is_configured(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fake_gh
+) -> None:
+    origin = _init_bare_origin(tmp_path)
+    project = _project(str(origin))
+    monkeypatch.setenv("DARKFAC_WORKSPACES", str(tmp_path / "root"))
+    gh_path, set_spec, calls = fake_gh
+    ws = checkout(project, "run-no-checks")
+    ws_mod.write_context(ws, "DEMAND.md", "# Add widget\n")
+    workflows = ws.path / ".github" / "workflows"
+    workflows.mkdir(parents=True)
+    (workflows / "ci.yml").write_text("name: CI\n", encoding="utf-8")
+    ws_mod.commit(ws, "feat: add CI and widget", "run-no-checks:T1")
+    ws_mod.push(ws)
+    set_spec({
+        "pr_list": [{"number": 7, "url": "https://github.com/acme/repo/pull/7", "state": "OPEN"}],
+        "pr_checks": [],
+    })
+    monkeypatch.setenv("DARKFAC_CI_NO_CHECKS_GRACE_SECONDS", "30")
+    now = datetime(2026, 10, 1, 12, 0, tzinfo=UTC)
+    handler = IntegrationStageHandler(
+        project, gh_executable=gh_path, clock=lambda: now, ci_check_window_s=300
+    )
+    result = handler.handle(_context("run-no-checks"))
+    assert result.outcome == "retry"
+    assert _parse_retry_cause_code(result.cause_code) == (
+        None, (now + timedelta(seconds=30)).isoformat()
+    )
+    assert sum(call[:2] == ["pr", "checks"] for call in calls()) == 1
+    assert not any(call[:2] == ["pr", "merge"] for call in calls())
+
+    later = now + timedelta(seconds=30)
+    resumed = IntegrationStageHandler(
+        project, gh_executable=gh_path, clock=lambda: later, ci_check_window_s=300
+    ).handle(_context("run-no-checks", iteration=1))
+    assert resumed.outcome == "retry"
+    assert _parse_retry_cause_code(resumed.cause_code) == (
+        None, (later + timedelta(seconds=300)).isoformat()
+    )
+    assert not any(call[:2] == ["pr", "merge"] for call in calls())
+
+
+def test_no_workflow_merges_only_after_grace_without_sleeping(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fake_gh
+) -> None:
+    origin = _init_bare_origin(tmp_path)
+    project = _project(str(origin))
+    monkeypatch.setenv("DARKFAC_WORKSPACES", str(tmp_path / "root"))
+    monkeypatch.setenv("DARKFAC_CI_NO_CHECKS_GRACE_SECONDS", "30")
+    gh_path, set_spec, calls = fake_gh
+    ws = checkout(project, "run-no-workflow")
+    ws_mod.write_context(ws, "DEMAND.md", "# Add widget\n")
+    ws_mod.commit(ws, "feat: widget", "run-no-workflow:T1")
+    ws_mod.push(ws)
+    set_spec({
+        "pr_list": [{"number": 7, "url": "https://github.com/acme/repo/pull/7", "state": "OPEN"}],
+        "pr_checks": [],
+    })
+    now = datetime(2026, 10, 1, 12, 0, tzinfo=UTC)
+    current = [now]
+    original_gate = stage_integration.ci_checks.ensure_green
+
+    def one_snapshot(*args: Any, **kwargs: Any):
+        assert kwargs["timeout_s"] == 0
+        return original_gate(*args, **kwargs)
+
+    monkeypatch.setattr(stage_integration.ci_checks, "ensure_green", one_snapshot)
+    handler = IntegrationStageHandler(
+        project, gh_executable=gh_path, clock=lambda: current[0], ci_check_window_s=300
+    )
+    first = handler.handle(_context("run-no-workflow"))
+    assert first.outcome == "retry"
+    assert _parse_retry_cause_code(first.cause_code) == (
+        None, (now + timedelta(seconds=30)).isoformat()
+    )
+    assert sum(call[:2] == ["pr", "checks"] for call in calls()) == 1
+    assert not any(call[:2] == ["pr", "merge"] for call in calls())
+
+    current[0] = now + timedelta(seconds=29)
+    second = IntegrationStageHandler(
+        project, gh_executable=gh_path, clock=lambda: current[0], ci_check_window_s=300
+    ).handle(_context("run-no-workflow", iteration=1))
+    assert second.outcome == "retry"
+    assert _parse_retry_cause_code(second.cause_code) == (
+        None, (now + timedelta(seconds=30)).isoformat()
+    )
+    assert not any(call[:2] == ["pr", "merge"] for call in calls())
+
+    current[0] = now + timedelta(seconds=30)
+    third = IntegrationStageHandler(
+        project, gh_executable=gh_path, clock=lambda: current[0], ci_check_window_s=300
+    ).handle(_context("run-no-workflow", iteration=2))
+    assert third.outcome == "success", third.cause_code
+    assert sum(call[:2] == ["pr", "merge"] for call in calls()) == 1
+
+
+def test_green_checks_on_different_pr_head_do_not_merge(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fake_gh
+) -> None:
+    origin = _init_bare_origin(tmp_path)
+    project = _project(str(origin))
+    monkeypatch.setenv("DARKFAC_WORKSPACES", str(tmp_path / "root"))
+    gh_path, set_spec, calls = fake_gh
+    ws = checkout(project, "run-stale-head")
+    ws_mod.write_context(ws, "DEMAND.md", "# Add widget\n")
+    ws_mod.commit(ws, "feat: widget", "run-stale-head:T1")
+    ws_mod.push(ws)
+    set_spec({
+        "pr_list": [{"number": 7, "url": "https://github.com/acme/repo/pull/7", "state": "OPEN"}],
+        "pr_checks": [{"bucket": "pass", "name": "build", "link": ""}],
+        "pr_head_sha": "b" * 40,
+    })
+    handler = IntegrationStageHandler(project, gh_executable=gh_path, ci_check_window_s=0)
+    result = handler.handle(_context("run-stale-head"))
+    assert result.outcome == "retry"
+    assert not any(call[:2] == ["pr", "merge"] for call in calls())
 
 
 def test_full_flow_creates_pr_and_merges_on_green_checks(

@@ -2836,7 +2836,8 @@
     "project_id": "darkfac",
     "title": "Linha: _evaluate_checks trata 'sem checks' como verde sem janela de graca: apos o push do rebase pode mergear sem CI verificado",
     "origin": "agent",
-    "status": "planned",
+    "status": "completed",
+    "delivery_evidence": "6ca7bfd9f9d6a10a42bc251b70277608db368fc1",
     "item_type": "quality",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -2867,7 +2868,7 @@
       "USR-103"
     ],
     "created_at": "2026-10-01T07:00:00Z",
-    "updated_at": "2026-10-01T07:00:00Z"
+    "updated_at": "2026-10-01T14:04:40.477027Z"
   },
   {
     "id": "USR-105",
