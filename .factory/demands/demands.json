@@ -1708,7 +1708,7 @@
     "project_id": "darkfac",
     "title": "IDs de ticket nao podem colidir entre worktrees e sessoes simultaneas",
     "origin": "user",
-    "status": "planned",
+    "status": "completed",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -1740,7 +1740,7 @@
       "USR-69"
     ],
     "created_at": "2026-09-30T17:35:54.781574Z",
-    "updated_at": "2026-09-30T22:00:00Z"
+    "updated_at": "2026-10-01T08:47:07.497437Z"
   },
   {
     "id": "USR-76",
