@@ -45,6 +45,8 @@ AUTODETECT_ENV_SIGNALS: tuple[tuple[str, str], ...] = (
     ("GROK_AGENT", "grok"),
     ("GROK_SESSION_ID", "grok"),
     ("GROK_CLI", "grok"),  # legacy name from suite_lock; not exported by Grok Build 1.0.46
+    ("ANTIGRAVITY_AGENT", "antigravity"),
+    ("ANTIGRAVITY_CONVERSATION_ID", "antigravity"),
     ("ANTIGRAVITY_SESSION", "antigravity"),
 )
 
