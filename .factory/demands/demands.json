@@ -3384,8 +3384,8 @@
     "project_id": "darkfac",
     "title": "Worker da nuvem: atualizar Codex CLI 0.48.0 -> 0.159.3 (modelo padrao gpt-5-codex recusado pela conta ChatGPT)",
     "origin": "user",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "68d11fd7b5b7514bd78034ec1d6804489c17f37d",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -3408,6 +3408,6 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-01T17:53:33.261046Z",
-    "updated_at": "2026-10-01T17:53:33.261046Z"
+    "updated_at": "2026-10-01T18:11:27.530148Z"
   }
 ]
