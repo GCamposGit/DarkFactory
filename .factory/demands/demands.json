@@ -3281,5 +3281,37 @@
     "dependencies": [],
     "created_at": "2026-10-01T13:18:43.247706Z",
     "updated_at": "2026-10-01T13:18:43.247706Z"
+  },
+  {
+    "id": "USR-117",
+    "project_id": "darkfac",
+    "title": "Deploy sai com codigo 1 por falso 'Desktop offline': node_sync sonda o /health uma unica vez e ja decide update/restart do worker",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "EVIDENCIA (2026-10-01, python C:\\dev\\DarkFac\\scripts\\dokploy_redeploy.py apos o merge do USR-109, SHA 3537af4): VPS convergiu ('[NODE SYNC] VPS: converged sha=3537af4...'), mas o script saiu com codigo 1 e imprimiu '[NODE SYNC] Desktop: offline sha=(unknown) expected=3537af4... reason=health endpoint unavailable; last contact unknown'. Cerca de 1 minuto depois, GET http://100.78.181.90:8080/health respondeu 200 com git_sha=3537af4c5ff484540d0d8105753bb50e926b93d0 (igual ao esperado), busy=false, active_runs=0, docker_ready=true; o mesmo Desktop tinha executado o portao oficial do USR-109 sem problemas ~1 h antes. Ou seja, o deploy deu falha para um no que estava saudavel e convergido.\n\nHIPOTESE (nao confirmada, ocorrencia unica): core/infra/node_sync.py::_probe faz uma unica chamada (request_json com timeout=5 s) e qualquer excecao vira state='offline'; em sync(), um no nao 'converged' dispara GET /health, POST /system/update e POST /system/restart no Desktop, e so depois ha o laco de espera (timeout=120 s) pelo estado convergido. Uma falha transitoria de rede (Tailscale) ou uma janela de reinicio do worker pode, portanto, (a) fazer o deploy sair com erro mesmo com o no bom e (b) disparar update/restart de um worker saudavel que talvez esteja no meio de um portao de testes remoto (busy/active_runs).\n\nSOLUCAO: a sonda inicial e a final do Desktop e do VPS devem tentar novamente com espera curta (ex.: 3 tentativas, backoff de ate ~15 s) antes de declarar 'offline'; antes de /system/update e /system/restart, so agir se o no estiver realmente divergente (SHA diferente observado) e NUNCA reiniciar quando /health informar busy=true ou active_runs>0; a mensagem final deve distinguir 'offline (todas as tentativas falharam)' de 'divergente'; o codigo de saida do deploy so deve ser 1 se algum no estiver divergente/offline apos as tentativas.\n\nNAO-OBJETIVOS: nao mudar o fluxo de deploy do Dokploy nem o endpoint /health do worker.",
+    "core_journey": [
+      "EVIDENCIA (2026-10-01, python C:\\dev\\DarkFac\\scripts\\dokploy_redeploy.py apos o merge do USR-109, SHA 3537af4): VPS convergiu ('[NODE SYNC] VPS: converged sha=3537af4...'), mas o script saiu com codigo 1 e imprimiu '[NODE SYNC] Desktop: offline sha=(unknown) expected=3537af4... reason=health endpoint unavailable; last contact unknown'. Cerca de 1 minuto depois, GET http://100.78.181.90:8080/health respondeu 200 com git_sha=3537af4c5ff484540d0d8105753bb50e926b93d0 (igual ao esperado), busy=false, active_runs=0, docker_ready=true; o mesmo Desktop tinha executado o portao oficial do USR-109 sem problemas ~1 h antes. Ou seja, o deploy deu falha para um no que estava saudavel e convergido.\n\nHIPOTESE (nao confirmada, ocorrencia unica): core/infra/node_sync.py::_probe faz uma unica chamada (request_json com timeout=5 s) e qualquer excecao vira state='offline'; em sync(), um no nao 'converged' dispara GET /health, POST /system/update e POST /system/restart no Desktop, e so depois ha o laco de espera (timeout=120 s) pelo estado convergido. Uma falha transitoria de rede (Tailscale) ou uma janela de reinicio do worker pode, portanto, (a) fazer o deploy sair com erro mesmo com o no bom e (b) disparar update/restart de um worker saudavel que talvez esteja no meio de um portao de testes remoto (busy/active_runs).\n\nSOLUCAO: a sonda inicial e a final do Desktop e do VPS devem tentar novamente com espera curta (ex.: 3 tentativas, backoff de ate ~15 s) antes de declarar 'offline'; antes de /system/update e /system/restart, so agir se o no estiver realmente divergente (SHA diferente observado) e NUNCA reiniciar quando /health informar busy=true ou active_runs>0; a mensagem final deve distinguir 'offline (todas as tentativas falharam)' de 'divergente'; o codigo de saida do deploy so deve ser 1 se algum no estiver divergente/offline apos as tentativas.\n\nNAO-OBJETIVOS: nao mudar o fluxo de deploy do Dokploy nem o endpoint /health do worker."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "A sonda de cada no (Desktop e VPS) repete ate 3 vezes com backoff curto antes de devolver 'offline'; teste com cliente HTTP falso que falha uma vez e responde na segunda tentativa resulta em 'converged'",
+      "Nenhum POST /system/update ou /system/restart e enviado quando a sonda inicial nao observou um SHA divergente (no offline por falha transitoria ou convergido); teste com cliente HTTP falso",
+      "Nenhum /system/restart e enviado quando /health informa busy=true ou active_runs>0 (teste); o motivo fica no relatorio",
+      "Mensagem final distingue 'offline apos N tentativas' de 'divergente'; codigo de saida de dokploy_redeploy.py e 0 quando todos os nos estao convergidos apos as tentativas (teste)",
+      "O gate oficial (python C:\\dev\\DarkFac\\core\\harness\\runner.py --quick) passa"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-01T14:08:39.191606Z",
+    "updated_at": "2026-10-01T14:08:39.191606Z"
   }
 ]
