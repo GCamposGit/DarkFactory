@@ -3439,5 +3439,35 @@
     "dependencies": [],
     "created_at": "2026-10-01T18:25:51.031851Z",
     "updated_at": "2026-10-01T18:25:51.031851Z"
+  },
+  {
+    "id": "USR-123",
+    "project_id": "darkfac",
+    "title": "Linha: run que estourou o wall-clock fica em waiting_human para sempre e /linha nao abre nova tentativa",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "Em 01/10 o run-83bd3712924d (USR-62 tentativa 4) ficou 9x sem rota de escrita (Codex 0.48 quebrado, Claude <15%) e, ao passar de run_caps.wall_clock_hours (6h desde created_at), o development foi para waiting_human(no_route_available). Mesmo depois de corrigir a causa (USR-121), retomar o job nao serve (qualquer retry com not_before, ex. ci_pending na integracao, estoura o wall-clock e falha), e owner_intake.run_state considera waiting_human como em voo, entao /linha USR-62 reapresenta a tentativa morta em vez de abrir a 5. Nao existe comando para cancelar um run da linha no store Postgres (core/workflow/runtime.cancel_run e de outro store).",
+    "core_journey": [
+      "Em 01/10 o run-83bd3712924d (USR-62 tentativa 4) ficou 9x sem rota de escrita (Codex 0.48 quebrado, Claude <15%) e, ao passar de run_caps.wall_clock_hours (6h desde created_at), o development foi para waiting_human(no_route_available). Mesmo depois de corrigir a causa (USR-121), retomar o job nao serve (qualquer retry com not_before, ex. ci_pending na integracao, estoura o wall-clock e falha), e owner_intake.run_state considera waiting_human como em voo, entao /linha USR-62 reapresenta a tentativa morta em vez de abrir a 5. Nao existe comando para cancelar um run da linha no store Postgres (core/workflow/runtime.cancel_run e de outro store)."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Comando do owner (Telegram /cancelar <ticket|run> e endpoint do Hub) cancela um run da linha: jobs abertos -> cancelled, run -> cancelled, com auditoria",
+      "run_state trata como encerrado um run cujo wall-clock expirou e cujo unico job aberto e waiting_human(no_route_available), permitindo nova tentativa",
+      "Testes cobrindo os dois casos"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-01T19:23:22.112430Z",
+    "updated_at": "2026-10-01T19:23:22.112430Z"
   }
 ]
