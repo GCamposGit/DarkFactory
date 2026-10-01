@@ -1,0 +1,15 @@
+{
+  "captured_at": "2026-10-01",
+  "source": "GetSandUsageStatus",
+  "payload": {
+    "currentPeriodStart": "2026-09-29T22:15:57.642Z",
+    "nextResetTimestampUtc": "2026-10-06T22:15:57.642Z",
+    "usagePercent": 1.40324,
+    "hasAvailableUsage": true,
+    "hasNonZeroIncludedLimit": true,
+    "includedUsageSuperGrokPlan": "supergrok",
+    "grokPlanLabel": "SuperGrok",
+    "cursorPlanName": "Free",
+    "billingBrand": "SAND_BILLING_BRAND_CURSOR"
+  }
+}

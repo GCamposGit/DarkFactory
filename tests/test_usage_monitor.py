@@ -106,6 +106,7 @@ def test_snapshot_keeps_unknown_percent_distinct_from_zero(tmp_path: Path) -> No
 def test_openai_and_xai_api_keys_are_connected_fallbacks(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setattr("core.usage.adapters.shutil.which", lambda _: None)
     monkeypatch.setattr(CodexAccountAdapter, "_find_codex", lambda self: None)
+    monkeypatch.setattr(CodexAccountAdapter, "_from_session_files", lambda self: None)
     from core.usage.adapters import GrokAccountAdapter, GeminiAccountAdapter
     monkeypatch.setattr(GrokAccountAdapter, "_probe_grok_cli_session", lambda self: None)
     monkeypatch.setenv("OPENAI_API_KEY", "configured")
@@ -724,14 +725,7 @@ def test_grok_adapter_probes_bot_session_live_percentage(tmp_path: Path, monkeyp
         def __exit__(self, *args):
             pass
 
-    bot_payload = {
-        "currentPeriodStart": "2026-09-08T22:15:57.642Z",
-        "nextResetTimestampUtc": "2026-09-15T22:15:57.642Z",
-        "usagePercent": 2.141932,
-        "hasAvailableUsage": True,
-        "hasNonZeroIncludedLimit": True,
-        "grokPlanLabel": "SuperGrok",
-    }
+    bot_payload = json.loads((Path(__file__).parent / "fixtures" / "usage" / "xai_2026-10-01.json").read_text(encoding="utf-8"))["payload"]
 
     monkeypatch.setattr(GrokAccountAdapter, "_extract_grok_bot_token", lambda *args: "mock_jwt_token")
     monkeypatch.setattr(GrokAccountAdapter, "_probe_grok_cli_session", lambda self: None)
@@ -750,10 +744,9 @@ def test_grok_adapter_probes_bot_session_live_percentage(tmp_path: Path, monkeyp
     assert result.quota_supported is True
     assert len(result.windows) == 2
     assert result.windows[0].quota_id == "grok:weekly_pool"
-    assert result.windows[0].used_percent == 97.86
-    assert result.windows[0].remaining_percent == 2.14
-    assert result.windows[0].resets_at == "2026-09-15T22:15:57.642Z"
+    assert result.windows[0].used_percent == 1.4
+    assert result.windows[0].remaining_percent == 98.6
+    assert result.windows[0].resets_at == "2026-10-06T22:15:57.642Z"
     assert result.windows[1].quota_id == "grok:5h"
+    assert result.windows[1].remaining_percent is None
     assert "Pool semanal e janela móvel" in result.message
-
-
