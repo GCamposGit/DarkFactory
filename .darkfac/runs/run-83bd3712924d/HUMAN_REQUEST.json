@@ -1,0 +1,8 @@
+{
+  "kind": "infra",
+  "run_id": "run-83bd3712924d",
+  "blocking_stage": "development",
+  "guide_md": "kind=infra: a fabrica esperou 6.0h (limite de relogio do run: 6h) por uma conta de IA com cota livre para a etapa 'development' e nenhuma voltou. Passo a passo:\n1. No PowerShell, rode: Set-Location C:\\dev\\DarkFac; python -m core.usage.cli accounts --refresh. A lista mostra cada conta (anthropic, openai, google, xai) com a cota restante e a data de reset.\n2. Se a assinatura estiver sem cota, espere o reset mostrado ou faca upgrade do plano no painel da propria conta (Claude, ChatGPT, Google AI ou xAI).\n3. Esta etapa escreve codigo e o OpenRouter e somente leitura: so uma conta de assinatura com mais de 15% de cota destrava.\n4. Rode o comando do passo 1 de novo e confirme que ao menos uma conta aparece com mais de 15% de cota.\n5. Retome o run: o job fica parado em 'waiting_human' ate la, e a fabrica volta a rotear sozinha assim que houver rota.",
+  "probe_cmd": null,
+  "created_at": "2026-10-01T17:22:33.336969Z"
+}
