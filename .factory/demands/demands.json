@@ -3409,5 +3409,35 @@
     "dependencies": [],
     "created_at": "2026-10-01T17:53:33.261046Z",
     "updated_at": "2026-10-01T18:11:27.530148Z"
+  },
+  {
+    "id": "USR-122",
+    "project_id": "darkfac",
+    "title": "VPS sem espaco em disco derruba o build do darkfac-cloud",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "Em 01/10 18:19 UTC o deploy do darkfac-cloud (USR-121, PR #111) falhou no build: apt-get 'You don't have enough free space in /var/cache/apt/archives/'. Liberado manualmente via Dokploy settings.cleanDockerBuilder + settings.cleanUnusedImages; o redeploy seguinte passou. Nao ha limpeza automatica de cache de build/imagens nem alerta de disco no VPS (CX23).",
+    "core_journey": [
+      "Em 01/10 18:19 UTC o deploy do darkfac-cloud (USR-121, PR #111) falhou no build: apt-get 'You don't have enough free space in /var/cache/apt/archives/'. Liberado manualmente via Dokploy settings.cleanDockerBuilder + settings.cleanUnusedImages; o redeploy seguinte passou. Nao ha limpeza automatica de cache de build/imagens nem alerta de disco no VPS (CX23)."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Limpeza automatica e segura (build cache + imagens sem uso, nunca volumes) agendada ou executada antes de cada deploy",
+      "Alerta no owner bot quando o disco do VPS passar de 85%",
+      "dokploy_redeploy.py detecta falha de build por disco e informa a causa"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-01T18:25:51.031851Z",
+    "updated_at": "2026-10-01T18:25:51.031851Z"
   }
 ]
