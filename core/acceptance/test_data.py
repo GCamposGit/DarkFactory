@@ -58,7 +58,7 @@ def generate_g2_fixture() -> ScenarioDataFixture:
                 "approved_fallback": None,
                 "expected_resolution": "manual_dependency_required",
                 "invalid_attempt": "invalid_format_token",
-                "valid_attempt": "8366386707:AAFTGyHUi38E6kgVKaJbIThww-G_F9OgCJg",
+                "valid_attempt": "123456789:" + "A" * 35,
             },
         },
         expected_outcome="Chave substituível não interrompe pipeline; chave crítica bloqueia gate se inválida e libera apenas com chave válida.",

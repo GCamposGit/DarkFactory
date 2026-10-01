@@ -349,25 +349,14 @@ ALLOWLIST: tuple[AllowlistEntry, ...] = (
     # --- TEMPORARY (USR-100): the real Telegram bot token is committed. ----------
     # Rotation is the owner's action. Untracking the file comes after it, because
     # the Desktop/Notebook nodes read the local copy and a `git pull` would delete
-    # it. The same value was also pasted into two HF-15 fixtures, which must be
-    # switched to a well-formed FAKE token. When a file is untracked or cleaned,
-    # its entry turns stale and the gate fails until the entry is removed.
+    # it. (The same value was also pasted into two HF-15 fixtures; they now build a
+    # FAKE token at runtime and their entries were removed.) When a file is
+    # untracked or cleaned, its entry turns stale and the gate fails until the
+    # entry is removed.
     AllowlistEntry(
         path=".factory/telegram/config.json",
         patterns=(_TELEGRAM,),
         reason="token de bot real exposto no repositorio publico (commit 0c7514e); desversionar apos a rotacao",
-        ticket="USR-100",
-    ),
-    AllowlistEntry(
-        path="core/acceptance/test_data.py",
-        patterns=(_TELEGRAM,),
-        reason="fixture 'valid_attempt' reutiliza o mesmo valor de .factory/telegram/config.json; trocar por token FAKE",
-        ticket="USR-100",
-    ),
-    AllowlistEntry(
-        path="tests/test_hf15_acceptance_environment.py",
-        patterns=(_TELEGRAM,),
-        reason="fixture reutiliza o mesmo valor de .factory/telegram/config.json; trocar por token FAKE",
         ticket="USR-100",
     ),
     # --- Sentinelas de teste: o formato E o ponto (redacao, probes, validacao). --
