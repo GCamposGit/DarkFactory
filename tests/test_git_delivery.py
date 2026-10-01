@@ -65,6 +65,9 @@ class FakeGh:
             head = a[a.index("--head") + 1]
             n = self.add_open_pr(head)
             return ok(f"https://github.com/x/y/pull/{n}\n")
+        if a[:2] == ["pr", "checks"]:
+            # USR-85: merges are gated on CI; the fake repository reports one green check.
+            return ok(json.dumps([{"bucket": "pass", "name": "build", "link": "", "workflow": "CI"}]))
         if a[:2] == ["pr", "view"]:
             p = self.prs[int(a[2])]
             return ok(json.dumps({"state": p["state"], "mergeCommit": {"oid": p["oid"]} if p["oid"] else None}))
