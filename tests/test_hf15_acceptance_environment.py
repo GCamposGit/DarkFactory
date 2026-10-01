@@ -256,7 +256,7 @@ def test_observability_ledger_and_sla_tracking(tmp_path: Path) -> None:
 
     # Test secret sanitization
     raw_payload = {
-        "bot_token": "8366386707:AAFTGyHUi38E6kgVKaJbIThww-G_F9OgCJg",
+        "bot_token": "123456789:" + "A" * 35,
         "api_key": "sk-1234567890abcdef1234567890",
         "endpoint": "https://api.openai.com/v1?token=sk-99999999999999999999",
         "nested": {"secret": "secret_val"},
