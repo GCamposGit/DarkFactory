@@ -3314,5 +3314,37 @@
     "dependencies": [],
     "created_at": "2026-10-01T14:08:39.191606Z",
     "updated_at": "2026-10-01T14:08:39.191606Z"
+  },
+  {
+    "id": "USR-118",
+    "project_id": "darkfac",
+    "title": "Medidor de cotas: fixtures reais e conferencia com o painel oficial para Anthropic, OpenAI e Google (pendencia do USR-108)",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "EVIDENCIA: o USR-108 (#103) corrigiu o Grok (usagePercent e USADO), criou historico, plausibilidade, scripts/quota_audit.py e docs/QUOTA_METER_CONTRACT.md, mas o proprio resumo do agente declarou 'Entrega incompleta: so ha fixture real do Grok. Esta worktree nao contem payloads reais de Anthropic, OpenAI e Google, e nao foi possivel confirmar as leituras nos paineis nem executar a auditoria pos-merge'. Criterios do USR-108 nao cumpridos: fixtures REAIS sanitizadas para anthropic/openai/google (hoje so tests/fixtures/usage/xai_2026-10-01.json) e conferencia com o painel oficial de cada provedor.\n\nLEITURAS BRUTAS observadas no preflight de 2026-10-01 (para servir de ponto de partida, a semantica ainda precisa ser confirmada contra o painel): anthropic via claude_code_api: anthropic-ratelimit-unified-5h-utilization=0.12, anthropic-ratelimit-unified-7d-utilization=0.87, resets em 1790873400 (5h) e 1791075600 (7d) => restante = 100 - utilizacao*100 por janela, headroom = min das janelas (13% semanal); openai via codex_app_server: primaryUsedPercent=47 (janela 300 min, reset 1790873831) e secondaryUsedPercent=53 (10080 min, reset 1791073443); google via antigravity_rpc: bucketId=gemini-5h, remainingFraction=1, resetTime=2026-10-01T18:13:46Z. O owner precisa confirmar cada numero no painel oficial (dashboard_url do ProviderSpec) no momento da captura.\n\nPor que importa: o piso fail-closed de 15% decide quem pode desenvolver; o Claude esta em ~10-13% e qualquer inversao ou janela errada (5h x semanal) muda o roteamento, como ocorreu com o Grok.\n\nSOLUCAO: (1) para cada provedor, capturar payload REAL sanitizado (sem token/e-mail/ids) com data e fonte em tests/fixtures/usage/<provedor>_<data>.json e teste parametrizado payload real -> used/remaining por janela; (2) rodar `python C:\\dev\\DarkFac\\scripts\\quota_audit.py --expect <provedor>=<percentual do painel>` na maquina do owner com os valores lidos do painel e anexar a saida como evidencia; (3) corrigir toda divergencia no mesmo PR ou abrir ticket; (4) completar docs/QUOTA_METER_CONTRACT.md com a semantica confirmada de cada janela.\n\nNAO-OBJETIVOS: nao alterar o piso de 15%; nao mudar a fonte de dados do Grok.",
+    "core_journey": [
+      "EVIDENCIA: o USR-108 (#103) corrigiu o Grok (usagePercent e USADO), criou historico, plausibilidade, scripts/quota_audit.py e docs/QUOTA_METER_CONTRACT.md, mas o proprio resumo do agente declarou 'Entrega incompleta: so ha fixture real do Grok. Esta worktree nao contem payloads reais de Anthropic, OpenAI e Google, e nao foi possivel confirmar as leituras nos paineis nem executar a auditoria pos-merge'. Criterios do USR-108 nao cumpridos: fixtures REAIS sanitizadas para anthropic/openai/google (hoje so tests/fixtures/usage/xai_2026-10-01.json) e conferencia com o painel oficial de cada provedor.\n\nLEITURAS BRUTAS observadas no preflight de 2026-10-01 (para servir de ponto de partida, a semantica ainda precisa ser confirmada contra o painel): anthropic via claude_code_api: anthropic-ratelimit-unified-5h-utilization=0.12, anthropic-ratelimit-unified-7d-utilization=0.87, resets em 1790873400 (5h) e 1791075600 (7d) => restante = 100 - utilizacao*100 por janela, headroom = min das janelas (13% semanal); openai via codex_app_server: primaryUsedPercent=47 (janela 300 min, reset 1790873831) e secondaryUsedPercent=53 (10080 min, reset 1791073443); google via antigravity_rpc: bucketId=gemini-5h, remainingFraction=1, resetTime=2026-10-01T18:13:46Z. O owner precisa confirmar cada numero no painel oficial (dashboard_url do ProviderSpec) no momento da captura.\n\nPor que importa: o piso fail-closed de 15% decide quem pode desenvolver; o Claude esta em ~10-13% e qualquer inversao ou janela errada (5h x semanal) muda o roteamento, como ocorreu com o Grok.\n\nSOLUCAO: (1) para cada provedor, capturar payload REAL sanitizado (sem token/e-mail/ids) com data e fonte em tests/fixtures/usage/<provedor>_<data>.json e teste parametrizado payload real -> used/remaining por janela; (2) rodar `python C:\\dev\\DarkFac\\scripts\\quota_audit.py --expect <provedor>=<percentual do painel>` na maquina do owner com os valores lidos do painel e anexar a saida como evidencia; (3) corrigir toda divergencia no mesmo PR ou abrir ticket; (4) completar docs/QUOTA_METER_CONTRACT.md com a semantica confirmada de cada janela.\n\nNAO-OBJETIVOS: nao alterar o piso de 15%; nao mudar a fonte de dados do Grok."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Existe fixture real sanitizada (com data e fonte) para anthropic, openai e google em tests/fixtures/usage/, sem token, e-mail ou id de conta (o teste de varredura de segredos passa)",
+      "Teste parametrizado payload real -> used/remaining por janela para os tres provedores, que falha se a semantica for invertida",
+      "scripts/quota_audit.py executado com --expect para cada provedor usando os valores do painel oficial informados pelo owner, saida anexada a descricao do PR; divergencia maior que 5 pontos vira correcao no PR ou ticket citado",
+      "docs/QUOTA_METER_CONTRACT.md lista, para cada provedor e janela, a semantica confirmada (usado vs restante), o reset e o painel de conferencia",
+      "O gate oficial (python C:\\dev\\DarkFac\\core\\harness\\runner.py --quick) passa"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-01T14:10:54.865673Z",
+    "updated_at": "2026-10-01T14:10:54.865673Z"
   }
 ]
