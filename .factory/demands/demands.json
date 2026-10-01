@@ -3093,5 +3093,35 @@
     "dependencies": [],
     "created_at": "2026-10-01T11:08:50.916654Z",
     "updated_at": "2026-10-01T11:08:50.916654Z"
+  },
+  {
+    "id": "USR-111",
+    "project_id": "darkfac",
+    "title": "CI Windows do main e dos PRs falha de forma intermitente (spike R02/R12 STORE_UNAVAILABLE, worker xdist crashed, PermissionError) e bloqueia merges",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "EVIDENCIA (2026-10-01): jobs pr-validation/main-validation (windows-latest) falharam sem relacao com o diff em: run 36839134028 (main 918ec7d, tests/test_runtime_spike_scenarios.py::test_cli_run_verify_and_summarize_native_core, R02 native_sqlite STORE_UNAVAILABLE); 36849352308 (main 604bd16, mesmo teste); 36849686897 (main 11cd44c, tests/test_usage_monitor.py::test_independent_ledger_instances_serialize_transactions, PermissionError); 36853547030 (PR de fila, mesmo teste R02); 36855196695 (PR 96, USR-94: 4 execucoes, falhou com R12 STORE_UNAVAILABLE, depois worker gw2 crashed em tests/test_line_e2e_hf2708.py::test_review_retry_routes_to_development_iteration_1_e2e, passou na 4a). Ubuntu passa sempre e o spike passa local (4 passed em 8,7 s). No CI do PR 96 os testes levam 100+ s (test_line_e2e_hf2708 133 s, setup de test_ticket_workspace 35 s) e o job vai de ~300 s para ~580 s. Cada falha custa uma execucao completa de ~6-10 min e o main fica vermelho (meta do HF-28: CI verde). \n\n[Plano HF-28 | lote 5] Onda 0. CAUSA RAIZ PROVAVEL: contencao de I/O/CPU do runner Windows com pytest-xdist sobre testes que criam repositorios git, sqlite e subprocessos; spikes/runtime_choice engole a excecao do SQLite em STORE_UNAVAILABLE (so o codigo aparece no log). SOLUCAO: (a) expor tipo e mensagem da excecao original em ScenarioResult/ExecutionTrace e no log do teste; (b) reproduzir em Windows sob xdist e corrigir (retry/backoff em PermissionError e 'database is locked', fechar handles, diretorios temporarios por worker); (c) avaliar numero de workers e timeouts do job windows (harness.config.json e .github/workflows sao protegidos: se precisar mudar, registrar patch proposto para o owner); (d) rerun manual nao e correcao. NUNCA MAIS: teste de estabilidade (N repeticoes) dos spikes e dos testes com PermissionError.",
+    "core_journey": [
+      "EVIDENCIA (2026-10-01): jobs pr-validation/main-validation (windows-latest) falharam sem relacao com o diff em: run 36839134028 (main 918ec7d, tests/test_runtime_spike_scenarios.py::test_cli_run_verify_and_summarize_native_core, R02 native_sqlite STORE_UNAVAILABLE); 36849352308 (main 604bd16, mesmo teste); 36849686897 (main 11cd44c, tests/test_usage_monitor.py::test_independent_ledger_instances_serialize_transactions, PermissionError); 36853547030 (PR de fila, mesmo teste R02); 36855196695 (PR 96, USR-94: 4 execucoes, falhou com R12 STORE_UNAVAILABLE, depois worker gw2 crashed em tests/test_line_e2e_hf2708.py::test_review_retry_routes_to_development_iteration_1_e2e, passou na 4a). Ubuntu passa sempre e o spike passa local (4 passed em 8,7 s). No CI do PR 96 os testes levam 100+ s (test_line_e2e_hf2708 133 s, setup de test_ticket_workspace 35 s) e o job vai de ~300 s para ~580 s. Cada falha custa uma execucao completa de ~6-10 min e o main fica vermelho (meta do HF-28: CI verde). \n\n[Plano HF-28 | lote 5] Onda 0. CAUSA RAIZ PROVAVEL: contencao de I/O/CPU do runner Windows com pytest-xdist sobre testes que criam repositorios git, sqlite e subprocessos; spikes/runtime_choice engole a excecao do SQLite em STORE_UNAVAILABLE (so o codigo aparece no log). SOLUCAO: (a) expor tipo e mensagem da excecao original em ScenarioResult/ExecutionTrace e no log do teste; (b) reproduzir em Windows sob xdist e corrigir (retry/backoff em PermissionError e 'database is locked', fechar handles, diretorios temporarios por worker); (c) avaliar numero de workers e timeouts do job windows (harness.config.json e .github/workflows sao protegidos: se precisar mudar, registrar patch proposto para o owner); (d) rerun manual nao e correcao. NUNCA MAIS: teste de estabilidade (N repeticoes) dos spikes e dos testes com PermissionError."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Falha de STORE_UNAVAILABLE no spike mostra a excecao original (tipo e mensagem) no log do CI",
+      "10 execucoes consecutivas do job windows no main sem falha de test_cli_run_verify_and_summarize_native_core e test_independent_ledger_instances_serialize_transactions",
+      "Causa raiz documentada no ticket com evidencia de reproducao"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-01T12:01:19.416762Z",
+    "updated_at": "2026-10-01T12:01:19.416762Z"
   }
 ]
