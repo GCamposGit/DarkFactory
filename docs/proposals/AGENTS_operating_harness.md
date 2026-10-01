@@ -40,5 +40,7 @@ Logo depois do bullet **Bloqueio de Quota Critica no Chat**, acrescentar:
 
 ## 4. Aplicacao
 
-1. Abra `C:\dev\DarkFac\AGENTS.md`, faca as alteracoes das secoes 1 e 2 e, se quiser corrigir o rotulo do lock de testes, a da secao 3 em `C:\dev\DarkFac\core\harness\suite_lock.py`; commite diretamente (commit humano).
-2. Rode `python C:\dev\DarkFac\core\orchestrator\guard.py origin/main` apenas para confirmar que os unicos arquivos protegidos alterados sao esses, por autoria humana.
+1. Abra `C:\dev\DarkFac\AGENTS.md`, faca as alteracoes das secoes 1 e 2 e, se quiser corrigir o rotulo do lock de testes, a da secao 3 em `C:\dev\DarkFac\core\harness\suite_lock.py`. Edite so essas linhas: nao mexa nos titulos (ex.: manter "(Zero Toque Humano Pós-Grill, USR-57)") e mantenha cada bullet numa unica linha.
+2. Antes de commitar, rode `python -m pytest tests/test_suite_lock.py tests/test_governance_guard.py tests/test_harness_contract.py tests/test_ci_policy.py -q` em `C:\dev\DarkFac`: o push vai direto para a `main` (sem CI de PR antes).
+3. Commite SOMENTE os arquivos desta proposta (`git add` com caminhos explicitos; nunca `git add -A`, o checkout compartilhado tem alteracoes locais em `.factory/telegram/config.json`) e de push direto na `main`. Nao use PR: o job `trusted-pr-policy` do CI roda o `guard.py` e reprova qualquer PR que toque arquivo protegido.
+4. O `guard.py` NAO verifica autoria: ele so compara os caminhos protegidos com a base e reprova sempre que houver diferenca (`GUARD VIOLATION`), quem quer que tenha commitado; so passa com `DARKFAC_ALLOW_GOVERNANCE_EVOLUTION=1`. Por isso, rodar `python C:\dev\DarkFac\core\orchestrator\guard.py origin/main` ANTES do push acusa violacao (esperado, nao e erro). Depois do push o diff com `origin/main` some e o resultado e `[GUARD PASS]`.

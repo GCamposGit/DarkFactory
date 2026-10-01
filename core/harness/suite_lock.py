@@ -107,6 +107,8 @@ def _detect_harness() -> str | None:
         ("CLAUDECODE", "claude-code"),
         ("CLAUDE_CODE_ENTRYPOINT", "claude-code"),
         ("CODEX_SANDBOX", "codex"),
+        ("GROK_AGENT", "grok"),
+        ("GROK_SESSION_ID", "grok"),
         ("GROK_CLI", "grok"),
         ("ANTIGRAVITY_SESSION", "antigravity"),
     ):
