@@ -162,7 +162,7 @@ def test_autonomous_recommend_never_returns_fable_or_astra():
     """Verify recommendation engine forbids Fable and Astra."""
     rec = recommend_model("architecture", "critical")
     assert rec["model"] not in ("gpt-6-astra", "astra", "claude-fable", "fable")
-    assert rec["provider"] in ("anthropic", "antigravity", "openrouter", "google", "openai")
+    assert rec["provider"] in ("anthropic", "antigravity", "openrouter", "google", "openai", "xai")
 
 
 def test_openrouter_fallback_requires_positive_balance():
