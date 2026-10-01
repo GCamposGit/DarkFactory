@@ -30,7 +30,7 @@ if str(PROJECT_ROOT) not in sys.path:
 from core.demands.models import UserTicket
 from core.demands.id_allocator import title_collisions
 from core.demands.store import DemandsStore
-from core.git import ticket_workspace
+from core.git import secret_scan, ticket_workspace
 from core.git.safe_show import safe_show
 from core.git.state_guard import DEFAULT_PROTECTED_STATE_PATHS, check_staged_state_files
 from core.git.ci_checks import (
@@ -219,6 +219,41 @@ class GitAutonomyManager:
             self.protected_state_paths,
         )
 
+    def _check_staged_secrets(self, cwd: Path) -> None:
+        """Inspect index blobs, including content staged before this commit call."""
+        names = _run_git(["diff", "--cached", "--name-only", "--diff-filter=ACMR", "-z"], cwd=cwd)
+        if names.returncode != 0:
+            raise RuntimeError("Cannot inspect staged paths for secrets")
+        paths = [path for path in names.stdout.split("\0") if path]
+        findings: list[secret_scan.Finding] = []
+        for path in paths:
+            blob = safe_show("", path, cwd=cwd)
+            if blob.returncode != 0:
+                raise RuntimeError(f"Cannot inspect staged content: {path}")
+            if Path(path).suffix.lower() in secret_scan.BINARY_EXTENSIONS:
+                continue
+            if len(blob.stdout.encode("utf-8")) > secret_scan.MAX_FILE_BYTES or "\0" in blob.stdout[:8192]:
+                continue
+            findings.extend(secret_scan.scan_text(path, blob.stdout))
+        # Temporary exceptions are for the repository gate only. A new commit
+        # must never re-introduce the already exposed credential.
+        permitted = tuple(entry for entry in secret_scan.ALLOWLIST if not entry.ticket)
+        violations = secret_scan.apply_allowlist(findings, permitted)
+        if violations:
+            details = "\n".join(f"  - {finding.render()}" for finding in violations)
+            raise RuntimeError(f"Staged content contains potential secrets:\n{details}")
+
+    def _check_ignored_staged_additions(self, cwd: Path) -> None:
+        added = _run_git(["diff", "--cached", "--name-only", "--diff-filter=A", "-z"], cwd=cwd)
+        if added.returncode != 0:
+            raise RuntimeError("Cannot inspect staged additions")
+        for path in filter(None, added.stdout.split("\0")):
+            ignored = _run_git(["check-ignore", "--no-index", "--quiet", "--", path], cwd=cwd)
+            if ignored.returncode == 0:
+                raise RuntimeError(f"Refusing staged ignored path: {path}")
+            if ignored.returncode != 1:
+                raise RuntimeError(f"Cannot check ignore rules for staged path: {path}")
+
     def get_current_sha(self, cwd: Optional[Path] = None) -> str:
         """Return the current HEAD commit SHA."""
         target_dir = cwd or self.root
@@ -278,6 +313,7 @@ class GitAutonomyManager:
         target_dir = cwd or self.root
 
         # 1. Stage changes
+        self._check_ignored_staged_additions(target_dir)
         if paths:
             stage_args = ["add", "--"] + [str(p) for p in paths]
             add = _run_git(stage_args, cwd=target_dir)
@@ -300,6 +336,8 @@ class GitAutonomyManager:
             raise RuntimeError(f"Cannot inspect staged changes: {staged_check.stderr.strip()}")
 
         self._check_staged_state_files(target_dir)
+        self._check_ignored_staged_additions(target_dir)
+        self._check_staged_secrets(target_dir)
 
         # 3. Format message
         clean_title = title.strip().replace("\n", " ")

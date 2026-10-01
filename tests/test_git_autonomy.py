@@ -107,6 +107,44 @@ def test_git_autonomy_commit_ticket_clean_tree_returns_head(test_git_repo: Path)
     assert result_sha == initial_sha
 
 
+def test_commit_ticket_rejects_secret_in_pre_staged_index_blob(test_git_repo: Path) -> None:
+    manager = GitAutonomyManager(test_git_repo)
+    token = "123456789" + ":" + "Ab1_-" * 7
+    target = test_git_repo / "notes.txt"
+    target.write_text(f"token={token}\n", encoding="utf-8")
+    _git(test_git_repo, "add", "notes.txt")
+    target.write_text("clean worktree\n", encoding="utf-8")
+
+    with pytest.raises(RuntimeError, match="Staged content contains potential secrets") as exc:
+        manager.commit_ticket("USR-100", "secret guard", paths=["README.md"])
+    assert token not in str(exc.value)
+    assert _git(test_git_repo, "log", "-1", "--format=%s").stdout.strip() == "chore: initial commit"
+
+
+def test_commit_ticket_rejects_force_added_ignored_path(test_git_repo: Path) -> None:
+    manager = GitAutonomyManager(test_git_repo)
+    (test_git_repo / ".gitignore").write_text("private/\n", encoding="utf-8")
+    _git(test_git_repo, "add", ".gitignore")
+    private = test_git_repo / "private"
+    private.mkdir()
+    (private / "settings.json").write_text("{}\n", encoding="utf-8")
+    _git(test_git_repo, "add", "-f", "private/settings.json")
+
+    with pytest.raises(RuntimeError, match="Refusing staged ignored path: private/settings.json"):
+        manager.commit_ticket("USR-100", "ignored guard")
+
+
+def test_commit_ticket_allows_justified_test_sentinel(test_git_repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from core.git import secret_scan
+
+    token = "123456789" + ":" + "Ab1_-" * 7
+    (test_git_repo / "sentinel.txt").write_text(token, encoding="utf-8")
+    monkeypatch.setattr(secret_scan, "ALLOWLIST", (
+        secret_scan.AllowlistEntry("sentinel.txt", ("telegram_bot_token",), "test sentinel"),
+    ))
+    assert GitAutonomyManager(test_git_repo).commit_ticket("USR-100", "sentinel")
+
+
 def test_git_autonomy_sync_up_to_date(test_remote_pair: tuple[Path, Path]):
     local, _ = test_remote_pair
     mgr = GitAutonomyManager(local)

@@ -30,6 +30,8 @@ from typing import Any, Callable, Dict, List, Optional, Sequence, Set
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from core.paths import project_root
+
 logger = logging.getLogger("darkfac.integrations.telegram")
 
 # Secret redaction pattern
@@ -185,7 +187,7 @@ class TelegramConfig(BaseModel):
 
 def _read_env_fallback() -> dict[str, str]:
     """Reads .env from repository root if present without external dependencies."""
-    root_dir = Path(__file__).resolve().parents[2]
+    root_dir = project_root()
     env_file = root_dir / ".env"
     env_vars: dict[str, str] = {}
     if env_file.exists():
@@ -203,79 +205,38 @@ def _read_env_fallback() -> dict[str, str]:
 def load_telegram_config(
     config_file: Optional[Path] = None,
     role: str = "ops",
+    config_dir: Optional[Path] = None,
 ) -> TelegramConfig:
-    """Loads TelegramConfig from role-specific configs, environment variables, or .env."""
-    root_dir = Path(__file__).resolve().parents[2]
-    if config_file is not None:
-        if config_file.exists():
-            try:
-                data = json.loads(config_file.read_text(encoding="utf-8"))
-                return TelegramConfig.model_validate(data)
-            except Exception:
-                pass
-
+    """Load environment credentials first; use local config only as fallback."""
+    root_dir = project_root()
     env_vars = _read_env_fallback()
+    keys = {
+        "owner": ("TELEGRAM_OWNER_BOT_TOKEN",),
+        "ops": ("TELEGRAM_OPS_BOT_TOKEN", "TELEGRAM_BOT_TOKEN"),
+    }.get(role, ("TELEGRAM_BOT_TOKEN", "TELEGRAM_OPS_BOT_TOKEN", "TELEGRAM_OWNER_BOT_TOKEN"))
+    token = next((value for key in keys if (value := os.environ.get(key) or env_vars.get(key))), None)
 
-    # Determine token based on requested role
-    token = None
-    if role == "owner":
-        token = os.environ.get("TELEGRAM_OWNER_BOT_TOKEN") or env_vars.get("TELEGRAM_OWNER_BOT_TOKEN")
-        if not token:
-            owner_cfg = root_dir / ".factory" / "telegram" / "owner_config.json"
-            if owner_cfg.exists():
-                try:
-                    data = json.loads(owner_cfg.read_text(encoding="utf-8"))
-                    token = data.get("bot_token")
-                except Exception:
-                    pass
-        if not token:
-            legacy_cfg = root_dir / ".factory" / "telegram" / "config.json"
-            if legacy_cfg.exists():
-                try:
-                    data = json.loads(legacy_cfg.read_text(encoding="utf-8"))
-                    token = data.get("bot_token")
-                except Exception:
-                    pass
-    elif role == "ops":
-        token = (
-            os.environ.get("TELEGRAM_OPS_BOT_TOKEN")
-            or env_vars.get("TELEGRAM_OPS_BOT_TOKEN")
-            or os.environ.get("TELEGRAM_BOT_TOKEN")
-            or env_vars.get("TELEGRAM_BOT_TOKEN")
-        )
-        if not token:
-            ops_cfg = root_dir / ".factory" / "telegram" / "ops_config.json"
-            if ops_cfg.exists():
-                try:
-                    data = json.loads(ops_cfg.read_text(encoding="utf-8"))
-                    token = data.get("bot_token")
-                except Exception:
-                    pass
-        if not token:
-            legacy_cfg = root_dir / ".factory" / "telegram" / "config.json"
-            if legacy_cfg.exists():
-                try:
-                    data = json.loads(legacy_cfg.read_text(encoding="utf-8"))
-                    token = data.get("bot_token")
-                except Exception:
-                    pass
-    else:  # role == "all" or generic
-        token = (
-            os.environ.get("TELEGRAM_BOT_TOKEN")
-            or env_vars.get("TELEGRAM_BOT_TOKEN")
-            or os.environ.get("TELEGRAM_OPS_BOT_TOKEN")
-            or env_vars.get("TELEGRAM_OPS_BOT_TOKEN")
-            or os.environ.get("TELEGRAM_OWNER_BOT_TOKEN")
-            or env_vars.get("TELEGRAM_OWNER_BOT_TOKEN")
-        )
-        if not token:
-            legacy_cfg = root_dir / ".factory" / "telegram" / "config.json"
-            if legacy_cfg.exists():
-                try:
-                    data = json.loads(legacy_cfg.read_text(encoding="utf-8"))
-                    token = data.get("bot_token")
-                except Exception:
-                    pass
+    cfg_dir = config_dir or (root_dir / ".factory" / "telegram")
+    files = (
+        [config_file] if config_file is not None else
+        [cfg_dir / ("owner_config.json" if role == "owner" else "ops_config.json"), cfg_dir / "config.json"]
+        if role in {"owner", "ops"} else [cfg_dir / "config.json"]
+    )
+    local_data: dict[str, Any] = {}
+    local_token: str | None = None
+    for candidate in files:
+        try:
+            data = json.loads(candidate.read_text(encoding="utf-8"))
+            if isinstance(data, dict):
+                if not local_token and data.get("bot_token"):
+                    local_token = data.get("bot_token")
+                for key, value in data.items():
+                    if value is not None:
+                        local_data.setdefault(key, value)
+        except (OSError, ValueError):
+            continue
+    if not token:
+        token = local_token
 
     users_raw = os.environ.get("TELEGRAM_AUTHORIZED_USERS") or env_vars.get("TELEGRAM_AUTHORIZED_USERS", "")
     users = [int(u.strip()) for u in users_raw.split(",") if u.strip().isdigit()]
@@ -283,30 +244,19 @@ def load_telegram_config(
     chats = [int(c.strip()) for c in chats_raw.split(",") if c.strip().isdigit()]
     secret = os.environ.get("TELEGRAM_WEBHOOK_SECRET") or env_vars.get("TELEGRAM_WEBHOOK_SECRET")
 
-    # If no users/chats in env, check if role-specific config file has them
-    if not users or not chats:
-        specific_cfg = (
-            root_dir / ".factory" / "telegram" / "owner_config.json"
-            if role == "owner"
-            else (root_dir / ".factory" / "telegram" / "ops_config.json" if role == "ops" else root_dir / ".factory" / "telegram" / "config.json")
-        )
-        if specific_cfg.exists():
-            try:
-                data = json.loads(specific_cfg.read_text(encoding="utf-8"))
-                if not users:
-                    users = data.get("authorized_user_ids", [])
-                if not chats:
-                    chats = data.get("authorized_chat_ids", [])
-            except Exception:
-                pass
+    if not users:
+        users = local_data.get("authorized_user_ids", [])
+    if not chats:
+        chats = local_data.get("authorized_chat_ids", [])
 
     return TelegramConfig(
         bot_token=token,
         role=role,
         authorized_user_ids=users,
         authorized_chat_ids=chats,
-        webhook_secret_token=secret,
-        api_base_url=os.environ.get("TELEGRAM_API_BASE_URL", "https://api.telegram.org"),
+        webhook_secret_token=secret or local_data.get("webhook_secret_token"),
+        api_base_url=os.environ.get("TELEGRAM_API_BASE_URL", local_data.get("api_base_url", "https://api.telegram.org")),
+        poll_timeout_seconds=local_data.get("poll_timeout_seconds", 30),
     )
 
 
@@ -376,7 +326,7 @@ class TelegramGateway:
         line_handler: Optional[Callable[[str, int], Dict[str, Any]]] = None,
     ) -> None:
         self.config = config
-        self.state_dir = state_dir or Path(".factory/telegram")
+        self.state_dir = state_dir if state_dir is not None else project_root() / ".factory" / "telegram"
         self.state_dir.mkdir(parents=True, exist_ok=True)
         if state_file is not None:
             self.state_file = state_file
@@ -1272,4 +1222,3 @@ class TelegramGateway:
 
 # Interop alias
 TelegramService = TelegramGateway
-
