@@ -2678,9 +2678,9 @@
     "project_id": "darkfac",
     "title": "SEGURANCA P0: token de bot do Telegram rastreado no git de repositorio PUBLICO (.factory/telegram/config.json, commit 0c7514e)",
     "origin": "agent",
-    "status": "planned",
+    "status": "completed",
     "item_type": "security",
-    "lifecycle_stage": "execution",
+    "lifecycle_stage": "done",
     "horizon": "now",
     "tags": [
       "user-demand",
@@ -2713,7 +2713,8 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-09-30T23:30:00Z",
-    "updated_at": "2026-10-01T07:00:00Z"
+    "updated_at": "2026-10-01T16:30:00Z",
+    "delivery_evidence": "17c1d68215997b5d688dfdcb95c7691d8b9aec64"
   },
   {
     "id": "USR-101",
