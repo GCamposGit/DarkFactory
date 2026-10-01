@@ -221,6 +221,30 @@ def test_codex_read_mode_uses_read_only_sandbox(tmp_path, make_fake_cli, monkeyp
     assert "-m" not in argv  # model omitted when None
 
 
+def test_codex_cloud_bypass_uses_stdin_without_explicit_model(tmp_path, make_fake_cli, monkeypatch):
+    cmd_path, env_var = make_fake_cli("codex")
+    monkeypatch.setattr(agent_cli, "find_codex_binary", lambda: cmd_path)
+    monkeypatch.setenv(agent_cli.CODEX_SANDBOX_ENV, "bypass")
+    record_path = tmp_path / "record.json"
+    set_fake_response(
+        monkeypatch,
+        env_var,
+        {"record_path": str(record_path), "tmp_out_content": "done", "returncode": 0},
+    )
+
+    result = run_agent(AgentRequest(prompt="implement", cwd=tmp_path, mode="write", harness="codex"))
+
+    assert result.ok is True
+    assert result.text == "done"
+    record = json.loads(record_path.read_text(encoding="utf-8"))
+    assert record["argv"][:4] == [
+        "exec", "--dangerously-bypass-approvals-and-sandbox", "--skip-git-repo-check", "--json",
+    ]
+    assert "-m" not in record["argv"]
+    assert record["argv"][-1] == "-"
+    assert record["stdin"] == "implement"
+
+
 def test_codex_rate_limited_from_stderr(tmp_path, make_fake_cli, monkeypatch):
     cmd_path, env_var = make_fake_cli("codex")
     monkeypatch.setattr(agent_cli, "find_codex_binary", lambda: cmd_path)

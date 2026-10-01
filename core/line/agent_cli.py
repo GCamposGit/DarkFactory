@@ -375,7 +375,8 @@ def codex_sandbox_mode() -> str:
 def build_codex_argv(executable: str, req: AgentRequest, tmp_out: Path) -> list[str]:
     """Build the Codex CLI argv for read or write mode. Prompt goes on stdin via trailing '-'.
 
-    Sandbox flags (verified against codex-cli 0.48.0, `codex-rs/exec/src/cli.rs`):
+    Flags verified against codex-cli 0.159.3 (`codex-rs/exec/src/cli.rs` and
+    `codex-rs/utils/cli/src/shared_options.rs` at tag `rust-v0.159.3`):
     `auto` keeps `--sandbox workspace-write|read-only`; `danger-full-access` passes
     `--sandbox danger-full-access`; `bypass` passes `--dangerously-bypass-approvals-and-sandbox`
     (alias `--yolo`) and no `--sandbox` (the flag exists to run in an externally sandboxed
@@ -969,4 +970,3 @@ def run_agent(req: AgentRequest) -> AgentResult:
         logger.debug("Failed recording agent_cli call to ModelUsageLedger: %s", exc)
 
     return res
-

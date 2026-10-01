@@ -75,7 +75,7 @@ services:
       - DARKFAC_WORKER_PRIORITY=${DARKFAC_WORKER_PRIORITY:-primary}
       # Codex's own Linux sandbox (landlock/seccomp) is unavailable in an unprivileged container, so
       # `codex exec --sandbox ...` fails here; the container is the isolation boundary instead.
-      # `bypass` = --dangerously-bypass-approvals-and-sandbox (codex-cli 0.48.0). Desktop/Notebook leave
+      # `bypass` = --dangerously-bypass-approvals-and-sandbox (codex-cli 0.159.3). Desktop/Notebook leave
       # this unset (auto) and keep Codex's sandbox.
       - DARKFAC_CODEX_SANDBOX_MODE=${DARKFAC_CODEX_SANDBOX_MODE:-bypass}
       # Bootstrap for a worker that has no quota reading for a subscription harness yet (Codex before its

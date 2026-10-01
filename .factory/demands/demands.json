@@ -3378,5 +3378,36 @@
     "dependencies": [],
     "created_at": "2026-10-01T14:14:43.505704Z",
     "updated_at": "2026-10-01T14:14:43.505704Z"
+  },
+  {
+    "id": "USR-121",
+    "project_id": "darkfac",
+    "title": "Worker da nuvem: atualizar Codex CLI 0.48.0 -> 0.159.3 (modelo padrao gpt-5-codex recusado pela conta ChatGPT)",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "Em 01/10 o development do run-83bd3712924d (USR-62 tentativa 4) elegeu Codex no worker do VPS e falhou em 8s com: unexpected status 400 Bad Request: The 'gpt-5-codex' model is not supported when using Codex with a ChatGPT account. O Codex do container e 0.48.0 (deploy/dokploy/Dockerfile.cloud ARG CODEX_CLI_VERSION=0.48.0) e seu modelo padrao foi descontinuado para contas ChatGPT. Com o Claude abaixo do piso de 15%, o Codex e a unica rota de escrita e a linha fica em no_route_available. Evidencia: origin/df/run-83bd3712924d:.darkfac/runs/run-83bd3712924d/validate-T1-1.log.md. Ultima versao estavel no npm: 0.159.3.",
+    "core_journey": [
+      "Em 01/10 o development do run-83bd3712924d (USR-62 tentativa 4) elegeu Codex no worker do VPS e falhou em 8s com: unexpected status 400 Bad Request: The 'gpt-5-codex' model is not supported when using Codex with a ChatGPT account. O Codex do container e 0.48.0 (deploy/dokploy/Dockerfile.cloud ARG CODEX_CLI_VERSION=0.48.0) e seu modelo padrao foi descontinuado para contas ChatGPT. Com o Claude abaixo do piso de 15%, o Codex e a unica rota de escrita e a linha fica em no_route_available. Evidencia: origin/df/run-83bd3712924d:.darkfac/runs/run-83bd3712924d/validate-T1-1.log.md. Ultima versao estavel no npm: 0.159.3."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "deploy/dokploy/Dockerfile.cloud fixa ARG CODEX_CLI_VERSION=0.159.3 e tests/test_deploy_topology_hf2709.py acompanha a nova versao",
+      "core/line/agent_cli.build_codex_argv continua valido para 0.159.x: exec, --dangerously-bypass-approvals-and-sandbox, --sandbox, --skip-git-repo-check, --json, -o/--output-last-message e prompt por stdin (verificar contra a ajuda/fonte da 0.159.3 e ajustar se algum flag mudou)",
+      "O volume /home/darkfac/.codex (auth.json) continua sendo usado sem novo login",
+      "Portao oficial verde; PR mergeado"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-01T17:53:33.261046Z",
+    "updated_at": "2026-10-01T17:53:33.261046Z"
   }
 ]
