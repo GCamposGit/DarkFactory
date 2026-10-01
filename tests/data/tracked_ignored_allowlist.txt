@@ -1,0 +1,93 @@
+# Caminhos rastreados pelo git E cobertos por uma regra do .gitignore (USR-102).
+#
+# O .gitignore so protege o que nunca foi adicionado; um arquivo ja rastreado que
+# passa a ser ignorado continua sendo versionado (e publicado) em silencio. O teste
+# tests/test_gitignore_consistency.py compara `git ls-files -ci --exclude-standard`
+# com esta lista:
+#   - caminho rastreado-e-ignorado FORA desta lista  -> falha (git rm --cached ou
+#     ajuste o .gitignore; nunca acrescente aqui para "fazer passar");
+#   - caminho DESTA lista que deixou de ser rastreado-e-ignorado -> falha (remova a
+#     linha). A lista so pode encolher.
+#
+# Formato: um caminho relativo (separador "/") por linha; "#" abre comentario; as
+# linhas de comentario que precedem um grupo dizem de qual ticket ele e.
+
+# [USR-102] .factory/reports/**: decidir se desversiona (git rm --cached) ou se a regra
+# `.factory/reports/` deixa de existir no .gitignore. Apague as linhas ao resolver.
+.factory/reports/20260905_project_review/evidence.json
+.factory/reports/ai-usage-monitor-report.md
+.factory/reports/cr-02-baseline-confidence-report.md
+.factory/reports/cr-03-baseline-verification-report.md
+.factory/reports/cr-04-workflow-verification-context-report.md
+.factory/reports/cr-05-gate-policy-authority-report.md
+.factory/reports/cr-06-evidence-ttl-and-binding-report.md
+.factory/reports/cr-07-grill-and-human-dependency-report.md
+.factory/reports/cr-08-manifest-secret-exposure-report.md
+.factory/reports/cr-10-runtime-idempotency-report.md
+.factory/reports/cr-11-prefix-dependencies-report.md
+.factory/reports/cr-12-baseline-exit-codes-report.md
+.factory/reports/cr-13-probe-limits-report.md
+.factory/reports/cr-14-driver-protocol-errors-report.md
+.factory/reports/cr-15-approval-binding-report.md
+.factory/reports/cr-16-oracle-qualification-report.md
+.factory/reports/dark-factory-e2e-game-report.md
+.factory/reports/df-01-state-contract-report.md
+.factory/reports/df-02-governance-guard-report.md
+.factory/reports/df-03-harness-contract-report.md
+.factory/reports/df-04-ci-policy-report.md
+.factory/reports/df-05-racing-evidence-report.md
+.factory/reports/df-06-learning-promotion-report.md
+.factory/reports/df-07-df-08-hub-security-report.md
+.factory/reports/df-08-hub-access-security-report.md
+.factory/reports/df-09-tls-transport-report.md
+.factory/reports/df-10-usage-store-report.md
+.factory/reports/df-11-runtime-recovery-report.md
+.factory/reports/df-12-execution-budget-report.md
+.factory/reports/df-13-executor-sandbox-report.md
+.factory/reports/df-14-provider-integration-report.md
+.factory/reports/df-15-factory-vertical-report.md
+.factory/reports/df-16-portable-offline-ci-report.md
+.factory/reports/df-17-field-provenance-report.md
+.factory/reports/df-18-agent-evals-report.md
+.factory/reports/df-19-context-policy-report.md
+.factory/reports/df-20-delivery-policy-report.md
+.factory/reports/df-21-task-dashboard-report.md
+.factory/reports/df-22-content-visual-migration-report.md
+.factory/reports/df-23-worktree-protocol-report.md
+.factory/reports/df-24-project-adoption-report.md
+.factory/reports/hf-01-01-catalog-report.md
+.factory/reports/hf-01-02-sources-report.md
+.factory/reports/hf-01-baseline-report.md
+.factory/reports/hf-02-01-environment-report.md
+.factory/reports/hf-02-02-04-runtime-spike-report.md
+.factory/reports/hf-02-02-report.md
+.factory/reports/hf-02-03-report.md
+.factory/reports/hf-02-04-report.md
+.factory/reports/hf-02-spike-report.md
+.factory/reports/hf-03-cloud-readiness-report.md
+.factory/reports/hf-04-workflow-contracts-report.md
+.factory/reports/hf-05-01-local-runtime-report.md
+.factory/reports/hf-06-skills-modularization-report.md
+.factory/reports/hf-07-ai-adapters-budget-report.md
+.factory/reports/hf-08-demand-intake-grill-bootstrap-report.md
+.factory/reports/hf-09-implementation-quality-review-report.md
+.factory/reports/hf-10-persistent-memory-learning-pack-report.md
+.factory/reports/hf-11-resilient-execution-budget-report.md
+.factory/reports/hf-12-release-staging-production-backup-report.md
+.factory/reports/hf-13-darkhub-visibility-report.md
+.factory/reports/hf-14-telegram-n8n-integration-report.md
+.factory/reports/hf-wave1-luna-report.md
+.factory/reports/rm-08-incremental-telemetry-report.md
+.factory/reports/rm-09-history-report.md
+.factory/reports/roadmap-df-integration-report.md
+.factory/reports/roadmap-list-sort-report.md
+.factory/reports/roadmap-operacional-report.md
+.factory/reports/token-stress-routing-report.md
+.factory/reports/usr-15-report.md
+.factory/reports/usr-16-report.md
+.factory/reports/usr-18-report.md
+
+# [USR-100] .factory/telegram/*.json: config.json contem token de bot exposto no
+# repositorio publico. Desversionar so apos a rotacao do token pelo owner.
+.factory/telegram/config.json
+.factory/telegram/gateway_state.json
