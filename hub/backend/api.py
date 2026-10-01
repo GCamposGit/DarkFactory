@@ -1097,6 +1097,8 @@ def update_demand_ticket_status(
         return service.update_demand_ticket_status(ticket_id, status_value, notes=notes)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:  # e.g. completed without delivery_evidence (USR-94)
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @router.post("/demands/tickets/{ticket_id}/grill", response_model=GrillSession)

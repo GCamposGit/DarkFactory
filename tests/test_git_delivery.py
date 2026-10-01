@@ -65,6 +65,8 @@ class FakeGh:
             head = a[a.index("--head") + 1]
             n = self.add_open_pr(head)
             return ok(f"https://github.com/x/y/pull/{n}\n")
+        if a[:2] == ["pr", "edit"] or a[:2] == ["label", "create"]:
+            return ok()
         if a[:2] == ["pr", "checks"]:
             # USR-85: merges are gated on CI; the fake repository reports one green check.
             return ok(json.dumps([{"bucket": "pass", "name": "build", "link": "", "workflow": "CI"}]))
@@ -121,19 +123,27 @@ def test_happy_path_merges_and_cleans(env: tuple[Path, Path, FakeGh]) -> None:
     assert _git(local, "rev-parse", "main") == _git(local, "rev-parse", "origin/main") == rep.merge_sha
     assert _git(local, "branch", "--list", "ticket/*") == ""
     assert any(c[:2] == ["pr", "create"] for c in gh.calls)
+    create = next(call for call in gh.calls if call[:2] == ["pr", "create"])
+    assert create[create.index("--title") + 1] == "feat(core): Nova feature [USR-70]"
+    assert any(call[:2] == ["pr", "edit"] and "--add-label" in call
+               and "implementation" in call for call in gh.calls)
 
 
-def test_rebases_when_behind_origin(env: tuple[Path, Path, FakeGh], tmp_path: Path) -> None:
+def test_sync_preserves_evidence_when_behind_origin(env: tuple[Path, Path, FakeGh], tmp_path: Path) -> None:
     local, bare, gh = env
     other = _other_clone(bare, tmp_path)
     (other / "other.txt").write_text("o\n", encoding="utf-8")
     _git(other, "add", "-A")
     _git(other, "commit", "--quiet", "-m", "feat: other")
     _git(other, "push", "--quiet", "origin", "main")
+    _seed_ticket(local, "USR-71")
     (local / "mine.txt").write_text("m\n", encoding="utf-8")
     rep = GitAutonomyManager(local).deliver_branch("USR-71", "Mine", cwd=local, gh_runner=gh)
     assert rep.ok and rep.action == "merged", rep.message
     assert (local / "other.txt").exists() and (local / "mine.txt").exists()
+    ticket = DemandsStore(local / ".factory" / "demands" / "demands.json").get_ticket("USR-71")
+    assert ticket is not None and ticket.delivery_evidence
+    assert _git(local, "merge-base", "--is-ancestor", ticket.delivery_evidence, "HEAD") == ""
 
 
 def test_conflict_is_reported_and_tree_left_clean(env: tuple[Path, Path, FakeGh], tmp_path: Path) -> None:
@@ -222,6 +232,53 @@ def test_complete_ticket_uses_delivery(env: tuple[Path, Path, FakeGh]) -> None:
     rep = GitAutonomyManager(local).complete_ticket("USR-76", cwd=local, gh_runner=gh)
     assert rep.ok and rep.delivery is not None and rep.delivery.action == "merged"
     assert rep.sync_result is not None and rep.sync_result.ok
+    ticket = DemandsStore(local / ".factory" / "demands" / "demands.json").get_ticket("USR-76")
+    assert ticket is not None and ticket.status == DeliveryStatus.COMPLETED
+    assert ticket.delivery_evidence
+    assert _git(local, "cat-file", "-t", ticket.delivery_evidence) == "commit"
+    assert '"status": "completed"' in _git(local, "show", "HEAD:.factory/demands/demands.json")
+    assert ticket.delivery_evidence in _git(local, "show", "HEAD:.factory/demands/demands.json")
+    ledger_commit = _git(local, "show", "--format=", "HEAD", "--", ".factory/demands/demands.json")
+    assert '+    "status": "completed"' in ledger_commit
+    assert '+    "delivery_evidence": "' + ticket.delivery_evidence + '"' in ledger_commit
+
+
+def test_queue_delivery_uses_chore_title_and_label(env: tuple[Path, Path, FakeGh]) -> None:
+    local, _, gh = env
+    _seed_ticket(local, "USR-120")
+    rep = GitAutonomyManager(local).deliver_branch("USR-120", "Novo defeito", cwd=local, gh_runner=gh, kind="queue")
+    assert rep.ok and rep.action == "merged", rep.message
+    create = next(call for call in gh.calls if call[:2] == ["pr", "create"])
+    assert create[create.index("--title") + 1] == "chore(backlog): registrar USR-120 - Novo defeito"
+    assert any(call[:2] == ["pr", "edit"] and "--add-label" in call and "queue" in call for call in gh.calls)
+    assert _git(local, "log", "-1", "--format=%s").startswith("chore(backlog): registrar USR-120")
+    assert DemandsStore(local / ".factory" / "demands" / "demands.json").get_ticket("USR-120").status == DeliveryStatus.PLANNED
+
+
+def test_existing_queue_pr_gets_queue_title_and_label(env: tuple[Path, Path, FakeGh]) -> None:
+    local, _, gh = env
+    number = gh.add_open_pr("ticket/usr-122")
+    _seed_ticket(local, "USR-122")
+
+    rep = GitAutonomyManager(local).deliver_branch("USR-122", "Registrar falha", cwd=local,
+                                                   gh_runner=gh, kind="queue")
+
+    assert rep.ok and rep.pr_url.endswith(f"/pull/{number}")
+    assert not any(call[:2] == ["pr", "create"] for call in gh.calls)
+    assert any(call[:3] == ["pr", "edit", str(number)] and
+               call[call.index("--title") + 1] == "chore(backlog): registrar USR-122 - Registrar falha"
+               for call in gh.calls if "--title" in call)
+    assert any(call[:3] == ["pr", "edit", str(number)] and
+               call[call.index("--add-label") + 1] == "queue"
+               for call in gh.calls if "--add-label" in call)
+
+
+def test_implementation_delivery_rejects_ledger_only(env: tuple[Path, Path, FakeGh]) -> None:
+    local, _, gh = env
+    _seed_ticket(local, "USR-121")
+    rep = GitAutonomyManager(local).deliver_branch("USR-121", "Falso sucesso", cwd=local, gh_runner=gh)
+    assert not rep.ok and rep.action == "no_changes"
+    assert not any(call[:2] == ["pr", "create"] for call in gh.calls)
 
 
 def test_complete_ticket_rejects_ledger_only_branch(env: tuple[Path, Path, FakeGh]) -> None:

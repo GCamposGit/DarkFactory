@@ -19,7 +19,7 @@ from pathlib import Path
 import re
 import subprocess
 import sys
-from typing import Any, Callable, Optional, Sequence
+from typing import Any, Callable, Literal, Optional, Sequence
 
 from pydantic import BaseModel, Field
 
@@ -266,6 +266,7 @@ class GitAutonomyManager:
         paths: Optional[Sequence[str | Path]] = None,
         cwd: Optional[Path] = None,
         custom_message: Optional[str] = None,
+        kind: Literal["queue", "implementation"] = "implementation",
     ) -> Optional[str]:
         """Stage changes and produce a deterministic atomic commit bound to the ticket.
 
@@ -305,8 +306,12 @@ class GitAutonomyManager:
         if custom_message:
             commit_msg = custom_message
         else:
+            subject = (
+                f"chore(backlog): registrar {ticket_id} - {clean_title}"
+                if kind == "queue" else f"feat({scope}): {clean_title} [{ticket_id}]"
+            )
             commit_msg = (
-                f"feat({scope}): {clean_title} [{ticket_id}]\n\n"
+                f"{subject}\n\n"
                 f"DarkFac-Ticket: {ticket_id}\n"
                 f"DarkFac-Autonomy: zero-human-touch\n"
             )
@@ -462,11 +467,21 @@ class GitAutonomyManager:
             return False
         return runner(["auth", "status"], target).returncode == 0
 
-    def _sync_with_base(self, base: str, cwd: Path) -> tuple[bool, list[str], str]:
+    def _sync_with_base(
+        self, base: str, cwd: Path, *, preserve_commits: bool = False
+    ) -> tuple[bool, list[str], str]:
         """Bring HEAD up to date with origin/base. Returns (ok, conflict_files, message)."""
         remote_ref = f"origin/{base}"
         if _run_git(["merge-base", "--is-ancestor", remote_ref, "HEAD"], cwd=cwd).returncode == 0:
             return True, [], "up to date"
+        if preserve_commits:
+            # A rebase would rewrite the implementation SHA already recorded in the ledger.
+            merge = _run_git(["merge", "--no-edit", remote_ref], cwd=cwd)
+            if merge.returncode == 0:
+                return True, [], "merged"
+            files = self._conflict_files(cwd)
+            _run_git(["merge", "--abort"], cwd=cwd)
+            return False, files, (merge.stderr or merge.stdout).strip()
         rebase = _run_git(["rebase", remote_ref], cwd=cwd)
         if rebase.returncode == 0:
             return True, [], "rebased"
@@ -527,18 +542,50 @@ class GitAutonomyManager:
             return []
         return [line for line in res.stdout.splitlines() if line.strip()]
 
+    def _record_completion(
+        self, ticket_id: str, title: str, cwd: Path, custom_message: str | None = None
+    ) -> str:
+        """Commit implementation, then atomically record its SHA and completed status."""
+        ledger = cwd / _LEDGER_RELATIVE
+        if not ledger.is_file():  # small standalone repositories used by callers/tests
+            if self.is_dirty(cwd):
+                self.commit_ticket(ticket_id, title, cwd=cwd, custom_message=custom_message)
+            return self.get_current_sha(cwd)
+        store = DemandsStore(ledger)
+        ticket = store.get_ticket(ticket_id)
+        if ticket is None:
+            raise ValueError(f"Ticket {ticket_id} not found in demands ledger")
+        if ticket.status == DeliveryStatus.COMPLETED and ticket.delivery_evidence:
+            if self.is_dirty(cwd):
+                self.commit_ticket(ticket_id, title, cwd=cwd, custom_message=custom_message)
+            return self.get_current_sha(cwd)
+        if self.is_dirty(cwd):
+            self.commit_ticket(ticket_id, title, cwd=cwd, custom_message=custom_message)
+        implementation_sha = self.get_current_sha(cwd)
+        ticket.status = DeliveryStatus.COMPLETED
+        ticket.delivery_evidence = implementation_sha
+        ticket.updated_at = datetime.now(timezone.utc)
+        store.save_ticket(ticket)
+        return self.commit_ticket(ticket_id, title, cwd=cwd, custom_message=custom_message) or implementation_sha
+
     def _ci_gate(
-        self, number: int, pr_url: str, branch: str, base: str, cwd: Path, runner: GhRunner
+        self, number: int, pr_url: str, branch: str, base: str, cwd: Path, runner: GhRunner,
+        kind: Literal["queue", "implementation"] = "implementation",
     ) -> tuple[Optional[DeliveryReport], str]:
         """Decide whether the PR may be merged (USR-85).
 
         Returns ``(blocking_report, note)``. ``blocking_report`` is ``None`` when
         the merge may proceed; ``note`` is the ``ci_gate=...`` marker for the
-        final message. PRs that only touch the ticket ledger/roadmap skip the
-        gate: no code changed, and gating them would stop defect tickets from
-        being registered while ``main`` is red.
+        final message. Only queue PRs that touch the ledger/roadmap skip CI;
+        ledger-only implementation PRs are rejected.
         """
-        if is_ledger_only(self._changed_files(base, cwd)):
+        changed = self._changed_files(base, cwd)
+        if kind == "implementation" and is_ledger_only(changed):
+            return DeliveryReport(
+                ok=False, action="no_changes", pr_url=pr_url, branch=branch,
+                message="Implementation PR changes only the ledger; merge withheld.",
+            ), "ci_gate=rejected_ledger_only"
+        if kind == "queue" and is_ledger_only(changed):
             logger.info("PR #%s touches only ledger/roadmap files: ci_gate=skipped_ledger_only", number)
             return None, "ci_gate=skipped_ledger_only"
         verdict = ensure_green(
@@ -595,6 +642,7 @@ class GitAutonomyManager:
         base: str = "main",
         gh_runner: Optional[GhRunner] = None,
         merge: bool = True,
+        kind: Literal["queue", "implementation"] = "implementation",
     ) -> DeliveryReport:
         """Commit, push, open PR, merge (squash) and clean up a ticket branch.
 
@@ -604,17 +652,29 @@ class GitAutonomyManager:
         target = cwd or self.root
         runner = gh_runner or _run_gh
         try:
-            return self._deliver(ticket_id, title, target, base, runner, merge)
+            if kind not in ("queue", "implementation"):
+                raise ValueError(f"Unknown delivery kind: {kind}")
+            return self._deliver(ticket_id, title, target, base, runner, merge, kind)
         except Exception as exc:  # fail-closed report instead of crashing the pipeline
             logger.exception("deliver_branch failed for %s", ticket_id)
             return DeliveryReport(ok=False, action="error", message=str(exc))
 
     def _deliver(
-        self, ticket_id: str, title: str, cwd: Path, base: str, runner: GhRunner, merge: bool
+        self, ticket_id: str, title: str, cwd: Path, base: str, runner: GhRunner, merge: bool,
+        kind: Literal["queue", "implementation"],
     ) -> DeliveryReport:
         # (a) commit if dirty
-        if self.is_dirty(cwd=cwd):
-            self.commit_ticket(ticket_id, title, cwd=cwd)
+        if kind == "implementation":
+            changed = set(self._changed_files(base, cwd)) | set(self.changed_paths(cwd))
+            if is_ledger_only(list(changed)):
+                return DeliveryReport(ok=False, action="no_changes", message="Implementation changes only the ledger.")
+            self._record_completion(ticket_id, title, cwd)
+        else:
+            changed = set(self._changed_files(base, cwd)) | set(self.changed_paths(cwd))
+            if not is_ledger_only(list(changed)):
+                return DeliveryReport(ok=False, action="error", message="Queue registration must change only ledger files.")
+            if self.is_dirty(cwd=cwd):
+                self.commit_ticket(ticket_id, title, cwd=cwd, kind="queue")
 
         # (b) never work on base directly
         branch = self._current_branch(cwd)
@@ -638,7 +698,7 @@ class GitAutonomyManager:
         if _run_git(["merge-base", "--is-ancestor", base, "HEAD"], cwd=cwd).returncode == 0:
             _run_git(["branch", "-f", base, remote_ref], cwd=cwd)
 
-        ok, files, msg = self._sync_with_base(base, cwd)
+        ok, files, msg = self._sync_with_base(base, cwd, preserve_commits=kind == "implementation")
         if not ok:
             return DeliveryReport(
                 ok=False,
@@ -655,6 +715,10 @@ class GitAutonomyManager:
                 ok=True, action="no_changes", branch=branch, cleaned=cleaned,
                 message="Branch has no commits beyond base.",
             )
+        if kind == "implementation" and is_ledger_only(self._changed_files(base, cwd)):
+            return DeliveryReport(ok=False, action="no_changes", branch=branch, message="Implementation changes only the ledger.")
+        if kind == "queue" and not is_ledger_only(self._changed_files(base, cwd)):
+            return DeliveryReport(ok=False, action="error", branch=branch, message="Queue PR changes non-ledger files.")
 
         # (d) push
         push = _run_git(["push", "--force-with-lease", "-u", "origin", branch], cwd=cwd, timeout_s=180.0)
@@ -668,11 +732,13 @@ class GitAutonomyManager:
         if existing:
             number, pr_url = existing
         else:
-            body = f"Entrega autonoma do ticket {ticket_id}.\n\nDarkFac-Ticket: {ticket_id}"
+            body = f"{'Registro de fila' if kind == 'queue' else 'Entrega autonoma'} do ticket {ticket_id}.\n\nDarkFac-Ticket: {ticket_id}"
+            pr_title = (f"chore(backlog): registrar {ticket_id} - {title.strip()}" if kind == "queue"
+                        else f"feat(core): {title.strip()} [{ticket_id}]")
             pr = runner(
                 [
                     "pr", "create", "--base", base, "--head", branch,
-                    "--title", f"{title.strip()} [{ticket_id}]", "--body", body,
+                    "--title", pr_title, "--body", body,
                 ],
                 cwd,
             )
@@ -688,6 +754,26 @@ class GitAutonomyManager:
                 )
             number = int(m.group(1))
 
+        pr_title = (f"chore(backlog): registrar {ticket_id} - {title.strip()}" if kind == "queue"
+                    else f"feat(core): {title.strip()} [{ticket_id}]")
+        title_update = runner(["pr", "edit", str(number), "--title", pr_title], cwd)
+        if title_update.returncode != 0:
+            return DeliveryReport(ok=False, action="error", pr_url=pr_url, branch=branch,
+                                  message=f"Could not set {kind} PR title: {title_update.stderr.strip()}")
+        label = runner(["pr", "edit", str(number), "--add-label", kind], cwd)
+        if label.returncode != 0:
+            color = "D4C5F9" if kind == "queue" else "0E8A16"
+            description = "Ticket registered in backlog" if kind == "queue" else "Ticket implementation"
+            created = runner(["label", "create", kind, "--color", color,
+                              "--description", description, "--force"], cwd)
+            if created.returncode != 0:
+                return DeliveryReport(ok=False, action="error", pr_url=pr_url, branch=branch,
+                                      message=f"Could not create {kind} label: {created.stderr.strip()}")
+            label = runner(["pr", "edit", str(number), "--add-label", kind], cwd)
+            if label.returncode != 0:
+                return DeliveryReport(ok=False, action="error", pr_url=pr_url, branch=branch,
+                                      message=f"Could not label {kind} PR: {label.stderr.strip()}")
+
         if not merge:
             return DeliveryReport(
                 ok=True,
@@ -701,7 +787,7 @@ class GitAutonomyManager:
         # `gh pr merge` must never be reached without the gate approving the exact
         # head being merged (USR-85); the retry below re-runs the gate because the
         # re-sync pushes a new head.
-        blocked, gate_note = self._ci_gate(number, pr_url, branch, base, cwd, runner)
+        blocked, gate_note = self._ci_gate(number, pr_url, branch, base, cwd, runner, kind)
         if blocked is not None:
             return blocked
         merge_args = ["pr", "merge", str(number), "--squash", "--delete-branch"]
@@ -714,14 +800,14 @@ class GitAutonomyManager:
                 collision = self._ledger_collision(cwd, remote_ref)
                 if collision:
                     return DeliveryReport(ok=False, action="conflict", pr_url=pr_url, branch=branch, message=collision)
-                ok, files, msg = self._sync_with_base(base, cwd)
+                ok, files, msg = self._sync_with_base(base, cwd, preserve_commits=kind == "implementation")
                 if not ok:
                     return DeliveryReport(
                         ok=False, action="conflict", pr_url=pr_url, branch=branch, conflict_files=files,
                         message=f"Conflict on retry: {', '.join(files) or msg}",
                     )
                 _run_git(["push", "--force-with-lease", "origin", branch], cwd=cwd, timeout_s=180.0)
-                blocked, gate_note = self._ci_gate(number, pr_url, branch, base, cwd, runner)
+                blocked, gate_note = self._ci_gate(number, pr_url, branch, base, cwd, runner, kind)
                 if blocked is not None:
                     return blocked
                 merge_res = runner(merge_args, cwd)
@@ -950,24 +1036,15 @@ class GitAutonomyManager:
                 message=message,
             )
 
-        # 1. Update ticket in DemandsStore
-        ticket.status = DeliveryStatus.COMPLETED
-        ticket.updated_at = datetime.now(timezone.utc)
-        store.save_ticket(ticket)
-        logger.info("Marked ticket %s as completed in demands store.", ticket_id)
-
-        # 2. Atomic commit if requested
+        # Record a verifiable implementation SHA alongside completed in one ledger commit.
         commit_sha: Optional[str] = None
         if auto_commit:
-            commit_sha = self.commit_ticket(
-                ticket_id=ticket.id,
-                title=ticket.title,
-                scope="core" if not ticket.tags else ticket.tags[0].replace("user-", ""),
-                cwd=target_dir,
-                custom_message=custom_message,
-            )
+            commit_sha = self._record_completion(ticket.id, ticket.title, target_dir, custom_message)
         else:
-            commit_sha = self.get_current_sha(cwd=target_dir)
+            return TicketCompletionReport(
+                ok=False, ticket_id=ticket_id,
+                message="Cannot complete a ticket without committing delivery evidence.",
+            )
 
         # 3. Remote sync if requested
         sync_result: Optional[GitSyncResult] = None
@@ -976,7 +1053,8 @@ class GitAutonomyManager:
             if self.gh_ready(cwd=target_dir, gh_runner=gh_runner):
                 needs_acceptance = self._requires_commercial_acceptance(ticket.project_id)
                 delivery = self.deliver_branch(
-                    ticket.id, ticket.title, cwd=target_dir, gh_runner=gh_runner, merge=not needs_acceptance
+                    ticket.id, ticket.title, cwd=target_dir, gh_runner=gh_runner,
+                    merge=not needs_acceptance, kind="implementation"
                 )
                 sync_result = GitSyncResult(
                     ok=delivery.ok,
@@ -1255,6 +1333,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     deliver_parser.add_argument("ticket_id", help="Ticket ID (e.g. USR-57)")
     deliver_parser.add_argument("--title", required=True, help="Title/summary of the change")
     deliver_parser.add_argument("--base", default="main", help="Base branch (default: main)")
+    deliver_parser.add_argument("--kind", choices=("queue", "implementation"), default="implementation",
+                                help="Delivery type (default: implementation)")
     deliver_parser.add_argument("--no-merge", action="store_true", help="Open PR only (commercial acceptance)")
 
     subparsers.add_parser("sweep", help="Remove merged ticket/df branches and stale worktrees")
@@ -1303,7 +1383,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         return 0
 
     if args.command == "deliver":
-        rep = manager.deliver_branch(args.ticket_id, args.title, base=args.base, merge=not args.no_merge)
+        rep = manager.deliver_branch(args.ticket_id, args.title, base=args.base,
+                                     merge=not args.no_merge, kind=args.kind)
         print(f"[{rep.action.upper()}] {rep.message} {rep.pr_url or ''}".rstrip())
         return 0 if rep.ok else 1
 

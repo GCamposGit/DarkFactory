@@ -267,5 +267,10 @@ def test_hub_api_demands_endpoints(temp_demands_env):
         patch_resp = client.patch(f"/api/demands/tickets/{ticket_id}/status?status=implementing")
         assert patch_resp.status_code == 200
         assert patch_resp.json()["status"] == "implementing"
+
+        # 6. Completion needs delivery evidence: a clean 422, not a server error (USR-94)
+        refused = client.patch(f"/api/demands/tickets/{ticket_id}/status?status=completed")
+        assert refused.status_code == 422
+        assert "delivery_evidence" in refused.json()["detail"]
     finally:
         app.dependency_overrides.clear()

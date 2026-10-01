@@ -424,6 +424,9 @@ class FakeRepoGh(GhScript):
             number = len(self.prs) + 1
             self.prs[number] = {"head": a[a.index("--head") + 1], "state": "OPEN", "oid": None}
             return self.result(a, 0, f"https://github.com/x/y/pull/{number}\n")
+        if a[:2] == ["pr", "edit"] or a[:2] == ["label", "create"]:
+            self.calls.append(a)
+            return self.result(a, 0)
         if a[:2] == ["pr", "view"]:
             self.calls.append(a)
             p = self.prs[int(a[2])]
@@ -474,7 +477,9 @@ def write_code(local: Path) -> None:
 def write_ledger(local: Path) -> None:
     ledger = local / ".factory" / "demands"
     ledger.mkdir(parents=True)
-    (ledger / "demands.json").write_text("[]\n", encoding="utf-8")
+    (ledger / "demands.json").write_text(
+        json.dumps([{"id": "USR-90", "title": "Gate"}], indent=2), encoding="utf-8"
+    )
 
 
 def deliver(local: Path, gh: FakeRepoGh, clock: FakeClock, **kwargs: Any) -> DeliveryReport:
@@ -503,7 +508,7 @@ def test_delivery_blocks_different_titles_for_same_id(repo: tuple[Path, Path]) -
     ledger.write_text(json.dumps([{"id": "USR-67", "title": "DarkHub"}], indent=2), encoding="utf-8")
     gh = FakeRepoGh(bare, [])
 
-    rep = manager(local, FakeClock()).deliver_branch("USR-67", "DarkHub", cwd=local, gh_runner=gh)
+    rep = manager(local, FakeClock()).deliver_branch("USR-67", "DarkHub", cwd=local, gh_runner=gh, kind="queue")
 
     assert not rep.ok and rep.action == "conflict"
     assert "USR-67" in rep.message and "Original" in rep.message and "DarkHub" in rep.message
@@ -567,10 +572,27 @@ def test_ledger_only_pr_skips_the_gate_even_with_red_main(repo: tuple[Path, Path
     local, bare = repo
     write_ledger(local)
     gh = FakeRepoGh(bare, [[check("fail")]])
-    rep = deliver(local, gh, FakeClock())
+    rep = manager(local, FakeClock()).deliver_branch("USR-90", "Gate", cwd=local, gh_runner=gh, kind="queue")
     assert rep.ok and rep.action == "merged", rep.message
     assert "ci_gate=skipped_ledger_only" in rep.message
     assert gh.count(["pr", "checks"]) == 0 and gh.count(["run", "list"]) == 0
+
+
+def test_ledger_only_implementation_is_rejected_by_ci_gate(repo: tuple[Path, Path]) -> None:
+    local, bare = repo
+    write_ledger(local)
+    _git(local, "add", ".factory/demands/demands.json")
+    _git(local, "commit", "-m", "ledger only")
+    gh = FakeRepoGh(bare, [[check("pass")]])
+
+    blocked, note = manager(local, FakeClock())._ci_gate(
+        1, "https://github.com/x/y/pull/1", "ticket/usr-90", "main", local, gh,
+        kind="implementation",
+    )
+
+    assert blocked is not None and not blocked.ok and blocked.action == "no_changes"
+    assert note == "ci_gate=rejected_ledger_only"
+    assert not gh.calls
 
 
 def test_pr_mixing_ledger_and_code_is_still_gated(repo: tuple[Path, Path]) -> None:

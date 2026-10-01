@@ -196,7 +196,7 @@ def _queue_ticket_isolated(args: argparse.Namespace) -> Optional[UserTicket]:
     store = DemandsStore(workspace.path / ".factory" / "demands" / "demands.json")
     ticket = _build_ticket(args, store)
     store.save_ticket(ticket)
-    report = GitAutonomyManager(PROJECT_ROOT).deliver_branch(ticket.id, ticket.title, cwd=workspace.path)
+    report = GitAutonomyManager(PROJECT_ROOT).deliver_branch(ticket.id, ticket.title, cwd=workspace.path, kind="queue")
     if not report.ok:
         logger.error("Queue registration of %s failed (%s): %s", ticket.id, report.action, report.message)
     return ticket if report.ok else None
