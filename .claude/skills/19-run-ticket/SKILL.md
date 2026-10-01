@@ -24,7 +24,7 @@ Esta skill governa o ciclo de vida ponta a ponta de desenvolvimento de tickets n
    - O agente deve:
      a) Recusar a implementação local no chat;
      b) Informar a cota atual e que ela está abaixo do limiar de segurança ($15\%$);
-     c) Orientar o usuário a migrar para o harness saudável eleito (ex.: Antigravity) ou invocar o launcher headless `python run_ticket.py <TICKET_ID>`.
+     c) Orientar o usuário a migrar para o harness saudável eleito com capacidade de escrita (Claude ou Codex) ou invocar o launcher headless `python run_ticket.py <TICKET_ID>`.
 
 3. **Exceção de Override Explícito pelo Usuário**:
    - **A implementação em um harness com cota $\le 15.0\%$ SÓ É PERMITIDA se o usuário exigir explicitamente no prompt** (ex.: *"forçar execução neste harness"*, *"ignorar limite de cota"*, *"estou ciente da cota crítica, prossiga"* ou via flag `--force` / `--allow-critical-quota`).
@@ -42,7 +42,7 @@ flowchart TD
     Evaluate -->|Não| CheckOverride{"Usuário exigiu Override<br/>explicitamente no prompt?"}
     CheckOverride -->|Sim| PIVLoop
     CheckOverride -->|Não| Block["Bloqueia Chat Interativo<br/>Despacha Headless ou Redireciona"]
-    Block --> DispatchHealthy["3. Invoca run_ticket.py<br/>Harness Saudável Eleito (Antigravity)"]
+    Block --> DispatchHealthy["3. Invoca run_ticket.py<br/>Harness Saudável com Escrita (Claude/Codex)"]
     PIVLoop --> Validate["4. Validação Determinística Oficial<br/>(runner.py --quick)"]
     DispatchHealthy --> Validate
     Validate --> Done["5. [HARNESS_PASS] & Conclusão"]
@@ -52,8 +52,8 @@ flowchart TD
 
 1. **Preflight e Erupção de Telemetria**:
    O script `run_ticket.py` ou a linha autônoma inspeciona os 4 provedores em tempo real (`.factory/usage/providers/`).
-   - Se Codex estiver em 2%, Claude em 3% e Grok em 2.8%, o Antigravity (~53%+) é eleito como executor primário.
-   - Se todas as contas de assinatura estiverem $\le 15\%$, o fallback é acionado para o OpenRouter (DeepSeek V4.1 Flash), desde que haja saldo em dólar confirmado (`available_credit_usd > 0`).
+   - O roteador só elege harnesses que declaram o modo exigido pelo estágio (`core.line.agent_cli.HARNESS_CAPABILITIES`): o desenvolvimento exige `write`, que só Claude e Codex implementam. Grok e Antigravity são somente leitura (grill/planning/review) e nunca são eleitos para `development`; se Claude e Codex estiverem $\le 15\%$, não há rota (fail-closed), mesmo com o Antigravity saudável.
+   - Se todas as contas de assinatura estiverem $\le 15\%$, o fallback é acionado para o OpenRouter (DeepSeek V4.1 Flash) apenas em estágios de leitura (ele não escreve no worktree), desde que haja saldo em dólar confirmado (`available_credit_usd > 0`).
 
 2. **Execução Headless ou Assistida**:
    - O executor recebe o ticket, prepara a branch de trabalho isolada (`core.line.workspace`), gera os testes unitários primeiro (TDD) e escreve o código funcional.

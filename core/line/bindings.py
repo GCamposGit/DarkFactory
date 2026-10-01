@@ -76,8 +76,11 @@ def default_project_resolver() -> ProjectResolver:
 
 
 # Stages whose agent must be able to WRITE to the worktree: OpenRouter is
-# read-only (core.line.agent_cli._run_openrouter), so it can never serve them.
-_WRITE_AGENT_STAGES: frozenset[str] = frozenset({"development", "integration"})
+# read-only (core.line.agent_cli.HARNESS_CAPABILITIES), so it can never serve them.
+# Derived from the router's stage modes so the two never drift apart.
+_WRITE_AGENT_STAGES: frozenset[str] = frozenset(
+    stage for stage, mode in line_routing.STAGE_MODES.items() if mode == "write"
+)
 
 
 def agent_route_unavailable(

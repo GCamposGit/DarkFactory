@@ -60,17 +60,18 @@ def test_run_ticket_no_args_displays_quotas(capsys: pytest.CaptureFixture[str]) 
     assert "Nenhum ticket especificado" in captured.out
 
 
-def test_run_ticket_dry_run_auto_picks_antigravity(capsys: pytest.CaptureFixture[str]) -> None:
-    """Dry-run reports the healthy route selected by the quota router."""
+def test_run_ticket_dry_run_auto_picks_a_write_capable_route(capsys: pytest.CaptureFixture[str]) -> None:
+    """Dry-run reports the healthy write-capable route selected by the quota router (Antigravity cannot write)."""
     fake_quotas = {
-        "antigravity": {"provider": "google", "headroom": 50.0, "is_critical": False, "status": "SAUDÁVEL"},
+        "claude": {"provider": "anthropic", "headroom": 50.0, "is_critical": False, "status": "SAUDÁVEL"},
     }
     with patch("run_ticket.inspect_quotas", return_value=fake_quotas), \
-         patch("run_ticket.pick", return_value=("antigravity", None)):
+         patch("run_ticket.pick", return_value=("claude", "sonnet")) as picked:
         exit_code = main(["USR-01", "--dry-run"])
     assert exit_code == 0
+    assert picked.call_args.kwargs["mode"] == "write"
     captured = capsys.readouterr()
-    assert "antigravity" in captured.out.lower()
+    assert "claude" in captured.out.lower()
     assert "[DRY RUN]" in captured.out
 
 

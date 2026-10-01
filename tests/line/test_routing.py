@@ -16,6 +16,7 @@ from core.line.routing import (
     load_routing_config,
     pick,
     record_result,
+    validate_routing_config,
 )
 
 
@@ -316,11 +317,17 @@ def test_load_routing_config_falls_back_to_defaults_when_file_missing(tmp_path):
     cfg = load_routing_config(missing)
     assert isinstance(cfg, RoutingConfig)
     assert cfg.pressure_thresholds["critical"] == 15.0
-    assert cfg.stages["development"].cascade[0] == ("antigravity", None)
+    # Development needs `write`: the defaults only list harnesses that declare it.
+    assert cfg.stages["development"].cascade[0] == ("claude", "sonnet")
+    assert validate_routing_config(cfg) == []
 
 
 def test_pick_dynamic_headroom_prefers_antigravity_over_critical_codex_claude():
-    """Real scenario: Codex at 2%, Claude at 3%, Grok at 2.8%, Antigravity at 61.5%."""
+    """Real scenario: Codex at 2%, Claude at 3%, Grok at 2.8%, Antigravity at 61.5%.
+
+    A read stage still elects the only healthy harness (Antigravity); a write stage must NOT, because
+    Antigravity has no write mode: it fails closed instead of electing a harness that cannot run it.
+    """
     cfg = load_routing_config(default_config_path())
 
     def real_like_lookup(provider_id: str) -> float | None:
@@ -332,15 +339,16 @@ def test_pick_dynamic_headroom_prefers_antigravity_over_critical_codex_claude():
         }
         return table.get(provider_id)
 
-    choice = pick(
-        "development",
-        ["harness:claude", "harness:codex", "harness:grok", "harness:antigravity"],
-        config=cfg,
-        quota_lookup=real_like_lookup,
-        cooldown_path=Path("does-not-exist.json"),
+    caps = ["harness:claude", "harness:codex", "harness:grok", "harness:antigravity"]
+    read_choice = pick(
+        "grill", caps, config=cfg, quota_lookup=real_like_lookup, cooldown_path=Path("does-not-exist.json"),
     )
-    # Antigravity must be selected since all others are critical!
-    assert choice == ("antigravity", None)
+    assert read_choice == ("antigravity", None)
+
+    write_choice = pick(
+        "development", caps, config=cfg, quota_lookup=real_like_lookup, cooldown_path=Path("does-not-exist.json"),
+    )
+    assert write_choice is None
 
 
 def test_pick_skips_forbidden_autonomous_models():
