@@ -1,0 +1,105 @@
+[
+  {
+    "id": "T1",
+    "title": "Criar estrutura da sidebar e ajustar layout base",
+    "goal": "Adicionar o componente de sidebar à esquerda e reorganizar o layout para duas colunas (sidebar + conteúdo) mantendo a topbar acima, sem ainda mover os links.",
+    "files_hint": [
+      "templates/base.html",
+      "templates/partials/sidebar.html",
+      "static/css/layout.css"
+    ],
+    "acceptance": [
+      "Sidebar renderiza à esquerda em desktop com largura fixa",
+      "Conteúdo principal permanece visível e sem sobreposição",
+      "Topbar continua no topo acima do layout de duas colunas",
+      "Nenhuma dependência nova adicionada"
+    ],
+    "tests_to_add": [
+      "tests/test_transformar_menu_superior_em_m.py::test_sidebar_presente_no_layout"
+    ],
+    "smoke": [
+      "/"
+    ]
+  },
+  {
+    "id": "T2",
+    "title": "Mover links de navegação do menu superior para a sidebar",
+    "goal": "Transferir os links de navegação atualmente no menu superior para a sidebar, deixando a topbar apenas com logo e busca.",
+    "files_hint": [
+      "templates/partials/sidebar.html",
+      "templates/partials/topbar.html",
+      "templates/base.html"
+    ],
+    "acceptance": [
+      "Todos os links de navegação antes no topo aparecem na sidebar",
+      "Topbar contém apenas logo e busca",
+      "Nenhum link de navegação duplicado entre topbar e sidebar"
+    ],
+    "tests_to_add": [
+      "tests/test_transformar_menu_superior_em_m.py::test_links_na_sidebar_e_nao_na_topbar"
+    ],
+    "smoke": [
+      "/"
+    ]
+  },
+  {
+    "id": "T3",
+    "title": "Destacar item ativo da sidebar conforme rota atual",
+    "goal": "Aplicar classe de destaque ao item de menu correspondente à rota atual, sem acoplar lógica de negócio à apresentação.",
+    "files_hint": [
+      "templates/partials/sidebar.html",
+      "static/css/layout.css"
+    ],
+    "acceptance": [
+      "Item correspondente à rota atual recebe classe de destaque",
+      "Rotas aninhadas destacam o item pai correto",
+      "Nenhuma lógica de negócio é adicionada à view/template"
+    ],
+    "tests_to_add": [
+      "tests/test_transformar_menu_superior_em_m.py::test_item_ativo_destacado"
+    ],
+    "smoke": [
+      "/"
+    ]
+  },
+  {
+    "id": "T4",
+    "title": "Tornar sidebar colapsável em mobile",
+    "goal": "Implementar toggle de colapso da sidebar em telas pequenas usando apenas recursos já presentes no projeto.",
+    "files_hint": [
+      "static/js/sidebar.js",
+      "static/css/layout.css",
+      "templates/partials/sidebar.html"
+    ],
+    "acceptance": [
+      "Em viewport mobile a sidebar inicia colapsada e pode ser aberta/fechada por botão",
+      "Em desktop a sidebar permanece fixa e sempre visível",
+      "Toggle funciona sem novas dependências"
+    ],
+    "tests_to_add": [
+      "tests/test_transformar_menu_superior_em_m.py::test_sidebar_colapsavel_mobile"
+    ],
+    "smoke": [
+      "/"
+    ]
+  },
+  {
+    "id": "T5",
+    "title": "Criar teste headless de validação do menu lateral",
+    "goal": "Garantir que o arquivo tests/test_transformar_menu_superior_em_m.py existe e valida a presença/estrutura do menu lateral conforme critério de aceite.",
+    "files_hint": [
+      "tests/test_transformar_menu_superior_em_m.py"
+    ],
+    "acceptance": [
+      "python -m pytest tests/test_transformar_menu_superior_em_m.py -v executa sem erros sintáticos ou de tipos",
+      "Teste valida presença da sidebar e ausência de links de navegação na topbar",
+      "Teste passa no CI local"
+    ],
+    "tests_to_add": [
+      "tests/test_transformar_menu_superior_em_m.py::test_estrutura_menu_lateral"
+    ],
+    "smoke": [
+      "/"
+    ]
+  }
+]
