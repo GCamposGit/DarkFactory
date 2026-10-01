@@ -52,6 +52,17 @@ _HARNESS_TO_PROVIDER: dict[str, str] = {
 }
 
 
+# Opt-in bootstrap for a host that has no quota data for a subscription harness yet (the cloud worker
+# before Codex has ever run). Unset (default) = unknown quota is ineligible, fail-closed.
+UNKNOWN_QUOTA_ENV = "DARKFAC_ROUTING_UNKNOWN_QUOTA"
+UNKNOWN_QUOTA_LAST_RESORT = "last_resort"
+
+
+def unknown_quota_last_resort() -> bool:
+    """True when `DARKFAC_ROUTING_UNKNOWN_QUOTA=last_resort` (set only on the cloud worker service)."""
+    return os.environ.get(UNKNOWN_QUOTA_ENV, "").strip().lower() == UNKNOWN_QUOTA_LAST_RESORT
+
+
 # Mode each stage needs from its agent. Stages not listed are read-only (text in, text out).
 STAGE_MODES: dict[str, str] = {
     "development": "write",
@@ -135,7 +146,7 @@ def _default_routing_config() -> RoutingConfig:
             ),
             "development": StageRoute(
                 cascade=[("claude", "sonnet"), ("codex", None)],
-                openrouter_ok=True,
+                openrouter_ok=False,  # write stage: OpenRouter is read-only, never a fallback here
                 openrouter_model=cheap_model,
             ),
             "review": StageRoute(
@@ -158,7 +169,8 @@ def validate_routing_config(config: RoutingConfig) -> list[str]:
     """Violations of the capability contract: a cascade candidate that cannot run its stage's mode.
 
     Empty list means consistent. Only subscription harnesses are checked; the OpenRouter fallback is
-    structurally read-only and `pick()` never offers it to a write stage.
+    structurally read-only and `pick()` never offers it to a write stage; `openrouter_ok: true` on a
+    write stage is reported as a violation because it can never take effect.
     """
     violations: list[str] = []
     for stage, stage_cfg in config.stages.items():
@@ -167,6 +179,10 @@ def validate_routing_config(config: RoutingConfig) -> list[str]:
             if not supports(harness, mode):
                 label = f"{harness}:{model}" if model else harness
                 violations.append(f"stage '{stage}' needs '{mode}' but candidate '{label}' does not declare it")
+        if stage_cfg.openrouter_ok and not supports("openrouter", mode):
+            violations.append(
+                f"stage '{stage}' needs '{mode}' but openrouter_ok is true and OpenRouter does not declare it"
+            )
     return violations
 
 
@@ -289,41 +305,64 @@ def record_result(
 # --------------------------------------------------------------------------
 
 
+_SNAPSHOT_MAX_AGE_SECONDS = 3600.0
+
+
+def _parse_iso_utc(raw: Any) -> Optional[datetime]:
+    try:
+        parsed = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=timezone.utc)
+
+
+def _snapshot_max_age(provider_dir: Path) -> float:
+    if os.environ.get("PYTEST_CURRENT_TEST") and provider_dir.resolve() == (
+        _CANONICAL_REPO_ROOT / ".factory" / "usage" / "providers"
+    ).resolve():
+        return 86400.0 * 30.0
+    return _SNAPSHOT_MAX_AGE_SECONDS
+
+
 def _default_quota_headroom(provider_id: str) -> Optional[float]:
-    """Real quota probe via core.usage.adapters reading providers. Fail-closed on stale/missing."""
+    """Real quota probe via core.usage.adapters reading providers. Fail-closed on stale/missing.
+
+    A stale snapshot is not the end of the road: the adapter is asked again (`force=True`, a live probe
+    or, for Codex inside the cloud container, the rate limits Codex logged in its own session files) and
+    only a result whose `checked_at` is within the max age counts. Anything older, unreadable or absent is
+    None, which `pick()` treats as unknown (fail-closed).
+    """
     try:
         from core.router.token_budget import _quota_headroom
         from core.usage.adapters import build_default_adapters
         from core.usage.reservation import QuotaReservationManager
 
         provider_dir = REPO_ROOT / ".factory" / "usage" / "providers"
+        max_age = _snapshot_max_age(provider_dir)
+        snapshot_stale = False
         snapshot_file = provider_dir / f"{provider_id}.json"
         if snapshot_file.is_file():
             try:
                 data = json.loads(snapshot_file.read_text(encoding="utf-8"))
-                checked_at_str = data.get("checked_at")
-                if checked_at_str:
-                    checked_at = datetime.fromisoformat(str(checked_at_str).replace("Z", "+00:00"))
-                    if checked_at.tzinfo is None:
-                        checked_at = checked_at.replace(tzinfo=timezone.utc)
+                checked_at = _parse_iso_utc(data.get("checked_at")) if data.get("checked_at") else None
+                if checked_at is not None:
                     age_seconds = (datetime.now(timezone.utc) - checked_at).total_seconds()
-                    max_age = 3600.0
-                    if os.environ.get("PYTEST_CURRENT_TEST") and provider_dir.resolve() == (_CANONICAL_REPO_ROOT / ".factory" / "usage" / "providers").resolve():
-                        max_age = 86400.0 * 30.0
                     if age_seconds > max_age:
-                        logger.warning(
-                            "Snapshot for %s is stale (%s s > %ss); failing closed",
-                            provider_id,
-                            round(age_seconds, 1),
-                            max_age,
+                        logger.info(
+                            "Snapshot for %s is stale (%s s > %ss); re-probing", provider_id, round(age_seconds, 1), max_age
                         )
-                        return None
+                        snapshot_stale = True
             except Exception as e:
                 logger.debug("Failed parsing checked_at for provider %s: %s", provider_id, e)
 
         for adapter in build_default_adapters(provider_dir):
             if adapter.spec.provider_id == provider_id:
-                raw_headroom = _quota_headroom(adapter.inspect())
+                usage = adapter.inspect(force=snapshot_stale)
+                checked = _parse_iso_utc(usage.checked_at)
+                if checked is None or (datetime.now(timezone.utc) - checked).total_seconds() > max_age:
+                    logger.warning("Quota data for %s is older than %ss; failing closed", provider_id, max_age)
+                    return None
+                raw_headroom = _quota_headroom(usage)
                 if raw_headroom is None:
                     return None
                 reserved = QuotaReservationManager().get_active_reserved_percent(provider_id)
@@ -413,6 +452,7 @@ def pick(
     ticket_id: Optional[str] = None,
     openrouter_balance_lookup: Optional[Callable[[], Optional[float]]] = None,
     mode: Optional[str] = None,
+    unknown_quota_last_resort_ok: Optional[bool] = None,
 ) -> Optional[tuple[str, Optional[str]]]:
     """Pick a (harness, model) for `stage`, or None if nothing is eligible right now.
 
@@ -428,6 +468,10 @@ def pick(
          falling back to highest headroom.
        - Low complexity: prefers GPT Luna xhigh / Gemini Flash if eligible.
        - Medium complexity / default: sorts strictly by remaining headroom descending.
+    2b. Bootstrap (`DARKFAC_ROUTING_UNKNOWN_QUOTA=last_resort`, or `unknown_quota_last_resort_ok=True`):
+       when no candidate has known healthy quota, a subscription harness whose quota is UNKNOWN (never
+       one known critical, nor one in cooldown) is elected, in cascade order, before OpenRouter.
+       Default off: unknown quota stays fail-closed.
     3. Fallback to OpenRouter only for `read` mode, when stage allows it or all cascade accounts
        are exhausted, provided OpenRouter has confirmed USD credit and spent_usd < cap.
     """
@@ -448,6 +492,7 @@ def pick(
     # (harness, model, in_cooldown, is_critical_or_unknown, remaining_headroom)
     evaluated: list[tuple[str, Optional[str], bool, bool, float]] = []
     eligible: list[tuple[str, Optional[str], float]] = []
+    unknown_quota: list[tuple[str, Optional[str]]] = []
 
     for harness, model in _routable_candidates(
         stage, stage_cfg, cfg, caps, required_mode, excluded_harnesses, excluded_pairs, implementing_harness
@@ -462,6 +507,8 @@ def pick(
 
         if not cooling and not is_critical and remaining is not None:
             eligible.append((harness, model, remaining))
+        elif not cooling and remaining is None:
+            unknown_quota.append((harness, model))
 
     winner: Optional[tuple[str, Optional[str]]] = None
 
@@ -496,6 +543,14 @@ def pick(
             # Medium complexity / default: Headroom Dinâmico (maior cota primeiro)
             eligible.sort(key=lambda item: item[2], reverse=True)
             winner = (eligible[0][0], eligible[0][1])
+
+    allow_unknown = unknown_quota_last_resort() if unknown_quota_last_resort_ok is None else unknown_quota_last_resort_ok
+    if winner is None and allow_unknown and unknown_quota:
+        winner = unknown_quota[0]
+        logger.warning(
+            "No harness with known healthy quota for stage %s; electing %s with UNKNOWN quota as last resort",
+            stage, winner[0],
+        )
 
     if winner is not None:
         if reserve_quota:

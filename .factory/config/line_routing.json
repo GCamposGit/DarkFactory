@@ -16,7 +16,7 @@
     },
     "development": {
       "cascade": [["claude", "sonnet"], ["codex", null]],
-      "openrouter_ok": true,
+      "openrouter_ok": false,
       "openrouter_model": "deepseek/deepseek-v4.1-flash"
     },
     "review": {

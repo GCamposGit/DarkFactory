@@ -153,6 +153,29 @@ def build_snapshot_commit(root: Path) -> str:
         shutil.rmtree(scratch, ignore_errors=True)
 
 
+def report_dirty_checkout(checkout: Path, *, limit: int = 40) -> None:
+    """After a failed runner, list what the run left dirty in the checkout (best effort).
+
+    The runner refuses a candidate whose worktree changed while the tests ran ("Candidate worktree is
+    dirty") and a green pytest summary then ends in exit 1; naming the paths makes that obvious in the
+    log tail the line records, instead of an unexplained "FAILED (N passed)".
+    """
+    try:
+        status = _git(checkout, "status", "--porcelain=v1", "--untracked-files=all")
+    except SnapshotError as exc:
+        print(f"[line_validate] could not inspect the checkout after the failure: {exc}", flush=True)
+        return
+    lines = status.splitlines()
+    if not lines:
+        print("[line_validate] runner failed; the checkout is clean (the failure is not a dirty tree)", flush=True)
+        return
+    print(f"[line_validate] runner failed and left {len(lines)} dirty path(s) in the checkout:", flush=True)
+    for line in lines[:limit]:
+        print(f"[line_validate]   {line}", flush=True)
+    if len(lines) > limit:
+        print(f"[line_validate]   ... {len(lines) - limit} more", flush=True)
+
+
 def run_official_runner_on_snapshot(root: Path) -> int:
     """Run `runner.py --quick` on a detached temporary checkout of a snapshot commit.
 
@@ -173,7 +196,10 @@ def run_official_runner_on_snapshot(root: Path) -> int:
             f"[line_validate] snapshot {sha[:12]} checked out at {checkout}; running the official harness (--quick)",
             flush=True,
         )
-        return subprocess.call([sys.executable, str(runner_path), "--quick"], cwd=checkout, env=sanitized_env())
+        code = subprocess.call([sys.executable, str(runner_path), "--quick"], cwd=checkout, env=sanitized_env())
+        if code != 0:
+            report_dirty_checkout(checkout)
+        return code
     finally:
         if added:
             try:

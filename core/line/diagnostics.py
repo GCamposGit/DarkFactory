@@ -5,7 +5,9 @@ the worker's local worktree and never committed, and the worker only logged "Job
 completed". This module gives every stage the same three tools:
 
 - `format_attempt_log` / `record_attempt`: a per-attempt record (stage, iteration, harness, model,
-  error kind, duration and the redacted first ~2000 characters of the agent/validate output);
+  error kind, duration and the redacted first ~2000 characters of the agent/validate output, plus, for
+  validate runs, the redacted last ~3000 characters of the RAW command output: the distilled report only
+  sees pytest lines, so a non-test failure such as the runner's "worktree is dirty" check lives there);
 - `persist`: commit and push ONLY the run's context directory (`.darkfac/runs/<run_id>/`) to the
   run branch, so the evidence is readable on GitHub without also committing a failing iteration's
   half-made edits;
@@ -26,6 +28,7 @@ from core.line.agent_cli import redact_secrets
 logger = logging.getLogger(__name__)
 
 MAX_OUTPUT_CHARS = 2000
+RAW_TAIL_CHARS = 3000
 SNIPPET_CHARS = 300
 _MAX_RECORDED_ATTEMPTS = 10
 
@@ -36,6 +39,18 @@ def redacted_head(text: Optional[str], limit: int = MAX_OUTPUT_CHARS) -> str:
     if len(clean) <= limit:
         return clean
     return f"{clean[:limit]}\n... [truncated, {len(clean)} chars total]"
+
+
+def redacted_tail(text: Optional[str], limit: int = RAW_TAIL_CHARS) -> str:
+    """Secret-redacted LAST `limit` characters of `text`, with a marker when truncated.
+
+    Redaction runs before truncation so a token straddling the cut is never left half-visible. The tail
+    is where a runner prints what a distilled test report cannot see (`[ERROR] ...`, `[HARNESS_FAIL]`).
+    """
+    clean = redact_secrets(text or "").rstrip()
+    if len(clean) <= limit:
+        return clean
+    return f"[truncated, {len(clean)} chars total] ...\n{clean[-limit:]}"
 
 
 def worker_snippet(text: Optional[str], limit: int = SNIPPET_CHARS) -> str:
@@ -54,6 +69,7 @@ def format_attempt_log(
     duration_s: Optional[float],
     output: Optional[str],
     note: str = "",
+    raw_tail: Optional[str] = None,
 ) -> str:
     lines = [
         f"# {stage} attempt log",
@@ -67,6 +83,10 @@ def format_attempt_log(
     if note:
         lines.append(f"- note: {note}")
     lines += ["", f"## Output (redacted, first {MAX_OUTPUT_CHARS} chars)", "", "```text", redacted_head(output), "```", ""]
+    if raw_tail is not None:
+        lines += [
+            f"## Raw output tail (redacted, last {RAW_TAIL_CHARS} chars)", "", "```text", redacted_tail(raw_tail), "```", "",
+        ]
     return "\n".join(lines)
 
 
