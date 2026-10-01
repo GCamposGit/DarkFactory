@@ -388,6 +388,13 @@ def resolve_wait_seconds(timeout_s: Optional[float] = None) -> float:
     return _env_seconds(CI_WAIT_ENV, DEFAULT_CI_WAIT_SECONDS)
 
 
+def resolve_no_checks_grace_seconds(grace_s: Optional[float] = None) -> float:
+    """Explicit grace, else the configured no-checks grace window."""
+    if grace_s is not None:
+        return max(0.0, float(grace_s))
+    return _env_seconds(NO_CHECKS_GRACE_ENV, DEFAULT_NO_CHECKS_GRACE_SECONDS)
+
+
 def _poll_checks(pr_number: int, cwd: Path, runner: GhRunner) -> CheckSnapshot:
     try:
         return query_checks(pr_number, cwd, runner)
@@ -470,11 +477,7 @@ def ensure_green(
     """
     timeout = resolve_wait_seconds(timeout_s)
     poll = DEFAULT_POLL_SECONDS if poll_s is None else max(0.0, float(poll_s))
-    grace = (
-        _env_seconds(NO_CHECKS_GRACE_ENV, DEFAULT_NO_CHECKS_GRACE_SECONDS)
-        if no_checks_grace_s is None
-        else max(0.0, float(no_checks_grace_s))
-    )
+    grace = resolve_no_checks_grace_seconds(no_checks_grace_s)
     sleep = sleep_fn or time.sleep
     clock = clock_fn or time.monotonic
 
@@ -527,7 +530,8 @@ def ensure_green(
             if snapshot.state == "error" and last_error:
                 detail += f": {tail_chars(sanitize(last_error), 300)}"
             return CiVerdict(
-                status="pending_timeout", pending_checks=pending, waited_s=elapsed, detail=detail
+                status="pending_timeout", pending_checks=pending, waited_s=elapsed,
+                detail=detail, snapshot=snapshot,
             )
 
         remaining = timeout - elapsed
