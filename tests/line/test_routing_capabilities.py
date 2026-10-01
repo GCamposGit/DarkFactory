@@ -55,7 +55,7 @@ def _write_config(tmp_path: Path, development_cascade: list[list[str | None]], *
 
 @pytest.mark.parametrize(
     ("harness", "write"),
-    [("claude", True), ("codex", True), ("grok", False), ("antigravity", False), ("openrouter", False)],
+    [("claude", True), ("codex", True), ("grok", True), ("antigravity", False), ("openrouter", False)],
 )
 def test_write_is_declared_only_for_harnesses_whose_runner_implements_it(harness: str, write: bool) -> None:
     assert supports(harness, "write") is write
@@ -94,9 +94,9 @@ def test_a_write_stage_listing_antigravity_is_a_violation_mutation_proof(tmp_pat
 
     violations = validate_routing_config(config)
 
-    assert len(violations) == 2
+    assert len(violations) == 1
     assert any("antigravity" in v and "development" in v and "'write'" in v for v in violations)
-    assert any("grok" in v for v in violations)
+    assert not any("grok" in v for v in violations)  # Grok Build declares `write` since USR-109
     assert not any("claude" in v for v in violations)
 
 
@@ -125,7 +125,7 @@ def test_read_stages_may_list_any_harness_and_the_other_family_cascade_is_checke
 
 
 def test_write_never_elects_antigravity_even_with_full_headroom_and_first_in_the_cascade(tmp_path: Path) -> None:
-    config = _write_config(tmp_path, [["antigravity", None], ["grok", None], ["codex", None]])
+    config = _write_config(tmp_path, [["antigravity", None], ["codex", None]])
 
     def lookup(provider_id: str) -> float | None:
         return 100.0 if provider_id == "google" else 20.0  # antigravity has by far the most headroom
@@ -135,13 +135,19 @@ def test_write_never_elects_antigravity_even_with_full_headroom_and_first_in_the
     assert choice == ("codex", None)
 
 
+def test_write_can_elect_grok_now_that_it_declares_write(tmp_path: Path) -> None:
+    config = _write_config(tmp_path, [["antigravity", None], ["grok", None]])
+
+    choice = _pick("development", _ALL_CAPS, config, tmp_path, mode="write")
+
+    assert choice == ("grok", None)
+
+
 def test_write_with_only_read_only_harnesses_available_returns_none_not_openrouter(tmp_path: Path) -> None:
-    config = _write_config(
-        tmp_path, [["antigravity", None], ["grok", None]], openrouter_ok=True, openrouter_model="deepseek/x"
-    )
+    config = _write_config(tmp_path, [["antigravity", None]], openrouter_ok=True, openrouter_model="deepseek/x")
 
     choice = _pick(
-        "development", ["harness:antigravity", "harness:grok"], config, tmp_path,
+        "development", ["harness:antigravity"], config, tmp_path,
         mode="write", openrouter_balance_lookup=lambda: 50.0,
     )
 
@@ -210,7 +216,7 @@ def test_the_default_routing_config_is_consistent_with_the_capabilities() -> Non
 # --------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("harness", ["antigravity", "grok", "openrouter"])
+@pytest.mark.parametrize("harness", ["antigravity", "openrouter"])
 def test_run_agent_refuses_write_on_a_read_only_harness_as_unsupported_mode(
     harness: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

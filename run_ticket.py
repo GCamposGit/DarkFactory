@@ -46,6 +46,7 @@ from core.line.agent_cli import (
     supports,
 )
 from core.line.diagnostics import redacted_head
+from core.line.operating_harness import detect_operating_harness
 from core.line.routing import _HARNESS_TO_PROVIDER, _default_quota_headroom, load_routing_config, pick
 from core.usage.history import history_path, read_history
 from core.roadmap.models import DeliveryStatus
@@ -380,6 +381,10 @@ def main(argv: Optional[list[str]] = None) -> int:
     caps = ["harness:claude", "harness:codex", "harness:grok", "harness:antigravity"]
     selected_harness: Optional[str] = None
     selected_model: Optional[str] = None
+    # The harness the owner operates the factory through is the preferred developer while its quota is
+    # above the critical floor (USR-109); None when no signal exists (pump, worker, cloud).
+    operating_harness = detect_operating_harness()
+    route_reason = "headroom"
 
     if args.harness:
         target_harness = args.harness.lower().strip()
@@ -401,6 +406,7 @@ def main(argv: Optional[list[str]] = None) -> int:
             return 2
 
         selected_harness = target_harness
+        route_reason = "explicit_harness"
         if not args.json:
             if harness_info and harness_info["is_critical"] and override_granted:
                 print(f"[AVISO] Override explícito do usuário ativo: executando em {target_harness} com quota crítica ou desconhecida.")
@@ -408,7 +414,9 @@ def main(argv: Optional[list[str]] = None) -> int:
                 print(f"[+] Harness explicitamente selecionado: {target_harness}")
     else:
         # Automatic router resolution via Dynamic Headroom, among harnesses that can write
-        route = pick("development", caps, mode=DEVELOPMENT_MODE)
+        if operating_harness and not args.json:
+            print(f"[+] Harness de operacao detectado: {operating_harness}")
+        route = pick("development", caps, mode=DEVELOPMENT_MODE, operating_harness=operating_harness)
         if route is None:
             print(
                 "\n[ERRO] Nenhuma rota disponível: todas as contas de assinatura estão <= 15% e OpenRouter sem saldo confirmado.",
@@ -416,10 +424,14 @@ def main(argv: Optional[list[str]] = None) -> int:
             )
             return 2
         selected_harness, selected_model = route
+        preferred_operating = operating_harness is not None and selected_harness == operating_harness
+        if preferred_operating:
+            route_reason = "operating_harness_preferred"
         if not args.json:
             print(
                 f"[+] Roteador selecionou automaticamente: {selected_harness.upper()} "
                 f"(Modelo: {selected_model or 'default'}, modo: {DEVELOPMENT_MODE})"
+                + (" (preferencia: harness de operacao)" if preferred_operating else "")
             )
 
     if args.dry_run:
@@ -430,6 +442,8 @@ def main(argv: Optional[list[str]] = None) -> int:
             "selected_model": selected_model,
             "mode": DEVELOPMENT_MODE,
             "override_granted": override_granted,
+            "operating_harness": operating_harness,
+            "route_reason": route_reason,
             "dry_run": True,
         }
         if args.json:

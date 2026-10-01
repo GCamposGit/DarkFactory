@@ -3032,7 +3032,8 @@
     "project_id": "darkfac",
     "title": "Roteador: preferir o harness de operacao como desenvolvedor principal (cota acima do piso) e habilitar escrita no Grok Build",
     "origin": "user",
-    "status": "planned",
+    "status": "completed",
+    "delivery_evidence": "5e7c848ded30b87a55916d609c55dff96387e2c6",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -3062,7 +3063,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-01T10:31:19.702331Z",
-    "updated_at": "2026-10-01T10:31:19.702331Z"
+    "updated_at": "2026-10-01T13:57:29.562041Z"
   },
   {
     "id": "USR-110",

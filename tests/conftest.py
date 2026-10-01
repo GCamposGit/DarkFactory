@@ -284,6 +284,21 @@ def offline_test_environment(request: pytest.FixtureRequest) -> Iterator[None]:
                 os.environ[key] = value
 
 
+@pytest.fixture(autouse=True)
+def _isolate_operating_harness_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Routing must not depend on which harness the developer running the tests operates through.
+
+    A developer inside Claude Code has CLAUDECODE=1 (Grok Build exports GROK_AGENT, and so on); left in
+    place, `core.line.operating_harness` would make `pick("development", ...)` prefer that harness and
+    change results. A test that needs an operating harness sets the variables itself.
+    """
+
+    from core.line.operating_harness import AUTODETECT_ENV_SIGNALS, OPERATING_HARNESS_ENV
+
+    for name in (OPERATING_HARNESS_ENV, *(name for name, _harness in AUTODETECT_ENV_SIGNALS)):
+        monkeypatch.delenv(name, raising=False)
+
+
 @pytest.fixture
 def stereo_wav(tmp_path: Path) -> Path:
     """Generate a tiny deterministic stereo fixture without shipping binary data."""
