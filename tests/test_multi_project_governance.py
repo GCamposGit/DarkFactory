@@ -17,6 +17,8 @@ from core.infra.models import InfraInventory, InfraNode, NodeRole, NodeStatus
 from core.infra.cards import build_infra_cards_report
 from core.roadmap.service import RoadmapQueryService
 from hub.backend.main import app
+from hub.backend.api import get_hub_service
+from hub.backend.service import HubService
 
 
 def test_project_registry_loading_and_prefixes():
@@ -189,7 +191,13 @@ def test_infra_cards_project_filtering():
     assert "hostinger-web" not in sc_card_ids
 
 
-def test_darkhub_api_multi_project_integration():
+def test_darkhub_api_multi_project_integration(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    source = Path(__file__).resolve().parents[1] / ".factory" / "demands" / "demands.json"
+    target = tmp_path / "demands" / "demands.json"
+    target.parent.mkdir(parents=True)
+    target.write_bytes(source.read_bytes())
+    service = HubService(data_dir=tmp_path)
+    monkeypatch.setitem(app.dependency_overrides, get_hub_service, lambda: service)
     client = TestClient(app)
 
     # 1. Projects listing
