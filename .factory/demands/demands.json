@@ -2993,7 +2993,8 @@
     "project_id": "darkfac",
     "title": "Medidor de cotas nao confiavel: Grok le 1,4% restante com 98,6% disponivel; auditar os 4 provedores com contrato, fixtures reais, historico e autoteste",
     "origin": "user",
-    "status": "planned",
+    "status": "completed",
+    "delivery_evidence": "41978ca084879add00d5178a3c4cae675a2564bc",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -3023,7 +3024,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-01T10:30:39.461763Z",
-    "updated_at": "2026-10-01T10:30:39.461763Z"
+    "updated_at": "2026-10-01T13:08:52.219553Z"
   },
   {
     "id": "USR-109",
