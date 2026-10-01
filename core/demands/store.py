@@ -5,12 +5,12 @@ from __future__ import annotations
 import json
 import logging
 import os
-import re
 from pathlib import Path
 from threading import RLock
 from typing import Any
 
 from core.demands.models import UserTicket
+from core.demands.id_allocator import reserve_ticket_id
 from core.roadmap.models import DeliveryStatus, utc_now
 
 logger = logging.getLogger(__name__)
@@ -110,19 +110,7 @@ class DemandsStore:
             from core.projects.registry import get_project_registry
 
             prefix = get_project_registry().get_ticket_prefix(project_id)
-            tickets = self.list_tickets(project_id=project_id)
-            existing_numbers: list[int] = []
-            pattern = re.compile(rf"{re.escape(prefix)}-(\d+)")
-            for t in tickets:
-                match = pattern.search(t.id)
-                if match:
-                    existing_numbers.append(int(match.group(1)))
-                elif project_id == "darkfac":
-                    match_usr = re.search(r"(?:USR|DF)-(\d+)", t.id)
-                    if match_usr:
-                        existing_numbers.append(int(match_usr.group(1)))
-            next_num = max(existing_numbers, default=0) + 1
-            return f"{prefix}-{next_num:02d}"
+            return reserve_ticket_id(self.path, prefix)
 
     def update_status(
         self,

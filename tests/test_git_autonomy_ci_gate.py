@@ -491,6 +491,25 @@ def test_delivery_without_checks_merges(repo: tuple[Path, Path]) -> None:
     assert gh.count(["pr", "checks"]) >= 1  # the gate did look
 
 
+def test_delivery_blocks_different_titles_for_same_id(repo: tuple[Path, Path]) -> None:
+    local, bare = repo
+    ledger = local / ".factory" / "demands" / "demands.json"
+    ledger.parent.mkdir(parents=True)
+    ledger.write_text(json.dumps([{"id": "USR-67", "title": "Original"}], indent=2), encoding="utf-8")
+    _git(local, "add", ".factory/demands/demands.json")
+    _git(local, "commit", "-m", "base ticket")
+    _git(local, "push", "origin", "main")
+    _git(local, "checkout", "-b", "ticket/usr-67")
+    ledger.write_text(json.dumps([{"id": "USR-67", "title": "DarkHub"}], indent=2), encoding="utf-8")
+    gh = FakeRepoGh(bare, [])
+
+    rep = manager(local, FakeClock()).deliver_branch("USR-67", "DarkHub", cwd=local, gh_runner=gh)
+
+    assert not rep.ok and rep.action == "conflict"
+    assert "USR-67" in rep.message and "Original" in rep.message and "DarkHub" in rep.message
+    assert gh.count(["pr", "merge"]) == 0
+
+
 def test_delivery_waits_for_pending_then_merges(repo: tuple[Path, Path]) -> None:
     local, bare = repo
     write_code(local)

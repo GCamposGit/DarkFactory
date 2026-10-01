@@ -28,6 +28,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from core.demands.models import UserTicket
+from core.demands.id_allocator import title_collisions
 from core.demands.store import DemandsStore
 from core.git import ticket_workspace
 from core.git.safe_show import safe_show
@@ -478,6 +479,19 @@ class GitAutonomyManager:
         _run_git(["merge", "--abort"], cwd=cwd)
         return False, files, (merge.stderr or merge.stdout).strip()
 
+    def _ledger_collision(self, cwd: Path, remote_ref: str) -> str:
+        """Reject conflicting ticket identities before Git can resolve ledger rows."""
+        candidate = cwd / _LEDGER_RELATIVE
+        if not candidate.is_file():
+            return ""
+        shown = safe_show(remote_ref, _LEDGER_RELATIVE, cwd=cwd)
+        if shown.returncode != 0:
+            return ""
+        collisions = title_collisions(shown.stdout, candidate.read_text(encoding="utf-8"))
+        if not collisions:
+            return ""
+        return "demands.json ticket ID collision; merge blocked: " + "; ".join(collisions)
+
     def _find_open_pr(self, branch: str, cwd: Path, runner: GhRunner) -> Optional[tuple[int, str]]:
         res = runner(["pr", "list", "--head", branch, "--state", "open", "--json", "number,url"], cwd)
         if res.returncode != 0:
@@ -617,6 +631,9 @@ class GitAutonomyManager:
                 ok=False, action="error", branch=branch, message=f"fetch failed: {fetch.stderr.strip()}"
             )
         remote_ref = f"origin/{base}"
+        collision = self._ledger_collision(cwd, remote_ref)
+        if collision:
+            return DeliveryReport(ok=False, action="conflict", branch=branch, message=collision)
         # Local base is only realigned when fully contained in the branch (nothing is lost).
         if _run_git(["merge-base", "--is-ancestor", base, "HEAD"], cwd=cwd).returncode == 0:
             _run_git(["branch", "-f", base, remote_ref], cwd=cwd)
@@ -694,6 +711,9 @@ class GitAutonomyManager:
             err = f"{merge_res.stderr}{merge_res.stdout}".lower()
             if "not mergeable" in err or "conflict" in err or "out of date" in err:
                 _run_git(["fetch", "origin"], cwd=cwd)
+                collision = self._ledger_collision(cwd, remote_ref)
+                if collision:
+                    return DeliveryReport(ok=False, action="conflict", pr_url=pr_url, branch=branch, message=collision)
                 ok, files, msg = self._sync_with_base(base, cwd)
                 if not ok:
                     return DeliveryReport(

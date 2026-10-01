@@ -163,10 +163,8 @@ def build_parser() -> argparse.ArgumentParser:
 
 def _build_ticket(args: argparse.Namespace, store: DemandsStore) -> UserTicket:
     """Build the next sequential planned ticket from CLI arguments."""
-    num_ids = [int(m.group(1)) for t in store.list_tickets() if (m := re.match(r"USR-(\d+)", t.id))]
-    next_num = (max(num_ids) + 1) if num_ids else 1
     return UserTicket(
-        id=f"USR-{next_num:02d}",
+        id=store.next_ticket_id(args.project),
         project_id=args.project,
         title=args.title,
         problem_statement=args.problem,
