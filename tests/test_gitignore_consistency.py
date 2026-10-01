@@ -2,8 +2,8 @@
 
 ``.gitignore`` only protects files that were never added. A file that is already
 tracked and later matches an ignore rule keeps being versioned (and published, in
-this PUBLIC repository) with no warning: ``.factory/telegram/config.json`` and 71
-reports under ``.factory/reports/`` are exactly that. The gate compares
+this PUBLIC repository) with no warning: ``.factory/telegram/*.json`` and 72 files
+under ``.factory/reports/`` are exactly that. The gate compares
 ``git ls-files -ci --exclude-standard`` with the versioned allowlist
 ``tests/data/tracked_ignored_allowlist.txt``:
 
