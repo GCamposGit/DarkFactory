@@ -423,3 +423,29 @@ def test_rate_limited_agent_retries_without_burning_iterations(
     assert result.outcome == "retry"
     assert result.cause_code == "agent_rate_limited"
     assert len(calls) == 1
+
+
+def test_failed_validate_log_carries_redacted_raw_output_tail(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The distilled report only sees pytest lines; the log must also hold the raw tail (redacted)."""
+    secret = "sk-ant-" + "A" * 24
+    script = f'import sys\nprint("[ERROR] Candidate worktree is dirty {secret}")\nsys.exit(1)\n'
+    origin = _init_bare_origin(tmp_path, extra_files={"requirements.txt": "", "check_status.py": script})
+    project = _project(str(origin), commands=_CHECK_COMMANDS)
+    _write_tickets(tmp_path / "root", monkeypatch, project, "run-tail", [{"id": "T1", "title": "t"}])
+
+    fake_agent = _RecordingFakeAgent(lambda call_no, req: None)
+    stage = DevelopmentStage(
+        run_agent_func=fake_agent, pick_func=_fixed_route(), routing_config=load_routing_config()
+    )
+    result = stage.run(project, "run-tail")
+
+    assert result.cause_code == "validate_exhausted"
+    ws = ws_mod.checkout(project, "run-tail")
+    log = sorted(ws_mod.context_dir(ws).glob("validate-T1-*.log.md"))[-1].read_text(encoding="utf-8")
+    assert "Raw output tail" in log
+    assert "[ERROR] Candidate worktree is dirty" in log
+    assert secret not in log and "[REDACTED]" in log
+    # the next iteration's prompt also receives the raw tail
+    assert "Candidate worktree is dirty" in fake_agent.calls[-1].prompt
