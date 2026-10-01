@@ -36,7 +36,16 @@ if str(PROJECT_ROOT) not in sys.path:
 from core.demands.models import UserTicket
 from core.demands.store import DemandsStore
 from core.line import agent_retry
-from core.line.agent_cli import HARNESS_CAPABILITIES, AgentRequest, AgentResult, run_agent, supports
+from core.line.agent_cli import (
+    HARNESS_CAPABILITIES,
+    AgentRequest,
+    AgentResult,
+    headless_development_preamble,
+    redact_secrets,
+    run_agent,
+    supports,
+)
+from core.line.diagnostics import redacted_head
 from core.line.routing import _HARNESS_TO_PROVIDER, _default_quota_headroom, load_routing_config, pick
 from core.roadmap.models import DeliveryStatus
 
@@ -433,7 +442,10 @@ def main(argv: Optional[list[str]] = None) -> int:
 
     def _build_request(harness: str, model: Optional[str]) -> AgentRequest:
         return AgentRequest(
-            prompt=dev_prompt, cwd=workspace.path, mode=DEVELOPMENT_MODE, harness=harness, model=model, timeout_s=1800,
+            prompt=headless_development_preamble(
+                harness, quotas.get(harness, {}).get("headroom")
+            ) + dev_prompt,
+            cwd=workspace.path, mode=DEVELOPMENT_MODE, harness=harness, model=model, timeout_s=1800,
         )
 
     def _report_progress(message: str) -> None:
@@ -472,12 +484,33 @@ def main(argv: Optional[list[str]] = None) -> int:
     if report.route is not None:
         selected_harness, selected_model = report.route  # the harness that actually did the work
 
-    if not args.json:
-        print(f"[+] Desenvolvimento concluído com sucesso pelo {selected_harness.upper()}.")
-
     from core.git.autonomy import GitAutonomyManager
 
     git_mgr = GitAutonomyManager(PROJECT_ROOT)
+    implementation_paths = [
+        path for path in git_mgr.changed_paths(workspace.path) if path != LEDGER_RELATIVE
+    ]
+    if not implementation_paths:
+        reason = (
+            "[ERRO] O agente terminou sem alterar nenhum arquivo de implementacao; "
+            "o ticket NAO foi marcado como concluido."
+        )
+        agent_tail = redact_secrets(agent_result.text).strip()[-1500:]
+        print(reason, file=sys.stderr)
+        print(f"[i] Saida final do agente: {agent_tail or '(vazia)'}", file=sys.stderr)
+        _report_workspace_fate(workspace, args.json)
+        if args.json:
+            print(json.dumps({
+                "ok": False, "cause": "agent_no_changes", "ticket_id": ticket.id,
+                "workspace": str(workspace.path), "branch": workspace.branch,
+                "agent_tail": agent_tail,
+            }, indent=2, ensure_ascii=False))
+        return 4
+
+    agent_summary = redacted_head(agent_result.text, 800)
+    if not args.json:
+        print(f"[+] Desenvolvimento concluído pelo {selected_harness.upper()}.")
+        print(f"[i] Resumo do agente: {agent_summary or '(vazio)'}")
 
     # 4b. Commit the agent's work on the ticket branch: the official gate refuses a dirty
     # candidate worktree, so the gate must validate a committed SHA (the worktree's, never the shared checkout).
@@ -545,6 +578,7 @@ def main(argv: Optional[list[str]] = None) -> int:
             "duration_s": agent_result.duration_s,
             "workspace": str(workspace.path),
             "branch": workspace.branch,
+            "agent_summary": agent_summary,
         }
         if completion_report:
             payload["commit_sha"] = completion_report.commit_sha

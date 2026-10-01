@@ -146,6 +146,8 @@ def test_ticket_fails_once_then_passes_commits_and_writes_two_logs(
 
     assert result.outcome == "success"
     assert len(fake_agent.calls) == 2
+    assert fake_agent.calls[0].prompt.startswith("CONTEXTO DE EXECUCAO HEADLESS")
+    assert "harness claude" in fake_agent.calls[0].prompt
 
     ws = ws_mod.checkout(project, run_id)
     assert ws_mod.find_commit_by_job(ws, f"{run_id}:T1") is not None

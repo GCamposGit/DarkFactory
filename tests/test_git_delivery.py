@@ -224,6 +224,22 @@ def test_complete_ticket_uses_delivery(env: tuple[Path, Path, FakeGh]) -> None:
     assert rep.sync_result is not None and rep.sync_result.ok
 
 
+def test_complete_ticket_rejects_ledger_only_branch(env: tuple[Path, Path, FakeGh]) -> None:
+    """A committed ledger-only branch cannot complete or open a PR."""
+    local, bare, gh = env
+    _seed_ticket(local, "USR-98")
+    _git(local, "add", ".factory/demands/demands.json")
+    _git(local, "commit", "--quiet", "-m", "ledger only")
+    before = (local / ".factory" / "demands" / "demands.json").read_bytes()
+
+    rep = GitAutonomyManager(local).complete_ticket("USR-98", cwd=local, gh_runner=gh)
+
+    assert not rep.ok and rep.delivery is not None and rep.delivery.action == "no_changes"
+    assert (local / ".factory" / "demands" / "demands.json").read_bytes() == before
+    assert DemandsStore(local / ".factory" / "demands" / "demands.json").get_ticket("USR-98").status == DeliveryStatus.PLANNED
+    assert not any(call[:2] == ["pr", "create"] for call in gh.calls)
+
+
 def test_complete_ticket_commercial_project_awaits(env: tuple[Path, Path, FakeGh], monkeypatch: pytest.MonkeyPatch) -> None:
     local, bare, gh = env
     _seed_ticket(local, "USR-77")

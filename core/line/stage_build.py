@@ -42,7 +42,7 @@ from typing import Any, Callable, Iterable, Optional
 from pydantic import BaseModel, Field
 
 from core.line import agent_retry, diagnostics, workspace
-from core.line.agent_cli import AgentRequest, AgentResult, run_agent
+from core.line.agent_cli import AgentRequest, AgentResult, headless_development_preamble, run_agent
 from core.line.route_wait import RouteWaiter
 from core.line.routing import RoutingConfig, load_routing_config, pick, record_result
 from core.line.workspace import RunWorkspace, WorkspaceError
@@ -384,9 +384,11 @@ class DevelopmentStage:
         last_validate_log: Optional[str],
         last_review_log: Optional[str],
         spec_text: str = "",
+        harness: str,
+        headroom: Optional[float] = None,
     ) -> str:
         template = _load_prompt_template("develop.md", _FALLBACK_DEVELOP_TEMPLATE)
-        return fill_template(
+        return headless_development_preamble(harness, headroom) + fill_template(
             template,
             spec=spec_text or "(SPEC.md ausente)",
             ticket_id=ticket.id,
@@ -430,15 +432,6 @@ class DevelopmentStage:
             if ticket_index == 0 and not commands.validate_cmds:
                 extra_instruction = _MISSING_TESTS_INSTRUCTION
 
-            prompt = self._build_prompt(
-                ticket,
-                commands,
-                extra_instruction=extra_instruction,
-                last_validate_log=last_validate_log,
-                last_review_log=last_review_log,
-                spec_text=spec_text,
-            )
-
             route = self._pick_route(excluded)
             if route is None:
                 self._persist_diagnostics(ws, run_id, ticket.id)
@@ -449,6 +442,15 @@ class DevelopmentStage:
                     host_caps=self.host_caps, config=self.routing_config, mode="write",
                 )
             harness, model = route
+            prompt = self._build_prompt(
+                ticket,
+                commands,
+                extra_instruction=extra_instruction,
+                last_validate_log=last_validate_log,
+                last_review_log=last_review_log,
+                spec_text=spec_text,
+                harness=harness,
+            )
 
             agent_result = self.run_agent_func(
                 AgentRequest(
