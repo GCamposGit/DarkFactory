@@ -29,6 +29,7 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from core.demands.models import UserTicket
 from core.demands.id_allocator import title_collisions
+from core.demands.merge import merge_demands_3way
 from core.demands.store import DemandsStore
 from core.git import secret_scan, ticket_workspace
 from core.git.safe_show import safe_show
@@ -45,6 +46,8 @@ from core.git.ci_checks import (
 from core.roadmap.models import DeliveryStatus
 
 logger = logging.getLogger("darkfac.git.autonomy")
+
+_LEDGER_RELATIVE = ".factory/demands/demands.json"
 
 
 class GitSyncResult(BaseModel):
@@ -505,11 +508,43 @@ class GitAutonomyManager:
             return False
         return runner(["auth", "status"], target).returncode == 0
 
+    def _resolve_ledger_conflict(self, cwd: Path, remote_ref: str) -> tuple[bool, str]:
+        """Attempt a 3-way line/ticket merge of .factory/demands/demands.json (USR-112)."""
+        ledger_path = cwd / _LEDGER_RELATIVE
+        if not ledger_path.is_file():
+            return False, "ledger file not found"
+        mb = self._git_out(["merge-base", "HEAD", remote_ref], cwd)
+        base_raw = ""
+        if mb:
+            res_base = safe_show(mb, _LEDGER_RELATIVE, cwd=cwd)
+            if res_base.returncode == 0:
+                base_raw = res_base.stdout
+        res_ours = safe_show("HEAD", _LEDGER_RELATIVE, cwd=cwd)
+        res_theirs = safe_show(remote_ref, _LEDGER_RELATIVE, cwd=cwd)
+        if res_ours.returncode != 0 or res_theirs.returncode != 0:
+            return False, "failed to read demands.json revisions for 3-way merge"
+
+        ok, merged_text, err = merge_demands_3way(base_raw, res_ours.stdout, res_theirs.stdout)
+        if not ok:
+            return False, err or "demands.json 3-way merge failed"
+
+        ledger_path.write_text(merged_text, encoding="utf-8")
+        add_res = _run_git(["add", _LEDGER_RELATIVE], cwd=cwd)
+        if add_res.returncode != 0:
+            return False, f"git add {_LEDGER_RELATIVE} failed: {add_res.stderr.strip()}"
+        commit_res = _run_git(["commit", "--no-edit"], cwd=cwd)
+        if commit_res.returncode != 0:
+            return False, f"git commit --no-edit failed: {commit_res.stderr.strip()}"
+        return True, "merged"
+
     def _sync_with_base(
         self, base: str, cwd: Path, *, preserve_commits: bool = False
     ) -> tuple[bool, list[str], str]:
         """Bring HEAD up to date with origin/base. Returns (ok, conflict_files, message)."""
         remote_ref = f"origin/{base}"
+        if _run_git(["rev-parse", "--verify", remote_ref], cwd=cwd).returncode != 0:
+            if _run_git(["rev-parse", "--verify", base], cwd=cwd).returncode == 0:
+                remote_ref = base
         if _run_git(["merge-base", "--is-ancestor", remote_ref, "HEAD"], cwd=cwd).returncode == 0:
             return True, [], "up to date"
         if preserve_commits:
@@ -518,6 +553,12 @@ class GitAutonomyManager:
             if merge.returncode == 0:
                 return True, [], "merged"
             files = self._conflict_files(cwd)
+            if files == [_LEDGER_RELATIVE]:
+                resolved, msg = self._resolve_ledger_conflict(cwd, remote_ref)
+                if resolved:
+                    return True, [], "merged"
+                _run_git(["merge", "--abort"], cwd=cwd)
+                return False, files, msg
             _run_git(["merge", "--abort"], cwd=cwd)
             return False, files, (merge.stderr or merge.stdout).strip()
         rebase = _run_git(["rebase", remote_ref], cwd=cwd)
@@ -529,6 +570,12 @@ class GitAutonomyManager:
         if merge.returncode == 0:
             return True, [], "merged"
         files = self._conflict_files(cwd) or files
+        if files == [_LEDGER_RELATIVE]:
+            resolved, msg = self._resolve_ledger_conflict(cwd, remote_ref)
+            if resolved:
+                return True, [], "merged"
+            _run_git(["merge", "--abort"], cwd=cwd)
+            return False, files, msg
         _run_git(["merge", "--abort"], cwd=cwd)
         return False, files, (merge.stderr or merge.stdout).strip()
 
