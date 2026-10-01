@@ -198,7 +198,9 @@ def test_sweep_removes_only_merged(env: tuple[Path, Path, FakeGh]) -> None:
     wt_open = local / ".worktrees" / "open"
     _git(local, "worktree", "add", "-q", str(wt_open), "ticket/unmerged")
 
-    rep = GitAutonomyManager(local).sweep_stale(gh_runner=gh)
+    # sweep_grace_s=0: the fixture's worktrees are brand new, and a fresh worktree with no commits of
+    # its own is normally spared (it may still be being set up, USR-69).
+    rep = GitAutonomyManager(local, sweep_grace_s=0).sweep_stale(gh_runner=gh)
     assert sorted(rep.removed_branches) == ["df/merged-two", "ticket/merged-one", "ticket/old-wt"]
     assert str(wt_merged.resolve()) in rep.removed_worktrees or str(wt_merged) in rep.removed_worktrees
     assert not wt_merged.exists()

@@ -29,6 +29,7 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from core.demands.models import UserTicket
 from core.demands.store import DemandsStore
+from core.git import ticket_workspace
 from core.git.ci_checks import (
     DEFAULT_MAIN_WORKFLOW,
     CiVerdict,
@@ -74,12 +75,24 @@ class DeliveryReport(BaseModel):
 
 
 class SweepReport(BaseModel):
-    """Outcome of sweeping stale (already merged) branches and worktrees."""
+    """Outcome of sweeping stale (already merged) branches and worktrees (USR-69)."""
 
     removed_branches: list[str] = Field(default_factory=list)
     removed_worktrees: list[str] = Field(default_factory=list)
+    trashed_worktrees: list[str] = Field(
+        default_factory=list, description="merged worktrees that could not be deleted and were moved to the trash"
+    )
+    orphans_trashed: list[str] = Field(
+        default_factory=list, description="unregistered directories without .git moved to the recoverable trash"
+    )
+    trash_purged: list[str] = Field(
+        default_factory=list, description="trash entries older than the retention that were deleted"
+    )
     skipped: list[str] = Field(default_factory=list)
 
+
+# Paths per `git add` call when staging a ticket's changed files (command-line length on Windows).
+_ADD_CHUNK = 100
 
 GhRunner = Callable[[Sequence[str], Path], "subprocess.CompletedProcess[str]"]
 
@@ -173,6 +186,10 @@ class GitAutonomyManager:
         ci_poll_s: Optional[float] = None,
         ci_sleep_fn: Optional[Callable[[float], None]] = None,
         ci_clock_fn: Optional[Callable[[], float]] = None,
+        cleanup_sleep_fn: Optional[Callable[[float], None]] = None,
+        now_fn: Optional[Callable[[], datetime]] = None,
+        sweep_grace_s: float = ticket_workspace.ORPHAN_MIN_AGE_S,
+        trash_retention_days: float = ticket_workspace.TRASH_RETENTION_DAYS,
     ) -> None:
         self.root = root
         # CI gate tuning (USR-85); None keeps the ci_checks defaults
@@ -181,6 +198,14 @@ class GitAutonomyManager:
         self.ci_poll_s = ci_poll_s
         self.ci_sleep_fn = ci_sleep_fn
         self.ci_clock_fn = ci_clock_fn
+        # Worktree cleanup / trash tuning (USR-69); injectable so tests never really sleep
+        # or wait for a directory to age.
+        self.cleanup_sleep_fn = cleanup_sleep_fn
+        self.now_fn = now_fn
+        # A directory or commit-less worktree touched within this window is never swept: it
+        # may be a worktree that is being created right now.
+        self.sweep_grace_s = sweep_grace_s
+        self.trash_retention_days = trash_retention_days
 
     def get_current_sha(self, cwd: Optional[Path] = None) -> str:
         """Return the current HEAD commit SHA."""
@@ -194,6 +219,33 @@ class GitAutonomyManager:
         res = _run_git(["status", "--porcelain=v1", "--untracked-files=all"], cwd=target_dir)
         return bool(res.stdout.strip())
 
+    def changed_paths(self, cwd: Optional[Path] = None) -> list[str]:
+        """Repository-relative paths changed in ``cwd`` (staged, unstaged, untracked, deleted).
+
+        Read from ``git status --porcelain=v1 -z`` run INSIDE ``cwd``: in a ticket
+        worktree that is exactly the ticket's own change set (USR-69).
+        """
+        target_dir = cwd or self.root
+        res = _run_git(["status", "--porcelain=v1", "-z", "--untracked-files=all"], cwd=target_dir)
+        if res.returncode != 0:
+            logger.warning("git status failed in %s: %s", target_dir, res.stderr.strip())
+            return []
+        paths: list[str] = []
+        tokens = res.stdout.split("\0")
+        index = 0
+        while index < len(tokens):
+            token = tokens[index]
+            index += 1
+            if len(token) < 4 or token[2] != " ":
+                continue
+            status, path = token[:2], token[3:]
+            paths.append(path)
+            if "R" in status or "C" in status:  # `XY <to>\0<from>\0`: stage both sides of a rename
+                if index < len(tokens) and tokens[index]:
+                    paths.append(tokens[index])
+                index += 1
+        return list(dict.fromkeys(paths))
+
     def commit_ticket(
         self,
         ticket_id: str,
@@ -205,6 +257,9 @@ class GitAutonomyManager:
     ) -> Optional[str]:
         """Stage changes and produce a deterministic atomic commit bound to the ticket.
 
+        Without ``paths`` only the paths changed IN ``cwd`` are staged (see
+        :meth:`changed_paths`); a bare ``git add -A`` is never issued (USR-69).
+
         Returns the new commit SHA, or the current HEAD if working tree is clean.
         """
         target_dir = cwd or self.root
@@ -214,7 +269,12 @@ class GitAutonomyManager:
             stage_args = ["add", "--"] + [str(p) for p in paths]
             _run_git(stage_args, cwd=target_dir)
         else:
-            _run_git(["add", "-A"], cwd=target_dir)
+            changed = self.changed_paths(target_dir)
+            for start in range(0, len(changed), _ADD_CHUNK):
+                chunk = changed[start : start + _ADD_CHUNK]
+                add = _run_git(["--literal-pathspecs", "add", "-A", "--", *chunk], cwd=target_dir)
+                if add.returncode != 0:
+                    logger.warning("git add failed for %s: %s", chunk[:3], add.stderr.strip())
 
         # 2. Check if anything is staged
         staged_check = _run_git(["diff", "--cached", "--quiet"], cwd=target_dir)
@@ -656,10 +716,16 @@ class GitAutonomyManager:
         _run_git(["fetch", "--prune", "origin"], cwd=main_root)
         ok = True
         if is_secondary:
-            rm = _run_git(["worktree", "remove", "--force", str(cwd)], cwd=main_root)
-            if rm.returncode != 0:
-                logger.warning("worktree remove failed: %s", rm.stderr.strip())
+            # Retry/backoff, robust rmtree and the recoverable-trash fallback (USR-69):
+            # a plain `git worktree remove` leaves the directory behind on Windows.
+            removal = ticket_workspace.cleanup(
+                cwd, main_root, sleep_fn=self.cleanup_sleep_fn, now_fn=self.now_fn
+            )
+            if not removal.removed:
+                logger.warning("worktree cleanup failed for %s: %s", cwd, removal.detail or removal.errors)
                 ok = False
+            elif removal.method == "trash":
+                logger.warning("worktree %s could not be deleted; moved to %s", cwd, removal.trash_path)
         elif self._current_branch(main_root) == branch:
             co = _run_git(["checkout", base], cwd=main_root)
             if co.returncode != 0:
@@ -709,16 +775,11 @@ class GitAutonomyManager:
             except (json.JSONDecodeError, AttributeError):
                 return False
 
-        wt_roots = [(main_root / ".worktrees").resolve(), (main_root / ".claude" / "worktrees").resolve()]
-        porcelain = self._git_out(["worktree", "list", "--porcelain"], main_root)
-        entries: list[dict[str, str]] = []
-        for block in porcelain.replace("\r\n", "\n").split("\n\n"):
-            entry: dict[str, str] = {}
-            for line in block.splitlines():
-                key, _, val = line.partition(" ")
-                entry[key] = val
-            if entry.get("worktree"):
-                entries.append(entry)
+        wt_roots = [(main_root / rel).resolve() for rel in ticket_workspace.WORKTREE_ROOTS]
+        entries = ticket_workspace.parse_worktree_list(self._git_out(["worktree", "list", "--porcelain"], main_root))
+        remote_sha = self._git_out(["rev-parse", remote_ref], main_root)
+        running_in = (cwd or self.root).resolve()
+        now = (self.now_fn or ticket_workspace.utc_now)().timestamp()
         occupied: set[str] = set()
         for entry in entries:
             path = Path(entry["worktree"]).resolve()
@@ -740,15 +801,27 @@ class GitAutonomyManager:
             if not is_merged:
                 report.skipped.append(f"worktree:{path} (not merged)")
                 continue
+            if "locked" in entry:
+                report.skipped.append(f"worktree:{path} (locked: in use)")
+                continue
+            if path == running_in or path in running_in.parents:
+                report.skipped.append(f"worktree:{path} (current working directory)")
+                continue
             if self.is_dirty(cwd=path):
                 report.skipped.append(f"worktree:{path} (dirty)")
                 continue
-            rm = _run_git(["worktree", "remove", "--force", str(path)], cwd=main_root)
-            if rm.returncode == 0:
+            if head and head == remote_sha and now - ticket_workspace.latest_mtime(path) < self.sweep_grace_s:
+                # No commit of its own yet and just touched: most likely a worktree being set up.
+                report.skipped.append(f"worktree:{path} (fresh, no commits yet)")
+                continue
+            removal = ticket_workspace.cleanup(path, main_root, sleep_fn=self.cleanup_sleep_fn, now_fn=self.now_fn)
+            if removal.removed:
                 report.removed_worktrees.append(str(path))
+                if removal.method == "trash":
+                    report.trashed_worktrees.append(str(path))
                 occupied.discard(br)
             else:
-                report.skipped.append(f"worktree:{path} ({rm.stderr.strip()})")
+                report.skipped.append(f"worktree:{path} ({removal.detail or '; '.join(removal.errors)})")
 
         current = self._current_branch(main_root)
         out = self._git_out(["branch", "--format=%(refname:short)", "--list", "ticket/*", "df/*"], main_root)
@@ -762,6 +835,25 @@ class GitAutonomyManager:
             if _run_git(["branch", "-D", br], cwd=main_root).returncode == 0:
                 report.removed_branches.append(br)
         _run_git(["worktree", "prune"], cwd=main_root)
+
+        # Directories no worktree owns (dead leftovers of failed removals): recoverable trash,
+        # never a direct delete; then drop trash entries past the retention.
+        orphans, notes = ticket_workspace.find_orphan_dirs(
+            main_root, min_age_s=self.sweep_grace_s, now_fn=self.now_fn
+        )
+        report.skipped.extend(f"orphan:{note}" for note in notes)
+        for orphan in orphans:
+            try:
+                target = ticket_workspace.trash_directory(orphan, main_root, now_fn=self.now_fn)
+            except OSError as exc:
+                report.skipped.append(f"orphan:{orphan} (could not move to trash: {exc})")
+                continue
+            report.orphans_trashed.append(f"{orphan} -> {target}")
+        purged = ticket_workspace.purge_trash(
+            main_root, retention_days=self.trash_retention_days, now_fn=self.now_fn
+        )
+        report.trash_purged.extend(purged.purged)
+        report.skipped.extend(f"trash:{failure}" for failure in purged.failed)
         return report
 
     @staticmethod
@@ -1157,7 +1249,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
     if args.command == "sweep":
         sw = manager.sweep_stale()
-        print(f"[SWEEP] branches={sw.removed_branches} worktrees={sw.removed_worktrees} skipped={len(sw.skipped)}")
+        print(
+            f"[SWEEP] branches={sw.removed_branches} worktrees={sw.removed_worktrees} "
+            f"trashed={len(sw.trashed_worktrees)} orphans_trashed={len(sw.orphans_trashed)} "
+            f"trash_purged={len(sw.trash_purged)} skipped={len(sw.skipped)}"
+        )
         return 0
 
     if args.command == "complete":
