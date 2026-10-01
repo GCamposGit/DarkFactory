@@ -24,10 +24,14 @@ import pytest
 from core.line import stage_integration
 from core.line import workspace as ws_mod
 from core.line.agent_cli import AgentRequest, AgentResult
+from core.line.routing import load_routing_config
+from core.line.stage_build import DevelopmentStage
 from core.line.stage_integration import IntegrationStageHandler
 from core.line.workspace import checkout
-from core.projects.models import ProjectDescriptor
+from core.projects.models import ProjectCommands, ProjectDescriptor
 from core.workflow.control_contracts import Claim, JobKey, StageContext
+from core.workflow.control_store import SQLiteControlStore
+from core.workflow.successors import _parse_retry_cause_code, materialize_result
 from tests.line.conftest import write_python_shim
 
 # --------------------------------------------------------------------------
@@ -82,8 +86,8 @@ def _project(repo_url: str, default_branch: str = "main") -> ProjectDescriptor:
     )
 
 
-def _context(run_id: str) -> StageContext:
-    jk = JobKey(run_id=run_id, ticket_id="T1", plan_version="1.0", stage="integration", iteration=0)
+def _context(run_id: str, iteration: int = 0) -> StageContext:
+    jk = JobKey(run_id=run_id, ticket_id="T1", plan_version="1.0", stage="integration", iteration=iteration)
     claim = Claim(
         job_key=jk,
         lease_id=f"lease_{run_id}",
@@ -251,6 +255,130 @@ def fake_gh(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
 # --------------------------------------------------------------------------
 
 
+def test_red_ci_feedback_reaches_development_then_green_ci_merges(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fake_gh
+) -> None:
+    origin = _init_bare_origin(tmp_path)
+    project = ProjectDescriptor(
+        id="acme", name="Acme", repo_url=str(origin), default_branch="main",
+        commands=ProjectCommands(validate=["python check_status.py"]),
+    )
+    monkeypatch.setenv("DARKFAC_WORKSPACES", str(tmp_path / "root"))
+    gh_path, set_spec, calls = fake_gh
+    ws = checkout(project, "run-ci")
+    ws_mod.write_context(ws, "DEMAND.md", "# Fix the check\n")
+    ws_mod.write_context(ws, "tickets.json", json.dumps([{"id": "T1", "title": "Fix check"}]))
+    (ws.path / "check_status.py").write_text(
+        "from pathlib import Path\nimport sys\nsys.exit(0 if Path('STATUS_OK').exists() else 1)\n",
+        encoding="utf-8",
+    )
+    ws_mod.commit(ws, "feat: initial candidate", "run-ci:T1")
+    ws_mod.push(ws)
+    spec = {
+        "pr_list": [{"number": 7, "url": "https://github.com/acme/repo/pull/7", "state": "OPEN"}],
+        "pr_checks": [{"bucket": "fail", "name": "build", "workflow": "CI",
+                       "link": "https://github.com/acme/repo/actions/runs/555/job/1"}],
+        "run_view_log": "FAIL check_status.py\nBearer example-secret\nAssertionError: CI_MARKER_103\n",
+        "pr_url": "https://github.com/acme/repo/pull/7",
+    }
+    set_spec(spec)
+    handler = IntegrationStageHandler(project, gh_executable=gh_path)
+    red = handler.handle(_context("run-ci"))
+    assert (red.outcome, red.cause_code) == ("retry", "retry:development")
+    successors = materialize_result(
+        _context("run-ci").claim.job_key, red, SQLiteControlStore(":memory:")
+    )
+    assert [job.stage for job in successors] == ["development"]
+    feedback = (ws_mod.context_dir(ws) / "ci-1.log.md").read_text(encoding="utf-8")
+    assert "CI failure 1: CI / build" in feedback
+    assert "CI_MARKER_103" in feedback
+    assert "example-secret" not in feedback
+    assert "[REDACTED]" in feedback
+    checks_before = sum(c[:2] == ["pr", "checks"] for c in calls())
+    assert handler.handle(_context("run-ci")).cause_code == "retry:development"
+    assert sum(c[:2] == ["pr", "checks"] for c in calls()) == checks_before
+
+    prompts: list[str] = []
+
+    def fix_agent(request: AgentRequest) -> AgentResult:
+        prompts.append(request.prompt)
+        (request.cwd / "STATUS_OK").write_text("ok\n", encoding="utf-8")
+        return AgentResult(ok=True, text="fixed", harness=request.harness, duration_s=0.01)
+
+    development = DevelopmentStage(
+        run_agent_func=fix_agent,
+        pick_func=lambda *args, **kwargs: ("codex", None),
+        routing_config=load_routing_config(),
+    )
+    assert development.run(project, "run-ci").outcome == "success"
+    assert len(prompts) == 1 and "CI_MARKER_103" in prompts[0]
+    assert "example-secret" not in prompts[0]
+    assert ws_mod.find_commit_by_job(ws, "run-ci:fix-ci-1") is not None
+
+    set_spec({**spec, "pr_checks": [{"bucket": "pass", "name": "build", "link": ""}]})
+    green = handler.handle(_context("run-ci", iteration=1))
+    assert green.outcome == "success", green.cause_code
+    assert not ws_mod.context_dir(ws).exists()
+
+
+def test_ci_failure_cap_stops_another_red_check_without_repoll(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fake_gh
+) -> None:
+    origin = _init_bare_origin(tmp_path)
+    project = _project(str(origin))
+    monkeypatch.setenv("DARKFAC_WORKSPACES", str(tmp_path / "root"))
+    gh_path, set_spec, calls = fake_gh
+    ws = checkout(project, "run-cap")
+    ws_mod.write_context(ws, "tickets.json", json.dumps([{"id": "T1", "title": "Fix"}]))
+    ws_mod.commit(ws, "feat: candidate", "run-cap:T1")
+    ws_mod.push(ws)
+    set_spec({
+        "pr_list": [{"number": 7, "url": "https://github.com/acme/repo/pull/7", "state": "OPEN"}],
+        "pr_checks": [{"bucket": "fail", "name": "build", "workflow": "CI",
+                       "link": "https://github.com/acme/repo/actions/runs/555/job/1"}],
+        "run_view_log": "CI still red",
+    })
+    monkeypatch.setattr(stage_integration, "MAX_CI_ITERATIONS", 2)
+    handler = IntegrationStageHandler(project, gh_executable=gh_path)
+    assert handler.handle(_context("run-cap")).cause_code == "retry:development"
+    second = handler.handle(_context("run-cap", iteration=1))
+    assert (second.outcome, second.cause_code) == ("retry", "retry:development")
+    assert (ws_mod.context_dir(ws) / "ci-1.log.md").is_file()
+    assert (ws_mod.context_dir(ws) / "ci-2.log.md").is_file()
+    # A third red result is terminal and cannot create another fix-up round.
+    third = handler.handle(_context("run-cap", iteration=2))
+    assert (third.outcome, third.cause_code) == ("failed", "ci_iteration_cap")
+    assert not (ws_mod.context_dir(ws) / "ci-3.log.md").exists()
+    checks_before = sum(c[:2] == ["pr", "checks"] for c in calls())
+    assert handler.handle(_context("run-cap")).cause_code == "retry:development"
+    assert sum(c[:2] == ["pr", "checks"] for c in calls()) == checks_before
+
+
+def test_checks_query_error_waits_before_retrying_integration(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fake_gh
+) -> None:
+    origin = _init_bare_origin(tmp_path)
+    project = _project(str(origin))
+    monkeypatch.setenv("DARKFAC_WORKSPACES", str(tmp_path / "root"))
+    gh_path, set_spec, _calls = fake_gh
+    ws = checkout(project, "run-query-error")
+    ws_mod.write_context(ws, "DEMAND.md", "# Query checks\n")
+    ws_mod.commit(ws, "feat: candidate", "run-query-error:T1")
+    ws_mod.push(ws)
+    set_spec({
+        "pr_list": [{"number": 7, "url": "https://github.com/acme/repo/pull/7", "state": "OPEN"}],
+        "pr_checks_returncode": 1,
+        "pr_checks_stderr": "HTTP 502",
+    })
+    now = datetime(2026, 10, 1, 12, 0, tzinfo=UTC)
+    handler = IntegrationStageHandler(project, gh_executable=gh_path, clock=lambda: now)
+    result = handler.handle(_context("run-query-error"))
+    assert result.outcome == "retry"
+    assert _parse_retry_cause_code(result.cause_code) == (
+        None, (now + timedelta(seconds=handler.ci_check_window_s)).isoformat()
+    )
+
+
 def test_full_flow_creates_pr_and_merges_on_green_checks(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fake_gh
 ) -> None:
@@ -338,6 +466,7 @@ def test_red_check_returns_retry_with_log_and_does_not_merge(
 
     ws = checkout(project, "run-3")
     ws_mod.write_context(ws, "DEMAND.md", "# Broken build\n")
+    ws_mod.write_context(ws, "tickets.json", json.dumps([{"id": "T1", "title": "Broken build"}]))
     ws_mod.commit(ws, "feat: broken", "run-3:T1")
     ws_mod.push(ws)
 
@@ -356,8 +485,10 @@ def test_red_check_returns_retry_with_log_and_does_not_merge(
     result = handler.handle(_context("run-3"))
 
     assert result.outcome == "retry"
-    assert "build" in result.cause_code
-    assert "AssertionError: boom" in result.cause_code
+    assert result.cause_code == "retry:development"
+    feedback = (ws_mod.context_dir(ws) / "ci-1.log.md").read_text(encoding="utf-8")
+    assert "build" in feedback
+    assert "AssertionError: boom" in feedback
 
     call_names = [" ".join(c[:2]) for c in calls()]
     assert "pr merge" not in call_names
