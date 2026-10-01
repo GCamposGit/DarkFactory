@@ -7,17 +7,26 @@ that ``python -m core.git.autonomy`` does not hit the runpy double-import warnin
 
 from __future__ import annotations
 
+import importlib
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from core.git.autonomy import GitAutonomyManager, GitSyncResult, TicketCompletionReport
+    from core.git.ticket_workspace import TicketWorkspace
 
-__all__ = ["GitAutonomyManager", "GitSyncResult", "TicketCompletionReport"]
+# public name -> module that defines it
+_LAZY_EXPORTS: dict[str, str] = {
+    "GitAutonomyManager": "core.git.autonomy",
+    "GitSyncResult": "core.git.autonomy",
+    "TicketCompletionReport": "core.git.autonomy",
+    "TicketWorkspace": "core.git.ticket_workspace",
+}
+
+__all__ = list(_LAZY_EXPORTS)
 
 
 def __getattr__(name: str) -> Any:
-    if name in __all__:
-        from core.git import autonomy
-
-        return getattr(autonomy, name)
+    module_name = _LAZY_EXPORTS.get(name)
+    if module_name is not None:
+        return getattr(importlib.import_module(module_name), name)
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

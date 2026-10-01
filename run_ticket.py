@@ -4,6 +4,10 @@
 Executes development tickets using the unified Model Router with Dynamic Headroom,
 15% fail-closed quota protection, explicit user override handling, and deterministic
 validation gate enforcement.
+
+Inner delivery cycle (USR-69): every ticket runs in its OWN worktree
+(``.worktrees/<id>-<timestamp>`` on ``ticket/<id>``, created from ``origin/main``), never in the
+shared checkout. The agent, the official gate, the commit and the delivery all happen there.
 """
 
 from __future__ import annotations
@@ -17,7 +21,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
-from typing import Any, Optional
+from typing import TYPE_CHECKING, Any, Optional
 
 # Ensure UTF-8 output on Windows
 if hasattr(sys.stdout, "reconfigure"):
@@ -35,6 +39,9 @@ from core.line import agent_retry
 from core.line.agent_cli import HARNESS_CAPABILITIES, AgentRequest, AgentResult, run_agent, supports
 from core.line.routing import _HARNESS_TO_PROVIDER, _default_quota_headroom, load_routing_config, pick
 from core.roadmap.models import DeliveryStatus
+
+if TYPE_CHECKING:
+    from core.git.ticket_workspace import TicketWorkspace
 
 logger = logging.getLogger("darkfac.run_ticket")
 
@@ -146,6 +153,11 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="With --create: register the ticket in the development queue (isolated worktree, PR, merge) without running it",
     )
+    parser.add_argument(
+        "--allow-dirty-shared-checkout",
+        action="store_true",
+        help="Run even when the shared checkout has uncommitted changes of another ticket (they are never included)",
+    )
     return parser
 
 
@@ -166,20 +178,105 @@ def _build_ticket(args: argparse.Namespace, store: DemandsStore) -> UserTicket:
 
 def _queue_ticket_isolated(args: argparse.Namespace) -> Optional[UserTicket]:
     """Register a planned ticket on origin/main from a throwaway worktree (never the shared checkout)."""
-    import time
+    from core.git.autonomy import GitAutonomyManager
+    from core.git.ticket_workspace import WorkspaceError, create_workspace
 
-    from core.git.autonomy import GitAutonomyManager, _run_git
-
-    if _run_git(["fetch", "origin", "main"]).returncode != 0:
+    try:
+        workspace = create_workspace("queue", cwd=PROJECT_ROOT, unique_branch=True)
+    except WorkspaceError as exc:
+        logger.error("Queue registration: could not create the worktree: %s", exc)
         return None
-    worktree = PROJECT_ROOT / ".worktrees" / f"queue-{int(time.time())}"
-    if _run_git(["worktree", "add", "-b", f"ticket/{worktree.name}", str(worktree), "origin/main"]).returncode != 0:
-        return None
-    store = DemandsStore(worktree / ".factory" / "demands" / "demands.json")
+    store = DemandsStore(workspace.path / ".factory" / "demands" / "demands.json")
     ticket = _build_ticket(args, store)
     store.save_ticket(ticket)
-    report = GitAutonomyManager(PROJECT_ROOT).deliver_branch(ticket.id, ticket.title, cwd=worktree)
+    report = GitAutonomyManager(PROJECT_ROOT).deliver_branch(ticket.id, ticket.title, cwd=workspace.path)
+    if not report.ok:
+        logger.error("Queue registration of %s failed (%s): %s", ticket.id, report.action, report.message)
     return ticket if report.ok else None
+
+
+# Runtime state that git reports as modified in the shared checkout without being another
+# ticket's work (tracked-but-ignored files, see USR-102): never a reason to refuse a run.
+VOLATILE_STATE_PREFIXES: tuple[str, ...] = (
+    ".factory/telegram/",
+    ".factory/reports/",
+    ".factory/usage/",
+    ".factory/test_logs/",
+    ".factory/tmp/",
+    ".factory/pids/",
+)
+
+
+LEDGER_RELATIVE = ".factory/demands/demands.json"
+
+
+class SharedCheckoutDirty(RuntimeError):
+    """The shared checkout holds uncommitted changes that belong to somebody else."""
+
+    def __init__(self, paths: list[str]) -> None:
+        self.paths = paths
+        shown = "\n".join(f"    {p}" for p in paths[:15])
+        more = f"\n    ... (+{len(paths) - 15})" if len(paths) > 15 else ""
+        super().__init__(
+            "O checkout compartilhado tem alterações não commitadas de outro ticket/sessão:\n"
+            f"{shown}{more}\n"
+            "Cada ticket roda numa worktree própria e nada disso seria incluído no seu commit, mas "
+            "rodar a partir de um checkout sujo esconde o trabalho de outra sessão. Commite ou descarte "
+            "essas alterações, rode a partir da sua própria worktree, ou use --allow-dirty-shared-checkout "
+            "para prosseguir assumindo o risco."
+        )
+
+
+def _prepare_workspace(args: argparse.Namespace, ticket: UserTicket) -> TicketWorkspace:
+    """Refuse a dirty shared checkout, then create the ticket's own worktree from origin/main (USR-69).
+
+    The ticket row is copied into the worktree's ledger when origin/main does not have it yet
+    (a ticket created by this very run), so the implementation commit carries it.
+    """
+    from core.git.ticket_workspace import create_workspace, shared_checkout_dirty_paths
+
+    if not args.allow_dirty_shared_checkout:
+        dirty = shared_checkout_dirty_paths(PROJECT_ROOT, ignore_prefixes=VOLATILE_STATE_PREFIXES)
+        if dirty:
+            raise SharedCheckoutDirty(dirty)
+    workspace = create_workspace(ticket.id, cwd=PROJECT_ROOT)
+    ledger = DemandsStore(workspace.path / ".factory" / "demands" / "demands.json")
+    if ledger.get_ticket(ticket.id) is None:
+        ledger.save_ticket(ticket)
+    return workspace
+
+
+def _discard_untouched_workspace(workspace: TicketWorkspace) -> bool:
+    """Remove a worktree/branch the agent never changed (a failed run leaves nothing behind)."""
+    from core.git.autonomy import GitAutonomyManager, _run_git
+    from core.git.ticket_workspace import cleanup
+
+    mgr = GitAutonomyManager(PROJECT_ROOT)
+    head = _run_git(["rev-parse", "HEAD"], cwd=workspace.path).stdout.strip()
+    if not head or head != workspace.base_sha:
+        return False
+    # The ledger row of a ticket created by this very run is the only change the harness itself makes.
+    if [p for p in mgr.changed_paths(workspace.path) if p != LEDGER_RELATIVE]:
+        return False
+    if not cleanup(workspace.path, workspace.main_root).removed:
+        return False
+    _run_git(["branch", "-D", workspace.branch], cwd=workspace.main_root)
+    return True
+
+
+def _report_workspace_fate(workspace: TicketWorkspace, as_json: bool) -> None:
+    """After a failed agent run: drop the worktree if untouched, otherwise say where the work is."""
+    try:
+        discarded = _discard_untouched_workspace(workspace)
+    except Exception as exc:  # cleanup must never mask the agent failure
+        logger.warning("Could not inspect/discard %s: %s", workspace.path, exc)
+        discarded = False
+    if as_json:
+        return
+    if discarded:
+        print(f"[i] Worktree sem alterações removida: {workspace.path}", file=sys.stderr)
+    else:
+        print(f"[i] Worktree preservada para diagnóstico: {workspace.path}", file=sys.stderr)
 
 
 def main(argv: Optional[list[str]] = None) -> int:
@@ -221,10 +318,11 @@ def main(argv: Optional[list[str]] = None) -> int:
                 return 1
             print(f"[+] Ticket {queued.id} registrado na fila de desenvolvimento: '{queued.title}'")
             return 0
+        # The row is NOT written to the shared checkout's ledger: it is added to the ticket's own
+        # worktree ledger below and travels in the implementation commit (USR-69/USR-75).
         ticket = _build_ticket(args, store)
-        store.save_ticket(ticket)
         if not args.json:
-            print(f"\n[+] Novo ticket criado e registrado: {ticket.id} - '{ticket.title}'")
+            print(f"\n[+] Novo ticket criado: {ticket.id} - '{ticket.title}'")
     elif args.ticket_id:
         ticket = store.get_ticket(args.ticket_id)
         if ticket is None:
@@ -302,7 +400,24 @@ def main(argv: Optional[list[str]] = None) -> int:
             )
         return 0
 
-    # 3. Execution Phase
+    # 3. Own worktree (USR-69): the agent, the gate and the commit never touch the shared checkout
+    from core.git.ticket_workspace import WorkspaceError
+
+    try:
+        workspace = _prepare_workspace(args, ticket)
+    except SharedCheckoutDirty as exc:
+        print(f"[ERRO] {exc}", file=sys.stderr)
+        return 3
+    except WorkspaceError as exc:
+        print(f"[ERRO] Não foi possível criar a worktree do ticket {ticket.id}: {exc}", file=sys.stderr)
+        return 1
+    if not args.json:
+        print(
+            f"[+] Worktree própria: {workspace.path} "
+            f"(branch {workspace.branch}, base {workspace.base_ref}@{workspace.base_sha[:12]})"
+        )
+
+    # 4. Execution Phase
     dev_prompt = (
         f"Voce e o agente de desenvolvimento autonomo da DarkFac.\n"
         f"Implemente o seguinte ticket:\n"
@@ -311,6 +426,8 @@ def main(argv: Optional[list[str]] = None) -> int:
         f"Problema: {ticket.problem_statement}\n"
         f"Criterios de Aceite:\n" + "\n".join(f"- {c}" for c in ticket.acceptance_criteria) + "\n\n"
         f"Escreva/ajuste testes unitarios e o codigo funcional.\n"
+        f"Voce trabalha numa worktree propria deste ticket (branch {workspace.branch}); "
+        f"nao leia nem altere arquivos fora dela e nao faca commit, push nem merge: a fabrica entrega.\n"
     )
 
     if not args.json:
@@ -318,7 +435,7 @@ def main(argv: Optional[list[str]] = None) -> int:
 
     def _build_request(harness: str, model: Optional[str]) -> AgentRequest:
         return AgentRequest(
-            prompt=dev_prompt, cwd=PROJECT_ROOT, mode=DEVELOPMENT_MODE, harness=harness, model=model, timeout_s=1800,
+            prompt=dev_prompt, cwd=workspace.path, mode=DEVELOPMENT_MODE, harness=harness, model=model, timeout_s=1800,
         )
 
     def _report_progress(message: str) -> None:
@@ -344,6 +461,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     if not report.ok or report.result is None:
         failure = format_agent_failure(report)
         print(failure, file=sys.stderr)
+        _report_workspace_fate(workspace, args.json)
         if args.json:
             print(json.dumps({
                 "ok": False,
@@ -359,25 +477,27 @@ def main(argv: Optional[list[str]] = None) -> int:
     if not args.json:
         print(f"[+] Desenvolvimento concluído com sucesso pelo {selected_harness.upper()}.")
 
-    # 3b. Commit the agent's work on a ticket branch: the official gate refuses a dirty
-    # candidate worktree, so the gate must validate a committed SHA (never the main checkout).
-    if not args.no_commit and not args.dry_run:
-        from core.git.autonomy import GitAutonomyManager, _run_git
+    from core.git.autonomy import GitAutonomyManager
 
-        pre_mgr = GitAutonomyManager(PROJECT_ROOT)
-        if pre_mgr.is_dirty():
-            current = _run_git(["rev-parse", "--abbrev-ref", "HEAD"]).stdout.strip()
-            if current in ("main", "HEAD"):
-                _run_git(["switch", "-c", f"ticket/{ticket.id.lower()}"])
-            pre_mgr.commit_ticket(ticket_id=ticket.id, title=ticket.title)
+    git_mgr = GitAutonomyManager(PROJECT_ROOT)
 
-    # 4. Official Validation Gate
+    # 4b. Commit the agent's work on the ticket branch: the official gate refuses a dirty
+    # candidate worktree, so the gate must validate a committed SHA (the worktree's, never the shared checkout).
+    if not args.no_commit and git_mgr.is_dirty(cwd=workspace.path):
+        git_mgr.commit_ticket(
+            ticket_id=ticket.id,
+            title=ticket.title,
+            scope="core" if not ticket.tags else ticket.tags[0].replace("user-", ""),
+            cwd=workspace.path,
+        )
+
+    # 5. Official Validation Gate, run inside the ticket worktree
     if not args.skip_validation:
         if not args.json:
             print("\n--> Executando portão oficial da fábrica (python core/harness/runner.py --quick)...")
         gate_res = subprocess.run(
-            [sys.executable, "core/harness/runner.py", "--quick"],
-            cwd=str(PROJECT_ROOT),
+            [sys.executable, str(workspace.path / "core" / "harness" / "runner.py"), "--quick"],
+            cwd=str(workspace.path),
             capture_output=True,
             text=True,
             encoding="utf-8",
@@ -385,45 +505,58 @@ def main(argv: Optional[list[str]] = None) -> int:
         )
         if gate_res.returncode != 0:
             print(f"[ERRO NO PORTÃO OFICIAL]:\n{gate_res.stdout}\n{gate_res.stderr}", file=sys.stderr)
+            print(f"[i] Worktree preservada para diagnóstico: {workspace.path}", file=sys.stderr)
             return gate_res.returncode
 
         if not args.json:
             print("[+] Portão oficial aprovado com sucesso: [HARNESS_PASS]!")
 
-    # 5. Autonomous Git Lifecycle Completion (USR-57)
+    # 6. Autonomous Git Lifecycle Completion (USR-57): ledger closed in the same commit (USR-94), PR, merge, cleanup
     completion_report = None
-    if not args.no_commit and not args.dry_run:
-        from core.git.autonomy import GitAutonomyManager
-
-        git_mgr = GitAutonomyManager(PROJECT_ROOT)
+    if not args.no_commit:
         completion_report = git_mgr.complete_ticket(
             ticket_id=ticket.id,
+            cwd=workspace.path,
             auto_push=not args.no_push,
             auto_commit=True,
         )
         if not args.json:
             if completion_report.ok:
-                print(f"[+] Autonomia Git: Ticket {ticket.id} concluído, comitado ({completion_report.commit_sha}) e sincronizado com sucesso.")
+                print(
+                    f"[+] Autonomia Git: Ticket {ticket.id} concluído, comitado "
+                    f"({completion_report.commit_sha}) e sincronizado com sucesso."
+                )
             else:
                 print(f"[!] Aviso Autonomia Git: {completion_report.message}", file=sys.stderr)
 
+    delivered = completion_report is None or completion_report.ok
+    if not delivered:
+        print(
+            f"[ERRO] A entrega do ticket {ticket.id} não foi concluída; worktree preservada: {workspace.path}",
+            file=sys.stderr,
+        )
+    elif workspace.path.exists() and not args.json:
+        print(f"[i] Worktree mantida em {workspace.path} (sem entrega automática nesta execução).")
+
     if args.json:
         payload = {
-            "ok": True,
+            "ok": delivered,
             "ticket_id": ticket.id,
             "harness": selected_harness,
             "model": selected_model,
             "duration_s": agent_result.duration_s,
+            "workspace": str(workspace.path),
+            "branch": workspace.branch,
         }
         if completion_report:
             payload["commit_sha"] = completion_report.commit_sha
             if completion_report.sync_result:
                 payload["sync_action"] = completion_report.sync_result.action
         print(json.dumps(payload, indent=2))
-    else:
+    elif delivered:
         print(f"\n[SUCESSO] Ticket {ticket.id} concluído e validado pelo portão oficial.")
 
-    return 0
+    return 0 if delivered else 1
 
 
 if __name__ == "__main__":

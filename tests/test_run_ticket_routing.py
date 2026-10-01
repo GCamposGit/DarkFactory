@@ -20,6 +20,8 @@ import pytest
 
 import run_ticket
 from core.line import agent_retry, routing
+from core.git.autonomy import GitAutonomyManager, TicketCompletionReport
+from core.git.ticket_workspace import TicketWorkspace
 from core.line.agent_cli import AgentRequest, AgentResult
 from core.line.routing import _HARNESS_TO_PROVIDER
 from run_ticket import main
@@ -62,7 +64,20 @@ def env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> dict[str, Any]:
     monkeypatch.setattr(run_ticket.time, "sleep", sleeps.append)
     agent = MagicMock(name="run_agent")
     monkeypatch.setattr(run_ticket, "run_agent", agent)
-    return {"agent": agent, "sleeps": sleeps, "cooldowns": tmp_path / "cooldowns.json"}
+    # USR-69: the agent runs in the ticket's own worktree. Creating a real one would touch this
+    # repository, so the launcher's workspace seam hands out a plain directory instead.
+    workspace_dir = tmp_path / "ticket-workspace"
+    workspace_dir.mkdir()
+    workspace = TicketWorkspace(
+        ticket_id=_TICKET.id, path=workspace_dir, branch="ticket/usr-99", main_root=tmp_path,
+        base_ref="origin/main", base_sha="0" * 40,
+    )
+    prepared: list[str] = []
+    monkeypatch.setattr(run_ticket, "_prepare_workspace", lambda args, ticket: prepared.append(ticket.id) or workspace)
+    return {
+        "agent": agent, "sleeps": sleeps, "cooldowns": tmp_path / "cooldowns.json",
+        "workspace": workspace, "prepared": prepared,
+    }
 
 
 def _fail(kind: str, harness: str, **kwargs: Any) -> AgentResult:
@@ -283,3 +298,63 @@ def test_a_rate_limited_harness_gets_a_cooldown_recorded_by_the_launcher(
 
     entry = json.loads(env["cooldowns"].read_text(encoding="utf-8"))["claude"]
     assert entry["reason"] == "rate_limited"  # the next run (or stage) will skip it until the limit lifts
+
+
+# --------------------------------------------------------------------------
+# USR-69: the agent works in the ticket's own worktree, never in the shared checkout
+# --------------------------------------------------------------------------
+
+
+def test_the_agent_runs_in_the_ticket_worktree_not_the_shared_checkout(
+    env: dict[str, Any], capsys: pytest.CaptureFixture[str]
+) -> None:
+    env["agent"].side_effect = lambda req: AgentResult(
+        ok=True, text="done", harness=req.harness, model=req.model, duration_s=1.0, exit_code=0
+    )
+
+    assert main(["USR-99", "--harness", "codex", "--skip-validation", "--no-commit", "--json"]) == 0
+
+    request: AgentRequest = env["agent"].call_args.args[0]
+    assert request.cwd == env["workspace"].path and request.cwd != run_ticket.PROJECT_ROOT
+    assert "ticket/usr-99" in request.prompt  # the agent is told where it works
+    assert env["prepared"] == ["USR-99"]
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["workspace"] == str(env["workspace"].path) and payload["branch"] == "ticket/usr-99"
+
+
+def test_a_dirty_shared_checkout_stops_the_run_before_any_agent_is_consumed(
+    env: dict[str, Any], monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    def refuse(args: Any, ticket: Any) -> None:
+        raise run_ticket.SharedCheckoutDirty(["core/other_ticket.py", "tests/test_other_ticket.py"])
+
+    monkeypatch.setattr(run_ticket, "_prepare_workspace", refuse)
+
+    assert main(["USR-99", "--harness", "codex", "--skip-validation"]) == 3
+
+    err = capsys.readouterr().err
+    assert "core/other_ticket.py" in err and "checkout compartilhado" in err and "--allow-dirty-shared-checkout" in err
+    env["agent"].assert_not_called()
+
+
+def test_a_blocked_delivery_is_an_error_not_a_success(
+    env: dict[str, Any], monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A red CI (or any blocked delivery) leaves the PR open: the launcher must not print [SUCESSO]."""
+    env["agent"].side_effect = lambda req: AgentResult(
+        ok=True, text="done", harness=req.harness, model=req.model, duration_s=1.0, exit_code=0
+    )
+    seen: dict[str, Any] = {}
+
+    def blocked(self: GitAutonomyManager, **kwargs: Any) -> TicketCompletionReport:
+        seen.update(kwargs)
+        return TicketCompletionReport(ok=False, ticket_id=kwargs["ticket_id"], message="CI failed on build")
+
+    monkeypatch.setattr(GitAutonomyManager, "complete_ticket", blocked)
+
+    assert main(["USR-99", "--harness", "codex", "--skip-validation"]) == 1
+
+    captured = capsys.readouterr()
+    assert "[SUCESSO]" not in captured.out
+    assert "CI failed on build" in captured.err and str(env["workspace"].path) in captured.err
+    assert seen["cwd"] == env["workspace"].path  # completion also happens inside the worktree
