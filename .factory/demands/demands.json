@@ -3216,5 +3216,35 @@
     "dependencies": [],
     "created_at": "2026-10-01T12:48:23.835466Z",
     "updated_at": "2026-10-01T12:48:23.835466Z"
+  },
+  {
+    "id": "USR-115",
+    "project_id": "darkfac",
+    "title": "Grill nao reenvia pergunta ao owner quando o envio ao Telegram falha",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "Em 01/10 o run-83bd3712924d (USR-62 tentativa 4) parou em waiting_human: o worker tentou enviar a pergunta do grill e o Telegram respondeu 401 (token do ops bot trocado depois do worker subir). TelegramGateway grava a mensagem num outbox local do container que nada drena e que some no redeploy; GRILL_PENDING.json fica notified=false, mas nada reexecuta o grill parado para tentar de novo. O owner nunca recebeu a pergunta; foi reenviada manualmente pela sessao interativa.",
+    "core_journey": [
+      "Em 01/10 o run-83bd3712924d (USR-62 tentativa 4) parou em waiting_human: o worker tentou enviar a pergunta do grill e o Telegram respondeu 401 (token do ops bot trocado depois do worker subir). TelegramGateway grava a mensagem num outbox local do container que nada drena e que some no redeploy; GRILL_PENDING.json fica notified=false, mas nada reexecuta o grill parado para tentar de novo. O owner nunca recebeu a pergunta; foi reenviada manualmente pela sessao interativa."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Grill com notified=false e reenviado automaticamente (ex.: loop do worker/coordinator a cada N minutos) ate notificar",
+      "Falha de envio do grill gera alerta visivel (log ERROR + alerta no owner bot quando possivel)",
+      "Teste cobrindo envio que falha e e reenviado depois"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-01T12:55:19.726914Z",
+    "updated_at": "2026-10-01T12:55:19.726914Z"
   }
 ]
