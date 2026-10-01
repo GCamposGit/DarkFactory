@@ -373,6 +373,7 @@ class CiVerdict:
     base_red: bool = False
     waited_s: float = 0.0
     detail: str = ""
+    snapshot: Optional[CheckSnapshot] = None
 
     @property
     def passed(self) -> bool:
@@ -392,6 +393,26 @@ def _poll_checks(pr_number: int, cwd: Path, runner: GhRunner) -> CheckSnapshot:
         return query_checks(pr_number, cwd, runner)
     except Exception as exc:  # a flaky gh must never turn into a merge
         return CheckSnapshot(state="error", error=sanitize(str(exc)))
+
+
+def _pr_head_matches(pr_number: int, expected_head_sha: str, cwd: Path, runner: GhRunner) -> bool:
+    """Fail closed when GitHub's PR head is not the commit just pushed."""
+    try:
+        result = runner(["pr", "view", str(pr_number), "--json", "headRefOid"], cwd)
+        if result.returncode != 0:
+            return False
+        return json.loads(result.stdout or "{}").get("headRefOid") == expected_head_sha
+    except Exception:  # a flaky gh must never turn into a merge
+        return False
+
+
+def has_ci_workflow(cwd: Path) -> bool:
+    """Whether this checkout configures GitHub Actions workflows."""
+    workflows = cwd / ".github" / "workflows"
+    try:
+        return any(workflows.glob("*.yml")) or any(workflows.glob("*.yaml"))
+    except OSError:
+        return True  # unknown configuration must not permit a no-checks merge
 
 
 def _failed_log_tail(runner: GhRunner, cwd: Path, failing: Sequence[dict[str, Any]]) -> str:
@@ -429,6 +450,8 @@ def ensure_green(
     clock_fn: Optional[Callable[[], float]] = None,
     base_branch: str = "main",
     no_checks_grace_s: Optional[float] = None,
+    expected_head_sha: Optional[str] = None,
+    require_no_workflows: bool = False,
 ) -> CiVerdict:
     """Wait for a PR's checks and return whether merging is allowed.
 
@@ -438,8 +461,8 @@ def ensure_green(
       until ``timeout_s`` (default ``DARKFAC_CI_WAIT_SECONDS``, 1200 s), then the
       verdict is ``pending_timeout``;
     * "no checks reported" is only accepted as ``no_checks`` after a short grace
-      window (``DARKFAC_CI_NO_CHECKS_GRACE_SECONDS``, 30 s, capped by the
-      timeout) because GitHub registers workflow runs a few seconds after a push;
+      window (``DARKFAC_CI_NO_CHECKS_GRACE_SECONDS``, 30 s); a shorter timeout
+      returns ``pending_timeout`` rather than shortening the grace;
     * all checks settled without failure returns ``green``.
 
     Elapsed time is ``max(clock delta, total requested sleep)`` so a stubbed
@@ -452,7 +475,6 @@ def ensure_green(
         if no_checks_grace_s is None
         else max(0.0, float(no_checks_grace_s))
     )
-    grace = min(grace, timeout)
     sleep = sleep_fn or time.sleep
     clock = clock_fn or time.monotonic
 
@@ -460,13 +482,22 @@ def ensure_green(
     slept = 0.0
     last_error = ""
     while True:
-        snapshot = _poll_checks(pr_number, cwd, runner)
+        head_matches = expected_head_sha is None or _pr_head_matches(
+            pr_number, expected_head_sha, cwd, runner
+        )
+        snapshot = _poll_checks(pr_number, cwd, runner) if head_matches else CheckSnapshot(
+            state="error", error="PR head differs from pushed commit"
+        )
+        if expected_head_sha is not None and head_matches and not _pr_head_matches(
+            pr_number, expected_head_sha, cwd, runner
+        ):
+            snapshot = CheckSnapshot(state="error", error="PR head changed while checking CI")
         elapsed = max(clock() - started, slept)
 
         if snapshot.state == "failed":
             labels = tuple(check_label(c) for c in snapshot.failing)
-            log_tail = _failed_log_tail(runner, cwd, snapshot.failing)
             base_red = classify_base_red(runner, cwd, base_branch, snapshot.failing)
+            log_tail = "" if base_red else _failed_log_tail(runner, cwd, snapshot.failing)
             logger.warning(
                 "CI failed on PR #%s: %s (base_red=%s)", pr_number, ", ".join(labels), base_red
             )
@@ -477,10 +508,13 @@ def ensure_green(
                 log_tail=log_tail,
                 base_red=base_red,
                 waited_s=elapsed,
+                snapshot=snapshot,
             )
         if snapshot.state == "green":
             return CiVerdict(status="green", waited_s=elapsed)
-        if snapshot.state == "no_checks" and elapsed >= grace:
+        if snapshot.state == "no_checks" and elapsed >= grace and not (
+            require_no_workflows and has_ci_workflow(cwd)
+        ):
             return CiVerdict(
                 status="no_checks", waited_s=elapsed, detail="gh reports no checks for the PR"
             )
@@ -497,7 +531,7 @@ def ensure_green(
             )
 
         remaining = timeout - elapsed
-        if snapshot.state == "no_checks":
+        if snapshot.state == "no_checks" and elapsed < grace:
             remaining = min(remaining, grace - elapsed)
         pause = max(min(poll, remaining), 0.0)
         sleep(pause)

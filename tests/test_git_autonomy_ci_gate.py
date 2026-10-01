@@ -76,12 +76,14 @@ class GhScript:
         base_jobs: Optional[dict[int, list[dict[str, Any]]]] = None,
         failed_log: str = "",
         run_list_rc: int = 0,
+        pr_head_sha: str = "a" * 40,
     ) -> None:
         self.checks = list(checks)
         self.base_runs = base_runs if base_runs is not None else []
         self.base_jobs = base_jobs or {}
         self.failed_log = failed_log
         self.run_list_rc = run_list_rc
+        self.pr_head_sha = pr_head_sha
         self.calls: list[list[str]] = []
         self.on_checks: Optional[Callable[[int], None]] = None
         self._checks_calls = 0
@@ -104,6 +106,8 @@ class GhScript:
             if isinstance(entry, tuple):
                 return self.result(a, entry[0], "", entry[1])
             return self.result(a, 0, json.dumps(entry))
+        if a[:2] == ["pr", "view"] and "headRefOid" in a:
+            return self.result(a, 0, json.dumps({"headRefOid": self.pr_head_sha}))
         if a[:2] == ["run", "list"]:
             if self.run_list_rc != 0:
                 return self.result(a, self.run_list_rc, "", "HTTP 502")
@@ -236,11 +240,72 @@ def test_no_checks_grace_zero_returns_immediately() -> None:
     assert verdict.status == "no_checks" and clock.sleeps == []
 
 
+def test_timeout_shorter_than_grace_never_accepts_no_checks() -> None:
+    clock = FakeClock()
+    verdict = gate(GhScript([]), clock, timeout_s=10, no_checks_grace_s=30)
+    assert verdict.status == "pending_timeout" and not verdict.passed
+
+
 def test_checks_appearing_inside_the_grace_window_are_honoured() -> None:
     clock = FakeClock()
     runner = GhScript([NO_CHECKS, [check("fail")]], failed_log="boom")
     verdict = gate(runner, clock, no_checks_grace_s=30)
     assert verdict.status == "failed"
+
+
+def test_configured_workflow_never_turns_missing_checks_green(tmp_path: Path) -> None:
+    workflows = tmp_path / ".github" / "workflows"
+    workflows.mkdir(parents=True)
+    (workflows / "ci.yml").write_text("name: CI\n", encoding="utf-8")
+    clock = FakeClock()
+    verdict = ensure_green(
+        5, tmp_path, GhScript([]), timeout_s=40, poll_s=10,
+        sleep_fn=clock.sleep, clock_fn=clock.clock,
+        no_checks_grace_s=30, expected_head_sha="a" * 40,
+        require_no_workflows=True,
+    )
+    assert verdict.status == "pending_timeout" and not verdict.passed
+    assert clock.now == 40
+
+
+def test_missing_checks_require_grace_and_matching_pr_head(tmp_path: Path) -> None:
+    clock = FakeClock()
+    verdict = ensure_green(
+        5, tmp_path, GhScript([]), timeout_s=40, poll_s=10,
+        sleep_fn=clock.sleep, clock_fn=clock.clock,
+        no_checks_grace_s=30, expected_head_sha="a" * 40,
+        require_no_workflows=True,
+    )
+    assert verdict.status == "no_checks" and clock.now == 30
+
+    clock = FakeClock()
+    verdict = ensure_green(
+        5, tmp_path, GhScript([[check("pass")]], pr_head_sha="b" * 40),
+        timeout_s=10, poll_s=10, sleep_fn=clock.sleep, clock_fn=clock.clock,
+        expected_head_sha="a" * 40,
+    )
+    assert verdict.status == "pending_timeout" and not verdict.passed
+
+
+def test_only_shared_ci_module_invokes_pr_checks() -> None:
+    core = Path(__file__).resolve().parents[1] / "core"
+    callers = set()
+    for path in core.rglob("*.py"):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            is_command = (
+                isinstance(node, (ast.List, ast.Tuple))
+                and len(node.elts) >= 2
+                and all(isinstance(part, ast.Constant) for part in node.elts[:2])
+                and [part.value for part in node.elts[:2]] == ["pr", "checks"]
+            )
+            calls_query = isinstance(node, ast.Call) and (
+                isinstance(node.func, ast.Name) and node.func.id == "query_checks"
+                or isinstance(node.func, ast.Attribute) and node.func.attr == "query_checks"
+            )
+            if is_command or calls_query:
+                callers.add(path.relative_to(core).as_posix())
+    assert callers == {"git/ci_checks.py"}
 
 
 def test_pending_then_green() -> None:

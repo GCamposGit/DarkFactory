@@ -23,8 +23,8 @@ Flow (`IntegrationStageHandler.handle`), per
 2. Remove `.darkfac/runs/<run_id>/` from the branch in a final commit — its
    content is folded into the PR body first.
 3. Idempotent PR: reuse an already-open PR for the branch, or create one.
-4. Poll CI (`gh pr checks --json`); pending checks return `retry` with a
-   `not_before` hint rather than blocking the stage for 30 minutes.
+4. Wait for CI through `core.git.ci_checks.ensure_green`; pending checks return
+   `retry` with a `not_before` hint after the stage's polling window.
 5. A red check downloads the failing job's log, persists it in the run context,
    and returns `retry:development` -- unless the very same check
    is already red on the base branch (`base_red`, USR-86): then no change the
@@ -241,6 +241,7 @@ class IntegrationStageHandler:
         gh_timeout_s: int = _GH_DEFAULT_TIMEOUT_S,
         validate_timeout_s: int = _VALIDATE_DEFAULT_TIMEOUT_S,
         sleep: Callable[[float], None] = time.sleep,
+        ci_clock: Callable[[], float] = time.monotonic,
         base_red_attempts: Optional[BaseRedAttempts] = None,
         base_red_wait_minutes: int = ci_checks.BASE_RED_RETRY_MINUTES,
         base_red_max_retries: int = ci_checks.BASE_RED_MAX_RETRIES,
@@ -264,6 +265,7 @@ class IntegrationStageHandler:
         self.gh_timeout_s = gh_timeout_s
         self.validate_timeout_s = validate_timeout_s
         self.sleep = sleep
+        self.ci_clock = ci_clock
         self.base_red_attempts = base_red_attempts
         self.base_red_wait_minutes = base_red_wait_minutes
         self.base_red_max_retries = base_red_max_retries
@@ -675,9 +677,6 @@ class IntegrationStageHandler:
 
         return _run
 
-    def _fetch_failed_log(self, ws: RunWorkspace, failing_check: dict[str, Any]) -> str:
-        return ci_checks.fetch_failed_log(self._ci_runner(ws, timeout=120), ws.path, failing_check)
-
     def _ci_failure_count(self, ws: RunWorkspace) -> int:
         """Count recorded red PR checks in the run's branch history, across strips."""
         result = self._git(["log", "--format=%B"], ws)
@@ -724,43 +723,37 @@ class IntegrationStageHandler:
     def _evaluate_checks(
         self, ws: RunWorkspace, pr_number: int, context: Optional[StageContext] = None
     ) -> Optional[StageResult]:
-        """Return a terminal/retry `StageResult` unless every check is green.
-
-        `None` means "no checks configured, or all green" — proceed to merge,
-        matching "se o repo nao tiver checks, a validacao limpa do HF-27-05 e
-        o gate". The classification itself lives in `core.git.ci_checks`, shared
-        with the autonomous merge gate of `core.git.autonomy` (USR-85).
-
-        A red check that is ALSO red on the base branch is not the agent's fault
-        (`base_red`, USR-86): see `_base_red_outcome`.
-        """
-        snapshot = ci_checks.query_checks(pr_number, ws.path, self._ci_runner(ws))
-        if snapshot.state == "error":
-            logger.warning("Could not query PR #%s checks: %s", pr_number, _sanitize(snapshot.error))
-            not_before = (self.clock() + timedelta(seconds=self.ci_check_window_s)).isoformat()
-            return StageResult(
-                outcome="retry",
-                cause_code=f"gh_pr_checks_failed:not_before={not_before}",
-            )
-
-        if snapshot.state == "failed":
-            default_branch = self.project.default_branch or "main"
-            if ci_checks.classify_base_red(
-                self._ci_runner(ws), ws.path, default_branch, snapshot.failing
-            ):
-                return self._base_red_outcome(ws, pr_number, snapshot, default_branch, context)
+        """Use the shared gate and allow merge only for its passing verdict."""
+        head = self._git(["rev-parse", "HEAD"], ws)
+        if head.returncode != 0 or not head.stdout.strip():
+            return StageResult(outcome="retry", cause_code="ci_head_unavailable")
+        verdict = ci_checks.ensure_green(
+            pr_number,
+            ws.path,
+            self._ci_runner(ws),
+            timeout_s=self.ci_check_window_s,
+            sleep_fn=self.sleep,
+            clock_fn=self.ci_clock,
+            base_branch=self.project.default_branch or "main",
+            expected_head_sha=head.stdout.strip(),
+            require_no_workflows=True,
+        )
+        if verdict.status == "failed":
+            snapshot = verdict.snapshot
+            assert snapshot is not None and snapshot.failing
+            if verdict.base_red:
+                return self._base_red_outcome(
+                    ws, pr_number, snapshot, self.project.default_branch or "main", context
+                )
             failing = snapshot.failing[0]
-            log = self._fetch_failed_log(ws, failing)
             if context is None:
                 return StageResult(outcome="failed", cause_code="ci_context_unavailable")
-            return self._record_ci_failure(ws, failing, log, context)
-
-        if snapshot.state == "pending":
-            not_before = (
-                datetime.now(timezone.utc) + timedelta(seconds=self.ci_check_window_s)
-            ).isoformat()
+            return self._record_ci_failure(ws, failing, verdict.log_tail, context)
+        if verdict.status == "pending_timeout":
+            not_before = (self.clock() + timedelta(seconds=self.ci_check_window_s)).isoformat()
             return StageResult(outcome="retry", cause_code=f"ci_pending:not_before={not_before}")
-
+        if not verdict.passed:
+            return StageResult(outcome="retry", cause_code="ci_unverified")
         return None
 
     # ----------------------------------------------------------------

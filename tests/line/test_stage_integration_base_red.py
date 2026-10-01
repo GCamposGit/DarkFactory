@@ -51,6 +51,7 @@ BASE_RED_JOBS = {"900": [{"name": "main-validation (ubuntu-latest)", "conclusion
 _FAKE_GH_SCRIPT = '''\
 import json
 import os
+import subprocess
 import sys
 
 spec = json.loads(os.environ[{env_var!r}])
@@ -68,6 +69,9 @@ if argv[:2] == ["pr", "list"]:
     out([] if "merged" in argv else [{{"number": 7, "url": spec["pr_url"], "state": "OPEN"}}])
 if argv[:2] == ["pr", "checks"]:
     out(spec["pr_checks"])
+if argv[:2] == ["pr", "view"] and "headRefOid" in argv:
+    head = subprocess.run(["git", "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()
+    out({{"headRefOid": spec.get("pr_head_sha", head)}})
 if argv[:2] == ["run", "list"]:
     if spec.get("run_list_fails"):
         sys.stderr.write("HTTP 502")
