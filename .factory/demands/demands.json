@@ -3123,5 +3123,35 @@
     "dependencies": [],
     "created_at": "2026-10-01T12:01:19.416762Z",
     "updated_at": "2026-10-01T12:01:19.416762Z"
+  },
+  {
+    "id": "USR-112",
+    "project_id": "darkfac",
+    "title": "Entrega: conflito textual no demands.json quando outro ticket e registrado durante a execucao derruba a entrega depois do trabalho pronto",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "EVIDENCIA (2026-10-01): run_ticket USR-94 (Codex, 48 min) terminou com 'Conflict with origin/main: .factory/demands/demands.json' porque USR-108/109/110 foram registrados em main durante a execucao; a entrega parou, a worktree foi preservada e foi preciso reconciliar o ledger a mao (script por linha). Qualquer registro de ticket (Telegram, Grill, outra sessao) durante um run longo reabre o problema: duas branches que acrescentam ou alteram linhas adjacentes de um JSON de lista conflitam em texto. \n\n[Plano HF-28 | lote 5] Onda 0. SOLUCAO: merge por linha (3-way por id de ticket) do demands.json em GitAutonomyManager._sync_with_base/_deliver: ao conflitar so no ledger, calcular base/ours/theirs, aplicar as linhas alteradas pela branch sobre theirs, manter as linhas novas de main e falhar so se a MESMA linha foi alterada nos dois lados com valores diferentes. Reaproveitar safe_show e title_collisions. NUNCA MAIS: teste de integracao com repositorio git real e registro concorrente durante a entrega.",
+    "core_journey": [
+      "EVIDENCIA (2026-10-01): run_ticket USR-94 (Codex, 48 min) terminou com 'Conflict with origin/main: .factory/demands/demands.json' porque USR-108/109/110 foram registrados em main durante a execucao; a entrega parou, a worktree foi preservada e foi preciso reconciliar o ledger a mao (script por linha). Qualquer registro de ticket (Telegram, Grill, outra sessao) durante um run longo reabre o problema: duas branches que acrescentam ou alteram linhas adjacentes de um JSON de lista conflitam em texto. \n\n[Plano HF-28 | lote 5] Onda 0. SOLUCAO: merge por linha (3-way por id de ticket) do demands.json em GitAutonomyManager._sync_with_base/_deliver: ao conflitar so no ledger, calcular base/ours/theirs, aplicar as linhas alteradas pela branch sobre theirs, manter as linhas novas de main e falhar so se a MESMA linha foi alterada nos dois lados com valores diferentes. Reaproveitar safe_show e title_collisions. NUNCA MAIS: teste de integracao com repositorio git real e registro concorrente durante a entrega."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Branch que altera a linha de um ticket e main que anexa tickets novos: a entrega faz merge automatico e preserva ambos",
+      "Mesma linha alterada nos dois lados com valores diferentes: falha explicita com o ID do ticket (fail-closed)",
+      "Teste de integracao com repositorio git real e dois registros concorrentes"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-01T12:01:55.341233Z",
+    "updated_at": "2026-10-01T12:01:55.341233Z"
   }
 ]
