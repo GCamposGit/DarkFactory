@@ -368,6 +368,10 @@ def test_a_blocked_delivery_is_an_error_not_a_success(
     assert seen["cwd"] == env["workspace"].path  # completion also happens inside the worktree
 
 
+# Built at runtime so no tracked file contains a literal key-shaped string (test_no_tracked_secrets).
+_FAKE_SECRET = "sk-" + "ant-api03-" + "SECRETSECRETSECRET"
+
+
 def _git(repo: Path, *args: str) -> str:
     """Run local git against a disposable repository."""
     proc = subprocess.run(
@@ -422,7 +426,7 @@ def test_ok_agent_without_implementation_is_rejected_before_delivery(
             ticket.problem_statement = "ledger-only edit"
             store.save_ticket(ticket)
         return AgentResult(
-            ok=True, text="sk-ant-api03-SECRETSECRETSECRET nao implementei", harness=req.harness,
+            ok=True, text=f"{_FAKE_SECRET} nao implementei", harness=req.harness,
             duration_s=1.0,
         )
 
@@ -450,7 +454,7 @@ def test_ok_agent_with_implementation_reaches_normal_completion(
         assert "codex (headroom 64.0%)" in req.prompt
         (req.cwd / "feature.py").write_text("value = 1\n", encoding="utf-8")
         return AgentResult(
-            ok=True, text="Implemented feature.py sk-ant-api03-SECRETSECRETSECRET",
+            ok=True, text=f"Implemented feature.py {_FAKE_SECRET}",
             harness=req.harness, duration_s=1.0,
         )
 
