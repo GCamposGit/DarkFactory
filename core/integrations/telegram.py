@@ -185,9 +185,9 @@ class TelegramConfig(BaseModel):
     poll_timeout_seconds: int = 30
 
 
-def _read_env_fallback() -> dict[str, str]:
+def _read_env_fallback(root: Optional[Path] = None) -> dict[str, str]:
     """Reads .env from repository root if present without external dependencies."""
-    root_dir = project_root()
+    root_dir = root or project_root()
     env_file = root_dir / ".env"
     env_vars: dict[str, str] = {}
     if env_file.exists():
@@ -208,8 +208,8 @@ def load_telegram_config(
     config_dir: Optional[Path] = None,
 ) -> TelegramConfig:
     """Load environment credentials first; use local config only as fallback."""
-    root_dir = project_root()
-    env_vars = _read_env_fallback()
+    root_dir = config_dir.parent.parent if config_dir is not None else project_root()
+    env_vars = _read_env_fallback(root_dir)
     keys = {
         "owner": ("TELEGRAM_OWNER_BOT_TOKEN",),
         "ops": ("TELEGRAM_OPS_BOT_TOKEN", "TELEGRAM_BOT_TOKEN"),
@@ -238,16 +238,17 @@ def load_telegram_config(
     if not token:
         token = local_token
 
-    users_raw = os.environ.get("TELEGRAM_AUTHORIZED_USERS") or env_vars.get("TELEGRAM_AUTHORIZED_USERS", "")
+    users_raw = os.environ.get("TELEGRAM_AUTHORIZED_USERS") or os.environ.get("TELEGRAM_ALLOWED_USERS") or env_vars.get("TELEGRAM_AUTHORIZED_USERS", "")
     users = [int(u.strip()) for u in users_raw.split(",") if u.strip().isdigit()]
-    chats_raw = os.environ.get("TELEGRAM_AUTHORIZED_CHATS") or env_vars.get("TELEGRAM_AUTHORIZED_CHATS", "")
-    chats = [int(c.strip()) for c in chats_raw.split(",") if c.strip().isdigit()]
-    secret = os.environ.get("TELEGRAM_WEBHOOK_SECRET") or env_vars.get("TELEGRAM_WEBHOOK_SECRET")
-
     if not users:
         users = local_data.get("authorized_user_ids", [])
+
+    chats_raw = os.environ.get("TELEGRAM_AUTHORIZED_CHATS") or os.environ.get("TELEGRAM_ALLOWED_CHATS") or env_vars.get("TELEGRAM_AUTHORIZED_CHATS", "")
+    chats = [int(c.strip()) for c in chats_raw.split(",") if c.strip().isdigit()]
     if not chats:
         chats = local_data.get("authorized_chat_ids", [])
+
+    secret = os.environ.get("TELEGRAM_WEBHOOK_SECRET") or env_vars.get("TELEGRAM_WEBHOOK_SECRET")
 
     return TelegramConfig(
         bot_token=token,

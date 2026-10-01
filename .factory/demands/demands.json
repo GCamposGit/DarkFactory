@@ -2680,7 +2680,7 @@
     "origin": "agent",
     "status": "completed",
     "item_type": "security",
-    "lifecycle_stage": "done",
+    "lifecycle_stage": "execution",
     "horizon": "now",
     "tags": [
       "user-demand",
