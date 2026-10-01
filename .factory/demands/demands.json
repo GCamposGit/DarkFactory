@@ -3183,5 +3183,38 @@
     "dependencies": [],
     "created_at": "2026-10-01T12:02:27.409844Z",
     "updated_at": "2026-10-01T12:02:27.409844Z"
+  },
+  {
+    "id": "USR-114",
+    "project_id": "darkfac",
+    "title": "Agente headless ignora o timeout no Windows: Codex rodou 4744 s com timeout_s=1800 e a tentativa vira transient com retry integral",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "EVIDENCIA (2026-10-01, run_ticket USR-108 --harness codex): log core.line.agent_retry 'Agent attempt 1 failed: harness=codex model=- error_kind=timeout exit_code=- duration_s=4744.077 class=transient' seguido de 'Transient failure on codex; retrying the same route in 30s'. run_ticket._build_request fixa AgentRequest.timeout_s=1800 (30 min), mas a tentativa durou 4744 s (79 min): 2,6x o limite. O owner esperou ~2h por um unico ticket.\n\nHIPOTESE DE CAUSA RAIZ (confirmar com teste): core/line/agent_cli.py::_run_codex (e _run_claude, _run_grok, _run_antigravity) usam subprocess.run(argv, capture_output=True, timeout=req.timeout_s). No Windows, ao estourar o prazo o CPython faz process.kill() e depois communicate() para coletar a saida, e esse communicate() bloqueia ate os pipes de stdout/stderr chegarem a EOF. O Codex lanca processos filhos/netos (node_repl, cua-repl, codex-code-mode-host, runtime_dispatch.py) que herdam os handles dos pipes; kill() mata so o processo raiz, nao a arvore, entao o communicate() espera os netos terminarem. Resultado: o timeout efetivo e ilimitado; o unico teto real e wall_clock_hours (6 h) do RunCaps.\n\nCONSEQUENCIAS: (1) o tempo de um ticket nao tem limite superior util; (2) o erro e classificado transient e a rota e repetida do zero (mais ate 79 min e mais cota gasta) mesmo com o trabalho da tentativa anterior ja na worktree; (3) _run_codex devolve text='' no timeout e perde a saida parcial, o que impede diagnosticar o que o agente estava fazendo; (4) a fila inteira (um run_ticket por vez) fica bloqueada atras de uma tentativa descontrolada.\n\nSOLUCAO: helper unico em core/line/agent_cli.py (ex.: _run_bounded(argv, input, cwd, timeout, grace)) usado por TODOS os runners: iniciar com subprocess.Popen em novo grupo de processos (CREATE_NEW_PROCESS_GROUP no Windows, start_new_session no POSIX) e, no Windows, associar a um Job Object com JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE (ou, no minimo, 'taskkill /PID <pid> /T /F'); communicate(timeout=...) e, no estouro, matar a ARVORE inteira e ler os pipes com um segundo prazo curto (ex.: 10 s), abandonando o que restar; devolver error_kind='timeout' com a saida parcial redigida (redact_secrets) e duration_s real <= timeout + grace. Revisar a politica de retry para 'timeout': no maximo uma nova tentativa, preferindo continuar de onde parou (worktree ja tem alteracoes) ou ir direto ao validate quando houver mudancas de implementacao, em vez de refazer a rota do zero; documentar a escolha.\n\nNAO-OBJETIVOS: nao mudar o valor padrao de 1800 s; nao alterar a escolha de harness.",
+    "core_journey": [
+      "EVIDENCIA (2026-10-01, run_ticket USR-108 --harness codex): log core.line.agent_retry 'Agent attempt 1 failed: harness=codex model=- error_kind=timeout exit_code=- duration_s=4744.077 class=transient' seguido de 'Transient failure on codex; retrying the same route in 30s'. run_ticket._build_request fixa AgentRequest.timeout_s=1800 (30 min), mas a tentativa durou 4744 s (79 min): 2,6x o limite. O owner esperou ~2h por um unico ticket.\n\nHIPOTESE DE CAUSA RAIZ (confirmar com teste): core/line/agent_cli.py::_run_codex (e _run_claude, _run_grok, _run_antigravity) usam subprocess.run(argv, capture_output=True, timeout=req.timeout_s). No Windows, ao estourar o prazo o CPython faz process.kill() e depois communicate() para coletar a saida, e esse communicate() bloqueia ate os pipes de stdout/stderr chegarem a EOF. O Codex lanca processos filhos/netos (node_repl, cua-repl, codex-code-mode-host, runtime_dispatch.py) que herdam os handles dos pipes; kill() mata so o processo raiz, nao a arvore, entao o communicate() espera os netos terminarem. Resultado: o timeout efetivo e ilimitado; o unico teto real e wall_clock_hours (6 h) do RunCaps.\n\nCONSEQUENCIAS: (1) o tempo de um ticket nao tem limite superior util; (2) o erro e classificado transient e a rota e repetida do zero (mais ate 79 min e mais cota gasta) mesmo com o trabalho da tentativa anterior ja na worktree; (3) _run_codex devolve text='' no timeout e perde a saida parcial, o que impede diagnosticar o que o agente estava fazendo; (4) a fila inteira (um run_ticket por vez) fica bloqueada atras de uma tentativa descontrolada.\n\nSOLUCAO: helper unico em core/line/agent_cli.py (ex.: _run_bounded(argv, input, cwd, timeout, grace)) usado por TODOS os runners: iniciar com subprocess.Popen em novo grupo de processos (CREATE_NEW_PROCESS_GROUP no Windows, start_new_session no POSIX) e, no Windows, associar a um Job Object com JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE (ou, no minimo, 'taskkill /PID <pid> /T /F'); communicate(timeout=...) e, no estouro, matar a ARVORE inteira e ler os pipes com um segundo prazo curto (ex.: 10 s), abandonando o que restar; devolver error_kind='timeout' com a saida parcial redigida (redact_secrets) e duration_s real <= timeout + grace. Revisar a politica de retry para 'timeout': no maximo uma nova tentativa, preferindo continuar de onde parou (worktree ja tem alteracoes) ou ir direto ao validate quando houver mudancas de implementacao, em vez de refazer a rota do zero; documentar a escolha.\n\nNAO-OBJETIVOS: nao mudar o valor padrao de 1800 s; nao alterar a escolha de harness."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Existe um helper unico de execucao limitada usado por _run_claude, _run_codex, _run_grok e _run_antigravity (nenhum chama subprocess.run com timeout diretamente)",
+      "Teste com processo falso que cria um neto dormindo e segurando os pipes: com timeout=2 o helper retorna em menos de 15 s com error_kind='timeout', a arvore de processos e encerrada (nenhum neto vivo apos o retorno) e a saida parcial vem redigida; teste roda no Windows e em POSIX",
+      "duration_s reportado em AgentResult e no log do agent_retry nunca excede timeout_s + grace configurado (assercao no teste)",
+      "O erro de timeout preserva a saida parcial (stdout/stderr redigidos) tambem em _run_codex",
+      "Politica de retry para error_kind='timeout' documentada e testada: no maximo uma nova tentativa, e com alteracoes de implementacao ja presentes na worktree o fluxo segue para o validate em vez de repetir a rota do zero",
+      "O gate oficial (python C:\\dev\\DarkFac\\core\\harness\\runner.py --quick) passa"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-01T12:48:23.835466Z",
+    "updated_at": "2026-10-01T12:48:23.835466Z"
   }
 ]
