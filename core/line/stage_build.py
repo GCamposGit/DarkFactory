@@ -625,11 +625,28 @@ def _read_context_json(ws: RunWorkspace, name: str) -> dict[str, Any]:
 
 
 def _pending_fixup(ws: RunWorkspace, run_id: str) -> Optional[tuple[TicketSpec, str]]:
-    """Unaddressed feedback from review (`changes_required`) or a red clean validation.
+    """Unaddressed feedback from review, clean validation, or PR CI.
 
     Returns a synthetic fix-up ticket whose job key (`<run_id>:fix-...`) is
     unique per feedback item, so each item is addressed exactly once.
     """
+    ci_logs = sorted(
+        workspace.context_dir(ws).glob("ci-*.log.md"),
+        key=lambda path: int(path.name[3:-7]) if path.name[3:-7].isdigit() else -1,
+        reverse=True,
+    )
+    for log_path in ci_logs:
+        number = log_path.name[3:-7]
+        if not number.isdigit():
+            continue
+        ticket = TicketSpec(
+            id=f"fix-ci-{number}",
+            title=f"fix PR CI failure {number}",
+            goal="Corrigir o check vermelho do PR usando o log de CI.",
+        )
+        if not workspace.find_commit_by_job(ws, f"{run_id}:{ticket.id}"):
+            return ticket, _read_context_text(ws, log_path.name)
+
     rounds = _read_context_json(ws, "review_state.json").get("rounds")
     if isinstance(rounds, list) and rounds and isinstance(rounds[-1], dict):
         last = rounds[-1]

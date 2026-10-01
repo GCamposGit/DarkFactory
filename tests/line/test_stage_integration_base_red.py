@@ -151,6 +151,7 @@ def _branch(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, run_id: str, projec
     project = _project(origin, project_id)
     ws = ws_mod.checkout(project, run_id)
     ws_mod.write_context(ws, "DEMAND.md", "# Add widget\n")
+    ws_mod.write_context(ws, "tickets.json", json.dumps([{"id": "T1", "title": "Add widget"}]))
     ws_mod.commit(ws, "feat: add widget", f"{run_id}:T1")
     ws_mod.push(ws)
     return project
@@ -351,8 +352,9 @@ def test_a_check_that_is_green_on_the_base_still_goes_back_to_development_with_i
     result = handler.handle(_context("run-br9"))
 
     assert result.outcome == "retry"
-    assert result.cause_code.startswith(f"ci_check_failed:{PR_CHECK['name']}")
-    assert "AssertionError: boom" in result.cause_code
+    assert result.cause_code == "retry:development"
+    ws = ws_mod.checkout(project, "run-br9")
+    assert "AssertionError: boom" in (ws_mod.context_dir(ws) / "ci-1.log.md").read_text(encoding="utf-8")
     assert counter.calls == [] and humans.calls == []  # the base_red machinery is never consulted
     assert any("--log-failed" in c for c in calls())
 
@@ -366,7 +368,7 @@ def test_a_check_red_on_the_base_for_another_job_is_still_the_prs_fault(
 
     result = _handler(project, gh_path).handle(_context("run-br10"))
 
-    assert result.cause_code.startswith("ci_check_failed:")
+    assert result.cause_code == "retry:development"
 
 
 def test_an_unreadable_base_is_not_proof_that_it_is_red(
@@ -378,7 +380,7 @@ def test_an_unreadable_base_is_not_proof_that_it_is_red(
 
     result = _handler(project, gh_path).handle(_context("run-br11"))
 
-    assert result.cause_code.startswith("ci_check_failed:")
+    assert result.cause_code == "retry:development"
 
 
 # --------------------------------------------------------------------------

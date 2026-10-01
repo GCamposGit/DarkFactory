@@ -25,8 +25,8 @@ Flow (`IntegrationStageHandler.handle`), per
 3. Idempotent PR: reuse an already-open PR for the branch, or create one.
 4. Poll CI (`gh pr checks --json`); pending checks return `retry` with a
    `not_before` hint rather than blocking the stage for 30 minutes.
-5. A red check downloads the failing job's log and returns `retry` (for the
-   `development` stage) with that log attached -- unless the very same check
+5. A red check downloads the failing job's log, persists it in the run context,
+   and returns `retry:development` -- unless the very same check
    is already red on the base branch (`base_red`, USR-86): then no change the
    agent makes can fix it, so the stage returns
    `retry("base_red not_before=<now + 60 min>")` without touching the agent
@@ -66,13 +66,14 @@ from typing import Any, Callable, Iterable, Optional, Sequence
 from core.git import ci_checks
 from core.git.safe_show import safe_show
 from core.line import workspace as ws_mod
-from core.line.agent_cli import AgentRequest, AgentResult, run_agent
+from core.line.agent_cli import AgentRequest, AgentResult, redact_secrets, run_agent
 from core.line.human import HumanRequest, notify_human_request
 from core.line.routing import RoutingConfig, pick, record_result
 from core.line.workspace import RunWorkspace, WorkspaceError
 from core.projects.models import ProjectDescriptor
 from core.projects.registry import resolve_commands
 from core.workflow.control_contracts import HandlerDescriptor, StageContext, StageResult
+from core.workflow.successors import MAX_STAGE_ITERATIONS
 
 logger = logging.getLogger(__name__)
 
@@ -89,6 +90,7 @@ _VALIDATE_DEFAULT_TIMEOUT_S = 1800
 _ATTEMPT_JOB_SUFFIX = "integration:conflict_attempt"
 _RESOLVED_JOB_SUFFIX = "integration:conflict_resolved"
 _STRIP_JOB_SUFFIX = "integration:strip_context"
+MAX_CI_ITERATIONS = MAX_STAGE_ITERATIONS
 
 _GITHUB_REPO_PATTERN = re.compile(
     r"github\.com[:/]+([^/]+)/([^/.\s]+?)(?:\.git)?/?$", re.IGNORECASE
@@ -539,7 +541,7 @@ class IntegrationStageHandler:
         directory = ws_mod.context_dir(ws)
 
         strip_sha = ws_mod.find_commit_by_job(ws, strip_key)
-        if strip_sha is not None:
+        if strip_sha is not None and not directory.exists():
             # Already stripped by an earlier call (e.g. `gh pr create` failed
             # afterwards): rebuild title/body from the strip commit's parent.
             with tempfile.TemporaryDirectory() as tmp:
@@ -564,7 +566,14 @@ class IntegrationStageHandler:
         )
         if directory.exists():
             shutil.rmtree(directory, ignore_errors=True)
-        ws_mod.commit(ws, "chore(line): drop run context (details folded into PR body)", strip_key)
+        # A CI fix-up restores the context after the first strip. Strip it on
+        # every new integration pass so the final PR does not carry run state.
+        ws_mod.commit(
+            ws, "chore(line): drop run context (details folded into PR body)",
+            strip_key if strip_sha is None else self._job_key(
+                run_id, f"integration:strip_context:{context.claim.job_key.iteration}"
+            ),
+        )
 
         push_error = self._push_force_with_lease(ws)
         if push_error is not None:
@@ -669,6 +678,49 @@ class IntegrationStageHandler:
     def _fetch_failed_log(self, ws: RunWorkspace, failing_check: dict[str, Any]) -> str:
         return ci_checks.fetch_failed_log(self._ci_runner(ws, timeout=120), ws.path, failing_check)
 
+    def _ci_failure_count(self, ws: RunWorkspace) -> int:
+        """Count recorded red PR checks in the run's branch history, across strips."""
+        result = self._git(["log", "--format=%B"], ws)
+        if result.returncode != 0:
+            raise IntegrationError("cannot count CI failures from branch history")
+        prefix = re.escape(f"DarkFac-Job: {ws.run_id}:ci-failure:")
+        return len(re.findall(rf"^{prefix}\d+$", result.stdout or "", re.MULTILINE))
+
+    def _record_ci_failure(
+        self, ws: RunWorkspace, failing: dict[str, Any], log: str, context: StageContext
+    ) -> StageResult:
+        """Persist feedback on the run branch before bouncing to development."""
+        count = self._ci_failure_count(ws)
+        if count >= MAX_CI_ITERATIONS:
+            return StageResult(outcome="failed", cause_code="ci_iteration_cap")
+        directory = ws_mod.context_dir(ws)
+        if not (directory / "tickets.json").is_file():
+            # On later rounds use the strip immediately preceding this CI
+            # check, preserving review state and earlier CI feedback.
+            current_strip_key = self._job_key(
+                ws.run_id, f"integration:strip_context:{context.claim.job_key.iteration}"
+            )
+            strip_sha = ws_mod.find_commit_by_job(ws, current_strip_key)
+            if strip_sha is None:
+                strip_sha = ws_mod.find_commit_by_job(
+                    ws, self._job_key(ws.run_id, _STRIP_JOB_SUFFIX)
+                )
+            if strip_sha is None or self._restore_context(ws, strip_sha, directory) is None:
+                return StageResult(outcome="failed", cause_code="ci_context_unavailable")
+        number = count + 1
+        label = _sanitize(ci_checks.check_label(failing))
+        content = f"# CI failure {number}: {label}\n\n{_truncate(_sanitize(redact_secrets(log)), 4000)}\n"
+        path = ws_mod.write_context(ws, f"ci-{number}.log.md", content)
+        ws_mod.commit(
+            ws, f"chore(line): record CI failure {number}",
+            self._job_key(ws.run_id, f"ci-failure:{context.claim.job_key.iteration}"),
+        )
+        ws_mod.push(ws)
+        return StageResult(
+            outcome="retry", cause_code="retry:development",
+            evidence_refs=[str(path.relative_to(ws.path))],
+        )
+
     def _evaluate_checks(
         self, ws: RunWorkspace, pr_number: int, context: Optional[StageContext] = None
     ) -> Optional[StageResult]:
@@ -684,9 +736,11 @@ class IntegrationStageHandler:
         """
         snapshot = ci_checks.query_checks(pr_number, ws.path, self._ci_runner(ws))
         if snapshot.state == "error":
+            logger.warning("Could not query PR #%s checks: %s", pr_number, _sanitize(snapshot.error))
+            not_before = (self.clock() + timedelta(seconds=self.ci_check_window_s)).isoformat()
             return StageResult(
                 outcome="retry",
-                cause_code=_sanitize(f"gh_pr_checks_failed: {_truncate(snapshot.error, 2000)}"),
+                cause_code=f"gh_pr_checks_failed:not_before={not_before}",
             )
 
         if snapshot.state == "failed":
@@ -697,12 +751,9 @@ class IntegrationStageHandler:
                 return self._base_red_outcome(ws, pr_number, snapshot, default_branch, context)
             failing = snapshot.failing[0]
             log = self._fetch_failed_log(ws, failing)
-            return StageResult(
-                outcome="retry",
-                cause_code=_sanitize(
-                    f"ci_check_failed:{failing.get('name')}\n{_truncate(log, 4000)}"
-                ),
-            )
+            if context is None:
+                return StageResult(outcome="failed", cause_code="ci_context_unavailable")
+            return self._record_ci_failure(ws, failing, log, context)
 
         if snapshot.state == "pending":
             not_before = (
@@ -923,6 +974,14 @@ class IntegrationStageHandler:
             ws = ws_mod.checkout(self.project, run_id)
         except WorkspaceError as exc:
             return StageResult(outcome="retry", cause_code=_sanitize(f"workspace_checkout_failed: {exc}"))
+
+        # Replaying a claim after publishing its feedback must not poll the
+        # same red SHA or create another CI iteration.
+        if ws_mod.find_commit_by_job(
+            ws, self._job_key(run_id, f"ci-failure:{context.claim.job_key.iteration}")
+        ) is not None:
+            ws_mod.push(ws)
+            return StageResult(outcome="retry", cause_code="retry:development")
 
         # Idempotency: a previous call may have merged (or queued `--auto`)
         # and deleted the branch before returning; never redo the work.
