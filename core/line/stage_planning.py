@@ -27,6 +27,7 @@ from typing import Iterable, Optional, Protocol
 from pydantic import BaseModel, Field, ValidationError
 
 from core.line import diagnostics, stage_grill, workspace
+from core.line.route_wait import RouteWaiter
 from core.line.routing import RoutingConfig
 from core.line.stage_grill import GRILL_FILE, load_prompt, read_lessons, render_prompt
 from core.projects.models import ProjectDescriptor
@@ -202,13 +203,16 @@ def run_planning(
     intake_service: Optional[IntakeServiceLike] = None,
     policy_ref: str = "darkfac://line/v1",
     now: Optional[datetime] = None,
+    route_waiter: Optional[RouteWaiter] = None,
 ) -> StageResult:
     """Run (or reuse) the planning stage for `run_id`.
 
     Requires the grill stage to have already committed `DEMAND.md`/
     `GRILL.md` on the run's branch (`workspace.checkout` will see them).
+    `route_waiter` decides what "no agent route right now" means (USR-87, see `run_grill`).
     """
     ws = workspace.checkout(project, run_id)
+    waiter = route_waiter or RouteWaiter()
 
     existing = workspace.find_commit_by_job(ws, _job_key(run_id))
     if existing:
@@ -242,7 +246,12 @@ def run_planning(
         last_result = result
         if not result.ok:
             stage_grill._record_failed_agent(ws, run_id, STAGE, result)
-            return stage_grill.retry_for_agent_failure(result, "planning_agent_failed")
+            return stage_grill.retry_for_agent_failure(
+                result, "planning_agent_failed",
+                on_no_route=lambda: waiter.no_route_result(
+                    STAGE, project, run_id, host_caps=host_caps, config=routing_config
+                ),
+            )
         try:
             plan = parse_planning_plan(result.text)
             break

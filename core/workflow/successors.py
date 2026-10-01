@@ -100,11 +100,12 @@ STAGE_ROLES: dict[str, str] = {
 # bounded by `RunCaps.wall_clock_hours` (from the run's `created_at`)
 # instead of a count at all -- see `_run_wall_clock_exceeded`.
 #
-# Retry kinds and their caps (USR-86):
+# Retry kinds and their caps (USR-86/USR-87):
 # - plain same-stage retry: MAX_SAME_STAGE_RETRIES iterations;
 # - `retry:<stage>` bounce: MAX_STAGE_ITERATIONS on the target stage;
-# - same-stage retry with `not_before` (`ci_pending`, auth waits): the run's wall clock
-#   (`RunCaps.wall_clock_hours`);
+# - same-stage retry with `not_before` (`ci_pending`, `no_route_available`, auth waits): the run's
+#   wall clock (`RunCaps.wall_clock_hours`); the stage itself turns the first claim after that
+#   budget into `waiting_human` instead (see `core.line.route_wait`);
 # - `base_red not_before=...` (CI already red on the base branch): its OWN cap, counted by the
 #   integration stage (`ci_checks.BASE_RED_MAX_RETRIES` hourly waits, then `waiting_human`), so it is
 #   exempt from the wall clock and keeps only the MAX_SAME_STAGE_RETRIES backstop.

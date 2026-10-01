@@ -24,6 +24,7 @@ from typing import Any, Callable, Iterable, Optional, Protocol
 from core.git import ci_checks
 from core.line import routing as line_routing
 from core.line import stage_build, stage_grill, stage_integration, stage_planning, stage_release, stage_review
+from core.line.route_wait import RouteWaiter, run_started_at_lookup
 from core.line.routing import RoutingConfig
 from core.projects.models import DeployTargetType, ProjectDescriptor
 from core.projects.registry import get_project_registry
@@ -149,6 +150,11 @@ def required_caps(project: ProjectDescriptor, stage: str) -> list[str]:
     return caps
 
 
+def _route_waiter_for(store: Any) -> RouteWaiter:
+    """The `RouteWaiter` of a store-backed handler: the run's start is its `created_at` (USR-87)."""
+    return RouteWaiter(run_started_at=run_started_at_lookup(store))
+
+
 def base_red_attempt_counter(store: Any) -> Callable[[str], int]:
     """`run_id -> integration waits already returned as ``base_red``` (USR-86).
 
@@ -215,11 +221,13 @@ class GrillStageHandler:
         host_caps: Iterable[str],
         routing_config: Optional[RoutingConfig],
         project_resolver: ProjectResolver,
+        route_waiter: Optional[RouteWaiter] = None,
     ) -> None:
         self.store = store
         self.host_caps = list(host_caps)
         self.routing_config = routing_config
         self.project_resolver = project_resolver
+        self.route_waiter = route_waiter or _route_waiter_for(store)
 
     def handle(self, context: StageContext) -> StageResult:
         project = _resolve_project(context, self.project_resolver)
@@ -238,6 +246,7 @@ class GrillStageHandler:
             auto_policy=stage_grill.is_auto_grill(project, payload),
             answers=self._recorded_answers(run_id),
             adopt_from_runs=adopt_from,
+            route_waiter=self.route_waiter,
         )
         self._carry_over_answers(run_id, result)
         return result
@@ -292,12 +301,14 @@ class PlanningStageHandler:
         routing_config: Optional[RoutingConfig],
         project_resolver: ProjectResolver,
         intake_service: Optional[Any] = None,
+        route_waiter: Optional[RouteWaiter] = None,
     ) -> None:
         self.store = store
         self.host_caps = list(host_caps)
         self.routing_config = routing_config
         self.project_resolver = project_resolver
         self.intake_service = intake_service
+        self.route_waiter = route_waiter or _route_waiter_for(store)
 
     def handle(self, context: StageContext) -> StageResult:
         project = _resolve_project(context, self.project_resolver)
@@ -310,6 +321,7 @@ class PlanningStageHandler:
             routing_config=self.routing_config,
             intake_service=self.intake_service,
             policy_ref=payload.get("policy_ref", "darkfac://line/v1"),
+            route_waiter=self.route_waiter,
         )
 
 
@@ -510,14 +522,23 @@ def build_line_registry(
     cfg = routing_config or line_routing.load_routing_config()
     resolver = project_resolver or default_project_resolver()
 
+    waiter = _route_waiter_for(store)
+
     bindings: dict[str, Any] = {
-        "grill": GrillStageHandler(store=store, host_caps=host_caps, routing_config=cfg, project_resolver=resolver),
-        "planning": PlanningStageHandler(
-            store=store, host_caps=host_caps, routing_config=cfg, project_resolver=resolver, intake_service=intake_service
+        "grill": GrillStageHandler(
+            store=store, host_caps=host_caps, routing_config=cfg, project_resolver=resolver, route_waiter=waiter
         ),
-        "development": DevelopmentStageHandler(project_resolver=resolver, host_caps=host_caps, routing_config=cfg),
+        "planning": PlanningStageHandler(
+            store=store, host_caps=host_caps, routing_config=cfg, project_resolver=resolver,
+            intake_service=intake_service, route_waiter=waiter,
+        ),
+        "development": DevelopmentStageHandler(
+            project_resolver=resolver, host_caps=host_caps, routing_config=cfg, route_waiter=waiter
+        ),
         "validation": ValidationStageHandler(project_resolver=resolver),
-        "independent_review": ReviewStageHandler(project_resolver=resolver, host_caps=host_caps, routing_config=cfg),
+        "independent_review": ReviewStageHandler(
+            project_resolver=resolver, host_caps=host_caps, routing_config=cfg, route_waiter=waiter
+        ),
         "integration": IntegrationStageAdapter(
             project_resolver=resolver, gh_executable=gh_executable, host_caps=host_caps, routing_config=cfg,
             base_red_attempts=base_red_attempt_counter(store),
