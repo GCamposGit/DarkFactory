@@ -1400,7 +1400,7 @@
     "project_id": "darkfac",
     "title": "Roteador de desenvolvimento nao pode eleger harness sem modo de escrita headless",
     "origin": "user",
-    "status": "planned",
+    "status": "completed",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -1410,7 +1410,7 @@
       "wave-0",
       "router"
     ],
-    "problem_statement": "Em 2026-09-30 o roteador elegeu ANTIGRAVITY para o USR-67 e o run_ticket falhou com 'Antigravity has no reliable headless write mode on this host; only read is supported'. O ticket ficou parado ate ser reexecutado manualmente com --harness codex.\n\n[Plano HF-28 | 2026-09-30] Onda 0. 1/3 do caminho critico; independente do USR-84. Ver docs/STABILITY_PLAN_2026-09-30.md.\nCAUSA RAIZ: line_routing.json lista antigravity como PRIMEIRO candidato de 'development' e 'grill', mas core/line/agent_cli._run_antigravity recusa mode='write' (devolvendo error_kind='not_installed', que mascara a causa). O roteador so conhece nomes de harness e cota; nao existe o conceito de capacidade. Verificado em 2026-09-30: pick('development', caps) devolve ('antigravity', None) com 100% de headroom, entao run_ticket.py no caminho padrao falha sempre que o Antigravity e o mais folgado.\nSOLUCAO DEFINITIVA: Tabela declarativa unica HARNESS_CAPABILITIES (claude/codex/grok/antigravity/openrouter -> {read, write}) em core/line/agent_cli.py; pick(stage, caps, mode=...) filtra harnesses sem a capacidade ANTES de ordenar por headroom; stages write (development, integration) e run_ticket passam mode='write'; recusa de modo passa a error_kind='unsupported_mode' (nao 'not_installed'); run_ticket exclui o harness que falhou por capacidade e tenta o proximo saudavel (max 3) antes de falhar.\nNUNCA MAIS (prevencao estrutural): teste de contrato que percorre line_routing.json e falha se qualquer candidato de um stage de escrita nao tiver 'write' declarado (config nao pode mais divergir do codigo); skills 03/19 e CLAUDE.md param de citar Antigravity como executor fixo (ver USR-89).",
+    "problem_statement": "Em 2026-09-30 o roteador elegeu ANTIGRAVITY para o USR-67 e o run_ticket falhou com 'Antigravity has no reliable headless write mode on this host; only read is supported'. O ticket ficou parado ate ser reexecutado manualmente com --harness codex.\n\n[Plano HF-28 | 2026-09-30] Onda 0. 1/3 do caminho critico; independente do USR-84. Ver docs/STABILITY_PLAN_2026-09-30.md.\nCAUSA RAIZ: line_routing.json lista antigravity como PRIMEIRO candidato de 'development' e 'grill', mas core/line/agent_cli._run_antigravity recusa mode='write' (devolvendo error_kind='not_installed', que mascara a causa). O roteador so conhece nomes de harness e cota; nao existe o conceito de capacidade. Verificado em 2026-09-30: pick('development', caps) devolve ('antigravity', None) com 100% de headroom, entao run_ticket.py no caminho padrao falha sempre que o Antigravity e o mais folgado.\nSOLUCAO DEFINITIVA: Tabela declarativa unica HARNESS_CAPABILITIES (claude/codex/grok/antigravity/openrouter -> {read, write}) em core/line/agent_cli.py; pick(stage, caps, mode=...) filtra harnesses sem a capacidade ANTES de ordenar por headroom; stages write (development, integration) e run_ticket passam mode='write'; recusa de modo passa a error_kind='unsupported_mode' (nao 'not_installed'); run_ticket exclui o harness que falhou por capacidade e tenta o proximo saudavel (max 3) antes de falhar.\nNUNCA MAIS (prevencao estrutural): teste de contrato que percorre line_routing.json e falha se qualquer candidato de um stage de escrita nao tiver 'write' declarado (config nao pode mais divergir do codigo); skills 03/19 e CLAUDE.md param de citar Antigravity como executor fixo (ver USR-89).\n\n[Plano HF-28 | lote 3] ENCERRADO COM EVIDENCIA (2026-09-30): PR #80 (merge 4b7a318). Tabela HARNESS_CAPABILITIES em core/line/agent_cli.py (claude/codex = read+write; grok/antigravity/openrouter = read), pick(mode=) filtra antes do headroom, STAGE_MODES (development/integration = write), validate_routing_config + testes de contrato (tests/line/test_routing_capabilities.py), antigravity/grok removidos do cascade de development, erro novo unsupported_mode. Verificado: pick('development') -> ('codex', None) e run_ticket --dry-run mostra 'modo: write'. CI verde ubuntu+windows.",
     "core_journey": [
       "Em 2026-09-30 o roteador elegeu ANTIGRAVITY para o USR-67 e o run_ticket falhou com 'Antigravity has no reliable headless write mode on this host; only read is supported'. O ticket ficou parado ate ser reexecutado manualmente com --harness codex."
     ],
@@ -1435,14 +1435,14 @@
     "estimated_complexity": "small",
     "dependencies": [],
     "created_at": "2026-09-30T17:25:29.151390Z",
-    "updated_at": "2026-09-30T22:00:00Z"
+    "updated_at": "2026-10-01T07:00:00Z"
   },
   {
     "id": "USR-68",
     "project_id": "darkfac",
     "title": "Falha do agente sem mensagem: run_ticket deve diagnosticar e repetir",
     "origin": "user",
-    "status": "planned",
+    "status": "completed",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -1452,7 +1452,7 @@
       "wave-0",
       "run-ticket"
     ],
-    "problem_statement": "O codex terminou com '[FALHA NA EXECUCAO DO AGENTE]:' e texto vazio no USR-63 (primeira execucao) e no USR-67 (2026-09-30), deixando o ticket sem causa. Sem stderr, exit code ou duracao no relatorio nao ha como distinguir timeout, quota ou erro de CLI.\n\n[Plano HF-28 | 2026-09-30] Onda 0. 2/3; depende do helper criado junto com USR-67 (mesmo agente, mesma PR). Ver docs/STABILITY_PLAN_2026-09-30.md.\nCAUSA RAIZ: run_ticket imprime apenas agent_result.text; o codex devolve texto vazio em falha e o run_ticket nao le error_kind, exit code, duracao nem stderr. O PR #61 deu visibilidade e retry a etapas da LINHA (core/line/diagnostics.py, stage_build), mas o lancador local run_ticket.py nunca foi alinhado a essa logica.\nSOLUCAO DEFINITIVA: extrair para helper compartilhado (core/line/agent_retry.py) a politica que stage_build ja usa (excluir par (harness,modelo) que falhou, cooldown curto, classificacao de erro) e usa-la em run_ticket: relatorio de falha sempre com harness, modelo, kind, exit code, duracao e tail de stderr; transitorios (empty_output, timeout, crash) repetidos 2x com backoff 30s/120s e depois proximo harness saudavel.\nNUNCA MAIS (prevencao estrutural): run_ticket e stage_build passam a usar o MESMO helper (um teste garante que nenhum dos dois reimplementa a politica); agente falso cobre saida vazia, timeout e retry.",
+    "problem_statement": "O codex terminou com '[FALHA NA EXECUCAO DO AGENTE]:' e texto vazio no USR-63 (primeira execucao) e no USR-67 (2026-09-30), deixando o ticket sem causa. Sem stderr, exit code ou duracao no relatorio nao ha como distinguir timeout, quota ou erro de CLI.\n\n[Plano HF-28 | 2026-09-30] Onda 0. 2/3; depende do helper criado junto com USR-67 (mesmo agente, mesma PR). Ver docs/STABILITY_PLAN_2026-09-30.md.\nCAUSA RAIZ: run_ticket imprime apenas agent_result.text; o codex devolve texto vazio em falha e o run_ticket nao le error_kind, exit code, duracao nem stderr. O PR #61 deu visibilidade e retry a etapas da LINHA (core/line/diagnostics.py, stage_build), mas o lancador local run_ticket.py nunca foi alinhado a essa logica.\nSOLUCAO DEFINITIVA: extrair para helper compartilhado (core/line/agent_retry.py) a politica que stage_build ja usa (excluir par (harness,modelo) que falhou, cooldown curto, classificacao de erro) e usa-la em run_ticket: relatorio de falha sempre com harness, modelo, kind, exit code, duracao e tail de stderr; transitorios (empty_output, timeout, crash) repetidos 2x com backoff 30s/120s e depois proximo harness saudavel.\nNUNCA MAIS (prevencao estrutural): run_ticket e stage_build passam a usar o MESMO helper (um teste garante que nenhum dos dois reimplementa a politica); agente falso cobre saida vazia, timeout e retry.\n\n[Plano HF-28 | lote 3] ENCERRADO COM EVIDENCIA (2026-09-30): PR #80 (merge 4b7a318). core/line/agent_retry.py (politica compartilhada com stage_build: transitorios 2x com backoff 30s/120s, depois proximo harness; unsupported_mode/not_installed/login excluem na hora; quota vira cooldown), AgentResult com exit_code e stderr_tail redigidos, run_ticket imprime harness/modelo/kind/exit/duracao/stderr em toda falha. Testes: tests/line/test_agent_retry.py e tests/test_run_ticket_routing.py.",
     "core_journey": [
       "O codex terminou com '[FALHA NA EXECUCAO DO AGENTE]:' e texto vazio no USR-63 (primeira execucao) e no USR-67 (2026-09-30), deixando o ticket sem causa. Sem stderr, exit code ou duracao no relatorio nao ha como distinguir timeout, quota ou erro de CLI."
     ],
@@ -1476,7 +1476,7 @@
       "USR-67"
     ],
     "created_at": "2026-09-30T17:25:52.164549Z",
-    "updated_at": "2026-09-30T22:00:00Z"
+    "updated_at": "2026-10-01T07:00:00Z"
   },
   {
     "id": "USR-69",
@@ -1613,7 +1613,7 @@
       "wave-3",
       "deploy"
     ],
-    "problem_statement": "Em 2026-09-30 o dokploy_redeploy teve um Traceback intermitente (nao capturado), excedeu 590s sem nenhuma saida por causa de buffer e, com --skip-node-sync, nao exibiu o backup pos-deploy que as execucoes anteriores exibiam.\n\n[Plano HF-28 | 2026-09-30] Onda 3. Ver docs/STABILITY_PLAN_2026-09-30.md.\nCAUSA RAIZ: (a) stdout em pipe e block-buffered: nenhum print usa flush, entao 590 s sem saida; (b) main() nao tem tratamento de excecao de topo: erro de transporte vira Traceback cru; (c) o backup pos-deploy so roda em 'if all_ok and not skip_backup' e, quando all_ok e False (ex.: titulo de deploy divergente ou no nao convergido), pula SEM registrar o motivo; alem disso ha logica de teste em producao ('pytest' in sys.modules) decidindo se o backup roda.\nSOLUCAO DEFINITIVA: reconfigurar stdout para line_buffering e usar flush nas esperas (com progresso/timeout explicito por etapa); try/except de topo que emite erro estruturado (JSON de uma linha + exit code proprio); backup decidido por flag propria (--skip-backup) e sempre loga '[BACKUP] skipped: <motivo>' ou '[BACKUP] ran'; remover a deteccao de pytest de codigo de producao (injetar backup_runner nos testes).\nNUNCA MAIS (prevencao estrutural): testes cobrindo excecao no transporte, ordem das etapas (deploy -> verify -> node sync -> backup) e todos os caminhos de skip logando motivo; teste que proibe 'sys.modules' de pytest no script.",
+    "problem_statement": "Em 2026-09-30 o dokploy_redeploy teve um Traceback intermitente (nao capturado), excedeu 590s sem nenhuma saida por causa de buffer e, com --skip-node-sync, nao exibiu o backup pos-deploy que as execucoes anteriores exibiam.\n\n[Plano HF-28 | 2026-09-30] Onda 3. Ver docs/STABILITY_PLAN_2026-09-30.md.\nCAUSA RAIZ: (a) stdout em pipe e block-buffered: nenhum print usa flush, entao 590 s sem saida; (b) main() nao tem tratamento de excecao de topo: erro de transporte vira Traceback cru; (c) o backup pos-deploy so roda em 'if all_ok and not skip_backup' e, quando all_ok e False (ex.: titulo de deploy divergente ou no nao convergido), pula SEM registrar o motivo; alem disso ha logica de teste em producao ('pytest' in sys.modules) decidindo se o backup roda.\nSOLUCAO DEFINITIVA: reconfigurar stdout para line_buffering e usar flush nas esperas (com progresso/timeout explicito por etapa); try/except de topo que emite erro estruturado (JSON de uma linha + exit code proprio); backup decidido por flag propria (--skip-backup) e sempre loga '[BACKUP] skipped: <motivo>' ou '[BACKUP] ran'; remover a deteccao de pytest de codigo de producao (injetar backup_runner nos testes).\nNUNCA MAIS (prevencao estrutural): testes cobrindo excecao no transporte, ordem das etapas (deploy -> verify -> node sync -> backup) e todos os caminhos de skip logando motivo; teste que proibe 'sys.modules' de pytest no script.\n\n[Plano HF-28 | lote 3] ESCOPO ADICIONAL (do USR-85): chamar 'python -m core.git.autonomy check-main --open-ticket --notify' no pos-deploy (apos node sync) e registrar o resultado na saida estruturada.",
     "core_journey": [
       "Em 2026-09-30 o dokploy_redeploy teve um Traceback intermitente (nao capturado), excedeu 590s sem nenhuma saida por causa de buffer e, com --skip-node-sync, nao exibiu o backup pos-deploy que as execucoes anteriores exibiam."
     ],
@@ -1632,7 +1632,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-09-30T17:27:32.659425Z",
-    "updated_at": "2026-09-30T22:00:00Z"
+    "updated_at": "2026-10-01T07:00:00Z"
   },
   {
     "id": "USR-73",
@@ -1997,7 +1997,7 @@
       "wave-2",
       "flaky"
     ],
-    "problem_statement": "No gate oficial (Desktop test worker, xdist, pre-merge de PR #72) tests/test_runtime_spike_scenarios.py::test_cli_run_verify_and_summarize_native_core falhou uma vez com 'Scenario R12 on native_sqlite: status=fail, error=STORE_UNAVAILABLE' (duracao do teste ~16s sob carga) e passou na reexecucao sem mudancas. Suspeita: timing/lock de SQLite sob paralelismo ou timeout curto no cenario R12 do runtime spike.\n\n[Plano HF-28 | 2026-09-30] Onda 2. Ver docs/STABILITY_PLAN_2026-09-30.md.\nCAUSA RAIZ: hipotese (a confirmar): o cenario R12 do runtime spike abre SQLite nativo e sofre STORE_UNAVAILABLE sob carga (xdist + disco lento do worker Desktop) por timeout/lock curto; a duracao do teste (~16 s) indica disputa de I/O, nao erro de logica.\nSOLUCAO DEFINITIVA: reproduzir com carga controlada (-n auto repetido), identificar o timeout/lock, e tornar o cenario deterministico (injetar relogio/retry explicito com limite documentado no store em vez de depender de tempo real).\nNUNCA MAIS (prevencao estrutural): 10 execucoes consecutivas sob xdist -n auto sem falha e registro do padrao de flake no ledger de aprendizado (python -m core.learning.cli rca).",
+    "problem_statement": "No gate oficial (Desktop test worker, xdist, pre-merge de PR #72) tests/test_runtime_spike_scenarios.py::test_cli_run_verify_and_summarize_native_core falhou uma vez com 'Scenario R12 on native_sqlite: status=fail, error=STORE_UNAVAILABLE' (duracao do teste ~16s sob carga) e passou na reexecucao sem mudancas. Suspeita: timing/lock de SQLite sob paralelismo ou timeout curto no cenario R12 do runtime spike.\n\n[Plano HF-28 | 2026-09-30] Onda 2. Ver docs/STABILITY_PLAN_2026-09-30.md.\nCAUSA RAIZ: hipotese (a confirmar): o cenario R12 do runtime spike abre SQLite nativo e sofre STORE_UNAVAILABLE sob carga (xdist + disco lento do worker Desktop) por timeout/lock curto; a duracao do teste (~16 s) indica disputa de I/O, nao erro de logica.\nSOLUCAO DEFINITIVA: reproduzir com carga controlada (-n auto repetido), identificar o timeout/lock, e tornar o cenario deterministico (injetar relogio/retry explicito com limite documentado no store em vez de depender de tempo real).\nNUNCA MAIS (prevencao estrutural): 10 execucoes consecutivas sob xdist -n auto sem falha e registro do padrao de flake no ledger de aprendizado (python -m core.learning.cli rca).\n\n[Plano HF-28 | lote 3] EVIDENCIAS ADICIONAIS (2026-09-30/10-01): a familia de flakes do runtime spike ocorreu 3 vezes em <24h: (a) run 36784125723 windows main: tests/test_runtime_spike_native.py::test_jsonl_driver_keeps_workflow_threaded_until_shutdown (nenhum evento 'completed' com runtime_status=succeeded: corrida entre o comando 'shutdown' e a conclusao do workflow no driver JSONL); (b) run 36806660881 windows (PR #84): tests/test_runtime_spike_scenarios.py::test_cli_run_verify_and_summarize_native_core R01 native_sqlite STORE_UNAVAILABLE; (c) USR-83 original (R12). Escopo ampliado: TODOS os testes do runtime spike nativo que dependem de ordem/tempo (shutdown x conclusao, abertura do SQLite sob carga) devem ficar deterministicos (sincronizar por evento, nao por tempo).",
     "core_journey": [
       "No gate oficial (Desktop test worker, xdist, pre-merge de PR #72) tests/test_runtime_spike_scenarios.py::test_cli_run_verify_and_summarize_native_core falhou uma vez com 'Scenario R12 on native_sqlite: status=fail, error=STORE_UNAVAILABLE' (duracao do teste ~16s sob carga) e passou na reexecucao sem mudancas. Suspeita: timing/lock de SQLite sob paralelismo ou timeout curto no cenario R12 do runtime spike."
     ],
@@ -2015,7 +2015,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-09-30T20:20:52.619254Z",
-    "updated_at": "2026-09-30T22:00:00Z"
+    "updated_at": "2026-10-01T07:00:00Z"
   },
   {
     "id": "USR-84",
@@ -2062,7 +2062,7 @@
     "project_id": "darkfac",
     "title": "Merge autonomo so com CI verde: o ciclo interno espera os checks, nao mergeia vermelho e abre ticket quando o main fica vermelho",
     "origin": "agent",
-    "status": "planned",
+    "status": "completed",
     "item_type": "quality",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -2073,7 +2073,7 @@
       "ci",
       "autonomy"
     ],
-    "problem_statement": "EVIDENCIA: GitAutonomyManager._deliver executa 'gh pr merge --squash --delete-branch' sem consultar os checks; a branch main nao tem protecao; resultado: dezenas de merges consecutivos com CI vermelho sem que ninguem fosse avisado por 6 dias. Somente a linha (stage_integration, HF-27-06) trata o CI como portao; o ciclo interno (run_ticket/deliver_branch) nunca foi alinhado a ela. O portao local e o CI podem divergir (Linux x Windows) e so o CI e a verdade de main.\n\n[Plano HF-28 | 2026-09-30] Onda 0. so depois do USR-84 (senao nenhum PR fica verde). Ver docs/STABILITY_PLAN_2026-09-30.md.\nCAUSA RAIZ: nenhuma etapa do ciclo autonomo interno considera o CI do GitHub obrigatorio; nao ha deteccao de 'main vermelho' nem alerta.\nSOLUCAO DEFINITIVA: extrair a avaliacao de checks de stage_integration._evaluate_checks para core/git/ci_checks.py (um so codigo, usado pela linha e pelo ciclo interno); _deliver espera checks pendentes (timeout configuravel, padrao 20 min), NAO mergeia se vermelho, baixa o log do job falho e classifica ci_failed | base_red (mesmo job ja vermelho no ultimo run de main); comando 'python -m core.git.autonomy check-main' (chamado pelo pos-deploy e pelo canario) abre ticket de defeito deduplicado por SHA e alerta no Telegram quando main esta vermelho. Sem checks configurados, segue como hoje.\nNUNCA MAIS (prevencao estrutural): teste de contrato: 'gh pr merge' so pode ser invocado via ci_checks.ensure_green(); main vermelho vira ticket automatico em ate 1 ciclo.",
+    "problem_statement": "EVIDENCIA: GitAutonomyManager._deliver executa 'gh pr merge --squash --delete-branch' sem consultar os checks; a branch main nao tem protecao; resultado: dezenas de merges consecutivos com CI vermelho sem que ninguem fosse avisado por 6 dias. Somente a linha (stage_integration, HF-27-06) trata o CI como portao; o ciclo interno (run_ticket/deliver_branch) nunca foi alinhado a ela. O portao local e o CI podem divergir (Linux x Windows) e so o CI e a verdade de main.\n\n[Plano HF-28 | 2026-09-30] Onda 0. so depois do USR-84 (senao nenhum PR fica verde). Ver docs/STABILITY_PLAN_2026-09-30.md.\nCAUSA RAIZ: nenhuma etapa do ciclo autonomo interno considera o CI do GitHub obrigatorio; nao ha deteccao de 'main vermelho' nem alerta.\nSOLUCAO DEFINITIVA: extrair a avaliacao de checks de stage_integration._evaluate_checks para core/git/ci_checks.py (um so codigo, usado pela linha e pelo ciclo interno); _deliver espera checks pendentes (timeout configuravel, padrao 20 min), NAO mergeia se vermelho, baixa o log do job falho e classifica ci_failed | base_red (mesmo job ja vermelho no ultimo run de main); comando 'python -m core.git.autonomy check-main' (chamado pelo pos-deploy e pelo canario) abre ticket de defeito deduplicado por SHA e alerta no Telegram quando main esta vermelho. Sem checks configurados, segue como hoje.\nNUNCA MAIS (prevencao estrutural): teste de contrato: 'gh pr merge' so pode ser invocado via ci_checks.ensure_green(); main vermelho vira ticket automatico em ate 1 ciclo.\n\n[Plano HF-28 | lote 3] ENCERRADO COM EVIDENCIA (2026-09-30): PR #81 (merge 527c7e7). core/git/ci_checks.py (ensure_green, classificacao, base_red) usado por core/git/autonomy._deliver (nunca mergeia com CI vermelho/pendente; PRs so de ledger sao isentos) e por stage_integration; CLI 'python -m core.git.autonomy check-main [--open-ticket] [--notify]'; 44 testes incluindo contrato por AST (unica chamada de 'gh pr merge' fica em _deliver apos ensure_green). PENDENTE (movido para USR-72): chamar check-main no pos-deploy.",
     "core_journey": [],
     "non_goals": [
       "Nao incluir novas features: apenas estabilidade e autonomia (plano HF-28)"
@@ -2096,14 +2096,14 @@
       "USR-84"
     ],
     "created_at": "2026-09-30T22:00:00Z",
-    "updated_at": "2026-09-30T22:00:00Z"
+    "updated_at": "2026-10-01T07:00:00Z"
   },
   {
     "id": "USR-86",
     "project_id": "darkfac",
     "title": "Linha: CI vermelho pre-existente na base nao pode queimar iteracoes do agente (classificar base_red, reesperar e escalar como defeito)",
     "origin": "agent",
-    "status": "planned",
+    "status": "completed",
     "item_type": "quality",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -2114,7 +2114,7 @@
       "line",
       "autonomy"
     ],
-    "problem_statement": "EVIDENCIA: core/line/stage_integration._evaluate_checks devolve 'retry' (o development re-itera) para qualquer check vermelho. Se o mesmo job ja esta vermelho em origin/<default>, nenhuma mudanca do agente resolve: o run gasta ate 14 invocacoes (teto) e termina em falha/HumanRequest. E o caso real do projeto darkfac hoje (USR-84) e vale para qualquer produto de cliente cujo CI ja estava vermelho.\n\n[Plano HF-28 | 2026-09-30] Onda 1. depende do helper USR-85. Ver docs/STABILITY_PLAN_2026-09-30.md.\nCAUSA RAIZ: a etapa nao compara o check vermelho com o estado da base; trata toda falha como culpa do diff.\nSOLUCAO DEFINITIVA: ao encontrar check vermelho consultar a conclusao do mesmo workflow/job no ultimo run do branch default (gh run list --branch <default>); se a base tambem esta vermelha no mesmo check -> base_red: NAO re-iterar o desenvolvimento; retry com not_before (+60 min, ate 6x) enquanto abre o ticket de defeito (projeto darkfac: core.demands; cliente: HumanRequest kind=infra somente apos esgotar as tentativas). Se a base esta verde, mantem o comportamento atual.\nNUNCA MAIS (prevencao estrutural): teste com fake do gh cobrindo base verde (retry com log) e base vermelha (base_red sem consumir iteracao do agente).",
+    "problem_statement": "EVIDENCIA: core/line/stage_integration._evaluate_checks devolve 'retry' (o development re-itera) para qualquer check vermelho. Se o mesmo job ja esta vermelho em origin/<default>, nenhuma mudanca do agente resolve: o run gasta ate 14 invocacoes (teto) e termina em falha/HumanRequest. E o caso real do projeto darkfac hoje (USR-84) e vale para qualquer produto de cliente cujo CI ja estava vermelho.\n\n[Plano HF-28 | 2026-09-30] Onda 1. depende do helper USR-85. Ver docs/STABILITY_PLAN_2026-09-30.md.\nCAUSA RAIZ: a etapa nao compara o check vermelho com o estado da base; trata toda falha como culpa do diff.\nSOLUCAO DEFINITIVA: ao encontrar check vermelho consultar a conclusao do mesmo workflow/job no ultimo run do branch default (gh run list --branch <default>); se a base tambem esta vermelha no mesmo check -> base_red: NAO re-iterar o desenvolvimento; retry com not_before (+60 min, ate 6x) enquanto abre o ticket de defeito (projeto darkfac: core.demands; cliente: HumanRequest kind=infra somente apos esgotar as tentativas). Se a base esta verde, mantem o comportamento atual.\nNUNCA MAIS (prevencao estrutural): teste com fake do gh cobrindo base verde (retry com log) e base vermelha (base_red sem consumir iteracao do agente).\n\n[Plano HF-28 | lote 3] ENCERRADO COM EVIDENCIA (2026-10-01): PR #84 (merge 7bd5896). stage_integration classifica check vermelho que tambem esta vermelho na base como base_red (retry com not_before +60 min, ate 6x, sem chamar o agente nem consumir agent_calls); apos 6: waiting_human + HumanRequest(kind=infra) e, so para o darkfac, ticket de defeito best-effort; successors.py ganhou teto proprio para base_red. 22 testes (tests/line/test_stage_integration_base_red.py). Achados novos registrados em USR-103..106.",
     "core_journey": [],
     "non_goals": [
       "Nao incluir novas features: apenas estabilidade e autonomia (plano HF-28)"
@@ -2135,14 +2135,14 @@
       "USR-85"
     ],
     "created_at": "2026-09-30T22:00:00Z",
-    "updated_at": "2026-09-30T22:00:00Z"
+    "updated_at": "2026-10-01T07:00:00Z"
   },
   {
     "id": "USR-87",
     "project_id": "darkfac",
     "title": "Quota esgotada (no_route_available) nao pode estacionar o run em waiting_human: retry com not_before no proximo reset",
     "origin": "agent",
-    "status": "planned",
+    "status": "completed",
     "item_type": "quality",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -2153,7 +2153,7 @@
       "line",
       "autonomy"
     ],
-    "problem_statement": "EVIDENCIA: core/line/stage_build.py (development) e stage_review.py devolvem outcome='waiting_human' com cause_code='no_route_available' quando nenhuma conta tem cota; nenhum mecanismo acorda esse job (resume_blocked_job so e chamado por resposta humana/probe) e o plano da linha (secao 6 e criterio V3) exige 'espera o reset com wakeup explicito'. Um run fica parado ate alguem intervir, contrariando o objetivo de so pedir entrada humana na demanda inicial e no Grill.\n\n[Plano HF-28 | 2026-09-30] Onda 1. Ver docs/STABILITY_PLAN_2026-09-30.md.\nCAUSA RAIZ: 'sem rota por cota' foi modelado como espera humana, mas e uma condicao temporal (cooldown/reset de cota) que o proprio sistema sabe calcular.\nSOLUCAO DEFINITIVA: core/line/routing.earliest_route_available_at(stage, caps) = min(fim de cooldown, proximo reset de cota conhecido, padrao +60 min); as etapas devolvem retry com cause_code 'no_route_available not_before=<iso>' (mecanismo D-c ja existente em successors); so apos o cap de relogio do run (wall_clock_hours) vira waiting_human com HumanRequest kind=infra (upgrade/billing).\nNUNCA MAIS (prevencao estrutural): teste: nenhuma etapa devolve waiting_human por falta de rota antes do cap de relogio; teste de contrato varre core/line por 'no_route_available' com waiting_human.",
+    "problem_statement": "EVIDENCIA: core/line/stage_build.py (development) e stage_review.py devolvem outcome='waiting_human' com cause_code='no_route_available' quando nenhuma conta tem cota; nenhum mecanismo acorda esse job (resume_blocked_job so e chamado por resposta humana/probe) e o plano da linha (secao 6 e criterio V3) exige 'espera o reset com wakeup explicito'. Um run fica parado ate alguem intervir, contrariando o objetivo de so pedir entrada humana na demanda inicial e no Grill.\n\n[Plano HF-28 | 2026-09-30] Onda 1. Ver docs/STABILITY_PLAN_2026-09-30.md.\nCAUSA RAIZ: 'sem rota por cota' foi modelado como espera humana, mas e uma condicao temporal (cooldown/reset de cota) que o proprio sistema sabe calcular.\nSOLUCAO DEFINITIVA: core/line/routing.earliest_route_available_at(stage, caps) = min(fim de cooldown, proximo reset de cota conhecido, padrao +60 min); as etapas devolvem retry com cause_code 'no_route_available not_before=<iso>' (mecanismo D-c ja existente em successors); so apos o cap de relogio do run (wall_clock_hours) vira waiting_human com HumanRequest kind=infra (upgrade/billing).\nNUNCA MAIS (prevencao estrutural): teste: nenhuma etapa devolve waiting_human por falta de rota antes do cap de relogio; teste de contrato varre core/line por 'no_route_available' com waiting_human.\n\n[Plano HF-28 | lote 3] ENCERRADO COM EVIDENCIA (2026-10-01): PR #84 (merge 7bd5896). routing.earliest_route_available_at + core/line/route_wait.py: development, independent_review, grill e planning devolvem retry 'no_route_available not_before=<iso>' (<= 64 chars) ate o teto de relogio do run e so depois waiting_human + HumanRequest infra; teste de contrato por AST (tests/line/test_no_route_contract.py) impede waiting_human por falta de rota fora do RouteWaiter. Achados novos em USR-105/106.",
     "core_journey": [],
     "non_goals": [
       "Nao incluir novas features: apenas estabilidade e autonomia (plano HF-28)"
@@ -2175,7 +2175,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-09-30T22:00:00Z",
-    "updated_at": "2026-09-30T22:00:00Z"
+    "updated_at": "2026-10-01T07:00:00Z"
   },
   {
     "id": "USR-88",
@@ -2644,7 +2644,7 @@
       "wave-0",
       "defect"
     ],
-    "problem_statement": "EVIDENCIA (2026-09-30): o repositorio GCamposGit/DarkFactory e PUBLICO (gh repo view: visibility PUBLIC). O arquivo .factory/telegram/config.json esta rastreado (adicionado em 0c7514e, commit automatico 'feat(benchmarks): ingest deepseek-v4.1-flash ...', autor DarkFac) e contem bot_token com formato de token real do Telegram (46 caracteres, sem palavras de placeholder), alem de authorized_user_ids/authorized_chat_ids (dados pessoais). Varredura deterministica dos 954 arquivos rastreados (Telegram, Anthropic, OpenAI, GitHub, OpenRouter, xAI, Google, AWS, chaves privadas, URLs Postgres): nenhum outro segredo real; demais ocorrencias sao sentinelas de teste e exemplos com placeholder. Qualquer pessoa pode ler o token do historico publico e controlar o bot (ler mensagens, enviar como o bot, desviar webhooks).\n\n[Plano HF-28 | lote 2] Onda 0 (seguranca). Ver docs/STABILITY_PLAN_2026-09-30.md (Apendice C).\nCAUSA RAIZ: (1) um commit autonomo incluiu um arquivo de configuracao LOCAL da maquina apesar de '.factory/telegram/*.json' estar no .gitignore (added com -f ou antes da regra; o ciclo de commit da fabrica nao verifica conteudo); (2) nao existe varredura de segredos em nenhum portao (testes, CI, commit_ticket); (3) o runtime le o segredo de um arquivo no caminho versionado (core/integrations/telegram.py) em vez de so de variavel de ambiente/arquivo fora da arvore.\nSOLUCAO DEFINITIVA (em ordem; o passo 1 e EXCLUSIVO DO OWNER): (1) OWNER: revogar o token no @BotFather (/mybots > bot > API Token > Revoke current token), colocar o novo token no Dokploy (env do compose darkfac-cloud e Darkhub) e no .factory/telegram/config.json LOCAL de cada no (Notebook, Desktop) - guia passo a passo no Apendice C do plano; (2) AGENTE, somente APOS a rotacao (senao os nos perdem o arquivo no proximo git pull): git rm --cached dos dois arquivos .factory/telegram/*.json, criar config.example.json sem segredos, e fazer o codigo preferir TELEGRAM_*_TOKEN do ambiente e ler o arquivo local so como fallback; caminho do state_dir absoluto via project_root(); (3) AGENTE: tests/test_no_tracked_secrets.py varre 'git ls-files' com os padroes acima (allowlist explicita e justificada para sentinelas de teste e exemplos) e falha o portao; (4) AGENTE: guarda pre-commit em core/git/autonomy.commit_ticket que recusa staged content com esses padroes e recusa 'git add -f' de caminho ignorado; (5) DECISAO DO OWNER (opcional apos a revogacao): reescrever o historico (git filter-repo + force push) para remover o arquivo dos commits publicos - e destrutivo e externo, nao automatico.\nNUNCA MAIS: varredura de segredos no portao oficial e no commit autonomo; arquivos locais de maquina fora de git (example.json versionado).",
+    "problem_statement": "EVIDENCIA (2026-09-30): o repositorio GCamposGit/DarkFactory e PUBLICO (gh repo view: visibility PUBLIC). O arquivo .factory/telegram/config.json esta rastreado (adicionado em 0c7514e, commit automatico 'feat(benchmarks): ingest deepseek-v4.1-flash ...', autor DarkFac) e contem bot_token com formato de token real do Telegram (46 caracteres, sem palavras de placeholder), alem de authorized_user_ids/authorized_chat_ids (dados pessoais). Varredura deterministica dos 954 arquivos rastreados (Telegram, Anthropic, OpenAI, GitHub, OpenRouter, xAI, Google, AWS, chaves privadas, URLs Postgres): nenhum outro segredo real; demais ocorrencias sao sentinelas de teste e exemplos com placeholder. Qualquer pessoa pode ler o token do historico publico e controlar o bot (ler mensagens, enviar como o bot, desviar webhooks).\n\n[Plano HF-28 | lote 2] Onda 0 (seguranca). Ver docs/STABILITY_PLAN_2026-09-30.md (Apendice C).\nCAUSA RAIZ: (1) um commit autonomo incluiu um arquivo de configuracao LOCAL da maquina apesar de '.factory/telegram/*.json' estar no .gitignore (added com -f ou antes da regra; o ciclo de commit da fabrica nao verifica conteudo); (2) nao existe varredura de segredos em nenhum portao (testes, CI, commit_ticket); (3) o runtime le o segredo de um arquivo no caminho versionado (core/integrations/telegram.py) em vez de so de variavel de ambiente/arquivo fora da arvore.\nSOLUCAO DEFINITIVA (em ordem; o passo 1 e EXCLUSIVO DO OWNER): (1) OWNER: revogar o token no @BotFather (/mybots > bot > API Token > Revoke current token), colocar o novo token no Dokploy (env do compose darkfac-cloud e Darkhub) e no .factory/telegram/config.json LOCAL de cada no (Notebook, Desktop) - guia passo a passo no Apendice C do plano; (2) AGENTE, somente APOS a rotacao (senao os nos perdem o arquivo no proximo git pull): git rm --cached dos dois arquivos .factory/telegram/*.json, criar config.example.json sem segredos, e fazer o codigo preferir TELEGRAM_*_TOKEN do ambiente e ler o arquivo local so como fallback; caminho do state_dir absoluto via project_root(); (3) AGENTE: tests/test_no_tracked_secrets.py varre 'git ls-files' com os padroes acima (allowlist explicita e justificada para sentinelas de teste e exemplos) e falha o portao; (4) AGENTE: guarda pre-commit em core/git/autonomy.commit_ticket que recusa staged content com esses padroes e recusa 'git add -f' de caminho ignorado; (5) DECISAO DO OWNER (opcional apos a revogacao): reescrever o historico (git filter-repo + force push) para remover o arquivo dos commits publicos - e destrutivo e externo, nao automatico.\nNUNCA MAIS: varredura de segredos no portao oficial e no commit autonomo; arquivos locais de maquina fora de git (example.json versionado).\n\n[Plano HF-28 | lote 3] PROGRESSO (2026-10-01): PR #82 (42032bf) entregou o gate de segredos (core/git/secret_scan.py + tests/test_no_tracked_secrets.py; valor nunca impresso) e PR #83 (39ba3cf) trocou o token REAL por FAKE nas duas fixtures onde ele tambem estava (core/acceptance/test_data.py e tests/test_hf15_acceptance_environment.py; core/ vai na imagem do deploy). FALTA: (1) OWNER revogar o token (Apendice C do plano) - URGENTE, repo publico; (2) apos a rotacao: git rm --cached dos .json de .factory/telegram, config.example.json, env-first no codigo e remover a entrada temporaria da allowlist; (3) plugar secret_scan.scan_paths no pre-commit de core.git.autonomy.commit_ticket e recusar 'git add -f' de caminho ignorado.",
     "core_journey": [],
     "non_goals": [
       "Nao incluir novas features: apenas estabilidade e autonomia (plano HF-28)"
@@ -2667,7 +2667,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-09-30T23:30:00Z",
-    "updated_at": "2026-09-30T23:30:00Z"
+    "updated_at": "2026-10-01T07:00:00Z"
   },
   {
     "id": "USR-101",
@@ -2721,7 +2721,7 @@
       "wave-2",
       "hygiene"
     ],
-    "problem_statement": "EVIDENCIA (achado do USR-84): 74 arquivos estao no indice do git E casam com o .gitignore: 71 em .factory/reports/ (inclui .factory/reports/20260905_project_review) e 2 em .factory/telegram/ (ver USR-100). Git mostra 'modificado' nesses arquivos mas nao mostra arquivos NOVOS no mesmo diretorio, entao uma escrita de teste pode sujar (ou nao) a arvore conforme o caso. Alem disso core/integrations/telegram.py usa state_dir or Path('.factory/telegram') relativo ao cwd.\n\n[Plano HF-28 | lote 2] Onda 2. Ver docs/STABILITY_PLAN_2026-09-30.md.\nCAUSA RAIZ: arquivos de evidencia foram versionados depois (ou com -f) sem reconciliar com o .gitignore; defaults de pasta relativos ao cwd.\nSOLUCAO DEFINITIVA: decidir por grupo (evidencia versionavel -> remover o diretorio do .gitignore; gerado/local -> git rm --cached) e zerar o conjunto 'rastreado e ignorado'; teste tests/test_gitignore_consistency.py falha se 'git ls-files -ci --exclude-standard' nao for vazio (allowlist encolhendo, sem novas entradas); defaults de pasta de estado via project_root()/state_root() (USR-88).",
+    "problem_statement": "EVIDENCIA (achado do USR-84): 74 arquivos estao no indice do git E casam com o .gitignore: 71 em .factory/reports/ (inclui .factory/reports/20260905_project_review) e 2 em .factory/telegram/ (ver USR-100). Git mostra 'modificado' nesses arquivos mas nao mostra arquivos NOVOS no mesmo diretorio, entao uma escrita de teste pode sujar (ou nao) a arvore conforme o caso. Alem disso core/integrations/telegram.py usa state_dir or Path('.factory/telegram') relativo ao cwd.\n\n[Plano HF-28 | lote 2] Onda 2. Ver docs/STABILITY_PLAN_2026-09-30.md.\nCAUSA RAIZ: arquivos de evidencia foram versionados depois (ou com -f) sem reconciliar com o .gitignore; defaults de pasta relativos ao cwd.\nSOLUCAO DEFINITIVA: decidir por grupo (evidencia versionavel -> remover o diretorio do .gitignore; gerado/local -> git rm --cached) e zerar o conjunto 'rastreado e ignorado'; teste tests/test_gitignore_consistency.py falha se 'git ls-files -ci --exclude-standard' nao for vazio (allowlist encolhendo, sem novas entradas); defaults de pasta de estado via project_root()/state_root() (USR-88).\n\n[Plano HF-28 | lote 3] PROGRESSO (2026-10-01): PR #82 entregou tests/test_gitignore_consistency.py + tests/data/tracked_ignored_allowlist.txt (74 caminhos atuais: 72 em .factory/reports/** e 2 em .factory/telegram/; a lista so pode encolher). FALTA: decidir por grupo (desversionar ou tirar do .gitignore) e zerar a allowlist.",
     "core_journey": [],
     "non_goals": [
       "Nao incluir novas features: apenas estabilidade e autonomia (plano HF-28)"
@@ -2742,6 +2742,161 @@
       "USR-100"
     ],
     "created_at": "2026-09-30T23:30:00Z",
-    "updated_at": "2026-09-30T23:30:00Z"
+    "updated_at": "2026-10-01T07:00:00Z"
+  },
+  {
+    "id": "USR-103",
+    "project_id": "darkfac",
+    "title": "Linha: check de CI vermelho do PR (base verde) nao volta ao desenvolvimento: 30 re-polls do mesmo CI e failed(loop_cap), sem o agente ver o log",
+    "origin": "agent",
+    "status": "planned",
+    "item_type": "quality",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand",
+      "stability",
+      "wave-1",
+      "line",
+      "autonomy"
+    ],
+    "problem_statement": "EVIDENCIA (achado do review do USR-86, 2026-10-01): stage_integration._evaluate_checks devolve retry com cause_code 'ci_check_failed:<nome>\\n<log>'; como nao comeca com 'retry:development', successors._parse_retry_cause_code trata como retry do MESMO estagio (integration) sem not_before: ate 30 re-polls imediatos do mesmo CI vermelho e failed(loop_cap). O agente nunca ve o log (DevelopmentStage._pending_fixup so le review_state.json/validation.json). O docstring do estagio promete 'retry para o development'. Este e o ciclo PIV central: quando a mudanca do agente quebra o CI, a fabrica deveria corrigir sozinha.\n\n[Plano HF-28 | lote 3] Onda 1. Ver docs/STABILITY_PLAN_2026-09-30.md.\nCAUSA RAIZ: o contrato de retry entre integration e development (cause_code 'retry:development') nao foi implementado para falha de CI; o log nao tem canal ate o desenvolvimento.\nSOLUCAO DEFINITIVA: falha de CI com base verde escreve o log condensado no contexto do run (.darkfac/runs/<run>/ci-<n>.log.md) e devolve 'retry:development'; DevelopmentStage._pending_fixup passa a incluir o ultimo log de CI no prompt da proxima iteracao; contagem por MAX_STAGE_ITERATIONS e teto de iteracoes de CI por run.\nNUNCA MAIS (prevencao estrutural): teste E2E com fakes: PR com check vermelho -> desenvolvimento recebe o log -> novo commit -> integracao verde; nenhum caminho de falha de CI faz re-poll imediato do mesmo estagio.",
+    "core_journey": [],
+    "non_goals": [
+      "Nao incluir novas features: apenas estabilidade e autonomia (plano HF-28)"
+    ],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Check vermelho com base verde devolve 'retry:development' com o log condensado acessivel ao agente",
+      "Teste E2E com fakes cobrindo vermelho -> correcao -> verde e o teto de iteracoes de CI",
+      "Nenhum re-poll imediato do mesmo CI vermelho (teste)"
+    ],
+    "suggested_files": [
+      "core/line/stage_integration.py",
+      "core/line/stage_build.py",
+      "core/workflow/successors.py",
+      "tests/line/test_stage_integration.py"
+    ],
+    "estimated_complexity": "medium",
+    "dependencies": [
+      "USR-86"
+    ],
+    "created_at": "2026-10-01T07:00:00Z",
+    "updated_at": "2026-10-01T07:00:00Z"
+  },
+  {
+    "id": "USR-104",
+    "project_id": "darkfac",
+    "title": "Linha: _evaluate_checks trata 'sem checks' como verde sem janela de graca: apos o push do rebase pode mergear sem CI verificado",
+    "origin": "agent",
+    "status": "planned",
+    "item_type": "quality",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand",
+      "stability",
+      "wave-1",
+      "line",
+      "ci"
+    ],
+    "problem_statement": "EVIDENCIA (achado do review do USR-86): stage_integration._evaluate_checks retorna None (prossegue ao merge) quando 'gh pr checks' ainda nao lista checks; core/git/ci_checks.ensure_green tem janela de graca para esse caso, a linha nao. Logo apos 'push --force-with-lease' do rebase o GitHub ainda nao registrou os checks do novo head e a integracao pode mesclar sem CI.\n\n[Plano HF-28 | lote 3] Onda 1. Ver docs/STABILITY_PLAN_2026-09-30.md.\nCAUSA RAIZ: duas implementacoes da mesma regra de CI (linha x ciclo interno): o helper compartilhado cobre a graca, a linha ainda usa o caminho antigo.\nSOLUCAO DEFINITIVA: stage_integration usa core.git.ci_checks (graca configuravel, checks do head exato) em vez de decidir sozinha; sem checks so apos a graca E se o repo realmente nao tem workflow de CI.\nNUNCA MAIS (prevencao estrutural): teste de contrato: nenhum modulo fora de ci_checks decide 'verde' a partir de 'gh pr checks'.",
+    "core_journey": [],
+    "non_goals": [
+      "Nao incluir novas features: apenas estabilidade e autonomia (plano HF-28)"
+    ],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "stage_integration so prossegue ao merge com checks do head exato verdes ou apos a janela de graca sem workflow configurado",
+      "Teste: push do rebase seguido de lista de checks vazia nao mergeia imediatamente"
+    ],
+    "suggested_files": [
+      "core/line/stage_integration.py",
+      "core/git/ci_checks.py",
+      "tests/line/test_stage_integration.py"
+    ],
+    "estimated_complexity": "small",
+    "dependencies": [
+      "USR-103"
+    ],
+    "created_at": "2026-10-01T07:00:00Z",
+    "updated_at": "2026-10-01T07:00:00Z"
+  },
+  {
+    "id": "USR-105",
+    "project_id": "darkfac",
+    "title": "Nenhum agendador retoma waiting_human que nao e Grill (infra, base_red esgotado, secret): a promessa 'a fabrica retoma sozinha' nao se cumpre",
+    "origin": "agent",
+    "status": "planned",
+    "item_type": "quality",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand",
+      "stability",
+      "wave-1",
+      "line",
+      "autonomy"
+    ],
+    "problem_statement": "EVIDENCIA (achado do review do USR-86/87): so o canario e callbacks do Telegram chamam resume_blocked_job; core/line/human.py tem probe_and_resume/probe_cmd (ex.: 'python -m core.git.autonomy check-main'), mas nenhum varredor periodico os executa. Os guias de HumanRequest(kind=infra) criados por USR-86 (base_red esgotado) e USR-87 (apos o teto de relogio) prometem retomada automatica e o job so volta por resume manual.\n\n[Plano HF-28 | lote 3] Onda 1. Ver docs/STABILITY_PLAN_2026-09-30.md.\nCAUSA RAIZ: probe_and_resume foi entregue como funcao e ninguem a agenda.\nSOLUCAO DEFINITIVA: varredor no cloud_worker (intervalo configuravel, padrao 10 min) que lista HumanRequests abertos de kind != grill/commercial_acceptance, executa o probe deterministico de cada um (timeout curto, sem segredos no log) e chama resume_blocked_job quando verde; idempotente e protegido por lease.\nNUNCA MAIS (prevencao estrutural): teste: HumanRequest infra com probe verde e retomado sem acao humana; probe vermelho nao retoma; varredor nunca bloqueia o loop do worker.",
+    "core_journey": [],
+    "non_goals": [
+      "Nao incluir novas features: apenas estabilidade e autonomia (plano HF-28)"
+    ],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Varredor no cloud_worker executa probe_and_resume para requests nao-Grill",
+      "Testes com fakes: probe verde retoma, vermelho nao, falha do probe nao derruba o worker"
+    ],
+    "suggested_files": [
+      "core/orchestrator/cloud_worker.py",
+      "core/line/human.py",
+      "tests/test_cloud_worker_active_loop.py"
+    ],
+    "estimated_complexity": "medium",
+    "dependencies": [
+      "USR-86",
+      "USR-87"
+    ],
+    "created_at": "2026-10-01T07:00:00Z",
+    "updated_at": "2026-10-01T07:00:00Z"
+  },
+  {
+    "id": "USR-106",
+    "project_id": "darkfac",
+    "title": "Falta de harness/rota no cloud_worker e na resolucao de conflito vira failed(loop_cap) ou 30 retries quentes: usar o RouteWaiter",
+    "origin": "agent",
+    "status": "planned",
+    "item_type": "quality",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand",
+      "stability",
+      "wave-1",
+      "line",
+      "autonomy"
+    ],
+    "problem_statement": "EVIDENCIA (achados do review do USR-87): (1) core/orchestrator/cloud_worker.dispatch_claimed_job (~730-745): worker sem nenhum 'harness:*' adia com 'no_authenticated_harness not_before=+10min' limitado pelo relogio do run, que em successors vira failed(loop_cap) TERMINAL (nem espera nem waiting_human); (2) stage_integration._resolve_conflict sem rota devolve AgentResult(not_installed) -> 'retry merge_conflict_resolution_failed (not_installed)' simples e imediato (sem not_before): ate 30 iteracoes quentes.\n\n[Plano HF-28 | lote 3] Onda 1. Ver docs/STABILITY_PLAN_2026-09-30.md.\nCAUSA RAIZ: so development/review/grill/planning foram migrados para o RouteWaiter (USR-87); os outros dois pontos de 'sem rota' ficaram com o comportamento antigo.\nSOLUCAO DEFINITIVA: ambos passam a usar core.line.route_wait.RouteWaiter (retry com not_before ate o teto de relogio, depois waiting_human infra).\nNUNCA MAIS (prevencao estrutural): o teste de contrato por AST (tests/line/test_no_route_contract.py) cobre tambem cloud_worker.py e stage_integration.py.",
+    "core_journey": [],
+    "non_goals": [
+      "Nao incluir novas features: apenas estabilidade e autonomia (plano HF-28)"
+    ],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "cloud_worker e _resolve_conflict usam RouteWaiter; nenhum retry quente por falta de rota",
+      "Teste de contrato estendido a cloud_worker.py e stage_integration.py"
+    ],
+    "suggested_files": [
+      "core/orchestrator/cloud_worker.py",
+      "core/line/stage_integration.py",
+      "tests/line/test_no_route_contract.py"
+    ],
+    "estimated_complexity": "small",
+    "dependencies": [
+      "USR-87"
+    ],
+    "created_at": "2026-10-01T07:00:00Z",
+    "updated_at": "2026-10-01T07:00:00Z"
   }
 ]
