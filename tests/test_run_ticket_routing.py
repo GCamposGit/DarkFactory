@@ -155,7 +155,7 @@ def test_the_recommendation_for_a_blocked_critical_harness_is_also_write_capable
 # --------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("harness", ["antigravity", "Antigravity", "grok", "openrouter", "mystery"])
+@pytest.mark.parametrize("harness", ["antigravity", "Antigravity", "openrouter", "mystery"])
 def test_an_explicit_harness_without_write_fails_early_with_exit_2_and_consumes_nothing(
     harness: str, env: dict[str, Any], monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -180,7 +180,7 @@ def test_antigravity_is_rejected_even_with_an_explicit_quota_override(
     assert "não suporta o modo 'write'" in capsys.readouterr().err  # --force overrides quota, never capability
 
 
-@pytest.mark.parametrize("harness", ["claude", "codex"])
+@pytest.mark.parametrize("harness", ["claude", "codex", "grok"])  # grok declares write since USR-109
 def test_a_write_capable_explicit_harness_is_accepted(
     harness: str, env: dict[str, Any], capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -464,3 +464,79 @@ def test_ok_agent_with_implementation_reaches_normal_completion(
     assert payload["ok"] is True and payload["agent_summary"] == "Implemented feature.py [REDACTED]"
     assert (real_workspace.path / "feature.py").is_file()
     assert DemandsStore(real_workspace.path / ".factory" / "demands" / "demands.json").get_ticket(_TICKET.id).status == DeliveryStatus.COMPLETED
+
+
+# --------------------------------------------------------------------------
+# USR-109: the harness the owner operates through is reported and preferred
+# --------------------------------------------------------------------------
+
+
+def _real_router_with(monkeypatch: pytest.MonkeyPatch, **by_provider: float) -> None:
+    monkeypatch.setattr(routing, "_default_quota_headroom", lambda provider: by_provider.get(provider, 50.0))
+
+
+def test_dry_run_json_reports_the_operating_harness_and_why_it_was_elected(
+    env: dict[str, Any], monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _real_router_with(monkeypatch, anthropic=90.0, openai=40.0)
+    monkeypatch.setenv("DARKFAC_OPERATING_HARNESS", "codex")
+
+    assert main(["USR-99", "--dry-run", "--json"]) == 0
+
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["selected_harness"] == "codex"  # claude has more headroom, codex is the one in use
+    assert payload["operating_harness"] == "codex" and payload["route_reason"] == "operating_harness_preferred"
+
+
+def test_dry_run_without_any_signal_reports_no_operating_harness_and_the_headroom_reason(
+    env: dict[str, Any], monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _real_router_with(monkeypatch, anthropic=90.0, openai=40.0)
+
+    assert main(["USR-99", "--dry-run", "--json"]) == 0
+
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["selected_harness"] == "claude"
+    assert payload["operating_harness"] is None and payload["route_reason"] == "headroom"
+
+
+def test_dry_run_shows_the_detected_harness_and_the_preference_in_the_selection_line(
+    env: dict[str, Any], monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _real_router_with(monkeypatch, anthropic=90.0, openai=40.0)
+    monkeypatch.setenv("DARKFAC_OPERATING_HARNESS", "codex")
+
+    assert main(["USR-99", "--dry-run"]) == 0
+
+    out = capsys.readouterr().out
+    assert "[+] Harness de operacao detectado: codex" in out
+    assert "CODEX (Modelo: default, modo: write) (preferencia: harness de operacao)" in out
+
+
+def test_a_critical_operating_harness_is_reported_but_not_preferred(
+    env: dict[str, Any], monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _real_router_with(monkeypatch, anthropic=70.0, openai=10.0)  # codex is under the 15% floor
+    monkeypatch.setenv("DARKFAC_OPERATING_HARNESS", "codex")
+
+    assert main(["USR-99", "--dry-run"]) == 0
+    out = capsys.readouterr().out
+    assert "[+] Harness de operacao detectado: codex" in out
+    assert "CLAUDE" in out and "preferencia" not in out
+
+    assert main(["USR-99", "--dry-run", "--json"]) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["selected_harness"] == "claude" and payload["route_reason"] == "headroom"
+    assert payload["operating_harness"] == "codex"
+
+
+def test_an_explicit_harness_is_reported_as_the_reason_and_the_operating_harness_stays_visible(
+    env: dict[str, Any], monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setenv("DARKFAC_OPERATING_HARNESS", "claude")
+
+    assert main(["USR-99", "--harness", "codex", "--dry-run", "--json"]) == 0
+
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["selected_harness"] == "codex"
+    assert payload["operating_harness"] == "claude" and payload["route_reason"] == "explicit_harness"

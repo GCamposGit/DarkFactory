@@ -24,7 +24,7 @@ Esta skill governa o ciclo de vida ponta a ponta de desenvolvimento de tickets n
    - O agente deve:
      a) Recusar a implementação local no chat;
      b) Informar a cota atual e que ela está abaixo do limiar de segurança ($15\%$);
-     c) Orientar o usuário a migrar para o harness saudável eleito com capacidade de escrita (Claude ou Codex) ou invocar o launcher headless `python run_ticket.py <TICKET_ID>`.
+     c) Orientar o usuário a migrar para o harness saudável eleito com capacidade de escrita (Claude, Codex ou Grok Build) ou invocar o launcher headless `python C:\dev\DarkFac\run_ticket.py <TICKET_ID>`.
 
 3. **Exceção de Override Explícito pelo Usuário**:
    - **A implementação em um harness com cota $\le 15.0\%$ SÓ É PERMITIDA se o usuário exigir explicitamente no prompt** (ex.: *"forçar execução neste harness"*, *"ignorar limite de cota"*, *"estou ciente da cota crítica, prossiga"* ou via flag `--force` / `--allow-critical-quota`).
@@ -52,7 +52,7 @@ flowchart TD
 
 1. **Preflight e Erupção de Telemetria**:
    O script `run_ticket.py` ou a linha autônoma inspeciona os 4 provedores em tempo real (`.factory/usage/providers/`).
-   - O roteador só elege harnesses que declaram o modo exigido pelo estágio (`core.line.agent_cli.HARNESS_CAPABILITIES`): o desenvolvimento exige `write`, que só Claude e Codex implementam. Grok e Antigravity são somente leitura (grill/planning/review) e nunca são eleitos para `development`; se Claude e Codex estiverem $\le 15\%$, não há rota (fail-closed), mesmo com o Antigravity saudável.
+   - O roteador só elege harnesses que declaram o modo exigido pelo estágio (`core.line.agent_cli.HARNESS_CAPABILITIES`): o desenvolvimento exige `write`, que Claude, Codex e Grok Build (USR-109) implementam. O Antigravity é somente leitura (grill/planning/review) e nunca é eleito para `development`, mesmo saudável; se nenhum harness com `write` estiver acima de $15\%$, não há rota (fail-closed).
    - Se todas as contas de assinatura estiverem $\le 15\%$, o fallback é acionado para o OpenRouter (DeepSeek V4.1 Flash) apenas em estágios de leitura (ele não escreve no worktree), desde que haja saldo em dólar confirmado (`available_credit_usd > 0`).
 
 2. **Execução Headless ou Assistida**:
@@ -66,6 +66,19 @@ flowchart TD
    python core/harness/runner.py --quick
    ```
    Nenhum ticket é considerado concluído sem o marcador `[HARNESS_PASS]`.
+
+---
+
+## 2b. Harness de Operação como Desenvolvedor Principal (USR-109)
+
+Regra do owner: se o usuário opera a fábrica por um harness específico, esse harness é o desenvolvedor principal do estágio `development` sempre que sua cota estiver acima do piso crítico de $15\%$.
+
+1. **Harness de operação** (`core/line/operating_harness.py`), por ordem de precedência: parâmetro explícito `pick(operating_harness=...)` (ou `run_ticket --harness`), variável `DARKFAC_OPERATING_HARNESS` (`claude|codex|grok|antigravity`), autodetecção pelas variáveis de ambiente do harness pai, nenhum. Sinais ambíguos (mais de um harness) valem como nenhum: o roteador nunca chuta. Pump, worker e nuvem não têm harness de operação e seguem exatamente o Dynamic Headroom.
+2. **Passo de preferência** (só estágio `development`): depois dos filtros de sempre (`host_caps`, modo `write` declarado, modelo proibido, `exclude`, cooldown, cota desconhecida, cota $\le 15\%$), se o harness de operação sobreviveu ele é **eleito**, vencendo o maior headroom e a preferência por faixa de complexidade. O harness de operação entra como candidato extra mesmo fora da cascata, mas nunca participa do ranking por headroom: só é eleito por este passo.
+3. **Se não sobreviveu** (crítico, cooldown, cota desconhecida, sem `write`), vale a regra de sempre. O piso de $15\%$ nunca é relaxado pela preferência.
+4. **Prioridade, não trava**: se o harness de operação entrar em rate limit no meio do ticket, o retry o exclui e o roteador volta ao maior headroom.
+5. **Revisão** continua em `other_family_than_development`: o revisor nunca é da mesma família do implementador (inclui Grok e Antigravity).
+6. Subagentes mais simples e execução de testes no desktop continuam livres: a preferência decide só quem escreve o código do ticket.
 
 ---
 

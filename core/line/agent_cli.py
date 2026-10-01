@@ -78,13 +78,14 @@ AgentMode = Literal["write", "read"]
 # implements a mode that lets the agent edit files under `req.cwd`.
 # - claude: `--permission-mode bypassPermissions` (see `build_claude_argv`).
 # - codex: `--sandbox workspace-write` or the documented bypass (`build_codex_argv`).
-# - grok / antigravity: only one-shot print/conversation calls that return text;
-#   neither has a reliable headless write mode on this host.
+# - grok: `--permission-mode auto` plus `--prompt-file`/`--cwd` (see `build_grok_write_argv`).
+# - antigravity: only one-shot conversation calls that return text; it has no reliable headless
+#   write mode on this host.
 # - openrouter: a plain chat-completion gateway, it cannot touch the filesystem.
 HARNESS_CAPABILITIES: dict[str, frozenset[str]] = {
     "claude": frozenset({"read", "write"}),
     "codex": frozenset({"read", "write"}),
-    "grok": frozenset({"read"}),
+    "grok": frozenset({"read", "write"}),
     "antigravity": frozenset({"read"}),
     "openrouter": frozenset({"read"}),
 }
@@ -397,6 +398,60 @@ def build_codex_argv(executable: str, req: AgentRequest, tmp_out: Path) -> list[
     return argv
 
 
+GROK_PERMISSION_ENV = "DARKFAC_GROK_PERMISSION_MODE"
+_GROK_PERMISSION_MODES = ("default", "acceptEdits", "auto", "dontAsk", "bypassPermissions", "plan")
+_GROK_PERMISSION_BY_LOWER = {mode.lower(): mode for mode in _GROK_PERMISSION_MODES}
+GROK_DEFAULT_PERMISSION_MODE = "auto"
+
+
+def grok_permission_mode() -> str:
+    """`DARKFAC_GROK_PERMISSION_MODE` for Grok *write* runs: one of the six `--permission-mode` values.
+
+    Default `auto`, the least-privileged mode that works headless (Grok Build 1.0.46, measured on this
+    Windows host in throwaway git repos with `--max-turns` capped; the headless prompt never has a human
+    to approve a tool call, so anything that would ask is auto-cancelled):
+    - `acceptEdits`: FAILS. The very first edit is cancelled (`stopReason: "cancelled"`, exit 0, no file).
+    - `dontAsk`: FAILS the same way. `default` was not run: it asks for every edit, so it cannot work headless.
+    - `auto`: WORKS. Created files, edited several files, ran `python -m pytest` and `git`/`pip --dry-run`
+      shell commands; nothing legitimate was blocked. A call its safety classifier refuses is reported
+      to the model instead of aborting the run.
+    - `bypassPermissions` (= `--always-approve`): WORKS, it is Grok's documented mode for CI/agents.
+    Set `bypassPermissions` here if `auto` ever blocks a routine command; the OS sandbox (`--sandbox`)
+    is Landlock/Seatbelt only, so it does not exist on Windows. Case-insensitive; an invalid value logs a
+    WARNING and falls back to the default. Read mode never uses this setting.
+    """
+    raw = os.environ.get(GROK_PERMISSION_ENV, "").strip()
+    if not raw:
+        return GROK_DEFAULT_PERMISSION_MODE
+    mode = _GROK_PERMISSION_BY_LOWER.get(raw.lower())
+    if mode is None:
+        logger.warning(
+            "Invalid %s=%r (valid: %s); using %r",
+            GROK_PERMISSION_ENV, raw, ", ".join(_GROK_PERMISSION_MODES), GROK_DEFAULT_PERMISSION_MODE,
+        )
+        return GROK_DEFAULT_PERMISSION_MODE
+    return mode
+
+
+def build_grok_write_argv(executable: str, req: AgentRequest, prompt_file: Path) -> list[str]:
+    """Build the Grok Build argv for write mode (verified against grok 1.0.46 `--help`).
+
+    The prompt goes through `--prompt-file` (never on the command line: Windows caps it at ~32k
+    characters and a long ticket prompt would also show up in process listings), the working directory
+    is passed both as `--cwd` and as the subprocess cwd, and `--output-format json` yields one JSON
+    object with the final text, `usage` and `total_cost_usd` (see `_run_grok_write`).
+    """
+    argv = [
+        executable, "--prompt-file", str(prompt_file), "--cwd", str(req.cwd),
+        "--output-format", "json", "--permission-mode", grok_permission_mode(),
+    ]
+    if req.model:
+        argv += ["-m", req.model]
+    if req.max_turns:
+        argv += ["--max-turns", str(req.max_turns)]
+    return argv
+
+
 def _win_kwargs() -> dict[str, Any]:
     kwargs: dict[str, Any] = {}
     if sys.platform == "win32":
@@ -584,14 +639,126 @@ def _run_codex(req: AgentRequest) -> AgentResult:
     )
 
 
+def _parse_json_object(stdout: str) -> Optional[dict[str, Any]]:
+    """The whole stdout as a JSON object, or None when it is empty, not JSON or not an object."""
+    if not stdout:
+        return None
+    try:
+        candidate = json.loads(stdout)
+    except json.JSONDecodeError:
+        return None
+    return candidate if isinstance(candidate, dict) else None
+
+
+def _run_grok_write(req: AgentRequest, executable: str) -> AgentResult:
+    """Grok Build in write mode: headless `--prompt-file` run with cwd = `req.cwd`.
+
+    `--output-format json` prints one object: `{"text", "stopReason", "sessionId", "requestId",
+    "usage": {input_tokens, output_tokens, ...}, "num_turns", "total_cost_usd", "modelUsage"}`; a failed
+    run prints `{"type": "error", "message": ...}` and exits non-zero. A call that needs approval the
+    headless run cannot give ends with `stopReason: "cancelled"` and exit 0, which is reported as a crash
+    (never as a silent success) with the permission mode in the message.
+    """
+    tmp_dir = REPO_ROOT / ".factory" / "tmp"
+    prompt_file = tmp_dir / f"grok_line_{uuid.uuid4().hex[:8]}.prompt.txt"
+    start = time.perf_counter()
+    try:
+        try:
+            tmp_dir.mkdir(parents=True, exist_ok=True)
+            prompt_file.write_text(req.prompt, encoding="utf-8")
+        except OSError as exc:
+            return AgentResult(
+                ok=False, text=redact_secrets(f"could not write the Grok prompt file: {exc}"),
+                harness="grok", model=req.model,
+                duration_s=round(time.perf_counter() - start, 3), error_kind="crash",
+            )
+        argv = build_grok_write_argv(executable, req, prompt_file)
+        try:
+            proc = subprocess.run(
+                argv,
+                stdin=subprocess.DEVNULL,
+                capture_output=True,
+                text=True,
+                cwd=str(req.cwd),
+                timeout=req.timeout_s,
+                encoding="utf-8",
+                errors="replace",
+                **_win_kwargs(),
+            )
+        except subprocess.TimeoutExpired as exc:
+            partial = redact_secrets(f"{_partial_output(exc.stdout)}\n{_partial_output(exc.stderr)}".strip())
+            return AgentResult(
+                ok=False, text=f"timed out after {req.timeout_s}s" + (f": {partial}" if partial else ""),
+                harness="grok", model=req.model,
+                duration_s=round(time.perf_counter() - start, 3), error_kind="timeout",
+                stderr_tail=_stderr_tail(exc.stderr),
+            )
+        except OSError as exc:
+            return AgentResult(
+                ok=False, text=redact_secrets(str(exc)), harness="grok", model=req.model,
+                duration_s=round(time.perf_counter() - start, 3), error_kind="crash",
+            )
+    finally:
+        try:
+            prompt_file.unlink(missing_ok=True)
+        except OSError:
+            pass
+
+    duration = round(time.perf_counter() - start, 3)
+    stdout = (proc.stdout or "").strip()
+    stderr = proc.stderr or ""
+    diag: dict[str, Any] = {"exit_code": proc.returncode, "stderr_tail": _stderr_tail(stderr)}
+
+    parsed = _parse_json_object(stdout)
+    usage: Optional[dict[str, Any]] = None
+    cost_usd: Optional[float] = None
+    stop_reason: Optional[str] = None
+    is_error = False
+    if parsed is None:
+        result_text = stdout
+        error_text = stdout  # unstructured output: it may be the only place the failure is described
+    else:
+        is_error = parsed.get("type") == "error"
+        result_text = str(parsed.get("message" if is_error else "text") or "")
+        error_text = result_text if is_error else ""  # never classify the agent's own prose
+        if isinstance(parsed.get("usage"), dict):
+            usage = parsed["usage"]
+        cost_raw = parsed.get("total_cost_usd")
+        cost_usd = float(cost_raw) if isinstance(cost_raw, (int, float)) and not isinstance(cost_raw, bool) else None
+        stop_reason = parsed.get("stopReason") if isinstance(parsed.get("stopReason"), str) else None
+
+    if proc.returncode != 0 or is_error:
+        combined = f"{error_text}\n{stderr}"
+        return AgentResult(
+            ok=False, text=redact_secrets(result_text or stderr.strip()), harness="grok", model=req.model,
+            duration_s=duration, usage=usage, cost_usd=cost_usd,
+            error_kind=_classify_error(combined), reset_at=_extract_reset_at(combined), **diag,
+        )
+    if stop_reason == "cancelled":
+        detail = (
+            f"Grok stopped with stopReason=cancelled (permission mode '{grok_permission_mode()}'): "
+            "a tool call that needs approval is cancelled in headless runs."
+        )
+        return AgentResult(
+            ok=False, text=redact_secrets(f"{detail} {result_text}".strip()), harness="grok", model=req.model,
+            duration_s=duration, usage=usage, cost_usd=cost_usd, error_kind="crash", **diag,
+        )
+    return AgentResult(
+        ok=True, text=redact_secrets(result_text), harness="grok", model=req.model,
+        duration_s=duration, usage=usage, cost_usd=cost_usd, **diag,
+    )
+
+
 def _run_grok(req: AgentRequest) -> AgentResult:
-    # Read-only: `run_agent` refuses `write` via HARNESS_CAPABILITIES before reaching this runner.
     executable = find_grok_binary()
     if not executable:
         return AgentResult(
             ok=False, text="Grok executable not found on PATH or known install locations.",
             harness="grok", model=req.model, duration_s=0.0, error_kind="not_installed",
         )
+    if req.mode == "write":
+        return _run_grok_write(req, executable)
+    # Read mode: one-shot `-p` call that returns plain text (unchanged since HF-27-03).
     argv = [executable, "-p", req.prompt, "--output-format", "plain"]
     if req.model:
         argv += ["-m", req.model]
