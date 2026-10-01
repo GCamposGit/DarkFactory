@@ -259,7 +259,7 @@ def main() -> int:
             updated = service.update_ticket_status(args.ticket_id, new_stat, notes=args.notes)
             print(f"[OK] Ticket {updated.id} atualizado para status: {updated.status.value}")
             return 0
-        except KeyError as exc:
+        except (KeyError, ValueError) as exc:  # ValueError: completed without delivery_evidence (USR-94)
             print(f"[ERRO] {exc}", file=sys.stderr)
             return 1
 

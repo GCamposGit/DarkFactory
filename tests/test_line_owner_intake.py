@@ -400,6 +400,33 @@ def test_failed_run_is_retried_as_a_new_attempt(store, demands) -> None:
     assert fourth.attempt == 3 and _external_ids(store)[-1] == "ticket:USR-62:a3"
 
 
+def test_failed_run_with_leftover_retry_rows_is_retried_not_replayed(store, demands) -> None:
+    # Production run-f0c98a90cf0f: old independent_review iterations kept status `retry` after
+    # development failed; the run must count as failed, not in flight.
+    _ticket(demands)
+    first = owner_intake.submit_ticket_to_line("USR-62", demands_store=demands, store=store)
+    _set_run_jobs(
+        store,
+        first.run_id,
+        {"grill": "succeeded", "independent_review": "retry", "planning": "replan", "development": "failed"},
+    )
+
+    second = owner_intake.submit_ticket_to_line("USR-62", demands_store=demands, store=store)
+
+    assert second.ok and not second.replayed and second.attempt == 2
+    assert _external_ids(store) == ["ticket:USR-62", "ticket:USR-62:a2"]
+
+
+def test_run_parked_on_the_owner_is_still_in_flight(store, demands) -> None:
+    _ticket(demands)
+    first = owner_intake.submit_ticket_to_line("USR-62", demands_store=demands, store=store)
+    _set_run_jobs(store, first.run_id, {"grill": "waiting_human"})
+
+    again = owner_intake.submit_ticket_to_line("USR-62", demands_store=demands, store=store)
+
+    assert again.replayed and again.run_id == first.run_id and again.state == "in_flight"
+
+
 def test_delivered_ticket_is_reported_as_delivered_not_resubmitted(store, demands) -> None:
     _ticket(demands)
     first = owner_intake.submit_ticket_to_line("USR-62", demands_store=demands, store=store)

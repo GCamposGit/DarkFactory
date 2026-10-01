@@ -241,6 +241,9 @@ def run_state(store: Any, run_id: str | None) -> RunState:
     `succeeded`: every required line stage has a succeeded job; `in_flight`: anything is still
     pending/running/waiting (or the state cannot be read: never duplicate a run we cannot see
     the end of); `failed`: nothing is in flight and the run did not deliver.
+
+    `retry`/`replan` rows are history, not work: the successor is written as a new row and the
+    old one keeps that status forever, so they never make a run look alive.
     """
     getter = getattr(store, "get_run_status", None)
     if not run_id or getter is None:
@@ -259,7 +262,9 @@ def run_state(store: Any, run_id: str | None) -> RunState:
     succeeded = {job.get("stage") for job in jobs if job.get("status") == "succeeded"}
     if all(stage in succeeded for stage in required):
         return "succeeded"
-    if any(job.get("status") not in ("succeeded", "failed", "cancelled") for job in jobs):
+    from core.workflow.control_store import RUN_OPEN_JOB_STATUSES
+
+    if any(job.get("status") in RUN_OPEN_JOB_STATUSES for job in jobs):
         return "in_flight"
     return "failed"
 
