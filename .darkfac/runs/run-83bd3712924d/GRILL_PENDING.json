@@ -1,0 +1,77 @@
+{
+  "assumptions": [
+    "O DarkHub é uma aplicação web com front-end já existente e o menu superior atual é composto por links de navegação.",
+    "A mudança é puramente de apresentação/UI, sem alterar modelos de dados ou lógica de negócio.",
+    "O CI do darkfac precisa estar verde (USR-84/85/86) antes de submeter esta demanda à linha, conforme nota do plano HF-28.",
+    "O teste headless será executado via `python -m pytest tests/test_transformar_menu_superior_em_m.py -v` e deve passar sem erros sintáticos ou de tipos.",
+    "Não há premissas anteriores registradas no projeto para esta demanda."
+  ],
+  "technical": [
+    {
+      "id": "q2",
+      "text": "A sidebar deve ser fixa (sempre visível) ou colapsável/recolhível em telas menores?",
+      "kind": "technical",
+      "options": [
+        "Fixa em desktop, colapsável em mobile",
+        "Sempre fixa em todos os tamanhos",
+        "Sempre colapsável com botão de toggle"
+      ],
+      "recommended": "Fixa em desktop, colapsável em mobile",
+      "why": "Mantém usabilidade em telas pequenas sem introduzir complexidade desnecessária; alinhado ao escopo de não adicionar dependências pesadas."
+    },
+    {
+      "id": "q3",
+      "text": "Qual o comportamento esperado do estado ativo/seleção do item de menu na sidebar (ex.: destacar rota atual)?",
+      "kind": "technical",
+      "options": [
+        "Destacar item correspondente à rota atual",
+        "Sem destaque, apenas links",
+        "Destacar com ícone + cor de fundo"
+      ],
+      "recommended": "Destacar item correspondente à rota atual",
+      "why": "Feedback visual de navegação é esperado em menus laterais e não requer lógica de negócio acoplada à apresentação."
+    },
+    {
+      "id": "q4",
+      "text": "O teste headless `tests/test_transformar_menu_superior_em_m.py` já existe no repositório ou precisa ser criado junto com a mudança?",
+      "kind": "technical",
+      "options": [
+        "Já existe e deve passar",
+        "Precisa ser criado nesta demanda",
+        "Não sei, verificar no repo"
+      ],
+      "recommended": "Precisa ser criado nesta demanda",
+      "why": "O critério de aceite cita o arquivo explicitamente, mas o nome sugere geração automática pela fábrica; se não existir, criar um teste mínimo que valide a presença/estrutura do menu lateral."
+    },
+    {
+      "id": "q5",
+      "text": "Há alguma restrição de stack/UI (framework, biblioteca de componentes) que deva ser respeitada para a sidebar?",
+      "kind": "technical",
+      "options": [
+        "Usar apenas o que já está no projeto (sem novas deps)",
+        "Permitir biblioteca leve de UI se necessário",
+        "Não sei, seguir o padrão existente"
+      ],
+      "recommended": "Usar apenas o que já está no projeto (sem novas deps)",
+      "why": "O fora de escopo proíbe dependências externas pesadas; reutilizar o stack atual reduz risco e mantém o CI verde."
+    }
+  ],
+  "questions": [
+    {
+      "id": "q1",
+      "text": "O menu vertical lateral esquerdo deve substituir completamente o menu superior ou coexistir com ele (ex.: topbar com logo/busca + sidebar de navegação)?",
+      "kind": "intent",
+      "options": [
+        "Substituir totalmente o menu superior por uma sidebar esquerda",
+        "Manter topbar enxuta (logo/busca) e mover apenas os links de navegação para a sidebar",
+        "Não sei / decidir pelo mais simples"
+      ],
+      "recommended": "Manter topbar enxuta (logo/busca) e mover apenas os links de navegação para a sidebar",
+      "why": "O problema relatado é o menu 'indo muito para a direita'; mover só a navegação resolve sem perder identidade visual e busca, e é o padrão comum em dashboards."
+    }
+  ],
+  "deadline": "2026-10-01T23:23:14.909874Z",
+  "answers": {},
+  "notified": false,
+  "auto_resolved": []
+}
