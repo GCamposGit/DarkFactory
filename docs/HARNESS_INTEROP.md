@@ -150,6 +150,16 @@ pontual sem tocar nas flags de ambiente.
   worktrees daquela máquina — é exatamente o ponto: dois worktrees do mesmo
   repositório na mesma máquina disputam o mesmo lock.
 
+## Gates de higiene do repositório (USR-100 / USR-102)
+
+Dois testes do portão protegem o repositório **público** de vazamentos silenciosos. Usam só `git ls-files` (sem rede) e valem igual no Windows e no CI Linux.
+
+- `tests/test_no_tracked_secrets.py` varre o conteúdo de todo arquivo rastreado com os detectores de `core/git/secret_scan.py` (token de bot do Telegram, chaves Anthropic/OpenAI/OpenRouter/xAI/Google/AWS, tokens do GitHub, chave privada PEM, URL postgres com senha). A falha lista só `caminho:linha [padrão] abc***`: **o valor do segredo nunca é impresso**, logado nem guardado.
+- Para tolerar uma sentinela de teste, acrescente uma `AllowlistEntry(path, patterns, reason)` em `ALLOWLIST` (`core/git/secret_scan.py`) com o motivo; prefira reescrever a fixture para que ela não pareça uma credencial. Entrada obsoleta (arquivo limpo ou desversionado) também falha; as entradas temporárias do USR-100 (`ticket="USR-100"`) somem junto com o desversionamento de `.factory/telegram/config.json`, que só ocorre depois que o owner rotaciona o token.
+- `tests/test_gitignore_consistency.py` falha se `git ls-files -ci --exclude-standard` listar caminho fora de `tests/data/tracked_ignored_allowlist.txt` (rastreado e ignorado é versionado em silêncio). Corrija com `git rm --cached -- <caminho>` ou ajustando o `.gitignore`.
+- Essa allowlist só pode **encolher**: linha cujo caminho deixou de ser rastreado-e-ignorado falha até ser removida, e caminho novo nunca entra nela para "fazer passar". Um grupo é identificado pelo comentário do ticket (`[USR-102]` reports, `[USR-100]` telegram).
+- Os testes de mutação usam repositórios git temporários (`tmp_path`) e não alteram o checkout (guarda de higiene da árvore).
+
 ## Worker primário de testes (Desktop)
 
 HF-27-11: além do lock/cache/single-flight acima (que coordenam execuções
