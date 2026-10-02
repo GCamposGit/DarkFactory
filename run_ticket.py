@@ -49,6 +49,7 @@ from core.line.diagnostics import redacted_head
 from core.line.operating_harness import detect_operating_harness
 from core.line.routing import _HARNESS_TO_PROVIDER, _default_quota_headroom, load_routing_config, pick
 from core.usage.history import history_path, read_history
+from core.usage.ticket_cost import format_ticket_quota_summary, record_ticket_quota_cost
 from core.roadmap.models import DeliveryStatus
 
 if TYPE_CHECKING:
@@ -58,6 +59,36 @@ logger = logging.getLogger("darkfac.run_ticket")
 
 # The launcher asks the agent to edit files in the checkout, so the route must declare `write`.
 DEVELOPMENT_MODE = "write"
+
+
+def estimate_ticket_size(ticket: UserTicket) -> tuple[str, list[str]]:
+    """Classify ticket as 'small', 'medium', or 'large' based on complexity, criteria, and text volume (USR-113)."""
+    reasons: list[str] = []
+    complexity = (ticket.estimated_complexity or "").lower().strip()
+    if complexity in ("large", "huge", "xl"):
+        reasons.append(f"complexidade estimada declarada como '{complexity}'")
+
+    criteria_count = len(ticket.acceptance_criteria)
+    if criteria_count >= 5:
+        reasons.append(f"elevado número de critérios de aceite ({criteria_count} critérios >= 5)")
+
+    problem_len = len(ticket.problem_statement or "")
+    if problem_len >= 1000:
+        reasons.append(f"descrição do problema extensa ({problem_len} caracteres >= 1000)")
+
+    total_text = problem_len + sum(len(c) for c in ticket.acceptance_criteria)
+    if total_text >= 1500 and not reasons:
+        reasons.append(f"volume textual total extenso ({total_text} caracteres >= 1500)")
+
+    for tag in ticket.tags:
+        clean = tag.lower().strip()
+        if clean in ("epic", "size:large", "complex"):
+            reasons.append(f"tag de escopo amplo '{clean}'")
+
+    if reasons:
+        return "large", reasons
+    return complexity or "medium", []
+
 
 _OVERRIDE_PATTERNS = [
     re.compile(r"\b(?:forcar|forçar|force)\b", re.IGNORECASE),
@@ -377,6 +408,20 @@ def main(argv: Optional[list[str]] = None) -> int:
             print("\nNenhum ticket especificado. Use: python run_ticket.py <TICKET_ID> ou python run_ticket.py --create --title '...'")
         return 0
 
+    # 1b. Ticket size and quota risk estimation (USR-113)
+    ticket_size, size_reasons = estimate_ticket_size(ticket)
+    if ticket_size == "large" and not args.json:
+        box_lines = [
+            "=" * 68,
+            " [AVISO: TICKET ESTIMADO COMO GRANDE - RISCO DE COTA (USR-113)]",
+            f" Ticket {ticket.id} possui características de alta complexidade/tamanho:",
+            *[f"   - {r}" for r in size_reasons],
+            " Risco: pode estourar o timeout do agente (1800s) e consumir cota elevada.",
+            " Recomendação: considere quebrar este ticket em demandas menores.",
+            "=" * 68,
+        ]
+        print("\n" + "\n".join(box_lines) + "\n", file=sys.stderr)
+
     # 2. Routing Decision
     caps = ["harness:claude", "harness:codex", "harness:grok", "harness:antigravity"]
     selected_harness: Optional[str] = None
@@ -438,6 +483,8 @@ def main(argv: Optional[list[str]] = None) -> int:
         result_payload = {
             "ticket_id": ticket.id,
             "title": ticket.title,
+            "estimated_size": ticket_size,
+            "size_reasons": size_reasons,
             "selected_harness": selected_harness,
             "selected_model": selected_model,
             "mode": DEVELOPMENT_MODE,
@@ -488,11 +535,31 @@ def main(argv: Optional[list[str]] = None) -> int:
     if not args.json:
         print(f"\n--> Iniciando desenvolvimento via {selected_harness.upper()}...")
 
+    before_headroom = quotas.get(selected_harness, {}).get("headroom")
+
     def _build_request(harness: str, model: Optional[str]) -> AgentRequest:
+        from core.git.autonomy import GitAutonomyManager
+        git_mgr = GitAutonomyManager(PROJECT_ROOT)
+        existing_changes = [
+            p for p in git_mgr.changed_paths(workspace.path) if p != LEDGER_RELATIVE
+        ]
+        continuation_prompt = ""
+        if existing_changes:
+            changed_preview = ", ".join(existing_changes[:8])
+            if len(existing_changes) > 8:
+                changed_preview += f" (+{len(existing_changes) - 8} arquivos)"
+            continuation_prompt = (
+                f"\n\n[AVISO DE CONTINUAÇÃO - WORKTREE JÁ INICIADA (USR-113)]\n"
+                f"Uma tentativa anterior foi interrompida (ex.: tempo limite atingido), mas o trabalho já iniciado foi PRESERVADO nesta worktree.\n"
+                f"Arquivos já criados ou alterados: {changed_preview}.\n"
+                f"NÃO recomece a implementação do zero nem descarte o que foi feito. Inspecione o estado atual dos arquivos na worktree, "
+                f"continue o desenvolvimento a partir de onde parou, ajuste os testes unitários e garanta que todos os critérios de aceite passem.\n"
+            )
+
         return AgentRequest(
             prompt=headless_development_preamble(
                 harness, quotas.get(harness, {}).get("headroom")
-            ) + dev_prompt,
+            ) + dev_prompt + continuation_prompt,
             cwd=workspace.path, mode=DEVELOPMENT_MODE, harness=harness, model=model, timeout_s=1800,
         )
 
@@ -519,11 +586,24 @@ def main(argv: Optional[list[str]] = None) -> int:
     if not report.ok or report.result is None:
         failure = format_agent_failure(report)
         print(failure, file=sys.stderr)
+        quotas_after = inspect_quotas()
+        after_headroom = quotas_after.get(selected_harness, {}).get("headroom")
+        cost_record = record_ticket_quota_cost(
+            ticket_id=ticket.id,
+            harness=selected_harness,
+            before_headroom=before_headroom,
+            after_headroom=after_headroom,
+            duration_s=report.total_duration_s,
+        )
+        if not args.json:
+            print(f"\n{format_ticket_quota_summary(cost_record)}", file=sys.stderr)
         _report_workspace_fate(workspace, args.json)
         if args.json:
             print(json.dumps({
                 "ok": False,
                 "ticket_id": ticket.id,
+                "estimated_size": ticket_size,
+                "quota_usage": cost_record,
                 "attempts": [a.model_dump() for a in report.attempts],
             }, indent=2, ensure_ascii=False))
         return 1
@@ -531,6 +611,18 @@ def main(argv: Optional[list[str]] = None) -> int:
     agent_result = report.result
     if report.route is not None:
         selected_harness, selected_model = report.route  # the harness that actually did the work
+
+    quotas_after = inspect_quotas()
+    after_headroom = quotas_after.get(selected_harness, {}).get("headroom")
+    cost_record = record_ticket_quota_cost(
+        ticket_id=ticket.id,
+        harness=selected_harness,
+        before_headroom=before_headroom,
+        after_headroom=after_headroom,
+        duration_s=report.total_duration_s,
+    )
+    if not args.json:
+        print(f"\n{format_ticket_quota_summary(cost_record)}")
 
     from core.git.autonomy import GitAutonomyManager
 
@@ -550,6 +642,8 @@ def main(argv: Optional[list[str]] = None) -> int:
         if args.json:
             print(json.dumps({
                 "ok": False, "cause": "agent_no_changes", "ticket_id": ticket.id,
+                "estimated_size": ticket_size,
+                "quota_usage": cost_record,
                 "workspace": str(workspace.path), "branch": workspace.branch,
                 "agent_tail": agent_tail,
             }, indent=2, ensure_ascii=False))
@@ -621,6 +715,8 @@ def main(argv: Optional[list[str]] = None) -> int:
         payload = {
             "ok": delivered,
             "ticket_id": ticket.id,
+            "estimated_size": ticket_size,
+            "quota_usage": cost_record,
             "harness": selected_harness,
             "model": selected_model,
             "duration_s": agent_result.duration_s,
