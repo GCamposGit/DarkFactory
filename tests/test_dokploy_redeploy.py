@@ -1259,3 +1259,31 @@ def test_darkhub_divergent_health_times_out_and_fails(observed_sha: Optional[str
     assert code == mod.EXIT_DEPLOY_FAILED
     assert len(probes) >= 2
     assert "VPS: divergent" in err.getvalue()
+
+
+def test_main_node_sync_transient_failure_converges_with_exit_0(monkeypatch: pytest.MonkeyPatch) -> None:
+    """AC 4: dokploy_redeploy.py sai com codigo 0 quando nos convergem apos retries transitorios."""
+    from core.infra import node_sync
+
+    transport = _cloud_transport()
+    # Fake node_sync.sync that simulates transient Desktop probe recovery
+    probes = 0
+
+    def fake_sync(**kwargs: Any) -> node_sync.SyncReport:
+        nonlocal probes
+        probes += 1
+        return node_sync.SyncReport(
+            expected_sha="a" * 40,
+            nodes=[
+                node_sync.NodeStatus(name="Notebook", state="converged", git_sha="a" * 40),
+                node_sync.NodeStatus(name="Desktop", state="converged", git_sha="a" * 40),
+                node_sync.NodeStatus(name="VPS", state="converged", git_sha="a" * 40),
+            ],
+        )
+
+    monkeypatch.setattr(node_sync, "sync", fake_sync)
+    code, out, err = _run_main(["--only", "darkfac-cloud", "--skip-backup"], transport, monkeypatch, None)
+    assert code == mod.EXIT_OK, err
+    assert probes == 1
+    assert "Desktop: offline" not in err
+

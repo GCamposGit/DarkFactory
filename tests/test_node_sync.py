@@ -45,10 +45,32 @@ class FakeGit:
         raise AssertionError(args)
 
 
+class VirtualClock:
+    def __init__(self, start: float = 0.0) -> None:
+        self.now = start
+
+    def clock(self) -> float:
+        return self.now
+
+    def sleep(self, seconds: float) -> None:
+        self.now += max(0.0, seconds)
+
+
 class FakeHttp:
-    def __init__(self, *, desktop: str = SHA, returns: bool = True) -> None:
+    def __init__(
+        self,
+        *,
+        desktop: str = SHA,
+        returns: bool = True,
+        busy: bool = False,
+        active_runs: int = 0,
+        transient_failures: int = 0,
+    ) -> None:
         self.desktop = desktop
         self.returns = returns
+        self.busy = busy
+        self.active_runs = active_runs
+        self.transient_failures = transient_failures
         self.vps_sha: str | None | bool = None
         self.calls: list[tuple[str, str]] = []
 
@@ -58,7 +80,15 @@ class FakeHttp:
             if method == "GET":
                 if not self.returns:
                     raise OSError("offline")
-                return {"git_sha": self.desktop, "restart_safe": True}
+                if self.transient_failures > 0:
+                    self.transient_failures -= 1
+                    raise OSError("transient connection error")
+                return {
+                    "git_sha": self.desktop,
+                    "restart_safe": True,
+                    "busy": self.busy,
+                    "active_runs": self.active_runs,
+                }
             if url.endswith("/system/update"):
                 self.desktop = SHA
                 return {"success": True, "current_commit": SHA}
@@ -76,7 +106,8 @@ def test_all_nodes_converged() -> None:
 
 def test_desktop_update_and_restart_converges() -> None:
     http = FakeHttp(desktop=OLD)
-    report = mod.sync(root=Path("."), git=FakeGit(), http=http)
+    vclock = VirtualClock()
+    report = mod.sync(root=Path("."), git=FakeGit(), http=http, clock=vclock.clock, sleep=vclock.sleep)
     assert report.ok
     assert ("POST", f"{mod.DESKTOP_URL}/system/update") in http.calls
     assert ("POST", f"{mod.DESKTOP_URL}/system/restart") in http.calls
@@ -90,7 +121,8 @@ def test_desktop_without_restart_safe_is_not_touched() -> None:
             return super().__call__(method, url, payload, token)
 
     http = LegacyDesktop(desktop=OLD)
-    report = mod.sync(root=Path("."), git=FakeGit(), http=http)
+    vclock = VirtualClock()
+    report = mod.sync(root=Path("."), git=FakeGit(), http=http, clock=vclock.clock, sleep=vclock.sleep)
     assert report.nodes[1].state == "divergent"
     assert report.nodes[1].reason  # legacy worker is reported with a reason, never silently skipped
     assert not any(method == "POST" and ":8080" in url for method, url in http.calls)
@@ -104,8 +136,8 @@ def test_desktop_offline_after_restart_fails() -> None:
             return super().__call__(method, url, payload, token)
 
     http = LostDesktop(desktop=OLD)
-    ticks = iter((0.0, 0.0, 1.0, 2.0, 3.0))
-    report = mod.sync(root=Path("."), git=FakeGit(), http=http, timeout=2, interval=1, clock=lambda: next(ticks))
+    vclock = VirtualClock()
+    report = mod.sync(root=Path("."), git=FakeGit(), http=http, timeout=2, interval=1, clock=vclock.clock, sleep=vclock.sleep)
     assert not report.ok
     assert report.nodes[1].state == "offline"
 
@@ -250,6 +282,126 @@ def test_desktop_with_git_sha_but_no_restart_safe_flag_is_updated() -> None:
             return result
 
     http = PreFlagDesktop(desktop=OLD)
-    report = mod.sync(root=Path("."), git=FakeGit(), http=http)
+    vclock = VirtualClock()
+    report = mod.sync(root=Path("."), git=FakeGit(), http=http, clock=vclock.clock, sleep=vclock.sleep)
     assert ("POST", f"{mod.DESKTOP_URL}/system/restart") in http.calls
     assert report.nodes[1].state == "converged"
+
+
+def test_probe_retries_transient_failure_and_converges() -> None:
+    """AC 1: A sonda de cada no (Desktop e VPS) repete ate 3 vezes com backoff curto antes de devolver 'offline'."""
+    http = FakeHttp(transient_failures=1)
+    report = mod.verify(root=Path("."), git=FakeGit(), http=http, retries=3, retry_delay=0.01)
+    assert report.nodes[1].state == "converged"
+
+    class TransientVps(FakeHttp):
+        def __init__(self) -> None:
+            super().__init__()
+            self.vps_fails = 1
+
+        def __call__(self, method: str, url: str, payload: dict[str, Any] | None, token: str | None) -> dict[str, Any]:
+            if "darkhub" in url:
+                if self.vps_fails > 0:
+                    self.vps_fails -= 1
+                    raise OSError("vps transient failure")
+                return {"git_sha": SHA}
+            return super().__call__(method, url, payload, token)
+
+    report_vps = mod.verify(root=Path("."), git=FakeGit(), http=TransientVps(), retries=3, retry_delay=0.01)
+    assert report_vps.nodes[2].state == "converged"
+
+
+def test_probe_all_retries_fail_marks_offline_with_attempt_count() -> None:
+    """AC 4: Mensagem final distingue 'offline apos N tentativas' de 'divergente'."""
+    http = FakeHttp(returns=False)
+    report = mod.verify(root=Path("."), git=FakeGit(), http=http, retries=3, retry_delay=0.01)
+    desktop = report.nodes[1]
+    assert desktop.state == "offline"
+    assert "offline apos 3 tentativas" in (desktop.reason or "")
+
+
+def test_sync_no_update_or_restart_when_desktop_is_offline() -> None:
+    """AC 2: Nenhum POST /system/update ou /system/restart e enviado quando a sonda inicial nao observou um SHA divergente."""
+    http = FakeHttp(returns=False)
+    vclock = VirtualClock()
+    report = mod.sync(
+        root=Path("."), git=FakeGit(), http=http,
+        clock=vclock.clock, sleep=vclock.sleep, retries=3, retry_delay=0.01,
+    )
+    assert not report.ok
+    assert report.nodes[1].state == "offline"
+    assert not any(method == "POST" and ":8080" in url for method, url in http.calls)
+
+
+@pytest.mark.parametrize("busy, active_runs", [(True, 0), (False, 2)])
+def test_sync_no_restart_when_desktop_is_busy(busy: bool, active_runs: int) -> None:
+    """AC 3: Nenhum /system/restart e enviado quando /health informa busy=true ou active_runs>0; motivo no relatorio."""
+    http = FakeHttp(desktop=OLD, busy=busy, active_runs=active_runs)
+    vclock = VirtualClock()
+    report = mod.sync(
+        root=Path("."), git=FakeGit(), http=http,
+        clock=vclock.clock, sleep=vclock.sleep, retries=3, retry_delay=0.01,
+    )
+    assert not report.ok
+    assert report.nodes[1].state == "divergent"
+    assert "busy" in (report.nodes[1].reason or "").lower()
+    assert not any(method == "POST" and ":8080" in url for method, url in http.calls)
+
+
+def test_sync_waits_for_desktop_spontaneous_convergence_without_post() -> None:
+    """AC 6: Desktop offline na primeira sonda: esperar ate 120 s pela convergencia antes de declarar estado e antes de qualquer POST."""
+    class DelayedConvergedHttp(FakeHttp):
+        def __init__(self, offline_calls: int = 5) -> None:
+            super().__init__()
+            self.offline_remaining = offline_calls
+
+        def __call__(self, method: str, url: str, payload: dict[str, Any] | None, token: str | None) -> dict[str, Any]:
+            self.calls.append((method, url))
+            if "Desktop" in url or ":8080" in url:
+                if method == "GET":
+                    if self.offline_remaining > 0:
+                        self.offline_remaining -= 1
+                        raise OSError("worker rebooting")
+                    return {"git_sha": SHA, "restart_safe": True}
+            return super().__call__(method, url, payload, token)
+
+    http = DelayedConvergedHttp(offline_calls=5)
+    vclock = VirtualClock()
+    report = mod.sync(
+        root=Path("."), git=FakeGit(), http=http,
+        timeout=120, interval=2, clock=vclock.clock, sleep=vclock.sleep,
+        retries=3, retry_delay=0.01,
+    )
+    assert report.ok
+    assert report.nodes[1].state == "converged"
+    assert not any(method == "POST" and ":8080" in url for method, url in http.calls)
+
+
+def test_sync_waits_for_divergent_desktop_spontaneous_convergence_without_post() -> None:
+    """AC 6: Desktop com SHA diferente na primeira sonda: esperar ate 120 s pela convergencia antes de qualquer POST."""
+    class DelayedDivergentToConvergedHttp(FakeHttp):
+        def __init__(self, divergent_calls: int = 3) -> None:
+            super().__init__(desktop=OLD)
+            self.divergent_remaining = divergent_calls
+
+        def __call__(self, method: str, url: str, payload: dict[str, Any] | None, token: str | None) -> dict[str, Any]:
+            self.calls.append((method, url))
+            if "Desktop" in url or ":8080" in url:
+                if method == "GET":
+                    if self.divergent_remaining > 0:
+                        self.divergent_remaining -= 1
+                        return {"git_sha": OLD, "restart_safe": True}
+                    return {"git_sha": SHA, "restart_safe": True}
+            return super().__call__(method, url, payload, token)
+
+    http = DelayedDivergentToConvergedHttp(divergent_calls=3)
+    vclock = VirtualClock()
+    report = mod.sync(
+        root=Path("."), git=FakeGit(), http=http,
+        timeout=120, interval=2, clock=vclock.clock, sleep=vclock.sleep,
+        retries=3, retry_delay=0.01,
+    )
+    assert report.ok
+    assert report.nodes[1].state == "converged"
+    assert not any(method == "POST" and ":8080" in url for method, url in http.calls)
+

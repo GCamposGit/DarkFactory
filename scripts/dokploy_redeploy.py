@@ -851,6 +851,8 @@ def main(
             "vps_url": env.get("DARKFAC_VPS_HEALTH_URL") or node_sync.VPS_URL,
             "token": env.get("DARKFAC_WORKER_TOKEN"),
             "vps_redeploy": lambda: True,  # VPS was just deployed above; never redeploy again from here
+            "clock": clock_fn,
+            "sleep": sleep_fn,
         }
         sync_report = node_sync.sync(**sync_kwargs)
         for node in sync_report.nodes:
