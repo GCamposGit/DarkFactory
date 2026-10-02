@@ -30,6 +30,8 @@ class NodeStatus(BaseModel):
     git_sha: str | None = None
     last_contact: datetime | None = None
     reason: str | None = None
+    busy: bool | None = None
+    active_runs: int | None = None
 
 
 class SyncReport(BaseModel):
@@ -90,23 +92,51 @@ def _sha(value: Any) -> str | None:
     return candidate if SHA_PATTERN.fullmatch(candidate) else None
 
 
-def _probe(name: str, url: str, expected: str, http: HttpClient, *, unknown_without_sha: bool = False) -> NodeStatus:
-    try:
-        data = http("GET", url, None, None)
-    except Exception:
-        return NodeStatus(name=name, state="offline", reason="health endpoint unavailable; last contact unknown")
+def _probe(
+    name: str,
+    url: str,
+    expected: str,
+    http: HttpClient,
+    *,
+    unknown_without_sha: bool = False,
+    retries: int = 3,
+    retry_delay: float = 0.5,
+    sleep: Callable[[float], None] = time.sleep,
+) -> NodeStatus:
+    data: dict[str, Any] | None = None
+    for attempt in range(1, max(1, retries) + 1):
+        try:
+            data = http("GET", url, None, None)
+            break
+        except Exception:
+            if attempt < retries:
+                sleep(retry_delay * attempt)
+    if data is None:
+        return NodeStatus(
+            name=name,
+            state="offline",
+            reason=f"health endpoint unavailable (offline apos {retries} tentativas); last contact unknown",
+        )
     observed = _sha(data.get("git_sha"))
     now = datetime.now(timezone.utc)
+    busy = bool(data.get("busy")) if "busy" in data else None
+    active_runs = int(data.get("active_runs")) if "active_runs" in data and data.get("active_runs") is not None else None
     if observed is None:
         if unknown_without_sha:
             return NodeStatus(
                 name=name, state="unknown", last_contact=now,
                 reason="health reports no git_sha (DARKFAC_GIT_SHA not provided at deploy); cannot verify",
+                busy=busy, active_runs=active_runs,
             )
-        return NodeStatus(name=name, state="divergent", last_contact=now, reason="health response has no full git_sha")
+        return NodeStatus(
+            name=name, state="divergent", last_contact=now,
+            reason="health response has no full git_sha",
+            busy=busy, active_runs=active_runs,
+        )
     return NodeStatus(
         name=name, state="converged" if observed == expected else "divergent",
         git_sha=observed, last_contact=now,
+        busy=busy, active_runs=active_runs,
     )
 
 
@@ -126,6 +156,8 @@ def verify(
     *, root: Path = MAIN_CHECKOUT, git: GitRunner = run_git,
     http: HttpClient = request_json, desktop_url: str = DESKTOP_URL,
     vps_url: str = VPS_URL,
+    retries: int = 3, retry_delay: float = 0.5,
+    sleep: Callable[[float], None] = time.sleep,
 ) -> SyncReport:
     try:
         expected = _sha(git(root, ["rev-parse", "origin/main"]))
@@ -142,8 +174,14 @@ def verify(
         notebook = NodeStatus(name="Notebook", state="unknown", reason="checkout unavailable")
     return SyncReport(expected_sha=expected, nodes=[
         notebook,
-        _probe("Desktop", f"{desktop_url.rstrip('/')}/health", expected, http),
-        _probe("VPS", vps_url, expected, http, unknown_without_sha=True),
+        _probe(
+            "Desktop", f"{desktop_url.rstrip('/')}/health", expected, http,
+            retries=retries, retry_delay=retry_delay, sleep=sleep,
+        ),
+        _probe(
+            "VPS", vps_url, expected, http, unknown_without_sha=True,
+            retries=retries, retry_delay=retry_delay, sleep=sleep,
+        ),
     ])
 
 
@@ -155,8 +193,12 @@ def sync(
     clock: Callable[[], float] = time.monotonic,
     sleep: Callable[[float], None] = time.sleep,
     vps_redeploy: VpsRedeploy = redeploy_vps,
+    retries: int = 3, retry_delay: float = 0.5,
 ) -> SyncReport:
-    initial = verify(root=root, git=git, http=http, desktop_url=desktop_url, vps_url=vps_url)
+    initial = verify(
+        root=root, git=git, http=http, desktop_url=desktop_url, vps_url=vps_url,
+        retries=retries, retry_delay=retry_delay, sleep=sleep,
+    )
     expected = initial.expected_sha
     if expected is None:
         return initial
@@ -177,35 +219,70 @@ def sync(
         except Exception as exc:
             notebook.reason = str(exc)
     desktop = initial.nodes[1]
+    observed_divergent_sha = desktop.git_sha if desktop.state == "divergent" else None
     if desktop.state != "converged":
-        try:
-            health = http("GET", f"{desktop_url.rstrip('/')}/health", None, None)
-            # `git_sha` in /health exists only from USR-65, which is after the USR-64 restart fix,
-            # so a worker exposing it restarts itself safely even if it predates `restart_safe`.
-            if health.get("restart_safe") is not True and _sha(health.get("git_sha")) is None:
-                raise RuntimeError("Desktop /health does not advertise restart_safe=true; update and restart skipped")
-            response = http("POST", f"{desktop_url.rstrip('/')}/system/update", {}, token)
-            if response.get("success") is not True or _sha(response.get("current_commit")) != expected:
-                raise RuntimeError("Desktop update did not reach expected SHA")
-            http("POST", f"{desktop_url.rstrip('/')}/system/restart", {}, token)
-            deadline = clock() + timeout
-            while clock() < deadline:
-                probe = _probe("Desktop", f"{desktop_url.rstrip('/')}/health", expected, http)
-                if probe.state == "converged":
-                    break
-                sleep(min(interval, max(0, deadline - clock())))
-        except Exception as exc:
-            desktop.reason = str(exc)
+        deadline = clock() + timeout
+        while desktop.state != "converged" and clock() < deadline:
+            sleep(min(interval, max(0.0, deadline - clock())))
+            desktop = _probe(
+                "Desktop", f"{desktop_url.rstrip('/')}/health", expected, http,
+                retries=retries, retry_delay=retry_delay, sleep=sleep,
+            )
+            if desktop.state == "divergent":
+                observed_divergent_sha = desktop.git_sha
+
+    if desktop.state != "converged":
+        if observed_divergent_sha is None:
+            # Nunca observou SHA divergente (nó permaneceu offline após retries e polling);
+            # não dispara update nem restart para nó inacessível (USR-117)
+            initial.nodes[1] = desktop
+        else:
+            try:
+                health = http("GET", f"{desktop_url.rstrip('/')}/health", None, None)
+                is_busy = bool(health.get("busy")) or int(health.get("active_runs") or 0) > 0
+                if is_busy:
+                    desktop.reason = "Desktop is busy (busy=True or active_runs > 0); update and restart skipped"
+                    initial.nodes[1] = desktop
+                else:
+                    # `git_sha` in /health exists only from USR-65, which is after the USR-64 restart fix,
+                    # so a worker exposing it restarts itself safely even if it predates `restart_safe`.
+                    if health.get("restart_safe") is not True and _sha(health.get("git_sha")) is None:
+                        raise RuntimeError("Desktop /health does not advertise restart_safe=true; update and restart skipped")
+                    response = http("POST", f"{desktop_url.rstrip('/')}/system/update", {}, token)
+                    if response.get("success") is not True or _sha(response.get("current_commit")) != expected:
+                        raise RuntimeError("Desktop update did not reach expected SHA")
+                    http("POST", f"{desktop_url.rstrip('/')}/system/restart", {}, token)
+                    restart_deadline = clock() + timeout
+                    while clock() < restart_deadline:
+                        probe = _probe(
+                            "Desktop", f"{desktop_url.rstrip('/')}/health", expected, http,
+                            retries=retries, retry_delay=retry_delay, sleep=sleep,
+                        )
+                        if probe.state == "converged":
+                            desktop = probe
+                            break
+                        sleep(min(interval, max(0.0, restart_deadline - clock())))
+                    initial.nodes[1] = desktop
+            except Exception as exc:
+                desktop.reason = str(exc)
+                initial.nodes[1] = desktop
+    else:
+        initial.nodes[1] = desktop
+
     if initial.nodes[2].state in ("divergent", "offline"):
         try:
             if not vps_redeploy():
                 initial.nodes[2].reason = "Dokploy redeploy failed"
         except Exception as exc:
             initial.nodes[2].reason = f"Dokploy redeploy failed: {type(exc).__name__}"
-    final = verify(root=root, git=git, http=http, desktop_url=desktop_url, vps_url=vps_url)
+    final = verify(
+        root=root, git=git, http=http, desktop_url=desktop_url, vps_url=vps_url,
+        retries=retries, retry_delay=retry_delay, sleep=sleep,
+    )
     for old, new in zip(initial.nodes, final.nodes):
-        if new.state != "converged" and old.reason and not new.reason:
-            new.reason = old.reason
+        if new.state != "converged":
+            if old.reason and (not new.reason or "busy" in old.reason or "offline" in old.reason):
+                new.reason = old.reason
     return final
 
 
