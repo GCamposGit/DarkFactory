@@ -244,16 +244,17 @@ def run_with_retry(
                 f"duration_s={attempt.duration_s} class={failure}"
             )
 
-            # USR-114: Timeout policy: if implementation changes are already present in the
-            # worktree after a timeout, proceed to validation instead of repeating from scratch.
+            # USR-114: Timeout policy: at most 1 retry.
+            # If implementation changes are already present in the worktree after a timeout,
+            # stop retrying immediately rather than repeating the route from scratch.
             if result.error_kind == "timeout" and mode == "write":
                 check_fn = has_changes_fn or default_worktree_has_changes
                 if check_fn(req.cwd):
                     emit(
                         f"Timeout on {harness}, but implementation changes are already present in worktree; "
-                        "proceeding to validate instead of repeating route from scratch"
+                        "stopping retries so work is not overwritten or repeated from scratch"
                     )
-                    return RetryReport(ok=True, result=result, route=route, attempts=attempts)
+                    break
 
             effective_retries = timeout_retries if result.error_kind == "timeout" else transient_retries
             if failure != "transient" or retry_no >= effective_retries:

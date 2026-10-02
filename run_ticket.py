@@ -516,18 +516,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         pinned=bool(args.harness),
         on_event=_report_progress,
     )
-    from core.git.autonomy import GitAutonomyManager
-
-    git_mgr = GitAutonomyManager(PROJECT_ROOT)
-    implementation_paths = [
-        path for path in git_mgr.changed_paths(workspace.path) if path != LEDGER_RELATIVE
-    ]
-
-    is_timeout_with_changes = False
-    if report.result is not None and report.result.error_kind == "timeout" and implementation_paths:
-        is_timeout_with_changes = True
-
-    if (not report.ok or report.result is None) and not is_timeout_with_changes:
+    if not report.ok or report.result is None:
         failure = format_agent_failure(report)
         print(failure, file=sys.stderr)
         _report_workspace_fate(workspace, args.json)
@@ -539,15 +528,16 @@ def main(argv: Optional[list[str]] = None) -> int:
             }, indent=2, ensure_ascii=False))
         return 1
 
-    if is_timeout_with_changes and not args.json:
-        print(
-            f"[!] Agente atingiu timeout ({report.result.duration_s}s), mas alteracoes de "
-            "implementacao foram encontradas na worktree. Avancando diretamente para validacao."
-        )
-
     agent_result = report.result
     if report.route is not None:
         selected_harness, selected_model = report.route  # the harness that actually did the work
+
+    from core.git.autonomy import GitAutonomyManager
+
+    git_mgr = GitAutonomyManager(PROJECT_ROOT)
+    implementation_paths = [
+        path for path in git_mgr.changed_paths(workspace.path) if path != LEDGER_RELATIVE
+    ]
     if not implementation_paths:
         reason = (
             "[ERRO] O agente terminou sem alterar nenhum arquivo de implementacao; "

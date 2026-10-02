@@ -135,15 +135,15 @@ def test_timeout_repeats_at_most_once_with_30s_backoff_and_then_moves_to_the_nex
     assert picker.calls[-1]["mode"] == "write" and picker.calls[-1]["stage"] == "development"
 
 
-def test_timeout_proceeds_to_validate_when_worktree_has_changes() -> None:
-    # USR-114: When implementation changes already exist, a timeout proceeds to validation immediately
+def test_timeout_stops_retrying_when_worktree_has_changes() -> None:
+    # USR-114: When implementation changes already exist, a timeout stops retrying immediately
     agent = _Agent({"codex": [_fail("timeout", "codex", exit_code=None)]})
     picker = _Picker([("codex", None), ("claude", "sonnet")])
     sleeps: list[float] = []
 
     report = _run(agent, ("codex", None), picker, sleeps, has_changes_fn=lambda cwd: True)
 
-    assert report.ok is True
+    assert report.ok is False
     assert report.route == ("codex", None)
     assert report.result is not None and report.result.error_kind == "timeout"
     assert agent.harnesses == ["codex"]  # stops at attempt 1 without repeating from scratch
