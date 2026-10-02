@@ -227,6 +227,7 @@ def run_with_retry(
         routes_tried += 1
         harness, model = route
         max_loop_retries = max(transient_retries, timeout_retries)
+        stopped_due_to_changes = False
         for retry_no in range(max_loop_retries + 1):
             req = build_request(harness, model)
             result = run_func(req)
@@ -254,6 +255,7 @@ def run_with_retry(
                         f"Timeout on {harness}, but implementation changes are already present in worktree; "
                         "stopping retries so work is not overwritten or repeated from scratch"
                     )
+                    stopped_due_to_changes = True
                     break
 
             effective_retries = timeout_retries if result.error_kind == "timeout" else transient_retries
@@ -262,6 +264,9 @@ def run_with_retry(
             delay = backoff_s[min(retry_no, len(backoff_s) - 1)] if backoff_s else 0.0
             emit(f"Transient failure on {harness}; retrying the same route in {delay:g}s")
             sleep_fn(delay)
+
+        if stopped_due_to_changes:
+            break
 
         exclude_route(excluded, harness, model)
         if pinned:
