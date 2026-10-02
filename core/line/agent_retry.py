@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import logging
 import time
+from pathlib import Path
 from typing import Any, Callable, Iterable, Literal, Optional, Sequence
 
 from pydantic import BaseModel, Field
@@ -31,6 +32,8 @@ from core.line.agent_cli import AgentRequest, AgentResult, run_agent
 from core.line.routing import RoutingConfig, pick, record_result
 
 logger = logging.getLogger(__name__)
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
 
 Route = tuple[str, Optional[str]]
 FailureClass = Literal["transient", "exclude", "cooldown"]
@@ -44,10 +47,33 @@ COOLDOWN_ERRORS = frozenset({"rate_limited"})
 EXCLUDE_NOW_ERRORS = frozenset({"unsupported_mode", "not_installed", "auth_expired", "no_authenticated_harness"})
 
 TRANSIENT_RETRIES = 2
+# Timeout policy (USR-114): at most 1 retry for timeouts, and if implementation changes are
+# already present in the worktree, the flow follows to validate rather than repeating from scratch.
+TIMEOUT_RETRIES = 1
 BACKOFF_SECONDS: tuple[float, ...] = (30.0, 120.0)
 MAX_ROUTES = 3
 
 _OUTPUT_HEAD_CHARS = 500
+
+
+def default_worktree_has_changes(cwd: Path) -> bool:
+    """True when `cwd` has uncommitted implementation changes outside internal state (USR-114)."""
+    try:
+        resolved_cwd = cwd.resolve()
+        if resolved_cwd == REPO_ROOT.resolve():
+            # The shared repo root is not a ticket worktree; never treat root changes as ticket changes
+            return False
+        from core.git.autonomy import GitAutonomyManager
+
+        mgr = GitAutonomyManager(REPO_ROOT)
+        changes = [
+            p
+            for p in mgr.changed_paths(cwd)
+            if not p.startswith(".factory/") and not p.startswith(".darkfac/")
+        ]
+        return len(changes) > 0
+    except Exception:
+        return False
 
 
 # --------------------------------------------------------------------------
@@ -161,14 +187,19 @@ def run_with_retry(
     pinned: bool = False,
     max_routes: int = MAX_ROUTES,
     transient_retries: int = TRANSIENT_RETRIES,
+    timeout_retries: int = TIMEOUT_RETRIES,
     backoff_s: Sequence[float] = BACKOFF_SECONDS,
+    has_changes_fn: Optional[Callable[[Path], bool]] = None,
     on_event: Optional[Callable[[str], None]] = None,
 ) -> RetryReport:
     """Run an agent on `route` until one attempt succeeds, walking to the next healthy route on failure.
 
-    - transient failure (`empty_output`, `timeout`, `crash`, unknown): repeat on the same route up to
+    - transient failure (`empty_output`, `crash`, unknown): repeat on the same route up to
       `transient_retries` times, sleeping `backoff_s[i]` (30s, then 120s) before repeat i, then exclude
       the route and move on;
+    - `timeout` failure (USR-114): repeat at most `timeout_retries` (1) time on the same route. Furthermore,
+      if implementation changes are already present in the worktree, advance directly to validation instead
+      of repeating from scratch or burning quota.
     - `unsupported_mode` / `not_installed` / login failures: exclude the route immediately;
     - quota (`rate_limited`): `record_func` (routing's `record_result`) stores a cooldown from `reset_at`,
       and the route is excluded.
@@ -195,8 +226,11 @@ def run_with_retry(
     while route is not None and routes_tried < max_routes:
         routes_tried += 1
         harness, model = route
-        for retry_no in range(transient_retries + 1):
-            result = run_func(build_request(harness, model))
+        max_loop_retries = max(transient_retries, timeout_retries)
+        stopped_due_to_changes = False
+        for retry_no in range(max_loop_retries + 1):
+            req = build_request(harness, model)
+            result = run_func(req)
             record_func(result, config=config)
             attempt = AgentAttempt.from_result(len(attempts) + 1, result)
             attempts.append(attempt)
@@ -210,11 +244,29 @@ def run_with_retry(
                 f"error_kind={result.error_kind or '-'} exit_code={attempt.exit_code if attempt.exit_code is not None else '-'} "
                 f"duration_s={attempt.duration_s} class={failure}"
             )
-            if failure != "transient" or retry_no == transient_retries:
+
+            # USR-114: Timeout policy: at most 1 retry.
+            # If implementation changes are already present in the worktree after a timeout,
+            # stop retrying immediately rather than repeating the route from scratch.
+            if result.error_kind == "timeout" and mode == "write":
+                check_fn = has_changes_fn or default_worktree_has_changes
+                if check_fn(req.cwd):
+                    emit(
+                        f"Timeout on {harness}, but implementation changes are already present in worktree; "
+                        "stopping retries so work is not overwritten or repeated from scratch"
+                    )
+                    stopped_due_to_changes = True
+                    break
+
+            effective_retries = timeout_retries if result.error_kind == "timeout" else transient_retries
+            if failure != "transient" or retry_no >= effective_retries:
                 break
             delay = backoff_s[min(retry_no, len(backoff_s) - 1)] if backoff_s else 0.0
             emit(f"Transient failure on {harness}; retrying the same route in {delay:g}s")
             sleep_fn(delay)
+
+        if stopped_due_to_changes:
+            break
 
         exclude_route(excluded, harness, model)
         if pinned:

@@ -471,19 +471,25 @@ class DevelopmentStage:
                     outcome="retry", cause_code=f"agent_{agent_result.error_kind}", output_refs=[]
                 )
             if not agent_result.ok:
-                last_validate_log = (
-                    f"Falha ao invocar agente ({agent_result.error_kind}): {agent_result.text}"
-                )
-                _write_validate_log(
-                    ws, ticket.id, iteration, last_validate_log,
-                    meta={
-                        "harness": agent_result.harness, "model": agent_result.model,
-                        "error_kind": agent_result.error_kind, "duration_s": agent_result.duration_s,
-                        "note": "agent invocation failed",
-                    },
-                )
-                agent_retry.exclude_route(excluded, harness, model)
-                continue
+                if agent_result.error_kind == "timeout" and self._has_implementation_changes(ws):
+                    logger.info(
+                        "Agent timed out on %s, but implementation changes are present in %s; proceeding to validate",
+                        harness, ws.path
+                    )
+                else:
+                    last_validate_log = (
+                        f"Falha ao invocar agente ({agent_result.error_kind}): {agent_result.text}"
+                    )
+                    _write_validate_log(
+                        ws, ticket.id, iteration, last_validate_log,
+                        meta={
+                            "harness": agent_result.harness, "model": agent_result.model,
+                            "error_kind": agent_result.error_kind, "duration_s": agent_result.duration_s,
+                            "note": "agent invocation failed",
+                        },
+                    )
+                    agent_retry.exclude_route(excluded, harness, model)
+                    continue
 
             # Re-detect after the agent ran: it may have just created the
             # minimal test infrastructure the extra instruction asked for.
@@ -561,6 +567,17 @@ class DevelopmentStage:
         diagnostics.persist(
             ws, f"chore(line): development diagnostics ({ticket_id})", f"{run_id}:{ticket_id}:diag"
         )
+
+    def _has_implementation_changes(self, ws: RunWorkspace) -> bool:
+        """Check if worktree has modifications outside .darkfac/ (USR-114)."""
+        try:
+            from core.git.autonomy import GitAutonomyManager
+
+            mgr = GitAutonomyManager(REPO_ROOT)
+            changes = [p for p in mgr.changed_paths(ws.path) if not p.startswith(".darkfac/")]
+            return len(changes) > 0
+        except Exception:
+            return False
 
     # -- full run --------------------------------------------------------
 

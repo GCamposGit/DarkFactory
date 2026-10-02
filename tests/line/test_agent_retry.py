@@ -118,20 +118,36 @@ def test_empty_output_is_retried_after_a_30s_backoff_and_then_succeeds() -> None
     assert [a.error_kind for a in report.attempts] == ["empty_output", None]
 
 
-def test_timeout_repeats_twice_with_30s_then_120s_backoff_and_then_moves_to_the_next_harness() -> None:
+def test_timeout_repeats_at_most_once_with_30s_backoff_and_then_moves_to_the_next_harness() -> None:
+    # USR-114: A timeout is limited to at most 1 retry (2 attempts total per route, not 3)
     agent = _Agent(
         {"codex": [_fail("timeout", "codex", exit_code=None)], "claude": [_ok("claude", "sonnet")]}
     )
     picker = _Picker([("codex", None), ("claude", "sonnet")])
     sleeps: list[float] = []
 
-    report = _run(agent, ("codex", None), picker, sleeps)
+    report = _run(agent, ("codex", None), picker, sleeps, has_changes_fn=lambda cwd: False)
 
     assert report.ok and report.route == ("claude", "sonnet")
-    assert agent.harnesses == ["codex", "codex", "codex", "claude"]  # initial + 2 repeats, then fallback
-    assert sleeps == [30.0, 120.0]
+    assert agent.harnesses == ["codex", "codex", "claude"]  # initial + 1 repeat, then fallback
+    assert sleeps == [30.0]
     assert picker.calls[-1]["exclude"] == {("codex", None)}
     assert picker.calls[-1]["mode"] == "write" and picker.calls[-1]["stage"] == "development"
+
+
+def test_timeout_stops_retrying_when_worktree_has_changes() -> None:
+    # USR-114: When implementation changes already exist, a timeout stops retrying immediately
+    agent = _Agent({"codex": [_fail("timeout", "codex", exit_code=None)]})
+    picker = _Picker([("codex", None), ("claude", "sonnet")])
+    sleeps: list[float] = []
+
+    report = _run(agent, ("codex", None), picker, sleeps, has_changes_fn=lambda cwd: True)
+
+    assert report.ok is False
+    assert report.route == ("codex", None)
+    assert report.result is not None and report.result.error_kind == "timeout"
+    assert agent.harnesses == ["codex"]  # stops at attempt 1 without repeating from scratch
+    assert sleeps == []
 
 
 def test_a_crash_is_transient_too_and_a_later_success_stops_the_loop() -> None:
@@ -270,8 +286,8 @@ def test_when_every_harness_fails_the_report_carries_kind_exit_code_duration_and
     report = _run(agent, ("claude", "sonnet"), _Picker([("claude", "sonnet"), ("codex", None)]), sleeps)
 
     assert report.ok is False and report.result is not None and report.result.error_kind == "timeout"
-    assert agent.harnesses == ["claude"] * 3 + ["codex"] * 3
-    assert sleeps == [30.0, 120.0, 30.0, 120.0]
+    assert agent.harnesses == ["claude"] * 3 + ["codex"] * 2  # USR-114: timeout retries at most once
+    assert sleeps == [30.0, 120.0, 30.0]
 
     message = run_ticket.format_agent_failure(report)
     assert message.startswith("[FALHA NA EXECUÇÃO DO AGENTE]") and message.strip() != "[FALHA NA EXECUÇÃO DO AGENTE]:"
