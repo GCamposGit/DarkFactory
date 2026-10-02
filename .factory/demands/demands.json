@@ -3289,8 +3289,8 @@
     "project_id": "darkfac",
     "title": "Deploy sai com codigo 1 por falso 'Desktop offline': node_sync sonda o /health uma unica vez e ja decide update/restart do worker",
     "origin": "user",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "Entregue e mergeado via PR #120 (commit 6097cd3). Implementados retries com backoff curto para Desktop e VPS em node_sync._probe, polling de ate 120s para convergencia espontanea do worker antes de qualquer update/restart, guard rail fail-safe que nunca envia update/restart para nos offline sem SHA divergente observado, e guard rail que impede restart quando /health informa busy=True ou active_runs>0. Cobertura completa de testes unitarios em tests/test_node_sync.py e tests/test_dokploy_redeploy.py. Validacao oficial deterministicamente aprovada: 2900 testes, 0 falhas ([HARNESS_PASS]). Deploy pós-merge no Dokploy executado com saida 0 (VPS convergiu no commit 6097cd3 e drill de backup 3-tier verificado).",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -3315,7 +3315,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-01T14:08:39.191606Z",
-    "updated_at": "2026-10-01T14:08:39.191606Z"
+    "updated_at": "2026-10-02T22:46:43.419806+00:00"
   },
   {
     "id": "USR-118",
