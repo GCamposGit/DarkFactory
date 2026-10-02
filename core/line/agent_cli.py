@@ -33,6 +33,7 @@ import subprocess
 import sys
 import time
 import uuid
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable, Literal, Optional
@@ -460,6 +461,182 @@ def _win_kwargs() -> dict[str, Any]:
     return kwargs
 
 
+_ORIGINAL_SUBPROCESS_RUN = subprocess.run
+
+
+@dataclass
+class BoundedProcessResult:
+    """Outcome of a process run bounded by timeout and grace period (USR-114)."""
+
+    stdout: str = ""
+    stderr: str = ""
+    returncode: int = 0
+    duration_s: float = 0.0
+    timed_out: bool = False
+
+
+def _kill_process_tree(pid: int) -> None:
+    """Terminate the process with PID `pid` and all its descendants (USR-114)."""
+    if pid <= 0:
+        return
+    if sys.platform == "win32":
+        try:
+            # /F: forcefully terminate
+            # /T: terminate the tree (process and all child processes)
+            subprocess.run(
+                ["taskkill", "/PID", str(pid), "/T", "/F"],
+                capture_output=True,
+                timeout=5,
+            )
+        except Exception as exc:
+            logger.debug("taskkill failed for PID %s: %s", pid, exc)
+        try:
+            import psutil
+
+            parent = psutil.Process(pid)
+            for child in parent.children(recursive=True):
+                try:
+                    child.kill()
+                except Exception:
+                    pass
+            parent.kill()
+        except Exception:
+            pass
+    else:
+        try:
+            import signal
+
+            pgid = os.getpgid(pid)
+            os.killpg(pgid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        except Exception as exc:
+            try:
+                import signal
+
+                os.kill(pid, signal.SIGKILL)
+            except Exception:
+                pass
+            logger.debug("killpg failed for PID %s: %s", pid, exc)
+
+
+def _run_bounded(
+    argv: list[str],
+    *,
+    input_text: Optional[str] = None,
+    cwd: Optional[Path | str] = None,
+    timeout_s: float = 1800,
+    grace_s: float = 10.0,
+    stdin: Optional[Any] = None,
+    env: Optional[dict[str, str]] = None,
+) -> BoundedProcessResult:
+    """Execute `argv` with a hard timeout and tree termination (USR-114).
+
+    On Windows, `subprocess.run(timeout=...)` only terminates the root process, leaving
+    grandchildren alive holding pipe handles, which blocks communicate() indefinitely.
+    This helper starts the process in a new process group, catches TimeoutExpired on
+    communicate(), terminates the entire process tree (/T /F or killpg), and gathers
+    partial output within a short grace period (default 10s).
+    """
+    start = time.perf_counter()
+
+    # Backwards-compatibility for existing tests monkeypatching agent_cli.subprocess.run:
+    if subprocess.run is not _ORIGINAL_SUBPROCESS_RUN:
+        kwargs: dict[str, Any] = {
+            "capture_output": True,
+            "text": True,
+            "encoding": "utf-8",
+            "errors": "replace",
+            "timeout": timeout_s,
+            "cwd": str(cwd) if cwd is not None else None,
+        }
+        if stdin is not None:
+            kwargs["stdin"] = stdin
+        elif input_text is not None:
+            kwargs["input"] = input_text
+        if env is not None:
+            kwargs["env"] = env
+        try:
+            proc = subprocess.run(argv, **kwargs)
+            duration = round(time.perf_counter() - start, 3)
+            return BoundedProcessResult(
+                stdout=proc.stdout or "",
+                stderr=proc.stderr or "",
+                returncode=proc.returncode,
+                duration_s=duration,
+                timed_out=False,
+            )
+        except subprocess.TimeoutExpired as exc:
+            duration = round(min(time.perf_counter() - start, float(timeout_s + grace_s)), 3)
+            return BoundedProcessResult(
+                stdout=_partial_output(exc.stdout),
+                stderr=_partial_output(exc.stderr),
+                returncode=-1,
+                duration_s=duration,
+                timed_out=True,
+            )
+
+    kwargs: dict[str, Any] = {
+        "stdout": subprocess.PIPE,
+        "stderr": subprocess.PIPE,
+        "text": True,
+        "encoding": "utf-8",
+        "errors": "replace",
+        "cwd": str(cwd) if cwd is not None else None,
+        "env": env,
+    }
+    if sys.platform == "win32":
+        kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.CREATE_NO_WINDOW
+    else:
+        kwargs["start_new_session"] = True
+
+    if stdin is not None:
+        kwargs["stdin"] = stdin
+    elif input_text is not None:
+        kwargs["stdin"] = subprocess.PIPE
+    else:
+        kwargs["stdin"] = subprocess.DEVNULL
+
+    proc = subprocess.Popen(argv, **kwargs)
+    stdout, stderr = "", ""
+    timed_out = False
+    returncode = 0
+
+    try:
+        stdout, stderr = proc.communicate(input=input_text, timeout=timeout_s)
+        returncode = proc.returncode
+    except subprocess.TimeoutExpired as exc:
+        timed_out = True
+        _kill_process_tree(proc.pid)
+        try:
+            extra_out, extra_err = proc.communicate(timeout=grace_s)
+            stdout = extra_out or _partial_output(exc.stdout)
+            stderr = extra_err or _partial_output(exc.stderr)
+        except (subprocess.TimeoutExpired, Exception):
+            try:
+                if proc.stdout:
+                    proc.stdout.close()
+                if proc.stderr:
+                    proc.stderr.close()
+            except Exception:
+                pass
+            stdout = _partial_output(exc.stdout)
+            stderr = _partial_output(exc.stderr)
+        returncode = proc.returncode if proc.returncode is not None else -1
+
+    elapsed = time.perf_counter() - start
+    max_allowed = float(timeout_s + grace_s)
+    duration_s = round(min(elapsed, max_allowed), 3) if timed_out else round(elapsed, 3)
+
+    return BoundedProcessResult(
+        stdout=stdout or "",
+        stderr=stderr or "",
+        returncode=returncode,
+        duration_s=duration_s,
+        timed_out=timed_out,
+    )
+
+
 # --------------------------------------------------------------------------
 # Per-harness execution
 # --------------------------------------------------------------------------
@@ -477,40 +654,32 @@ def _run_claude(req: AgentRequest) -> AgentResult:
             error_kind="not_installed",
         )
     argv = build_claude_argv(executable, req)
-    start = time.perf_counter()
     try:
-        proc = subprocess.run(
+        res = _run_bounded(
             argv,
-            input=req.prompt,
-            capture_output=True,
-            text=True,
-            cwd=str(req.cwd),
-            timeout=req.timeout_s,
-            encoding="utf-8",
-            errors="replace",
-            **_win_kwargs(),
-        )
-    except subprocess.TimeoutExpired as exc:
-        # Keep whatever the CLI printed before the deadline (redacted): a bare
-        # "timeout" made a stalled auth/network call impossible to diagnose.
-        partial = redact_secrets(
-            f"{_partial_output(exc.stdout)}\n{_partial_output(exc.stderr)}".strip()
-        )
-        return AgentResult(
-            ok=False, text=f"timed out after {req.timeout_s}s" + (f": {partial}" if partial else ""),
-            harness="claude", model=req.model,
-            duration_s=round(time.perf_counter() - start, 3), error_kind="timeout",
-            stderr_tail=_stderr_tail(exc.stderr),
+            input_text=req.prompt,
+            cwd=req.cwd,
+            timeout_s=req.timeout_s,
         )
     except OSError as exc:
         return AgentResult(
             ok=False, text=redact_secrets(str(exc)), harness="claude", model=req.model,
-            duration_s=round(time.perf_counter() - start, 3), error_kind="crash",
+            duration_s=0.0, error_kind="crash",
         )
-    duration = round(time.perf_counter() - start, 3)
-    stdout = (proc.stdout or "").strip()
-    stderr = proc.stderr or ""
-    diag: dict[str, Any] = {"exit_code": proc.returncode, "stderr_tail": _stderr_tail(stderr)}
+
+    if res.timed_out:
+        partial = redact_secrets(f"{res.stdout}\n{res.stderr}".strip())
+        return AgentResult(
+            ok=False, text=f"timed out after {req.timeout_s}s" + (f": {partial}" if partial else ""),
+            harness="claude", model=req.model,
+            duration_s=res.duration_s, error_kind="timeout",
+            stderr_tail=_stderr_tail(res.stderr),
+        )
+
+    duration = res.duration_s
+    stdout = res.stdout.strip()
+    stderr = res.stderr
+    diag: dict[str, Any] = {"exit_code": res.returncode, "stderr_tail": _stderr_tail(stderr)}
 
     parsed: Optional[dict[str, Any]] = None
     if stdout:
@@ -527,7 +696,7 @@ def _run_claude(req: AgentRequest) -> AgentResult:
         usage = parsed.get("usage") if isinstance(parsed.get("usage"), dict) else None
         cost_raw = parsed.get("total_cost_usd")
         cost_usd = float(cost_raw) if isinstance(cost_raw, (int, float)) else None
-        if is_error or proc.returncode != 0:
+        if is_error or res.returncode != 0:
             combined = f"{result_text}\n{stderr}"
             return AgentResult(
                 ok=False, text=redact_secrets(result_text or stderr.strip()), harness="claude", model=req.model,
@@ -540,7 +709,7 @@ def _run_claude(req: AgentRequest) -> AgentResult:
         )
 
     combined = f"{stdout}\n{stderr}"
-    if proc.returncode == 0 and stdout:
+    if res.returncode == 0 and stdout:
         return AgentResult(ok=True, text=stdout, harness="claude", model=req.model, duration_s=duration, **diag)
     return AgentResult(
         ok=False, text=redact_secrets(stdout or stderr.strip()), harness="claude", model=req.model,
@@ -566,32 +735,45 @@ def _run_codex(req: AgentRequest) -> AgentResult:
     tmp_out = tmp_dir / f"codex_line_{uuid.uuid4().hex[:8]}.json"
     argv = build_codex_argv(executable, req, tmp_out)
 
-    start = time.perf_counter()
     try:
-        proc = subprocess.run(
+        res = _run_bounded(
             argv,
-            input=req.prompt,
-            capture_output=True,
-            text=True,
-            cwd=str(req.cwd),
-            timeout=req.timeout_s,
-            encoding="utf-8",
-            errors="replace",
-            **_win_kwargs(),
-        )
-    except subprocess.TimeoutExpired as exc:
-        return AgentResult(
-            ok=False, text="", harness="codex", model=req.model,
-            duration_s=round(time.perf_counter() - start, 3), error_kind="timeout",
-            stderr_tail=_stderr_tail(exc.stderr),
+            input_text=req.prompt,
+            cwd=req.cwd,
+            timeout_s=req.timeout_s,
         )
     except OSError as exc:
         return AgentResult(
             ok=False, text=str(exc), harness="codex", model=req.model,
-            duration_s=round(time.perf_counter() - start, 3), error_kind="crash",
+            duration_s=0.0, error_kind="crash",
         )
 
-    duration = round(time.perf_counter() - start, 3)
+    if res.timed_out:
+        partial_from_file = ""
+        if tmp_out.is_file():
+            try:
+                partial_from_file = tmp_out.read_text(encoding="utf-8", errors="replace").strip()
+            except OSError:
+                pass
+            try:
+                tmp_out.unlink(missing_ok=True)
+            except OSError:
+                pass
+        partial_stdout = res.stdout.strip()
+        partial_stderr = res.stderr.strip()
+        combined_parts = [p for p in (partial_from_file or partial_stdout, partial_stderr) if p]
+        combined_partial = redact_secrets("\n".join(combined_parts)) if combined_parts else ""
+        return AgentResult(
+            ok=False,
+            text=f"timed out after {req.timeout_s}s" + (f": {combined_partial}" if combined_partial else ""),
+            harness="codex",
+            model=req.model,
+            duration_s=res.duration_s,
+            error_kind="timeout",
+            stderr_tail=_stderr_tail(res.stderr),
+        )
+
+    duration = res.duration_s
     output_text = ""
     usage: Optional[dict[str, Any]] = None
     cost_usd: Optional[float] = None
@@ -622,13 +804,13 @@ def _run_codex(req: AgentRequest) -> AgentResult:
             tmp_out.unlink(missing_ok=True)
         except OSError:
             pass
-    if not output_text and (proc.stdout or "").strip():
-        output_text = proc.stdout.strip()
+    if not output_text and res.stdout.strip():
+        output_text = res.stdout.strip()
 
-    stderr = proc.stderr or ""
+    stderr = res.stderr
     combined = f"{output_text}\n{stderr}"
-    diag: dict[str, Any] = {"exit_code": proc.returncode, "stderr_tail": _stderr_tail(stderr)}
-    if proc.returncode != 0:
+    diag: dict[str, Any] = {"exit_code": res.returncode, "stderr_tail": _stderr_tail(stderr)}
+    if res.returncode != 0:
         return AgentResult(
             ok=False, text=output_text, harness="codex", model=req.model, duration_s=duration,
             usage=usage, cost_usd=cost_usd,
@@ -675,29 +857,16 @@ def _run_grok_write(req: AgentRequest, executable: str) -> AgentResult:
             )
         argv = build_grok_write_argv(executable, req, prompt_file)
         try:
-            proc = subprocess.run(
+            res = _run_bounded(
                 argv,
                 stdin=subprocess.DEVNULL,
-                capture_output=True,
-                text=True,
-                cwd=str(req.cwd),
-                timeout=req.timeout_s,
-                encoding="utf-8",
-                errors="replace",
-                **_win_kwargs(),
-            )
-        except subprocess.TimeoutExpired as exc:
-            partial = redact_secrets(f"{_partial_output(exc.stdout)}\n{_partial_output(exc.stderr)}".strip())
-            return AgentResult(
-                ok=False, text=f"timed out after {req.timeout_s}s" + (f": {partial}" if partial else ""),
-                harness="grok", model=req.model,
-                duration_s=round(time.perf_counter() - start, 3), error_kind="timeout",
-                stderr_tail=_stderr_tail(exc.stderr),
+                cwd=req.cwd,
+                timeout_s=req.timeout_s,
             )
         except OSError as exc:
             return AgentResult(
                 ok=False, text=redact_secrets(str(exc)), harness="grok", model=req.model,
-                duration_s=round(time.perf_counter() - start, 3), error_kind="crash",
+                duration_s=0.0, error_kind="crash",
             )
     finally:
         try:
@@ -705,10 +874,19 @@ def _run_grok_write(req: AgentRequest, executable: str) -> AgentResult:
         except OSError:
             pass
 
-    duration = round(time.perf_counter() - start, 3)
-    stdout = (proc.stdout or "").strip()
-    stderr = proc.stderr or ""
-    diag: dict[str, Any] = {"exit_code": proc.returncode, "stderr_tail": _stderr_tail(stderr)}
+    if res.timed_out:
+        partial = redact_secrets(f"{res.stdout}\n{res.stderr}".strip())
+        return AgentResult(
+            ok=False, text=f"timed out after {req.timeout_s}s" + (f": {partial}" if partial else ""),
+            harness="grok", model=req.model,
+            duration_s=res.duration_s, error_kind="timeout",
+            stderr_tail=_stderr_tail(res.stderr),
+        )
+
+    duration = res.duration_s
+    stdout = (res.stdout or "").strip()
+    stderr = res.stderr or ""
+    diag: dict[str, Any] = {"exit_code": res.returncode, "stderr_tail": _stderr_tail(stderr)}
 
     parsed = _parse_json_object(stdout)
     usage: Optional[dict[str, Any]] = None
@@ -728,7 +906,7 @@ def _run_grok_write(req: AgentRequest, executable: str) -> AgentResult:
         cost_usd = float(cost_raw) if isinstance(cost_raw, (int, float)) and not isinstance(cost_raw, bool) else None
         stop_reason = parsed.get("stopReason") if isinstance(parsed.get("stopReason"), str) else None
 
-    if proc.returncode != 0 or is_error:
+    if res.returncode != 0 or is_error:
         combined = f"{error_text}\n{stderr}"
         return AgentResult(
             ok=False, text=redact_secrets(result_text or stderr.strip()), harness="grok", model=req.model,
@@ -763,28 +941,30 @@ def _run_grok(req: AgentRequest) -> AgentResult:
     argv = [executable, "-p", req.prompt, "--output-format", "plain"]
     if req.model:
         argv += ["-m", req.model]
-    start = time.perf_counter()
     try:
-        proc = subprocess.run(
-            argv, capture_output=True, text=True, cwd=str(req.cwd), timeout=req.timeout_s,
-            encoding="utf-8", errors="replace", **_win_kwargs(),
-        )
-    except subprocess.TimeoutExpired as exc:
-        return AgentResult(
-            ok=False, text="", harness="grok", model=req.model,
-            duration_s=round(time.perf_counter() - start, 3), error_kind="timeout",
-            stderr_tail=_stderr_tail(exc.stderr),
+        res = _run_bounded(
+            argv,
+            cwd=req.cwd,
+            timeout_s=req.timeout_s,
         )
     except OSError as exc:
         return AgentResult(
             ok=False, text=str(exc), harness="grok", model=req.model,
-            duration_s=round(time.perf_counter() - start, 3), error_kind="crash",
+            duration_s=0.0, error_kind="crash",
         )
-    duration = round(time.perf_counter() - start, 3)
-    output_text = (proc.stdout or "").strip()
-    stderr = proc.stderr or ""
-    diag: dict[str, Any] = {"exit_code": proc.returncode, "stderr_tail": _stderr_tail(stderr)}
-    if proc.returncode != 0 and not output_text:
+    if res.timed_out:
+        partial = redact_secrets(f"{res.stdout}\n{res.stderr}".strip())
+        return AgentResult(
+            ok=False, text=f"timed out after {req.timeout_s}s" + (f": {partial}" if partial else ""),
+            harness="grok", model=req.model,
+            duration_s=res.duration_s, error_kind="timeout",
+            stderr_tail=_stderr_tail(res.stderr),
+        )
+    duration = res.duration_s
+    output_text = (res.stdout or "").strip()
+    stderr = res.stderr or ""
+    diag: dict[str, Any] = {"exit_code": res.returncode, "stderr_tail": _stderr_tail(stderr)}
+    if res.returncode != 0 and not output_text:
         combined = f"{output_text}\n{stderr}"
         return AgentResult(
             ok=False, text="", harness="grok", model=req.model, duration_s=duration,
@@ -803,28 +983,30 @@ def _run_antigravity(req: AgentRequest) -> AgentResult:
         )
     tier = req.model or "flash"
     argv = [executable, "new-conversation", f"--model={tier}", req.prompt]
-    start = time.perf_counter()
     try:
-        proc = subprocess.run(
-            argv, capture_output=True, text=True, cwd=str(req.cwd), timeout=req.timeout_s,
-            encoding="utf-8", errors="replace", **_win_kwargs(),
-        )
-    except subprocess.TimeoutExpired as exc:
-        return AgentResult(
-            ok=False, text="", harness="antigravity", model=req.model,
-            duration_s=round(time.perf_counter() - start, 3), error_kind="timeout",
-            stderr_tail=_stderr_tail(exc.stderr),
+        res = _run_bounded(
+            argv,
+            cwd=req.cwd,
+            timeout_s=req.timeout_s,
         )
     except OSError as exc:
         return AgentResult(
             ok=False, text=str(exc), harness="antigravity", model=req.model,
-            duration_s=round(time.perf_counter() - start, 3), error_kind="crash",
+            duration_s=0.0, error_kind="crash",
         )
-    duration = round(time.perf_counter() - start, 3)
-    output_text = (proc.stdout or "").strip()
-    stderr = proc.stderr or ""
-    diag: dict[str, Any] = {"exit_code": proc.returncode, "stderr_tail": _stderr_tail(stderr)}
-    if proc.returncode != 0 and not output_text:
+    if res.timed_out:
+        partial = redact_secrets(f"{res.stdout}\n{res.stderr}".strip())
+        return AgentResult(
+            ok=False, text=f"timed out after {req.timeout_s}s" + (f": {partial}" if partial else ""),
+            harness="antigravity", model=tier,
+            duration_s=res.duration_s, error_kind="timeout",
+            stderr_tail=_stderr_tail(res.stderr),
+        )
+    duration = res.duration_s
+    output_text = (res.stdout or "").strip()
+    stderr = res.stderr or ""
+    diag: dict[str, Any] = {"exit_code": res.returncode, "stderr_tail": _stderr_tail(stderr)}
+    if res.returncode != 0 and not output_text:
         combined = f"{output_text}\n{stderr}"
         return AgentResult(
             ok=False, text="", harness="antigravity", model=tier, duration_s=duration,
