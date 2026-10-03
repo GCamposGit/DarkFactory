@@ -17,11 +17,12 @@ import urllib.request
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from core.paths import state_root
 from .models import GA4Event, GA4Report, SEOAuditResult
 
 logger = logging.getLogger("darkfac.marketing.seo")
 
-DEFAULT_GA4_LOG_PATH = Path(".factory/marketing/ga4_events.jsonl")
+DEFAULT_GA4_LOG_PATH = state_root() / "marketing" / "ga4_events.jsonl"
 
 
 class SEOValidator:

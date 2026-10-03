@@ -13,11 +13,12 @@ import os
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from core.paths import state_root
 from .models import GoogleAdsCampaignMetrics, GoogleAdsReport
 
 logger = logging.getLogger("darkfac.marketing.ads")
 
-DEFAULT_ADS_METRICS_PATH = Path(".factory/marketing/google_ads_metrics.json")
+DEFAULT_ADS_METRICS_PATH = state_root() / "marketing" / "google_ads_metrics.json"
 DEFAULT_PROJECT_BUDGET_USD = 500.0
 
 

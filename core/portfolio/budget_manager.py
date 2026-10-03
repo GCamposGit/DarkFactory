@@ -15,11 +15,12 @@ from pathlib import Path
 from typing import Dict, List, Optional
 
 from core.integrations.telegram import TelegramGateway, load_telegram_config
+from core.paths import state_root
 from .models import BudgetStatus, ProjectBudgetConfig, utc_now_iso
 
 logger = logging.getLogger("darkfac.portfolio.budget")
 
-DEFAULT_PORTFOLIO_DIR = Path(".factory/portfolio")
+DEFAULT_PORTFOLIO_DIR = state_root() / "portfolio"
 DEFAULT_BUDGET_FILE = DEFAULT_PORTFOLIO_DIR / "budgets.json"
 
 DEFAULT_BUDGETS_USD: Dict[str, float] = {

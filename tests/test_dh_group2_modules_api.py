@@ -45,11 +45,16 @@ def test_dh04_catalog_sync_and_evolution_lifecycle(
     # named "C:\dev\DarkFac" created inside the checkout under test. Point the
     # registry at a throwaway clone so the sync can only write under tmp_path.
     sync_target = tmp_path / "darkfac_clone"
+    sync_target.mkdir(parents=True, exist_ok=True)
+    (sync_target / ".agents" / "rules").mkdir(parents=True, exist_ok=True)
     isolated_registry = ProjectRegistry(projects_file=tmp_path / "projects.json")
     darkfac = isolated_registry.get_project("darkfac")
     assert darkfac is not None
     isolated_registry.register_project(darkfac.model_copy(update={"path": str(sync_target)}))
     monkeypatch.setattr(catalog_manager, "get_project_registry", lambda: isolated_registry)
+    monkeypatch.setenv("DARKFAC_PROJECT_ROOT", str(sync_target))
+
+    real_repo_root = Path(__file__).resolve().parent.parent
 
     # 1. Catalog Sync
     comp_res = client.get("/api/catalog/components")
@@ -113,6 +118,8 @@ def test_dh04_catalog_sync_and_evolution_lifecycle(
         )
         assert prom_res.status_code == 200
         assert prom_res.json()["success"] is True
+        assert (sync_target / unique_rule).is_file()
+        assert not (real_repo_root / unique_rule).exists()
 
         # 5. Rollback proposal
         roll_res = client.post(
@@ -122,8 +129,10 @@ def test_dh04_catalog_sync_and_evolution_lifecycle(
         )
         assert roll_res.status_code == 200
         assert roll_res.json()["success"] is True
+        assert not (real_repo_root / unique_rule).exists()
     finally:
-        Path(unique_rule).unlink(missing_ok=True)
+        (sync_target / unique_rule).unlink(missing_ok=True)
+        (real_repo_root / unique_rule).unlink(missing_ok=True)
 
 
 # =====================================================================

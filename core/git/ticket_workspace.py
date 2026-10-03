@@ -40,6 +40,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable, Optional, Sequence
 
+from core.paths import state_root
+
 logger = logging.getLogger("darkfac.git.ticket_workspace")
 
 WORKTREES_DIRNAME = ".worktrees"

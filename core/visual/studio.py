@@ -6,7 +6,7 @@ Orchestrates prompt synthesis, semantic text illustration, procedural and cloud 
 import json
 from pathlib import Path
 
-from core.paths import project_root
+from core.paths import project_root, state_root
 from typing import List, Dict, Any, Optional
 
 from core.visual.models import (
@@ -30,14 +30,14 @@ class VisualStudio:
 
     def __init__(self, output_dir: Optional[Path] = None) -> None:
         if output_dir is None:
-            self.output_dir = project_root() / ".factory" / "visuals"
+            self.output_dir = state_root() / "visuals"
         else:
             self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self.metadata_dir = self.output_dir / "metadata"
         self.metadata_dir.mkdir(parents=True, exist_ok=True)
         self.engine = CloudVisualEngine(output_dir=self.output_dir)
-        self.model_usage_ledger = ModelUsageLedger(self.output_dir.parent / "usage")
+        self.model_usage_ledger = ModelUsageLedger(self.output_dir.parent / "usage" if output_dir else (state_root() / "usage"))
 
     def _record_usage(self, result: VisualAssetResult) -> None:
         try:

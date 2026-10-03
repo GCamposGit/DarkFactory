@@ -27,7 +27,9 @@ from .models import (
 import json
 from pathlib import Path
 
-DEFAULT_SCHEDULER_FILE = Path(".factory/portfolio/scheduler_state.json")
+from core.paths import state_root
+
+DEFAULT_SCHEDULER_FILE = state_root() / "portfolio" / "scheduler_state.json"
 
 logger = logging.getLogger("darkfac.portfolio.scheduler")
 

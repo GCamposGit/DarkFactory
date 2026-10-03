@@ -17,17 +17,25 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+from core.paths import state_root
 from core.workflow.control_store import ControlStore, SQLiteControlStore
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_CONTROL_DB = PROJECT_ROOT / ".factory" / "control.db"
 
 
-def default_control_store(*, sqlite_db_path: Path | str = DEFAULT_CONTROL_DB) -> ControlStore:
+def default_control_db_path() -> Path:
+    return state_root() / "control.db"
+
+
+DEFAULT_CONTROL_DB = default_control_db_path()
+
+
+def default_control_store(*, sqlite_db_path: Path | str | None = None) -> ControlStore:
     """Postgres (real cloud line) if `DARKFAC_HF02_DATABASE_URL` is set, else
     a persistent local SQLite file -- never the coordinator/worker's
     in-memory mock, which would silently drop every canary/dogfood demand
     between process invocations."""
+    effective_path = sqlite_db_path or default_control_db_path()
     database_url = os.environ.get("DARKFAC_HF02_DATABASE_URL")
     if database_url:
         from core.orchestrator.adapters.control_postgres import PostgresControlStore
@@ -38,4 +46,4 @@ def default_control_store(*, sqlite_db_path: Path | str = DEFAULT_CONTROL_DB) ->
             runtime_owner=RuntimeOwner.CLOUD_DBOS_POSTGRES.value,
             lease_duration_sec=300,
         )
-    return SQLiteControlStore(db_path=sqlite_db_path)
+    return SQLiteControlStore(db_path=effective_path)

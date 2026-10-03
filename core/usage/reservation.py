@@ -17,10 +17,12 @@ from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field
 
+from core.paths import state_root
+
 logger = logging.getLogger(__name__)
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_RESERVATIONS_PATH = REPO_ROOT / ".factory" / "usage" / "reservations.json"
+DEFAULT_RESERVATIONS_PATH = state_root() / "usage" / "reservations.json"
 
 
 class QuotaReservation(BaseModel):
@@ -39,7 +41,7 @@ class QuotaReservationManager:
     """Thread-safe and process-safe reservation store for provider quotas."""
 
     def __init__(self, path: Optional[Path] = None, default_ttl_seconds: int = 900) -> None:
-        self.path = Path(path) if path is not None else DEFAULT_RESERVATIONS_PATH
+        self.path = Path(path) if path is not None else (state_root() / "usage" / "reservations.json")
         self.default_ttl_seconds = default_ttl_seconds
         self._lock = threading.RLock()
 

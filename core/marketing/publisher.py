@@ -15,6 +15,7 @@ from typing import Any, Dict, List, Optional
 
 from core.content.anti_slop_linter import AntiSlopLinter
 from core.integrations.telegram import TelegramGateway, load_telegram_config
+from core.paths import state_root
 from .models import BlogPost, CaseStudy, PublishResult
 
 import unicodedata
@@ -22,7 +23,7 @@ import unicodedata
 logger = logging.getLogger("darkfac.marketing.publisher")
 
 DEFAULT_ATRIUM_PATH = Path(r"C:\dev\Site_ggcampos")
-DEFAULT_STAGING_DIR = Path(".factory/marketing/staged_posts")
+DEFAULT_STAGING_DIR = state_root() / "marketing" / "staged_posts"
 
 
 def slugify(text: str) -> str:

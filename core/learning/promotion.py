@@ -17,8 +17,9 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field
 
 from core.learning.models import PolicyOrigin, PolicyStatus
+from core.paths import state_root
 
-DEFAULT_CANDIDATES_PATH = Path(".factory") / "learning" / "candidates.json"
+DEFAULT_CANDIDATES_PATH = state_root() / "learning" / "candidates.json"
 
 
 class PromotionDeniedError(Exception):

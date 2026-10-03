@@ -13,6 +13,7 @@ from core.notifications.models import (
     TokenAlertThresholds,
 )
 from core.notifications.service import NotificationService
+from core.paths import state_root
 from core.router.token_budget import _quota_headroom
 from core.usage.models import AccountConnectionStatus, ProviderAccountUsage, ProviderFamily
 from core.usage.monitor import AccountUsageMonitor
@@ -82,10 +83,10 @@ class TokenQuotaWatcher:
             logger.warning("Could not persist quota states: %s", exc)
 
     def _get_usage_monitor(self) -> AccountUsageMonitor:
-        """Returns or creates default AccountUsageMonitor pointing to .factory/usage."""
+        """Returns or creates default AccountUsageMonitor pointing to state_root() / usage."""
         if self.usage_monitor is not None:
             return self.usage_monitor
-        snapshot_dir = Path.cwd() / ".factory" / "usage"
+        snapshot_dir = state_root() / "usage"
         self.usage_monitor = AccountUsageMonitor(snapshot_dir=snapshot_dir)
         return self.usage_monitor
 

@@ -11,9 +11,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 
+from core.paths import state_root
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_REPORTS_DIR = PROJECT_ROOT / ".factory" / "reports"
+DEFAULT_REPORTS_DIR = state_root() / "reports"
 COST_LEDGER_FILENAME = "ticket_quota_usage.jsonl"
 
 
@@ -27,7 +28,7 @@ def record_ticket_quota_cost(
     reports_dir: Optional[Path] = None,
 ) -> dict[str, Any]:
     """Record quota headroom before and after running a ticket."""
-    target_dir = reports_dir or DEFAULT_REPORTS_DIR
+    target_dir = reports_dir or (state_root() / "reports")
     target_dir.mkdir(parents=True, exist_ok=True)
     target_file = target_dir / COST_LEDGER_FILENAME
 

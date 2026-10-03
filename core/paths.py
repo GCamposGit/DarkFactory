@@ -13,3 +13,15 @@ def project_root() -> Path:
     if configured:
         return Path(configured).expanduser().resolve()
     return Path(__file__).resolve().parent.parent
+
+
+def state_root() -> Path:
+    """Return the root directory for mutable factory runtime state.
+
+    Respects DARKFAC_STATE_ROOT if set in the environment,
+    otherwise defaults to project_root() / ".factory".
+    """
+    configured = os.environ.get("DARKFAC_STATE_ROOT")
+    if configured:
+        return Path(configured).expanduser().resolve()
+    return project_root() / ".factory"

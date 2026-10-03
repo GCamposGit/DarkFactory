@@ -13,7 +13,7 @@ import threading
 from pathlib import Path
 from typing import Any, Dict, Generator, List, Optional
 
-from core.paths import project_root
+from core.paths import project_root, state_root
 from core.telemetry.hardware import get_hardware_context
 from core.telemetry.models import (
     BreakdownItem,
@@ -27,14 +27,24 @@ from core.telemetry.models import (
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_DB_PATH = project_root() / ".factory" / "telemetry.db"
+
+def default_db_path() -> Path:
+    return state_root() / "telemetry.db"
+
+
+DEFAULT_DB_PATH = default_db_path()
 
 
 class TelemetryStore:
     """Thread-safe SQLite store for model runs telemetry."""
 
     def __init__(self, db_path: Optional[Path] = None) -> None:
-        self.db_path = Path(db_path) if db_path else DEFAULT_DB_PATH
+        if db_path:
+            self.db_path = Path(db_path)
+        elif DEFAULT_DB_PATH != (project_root() / ".factory" / "telemetry.db"):
+            self.db_path = Path(DEFAULT_DB_PATH)
+        else:
+            self.db_path = default_db_path()
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._lock = threading.Lock()
         self._init_db()

@@ -29,13 +29,14 @@ from core.workflow.cycle import (
     ImplementationCandidate,
     ImplementationCycleService,
 )
+from core.paths import state_root
 from core.workflow.readiness import ReadinessGate
 from core.workflow.reconciliation import reconcile_environment_manifest
 from core.workflow.runtime import WorkflowRuntime
 
 
 def _build_service(db_path: Path | str | None = None) -> ImplementationCycleService:
-    database_path = Path(db_path) if db_path else PROJECT_ROOT / ".factory" / "workflow" / "runtime.db"
+    database_path = Path(db_path) if db_path else state_root() / "workflow" / "runtime.db"
     database_path.parent.mkdir(parents=True, exist_ok=True)
     runtime = WorkflowRuntime(database_path)
     gate = ReadinessGate()

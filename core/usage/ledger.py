@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
+from core.paths import state_root
 from core.usage.models import (
     ModelCallEvent,
     ModelUsageAggregate,
@@ -17,8 +18,8 @@ class ModelUsageLedger:
 
     schema_version = 2
 
-    def __init__(self, storage_dir: Path, max_events: int = 500) -> None:
-        self.storage_dir = Path(storage_dir)
+    def __init__(self, storage_dir: Optional[Path] = None, max_events: int = 500) -> None:
+        self.storage_dir = Path(storage_dir) if storage_dir is not None else (state_root() / "usage")
         self.ledger_path = self.storage_dir / "model_usage.json"
         self.max_events = max(10, max_events)
         self._store = AtomicUsageStore(self.ledger_path)

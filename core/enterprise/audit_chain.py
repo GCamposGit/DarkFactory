@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any, List, Optional
 import uuid
 
-from core.paths import project_root
+from core.paths import project_root, state_root
 from core.enterprise.models import (
     AuditChainVerificationResult,
     AuditEvent,
@@ -31,7 +31,7 @@ class ImmutableAuditChain:
 
     def __init__(self, root: Optional[Path] = None, log_file: Optional[Path] = None) -> None:
         self.root = Path(root) if root else project_root()
-        self.log_file = Path(log_file) if log_file else (self.root / DEFAULT_ENTERPRISE_DIR / "audit_trail.jsonl")
+        self.log_file = Path(log_file) if log_file else (state_root() / "enterprise" / "audit_trail.jsonl")
         self.log_file.parent.mkdir(parents=True, exist_ok=True)
 
     def record_event(

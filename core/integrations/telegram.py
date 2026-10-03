@@ -30,7 +30,7 @@ from typing import Any, Callable, Dict, List, Optional, Sequence, Set
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from core.paths import project_root
+from core.paths import project_root, state_root
 
 logger = logging.getLogger("darkfac.integrations.telegram")
 
@@ -327,7 +327,7 @@ class TelegramGateway:
         line_handler: Optional[Callable[[str, int], Dict[str, Any]]] = None,
     ) -> None:
         self.config = config
-        self.state_dir = state_dir if state_dir is not None else project_root() / ".factory" / "telegram"
+        self.state_dir = state_dir if state_dir is not None else state_root() / "telegram"
         self.state_dir.mkdir(parents=True, exist_ok=True)
         if state_file is not None:
             self.state_file = state_file

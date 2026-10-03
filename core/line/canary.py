@@ -64,6 +64,7 @@ from pydantic import BaseModel, Field, model_validator
 from core.demands.autonomous_intake import AutonomousIntakeService
 from core.demands.store import DemandsStore
 from core.line.store_selection import default_control_store
+from core.paths import state_root
 from core.workflow.control_contracts import IdempotencyConflict, IntakeCommand
 from core.workflow.control_store import ControlStore
 
@@ -72,10 +73,14 @@ logger = logging.getLogger(__name__)
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 CANARY_PROJECT_ID = "darkfac-canary"
 CANARY_CHANNEL = "canary"
-_DEFAULT_REPORTS_DIR = PROJECT_ROOT / ".factory" / "reports" / "canary"
-# HF-27-10 review item 3: overridable so a Dokploy/compose volume can be
-# mounted at a path other than the image's baked-in default.
-REPORTS_DIR = Path(os.environ.get("DARKFAC_CANARY_REPORTS_DIR") or _DEFAULT_REPORTS_DIR)
+
+
+def default_canary_reports_dir() -> Path:
+    return Path(os.environ.get("DARKFAC_CANARY_REPORTS_DIR") or (state_root() / "reports" / "canary"))
+
+
+_DEFAULT_REPORTS_DIR = default_canary_reports_dir()
+REPORTS_DIR = _DEFAULT_REPORTS_DIR
 
 # The line's real terminal stages (core.line.bindings.LINE_STAGES), minus
 # "retrospective" -- a post-delivery memory/learning stage that runs *after*
@@ -472,12 +477,13 @@ def _write_report(reports_dir: Path, day: date, report: CanaryReport) -> Path:
     return path
 
 
-def load_reports(reports_dir: Path = REPORTS_DIR, limit: int | None = None) -> list[CanaryReport]:
+def load_reports(reports_dir: Optional[Path] = None, limit: int | None = None) -> list[CanaryReport]:
     """All readable reports, oldest first. `limit` keeps only the most recent N."""
-    if not reports_dir.exists():
+    effective_dir = reports_dir if reports_dir is not None else default_canary_reports_dir()
+    if not effective_dir.exists():
         return []
     reports: list[CanaryReport] = []
-    for path in sorted(reports_dir.glob("*.json")):
+    for path in sorted(effective_dir.glob("*.json")):
         try:
             reports.append(CanaryReport.model_validate_json(path.read_text(encoding="utf-8")))
         except (OSError, ValueError) as exc:
@@ -652,7 +658,7 @@ def _notify_failure(report: CanaryReport, sender: Optional[NotifySender]) -> boo
 
 def send_weekly_summary(
     *,
-    reports_dir: Path = REPORTS_DIR,
+    reports_dir: Optional[Path] = None,
     today: date | None = None,
     sender: Optional[NotifySender] = None,
 ) -> bool:
@@ -845,7 +851,7 @@ def run_daily(
     failure_sender: Optional[NotifySender] = None,
     summary_sender: Optional[NotifySender] = None,
     base_url: str | None = None,
-    reports_dir: Path = REPORTS_DIR,
+    reports_dir: Optional[Path] = None,
     dry_run: bool = False,
     send_weekly: bool = True,
     timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS,
@@ -873,6 +879,7 @@ def run_daily(
     than `timeout_seconds` have elapsed since the run was created, in which
     case it is `timeout` (also not green, and notified like a failure).
     """
+    reports_dir = reports_dir if reports_dir is not None else default_canary_reports_dir()
     clock = clock or SystemClock()
     today = day or clock.today()
     scenario = select_scenario(today)
@@ -1051,7 +1058,7 @@ def _cli_run(args: argparse.Namespace) -> int:
 
 def _cli_summary(args: argparse.Namespace) -> int:
     today = date.fromisoformat(args.date) if args.date else SystemClock().today()
-    reports = load_reports(REPORTS_DIR, limit=7)
+    reports = load_reports(limit=7)
     streak = green_streak(reports)
     print(
         json.dumps(
@@ -1069,7 +1076,7 @@ def _cli_summary(args: argparse.Namespace) -> int:
 
 
 def _cli_status(_args: argparse.Namespace) -> int:
-    reports = load_reports(REPORTS_DIR, limit=7)
+    reports = load_reports(limit=7)
     streak = green_streak(reports)
     last = reports[-1] if reports else None
     print(
