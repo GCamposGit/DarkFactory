@@ -2726,7 +2726,7 @@
     "project_id": "darkfac",
     "title": "catalog.sync_to_project cria diretorio e reporta sucesso em caminho inexistente (em producao Linux o darkfac esta registrado com caminho Windows)",
     "origin": "agent",
-    "status": "planned",
+    "status": "completed",
     "item_type": "quality",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -2756,7 +2756,8 @@
     "estimated_complexity": "small",
     "dependencies": [],
     "created_at": "2026-09-30T23:30:00Z",
-    "updated_at": "2026-09-30T23:30:00Z"
+    "updated_at": "2026-10-03T17:49:44Z",
+    "delivery_evidence": "d51bb10d58c5c04e52f785aeafbecd29d50935ad"
   },
   {
     "id": "USR-102",
