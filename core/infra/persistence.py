@@ -23,10 +23,16 @@ from urllib.parse import urlparse
 from pydantic import BaseModel, ConfigDict, Field
 
 from core.orchestrator.cloud_db import sanitize_database_url
+from core.paths import state_root
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_PERSISTENCE_DB = Path(".factory/persistence.db")
+
+def default_persistence_db_path() -> Path:
+    return state_root() / "persistence.db"
+
+
+DEFAULT_PERSISTENCE_DB = default_persistence_db_path()
 
 POSTGRES_SCHEMA_DDL = """
 CREATE TABLE IF NOT EXISTS tenant_records (
@@ -118,7 +124,7 @@ class HybridPersistenceAdapter:
         *,
         auto_sync: bool = False,
     ) -> None:
-        self.db_path = Path(db_path) if db_path else DEFAULT_PERSISTENCE_DB
+        self.db_path = Path(db_path) if db_path else default_persistence_db_path()
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self.raw_url = database_url or os.environ.get("DARKFAC_HF02_DATABASE_URL")
         self.auto_sync = auto_sync

@@ -25,6 +25,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from core.paths import state_root
 from core.integrations.n8n import (
     N8nApiClient,
     N8nConfig,
@@ -65,7 +66,7 @@ def cmd_telegram_process_update(args: argparse.Namespace) -> int:
     if args.user_id:
         config.authorized_user_ids.append(args.user_id)
 
-    gateway = TelegramGateway(config=config, state_dir=REPO_ROOT / ".factory" / "telegram")
+    gateway = TelegramGateway(config=config, state_dir=state_root() / "telegram")
     result = gateway.process_update(update_data)
 
     if args.json:
@@ -83,7 +84,7 @@ def cmd_telegram_process_update(args: argparse.Namespace) -> int:
 def cmd_telegram_status(args: argparse.Namespace) -> int:
     """Check Telegram gateway status."""
     config = _load_telegram_config(args.config, role=getattr(args, "role", "ops"))
-    gateway = TelegramGateway(config=config, state_dir=REPO_ROOT / ".factory" / "telegram")
+    gateway = TelegramGateway(config=config, state_dir=state_root() / "telegram")
     status = gateway.get_status()
 
     if args.json:
@@ -102,7 +103,7 @@ def cmd_telegram_status(args: argparse.Namespace) -> int:
 def cmd_telegram_send(args: argparse.Namespace) -> int:
     """Send a notification message via Telegram Gateway."""
     config = _load_telegram_config(args.config, role=getattr(args, "role", "ops"))
-    gateway = TelegramGateway(config=config, state_dir=REPO_ROOT / ".factory" / "telegram")
+    gateway = TelegramGateway(config=config, state_dir=state_root() / "telegram")
     success = gateway.send_message(chat_id=args.chat_id, text=args.text)
 
     output = {"chat_id": args.chat_id, "sent": success, "queued": not success}

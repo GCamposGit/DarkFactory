@@ -11,11 +11,11 @@ from typing import Optional
 from core.usage.ledger import ModelUsageLedger
 from core.usage.models import ModelCallEvent, ModelModality, ModelTier
 from core.usage.monitor import AccountUsageMonitor
-from core.paths import project_root
+from core.paths import project_root, state_root
 
 
 PROJECT_ROOT = project_root()
-USAGE_DIR = PROJECT_ROOT / ".factory" / "usage"
+USAGE_DIR = state_root() / "usage"
 
 
 def _configure_stdout() -> None:

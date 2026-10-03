@@ -41,6 +41,7 @@ from core.execution.providers import (
 )
 from core.usage.ledger import ModelUsageLedger, infer_model_tier
 from core.usage.models import ModelCallEvent, ModelModality, ModelTier
+from core.paths import state_root
 
 logger = logging.getLogger("core.content.engine")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
@@ -70,12 +71,12 @@ class ContentEngine:
         provider: Optional[ModelProvider] = None,
     ) -> None:
         if storage_dir is None:
-            self.storage_dir = Path(__file__).resolve().parent.parent.parent / ".factory" / "content"
+            self.storage_dir = state_root() / "content"
         else:
             self.storage_dir = Path(storage_dir)
         self.storage_dir.mkdir(parents=True, exist_ok=True)
         self.linter = AntiSlopLinter()
-        usage_dir = self.storage_dir.parent / "usage"
+        usage_dir = self.storage_dir.parent / "usage" if storage_dir else (state_root() / "usage")
         self.model_usage_ledger = ModelUsageLedger(usage_dir)
         self.provider = provider
 

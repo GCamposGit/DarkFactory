@@ -16,7 +16,7 @@ import urllib.error
 from typing import Dict, Any, Optional
 from pathlib import Path
 
-from core.paths import project_root
+from core.paths import project_root, state_root
 
 # Ensure root directory in sys.path
 _ROOT = project_root()
@@ -470,7 +470,7 @@ def recommend_model(
         try:
             from core.usage.monitor import AccountUsageMonitor
 
-            usage_report = AccountUsageMonitor(_ROOT / ".factory" / "usage" / "providers").inspect(force=False)
+            usage_report = AccountUsageMonitor(state_root() / "usage" / "providers").inspect(force=False)
         except Exception:
             pass
 
@@ -579,7 +579,7 @@ def main():
                 from core.usage.monitor import AccountUsageMonitor
 
                 usage_report = AccountUsageMonitor(
-                    _ROOT / ".factory" / "usage" / "providers"
+                    state_root() / "usage" / "providers"
                 ).inspect()
             except Exception as exc:
                 print(f"[WARN] Quota scan unavailable: {exc}", file=sys.stderr)
@@ -603,7 +603,7 @@ def main():
         res = query_ollama("/api/generate", payload, timeout=args.timeout)
         latency_ms = round((time.perf_counter() - started) * 1000, 1)
         try:
-            ModelUsageLedger(_ROOT / ".factory" / "usage").record(ModelCallEvent(
+            ModelUsageLedger(state_root() / "usage").record(ModelCallEvent(
                 provider="ollama",
                 model=str(res.get("model") or args.model),
                 tier=ModelTier.LOCAL,

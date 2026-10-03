@@ -58,6 +58,7 @@ from hub.backend.models import (
     PortfolioProjectDetailResponse,
     PortfolioOverviewResponse,
 )
+from core.paths import state_root
 from core.audio.engine import TranscriptionResult
 from core.execution.providers import get_openrouter_api_key
 from core.content import (
@@ -301,7 +302,7 @@ class HubService:
         elif data_dir is not None:
             self.usage_dir = self.data_dir / "usage"
         else:
-            self.usage_dir = Path(__file__).resolve().parents[2] / ".factory" / "usage"
+            self.usage_dir = state_root() / "usage"
         self.model_usage_ledger = ModelUsageLedger(self.usage_dir)
         self.account_usage_monitor = AccountUsageMonitor(self.usage_dir / "providers")
         self.api_credits_monitor = ApiCreditsMonitor(self.usage_dir / "credits")
@@ -344,19 +345,19 @@ class HubService:
                     except Exception as exc:
                         logger.warning(f"Failed to copy seed item {seed_item.name}: {exc}")
 
-        self.task_state_path = Path(state_path) if state_path is not None else repository_root / ".factory" / "state.json"
+        self.task_state_path = Path(state_path) if state_path is not None else state_root() / "state.json"
         self.orchestrator_path = (
             Path(orchestrator_path)
             if orchestrator_path is not None
-            else repository_root / ".factory" / "orchestrator.sqlite3"
+            else state_root() / "orchestrator.sqlite3"
         )
         # Canonical HF-05 control store read by the task dashboard (USR-42).
         # ``control_database_url=None`` defers to DARKHUB_CONTROL_DATABASE_URL, then DARKFAC_HF02_DATABASE_URL.
         self.control_db_path = (
-            Path(control_db_path) if control_db_path is not None else repository_root / ".factory" / "control.db"
+            Path(control_db_path) if control_db_path is not None else state_root() / "control.db"
         )
         self.control_database_url = control_database_url
-        self.test_subagent_engine = TestSubagentEngine(project_root=repository_root)
+        self.test_subagent_engine = TestSubagentEngine(project_root=repository_root, log_dir=state_root() / "test_logs")
         self.roadmap = build_repository_roadmap_service(
             repository_root,
             demands_path=self.demands_dir / "demands.json",
@@ -375,7 +376,7 @@ class HubService:
         from core.portfolio.budget_manager import PortfolioBudgetManager
         from core.portfolio.scheduler import PortfolioScheduler
         from core.projects.registry import ProjectRegistry
-        self.portfolio_dir = repository_root / ".factory" / "portfolio"
+        self.portfolio_dir = state_root() / "portfolio"
         self.budget_manager = PortfolioBudgetManager(storage_file=self.portfolio_dir / "budgets.json")
         self.portfolio_scheduler = PortfolioScheduler(storage_file=self.portfolio_dir / "scheduler_state.json")
         self.project_registry = ProjectRegistry(repository_root / ".factory" / "projects.json")
@@ -388,7 +389,7 @@ class HubService:
         """Accessor for canonical SQLiteControlStore (HF-13-02)."""
         if self._control_store is None:
             from core.workflow.control_store import SQLiteControlStore
-            control_db = self.project_root / ".factory" / "control.db"
+            control_db = state_root() / "control.db"
             control_db.parent.mkdir(parents=True, exist_ok=True)
             self._control_store = SQLiteControlStore(db_path=control_db)
         return self._control_store
@@ -1644,7 +1645,7 @@ class HubService:
         if sys.platform == "win32":
             creationflags = subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
 
-        log_dir = self.project_root / ".factory" / "services"
+        log_dir = state_root() / "services"
         log_dir.mkdir(parents=True, exist_ok=True)
         log_file = log_dir / f"{service_id}.log"
 
@@ -2411,7 +2412,7 @@ class HubService:
 
     def execute_test_run(self, instruction: TestExecutionInstruction) -> DistilledTestReport:
         """Executes a test run via TestSubagentEngine with automatic failover."""
-        engine = TestSubagentEngine(project_root=self.project_root)
+        engine = TestSubagentEngine(project_root=self.project_root, log_dir=state_root() / "test_logs")
         return engine.execute(instruction)
 
     # ---------------------------------------------------------------------------
@@ -2471,6 +2472,14 @@ class HubService:
         """
         from core.integrations.telegram import load_telegram_config
 
+        is_custom_data_dir = self.data_dir != Path(__file__).resolve().parent.parent / "data"
+        if is_custom_data_dir:
+            telegram_state_dir = self.data_dir / "telegram"
+        elif self.project_root.resolve() != Path(__file__).resolve().parents[2]:
+            telegram_state_dir = self.project_root / ".factory" / "telegram"
+        else:
+            telegram_state_dir = state_root() / "telegram"
+
         if role == "owner":
             users_raw = os.environ.get("TELEGRAM_AUTHORIZED_USERS") or os.environ.get("TELEGRAM_ALLOWED_USERS", "")
             chats_raw = os.environ.get("TELEGRAM_AUTHORIZED_CHATS") or os.environ.get("TELEGRAM_ALLOWED_CHATS", "")
@@ -2487,7 +2496,7 @@ class HubService:
             owner_config = load_telegram_config(role="owner", config_dir=self.project_root / ".factory" / "telegram")
             if owner_updates:
                 owner_config = owner_config.model_copy(update=owner_updates)
-            return TelegramGateway(config=owner_config, state_dir=self.project_root / ".factory" / "telegram")
+            return TelegramGateway(config=owner_config, state_dir=telegram_state_dir)
 
         token = os.environ.get("TELEGRAM_OPS_BOT_TOKEN") or os.environ.get("TELEGRAM_BOT_TOKEN")
         users_raw = os.environ.get("TELEGRAM_AUTHORIZED_USERS") or os.environ.get("TELEGRAM_ALLOWED_USERS", "")
@@ -2556,7 +2565,7 @@ class HubService:
                 return {"resumed": False, "error": str(e)}
 
         def _handle_approval(project_id: str, digest: str, user_id: int) -> Dict[str, Any]:
-            pipeline = ReleasePipelineService(storage_dir=self.project_root / ".factory" / "releases")
+            pipeline = ReleasePipelineService(storage_path=state_root() / "releases" / "release_registry.json")
             receipt = pipeline.record_client_acceptance(
                 project_id=project_id,
                 artifact_digest=digest,
@@ -2590,7 +2599,7 @@ class HubService:
 
         return TelegramGateway(
             config=config,
-            state_dir=self.project_root / ".factory" / "telegram",
+            state_dir=telegram_state_dir,
             demand_handler=_handle_demand,
             line_handler=_handle_line,
             status_handler=_handle_status,

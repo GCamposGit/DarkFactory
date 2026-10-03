@@ -24,12 +24,13 @@ from core.benchmarks.models import (
     ModelTier,
     TaskComplexity,
 )
+from core.paths import state_root
 from core.benchmarks.frontier import get_top_candidates_for_tier
 from core.benchmarks.fetcher import ensure_daily_benchmark
 
 logger = logging.getLogger("darkfac.benchmarks.racing")
 
-DEFAULT_EMPIRICAL_LEDGER_PATH = Path(".factory/benchmarks/empirical_ledger.json")
+DEFAULT_EMPIRICAL_LEDGER_PATH = state_root() / "benchmarks" / "empirical_ledger.json"
 K_FACTOR_ELO = 32.0
 LiveExecutor = Callable[[str, str], LiveModelExecution]
 
@@ -37,8 +38,8 @@ LiveExecutor = Callable[[str, str], LiveModelExecution]
 class EmpiricalBenchmarkLedger:
     """Perpetual storage of real-world Dark Factory empirical performance metrics."""
 
-    def __init__(self, file_path: Path = DEFAULT_EMPIRICAL_LEDGER_PATH):
-        self.file_path = file_path
+    def __init__(self, file_path: Optional[Path] = None):
+        self.file_path = Path(file_path) if file_path is not None else (state_root() / "benchmarks" / "empirical_ledger.json")
         self.stats: Dict[str, EmpiricalModelStats] = {}
         self.legacy_stats: Dict[str, EmpiricalModelStats] = {}
         self.history: List[SpeculativeRaceResult] = []

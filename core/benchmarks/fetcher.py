@@ -14,6 +14,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, List, Any, Optional, Tuple
 
+from core.paths import state_root
 from core.benchmarks.models import (
     ModelBenchmarkEntry,
     DailyBenchmarkLedger,
@@ -37,7 +38,12 @@ from core.benchmarks.frontier import (
 
 logger = logging.getLogger("dark_factory.benchmarks")
 
-BENCHMARKS_DIR = Path(".factory/benchmarks")
+
+def default_benchmarks_dir() -> Path:
+    return state_root() / "benchmarks"
+
+
+BENCHMARKS_DIR = default_benchmarks_dir()
 LATEST_LEDGER_FILE = BENCHMARKS_DIR / "latest.json"
 HISTORY_DIR = BENCHMARKS_DIR / "history"
 BASELINE_CATALOG_FILE = Path(__file__).parent / "data" / "benchmark_catalog.json"
@@ -105,10 +111,13 @@ class DailyBenchmarkService:
     """Orchestrates once-per-day benchmarking of LLM frontier models."""
 
     def __init__(self, workspace_root: Optional[Path] = None):
-        self.root = workspace_root or Path.cwd()
-        self.benchmarks_dir = self.root / BENCHMARKS_DIR
-        self.latest_file = self.root / LATEST_LEDGER_FILE
-        self.history_dir = self.root / HISTORY_DIR
+        self.root = workspace_root
+        if workspace_root is not None:
+            self.benchmarks_dir = workspace_root / ".factory" / "benchmarks"
+        else:
+            self.benchmarks_dir = state_root() / "benchmarks"
+        self.latest_file = self.benchmarks_dir / "latest.json"
+        self.history_dir = self.benchmarks_dir / "history"
         self._catalog_field_provenance: Dict[str, Dict[str, Any]] = {}
         self._catalog_observed_at: Optional[str] = None
         self._last_openrouter_observed_at: Optional[str] = None

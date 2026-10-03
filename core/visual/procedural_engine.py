@@ -12,7 +12,7 @@ import math
 import time
 from pathlib import Path
 
-from core.paths import project_root
+from core.paths import project_root, state_root
 from typing import Tuple, List, Optional
 from PIL import Image, ImageDraw, ImageFont, ImageFilter
 
@@ -60,7 +60,7 @@ class ProceduralVisualEngine:
 
     def __init__(self, output_dir: Optional[Path] = None) -> None:
         if output_dir is None:
-            self.output_dir = project_root() / ".factory" / "visuals"
+            self.output_dir = state_root() / "visuals"
         else:
             self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)

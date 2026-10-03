@@ -12,7 +12,7 @@ import logging
 from pathlib import Path
 from typing import Dict, List, Optional
 
-from core.paths import project_root
+from core.paths import project_root, state_root
 from core.projects.registry import get_project_registry
 from core.catalog.models import (
     ComponentDescriptor,
@@ -130,7 +130,7 @@ class CrossProjectCatalogManager:
         catalog_file: Optional[Path] = None,
     ) -> None:
         self.root = Path(root) if root else project_root()
-        self.catalog_file = Path(catalog_file) if catalog_file else (self.root / DEFAULT_CATALOG_FILE)
+        self.catalog_file = Path(catalog_file) if catalog_file else (state_root() / "catalog" / "components.json")
         self._components: Dict[str, ComponentDescriptor] = {}
         self._load()
 

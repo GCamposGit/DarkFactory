@@ -5,10 +5,15 @@ from __future__ import annotations
 import os
 import socket
 import sys
+import tempfile
 import urllib.error
 import urllib.request
 from pathlib import Path
 from typing import Any, Iterator
+
+if "DARKFAC_STATE_ROOT" not in os.environ:
+    _EARLY_STATE_ROOT = tempfile.mkdtemp(prefix="darkfac_state_")
+    os.environ["DARKFAC_STATE_ROOT"] = _EARLY_STATE_ROOT
 
 import numpy as np
 import pytest
@@ -282,6 +287,25 @@ def offline_test_environment(request: pytest.FixtureRequest) -> Iterator[None]:
                 os.environ.pop(key, None)
             else:
                 os.environ[key] = value
+
+
+@pytest.fixture(scope="session", autouse=True)
+def isolated_state_root(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Path]:
+    """Redirect DARKFAC_STATE_ROOT to an isolated tmp directory for the test session.
+
+    This ensures that any test touching state_root() writes to an ephemeral
+    directory instead of contaminating the repository's real .factory directory.
+    """
+    old_val = os.environ.get("DARKFAC_STATE_ROOT")
+    state_dir = tmp_path_factory.mktemp("darkfac_state_root")
+    os.environ["DARKFAC_STATE_ROOT"] = str(state_dir)
+    try:
+        yield state_dir
+    finally:
+        if old_val is None:
+            os.environ.pop("DARKFAC_STATE_ROOT", None)
+        else:
+            os.environ["DARKFAC_STATE_ROOT"] = old_val
 
 
 @pytest.fixture(autouse=True)

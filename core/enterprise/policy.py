@@ -12,7 +12,7 @@ import logging
 from pathlib import Path
 from typing import Dict, List, Optional
 
-from core.paths import project_root
+from core.paths import project_root, state_root
 from core.enterprise.models import (
     DataResidencyMode,
     EnterpriseDeployDecision,
@@ -33,7 +33,7 @@ class EnterprisePolicyGuard:
 
     def __init__(self, root: Optional[Path] = None, configs_file: Optional[Path] = None) -> None:
         self.root = Path(root) if root else project_root()
-        self.configs_file = Path(configs_file) if configs_file else (self.root / DEFAULT_CONFIGS_FILE)
+        self.configs_file = Path(configs_file) if configs_file else (state_root() / "enterprise" / "configs.json")
         self.audit_chain = ImmutableAuditChain(self.root)
         self.sla_guard = EnterpriseSLAGuard(self.root)
         self._configs: Dict[str, EnterpriseProjectConfig] = {}

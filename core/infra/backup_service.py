@@ -26,6 +26,7 @@ from typing import Any, Sequence
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from core.paths import state_root
 from core.infra.crypto import decrypt_file, encrypt_file
 from core.infra.postgres_dumper import PostgresDumper, PostgresDumpResult
 from core.infra.r2_client import R2StorageClient
@@ -116,7 +117,7 @@ class CloudBackupService:
         postgres_dumper: PostgresDumper | None = None,
         encryption_key: str | None = None,
     ) -> None:
-        self.backup_root = Path(backup_root or (Path.cwd() / ".factory" / "backups")).resolve()
+        self.backup_root = Path(backup_root or (state_root() / "backups")).resolve()
         self.backup_root.mkdir(parents=True, exist_ok=True)
         self.registry_path = Path(registry_path or (self.backup_root / "registry.json")).resolve()
 

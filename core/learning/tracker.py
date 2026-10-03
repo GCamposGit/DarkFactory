@@ -27,8 +27,9 @@ from core.learning.models import (
     PolicyOrigin,
     PolicyStatus,
 )
+from core.paths import state_root
 
-DEFAULT_LEARNING_DIR = Path(".factory") / "learning"
+DEFAULT_LEARNING_DIR = state_root() / "learning"
 DEFAULT_LEDGER_FILE = DEFAULT_LEARNING_DIR / "learning_ledger.json"
 
 

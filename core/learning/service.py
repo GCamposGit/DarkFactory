@@ -38,7 +38,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from core.orchestrator.context import ContextSelector, TaskContext
 from core.execution.agent_executor import TaskSpec
-from core.paths import project_root
+from core.paths import project_root, state_root
 from core.research.ledger import KnowledgeLedgerManager
 from core.research.models import (
     AuthorityTier,
@@ -58,7 +58,7 @@ class PersistentMemoryService:
         base_dir: Path | str | None = None,
         session_id: Optional[str] = None,
     ) -> None:
-        self.base_dir = Path(base_dir) if base_dir else (project_root() / ".factory")
+        self.base_dir = Path(base_dir) if base_dir else state_root()
         self.learning_dir = self.base_dir / "learning"
         self.research_dir = self.base_dir / "research"
         self.learning_packs_dir = self.base_dir / "learning_packs"

@@ -11,10 +11,10 @@ from typing import List, Dict, Any, Optional
 
 from core.learning_pack.models import SessionLearningPack
 from core.learning_pack.renderer import LearningPackRenderer
-from core.paths import project_root
+from core.paths import project_root, state_root
 
 _ROOT_DIR = project_root()
-DEFAULT_PACKS_DIR = _ROOT_DIR / ".factory" / "learning_packs"
+DEFAULT_PACKS_DIR = state_root() / "learning_packs"
 INDEX_FILE_NAME = "packs_index.json"
 
 
@@ -22,7 +22,7 @@ class LearningPackStore:
     """Manages reading and writing of session learning packs."""
 
     def __init__(self, storage_dir: Optional[Path] = None):
-        self.storage_dir = storage_dir or DEFAULT_PACKS_DIR
+        self.storage_dir = storage_dir or (state_root() / "learning_packs")
         self.index_file = self.storage_dir / INDEX_FILE_NAME
         self._ensure_storage_exists()
 

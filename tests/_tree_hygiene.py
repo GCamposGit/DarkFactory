@@ -119,6 +119,32 @@ def _parse_porcelain_z(raw: str) -> list[tuple[str, str]]:
     return entries
 
 
+def _scan_factory_dir(root: Path, fingerprint: Fingerprint) -> None:
+    """Include unversioned/ignored files under .factory in the fingerprint.
+
+    Tests must never mutate the real .factory state. We use stat size and mtime
+    which takes < 0.3s for thousands of files, detecting any created, modified,
+    or deleted files under .factory.
+    """
+    factory_dir = root / ".factory"
+    if not factory_dir.is_dir():
+        return
+    try:
+        for entry in os.walk(factory_dir):
+            dirpath, _, filenames = entry
+            for fname in filenames:
+                full_path = Path(dirpath) / fname
+                try:
+                    st = full_path.stat()
+                    rel_path = full_path.relative_to(root).as_posix()
+                    if rel_path not in fingerprint:
+                        fingerprint[rel_path] = ("!!", f"{st.st_size}:{st.st_mtime_ns}")
+                except OSError:
+                    continue
+    except OSError:
+        pass
+
+
 def take_fingerprint(root: Path, *, max_hash_bytes: int = MAX_HASH_BYTES) -> Fingerprint | None:
     """Fingerprint the dirty set of the git checkout at ``root``.
 
@@ -154,6 +180,7 @@ def take_fingerprint(root: Path, *, max_hash_bytes: int = MAX_HASH_BYTES) -> Fin
     fingerprint: Fingerprint = {}
     for status, path in _parse_porcelain_z(process.stdout):
         fingerprint[path] = (status, _content_digest(root / path, max_hash_bytes))
+    _scan_factory_dir(root, fingerprint)
     return fingerprint
 
 

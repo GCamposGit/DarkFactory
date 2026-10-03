@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from core.notifications.models import AlertSeverity, NotificationEvent
+from core.paths import state_root
 
 logger = logging.getLogger("darkfac.notifications.store")
 
@@ -35,7 +36,7 @@ class NotificationStore:
         self.store_path = store_path or Path(
             os.environ.get(
                 "DARKFAC_NOTIFICATIONS_PATH",
-                str(Path.cwd() / ".factory" / "notifications" / "notifications.jsonl"),
+                str(state_root() / "notifications" / "notifications.jsonl"),
             )
         )
         self.store_path.parent.mkdir(parents=True, exist_ok=True)

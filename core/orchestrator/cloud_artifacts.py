@@ -13,8 +13,16 @@ from pathlib import Path
 from typing import Union
 from pydantic import BaseModel, ConfigDict, Field
 
+from core.paths import state_root
+
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_ARTIFACTS_ROOT = PROJECT_ROOT / ".factory" / "artifacts"
+
+
+def default_artifacts_root() -> Path:
+    return state_root() / "artifacts"
+
+
+DEFAULT_ARTIFACTS_ROOT = default_artifacts_root()
 
 
 class ArtifactReference(BaseModel):
@@ -33,7 +41,7 @@ class CloudArtifactStore:
     """Manages volume-backed artifact persistence with integrity guarantees."""
 
     def __init__(self, root_dir: Path | None = None) -> None:
-        self.root_dir = (root_dir or DEFAULT_ARTIFACTS_ROOT).resolve()
+        self.root_dir = (root_dir if root_dir is not None else default_artifacts_root()).resolve()
         self.root_dir.mkdir(parents=True, exist_ok=True)
 
     def _safe_target_path(self, workflow_id: str, filename: str) -> Path:

@@ -15,11 +15,12 @@ from typing import Any, Dict, List, Optional
 
 from core.integrations.n8n import N8nApiClient, load_n8n_config
 from core.integrations.telegram import TelegramGateway, load_telegram_config
+from core.paths import state_root
 from .models import LeadCapture, LeadDeliveryResult
 
 logger = logging.getLogger("darkfac.marketing.crm")
 
-DEFAULT_LEADS_DB_DIR = Path(".factory/marketing")
+DEFAULT_LEADS_DB_DIR = state_root() / "marketing"
 DEFAULT_LEADS_DB_PATH = DEFAULT_LEADS_DB_DIR / "leads.db"
 
 

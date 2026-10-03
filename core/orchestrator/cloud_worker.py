@@ -22,6 +22,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from core.orchestrator.adapters.control_postgres import PostgresControlStore
 from core.orchestrator.cloud_artifacts import CloudArtifactStore
+from core.paths import state_root
 from core.workflow.control_contracts import (
     Claim,
     ExternalOperation,
@@ -395,7 +396,7 @@ class CloudWorker:
     @property
     def artifact_store(self) -> CloudArtifactStore:
         if self._artifact_store is None:
-            artifacts_root = Path("/app/.factory/artifacts") if Path("/app").is_dir() else Path(".factory/artifacts")
+            artifacts_root = Path("/app/.factory/artifacts") if Path("/app").is_dir() else (state_root() / "artifacts")
             self._artifact_store = CloudArtifactStore(root_dir=artifacts_root)
         return self._artifact_store
 

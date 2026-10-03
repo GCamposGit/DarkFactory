@@ -38,6 +38,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable, Literal, Optional
 
+from core.paths import project_root, state_root
+
 from pydantic import BaseModel, Field, field_validator
 
 from core.harness.remote_worker import (
@@ -730,7 +732,8 @@ def _run_codex(req: AgentRequest) -> AgentResult:
             error_kind="not_installed",
         )
 
-    tmp_dir = REPO_ROOT / ".factory" / "tmp"
+    mocked_tmp = REPO_ROOT / ".factory" / "tmp"
+    tmp_dir = mocked_tmp if (REPO_ROOT != project_root()) else (state_root() / "tmp")
     tmp_dir.mkdir(parents=True, exist_ok=True)
     tmp_out = tmp_dir / f"codex_line_{uuid.uuid4().hex[:8]}.json"
     argv = build_codex_argv(executable, req, tmp_out)
@@ -842,7 +845,8 @@ def _run_grok_write(req: AgentRequest, executable: str) -> AgentResult:
     headless run cannot give ends with `stopReason: "cancelled"` and exit 0, which is reported as a crash
     (never as a silent success) with the permission mode in the message.
     """
-    tmp_dir = REPO_ROOT / ".factory" / "tmp"
+    mocked_tmp = REPO_ROOT / ".factory" / "tmp"
+    tmp_dir = mocked_tmp if (REPO_ROOT != project_root()) else (state_root() / "tmp")
     prompt_file = tmp_dir / f"grok_line_{uuid.uuid4().hex[:8]}.prompt.txt"
     start = time.perf_counter()
     try:
@@ -1131,7 +1135,8 @@ def run_agent(req: AgentRequest) -> AgentResult:
             input_toks = res.usage.get("prompt_tokens") or res.usage.get("input_tokens")
             output_toks = res.usage.get("completion_tokens") or res.usage.get("output_tokens")
 
-        usage_dir = REPO_ROOT / ".factory" / "usage"
+        mocked_usage = REPO_ROOT / ".factory" / "usage"
+        usage_dir = mocked_usage if (REPO_ROOT != project_root()) else (state_root() / "usage")
         ledger = ModelUsageLedger(usage_dir)
         ledger.record(
             ModelCallEvent(

@@ -30,6 +30,7 @@ from pydantic import BaseModel, Field
 
 from core.line.agent_cli import AgentResult, _DEFAULT_OPENROUTER_MODEL, supports
 from core.line.operating_harness import resolve_operating_harness
+from core.paths import project_root, state_root
 
 logger = logging.getLogger(__name__)
 
@@ -129,7 +130,7 @@ def default_config_path() -> Path:
 
 
 def default_cooldown_path() -> Path:
-    return REPO_ROOT / ".factory" / "usage" / "cooldowns.json"
+    return state_root() / "usage" / "cooldowns.json"
 
 
 def _default_routing_config() -> RoutingConfig:
@@ -323,9 +324,11 @@ def _parse_iso_utc(raw: Any) -> Optional[datetime]:
 
 
 def _snapshot_max_age(provider_dir: Path) -> float:
-    if os.environ.get("PYTEST_CURRENT_TEST") and provider_dir.resolve() == (
-        _CANONICAL_REPO_ROOT / ".factory" / "usage" / "providers"
-    ).resolve():
+    resolved = provider_dir.resolve()
+    if os.environ.get("PYTEST_CURRENT_TEST") and (
+        resolved == (_CANONICAL_REPO_ROOT / ".factory" / "usage" / "providers").resolve()
+        or resolved == (state_root() / "usage" / "providers").resolve()
+    ):
         return 86400.0 * 30.0
     return _SNAPSHOT_MAX_AGE_SECONDS
 
@@ -343,7 +346,8 @@ def _default_quota_headroom(provider_id: str) -> Optional[float]:
         from core.usage.adapters import build_default_adapters
         from core.usage.reservation import QuotaReservationManager
 
-        provider_dir = REPO_ROOT / ".factory" / "usage" / "providers"
+        mocked_dir = REPO_ROOT / ".factory" / "usage" / "providers"
+        provider_dir = mocked_dir if (REPO_ROOT != project_root() and mocked_dir.is_dir()) else (state_root() / "usage" / "providers")
         max_age = _snapshot_max_age(provider_dir)
         snapshot_stale = False
         snapshot_file = provider_dir / f"{provider_id}.json"
@@ -675,7 +679,7 @@ def _default_quota_reset(provider_id: str, critical_threshold: float = 15.0) -> 
     try:
         from core.usage.adapters import build_default_adapters
 
-        provider_dir = REPO_ROOT / ".factory" / "usage" / "providers"
+        provider_dir = state_root() / "usage" / "providers"
         for adapter in build_default_adapters(provider_dir):
             if adapter.spec.provider_id != provider_id:
                 continue

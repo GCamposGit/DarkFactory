@@ -16,7 +16,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from core.paths import project_root
+from core.paths import project_root, state_root
 from core.evolution.models import (
     EvolutionProposal,
     EvolutionReport,
@@ -45,7 +45,7 @@ class FactoryEvolutionEngine:
         storage_dir: Path | None = None,
     ) -> None:
         self.root = Path(root) if root else project_root()
-        self.storage_dir = Path(storage_dir) if storage_dir else (self.root / DEFAULT_EVOLUTION_DIR)
+        self.storage_dir = Path(storage_dir) if storage_dir else (state_root() / "evolution")
         self.proposals_file = self.storage_dir / "proposals.json"
         self.rollbacks_dir = self.storage_dir / "rollbacks"
         self.sandbox = EvolutionHoldoutSandbox(self.root)
