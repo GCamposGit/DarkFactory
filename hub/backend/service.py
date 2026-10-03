@@ -2472,6 +2472,13 @@ class HubService:
         """
         from core.integrations.telegram import load_telegram_config
 
+        if self.data_dir is not None:
+            telegram_state_dir = self.data_dir / "telegram"
+        elif self.project_root.resolve() != Path(__file__).resolve().parents[2]:
+            telegram_state_dir = self.project_root / ".factory" / "telegram"
+        else:
+            telegram_state_dir = state_root() / "telegram"
+
         if role == "owner":
             users_raw = os.environ.get("TELEGRAM_AUTHORIZED_USERS") or os.environ.get("TELEGRAM_ALLOWED_USERS", "")
             chats_raw = os.environ.get("TELEGRAM_AUTHORIZED_CHATS") or os.environ.get("TELEGRAM_ALLOWED_CHATS", "")
@@ -2488,7 +2495,7 @@ class HubService:
             owner_config = load_telegram_config(role="owner", config_dir=self.project_root / ".factory" / "telegram")
             if owner_updates:
                 owner_config = owner_config.model_copy(update=owner_updates)
-            return TelegramGateway(config=owner_config, state_dir=state_root() / "telegram")
+            return TelegramGateway(config=owner_config, state_dir=telegram_state_dir)
 
         token = os.environ.get("TELEGRAM_OPS_BOT_TOKEN") or os.environ.get("TELEGRAM_BOT_TOKEN")
         users_raw = os.environ.get("TELEGRAM_AUTHORIZED_USERS") or os.environ.get("TELEGRAM_ALLOWED_USERS", "")
@@ -2591,7 +2598,7 @@ class HubService:
 
         return TelegramGateway(
             config=config,
-            state_dir=state_root() / "telegram",
+            state_dir=telegram_state_dir,
             demand_handler=_handle_demand,
             line_handler=_handle_line,
             status_handler=_handle_status,
