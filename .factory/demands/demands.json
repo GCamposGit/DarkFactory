@@ -2545,7 +2545,7 @@
     "project_id": "darkfac",
     "title": "Testes fixam contagens, IDs e hashes de arquivos vivos (ledger, roadmap, claims): toda edicao legitima exige editar 3 arquivos e quebra o portao",
     "origin": "agent",
-    "status": "planned",
+    "status": "completed",
     "item_type": "quality",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -2575,7 +2575,8 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-09-30T22:00:00Z",
-    "updated_at": "2026-09-30T22:00:00Z"
+    "updated_at": "2026-10-03T11:13:48Z",
+    "delivery_evidence": "6d9573f8596c80a31b435c6bda51fa79e4f7d843"
   },
   {
     "id": "USR-96",
