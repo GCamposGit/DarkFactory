@@ -2026,9 +2026,9 @@
     "project_id": "darkfac",
     "title": "Flaky: test_runtime_spike_scenarios R12 STORE_UNAVAILABLE no worker de testes",
     "origin": "user",
-    "status": "planned",
+    "status": "completed",
     "item_type": "feature",
-    "lifecycle_stage": "execution",
+    "lifecycle_stage": "delivered",
     "horizon": "now",
     "tags": [
       "user-demand",
@@ -2054,7 +2054,8 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-09-30T20:20:52.619254Z",
-    "updated_at": "2026-10-01T07:00:00Z"
+    "updated_at": "2026-10-03T10:45:44Z",
+    "delivery_evidence": "c9d522ef8399eac227d796ec8dd92c37f89b214f"
   },
   {
     "id": "USR-84",
