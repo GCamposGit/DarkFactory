@@ -24,7 +24,10 @@ if str(IMPORT_ROOT) not in sys.path:
     sys.path.insert(0, str(IMPORT_ROOT))
 
 from core.harness import suite_lock as _suite_lock
-from tests import _tree_hygiene
+from tests import _tree_hygiene, _worker_capacity
+
+# Mitigate Windows WMI query crashes (0x8007000e) during worker startup (USR-95)
+_worker_capacity.mitigate_windows_wmi_startup()
 
 _DEFAULT_SUITE_LOCK_MIN_ITEMS = 100
 
@@ -64,6 +67,23 @@ def _requested_numprocesses(config: pytest.Config) -> int | None:
     if not value or value in ("0",):
         return None
     return value
+
+
+@pytest.hookimpl(tryfirst=True)
+def pytest_cmdline_main(config: pytest.Config) -> None:
+    """Enforce memory-safe worker limit on xdist before workers spawn (USR-95)."""
+    safe_cap = _worker_capacity.calculate_safe_worker_cap()
+    current_max = getattr(config.option, "maxprocesses", None)
+    if current_max is not None and current_max > 0:
+        config.option.maxprocesses = min(current_max, safe_cap)
+    else:
+        config.option.maxprocesses = safe_cap
+
+
+@pytest.hookimpl(tryfirst=True)
+def pytest_xdist_auto_num_workers(config: pytest.Config) -> int:
+    """Provide memory-safe number of workers when --numprocesses=auto is requested (USR-95)."""
+    return _worker_capacity.calculate_safe_worker_cap()
 
 
 def _acquire_session_lock() -> None:
