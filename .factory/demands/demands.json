@@ -2028,7 +2028,7 @@
     "origin": "user",
     "status": "completed",
     "item_type": "feature",
-    "lifecycle_stage": "delivered",
+    "lifecycle_stage": "execution",
     "horizon": "now",
     "tags": [
       "user-demand",
