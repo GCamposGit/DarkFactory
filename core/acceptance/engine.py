@@ -33,6 +33,7 @@ from core.acceptance.models import (
 )
 from core.acceptance.observability import HF15ObservabilityTracker
 from core.acceptance.rollback import HF15RollbackCoordinator
+from core.paths import project_root as get_project_root, state_root
 from core.acceptance.test_data import (
     generate_g1_fixture,
     generate_g2_fixture,
@@ -51,7 +52,7 @@ logger = logging.getLogger("darkfac.acceptance.engine")
 
 def get_current_git_sha(project_root: Optional[Path] = None) -> str:
     """Retrieves current git commit SHA or a deterministic fallback."""
-    root = project_root or Path.cwd()
+    root = project_root or get_project_root()
     try:
         res = subprocess.run(
             ["git", "rev-parse", "HEAD"],
@@ -68,7 +69,7 @@ def get_current_git_sha(project_root: Optional[Path] = None) -> str:
 
 def compute_plan_digest(plan_path: Optional[Path] = None) -> str:
     """Computes SHA-256 digest of the HF-15 handoff plan document."""
-    target = plan_path or (Path.cwd() / "docs" / "handoffs" / "HF-15.md")
+    target = plan_path or (get_project_root() / "docs" / "handoffs" / "HF-15.md")
     if target.exists():
         content = target.read_bytes()
         return hashlib.sha256(content).hexdigest()
@@ -89,7 +90,7 @@ class HF15AcceptanceEngine:
     ) -> None:
         self.config = config or load_hf15_config()
         self.run_id = run_id or f"hf15_{uuid.uuid4().hex[:10]}"
-        self.report_dir = report_dir or (Path.cwd() / ".factory" / "reports" / f"hf-15-{self.run_id}")
+        self.report_dir = report_dir or (state_root() / "reports" / f"hf-15-{self.run_id}")
         self.env_manager = env_manager or HF15EnvironmentManager(self.config)
         
         # Provision isolated workspace

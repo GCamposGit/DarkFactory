@@ -28,6 +28,7 @@ from core.infra.backup_service import (
 from core.orchestrator.build_artifacts import ArtifactRef
 from core.orchestrator.deployment_adapter import TargetConfig
 from core.orchestrator.release_pipeline import ReleasePipelineService, RollbackReceipt
+from core.paths import state_root
 
 logger = logging.getLogger("darkfac.acceptance.rollback")
 
@@ -42,7 +43,7 @@ class HF15RollbackCoordinator:
         release_pipeline: Optional[ReleasePipelineService] = None,
         backup_root: Optional[Path] = None,
     ) -> None:
-        self.backup_root = backup_root or (Path.cwd() / ".factory" / "hf15" / "workspace" / "backups")
+        self.backup_root = backup_root or (state_root() / "hf15" / "workspace" / "backups")
         self.backup_root.mkdir(parents=True, exist_ok=True)
         self.backup_service = backup_service or CloudBackupService(backup_root=self.backup_root)
         self.release_pipeline = release_pipeline
@@ -233,7 +234,7 @@ class RollbackAdapter:
                 target.metadata.get("state_directory")
                 or target.metadata.get("data_dir")
                 or target.metadata.get("restore_target")
-                or (Path.cwd() / ".factory" / "workspace" / project_id)
+                or (state_root() / "workspace" / project_id)
             ).resolve()
         else:
             target_dir = Path(target).resolve()

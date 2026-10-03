@@ -53,7 +53,9 @@ models/.locks/
 .factory/services/
 .factory/test_logs/
 .factory/hf15/workspace/
-.factory/reports/
+.factory/reports/canary/
+.factory/reports/hf-15-*/
+.factory/reports/ticket_quota_usage.jsonl
 .factory/notifications/
 .factory/marketing/
 .factory/portfolio/
