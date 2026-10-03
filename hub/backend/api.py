@@ -1647,6 +1647,7 @@ def sync_catalog_component_endpoint(
     component_id: str = Body(..., description="Component ID to synchronize"),
     target_project_id: str = Body(..., description="Target project identifier"),
     overwrite: bool = Body(True, description="Whether to overwrite existing files"),
+    create: bool = Body(False, description="Whether to create target directory if missing"),
     service: HubService = Depends(require_owner_session),
 ) -> Dict[str, Any]:
     """Synchronizes a reusable catalog component into a target registered project."""
@@ -1657,6 +1658,7 @@ def sync_catalog_component_endpoint(
             component_id=component_id,
             target_project_id=target_project_id,
             overwrite=overwrite,
+            create=create,
         )
         return {"success": result.success, "result": result.model_dump(mode="json")}
     except KeyError as exc:
