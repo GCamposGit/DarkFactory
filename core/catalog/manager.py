@@ -9,6 +9,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import sys
 from pathlib import Path
 from typing import Dict, List, Optional
 
@@ -230,20 +231,47 @@ class CrossProjectCatalogManager:
         *,
         target_dir_override: Optional[Path | str] = None,
         overwrite: bool = True,
+        create: bool = False,
     ) -> SyncResult:
-        """Synchronize a component's files into a target project workspace."""
+        """Synchronize a component's files into a target project workspace (USR-101).
+
+        Args:
+            component_id: ID of the component in the catalog.
+            target_project_id: Project identifier in the project registry.
+            target_dir_override: Optional direct path to target workspace.
+            overwrite: Whether to overwrite existing files.
+            create: Whether to create target directory if it does not exist.
+        """
         comp = self.get_component(component_id)
         if not comp:
             raise KeyError(f"Component '{component_id}' not found in catalog.")
 
         if target_dir_override:
-            target_path = Path(target_dir_override)
+            target_path = Path(target_dir_override).resolve()
         else:
             reg = get_project_registry()
             proj = reg.get_project(target_project_id)
             if not proj:
                 raise KeyError(f"Target project '{target_project_id}' not found in registry.")
-            target_path = Path(proj.path)
+
+            resolved = proj.resolve_path()
+            if resolved is None:
+                raise ValueError(
+                    f"Target project '{target_project_id}' path '{proj.path}' cannot be resolved "
+                    f"on platform '{sys.platform}'. Configure 'paths' mapping or provide target_dir_override."
+                )
+            target_path = resolved.resolve()
+
+        # Validate target directory existence (USR-101)
+        if not target_path.exists():
+            if not create:
+                raise FileNotFoundError(
+                    f"Target directory '{target_path}' does not exist for project '{target_project_id}'. "
+                    f"Explicit create=True is required to create new target directories."
+                )
+            target_path.mkdir(parents=True, exist_ok=True)
+        elif not target_path.is_dir():
+            raise NotADirectoryError(f"Target path '{target_path}' is not a directory.")
 
         # Check compatibility if archetypes are specified
         if comp.compatible_archetypes and not target_dir_override:
@@ -258,7 +286,16 @@ class CrossProjectCatalogManager:
         skipped: List[str] = []
 
         for cfile in comp.files:
-            dest_file = target_path / cfile.path
+            dest_file = (target_path / cfile.path).resolve()
+            # Path traversal prevention: ensure dest_file is inside target_path
+            try:
+                dest_file.relative_to(target_path)
+            except ValueError:
+                raise PermissionError(
+                    f"Path traversal detected: file path '{cfile.path}' resolves outside "
+                    f"target directory '{target_path}'."
+                )
+
             dest_file.parent.mkdir(parents=True, exist_ok=True)
 
             if dest_file.is_file() and not overwrite:

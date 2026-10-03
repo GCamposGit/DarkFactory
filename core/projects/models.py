@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import re
+import sys
 from enum import Enum
+from pathlib import Path
 from typing import Optional
 from datetime import datetime, timezone
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -89,6 +91,10 @@ class ProjectDescriptor(BaseModel):
     name: str = Field(..., min_length=2, max_length=120, description="Human-readable project title")
     description: str = Field(default="", description="High-level project scope or client description")
     path: Optional[str] = Field(default=None, description="Filesystem absolute path to workspace")
+    paths: dict[str, str] = Field(
+        default_factory=dict,
+        description="Platform-specific paths, e.g. {'windows': 'C:\\dev\\...', 'linux': '/app/...'}",
+    )
     kind: ProjectKind = Field(default=ProjectKind.CLIENT_PORTFOLIO, description="Project architectural kind")
     prefix: str = Field(default="PRJ", max_length=10, description="Ticket ID prefix for demands (e.g. SIT, SC)")
     domain: Optional[str] = Field(default=None, description="Primary public domain if applicable")
@@ -116,6 +122,33 @@ class ProjectDescriptor(BaseModel):
     requires_commercial_acceptance: bool = Field(
         default=False, description="Blocks automatic deploy until commercial/business acceptance is given"
     )
+
+    def resolve_path(self, platform_name: Optional[str] = None) -> Optional[Path]:
+        """Resolve workspace path for the current OS platform or darkfac core (USR-101)."""
+        if self.id == "darkfac":
+            from core.paths import project_root
+            return project_root()
+
+        target_platform = platform_name or ("windows" if sys.platform == "win32" else "linux")
+
+        if self.paths:
+            if target_platform in self.paths:
+                return Path(self.paths[target_platform])
+            if "posix" in self.paths and target_platform != "windows":
+                return Path(self.paths["posix"])
+            if "default" in self.paths:
+                return Path(self.paths["default"])
+
+        if self.path:
+            # Incompatible Windows drive-letter paths when running on Linux/POSIX
+            if target_platform != "windows" and re.match(r"^[a-zA-Z]:[/\\]", self.path):
+                return None
+            # Incompatible root POSIX paths when running on Windows (unless it exists)
+            if target_platform == "windows" and self.path.startswith("/") and not Path(self.path).exists():
+                return None
+            return Path(self.path)
+
+        return None
 
     def to_roadmap_summary(self) -> RoadmapProjectSummary:
         """Convert to the standard RoadmapProjectSummary used across DarkHub."""

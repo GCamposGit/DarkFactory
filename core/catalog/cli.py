@@ -37,6 +37,7 @@ def main(argv: list[str] | None = None) -> int:
     sync_p.add_argument("--id", required=True, help="Component ID to sync")
     sync_p.add_argument("--target-project", required=True, help="Target project ID from registry")
     sync_p.add_argument("--no-overwrite", action="store_true", help="Do not overwrite existing files")
+    sync_p.add_argument("--create", action="store_true", help="Create target directory if it does not exist (USR-101)")
 
     # export
     export_p = subparsers.add_parser("export", help="Package files from a project into catalog")
@@ -88,6 +89,7 @@ def main(argv: list[str] | None = None) -> int:
                 component_id=args.id,
                 target_project_id=args.target_project,
                 overwrite=not args.no_overwrite,
+                create=bool(getattr(args, "create", False)),
             )
             print(f"Sync complete: {res.message}")
             for f in res.files_synced:
