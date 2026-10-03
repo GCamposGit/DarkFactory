@@ -2472,7 +2472,8 @@ class HubService:
         """
         from core.integrations.telegram import load_telegram_config
 
-        if self.data_dir is not None:
+        is_custom_data_dir = self.data_dir != Path(__file__).resolve().parent.parent / "data"
+        if is_custom_data_dir:
             telegram_state_dir = self.data_dir / "telegram"
         elif self.project_root.resolve() != Path(__file__).resolve().parents[2]:
             telegram_state_dir = self.project_root / ".factory" / "telegram"
