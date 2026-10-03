@@ -3476,8 +3476,8 @@
     "project_id": "darkfac",
     "title": "Stabilize always-on DarkHub quota sync and Grok fallback",
     "origin": "user",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "a95140e389487d8f51b079fb8647c860e3f9dcd2",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -3501,6 +3501,6 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-03T07:58:51.923675Z",
-    "updated_at": "2026-10-03T07:58:51.923675Z"
+    "updated_at": "2026-10-03T09:34:35.286143Z"
   }
 ]
