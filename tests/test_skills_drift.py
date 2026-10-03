@@ -65,6 +65,9 @@ ALLOWLIST_PATH_EXCEPTIONS: dict[str, str] = {
     "12-daily-model-benchmark:.factory/benchmarks/latest.json": (
         "Dynamic daily benchmark artifact generated at runtime by Skill 12; not pre-committed"
     ),
+    "14-speculative-model-racing:.factory/benchmarks/empirical_ledger.json": (
+        "Dynamic empirical benchmark ledger generated at runtime by Skill 14; not pre-committed"
+    ),
 }
 
 # ---------------------------------------------------------------------------
