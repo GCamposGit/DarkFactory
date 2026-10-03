@@ -3532,5 +3532,35 @@
     "dependencies": [],
     "created_at": "2026-10-03T09:58:05.460008Z",
     "updated_at": "2026-10-03T09:58:05.460008Z"
+  },
+  {
+    "id": "USR-126",
+    "project_id": "darkfac",
+    "title": "Stabilize the Windows native runtime storage integration test",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "On PR #124, the Windows PR validation failed once in tests/test_runtime_spike_native.py::test_native_adapter_executes_core_path_and_keeps_capability_gaps with STORE_UNAVAILABLE (1 failed, 2907 passed); retrying the same commit passed, as did the local official gate and the remote official gate. The failure appears transient but the current event hides whether SQLite or the local effect HTTP service caused it.",
+    "core_journey": [
+      "On PR #124, the Windows PR validation failed once in tests/test_runtime_spike_native.py::test_native_adapter_executes_core_path_and_keeps_capability_gaps with STORE_UNAVAILABLE (1 failed, 2907 passed); retrying the same commit passed, as did the local official gate and the remote official gate. The failure appears transient but the current event hides whether SQLite or the local effect HTTP service caused it."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Capture enough sanitized diagnostic context to distinguish SQLite/storage errors from local effect-service failures without exposing secrets.",
+      "Make the Windows native-adapter integration test deterministic under the full parallel CI workload, with a regression for the observed failure mode.",
+      "Verify the full official gate and repeated Windows CI runs pass without relaxing existing assertions."
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-03T10:00:35.033805Z",
+    "updated_at": "2026-10-03T10:00:35.033805Z"
   }
 ]
