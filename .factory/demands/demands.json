@@ -1601,7 +1601,7 @@
     "project_id": "darkfac",
     "title": "Worker de testes do Desktop: processo legado na 8080 nao atualiza e nao expoe versao",
     "origin": "user",
-    "status": "planned",
+    "status": "completed",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -1631,14 +1631,15 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-09-30T17:27:02.652382Z",
-    "updated_at": "2026-09-30T22:00:00Z"
+    "updated_at": "2026-10-03T21:17:00Z",
+    "delivery_evidence": "core/infra/node_sync.py, tests/test_node_sync.py, docs/runbooks/desktop_test_worker.md"
   },
   {
     "id": "USR-72",
     "project_id": "darkfac",
     "title": "dokploy_redeploy: saida em tempo real, sem Traceback e com backup garantido",
     "origin": "user",
-    "status": "planned",
+    "status": "completed",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -1667,7 +1668,8 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-09-30T17:27:32.659425Z",
-    "updated_at": "2026-10-01T07:00:00Z"
+    "updated_at": "2026-10-03T21:17:00Z",
+    "delivery_evidence": "scripts/dokploy_redeploy.py, tests/test_dokploy_redeploy.py"
   },
   {
     "id": "USR-73",
@@ -1866,7 +1868,7 @@
     ],
     "problem_statement": "Em 2026-09-30 o checkout do Desktop (C:\\dev\\DarkFac) estava com main divergida (ahead 3, behind 9): um commit real 9113b67 (fix(startup): escape de aspas no launcher DarkFacWorker.vbs) e dois merges feitos localmente nunca foram enviados ao GitHub. Por isso git pull --ff-only e /system/update falhavam em silencio e o worker de testes ficou sem atualizar (sem git_sha no /health), sem nenhum alerta; a duracao da defasagem NAO foi medida (ver USR-82).\n\n[Plano HF-28 | 2026-09-30] Onda 3. Ver docs/STABILITY_PLAN_2026-09-30.md.\nCAUSA RAIZ: node_sync so sabe comparar SHA; nao enxerga commits locais fora do remoto (ahead), arvore suja ou divergencia, entao 'git pull --ff-only' falha em silencio. Em 2026-09-30 o Desktop estava ahead 3 / behind 9 (evidencia medida; a duracao NAO foi medida - ver USR-82).\nSOLUCAO DEFINITIVA: node_sync classifica cada no como converged | behind | ahead | diverged | dirty com lista de commits locais e motivo; reparo autonomo seguro: branch backup/<no>-<data> enviada ao GitHub com os commits locais + ticket/PR para o trabalho real (cherry-pick), so depois reset --hard para origin/main; alerta Telegram se divergente por >1 ciclo de deploy.\nNUNCA MAIS (prevencao estrutural): testes com repositorios git temporarios (ahead/behind/diverged/dirty) e verificacao de que o backup e enviado ANTES do reset.",
     "core_journey": [
-      "Em 2026-09-30 o checkout do Desktop (C:\\dev\\DarkFac) estava com main divergida (ahead 3, behind 9): um commit real 9113b67 (fix(startup): escape de aspas no launcher DarkFacWorker.vbs) e dois merges feitos localmente nunca foram enviados ao GitHub. Por isso git pull --ff-only e /system/update falhavam em silencio e o worker de testes ficou semanas sem atualizar (sem git_sha no /health), sem nenhum alerta."
+      "Em 2026-09-30 o checkout do Desktop (C:\\dev\\DarkFac) estava com main divergida (ahead 3, behind 9): um commit real 9113b67 (fix(startup): escape de aspas no launcher DarkFacWorker.vbs) e dois merges feitos localmente nunca foram enviados ao GitHub. Por isso git pull --ff-only e /system/update falhavam em silencio e o worker de testes ficou sem atualizar (ahead 3, behind 9) (sem git_sha no /health), sem nenhum alerta."
     ],
     "non_goals": [],
     "reachability_contract": "",
@@ -1885,7 +1887,7 @@
       "USR-71"
     ],
     "created_at": "2026-09-30T18:35:48.481396Z",
-    "updated_at": "2026-09-30T22:00:00Z"
+    "updated_at": "2026-10-03T21:17:00Z"
   },
   {
     "id": "USR-79",
@@ -1953,7 +1955,7 @@
     "project_id": "darkfac",
     "title": "node_sync: aguardar o worker voltar apos auto-restart antes de dar o veredito",
     "origin": "user",
-    "status": "planned",
+    "status": "completed",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -1983,14 +1985,15 @@
       "USR-71"
     ],
     "created_at": "2026-09-30T19:05:55.175757Z",
-    "updated_at": "2026-09-30T22:00:00Z"
+    "updated_at": "2026-10-03T21:17:00Z",
+    "delivery_evidence": "core/infra/node_sync.py, tests/test_node_sync.py"
   },
   {
     "id": "USR-82",
     "project_id": "darkfac",
     "title": "Corrigir descricao do USR-78: nao ha evidencia de 'semanas' sem atualizar",
     "origin": "user",
-    "status": "planned",
+    "status": "completed",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -2020,7 +2023,8 @@
       "USR-78"
     ],
     "created_at": "2026-09-30T19:06:31.079479Z",
-    "updated_at": "2026-09-30T22:00:00Z"
+    "updated_at": "2026-10-03T21:17:00Z",
+    "delivery_evidence": "core/infra/node_sync.py, tests/test_node_sync.py"
   },
   {
     "id": "USR-83",

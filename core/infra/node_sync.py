@@ -28,10 +28,12 @@ class NodeStatus(BaseModel):
     name: str
     state: Literal["converged", "divergent", "offline", "unknown"]
     git_sha: str | None = None
+    commit_date: str | None = None
     last_contact: datetime | None = None
     reason: str | None = None
     busy: bool | None = None
     active_runs: int | None = None
+    is_legacy: bool | None = None
 
 
 class SyncReport(BaseModel):
@@ -48,6 +50,7 @@ class SyncReport(BaseModel):
 GitRunner = Callable[[Path, list[str]], str]
 HttpClient = Callable[[str, str, dict[str, Any] | None, str | None], dict[str, Any]]
 VpsRedeploy = Callable[[], bool]
+TaskRecovery = Callable[[str], bool]
 
 
 def run_git(root: Path, args: list[str]) -> str:
@@ -87,6 +90,18 @@ def redeploy_vps() -> bool:
     return result.returncode == 0
 
 
+def recover_scheduled_task(task_name: str = "DarkFac Test Worker") -> bool:
+    """Safely terminate and restart the worker via Windows Scheduled Task (USR-71)."""
+    if sys.platform != "win32":
+        return False
+    try:
+        subprocess.run(["schtasks", "/End", "/TN", task_name], capture_output=True, check=False, timeout=15)
+        res = subprocess.run(["schtasks", "/Run", "/TN", task_name], capture_output=True, check=False, timeout=15)
+        return res.returncode == 0
+    except Exception:
+        return False
+
+
 def _sha(value: Any) -> str | None:
     candidate = str(value or "").lower()
     return candidate if SHA_PATTERN.fullmatch(candidate) else None
@@ -121,22 +136,31 @@ def _probe(
     now = datetime.now(timezone.utc)
     busy = bool(data.get("busy")) if "busy" in data else None
     active_runs = int(data.get("active_runs")) if "active_runs" in data and data.get("active_runs") is not None else None
+    restart_safe = bool(data.get("restart_safe")) if "restart_safe" in data else False
+    commit_date = str(data.get("commit_date")) if data.get("commit_date") else None
     if observed is None:
         if unknown_without_sha:
             return NodeStatus(
                 name=name, state="unknown", last_contact=now,
                 reason="health reports no git_sha (DARKFAC_GIT_SHA not provided at deploy); cannot verify",
-                busy=busy, active_runs=active_runs,
+                busy=busy, active_runs=active_runs, is_legacy=False, commit_date=commit_date,
+            )
+        is_legacy = not restart_safe
+        if is_legacy:
+            return NodeStatus(
+                name=name, state="divergent", last_contact=now,
+                reason="legacy test worker on :8080 (no git_sha / restart_safe)",
+                busy=busy, active_runs=active_runs, is_legacy=True, commit_date=commit_date,
             )
         return NodeStatus(
             name=name, state="divergent", last_contact=now,
             reason="health response has no full git_sha",
-            busy=busy, active_runs=active_runs,
+            busy=busy, active_runs=active_runs, is_legacy=False, commit_date=commit_date,
         )
     return NodeStatus(
         name=name, state="converged" if observed == expected else "divergent",
         git_sha=observed, last_contact=now,
-        busy=busy, active_runs=active_runs,
+        busy=busy, active_runs=active_runs, is_legacy=False, commit_date=commit_date,
     )
 
 
@@ -169,7 +193,11 @@ def verify(
         local = _sha(git(root, ["rev-parse", "HEAD"]))
         blocker = _notebook_blocker(root, git)
         state = "converged" if local == expected and blocker is None else "divergent"
-        notebook = NodeStatus(name="Notebook", state=state, git_sha=local, reason=blocker)
+        try:
+            notebook_commit_date = git(root, ["show", "-s", "--format=%cI", local]) if local else None
+        except Exception:
+            notebook_commit_date = None
+        notebook = NodeStatus(name="Notebook", state=state, git_sha=local, reason=blocker, commit_date=notebook_commit_date)
     except Exception:
         notebook = NodeStatus(name="Notebook", state="unknown", reason="checkout unavailable")
     return SyncReport(expected_sha=expected, nodes=[
@@ -193,6 +221,7 @@ def sync(
     clock: Callable[[], float] = time.monotonic,
     sleep: Callable[[float], None] = time.sleep,
     vps_redeploy: VpsRedeploy = redeploy_vps,
+    task_recovery: TaskRecovery = recover_scheduled_task,
     retries: int = 3, retry_delay: float = 0.5,
 ) -> SyncReport:
     initial = verify(
@@ -232,37 +261,50 @@ def sync(
                 observed_divergent_sha = desktop.git_sha
 
     if desktop.state != "converged":
-        if observed_divergent_sha is None:
-            # Nunca observou SHA divergente (nó permaneceu offline após retries e polling);
+        if observed_divergent_sha is None and not desktop.is_legacy:
+            # Nunca observou SHA divergente nem legado (nó permaneceu offline após retries e polling);
             # não dispara update nem restart para nó inacessível (USR-117)
             initial.nodes[1] = desktop
         else:
+            def _wait_for_restart() -> NodeStatus:
+                restart_deadline = clock() + timeout
+                latest_desktop = desktop
+                while clock() < restart_deadline:
+                    probe = _probe(
+                        "Desktop", f"{desktop_url.rstrip('/')}/health", expected, http,
+                        retries=1, retry_delay=retry_delay, sleep=sleep,
+                    )
+                    if probe.state == "converged":
+                        return probe
+                    elif probe.state == "offline":
+                        probe.reason = "restarting"
+                    latest_desktop = probe
+                    sleep(min(interval, max(0.0, restart_deadline - clock())))
+                if latest_desktop.state == "offline":
+                    latest_desktop.reason = f"Desktop worker offline apos restart (excedeu timeout de {timeout:.0f}s)"
+                elif latest_desktop.state == "divergent" and latest_desktop.git_sha is None:
+                    latest_desktop.reason = f"Desktop worker reiniciou mas permaneceu legado/sem git_sha apos {timeout:.0f}s"
+                return latest_desktop
+
             try:
                 health = http("GET", f"{desktop_url.rstrip('/')}/health", None, None)
                 is_busy = bool(health.get("busy")) or int(health.get("active_runs") or 0) > 0
                 if is_busy:
                     desktop.reason = "Desktop is busy (busy=True or active_runs > 0); update and restart skipped"
                     initial.nodes[1] = desktop
+                elif desktop.is_legacy or (health.get("restart_safe") is not True and _sha(health.get("git_sha")) is None):
+                    # USR-71: Legacy test worker on :8080 without git_sha or restart_safe.
+                    # Recover safely via Scheduled Task "DarkFac Test Worker" (schtasks /End + /Run)
+                    task_recovery("DarkFac Test Worker")
+                    initial.nodes[1] = _wait_for_restart()
                 else:
                     # `git_sha` in /health exists only from USR-65, which is after the USR-64 restart fix,
                     # so a worker exposing it restarts itself safely even if it predates `restart_safe`.
-                    if health.get("restart_safe") is not True and _sha(health.get("git_sha")) is None:
-                        raise RuntimeError("Desktop /health does not advertise restart_safe=true; update and restart skipped")
                     response = http("POST", f"{desktop_url.rstrip('/')}/system/update", {}, token)
                     if response.get("success") is not True or _sha(response.get("current_commit")) != expected:
                         raise RuntimeError("Desktop update did not reach expected SHA")
                     http("POST", f"{desktop_url.rstrip('/')}/system/restart", {}, token)
-                    restart_deadline = clock() + timeout
-                    while clock() < restart_deadline:
-                        probe = _probe(
-                            "Desktop", f"{desktop_url.rstrip('/')}/health", expected, http,
-                            retries=retries, retry_delay=retry_delay, sleep=sleep,
-                        )
-                        if probe.state == "converged":
-                            desktop = probe
-                            break
-                        sleep(min(interval, max(0.0, restart_deadline - clock())))
-                    initial.nodes[1] = desktop
+                    initial.nodes[1] = _wait_for_restart()
             except Exception as exc:
                 desktop.reason = str(exc)
                 initial.nodes[1] = desktop

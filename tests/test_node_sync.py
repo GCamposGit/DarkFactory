@@ -42,6 +42,8 @@ class FakeGit:
         if args == ["merge", "--ff-only", "origin/main"]:
             self.head = SHA
             return ""
+        if len(args) >= 3 and args[:3] == ["show", "-s", "--format=%cI"]:
+            return "2026-10-03T18:00:00+00:00"
         raise AssertionError(args)
 
 
@@ -404,4 +406,112 @@ def test_sync_waits_for_divergent_desktop_spontaneous_convergence_without_post()
     assert report.ok
     assert report.nodes[1].state == "converged"
     assert not any(method == "POST" and ":8080" in url for method, url in http.calls)
+
+
+def test_desktop_legacy_recovers_via_scheduled_task() -> None:
+    """USR-71: Legacy worker without git_sha/restart_safe triggers Scheduled Task recovery."""
+    class LegacyRecoveringHttp(FakeHttp):
+        def __init__(self) -> None:
+            super().__init__()
+            self.recovered = False
+
+        def __call__(self, method: str, url: str, payload: dict[str, Any] | None, token: str | None) -> dict[str, Any]:
+            self.calls.append((method, url))
+            if ":8080" in url and method == "GET":
+                if not self.recovered:
+                    return {"status": "ok"}
+                return {"git_sha": SHA, "restart_safe": True}
+            return super().__call__(method, url, payload, token)
+
+    recovery_calls: list[str] = []
+    http = LegacyRecoveringHttp()
+    vclock = VirtualClock()
+
+    def fake_recovery(task_name: str) -> bool:
+        recovery_calls.append(task_name)
+        http.recovered = True
+        return True
+
+    report = mod.sync(
+        root=Path("."), git=FakeGit(), http=http,
+        task_recovery=fake_recovery,
+        clock=vclock.clock, sleep=vclock.sleep,
+    )
+    assert report.ok
+    assert report.nodes[1].state == "converged"
+    assert recovery_calls == ["DarkFac Test Worker"]
+    assert not any(method == "POST" and ":8080" in url for method, url in http.calls)
+
+
+def test_desktop_restart_transient_offline_treated_as_restarting_and_converges() -> None:
+    """USR-81: Transient offline during worker restart window is treated as restarting, then converges."""
+    class TransientRestartHttp(FakeHttp):
+        def __init__(self, offline_probes: int = 3) -> None:
+            super().__init__(desktop=OLD)
+            self.restarting = False
+            self.offline_remaining = offline_probes
+
+        def __call__(self, method: str, url: str, payload: dict[str, Any] | None, token: str | None) -> dict[str, Any]:
+            self.calls.append((method, url))
+            if ":8080" in url:
+                if url.endswith("/system/restart"):
+                    self.restarting = True
+                    return {"status": "restarting"}
+                if method == "GET":
+                    if self.restarting:
+                        if self.offline_remaining > 0:
+                            self.offline_remaining -= 1
+                            raise OSError("worker is restarting")
+                        return {"git_sha": SHA, "restart_safe": True}
+                    return {"git_sha": self.desktop, "restart_safe": True}
+            return super().__call__(method, url, payload, token)
+
+    http = TransientRestartHttp(offline_probes=3)
+    vclock = VirtualClock()
+    report = mod.sync(
+        root=Path("."), git=FakeGit(), http=http,
+        timeout=60, interval=2, clock=vclock.clock, sleep=vclock.sleep,
+    )
+    assert report.ok
+    assert report.nodes[1].state == "converged"
+
+
+def test_desktop_restart_persistent_offline_fails_with_clear_cause() -> None:
+    """USR-81: Persistent offline after worker restart fails with clear timeout reason."""
+    class PersistentOfflineRestartHttp(FakeHttp):
+        def __init__(self) -> None:
+            super().__init__(desktop=OLD)
+            self.restarting = False
+
+        def __call__(self, method: str, url: str, payload: dict[str, Any] | None, token: str | None) -> dict[str, Any]:
+            self.calls.append((method, url))
+            if ":8080" in url:
+                if url.endswith("/system/restart"):
+                    self.restarting = True
+                    return {"status": "restarting"}
+                if method == "GET" and self.restarting:
+                    raise OSError("worker permanently offline")
+            return super().__call__(method, url, payload, token)
+
+    http = PersistentOfflineRestartHttp()
+    vclock = VirtualClock()
+    report = mod.sync(
+        root=Path("."), git=FakeGit(), http=http,
+        timeout=10, interval=2, clock=vclock.clock, sleep=vclock.sleep,
+    )
+    assert not report.ok
+    desktop = report.nodes[1]
+    assert desktop.state == "offline"
+    assert "offline apos restart" in (desktop.reason or "").lower()
+
+
+def test_node_status_records_commit_date() -> None:
+    """USR-82: NodeStatus records commit_date so divergence age can be measured."""
+    git = FakeGit()
+    http = FakeHttp()
+    report = mod.verify(root=Path("."), git=git, http=http)
+    assert report.ok
+    notebook = report.nodes[0]
+    assert notebook.commit_date == "2026-10-03T18:00:00+00:00"
+
 
