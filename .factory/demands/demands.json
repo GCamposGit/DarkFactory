@@ -3502,5 +3502,35 @@
     "dependencies": [],
     "created_at": "2026-10-03T07:58:51.923675Z",
     "updated_at": "2026-10-03T09:34:35.286143Z"
+  },
+  {
+    "id": "USR-125",
+    "project_id": "darkfac",
+    "title": "Fail fast when optional Segundo Cerebro MCP is unavailable",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "Durante a execução de USR-124, a inicialização do MCP Segundo Cérebro em http://127.0.0.1:18788/mcp falhou e o fluxo de desenvolvimento headless aguardou até o timeout de 1800 segundos antes de preservar a worktree e encerrar. Uma integração opcional indisponível consumiu 30 minutos e impediu que uma demanda clara chegasse à validação e entrega.",
+    "core_journey": [
+      "Durante a execução de USR-124, a inicialização do MCP Segundo Cérebro em http://127.0.0.1:18788/mcp falhou e o fluxo de desenvolvimento headless aguardou até o timeout de 1800 segundos antes de preservar a worktree e encerrar. Uma integração opcional indisponível consumiu 30 minutos e impediu que uma demanda clara chegasse à validação e entrega."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Falha de conexão ou handshake do MCP opcional termina em prazo curto documentado, sem aguardar o timeout total do agente.",
+      "O ticket continua quando possível sem a integração opcional e registra um estado degradado legível, sem vazar credenciais.",
+      "Adicionar cobertura determinística para MCP offline/time-out e garantir que a worktree e o estado do ticket permaneçam retomáveis."
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-03T09:58:05.460008Z",
+    "updated_at": "2026-10-03T09:58:05.460008Z"
   }
 ]
