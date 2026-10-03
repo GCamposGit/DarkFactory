@@ -23,7 +23,13 @@ import unicodedata
 logger = logging.getLogger("darkfac.marketing.publisher")
 
 DEFAULT_ATRIUM_PATH = Path(r"C:\dev\Site_ggcampos")
-DEFAULT_STAGING_DIR = state_root() / "marketing" / "staged_posts"
+
+
+def default_staging_dir() -> Path:
+    return state_root() / "marketing" / "staged_posts"
+
+
+DEFAULT_STAGING_DIR = default_staging_dir()
 
 
 def slugify(text: str) -> str:
@@ -46,9 +52,8 @@ class ContentPublisher:
         self.target_site_dir = target_site_dir or Path(
             os.getenv("ATRIUM_SITE_DIR", str(DEFAULT_ATRIUM_PATH))
         )
-        self.staging_dir = staging_dir or Path(
-            os.getenv("MARKETING_STAGING_DIR", str(DEFAULT_STAGING_DIR))
-        )
+        staging_env = os.getenv("MARKETING_STAGING_DIR")
+        self.staging_dir = staging_dir or (Path(staging_env) if staging_env else default_staging_dir())
         self.max_slop_score = max_slop_score
         self.linter = AntiSlopLinter()
         self._telegram_gateway = telegram_gateway

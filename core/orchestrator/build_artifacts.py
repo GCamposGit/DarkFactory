@@ -19,10 +19,18 @@ from typing import Any, Dict, List, Optional, Union
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from core.paths import state_root
+
 logger = logging.getLogger(__name__)
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_LEDGER_PATH = PROJECT_ROOT / ".factory" / "artifacts" / "build_ledger.json"
+
+
+def default_ledger_path() -> Path:
+    return state_root() / "artifacts" / "build_ledger.json"
+
+
+DEFAULT_LEDGER_PATH = default_ledger_path()
 
 
 class BuildError(Exception):

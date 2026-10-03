@@ -5,10 +5,15 @@ from __future__ import annotations
 import os
 import socket
 import sys
+import tempfile
 import urllib.error
 import urllib.request
 from pathlib import Path
 from typing import Any, Iterator
+
+if "DARKFAC_STATE_ROOT" not in os.environ:
+    _EARLY_STATE_ROOT = tempfile.mkdtemp(prefix="darkfac_state_")
+    os.environ["DARKFAC_STATE_ROOT"] = _EARLY_STATE_ROOT
 
 import numpy as np
 import pytest

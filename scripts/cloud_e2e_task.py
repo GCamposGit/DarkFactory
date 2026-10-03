@@ -92,7 +92,9 @@ def run_e2e_autonomous_task() -> dict:
         )
 
         # 5. Execute Real Task Stage
-        artifacts_root = Path("/app/.factory/artifacts") if Path("/app").is_dir() else Path(".factory/artifacts")
+        from core.paths import state_root
+
+        artifacts_root = Path("/app/.factory/artifacts") if Path("/app").is_dir() else (state_root() / "artifacts")
         artifact_store = CloudArtifactStore(root_dir=artifacts_root)
 
         def _execute_stage() -> dict:

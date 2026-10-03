@@ -19,6 +19,7 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from core.demands.models import DemandInput, UserTicket
 from core.demands.service import build_default_demands_service
+from core.paths import state_root
 from core.roadmap.models import DeliveryStatus, PlanningHorizon, RoadmapItemType
 
 
@@ -151,7 +152,7 @@ def main() -> int:
             from core.demands.autonomous_intake import AutonomousIntakeService
 
             ext_id = args.external_id or f"cli-{args.project}-{hashlib.sha256(args.title.encode('utf-8')).hexdigest()[:12]}"
-            db_path = Path(args.store_path) if args.store_path else PROJECT_ROOT / ".factory" / "control.db"
+            db_path = Path(args.store_path) if args.store_path else state_root() / "control.db"
 
             try:
                 db_path.parent.mkdir(parents=True, exist_ok=True)
@@ -336,7 +337,7 @@ def main() -> int:
         from core.demands.autonomous_intake import AutonomousIntakeService
 
         ext_id = args.external_id or f"cli-{args.project}-{hashlib.sha256(args.title.encode('utf-8')).hexdigest()[:12]}"
-        db_path = Path(args.store_path) if args.store_path else PROJECT_ROOT / ".factory" / "control.db"
+        db_path = Path(args.store_path) if args.store_path else state_root() / "control.db"
 
         try:
             db_path.parent.mkdir(parents=True, exist_ok=True)

@@ -1645,7 +1645,7 @@ class HubService:
         if sys.platform == "win32":
             creationflags = subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
 
-        log_dir = self.project_root / ".factory" / "services"
+        log_dir = state_root() / "services"
         log_dir.mkdir(parents=True, exist_ok=True)
         log_file = log_dir / f"{service_id}.log"
 
@@ -2488,7 +2488,7 @@ class HubService:
             owner_config = load_telegram_config(role="owner", config_dir=self.project_root / ".factory" / "telegram")
             if owner_updates:
                 owner_config = owner_config.model_copy(update=owner_updates)
-            return TelegramGateway(config=owner_config, state_dir=self.project_root / ".factory" / "telegram")
+            return TelegramGateway(config=owner_config, state_dir=state_root() / "telegram")
 
         token = os.environ.get("TELEGRAM_OPS_BOT_TOKEN") or os.environ.get("TELEGRAM_BOT_TOKEN")
         users_raw = os.environ.get("TELEGRAM_AUTHORIZED_USERS") or os.environ.get("TELEGRAM_ALLOWED_USERS", "")
@@ -2557,7 +2557,7 @@ class HubService:
                 return {"resumed": False, "error": str(e)}
 
         def _handle_approval(project_id: str, digest: str, user_id: int) -> Dict[str, Any]:
-            pipeline = ReleasePipelineService(storage_dir=self.project_root / ".factory" / "releases")
+            pipeline = ReleasePipelineService(storage_path=state_root() / "releases" / "release_registry.json")
             receipt = pipeline.record_client_acceptance(
                 project_id=project_id,
                 artifact_digest=digest,
@@ -2591,7 +2591,7 @@ class HubService:
 
         return TelegramGateway(
             config=config,
-            state_dir=self.project_root / ".factory" / "telegram",
+            state_dir=state_root() / "telegram",
             demand_handler=_handle_demand,
             line_handler=_handle_line,
             status_handler=_handle_status,
