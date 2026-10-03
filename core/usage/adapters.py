@@ -109,6 +109,25 @@ def _duration_label(minutes: Optional[int]) -> str:
     return f"{minutes} min"
 
 
+def _snapshot_age_label(checked_at: Optional[str]) -> str:
+    """Describe snapshot age without refreshing or replacing its source timestamp."""
+    try:
+        checked = datetime.fromisoformat(str(checked_at).replace("Z", "+00:00"))
+        if checked.tzinfo is None:
+            checked = checked.replace(tzinfo=timezone.utc)
+        age_seconds = max(0, int((datetime.now(timezone.utc) - checked).total_seconds()))
+    except (TypeError, ValueError):
+        return "com horário de verificação desconhecido"
+
+    if age_seconds < 60:
+        return "há menos de 1 min"
+    if age_seconds < 3600:
+        return f"há {age_seconds // 60} min"
+    if age_seconds < 86400:
+        return f"há {age_seconds // 3600} h"
+    return f"há {age_seconds // 86400} d"
+
+
 class AccountUsageAdapter(ABC):
     SNAPSHOT_FRESHNESS_TTL_SECONDS: float = 120.0
 
@@ -608,36 +627,73 @@ class GrokAccountAdapter(AccountUsageAdapter):
         if snapshot and not force and self._is_snapshot_fresh(snapshot):
             return self._from_snapshot(snapshot)
 
+        probe_failure: Optional[str] = None
         # 1. Try Grok Bot session probe (real live quota % and weekly reset on Windows)
         try:
             bot_usage = self._probe_grok_bot_session()
-            if bot_usage:
+            if bot_usage and bot_usage.status in (AccountConnectionStatus.CONNECTED, AccountConnectionStatus.LIMITED) and bot_usage.windows:
                 return bot_usage
+            if bot_usage:
+                probe_failure = bot_usage.message
         except Exception as exc:
             logger.warning("Grok Bot quota probe failed: %s", type(exc).__name__)
+            probe_failure = f"sonda Grok Bot falhou ({type(exc).__name__})"
 
         # 2. Try Grok CLI session probe via ~/.grok/auth.json (official SuperGrok session)
         try:
             cli_usage = self._probe_grok_cli_session()
             if cli_usage:
-                return cli_usage
+                if cli_usage.windows:
+                    return cli_usage
+                if not snapshot:
+                    if probe_failure:
+                        return self.degraded(
+                            f"Quota Grok indisponível: {probe_failure}. {cli_usage.message} "
+                            "Reautentique no Grok Bot ou Grok CLI; nenhuma quota foi medida.",
+                            "grok_bot_api",
+                        )
+                    return cli_usage
+                probe_failure = "sessão Grok autenticada, mas a API do CLI não fornece percentual de quota"
         except Exception as exc:
             logger.debug("Grok CLI session probe failed: %s", exc)
+            if not probe_failure:
+                probe_failure = f"sonda Grok CLI falhou ({type(exc).__name__})"
 
         if snapshot:
-            if self._is_snapshot_fresh(snapshot):
-                return self._from_snapshot(snapshot)
-            logger.warning("Grok quota probe unavailable and snapshot stale")
-            return self.degraded("Sem medidor: sonda Grok indisponível e snapshot expirado.", "grok_bot_api")
+            logger.warning("Grok quota probe unavailable; retaining the last-known snapshot")
+            previous = self._from_snapshot(snapshot, adapter=str(snapshot.get("adapter") or "grok_bot_api"))
+            age = _snapshot_age_label(previous.checked_at)
+            issue = probe_failure or "sessão Grok local ausente ou sem resposta verificável"
+            return previous.model_copy(update={
+                "status": AccountConnectionStatus.DEGRADED,
+                "message": (
+                    f"Quota Grok do último snapshot preservada; verificada {age}. "
+                    f"Estado degradado: {issue}. Reautentique no Grok Bot ou Grok CLI "
+                    "no usuário que executa a sincronização, confira DARKFAC_TELEMETRY_KEY "
+                    "no ambiente/.env e mantenha DarkFac-Usage-Cloud-Sync ativo."
+                ),
+            })
+
+        if probe_failure:
+            return self.degraded(
+                f"Quota Grok indisponível: {probe_failure}. Reautentique no Grok Bot ou Grok CLI "
+                "neste usuário e tente novamente; nenhuma quota foi medida.",
+                "grok_bot_api",
+            )
 
         executable = shutil.which("grok")
         if not executable:
             if any(os.environ.get(key) for key in self.spec.env_keys):
                 return self.connected_without_quota(
-                    "xAI API configurada; a credencial não expõe a quota do plano Grok.",
+                    "Chave da API xAI configurada; ela não expõe quota da assinatura Grok. "
+                    "Autentique Grok Bot ou Grok CLI neste usuário; nenhuma quota foi medida.",
                     "xai_api_key",
                 )
-            return self.disconnected("Grok Build não instalado ou fora do PATH.", "grok_cli")
+            return self.disconnected(
+                "Sessão Grok não autenticada ou indisponível: autentique-se no Grok Bot ou faça login no Grok CLI "
+                "neste usuário; nenhuma quota foi medida.",
+                "grok_cli",
+            )
         try:
             result = subprocess.run(
                 [executable, "models"], capture_output=True, text=True, encoding="utf-8",
@@ -649,10 +705,15 @@ class GrokAccountAdapter(AccountUsageAdapter):
         if result.returncode != 0:
             if any(os.environ.get(key) for key in self.spec.env_keys):
                 return self.connected_without_quota(
-                    "xAI API configurada; a sessão Grok do CLI não foi validada.",
+                    "Chave da API xAI configurada; a sessão Grok do CLI não foi validada e a chave não "
+                    "expõe quota da assinatura. Reautentique Grok Bot ou Grok CLI; nenhuma quota foi medida.",
                     "xai_api_key",
                 )
-            return self.disconnected("Grok instalado, porém sem sessão autenticada verificável.", "grok_cli")
+            return self.disconnected(
+                "Sessão Grok instalada, mas não autenticada: faça login no Grok CLI ou abra Grok Bot "
+                "neste usuário; nenhuma quota foi medida.",
+                "grok_cli",
+            )
         return ProviderAccountUsage(
             provider_id=self.spec.provider_id, provider_name=self.spec.provider_name,
             family=self.spec.family, status=AccountConnectionStatus.CONNECTED, adapter="grok_cli",
@@ -664,7 +725,9 @@ class GrokAccountAdapter(AccountUsageAdapter):
     def _probe_grok_bot_session(self) -> Optional[ProviderAccountUsage]:
         token = self._extract_grok_bot_token()
         if not token:
-            logger.warning("Grok Bot quota probe unavailable: token or app missing")
+            logger.warning(
+                "Grok Bot session unavailable: authenticate Grok Bot for this user to query subscription quota"
+            )
             return None
 
         req = urllib.request.Request(

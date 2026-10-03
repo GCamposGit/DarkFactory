@@ -49,6 +49,7 @@ models/.locks/
 .factory/benchmarks/empirical_ledger.json
 .factory/decks/
 .factory/usage/
+.factory/logs/
 .factory/services/
 .factory/test_logs/
 .factory/hf15/workspace/

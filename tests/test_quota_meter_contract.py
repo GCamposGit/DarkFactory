@@ -130,14 +130,60 @@ def test_grok_stale_snapshot_does_not_hide_missing_probe(tmp_path, monkeypatch, 
     directory = tmp_path / "providers"
     directory.mkdir()
     old = (datetime.now(timezone.utc) - timedelta(days=2)).isoformat()
-    (directory / "xai.json").write_text(json.dumps({"checked_at": old, "status": "connected",
-        "windows": [{"quota_id": "grok:weekly_pool", "remaining_percent": 99}]}), encoding="utf-8")
+    (directory / "xai.json").write_text(json.dumps({
+        "checked_at": old, "status": "connected", "adapter": "grok_bot_api",
+        "raw_fields": {"usagePercent": 1.0},
+        "windows": [{"quota_id": "grok:weekly_pool", "label": "weekly",
+                     "used_percent": 1.0, "remaining_percent": 99.0}],
+    }), encoding="utf-8")
     monkeypatch.setattr(GrokAccountAdapter, "_extract_grok_bot_token", lambda self: None)
     monkeypatch.setattr(GrokAccountAdapter, "_probe_grok_cli_session", lambda self: None)
     usage = GrokAccountAdapter(SPEC, directory).inspect()
     assert usage.status == AccountConnectionStatus.DEGRADED
     assert _quota_headroom(usage) is None
-    assert "token or app missing" in caplog.text
+    assert usage.checked_at == old
+    assert usage.windows[0].remaining_percent == 99.0
+    assert "snapshot" in usage.message.lower()
+    assert "2" in usage.message
+    assert "grok bot" in usage.message.lower() or "grok cli" in usage.message.lower()
+    assert "authenticate Grok Bot" in caplog.text
+
+
+def test_grok_without_snapshot_or_local_session_has_no_fabricated_quota(tmp_path, monkeypatch):
+    monkeypatch.setattr(GrokAccountAdapter, "_extract_grok_bot_token", lambda self: None)
+    monkeypatch.setattr(GrokAccountAdapter, "_probe_grok_cli_session", lambda self: None)
+    monkeypatch.setattr("core.usage.adapters.shutil.which", lambda _: None)
+    for key in SPEC.env_keys:
+        monkeypatch.delenv(key, raising=False)
+
+    usage = GrokAccountAdapter(SPEC, tmp_path / "providers").inspect()
+
+    assert usage.status == AccountConnectionStatus.DISCONNECTED
+    assert usage.windows == []
+    assert usage.quota_supported is False
+    assert "sessão grok" in usage.message.lower()
+    assert "autentique" in usage.message.lower()
+
+
+def test_grok_forced_probe_failure_marks_recent_snapshot_degraded(tmp_path, monkeypatch):
+    directory = tmp_path / "providers"
+    directory.mkdir()
+    checked_at = datetime.now(timezone.utc).isoformat()
+    (directory / "xai.json").write_text(json.dumps({
+        "checked_at": checked_at, "status": "connected", "adapter": "grok_bot_api",
+        "raw_fields": {"usagePercent": 4.0},
+        "windows": [{"quota_id": "grok:weekly_pool", "label": "weekly",
+                     "used_percent": 4.0, "remaining_percent": 96.0}],
+    }), encoding="utf-8")
+    monkeypatch.setattr(GrokAccountAdapter, "_extract_grok_bot_token", lambda self: None)
+    monkeypatch.setattr(GrokAccountAdapter, "_probe_grok_cli_session", lambda self: None)
+
+    usage = GrokAccountAdapter(SPEC, directory).inspect(force=True)
+
+    assert usage.status == AccountConnectionStatus.DEGRADED
+    assert usage.checked_at == checked_at
+    assert usage.windows[0].remaining_percent == 96.0
+    assert "há menos de 1 min" in usage.message
 
 
 def test_history_rotates_without_rewriting_old_lines(tmp_path):

@@ -30,6 +30,12 @@ function toggleUsageExpansion() {
 document.addEventListener("DOMContentLoaded", () => {
   mountAIUsageMonitor();
   loadAIUsage(false);
+  window.setInterval(() => {
+    if (document.visibilityState === "visible") loadAIUsage(false);
+  }, 60000);
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") loadAIUsage(false);
+  });
 });
 
 function mountAIUsageMonitor() {
@@ -183,8 +189,9 @@ function renderAccountUsage() {
 
   const pill = document.getElementById("usage-health-pill");
   if (pill) {
-    pill.textContent = `${report.connected_count || 0} ativas · ${report.limited_count || 0} limitadas`;
-    pill.className = report.limited_count
+    const degradedCount = allAccounts.filter((account) => account.status === "degraded").length;
+    pill.textContent = `${report.connected_count || 0} ativas · ${report.limited_count || 0} limitadas${degradedCount ? ` · ${degradedCount} degradadas` : ""}`;
+    pill.className = report.limited_count || degradedCount
       ? "rounded-full border border-amber-500/30 bg-amber-500/10 px-2 py-0.5 text-[10px] font-mono text-amber-300"
       : "rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 text-[10px] font-mono text-emerald-300";
   }
@@ -197,6 +204,7 @@ function renderAccountCard(account) {
     ? windows.map((window) => renderQuotaWindow(window)).join("")
     : `<div class="rounded-lg border border-dashed border-slate-800 px-3 py-2 text-[10px] text-slate-500">Percentual indisponível — não interpretado como 0%.</div>`;
   const plan = account.plan ? `<span class="text-slate-500">${usageEscapeHtml(account.plan)}</span>` : "";
+  const checkedAt = usageEscapeHtml(account.checked_at || "");
   return `
     <article class="rounded-xl border ${styles.border} bg-slate-950/65 p-3.5" data-provider="${usageEscapeHtml(account.provider_id)}">
       <div class="flex items-start justify-between gap-3">
@@ -210,7 +218,10 @@ function renderAccountCard(account) {
       </div>
       <div class="mt-3 space-y-2">${quota}</div>
       <div class="mt-3 flex items-end justify-between gap-3">
-        <p class="text-[10px] leading-4 text-slate-500">${usageEscapeHtml(account.message)}</p>
+        <div class="min-w-0">
+          <p class="text-[10px] leading-4 text-slate-500">${usageEscapeHtml(account.message)}</p>
+          <p class="mt-1 text-[9px] font-mono text-slate-600" title="${checkedAt}">${usageEscapeHtml(formatUsageCheckedAt(account.checked_at))}</p>
+        </div>
         <a href="${usageEscapeHtml(account.dashboard_url || "#")}" target="_blank" rel="noopener noreferrer" class="shrink-0 text-[9px] font-mono text-indigo-400 hover:text-indigo-300">painel ↗</a>
       </div>
     </article>`;
@@ -230,6 +241,9 @@ function renderQuotaWindow(window) {
   const barPercent = remaining !== null ? remaining : (used !== null ? Math.max(0, 100 - used) : 0);
   const color = barPercent <= 10 ? "bg-rose-500" : barPercent <= 30 ? "bg-amber-400" : "bg-emerald-400";
   const reset = window.resets_at ? formatUsageReset(window.resets_at) : "restart não informado";
+  const progress = remaining !== null || used !== null
+    ? `<div class="h-full rounded-full ${color}" style="width:${barPercent}%"></div>`
+    : `<div class="rounded border border-dashed border-slate-700 px-2 py-1 text-[9px] text-slate-500">sem leitura numérica</div>`;
 
   return `
     <div>
@@ -237,8 +251,8 @@ function renderQuotaWindow(window) {
         <span class="truncate text-slate-300 font-medium">${usageEscapeHtml(window.label)}</span>
         <div class="text-[10px] font-mono">${percentDisplay}</div>
       </div>
-      <div class="h-1.5 overflow-hidden rounded-full bg-slate-800" title="${remaining !== null ? `Saldo restante: ${remaining.toFixed(1)}% | Consumo: ${used.toFixed(1)}%` : ''}">
-        <div class="h-full rounded-full ${color}" style="width:${barPercent}%"></div>
+      <div class="${remaining !== null || used !== null ? "h-1.5 overflow-hidden rounded-full bg-slate-800" : ""}" title="${remaining !== null ? `Saldo restante: ${remaining.toFixed(1)}% | Consumo: ${used.toFixed(1)}%` : (used !== null ? `Consumo: ${used.toFixed(1)}%` : "Sem leitura numérica")}">
+        ${progress}
       </div>
       <div class="mt-1 text-right text-[9px] text-slate-600">${usageEscapeHtml(reset)}</div>
     </div>`;
@@ -284,6 +298,17 @@ function usageStatusStyle(status) {
     unknown: { label: "desconhecida", border: "border-slate-800", badge: "bg-slate-800 text-slate-400" },
   };
   return values[status] || values.unknown;
+}
+
+function formatUsageCheckedAt(value) {
+  if (!value) return "verificação sem horário";
+  const checked = new Date(value);
+  if (Number.isNaN(checked.getTime())) return "verificação sem horário";
+  const ageSeconds = Math.max(0, Math.floor((Date.now() - checked.getTime()) / 1000));
+  if (ageSeconds < 60) return "verificado há menos de 1 min";
+  if (ageSeconds < 3600) return `verificado há ${Math.floor(ageSeconds / 60)} min`;
+  if (ageSeconds < 86400) return `verificado há ${Math.floor(ageSeconds / 3600)} h`;
+  return `verificado há ${Math.floor(ageSeconds / 86400)} d`;
 }
 
 function formatUsageReset(value) {
