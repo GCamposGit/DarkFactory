@@ -2306,7 +2306,7 @@
     "project_id": "darkfac",
     "title": "Gate de drift de skills: tests/test_skills_drift.py valida caminhos, modulos, flags e espelho no portao oficial (e sync_skills sem efeito colateral em --help)",
     "origin": "agent",
-    "status": "planned",
+    "status": "completed",
     "item_type": "quality",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -2334,7 +2334,8 @@
     "estimated_complexity": "small",
     "dependencies": [],
     "created_at": "2026-09-30T22:00:00Z",
-    "updated_at": "2026-09-30T22:00:00Z"
+    "updated_at": "2026-10-03T17:03:00Z",
+    "delivery_evidence": "pr:#132:70e5ec6caa7f84f6f48c2808f79cda40bd8ffd98"
   },
   {
     "id": "USR-91",
