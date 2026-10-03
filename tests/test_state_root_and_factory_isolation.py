@@ -142,6 +142,7 @@ DISALLOWED_FACTORY_SUBDIRS = {
     "portfolio",
     "workflow",
     "telegram",
+    "benchmarks",
 }
 
 

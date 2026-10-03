@@ -67,6 +67,7 @@ def test_telegram_environment_precedes_local_config(monkeypatch: pytest.MonkeyPa
 
 
 def test_telegram_default_state_dir_uses_project_root(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.delenv("DARKFAC_STATE_ROOT", raising=False)
     monkeypatch.setenv("DARKFAC_PROJECT_ROOT", str(tmp_path))
     gateway = TelegramGateway(config=TelegramConfig(role="ops"))
     assert gateway.state_dir == tmp_path / ".factory" / "telegram"

@@ -32,7 +32,8 @@ def default_db_path() -> Path:
     return state_root() / "telemetry.db"
 
 
-DEFAULT_DB_PATH = default_db_path()
+_MODULE_LOAD_DB_PATH = default_db_path()
+DEFAULT_DB_PATH = _MODULE_LOAD_DB_PATH
 
 
 class TelemetryStore:
@@ -41,7 +42,7 @@ class TelemetryStore:
     def __init__(self, db_path: Optional[Path] = None) -> None:
         if db_path:
             self.db_path = Path(db_path)
-        elif DEFAULT_DB_PATH != (project_root() / ".factory" / "telemetry.db"):
+        elif DEFAULT_DB_PATH != _MODULE_LOAD_DB_PATH:
             self.db_path = Path(DEFAULT_DB_PATH)
         else:
             self.db_path = default_db_path()

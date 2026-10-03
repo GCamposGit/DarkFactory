@@ -30,7 +30,7 @@ from pydantic import BaseModel, Field
 
 from core.line.agent_cli import AgentResult, _DEFAULT_OPENROUTER_MODEL, supports
 from core.line.operating_harness import resolve_operating_harness
-from core.paths import state_root
+from core.paths import project_root, state_root
 
 logger = logging.getLogger(__name__)
 
@@ -346,7 +346,8 @@ def _default_quota_headroom(provider_id: str) -> Optional[float]:
         from core.usage.adapters import build_default_adapters
         from core.usage.reservation import QuotaReservationManager
 
-        provider_dir = state_root() / "usage" / "providers"
+        mocked_dir = REPO_ROOT / ".factory" / "usage" / "providers"
+        provider_dir = mocked_dir if (REPO_ROOT != project_root() and mocked_dir.is_dir()) else (state_root() / "usage" / "providers")
         max_age = _snapshot_max_age(provider_dir)
         snapshot_stale = False
         snapshot_file = provider_dir / f"{provider_id}.json"
