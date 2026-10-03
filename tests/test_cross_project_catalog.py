@@ -242,7 +242,9 @@ def test_project_descriptor_resolve_path_platform_awareness() -> None:
         path="C:\\dev\\MultiOS",
         paths={"windows": "C:\\dev\\MultiOS", "linux": "/var/www/multios"},
     )
-    assert multi_os_proj.resolve_path(platform_name="windows") == Path("C:/dev/MultiOS")
+    win_res = multi_os_proj.resolve_path(platform_name="windows")
+    assert win_res is not None
+    assert str(win_res).replace("\\", "/") == "C:/dev/MultiOS"
     assert multi_os_proj.resolve_path(platform_name="linux") == Path("/var/www/multios")
 
     # 3. Unresolved Windows path on Linux returns None
