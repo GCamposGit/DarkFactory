@@ -131,9 +131,26 @@ todos estourando o timeout de 1200s. Três mecanismos resolvem isso, todos em
 | `DARKFAC_HARNESS_INFLIGHT_LEASE_SEC` | Duração do lease da reivindicação `harness_inflight`; renovado por heartbeat a cada `lease/3` enquanto os steps rodam | `90` |
 | `CI` | Truthy desativa o cache — CI continua sendo o portão de verdade, sempre fresco | — |
 | `PYTEST_XDIST_AUTO_NUM_WORKERS` | Override do nº de workers do `-n auto` (útil na VPS, 2 vCPU) | auto-detectado pelo xdist |
+| `DARKFAC_MAX_WORKERS` | Limite máximo manual de workers xdist para o host local | auto-calculado por memória livre (psutil) |
 
 `python core/harness/runner.py --quick --no-cache` força uma execução fresca
 pontual sem tocar nas flags de ambiente.
+
+### Orçamento de memória para workers xdist e proteção contra OOM (USR-95)
+
+No Windows (especialmente no Notebook com navegadores, IDEs e outros processos abertos), o uso de `-n auto` puro sem considerar memória disponível causava exaustão de commit charge (`0x8007000e` / `E_OUTOFMEMORY`) em `platform._wmi_query` e `subprocess._execute_child`.
+
+Para eliminar qualquer risco de falha espúria no fallback local:
+1. **Cap por memória livre (`tests/_worker_capacity.py`)**: a suíte calcula dinamicamente o número seguro de workers:
+   - Reserva basal de 2.0 GiB para o sistema operacional e o processo controlador.
+   - 2.0 GiB por worker xdist.
+   - Limite superior absoluto padrão de 8 workers (`--maxprocesses=8` em `pytest.ini`).
+   - Exemplo prático: com 6.3 GiB livres, limita automaticamente a 2 workers; com 9.2 GiB, limita a 3 workers; com 32 GiB, limita a 8 workers.
+2. **Mitigação de WMI no startup**: no Windows, consultas WMI via COM RPC (`platform._wmi_query`) sob pressão de memória podem gerar exceções SEH não-continuáveis interceptadas pelo `PYTHONFAULTHANDLER`. O conftest pré-aquece `platform.uname()` e redireciona `_wmi_query` para o fallback nativo Win32 (`sys.getwindowsversion`, `winreg`), instantâneo e livre de alocação de RPC.
+3. **Prioridade de execução e Fallback**:
+   - O portão oficial tenta **sempre** despachar primeiro para o **Desktop** (`darkfac-desktop`, 16 GB dedicado).
+   - Caso o Desktop esteja ocupado ou offline, o portão recai para o modo local com o cap conservador ativo de forma 100% transparente.
+   - Overrides manuais disponíveis: `DARKFAC_MAX_WORKERS` ou `PYTEST_XDIST_AUTO_NUM_WORKERS`.
 
 ### Notas por host
 
