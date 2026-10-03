@@ -3470,5 +3470,37 @@
     "dependencies": [],
     "created_at": "2026-10-01T19:23:22.112430Z",
     "updated_at": "2026-10-01T19:23:22.112430Z"
+  },
+  {
+    "id": "USR-124",
+    "project_id": "darkfac",
+    "title": "Stabilize always-on DarkHub quota sync and Grok fallback",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "DarkHub quota cards refresh only on page load or manual click. Cloud Grok quota depends on a local-session snapshot with a 120-second freshness window, but the Windows sync task is absent and its installer defaults to a 15-minute interval. The installer also puts the telemetry key in Task Scheduler arguments. Implement an always-on per-user Windows sync every 60 seconds, update the open dashboard automatically, keep last-known Grok quota visible with an explicit stale status if the live session is unavailable, and load the telemetry key at runtime without exposing it in task arguments. If local Grok authentication or the telemetry key is unavailable, report the exact actionable degraded state without inventing quota values.",
+    "core_journey": [
+      "DarkHub quota cards refresh only on page load or manual click. Cloud Grok quota depends on a local-session snapshot with a 120-second freshness window, but the Windows sync task is absent and its installer defaults to a 15-minute interval. The installer also puts the telemetry key in Task Scheduler arguments. Implement an always-on per-user Windows sync every 60 seconds, update the open dashboard automatically, keep last-known Grok quota visible with an explicit stale status if the live session is unavailable, and load the telemetry key at runtime without exposing it in task arguments. If local Grok authentication or the telemetry key is unavailable, report the exact actionable degraded state without inventing quota values."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Register the sync task at user logon in hidden background loop mode at 60-second intervals, with automatic restart after process failure.",
+      "The task command line contains no telemetry key; the client loads it at runtime from the environment or a local ignored .env file and never logs it.",
+      "The open DarkHub quota panel refreshes automatically, and cloud Grok retains its last known value with checked-at age and stale/degraded messaging when the source probe fails.",
+      "Missing telemetry key or Grok session produces actionable degraded status and no fabricated quota.",
+      "Complete the official DarkFac validation and autonomous delivery workflow."
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-03T07:58:51.923675Z",
+    "updated_at": "2026-10-03T07:58:51.923675Z"
   }
 ]

@@ -377,6 +377,9 @@ def test_explicit_base_ref_used_when_present(tmp_path: Path) -> None:
 # --- smoke test against the real repository -----------------------------------
 
 
+# The official quick gate runs this test in the serial step so xdist workers do
+# not make the absolute latency budget depend on unrelated CPU contention.
+@pytest.mark.serial
 def test_smoke_real_repo_json_is_valid_and_fast() -> None:
     here = Path(__file__).resolve().parent
     try:

@@ -18,7 +18,8 @@ from core.usage.api_credits import ApiCreditsMonitor, CreditAccountStatus
 from hub.backend.main import app
 from hub.backend.api import get_hub_service
 from hub.backend.service import HubService
-from scripts.sync_usage_to_cloud import collect_local_usage_payload, send_sync_payload
+import scripts.sync_usage_to_cloud as sync_client
+from scripts.sync_usage_to_cloud import collect_local_usage_payload, load_telemetry_key, send_sync_payload
 
 
 @pytest.fixture
@@ -231,3 +232,100 @@ def test_sync_usage_client_script_dry_run(tmp_path: Path):
     assert "timestamp" in payload
     assert isinstance(payload["accounts"], list)
     assert isinstance(payload["credits"], list)
+
+
+def test_sync_client_loads_telemetry_key_at_runtime_from_env_or_local_env(tmp_path: Path):
+    env_file = tmp_path / ".env"
+    env_file.write_text('# local credentials\nDARKFAC_TELEMETRY_KEY="file-secret"\n', encoding="utf-8")
+
+    assert load_telemetry_key(tmp_path, environ={}) == "file-secret"
+    assert load_telemetry_key(tmp_path, environ={"DARKFAC_TELEMETRY_KEY": "environment-secret"}) == "environment-secret"
+
+
+def test_sync_client_missing_key_reports_action_without_exposing_secret(tmp_path: Path, monkeypatch, caplog):
+    monkeypatch.setattr(sync_client, "REPO_ROOT", tmp_path)
+    monkeypatch.setattr(sync_client, "configure_sync_logging", lambda _: None)
+    monkeypatch.setattr("sys.argv", ["sync_usage_to_cloud.py"])
+    monkeypatch.delenv("DARKFAC_TELEMETRY_KEY", raising=False)
+
+    assert sync_client.main() == 1
+    assert "DARKFAC_TELEMETRY_KEY ausente" in caplog.text
+    assert str(tmp_path / ".env") in caplog.text
+    assert "secret" not in caplog.text.lower()
+
+
+def test_sync_client_loop_recovers_when_telemetry_key_becomes_available(tmp_path: Path, monkeypatch):
+    secret = "runtime-telemetry-key"
+    sent_keys = []
+    sleep_calls = 0
+    monkeypatch.setattr(sync_client, "REPO_ROOT", tmp_path)
+    monkeypatch.setattr(sync_client, "configure_sync_logging", lambda _: None)
+    monkeypatch.setattr("sys.argv", ["sync_usage_to_cloud.py", "--loop", "--interval", "1"])
+    monkeypatch.delenv("DARKFAC_TELEMETRY_KEY", raising=False)
+    monkeypatch.setattr(
+        sync_client,
+        "collect_local_usage_payload",
+        lambda *args, **kwargs: {"accounts": [], "credits": []},
+    )
+    monkeypatch.setattr(
+        sync_client,
+        "send_sync_payload",
+        lambda _url, _payload, telemetry_key: sent_keys.append(telemetry_key) or {},
+    )
+
+    def fake_sleep(_delay: float) -> None:
+        nonlocal sleep_calls
+        sleep_calls += 1
+        if sleep_calls == 1:
+            monkeypatch.setenv("DARKFAC_TELEMETRY_KEY", secret)
+            return
+        raise StopIteration
+
+    monkeypatch.setattr(sync_client.time, "sleep", fake_sleep)
+
+    with pytest.raises(StopIteration):
+        sync_client.main()
+
+    assert sent_keys == [secret]
+
+
+def test_sync_client_redacts_telemetry_key_from_failure_logs(tmp_path: Path, monkeypatch, caplog):
+    secret = "never-log-this-telemetry-key"
+    monkeypatch.setattr(sync_client, "REPO_ROOT", tmp_path)
+    monkeypatch.setattr(sync_client, "configure_sync_logging", lambda _: None)
+    monkeypatch.setattr("sys.argv", ["sync_usage_to_cloud.py"])
+    monkeypatch.setenv("DARKFAC_TELEMETRY_KEY", secret)
+    monkeypatch.setattr(sync_client, "collect_local_usage_payload", lambda *args, **kwargs: {"accounts": [], "credits": []})
+
+    def fail_with_secret(*args, **kwargs):
+        raise RuntimeError(f"remote echo: {secret}")
+
+    monkeypatch.setattr(sync_client, "send_sync_payload", fail_with_secret)
+
+    assert sync_client.main() == 1
+    assert secret not in caplog.text
+    assert "[redacted]" in caplog.text
+
+
+def test_sync_task_installer_is_hidden_logon_loop_without_key_argument():
+    root = Path(__file__).resolve().parents[1]
+    installer = (root / "scripts" / "install_sync_task.ps1").read_text(encoding="utf-8")
+    client = (root / "scripts" / "sync_usage_to_cloud.py").read_text(encoding="utf-8")
+
+    assert "New-ScheduledTaskTrigger -AtLogOn" in installer
+    assert "-Hidden" in installer
+    assert "-RestartCount" in installer and "-RestartInterval" in installer
+    assert "--loop" in installer and "--interval" in installer
+    assert "--interval 60" in installer
+    assert "--key" not in installer.lower()
+    assert "--key" not in client.lower()
+
+
+def test_usage_dashboard_auto_refreshes_and_displays_checked_at_age():
+    root = Path(__file__).resolve().parents[1]
+    frontend = (root / "hub" / "frontend" / "usage.js").read_text(encoding="utf-8")
+
+    assert "setInterval" in frontend
+    assert "document.visibilityState" in frontend
+    assert "formatUsageCheckedAt(account.checked_at)" in frontend
+    assert "degraded" in frontend.lower()
