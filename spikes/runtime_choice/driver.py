@@ -101,6 +101,12 @@ def run_jsonl(config: LabConfig, input_stream: TextIO, output_stream: TextIO) ->
             event = session.adapter.poll_event(timeout=0.05)
             if event is not None:
                 write(event)
+        # Drain any remaining events in the queue before terminating
+        while True:
+            event = session.adapter.poll_event(timeout=0.0)
+            if event is None:
+                break
+            write(event)
 
     pump_thread = threading.Thread(target=pump, name="hf02-driver-events", daemon=True)
     pump_thread.start()

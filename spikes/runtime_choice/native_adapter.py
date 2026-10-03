@@ -13,6 +13,7 @@ import os
 import queue
 import sqlite3
 import threading
+import time
 from copy import deepcopy
 from pathlib import Path
 from typing import Any
@@ -112,17 +113,24 @@ class NativeAdapter:
             raise ValueError("NativeAdapter requires runtime=native_sqlite")
         self.config = config
         self.native_root = config.root_dir / "native"
-        try:
-            self.native_root.mkdir(parents=True, exist_ok=True)
-            self.database_path = self.native_root / "orchestrator.sqlite3"
-            self.store = OrchestratorStore(self.database_path, timeout_seconds=30.0)
-            self.runtime = OrchestratorRuntime(
-                self.store,
-                owner=f"native-{os.getpid()}-{uuid4().hex[:8]}",
-                lease_seconds=config.lease_seconds,
-            )
-        except (OSError, sqlite3.Error, StoreError) as error:
-            raise NativeAdapterError("STORE_UNAVAILABLE") from error
+        last_error: Exception | None = None
+        for attempt in range(5):
+            try:
+                self.native_root.mkdir(parents=True, exist_ok=True)
+                self.database_path = self.native_root / "orchestrator.sqlite3"
+                self.store = OrchestratorStore(self.database_path, timeout_seconds=30.0)
+                self.runtime = OrchestratorRuntime(
+                    self.store,
+                    owner=f"native-{os.getpid()}-{uuid4().hex[:8]}",
+                    lease_seconds=config.lease_seconds,
+                )
+                last_error = None
+                break
+            except (OSError, sqlite3.Error, StoreError) as error:
+                last_error = error
+                time.sleep(0.1 * (attempt + 1))
+        if last_error is not None:
+            raise NativeAdapterError("STORE_UNAVAILABLE") from last_error
         self.effects = EffectClient(config.effect_base_url)
         self._events: queue.Queue[DriverEvent] = queue.Queue()
         self._threads: dict[str, threading.Thread] = {}
@@ -183,15 +191,22 @@ class NativeAdapter:
         )
 
     def _latest_is_duplicate(self, workflow_id: str) -> bool:
-        latest = self.store.get_latest_run(workflow_id)
-        if latest is None:
-            return False
-        if latest.status is RunStatus.SUCCEEDED:
-            return True
-        if latest.status is not RunStatus.RUNNING:
-            return False
-        lease = self.store.current_lease(workflow_id)
-        return lease is not None and lease.is_valid()
+        for attempt in range(5):
+            try:
+                latest = self.store.get_latest_run(workflow_id)
+                if latest is None:
+                    return False
+                if latest.status is RunStatus.SUCCEEDED:
+                    return True
+                if latest.status is not RunStatus.RUNNING:
+                    return False
+                lease = self.store.current_lease(workflow_id)
+                return lease is not None and lease.is_valid()
+            except (sqlite3.Error, OSError, StoreError):
+                if attempt == 4:
+                    raise
+                time.sleep(0.05 * (attempt + 1))
+        return False
 
     def start(self, command: DriverCommand) -> list[DriverEvent]:
         if command.action is not DriverAction.START:
@@ -286,9 +301,17 @@ class NativeAdapter:
 
     def observe(self, command: DriverCommand) -> list[DriverEvent]:
         assert command.workflow_id is not None
-        try:
-            record = self.store.get_latest_run(command.workflow_id)
-        except (sqlite3.Error, OSError, StoreError):
+        record = None
+        last_error: Exception | None = None
+        for attempt in range(5):
+            try:
+                record = self.store.get_latest_run(command.workflow_id)
+                last_error = None
+                break
+            except (sqlite3.Error, OSError, StoreError) as error:
+                last_error = error
+                time.sleep(0.05 * (attempt + 1))
+        if last_error is not None:
             return [
                 self._event(
                     command.workflow_id,
