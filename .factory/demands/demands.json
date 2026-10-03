@@ -2508,7 +2508,7 @@
     "project_id": "darkfac",
     "title": "Notebook: workers xdist morrem com 0x8007000e (E_OUTOFMEMORY) em subprocess/platform e geram falha espuria de teste",
     "origin": "agent",
-    "status": "planned",
+    "status": "completed",
     "item_type": "quality",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -2538,7 +2538,8 @@
     "estimated_complexity": "small",
     "dependencies": [],
     "created_at": "2026-09-30T22:00:00Z",
-    "updated_at": "2026-09-30T22:00:00Z"
+    "updated_at": "2026-10-03T16:15:00Z",
+    "delivery_evidence": "pr:#131:09463d8bbce42469a30e2795d4c5e5adac1bd892"
   },
   {
     "id": "USR-97",
