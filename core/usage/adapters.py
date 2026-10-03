@@ -1006,6 +1006,8 @@ class GeminiAccountAdapter(AccountUsageAdapter):
     @staticmethod
     def _find_live_ls_credentials() -> tuple[Optional[str], List[int]]:
         """Extract current csrf_token and candidate ports for Antigravity Language Server."""
+        if os.environ.get("DARKFAC_OFFLINE") == "1":
+            return None, []
         csrf_token: Optional[str] = None
         ports: List[int] = []
 
@@ -1071,8 +1073,6 @@ class GeminiAccountAdapter(AccountUsageAdapter):
         return csrf_token, ports
 
     def _probe_language_server(self) -> Optional[ProviderAccountUsage]:
-        if os.environ.get("DARKFAC_OFFLINE") == "1":
-            return None
         csrf_token, candidate_ports = self._find_live_ls_credentials()
         if not csrf_token or not candidate_ports:
             return None
