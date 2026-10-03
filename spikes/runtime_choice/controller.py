@@ -139,6 +139,7 @@ class ScenarioController:
         scenario_dir = self.config.root_dir / f"run_{spec.scenario_id}_{repeat_index}"
         scenario_dir.mkdir(parents=True, exist_ok=True)
         config_data = self.config.model_dump(mode="json")
+        config_data["root_dir"] = str(scenario_dir)
         config_data["effect_base_url"] = server.base_url
         if spec.capability.value == "version_isolation":
             config_data["workflow_version"] = WorkflowVersion.V1.value
