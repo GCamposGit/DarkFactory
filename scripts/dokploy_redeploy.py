@@ -655,8 +655,36 @@ def build_arg_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Skip the post-deploy 3-node verification/sync (used by node_sync itself to avoid re-entry).",
     )
+    parser.add_argument(
+        "--skip-check-main",
+        action="store_true",
+        help="Skip post-deploy check-main verification.",
+    )
     parser.add_argument("-v", "--verbose", action="store_true", help="Enable debug logging.")
     return parser
+
+
+def default_check_main_runner() -> Tuple[int, Dict[str, Any]]:
+    """Probe base branch CI and open defect ticket if red (USR-85)."""
+    try:
+        if str(REPO_ROOT) not in sys.path:
+            sys.path.insert(0, str(REPO_ROOT))
+        from core.git.autonomy import run_check_main
+
+        return run_check_main(open_ticket=True, notify=True)
+    except Exception as exc:
+        return 2, {"state": "unknown", "error": str(exc)}
+
+
+def default_backup_runner(project_id: str = "darkfac") -> Dict[str, Any]:
+    """Execute the real autonomous 3-tier backup cycle."""
+    if str(REPO_ROOT) not in sys.path:
+        sys.path.insert(0, str(REPO_ROOT))
+    from core.infra.backup_cron import run_autonomous_backup_cycle
+
+    return run_autonomous_backup_cycle(project_id=project_id)
+
+
 
 
 def _print_service_list(transport: Transport, services: Sequence[Service], out: Any) -> None:
@@ -696,48 +724,32 @@ def _resolve_services(
     return select_services(services, only)
 
 
-def main(
-    argv: Optional[Sequence[str]] = None,
+def _run_main(
     *,
-    env: Optional[Dict[str, str]] = None,
-    registry_reader: Callable[[str], Optional[str]] = _read_windows_user_env,
-    transport_factory: Optional[Callable[[str, str], Transport]] = None,
-    health_client: Optional[Callable[[], Dict[str, Any]]] = None,
-    sleep_fn: Callable[[float], None] = time.sleep,
-    clock_fn: Callable[[], float] = time.monotonic,
-    backup_runner: Optional[Callable[..., Any]] = None,
-    stdout: Any = None,
-    stderr: Any = None,
+    argv: Optional[Sequence[str]],
+    env: Dict[str, str],
+    registry_reader: Callable[[str], Optional[str]],
+    transport_factory: Optional[Callable[[str, str], Transport]],
+    health_client: Optional[Callable[[], Dict[str, Any]]],
+    sleep_fn: Callable[[float], None],
+    clock_fn: Callable[[], float],
+    backup_runner: Optional[Callable[..., Any]],
+    check_main_runner: Optional[Callable[[], Tuple[int, Dict[str, Any]]]],
+    out: Any,
+    err: Any,
 ) -> int:
-    out = stdout if stdout is not None else sys.stdout
-    err = stderr if stderr is not None else sys.stderr
-    env = dict(os.environ) if env is None else dict(env)
-
     parser = build_arg_parser()
     args = parser.parse_args(list(argv) if argv is not None else None)
 
     logging.basicConfig(level=logging.DEBUG if args.verbose else logging.WARNING, format="%(message)s")
 
-    try:
-        check_project_allowed(args.project)
-    except DokployUsageError as exc:
-        print(str(exc), file=err)
-        return EXIT_USAGE_ERROR
-
-    try:
-        api_url, api_key = resolve_credentials(env, registry_reader)
-    except DokployUsageError as exc:
-        print(str(exc), file=err)
-        return EXIT_USAGE_ERROR
+    check_project_allowed(args.project)
+    api_url, api_key = resolve_credentials(env, registry_reader)
 
     factory = transport_factory or make_urllib_transport
     transport = factory(api_url, api_key)
 
-    try:
-        selected = _resolve_services(transport, args.project, args.environment, args.only)
-    except DokployUsageError as exc:
-        print(str(exc), file=err)
-        return EXIT_USAGE_ERROR
+    selected = _resolve_services(transport, args.project, args.environment, args.only)
 
     if args.list:
         _print_service_list(transport, selected, out)
@@ -745,20 +757,22 @@ def main(
 
     if args.dry_run:
         print(
-            f"Dry run: would deploy {len(selected)} service(s) in {args.project}/{args.environment}:", file=out
+            f"Dry run: would deploy {len(selected)} service(s) in {args.project}/{args.environment}:",
+            file=out,
+            flush=True,
         )
         for svc in selected:
-            print(f"  - {svc.name} ({svc.kind}, id={svc.service_id})", file=out)
+            print(f"  - {svc.name} ({svc.kind}, id={svc.service_id})", file=out, flush=True)
         return EXIT_OK
 
     local_subject = get_local_origin_main_subject()
     darkhub_selected = any(svc.name.lower() == "darkhub" and svc.kind == "compose" for svc in selected)
     expected_sha = get_origin_main_sha() if darkhub_selected else None
     if darkhub_selected and expected_sha is None:
-        print("Cannot determine full origin/main SHA; Darkhub deploy refused", file=err)
+        print("Cannot determine full origin/main SHA; Darkhub deploy refused", file=err, flush=True)
         return EXIT_DEPLOY_FAILED
     if darkhub_selected and not args.wait:
-        print("Darkhub deploy requires --wait so /health can prove the origin/main SHA", file=err)
+        print("Darkhub deploy requires --wait so /health can prove the origin/main SHA", file=err, flush=True)
         return EXIT_USAGE_ERROR
     darkhub_compose = None
     if darkhub_selected:
@@ -766,12 +780,16 @@ def main(
             darkhub_compose = get_origin_main_compose(expected_sha)
             render_darkhub_compose(darkhub_compose, expected_sha)
         except DokployUsageError as exc:
-            print(f"Darkhub deploy refused: {exc}", file=err)
+            print(f"Darkhub deploy refused: {exc}", file=err, flush=True)
             return EXIT_DEPLOY_FAILED
     if local_subject:
-        print(f"Local origin/main HEAD subject: {local_subject}", file=out)
+        print(f"Local origin/main HEAD subject: {local_subject}", file=out, flush=True)
 
-    print(f"Triggering redeploy for {len(selected)} service(s) in {args.project}/{args.environment}...", file=out)
+    print(
+        f"Triggering redeploy for {len(selected)} service(s) in {args.project}/{args.environment}...",
+        file=out,
+        flush=True,
+    )
 
     all_ok = True
     triggered: List[Service] = []
@@ -784,15 +802,15 @@ def main(
                 set_compose_git_sha(transport, svc, baseline_payload, expected_sha, darkhub_compose)
             trigger_deploy(transport, svc)
         except DokployUsageError as exc:
-            print(f"[{svc.name}] FAILED to trigger deploy: {exc}", file=err)
+            print(f"[{svc.name}] FAILED to trigger deploy: {exc}", file=err, flush=True)
             all_ok = False
             continue
-        print(f"[{svc.name}] deploy triggered ({svc.kind}, id={svc.service_id})", file=out)
+        print(f"[{svc.name}] deploy triggered ({svc.kind}, id={svc.service_id})", file=out, flush=True)
         triggered.append(svc)
         baselines[svc.name] = baseline
 
     if not args.wait:
-        print("Not waiting (--no-wait): triggered deploy(s) may still be in progress on Dokploy.", file=out)
+        print("Not waiting (--no-wait): triggered deploy(s) may still be in progress on Dokploy.", file=out, flush=True)
         return EXIT_OK if all_ok else EXIT_DEPLOY_FAILED
 
     completed: List[ServiceWaitResult] = []
@@ -820,6 +838,7 @@ def main(
         print(
             f"[{svc.name}] status={result.outcome} title={title!r} elapsed={result.elapsed_seconds:.1f}s{match_note}",
             file=out,
+            flush=True,
         )
         if result.outcome != WaitOutcome.DONE:
             all_ok = False
@@ -829,9 +848,9 @@ def main(
             expected_sha, health=health_client or fetch_darkhub_health, timeout=args.timeout,
             interval=args.poll_interval, sleep_fn=sleep_fn, clock_fn=clock_fn,
         ):
-            print(f"[NODE SYNC] VPS: converged sha={expected_sha}", file=out)
+            print(f"[NODE SYNC] VPS: converged sha={expected_sha}", file=out, flush=True)
         else:
-            print(f"[NODE SYNC] VPS: divergent; /health did not report origin/main sha={expected_sha}", file=err)
+            print(f"[NODE SYNC] VPS: divergent; /health did not report origin/main sha={expected_sha}", file=err, flush=True)
             all_ok = False
 
     # A completed Dokploy job is not evidence that all running nodes use main.
@@ -840,7 +859,7 @@ def main(
     # sync must not trigger another redeploy, and node_sync's own redeploy
     # passes --skip-node-sync, so there is no re-entry loop.
     if getattr(args, "skip_node_sync", False):
-        print("[NODE SYNC] skipped (--skip-node-sync)", file=out)
+        print("[NODE SYNC] skipped (--skip-node-sync)", file=out, flush=True)
     else:
         if str(REPO_ROOT) not in sys.path:
             sys.path.insert(0, str(REPO_ROOT))
@@ -864,6 +883,7 @@ def main(
                 f"sha={node.git_sha or '(unknown)'} expected={sync_report.expected_sha or '(unknown)'} "
                 f"reason={node.reason or '(none)'}",
                 file=err,
+                flush=True,
             )
     if local_subject:
         for svc in triggered:
@@ -876,33 +896,101 @@ def main(
                 # Weaker than a runtime SHA, so a missing/different title fails closed.
                 if not matches:
                     all_ok = False
-                    print(f"[NODE SYNC] VPS service {svc.name}: does not match local origin/main", file=err)
+                    print(f"[NODE SYNC] VPS service {svc.name}: does not match local origin/main", file=err, flush=True)
             elif not matches:
-                print(f"[{svc.name}] info: deploy title {title!r} is not a commit subject (not code-bearing; ignored)", file=out)
+                print(f"[{svc.name}] info: deploy title {title!r} is not a commit subject (not code-bearing; ignored)", file=out, flush=True)
 
-    if all_ok and not getattr(args, "skip_backup", False):
+    # Post-deploy check-main verification (USR-85 scope in USR-72)
+    if getattr(args, "skip_check_main", False):
+        print("[CHECK-MAIN] skipped (--skip-check-main)", file=out, flush=True)
+    elif check_main_runner is not None:
         try:
-            print("\n[AUTONOMOUS POST-DEPLOY BACKUP] Executing 3-tier backup & restore drill...", file=out)
-            runner = backup_runner
-            if runner is None:
-                # In pytest test harness without explicit runner, skip heavy real backup
-                if "pytest" in sys.modules and not os.getenv("DARKFAC_TEST_REAL_BACKUP"):
-                    print("[AUTONOMOUS POST-DEPLOY BACKUP] Skipped in pytest test harness.", file=out)
-                else:
-                    if str(REPO_ROOT) not in sys.path:
-                        sys.path.insert(0, str(REPO_ROOT))
-                    from core.infra.backup_cron import run_autonomous_backup_cycle
-
-                    runner = run_autonomous_backup_cycle
-            if runner is not None:
-                summary = runner(project_id="darkfac")
-                drill_v = summary.get("drill_verified", False) if isinstance(summary, dict) else True
-                snap_id = summary.get("snapshot_id", "done") if isinstance(summary, dict) else "done"
-                print(f"[AUTONOMOUS POST-DEPLOY BACKUP] Done: snapshot={snap_id}, drill_verified={drill_v}\n", file=out)
+            cm_code, cm_payload = check_main_runner()
+            cm_state = cm_payload.get("state", "unknown") if isinstance(cm_payload, dict) else "unknown"
+            print(f"[CHECK-MAIN] state={cm_state} code={cm_code} payload={json.dumps(cm_payload)}", file=out, flush=True)
         except Exception as exc:
-            print(f"[AUTONOMOUS POST-DEPLOY BACKUP] Warning: autonomous backup cycle failed: {exc}", file=err)
+            print(f"[CHECK-MAIN] failed: {exc}", file=err, flush=True)
+    elif not getattr(args, "skip_node_sync", False) and not args.list and not args.dry_run:
+        try:
+            cm_code, cm_payload = default_check_main_runner()
+            cm_state = cm_payload.get("state", "unknown") if isinstance(cm_payload, dict) else "unknown"
+            print(f"[CHECK-MAIN] state={cm_state} code={cm_code} payload={json.dumps(cm_payload)}", file=out, flush=True)
+        except Exception as exc:
+            print(f"[CHECK-MAIN] failed: {exc}", file=err, flush=True)
+
+    if getattr(args, "skip_backup", False):
+        print("[BACKUP] skipped: --skip-backup flag provided", file=out, flush=True)
+    elif not all_ok:
+        print("[BACKUP] skipped: deploy did not converge (all_ok is False)", file=out, flush=True)
+    else:
+        try:
+            print("\n[AUTONOMOUS POST-DEPLOY BACKUP] Executing 3-tier backup & restore drill...", file=out, flush=True)
+            runner = backup_runner or default_backup_runner
+            summary = runner(project_id="darkfac")
+            drill_v = summary.get("drill_verified", False) if isinstance(summary, dict) else True
+            snap_id = summary.get("snapshot_id", "done") if isinstance(summary, dict) else "done"
+            print(f"[BACKUP] ran: snapshot={snap_id}, drill_verified={drill_v}", file=out, flush=True)
+            print(f"[AUTONOMOUS POST-DEPLOY BACKUP] Done: snapshot={snap_id}, drill_verified={drill_v}\n", file=out, flush=True)
+        except Exception as exc:
+            print(f"[BACKUP] failed: {exc}", file=err, flush=True)
+            print(f"[AUTONOMOUS POST-DEPLOY BACKUP] Warning: autonomous backup cycle failed: {exc}", file=err, flush=True)
 
     return EXIT_OK if all_ok else EXIT_DEPLOY_FAILED
+
+
+def main(
+    argv: Optional[Sequence[str]] = None,
+    *,
+    env: Optional[Dict[str, str]] = None,
+    registry_reader: Callable[[str], Optional[str]] = _read_windows_user_env,
+    transport_factory: Optional[Callable[[str, str], Transport]] = None,
+    health_client: Optional[Callable[[], Dict[str, Any]]] = None,
+    sleep_fn: Callable[[float], None] = time.sleep,
+    clock_fn: Callable[[], float] = time.monotonic,
+    backup_runner: Optional[Callable[..., Any]] = None,
+    check_main_runner: Optional[Callable[[], Tuple[int, Dict[str, Any]]]] = None,
+    stdout: Any = None,
+    stderr: Any = None,
+) -> int:
+    out = stdout if stdout is not None else sys.stdout
+    err = stderr if stderr is not None else sys.stderr
+    env = dict(os.environ) if env is None else dict(env)
+
+    if hasattr(out, "reconfigure"):
+        try:
+            out.reconfigure(line_buffering=True)
+        except Exception:
+            pass
+    if hasattr(err, "reconfigure"):
+        try:
+            err.reconfigure(line_buffering=True)
+        except Exception:
+            pass
+
+    try:
+        return _run_main(
+            argv=argv,
+            env=env,
+            registry_reader=registry_reader,
+            transport_factory=transport_factory,
+            health_client=health_client,
+            sleep_fn=sleep_fn,
+            clock_fn=clock_fn,
+            backup_runner=backup_runner,
+            check_main_runner=check_main_runner,
+            out=out,
+            err=err,
+        )
+    except DokployUsageError as exc:
+        print(str(exc), file=err, flush=True)
+        payload = {"error": str(exc), "error_type": "DokployUsageError", "exit_code": EXIT_USAGE_ERROR}
+        print(f"[STRUCTURED_ERROR] {json.dumps(payload)}", file=err, flush=True)
+        return EXIT_USAGE_ERROR
+    except Exception as exc:
+        print(f"Redeploy failed: {exc}", file=err, flush=True)
+        payload = {"error": str(exc), "error_type": type(exc).__name__, "exit_code": EXIT_DEPLOY_FAILED}
+        print(f"[STRUCTURED_ERROR] {json.dumps(payload)}", file=err, flush=True)
+        return EXIT_DEPLOY_FAILED
 
 
 if __name__ == "__main__":

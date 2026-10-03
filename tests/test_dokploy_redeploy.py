@@ -29,6 +29,8 @@ def _node_verification_fake(monkeypatch: pytest.MonkeyPatch) -> None:
     from core.infra import node_sync
 
     monkeypatch.setattr(mod, "get_local_origin_main_subject", lambda: None)
+    monkeypatch.setattr(mod, "default_check_main_runner", lambda: (0, {"state": "green", "sha": "a" * 40}))
+    monkeypatch.setattr(mod, "default_backup_runner", lambda project_id="darkfac": {"snapshot_id": "snp_fake", "drill_verified": True})
     monkeypatch.setattr(
         node_sync,
         "sync",
@@ -1286,4 +1288,127 @@ def test_main_node_sync_transient_failure_converges_with_exit_0(monkeypatch: pyt
     assert code == mod.EXIT_OK, err
     assert probes == 1
     assert "Desktop: offline" not in err
+
+
+def test_no_pytest_in_dokploy_redeploy() -> None:
+    """USR-72: Production script must not inspect sys.modules or mention pytest."""
+    from pathlib import Path
+
+    source_path = Path(__file__).resolve().parents[1] / "scripts" / "dokploy_redeploy.py"
+    content = source_path.read_text(encoding="utf-8")
+    assert "pytest" not in content
+    assert "sys.modules" not in content
+
+
+def test_transport_exception_emits_structured_error_no_traceback() -> None:
+    """USR-72: Unhandled transport exception produces single-line structured error JSON, no raw Traceback."""
+    def broken_transport_factory(url: str, key: str) -> mod.Transport:
+        def boom(method: str, path: str, body: Optional[Dict[str, Any]] = None) -> Any:
+            raise RuntimeError("dokploy connection timed out")
+        return boom
+
+    out, err = io.StringIO(), io.StringIO()
+    exit_code = mod.main(
+        ["--only", "darkfac-cloud", "--skip-backup"],
+        env=_ENV,
+        registry_reader=_no_registry,
+        transport_factory=broken_transport_factory,
+        stdout=out,
+        stderr=err,
+    )
+    assert exit_code == mod.EXIT_DEPLOY_FAILED
+    err_str = err.getvalue()
+    assert "Traceback (most recent call last)" not in err_str
+    assert "[STRUCTURED_ERROR]" in err_str
+    assert "dokploy connection timed out" in err_str
+
+
+def test_backup_skipped_on_failure_logs_reason() -> None:
+    """USR-72: When deployment fails, backup is skipped and explicitly logs the reason."""
+    transport = _make_transport_with_full_project()
+    old = {"deploymentId": "old", "status": "done", "title": "old", "createdAt": "2026-09-12T09:00:00Z"}
+    new = {"deploymentId": "new", "status": "error", "title": "error deploy", "createdAt": "2026-09-12T09:10:00Z"}
+    _program_status(transport, "/api/compose.one?composeId=compose_cloud", [[old], [new]])
+
+    out, err = io.StringIO(), io.StringIO()
+    clock = FakeClock()
+    exit_code = mod.main(
+        ["--only", "darkfac-cloud"],
+        env=_ENV,
+        registry_reader=_no_registry,
+        transport_factory=lambda url, key: transport,
+        sleep_fn=clock.sleep,
+        clock_fn=clock.now,
+        stdout=out,
+        stderr=err,
+    )
+    assert exit_code == mod.EXIT_DEPLOY_FAILED
+    assert "[BACKUP] skipped: deploy did not converge (all_ok is False)" in out.getvalue()
+
+
+def test_check_main_called_after_node_sync() -> None:
+    """USR-72 / USR-85: check-main is invoked post-deploy and logs structured result."""
+    transport = _cloud_transport()
+    out, err = io.StringIO(), io.StringIO()
+    check_main_calls: list[str] = []
+
+    def mock_check_main() -> Tuple[int, Dict[str, Any]]:
+        check_main_calls.append("check-main")
+        return 0, {"state": "green", "sha": "a" * 40}
+
+    exit_code = mod.main(
+        ["--only", "darkfac-cloud", "--skip-backup"],
+        env=_ENV,
+        registry_reader=_no_registry,
+        transport_factory=lambda url, key: transport,
+        check_main_runner=mock_check_main,
+        stdout=out,
+        stderr=err,
+    )
+    assert exit_code == mod.EXIT_OK
+    assert check_main_calls == ["check-main"]
+    assert "[CHECK-MAIN] state=green code=0" in out.getvalue()
+
+
+def test_stage_order_in_redeploy(monkeypatch: pytest.MonkeyPatch) -> None:
+    """USR-72: Validates strict execution order: deploy -> node_sync -> check-main -> backup."""
+    from core.infra import node_sync
+
+    events: list[str] = []
+    transport = _cloud_transport()
+
+    def recording_transport(method: str, path: str, body: Optional[Dict[str, Any]] = None) -> Any:
+        if method == "POST" and "deploy" in path:
+            events.append("deploy")
+        return transport(method, path, body)
+
+    def recording_sync(**kwargs: Any) -> node_sync.SyncReport:
+        events.append("node_sync")
+        return node_sync.SyncReport(expected_sha="a" * 40, nodes=[
+            node_sync.NodeStatus(name=n, state="converged", git_sha="a" * 40) for n in ("Notebook", "Desktop", "VPS")
+        ])
+    monkeypatch.setattr(node_sync, "sync", recording_sync)
+
+    def recording_check_main() -> Tuple[int, Dict[str, Any]]:
+        events.append("check_main")
+        return 0, {"state": "green", "sha": "a" * 40}
+
+    def recording_backup(project_id: str = "darkfac") -> Dict[str, Any]:
+        events.append("backup")
+        return {"snapshot_id": "snp_order", "drill_verified": True}
+
+    out, err = io.StringIO(), io.StringIO()
+    exit_code = mod.main(
+        ["--only", "darkfac-cloud"],
+        env=_ENV,
+        registry_reader=_no_registry,
+        transport_factory=lambda url, key: recording_transport,
+        check_main_runner=recording_check_main,
+        backup_runner=recording_backup,
+        stdout=out,
+        stderr=err,
+    )
+    assert exit_code == mod.EXIT_OK
+    assert events == ["deploy", "node_sync", "check_main", "backup"]
+
 

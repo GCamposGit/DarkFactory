@@ -257,6 +257,22 @@ Rode o comando do passo 2 de novo, so que com a variante que inclui
 `-Token "novo-valor"`. O instalador substitui a tarefa agendada e a
 variavel de ambiente sem duplicar nada.
 
+**Processo legado na porta 8080 (recuperacao autonoma e manual — USR-71)**
+Se um processo antigo estiver segurando a porta 8080 sem expor `git_sha` ou
+`restart_safe` no `/health`:
+- **Autonomo**: o `core.infra.node_sync` detecta o estado legado (`is_legacy`)
+  e dispara a recuperacao pela Scheduled Task (`schtasks /End` e `schtasks /Run`),
+  aguardando a convergencia sem intervencao humana.
+- **Manual** (caso deseje reiniciar manualmente):
+  ```powershell
+  schtasks /End /TN "DarkFac Test Worker"
+  schtasks /Run /TN "DarkFac Test Worker"
+  ```
+  E confira se voltou com a versao e SHA:
+  ```powershell
+  Invoke-RestMethod http://127.0.0.1:8080/health | Select-Object status, node_id, git_sha, restart_safe, harness_version
+  ```
+
 **Preciso desinstalar / parar o worker**
 Abra o PowerShell como administrador e rode:
 
