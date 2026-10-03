@@ -2764,7 +2764,7 @@
     "project_id": "darkfac",
     "title": "Caminhos rastreados e ignorados ao mesmo tempo (74 arquivos) escondem escrita de teste em arquivo versionado; defaults relativos ao cwd",
     "origin": "agent",
-    "status": "planned",
+    "status": "completed",
     "item_type": "quality",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -2795,7 +2795,8 @@
       "USR-100"
     ],
     "created_at": "2026-09-30T23:30:00Z",
-    "updated_at": "2026-10-01T07:00:00Z"
+    "updated_at": "2026-10-03T18:25:22Z",
+    "delivery_evidence": "a51d54e838934be530ebfd48567d8d999403f322"
   },
   {
     "id": "USR-103",
