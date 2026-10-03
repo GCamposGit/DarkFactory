@@ -59,4 +59,4 @@ flowchart TD
 - Idempotência: toda etapa verifica primeiro se o efeito já existe (commit com trailer `DarkFac-Job: <job_key>`, PR aberto para a branch, deploy com o mesmo SHA) e o reaproveita.
 - Falhas usam `outcome`: `retry` (transitória), `failed` com `cause_code`, `replan` (spec errada) e `waiting_human` (só para os itens da seção 7 do plano).
 - Testes focais em `tests/line/` com repositório Git temporário (`tmp_path`, `git init`) e um CLI falso (`scripts` stub no PATH) para as etapas de agente. Nenhum teste depende de rede.
-- Validação global inalterada: `python core/harness/runner.py --quick` e `python -m pytest tests -v --ignore=tests/test_canaletto.py`.
+- Validação global: `python core/harness/runner.py --quick` é o único portão oficial e já executa a suíte inteira, exceto `tests/test_canaletto.py`.

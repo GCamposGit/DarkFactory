@@ -1,10 +1,9 @@
 """HF-27-10 -- Dogfood submitter: the factory builds its own backlog.
 
-Once `core.line.canary.green_streak` reaches 7 consecutive green days, the
-factory starts feeding its own roadmap back through the line: a single
-`planned` item from `.factory/roadmap/darkfac.json` tagged `line-ok` is
-submitted through the same public intake (`AutonomousIntakeService`) used
-by every other demand, as project `darkfac`, one item at a time.
+Once `core.line.canary.green_streak` reaches the configured threshold, the
+factory feeds its approved demands and roadmap through the line. Tickets in
+`.factory/demands/demands.json` take precedence over roadmap items, and both
+sources require the `line-ok` tag. Only one dogfood run is submitted at a time.
 
 Gating (all three must hold):
 - `green_streak(reports) >= min_green_streak()` (code default 7, overridable
@@ -28,11 +27,19 @@ from pathlib import Path
 from typing import Any
 
 from core.demands.autonomous_intake import AutonomousIntakeService
+from core.demands.models import UserTicket
 from core.demands.store import DemandsStore
 from core.line.canary import REPORTS_DIR, green_streak, load_reports
+from core.line.owner_intake import (
+    LineSubmission,
+    _ticket_attempts,
+    max_ticket_attempts_from_env,
+    run_state,
+    submit_ticket_to_line,
+)
 from core.line.store_selection import default_control_store
 from core.orchestrator.guard import PROTECTED_PATTERNS
-from core.roadmap.models import DeliveryStatus, RoadmapItem
+from core.roadmap.models import DeliveryStatus, PlanningHorizon, RoadmapItem
 from core.workflow.control_contracts import IdempotencyConflict, IntakeCommand, IntakeReceipt
 from core.workflow.control_store import ControlStore
 
@@ -81,16 +88,7 @@ def load_roadmap_items(roadmap_path: Path = ROADMAP_PATH) -> list[RoadmapItem]:
     return items
 
 
-def touches_protected_path(item: RoadmapItem) -> bool:
-    """True when the item's own text mentions a `guard.py`-protected path.
-
-    `RoadmapItem` has no dedicated "touched files" field, so this is a
-    best-effort scan of `description`, `completion_criteria` and
-    `source_refs[].locator` for a path-shaped token matching one of
-    `core.orchestrator.guard.PROTECTED_PATTERNS`.
-    """
-    haystacks: list[str] = [item.description, *item.completion_criteria]
-    haystacks += [ref.locator for ref in item.source_refs if ref.locator]
+def _text_touches_protected_path(haystacks: list[str]) -> bool:
     for text in haystacks:
         if not text:
             continue
@@ -104,10 +102,61 @@ def touches_protected_path(item: RoadmapItem) -> bool:
     return False
 
 
-def pick_candidate(items: list[RoadmapItem]) -> RoadmapItem | None:
+def touches_protected_path(item: RoadmapItem) -> bool:
+    """True when the item's own text mentions a `guard.py`-protected path.
+
+    `RoadmapItem` has no dedicated "touched files" field, so this is a
+    best-effort scan of `description`, `completion_criteria` and
+    `source_refs[].locator` for a path-shaped token matching one of
+    `core.orchestrator.guard.PROTECTED_PATTERNS`.
+    """
+    haystacks: list[str] = [item.description, *item.completion_criteria]
+    haystacks += [ref.locator for ref in item.source_refs if ref.locator]
+    return _text_touches_protected_path(haystacks)
+
+
+def ticket_touches_protected_path(ticket: UserTicket) -> bool:
+    """Reject tickets that name a protected path, including suggested files."""
+    return _text_touches_protected_path([
+        ticket.problem_statement,
+        ticket.reachability_contract,
+        *ticket.core_journey,
+        *ticket.acceptance_criteria,
+        *ticket.suggested_files,
+    ])
+
+
+_HORIZON_ORDER = {
+    PlanningHorizon.NOW: 0,
+    PlanningHorizon.NEXT: 1,
+    PlanningHorizon.LATER: 2,
+    PlanningHorizon.EXPLORATORY: 3,
+    PlanningHorizon.UNSCHEDULED: 4,
+}
+
+
+def eligible_ticket_candidates(tickets: list[UserTicket]) -> list[UserTicket]:
+    """Prioritize approved internal tickets by horizon, creation time and ID."""
+    completed = {ticket.id for ticket in tickets if ticket.status == DeliveryStatus.COMPLETED}
+    candidates = [
+        ticket for ticket in tickets
+        if ticket.project_id == DOGFOOD_PROJECT_ID
+        and ticket.status in {DeliveryStatus.PLANNED, DeliveryStatus.IMPLEMENTING}
+        and LINE_OK_TAG in ticket.tags
+        and all(dependency in completed for dependency in ticket.dependencies)
+        and not ticket_touches_protected_path(ticket)
+    ]
+    return sorted(candidates, key=lambda ticket: (
+        _HORIZON_ORDER[ticket.horizon], ticket.created_at, ticket.id,
+    ))
+
+
+def pick_candidate(items: list[RoadmapItem], *, exclude_ids: frozenset[str] = frozenset()) -> RoadmapItem | None:
     """First `planned` item tagged `line-ok` that does not touch governance,
     in roadmap order (stable, so repeated calls with the same input agree)."""
     for item in items:
+        if item.id in exclude_ids:
+            continue
         if item.delivery_status != DeliveryStatus.PLANNED:
             continue
         if LINE_OK_TAG not in item.tags:
@@ -184,6 +233,24 @@ def has_in_flight_dogfood(store: ControlStore) -> bool:
     return True
 
 
+def has_in_flight_line_ticket(store: ControlStore, tickets: list[UserTicket]) -> bool:
+    """Count owner-channel runs for line-ok tickets in the same one-at-a-time gate."""
+    if not callable(getattr(store, "find_intake_runs", None)):
+        logger.warning("Store cannot list owner-channel runs; refusing dogfood submission")
+        return True
+    try:
+        for ticket in tickets:
+            if ticket.project_id != DOGFOOD_PROJECT_ID or LINE_OK_TAG not in ticket.tags:
+                continue
+            attempts = _ticket_attempts(store, ticket.id)
+            if attempts and run_state(store, attempts[-1][1]) == "in_flight":
+                return True
+    except Exception as exc:
+        logger.warning("Could not check in-flight line tickets; refusing dogfood submission: %s", exc)
+        return True
+    return False
+
+
 # --------------------------------------------------------------------------
 # Submission
 # --------------------------------------------------------------------------
@@ -215,7 +282,7 @@ def submit_dogfood_item(
     reports_dir: Path = REPORTS_DIR,
     now: datetime | None = None,
     min_green_streak: int | None = None,
-) -> IntakeReceipt | None:
+) -> IntakeReceipt | LineSubmission | None:
     """Submit at most one dogfood demand, or `None` if the gate is closed.
 
     `roadmap_path` defaults to the *current* value of the module-level
@@ -233,14 +300,40 @@ def submit_dogfood_item(
         logger.info("Dogfood gate closed: a dogfood demand is already in flight")
         return None
 
-    candidate = pick_candidate(load_roadmap_items(roadmap_path))
+    demands_store = demands_store or DemandsStore()
+    tickets = demands_store.list_tickets(project_id=DOGFOOD_PROJECT_ID)
+    if has_in_flight_line_ticket(store, tickets):
+        logger.info("Dogfood gate closed: a line-ok ticket is already in flight")
+        return None
+
+    effective_now = now or datetime.now(UTC)
+    for ticket in eligible_ticket_candidates(tickets):
+        attempts = _ticket_attempts(store, ticket.id)
+        if ticket.status == DeliveryStatus.IMPLEMENTING and not attempts:
+            # An agent or owner may be implementing this ticket outside dogfood.
+            continue
+        if attempts:
+            state = run_state(store, attempts[-1][1])
+            if state == "succeeded" or len(attempts) >= max_ticket_attempts_from_env():
+                continue
+        submission = submit_ticket_to_line(
+            ticket.id, demands_store=demands_store, store=store, now=effective_now,
+        )
+        if submission.ok and submission.run_id:
+            logger.info("Dogfood: submitted ticket %s (run_id=%s)", ticket.id, submission.run_id)
+            return submission
+        logger.warning("Dogfood: ticket %s could not be submitted: %s", ticket.id, submission.message)
+        return None
+
+    candidate = pick_candidate(
+        load_roadmap_items(roadmap_path), exclude_ids=frozenset(ticket.id for ticket in tickets),
+    )
     if candidate is None:
-        logger.info("Dogfood: no eligible planned/line-ok roadmap item found")
+        logger.info("Dogfood: no eligible planned/line-ok ticket or roadmap item found")
         return None
 
     command = _build_intake_command(candidate)
     service = AutonomousIntakeService(store=store, demands_store=demands_store)
-    effective_now = now or datetime.now(UTC)
     try:
         receipt = service.accept(command, effective_now)
     except IdempotencyConflict as exc:  # pragma: no cover - defensive, item.id is unique

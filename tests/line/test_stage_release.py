@@ -23,6 +23,7 @@ from typing import Callable, Optional
 
 import pytest
 
+from core.line import stage_release as stage_release_mod
 from core.line.stage_release import (
     GitRefReleaseStateStore,
     ReleaseRunState,
@@ -166,6 +167,57 @@ def test_success_deploys_and_records_last_good_sha(tmp_path: Path) -> None:
     state = handler.state_store.load(project.id)
     assert state.last_good_sha == context.input_refs[-1]
     assert state.last_success_operation_id == result.output_refs[0]
+
+
+def test_remote_deploy_without_executable_smoke_fails_before_deploy(tmp_path: Path) -> None:
+    project = _project().model_copy(update={"smoke": []})
+    adapter = FakeAdapter()
+    handler = _handler(project, adapter, tmp_path, _opener_factory([(200, b"ok")]))
+
+    result = handler.handle(_context("run-no-smoke", "", "sha_v1_" + "a" * 33))
+
+    assert result.outcome == "failed"
+    assert result.cause_code == "smoke_not_configured"
+    assert adapter.start_calls == []
+    assert handler.state_store.load(project.id).last_good_sha is None
+
+
+def test_remote_deploy_without_observed_digest_cannot_succeed(tmp_path: Path) -> None:
+    project = _project()
+    adapter = FakeAdapter()
+    adapter.installed_digest = lambda _target: None  # type: ignore[method-assign]
+    handler = _handler(project, adapter, tmp_path, _opener_factory([(200, b"ok")]))
+
+    result = handler.handle(_context("run-no-digest", "", "sha_v1_" + "d" * 33))
+
+    assert result.outcome == "retry"
+    assert (result.cause_code or "").startswith("installed_digest_unverified:")
+    assert handler.state_store.load(project.id).last_good_sha is None
+
+
+def test_free_text_smoke_does_not_satisfy_release_preflight(tmp_path: Path, monkeypatch) -> None:
+    project = _project().model_copy(update={"smoke": []})
+    adapter = FakeAdapter()
+    handler = _handler(project, adapter, tmp_path, _opener_factory([(200, b"ok")]))
+    monkeypatch.setattr(stage_release_mod, "_fetch_ticket_smoke_entries", lambda *_args: ["check the homepage"])
+
+    result = handler.handle(_context("run-text-smoke", "https://github.com/acme/acme/pull/1", "sha_v1_" + "b" * 33))
+
+    assert result.outcome == "failed"
+    assert result.cause_code == "smoke_not_configured"
+    assert adapter.start_calls == []
+
+
+def test_ticket_http_smoke_can_satisfy_release_preflight(tmp_path: Path, monkeypatch) -> None:
+    project = _project().model_copy(update={"smoke": []})
+    adapter = FakeAdapter()
+    handler = _handler(project, adapter, tmp_path, _opener_factory([(200, b"ok")]))
+    monkeypatch.setattr(stage_release_mod, "_fetch_ticket_smoke_entries", lambda *_args: ["https://acme.example/healthz"])
+
+    result = handler.handle(_context("run-ticket-only-smoke", "https://github.com/acme/acme/pull/1", "sha_v1_" + "c" * 33))
+
+    assert result.outcome == "success"
+    assert adapter.start_calls == ["sha_v1_" + "c" * 33]
 
 
 def test_success_is_idempotent_for_same_sha(tmp_path: Path) -> None:

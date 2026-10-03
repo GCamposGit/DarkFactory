@@ -17,6 +17,7 @@ import sys
 import textwrap
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -257,6 +258,21 @@ def fake_gh(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
 # --------------------------------------------------------------------------
 # Full-flow tests
 # --------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("validate_commands", [[], ["  "]])
+def test_conflict_resolution_cannot_pass_without_validate_command(
+    tmp_path: Path, validate_commands: list[str]
+) -> None:
+    project = _project(str(tmp_path)).model_copy(
+        update={"commands": ProjectCommands(validate=validate_commands)}
+    )
+    handler = IntegrationStageHandler(project)
+
+    ok, log = handler._run_validate(SimpleNamespace(path=tmp_path))
+
+    assert ok is False
+    assert "Nenhum comando de validate" in log
 
 
 def test_red_ci_feedback_reaches_development_then_green_ci_merges(

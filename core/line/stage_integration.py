@@ -318,10 +318,11 @@ class IntegrationStageHandler:
 
     def _run_validate(self, ws: RunWorkspace) -> tuple[bool, str]:
         commands = resolve_commands(self.project, ws.path)
-        if not commands.validate_cmds:
-            return True, "(sem comandos de validate configurados)"
+        executable_validate = [cmd for cmd in commands.validate_cmds if cmd.strip()]
+        if not executable_validate:
+            return False, "Nenhum comando de validate foi detectado apos resolver o conflito."
         logs: list[str] = []
-        for cmd in commands.validate_cmds:
+        for cmd in executable_validate:
             try:
                 proc = subprocess.run(
                     cmd,

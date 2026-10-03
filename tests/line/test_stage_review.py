@@ -110,7 +110,7 @@ def test_review_uses_family_different_from_development(
     assert agent.calls[0].mode == "read"
 
 
-def test_changes_required_retries_with_review_log_then_approves_on_exhaustion(
+def test_changes_required_retries_then_fails_on_exhaustion_without_another_review(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     origin = _init_bare_origin(tmp_path)
@@ -138,10 +138,11 @@ def test_changes_required_retries_with_review_log_then_approves_on_exhaustion(
     assert result2.outcome == "retry"
     assert result2.cause_code.startswith("retry:development\n")
 
-    # Round 3 exceeds run_caps.review_rounds (2); validation is green, so it
-    # force-approves instead of looping forever between two opinionated models.
+    # Round 3 exceeds run_caps.review_rounds (2). A green validation does
+    # not override the independent reviewer's blocking finding.
     result3 = stage.run(project, run_id)
-    assert result3.outcome == "success"
+    assert result3.outcome == "failed"
+    assert result3.cause_code == "review_exhausted_changes_required:round=3"
     assert len(agent.calls) == 3
 
     ws = ws_mod.checkout(project, run_id)
@@ -149,7 +150,18 @@ def test_changes_required_retries_with_review_log_then_approves_on_exhaustion(
     assert (ctx / "review-1.md").is_file()
     assert (ctx / "review-2.md").is_file()
     review_3 = (ctx / "review-3.md").read_text(encoding="utf-8")
-    assert "aprovado automaticamente" in review_3
+    assert "Verdict: changes_required" in review_3
+    assert "no tests" in review_3
+    assert "aprovado automaticamente" not in review_3
+    state = json.loads((ctx / "review_state.json").read_text(encoding="utf-8"))
+    assert state["rounds"][-1]["verdict"] == "changes_required"
+    assert state["rounds"][-1]["forced"] is False
+
+    replay = stage.run(project, run_id)
+    assert replay.outcome == "failed"
+    assert replay.cause_code == result3.cause_code
+    assert replay.output_refs == result3.output_refs
+    assert len(agent.calls) == 3
 
 
 def test_review_exhausted_without_green_validation_fails(
@@ -169,7 +181,28 @@ def test_review_exhausted_without_green_validation_fails(
     result3 = stage.run(project, run_id)
 
     assert result3.outcome == "failed"
-    assert result3.cause_code == "review_exhausted_not_green"
+    assert result3.cause_code == "review_exhausted_changes_required:round=3"
+    ws = ws_mod.checkout(project, run_id)
+    assert (ws_mod.context_dir(ws) / "review-3.md").is_file()
+
+
+def test_review_may_approve_on_final_independent_round(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    origin = _init_bare_origin(tmp_path)
+    project = _project(str(origin))
+    run_id = "run-final-approval"
+    _prepare_run(tmp_path, monkeypatch, project, run_id, harness="claude")
+
+    changes_required = {"verdict": "changes_required", "blocking": [], "non_blocking": []}
+    approved = {"verdict": "approve", "blocking": [], "non_blocking": []}
+    agent = _ScriptedAgent([changes_required, changes_required, approved])
+    stage = ReviewStage(run_agent_func=agent, pick_func=_isolated_pick(tmp_path), routing_config=load_routing_config())
+
+    assert stage.run(project, run_id).outcome == "retry"
+    assert stage.run(project, run_id).outcome == "retry"
+    assert stage.run(project, run_id).outcome == "success"
+    assert len(agent.calls) == 3
 
 
 def test_resume_after_approval_is_idempotent_and_does_not_call_agent_again(

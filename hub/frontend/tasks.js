@@ -8,36 +8,53 @@
 const taskDashboardState = {
   loading: false,
   report: null,
+  lastSuccessAt: null,
+  error: null,
 };
 
 document.addEventListener("DOMContentLoaded", () => {
   document
     .getElementById("tasks-dashboard-refresh")
     ?.addEventListener("click", () => loadTaskDashboard(true));
-  loadTaskDashboard();
+  if (!document.hidden) loadTaskDashboard();
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden) loadTaskDashboard();
+  });
+  window.setInterval(() => {
+    if (!document.hidden) loadTaskDashboard();
+  }, 30000);
 });
 
 async function loadTaskDashboard(force = false) {
-  if (taskDashboardState.loading && !force) return;
+  if (taskDashboardState.loading) return;
   taskDashboardState.loading = true;
   const alert = document.getElementById("tasks-dashboard-alert");
-  if (alert) alert.textContent = "Atualizando fila operacional…";
+  if (alert && !taskDashboardState.report) alert.textContent = "Atualizando fila operacional…";
 
   try {
     const request = typeof hubFetch === "function" ? hubFetch : fetch;
     let response = await request("/api/tasks/dashboard", {
       headers: { Accept: "application/json" },
+      cache: "no-store",
     });
     if (response.status === 404) {
       response = await request("/tasks/dashboard", {
         headers: { Accept: "application/json" },
+        cache: "no-store",
       });
     }
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    taskDashboardState.report = await response.json();
+    const report = await response.json();
+    const controlSource = String(report.sources?.control || "indisponível");
+    if (controlSource !== "ok" && !controlSource.endsWith(":ok")) {
+      throw new Error(`fonte de controle ${controlSource}`);
+    }
+    taskDashboardState.report = report;
+    taskDashboardState.lastSuccessAt = new Date();
+    taskDashboardState.error = null;
     renderTaskDashboard();
   } catch (error) {
-    taskDashboardState.report = null;
+    taskDashboardState.error = error;
     renderTaskDashboardError(error);
   } finally {
     taskDashboardState.loading = false;
@@ -53,12 +70,13 @@ function renderTaskDashboard() {
   if (!summary || !alert || !queueContainer) return;
 
   const warningCount = Array.isArray(report.warnings) ? report.warnings.length : 0;
+  const updatedAt = formatTaskUpdateTime(taskDashboardState.lastSuccessAt);
   alert.className = warningCount
     ? "rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[11px] text-amber-200"
     : "rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-[11px] text-emerald-200";
   alert.textContent = warningCount
-    ? `Fila disponível com ${warningCount} aviso(s): ${report.warnings.join(" · ")}`
-    : `Estado atualizado · fontes: ${formatTaskSources(report.sources)}`;
+    ? `Atualizado às ${updatedAt} · ${warningCount} aviso(s): ${report.warnings.join(" · ")}`
+    : `Atualizado às ${updatedAt} · fontes: ${formatTaskSources(report.sources)}`;
 
   const waitingHumanJobs = queue.filter(
     (item) => String(item.status || "").toUpperCase() === "WAITING_HUMAN"
@@ -127,6 +145,7 @@ function renderWaitingHumanObservationCard(item) {
       <div class="text-[10px] uppercase tracking-wider font-semibold text-amber-300">Motivo da Suspensão</div>
       <div class="mt-1 text-xs text-amber-200 font-medium">${tasksEscapeHtml(reason)}</div>
     </div>
+    <div class="mt-2 text-[10px] text-slate-400">Última atividade: ${tasksEscapeHtml(formatTaskAge(item.updated_at))}</div>
     <div class="mt-3 rounded-lg bg-slate-950/80 border border-slate-800 p-3">
       <div class="text-[10px] uppercase tracking-wider font-semibold text-slate-400">Instrução de Resolução</div>
       <div class="mt-1 text-xs font-mono text-emerald-400 select-all" data-instruction="${CANONICAL_GRILL_INSTRUCTION}">Resolução pelo terminal canônico: python -m core.demands.cli grill ${ticketId}</div>
@@ -158,6 +177,7 @@ function renderTaskCard(item) {
       <div class="rounded-lg bg-slate-950/70 p-2"><div class="text-slate-600">Passo</div><div class="mt-1 text-slate-300">${tasksEscapeHtml(item.step_index ?? "—")}</div></div>
       <div class="rounded-lg bg-slate-950/70 p-2"><div class="text-slate-600">Custo da tarefa</div><div class="mt-1 text-amber-300">${formatTaskCost(item.cost_usd)}</div></div>
     </div>
+    <div class="mt-2 text-[10px] text-slate-400">Última atividade: ${tasksEscapeHtml(formatTaskAge(item.updated_at))}</div>
     <div class="mt-3 border-t border-slate-800/80 pt-3"><div class="text-[10px] font-semibold uppercase tracking-wider text-slate-500">Evidências</div>${evidenceMarkup}</div>
     ${exceptionMarkup}
   </article>`;
@@ -186,16 +206,39 @@ function formatTaskSources(sources) {
   return Object.entries(sources).map(([key, value]) => `${key}:${value}`).join(" · ") || "indisponíveis";
 }
 
+function formatTaskUpdateTime(value) {
+  return value instanceof Date && !Number.isNaN(value.getTime())
+    ? value.toLocaleString("pt-BR")
+    : "horário indisponível";
+}
+
+function formatTaskAge(updatedAt, now = Date.now()) {
+  const updated = Date.parse(updatedAt);
+  if (!Number.isFinite(updated)) return "horário indisponível";
+  const seconds = Math.max(0, Math.floor((now - updated) / 1000));
+  if (seconds < 60) return "agora";
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `há ${minutes} min`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `há ${hours} h`;
+  return `há ${Math.floor(hours / 24)} d`;
+}
+
 function renderTaskDashboardError(error) {
   const alert = document.getElementById("tasks-dashboard-alert");
   const summary = document.getElementById("tasks-dashboard-summary");
   const queue = document.getElementById("tasks-dashboard-queue");
   if (alert) {
     alert.className = "rounded-xl border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-[11px] text-rose-200";
-    alert.textContent = `Fila indisponível: ${error?.message || "erro desconhecido"}`;
+    const lastUpdate = taskDashboardState.lastSuccessAt
+      ? ` · Última atualização bem-sucedida às ${formatTaskUpdateTime(taskDashboardState.lastSuccessAt)}; exibindo último estado recebido.`
+      : "";
+    alert.textContent = `Fila indisponível: ${error?.message || "erro desconhecido"}${lastUpdate}`;
   }
-  if (summary) summary.innerHTML = "";
-  if (queue) queue.innerHTML = '<div class="lg:col-span-2 rounded-2xl border border-dashed border-rose-500/20 bg-rose-500/5 p-8 text-center text-xs text-rose-300">Recarregue para tentar novamente.</div>';
+  if (!taskDashboardState.report) {
+    if (summary) summary.innerHTML = "";
+    if (queue) queue.innerHTML = '<div class="lg:col-span-2 rounded-2xl border border-dashed border-rose-500/20 bg-rose-500/5 p-8 text-center text-xs text-rose-300">Recarregue para tentar novamente.</div>';
+  }
 }
 
 function tasksEscapeHtml(value) {
@@ -234,6 +277,7 @@ function switchTaskViewMode(mode) {
     if (queueContainer) queueContainer.classList.remove("hidden");
     if (taskDashboardState.report) {
       renderTaskDashboard();
+      if (taskDashboardState.error) renderTaskDashboardError(taskDashboardState.error);
     } else {
       loadTaskDashboard();
     }
@@ -477,4 +521,3 @@ function openAutonomyUnitModal(ticketId) {
 
   modal.classList.remove("hidden");
 }
-
