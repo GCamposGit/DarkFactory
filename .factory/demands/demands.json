@@ -3562,5 +3562,35 @@
     "dependencies": [],
     "created_at": "2026-10-03T10:00:35.033805Z",
     "updated_at": "2026-10-03T10:00:35.033805Z"
+  },
+  {
+    "id": "USR-127",
+    "project_id": "darkfac",
+    "title": "Retry post-deploy node convergence without touching active checkouts",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "After PR #124 merged, Dokploy reported all four services done and VPS converged to origin/main, but post-deploy node sync could not converge Notebook or Desktop. Notebook was invoked from an app-managed worktree and sync refused to treat it as the canonical main checkout; the shared checkout was on ticket/usr-88. Desktop health reported busy, so update/restart was correctly skipped. The deploy lifecycle then ended with nodes still divergent and no durable retry.",
+    "core_journey": [
+      "After PR #124 merged, Dokploy reported all four services done and VPS converged to origin/main, but post-deploy node sync could not converge Notebook or Desktop. Notebook was invoked from an app-managed worktree and sync refused to treat it as the canonical main checkout; the shared checkout was on ticket/usr-88. Desktop health reported busy, so update/restart was correctly skipped. The deploy lifecycle then ended with nodes still divergent and no durable retry."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Discover or use a safe canonical main checkout for post-merge sync without switching, overwriting, or cleaning an active ticket branch or untracked local settings.",
+      "When a remote node is busy, preserve the no-disruption guard and persist/retry convergence after it becomes idle.",
+      "Report final per-node SHA and terminal state, and keep the post-deploy lifecycle resumable until required nodes converge or a formal blocker is recorded."
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-03T10:03:35.187704Z",
+    "updated_at": "2026-10-03T10:03:35.187704Z"
   }
 ]
