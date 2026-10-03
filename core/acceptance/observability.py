@@ -27,6 +27,7 @@ from core.acceptance.models import (
     HF15MetricsSummary,
     ScenarioStatus,
 )
+from core.paths import state_root
 
 logger = logging.getLogger("darkfac.acceptance.observability")
 
@@ -63,7 +64,7 @@ class HF15ObservabilityTracker:
 
     def __init__(self, ledger_path: Optional[Path] = None) -> None:
         self.ledger_path = ledger_path or (
-            Path.cwd() / ".factory" / "hf15" / "workspace" / "telemetry" / "observability_ledger.jsonl"
+            state_root() / "hf15" / "workspace" / "telemetry" / "observability_ledger.jsonl"
         )
         self.ledger_path.parent.mkdir(parents=True, exist_ok=True)
         self._lock = threading.Lock()

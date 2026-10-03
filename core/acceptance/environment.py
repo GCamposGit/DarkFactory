@@ -24,13 +24,14 @@ from core.acceptance.models import (
 from core.integrations.n8n import N8nConfig, N8nProbe, load_n8n_config
 from core.integrations.telegram import TelegramConfig, load_telegram_config
 from core.orchestrator.cloud_db import probe_cloud_database
+from core.paths import project_root, state_root
 
 logger = logging.getLogger("darkfac.acceptance.environment")
 
 
 def load_hf15_config(config_path: Optional[Path] = None) -> HF15EnvironmentConfig:
     """Loads HF15EnvironmentConfig from file or merges default/environment values."""
-    target = config_path or (Path.cwd() / ".factory" / "hf15" / "config.json")
+    target = config_path or (project_root() / ".factory" / "hf15" / "config.json")
     base_n8n = load_n8n_config()
     base_tg = load_telegram_config()
 
@@ -45,7 +46,7 @@ def load_hf15_config(config_path: Optional[Path] = None) -> HF15EnvironmentConfi
             logger.warning("Failed to parse %s: %s; falling back to environment", target, exc)
 
     sandbox_root = Path(
-        os.environ.get("DARKFAC_HF15_SANDBOX_ROOT", str(Path.cwd() / ".factory" / "hf15" / "workspace"))
+        os.environ.get("DARKFAC_HF15_SANDBOX_ROOT", str(state_root() / "hf15" / "workspace"))
     ).resolve()
 
     live_mode = os.environ.get("DARKFAC_HF15_LIVE_MODE", "false").lower() in {"true", "1", "yes"}
