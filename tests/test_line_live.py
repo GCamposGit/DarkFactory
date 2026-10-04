@@ -175,7 +175,7 @@ def test_running_stage_duration_and_run_age_use_the_given_now(seeded: tuple[Path
     assert development.timeout_seconds == 3600
     assert development.lease_expires_at is not None
     assert dev.title == "Esteira ao vivo no DarkHub"
-    assert dev.ticket_id == "darkfac" and dev.demand_id == "USR-138"
+    assert dev.ticket_id == dev.demand_id == "USR-138"  # ticket_id == project_id falls back to demand_id
 
     later = _read(db, now=NOW + timedelta(minutes=2))
     assert _run(later, ids["dev_live"]).stages[2].duration_seconds == pytest.approx(14 * 60)
@@ -201,6 +201,13 @@ def test_runs_are_ordered_attention_running_queued_then_terminal(seeded: tuple[P
         ids["failed"],
         ids["done_old"],
     ]
+
+
+def test_ticket_id_equal_to_project_id_shows_the_demand_id(seeded: tuple[Path, dict[str, str]]) -> None:
+    db, ids = seeded
+    run = _run(_read(db), ids["grill_wait"])
+    assert run.project_id == "darkfac-canary"
+    assert run.ticket_id == run.demand_id == "CAN-07"
 
 
 def test_titles_mapping_is_the_fallback_when_intake_has_no_title(seeded: tuple[Path, dict[str, str]]) -> None:

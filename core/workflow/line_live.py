@@ -780,6 +780,10 @@ def _build_runs(
             else None
         )
         ticket_id = str((latest_job_row or {}).get("ticket_id") or demand_id)
+        # Real cloud rows carry ticket_id = project_id (e.g. "darkfac"), which is not a
+        # meaningful task identifier; show the unique demand_id instead (same rule as USR-44).
+        if ticket_id == project_id:
+            ticket_id = demand_id
         title = (
             intake_titles.get(run_id)
             or titles.get(demand_id)
