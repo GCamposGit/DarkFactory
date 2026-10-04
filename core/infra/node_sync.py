@@ -172,8 +172,8 @@ def _probe(
 KNOWN_EPHEMERAL_PATTERNS = (
     "__pycache__",
     ".pytest_cache",
-    ".factory/test_logs",
-    ".factory/reports/canary",
+    "test_logs",
+    "reports/canary",
     "ticket_quota_usage.jsonl",
 )
 
