@@ -1,0 +1,84 @@
+[
+  {
+    "id": "T1",
+    "title": "Primitivas CSS da sidebar no gerador de estilos + regeneracao e cache-busting",
+    "goal": "Adicionar as classes semanticas da sidebar (.dh-shell, .dh-sidebar, .dh-sidebar-nav, .dh-sidebar-link, estado ativo, .dh-sidebar-toggle, .dh-sidebar-backdrop, .dh-content) na secao de custom styling de scripts/generate_hub_styles.py, com sidebar fixa a partir de 1024px e colapsavel abaixo disso, regenerar os dois stylesheets e subir a versao de cache do link.",
+    "files_hint": [
+      "scripts/generate_hub_styles.py",
+      "hub/frontend/styles.css",
+      "hub/frontend/static/styles.css",
+      "hub/frontend/index.html",
+      "tests/test_frontend_foundation.py",
+      "tests/test_transformar_menu_superior_em_m.py"
+    ],
+    "acceptance": [
+      "`python scripts/generate_hub_styles.py` roda sem erro e hub/frontend/styles.css e hub/frontend/static/styles.css ficam identicos e continuam > 10 KB",
+      "styles.css contem .dh-sidebar, .dh-sidebar-link, .dh-sidebar-link[aria-current=\"page\"], .dh-sidebar-toggle, .dh-sidebar-backdrop e .dh-content",
+      "Existe media query >= 1024px em que .dh-sidebar fica visivel/fixa e .dh-content recebe offset lateral; abaixo de 1024px .dh-sidebar e deslocada e .dh-sidebar.is-open a traz de volta",
+      "O link do stylesheet em index.html usa a nova versao de cache e tests/test_frontend_foundation.py foi atualizado para essa mesma versao",
+      "Nenhuma dependencia nova e nenhum href/CSS externo introduzido"
+    ],
+    "tests_to_add": [
+      "tests/test_transformar_menu_superior_em_m.py::test_sidebar_css_primitives_present (le styles.css e exige as classes .dh-* e o breakpoint de 1024px)",
+      "tests/test_transformar_menu_superior_em_m.py::test_generated_stylesheets_are_in_sync (styles.css == static/styles.css byte-a-byte)",
+      "tests/test_transformar_menu_superior_em_m.py::test_static_stylesheet_served_200 (TestClient GET /static/styles.css => 200, text/css)"
+    ],
+    "smoke": [
+      "/",
+      "/static/styles.css"
+    ]
+  },
+  {
+    "id": "T2",
+    "title": "Reestruturar index.html: topbar enxuta + aside de navegacao lateral esquerda",
+    "goal": "Em hub/frontend/index.html, mover os botoes de navegacao do header para um <aside id=\"dh-sidebar\"> com <nav aria-label=\"Navegacao principal\">, manter no header apenas marca/badge/seletor de projeto/status/busca/engrenagem/Novo mais o hamburguer, e envolver header+main em .dh-content, preservando todos os onclick existentes.",
+    "files_hint": [
+      "hub/frontend/index.html",
+      "tests/test_transformar_menu_superior_em_m.py"
+    ],
+    "acceptance": [
+      "index.html tem exatamente um <aside id=\"dh-sidebar\"> contendo um <nav aria-label=\"Navegacao principal\"> com >= 10 itens .dh-sidebar-link, cada um com data-nav-target e rotulo textual",
+      "Os handlers dos itens movidos sao os mesmos de antes (openBenchmarksModal, openLearningDrawer, openPortfolioDrawer, openRoadmapDrawer, openDemandsDrawer, openTelemetryDrawer, openPlaygroundDrawer, openPromptVaultDrawer e os scrollIntoView de content-studio-section, harness-validation-section, infrastructure-cards-section, tasks-dashboard-section)",
+      "O header nao contem mais nenhum .dh-sidebar-link e preserva marca, #hub-coverage-badge, #global-project-select, #ollama-status-badge, #openrouter-status-badge, busca Ctrl+K, engrenagem e botao Novo",
+      "Existe um botao .dh-sidebar-toggle no header com aria-controls=\"dh-sidebar\" e aria-expanded=\"false\", e um elemento .dh-sidebar-backdrop",
+      "O conteudo (header + main) esta dentro de um container .dh-content e o HTML continua parseavel por lxml sem tags orfas"
+    ],
+    "tests_to_add": [
+      "tests/test_transformar_menu_superior_em_m.py::test_sidebar_aside_structure_and_items (lxml: aside#dh-sidebar, nav[aria-label], >= 10 .dh-sidebar-link com data-nav-target)",
+      "tests/test_transformar_menu_superior_em_m.py::test_header_is_slim_and_keeps_core_controls (nenhum .dh-sidebar-link no header; ids essenciais presentes)",
+      "tests/test_transformar_menu_superior_em_m.py::test_legacy_nav_handlers_preserved (todos os onclick/targets antigos continuam referenciados)",
+      "tests/test_transformar_menu_superior_em_m.py::test_index_served_200_with_sidebar_markup (TestClient GET / => 200 e markup da sidebar no corpo)"
+    ],
+    "smoke": [
+      "/"
+    ]
+  },
+  {
+    "id": "T3",
+    "title": "nav.js: colapso mobile e destaque do item da rota atual",
+    "goal": "Criar hub/frontend/nav.js (carregado com a mesma versao de cache dos demais scripts) implementando abertura/fechamento da sidebar no mobile (hamburguer, backdrop, Esc, clique em item) com sincronizacao de aria-expanded, e marcacao de aria-current=\"page\" no item correspondente a location.hash / secao visivel.",
+    "files_hint": [
+      "hub/frontend/nav.js",
+      "hub/frontend/index.html",
+      "tests/test_transformar_menu_superior_em_m.py"
+    ],
+    "acceptance": [
+      "hub/frontend/nav.js existe, nao usa dependencias externas e expõe toggleSidebar/closeSidebar no escopo global",
+      "index.html carrega /static/nav.js com a mesma versao ?v= de todos os outros <script> (tests/test_frontend_foundation.py continua verde)",
+      "nav.js alterna a classe is-open em #dh-sidebar, atualiza aria-expanded do toggle, fecha no backdrop, no Esc e ao clicar em um item no mobile",
+      "nav.js define aria-current=\"page\" em um unico .dh-sidebar-link por vez, derivado de location.hash (com hashchange) e de IntersectionObserver sobre as secoes alvo, degradando sem erro quando IntersectionObserver nao existe",
+      "`python -m pytest tests/test_transformar_menu_superior_em_m.py -v` passa e `python core/harness/runner.py --quick` fica verde"
+    ],
+    "tests_to_add": [
+      "tests/test_transformar_menu_superior_em_m.py::test_nav_js_registered_with_shared_cache_version",
+      "tests/test_transformar_menu_superior_em_m.py::test_nav_js_implements_toggle_and_aria_expanded",
+      "tests/test_transformar_menu_superior_em_m.py::test_nav_js_marks_active_item_from_hash_and_observer",
+      "tests/test_transformar_menu_superior_em_m.py::test_nav_js_served_200 (TestClient GET /static/nav.js => 200)"
+    ],
+    "smoke": [
+      "/",
+      "/static/nav.js",
+      "/static/styles.css"
+    ]
+  }
+]
