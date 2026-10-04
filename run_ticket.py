@@ -40,6 +40,7 @@ from core.line.agent_cli import (
     HARNESS_CAPABILITIES,
     AgentRequest,
     AgentResult,
+    check_optional_mcp_servers,
     headless_development_preamble,
     redact_secrets,
     run_agent,
@@ -520,6 +521,9 @@ def main(argv: Optional[list[str]] = None) -> int:
         )
 
     # 4. Execution Phase
+    mcp_healthy, mcp_reasons = check_optional_mcp_servers()
+    if not mcp_healthy and not args.json:
+        print(f"[!] Integração opcional MCP indisponível ({'; '.join(mcp_reasons)}). Continuando em modo degradado.")
     dev_prompt = (
         f"Voce e o agente de desenvolvimento autonomo da DarkFac.\n"
         f"Implemente o seguinte ticket:\n"

@@ -29,6 +29,7 @@ import json
 import logging
 import os
 import re
+import socket
 import subprocess
 import sys
 import time
@@ -37,6 +38,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable, Literal, Optional
+from urllib.parse import urlparse
 
 from core.paths import project_root, state_root
 
@@ -338,11 +340,92 @@ def _extract_reset_at(text: str, *, now: Optional[datetime] = None) -> Optional[
 
 
 # --------------------------------------------------------------------------
+# Optional MCP Server Preflight & Fail-Fast (USR-125)
+# --------------------------------------------------------------------------
+
+DEFAULT_MCP_PROBE_TIMEOUT = 2.0
+
+
+def check_optional_mcp_servers(
+    config_path: Optional[Path] = None,
+    timeout_sec: float = DEFAULT_MCP_PROBE_TIMEOUT,
+) -> tuple[bool, list[str]]:
+    """Probe optional MCP servers configured in user/project configs (e.g. ~/.claude.json).
+
+    Returns (all_healthy, degraded_reasons).
+    If any optional MCP server is offline or unreachable, returns (False, [...]) so
+    Claude Code can be launched with --strict-mcp-config, failing fast in <= 2.0s rather than
+    hanging for up to 1800s during MCP handshake (USR-125).
+    """
+    env_strict = os.environ.get("DARKFAC_STRICT_MCP_CONFIG", "").strip().lower()
+    if env_strict in ("1", "true", "yes", "on"):
+        return False, ["DARKFAC_STRICT_MCP_CONFIG explicitly forced strict MCP mode"]
+    if env_strict in ("0", "false", "no", "off"):
+        return True, []
+
+    path = config_path or (Path.home() / ".claude.json")
+    if not path.is_file():
+        return True, []
+
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError, UnicodeDecodeError):
+        return True, []
+
+    if not isinstance(data, dict):
+        return True, []
+
+    mcp_servers = data.get("mcpServers")
+    if not isinstance(mcp_servers, dict) or not mcp_servers:
+        return True, []
+
+    degraded_reasons: list[str] = []
+    for name, server_cfg in mcp_servers.items():
+        if not isinstance(server_cfg, dict):
+            continue
+        url = server_cfg.get("url") or server_cfg.get("serverUrl")
+        if not url or not isinstance(url, str):
+            continue
+
+        parsed = urlparse(url)
+        host = parsed.hostname
+        port = parsed.port
+        if not host:
+            continue
+        if port is None:
+            port = 443 if parsed.scheme == "https" else 80
+
+        try:
+            with socket.create_connection((host, port), timeout=timeout_sec):
+                pass
+        except Exception as exc:
+            safe_url = redact_secrets(url)
+            logger.warning(
+                "[MCP] Optional MCP server %r at %s unavailable within %.1fs: %s",
+                name,
+                safe_url,
+                timeout_sec,
+                redact_secrets(str(exc)),
+            )
+            degraded_reasons.append(
+                f"MCP server '{name}' at {host}:{port} unreachable ({type(exc).__name__})"
+            )
+
+    if degraded_reasons:
+        return False, degraded_reasons
+    return True, []
+
+
+# --------------------------------------------------------------------------
 # Argv builders (shared with core.harness.remote_worker write mode)
 # --------------------------------------------------------------------------
 
 
-def build_claude_argv(executable: str, req: AgentRequest) -> list[str]:
+def build_claude_argv(
+    executable: str,
+    req: AgentRequest,
+    strict_mcp_config: bool = False,
+) -> list[str]:
     """Build the Claude Code CLI argv for read or write mode. Prompt goes on stdin."""
     argv = [executable, "-p", "--output-format", "json"]
     if req.model:
@@ -351,6 +434,8 @@ def build_claude_argv(executable: str, req: AgentRequest) -> list[str]:
     argv += ["--permission-mode", permission_mode]
     if req.max_turns:
         argv += ["--max-turns", str(req.max_turns)]
+    if strict_mcp_config:
+        argv += ["--strict-mcp-config"]
     return argv
 
 
@@ -655,7 +740,14 @@ def _run_claude(req: AgentRequest) -> AgentResult:
             duration_s=0.0,
             error_kind="not_installed",
         )
-    argv = build_claude_argv(executable, req)
+    mcp_healthy, degraded_reasons = check_optional_mcp_servers()
+    strict_mcp = not mcp_healthy
+    if strict_mcp and degraded_reasons:
+        logger.warning(
+            "[MCP] Optional MCP server(s) unavailable (%s); launching Claude with --strict-mcp-config in degraded mode.",
+            "; ".join(degraded_reasons),
+        )
+    argv = build_claude_argv(executable, req, strict_mcp_config=strict_mcp)
     try:
         res = _run_bounded(
             argv,
