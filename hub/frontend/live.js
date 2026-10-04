@@ -1264,7 +1264,7 @@
     let es;
     try { es = new EventSource(STREAM_URL); } catch (e) { startPolling(); scheduleSseRetry(); return; }
     conn.es = es;
-    if (!trial) setConn('reconnecting');
+    if (!trial && state.conn !== 'connecting') setConn('reconnecting');
     es.addEventListener('snapshot', function (ev) {
       if (conn.es !== es) return;
       let data;
