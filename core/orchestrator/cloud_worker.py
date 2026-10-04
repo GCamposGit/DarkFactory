@@ -170,6 +170,10 @@ class CloudWorker:
         clock: Callable[[], float] = time.monotonic,
         on_capabilities_probed: Callable[[list[str]], None] | None = None,
         capability_detail_lookup: Callable[[str], str] | None = None,
+        human_probe_interval_s: float = 600.0,
+        request_loader: Callable[[Any, str], Any] | None = None,
+        human_probe_runner: Callable[..., bool] | None = None,
+        route_waiter: Any | None = None,
     ) -> None:
         self.worker_id = worker_id or os.environ.get("DARKFAC_WORKER_ID", "cloud-worker-1")
         self.max_slots = (
@@ -194,6 +198,12 @@ class CloudWorker:
         self._last_capability_probe_monotonic: float | None = None
         # harness name -> (clock time of its last real probe, result)
         self._harness_probe_state: dict[str, tuple[float, bool]] = {}
+
+        self._human_probe_interval_s = human_probe_interval_s
+        self._last_human_probe_at: datetime | None = None
+        self._request_loader = request_loader
+        self._human_probe_runner = human_probe_runner
+        self._route_waiter = route_waiter
 
         if capabilities is not None:
             self.capabilities = list(capabilities)
@@ -730,16 +740,27 @@ class CloudWorker:
             try:
                 unavailable = self._agent_route_unavailable(stage)
                 if unavailable is not None:
-                    # The job was claimable (initial grill has no required caps)
-                    # but this worker has no authenticated harness for it: hand
-                    # it back with a delay instead of crashing/burning the agent.
-                    retry_at = (datetime.now(UTC) + timedelta(minutes=_NO_HARNESS_RETRY_MINUTES)).replace(microsecond=0)
-                    logger.warning(
-                        "Worker %s has no authenticated harness for stage %s; deferring %s until %s",
-                        self.worker_id, stage, claim.job_key.canonical_key(), retry_at.isoformat(),
+                    from core.line import routing
+                    from core.line.route_wait import RouteWaiter, run_started_at_lookup
+                    from core.projects.models import ProjectDescriptor
+
+                    project = self._project_for(claim)
+                    if project is None:
+                        project = ProjectDescriptor(
+                            id=claim.job_key.ticket_id,
+                            repo_url="",
+                            default_branch="main",
+                        )
+                    waiter = self._route_waiter or RouteWaiter(
+                        run_started_at=run_started_at_lookup(self.store)
                     )
-                    stage_result = StageResult(
-                        outcome="retry", cause_code=f"{unavailable} not_before={retry_at.isoformat()}"
+                    stage_result = waiter.no_route_result(
+                        stage,
+                        project,
+                        claim.job_key.run_id,
+                        host_caps=self.capabilities,
+                        config=self._routing_config,
+                        mode=routing.stage_mode(stage),
                     )
                 else:
                     stage_result = self.registry.dispatch(context)
@@ -787,6 +808,67 @@ class CloudWorker:
 
         return self.execute_step(run_id, stage, _execute_stage)
 
+    def sweep_waiting_human_requests(self, now: datetime | None = None) -> list[str]:
+        """Sweep waiting_human jobs, probe deterministic checks, and resume green non-grill requests (USR-105)."""
+        effective_now = now or datetime.now(UTC)
+        resumed_runs: list[str] = []
+        try:
+            waiting_jobs = self.store.list_waiting_jobs(statuses=("waiting_human",))
+        except Exception as exc:
+            logger.warning("Failed to list waiting jobs for human sweep: %s", exc)
+            return []
+
+        seen_runs: set[str] = set()
+        for job_key in waiting_jobs:
+            run_id = job_key.run_id
+            if run_id in seen_runs:
+                continue
+            seen_runs.add(run_id)
+
+            try:
+                from core.line.bindings import default_project_resolver
+                from core.line.human import load_request, resume_blocked_job, run_probe
+
+                project = default_project_resolver()(job_key.ticket_id)
+                if project is None:
+                    continue
+
+                loader = self._request_loader or load_request
+                request = loader(project, run_id)
+                if request is None:
+                    continue
+
+                if request.kind in ("grill", "commercial_acceptance"):
+                    continue
+
+                if not request.probe_cmd:
+                    continue
+
+                prober = self._human_probe_runner or run_probe
+                try:
+                    probe_ok = prober(request.probe_cmd, timeout_s=15)
+                except TypeError:
+                    probe_ok = prober(request.probe_cmd)
+
+                if not probe_ok:
+                    continue
+
+                resumed = resume_blocked_job(
+                    self.store, run_id, request.blocking_stage, now=effective_now
+                )
+                if resumed:
+                    logger.info(
+                        "Auto-resumed waiting job %s (run %s stage %s) after green probe",
+                        job_key.canonical_key(),
+                        run_id,
+                        request.blocking_stage,
+                    )
+                    resumed_runs.append(run_id)
+            except Exception as exc:
+                logger.warning("Error during human probe sweep for run %s: %s", run_id, exc)
+
+        return resumed_runs
+
     def poll_and_execute_once(self, now: datetime | None = None) -> bool:
         """Attempt to claim one pending job and execute it.
 
@@ -798,6 +880,16 @@ class CloudWorker:
             return False
 
         effective_now = now or datetime.now(UTC)
+        if (
+            self._last_human_probe_at is None
+            or (effective_now - self._last_human_probe_at).total_seconds() >= self._human_probe_interval_s
+        ):
+            self._last_human_probe_at = effective_now
+            try:
+                self.sweep_waiting_human_requests(now=effective_now)
+            except Exception as exc:
+                logger.warning("Human probe sweep failed: %s", exc)
+
         try:
             claim = self.store.claim(
                 worker=self.worker_id,

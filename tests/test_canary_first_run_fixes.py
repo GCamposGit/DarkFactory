@@ -199,7 +199,7 @@ def test_worker_without_harness_defers_agent_stage_instead_of_running_it(
     grill = [j for j in jobs if j["stage"] == "grill"]
     assert len(grill) >= 1
     assert all(j["status"] != "running" for j in grill)  # lease released, not stuck
-    assert any((j.get("cause_code") or "").startswith("no_authenticated_harness") for j in grill)
+    assert any((j.get("cause_code") or "").startswith(("no_authenticated_harness", "no_route_available")) for j in grill)
 
 
 def test_worker_with_explicit_caps_and_no_autodetect_keeps_legacy_behaviour(store: PostgresControlStore) -> None:

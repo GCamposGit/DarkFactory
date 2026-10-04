@@ -1319,6 +1319,39 @@ class PostgresControlStore:
         except Exception as exc:
             raise StoreUnavailableError(f"PostgreSQL resume_job failed: {exc}") from exc
 
+    def list_waiting_jobs(
+        self, statuses: tuple[str, ...] = ("waiting_human", "waiting_dependency")
+    ) -> list[JobKey]:
+        """List active jobs parked in waiting states."""
+        if self.mock_mode:
+            return self._backend.list_waiting_jobs(statuses=statuses)
+
+        try:
+            with self._psycopg.connect(self.raw_url) as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        SELECT run_id, ticket_id, plan_version, stage, iteration
+                        FROM jobs
+                        WHERE status = ANY(%s)
+                        ORDER BY created_at ASC
+                        """,
+                        (list(statuses),),
+                    )
+                    return [
+                        JobKey(
+                            run_id=row[0],
+                            ticket_id=row[1],
+                            plan_version=row[2],
+                            stage=row[3],
+                            iteration=row[4],
+                        )
+                        for row in cur.fetchall()
+                    ]
+        except Exception as exc:
+            logger.warning("PostgreSQL list_waiting_jobs failed: %s", exc)
+            return []
+
     def max_iteration(self, run_id: str, ticket_id: str, plan_version: str, stage: str) -> int:
         """Highest `iteration` already recorded for `(run_id, ticket_id, plan_version, stage)`, or -1."""
         if self.mock_mode:

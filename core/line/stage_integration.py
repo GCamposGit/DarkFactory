@@ -68,6 +68,7 @@ from core.git.safe_show import safe_show
 from core.line import workspace as ws_mod
 from core.line.agent_cli import AgentRequest, AgentResult, redact_secrets, run_agent
 from core.line.human import HumanRequest, notify_human_request
+from core.line.route_wait import RouteWaiter
 from core.line.routing import RoutingConfig, pick, record_result
 from core.line.workspace import RunWorkspace, WorkspaceError
 from core.projects.models import ProjectDescriptor
@@ -245,6 +246,7 @@ class IntegrationStageHandler:
         human_notifier: Optional[HumanNotifier] = None,
         defect_ticket_func: Optional[DefectTicketFunc] = None,
         clock: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
+        route_waiter: Optional[RouteWaiter] = None,
     ) -> None:
         """`base_red_attempts(run_id)` counts the `base_red` waits this run already spent (the store
         backed counter lives in `core.line.bindings`); without it the job's own iteration is the
@@ -267,6 +269,7 @@ class IntegrationStageHandler:
         self.human_notifier = human_notifier
         self.defect_ticket_func = defect_ticket_func
         self.clock = clock
+        self.route_waiter = route_waiter or RouteWaiter()
 
     # ----------------------------------------------------------------
     # git helpers (reuse workspace's auth/sanitization plumbing)
@@ -290,7 +293,9 @@ class IntegrationStageHandler:
     # Step 1: checkout, rebase, conflict resolution, push
     # ----------------------------------------------------------------
 
-    def _resolve_conflict(self, ws: RunWorkspace, default_branch: str) -> AgentResult:
+    def _resolve_conflict(
+        self, ws: RunWorkspace, default_branch: str
+    ) -> AgentResult | StageResult:
         choice = pick(
             "development",
             self.host_caps,
@@ -299,13 +304,27 @@ class IntegrationStageHandler:
             cooldown_path=self.cooldown_path,
         )
         if choice is None:
-            return AgentResult(
-                ok=False,
-                text="no harness available to resolve the merge conflict",
-                harness="none",
-                duration_s=0.0,
-                error_kind="not_installed",
+            return self.route_waiter.no_route_result(
+                "development",
+                self.project,
+                ws.run_id,
+                host_caps=self.host_caps,
+                config=self.routing_config,
+                mode="write",
             )
+
+        run_id = ws.run_id
+        attempt_key = self._job_key(run_id, _ATTEMPT_JOB_SUFFIX)
+        # Record and push the attempt marker before invoking the agent so the
+        # one-attempt cap survives a crash or a retry picked up by another host.
+        ws_mod.write_context(
+            ws, "integration_conflict_attempt.marker", f"attempted for {run_id}\n"
+        )
+        ws_mod.commit(ws, "chore(line): record integration conflict-resolution attempt", attempt_key)
+        marker_push = self._push_force_with_lease(ws)
+        if marker_push is not None:
+            return marker_push
+
         harness, model = choice
         prompt = (
             f"resolva o merge de origin/{default_branch} nesta branch "
@@ -388,17 +407,10 @@ class IntegrationStageHandler:
         if already_attempted:
             return StageResult(outcome="failed", cause_code="merge_conflict")
 
-        # Record and push the attempt marker before invoking the agent so the
-        # one-attempt cap survives a crash or a retry picked up by another host.
-        ws_mod.write_context(
-            ws, "integration_conflict_attempt.marker", f"attempted for {run_id}\n"
-        )
-        ws_mod.commit(ws, "chore(line): record integration conflict-resolution attempt", attempt_key)
-        marker_push = self._push_force_with_lease(ws)
-        if marker_push is not None:
-            return marker_push
-
         agent_result = self._resolve_conflict(ws, default_branch)
+        if isinstance(agent_result, StageResult):
+            return agent_result
+
         if not agent_result.ok:
             return StageResult(
                 outcome="retry",

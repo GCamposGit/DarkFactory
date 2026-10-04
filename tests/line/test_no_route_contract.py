@@ -29,15 +29,16 @@ ALLOWLIST: dict[tuple[str, str], str] = {
 }
 
 # Stage modules that pick a route for an agent and therefore MUST go through the waiter.
-AGENT_STAGE_MODULES = ("stage_build.py", "stage_review.py", "stage_grill.py", "stage_planning.py")
+AGENT_STAGE_MODULES = (
+    "stage_build.py",
+    "stage_review.py",
+    "stage_grill.py",
+    "stage_planning.py",
+    "stage_integration.py",
+)
 
 # Modules that call `pick` on purpose without parking the run on a missing route.
-NOT_A_ROUTE_PARK = {
-    "stage_integration.py": (
-        "`_resolve_conflict` turns 'no harness' into an AgentResult(not_installed) that the stage maps "
-        "to a plain retry; it never returns waiting_human for a route"
-    ),
-}
+NOT_A_ROUTE_PARK: dict[str, str] = {}
 
 
 def _literals(node: ast.AST) -> list[str]:
@@ -132,6 +133,8 @@ def _violations() -> list[str]:
     found: list[str] = []
     for path in _line_files():
         found.extend(_violations_in(path.name, path.read_text(encoding="utf-8")))
+    cloud_worker_path = Path(__file__).resolve().parents[2] / "core" / "orchestrator" / "cloud_worker.py"
+    found.extend(_violations_in("cloud_worker.py", cloud_worker_path.read_text(encoding="utf-8")))
     return sorted(set(found))
 
 
@@ -212,3 +215,9 @@ def test_other_modules_that_pick_a_route_are_explicitly_accounted_for() -> None:
         f"{unexplained} call pick(): use RouteWaiter.no_route_result for 'no route', or document why "
         "not in NOT_A_ROUTE_PARK"
     )
+
+
+def test_cloud_worker_routes_missing_harness_through_waiter() -> None:
+    source = (Path(__file__).resolve().parents[2] / "core" / "orchestrator" / "cloud_worker.py").read_text(encoding="utf-8")
+    assert "RouteWaiter" in source, "cloud_worker.py must route missing harness through RouteWaiter"
+    assert "no_route_result" in source, "cloud_worker.py must call RouteWaiter.no_route_result"

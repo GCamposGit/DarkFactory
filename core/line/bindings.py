@@ -541,7 +541,7 @@ def build_line_registry(
         ),
         "integration": IntegrationStageAdapter(
             project_resolver=resolver, gh_executable=gh_executable, host_caps=host_caps, routing_config=cfg,
-            base_red_attempts=base_red_attempt_counter(store),
+            base_red_attempts=base_red_attempt_counter(store), route_waiter=waiter,
         ),
         "build_deploy": ReleaseStageAdapter(project_resolver=resolver),
         "retrospective": RetrospectiveStageHandler(store=store, project_resolver=resolver),
