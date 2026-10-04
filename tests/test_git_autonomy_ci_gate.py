@@ -16,6 +16,8 @@ from typing import Any, Callable, Optional, Sequence
 
 import pytest
 
+pytestmark = [pytest.mark.serial]
+
 from core.git import autonomy
 from core.git import ci_checks
 from core.git.autonomy import DeliveryReport, GitAutonomyManager
