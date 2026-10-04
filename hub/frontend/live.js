@@ -1275,6 +1275,25 @@
       setConn('live');
       applySnapshot(data);
     });
+    // O servidor só reenvia o quadro quando ele muda; o heartbeat (a cada ~15 s e logo ao
+    // retomar o stream) prova que a leitura do store está viva e renova "dados de".
+    es.addEventListener('heartbeat', function (ev) {
+      if (conn.es !== es) return;
+      let beat;
+      try { beat = JSON.parse(ev.data); } catch (e) { return; }
+      conn.failures = 0;
+      clearTimeout(conn.retryTimer);
+      if (conn.polling) stopPolling();
+      setConn('live');
+      const cur = state.snapshot;
+      if (cur && beat && beat.version === cur.version && beat.generated_at) {
+        cur.generated_at = beat.generated_at;
+        state.receivedAt = Date.now();
+        renderConn(Date.now());
+      } else if (!conn.inflight) {
+        fetchSnapshot().then(applySnapshot).catch(function () { /* o próximo evento corrige */ });
+      }
+    });
     es.onerror = function () {
       if (conn.es !== es) return;
       conn.failures++;

@@ -3,10 +3,10 @@ FastAPI REST API router for DarkHub.
 """
 
 import asyncio
+import json
 import os
 import secrets
 import time
-from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 from pydantic import BaseModel
 from fastapi import APIRouter, Body, Depends, Header, HTTPException, Query, Request, Response, status
@@ -1219,9 +1219,15 @@ async def stream_line_live(
                 yield f"id: {snapshot.version}\nevent: snapshot\ndata: {snapshot.model_dump_json()}\n\n"
                 if max_events is not None and emitted >= max_events:
                     return
-            elif now - last_write >= LINE_LIVE_PING_SECONDS:
+            elif emitted == 0 or now - last_write >= LINE_LIVE_PING_SECONDS:
+                # A named event (not an SSE comment) so the page can tell an idle factory from a
+                # dead stream: it refreshes the "dados de" freshness without resending the board.
                 last_write = now
-                yield f": ping {datetime.now(timezone.utc).isoformat()}\n\n"
+                emitted += 1
+                heartbeat = {"generated_at": snapshot.generated_at, "version": snapshot.version}
+                yield f"id: {snapshot.version}\nevent: heartbeat\ndata: {json.dumps(heartbeat)}\n\n"
+                if max_events is not None and emitted >= max_events:
+                    return
             if now - started >= LINE_LIVE_MAX_STREAM_SECONDS:
                 return  # the client reconnects with Last-Event-ID
             await asyncio.sleep(LINE_LIVE_POLL_SECONDS)

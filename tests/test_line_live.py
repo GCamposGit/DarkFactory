@@ -519,7 +519,7 @@ def test_sse_stream_sends_retry_then_one_snapshot_event(client: TestClient) -> N
     assert len(snapshot.runs) == 8
 
 
-def test_sse_stream_skips_first_snapshot_for_matching_last_event_id_and_pings(
+def test_sse_stream_skips_first_snapshot_for_matching_last_event_id_and_sends_heartbeats(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     version = client.get("/api/line/live").json()["version"]
@@ -531,7 +531,12 @@ def test_sse_stream_skips_first_snapshot_for_matching_last_event_id_and_pings(
 
     assert body.startswith("retry: 5000\n\n")
     assert "event: snapshot" not in body
-    assert ": ping " in body
+    # Heartbeats are named events (EventSource never surfaces SSE comments to the page), sent at once
+    # on a resumed stream and then periodically, carrying the fresh read time of an unchanged board.
+    assert body.count("event: heartbeat") >= 2
+    heartbeat = json.loads(body.split("event: heartbeat\ndata: ", 1)[1].split("\n", 1)[0])
+    assert heartbeat["version"] == version
+    assert heartbeat["generated_at"]
 
 
 def test_sse_stream_answers_a_stale_last_event_id_with_the_current_snapshot(
