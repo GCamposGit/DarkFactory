@@ -87,6 +87,7 @@ TERMINAL_FAILURE_STATUSES = {"error", "failed"}
 EXIT_OK = 0
 EXIT_DEPLOY_FAILED = 1
 EXIT_USAGE_ERROR = 2
+EXIT_NODE_DIRTY = 3
 
 # A transport takes (method, path, json_body) and returns the parsed JSON
 # response (a dict or a list, depending on the endpoint). Production code
@@ -792,6 +793,8 @@ def _run_main(
     )
 
     all_ok = True
+    other_failure = False
+    node_sync_dirty = False
     triggered: List[Service] = []
     baselines: Dict[str, Optional[Deployment]] = {}
     for svc in selected:
@@ -804,6 +807,7 @@ def _run_main(
         except DokployUsageError as exc:
             print(f"[{svc.name}] FAILED to trigger deploy: {exc}", file=err, flush=True)
             all_ok = False
+            other_failure = True
             continue
         print(f"[{svc.name}] deploy triggered ({svc.kind}, id={svc.service_id})", file=out, flush=True)
         triggered.append(svc)
@@ -842,6 +846,7 @@ def _run_main(
         )
         if result.outcome != WaitOutcome.DONE:
             all_ok = False
+            other_failure = True
 
     if darkhub_selected and any(svc.name.lower() == "darkhub" for svc in triggered):
         if wait_for_darkhub_sha(
@@ -852,6 +857,7 @@ def _run_main(
         else:
             print(f"[NODE SYNC] VPS: divergent; /health did not report origin/main sha={expected_sha}", file=err, flush=True)
             all_ok = False
+            other_failure = True
 
     # A completed Dokploy job is not evidence that all running nodes use main.
     # Converge and verify the three execution nodes (Notebook ff-only when
@@ -873,11 +879,16 @@ def _run_main(
             "clock": clock_fn,
             "sleep": sleep_fn,
         }
+        node_sync_dirty = False
         sync_report = node_sync.sync(**sync_kwargs)
         for node in sync_report.nodes:
             if node.state == "converged":
                 continue
             all_ok = False
+            if getattr(node, "sync_classification", None) == "dirty" or "dirty worktree" in (node.reason or ""):
+                node_sync_dirty = True
+            else:
+                other_failure = True
             print(
                 f"[NODE SYNC] {node.name}: {node.state} "
                 f"sha={node.git_sha or '(unknown)'} expected={sync_report.expected_sha or '(unknown)'} "
@@ -896,6 +907,7 @@ def _run_main(
                 # Weaker than a runtime SHA, so a missing/different title fails closed.
                 if not matches:
                     all_ok = False
+                    other_failure = True
                     print(f"[NODE SYNC] VPS service {svc.name}: does not match local origin/main", file=err, flush=True)
             elif not matches:
                 print(f"[{svc.name}] info: deploy title {title!r} is not a commit subject (not code-bearing; ignored)", file=out, flush=True)
@@ -935,7 +947,11 @@ def _run_main(
             print(f"[BACKUP] failed: {exc}", file=err, flush=True)
             print(f"[AUTONOMOUS POST-DEPLOY BACKUP] Warning: autonomous backup cycle failed: {exc}", file=err, flush=True)
 
-    return EXIT_OK if all_ok else EXIT_DEPLOY_FAILED
+    if all_ok:
+        return EXIT_OK
+    if node_sync_dirty and not other_failure:
+        return EXIT_NODE_DIRTY
+    return EXIT_DEPLOY_FAILED
 
 
 def main(

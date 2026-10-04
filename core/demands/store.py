@@ -93,6 +93,12 @@ class DemandsStore:
     def save_ticket(self, ticket: UserTicket) -> UserTicket:
         if ticket.status == DeliveryStatus.COMPLETED and not (ticket.delivery_evidence or "").strip():
             raise ValueError(f"Completed ticket {ticket.id} requires delivery_evidence")
+        if ticket.status == DeliveryStatus.COMPLETED and ticket.is_live_deploy:
+            evidence = (ticket.delivery_evidence or "").strip()
+            if not any(marker in evidence for marker in ("live_converged", "live_verified", "live_provisional")):
+                raise ValueError(
+                    f"Completed ticket {ticket.id} with live deployment requirements requires live convergence proof in delivery_evidence"
+                )
         with self._lock:
             raw_items = self._read_raw()
             updated = False

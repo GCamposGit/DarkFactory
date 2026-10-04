@@ -27,7 +27,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from core.demands.models import UserTicket
+from core.demands.models import DemandOrigin, TAG_USER_DEMAND, UserTicket
 from core.demands.id_allocator import title_collisions
 from core.demands.merge import merge_demands_3way
 from core.demands.store import DemandsStore
@@ -43,7 +43,7 @@ from core.git.ci_checks import (
     is_ledger_only,
     sanitize,
 )
-from core.roadmap.models import DeliveryStatus
+from core.roadmap.models import DeliveryStatus, LifecycleStage, PlanningHorizon, RoadmapItemType
 
 logger = logging.getLogger("darkfac.git.autonomy")
 
@@ -648,7 +648,10 @@ class GitAutonomyManager:
             self.commit_ticket(ticket_id, title, cwd=cwd, custom_message=custom_message)
         implementation_sha = self.get_current_sha(cwd)
         ticket.status = DeliveryStatus.COMPLETED
-        ticket.delivery_evidence = implementation_sha
+        if ticket.is_live_deploy:
+            ticket.delivery_evidence = f"{implementation_sha}:live_provisional"
+        else:
+            ticket.delivery_evidence = implementation_sha
         ticket.updated_at = datetime.now(timezone.utc)
         store.save_ticket(ticket)
         return self.commit_ticket(ticket_id, title, cwd=cwd, custom_message=custom_message) or implementation_sha
@@ -1084,6 +1087,7 @@ class GitAutonomyManager:
         auto_commit: bool = True,
         custom_message: Optional[str] = None,
         gh_runner: Optional[GhRunner] = None,
+        live_verifier: Optional[Callable[[str], Any]] = None,
     ) -> TicketCompletionReport:
         """Finalize ticket development: update DemandsStore to completed, commit, and push."""
         target_dir = cwd or self.root
@@ -1160,6 +1164,77 @@ class GitAutonomyManager:
                 logger.warning("gh unavailable or unauthenticated; falling back to direct push to main.")
                 sync_result = self.sync_environment(cwd=target_dir, allow_push=True)
 
+        # 4. Live proof verification for live-deploy tickets (USR-73)
+        if ticket.is_live_deploy:
+            target_sha = (
+                (delivery.merge_sha if delivery and delivery.merge_sha else None)
+                or commit_sha
+                or self.get_current_sha(target_dir)
+            )
+            verify_res = None
+            verify_ok = False
+            try:
+                verify_res = (
+                    live_verifier(target_sha)
+                    if live_verifier is not None
+                    else self._default_live_verify(target_sha, target_dir)
+                )
+                verify_ok = bool(
+                    getattr(verify_res, "ok", False)
+                    or (isinstance(verify_res, dict) and verify_res.get("ok"))
+                )
+            except Exception as exc:
+                verify_res = f"live verification exception: {type(exc).__name__}: {exc}"
+                verify_ok = False
+
+            if verify_ok:
+                t = store.get_ticket(ticket.id)
+                if t:
+                    t.delivery_evidence = f"{target_sha}:live_converged"
+                    t.updated_at = datetime.now(timezone.utc)
+                    store.save_ticket(t)
+            else:
+                t = store.get_ticket(ticket.id)
+                failure_evidence = (
+                    f"[LIVE_CONVERGENCE_FAILURE] Failed at {datetime.now(timezone.utc).isoformat()} "
+                    f"on SHA {target_sha}: {verify_res}"
+                )
+                if t:
+                    t.status = DeliveryStatus.PLANNED
+                    t.delivery_evidence = None
+                    t.problem_statement = (t.problem_statement or "") + f"\n\n{failure_evidence}"
+                    t.updated_at = datetime.now(timezone.utc)
+                    store.save_ticket(t)
+
+                defect_id = store.next_ticket_id(ticket.project_id)
+                defect_ticket = UserTicket(
+                    id=defect_id,
+                    project_id=ticket.project_id,
+                    title=f"Defeito: Falha de convergência ao vivo pós-deploy de {ticket.id}",
+                    origin=DemandOrigin.AGENT,
+                    status=DeliveryStatus.PLANNED,
+                    item_type=RoadmapItemType.INFRASTRUCTURE,
+                    lifecycle_stage=LifecycleStage.EXECUTION,
+                    horizon=PlanningHorizon.NOW,
+                    tags=[TAG_USER_DEMAND, "defect", "deploy-live-failure", "auto-generated"],
+                    problem_statement=(
+                        f"O ticket {ticket.id} ({ticket.title}) falhou na prova de convergência ao vivo "
+                        f"pós-deploy no SHA {target_sha}.\nEvidência:\n{failure_evidence}"
+                    ),
+                    core_journey=[f"Investigar e restaurar convergência dos 3 nós após deploy do ticket {ticket.id}"],
+                    acceptance_criteria=["Todos os 3 nós (Notebook, Desktop, VPS) convergem para o SHA em produção"],
+                    dependencies=[ticket.id],
+                )
+                store.save_ticket(defect_ticket)
+                return TicketCompletionReport(
+                    ok=False,
+                    ticket_id=ticket.id,
+                    commit_sha=commit_sha,
+                    sync_result=sync_result,
+                    delivery=delivery,
+                    message=f"Live convergence proof failed for {ticket.id}. Reverted to planned; defect ticket {defect_id} opened. {verify_res}",
+                )
+
         return TicketCompletionReport(
             ok=True,
             ticket_id=ticket.id,
@@ -1168,6 +1243,14 @@ class GitAutonomyManager:
             delivery=delivery,
             message=f"Ticket {ticket.id} successfully completed and recorded.",
         )
+
+    @staticmethod
+    def _default_live_verify(target_sha: str, target_dir: Path) -> Any:
+        try:
+            from core.infra import node_sync
+            return node_sync.verify(root=target_dir)
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
 
 
 # ----------------------------------------------------------------------

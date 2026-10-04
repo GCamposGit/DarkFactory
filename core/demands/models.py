@@ -83,6 +83,17 @@ class UserTicket(BaseModel):
             cleaned.insert(0, TAG_USER_DEMAND)
         return cleaned
 
+    @property
+    def is_live_deploy(self) -> bool:
+        """Whether this ticket requires live proof of convergence upon deployment (USR-73)."""
+        tags = set(self.tags or [])
+        if "deploy-live" in tags:
+            return True
+        criteria = self.acceptance_criteria or []
+        has_live_criterion = any("live" in str(c).lower() for c in criteria)
+        is_deploy_or_infra = any(t in tags for t in ("deploy", "infra", "deploy-live", "wave-3"))
+        return has_live_criterion and is_deploy_or_infra
+
 
 class DemandSpecificationGuidance(BaseModel):
     """Feedback and auto-generated refinement proposals for a user demand."""
