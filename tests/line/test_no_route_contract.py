@@ -22,6 +22,10 @@ ALLOWLIST: dict[tuple[str, str], str] = {
         "is a real infrastructure problem (HumanRequest kind=infra), reached only from "
         "`RouteWaiter.no_route_result` after its wall-clock check"
     ),
+    ("owner_intake.py", "_expired_no_route_wait"): (
+        "read-only inspection of an existing post-budget waiting_human(no_route_available) "
+        "job; it never creates a wait and permits a fresh attempt only after wall_clock_hours"
+    ),
 }
 
 # Stage modules that pick a route for an agent and therefore MUST go through the waiter.

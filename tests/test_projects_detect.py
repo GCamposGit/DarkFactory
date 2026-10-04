@@ -325,6 +325,7 @@ def test_real_registry_projects_json_loads_with_new_fields() -> None:
     assert by_id["darkfac-canary"].deploy.params == {
         "service_name": "KCTz2USVQhNp_R6BuTxh1",
         "service_type": "application",
+        "healthcheck_endpoint": "https://canary.ggcampos.com/version",
     }
     # The line's V1 pilot deploys the DarkHub (a separate Dokploy compose) -- never the
     # darkfac-cloud compose that runs the worker (see stage_release's self-restart guard).

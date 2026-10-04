@@ -178,9 +178,9 @@ def test_dokploy_adapter_lifecycle_start_reconcile_installed_digest() -> None:
     status_2 = adapter.reconcile(operation.operation_id)
     assert status_2 == DeploymentStatus.SUCCEEDED
 
-    # 4. Check installed digest reflects newly deployed artifact
+    # 4. Provider completion alone cannot attest the bytes serving traffic.
     installed = adapter.installed_digest(target_config)
-    assert installed == "sha256_new_digest_111"
+    assert installed is None
 
 
 # ---------------------------------------------------------------------------

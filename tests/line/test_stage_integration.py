@@ -671,7 +671,9 @@ def _merging_agent(call_count: dict[str, int]):
 
 def _conflicting_run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, run_id: str):
     origin = _init_bare_origin(tmp_path)
-    project = _project(str(origin))
+    project = _project(str(origin)).model_copy(
+        update={"commands": ProjectCommands(validate=['python -c "print(1)"'])}
+    )
     monkeypatch.setenv("DARKFAC_WORKSPACES", str(tmp_path / "root"))
     # Pin the route and skip cooldown bookkeeping: the result must not depend
     # on which agent CLIs or quota state the test host happens to have.
