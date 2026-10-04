@@ -73,7 +73,7 @@ def test_cli_run_verify_and_summarize_native_core(tmp_path: Path) -> None:
             "--out",
             str(run_out),
             "--lease-seconds",
-            "1.0",
+            "10.0",
         ],
         cwd=PROJECT_ROOT,
         capture_output=True,

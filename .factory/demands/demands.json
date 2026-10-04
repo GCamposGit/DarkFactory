@@ -2892,7 +2892,7 @@
     "project_id": "darkfac",
     "title": "Nenhum agendador retoma waiting_human que nao e Grill (infra, base_red esgotado, secret): a promessa 'a fabrica retoma sozinha' nao se cumpre",
     "origin": "agent",
-    "status": "planned",
+    "status": "completed",
     "item_type": "quality",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -2924,14 +2924,15 @@
       "USR-87"
     ],
     "created_at": "2026-10-01T07:00:00Z",
-    "updated_at": "2026-10-01T07:00:00Z"
+    "updated_at": "2026-10-04T11:58:06.710966+00:00",
+    "delivery_evidence": "core/orchestrator/cloud_worker.py, core/workflow/control_store.py, tests/test_cloud_worker_active_loop.py, .factory/reports/usr-105-106-route-waiter-human-probe-report.md"
   },
   {
     "id": "USR-106",
     "project_id": "darkfac",
     "title": "Falta de harness/rota no cloud_worker e na resolucao de conflito vira failed(loop_cap) ou 30 retries quentes: usar o RouteWaiter",
     "origin": "agent",
-    "status": "planned",
+    "status": "completed",
     "item_type": "quality",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -2962,7 +2963,8 @@
       "USR-87"
     ],
     "created_at": "2026-10-01T07:00:00Z",
-    "updated_at": "2026-10-01T07:00:00Z"
+    "updated_at": "2026-10-04T11:58:06.710966+00:00",
+    "delivery_evidence": "core/orchestrator/cloud_worker.py, core/line/stage_integration.py, tests/line/test_no_route_contract.py, tests/line/test_stage_integration.py, .factory/reports/usr-105-106-route-waiter-human-probe-report.md"
   },
   {
     "id": "USR-107",

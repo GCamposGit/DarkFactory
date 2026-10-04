@@ -117,6 +117,12 @@ class ControlStore(Protocol):
         """Query pending outbox events for publication/materialization."""
         ...
 
+    def list_waiting_jobs(
+        self, statuses: tuple[str, ...] = ("waiting_human", "waiting_dependency")
+    ) -> list[JobKey]:
+        """List active jobs parked in waiting states."""
+        ...
+
 
 class SQLiteControlStore:
     """Canonical SQLite implementation of ControlStore for local-first execution.
@@ -1406,6 +1412,36 @@ class SQLiteControlStore:
         except Exception:
             conn.rollback()
             raise
+        finally:
+            conn.close()
+
+    def list_waiting_jobs(
+        self, statuses: tuple[str, ...] = ("waiting_human", "waiting_dependency")
+    ) -> list[JobKey]:
+        """List all active jobs parked in waiting states."""
+        conn = self._connect()
+        try:
+            cur = conn.cursor()
+            placeholders = ", ".join("?" for _ in statuses)
+            cur.execute(
+                f"""
+                SELECT run_id, ticket_id, plan_version, stage, iteration
+                FROM jobs
+                WHERE status IN ({placeholders})
+                ORDER BY created_at ASC
+                """,
+                statuses,
+            )
+            return [
+                JobKey(
+                    run_id=row["run_id"],
+                    ticket_id=row["ticket_id"],
+                    plan_version=row["plan_version"],
+                    stage=row["stage"],
+                    iteration=row["iteration"],
+                )
+                for row in cur.fetchall()
+            ]
         finally:
             conn.close()
 

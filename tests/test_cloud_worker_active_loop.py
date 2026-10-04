@@ -208,3 +208,245 @@ def test_worker_draining_rejects_new_claims(temp_stores):
 
     executed = worker.poll_and_execute_once()
     assert executed is False
+
+
+# --------------------------------------------------------------------------
+# USR-105: HumanRequest periodic probe sweeper and auto-resume
+# --------------------------------------------------------------------------
+
+def _setup_waiting_human_job(store, stage: str = "integration") -> tuple[str, Any]:
+    cmd = IntakeCommand(
+        project_id="darkfac",
+        channel="test_channel",
+        external_id=f"test-wait-{uuid4().hex[:6]}",
+        mode="autonomous",
+        policy_ref="policy-v1",
+        payload={
+            "title": "Waiting Human Test",
+            "problem": "Validate sweeper",
+            "journey": "J",
+            "non_goals": ["None"],
+            "criteria": ["Done"],
+        },
+    )
+    receipt = store.accept(cmd, datetime.now(UTC))
+    run_id = receipt.run_id
+    claim = store.claim("test-worker-1", ["grill_engine", "integrator"], datetime.now(UTC))
+    store.finish(
+        claim,
+        StageResult(outcome="waiting_human", cause_code="infra_wait"),
+        datetime.now(UTC),
+    )
+    return run_id, claim.job_key
+
+
+def test_human_probe_sweeper_resumes_green_infra_request(temp_stores):
+    store, artifact_store = temp_stores
+    run_id, job_key = _setup_waiting_human_job(store, "integration")
+
+    from core.line.human import HumanRequest
+
+    req = HumanRequest(
+        kind="infra",
+        run_id=run_id,
+        blocking_stage="grill",
+        guide_md="Infra guide",
+        probe_cmd="python -c \"import sys; sys.exit(0)\"",
+    )
+
+    worker = CloudWorker(
+        worker_id="test-sweeper",
+        store=store,
+        artifact_store=artifact_store,
+        request_loader=lambda proj, r_id: req if r_id == run_id else None,
+        human_probe_runner=lambda cmd, **kw: True,
+    )
+
+    # Before sweep: job is waiting_human
+    waiting = store.list_waiting_jobs(statuses=("waiting_human",))
+    assert len(waiting) == 1
+    assert waiting[0].run_id == run_id
+
+    # Run sweep directly
+    resumed = worker.sweep_waiting_human_requests()
+    assert resumed == [run_id]
+
+    # After sweep: job was resumed into pending
+    waiting_after = store.list_waiting_jobs(statuses=("waiting_human",))
+    assert len(waiting_after) == 0
+
+    status = store.get_run_status(run_id)
+    grill_jobs = [j for j in status["jobs"] if j["stage"] == "grill"]
+    assert any(j["status"] == "pending" for j in grill_jobs)
+
+
+def test_human_probe_sweeper_does_not_resume_red_infra_request(temp_stores):
+    store, artifact_store = temp_stores
+    run_id, job_key = _setup_waiting_human_job(store, "integration")
+
+    from core.line.human import HumanRequest
+
+    req = HumanRequest(
+        kind="infra",
+        run_id=run_id,
+        blocking_stage="grill",
+        guide_md="Infra guide",
+        probe_cmd="python -c \"import sys; sys.exit(1)\"",
+    )
+
+    worker = CloudWorker(
+        worker_id="test-sweeper",
+        store=store,
+        artifact_store=artifact_store,
+        request_loader=lambda proj, r_id: req if r_id == run_id else None,
+        human_probe_runner=lambda cmd, **kw: False,
+    )
+
+    resumed = worker.sweep_waiting_human_requests()
+    assert resumed == []
+
+    # Still waiting_human
+    waiting = store.list_waiting_jobs(statuses=("waiting_human",))
+    assert len(waiting) == 1
+
+
+def test_human_probe_sweeper_ignores_grill_and_commercial_acceptance(temp_stores):
+    store, artifact_store = temp_stores
+    run_id, job_key = _setup_waiting_human_job(store, "integration")
+
+    from core.line.human import HumanRequest
+
+    for kind in ("grill", "commercial_acceptance"):
+        req = HumanRequest(
+            kind=kind,
+            run_id=run_id,
+            blocking_stage="grill",
+            guide_md="Guide",
+            probe_cmd="python -c \"import sys; sys.exit(0)\"",
+        )
+        called = {"probed": False}
+
+        def _probe(cmd, **kw):
+            called["probed"] = True
+            return True
+
+        worker = CloudWorker(
+            worker_id="test-sweeper",
+            store=store,
+            artifact_store=artifact_store,
+            request_loader=lambda proj, r_id: req,
+            human_probe_runner=_probe,
+        )
+
+        resumed = worker.sweep_waiting_human_requests()
+        assert resumed == []
+        assert not called["probed"]
+
+
+def test_human_probe_sweeper_handles_exception_without_crashing_worker(temp_stores):
+    store, artifact_store = temp_stores
+    run_id, job_key = _setup_waiting_human_job(store, "integration")
+
+    from core.line.human import HumanRequest
+
+    req = HumanRequest(
+        kind="infra",
+        run_id=run_id,
+        blocking_stage="grill",
+        guide_md="Guide",
+        probe_cmd="timeout",
+    )
+
+    def _exploding_probe(cmd, **kw):
+        raise RuntimeError("Network timeout or crash")
+
+    worker = CloudWorker(
+        worker_id="test-sweeper",
+        store=store,
+        artifact_store=artifact_store,
+        request_loader=lambda proj, r_id: req,
+        human_probe_runner=_exploding_probe,
+    )
+
+    # Must never raise or crash
+    resumed = worker.sweep_waiting_human_requests()
+    assert resumed == []
+
+
+def test_human_probe_sweeper_respects_interval(temp_stores):
+    store, artifact_store = temp_stores
+    sweep_calls = {"n": 0}
+
+    worker = CloudWorker(
+        worker_id="test-sweeper",
+        store=store,
+        artifact_store=artifact_store,
+        human_probe_interval_s=600.0,
+    )
+
+    orig_sweep = worker.sweep_waiting_human_requests
+    def _tracked_sweep(now=None):
+        sweep_calls["n"] += 1
+        return orig_sweep(now=now)
+
+    worker.sweep_waiting_human_requests = _tracked_sweep
+
+    t0 = datetime(2026, 10, 1, 12, 0, 0, tzinfo=UTC)
+    worker.poll_and_execute_once(now=t0)
+    assert sweep_calls["n"] == 1
+
+    # 300s later: interval (600s) has not passed, no new sweep
+    t1 = datetime(2026, 10, 1, 12, 5, 0, tzinfo=UTC)
+    worker.poll_and_execute_once(now=t1)
+    assert sweep_calls["n"] == 1
+
+    # 601s later: interval passed, sweep triggers
+    t2 = datetime(2026, 10, 1, 12, 10, 1, tzinfo=UTC)
+    worker.poll_and_execute_once(now=t2)
+    assert sweep_calls["n"] == 2
+
+
+# --------------------------------------------------------------------------
+# USR-106: RouteWaiter on cloud_worker dispatch when route is unavailable
+# --------------------------------------------------------------------------
+
+def test_cloud_worker_dispatch_no_route_uses_route_waiter(temp_stores):
+    store, artifact_store = temp_stores
+    cmd = IntakeCommand(
+        project_id="darkfac",
+        channel="test_channel",
+        external_id=f"test-noroute-{uuid4().hex[:6]}",
+        mode="autonomous",
+        policy_ref="policy-v1",
+        payload={
+            "title": "No Route Test",
+            "problem": "P",
+            "journey": "J",
+            "non_goals": ["N"],
+            "criteria": ["C"],
+        },
+    )
+    receipt = store.accept(cmd, datetime.now(UTC))
+    run_id = receipt.run_id
+
+    from core.line.route_wait import RouteWaiter
+
+    waiter = RouteWaiter()
+    worker = CloudWorker(
+        worker_id="test-no-route-worker",
+        store=store,
+        artifact_store=artifact_store,
+        capabilities=["git"],  # no harness:* capability
+        autodetect_tooling=True,
+        route_waiter=waiter,
+    )
+
+    # Worker claims and dispatches grill job
+    executed = worker.poll_and_execute_once()
+    assert executed is True
+
+    status = store.get_run_status(run_id)
+    grill_jobs = [j for j in status["jobs"] if j["stage"] == "grill"]
+    assert len(grill_jobs) >= 1
+    # Must use RouteWaiter (starts with no_route_available not_before=...)
+    assert any((j.get("cause_code") or "").startswith("no_route_available not_before=") for j in grill_jobs)

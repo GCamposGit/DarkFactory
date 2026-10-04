@@ -778,6 +778,28 @@ def test_agent_that_does_not_merge_fails_merge_conflict(
     assert result.cause_code == "merge_conflict"
 
 
+def test_merge_conflict_without_route_uses_route_waiter_and_no_marker(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _, project, ws = _conflicting_run(tmp_path, monkeypatch, "run-no-route")
+    # Simulate pick returning None (no route available)
+    monkeypatch.setattr(stage_integration, "pick", lambda *a, **k: None)
+
+    handler = IntegrationStageHandler(
+        project, gh_executable="gh-not-used", host_caps=["harness:claude"],
+    )
+
+    result = handler._rebase_onto_default(ws, "main")
+    assert result is not None
+    assert result.outcome == "retry"
+    assert result.cause_code.startswith("no_route_available not_before=")
+
+    # Attempt marker must NOT have been written or committed because no agent ran
+    assert ws_mod.find_commit_by_job(ws, "run-no-route:integration:conflict_attempt") is None
+    local_log = _git(["log", "--format=%B", "HEAD"], cwd=ws.path).stdout
+    assert "run-no-route:integration:conflict_attempt" not in local_log
+
+
 def test_already_merged_pr_short_circuits_to_success(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fake_gh
 ) -> None:
