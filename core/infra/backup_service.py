@@ -13,6 +13,7 @@ import hashlib
 import json
 import logging
 import os
+import re
 import shutil
 import tarfile
 import tempfile
@@ -32,6 +33,26 @@ from core.infra.postgres_dumper import PostgresDumper, PostgresDumpResult
 from core.infra.r2_client import R2StorageClient
 
 logger = logging.getLogger(__name__)
+
+_WINDOWS_DRIVE_PATH = re.compile(r"^[A-Za-z]:[\\/]")
+
+
+def usable_onprem_dir(configured: str | os.PathLike[str] | None, *, os_name: str | None = None) -> str | None:
+    """Return `configured` unless it is a Windows drive path (drive letter + backslash) on a non-Windows host.
+
+    The cloud env example ships DARKFAC_ONPREM_BACKUP_DIR set to the Desktop's E: drive. On Linux that
+    string is a RELATIVE path, so mkdir created a literal directory with the drive letter and backslashes
+    under the current working directory (dirtying checkouts and writing backups to the wrong place).
+    Such a value is ignored with a warning and the caller uses its platform-correct default.
+    """
+    if not configured:
+        return None
+    text = os.fspath(configured)
+    if (os_name or os.name) != "nt" and _WINDOWS_DRIVE_PATH.match(text):
+        logger.warning("Ignoring Windows drive path %r as on-prem backup dir on a non-Windows host", text)
+        return None
+    return text
+
 
 DEFAULT_BACKUP_IGNORED_DIRS: frozenset[str] = frozenset({
     ".git",
@@ -122,7 +143,7 @@ class CloudBackupService:
         self.registry_path = Path(registry_path or (self.backup_root / "registry.json")).resolve()
 
         # On-premise mirror destination (Drive E: on desktop-g45ipem or local fallback)
-        configured_onprem = onprem_root or os.getenv("DARKFAC_ONPREM_BACKUP_DIR")
+        configured_onprem = usable_onprem_dir(onprem_root or os.getenv("DARKFAC_ONPREM_BACKUP_DIR"))
         if configured_onprem:
             self.onprem_root = Path(configured_onprem).resolve()
         elif Path("E:/").exists():

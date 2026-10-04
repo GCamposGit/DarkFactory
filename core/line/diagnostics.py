@@ -30,6 +30,9 @@ logger = logging.getLogger(__name__)
 MAX_OUTPUT_CHARS = 2000
 RAW_TAIL_CHARS = 3000
 SNIPPET_CHARS = 300
+REMOTE_SECTION_MAX_LINES = 40
+REMOTE_SECTION_MAX_CHARS = 3000
+REMOTE_LINE_PREFIXES = ("[REMOTE]", "[line_validate]")
 _MAX_RECORDED_ATTEMPTS = 10
 
 
@@ -51,6 +54,36 @@ def redacted_tail(text: Optional[str], limit: int = RAW_TAIL_CHARS) -> str:
     if len(clean) <= limit:
         return clean
     return f"[truncated, {len(clean)} chars total] ...\n{clean[-limit:]}"
+
+
+def remote_dispatch_lines(
+    text: Optional[str],
+    *,
+    max_lines: int = REMOTE_SECTION_MAX_LINES,
+    max_chars: int = REMOTE_SECTION_MAX_CHARS,
+) -> list[str]:
+    """Redacted `[REMOTE]` / `[line_validate]` lines of a raw validate output, in order.
+
+    The raw tail only keeps the END of a long pytest run, so the lines that explain WHY the suite ran
+    locally instead of on the Desktop test worker (worker unreachable, busy, unavailable, no remote
+    used) were lost. They are collected from the whole output; when over the caps the newest lines win.
+    """
+    found = [
+        line.strip()
+        for line in redact_secrets(text or "").splitlines()
+        if line.strip().startswith(REMOTE_LINE_PREFIXES)
+    ]
+    found = found[-max_lines:]
+    while len(found) > 1 and sum(len(line) + 1 for line in found) > max_chars:
+        found.pop(0)
+    return [line if len(line) <= max_chars else f"{line[:max_chars]}..." for line in found]
+
+
+def remote_dispatch_section(raw_output: Optional[str]) -> list[str]:
+    """Markdown lines of the remote-dispatch section of a validate attempt log."""
+    lines = remote_dispatch_lines(raw_output)
+    body = "\n".join(lines) if lines else "(no [REMOTE] line in the output: remote dispatch was not attempted)"
+    return ["## Remote dispatch lines (redacted)", "", "```text", body, "```", ""]
 
 
 def worker_snippet(text: Optional[str], limit: int = SNIPPET_CHARS) -> str:
@@ -87,6 +120,7 @@ def format_attempt_log(
         lines += [
             f"## Raw output tail (redacted, last {RAW_TAIL_CHARS} chars)", "", "```text", redacted_tail(raw_tail), "```", "",
         ]
+        lines += remote_dispatch_section(raw_tail)
     return "\n".join(lines)
 
 

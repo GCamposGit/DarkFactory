@@ -343,6 +343,24 @@ def _isolate_operating_harness_env(monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.delenv(name, raising=False)
 
 
+@pytest.fixture(autouse=True)
+def _isolate_ambient_worker_config_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Cloud-worker container settings must not leak into tests.
+
+    - `DARKFAC_ROUTING_*` (the worker sets `DARKFAC_ROUTING_UNKNOWN_QUOTA=last_resort`) changes what
+      `core.line.routing.pick` returns, so fail-closed assertions would fail inside the container.
+    - `DARKFAC_ONPREM_BACKUP_DIR` (the env example points it at the Desktop's E: drive) decides where
+      `CloudBackupService` mirrors encrypted backups; tests that build the service without arguments
+      wrote them to the checkout (or to the real drive). Each test gets its own tmp mirror instead.
+
+    A test that needs a specific value sets it itself (monkeypatch runs after this fixture).
+    """
+
+    for name in [key for key in os.environ if key.startswith("DARKFAC_ROUTING_")]:
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("DARKFAC_ONPREM_BACKUP_DIR", str(tmp_path / "onprem_backup_mirror"))
+
+
 @pytest.fixture
 def stereo_wav(tmp_path: Path) -> Path:
     """Generate a tiny deterministic stereo fixture without shipping binary data."""

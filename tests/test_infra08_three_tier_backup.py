@@ -9,6 +9,7 @@ Governed by:
 from __future__ import annotations
 
 import hashlib
+import os
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from unittest.mock import patch
@@ -474,3 +475,34 @@ def test_autonomous_backup_cli_main(tmp_path: Path) -> None:
     code = cron_main(["--once", "--project-id", "cron-cli-test", "--source-dir", str(src_dir)])
     assert code == 0
 
+
+# ==============================================================================
+# 8. Windows drive paths must never become literal directories on POSIX hosts
+# ==============================================================================
+
+
+def test_usable_onprem_dir_ignores_windows_drive_paths_off_windows() -> None:
+    from core.infra.backup_service import usable_onprem_dir
+
+    assert usable_onprem_dir("E:\\DarkFac\\Backups", os_name="posix") is None
+    assert usable_onprem_dir("e:/DarkFac/Backups", os_name="posix") is None
+    assert usable_onprem_dir("E:\\DarkFac\\Backups", os_name="nt") == "E:\\DarkFac\\Backups"
+    assert usable_onprem_dir("/mnt/backups", os_name="posix") == "/mnt/backups"
+    assert usable_onprem_dir("relative/mirror", os_name="posix") == "relative/mirror"
+    assert usable_onprem_dir(None, os_name="posix") is None
+    assert usable_onprem_dir("", os_name="posix") is None
+
+
+@pytest.mark.skipif(os.name == "nt", reason="a drive path is a legitimate absolute path on Windows")
+def test_service_does_not_create_a_literal_windows_dir_in_the_cwd(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    cwd = tmp_path / "cwd"
+    cwd.mkdir()
+    monkeypatch.chdir(cwd)
+    monkeypatch.setenv("DARKFAC_ONPREM_BACKUP_DIR", "E:\\DarkFac\\Backups")
+
+    service = CloudBackupService(backup_root=tmp_path / "root")
+
+    assert list(cwd.iterdir()) == []
+    assert service.onprem_root == (tmp_path / "root" / "onprem").resolve()

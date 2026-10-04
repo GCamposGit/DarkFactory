@@ -729,7 +729,8 @@ def _write_validate_log(
     elif raw_output is not None:
         content = (
             f"{content}\n\n## Raw output tail (redacted, last {diagnostics.RAW_TAIL_CHARS} chars)\n\n"
-            f"```text\n{diagnostics.redacted_tail(raw_output)}\n```\n"
+            f"```text\n{diagnostics.redacted_tail(raw_output)}\n```\n\n"
+            + "\n".join(diagnostics.remote_dispatch_section(raw_output))
         )
     workspace.write_context(ws, f"validate-{ticket_id}-{iteration}.log.md", content)
 
