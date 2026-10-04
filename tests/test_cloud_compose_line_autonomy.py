@@ -108,3 +108,9 @@ def test_agent_cli_runs_as_the_non_root_user_so_claude_bypass_permissions_is_all
     dockerfile = (REPO_ROOT / "deploy" / "dokploy" / "Dockerfile.cloud").read_text(encoding="utf-8")
     assert dockerfile.index("USER darkfac") < dockerfile.index("CMD [")
     assert "useradd -u 1000" in dockerfile
+
+
+def test_worker_waits_long_for_a_busy_desktop_and_reaps_zombies(compose: dict) -> None:
+    worker = compose["services"]["darkfac-worker"]
+    assert "DARKFAC_REMOTE_BUSY_WAIT_SEC=${DARKFAC_REMOTE_BUSY_WAIT_SEC:-900}" in worker["environment"]
+    assert worker["init"] is True

@@ -309,3 +309,24 @@ def test_clean_tree_does_not_build_a_snapshot(line_validate, tmp_path: Path, mon
 
     monkeypatch.setattr(line_validate, "build_snapshot_commit", _unexpected)
     assert line_validate.main(root) == 0
+
+
+def test_sanitized_env_drops_routing_operating_harness_and_onprem_backup_config(line_validate) -> None:
+    base = {
+        "PATH": "/usr/bin",
+        "DARKFAC_ROUTING_UNKNOWN_QUOTA": "last_resort",
+        "DARKFAC_ROUTING_ANYTHING_ELSE": "1",
+        "DARKFAC_OPERATING_HARNESS": "claude",
+        "DARKFAC_ONPREM_BACKUP_DIR": "E:\\DarkFac\\Backups",
+    }
+    assert line_validate.sanitized_env(base) == {"PATH": "/usr/bin"}
+
+
+def test_runner_env_caps_xdist_workers_off_windows_unless_already_set(line_validate) -> None:
+    base = {"PATH": "/usr/bin", "DARKFAC_TEST_WORKERS": "http://w:8080"}
+    capped = line_validate.runner_env(base, platform="linux")
+    assert capped["PYTEST_XDIST_AUTO_NUM_WORKERS"] == line_validate.LOCAL_XDIST_WORKERS
+    assert capped["DARKFAC_TEST_WORKERS"] == "http://w:8080"
+    assert "PYTEST_XDIST_AUTO_NUM_WORKERS" not in line_validate.runner_env(base, platform="win32")
+    explicit = line_validate.runner_env({**base, "PYTEST_XDIST_AUTO_NUM_WORKERS": "4"}, platform="linux")
+    assert explicit["PYTEST_XDIST_AUTO_NUM_WORKERS"] == "4"

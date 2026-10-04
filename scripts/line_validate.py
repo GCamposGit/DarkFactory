@@ -60,6 +60,8 @@ _AMBIENT_CONFIG_ENV = frozenset(
         "DARKFAC_MAX_CONCURRENT_SLOTS",
         "DARKFAC_WORKSPACES",
         "DARKFAC_OPENROUTER_CHEAP_MODEL",
+        "DARKFAC_OPERATING_HARNESS",
+        "DARKFAC_ONPREM_BACKUP_DIR",
         "DATA_DIR",
         "FACTORY_DIR",
         "OLLAMA_BASE_URL",
@@ -67,6 +69,14 @@ _AMBIENT_CONFIG_ENV = frozenset(
         "REMOTE_HARNESS_URLS",
     }
 )
+# Routing knobs of the cloud worker (`DARKFAC_ROUTING_UNKNOWN_QUOTA=last_resort`, ...): they change what
+# `core.line.routing.pick` returns, so a test asserting the workstation behaviour fails when they leak.
+_AMBIENT_CONFIG_PREFIXES = ("DARKFAC_ROUTING_",)
+# xdist workers a LOCAL run may start when the host is not Windows: `-n auto` in the 1.5-CPU production
+# container exhausts its thread/pid limits ("RuntimeError: can't start new thread"). Remote dispatch is
+# unaffected (the Desktop test worker uses its own environment).
+LOCAL_XDIST_WORKERS = "2"
+XDIST_WORKERS_ENV = "PYTEST_XDIST_AUTO_NUM_WORKERS"
 _KEEP_ENV = frozenset({"DARKFAC_WORKER_TOKEN", "DARKFAC_TEST_WORKERS", "DARKFAC_REMOTE_BUSY_WAIT_SEC"})
 
 
@@ -76,8 +86,18 @@ def sanitized_env(base: dict[str, str] | None = None) -> dict[str, str]:
     return {
         k: v
         for k, v in source.items()
-        if k in _KEEP_ENV or (k not in _AMBIENT_CONFIG_ENV and not _SENSITIVE_ENV.search(k))
+        if k in _KEEP_ENV
+        or (k not in _AMBIENT_CONFIG_ENV and not k.startswith(_AMBIENT_CONFIG_PREFIXES) and not _SENSITIVE_ENV.search(k))
     }
+
+
+def runner_env(base: dict[str, str] | None = None, *, platform: str | None = None) -> dict[str, str]:
+    """`sanitized_env` plus the xdist worker cap for local runs on non-Windows hosts (see above)."""
+    env = sanitized_env(base)
+    source = os.environ if base is None else base
+    if (platform or sys.platform) != "win32" and not source.get(XDIST_WORKERS_ENV, "").strip():
+        env[XDIST_WORKERS_ENV] = LOCAL_XDIST_WORKERS
+    return env
 
 
 def is_clean_tree(root: Path) -> bool:
@@ -196,7 +216,7 @@ def run_official_runner_on_snapshot(root: Path) -> int:
             f"[line_validate] snapshot {sha[:12]} checked out at {checkout}; running the official harness (--quick)",
             flush=True,
         )
-        code = subprocess.call([sys.executable, str(runner_path), "--quick"], cwd=checkout, env=sanitized_env())
+        code = subprocess.call([sys.executable, str(runner_path), "--quick"], cwd=checkout, env=runner_env())
         if code != 0:
             report_dirty_checkout(checkout)
         return code
@@ -219,7 +239,7 @@ def run_steps_directly(root: Path, config_path: Path) -> int:
     if not steps:
         print("[line_validate] no quick steps selected; refusing to pass on an empty selection")
         return 1
-    env = dict(sanitized_env(), PYTHONPATH=str(root))
+    env = dict(runner_env(), PYTHONPATH=str(root))
     for step in steps:
         print(f"[line_validate] step {step.name}: {step.cmd}", flush=True)
         try:
@@ -248,7 +268,7 @@ def main(root: Path = REPO_ROOT) -> int:
         return subprocess.call(
             [sys.executable, str(root / "core" / "harness" / "runner.py"), "--quick"],
             cwd=root,
-            env=sanitized_env(),
+            env=runner_env(),
         )
     print("[line_validate] dirty tree: validating a snapshot commit of the working tree", flush=True)
     try:

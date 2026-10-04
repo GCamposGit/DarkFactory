@@ -67,6 +67,38 @@ time.sleep(30)
 """
 
 
+def _is_running(pid: int) -> bool:
+    """True while `pid` is a live process. A zombie is dead: it only awaits a reaper.
+
+    In a Docker container whose PID 1 is not an init (no `init: true`), a killed grandchild is
+    reparented to PID 1 and stays <defunct> forever, so `psutil.pid_exists` keeps answering True even
+    though SIGKILL was delivered and the process no longer runs.
+    """
+    try:
+        return psutil.Process(pid).status() != psutil.STATUS_ZOMBIE
+    except (psutil.NoSuchProcess, psutil.ZombieProcess):
+        return False
+
+
+def test_is_running_treats_zombies_and_missing_pids_as_dead(monkeypatch: pytest.MonkeyPatch) -> None:
+    class _FakeProcess:
+        def __init__(self, pid: int) -> None:
+            self.pid = pid
+
+        def status(self) -> str:
+            return psutil.STATUS_ZOMBIE if self.pid == 111 else psutil.STATUS_SLEEPING
+
+    def _fake_process(pid: int) -> _FakeProcess:
+        if pid == 222:
+            raise psutil.NoSuchProcess(pid)
+        return _FakeProcess(pid)
+
+    monkeypatch.setattr(psutil, "Process", _fake_process)
+    assert _is_running(111) is False  # zombie
+    assert _is_running(222) is False  # gone
+    assert _is_running(333) is True  # alive
+
+
 def test_bounded_runner_terminates_grandchild_and_returns_under_15s(tmp_path: Path) -> None:
     """Fake process creates a grandchild sleeping and holding pipes open.
 
@@ -99,7 +131,7 @@ def test_bounded_runner_terminates_grandchild_and_returns_under_15s(tmp_path: Pa
     time.sleep(0.5)
 
     # 4. Process tree terminated: grandchild is not running
-    assert not psutil.pid_exists(grandchild_pid), f"Grandchild process {grandchild_pid} is still alive!"
+    assert not _is_running(grandchild_pid), f"Grandchild process {grandchild_pid} is still alive!"
 
     # 5. Redaction verification
     redacted = redact_secrets(res.stdout)
