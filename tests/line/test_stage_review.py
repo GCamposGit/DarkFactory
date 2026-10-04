@@ -256,3 +256,144 @@ def test_get_diff_summarizes_when_over_60kb(tmp_path: Path, monkeypatch: pytest.
 
     assert "diff completo tem" in diff_text
     assert "big.py" in diff_text
+
+
+def test_consecutive_agent_errors_fail_after_max_retries(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    origin = _init_bare_origin(tmp_path)
+    project = _project(str(origin))
+    run_id = "run-agent-fail"
+    _prepare_run(tmp_path, monkeypatch, project, run_id, harness="claude")
+
+    def failing_agent(req: AgentRequest) -> AgentResult:
+        return AgentResult(ok=False, text="", error_kind="empty_output", harness=req.harness, duration_s=0.01)
+
+    stage = ReviewStage(
+        run_agent_func=failing_agent,
+        pick_func=_isolated_pick(tmp_path),
+        routing_config=load_routing_config(),
+    )
+
+    ctx = ws_mod.context_dir(ws_mod.checkout(project, run_id))
+
+    # 5 consecutive retries allowed
+    for attempt in range(1, 6):
+        res = stage.run(project, run_id)
+        assert res.outcome == "retry"
+        assert res.cause_code == "review_agent_empty_output"
+        state = json.loads((ctx / "review_state.json").read_text(encoding="utf-8"))
+        assert state["agent_error_streak"] == attempt
+
+    # 6th attempt: ceiling exceeded (5 retries already exhausted)
+    res = stage.run(project, run_id)
+    assert res.outcome == "failed"
+    assert res.cause_code == "review_agent_exhausted"
+
+
+def test_agent_error_streak_resets_on_agent_success(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    origin = _init_bare_origin(tmp_path)
+    project = _project(str(origin))
+    run_id = "run-agent-reset"
+    _prepare_run(tmp_path, monkeypatch, project, run_id, harness="claude")
+
+    call_count = 0
+
+    def flaky_agent(req: AgentRequest) -> AgentResult:
+        nonlocal call_count
+        call_count += 1
+        if call_count <= 2:
+            return AgentResult(ok=False, text="", error_kind="timeout", harness=req.harness, duration_s=0.01)
+        return AgentResult(
+            ok=True,
+            text=json.dumps({"verdict": "approve", "blocking": [], "non_blocking": []}),
+            harness=req.harness,
+            duration_s=0.01,
+        )
+
+    stage = ReviewStage(
+        run_agent_func=flaky_agent,
+        pick_func=_isolated_pick(tmp_path),
+        routing_config=load_routing_config(),
+    )
+
+    ctx = ws_mod.context_dir(ws_mod.checkout(project, run_id))
+
+    # 2 failures
+    res1 = stage.run(project, run_id)
+    assert res1.outcome == "retry"
+    assert res1.cause_code == "review_agent_timeout"
+
+    res2 = stage.run(project, run_id)
+    assert res2.outcome == "retry"
+
+    state_mid = json.loads((ctx / "review_state.json").read_text(encoding="utf-8"))
+    assert state_mid["agent_error_streak"] == 2
+
+    # 3rd attempt: success -> streak resets to 0
+    res3 = stage.run(project, run_id)
+    assert res3.outcome == "success"
+
+    state_final = json.loads((ctx / "review_state.json").read_text(encoding="utf-8"))
+    assert state_final["agent_error_streak"] == 0
+
+
+def test_agent_error_streak_resets_on_round_change(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    origin = _init_bare_origin(tmp_path)
+    project = _project(str(origin))
+    run_id = "run-round-reset"
+    _prepare_run(tmp_path, monkeypatch, project, run_id, harness="claude")
+
+    call_count = 0
+
+    def round_agent(req: AgentRequest) -> AgentResult:
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            return AgentResult(ok=False, text="", error_kind="empty_output", harness=req.harness, duration_s=0.01)
+        if call_count == 2:
+            return AgentResult(
+                ok=True,
+                text=json.dumps({
+                    "verdict": "changes_required",
+                    "blocking": [{"file": "f.py", "line": 1, "issue": "bug", "fix": "fix"}],
+                    "non_blocking": [],
+                }),
+                harness=req.harness,
+                duration_s=0.01,
+            )
+        # Round 2: fail again once
+        return AgentResult(ok=False, text="", error_kind="empty_output", harness=req.harness, duration_s=0.01)
+
+    stage = ReviewStage(
+        run_agent_func=round_agent,
+        pick_func=_isolated_pick(tmp_path),
+        routing_config=load_routing_config(),
+    )
+
+    ctx = ws_mod.context_dir(ws_mod.checkout(project, run_id))
+
+    # Call 1: fails in round 1
+    res1 = stage.run(project, run_id)
+    assert res1.outcome == "retry"
+
+    # Call 2: succeeds in round 1 with changes_required
+    res2 = stage.run(project, run_id)
+    assert res2.outcome == "retry"
+    assert "retry:development" in res2.cause_code
+
+    state_r1 = json.loads((ctx / "review_state.json").read_text(encoding="utf-8"))
+    assert state_r1["agent_error_streak"] == 0
+    assert len(state_r1["rounds"]) == 1
+
+    # Call 3: round 2 starts, fails once -> streak should be 1 (not 2 or more)
+    res3 = stage.run(project, run_id)
+    assert res3.outcome == "retry"
+
+    state_r2 = json.loads((ctx / "review_state.json").read_text(encoding="utf-8"))
+    assert state_r2["agent_error_streak"] == 1
+

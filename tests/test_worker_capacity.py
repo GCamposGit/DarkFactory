@@ -15,6 +15,12 @@ pytestmark = [pytest.mark.offline]
 BYTES_PER_GIB = 1024 * 1024 * 1024
 
 
+@pytest.fixture(autouse=True)
+def _clean_worker_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("DARKFAC_MAX_WORKERS", raising=False)
+    monkeypatch.delenv("PYTEST_XDIST_AUTO_NUM_WORKERS", raising=False)
+
+
 def test_calculate_safe_worker_cap_notebook_incident() -> None:
     """The 2026-09-30 incident: Notebook with 6.3 GiB available RAM and 20 CPUs.
 
