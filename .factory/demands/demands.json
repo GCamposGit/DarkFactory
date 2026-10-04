@@ -3960,5 +3960,65 @@
     "dependencies": [],
     "created_at": "2026-10-04T16:10:50.278897Z",
     "updated_at": "2026-10-04T16:10:50.278897Z"
+  },
+  {
+    "id": "USR-139",
+    "project_id": "darkfac",
+    "title": "PR de fila (ledger-only) e mergeado antes dos checks obrigatorios do ruleset do main",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "EVIDENCIA 04/10/2026: run_ticket --create --queue-only registrou USR-138, abriu GCamposGit/DarkFactory#142 e falhou com 'gh pr merge failed: the base branch policy prohibits the merge'. Desde 04/10 09:56 o ruleset do main exige pr-validation (ubuntu/windows) e trusted-pr-policy; core/git/autonomy.py::_ci_gate devolve ci_gate=skipped_ledger_only para PR de fila e chama gh pr merge com os checks em andamento. Todo registro de fila falha e deixa PR orfao (o #142 foi mergeado a mao pela sessao depois do CI verde).",
+    "core_journey": [
+      "EVIDENCIA 04/10/2026: run_ticket --create --queue-only registrou USR-138, abriu GCamposGit/DarkFactory#142 e falhou com 'gh pr merge failed: the base branch policy prohibits the merge'. Desde 04/10 09:56 o ruleset do main exige pr-validation (ubuntu/windows) e trusted-pr-policy; core/git/autonomy.py::_ci_gate devolve ci_gate=skipped_ledger_only para PR de fila e chama gh pr merge com os checks em andamento. Todo registro de fila falha e deixa PR orfao (o #142 foi mergeado a mao pela sessao depois do CI verde)."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "PR de fila ledger-only aguarda ensure_green antes do merge",
+      "Falha 'base branch policy prohibits' re-roda o gate uma vez e so entao desiste com mensagem clara",
+      "Testes em tests/test_git_autonomy_ci_gate.py cobrem os dois caminhos"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-04T16:41:52.618358Z",
+    "updated_at": "2026-10-04T16:41:52.618358Z"
+  },
+  {
+    "id": "USR-140",
+    "project_id": "darkfac",
+    "title": "Esteira ao vivo: run_ticket local nao publica progresso etapa a etapa",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "A Esteira ao vivo (USR-138, /live) mostra etapa a etapa so os runs da linha autonoma (control store). Tickets executados por run_ticket.py no Desktop/Notebook aparecem apenas como 'Fora da esteira' (status implementing do demands.json, que o hub da nuvem so ve apos merge) sem preflight, worktree, agente, portao, PR/CI, merge e deploy. O owner volta a pedir status no chat para esses runs.",
+    "core_journey": [
+      "A Esteira ao vivo (USR-138, /live) mostra etapa a etapa so os runs da linha autonoma (control store). Tickets executados por run_ticket.py no Desktop/Notebook aparecem apenas como 'Fora da esteira' (status implementing do demands.json, que o hub da nuvem so ve apos merge) sem preflight, worktree, agente, portao, PR/CI, merge e deploy. O owner volta a pedir status no chat para esses runs."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "run_ticket publica eventos de fase (preflight, workspace, agente, portao, commit, PR, CI, merge, deploy) num store que o DarkHub da nuvem le",
+      "GET /api/line/live inclui esses runs com estagios proprios e worker/harness",
+      "Falha ao publicar nunca bloqueia o run_ticket; teste focal"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-04T16:41:55.282304Z",
+    "updated_at": "2026-10-04T16:41:55.282304Z"
   }
 ]
