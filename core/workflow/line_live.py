@@ -304,6 +304,9 @@ def _fmt_duration(seconds: float | None) -> str:
     if minutes < 60:
         return f"{minutes} min"
     hours, rest = divmod(minutes, 60)
+    if hours >= 48:
+        days, hours = divmod(hours, 24)
+        return f"{days} d" if hours == 0 else f"{days} d {hours} h"
     return f"{hours} h" if rest == 0 else f"{hours} h {rest:02d} min"
 
 
