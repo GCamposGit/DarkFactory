@@ -13,7 +13,7 @@ O ciclo PIV divide a entrega em mudanças pequenas, isoladas e estritamente veri
 
 ### Inputs (Entradas)
 - **Contrato de Handoff Aprovado**: `WorkflowHandoff` em estado `WorkflowState.READY_FOR_HANDOFF`.
-- **Fencing de Isolamento Git**: Branch dedicada e worktree exclusiva com lease de ownership (`core.line.workspace`).
+- **Fencing de Isolamento Git**: Branch dedicada e worktree exclusiva com lease de ownership (`core.line.workspace` e `references/worktree-parallelism.md`).
 - **Baseline SHA**: Hash do commit base limpo e verificado.
 - **Governança**: `MISSION.md`, `FACTORY_RULES.md`, `AGENTS.md`.
 

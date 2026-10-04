@@ -175,10 +175,12 @@ def test_skill_cited_paths_exist() -> None:
             if key in ALLOWLIST_PATH_EXCEPTIONS:
                 continue
 
-            # Check if exists relative to REPO_ROOT or absolute
+            # Check if exists relative to REPO_ROOT, relative to skill directory, or absolute
             target_path = REPO_ROOT / cited
-            if not target_path.exists():
+            skill_local_path = skill_dir / cited
+            if not target_path.exists() and not skill_local_path.exists():
                 missing_paths.append(f"{skill_dir.name}: {cited}")
+
 
     assert not missing_paths, (
         f"Skills cite paths that do not exist:\n"
