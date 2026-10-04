@@ -4020,5 +4020,35 @@
     "dependencies": [],
     "created_at": "2026-10-04T16:41:55.282304Z",
     "updated_at": "2026-10-04T16:41:55.282304Z"
+  },
+  {
+    "id": "USR-141",
+    "project_id": "darkfac",
+    "title": "Worker de testes do Desktop para de responder ao iniciar o passo paralelo do portao",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "EVIDENCIA 04/10/2026 ~18:35 e ~19:05 (Notebook AI_Notebook, candidato 39cee2c do USR-138): runner.py --quick despachou a suite para o worker do Desktop (http://100.78.181.90:8080, DESKTOP-G45IPEM); syntax_and_types passou e, ao iniciar unit_and_integration_tests_parallel, o runner registrou 'worker stopped responding for >60s mid-run' nas duas tentativas. Na segunda, o worker antes reportou '[SUITE_LOCK] waiting: held by pid 13092 on DESKTOP-G45IPEM ... since 13:52:15'. Logo depois /health respondia ok/busy=false. Na primeira, o fallback local estourou 906 s com TEST_COUNT=0 (USR-135) porque outras sessoes rodavam runner --local no Notebook. Hoje o Desktop e o worker primario de testes e o portao oficial fica indisponivel.",
+    "core_journey": [
+      "EVIDENCIA 04/10/2026 ~18:35 e ~19:05 (Notebook AI_Notebook, candidato 39cee2c do USR-138): runner.py --quick despachou a suite para o worker do Desktop (http://100.78.181.90:8080, DESKTOP-G45IPEM); syntax_and_types passou e, ao iniciar unit_and_integration_tests_parallel, o runner registrou 'worker stopped responding for >60s mid-run' nas duas tentativas. Na segunda, o worker antes reportou '[SUITE_LOCK] waiting: held by pid 13092 on DESKTOP-G45IPEM ... since 13:52:15'. Logo depois /health respondia ok/busy=false. Na primeira, o fallback local estourou 906 s com TEST_COUNT=0 (USR-135) porque outras sessoes rodavam runner --local no Notebook. Hoje o Desktop e o worker primario de testes e o portao oficial fica indisponivel."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Worker continua respondendo ao progresso/heartbeat enquanto o pytest -n satura a CPU (thread ou processo separado, prioridade)",
+      "Suite lock orfao (pid morto) e liberado automaticamente com registro",
+      "Runner distingue worker lento de worker morto antes de abortar; teste focal com worker falso"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-04T17:06:34.784102Z",
+    "updated_at": "2026-10-04T17:06:34.784102Z"
   }
 ]
