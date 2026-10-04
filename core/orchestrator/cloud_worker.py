@@ -174,6 +174,7 @@ class CloudWorker:
         request_loader: Callable[[Any, str], Any] | None = None,
         human_probe_runner: Callable[..., bool] | None = None,
         route_waiter: Any | None = None,
+        grill_resender: Callable[[Any, str], bool] | None = None,
     ) -> None:
         self.worker_id = worker_id or os.environ.get("DARKFAC_WORKER_ID", "cloud-worker-1")
         self.max_slots = (
@@ -204,6 +205,7 @@ class CloudWorker:
         self._request_loader = request_loader
         self._human_probe_runner = human_probe_runner
         self._route_waiter = route_waiter
+        self._grill_resender = grill_resender
 
         if capabilities is not None:
             self.capabilities = list(capabilities)
@@ -832,6 +834,17 @@ class CloudWorker:
                 project = default_project_resolver()(job_key.ticket_id)
                 if project is None:
                     continue
+
+                if job_key.stage == "grill":
+                    resender = self._grill_resender
+                    if resender is None:
+                        from core.line.stage_grill import resend_unnotified_grill
+
+                        resender = resend_unnotified_grill
+                    try:
+                        resender(project, run_id)
+                    except Exception as exc:
+                        logger.warning("Error resending unnotified grill for run %s: %s", run_id, exc)
 
                 loader = self._request_loader or load_request
                 request = loader(project, run_id)
