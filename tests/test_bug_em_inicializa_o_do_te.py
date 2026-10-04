@@ -138,7 +138,9 @@ def test_init_terminal_script_execution() -> None:
         text=True,
         encoding="utf-8",
         errors="replace",
-        timeout=15,
+        # A fresh Windows PowerShell process can start slowly while xdist
+        # workers compete for CPU on GitHub-hosted runners.
+        timeout=60,
     )
 
     assert res.returncode == 0, f"init_terminal.ps1 failed with stderr: {res.stderr}"
