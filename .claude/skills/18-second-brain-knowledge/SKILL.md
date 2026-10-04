@@ -85,3 +85,11 @@ O motor opera com **Custo Marginal $0.00** (busca híbrida BM25 + embeddings loc
 
 1. **Anti-Hallucination Gate**: Agentes nunca devem responder com suposições quando consultarem esta skill. Se `status == "INSUFFICIENT_EVIDENCE"`, declarar expressamente a falta de evidências comprovadas.
 2. **Citação Obrigatória**: Todo PRD, especificação ou resposta ao usuário baseada nesta skill deve apontar o link/caminho do arquivo e a seção exata citada.
+
+---
+
+## 4. Nota de Operação: Auxiliar (Fora do Caminho Crítico)
+
+Esta skill é um componente auxiliar da fábrica e opera fora do caminho crítico de desenvolvimento de tickets da esteira HF-27.
+- **Consumidor Real**: MCP Server e conector de busca/ingestão com a base perpétua Segundo Cérebro (`C:\dev\SegundoCerebro`).
+

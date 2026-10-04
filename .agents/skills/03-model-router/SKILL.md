@@ -49,21 +49,32 @@ Esta skill governa o despacho eficiente e custo-efetivo de modelos de linguagem 
 
 ---
 
-## 2. Matriz de Despacho (Mapeamento Dinâmico 2026)
+## 2. Configuração Dinâmica de Roteamento
 
-| Tipo de Tarefa | Complexidade | Modelo Recomendado | Provedor / Endpoint |
+A fonte única e canônica de modelos, provedores, timeouts e cascatas para a esteira é `.factory/config/line_routing.json`, consumida por `core.line.routing.pick`. Exemplos ilustrativos de despacho por complexidade:
+
+| Tipo de Tarefa | Complexidade | Perfil Típico | Provedor / Endpoint |
 | :--- | :--- | :--- | :--- |
-| **Ingestão & Mapeamento** | Qualquer | `gemini-3.8-flash` | Antigravity Native |
-| **Pesquisa Web & Docs Vivos** | Média / Alta | `grok-4.6` | xAI API |
-| **Arquitetura & PRD (Alta)** | Alta / Crítica | `claude-3.7-sonnet` / `deepseek-r1` | Anthropic / SiliconFlow |
-| **Implementação Cirúrgica** | Crítica / Alta | `claude-3.7-sonnet` | Anthropic / OpenRouter |
-| **Implementação Econômica** | Média | `deepseek-v4-pro` / `qwen-deep` | SiliconFlow / Ollama |
-| **Tarefas Rápidas / Boilerplate** | Baixa | `qwen-fast:latest` | Ollama (Local $0) |
-| **Auditoria Local Nível 1** | Local | `gpt-review:latest` | Ollama (Local $0) |
-| **Auditoria Cruzada Nível 2** | Independente | `deepseek-r1` / `grok-4.6` | SiliconFlow / xAI |
+| **Ingestão & Mapeamento** | Qualquer | Gemini 3.8 Flash | Antigravity / Google |
+| **Pesquisa Web & Docs Vivos** | Média / Alta | Grok 4.6 | xAI |
+| **Arquitetura & PRD** | Alta / Crítica | Claude 3.7 Sonnet / Opus | Anthropic |
+| **Implementação de Código** | Alta / Média | Claude 3.7 Sonnet / Codex | Anthropic / OpenAI |
+| **Tarefas Rápidas / Boilerplate** | Baixa | Qwen Fast / Deep | Ollama (Local $0) |
+| **Auditoria Local Nível 1** | Local | GPT Review / Qwen | Ollama (Local $0) |
+| **Auditoria Cruzada Nível 2** | Independente | Família distinta do coder | xAI / DeepSeek / Google |
 
 ---
 
 ## 3. Continuous Self-Improvement & RCA de Roteamento
 
-- **RCA em Falhas de Inferência**: Se um modelo econômico produzir loops de sintaxe ou alucinações repetidas, registre o RCA via `python -m core.learning.cli rca` e eleve deterministicamente a classe de complexidade da tarefa na matriz.
+- **RCA em Falhas de Inferência**: Se um modelo produzir falhas de sintaxe repetidas ou alucinações, registre o RCA via `python -m core.learning.cli rca` e recalibre a classe de complexidade ou ordem de fallback na configuração.
+
+---
+
+## 4. Binding com a Esteira (HF-27)
+
+- **Módulo na Linha**: `core.line.routing` (`core/line/routing.py`) com configuração única em `.factory/config/line_routing.json`.
+- **Capacidades e Modos**: O roteador respeita estritamente `core.line.agent_cli.HARNESS_CAPABILITIES`. O Antigravity é configurado apenas com modo de leitura (`read`) e nunca é eleito para estágios que exigem escrita de código (`development`).
+- **Dynamic Headroom & Piso Crítico**: Seleção automática pelo maior headroom com bloqueio preventivo (fail-closed) para contas com cota $\le 15.0\%$.
+- **Harness de Operação (USR-109)**: Quando o operador utiliza um harness específico, ele tem preferência no estágio de desenvolvimento se sua cota for saudável (> 15%) e possuir capacidade de escrita.
+

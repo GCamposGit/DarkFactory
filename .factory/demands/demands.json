@@ -2273,7 +2273,7 @@
     "project_id": "darkfac",
     "title": "Skills x esteira: alinhar as skills 02/03/04/05/06/19 (e 00/08) ao que a linha realmente executa",
     "origin": "agent",
-    "status": "planned",
+    "status": "completed",
     "item_type": "documentation",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -2304,7 +2304,8 @@
       "USR-90"
     ],
     "created_at": "2026-09-30T22:00:00Z",
-    "updated_at": "2026-09-30T22:00:00Z"
+    "updated_at": "2026-09-30T22:00:00Z",
+    "delivery_evidence": "Skills canonicas em .agents/skills/ (00, 02, 03, 04, 05, 06, 08, 19) atualizadas com a secao Binding com a esteira apontando para modulos reais da linha HF-27. Remocao de referencias a arquivos e flags inexistentes (--allow-critical-quota, references/*.md). Skills auxiliares (09-16, 18) marcadas com nota auxiliar fora do caminho critico. Espelho .claude/skills sincronizado via sync_skills.py. Gate de drift em tests/test_skills_drift.py aprovado sem excecoes de flag."
   },
   {
     "id": "USR-90",
@@ -2590,7 +2591,7 @@
     "project_id": "darkfac",
     "title": "ACOES EXCLUSIVAS DO OWNER: protecao de branch do main, MISSION.md defasada e patches de arquivos protegidos (commit humano)",
     "origin": "agent",
-    "status": "planned",
+    "status": "completed",
     "item_type": "operations",
     "lifecycle_stage": "execution",
     "horizon": "next",
@@ -2621,7 +2622,8 @@
       "USR-84"
     ],
     "created_at": "2026-09-30T22:00:00Z",
-    "updated_at": "2026-09-30T22:00:00Z"
+    "updated_at": "2026-09-30T22:00:00Z",
+    "delivery_evidence": "Acoes exclusivas do owner executadas e verificadas: (1) GitHub Ruleset main-requer-ci-verde ativo com bypass admin; (2) MISSION.md atualizado diretamente pelo owner (commit e99fbf8); (3) Tokens do Telegram rotacionados no BotFather, Dokploy e nos locais."
   },
   {
     "id": "USR-98",

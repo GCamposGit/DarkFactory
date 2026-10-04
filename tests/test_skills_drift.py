@@ -38,20 +38,11 @@ ALLOWLIST_PATH_EXCEPTIONS: dict[str, str] = {
     "03-model-router:.factory/benchmarks/latest.json": (
         "Dynamic daily benchmark artifact generated at runtime by Skill 12; not pre-committed"
     ),
-    "04-autonomous-piv-loop:references/remote-delivery.md": (
-        "Internal reference template cited in skill documentation; to be consolidated in USR-89"
-    ),
-    "04-autonomous-piv-loop:references/worktree-parallelism.md": (
-        "Internal reference template cited in skill documentation; to be consolidated in USR-89"
-    ),
     "07-build-dark-factory:.factory/darkfac.lock.json": (
         "Artifact created only inside adopted client target repositories, not in darkfac core"
     ),
     "07-build-dark-factory:codex/darkfac-adoption": (
         "Example Git branch name pattern for adopted projects"
-    ),
-    "08-meta-skills-evolver:.factory/state.json": (
-        "Superseded state file cited in old evolver text; pending editorial cleanup in USR-89"
     ),
     "09-local-audio-transcription:caminho/para/reuniao.wav": (
         "User placeholder argument in usage example"
@@ -71,14 +62,10 @@ ALLOWLIST_PATH_EXCEPTIONS: dict[str, str] = {
 }
 
 # ---------------------------------------------------------------------------
-# Allowlist for known false claims / drift in skill text (to be corrected in USR-89)
+# Allowlist for known false claims / drift in skill text (all resolved in USR-89)
 # ---------------------------------------------------------------------------
-KNOWN_FLAG_DRIFT_ALLOWLIST: dict[str, str] = {
-    "19-run-ticket:run_ticket.py:--allow-critical-quota": (
-        "Documented false claim in Skill 19: run_ticket.py only supports --force. "
-        "USR-90 gate detects this; pending USR-89 editorial correction."
-    ),
-}
+KNOWN_FLAG_DRIFT_ALLOWLIST: dict[str, str] = {}
+
 
 _PATH_PATTERN = re.compile(r"[`\"]([a-zA-Z0-9_\-\.]+(?:/[a-zA-Z0-9_\-\.]+)+)[`\"]")
 _FRONTMATTER_PATTERN = re.compile(r"^---\s*\n(.*?)\n---\s*\n", re.DOTALL)
@@ -341,10 +328,15 @@ def test_mutation_detector_catches_invalid_references() -> None:
     flags = _extract_cli_flags(sample_text)
     assert ("run_ticket.py", "--nonexistent-unsupported-flag") in flags
 
-    # Verify that the known false claim in Skill 19 (--allow-critical-quota)
-    # is detected when not excused by the allowlist
+    # Verify that Skill 19 has no false claims and all its flags exist in run_ticket parser
+    import run_ticket
+    parser = run_ticket.build_parser()
+    valid_run_ticket_flags = {opt for action in parser._actions for opt in action.option_strings}
+
     skill19 = (AGENTS_SKILLS_DIR / "19-run-ticket" / "SKILL.md").read_text(encoding="utf-8")
     skill19_flags = _extract_cli_flags(skill19)
-    assert ("run_ticket.py", "--allow-critical-quota") in skill19_flags, (
-        "Skill 19 was expected to contain the documented false claim '--allow-critical-quota' (USR-90/USR-89)"
-    )
+    assert ("run_ticket.py", "--allow-critical-quota") not in skill19_flags
+    for cli_name, flag in skill19_flags:
+        if cli_name == "run_ticket.py":
+            assert flag in valid_run_ticket_flags, f"Unexpected invalid flag in skill 19: {flag}"
+

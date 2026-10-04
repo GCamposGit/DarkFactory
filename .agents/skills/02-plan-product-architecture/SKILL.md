@@ -5,7 +5,7 @@ description: Produz PRD, decisões de arquitetura e handoffs pequenos a partir d
 
 # 02 - Planejamento e Especificação para Execução
 
-O produto do planejamento é um contrato normativo verificável que um implementador econômico consegue executar e um verificador independente consegue auditar. No DarkFac, o planejamento opera sob `HANDOFF_POLICY.md` e `HYBRID_AUTONOMY_REQUIREMENTS.md`, gerando o contrato `WorkflowHandoff`.
+O produto do planejamento é um contrato normativo verificável que um implementador econômico consegue executar e um verificador independente consegue auditar. No DarkFac, o planejamento opera sob as diretrizes de governança da fábrica e registro estruturado em `.factory/demands/demands.json`.
 
 ---
 
@@ -56,3 +56,12 @@ O produto do planejamento é um contrato normativo verificável que um implement
 
 - **Planejamento de Alta Inteligência**: Modelos qualificados com raciocínio profundo (`gemini-3.8-flash`, `claude-3.7-sonnet`, `deepseek-r1`, `gpt-6-astra`), com esforço `high` ou `max`.
 - **Proibição de Degradação Silenciosa**: O planejador não pode rebaixar requisitos arquiteturais para acomodar limitações de implementadores econômicos.
+
+---
+
+## 3. Binding com a Esteira (HF-27)
+
+- **Estágio na Linha**: `stage_planning` (`core/line/stage_planning.py`) orientado pelos prompts em `core/line/prompts/planning.md`.
+- **Simplificação Arquitetural da Linha**: Na esteira de produção HF-27, o planejamento de tickets emite diretamente o plano técnico, arquitetura e critérios de aceite em `.factory/demands/demands.json` e especificações de produto, dispensando os contratos burocráticos legados (`WorkflowHandoff`, `PlanApproval` e `ReadinessGate`).
+- **Resolução de Ambiguidade**: A desambiguação e o Grill de negócio são geridos pelo estágio `stage_grill` (`core/line/stage_grill.py`), com interação via Telegram ou DarkHub antes do avanço para o planejamento técnico.
+

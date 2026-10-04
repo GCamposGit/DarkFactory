@@ -51,3 +51,13 @@ Esta skill orienta a evolução contínua da fábrica de software com base em ev
 - No DarkFac, `.agents/skills/` é a fonte canônica.
 - Toda modificação deve ser sincronizada deterministicamente para `.claude/skills/` via `python scripts/sync_skills.py`.
 - O CLI oficial de aprendizagem pode ser inspecionado com `python -m core.learning.cli --help`.
+
+---
+
+## 3. Binding com a Esteira (HF-27)
+
+- **Módulo / Estágio na Linha**: A esteira autônoma integra a melhoria contínua através do pacote `core.learning` (`core/learning/`) e da etapa de retrospectiva da esteira (USR-91).
+- **Ciclo Interativo vs. Autônomo**: Em execuções interativas, agentes acionam o CLI `python -m core.learning.cli rca` para isolar causas raiz. Na esteira contínua de produção, a etapa de retrospectiva grava lições estruturadas ao término de cada ticket para consumo no planejamento do ciclo subsequente (USR-91).
+- **Fonte Canônica de Regras**: As regras operacionais e contratuais derivam de `AGENTS.md` e são validadas de forma determinística por `python core/harness/runner.py --quick`.
+
+

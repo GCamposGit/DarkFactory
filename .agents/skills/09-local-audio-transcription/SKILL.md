@@ -61,3 +61,11 @@ Esta skill orienta a execução de transcrições de áudio locais de alta veloc
 ## 2. Continuous Self-Improvement & RCA de Áudio
 
 - **RCA em Problemas de Áudio**: Se ocorrer corte de fala baixa por VAD ou desbalanceamento entre canais, ajuste os parâmetros de normalização no transcriber e registre a causa raiz via `python -m core.learning.cli rca`.
+
+---
+
+## 3. Nota de Operação: Auxiliar (Fora do Caminho Crítico)
+
+Esta skill é um componente auxiliar da fábrica e opera fora do caminho crítico de desenvolvimento de tickets da esteira HF-27.
+- **Consumidor Real**: Bots do Telegram (@darkfac_bot e @darkfac_ops_bot) e processamento sob demanda de reuniões e atas locais.
+

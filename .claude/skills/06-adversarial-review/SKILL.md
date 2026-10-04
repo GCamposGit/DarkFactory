@@ -54,3 +54,13 @@ Esta skill opera a auditoria crítica e independente de contratos, código, segu
 
 - **Nível 1 (Local, Custo $0)**: Execução de pré-revisão com modelo local via Ollama (`gpt-review:latest` ou `qwen-code-deep`) para detecção estática e estrutural.
 - **Nível 2 (Fronteira Independente)**: Para auditorias críticas e entregas em produção, despache para modelo de fronteira de família diferente do implementador (`claude-3.7-sonnet`, `deepseek-r1` ou `grok-4.6`).
+
+---
+
+## 3. Binding com a Esteira (HF-27)
+
+- **Estágio na Linha**: `core.line.stage_review` (`core/line/stage_review.py`) utilizando as diretrizes de prompt e verificação de compliance.
+- **Família Independente Obrigatória**: O roteador enforça `other_family_than_development`, garantindo que o revisor pertença a uma família distinta do implementador (ex.: se Claude implementou, Grok ou DeepSeek revisam).
+- **Ciclo de Feedback**: Achados impeditivos (`CHANGES_REQUIRED`) retornam ao estágio de desenvolvimento (`stage_build`) com diagnóstico estruturado para um passe focal de fixup.
+
+

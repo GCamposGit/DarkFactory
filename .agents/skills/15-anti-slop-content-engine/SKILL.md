@@ -51,3 +51,11 @@ O **Anti-AI-Slop Content Engine** blinda as comunicações técnicas e publicaç
 ## 2. Continuous Self-Improvement & Calibração Léxica
 
 - **Expansão de Léxico**: Quando um novo padrão de jargão artificial for identificado em revisões, adicione o termo ao léxico de restrições negativas e atualize os testes do engine.
+
+---
+
+## 3. Nota de Operação: Auxiliar (Fora do Caminho Crítico)
+
+Esta skill é um componente auxiliar da fábrica e opera fora do caminho crítico de desenvolvimento de tickets da esteira HF-27.
+- **Consumidor Real**: Geração de conteúdo, release notes, propostas e memos no DarkHub.
+
