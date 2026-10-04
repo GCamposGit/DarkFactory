@@ -288,10 +288,11 @@ kbd { font-family: var(--font-mono); font-size: 11px; border: 1px solid var(--bo
 .done-list { display: flex; flex-direction: column; gap: 6px; }
 .done-row { display: grid; grid-template-columns: auto auto minmax(0, 1fr); gap: 6px 10px; align-items: center; padding: 8px 10px; border-radius: var(--radius-sm); background: var(--surface-2); border: 1px solid var(--border); cursor: pointer; min-width: 0; }
 .done-row:hover { background: var(--surface-3); }
+.done-row .ticket-id { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .done-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); min-width: 0; }
 .done-extra { grid-column: 1 / -1; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; font-size: 12px; color: var(--muted); }
 @media (min-width: 900px) {
-  .done-row { grid-template-columns: 112px 100px minmax(0, 1fr) auto; }
+  .done-row { grid-template-columns: 112px 136px minmax(0, 1fr) auto; }
   .done-extra { grid-column: auto; flex-wrap: nowrap; justify-content: flex-end; }
 }
 .dots { display: inline-flex; gap: 3px; }

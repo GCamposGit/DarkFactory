@@ -623,6 +623,19 @@ def _stall_reason(
             waited = now - min(pending_times)
             if waited > QUEUED_STALL_LIMIT:
                 return f"na fila há {_fmt_duration(waited.total_seconds())}"
+    if state in ("running", "queued") and not any(item.status in ("running", "pending") for item in stages):
+        # Active run whose last job finished and no successor was ever scheduled (seen in production:
+        # HF-03-08 sat 15 days after Grill). Nothing is running, so the per-stage checks above never fire.
+        moments = [
+            moment
+            for attempts in attempts_by_stage.values()
+            for attempt in attempts
+            if (moment := attempt.updated or attempt.finished or attempt.created) is not None
+        ]
+        if moments:
+            idle = now - max(moments)
+            if idle > QUEUED_STALL_LIMIT:
+                return f"nenhuma etapa agendada há {_fmt_duration(idle.total_seconds())}"
     return None
 
 

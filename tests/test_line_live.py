@@ -162,6 +162,21 @@ def test_stalled_detects_expired_lease_idle_running_and_old_queue(seeded: tuple[
     assert queued.stalled_reason == "na fila há 45 min"
 
 
+def test_stalled_flags_active_run_with_no_successor_scheduled(seeded: tuple[Path, dict[str, str]]) -> None:
+    # Production shape (HF-03-08): Grill succeeded, run still active, no next job for days.
+    db, ids = seeded
+    finished = (NOW - timedelta(hours=2)).isoformat()
+    _execute(
+        db,
+        "UPDATE jobs SET status = 'succeeded', started_at = ?, finished_at = ?, updated_at = ? WHERE run_id = ?",
+        (finished, finished, finished, ids["queued"]),
+    )
+    run = _run(_read(db), ids["queued"])
+    assert run.run_status == "active"
+    assert run.stalled
+    assert run.stalled_reason is not None and run.stalled_reason.startswith("nenhuma etapa agendada há")
+
+
 def test_running_stage_duration_and_run_age_use_the_given_now(seeded: tuple[Path, dict[str, str]]) -> None:
     db, ids = seeded
     snapshot = _read(db)
