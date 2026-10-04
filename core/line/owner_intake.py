@@ -33,7 +33,7 @@ from __future__ import annotations
 
 import logging
 import os
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from pydantic import BaseModel
@@ -235,7 +235,41 @@ def previous_attempt_run_ids(store: Any, payload: dict[str, Any] | None) -> list
 RunState = str  # "in_flight" | "succeeded" | "failed"
 
 
-def run_state(store: Any, run_id: str | None) -> RunState:
+def _expired_no_route_wait(
+    status: dict[str, Any], *, now: datetime | None = None, wall_clock_hours: float | None = None,
+) -> bool:
+    """A lone no-route wait beyond the run budget cannot make useful progress."""
+    from core.workflow.control_store import RUN_OPEN_JOB_STATUSES
+
+    open_jobs = [job for job in status.get("jobs", []) if job.get("status") in RUN_OPEN_JOB_STATUSES]
+    if len(open_jobs) != 1:
+        return False
+    job = open_jobs[0]
+    if job.get("status") != "waiting_human" or job.get("cause_code") != "no_route_available":
+        return False
+    raw_created = status.get("created_at")
+    if not raw_created:
+        return False
+    try:
+        created = raw_created if isinstance(raw_created, datetime) else datetime.fromisoformat(str(raw_created))
+        if wall_clock_hours is None:
+            from core.line.routing import load_routing_config
+
+            wall_clock_hours = load_routing_config().run_caps.wall_clock_hours
+        if wall_clock_hours <= 0:
+            return False
+        started = created.replace(tzinfo=UTC) if created.tzinfo is None else created.astimezone(UTC)
+        current = now or datetime.now(UTC)
+        current = current.replace(tzinfo=UTC) if current.tzinfo is None else current.astimezone(UTC)
+        return current - started > timedelta(hours=wall_clock_hours)
+    except (TypeError, ValueError, OSError) as exc:
+        logger.warning("Could not determine whether no-route wait expired: %s", exc)
+        return False
+
+
+def run_state(
+    store: Any, run_id: str | None, *, now: datetime | None = None, wall_clock_hours: float | None = None,
+) -> RunState:
     """Coarse state of a line run from its jobs.
 
     `succeeded`: every required line stage has a succeeded job; `in_flight`: anything is still
@@ -262,6 +296,9 @@ def run_state(store: Any, run_id: str | None) -> RunState:
     succeeded = {job.get("stage") for job in jobs if job.get("status") == "succeeded"}
     if all(stage in succeeded for stage in required):
         return "succeeded"
+    if _expired_no_route_wait(status, now=now, wall_clock_hours=wall_clock_hours):
+        logger.info("Run %s exhausted its clock while waiting for a route; a new attempt may start", run_id)
+        return "failed"
     from core.workflow.control_store import RUN_OPEN_JOB_STATUSES
 
     if any(job.get("status") in RUN_OPEN_JOB_STATUSES for job in jobs):
@@ -378,5 +415,4 @@ def submit_ticket_to_line(
             )
         ),
     )
-
 

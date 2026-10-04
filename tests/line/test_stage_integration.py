@@ -17,6 +17,7 @@ import sys
 import textwrap
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -257,6 +258,21 @@ def fake_gh(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
 # --------------------------------------------------------------------------
 # Full-flow tests
 # --------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("validate_commands", [[], ["  "]])
+def test_conflict_resolution_cannot_pass_without_validate_command(
+    tmp_path: Path, validate_commands: list[str]
+) -> None:
+    project = _project(str(tmp_path)).model_copy(
+        update={"commands": ProjectCommands(validate=validate_commands)}
+    )
+    handler = IntegrationStageHandler(project)
+
+    ok, log = handler._run_validate(SimpleNamespace(path=tmp_path))
+
+    assert ok is False
+    assert "Nenhum comando de validate" in log
 
 
 def test_red_ci_feedback_reaches_development_then_green_ci_merges(
@@ -655,7 +671,9 @@ def _merging_agent(call_count: dict[str, int]):
 
 def _conflicting_run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, run_id: str):
     origin = _init_bare_origin(tmp_path)
-    project = _project(str(origin))
+    project = _project(str(origin)).model_copy(
+        update={"commands": ProjectCommands(validate=['python -c "print(1)"'])}
+    )
     monkeypatch.setenv("DARKFAC_WORKSPACES", str(tmp_path / "root"))
     # Pin the route and skip cooldown bookkeeping: the result must not depend
     # on which agent CLIs or quota state the test host happens to have.

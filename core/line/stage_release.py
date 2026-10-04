@@ -541,10 +541,10 @@ class ReleaseStageHandler:
             )
 
         active_digest = adapter.installed_digest(target_config)
-        if active_digest is not None and active_digest != sha:
+        if active_digest != sha:
             return operation, target_config, StageResult(
                 outcome="retry",
-                cause_code=f"installed_digest_mismatch:active={active_digest},expected={sha}",
+                cause_code=f"installed_digest_unverified:active={active_digest or 'missing'},expected={sha}",
             )
 
         return operation, target_config, None
@@ -602,6 +602,18 @@ class ReleaseStageHandler:
                 return False, _truncate("\n".join(logs), 8000)
         return True, _truncate("\n".join(logs), 4000)
 
+    def _has_executable_smoke(
+        self, entries: list[str], target_config: Optional[TargetConfig]
+    ) -> bool:
+        if self.project.smoke:
+            return True
+        base_url = _smoke_base_url(self.project, target_config)
+        return any(
+            entry.strip().startswith(("http://", "https://"))
+            or (entry.strip().startswith("/") and bool(base_url))
+            for entry in entries
+        )
+
     def _smoke(
         self,
         sha: str,
@@ -641,8 +653,8 @@ class ReleaseStageHandler:
                 return False, _truncate("\n".join(logs), 8000)
             return True, _truncate("\n".join(logs), 4000)
 
-        if not self.project.smoke and not extra_entries:
-            return True, "(sem SmokeCheck configurado para o projeto)"
+        if not self._has_executable_smoke(list(extra_entries), target_config):
+            return False, "smoke_not_configured: nenhum probe HTTP executável para o deploy"
 
         logs = []
         for check in self.project.smoke:
@@ -665,7 +677,7 @@ class ReleaseStageHandler:
 
         if target_config is not None and adapter is not None and target_config.healthcheck_endpoint:
             active_digest = adapter.installed_digest(target_config)
-            if active_digest is not None and active_digest != sha:
+            if active_digest != sha:
                 logs.append(f"healthcheck sha mismatch: active={active_digest} expected={sha}")
                 return False, _truncate("\n".join(logs), 8000)
 
@@ -754,13 +766,18 @@ class ReleaseStageHandler:
         if self.project.requires_commercial_acceptance and run_state.commercial_accepted_sha != merge_sha:
             return self._commercial_acceptance_guide(pr_url, merge_sha)
 
+        deploy_type = self.project.deploy.type if self.project.deploy else DeployTargetType.NONE
+        ticket_smoke_entries = _fetch_ticket_smoke_entries(pr_url, Path(self.project.path or "."))
+        if deploy_type != DeployTargetType.NONE:
+            preflight_target = self._target_config(merge_sha, state.last_good_sha)
+            if not self._has_executable_smoke(ticket_smoke_entries, preflight_target):
+                return StageResult(outcome="failed", cause_code="smoke_not_configured")
+
         operation, target_config, deploy_error = self._deploy(merge_sha, state.last_good_sha)
         if deploy_error is not None:
             return deploy_error
 
-        deploy_type = self.project.deploy.type if self.project.deploy else DeployTargetType.NONE
         adapter = self._adapter_for(deploy_type)
-        ticket_smoke_entries = _fetch_ticket_smoke_entries(pr_url, Path(self.project.path or "."))
         smoke_ok, smoke_log = self._smoke(merge_sha, target_config, adapter, extra_entries=ticket_smoke_entries)
 
         if smoke_ok:

@@ -20,7 +20,7 @@ import pytest
 from core.line import workspace as ws_mod
 from core.line.agent_cli import AgentRequest, AgentResult
 from core.line.routing import load_routing_config
-from core.line.stage_build import DevelopmentStage, ValidationStage, _MISSING_TESTS_INSTRUCTION
+from core.line.stage_build import DevelopmentStage, ValidationStage, _MISSING_TESTS_INSTRUCTION, _pending_fixup
 from core.projects.models import ProjectCommands, ProjectDescriptor
 
 
@@ -203,11 +203,12 @@ def test_ticket_never_passes_fails_without_commit(
 # --------------------------------------------------------------------------
 
 
+@pytest.mark.parametrize("validate_commands", [[], ["  "]])
 def test_empty_validate_instructs_first_ticket_to_create_tests(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, validate_commands: list[str]
 ) -> None:
     origin = _init_bare_origin(tmp_path)  # no manifest -> detect_commands() is always empty
-    project = _project(str(origin))
+    project = _project(str(origin), commands=ProjectCommands(validate=validate_commands))
     run_id = "run-3"
     _write_tickets(
         tmp_path / "root",
@@ -350,6 +351,33 @@ def test_clean_validation_success_when_everything_is_committed(
 
     assert result.outcome == "success"
     assert result.output_refs
+
+
+@pytest.mark.parametrize("validate_commands", [[], ["  "]])
+def test_clean_validation_without_validate_command_returns_to_development(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, validate_commands: list[str]
+) -> None:
+    origin = _init_bare_origin(tmp_path)
+    project = _project(str(origin), commands=ProjectCommands(validate=validate_commands))
+    run_id = "run-no-validate"
+    monkeypatch.setenv("DARKFAC_WORKSPACES", str(tmp_path / "root"))
+
+    ws = ws_mod.checkout(project, run_id)
+    (ws.path / "feature.py").write_text("value = 1\n", encoding="utf-8")
+    ws_mod.commit(ws, "chore: prepare candidate", job_key=f"{run_id}:T1")
+    ws_mod.push(ws)
+
+    result = ValidationStage().run(project, run_id)
+
+    assert result.outcome == "retry"
+    assert result.cause_code.startswith("retry:development\nclean_validate_missing:")
+    report = json.loads((ws_mod.context_dir(ws) / "validation.json").read_text(encoding="utf-8"))
+    assert report["commands"]["validate"]["ran"] is False
+    assert report["commands"]["validate"]["ok"] is False
+    fixup = _pending_fixup(ws, run_id)
+    assert fixup is not None
+    assert fixup[0].id.startswith("fix-validation-")
+    assert "Nenhum comando de validate" in fixup[1]
 
 
 # --------------------------------------------------------------------------

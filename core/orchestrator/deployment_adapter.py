@@ -467,7 +467,6 @@ class DokployDeploymentAdapter:
                     op.status = DeploymentStatus.IN_PROGRESS
                 elif raw_status == "done":
                     op.status = DeploymentStatus.SUCCEEDED
-                    self._simulated_installed_digests[op.project_id] = op.artifact_ref.byte_digest
                 elif raw_status == "error":
                     op.status = DeploymentStatus.FAILED
                 elif raw_status == "running":
@@ -493,8 +492,6 @@ class DokployDeploymentAdapter:
                 raw_status = str(res.get("status", "IN_PROGRESS")).upper()
                 if raw_status in ("SUCCEEDED", "SUCCESS", "DONE", "FINISHED"):
                     op.status = DeploymentStatus.SUCCEEDED
-                    # Automatically update simulated installed digest to the artifact digest
-                    self._simulated_installed_digests[op.project_id] = op.artifact_ref.byte_digest
                 elif raw_status in ("FAILED", "ERROR", "CRASHED"):
                     op.status = DeploymentStatus.FAILED
                 elif raw_status in ("ROLLED_BACK",):

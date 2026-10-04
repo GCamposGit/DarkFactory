@@ -108,7 +108,8 @@
       "type": "dokploy",
       "params": {
         "service_name": "KCTz2USVQhNp_R6BuTxh1",
-        "service_type": "application"
+        "service_type": "application",
+        "healthcheck_endpoint": "https://canary.ggcampos.com/version"
       }
     },
     "commands": {

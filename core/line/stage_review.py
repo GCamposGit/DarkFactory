@@ -10,10 +10,9 @@ Implements the "Review" section of `docs/handoffs/production-line/HF-27-05.md`:
    `other_family_than_development` cascade rule.
 3. Parses the agent's JSON verdict (`approve` or `changes_required`) and
    commits `review-<n>.md`. `changes_required` maps to `retry` (back to
-   development) up to `run_caps.review_rounds` (default 2); the round after
-   that force-approves — annotated with the outstanding `non_blocking`
-   items — as long as the last `ValidationStage` run was green, to avoid an
-   infinite loop between two models with differing opinions.
+   development) up to `run_caps.review_rounds` (default 2). If the next
+   independent review still requires changes, the run fails with a structured
+   cause instead of silently approving or looping.
 
 All round state lives in `.darkfac/runs/<run_id>/review_state.json` on the
 run's branch, so review is resumable and idempotent exactly like
@@ -122,25 +121,6 @@ def _read_progress_harness(ws: RunWorkspace) -> Optional[str]:
     return None
 
 
-def _read_validation_green(ws: RunWorkspace) -> bool:
-    path = workspace.context_dir(ws) / "validation.json"
-    if not path.is_file():
-        return False
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return False
-    if not isinstance(data, dict):
-        return False
-    commands = data.get("commands")
-    if not isinstance(commands, dict):
-        return False
-    for entry in commands.values():
-        if isinstance(entry, dict) and entry.get("ran") and not entry.get("ok", True):
-            return False
-    return True
-
-
 def _load_review_state(ws: RunWorkspace) -> ReviewState:
     path = workspace.context_dir(ws) / "review_state.json"
     if not path.is_file():
@@ -193,14 +173,8 @@ def _get_diff(ws: RunWorkspace, default_branch: str) -> str:
     )
 
 
-def _render_review_md(round_num: int, verdict: ReviewVerdict, *, forced: bool) -> str:
+def _render_review_md(round_num: int, verdict: ReviewVerdict) -> str:
     lines = [f"# Review round {round_num}", "", f"Verdict: {verdict.verdict}"]
-    if forced:
-        lines.append("")
-        lines.append(
-            "(aprovado automaticamente apos esgotar as rodadas de revisao, com a "
-            "validacao limpa verde; itens abaixo registrados como nao-bloqueantes)"
-        )
     if verdict.blocking:
         lines.append("")
         lines.append("## Bloqueantes")
@@ -257,14 +231,28 @@ class ReviewStage:
     def run(self, project: ProjectDescriptor, run_id: str) -> StageResult:
         ws = workspace.checkout(project, run_id)
         state = _load_review_state(ws)
+        max_rounds = self.routing_config.run_caps.review_rounds
 
         if state.rounds and state.rounds[-1].verdict == "approve":
             last = state.rounds[-1]
             last_sha = last.sha or workspace.find_commit_by_job(ws, f"{run_id}:review:{last.round}")
+            if last.forced:
+                return StageResult(
+                    outcome="failed", cause_code="review_forced_approval_legacy",
+                    output_refs=[last_sha] if last_sha else [],
+                )
             return StageResult(outcome="success", output_refs=[last_sha] if last_sha else [])
 
+        if state.rounds and len(state.rounds) > max_rounds:
+            last = state.rounds[-1]
+            last_sha = last.sha or workspace.find_commit_by_job(ws, f"{run_id}:review:{last.round}")
+            return StageResult(
+                outcome="failed",
+                cause_code=f"review_exhausted_changes_required:round={last.round}",
+                output_refs=[last_sha] if last_sha else [],
+            )
+
         round_num = len(state.rounds) + 1
-        max_rounds = self.routing_config.run_caps.review_rounds
         implementing_harness = _read_progress_harness(ws)
 
         route = self.pick_func(
@@ -312,17 +300,13 @@ class ReviewStage:
         if verdict is None:
             return StageResult(outcome="retry", cause_code="review_invalid_json", output_refs=[])
 
-        exhausted = round_num > max_rounds
-        force_approve = exhausted and verdict.verdict != "approve"
-        if force_approve and not _read_validation_green(ws):
-            return StageResult(outcome="failed", cause_code="review_exhausted_not_green", output_refs=[])
-
-        approved = verdict.verdict == "approve" or force_approve
-        content = _render_review_md(round_num, verdict, forced=force_approve)
+        approved = verdict.verdict == "approve"
+        exhausted = round_num > max_rounds and not approved
+        content = _render_review_md(round_num, verdict)
         workspace.write_context(ws, f"review-{round_num}.md", content)
 
         state.rounds.append(
-            ReviewRound(round=round_num, verdict="approve" if approved else "changes_required", forced=force_approve)
+            ReviewRound(round=round_num, verdict="approve" if approved else "changes_required")
         )
         _write_review_state(ws, state)
 
@@ -336,6 +320,12 @@ class ReviewStage:
 
         if approved:
             return StageResult(outcome="success", output_refs=[sha])
+        if exhausted:
+            return StageResult(
+                outcome="failed",
+                cause_code=f"review_exhausted_changes_required:round={round_num}",
+                output_refs=[sha],
+            )
         # HF-27-08 D-b (review fix item 1): route back to development, not
         # to another review round. The blocking log itself is not carried in
         # the cause_code -- it is `review-{round_num}.md`, committed on the

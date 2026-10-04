@@ -17,7 +17,6 @@ python -m venv .venv
 python -m pip install --upgrade pip
 python -m pip install -r requirements.txt
 python core/harness/runner.py --quick
-python -m pytest tests -v
 ```
 
 O fluxo completo de interoperabilidade com Antigravity, Grok e outros harnesses está em [`docs/HARNESS_INTEROP.md`](docs/HARNESS_INTEROP.md). O stack opcional de transcrição GPU está em `requirements-audio.txt`.

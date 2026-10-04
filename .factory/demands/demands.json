@@ -3604,5 +3604,322 @@
     "dependencies": [],
     "created_at": "2026-10-03T10:03:35.187704Z",
     "updated_at": "2026-10-03T10:03:35.187704Z"
+  },
+  {
+    "id": "USR-128",
+    "project_id": "darkfac",
+    "title": "Painel de tarefas ao vivo com idade e falha de atualização",
+    "origin": "review",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand",
+      "autonomy-throughput",
+      "wave-current"
+    ],
+    "problem_statement": "O painel de tarefas só atualiza no carregamento ou clique; o owner não vê jobs parados em tempo real.",
+    "core_journey": [
+      "O painel de tarefas só atualiza no carregamento ou clique; o owner não vê jobs parados em tempo real."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Polling apenas enquanto visível e refresh ao voltar, sem requisições sobrepostas.",
+      "Exibir idade desde updated_at e horário da última atualização bem-sucedida.",
+      "Falha de fonte visível sem apagar dados anteriores; teste focal."
+    ],
+    "suggested_files": [
+      "hub/frontend/tasks.js"
+    ],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-03T21:22:02.611051Z",
+    "updated_at": "2026-10-03T21:22:02.611051Z"
+  },
+  {
+    "id": "USR-129",
+    "project_id": "darkfac",
+    "title": "Revisão bloqueante não pode ser aprovada ao esgotar rodadas",
+    "origin": "review",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand",
+      "autonomy-throughput",
+      "wave-current"
+    ],
+    "problem_statement": "ReviewStage converte changes_required em success após exceder review_rounds.",
+    "core_journey": [
+      "ReviewStage converte changes_required em success após exceder review_rounds."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Esgotamento retorna causa estruturada sem aprovar nem integrar.",
+      "Run pode seguir para correção ou replanejamento sem loop infinito.",
+      "Teste com objeção bloqueante em todas as rodadas impede sucesso."
+    ],
+    "suggested_files": [
+      "core/line/stage_review.py",
+      "tests/line/test_stage_review.py"
+    ],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-03T21:22:03.378432Z",
+    "updated_at": "2026-10-03T21:22:03.378432Z"
+  },
+  {
+    "id": "USR-130",
+    "project_id": "darkfac",
+    "title": "Validação sem checagem executada não pode autorizar integração",
+    "origin": "review",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand",
+      "autonomy-throughput",
+      "wave-current"
+    ],
+    "problem_statement": "Validação e integração podem aceitar comandos vazios; _read_validation_green trata ausência de teste como verde.",
+    "core_journey": [
+      "Validação e integração podem aceitar comandos vazios; _read_validation_green trata ausência de teste como verde."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Sem comando/check executado, estágio não retorna success.",
+      "Evidência inclui pelo menos uma checagem vinculada ao SHA.",
+      "Testes cobrem ausência de comandos e controle positivo."
+    ],
+    "suggested_files": [
+      "core/line/stage_build.py",
+      "core/line/stage_integration.py",
+      "core/line/stage_review.py"
+    ],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-03T21:22:04.570755Z",
+    "updated_at": "2026-10-03T21:22:04.570755Z"
+  },
+  {
+    "id": "USR-131",
+    "project_id": "darkfac",
+    "title": "Release sem smoke configurado não pode alegar operação verificada",
+    "origin": "review",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand",
+      "autonomy-throughput",
+      "wave-current"
+    ],
+    "problem_statement": "ReleaseStage aceita ausência de SmokeCheck e jornada adicional como smoke verde.",
+    "core_journey": [
+      "ReleaseStage aceita ausência de SmokeCheck e jornada adicional como smoke verde."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Deploy remoto sem prova de jornada ou digest não declara delivered.",
+      "Smoke executado e SHA correto permitem sucesso.",
+      "Testes cobrem ausência, probe inconclusivo e controle positivo."
+    ],
+    "suggested_files": [
+      "core/line/stage_release.py",
+      "tests/line/test_stage_release.py"
+    ],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-03T21:22:05.340099Z",
+    "updated_at": "2026-10-03T21:22:05.340099Z"
+  },
+  {
+    "id": "USR-132",
+    "project_id": "darkfac",
+    "title": "Canário deve verificar SHA implantado além da data",
+    "origin": "review",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand",
+      "autonomy-throughput",
+      "wave-current"
+    ],
+    "problem_statement": "HttpSmokeClient procura só a data no corpo de /version; resposta obsoleta pode passar.",
+    "core_journey": [
+      "HttpSmokeClient procura só a data no corpo de /version; resposta obsoleta pode passar."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Canário interpreta JSON e compara canary_day e SHA do run.",
+      "Resposta antiga, SHA divergente e corpo malformado falham com causa.",
+      "Teste exercita cliente HTTP real com respostas sintéticas."
+    ],
+    "suggested_files": [
+      "core/line/canary.py",
+      "tests/test_line_canary_hf2710.py"
+    ],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-03T21:22:06.956814Z",
+    "updated_at": "2026-10-03T21:22:06.956814Z"
+  },
+  {
+    "id": "USR-133",
+    "project_id": "darkfac",
+    "title": "Avaliação E2E da fábrica com tarefas reais e métricas de resultado",
+    "origin": "review",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand",
+      "autonomy-throughput",
+      "wave-next"
+    ],
+    "problem_statement": "Corpus atual contém 24 tarefas sintéticas de dois arquivos e não mede sistema completo ou recuperação.",
+    "core_journey": [
+      "Corpus atual contém 24 tarefas sintéticas de dois arquivos e não mede sistema completo ou recuperação."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Corpus reservado tem produtos distintos e jornadas independentes da implementação.",
+      "Relatório mede sucesso E2E, intervenção, tempo, custo e recuperação.",
+      "Trajetórias e recibos permitem comparação sem vazamento de casos."
+    ],
+    "suggested_files": [
+      "evals/",
+      "core/acceptance/"
+    ],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-03T21:22:07.830066Z",
+    "updated_at": "2026-10-03T21:22:07.830066Z"
+  },
+  {
+    "id": "USR-134",
+    "project_id": "darkfac",
+    "title": "Rollback de produção deve preservar contexto para correção automática",
+    "origin": "review",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand",
+      "autonomy-throughput",
+      "wave-current"
+    ],
+    "problem_statement": "Após merge, IntegrationStage remove .darkfac/runs/<run_id>/; se smoke falha e ReleaseStage retorna retry:development, DevelopmentStage não encontra tickets.json e termina failed(no_tickets). O próprio docstring de _persist_smoke_failure_log declara a lacuna.",
+    "core_journey": [
+      "Smoke falha após merge; rollback restaura produção; fábrica reconstrói contexto e corrige a regressão sem novo prompt."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Após rollback, contexto mínimo de SPEC, tickets e feedback permanece recuperável por run sem reintroduzir artefatos no produto.",
+      "Uma falha de smoke produz novo candidato em branch isolada, valida, revisa e entrega ou termina com causa estruturada após limite.",
+      "Teste de integração com merge simulado, smoke falhando e iteração de desenvolvimento comprova ausência de failed(no_tickets)."
+    ],
+    "suggested_files": [
+      "core/line/stage_integration.py",
+      "core/line/stage_release.py",
+      "core/line/stage_build.py"
+    ],
+    "estimated_complexity": "large",
+    "dependencies": [],
+    "created_at": "2026-10-03T21:26:22.640747Z",
+    "updated_at": "2026-10-03T21:26:22.640747Z"
+  },
+  {
+    "id": "CNR-01",
+    "project_id": "darkfac-canary",
+    "title": "Publicar no /version o SHA real do commit implantado",
+    "origin": "review",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand",
+      "autonomy-throughput",
+      "wave-current"
+    ],
+    "problem_statement": "Em 03/10/2026, GET https://canary.ggcampos.com/version retornou status 200 e {\"sha\":\"initial\",\"canary_day\":\"2026-10-03\"}; o campo sha não prova o commit publicado.",
+    "core_journey": [
+      "A linha entrega um commit e o endpoint /version devolve esse SHA completo ao responder em produção."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Após deploy, /version.sha é igual ao SHA completo de integration.output_refs.",
+      "O recibo de release e o canário vinculam o mesmo SHA observado.",
+      "Valor estático initial e SHA antigo falham no smoke e impedem dia verde."
+    ],
+    "suggested_files": [
+      "app.py",
+      "tests/test_version.py"
+    ],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-03T21:49:22.314311Z",
+    "updated_at": "2026-10-03T21:49:22.314311Z"
+  },
+  {
+    "id": "USR-135",
+    "project_id": "darkfac",
+    "title": "Adequar limite do portão oficial à suíte completa no Notebook",
+    "origin": "review",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand",
+      "autonomy-throughput",
+      "wave-current",
+      "protected-governance"
+    ],
+    "problem_statement": "Em 04/10/2026, runner.py --quick --local --no-cache interrompeu o bloco paralelo em 908,5s por timeout de 900s, count=0. A mesma suíte com limite diagnóstico de 2400s terminou em 916,1s, descobriu 2971 testes (2959 passaram, 6 falharam, 6 pulados antes de corrigir os seis). A CI do PR #136 bloqueou alterar harness.config.json porque o arquivo só aceita commit direto humano.",
+    "core_journey": [
+      "Portão oficial completo no Notebook produz contagem positiva e veredito antes do prazo; preserva o bloqueio a mudanças do harness por agentes."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Medir novamente a duração da suíte completa no Notebook com as falhas corrigidas.",
+      "Owner decide e aplica em commit direto o timeout de harness.config.json ou estratégia equivalente que permita o conjunto terminar sem false timeout.",
+      "CI trusted-pr-policy permanece verde; portão oficial passa com contagem positiva no Notebook."
+    ],
+    "suggested_files": [
+      "harness.config.json",
+      "core/harness/runner.py"
+    ],
+    "estimated_complexity": "small",
+    "dependencies": [],
+    "created_at": "2026-10-04T08:18:40.458904Z",
+    "updated_at": "2026-10-04T08:18:40.458904Z"
   }
 ]

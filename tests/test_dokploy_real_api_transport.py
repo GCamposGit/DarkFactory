@@ -181,7 +181,8 @@ def test_reconcile_succeeds_when_a_newer_deployment_is_done(monkeypatch: pytest.
 
     status = adapter.reconcile(op.operation_id)
     assert status == DeploymentStatus.SUCCEEDED
-    assert adapter.installed_digest(target_config) == "b" * 40
+    # Provider completion says nothing about the digest currently served.
+    assert adapter.installed_digest(target_config) is None
 
 
 def test_reconcile_fails_when_a_newer_deployment_errors(monkeypatch: pytest.MonkeyPatch) -> None:

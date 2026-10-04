@@ -30,6 +30,12 @@ from core.roadmap.models import (
 from core.workflow.control_store import SQLiteControlStore
 
 
+@pytest.fixture(autouse=True)
+def _isolated_dogfood_demands(monkeypatch, tmp_path: Path) -> None:
+    """Canary and dogfood tests must never project demands into the live ledger."""
+    monkeypatch.setenv("DARKFAC_DEMANDS_PATH", str(tmp_path / "demands.json"))
+
+
 # --------------------------------------------------------------------------
 # Fakes
 # --------------------------------------------------------------------------
@@ -56,22 +62,24 @@ class FakeObserver:
 
     def observe(self, run_id: str) -> list[canary.CanaryStageObservation]:
         self.calls.append(run_id)
-        return list(self._stages)
+        return _with_run_id(self._stages, run_id)
 
 
 class FakeSmokeClient:
     def __init__(self, ok: bool = True, rollback_required: bool = False) -> None:
         self.ok = ok
         self.rollback_required = rollback_required
-        self.calls: list[tuple[str, date, str]] = []
+        self.calls: list[tuple[str, date, str, str]] = []
 
-    def check(self, base_url: str, expected_date: date, scenario: str) -> canary.SmokeResult:
-        self.calls.append((base_url, expected_date, scenario))
+    def check(self, base_url: str, expected_date: date, scenario: str, expected_sha: str) -> canary.SmokeResult:
+        self.calls.append((base_url, expected_date, scenario, expected_sha))
         return canary.SmokeResult(
             ok=self.ok,
             url=f"{base_url}/version",
             expected_date=expected_date.isoformat(),
-            observed_body=f'{{"canary_day": "{expected_date.isoformat()}"}}' if self.ok else "{}",
+            expected_sha=expected_sha,
+            observed_sha=expected_sha if self.ok else None,
+            observed_body=f'{{"canary_day": "{expected_date.isoformat()}", "sha": "{expected_sha}"}}' if self.ok else "{}",
             rollback_required=self.rollback_required,
         )
 
@@ -87,8 +95,24 @@ class RecordingSender:
 
 # Real line stage names (core.line.bindings.LINE_STAGES minus "retrospective"
 # == canary.REQUIRED_STAGES), all terminal-succeeded -- a fully released run.
+TEST_SHA = "a" * 40
+
+
+def _with_run_id(stages: list[canary.CanaryStageObservation], run_id: str) -> list[canary.CanaryStageObservation]:
+    return [
+        obs.model_copy(update={"output_refs": [ref.replace("{run_id}", run_id) for ref in obs.output_refs]})
+        for obs in stages
+    ]
+
+
 _ALL_STAGES = [
-    canary.CanaryStageObservation(stage=stage, status="succeeded", iteration=0, harness="role", actual_cost=0.01)
+    canary.CanaryStageObservation(
+        stage=stage, status="succeeded", iteration=0, harness="role", actual_cost=0.01,
+        output_refs=(
+            ["https://example.test/pr/1", TEST_SHA] if stage == "integration" else
+            ["operation:1", f"smoke:{{run_id}}:{TEST_SHA[:12]}"] if stage == "build_deploy" else []
+        ),
+    )
     for stage in canary.REQUIRED_STAGES
 ]
 
@@ -108,6 +132,16 @@ def store(tmp_path: Path) -> SQLiteControlStore:
 @pytest.fixture
 def reports_dir(tmp_path: Path) -> Path:
     return tmp_path / "reports" / "canary"
+
+
+def _passed_report(day: date) -> canary.CanaryReport:
+    return canary.CanaryReport(
+        date=day.isoformat(), scenario="normal", external_id="x", outcome="passed",
+        smoke=canary.SmokeResult(
+            ok=True, url="https://canary.example.test/version", expected_date=day.isoformat(),
+            expected_sha=TEST_SHA, observed_sha=TEST_SHA,
+        ),
+    )
 
 
 # --------------------------------------------------------------------------
@@ -312,15 +346,15 @@ def test_non_terminal_run_past_the_deadline_times_out_and_notifies(store, report
 def test_green_streak_never_counts_in_progress_or_timeout_or_dry_run() -> None:
     base = date(2026, 9, 1)
     reports = [
-        canary.CanaryReport(date=base.isoformat(), scenario="normal", external_id="x", outcome="passed"),
+        _passed_report(base),
         canary.CanaryReport(date=(base + timedelta(days=1)).isoformat(), scenario="normal", external_id="x", outcome="in_progress"),
-        canary.CanaryReport(date=(base + timedelta(days=2)).isoformat(), scenario="normal", external_id="x", outcome="passed"),
+        _passed_report(base + timedelta(days=2)),
     ]
     # day 1 (in_progress) breaks any streak that would otherwise bridge day 0 -> day 2
     assert canary.green_streak(reports) == 1
 
     timeout_reports = [
-        canary.CanaryReport(date=base.isoformat(), scenario="normal", external_id="x", outcome="passed"),
+        _passed_report(base),
         canary.CanaryReport(date=(base + timedelta(days=1)).isoformat(), scenario="normal", external_id="x", outcome="timeout"),
     ]
     assert canary.green_streak(timeout_reports) == 0
@@ -348,6 +382,85 @@ def test_failing_smoke_check_is_reported_when_stages_all_succeed(store, reports_
     assert report.failing_stage == "smoke"
     assert report.cause_code == "rollback_required"
     assert len(sender.messages) == 1
+
+
+@pytest.mark.parametrize(
+    ("body", "expected_ok"),
+    [
+        ('{"canary_day":"2026-09-22","sha":"' + TEST_SHA + '"}', True),
+        ('{"canary_day":"2026-09-22","sha":"initial"}', False),
+        ('{"canary_day":"2026-09-21","sha":"' + TEST_SHA + '","note":"2026-09-22"}', False),
+        ('{"canary_day":"2026-09-22","sha":"' + "b" * 40 + '","note":"' + TEST_SHA + '"}', False),
+        ('{"message":"2026-09-22 ' + TEST_SHA + '"}', False),
+        ('not-json 2026-09-22 ' + TEST_SHA, False),
+    ],
+)
+def test_http_smoke_requires_exact_json_day_and_sha(monkeypatch, body: str, expected_ok: bool) -> None:
+    class Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return None
+
+        def read(self):
+            return body.encode("utf-8")
+
+    monkeypatch.setattr("urllib.request.urlopen", lambda *args, **kwargs: Response())
+    result = canary.HttpSmokeClient().check(
+        "https://canary.example.test", date(2026, 9, 22), "normal", TEST_SHA
+    )
+    assert result.ok is expected_ok
+    assert result.expected_sha == TEST_SHA
+    assert result.error is None if expected_ok else result.error == "version_identity_mismatch"
+
+
+@pytest.mark.parametrize("broken_stage", ["integration", "build_deploy", "mismatched_release"])
+def test_run_daily_fails_closed_without_matching_release_sha(
+    store, reports_dir, broken_stage: str
+) -> None:
+    stages = [obs.model_copy(deep=True) for obs in _ALL_STAGES]
+    if broken_stage == "integration":
+        next(obs for obs in stages if obs.stage == "integration").output_refs = []
+    elif broken_stage == "build_deploy":
+        next(obs for obs in stages if obs.stage == "build_deploy").output_refs = []
+    else:
+        next(obs for obs in stages if obs.stage == "build_deploy").output_refs[-1] = (
+            "smoke:{run_id}:" + "b" * 12
+        )
+    smoke = FakeSmokeClient()
+    report = canary.run_daily(
+        day=date(2026, 9, 22), store=store, observer=FakeObserver(stages), smoke_client=smoke,
+        clock=FixedClock(date(2026, 9, 22)), base_url="https://canary.example.test",
+        reports_dir=reports_dir, send_weekly=False,
+    )
+    assert report.passed is False
+    assert report.outcome == "failed"
+    assert report.cause_code == "release_identity_missing"
+    assert smoke.calls == []
+
+
+def test_old_date_only_pass_is_reobserved_before_remaining_green(store, reports_dir) -> None:
+    day = date(2026, 9, 22)
+    observer = FakeObserver(_ALL_STAGES)
+    kwargs = dict(
+        day=day, store=store, observer=observer, smoke_client=FakeSmokeClient(),
+        clock=FixedClock(day), base_url="https://canary.example.test",
+        reports_dir=reports_dir, send_weekly=False,
+    )
+    first = canary.run_daily(**kwargs)
+    assert first.passed
+    path = reports_dir / f"{day.isoformat()}.json"
+    legacy = json.loads(path.read_text(encoding="utf-8"))
+    legacy["smoke"].pop("expected_sha")
+    legacy["smoke"].pop("observed_sha")
+    path.write_text(json.dumps(legacy), encoding="utf-8")
+    assert canary.load_reports(reports_dir)[0].passed is False
+
+    second = canary.run_daily(**kwargs)
+    assert second.passed is True
+    assert second.run_id == first.run_id
+    assert observer.calls == [first.run_id, first.run_id]
 
 
 def test_dry_run_does_not_submit_intake(store, reports_dir) -> None:
@@ -379,6 +492,7 @@ def _write_fake_report(reports_dir: Path, day: date, passed: bool, scenario: str
         run_id=f"run-{day.isoformat()}",
         demand_id=f"dem-{day.isoformat()}",
         outcome="passed" if passed else "failed",
+        smoke=_passed_report(day).smoke if passed else None,
         failing_stage=None if passed else "development",
         cause_code=None if passed else "test_failure",
     )
@@ -408,7 +522,7 @@ def test_weekly_summary_includes_streak_and_last_seven(reports_dir) -> None:
 def test_green_streak_counts_consecutive_passing_days() -> None:
     base = date(2026, 9, 1)
     reports = [
-        canary.CanaryReport(date=(base + timedelta(days=i)).isoformat(), scenario="normal", external_id="x", outcome="passed")
+        _passed_report(base + timedelta(days=i))
         for i in range(5)
     ]
     assert canary.green_streak(reports) == 5
@@ -418,10 +532,10 @@ def test_green_streak_counts_consecutive_passing_days() -> None:
 def test_green_streak_stops_at_a_failure() -> None:
     base = date(2026, 9, 1)
     reports = [
-        canary.CanaryReport(date=(base + timedelta(days=0)).isoformat(), scenario="normal", external_id="x", outcome="passed"),
+        _passed_report(base),
         canary.CanaryReport(date=(base + timedelta(days=1)).isoformat(), scenario="normal", external_id="x", outcome="failed"),
-        canary.CanaryReport(date=(base + timedelta(days=2)).isoformat(), scenario="normal", external_id="x", outcome="passed"),
-        canary.CanaryReport(date=(base + timedelta(days=3)).isoformat(), scenario="normal", external_id="x", outcome="passed"),
+        _passed_report(base + timedelta(days=2)),
+        _passed_report(base + timedelta(days=3)),
     ]
     assert canary.green_streak(reports) == 2
 
@@ -429,8 +543,8 @@ def test_green_streak_stops_at_a_failure() -> None:
 def test_green_streak_stops_at_a_gap_in_calendar_days() -> None:
     base = date(2026, 9, 1)
     reports = [
-        canary.CanaryReport(date=base.isoformat(), scenario="normal", external_id="x", outcome="passed"),
-        canary.CanaryReport(date=(base + timedelta(days=2)).isoformat(), scenario="normal", external_id="x", outcome="passed"),
+        _passed_report(base),
+        _passed_report(base + timedelta(days=2)),
     ]
     assert canary.green_streak(reports) == 1
 
@@ -438,7 +552,7 @@ def test_green_streak_stops_at_a_gap_in_calendar_days() -> None:
 def test_seven_consecutive_green_days_meets_v2() -> None:
     base = date(2026, 9, 1)
     reports = [
-        canary.CanaryReport(date=(base + timedelta(days=i)).isoformat(), scenario="normal", external_id="x", outcome="passed")
+        _passed_report(base + timedelta(days=i))
         for i in range(7)
     ]
     assert canary.green_streak(reports) == 7
@@ -739,9 +853,7 @@ def test_run_loop_exception_in_one_iteration_does_not_stop_the_loop(store, repor
         calls["n"] += 1
         if calls["n"] == 2:
             raise RuntimeError("transient failure")
-        return canary.CanaryReport(
-            date=day.isoformat(), scenario="normal", external_id="x", outcome="passed"
-        )
+        return _passed_report(day)
 
     monkeypatch.setattr(canary, "run_daily", _flaky_run_daily)
 
@@ -790,7 +902,7 @@ def test_cli_run_defaults_to_one_shot_without_every_seconds(monkeypatch, reports
 
     def _fake_run_daily(**kwargs: object) -> canary.CanaryReport:
         calls.append(kwargs)
-        return canary.CanaryReport(date="2026-09-22", scenario="normal", external_id="x", outcome="passed")
+        return _passed_report(date(2026, 9, 22))
 
     monkeypatch.setattr(canary, "run_daily", _fake_run_daily)
     loop_calls: list[dict[str, object]] = []
@@ -941,6 +1053,15 @@ def test_observer_keeps_the_failing_jobs_own_cause_code() -> None:
     assert obs[0].cause_code == "handler_error:X"
 
 
+def test_observer_keeps_release_identity_output_refs() -> None:
+    jobs = [
+        {**_job("integration", "succeeded", 0, None), "output_refs": ["pr", TEST_SHA]},
+        {**_job("build_deploy", "succeeded", 0, None), "output_refs": ["op", f"smoke:r:{TEST_SHA[:12]}"]},
+    ]
+    observed = canary.ControlStoreLineObserver(_StatusStore(jobs)).observe("r")
+    assert canary._observed_release_sha(observed, "r") == TEST_SHA
+
+
 def test_observer_falls_back_to_last_retry_cause_when_final_failed_row_has_none() -> None:
     jobs = [
         _job("grill", "retry", 0, "no_authenticated_harness"),
@@ -1018,7 +1139,7 @@ class RunAwareObserver:
 
     def observe(self, run_id: str) -> list[canary.CanaryStageObservation]:
         self.calls.append(run_id)
-        return list(self.by_run.get(run_id, self.default))
+        return _with_run_id(self.by_run.get(run_id, self.default), run_id)
 
 
 def _retry_run(store, reports_dir, observer, sender, **kwargs):

@@ -53,6 +53,7 @@ import argparse
 import json
 import logging
 import os
+import re
 import sys
 import time
 from datetime import UTC, date, datetime, timedelta
@@ -238,12 +239,15 @@ class CanaryStageObservation(BaseModel):
     cause_code: str | None = None
     harness: str | None = None
     model_used: str | None = None
+    output_refs: list[str] = Field(default_factory=list)
 
 
 class SmokeResult(BaseModel):
     ok: bool
     url: str
     expected_date: str
+    expected_sha: str | None = None
+    observed_sha: str | None = None
     observed_body: str | None = None
     error: str | None = None
     rollback_required: bool = False
@@ -304,7 +308,15 @@ class CanaryReport(BaseModel):
 
     @model_validator(mode="after")
     def _derive_passed_and_dry_run(self) -> "CanaryReport":
-        self.passed = self.outcome == "passed"
+        self.passed = (
+            self.outcome == "passed"
+            and self.smoke is not None
+            and self.smoke.ok
+            and self.smoke.expected_date == self.date
+            and bool(self.smoke.expected_sha)
+            and re.fullmatch(r"(?:[0-9a-f]{40}|[0-9a-f]{64})", self.smoke.expected_sha) is not None
+            and self.smoke.observed_sha == self.smoke.expected_sha
+        )
         if self.outcome == "dry_run":
             self.dry_run = True
         return self
@@ -330,16 +342,16 @@ class SystemClock:
 
 
 class SmokeClient(Protocol):
-    def check(self, base_url: str, expected_date: date, scenario: CanaryScenario) -> SmokeResult: ...
+    def check(self, base_url: str, expected_date: date, scenario: CanaryScenario, expected_sha: str) -> SmokeResult: ...
 
 
 class HttpSmokeClient:
-    """Real adapter: `GET {base_url}/version`, checks it contains the date."""
+    """Real adapter: check the structured release identity from ``GET /version``."""
 
     def __init__(self, timeout: float = 10.0) -> None:
         self.timeout = timeout
 
-    def check(self, base_url: str, expected_date: date, scenario: CanaryScenario) -> SmokeResult:
+    def check(self, base_url: str, expected_date: date, scenario: CanaryScenario, expected_sha: str) -> SmokeResult:
         import urllib.error
         import urllib.request
 
@@ -352,15 +364,25 @@ class HttpSmokeClient:
                 ok=False,
                 url=url,
                 expected_date=expected_date.isoformat(),
+                expected_sha=expected_sha,
                 error=str(exc),
                 rollback_required=(scenario == "smoke_rollback"),
             )
-        ok = expected_date.isoformat() in body
+        try:
+            document = json.loads(body)
+        except json.JSONDecodeError:
+            document = None
+        observed_sha = document.get("sha") if isinstance(document, dict) else None
+        observed_day = document.get("canary_day") if isinstance(document, dict) else None
+        ok = observed_day == expected_date.isoformat() and observed_sha == expected_sha
         return SmokeResult(
             ok=ok,
             url=url,
             expected_date=expected_date.isoformat(),
+            expected_sha=expected_sha,
+            observed_sha=observed_sha if isinstance(observed_sha, str) else None,
             observed_body=body[:500],
+            error=None if ok else "version_identity_mismatch",
             rollback_required=(scenario == "smoke_rollback" and not ok),
         )
 
@@ -409,6 +431,7 @@ class ControlStoreLineObserver:
                     actual_cost=float(job.get("actual_cost") or 0.0),
                     cause_code=cause,
                     harness=job.get("role"),
+                    output_refs=job.get("output_refs") if isinstance(job.get("output_refs"), list) else [],
                 )
             )
         return observations
@@ -543,6 +566,24 @@ def _reached_terminal_success(stages: list[CanaryStageObservation]) -> bool:
     return all(statuses.get(stage) == "succeeded" for stage in REQUIRED_STAGES)
 
 
+def _observed_release_sha(stages: list[CanaryStageObservation], run_id: str) -> str | None:
+    """Match the integration's full merge SHA to this run's release receipt."""
+    integration = next(
+        (obs for obs in reversed(stages) if obs.stage == "integration" and obs.status == "succeeded"), None
+    )
+    release = next(
+        (obs for obs in reversed(stages) if obs.stage == "build_deploy" and obs.status == "succeeded"), None
+    )
+    if integration is None or release is None or not integration.output_refs or not release.output_refs:
+        return None
+    merge_sha = integration.output_refs[-1]
+    if not re.fullmatch(r"(?:[0-9a-f]{40}|[0-9a-f]{64})", merge_sha):
+        return None
+    if release.output_refs[-1] != f"smoke:{run_id}:{merge_sha[:12]}":
+        return None
+    return merge_sha
+
+
 def _first_incomplete_required_stage(stages: list[CanaryStageObservation]) -> str | None:
     statuses = _stage_statuses(stages)
     for stage in REQUIRED_STAGES:
@@ -598,6 +639,14 @@ def _load_day_report(reports_dir: Path, day: date) -> CanaryReport | None:
                 notified=report.notified,
             )
         ]
+    if report.outcome == "passed" and not report.passed:
+        # Old date-only smoke results cannot establish which release was live.
+        report.outcome = "failed"
+        report.failing_stage = "smoke"
+        report.cause_code = "legacy_smoke_unverified"
+        report.attempts[-1].outcome = "failed"
+        report.attempts[-1].failing_stage = "smoke"
+        report.attempts[-1].cause_code = "legacy_smoke_unverified"
     return report
 
 
@@ -752,14 +801,24 @@ def _evaluate_attempt(
         # Smoke is mandatory for a "passed" outside dry-run (HF-27-10
         # review item 1): no base_url at all is itself a failure, not a
         # silently-skipped check.
-        if not base_url:
+        expected_sha = _observed_release_sha(stages, run_id)
+        if not expected_sha:
+            outcome = "failed"
+            failing_stage = "smoke"
+            cause_code = "release_identity_missing"
+        elif not base_url:
             outcome = "failed"
             failing_stage = "smoke"
             cause_code = "canary_base_url_missing"
         else:
             active_smoke_client = smoke_client or HttpSmokeClient()
-            smoke = active_smoke_client.check(base_url, today, scenario)
-            if smoke.ok:
+            smoke = active_smoke_client.check(base_url, today, scenario, expected_sha)
+            if (
+                smoke.ok
+                and smoke.expected_date == today.isoformat()
+                and smoke.expected_sha == expected_sha
+                and smoke.observed_sha == expected_sha
+            ):
                 outcome = "passed"
                 failing_stage = None
                 cause_code = None

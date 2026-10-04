@@ -429,7 +429,7 @@ class DevelopmentStage:
         for iteration in range(1, max_iterations + 1):
             commands = resolve_commands(project, ws.path)
             extra_instruction = ""
-            if ticket_index == 0 and not commands.validate_cmds:
+            if ticket_index == 0 and not any(cmd.strip() for cmd in commands.validate_cmds):
                 extra_instruction = _MISSING_TESTS_INSTRUCTION
 
             route = self._pick_route(excluded)
@@ -502,7 +502,8 @@ class DevelopmentStage:
                 )
                 continue
 
-            if not commands.validate_cmds:
+            executable_validate = [cmd for cmd in commands.validate_cmds if cmd.strip()]
+            if not executable_validate:
                 # Still nothing to validate against, even after the extra
                 # instruction (ticket 0) or normally (later tickets should
                 # have inherited test infra by now). Treat as a failed
@@ -516,7 +517,7 @@ class DevelopmentStage:
                 )
             else:
                 validate_result = run_shell_commands(
-                    commands.validate_cmds, ws.path, timeout_s=self.command_timeout_s
+                    executable_validate, ws.path, timeout_s=self.command_timeout_s
                 )
 
             distilled = _distill_with_test_subagent(validate_result)
@@ -684,7 +685,11 @@ def _pending_fixup(ws: RunWorkspace, run_id: str) -> Optional[tuple[TicketSpec, 
         failed = {
             name: entry
             for name, entry in commands.items()
-            if isinstance(entry, dict) and entry.get("ran") and not entry.get("ok", True)
+            if isinstance(entry, dict)
+            and (
+                (entry.get("ran") and not entry.get("ok", True))
+                or (name == "validate" and not entry.get("ran"))
+            )
         }
         if failed:
             ticket = TicketSpec(
@@ -807,16 +812,25 @@ class ValidationStage:
 
         try:
             commands = resolve_commands(project, tmp_dir)
+            executable_validate = [cmd for cmd in commands.validate_cmds if cmd.strip()]
             report: dict[str, Any] = {"sha": sha, "commands": {}, "started_at": time.time()}
-            all_ok = True
+            # Setup/build alone cannot prove the candidate. A missing validate
+            # command must route back to development before review.
+            all_ok = bool(executable_validate)
 
             for stage_name, cmd_list in (
                 ("setup", commands.setup),
-                ("validate", commands.validate_cmds),
+                ("validate", executable_validate),
                 ("build", commands.build),
             ):
                 if not cmd_list:
                     report["commands"][stage_name] = {"ran": False}
+                    if stage_name == "validate":
+                        report["commands"][stage_name]["ok"] = False
+                        report["commands"][stage_name]["log"] = (
+                            "Nenhum comando de validate foi detectado no clone limpo; "
+                            "configure testes executaveis antes da revisao."
+                        )
                     continue
                 result = run_shell_commands(cmd_list, tmp_dir, timeout_s=self.command_timeout_s)
                 report["commands"][stage_name] = {
@@ -837,6 +851,12 @@ class ValidationStage:
 
             if all_ok:
                 return StageResult(outcome="success", output_refs=[commit_sha])
+            if not executable_validate and "validate" in report["commands"]:
+                return StageResult(
+                    outcome="retry",
+                    cause_code=f"retry:development\nclean_validate_missing:{sha[:12]}",
+                    output_refs=[commit_sha],
+                )
             # HF-27-08 D-b (review fix item 1): route back to development,
             # not another validation pass. `validation.json` (written just
             # above) is already consumed by DevelopmentStage._pending_fixup().
