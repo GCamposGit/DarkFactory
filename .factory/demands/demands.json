@@ -3928,5 +3928,187 @@
     "dependencies": [],
     "created_at": "2026-10-04T08:18:40.458904Z",
     "updated_at": "2026-10-04T08:18:40.458904Z"
+  },
+  {
+    "id": "USR-138",
+    "project_id": "darkfac",
+    "title": "Esteira ao vivo: painel visual em tempo real de tickets e runs etapa por etapa",
+    "origin": "user",
+    "status": "completed",
+    "delivery_evidence": "452605d81a5429b7154c99040030a23def966e08",
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "O owner precisa pedir status no chat para saber o que a fabrica esta fazendo. O painel de tarefas do DarkHub dobra cada run numa unica linha (stages_seen), atualiza so a cada 30 s e nao mostra tempo por etapa, iteracoes, worker/modelo que segura o job, idade do item nem o que exige acao do owner. Os dados ja existem no control store (jobs por estagio/iteracao com started_at/finished_at/custo/retry/cause_code e claims com owner/route_ref).",
+    "core_journey": [
+      "O owner precisa pedir status no chat para saber o que a fabrica esta fazendo. O painel de tarefas do DarkHub dobra cada run numa unica linha (stages_seen), atualiza so a cada 30 s e nao mostra tempo por etapa, iteracoes, worker/modelo que segura o job, idade do item nem o que exige acao do owner. Os dados ja existem no control store (jobs por estagio/iteracao com started_at/finished_at/custo/retry/cause_code e claims com owner/route_ref)."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "GET /api/line/live devolve snapshot read-only com runs, estagios na ordem LINE_STAGES (status, iteracoes, inicio, fim, duracao, custo, retries, causa, evidencias, worker e rota do claim ativo), KPIs e backlog por projeto, sem DDL nem lease",
+      "GET /api/line/live/stream (SSE) emite snapshot so quando muda, heartbeat a cada 15 s, retry de reconexao, e uma unica leitura do store por janela de 2-3 s compartilhada entre clientes",
+      "Pagina /live com faixa Precisa de voce, esteira por run com nos por etapa (feito, rodando com cronometro, retry, aguardando humano, falhou, pendente), gaveta de detalhes com linha do tempo, KPIs, concluidos recentes e feed de atividade",
+      "Indicador de conexao ao vivo/reconectando/offline com idade dos dados; falha da fonte nao apaga dados anteriores; fallback para polling; pausa quando a aba esta oculta",
+      "Status nunca so por cor (icone+texto), respeita prefers-reduced-motion, funciona a 375 px; testes do projetor com SQLite falso, da API e do SSE; hub/coverage.json atualizado"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-04T16:10:50.278897Z",
+    "updated_at": "2026-10-04T17:06:54.366326Z"
+  },
+  {
+    "id": "USR-139",
+    "project_id": "darkfac",
+    "title": "PR de fila (ledger-only) e mergeado antes dos checks obrigatorios do ruleset do main",
+    "origin": "user",
+    "status": "completed",
+    "delivery_evidence": "78b143e9e2ad19c325a664965bd606bcf9a7f4de",
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "EVIDENCIA 04/10/2026: run_ticket --create --queue-only registrou USR-138, abriu GCamposGit/DarkFactory#142 e falhou com 'gh pr merge failed: the base branch policy prohibits the merge'. Desde 04/10 09:56 o ruleset do main exige pr-validation (ubuntu/windows) e trusted-pr-policy; core/git/autonomy.py::_ci_gate devolve ci_gate=skipped_ledger_only para PR de fila e chama gh pr merge com os checks em andamento. Todo registro de fila falha e deixa PR orfao (o #142 foi mergeado a mao pela sessao depois do CI verde).",
+    "core_journey": [
+      "EVIDENCIA 04/10/2026: run_ticket --create --queue-only registrou USR-138, abriu GCamposGit/DarkFactory#142 e falhou com 'gh pr merge failed: the base branch policy prohibits the merge'. Desde 04/10 09:56 o ruleset do main exige pr-validation (ubuntu/windows) e trusted-pr-policy; core/git/autonomy.py::_ci_gate devolve ci_gate=skipped_ledger_only para PR de fila e chama gh pr merge com os checks em andamento. Todo registro de fila falha e deixa PR orfao (o #142 foi mergeado a mao pela sessao depois do CI verde)."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "PR de fila ledger-only aguarda ensure_green antes do merge",
+      "Falha 'base branch policy prohibits' re-roda o gate uma vez e so entao desiste com mensagem clara",
+      "Testes em tests/test_git_autonomy_ci_gate.py cobrem os dois caminhos"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-04T16:41:52.618358Z",
+    "updated_at": "2026-10-04T17:26:37.364046Z"
+  },
+  {
+    "id": "USR-140",
+    "project_id": "darkfac",
+    "title": "Esteira ao vivo: run_ticket local nao publica progresso etapa a etapa",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "A Esteira ao vivo (USR-138, /live) mostra etapa a etapa so os runs da linha autonoma (control store). Tickets executados por run_ticket.py no Desktop/Notebook aparecem apenas como 'Fora da esteira' (status implementing do demands.json, que o hub da nuvem so ve apos merge) sem preflight, worktree, agente, portao, PR/CI, merge e deploy. O owner volta a pedir status no chat para esses runs.",
+    "core_journey": [
+      "A Esteira ao vivo (USR-138, /live) mostra etapa a etapa so os runs da linha autonoma (control store). Tickets executados por run_ticket.py no Desktop/Notebook aparecem apenas como 'Fora da esteira' (status implementing do demands.json, que o hub da nuvem so ve apos merge) sem preflight, worktree, agente, portao, PR/CI, merge e deploy. O owner volta a pedir status no chat para esses runs."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "run_ticket publica eventos de fase (preflight, workspace, agente, portao, commit, PR, CI, merge, deploy) num store que o DarkHub da nuvem le",
+      "GET /api/line/live inclui esses runs com estagios proprios e worker/harness",
+      "Falha ao publicar nunca bloqueia o run_ticket; teste focal"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-04T16:41:55.282304Z",
+    "updated_at": "2026-10-04T16:41:55.282304Z"
+  },
+  {
+    "id": "USR-141",
+    "project_id": "darkfac",
+    "title": "Worker de testes do Desktop para de responder ao iniciar o passo paralelo do portao",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "EVIDENCIA 04/10/2026 ~18:35 e ~19:05 (Notebook AI_Notebook, candidato 39cee2c do USR-138): runner.py --quick despachou a suite para o worker do Desktop (http://100.78.181.90:8080, DESKTOP-G45IPEM); syntax_and_types passou e, ao iniciar unit_and_integration_tests_parallel, o runner registrou 'worker stopped responding for >60s mid-run' nas duas tentativas. Na segunda, o worker antes reportou '[SUITE_LOCK] waiting: held by pid 13092 on DESKTOP-G45IPEM ... since 13:52:15'. Logo depois /health respondia ok/busy=false. Na primeira, o fallback local estourou 906 s com TEST_COUNT=0 (USR-135) porque outras sessoes rodavam runner --local no Notebook. Hoje o Desktop e o worker primario de testes e o portao oficial fica indisponivel.",
+    "core_journey": [
+      "EVIDENCIA 04/10/2026 ~18:35 e ~19:05 (Notebook AI_Notebook, candidato 39cee2c do USR-138): runner.py --quick despachou a suite para o worker do Desktop (http://100.78.181.90:8080, DESKTOP-G45IPEM); syntax_and_types passou e, ao iniciar unit_and_integration_tests_parallel, o runner registrou 'worker stopped responding for >60s mid-run' nas duas tentativas. Na segunda, o worker antes reportou '[SUITE_LOCK] waiting: held by pid 13092 on DESKTOP-G45IPEM ... since 13:52:15'. Logo depois /health respondia ok/busy=false. Na primeira, o fallback local estourou 906 s com TEST_COUNT=0 (USR-135) porque outras sessoes rodavam runner --local no Notebook. Hoje o Desktop e o worker primario de testes e o portao oficial fica indisponivel."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Worker continua respondendo ao progresso/heartbeat enquanto o pytest -n satura a CPU (thread ou processo separado, prioridade)",
+      "Suite lock orfao (pid morto) e liberado automaticamente com registro",
+      "Runner distingue worker lento de worker morto antes de abortar; teste focal com worker falso"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-04T17:06:34.784102Z",
+    "updated_at": "2026-10-04T17:06:34.784102Z"
+  },
+  {
+    "id": "USR-142",
+    "project_id": "darkfac",
+    "title": "Linha: run ativo sem sucessor agendado apos o Grill (HF-03-08 parado ha 15 dias)",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "EVIDENCIA 04/10/2026 na Esteira ao vivo (/api/line/live, control store Postgres): run do demand dem-cb92532c1c46 (HF-03-08: Autonomia Operacional Cloud e Verificacao Continua) esta com runs.status=active ha ~15 dias, com um unico job grill succeeded e nenhum job de planning (nem pending) criado. Nenhum agendador/varredor (USR-105 cobre waiting_human) detecta run ativo sem job aberto; o run fica invisivel para a fila e nunca termina.",
+    "core_journey": [
+      "EVIDENCIA 04/10/2026 na Esteira ao vivo (/api/line/live, control store Postgres): run do demand dem-cb92532c1c46 (HF-03-08: Autonomia Operacional Cloud e Verificacao Continua) esta com runs.status=active ha ~15 dias, com um unico job grill succeeded e nenhum job de planning (nem pending) criado. Nenhum agendador/varredor (USR-105 cobre waiting_human) detecta run ativo sem job aberto; o run fica invisivel para a fila e nunca termina."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Varredor detecta run active sem job running/pending/retry e sem atividade ha mais de 30 min e agenda o sucessor ou move o run para waiting_human com cause_code explicito",
+      "HF-03-08 (dem-cb92532c1c46) resolvido: segue para planning ou fecha com causa registrada",
+      "Teste focal com store falso; o painel /live deixa de marcar o run como 'nenhuma etapa agendada'"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-04T17:56:24.512760Z",
+    "updated_at": "2026-10-04T17:56:24.512760Z"
+  },
+  {
+    "id": "USR-143",
+    "project_id": "darkfac",
+    "title": "Gate local do Notebook nunca fecha em 900s e fica preso por pytest de outras sessoes",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "Em 04/10 o gate oficial (runner.py --quick) no AI_Notebook falhou 5 vezes com timeout exceeded (~900s, TEST_COUNT=0): (1) o Desktop 100.78.181.90:8080 ficou inalcancavel/parou de responder no meio do job (probe /health de 2s em core/harness/remote_dispatch.py e o provavel gargalo, caminho protegido); (2) o cap de workers por memoria (tests/_worker_capacity.py) deixa apenas 1 worker xdist com ~6 GB livres, entao a suite leva ~70 min; (3) pytest/runner de outras sessoes ficam pendurados segurando o suite lock global (suite-0.json) por mais de 30 min, e a espera do lock consome o timeout do passo. Evidencia: saidas [REMOTE] unreachable, 1 unico gw0 progredindo no pytest -v -n 4, suite-0.json com pid pendurado.",
+    "core_journey": [
+      "Em 04/10 o gate oficial (runner.py --quick) no AI_Notebook falhou 5 vezes com timeout exceeded (~900s, TEST_COUNT=0): (1) o Desktop 100.78.181.90:8080 ficou inalcancavel/parou de responder no meio do job (probe /health de 2s em core/harness/remote_dispatch.py e o provavel gargalo, caminho protegido); (2) o cap de workers por memoria (tests/_worker_capacity.py) deixa apenas 1 worker xdist com ~6 GB livres, entao a suite leva ~70 min; (3) pytest/runner de outras sessoes ficam pendurados segurando o suite lock global (suite-0.json) por mais de 30 min, e a espera do lock consome o timeout do passo. Evidencia: saidas [REMOTE] unreachable, 1 unico gw0 progredindo no pytest -v -n 4, suite-0.json com pid pendurado."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Suite lock expira/solta holder sem progresso (CPU parada) e o tempo de espera do lock nao consome o timeout do passo",
+      "Gate local exibe quantos workers xdist foram permitidos e por que (memoria livre)",
+      "Probe do Desktop tolera latencia da tailnet (timeout configuravel) com log do motivo"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-04T20:01:20.786789Z",
+    "updated_at": "2026-10-04T20:01:20.786789Z"
   }
 ]

@@ -464,9 +464,10 @@ def _ident(repo: Path) -> None:
 class FakeRepoGh(GhScript):
     """``GhScript`` plus the PR lifecycle, simulated against a local bare repository."""
 
-    def __init__(self, bare: Path, checks: Sequence[Any], **kwargs: Any) -> None:
+    def __init__(self, bare: Path, checks: Sequence[Any], *, policy_blocks: int = 0, **kwargs: Any) -> None:
         super().__init__(checks, **kwargs)
         self.bare = bare
+        self.policy_blocks = policy_blocks  # merges refused by the base-branch ruleset
         self.prs: dict[int, dict[str, Any]] = {}
 
     def _bare(self, *args: str) -> subprocess.CompletedProcess[str]:
@@ -502,6 +503,12 @@ class FakeRepoGh(GhScript):
         if a[:2] == ["pr", "merge"]:
             self.calls.append(a)
             p = self.prs[int(a[2])]
+            if self.policy_blocks > 0:
+                self.policy_blocks -= 1
+                return self.result(
+                    a, 1, "",
+                    f"X Pull request x/y#{int(a[2])} is not mergeable: the base branch policy prohibits the merge.",
+                )
             sha = self._bare("rev-parse", f"refs/heads/{p['head']}").stdout.strip()
             main = self._bare("rev-parse", "refs/heads/main").stdout.strip()
             if self._bare("merge-base", "--is-ancestor", main, sha).returncode != 0:
@@ -635,14 +642,73 @@ def test_delivery_with_red_checks_also_red_on_main_reports_base_red(repo: tuple[
     assert gh.count(["pr", "merge"]) == 0
 
 
-def test_ledger_only_pr_skips_the_gate_even_with_red_main(repo: tuple[Path, Path]) -> None:
+def test_ledger_only_queue_pr_waits_for_required_checks_before_merging(repo: tuple[Path, Path]) -> None:
+    local, bare = repo
+    write_ledger(local)
+    gh = FakeRepoGh(bare, [[check("pending")], [check("pending")], [check("pass")]])
+    clock = FakeClock()
+    rep = manager(local, clock).deliver_branch("USR-90", "Gate", cwd=local, gh_runner=gh, kind="queue")
+    assert rep.ok and rep.action == "merged", rep.message
+    assert "ci_gate=green" in rep.message and "skipped_ledger_only" not in rep.message
+    assert gh.count(["pr", "checks"]) == 3 and clock.sleeps == [10, 10]
+    assert gh.count(["pr", "merge"]) == 1  # no refused attempt: merged only after the checks settled
+    names = [" ".join(c[:2]) for c in gh.calls]
+    assert names.index("pr merge") > max(i for i, n in enumerate(names) if n == "pr checks")
+
+
+def test_ledger_only_queue_pr_with_red_checks_is_not_merged(repo: tuple[Path, Path]) -> None:
     local, bare = repo
     write_ledger(local)
     gh = FakeRepoGh(bare, [[check("fail")]])
     rep = manager(local, FakeClock()).deliver_branch("USR-90", "Gate", cwd=local, gh_runner=gh, kind="queue")
+    assert not rep.ok and rep.action == "ci_failed", rep.message
+    assert gh.count(["pr", "merge"]) == 0
+
+
+def test_ledger_only_queue_pr_without_checks_merges_after_grace(repo: tuple[Path, Path]) -> None:
+    local, bare = repo
+    write_ledger(local)
+    gh = FakeRepoGh(bare, [])
+    clock = FakeClock()
+    rep = manager(local, clock).deliver_branch("USR-90", "Gate", cwd=local, gh_runner=gh, kind="queue")
     assert rep.ok and rep.action == "merged", rep.message
-    assert "ci_gate=skipped_ledger_only" in rep.message
-    assert gh.count(["pr", "checks"]) == 0 and gh.count(["run", "list"]) == 0
+    assert "ci_gate=no_checks" in rep.message
+    assert sum(clock.sleeps) >= ci_checks.DEFAULT_NO_CHECKS_GRACE_SECONDS
+
+
+def test_policy_prohibits_merge_regates_once_then_merges(repo: tuple[Path, Path]) -> None:
+    local, bare = repo
+    write_ledger(local)
+    gh = FakeRepoGh(bare, [[check("pass")]], policy_blocks=1)
+    rep = manager(local, FakeClock()).deliver_branch("USR-90", "Gate", cwd=local, gh_runner=gh, kind="queue")
+    assert rep.ok and rep.action == "merged", rep.message
+    assert gh.count(["pr", "merge"]) == 2
+    assert gh.count(["pr", "checks"]) == 2  # initial gate + re-gate after the refusal
+    names = [" ".join(c[:2]) for c in gh.calls]
+    second_merge = len(names) - 1 - names[::-1].index("pr merge")
+    last_checks = len(names) - 1 - names[::-1].index("pr checks")
+    assert last_checks < second_merge
+
+
+def test_policy_prohibits_merge_that_stays_barred_reports_policy_and_pending(repo: tuple[Path, Path]) -> None:
+    local, bare = repo
+    write_ledger(local)
+    gh = FakeRepoGh(bare, [[check("pass")], [check("pass")], [check("pending", "trusted-pr-policy")]], policy_blocks=99)
+    rep = manager(local, FakeClock()).deliver_branch("USR-90", "Gate", cwd=local, gh_runner=gh, kind="queue")
+    assert not rep.ok and rep.action == "error", rep.message
+    assert "base branch policy" in rep.message and "trusted-pr-policy" in rep.message
+    assert gh.count(["pr", "merge"]) == 2  # exactly one retry, never a loop
+    assert not rep.cleaned
+    assert gh.prs[1]["state"] == "OPEN"
+
+
+def test_policy_prohibits_merge_regate_failure_blocks_second_merge(repo: tuple[Path, Path]) -> None:
+    local, bare = repo
+    write_ledger(local)
+    gh = FakeRepoGh(bare, [[check("pass")], [check("fail")]], policy_blocks=99)
+    rep = manager(local, FakeClock()).deliver_branch("USR-90", "Gate", cwd=local, gh_runner=gh, kind="queue")
+    assert not rep.ok and rep.action == "ci_failed", rep.message
+    assert gh.count(["pr", "merge"]) == 1
 
 
 def test_ledger_only_implementation_is_rejected_by_ci_gate(repo: tuple[Path, Path]) -> None:

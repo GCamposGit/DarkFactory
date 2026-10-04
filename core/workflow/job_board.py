@@ -297,3 +297,11 @@ def read_job_board(
     if sqlite_path is None:
         return JobBoardSnapshot(backend="none", source="missing")
     return read_sqlite_job_board(sqlite_path, limit=limit)
+
+
+# Public aliases so sibling read-only projections (e.g. ``line_live``) reuse these helpers
+# instead of duplicating them.
+decode_refs = _decode_refs
+as_text = _as_text
+extract_title = _extract_title
+resolve_cause_and_diagnostic = _resolve_cause_and_diagnostic

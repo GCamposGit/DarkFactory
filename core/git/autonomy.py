@@ -41,11 +41,14 @@ from core.git.ci_checks import (
     check_main,
     ensure_green,
     is_ledger_only,
+    pending_check_labels,
     sanitize,
 )
 from core.roadmap.models import DeliveryStatus, LifecycleStage, PlanningHorizon, RoadmapItemType
 
 logger = logging.getLogger("darkfac.git.autonomy")
+
+_POLICY_BLOCK_MARKER = "base branch policy prohibits"
 
 _LEDGER_RELATIVE = ".factory/demands/demands.json"
 
@@ -664,8 +667,9 @@ class GitAutonomyManager:
 
         Returns ``(blocking_report, note)``. ``blocking_report`` is ``None`` when
         the merge may proceed; ``note`` is the ``ci_gate=...`` marker for the
-        final message. Only queue PRs that touch the ledger/roadmap skip CI;
-        ledger-only implementation PRs are rejected.
+        final message. Ledger-only implementation PRs are rejected. Ledger-only
+        queue PRs are gated like any other PR: the repository ruleset on the base
+        branch requires status checks, so merging before they settle is refused.
         """
         changed = self._changed_files(base, cwd)
         if kind == "implementation" and is_ledger_only(changed):
@@ -674,8 +678,7 @@ class GitAutonomyManager:
                 message="Implementation PR changes only the ledger; merge withheld.",
             ), "ci_gate=rejected_ledger_only"
         if kind == "queue" and is_ledger_only(changed):
-            logger.info("PR #%s touches only ledger/roadmap files: ci_gate=skipped_ledger_only", number)
-            return None, "ci_gate=skipped_ledger_only"
+            logger.info("PR #%s touches only ledger/roadmap files; waiting for required checks", number)
         verdict = ensure_green(
             number,
             cwd,
@@ -883,7 +886,26 @@ class GitAutonomyManager:
         state, merge_sha = self._pr_state(number, cwd, runner)
         if state != "MERGED" and merge_res.returncode != 0:
             err = f"{merge_res.stderr}{merge_res.stdout}".lower()
-            if "not mergeable" in err or "conflict" in err or "out of date" in err:
+            if _POLICY_BLOCK_MARKER in err:
+                # The ruleset on the base branch still lacks its required checks:
+                # re-run the gate once (it waits for them) and try the merge again.
+                blocked, gate_note = self._ci_gate(number, pr_url, branch, base, cwd, runner, kind)
+                if blocked is not None:
+                    return blocked
+                merge_res = runner(merge_args, cwd)
+                state, merge_sha = self._pr_state(number, cwd, runner)
+                if state != "MERGED" and merge_res.returncode != 0:
+                    pending = pending_check_labels(number, cwd, runner)
+                    return DeliveryReport(
+                        ok=False, action="error", pr_url=pr_url, branch=branch,
+                        message=(
+                            "gh pr merge failed: the base branch policy still prohibits the merge after "
+                            f"re-running the CI gate ({gate_note}); pending required checks: "
+                            f"{', '.join(pending) or 'none reported'}; PR and branch left open. "
+                            f"gh said: {(merge_res.stderr or merge_res.stdout).strip()}"
+                        ),
+                    )
+            elif "not mergeable" in err or "conflict" in err or "out of date" in err:
                 _run_git(["fetch", "origin"], cwd=cwd)
                 collision = self._ledger_collision(cwd, remote_ref)
                 if collision:

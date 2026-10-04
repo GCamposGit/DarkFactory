@@ -143,14 +143,14 @@ def core_module_names(core_dir: Path = CORE_DIR) -> set[str]:
 
 def frontend_text(frontend_dir: Path = FRONTEND_DIR) -> str:
     chunks = [path.read_text(encoding="utf-8") for path in sorted(frontend_dir.glob("*.js"))]
-    chunks.append((frontend_dir / "index.html").read_text(encoding="utf-8"))
+    chunks.extend(path.read_text(encoding="utf-8") for path in sorted(frontend_dir.glob("*.html")))
     return "\n".join(chunks).replace("${API_BASE}", "/api")
 
 
 def frontend_ids(frontend_dir: Path = FRONTEND_DIR) -> set[str]:
-    """Static ids from index.html plus ids of sections injected by the frontend scripts."""
+    """Static ids from the frontend pages (``*.html``) plus ids of sections injected by the frontend scripts."""
     ids: set[str] = set()
-    for source in [frontend_dir / "index.html", *sorted(frontend_dir.glob("*.js"))]:
+    for source in [*sorted(frontend_dir.glob("*.html")), *sorted(frontend_dir.glob("*.js"))]:
         ids.update(_DOM_ID.findall(source.read_text(encoding="utf-8")))
     return ids
 

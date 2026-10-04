@@ -248,6 +248,20 @@ def serve_index() -> FileResponse:
     )
 
 
+# Live line board page (USR-138)
+@app.get("/live", response_class=FileResponse, include_in_schema=False)
+@app.get("/live/", response_class=FileResponse, include_in_schema=False)
+def serve_live() -> FileResponse:
+    return FileResponse(
+        FRONTEND_DIR / "live.html",
+        headers={
+            "Cache-Control": "no-cache, no-store, must-revalidate",
+            "Pragma": "no-cache",
+            "Expires": "0",
+        },
+    )
+
+
 # Mount static assets (CSS, JS)
 if FRONTEND_DIR.exists():
     app.mount("/static", StaticFiles(directory=str(FRONTEND_DIR)), name="static")

@@ -274,3 +274,42 @@ def test_line_validate_names_the_paths_a_failed_runner_left_dirty(
     (root / "stray_dir" / "left.txt").write_text("x", encoding="utf-8")
     module.report_dirty_checkout(root)
     assert "stray_dir/left.txt" in capsys.readouterr().out
+
+
+def test_attempt_log_lists_every_remote_dispatch_line_even_when_the_tail_cut_them_off() -> None:
+    noise = "x" * 6000
+    raw = (
+        "[REMOTE] http://100.78.181.90:8080 unreachable (worker offline or port blocked)\n"
+        "[line_validate] snapshot abc checked out\n"
+        f"{noise}\n"
+        "[REMOTE] no remote worker used; running the suite locally on this host\n"
+        "[HARNESS_FAIL]\n"
+    )
+    log = diagnostics.format_attempt_log(
+        "development", iteration=1, harness="claude", model="sonnet", error_kind=None,
+        duration_s=1.0, output="verdict=FAILED", raw_tail=raw,
+    )
+    before, section = log.split("## Remote dispatch lines (redacted)", 1)
+    assert "unreachable (worker offline or port blocked)" in section
+    assert "[line_validate] snapshot abc checked out" in section
+    assert "no remote worker used" in section
+    assert "[HARNESS_FAIL]" not in section
+    # the first [REMOTE] line is outside the 3000-char raw tail: only the dedicated section keeps it
+    assert "unreachable" not in before
+
+
+def test_attempt_log_says_when_remote_dispatch_was_not_attempted() -> None:
+    log = diagnostics.format_attempt_log(
+        "development", iteration=1, harness="claude", model="sonnet", error_kind=None,
+        duration_s=1.0, output="o", raw_tail="plain output",
+    )
+    assert "remote dispatch was not attempted" in log
+
+
+def test_remote_dispatch_lines_are_redacted_and_capped() -> None:
+    secret = "sk-" + "ant-" + "api03-" + "FakeSecretToken1234567890"
+    raw = "\n".join([f"[REMOTE] line {i} {secret}" for i in range(100)])
+    lines = diagnostics.remote_dispatch_lines(raw)
+    assert len(lines) <= diagnostics.REMOTE_SECTION_MAX_LINES
+    assert lines[-1].startswith("[REMOTE] line 99")
+    assert all(secret not in line for line in lines)
