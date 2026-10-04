@@ -61,10 +61,42 @@ def _git(args: list[str], cwd: Path) -> "subprocess.CompletedProcess[str]":
     return proc
 
 
+import shutil
+import tempfile
+import threading
+
+_STAGE_INT_TEMPLATE_LOCK = threading.Lock()
+_STAGE_INT_TEMPLATE: Path | None = None
+
+
+def _get_stage_int_template() -> Path:
+    global _STAGE_INT_TEMPLATE
+    with _STAGE_INT_TEMPLATE_LOCK:
+        if _STAGE_INT_TEMPLATE is None:
+            base = Path(tempfile.mkdtemp(prefix="darkfac-stage-int-template-"))
+            origin = base / "origin.git"
+            _git(["init", "--bare", str(origin)], cwd=base)
+            seed = base / "_seed"
+            _git(["clone", str(origin), str(seed)], cwd=base)
+            _git(["checkout", "-B", "main"], cwd=seed)
+            _git(["config", "user.email", "seed@example.com"], cwd=seed)
+            _git(["config", "user.name", "Seed"], cwd=seed)
+            (seed / "README.md").write_text("seed\n", encoding="utf-8")
+            (seed / "shared.txt").write_text("base\n", encoding="utf-8")
+            _git(["add", "."], cwd=seed)
+            _git(["commit", "-m", "seed commit"], cwd=seed)
+            _git(["push", "origin", "main"], cwd=seed)
+            shutil.rmtree(seed, ignore_errors=True)
+            _STAGE_INT_TEMPLATE = origin
+        return _STAGE_INT_TEMPLATE
+
+
 def _init_bare_origin(tmp_path: Path, default_branch: str = "main") -> Path:
     origin = tmp_path / "origin.git"
+    if default_branch == "main":
+        shutil.copytree(_get_stage_int_template(), origin)
+        return origin
     _git(["init", "--bare", str(origin)], cwd=tmp_path)
-
     seed = tmp_path / "_seed"
     _git(["clone", str(origin), str(seed)], cwd=tmp_path)
     _git(["checkout", "-B", default_branch], cwd=seed)

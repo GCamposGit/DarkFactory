@@ -34,6 +34,11 @@ class NodeStatus(BaseModel):
     busy: bool | None = None
     active_runs: int | None = None
     is_legacy: bool | None = None
+    sync_classification: Literal["converged", "behind", "ahead", "diverged", "dirty"] | None = None
+    local_commits: list[str] = Field(default_factory=list)
+    dirty_files: dict[str, list[str]] = Field(default_factory=dict)
+    backup_branch: str | None = None
+
 
 
 class SyncReport(BaseModel):
@@ -164,6 +169,302 @@ def _probe(
     )
 
 
+KNOWN_EPHEMERAL_PATTERNS = (
+    "__pycache__",
+    ".pytest_cache",
+    "test_logs",
+    "reports/canary",
+    "ticket_quota_usage.jsonl",
+)
+
+
+def is_ephemeral_dirty_file(path_str: str) -> bool:
+    norm = path_str.replace("\\", "/")
+    return any(pattern in norm for pattern in KNOWN_EPHEMERAL_PATTERNS)
+
+
+def classify_checkout(
+    root: Path,
+    git: GitRunner,
+    expected_sha: str | None,
+) -> tuple[
+    Literal["converged", "behind", "ahead", "diverged", "dirty"] | None,
+    list[str],
+    dict[str, list[str]],
+    str | None,
+]:
+    """Classify the git state of a checkout relative to origin/main (USR-78, USR-119)."""
+    dirty_files: dict[str, list[str]] = {"tracked_modified": [], "untracked": [], "ignored": []}
+    status_porcelain = ""
+    try:
+        status_porcelain = git(root, ["status", "--porcelain"])
+    except Exception:
+        status_porcelain = ""
+
+    if status_porcelain:
+        try:
+            diff_names = [p.strip() for p in git(root, ["diff", "--name-only"]).splitlines() if p.strip()]
+            dirty_files["tracked_modified"] = sorted(set(diff_names))
+        except Exception:
+            lines = [l.strip() for l in status_porcelain.splitlines() if l.strip()]
+            dirty_files["tracked_modified"] = [l[2:].strip() for l in lines if not l.startswith("??")]
+        try:
+            untracked = [p.strip() for p in git(root, ["ls-files", "--others", "--exclude-standard"]).splitlines() if p.strip()]
+            dirty_files["untracked"] = sorted(set(untracked))
+        except Exception:
+            lines = [l.strip() for l in status_porcelain.splitlines() if l.strip()]
+            dirty_files["untracked"] = [l[2:].strip() for l in lines if l.startswith("??")]
+        try:
+            ignored = [p.strip() for p in git(root, ["ls-files", "--others", "-i", "--exclude-standard"]).splitlines() if p.strip()]
+            dirty_files["ignored"] = sorted(set(ignored))
+        except Exception:
+            pass
+
+    has_tracked_or_untracked = bool(dirty_files["tracked_modified"] or dirty_files["untracked"])
+
+    local_commits: list[str] = []
+    ahead_count = 0
+    behind_count = 0
+    if expected_sha:
+        try:
+            rev_list_ahead = git(root, ["rev-list", "origin/main..HEAD"]).strip()
+            if rev_list_ahead:
+                local_commits = [c.strip() for c in rev_list_ahead.splitlines() if c.strip()]
+                ahead_count = len(local_commits)
+        except Exception:
+            pass
+        try:
+            rev_list_behind = git(root, ["rev-list", "HEAD..origin/main"]).strip()
+            if rev_list_behind:
+                behind_count = len([c.strip() for c in rev_list_behind.splitlines() if c.strip()])
+        except Exception:
+            pass
+
+    if has_tracked_or_untracked:
+        tracked_summary = f"{len(dirty_files['tracked_modified'])} tracked modified ({', '.join(dirty_files['tracked_modified'][:3])})" if dirty_files["tracked_modified"] else "0 tracked"
+        untracked_summary = f"{len(dirty_files['untracked'])} untracked ({', '.join(dirty_files['untracked'][:3])})" if dirty_files["untracked"] else "0 untracked"
+        reason = f"dirty worktree: {tracked_summary}, {untracked_summary}; no git operation attempted"
+        return "dirty", local_commits, dirty_files, reason
+    elif ahead_count > 0 and behind_count > 0:
+        reason = f"diverged: ahead {ahead_count} commits ({', '.join(local_commits[:3])}), behind {behind_count} commits"
+        return "diverged", local_commits, dirty_files, reason
+    elif ahead_count > 0:
+        reason = f"ahead: {ahead_count} local unpushed commits ({', '.join(local_commits[:3])})"
+        return "ahead", local_commits, dirty_files, reason
+    elif behind_count > 0:
+        reason = f"behind: {behind_count} commits behind origin/main"
+        return "behind", local_commits, dirty_files, reason
+    elif expected_sha:
+        return "converged", [], dirty_files, None
+    return None, [], dirty_files, None
+
+
+from core.paths import state_root
+
+def _divergence_state_file() -> Path:
+    return state_root() / "node_sync_divergence.json"
+
+def _pending_convergence_file() -> Path:
+    return state_root() / "node_sync_pending.json"
+
+
+def record_divergence_cycle(
+    node_name: str,
+    state: str,
+    state_path: Path | None = None,
+    notifier: Callable[[str], bool] | None = None,
+) -> int:
+    """Track consecutive divergent cycles per node and notify on > 1 cycle (USR-78)."""
+    cycles = 0
+    path = state_path or _divergence_state_file()
+    try:
+        data: dict[str, int] = {}
+        if path.is_file():
+            try:
+                data = json.loads(path.read_text(encoding="utf-8"))
+            except Exception:
+                data = {}
+        if state == "divergent":
+            cycles = data.get(node_name, 0) + 1
+            data[node_name] = cycles
+            if cycles > 1 and notifier:
+                notifier(f"ALERTA: Nó {node_name} permanece divergente por {cycles} ciclos de deploy consecutivos!")
+        else:
+            data[node_name] = 0
+            cycles = 0
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+    except Exception:
+        pass
+    return cycles
+
+
+def record_pending_convergence(
+    node: str,
+    expected_sha: str,
+    reason: str,
+    path: Path | None = None,
+) -> None:
+    """Persist pending convergence request for resumable lifecycle (USR-127)."""
+    target = path or _pending_convergence_file()
+    try:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        data = {
+            "node": node,
+            "expected_sha": expected_sha,
+            "reason": reason,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+        target.write_text(json.dumps(data, indent=2), encoding="utf-8")
+    except Exception:
+        pass
+
+
+def load_pending_convergence(path: Path | None = None) -> dict[str, Any] | None:
+    """Load pending convergence request if one was stored (USR-127)."""
+    target = path or _pending_convergence_file()
+    try:
+        if target.is_file():
+            return json.loads(target.read_text(encoding="utf-8"))
+    except Exception:
+        pass
+    return None
+
+
+def clear_pending_convergence(path: Path | None = None) -> None:
+    """Clear pending convergence record after successful convergence (USR-127)."""
+    target = path or _pending_convergence_file()
+    try:
+        if target.is_file():
+            target.unlink()
+    except Exception:
+        pass
+
+
+def find_canonical_main_checkout(root: Path = REPO_ROOT, git: GitRunner = run_git) -> Path:
+    """Discover a safe canonical main checkout without touching active worktrees (USR-127)."""
+    try:
+        common_dir = git(root, ["rev-parse", "--git-common-dir"])
+        common_path = Path(common_dir)
+        if not common_path.is_absolute():
+            common_path = (root / common_path).resolve()
+        primary_root = common_path.parent if common_path.name == ".git" else root
+    except Exception:
+        primary_root = root
+
+    try:
+        wt_out = git(primary_root, ["worktree", "list", "--porcelain"])
+        current_wt: Path | None = None
+        for line in wt_out.splitlines():
+            line = line.strip()
+            if line.startswith("worktree "):
+                current_wt = Path(line.split(" ", 1)[1])
+            elif line.startswith("branch refs/heads/main") and current_wt:
+                return current_wt
+    except Exception:
+        pass
+
+    return primary_root
+
+
+def remediate_dirty_checkout(
+    root: Path,
+    git: GitRunner,
+    dirty_files: dict[str, list[str]],
+    store: Any = None,
+    notifier: Callable[[str], bool] | None = None,
+) -> bool:
+    """Safely remediate dirty worktrees if they only contain known ephemeral files (USR-119)."""
+    non_ephemeral = []
+    for category in ("tracked_modified", "untracked"):
+        for f in dirty_files.get(category, []):
+            if not is_ephemeral_dirty_file(f):
+                non_ephemeral.append(f)
+    if non_ephemeral:
+        msg = f"Dirty worktree contains non-ephemeral files: {', '.join(non_ephemeral)}"
+        if notifier:
+            notifier(msg)
+        if store is not None:
+            try:
+                from core.demands.models import DemandOrigin, TAG_USER_DEMAND, UserTicket
+                from core.roadmap.models import DeliveryStatus, LifecycleStage, PlanningHorizon, RoadmapItemType
+                ticket_id = store.next_ticket_id("darkfac")
+                t = UserTicket(
+                    id=ticket_id,
+                    project_id="darkfac",
+                    title=f"Investigar arquivos modificados nao-efemeros no nó ({len(non_ephemeral)} arquivos)",
+                    origin=DemandOrigin.AGENT,
+                    status=DeliveryStatus.PLANNED,
+                    item_type=RoadmapItemType.INFRASTRUCTURE,
+                    lifecycle_stage=LifecycleStage.EXECUTION,
+                    horizon=PlanningHorizon.NOW,
+                    tags=[TAG_USER_DEMAND, "dirty-worktree", "auto-generated"],
+                    problem_statement="O nó continha alterações não-efêmeras que impediram a sincronização limpa:\n" + "\n".join(f"- {f}" for f in non_ephemeral),
+                    core_journey=["Investigar se alterações devem ser commitadas em branch ou descartadas"],
+                    acceptance_criteria=["Arquivos tratados e worktree limpa para convergência"],
+                )
+                store.save_ticket(t)
+            except Exception:
+                pass
+        return False
+    for category in ("tracked_modified", "untracked"):
+        for f in dirty_files.get(category, []):
+            p = root / f
+            if p.exists() and p.is_file():
+                try:
+                    p.unlink()
+                except Exception:
+                    pass
+    return True
+
+
+def safe_repair_divergent_checkout(
+    root: Path,
+    node_name: str,
+    git: GitRunner,
+    expected_sha: str,
+    notifier: Callable[[str], bool] | None = None,
+    store: Any = None,
+) -> str | None:
+    """Safely back up unpushed local commits to a remote branch before hard reset (USR-78)."""
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    backup_branch = f"backup/{node_name.lower()}-{timestamp}"
+    try:
+        git(root, ["branch", backup_branch, "HEAD"])
+        git(root, ["push", "origin", backup_branch])
+    except Exception:
+        return None
+    try:
+        git(root, ["reset", "--hard", "origin/main"])
+    except Exception:
+        return None
+    if store is not None:
+        try:
+            from core.demands.models import DemandOrigin, TAG_USER_DEMAND, UserTicket
+            from core.roadmap.models import DeliveryStatus, LifecycleStage, PlanningHorizon, RoadmapItemType
+            ticket_id = store.next_ticket_id("darkfac")
+            t = UserTicket(
+                id=ticket_id,
+                project_id="darkfac",
+                title=f"Cherry-pick commits divergentes de {node_name} salvos em {backup_branch}",
+                origin=DemandOrigin.AGENT,
+                status=DeliveryStatus.PLANNED,
+                item_type=RoadmapItemType.INFRASTRUCTURE,
+                lifecycle_stage=LifecycleStage.EXECUTION,
+                horizon=PlanningHorizon.NOW,
+                tags=[TAG_USER_DEMAND, "divergence", "cherry-pick", "auto-generated"],
+                problem_statement=f"O nó {node_name} continha commits locais antes da sincronização. Foram salvos na branch remota {backup_branch}.",
+                core_journey=[f"Revisar commits na branch {backup_branch} e aplicar cherry-pick via PR se necessário"],
+                acceptance_criteria=[f"Commits avaliados na branch {backup_branch}"],
+            )
+            store.save_ticket(t)
+        except Exception:
+            pass
+    if notifier:
+        notifier(f"Node {node_name} was divergent. Backed up to {backup_branch} and reset to origin/main.")
+    return backup_branch
+
+
 def _notebook_blocker(root: Path, git: GitRunner) -> str | None:
     """Why the Notebook checkout must never be touched, or ``None`` when it may be synced."""
     git_dir = git(root, ["rev-parse", "--git-dir"])
@@ -182,6 +483,8 @@ def verify(
     vps_url: str = VPS_URL,
     retries: int = 3, retry_delay: float = 0.5,
     sleep: Callable[[float], None] = time.sleep,
+    notifier: Callable[[str], bool] | None = None,
+    track_divergence: bool = False,
 ) -> SyncReport:
     try:
         expected = _sha(git(root, ["rev-parse", "origin/main"]))
@@ -192,25 +495,36 @@ def verify(
     try:
         local = _sha(git(root, ["rev-parse", "HEAD"]))
         blocker = _notebook_blocker(root, git)
-        state = "converged" if local == expected and blocker is None else "divergent"
+        if blocker:
+            classification, local_commits, dirty_files, classification_reason = None, [], {}, blocker
+            reason = blocker
+            state = "divergent"
+        else:
+            classification, local_commits, dirty_files, classification_reason = classify_checkout(root, git, expected)
+            reason = classification_reason
+            state = "converged" if local == expected and classification == "converged" else "divergent"
         try:
             notebook_commit_date = git(root, ["show", "-s", "--format=%cI", local]) if local else None
         except Exception:
             notebook_commit_date = None
-        notebook = NodeStatus(name="Notebook", state=state, git_sha=local, reason=blocker, commit_date=notebook_commit_date)
+        notebook = NodeStatus(
+            name="Notebook", state=state, git_sha=local, reason=reason, commit_date=notebook_commit_date,
+            sync_classification=classification, local_commits=local_commits, dirty_files=dirty_files,
+        )
     except Exception:
         notebook = NodeStatus(name="Notebook", state="unknown", reason="checkout unavailable")
-    return SyncReport(expected_sha=expected, nodes=[
-        notebook,
-        _probe(
-            "Desktop", f"{desktop_url.rstrip('/')}/health", expected, http,
-            retries=retries, retry_delay=retry_delay, sleep=sleep,
-        ),
-        _probe(
-            "VPS", vps_url, expected, http, unknown_without_sha=True,
-            retries=retries, retry_delay=retry_delay, sleep=sleep,
-        ),
-    ])
+    desktop = _probe(
+        "Desktop", f"{desktop_url.rstrip('/')}/health", expected, http,
+        retries=retries, retry_delay=retry_delay, sleep=sleep,
+    )
+    vps = _probe(
+        "VPS", vps_url, expected, http, unknown_without_sha=True,
+        retries=retries, retry_delay=retry_delay, sleep=sleep,
+    )
+    if track_divergence:
+        for node in (notebook, desktop, vps):
+            record_divergence_cycle(node.name, node.state, notifier=notifier)
+    return SyncReport(expected_sha=expected, nodes=[notebook, desktop, vps])
 
 
 def sync(
@@ -223,10 +537,13 @@ def sync(
     vps_redeploy: VpsRedeploy = redeploy_vps,
     task_recovery: TaskRecovery = recover_scheduled_task,
     retries: int = 3, retry_delay: float = 0.5,
+    notifier: Callable[[str], bool] | None = None,
+    track_divergence: bool = False,
 ) -> SyncReport:
     initial = verify(
         root=root, git=git, http=http, desktop_url=desktop_url, vps_url=vps_url,
-        retries=retries, retry_delay=retry_delay, sleep=sleep,
+        retries=retries, retry_delay=retry_delay, sleep=sleep, notifier=notifier,
+        track_divergence=track_divergence,
     )
     expected = initial.expected_sha
     if expected is None:
@@ -237,6 +554,29 @@ def sync(
             blocker = _notebook_blocker(root, git)
             if blocker:
                 notebook.reason = blocker
+            elif notebook.sync_classification == "dirty":
+                remediated = remediate_dirty_checkout(root, git, notebook.dirty_files, notifier=notifier)
+                if remediated:
+                    git(root, ["fetch", "origin", "main"])
+                    expected = _sha(git(root, ["rev-parse", "origin/main"]))
+                    if expected is None:
+                        raise RuntimeError("origin/main SHA invalid")
+                    git(root, ["merge", "--ff-only", "origin/main"])
+                    notebook.state = "converged"
+                    notebook.sync_classification = "converged"
+                    notebook.reason = None
+                else:
+                    notebook.reason = notebook.reason or "dirty worktree; no git operation attempted"
+            elif notebook.sync_classification in ("ahead", "diverged"):
+                backup_branch = safe_repair_divergent_checkout(root, "Notebook", git, expected, notifier=notifier)
+                if backup_branch:
+                    notebook.backup_branch = backup_branch
+                    notebook.state = "converged"
+                    notebook.sync_classification = "converged"
+                    notebook.git_sha = expected
+                    notebook.reason = f"converged after backing up local commits to remote branch {backup_branch}"
+                else:
+                    notebook.reason = "divergent: failed to push backup branch; reset aborted for safety"
             elif git(root, ["status", "--porcelain"]):
                 notebook.reason = "dirty worktree; no git operation attempted"
             else:
@@ -245,8 +585,12 @@ def sync(
                 if expected is None:
                     raise RuntimeError("origin/main SHA invalid")
                 git(root, ["merge", "--ff-only", "origin/main"])
+                notebook.state = "converged"
+                notebook.sync_classification = "converged"
+                notebook.reason = None
         except Exception as exc:
             notebook.reason = str(exc)
+
     desktop = initial.nodes[1]
     observed_divergent_sha = desktop.git_sha if desktop.state == "divergent" else None
     if desktop.state != "converged":
@@ -291,6 +635,7 @@ def sync(
                 is_busy = bool(health.get("busy")) or int(health.get("active_runs") or 0) > 0
                 if is_busy:
                     desktop.reason = "Desktop is busy (busy=True or active_runs > 0); update and restart skipped"
+                    record_pending_convergence("Desktop", expected, desktop.reason)
                     initial.nodes[1] = desktop
                 elif desktop.is_legacy or (health.get("restart_safe") is not True and _sha(health.get("git_sha")) is None):
                     # USR-71: Legacy test worker on :8080 without git_sha or restart_safe.
@@ -319,26 +664,38 @@ def sync(
             initial.nodes[2].reason = f"Dokploy redeploy failed: {type(exc).__name__}"
     final = verify(
         root=root, git=git, http=http, desktop_url=desktop_url, vps_url=vps_url,
-        retries=retries, retry_delay=retry_delay, sleep=sleep,
+        retries=retries, retry_delay=retry_delay, sleep=sleep, notifier=notifier,
+        track_divergence=track_divergence,
     )
     for old, new in zip(initial.nodes, final.nodes):
         if new.state != "converged":
             if old.reason and (not new.reason or "busy" in old.reason or "offline" in old.reason):
                 new.reason = old.reason
+    if final.nodes[1].state == "converged":
+        pending = load_pending_convergence()
+        if pending and pending.get("node") == "Desktop":
+            clear_pending_convergence()
     return final
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=("verify", "sync"))
+    parser.add_argument("action", choices=("verify", "sync", "retry"))
     args = parser.parse_args(argv)
     kwargs = {
         "desktop_url": os.environ.get("DARKFAC_DESKTOP_URL", DESKTOP_URL),
         "vps_url": os.environ.get("DARKFAC_VPS_HEALTH_URL", VPS_URL),
     }
-    report = verify(**kwargs) if args.action == "verify" else sync(
-        **kwargs, token=os.environ.get("DARKFAC_WORKER_TOKEN"),
-    )
+    if args.action == "retry":
+        pending = load_pending_convergence()
+        if not pending:
+            print(json.dumps({"message": "No pending convergence found", "ok": True}))
+            return 0
+        report = sync(**kwargs, token=os.environ.get("DARKFAC_WORKER_TOKEN"))
+    elif args.action == "verify":
+        report = verify(**kwargs)
+    else:
+        report = sync(**kwargs, token=os.environ.get("DARKFAC_WORKER_TOKEN"))
     print(report.model_dump_json())
     return 0 if report.ok else 1
 

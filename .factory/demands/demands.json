@@ -1676,7 +1676,8 @@
     "project_id": "darkfac",
     "title": "Tickets de deploy so podem ser concluidos com prova ao vivo de convergencia",
     "origin": "user",
-    "status": "planned",
+    "status": "completed",
+    "delivery_evidence": "core/git/autonomy.py, core/demands/store.py, tests/test_git_autonomy_live_proof.py:live_provisional",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -1708,7 +1709,7 @@
       "USR-81"
     ],
     "created_at": "2026-09-30T17:27:55.666113Z",
-    "updated_at": "2026-09-30T22:00:00Z"
+    "updated_at": "2026-10-04T09:59:15.138665Z"
   },
   {
     "id": "USR-74",
@@ -1856,7 +1857,8 @@
     "project_id": "darkfac",
     "title": "Nos de producao nao podem acumular commits locais fora do fluxo de PR",
     "origin": "user",
-    "status": "planned",
+    "status": "completed",
+    "delivery_evidence": "core/infra/node_sync.py, tests/test_node_sync_divergence.py, .factory/reports/usr-78-73-119-127-resilient-nodes-live-deploy-report.md",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -1887,7 +1889,7 @@
       "USR-71"
     ],
     "created_at": "2026-09-30T18:35:48.481396Z",
-    "updated_at": "2026-10-03T21:17:00Z"
+    "updated_at": "2026-10-04T09:59:15.138665Z"
   },
   {
     "id": "USR-79",
@@ -3368,8 +3370,8 @@
     "project_id": "darkfac",
     "title": "node_sync: Notebook com worktree suja fica divergente e o redeploy pos-merge sai com codigo 1 sem dizer o que esta sujo nem como remediar",
     "origin": "user",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "core/infra/node_sync.py, scripts/dokploy_redeploy.py, tests/test_node_sync_divergence.py, tests/test_dokploy_redeploy.py",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -3392,7 +3394,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-01T14:14:43.505704Z",
-    "updated_at": "2026-10-01T14:14:43.505704Z"
+    "updated_at": "2026-10-04T09:59:15.138665Z"
   },
   {
     "id": "USR-121",
@@ -3582,8 +3584,8 @@
     "project_id": "darkfac",
     "title": "Retry post-deploy node convergence without touching active checkouts",
     "origin": "user",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "core/infra/node_sync.py, tests/test_node_sync_divergence.py",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -3605,7 +3607,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-03T10:03:35.187704Z",
-    "updated_at": "2026-10-03T10:03:35.187704Z"
+    "updated_at": "2026-10-04T09:59:15.138665Z"
   },
   {
     "id": "USR-128",

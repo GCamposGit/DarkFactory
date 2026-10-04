@@ -1412,3 +1412,34 @@ def test_stage_order_in_redeploy(monkeypatch: pytest.MonkeyPatch) -> None:
     assert events == ["deploy", "node_sync", "check_main", "backup"]
 
 
+def test_main_returns_exit_node_dirty_when_worktree_is_dirty(monkeypatch: pytest.MonkeyPatch) -> None:
+    """USR-119: dokploy_redeploy exits with EXIT_NODE_DIRTY (3) when deploy succeeds but node sync fails due to dirty worktree."""
+    from core.infra import node_sync
+
+    def dirty_sync(**kwargs: Any) -> node_sync.SyncReport:
+        return node_sync.SyncReport(
+            expected_sha="a" * 40,
+            nodes=[
+                node_sync.NodeStatus(name="Notebook", state="divergent", sync_classification="dirty", reason="dirty worktree: 1 tracked modified"),
+                node_sync.NodeStatus(name="Desktop", state="converged", git_sha="a" * 40),
+                node_sync.NodeStatus(name="VPS", state="converged", git_sha="a" * 40),
+            ],
+        )
+
+    monkeypatch.setattr(node_sync, "sync", dirty_sync)
+
+    transport = _cloud_transport()
+    out, err = io.StringIO(), io.StringIO()
+    exit_code = mod.main(
+        ["--only", "darkfac-cloud", "--skip-backup", "--skip-check-main"],
+        env=_ENV,
+        registry_reader=_no_registry,
+        transport_factory=lambda url, key: transport,
+        stdout=out,
+        stderr=err,
+    )
+    assert exit_code == mod.EXIT_NODE_DIRTY
+    assert exit_code == 3
+
+
+
