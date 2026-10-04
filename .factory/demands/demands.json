@@ -4050,5 +4050,35 @@
     "dependencies": [],
     "created_at": "2026-10-04T17:06:34.784102Z",
     "updated_at": "2026-10-04T17:06:34.784102Z"
+  },
+  {
+    "id": "USR-142",
+    "project_id": "darkfac",
+    "title": "Linha: run ativo sem sucessor agendado apos o Grill (HF-03-08 parado ha 15 dias)",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "EVIDENCIA 04/10/2026 na Esteira ao vivo (/api/line/live, control store Postgres): run do demand dem-cb92532c1c46 (HF-03-08: Autonomia Operacional Cloud e Verificacao Continua) esta com runs.status=active ha ~15 dias, com um unico job grill succeeded e nenhum job de planning (nem pending) criado. Nenhum agendador/varredor (USR-105 cobre waiting_human) detecta run ativo sem job aberto; o run fica invisivel para a fila e nunca termina.",
+    "core_journey": [
+      "EVIDENCIA 04/10/2026 na Esteira ao vivo (/api/line/live, control store Postgres): run do demand dem-cb92532c1c46 (HF-03-08: Autonomia Operacional Cloud e Verificacao Continua) esta com runs.status=active ha ~15 dias, com um unico job grill succeeded e nenhum job de planning (nem pending) criado. Nenhum agendador/varredor (USR-105 cobre waiting_human) detecta run ativo sem job aberto; o run fica invisivel para a fila e nunca termina."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Varredor detecta run active sem job running/pending/retry e sem atividade ha mais de 30 min e agenda o sucessor ou move o run para waiting_human com cause_code explicito",
+      "HF-03-08 (dem-cb92532c1c46) resolvido: segue para planning ou fecha com causa registrada",
+      "Teste focal com store falso; o painel /live deixa de marcar o run como 'nenhuma etapa agendada'"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-04T17:56:24.512760Z",
+    "updated_at": "2026-10-04T17:56:24.512760Z"
   }
 ]
