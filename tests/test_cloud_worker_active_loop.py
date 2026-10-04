@@ -406,6 +406,28 @@ def test_human_probe_sweeper_respects_interval(temp_stores):
     assert sweep_calls["n"] == 2
 
 
+def test_human_probe_sweeper_resends_unnotified_grill(temp_stores):
+    store, artifact_store = temp_stores
+    run_id, job_key = _setup_waiting_human_job(store, "grill")
+
+    resender_calls = []
+
+    def _fake_resender(project, r_id):
+        resender_calls.append((project, r_id))
+        return True
+
+    worker = CloudWorker(
+        worker_id="test-sweeper",
+        store=store,
+        artifact_store=artifact_store,
+        grill_resender=_fake_resender,
+    )
+
+    worker.sweep_waiting_human_requests()
+    assert len(resender_calls) == 1
+    assert resender_calls[0][1] == run_id
+
+
 # --------------------------------------------------------------------------
 # USR-106: RouteWaiter on cloud_worker dispatch when route is unavailable
 # --------------------------------------------------------------------------

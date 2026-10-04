@@ -317,6 +317,71 @@ def test_failed_notification_is_retried_on_next_reconcile(project, monkeypatch):
     assert len(ok) == 1  # already notified; not sent twice
 
 
+def test_failed_notification_logs_error_and_alerts_owner(project, monkeypatch, caplog):
+    reply = _fake_agent_reply(
+        {
+            "questions": [
+                {"id": "q1", "text": "Cobrar taxa?", "kind": "business", "options": ["sim", "nao"], "recommended": "nao"}
+            ],
+            "assumptions": [],
+            "is_product_scale": False,
+        }
+    )
+    monkeypatch.setattr(stage_grill, "run_read_agent", lambda *a, **k: reply)
+    alerts = []
+    monkeypatch.setattr(stage_grill, "_alert_owner_bot", lambda text: alerts.append(text) or True)
+
+    import logging
+    with caplog.at_level(logging.ERROR):
+        res = run_grill(project, "run-err-alert", "demanda", send_message=lambda t, b: False)
+        assert res.outcome == "waiting_human"
+
+    assert len(alerts) == 1
+    assert "[ALERTA GRILL]" in alerts[0]
+    assert "run-err-alert" in alerts[0]
+    assert any("Grill Telegram notification not delivered for run run-err-alert" in r.message for r in caplog.records)
+
+
+def test_resend_unnotified_grill(project, monkeypatch):
+    reply = _fake_agent_reply(
+        {
+            "questions": [
+                {"id": "q1", "text": "Regra X?", "kind": "intent", "options": ["A", "B"], "recommended": "A"}
+            ],
+            "assumptions": [],
+            "is_product_scale": False,
+        }
+    )
+    monkeypatch.setattr(stage_grill, "run_read_agent", lambda *a, **k: reply)
+
+    # First attempt fails to send
+    first = run_grill(project, "run-resend", "demanda", send_message=lambda t, b: False)
+    assert first.outcome == "waiting_human"
+
+    from core.line.stage_grill import _load_pending, resend_unnotified_grill
+    from core.line import workspace
+
+    ws = workspace.checkout(project, "run-resend")
+    pending = _load_pending(ws)
+    assert pending is not None
+    assert pending.notified is False
+
+    # Resend succeeds
+    sent_messages = []
+    res = resend_unnotified_grill(project, "run-resend", send_message=lambda t, b: sent_messages.append(t) or True)
+    assert res is True
+    assert len(sent_messages) == 1
+
+    pending_after = _load_pending(ws)
+    assert pending_after is not None
+    assert pending_after.notified is True
+
+    # Idempotent: resend does not duplicate when already notified
+    res2 = resend_unnotified_grill(project, "run-resend", send_message=lambda t, b: sent_messages.append(t) or True)
+    assert res2 is True
+    assert len(sent_messages) == 1
+
+
 # --------------------------------------------------------------------------
 # Canary auto policy: a canary never waits for a human
 # --------------------------------------------------------------------------

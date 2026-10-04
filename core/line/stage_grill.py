@@ -738,6 +738,23 @@ def _adopt_previous_grill(ws: workspace.RunWorkspace, run_id: str, previous_run_
     return sha
 
 
+def _alert_owner_bot(text: str, alert_sender: Optional[Callable[[str], bool]] = None) -> bool:
+    """Best-effort alert to the owner bot when the ops bot notification fails."""
+    try:
+        if alert_sender is not None:
+            return bool(alert_sender(text))
+        if os.environ.get("PYTEST_CURRENT_TEST"):
+            return False
+        from core.line.human import _default_sender
+
+        sender = _default_sender()
+        if sender is not None:
+            return bool(sender(text))
+    except Exception as exc:  # pragma: no cover - alert must never break the stage
+        logger.warning("Failed to send alert to owner bot: %s", exc)
+    return False
+
+
 def _notify_owner(
     ws: workspace.RunWorkspace,
     run_id: str,
@@ -755,15 +772,44 @@ def _notify_owner(
     try:
         sent = bool(sender(text, buttons))
     except Exception as exc:  # notification must never break the stage
-        logger.warning("Failed to send grill Telegram message for run %s: %s", run_id, exc)
+        logger.error("Failed to send grill Telegram message for run %s: %s", run_id, exc)
         sent = False
     if not sent:
+        logger.error("Grill Telegram notification not delivered for run %s (notified=false)", run_id)
+        alert_msg = (
+            f"[ALERTA GRILL] Falha ao enviar perguntas do Grill para o run {run_id} via bot de operacoes. "
+            "Verifique credenciais/status do Telegram. O Grill tentara reenviar automaticamente."
+        )
+        _alert_owner_bot(alert_msg)
         return None
     pending.notified = True
     _save_pending(ws, pending)
     sha = workspace.commit(ws, "grill: owner notified", _pending_job_key(run_id))
     workspace.push(ws)
     return sha
+
+
+def resend_unnotified_grill(
+    project: ProjectDescriptor,
+    run_id: str,
+    send_message: Optional[TelegramSender] = None,
+) -> bool:
+    """If GRILL_PENDING.json exists on the run branch with notified=False, attempt to notify the owner.
+
+    Returns True if notified (already was or just sent successfully), False if delivery failed.
+    """
+    try:
+        ws = workspace.checkout(project, run_id)
+        pending = _load_pending(ws)
+        if pending is None:
+            return True
+        if pending.notified:
+            return True
+        sha = _notify_owner(ws, run_id, pending, send_message)
+        return sha is not None
+    except Exception as exc:
+        logger.warning("resend_unnotified_grill failed for run %s: %s", run_id, exc)
+        return False
 
 
 def _reconcile_pending(
