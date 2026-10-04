@@ -162,6 +162,16 @@ def test_stalled_detects_expired_lease_idle_running_and_old_queue(seeded: tuple[
     assert queued.stalled_reason == "na fila há 45 min"
 
 
+def test_long_durations_read_in_days() -> None:
+    from core.workflow.line_live import _fmt_duration
+
+    assert _fmt_duration(45) == "45 s"
+    assert _fmt_duration(25 * 60) == "25 min"
+    assert _fmt_duration(26 * 3600 + 5 * 60) == "26 h 05 min"
+    assert _fmt_duration(360 * 3600 + 22 * 60) == "15 d"  # seen in production as "360 h 22 min"
+    assert _fmt_duration(50 * 3600) == "2 d 2 h"
+
+
 def test_stalled_flags_active_run_with_no_successor_scheduled(seeded: tuple[Path, dict[str, str]]) -> None:
     # Production shape (HF-03-08): Grill succeeded, run still active, no next job for days.
     db, ids = seeded
