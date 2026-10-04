@@ -209,6 +209,12 @@
     "GET /api/learning-packs/{pack_id}/html": {
       "surface": "learning-drawer"
     },
+    "GET /api/line/live": {
+      "surface": "line-live-board"
+    },
+    "GET /api/line/live/stream": {
+      "surface": "line-live-board"
+    },
     "GET /api/notifications": {
       "surface": "factory-alerts-strip"
     },

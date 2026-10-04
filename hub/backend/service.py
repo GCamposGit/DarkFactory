@@ -11,6 +11,7 @@ import re
 import secrets
 import subprocess
 import sys
+import threading
 import time
 import urllib.error
 import urllib.parse
@@ -139,6 +140,7 @@ from core.infra.metrics import (
     build_infra_metrics_report,
 )
 from core.workflow.job_board import JobBoardEntry, read_job_board
+from core.workflow.line_live import LineLiveSnapshot, read_line_live
 from hub.backend.webhooks import (
     CloudGatewayStatus,
     DokployDeployClient,
@@ -156,6 +158,9 @@ from core.acceptance.models import HF15MetricsSummary, RollbackExecutionRecord
 
 
 logger = logging.getLogger("darkhub.service")
+
+# One control-store read per window, shared by all /api/line/live clients and streams (USR-138).
+LINE_LIVE_CACHE_TTL_SECONDS = 2.5
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 
 BLOCKED_SSRF_NETWORKS = [
@@ -357,6 +362,8 @@ class HubService:
             Path(control_db_path) if control_db_path is not None else state_root() / "control.db"
         )
         self.control_database_url = control_database_url
+        self._line_live_lock = threading.Lock()
+        self._line_live_cache: tuple[float, LineLiveSnapshot] | None = None
         self.test_subagent_engine = TestSubagentEngine(project_root=repository_root, log_dir=state_root() / "test_logs")
         self.roadmap = build_repository_roadmap_service(
             repository_root,
@@ -523,6 +530,47 @@ class HubService:
         except Exception as exc:  # pragma: no cover - titles are cosmetic, never block the board
             logger.warning("Demand titles unavailable for task dashboard: %s", exc)
             return {}
+
+    def get_line_live(self) -> LineLiveSnapshot:
+        """Stage-by-stage live projection of the autonomous line (USR-138).
+
+        One read of the control store per ``LINE_LIVE_CACHE_TTL_SECONDS`` window, shared by every
+        client and SSE stream (single flight: concurrent callers wait for the same read).
+        """
+        with self._line_live_lock:
+            cached = self._line_live_cache
+            now_monotonic = time.monotonic()
+            if cached is not None and now_monotonic - cached[0] < LINE_LIVE_CACHE_TTL_SECONDS:
+                return cached[1]
+            tickets: list[dict[str, Any]] = []
+            titles: dict[str, str] = {}
+            warnings: list[str] = []
+            try:
+                for ticket in self.demands_service.list_tickets():
+                    titles[ticket.id] = ticket.title
+                    tickets.append(
+                        {
+                            "id": ticket.id,
+                            "project_id": ticket.project_id,
+                            "title": ticket.title,
+                            "status": getattr(ticket.status, "value", ticket.status),
+                            "horizon": getattr(ticket.horizon, "value", ticket.horizon),
+                            "updated_at": ticket.updated_at,
+                        }
+                    )
+            except Exception as exc:  # demands are enrichment: never take the live board down
+                logger.warning("Demands unavailable for live line: %s", exc)
+                warnings.append(f"demands indisponíveis ({type(exc).__name__})")
+            snapshot = read_line_live(
+                self.control_db_path,
+                database_url=self.control_database_url,
+                titles=titles,
+                tickets=tickets,
+            )
+            if warnings:
+                snapshot = snapshot.model_copy(update={"warnings": [*snapshot.warnings, *warnings]})
+            self._line_live_cache = (time.monotonic(), snapshot)
+            return snapshot
 
     @staticmethod
     def _control_dashboard_row(entry: JobBoardEntry, titles: dict[str, str]) -> dict[str, Any]:
