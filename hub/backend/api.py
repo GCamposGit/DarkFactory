@@ -3,12 +3,15 @@ FastAPI REST API router for DarkHub.
 """
 
 import asyncio
+import json
 import os
 import secrets
+import time
 from typing import Any, Dict, List, Optional
 from pydantic import BaseModel
 from fastapi import APIRouter, Body, Depends, Header, HTTPException, Query, Request, Response, status
-from fastapi.responses import RedirectResponse
+from fastapi.concurrency import run_in_threadpool
+from fastapi.responses import RedirectResponse, StreamingResponse
 
 from hub.backend.webhooks import (
     CloudGatewayStatus,
@@ -57,6 +60,7 @@ from hub.backend.models import (
     PriorityInterventionKind,
     PriorityInterventionsReport,
 )
+from core.workflow.line_live import LineLiveSnapshot
 from hub.backend.service import HubService
 from core.portfolio.models import PortfolioEfficiencyReport
 from core.usage.models import AccountUsageReport, ModelCallEvent, ModelUsageReport
@@ -1170,6 +1174,73 @@ def notify_pending_grill_endpoint(
 ) -> Dict[str, Any]:
     """Dispatches an active Telegram notification to the Owner for a demand pending grill."""
     return service.notify_pending_grill(ticket_id, hub_base_url=hub_base_url)
+
+
+# ------------------------------------------------------------------------------
+# Live line board (USR-138)
+# ------------------------------------------------------------------------------
+
+LINE_LIVE_RETRY_MS = 5000
+LINE_LIVE_POLL_SECONDS = 2.5
+LINE_LIVE_PING_SECONDS = 15.0
+LINE_LIVE_MAX_STREAM_SECONDS = 25 * 60
+
+
+@router.get("/line/live", response_model=LineLiveSnapshot)
+def get_line_live(service: HubService = Depends(get_hub_service)) -> LineLiveSnapshot:
+    """Stage-by-stage projection of every recent autonomous run (read-only)."""
+    return service.get_line_live()
+
+
+@router.get("/line/live/stream")
+async def stream_line_live(
+    request: Request,
+    max_events: Optional[int] = Query(None, include_in_schema=False),
+    last_event_id: Optional[str] = Header(None, alias="Last-Event-ID"),
+    service: HubService = Depends(get_hub_service),
+) -> StreamingResponse:
+    """Server-Sent Events: a ``snapshot`` event whenever the live line version changes."""
+
+    async def event_stream() -> Any:
+        yield f"retry: {LINE_LIVE_RETRY_MS}\n\n"
+        last_version = last_event_id
+        started = time.monotonic()
+        last_write = started
+        emitted = 0
+        while True:
+            if await request.is_disconnected():
+                return
+            snapshot = await run_in_threadpool(service.get_line_live)
+            now = time.monotonic()
+            if snapshot.version != last_version:
+                last_version = snapshot.version
+                last_write = now
+                emitted += 1
+                yield f"id: {snapshot.version}\nevent: snapshot\ndata: {snapshot.model_dump_json()}\n\n"
+                if max_events is not None and emitted >= max_events:
+                    return
+            elif emitted == 0 or now - last_write >= LINE_LIVE_PING_SECONDS:
+                # A named event (not an SSE comment) so the page can tell an idle factory from a
+                # dead stream: it refreshes the "dados de" freshness without resending the board.
+                last_write = now
+                emitted += 1
+                heartbeat = {"generated_at": snapshot.generated_at, "version": snapshot.version}
+                yield f"id: {snapshot.version}\nevent: heartbeat\ndata: {json.dumps(heartbeat)}\n\n"
+                if max_events is not None and emitted >= max_events:
+                    return
+            if now - started >= LINE_LIVE_MAX_STREAM_SECONDS:
+                return  # the client reconnects with Last-Event-ID
+            await asyncio.sleep(LINE_LIVE_POLL_SECONDS)
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+            "Connection": "keep-alive",
+        },
+    )
 
 
 # ==============================================================================
