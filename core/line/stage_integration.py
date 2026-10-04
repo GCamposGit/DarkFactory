@@ -66,6 +66,7 @@ from typing import Any, Callable, Iterable, Optional, Sequence
 from core.git import ci_checks
 from core.git.safe_show import safe_show
 from core.line import workspace as ws_mod
+from core.line.recovery_context import preserve_context
 from core.line.agent_cli import AgentRequest, AgentResult, redact_secrets, run_agent
 from core.line.human import HumanRequest, notify_human_request
 from core.line.route_wait import RouteWaiter
@@ -574,6 +575,12 @@ class IntegrationStageHandler:
             if directory.exists()
             else f"(sem contexto adicional do run `{run_id}`)"
         )
+        if directory.exists():
+            try:
+                preserve_context(ws)
+            except (OSError, ValueError, WorkspaceError) as exc:
+                logger.warning("Could not pin recovery context for run %s: %s", run_id, _sanitize(str(exc)))
+                return title, body, StageResult(outcome="retry", cause_code="context_archive_failed")
         if directory.exists():
             shutil.rmtree(directory, ignore_errors=True)
         # A CI fix-up restores the context after the first strip. Strip it on

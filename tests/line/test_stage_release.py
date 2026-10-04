@@ -454,7 +454,7 @@ def test_prod_smoke_failure_log_is_persisted_on_run_branch(tmp_path: Path, monke
     pass to read -- exactly like ReviewStage/ValidationStage already do."""
     import subprocess
 
-    from core.line import workspace as ws_mod
+    from core.line import recovery_context, workspace as ws_mod
 
     def git(args: list[str], cwd: Path) -> str:
         proc = subprocess.run(["git", *args], cwd=str(cwd), capture_output=True, text=True, check=True)
@@ -479,6 +479,18 @@ def test_prod_smoke_failure_log_is_persisted_on_run_branch(tmp_path: Path, monke
         deploy=DeployConfig(type=DeployTargetType.DOKPLOY, params={}),
         smoke=[SmokeCheck(url="https://acme.example/healthz", expect_status=200)],
     )
+    planned = ws_mod.checkout(project, "run-persist")
+    ws_mod.write_context(planned, "SPEC.md", "# Smoke must pass\n")
+    ws_mod.write_context(planned, "tickets.json", '[{"id":"T1","title":"Repair smoke"}]')
+    ws_mod.write_context(planned, "progress.json", '{"old_candidate": true}')
+    ws_mod.commit(planned, "test: planning inputs", "run-persist:planning")
+    ws_mod.push(planned)
+    recovery_context.preserve_context(planned)
+    import shutil
+
+    shutil.rmtree(ws_mod.context_dir(planned))
+    ws_mod.commit(planned, "test: context stripped before merge", "run-persist:integration:strip_context")
+    ws_mod.push(planned)
     adapter = FakeAdapter()
     handler = _handler(project, adapter, tmp_path, _opener_factory([(200, b"ok")]))
 
@@ -496,6 +508,9 @@ def test_prod_smoke_failure_log_is_persisted_on_run_branch(tmp_path: Path, monke
     content = log_path.read_text(encoding="utf-8")
     assert sha_bad in content
     assert "prod_smoke_failed_rolled_back_to_" in content
+    assert (ws_mod.context_dir(ws) / "SPEC.md").is_file()
+    assert (ws_mod.context_dir(ws) / "tickets.json").is_file()
+    assert not (ws_mod.context_dir(ws) / "progress.json").exists()
 
 
 def _bare_origin_with_commits(tmp_path: Path, count: int) -> tuple[Path, list[str]]:
