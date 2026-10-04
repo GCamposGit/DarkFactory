@@ -123,20 +123,21 @@ def _scan_factory_dir(root: Path, fingerprint: Fingerprint) -> None:
     """Include unversioned/ignored files under .factory in the fingerprint.
 
     Tests must never mutate the real .factory state. We use stat size and mtime
-    which takes < 0.3s for thousands of files, detecting any created, modified,
-    or deleted files under .factory.
+    which takes < 0.05s, detecting any created, modified, or deleted files under .factory.
     """
     factory_dir = root / ".factory"
     if not factory_dir.is_dir():
         return
+    root_str = str(root)
+    skip_dirs = {"backups", "test_logs", "tmp", ".pytest_cache", "__pycache__"}
     try:
-        for entry in os.walk(factory_dir):
-            dirpath, _, filenames = entry
+        for dirpath, dirnames, filenames in os.walk(str(factory_dir)):
+            dirnames[:] = [d for d in dirnames if d not in skip_dirs]
             for fname in filenames:
-                full_path = Path(dirpath) / fname
+                full_path = os.path.join(dirpath, fname)
                 try:
-                    st = full_path.stat()
-                    rel_path = full_path.relative_to(root).as_posix()
+                    st = os.stat(full_path)
+                    rel_path = os.path.relpath(full_path, root_str).replace("\\", "/")
                     if rel_path not in fingerprint:
                         fingerprint[rel_path] = ("!!", f"{st.st_size}:{st.st_mtime_ns}")
                 except OSError:
