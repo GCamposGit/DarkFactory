@@ -3928,5 +3928,37 @@
     "dependencies": [],
     "created_at": "2026-10-04T08:18:40.458904Z",
     "updated_at": "2026-10-04T08:18:40.458904Z"
+  },
+  {
+    "id": "USR-138",
+    "project_id": "darkfac",
+    "title": "Esteira ao vivo: painel visual em tempo real de tickets e runs etapa por etapa",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "O owner precisa pedir status no chat para saber o que a fabrica esta fazendo. O painel de tarefas do DarkHub dobra cada run numa unica linha (stages_seen), atualiza so a cada 30 s e nao mostra tempo por etapa, iteracoes, worker/modelo que segura o job, idade do item nem o que exige acao do owner. Os dados ja existem no control store (jobs por estagio/iteracao com started_at/finished_at/custo/retry/cause_code e claims com owner/route_ref).",
+    "core_journey": [
+      "O owner precisa pedir status no chat para saber o que a fabrica esta fazendo. O painel de tarefas do DarkHub dobra cada run numa unica linha (stages_seen), atualiza so a cada 30 s e nao mostra tempo por etapa, iteracoes, worker/modelo que segura o job, idade do item nem o que exige acao do owner. Os dados ja existem no control store (jobs por estagio/iteracao com started_at/finished_at/custo/retry/cause_code e claims com owner/route_ref)."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "GET /api/line/live devolve snapshot read-only com runs, estagios na ordem LINE_STAGES (status, iteracoes, inicio, fim, duracao, custo, retries, causa, evidencias, worker e rota do claim ativo), KPIs e backlog por projeto, sem DDL nem lease",
+      "GET /api/line/live/stream (SSE) emite snapshot so quando muda, heartbeat a cada 15 s, retry de reconexao, e uma unica leitura do store por janela de 2-3 s compartilhada entre clientes",
+      "Pagina /live com faixa Precisa de voce, esteira por run com nos por etapa (feito, rodando com cronometro, retry, aguardando humano, falhou, pendente), gaveta de detalhes com linha do tempo, KPIs, concluidos recentes e feed de atividade",
+      "Indicador de conexao ao vivo/reconectando/offline com idade dos dados; falha da fonte nao apaga dados anteriores; fallback para polling; pausa quando a aba esta oculta",
+      "Status nunca so por cor (icone+texto), respeita prefers-reduced-motion, funciona a 375 px; testes do projetor com SQLite falso, da API e do SSE; hub/coverage.json atualizado"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-04T16:10:50.278897Z",
+    "updated_at": "2026-10-04T16:10:50.278897Z"
   }
 ]
