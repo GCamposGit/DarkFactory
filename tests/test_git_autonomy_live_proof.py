@@ -26,10 +26,6 @@ def _git(repo: Path, *args: str) -> subprocess.CompletedProcess[str]:
 
 @pytest.fixture
 def test_remote_pair(tmp_path: Path) -> tuple[Path, Path]:
-    bare = tmp_path / "origin.git"
-    bare.mkdir()
-    _git(bare, "init", "--bare", "--quiet", "-b", "main")
-
     local = tmp_path / "local"
     local.mkdir()
     _git(local, "init", "--quiet", "-b", "main")
@@ -39,9 +35,8 @@ def test_remote_pair(tmp_path: Path) -> tuple[Path, Path]:
     (local / "README.md").write_text("# Project\n", encoding="utf-8")
     _git(local, "add", "README.md")
     _git(local, "commit", "--quiet", "-m", "chore: initial commit")
-    _git(local, "remote", "add", "origin", str(bare))
-    _git(local, "push", "--quiet", "-u", "origin", "main")
-    return local, bare
+    _git(local, "update-ref", "refs/remotes/origin/main", "HEAD")
+    return local, local
 
 
 class FakeSyncReport:

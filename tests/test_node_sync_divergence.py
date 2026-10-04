@@ -25,52 +25,40 @@ def _init_repo(path: Path) -> None:
 
 
 def test_classify_checkout_ahead_behind_and_diverged(tmp_path: Path) -> None:
-    origin_repo = tmp_path / "origin.git"
-    subprocess.run(["git", "init", "--bare", "-b", "main", str(origin_repo)], check=True, capture_output=True)
-
-    clone_repo = tmp_path / "clone"
-    subprocess.run(["git", "clone", str(origin_repo), str(clone_repo)], check=True, capture_output=True)
-    subprocess.run(["git", "config", "user.name", "Test"], cwd=clone_repo, check=True, capture_output=True)
-    subprocess.run(["git", "config", "user.email", "t@e.com"], cwd=clone_repo, check=True, capture_output=True)
-    (clone_repo / "file1.txt").write_text("1", encoding="utf-8")
-    subprocess.run(["git", "add", "file1.txt"], cwd=clone_repo, check=True, capture_output=True)
-    subprocess.run(["git", "commit", "-m", "base commit"], cwd=clone_repo, check=True, capture_output=True)
-    subprocess.run(["git", "push", "origin", "main"], cwd=clone_repo, check=True, capture_output=True)
-
-    base_sha = node_sync.run_git(clone_repo, ["rev-parse", "HEAD"])
+    repo = tmp_path / "repo"
+    _init_repo(repo)
+    base_sha = node_sync.run_git(repo, ["rev-parse", "HEAD"])
+    node_sync.run_git(repo, ["update-ref", "refs/remotes/origin/main", base_sha])
 
     # 1. Ahead checkout: make 2 local commits without pushing
-    (clone_repo / "file2.txt").write_text("2", encoding="utf-8")
-    subprocess.run(["git", "add", "file2.txt"], cwd=clone_repo, check=True, capture_output=True)
-    subprocess.run(["git", "commit", "-m", "local commit 1"], cwd=clone_repo, check=True, capture_output=True)
-    (clone_repo / "file3.txt").write_text("3", encoding="utf-8")
-    subprocess.run(["git", "add", "file3.txt"], cwd=clone_repo, check=True, capture_output=True)
-    subprocess.run(["git", "commit", "-m", "local commit 2"], cwd=clone_repo, check=True, capture_output=True)
+    (repo / "file2.txt").write_text("2", encoding="utf-8")
+    subprocess.run(["git", "add", "file2.txt"], cwd=repo, check=True, capture_output=True)
+    subprocess.run(["git", "commit", "-m", "local commit 1"], cwd=repo, check=True, capture_output=True)
+    (repo / "file3.txt").write_text("3", encoding="utf-8")
+    subprocess.run(["git", "add", "file3.txt"], cwd=repo, check=True, capture_output=True)
+    subprocess.run(["git", "commit", "-m", "local commit 2"], cwd=repo, check=True, capture_output=True)
 
     classification, local_commits, dirty_files, reason = node_sync.classify_checkout(
-        clone_repo, node_sync.run_git, base_sha
+        repo, node_sync.run_git, base_sha
     )
     assert classification == "ahead"
     assert len(local_commits) == 2
     assert "local unpushed commits" in (reason or "")
 
-    # 2. Behind checkout: in second clone, push commits so clone 1 is behind
-    clone2 = tmp_path / "clone2"
-    subprocess.run(["git", "clone", str(origin_repo), str(clone2)], check=True, capture_output=True)
-    subprocess.run(["git", "config", "user.name", "Test2"], cwd=clone2, check=True, capture_output=True)
-    subprocess.run(["git", "config", "user.email", "t2@e.com"], cwd=clone2, check=True, capture_output=True)
-    (clone2 / "file_remote.txt").write_text("remote", encoding="utf-8")
-    subprocess.run(["git", "add", "file_remote.txt"], cwd=clone2, check=True, capture_output=True)
-    subprocess.run(["git", "commit", "-m", "remote commit"], cwd=clone2, check=True, capture_output=True)
-    subprocess.run(["git", "push", "origin", "main"], cwd=clone2, check=True, capture_output=True)
+    # 2. Behind & diverged: create a commit from base_sha to represent remote commit
+    remote_tree = node_sync.run_git(repo, ["write-tree"])
+    remote_commit_sha = subprocess.run(
+        ["git", "commit-tree", remote_tree, "-p", base_sha, "-m", "remote commit"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    node_sync.run_git(repo, ["update-ref", "refs/remotes/origin/main", remote_commit_sha])
 
-    # In clone 1: fetch origin
-    subprocess.run(["git", "fetch", "origin", "main"], cwd=clone_repo, check=True, capture_output=True)
-    expected_remote_sha = node_sync.run_git(clone_repo, ["rev-parse", "origin/main"])
-
-    # clone 1 has local commits (ahead 2) AND is behind origin/main (behind 1) -> diverged!
+    # repo has local commits (ahead 2) AND is behind origin/main (behind 1) -> diverged!
     classification, local_commits, dirty_files, reason = node_sync.classify_checkout(
-        clone_repo, node_sync.run_git, expected_remote_sha
+        repo, node_sync.run_git, remote_commit_sha
     )
     assert classification == "diverged"
     assert len(local_commits) == 2
