@@ -3966,8 +3966,8 @@
     "project_id": "darkfac",
     "title": "PR de fila (ledger-only) e mergeado antes dos checks obrigatorios do ruleset do main",
     "origin": "user",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "78b143e9e2ad19c325a664965bd606bcf9a7f4de",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -3989,7 +3989,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-04T16:41:52.618358Z",
-    "updated_at": "2026-10-04T16:41:52.618358Z"
+    "updated_at": "2026-10-04T17:26:37.364046Z"
   },
   {
     "id": "USR-140",
