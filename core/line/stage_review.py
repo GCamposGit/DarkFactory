@@ -92,8 +92,12 @@ class ReviewRound(BaseModel):
     forced: bool = False
 
 
+MAX_REVIEW_AGENT_RETRIES: int = 5
+
+
 class ReviewState(BaseModel):
     rounds: list[ReviewRound] = Field(default_factory=list)
+    agent_error_streak: int = 0
 
 
 def _load_prompt_template(name: str, fallback: str) -> str:
@@ -292,9 +296,25 @@ class ReviewStage:
         record_result(agent_result, config=self.routing_config)
 
         if not agent_result.ok:
+            if state.agent_error_streak >= MAX_REVIEW_AGENT_RETRIES:
+                logger.error(
+                    "Review agent failed %d consecutive times in round %d for run %s; failing review stage",
+                    state.agent_error_streak,
+                    round_num,
+                    run_id,
+                )
+                return StageResult(
+                    outcome="failed", cause_code="review_agent_exhausted", output_refs=[]
+                )
+            state.agent_error_streak += 1
+            _write_review_state(ws, state)
             return StageResult(
                 outcome="retry", cause_code=f"review_agent_{agent_result.error_kind}", output_refs=[]
             )
+
+        if state.agent_error_streak != 0:
+            state.agent_error_streak = 0
+            _write_review_state(ws, state)
 
         verdict = _parse_verdict(agent_result.text)
         if verdict is None:
@@ -308,6 +328,7 @@ class ReviewStage:
         state.rounds.append(
             ReviewRound(round=round_num, verdict="approve" if approved else "changes_required")
         )
+        state.agent_error_streak = 0
         _write_review_state(ws, state)
 
         job_key = f"{run_id}:review:{round_num}"
