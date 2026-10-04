@@ -3885,5 +3885,41 @@
     "dependencies": [],
     "created_at": "2026-10-03T21:49:22.314311Z",
     "updated_at": "2026-10-03T21:49:22.314311Z"
+  },
+  {
+    "id": "USR-135",
+    "project_id": "darkfac",
+    "title": "Adequar limite do portão oficial à suíte completa no Notebook",
+    "origin": "review",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand",
+      "autonomy-throughput",
+      "wave-current",
+      "protected-governance"
+    ],
+    "problem_statement": "Em 04/10/2026, runner.py --quick --local --no-cache interrompeu o bloco paralelo em 908,5s por timeout de 900s, count=0. A mesma suíte com limite diagnóstico de 2400s terminou em 916,1s, descobriu 2971 testes (2959 passaram, 6 falharam, 6 pulados antes de corrigir os seis). A CI do PR #136 bloqueou alterar harness.config.json porque o arquivo só aceita commit direto humano.",
+    "core_journey": [
+      "Portão oficial completo no Notebook produz contagem positiva e veredito antes do prazo; preserva o bloqueio a mudanças do harness por agentes."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Medir novamente a duração da suíte completa no Notebook com as falhas corrigidas.",
+      "Owner decide e aplica em commit direto o timeout de harness.config.json ou estratégia equivalente que permita o conjunto terminar sem false timeout.",
+      "CI trusted-pr-policy permanece verde; portão oficial passa com contagem positiva no Notebook."
+    ],
+    "suggested_files": [
+      "harness.config.json",
+      "core/harness/runner.py"
+    ],
+    "estimated_complexity": "small",
+    "dependencies": [],
+    "created_at": "2026-10-04T08:18:40.458904Z",
+    "updated_at": "2026-10-04T08:18:40.458904Z"
   }
 ]
