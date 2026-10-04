@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <meta name="theme-color" content="#020617">
+  <title>Esteira ao vivo · DarkHub</title>
+  <link rel="stylesheet" href="/static/live.css?v=20261004a">
+</head>
+<body>
+  <a class="skip-link" href="#line-live-board">Pular para o conteúdo</a>
+
+  <div id="live-app">
+    <header class="topbar" role="banner">
+      <div class="topbar-row">
+        <div class="brand">
+          <a class="back-link" href="/" title="Voltar ao DarkHub">
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m12 19-7-7 7-7M19 12H5"/></svg>
+            DarkHub
+          </a>
+          <h1 class="brand-title"><span class="brand-mark" aria-hidden="true"></span>Esteira ao vivo</h1>
+        </div>
+        <div class="status-cluster">
+          <span id="conn-pill" class="conn conn-connecting" title="Estado da conexão com a fábrica">
+            <span class="conn-dot" aria-hidden="true"></span>
+            <span id="conn-text">Conectando…</span>
+          </span>
+          <span id="freshness" class="fresh fresh-none">aguardando dados…</span>
+        </div>
+      </div>
+      <div class="topbar-row topbar-tools">
+        <div id="project-chips" class="chips" role="group" aria-label="Filtrar por projeto"></div>
+        <div class="tools">
+          <label class="search" for="search-input">
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+            <input id="search-input" type="search" placeholder="Buscar ticket ou título" autocomplete="off" spellcheck="false" aria-label="Buscar por id ou título">
+            <kbd aria-hidden="true">/</kbd>
+          </label>
+          <label class="switch" for="toggle-done">
+            <input id="toggle-done" type="checkbox" checked>
+            <span class="switch-track" aria-hidden="true"></span>
+            <span class="switch-text">Mostrar concluídos</span>
+          </label>
+          <button id="notify-btn" class="btn btn-ghost" type="button" hidden aria-pressed="false">Avisar no navegador</button>
+        </div>
+      </div>
+    </header>
+
+    <div id="alert-banner" class="alert-banner" role="status" hidden></div>
+
+    <main id="line-live-board" class="board is-loading" aria-label="Esteira ao vivo da fábrica">
+      <div id="attention-live" class="sr-only" aria-live="polite" aria-atomic="true"></div>
+
+      <section class="kpis" aria-label="Indicadores">
+        <div class="kpi" id="kpi-active">
+          <div class="kpi-label">Em andamento</div>
+          <div class="kpi-value" data-k="value">–</div>
+          <div class="kpi-sub" data-k="sub">&nbsp;</div>
+        </div>
+        <div class="kpi kpi-attention" id="kpi-attention">
+          <div class="kpi-label">Precisam de você</div>
+          <div class="kpi-value" data-k="value">–</div>
+          <div class="kpi-sub" data-k="sub">&nbsp;</div>
+        </div>
+        <div class="kpi" id="kpi-done">
+          <div class="kpi-label">Concluídos 24 h</div>
+          <div class="kpi-value-row">
+            <div class="kpi-value" data-k="value">–</div>
+            <span class="spark" data-k="spark" aria-hidden="true"></span>
+          </div>
+          <div class="kpi-sub" data-k="sub">&nbsp;</div>
+        </div>
+        <div class="kpi" id="kpi-cycle">
+          <div class="kpi-label">Cycle time mediano 7 d</div>
+          <div class="kpi-value" data-k="value">–</div>
+          <div class="kpi-sub" data-k="sub">&nbsp;</div>
+        </div>
+        <div class="kpi" id="kpi-cost">
+          <div class="kpi-label">Custo 24 h</div>
+          <div class="kpi-value" data-k="value">–</div>
+          <div class="kpi-sub" data-k="sub">&nbsp;</div>
+        </div>
+        <div class="kpi" id="kpi-backlog">
+          <div class="kpi-label">Backlog planejado</div>
+          <div class="kpi-value" data-k="value">–</div>
+          <div class="kpi-sub" data-k="sub">&nbsp;</div>
+        </div>
+      </section>
+
+      <div class="layout">
+        <div class="col-main">
+          <section id="sec-attention" class="panel panel-attention" aria-labelledby="h-attention" hidden>
+            <h2 id="h-attention" class="panel-title">Precisa de você <span id="attention-count" class="count-pill count-violet">0</span></h2>
+            <div id="attention-list" class="attention-list"></div>
+          </section>
+
+          <section id="sec-running" class="panel" aria-labelledby="h-running">
+            <h2 id="h-running" class="panel-title">Em andamento <span id="running-count" class="count-pill">0</span></h2>
+            <div id="lanes" class="lanes">
+              <div class="lane skeleton-lane" aria-hidden="true"><div class="sk sk-a"></div><div class="sk sk-b"></div></div>
+              <div class="lane skeleton-lane" aria-hidden="true"><div class="sk sk-a"></div><div class="sk sk-b"></div></div>
+            </div>
+            <div id="lanes-empty" class="empty" hidden></div>
+          </section>
+
+          <section id="sec-done" class="panel" aria-labelledby="h-done">
+            <h2 id="h-done" class="panel-title">
+              <button id="done-toggle" class="title-toggle" type="button" aria-expanded="true" aria-controls="done-list">
+                <svg class="chev" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+                Concluídos recentemente
+              </button>
+              <span id="done-count" class="count-pill">0</span>
+            </h2>
+            <div id="done-list" class="done-list"></div>
+            <div id="done-empty" class="empty empty-small" hidden>Nenhum run concluído ainda.</div>
+            <button id="done-more" class="btn btn-ghost done-more" type="button" hidden>Ver mais</button>
+          </section>
+        </div>
+
+        <aside class="col-side" aria-label="Atividade e backlog">
+          <section class="panel" aria-labelledby="h-events">
+            <h2 id="h-events" class="panel-title">Atividade</h2>
+            <ul id="events" class="events"></ul>
+            <div id="events-empty" class="empty empty-small" hidden>Sem atividade recente.</div>
+          </section>
+          <section class="panel" aria-labelledby="h-backlog">
+            <h2 id="h-backlog" class="panel-title">Backlog por projeto</h2>
+            <div id="backlog" class="backlog"></div>
+            <div id="backlog-empty" class="empty empty-small" hidden>Sem backlog para exibir.</div>
+          </section>
+          <section id="sec-offline" class="panel" aria-labelledby="h-off" hidden>
+            <h2 id="h-off" class="panel-title">Fora da esteira <span id="off-count" class="count-pill">0</span></h2>
+            <p class="note">Em desenvolvimento via run_ticket local — progresso etapa a etapa não reportado ainda.</p>
+            <ul id="off-list" class="off-list"></ul>
+          </section>
+        </aside>
+      </div>
+
+      <footer class="foot" id="foot"></footer>
+    </main>
+  </div>
+
+  <div id="drawer" class="drawer" hidden>
+    <div class="drawer-backdrop" data-close-drawer></div>
+    <div class="drawer-panel" role="dialog" aria-modal="true" aria-labelledby="drawer-title" tabindex="-1">
+      <div class="drawer-top">
+        <h2 id="drawer-title" class="drawer-title">Detalhes do run</h2>
+        <button id="drawer-close" class="btn btn-icon" type="button" aria-label="Fechar detalhes" data-close-drawer>
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>
+        </button>
+      </div>
+      <div id="drawer-content" class="drawer-body"></div>
+    </div>
+  </div>
+
+  <noscript><p class="noscript">A Esteira ao vivo precisa de JavaScript habilitado.</p></noscript>
+  <script src="/static/live.js?v=20261004a"></script>
+</body>
+</html>
