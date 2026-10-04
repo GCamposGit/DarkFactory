@@ -203,6 +203,15 @@ def query_checks(pr_number: int, cwd: Path, runner: GhRunner) -> CheckSnapshot:
     return parse_checks_output(result.returncode, result.stdout or "", result.stderr or "")
 
 
+def pending_check_labels(pr_number: int, cwd: Path, runner: GhRunner) -> tuple[str, ...]:
+    """Best-effort labels of the checks still pending on a PR (diagnostics only)."""
+    try:
+        snapshot = query_checks(pr_number, cwd, runner)
+    except Exception:
+        return ()
+    return tuple(check_label(c) for c in snapshot.pending)
+
+
 def extract_run_id(check: dict[str, Any]) -> Optional[str]:
     """Return the Actions run id embedded in a check's ``link``, if any."""
     match = _RUN_LINK_PATTERN.search(str(check.get("link") or ""))
