@@ -1,24 +1,19 @@
 # DarkFac Mission
 
 ## Objetivo
+Uma fábrica de software autônoma: recebe uma demanda em linguagem natural, esclarece com o operador apenas o que não consegue resolver sozinha (Grill) e entrega o produto ponta a ponta para o cliente final (código, testes, revisão independente, PR, CI, merge, deploy e smoke), sem intervenção humana fora da demanda inicial e do Grill. O mesmo núcleo evolui a própria fábrica (dogfood).
 
-Manter um núcleo Python headless, determinístico e portátil para orquestração de modelos, pesquisa, conteúdo, ativos visuais, aprendizado contínuo e validação. O projeto deve funcionar depois de um clone limpo em Windows ou Linux e ser compreensível por diferentes harnesses de código.
+## Princípios
+- Headless, determinístico e portátil (Windows e Linux); um clone limpo roda a validação e descobre as skills sem credenciais privadas.
+- Nenhum sucesso sem efeito verificável (SHA, PR, deploy, smoke); o CI do GitHub é a verdade de `main`.
+- Entradas humanas só para intenção, negócio, segredos/contas e aceite comercial.
+- Pesquisa online em melhores fontes e repositórios para melhores práticas e state of the art das features implementadas sempre que necessário.
 
 ## Escopo versionado
-
-- `core/`: domínio, serviços headless, roteamento, aprendizado e harness determinístico.
-- `hub/`: DarkHub HTTP e frontend estático.
-- `.agents/skills/`: catálogo canônico de skills para Antigravity e agentes compatíveis.
-- `.claude/skills/`: espelho para Claude Code e harnesses que adotem esse layout.
-- `tests/`: testes do núcleo compartilhado.
-- `docs/`, scripts de bootstrap e configurações de CI.
+`core/`, `hub/`, `.agents/skills/` e espelho `.claude/skills/`, `tests/`, `docs/`, scripts de bootstrap e CI.
 
 ## Fora do escopo compartilhado
-
-- Chaves, tokens, credenciais, dados pessoais e configurações específicas de uma máquina.
-- Pesos de modelos, caches, imagens/áudios gerados e outros artefatos grandes ou regeneráveis.
-- Deploy de produção, billing ou qualquer ação externa não descrita em uma issue.
+Chaves, tokens, dados pessoais, configurações específicas de máquina, pesos de modelos e artefatos regeneráveis.
 
 ## Critério de sucesso
-
-Um clone limpo deve conseguir instalar as dependências, executar a validação sintática e os testes do núcleo, iniciar o DarkHub e descobrir as skills sem depender de credenciais privadas.
+Uma demanda enviada pelo Telegram ou DarkHub vira PR com testes, merge, deploy e smoke verde com relatório no Telegram; o canário diário passa; o `main` permanece verde em Linux e Windows.
