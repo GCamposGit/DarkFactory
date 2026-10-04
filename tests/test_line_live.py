@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import gc
 import json
 import sqlite3
 from contextlib import closing
@@ -383,9 +384,17 @@ def test_postgres_failure_never_leaks_credentials(tmp_path: Path) -> None:
 
 def test_reading_does_not_write_the_store(seeded: tuple[Path, dict[str, str]]) -> None:
     db, _ = seeded
-    before = db.stat().st_mtime_ns
+    # The seeding connections are closed (and may checkpoint) only when collected; settle them first
+    # so a late write from the fixture is not blamed on the reader (flaked on the Ubuntu CI by mtime).
+    gc.collect()
+    wal = db.with_name(db.name + "-wal")
+    wal_before = wal.read_bytes() if wal.is_file() else b""
+    before = db.read_bytes()
     _read(db)
-    assert db.stat().st_mtime_ns == before
+    gc.collect()
+    assert db.read_bytes() == before
+    # A read-only WAL reader may create an empty -wal/-shm pair (normal SQLite behaviour), never frames.
+    assert (wal.read_bytes() if wal.is_file() else b"") == wal_before
 
 
 def test_json_contract_field_names_are_frozen(seeded: tuple[Path, dict[str, str]]) -> None:
