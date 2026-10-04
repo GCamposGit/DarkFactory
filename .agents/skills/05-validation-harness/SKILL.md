@@ -79,3 +79,12 @@ Esta skill opera a validação determinística da Dark Factory, assegurando que 
 - Quando um teste falhar, reproduza pelo menor caminho observável.
 - Se a resolução exigir alteração de oráculo ou contrato público, devolva ao planejador qualificado (`WorkflowState.NEEDS_REPLAN`).
 - Nunca enfraqueça uma asserção para forçar um resultado verde.
+
+---
+
+## 3. Binding com a Esteira (HF-27)
+
+- **Módulo na Linha**: `core/harness/runner.py` e rotinas de validação em `core.line.stage_build`.
+- **Portão Único e Canônico**: O comando `python core/harness/runner.py --quick` é o único portão oficial da fábrica, integrando compilação AST, testes paralelos via pytest-xdist, testes seriais isolados, locks de máquina e cache por árvore de commit.
+- **Higiene e Hermeticidade**: Suítes são estritamente isoladas contra mutação da árvore de trabalho (`tests/_tree_hygiene.py`) e redirecionam escritas para diretórios temporários ou `core.paths.state_root()`.
+

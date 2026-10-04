@@ -47,3 +47,11 @@ O **Visual Asset Studio** é o motor de geração de ativos gráficos e ilustra�
 ## 2. Continuous Self-Improvement & RCA Visual
 
 - **RCA de Legibilidade e Contraste**: Se elementos tipográficos gerados apresentarem sobreposição ou baixo contraste de cor, execute ajuste nas paletas do motor procedural e registre a correção no ledger.
+
+---
+
+## 3. Nota de Operação: Auxiliar (Fora do Caminho Crítico)
+
+Esta skill é um componente auxiliar da fábrica e opera fora do caminho crítico de desenvolvimento de tickets da esteira HF-27.
+- **Consumidor Real**: Ilustrações, diagramas e banners técnicos para documentação e DarkHub (`/visuals/`).
+

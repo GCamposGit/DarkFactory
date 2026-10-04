@@ -59,3 +59,11 @@ Esta skill orienta a investigação estruturada de conceitos de engenharia, arqu
 ## 2. Continuous Self-Improvement & RCA de Pesquisa
 
 - **RCA em Falhas de Descoberta**: Se uma busca no arXiv retornar 0 resultados úteis, execute RCA para identificar lacunas de terminologia e registrar os termos canônicos no ledger.
+
+---
+
+## 3. Nota de Operação: Auxiliar (Fora do Caminho Crítico)
+
+Esta skill é um componente auxiliar da fábrica e opera fora do caminho crítico de desenvolvimento de tickets da esteira HF-27.
+- **Consumidor Real**: Knowledge Ledger perpétuo e pesquisas ad-hoc em `.factory/research/`.
+

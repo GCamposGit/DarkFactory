@@ -49,3 +49,11 @@ Esta skill governa o monitoramento diário do ecossistema global de modelos de i
 ## 2. Continuous Self-Improvement & RCA de Benchmarks
 
 - **Detecção de Degradação de Modelos**: Se um modelo de fronteira sofrer aumento abrupto de latência ou regressão de raciocínio, o benchmark registra anomalia e o rebaixa na fronteira, alertando o `model-router`.
+
+---
+
+## 3. Nota de Operação: Auxiliar (Fora do Caminho Crítico)
+
+Esta skill é um componente auxiliar da fábrica e opera fora do caminho crítico de desenvolvimento de tickets da esteira HF-27.
+- **Consumidor Real**: Cron diário de benchmark e painel DarkHub (`/api/benchmarks`).
+

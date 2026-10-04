@@ -12,7 +12,7 @@ Esta skill analisa o histórico operacional de longo prazo da fábrica autônoma
 ## 1. Contratos Normativos da Etapa
 
 ### Inputs (Entradas)
-- **Histórico de Tarefas**: `.factory/state.json` e relatórios em `.factory/reports/`, focando em tarefas que transicionaram por `NEEDS_REPLAN` ou `FAILED_VALIDATION`.
+- **Histórico de Tarefas**: `.factory/demands/demands.json`, banco SQLite e relatórios em `.factory/reports/`, focando em tarefas que transicionaram por `NEEDS_REPLAN` ou falhas de validação.
 - **Knowledge & Learning Ledger**: `.factory/learning/learning_ledger.json` consolidando registros de RCA, preferências confirmadas e contraexemplos.
 - **Métricas de Inferência e Telemetria**: Consumo de tokens, latência e custo por modelo provenientes do `model-router` e benchmarks diários.
 
@@ -28,7 +28,7 @@ Esta skill analisa o histórico operacional de longo prazo da fábrica autônoma
    - Remova instruções obsoletas ou regras duplicadas que incham o contexto sem fornecer garantias determinísticas adicionais.
 
 ### Outputs Estruturados
-- **Relatório de Evolução**: `.factory/evolution_report.md` com diagnósticos sistêmicos e propostas de ajuste.
+- **Relatório de Evolução**: Relatório arquivado em `.factory/reports/` com diagnósticos sistêmicos e propostas de ajuste.
 - **Rascunhos de Novas Skills**: Novos arquivos de especificação com frontmatter e contratos normativos.
 - **Calibração de Roteamento**: Recomendações de pesos e thresholds para o `model_router.py`.
 
@@ -43,3 +43,13 @@ Esta skill analisa o histórico operacional de longo prazo da fábrica autônoma
 
 - Enquanto a Skill 00 atua em nível de micro-iteração imediata (ao término do ticket ou diante de incidente pontual), o `08-meta-skills-evolver` atua em nível macro-estrutural.
 - O evolver consome as preferências consolidadas no ledger e as transforma em atualizações definitivas de arquitetura e documentação.
+
+---
+
+## 3. Binding com a Esteira (HF-27)
+
+- **Módulo na Linha**: `core.evolution` (`core/evolution/engine.py`).
+- **Armazenamento de Estado**: O estado do ecossistema é mantido no banco SQLite e no catálogo de demandas (`.factory/demands/demands.json`), superando o antigo formato monolítico de estado.
+- **Sincronização de Skills**: Toda evolução em `.agents/skills/` é sincronizada com `.claude/skills/` via `scripts/sync_skills.py` e verificada pelo gate de drift (`tests/test_skills_drift.py`).
+
+

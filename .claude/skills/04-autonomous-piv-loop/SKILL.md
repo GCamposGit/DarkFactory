@@ -13,7 +13,7 @@ O ciclo PIV divide a entrega em mudanças pequenas, isoladas e estritamente veri
 
 ### Inputs (Entradas)
 - **Contrato de Handoff Aprovado**: `WorkflowHandoff` em estado `WorkflowState.READY_FOR_HANDOFF`.
-- **Fencing de Isolamento Git**: Branch dedicada e worktree exclusiva com lease de ownership (`references/worktree-parallelism.md`).
+- **Fencing de Isolamento Git**: Branch dedicada e worktree exclusiva com lease de ownership (`core.line.workspace` e `references/worktree-parallelism.md`).
 - **Baseline SHA**: Hash do commit base limpo e verificado.
 - **Governança**: `MISSION.md`, `FACTORY_RULES.md`, `AGENTS.md`.
 
@@ -54,7 +54,7 @@ O ciclo PIV divide a entrega em mudanças pequenas, isoladas e estritamente veri
 ### Portões, Política e Validação
 - **Conformidade com ReadinessGate**: O avanço entre estágios obedece rigorosamente às transições legais (`ALLOWED_TRANSITIONS`).
 - **Protocolo Fail-Closed de Worktrees**: Ausência de heartbeat, colisão de arquivos ou branch suja bloqueiam o ciclo imediatamente.
-- **Entrega Remota Obrigatória**: Conforme `references/remote-delivery.md`, um ticket de desenvolvimento só é concluído após PR aberta, checks de CI verdes, merge aprovado e confirmação do SHA no `main` remoto.
+- **Entrega Remota Obrigatória**: Conforme o ciclo autônomo de `core.git.autonomy`, um ticket de desenvolvimento só é concluído após PR aberta, checks de CI verdes, merge aprovado e confirmação do SHA no `main` remoto.
 - **Proibição de Atalhos**: Nenhum artefato é marcado como entregue sem aprovação do `ReadinessGate`.
 - **Reflexo no DarkHub**: Nenhuma entrega que crie, altere ou remova rota `/api`, pacote de `core/` ou capacidade visível ao owner é concluída sem o Step V-4 (seção 3).
 
@@ -105,4 +105,16 @@ Invoke-RestMethod -Method POST `
 
 
 > **Nota:** O runner.py já executa este refresh automaticamente via `_notify_hub_on_pass()`. Este step existe para harnesses que chamam o runner indiretamente ou orquestram testes sem usar `runner.py` diretamente (ex.: Grok, Claude Code, scripts CI).
+
+---
+
+## 5. Binding com a Esteira (HF-27)
+
+- **Estágios na Linha**: O ciclo PIV é operacionalizado na esteira contínua através de:
+  - **Implementação**: `core.line.stage_build` com teto de auto-correção técnica de 3 iterações (`stage_config.max_iterations`).
+  - **Revisão Independente**: `core.line.stage_review` acionando modelo de família distinta da implementação.
+  - **Integração e Entrega**: `core.line.stage_integration` executando PR, verificação de CI e merge squash via `core.git.autonomy`.
+- **Isolamento de Worktree**: Cada tarefa opera em worktree isolada (`core.ticket_workspace` ou `core.line.workspace`), prevenindo concorrência no checkout compartilhado.
+- **Portão Oficial**: A validação determinística de todo o ciclo é realizada exclusivamente pelo `core/harness/runner.py --quick`.
+
 

@@ -27,8 +27,9 @@ Esta skill governa o ciclo de vida ponta a ponta de desenvolvimento de tickets n
      c) Orientar o usuário a migrar para o harness saudável eleito com capacidade de escrita (Claude, Codex ou Grok Build) ou invocar o launcher headless `python C:\dev\DarkFac\run_ticket.py <TICKET_ID>`.
 
 3. **Exceção de Override Explícito pelo Usuário**:
-   - **A implementação em um harness com cota $\le 15.0\%$ SÓ É PERMITIDA se o usuário exigir explicitamente no prompt** (ex.: *"forçar execução neste harness"*, *"ignorar limite de cota"*, *"estou ciente da cota crítica, prossiga"* ou via flag `--force` / `--allow-critical-quota`).
+   - **A implementação em um harness com cota $\le 15.0\%$ SÓ É PERMITIDA se o usuário exigir explicitamente no prompt** (ex.: *"forçar execução neste harness"*, *"ignorar limite de cota"*, *"estou ciente da cota crítica, prossiga"* ou via flag `--force`).
    - Sem essa instrução textual inequívoca, o agente deve falhar fechado (*fail-closed*).
+
 
 ---
 
@@ -57,7 +58,7 @@ flowchart TD
 
 2. **Execução Headless ou Assistida**:
    - O executor recebe o ticket, prepara a branch de trabalho isolada (`core.line.workspace`), gera os testes unitários primeiro (TDD) e escreve o código funcional.
-   - **Loop de Auto-Correção Técnico**: Se os testes falharem, o `DevelopmentStage` não aborta: ele itera até 5 vezes corrigindo o código com base nos logs destilados de erro.
+   - **Loop de Auto-Correção Técnico**: Se os testes falharem, o `DevelopmentStage` não aborta: ele itera até 3 vezes corrigindo o código com base nos logs destilados de erro.
    - **Dúvidas de Negócio e Ambiguidade (Gate G1)**: Se houver ambiguidade material, uma `HumanRequest` é gerada com notificação via Telegram (Jarvis) e DarkHub, aguardando resposta humana sem inventar parâmetros.
 
 3. **Validação Obrigatória do Portão**:
@@ -103,3 +104,12 @@ Regra do owner: se o usuário opera a fábrica por um harness específico, esse 
   ```powershell
   python -m core.usage.cli accounts --refresh
   ```
+
+---
+
+## 4. Binding com a Esteira (HF-27)
+
+- **Papel do run_ticket.py**: Lançador headless e interativo local para desenvolvimento focado de tickets individuais fora da esteira contínua.
+- **Roteamento Unificado**: Tanto o `run_ticket.py` quanto a linha de produção contínua consomem `core.line.routing.pick` e a mesma matriz de capacidades (`core.line.agent_cli.HARNESS_CAPABILITIES`), garantindo que apenas harnesses com capacidade `write` (Claude, Codex, Grok Build) sejam eleitos para implementação.
+- **Configuração Canônica**: Configurações de timeout, modelos e provedores são lidas diretamente de `.factory/config/line_routing.json`, evitando duplicidade de regras.
+

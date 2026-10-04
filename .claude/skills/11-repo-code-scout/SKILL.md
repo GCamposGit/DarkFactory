@@ -58,3 +58,11 @@ Esta skill assegura o princípio de eficiência da DarkFac: **"Não reinventar a
 ## 2. Continuous Self-Improvement & RCA de Reúso
 
 - **RCA em Conflito de Dependências**: Se uma biblioteca minerada introduzir conflito de dependências ou quebrar o harness, execute RCA e registre a incompatibilidade via `python -m core.learning.cli rca`.
+
+---
+
+## 3. Nota de Operação: Auxiliar (Fora do Caminho Crítico)
+
+Esta skill é um componente auxiliar da fábrica e opera fora do caminho crítico de desenvolvimento de tickets da esteira HF-27.
+- **Consumidor Real**: Knowledge Ledger e mineração de componentes sob demanda em `.factory/research/`.
+

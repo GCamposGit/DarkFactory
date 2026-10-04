@@ -51,3 +51,11 @@ O **Session Learning Pack** é o motor de co-evolução cognitiva e ampliação 
 ## 2. Continuous Self-Improvement & Calibração Didática
 
 - **Calibração de Nível**: Ajuste a densidade técnica dos flashcards e da defesa arquitetural com base no feedback explícito do usuário sobre a profundidade desejada.
+
+---
+
+## 3. Nota de Operação: Auxiliar (Fora do Caminho Crítico)
+
+Esta skill é um componente auxiliar da fábrica e opera fora do caminho crítico de desenvolvimento de tickets da esteira HF-27.
+- **Consumidor Real**: Sessões interativas e relatórios de aprendizagem contínua para o operador humano.
+

@@ -50,3 +50,11 @@ O **Speculative Model Racing Engine** implementa a seleção dinâmica custo-efe
 ## 2. Continuous Self-Improvement & Calibração de Elo
 
 - **Fechamento do Loop Empírico**: Se um modelo com alto índice em benchmarks sintéticos falhar repetidamente no ambiente Windows local da fábrica, seu Elo empírico é rebaixado no ledger, reduzindo sua prioridade nas cascatas especulativas.
+
+---
+
+## 3. Nota de Operação: Auxiliar (Fora do Caminho Crítico)
+
+Esta skill é um componente auxiliar da fábrica e opera fora do caminho crítico de desenvolvimento de tickets da esteira HF-27.
+- **Consumidor Real**: Torneios empíricos e calibração periódica da Fronteira de Pareto.
+
