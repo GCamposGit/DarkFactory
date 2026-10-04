@@ -177,6 +177,25 @@ def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
             _session_suite_lock.release()
             _session_suite_lock = None
 
+@pytest.hookimpl(tryfirst=True)
+def pytest_runtest_setup(item: pytest.Item) -> None:
+    worker = os.environ.get("PYTEST_XDIST_WORKER", "master")
+    path = Path(tempfile.gettempdir()) / f"darkfac_active_{worker}.txt"
+    try:
+        path.write_text(item.nodeid, encoding="utf-8")
+    except Exception:
+        pass
+
+
+@pytest.hookimpl(trylast=True)
+def pytest_runtest_teardown(item: pytest.Item) -> None:
+    worker = os.environ.get("PYTEST_XDIST_WORKER", "master")
+    path = Path(tempfile.gettempdir()) / f"darkfac_active_{worker}.txt"
+    try:
+        path.unlink(missing_ok=True)
+    except Exception:
+        pass
+
 
 _SECRET_ENVIRONMENT_KEYS = (
     "OPENAI_API_KEY",
