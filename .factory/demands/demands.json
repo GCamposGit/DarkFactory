@@ -3934,8 +3934,8 @@
     "project_id": "darkfac",
     "title": "Esteira ao vivo: painel visual em tempo real de tickets e runs etapa por etapa",
     "origin": "user",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "452605d81a5429b7154c99040030a23def966e08",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -3959,7 +3959,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-04T16:10:50.278897Z",
-    "updated_at": "2026-10-04T16:10:50.278897Z"
+    "updated_at": "2026-10-04T17:06:54.366326Z"
   },
   {
     "id": "USR-139",
