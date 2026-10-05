@@ -94,8 +94,15 @@ VERSION = "v1"
 
 _SMOKE_RETRIES = 5
 _SMOKE_DELAY_S = 10.0
-_RECONCILE_POLLS = 30
-_RECONCILE_DELAY_S = 1.0
+# A real Dokploy build (the DarkHub compose builds from source with no cache)
+# takes minutes, not the 30s the first transport assumed: 180 x 5s = 15 min ceiling.
+_RECONCILE_POLLS = 180
+_RECONCILE_DELAY_S = 5.0
+# After the provider reports `done` the new container may still be starting:
+# poll the live identity probe (bounded) before declaring the digest unverified,
+# instead of failing the job and re-triggering a full redeploy on every retry.
+_DIGEST_POLLS = 24
+_DIGEST_DELAY_S = 5.0
 _MAX_CONSECUTIVE_SMOKE_FAILURES = 2
 
 # HF-27-08 item G: PlanningTicket.smoke entries embedded by stage_integration
@@ -395,6 +402,8 @@ class ReleaseStageHandler:
         smoke_delay_s: float = _SMOKE_DELAY_S,
         reconcile_polls: int = _RECONCILE_POLLS,
         reconcile_delay_s: float = _RECONCILE_DELAY_S,
+        digest_polls: int = _DIGEST_POLLS,
+        digest_delay_s: float = _DIGEST_DELAY_S,
         sleep: Callable[[float], None] = time.sleep,
         validate_timeout_s: int = 1800,
     ) -> None:
@@ -408,6 +417,8 @@ class ReleaseStageHandler:
         self.smoke_delay_s = smoke_delay_s
         self.reconcile_polls = reconcile_polls
         self.reconcile_delay_s = reconcile_delay_s
+        self.digest_polls = max(1, digest_polls)
+        self.digest_delay_s = digest_delay_s
         self.sleep = sleep
         self.validate_timeout_s = validate_timeout_s
 
@@ -532,8 +543,10 @@ class ReleaseStageHandler:
             status = adapter.reconcile(operation.operation_id)
 
         if status == DeploymentStatus.FAILED:
+            error = (operation.details or {}).get("error")
             return operation, target_config, StageResult(
-                outcome="retry", cause_code=f"deploy_failed:{operation.operation_id}"
+                outcome="retry",
+                cause_code=f"deploy_failed:{operation.operation_id}" + (f":{error}" if error else ""),
             )
         if status != DeploymentStatus.SUCCEEDED:
             return operation, target_config, StageResult(
@@ -541,6 +554,11 @@ class ReleaseStageHandler:
             )
 
         active_digest = adapter.installed_digest(target_config)
+        for _ in range(self.digest_polls - 1):
+            if active_digest == sha:
+                break
+            self.sleep(self.digest_delay_s)
+            active_digest = adapter.installed_digest(target_config)
         if active_digest != sha:
             return operation, target_config, StageResult(
                 outcome="retry",

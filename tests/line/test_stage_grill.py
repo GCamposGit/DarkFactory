@@ -709,3 +709,14 @@ def test_adoption_never_raises_when_git_cannot_read_the_previous_grill(project, 
     result = run_grill(project, "run-new", "Landing page nova", adopt_from_runs=["run-prev"])
 
     assert result.outcome == "waiting_human" and calls["n"] == 1
+
+
+def test_planning_prompt_forbids_red_only_tickets():
+    """Canary 2026-10-05: 'teste inicial deve falhar de proposito' became a T1 whose acceptance was a
+    red suite, which development (validate must be green) and review can never satisfy."""
+    rendered = stage_grill.render_prompt(
+        stage_grill.load_prompt("planning.md"), demand="d", grill="g", commands="c", lessons="l"
+    )
+    assert "Todo ticket termina verde" in rendered
+    assert "nunca crie um ticket" in rendered.lower() and "red" in rendered
+    assert "UM mesmo ticket" in rendered

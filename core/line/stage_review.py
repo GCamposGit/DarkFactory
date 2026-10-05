@@ -64,6 +64,14 @@ implementou esta mudanca. Responda apenas com um objeto JSON no formato:
 So marque como bloqueante: bug de correcao, teste que nao testa o aceite,
 requisito do ticket nao atendido, ou quebra de contrato.
 
+Julgue a arvore final (o diff), nao o processo. NAO e bloqueante, e vai em
+`non_blocking`: a ordem em que o trabalho foi feito, a falta de uma execucao
+"red" registrada ou de falha intencional previa, o historico de commits, ou
+qualquer criterio de aceite sobre PROCESSO (registrar falha inicial, rodar
+algo em estado antigo). Nunca peca ao autor para quebrar o codigo, reverter uma
+constante ou reescrever historico para provar um teste: se o comportamento e os
+testes presentes atendem o aceite e a validacao esta verde, aprove.
+
 A SPEC e os tickets (com criterios de aceite) estao em `{context_dir}/SPEC.md`
 e `{context_dir}/tickets.json` neste repositorio; leia-os antes de julgar.
 

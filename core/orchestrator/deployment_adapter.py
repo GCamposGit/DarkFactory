@@ -12,6 +12,7 @@ import io
 import json
 import logging
 import os
+import re
 import socket
 import tempfile
 import threading
@@ -38,6 +39,20 @@ logger = logging.getLogger(__name__)
 # DARKFAC_LINE_FORBIDDEN_DEPLOY_IDS (comma-separated).
 SELF_DEPLOY_COMPOSE_ID = "QJK0YXPQvCgjrpdgWH0uo"
 SELF_RESTART_CAUSE_CODE = "deploy_target_forbidden_self_restart"
+
+# Keys a deployed service may use to report the build it is running. `sha` /
+# `git_sha` are what small apps (the canary `/version`) and the DarkHub
+# `/health` expose; the first three are the original contract.
+_DIGEST_KEYS = ("artifact_digest", "oci_digest", "digest", "sha", "git_sha")
+_FULL_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
+_DOKPLOY_COMMIT_RE = re.compile(r"Commit:\s*([0-9a-f]{40})", re.IGNORECASE)
+# `<repo>.git#<sha>` build context, `DARKFAC_GIT_SHA: <sha>` build arg and
+# `DARKFAC_GIT_SHA=<sha>` runtime env of the rendered DarkHub raw compose.
+_COMPOSE_SHA_PINS = (
+    re.compile(r"(\.git#)[0-9a-f]{40}"),
+    re.compile(r"(DARKFAC_GIT_SHA:\s*)[0-9a-f]{40}"),
+    re.compile(r"(DARKFAC_GIT_SHA=)[0-9a-f]{40}"),
+)
 
 
 def forbidden_deploy_ids() -> frozenset[str]:
@@ -188,6 +203,10 @@ class DokployDeploymentAdapter:
         self._operations: Dict[str, DeploymentOperation] = {}
         self._target_configs: Dict[str, TargetConfig] = {}
         self._simulated_installed_digests: Dict[str, str] = {}
+        # Commit Dokploy itself recorded on the latest finished deployment of a
+        # service (github-sourced applications write "Commit: <sha>"), keyed by
+        # service id. Real provider data, never a guess.
+        self._deployed_commits: Dict[str, str] = {}
 
     def set_installed_digest_mock(self, project_id: str, digest: str) -> None:
         """Test helper to simulate live installed host digest."""
@@ -282,6 +301,83 @@ class DokployDeploymentAdapter:
         created_ats = sorted(str(d.get("createdAt", "")) for d in deployments if d.get("createdAt"))
         return created_ats[-1] if created_ats else ""
 
+    def _bind_release_identity(
+        self, base_url: str, api_key: str, target_config: TargetConfig, sha: str
+    ) -> Optional[str]:
+        """Make the service report the exact commit being deployed, BEFORE deploy.
+
+        Without this the live proof cannot converge: a Dokploy application keeps
+        whatever static env it was created with (the canary's ``GIT_SHA=initial``)
+        and a raw compose keeps the SHA of the previous render, so `/version` or
+        `/health` would never name the new commit. Opt-in per project via
+        ``deploy.params``:
+
+        - ``git_sha_env`` (application): name of the env var the app reports as
+          its sha; set to ``sha`` through ``application.update``.
+        - ``pin_compose_sha=true`` (raw compose, the DarkHub): the stored compose
+          file's pinned ``.git#<sha>`` / ``DARKFAC_GIT_SHA`` values are rewritten
+          to ``sha`` through ``compose.update`` (same contract as
+          ``scripts/dokploy_redeploy.py``).
+
+        Returns ``None`` when nothing is configured or the binding is in place,
+        otherwise a short error code. Never logs or returns env/compose bodies.
+        """
+        params = target_config.metadata or {}
+        service_id = target_config.service_name
+        env_name = str(params.get("git_sha_env") or "").strip()
+        pin_compose = str(params.get("pin_compose_sha") or "").strip().lower() in ("1", "true", "yes")
+        if not (env_name or pin_compose):
+            return None
+        if not _FULL_SHA_RE.fullmatch(sha or ""):
+            return "release_identity_sha_not_full"
+        try:
+            if env_name and target_config.service_type != "compose":
+                one = self._dokploy_request(
+                    base_url, api_key, "GET", "application.one", query={"applicationId": service_id}
+                )
+                current = one.get("env")
+                if current is not None and not isinstance(current, str):
+                    return "release_identity_env_unreadable"
+                lines = (current or "").splitlines()
+                wanted = f"{env_name}={sha}"
+                if wanted in lines:
+                    return None
+                replaced = [wanted if ln.split("=", 1)[0].strip() == env_name else ln for ln in lines]
+                if replaced == lines:
+                    replaced.append(wanted)
+                self._dokploy_request(
+                    base_url, api_key, "POST", "application.update",
+                    json_body={"applicationId": service_id, "env": "\n".join(replaced)},
+                )
+            elif pin_compose and target_config.service_type == "compose":
+                one = self._dokploy_request(
+                    base_url, api_key, "GET", "compose.one", query={"composeId": service_id}
+                )
+                if one.get("sourceType") != "raw" or not isinstance(one.get("composeFile"), str):
+                    return "release_identity_compose_not_raw"
+                original = one["composeFile"]
+                rendered, total = original, 0
+                for pin in _COMPOSE_SHA_PINS:
+                    rendered, count = pin.subn(lambda m: m.group(1) + sha, rendered)
+                    total += count
+                if total < len(_COMPOSE_SHA_PINS):
+                    return "release_identity_compose_pin_not_found"
+                if rendered != original:
+                    self._dokploy_request(
+                        base_url, api_key, "POST", "compose.update",
+                        json_body={
+                            "composeId": service_id,
+                            "sourceType": "raw",
+                            "composePath": one.get("composePath") or "docker-compose.yml",
+                            "composeFile": rendered,
+                        },
+                    )
+        except urllib.error.HTTPError as exc:
+            return f"release_identity_http_{exc.code}"
+        except Exception as exc:
+            return f"release_identity_{type(exc).__name__}"
+        return None
+
     def start(
         self,
         artifact_ref: ArtifactRef,
@@ -346,6 +442,17 @@ class DokployDeploymentAdapter:
                 )
                 status = DeploymentStatus.FAILED
                 provider_details = {"error": "dokploy_service_name_missing"}
+            elif (
+                identity_error := self._bind_release_identity(
+                    base_url, api_key, target_config, artifact_ref.byte_digest
+                )
+            ) is not None:
+                logger.warning(
+                    "Dokploy deploy aborted for project %s: could not bind release identity (%s)",
+                    target_config.project_id, identity_error,
+                )
+                status = DeploymentStatus.FAILED
+                provider_details = {"error": identity_error}
             else:
                 deploy_procedure, status_procedure, id_key = self._service_procedure_and_key(target_config)
                 baseline_created_at = self._latest_deployment_created_at(
@@ -467,6 +574,9 @@ class DokployDeploymentAdapter:
                     op.status = DeploymentStatus.IN_PROGRESS
                 elif raw_status == "done":
                     op.status = DeploymentStatus.SUCCEEDED
+                    commit = _DOKPLOY_COMMIT_RE.search(str((latest or {}).get("description") or ""))
+                    if commit:
+                        self._deployed_commits[target_config.service_name] = commit.group(1).lower()
                 elif raw_status == "error":
                     op.status = DeploymentStatus.FAILED
                 elif raw_status == "running":
@@ -507,12 +617,21 @@ class DokployDeploymentAdapter:
             return op.status
 
     def installed_digest(self, target_config: TargetConfig) -> Optional[str]:
-        """Queries the actual currently running digest on the host."""
+        """The build the target is actually serving, from real evidence only.
+
+        Precedence: (1) the service's own healthcheck endpoint (header
+        ``X-Artifact-Digest``/``X-OCI-Digest`` or a JSON key from ``_DIGEST_KEYS``)
+        -- whatever it reports is returned verbatim, so a stale value stays a
+        mismatch (fail closed); (2) only when the endpoint answered but carries no
+        digest at all, or none is configured, the commit Dokploy recorded on the
+        finished deployment ("Commit: <sha>", github-sourced applications).
+        Unreachable endpoint or no evidence -> ``None`` (unverified).
+        """
         with self._lock:
             if target_config.project_id in self._simulated_installed_digests:
                 return self._simulated_installed_digests[target_config.project_id]
+            recorded = self._deployed_commits.get(target_config.service_name or "")
 
-        # Probe healthcheck endpoint if available
         if target_config.healthcheck_endpoint:
             try:
                 req = urllib.request.Request(
@@ -525,12 +644,17 @@ class DokployDeploymentAdapter:
                     if hdr_digest:
                         return hdr_digest
                     data = json.loads(resp.read().decode("utf-8", errors="replace"))
-                    return data.get("artifact_digest") or data.get("oci_digest") or data.get("digest")
             except Exception as exc:
                 logger.debug("Failed probing healthcheck endpoint %s: %s", target_config.healthcheck_endpoint, exc)
                 return None
+            if isinstance(data, dict):
+                for key in _DIGEST_KEYS:
+                    value = data.get(key)
+                    if isinstance(value, str) and value.strip():
+                        return value.strip()
+            return recorded
 
-        return None
+        return recorded
 
     def rollback(
         self,

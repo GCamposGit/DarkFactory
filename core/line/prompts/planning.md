@@ -41,6 +41,16 @@ cada.
    sem repetir o que o grill ja decidiu.
 4. Marque `is_product_scale` como `true` quando `milestones` nao estiver
    vazio.
+5. **Todo ticket termina verde.** Ao fim de cada ticket os comandos de
+   validate do projeto DEVEM passar, e a revisao independente julga a arvore
+   final. Por isso nunca crie um ticket "red" cujo criterio de aceite seja a
+   suite falhar, um teste falhando, "registrar a falha" ou manter o app antigo
+   ate outro ticket: ele nunca converge. Quando a demanda pedir "teste inicial
+   deve falhar de proposito", "red-green" ou "exercita o validate loop", isso
+   descreve a ORDEM de trabalho dentro de UM mesmo ticket (escrever o teste
+   antes, ver a primeira validacao falhar, implementar e terminar verde):
+   coloque teste e implementacao juntos no mesmo ticket e nao transforme a
+   falha em criterio de aceite nem exija evidencia de execucao vermelha.
 
 ## Formato de resposta (obrigatorio)
 
