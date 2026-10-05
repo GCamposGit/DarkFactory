@@ -39,7 +39,7 @@ def make_config(tmp_path: Path, effect_base_url: str) -> LabConfig:
         workflow_version=WorkflowVersion.V1,
         database_alias="darkfac_hf02_native",
         effect_base_url=effect_base_url,
-        lease_seconds=2,
+        lease_seconds=15.0,
     )
 
 
