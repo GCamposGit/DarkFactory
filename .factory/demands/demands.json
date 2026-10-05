@@ -4200,5 +4200,44 @@
     "dependencies": [],
     "created_at": "2026-10-05T22:05:56.766870Z",
     "updated_at": "2026-10-05T22:05:56.766870Z"
+  },
+  {
+    "id": "USR-136",
+    "project_id": "darkfac",
+    "title": "Unificar a fonte viva do backlog entre DarkHub e worker da linha",
+    "origin": "review",
+    "status": "implementing",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand",
+      "autonomy-throughput",
+      "wave-current",
+      "defect"
+    ],
+    "problem_statement": "DarkHub lê demands.json de seu contêiner e o worker de produção lê demands.json do contêiner cloud; os docker-compose atuais não compartilham o arquivo nem fornecem contrato de sincronização. Um ticket criado no Hub pode não ser consumido pelo dogfood, enquanto o painel pode mostrar contagem diferente da fila executável.",
+    "core_journey": [
+      "Criar ticket elegível no DarkHub; vê-lo na mesma fila que o worker consome e acompanhar sua transição até um run ou bloqueio explícito."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Hub e worker usam uma fonte durável canônica para tickets novos e atualizações de status, inclusive após reinício e deploy.",
+      "Um teste de integração entre duas instâncias demonstra que ticket criado no Hub fica elegível no worker e que o status posterior aparece no Hub.",
+      "O painel informa a origem e a idade dos dados e não apresenta snapshot da imagem como estado vivo."
+    ],
+    "suggested_files": [
+      "core/demands/store.py",
+      "core/line/dogfood.py",
+      "hub/backend/service.py",
+      "deploy/dokploy/docker-compose.cloud.yml",
+      "deploy/dokploy/docker-compose.hub.yml"
+    ],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-04T16:19:08.467489Z",
+    "updated_at": "2026-10-05T22:09:32.557664Z"
   }
 ]

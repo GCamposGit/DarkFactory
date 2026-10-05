@@ -46,6 +46,7 @@ services:
       - FACTORY_DIR=/app/.factory
       - DARKFAC_DEMANDS_PATH=/app/.factory/demands/demands.json
       - DARKFAC_DEMANDS_SEED_PATH=/app/.factory_seed/demands/demands.json
+      - DARKFAC_DEMANDS_SHARED_VOLUME=darkfac-demands-v1
       # Integrations (Telegram & n8n Community)
       - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}
       - TELEGRAM_OPS_BOT_TOKEN=${TELEGRAM_OPS_BOT_TOKEN:-}

@@ -39,6 +39,13 @@ class DemandsStore:
             else Path(configured_seed) if configured_seed and use_environment_seed
             else None
         )
+        self.shared_volume_name = (
+            os.environ.get("DARKFAC_DEMANDS_SHARED_VOLUME") if use_environment_seed else None
+        )
+        if self.shared_volume_name and not self.path.parent.is_mount():
+            raise RuntimeError(
+                f"Demand volume {self.shared_volume_name} is not mounted at {self.path.parent}"
+            )
         self._write_lock_path = self.path.with_name("demands-write.lock")
         self._lock = RLock()
         self._ensure_storage()

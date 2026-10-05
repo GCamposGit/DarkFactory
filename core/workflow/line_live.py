@@ -110,6 +110,8 @@ class _Model(BaseModel):
 class LiveSource(_Model):
     backend: Literal["postgres", "sqlite", "none"]
     status: Literal["ok", "missing", "error"]
+    demands: Literal["shared-volume", "local-file", "unavailable"] = "local-file"
+    demands_latest_at: str | None = None
 
 
 class LiveAttempt(_Model):

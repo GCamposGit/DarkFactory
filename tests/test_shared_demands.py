@@ -11,6 +11,8 @@ import yaml
 
 from core.demands.models import UserTicket
 from core.demands.store import DemandsStore
+from core.roadmap.models import DeliveryStatus
+from hub.backend.service import HubService
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -102,6 +104,33 @@ def test_independent_store_instances_do_not_lose_concurrent_tickets(tmp_path: Pa
     assert len(DemandsStore(path).list_tickets()) == 40
 
 
+def test_hub_and_worker_observe_the_same_ticket_and_status(tmp_path: Path) -> None:
+    path = tmp_path / "demands.json"
+    hub = DemandsStore(path)
+    worker = DemandsStore(path)
+    hub.save_ticket(UserTicket(id="USR-01", project_id="darkfac", title="shared"))
+    assert worker.get_ticket("USR-01").title == "shared"
+    worker.update_status("USR-01", DeliveryStatus.IMPLEMENTING)
+    assert hub.get_ticket("USR-01").status == DeliveryStatus.IMPLEMENTING
+
+
+def test_missing_shared_mount_fails_closed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("DARKFAC_DEMANDS_PATH", str(tmp_path / "demands.json"))
+    monkeypatch.setenv("DARKFAC_DEMANDS_SHARED_VOLUME", "darkfac-demands-v1")
+    with pytest.raises(RuntimeError, match="not mounted"):
+        DemandsStore()
+
+
+def test_live_board_labels_local_ledger_without_claiming_a_shared_mount(tmp_path: Path) -> None:
+    service = HubService(data_dir=tmp_path)
+    service.demands_store.save_ticket(UserTicket(
+        id="USR-01", project_id="darkfac", title="visible",
+    ))
+    snapshot = service.get_line_live()
+    assert snapshot.source.demands == "local-file"
+    assert snapshot.source.demands_latest_at is not None
+
+
 def test_cloud_and_hub_share_one_named_demand_volume() -> None:
     cloud = yaml.safe_load((ROOT / "deploy/dokploy/docker-compose.cloud.yml").read_text(encoding="utf-8"))
     hub = yaml.safe_load((ROOT / "deploy/dokploy/docker-compose.hub.yml").read_text(encoding="utf-8"))
@@ -111,6 +140,8 @@ def test_cloud_and_hub_share_one_named_demand_volume() -> None:
         service = cloud["services"][name]
         assert "darkfac-demands:/app/.factory/demands" in service["volumes"]
         assert "DARKFAC_DEMANDS_SEED_PATH=/app/.factory_seed/demands/demands.json" in service["environment"]
+        assert "DARKFAC_DEMANDS_SHARED_VOLUME=darkfac-demands-v1" in service["environment"]
     service = hub["services"]["darkhub"]
     assert "darkfac-demands:/app/.factory/demands" in service["volumes"]
     assert "DARKFAC_DEMANDS_PATH=/app/.factory/demands/demands.json" in service["environment"]
+    assert "DARKFAC_DEMANDS_SHARED_VOLUME=darkfac-demands-v1" in service["environment"]

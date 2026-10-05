@@ -550,8 +550,16 @@ class HubService:
             tickets: list[dict[str, Any]] = []
             titles: dict[str, str] = {}
             warnings: list[str] = []
+            latest_demand_update: datetime | None = None
+            demands_available = True
             try:
                 for ticket in self.demands_service.list_tickets():
+                    changed_at = ticket.updated_at
+                    if changed_at.tzinfo is None:
+                        changed_at = changed_at.replace(tzinfo=timezone.utc)
+                    changed_at = changed_at.astimezone(timezone.utc)
+                    if latest_demand_update is None or changed_at > latest_demand_update:
+                        latest_demand_update = changed_at
                     titles[ticket.id] = ticket.title
                     tickets.append(
                         {
@@ -566,12 +574,26 @@ class HubService:
             except Exception as exc:  # demands are enrichment: never take the live board down
                 logger.warning("Demands unavailable for live line: %s", exc)
                 warnings.append(f"demands indisponíveis ({type(exc).__name__})")
+                demands_available = False
             snapshot = read_line_live(
                 self.control_db_path,
                 database_url=self.control_database_url,
                 titles=titles,
                 tickets=tickets,
             )
+            demands_source = (
+                "unavailable" if not demands_available
+                else "shared-volume" if self.demands_store.shared_volume_name
+                else "local-file"
+            )
+            snapshot = snapshot.model_copy(update={
+                "source": snapshot.source.model_copy(update={
+                    "demands": demands_source,
+                    "demands_latest_at": (
+                        latest_demand_update.isoformat() if latest_demand_update else None
+                    ),
+                }),
+            })
             if warnings:
                 snapshot = snapshot.model_copy(update={"warnings": [*snapshot.warnings, *warnings]})
             self._line_live_cache = (time.monotonic(), snapshot)
@@ -3511,4 +3533,3 @@ class HubService:
 
 # Canonical alias for DarkHubService (HF-13-02)
 DarkHubService = HubService
-

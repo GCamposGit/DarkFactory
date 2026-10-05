@@ -26,6 +26,7 @@ services:
       - FACTORY_DIR=/app/.factory
       - DARKFAC_DEMANDS_PATH=/app/.factory/demands/demands.json
       - DARKFAC_DEMANDS_SEED_PATH=/app/.factory_seed/demands/demands.json
+      - DARKFAC_DEMANDS_SHARED_VOLUME=darkfac-demands-v1
       - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-}
       - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
@@ -114,6 +115,7 @@ services:
       - FACTORY_DIR=/app/.factory
       - DARKFAC_DEMANDS_PATH=/app/.factory/demands/demands.json
       - DARKFAC_DEMANDS_SEED_PATH=/app/.factory_seed/demands/demands.json
+      - DARKFAC_DEMANDS_SHARED_VOLUME=darkfac-demands-v1
       - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-}
       - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
       - REMOTE_HARNESS_URLS=${REMOTE_HARNESS_URLS:-http://100.78.181.90:8080,http://100.81.84.124:8080}
@@ -188,6 +190,7 @@ services:
       - FACTORY_DIR=/app/.factory
       - DARKFAC_DEMANDS_PATH=/app/.factory/demands/demands.json
       - DARKFAC_DEMANDS_SEED_PATH=/app/.factory_seed/demands/demands.json
+      - DARKFAC_DEMANDS_SHARED_VOLUME=darkfac-demands-v1
       - R2_ENDPOINT_URL=${R2_ENDPOINT_URL:-}
       - R2_ACCESS_KEY_ID=${R2_ACCESS_KEY_ID:-}
       - R2_SECRET_ACCESS_KEY=${R2_SECRET_ACCESS_KEY:-}
@@ -254,6 +257,7 @@ services:
       - FACTORY_DIR=/app/.factory
       - DARKFAC_DEMANDS_PATH=/app/.factory/demands/demands.json
       - DARKFAC_DEMANDS_SEED_PATH=/app/.factory_seed/demands/demands.json
+      - DARKFAC_DEMANDS_SHARED_VOLUME=darkfac-demands-v1
       # Same notifier env the worker uses (review item 4) -- NotificationService
       # (role="owner") needs these to actually send the failure/weekly alerts.
       - TELEGRAM_OWNER_BOT_TOKEN=${TELEGRAM_OWNER_BOT_TOKEN:-}

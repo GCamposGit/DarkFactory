@@ -6,6 +6,9 @@ same host. Both mount the named volume `darkfac-demands-v1` at
 mount it too. The volume holds `demands.json`, the ID counter, and the file
 locks. The image ships an independent seed at
 `/app/.factory_seed/demands/demands.json`.
+Each service sets `DARKFAC_DEMANDS_SHARED_VOLUME=darkfac-demands-v1`; startup
+fails if the expected mount is absent. The live board labels the backlog
+source and the age of its last ticket change.
 
 At startup, `DemandsStore` merges committed seed rows into the persistent
 ledger under a process-wide file lock. A newer `updated_at` wins for an existing
