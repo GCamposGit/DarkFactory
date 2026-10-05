@@ -12,7 +12,7 @@ workers read), creating a run whose first job is the grill stage. It is:
 - idempotent per attempt (`channel=owner`, `external_id=ticket:<id>`, then `ticket:<id>:a<n>`):
   pushing a ticket whose run is still in flight returns that run instead of a second one, a
   delivered ticket is reported as delivered, and a run that ended without delivering is retried
-  as a new attempt (cap `DARKFAC_LINE_MAX_TICKET_ATTEMPTS`, default 5);
+  as a new attempt (cap `DARKFAC_LINE_MAX_TICKET_ATTEMPTS`, default 10);
 - fail-closed on the store: when a database URL is configured but Postgres cannot
   be reached, `open_line_store` raises instead of silently accepting the demand
   into `PostgresControlStore`'s in-memory mock (which no worker would ever see);
@@ -58,7 +58,7 @@ AUTOSUBMIT_ENV = "DARKFAC_LINE_AUTOSUBMIT"
 PROJECTS_ENV = "DARKFAC_LINE_INTAKE_PROJECTS"
 DEFAULT_PROJECTS = "darkfac"
 MAX_ATTEMPTS_ENV = "DARKFAC_LINE_MAX_TICKET_ATTEMPTS"
-DEFAULT_MAX_TICKET_ATTEMPTS = 5
+DEFAULT_MAX_TICKET_ATTEMPTS = 10
 # Statuses from which pushing a ticket into the line moves it to `implementing`.
 _PROMOTABLE_STATUSES = frozenset({DeliveryStatus.DISCOVERED, DeliveryStatus.ACCEPTED, DeliveryStatus.PLANNED})
 
@@ -138,7 +138,7 @@ def ticket_external_id(ticket_id: str, attempt: int = 1) -> str:
 
 
 def max_ticket_attempts_from_env() -> int:
-    """`DARKFAC_LINE_MAX_TICKET_ATTEMPTS`; unset/invalid/<1 falls back to 5."""
+    """`DARKFAC_LINE_MAX_TICKET_ATTEMPTS`; unset/invalid/<1 falls back to 10."""
     raw = os.environ.get(MAX_ATTEMPTS_ENV, "").strip()
     if not raw:
         return DEFAULT_MAX_TICKET_ATTEMPTS
@@ -347,7 +347,7 @@ def submit_ticket_to_line(
     Retries mirror the canary: the first send uses `ticket:<id>`; while a run is in flight it is
     replayed (never duplicated); a succeeded run is reported as delivered; when the latest run
     ended without delivering, a new send starts `ticket:<id>:a<n>` (capped by
-    `DARKFAC_LINE_MAX_TICKET_ATTEMPTS`, default 5).
+    `DARKFAC_LINE_MAX_TICKET_ATTEMPTS`, default 10).
     """
     ticket = demands_store.get_ticket(ticket_id)
     if ticket is None:
