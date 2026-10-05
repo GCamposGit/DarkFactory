@@ -3094,7 +3094,8 @@
     "project_id": "darkfac",
     "title": "Telegram: webhooks ausentes apos rotacao de token, tokens locais obsoletos e falhas silenciosas no poller/registro",
     "origin": "user",
-    "status": "planned",
+    "status": "completed",
+    "delivery_evidence": "scripts/telegram_rotate_check.py, docs/runbooks/telegram_rotation.md, tests/test_telegram_rotation_usr110.py",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -3119,7 +3120,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-01T11:08:50.916654Z",
-    "updated_at": "2026-10-01T11:08:50.916654Z"
+    "updated_at": "2026-10-05T21:04:16.997729Z"
   },
   {
     "id": "USR-111",

@@ -2745,9 +2745,13 @@ class HubService:
         return result.model_dump()
 
     def get_telegram_gateway_status(self) -> Dict[str, Any]:
-        """Returns diagnostic status of Telegram Gateway."""
+        """Returns diagnostic status of Telegram Gateway (HF-14 / USR-110)."""
         gateway = self._build_telegram_gateway()
-        return gateway.get_status()
+        status = gateway.get_status()
+        from core.integrations.telegram_webhooks import get_webhook_registration_status
+
+        status["webhooks"] = get_webhook_registration_status()
+        return status
 
     def get_n8n_status(self, target_url: Optional[str] = None) -> Dict[str, Any]:
         """Probes n8n endpoint and returns health/instance report."""

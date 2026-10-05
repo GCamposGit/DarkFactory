@@ -147,9 +147,12 @@ async def _lifespan(app: FastAPI):
 
         outcome = await asyncio.to_thread(register_telegram_webhooks)
         if outcome:
-            _logger_hub.info(f"[STARTUP] Telegram webhooks: {outcome}")
+            if any(v == "failed" for v in outcome.values()):
+                _logger_hub.error(f"[STARTUP] Telegram webhook registration failure: {outcome}")
+            else:
+                _logger_hub.info(f"[STARTUP] Telegram webhooks: {outcome}")
     except Exception as exc:
-        _logger_hub.warning(f"[STARTUP] Telegram webhook registration skipped: {type(exc).__name__}")
+        _logger_hub.error(f"[STARTUP] Telegram webhook registration exception: {type(exc).__name__}")
     yield
     # Teardown (none needed)
 
