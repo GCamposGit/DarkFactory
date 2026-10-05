@@ -59,6 +59,7 @@ from hub.backend.models import (
     PriorityInterventionItem,
     PriorityInterventionKind,
     PriorityInterventionsReport,
+    LineStatusResponse,
 )
 from core.workflow.line_live import LineLiveSnapshot
 from hub.backend.service import HubService
@@ -1184,6 +1185,12 @@ LINE_LIVE_RETRY_MS = 5000
 LINE_LIVE_POLL_SECONDS = 2.5
 LINE_LIVE_PING_SECONDS = 15.0
 LINE_LIVE_MAX_STREAM_SECONDS = 25 * 60
+
+
+@router.get("/line/status", response_model=LineStatusResponse)
+def get_line_status(service: HubService = Depends(get_hub_service)) -> LineStatusResponse:
+    """Real-time production-line status, canary streak and HF-27 acceptance (USR-93)."""
+    return service.get_line_status()
 
 
 @router.get("/line/live", response_model=LineLiveSnapshot)

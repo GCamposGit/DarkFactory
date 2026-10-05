@@ -58,6 +58,7 @@ from hub.backend.models import (
     PortfolioProjectSummary,
     PortfolioProjectDetailResponse,
     PortfolioOverviewResponse,
+    LineStatusResponse,
 )
 from core.paths import state_root
 from core.audio.engine import TranscriptionResult
@@ -571,6 +572,66 @@ class HubService:
                 snapshot = snapshot.model_copy(update={"warnings": [*snapshot.warnings, *warnings]})
             self._line_live_cache = (time.monotonic(), snapshot)
             return snapshot
+
+    def get_line_status(self) -> LineStatusResponse:
+        """Real-time status of the autonomous production line (USR-93)."""
+        from core.line.canary import REPORTS_DIR, green_streak, load_reports
+        from core.line.acceptance import ACCEPTANCE_JSON
+
+        streak = 0
+        last_canary: dict[str, Any] | None = None
+        try:
+            reports = load_reports(REPORTS_DIR, limit=10)
+            streak = green_streak(reports)
+            if reports:
+                last_canary = reports[-1].model_dump(mode="json")
+        except Exception as exc:
+            logger.warning("Failed to load canary streak for line status: %s", exc)
+
+        active_runs: list[dict[str, Any]] = []
+        try:
+            store = self._line_control_store()
+            conn = getattr(store, "_connect", None)
+            if conn is not None:
+                with conn() as c:
+                    rows = c.execute(
+                        "SELECT run_id, demand_id, status, current_stage, created_at, updated_at "
+                        "FROM runs WHERE status IN ('active', 'running', 'leased', 'in_progress', 'waiting_human')"
+                    ).fetchall()
+                    for r in rows:
+                        active_runs.append({
+                            "run_id": r[0],
+                            "demand_id": r[1],
+                            "status": r[2],
+                            "current_stage": r[3],
+                            "created_at": r[4],
+                            "updated_at": r[5],
+                        })
+        except Exception as exc:
+            logger.warning("Failed to query active runs for line status: %s", exc)
+
+        nodes: list[dict[str, Any]] = []
+        try:
+            cards_report = self.get_infra_cards_report(probe_liveness=False)
+            nodes = [card.model_dump(mode="json") for card in cards_report.cards]
+        except Exception as exc:
+            logger.warning("Failed to load topology nodes for line status: %s", exc)
+
+        acceptance_data: dict[str, Any] | None = None
+        try:
+            if ACCEPTANCE_JSON.exists():
+                acceptance_data = json.loads(ACCEPTANCE_JSON.read_text(encoding="utf-8"))
+        except Exception as exc:
+            logger.warning("Failed to load acceptance report for line status: %s", exc)
+
+        return LineStatusResponse(
+            canary_streak=streak,
+            last_canary_report=last_canary,
+            active_runs_count=len(active_runs),
+            active_runs=active_runs,
+            nodes=nodes,
+            acceptance=acceptance_data,
+        )
 
     @staticmethod
     def _control_dashboard_row(entry: JobBoardEntry, titles: dict[str, str]) -> dict[str, Any]:

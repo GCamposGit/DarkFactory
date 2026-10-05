@@ -2333,7 +2333,7 @@
       "item_type": "feature",
       "lifecycle_stage": "next_steps",
       "delivery_status": "validating",
-      "state_rationale": "HF-27-01 a HF-27-11 implementados e integrados em main; o canário E2E (HF-27-10) roda em produção. Falta o critério V2 do plano (7 dias verdes seguidos do canário) e o registro de verificação de V1, V3 e V4 antes de concluir o marco. Bloqueio identificado em 30/09/2026: o CI do main esta vermelho desde 24/09 e a etapa de integracao da linha nao fecha PRs do proprio darkfac enquanto isso durar; V1 depende do marco HF-28 (USR-84, USR-85, USR-86).",
+      "state_rationale": "Validacao da linha autonoma em andamento: 2/4 criterios verificados pelo probe deterministico (2/4 criterios de aceite verificados (V1: False, V2: False, V3: True, V4: True).).",
       "horizon": "now",
       "confidence": "high",
       "dependencies": [
@@ -2368,6 +2368,13 @@
           "evidence_kind": "handoff_doc",
           "label": "Índice HF-27 (11 tickets implementados)",
           "locator": "docs/handoffs/production-line/INDEX.md",
+          "verified": false
+        },
+        {
+          "evidence_id": "report:HF-27:line-acceptance",
+          "evidence_kind": "test_run",
+          "label": "Relatorio deterministico de aceite da linha autonoma (V1-V4)",
+          "locator": ".factory/reports/line-acceptance/line-acceptance-report.md",
           "verified": false
         }
       ]

@@ -645,3 +645,15 @@ class PriorityInterventionsReport(BaseModel):
     waiting_human_count: int = Field(ge=0, description="Tasks blocked in WAITING_HUMAN")
     items: List[PriorityInterventionItem] = Field(default_factory=list, description="Ordered list of intervention items")
     generated_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat(), description="Generation timestamp")
+
+
+class LineStatusResponse(BaseModel):
+    """Real-time status of the autonomous production line (USR-93)."""
+
+    canary_streak: int = Field(ge=0, description="Consecutive green days of the daily canary")
+    last_canary_report: Optional[Dict[str, Any]] = Field(default=None, description="Most recent canary report dict")
+    active_runs_count: int = Field(ge=0, description="Count of currently active or in-flight line runs")
+    active_runs: List[Dict[str, Any]] = Field(default_factory=list, description="Active run summaries")
+    nodes: List[Dict[str, Any]] = Field(default_factory=list, description="Registered line execution nodes")
+    acceptance: Optional[Dict[str, Any]] = Field(default=None, description="HF-27 V1-V4 acceptance probe summary")
+    generated_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
