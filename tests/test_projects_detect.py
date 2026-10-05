@@ -326,12 +326,18 @@ def test_real_registry_projects_json_loads_with_new_fields() -> None:
         "service_name": "KCTz2USVQhNp_R6BuTxh1",
         "service_type": "application",
         "healthcheck_endpoint": "https://canary.ggcampos.com/version",
+        # Dokploy keeps a static GIT_SHA env; the release stage rewrites it to the merge sha
+        # before deploy so /version proves the live commit.
+        "git_sha_env": "GIT_SHA",
     }
     # The line's V1 pilot deploys the DarkHub (a separate Dokploy compose) -- never the
     # darkfac-cloud compose that runs the worker (see stage_release's self-restart guard).
     assert by_id["darkfac"].deploy.params == {
         "service_name": "wuH-sjZBig74xFGdk4IsL",
         "service_type": "compose",
+        # Live proof: /health reports the pinned DARKFAC_GIT_SHA; the stage re-pins the raw compose.
+        "healthcheck_endpoint": "https://darkhub.ggcampos.com/health",
+        "pin_compose_sha": "true",
     }
     for project in projects:
         assert project.repo_url is not None
