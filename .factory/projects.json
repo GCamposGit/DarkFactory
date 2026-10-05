@@ -15,7 +15,9 @@
       "type": "dokploy",
       "params": {
         "service_name": "wuH-sjZBig74xFGdk4IsL",
-        "service_type": "compose"
+        "service_type": "compose",
+        "healthcheck_endpoint": "https://darkhub.ggcampos.com/health",
+        "pin_compose_sha": "true"
       }
     },
     "commands": {
@@ -109,7 +111,8 @@
       "params": {
         "service_name": "KCTz2USVQhNp_R6BuTxh1",
         "service_type": "application",
-        "healthcheck_endpoint": "https://canary.ggcampos.com/version"
+        "healthcheck_endpoint": "https://canary.ggcampos.com/version",
+        "git_sha_env": "GIT_SHA"
       }
     },
     "commands": {

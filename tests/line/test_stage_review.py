@@ -397,3 +397,25 @@ def test_agent_error_streak_resets_on_round_change(
     state_r2 = json.loads((ctx / "review_state.json").read_text(encoding="utf-8"))
     assert state_r2["agent_error_streak"] == 1
 
+
+
+def test_review_prompt_judges_final_tree_not_process_evidence(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Canary 2026-10-04/05: the reviewer blocked 3 rounds in a row on a missing recorded 'red' run
+    (process evidence the final tree can never show). The prompt now says process is non-blocking."""
+    origin = _init_bare_origin(tmp_path)
+    project = _project(str(origin))
+    run_id = "run-process-nit"
+    _prepare_run(tmp_path, monkeypatch, project, run_id, harness="claude")
+
+    agent = _ScriptedAgent([{"verdict": "approve", "blocking": [], "non_blocking": []}])
+    stage = ReviewStage(
+        run_agent_func=agent, pick_func=_isolated_pick(tmp_path), routing_config=load_routing_config()
+    )
+    assert stage.run(project, run_id).outcome == "success"
+
+    prompt = agent.calls[0].prompt
+    assert "Julgue a arvore final" in prompt
+    assert "NAO e bloqueante" in prompt and "red" in prompt
+    assert "{{" not in prompt and '"verdict"' in prompt  # JSON example rendered, braces unescaped
