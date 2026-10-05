@@ -71,13 +71,16 @@ def _requested_numprocesses(config: pytest.Config) -> int | None:
 
 @pytest.hookimpl(tryfirst=True)
 def pytest_cmdline_main(config: pytest.Config) -> None:
-    """Enforce memory-safe worker limit on xdist before workers spawn (USR-95)."""
+    """Enforce memory-safe worker limit on xdist before workers spawn (USR-95/USR-143)."""
     safe_cap = _worker_capacity.calculate_safe_worker_cap()
     current_max = getattr(config.option, "maxprocesses", None)
     if current_max is not None and current_max > 0:
         config.option.maxprocesses = min(current_max, safe_cap)
     else:
         config.option.maxprocesses = safe_cap
+
+    if not _is_xdist_worker(config):
+        print(f"[WORKERS] allowed {_worker_capacity.explain_worker_budget()}")
 
 
 @pytest.hookimpl(tryfirst=True)
