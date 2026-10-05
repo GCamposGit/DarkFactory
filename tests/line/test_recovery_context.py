@@ -74,7 +74,7 @@ def test_archive_push_failure_leaves_context_in_branch(tmp_path: Path, monkeypat
     real_run_git = recovery_context.workspace._run_git
 
     def reject_context_push(args: list[str], **kwargs):
-        if args and args[0] == "push" and any("refs/darkfac/context/" in arg for arg in args):
+        if args and args[0] == "push" and any("refs/heads/darkfac-context/" in arg for arg in args):
             raise WorkspaceError("simulated push rejection")
         return real_run_git(args, **kwargs)
 

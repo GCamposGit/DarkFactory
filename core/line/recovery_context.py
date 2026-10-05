@@ -24,7 +24,8 @@ def context_ref(run_id: str) -> str:
     """A Git ref scoped to one run; reject values that could escape its namespace."""
     if not _RUN_ID_RE.fullmatch(run_id):
         raise ValueError(f"Invalid run id for recovery context: {run_id!r}")
-    return f"refs/darkfac/context/{run_id}"
+    # GitHub branch refs can be fetched by remote workers through normal Git access.
+    return f"refs/heads/darkfac-context/{run_id}"
 
 
 def _remote_sha(ws: RunWorkspace, ref: str) -> str | None:
