@@ -4171,5 +4171,34 @@
     "dependencies": [],
     "created_at": "2026-10-05T15:20:46.396815Z",
     "updated_at": "2026-10-05T15:20:46.396815Z"
+  },
+  {
+    "id": "USR-146",
+    "project_id": "darkfac",
+    "title": "Dokploy 502 Bad Gateway: queda do container ou esgotamento de recursos na VPS CX23",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "Em 05/10/2026 21:30 CEST, GET https://dokploy.ggcampos.com e https://dokploy.ggcampos.com/api/project.all retornaram HTTP 502 Bad Gateway (Traefik ativo com Alt-Svc h3, canary.ggcampos.com 200 OK, n8n 503, portas 80/443 e 5432 abertas). O container dokploy caiu, travou ou sofreu OOM/disco cheio na VPS Hetzner CX23.",
+    "core_journey": [
+      "Em 05/10/2026 21:30 CEST, GET https://dokploy.ggcampos.com e https://dokploy.ggcampos.com/api/project.all retornaram HTTP 502 Bad Gateway (Traefik ativo com Alt-Svc h3, canary.ggcampos.com 200 OK, n8n 503, portas 80/443 e 5432 abertas). O container dokploy caiu, travou ou sofreu OOM/disco cheio na VPS Hetzner CX23."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Dokploy restaurado e respondendo 200 em https://dokploy.ggcampos.com",
+      "Monitoramento e auto-recuperacao de containers e recursos da VPS documentados"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-05T22:05:56.766870Z",
+    "updated_at": "2026-10-05T22:05:56.766870Z"
   }
 ]
