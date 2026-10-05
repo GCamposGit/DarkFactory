@@ -4201,5 +4201,35 @@
     "dependencies": [],
     "created_at": "2026-10-05T22:05:56.766870Z",
     "updated_at": "2026-10-05T22:05:56.766870Z"
+  },
+  {
+    "id": "USR-147",
+    "project_id": "darkfac",
+    "title": "Governança: Aplicar patch de proteção de suite lock e remote probe no core/harness (caminho protegido)",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "USR-143 entregou o orçamento e diagnóstico de workers xdist em tests/_worker_capacity.py. As alterações de core/harness/suite_lock.py (stall detector), core/harness/runner.py (lock pré-execute) e core/harness/remote_dispatch.py (timeout configurável de probe) estão salvas em .factory/patches/usr-143-harness-core.patch pois core/harness/* é protegido por guard.py contra alterações automáticas de agentes.",
+    "core_journey": [
+      "USR-143 entregou o orçamento e diagnóstico de workers xdist em tests/_worker_capacity.py. As alterações de core/harness/suite_lock.py (stall detector), core/harness/runner.py (lock pré-execute) e core/harness/remote_dispatch.py (timeout configurável de probe) estão salvas em .factory/patches/usr-143-harness-core.patch pois core/harness/* é protegido por guard.py contra alterações automáticas de agentes."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Owner aplica patch de governança em core/harness/",
+      "Suite lock possui detecção de processos stalled com 0 CPU",
+      "Probe do Desktop possui timeout configurável"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-05T22:42:41.687764Z",
+    "updated_at": "2026-10-05T22:42:41.687764Z"
   }
 ]
