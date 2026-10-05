@@ -4110,5 +4110,34 @@
     "dependencies": [],
     "created_at": "2026-10-04T20:01:20.786789Z",
     "updated_at": "2026-10-04T20:01:20.786789Z"
+  },
+  {
+    "id": "USR-144",
+    "project_id": "darkfac",
+    "title": "Linha: deploy do DarkHub deve renderizar o compose do commit exato, nao so repinar o SHA armazenado",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "O DokployDeploymentAdapter (pin_compose_sha, PR #155) apenas troca os 3 SHAs pinados no composeFile raw ja armazenado no Dokploy. Mudancas em deploy/dokploy/docker-compose.hub.yml feitas por um ticket so chegam ao Dokploy pelo scripts/dokploy_redeploy.py (render_darkhub_compose a partir do commit). Evidencia: core/orchestrator/deployment_adapter.py::_bind_release_identity e scripts/dokploy_redeploy.py::set_compose_git_sha divergem.",
+    "core_journey": [
+      "O DokployDeploymentAdapter (pin_compose_sha, PR #155) apenas troca os 3 SHAs pinados no composeFile raw ja armazenado no Dokploy. Mudancas em deploy/dokploy/docker-compose.hub.yml feitas por um ticket so chegam ao Dokploy pelo scripts/dokploy_redeploy.py (render_darkhub_compose a partir do commit). Evidencia: core/orchestrator/deployment_adapter.py::_bind_release_identity e scripts/dokploy_redeploy.py::set_compose_git_sha divergem."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "O adapter da linha obtem deploy/dokploy/docker-compose.hub.yml no SHA do merge (gh/API do GitHub, sem checkout local) e instala o render completo via compose.update antes do deploy, compartilhando a funcao de render com scripts/dokploy_redeploy.py",
+      "Teste com transporte falso cobre compose alterado entre commits e falha fechada quando o arquivo nao pode ser lido"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-05T15:14:42.915940Z",
+    "updated_at": "2026-10-05T15:14:42.915940Z"
   }
 ]
