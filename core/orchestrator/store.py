@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import time
 from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 from enum import Enum
@@ -237,23 +238,56 @@ class OrchestratorStore:
 
     @contextmanager
     def _write_transaction(self) -> Iterator[sqlite3.Connection]:
-        connection = self._connect()
+        connection: sqlite3.Connection | None = None
+        for attempt in range(5):
+            try:
+                connection = self._connect()
+                self._ensure_schema(connection)
+                connection.execute("BEGIN IMMEDIATE")
+                break
+            except (sqlite3.OperationalError, PermissionError):
+                if connection is not None:
+                    try:
+                        connection.close()
+                    except Exception:
+                        pass
+                    connection = None
+                if attempt == 4:
+                    raise
+                time.sleep(0.02 * (attempt + 1))
+        assert connection is not None
         try:
-            self._ensure_schema(connection)
-            connection.execute("BEGIN IMMEDIATE")
             yield connection
             connection.commit()
         except Exception:
-            connection.rollback()
+            try:
+                connection.rollback()
+            except Exception:
+                pass
             raise
         finally:
             connection.close()
 
     @contextmanager
     def _read_connection(self) -> Iterator[sqlite3.Connection]:
-        connection = self._connect()
+        connection: sqlite3.Connection | None = None
+        for attempt in range(5):
+            try:
+                connection = self._connect()
+                self._ensure_schema(connection)
+                break
+            except (sqlite3.OperationalError, PermissionError):
+                if connection is not None:
+                    try:
+                        connection.close()
+                    except Exception:
+                        pass
+                    connection = None
+                if attempt == 4:
+                    raise
+                time.sleep(0.02 * (attempt + 1))
+        assert connection is not None
         try:
-            self._ensure_schema(connection)
             yield connection
         finally:
             connection.close()

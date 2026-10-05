@@ -524,6 +524,7 @@ class DriverEvent(StrictLabModel):
     runtime_status: RuntimeStatus
     step_id: str | None = None
     code: str | None = None
+    details: dict[str, Any] = Field(default_factory=dict)
 
     @field_validator("kind", mode="before")
     @classmethod
@@ -550,6 +551,13 @@ class DriverEvent(StrictLabModel):
     @classmethod
     def _optional_strings_are_normalized(cls, value: str | None, info: Any) -> str | None:
         return None if value is None else _safe_id(value, field_name=info.field_name)
+
+    @field_validator("details")
+    @classmethod
+    def _details_are_safe_json(cls, value: dict[str, Any]) -> dict[str, Any]:
+        _ensure_json_value(value, path="details")
+        _reject_secret_material(value, path="details")
+        return value
 
 
 class ScenarioResult(StrictLabModel):
