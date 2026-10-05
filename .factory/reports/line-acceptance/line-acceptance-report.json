@@ -1,0 +1,50 @@
+{
+  "generated_at": "2026-10-05T20:00:20.479993+00:00",
+  "all_verified": false,
+  "verified_count": 2,
+  "total_count": 4,
+  "criteria": [
+    {
+      "id": "V1",
+      "title": "Demanda autonoma ponta a ponta sem intervencao humana alem do intake/grill",
+      "verified": false,
+      "evidence": "Nenhum run entregue de ponta a ponta verificado no control store",
+      "details": {}
+    },
+    {
+      "id": "V2",
+      "title": "Canario diario E2E com streak >= 7 dias verdes",
+      "verified": false,
+      "evidence": "Streak atual: 0/7 dias verdes (ultimo: nenhum)",
+      "details": {
+        "streak": 0,
+        "min_streak": 7,
+        "last_date": null
+      }
+    },
+    {
+      "id": "V3",
+      "title": "Failover de capacidade, graceful degradation e restricoes de quota",
+      "verified": true,
+      "evidence": "Roteamento por capacidade, failover de quota e expiracao de espera verificados",
+      "details": {
+        "dev_harness": "claude",
+        "cooldown_failover_ok": true
+      }
+    },
+    {
+      "id": "V4",
+      "title": "Adocao greenfield e decomposicao de marcos (core.adoption)",
+      "verified": true,
+      "evidence": "Servico core.adoption (plan_adoption, apply_adoption, verify_adoption) e ProjectKind.GREENFIELD verificados",
+      "details": {
+        "service": "core.adoption.service",
+        "types": [
+          "greenfield",
+          "brownfield"
+        ]
+      }
+    }
+  ],
+  "summary": "2/4 criterios de aceite verificados (V1: False, V2: False, V3: True, V4: True)."
+}

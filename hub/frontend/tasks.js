@@ -15,15 +15,57 @@ const taskDashboardState = {
 document.addEventListener("DOMContentLoaded", () => {
   document
     .getElementById("tasks-dashboard-refresh")
-    ?.addEventListener("click", () => loadTaskDashboard(true));
-  if (!document.hidden) loadTaskDashboard();
+    ?.addEventListener("click", () => {
+      loadTaskDashboard(true);
+      loadLineStatus();
+    });
+  if (!document.hidden) {
+    loadTaskDashboard();
+    loadLineStatus();
+  }
   document.addEventListener("visibilitychange", () => {
-    if (!document.hidden) loadTaskDashboard();
+    if (!document.hidden) {
+      loadTaskDashboard();
+      loadLineStatus();
+    }
   });
   window.setInterval(() => {
-    if (!document.hidden) loadTaskDashboard();
+    if (!document.hidden) {
+      loadTaskDashboard();
+      loadLineStatus();
+    }
   }, 30000);
 });
+
+async function loadLineStatus() {
+  const card = document.getElementById("line-status-card");
+  if (!card) return;
+  try {
+    const request = typeof hubFetch === "function" ? hubFetch : fetch;
+    const response = await request("/api/line/status", {
+      headers: { Accept: "application/json" },
+      cache: "no-store",
+    });
+    if (!response.ok) return;
+    const data = await response.json();
+    const streakBadge = document.getElementById("line-canary-streak-badge");
+    if (streakBadge) {
+      streakBadge.textContent = `Canário: ${data.canary_streak} dias verdes`;
+    }
+    if (data.acceptance && Array.isArray(data.acceptance.criteria)) {
+      for (const crit of data.acceptance.criteria) {
+        const idLower = String(crit.id || "").toLowerCase();
+        const el = document.getElementById(`line-${idLower}-status`);
+        if (el) {
+          el.textContent = crit.verified ? "Aprovado" : "Pendente";
+          el.className = crit.verified ? "font-medium text-emerald-400 mt-0.5" : "font-medium text-amber-400 mt-0.5";
+        }
+      }
+    }
+  } catch (_err) {
+    // Gracefully ignore fetch errors
+  }
+}
 
 async function loadTaskDashboard(force = false) {
   if (taskDashboardState.loading) return;

@@ -2434,7 +2434,8 @@
     "project_id": "darkfac",
     "title": "Aceite V1-V4 com evidencia automatica e visivel: probe de aceite, status do canario no DarkHub e HF-27 sai de validating",
     "origin": "agent",
-    "status": "planned",
+    "status": "completed",
+    "delivery_evidence": "core.line.acceptance verify, /api/line/status, line-status-card in DarkHub, tests/test_line_acceptance.py",
     "item_type": "quality",
     "lifecycle_stage": "execution",
     "horizon": "next",
@@ -2471,7 +2472,7 @@
       "USR-86"
     ],
     "created_at": "2026-09-30T22:00:00Z",
-    "updated_at": "2026-09-30T22:00:00Z"
+    "updated_at": "2026-10-05T20:00:50.209927Z"
   },
   {
     "id": "USR-94",

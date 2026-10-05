@@ -215,6 +215,9 @@
     "GET /api/line/live/stream": {
       "surface": "line-live-board"
     },
+    "GET /api/line/status": {
+      "surface": "line-status-card"
+    },
     "GET /api/notifications": {
       "surface": "factory-alerts-strip"
     },
