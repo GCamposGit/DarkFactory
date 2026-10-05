@@ -429,6 +429,23 @@ class RetrospectiveStageHandler:
         try:
             summary = self._build_summary(context)
             self._record_summary(run_id, summary)
+
+            try:
+                from core.line.retrospective import record_retrospective_lessons
+
+                project = _resolve_project(context, self.project_resolver)
+                status: Optional[dict[str, Any]] = None
+                getter = getattr(self.store, "get_run_status", None)
+                if getter is not None:
+                    status = getter(run_id)
+                record_retrospective_lessons(
+                    project=project,
+                    run_id=run_id,
+                    summary=summary,
+                    status=status,
+                )
+            except Exception as retro_exc:
+                logger.warning("retrospective lesson recording for run %s failed (non-blocking): %s", run_id, retro_exc)
         except Exception as exc:  # pragma: no cover - defensive, must never block
             logger.warning("retrospective summary for run %s failed (non-blocking): %s", run_id, exc)
         return StageResult(outcome="success", output_refs=[f"retrospective:{run_id}"])
