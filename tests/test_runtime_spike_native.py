@@ -424,3 +424,95 @@ def test_jsonl_driver_emits_store_unavailable_when_observe_fails(
         for event in events
     )
 
+
+def test_native_adapter_distinguishes_storage_error_from_effect_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Part A: Storage error simulation
+    lab_storage = tmp_path / "lab_storage"
+    lab_storage.mkdir(parents=True, exist_ok=True)
+    with EffectServer(tmp_path / "srv_storage") as server:
+        config = make_config(lab_storage, server.base_url)
+        adapter = NativeAdapter(config)
+
+        def fail_save_checkpoint(*args, **kwargs):
+            raise sqlite3.OperationalError("database is locked: busy")
+
+        monkeypatch.setattr(adapter.store, "save_checkpoint", fail_save_checkpoint)
+
+        started = adapter.start(start_command("wf-storage-fail"))
+        events = wait_for_terminal(adapter, "wf-storage-fail")
+
+        assert started[0].kind is DriverEventKind.STARTED
+        assert events[-1].kind is DriverEventKind.ERROR
+        assert events[-1].code == "STORE_UNAVAILABLE"
+        assert events[-1].details.get("source") == "storage"
+        assert events[-1].details.get("error_type") == "OperationalError"
+        assert "database is locked" in events[-1].details.get("diagnostic", "")
+        assert str(tmp_path) not in json.dumps(events[-1].details)
+        adapter.shutdown()
+
+    # Part B: Effect service failure simulation
+    lab_effect = tmp_path / "lab_effect"
+    lab_effect.mkdir(parents=True, exist_ok=True)
+    with EffectServer(tmp_path / "srv_effect") as server:
+        config = make_config(lab_effect, server.base_url)
+        adapter = NativeAdapter(config)
+
+        def fail_observe(*args, **kwargs):
+            raise NativeAdapterError(
+                "EFFECT_SERVICE_UNAVAILABLE",
+                details={"source": "effect_service", "error_type": "URLError", "diagnostic": "connection refused"},
+            )
+
+        monkeypatch.setattr(adapter.effects, "observe", fail_observe)
+
+        started = adapter.start(start_command("wf-effect-fail"))
+        events = wait_for_terminal(adapter, "wf-effect-fail")
+
+        assert started[0].kind is DriverEventKind.STARTED
+        assert events[-1].kind is DriverEventKind.ERROR
+        assert events[-1].code == "EFFECT_SERVICE_UNAVAILABLE"
+        assert events[-1].details.get("source") == "effect_service"
+        assert events[-1].details.get("error_type") == "URLError"
+        assert "connection refused" in events[-1].details.get("diagnostic", "")
+        adapter.shutdown()
+
+
+def test_native_adapter_observe_includes_sanitized_storage_diagnostic(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    adapter = NativeAdapter(make_config(tmp_path, "http://127.0.0.1:18402"))
+
+    def fail_latest_run(_workflow_id: str) -> None:
+        raise sqlite3.OperationalError(r"disk I/O error on C:\dev\DarkFac\secret\db.sqlite3")
+
+    monkeypatch.setattr(adapter.store, "get_latest_run", fail_latest_run)
+
+    events = adapter.observe(
+        DriverCommand(command_id="obs-diag", action=DriverAction.OBSERVE, workflow_id="wf-obs-diag")
+    )
+    assert events[0].kind is DriverEventKind.ERROR
+    assert events[0].code == "STORE_UNAVAILABLE"
+    assert events[0].details.get("source") == "storage"
+    assert events[0].details.get("error_type") == "OperationalError"
+    assert "disk I/O error" in events[0].details.get("diagnostic", "")
+    assert r"C:\dev" not in events[0].details.get("diagnostic", "")
+    adapter.shutdown()
+
+
+def test_native_adapter_executes_repeatedly_without_transient_store_error(tmp_path: Path) -> None:
+    with EffectServer(tmp_path / "server_repeat") as server:
+        for i in range(3):
+            lab_dir = tmp_path / f"repeat_{i}"
+            lab_dir.mkdir(parents=True, exist_ok=True)
+            config = make_config(lab_dir, server.base_url)
+            adapter = NativeAdapter(config)
+            wf_id = f"workflow-repeat-{i}"
+            started = adapter.start(start_command(wf_id))
+            events = wait_for_terminal(adapter, wf_id)
+            assert started[0].kind is DriverEventKind.STARTED
+            assert events[-1].kind is DriverEventKind.COMPLETED
+            assert events[-1].runtime_status is RuntimeStatus.SUCCEEDED
+            adapter.shutdown()
+

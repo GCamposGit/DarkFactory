@@ -74,13 +74,19 @@ class DriverSession:
         return self.adapter.dispatch(command)
 
 
-def _protocol_error(code: str, workflow_id: str = "driver-error") -> DriverEvent:
+def _protocol_error(
+    code: str,
+    workflow_id: str = "driver-error",
+    *,
+    details: dict[str, Any] | None = None,
+) -> DriverEvent:
     return DriverEvent(
         event_id="event-driver-error",
         workflow_id=workflow_id,
         kind=DriverEventKind.ERROR,
         runtime_status=RuntimeStatus.ERROR,
         code=code,
+        details=details or {},
     )
 
 
@@ -124,14 +130,16 @@ def run_jsonl(config: LabConfig, input_stream: TextIO, output_stream: TextIO) ->
                 continue
             except DriverConfigurationError as error:
                 exit_code = 2
-                write(_protocol_error(error.code))
+                err_details = getattr(error, "details", {})
+                write(_protocol_error(error.code, details=err_details))
                 continue
             except Exception as error:
                 code = getattr(error, "code", None)
                 if code is not None and isinstance(code, str):
                     exit_code = 2
                     target_id = getattr(command, "workflow_id", None) or "driver-error"
-                    write(_protocol_error(code, workflow_id=target_id))
+                    err_details = getattr(error, "details", {})
+                    write(_protocol_error(code, workflow_id=target_id, details=err_details))
                     continue
                 raise
             for event in events:

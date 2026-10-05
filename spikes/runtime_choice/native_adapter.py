@@ -8,9 +8,11 @@ versioning wrappers that the baseline does not natively provide.
 from __future__ import annotations
 
 import hashlib
+import http.client
 import json
 import os
 import queue
+import re
 import sqlite3
 import threading
 import time
@@ -38,12 +40,31 @@ from spikes.runtime_choice.contracts import (
 )
 
 
+def sanitize_diagnostic(message: object) -> str:
+    """Sanitize error messages for diagnostic inclusion without leaking paths or secrets."""
+    text = str(message)
+    # Strip Windows and Unix absolute/relative file paths
+    text = re.sub(r"[A-Za-z]:\\[\w\-.\\]+", "[path]", text)
+    text = re.sub(r"/(?:[\w\-.]+/)+[\w\-.]*", "[path]", text)
+    # Strip sensitive key=value pairs or URLs
+    text = re.sub(r"(?i)(token|password|secret|bearer|key)=[^\s&;]+", r"\1=[redacted]", text)
+    # Collapse multiple whitespaces and truncate safely
+    text = " ".join(text.split()).strip()
+    return text[:120] if text else "unknown"
+
+
 class NativeAdapterError(RuntimeError):
     """Sanitized adapter failure with a stable code for the driver."""
 
-    def __init__(self, code: str, message: str = "native adapter failed") -> None:
+    def __init__(
+        self,
+        code: str,
+        message: str = "native adapter failed",
+        details: dict[str, Any] | None = None,
+    ) -> None:
         super().__init__(message)
         self.code = code
+        self.details = details or {}
 
 
 class EffectClient:
@@ -60,17 +81,43 @@ class EffectClient:
             method="POST",
             headers={"Content-Type": "application/json"},
         )
-        try:
-            with urlopen(request, timeout=5) as response:
-                return json.loads(response.read().decode("utf-8"))
-        except HTTPError as error:
+        max_attempts = 3
+        for attempt in range(max_attempts):
             try:
-                body = json.loads(error.read().decode("utf-8"))
-            except (UnicodeDecodeError, json.JSONDecodeError):
-                body = {}
-            raise NativeAdapterError(str(body.get("error_code", "EFFECT_HTTP_ERROR"))) from error
-        except (URLError, TimeoutError, OSError) as error:
-            raise NativeAdapterError("EFFECT_SERVICE_UNAVAILABLE") from error
+                with urlopen(request, timeout=5) as response:
+                    return json.loads(response.read().decode("utf-8"))
+            except HTTPError as error:
+                try:
+                    body_json = json.loads(error.read().decode("utf-8"))
+                except (UnicodeDecodeError, json.JSONDecodeError):
+                    body_json = {}
+                error_code = str(body_json.get("error_code", "EFFECT_HTTP_ERROR"))
+                raise NativeAdapterError(
+                    error_code,
+                    details={
+                        "source": "effect_service",
+                        "error_type": "HTTPError",
+                        "status_code": error.code,
+                        "diagnostic": sanitize_diagnostic(str(error)),
+                    },
+                ) from error
+            except (URLError, TimeoutError, OSError, http.client.HTTPException) as error:
+                if (
+                    attempt < max_attempts - 1
+                    and isinstance(error, (URLError, ConnectionRefusedError))
+                    and not isinstance(error, (http.client.RemoteDisconnected, ConnectionResetError))
+                ):
+                    time.sleep(0.05 * (attempt + 1))
+                    continue
+                raise NativeAdapterError(
+                    "EFFECT_SERVICE_UNAVAILABLE",
+                    details={
+                        "source": "effect_service",
+                        "error_type": type(error).__name__,
+                        "diagnostic": sanitize_diagnostic(str(error)),
+                    },
+                ) from error
+        raise NativeAdapterError("EFFECT_SERVICE_UNAVAILABLE")
 
     def observe(self, workflow_id: str, kind: str, step_id: str, details: dict[str, Any]) -> None:
         self._post(
@@ -130,7 +177,12 @@ class NativeAdapter:
                 last_error = error
                 time.sleep(0.1 * (attempt + 1))
         if last_error is not None:
-            raise NativeAdapterError("STORE_UNAVAILABLE") from last_error
+            storage_details = {
+                "source": "storage",
+                "error_type": type(last_error).__name__,
+                "diagnostic": sanitize_diagnostic(str(last_error)),
+            }
+            raise NativeAdapterError("STORE_UNAVAILABLE", details=storage_details) from last_error
         self.effects = EffectClient(config.effect_base_url)
         self._events: queue.Queue[DriverEvent] = queue.Queue()
         self._threads: dict[str, threading.Thread] = {}
@@ -163,6 +215,7 @@ class NativeAdapter:
         *,
         step_id: str | None = None,
         code: str | None = None,
+        details: dict[str, Any] | None = None,
     ) -> DriverEvent:
         return DriverEvent(
             event_id=f"event-{uuid4().hex}",
@@ -171,6 +224,7 @@ class NativeAdapter:
             runtime_status=status,
             step_id=step_id,
             code=code,
+            details=details or {},
         )
 
     def _emit(self, event: DriverEvent) -> None:
@@ -229,13 +283,18 @@ class NativeAdapter:
             try:
                 if self._latest_is_duplicate(command.workflow_id):
                     return [self._unsupported(command.workflow_id, capability="deduplicated_intake")]
-            except (sqlite3.Error, OSError, StoreError):
+            except (sqlite3.Error, OSError, StoreError) as error:
                 return [
                     self._event(
                         command.workflow_id,
                         DriverEventKind.ERROR,
                         RuntimeStatus.ERROR,
                         code="STORE_UNAVAILABLE",
+                        details={
+                            "source": "storage",
+                            "error_type": type(error).__name__,
+                            "diagnostic": sanitize_diagnostic(str(error)),
+                        },
                     )
                 ]
             started = self._event(
@@ -290,11 +349,58 @@ class NativeAdapter:
             status = RuntimeStatus.SUCCEEDED if result.status is RunStatus.SUCCEEDED else RuntimeStatus.ERROR
             self._emit(self._event(workflow_id, DriverEventKind.COMPLETED, status))
         except NativeAdapterError as error:
-            self._emit(self._event(workflow_id, DriverEventKind.ERROR, RuntimeStatus.ERROR, code=error.code))
-        except (sqlite3.Error, OSError, StoreError):
-            self._emit(self._event(workflow_id, DriverEventKind.ERROR, RuntimeStatus.ERROR, code="STORE_UNAVAILABLE"))
-        except Exception:
-            self._emit(self._event(workflow_id, DriverEventKind.ERROR, RuntimeStatus.ERROR, code="NATIVE_RUNTIME_ERROR"))
+            details = {"source": "effect_service", **error.details}
+            self._emit(
+                self._event(
+                    workflow_id,
+                    DriverEventKind.ERROR,
+                    RuntimeStatus.ERROR,
+                    code=error.code,
+                    details=details,
+                )
+            )
+        except (sqlite3.Error, StoreError) as error:
+            self._emit(
+                self._event(
+                    workflow_id,
+                    DriverEventKind.ERROR,
+                    RuntimeStatus.ERROR,
+                    code="STORE_UNAVAILABLE",
+                    details={
+                        "source": "storage",
+                        "error_type": type(error).__name__,
+                        "diagnostic": sanitize_diagnostic(str(error)),
+                    },
+                )
+            )
+        except OSError as error:
+            self._emit(
+                self._event(
+                    workflow_id,
+                    DriverEventKind.ERROR,
+                    RuntimeStatus.ERROR,
+                    code="STORE_UNAVAILABLE",
+                    details={
+                        "source": "storage",
+                        "error_type": type(error).__name__,
+                        "diagnostic": sanitize_diagnostic(str(error)),
+                    },
+                )
+            )
+        except Exception as error:
+            self._emit(
+                self._event(
+                    workflow_id,
+                    DriverEventKind.ERROR,
+                    RuntimeStatus.ERROR,
+                    code="NATIVE_RUNTIME_ERROR",
+                    details={
+                        "source": "native_runtime",
+                        "error_type": type(error).__name__,
+                        "diagnostic": sanitize_diagnostic(str(error)),
+                    },
+                )
+            )
         finally:
             with self._lock:
                 self._threads.pop(workflow_id, None)
@@ -318,6 +424,11 @@ class NativeAdapter:
                     DriverEventKind.ERROR,
                     RuntimeStatus.ERROR,
                     code="STORE_UNAVAILABLE",
+                    details={
+                        "source": "storage",
+                        "error_type": type(last_error).__name__,
+                        "diagnostic": sanitize_diagnostic(str(last_error)),
+                    },
                 )
             ]
         if record is None:
@@ -383,4 +494,4 @@ class NativeAdapter:
         raise NativeAdapterError("UNKNOWN_ACTION")
 
 
-__all__ = ["EffectClient", "NativeAdapter", "NativeAdapterError"]
+__all__ = ["EffectClient", "NativeAdapter", "NativeAdapterError", "sanitize_diagnostic"]

@@ -6,6 +6,7 @@ import json
 import logging
 import socket
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
@@ -73,7 +74,17 @@ class EffectServer:
             daemon=True,
         )
         self._thread.start()
+        self._wait_ready(timeout=3.0)
         return self.base_url
+
+    def _wait_ready(self, timeout: float = 3.0) -> None:
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            try:
+                with socket.create_connection((self.host, self.port), timeout=0.1):
+                    return
+            except (OSError, TimeoutError):
+                time.sleep(0.02)
 
     def stop(self) -> None:
         httpd, thread = self._httpd, self._thread
