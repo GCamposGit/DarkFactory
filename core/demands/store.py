@@ -125,15 +125,19 @@ class DemandsStore:
         ticket_id: str,
         status: DeliveryStatus,
         notes: str | None = None,
+        delivery_evidence: str | None = None,
     ) -> UserTicket:
         with self._lock:
             ticket = self.get_ticket(ticket_id)
             if not ticket:
                 raise KeyError(f"Ticket '{ticket_id}' not found")
             now = utc_now()
-            updated = ticket.model_copy(update={
+            updates: dict[str, Any] = {
                 "status": status,
                 "updated_at": now,
-            })
+            }
+            if delivery_evidence is not None:
+                updates["delivery_evidence"] = delivery_evidence
+            updated = ticket.model_copy(update=updates)
             self.save_ticket(updated)
             return updated

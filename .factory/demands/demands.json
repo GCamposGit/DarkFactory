@@ -2392,7 +2392,7 @@
     "project_id": "darkfac",
     "title": "Backlog interno sem consumidor: o dogfood deve ler tickets planned com tag line-ok de demands.json, nao so o manifesto do roadmap",
     "origin": "agent",
-    "status": "planned",
+    "status": "completed",
     "item_type": "quality",
     "lifecycle_stage": "execution",
     "horizon": "next",
@@ -2426,7 +2426,8 @@
       "USR-86"
     ],
     "created_at": "2026-09-30T22:00:00Z",
-    "updated_at": "2026-09-30T22:00:00Z"
+    "updated_at": "2026-10-05T19:45:00Z",
+    "delivery_evidence": "Official gate 3046 tests pass (3039 passed, 7 skipped), 10/10 test_line_dogfood.py pass, .factory/reports/usr-92-dogfood-backlog-report.md"
   },
   {
     "id": "USR-93",

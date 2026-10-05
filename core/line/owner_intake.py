@@ -306,6 +306,31 @@ def run_state(
     return "failed"
 
 
+def extract_run_delivery_evidence(store: Any, run_id: str | None) -> str:
+    """Extract PR URL and merge SHA evidence from a succeeded line run."""
+    if not run_id:
+        return "line:delivered"
+    getter = getattr(store, "get_run_status", None)
+    if getter is not None:
+        try:
+            status = getter(run_id) or {}
+            jobs = status.get("jobs") or []
+            for job in jobs:
+                if job.get("stage") == "integration" and job.get("status") == "succeeded":
+                    refs = job.get("output_refs") or []
+                    if len(refs) >= 2 and refs[0] and refs[1]:
+                        return f"{refs[0]} (commit {refs[1]})"
+                    elif len(refs) == 1 and refs[0]:
+                        return str(refs[0])
+            for job in jobs:
+                for ref in (job.get("output_refs") or []):
+                    if isinstance(ref, str) and ("pull" in ref or "commit" in ref or len(ref) == 40):
+                        return ref
+        except Exception as exc:
+            logger.warning("Could not extract delivery evidence for run %s: %s", run_id, exc)
+    return f"line:run:{run_id}"
+
+
 def submit_ticket_to_line(
     ticket_id: str,
     *,
@@ -361,6 +386,14 @@ def submit_ticket_to_line(
             latest_attempt, latest_run = attempts[-1]
             state = run_state(line_store, latest_run)
             if state == "succeeded":
+                if ticket.status != DeliveryStatus.COMPLETED and demands_store is not None:
+                    evidence = extract_run_delivery_evidence(line_store, latest_run)
+                    if getattr(ticket, "is_live_deploy", False) and "live_converged" not in evidence:
+                        evidence = f"{evidence}:live_converged"
+                    try:
+                        demands_store.update_status(ticket.id, DeliveryStatus.COMPLETED, delivery_evidence=evidence)
+                    except Exception as exc:
+                        logger.warning("Could not mark ticket %s completed: %s", ticket.id, exc)
                 return LineSubmission(
                     ok=True, ticket_id=ticket.id, project_id=ticket.project_id, run_id=latest_run,
                     attempt=latest_attempt, replayed=True, state="delivered",

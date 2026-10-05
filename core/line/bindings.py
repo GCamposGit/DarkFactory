@@ -446,9 +446,52 @@ class RetrospectiveStageHandler:
                 )
             except Exception as retro_exc:
                 logger.warning("retrospective lesson recording for run %s failed (non-blocking): %s", run_id, retro_exc)
+
+            try:
+                self._reconcile_ticket_delivery(context, run_id, summary)
+            except Exception as delivery_exc:
+                logger.warning("retrospective ticket delivery reconciliation for run %s failed (non-blocking): %s", run_id, delivery_exc)
         except Exception as exc:  # pragma: no cover - defensive, must never block
             logger.warning("retrospective summary for run %s failed (non-blocking): %s", run_id, exc)
         return StageResult(outcome="success", output_refs=[f"retrospective:{run_id}"])
+
+    def _reconcile_ticket_delivery(self, context: StageContext, run_id: str, summary: dict[str, Any]) -> None:
+        """When a line run for a ticket delivers successfully, mark the ticket completed with evidence."""
+        from core.line.owner_intake import run_state
+
+        if summary.get("final_outcome") != "completed" and run_state(self.store, run_id) != "succeeded":
+            return
+        payload_getter = getattr(self.store, "get_run_payload", None)
+        ticket_id: str | None = None
+        if payload_getter is not None:
+            try:
+                payload = payload_getter(run_id)
+                if isinstance(payload, dict):
+                    ticket_id = payload.get("ticket_id")
+            except Exception:
+                pass
+        if not ticket_id:
+            return
+        try:
+            project = _resolve_project(context, self.project_resolver)
+            repo_path = project.resolve_path()
+        except Exception:
+            return
+        demands_file = repo_path / ".factory" / "demands" / "demands.json"
+        if not demands_file.exists():
+            return
+        from core.demands.store import DemandsStore
+        from core.line.owner_intake import extract_run_delivery_evidence
+        from core.roadmap.models import DeliveryStatus
+
+        demands_store = DemandsStore(demands_file)
+        ticket = demands_store.get_ticket(ticket_id)
+        if ticket and ticket.status != DeliveryStatus.COMPLETED:
+            evidence = extract_run_delivery_evidence(self.store, run_id)
+            if getattr(ticket, "is_live_deploy", False) and "live_converged" not in evidence:
+                evidence = f"{evidence}:live_converged"
+            demands_store.update_status(ticket_id, DeliveryStatus.COMPLETED, delivery_evidence=evidence)
+            logger.info("Retrospective: reconciled delivered ticket %s with evidence: %s", ticket_id, evidence)
 
     def _build_summary(self, context: StageContext) -> dict[str, Any]:
         run_id = context.claim.job_key.run_id

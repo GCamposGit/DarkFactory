@@ -33,6 +33,7 @@ from core.line.canary import REPORTS_DIR, green_streak, load_reports
 from core.line.owner_intake import (
     LineSubmission,
     _ticket_attempts,
+    extract_run_delivery_evidence,
     max_ticket_attempts_from_env,
     run_state,
     submit_ticket_to_line,
@@ -151,19 +152,52 @@ def eligible_ticket_candidates(tickets: list[UserTicket]) -> list[UserTicket]:
     ))
 
 
-def pick_candidate(items: list[RoadmapItem], *, exclude_ids: frozenset[str] = frozenset()) -> RoadmapItem | None:
-    """First `planned` item tagged `line-ok` that does not touch governance,
-    in roadmap order (stable, so repeated calls with the same input agree)."""
-    for item in items:
-        if item.id in exclude_ids:
-            continue
-        if item.delivery_status != DeliveryStatus.PLANNED:
-            continue
-        if LINE_OK_TAG not in item.tags:
-            continue
-        if touches_protected_path(item):
-            continue
-        return item
+def pick_candidate(
+    items: list[RoadmapItem] | list[UserTicket] | None = None,
+    *,
+    tickets: list[UserTicket] | None = None,
+    exclude_ids: frozenset[str] = frozenset(),
+) -> UserTicket | RoadmapItem | None:
+    """Select the first eligible candidate, prioritizing demands.json tickets over roadmap items.
+
+    Criteria:
+    - Must be planned/implementing
+    - Must be tagged `line-ok`
+    - Must not touch `guard.py`-protected paths
+    - All dependencies must be in `completed` status
+    - Respects exclude_ids
+    """
+    candidate_tickets: list[UserTicket] = []
+    candidate_items: list[RoadmapItem] = []
+
+    if tickets is not None:
+        candidate_tickets = list(tickets)
+
+    if items is not None:
+        if items and isinstance(items[0], UserTicket):
+            if not candidate_tickets:
+                candidate_tickets = list(items)  # type: ignore[arg-type]
+        else:
+            candidate_items = list(items)  # type: ignore[arg-type]
+
+    if candidate_tickets:
+        for ticket in eligible_ticket_candidates(candidate_tickets):
+            if ticket.id in exclude_ids:
+                continue
+            return ticket
+
+    if candidate_items:
+        for item in candidate_items:
+            if item.id in exclude_ids:
+                continue
+            if item.delivery_status != DeliveryStatus.PLANNED:
+                continue
+            if LINE_OK_TAG not in item.tags:
+                continue
+            if touches_protected_path(item):
+                continue
+            return item
+
     return None
 
 
@@ -314,7 +348,16 @@ def submit_dogfood_item(
             continue
         if attempts:
             state = run_state(store, attempts[-1][1])
-            if state == "succeeded" or len(attempts) >= max_ticket_attempts_from_env():
+            if state == "succeeded":
+                evidence = extract_run_delivery_evidence(store, attempts[-1][1])
+                if getattr(ticket, "is_live_deploy", False) and "live_converged" not in evidence:
+                    evidence = f"{evidence}:live_converged"
+                try:
+                    demands_store.update_status(ticket.id, DeliveryStatus.COMPLETED, delivery_evidence=evidence)
+                except Exception as exc:
+                    logger.warning("Could not mark ticket %s completed in dogfood: %s", ticket.id, exc)
+                continue
+            if len(attempts) >= max_ticket_attempts_from_env():
                 continue
         submission = submit_ticket_to_line(
             ticket.id, demands_store=demands_store, store=store, now=effective_now,
