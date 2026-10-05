@@ -75,6 +75,14 @@ def _default_http(method: str, url: str, payload: Optional[dict[str, Any]]) -> d
         return json.loads(response.read().decode("utf-8"))
 
 
+_webhook_registration_status: dict[str, dict[str, Any]] = {}
+
+
+def get_webhook_registration_status() -> dict[str, dict[str, Any]]:
+    """Returns the most recent webhook registration status by role (USR-110)."""
+    return dict(_webhook_registration_status)
+
+
 def register_telegram_webhooks(
     env: Mapping[str, str] | None = None,
     *,
@@ -98,6 +106,11 @@ def register_telegram_webhooks(
             current = ((info or {}).get("result") or {}).get("url") or ""
             if current == target.url:
                 results[target.role] = "unchanged"
+                _webhook_registration_status[target.role] = {
+                    "url": target.url,
+                    "status": "unchanged",
+                    "last_error": None,
+                }
                 continue
             payload: dict[str, Any] = {"url": target.url, "allowed_updates": ALLOWED_UPDATES}
             if secret:
@@ -106,12 +119,23 @@ def register_telegram_webhooks(
             if not (reply or {}).get("ok"):
                 raise RuntimeError("setWebhook was not ok")
             results[target.role] = "updated"
+            _webhook_registration_status[target.role] = {
+                "url": target.url,
+                "status": "updated",
+                "last_error": None,
+            }
         except Exception as exc:  # noqa: BLE001 - startup must never fail because of Telegram
             results[target.role] = "failed"
             # Never log the exception text: urllib/requests errors can embed the request URL, which
             # carries the bot token. The type (and HTTP status, if any) is enough to diagnose.
             status = getattr(exc, "code", None)
-            logger.warning(
+            err_repr = f"HTTP {status}" if isinstance(status, int) else type(exc).__name__
+            _webhook_registration_status[target.role] = {
+                "url": target.url,
+                "status": "failed",
+                "last_error": err_repr,
+            }
+            logger.error(
                 "Telegram webhook registration failed for role=%s: %s%s",
                 target.role,
                 type(exc).__name__,

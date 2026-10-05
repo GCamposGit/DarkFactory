@@ -202,6 +202,15 @@ def _read_env_fallback(root: Optional[Path] = None) -> dict[str, str]:
     return env_vars
 
 
+def _token_fp(tok: str | None) -> str:
+    if not tok:
+        return "none"
+    clean = tok.strip()
+    if len(clean) > 8:
+        return f"{clean[:4]}...{clean[-4:]}"
+    return "***"
+
+
 def load_telegram_config(
     config_file: Optional[Path] = None,
     role: str = "ops",
@@ -214,6 +223,14 @@ def load_telegram_config(
         "owner": ("TELEGRAM_OWNER_BOT_TOKEN",),
         "ops": ("TELEGRAM_OPS_BOT_TOKEN", "TELEGRAM_BOT_TOKEN"),
     }.get(role, ("TELEGRAM_BOT_TOKEN", "TELEGRAM_OPS_BOT_TOKEN", "TELEGRAM_OWNER_BOT_TOKEN"))
+
+    sources: dict[str, str] = {}
+    for key in keys:
+        if os.environ.get(key):
+            sources[f"env:{key}"] = os.environ[key]
+        elif env_vars.get(key):
+            sources[f".env:{key}"] = env_vars[key]
+
     token = next((value for key in keys if (value := os.environ.get(key) or env_vars.get(key))), None)
 
     cfg_dir = config_dir or (root_dir / ".factory" / "telegram")
@@ -228,13 +245,22 @@ def load_telegram_config(
         try:
             data = json.loads(candidate.read_text(encoding="utf-8"))
             if isinstance(data, dict):
-                if not local_token and data.get("bot_token"):
-                    local_token = data.get("bot_token")
+                cand_tok = data.get("bot_token")
+                if cand_tok:
+                    sources[candidate.name] = str(cand_tok)
+                    if not local_token:
+                        local_token = str(cand_tok)
                 for key, value in data.items():
                     if value is not None:
                         local_data.setdefault(key, value)
         except (OSError, ValueError):
             continue
+
+    distinct_tokens = set(sources.values())
+    if len(distinct_tokens) > 1:
+        details = ", ".join(f"{src}={_token_fp(t)}" for src, t in sources.items())
+        logger.warning("Telegram token sources diverge for role=%s: %s", role, details)
+
     if not token:
         token = local_token
 
@@ -1099,7 +1125,24 @@ class TelegramGateway:
                             self.send_message(chat_id, res.response_text)
                 return results
         except Exception as exc:
-            logger.warning("Failed to poll Telegram updates: %s", exc)
+            status_code = getattr(exc, "code", None)
+            if status_code == 401:
+                logger.error(
+                    "Telegram poll_updates failed: HTTP 401 Unauthorized (bot token is invalid or revoked for role=%s)",
+                    self.config.role,
+                )
+            elif status_code == 409:
+                logger.error(
+                    "Telegram poll_updates failed: HTTP 409 Conflict (active webhook or concurrent poll for role=%s)",
+                    self.config.role,
+                )
+            else:
+                logger.warning(
+                    "Failed to poll Telegram updates for role=%s: %s%s",
+                    self.config.role,
+                    type(exc).__name__,
+                    f" (HTTP {status_code})" if isinstance(status_code, int) else "",
+                )
             return []
 
     def send_message(
