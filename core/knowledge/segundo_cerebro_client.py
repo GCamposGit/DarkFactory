@@ -10,11 +10,17 @@ import hashlib
 import json
 import logging
 import os
+import socket
 import subprocess
 import sys
 import time
+import urllib.error
+import urllib.request
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+from urllib.parse import urlparse
+
+from core.line.agent_cli import redact_secrets
 
 from .models import (
     KnowledgeCitation,
@@ -27,6 +33,7 @@ logger = logging.getLogger("darkfac.knowledge.segundo_cerebro")
 
 DEFAULT_SEGUNDO_CEREBRO_ROOT = Path(r"C:\dev\SegundoCerebro")
 DEFAULT_VENV_PYTHON = DEFAULT_SEGUNDO_CEREBRO_ROOT / ".venv" / "Scripts" / "python.exe"
+DEFAULT_MCP_HTTP_TIMEOUT = 3.0
 
 
 class SegundoCerebroClient:
@@ -37,6 +44,7 @@ class SegundoCerebroClient:
         repo_root: Optional[Path] = None,
         python_exe: Optional[Path] = None,
         mock_mode: bool = False,
+        mcp_url: Optional[str] = None,
     ) -> None:
         self.repo_root = repo_root or Path(
             os.getenv("SEGUNDO_CEREBRO_ROOT", str(DEFAULT_SEGUNDO_CEREBRO_ROOT))
@@ -44,6 +52,7 @@ class SegundoCerebroClient:
         self.python_exe = python_exe or Path(
             os.getenv("SEGUNDO_CEREBRO_PYTHON", str(DEFAULT_VENV_PYTHON))
         )
+        self.mcp_url = mcp_url or os.getenv("SEGUNDO_CEREBRO_MCP_URL")
         # Mock mode allows deterministic testing in headless environments without dependencies
         self.mock_mode = mock_mode or os.getenv("DARKFAC_KNOWLEDGE_MOCK", "0") in ("1", "true", "yes")
         self._mock_corpus: List[Dict[str, Any]] = []
@@ -53,8 +62,8 @@ class SegundoCerebroClient:
         self._mock_corpus = items
         self.mock_mode = True
 
-    def check_health(self) -> SecondBrainStatus:
-        """Verify presence of Segundo Cérebro repository, python environment, and MCP server."""
+    def check_health(self, timeout_sec: float = DEFAULT_MCP_HTTP_TIMEOUT) -> SecondBrainStatus:
+        """Verify presence and responsiveness of Segundo Cérebro MCP server (fail-fast, USR-125)."""
         if self.mock_mode:
             return SecondBrainStatus(
                 available=True,
@@ -63,6 +72,36 @@ class SegundoCerebroClient:
                 corpus_root=str(self.repo_root),
                 error_message=None,
             )
+
+        if self.mcp_url:
+            safe_endpoint = redact_secrets(self.mcp_url)
+            try:
+                parsed = urlparse(self.mcp_url)
+                host = parsed.hostname or "127.0.0.1"
+                port = parsed.port or (443 if parsed.scheme == "https" else 80)
+                with socket.create_connection((host, port), timeout=timeout_sec):
+                    pass
+                return SecondBrainStatus(
+                    available=True,
+                    mcp_endpoint=safe_endpoint,
+                    registered_tools=["search", "read_note", "neighbors", "list_folder", "outline", "get_document", "pack_folder"],
+                    corpus_root=str(self.repo_root) if self.repo_root.exists() else None,
+                    error_message=None,
+                )
+            except Exception as exc:
+                err_msg = f"MCP server unreachable at {safe_endpoint} within {timeout_sec:.1f}s ({type(exc).__name__})"
+                logger.warning(
+                    "[MCP] Segundo Cérebro MCP endpoint %s offline: %s",
+                    safe_endpoint,
+                    redact_secrets(str(exc)),
+                )
+                return SecondBrainStatus(
+                    available=False,
+                    mcp_endpoint=safe_endpoint,
+                    registered_tools=[],
+                    corpus_root=None,
+                    error_message=redact_secrets(err_msg),
+                )
 
         if not self.repo_root.exists():
             return SecondBrainStatus(
@@ -93,9 +132,36 @@ class SegundoCerebroClient:
         )
 
     def _execute_mcp_tool(self, tool_name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
-        """Execute a tool on the Segundo Cérebro MCP server via stdio or direct import."""
+        """Execute a tool on the Segundo Cérebro MCP server via HTTP, stdio, or direct import."""
         if self.mock_mode:
             return self._mock_execute(tool_name, arguments)
+
+        if self.mcp_url:
+            try:
+                payload = json.dumps({
+                    "jsonrpc": "2.0",
+                    "method": "tools/call",
+                    "params": {"name": tool_name, "arguments": arguments},
+                    "id": 1,
+                }).encode("utf-8")
+                req = urllib.request.Request(
+                    self.mcp_url,
+                    data=payload,
+                    headers={"Content-Type": "application/json"},
+                )
+                auth_token = os.getenv("SEGUNDO_CEREBRO_API_KEY") or os.getenv("MCP_AUTH_TOKEN")
+                if auth_token:
+                    req.add_header("Authorization", f"Bearer {auth_token}")
+                timeout = float(os.getenv("SEGUNDO_CEREBRO_TIMEOUT", "5.0"))
+                with urllib.request.urlopen(req, timeout=timeout) as resp:
+                    data = json.loads(resp.read().decode("utf-8"))
+                    result = data.get("result", {})
+                    if isinstance(result, dict) and "content" in result:
+                        return result
+                    return data
+            except Exception as exc:
+                logger.warning("Segundo Cérebro MCP HTTP call failed: %s", redact_secrets(str(exc)))
+                return {"error": redact_secrets(f"MCP HTTP request failed: {exc}")}
 
         # Build execution environment
         python_bin = str(self.python_exe) if self.python_exe.exists() else sys.executable
@@ -250,6 +316,22 @@ except Exception as exc:
         """
         Execute knowledge query with strict fail-closed anti-hallucination and project isolation.
         """
+        if not self.mock_mode and self.mcp_url:
+            health = self.check_health()
+            if not health.available:
+                logger.warning(
+                    "[MCP] Segundo Cérebro MCP endpoint unavailable (%s); failing fast in degraded state.",
+                    health.error_message,
+                )
+                return KnowledgeQueryResult(
+                    status="INSUFFICIENT_EVIDENCE",
+                    query=query.query,
+                    project_id=query.project_id,
+                    citations=[],
+                    total_found=0,
+                    execution_time_ms=0.0,
+                )
+
         start_time = time.perf_counter()
 
         # Build tool arguments
