@@ -322,7 +322,11 @@ class HubService:
         if data_dir is not None:
             self.demands_dir = self.data_dir / "demands"
         else:
-            self.demands_dir = Path(__file__).resolve().parents[2] / ".factory" / "demands"
+            configured_demands = os.environ.get("DARKFAC_DEMANDS_PATH")
+            self.demands_dir = (
+                Path(configured_demands).parent if configured_demands
+                else Path(__file__).resolve().parents[2] / ".factory" / "demands"
+            )
         self.demands_store = DemandsStore(self.demands_dir / "demands.json")
         self.demands_service = DemandsService(
             store=self.demands_store,
@@ -3507,5 +3511,4 @@ class HubService:
 
 # Canonical alias for DarkHubService (HF-13-02)
 DarkHubService = HubService
-
 

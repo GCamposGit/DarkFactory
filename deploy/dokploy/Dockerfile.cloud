@@ -84,6 +84,7 @@ COPY scripts /app/scripts
 COPY deploy /app/deploy
 COPY spikes /app/spikes
 COPY .factory /app/.factory
+COPY .factory /app/.factory_seed
 COPY harness.config.json /app/harness.config.json
 
 # Create artifact/log directories plus the CLI auth and workspace volumes
