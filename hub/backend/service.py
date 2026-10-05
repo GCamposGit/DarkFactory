@@ -587,12 +587,10 @@ class HubService:
                 else "local-file"
             )
             snapshot = snapshot.model_copy(update={
-                "source": snapshot.source.model_copy(update={
-                    "demands": demands_source,
-                    "demands_latest_at": (
-                        latest_demand_update.isoformat() if latest_demand_update else None
-                    ),
-                }),
+                "demands_source": demands_source,
+                "demands_latest_at": (
+                    latest_demand_update.isoformat() if latest_demand_update else None
+                ),
             })
             if warnings:
                 snapshot = snapshot.model_copy(update={"warnings": [*snapshot.warnings, *warnings]})

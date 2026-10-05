@@ -5,7 +5,9 @@ from __future__ import annotations
 import json
 import logging
 import os
+import tempfile
 from datetime import datetime, timezone
+from hashlib import sha256
 from pathlib import Path
 from threading import RLock, get_ident
 from typing import Any
@@ -46,7 +48,14 @@ class DemandsStore:
             raise RuntimeError(
                 f"Demand volume {self.shared_volume_name} is not mounted at {self.path.parent}"
             )
-        self._write_lock_path = self.path.with_name("demands-write.lock")
+        if self.shared_volume_name:
+            self._write_lock_path = self.path.with_name("demands-write.lock")
+        else:
+            canonical_path = str(self.path.resolve())
+            if os.name == "nt":
+                canonical_path = canonical_path.casefold()
+            lock_id = sha256(canonical_path.encode("utf-8")).hexdigest()[:24]
+            self._write_lock_path = Path(tempfile.gettempdir()) / "darkfac-demand-locks" / f"{lock_id}.lock"
         self._lock = RLock()
         self._ensure_storage()
 

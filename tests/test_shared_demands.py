@@ -127,8 +127,8 @@ def test_live_board_labels_local_ledger_without_claiming_a_shared_mount(tmp_path
         id="USR-01", project_id="darkfac", title="visible",
     ))
     snapshot = service.get_line_live()
-    assert snapshot.source.demands == "local-file"
-    assert snapshot.source.demands_latest_at is not None
+    assert snapshot.demands_source == "local-file"
+    assert snapshot.demands_latest_at is not None
 
 
 def test_cloud_and_hub_share_one_named_demand_volume() -> None:

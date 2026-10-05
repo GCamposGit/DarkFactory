@@ -110,8 +110,6 @@ class _Model(BaseModel):
 class LiveSource(_Model):
     backend: Literal["postgres", "sqlite", "none"]
     status: Literal["ok", "missing", "error"]
-    demands: Literal["shared-volume", "local-file", "unavailable"] = "local-file"
-    demands_latest_at: str | None = None
 
 
 class LiveAttempt(_Model):
@@ -234,6 +232,8 @@ class LineLiveSnapshot(_Model):
     generated_at: str
     version: str
     source: LiveSource
+    demands_source: Literal["shared-volume", "local-file", "unavailable"] = "local-file"
+    demands_latest_at: str | None = None
     warnings: list[str] = Field(default_factory=list)
     stage_order: list[str] = Field(default_factory=list)
     stage_labels: dict[str, str] = Field(default_factory=dict)

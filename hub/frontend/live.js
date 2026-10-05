@@ -859,9 +859,9 @@
 
   function renderFoot(view, snap) {
     const src = snap.source || {};
-    const demandSource = src.demands === 'shared-volume' ? 'volume compartilhado'
-      : src.demands === 'unavailable' ? 'indisponível' : 'arquivo local';
-    const changed = parseTime(src.demands_latest_at);
+    const demandSource = snap.demands_source === 'shared-volume' ? 'volume compartilhado'
+      : snap.demands_source === 'unavailable' ? 'indisponível' : 'arquivo local';
+    const changed = parseTime(snap.demands_latest_at);
     const demandAge = isFinite(changed) ? ' · última alteração ' + formatAge(changed) : '';
     const t = 'Fonte: ' + (src.backend || '—') + ' · ' + (src.status || '—')
       + ' · backlog: ' + demandSource + demandAge
