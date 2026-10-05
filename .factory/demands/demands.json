@@ -2350,7 +2350,7 @@
     "project_id": "darkfac",
     "title": "Fechar o ciclo de aprendizado da linha: a etapa retrospective grava licoes que o planning le",
     "origin": "agent",
-    "status": "planned",
+    "status": "completed",
     "item_type": "quality",
     "lifecycle_stage": "execution",
     "horizon": "next",
@@ -2384,7 +2384,8 @@
       "USR-86"
     ],
     "created_at": "2026-09-30T22:00:00Z",
-    "updated_at": "2026-09-30T22:00:00Z"
+    "updated_at": "2026-10-05T18:00:00Z",
+    "delivery_evidence": "PR #160 (commit 87ca1a5), official gate 3098 tests pass, Windows and Ubuntu CI pass, .factory/reports/usr-91-retrospective-lessons-report.md"
   },
   {
     "id": "USR-92",
