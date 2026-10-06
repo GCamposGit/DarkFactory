@@ -328,7 +328,7 @@ class ReviewStage:
         if verdict is None:
             return StageResult(outcome="retry", cause_code="review_invalid_json", output_refs=[])
 
-        approved = verdict.verdict == "approve"
+        approved = verdict.verdict == "approve" and not bool(verdict.blocking)
         exhausted = round_num > max_rounds and not approved
         content = _render_review_md(round_num, verdict)
         workspace.write_context(ws, f"review-{round_num}.md", content)

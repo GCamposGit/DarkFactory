@@ -3655,8 +3655,8 @@
     "project_id": "darkfac",
     "title": "Revisão bloqueante não pode ser aprovada ao esgotar rodadas",
     "origin": "review",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "core/line/stage_review.py, tests/line/test_stage_review.py, .factory/reports/usr-129-blocking-review-exhaustion-report.md",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -3683,7 +3683,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-03T21:22:03.378432Z",
-    "updated_at": "2026-10-03T21:22:03.378432Z"
+    "updated_at": "2026-10-06T02:46:42.659202+00:00"
   },
   {
     "id": "USR-130",
