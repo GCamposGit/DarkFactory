@@ -123,6 +123,17 @@ class ControlStore(Protocol):
         """List active jobs parked in waiting states."""
         ...
 
+    def cancel_run(
+        self,
+        run_id: str,
+        *,
+        reason: str = "owner_cancelled",
+        actor: str = "owner",
+        now: datetime | None = None,
+    ) -> dict[str, Any]:
+        """Cancel an in-flight run and all its open jobs with audit logging (USR-123)."""
+        ...
+
 
 class SQLiteControlStore:
     """Canonical SQLite implementation of ControlStore for local-first execution.
@@ -1633,5 +1644,82 @@ class SQLiteControlStore:
                     "created_at": row["created_at"],
                 })
             return out
+        finally:
+            conn.close()
+
+    def cancel_run(
+        self,
+        run_id: str,
+        *,
+        reason: str = "owner_cancelled",
+        actor: str = "owner",
+        now: datetime | None = None,
+    ) -> dict[str, Any]:
+        """Cancels a line run and all its open jobs with audit logging (USR-123)."""
+        current_time = now or datetime.now(UTC)
+        now_iso = current_time.isoformat()
+        conn = self._connect()
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            cur = conn.cursor()
+            cur.execute("SELECT run_id, status FROM runs WHERE run_id = ?", (run_id,))
+            run_row = cur.fetchone()
+            if not run_row:
+                conn.rollback()
+                return {"ok": False, "error": f"run not found: {run_id}", "run_id": run_id}
+
+            # 1. Cancel all open jobs (pending, running, waiting_human, waiting_dependency)
+            cur.execute(
+                f"""
+                UPDATE jobs
+                SET status = 'cancelled',
+                    cause_code = ?,
+                    finished_at = ?,
+                    updated_at = ?,
+                    current_lease_id = NULL
+                WHERE run_id = ? AND status IN ({_RUN_OPEN_JOB_STATUSES_SQL})
+                """,
+                (reason, now_iso, now_iso, run_id),
+            )
+            jobs_cancelled = cur.rowcount
+
+            # 2. Release active claims
+            cur.execute(
+                "UPDATE claims SET status = 'released' WHERE run_id = ? AND status = 'active'",
+                (run_id,),
+            )
+
+            # 3. Cancel the run
+            cur.execute(
+                "UPDATE runs SET status = 'cancelled', completed_at = ?, updated_at = ? WHERE run_id = ?",
+                (now_iso, now_iso, run_id),
+            )
+
+            # 4. Record audit event
+            audit_payload = json.dumps({
+                "reason": reason,
+                "actor": actor,
+                "jobs_cancelled": jobs_cancelled,
+            })
+            cur.execute(
+                """
+                INSERT INTO outbox (
+                    event_type, aggregate_type, aggregate_id, payload,
+                    target_system, status, retry_count, created_at
+                ) VALUES ('run_cancelled', 'run', ?, ?, 'audit', 'pending', 0, ?)
+                """,
+                (run_id, audit_payload, now_iso),
+            )
+
+            conn.commit()
+            return {
+                "ok": True,
+                "run_id": run_id,
+                "jobs_cancelled": jobs_cancelled,
+                "message": f"Run {run_id} cancelado com sucesso ({jobs_cancelled} jobs cancelados).",
+            }
+        except Exception:
+            conn.rollback()
+            raise
         finally:
             conn.close()

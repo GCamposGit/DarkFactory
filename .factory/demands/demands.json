@@ -3469,8 +3469,8 @@
     "project_id": "darkfac",
     "title": "Linha: run que estourou o wall-clock fica em waiting_human para sempre e /linha nao abre nova tentativa",
     "origin": "user",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "core/workflow/control_store.py, core/orchestrator/adapters/control_postgres.py, core/line/owner_intake.py, core/integrations/telegram.py, hub/backend/service.py, hub/backend/api.py, tests/test_line_cancel.py, .factory/reports/usr-123-cancel-line-run-and-wall-clock-expiration-report.md",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -3492,7 +3492,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-01T19:23:22.112430Z",
-    "updated_at": "2026-10-01T19:23:22.112430Z"
+    "updated_at": "2026-10-06T01:58:47.565680+00:00"
   },
   {
     "id": "USR-124",
