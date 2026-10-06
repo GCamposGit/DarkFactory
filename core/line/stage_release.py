@@ -372,6 +372,17 @@ def _smoke_base_url(project: ProjectDescriptor, target_config: Optional["TargetC
     return None
 
 
+def _default_disk_cleaner(stage: str) -> Any:
+    """Safe VPS prune policy (see core.infra.vps_cleanup.clean_vps_if_needed).
+
+    pre-deploy: only when free space is below the threshold (default 8 GB).
+    post-deploy: unused images always (superseded versions), build cache only when space is short.
+    """
+    from core.infra.vps_cleanup import clean_vps_if_needed
+
+    return clean_vps_if_needed(stage=stage, force_images=(stage == "post-deploy"))
+
+
 class ReleaseStageHandler:
     """StageHandler for the deploy/smoke/rollback release stage (HF-27-07)."""
 
@@ -406,8 +417,12 @@ class ReleaseStageHandler:
         digest_delay_s: float = _DIGEST_DELAY_S,
         sleep: Callable[[float], None] = time.sleep,
         validate_timeout_s: int = 1800,
+        disk_cleaner: Optional[Callable[[str], Any]] = None,
     ) -> None:
         self.project = project
+        # Disk hygiene around Dokploy deploys (2026-10-06 VPS incident): called with "pre-deploy" and
+        # "post-deploy"; best effort, never changes the stage outcome.
+        self.disk_cleaner = disk_cleaner or _default_disk_cleaner
         self.dokploy_adapter = dokploy_adapter or DokployDeploymentAdapter()
         self.local_service_adapter = local_service_adapter or LocalServiceDeploymentAdapter()
         self.ftp_adapter = ftp_adapter or FtpMirrorDeploymentAdapter()
@@ -467,6 +482,17 @@ class ReleaseStageHandler:
             last_known_good_digest=last_good_sha,
             metadata=params,
         )
+
+    def _disk_hygiene(self, stage: str) -> None:
+        try:
+            report = self.disk_cleaner(stage)
+            if isinstance(report, dict) and report.get("action") == "cleaned":
+                logger.info(
+                    "Release %s disk cleanup for project %s: freed_gb=%s reason=%s",
+                    stage, self.project.id, report.get("freed_gb"), report.get("reason"),
+                )
+        except Exception as exc:  # never let housekeeping break a deploy
+            logger.warning("Release %s disk cleanup failed for project %s: %s", stage, self.project.id, exc)
 
     # ----------------------------------------------------------------
     # deploy dispatch
@@ -528,6 +554,9 @@ class ReleaseStageHandler:
                         outcome="retry", cause_code=f"restart_cmd_failed:\n{_truncate(log, 4000)}"
                     )
 
+        if deploy_type == DeployTargetType.DOKPLOY:
+            self._disk_hygiene("pre-deploy")
+
         artifact_ref = ArtifactRef(
             artifact_id=sha,
             source_sha=sha,
@@ -564,6 +593,9 @@ class ReleaseStageHandler:
                 outcome="retry",
                 cause_code=f"installed_digest_unverified:active={active_digest or 'missing'},expected={sha}",
             )
+
+        if deploy_type == DeployTargetType.DOKPLOY:
+            self._disk_hygiene("post-deploy")
 
         return operation, target_config, None
 
