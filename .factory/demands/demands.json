@@ -4231,5 +4231,35 @@
     "dependencies": [],
     "created_at": "2026-10-05T22:42:41.687764Z",
     "updated_at": "2026-10-05T22:42:41.687764Z"
+  },
+  {
+    "id": "USR-148",
+    "project_id": "darkfac",
+    "title": "Retencao do volume darkfac-artifacts (artefatos de workflows) na VPS",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "O volume darkfac-artifacts (core/orchestrator/cloud_artifacts.py, montado em coordinator/worker/backup-cron/canary) nao tem retencao e cresce sem limite; apagar sem criterio pode quebrar evidencia de runs antigos ou em espera. Apontado no incidente de disco de 2026-10-06 (PR #176, docs/runbooks/vps_disk.md secao 7). O tamanho ja aparece nos alertas de disco.",
+    "core_journey": [
+      "O volume darkfac-artifacts (core/orchestrator/cloud_artifacts.py, montado em coordinator/worker/backup-cron/canary) nao tem retencao e cresce sem limite; apagar sem criterio pode quebrar evidencia de runs antigos ou em espera. Apontado no incidente de disco de 2026-10-06 (PR #176, docs/runbooks/vps_disk.md secao 7). O tamanho ja aparece nos alertas de disco."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Politica de retencao definida e documentada (idade minima, nunca artefato referenciado por run ativo ou waiting_*)",
+      "Sweep periodico (6h) no CloudWorker ou disk_guard com testes cobrindo run ativo, waiting_human e terminal antigo",
+      "docs/runbooks/vps_disk.md atualizado removendo o limite conhecido"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-06T21:38:54.371899Z",
+    "updated_at": "2026-10-06T21:38:54.371899Z"
   }
 ]
