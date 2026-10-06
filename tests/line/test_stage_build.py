@@ -352,6 +352,15 @@ def test_clean_validation_success_when_everything_is_committed(
     assert result.outcome == "success"
     assert result.output_refs
 
+    # USR-130: Evidencia inclui pelo menos uma checagem vinculada ao SHA.
+    ws2 = ws_mod.checkout(project, run_id)
+    validation_path = ws_mod.context_dir(ws2) / "validation.json"
+    assert validation_path.is_file()
+    report = json.loads(validation_path.read_text(encoding="utf-8"))
+    assert report["sha"]
+    assert report["commands"]["validate"]["ran"] is True
+    assert report["commands"]["validate"]["ok"] is True
+
 
 @pytest.mark.parametrize("validate_commands", [[], ["  "]])
 def test_clean_validation_without_validate_command_returns_to_development(

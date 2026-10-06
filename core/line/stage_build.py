@@ -845,6 +845,11 @@ class ValidationStage:
                     all_ok = False
                     break
 
+            # USR-130: Sem comando/check executado, estagio nao pode retornar success.
+            validate_entry = report["commands"].get("validate", {})
+            if not (isinstance(validate_entry, dict) and validate_entry.get("ran") and validate_entry.get("ok")):
+                all_ok = False
+
             workspace.write_context(ws, "validation.json", json.dumps(report, indent=2, ensure_ascii=False))
             job_key = f"{run_id}:validation:{sha}"
             commit_sha = workspace.commit(ws, "chore: clean-checkout validation", job_key=job_key)
