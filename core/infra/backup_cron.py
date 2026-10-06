@@ -99,14 +99,15 @@ def run_autonomous_backup_cycle(
             onprem_max_age_days=onprem_retention_days,
         )
 
-        # 4. Safe Dokploy Docker build cache & unused images cleanup (USR-122)
+        # 4. Policy-driven VPS disk guard cycle (USR-122): prune only when needed/safe, alert at 80%/90%.
+        # The continuous schedule (every 30 min, prune every 6h) runs in its own thread, see run_daemon.
         vps_cleanup_report = None
         try:
-            from core.infra.vps_cleanup import clean_vps_if_configured
+            from core.infra.disk_guard import run_cycle
 
-            vps_cleanup_report = clean_vps_if_configured()
+            vps_cleanup_report = run_cycle()
         except Exception as exc:
-            logger.debug("Safe VPS cleanup skipped or failed: %s", exc)
+            logger.warning("VPS disk guard cycle failed: %s", exc)
 
         summary = {
             "status": "success",
@@ -146,8 +147,21 @@ def run_daemon(
     interval_hours: float = 24.0,
     project_id: str = "darkfac",
     source_dir: Path | str | None = None,
+    *,
+    disk_guard_interval_minutes: float = 30.0,
+    disk_prune_interval_hours: float = 6.0,
 ) -> None:
-    """Runs autonomous backup cycles continuously in a background loop."""
+    """Runs autonomous backup cycles continuously in a background loop.
+
+    Also starts the VPS disk guard thread (monitor + alerts + safe prune), independent of backup success:
+    a failing backup must never stop the disk from being watched (0 minutes disables it).
+    """
+    from core.infra.disk_guard import start_background_guard
+
+    start_background_guard(
+        check_interval_minutes=disk_guard_interval_minutes,
+        prune_interval_hours=disk_prune_interval_hours,
+    )
     interval_sec = max(60.0, interval_hours * 3600.0)
     logger.info(
         "Autonomous backup daemon started. Interval: %.1f hours (%.0f seconds)",
@@ -169,6 +183,18 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--once", action="store_true", help="Run a single autonomous backup cycle and exit")
     parser.add_argument("--daemon", action="store_true", help="Run continuously in background daemon mode")
     parser.add_argument("--interval-hours", type=float, default=24.0, help="Daemon interval in hours (default: 24.0)")
+    parser.add_argument(
+        "--disk-guard-interval-minutes",
+        type=float,
+        default=30.0,
+        help="VPS disk guard check interval in daemon mode (default: 30; 0 disables)",
+    )
+    parser.add_argument(
+        "--disk-prune-interval-hours",
+        type=float,
+        default=6.0,
+        help="Scheduled unused-images prune interval in daemon mode (default: 6)",
+    )
     parser.add_argument("--project-id", default="darkfac", help="Project identifier")
     parser.add_argument("--source-dir", default=None, help="Source directory path")
 
@@ -184,6 +210,8 @@ def main(argv: list[str] | None = None) -> int:
             interval_hours=args.interval_hours,
             project_id=args.project_id,
             source_dir=args.source_dir,
+            disk_guard_interval_minutes=args.disk_guard_interval_minutes,
+            disk_prune_interval_hours=args.disk_prune_interval_hours,
         )
         return 0
     else:

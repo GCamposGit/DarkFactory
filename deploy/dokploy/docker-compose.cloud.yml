@@ -47,6 +47,12 @@ services:
       - "127.0.0.1:8001:8001"
     networks:
       - dokploy-network
+    # Bounded container logs (2026-10-06 disk incident): json-file default is unbounded.
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     deploy:
       resources:
         limits:
@@ -86,6 +92,7 @@ services:
       # OpenRouter; known-critical (<=15%) stays excluded. Worker service only; unset = fail-closed.
       - DARKFAC_ROUTING_UNKNOWN_QUOTA=${DARKFAC_ROUTING_UNKNOWN_QUOTA:-last_resort}
       - DARKFAC_WORKSPACES=/workspaces
+      - DARKFAC_WORKSPACE_RETENTION_DAYS=${DARKFAC_WORKSPACE_RETENTION_DAYS:-3}
       - CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN:-}
       # HF-27-10 canary trace (B.4): core.line.workspace only reads
       # GITHUB_TOKEN (not the GITHUB_PAT declared in env.cloud.example) to
@@ -151,6 +158,12 @@ services:
       - darkfac-workspaces:/workspaces
     networks:
       - dokploy-network
+    # Bounded container logs (2026-10-06 disk incident): json-file default is unbounded.
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     deploy:
       resources:
         limits:
@@ -174,7 +187,11 @@ services:
     image: ghcr.io/gcamposgit/darkfac-cloud:latest
     container_name: darkfac-backup-cron
     restart: unless-stopped
-    command: ["python", "-m", "core.infra.backup_cron", "--daemon", "--interval-hours", "24"]
+    # The same daemon also runs the VPS disk guard (core.infra.disk_guard) in a thread: every 30 min it
+    # checks the HOST disk, alerts the owner at 80% (warning) / 90% (critical, 1 alert per level per 6h) and
+    # prunes unused images (+ build cache when free space < DARKFAC_VPS_MIN_FREE_GB), never during a deploy;
+    # the unused-images prune also runs every 6h. See docs/runbooks/vps_disk.md.
+    command: ["python", "-m", "core.infra.backup_cron", "--daemon", "--interval-hours", "24", "--disk-guard-interval-minutes", "30", "--disk-prune-interval-hours", "6"]
     environment:
       - DARKFAC_ROLE=backup
       - DARKFAC_HF02_DATABASE_URL=${DARKFAC_HF02_DATABASE_URL}
@@ -189,11 +206,26 @@ services:
       - TELEGRAM_OWNER_BOT_TOKEN=${TELEGRAM_OWNER_BOT_TOKEN:-}
       - TELEGRAM_AUTHORIZED_USERS=${TELEGRAM_AUTHORIZED_USERS:-}
       - TELEGRAM_AUTHORIZED_CHATS=${TELEGRAM_AUTHORIZED_CHATS:-}
+      # VPS disk guard (core.infra.disk_guard): the Dokploy API prunes (settings.cleanUnusedImages /
+      # cleanDockerBuilder) need these. Without them the guard only alerts and says so (USR-122 shipped
+      # without them wired here, so its cleanup silently never ran). Values live in the Dokploy vault.
+      - DOKPLOY_API_URL=${DOKPLOY_API_URL:-}
+      - DOKPLOY_API_KEY=${DOKPLOY_API_KEY:-}
+      - DARKFAC_VPS_MIN_FREE_GB=${DARKFAC_VPS_MIN_FREE_GB:-8}
+      - DARKFAC_DISK_REPORT_PATHS=/workspaces,/app/.factory/artifacts,/app/.factory/test_logs
     volumes:
       - darkfac-artifacts:/app/.factory/artifacts
       - darkfac-test-logs:/app/.factory/test_logs
+      # Read-only: only to report the size of the run workspaces in the disk alert.
+      - darkfac-workspaces:/workspaces:ro
     networks:
       - dokploy-network
+    # Bounded container logs (2026-10-06 disk incident): json-file default is unbounded.
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     deploy:
       resources:
         limits:
@@ -257,6 +289,12 @@ services:
       - darkfac-canary-reports-v2:/app/.factory/reports/canary
     networks:
       - dokploy-network
+    # Bounded container logs (2026-10-06 disk incident): json-file default is unbounded.
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     deploy:
       resources:
         limits:
@@ -287,6 +325,12 @@ services:
       - "${DARKFAC_TAILNET_BIND_IP:-100.83.176.60}:5432:5432"
     networks:
       - dokploy-network
+    # Bounded container logs (2026-10-06 disk incident): json-file default is unbounded.
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     deploy:
       resources:
         limits:

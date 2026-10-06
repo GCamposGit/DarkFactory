@@ -175,6 +175,8 @@ class CloudWorker:
         human_probe_runner: Callable[..., bool] | None = None,
         route_waiter: Any | None = None,
         grill_resender: Callable[[Any, str], bool] | None = None,
+        workspace_sweep_interval_s: float = 6 * 3600.0,
+        workspace_sweeper: Callable[..., list[str]] | None = None,
     ) -> None:
         self.worker_id = worker_id or os.environ.get("DARKFAC_WORKER_ID", "cloud-worker-1")
         self.max_slots = (
@@ -206,6 +208,10 @@ class CloudWorker:
         self._human_probe_runner = human_probe_runner
         self._route_waiter = route_waiter
         self._grill_resender = grill_resender
+        # Disk retention (2026-10-06 VPS incident): periodically delete per-run workspaces of terminal runs.
+        self._workspace_sweep_interval_s = workspace_sweep_interval_s
+        self._workspace_sweeper = workspace_sweeper
+        self._last_workspace_sweep_at: datetime | None = None
 
         if capabilities is not None:
             self.capabilities = list(capabilities)
@@ -882,6 +888,35 @@ class CloudWorker:
 
         return resumed_runs
 
+    def sweep_stale_workspaces(self, now: datetime | None = None) -> list[str]:
+        """Delete workspaces of terminal runs older than the retention (default 3 days); never an active run.
+
+        Retention is `DARKFAC_WORKSPACE_RETENTION_DAYS` (default 3; 0 disables the sweep).
+        """
+        try:
+            retention_days = float(os.environ.get("DARKFAC_WORKSPACE_RETENTION_DAYS", "3"))
+        except ValueError:
+            retention_days = 3.0
+        if retention_days <= 0:
+            return []
+        sweeper = self._workspace_sweeper
+        if sweeper is None:
+            if os.environ.get("PYTEST_CURRENT_TEST"):
+                return []  # tests must never delete real workspaces unless they inject a sweeper
+            from core.line.workspace import sweep_stale_workspaces
+
+            sweeper = sweep_stale_workspaces
+        protected = {key.rsplit(":", 1)[0] for key in list(self._active_tasks)}
+        removed = sweeper(
+            run_status=self.store.get_run_status,
+            protected_run_ids=protected,
+            terminal_max_age_days=retention_days,
+            now=(now.timestamp() if now is not None else None),
+        )
+        if removed:
+            logger.info("Workspace sweep removed %d stale run workspace(s): %s", len(removed), removed)
+        return removed
+
     def poll_and_execute_once(self, now: datetime | None = None) -> bool:
         """Attempt to claim one pending job and execute it.
 
@@ -902,6 +937,16 @@ class CloudWorker:
                 self.sweep_waiting_human_requests(now=effective_now)
             except Exception as exc:
                 logger.warning("Human probe sweep failed: %s", exc)
+
+        if (
+            self._last_workspace_sweep_at is None
+            or (effective_now - self._last_workspace_sweep_at).total_seconds() >= self._workspace_sweep_interval_s
+        ):
+            self._last_workspace_sweep_at = effective_now
+            try:
+                self.sweep_stale_workspaces(now=effective_now)
+            except Exception as exc:
+                logger.warning("Workspace sweep failed: %s", exc)
 
         try:
             claim = self.store.claim(
