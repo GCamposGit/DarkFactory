@@ -1,0 +1,22 @@
+{
+  "captured_at": "2026-10-01",
+  "source": "codex_app_server",
+  "payload": {
+    "rateLimitsByLimitId": {
+      "codex": {
+        "limitName": "codex",
+        "planType": "plus",
+        "primary": {
+          "usedPercent": 47,
+          "windowDurationMins": 300,
+          "resetsAt": 1790873831
+        },
+        "secondary": {
+          "usedPercent": 53,
+          "windowDurationMins": 10080,
+          "resetsAt": 1791073443
+        }
+      }
+    }
+  }
+}
