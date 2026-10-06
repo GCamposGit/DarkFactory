@@ -351,6 +351,7 @@ class TelegramGateway:
         commercial_acceptance_handler: Optional[Callable[[str, int], Dict[str, Any]]] = None,
         audio_engine: Optional[Any] = None,
         line_handler: Optional[Callable[[str, int], Dict[str, Any]]] = None,
+        cancel_handler: Optional[Callable[[str, int], Dict[str, Any]]] = None,
     ) -> None:
         self.config = config
         self.state_dir = state_dir if state_dir is not None else state_root() / "telegram"
@@ -381,6 +382,8 @@ class TelegramGateway:
         self.audio_engine = audio_engine
         # `/linha <ticket_id>`: push an existing demands.json ticket into the production line.
         self.line_handler = line_handler
+        # `/cancelar <ticket_id|run_id>`: cancel an in-flight line run (USR-123).
+        self.cancel_handler = cancel_handler
 
         self.last_offset: int = 0
         self.processed_update_ids: Set[int] = set()
@@ -680,7 +683,8 @@ class TelegramGateway:
                     "• <code>/alerts</code> - Consultar alertas de segurança, orçamento e cotas\n"
                     "• <code>/status [ticket_id]</code> - Consultar status de pipelines e jobs\n"
                     "• <code>/demand [texto da demanda]</code> - Registrar demanda prioritária do Owner\n"
-                    "• <code>/linha [ticket_id]</code> - Enviar um ticket existente para a linha autônoma\n\n"
+                    "• <code>/linha [ticket_id]</code> - Enviar um ticket existente para a linha autônoma\n"
+                    "• <code>/cancelar [ticket_id|run_id]</code> - Cancelar run da linha autônoma\n\n"
                     "ℹ️ <i>Demandas operacionais e backlog geral são gerenciadas no @darkfac_ops_bot</i>"
                 )
             elif self.config.role == "ops":
@@ -690,6 +694,7 @@ class TelegramGateway:
                     "Comandos disponíveis:\n"
                     "• <code>/demand [texto da demanda]</code> - Ingerir nova demanda no backlog autônomo\n"
                     "• <code>/linha [ticket_id]</code> - Enviar um ticket existente para a linha autônoma\n"
+                    "• <code>/cancelar [ticket_id|run_id]</code> - Cancelar run da linha autônoma\n"
                     "• <code>/status [ticket_id]</code> - Consultar status de pipelines e jobs\n"
                     "• <code>/alerts</code> - Consultar telemetria operacional\n\n"
                     "• <code>/grill [ticket_id] [resposta]</code> - Responder alinhamento (Grill)\n"
@@ -701,6 +706,8 @@ class TelegramGateway:
                     "👋 <b>Dark Factory Autonomous Control Bot</b>\n\n"
                     "Available commands:\n"
                     "• <code>/demand [text]</code> - Ingest a new demand into backlog\n"
+                    "• <code>/linha [ticket_id]</code> - Send existing ticket to autonomous line\n"
+                    "• <code>/cancelar [ticket_id|run_id]</code> - Cancel an in-flight autonomous line run\n"
                     "• <code>/status [ticket_id]</code> - Check status of runs and pipelines\n"
                     "• <code>/alerts</code> - Check active token quota and operational alerts\n"
                     "• <code>/grill [ticket_id] [choice]</code> - Answer Grill clarification questions\n"
@@ -830,6 +837,26 @@ class TelegramGateway:
                     logger.error("Line handler error: %s", exc)
                     result.error = str(exc)
                     result.response_text = f"Falha ao enviar {target} para a linha: {exc}"
+
+        elif cmd_str in ("/cancelar", "/cancel"):
+            result.action = TelegramActionType.DEMAND
+            target = arg_str.strip().split()[0] if arg_str.strip() else ""
+            if not target:
+                result.response_text = "Uso: /cancelar <ticket_id|run_id>  (ex.: /cancelar USR-62 ou /cancelar run-xxx)"
+            elif self.cancel_handler is None:
+                result.target_id = target
+                result.response_text = "Cancelamento de run indisponivel neste canal."
+            else:
+                result.target_id = target
+                try:
+                    res = self.cancel_handler(target, user_id or 0)
+                    result.response_text = str(res.get("message") or f"Alvo {target} processado.")
+                    if not res.get("ok", True):
+                        result.error = result.response_text
+                except Exception as exc:
+                    logger.error("Cancel handler error: %s", exc)
+                    result.error = str(exc)
+                    result.response_text = f"Falha ao cancelar {target}: {exc}"
 
         elif cmd_str == "/status":
             result.action = TelegramActionType.STATUS

@@ -32,7 +32,7 @@ from core.workflow.control_contracts import (
     StoreUnavailableError,
     normalize_cause_code,
 )
-from core.workflow.control_store import ControlStore, SQLiteControlStore, _is_ready_enough
+from core.workflow.control_store import ControlStore, SQLiteControlStore, _is_ready_enough, RUN_OPEN_JOB_STATUSES
 
 logger = logging.getLogger(__name__)
 
@@ -1487,3 +1487,73 @@ class PostgresControlStore:
                 "max_ready_age_sec": 0.0,
                 "starved_projects": [],
             }
+
+    def cancel_run(
+        self,
+        run_id: str,
+        *,
+        reason: str = "owner_cancelled",
+        actor: str = "owner",
+        now: datetime | None = None,
+    ) -> dict[str, Any]:
+        """Cancels a line run and all its open jobs with audit logging (USR-123)."""
+        if self.mock_mode:
+            return self._backend.cancel_run(run_id, reason=reason, actor=actor, now=now)
+
+        current_time = now or datetime.now(UTC)
+        now_utc = current_time.astimezone(UTC)
+        try:
+            with self._psycopg.connect(self.raw_url) as conn:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT run_id, status FROM runs WHERE run_id = %s", (run_id,))
+                    row = cur.fetchone()
+                    if not row:
+                        return {"ok": False, "error": f"run not found: {run_id}", "run_id": run_id}
+
+                    cur.execute(
+                        """
+                        UPDATE jobs
+                        SET status = 'cancelled',
+                            cause_code = %s,
+                            finished_at = %s,
+                            updated_at = %s,
+                            current_lease_id = NULL
+                        WHERE run_id = %s AND status = ANY(%s)
+                        """,
+                        (reason, now_utc, now_utc, run_id, list(RUN_OPEN_JOB_STATUSES)),
+                    )
+                    jobs_cancelled = cur.rowcount
+
+                    cur.execute(
+                        "UPDATE claims SET status = 'released' WHERE run_id = %s AND status = 'active'",
+                        (run_id,),
+                    )
+
+                    cur.execute(
+                        "UPDATE runs SET status = 'cancelled', completed_at = %s, updated_at = %s WHERE run_id = %s",
+                        (now_utc, now_utc, run_id),
+                    )
+
+                    audit_payload = json.dumps({
+                        "reason": reason,
+                        "actor": actor,
+                        "jobs_cancelled": jobs_cancelled,
+                    })
+                    cur.execute(
+                        """
+                        INSERT INTO outbox (
+                            event_type, aggregate_type, aggregate_id, payload,
+                            target_system, status, retry_count, created_at
+                        ) VALUES ('run_cancelled', 'run', %s, %s, 'audit', 'pending', 0, %s)
+                        """,
+                        (run_id, audit_payload, now_utc),
+                    )
+                    conn.commit()
+                    return {
+                        "ok": True,
+                        "run_id": run_id,
+                        "jobs_cancelled": jobs_cancelled,
+                        "message": f"Run {run_id} cancelado com sucesso ({jobs_cancelled} jobs cancelados).",
+                    }
+        except Exception as exc:
+            raise StoreUnavailableError(f"PostgreSQL cancel_run failed: {exc}") from exc
