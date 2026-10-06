@@ -3439,8 +3439,8 @@
     "project_id": "darkfac",
     "title": "VPS sem espaco em disco derruba o build do darkfac-cloud",
     "origin": "user",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "core/infra/vps_cleanup.py, scripts/dokploy_redeploy.py, hub/backend/main.py, core/infra/backup_cron.py, tests/test_vps_cleanup.py, .factory/reports/usr-122-vps-disk-cleanup-and-alerting-report.md",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -3462,7 +3462,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-01T18:25:51.031851Z",
-    "updated_at": "2026-10-01T18:25:51.031851Z"
+    "updated_at": "2026-10-06T01:10:39.851562+00:00"
   },
   {
     "id": "USR-123",

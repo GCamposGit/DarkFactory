@@ -201,6 +201,8 @@ class Deployment:
     status: str
     title: str
     created_at: Optional[datetime]
+    error_message: Optional[str] = None
+    description: Optional[str] = None
 
 
 class WaitOutcome:
@@ -336,6 +338,8 @@ def latest_deployment(payload: Dict[str, Any]) -> Optional[Deployment]:
             status=str(item.get("status") or ""),
             title=str(item.get("title") or ""),
             created_at=_parse_iso8601(item.get("createdAt")),
+            error_message=str(item.get("errorMessage") or item.get("error") or "") or None,
+            description=str(item.get("description") or "") or None,
         )
         for item in raw_deployments
     ]
@@ -347,6 +351,26 @@ def latest_deployment(payload: Dict[str, Any]) -> Optional[Deployment]:
     # No parseable timestamps: fall back to list order (providers return it
     # oldest-first), so the just-triggered deployment is still found.
     return parsed[-1]
+
+
+def detect_disk_space_failure(deployment: Optional[Deployment]) -> Optional[str]:
+    """Inspects deployment error fields for VPS disk space exhaustion signatures (USR-122)."""
+    if not deployment:
+        return None
+    from core.infra.vps_cleanup import is_disk_space_failure
+
+    for text in (deployment.error_message, deployment.description, deployment.title):
+        match = is_disk_space_failure(text)
+        if match:
+            return text
+    return None
+
+
+def clean_dokploy_build_cache_and_images(transport: Transport) -> Dict[str, Any]:
+    """Executes safe Docker build cache and unused image pruning via Dokploy API (USR-122)."""
+    from core.infra.vps_cleanup import clean_vps_docker_cache
+
+    return clean_vps_docker_cache("", "", transport=transport)
 
 
 def evaluate_wait_state(
@@ -661,6 +685,11 @@ def build_arg_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Skip post-deploy check-main verification.",
     )
+    parser.add_argument(
+        "--clean",
+        action="store_true",
+        help="Execute safe Docker builder cache and unused images cleanup on Dokploy before deploying (USR-122).",
+    )
     parser.add_argument("-v", "--verbose", action="store_true", help="Enable debug logging.")
     return parser
 
@@ -792,6 +821,16 @@ def _run_main(
         flush=True,
     )
 
+    if getattr(args, "clean", False):
+        try:
+            print("[DOKPLOY CLEANUP] Pruning Docker builder cache and unused images on Dokploy...", file=out, flush=True)
+            cleanup_res = clean_dokploy_build_cache_and_images(transport)
+            builder_ok = cleanup_res.get("cleanDockerBuilder", False)
+            images_ok = cleanup_res.get("cleanUnusedImages", False)
+            print(f"[DOKPLOY CLEANUP] Done: builder_cache={builder_ok}, unused_images={images_ok}", file=out, flush=True)
+        except Exception as exc:
+            print(f"[DOKPLOY CLEANUP] Warning: cleanup failed: {exc}", file=err, flush=True)
+
     all_ok = True
     other_failure = False
     node_sync_dirty = False
@@ -847,6 +886,16 @@ def _run_main(
         if result.outcome != WaitOutcome.DONE:
             all_ok = False
             other_failure = True
+            disk_err = detect_disk_space_failure(result.deployment)
+            if disk_err:
+                print(
+                    f"[{svc.name}] FALHA DE DISCO NO VPS: O build falhou por falta de espaço em disco no VPS CX23. "
+                    f"Assinatura detectada: '{disk_err.strip()}'. "
+                    "Causa raiz: esgotamento em /var/cache/apt/archives ou Docker builder cache. "
+                    "Execute 'python scripts/dokploy_redeploy.py --clean' para liberar espaço.",
+                    file=err,
+                    flush=True,
+                )
 
     if darkhub_selected and any(svc.name.lower() == "darkhub" for svc in triggered):
         if wait_for_darkhub_sha(
@@ -858,6 +907,16 @@ def _run_main(
             print(f"[NODE SYNC] VPS: divergent; /health did not report origin/main sha={expected_sha}", file=err, flush=True)
             all_ok = False
             other_failure = True
+        try:
+            h_data = (health_client or fetch_darkhub_health)()
+            if "disk_percent" in h_data:
+                from core.infra.vps_cleanup import check_vps_disk_and_alert
+
+                disk_pct = float(h_data["disk_percent"])
+                if check_vps_disk_and_alert(disk_pct):
+                    print(f"[ALERTA INFRA] VPS CX23 disk usage is high: {disk_pct}% (> 85.0%)", file=err, flush=True)
+        except Exception:
+            pass
 
     # A completed Dokploy job is not evidence that all running nodes use main.
     # Converge and verify the three execution nodes (Notebook ff-only when
