@@ -99,6 +99,15 @@ def run_autonomous_backup_cycle(
             onprem_max_age_days=onprem_retention_days,
         )
 
+        # 4. Safe Dokploy Docker build cache & unused images cleanup (USR-122)
+        vps_cleanup_report = None
+        try:
+            from core.infra.vps_cleanup import clean_vps_if_configured
+
+            vps_cleanup_report = clean_vps_if_configured()
+        except Exception as exc:
+            logger.debug("Safe VPS cleanup skipped or failed: %s", exc)
+
         summary = {
             "status": "success",
             "snapshot_id": snapshot.snapshot_id,
@@ -111,6 +120,7 @@ def run_autonomous_backup_cycle(
             "drill_verified": drill_verified,
             "r2_pruned_count": len(prune_result.get("r2_pruned", [])),
             "onprem_pruned_count": len(prune_result.get("onprem_pruned", [])),
+            "vps_cleanup": vps_cleanup_report,
             "completed_at": datetime.now(UTC).isoformat(),
         }
 
