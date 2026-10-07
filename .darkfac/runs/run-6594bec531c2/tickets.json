@@ -1,0 +1,93 @@
+[
+  {
+    "id": "T1",
+    "title": "Camada CSS da sidebar vertical no gerador de estilos do DarkHub",
+    "goal": "Adicionar ao scripts/generate_hub_styles.py uma seção de componentes .dh-* para o shell com menu lateral esquerdo (fixo >=1024px, off-canvas abaixo disso, overlay, estado ativo e prefers-reduced-motion), regenerar hub/frontend/styles.css e hub/frontend/static/styles.css, e bumpar o token de cache do stylesheet em index.html junto com o teste que o fixa.",
+    "files_hint": [
+      "scripts/generate_hub_styles.py",
+      "hub/frontend/styles.css",
+      "hub/frontend/static/styles.css",
+      "hub/frontend/index.html",
+      "tests/test_frontend_foundation.py",
+      "tests/test_transformar_menu_superior_em_m.py"
+    ],
+    "acceptance": [
+      "scripts/generate_hub_styles.py emite regras para .dh-shell, .dh-main, .dh-sidebar, .dh-sidebar-brand, .dh-sidebar-nav, .dh-nav-link, .dh-nav-link[aria-current=\"page\"], .dh-sidebar-footer, .dh-sidebar-toggle e .dh-sidebar-overlay, mantendo o estilo visual atual (slate-950/900, borda slate-800, acento indigo)",
+      "A sidebar tem largura fixa (16rem), position: fixed, inset-y-0/left-0, overflow-y-auto e o conteúdo principal recebe o deslocamento equivalente em telas >=1024px",
+      "Em @media (max-width: 1023.98px) a sidebar fica translateX(-100%) por padrão, visível com a classe .is-open, o overlay só aparece junto com .is-open e o conteúdo principal não recebe deslocamento",
+      "@media (prefers-reduced-motion: reduce) desativa as transições de .dh-sidebar e .dh-sidebar-overlay",
+      "Rodar `python scripts/generate_hub_styles.py` deixa hub/frontend/styles.css e hub/frontend/static/styles.css byte-a-byte idênticos, acima de 10 KB e contendo os seletores .dh-*",
+      "index.html passa a linkar `/static/styles.css?v=20261007a` e tests/test_frontend_foundation.py é atualizado para fixar esse token (função renomeada coerentemente), sem nenhum recurso CSS externo",
+      "`python scripts/line_validate.py` passa"
+    ],
+    "tests_to_add": [
+      "tests/test_transformar_menu_superior_em_m.py::test_generator_emits_sidebar_component_layer — importa/executa build_stylesheet() de scripts/generate_hub_styles.py e afirma a presença de cada seletor .dh-*",
+      "tests/test_transformar_menu_superior_em_m.py::test_sidebar_css_is_mirrored_and_served — styles.css e static/styles.css são idênticos, contêm os seletores .dh-* e /static/styles.css responde 200 com text/css via fastapi.testclient",
+      "tests/test_transformar_menu_superior_em_m.py::test_sidebar_css_has_responsive_collapse_and_reduced_motion — afirma o bloco max-width:1023.98px com translateX(-100%)/.is-open e o bloco prefers-reduced-motion",
+      "tests/test_frontend_foundation.py — atualizar a asserção literal do token do stylesheet para ?v=20261007a"
+    ],
+    "smoke": [
+      "/",
+      "/static/styles.css"
+    ]
+  },
+  {
+    "id": "T2",
+    "title": "Reestruturar index.html: topbar enxuta + menu vertical lateral esquerdo",
+    "goal": "Envolver o conteúdo em .dh-shell com <aside id=\"dh-sidebar\"> à esquerda, mover para lá os botões de navegação do header (preservando onclick, title e ids), manter na topbar apenas marca/badges/seletor de projeto/busca/⚙️/Novo, e adicionar o botão hambúrguer e o overlay com semântica acessível.",
+    "files_hint": [
+      "hub/frontend/index.html",
+      "tests/test_transformar_menu_superior_em_m.py"
+    ],
+    "acceptance": [
+      "Existe exatamente um <aside id=\"dh-sidebar\" class=\"dh-sidebar\"> contendo um <nav> com aria-label de navegação principal e os itens Benchmarks, Aprendizado, Portfólio, Roadmap, Demandas, Telemetria, Estúdio, Testes, Infra, Tarefas, Playground e Prompts, cada um com rótulo textual sempre visível (sem `hidden lg:inline`) e classe .dh-nav-link",
+      "Todos os atributos onclick/title dos botões movidos são idênticos aos originais e os ids preservados (#portfolio-trigger-btn e demais), sem nenhuma função JS nova sendo referenciada",
+      "O <header> remanescente contém apenas marca/versão, #hub-coverage-badge, #line-live-link, #global-project-select, o gatilho de busca Ctrl+K, ⚙️ (Backup & Configurações) e o botão Novo; os contêineres #ollama-status-badge e #openrouter-status-badge passam para o rodapé da sidebar mantendo os mesmos ids",
+      "Existem <button id=\"dh-sidebar-toggle\"> com aria-controls=\"dh-sidebar\", aria-expanded=\"false\" e rótulo acessível, e <div id=\"dh-sidebar-overlay\"> inerte por padrão",
+      "O <main> e todas as seções existentes (#interventions-hero-strip, #line-status-card, #quick-dock-section, #tasks-dashboard-section, #services-grid, #empty-state…) continuam presentes e na mesma ordem, agora dentro de .dh-main",
+      "Nenhum recurso externo é adicionado e o HTML continua parseável por lxml.html sem tags órfãs (contagem de <aside>/<nav>/<main> conforme esperado)",
+      "`python scripts/line_validate.py` passa"
+    ],
+    "tests_to_add": [
+      "tests/test_transformar_menu_superior_em_m.py::test_sidebar_markup_exists_with_navigation_links — via lxml.html: um único #dh-sidebar, <nav> com aria-label e os 12 rótulos esperados em .dh-nav-link",
+      "tests/test_transformar_menu_superior_em_m.py::test_topbar_no_longer_holds_navigation_buttons — nenhum .dh-nav-link nem os rótulos de navegação dentro de <header>, e o header mantém busca, seletor de projeto e botão Novo",
+      "tests/test_transformar_menu_superior_em_m.py::test_sidebar_links_preserve_original_handlers — cada item de navegação tem onclick não vazio apontando para função/elemento já existente no código (openRoadmapDrawer, openDemandsDrawer, scrollIntoView de seções conhecidas, etc.)",
+      "tests/test_transformar_menu_superior_em_m.py::test_sidebar_toggle_and_overlay_accessibility — #dh-sidebar-toggle com aria-controls/aria-expanded e presença de #dh-sidebar-overlay",
+      "tests/test_transformar_menu_superior_em_m.py::test_existing_sections_and_badge_ids_preserved — ids críticos (#global-project-select, #ollama-status-badge, #openrouter-status-badge, #hub-coverage-badge, #tasks-dashboard-section, #quick-dock-section) continuam únicos no documento"
+    ],
+    "smoke": [
+      "/",
+      "/static/styles.css"
+    ]
+  },
+  {
+    "id": "T3",
+    "title": "Comportamento da sidebar: colapso em mobile e destaque do item da rota atual",
+    "goal": "Criar hub/frontend/sidebar.js (carregado com o mesmo token de cache dos outros scripts) implementando abrir/fechar em telas pequenas (botão, overlay, Esc, foco), fechamento automático ao navegar e marcação aria-current=\"page\" do item correspondente ao hash ou à seção visível, sem acoplar lógica de negócio à apresentação.",
+    "files_hint": [
+      "hub/frontend/sidebar.js",
+      "hub/frontend/index.html",
+      "tests/test_transformar_menu_superior_em_m.py"
+    ],
+    "acceptance": [
+      "hub/frontend/sidebar.js é carregado em index.html como `/static/sidebar.js?v=20261003a`, exatamente o mesmo token dos demais <script>, mantendo test_frontend_foundation verde",
+      "O toggle alterna a classe .is-open em #dh-sidebar e sincroniza aria-expanded; clique no overlay e tecla Escape fecham a sidebar e devolvem o foco ao toggle",
+      "Clicar em um item de navegação em viewport pequena fecha a sidebar depois de disparar a ação original (drawer ou scroll), sem suprimir o handler existente",
+      "O item ativo recebe aria-current=\"page\" e apenas um item fica ativo por vez, derivado de location.hash (hashchange) e de IntersectionObserver sobre as seções do <main>, com degradação silenciosa quando a seção ainda não foi injetada por infra.js/studio.js/harness.js",
+      "Nenhuma variável global nova além de um namespace único (ex.: window.DarkHubSidebar), sem dependências externas e sem chamadas de rede",
+      "`python -m pytest tests/test_transformar_menu_superior_em_m.py -v` passa e `python scripts/line_validate.py` passa"
+    ],
+    "tests_to_add": [
+      "tests/test_transformar_menu_superior_em_m.py::test_sidebar_script_loaded_with_shared_cache_version — sidebar.js existe e é referenciado com o mesmo ?v= dos outros scripts",
+      "tests/test_transformar_menu_superior_em_m.py::test_sidebar_script_implements_toggle_overlay_and_escape — o fonte contém o tratamento de clique no toggle/overlay, a tecla Escape e a sincronização de aria-expanded/.is-open",
+      "tests/test_transformar_menu_superior_em_m.py::test_sidebar_script_marks_active_route — o fonte usa aria-current, hashchange e IntersectionObserver e não referencia endpoints de API",
+      "tests/test_transformar_menu_superior_em_m.py::test_sidebar_script_has_no_external_dependencies_or_globals — sem import/require de URL externa e sem poluição além do namespace único"
+    ],
+    "smoke": [
+      "/",
+      "/static/sidebar.js",
+      "/static/styles.css",
+      "/health"
+    ]
+  }
+]
