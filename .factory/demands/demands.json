@@ -1222,7 +1222,7 @@
     "project_id": "darkfac",
     "title": "Melhoria nas ações do usuário no Dark Hub",
     "origin": "user",
-    "status": "planned",
+    "status": "completed",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "later",
@@ -1252,7 +1252,8 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-09-29T11:57:05.966732Z",
-    "updated_at": "2026-09-30T22:00:00Z"
+    "updated_at": "2026-10-07T19:45:00Z",
+    "delivery_evidence": "PR #189: alerta reconhecido com um clique, sem confirmacao, mensagem aria-live que some em 3 s; selecao multipla com 'Reconhecer selecionadas' e falha parcial preservada. tests/test_melhoria_nas_a_es_do_usu_.py: 16 passed; CI ubuntu e windows verdes."
   },
   {
     "id": "USR-62",
@@ -1896,7 +1897,7 @@
     "project_id": "darkfac",
     "title": "Recuperar tarefa Codex apos reinicio com resposta de ferramenta ausente",
     "origin": "user",
-    "status": "planned",
+    "status": "completed",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "later",
@@ -1920,7 +1921,8 @@
     "estimated_complexity": "small",
     "dependencies": [],
     "created_at": "2026-09-30T18:49:45.044726Z",
-    "updated_at": "2026-09-30T22:00:00Z"
+    "updated_at": "2026-10-07T19:45:00Z",
+    "delivery_evidence": "PR #188 (escopo rebaixado do ticket): runbook docs/runbooks/codex_session_orphan_tool_call.md com limite conhecido e recuperacao segura; core/line/codex_session_probe.py detecta chamada de ferramenta sem resposta (somente leitura) e avisa no resume_delivery via DARKFAC_CODEX_SESSION_PATH. tests/test_codex_session_probe.py: 7 passed; CI verde."
   },
   {
     "id": "USR-80",
@@ -3796,8 +3798,8 @@
     "project_id": "darkfac",
     "title": "Avaliação E2E da fábrica com tarefas reais e métricas de resultado",
     "origin": "review",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "PR #190: evals/e2e com validador pydantic v2, corpus semente reservado de 6 produtos distintos com jornadas independentes da implementacao, replay deterministico (sucesso E2E, intervencao, tempo, custo, recuperacao), recibos SHA-256 e scanner anti-vazamento. tests/test_factory_e2e_eval.py: 26 passed; CI verde. Execucao real contra a linha e injecao de falhas ficam documentadas em docs/EVAL_E2E.md.",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -3824,7 +3826,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-03T21:22:07.830066Z",
-    "updated_at": "2026-10-03T21:22:07.830066Z"
+    "updated_at": "2026-10-07T19:45:00Z"
   },
   {
     "id": "USR-134",
@@ -3867,8 +3869,8 @@
     "project_id": "darkfac-canary",
     "title": "Publicar no /version o SHA real do commit implantado",
     "origin": "review",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "Verificado em 07/10/2026: https://canary.ggcampos.com/version devolve sha=3d0b2ee5e00833cff2ee38fe0a91becdb8c15d94, igual ao HEAD completo de darkfac-canary/main (SPEC #7). Comparacao exata de canary_day e SHA no canario (USR-132) e smoke/digest no release (USR-131) entregues no PR #136.",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -3895,7 +3897,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-03T21:49:22.314311Z",
-    "updated_at": "2026-10-03T21:49:22.314311Z"
+    "updated_at": "2026-10-07T19:45:00Z"
   },
   {
     "id": "USR-135",
@@ -4000,8 +4002,8 @@
     "project_id": "darkfac",
     "title": "Esteira ao vivo: run_ticket local nao publica progresso etapa a etapa",
     "origin": "user",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "PR #187: run_ticket publica as fases preflight/workspace/agent/gate/commit/pr/ci/merge/deploy em local_run_events (control store lido pelo hub); /api/line/live inclui os runs locais; publicacao best-effort com timeout e silenciamento apos 2 falhas. 112 testes focais passed; CI verde. Operacional: a maquina do run_ticket precisa de DARKFAC_HF02_DATABASE_URL com permissao de escrita.",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -4023,7 +4025,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-04T16:41:55.282304Z",
-    "updated_at": "2026-10-04T16:41:55.282304Z"
+    "updated_at": "2026-10-07T19:45:00Z"
   },
   {
     "id": "USR-141",
@@ -4060,8 +4062,8 @@
     "project_id": "darkfac",
     "title": "Linha: run ativo sem sucessor agendado apos o Grill (HF-03-08 parado ha 15 dias)",
     "origin": "user",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "PR #185: core/line/orphan_runs.py + CloudWorker.sweep_orphan_runs (a cada 300 s) agendam o sucessor ou movem para waiting_human com cause_code orphan_run_no_successor. Em producao apos o deploy de 07/10 o run dem-cb92532c1c46 (HF-03-08) deixou de ficar parado: planning=failed cause=loop_cap:grill_not_ready e retrospective=succeeded em /api/line/live. tests/line/test_orphan_runs.py: 20 passed; CI verde.",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -4083,7 +4085,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-04T17:56:24.512760Z",
-    "updated_at": "2026-10-04T17:56:24.512760Z"
+    "updated_at": "2026-10-07T19:45:00Z"
   },
   {
     "id": "USR-143",
@@ -4120,8 +4122,8 @@
     "project_id": "darkfac",
     "title": "Linha: deploy do DarkHub deve renderizar o compose do commit exato, nao so repinar o SHA armazenado",
     "origin": "user",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "PR #184: core/orchestrator/compose_render.py busca deploy/dokploy/docker-compose.hub.yml no SHA do merge via gh api, renderiza e instala via compose.update antes do deploy (render compartilhado com scripts/dokploy_redeploy.py); falha fechada se o arquivo nao puder ser lido. tests/test_compose_render.py e tests/test_dokploy_release_identity.py: 188 passed nos focais; CI verde.",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -4142,7 +4144,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-05T15:14:42.915940Z",
-    "updated_at": "2026-10-05T15:14:42.915940Z"
+    "updated_at": "2026-10-07T19:45:00Z"
   },
   {
     "id": "USR-145",
@@ -4178,8 +4180,8 @@
     "project_id": "darkfac",
     "title": "Dokploy 502 Bad Gateway: queda do container ou esgotamento de recursos na VPS CX23",
     "origin": "user",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "Verificado em 07/10/2026: https://dokploy.ggcampos.com responde HTTP 200 e a API responde 401 sem credencial; o redeploy de 07/10 acionou os 4 servicos sem erro. Monitoramento e auto-recuperacao de disco documentados em docs/runbooks/vps_disk.md (PR #176, #172).",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -4200,7 +4202,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-05T22:05:56.766870Z",
-    "updated_at": "2026-10-05T22:05:56.766870Z"
+    "updated_at": "2026-10-07T19:45:00Z"
   },
   {
     "id": "USR-147",
@@ -4237,8 +4239,8 @@
     "project_id": "darkfac",
     "title": "Retencao do volume darkfac-artifacts (artefatos de workflows) na VPS",
     "origin": "user",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "PR #183: core/orchestrator/artifact_retention.py com politica (run terminal ha 30 dias ou mais sem escrita; orfao 60 dias; nunca run active/waiting_*/recente; fail-closed), sweep a cada 6 h no CloudWorker com dry-run, variaveis no compose cloud e docs/runbooks/vps_disk.md atualizado. tests/test_artifact_retention.py + cloud_worker/artifacts: 91 passed; CI verde.",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -4260,15 +4262,15 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-06T21:38:54.371899Z",
-    "updated_at": "2026-10-06T21:38:54.371899Z"
+    "updated_at": "2026-10-07T19:45:00Z"
   },
   {
     "id": "USR-149",
     "project_id": "darkfac",
     "title": "Teste instavel no Linux: test_executor_contract test_process_sandbox_kills_descendants (grandchild.pid ausente)",
     "origin": "user",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "PR #186: tests/test_executor_contract.py espera de forma deterministica (timeout escalonado e poll do grandchild.pid, janela de morte de 10 s) com diagnostico em falha; core/harness intacto. Executou e passou no CI ubuntu. Nao foram feitas 20 repeticoes sob carga.",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -4290,15 +4292,15 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-07T10:14:17.702233Z",
-    "updated_at": "2026-10-07T10:14:17.702233Z"
+    "updated_at": "2026-10-07T19:45:00Z"
   },
   {
     "id": "USR-150",
     "project_id": "darkfac",
     "title": "Estabilizar timeout do teste de subprocesso no CI Windows",
     "origin": "user",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "PR #186: test_json_config_subprocess_runs_protocol_until_terminal_then_shutdown com prazo de 60 s, saida ao primeiro evento terminal, stderr drenado em thread e mensagem diagnostica (tempo, returncode, eventos, stderr). Passou no CI Windows e Linux. O portao do Notebook nao foi executado.",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -4320,6 +4322,6 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-07T17:54:35.645358Z",
-    "updated_at": "2026-10-07T17:54:35.645358Z"
+    "updated_at": "2026-10-07T19:45:00Z"
   }
 ]
