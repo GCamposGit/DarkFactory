@@ -38,7 +38,6 @@ import argparse
 import json
 import logging
 import os
-import re
 import subprocess
 import sys
 import time
@@ -57,6 +56,12 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from core.git.safe_show import safe_show
+from core.orchestrator.compose_render import (
+    HUB_COMPOSE_PATH,
+    SHA_PATTERN,
+    ComposeRenderError,
+    render_darkhub_compose as _shared_render_darkhub_compose,
+)
 
 DEFAULT_PROJECT = "darkfac-core"
 DEFAULT_ENVIRONMENT = "production"
@@ -66,7 +71,6 @@ DARKHUB_HEALTH_URL = "https://darkhub.ggcampos.com/health"
 # `disk=true` makes DarkHub report the HOST disk (disk_percent/disk_free_gb/disk_total_gb). Without it the
 # post-deploy disk alert of USR-122 never saw a value and never fired.
 DARKHUB_HEALTH_DISK_URL = DARKHUB_HEALTH_URL + "?disk=true"
-SHA_PATTERN = re.compile(r"^[0-9a-f]{40}$")
 
 # Hard allowlist: this tool may only ever act on these Dokploy projects,
 # regardless of --project. Claude Code's own permission config allows
@@ -600,7 +604,7 @@ def get_origin_main_compose(sha: str, repo_root: Path = REPO_ROOT) -> str:
     if not SHA_PATTERN.fullmatch(sha):
         raise DokployUsageError("Darkhub build requires a full origin/main SHA")
     try:
-        result = safe_show(sha, "deploy/dokploy/docker-compose.hub.yml", cwd=repo_root)
+        result = safe_show(sha, HUB_COMPOSE_PATH, cwd=repo_root)
     except Exception:
         raise DokployUsageError("Cannot read Darkhub compose from origin/main") from None
     if result.returncode != 0 or not result.stdout:
@@ -609,14 +613,15 @@ def get_origin_main_compose(sha: str, repo_root: Path = REPO_ROOT) -> str:
 
 
 def render_darkhub_compose(source: str, sha: str) -> str:
-    """Bind both the Git build context and container environment to one SHA."""
-    if not SHA_PATTERN.fullmatch(sha):
-        raise DokployUsageError("Darkhub build requires a full origin/main SHA")
-    context = "DarkFactory.git#${DARKFAC_GIT_SHA}"
-    placeholder = "${DARKFAC_GIT_SHA}"
-    if context not in source or source.count(placeholder) != 3 or "no_cache: true" not in source or "pull_policy: build" not in source:
-        raise DokployUsageError("Darkhub compose lacks the pinned Git build and SHA contract")
-    return source.replace(placeholder, sha)
+    """Bind both the Git build context and container environment to one SHA.
+
+    Thin wrapper over the render shared with the line's deployment adapter
+    (``core.orchestrator.compose_render``, USR-144).
+    """
+    try:
+        return _shared_render_darkhub_compose(source, sha)
+    except ComposeRenderError as exc:
+        raise DokployUsageError(str(exc)) from None
 
 
 def set_compose_git_sha(transport: Transport, service: Service, payload: Dict[str, Any], sha: str, source: str) -> None:
