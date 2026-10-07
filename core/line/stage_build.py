@@ -595,6 +595,27 @@ class DevelopmentStage:
             return StageResult(outcome="failed", cause_code="no_tickets", output_refs=[])
 
         progress = _read_progress(ws)
+        smoke_feedback = _read_context_text(ws, "PROD_SMOKE_FAILURE.md")
+        if smoke_feedback:
+            # A post-merge rollback starts from the product commit. Squash
+            # merging removed the original DarkFac-Job trailers, so replaying
+            # tickets.json would implement the entire demand again. Keep the
+            # original tickets as context and develop one bounded correction.
+            feedback_id = hashlib.sha256(smoke_feedback.encode("utf-8")).hexdigest()[:12]
+            fix_ticket = TicketSpec(
+                id=f"fix-prod-smoke-{feedback_id}",
+                title="repair production smoke failure",
+                goal="Correct the deployed behavior reported in PROD_SMOKE_FAILURE.md while preserving the original specification.",
+                acceptance=["The production smoke failure is corrected and project validation passes."],
+            )
+            existing_sha = workspace.find_commit_by_job(ws, f"{run_id}:{fix_ticket.id}")
+            if existing_sha:
+                return StageResult(outcome="success", output_refs=[existing_sha])
+            return self._develop_ticket(
+                ws, run_id, project, fix_ticket, len(tickets), progress,
+                initial_feedback=smoke_feedback,
+            )
+
         last_sha: Optional[str] = None
         for index, ticket in enumerate(tickets):
             job_key = f"{run_id}:{ticket.id}"

@@ -307,6 +307,28 @@ def test_conflict_resolution_cannot_pass_without_validate_command(
     assert "Nenhum comando de validate" in log
 
 
+def test_context_archive_push_failure_keeps_planning_inputs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    origin = _init_bare_origin(tmp_path)
+    project = _project(str(origin))
+    monkeypatch.setenv("DARKFAC_WORKSPACES", str(tmp_path / "root"))
+    ws = checkout(project, "run-archive-fails")
+    ws_mod.write_context(ws, "tickets.json", '[{"id":"T1","title":"Build"}]')
+    ws_mod.commit(ws, "test: planned demand", "run-archive-fails:planning")
+    ws_mod.push(ws)
+
+    def reject_archive(_ws):
+        raise ws_mod.WorkspaceError("simulated ref push failure")
+
+    monkeypatch.setattr(stage_integration, "preserve_context", reject_archive)
+    _title, _body, error = IntegrationStageHandler(project)._strip_context(
+        ws, _context("run-archive-fails")
+    )
+    assert error is not None
+    assert (error.outcome, error.cause_code) == ("retry", "context_archive_failed")
+    assert (ws_mod.context_dir(ws) / "tickets.json").is_file()
+    assert ws_mod.find_commit_by_job(ws, "run-archive-fails:integration:strip_context") is None
 def test_conflict_resolution_passes_with_executable_validate_command(
     tmp_path: Path
 ) -> None:

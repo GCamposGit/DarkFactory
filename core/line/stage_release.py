@@ -71,6 +71,7 @@ from typing import Any, Callable, Dict, Optional
 from pydantic import BaseModel, Field
 
 from core.line import workspace as ws_mod
+from core.line.recovery_context import restore_context
 from core.orchestrator.build_artifacts import ArtifactRef
 from core.orchestrator.deployment_adapter import (
     DeploymentAdapter,
@@ -218,6 +219,14 @@ class GitRefReleaseStateStore:
         specs = [f"+{sha}:{ref}" for ref, sha in updates.items()]
         ws_mod._run_git(["push", "origin", *specs], cwd=mirror, repo_url=self.repo_url)
 
+    def _delete_refs(self, mirror: Path, deletions: dict[str, str]) -> None:
+        """Remove obsolete failure counters only if they still point to observed SHAs."""
+        if not deletions:
+            return
+        leases = [f"--force-with-lease={ref}:{sha}" for ref, sha in deletions.items()]
+        specs = [f":{ref}" for ref in deletions]
+        ws_mod._run_git(["push", *leases, "origin", *specs], cwd=mirror, repo_url=self.repo_url)
+
     def load(self, project_id: str) -> ReleaseState:
         refs = self._remote_refs(self._mirror())
         state = ReleaseState(last_good_sha=refs.get(f"{_REF_ROOT}/last-good"))
@@ -238,10 +247,18 @@ class GitRefReleaseStateStore:
         mirror = self._mirror()
         current = self._remote_refs(mirror)
         updates: dict[str, str] = {}
+        deletions: dict[str, str] = {}
         if state.last_good_sha and current.get(f"{_REF_ROOT}/last-good") != state.last_good_sha:
             updates[f"{_REF_ROOT}/last-good"] = state.last_good_sha
         for run_id, run_state in state.runs.items():
             base = f"{_REF_ROOT}/runs/{run_id}"
+            failure_prefix = f"{base}/smoke-fail-"
+            for ref, sha in current.items():
+                if not ref.startswith(failure_prefix):
+                    continue
+                suffix = ref[len(failure_prefix):]
+                if suffix.isdigit() and int(suffix) > run_state.consecutive_smoke_failures:
+                    deletions[ref] = sha
             for n in range(1, run_state.consecutive_smoke_failures + 1):
                 ref = f"{base}/smoke-fail-{n}"
                 if ref not in current and run_state.last_sha:
@@ -250,6 +267,7 @@ class GitRefReleaseStateStore:
             if accepted and current.get(f"{base}/accepted") != accepted:
                 updates[f"{base}/accepted"] = accepted
         self._push(mirror, updates)
+        self._delete_refs(mirror, deletions)
 
 
 def default_state_store(project: ProjectDescriptor) -> "ReleaseStateStore | GitRefReleaseStateStore":
@@ -758,24 +776,19 @@ class ReleaseStageHandler:
     # ReviewStage/ValidationStage already do via committed context files.
     # ----------------------------------------------------------------
 
-    def _persist_smoke_failure_log(self, run_id: str, merge_sha: str, reason: str, smoke_log: str) -> None:
-        """Best-effort: write `PROD_SMOKE_FAILURE.md` on the run's branch.
+    def _persist_smoke_failure_log(self, run_id: str, merge_sha: str, reason: str, smoke_log: str) -> bool:
+        """Restore planning inputs and write failure feedback on the new run branch.
 
         `df/<run_id>` no longer exists once `IntegrationStageHandler` merges
         and deletes it -- `workspace.checkout` recreates it fresh from the
-        default branch's tip (see `test_release_smoke_failure_recreates_branch`
-        in `tests/line/test_stage_release.py`), so this still lands
-        somewhere development can find it on its next `workspace.checkout`.
-        It does NOT restore `SPEC.md`/`tickets.json` (stripped by
-        `IntegrationStageHandler._strip_context` before the merge this SHA
-        came from) -- a real re-run of `DevelopmentStage.run()` against this
-        recreated branch has no ticket to resume and will short-circuit with
-        `failed(no_tickets)`. That gap is documented, not solved, here (see
-        this ticket's final report); this log is still useful evidence for
-        whoever/whatever handles the resulting `waiting_human`/`failed`.
+        default branch's tip. The recovery ref supplies `SPEC.md` and
+        `tickets.json`; progress from the failed candidate is intentionally
+        left behind so development creates a new candidate. Failure to
+        restore or push is returned to the caller instead of a false retry.
         """
         try:
             ws = ws_mod.checkout(self.project, run_id)
+            restored = restore_context(ws)
             ws_mod.write_context(
                 ws,
                 "PROD_SMOKE_FAILURE.md",
@@ -783,8 +796,10 @@ class ReleaseStageHandler:
             )
             ws_mod.commit(ws, f"chore(line): record prod smoke failure ({reason})", f"{run_id}:release:smoke_failure:{merge_sha[:12]}")
             ws_mod.push(ws)
-        except Exception as exc:  # pragma: no cover - defensive, must never block the retry
-            logger.warning("Failed to persist prod smoke failure log for run %s: %s", run_id, exc)
+            return restored
+        except Exception as exc:  # pragma: no cover - defensive failure becomes a structured result
+            logger.warning("Failed to persist prod smoke failure context for run %s: %s", run_id, type(exc).__name__)
+            return not bool(self.project.repo_url)
 
     # ----------------------------------------------------------------
     # entry point
@@ -845,22 +860,16 @@ class ReleaseStageHandler:
         run_state.consecutive_smoke_failures += 1
         run_state.last_sha = merge_sha
         state.runs[run_id] = run_state
-
-        if run_state.consecutive_smoke_failures >= _MAX_CONSECUTIVE_SMOKE_FAILURES:
-            self.state_store.save(self.project.id, state)
-            logger.error(
-                "release %s: smoke failed twice in a row for sha %s; giving up (prod_smoke_failed)",
-                run_id, merge_sha,
-            )
-            return StageResult(
-                outcome="failed",
-                cause_code=f"prod_smoke_failed:\n{smoke_log}",
-            )
+        exhausted = run_state.consecutive_smoke_failures >= _MAX_CONSECUTIVE_SMOKE_FAILURES
 
         if adapter is None or target_config is None or not state.last_good_sha:
             # No deploy target (local-only smoke) or nothing to roll back to.
             self.state_store.save(self.project.id, state)
-            self._persist_smoke_failure_log(run_id, merge_sha, "smoke_failed_no_rollback_target", smoke_log)
+            if exhausted:
+                return StageResult(outcome="failed", cause_code=f"prod_smoke_failed:\n{smoke_log}")
+            recovered = self._persist_smoke_failure_log(run_id, merge_sha, "smoke_failed_no_rollback_target", smoke_log)
+            if not recovered and self.project.repo_url:
+                return StageResult(outcome="failed", cause_code="rollback_context_unavailable")
             return StageResult(
                 outcome="retry",
                 cause_code=f"retry:development\nsmoke_failed_no_rollback_target:{merge_sha[:12]}",
@@ -890,8 +899,16 @@ class ReleaseStageHandler:
                 outcome="failed",
                 cause_code=f"rollback_smoke_failed:{state.last_good_sha[:12]}\n{restored_log}\n{smoke_log}",
             )
+        if exhausted:
+            logger.error(
+                "release %s: smoke failed twice; restored last good sha %s before stopping",
+                run_id, state.last_good_sha,
+            )
+            return StageResult(outcome="failed", cause_code=f"prod_smoke_failed:\n{smoke_log}")
         rollback_reason = f"prod_smoke_failed_rolled_back_to_{state.last_good_sha[:12]}"
-        self._persist_smoke_failure_log(run_id, merge_sha, rollback_reason, smoke_log)
+        recovered = self._persist_smoke_failure_log(run_id, merge_sha, rollback_reason, smoke_log)
+        if not recovered and self.project.repo_url:
+            return StageResult(outcome="failed", cause_code="rollback_context_unavailable")
         return StageResult(
             outcome="retry",
             cause_code=f"retry:development\n{rollback_reason}:{merge_sha[:12]}",
