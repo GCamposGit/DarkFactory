@@ -188,7 +188,21 @@ class IntegratedIntakeService:
             answers,
             auto_accept_unanswered=auto_accept_unanswered,
         )
-        self.store.save_ticket(refined_ticket)
+        try:
+            self.store.save_ticket(refined_ticket, expected_updated_at=ticket.updated_at)
+        except ValueError as exc:
+            if "Stale demand ticket" not in str(exc):
+                raise
+            latest = self.store.get_ticket(ticket_id)
+            if latest is None:
+                raise KeyError(f"Ticket '{ticket_id}' not found in store") from exc
+            refined_ticket, completed_grill, refinement = self.grill_engine.resolve_grill_answers(
+                latest,
+                session,
+                answers,
+                auto_accept_unanswered=auto_accept_unanswered,
+            )
+            self.store.save_ticket(refined_ticket, expected_updated_at=latest.updated_at)
 
         run_id = f"run_{ticket.id.lower().replace('-', '_')}"
         run_record: RunRecord | None = None

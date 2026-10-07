@@ -1052,6 +1052,33 @@ def list_demand_tickets(
     return service.list_demand_tickets(project_id=project_id, status=status)
 
 
+@router.get("/demands/migration")
+def get_demands_migration(service: HubService = Depends(get_hub_service)) -> Dict[str, Any]:
+    """Expose the shared-volume completion marker for cross-host deploy safety."""
+    try:
+        return service.get_demands_migration_status()
+    except ValueError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
+@router.post("/demands/migration/complete")
+def complete_demands_migration(
+    versions: Dict[str, str] = Body(..., embed=True),
+    x_darkfac_telemetry_key: Optional[str] = Header(default=None, alias="X-DarkFac-Telemetry-Key"),
+    service: HubService = Depends(get_hub_service),
+) -> Dict[str, Any]:
+    """Seal first-rollout migration after the authenticated manifest is verified."""
+    configured_key = os.environ.get("DARKFAC_TELEMETRY_KEY")
+    if not configured_key:
+        raise HTTPException(status_code=503, detail="Demand migration completion is disabled")
+    if not x_darkfac_telemetry_key or not secrets.compare_digest(x_darkfac_telemetry_key, configured_key):
+        raise HTTPException(status_code=401, detail="Invalid telemetry key")
+    try:
+        return service.complete_demands_migration(versions)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
 @router.get("/demands/tickets/{ticket_id}", response_model=UserTicket)
 def get_demand_ticket(
     ticket_id: str,
@@ -1958,7 +1985,6 @@ def get_autonomy_plan_endpoint(
 ) -> Dict[str, Any]:
     """Returns the compiled Continuous Autonomy Plan and execution DAG (DH-12)."""
     return service.get_autonomy_plan()
-
 
 
 

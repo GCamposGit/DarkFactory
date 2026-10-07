@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import io
 import sys
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import pytest
@@ -29,6 +30,10 @@ def _node_verification_fake(monkeypatch: pytest.MonkeyPatch) -> None:
     from core.infra import node_sync
 
     monkeypatch.setattr(mod, "get_local_origin_main_subject", lambda: None)
+    monkeypatch.setattr(
+        mod, "make_hub_transport",
+        lambda **_kwargs: (lambda _method, path, _body: {"state": "complete"} if path == "/api/demands/migration" else {"demands_source": "shared-volume"}),
+    )
     monkeypatch.setattr(
         mod, "default_disk_hygiene_runner", lambda transport, stage, **kw: {"action": "skipped", "reason": "test"}
     )
@@ -312,7 +317,7 @@ def test_main_allows_default_project_explicitly() -> None:
         stdout=out,
         stderr=err,
     )
-    assert exit_code == mod.EXIT_OK
+    assert exit_code == mod.EXIT_OK, err.getvalue()
     assert "darkfac-cloud" in out.getvalue()
 
 
@@ -623,7 +628,8 @@ def _fake_darkhub_health(monkeypatch: pytest.MonkeyPatch) -> None:
 def _program_status(
     transport: QueueTransport, path: str, deployments_sequence: Sequence[List[Dict[str, Any]]]
 ) -> None:
-    transport.program_get(path, [{"deployments": d, "env": "KEEP=secret-value\n"} for d in deployments_sequence])
+    compose = f"services:\n  darkhub:\n    volumes:\n      - {mod.SHARED_DEMANDS_MARKER}:/app/.factory/demands\n" if path.endswith("compose_hub") else ""
+    transport.program_get(path, [{"deployments": d, "env": "KEEP=secret-value\nDARKFAC_TELEMETRY_KEY=fake-key\n", "composeFile": compose} for d in deployments_sequence])
 
 
 def test_main_missing_credentials_exit_2_no_leak() -> None:
@@ -733,7 +739,7 @@ def test_main_deploy_and_wait_all_done_exit_0() -> None:
         stdout=out,
         stderr=err,
     )
-    assert exit_code == mod.EXIT_OK
+    assert exit_code == mod.EXIT_OK, err.getvalue()
     # 4 deploys plus the DarkHub pinned compose update.
     assert len(transport.post_calls) == 5
     assert {c[1] for c in transport.post_calls} == {"/api/compose.update", "/api/compose.deploy", "/api/application.deploy"}
@@ -1301,6 +1307,210 @@ def test_no_pytest_in_dokploy_redeploy() -> None:
     content = source_path.read_text(encoding="utf-8")
     assert "pytest" not in content
     assert "sys.modules" not in content
+
+
+def _migration_ticket(status: str, updated_at: str) -> Dict[str, Any]:
+    return {
+        "id": "USR-200", "project_id": "darkfac", "title": "Runtime-only ticket",
+        "status": status, "updated_at": updated_at,
+    }
+
+
+def test_old_hub_baseline_requires_one_sha_and_readable_ledger(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import json
+    import subprocess
+
+    old_sha = "a" * 40
+    calls: list[str] = []
+
+    def show(rev: str, path: str, *, cwd: Path) -> subprocess.CompletedProcess[str]:
+        calls.append(f"{rev}:{path}")
+        return subprocess.CompletedProcess([], 0, json.dumps([_migration_ticket("planned", "2026-09-12T09:00:00Z")]), "")
+
+    monkeypatch.setattr(mod, "safe_show", show)
+    assert mod._baseline_ticket_ids(f"build: DarkFactory.git#{old_sha}\nenv: {old_sha}") == {"USR-200"}
+    assert calls == [f"{old_sha}:.factory/demands/demands.json"]
+    with pytest.raises(mod.DokployUsageError, match="old DarkHub Git SHA"):
+        mod._baseline_ticket_ids("build: DarkFactory.git#latest")
+    with pytest.raises(mod.DokployUsageError, match="old DarkHub Git SHA"):
+        mod._baseline_ticket_ids(f"build: {old_sha}\nother: {'b' * 40}")
+
+
+def test_first_shared_volume_rollout_restores_runtime_ticket_after_cutover(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The old container's writable-layer ticket must survive the new volume."""
+    monkeypatch.setattr(mod, "_baseline_ticket_ids", lambda _compose: {"USR-200"})
+    dokploy = _make_transport_with_full_project()
+    _program_status(dokploy, "/api/compose.one?composeId=compose_hub", [
+        [{"deploymentId": "old", "status": "done", "createdAt": "2026-09-12T09:00:00Z"}],
+        [{"deploymentId": "new", "status": "done", "createdAt": "2026-09-12T09:10:00Z"}],
+    ])
+    for response in dokploy._get_queues["/api/compose.one?composeId=compose_hub"]:
+        response["composeFile"] = "services:\n  darkhub:\n    image: old\n"
+    early = _migration_ticket("planned", "2026-09-12T09:00:00Z")
+    latest = _migration_ticket("implementing", "2026-09-12T09:01:00Z")
+    live: Dict[str, Dict[str, Any]] = {}
+    state = {"deployed": False, "reads": 0, "sealed": False}
+
+    def dokploy_call(method: str, path: str, body: Optional[Dict[str, Any]]) -> Any:
+        if method == "POST" and path == "/api/compose.deploy":
+            state["deployed"] = True
+        return dokploy(method, path, body)
+
+    def hub_call(method: str, path: str, body: Optional[Dict[str, Any]]) -> Any:
+        if path == "/api/line/live":
+            return {"demands_source": "shared-volume-pending-migration" if state["deployed"] and not state["sealed"] else "shared-volume" if state["deployed"] else "local-file"}
+        if path == "/api/demands/migration":
+            return {"state": "complete" if state["sealed"] else "pending"}
+        if path == "/api/demands/migration/complete":
+            assert body == {"versions": {"USR-200": latest["updated_at"]}}
+            state["sealed"] = True
+            return {"state": "complete", "ticket_count": 1}
+        if method == "GET" and path == "/api/demands/tickets":
+            if not state["deployed"]:
+                state["reads"] += 1
+                return [early if state["reads"] == 1 else latest]
+            return list(live.values())
+        assert method == "POST" and path == "/api/demands/tickets"
+        assert body is not None
+        live[body["id"]] = body
+        return body
+
+    path = tmp_path / "pending.json"
+    out, err = io.StringIO(), io.StringIO()
+    code = mod.main(
+        ["--only", "Darkhub", "--skip-node-sync", "--skip-check-main", "--skip-backup"],
+        env=_ENV, registry_reader=_no_registry,
+        transport_factory=lambda _url, _key: dokploy_call,
+        hub_transport_factory=lambda: hub_call, migration_path=path,
+        health_client=lambda: {"git_sha": "a" * 40},
+        stdout=out, stderr=err,
+    )
+    assert code == mod.EXIT_OK, err.getvalue()
+    assert state["reads"] == 2
+    assert live["USR-200"] == latest
+    assert state["sealed"]
+    assert not path.exists()
+
+
+def test_first_shared_volume_rollout_blocks_when_old_hub_unavailable(
+    tmp_path: Path,
+) -> None:
+    dokploy = _make_transport_with_full_project()
+    _program_status(dokploy, "/api/compose.one?composeId=compose_hub", [[]])
+    dokploy._get_queues["/api/compose.one?composeId=compose_hub"][0]["composeFile"] = "old"
+
+    def hub_call(_method: str, _path: str, _body: Optional[Dict[str, Any]]) -> Any:
+        raise mod.DokployUsageError("DarkHub demand API returned HTTP 404")
+
+    err = io.StringIO()
+    code = mod.main(
+        ["--only", "Darkhub", "--skip-backup"], env=_ENV,
+        registry_reader=_no_registry, transport_factory=lambda _url, _key: dokploy,
+        hub_transport_factory=lambda: hub_call, migration_path=tmp_path / "pending.json",
+        stderr=err,
+    )
+    assert code == mod.EXIT_DEPLOY_FAILED
+    assert dokploy.post_calls == []
+    assert "snapshot unavailable" in err.getvalue()
+
+
+def test_first_shared_volume_rollout_rejects_empty_old_ledger(tmp_path: Path) -> None:
+    dokploy = _make_transport_with_full_project()
+    _program_status(dokploy, "/api/compose.one?composeId=compose_hub", [[]])
+    dokploy._get_queues["/api/compose.one?composeId=compose_hub"][0]["composeFile"] = "old"
+
+    def hub_call(_method: str, route: str, _body: Optional[Dict[str, Any]]) -> Any:
+        assert route == "/api/demands/tickets"
+        return []
+
+    err = io.StringIO()
+    code = mod.main(
+        ["--only", "Darkhub", "--skip-backup"], env=_ENV,
+        registry_reader=_no_registry, transport_factory=lambda _url, _key: dokploy,
+        hub_transport_factory=lambda: hub_call, migration_path=tmp_path / "pending.json",
+        stderr=err,
+    )
+    assert code == mod.EXIT_DEPLOY_FAILED
+    assert not dokploy.post_calls
+    assert not (tmp_path / "pending.json").exists()
+    assert "empty demand ledger" in err.getvalue()
+
+
+def test_first_shared_volume_rollout_rejects_partial_old_ledger(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(mod, "_baseline_ticket_ids", lambda _compose: {"USR-199", "USR-200"})
+    dokploy = _make_transport_with_full_project()
+    _program_status(dokploy, "/api/compose.one?composeId=compose_hub", [[]])
+    dokploy._get_queues["/api/compose.one?composeId=compose_hub"][0]["composeFile"] = "old"
+
+    def hub_call(_method: str, route: str, _body: Optional[Dict[str, Any]]) -> Any:
+        assert route == "/api/demands/tickets"
+        return [_migration_ticket("planned", "2026-09-12T09:00:00Z")]
+
+    err = io.StringIO()
+    code = mod.main(
+        ["--only", "Darkhub", "--skip-backup"], env=_ENV,
+        registry_reader=_no_registry, transport_factory=lambda _url, _key: dokploy,
+        hub_transport_factory=lambda: hub_call, migration_path=tmp_path / "pending.json",
+        stderr=err,
+    )
+    assert code == mod.EXIT_DEPLOY_FAILED
+    assert not dokploy.post_calls
+    assert not (tmp_path / "pending.json").exists()
+    assert "omits 1 ticket(s)" in err.getvalue()
+
+
+def test_pending_migration_resumes_on_next_process_after_restore_failure(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "pending.json"
+    ticket = _migration_ticket("planned", "2026-09-12T09:00:00Z")
+    mod._write_pending_migration(path, {ticket["id"]: ticket})
+    live: Dict[str, Dict[str, Any]] = {}
+
+    def broken_hub(method: str, route: str, body: Optional[Dict[str, Any]]) -> Any:
+        if route == "/api/line/live":
+            return {"demands_source": "shared-volume"}
+        if route == "/api/demands/migration":
+            return {"state": "pending"}
+        if method == "GET":
+            return list(live.values())
+        raise mod.DokployUsageError("temporary POST failure")
+
+    dokploy = _make_transport_with_full_project()
+    _program_status(dokploy, "/api/compose.one?composeId=compose_hub", [[]])
+    code = mod.main(
+        ["--only", "Darkhub", "--skip-backup"], env=_ENV,
+        registry_reader=_no_registry, transport_factory=lambda _url, _key: dokploy,
+        hub_transport_factory=lambda: broken_hub, migration_path=path,
+    )
+    assert code == mod.EXIT_DEPLOY_FAILED
+    assert path.exists()
+    assert dokploy.post_calls == []
+
+    def recovered_hub(method: str, route: str, body: Optional[Dict[str, Any]]) -> Any:
+        if route == "/api/line/live":
+            return {"demands_source": "shared-volume"}
+        if route == "/api/demands/migration":
+            return {"state": "complete"}
+        if route == "/api/demands/migration/complete":
+            return {"state": "complete", "ticket_count": 1}
+        if method == "GET":
+            return list(live.values())
+        assert body is not None
+        live[body["id"]] = body
+        return body
+
+    restored = mod._restore_pending_migration(recovered_hub, path)
+    mod._complete_pending_migration(recovered_hub, path)
+    assert restored == 1
+    assert live["USR-200"] == ticket
+    assert not path.exists()
 
 
 def test_transport_exception_emits_structured_error_no_traceback() -> None:

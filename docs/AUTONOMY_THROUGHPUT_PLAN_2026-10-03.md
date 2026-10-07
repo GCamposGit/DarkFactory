@@ -35,7 +35,7 @@ apenas de testes sintéticos, PR ou webhook disparado.
 
 | Fatia | Contrato observável | Tickets | Superfície principal |
 | --- | --- | --- | --- |
-| Consumo do backlog | `planned` + `line-ok` em `demands.json` entra na linha com idempotência; sem tag ou com caminho protegido não entra. O gate de canário permanece explícito. | USR-92 | `core/line/dogfood.py` |
+| Consumo do backlog | `planned` + `line-ok` em `demands.json` entra na linha com idempotência; Hub e worker compartilham a mesma fila durável. Sem tag ou com caminho protegido não entra. O gate de canário permanece explícito. | USR-92, USR-136 | `core/line/dogfood.py`, `core/demands/store.py`, Compose cloud/Hub |
 | Retomada autônoma | Esperas técnicas/temporais têm próximo evento e nova tentativa; `waiting_human` só permanece para decisão ou ação humana real. Esgotamento de wall-clock não estaciona o run para sempre. Após rollback, o contexto ainda permite corrigir a regressão. | USR-99, USR-105, USR-106, USR-123, USR-134 | `core/line`, `core/workflow` |
 | Progresso visível | O painel atualiza enquanto visível, mostra a idade de cada job, data do último refresh e falha de fonte sem apagar dados anteriores. Status do backlog e canário são vinculados à linha em fatia posterior. | USR-128, USR-93 | `hub/frontend/tasks.js`, depois API de status |
 | Qualidade sem falso verde | Parecer `changes_required` nunca vira aprovação por limite de rodadas. Sem comando/prova mínima de validação a entrega não avança. | USR-129, USR-130, USR-131 | `stage_review.py`, `stage_build.py`, `stage_integration.py`, `stage_release.py` |

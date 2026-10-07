@@ -426,7 +426,8 @@ def test_json_contract_field_names_are_frozen(seeded: tuple[Path, dict[str, str]
     db, ids = seeded
     data = _read(db).model_dump(mode="json")
     assert set(data) == {
-        "generated_at", "version", "source", "warnings", "stage_order", "stage_labels", "runs",
+        "generated_at", "version", "source", "demands_source", "demands_latest_at",
+        "warnings", "stage_order", "stage_labels", "runs",
         "events", "kpis", "backlog", "off_line",
     }
     run = next(item for item in data["runs"] if item["run_id"] == ids["dev_live"])

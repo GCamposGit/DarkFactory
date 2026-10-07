@@ -41,6 +41,7 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
 import time
 import urllib.error
 import urllib.parse
@@ -63,6 +64,8 @@ DEFAULT_ENVIRONMENT = "production"
 DEFAULT_TIMEOUT_SECONDS = 900.0
 DEFAULT_POLL_INTERVAL_SECONDS = 5.0
 DARKHUB_HEALTH_URL = "https://darkhub.ggcampos.com/health"
+DARKHUB_API_URL = "https://darkhub.ggcampos.com"
+SHARED_DEMANDS_MARKER = "darkfac-demands-v1"
 # `disk=true` makes DarkHub report the HOST disk (disk_percent/disk_free_gb/disk_total_gb). Without it the
 # post-deploy disk alert of USR-122 never saw a value and never fired.
 DARKHUB_HEALTH_DISK_URL = DARKHUB_HEALTH_URL + "?disk=true"
@@ -96,10 +99,22 @@ EXIT_NODE_DIRTY = 3
 # response (a dict or a list, depending on the endpoint). Production code
 # builds one via make_urllib_transport(); tests inject a fake.
 Transport = Callable[[str, str, Optional[Dict[str, Any]]], Any]
+HubTransport = Callable[[str, str, Optional[Dict[str, Any]]], Any]
 
 
 class DokployUsageError(Exception):
     """Usage, credential, or discovery error -> process exit code 2."""
+
+
+def stable_migration_path(repo_root: Path = REPO_ROOT) -> Path:
+    """Keep a pending snapshot in the main checkout, not an ephemeral worktree."""
+    result = subprocess.run(
+        ["git", "rev-parse", "--path-format=absolute", "--git-common-dir"],
+        cwd=repo_root, capture_output=True, text=True, timeout=10, check=False,
+    )
+    common = Path(result.stdout.strip()) if result.returncode == 0 and result.stdout.strip() else None
+    root = common.parent if common is not None and common.name == ".git" else repo_root
+    return root / ".factory" / "tmp" / "shared_demands_migration_pending.json"
 
 
 def check_project_allowed(project: str) -> None:
@@ -641,6 +656,182 @@ def fetch_darkhub_health(url: str = DARKHUB_HEALTH_URL) -> Dict[str, Any]:
     return data if isinstance(data, dict) else {}
 
 
+def make_hub_transport(base_url: str = DARKHUB_API_URL, timeout: float = 15.0, telemetry_key: Optional[str] = None) -> HubTransport:
+    """Small transport for the existing public demand API; never logs ticket bodies."""
+    base = base_url.rstrip("/")
+
+    def request(method: str, path: str, body: Optional[Dict[str, Any]]) -> Any:
+        data = json.dumps(body, ensure_ascii=False).encode("utf-8") if body is not None else None
+        headers = {"Accept": "application/json"}
+        if telemetry_key:
+            headers["X-DarkFac-Telemetry-Key"] = telemetry_key
+        if data is not None:
+            headers["Content-Type"] = "application/json; charset=utf-8"
+        req = urllib.request.Request(base + path, data=data, headers=headers, method=method)
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as response:
+                return json.load(response)
+        except urllib.error.HTTPError as exc:
+            raise DokployUsageError(f"DarkHub demand API returned HTTP {exc.code} for {method} {path}") from None
+        except (urllib.error.URLError, ValueError) as exc:
+            raise DokployUsageError(f"DarkHub demand API unavailable for {method} {path}: {type(exc).__name__}") from None
+
+    return request
+
+
+def _ticket_time(ticket: Dict[str, Any]) -> datetime:
+    parsed = _parse_iso8601(ticket.get("updated_at"))
+    if parsed is None or parsed.tzinfo is None:
+        raise DokployUsageError("DarkHub demand API returned a ticket without a valid updated_at")
+    return parsed
+
+
+def _tickets_by_id(payload: Any) -> Dict[str, Dict[str, Any]]:
+    if not isinstance(payload, list):
+        raise DokployUsageError("DarkHub demand API returned an invalid ticket list")
+    result: Dict[str, Dict[str, Any]] = {}
+    for row in payload:
+        if not isinstance(row, dict) or not isinstance(row.get("id"), str) or not row["id"]:
+            raise DokployUsageError("DarkHub demand API returned a malformed ticket")
+        if row["id"] in result:
+            raise DokployUsageError("DarkHub demand API returned duplicate ticket IDs")
+        _ticket_time(row)
+        result[row["id"]] = row
+    return result
+
+
+def _merge_ticket_snapshots(
+    previous: Dict[str, Dict[str, Any]], current: Dict[str, Dict[str, Any]],
+) -> Dict[str, Dict[str, Any]]:
+    merged = dict(previous)
+    for ticket_id, row in current.items():
+        prior = merged.get(ticket_id)
+        if prior is None or _ticket_time(row) > _ticket_time(prior):
+            merged[ticket_id] = row
+        elif _ticket_time(row) == _ticket_time(prior) and row != prior:
+            raise DokployUsageError(f"Demand {ticket_id} changed without a newer updated_at; migration stopped")
+    return merged
+
+
+def _read_pending_migration(path: Path) -> Dict[str, Dict[str, Any]]:
+    if not path.exists():
+        return {}
+    try:
+        envelope = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(envelope, dict) or envelope.get("version") != 1:
+            raise ValueError("invalid envelope")
+        return _tickets_by_id(envelope.get("tickets"))
+    except (OSError, ValueError, DokployUsageError) as exc:
+        raise DokployUsageError(f"Pending demand migration is unreadable at {path}: {type(exc).__name__}") from None
+
+
+def _write_pending_migration(path: Path, tickets: Dict[str, Dict[str, Any]]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary: Optional[Path] = None
+    try:
+        with tempfile.NamedTemporaryFile("w", encoding="utf-8", dir=path.parent, prefix=".migration-", delete=False) as stream:
+            temporary = Path(stream.name)
+            json.dump({"version": 1, "tickets": list(tickets.values())}, stream, ensure_ascii=False)
+            stream.flush()
+            os.fsync(stream.fileno())
+        if os.name != "nt":
+            temporary.chmod(0o600)
+        os.replace(temporary, path)
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
+
+
+def _fetch_hub_tickets(transport: HubTransport) -> Dict[str, Dict[str, Any]]:
+    return _tickets_by_id(transport("GET", "/api/demands/tickets", None))
+
+
+def _baseline_ticket_ids(compose_file: str, repo_root: Path = REPO_ROOT) -> set[str]:
+    """Require the old Hub API snapshot to include every ticket in its image."""
+    shas = set(re.findall(r"\b[0-9a-f]{40}\b", compose_file))
+    if len(shas) != 1:
+        raise DokployUsageError("Cannot identify the old DarkHub Git SHA for demand migration")
+    try:
+        result = safe_show(next(iter(shas)), ".factory/demands/demands.json", cwd=repo_root)
+        if result.returncode != 0:
+            raise ValueError("old demand ledger unavailable")
+        baseline = _tickets_by_id(json.loads(result.stdout))
+    except (OSError, ValueError, DokployUsageError) as exc:
+        raise DokployUsageError("Cannot verify the old DarkHub demand ledger") from exc
+    if not baseline:
+        raise DokployUsageError("Old DarkHub image has an empty demand ledger")
+    return set(baseline)
+
+
+def _runtime_shared_demands(transport: HubTransport) -> bool:
+    snapshot = transport("GET", "/api/line/live", None)
+    if not isinstance(snapshot, dict):
+        raise DokployUsageError("DarkHub live endpoint returned an invalid response")
+    return snapshot.get("demands_source") in ("shared-volume", "shared-volume-pending-migration")
+
+
+def _migration_status(transport: HubTransport) -> str:
+    response = transport("GET", "/api/demands/migration", None)
+    if not isinstance(response, dict) or response.get("state") not in ("pending", "complete", "not-shared"):
+        raise DokployUsageError("DarkHub migration marker endpoint returned an invalid response")
+    return response["state"]
+
+
+def _compose_telemetry_key(payload: Dict[str, Any]) -> str:
+    raw = payload.get("env")
+    if not isinstance(raw, str):
+        raise DokployUsageError("DarkHub compose has no environment for migration authentication")
+    for line in raw.splitlines():
+        key, separator, value = line.partition("=")
+        if separator and key.strip() == "DARKFAC_TELEMETRY_KEY" and value.strip():
+            return value.strip().strip('"').strip("'")
+    raise DokployUsageError("DarkHub telemetry key is unavailable; migration cannot be sealed")
+
+
+def _restore_pending_migration(transport: HubTransport, path: Path) -> int:
+    pending = _read_pending_migration(path)
+    if not path.exists():
+        return 0
+    if not _runtime_shared_demands(transport):
+        raise DokployUsageError("DarkHub runtime has not confirmed the shared demand volume")
+    live = _fetch_hub_tickets(transport)
+    restored = 0
+    for ticket_id, ticket in pending.items():
+        current = live.get(ticket_id)
+        if current is not None:
+            if _ticket_time(current) > _ticket_time(ticket):
+                continue
+            if _ticket_time(current) == _ticket_time(ticket):
+                if current != ticket:
+                    raise DokployUsageError(f"Demand {ticket_id} differs at equal updated_at after migration")
+                continue
+        response = transport("POST", "/api/demands/tickets", ticket)
+        if not isinstance(response, dict) or response.get("id") != ticket_id:
+            raise DokployUsageError(f"DarkHub rejected restored demand {ticket_id}")
+        restored += 1
+    verified = _fetch_hub_tickets(transport)
+    for ticket_id, ticket in pending.items():
+        current = verified.get(ticket_id)
+        if current is None or _ticket_time(current) < _ticket_time(ticket):
+            raise DokployUsageError(f"Demand {ticket_id} missing or stale after migration")
+        if _ticket_time(current) == _ticket_time(ticket) and current != ticket:
+            raise DokployUsageError(f"Demand {ticket_id} differs after migration verification")
+    return restored
+
+
+def _complete_pending_migration(transport: HubTransport, path: Path) -> None:
+    pending = _read_pending_migration(path)
+    if not path.exists():
+        raise DokployUsageError("Pending demand snapshot disappeared before sealing migration")
+    versions = {ticket_id: row["updated_at"] for ticket_id, row in pending.items()}
+    result = transport("POST", "/api/demands/migration/complete", {"versions": versions})
+    if not isinstance(result, dict) or result.get("state") != "complete" or result.get("ticket_count") != len(versions):
+        raise DokployUsageError("DarkHub did not confirm migration completion")
+    if _migration_status(transport) != "complete":
+        raise DokployUsageError("Shared volume has no durable migration completion marker")
+    path.unlink()
+
+
 def wait_for_darkhub_sha(
     expected_sha: str, *, health: Callable[[], Dict[str, Any]], timeout: float,
     interval: float, sleep_fn: Callable[[float], None], clock_fn: Callable[[], float],
@@ -807,6 +998,8 @@ def _run_main(
     registry_reader: Callable[[str], Optional[str]],
     transport_factory: Optional[Callable[[str, str], Transport]],
     health_client: Optional[Callable[[], Dict[str, Any]]],
+    hub_transport_factory: Optional[Callable[[], HubTransport]],
+    migration_path: Path,
     sleep_fn: Callable[[float], None],
     clock_fn: Callable[[], float],
     backup_runner: Optional[Callable[..., Any]],
@@ -859,6 +1052,51 @@ def _run_main(
         except DokployUsageError as exc:
             print(f"Darkhub deploy refused: {exc}", file=err, flush=True)
             return EXIT_DEPLOY_FAILED
+    migration_required = False
+    hub_transport: Optional[HubTransport] = None
+    hub_baseline: Optional[Dict[str, Any]] = None
+    if darkhub_selected:
+        hub_service = next(svc for svc in selected if svc.name.lower() == "darkhub" and svc.kind == "compose")
+        hub_baseline = fetch_service_status(transport, hub_service)
+        current_compose = hub_baseline.get("composeFile")
+        if not isinstance(current_compose, str):
+            print("Darkhub deploy refused: cannot identify the running Compose demand-volume contract", file=err, flush=True)
+            return EXIT_DEPLOY_FAILED
+        target_shared = SHARED_DEMANDS_MARKER in darkhub_compose
+        current_shared = SHARED_DEMANDS_MARKER in current_compose
+        if migration_path.exists() and not target_shared:
+            print("Darkhub deploy refused: pending demand migration but target lacks shared volume", file=err, flush=True)
+            return EXIT_DEPLOY_FAILED
+        if target_shared:
+            telemetry_key = _compose_telemetry_key(hub_baseline)
+            hub_transport = hub_transport_factory() if hub_transport_factory else make_hub_transport(telemetry_key=telemetry_key)
+            try:
+                runtime_shared = _runtime_shared_demands(hub_transport) if current_shared else False
+                if runtime_shared:
+                    marker_state = _migration_status(hub_transport)
+                    if marker_state == "not-shared":
+                        raise DokployUsageError("DarkHub reports a shared runtime without the shared migration contract")
+                    if migration_path.exists():
+                        restored = _restore_pending_migration(hub_transport, migration_path)
+                        _complete_pending_migration(hub_transport, migration_path)
+                        print(f"[DEMAND MIGRATION] resumed and verified {restored} restored ticket(s)", file=out, flush=True)
+                    elif marker_state != "complete":
+                        raise DokployUsageError("Shared volume migration is pending on another host; no local snapshot")
+                else:
+                    snapshot = _merge_ticket_snapshots(_read_pending_migration(migration_path), _fetch_hub_tickets(hub_transport))
+                    if not snapshot:
+                        raise DokployUsageError("DarkHub returned an empty demand ledger; migration cannot prove completeness")
+                    missing = _baseline_ticket_ids(current_compose) - snapshot.keys()
+                    if missing:
+                        raise DokployUsageError(
+                            f"DarkHub demand snapshot omits {len(missing)} ticket(s) from its deployed image"
+                        )
+                    _write_pending_migration(migration_path, snapshot)
+                    migration_required = True
+                    print(f"[DEMAND MIGRATION] durable pre-deploy snapshot: {len(snapshot)} ticket(s)", file=out, flush=True)
+            except (DokployUsageError, OSError) as exc:
+                print(f"Darkhub deploy refused: demand migration snapshot unavailable: {exc}", file=err, flush=True)
+                return EXIT_DEPLOY_FAILED
     if local_subject:
         print(f"Local origin/main HEAD subject: {local_subject}", file=out, flush=True)
 
@@ -903,9 +1141,18 @@ def _run_main(
     baselines: Dict[str, Optional[Deployment]] = {}
     for svc in selected:
         try:
-            baseline_payload = fetch_service_status(transport, svc)
+            baseline_payload = hub_baseline if svc.name.lower() == "darkhub" and hub_baseline is not None else fetch_service_status(transport, svc)
             baseline = latest_deployment(baseline_payload)
             if svc.name.lower() == "darkhub" and svc.kind == "compose":
+                if migration_required:
+                    assert hub_transport is not None
+                    refreshed = _merge_ticket_snapshots(
+                        _read_pending_migration(migration_path), _fetch_hub_tickets(hub_transport),
+                    )
+                    if not refreshed:
+                        raise DokployUsageError("DarkHub demand ledger became empty before cutover")
+                    _write_pending_migration(migration_path, refreshed)
+                    print(f"[DEMAND MIGRATION] refreshed before cutover: {len(refreshed)} ticket(s)", file=out, flush=True)
                 set_compose_git_sha(transport, svc, baseline_payload, expected_sha, darkhub_compose)
             trigger_deploy(transport, svc)
         except DokployUsageError as exc:
@@ -969,6 +1216,16 @@ def _run_main(
             interval=args.poll_interval, sleep_fn=sleep_fn, clock_fn=clock_fn,
         ):
             print(f"[NODE SYNC] VPS: converged sha={expected_sha}", file=out, flush=True)
+            if migration_required:
+                try:
+                    assert hub_transport is not None
+                    restored = _restore_pending_migration(hub_transport, migration_path)
+                    _complete_pending_migration(hub_transport, migration_path)
+                    print(f"[DEMAND MIGRATION] verified; restored {restored} ticket(s)", file=out, flush=True)
+                except (DokployUsageError, OSError) as exc:
+                    print(f"[DEMAND MIGRATION] FAILED; durable snapshot retained: {exc}", file=err, flush=True)
+                    all_ok = False
+                    other_failure = True
         else:
             print(f"[NODE SYNC] VPS: divergent; /health did not report origin/main sha={expected_sha}", file=err, flush=True)
             all_ok = False
@@ -1088,6 +1345,8 @@ def main(
     registry_reader: Callable[[str], Optional[str]] = _read_windows_user_env,
     transport_factory: Optional[Callable[[str, str], Transport]] = None,
     health_client: Optional[Callable[[], Dict[str, Any]]] = None,
+    hub_transport_factory: Optional[Callable[[], HubTransport]] = None,
+    migration_path: Path | None = None,
     sleep_fn: Callable[[float], None] = time.sleep,
     clock_fn: Callable[[], float] = time.monotonic,
     backup_runner: Optional[Callable[..., Any]] = None,
@@ -1118,6 +1377,8 @@ def main(
             registry_reader=registry_reader,
             transport_factory=transport_factory,
             health_client=health_client,
+            hub_transport_factory=hub_transport_factory,
+            migration_path=migration_path or stable_migration_path(),
             sleep_fn=sleep_fn,
             clock_fn=clock_fn,
             backup_runner=backup_runner,

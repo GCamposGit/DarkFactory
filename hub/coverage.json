@@ -80,6 +80,12 @@
     "GET /api/demands/tickets": {
       "surface": "demands-drawer"
     },
+    "GET /api/demands/migration": {
+      "machine": "Estado interno do primeiro rollout do volume compartilhado, consultado pelo deploy autônomo (USR-136)."
+    },
+    "POST /api/demands/migration/complete": {
+      "machine": "Selo autenticado do manifesto migrado, acionado pelo deploy autônomo após verificação (USR-136)."
+    },
     "POST /api/demands/tickets/{ticket_id}/line": {
       "machine": "Envio de um ticket existente para a linha autonoma, acionado pelo comando /linha do Telegram e por scripts; sem controle proprio no DarkHub por enquanto (core/line/owner_intake.py)."
     },

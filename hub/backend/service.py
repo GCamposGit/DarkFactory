@@ -4,6 +4,7 @@ Decoupled from Web UI and HTTP frameworks (Reachability standard).
 """
 
 import ipaddress
+import hashlib
 import json
 import logging
 import os
@@ -11,6 +12,7 @@ import re
 import secrets
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 import urllib.error
@@ -322,7 +324,11 @@ class HubService:
         if data_dir is not None:
             self.demands_dir = self.data_dir / "demands"
         else:
-            self.demands_dir = Path(__file__).resolve().parents[2] / ".factory" / "demands"
+            configured_demands = os.environ.get("DARKFAC_DEMANDS_PATH")
+            self.demands_dir = (
+                Path(configured_demands).parent if configured_demands
+                else Path(__file__).resolve().parents[2] / ".factory" / "demands"
+            )
         self.demands_store = DemandsStore(self.demands_dir / "demands.json")
         self.demands_service = DemandsService(
             store=self.demands_store,
@@ -562,8 +568,16 @@ class HubService:
             tickets: list[dict[str, Any]] = []
             titles: dict[str, str] = {}
             warnings: list[str] = []
+            latest_demand_update: datetime | None = None
+            demands_available = True
             try:
                 for ticket in self.demands_service.list_tickets():
+                    changed_at = ticket.updated_at
+                    if changed_at.tzinfo is None:
+                        changed_at = changed_at.replace(tzinfo=timezone.utc)
+                    changed_at = changed_at.astimezone(timezone.utc)
+                    if latest_demand_update is None or changed_at > latest_demand_update:
+                        latest_demand_update = changed_at
                     titles[ticket.id] = ticket.title
                     tickets.append(
                         {
@@ -578,12 +592,30 @@ class HubService:
             except Exception as exc:  # demands are enrichment: never take the live board down
                 logger.warning("Demands unavailable for live line: %s", exc)
                 warnings.append(f"demands indisponíveis ({type(exc).__name__})")
+                demands_available = False
             snapshot = read_line_live(
                 self.control_db_path,
                 database_url=self.control_database_url,
                 titles=titles,
                 tickets=tickets,
             )
+            demands_source = "unavailable" if not demands_available else "local-file"
+            if demands_available and self.demands_store.shared_volume_name:
+                try:
+                    migration_state = self.get_demands_migration_status()["state"]
+                    demands_source = (
+                        "shared-volume" if migration_state == "complete"
+                        else "shared-volume-pending-migration"
+                    )
+                except ValueError:
+                    demands_source = "unavailable"
+                    warnings.append("marcador de migração de demandas inválido")
+            snapshot = snapshot.model_copy(update={
+                "demands_source": demands_source,
+                "demands_latest_at": (
+                    latest_demand_update.isoformat() if latest_demand_update else None
+                ),
+            })
             if warnings:
                 snapshot = snapshot.model_copy(update={"warnings": [*snapshot.warnings, *warnings]})
             self._line_live_cache = (time.monotonic(), snapshot)
@@ -748,6 +780,57 @@ class HubService:
                 logger.warning("Failed auto-dispatching grill notification for %s: %s", saved.id, exc)
 
         return saved
+
+    @property
+    def _demands_migration_marker(self) -> Path:
+        return self.demands_store.path.parent / ".shared_demands_migration.json"
+
+    def get_demands_migration_status(self) -> Dict[str, Any]:
+        """Read the first-rollout completion marker from the mounted ledger volume."""
+        if not self.demands_store.shared_volume_name:
+            return {"state": "not-shared"}
+        versions = self.demands_store.migration_manifest()
+        if versions is None:
+            return {"state": "pending"}
+        canonical = json.dumps(versions, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        return {"state": "complete", "ticket_count": len(versions), "manifest_sha256": hashlib.sha256(canonical).hexdigest()}
+
+    def complete_demands_migration(self, versions: Dict[str, str]) -> Dict[str, Any]:
+        """Mark migration complete only after the shared ledger contains every captured version."""
+        if not self.demands_store.shared_volume_name:
+            raise ValueError("Demand migration requires the shared volume")
+        for ticket_id, stamp in versions.items():
+            if not ticket_id or not isinstance(stamp, str):
+                raise ValueError("Invalid demand migration manifest")
+            try:
+                expected = datetime.fromisoformat(stamp.replace("Z", "+00:00"))
+            except ValueError as exc:
+                raise ValueError("Invalid demand migration timestamp") from exc
+            if expected.tzinfo is None:
+                raise ValueError("Demand migration timestamp must include timezone")
+            current = self.demands_store.get_ticket(ticket_id)
+            if current is None or current.updated_at.astimezone(timezone.utc) < expected.astimezone(timezone.utc):
+                raise ValueError(f"Demand {ticket_id} is missing or stale")
+        canonical = json.dumps(versions, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        payload = {
+            "version": 1, "state": "complete", "ticket_count": len(versions),
+            "manifest_sha256": hashlib.sha256(canonical).hexdigest(),
+            "versions": versions,
+        }
+        marker = self._demands_migration_marker
+        marker.parent.mkdir(parents=True, exist_ok=True)
+        temporary: Optional[Path] = None
+        try:
+            with tempfile.NamedTemporaryFile("w", encoding="utf-8", dir=marker.parent, prefix=".migration-", delete=False) as stream:
+                temporary = Path(stream.name)
+                json.dump(payload, stream)
+                stream.flush()
+                os.fsync(stream.fileno())
+            os.replace(temporary, marker)
+        finally:
+            if temporary is not None:
+                temporary.unlink(missing_ok=True)
+        return {"state": "complete", "ticket_count": payload["ticket_count"], "manifest_sha256": payload["manifest_sha256"]}
 
     def list_demand_tickets(
         self,
@@ -3532,5 +3615,3 @@ class HubService:
 
 # Canonical alias for DarkHubService (HF-13-02)
 DarkHubService = HubService
-
-

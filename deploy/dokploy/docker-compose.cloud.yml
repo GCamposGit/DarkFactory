@@ -24,6 +24,10 @@ services:
       - DARKFAC_ALLOWED_PROJECT_ID=darkfac
       - DATA_DIR=/app/data
       - FACTORY_DIR=/app/.factory
+      - DARKFAC_DEMANDS_PATH=/app/.factory/demands/demands.json
+      - DARKFAC_DEMANDS_SEED_PATH=/app/.factory_seed/demands/demands.json
+      - DARKFAC_DEMANDS_SHARED_VOLUME=darkfac-demands-v1
+      - DARKFAC_DEMANDS_MIGRATION_GATE=required
       - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-}
       - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
@@ -43,6 +47,7 @@ services:
     volumes:
       - darkfac-artifacts:/app/.factory/artifacts
       - darkfac-test-logs:/app/.factory/test_logs
+      - darkfac-demands:/app/.factory/demands
     ports:
       - "127.0.0.1:8001:8001"
     networks:
@@ -116,6 +121,10 @@ services:
       - DARKFAC_MAX_CONCURRENT_SLOTS=${DARKFAC_MAX_CONCURRENT_SLOTS:-1}
       - DATA_DIR=/app/data
       - FACTORY_DIR=/app/.factory
+      - DARKFAC_DEMANDS_PATH=/app/.factory/demands/demands.json
+      - DARKFAC_DEMANDS_SEED_PATH=/app/.factory_seed/demands/demands.json
+      - DARKFAC_DEMANDS_SHARED_VOLUME=darkfac-demands-v1
+      - DARKFAC_DEMANDS_MIGRATION_GATE=required
       - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-}
       - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
       - REMOTE_HARNESS_URLS=${REMOTE_HARNESS_URLS:-http://100.78.181.90:8080,http://100.81.84.124:8080}
@@ -154,6 +163,7 @@ services:
     volumes:
       - darkfac-artifacts:/app/.factory/artifacts
       - darkfac-test-logs:/app/.factory/test_logs
+      - darkfac-demands:/app/.factory/demands
       - darkfac-codex-auth:/home/darkfac/.codex
       - darkfac-workspaces:/workspaces
     networks:
@@ -197,6 +207,10 @@ services:
       - DARKFAC_HF02_DATABASE_URL=${DARKFAC_HF02_DATABASE_URL}
       - DATA_DIR=/app/data
       - FACTORY_DIR=/app/.factory
+      - DARKFAC_DEMANDS_PATH=/app/.factory/demands/demands.json
+      - DARKFAC_DEMANDS_SEED_PATH=/app/.factory_seed/demands/demands.json
+      - DARKFAC_DEMANDS_SHARED_VOLUME=darkfac-demands-v1
+      - DARKFAC_DEMANDS_MIGRATION_GATE=required
       - R2_ENDPOINT_URL=${R2_ENDPOINT_URL:-}
       - R2_ACCESS_KEY_ID=${R2_ACCESS_KEY_ID:-}
       - R2_SECRET_ACCESS_KEY=${R2_SECRET_ACCESS_KEY:-}
@@ -216,6 +230,7 @@ services:
     volumes:
       - darkfac-artifacts:/app/.factory/artifacts
       - darkfac-test-logs:/app/.factory/test_logs
+      - darkfac-demands:/app/.factory/demands
       # Read-only: only to report the size of the run workspaces in the disk alert.
       - darkfac-workspaces:/workspaces:ro
     networks:
@@ -275,6 +290,10 @@ services:
       - DARKFAC_CANARY_MAX_ATTEMPTS_PER_DAY=${DARKFAC_CANARY_MAX_ATTEMPTS_PER_DAY:-4}
       - DATA_DIR=/app/data
       - FACTORY_DIR=/app/.factory
+      - DARKFAC_DEMANDS_PATH=/app/.factory/demands/demands.json
+      - DARKFAC_DEMANDS_SEED_PATH=/app/.factory_seed/demands/demands.json
+      - DARKFAC_DEMANDS_SHARED_VOLUME=darkfac-demands-v1
+      - DARKFAC_DEMANDS_MIGRATION_GATE=required
       # Same notifier env the worker uses (review item 4) -- NotificationService
       # (role="owner") needs these to actually send the failure/weekly alerts.
       - TELEGRAM_OWNER_BOT_TOKEN=${TELEGRAM_OWNER_BOT_TOKEN:-}
@@ -286,6 +305,7 @@ services:
     volumes:
       - darkfac-artifacts:/app/.factory/artifacts
       - darkfac-test-logs:/app/.factory/test_logs
+      - darkfac-demands:/app/.factory/demands
       - darkfac-canary-reports-v2:/app/.factory/reports/canary
     networks:
       - dokploy-network
@@ -341,6 +361,8 @@ services:
           memory: 8M
 
 volumes:
+  darkfac-demands:
+    name: darkfac-demands-v1
   darkfac-artifacts:
     name: darkfac-artifacts
   darkfac-test-logs:

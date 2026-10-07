@@ -52,6 +52,8 @@ models/.locks/
 .factory/logs/
 .factory/services/
 .factory/test_logs/
+.factory/demands/*.lock
+.factory/demands/*.tmp
 .factory/hf15/workspace/
 .factory/reports/canary/
 .factory/reports/hf-15-*/

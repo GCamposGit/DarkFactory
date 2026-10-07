@@ -859,7 +859,14 @@
 
   function renderFoot(view, snap) {
     const src = snap.source || {};
-    const t = 'Fonte: ' + (src.backend || '—') + ' · ' + (src.status || '—') + ' · versão ' + (snap.version != null ? snap.version : '—');
+    const demandSource = snap.demands_source === 'shared-volume' ? 'volume compartilhado'
+      : snap.demands_source === 'shared-volume-pending-migration' ? 'volume compartilhado · migração pendente'
+      : snap.demands_source === 'unavailable' ? 'indisponível' : 'arquivo local';
+    const changed = parseTime(snap.demands_latest_at);
+    const demandAge = isFinite(changed) ? ' · última alteração ' + formatAge(changed) : '';
+    const t = 'Fonte: ' + (src.backend || '—') + ' · ' + (src.status || '—')
+      + ' · backlog: ' + demandSource + demandAge
+      + ' · versão ' + (snap.version != null ? snap.version : '—');
     setText(el.foot, t);
   }
 
