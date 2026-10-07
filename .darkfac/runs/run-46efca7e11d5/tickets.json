@@ -1,0 +1,86 @@
+[
+  {
+    "id": "T1",
+    "title": "Utilitarias de sidebar no gerador de CSS do DarkHub",
+    "goal": "Adicionar ao gerador auto-contido as classes responsivas que faltam para o padrao de menu lateral fixo (offset e transform em lg) e regenerar as duas copias do stylesheet, mantendo o CSS como artefato 100% derivado do script.",
+    "files_hint": [
+      "scripts/generate_hub_styles.py",
+      "hub/frontend/styles.css",
+      "hub/frontend/static/styles.css",
+      "tests/test_frontend_foundation.py",
+      "hub/frontend/index.html"
+    ],
+    "acceptance": [
+      "No bloco @media (min-width: 1024px) da secao 'Responsive Breakpoints' de scripts/generate_hub_styles.py existem as regras lg:translate-x-0, lg:ml-64, lg:pl-64, lg:w-64 e lg:max-w-none",
+      "Rodar `python scripts/generate_hub_styles.py` regenera hub/frontend/styles.css e hub/frontend/static/styles.css com conteudo identico entre si e com as novas classes presentes; rodar o script duas vezes nao produz diff (idempotente)",
+      "A versao de cache do <link rel=\"stylesheet\"> em hub/frontend/index.html e incrementada e o assert de versao em tests/test_frontend_foundation.py (funcao test_stylesheet_link_uses_cache_version_*) e atualizado para a nova versao, incluindo o nome da funcao",
+      "Nenhuma tag <script> de index.html muda de versao neste ticket (test_all_script_tags_share_cache_version_* continua passando)",
+      "`python scripts/line_validate.py` termina com exit code 0"
+    ],
+    "tests_to_add": [
+      "tests/test_transformar_menu_superior_em_m.py::test_sidebar_utilities_present_in_generated_stylesheet - le hub/frontend/styles.css e hub/frontend/static/styles.css e exige as classes escapadas .lg\\:translate-x-0, .lg\\:ml-64, .fixed, .inset-y-0, .w-64, .-translate-x-full, .transition-transform",
+      "tests/test_transformar_menu_superior_em_m.py::test_generated_stylesheet_copies_are_identical - compara o conteudo de hub/frontend/styles.css com hub/frontend/static/styles.css"
+    ],
+    "smoke": [
+      "/",
+      "/static/styles.css"
+    ]
+  },
+  {
+    "id": "T2",
+    "title": "Mover navegacao do header para sidebar vertical esquerda",
+    "goal": "Criar o <aside id=\"hub-sidebar\"> com os links de navegacao em coluna a esquerda, deixar a topbar enxuta (marca/badges, busca Ctrl+K, seletor de projeto, engrenagem e Novo) e aplicar o offset lateral no <main>, sem perder nenhum gatilho existente.",
+    "files_hint": [
+      "hub/frontend/index.html",
+      "tests/test_transformar_menu_superior_em_m.py"
+    ],
+    "acceptance": [
+      "index.html tem um unico <aside id=\"hub-sidebar\"> contendo um <nav> com aria-label descritivo e os itens de navegacao em coluna (Benchmarks & Pareto, Aprendizado, Portfolio, Roadmap, Demandas, Telemetria, Estudio, Testes, Infra, Tarefas, Playground, Prompts), cada um com o mesmo onclick/title/emoji que tinha no header",
+      "O <header> nao contem mais nenhum desses gatilhos de navegacao e mantem marca, badge de cobertura, link /live, seletor #global-project-select, indicadores #ollama-status-badge e #openrouter-status-badge, busca com Ctrl+K, engrenagem de backup e botao Novo",
+      "O <main> recebe a classe de offset lg:ml-64 (sem max-w-7xl mx-auto concorrente) e nenhum id de secao referenciado por scrollIntoView deixa de existir",
+      "Todos os ids/onclicks preservados: um grep por cada nome de funcao usada nos onclicks originais ainda encontra ocorrencia em index.html",
+      "`python scripts/line_validate.py` termina com exit code 0 (incluindo tests/test_hub.py, test_hub_browser.py, test_hub_coverage.py e test_task_dashboard.py)"
+    ],
+    "tests_to_add": [
+      "tests/test_transformar_menu_superior_em_m.py::test_sidebar_aside_exists_with_vertical_nav - parse com lxml.html, exige exatamente um #hub-sidebar contendo um <nav> com aria-label e >= 10 itens de navegacao",
+      "tests/test_transformar_menu_superior_em_m.py::test_header_no_longer_holds_navigation_triggers - exige que os gatilhos de navegacao nao estejam dentro de <header> e que estejam dentro de #hub-sidebar",
+      "tests/test_transformar_menu_superior_em_m.py::test_topbar_keeps_brand_search_and_project_switcher - exige marca DarkHub, #global-project-select, botao de busca com Ctrl+K e botao Novo ainda no header",
+      "tests/test_transformar_menu_superior_em_m.py::test_all_original_nav_handlers_preserved - para cada funcao de drawer/modal da lista original, exige ocorrencia em index.html",
+      "tests/test_transformar_menu_superior_em_m.py::test_main_has_sidebar_offset - exige a classe de offset lateral no <main>",
+      "tests/test_transformar_menu_superior_em_m.py::test_index_served_200 - TestClient(app).get('/') == 200 e corpo contem hub-sidebar"
+    ],
+    "smoke": [
+      "/",
+      "/static/styles.css"
+    ]
+  },
+  {
+    "id": "T3",
+    "title": "Sidebar colapsavel em mobile e destaque do item ativo",
+    "goal": "Implementar em app.js o toggle acessivel da sidebar abaixo de 1024px (hamburguer, overlay, Escape, aria-expanded) e o realce do item correspondente a rota/secao atual com aria-current, sem criar novo arquivo de script.",
+    "files_hint": [
+      "hub/frontend/app.js",
+      "hub/frontend/index.html",
+      "tests/test_transformar_menu_superior_em_m.py"
+    ],
+    "acceptance": [
+      "index.html tem o botao #hub-sidebar-toggle (visivel so abaixo de lg, com aria-controls=\"hub-sidebar\", aria-expanded=\"false\" e aria-label) e o #hub-sidebar-overlay oculto por padrao",
+      "hub/frontend/app.js expoe as funcoes de abrir/fechar/alternar a sidebar, alterna as classes -translate-x-full/translate-x-0 e o aria-expanded, fecha ao clicar no overlay, ao pressionar Escape e ao acionar um item no mobile",
+      "Em viewport >= 1024px a sidebar permanece visivel (classe lg:translate-x-0) independentemente do estado do toggle",
+      "O item de navegacao correspondente a rota atual (location.pathname) ou a secao alvo recebe aria-current=\"page\" e classes de realce; apenas um item ativo por vez",
+      "Nenhuma nova tag <script> e adicionada a index.html e a versao ?v= compartilhada por todos os scripts permanece unica (test_all_script_tags_share_cache_version_* passa)",
+      "`python scripts/line_validate.py` termina com exit code 0"
+    ],
+    "tests_to_add": [
+      "tests/test_transformar_menu_superior_em_m.py::test_sidebar_toggle_button_is_accessible - exige #hub-sidebar-toggle com aria-controls, aria-expanded e aria-label, e a classe que o esconde em lg",
+      "tests/test_transformar_menu_superior_em_m.py::test_sidebar_toggle_logic_present_in_app_js - exige em app.js as referencias a hub-sidebar, hub-sidebar-overlay, aria-expanded, Escape e as classes de transform",
+      "tests/test_transformar_menu_superior_em_m.py::test_active_nav_item_highlight_logic - exige em app.js a aplicacao de aria-current='page' a um unico item e a leitura de location.pathname/data-nav-target",
+      "tests/test_transformar_menu_superior_em_m.py::test_no_new_script_tag_and_single_cache_version - reconta as tags <script> de index.html e exige versao ?v= unica"
+    ],
+    "smoke": [
+      "/",
+      "/live",
+      "/static/styles.css"
+    ]
+  }
+]
