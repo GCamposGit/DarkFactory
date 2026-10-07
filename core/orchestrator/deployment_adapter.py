@@ -29,6 +29,13 @@ from typing import Any, Callable, Dict, List, Optional, Protocol, Union, runtime
 from pydantic import BaseModel, ConfigDict, Field
 
 from core.orchestrator.build_artifacts import ArtifactRef, Claim
+from core.orchestrator.compose_render import (
+    HUB_COMPOSE_PATH,
+    ComposeFetcher,
+    ComposeRenderError,
+    fetch_compose_at_sha,
+    render_darkhub_compose,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -46,13 +53,6 @@ SELF_RESTART_CAUSE_CODE = "deploy_target_forbidden_self_restart"
 _DIGEST_KEYS = ("artifact_digest", "oci_digest", "digest", "sha", "git_sha")
 _FULL_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 _DOKPLOY_COMMIT_RE = re.compile(r"Commit:\s*([0-9a-f]{40})", re.IGNORECASE)
-# `<repo>.git#<sha>` build context, `DARKFAC_GIT_SHA: <sha>` build arg and
-# `DARKFAC_GIT_SHA=<sha>` runtime env of the rendered DarkHub raw compose.
-_COMPOSE_SHA_PINS = (
-    re.compile(r"(\.git#)[0-9a-f]{40}"),
-    re.compile(r"(DARKFAC_GIT_SHA:\s*)[0-9a-f]{40}"),
-    re.compile(r"(DARKFAC_GIT_SHA=)[0-9a-f]{40}"),
-)
 
 
 def forbidden_deploy_ids() -> frozenset[str]:
@@ -195,10 +195,14 @@ class DokployDeploymentAdapter:
         api_url: Optional[str] = None,
         api_key: Optional[str] = None,
         transport: Optional[Callable[[str, str, Optional[Dict[str, Any]], Optional[Dict[str, str]]], Dict[str, Any]]] = None,
+        compose_fetcher: Optional[ComposeFetcher] = None,
     ) -> None:
         self.api_url = api_url or os.getenv("DOKPLOY_API_URL", "")
         self.api_key = api_key or os.getenv("DOKPLOY_API_KEY", "")
         self.transport = transport
+        # (repository, sha, path) -> compose text at that commit; defaults to
+        # `gh api` (compose_render.fetch_compose_at_sha). Injected by tests.
+        self.compose_fetcher = compose_fetcher
         self._lock = threading.Lock()
         self._operations: Dict[str, DeploymentOperation] = {}
         self._target_configs: Dict[str, TargetConfig] = {}
@@ -301,6 +305,34 @@ class DokployDeploymentAdapter:
         created_ats = sorted(str(d.get("createdAt", "")) for d in deployments if d.get("createdAt"))
         return created_ats[-1] if created_ats else ""
 
+    def _render_compose_at_sha(
+        self, params: Dict[str, Any], sha: str
+    ) -> tuple[Optional[str], Optional[str]]:
+        """`(rendered_compose, None)` or `(None, error_code)` for the DarkHub compose at `sha`.
+
+        The repository comes from ``deploy.params.compose_repo`` (``owner/name``;
+        the release stage derives it from the project's ``repo_url``). Never
+        logs or returns compose bodies.
+        """
+        repository = str(params.get("compose_repo") or "").strip()
+        if not repository:
+            return None, "release_identity_compose_repo_missing"
+        path = str(params.get("compose_source_path") or HUB_COMPOSE_PATH).strip()
+        fetch = self.compose_fetcher or (lambda repo, rev, rel: fetch_compose_at_sha(repo, rev, rel))
+        try:
+            source = fetch(repository, sha, path)
+        except Exception as exc:
+            logger.warning(
+                "Dokploy compose source unreadable at %s for %s: %s", sha[:12], repository, type(exc).__name__
+            )
+            return None, "release_identity_compose_unreadable"
+        if not isinstance(source, str) or not source.strip():
+            return None, "release_identity_compose_unreadable"
+        try:
+            return render_darkhub_compose(source, sha), None
+        except ComposeRenderError:
+            return None, "release_identity_compose_contract_invalid"
+
     def _bind_release_identity(
         self, base_url: str, api_key: str, target_config: TargetConfig, sha: str
     ) -> Optional[str]:
@@ -314,10 +346,12 @@ class DokployDeploymentAdapter:
 
         - ``git_sha_env`` (application): name of the env var the app reports as
           its sha; set to ``sha`` through ``application.update``.
-        - ``pin_compose_sha=true`` (raw compose, the DarkHub): the stored compose
-          file's pinned ``.git#<sha>`` / ``DARKFAC_GIT_SHA`` values are rewritten
-          to ``sha`` through ``compose.update`` (same contract as
-          ``scripts/dokploy_redeploy.py``).
+        - ``pin_compose_sha=true`` (raw compose, the DarkHub): the compose file
+          ``deploy/dokploy/docker-compose.hub.yml`` is read AT ``sha`` from
+          GitHub (``deploy.params.compose_repo``, no checkout), rendered with
+          the function shared with ``scripts/dokploy_redeploy.py`` and
+          installed through ``compose.update`` before deploy (USR-144). An
+          unreadable or contract-violating source fails closed.
 
         Returns ``None`` when nothing is configured or the binding is in place,
         otherwise a short error code. Never logs or returns env/compose bodies.
@@ -350,19 +384,20 @@ class DokployDeploymentAdapter:
                     json_body={"applicationId": service_id, "env": "\n".join(replaced)},
                 )
             elif pin_compose and target_config.service_type == "compose":
+                # USR-144: render the compose AT THE MERGED SHA (read from
+                # GitHub, no checkout), not just re-pin the stored one, so a
+                # ticket that edits docker-compose.hub.yml reaches Dokploy.
+                # Done before any Dokploy call: unreadable source -> fail
+                # closed with nothing touched.
+                rendered, render_error = self._render_compose_at_sha(params, sha)
+                if render_error is not None or rendered is None:
+                    return render_error or "release_identity_compose_unreadable"
                 one = self._dokploy_request(
                     base_url, api_key, "GET", "compose.one", query={"composeId": service_id}
                 )
                 if one.get("sourceType") != "raw" or not isinstance(one.get("composeFile"), str):
                     return "release_identity_compose_not_raw"
-                original = one["composeFile"]
-                rendered, total = original, 0
-                for pin in _COMPOSE_SHA_PINS:
-                    rendered, count = pin.subn(lambda m: m.group(1) + sha, rendered)
-                    total += count
-                if total < len(_COMPOSE_SHA_PINS):
-                    return "release_identity_compose_pin_not_found"
-                if rendered != original:
+                if rendered != one["composeFile"]:
                     self._dokploy_request(
                         base_url, api_key, "POST", "compose.update",
                         json_body={

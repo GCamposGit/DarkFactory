@@ -72,6 +72,7 @@ from pydantic import BaseModel, Field
 
 from core.line import workspace as ws_mod
 from core.orchestrator.build_artifacts import ArtifactRef
+from core.orchestrator.compose_render import repository_from_url
 from core.orchestrator.deployment_adapter import (
     DeploymentAdapter,
     DeploymentOperation,
@@ -452,6 +453,14 @@ class ReleaseStageHandler:
         deploy = self.project.deploy
         params = dict(deploy.params) if deploy else {}
         healthcheck = params.get("healthcheck_endpoint") or params.get("health_endpoint")
+        # USR-144: a raw-compose target (pin_compose_sha) renders its compose AT
+        # the merged SHA from GitHub; the repository defaults to the project's own.
+        if str(params.get("pin_compose_sha") or "").strip().lower() in ("1", "true", "yes") and not params.get(
+            "compose_repo"
+        ):
+            derived_repo = repository_from_url(getattr(self.project, "repo_url", None))
+            if derived_repo:
+                params["compose_repo"] = derived_repo
         return TargetConfig(
             project_id=self.project.id,
             target_type=(deploy.type.value if deploy else DeployTargetType.NONE.value),
