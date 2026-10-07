@@ -7,39 +7,54 @@
 
 const taskDashboardState = {
   loading: false,
+  refreshPending: false,
+  lineStatusLoading: false,
+  lineStatusRefreshPending: false,
+  pollTimer: null,
   report: null,
   lastSuccessAt: null,
   error: null,
 };
 
+const TASK_DASHBOARD_POLL_MS = 30000;
+
+function stopTaskDashboardPolling() {
+  if (taskDashboardState.pollTimer !== null) {
+    window.clearTimeout(taskDashboardState.pollTimer);
+    taskDashboardState.pollTimer = null;
+  }
+}
+
+function refreshVisibleTaskDashboard() {
+  if (document.hidden) return;
+  loadTaskDashboard();
+  loadLineStatus();
+  stopTaskDashboardPolling();
+  taskDashboardState.pollTimer = window.setTimeout(() => {
+    taskDashboardState.pollTimer = null;
+    refreshVisibleTaskDashboard();
+  }, TASK_DASHBOARD_POLL_MS);
+}
+
 document.addEventListener("DOMContentLoaded", () => {
   document
     .getElementById("tasks-dashboard-refresh")
-    ?.addEventListener("click", () => {
-      loadTaskDashboard(true);
-      loadLineStatus();
-    });
-  if (!document.hidden) {
-    loadTaskDashboard();
-    loadLineStatus();
-  }
+    ?.addEventListener("click", refreshVisibleTaskDashboard);
+  refreshVisibleTaskDashboard();
   document.addEventListener("visibilitychange", () => {
-    if (!document.hidden) {
-      loadTaskDashboard();
-      loadLineStatus();
-    }
+    if (document.hidden) stopTaskDashboardPolling();
+    else refreshVisibleTaskDashboard();
   });
-  window.setInterval(() => {
-    if (!document.hidden) {
-      loadTaskDashboard();
-      loadLineStatus();
-    }
-  }, 30000);
 });
 
 async function loadLineStatus() {
   const card = document.getElementById("line-status-card");
   if (!card) return;
+  if (taskDashboardState.lineStatusLoading) {
+    taskDashboardState.lineStatusRefreshPending = true;
+    return;
+  }
+  taskDashboardState.lineStatusLoading = true;
   try {
     const request = typeof hubFetch === "function" ? hubFetch : fetch;
     const response = await request("/api/line/status", {
@@ -64,11 +79,19 @@ async function loadLineStatus() {
     }
   } catch (_err) {
     // Gracefully ignore fetch errors
+  } finally {
+    taskDashboardState.lineStatusLoading = false;
+    const refreshPending = taskDashboardState.lineStatusRefreshPending;
+    taskDashboardState.lineStatusRefreshPending = false;
+    if (refreshPending && !document.hidden) loadLineStatus();
   }
 }
 
-async function loadTaskDashboard(force = false) {
-  if (taskDashboardState.loading) return;
+async function loadTaskDashboard() {
+  if (taskDashboardState.loading) {
+    taskDashboardState.refreshPending = true;
+    return;
+  }
   taskDashboardState.loading = true;
   const alert = document.getElementById("tasks-dashboard-alert");
   if (alert && !taskDashboardState.report) alert.textContent = "Atualizando fila operacional…";
@@ -97,9 +120,13 @@ async function loadTaskDashboard(force = false) {
     renderTaskDashboard();
   } catch (error) {
     taskDashboardState.error = error;
+    if (taskDashboardState.report) renderTaskDashboard();
     renderTaskDashboardError(error);
   } finally {
     taskDashboardState.loading = false;
+    const refreshPending = taskDashboardState.refreshPending;
+    taskDashboardState.refreshPending = false;
+    if (refreshPending && !document.hidden) loadTaskDashboard();
   }
 }
 

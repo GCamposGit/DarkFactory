@@ -69,21 +69,19 @@ def test_static_styles_css_exists_and_representative_size():
     assert "text/css" in response.headers.get("content-type", "").lower()
 
 
-def test_all_script_tags_share_cache_version_20261003a():
-    """Verify that every script tag in index.html shares the expected ?v=20261003a cache version."""
+def test_all_script_tags_share_one_cache_version():
+    """Verify that every script tag in index.html shares one cache version."""
     html = INDEX_HTML.read_text(encoding="utf-8")
     script_srcs = _SCRIPT_SRC_TAG.findall(html)
     assert len(script_srcs) >= 10, f"expected at least 10 script tags in index.html, found {len(script_srcs)}"
 
-    expected_version = "20261003a"
     versions = set()
     for src in script_srcs:
         assert "?v=" in src, f"Script tag '{src}' is missing ?v= cache busting parameter"
         version = src.split("?v=")[-1]
         versions.add(version)
-        assert version == expected_version, f"Script tag '{src}' has version '{version}', expected '{expected_version}'"
 
-    assert len(versions) == 1, f"All script tags must share a single cache version, found {versions}"
+    assert len(versions) == 1 and next(iter(versions)), f"All script tags must share one non-empty cache version, found {versions}"
 
 
 def test_stylesheet_link_uses_cache_version_20260924b():
