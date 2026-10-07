@@ -1,0 +1,125 @@
+{
+  "case_id": "E2E-WEBHOOK-COUNTER",
+  "product_id": "webhook-counter",
+  "product_kind": "webhook_service",
+  "title": "Signed webhook receiver with event counter",
+  "visibility": "reserved",
+  "canary": "DFE2E-CANARY-e559c0d2124924ce",
+  "brief": "Build an HTTP webhook receiver. POST /webhook takes a JSON event with an id and a type, signed with an X-Signature header holding the hex HMAC-SHA256 of the compact key-sorted JSON body using the secret test-secret-1. A valid new event returns 202 {accepted: true}; a repeated event id returns 200 {duplicate: true}; a missing or wrong signature returns 401. GET /stats returns {received: N} counting accepted events only.",
+  "spec": "Signature comparison must be constant time. Rejected requests never change the counter and are never stored. Duplicate detection is by event id and survives for the lifetime of the service. Bodies that are not valid JSON objects answer 400 before any signature work is attempted and a body larger than one megabyte answers 413. The counter is exposed as an integer.",
+  "seed_files": {},
+  "journey": [
+    {
+      "id": "accept_new",
+      "kind": "http",
+      "method": "POST",
+      "path": "/webhook",
+      "expect": {
+        "status": 202,
+        "json_subset": {
+          "accepted": true
+        }
+      },
+      "json_body": {
+        "id": "evt-1",
+        "type": "order.created"
+      },
+      "sign": {
+        "header": "X-Signature",
+        "secret": "test-secret-1"
+      }
+    },
+    {
+      "id": "ignore_duplicate",
+      "kind": "http",
+      "method": "POST",
+      "path": "/webhook",
+      "expect": {
+        "status": 200,
+        "json_subset": {
+          "duplicate": true
+        }
+      },
+      "json_body": {
+        "id": "evt-1",
+        "type": "order.created"
+      },
+      "sign": {
+        "header": "X-Signature",
+        "secret": "test-secret-1"
+      }
+    },
+    {
+      "id": "reject_wrong_signature",
+      "kind": "http",
+      "method": "POST",
+      "path": "/webhook",
+      "expect": {
+        "status": 401
+      },
+      "json_body": {
+        "id": "evt-9",
+        "type": "order.created"
+      },
+      "sign": {
+        "header": "X-Signature",
+        "secret": "wrong-secret"
+      }
+    },
+    {
+      "id": "reject_unsigned",
+      "kind": "http",
+      "method": "POST",
+      "path": "/webhook",
+      "expect": {
+        "status": 401
+      },
+      "json_body": {
+        "id": "evt-8",
+        "type": "order.created"
+      }
+    },
+    {
+      "id": "accept_second",
+      "kind": "http",
+      "method": "POST",
+      "path": "/webhook",
+      "expect": {
+        "status": 202,
+        "json_subset": {
+          "accepted": true
+        }
+      },
+      "json_body": {
+        "id": "evt-2",
+        "type": "order.paid"
+      },
+      "sign": {
+        "header": "X-Signature",
+        "secret": "test-secret-1"
+      }
+    },
+    {
+      "id": "stats",
+      "kind": "http",
+      "method": "GET",
+      "path": "/stats",
+      "expect": {
+        "status": 200,
+        "json_subset": {
+          "received": 2
+        }
+      }
+    }
+  ],
+  "recovery": {
+    "fault": "worker_crash",
+    "phase": "build",
+    "description": "The factory worker executing the ticket is killed mid-build; the line must resume from its last checkpoint.",
+    "inject_after_step": null,
+    "max_recovery_seconds": 1800
+  },
+  "time_budget_seconds": 3000,
+  "cost_budget_usd": 4.0,
+  "schema_version": "1"
+}

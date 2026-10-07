@@ -1,0 +1,44 @@
+{
+  "schema_version": "1",
+  "corpus_id": "darkfac-e2e",
+  "corpus_version": "1.0.0",
+  "entries": [
+    {
+      "case_id": "E2E-API-NOTES",
+      "sha256": "285bf1435a6066aacffa061ebfab277d19983cc5c10c988fdd6548efe669a8c4",
+      "visibility": "reserved",
+      "product_kind": "http_api"
+    },
+    {
+      "case_id": "E2E-BATCH-SALES",
+      "sha256": "f39a888d334b024d8fe8099b3db166cc84d9bad646b0fc9d9056dbd01a3749b3",
+      "visibility": "reserved",
+      "product_kind": "batch_job"
+    },
+    {
+      "case_id": "E2E-BOT-EXPENSES",
+      "sha256": "b90c2c343d6e45c9f32f883f0984370acb264ba3e6aa9f0edd80b8488b58c2e9",
+      "visibility": "reserved",
+      "product_kind": "chat_bot"
+    },
+    {
+      "case_id": "E2E-CLI-UNITS",
+      "sha256": "5526a0c51faedabffacfe6dd031f62719e0d0b7ca64ea418cd7451e7a8ab468c",
+      "visibility": "reserved",
+      "product_kind": "cli"
+    },
+    {
+      "case_id": "E2E-SITE-PORTFOLIO",
+      "sha256": "dc9a102a0fe4a3f0282368e1818e87655d5954cd5689327d24c61a744570b7ff",
+      "visibility": "reserved",
+      "product_kind": "static_site"
+    },
+    {
+      "case_id": "E2E-WEBHOOK-COUNTER",
+      "sha256": "03f34b8d197865a4cf4666c157ec563de69f8e2ee2f067a1674ede838d6f5ec7",
+      "visibility": "reserved",
+      "product_kind": "webhook_service"
+    }
+  ],
+  "manifest_sha256": "2584b968e96f3912c8d0f995e4ba207961d09006a112a02ec41086aad092b772"
+}
