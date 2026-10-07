@@ -138,21 +138,44 @@ def test_process_sandbox_timeout_and_tree_kill(temp_workspace: Path) -> None:
 def test_process_sandbox_kills_descendant_after_leader_exits(temp_workspace: Path) -> None:
     """A dead session leader must not prevent its surviving child from being killed."""
     sandbox = ProcessSandbox(working_dir=temp_workspace, default_timeout_seconds=0.5)
-    pid_path = temp_workspace / "grandchild.pid"
     launcher = (
         "import pathlib, subprocess, sys; "
         "child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)']); "
         "pathlib.Path(sys.argv[1]).write_text(str(child.pid), encoding='utf-8')"
     )
 
-    result = sandbox.run_command(
-        [sys.executable, "-c", launcher, str(pid_path)],
-        timeout_seconds=0.5,
-    )
-
-    assert result.timed_out is True
-    grandchild_pid = int(pid_path.read_text(encoding="utf-8"))
-    deadline = time.monotonic() + 2.0
+    # The sandbox timeout is measured from Popen, so under load (1.5 vCPU, xdist)
+    # the launcher can be killed before it writes the pid file; that run is
+    # inconclusive, not a failure.  Escalate the timeout until the launcher
+    # demonstrably ran (pid file present) instead of racing a fixed deadline.
+    grandchild_pid: int | None = None
+    attempts: list[str] = []
+    for attempt, timeout_seconds in enumerate((1.5, 3.0, 6.0, 12.0)):
+        pid_path = temp_workspace / f"grandchild-{attempt}.pid"
+        result = sandbox.run_command(
+            [sys.executable, "-c", launcher, str(pid_path)],
+            timeout_seconds=timeout_seconds,
+        )
+        assert result.timed_out is True
+        poll_deadline = time.monotonic() + 5.0
+        while not pid_path.exists() and time.monotonic() < poll_deadline:
+            time.sleep(0.05)
+        if pid_path.exists():
+            # The writer may have created the file but not flushed the content yet.
+            while time.monotonic() < poll_deadline:
+                content = pid_path.read_text(encoding="utf-8").strip()
+                if content.isdigit():
+                    grandchild_pid = int(content)
+                    break
+                time.sleep(0.05)
+        if grandchild_pid is not None:
+            break
+        attempts.append(f"timeout={timeout_seconds}s duration={result.duration_seconds:.2f}s")
+    if grandchild_pid is None:
+        pytest.fail(
+            "launcher never wrote grandchild pid before sandbox timeout: " + "; ".join(attempts)
+        )
+    deadline = time.monotonic() + 10.0
     while time.monotonic() < deadline:
         stat_path = Path(f"/proc/{grandchild_pid}/stat")
         try:
