@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import io
 import json
+import os
 import queue
 import sqlite3
 import subprocess
@@ -28,6 +29,7 @@ from spikes.runtime_choice.native_adapter import NativeAdapter, NativeAdapterErr
 from spikes.runtime_choice.driver import run_jsonl
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+TERMINAL_EVENT_DEADLINE_SECONDS = 60.0
 
 
 def make_config(tmp_path: Path, effect_base_url: str) -> LabConfig:
@@ -194,27 +196,42 @@ def test_json_config_subprocess_runs_protocol_until_terminal_then_shutdown(tmp_p
             text=True,
             encoding="utf-8",
             bufsize=1,
+            env={**os.environ, "HF02_DRIVER_DIAGNOSTICS": "1"},
         )
         lines: queue.Queue[str] = queue.Queue()
+        stderr_lines: list[str] = []
 
         def read_output() -> None:
             assert process.stdout is not None
             for line in process.stdout:
                 lines.put(line)
 
+        def read_errors() -> None:
+            # Drain stderr continuously so the driver never blocks on a full pipe
+            # and the diagnostics survive a timeout (USR-150).
+            assert process.stderr is not None
+            for line in process.stderr:
+                stderr_lines.append(line.rstrip())
+
         reader = threading.Thread(target=read_output, name="driver-test-reader", daemon=True)
         reader.start()
+        err_reader = threading.Thread(target=read_errors, name="driver-test-stderr", daemon=True)
+        err_reader.start()
         events: list[dict] = []
+        started_at = time.monotonic()
         try:
             assert process.stdin is not None
             process.stdin.write(start.model_dump_json() + "\n")
             process.stdin.flush()
-            deadline = time.monotonic() + 10
+            # Generous deadline: a loaded Windows runner (xdist, repo creation, sqlite)
+            # needs far more than the ~1 s a quiet machine takes; the loop exits as
+            # soon as a terminal event or the driver exit is observed.
+            deadline = started_at + TERMINAL_EVENT_DEADLINE_SECONDS
             while time.monotonic() < deadline:
                 try:
-                    line = lines.get(timeout=min(0.2, deadline - time.monotonic()))
+                    line = lines.get(timeout=min(0.2, max(0.0, deadline - time.monotonic())))
                 except queue.Empty:
-                    if process.poll() is not None:
+                    if process.poll() is not None and lines.empty():
                         break
                     continue
                 events.append(json.loads(line))
@@ -230,7 +247,20 @@ def test_json_config_subprocess_runs_protocol_until_terminal_then_shutdown(tmp_p
             terminal_events = [
                 event for event in events if event["kind"] in {"completed", "error"}
             ]
-            assert terminal_events[-1]["kind"] == "completed"
+            if not terminal_events:
+                err_reader.join(timeout=1)
+                pytest.fail(
+                    "no terminal event from driver subprocess: "
+                    f"elapsed={time.monotonic() - started_at:.2f}s "
+                    f"deadline={TERMINAL_EVENT_DEADLINE_SECONDS}s "
+                    f"returncode={process.poll()} "
+                    f"event_kinds={[event['kind'] for event in events]} "
+                    f"stderr={' | '.join(stderr_lines) or '<empty>'}"
+                )
+            assert terminal_events[-1]["kind"] == "completed", (
+                f"terminal event was not completed: {terminal_events[-1]} "
+                f"stderr={' | '.join(stderr_lines) or '<empty>'}"
+            )
             assert terminal_events[-1]["runtime_status"] == "succeeded"
             assert [
                 event["step_id"] for event in events if event["kind"] == "step_observed"
@@ -241,12 +271,15 @@ def test_json_config_subprocess_runs_protocol_until_terminal_then_shutdown(tmp_p
             process.stdin.write(shutdown.model_dump_json() + "\n")
             process.stdin.flush()
             process.stdin.close()
-            assert process.wait(timeout=10) == 0, process.stderr.read() if process.stderr else ""
+            shutdown_code = process.wait(timeout=30)
+            err_reader.join(timeout=5)
+            assert shutdown_code == 0, " | ".join(stderr_lines)
         finally:
             if process.poll() is None:
                 process.kill()
                 process.wait(timeout=5)
             reader.join(timeout=5)
+            err_reader.join(timeout=5)
             if process.stdin is not None and not process.stdin.closed:
                 process.stdin.close()
             if process.stdout is not None:
@@ -516,3 +549,31 @@ def test_native_adapter_executes_repeatedly_without_transient_store_error(tmp_pa
             assert events[-1].runtime_status is RuntimeStatus.SUCCEEDED
             adapter.shutdown()
 
+
+def test_driver_diagnostics_expose_original_store_exception_when_opted_in(tmp_path: Path) -> None:
+    """USR-111: STORE_UNAVAILABLE must carry the original exception type and message."""
+    native_path = tmp_path / "native"
+    native_path.write_text("occupied", encoding="utf-8")
+    config = make_config(tmp_path, "http://127.0.0.1:18402")
+    config_path = tmp_path / "lab-config.json"
+    config_path.write_text(config.model_dump_json(), encoding="utf-8")
+
+    result = subprocess.run(
+        [sys.executable, "-m", "spikes.runtime_choice.driver", "--config", str(config_path)],
+        cwd=PROJECT_ROOT,
+        input="",
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        timeout=30,
+        check=False,
+        env={**os.environ, "HF02_DRIVER_DIAGNOSTICS": "1"},
+    )
+
+    assert result.returncode == 2
+    lines = result.stderr.strip().splitlines()
+    assert lines[0] == "STORE_UNAVAILABLE"
+    assert lines[1].startswith("[diag] NativeAdapterError(STORE_UNAVAILABLE)")
+    # The original OS exception type is visible, not only the stable code.
+    assert any(name in lines[1] for name in ("FileExistsError", "NotADirectoryError", "OSError"))
+    assert "Traceback" not in result.stderr
