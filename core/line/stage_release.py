@@ -219,6 +219,14 @@ class GitRefReleaseStateStore:
         specs = [f"+{sha}:{ref}" for ref, sha in updates.items()]
         ws_mod._run_git(["push", "origin", *specs], cwd=mirror, repo_url=self.repo_url)
 
+    def _delete_refs(self, mirror: Path, deletions: dict[str, str]) -> None:
+        """Remove obsolete failure counters only if they still point to observed SHAs."""
+        if not deletions:
+            return
+        leases = [f"--force-with-lease={ref}:{sha}" for ref, sha in deletions.items()]
+        specs = [f":{ref}" for ref in deletions]
+        ws_mod._run_git(["push", *leases, "origin", *specs], cwd=mirror, repo_url=self.repo_url)
+
     def load(self, project_id: str) -> ReleaseState:
         refs = self._remote_refs(self._mirror())
         state = ReleaseState(last_good_sha=refs.get(f"{_REF_ROOT}/last-good"))
@@ -239,10 +247,18 @@ class GitRefReleaseStateStore:
         mirror = self._mirror()
         current = self._remote_refs(mirror)
         updates: dict[str, str] = {}
+        deletions: dict[str, str] = {}
         if state.last_good_sha and current.get(f"{_REF_ROOT}/last-good") != state.last_good_sha:
             updates[f"{_REF_ROOT}/last-good"] = state.last_good_sha
         for run_id, run_state in state.runs.items():
             base = f"{_REF_ROOT}/runs/{run_id}"
+            failure_prefix = f"{base}/smoke-fail-"
+            for ref, sha in current.items():
+                if not ref.startswith(failure_prefix):
+                    continue
+                suffix = ref[len(failure_prefix):]
+                if suffix.isdigit() and int(suffix) > run_state.consecutive_smoke_failures:
+                    deletions[ref] = sha
             for n in range(1, run_state.consecutive_smoke_failures + 1):
                 ref = f"{base}/smoke-fail-{n}"
                 if ref not in current and run_state.last_sha:
@@ -251,6 +267,7 @@ class GitRefReleaseStateStore:
             if accepted and current.get(f"{base}/accepted") != accepted:
                 updates[f"{base}/accepted"] = accepted
         self._push(mirror, updates)
+        self._delete_refs(mirror, deletions)
 
 
 def default_state_store(project: ProjectDescriptor) -> "ReleaseStateStore | GitRefReleaseStateStore":
@@ -811,21 +828,13 @@ class ReleaseStageHandler:
         run_state.consecutive_smoke_failures += 1
         run_state.last_sha = merge_sha
         state.runs[run_id] = run_state
-
-        if run_state.consecutive_smoke_failures >= _MAX_CONSECUTIVE_SMOKE_FAILURES:
-            self.state_store.save(self.project.id, state)
-            logger.error(
-                "release %s: smoke failed twice in a row for sha %s; giving up (prod_smoke_failed)",
-                run_id, merge_sha,
-            )
-            return StageResult(
-                outcome="failed",
-                cause_code=f"prod_smoke_failed:\n{smoke_log}",
-            )
+        exhausted = run_state.consecutive_smoke_failures >= _MAX_CONSECUTIVE_SMOKE_FAILURES
 
         if adapter is None or target_config is None or not state.last_good_sha:
             # No deploy target (local-only smoke) or nothing to roll back to.
             self.state_store.save(self.project.id, state)
+            if exhausted:
+                return StageResult(outcome="failed", cause_code=f"prod_smoke_failed:\n{smoke_log}")
             recovered = self._persist_smoke_failure_log(run_id, merge_sha, "smoke_failed_no_rollback_target", smoke_log)
             if not recovered and self.project.repo_url:
                 return StageResult(outcome="failed", cause_code="rollback_context_unavailable")
@@ -858,6 +867,12 @@ class ReleaseStageHandler:
                 outcome="failed",
                 cause_code=f"rollback_smoke_failed:{state.last_good_sha[:12]}\n{restored_log}\n{smoke_log}",
             )
+        if exhausted:
+            logger.error(
+                "release %s: smoke failed twice; restored last good sha %s before stopping",
+                run_id, state.last_good_sha,
+            )
+            return StageResult(outcome="failed", cause_code=f"prod_smoke_failed:\n{smoke_log}")
         rollback_reason = f"prod_smoke_failed_rolled_back_to_{state.last_good_sha[:12]}"
         recovered = self._persist_smoke_failure_log(run_id, merge_sha, rollback_reason, smoke_log)
         if not recovered and self.project.repo_url:

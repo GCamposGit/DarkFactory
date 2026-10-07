@@ -287,15 +287,19 @@ def test_two_consecutive_smoke_failures_give_up(tmp_path: Path) -> None:
     handler.handle(_context("run-1", "https://github.com/acme/acme/pull/1", sha_good))
 
     # bad smoke -> restored smoke ok -> bad smoke again (terminal).
-    handler.smoke_opener = _opener_factory([(500, b"boom"), (200, b"ok"), (500, b"boom")])
+    handler.smoke_opener = _opener_factory([(500, b"boom"), (200, b"ok"), (500, b"boom"), (200, b"ok")])
     sha_bad = "sha_bad_" + "b" * 32
+    sha_bad_fix = "sha_fix_" + "c" * 32
 
     first = handler.handle(_context("run-1", "https://github.com/acme/acme/pull/1", sha_bad))
     assert first.outcome == "retry"
 
-    second = handler.handle(_context("run-1", "https://github.com/acme/acme/pull/1", sha_bad))
+    second = handler.handle(_context("run-1", "https://github.com/acme/acme/pull/1", sha_bad_fix))
     assert second.outcome == "failed"
     assert second.cause_code.startswith("prod_smoke_failed:")
+    assert adapter.rollback_calls[-1] == (sha_bad_fix, sha_good, "post-deploy smoke check failed")
+    assert len(adapter.rollback_calls) == 2
+    assert adapter.installed["acme"] == sha_good
 
 
 # --------------------------------------------------------------------------
@@ -552,6 +556,28 @@ def test_git_ref_state_is_shared_between_hosts(tmp_path: Path, monkeypatch) -> N
     assert desktop.last_good_sha == sha_a
     assert desktop.runs["run-1"].consecutive_smoke_failures == 1
     assert desktop.runs["run-2"].commercial_accepted_sha == sha_b
+
+
+def test_git_ref_failure_count_resets_for_another_worker_after_success(tmp_path: Path, monkeypatch) -> None:
+    origin, (sha_good, sha_failed) = _bare_origin_with_commits(tmp_path, 2)
+    project = ProjectDescriptor(id="acme", name="Acme", repo_url=str(origin), default_branch="main")
+
+    monkeypatch.setenv("DARKFAC_WORKSPACES", str(tmp_path / "first_worker"))
+    first = GitRefReleaseStateStore(project)
+    first.save("acme", ReleaseState(
+        last_good_sha=sha_good,
+        runs={"run-1": ReleaseRunState(last_sha=sha_failed, consecutive_smoke_failures=1)},
+    ))
+    assert first.load("acme").runs["run-1"].consecutive_smoke_failures == 1
+    first.save("acme", ReleaseState(
+        last_good_sha=sha_failed,
+        runs={"run-1": ReleaseRunState(last_sha=sha_failed, consecutive_smoke_failures=0)},
+    ))
+
+    monkeypatch.setenv("DARKFAC_WORKSPACES", str(tmp_path / "second_worker"))
+    second = GitRefReleaseStateStore(project).load("acme")
+    assert second.last_good_sha == sha_failed
+    assert second.runs.get("run-1", ReleaseRunState()).consecutive_smoke_failures == 0
 
 
 # --------------------------------------------------------------------------
