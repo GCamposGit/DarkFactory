@@ -4291,5 +4291,35 @@
     "dependencies": [],
     "created_at": "2026-10-07T10:14:17.702233Z",
     "updated_at": "2026-10-07T10:14:17.702233Z"
+  },
+  {
+    "id": "USR-150",
+    "project_id": "darkfac",
+    "title": "Estabilizar timeout do teste de subprocesso no CI Windows",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "No PR #143, o job Windows 112706304707 falhou em tests/test_runtime_spike_native.py::test_json_config_subprocess_runs_protocol_until_terminal_then_shutdown após 10,46 s: terminal_events ficou vazio e terminal_events[-1] causou IndexError. O teste passou no Notebook; verificar se é prazo insuficiente, corrida ou falha real do driver e preservar diagnóstico do stderr.",
+    "core_journey": [
+      "No PR #143, o job Windows 112706304707 falhou em tests/test_runtime_spike_native.py::test_json_config_subprocess_runs_protocol_until_terminal_then_shutdown após 10,46 s: terminal_events ficou vazio e terminal_events[-1] causou IndexError. O teste passou no Notebook; verificar se é prazo insuficiente, corrida ou falha real do driver e preservar diagnóstico do stderr."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Reproduzir ou instrumentar a condição no Windows com evidência de tempo e stderr",
+      "Garantir resultado determinístico do teste e mensagem diagnóstica quando não houver evento terminal",
+      "Validar no portão oficial do Notebook e no CI Windows"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-07T17:54:35.645358Z",
+    "updated_at": "2026-10-07T17:54:35.645358Z"
   }
 ]
