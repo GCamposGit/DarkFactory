@@ -10,8 +10,17 @@
 const FACTORY_HEALTH_TIMEOUT_MS = 12000;
 const FACTORY_HEALTH_POLL_MS = 60000;
 
+const FACTORY_ALERTS_SUCCESS_MS = 3000;
+const FACTORY_ALERTS_ERROR_MS = 6000;
+
 const factoryAlertsState = {
   loading: false,
+  refreshQueued: false,
+  items: [],
+  selected: new Set(),
+  busy: new Set(),
+  batchBusy: false,
+  statusTimer: null,
 };
 
 function initFactoryAlerts() {
@@ -116,9 +125,18 @@ function ensureAlertsStripMounted() {
   const strip = document.createElement("section");
   strip.id = "factory-alerts-strip";
   strip.className = "hidden space-y-2";
-  strip.setAttribute("aria-live", "polite");
   strip.setAttribute("aria-label", "Alertas não lidos da fábrica");
-  strip.innerHTML = `<div id="factory-alerts-list" class="space-y-2"></div>`;
+  strip.innerHTML = `
+    <div id="factory-alerts-toolbar" class="flex flex-wrap items-center justify-between gap-2 px-1">
+      <label class="flex items-center gap-2 text-[11px] text-slate-400 cursor-pointer">
+        <input type="checkbox" id="factory-alerts-select-all" aria-label="Selecionar todos os alertas" onchange="toggleAllFactoryAlerts(this.checked)" class="rounded border-slate-700 bg-slate-900 text-indigo-600" />
+        <span>Selecionar todos</span>
+        <span id="factory-alerts-selected-count" class="font-mono text-slate-500">0 selecionados</span>
+      </label>
+      <button type="button" id="factory-alerts-ack-selected" disabled onclick="acknowledgeSelectedNotifications()" class="text-[10px] font-mono px-2 py-1 rounded-lg border border-slate-700 bg-slate-900/80 hover:bg-slate-800 text-slate-300 hover:text-white transition active:scale-95 shadow-sm disabled:opacity-40 disabled:cursor-not-allowed disabled:active:scale-100">Reconhecer selecionadas</button>
+    </div>
+    <div id="factory-alerts-status" role="status" aria-live="polite" aria-atomic="true" class="hidden rounded-xl border px-3 py-2 text-xs"></div>
+    <div id="factory-alerts-list" class="space-y-2"></div>`;
 
   if (anchor) {
     anchor.insertAdjacentElement("beforebegin", strip);
@@ -128,7 +146,11 @@ function ensureAlertsStripMounted() {
 }
 
 async function loadFactoryAlerts() {
-  if (factoryAlertsState.loading) return;
+  if (factoryAlertsState.loading) {
+    // A refresh requested mid-flight (e.g. right after an acknowledge) must not be dropped.
+    factoryAlertsState.refreshQueued = true;
+    return;
+  }
   factoryAlertsState.loading = true;
   try {
     const payload = await healthFetchJson("/api/notifications?unread_only=true&limit=20");
@@ -138,24 +160,157 @@ async function loadFactoryAlerts() {
     console.warn("Falha ao carregar alertas da fábrica:", error);
   } finally {
     factoryAlertsState.loading = false;
+    if (factoryAlertsState.refreshQueued) {
+      factoryAlertsState.refreshQueued = false;
+      loadFactoryAlerts();
+    }
   }
 }
 
+/**
+ * Keeps only the selected ids that still exist in the freshly loaded list, so a
+ * poll never leaves a stale (already acknowledged elsewhere) id selected.
+ */
+function healthReconcileSelection(selected, items) {
+  const present = new Set((items || []).map((n) => healthNotificationId(n)).filter(Boolean));
+  const next = new Set();
+  for (const id of selected || []) {
+    if (present.has(id)) next.add(id);
+  }
+  return next;
+}
+
+function healthNotificationId(notification) {
+  const n = notification || {};
+  return String(n.notification_id || n.id || "");
+}
+
+/** Builds the success/partial/failure summary for an acknowledge batch. */
+function healthAckSummary(acknowledgedCount, failedCount) {
+  if (failedCount === 0) {
+    const text = acknowledgedCount === 1 ? "Alerta reconhecido." : `${acknowledgedCount} alertas reconhecidos.`;
+    return { kind: "success", text };
+  }
+  if (acknowledgedCount === 0) {
+    const text = failedCount === 1 ? "Falha ao reconhecer o alerta." : `Falha ao reconhecer ${failedCount} alertas.`;
+    return { kind: "error", text };
+  }
+  return {
+    kind: "error",
+    text: `${acknowledgedCount} reconhecidos; ${failedCount} falharam e continuam selecionados.`,
+  };
+}
+
 function renderFactoryAlerts(items) {
-  const strip = document.getElementById("factory-alerts-strip");
+  factoryAlertsState.items = Array.isArray(items) ? items : [];
+  factoryAlertsState.selected = healthReconcileSelection(factoryAlertsState.selected, factoryAlertsState.items);
+  renderFactoryAlertsList();
+}
+
+function renderFactoryAlertsList() {
   const list = document.getElementById("factory-alerts-list");
-  if (!strip || !list) return;
+  if (!document.getElementById("factory-alerts-strip") || !list) return;
+  const items = factoryAlertsState.items;
 
   if (!items.length) {
-    strip.classList.add("hidden");
     list.innerHTML = "";
-    return;
+  } else {
+    const severityOrder = { critical: 0, warning: 1, info: 2 };
+    const sorted = [...items].sort((a, b) => (severityOrder[a?.severity] ?? 3) - (severityOrder[b?.severity] ?? 3));
+    list.innerHTML = sorted.map(renderFactoryAlertItem).join("");
+  }
+  syncFactoryAlertsUi();
+}
+
+/**
+ * Updates strip visibility, toolbar and checkbox state in place (no list
+ * re-render, so keyboard focus on a checkbox survives a toggle).
+ */
+function syncFactoryAlertsUi() {
+  const strip = document.getElementById("factory-alerts-strip");
+  if (!strip) return;
+  const state = factoryAlertsState;
+  const total = state.items.length;
+  const status = document.getElementById("factory-alerts-status");
+  const statusVisible = !!status && !status.classList.contains("hidden");
+
+  // Stays visible while a status message is on screen so the user sees the
+  // confirmation even after the last alert was acknowledged.
+  strip.classList.toggle("hidden", total === 0 && !statusVisible);
+  const toolbar = document.getElementById("factory-alerts-toolbar");
+  if (toolbar) toolbar.classList.toggle("hidden", total === 0);
+
+  const count = state.selected.size;
+  const countEl = document.getElementById("factory-alerts-selected-count");
+  if (countEl) countEl.textContent = count === 1 ? "1 selecionado" : `${count} selecionados`;
+
+  const batchBtn = document.getElementById("factory-alerts-ack-selected");
+  if (batchBtn) {
+    batchBtn.disabled = count === 0 || state.batchBusy;
+    batchBtn.textContent = state.batchBusy ? "Reconhecendo..." : "Reconhecer selecionadas";
   }
 
-  const severityOrder = { critical: 0, warning: 1, info: 2 };
-  const sorted = [...items].sort((a, b) => (severityOrder[a?.severity] ?? 3) - (severityOrder[b?.severity] ?? 3));
-  list.innerHTML = sorted.map(renderFactoryAlertItem).join("");
-  strip.classList.remove("hidden");
+  const all = document.getElementById("factory-alerts-select-all");
+  if (all) {
+    all.checked = total > 0 && count === total;
+    all.indeterminate = count > 0 && count < total;
+    all.disabled = state.batchBusy;
+  }
+
+  document.querySelectorAll("#factory-alerts-list input[data-alert-select]").forEach((box) => {
+    box.checked = state.selected.has(box.dataset.nid);
+    box.disabled = state.batchBusy || state.busy.has(box.dataset.nid);
+  });
+}
+
+function toggleFactoryAlertSelection(notificationId, checked) {
+  if (!notificationId) return;
+  if (checked) factoryAlertsState.selected.add(notificationId);
+  else factoryAlertsState.selected.delete(notificationId);
+  syncFactoryAlertsUi();
+}
+
+function toggleAllFactoryAlerts(checked) {
+  const state = factoryAlertsState;
+  state.selected = checked
+    ? new Set(state.items.map((n) => healthNotificationId(n)).filter(Boolean))
+    : new Set();
+  syncFactoryAlertsUi();
+}
+
+/**
+ * Shows a transient message in the aria-live status region. Success messages
+ * disappear on their own after 3 seconds; errors stay a bit longer.
+ */
+function showFactoryAlertsStatus(kind, text) {
+  const status = document.getElementById("factory-alerts-status");
+  const state = factoryAlertsState;
+  if (!status) return;
+  if (state.statusTimer) clearTimeout(state.statusTimer);
+
+  const ok = kind === "success";
+  status.className = ok
+    ? "rounded-xl border px-3 py-2 text-xs border-emerald-800/60 bg-emerald-950/40 text-emerald-300"
+    : "rounded-xl border px-3 py-2 text-xs border-rose-800/60 bg-rose-950/40 text-rose-300";
+  const strip = document.getElementById("factory-alerts-strip");
+  if (strip) strip.classList.remove("hidden");
+  status.textContent = text;
+
+  state.statusTimer = setTimeout(() => {
+    state.statusTimer = null;
+    status.textContent = "";
+    status.className = "hidden rounded-xl border px-3 py-2 text-xs";
+    syncFactoryAlertsUi();
+  }, ok ? FACTORY_ALERTS_SUCCESS_MS : FACTORY_ALERTS_ERROR_MS);
+}
+
+/** Drops acknowledged ids from the local list and selection, then re-renders. */
+function applyFactoryAlertsAcknowledged(ids) {
+  const done = new Set(ids || []);
+  const state = factoryAlertsState;
+  state.items = state.items.filter((n) => !done.has(healthNotificationId(n)));
+  for (const id of done) state.selected.delete(id);
+  renderFactoryAlertsList();
 }
 
 function renderFactoryAlertItem(notification) {
@@ -165,10 +320,13 @@ function renderFactoryAlertItem(notification) {
   const channelLabel = channels.length ? channels.join(", ") : (n.provider_id || "");
   const age = healthRelativeAge(n.timestamp) || "sem horário";
   const title = n.title || n.message || "Notificação";
-  const nid = n.notification_id || n.id || "";
+  const nid = healthNotificationId(n);
+  const checked = nid && factoryAlertsState.selected.has(nid) ? "checked" : "";
+  const locked = factoryAlertsState.batchBusy || factoryAlertsState.busy.has(nid);
 
   return `<div class="flex items-start justify-between gap-3 rounded-xl border ${meta.border} ${meta.bg} px-3 py-2.5">
     <div class="flex items-start gap-3 min-w-0 flex-1">
+      ${nid ? `<input type="checkbox" data-alert-select data-nid="${healthEscapeHtml(nid)}" ${checked} ${locked ? "disabled" : ""} aria-label="Selecionar alerta: ${healthEscapeHtml(title)}" onchange="toggleFactoryAlertSelection(this.dataset.nid, this.checked)" class="mt-0.5 shrink-0 rounded border-slate-700 bg-slate-900 text-indigo-600" />` : ""}
       <span class="mt-1 h-2 w-2 shrink-0 rounded-full ${meta.dot}" aria-hidden="true"></span>
       <div class="min-w-0 flex-1">
         <div class="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
@@ -179,7 +337,7 @@ function renderFactoryAlertItem(notification) {
         ${channelLabel ? `<p class="mt-0.5 text-[10px] font-mono text-slate-500">Canal: ${healthEscapeHtml(channelLabel)}</p>` : ""}
       </div>
     </div>
-    ${nid ? `<button type="button" onclick="confirmAcknowledgeNotification('${healthEscapeHtml(nid)}', '${healthEscapeHtml(title)}')" class="shrink-0 text-[10px] font-mono px-2 py-1 rounded-lg border border-slate-700 bg-slate-900/80 hover:bg-slate-800 text-slate-300 hover:text-white transition active:scale-95 shadow-sm">Reconhecer</button>` : ""}
+    ${nid ? `<button type="button" data-nid="${healthEscapeHtml(nid)}" ${locked ? "disabled" : ""} aria-label="Reconhecer alerta: ${healthEscapeHtml(title)}" onclick="acknowledgeNotification(this.dataset.nid)" class="shrink-0 text-[10px] font-mono px-2 py-1 rounded-lg border border-slate-700 bg-slate-900/80 hover:bg-slate-800 text-slate-300 hover:text-white transition active:scale-95 shadow-sm disabled:opacity-40 disabled:cursor-not-allowed">Reconhecer</button>` : ""}
   </div>`;
 }
 

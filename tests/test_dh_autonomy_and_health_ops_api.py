@@ -175,7 +175,7 @@ def test_health_ops_js_served_and_defines_handlers():
     assert file_path.is_file()
     content = file_path.read_text(encoding="utf-8")
 
-    assert "function confirmAcknowledgeNotification(" in content
+    assert "function acknowledgeNotification(" in content
     assert "function openCheckQuotasModal(" in content
     assert "function openN8nSyncModal(" in content
     assert "function openN8nTriggerModal(" in content

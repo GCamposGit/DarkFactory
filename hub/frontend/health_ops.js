@@ -8,7 +8,11 @@
  * 4. POST /api/integrations/n8n/trigger (n8n webhook trigger)
  * 5. POST /api/hf15/rollback/drill (HF-15 isolated hermetic rollback drill)
  *
- * Every action requires a 2-step confirmation modal with preview of impact.
+ * Actions 2-5 require a 2-step confirmation modal with preview of impact.
+ * Action 1 (acknowledge) is low-risk and reversible-by-nature: it runs on a
+ * single click without a confirmation box (USR-61), either per alert or for
+ * every selected alert at once, and reports the outcome in the aria-live
+ * status region of the alerts strip (success messages vanish after 3 s).
  */
 
 const healthOpsState = {
@@ -88,52 +92,90 @@ function closeHealthOpsModal() {
 // 1. Acknowledge Alert (POST /api/notifications/{notification_id}/acknowledge)
 // -----------------------------------------------------------------------------
 
-function confirmAcknowledgeNotification(notificationId, title) {
-  ensureHealthOpsModalMounted();
-  const modal = document.getElementById("health-ops-modal");
-  const titleEl = document.getElementById("health-ops-modal-title");
-  const bodyEl = document.getElementById("health-ops-modal-body");
-  const confirmBtn = document.getElementById("health-ops-modal-confirm-btn");
-  if (!modal || !titleEl || !bodyEl || !confirmBtn) return;
+/**
+ * Acknowledges one notification. Resolves only when the backend confirmed it:
+ * the endpoint answers HTTP 200 with {acknowledged: false} for an unknown id,
+ * which must count as a failure, not a success.
+ */
+async function healthOpsAckOne(notificationId) {
+  const res = await healthOpsAuthenticatedFetch(`/api/notifications/${encodeURIComponent(notificationId)}/acknowledge`, {
+    method: "POST",
+    headers: { Accept: "application/json" },
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  let data = null;
+  try {
+    data = await res.json();
+  } catch (_) {}
+  if (data && data.acknowledged === false) throw new Error("alerta não encontrado");
+  return data;
+}
 
-  titleEl.innerHTML = `<span>🔔</span><span>Reconhecer Alerta Operacional</span>`;
-  bodyEl.innerHTML = `
-    <div class="space-y-2">
-      <p class="text-slate-300">
-        Você está prestes a marcar este alerta como reconhecido pelo Owner:
-      </p>
-      <div class="p-3 rounded-xl bg-slate-950 border border-slate-800 space-y-1">
-        <div class="font-semibold text-slate-200">${healthOpsEscapeHtml(title)}</div>
-        <div class="font-mono text-[10px] text-slate-500">ID: ${healthOpsEscapeHtml(notificationId)}</div>
-      </div>
-      <p class="text-[11px] text-slate-400">
-        Impacto: O alerta deixará de ser exibido na faixa de avisos pendentes e o evento será registrado na trilha de governança.
-      </p>
-    </div>`;
-
-  confirmBtn.className = "px-4 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-medium transition shadow-md";
-  confirmBtn.textContent = "Confirmar Reconhecimento";
-  confirmBtn.onclick = async () => {
-    confirmBtn.disabled = true;
-    confirmBtn.textContent = "Processando...";
+/**
+ * Acknowledges every id sequentially via `ackOne` (injectable for tests) and
+ * never aborts on the first failure: returns which ids succeeded and which
+ * failed so the caller can keep only the failed ones selected.
+ */
+async function healthOpsAckMany(ids, ackOne = healthOpsAckOne) {
+  const acknowledged = [];
+  const failed = [];
+  for (const id of ids) {
     try {
-      const res = await healthOpsAuthenticatedFetch(`/api/notifications/${encodeURIComponent(notificationId)}/acknowledge`, {
-        method: "POST",
-        headers: { Accept: "application/json" },
-      });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      closeHealthOpsModal();
-      if (typeof loadFactoryAlerts === "function") {
-        loadFactoryAlerts();
-      }
-    } catch (err) {
-      alert(`Falha ao reconhecer alerta: ${err.message}`);
-    } finally {
-      confirmBtn.disabled = false;
+      await ackOne(id);
+      acknowledged.push(id);
+    } catch (_) {
+      failed.push(id);
     }
-  };
+  }
+  return { acknowledged, failed };
+}
 
-  modal.classList.remove("hidden");
+function healthOpsAfterAck(acknowledged, failed) {
+  if (typeof applyFactoryAlertsAcknowledged === "function") applyFactoryAlertsAcknowledged(acknowledged);
+  if (typeof showFactoryAlertsStatus === "function" && typeof healthAckSummary === "function") {
+    const summary = healthAckSummary(acknowledged.length, failed.length);
+    showFactoryAlertsStatus(summary.kind, summary.text);
+  }
+  if (typeof loadFactoryAlerts === "function") loadFactoryAlerts();
+}
+
+/** Single click, no confirmation box: acknowledges one alert (USR-61). */
+async function acknowledgeNotification(notificationId) {
+  if (!notificationId) return;
+  const state = typeof factoryAlertsState !== "undefined" ? factoryAlertsState : null;
+  if (state && (state.batchBusy || state.busy.has(notificationId))) return;
+  if (state) {
+    state.busy.add(notificationId);
+    if (typeof syncFactoryAlertsUi === "function") syncFactoryAlertsUi();
+  }
+  try {
+    const { acknowledged, failed } = await healthOpsAckMany([notificationId]);
+    healthOpsAfterAck(acknowledged, failed);
+  } finally {
+    if (state) {
+      state.busy.delete(notificationId);
+      if (typeof syncFactoryAlertsUi === "function") syncFactoryAlertsUi();
+    }
+  }
+}
+
+/**
+ * Acknowledges all selected alerts with one click. Acknowledged ones leave
+ * the list and the selection; failed ones stay listed and selected.
+ */
+async function acknowledgeSelectedNotifications() {
+  const state = typeof factoryAlertsState !== "undefined" ? factoryAlertsState : null;
+  if (!state || state.batchBusy || state.selected.size === 0) return;
+  const ids = [...state.selected];
+  state.batchBusy = true;
+  if (typeof syncFactoryAlertsUi === "function") syncFactoryAlertsUi();
+  try {
+    const { acknowledged, failed } = await healthOpsAckMany(ids);
+    healthOpsAfterAck(acknowledged, failed);
+  } finally {
+    state.batchBusy = false;
+    if (typeof renderFactoryAlertsList === "function") renderFactoryAlertsList();
+  }
 }
 
 // -----------------------------------------------------------------------------
