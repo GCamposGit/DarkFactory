@@ -4261,5 +4261,35 @@
     "dependencies": [],
     "created_at": "2026-10-06T21:38:54.371899Z",
     "updated_at": "2026-10-06T21:38:54.371899Z"
+  },
+  {
+    "id": "USR-149",
+    "project_id": "darkfac",
+    "title": "Teste instavel no Linux: test_executor_contract test_process_sandbox_kills_descendants (grandchild.pid ausente)",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "Em 07/10 a validacao em checkout limpo do run-6594bec531c2 (USR-62 tentativa 7) falhou so por tests/test_executor_contract.py:154: [Errno 2] No such file or directory: .../sandbox_ws/grandchild.pid, rodando no container Linux do worker (VPS, 1.5 vCPU, xdist 2 workers). O mesmo teste passou nas iteracoes de development do mesmo run; no Windows e pulado (exige /proc). Indica corrida de tempo: o teste le o pid do neto antes de o processo filho escreve-lo sob carga. Evidencia: origin/df/run-6594bec531c2:.darkfac/runs/run-6594bec531c2/validation.json.",
+    "core_journey": [
+      "Em 07/10 a validacao em checkout limpo do run-6594bec531c2 (USR-62 tentativa 7) falhou so por tests/test_executor_contract.py:154: [Errno 2] No such file or directory: .../sandbox_ws/grandchild.pid, rodando no container Linux do worker (VPS, 1.5 vCPU, xdist 2 workers). O mesmo teste passou nas iteracoes de development do mesmo run; no Windows e pulado (exige /proc). Indica corrida de tempo: o teste le o pid do neto antes de o processo filho escreve-lo sob carga. Evidencia: origin/df/run-6594bec531c2:.darkfac/runs/run-6594bec531c2/validation.json."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "O teste espera de forma deterministica (poll com timeout generoso) o arquivo grandchild.pid antes de ler",
+      "Passa 20 vezes seguidas sob carga no Linux sem falhar",
+      "Nao altera core/harness"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-07T10:14:17.702233Z",
+    "updated_at": "2026-10-07T10:14:17.702233Z"
   }
 ]
