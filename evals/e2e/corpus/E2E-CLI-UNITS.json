@@ -1,0 +1,125 @@
+{
+  "case_id": "E2E-CLI-UNITS",
+  "product_id": "unitconv",
+  "product_kind": "cli",
+  "title": "Unit conversion command line tool",
+  "visibility": "reserved",
+  "canary": "DFE2E-CANARY-32454f39904d0beb",
+  "brief": "Build a command line tool. `convert <value> <from> <to>` prints only the converted number rounded to two decimals on stdout and exits 0. Supported units: km, mi, kg, lb, c, f. `list` prints the supported units one per line in alphabetical order. An unknown unit exits 2 with 'unknown unit' on stderr and nothing on stdout; a non-numeric value exits 2 with 'invalid number' on stderr.",
+  "spec": "Conversions are only valid inside a dimension: length (km, mi), mass (kg, lb) and temperature (c, f). Asking to convert across dimensions is an error treated like an unknown unit. Negative values are allowed. Output uses a dot as decimal separator regardless of locale and a single trailing newline. The tool must not require network access or any package that is not part of a standard installation.",
+  "seed_files": {},
+  "journey": [
+    {
+      "id": "km_to_mi",
+      "kind": "cli",
+      "args": [
+        "convert",
+        "10",
+        "km",
+        "mi"
+      ],
+      "stdin": "",
+      "expect": {
+        "exit_code": 0,
+        "regex": [
+          "^6\\.21$"
+        ]
+      }
+    },
+    {
+      "id": "c_to_f",
+      "kind": "cli",
+      "args": [
+        "convert",
+        "100",
+        "c",
+        "f"
+      ],
+      "stdin": "",
+      "expect": {
+        "exit_code": 0,
+        "regex": [
+          "^212\\.00$"
+        ]
+      }
+    },
+    {
+      "id": "kg_to_lb",
+      "kind": "cli",
+      "args": [
+        "convert",
+        "5",
+        "kg",
+        "lb"
+      ],
+      "stdin": "",
+      "expect": {
+        "exit_code": 0,
+        "regex": [
+          "^11\\.02$"
+        ]
+      }
+    },
+    {
+      "id": "list_units",
+      "kind": "cli",
+      "args": [
+        "list"
+      ],
+      "stdin": "",
+      "expect": {
+        "exit_code": 0,
+        "regex": [
+          "^c\\nf\\nkg\\nkm\\nlb\\nmi\\n?$"
+        ]
+      }
+    },
+    {
+      "id": "unknown_unit",
+      "kind": "cli",
+      "args": [
+        "convert",
+        "1",
+        "parsec",
+        "km"
+      ],
+      "stdin": "",
+      "expect": {
+        "exit_code": 2,
+        "error_contains": [
+          "unknown unit"
+        ],
+        "not_contains": [
+          "parsec"
+        ]
+      }
+    },
+    {
+      "id": "bad_number",
+      "kind": "cli",
+      "args": [
+        "convert",
+        "abc",
+        "km",
+        "mi"
+      ],
+      "stdin": "",
+      "expect": {
+        "exit_code": 2,
+        "error_contains": [
+          "invalid number"
+        ]
+      }
+    }
+  ],
+  "recovery": {
+    "fault": "dependency_unavailable",
+    "phase": "build",
+    "description": "The package registry is unreachable for the whole build; the product must ship without installing anything new.",
+    "inject_after_step": null,
+    "max_recovery_seconds": 900
+  },
+  "time_budget_seconds": 2400,
+  "cost_budget_usd": 3.0,
+  "schema_version": "1"
+}

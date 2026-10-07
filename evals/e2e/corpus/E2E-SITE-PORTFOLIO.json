@@ -1,0 +1,103 @@
+{
+  "case_id": "E2E-SITE-PORTFOLIO",
+  "product_id": "photo-portfolio",
+  "product_kind": "static_site",
+  "title": "Static portfolio site for a photographer",
+  "visibility": "reserved",
+  "canary": "DFE2E-CANARY-aabf5f7127c70c46",
+  "brief": "Build a static website over HTTP for the photographer Ana Souza, based in Lisbon. Pages: home (/), /about.html, /contact.html (shows the email hello@anasouza.example as a mailto link) and a custom /404.html returned with status 404 for unknown paths. Serve /robots.txt allowing all crawlers. Every page links to the home, about and contact pages.",
+  "spec": "The home page has a single top-level heading with the photographer's name and a viewport meta tag so it renders on phones. The about page title starts with About and mentions the city. The not-found page says the page was not found and links back to the home page. All internal links are root relative and none of them is broken. No page loads scripts or styles from third-party hosts.",
+  "seed_files": {},
+  "journey": [
+    {
+      "id": "home",
+      "kind": "http",
+      "method": "GET",
+      "path": "/",
+      "expect": {
+        "status": 200,
+        "regex": [
+          "<h1[^>]*>[^<]*Ana Souza",
+          "<meta[^>]+name=\"viewport\""
+        ]
+      }
+    },
+    {
+      "id": "home_nav",
+      "kind": "http",
+      "method": "GET",
+      "path": "/",
+      "expect": {
+        "status": 200,
+        "regex": [
+          "href=\"/about\\.html\"",
+          "href=\"/contact\\.html\""
+        ]
+      }
+    },
+    {
+      "id": "about",
+      "kind": "http",
+      "method": "GET",
+      "path": "/about.html",
+      "expect": {
+        "status": 200,
+        "contains": [
+          "Lisbon"
+        ],
+        "regex": [
+          "<title>\\s*About"
+        ]
+      }
+    },
+    {
+      "id": "contact",
+      "kind": "http",
+      "method": "GET",
+      "path": "/contact.html",
+      "expect": {
+        "status": 200,
+        "regex": [
+          "<a[^>]+href=\"mailto:hello@anasouza\\.example\""
+        ]
+      }
+    },
+    {
+      "id": "not_found",
+      "kind": "http",
+      "method": "GET",
+      "path": "/nope.html",
+      "expect": {
+        "status": 404,
+        "contains": [
+          "Page not found"
+        ],
+        "regex": [
+          "href=\"/\""
+        ]
+      }
+    },
+    {
+      "id": "robots",
+      "kind": "http",
+      "method": "GET",
+      "path": "/robots.txt",
+      "expect": {
+        "status": 200,
+        "regex": [
+          "^User-agent: \\*$"
+        ]
+      }
+    }
+  ],
+  "recovery": {
+    "fault": "merge_conflict",
+    "phase": "build",
+    "description": "Another branch lands a conflicting edit to the shared page layout while the build is in progress.",
+    "inject_after_step": null,
+    "max_recovery_seconds": 1200
+  },
+  "time_budget_seconds": 2400,
+  "cost_budget_usd": 3.0,
+  "schema_version": "1"
+}

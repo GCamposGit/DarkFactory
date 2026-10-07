@@ -1,0 +1,122 @@
+{
+  "case_id": "E2E-BOT-EXPENSES",
+  "product_id": "expense-bot",
+  "product_kind": "chat_bot",
+  "title": "Chat bot that tracks personal expenses",
+  "visibility": "reserved",
+  "canary": "DFE2E-CANARY-715f9dab696b32a4",
+  "brief": "Build a chat bot that tracks expenses per user. `/add <amount> <category>` replies 'Added 12.50 to food' (two decimals). `/total` replies 'Total: 19.50' and `/total <category>` replies 'food: 12.50'. `/undo` removes the last expense and replies 'Removed 7.00 transport'. An unknown command replies 'Unknown command'; a bad amount replies 'Invalid amount'. Each user only sees their own expenses.",
+  "spec": "Amounts are positive decimals with at most two decimal places and are stored without floating point drift. Categories are lower-cased single words. The total of a user with no expenses is 0.00. Undo applies to the most recent expense of the same user only and replies with an error text when there is nothing to undo. State is kept per user identifier supplied by the chat platform adapter.",
+  "seed_files": {},
+  "journey": [
+    {
+      "id": "add_food",
+      "kind": "chat",
+      "message": "/add 12.50 food",
+      "user": "user1",
+      "expect": {
+        "contains": [
+          "Added 12.50 to food"
+        ]
+      }
+    },
+    {
+      "id": "add_transport",
+      "kind": "chat",
+      "message": "/add 7 transport",
+      "user": "user1",
+      "expect": {
+        "contains": [
+          "Added 7.00 to transport"
+        ]
+      }
+    },
+    {
+      "id": "total_all",
+      "kind": "chat",
+      "message": "/total",
+      "user": "user1",
+      "expect": {
+        "contains": [
+          "Total: 19.50"
+        ]
+      }
+    },
+    {
+      "id": "total_food",
+      "kind": "chat",
+      "message": "/total food",
+      "user": "user1",
+      "expect": {
+        "contains": [
+          "food: 12.50"
+        ]
+      }
+    },
+    {
+      "id": "undo_last",
+      "kind": "chat",
+      "message": "/undo",
+      "user": "user1",
+      "expect": {
+        "contains": [
+          "Removed 7.00 transport"
+        ]
+      }
+    },
+    {
+      "id": "total_after_undo",
+      "kind": "chat",
+      "message": "/total",
+      "user": "user1",
+      "expect": {
+        "contains": [
+          "Total: 12.50"
+        ]
+      }
+    },
+    {
+      "id": "other_user_isolated",
+      "kind": "chat",
+      "message": "/total",
+      "user": "user2",
+      "expect": {
+        "contains": [
+          "Total: 0.00"
+        ]
+      }
+    },
+    {
+      "id": "bad_amount",
+      "kind": "chat",
+      "message": "/add abc food",
+      "user": "user1",
+      "expect": {
+        "contains": [
+          "Invalid amount"
+        ]
+      }
+    },
+    {
+      "id": "unknown_command",
+      "kind": "chat",
+      "message": "/bogus",
+      "user": "user1",
+      "expect": {
+        "contains": [
+          "Unknown command"
+        ]
+      }
+    }
+  ],
+  "recovery": {
+    "fault": "provider_outage",
+    "phase": "build",
+    "description": "The primary model provider returns errors for a window during the build; the line must fall back or resume.",
+    "inject_after_step": null,
+    "max_recovery_seconds": 1800
+  },
+  "time_budget_seconds": 3000,
+  "cost_budget_usd": 4.0,
+  "schema_version": "1"
+}

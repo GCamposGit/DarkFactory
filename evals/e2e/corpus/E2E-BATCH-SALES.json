@@ -1,0 +1,100 @@
+{
+  "case_id": "E2E-BATCH-SALES",
+  "product_id": "sales-summary",
+  "product_kind": "batch_job",
+  "title": "Batch job that summarizes sales by region",
+  "visibility": "reserved",
+  "canary": "DFE2E-CANARY-1a5e068ec6a4e3e3",
+  "brief": "Build a batch command line job. `--input <csv> --output <csv>` reads a sales file with the columns region,sku,units,price and writes a summary file with the header region,revenue and one row per region (units times price, summed, two decimals) sorted by revenue descending. It prints '<n> regions' and exits 0. A missing input exits 1 with 'not found' on stderr. `--min-revenue <n>` drops regions below n. The working directory contains sales.csv.",
+  "spec": "The job is idempotent: running it again overwrites the output completely, even if a previous run left a partial or truncated output file behind. Rows are written to a temporary file and moved into place so a crash never leaves a half-written summary. Ties in revenue are ordered by region name. Blank lines in the input are ignored and a malformed row stops the job with a non-zero exit code.",
+  "seed_files": {
+    "sales.csv": "region,sku,units,price\nnorth,A1,2,10.00\nsouth,B2,1,5.50\nnorth,B2,3,5.50\neast,A1,1,10.00\nsouth,A1,4,10.00\n"
+  },
+  "journey": [
+    {
+      "id": "first_run",
+      "kind": "cli",
+      "args": [
+        "--input",
+        "sales.csv",
+        "--output",
+        "summary.csv"
+      ],
+      "stdin": "",
+      "expect": {
+        "exit_code": 0,
+        "contains": [
+          "3 regions"
+        ]
+      }
+    },
+    {
+      "id": "summary_content",
+      "kind": "cli",
+      "args": [
+        "--input",
+        "sales.csv",
+        "--output",
+        "summary.csv"
+      ],
+      "stdin": "",
+      "expect": {
+        "exit_code": 0,
+        "regex": [
+          "^region,revenue\\nsouth,45\\.50\\nnorth,36\\.50\\neast,10\\.00\\n?$"
+        ]
+      },
+      "read_file": "summary.csv"
+    },
+    {
+      "id": "missing_input",
+      "kind": "cli",
+      "args": [
+        "--input",
+        "missing.csv",
+        "--output",
+        "out.csv"
+      ],
+      "stdin": "",
+      "expect": {
+        "exit_code": 1,
+        "error_contains": [
+          "not found"
+        ]
+      }
+    },
+    {
+      "id": "min_revenue",
+      "kind": "cli",
+      "args": [
+        "--input",
+        "sales.csv",
+        "--output",
+        "summary.csv",
+        "--min-revenue",
+        "20"
+      ],
+      "stdin": "",
+      "expect": {
+        "exit_code": 0,
+        "regex": [
+          "^region,revenue\\nsouth,45\\.50\\nnorth,36\\.50\\n?$"
+        ],
+        "not_contains": [
+          "east"
+        ]
+      },
+      "read_file": "summary.csv"
+    }
+  ],
+  "recovery": {
+    "fault": "corrupted_state",
+    "phase": "runtime",
+    "description": "The summary output file is truncated by the harness after the first run, as a crashed earlier run would leave it.",
+    "inject_after_step": "first_run",
+    "max_recovery_seconds": 300
+  },
+  "time_budget_seconds": 2400,
+  "cost_budget_usd": 3.0,
+  "schema_version": "1"
+}

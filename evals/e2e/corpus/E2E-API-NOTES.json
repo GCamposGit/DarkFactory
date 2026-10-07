@@ -1,0 +1,103 @@
+{
+  "case_id": "E2E-API-NOTES",
+  "product_id": "notes-api",
+  "product_kind": "http_api",
+  "title": "Notes HTTP JSON API with persistence",
+  "visibility": "reserved",
+  "canary": "DFE2E-CANARY-bfd9722e5c97565d",
+  "brief": "Build a small HTTP JSON API for personal notes. POST /notes with {title, body} creates a note and returns 201 with the stored note including an integer id (ids are sequential starting at 1). GET /notes/{id} returns the note or 404. GET /notes?q=term lists notes whose title contains the term (case-insensitive). DELETE /notes/{id} returns 204. Notes must survive a restart of the service.",
+  "spec": "The service stores notes durably so that a process restart loses nothing. Titles are required and non-empty; bodies may be empty. The list endpoint returns a JSON array ordered by id ascending and filters on a case-insensitive substring of the title only, never the body. A deleted note answers 404 on every later read and never reappears in listings. Ids are never reused after a delete within the lifetime of the data. Error responses are JSON objects with an error field.",
+  "seed_files": {},
+  "journey": [
+    {
+      "id": "create_first",
+      "kind": "http",
+      "method": "POST",
+      "path": "/notes",
+      "expect": {
+        "status": 201,
+        "json_subset": {
+          "id": 1,
+          "title": "Groceries"
+        }
+      },
+      "json_body": {
+        "title": "Groceries",
+        "body": "milk and eggs"
+      }
+    },
+    {
+      "id": "read_first",
+      "kind": "http",
+      "method": "GET",
+      "path": "/notes/1",
+      "expect": {
+        "status": 200,
+        "json_subset": {
+          "id": 1,
+          "body": "milk and eggs"
+        }
+      }
+    },
+    {
+      "id": "create_second",
+      "kind": "http",
+      "method": "POST",
+      "path": "/notes",
+      "expect": {
+        "status": 201,
+        "json_subset": {
+          "id": 2,
+          "title": "Roadmap"
+        }
+      },
+      "json_body": {
+        "title": "Roadmap",
+        "body": "ship v1 in autumn"
+      }
+    },
+    {
+      "id": "search_title",
+      "kind": "http",
+      "method": "GET",
+      "path": "/notes?q=road",
+      "expect": {
+        "status": 200,
+        "contains": [
+          "Roadmap"
+        ],
+        "not_contains": [
+          "Groceries"
+        ]
+      }
+    },
+    {
+      "id": "delete_first",
+      "kind": "http",
+      "method": "DELETE",
+      "path": "/notes/1",
+      "expect": {
+        "status": 204
+      }
+    },
+    {
+      "id": "read_deleted",
+      "kind": "http",
+      "method": "GET",
+      "path": "/notes/1",
+      "expect": {
+        "status": 404
+      }
+    }
+  ],
+  "recovery": {
+    "fault": "process_crash",
+    "phase": "runtime",
+    "description": "The service process is killed and restarted from its persisted state right after the second note is created.",
+    "inject_after_step": "create_second",
+    "max_recovery_seconds": 120
+  },
+  "time_budget_seconds": 3600,
+  "cost_budget_usd": 6.0,
+  "schema_version": "1"
+}
