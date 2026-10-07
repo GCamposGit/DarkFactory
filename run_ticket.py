@@ -47,6 +47,7 @@ from core.line.agent_cli import (
     supports,
 )
 from core.line.diagnostics import redacted_head
+from core.line.local_progress import ENV_RUN_ID, ProgressPublisher, open_progress
 from core.line.operating_harness import detect_operating_harness
 from core.line.routing import _HARNESS_TO_PROVIDER, _default_quota_headroom, load_routing_config, pick
 from core.usage.history import history_path, read_history
@@ -404,12 +405,40 @@ def resume_delivery(
     no_push: bool = False,
     as_json: bool = False,
     return_result: bool = False,
+    progress: Optional[ProgressPublisher] = None,
 ) -> Any:
     """Execute the rebase, validation gate, and Git autonomy delivery phase for a ticket (USR-116).
 
     Runs in a fresh process with fresh module imports from disk.
     Preserves worktree and outputs exact diagnosis if any phase fails.
+
+    Phase progress (USR-140) goes to the live line board: through ``progress`` when the caller passes
+    its own publisher, otherwise through one opened here (joining the parent run when the launcher
+    exported ``DARKFAC_LOCAL_RUN_ID``). A publisher opened here for a standalone resume closes its run.
     """
+    holder: list[ProgressPublisher] = [progress] if progress is not None else []
+    code = 1
+    try:
+        result = _resume_delivery(
+            ticket_id, worktree_path, skip_validation, no_commit, no_push, as_json, return_result, holder
+        )
+        code = int(result.get("exit_code", 1)) if isinstance(result, dict) else int(result)
+        return result
+    finally:
+        if progress is None and holder:
+            holder[0].finish(code == 0, "" if code == 0 else f"entrega terminou com codigo {code}")
+
+
+def _resume_delivery(
+    ticket_id: str,
+    worktree_path: Optional[Path | str],
+    skip_validation: bool,
+    no_commit: bool,
+    no_push: bool,
+    as_json: bool,
+    return_result: bool,
+    holder: list[ProgressPublisher],
+) -> Any:
     from core.git.autonomy import GitAutonomyManager
     from core.git.ticket_workspace import find_ticket_worktree
 
@@ -451,6 +480,15 @@ def resume_delivery(
 
         warn_if_unanswered(session_probe_path, logger)
 
+    if holder:
+        progress = holder[0]
+    else:
+        progress = open_progress(ticket.id, ticket.project_id, ticket.title)
+        holder.append(progress)
+    git_mgr.on_phase = lambda phase, status, message, cause: progress.phase(  # type: ignore[arg-type]
+        phase, status, message, cause=cause
+    )
+
     current_branch = git_mgr._current_branch(target_worktree)
     resume_cmd = (
         f"python C:\\dev\\DarkFac\\run_ticket.py --resume-delivery {ticket.id} "
@@ -463,6 +501,7 @@ def resume_delivery(
         print(f"    Branch: {current_branch}")
 
     # 1. Commit uncommitted changes in worktree if any (required before rebase)
+    progress.phase("gate", "running", "sincronizando com origin/main antes do portao")
     if not no_commit and git_mgr.is_dirty(cwd=target_worktree):
         if not as_json:
             print("[+] Comitando alterações pendentes antes do rebase...")
@@ -496,6 +535,12 @@ def resume_delivery(
         print(f"  {resume_cmd}", file=sys.stderr)
         print("=" * 68 + "\n", file=sys.stderr)
 
+        progress.phase(
+            "gate",
+            "failed",
+            f"conflito no rebase em origin/main: {', '.join(conflict_files[:5]) or msg}",
+            cause="rebase_conflict",
+        )
         conflict_payload = {
             "exit_code": 2,
             "ok": False,
@@ -514,7 +559,10 @@ def resume_delivery(
     current_sha = git_mgr.get_current_sha(target_worktree)
 
     # 3. Official Validation Gate
-    if not skip_validation:
+    if skip_validation:
+        progress.phase("gate", "skipped", "validacao pulada (--skip-validation)")
+    else:
+        progress.phase("gate", "running", "portao oficial (core/harness/runner.py --quick)")
         if not as_json:
             print("\n--> Executando portão oficial da fábrica (python core/harness/runner.py --quick)...")
         gate_res = subprocess.run(
@@ -529,6 +577,13 @@ def resume_delivery(
             print(f"[ERRO NO PORTÃO OFICIAL]:\n{gate_res.stdout}\n{gate_res.stderr}", file=sys.stderr)
             print(f"[i] Worktree preservada para diagnóstico: {target_worktree}", file=sys.stderr)
             print(f"[i] Comando para retomar entrega após correção:\n  {resume_cmd}", file=sys.stderr)
+            progress.phase(
+                "gate",
+                "failed",
+                f"portao oficial falhou (codigo {gate_res.returncode}): "
+                f"{redacted_head((gate_res.stdout or gate_res.stderr or '')[-600:], 300)}",
+                cause="gate_failed",
+            )
             gate_payload = {
                 "exit_code": gate_res.returncode,
                 "ok": False,
@@ -543,6 +598,7 @@ def resume_delivery(
                 print(json.dumps(gate_payload, indent=2, ensure_ascii=False))
             return gate_payload if return_result else gate_res.returncode
 
+        progress.phase("gate", "succeeded", "portao oficial aprovado")
         if not as_json:
             print("[+] Portão oficial aprovado com sucesso: [HARNESS_PASS]!")
 
@@ -571,6 +627,7 @@ def resume_delivery(
         print(f"  {resume_cmd}", file=sys.stderr)
         print("=" * 68 + "\n", file=sys.stderr)
 
+        progress.set_outcome(error_msg, "delivery_failed")
         fail_payload = {
             "exit_code": 1,
             "ok": False,
@@ -587,6 +644,9 @@ def resume_delivery(
         return fail_payload if return_result else 1
 
     if delivered:
+        progress.phase(
+            "deploy", "skipped", "deploy pos-merge nao faz parte do run_ticket (scripts/dokploy_redeploy.py)"
+        )
         try:
             git_mgr.sweep_stale(cwd=PROJECT_ROOT)
         except Exception as exc:
@@ -616,7 +676,30 @@ def resume_delivery(
     return success_payload if return_result else 0
 
 
+def _describe_workspace(workspace: TicketWorkspace) -> str:
+    """One-line description for the live board; progress text must never raise into the launcher."""
+    try:
+        return f"{workspace.path.name} ({workspace.branch}@{workspace.base_sha[:12]})"
+    except Exception:  # noqa: BLE001
+        return "worktree criada"
+
+
 def main(argv: Optional[list[str]] = None) -> int:
+    """Run the launcher and report its phases to the live line board (USR-140, best-effort)."""
+    box: list[ProgressPublisher] = []
+    code = 1
+    try:
+        code = _main(argv, box)
+        return code
+    finally:
+        if box:
+            box[0].release()
+            if code != 0:
+                box[0].set_outcome(f"run_ticket terminou com codigo {code}", f"exit_{code}", only_if_unset=True)
+            box[0].finish(code == 0)
+
+
+def _main(argv: Optional[list[str]], box: list[ProgressPublisher]) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
 
@@ -693,6 +776,13 @@ def main(argv: Optional[list[str]] = None) -> int:
             print("\nNenhum ticket especificado. Use: python run_ticket.py <TICKET_ID> ou python run_ticket.py --create --title '...'")
         return 0
 
+    # Live line board (USR-140): best-effort phase events. Held until the run is known not to be a dry
+    # run; a publishing failure can never block or change the outcome of this launcher.
+    progress = open_progress(ticket.id, ticket.project_id, ticket.title)
+    progress.hold()
+    box.append(progress)
+    progress.phase("preflight", "running", "cota, tamanho do ticket e roteamento")
+
     # 1b. Ticket size and quota risk estimation (USR-113)
     ticket_size, size_reasons = estimate_ticket_size(ticket)
     if ticket_size == "large" and not args.json:
@@ -729,6 +819,9 @@ def main(argv: Optional[list[str]] = None) -> int:
                 f"Para forçar mesmo assim, forneça --force ou inclua autorização explícita no prompt.\n",
                 file=sys.stderr,
             )
+            progress.phase(
+                "preflight", "failed", f"harness {target_harness} recusado: {quota_reason}", cause="quota_critical"
+            )
             # Find recommended healthy harness
             rec_route = pick("development", caps, mode=DEVELOPMENT_MODE)
             if rec_route:
@@ -748,6 +841,7 @@ def main(argv: Optional[list[str]] = None) -> int:
             print(f"[+] Harness de operacao detectado: {operating_harness}")
         route = pick("development", caps, mode=DEVELOPMENT_MODE, operating_harness=operating_harness)
         if route is None:
+            progress.phase("preflight", "failed", "nenhuma rota disponivel (cotas <= 15%)", cause="no_route")
             print(
                 "\n[ERRO] Nenhuma rota disponível: todas as contas de assinatura estão <= 15% e OpenRouter sem saldo confirmado.",
                 file=sys.stderr,
@@ -765,6 +859,7 @@ def main(argv: Optional[list[str]] = None) -> int:
             )
 
     if args.dry_run:
+        progress.discard()
         result_payload = {
             "ticket_id": ticket.id,
             "title": ticket.title,
@@ -787,17 +882,29 @@ def main(argv: Optional[list[str]] = None) -> int:
             )
         return 0
 
+    progress.phase(
+        "preflight",
+        "succeeded",
+        f"rota {selected_harness} (modelo {selected_model or 'default'}, motivo {route_reason})",
+        harness=selected_harness,
+    )
+    progress.release()
+
     # 3. Own worktree (USR-69): the agent, the gate and the commit never touch the shared checkout
     from core.git.ticket_workspace import WorkspaceError
 
+    progress.phase("workspace", "running", "criando worktree propria a partir de origin/main")
     try:
         workspace = _prepare_workspace(args, ticket)
     except SharedCheckoutDirty as exc:
+        progress.phase("workspace", "failed", "checkout compartilhado sujo", cause="shared_checkout_dirty")
         print(f"[ERRO] {exc}", file=sys.stderr)
         return 3
     except WorkspaceError as exc:
+        progress.phase("workspace", "failed", str(exc), cause="workspace_error")
         print(f"[ERRO] Não foi possível criar a worktree do ticket {ticket.id}: {exc}", file=sys.stderr)
         return 1
+    progress.phase("workspace", "succeeded", _describe_workspace(workspace))
     if not args.json:
         print(
             f"[+] Worktree própria: {workspace.path} "
@@ -852,8 +959,11 @@ def main(argv: Optional[list[str]] = None) -> int:
         )
 
     def _report_progress(message: str) -> None:
+        progress.phase("agent", "running", message)
         if not args.json:
             print(f"[!] {message}", file=sys.stderr)
+
+    progress.phase("agent", "running", f"desenvolvimento via {selected_harness}", harness=selected_harness)
 
     # Same failure policy as the production line (core.line.agent_retry): transient failures repeat with
     # backoff, then the harness is excluded and the next healthy one is tried. An explicit --harness is
@@ -873,6 +983,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     )
     if not report.ok or report.result is None:
         failure = format_agent_failure(report)
+        progress.phase("agent", "failed", failure, cause="agent_failed")
         print(failure, file=sys.stderr)
         quotas_after = inspect_quotas()
         after_headroom = quotas_after.get(selected_harness, {}).get("headroom")
@@ -924,6 +1035,10 @@ def main(argv: Optional[list[str]] = None) -> int:
             "o ticket NAO foi marcado como concluido."
         )
         agent_tail = redact_secrets(agent_result.text).strip()[-1500:]
+        progress.phase(
+            "agent", "failed", "o agente terminou sem alterar nenhum arquivo de implementacao",
+            cause="agent_no_changes", harness=selected_harness,
+        )
         print(reason, file=sys.stderr)
         print(f"[i] Saida final do agente: {agent_tail or '(vazia)'}", file=sys.stderr)
         _report_workspace_fate(workspace, args.json)
@@ -938,6 +1053,9 @@ def main(argv: Optional[list[str]] = None) -> int:
         return 4
 
     agent_summary = redacted_head(agent_result.text, 800)
+    progress.phase(
+        "agent", "succeeded", f"{len(implementation_paths)} arquivo(s) alterado(s)", harness=selected_harness
+    )
     if not args.json:
         print(f"[+] Desenvolvimento concluído pelo {selected_harness.upper()}.")
         print(f"[i] Resumo do agente: {agent_summary or '(vazio)'}")
@@ -970,6 +1088,10 @@ def main(argv: Optional[list[str]] = None) -> int:
         if args.no_push:
             delivery_cmd.append("--no-push")
 
+        delivery_kwargs: dict[str, Any] = {}
+        if progress.enabled:
+            # The delivery subprocess joins this run: same run id, so the board shows one run.
+            delivery_kwargs["env"] = {**os.environ, ENV_RUN_ID: progress.run_id}
         delivery_proc = subprocess.run(
             delivery_cmd,
             cwd=str(PROJECT_ROOT),
@@ -977,6 +1099,7 @@ def main(argv: Optional[list[str]] = None) -> int:
             text=True,
             encoding="utf-8",
             errors="replace",
+            **delivery_kwargs,
         )
         exit_code = delivery_proc.returncode
         if not args.json and delivery_proc.stderr:
@@ -995,11 +1118,15 @@ def main(argv: Optional[list[str]] = None) -> int:
             no_push=args.no_push,
             as_json=args.json,
             return_result=True,
+            progress=progress,
         )
         exit_code = res.get("exit_code", 0) if isinstance(res, dict) else int(res)
         completion_info = res if isinstance(res, dict) else {"ok": exit_code == 0}
 
     delivered = exit_code == 0 and completion_info.get("ok", False)
+    if not delivered:
+        failure_text = completion_info.get("error") or completion_info.get("cause") or f"codigo {exit_code}"
+        progress.set_outcome(f"entrega falhou: {failure_text}", str(completion_info.get("cause") or "delivery_failed"))
 
     if args.json:
         payload = {
