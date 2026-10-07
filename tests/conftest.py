@@ -383,6 +383,37 @@ def _isolate_ambient_worker_config_env(monkeypatch: pytest.MonkeyPatch, tmp_path
     monkeypatch.setenv("DARKFAC_ONPREM_BACKUP_DIR", str(tmp_path / "onprem_backup_mirror"))
 
 
+@pytest.fixture(autouse=True)
+def _never_sweep_the_real_checkout(monkeypatch: pytest.MonkeyPatch) -> None:
+    """`GitAutonomyManager.sweep_stale` must never run against the checkout that holds the tests.
+
+    `run_ticket.resume_delivery` ends with `sweep_stale(cwd=PROJECT_ROOT)`. A test that drives
+    `run_ticket.main` through a successful agent run reaches it in-process and would sweep the REAL
+    repository: `git fetch --prune`, `gh pr list` per branch and, for every merged ticket/*, df/* or
+    .claude/worktrees entry, `git worktree remove` with retries that sleep (via `time.sleep`, which the
+    routing tests record). On a developer desktop there is nothing stale to remove so the test passes;
+    inside the cloud worker container, leftover merged worktrees made the removal retry and
+    `test_an_auto_routed_ticket_falls_back_to_the_next_healthy_harness` failed on `sleeps == []`.
+    Sweeping a disposable repository (explicit tmp repo in the sweep tests) is unaffected, and a test
+    that stubs `sweep_stale` itself overrides this guard.
+    """
+
+    from core.git.autonomy import GitAutonomyManager, SweepReport
+
+    real_sweep = GitAutonomyManager.sweep_stale
+    suite_root: list[Path] = []
+
+    def guarded(self: Any, base: str = "main", gh_runner: Any = None, cwd: Path | None = None) -> Any:
+        target = Path(cwd or self.root).resolve()
+        if not suite_root:
+            suite_root.append(GitAutonomyManager(IMPORT_ROOT)._main_root(IMPORT_ROOT)[0].resolve())
+        if self._main_root(target)[0].resolve() == suite_root[0]:
+            return SweepReport()
+        return real_sweep(self, base, gh_runner, cwd)
+
+    monkeypatch.setattr(GitAutonomyManager, "sweep_stale", guarded)
+
+
 @pytest.fixture
 def stereo_wav(tmp_path: Path) -> Path:
     """Generate a tiny deterministic stereo fixture without shipping binary data."""

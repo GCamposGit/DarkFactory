@@ -14,6 +14,7 @@ from __future__ import annotations
 import json
 import subprocess
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, Optional
 from unittest.mock import MagicMock
 
@@ -21,7 +22,7 @@ import pytest
 
 import run_ticket
 from core.line import agent_retry, routing
-from core.git.autonomy import GitAutonomyManager, TicketCompletionReport
+from core.git.autonomy import GitAutonomyManager, SweepReport, TicketCompletionReport
 from core.demands.store import DemandsStore
 from core.roadmap.models import DeliveryStatus
 from core.git.ticket_workspace import TicketWorkspace
@@ -63,8 +64,18 @@ def env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> dict[str, Any]:
     monkeypatch.setattr(run_ticket, "DemandsStore", _Store)
     monkeypatch.setattr(run_ticket, "inspect_quotas", lambda: _quotas())
     monkeypatch.setattr(routing, "default_cooldown_path", lambda: tmp_path / "cooldowns.json")
+    # The retry backoff is recorded on the launcher's OWN `time` reference. Patching `time.sleep` on the
+    # shared module would also record sleeps made by anything else in the process (stale-worktree cleanup
+    # retries, leaked daemon threads) and made `sleeps == [...]` depend on the host.
     sleeps: list[float] = []
-    monkeypatch.setattr(run_ticket.time, "sleep", sleeps.append)
+    monkeypatch.setattr(run_ticket, "time", SimpleNamespace(sleep=sleeps.append))
+    # A successful agent run continues into the delivery phase (`resume_delivery`), which rebases the
+    # worktree on origin/main, sweeps stale ticket worktrees of the real checkout and first probes the MCP
+    # servers listed in the user's real ~/.claude.json. None of that is under test here, and all of it
+    # depends on the host (the cloud worker container has leftover worktrees and different MCP config).
+    monkeypatch.setattr(run_ticket, "check_optional_mcp_servers", lambda *a, **k: (True, []))
+    monkeypatch.setattr(run_ticket, "rebase_on_origin_main", lambda cwd: (True, [], "already up to date"))
+    monkeypatch.setattr(GitAutonomyManager, "sweep_stale", lambda self, *a, **k: SweepReport())
     agent = MagicMock(name="run_agent")
     monkeypatch.setattr(run_ticket, "run_agent", agent)
     # USR-69: the agent runs in the ticket's own worktree. Creating a real one would touch this
