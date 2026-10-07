@@ -175,8 +175,14 @@ def test_stale_refinement_cannot_revert_worker_status(tmp_path: Path) -> None:
     assert current.status == DeliveryStatus.IMPLEMENTING
 
 
-def test_equal_timestamp_cannot_replace_a_different_ticket(tmp_path: Path) -> None:
-    store = DemandsStore(tmp_path / "demands.json")
+def test_equal_timestamp_cannot_replace_a_different_ticket(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path = tmp_path / "demands.json"
+    monkeypatch.setenv("DARKFAC_DEMANDS_PATH", str(path))
+    monkeypatch.setenv("DARKFAC_DEMANDS_SHARED_VOLUME", "darkfac-demands-v1")
+    monkeypatch.setattr(Path, "is_mount", lambda self: True)
+    store = DemandsStore(path)
     original = UserTicket(id="USR-01", project_id="darkfac", title="original")
     store.save_ticket(original)
     with pytest.raises(ValueError, match="Stale demand ticket"):

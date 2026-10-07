@@ -295,10 +295,15 @@ class DemandsStore:
                     raise ValueError(f"Stale demand ticket {ticket.id}: reload before saving")
                 incoming_time = self._updated_at(ticket_dump)
                 current_time = self._updated_at(raw)
-                if incoming_time < current_time or (incoming_time == current_time and ticket_dump != raw):
+                # The shared ledger must reject an unversioned conflicting write.
+                # Legacy per-worktree ledgers still permit same-timestamp edits;
+                # their callers do not yet supply a CAS token. Shared-volume
+                # callers must use a newer version or pass expected_updated_at.
+                if self.shared_volume_name and (
+                    incoming_time < current_time
+                    or (incoming_time == current_time and ticket_dump != raw)
+                ):
                     raise ValueError(f"Stale demand ticket {ticket.id}: reload before saving")
-                if _STATUS_PROGRESS[ticket.status] < _STATUS_PROGRESS[current.status]:
-                    raise ValueError(f"Stale demand status for {ticket.id}: reload before saving")
                 raw_items[i] = ticket_dump
                 updated = True
                 break
