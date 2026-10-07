@@ -6,7 +6,7 @@ import json
 import logging
 import os
 import tempfile
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from hashlib import sha256
 from pathlib import Path
 from threading import RLock, get_ident
@@ -19,6 +19,15 @@ from core.roadmap.models import DeliveryStatus, utc_now
 logger = logging.getLogger(__name__)
 
 DEFAULT_DEMANDS_PATH = Path(".factory/demands/demands.json")
+_STATUS_PROGRESS = {
+    DeliveryStatus.DISCOVERED: 0,
+    DeliveryStatus.ACCEPTED: 1,
+    DeliveryStatus.PLANNED: 2,
+    DeliveryStatus.IMPLEMENTING: 3,
+    DeliveryStatus.VALIDATING: 4,
+    DeliveryStatus.COMPLETED: 5,
+    DeliveryStatus.CANCELLED: 5,
+}
 
 
 class DemandsStore:
@@ -44,6 +53,10 @@ class DemandsStore:
         self.shared_volume_name = (
             os.environ.get("DARKFAC_DEMANDS_SHARED_VOLUME") if use_environment_seed else None
         )
+        self.migration_gate_required = (
+            os.environ.get("DARKFAC_DEMANDS_MIGRATION_GATE") == "required"
+            and bool(self.shared_volume_name)
+        )
         if self.shared_volume_name and not self.path.parent.is_mount():
             raise RuntimeError(
                 f"Demand volume {self.shared_volume_name} is not mounted at {self.path.parent}"
@@ -58,6 +71,50 @@ class DemandsStore:
             self._write_lock_path = Path(tempfile.gettempdir()) / "darkfac-demand-locks" / f"{lock_id}.lock"
         self._lock = RLock()
         self._ensure_storage()
+
+    def _assert_migration_ready(self) -> None:
+        """Cloud line cannot consume the seed before the Hub imports its old ledger."""
+        if not self.migration_gate_required:
+            return
+        try:
+            manifest = self.migration_manifest()
+        except ValueError as exc:
+            raise RuntimeError("Shared demand migration is pending") from exc
+        if manifest is None:
+            raise RuntimeError("Shared demand migration is pending")
+
+    def migration_manifest(self) -> dict[str, str] | None:
+        """Read and verify the durable first-rollout receipt against the live ledger."""
+        marker = self.path.parent / ".shared_demands_migration.json"
+        if not marker.exists():
+            return None
+        try:
+            payload = json.loads(marker.read_text(encoding="utf-8"))
+            versions = payload.get("versions") if isinstance(payload, dict) else None
+            if (
+                not isinstance(payload, dict) or payload.get("version") != 1
+                or payload.get("state") != "complete" or not isinstance(versions, dict)
+                or not versions or payload.get("ticket_count") != len(versions)
+                or any(not isinstance(k, str) or not k or not isinstance(v, str) for k, v in versions.items())
+            ):
+                raise ValueError("Invalid demand migration marker")
+            canonical = json.dumps(versions, sort_keys=True, separators=(",", ":")).encode("utf-8")
+            if sha256(canonical).hexdigest() != payload.get("manifest_sha256"):
+                raise ValueError("Demand migration marker hash mismatch")
+            rows = self._read_raw(strict=True)
+            by_id = {row.get("id"): row for row in rows if isinstance(row, dict)}
+            if len(by_id) != len(rows):
+                raise ValueError("Demand ledger has duplicate or invalid rows")
+            for ticket_id, stamp in versions.items():
+                expected = datetime.fromisoformat(stamp.replace("Z", "+00:00"))
+                if expected.tzinfo is None:
+                    raise ValueError("Demand migration timestamp lacks timezone")
+                row = by_id.get(ticket_id)
+                if row is None or self._updated_at(row) < expected.astimezone(timezone.utc):
+                    raise ValueError(f"Migrated demand {ticket_id} is missing or stale")
+            return versions
+        except (OSError, TypeError, ValueError) as exc:
+            raise ValueError("Demand migration marker or ledger is invalid") from exc
 
     def _ensure_storage(self) -> None:
         with self._lock, _file_lock(self._write_lock_path):
@@ -117,14 +174,29 @@ class DemandsStore:
                 positions[ticket_id] = len(merged)
                 merged.append(row)
                 changed = True
-            elif cls._updated_at(row) > cls._updated_at(merged[positions[ticket_id]]):
-                merged[positions[ticket_id]] = row
+                continue
+            # A committed seed can advance delivery status, but cannot replace
+            # runtime edits or regress a ticket because of clock skew.
+            current_row = merged[positions[ticket_id]]
+            current = UserTicket.model_validate(current_row)
+            incoming = UserTicket.model_validate(row)
+            if _STATUS_PROGRESS[incoming.status] > _STATUS_PROGRESS[current.status]:
+                if incoming.status == DeliveryStatus.COMPLETED and not (incoming.delivery_evidence or "").strip():
+                    raise ValueError(f"Completed seed demand {ticket_id} has no delivery evidence")
+                advanced = dict(current_row)
+                advanced["status"] = incoming.status.value
+                advanced["delivery_evidence"] = incoming.delivery_evidence or current.delivery_evidence
+                later = max(cls._updated_at(current_row), cls._updated_at(row)) + timedelta(microseconds=1)
+                advanced["updated_at"] = later.isoformat().replace("+00:00", "Z")
+                merged[positions[ticket_id]] = advanced
                 changed = True
         return merged if changed else None
 
     def _read_raw(self, *, strict: bool = False) -> list[dict[str, Any]]:
         with self._lock:
             if not self.path.exists():
+                if strict:
+                    raise ValueError(f"Demand ledger is missing: {self.path}")
                 return []
             try:
                 content = self.path.read_text(encoding="utf-8").strip()
@@ -164,18 +236,25 @@ class DemandsStore:
         project_id: str | None = None,
         status: DeliveryStatus | None = None,
     ) -> list[UserTicket]:
+        self._assert_migration_ready()
         with self._lock:
-            raw_items = self._read_raw(strict=self.seed_path is not None)
+            raw_items = self._read_raw(strict=True)
             tickets: list[UserTicket] = []
+            seen_ids: set[str] = set()
             for raw in raw_items:
                 try:
                     ticket = UserTicket.model_validate(raw)
+                    if ticket.id in seen_ids:
+                        raise ValueError(f"Duplicate demand ticket ID: {ticket.id}")
+                    seen_ids.add(ticket.id)
                     if project_id and ticket.project_id != project_id:
                         continue
                     if status and ticket.status != status:
                         continue
                     tickets.append(ticket)
                 except Exception as exc:
+                    if self.seed_path is not None or self.shared_volume_name:
+                        raise ValueError(f"Invalid demand row in {self.path}") from exc
                     logger.warning(f"Skipping corrupted demand row in {self.path}: {exc}")
             return sorted(tickets, key=lambda t: t.id)
 
@@ -187,11 +266,16 @@ class DemandsStore:
                     return ticket
             return None
 
-    def save_ticket(self, ticket: UserTicket) -> UserTicket:
+    def save_ticket(
+        self, ticket: UserTicket, *, expected_updated_at: datetime | None = None,
+    ) -> UserTicket:
+        self._assert_migration_ready()
         with self._lock, _file_lock(self._write_lock_path):
-            return self._save_ticket_locked(ticket)
+            return self._save_ticket_locked(ticket, expected_updated_at=expected_updated_at)
 
-    def _save_ticket_locked(self, ticket: UserTicket) -> UserTicket:
+    def _save_ticket_locked(
+        self, ticket: UserTicket, *, expected_updated_at: datetime | None = None,
+    ) -> UserTicket:
         """Persist one ticket while the cross-process ledger lock is held."""
         if ticket.status == DeliveryStatus.COMPLETED and not (ticket.delivery_evidence or "").strip():
             raise ValueError(f"Completed ticket {ticket.id} requires delivery_evidence")
@@ -206,6 +290,15 @@ class DemandsStore:
         ticket_dump = json.loads(ticket.model_dump_json())
         for i, raw in enumerate(raw_items):
             if raw.get("id") == ticket.id:
+                current = UserTicket.model_validate(raw)
+                if expected_updated_at is not None and current.updated_at != expected_updated_at:
+                    raise ValueError(f"Stale demand ticket {ticket.id}: reload before saving")
+                incoming_time = self._updated_at(ticket_dump)
+                current_time = self._updated_at(raw)
+                if incoming_time < current_time or (incoming_time == current_time and ticket_dump != raw):
+                    raise ValueError(f"Stale demand ticket {ticket.id}: reload before saving")
+                if _STATUS_PROGRESS[ticket.status] < _STATUS_PROGRESS[current.status]:
+                    raise ValueError(f"Stale demand status for {ticket.id}: reload before saving")
                 raw_items[i] = ticket_dump
                 updated = True
                 break
@@ -215,6 +308,7 @@ class DemandsStore:
         return ticket
 
     def next_ticket_id(self, project_id: str = "darkfac") -> str:
+        self._assert_migration_ready()
         with self._lock:
             from core.projects.registry import get_project_registry
 
@@ -228,6 +322,7 @@ class DemandsStore:
         notes: str | None = None,
         delivery_evidence: str | None = None,
     ) -> UserTicket:
+        self._assert_migration_ready()
         with self._lock, _file_lock(self._write_lock_path):
             ticket = next(
                 (UserTicket.model_validate(raw) for raw in self._read_raw(strict=True)
@@ -236,7 +331,7 @@ class DemandsStore:
             )
             if not ticket:
                 raise KeyError(f"Ticket '{ticket_id}' not found")
-            now = utc_now()
+            now = max(utc_now(), self._updated_at(json.loads(ticket.model_dump_json())) + timedelta(microseconds=1))
             updates: dict[str, Any] = {
                 "status": status,
                 "updated_at": now,

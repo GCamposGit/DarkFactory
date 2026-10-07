@@ -232,7 +232,7 @@ class LineLiveSnapshot(_Model):
     generated_at: str
     version: str
     source: LiveSource
-    demands_source: Literal["shared-volume", "local-file", "unavailable"] = "local-file"
+    demands_source: Literal["shared-volume", "shared-volume-pending-migration", "local-file", "unavailable"] = "local-file"
     demands_latest_at: str | None = None
     warnings: list[str] = Field(default_factory=list)
     stage_order: list[str] = Field(default_factory=list)

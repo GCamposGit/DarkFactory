@@ -18,13 +18,27 @@ ledger or missing seed fails startup instead of displaying an empty backlog.
 Writes use the same lock and an atomic replacement, so requests from DarkHub
 and the worker cannot discard one another's distinct tickets.
 
-Before the first rollout, the deployment agent compares the current live Hub
-ticket IDs and statuses with `origin/main` and keeps a snapshot of any newer
-runtime rows. It must resolve any difference before replacing the old Hub
-container because its pre-migration ledger was inside the container image.
-After rollout, verify that a ticket created through DarkHub appears to the
-worker and that its status change appears back in DarkHub. The backup daemon
-includes this volume in its `.factory` snapshot and restore drill.
+On the first rollout, `scripts/dokploy_redeploy.py` reads the old Hub's entire
+`GET /api/demands/tickets` response before changing Dokploy. It keeps a
+pending snapshot at `.factory/tmp/shared_demands_migration_pending.json`, reads
+the old Hub again just before triggering its deployment, and merges the newer
+rows. If either read fails, the Hub is not replaced. After the new Hub reports
+the expected Git SHA and its live view reports `demands_source=shared-volume`,
+the script restores rows absent from the volume or older than the snapshot
+through the existing ticket API. It reads the ledger again and removes the
+pending file only after all captured rows are verified. A failed deployment
+or partial restore leaves the snapshot for the next run on the same host.
+
+This snapshot is local to the deploying harness. A process restart on that
+host is recoverable; a different host cannot see its pending file. Writes to
+the old Hub in the final instant between the last read and container shutdown
+also cannot be captured by this API-only sequence. Until an old-container
+write pause and a remote migration marker/snapshot are available, treat this
+first rollout as requiring operational proof and keep its PR in draft. If the
+old Hub or Dokploy API returns 404/502, the deployment fails before replacing
+the Hub. After rollout, verify a ticket created in DarkHub appears to the
+worker and its status change appears back in DarkHub. The backup daemon
+includes the shared volume in its `.factory` snapshot and restore drill.
 
 If either service cannot mount the shared volume, keep that service stopped and
 investigate its Compose volume name and file ownership. Do not initialize a

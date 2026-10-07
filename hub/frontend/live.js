@@ -860,6 +860,7 @@
   function renderFoot(view, snap) {
     const src = snap.source || {};
     const demandSource = snap.demands_source === 'shared-volume' ? 'volume compartilhado'
+      : snap.demands_source === 'shared-volume-pending-migration' ? 'volume compartilhado · migração pendente'
       : snap.demands_source === 'unavailable' ? 'indisponível' : 'arquivo local';
     const changed = parseTime(snap.demands_latest_at);
     const demandAge = isFinite(changed) ? ' · última alteração ' + formatAge(changed) : '';

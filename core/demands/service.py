@@ -134,7 +134,16 @@ class DemandsService:
         if not ticket:
             raise KeyError(f"Ticket '{ticket_id}' not found")
         result = self.grill_engine.refine_ticket(ticket, answers, session=session)
-        self.store.save_ticket(result.refined_ticket)
+        try:
+            self.store.save_ticket(result.refined_ticket, expected_updated_at=ticket.updated_at)
+        except ValueError as exc:
+            if "Stale demand ticket" not in str(exc):
+                raise
+            latest = self.get_ticket(ticket_id)
+            if latest is None:
+                raise KeyError(f"Ticket '{ticket_id}' not found") from exc
+            result = self.grill_engine.refine_ticket(latest, answers, session=session)
+            self.store.save_ticket(result.refined_ticket, expected_updated_at=latest.updated_at)
         logger.info(f"Refined ticket {ticket_id} with grill answers: {len(result.summary_of_changes)} changes")
         return result
 
