@@ -29,6 +29,7 @@ runbook descreve o que roda sozinho, os limiares, os comandos de emergencia e co
 | Limpeza pre/pos-deploy da linha | `core/line/stage_release.py` (estagio `build_deploy`, alvos Dokploy) | antes e depois de cada deploy | mesma politica; nunca altera o resultado do estagio |
 | Limpeza de emergencia | `scripts/dokploy_redeploy.py` | quando um build falha com assinatura de disco cheio | poda tudo e manda rodar o redeploy de novo |
 | Retencao de workspaces da linha | `CloudWorker` (`core/line/workspace.py::sweep_stale_workspaces`) | a cada 6h | apaga `/workspaces/<projeto>/runs/<run>` de runs terminais ha mais de 3 dias (`DARKFAC_WORKSPACE_RETENTION_DAYS`, 0 desliga); nunca run ativo/com job vivo/em andamento neste worker; orfaos so apos 14 dias |
+| Retencao de artefatos de workflows (USR-148) | `CloudWorker` (`core/orchestrator/artifact_retention.py::sweep_stale_artifacts`) | a cada 6h (e no primeiro poll do worker) | remove `/app/.factory/artifacts/<run_id>/` de runs terminais ha mais de 30 dias (`DARKFAC_ARTIFACT_RETENTION_DAYS`, 0 desliga); ver secao 8 |
 | Logs de container limitados | `deploy/dokploy/docker-compose.{cloud,hub,n8n}.yml` | sempre | `json-file`, `max-size 10m`, `max-file 3` por servico |
 | Limpeza nativa do Dokploy | Dokploy | diario 23:50 UTC | continua como rede de seguranca |
 
@@ -131,7 +132,38 @@ python C:\dev\DarkFac\scripts\dokploy_redeploy.py --list
 
 ## 7. Limites conhecidos
 
-- `darkfac-artifacts` (artefatos dos workflows) nao tem retencao: apagar pode quebrar evidencia de runs
-  antigos. Seu tamanho aparece no alerta; ticket aberto para definir a politica.
 - O espelho git por projeto (`/workspaces/<projeto>/.mirror`) cresce lentamente com o repositorio.
 - O Postgres de controle fica em outro servico do Dokploy (fora destes composes); acompanhe pelo alerta de disco.
+
+## 8. Retencao do volume `darkfac-artifacts` (USR-148)
+
+O volume guarda um diretorio por workflow (`<run_id>/`, escrito por `CloudArtifactStore`) mais arquivos de
+estado na raiz (`build_ledger.json`, `disk_guard_state.json`, ...). O `CloudWorker` aplica a politica abaixo
+a cada 6h (o worker e o unico processo com acesso ao control store, necessario para saber quais runs estao
+vivos); o resultado vai para o log do worker como uma linha `artifact_retention_sweep {json}` com os runs
+removidos (ou que seriam removidos), motivo, bytes liberados (`bytes_freed`) ou liberaveis em dry-run
+(`bytes_reclaimable`) e erros.
+
+| Situacao do diretorio `<run_id>/` | Acao |
+|---|---|
+| Run `active`, `waiting_*`, qualquer status nao terminal ou com job vivo (`pending`/`running`/`retry`/`replan`/`waiting_dependency`/`waiting_human`) | **Nunca removido**, por mais antigo que seja |
+| Run em execucao neste worker agora | Nunca removido |
+| Run terminal (`completed`/`failed`/`cancelled`/`succeeded`) concluido ha menos de 30 dias, ou com qualquer arquivo modificado ha menos de 30 dias | Mantido |
+| Run terminal concluido e sem escrita ha 30 dias ou mais | **Removido** |
+| Diretorio sem run no control store (orfao) sem escrita ha menos de 60 dias | Mantido |
+| Orfao sem escrita ha 60 dias ou mais | **Removido** |
+| Falha ao consultar o control store (banco fora do ar) | Mantido (fail-closed) |
+| Run terminal sem `completed_at`/`updated_at` | Mantido |
+| Arquivos na raiz, diretorios iniciados por `.` e symlinks | Nunca tocados |
+
+Variaveis (ambiente do compose `darkfac-cloud`, servico `worker`):
+
+| Variavel | Padrao | Efeito |
+|---|---|---|
+| `DARKFAC_ARTIFACT_RETENTION_DAYS` | `30` | Idade minima de runs terminais; `0` desliga o sweep |
+| `DARKFAC_ARTIFACT_ORPHAN_RETENTION_DAYS` | `60` | Idade minima de orfaos (nunca menor que a de runs terminais) |
+| `DARKFAC_ARTIFACT_RETENTION_DRY_RUN` | desligado | `1`/`true`: so loga o que removeria, nao apaga nada |
+
+Para validar antes de confiar: ponha `DARKFAC_ARTIFACT_RETENTION_DRY_RUN=1`, faca o deploy, e procure nos logs
+do worker no Dokploy a linha `artifact_retention_sweep` (campos `would_remove` e `bytes_reclaimable`);
+remova a variavel para ativar a remocao real. Valores invalidos (texto, negativos) voltam ao padrao.
