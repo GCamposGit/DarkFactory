@@ -139,6 +139,9 @@ def cmd_run(args: argparse.Namespace) -> int:
     validation_mode = ValidationMode(args.validation_mode)
 
     all_results: list[ScenarioResult] = []
+    # Original exception/stderr context per (runtime, scenario, repeat); logged on
+    # failure only, so results.json and the manifest contract stay unchanged.
+    trace_diagnostics: dict[tuple[str, str, int], list[str]] = {}
     capability_matrix: dict[str, AdapterCapabilities] = {}
 
     for runtime in runtimes_to_run:
@@ -215,6 +218,7 @@ def cmd_run(args: argparse.Namespace) -> int:
                         validation_mode=validation_mode,
                     )
                     all_results.append(result)
+                    trace_diagnostics[(runtime.value, spec.scenario_id, rep)] = list(trace.diagnostics)
                     time.sleep(0.15)
 
     # Serialize results.json
@@ -273,6 +277,8 @@ def cmd_run(args: argparse.Namespace) -> int:
                 f"error={fi.error_code}, diffs={fi.target_differences}",
                 file=sys.stderr,
             )
+            for diag_line in trace_diagnostics.get((fi.runtime.value, fi.scenario_id, fi.repeat_index), []):
+                print(f"[DIAG] {fi.scenario_id}#{fi.repeat_index} {diag_line}", file=sys.stderr)
         return CliExitCode.ASSERTION_FAILED
     return CliExitCode.SUCCESS
 

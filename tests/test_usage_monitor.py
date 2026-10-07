@@ -477,6 +477,29 @@ def test_independent_ledger_instances_serialize_transactions(tmp_path: Path) -> 
 
     assert ModelUsageLedger(tmp_path).report().total_calls == 24
 
+
+def test_independent_ledger_lock_contention_is_stable_across_fresh_stores(tmp_path: Path) -> None:
+    """USR-111: first-use lock-file creation raced the byte-range lock on Windows (PermissionError)."""
+
+    def record(root: Path, index: int) -> None:
+        ModelUsageLedger(root).record(
+            ModelCallEvent(
+                invocation_id=f"fresh-{index:03d}",
+                provider="ollama",
+                model="qwen3:8b",
+                tier=ModelTier.LOCAL,
+                harness="parallel-test",
+                source="test",
+            )
+        )
+
+    for round_index in range(8):
+        root = tmp_path / f"round-{round_index}"
+        with ThreadPoolExecutor(max_workers=12) as executor:
+            list(executor.map(lambda i, root=root: record(root, i), range(12)))
+        assert ModelUsageLedger(root).report().total_calls == 12
+
+
 def test_usage_api_returns_partial_accounts_and_ingests_harness_events(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setenv("DARKFAC_TELEMETRY_KEY", "test-telemetry-key")
     service = HubService(data_dir=tmp_path)

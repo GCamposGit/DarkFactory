@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import socket
+import sys
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -30,6 +31,23 @@ from spikes.runtime_choice.effect_store import (
 LOGGER = logging.getLogger(__name__)
 
 
+class _EffectHTTPServer(ThreadingHTTPServer):
+    """Loopback server tolerant to clients killed mid-request by fault injection."""
+
+    # The stdlib default backlog (5) can refuse bursts of connects on a loaded
+    # Windows runner; the driver client only retries a few times.
+    request_queue_size = 128
+
+    def handle_error(self, request: Any, client_address: Any) -> None:
+        error = sys.exc_info()[1]
+        if isinstance(error, (ConnectionError, TimeoutError)):
+            # The scenario controller kills drivers on purpose (R02, R06); a response
+            # written to a dead peer is expected and must not pollute stderr.
+            LOGGER.debug("effect service: client %s disconnected: %r", client_address, error)
+            return
+        super().handle_error(request, client_address)
+
+
 class EffectServer:
     """Manage a dynamic-port loopback server backed by ``NativeEffectStore``."""
 
@@ -41,7 +59,7 @@ class EffectServer:
         self.host = host
         self.requested_port = port
         self.store = NativeEffectStore(lab_root)
-        self._httpd: ThreadingHTTPServer | None = None
+        self._httpd: _EffectHTTPServer | None = None
         self._thread: threading.Thread | None = None
 
     @property
@@ -66,7 +84,7 @@ class EffectServer:
         class Handler(_EffectRequestHandler):
             effect_server = service
 
-        self._httpd = ThreadingHTTPServer((self.host, self.requested_port), Handler)
+        self._httpd = _EffectHTTPServer((self.host, self.requested_port), Handler)
         self._httpd.daemon_threads = True
         self._thread = threading.Thread(
             target=self._httpd.serve_forever,

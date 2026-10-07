@@ -8,7 +8,7 @@ import sqlite3
 import sys
 import threading
 from pathlib import Path
-from typing import TextIO
+from typing import Any, TextIO
 
 from pydantic import ValidationError
 
@@ -26,9 +26,42 @@ from spikes.runtime_choice.contracts import (
 class DriverConfigurationError(RuntimeError):
     """A sanitized configuration/optional-dependency failure."""
 
-    def __init__(self, code: str) -> None:
+    def __init__(self, code: str, details: dict[str, Any] | None = None) -> None:
         super().__init__(code)
         self.code = code
+        self.details = details or {}
+
+
+def describe_exception_chain(error: BaseException | None) -> str:
+    """Return ``Type(code): message <- Type: message`` for an exception chain.
+
+    Messages are sanitized (paths and secrets removed, truncated) so the text is
+    safe for CI logs while still exposing the original exception type, which the
+    sanitized ``STORE_UNAVAILABLE`` code alone hides.
+    """
+
+    from spikes.runtime_choice.native_adapter import sanitize_diagnostic
+
+    parts: list[str] = []
+    seen: set[int] = set()
+    current = error
+    while current is not None and id(current) not in seen and len(parts) < 6:
+        seen.add(id(current))
+        code = getattr(current, "code", None)
+        label = type(current).__name__
+        if isinstance(code, str):
+            label = f"{label}({code})"
+        parts.append(f"{label}: {sanitize_diagnostic(current)}")
+        details = getattr(current, "details", None)
+        if isinstance(details, dict) and details.get("error_type"):
+            parts.append(
+                f"{details['error_type']}: {sanitize_diagnostic(details.get('diagnostic', 'unknown'))}"
+            )
+        current = current.__cause__ or current.__context__
+    text = " <- ".join(parts) if parts else "unknown"
+    # ASCII-only: localized OS messages (e.g. cp1252 on Windows) must not break
+    # the UTF-8 pipe readers that capture driver stderr.
+    return text.encode("ascii", "backslashreplace").decode("ascii")
 
 
 def load_config(path: Path | str) -> LabConfig:
@@ -50,7 +83,10 @@ def build_adapter(config: LabConfig):
         try:
             return NativeAdapter(config)
         except (OSError, sqlite3.Error, NativeAdapterError) as error:
-            raise DriverConfigurationError("STORE_UNAVAILABLE") from error
+            raise DriverConfigurationError(
+                "STORE_UNAVAILABLE",
+                details={"cause": describe_exception_chain(error)},
+            ) from error
     if config.runtime is RuntimeKind.DBOS_POSTGRES:
         try:
             from spikes.runtime_choice.dbos_adapter import DBOSAdapter  # type: ignore[import-not-found]
@@ -165,6 +201,11 @@ def main(argv: list[str] | None = None) -> int:
         return run_jsonl(config, sys.stdin, sys.stdout)
     except DriverConfigurationError as error:
         print(error.code, file=sys.stderr)
+        # The bare code stays the default stderr contract; the scenario
+        # controller opts in to the original exception type and message.
+        if os.environ.get("HF02_DRIVER_DIAGNOSTICS") == "1":
+            cause = error.details.get("cause") or describe_exception_chain(error.__cause__)
+            print(f"[diag] {cause}", file=sys.stderr)
         return 2
 
 
@@ -172,4 +213,12 @@ if __name__ == "__main__":
     raise SystemExit(main())
 
 
-__all__ = ["DriverConfigurationError", "DriverSession", "build_adapter", "load_config", "main", "run_jsonl"]
+__all__ = [
+    "DriverConfigurationError",
+    "DriverSession",
+    "build_adapter",
+    "describe_exception_chain",
+    "load_config",
+    "main",
+    "run_jsonl",
+]

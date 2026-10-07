@@ -102,7 +102,15 @@ class AtomicUsageStore:
                 json.dumps(payload, indent=2, ensure_ascii=False),
                 encoding="utf-8",
             )
-            os.replace(temporary, self.path)
+            for attempt in range(10):
+                try:
+                    os.replace(temporary, self.path)
+                    break
+                except PermissionError:
+                    # Windows briefly denies replace while a scanner/reader holds the target.
+                    if attempt == 9:
+                        raise
+                    time.sleep(0.02 * (attempt + 1))
         except OSError as exc:
             raise UsageStoreError(f"unable to persist usage ledger {self.path}: {exc}") from exc
         finally:
@@ -111,20 +119,44 @@ class AtomicUsageStore:
             except OSError:
                 pass
 
+    @staticmethod
+    def _acquire_windows_lock(handle: Any, *, timeout_seconds: float = 120.0) -> None:
+        """Take the 1-byte lock with bounded polling instead of ``LK_LOCK``.
+
+        ``LK_LOCK`` gives up after ~10 s of 1 s retries and raises a bare
+        ``PermissionError`` under CI contention (xdist, many ledger instances), so
+        poll the non-blocking lock with a short backoff and a generous deadline.
+        """
+        import msvcrt
+
+        deadline = time.monotonic() + timeout_seconds
+        delay = 0.002
+        while True:
+            try:
+                handle.seek(0)
+                msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+                return
+            except OSError as exc:
+                if time.monotonic() >= deadline:
+                    raise UsageStoreError(
+                        f"timed out after {timeout_seconds:.0f}s acquiring usage ledger lock: {exc}"
+                    ) from exc
+                time.sleep(delay)
+                delay = min(delay * 2, 0.05)
+
     @contextmanager
     def _process_lock(self) -> Iterator[None]:
         self.storage_dir.mkdir(parents=True, exist_ok=True)
         lock_path = self.path.with_suffix(".lock")
         with lock_path.open("a+b") as handle:
-            handle.seek(0, os.SEEK_END)
-            if handle.tell() == 0:
-                handle.write(b"0")
-                handle.flush()
+            # No initial byte is written: the 1-byte lock may sit beyond EOF, and a
+            # write here raced other instances' byte-range lock on Windows, failing
+            # the flush with PermissionError (USR-111).
             handle.seek(0)
             if os.name == "nt":
                 import msvcrt
 
-                msvcrt.locking(handle.fileno(), msvcrt.LK_LOCK, 1)
+                self._acquire_windows_lock(handle)
             else:
                 import fcntl
 

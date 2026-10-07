@@ -15,6 +15,7 @@ import subprocess
 import sys
 import threading
 import time
+from collections import deque
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
@@ -59,6 +60,7 @@ class ExecutionTrace:
     barrier_reached: dict[str, bool] = field(default_factory=dict)
     error_code: str | None = None
     artifact_refs: list[str] = field(default_factory=list)
+    diagnostics: list[str] = field(default_factory=list)
 
 
 class ScenarioController:
@@ -75,6 +77,8 @@ class ScenarioController:
         self.effect_server = effect_server
         self.python_executable = python_executable
         self._child_processes: list[subprocess.Popen[str]] = []
+        self._stderr_tails: dict[int, deque[str]] = {}
+        self._stderr_threads: dict[int, threading.Thread] = {}
         self._lock = threading.Lock()
 
     def _ensure_effect_server(self) -> EffectServer:
@@ -97,6 +101,9 @@ class ScenarioController:
         if env_override:
             env.update(env_override)
         env["PYTHONUNBUFFERED"] = "1"
+        # Ask the driver to print the original exception type/message on startup
+        # failures (the bare STORE_UNAVAILABLE code hides the root cause).
+        env["HF02_DRIVER_DIAGNOSTICS"] = "1"
 
         project_root = Path(__file__).resolve().parents[2]
         process = subprocess.Popen(
@@ -110,9 +117,49 @@ class ScenarioController:
             bufsize=1,
             env=env,
         )
+        tail: deque[str] = deque(maxlen=20)
+
+        def drain_stderr() -> None:
+            # Also prevents the child from blocking on a full stderr pipe.
+            try:
+                if process.stderr is not None:
+                    for line in process.stderr:
+                        tail.append(line.rstrip())
+            except (OSError, ValueError):
+                pass
+
+        stderr_thread = threading.Thread(target=drain_stderr, name="hf02-driver-stderr", daemon=True)
+        stderr_thread.start()
         with self._lock:
             self._child_processes.append(process)
+            self._stderr_tails[process.pid] = tail
+            self._stderr_threads[process.pid] = stderr_thread
         return process
+
+    def _collect_diagnostics(
+        self,
+        events: list[DriverEvent],
+        pids: list[int],
+        exit_codes: list[int],
+    ) -> list[str]:
+        """Summarize error events and driver stderr for failure logs (never in results.json)."""
+        lines: list[str] = []
+        for event in events:
+            if event.kind is DriverEventKind.ERROR or event.code:
+                lines.append(
+                    f"event kind={event.kind.value} code={event.code} step={event.step_id} "
+                    f"details={json.dumps(event.details, sort_keys=True, default=str)}"
+                )
+        for pid in pids:
+            thread = self._stderr_threads.get(pid)
+            if thread is not None:
+                thread.join(timeout=0.5)
+            tail = self._stderr_tails.get(pid)
+            if tail:
+                lines.append(f"driver pid={pid} stderr_tail={' | '.join(tail)}")
+        if exit_codes:
+            lines.append(f"exit_codes={exit_codes}")
+        return lines
 
     def _kill_process(self, process: subprocess.Popen[str]) -> None:
         """Kill strictly the child process spawned by this controller."""
@@ -479,6 +526,7 @@ class ScenarioController:
             barrier_reached=barriers,
             error_code=error_code,
             artifact_refs=artifact_refs,
+            diagnostics=self._collect_diagnostics(events, pids, exit_codes),
         )
 
     def _run_storage_unavailable(
@@ -548,6 +596,7 @@ class ScenarioController:
             duration_ms=total_duration_ms,
             exit_codes=[exit_code],
             error_code="STORE_UNAVAILABLE",
+            diagnostics=self._collect_diagnostics(events, pids, [exit_code]),
         )
 
     def shutdown(self) -> None:
