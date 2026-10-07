@@ -553,3 +553,50 @@ def purge_trash(
             logger.warning("Could not purge trash entry %s: %s", entry, exc)
             report.failed.append(f"{entry.name}: {exc}")
     return report
+
+
+def find_ticket_worktree(
+    ticket_id: str,
+    main_root: Path,
+    run_git: Optional[GitRunner] = None,
+) -> Optional[Path]:
+    """Find the most recent active worktree associated with a ticket ID (USR-116).
+
+    Matches worktrees whose branch is ticket/<slug> or directory name contains <slug>.
+    Returns the path of the most recently modified matching worktree, or None.
+    """
+    slug = _slug(ticket_id)
+    runner = run_git or _git
+    candidates: list[Path] = []
+    seen: set[str] = set()
+
+    for entry in list_worktrees(main_root, runner):
+        wt_str = entry.get("worktree", "")
+        if not wt_str:
+            continue
+        p = Path(wt_str).resolve()
+        norm = _norm(p)
+        if norm in seen:
+            continue
+        br = entry.get("branch", "").removeprefix("refs/heads/").lower()
+        name = p.name.lower()
+        if br == f"ticket/{slug}" or br.startswith(f"ticket/{slug}-") or name.startswith(f"{slug}-"):
+            if p.is_dir():
+                candidates.append(p)
+                seen.add(norm)
+
+    for root_rel in WORKTREE_ROOTS:
+        root_dir = main_root / root_rel
+        if root_dir.is_dir():
+            for p in root_dir.glob(f"{slug}-*"):
+                p_res = p.resolve()
+                norm = _norm(p_res)
+                if norm not in seen and p_res.is_dir():
+                    candidates.append(p_res)
+                    seen.add(norm)
+
+    if not candidates:
+        return None
+    candidates.sort(key=latest_mtime, reverse=True)
+    return candidates[0]
+

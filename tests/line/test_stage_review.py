@@ -419,3 +419,111 @@ def test_review_prompt_judges_final_tree_not_process_evidence(
     assert "Julgue a arvore final" in prompt
     assert "NAO e bloqueante" in prompt and "red" in prompt
     assert "{{" not in prompt and '"verdict"' in prompt  # JSON example rendered, braces unescaped
+
+
+def test_blocking_review_objection_across_all_rounds_prevents_success_and_integration(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """USR-129: Blocking objections across all review rounds MUST fail closed.
+    
+    1. Exhaustion returns structured failure cause without approving or integrating.
+    2. Workflow successors do NOT route to integration stage.
+    3. Run can proceed to fix/replanning without infinite loop.
+    4. Re-running ReviewStage is idempotent and fails without invoking the agent again.
+    """
+    from core.workflow.control_contracts import JobKey
+    from core.workflow.control_store import SQLiteControlStore
+    from core.workflow.successors import materialize_result
+
+    origin = _init_bare_origin(tmp_path)
+    project = _project(str(origin))
+    run_id = "run-usr-129-blocking"
+    _prepare_run(tmp_path, monkeypatch, project, run_id, harness="claude", green=True)
+
+    blocking_finding = {
+        "verdict": "changes_required",
+        "blocking": [{"file": "feature.py", "line": 1, "issue": "unhandled regression", "fix": "fix bug"}],
+        "non_blocking": [],
+    }
+    agent = _ScriptedAgent([blocking_finding, blocking_finding, blocking_finding])
+    stage = ReviewStage(
+        run_agent_func=agent,
+        pick_func=_isolated_pick(tmp_path),
+        routing_config=load_routing_config(),
+    )
+
+    # Round 1: blocking review objection -> retries back to development
+    res1 = stage.run(project, run_id)
+    assert res1.outcome == "retry"
+    assert res1.cause_code.startswith("retry:development\nchanges_required:round=1")
+
+    # Round 2: still blocking review objection -> retries back to development
+    res2 = stage.run(project, run_id)
+    assert res2.outcome == "retry"
+    assert res2.cause_code.startswith("retry:development\nchanges_required:round=2")
+
+    # Round 3 (exceeding review_rounds=2): blocking objection STILL persists
+    # MUST fail terminal with structured cause, NOT approve, even with green validation
+    res3 = stage.run(project, run_id)
+    assert res3.outcome == "failed"
+    assert res3.cause_code == "review_exhausted_changes_required:round=3"
+    assert res3.outcome != "success"
+    assert len(agent.calls) == 3
+
+    # Check committed review state
+    ws = ws_mod.checkout(project, run_id)
+    ctx = ws_mod.context_dir(ws)
+    review_3 = (ctx / "review-3.md").read_text(encoding="utf-8")
+    assert "Verdict: changes_required" in review_3
+    assert "unhandled regression" in review_3
+    state = json.loads((ctx / "review_state.json").read_text(encoding="utf-8"))
+    assert state["rounds"][-1]["verdict"] == "changes_required"
+    assert state["rounds"][-1]["forced"] is False
+
+    # Workflow DAG verification: successors must NEVER contain 'integration'
+    store = SQLiteControlStore(tmp_path / "control.db")
+    jk = JobKey(run_id=run_id, ticket_id="T1", plan_version="1", stage="independent_review", iteration=0)
+    successors = materialize_result(jk, res3, store)
+    assert all(s.stage != "integration" for s in successors)
+    assert [s.stage for s in successors] == ["retrospective"]
+
+    # Replay verification: idempotent fail without re-running agent
+    replay = stage.run(project, run_id)
+    assert replay.outcome == "failed"
+    assert replay.cause_code == res3.cause_code
+    assert replay.output_refs == res3.output_refs
+    assert len(agent.calls) == 3
+
+
+def test_review_verdict_approve_with_blocking_items_fails_to_approve(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """If reviewer mistakenly emits verdict 'approve' while specifying blocking items,
+    it must NOT be approved and must be treated as changes_required."""
+    origin = _init_bare_origin(tmp_path)
+    project = _project(str(origin))
+    run_id = "run-usr-129-contradictory"
+    _prepare_run(tmp_path, monkeypatch, project, run_id, harness="claude")
+
+    contradictory_verdict = {
+        "verdict": "approve",
+        "blocking": [{"file": "vuln.py", "line": 10, "issue": "critical vuln", "fix": "sanitize"}],
+        "non_blocking": [],
+    }
+    agent = _ScriptedAgent([contradictory_verdict])
+    stage = ReviewStage(
+        run_agent_func=agent,
+        pick_func=_isolated_pick(tmp_path),
+        routing_config=load_routing_config(),
+    )
+
+    res = stage.run(project, run_id)
+    assert res.outcome == "retry"
+    assert res.cause_code.startswith("retry:development\nchanges_required:round=1")
+
+    ws = ws_mod.checkout(project, run_id)
+    ctx = ws_mod.context_dir(ws)
+    state = json.loads((ctx / "review_state.json").read_text(encoding="utf-8"))
+    assert state["rounds"][0]["verdict"] == "changes_required"
+    assert (ctx / "review-1.md").is_file()
+

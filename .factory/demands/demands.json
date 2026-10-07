@@ -3094,7 +3094,8 @@
     "project_id": "darkfac",
     "title": "Telegram: webhooks ausentes apos rotacao de token, tokens locais obsoletos e falhas silenciosas no poller/registro",
     "origin": "user",
-    "status": "planned",
+    "status": "completed",
+    "delivery_evidence": "scripts/telegram_rotate_check.py, docs/runbooks/telegram_rotation.md, tests/test_telegram_rotation_usr110.py",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -3119,7 +3120,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-01T11:08:50.916654Z",
-    "updated_at": "2026-10-01T11:08:50.916654Z"
+    "updated_at": "2026-10-05T21:04:16.997729Z"
   },
   {
     "id": "USR-111",
@@ -3279,8 +3280,8 @@
     "project_id": "darkfac",
     "title": "run_ticket longo mistura versoes de codigo: importa modulos tarde de um checkout compartilhado que outra sessao atualizou e a entrega quebra depois do portao aprovado",
     "origin": "user",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": ".factory/reports/usr-116-run-ticket-resume-delivery-report.md",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -3344,8 +3345,8 @@
     "project_id": "darkfac",
     "title": "Medidor de cotas: fixtures reais e conferencia com o painel oficial para Anthropic, OpenAI e Google (pendencia do USR-108)",
     "origin": "user",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "legacy:report:.factory/reports/usr-118-quota-meter-real-fixtures-report.md",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -3438,8 +3439,8 @@
     "project_id": "darkfac",
     "title": "VPS sem espaco em disco derruba o build do darkfac-cloud",
     "origin": "user",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "core/infra/vps_cleanup.py, scripts/dokploy_redeploy.py, hub/backend/main.py, core/infra/backup_cron.py, tests/test_vps_cleanup.py, .factory/reports/usr-122-vps-disk-cleanup-and-alerting-report.md",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -3461,15 +3462,15 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-01T18:25:51.031851Z",
-    "updated_at": "2026-10-01T18:25:51.031851Z"
+    "updated_at": "2026-10-06T01:10:39.851562+00:00"
   },
   {
     "id": "USR-123",
     "project_id": "darkfac",
     "title": "Linha: run que estourou o wall-clock fica em waiting_human para sempre e /linha nao abre nova tentativa",
     "origin": "user",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "core/workflow/control_store.py, core/orchestrator/adapters/control_postgres.py, core/line/owner_intake.py, core/integrations/telegram.py, hub/backend/service.py, hub/backend/api.py, tests/test_line_cancel.py, .factory/reports/usr-123-cancel-line-run-and-wall-clock-expiration-report.md",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -3491,7 +3492,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-01T19:23:22.112430Z",
-    "updated_at": "2026-10-01T19:23:22.112430Z"
+    "updated_at": "2026-10-06T01:58:47.565680+00:00"
   },
   {
     "id": "USR-124",
@@ -3654,8 +3655,8 @@
     "project_id": "darkfac",
     "title": "Revisão bloqueante não pode ser aprovada ao esgotar rodadas",
     "origin": "review",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "core/line/stage_review.py, tests/line/test_stage_review.py, .factory/reports/usr-129-blocking-review-exhaustion-report.md",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -3682,15 +3683,15 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-03T21:22:03.378432Z",
-    "updated_at": "2026-10-03T21:22:03.378432Z"
+    "updated_at": "2026-10-06T02:46:42.659202+00:00"
   },
   {
     "id": "USR-130",
     "project_id": "darkfac",
     "title": "Validação sem checagem executada não pode autorizar integração",
     "origin": "review",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "core/line/stage_build.py, core/line/stage_integration.py, tests/line/test_stage_build.py, tests/line/test_stage_integration.py, .factory/reports/usr-130-validation-check-required-report.md",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -3718,7 +3719,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-03T21:22:04.570755Z",
-    "updated_at": "2026-10-03T21:22:04.570755Z"
+    "updated_at": "2026-10-06T03:24:43.127883+00:00"
   },
   {
     "id": "USR-131",
@@ -4089,8 +4090,8 @@
     "project_id": "darkfac",
     "title": "Gate local do Notebook nunca fecha em 900s e fica preso por pytest de outras sessoes",
     "origin": "user",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": ".factory/reports/usr-143-notebook-suite-lock-timeout-report.md",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -4112,7 +4113,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-04T20:01:20.786789Z",
-    "updated_at": "2026-10-04T20:01:20.786789Z"
+    "updated_at": "2026-10-05T22:38:00.081633+00:00"
   },
   {
     "id": "USR-144",
@@ -4148,8 +4149,8 @@
     "project_id": "darkfac",
     "title": "CI vermelho no main @68b5d24: main-validation (ubuntu-latest)",
     "origin": "user",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "https://github.com/GCamposGit/DarkFactory/actions/runs/37372750589",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -4170,7 +4171,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-05T15:20:46.396815Z",
-    "updated_at": "2026-10-05T15:20:46.396815Z"
+    "updated_at": "2026-10-05T22:38:00.081633+00:00"
   },
   {
     "id": "USR-146",
@@ -4200,6 +4201,66 @@
     "dependencies": [],
     "created_at": "2026-10-05T22:05:56.766870Z",
     "updated_at": "2026-10-05T22:05:56.766870Z"
+  },
+  {
+    "id": "USR-147",
+    "project_id": "darkfac",
+    "title": "Governança: Aplicar patch de proteção de suite lock e remote probe no core/harness (caminho protegido)",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "USR-143 entregou o orçamento e diagnóstico de workers xdist em tests/_worker_capacity.py. As alterações de core/harness/suite_lock.py (stall detector), core/harness/runner.py (lock pré-execute) e core/harness/remote_dispatch.py (timeout configurável de probe) estão salvas em .factory/patches/usr-143-harness-core.patch pois core/harness/* é protegido por guard.py contra alterações automáticas de agentes.",
+    "core_journey": [
+      "USR-143 entregou o orçamento e diagnóstico de workers xdist em tests/_worker_capacity.py. As alterações de core/harness/suite_lock.py (stall detector), core/harness/runner.py (lock pré-execute) e core/harness/remote_dispatch.py (timeout configurável de probe) estão salvas em .factory/patches/usr-143-harness-core.patch pois core/harness/* é protegido por guard.py contra alterações automáticas de agentes."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Owner aplica patch de governança em core/harness/",
+      "Suite lock possui detecção de processos stalled com 0 CPU",
+      "Probe do Desktop possui timeout configurável"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-05T22:42:41.687764Z",
+    "updated_at": "2026-10-05T22:42:41.687764Z"
+  },
+  {
+    "id": "USR-148",
+    "project_id": "darkfac",
+    "title": "Retencao do volume darkfac-artifacts (artefatos de workflows) na VPS",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "O volume darkfac-artifacts (core/orchestrator/cloud_artifacts.py, montado em coordinator/worker/backup-cron/canary) nao tem retencao e cresce sem limite; apagar sem criterio pode quebrar evidencia de runs antigos ou em espera. Apontado no incidente de disco de 2026-10-06 (PR #176, docs/runbooks/vps_disk.md secao 7). O tamanho ja aparece nos alertas de disco.",
+    "core_journey": [
+      "O volume darkfac-artifacts (core/orchestrator/cloud_artifacts.py, montado em coordinator/worker/backup-cron/canary) nao tem retencao e cresce sem limite; apagar sem criterio pode quebrar evidencia de runs antigos ou em espera. Apontado no incidente de disco de 2026-10-06 (PR #176, docs/runbooks/vps_disk.md secao 7). O tamanho ja aparece nos alertas de disco."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Politica de retencao definida e documentada (idade minima, nunca artefato referenciado por run ativo ou waiting_*)",
+      "Sweep periodico (6h) no CloudWorker ou disk_guard com testes cobrindo run ativo, waiting_human e terminal antigo",
+      "docs/runbooks/vps_disk.md atualizado removendo o limite conhecido"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-06T21:38:54.371899Z",
+    "updated_at": "2026-10-06T21:38:54.371899Z"
   },
   {
     "id": "USR-136",

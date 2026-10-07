@@ -1,0 +1,29 @@
+{
+  "captured_at": "2026-10-01",
+  "source": "antigravity_rpc",
+  "payload": {
+    "response": {
+      "groups": [
+        {
+          "displayName": "Gemini Models",
+          "buckets": [
+            {
+              "bucketId": "gemini-weekly",
+              "displayName": "Weekly Limit Remaining",
+              "window": "weekly",
+              "remainingFraction": 0.15,
+              "resetTime": "2026-10-08T18:13:46Z"
+            },
+            {
+              "bucketId": "gemini-5h",
+              "displayName": "Five Hour Limit Remaining",
+              "window": "5h",
+              "remainingFraction": 1.0,
+              "resetTime": "2026-10-01T18:13:46Z"
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

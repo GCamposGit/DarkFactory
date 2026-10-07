@@ -307,6 +307,38 @@ def test_conflict_resolution_cannot_pass_without_validate_command(
     assert "Nenhum comando de validate" in log
 
 
+def test_conflict_resolution_passes_with_executable_validate_command(
+    tmp_path: Path
+) -> None:
+    test_script = tmp_path / "check.py"
+    test_script.write_text("import sys; sys.exit(0)\n", encoding="utf-8")
+    project = _project(str(tmp_path)).model_copy(
+        update={"commands": ProjectCommands(validate=["python check.py"])}
+    )
+    handler = IntegrationStageHandler(project)
+
+    ok, log = handler._run_validate(SimpleNamespace(path=tmp_path))
+
+    assert ok is True
+    assert "$ python check.py" in log
+
+
+def test_conflict_resolution_fails_when_validate_command_fails(
+    tmp_path: Path
+) -> None:
+    test_script = tmp_path / "failing_check.py"
+    test_script.write_text("import sys; sys.exit(1)\n", encoding="utf-8")
+    project = _project(str(tmp_path)).model_copy(
+        update={"commands": ProjectCommands(validate=["python failing_check.py"])}
+    )
+    handler = IntegrationStageHandler(project)
+
+    ok, log = handler._run_validate(SimpleNamespace(path=tmp_path))
+
+    assert ok is False
+    assert "$ python failing_check.py" in log
+
+
 def test_red_ci_feedback_reaches_development_then_green_ci_merges(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fake_gh
 ) -> None:

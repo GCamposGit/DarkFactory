@@ -106,6 +106,57 @@ def calculate_safe_worker_cap(
     return max(1, safe_cap)
 
 
+def explain_worker_budget(
+    available_bytes: int | None = None,
+    cpu_count: int | None = None,
+    min_bytes_per_worker: int = DEFAULT_MIN_WORKER_MEMORY_BYTES,
+    reserve_bytes: int = DEFAULT_SYSTEM_RESERVE_BYTES,
+    hard_cap: int = DEFAULT_HARD_CAP_WORKERS,
+) -> str:
+    """Return a human-readable explanation of allowed xdist workers and memory budgeting (USR-143)."""
+    if available_bytes is None:
+        available_bytes = get_available_memory_bytes()
+    if cpu_count is None:
+        cpu_count = get_physical_cpu_count()
+
+    avail_gib = available_bytes / BYTES_PER_GIB
+    reserve_gib = reserve_bytes / BYTES_PER_GIB
+    per_worker_gib = min_bytes_per_worker / BYTES_PER_GIB
+
+    env_max = os.environ.get("DARKFAC_MAX_WORKERS")
+    if env_max:
+        try:
+            val = int(env_max)
+            if val > 0:
+                return f"{val} workers (override DARKFAC_MAX_WORKERS={val}; available RAM: {avail_gib:.1f} GiB)"
+        except ValueError:
+            pass
+
+    env_xdist = os.environ.get("PYTEST_XDIST_AUTO_NUM_WORKERS")
+    if env_xdist:
+        try:
+            val = int(env_xdist)
+            if val > 0:
+                return f"{val} workers (override PYTEST_XDIST_AUTO_NUM_WORKERS={val}; available RAM: {avail_gib:.1f} GiB)"
+        except ValueError:
+            pass
+
+    usable_bytes = max(0, available_bytes - reserve_bytes)
+    workers_by_memory = int(usable_bytes // min_bytes_per_worker)
+    if workers_by_memory < 1:
+        workers_by_memory = 1
+
+    safe_cap = max(1, min(cpu_count, workers_by_memory, hard_cap))
+
+    reasons = [f"available RAM: {avail_gib:.1f} GiB (reserve: {reserve_gib:.1f} GiB, {per_worker_gib:.1f} GiB/w -> {workers_by_memory} supported)"]
+    if cpu_count < workers_by_memory:
+        reasons.append(f"bounded by {cpu_count} CPUs")
+    elif hard_cap < workers_by_memory and hard_cap < cpu_count:
+        reasons.append(f"bounded by hard cap {hard_cap}")
+
+    return f"{safe_cap} xdist workers ({', '.join(reasons)})"
+
+
 def mitigate_windows_wmi_startup() -> None:
     """Pre-warm and safeguard platform info to prevent non-continuable 0x8007000e in WMI queries.
 

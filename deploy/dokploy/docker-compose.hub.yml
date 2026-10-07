@@ -71,6 +71,12 @@ services:
       - "traefik.http.routers.darkhub.entrypoints=websecure"
       - "traefik.http.routers.darkhub.tls.certresolver=letsencrypt"
       - "traefik.http.services.darkhub.loadbalancer.server.port=8000"
+    # Bounded container logs (2026-10-06 disk incident): json-file default is unbounded.
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     deploy:
       resources:
         limits:

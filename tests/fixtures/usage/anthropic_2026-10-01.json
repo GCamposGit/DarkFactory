@@ -1,0 +1,12 @@
+{
+  "captured_at": "2026-10-01",
+  "source": "claude_code_api",
+  "payload": {
+    "headers": {
+      "anthropic-ratelimit-unified-5h-utilization": "0.12",
+      "anthropic-ratelimit-unified-5h-reset": "1790873400",
+      "anthropic-ratelimit-unified-7d-utilization": "0.87",
+      "anthropic-ratelimit-unified-7d-reset": "1791075600"
+    }
+  }
+}

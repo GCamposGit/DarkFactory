@@ -34,6 +34,9 @@ def _node_verification_fake(monkeypatch: pytest.MonkeyPatch) -> None:
         mod, "make_hub_transport",
         lambda **_kwargs: (lambda _method, path, _body: {"state": "complete"} if path == "/api/demands/migration" else {"demands_source": "shared-volume"}),
     )
+    monkeypatch.setattr(
+        mod, "default_disk_hygiene_runner", lambda transport, stage, **kw: {"action": "skipped", "reason": "test"}
+    )
     monkeypatch.setattr(mod, "default_check_main_runner", lambda: (0, {"state": "green", "sha": "a" * 40}))
     monkeypatch.setattr(mod, "default_backup_runner", lambda project_id="darkfac": {"snapshot_id": "snp_fake", "drill_verified": True})
     monkeypatch.setattr(
@@ -1650,3 +1653,47 @@ def test_main_returns_exit_node_dirty_when_worktree_is_dirty(monkeypatch: pytest
     )
     assert exit_code == mod.EXIT_NODE_DIRTY
     assert exit_code == 3
+
+
+def test_disk_hygiene_runs_before_and_after_deploy_and_can_be_skipped(monkeypatch: pytest.MonkeyPatch) -> None:
+    """2026-10-06 disk incident: cleanup policy wraps every redeploy (pre: only if low; post: images)."""
+    stages: List[str] = []
+
+    def runner(transport: Any, stage: str, **kwargs: Any) -> Dict[str, Any]:
+        stages.append(stage)
+        return {"action": "skipped", "reason": "test"}
+
+    def run(extra: List[str]) -> Tuple[int, str]:
+        monkeypatch.setattr(mod, "get_local_origin_main_subject", lambda: "feat: algo")
+        out, err = io.StringIO(), io.StringIO()
+        code = mod.main(
+            ["--only", "darkfac-cloud", "--skip-backup", "--skip-node-sync"] + extra,
+            env=_ENV, registry_reader=_no_registry,
+            transport_factory=lambda url, key: _cloud_transport(), stdout=out, stderr=err,
+            sleep_fn=lambda _s: None, disk_hygiene_runner=runner,
+        )
+        return code, out.getvalue()
+
+    code, out = run([])
+    assert code == mod.EXIT_OK
+    assert stages == ["pre-deploy", "post-deploy"]
+    assert "[DISK HYGIENE] pre-deploy" in out and "[DISK HYGIENE] post-deploy" in out
+    stages.clear()
+    code, _ = run(["--skip-disk-hygiene"])
+    assert code == mod.EXIT_OK and stages == []
+
+
+def test_disk_hygiene_failure_never_changes_the_exit_code(monkeypatch: pytest.MonkeyPatch) -> None:
+    def runner(transport: Any, stage: str, **kwargs: Any) -> Dict[str, Any]:
+        raise RuntimeError("dokploy prune exploded")
+
+    monkeypatch.setattr(mod, "get_local_origin_main_subject", lambda: "feat: algo")
+    out, err = io.StringIO(), io.StringIO()
+    code = mod.main(
+        ["--only", "darkfac-cloud", "--skip-backup", "--skip-node-sync"],
+        env=_ENV, registry_reader=_no_registry,
+        transport_factory=lambda url, key: _cloud_transport(), stdout=out, stderr=err,
+        sleep_fn=lambda _s: None, disk_hygiene_runner=runner,
+    )
+    assert code == mod.EXIT_OK
+    assert "[DISK HYGIENE] pre-deploy: failed" in err.getvalue()
