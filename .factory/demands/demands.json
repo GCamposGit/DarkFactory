@@ -4324,5 +4324,35 @@
     "dependencies": [],
     "created_at": "2026-10-07T17:54:35.645358Z",
     "updated_at": "2026-10-07T19:45:00Z"
+  },
+  {
+    "id": "USR-151",
+    "project_id": "darkfac",
+    "title": "Stabilize auto-routed fallback after an unavailable harness",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "Ubuntu CI run 37670088327 attempt 1 on candidate 0bb6f32df67976a7e1a5aec0ba4ceddf9c220362 failed tests/test_run_ticket_routing.py::test_an_auto_routed_ticket_falls_back_to_the_next_healthy_harness. The test classified Claude as not_installed, but observed retry backoff sleeps ([0.001, 0.002, 0.004, 0.008, 0.016, 0.032, ...]) and failed its no-sleep assertion (tests/test_run_ticket_routing.py:293); the run reported 1 failed, 3141 passed, 5 skipped. The rerun, attempt 2 of the same CI run, passed Ubuntu and Windows. Diagnose whether the fallback path or test synchronization is nondeterministic, then make behavior and test deterministic.",
+    "core_journey": [
+      "Ubuntu CI run 37670088327 attempt 1 on candidate 0bb6f32df67976a7e1a5aec0ba4ceddf9c220362 failed tests/test_run_ticket_routing.py::test_an_auto_routed_ticket_falls_back_to_the_next_healthy_harness. The test classified Claude as not_installed, but observed retry backoff sleeps ([0.001, 0.002, 0.004, 0.008, 0.016, 0.032, ...]) and failed its no-sleep assertion (tests/test_run_ticket_routing.py:293); the run reported 1 failed, 3141 passed, 5 skipped. The rerun, attempt 2 of the same CI run, passed Ubuntu and Windows. Diagnose whether the fallback path or test synchronization is nondeterministic, then make behavior and test deterministic."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Identify and document the execution path that produces backoff after not_installed classification.",
+      "Ensure an unavailable primary harness falls through to the next healthy harness according to the intended retry policy, with deterministic timing semantics.",
+      "Add regression coverage that passes consistently on Ubuntu and Windows and verify with repeated CI execution."
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-07T20:06:28.291051Z",
+    "updated_at": "2026-10-07T20:06:28.291051Z"
   }
 ]
