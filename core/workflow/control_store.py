@@ -123,6 +123,10 @@ class ControlStore(Protocol):
         """List active jobs parked in waiting states."""
         ...
 
+    def list_active_run_ids(self) -> list[str]:
+        """Ids of every run whose `runs.status` is `active`, oldest first (USR-142 orphan-run sweep)."""
+        ...
+
     def cancel_run(
         self,
         run_id: str,
@@ -1453,6 +1457,16 @@ class SQLiteControlStore:
                 )
                 for row in cur.fetchall()
             ]
+        finally:
+            conn.close()
+
+    def list_active_run_ids(self) -> list[str]:
+        """Ids of every run whose `runs.status` is `active`, oldest first (USR-142 orphan-run sweep)."""
+        conn = self._connect()
+        try:
+            cur = conn.cursor()
+            cur.execute("SELECT run_id FROM runs WHERE status = 'active' ORDER BY created_at ASC")
+            return [str(row["run_id"]) for row in cur.fetchall()]
         finally:
             conn.close()
 
