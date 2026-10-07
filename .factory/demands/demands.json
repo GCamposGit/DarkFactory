@@ -3726,8 +3726,8 @@
     "project_id": "darkfac",
     "title": "Release sem smoke configurado não pode alegar operação verificada",
     "origin": "review",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "PR #136 (commit c4451fd): release exige smoke HTTP executavel antes do deploy remoto e digest instalado igual ao SHA; tests/line/test_stage_release.py: 23 passed no Notebook em 2026-10-07.",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -3754,15 +3754,15 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-03T21:22:05.340099Z",
-    "updated_at": "2026-10-03T21:22:05.340099Z"
+    "updated_at": "2026-10-07T08:21:01Z"
   },
   {
     "id": "USR-132",
     "project_id": "darkfac",
     "title": "Canário deve verificar SHA implantado além da data",
     "origin": "review",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "PR #136 (commit c4451fd): canario compara canary_day e SHA exatos no JSON de /version, com falha fechada sem SHA da release; tests/test_line_canary_hf2710.py: 72 passed no Notebook em 2026-10-07.",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -3789,7 +3789,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-03T21:22:06.956814Z",
-    "updated_at": "2026-10-03T21:22:06.956814Z"
+    "updated_at": "2026-10-07T08:21:01Z"
   },
   {
     "id": "USR-133",
