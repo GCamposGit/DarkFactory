@@ -137,7 +137,14 @@ def test_process_sandbox_timeout_and_tree_kill(temp_workspace: Path) -> None:
 )
 def test_process_sandbox_kills_descendant_after_leader_exits(temp_workspace: Path) -> None:
     """A dead session leader must not prevent its surviving child from being killed."""
-    sandbox = ProcessSandbox(working_dir=temp_workspace, default_timeout_seconds=0.5)
+    # The timeout must stay well above the time it takes to fork+exec the
+    # launcher and its grandchild: under heavy parallel test load (many
+    # pytest-xdist workers contending for CPU) that nested spawn can take
+    # much longer than the ~1ms it needs on an idle machine. The grandchild
+    # sleeps for 60s, so run_command still times out and this stays well
+    # under that bound.
+    timeout_seconds = 5.0
+    sandbox = ProcessSandbox(working_dir=temp_workspace, default_timeout_seconds=timeout_seconds)
     pid_path = temp_workspace / "grandchild.pid"
     launcher = (
         "import pathlib, subprocess, sys; "
@@ -147,11 +154,25 @@ def test_process_sandbox_kills_descendant_after_leader_exits(temp_workspace: Pat
 
     result = sandbox.run_command(
         [sys.executable, "-c", launcher, str(pid_path)],
-        timeout_seconds=0.5,
+        timeout_seconds=timeout_seconds,
     )
 
     assert result.timed_out is True
-    grandchild_pid = int(pid_path.read_text(encoding="utf-8"))
+
+    # The launcher wrote the pid file moments after it started, well before
+    # run_command's timeout elapsed, but under load the write may not be
+    # visible instantly; poll briefly instead of assuming it is already there.
+    pid_deadline = time.monotonic() + 5.0
+    grandchild_pid: int | None = None
+    while time.monotonic() < pid_deadline:
+        if pid_path.exists():
+            content = pid_path.read_text(encoding="utf-8").strip()
+            if content:
+                grandchild_pid = int(content)
+                break
+        time.sleep(0.05)
+    if grandchild_pid is None:
+        pytest.fail(f"launcher never wrote grandchild pid file at {pid_path}")
     deadline = time.monotonic() + 2.0
     while time.monotonic() < deadline:
         stat_path = Path(f"/proc/{grandchild_pid}/stat")
