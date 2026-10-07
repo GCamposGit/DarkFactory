@@ -1,4 +1,4 @@
-"""T1/T2 (Transformar menu superior em menu lateral): CSS layer + markup tests.
+"""T1/T2/T3 (Transformar menu superior em menu lateral): CSS, markup and behavior tests.
 
 Covers:
   (a) scripts/generate_hub_styles.py emits the .dh-* sidebar component layer;
@@ -10,7 +10,11 @@ Covers:
   (d) hub/frontend/index.html wraps the page in .dh-shell with a single
       #dh-sidebar containing the 12 navigation links, a slimmed-down <header>
       without navigation buttons, an accessible toggle/overlay pair, and all
-      pre-existing section/badge ids preserved exactly once.
+      pre-existing section/badge ids preserved exactly once;
+  (e) hub/frontend/sidebar.js implements the off-canvas toggle/overlay/Escape
+      behavior and active-route marking (hash + IntersectionObserver), shares
+      the same script cache token as the other <script> tags, and introduces
+      no external dependencies or stray globals.
 """
 
 from __future__ import annotations
@@ -31,6 +35,10 @@ INDEX_HTML = FRONTEND_DIR / "index.html"
 STYLES_CSS = FRONTEND_DIR / "styles.css"
 STATIC_STYLES_CSS = FRONTEND_DIR / "static" / "styles.css"
 SCRIPTS_DIR = REPO_ROOT / "scripts"
+SIDEBAR_JS = FRONTEND_DIR / "sidebar.js"
+
+_SCRIPT_SRC_TAG_RE = re.compile(r'<script[^>]*\bsrc=["\']([^"\']+)["\']')
+_CACHE_TOKEN_RE = re.compile(r"\?v=([^&\"']+)")
 
 EXPECTED_NAV_LABELS = [
     "Benchmarks",
@@ -290,3 +298,83 @@ def test_existing_sections_and_badge_ids_preserved():
     assert len(doc.xpath("//nav")) == 1
     assert len(doc.xpath("//main")) == 1
     assert len(doc.xpath("//aside")) == 2
+
+
+# ---------------------------------------------------------------------------
+# T3: sidebar.js behavior tests (toggle/overlay/Escape + active-route marking)
+# ---------------------------------------------------------------------------
+
+def test_sidebar_script_loaded_with_shared_cache_version():
+    assert SIDEBAR_JS.is_file(), f"{SIDEBAR_JS} must exist on disk"
+
+    html = INDEX_HTML.read_text(encoding="utf-8")
+    script_srcs = _SCRIPT_SRC_TAG_RE.findall(html)
+    assert script_srcs, "expected at least one <script src=...> tag in index.html"
+
+    def _version(src: str) -> str:
+        match = _CACHE_TOKEN_RE.search(src)
+        assert match, f"script src {src!r} must carry a ?v= cache token"
+        return match.group(1)
+
+    versions = {_version(src) for src in script_srcs}
+    assert len(versions) == 1, f"all <script> tags must share a single cache token, found {versions}"
+
+    sidebar_srcs = [src for src in script_srcs if "/sidebar.js" in src]
+    assert len(sidebar_srcs) == 1, "sidebar.js must be referenced by exactly one <script> tag"
+    assert sidebar_srcs[0] == f"/static/sidebar.js?v={next(iter(versions))}", (
+        "sidebar.js must be loaded with the same cache token as the other scripts"
+    )
+
+
+def test_sidebar_script_implements_toggle_overlay_and_escape():
+    source = SIDEBAR_JS.read_text(encoding="utf-8")
+
+    assert "dh-sidebar-toggle" in source, "script must reference the sidebar toggle button"
+    assert "dh-sidebar-overlay" in source, "script must reference the sidebar overlay"
+    assert re.search(r'["\']Escape["\']', source), "script must handle the Escape key"
+    assert "aria-expanded" in source, "script must sync aria-expanded on the toggle"
+    assert "is-open" in source, "script must toggle the .is-open state class"
+
+    assert re.search(r"toggle\.addEventListener\(\s*[\"']click[\"']", source), (
+        "script must bind a click handler on the toggle"
+    )
+    assert re.search(r"overlay\.addEventListener\(\s*[\"']click[\"']", source), (
+        "script must bind a click handler on the overlay"
+    )
+    assert re.search(r"addEventListener\(\s*[\"']keydown[\"']", source), (
+        "script must listen for keydown to detect Escape"
+    )
+
+
+def test_sidebar_script_marks_active_route():
+    source = SIDEBAR_JS.read_text(encoding="utf-8")
+
+    assert "aria-current" in source, "script must mark the active link with aria-current"
+    assert "hashchange" in source, "script must react to location.hash changes"
+    assert "IntersectionObserver" in source, (
+        "script must track the visible <main> section via IntersectionObserver"
+    )
+
+    for forbidden in ("fetch(", "XMLHttpRequest", "/api/"):
+        assert forbidden not in source, (
+            f"sidebar.js must not call application APIs (found {forbidden!r})"
+        )
+
+
+def test_sidebar_script_has_no_external_dependencies_or_globals():
+    source = SIDEBAR_JS.read_text(encoding="utf-8")
+
+    for forbidden in ("http://", "https://", "import ", "require("):
+        assert forbidden not in source, (
+            f"sidebar.js must have no external dependencies (found {forbidden!r})"
+        )
+
+    assert source.lstrip().startswith("//"), "sidebar.js should open with an explanatory comment"
+    assert re.search(r"\(function\s*\(\s*\)\s*{", source), (
+        "sidebar.js must be wrapped in an IIFE to avoid leaking locals"
+    )
+
+    window_assignments = sorted(set(re.findall(r"\bwindow\.(\w+)\s*=", source)))
+    assert len(window_assignments) <= 1, (
+        f"sidebar.js must expose at most one global namespace, found {window_assignments}"
+    )
