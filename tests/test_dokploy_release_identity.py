@@ -24,6 +24,7 @@ import pytest
 import core.orchestrator.deployment_adapter as mod
 from core.line.stage_release import ReleaseStageHandler, ReleaseStateStore
 from core.orchestrator.build_artifacts import ArtifactRef
+from core.orchestrator.compose_render import ComposeSourceError, render_darkhub_compose
 from core.orchestrator.deployment_adapter import (
     DeploymentOperation,
     DeploymentStatus,
@@ -249,26 +250,67 @@ def test_target_without_binding_params_is_untouched(monkeypatch: pytest.MonkeyPa
     assert [c["url"].rsplit("/", 1)[-1].split("?")[0] for c in calls] == ["application.one", "application.deploy"]
 
 
-HUB_COMPOSE = (
-    "services:\n  darkhub:\n    build:\n"
-    f"      context: https://${{GITHUB_PAT:-}}@github.com/Org/Repo.git#{OLD_SHA}\n"
-    f"      args:\n        DARKFAC_GIT_SHA: {OLD_SHA}\n"
-    f"    environment:\n      - DARKFAC_GIT_SHA={OLD_SHA}\n      - PORT=8000\n"
-)
+def _hub_template(*extra_env: str) -> str:
+    """The repo's docker-compose.hub.yml shape: SHA placeholders, not pinned values."""
+    env = "".join(f"      - {line}\n" for line in extra_env)
+    return (
+        "services:\n  darkhub:\n    build:\n"
+        "      context: https://${GITHUB_PAT:-}@github.com/Org/DarkFactory.git#${DARKFAC_GIT_SHA}\n"
+        "      no_cache: true\n"
+        "      args:\n        DARKFAC_GIT_SHA: ${DARKFAC_GIT_SHA}\n"
+        "    pull_policy: build\n"
+        f"    environment:\n      - DARKFAC_GIT_SHA=${{DARKFAC_GIT_SHA}}\n      - PORT=8000\n{env}"
+    )
+
+
+# Commit A of the repo; commit B adds an environment variable to the compose.
+TEMPLATE_A = _hub_template()
+TEMPLATE_B = _hub_template("NEW_FEATURE_FLAG=on")
+# What Dokploy stores today: the render of commit A at the previous release.
+HUB_COMPOSE = render_darkhub_compose(TEMPLATE_A, OLD_SHA)
+SHA_B = "c" * 40
+
+
+class _FakeFetcher:
+    """In-memory GitHub: {sha: compose text}. Records every request."""
+
+    def __init__(self, files: Dict[str, Any]) -> None:
+        self.files = files
+        self.requests: List[tuple[str, str, str]] = []
+
+    def __call__(self, repository: str, sha: str, path: str) -> str:
+        self.requests.append((repository, sha, path))
+        value = self.files[sha]
+        if isinstance(value, Exception):
+            raise value
+        return value
+
+
+def _hub_adapter(files: Dict[str, Any]) -> tuple[DokployDeploymentAdapter, _FakeFetcher]:
+    fetcher = _FakeFetcher(files)
+    return DokployDeploymentAdapter(compose_fetcher=fetcher), fetcher
 
 
 def _hub_target(**overrides: Any) -> TargetConfig:
+    metadata = {"pin_compose_sha": "true", "compose_repo": "Org/DarkFactory"}
+    metadata.update(overrides.pop("metadata", {}))
     return _target(
         project_id="darkfac",
         service_name="compose_hub",
         service_type="compose",
         healthcheck_endpoint="https://hub.example/health",
-        metadata={"pin_compose_sha": "true"},
+        metadata=metadata,
         **overrides,
     )
 
 
-def test_compose_raw_file_is_repinned_to_the_deployed_sha(monkeypatch: pytest.MonkeyPatch) -> None:
+def _procedures(calls: List[Dict[str, Any]]) -> List[str]:
+    return [c["url"].rsplit("/", 1)[-1].split("?")[0] for c in calls]
+
+
+def test_compose_is_rendered_from_the_merged_commit_and_installed_before_deploy(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     calls: List[Dict[str, Any]] = []
     _install_urlopen(
         monkeypatch,
@@ -280,58 +322,167 @@ def test_compose_raw_file_is_repinned_to_the_deployed_sha(monkeypatch: pytest.Mo
         ],
         calls,
     )
-    op = DokployDeploymentAdapter().start(_artifact(), _hub_target())
+    adapter, fetcher = _hub_adapter({SHA: TEMPLATE_A})
+    op = adapter.start(_artifact(), _hub_target())
 
     assert op.status == DeploymentStatus.IN_PROGRESS
-    assert [c["url"].rsplit("/", 1)[-1].split("?")[0] for c in calls] == [
-        "compose.one", "compose.update", "compose.one", "compose.deploy",
-    ]
+    assert fetcher.requests == [("Org/DarkFactory", SHA, "deploy/dokploy/docker-compose.hub.yml")]
+    assert _procedures(calls) == ["compose.one", "compose.update", "compose.one", "compose.deploy"]
     body = calls[1]["body"]
     assert body["composeId"] == "compose_hub" and body["sourceType"] == "raw"
-    assert body["composeFile"] == HUB_COMPOSE.replace(OLD_SHA, SHA)
+    assert body["composePath"] == "docker-compose.yml"
+    assert body["composeFile"] == render_darkhub_compose(TEMPLATE_A, SHA)
     assert OLD_SHA not in body["composeFile"] and "${GITHUB_PAT:-}" in body["composeFile"]
 
 
-def test_compose_already_on_sha_is_not_rewritten(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_compose_changed_between_commits_sends_the_render_of_the_merged_commit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Commit B edited the compose: Dokploy must receive B's render, not A's re-pinned."""
+    adapter, fetcher = _hub_adapter({SHA: TEMPLATE_A, SHA_B: TEMPLATE_B})
+    stored = render_darkhub_compose(TEMPLATE_A, SHA)  # Dokploy already runs commit A
     calls: List[Dict[str, Any]] = []
     _install_urlopen(
         monkeypatch,
         [
-            {"sourceType": "raw", "composeFile": HUB_COMPOSE.replace(OLD_SHA, SHA)},
+            {"sourceType": "raw", "composeFile": stored},
+            True,
             {"deployments": []},
             {"success": True},
         ],
         calls,
     )
-    DokployDeploymentAdapter().start(_artifact(), _hub_target())
-    assert "compose.update" not in [c["url"].rsplit("/", 1)[-1].split("?")[0] for c in calls]
+    op = adapter.start(_artifact(SHA_B), _hub_target())
+
+    assert op.status == DeploymentStatus.IN_PROGRESS
+    assert [r[1] for r in fetcher.requests] == [SHA_B]
+    sent = calls[1]["body"]["composeFile"]
+    assert sent == render_darkhub_compose(TEMPLATE_B, SHA_B)
+    assert "NEW_FEATURE_FLAG=on" in sent and "NEW_FEATURE_FLAG" not in stored
+    assert SHA not in sent and sent.count(SHA_B) == 3
+
+
+def test_compose_already_identical_to_the_render_is_not_rewritten(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: List[Dict[str, Any]] = []
+    _install_urlopen(
+        monkeypatch,
+        [
+            {"sourceType": "raw", "composeFile": render_darkhub_compose(TEMPLATE_B, SHA)},
+            {"deployments": []},
+            {"success": True},
+        ],
+        calls,
+    )
+    adapter, _ = _hub_adapter({SHA: TEMPLATE_B})
+    adapter.start(_artifact(), _hub_target())
+    assert "compose.update" not in _procedures(calls)
+
+
+def test_compose_with_same_pins_but_edited_body_is_still_updated(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The old re-pin logic saw 'same SHA, nothing to do'; the render must still differ and be sent."""
+    calls: List[Dict[str, Any]] = []
+    _install_urlopen(
+        monkeypatch,
+        [
+            {"sourceType": "raw", "composeFile": render_darkhub_compose(TEMPLATE_A, SHA)},
+            True,
+            {"deployments": []},
+            {"success": True},
+        ],
+        calls,
+    )
+    adapter, _ = _hub_adapter({SHA: TEMPLATE_B})
+    adapter.start(_artifact(), _hub_target())
+    assert _procedures(calls)[:2] == ["compose.one", "compose.update"]
+    assert "NEW_FEATURE_FLAG=on" in calls[1]["body"]["composeFile"]
 
 
 @pytest.mark.parametrize(
-    "compose_one,error",
+    "failure",
     [
-        ({"sourceType": "github", "composeFile": HUB_COMPOSE}, "release_identity_compose_not_raw"),
-        ({"sourceType": "raw", "composeFile": "services:\n  darkhub:\n    image: x\n"}, "release_identity_compose_pin_not_found"),
+        RuntimeError("gh api exited with code 1"),  # 404 / auth failure surfaced by gh
+        FileNotFoundError("gh"),
+        ComposeSourceError("compose file is empty at the requested commit"),
+        "",  # unreadable: empty body
     ],
 )
-def test_compose_unrecognised_layout_fails_closed_before_deploy(
-    monkeypatch: pytest.MonkeyPatch, compose_one: Dict[str, Any], error: str
+def test_unreadable_compose_source_fails_closed_without_touching_dokploy(
+    monkeypatch: pytest.MonkeyPatch, failure: Any
 ) -> None:
     calls: List[Dict[str, Any]] = []
-    _install_urlopen(monkeypatch, [compose_one], calls)
-    op = DokployDeploymentAdapter().start(_artifact(), _hub_target())
+    _install_urlopen(monkeypatch, [], calls)
+    adapter, fetcher = _hub_adapter({SHA: failure})
+    op = adapter.start(_artifact(), _hub_target())
+
     assert op.status == DeploymentStatus.FAILED
-    assert op.details["error"] == error
-    assert len(calls) == 1
+    assert op.details == {"error": "release_identity_compose_unreadable"}
+    assert len(fetcher.requests) == 1
+    assert calls == []  # no compose.one / compose.update / compose.deploy
+
+
+def test_compose_source_violating_the_pinned_build_contract_fails_closed(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: List[Dict[str, Any]] = []
+    _install_urlopen(monkeypatch, [], calls)
+    adapter, _ = _hub_adapter({SHA: "services:\n  darkhub:\n    image: x\n"})
+    op = adapter.start(_artifact(), _hub_target())
+    assert op.status == DeploymentStatus.FAILED
+    assert op.details["error"] == "release_identity_compose_contract_invalid"
+    assert calls == []
+
+
+def test_compose_repository_must_be_configured(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: List[Dict[str, Any]] = []
+    _install_urlopen(monkeypatch, [], calls)
+    adapter, fetcher = _hub_adapter({SHA: TEMPLATE_A})
+    target = _hub_target()
+    target.metadata.pop("compose_repo")
+    op = adapter.start(_artifact(), target)
+    assert op.status == DeploymentStatus.FAILED
+    assert op.details["error"] == "release_identity_compose_repo_missing"
+    assert fetcher.requests == [] and calls == []
+
+
+def test_compose_not_raw_in_dokploy_fails_closed_before_update(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: List[Dict[str, Any]] = []
+    _install_urlopen(monkeypatch, [{"sourceType": "github", "composeFile": HUB_COMPOSE}], calls)
+    adapter, _ = _hub_adapter({SHA: TEMPLATE_A})
+    op = adapter.start(_artifact(), _hub_target())
+    assert op.status == DeploymentStatus.FAILED
+    assert op.details["error"] == "release_identity_compose_not_raw"
+    assert _procedures(calls) == ["compose.one"]
 
 
 def test_binding_requires_a_full_sha(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: List[Dict[str, Any]] = []
     _install_urlopen(monkeypatch, [], calls)
-    op = DokployDeploymentAdapter().start(_artifact("short"), _hub_target())
+    adapter, fetcher = _hub_adapter({})
+    op = adapter.start(_artifact("short"), _hub_target())
     assert op.status == DeploymentStatus.FAILED
     assert op.details["error"] == "release_identity_sha_not_full"
-    assert calls == []
+    assert calls == [] and fetcher.requests == []
+
+
+def test_release_stage_derives_the_compose_repository_from_the_project_repo_url(tmp_path: Path) -> None:
+    def config(params: Dict[str, str], repo_url: str | None) -> TargetConfig:
+        project = ProjectDescriptor(
+            id="darkfac",
+            name="Dark Factory",
+            repo_url=repo_url,
+            deploy=DeployConfig(type=DeployTargetType.DOKPLOY, params=params),
+        )
+        handler = ReleaseStageHandler(
+            project,
+            dokploy_adapter=_SlowAdapter(0),  # type: ignore[arg-type]
+            state_store=ReleaseStateStore(state_dir=tmp_path / "state"),
+        )
+        return handler._target_config(SHA, None)
+
+    pinned = {"service_type": "compose", "service_name": "c1", "pin_compose_sha": "true"}
+    url = "https://github.com/GCamposGit/DarkFactory.git"
+    assert config(pinned, url).metadata["compose_repo"] == "GCamposGit/DarkFactory"
+    assert config({**pinned, "compose_repo": "Other/Repo"}, url).metadata["compose_repo"] == "Other/Repo"
+    assert "compose_repo" not in config(pinned, None).metadata
+    assert "compose_repo" not in config({"service_type": "compose", "service_name": "c1"}, url).metadata
 
 
 def test_hub_health_probe_matches_pinned_sha(monkeypatch: pytest.MonkeyPatch) -> None:
