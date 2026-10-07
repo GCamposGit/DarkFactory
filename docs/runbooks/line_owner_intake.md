@@ -123,7 +123,7 @@ resposta no proximo claim. O canario acorda sozinho o proprio grill em `waiting_
 
 - `/linha <ticket>` (e `POST /api/demands/tickets/<id>/line`): run em andamento e reapresentado
   (nunca duplicado); run entregue responde "ja foi entregue"; run terminado sem entregar abre
-  uma nova tentativa `ticket:<id>:a<n>` (teto `DARKFAC_LINE_MAX_TICKET_ATTEMPTS`, padrao 5). A
+  uma nova tentativa `ticket:<id>:a<n>` (teto `DARKFAC_LINE_MAX_TICKET_ATTEMPTS`, padrao 10). A
   resposta informa a tentativa. A tentativa 1 mantem o id historico `ticket:<id>`.
 - Grill reaproveitado entre tentativas: uma tentativa `ticket:<id>:a<n>` (n > 1) nao pergunta de novo
   ao owner o que ele ja decidiu. No estagio `grill`, o handler procura (via `find_intake_runs`) as

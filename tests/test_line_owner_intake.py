@@ -455,10 +455,11 @@ def test_attempts_are_capped_by_the_environment(store, demands, monkeypatch) -> 
 
 def test_attempt_cap_default_and_invalid_values(monkeypatch) -> None:
     monkeypatch.delenv(owner_intake.MAX_ATTEMPTS_ENV, raising=False)
-    assert owner_intake.max_ticket_attempts_from_env() == 5
+    assert owner_intake.DEFAULT_MAX_TICKET_ATTEMPTS == 10
+    assert owner_intake.max_ticket_attempts_from_env() == 10
     for bad in ("0", "-1", "abc"):
         monkeypatch.setenv(owner_intake.MAX_ATTEMPTS_ENV, bad)
-        assert owner_intake.max_ticket_attempts_from_env() == 5
+        assert owner_intake.max_ticket_attempts_from_env() == 10
     monkeypatch.setenv(owner_intake.MAX_ATTEMPTS_ENV, "7")
     assert owner_intake.max_ticket_attempts_from_env() == 7
 

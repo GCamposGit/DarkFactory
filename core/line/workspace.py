@@ -39,8 +39,9 @@ import shutil
 import subprocess
 import sys
 import time
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Any, Callable, Iterable, Optional
 
 from pydantic import BaseModel
 
@@ -510,4 +511,119 @@ def cleanup(ws: RunWorkspace, keep_days: int = 7) -> list[str]:
             _run_git(["worktree", "prune"], cwd=mirror, check=False)
             _run_git(["branch", "-D", branch], cwd=mirror, check=False)
         removed.append(entry.name)
+    return removed
+
+
+# --------------------------------------------------------------------------
+# Disk retention sweep (2026-10-06 VPS disk incident)
+# --------------------------------------------------------------------------
+
+TERMINAL_RUN_STATUSES = frozenset({"completed", "cancelled", "failed", "succeeded"})
+_LIVE_JOB_STATUSES = frozenset(
+    {"pending", "running", "retry", "replan", "waiting_dependency", "waiting_human"}
+)
+
+
+def _parse_ts(value: Any) -> Optional[float]:
+    if not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.timestamp()
+
+
+def _newest_mtime(entry: Path) -> float:
+    newest = entry.stat().st_mtime
+    try:
+        for child in entry.iterdir():
+            try:
+                newest = max(newest, child.lstat().st_mtime)
+            except OSError:
+                continue
+    except OSError:
+        pass
+    return newest
+
+
+def _remove_run_dir(mirror: Path, entry: Path) -> None:
+    branch = f"df/{entry.name}"
+    if mirror.is_dir():
+        _run_git(["worktree", "remove", "--force", str(entry)], cwd=mirror, check=False)
+    if entry.exists():
+        shutil.rmtree(entry, ignore_errors=True)
+    if mirror.is_dir():
+        _run_git(["worktree", "prune"], cwd=mirror, check=False)
+        _run_git(["branch", "-D", branch], cwd=mirror, check=False)
+
+
+def sweep_stale_workspaces(
+    *,
+    run_status: Callable[[str], Optional[dict]],
+    protected_run_ids: Iterable[str] = (),
+    terminal_max_age_days: float = 3.0,
+    orphan_max_age_days: float = 14.0,
+    now: Optional[float] = None,
+    root: Optional[Path] = None,
+) -> list[str]:
+    """Delete per-run worktrees that can no longer matter, bounding `/workspaces` growth.
+
+    Removed: runs whose store status is terminal (completed/cancelled/failed/succeeded) with no live job,
+    finished more than `terminal_max_age_days` ago AND not touched on disk for that long. Runs the store
+    does not know (orphans) go only after `orphan_max_age_days` of disk inactivity.
+    Never removed: `protected_run_ids` (runs this worker is executing now), runs with any live job
+    (pending/running/retry/replan/waiting_*), and anything whose status lookup raised (fail closed).
+    Idempotent and safe to repeat: `checkout()` recreates a worktree from the remote branch on demand, and
+    stages push their commits. The per-project `.mirror` is left alone. Returns the removed run ids.
+    """
+    base = Path(root) if root is not None else workspace_root()
+    moment = time.time() if now is None else now
+    protected = set(protected_run_ids)
+    removed: list[str] = []
+    if not base.is_dir():
+        return removed
+    for project_dir in sorted(base.iterdir()):
+        runs_root = project_dir / _RUNS_DIRNAME
+        if not project_dir.is_dir() or not runs_root.is_dir():
+            continue
+        mirror = project_dir / _MIRROR_DIRNAME
+        for entry in sorted(runs_root.iterdir()):
+            run_id = entry.name
+            if not entry.is_dir() or run_id in protected:
+                continue
+            try:
+                disk_age_days = (moment - _newest_mtime(entry)) / 86400.0
+            except OSError:
+                continue
+            try:
+                status = run_status(run_id)
+            except Exception as exc:
+                logger.warning("workspace sweep: status lookup failed for %s (%s); keeping", run_id, exc)
+                continue
+            if status is None:
+                if disk_age_days < orphan_max_age_days:
+                    continue
+            else:
+                jobs = status.get("jobs") or []
+                if any(str(j.get("status")) in _LIVE_JOB_STATUSES for j in jobs if isinstance(j, dict)):
+                    continue
+                if str(status.get("status")) not in TERMINAL_RUN_STATUSES:
+                    continue
+                finished = _parse_ts(status.get("completed_at")) or _parse_ts(status.get("updated_at"))
+                if finished is None:
+                    continue
+                if (moment - finished) / 86400.0 < terminal_max_age_days:
+                    continue
+                if disk_age_days < terminal_max_age_days:
+                    continue
+            try:
+                _remove_run_dir(mirror, entry)
+            except Exception as exc:
+                logger.warning("workspace sweep: failed to remove %s: %s", entry, exc)
+                continue
+            removed.append(run_id)
+            logger.info("workspace sweep: removed %s/%s", project_dir.name, run_id)
     return removed

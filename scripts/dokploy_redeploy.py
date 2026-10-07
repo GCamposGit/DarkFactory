@@ -63,6 +63,9 @@ DEFAULT_ENVIRONMENT = "production"
 DEFAULT_TIMEOUT_SECONDS = 900.0
 DEFAULT_POLL_INTERVAL_SECONDS = 5.0
 DARKHUB_HEALTH_URL = "https://darkhub.ggcampos.com/health"
+# `disk=true` makes DarkHub report the HOST disk (disk_percent/disk_free_gb/disk_total_gb). Without it the
+# post-deploy disk alert of USR-122 never saw a value and never fired.
+DARKHUB_HEALTH_DISK_URL = DARKHUB_HEALTH_URL + "?disk=true"
 SHA_PATTERN = re.compile(r"^[0-9a-f]{40}$")
 
 # Hard allowlist: this tool may only ever act on these Dokploy projects,
@@ -201,6 +204,8 @@ class Deployment:
     status: str
     title: str
     created_at: Optional[datetime]
+    error_message: Optional[str] = None
+    description: Optional[str] = None
 
 
 class WaitOutcome:
@@ -336,6 +341,8 @@ def latest_deployment(payload: Dict[str, Any]) -> Optional[Deployment]:
             status=str(item.get("status") or ""),
             title=str(item.get("title") or ""),
             created_at=_parse_iso8601(item.get("createdAt")),
+            error_message=str(item.get("errorMessage") or item.get("error") or "") or None,
+            description=str(item.get("description") or "") or None,
         )
         for item in raw_deployments
     ]
@@ -347,6 +354,63 @@ def latest_deployment(payload: Dict[str, Any]) -> Optional[Deployment]:
     # No parseable timestamps: fall back to list order (providers return it
     # oldest-first), so the just-triggered deployment is still found.
     return parsed[-1]
+
+
+def detect_disk_space_failure(deployment: Optional[Deployment]) -> Optional[str]:
+    """Inspects deployment error fields for VPS disk space exhaustion signatures (USR-122)."""
+    if not deployment:
+        return None
+    from core.infra.vps_cleanup import is_disk_space_failure
+
+    for text in (deployment.error_message, deployment.description, deployment.title):
+        match = is_disk_space_failure(text)
+        if match:
+            return text
+    return None
+
+
+def clean_dokploy_build_cache_and_images(transport: Transport) -> Dict[str, Any]:
+    """Executes safe Docker build cache and unused image pruning via Dokploy API (USR-122)."""
+    from core.infra.vps_cleanup import clean_vps_docker_cache
+
+    return clean_vps_docker_cache("", "", transport=transport)
+
+
+def fetch_vps_disk_usage(health: Optional[Callable[[], Dict[str, Any]]] = None) -> Dict[str, Any]:
+    """Host disk usage as reported by DarkHub `/health?disk=true`; zeros when unavailable."""
+    try:
+        data = (health or (lambda: fetch_darkhub_health(DARKHUB_HEALTH_DISK_URL)))()
+        total = float(data.get("disk_total_gb") or 0.0)
+        free = float(data.get("disk_free_gb") or 0.0)
+        pct = float(data.get("disk_percent") or 0.0)
+        return {"total_gb": total, "used_gb": round(max(total - free, 0.0), 2), "free_gb": free, "disk_percent": pct}
+    except Exception:
+        return {"total_gb": 0.0, "used_gb": 0.0, "free_gb": 0.0, "disk_percent": 0.0}
+
+
+def default_disk_hygiene_runner(
+    transport: Transport,
+    stage: str,
+    *,
+    health: Optional[Callable[[], Dict[str, Any]]] = None,
+    force: bool = False,
+) -> Dict[str, Any]:
+    """Pre/post-deploy safe prune (core.infra.vps_cleanup.clean_vps_if_needed); never raises.
+
+    pre-deploy: only when host free space < DARKFAC_VPS_MIN_FREE_GB (default 8 GB).
+    post-deploy: unused images always, build cache only when space is short.
+    on-disk-failure: everything, because a build just died of ENOSPC.
+    """
+    from core.infra.vps_cleanup import clean_vps_if_needed, min_free_gb_from_env
+
+    return clean_vps_if_needed(
+        transport=transport,
+        disk_probe=lambda: fetch_vps_disk_usage(health),
+        min_free_gb=min_free_gb_from_env(),
+        force_images=force or stage == "post-deploy",
+        force_builder=force,
+        stage=stage,
+    )
 
 
 def evaluate_wait_state(
@@ -661,6 +725,17 @@ def build_arg_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Skip post-deploy check-main verification.",
     )
+    parser.add_argument(
+        "--clean",
+        action="store_true",
+        help="Execute safe Docker builder cache and unused images cleanup on Dokploy before deploying (USR-122).",
+    )
+    parser.add_argument(
+        "--skip-disk-hygiene",
+        action="store_true",
+        help="Skip the automatic pre/post-deploy disk cleanup policy (images always after a deploy; build "
+        "cache only when host free space is below DARKFAC_VPS_MIN_FREE_GB).",
+    )
     parser.add_argument("-v", "--verbose", action="store_true", help="Enable debug logging.")
     return parser
 
@@ -738,6 +813,7 @@ def _run_main(
     check_main_runner: Optional[Callable[[], Tuple[int, Dict[str, Any]]]],
     out: Any,
     err: Any,
+    disk_hygiene_runner: Optional[Callable[..., Dict[str, Any]]] = None,
 ) -> int:
     parser = build_arg_parser()
     args = parser.parse_args(list(argv) if argv is not None else None)
@@ -791,6 +867,34 @@ def _run_main(
         file=out,
         flush=True,
     )
+
+    if getattr(args, "clean", False):
+        try:
+            print("[DOKPLOY CLEANUP] Pruning Docker builder cache and unused images on Dokploy...", file=out, flush=True)
+            cleanup_res = clean_dokploy_build_cache_and_images(transport)
+            builder_ok = cleanup_res.get("cleanDockerBuilder", False)
+            images_ok = cleanup_res.get("cleanUnusedImages", False)
+            print(f"[DOKPLOY CLEANUP] Done: builder_cache={builder_ok}, unused_images={images_ok}", file=out, flush=True)
+        except Exception as exc:
+            print(f"[DOKPLOY CLEANUP] Warning: cleanup failed: {exc}", file=err, flush=True)
+
+    hygiene_enabled = not getattr(args, "skip_disk_hygiene", False)
+    hygiene_runner = disk_hygiene_runner or (
+        lambda t, stage, **kw: default_disk_hygiene_runner(t, stage, health=health_client, **kw)
+    )
+
+    def _run_hygiene(stage: str, **kwargs: Any) -> None:
+        if not hygiene_enabled:
+            return
+        try:
+            res = hygiene_runner(transport, stage, **kwargs)
+            res = res if isinstance(res, dict) else {}
+            freed = f" freed_gb={res['freed_gb']}" if "freed_gb" in res else ""
+            print(f"[DISK HYGIENE] {stage}: {res.get('action')} ({res.get('reason', '')}){freed}", file=out, flush=True)
+        except Exception as exc:  # housekeeping must never break a deploy
+            print(f"[DISK HYGIENE] {stage}: failed: {exc}", file=err, flush=True)
+
+    _run_hygiene("pre-deploy")
 
     all_ok = True
     other_failure = False
@@ -847,6 +951,17 @@ def _run_main(
         if result.outcome != WaitOutcome.DONE:
             all_ok = False
             other_failure = True
+            disk_err = detect_disk_space_failure(result.deployment)
+            if disk_err:
+                print(
+                    f"[{svc.name}] FALHA DE DISCO NO VPS: O build falhou por falta de espaço em disco no VPS CX23. "
+                    f"Assinatura detectada: '{disk_err.strip()}'. "
+                    "Causa raiz: esgotamento em /var/cache/apt/archives ou Docker builder cache. "
+                    "Limpeza de emergencia executada automaticamente; rode o redeploy novamente.",
+                    file=err,
+                    flush=True,
+                )
+                _run_hygiene("on-disk-failure", force=True)
 
     if darkhub_selected and any(svc.name.lower() == "darkhub" for svc in triggered):
         if wait_for_darkhub_sha(
@@ -858,6 +973,18 @@ def _run_main(
             print(f"[NODE SYNC] VPS: divergent; /health did not report origin/main sha={expected_sha}", file=err, flush=True)
             all_ok = False
             other_failure = True
+        try:
+            h_data = (health_client or (lambda: fetch_darkhub_health(DARKHUB_HEALTH_DISK_URL)))()
+            if "disk_percent" in h_data:
+                from core.infra.vps_cleanup import check_vps_disk_and_alert
+
+                disk_pct = float(h_data["disk_percent"])
+                if check_vps_disk_and_alert(disk_pct):
+                    print(f"[ALERTA INFRA] VPS CX23 disk usage is high: {disk_pct}% (> 85.0%)", file=err, flush=True)
+        except Exception:
+            pass
+    if all_ok:
+        _run_hygiene("post-deploy")
 
     # A completed Dokploy job is not evidence that all running nodes use main.
     # Converge and verify the three execution nodes (Notebook ff-only when
@@ -965,6 +1092,7 @@ def main(
     clock_fn: Callable[[], float] = time.monotonic,
     backup_runner: Optional[Callable[..., Any]] = None,
     check_main_runner: Optional[Callable[[], Tuple[int, Dict[str, Any]]]] = None,
+    disk_hygiene_runner: Optional[Callable[..., Dict[str, Any]]] = None,
     stdout: Any = None,
     stderr: Any = None,
 ) -> int:
@@ -996,6 +1124,7 @@ def main(
             check_main_runner=check_main_runner,
             out=out,
             err=err,
+            disk_hygiene_runner=disk_hygiene_runner,
         )
     except DokployUsageError as exc:
         print(str(exc), file=err, flush=True)

@@ -1090,6 +1090,36 @@ def submit_demand_ticket_to_line(
     raise HTTPException(status_code=code, detail=message)
 
 
+@router.post("/demands/tickets/{ticket_id}/line/cancel")
+def cancel_demand_ticket_line_run(
+    ticket_id: str,
+    reason: str = Query(default="owner_cancelled"),
+    service: HubService = Depends(get_hub_service),
+) -> Dict[str, Any]:
+    """Cancel an in-flight line run for a ticket (USR-123)."""
+    result = service.cancel_line_run(ticket_id, reason=reason)
+    if result.ok:
+        return result.model_dump(mode="json")
+    if "Nenhum run encontrado" in result.message:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=result.message)
+    raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=result.message)
+
+
+@router.post("/line/runs/{run_id}/cancel")
+def cancel_line_run_by_id(
+    run_id: str,
+    reason: str = Query(default="owner_cancelled"),
+    service: HubService = Depends(get_hub_service),
+) -> Dict[str, Any]:
+    """Cancel an in-flight line run by its run_id (USR-123)."""
+    result = service.cancel_line_run(run_id, reason=reason)
+    if result.ok:
+        return result.model_dump(mode="json")
+    if "not found" in result.message or "Nenhum run" in result.message:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=result.message)
+    raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=result.message)
+
+
 @router.patch("/demands/tickets/{ticket_id}/status", response_model=UserTicket)
 def update_demand_ticket_status(
     ticket_id: str,

@@ -1,0 +1,489 @@
+diff --git a/core/harness/remote_dispatch.py b/core/harness/remote_dispatch.py
+index 3608f5a..98ea38f 100644
+--- a/core/harness/remote_dispatch.py
++++ b/core/harness/remote_dispatch.py
+@@ -45,6 +45,7 @@ from __future__ import annotations
+ import base64
+ import contextlib
+ import json
++import logging
+ import os
+ import re
+ import socket
+@@ -84,6 +85,7 @@ ENV_TEST_WORKERS = "DARKFAC_TEST_WORKERS"
+ ENV_REMOTE_HARNESS = "DARKFAC_REMOTE_HARNESS"  # auto (default) | off | required
+ ENV_WORKER_TOKEN = "DARKFAC_WORKER_TOKEN"
+ ENV_BUSY_WAIT_SEC = "DARKFAC_REMOTE_BUSY_WAIT_SEC"
++ENV_PROBE_TIMEOUT_SEC = "DARKFAC_REMOTE_PROBE_TIMEOUT_SEC"
+ ENV_WORKER_JOB = "DARKFAC_HARNESS_WORKER_JOB"
+ #: Test-only escape hatch: a loopback test dispatches to a worker running on
+ #: 127.0.0.1 on purpose, which the real self-dispatch guard would otherwise
+@@ -101,6 +103,26 @@ SUBMIT_TIMEOUT_SEC = 30.0
+ POLL_HTTP_TIMEOUT_SEC = 10.0
+ 
+ 
++def probe_timeout_sec() -> float:
++    """Configurable timeout for probing test worker health (default: HEALTH_PROBE_TIMEOUT_SEC)."""
++    raw = os.environ.get(ENV_PROBE_TIMEOUT_SEC, "").strip()
++    if not raw:
++        return HEALTH_PROBE_TIMEOUT_SEC
++    try:
++        val = float(raw)
++        return val if val > 0 else HEALTH_PROBE_TIMEOUT_SEC
++    except ValueError:
++        return HEALTH_PROBE_TIMEOUT_SEC
++
++
++_last_probe_failure_reason: str | None = None
++
++
++def last_probe_failure_reason() -> str | None:
++    """Return the diagnostic reason of the most recent failed health probe."""
++    return _last_probe_failure_reason
++
++
+ class RemoteRequiredError(RuntimeError):
+     """``--remote-required``/``DARKFAC_REMOTE_HARNESS=required`` but no
+     worker could run the job (never raised for the unconditional safety
+@@ -197,18 +219,58 @@ def is_self_dispatch(base_url: str, health: dict[str, Any] | None) -> bool:
+     return False
+ 
+ 
++logger = logging.getLogger(__name__)
++
++
+ # --- HTTP plumbing (stdlib only -- consistent with core.harness.test_subagent) --
+ 
+ 
+-def probe_health(base_url: str, timeout: float = HEALTH_PROBE_TIMEOUT_SEC) -> dict[str, Any] | None:
++def probe_health(base_url: str, timeout: float | None = None) -> dict[str, Any] | None:
++    global _last_probe_failure_reason
++    _last_probe_failure_reason = None
++    if timeout is None:
++        timeout = probe_timeout_sec()
+     url = f"{base_url.rstrip('/')}/health"
+     try:
+         req = urllib.request.Request(url, headers=_auth_headers())
+         with urllib.request.urlopen(req, timeout=timeout) as resp:
+             if resp.status != 200:
++                _last_probe_failure_reason = f"HTTP {resp.status}"
++                logger.warning(
++                    "[REMOTE] Health probe returned status %s for %s (timeout=%.1fs)",
++                    resp.status,
++                    url,
++                    timeout,
++                )
+                 return None
+             return json.loads(resp.read().decode("utf-8"))
+-    except Exception:
++    except urllib.error.HTTPError as exc:
++        _last_probe_failure_reason = f"HTTP {exc.code}"
++        logger.info(
++            "[REMOTE] Health probe failed for %s (timeout=%.1fs): HTTP %s",
++            url,
++            timeout,
++            exc.code,
++        )
++        return None
++    except urllib.error.URLError as exc:
++        _last_probe_failure_reason = f"network error: {exc.reason}"
++        logger.info(
++            "[REMOTE] Health probe failed for %s (timeout=%.1fs): %s",
++            url,
++            timeout,
++            exc.reason,
++        )
++        return None
++    except Exception as exc:
++        _last_probe_failure_reason = f"{type(exc).__name__}: {exc}"
++        logger.info(
++            "[REMOTE] Health probe failed for %s (timeout=%.1fs): %s (%s)",
++            url,
++            timeout,
++            type(exc).__name__,
++            exc,
++        )
+         return None
+ 
+ 
+@@ -561,7 +623,8 @@ def maybe_dispatch_remote(
+     for base_url in urls:
+         health = probe_health(base_url)
+         if health is None:
+-            print(f"[REMOTE] {base_url} unreachable (worker offline or port blocked)")
++            reason = last_probe_failure_reason() or "worker offline or port blocked"
++            print(f"[REMOTE] {base_url} unreachable ({reason})")
+             continue
+         if is_self_dispatch(base_url, health):
+             continue
+diff --git a/core/harness/runner.py b/core/harness/runner.py
+index 3e60265..342fd20 100644
+--- a/core/harness/runner.py
++++ b/core/harness/runner.py
+@@ -599,13 +599,14 @@ def run_with_cache(
+             return remote_result
+ 
+     if cache_key is None:
+-        return execute(
+-            config,
+-            config_hash=config_hash,
+-            quick=quick,
+-            include_holdout=include_holdout,
+-            config_path=config_path,
+-        )
++        with harness_suite_lock.suite_lock() as _lock:  # noqa: F841
++            return execute(
++                config,
++                config_hash=config_hash,
++                quick=quick,
++                include_holdout=include_holdout,
++                config_path=config_path,
++            )
+ 
+     total_timeout_sec = float(sum(step.timeout_sec for step in steps))
+     lease_sec = harness_cache.inflight_lease_sec()
+diff --git a/core/harness/suite_lock.py b/core/harness/suite_lock.py
+index f86c203..b88315f 100644
+--- a/core/harness/suite_lock.py
++++ b/core/harness/suite_lock.py
+@@ -40,10 +40,22 @@ from typing import Iterator
+ 
+ _DEFAULT_SLOTS = 1
+ _DEFAULT_TIMEOUT_SEC = 3600
++_DEFAULT_STALL_SEC = 600.0
+ _POLL_MIN_SEC = 0.5
+ _POLL_MAX_SEC = 5.0
+ 
+ 
++def _stall_timeout_sec() -> float:
++    raw = os.environ.get("DARKFAC_SUITE_LOCK_STALL_SEC", "").strip()
++    if not raw:
++        return _DEFAULT_STALL_SEC
++    try:
++        value = float(raw)
++    except ValueError:
++        return _DEFAULT_STALL_SEC
++    return value if value > 0 else _DEFAULT_STALL_SEC
++
++
+ class SuiteLockTimeout(RuntimeError):
+     """Raised when no slot became free before the configured timeout."""
+ 
+@@ -183,6 +195,7 @@ def _write_sidecar(lock_path: Path) -> None:
+         "cwd": str(Path.cwd()),
+         "argv": sys.argv,
+         "started_at": time.time(),
++        "heartbeat": time.time(),
+         "harness": _detect_harness(),
+     }
+     tmp_path = sidecar.with_suffix(".tmp")
+@@ -210,13 +223,108 @@ def _describe_holder(lock_path: Path) -> str:
+     )
+ 
+ 
++def _check_and_release_stalled_holder(
++    lock_path: Path,
++    tracker: dict[int, tuple[float, float]],
++    stall_sec: float,
++) -> bool:
++    """Check if the process holding ``lock_path`` is dead or stalled (0 CPU).
++
++    Returns True if a stalled/dead holder was cleaned up, meaning the slot
++    might now be free for acquisition.
++    """
++    info = _read_sidecar(lock_path)
++    if not info:
++        return False
++
++    pid = info.get("pid")
++    if not isinstance(pid, int) or pid <= 0:
++        return False
++
++    hostname = str(info.get("hostname") or "").lower()
++    my_hostname = socket.gethostname().lower()
++    if hostname and hostname != my_hostname:
++        return False
++
++    if pid == os.getpid():
++        return False
++
++    try:
++        import psutil
++    except ImportError:
++        return False
++
++    now = time.monotonic()
++
++    # Case 1: Process does not exist in the OS process table
++    if not psutil.pid_exists(pid):
++        with contextlib.suppress(OSError):
++            _sidecar_path(lock_path).unlink()
++        tracker.pop(pid, None)
++        return True
++
++    try:
++        proc = psutil.Process(pid)
++        if not proc.is_running() or proc.status() in (psutil.STATUS_ZOMBIE, psutil.STATUS_DEAD):
++            with contextlib.suppress(OSError):
++                _sidecar_path(lock_path).unlink()
++            tracker.pop(pid, None)
++            return True
++
++        # Case 2: Inspect CPU activity ("CPU parada")
++        cpu_times = proc.cpu_times()
++        total_cpu = cpu_times.user + cpu_times.system
++
++        if pid not in tracker:
++            tracker[pid] = (total_cpu, now)
++            return False
++
++        prev_cpu, first_stopped = tracker[pid]
++        if total_cpu > prev_cpu + 0.05:
++            # CPU is advancing (active test work underway)
++            tracker[pid] = (total_cpu, now)
++            return False
++
++        # CPU has NOT advanced
++        stopped_duration = now - first_stopped
++        if stopped_duration >= stall_sec:
++            print(
++                f"[SUITE_LOCK] holder pid {pid} stalled (0.0s CPU for {stopped_duration:.1f}s >= "
++                f"{stall_sec:.1f}s threshold); releasing stalled holder and reclaiming slot"
++            )
++            with contextlib.suppress(Exception):
++                for child in proc.children(recursive=True):
++                    with contextlib.suppress(Exception):
++                        child.kill()
++                proc.kill()
++                proc.wait(timeout=3.0)
++
++            with contextlib.suppress(OSError):
++                _sidecar_path(lock_path).unlink()
++            tracker.pop(pid, None)
++            return True
++
++    except (psutil.NoSuchProcess, psutil.AccessDenied):
++        pass
++
++    return False
++
++
+ class SuiteLock:
+     """Context manager acquiring one of ``DARKFAC_SUITE_SLOTS`` machine-wide slots."""
+ 
+-    def __init__(self, *, timeout_sec: float | None = None, slots: int | None = None) -> None:
++    def __init__(
++        self,
++        *,
++        timeout_sec: float | None = None,
++        slots: int | None = None,
++        stall_sec: float | None = None,
++    ) -> None:
+         self._timeout_sec = _timeout_sec() if timeout_sec is None else timeout_sec
+         self._slots = _slot_count() if slots is None else slots
++        self._stall_sec = _stall_timeout_sec() if stall_sec is None else stall_sec
+         self._handle: _LockHandle | None = None
++        self._cpu_tracker: dict[int, tuple[float, float]] = {}
+ 
+     @property
+     def held(self) -> bool:
+@@ -237,6 +345,14 @@ class SuiteLock:
+                     _write_sidecar(lock_path)
+                     self._handle = _LockHandle(file=handle, path=lock_path, slot=slot)
+                     return
++                # Check if holding process is dead or stalled ("CPU parada")
++                if _check_and_release_stalled_holder(lock_path, self._cpu_tracker, self._stall_sec):
++                    time.sleep(0.1)
++                    handle = _try_lock_file(lock_path)
++                    if handle is not None:
++                        _write_sidecar(lock_path)
++                        self._handle = _LockHandle(file=handle, path=lock_path, slot=slot)
++                        return
+             if time.monotonic() >= deadline:
+                 sample = directory / "suite-0.lock"
+                 raise SuiteLockTimeout(
+@@ -274,7 +390,12 @@ class SuiteLock:
+ 
+ 
+ @contextlib.contextmanager
+-def suite_lock(*, timeout_sec: float | None = None, slots: int | None = None) -> Iterator[SuiteLock | None]:
++def suite_lock(
++    *,
++    timeout_sec: float | None = None,
++    slots: int | None = None,
++    stall_sec: float | None = None,
++) -> Iterator[SuiteLock | None]:
+     """Acquire the machine-wide suite lock unless disabled or already held.
+ 
+     Yields ``None`` when locking is disabled (``DARKFAC_SUITE_LOCK=off``) or a
+@@ -285,7 +406,7 @@ def suite_lock(*, timeout_sec: float | None = None, slots: int | None = None) ->
+     if is_disabled() or is_held_by_ancestor():
+         yield None
+         return
+-    lock = SuiteLock(timeout_sec=timeout_sec, slots=slots)
++    lock = SuiteLock(timeout_sec=timeout_sec, slots=slots, stall_sec=stall_sec)
+     lock.acquire()
+     previous = os.environ.get("DARKFAC_SUITE_LOCK_HELD")
+     os.environ["DARKFAC_SUITE_LOCK_HELD"] = "1"
+diff --git a/tests/test_harness_runner_acceleration.py b/tests/test_harness_runner_acceleration.py
+index fee66d8..3657fa3 100644
+--- a/tests/test_harness_runner_acceleration.py
++++ b/tests/test_harness_runner_acceleration.py
+@@ -190,6 +190,45 @@ def test_run_with_cache_calls_execute_directly_when_no_cache_flag(monkeypatch: p
+     assert calls == ["execute"]
+ 
+ 
++def test_run_with_cache_acquires_suite_lock_before_execute_when_no_cache(monkeypatch: pytest.MonkeyPatch) -> None:
++    """Suite lock must be acquired before execute() even when caching is disabled (USR-143).
++
++    This guarantees lock contention happens outside the subprocess, so waiting
++    for a slot never consumes the step's execution timeout.
++    """
++    import contextlib
++
++    events: list[str] = []
++
++    @contextlib.contextmanager
++    def fake_suite_lock(**kwargs):
++        events.append("suite_lock_enter")
++        try:
++            yield None
++        finally:
++            events.append("suite_lock_exit")
++
++    def fake_execute(config, **kwargs):
++        events.append("execute")
++        return True
++
++    monkeypatch.setattr(runner.harness_suite_lock, "suite_lock", fake_suite_lock)
++    monkeypatch.setattr(runner, "execute", fake_execute)
++    config = _minimal_config()
++
++    result = runner.run_with_cache(
++        config,
++        config_hash="a" * 64,
++        quick=True,
++        include_holdout=False,
++        config_path=Path("harness.config.json"),
++        no_cache=True,
++    )
++    assert result is True
++    assert events == ["suite_lock_enter", "execute", "suite_lock_exit"]
++
++
++
+ def test_run_with_cache_stores_and_then_reuses_verdict_on_second_call(
+     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+ ) -> None:
+diff --git a/tests/test_remote_dispatch.py b/tests/test_remote_dispatch.py
+index b3aa68c..e6693fc 100644
+--- a/tests/test_remote_dispatch.py
++++ b/tests/test_remote_dispatch.py
+@@ -202,6 +202,31 @@ def test_worker_urls_parses_comma_separated_list(monkeypatch: pytest.MonkeyPatch
+     assert remote_dispatch.worker_urls() == ["http://a:1", "http://b:2", "http://c:3"]
+ 
+ 
++def test_probe_timeout_configurable_via_env(monkeypatch: pytest.MonkeyPatch) -> None:
++    monkeypatch.delenv(remote_dispatch.ENV_PROBE_TIMEOUT_SEC, raising=False)
++    assert remote_dispatch.probe_timeout_sec() == remote_dispatch.HEALTH_PROBE_TIMEOUT_SEC
++
++    monkeypatch.setenv(remote_dispatch.ENV_PROBE_TIMEOUT_SEC, "7.5")
++    assert remote_dispatch.probe_timeout_sec() == 7.5
++
++    monkeypatch.setenv(remote_dispatch.ENV_PROBE_TIMEOUT_SEC, "invalid")
++    assert remote_dispatch.probe_timeout_sec() == remote_dispatch.HEALTH_PROBE_TIMEOUT_SEC
++
++
++def test_probe_health_logs_and_records_failure_reason(monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture) -> None:
++    import urllib.error
++
++    def _failing_urlopen(*args, **kwargs):
++        raise urllib.error.URLError("Connection refused")
++
++    monkeypatch.setattr(remote_dispatch.urllib.request, "urlopen", _failing_urlopen)
++    with caplog.at_level("INFO"):
++        health = remote_dispatch.probe_health("http://100.78.181.90:8080")
++    assert health is None
++    assert "Connection refused" in (remote_dispatch.last_probe_failure_reason() or "")
++    assert any("Health probe failed" in r.message for r in caplog.records)
++
++
+ def test_ci_env_disables_remote_without_ever_probing(monkeypatch: pytest.MonkeyPatch) -> None:
+     monkeypatch.setenv("CI", "1")
+     monkeypatch.setenv("DARKFAC_TEST_WORKERS", "http://should-not-be-probed:1")
+diff --git a/tests/test_suite_lock.py b/tests/test_suite_lock.py
+index 6b35af1..4625928 100644
+--- a/tests/test_suite_lock.py
++++ b/tests/test_suite_lock.py
+@@ -9,7 +9,9 @@ concurrently.
+ 
+ from __future__ import annotations
+ 
++import json
+ import os
++import socket
+ import subprocess
+ import sys
+ import textwrap
+@@ -173,3 +175,61 @@ def test_two_real_processes_contend_for_the_single_slot(tmp_path: Path) -> None:
+         proc_a.wait(timeout=15)
+         if proc_a.poll() is None:
+             proc_a.kill()
++
++
++def test_dead_pid_sidecar_is_cleaned_up(tmp_path: Path) -> None:
++    """When a sidecar points to a non-existent PID, it is unlinked and slot reclaimed."""
++    state_dir = tmp_path / "dead_pid_state"
++    state_dir.mkdir(parents=True, exist_ok=True)
++    lock_file = state_dir / "suite-0.lock"
++    lock_file.touch()
++    sidecar_file = state_dir / "suite-0.json"
++    sidecar_file.write_text(
++        json.dumps({
++            "pid": 99999999,
++            "hostname": socket.gethostname(),
++            "started_at": time.time() - 100,
++        }),
++        encoding="utf-8",
++    )
++
++    tracker: dict[int, tuple[float, float]] = {}
++    cleaned = suite_lock._check_and_release_stalled_holder(lock_file, tracker, stall_sec=1.0)
++    assert cleaned is True
++    assert not sidecar_file.exists()
++
++
++def test_stalled_holder_with_zero_cpu_is_released(tmp_path: Path) -> None:
++    """Process A holds the lock but is stalled (sleeping / 0 CPU).
++
++    Process B with low stall_sec threshold must detect the stall, terminate
++    process A, and successfully acquire the lock (USR-143).
++    """
++    state_dir = tmp_path / "stalled_state"
++    marker_a = tmp_path / "a_acquired.txt"
++
++    # Start process A which acquires lock and sleeps for 60s without CPU usage
++    proc_a = subprocess.Popen(
++        [sys.executable, "-c", _contender_script(state_dir, marker_a, 60.0)],
++    )
++    try:
++        deadline = time.monotonic() + 10
++        while not marker_a.exists() and time.monotonic() < deadline:
++            time.sleep(0.05)
++        assert marker_a.exists(), "process A never acquired the lock"
++
++        # Now contender B attempts to acquire with stall_sec=0.5
++        b_lock = suite_lock.SuiteLock(timeout_sec=5.0, stall_sec=0.5)
++        os.environ["DARKFAC_HARNESS_STATE_DIR"] = str(state_dir)
++        b_lock.acquire()
++        try:
++            assert b_lock.held is True
++            # Process A should have been terminated by B's stall detector
++            time.sleep(0.5)
++            assert proc_a.poll() is not None, "process A should have been terminated due to zero CPU stall"
++        finally:
++            b_lock.release()
++    finally:
++        if proc_a.poll() is None:
++            proc_a.kill()
++

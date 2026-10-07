@@ -87,23 +87,32 @@ def main() -> None:
     # Launch browser in a background thread
     threading.Thread(target=open_browser_delayed, args=(url,), daemon=True).start()
 
-    # Start Telegram background poller (USR-60 / HF-14)
+    # Start Telegram background poller (USR-60 / HF-14 / USR-110)
     def start_telegram_listener(poll_interval: float = 2.5) -> None:
         try:
             from core.integrations.telegram import TelegramGateway, load_telegram_config
             cfg = load_telegram_config(role="ops")
             if not cfg.bot_token:
+                print(" [!] Telegram Listener ignorado: bot_token ausente", flush=True)
                 return
             gw = TelegramGateway(cfg)
             print(" [*] Telegram Listener ativo para @darkfac_ops_bot (Entradas de Voz & Grill)", flush=True)
+            last_err_time = 0.0
             while True:
                 try:
                     gw.poll_updates(timeout=5)
-                except Exception:
-                    pass
+                except Exception as exc:
+                    now = time.time()
+                    if now - last_err_time > 30.0:
+                        status_code = getattr(exc, "code", None)
+                        err_label = f"HTTP {status_code}" if status_code else type(exc).__name__
+                        print(f" [!] Telegram Listener erro de polling: {err_label}", flush=True)
+                        last_err_time = now
                 time.sleep(poll_interval)
         except Exception as exc:
-            print(f"[!] Telegram Listener desativado: {exc}", flush=True)
+            status_code = getattr(exc, "code", None)
+            err_label = f"HTTP {status_code}" if status_code else type(exc).__name__
+            print(f"[!] Telegram Listener desativado: {err_label}", flush=True)
 
     threading.Thread(target=start_telegram_listener, daemon=True, name="TelegramPoller").start()
 

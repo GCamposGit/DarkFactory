@@ -83,6 +83,9 @@
     "POST /api/demands/tickets/{ticket_id}/line": {
       "machine": "Envio de um ticket existente para a linha autonoma, acionado pelo comando /linha do Telegram e por scripts; sem controle proprio no DarkHub por enquanto (core/line/owner_intake.py)."
     },
+    "POST /api/demands/tickets/{ticket_id}/line/cancel": {
+      "machine": "Cancelamento de run de ticket da linha autonoma, acionado pelo comando /cancelar do Telegram e por scripts (USR-123)."
+    },
     "POST /api/demands/tickets": {
       "surface": "demands-drawer"
     },
@@ -217,6 +220,9 @@
     },
     "GET /api/line/status": {
       "surface": "line-status-card"
+    },
+    "POST /api/line/runs/{run_id}/cancel": {
+      "machine": "Cancelamento de run da linha autonoma por run_id, acionado pelo comando /cancelar do Telegram e por scripts (USR-123)."
     },
     "GET /api/notifications": {
       "surface": "factory-alerts-strip"

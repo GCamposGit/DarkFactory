@@ -147,9 +147,12 @@ async def _lifespan(app: FastAPI):
 
         outcome = await asyncio.to_thread(register_telegram_webhooks)
         if outcome:
-            _logger_hub.info(f"[STARTUP] Telegram webhooks: {outcome}")
+            if any(v == "failed" for v in outcome.values()):
+                _logger_hub.error(f"[STARTUP] Telegram webhook registration failure: {outcome}")
+            else:
+                _logger_hub.info(f"[STARTUP] Telegram webhooks: {outcome}")
     except Exception as exc:
-        _logger_hub.warning(f"[STARTUP] Telegram webhook registration skipped: {type(exc).__name__}")
+        _logger_hub.error(f"[STARTUP] Telegram webhook registration exception: {type(exc).__name__}")
     yield
     # Teardown (none needed)
 
@@ -180,13 +183,22 @@ app.include_router(roadmap_router, prefix="/api")
 app.include_router(roadmap_router)
 
 @app.get("/health", include_in_schema=False)
-def get_health() -> Dict[str, Any]:
-    """Liveness plus the deployed commit (USR-65): `DARKFAC_GIT_SHA` when set at
-    build/deploy time, else `git rev-parse HEAD`, else null (node sync then
-    reports the VPS as 'unknown' instead of 'divergent')."""
+def get_health(disk: bool = False) -> Dict[str, Any]:
+    """Liveness plus the deployed commit (USR-65) and optional disk space capacity (USR-122)."""
     from core.infra.git_sha import current_git_sha
 
-    return {"status": "ok", "git_sha": current_git_sha(BASE_DIR.parent, use_env=True)}
+    data: Dict[str, Any] = {
+        "status": "ok",
+        "git_sha": current_git_sha(BASE_DIR.parent, use_env=True),
+    }
+    if disk:
+        from core.infra.vps_cleanup import get_local_disk_usage
+
+        disk_info = get_local_disk_usage("/")
+        data["disk_percent"] = disk_info.get("disk_percent", 0.0)
+        data["disk_free_gb"] = disk_info.get("free_gb", 0.0)
+        data["disk_total_gb"] = disk_info.get("total_gb", 0.0)
+    return data
 
 
 # Root-level aliases for operational task dashboard (eliminating 404 on reverse proxy / direct calls)

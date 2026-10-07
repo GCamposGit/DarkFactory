@@ -23,6 +23,12 @@ services:
       retries: 5
     networks:
       - dokploy-network
+    # Bounded container logs (2026-10-06 disk incident): json-file default is unbounded.
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     deploy:
       resources:
         limits:
@@ -69,6 +75,12 @@ services:
       - "traefik.http.routers.darkfac-n8n.entrypoints=websecure"
       - "traefik.http.routers.darkfac-n8n.tls.certresolver=letsencrypt"
       - "traefik.http.services.darkfac-n8n.loadbalancer.server.port=5678"
+    # Bounded container logs (2026-10-06 disk incident): json-file default is unbounded.
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     deploy:
       resources:
         limits:

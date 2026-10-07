@@ -12,7 +12,7 @@ workers read), creating a run whose first job is the grill stage. It is:
 - idempotent per attempt (`channel=owner`, `external_id=ticket:<id>`, then `ticket:<id>:a<n>`):
   pushing a ticket whose run is still in flight returns that run instead of a second one, a
   delivered ticket is reported as delivered, and a run that ended without delivering is retried
-  as a new attempt (cap `DARKFAC_LINE_MAX_TICKET_ATTEMPTS`, default 5);
+  as a new attempt (cap `DARKFAC_LINE_MAX_TICKET_ATTEMPTS`, default 10);
 - fail-closed on the store: when a database URL is configured but Postgres cannot
   be reached, `open_line_store` raises instead of silently accepting the demand
   into `PostgresControlStore`'s in-memory mock (which no worker would ever see);
@@ -58,7 +58,7 @@ AUTOSUBMIT_ENV = "DARKFAC_LINE_AUTOSUBMIT"
 PROJECTS_ENV = "DARKFAC_LINE_INTAKE_PROJECTS"
 DEFAULT_PROJECTS = "darkfac"
 MAX_ATTEMPTS_ENV = "DARKFAC_LINE_MAX_TICKET_ATTEMPTS"
-DEFAULT_MAX_TICKET_ATTEMPTS = 5
+DEFAULT_MAX_TICKET_ATTEMPTS = 10
 # Statuses from which pushing a ticket into the line moves it to `implementing`.
 _PROMOTABLE_STATUSES = frozenset({DeliveryStatus.DISCOVERED, DeliveryStatus.ACCEPTED, DeliveryStatus.PLANNED})
 
@@ -74,6 +74,17 @@ class LineSubmission(BaseModel):
     replayed: bool = False
     attempt: int = 1
     state: str = ""  # "submitted" | "in_flight" | "delivered" ("" when refused)
+    message: str = ""
+
+
+class CancelResult(BaseModel):
+    """Outcome of cancelling a line run (never raises for expected refusals, USR-123)."""
+
+    ok: bool
+    target: str
+    run_id: str | None = None
+    ticket_id: str | None = None
+    jobs_cancelled: int = 0
     message: str = ""
 
 
@@ -138,7 +149,7 @@ def ticket_external_id(ticket_id: str, attempt: int = 1) -> str:
 
 
 def max_ticket_attempts_from_env() -> int:
-    """`DARKFAC_LINE_MAX_TICKET_ATTEMPTS`; unset/invalid/<1 falls back to 5."""
+    """`DARKFAC_LINE_MAX_TICKET_ATTEMPTS`; unset/invalid/<1 falls back to 10."""
     raw = os.environ.get(MAX_ATTEMPTS_ENV, "").strip()
     if not raw:
         return DEFAULT_MAX_TICKET_ATTEMPTS
@@ -287,6 +298,9 @@ def run_state(
     except Exception as exc:  # unreadable: assume alive rather than start a duplicate
         logger.warning("Could not read status of run %s: %s", run_id, exc)
         return "in_flight"
+    if (status or {}).get("status") == "cancelled":
+        logger.info("Run %s was cancelled; a new attempt may start", run_id)
+        return "failed"
     jobs = (status or {}).get("jobs") or []
     if not jobs:
         return "in_flight"
@@ -347,7 +361,7 @@ def submit_ticket_to_line(
     Retries mirror the canary: the first send uses `ticket:<id>`; while a run is in flight it is
     replayed (never duplicated); a succeeded run is reported as delivered; when the latest run
     ended without delivering, a new send starts `ticket:<id>:a<n>` (capped by
-    `DARKFAC_LINE_MAX_TICKET_ATTEMPTS`, default 5).
+    `DARKFAC_LINE_MAX_TICKET_ATTEMPTS`, default 10).
     """
     ticket = demands_store.get_ticket(ticket_id)
     if ticket is None:
@@ -447,5 +461,82 @@ def submit_ticket_to_line(
                 "o Grill comeca em seguida."
             )
         ),
+    )
+
+
+def cancel_line_run(
+    target: str,
+    *,
+    demands_store: DemandsStore | None = None,
+    store: ControlStore | None = None,
+    user_id: int | str = 0,
+    reason: str = "owner_cancelled",
+    now: datetime | None = None,
+) -> CancelResult:
+    """Cancels a line run given either a ticket_id (e.g. 'USR-62') or a run_id (e.g. 'run-83bd3712924d') (USR-123)."""
+    clean_target = target.strip()
+    if not clean_target:
+        return CancelResult(ok=False, target="", message="Alvo de cancelamento não especificado.")
+
+    try:
+        control = open_line_store(store)
+    except Exception as exc:
+        return CancelResult(ok=False, target=clean_target, message=f"Store da linha indisponível: {exc}")
+
+    cancel_fn = getattr(control, "cancel_run", None)
+    if cancel_fn is None:
+        return CancelResult(ok=False, target=clean_target, message="Store não suporta cancelamento de run.")
+
+    run_id: str | None = None
+    ticket_id: str | None = None
+
+    if clean_target.startswith("run-"):
+        run_id = clean_target
+        getter = getattr(control, "get_run_payload", None)
+        if getter is not None:
+            try:
+                payload = getter(run_id) or {}
+                ticket_id = payload.get("ticket_id")
+            except Exception:
+                pass
+    else:
+        ticket_id = clean_target.replace("ticket:", "").upper()
+        attempts = _ticket_attempts(control, ticket_id)
+        if not attempts:
+            return CancelResult(
+                ok=False,
+                target=clean_target,
+                ticket_id=ticket_id,
+                message=f"Nenhum run encontrado na linha para o ticket {ticket_id}.",
+            )
+        run_id = attempts[-1][1]
+        if not run_id:
+            return CancelResult(
+                ok=False,
+                target=clean_target,
+                ticket_id=ticket_id,
+                message=f"Nenhum run ativo associado ao ticket {ticket_id}.",
+            )
+
+    actor = f"telegram:{user_id}" if user_id else "owner"
+    res = cancel_fn(run_id, reason=reason, actor=actor, now=now)
+    if not res.get("ok", False):
+        return CancelResult(
+            ok=False,
+            target=clean_target,
+            run_id=run_id,
+            ticket_id=ticket_id,
+            message=str(res.get("error") or res.get("message") or f"Falha ao cancelar {clean_target}."),
+        )
+
+    jobs_count = res.get("jobs_cancelled", 0)
+    ticket_part = f" do ticket {ticket_id}" if ticket_id else ""
+    return CancelResult(
+        ok=True,
+        target=clean_target,
+        run_id=run_id,
+        ticket_id=ticket_id,
+        jobs_cancelled=jobs_count,
+        message=f"Run {run_id}{ticket_part} cancelado com sucesso ({jobs_count} jobs cancelados). Nova tentativa habilitada.",
     )
 

@@ -131,3 +131,25 @@ def test_structural_worker_cap_diagnostic() -> None:
             f"Configured cap ({safe_cap}) requires ~{required_mem / BYTES_PER_GIB:.1f} GiB "
             f"which exceeds safe memory headroom (available: {avail / BYTES_PER_GIB:.1f} GiB)"
         )
+
+
+def test_explain_worker_budget() -> None:
+    """Verify human-readable explanation of allowed workers and memory budgeting (USR-143)."""
+    # 1. With memory limiting
+    avail = int(6.3 * BYTES_PER_GIB)
+    explanation = _worker_capacity.explain_worker_budget(available_bytes=avail, cpu_count=20)
+    assert "2 xdist workers" in explanation
+    assert "available RAM: 6.3 GiB" in explanation
+
+    # 2. With CPU limiting
+    avail = int(32.0 * BYTES_PER_GIB)
+    explanation = _worker_capacity.explain_worker_budget(available_bytes=avail, cpu_count=4)
+    assert "4 xdist workers" in explanation
+    assert "bounded by 4 CPUs" in explanation
+
+    # 3. With override DARKFAC_MAX_WORKERS
+    with patch.dict(os.environ, {"DARKFAC_MAX_WORKERS": "5"}):
+        explanation = _worker_capacity.explain_worker_budget(available_bytes=avail, cpu_count=20)
+        assert "5 workers" in explanation
+        assert "override DARKFAC_MAX_WORKERS=5" in explanation
+

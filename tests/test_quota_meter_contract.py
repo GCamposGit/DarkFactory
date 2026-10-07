@@ -7,12 +7,19 @@ from pathlib import Path
 import pytest
 
 from core.router.token_budget import _quota_headroom
-from core.usage.adapters import GrokAccountAdapter, ProviderSpec
+from core.usage.adapters import (
+    ClaudeCodeAccountAdapter,
+    CodexAccountAdapter,
+    GeminiAccountAdapter,
+    GrokAccountAdapter,
+    ProviderSpec,
+)
 from core.usage.history import history_path, read_history, record_probe
 from core.usage.models import AccountConnectionStatus, ProviderAccountUsage, ProviderFamily, QuotaWindow
 
 
 FIXTURE = Path(__file__).parent / "fixtures" / "usage" / "xai_2026-10-01.json"
+FIXTURES_DIR = Path(__file__).parent / "fixtures" / "usage"
 SPEC = ProviderSpec("xai", "Grok", ProviderFamily.FRONTIER, "https://grok.com/?_s=usage")
 
 
@@ -50,6 +57,133 @@ def test_real_grok_fixture_semantics_and_sanitized_history(tmp_path, monkeypatch
     assert "accessToken" not in rows[0]["raw_fields"]
     from core.usage.history import sanitize_raw
     assert sanitize_raw("xai", {"grokPlanLabel": "someone@example.com"})["grokPlanLabel"] == "[redacted]"
+
+
+class HeaderResponse:
+    def __init__(self, headers):
+        self.headers = headers
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_):
+        return None
+
+
+class SummaryResponse(Response):
+    status = 200
+
+
+@pytest.mark.parametrize("provider_id,fixture_file,expected_windows,expected_headroom", [
+    (
+        "anthropic",
+        "anthropic_2026-10-01.json",
+        [
+            ("claude:weekly", 87.0, 13.0, "2026-10-04T01:00:00+00:00"),
+            ("claude:5h", 12.0, 88.0, "2026-10-01T16:50:00+00:00"),
+        ],
+        13.0,
+    ),
+    (
+        "openai",
+        "openai_2026-10-01.json",
+        [
+            ("codex:secondary", 53.0, 47.0, "2026-10-04T00:24:03+00:00"),
+            ("codex:primary", 47.0, 53.0, "2026-10-01T16:57:11+00:00"),
+        ],
+        47.0,
+    ),
+    (
+        "google",
+        "google_2026-10-01.json",
+        [
+            ("antigravity:gemini-weekly", 85.0, 15.0, "2026-10-08T18:13:46Z"),
+            ("antigravity:gemini-5h", 0.0, 100.0, "2026-10-01T18:13:46Z"),
+        ],
+        15.0,
+    ),
+    (
+        "xai",
+        "xai_2026-10-01.json",
+        [
+            ("grok:weekly_pool", 1.4, 98.6, "2026-10-06T22:15:57.642Z"),
+        ],
+        98.6,
+    ),
+])
+def test_real_fixtures_payload_semantics_fails_if_inverted(
+    tmp_path, monkeypatch, provider_id, fixture_file, expected_windows, expected_headroom
+):
+    fixture_data = json.loads((FIXTURES_DIR / fixture_file).read_text(encoding="utf-8"))
+    payload = fixture_data["payload"]
+
+    if provider_id == "anthropic":
+        adapter = ClaudeCodeAccountAdapter(
+            ProviderSpec("anthropic", "Claude", ProviderFamily.FRONTIER, "https://claude.ai/settings/usage"),
+            tmp_path / "providers",
+        )
+        monkeypatch.setattr(
+            ClaudeCodeAccountAdapter,
+            "_extract_claude_oauth_info",
+            lambda self: ("fixture-token", None, "Pro"),
+        )
+        monkeypatch.setattr(
+            "core.usage.adapters.urllib.request.urlopen",
+            lambda *a, **k: HeaderResponse(payload["headers"]),
+        )
+        usage = adapter._probe_claude_unified_ratelimits()
+
+    elif provider_id == "openai":
+        adapter = CodexAccountAdapter(
+            ProviderSpec("openai", "Codex", ProviderFamily.FRONTIER, "https://chatgpt.com/codex/settings/usage"),
+            tmp_path / "providers",
+        )
+        usage = adapter._from_codex_response(payload)
+        usage = record_probe(usage, tmp_path / "providers")
+
+    elif provider_id == "google":
+        adapter = GeminiAccountAdapter(
+            ProviderSpec("google", "Gemini", ProviderFamily.FRONTIER, "https://one.google.com/"),
+            tmp_path / "providers",
+        )
+        monkeypatch.setattr(
+            GeminiAccountAdapter,
+            "_find_live_ls_credentials",
+            lambda self: ("fixture-csrf", [12345]),
+        )
+        monkeypatch.setattr(
+            "core.usage.adapters.urllib.request.urlopen",
+            lambda *a, **k: SummaryResponse(payload),
+        )
+        usage = adapter._probe_language_server()
+
+    elif provider_id == "xai":
+        usage = probe(tmp_path, monkeypatch, payload)
+
+    else:
+        raise ValueError(provider_id)
+
+    assert usage is not None
+    assert usage.status == AccountConnectionStatus.CONNECTED
+    assert _quota_headroom(usage) == expected_headroom
+
+    # Check each expected window
+    windows_by_id = {w.quota_id: w for w in usage.windows}
+    for qid, exp_used, exp_remaining, exp_reset in expected_windows:
+        assert qid in windows_by_id, f"Window {qid} missing from {list(windows_by_id)}"
+        win = windows_by_id[qid]
+        assert win.used_percent == exp_used
+        assert win.remaining_percent == exp_remaining
+        if exp_reset:
+            assert win.resets_at == exp_reset
+
+        # Strict test requirement: must fail if semantics are inverted (used <-> remaining)
+        assert exp_used != exp_remaining, f"Window {qid} cannot have identical used and remaining for invert test"
+        inverted_used = exp_remaining
+        inverted_remaining = exp_used
+        assert (win.used_percent != inverted_used or win.remaining_percent != inverted_remaining), (
+            f"Window {qid} semantics are inverted!"
+        )
 
 
 @pytest.mark.parametrize("change", [
@@ -108,6 +242,47 @@ def test_audit_expect_detects_mismatch(tmp_path, monkeypatch, capsys):
     assert command.audit("xai", {"xai": 98}, tmp_path / "providers") == 0
     assert "usagePercent" in capsys.readouterr().out
     assert command.audit("xai", {"xai": 10}, tmp_path / "providers") == 1
+
+
+@pytest.mark.parametrize("provider_id,expected_val,divergent_val", [
+    ("xai", 98.6, 10.0),
+    ("anthropic", 13.0, 80.0),
+    ("openai", 47.0, 95.0),
+    ("google", 15.0, 80.0),
+])
+def test_audit_expect_all_providers_detects_mismatch(
+    tmp_path, monkeypatch, provider_id, expected_val, divergent_val
+):
+    import scripts.quota_audit as command
+
+    fixture_dir = Path(__file__).parent / "fixtures" / "usage"
+    xai_p = json.loads((fixture_dir / "xai_2026-10-01.json").read_text(encoding="utf-8"))["payload"]
+    ant_p = json.loads((fixture_dir / "anthropic_2026-10-01.json").read_text(encoding="utf-8"))["payload"]
+    oai_p = json.loads((fixture_dir / "openai_2026-10-01.json").read_text(encoding="utf-8"))["payload"]
+    goo_p = json.loads((fixture_dir / "google_2026-10-01.json").read_text(encoding="utf-8"))["payload"]
+
+    monkeypatch.setattr(GrokAccountAdapter, "_extract_grok_bot_token", lambda self: "fixture-token")
+    monkeypatch.setattr(GrokAccountAdapter, "_probe_grok_cli_session", lambda self: None)
+    monkeypatch.setattr(ClaudeCodeAccountAdapter, "_extract_claude_oauth_info", lambda self: ("fixture-token", None, "Pro"))
+    monkeypatch.setattr(GeminiAccountAdapter, "_find_live_ls_credentials", lambda self: ("fixture-csrf", [12345]))
+    monkeypatch.setattr(CodexAccountAdapter, "_find_codex", lambda *a: "fake-codex")
+    monkeypatch.setattr(CodexAccountAdapter, "_read_rate_limits", lambda *a, **k: oai_p)
+
+    def mock_urlopen(req, *args, **kwargs):
+        url = getattr(req, "full_url", str(req))
+        if "cursor.sh" in url or "grok" in url:
+            return Response(xai_p)
+        if "anthropic.com" in url:
+            return HeaderResponse(ant_p["headers"])
+        if "127.0.0.1" in url or "language_server" in url:
+            return SummaryResponse(goo_p)
+        return Response({})
+
+    monkeypatch.setattr("core.usage.adapters.urllib.request.urlopen", mock_urlopen)
+
+    assert command.audit(provider_id, {provider_id: expected_val}, tmp_path / "providers") == 0
+    assert command.audit(provider_id, {provider_id: divergent_val}, tmp_path / "providers") == 1
+
 
 
 def test_report_shows_source_raw_and_unknown_distinct_from_critical():
