@@ -391,6 +391,125 @@ def seed_line_live_demo(path: Path, now: datetime) -> dict[str, str]:
     return ids
 
 
+_LOCAL_HOST = "DESKTOP-TEST"
+
+# (minutes after the run started, phase, status, message, cause, harness)
+_LocalStep = tuple[float, str, str, str, str | None, str | None]
+
+
+def _emit_local_run(
+    db_path: Path,
+    now: datetime,
+    *,
+    run_id: str,
+    ticket_id: str,
+    title: str,
+    started_min_ago: float,
+    steps: list[_LocalStep],
+    finish: tuple[float, bool, str | None] | None = None,
+) -> None:
+    """Publish a scripted ``run_ticket`` run through the real publisher and the real SQLite sink."""
+    from core.line.local_progress import ProgressPublisher, SqliteSink
+
+    start = now - timedelta(minutes=started_min_ago)
+    current = [start]
+    publisher = ProgressPublisher(
+        ticket_id=ticket_id,
+        project_id="darkfac",
+        title=title,
+        run_id=run_id,
+        sink=SqliteSink(db_path),
+        worker=_LOCAL_HOST,
+        clock=lambda: current[0],
+    )
+    for minutes, phase, status, message, cause, harness in steps:
+        current[0] = start + timedelta(minutes=minutes)
+        publisher.phase(phase, status, message, cause=cause, harness=harness)  # type: ignore[arg-type]
+    if finish is not None:
+        current[0] = start + timedelta(minutes=finish[0])
+        if finish[1]:
+            publisher.finish(True)
+        else:
+            publisher.set_outcome(finish[2] or "falhou", "delivery_failed")
+            publisher.finish(False)
+
+
+_LOCAL_DONE_STEPS: list[_LocalStep] = [
+    (0, "preflight", "running", "cota e roteamento", None, None),
+    (1, "preflight", "succeeded", "rota codex", None, "codex"),
+    (1, "workspace", "running", "criando worktree", None, None),
+    (2, "workspace", "succeeded", "worktree pronta", None, None),
+    (2, "agent", "running", "desenvolvimento via codex", None, "codex"),
+    (20, "agent", "succeeded", "3 arquivo(s) alterado(s)", None, "codex"),
+    (20, "gate", "running", "portao oficial", None, None),
+    (26, "gate", "succeeded", "portao oficial aprovado", None, None),
+    (26, "commit", "running", "commit", None, None),
+    (27, "commit", "succeeded", "deadbeef", None, None),
+    (27, "pr", "running", "push e PR", None, None),
+    (28, "pr", "succeeded", "https://github.com/x/y/pull/9", None, None),
+    (28, "ci", "running", "aguardando checks", None, None),
+    (36, "ci", "succeeded", "ci_gate=green", None, None),
+    (36, "merge", "running", "squash merge", None, None),
+    (37, "merge", "succeeded", "merge cafe", None, None),
+    (37, "deploy", "skipped", "deploy fora do run_ticket", None, None),
+]
+
+
+def seed_local_runs(db_path: Path, now: datetime) -> dict[str, str]:
+    """Add four ``run_ticket`` runs (USR-140) to an already seeded control database.
+
+    ==================  =============================================================
+    ``local_live``      agent running for 12 min on claude (preflight/workspace done)
+    ``local_done``      every phase succeeded 2 h ago, deploy skipped, run closed
+    ``local_gate_red``  the official gate failed 3 h ago, run closed as failed
+    ``local_abandoned`` agent started 9 h ago and the process never reported again
+    ==================  =============================================================
+    """
+    ids = {
+        "local_live": "local-USR-140-live",
+        "local_done": "local-USR-141-done",
+        "local_gate_red": "local-USR-142-gate",
+        "local_abandoned": "local-USR-143-gone",
+    }
+    _emit_local_run(
+        db_path, now, run_id=ids["local_live"], ticket_id="USR-140", title="Esteira ao vivo: run_ticket local",
+        started_min_ago=15,
+        steps=[
+            (0, "preflight", "running", "cota e roteamento", None, None),
+            (1, "preflight", "succeeded", "rota claude", None, "claude"),
+            (1, "workspace", "running", "criando worktree", None, None),
+            (3, "workspace", "succeeded", "usr-140-1 (ticket/usr-140@abc123def456)", None, None),
+            (3, "agent", "running", "desenvolvimento via claude", None, "claude"),
+        ],
+    )
+    _emit_local_run(
+        db_path, now, run_id=ids["local_done"], ticket_id="USR-141", title="Ticket local entregue",
+        started_min_ago=120 + 38, steps=_LOCAL_DONE_STEPS, finish=(38, True, None),
+    )
+    _emit_local_run(
+        db_path, now, run_id=ids["local_gate_red"], ticket_id="USR-142", title="Ticket local com portao vermelho",
+        started_min_ago=180,
+        steps=[
+            (0, "preflight", "succeeded", "rota grok", None, "grok"),
+            (1, "workspace", "succeeded", "worktree pronta", None, None),
+            (1, "agent", "succeeded", "1 arquivo(s) alterado(s)", None, "grok"),
+            (10, "gate", "running", "portao oficial", None, None),
+            (14, "gate", "failed", "portao oficial falhou (codigo 1)", "gate_failed", None),
+        ],
+        finish=(14, False, "entrega falhou: gate_failed"),
+    )
+    _emit_local_run(
+        db_path, now, run_id=ids["local_abandoned"], ticket_id="USR-143", title="Ticket local abandonado",
+        started_min_ago=540,
+        steps=[
+            (0, "preflight", "succeeded", "rota claude", None, "claude"),
+            (1, "workspace", "succeeded", "worktree pronta", None, None),
+            (1, "agent", "running", "desenvolvimento via claude", None, "claude"),
+        ],
+    )
+    return ids
+
+
 def main(argv: list[str]) -> int:
     if len(argv) != 2:
         print("usage: python -m tests.fixtures.line_live_seed <state_dir>")
@@ -400,7 +519,9 @@ def main(argv: list[str]) -> int:
     db_path = directory / "control.db"
     for suffix in ("", "-wal", "-shm"):
         Path(str(db_path) + suffix).unlink(missing_ok=True)
-    seed_line_live_demo(db_path, datetime.now(timezone.utc))
+    now = datetime.now(timezone.utc)
+    seed_line_live_demo(db_path, now)
+    seed_local_runs(db_path, now)  # four run_ticket runs (USR-140) on top of the eight line runs
     print(f"seeded {db_path}")
     return 0
 

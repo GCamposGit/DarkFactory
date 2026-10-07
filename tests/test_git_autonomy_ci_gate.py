@@ -1117,3 +1117,78 @@ def test_check_main_cli_module_entrypoint_exposes_the_flags() -> None:
     assert proc.returncode == 0, proc.stderr
     for flag in ("--json", "--open-ticket", "--notify"):
         assert flag in proc.stdout
+
+
+# ----------------------------------------------------------------------
+# on_phase progress hook (USR-140): best-effort, never alters delivery
+# ----------------------------------------------------------------------
+
+
+def _recording_manager(local: Path, clock: FakeClock, phases: list[tuple[str, str]]) -> GitAutonomyManager:
+    mgr = manager(local, clock)
+    mgr.on_phase = lambda phase, status, message, cause: phases.append((phase, status))
+    return mgr
+
+
+def test_a_merged_delivery_reports_pr_ci_and_merge_in_order(repo: tuple[Path, Path]) -> None:
+    local, bare = repo
+    write_code(local)
+    phases: list[tuple[str, str]] = []
+    gh = FakeRepoGh(bare, [[check("pending")], [check("pass")]])
+
+    rep = _recording_manager(local, FakeClock(), phases).deliver_branch("USR-90", "Gate", cwd=local, gh_runner=gh)
+
+    assert rep.ok and rep.action == "merged", rep.message
+    assert phases == [
+        ("pr", "running"), ("pr", "succeeded"),
+        ("ci", "running"), ("ci", "succeeded"),
+        ("merge", "running"), ("merge", "succeeded"),
+    ]
+
+
+def test_red_checks_report_a_failed_ci_phase_and_never_a_merge(repo: tuple[Path, Path]) -> None:
+    local, bare = repo
+    write_code(local)
+    phases: list[tuple[str, str]] = []
+    gh = FakeRepoGh(bare, [[check("fail")]], failed_log="boom")
+
+    rep = _recording_manager(local, FakeClock(), phases).deliver_branch("USR-90", "Gate", cwd=local, gh_runner=gh)
+
+    assert not rep.ok and rep.action == "ci_failed"
+    assert phases == [("pr", "running"), ("pr", "succeeded"), ("ci", "running"), ("ci", "failed")]
+
+
+def test_a_delivery_that_stops_early_closes_the_open_phase_as_failed(repo: tuple[Path, Path]) -> None:
+    local, bare = repo
+    write_code(local)
+    phases: list[tuple[str, str]] = []
+    gh = FakeRepoGh(bare, [])
+    # `gh pr create` fails: the push/PR phase is left open by the early return
+    original = gh.__call__
+
+    def failing(args: Sequence[str], cwd: Path) -> subprocess.CompletedProcess[str]:
+        if list(args)[:2] == ["pr", "create"]:
+            return subprocess.CompletedProcess(list(args), 1, "", "HTTP 500")
+        return original(args, cwd)
+
+    rep = _recording_manager(local, FakeClock(), phases).deliver_branch(
+        "USR-90", "Gate", cwd=local, gh_runner=failing
+    )
+
+    assert not rep.ok
+    assert phases == [("pr", "running"), ("pr", "failed")]
+
+
+def test_a_raising_on_phase_hook_never_changes_the_delivery(repo: tuple[Path, Path]) -> None:
+    local, bare = repo
+    write_code(local)
+    gh = FakeRepoGh(bare, [])
+    mgr = manager(local, FakeClock())
+
+    def boom(phase: str, status: str, message: str, cause: Optional[str]) -> None:
+        raise RuntimeError("progress backend exploded")
+
+    mgr.on_phase = boom
+    rep = mgr.deliver_branch("USR-90", "Gate", cwd=local, gh_runner=gh)
+
+    assert rep.ok and rep.action == "merged", rep.message

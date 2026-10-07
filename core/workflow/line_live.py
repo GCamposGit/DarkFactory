@@ -30,6 +30,16 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from core.line.bindings import LINE_STAGES
+from core.line.local_progress import (
+    ABANDON_AFTER_SECONDS,
+    LOCAL_RUN_MODE,
+    PHASE_LABELS,
+    PHASE_TIMEOUT_SECONDS,
+    PHASES as LOCAL_PHASES,
+    READ_COLUMNS as LOCAL_EVENT_COLUMNS,
+    RUN_PHASE as LOCAL_RUN_PHASE,
+    TABLE as LOCAL_EVENTS_TABLE,
+)
 from core.orchestrator.cloud_db import sanitize_database_url
 from core.workflow.job_board import (
     DATABASE_URL_ENVS,
@@ -47,6 +57,7 @@ MAX_EVIDENCE_REFS = 12
 MAX_NEXT_BACKLOG = 5
 RUNNING_IDLE_LIMIT = timedelta(minutes=20)
 QUEUED_STALL_LIMIT = timedelta(minutes=30)
+LOCAL_EVENT_LIMIT = 3000
 
 STAGE_LABELS: dict[str, str] = {
     "grill": "Grill",
@@ -58,6 +69,7 @@ STAGE_LABELS: dict[str, str] = {
     "build_deploy": "Deploy",
     "retrospective": "Retrospectiva",
     "target_journey": "Jornada-alvo",
+    **PHASE_LABELS,  # stages of a local run_ticket run (USR-140)
 }
 
 _ATTENTION_STAGE_STATUSES: frozenset[str] = frozenset(
@@ -341,6 +353,7 @@ class _RawStore:
     jobs: list[dict[str, Any]] = field(default_factory=list)
     claims: list[dict[str, Any]] = field(default_factory=list)
     intake: list[dict[str, Any]] = field(default_factory=list)
+    local_events: list[dict[str, Any]] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
 
 
@@ -377,6 +390,16 @@ def _load_with(
     raw = _RawStore()
     runs = _select_runs(execute(_RUN_QUERY.format(limit=RUN_LIMIT), ()), now)
     raw.runs = runs
+    # run_ticket progress (USR-140) is optional enrichment: the table may not exist yet and must
+    # never hide the line itself.
+    try:
+        raw.local_events = execute(
+            f"SELECT {LOCAL_EVENT_COLUMNS} FROM {LOCAL_EVENTS_TABLE} "
+            f"ORDER BY event_id DESC LIMIT {LOCAL_EVENT_LIMIT}",
+            (),
+        )
+    except Exception as exc:  # noqa: BLE001 - driver specific errors (missing table is the common one)
+        logger.info("Live line: local run progress unreadable: %s", sanitize_database_url(str(exc)))
     run_ids = [str(row["run_id"]) for row in runs]
     if not run_ids:
         return raw
@@ -554,7 +577,7 @@ _ATTENTION_FALLBACK = {
 
 
 def _run_state(
-    *, active: bool, run_status: str, stages: list[LiveStage]
+    *, active: bool, run_status: str, stages: list[LiveStage], required: Sequence[str] = LINE_STAGES
 ) -> RunState:
     reached = [item for item in stages if item.status != "not_reached"]
     statuses = [item.status for item in reached]
@@ -578,7 +601,7 @@ def _run_state(
         return "queued"
     if all(s == "succeeded" for s in statuses) and all(
         any(item.stage == line_stage and item.status == "succeeded" for item in stages)
-        for line_stage in LINE_STAGES
+        for line_stage in required
     ):
         return "succeeded"
     # Between stages (a job succeeded, the next one is not scheduled yet) the run is still moving.
@@ -601,6 +624,7 @@ def _stall_reason(
     stages: list[LiveStage],
     attempts_by_stage: Mapping[str, list[_Attempt]],
     now: datetime,
+    local: bool = False,
 ) -> str | None:
     for item in stages:
         if item.status != "running":
@@ -612,7 +636,9 @@ def _stall_reason(
         lease = _parse_dt(item.lease_expires_at)
         if lease is not None and lease < now:
             return f"lease de {item.label} expirou há {_fmt_duration((now - lease).total_seconds())}"
-        if latest.updated is not None and now - latest.updated > RUNNING_IDLE_LIMIT:
+        # A local run publishes only on phase transitions (the agent phase is silent for minutes):
+        # its per-phase timeout above is the stall signal, not a short idle limit.
+        if not local and latest.updated is not None and now - latest.updated > RUNNING_IDLE_LIMIT:
             return f"{item.label} sem atividade há {_fmt_duration((now - latest.updated).total_seconds())}"
     if state == "queued":
         pending = [
@@ -691,21 +717,158 @@ def _attempt_events(
     return events
 
 
+_LOCAL_STAGE_STATUS: dict[str, str] = {
+    "running": "running",
+    "succeeded": "succeeded",
+    "failed": "failed",
+    "skipped": "cancelled",
+}
+_LOCAL_ROLE = "run_ticket"
+
+
+def _event_sort_key(event: Mapping[str, Any]) -> tuple[int, str]:
+    parsed = _parse_dt(event.get("at"))
+    return (_int(event.get("event_id")), parsed.isoformat() if parsed is not None else "")
+
+
+def _fold_local_runs(
+    events: Sequence[Mapping[str, Any]], now: datetime
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]], dict[str, str]]:
+    """Fold ``run_ticket`` phase events (USR-140) into rows shaped like control-store runs/jobs/claims.
+
+    Returns ``(runs, jobs, claims, titles_by_run_id)``. Everything downstream (stage statuses,
+    durations, stalls, event feed, KPIs, ordering) then works unchanged for local runs.
+    """
+    by_run: dict[str, list[Mapping[str, Any]]] = defaultdict(list)
+    for event in events:
+        if event.get("run_id") and _parse_dt(event.get("at")) is not None:
+            by_run[str(event["run_id"])].append(event)
+
+    runs: list[dict[str, Any]] = []
+    jobs: list[dict[str, Any]] = []
+    claims: list[dict[str, Any]] = []
+    titles: dict[str, str] = {}
+    cutoff = now - RECENT_RUN_WINDOW
+    for run_id, items in by_run.items():
+        items.sort(key=_event_sort_key)
+        first_at = _parse_dt(items[0].get("at"))
+        last_at = _parse_dt(items[-1].get("at"))
+        assert first_at is not None and last_at is not None
+        closing_event = next((e for e in reversed(items) if e.get("phase") == LOCAL_RUN_PHASE), None)
+        completed_at: datetime | None
+        if closing_event is not None:
+            status = "completed" if str(closing_event.get("status")) == "succeeded" else "failed"
+            completed_at = _parse_dt(closing_event.get("at"))
+        elif (now - last_at).total_seconds() > ABANDON_AFTER_SECONDS:
+            status, completed_at = "aborted", last_at
+        else:
+            status, completed_at = "active", None
+        if status != "active" and last_at < cutoff:
+            continue
+
+        ticket_id = str(items[0].get("ticket_id") or run_id)
+        title = next((str(e["title"]) for e in reversed(items) if e.get("title")), "")
+        if title:
+            titles[run_id] = title
+        runs.append(
+            {
+                "run_id": run_id,
+                "project_id": str(items[0].get("project_id") or "darkfac"),
+                "demand_id": ticket_id,
+                "mode": LOCAL_RUN_MODE,
+                "status": status,
+                "created_at": first_at,
+                "updated_at": last_at,
+                "completed_at": completed_at,
+            }
+        )
+
+        folded: dict[str, dict[str, Any]] = {}
+        for phase in LOCAL_PHASES:
+            phase_events = [e for e in items if e.get("phase") == phase]
+            if not phase_events:
+                continue
+            last = phase_events[-1]
+            phase_status = _LOCAL_STAGE_STATUS.get(str(last.get("status")), "pending")
+            at_last = _parse_dt(last.get("at"))
+            folded[phase] = {
+                "status": phase_status,
+                "started": _parse_dt(phase_events[0].get("at")),
+                "finished": at_last if phase_status != "running" else None,
+                "updated": at_last,
+                "cause": last.get("cause_code") or None,
+                "message": str(last.get("message") or ""),
+                "harness": next((e.get("harness") for e in reversed(phase_events) if e.get("harness")), None),
+                "worker": next((e.get("worker") for e in reversed(phase_events) if e.get("worker")), None),
+            }
+        # The run ended without any stage carrying the reason: pin it on the phase that was active.
+        if status == "failed" and closing_event is not None and folded:
+            if not any(f["status"] == "failed" for f in folded.values()):
+                running = [name for name, f in folded.items() if f["status"] == "running"]
+                target = running[-1] if running else list(folded)[-1]
+                folded[target].update(
+                    status="failed",
+                    finished=completed_at,
+                    cause=closing_event.get("cause_code") or None,
+                    message=str(closing_event.get("message") or ""),
+                )
+        if status == "aborted":
+            for f in folded.values():
+                if f["status"] == "running":
+                    f.update(status="cancelled", finished=last_at, cause="abandoned")
+
+        for phase, f in folded.items():
+            jobs.append(
+                {
+                    "run_id": run_id,
+                    "ticket_id": ticket_id,
+                    "stage": phase,
+                    "iteration": 0,
+                    "status": f["status"],
+                    "role": _LOCAL_ROLE,
+                    "cause_code": f["cause"],
+                    "actual_cost": 0,
+                    "retry_count": 0,
+                    "max_retries": 0,
+                    "evidence_refs": json.dumps([f["message"]]) if f["message"] else "[]",
+                    "timeout_seconds": PHASE_TIMEOUT_SECONDS.get(phase),
+                    "created_at": f["started"],
+                    "updated_at": f["updated"],
+                    "started_at": f["started"],
+                    "finished_at": f["finished"],
+                }
+            )
+            if f["worker"] or f["harness"]:
+                claims.append(
+                    {
+                        "run_id": run_id,
+                        "stage": phase,
+                        "iteration": 0,
+                        "owner": f["worker"],
+                        "route_ref": f["harness"],
+                        "acquired_at": f["started"],
+                        "expires_at": None,
+                    }
+                )
+    return runs, jobs, claims, titles
+
+
 def _build_runs(
     raw: _RawStore,
     *,
     now: datetime,
     titles: Mapping[str, str],
 ) -> tuple[list[LiveRun], list[LiveEvent], dict[str, list[tuple[datetime, float]]]]:
+    local_runs, local_jobs, local_claims, local_titles = _fold_local_runs(raw.local_events, now)
     jobs_by_run: dict[str, list[dict[str, Any]]] = defaultdict(list)
-    for job in raw.jobs:
+    for job in (*raw.jobs, *local_jobs):
         jobs_by_run[str(job["run_id"])].append(job)
 
     claims_by_key: dict[tuple[str, str, int], dict[str, Any]] = {}
-    for claim in sorted(raw.claims, key=lambda c: _parse_dt(c.get("acquired_at")) or now):
+    for claim in sorted((*raw.claims, *local_claims), key=lambda c: _parse_dt(c.get("acquired_at")) or now):
         claims_by_key[(str(claim["run_id"]), str(claim["stage"]), _int(claim.get("iteration")))] = claim
 
-    intake_titles: dict[str, str] = {}
+    intake_titles: dict[str, str] = dict(local_titles)
     for item in raw.intake:  # already ordered newest first
         run_id = item.get("run_id")
         if run_id is None or str(run_id) in intake_titles:
@@ -718,8 +881,10 @@ def _build_runs(
     events: list[LiveEvent] = []
     cost_points: dict[str, list[tuple[datetime, float]]] = {}
 
-    for run_row in raw.runs:
+    for run_row in (*raw.runs, *local_runs):
         run_id = str(run_row["run_id"])
+        local = str(run_row.get("mode") or "") == LOCAL_RUN_MODE
+        line_stages: Sequence[str] = LOCAL_PHASES if local else LINE_STAGES
         run_status = str(run_row.get("status") or "active")
         active = not _is_terminal(run_status)
         project_id = str(run_row.get("project_id") or "unknown")
@@ -764,19 +929,19 @@ def _build_runs(
                 latest_job_updated = attempt.updated
         cost_points[run_id] = points
 
-        extra_stages = [name for name in stage_first_seen if name not in LINE_STAGES]
+        extra_stages = [name for name in stage_first_seen if name not in line_stages]
         stages: list[LiveStage] = []
-        for stage in (*LINE_STAGES, *extra_stages):
+        for stage in (*line_stages, *extra_stages):
             attempts = attempts_by_stage.get(stage)
             if not attempts:
-                if stage in LINE_STAGES:
+                if stage in line_stages:
                     stages.append(_not_reached(stage))
                 continue
             latest_iteration = max(item.iteration for item in attempts)
             claim = claims_by_key.get((run_id, stage, latest_iteration))
             stages.append(_build_stage(stage, attempts, claim, now))
 
-        state = _run_state(active=active, run_status=run_status, stages=stages)
+        state = _run_state(active=active, run_status=run_status, stages=stages, required=line_stages)
         current = _current_stage(stages)
         attention: LiveAttention | None = None
         if state == "attention" and current is not None:
@@ -791,7 +956,9 @@ def _build_runs(
                 since=since,
             )
         stall = (
-            _stall_reason(state=state, stages=stages, attempts_by_stage=attempts_by_stage, now=now)
+            _stall_reason(
+                state=state, stages=stages, attempts_by_stage=attempts_by_stage, now=now, local=local
+            )
             if active
             else None
         )

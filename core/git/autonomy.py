@@ -52,6 +52,8 @@ _POLICY_BLOCK_MARKER = "base branch policy prohibits"
 
 _LEDGER_RELATIVE = ".factory/demands/demands.json"
 
+PhaseCallback = Callable[[str, str, str, Optional[str]], None]
+
 
 class GitSyncResult(BaseModel):
     """Normalized outcome of an environment sync operation."""
@@ -200,8 +202,13 @@ class GitAutonomyManager:
         sweep_grace_s: float = ticket_workspace.ORPHAN_MIN_AGE_S,
         trash_retention_days: float = ticket_workspace.TRASH_RETENTION_DAYS,
         protected_state_paths: Sequence[str] = DEFAULT_PROTECTED_STATE_PATHS,
+        on_phase: Optional[PhaseCallback] = None,
     ) -> None:
         self.root = root
+        # Optional best-effort progress hook (USR-140): called as (phase, status, message, cause) on
+        # commit/pr/ci/merge transitions. It can never affect delivery: errors are swallowed.
+        self.on_phase = on_phase
+        self._open_phase: Optional[str] = None
         # CI gate tuning (USR-85); None keeps the ci_checks defaults
         # (DARKFAC_CI_WAIT_SECONDS, 20 s poll, real clock). Injectable for tests.
         self.ci_timeout_s = ci_timeout_s
@@ -217,6 +224,29 @@ class GitAutonomyManager:
         self.sweep_grace_s = sweep_grace_s
         self.trash_retention_days = trash_retention_days
         self.protected_state_paths = tuple(protected_state_paths)
+
+    def _phase(self, phase: str, status: str, message: str = "", cause: Optional[str] = None) -> None:
+        """Report a delivery phase transition to ``on_phase``; never raises."""
+        if status == "running":
+            self._open_phase = phase
+        elif self._open_phase == phase:
+            self._open_phase = None
+        if self.on_phase is None:
+            return
+        try:
+            self.on_phase(phase, status, message, cause)
+        except Exception as exc:  # noqa: BLE001 - progress reporting must not alter delivery
+            logger.warning("on_phase hook failed for %s/%s: %s", phase, status, type(exc).__name__)
+
+    def _close_open_phase(self, report: DeliveryReport) -> None:
+        """A delivery that returned early leaves its phase open: close it with the outcome."""
+        phase = self._open_phase
+        if phase is None:
+            return
+        if report.ok:
+            self._phase(phase, "skipped", report.message)
+        else:
+            self._phase(phase, "failed", report.message, report.action)
 
     def _check_staged_state_files(self, cwd: Path) -> None:
         check_staged_state_files(
@@ -679,6 +709,7 @@ class GitAutonomyManager:
             ), "ci_gate=rejected_ledger_only"
         if kind == "queue" and is_ledger_only(changed):
             logger.info("PR #%s touches only ledger/roadmap files; waiting for required checks", number)
+        self._phase("ci", "running", f"aguardando checks obrigatorios do PR #{number}")
         verdict = ensure_green(
             number,
             cwd,
@@ -691,8 +722,11 @@ class GitAutonomyManager:
         )
         note = f"ci_gate={verdict.status}"
         if verdict.passed:
+            self._phase("ci", "succeeded", note)
             return None, note
-        return self._blocked_report(verdict, pr_url, branch, base), note
+        blocked = self._blocked_report(verdict, pr_url, branch, base)
+        self._phase("ci", "failed", blocked.message, verdict.status)
+        return blocked, note
 
     @staticmethod
     def _blocked_report(verdict: CiVerdict, pr_url: str, branch: str, base: str) -> DeliveryReport:
@@ -745,10 +779,12 @@ class GitAutonomyManager:
         try:
             if kind not in ("queue", "implementation"):
                 raise ValueError(f"Unknown delivery kind: {kind}")
-            return self._deliver(ticket_id, title, target, base, runner, merge, kind)
+            report = self._deliver(ticket_id, title, target, base, runner, merge, kind)
         except Exception as exc:  # fail-closed report instead of crashing the pipeline
             logger.exception("deliver_branch failed for %s", ticket_id)
-            return DeliveryReport(ok=False, action="error", message=str(exc))
+            report = DeliveryReport(ok=False, action="error", message=str(exc))
+        self._close_open_phase(report)
+        return report
 
     def _deliver(
         self, ticket_id: str, title: str, cwd: Path, base: str, runner: GhRunner, merge: bool,
@@ -812,6 +848,7 @@ class GitAutonomyManager:
             return DeliveryReport(ok=False, action="error", branch=branch, message="Queue PR changes non-ledger files.")
 
         # (d) push
+        self._phase("pr", "running", "push da branch e abertura do PR")
         push = _run_git(["push", "--force-with-lease", "-u", "origin", branch], cwd=cwd, timeout_s=180.0)
         if push.returncode != 0:
             return DeliveryReport(
@@ -865,6 +902,7 @@ class GitAutonomyManager:
                 return DeliveryReport(ok=False, action="error", pr_url=pr_url, branch=branch,
                                       message=f"Could not label {kind} PR: {label.stderr.strip()}")
 
+        self._phase("pr", "succeeded", pr_url)
         if not merge:
             return DeliveryReport(
                 ok=True,
@@ -882,6 +920,7 @@ class GitAutonomyManager:
         if blocked is not None:
             return blocked
         merge_args = ["pr", "merge", str(number), "--squash", "--delete-branch"]
+        self._phase("merge", "running", f"squash merge do PR {pr_url}")
         merge_res = runner(merge_args, cwd)
         state, merge_sha = self._pr_state(number, cwd, runner)
         if state != "MERGED" and merge_res.returncode != 0:
@@ -935,6 +974,8 @@ class GitAutonomyManager:
                 ok=False, action="error", pr_url=pr_url, branch=branch, merge_sha=merge_sha,
                 message=f"merge commit {merge_sha} not found in {remote_ref}",
             )
+
+        self._phase("merge", "succeeded", f"merge {merge_sha}")
 
         # (h) cleanup
         cleaned = self._cleanup(branch, base, cwd)
@@ -1150,7 +1191,13 @@ class GitAutonomyManager:
         # Record a verifiable implementation SHA alongside completed in one ledger commit.
         commit_sha: Optional[str] = None
         if auto_commit:
-            commit_sha = self._record_completion(ticket.id, ticket.title, target_dir, custom_message)
+            self._phase("commit", "running", "commit da implementacao e do registro de conclusao")
+            try:
+                commit_sha = self._record_completion(ticket.id, ticket.title, target_dir, custom_message)
+            except Exception as exc:
+                self._phase("commit", "failed", str(exc), type(exc).__name__)
+                raise
+            self._phase("commit", "succeeded", commit_sha or "")
         else:
             return TicketCompletionReport(
                 ok=False, ticket_id=ticket_id,
