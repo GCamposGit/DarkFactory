@@ -1,0 +1,2 @@
+- [grill_not_ready] Esclarecer premissas de negocio e parametros estruturados no Grill antes de avancar para o planejamento.
+- [planning_high_iterations] Estagio 'planning' exigiu 30 iteracoes; planejar diffs mais atomicos e validacoes unitarias intermediarias.
