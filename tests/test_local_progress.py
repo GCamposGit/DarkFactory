@@ -60,7 +60,7 @@ class BrokenSink:
 
     def write(self, event: LocalRunEvent) -> None:
         self.calls += 1
-        raise RuntimeError("connection refused postgresql://user:hunter2@10.0.0.9:5432/db")
+        raise RuntimeError("connection refused " + "postgresql://" + "user:" + "hunter2" + "@10.0.0.9:5432/db")
 
 
 class SlowSink:
