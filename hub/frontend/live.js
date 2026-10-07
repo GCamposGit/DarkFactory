@@ -135,6 +135,10 @@
   }
 
   function stageKeys(snapshot, run) {
+    // run_ticket local runs (USR-140) have their own phases; the autonomous line stages do not apply.
+    if (run && run.mode === 'run_ticket' && Array.isArray(run.stages) && run.stages.length) {
+      return run.stages.map(function (s) { return s.stage; });
+    }
     const order = snapshot && Array.isArray(snapshot.stage_order) && snapshot.stage_order.length ? snapshot.stage_order : DEFAULT_STAGE_ORDER;
     const extras = ((run && run.stages) || []).map(function (s) { return s.stage; }).filter(function (k) { return order.indexOf(k) < 0; });
     return order.concat(extras.filter(function (k, i) { return extras.indexOf(k) === i; }));

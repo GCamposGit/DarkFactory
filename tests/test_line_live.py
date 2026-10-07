@@ -14,13 +14,14 @@ import pytest
 from fastapi.testclient import TestClient
 
 from core.line.bindings import LINE_STAGES
+from core.line.local_progress import PHASES as LOCAL_PHASES
 from core.workflow.line_live import LineLiveSnapshot, LiveRun, read_line_live
 from hub.backend import api as hub_api
 from hub.backend import service as hub_service_module
 from hub.backend.api import get_hub_service
 from hub.backend.main import app
 from hub.backend.service import HubService
-from tests.fixtures.line_live_seed import seed_line_live_demo
+from tests.fixtures.line_live_seed import _emit_local_run, seed_line_live_demo, seed_local_runs
 
 NOW = datetime(2026, 10, 4, 15, 0, 0, tzinfo=timezone.utc)
 
@@ -599,3 +600,132 @@ def test_live_page_is_served_without_caching(client: TestClient) -> None:
         assert response.status_code == 200
         assert "line-live-board" in response.text
         assert "no-store" in response.headers["cache-control"]
+
+
+# ---------------------------------------------------------------- run_ticket runs (USR-140)
+
+
+@pytest.fixture()
+def seeded_local(seeded: tuple[Path, dict[str, str]]) -> tuple[Path, dict[str, str]]:
+    db, ids = seeded
+    return db, {**ids, **seed_local_runs(db, NOW)}
+
+
+def test_local_runs_are_projected_with_their_own_phases_worker_and_harness(
+    seeded_local: tuple[Path, dict[str, str]],
+) -> None:
+    db, ids = seeded_local
+    snapshot = _read(db)
+
+    assert len(snapshot.runs) == 8 + 4
+    live = _run(snapshot, ids["local_live"])
+    assert live.mode == "run_ticket"
+    assert (live.ticket_id, live.demand_id, live.project_id) == ("USR-140", "USR-140", "darkfac")
+    assert live.title == "Esteira ao vivo: run_ticket local"
+    assert live.state == "running" and live.current_stage == "agent" and live.current_stage_status == "running"
+    assert [stage.stage for stage in live.stages] == list(LOCAL_PHASES)  # no autonomous-line stages
+    assert [stage.status for stage in live.stages] == [
+        "succeeded", "succeeded", "running", "not_reached", "not_reached",
+        "not_reached", "not_reached", "not_reached", "not_reached",
+    ]
+    agent = live.stages[2]
+    assert (agent.worker, agent.route, agent.role) == ("DESKTOP-TEST", "claude", "run_ticket")
+    assert agent.evidence_refs == ["desenvolvimento via claude"]
+    assert agent.duration_seconds == pytest.approx(12 * 60)
+    assert live.stages[1].duration_seconds == pytest.approx(2 * 60)
+    assert not live.stalled
+
+    assert snapshot.stage_order == list(LINE_STAGES)  # the line's own columns are untouched
+    assert snapshot.stage_labels["gate"] == "Portão" and snapshot.stage_labels["pr"] == "PR"
+    assert "entrou em Agente" in [e.message for e in snapshot.events if e.run_id == ids["local_live"]]
+
+
+def test_local_run_outcomes_done_gate_red_and_abandoned(seeded_local: tuple[Path, dict[str, str]]) -> None:
+    db, ids = seeded_local
+    snapshot = _read(db)
+
+    done = _run(snapshot, ids["local_done"])
+    assert done.state == "succeeded" and done.run_status == "completed"
+    assert done.cycle_seconds == pytest.approx(38 * 60)
+    assert [stage.status for stage in done.stages] == ["succeeded"] * 8 + ["cancelled"]
+    assert done.stages[-1].stage == "deploy"  # skipped, not a green deploy
+
+    red = _run(snapshot, ids["local_gate_red"])
+    assert red.state == "failed" and red.run_status == "failed"
+    gate = next(stage for stage in red.stages if stage.stage == "gate")
+    assert gate.status == "failed" and gate.cause_code == "gate_failed"
+    assert [stage.status for stage in red.stages if stage.stage in {"pr", "ci", "merge"}] == ["not_reached"] * 3
+
+    gone = _run(snapshot, ids["local_abandoned"])
+    assert gone.run_status == "aborted" and gone.state == "cancelled"
+    agent = next(stage for stage in gone.stages if stage.stage == "agent")
+    assert agent.status == "cancelled" and agent.cause_code == "abandoned"
+
+    assert snapshot.kpis.completed_24h >= 1 and snapshot.kpis.failed_24h >= 1
+
+
+def test_a_failed_run_without_a_failed_phase_pins_the_reason_on_the_active_phase(tmp_path: Path) -> None:
+    db = tmp_path / "control.db"
+    seed_line_live_demo(db, NOW)
+    _emit_local_run(
+        db, NOW, run_id="local-USR-150-x", ticket_id="USR-150", title="t", started_min_ago=30,
+        steps=[
+            (0, "preflight", "succeeded", "rota", None, "claude"),
+            (1, "workspace", "succeeded", "ok", None, None),
+            (1, "agent", "running", "dev", None, "claude"),
+        ],
+        finish=(20, False, "run_ticket terminou com codigo 4"),
+    )
+    run = _run(_read(db), "local-USR-150-x")
+    agent = run.stages[2]
+    assert run.state == "failed"
+    assert agent.status == "failed" and agent.cause_code == "delivery_failed"
+    assert agent.evidence_refs == ["run_ticket terminou com codigo 4"]
+
+
+def test_a_silent_agent_is_not_stalled_until_its_phase_timeout(seeded_local: tuple[Path, dict[str, str]]) -> None:
+    db, ids = seeded_local
+    # 52 min without events: the autonomous line would flag it, a local run publishes only on transitions
+    assert not _run(_read(db, now=NOW + timedelta(minutes=40)), ids["local_live"]).stalled
+    late = _run(_read(db, now=NOW + timedelta(hours=3)), ids["local_live"])
+    assert late.stalled and late.stalled_reason is not None and "timeout" in late.stalled_reason
+
+
+def test_a_local_run_takes_its_ticket_out_of_off_line(seeded_local: tuple[Path, dict[str, str]]) -> None:
+    db, _ = seeded_local
+    tickets = [
+        {"id": "USR-140", "project_id": "darkfac", "title": "Esteira", "status": "implementing"},
+        {"id": "USR-199", "project_id": "darkfac", "title": "Outro", "status": "implementing"},
+    ]
+    snapshot = _read(db, tickets=tickets)
+    assert [item.id for item in snapshot.off_line] == ["USR-199"]
+
+
+def test_a_store_without_the_progress_table_still_reads_and_a_missing_title_falls_back(tmp_path: Path) -> None:
+    db = tmp_path / "control.db"
+    seed_line_live_demo(db, NOW)
+    snapshot = _read(db)
+    assert snapshot.source.status == "ok" and len(snapshot.runs) == 8
+    assert all(run.mode != "run_ticket" for run in snapshot.runs)
+
+    _emit_local_run(
+        db, NOW, run_id="local-USR-151-x", ticket_id="USR-151", title="", started_min_ago=5,
+        steps=[(0, "preflight", "running", "x", None, None)],
+    )
+    run = _run(_read(db, titles={"USR-151": "Titulo do ledger"}), "local-USR-151-x")
+    assert run.title == "Titulo do ledger" and run.state == "running"
+
+
+def test_api_line_live_includes_local_runs(tmp_path: Path, seeded_local: tuple[Path, dict[str, str]]) -> None:
+    db, ids = seeded_local
+    service = _make_service(tmp_path, db)
+    app.dependency_overrides[get_hub_service] = lambda: service
+    try:
+        response = TestClient(app).get("/api/line/live")
+    finally:
+        app.dependency_overrides.clear()
+    assert response.status_code == 200
+    snapshot = LineLiveSnapshot.model_validate(response.json())
+    live = _run(snapshot, ids["local_live"])
+    assert live.mode == "run_ticket" and live.current_stage == "agent"
+    assert live.stages[2].worker == "DESKTOP-TEST"
