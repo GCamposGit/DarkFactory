@@ -93,6 +93,10 @@ services:
       - DARKFAC_ROUTING_UNKNOWN_QUOTA=${DARKFAC_ROUTING_UNKNOWN_QUOTA:-last_resort}
       - DARKFAC_WORKSPACES=/workspaces
       - DARKFAC_WORKSPACE_RETENTION_DAYS=${DARKFAC_WORKSPACE_RETENTION_DAYS:-3}
+      # USR-148: retention of the darkfac-artifacts volume (docs/runbooks/vps_disk.md section 8).
+      - DARKFAC_ARTIFACT_RETENTION_DAYS=${DARKFAC_ARTIFACT_RETENTION_DAYS:-30}
+      - DARKFAC_ARTIFACT_ORPHAN_RETENTION_DAYS=${DARKFAC_ARTIFACT_ORPHAN_RETENTION_DAYS:-60}
+      - DARKFAC_ARTIFACT_RETENTION_DRY_RUN=${DARKFAC_ARTIFACT_RETENTION_DRY_RUN:-false}
       - CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN:-}
       # HF-27-10 canary trace (B.4): core.line.workspace only reads
       # GITHUB_TOKEN (not the GITHUB_PAT declared in env.cloud.example) to

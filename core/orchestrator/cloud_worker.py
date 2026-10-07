@@ -177,6 +177,8 @@ class CloudWorker:
         grill_resender: Callable[[Any, str], bool] | None = None,
         workspace_sweep_interval_s: float = 6 * 3600.0,
         workspace_sweeper: Callable[..., list[str]] | None = None,
+        artifact_sweep_interval_s: float = 6 * 3600.0,
+        artifact_sweeper: Callable[..., Any] | None = None,
     ) -> None:
         self.worker_id = worker_id or os.environ.get("DARKFAC_WORKER_ID", "cloud-worker-1")
         self.max_slots = (
@@ -212,6 +214,10 @@ class CloudWorker:
         self._workspace_sweep_interval_s = workspace_sweep_interval_s
         self._workspace_sweeper = workspace_sweeper
         self._last_workspace_sweep_at: datetime | None = None
+        # USR-148: same cadence for the `darkfac-artifacts` volume retention (core.orchestrator.artifact_retention).
+        self._artifact_sweep_interval_s = artifact_sweep_interval_s
+        self._artifact_sweeper = artifact_sweeper
+        self._last_artifact_sweep_at: datetime | None = None
 
         if capabilities is not None:
             self.capabilities = list(capabilities)
@@ -917,6 +923,32 @@ class CloudWorker:
             logger.info("Workspace sweep removed %d stale run workspace(s): %s", len(removed), removed)
         return removed
 
+    def sweep_stale_artifacts(self, now: datetime | None = None) -> list[str]:
+        """Apply the `darkfac-artifacts` retention policy (USR-148); never touches an active/waiting run.
+
+        Env: `DARKFAC_ARTIFACT_RETENTION_DAYS` (default 30; 0 disables), `DARKFAC_ARTIFACT_ORPHAN_RETENTION_DAYS`
+        (60), `DARKFAC_ARTIFACT_RETENTION_DRY_RUN` (log only). Returns the removed (or would-be removed) ids.
+        """
+        from core.orchestrator import artifact_retention as retention
+
+        config = retention.retention_config_from_env()
+        if not config.enabled:
+            return []
+        sweeper = self._artifact_sweeper
+        if sweeper is None:
+            if os.environ.get("PYTEST_CURRENT_TEST"):
+                return []  # tests must never delete real artifacts unless they inject a sweeper
+            sweeper = retention.sweep_stale_artifacts
+        protected = {key.rsplit(":", 1)[0] for key in list(self._active_tasks)}
+        report = sweeper(
+            root=self.artifact_store.root_dir,
+            run_status=self.store.get_run_status,
+            protected_run_ids=protected,
+            config=config,
+            now=(now.timestamp() if now is not None else None),
+        )
+        return list(getattr(report, "removed_ids", []) or [])
+
     def poll_and_execute_once(self, now: datetime | None = None) -> bool:
         """Attempt to claim one pending job and execute it.
 
@@ -947,6 +979,16 @@ class CloudWorker:
                 self.sweep_stale_workspaces(now=effective_now)
             except Exception as exc:
                 logger.warning("Workspace sweep failed: %s", exc)
+
+        if (
+            self._last_artifact_sweep_at is None
+            or (effective_now - self._last_artifact_sweep_at).total_seconds() >= self._artifact_sweep_interval_s
+        ):
+            self._last_artifact_sweep_at = effective_now
+            try:
+                self.sweep_stale_artifacts(now=effective_now)
+            except Exception as exc:
+                logger.warning("Artifact retention sweep failed: %s", exc)
 
         try:
             claim = self.store.claim(
