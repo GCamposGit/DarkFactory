@@ -1,0 +1,7 @@
+{
+  "harness": "claude",
+  "model": "sonnet",
+  "tickets_done": [
+    "T1"
+  ]
+}

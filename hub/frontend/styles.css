@@ -16273,3 +16273,142 @@ body {
   .roadmap-card:focus-within { transform: none; }
   .roadmap-list-item { transition: none; }
 }
+
+/* ==========================================================================
+   DarkHub Sidebar Shell (Vertical Navigation Menu)
+   ========================================================================== */
+
+.dh-shell {
+  display: flex;
+  min-height: 100vh;
+}
+
+.dh-sidebar {
+  position: fixed;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  width: 16rem;
+  overflow-y: auto;
+  background-color: #020617;
+  border-right: 1px solid rgba(30, 41, 59, 0.85);
+  transform: translateX(0);
+  transition: transform 0.25s ease-in-out;
+}
+
+.dh-sidebar-brand {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 1rem 1.1rem;
+  border-bottom: 1px solid rgba(30, 41, 59, 0.85);
+  color: #f8fafc;
+  font-weight: 600;
+}
+
+.dh-sidebar-nav {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 0.25rem;
+  padding: 0.75rem;
+  overflow-y: auto;
+}
+
+.dh-nav-link {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.55rem 0.75rem;
+  border-radius: 0.6rem;
+  color: #94a3b8;
+  font-size: 0.85rem;
+  font-weight: 500;
+  text-decoration: none;
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+.dh-nav-link:hover,
+.dh-nav-link:focus-visible {
+  background-color: rgba(30, 41, 59, 0.75);
+  color: #e2e8f0;
+}
+
+.dh-nav-link[aria-current="page"] {
+  background-color: rgba(79, 70, 229, 0.18);
+  color: #e0e7ff;
+  box-shadow: inset 0 0 0 1px rgba(99, 102, 241, 0.35);
+}
+
+.dh-sidebar-footer {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.85rem 1.1rem;
+  border-top: 1px solid rgba(30, 41, 59, 0.85);
+}
+
+.dh-sidebar-toggle {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 2.5rem;
+  height: 2.5rem;
+  border: 1px solid rgba(51, 65, 85, 0.8);
+  border-radius: 0.6rem;
+  background-color: rgba(15, 23, 42, 0.8);
+  color: #e2e8f0;
+}
+
+.dh-sidebar-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  display: none;
+  background-color: rgba(2, 6, 23, 0.6);
+  backdrop-filter: blur(2px);
+  -webkit-backdrop-filter: blur(2px);
+}
+
+.dh-main {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+@media (min-width: 1024px) {
+  .dh-main {
+    margin-left: 16rem;
+  }
+}
+
+@media (max-width: 1023.98px) {
+  .dh-sidebar {
+    transform: translateX(-100%);
+  }
+
+  .dh-sidebar.is-open {
+    transform: translateX(0);
+  }
+
+  .dh-sidebar-toggle {
+    display: inline-flex;
+  }
+
+  .dh-sidebar-overlay.is-open {
+    display: block;
+  }
+
+  .dh-main {
+    margin-left: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dh-sidebar,
+  .dh-sidebar-overlay {
+    transition: none;
+  }
+}
