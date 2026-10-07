@@ -179,6 +179,8 @@ class CloudWorker:
         workspace_sweeper: Callable[..., list[str]] | None = None,
         artifact_sweep_interval_s: float = 6 * 3600.0,
         artifact_sweeper: Callable[..., Any] | None = None,
+        orphan_run_sweep_interval_s: float = 300.0,
+        orphan_run_sweeper: Callable[..., list[Any]] | None = None,
     ) -> None:
         self.worker_id = worker_id or os.environ.get("DARKFAC_WORKER_ID", "cloud-worker-1")
         self.max_slots = (
@@ -218,6 +220,11 @@ class CloudWorker:
         self._artifact_sweep_interval_s = artifact_sweep_interval_s
         self._artifact_sweeper = artifact_sweeper
         self._last_artifact_sweep_at: datetime | None = None
+        # USR-142: active runs with no open job and no activity for 30 min get their successor scheduled
+        # (or are parked on waiting_human) instead of sitting idle forever.
+        self._orphan_run_sweep_interval_s = orphan_run_sweep_interval_s
+        self._orphan_run_sweeper = orphan_run_sweeper
+        self._last_orphan_run_sweep_at: datetime | None = None
 
         if capabilities is not None:
             self.capabilities = list(capabilities)
@@ -894,6 +901,20 @@ class CloudWorker:
 
         return resumed_runs
 
+    def sweep_orphan_runs(self, now: datetime | None = None) -> list[Any]:
+        """Schedule the successor of (or park) `active` runs with no open job and no activity for 30 min (USR-142)."""
+        sweeper = self._orphan_run_sweeper
+        if sweeper is None:
+            if os.environ.get("PYTEST_CURRENT_TEST"):
+                return []  # tests must never touch run state through the sweeper unless they inject one
+            from core.line.orphan_runs import sweep_orphan_runs
+
+            sweeper = sweep_orphan_runs
+        actions = sweeper(self.store, now=now or datetime.now(UTC))
+        if actions:
+            logger.info("Orphan run sweep repaired %d run(s): %s", len(actions), actions)
+        return actions
+
     def sweep_stale_workspaces(self, now: datetime | None = None) -> list[str]:
         """Delete workspaces of terminal runs older than the retention (default 3 days); never an active run.
 
@@ -989,6 +1010,16 @@ class CloudWorker:
                 self.sweep_stale_artifacts(now=effective_now)
             except Exception as exc:
                 logger.warning("Artifact retention sweep failed: %s", exc)
+
+        if (
+            self._last_orphan_run_sweep_at is None
+            or (effective_now - self._last_orphan_run_sweep_at).total_seconds() >= self._orphan_run_sweep_interval_s
+        ):
+            self._last_orphan_run_sweep_at = effective_now
+            try:
+                self.sweep_orphan_runs(now=effective_now)
+            except Exception as exc:
+                logger.warning("Orphan run sweep failed: %s", exc)
 
         try:
             claim = self.store.claim(

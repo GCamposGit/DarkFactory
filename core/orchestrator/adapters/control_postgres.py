@@ -1352,6 +1352,20 @@ class PostgresControlStore:
             logger.warning("PostgreSQL list_waiting_jobs failed: %s", exc)
             return []
 
+    def list_active_run_ids(self) -> list[str]:
+        """Ids of every run whose `runs.status` is `active`, oldest first (USR-142 orphan-run sweep)."""
+        if self.mock_mode:
+            return self._backend.list_active_run_ids()
+
+        try:
+            with self._psycopg.connect(self.raw_url) as conn:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT run_id FROM runs WHERE status = 'active' ORDER BY created_at ASC")
+                    return [str(row[0]) for row in cur.fetchall()]
+        except Exception as exc:
+            logger.warning("PostgreSQL list_active_run_ids failed: %s", exc)
+            return []
+
     def max_iteration(self, run_id: str, ticket_id: str, plan_version: str, stage: str) -> int:
         """Highest `iteration` already recorded for `(run_id, ticket_id, plan_version, stage)`, or -1."""
         if self.mock_mode:
