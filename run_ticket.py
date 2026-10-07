@@ -445,6 +445,12 @@ def resume_delivery(
             return {"exit_code": 1, "ok": False, "error": f"Ticket {ticket_id} not found in ledger"}
         return 1
 
+    session_probe_path = os.environ.get("DARKFAC_CODEX_SESSION_PATH", "").strip()
+    if session_probe_path:  # USR-79: aviso somente leitura de chamada de ferramenta orfa
+        from core.line.codex_session_probe import warn_if_unanswered
+
+        warn_if_unanswered(session_probe_path, logger)
+
     current_branch = git_mgr._current_branch(target_worktree)
     resume_cmd = (
         f"python C:\\dev\\DarkFac\\run_ticket.py --resume-delivery {ticket.id} "
