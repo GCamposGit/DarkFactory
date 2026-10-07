@@ -35,6 +35,7 @@ def test_persistent_ledger_merges_new_image_seed_without_losing_live_updates(tmp
     assert [ticket.id for ticket in store.list_tickets()] == ["USR-01"]
 
     live = _ticket("USR-01", "changed in Hub")
+    live["created_at"] = original["created_at"]
     live["updated_at"] = "2026-03-01T00:00:00Z"
     live_path.write_text(json.dumps([live]), encoding="utf-8")
     new = _ticket("USR-02", "new in image")
@@ -57,6 +58,23 @@ def test_invalid_live_ledger_fails_closed_during_seed_merge(tmp_path: Path) -> N
     with pytest.raises(ValueError, match="Cannot read demand ledger"):
         DemandsStore(live_path, seed_path=seed_path)
     assert live_path.read_text(encoding="utf-8") == "{broken"
+
+
+def test_new_image_seed_id_collision_keeps_the_live_ledger_intact(tmp_path: Path) -> None:
+    live_path = tmp_path / "live" / "demands.json"
+    seed_path = tmp_path / "seed" / "demands.json"
+    live_path.parent.mkdir()
+    seed_path.parent.mkdir()
+    live = _ticket("USR-01", "created in Hub")
+    committed = _ticket("USR-01", "different ticket created in Git")
+    live["created_at"] = "2026-01-01T00:00:00Z"
+    committed["created_at"] = "2026-02-01T00:00:00Z"
+    live_path.write_text(json.dumps([live]), encoding="utf-8")
+    seed_path.write_text(json.dumps([committed]), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="Demand ID collision"):
+        DemandsStore(live_path, seed_path=seed_path)
+    assert json.loads(live_path.read_text(encoding="utf-8")) == [live]
 
 
 def test_runtime_corruption_cannot_look_like_an_empty_backlog(tmp_path: Path) -> None:
@@ -94,6 +112,7 @@ def test_newer_image_seed_never_regresses_live_status_or_evidence(tmp_path: Path
     live["status"] = "completed"
     live["delivery_evidence"] = "commit abc123"
     newer = _ticket("USR-01", "newer committed row")
+    newer["created_at"] = live["created_at"]
     newer["updated_at"] = "2026-02-01T00:00:00Z"
     live_path.write_text(json.dumps([live]), encoding="utf-8")
     seed_path.write_text(json.dumps([newer]), encoding="utf-8")
@@ -111,6 +130,7 @@ def test_seed_advances_committed_delivery_without_replacing_live_fields(tmp_path
     live = _ticket("USR-01", "edited in Hub")
     live["updated_at"] = "2026-03-01T00:00:00Z"
     committed = _ticket("USR-01", "old committed title")
+    committed["created_at"] = live["created_at"]
     committed["updated_at"] = "2026-02-01T00:00:00Z"
     committed["status"] = "completed"
     committed["delivery_evidence"] = "commit abc123"

@@ -16,6 +16,9 @@ keeps its live fields and only advances to a later delivery status with valid
 evidence. Runtime changes therefore survive image replacement, while newly
 committed tickets become visible in the live backlog. A corrupt
 ledger or missing seed fails startup instead of displaying an empty backlog.
+If Git and the Hub independently allocate the same ID to different tickets,
+startup stops on their distinct creation identities and preserves the live
+file. USR-136 remains open until allocation itself is unified.
 Writes use the same lock and an atomic replacement, so requests from DarkHub
 and the worker cannot discard one another's distinct tickets.
 

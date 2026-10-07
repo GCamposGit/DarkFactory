@@ -4289,7 +4289,8 @@
       "Um teste de integração entre duas instâncias demonstra que ticket criado no Hub fica elegível no worker e que o status posterior aparece no Hub.",
       "O painel informa a origem e a idade dos dados e não apresenta snapshot da imagem como estado vivo.",
       "O primeiro deploy migra todos os IDs e versões do Hub antigo sem perder escritas concorrentes: pausa de escrita comprovada ou estratégia equivalente, snapshot durável fora do worktree, restauração verificada e retomada automática após falha.",
-      "Um teste reproduz ticket criado no intervalo de corte e prova que ele aparece no volume compartilhado antes de liberar o worker."
+      "Um teste reproduz ticket criado no intervalo de corte e prova que ele aparece no volume compartilhado antes de liberar o worker.",
+      "IDs alocados no Hub e em worktrees Git não podem sobrescrever demandas distintas; colisão deve falhar fechado e preservar o ledger vivo."
     ],
     "suggested_files": [
       "core/demands/store.py",
@@ -4301,6 +4302,6 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-04T16:19:08.467489Z",
-    "updated_at": "2026-10-07T08:17:48.670141Z"
+    "updated_at": "2026-10-07T08:44:01.409033Z"
   }
 ]

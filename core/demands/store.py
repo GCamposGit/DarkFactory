@@ -180,6 +180,8 @@ class DemandsStore:
             current_row = merged[positions[ticket_id]]
             current = UserTicket.model_validate(current_row)
             incoming = UserTicket.model_validate(row)
+            if incoming.project_id != current.project_id or incoming.created_at != current.created_at:
+                raise ValueError(f"Demand ID collision between image seed and live ledger: {ticket_id}")
             if _STATUS_PROGRESS[incoming.status] > _STATUS_PROGRESS[current.status]:
                 if incoming.status == DeliveryStatus.COMPLETED and not (incoming.delivery_evidence or "").strip():
                     raise ValueError(f"Completed seed demand {ticket_id} has no delivery evidence")
