@@ -1,0 +1,1095 @@
+diff --git a/core/harness/remote_dispatch.py b/core/harness/remote_dispatch.py
+index 3608f5a..8383278 100644
+--- a/core/harness/remote_dispatch.py
++++ b/core/harness/remote_dispatch.py
+@@ -84,6 +84,11 @@ ENV_TEST_WORKERS = "DARKFAC_TEST_WORKERS"
+ ENV_REMOTE_HARNESS = "DARKFAC_REMOTE_HARNESS"  # auto (default) | off | required
+ ENV_WORKER_TOKEN = "DARKFAC_WORKER_TOKEN"
+ ENV_BUSY_WAIT_SEC = "DARKFAC_REMOTE_BUSY_WAIT_SEC"
++#: USR-141: ceiling (seconds without a successful job poll) after which a worker
++#: that still answers ``/health`` is finally declared unavailable.
++ENV_WORKER_SILENCE_FALLBACK_SEC = "DARKFAC_WORKER_SILENCE_FALLBACK_SEC"
++#: USR-147: timeout (seconds) of the ``/health`` probe (default 2.0).
++ENV_WORKER_HEALTH_TIMEOUT_SEC = "DARKFAC_WORKER_HEALTH_TIMEOUT_SEC"
+ ENV_WORKER_JOB = "DARKFAC_HARNESS_WORKER_JOB"
+ #: Test-only escape hatch: a loopback test dispatches to a worker running on
+ #: 127.0.0.1 on purpose, which the real self-dispatch guard would otherwise
+@@ -95,8 +100,18 @@ DEFAULT_BUSY_WAIT_SEC = 300.0
+ HEALTH_PROBE_TIMEOUT_SEC = 2.0
+ POLL_INTERVAL_SEC = 2.0
+ #: A worker that stops answering GET /harness/jobs/{id} for longer than this
+-#: (network blip vs. genuinely gone) triggers a local fallback.
++#: is probed on ``/health`` (USR-141): a worker that still answers ``/health``
++#: is merely SLOW (e.g. a saturated CPU running ``pytest -n``) and keeps being
++#: awaited up to ``worker_silence_ceiling_sec()``; one that does not is gone
++#: and triggers a local fallback.
+ WORKER_SILENCE_FALLBACK_SEC = 60.0
++#: Default ceiling for a slow-but-alive worker (``DARKFAC_WORKER_SILENCE_FALLBACK_SEC``).
++DEFAULT_WORKER_SILENCE_CEILING_SEC = 180.0
++#: ``/health`` probes of a silent worker use at least this timeout: the point
++#: is to tell "slow" from "dead", so the probe must tolerate a busy host.
++SLOW_WORKER_PROBE_TIMEOUT_SEC = 10.0
++#: Minimum spacing between two ``/health`` probes of the same silent worker.
++SLOW_WORKER_PROBE_INTERVAL_SEC = 10.0
+ SUBMIT_TIMEOUT_SEC = 30.0
+ POLL_HTTP_TIMEOUT_SEC = 10.0
+ 
+@@ -154,6 +169,35 @@ def _busy_wait_sec() -> float:
+     return value if value >= 0 else DEFAULT_BUSY_WAIT_SEC
+ 
+ 
++def _positive_float_env(name: str, default: float) -> float:
++    """Parse a strictly positive float env var; anything invalid -> ``default``."""
++
++    raw = os.environ.get(name, "").strip()
++    if not raw:
++        return default
++    try:
++        value = float(raw)
++    except ValueError:
++        return default
++    if value != value or value in (float("inf"), float("-inf")) or value <= 0:
++        return default
++    return value
++
++
++def health_probe_timeout_sec() -> float:
++    """Timeout of the ``/health`` probe (``DARKFAC_WORKER_HEALTH_TIMEOUT_SEC``)."""
++
++    return _positive_float_env(ENV_WORKER_HEALTH_TIMEOUT_SEC, HEALTH_PROBE_TIMEOUT_SEC)
++
++
++def worker_silence_ceiling_sec() -> float:
++    """Longest a still-healthy-but-silent worker is awaited (never below the
++    plain silence threshold)."""
++
++    configured = _positive_float_env(ENV_WORKER_SILENCE_FALLBACK_SEC, DEFAULT_WORKER_SILENCE_CEILING_SEC)
++    return max(configured, WORKER_SILENCE_FALLBACK_SEC)
++
++
+ def _auth_headers(extra: dict[str, str] | None = None) -> dict[str, str]:
+     headers = dict(extra or {})
+     token = os.environ.get(ENV_WORKER_TOKEN, "").strip()
+@@ -200,7 +244,9 @@ def is_self_dispatch(base_url: str, health: dict[str, Any] | None) -> bool:
+ # --- HTTP plumbing (stdlib only -- consistent with core.harness.test_subagent) --
+ 
+ 
+-def probe_health(base_url: str, timeout: float = HEALTH_PROBE_TIMEOUT_SEC) -> dict[str, Any] | None:
++def probe_health(base_url: str, timeout: float | None = None) -> dict[str, Any] | None:
++    if timeout is None:
++        timeout = health_probe_timeout_sec()
+     url = f"{base_url.rstrip('/')}/health"
+     try:
+         req = urllib.request.Request(url, headers=_auth_headers())
+@@ -342,6 +388,8 @@ def _stream_job(base_url: str, job_id: str, *, deadline: float) -> dict[str, Any
+ 
+     offset = 0
+     last_ok = time.monotonic()
++    last_probe = float("-inf")
++    announced_slow = False
+     step_times: dict[str, str] = {}
+     while True:
+         now = time.monotonic()
+@@ -351,9 +399,29 @@ def _stream_job(base_url: str, job_id: str, *, deadline: float) -> dict[str, Any
+         try:
+             payload = _poll_job(base_url, job_id, offset)
+             last_ok = time.monotonic()
++            announced_slow = False
+         except Exception:
+-            if time.monotonic() - last_ok > WORKER_SILENCE_FALLBACK_SEC:
+-                raise _WorkerUnavailable("worker stopped responding for >60s mid-run")
++            silent_for = time.monotonic() - last_ok
++            if silent_for > WORKER_SILENCE_FALLBACK_SEC:
++                # USR-141: distinguish a SLOW worker from a DEAD one before
++                # abandoning the run. A saturated host can miss job polls
++                # while its HTTP server still answers /health.
++                ceiling = worker_silence_ceiling_sec()
++                if silent_for > ceiling:
++                    raise _WorkerUnavailable(f"worker stopped responding for >{ceiling:.0f}s mid-run")
++                if time.monotonic() - last_probe >= SLOW_WORKER_PROBE_INTERVAL_SEC:
++                    last_probe = time.monotonic()
++                    alive = probe_health(base_url, timeout=max(health_probe_timeout_sec(), SLOW_WORKER_PROBE_TIMEOUT_SEC))
++                    if alive is None:
++                        raise _WorkerUnavailable(
++                            f"worker stopped responding for >{silent_for:.0f}s mid-run and /health is unreachable"
++                        )
++                    if not announced_slow:
++                        announced_slow = True
++                        print(
++                            f"[REMOTE {base_url}] job polls silent for {silent_for:.0f}s but /health answers "
++                            f"(busy={alive.get('busy')}); worker is slow, not dead - waiting up to {ceiling:.0f}s"
++                        )
+             time.sleep(POLL_INTERVAL_SEC)
+             continue
+ 
+diff --git a/core/harness/remote_worker.py b/core/harness/remote_worker.py
+index a4a949f..66f310a 100644
+--- a/core/harness/remote_worker.py
++++ b/core/harness/remote_worker.py
+@@ -58,6 +58,16 @@ DEFAULT_WORKER_PORT = 8080
+ DEFAULT_WORKER_HOST = "0.0.0.0"
+ ENV_WORKER_TOKEN = "DARKFAC_WORKER_TOKEN"
+ ENV_WORKER_STATE_DIR = "DARKFAC_WORKER_STATE_DIR"
++#: USR-141: scheduling priority of the job child (``runner.py --quick --local``
++#: and, by inheritance, every pytest-xdist worker). ``below_normal`` (default)
++#: keeps the worker's own HTTP server responsive while the suite saturates the
++#: CPU; ``normal`` restores the previous behaviour.
++ENV_WORKER_CHILD_PRIORITY = "DARKFAC_WORKER_CHILD_PRIORITY"
++CHILD_PRIORITY_NORMAL = "normal"
++CHILD_PRIORITY_BELOW_NORMAL = "below_normal"
++POSIX_CHILD_NICE_INCREMENT = 5
++#: ``subprocess.BELOW_NORMAL_PRIORITY_CLASS`` (Windows only attribute).
++_WINDOWS_BELOW_NORMAL_PRIORITY_CLASS = 0x00004000
+ JOB_LOG_KEEP = 20
+ JOB_WATCHDOG_POLL_SEC = 1.0
+ DEFAULT_JOB_TIMEOUT_SEC = 1800.0
+@@ -249,6 +259,42 @@ def _extract_harness_result(log_text: str) -> Optional[Dict[str, Any]]:
+     return result
+ 
+ 
++def child_priority_mode() -> str:
++    """Resolve ``DARKFAC_WORKER_CHILD_PRIORITY``; invalid values -> ``below_normal``."""
++
++    raw = os.environ.get(ENV_WORKER_CHILD_PRIORITY, "").strip().lower()
++    if raw in (CHILD_PRIORITY_NORMAL, CHILD_PRIORITY_BELOW_NORMAL):
++        return raw
++    if raw:
++        logger.warning(
++            "Ignoring invalid %s=%r (expected 'normal' or 'below_normal'); using 'below_normal'",
++            ENV_WORKER_CHILD_PRIORITY,
++            raw,
++        )
++    return CHILD_PRIORITY_BELOW_NORMAL
++
++
++def apply_child_priority(cmd: list[str]) -> tuple[list[str], dict[str, Any]]:
++    """Return ``(cmd, extra_popen_kwargs)`` lowering the job child's priority.
++
++    Windows uses ``BELOW_NORMAL_PRIORITY_CLASS`` via ``creationflags``; POSIX
++    prefixes the command with ``nice -n 5`` (``preexec_fn`` is avoided: it is
++    unsafe in a multi-threaded process such as this worker). Both are
++    inherited by grandchildren (pytest-xdist workers). With mode ``normal``
++    (or no ``nice`` binary on POSIX) the command is returned unchanged.
++    """
++
++    if child_priority_mode() == CHILD_PRIORITY_NORMAL:
++        return cmd, {}
++    if os.name == "nt":
++        flag = getattr(subprocess, "BELOW_NORMAL_PRIORITY_CLASS", _WINDOWS_BELOW_NORMAL_PRIORITY_CLASS)
++        return cmd, {"creationflags": flag}
++    nice = shutil.which("nice")
++    if nice is None:
++        return cmd, {}
++    return [nice, "-n", str(POSIX_CHILD_NICE_INCREMENT), *cmd], {}
++
++
+ def _job_timeout_sec(worktree_path: Path, *, quick: bool, include_holdout: bool) -> float:
+     try:
+         config, _config_hash = _load_harness_config(worktree_path / "harness.config.json")
+@@ -485,6 +531,7 @@ class JobManager:
+             # block-buffered bursts (stdout is a pipe here, not a console).
+             env["PYTHONUNBUFFERED"] = "1"
+ 
++            cmd, priority_kwargs = apply_child_priority(cmd)
+             with open(log_file_path, "w", encoding="utf-8") as log_fh:
+                 process = subprocess.Popen(
+                     cmd,
+@@ -496,6 +543,7 @@ class JobManager:
+                     encoding="utf-8",
+                     errors="replace",
+                     bufsize=1,
++                    **priority_kwargs,
+                 )
+                 job.process = process
+                 deadline = time.monotonic() + timeout_sec
+diff --git a/core/harness/runner.py b/core/harness/runner.py
+index 3e60265..09e4dd9 100644
+--- a/core/harness/runner.py
++++ b/core/harness/runner.py
+@@ -599,13 +599,20 @@ def run_with_cache(
+             return remote_result
+ 
+     if cache_key is None:
+-        return execute(
+-            config,
+-            config_hash=config_hash,
+-            quick=quick,
+-            include_holdout=include_holdout,
+-            config_path=config_path,
+-        )
++        # USR-135/147: take the machine-wide suite lock HERE, before spawning
++        # the step subprocesses. Otherwise the pytest child acquires it itself
++        # (tests/conftest.py) and the time spent waiting for another run
++        # counts against the step timeout, ending in a false timeout with
++        # count=0. `suite_lock()` exports DARKFAC_SUITE_LOCK_HELD=1 so the
++        # child does not try to take the lock again.
++        with harness_suite_lock.suite_lock() as _lock:  # noqa: F841 - context manager for its side effect
++            return execute(
++                config,
++                config_hash=config_hash,
++                quick=quick,
++                include_holdout=include_holdout,
++                config_path=config_path,
++            )
+ 
+     total_timeout_sec = float(sum(step.timeout_sec for step in steps))
+     lease_sec = harness_cache.inflight_lease_sec()
+diff --git a/core/harness/suite_lock.py b/core/harness/suite_lock.py
+index f86c203..173d604 100644
+--- a/core/harness/suite_lock.py
++++ b/core/harness/suite_lock.py
+@@ -20,6 +20,14 @@ Env vars
+     Max seconds to wait for a free slot before failing closed (default 3600).
+ ``DARKFAC_SUITE_LOCK``
+     Set to ``off`` to disable locking entirely (opt-out escape hatch).
++``DARKFAC_SUITE_LOCK_STALL_AFTER_SEC``
++    Seconds a waiter must have been waiting before it starts checking whether
++    the holder is *stalled* (alive but idle), default 600 (USR-147).
++``DARKFAC_SUITE_LOCK_STALL_WINDOW_SEC``
++    Length of the CPU sampling window used to call a holder stalled, default 10.
++``DARKFAC_SUITE_LOCK_REAP_STALLED``
++    Set to ``1`` to also terminate a holder judged stalled (default off: only
++    a ``[SUITE_LOCK] holder appears stalled`` warning is printed).
+ ``DARKFAC_SUITE_LOCK_HELD``
+     Set to ``1`` by a holder for its child processes, so a nested pytest
+     invocation (e.g. the harness runner shelling out to pytest) does not try
+@@ -30,6 +38,7 @@ from __future__ import annotations
+ 
+ import contextlib
+ import json
++import math
+ import os
+ import socket
+ import sys
+@@ -42,6 +51,11 @@ _DEFAULT_SLOTS = 1
+ _DEFAULT_TIMEOUT_SEC = 3600
+ _POLL_MIN_SEC = 0.5
+ _POLL_MAX_SEC = 5.0
++_DEFAULT_STALL_AFTER_SEC = 600.0
++_DEFAULT_STALL_WINDOW_SEC = 10.0
++#: CPU seconds (whole holder process tree, over the sampling window) at or
++#: below which the holder counts as idle.
++_STALL_CPU_EPSILON_SEC = 0.25
+ 
+ 
+ class SuiteLockTimeout(RuntimeError):
+@@ -92,6 +106,31 @@ def _timeout_sec() -> float:
+     return value if value > 0 else float(_DEFAULT_TIMEOUT_SEC)
+ 
+ 
++def _non_negative_float_env(name: str, default: float) -> float:
++    raw = os.environ.get(name, "").strip()
++    if not raw:
++        return default
++    try:
++        value = float(raw)
++    except ValueError:
++        return default
++    if not math.isfinite(value) or value < 0:
++        return default
++    return value
++
++
++def _stall_after_sec() -> float:
++    return _non_negative_float_env("DARKFAC_SUITE_LOCK_STALL_AFTER_SEC", _DEFAULT_STALL_AFTER_SEC)
++
++
++def _stall_window_sec() -> float:
++    return _non_negative_float_env("DARKFAC_SUITE_LOCK_STALL_WINDOW_SEC", _DEFAULT_STALL_WINDOW_SEC)
++
++
++def _reap_stalled_enabled() -> bool:
++    return os.environ.get("DARKFAC_SUITE_LOCK_REAP_STALLED", "").strip() == "1"
++
++
+ def is_disabled() -> bool:
+     return _env_flag_off("DARKFAC_SUITE_LOCK")
+ 
+@@ -210,6 +249,130 @@ def _describe_holder(lock_path: Path) -> str:
+     )
+ 
+ 
++def _sample_holder_tree(pid: int, started_at: float | None) -> dict[int, float] | None:
++    """Accumulated CPU seconds of ``pid`` and all its descendants.
++
++    ``None`` when the holder cannot be inspected (psutil unavailable, process
++    gone, access denied) or when ``pid`` was recycled by an unrelated process
++    (created after the sidecar was written, so it cannot be the lock holder).
++    """
++
++    try:
++        import psutil
++    except ImportError:
++        return None
++    try:
++        proc = psutil.Process(pid)
++        if started_at is not None and proc.create_time() > float(started_at) + 5.0:
++            return None
++        sample: dict[int, float] = {}
++        for member in [proc, *proc.children(recursive=True)]:
++            with contextlib.suppress(psutil.NoSuchProcess, psutil.AccessDenied):
++                times = member.cpu_times()
++                sample[member.pid] = float(times.user) + float(times.system)
++        return sample if pid in sample else None
++    except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess, OSError):
++        return None
++
++
++def _reap_holder(pid: int) -> bool:
++    """Terminate the holder and its descendants. Never touches this process or
++    its ancestors. Returns ``True`` when a termination was attempted."""
++
++    try:
++        import psutil
++    except ImportError:
++        return False
++    try:
++        me = psutil.Process()
++        if pid == me.pid or pid in {parent.pid for parent in me.parents()}:
++            return False
++        victim = psutil.Process(pid)
++        victims = [*victim.children(recursive=True), victim]
++        for member in victims:
++            with contextlib.suppress(psutil.NoSuchProcess, psutil.AccessDenied):
++                member.terminate()
++        _, alive = psutil.wait_procs(victims, timeout=3.0)
++        for member in alive:
++            with contextlib.suppress(psutil.NoSuchProcess, psutil.AccessDenied):
++                member.kill()
++        psutil.wait_procs(alive, timeout=3.0)
++        return True
++    except (psutil.NoSuchProcess, psutil.AccessDenied, OSError):
++        return False
++
++
++class _StallWatch:
++    """Detects a lock holder that is alive but idle (USR-147).
++
++    The OS releases the lock when the holder dies, so the dangerous case is a
++    live holder doing nothing for hours. A holder counts as *stalled* when,
++    after the waiter has waited ``stall_after`` seconds, the accumulated CPU
++    time of its whole process tree (the holder runner + pytest + xdist
++    workers) advanced by no more than ``_STALL_CPU_EPSILON_SEC`` over a window
++    of ``window`` seconds and no process joined or left the tree.
++    """
++
++    def __init__(self, *, stall_after: float, window: float, reap: bool) -> None:
++        self._stall_after = stall_after
++        self._window = window
++        self._reap = reap
++        self._wait_started = time.monotonic()
++        self._baseline: dict[Path, tuple[int, float, dict[int, float]]] = {}
++        self._warned: set[int] = set()
++
++    def check(self, directory: Path, slots: int) -> None:
++        if time.monotonic() - self._wait_started < self._stall_after:
++            return
++        for slot in range(slots):
++            lock_path = directory / f"suite-{slot}.lock"
++            if lock_path.exists():
++                self._check_slot(lock_path)
++
++    def _check_slot(self, lock_path: Path) -> None:
++        info = _read_sidecar(lock_path)
++        pid = info.get("pid") if info else None
++        if not isinstance(pid, int) or pid <= 0 or pid == os.getpid():
++            self._baseline.pop(lock_path, None)
++            return
++        if str(info.get("hostname") or "").lower() != socket.gethostname().lower():
++            return  # a sidecar from another host cannot be inspected
++        now = time.monotonic()
++        previous = self._baseline.get(lock_path)
++        if previous is not None and previous[0] == pid and now - previous[1] < self._window:
++            return
++        sample = _sample_holder_tree(pid, info.get("started_at"))
++        if sample is None:
++            self._baseline.pop(lock_path, None)
++            return
++        self._baseline[lock_path] = (pid, now, sample)
++        if previous is None or previous[0] != pid or set(previous[2]) != set(sample):
++            return  # first look, new holder or processes joined/left: not idle
++        cpu_delta = sum(sample[member] - previous[2][member] for member in sample)
++        if cpu_delta > _STALL_CPU_EPSILON_SEC:
++            return
++        self._report(pid, info, cpu_delta=cpu_delta, window=now - previous[1], tree_size=len(sample))
++
++    def _report(self, pid: int, info: dict, *, cpu_delta: float, window: float, tree_size: int) -> None:
++        started_at = info.get("started_at")
++        age = f"{max(time.time() - float(started_at), 0.0):.0f}s" if started_at else "unknown age"
++        if pid not in self._warned:
++            self._warned.add(pid)
++            action = (
++                "terminating it (DARKFAC_SUITE_LOCK_REAP_STALLED=1)"
++                if self._reap
++                else "not terminating it; set DARKFAC_SUITE_LOCK_REAP_STALLED=1 to reap stalled holders automatically"
++            )
++            print(
++                f"[SUITE_LOCK] holder appears stalled: pid {pid} on {info.get('hostname', '?')} "
++                f"held the lock for {age} and used {cpu_delta:.2f}s of CPU in {window:.0f}s "
++                f"({tree_size} process(es) in its tree); {action}"
++            )
++        if self._reap and _reap_holder(pid):
++            print(f"[SUITE_LOCK] terminated stalled holder pid {pid}; its slot is being released by the OS")
++            self._baseline.clear()
++
++
+ class SuiteLock:
+     """Context manager acquiring one of ``DARKFAC_SUITE_SLOTS`` machine-wide slots."""
+ 
+@@ -229,6 +392,11 @@ class SuiteLock:
+         deadline = time.monotonic() + self._timeout_sec
+         backoff = _POLL_MIN_SEC
+         printed_wait = False
++        stall_watch = _StallWatch(
++            stall_after=_stall_after_sec(),
++            window=_stall_window_sec(),
++            reap=_reap_stalled_enabled(),
++        )
+         while True:
+             for slot in range(self._slots):
+                 lock_path = directory / f"suite-{slot}.lock"
+@@ -246,6 +414,10 @@ class SuiteLock:
+             if not printed_wait:
+                 print(f"[SUITE_LOCK] waiting: {self._describe_first_busy(directory)}")
+                 printed_wait = True
++            try:
++                stall_watch.check(directory, self._slots)
++            except Exception as exc:  # noqa: BLE001 - diagnostics must never break locking
++                print(f"[SUITE_LOCK] stalled-holder check failed ({type(exc).__name__}: {exc})")
+             time.sleep(backoff)
+             backoff = min(backoff * 1.5, _POLL_MAX_SEC)
+ 
+diff --git a/tests/test_remote_dispatch_resilience.py b/tests/test_remote_dispatch_resilience.py
+new file mode 100644
+index 0000000..850135a
+--- /dev/null
++++ b/tests/test_remote_dispatch_resilience.py
+@@ -0,0 +1,322 @@
++"""Resilience of the remote harness dispatch (USR-141): slow worker vs. dead worker,
++configurable probe/ceiling envs, and the lowered priority of the worker's job child.
++
++A fake worker (``http.server`` on 127.0.0.1:<free port>, in a thread) stands in
++for the Desktop worker: no external network, no real git/pytest.
++"""
++
++from __future__ import annotations
++
++import json
++import os
++import shutil
++import subprocess
++import sys
++import threading
++import time
++import types
++import urllib.request
++from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
++from pathlib import Path
++
++import pytest
++
++from core.harness import remote_dispatch, remote_worker
++
++
++@pytest.fixture(autouse=True)
++def _clean_env(monkeypatch: pytest.MonkeyPatch) -> None:
++    for key in (
++        "DARKFAC_WORKER_SILENCE_FALLBACK_SEC",
++        "DARKFAC_WORKER_HEALTH_TIMEOUT_SEC",
++        "DARKFAC_WORKER_CHILD_PRIORITY",
++        "DARKFAC_WORKER_TOKEN",
++    ):
++        monkeypatch.delenv(key, raising=False)
++    monkeypatch.setattr(remote_dispatch, "POLL_INTERVAL_SEC", 0.02)
++    monkeypatch.setattr(remote_dispatch, "SLOW_WORKER_PROBE_INTERVAL_SEC", 0.05)
++    monkeypatch.setattr(remote_dispatch, "_cancel_job", lambda *a, **k: None)
++
++    # tests/conftest.py replaces urllib.request.urlopen with an "offline" stub for
++    # the whole suite. These tests only talk to a fake worker on 127.0.0.1, so route
++    # the client through a real opener (no proxies) instead of the stub.
++    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
++
++    def _loopback_urlopen(req: object, timeout: float | None = None):
++        return opener.open(req, timeout=timeout)
++
++    monkeypatch.setattr(remote_dispatch.urllib.request, "urlopen", _loopback_urlopen)
++
++
++class _FakeWorker:
++    """Minimal fake of the worker HTTP surface used by ``_stream_job``."""
++
++    def __init__(self, *, poll_fails_for_sec: float | None, health_ok: bool = True) -> None:
++        # poll_fails_for_sec: None = job polls fail forever; N = fail for N s then answer "done".
++        self.poll_fails_for_sec = poll_fails_for_sec
++        self.health_ok = health_ok
++        self.health_hits = 0
++        self.started = time.monotonic()
++        owner = self
++
++        class _Handler(BaseHTTPRequestHandler):
++            def log_message(self, *args: object) -> None:  # silence
++                return
++
++            def _send(self, code: int, body: dict) -> None:
++                raw = json.dumps(body).encode("utf-8")
++                self.send_response(code)
++                self.send_header("Content-Type", "application/json")
++                self.send_header("Content-Length", str(len(raw)))
++                self.end_headers()
++                self.wfile.write(raw)
++
++            def do_GET(self) -> None:  # noqa: N802
++                if self.path.startswith("/health"):
++                    owner.health_hits += 1
++                    if owner.health_ok:
++                        self._send(200, {"ok": True, "busy": True})
++                    else:
++                        self._send(500, {"ok": False})
++                    return
++                if self.path.startswith("/harness/jobs/"):
++                    elapsed = time.monotonic() - owner.started
++                    failing = owner.poll_fails_for_sec is None or elapsed < owner.poll_fails_for_sec
++                    if failing:
++                        self._send(503, {"detail": "saturated"})
++                    else:
++                        self._send(200, {"status": "done", "log_chunk": "", "next_offset": 0, "returncode": 0})
++                    return
++                self._send(404, {})
++
++        self.server = ThreadingHTTPServer(("127.0.0.1", 0), _Handler)
++        self.url = f"http://127.0.0.1:{self.server.server_address[1]}"
++        self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
++        self.thread.start()
++
++    def stop(self) -> None:
++        self.server.shutdown()
++        self.server.server_close()
++
++
++@pytest.fixture
++def fake_worker_factory():
++    created: list[_FakeWorker] = []
++
++    def _make(**kwargs: object) -> _FakeWorker:
++        worker = _FakeWorker(**kwargs)  # type: ignore[arg-type]
++        created.append(worker)
++        return worker
++
++    yield _make
++    for worker in created:
++        try:
++            worker.stop()
++        except Exception:  # noqa: BLE001 - already stopped by the test
++            pass
++
++
++# --- slow vs. dead worker --------------------------------------------------------
++
++
++def test_slow_but_alive_worker_is_not_abandoned(
++    monkeypatch: pytest.MonkeyPatch, fake_worker_factory, capsys: pytest.CaptureFixture[str]
++) -> None:
++    """Job polls fail for longer than the silence threshold, /health keeps answering
++    (busy=true): the runner keeps waiting and gets the final verdict."""
++
++    monkeypatch.setattr(remote_dispatch, "WORKER_SILENCE_FALLBACK_SEC", 0.2)
++    monkeypatch.setenv("DARKFAC_WORKER_SILENCE_FALLBACK_SEC", "10")
++    worker = fake_worker_factory(poll_fails_for_sec=0.8)
++
++    payload = remote_dispatch._stream_job(worker.url, "job-1", deadline=time.monotonic() + 20)
++
++    assert payload["status"] == "done"
++    assert worker.health_hits >= 1
++    assert "slow, not dead" in capsys.readouterr().out
++
++
++def test_alive_worker_is_abandoned_only_after_the_ceiling(monkeypatch: pytest.MonkeyPatch, fake_worker_factory) -> None:
++    monkeypatch.setattr(remote_dispatch, "WORKER_SILENCE_FALLBACK_SEC", 0.1)
++    monkeypatch.setenv("DARKFAC_WORKER_SILENCE_FALLBACK_SEC", "0.8")
++    worker = fake_worker_factory(poll_fails_for_sec=None)  # polls never recover, /health ok
++
++    started = time.monotonic()
++    with pytest.raises(remote_dispatch._WorkerUnavailable, match="stopped responding"):
++        remote_dispatch._stream_job(worker.url, "job-1", deadline=time.monotonic() + 30)
++    elapsed = time.monotonic() - started
++
++    assert elapsed >= 0.75, "must keep waiting up to the ceiling while /health answers"
++    assert elapsed < 10, "must still give up at the ceiling"
++
++
++def test_dead_worker_is_abandoned_without_waiting_for_the_ceiling(
++    monkeypatch: pytest.MonkeyPatch, fake_worker_factory
++) -> None:
++    monkeypatch.setattr(remote_dispatch, "WORKER_SILENCE_FALLBACK_SEC", 0.2)
++    monkeypatch.setenv("DARKFAC_WORKER_SILENCE_FALLBACK_SEC", "60")
++    worker = fake_worker_factory(poll_fails_for_sec=None)
++    worker.stop()  # port closed: polls AND /health fail
++
++    started = time.monotonic()
++    with pytest.raises(remote_dispatch._WorkerUnavailable, match="/health is unreachable"):
++        remote_dispatch._stream_job(worker.url, "job-1", deadline=time.monotonic() + 120)
++
++    assert time.monotonic() - started < 15, "a dead worker must not wait for the 60s ceiling"
++
++
++def test_worker_with_failing_health_endpoint_counts_as_dead(
++    monkeypatch: pytest.MonkeyPatch, fake_worker_factory
++) -> None:
++    monkeypatch.setattr(remote_dispatch, "WORKER_SILENCE_FALLBACK_SEC", 0.2)
++    monkeypatch.setenv("DARKFAC_WORKER_SILENCE_FALLBACK_SEC", "60")
++    worker = fake_worker_factory(poll_fails_for_sec=None, health_ok=False)
++
++    with pytest.raises(remote_dispatch._WorkerUnavailable, match="/health is unreachable"):
++        remote_dispatch._stream_job(worker.url, "job-1", deadline=time.monotonic() + 120)
++
++
++def test_client_deadline_still_wins_over_a_slow_worker(monkeypatch: pytest.MonkeyPatch, fake_worker_factory) -> None:
++    monkeypatch.setattr(remote_dispatch, "WORKER_SILENCE_FALLBACK_SEC", 0.1)
++    monkeypatch.setenv("DARKFAC_WORKER_SILENCE_FALLBACK_SEC", "600")
++    worker = fake_worker_factory(poll_fails_for_sec=None)
++
++    with pytest.raises(remote_dispatch._WorkerUnavailable, match="client-side deadline exceeded"):
++        remote_dispatch._stream_job(worker.url, "job-1", deadline=time.monotonic() + 0.6)
++
++
++# --- env parsing -----------------------------------------------------------------
++
++
++@pytest.mark.parametrize("raw", ["", "abc", "-3", "0", "nan", "inf", " "])
++def test_invalid_health_timeout_env_falls_back_to_default(monkeypatch: pytest.MonkeyPatch, raw: str) -> None:
++    monkeypatch.setenv("DARKFAC_WORKER_HEALTH_TIMEOUT_SEC", raw)
++    assert remote_dispatch.health_probe_timeout_sec() == remote_dispatch.HEALTH_PROBE_TIMEOUT_SEC == 2.0
++
++
++def test_health_timeout_env_is_honoured_by_probe_health(monkeypatch: pytest.MonkeyPatch) -> None:
++    seen: list[float] = []
++
++    def fake_urlopen(_req: object, timeout: float | None = None):
++        seen.append(float(timeout))  # type: ignore[arg-type]
++        raise OSError("offline")
++
++    monkeypatch.setattr(remote_dispatch.urllib.request, "urlopen", fake_urlopen)
++    assert remote_dispatch.probe_health("http://worker") is None
++    monkeypatch.setenv("DARKFAC_WORKER_HEALTH_TIMEOUT_SEC", "7.5")
++    assert remote_dispatch.probe_health("http://worker") is None
++    assert remote_dispatch.probe_health("http://worker", timeout=1.25) is None
++    assert seen == [2.0, 7.5, 1.25]
++
++
++@pytest.mark.parametrize("raw", ["", "abc", "-1", "0", "nan"])
++def test_invalid_silence_ceiling_env_falls_back_to_default(monkeypatch: pytest.MonkeyPatch, raw: str) -> None:
++    monkeypatch.setenv("DARKFAC_WORKER_SILENCE_FALLBACK_SEC", raw)
++    assert remote_dispatch.worker_silence_ceiling_sec() == 180.0
++
++
++def test_silence_ceiling_is_never_below_the_plain_silence_threshold(monkeypatch: pytest.MonkeyPatch) -> None:
++    monkeypatch.setenv("DARKFAC_WORKER_SILENCE_FALLBACK_SEC", "5")
++    assert remote_dispatch.worker_silence_ceiling_sec() == remote_dispatch.WORKER_SILENCE_FALLBACK_SEC
++    monkeypatch.setenv("DARKFAC_WORKER_SILENCE_FALLBACK_SEC", "300")
++    assert remote_dispatch.worker_silence_ceiling_sec() == 300.0
++
++
++# --- priority of the job child -----------------------------------------------------
++
++
++def test_child_priority_defaults_to_below_normal() -> None:
++    assert remote_worker.child_priority_mode() == "below_normal"
++
++
++@pytest.mark.parametrize("raw", ["", "high", "idle", "0", "BELOW-NORMAL"])
++def test_invalid_child_priority_env_falls_back_to_below_normal(monkeypatch: pytest.MonkeyPatch, raw: str) -> None:
++    monkeypatch.setenv("DARKFAC_WORKER_CHILD_PRIORITY", raw)
++    assert remote_worker.child_priority_mode() == "below_normal"
++
++
++def test_child_priority_env_accepts_normal_case_insensitively(monkeypatch: pytest.MonkeyPatch) -> None:
++    monkeypatch.setenv("DARKFAC_WORKER_CHILD_PRIORITY", " Normal ")
++    assert remote_worker.child_priority_mode() == "normal"
++    cmd = [sys.executable, "x.py"]
++    assert remote_worker.apply_child_priority(cmd) == (cmd, {})
++
++
++def test_apply_child_priority_lowers_priority_on_this_platform() -> None:
++    cmd = [sys.executable, "core/harness/runner.py", "--quick", "--local"]
++    new_cmd, kwargs = remote_worker.apply_child_priority(cmd)
++    if os.name == "nt":
++        assert new_cmd == cmd
++        assert kwargs == {"creationflags": 0x00004000}
++    elif shutil.which("nice"):
++        assert new_cmd[1:3] == ["-n", "5"]
++        assert new_cmd[3:] == cmd
++        assert kwargs == {}
++    else:  # pragma: no cover - minimal POSIX without nice
++        assert (new_cmd, kwargs) == (cmd, {})
++
++
++class _FakePopen:
++    instances: list["_FakePopen"] = []
++
++    def __init__(self, cmd: list[str], **kwargs: object) -> None:
++        self.cmd = cmd
++        self.kwargs = kwargs
++        self.stdout: list[str] = ['[HARNESS_RESULT] {"ok": true}\n']
++        self.returncode = 0
++        _FakePopen.instances.append(self)
++
++    def wait(self) -> int:
++        return self.returncode
++
++    def kill(self) -> None:
++        pass
++
++
++def _run_job_with_fake_popen(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> _FakePopen:
++    _FakePopen.instances.clear()
++    fake_subprocess = types.SimpleNamespace(
++        run=lambda *a, **k: subprocess.CompletedProcess(a, 0, stdout="", stderr=""),
++        Popen=_FakePopen,
++        PIPE=subprocess.PIPE,
++        STDOUT=subprocess.STDOUT,
++    )
++    if hasattr(subprocess, "BELOW_NORMAL_PRIORITY_CLASS"):
++        fake_subprocess.BELOW_NORMAL_PRIORITY_CLASS = subprocess.BELOW_NORMAL_PRIORITY_CLASS
++    monkeypatch.setattr(remote_worker, "subprocess", fake_subprocess)
++    monkeypatch.setattr(remote_worker, "_job_timeout_sec", lambda *a, **k: 30.0)
++
++    manager = remote_worker.JobManager(tmp_path / "root", state_dir=tmp_path / "worker_state")
++    job = remote_worker.HarnessJob(
++        job_id="job-priority",
++        candidate_sha="a" * 40,
++        tree_sha="b" * 40,
++        quick=True,
++        include_holdout=False,
++        requesting_host="test-host",
++        ref_name="refs/darkfac/jobs/job-priority",
++    )
++    manager._run_job(job)
++    assert len(_FakePopen.instances) == 1, job.error
++    return _FakePopen.instances[0]
++
++
++def test_job_child_is_started_with_reduced_priority(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
++    (tmp_path / "root").mkdir()
++    popen = _run_job_with_fake_popen(monkeypatch, tmp_path)
++    if os.name == "nt":
++        assert popen.kwargs["creationflags"] == 0x00004000
++        assert popen.cmd[0] == sys.executable
++    elif shutil.which("nice"):
++        assert popen.cmd[1:3] == ["-n", "5"]
++        assert popen.cmd[3] == sys.executable
++    assert popen.cmd[-2:] == ["--quick", "--local"]
++    assert popen.kwargs["env"]["DARKFAC_HARNESS_WORKER_JOB"] == "1"
++
++
++def test_job_child_priority_can_be_switched_off(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
++    (tmp_path / "root").mkdir()
++    monkeypatch.setenv("DARKFAC_WORKER_CHILD_PRIORITY", "normal")
++    popen = _run_job_with_fake_popen(monkeypatch, tmp_path)
++    assert "creationflags" not in popen.kwargs
++    assert popen.cmd[0] == sys.executable
+diff --git a/tests/test_suite_lock_stalled.py b/tests/test_suite_lock_stalled.py
+new file mode 100644
+index 0000000..6b11deb
+--- /dev/null
++++ b/tests/test_suite_lock_stalled.py
+@@ -0,0 +1,300 @@
++"""Stalled-holder detection of the machine-wide suite lock (USR-147) and the
++``--no-cache`` lock-before-execute behaviour of the runner (USR-135/147).
++
++Every test points ``DARKFAC_HARNESS_STATE_DIR`` at a fresh ``tmp_path`` so the
++real machine-global lock is never touched.
++"""
++
++from __future__ import annotations
++
++import contextlib
++import json
++import os
++import socket
++import subprocess
++import sys
++import textwrap
++import time
++from pathlib import Path
++
++import pytest
++
++from core.harness import runner, suite_lock
++
++REPO_ROOT = Path(__file__).resolve().parents[1]
++
++
++@pytest.fixture(autouse=True)
++def _isolated_state_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
++    state_dir = tmp_path / "state"
++    monkeypatch.setenv("DARKFAC_HARNESS_STATE_DIR", str(state_dir))
++    for key in (
++        "DARKFAC_SUITE_LOCK_HELD",
++        "DARKFAC_SUITE_LOCK",
++        "DARKFAC_SUITE_SLOTS",
++        "DARKFAC_SUITE_LOCK_TIMEOUT_SEC",
++        "DARKFAC_SUITE_LOCK_STALL_AFTER_SEC",
++        "DARKFAC_SUITE_LOCK_STALL_WINDOW_SEC",
++        "DARKFAC_SUITE_LOCK_REAP_STALLED",
++    ):
++        monkeypatch.delenv(key, raising=False)
++    return state_dir
++
++
++def _idle_holder_script(state_dir: Path, marker: Path) -> str:
++    """A process that takes the lock and then sleeps (alive, ~0% CPU)."""
++
++    return textwrap.dedent(
++        f"""
++        import os, sys, time
++        sys.path.insert(0, {str(REPO_ROOT)!r})
++        os.environ["DARKFAC_HARNESS_STATE_DIR"] = {str(state_dir)!r}
++        os.environ.pop("DARKFAC_SUITE_LOCK_HELD", None)
++        from core.harness import suite_lock
++        lock = suite_lock.SuiteLock(timeout_sec=30)
++        lock.acquire()
++        open({str(marker)!r}, "w", encoding="utf-8").write("acquired")
++        time.sleep(120)
++        """
++    )
++
++
++@contextlib.contextmanager
++def _idle_holder(tmp_path: Path):
++    state_dir = tmp_path / "state"
++    marker = tmp_path / "holder_acquired.txt"
++    proc = subprocess.Popen([sys.executable, "-c", _idle_holder_script(state_dir, marker)])
++    try:
++        deadline = time.monotonic() + 30
++        while not marker.exists() and time.monotonic() < deadline:
++            time.sleep(0.05)
++        assert marker.exists(), "holder never acquired the lock"
++        yield proc
++    finally:
++        if proc.poll() is None:
++            proc.kill()
++        proc.wait(timeout=15)
++
++
++# --- env parsing ------------------------------------------------------------------
++
++
++@pytest.mark.parametrize("raw", ["", "abc", "-5", "nan", "inf"])
++def test_invalid_stall_envs_fall_back_to_defaults(monkeypatch: pytest.MonkeyPatch, raw: str) -> None:
++    monkeypatch.setenv("DARKFAC_SUITE_LOCK_STALL_AFTER_SEC", raw)
++    monkeypatch.setenv("DARKFAC_SUITE_LOCK_STALL_WINDOW_SEC", raw)
++    assert suite_lock._stall_after_sec() == 600.0
++    assert suite_lock._stall_window_sec() == 10.0
++
++
++def test_valid_stall_envs_are_honoured(monkeypatch: pytest.MonkeyPatch) -> None:
++    monkeypatch.setenv("DARKFAC_SUITE_LOCK_STALL_AFTER_SEC", "0")
++    monkeypatch.setenv("DARKFAC_SUITE_LOCK_STALL_WINDOW_SEC", "2.5")
++    assert suite_lock._stall_after_sec() == 0.0
++    assert suite_lock._stall_window_sec() == 2.5
++
++
++def test_reap_is_off_unless_explicitly_enabled(monkeypatch: pytest.MonkeyPatch) -> None:
++    assert suite_lock._reap_stalled_enabled() is False
++    for raw in ("", "0", "true", "yes", "on"):
++        monkeypatch.setenv("DARKFAC_SUITE_LOCK_REAP_STALLED", raw)
++        assert suite_lock._reap_stalled_enabled() is False
++    monkeypatch.setenv("DARKFAC_SUITE_LOCK_REAP_STALLED", "1")
++    assert suite_lock._reap_stalled_enabled() is True
++
++
++# --- real idle holder ----------------------------------------------------------------
++
++
++def test_idle_live_holder_triggers_a_stalled_warning_but_is_not_killed(
++    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
++) -> None:
++    monkeypatch.setenv("DARKFAC_SUITE_LOCK_STALL_AFTER_SEC", "0")
++    monkeypatch.setenv("DARKFAC_SUITE_LOCK_STALL_WINDOW_SEC", "1")
++    with _idle_holder(tmp_path) as holder:
++        waiter = suite_lock.SuiteLock(timeout_sec=6)
++        with pytest.raises(suite_lock.SuiteLockTimeout):
++            waiter.acquire()
++        out = capsys.readouterr().out
++        assert "[SUITE_LOCK] holder appears stalled" in out
++        assert f"pid {holder.pid}" in out
++        assert socket.gethostname() in out
++        assert "DARKFAC_SUITE_LOCK_REAP_STALLED=1" in out
++        assert holder.poll() is None, "reaping is opt-in; the holder must still be alive"
++
++
++def test_stall_check_waits_for_the_configured_wait_before_sampling(
++    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
++) -> None:
++    monkeypatch.setenv("DARKFAC_SUITE_LOCK_STALL_AFTER_SEC", "3600")
++    monkeypatch.setenv("DARKFAC_SUITE_LOCK_STALL_WINDOW_SEC", "0.5")
++
++    def _boom(*_a: object, **_k: object) -> None:
++        raise AssertionError("must not sample the holder before the stall wait elapsed")
++
++    monkeypatch.setattr(suite_lock, "_sample_holder_tree", _boom)
++    with _idle_holder(tmp_path):
++        with pytest.raises(suite_lock.SuiteLockTimeout):
++            suite_lock.SuiteLock(timeout_sec=2).acquire()
++    assert "appears stalled" not in capsys.readouterr().out
++
++
++def test_reap_enabled_terminates_the_stalled_holder_and_takes_the_slot(
++    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
++) -> None:
++    monkeypatch.setenv("DARKFAC_SUITE_LOCK_STALL_AFTER_SEC", "0")
++    monkeypatch.setenv("DARKFAC_SUITE_LOCK_STALL_WINDOW_SEC", "1")
++    monkeypatch.setenv("DARKFAC_SUITE_LOCK_REAP_STALLED", "1")
++    with _idle_holder(tmp_path) as holder:
++        waiter = suite_lock.SuiteLock(timeout_sec=30)
++        waiter.acquire()
++        try:
++            assert waiter.held
++            assert holder.wait(timeout=15) is not None
++        finally:
++            waiter.release()
++    out = capsys.readouterr().out
++    assert "holder appears stalled" in out
++    assert "terminated stalled holder" in out
++
++
++# --- deterministic unit tests of the detector -------------------------------------------
++
++
++def _write_sidecar(state: Path, **overrides: object) -> Path:
++    state.mkdir(parents=True, exist_ok=True)
++    lock_path = state / "suite-0.lock"
++    lock_path.touch()
++    payload = {
++        "pid": 424242,
++        "hostname": socket.gethostname(),
++        "started_at": time.time() - 100,
++        "cwd": "C:/x",
++    }
++    payload.update(overrides)
++    lock_path.with_suffix(".json").write_text(json.dumps(payload), encoding="utf-8")
++    return lock_path
++
++
++def _watch(monkeypatch: pytest.MonkeyPatch, samples: list[dict[int, float] | None]) -> suite_lock._StallWatch:
++    iterator = iter(samples)
++    monkeypatch.setattr(suite_lock, "_sample_holder_tree", lambda pid, started_at: next(iterator))
++    return suite_lock._StallWatch(stall_after=0.0, window=0.0, reap=False)
++
++
++def test_cpu_advancing_in_the_tree_is_not_stalled(
++    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
++) -> None:
++    lock_path = _write_sidecar(tmp_path / "s")
++    watch = _watch(monkeypatch, [{424242: 1.0, 7: 5.0}, {424242: 1.0, 7: 9.0}])  # a child works hard
++    watch.check(lock_path.parent, 1)
++    watch.check(lock_path.parent, 1)
++    assert "appears stalled" not in capsys.readouterr().out
++
++
++def test_unchanged_cpu_in_the_whole_tree_is_stalled_and_warned_once(
++    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
++) -> None:
++    lock_path = _write_sidecar(tmp_path / "s")
++    tree = {424242: 1.0, 7: 5.0}
++    watch = _watch(monkeypatch, [dict(tree), dict(tree), dict(tree), dict(tree)])
++    for _ in range(4):
++        watch.check(lock_path.parent, 1)
++    out = capsys.readouterr().out
++    assert out.count("[SUITE_LOCK] holder appears stalled") == 1
++    assert "pid 424242" in out
++
++
++def test_processes_joining_the_tree_count_as_activity(
++    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
++) -> None:
++    lock_path = _write_sidecar(tmp_path / "s")
++    watch = _watch(monkeypatch, [{424242: 1.0}, {424242: 1.0, 99: 0.0}])
++    watch.check(lock_path.parent, 1)
++    watch.check(lock_path.parent, 1)
++    assert "appears stalled" not in capsys.readouterr().out
++
++
++def test_sidecar_from_another_host_is_never_inspected(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
++    lock_path = _write_sidecar(tmp_path / "s", hostname="SOME-OTHER-HOST-XYZ")
++
++    def _boom(*_a: object, **_k: object) -> None:
++        raise AssertionError("a remote holder's pid is meaningless on this host")
++
++    monkeypatch.setattr(suite_lock, "_sample_holder_tree", _boom)
++    suite_lock._StallWatch(stall_after=0.0, window=0.0, reap=True).check(lock_path.parent, 1)
++
++
++def test_own_pid_is_never_inspected_or_reaped(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
++    lock_path = _write_sidecar(tmp_path / "s", pid=os.getpid())
++
++    def _boom(*_a: object, **_k: object) -> None:
++        raise AssertionError("must not inspect itself")
++
++    monkeypatch.setattr(suite_lock, "_sample_holder_tree", _boom)
++    suite_lock._StallWatch(stall_after=0.0, window=0.0, reap=True).check(lock_path.parent, 1)
++    assert suite_lock._reap_holder(os.getpid()) is False
++
++
++def test_recycled_pid_is_not_mistaken_for_the_holder(tmp_path: Path) -> None:
++    with _idle_holder(tmp_path) as holder:
++        # Sidecar claims the lock was taken long before the process existed -> pid reuse.
++        assert suite_lock._sample_holder_tree(holder.pid, started_at=1.0) is None
++        sample = suite_lock._sample_holder_tree(holder.pid, started_at=time.time())
++        assert sample is not None and holder.pid in sample
++
++
++def test_detector_failure_never_breaks_lock_acquisition(
++    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
++) -> None:
++    monkeypatch.setenv("DARKFAC_SUITE_LOCK_STALL_AFTER_SEC", "0")
++
++    def _boom(self: object, directory: Path, slots: int) -> None:
++        raise RuntimeError("psutil exploded")
++
++    monkeypatch.setattr(suite_lock._StallWatch, "check", _boom)
++    with _idle_holder(tmp_path):
++        with pytest.raises(suite_lock.SuiteLockTimeout):
++            suite_lock.SuiteLock(timeout_sec=1.5).acquire()
++    assert "stalled-holder check failed" in capsys.readouterr().out
++
++
++# --- runner: lock before execute on the --no-cache path ---------------------------------
++
++
++def test_no_cache_run_takes_the_suite_lock_before_execute(monkeypatch: pytest.MonkeyPatch) -> None:
++    """The wait for the machine-wide lock must happen OUTSIDE the step subprocess,
++    otherwise it is charged against the step timeout (false timeout, count=0)."""
++
++    from core.harness.models import HarnessConfig, HarnessStepConfig
++
++    events: list[str] = []
++
++    @contextlib.contextmanager
++    def fake_suite_lock(**_kwargs: object):
++        events.append("lock_enter")
++        try:
++            yield None
++        finally:
++            events.append("lock_exit")
++
++    def fake_execute(_config: object, **_kwargs: object) -> bool:
++        events.append("execute")
++        return True
++
++    monkeypatch.setattr(runner.harness_suite_lock, "suite_lock", fake_suite_lock)
++    monkeypatch.setattr(runner, "execute", fake_execute)
++    monkeypatch.delenv("CI", raising=False)
++    config = HarnessConfig(steps=[HarnessStepConfig(name="probe", cmd="python -c pass", quick=True, kind="check")])
++
++    ok = runner.run_with_cache(
++        config,
++        config_hash="a" * 64,
++        quick=True,
++        include_holdout=False,
++        config_path=Path("harness.config.json"),
++        no_cache=True,
++        local_only=True,
++    )
++    assert ok is True
++    assert events == ["lock_enter", "execute", "lock_exit"]
