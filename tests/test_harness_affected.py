@@ -406,16 +406,29 @@ def test_unborn_checkout_still_rejects_missing_base(tmp_path: Path) -> None:
 # The official quick gate runs this test in the serial step so xdist workers do
 # not make the absolute latency budget depend on unrelated CPU contention.
 @pytest.mark.serial
-def test_smoke_real_repo_json_is_valid_and_fast() -> None:
+@pytest.mark.parametrize("shallow_detached", [False, True])
+def test_smoke_real_repo_json_is_valid_and_fast(
+    tmp_path: Path, shallow_detached: bool
+) -> None:
     here = Path(__file__).resolve().parent
     try:
         repo_root = affected.find_repo_root(here)
     except Exception:
         pytest.skip("not running inside a git checkout")
 
+    if shallow_detached:
+        clone = tmp_path / "clone"
+        _git(tmp_path, "clone", "--depth=1", "--no-local", str(repo_root), str(clone))
+        _git(clone, "checkout", "--detach")
+        assert _git(clone, "rev-parse", "--is-shallow-repository").strip() == "true"
+        repo_root = clone
+
     started = time.monotonic()
     result = subprocess.run(
-        [sys.executable, "-m", "core.harness.affected", "--json"],
+        # This smoke checks CLI output and latency, not branch discovery.
+        # HEAD exists even in the validation stage's shallow detached clone;
+        # missing-base rejection is covered independently above.
+        [sys.executable, "-m", "core.harness.affected", "--base", "HEAD", "--json"],
         cwd=str(repo_root),
         capture_output=True,
         text=True,
