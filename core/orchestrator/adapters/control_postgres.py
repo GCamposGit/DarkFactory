@@ -694,6 +694,26 @@ class PostgresControlStore:
                         )
                         cur.execute("UPDATE claims SET status = 'released' WHERE lease_id = %s", (claim.lease_id,))
 
+                    if result.outcome != "success" and result.evidence_refs:
+                        # Same contract as the SQLite store: a failed/retry/waiting stage keeps its evidence
+                        # refs (failing test ids, log names); empty refs never clobber a stored value.
+                        cur.execute(
+                            """
+                            UPDATE jobs SET evidence_refs = %s::jsonb
+                            WHERE run_id = %s AND ticket_id = %s AND plan_version = %s
+                              AND stage = %s AND iteration = %s AND fencing_token = %s
+                            """,
+                            (
+                                json.dumps(result.evidence_refs),
+                                jk.run_id,
+                                jk.ticket_id,
+                                jk.plan_version,
+                                jk.stage,
+                                jk.iteration,
+                                claim.fencing_token,
+                            ),
+                        )
+
                     conn.commit()
         except (StaleLeaseError, InvalidResultError):
             raise

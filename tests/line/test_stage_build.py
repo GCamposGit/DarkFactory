@@ -488,3 +488,92 @@ def test_failed_validate_log_carries_redacted_raw_output_tail(
     assert secret not in log and "[REDACTED]" in log
     # the next iteration's prompt also receives the raw tail
     assert "Candidate worktree is dirty" in fake_agent.calls[-1].prompt
+
+
+# --------------------------------------------------------------------------
+# Failure evidence on the live board (USR-62 pilot: a bare `validate_exhausted` hid the failing tests)
+# --------------------------------------------------------------------------
+
+_FAILING_PYTEST_SCRIPT = (
+    "import sys\n"
+    "print('FAILED tests/test_unrelated.py::test_flaky_race - AssertionError: boom')\n"
+    "print('FAILED tests/test_unrelated.py::test_flaky_race - AssertionError: boom')\n"
+    "print('ERROR tests/test_other.py::test_setup')\n"
+    "print('2 failed, 10 passed in 1.0s')\n"
+    "sys.exit(1)\n"
+)
+
+
+def test_validate_exhausted_carries_the_failing_tests_as_evidence_refs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    origin = _init_bare_origin(
+        tmp_path, extra_files={"requirements.txt": "", "check_status.py": _FAILING_PYTEST_SCRIPT}
+    )
+    project = _project(str(origin), commands=_CHECK_COMMANDS)
+    _write_tickets(tmp_path / "root", monkeypatch, project, "run-ev", [{"id": "T1", "title": "t"}])
+    fake_agent = _RecordingFakeAgent(lambda call_no, req: None)
+    stage = DevelopmentStage(
+        run_agent_func=fake_agent, pick_func=_fixed_route(), routing_config=load_routing_config()
+    )
+
+    result = stage.run(project, "run-ev")
+
+    assert result.outcome == "failed" and result.cause_code == "validate_exhausted"
+    iterations = load_routing_config().run_caps.validate_iterations_per_ticket
+    assert result.evidence_refs == [
+        "validate_failed:tests/test_unrelated.py::test_flaky_race",  # de-duplicated across repeated lines
+        "validate_failed:tests/test_other.py::test_setup",
+        "validate_exit:1",
+        f"validate_log:validate-T1-{iterations}.log.md",
+    ]
+
+
+def test_validate_exhausted_after_agent_crashes_names_the_agent_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    origin = _init_bare_origin(
+        tmp_path, extra_files={"requirements.txt": "", "check_status.py": _CHECK_STATUS_SCRIPT}
+    )
+    project = _project(str(origin), commands=_CHECK_COMMANDS)
+    _write_tickets(tmp_path / "root", monkeypatch, project, "run-crash", [{"id": "T1", "title": "t"}])
+
+    def crashing(req: AgentRequest) -> AgentResult:
+        return AgentResult(ok=False, text="boom", harness=req.harness, duration_s=0.01, error_kind="crash")
+
+    stage = DevelopmentStage(
+        run_agent_func=crashing, pick_func=_fixed_route(), routing_config=load_routing_config()
+    )
+
+    result = stage.run(project, "run-crash")
+
+    assert result.cause_code == "validate_exhausted"
+    assert result.evidence_refs[0] == "agent_failed:crash"
+    assert result.evidence_refs[1].startswith("validate_log:validate-T1-")
+
+
+def test_clean_validation_retry_carries_the_failing_tests_as_evidence_refs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    origin = _init_bare_origin(
+        tmp_path, extra_files={"requirements.txt": "", "check_status.py": _FAILING_PYTEST_SCRIPT}
+    )
+    project = _project(str(origin), commands=_CHECK_COMMANDS)
+    run_id = "run-clean-ev"
+    monkeypatch.setenv("DARKFAC_WORKSPACES", str(tmp_path / "root"))
+    ws = ws_mod.checkout(project, run_id)
+    (ws.path / "feature.py").write_text("value = 1\n", encoding="utf-8")
+    ws_mod.commit(ws, "chore: prepare candidate", job_key=f"{run_id}:T1")
+    ws_mod.push(ws)
+
+    result = ValidationStage().run(project, run_id)
+
+    assert result.outcome == "retry"
+    assert result.cause_code.startswith("retry:development\nclean_validate_failed:")
+    assert result.evidence_refs == [
+        f"validation_report:.darkfac/runs/{run_id}/validation.json",
+        "clean_validate_step:validate",
+        "validate_failed:tests/test_unrelated.py::test_flaky_race",
+        "validate_failed:tests/test_other.py::test_setup",
+        "validate_exit:1",
+    ]

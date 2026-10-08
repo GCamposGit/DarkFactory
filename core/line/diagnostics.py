@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from typing import Any, Optional
 
 from core.line import workspace
@@ -34,6 +35,11 @@ REMOTE_SECTION_MAX_LINES = 40
 REMOTE_SECTION_MAX_CHARS = 3000
 REMOTE_LINE_PREFIXES = ("[REMOTE]", "[line_validate]")
 _MAX_RECORDED_ATTEMPTS = 10
+# The live board shows at most 12 evidence refs per stage (core.workflow.line_live.MAX_EVIDENCE_REFS).
+MAX_FAILURE_TEST_REFS = 8
+_MAX_REF_CHARS = 200
+# pytest's short test summary: `FAILED tests/x.py::test_y - AssertionError`, `ERROR tests/x.py::test_y`.
+_FAILED_TEST_LINE = re.compile(r"^(?:FAILED|ERROR)[ \t]+(\S+)", re.MULTILINE)
 
 
 def redacted_head(text: Optional[str], limit: int = MAX_OUTPUT_CHARS) -> str:
@@ -84,6 +90,39 @@ def remote_dispatch_section(raw_output: Optional[str]) -> list[str]:
     lines = remote_dispatch_lines(raw_output)
     body = "\n".join(lines) if lines else "(no [REMOTE] line in the output: remote dispatch was not attempted)"
     return ["## Remote dispatch lines (redacted)", "", "```text", body, "```", ""]
+
+
+def failed_test_ids(output: Optional[str]) -> list[str]:
+    """Distinct pytest node ids named in the `FAILED`/`ERROR` lines of a command output, in order."""
+    seen: dict[str, None] = {}
+    for match in _FAILED_TEST_LINE.finditer(redact_secrets(output or "")):
+        seen.setdefault(match.group(1)[:_MAX_REF_CHARS], None)
+    return list(seen)
+
+
+def validation_failure_refs(
+    output: Optional[str],
+    *,
+    exit_code: Optional[int] = None,
+    log_name: Optional[str] = None,
+    limit: int = MAX_FAILURE_TEST_REFS,
+) -> list[str]:
+    """Short, redacted `evidence_refs` that say WHAT a failed validate run broke.
+
+    A stage that ends `failed`/`retry` only exposes its cause code on the live board
+    (`validate_exhausted`, `retry:development` + `clean_validate_failed:<sha>`), which says neither which
+    tests failed nor where to read the log. These refs carry the failing test ids (capped, with a
+    "+N more" marker), the exit code and the name of the attempt log committed to the run branch.
+    """
+    ids = failed_test_ids(output)
+    refs = [f"validate_failed:{node_id}" for node_id in ids[:limit]]
+    if len(ids) > limit:
+        refs.append(f"validate_failed:+{len(ids) - limit} more")
+    if exit_code is not None:
+        refs.append(f"validate_exit:{exit_code}")
+    if log_name:
+        refs.append(f"validate_log:{log_name}")
+    return refs
 
 
 def worker_snippet(text: Optional[str], limit: int = SNIPPET_CHARS) -> str:

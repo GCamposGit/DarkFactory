@@ -425,8 +425,12 @@ class DevelopmentStage:
         # (harness, model) pairs whose agent crashed on this ticket: not picked again for its remaining
         # iterations (falls back to them only if nothing else is routable).
         excluded: set[tuple[str, Optional[str]]] = set()
+        # What the LAST failed iteration broke, surfaced as `evidence_refs` of a `failed` result: the live
+        # board otherwise shows nothing but `validate_exhausted` (USR-62 pilot, 07/10).
+        last_failure_refs: list[str] = []
 
         for iteration in range(1, max_iterations + 1):
+            log_name = f"validate-{ticket.id}-{iteration}.log.md"
             commands = resolve_commands(project, ws.path)
             extra_instruction = ""
             if ticket_index == 0 and not any(cmd.strip() for cmd in commands.validate_cmds):
@@ -480,6 +484,7 @@ class DevelopmentStage:
                     last_validate_log = (
                         f"Falha ao invocar agente ({agent_result.error_kind}): {agent_result.text}"
                     )
+                    last_failure_refs = [f"agent_failed:{agent_result.error_kind}", f"validate_log:{log_name}"]
                     _write_validate_log(
                         ws, ticket.id, iteration, last_validate_log,
                         meta={
@@ -497,6 +502,7 @@ class DevelopmentStage:
             setup_result = ensure_setup(ws, project, commands)
             if not setup_result.ok:
                 last_validate_log = "Falha no setup:\n" + _distill_with_test_subagent(setup_result)
+                last_failure_refs = ["setup_failed", f"validate_log:{log_name}"]
                 _write_validate_log(
                     ws, ticket.id, iteration, last_validate_log, raw_output=setup_result.combined_output
                 )
@@ -546,6 +552,9 @@ class DevelopmentStage:
 
             # The distilled report only knows pytest lines: a failure outside the tests (the runner's own
             # checks, a launch error) would reach the agent as "FAILED (N passed)". Give it the raw tail.
+            last_failure_refs = diagnostics.validation_failure_refs(
+                validate_result.combined_output, exit_code=validate_result.exit_code, log_name=log_name
+            )
             last_validate_log = (
                 f"{distilled}\n\n## Saida bruta do validate (ultimos {diagnostics.RAW_TAIL_CHARS} caracteres)\n"
                 f"{diagnostics.redacted_tail(validate_result.combined_output)}"
@@ -555,7 +564,9 @@ class DevelopmentStage:
                 return StageResult(outcome="replan", cause_code="spec_conflict", output_refs=[])
 
         self._persist_diagnostics(ws, run_id, ticket.id)
-        return StageResult(outcome="failed", cause_code="validate_exhausted", output_refs=[])
+        return StageResult(
+            outcome="failed", cause_code="validate_exhausted", output_refs=[], evidence_refs=last_failure_refs
+        )
 
     def _pick_route(self, excluded: set[tuple[str, Optional[str]]]) -> Optional[tuple[str, Optional[str]]]:
         """Next (harness, model), skipping pairs that crashed; falls back to them if nothing else is routable."""
@@ -839,6 +850,7 @@ class ValidationStage:
             # Setup/build alone cannot prove the candidate. A missing validate
             # command must route back to development before review.
             all_ok = bool(executable_validate)
+            failed_refs: list[str] = []
 
             for stage_name, cmd_list in (
                 ("setup", commands.setup),
@@ -863,6 +875,10 @@ class ValidationStage:
                 }
                 if not result.ok:
                     report["commands"][stage_name]["log"] = _distill_with_test_subagent(result)
+                    failed_refs = [
+                        f"clean_validate_step:{stage_name}",
+                        *diagnostics.validation_failure_refs(result.combined_output, exit_code=result.exit_code),
+                    ]
                     all_ok = False
                     break
 
@@ -878,11 +894,13 @@ class ValidationStage:
 
             if all_ok:
                 return StageResult(outcome="success", output_refs=[commit_sha])
+            failure_refs = [f"validation_report:.darkfac/runs/{ws.run_id}/validation.json", *failed_refs]
             if not executable_validate and "validate" in report["commands"]:
                 return StageResult(
                     outcome="retry",
                     cause_code=f"retry:development\nclean_validate_missing:{sha[:12]}",
                     output_refs=[commit_sha],
+                    evidence_refs=failure_refs,
                 )
             # HF-27-08 D-b (review fix item 1): route back to development,
             # not another validation pass. `validation.json` (written just
@@ -891,6 +909,7 @@ class ValidationStage:
                 outcome="retry",
                 cause_code=f"retry:development\nclean_validate_failed:{sha[:12]}",
                 output_refs=[commit_sha],
+                evidence_refs=failure_refs,
             )
         finally:
             shutil.rmtree(tmp_dir, ignore_errors=True)
