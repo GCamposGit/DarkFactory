@@ -69,5 +69,6 @@ Durante as execuções do gate oficial (`core/harness/runner.py --quick`) no Not
 - **Proteção de Governança (`core/harness/*`)**:
   - Conforme `core/orchestrator/guard.py` e o CI GitHub Actions (`pr-validation`), qualquer modificação em `core/harness/*` por agentes autônomos é bloqueada e sobrescrita pela árvore confiável da base.
   - Para preservar a integridade estrita do portão, as implementações de `remote_dispatch.py`, `runner.py` e `suite_lock.py` foram exportadas integralmente no patch `.factory/patches/usr-143-harness-core.patch`.
+  - Nota (USR-158): o arquivo `.factory/patches/usr-143-harness-core.patch` foi aposentado; o main usa o patch do commit `afac42b` (USR-141/147). Ver `docs/proposals/USR-158-usr143-patch-retirement.md`.
   - O ticket formal de governança USR-147 foi registrado no backlog para acompanhamento e aplicação direta pelo mantenedor humano.
 
