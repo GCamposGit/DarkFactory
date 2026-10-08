@@ -83,6 +83,16 @@ Regra do owner: se o usuário opera a fábrica por um harness específico, esse 
 
 ---
 
+## 2c. Modelo do Subagente de Desenvolvimento (USR-168)
+
+Ligada à seção 2b: a preferência pelo harness de operação decide QUEM escreve o ticket; o modelo do SUBAGENTE que executa cada fatia segue a política de `core/line/subagent_routing.py` (parâmetros em `.factory/config/subagent_model_routing.json`, tabela completa na skill 03-model-router, seção 2b).
+
+- **Padrão**: subagente Sonnet (`claude-sonnet-5-5`) para todo código; planning usa Opus (`claude-opus-5-5`).
+- **Haiku 5.5** (`claude-haiku-5-5`) só em fatias mecânicas: editar, sincronizar docs, testes a partir de especificação, config/dados, boilerplate de template, destilar testes, atualizar ledger; até 3 arquivos e 150 linhas, com aceite executável pré-definido e ambiguidade já resolvida. Nunca em caminho protegido, tag de risco, grill, review ou integration.
+- **Escalonamento**: uma única tentativa Haiku; falha do portão focado ou defeito apontado na revisão leva a nova tentativa com Sonnet. Cota, revisão em outra família e o portão único não mudam.
+
+---
+
 ## 3. Comandos de Referência para o Operador
 
 - **Executar ticket pelo roteador automático (Headless):**

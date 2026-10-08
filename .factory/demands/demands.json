@@ -4882,6 +4882,37 @@
     "updated_at": "2026-10-08T21:57:36.426364Z"
   },
   {
+    "id": "USR-178",
+    "project_id": "darkfac",
+    "title": "Portao local estoura o limite de 1500s sob concorrencia e o worker do Desktop silencia no passo paralelo",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "Em 08-09/10/2026, durante o USR-168, runner.py --quick falhou duas vezes com STEP_FAIL unit_and_integration_tests_parallel (timeout 1502s e 1506s, TEST_COUNT 0, exit 124): o worker do Desktop (http://100.78.181.90:8080) respondia /health com busy=False mas ficava silencioso por mais de 180s no passo paralelo (mesmo sintoma do USR-141, ja concluido) e a execucao local caiu na fila do suite_lock atras de outros harnesses. Com --local e host livre, a mesma arvore passou: 3600 passed em 1439s no passo paralelo, ou seja 96% do limite de 1500s, sem margem. O limite fixo e o tempo da suite estao no mesmo patamar, entao qualquer concorrencia reprova uma arvore valida.",
+    "core_journey": [
+      "Em 08-09/10/2026, durante o USR-168, runner.py --quick falhou duas vezes com STEP_FAIL unit_and_integration_tests_parallel (timeout 1502s e 1506s, TEST_COUNT 0, exit 124): o worker do Desktop (http://100.78.181.90:8080) respondia /health com busy=False mas ficava silencioso por mais de 180s no passo paralelo (mesmo sintoma do USR-141, ja concluido) e a execucao local caiu na fila do suite_lock atras de outros harnesses. Com --local e host livre, a mesma arvore passou: 3600 passed em 1439s no passo paralelo, ou seja 96% do limite de 1500s, sem margem. O limite fixo e o tempo da suite estao no mesmo patamar, entao qualquer concorrencia reprova uma arvore valida."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "O tempo de espera no suite_lock nao conta contra o timeout do passo (ou o limite escala com a fila), de modo que uma arvore valida nao reprove por concorrencia",
+      "Worker do Desktop silencioso por mais de 180s e tratado com diagnostico estruturado e retomada ou queda limpa para execucao local sem perder o tempo ja gasto, com teste de regressao",
+      "Telemetria registra por execucao o tempo de espera no lock separado do tempo de execucao da suite",
+      "Portao runner.py --quick com HARNESS_PASS, PR mergeado e deploy pos-merge"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-08T22:27:27.403290Z",
+    "updated_at": "2026-10-08T22:27:27.403290Z"
+  },
+  {
     "id": "USR-169",
     "project_id": "darkfac",
     "title": "Definir e implementar limpeza segura das referencias de contexto de recuperacao",

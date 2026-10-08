@@ -27,6 +27,15 @@ Este documento governa a operação do Claude Code no repositório DarkFac, em e
 
 ---
 
+## 1b. Modelo do Subagente de Desenvolvimento (Haiku 5.5, USR-168)
+
+- **Padrão**: subagente de código usa Sonnet (`claude-sonnet-5-5`); planning usa Opus. Política em `core/line/subagent_routing.py` e `.factory/config/subagent_model_routing.json` (skills `03-model-router` seção 2b e `19-run-ticket` seção 2c). Não altera o cascade da esteira.
+- **Haiku 5.5** (`claude-haiku-5-5`) é elegível SOMENTE se TODAS valerem: tipo mecânico (mechanical_edit, docs_sync, test_from_spec, config_data, boilerplate_from_template, test_run_distill, ledger_update); complexidade `low` (`medium` só para docs_sync e test_run_distill); no máximo 3 arquivos e 150 linhas; critério de aceite executável pré-definido; ambiguidade resolvida (Gate G1); zero falhas anteriores do Haiku.
+- **Haiku é proibido** em caminho protegido por governança, tags de risco (security, credentials, auth, payments, concurrency, locking, transactions, migration, data_deletion, public_contract, routing, quota, flaky_test, root_cause_debug, architecture) e nos estágios planning, grill, review e integration.
+- **Escalonamento**: uma tentativa Haiku; se o portão focado falhar ou a revisão apontar defeito de correção, nova tentativa com Sonnet. Haiku nunca escala sozinho para Opus nem Fable. Piso de cota de 15%, revisão em família diferente do implementador e portão único permanecem.
+
+---
+
 ## 2. Padrões de Código e Convenções
 
 - **Python**: 3.12+, type hints estritos em APIs públicas e nomes `snake_case`.

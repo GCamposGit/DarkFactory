@@ -1,7 +1,7 @@
 ---
 name: test-runner
 description: Executa a suíte de testes de forma headless, isola logs volumosos em .factory/test_logs/ e retorna um DistilledTestReport enxuto ao agente solicitante.
-model: claude-3-5-haiku-latest
+model: claude-haiku-5-5
 tools: [Bash, Read, Grep]
 ---
 
