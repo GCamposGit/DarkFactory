@@ -131,6 +131,30 @@ def classify_failure(result: AgentResult) -> FailureClass:
     return "transient"
 
 
+def backoff_delay(
+    result: AgentResult,
+    retry_no: int,
+    *,
+    transient_retries: int = TRANSIENT_RETRIES,
+    timeout_retries: int = TIMEOUT_RETRIES,
+    backoff_s: Sequence[float] = BACKOFF_SECONDS,
+) -> Optional[float]:
+    """Seconds to wait before repeating the same route, or None when the route must not be repeated (USR-151).
+
+    This is the ONLY place that decides a backoff, and `run_with_retry` calls `sleep_fn` only with the
+    value returned here. Only a `transient` failure (`empty_output`, `crash`, `timeout`, a missing or
+    unknown `error_kind`) that still has retries left waits; `not_installed`, `unsupported_mode`, login
+    failures and quota failures return None, so the loop falls straight through to the next healthy route
+    without a single sleep.
+    """
+    if classify_failure(result) != "transient":
+        return None
+    effective_retries = timeout_retries if result.error_kind == "timeout" else transient_retries
+    if retry_no >= effective_retries:
+        return None
+    return backoff_s[min(retry_no, len(backoff_s) - 1)] if backoff_s else 0.0
+
+
 class AgentAttempt(BaseModel):
     """One agent invocation, with the evidence needed to diagnose it (secret-redacted)."""
 
@@ -200,7 +224,8 @@ def run_with_retry(
     - `timeout` failure (USR-114): repeat at most `timeout_retries` (1) time on the same route. Furthermore,
       if implementation changes are already present in the worktree, advance directly to validation instead
       of repeating from scratch or burning quota.
-    - `unsupported_mode` / `not_installed` / login failures: exclude the route immediately;
+    - `unsupported_mode` / `not_installed` / login failures: exclude the route immediately, never sleeping
+      (the only path that sleeps is `backoff_delay`, which returns a delay for transient failures alone);
     - quota (`rate_limited`): `record_func` (routing's `record_result`) stores a cooldown from `reset_at`,
       and the route is excluded.
 
@@ -258,10 +283,12 @@ def run_with_retry(
                     stopped_due_to_changes = True
                     break
 
-            effective_retries = timeout_retries if result.error_kind == "timeout" else transient_retries
-            if failure != "transient" or retry_no >= effective_retries:
+            delay = backoff_delay(
+                result, retry_no,
+                transient_retries=transient_retries, timeout_retries=timeout_retries, backoff_s=backoff_s,
+            )
+            if delay is None:
                 break
-            delay = backoff_s[min(retry_no, len(backoff_s) - 1)] if backoff_s else 0.0
             emit(f"Transient failure on {harness}; retrying the same route in {delay:g}s")
             sleep_fn(delay)
 

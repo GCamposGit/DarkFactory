@@ -307,6 +307,80 @@ def test_an_auto_routed_ticket_falls_back_to_the_next_healthy_harness(
     assert all(f"harness {r.harness}" in r.prompt.splitlines()[0] for r in requests)
 
 
+def test_a_not_installed_harness_never_backs_off_in_fifty_runs_despite_sleeping_neighbours(
+    env: dict[str, Any], monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """USR-151 regression: the no-backoff fallback is deterministic, in any order, with a noisy process.
+
+    The flaky CI run recorded `[0.001, 0.002, 0.004, ...]` as if it were the launcher's backoff: it was
+    another component retrying inside the same process through the globally patched `time.sleep`
+    (the launcher did not wait at all). The launcher now records on its own `time` reference, and the
+    only path that makes it wait is `agent_retry.backoff_delay`, which is None for `not_installed`.
+
+    This test forces the old scenario: a background thread keeps calling the REAL `time.sleep` with a
+    doubling delay for the whole test, the unavailable harnesses answer in every adversarial order with a
+    real delay, and the scenario repeats 50 times in the same process.
+    """
+    import itertools
+    import threading
+    import time as real_time
+
+    from core.git.autonomy import GitAutonomyManager
+
+    monkeypatch.setattr(GitAutonomyManager, "_current_branch", lambda self, cwd: "ticket/usr-99")
+    monkeypatch.setattr(GitAutonomyManager, "get_current_sha", lambda self, cwd: "0" * 40)
+    assert real_time.sleep.__module__ in {"time", "builtins"}  # the shared module is NOT patched
+
+    stop = threading.Event()
+    noise: list[float] = []
+
+    def doubling_neighbour() -> None:
+        delay = 0.001
+        while not stop.is_set():
+            real_time.sleep(delay)
+            noise.append(delay)
+            delay = 0.001 if delay >= 0.032 else delay * 2
+
+    neighbour = threading.Thread(target=doubling_neighbour, name="usr-151-noise", daemon=True)
+    neighbour.start()
+
+    dead = [("claude", "sonnet"), ("grok", None)]
+    healthy = ("codex", None)
+    orders = list(itertools.permutations(dead))
+    try:
+        for run_no in range(50):
+            order = orders[run_no % len(orders)]
+            routes = [*order, healthy]
+            picks: list[set[Any]] = []
+
+            def _pick(stage, caps, exclude=(), mode=None, **kwargs):
+                picks.append(set(exclude))
+                return next((r for r in routes if r not in set(exclude)), None)
+
+            def _agent(req: AgentRequest) -> AgentResult:
+                if req.harness == healthy[0]:
+                    return AgentResult(ok=True, text="done", harness=req.harness, model=req.model, duration_s=1.0, exit_code=0)
+                real_time.sleep(0.002 if run_no % 2 else 0.0)  # late classification, in both orders
+                return _fail("not_installed", req.harness, exit_code=None)
+
+            monkeypatch.setattr(run_ticket, "pick", _pick)
+            env["agent"].reset_mock()
+            env["agent"].side_effect = _agent
+            env["sleeps"].clear()
+
+            assert main(["USR-99", "--skip-validation", "--no-commit", "--json"]) == 0
+            payload = json.loads(capsys.readouterr().out)
+
+            assert payload["ok"] is True and payload["harness"] == "codex", run_no
+            assert env["sleeps"] == [], f"run {run_no}: unexpected backoff {env['sleeps']}"
+            assert [c.args[0].harness for c in env["agent"].call_args_list] == [r[0] for r in routes], run_no
+            assert picks[-1] == set(order), run_no
+    finally:
+        stop.set()
+        neighbour.join(timeout=5)
+    assert noise, "the noisy neighbour never ran, so the scenario was not exercised"
+
+
 def test_a_rate_limited_harness_gets_a_cooldown_recorded_by_the_launcher(
     env: dict[str, Any], monkeypatch: pytest.MonkeyPatch
 ) -> None:
