@@ -22,11 +22,12 @@ import json
 import logging
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Iterable, Optional, Protocol
+from typing import Any, Callable, Iterable, Optional, Protocol
 
 from pydantic import BaseModel, Field, ValidationError
 
 from core.line import diagnostics, stage_grill, workspace
+from core.line.human import HumanRequest, request_human_help
 from core.line.route_wait import RouteWaiter
 from core.line.routing import RoutingConfig
 from core.line.stage_grill import GRILL_FILE, load_prompt, read_lessons, render_prompt
@@ -42,6 +43,13 @@ _TICKETS_FILE = "tickets.json"
 _MILESTONES_FILE = "milestones.json"
 _DEMAND_FILE = "DEMAND.md"
 MAX_REPROMPTS = 1
+
+# A grill job can be `succeeded` in the control store while `DEMAND.md`/`GRILL.md` are not on the run's
+# branch (observed 2026-10-07: runs whose grill was finished by `scripts/cloud_e2e_task.py`, which never
+# touches git). That is not transient, so planning must not poll it: it asks for the grill to be
+# re-run at most MAX_GRILL_RESCHEDULES time(s), then parks the run on the owner.
+GRILL_ARTIFACTS_MISSING = "grill_artifacts_missing"
+MAX_GRILL_RESCHEDULES = 1
 
 
 # --------------------------------------------------------------------------
@@ -79,6 +87,9 @@ class PlanningPlan(BaseModel):
     tickets: list[PlanningTicket] = Field(min_length=1, max_length=6)
     is_product_scale: bool = False
     milestones: list[PlanningMilestone] = Field(default_factory=list)
+
+
+HumanRequester = Callable[[ProjectDescriptor, HumanRequest], Any]
 
 
 class IntakeServiceLike(Protocol):
@@ -188,6 +199,52 @@ def _submit_milestone_children(
     return receipts
 
 
+def _grill_artifacts_missing_result(
+    project: ProjectDescriptor,
+    ws: workspace.RunWorkspace,
+    run_id: str,
+    missing: list[str],
+    *,
+    reschedules_used: int,
+    human_requester: Optional[HumanRequester],
+) -> StageResult:
+    """Structured, non-polling answer to "the grill's context files are not on the run's branch".
+
+    First time: `retry:grill` (cross-stage bounce, see `core.workflow.successors`) so the grill is
+    re-run on the run's own branch and re-materializes `DEMAND.md`/`GRILL.md`. Afterwards (the grill
+    already re-ran once, or the budget is spent): `waiting_human(grill_artifacts_missing)` with the
+    run, branch and missing files as evidence plus a step-by-step owner request.
+    """
+    logger.warning(
+        "planning run %s: grill artifacts missing on branch %s: %s (grill reschedules used: %d/%d)",
+        run_id, ws.branch, ", ".join(missing), reschedules_used, MAX_GRILL_RESCHEDULES,
+    )
+    if reschedules_used < MAX_GRILL_RESCHEDULES:
+        return StageResult(outcome="retry", cause_code=f"retry:grill\n{GRILL_ARTIFACTS_MISSING}")
+    request = HumanRequest(
+        kind="infra",
+        run_id=run_id,
+        blocking_stage=STAGE,
+        guide_md=(
+            f"O planning do run {run_id} nao encontrou {', '.join(missing)} na branch {ws.branch}, mesmo "
+            "depois de a fabrica refazer o grill uma vez. Passo a passo: "
+            "1. Abra o DarkHub em /live e localize este run. "
+            "2. Se a demanda ainda for valida, reenvie-a pela fabrica (o novo run faz o proprio grill) e "
+            "cancele este run. "
+            "3. Se o run foi criado por um teste ou script (titulo ou canal de teste), apenas cancele-o."
+        ),
+    )
+    try:
+        (human_requester or request_human_help)(project, request)
+    except Exception as exc:  # the structured outcome below is what matters
+        logger.warning("Human request for run %s was not delivered: %s", run_id, exc)
+    return StageResult(
+        outcome="waiting_human",
+        cause_code=GRILL_ARTIFACTS_MISSING,
+        evidence_refs=[f"run:{run_id}", f"branch:{ws.branch}", *(f"missing:{name}" for name in missing)],
+    )
+
+
 # --------------------------------------------------------------------------
 # run_planning
 # --------------------------------------------------------------------------
@@ -204,12 +261,20 @@ def run_planning(
     policy_ref: str = "darkfac://line/v1",
     now: Optional[datetime] = None,
     route_waiter: Optional[RouteWaiter] = None,
+    demand_text: Optional[str] = None,
+    grill_reschedules_used: int = 0,
+    human_requester: Optional[HumanRequester] = None,
 ) -> StageResult:
     """Run (or reuse) the planning stage for `run_id`.
 
     Requires the grill stage to have already committed `DEMAND.md`/
     `GRILL.md` on the run's branch (`workspace.checkout` will see them).
     `route_waiter` decides what "no agent route right now" means (USR-87, see `run_grill`).
+
+    Missing context files never burn retries: a missing `DEMAND.md` is re-rendered from `demand_text`
+    (the run's intake payload, when the caller has it); a missing `GRILL.md` cannot be derived, so the
+    grill is rescheduled once (`retry:grill`, `grill_reschedules_used` says how many times that
+    already happened) and then the run is parked as `waiting_human(grill_artifacts_missing)`.
     """
     ws = workspace.checkout(project, run_id)
     waiter = route_waiter or RouteWaiter()
@@ -218,17 +283,29 @@ def run_planning(
     if existing:
         return StageResult(outcome="success", output_refs=[existing])
 
-    demand_text = _read_context_file(ws, _DEMAND_FILE)
+    demand_md = _read_context_file(ws, _DEMAND_FILE)
     grill_text = _read_context_file(ws, GRILL_FILE)
-    if not demand_text or not grill_text:
-        return StageResult(outcome="retry", cause_code="grill_not_ready")
+    # A blank file is as good as a missing one (the grill treats it the same way).
+    demand_md = demand_md if demand_md.strip() else ""
+    grill_text = grill_text if grill_text.strip() else ""
+    if grill_text and not demand_md and demand_text:
+        # DEMAND.md is a pure function of the intake payload: recover it, committed with the plan below.
+        demand_md = stage_grill._render_demand_markdown(project, channel, demand_text)
+        workspace.write_context(ws, _DEMAND_FILE, demand_md)
+        logger.warning("planning run %s: DEMAND.md re-rendered from the intake payload", run_id)
+    if not demand_md or not grill_text:
+        missing = [name for name, text in ((_DEMAND_FILE, demand_md), (GRILL_FILE, grill_text)) if not text]
+        return _grill_artifacts_missing_result(
+            project, ws, run_id, missing,
+            reschedules_used=grill_reschedules_used, human_requester=human_requester,
+        )
 
     commands_text = _render_commands(project, ws.path)
     lessons_text = read_lessons(ws.path) or "(nenhuma)"
 
     base_prompt = render_prompt(
         load_prompt("planning.md"),
-        demand=demand_text,
+        demand=demand_md,
         grill=grill_text,
         commands=commands_text,
         lessons=lessons_text,

@@ -27,7 +27,27 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(me
 logger = logging.getLogger("darkfac.e2e")
 
 
-def run_e2e_autonomous_task() -> dict:
+ALLOW_REAL_STORE_ENV = "DARKFAC_E2E_ALLOW_REAL_STORE"
+
+
+class RealStoreRefusedError(RuntimeError):
+    """Raised when the script would write a fake-grilled run into a real (Postgres) control store."""
+
+
+def _real_store_allowed() -> bool:
+    return os.environ.get(ALLOW_REAL_STORE_ENV, "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def run_e2e_autonomous_task(store: object | None = None) -> dict:
+    """Run the E2E task against `store` (default: `PostgresControlStore` from the environment).
+
+    This script accepts a demand into project `darkfac`, claims its grill job and finishes it
+    WITHOUT touching git (no DEMAND.md/GRILL.md on any run branch). Against the real Postgres store
+    the production line then claims the planning successor and can only loop on `grill_not_ready`
+    (2026-10-07: three "HF-03-08" runs, the last one with 31 planning attempts). A real store is
+    therefore refused unless `DARKFAC_E2E_ALLOW_REAL_STORE=1` is set on purpose; a unit test run on a
+    machine that has `DARKFAC_HF02_DATABASE_URL` in its environment gets the in-memory mock instead.
+    """
     from core.acceptance.continuous_observer import ContinuousObserver
     from core.orchestrator.adapters.control_postgres import PostgresControlStore
     from core.orchestrator.cloud_artifacts import CloudArtifactStore
@@ -43,12 +63,24 @@ def run_e2e_autonomous_task() -> dict:
     logger.info("=== INITIATING 100%% AUTONOMOUS E2E TASK ===")
 
     # 1. Initialize Control Store (auto-detects PostgreSQL or mock)
-    db_url = os.environ.get("DARKFAC_HF02_DATABASE_URL")
-    store = PostgresControlStore(
-        database_url=db_url,
-        runtime_owner=RuntimeOwner.CLOUD_DBOS_POSTGRES.value,
-        lease_duration_sec=300,
-    )
+    if store is None:
+        db_url = (os.environ.get("DARKFAC_HF02_DATABASE_URL") or "").strip()
+        if db_url and not db_url.startswith("mock") and not _real_store_allowed():
+            # Checked before connecting: constructing the store already runs DDL against Postgres.
+            raise RealStoreRefusedError(
+                "DARKFAC_HF02_DATABASE_URL points at a real control store; "
+                f"set {ALLOW_REAL_STORE_ENV}=1 to run this validation against it on purpose"
+            )
+        store = PostgresControlStore(
+            database_url=db_url or None,
+            runtime_owner=RuntimeOwner.CLOUD_DBOS_POSTGRES.value,
+            lease_duration_sec=300,
+        )
+    if not getattr(store, "mock_mode", True) and not _real_store_allowed():
+        raise RealStoreRefusedError(
+            "refusing to write a fake-grilled run into the real control store; "
+            f"set {ALLOW_REAL_STORE_ENV}=1 to run this validation against it on purpose"
+        )
     backend_mode = "PostgreSQL (Production)" if not store.mock_mode else "SQLite Mock (Local)"
     logger.info("Storage backend initialized: %s", backend_mode)
 
@@ -225,7 +257,11 @@ def run_e2e_autonomous_task() -> dict:
 
 
 if __name__ == "__main__":
-    res = run_e2e_autonomous_task()
+    try:
+        res = run_e2e_autonomous_task()
+    except RealStoreRefusedError as refusal:
+        print(f"[REFUSED] {refusal}", file=sys.stderr)
+        sys.exit(2)
     print("\n" + "=" * 60)
     print("AUTONOMOUS E2E TASK EXECUTION SUMMARY")
     print("=" * 60)

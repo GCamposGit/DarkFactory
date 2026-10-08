@@ -322,6 +322,30 @@ class PlanningStageHandler:
             intake_service=self.intake_service,
             policy_ref=payload.get("policy_ref", "darkfac://line/v1"),
             route_waiter=self.route_waiter,
+            demand_text=_render_demand_text(payload) if payload else None,
+            grill_reschedules_used=self._grill_reschedules_used(run_id),
+        )
+
+    def _grill_reschedules_used(self, run_id: str) -> int:
+        """Planning jobs of this run that already bounced back to the grill for missing artifacts.
+
+        Read from the persisted `cause_code` of the run's planning jobs, so the bound survives worker
+        restarts. A store that cannot report it counts as "already used" (fail closed: park the run
+        on the owner instead of risking a bounce loop).
+        """
+        getter = getattr(self.store, "get_run_status", None)
+        if getter is None:
+            return stage_planning.MAX_GRILL_RESCHEDULES
+        try:
+            jobs = (getter(run_id) or {}).get("jobs", [])
+        except Exception as exc:
+            logger.warning("Could not read the job history of run %s: %s", run_id, exc)
+            return stage_planning.MAX_GRILL_RESCHEDULES
+        return sum(
+            1
+            for job in jobs
+            if job.get("stage") == "planning"
+            and stage_planning.GRILL_ARTIFACTS_MISSING in str(job.get("cause_code") or "")
         )
 
 
