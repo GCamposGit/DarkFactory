@@ -4846,5 +4846,39 @@
     "dependencies": [],
     "created_at": "2026-10-08T20:36:51.432814Z",
     "updated_at": "2026-10-08T20:36:51.432814Z"
+  },
+  {
+    "id": "USR-177",
+    "project_id": "darkfac",
+    "title": "Refinar a politica de subagentes Haiku 5.5: tipos somente leitura, recusa como gatilho, aceite verificado e telemetria",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "Seguimento do USR-168. A documentacao oficial do Haiku 5.5 (posicionamento: classificacao, roteamento, extracao e subagentes; Sonnet 5.5 e Opus 5.5 seguem melhores em codificacao agentica complexa) mostra lacunas na politica v1: (1) nao ha tipos elegiveis somente leitura (busca de codigo, destilar logs, triagem), onde o Haiku traz a maior economia com menor risco; (2) stop_reason refusal do Haiku (sem fallback no servidor) nao e gatilho explicito de escalonamento; (3) o Haiku as vezes relata a mudanca como pronta sem verificar, e a politica nao exige que o orquestrador rode o aceite; (4) falta prompt-padrao do Haiku (esforco medium, max_tokens com folga para thinking, trechos de verificar antes de concluir e continuar ate terminar); (5) os limites de 3 arquivos e 150 linhas sao hipoteses sem medicao e nao ha telemetria por modelo (sucesso na primeira tentativa, tokens, escalacoes).",
+    "core_journey": [
+      "Seguimento do USR-168. A documentacao oficial do Haiku 5.5 (posicionamento: classificacao, roteamento, extracao e subagentes; Sonnet 5.5 e Opus 5.5 seguem melhores em codificacao agentica complexa) mostra lacunas na politica v1: (1) nao ha tipos elegiveis somente leitura (busca de codigo, destilar logs, triagem), onde o Haiku traz a maior economia com menor risco; (2) stop_reason refusal do Haiku (sem fallback no servidor) nao e gatilho explicito de escalonamento; (3) o Haiku as vezes relata a mudanca como pronta sem verificar, e a politica nao exige que o orquestrador rode o aceite; (4) falta prompt-padrao do Haiku (esforco medium, max_tokens com folga para thinking, trechos de verificar antes de concluir e continuar ate terminar); (5) os limites de 3 arquivos e 150 linhas sao hipoteses sem medicao e nao ha telemetria por modelo (sucesso na primeira tentativa, tokens, escalacoes)."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Tipos somente leitura repo_lookup, log_distill e triage_classify elegiveis ao Haiku em subagent_model_routing.json e core/line/subagent_routing.py, sem permitir escrita nem arquivos protegidos",
+      "stop_reason refusal do Haiku e falha de portao focado escalam para Sonnet (reason code REFUSAL_ESCALATION), com testes",
+      "Regra e codigo: o aceite do Haiku so vale quando o orquestrador roda o comando de aceite; auto-relato nunca e prova",
+      "Prompt-padrao para subagentes Haiku (esforco medium, folga de max_tokens, trechos de verificacao e persistencia) documentado em skill 03, CLAUDE.md e MODEL_SELECTION_GUIDE",
+      "Telemetria por ticket (modelo, sucesso na primeira tentativa, tokens, escalacoes) e procedimento de calibracao dos limites via skill 14 antes de ampliar os limites",
+      "Texto das mudancas em AGENTS.md e FACTORY_RULES.md entregue como proposta em docs/proposals, sem editar protegidos",
+      "Portao runner.py --quick com HARNESS_PASS, PR mergeado e deploy pos-merge"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-08T21:57:36.426364Z",
+    "updated_at": "2026-10-08T21:57:36.426364Z"
   }
 ]
