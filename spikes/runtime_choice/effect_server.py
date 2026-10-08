@@ -8,9 +8,10 @@ import socket
 import sys
 import threading
 import time
+from collections import deque
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 from urllib.parse import parse_qs, unquote, urlsplit
 
 from pydantic import ValidationError
@@ -31,6 +32,59 @@ from spikes.runtime_choice.effect_store import (
 LOGGER = logging.getLogger(__name__)
 
 
+class RequestJournal:
+    """Bounded, thread-safe timeline of effect-service requests (USR-157).
+
+    The R02 failure of CI run 37596976676 left only a ``WinError 10053`` traceback
+    and an ``EFFECT_SERVICE_UNAVAILABLE`` code, with no way to tell a killed
+    client from a stalled server.  Each entry records when the request was
+    accepted, how long the handler took and whether the peer had already gone, so
+    a failed scenario can print the real order of events.
+    """
+
+    def __init__(self, *, max_entries: int = 500) -> None:
+        self._epoch = time.monotonic()
+        self._entries: deque[tuple[int, float, str]] = deque(maxlen=max_entries)  # (id, monotonic, text)
+        self._next_id = 0
+        self._condition = threading.Condition()
+
+    def record(self, text: str) -> int:
+        """Append ``text`` and return its monotonically increasing id."""
+
+        with self._condition:
+            self._next_id += 1
+            entry_id = self._next_id
+            self._entries.append((entry_id, time.monotonic(), text))
+            self._condition.notify_all()
+        return entry_id
+
+    def mark(self) -> int:
+        """Return an id such that ``lines(since=mark)`` yields only later entries."""
+
+        with self._condition:
+            return self._next_id
+
+    def lines(self, since: int = 0, *, origin: float | None = None) -> list[str]:
+        """Entries after ``since`` as ``+<ms> text``, relative to ``origin`` (a ``time.monotonic()`` value)."""
+
+        base = self._epoch if origin is None else origin
+        with self._condition:
+            return [
+                f"+{(stamp - base) * 1000.0:.0f}ms {text}"
+                for entry_id, stamp, text in self._entries
+                if entry_id > since
+            ]
+
+    def wait_for(self, fragment: str, *, since: int = 0, timeout: float = 5.0) -> bool:
+        """Block until an entry after ``since`` contains ``fragment`` (event driven, no polling)."""
+
+        def seen() -> bool:
+            return any(fragment in text for entry_id, _, text in self._entries if entry_id > since)
+
+        with self._condition:
+            return self._condition.wait_for(seen, timeout=timeout)
+
+
 class _EffectHTTPServer(ThreadingHTTPServer):
     """Loopback server tolerant to clients killed mid-request by fault injection."""
 
@@ -38,12 +92,26 @@ class _EffectHTTPServer(ThreadingHTTPServer):
     # Windows runner; the driver client only retries a few times.
     request_queue_size = 128
 
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        self.journal = RequestJournal()
+        self._accepted_at: dict[Any, float] = {}
+        super().__init__(*args, **kwargs)
+
+    def get_request(self) -> Any:
+        request, client_address = super().get_request()
+        self._accepted_at[client_address] = time.monotonic()
+        return request, client_address
+
+    def pop_accept_time(self, client_address: Any) -> float | None:
+        return self._accepted_at.pop(client_address, None)
+
     def handle_error(self, request: Any, client_address: Any) -> None:
         error = sys.exc_info()[1]
         if isinstance(error, (ConnectionError, TimeoutError)):
             # The scenario controller kills drivers on purpose (R02, R06); a response
             # written to a dead peer is expected and must not pollute stderr.
             LOGGER.debug("effect service: client %s disconnected: %r", client_address, error)
+            self.journal.record(f"peer_gone port={client_address[1]} while=connection error={type(error).__name__}")
             return
         super().handle_error(request, client_address)
 
@@ -67,6 +135,12 @@ class EffectServer:
         if self._httpd is None:
             return self.requested_port
         return int(self._httpd.server_address[1])
+
+    @property
+    def journal(self) -> RequestJournal | None:
+        """Request timeline of the running server, or ``None`` when stopped."""
+
+        return None if self._httpd is None else self._httpd.journal
 
     @property
     def base_url(self) -> str:
@@ -114,6 +188,11 @@ class EffectServer:
         if thread is not None:
             thread.join(timeout=5)
 
+    def record_request(self, text: str) -> None:
+        journal = self.journal
+        if journal is not None:
+            journal.record(text)
+
     def arm_disconnect_once(self, operation_key: str) -> None:
         self.store.arm_disconnect_once(operation_key)
 
@@ -131,16 +210,51 @@ class _EffectRequestHandler(BaseHTTPRequestHandler):
     server_version = "HF02EffectServer/1"
     sys_version = ""
 
+    _accepted_at: float | None = None
+    _response_status: int | None = None
+    _peer_gone: str | None = None
+
+    def setup(self) -> None:
+        super().setup()
+        self._accepted_at = self.server.pop_accept_time(self.client_address)  # type: ignore[attr-defined]
+
     def log_message(self, format: str, *args: object) -> None:
         LOGGER.debug("effect service: %s", format % args)
 
     def _write_json(self, status: int, payload: dict[str, Any]) -> None:
         encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
-        self.send_response(status)
-        self.send_header("Content-Type", "application/json; charset=utf-8")
-        self.send_header("Content-Length", str(len(encoded)))
-        self.end_headers()
-        self.wfile.write(encoded)
+        self._response_status = status
+        try:
+            self.send_response(status)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Content-Length", str(len(encoded)))
+            self.end_headers()
+            self.wfile.write(encoded)
+        except (ConnectionError, TimeoutError) as error:
+            # The client is gone (killed on purpose by the scenario controller, or it
+            # gave up on a timeout).  The effect is already committed; record who
+            # hung up instead of dumping a traceback on stderr.
+            self._peer_gone = type(error).__name__
+            self.close_connection = True
+
+    def _journaled(self, method: str, handler: Callable[[], None]) -> None:
+        """Run ``handler`` and journal accept-to-start latency, duration and peer state."""
+
+        started = time.monotonic()
+        queue_ms = 0.0 if self._accepted_at is None else (started - self._accepted_at) * 1000.0
+        self._response_status = None
+        self._peer_gone = None
+        try:
+            handler()
+        finally:
+            route = urlsplit(self.path).path
+            if route.startswith("/effects/") and route != "/effects/count":
+                route = "/effects/*"
+            peer = f" peer_gone={self._peer_gone}" if self._peer_gone else ""
+            self.effect_server.record_request(
+                f"{method} {route} status={self._response_status} port={self.client_address[1]} "
+                f"queue_ms={queue_ms:.0f} handle_ms={(time.monotonic() - started) * 1000.0:.0f}{peer}"
+            )
 
     def _error(self, status: int, code: str) -> None:
         self._write_json(status, {"error_code": code})
@@ -174,6 +288,12 @@ class _EffectRequestHandler(BaseHTTPRequestHandler):
         return value
 
     def do_GET(self) -> None:  # noqa: N802 - stdlib HTTP handler API
+        self._journaled("GET", self._handle_get)
+
+    def do_POST(self) -> None:  # noqa: N802 - stdlib HTTP handler API
+        self._journaled("POST", self._handle_post)
+
+    def _handle_get(self) -> None:
         parsed = urlsplit(self.path)
         path = parsed.path
         if path == "/effects/count":
@@ -201,7 +321,7 @@ class _EffectRequestHandler(BaseHTTPRequestHandler):
             return
         self._error(404, "NOT_FOUND")
 
-    def do_POST(self) -> None:  # noqa: N802 - stdlib HTTP handler API
+    def _handle_post(self) -> None:
         payload = self._read_json()
         if payload is None:
             return
@@ -210,6 +330,7 @@ class _EffectRequestHandler(BaseHTTPRequestHandler):
             if parsed.path == "/effects":
                 commit = self.effect_server.store.apply_effect(payload)
                 if commit.disconnect_after_commit:
+                    self._peer_gone = "fault_injected_disconnect"
                     self.close_connection = True
                     try:
                         self.connection.shutdown(socket.SHUT_RDWR)

@@ -25,7 +25,15 @@ from spikes.runtime_choice.contracts import (
     WorkflowVersion,
 )
 from spikes.runtime_choice.effect_server import EffectServer
-from spikes.runtime_choice.native_adapter import NativeAdapter, NativeAdapterError
+from urllib.error import URLError
+
+from spikes.runtime_choice import native_adapter
+from spikes.runtime_choice.native_adapter import (
+    PARK_AFTER_OBSERVED_ENV,
+    EffectClient,
+    NativeAdapter,
+    NativeAdapterError,
+)
 from spikes.runtime_choice.driver import run_jsonl
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -577,3 +585,93 @@ def test_driver_diagnostics_expose_original_store_exception_when_opted_in(tmp_pa
     # The original OS exception type is visible, not only the stable code.
     assert any(name in lines[1] for name in ("FileExistsError", "NotADirectoryError", "OSError"))
     assert "Traceback" not in result.stderr
+
+
+def test_adapter_parks_after_observed_stage_until_released(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """USR-157: the R02 crash hook stops the driver at a quiescent point, then releases on shutdown."""
+    monkeypatch.setenv(PARK_AFTER_OBSERVED_ENV, "S1")
+    with EffectServer(tmp_path) as server:
+        adapter = NativeAdapter(make_config(tmp_path, server.base_url))
+        adapter.start(start_command("workflow-park"))
+
+        assert adapter.parked.wait(timeout=30.0)
+        # Parked after S1 was observed: no later stage ran and no effect was published.
+        observations = server.store.observations("workflow-park")
+        assert [(item.kind, item.step_id) for item in observations] == [
+            ("step_started", "S0"),
+            ("step_observed", "S0"),
+            ("step_started", "S1"),
+            ("step_observed", "S1"),
+        ]
+        assert server.store.effect_count(workflow_id="workflow-park") == 0
+
+        adapter.shutdown()  # releases the park; the workflow then runs to completion
+        assert server.store.effect_count(workflow_id="workflow-park") == 1
+
+
+def test_adapter_rejects_an_unknown_park_stage(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv(PARK_AFTER_OBSERVED_ENV, "S9")
+    with pytest.raises(NativeAdapterError) as raised:
+        NativeAdapter(make_config(tmp_path, "http://127.0.0.1:18403"))
+    assert raised.value.code == "PARK_STAGE_INVALID"
+
+
+def test_adapter_without_park_env_runs_straight_through(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv(PARK_AFTER_OBSERVED_ENV, raising=False)
+    with EffectServer(tmp_path) as server:
+        adapter = NativeAdapter(make_config(tmp_path, server.base_url))
+        adapter.start(start_command("workflow-no-park"))
+        events = wait_for_terminal(adapter, "workflow-no-park")
+        assert events[-1].kind is DriverEventKind.COMPLETED
+        assert adapter.parked.is_set() is False
+        adapter.shutdown()
+
+
+def _raising_urlopen(error: BaseException):
+    def fake(*_args: object, **_kwargs: object) -> object:
+        raise error
+
+    return fake
+
+
+def test_effect_client_refused_connection_reports_attempts_and_elapsed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """USR-157: EFFECT_SERVICE_UNAVAILABLE says how many attempts ran and what the cause type was."""
+    monkeypatch.setattr(native_adapter, "urlopen", _raising_urlopen(URLError(ConnectionRefusedError(10061, "refused"))))
+    monkeypatch.setattr(native_adapter.time, "sleep", lambda _seconds: None)
+
+    with pytest.raises(NativeAdapterError) as raised:
+        EffectClient("http://127.0.0.1:1").observe("wf", "step_started", "S1", {})
+
+    error = raised.value
+    assert error.code == "EFFECT_SERVICE_UNAVAILABLE"
+    assert error.details["attempts"] == 3
+    assert error.details["reason_type"] == "ConnectionRefusedError"
+    assert error.details["request_path"] == "/observations"
+    assert error.details["timeout_s"] == native_adapter.EFFECT_REQUEST_TIMEOUT_SECONDS
+    assert error.details["elapsed_ms"] >= 0
+    # The details must survive the driver event contract (JSON-safe, no secret material).
+    event = NativeAdapter._event(
+        "wf",
+        DriverEventKind.ERROR,
+        RuntimeStatus.ERROR,
+        code=error.code,
+        details={"source": "effect_service", **error.details},
+    )
+    assert event.details["attempts"] == 3
+
+
+def test_effect_client_read_timeout_is_not_retried_and_is_labeled(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A read timeout may mean the request was committed, so it is reported once with its type."""
+    monkeypatch.setattr(native_adapter, "urlopen", _raising_urlopen(TimeoutError("timed out")))
+
+    with pytest.raises(NativeAdapterError) as raised:
+        EffectClient("http://127.0.0.1:1").observe("wf", "step_started", "S1", {})
+
+    assert raised.value.code == "EFFECT_SERVICE_UNAVAILABLE"
+    assert raised.value.details["attempts"] == 1
+    assert raised.value.details["error_type"] == "TimeoutError"
+    assert raised.value.details["reason_type"] is None
