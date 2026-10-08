@@ -66,6 +66,44 @@ GRANT USAGE, CREATE ON SCHEMA public TO escritor;
 
 O papel somente leitura do DarkHub precisa apenas de `SELECT` em `local_run_events`.
 
+### GRANT minimo verificado contra Postgres real (USR-167)
+
+Verificado em PostgreSQL 16.15 real (`tests/test_postgres_real_integration.py`, marker
+`postgres_integration`, usando um papel `NOSUPERUSER NOCREATEDB NOCREATEROLE`). Os dois `GRANT` acima
+bastam para o papel escritor: ele cria e passa a ser dono de `local_run_events`, do indice e da
+sequence `local_run_events_event_id_seq` (por isso nao precisa de `GRANT` extra em tabela ou sequence),
+e o `add_job_evidence` funciona nas tabelas do control store que o proprio escritor criou.
+
+Fatos verificados que mudam o que se espera do `GRANT`:
+
+- `CREATE` no schema e necessario **mesmo com a tabela ja existente**: a primeira publicacao de cada
+  processo roda `CREATE TABLE IF NOT EXISTS`, e o Postgres checa `CREATE` no schema antes de ver que a
+  tabela existe. Um usuario com so `INSERT` na tabela falha com `InsufficientPrivilege` (o aviso diz
+  "sem permissao de escrita"). Sem nenhum `GRANT` no schema, tambem falha.
+- Se um administrador criar a tabela antes (o escritor nao e o dono), alem de `CREATE` no schema o
+  escritor precisa de `INSERT` na tabela e `USAGE` na sequence:
+  `GRANT INSERT ON local_run_events TO escritor; GRANT USAGE ON SEQUENCE local_run_events_event_id_seq TO escritor;`
+- `add_job_evidence` (marcador de orfao, USR-155) executa so `UPDATE` e `SELECT` em `jobs`: com apenas
+  `SELECT` falha (`InsufficientPrivilege`, reportado como `StoreUnavailableError`); com `SELECT, UPDATE`
+  funciona e e idempotente. O bootstrap do `PostgresControlStore` (`CREATE TABLE IF NOT EXISTS`) exige o
+  `CREATE` no schema acima.
+- O papel de leitura do Hub le a Esteira com `GRANT CONNECT ON DATABASE <banco> TO leitor; GRANT USAGE ON SCHEMA public TO leitor; GRANT SELECT ON runs, jobs, claims, intake_commands, local_run_events TO leitor;`
+  Como `local_run_events` pertence ao escritor, o `GRANT SELECT` nela deve ser feito por um administrador
+  depois da primeira publicacao (a tabela so existe a partir dela).
+
+Para repetir a verificacao contra um Postgres descartavel (nunca a producao):
+
+```powershell
+docker run -d --name pg-usr167 -e POSTGRES_PASSWORD=<senha-de-teste> -p 127.0.0.1:55432:5432 postgres:16
+$env:DARKFAC_TEST_POSTGRES_DSN = "postgresql://postgres:<senha-de-teste>@127.0.0.1:55432/postgres"
+python -m pytest C:\dev\DarkFac\tests\test_postgres_real_integration.py -q -p no:cacheprovider
+docker rm -f pg-usr167
+```
+
+O DSN precisa de um usuario que possa `CREATE ROLE` e `CREATE DATABASE` (cada teste cria e remove seu
+proprio banco e papeis). Sem `DARKFAC_TEST_POSTGRES_DSN` os testes sao pulados e a suite padrao e o CI
+nao dependem de Postgres.
+
 ## Verificacao
 
 Depois de configurar, rode um ticket real (`--dry-run` nao publica nada) e confirme em
