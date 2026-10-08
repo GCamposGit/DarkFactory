@@ -237,11 +237,11 @@ def test_writer_without_create_cannot_publish_and_failure_is_described(scratch: 
     assert "sem permissao de escrita" in describe_publish_failure(caught.value)
 
 
-def test_existing_table_still_needs_create_for_the_first_ddl_but_not_for_dml(scratch: ScratchDb) -> None:
-    """Documents the real behaviour when an admin pre-creates the table.
+def test_insert_only_role_publishes_because_the_sink_inserts_before_any_ddl(scratch: ScratchDb) -> None:
+    """USR-164: an admin pre-creates the table; the writer needs INSERT + sequence USAGE, never CREATE.
 
-    ``PostgresSink`` runs ``CREATE TABLE IF NOT EXISTS`` on its first write, and PostgreSQL checks
-    CREATE on the schema *before* noticing the table exists. So a writer with only INSERT fails.
+    ``PostgresSink`` now inserts first and only runs the DDL when the table is missing, so the
+    CREATE-on-schema requirement documented in USR-167 applies to the bootstrap only (UndefinedTable).
     """
     import psycopg
 
@@ -254,15 +254,45 @@ def test_existing_table_still_needs_create_for_the_first_ddl_but_not_for_dml(scr
         conn.execute(f"GRANT USAGE ON SCHEMA public TO {scratch.nobody_role}")
         conn.execute(f"GRANT INSERT ON {TABLE} TO {scratch.nobody_role}")
         conn.execute(f"GRANT USAGE ON SEQUENCE {TABLE}_event_id_seq TO {scratch.nobody_role}")
-    with pytest.raises(psycopg.errors.InsufficientPrivilege):
-        PostgresSink(scratch.nobody).write(_event("local-USR-167-ddl", "preflight", "running"))
-    # Without the DDL, the INSERT alone works once the sequence is granted.
-    with psycopg.connect(scratch.nobody, autocommit=True) as conn:
-        columns = "run_id, ticket_id, project_id, phase, status, at"
-        conn.execute(
-            f"INSERT INTO {TABLE} ({columns}) VALUES ('local-USR-167-dml', 'USR-167', 'darkfac', 'agent', 'running', now())"
+    PostgresSink(scratch.nobody).write(_event("local-USR-167-ddl", "preflight", "running"))
+    assert scratch.admin_exec(f"SELECT count(*) FROM {TABLE} WHERE run_id = 'local-USR-167-ddl'") == [(1,)]
+
+
+def test_provisioned_restricted_writer_publishes_and_passes_the_audit(scratch: ScratchDb) -> None:
+    """USR-164: the plan of ``scripts/provision_live_writer.py`` yields a role that only inserts events."""
+    import psycopg
+
+    from core.line import live_writer
+
+    role = "usr164_" + scratch.name[-8:]  # cluster-wide: unique per scratch database, dropped below
+    try:
+        password = live_writer.generate_password()
+        plan = live_writer.build_plan(
+            writer_role=role, database=scratch.name, create_role=True, password=password, reader_role=scratch.reader_role
         )
-    assert scratch.admin_exec(f"SELECT count(*) FROM {TABLE} WHERE run_id = 'local-USR-167-dml'") == [(1,)]
+        with psycopg.connect(scratch.admin, autocommit=True) as conn:
+            for step in plan:
+                conn.execute(step.sql)
+            audit = live_writer.audit_role(conn, role)
+        assert audit.ok, audit.problems
+
+        url = live_writer.writer_url(scratch.admin, role, password)
+        PostgresSink(url).write(_event("local-USR-164-restricted", "preflight", "running"))
+        assert scratch.admin_exec(f"SELECT count(*) FROM {TABLE} WHERE run_id = 'local-USR-164-restricted'") == [(1,)]
+        with pytest.raises(psycopg.errors.InsufficientPrivilege), psycopg.connect(url, autocommit=True) as conn:
+            conn.execute("SELECT 1 FROM local_run_events")  # the writer cannot read, create or touch anything else
+        with pytest.raises(psycopg.errors.InsufficientPrivilege), psycopg.connect(url, autocommit=True) as conn:
+            conn.execute("CREATE TABLE usr164_intruder (x int)")
+        # idempotent: running the plan again (role now exists) keeps the audit green
+        again = live_writer.build_plan(writer_role=role, database=scratch.name, create_role=False, password=None)
+        with psycopg.connect(scratch.admin, autocommit=True) as conn:
+            for step in again:
+                conn.execute(step.sql)
+            assert live_writer.audit_role(conn, role).ok
+    finally:
+        with psycopg.connect(scratch.admin, autocommit=True) as conn:
+            conn.execute(f'DROP OWNED BY "{role}"')
+            conn.execute(f'DROP ROLE IF EXISTS "{role}"')
 
 
 # ------------------------------------------------------------------------------ add_job_evidence
