@@ -4814,5 +4814,37 @@
     "dependencies": [],
     "created_at": "2026-10-08T19:30:15.889542Z",
     "updated_at": "2026-10-08T19:30:15.889542Z"
+  },
+  {
+    "id": "USR-168",
+    "project_id": "darkfac",
+    "title": "Regra de roteamento de subagentes de desenvolvimento para o modelo Haiku 5.5",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "O Claude Haiku 5.5 (claude-haiku-5-5) ficou disponivel, mas nenhuma regra da fabrica define quando um subagente de desenvolvimento deve usar Haiku em vez de Sonnet. Hoje a regra implicita e 'subagente sonnet para todo codigo' (memoria do owner, skill 03, line_routing.json development=claude:sonnet) e o unico uso de Haiku e o test-runner, ainda fixado em claude-3-5-haiku-latest. Falta uma politica deterministica de elegibilidade (escopo pequeno, criterio de aceite executavel, sem governanca/seguranca/ambiguidade), de escalonamento (Haiku falhou -> Sonnet) e de proibicoes, aplicavel por todos os harnesses e testavel.",
+    "core_journey": [
+      "O Claude Haiku 5.5 (claude-haiku-5-5) ficou disponivel, mas nenhuma regra da fabrica define quando um subagente de desenvolvimento deve usar Haiku em vez de Sonnet. Hoje a regra implicita e 'subagente sonnet para todo codigo' (memoria do owner, skill 03, line_routing.json development=claude:sonnet) e o unico uso de Haiku e o test-runner, ainda fixado em claude-3-5-haiku-latest. Falta uma politica deterministica de elegibilidade (escopo pequeno, criterio de aceite executavel, sem governanca/seguranca/ambiguidade), de escalonamento (Haiku falhou -> Sonnet) e de proibicoes, aplicavel por todos os harnesses e testavel."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Politica canonica de elegibilidade Haiku documentada em skill 03-model-router e 19-run-ticket (.agents/skills, espelho em .claude/skills via scripts/sync_skills.py) e em CLAUDE.md, com criterios de elegibilidade, proibicoes, escalonamento Haiku->Sonnet apos 1 falha do portao focado e piso de cota 15% inalterado",
+      "Modulo core/line/subagent_routing.py com funcao pura pick_subagent_model(task) -> decisao (modelo, motivo, escalonamento) e config .factory/config/subagent_model_routing.json, com testes cobrindo elegivel, cada proibicao, escalonamento e modelo proibido (fable)",
+      ".claude/agents/test-runner.md atualizado de claude-3-5-haiku-latest para claude-haiku-5-5 e docs/MODEL_SELECTION_GUIDE.md com a secao do Haiku 5.5",
+      "Texto exato para AGENTS.md e FACTORY_RULES.md (arquivos protegidos pelo guard.py) entregue em docs/proposals/ para commit do owner, sem editar os protegidos; revisao continua em familia diferente do implementador e planning/grill/review/integration nao mudam",
+      "Portao python core/harness/runner.py --quick com HARNESS_PASS, PR mergeado e deploy pos-merge"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-08T20:36:51.432814Z",
+    "updated_at": "2026-10-08T20:36:51.432814Z"
   }
 ]
