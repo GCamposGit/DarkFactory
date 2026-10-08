@@ -3130,8 +3130,8 @@
     "project_id": "darkfac",
     "title": "CI Windows do main e dos PRs falha de forma intermitente (spike R02/R12 STORE_UNAVAILABLE, worker xdist crashed, PermissionError) e bloqueia merges",
     "origin": "user",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "PR #186: o log do spike passa a mostrar tipo e mensagem da excecao original (HF02_DRIVER_DIAGNOSTICS=1, linhas [DIAG] no CLI); PermissionError do ledger em core/usage/store.py:122 corrigido (sem escrita do byte inicial do .lock que colidia com o lock msvcrt de outra instancia, LK_NBLCK com polling de 120 s e retry no os.replace); effect_server endurecido contra ConnectionError de clientes mortos (R02 e mitigacao, causa raiz nao provada). Verificado em 08/10/2026: 12 execucoes consecutivas de main-validation (windows-latest e ubuntu-latest) com sucesso, 10 delas a partir do commit do #186. Causa raiz e analise do traceback no corpo do PR #186. Limite do job Windows (workers xdist e timeouts) depende do owner em core/harness (USR-141/USR-147).",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -3153,7 +3153,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-01T12:01:19.416762Z",
-    "updated_at": "2026-10-01T12:01:19.416762Z"
+    "updated_at": "2026-10-08T00:10:00Z"
   },
   {
     "id": "USR-112",
