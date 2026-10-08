@@ -4730,8 +4730,8 @@
     "project_id": "darkfac",
     "title": "Espera por base vermelha no development nao atualiza a branch do run quando a base fica verde",
     "origin": "user",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "PR #217 (542103c): core/line/base_sync.py novo; ao sair da espera base_red o DevelopmentStage faz fetch e merge de origin/<default> na branch do run, preservando as edicoes nao commitadas (WIP commit descartavel + cherry-pick --no-commit). Conflito de edicao volta ao desenvolvedor com prompt base_sync_conflict; conflito de branch falha com cause base_sync_conflict e refs estruturadas; o sync nao consome iteracao. 9 testes novos com repositorio git temporario (base vermelha, corrigida na base, retomada valida contra a base nova). CI ubuntu e windows verdes. Lacuna conhecida: espera sem marcador base_red (retry por rota) nao sincroniza a branch.",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -4753,15 +4753,15 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-08T19:30:14.568988Z",
-    "updated_at": "2026-10-08T19:30:14.568988Z"
+    "updated_at": "2026-10-08T23:30:00Z"
   },
   {
     "id": "USR-166",
     "project_id": "darkfac",
     "title": "Cancelamento por run no launcher headless run_ticket.py",
     "origin": "user",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "PR #218 (eba9802): core/line/local_cancel.py novo; run_ticket.py cancela por arquivo de controle por ticket (python run_ticket.py --cancel USR-XX) ou por sinal (SIGINT/SIGTERM/SIGBREAK), reutilizando o mecanismo do USR-152 (CancelToken/_run_bounded) para matar a arvore do agente, do portao e da entrega; autonomy._run_git/_run_gh recusam commit/push/pr create/pr merge apos o cancelamento; sai com codigo 130 e a Esteira ao vivo mostra a fase ativa como cancelada (causa owner_cancelled). 13 testes novos, incluindo agente falso de longa duracao. CI ubuntu e windows verdes. Mudanca de comportamento: portao com limite de 2 h e subprocesso de entrega com limite de 6 h. Limitacao: o sleep de backoff de retry do agente nao e interrompido pelo arquivo (o proximo run_agent devolve cancelled).",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -4783,15 +4783,15 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-08T19:30:15.159255Z",
-    "updated_at": "2026-10-08T19:30:15.159255Z"
+    "updated_at": "2026-10-08T23:30:00Z"
   },
   {
     "id": "USR-167",
     "project_id": "darkfac",
     "title": "Testar contra Postgres real o add_job_evidence e a tabela local_run_events",
     "origin": "user",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "PR #216 (3d54e2c): tests/test_postgres_real_integration.py com 11 testes marcados postgres_integration (desligados sem DARKFAC_TEST_POSTGRES_DSN; pytest.ini registra o marker). Executado em 08/10/2026 contra PostgreSQL 16.15 real (binarios portateis, sem Docker na maquina): 11 passed em 31,77 s, sem defeito no SQL de add_job_evidence nem no DDL/INSERT de local_run_events. GRANT minimo verificado documentado em docs/runbooks/live_progress.md (CREATE no schema e obrigatorio mesmo com a tabela existente; add_job_evidence precisa de SELECT, UPDATE em jobs). Job de CI com service container nao incluido porque ci.yml e arquivo de governanca protegido.",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -4813,7 +4813,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-08T19:30:15.889542Z",
-    "updated_at": "2026-10-08T19:30:15.889542Z"
+    "updated_at": "2026-10-08T23:30:00Z"
   },
   {
     "id": "USR-168",
