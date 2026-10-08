@@ -80,6 +80,7 @@ def test_scenario_controller_handles_r02_crash_and_restart(tmp_path: Path) -> No
         assert result.status is ResultStatus.PASS
         assert result.effect_count == 1
         assert result.assertions["distinct_process_restart"] is True
+        assert result.actual_step_invocations == 5
         assert len(trace.process_pids) == 2
         assert trace.process_pids[0] != trace.process_pids[1]
         assert result.recovery_ms is not None

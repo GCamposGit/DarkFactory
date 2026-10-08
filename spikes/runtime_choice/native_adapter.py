@@ -40,6 +40,17 @@ from spikes.runtime_choice.contracts import (
 )
 
 
+#: Per-attempt socket timeout of the effect client (connect and read).
+EFFECT_REQUEST_TIMEOUT_SECONDS = 5.0
+
+#: Opt-in fault-injection hook (USR-157).  When set to a stage id (e.g. ``S1``),
+#: the driver emits that stage's ``step_observed`` event and then parks, with no
+#: effect-service request in flight, until it is killed or shut down.  The
+#: scenario controller uses it so the R02 crash lands at a known point instead
+#: of racing the running workflow.
+PARK_AFTER_OBSERVED_ENV = "HF02_PARK_AFTER_OBSERVED"
+
+
 def sanitize_diagnostic(message: object) -> str:
     """Sanitize error messages for diagnostic inclusion without leaking paths or secrets."""
     text = str(message)
@@ -82,9 +93,10 @@ class EffectClient:
             headers={"Content-Type": "application/json"},
         )
         max_attempts = 3
+        started = time.monotonic()
         for attempt in range(max_attempts):
             try:
-                with urlopen(request, timeout=5) as response:
+                with urlopen(request, timeout=EFFECT_REQUEST_TIMEOUT_SECONDS) as response:
                     return json.loads(response.read().decode("utf-8"))
             except HTTPError as error:
                 try:
@@ -109,11 +121,19 @@ class EffectClient:
                 ):
                     time.sleep(0.05 * (attempt + 1))
                     continue
+                # USR-157: record where the time went.  A bare EFFECT_SERVICE_UNAVAILABLE
+                # could not tell a refused connect from a 5 s read timeout on a stalled server.
+                reason = getattr(error, "reason", None)
                 raise NativeAdapterError(
                     "EFFECT_SERVICE_UNAVAILABLE",
                     details={
                         "source": "effect_service",
                         "error_type": type(error).__name__,
+                        "reason_type": type(reason).__name__ if reason is not None else None,
+                        "request_path": path,
+                        "attempts": attempt + 1,
+                        "elapsed_ms": round((time.monotonic() - started) * 1000.0),
+                        "timeout_s": EFFECT_REQUEST_TIMEOUT_SECONDS,
                         "diagnostic": sanitize_diagnostic(str(error)),
                     },
                 ) from error
@@ -188,6 +208,13 @@ class NativeAdapter:
         self._threads: dict[str, threading.Thread] = {}
         self._lock = threading.RLock()
         self._closed = False
+        park_stage = os.environ.get(PARK_AFTER_OBSERVED_ENV) or None
+        if park_stage is not None and park_stage not in self._STAGES:
+            raise NativeAdapterError("PARK_STAGE_INVALID")
+        self._park_stage = park_stage
+        #: Set once the workflow thread is parked after ``_park_stage``.
+        self.parked = threading.Event()
+        self._release_park = threading.Event()
 
     @property
     def capabilities(self) -> AdapterCapabilities:
@@ -340,6 +367,11 @@ class NativeAdapter:
                     value = {"finalized": True}
                 self.effects.observe(workflow_id, "step_observed", stage, {"step_index": context.step_index})
                 self._emit(self._event(workflow_id, DriverEventKind.STEP_OBSERVED, RuntimeStatus.RUNNING, step_id=stage))
+                if stage == self._park_stage:
+                    # Quiescent point: the step is observed but not yet checkpointed and no
+                    # request to the effect service is in flight.  Wait to be killed.
+                    self.parked.set()
+                    self._release_park.wait()
                 return value
 
             return step
@@ -474,6 +506,7 @@ class NativeAdapter:
 
     def shutdown(self) -> None:
         self._closed = True
+        self._release_park.set()
         with self._lock:
             threads = list(self._threads.values())
         for thread in threads:

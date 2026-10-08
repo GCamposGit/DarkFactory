@@ -11,7 +11,7 @@ from urllib.request import Request, urlopen
 
 import pytest
 
-from spikes.runtime_choice.effect_server import EffectServer
+from spikes.runtime_choice.effect_server import EffectServer, _EffectRequestHandler
 from spikes.runtime_choice.effect_store import (
     EXPECTED_SCENARIO_CATALOG_SHA256,
     ApprovalSubjectConflictError,
@@ -247,3 +247,90 @@ def test_http_rejects_payloads_over_the_lab_limit_without_persisting_them(tmp_pa
             "GET", f"{server.base_url}/observations/count?workflow_id=workflow-large"
         )
         assert (count_status, count) == (200, {"count": 0})
+
+
+def test_request_journal_records_latency_and_status_per_request(tmp_path: Path) -> None:
+    """USR-157: every request leaves an ordered journal entry with accept/handle latency."""
+    with EffectServer(tmp_path) as server:
+        journal = server.journal
+        assert journal is not None
+        mark = journal.mark()
+
+        status, body = request_json("GET", f"{server.base_url}/effects/count")
+        assert (status, body) == (200, {"count": 0})
+        assert journal.wait_for("GET /effects/count status=200", since=mark, timeout=10.0)
+
+        status, _ = request_json("GET", f"{server.base_url}/effects/lab:wf:S3")
+        assert status == 404
+        assert journal.wait_for("GET /effects/* status=404", since=mark, timeout=10.0)
+
+        lines = journal.lines(since=mark)
+        assert len(lines) == 2
+        assert all("queue_ms=" in line and "handle_ms=" in line for line in lines)
+        assert not any("peer_gone" in line for line in lines)
+        # The operation key is a path parameter and must not be copied into diagnostics.
+        assert not any("lab:wf:S3" in line for line in lines)
+
+
+def _handler_with_dead_peer() -> _EffectRequestHandler:
+    """Build a handler whose peer already vanished, without opening a socket."""
+
+    class DeadPeer:
+        def write(self, _data: bytes) -> int:
+            raise ConnectionAbortedError(10053, "An established connection was aborted")
+
+        def flush(self) -> None:
+            raise ConnectionAbortedError(10053, "An established connection was aborted")
+
+    handler = object.__new__(_EffectRequestHandler)
+    handler.wfile = DeadPeer()  # type: ignore[assignment]
+    handler.request_version = "HTTP/1.0"
+    handler.requestline = "POST /observations HTTP/1.0"
+    handler.client_address = ("127.0.0.1", 54321)
+    handler.command = "POST"
+    handler.path = "/observations"
+    handler.close_connection = False
+    handler._headers_buffer = []
+    return handler
+
+
+def test_response_to_a_vanished_client_is_journaled_not_raised() -> None:
+    """USR-157: a client killed or timed out mid-request (WinError 10053) is recorded, not fatal."""
+    handler = _handler_with_dead_peer()
+
+    handler._write_json(201, {"ok": True})  # must not raise
+
+    assert handler._peer_gone == "ConnectionAbortedError"
+    assert handler._response_status == 201
+    assert handler.close_connection is True
+
+
+def test_server_error_hook_journals_peer_errors_without_stderr_noise(
+    tmp_path: Path, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """USR-157: connection errors outside the response write (read side) also leave a journal entry."""
+    with EffectServer(tmp_path) as server:
+        httpd = server._httpd
+        assert httpd is not None
+        mark = httpd.journal.mark()
+        try:
+            raise ConnectionResetError(10054, "forcibly closed")
+        except ConnectionResetError:
+            httpd.handle_error(None, ("127.0.0.1", 40000))
+
+        assert httpd.journal.wait_for("peer_gone port=40000", since=mark, timeout=10.0)
+    captured = capfd.readouterr()
+    assert "Traceback" not in captured.err
+    assert "Exception occurred" not in captured.err
+
+
+def test_unexpected_server_errors_are_still_reported(tmp_path: Path, capfd: pytest.CaptureFixture[str]) -> None:
+    """Only peer disconnects are silenced; a real handler bug must stay visible."""
+    with EffectServer(tmp_path) as server:
+        httpd = server._httpd
+        assert httpd is not None
+        try:
+            raise RuntimeError("handler bug")
+        except RuntimeError:
+            httpd.handle_error(None, ("127.0.0.1", 40001))
+    assert "handler bug" in capfd.readouterr().err

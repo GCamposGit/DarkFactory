@@ -38,6 +38,7 @@ from spikes.runtime_choice.contracts import (
     WorkflowVersion,
 )
 from spikes.runtime_choice.effect_server import EffectServer
+from spikes.runtime_choice.native_adapter import PARK_AFTER_OBSERVED_ENV
 
 LOGGER = logging.getLogger(__name__)
 
@@ -98,6 +99,7 @@ class ScenarioController:
     ) -> subprocess.Popen[str]:
         """Spawn the driver subprocess and record its exact PID."""
         env = dict(os.environ)
+        env.pop(PARK_AFTER_OBSERVED_ENV, None)
         if env_override:
             env.update(env_override)
         env["PYTHONUNBUFFERED"] = "1"
@@ -141,9 +143,15 @@ class ScenarioController:
         events: list[DriverEvent],
         pids: list[int],
         exit_codes: list[int],
+        timeline: list[str] | None = None,
+        server_lines: list[str] | None = None,
     ) -> list[str]:
         """Summarize error events and driver stderr for failure logs (never in results.json)."""
         lines: list[str] = []
+        if timeline:
+            lines.append("controller_timeline: " + " | ".join(timeline))
+        if server_lines:
+            lines.append("effect_service_requests: " + " | ".join(server_lines))
         for event in events:
             if event.kind is DriverEventKind.ERROR or event.code:
                 lines.append(
@@ -204,6 +212,12 @@ class ScenarioController:
         artifact_refs = [config_path.relative_to(self.config.root_dir).as_posix()]
 
         start_monotonic = time.monotonic()
+        journal = server.journal
+        journal_mark = journal.mark() if journal is not None else 0
+        timeline: list[str] = []
+
+        def mark(label: str) -> None:
+            timeline.append(f"+{(time.monotonic() - start_monotonic) * 1000.0:.0f}ms {label}")
 
         # Handle FaultPoint.STORAGE_UNAVAILABLE
         if spec.fault_point is FaultPoint.STORAGE_UNAVAILABLE:
@@ -246,9 +260,20 @@ class ScenarioController:
             spec.scenario_id in {"R01", "R02", "R03", "R05", "R08", "R10", "R12"}
         )
 
+        # R02 kills the driver on purpose.  Parking it after the S1 observation makes the
+        # crash land at a quiescent point (no request in flight, S1 not yet checkpointed)
+        # instead of racing the workflow, which made the step count and the effect
+        # service traffic depend on scheduler timing (USR-157).
+        park_env = (
+            {PARK_AFTER_OBSERVED_ENV: "S1"}
+            if spec.fault_point is FaultPoint.CRASH_AFTER_CHECKPOINT
+            else None
+        )
+
         # Spawn initial driver process
-        process = self._spawn_driver(config_path)
+        process = self._spawn_driver(config_path, park_env)
         pids.append(process.pid)
+        mark(f"p1 spawned pid={process.pid}")
 
         event_queue: queue.Queue[str] = queue.Queue()
 
@@ -279,6 +304,7 @@ class ScenarioController:
         assert process.stdin is not None
         process.stdin.write(start_cmd.model_dump_json() + "\n")
         process.stdin.flush()
+        mark("p1 start command sent")
 
         # Fault injection: duplicate start for R05
         if spec.scenario_id == "R05":
@@ -333,6 +359,7 @@ class ScenarioController:
                     events.append(event)
                 except Exception:
                     continue
+                mark(f"p1 event {event.kind.value} step={event.step_id} code={event.code}")
 
                 # Fault injection: CRASH_AFTER_CHECKPOINT
                 if (
@@ -341,73 +368,21 @@ class ScenarioController:
                     and event.step_id == "S1"
                 ):
                     barriers["s1_checkpoint_reached"] = True
-                    # Kill the driver immediately
+                    # Kill the driver; it is parked after the S1 observation (see park_env).
                     self._kill_process(process)
                     exit_codes.append(process.poll() or -9)
 
-                    # Monotonic recovery timing
-                    recovery_start = time.monotonic()
-                    # Wait for lease to expire with margin for clock jitter under heavy xdist load
-                    time.sleep(self.config.lease_seconds + 0.85)
-
-                    # Spawn second driver process to resume workflow
-                    process2 = self._spawn_driver(config_path)
-                    pids.append(process2.pid)
-
-                    event_queue2: queue.Queue[str] = queue.Queue()
-
-                    def stdout_reader2() -> None:
-                        assert process2.stdout is not None
-                        for line2 in process2.stdout:
-                            event_queue2.put(line2)
-
-                    reader2 = threading.Thread(target=stdout_reader2, daemon=True)
-                    reader2.start()
-
-                    # Send restart command
-                    resume_cmd = DriverCommand(
-                        command_id=f"cmd-resume-{workflow_id}",
-                        action=DriverAction.START,
+                    mark(f"p1 killed returncode={process.poll()} (parked after S1 observed)")
+                    recovery_ms = self._resume_on_second_driver(
+                        config_path=config_path,
                         workflow_id=workflow_id,
                         scenario_id=spec.scenario_id,
-                        workflow_version=self.config.workflow_version,
-                        payload=start_payload,
+                        start_payload=start_payload,
+                        events=events,
+                        pids=pids,
+                        exit_codes=exit_codes,
+                        mark=mark,
                     )
-                    assert process2.stdin is not None
-                    process2.stdin.write(resume_cmd.model_dump_json() + "\n")
-                    process2.stdin.flush()
-
-                    # Read until terminal on process2
-                    deadline2 = time.monotonic() + self.config.scenario_timeout_seconds
-                    while time.monotonic() < deadline2:
-                        try:
-                            line2 = event_queue2.get(timeout=0.1)
-                        except queue.Empty:
-                            if process2.poll() is not None:
-                                break
-                            continue
-                        line2_clean = line2.strip()
-                        if not line2_clean:
-                            continue
-                        try:
-                            event2 = DriverEvent.model_validate_json(line2_clean)
-                            events.append(event2)
-                            if event2.kind in {DriverEventKind.COMPLETED, DriverEventKind.ERROR, DriverEventKind.UNSUPPORTED}:
-                                recovery_ms = (time.monotonic() - recovery_start) * 1000.0
-                                break
-                        except Exception:
-                            continue
-
-                    # Shutdown process2 cleanly
-                    try:
-                        shutdown_cmd = DriverCommand(command_id="cmd-shutdown-2", action=DriverAction.SHUTDOWN)
-                        assert process2.stdin is not None
-                        process2.stdin.write(shutdown_cmd.model_dump_json() + "\n")
-                        process2.stdin.flush()
-                        process2.wait(timeout=3)
-                    except Exception:
-                        self._kill_process(process2)
-                    exit_codes.append(process2.poll() or 0)
                     break
 
                 # Fault injection: COMMIT_THEN_DISCONNECT_ONCE
@@ -419,63 +394,17 @@ class ScenarioController:
                     self._kill_process(process)
                     exit_codes.append(process.poll() or 1)
 
-                    recovery_start = time.monotonic()
-                    time.sleep(self.config.lease_seconds + 0.85)
-
-                    process2 = self._spawn_driver(config_path)
-                    pids.append(process2.pid)
-
-                    event_queue2 = queue.Queue()
-
-                    def stdout_reader_disconn() -> None:
-                        assert process2.stdout is not None
-                        for line_d in process2.stdout:
-                            event_queue2.put(line_d)
-
-                    reader_disconn = threading.Thread(target=stdout_reader_disconn, daemon=True)
-                    reader_disconn.start()
-
-                    resume_cmd = DriverCommand(
-                        command_id=f"cmd-resume-{workflow_id}",
-                        action=DriverAction.START,
+                    mark(f"p1 killed returncode={process.poll()} (after error event)")
+                    recovery_ms = self._resume_on_second_driver(
+                        config_path=config_path,
                         workflow_id=workflow_id,
                         scenario_id=spec.scenario_id,
-                        workflow_version=self.config.workflow_version,
-                        payload=start_payload,
+                        start_payload=start_payload,
+                        events=events,
+                        pids=pids,
+                        exit_codes=exit_codes,
+                        mark=mark,
                     )
-                    assert process2.stdin is not None
-                    process2.stdin.write(resume_cmd.model_dump_json() + "\n")
-                    process2.stdin.flush()
-
-                    deadline2 = time.monotonic() + self.config.scenario_timeout_seconds
-                    while time.monotonic() < deadline2:
-                        try:
-                            line2 = event_queue2.get(timeout=0.1)
-                        except queue.Empty:
-                            if process2.poll() is not None:
-                                break
-                            continue
-                        line2_clean = line2.strip()
-                        if not line2_clean:
-                            continue
-                        try:
-                            event2 = DriverEvent.model_validate_json(line2_clean)
-                            events.append(event2)
-                            if event2.kind in {DriverEventKind.COMPLETED, DriverEventKind.ERROR, DriverEventKind.UNSUPPORTED}:
-                                recovery_ms = (time.monotonic() - recovery_start) * 1000.0
-                                break
-                        except Exception:
-                            continue
-
-                    try:
-                        shutdown_cmd = DriverCommand(command_id="cmd-shutdown-2", action=DriverAction.SHUTDOWN)
-                        assert process2.stdin is not None
-                        process2.stdin.write(shutdown_cmd.model_dump_json() + "\n")
-                        process2.stdin.flush()
-                        process2.wait(timeout=3)
-                    except Exception:
-                        self._kill_process(process2)
-                    exit_codes.append(process2.poll() or 0)
                     break
 
                 # Fault injection: APPROVAL_DIGEST_MISMATCH
@@ -526,8 +455,99 @@ class ScenarioController:
             barrier_reached=barriers,
             error_code=error_code,
             artifact_refs=artifact_refs,
-            diagnostics=self._collect_diagnostics(events, pids, exit_codes),
+            diagnostics=self._collect_diagnostics(
+                events,
+                pids,
+                exit_codes,
+                timeline=timeline,
+                server_lines=journal.lines(journal_mark, origin=start_monotonic) if journal is not None else None,
+            ),
         )
+
+    def _resume_on_second_driver(
+        self,
+        *,
+        config_path: Path,
+        workflow_id: str,
+        scenario_id: str,
+        start_payload: dict[str, Any],
+        events: list[DriverEvent],
+        pids: list[int],
+        exit_codes: list[int],
+        mark: Callable[[str], None],
+    ) -> float | None:
+        """Wait out the dead driver's lease, then resume the workflow on a new driver.
+
+        Returns the monotonic recovery time in milliseconds, or ``None`` when the
+        second driver never reached a terminal event.
+        """
+
+        recovery_start = time.monotonic()
+        # Wait for lease to expire with margin for clock jitter under heavy xdist load
+        time.sleep(self.config.lease_seconds + 0.85)
+        mark("lease wait finished")
+
+        process2 = self._spawn_driver(config_path)
+        pids.append(process2.pid)
+        mark(f"p2 spawned pid={process2.pid}")
+
+        event_queue2: queue.Queue[str] = queue.Queue()
+
+        def stdout_reader2() -> None:
+            assert process2.stdout is not None
+            for line2 in process2.stdout:
+                event_queue2.put(line2)
+
+        threading.Thread(target=stdout_reader2, daemon=True).start()
+
+        resume_cmd = DriverCommand(
+            command_id=f"cmd-resume-{workflow_id}",
+            action=DriverAction.START,
+            workflow_id=workflow_id,
+            scenario_id=scenario_id,
+            workflow_version=self.config.workflow_version,
+            payload=start_payload,
+        )
+        assert process2.stdin is not None
+        process2.stdin.write(resume_cmd.model_dump_json() + "\n")
+        process2.stdin.flush()
+        mark("p2 resume command sent")
+
+        recovery_ms: float | None = None
+        deadline2 = time.monotonic() + self.config.scenario_timeout_seconds
+        while time.monotonic() < deadline2:
+            try:
+                line2 = event_queue2.get(timeout=0.1)
+            except queue.Empty:
+                if process2.poll() is not None:
+                    mark(f"p2 exited returncode={process2.poll()} before a terminal event")
+                    break
+                continue
+            line2_clean = line2.strip()
+            if not line2_clean:
+                continue
+            try:
+                event2 = DriverEvent.model_validate_json(line2_clean)
+            except Exception:
+                continue
+            events.append(event2)
+            mark(f"p2 event {event2.kind.value} step={event2.step_id} code={event2.code}")
+            if event2.kind in {DriverEventKind.COMPLETED, DriverEventKind.ERROR, DriverEventKind.UNSUPPORTED}:
+                recovery_ms = (time.monotonic() - recovery_start) * 1000.0
+                break
+
+        # Shutdown process2 cleanly
+        try:
+            shutdown_cmd = DriverCommand(command_id="cmd-shutdown-2", action=DriverAction.SHUTDOWN)
+            assert process2.stdin is not None
+            process2.stdin.write(shutdown_cmd.model_dump_json() + "\n")
+            process2.stdin.flush()
+            process2.wait(timeout=3)
+        except Exception:
+            self._kill_process(process2)
+        exit_codes.append(process2.poll() or 0)
+        mark(f"p2 stopped returncode={process2.poll()}")
+        return recovery_ms
 
     def _run_storage_unavailable(
         self,
