@@ -223,7 +223,55 @@ function syncActiveProjectToComponents(projectId) {
 }
 
 // Event Listeners Setup
+function openHubSidebar() {
+  if (window.innerWidth >= 1024) return;
+  const sidebar = document.getElementById("hub-sidebar");
+  sidebar.classList.replace("-translate-x-full", "translate-x-0");
+  sidebar.inert = false;
+  document.getElementById("hub-sidebar-overlay").classList.remove("hidden");
+  document.getElementById("hub-sidebar-toggle").setAttribute("aria-expanded", "true");
+  sidebar.querySelector("button, a")?.focus();
+}
+
+function closeHubSidebar(returnFocus = true) {
+  const toggle = document.getElementById("hub-sidebar-toggle");
+  const wasOpen = toggle.getAttribute("aria-expanded") === "true";
+  const sidebar = document.getElementById("hub-sidebar");
+  sidebar.classList.remove("translate-x-0");
+  sidebar.classList.add("-translate-x-full");
+  sidebar.inert = window.innerWidth < 1024;
+  document.getElementById("hub-sidebar-overlay").classList.add("hidden");
+  toggle.setAttribute("aria-expanded", "false");
+  if (returnFocus && wasOpen && window.innerWidth < 1024) toggle.focus();
+}
+
+function toggleHubSidebar() {
+  if (document.getElementById("hub-sidebar-toggle").getAttribute("aria-expanded") === "true") {
+    closeHubSidebar();
+  } else {
+    openHubSidebar();
+  }
+}
+
+function setHubSidebarActive(id) {
+  document.querySelectorAll("#hub-sidebar [data-sidebar-id]").forEach((item) => {
+    if (item.dataset.sidebarId === id) item.setAttribute("aria-current", "page");
+    else item.removeAttribute("aria-current");
+  });
+}
+
 function setupEventListeners() {
+  document.getElementById("hub-sidebar-toggle").addEventListener("click", toggleHubSidebar);
+  document.getElementById("hub-sidebar-overlay").addEventListener("click", () => closeHubSidebar());
+  // Capture before the original inline handler opens a drawer and moves focus.
+  document.getElementById("hub-sidebar").addEventListener("click", (event) => {
+    const item = event.target.closest("[data-sidebar-id]");
+    if (!item) return;
+    setHubSidebarActive(item.dataset.sidebarId);
+    if (window.innerWidth < 1024) closeHubSidebar();
+  }, true);
+  window.addEventListener("resize", () => closeHubSidebar(false));
+  closeHubSidebar(false);
   // Global Keyboard Shortcuts
   window.addEventListener("keydown", (e) => {
     // Ctrl+K or Cmd+K or Slash / (when not inside input)
@@ -242,7 +290,12 @@ function setupEventListeners() {
       e.preventDefault();
       openCommandPalette();
     } else if (e.key === "Escape") {
-      closeAllModals();
+      if (document.getElementById("hub-sidebar-toggle").getAttribute("aria-expanded") === "true") {
+        e.preventDefault();
+        closeHubSidebar();
+      } else {
+        closeAllModals();
+      }
     }
   });
 

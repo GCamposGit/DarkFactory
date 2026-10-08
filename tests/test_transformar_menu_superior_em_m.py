@@ -1,12 +1,98 @@
-"""Generated sidebar utilities remain reproducible and responsive."""
-
-from pathlib import Path
+"""Static contract for the DarkHub sidebar migration."""
 import re
 import shutil
 import subprocess
 import sys
+from pathlib import Path
+from urllib.parse import parse_qs, urlsplit
+from lxml import html
 
 ROOT = Path(__file__).resolve().parents[1]
+EXPECTED = [(None, 'line-live-link', 'Esteira ao vivo: tickets da fábrica etapa por etapa', 'Esteira ao vivo'),
+ ('openBenchmarksModal()',
+  None,
+  'Ver Benchmarks & Fronteira de Pareto',
+  '📊\n          Benchmarks & Pareto'),
+ ('openLearningDrawer()',
+  None,
+  'Abrir Central de Aprendizado, Learning Packs & Segundo Cérebro',
+  '🎓\n          Aprendizado'),
+ ('openPortfolioDrawer()',
+  'portfolio-trigger-btn',
+  'Abrir Portfólio Multiprojeto (DH-08)',
+  '💼\n          Portfólio'),
+ ('openRoadmapDrawer()', None, 'Abrir Roadmap Operacional', '🗺️\n          Roadmap'),
+ ('openDemandsDrawer()',
+  None,
+  'Abrir Central de Demandas do Usuário & Backlog',
+  '📝\n          Demandas'),
+ ('openTelemetryDrawer()',
+  None,
+  'Abrir Telemetria Estruturada de Modelos de IA',
+  '📈\n          Telemetria'),
+ ("document.getElementById('content-studio-section')?.scrollIntoView({behavior: 'smooth'})",
+  None,
+  'Estúdio de Conteúdo Anti-Slop & Ateliê Visual (DH-07)',
+  '🎨\n          Estúdio'),
+ ("document.getElementById('harness-validation-section')?.scrollIntoView({behavior: 'smooth'})",
+  None,
+  'Validação sob Demanda & Harness Remoto (DH-11)',
+  '🧪\n          Testes'),
+ ("document.getElementById('infrastructure-cards-section')?.scrollIntoView({behavior: 'smooth'})",
+  None,
+  'Recursos de Infraestrutura & Rede',
+  '🖥️\n          Infra'),
+ ("document.getElementById('tasks-dashboard-section')?.scrollIntoView({behavior: 'smooth'})",
+  None,
+  'Fila operacional de tarefas',
+  '✅\n          Tarefas'),
+ ('openPlaygroundDrawer()',
+  None,
+  'Abrir AI Playground (Local Ollama & OpenRouter)',
+  '🧠\n          Playground'),
+ ('openPromptVaultDrawer()', None, 'Abrir Cofre de Prompts', '📋\n          Prompts'),
+ ('openBackupModal()', None, 'Backup & Configurações', '⚙️')]
+
+def document():
+    return html.fromstring((ROOT / "hub/frontend/index.html").read_text(encoding="utf-8"))
+
+def test_sidebar_exists_with_single_nav_and_aria_label():
+    sidebars = document().xpath('//aside[@id="hub-sidebar"]')
+    assert len(sidebars) == 1
+    assert len(sidebars[0].xpath('./nav[@aria-label]')) == 1
+    assert {"fixed", "inset-y-0", "left-0", "w-64", "overflow-y-auto", "lg:translate-x-0"} <= set(sidebars[0].get('class').split())
+    toggle = document().get_element_by_id('hub-sidebar-toggle')
+    assert toggle.get('aria-controls') == 'hub-sidebar'
+    assert toggle.get('aria-expanded') == 'false'
+    assert 'lg:hidden' in toggle.get('class').split()
+    assert 'hidden' in document().get_element_by_id('hub-sidebar-overlay').get('class').split()
+
+def test_header_has_no_navigation_handlers():
+    header = document().xpath('//header')[0]
+    assert not header.xpath('.//a[@id="line-live-link"]')
+    assert all(n.get('onclick') in ('openCoverageDrawer()', 'openCommandPalette()', 'openServiceModal()') for n in header.xpath('.//*[@onclick]'))
+
+def test_all_original_nav_handlers_preserved_in_sidebar():
+    nodes = document().get_element_by_id('hub-sidebar').xpath('.//button[@onclick] | .//a')
+    actual = [(n.get('onclick'), n.get('id'), n.get('title'), ''.join(n.itertext()).strip()) for n in nodes]
+    assert actual == EXPECTED
+    assert nodes[0].get('href') == '/live'
+    assert len(document().xpath('//*[@aria-current="page"]')) == 1
+
+def test_topbar_keeps_brand_search_project_select_badges_and_new_button():
+    header = document().xpath('//header')[0]
+    assert 'DarkHub' in header.text_content()
+    for identifier in ('hub-coverage-badge', 'ollama-status-badge', 'openrouter-status-badge', 'global-project-select'):
+        assert header.xpath('.//*[@id=$identifier]', identifier=identifier)
+    assert header.xpath('.//button[@onclick="openCommandPalette()"]//kbd')[0].text == 'Ctrl+K'
+    assert header.xpath('.//button[@onclick="openServiceModal()"]')
+
+def test_main_has_lg_ml_64_offset():
+    assert 'lg:ml-64' in document().xpath('//main')[0].get('class').split()
+
+def test_scripts_share_single_cache_version():
+    versions = [parse_qs(urlsplit(n.get('src')).query).get('v', []) for n in document().xpath('//script[@src]')]
+    assert versions and all(v and v == versions[0] and v[0] for v in versions)
 
 
 def test_generate_hub_styles_is_idempotent_and_mirrors_match(tmp_path):

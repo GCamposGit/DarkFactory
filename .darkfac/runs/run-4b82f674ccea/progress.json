@@ -2,6 +2,7 @@
   "harness": "codex",
   "model": null,
   "tickets_done": [
-    "T1"
+    "T1",
+    "T2"
   ]
 }

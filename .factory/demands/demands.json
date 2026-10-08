@@ -4360,5 +4360,37 @@
     "dependencies": [],
     "created_at": "2026-10-07T20:06:28.291051Z",
     "updated_at": "2026-10-08T09:40:00Z"
+  },
+  {
+    "id": "USR-162",
+    "project_id": "darkfac",
+    "title": "Investigar perda de resposta do worker remoto durante validacao T2",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand",
+      "bug",
+      "test-worker"
+    ],
+    "problem_statement": "Durante python scripts/line_validate.py do T2 em 2026-10-08, job 535d787ecec547058c894111d3c68025 no worker http://100.78.181.90:8080 parou de responder durante unit_and_integration_tests_parallel. /health respondeu busy=False. Apos >180s o harness caiu para execucao local. Evidencia: /tmp/t2-validation.log no agente de desenvolvimento; snapshot a127ff6e32e6.",
+    "core_journey": [],
+    "non_goals": [
+      "Alterar a navegacao DarkHub ou ampliar o T2."
+    ],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Reproduzir e identificar por que consultas do job deixam de responder enquanto /health responde.",
+      "Garantir resultado terminal recuperavel ou erro estruturado do job sem perda de evidencias.",
+      "Preservar fallback local e passar pelo portao oficial."
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-08T14:09:14.155266Z",
+    "updated_at": "2026-10-08T14:09:14.155273Z"
   }
 ]

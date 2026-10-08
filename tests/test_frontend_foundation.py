@@ -84,11 +84,11 @@ def test_all_script_tags_share_one_cache_version():
     assert len(versions) == 1 and next(iter(versions)), f"All script tags must share one non-empty cache version, found {versions}"
 
 
-def test_stylesheet_link_uses_cache_version_20261008a():
-    """Verify that the stylesheet link in index.html uses ?v=20261008a."""
+def test_stylesheet_link_uses_cache_version_20261008b():
+    """Verify that the stylesheet link in index.html uses ?v=20261008b."""
     html = INDEX_HTML.read_text(encoding="utf-8")
-    assert '<link rel="stylesheet" href="/static/styles.css?v=20261008a">' in html, (
-        "index.html must link styles.css with ?v=20261008a"
+    assert '<link rel="stylesheet" href="/static/styles.css?v=20261008b">' in html, (
+        "index.html must link styles.css with ?v=20261008b"
     )
 
 
