@@ -47,7 +47,7 @@ from core.line.agent_cli import (
     supports,
 )
 from core.line.diagnostics import redacted_head
-from core.line.local_progress import ENV_RUN_ID, ProgressPublisher, open_progress
+from core.line.local_progress import ENV_RUN_ID, ENV_WARNED, ProgressPublisher, open_progress
 from core.line.operating_harness import detect_operating_harness
 from core.line.routing import _HARNESS_TO_PROVIDER, _default_quota_headroom, load_routing_config, pick
 from core.usage.history import history_path, read_history
@@ -1089,9 +1089,15 @@ def _main(argv: Optional[list[str]], box: list[ProgressPublisher]) -> int:
             delivery_cmd.append("--no-push")
 
         delivery_kwargs: dict[str, Any] = {}
-        if progress.enabled:
-            # The delivery subprocess joins this run: same run id, so the board shows one run.
-            delivery_kwargs["env"] = {**os.environ, ENV_RUN_ID: progress.run_id}
+        if progress.enabled or progress.warning:
+            child_env = dict(os.environ)
+            if progress.enabled:
+                # The delivery subprocess joins this run: same run id, so the board shows one run.
+                child_env[ENV_RUN_ID] = progress.run_id
+            if progress.warning:
+                # USR-154: the user was already warned; the subprocess must not repeat it.
+                child_env[ENV_WARNED] = "1"
+            delivery_kwargs["env"] = child_env
         delivery_proc = subprocess.run(
             delivery_cmd,
             cwd=str(PROJECT_ROOT),
