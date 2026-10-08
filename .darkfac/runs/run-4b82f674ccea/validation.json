@@ -1,19 +1,21 @@
 {
-  "sha": "36dcfab6266101e8dc8a68e05890f9bcaf44ead8",
+  "sha": "0ea34089773b892cea14f892771def2fd4316e31",
   "commands": {
     "setup": {
       "ran": true,
       "ok": true,
       "exit_code": 0,
-      "duration_s": 2.394
+      "duration_s": 1.86
     },
     "validate": {
       "ran": true,
-      "ok": false,
-      "exit_code": 1,
-      "duration_s": 531.528,
-      "log": "verdict=FAILED (1 failed, 3400 passed, 5 skipped in 531.53s)\n\nTest failures detected:\n- tests/test_harness_affected.py:426 [AssertionError]: no usable base ref found (tried 'origin/main', main, HEAD~1)\\n\").returncode"
+      "ok": true,
+      "exit_code": 0,
+      "duration_s": 516.928
+    },
+    "build": {
+      "ran": false
     }
   },
-  "started_at": 1791474620.5272427
+  "started_at": 1791475782.994706
 }
