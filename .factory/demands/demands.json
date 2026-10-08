@@ -4693,5 +4693,35 @@
     "dependencies": [],
     "created_at": "2026-10-08T15:25:09.313300Z",
     "updated_at": "2026-10-08T15:25:09.313314Z"
+  },
+  {
+    "id": "USR-164",
+    "project_id": "darkfac",
+    "title": "Esteira ao vivo nao enxerga trabalho local: Notebook sem URL de escrita e sessoes interativas do Claude Code nao publicam",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "EVIDENCIA 08/10/2026 ~17:56Z: o owner disse que o Claude Code estava executando USR-152..160, mas /live mostrava zero runs ativos (snapshot fresco, Postgres ok, DarkHub em c0aab80). Verificado: (1) no Notebook nao ha DARKFAC_HF02_DATABASE_URL/DARKHUB_CONTROL_DATABASE_URL em Process/User/Machine, entao core/line/local_progress.resolve_sink cai no SqliteSink de .factory/control.db, que o hub da nuvem nunca le (a tabela local_run_events nem existe); (2) sessoes interativas do Claude Code que implementam por subagentes no chat, sem run_ticket.py, nao publicam nada; (3) USR-152..160 seguem 'planned' no ledger, sem worktree, branch, PR ou processo run_ticket/pytest no Notebook. O painel prometido para dispensar status no chat fica cego justamente para o trabalho local.",
+    "core_journey": [
+      "EVIDENCIA 08/10/2026 ~17:56Z: o owner disse que o Claude Code estava executando USR-152..160, mas /live mostrava zero runs ativos (snapshot fresco, Postgres ok, DarkHub em c0aab80). Verificado: (1) no Notebook nao ha DARKFAC_HF02_DATABASE_URL/DARKHUB_CONTROL_DATABASE_URL em Process/User/Machine, entao core/line/local_progress.resolve_sink cai no SqliteSink de .factory/control.db, que o hub da nuvem nunca le (a tabela local_run_events nem existe); (2) sessoes interativas do Claude Code que implementam por subagentes no chat, sem run_ticket.py, nao publicam nada; (3) USR-152..160 seguem 'planned' no ledger, sem worktree, branch, PR ou processo run_ticket/pytest no Notebook. O painel prometido para dispensar status no chat fica cego justamente para o trabalho local."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Nos que rodam run_ticket (Notebook, Desktop) publicam no Postgres da nuvem com um role de escrita restrito a local_run_events, provisionado pelo bootstrap/env com passo a passo para o owner; sem URL, o run_ticket avisa em destaque (alinhado ao USR-154) em vez de gravar em SQLite local invisivel",
+      "Sessoes interativas do Claude Code (skill 19-run-ticket e fluxo por subagentes) abrem e atualizam um run local por ticket (preflight, workspace, agente, portao, PR, CI, merge, deploy) via core.line.local_progress, inclusive quando a implementacao e feita no chat",
+      "/live mostra esses runs em ate 5 s com harness/maquina; teste focal com sink falso e verificacao em producao"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-08T17:58:05.189744Z",
+    "updated_at": "2026-10-08T17:58:05.189744Z"
   }
 ]
