@@ -24,6 +24,12 @@ from core.line.stage_build import DevelopmentStage, ValidationStage, _MISSING_TE
 from core.projects.models import ProjectCommands, ProjectDescriptor
 
 
+@pytest.fixture(autouse=True)
+def _no_real_base_probe(monkeypatch: pytest.MonkeyPatch) -> None:
+    """USR-153: the development stage probes the base branch with a nested pytest; keep these tests hermetic."""
+    monkeypatch.setattr("core.line.base_probe.probe_base_failures", lambda ws, project, test_ids: None)
+
+
 # --------------------------------------------------------------------------
 # Helpers (mirrors tests/line/test_workspace.py's local git helpers)
 # --------------------------------------------------------------------------
