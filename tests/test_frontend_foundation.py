@@ -4,8 +4,8 @@ Covers:
   (a) hub/frontend/index.html does not reference cdn.tailwindcss.com;
   (b) No external CSS resources or CDNs are loaded in runtime;
   (c) /static/styles.css exists, is served with 200, is not empty, and has representative size (> 10 KB);
-  (d) All script tags share the exact cache version ?v=20260923c;
-  (e) Stylesheet link uses the shared cache version ?v=20260923c;
+  (d) All script tags share the exact cache version ?v=20261008c;
+  (e) Stylesheet link uses the shared cache version ?v=20261008c;
   (f) Stylesheet contains essential utility classes (colors, layout, flex/grid, transitions).
 """
 
