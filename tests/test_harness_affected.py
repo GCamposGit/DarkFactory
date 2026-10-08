@@ -377,7 +377,7 @@ def test_explicit_base_ref_used_when_present(tmp_path: Path) -> None:
 # --- smoke test against the real repository -----------------------------------
 
 
-def test_shallow_detached_checkout_selects_full_suite_without_base(tmp_path: Path) -> None:
+def test_shallow_detached_checkout_rejects_unavailable_base(tmp_path: Path) -> None:
     source = tmp_path / "source"
     _init_repo(source, branch="trunk")
     _write(source, "tests/test_a.py", "def test_a() -> None:\n    assert True\n")
@@ -390,13 +390,10 @@ def test_shallow_detached_checkout_selects_full_suite_without_base(tmp_path: Pat
     _git(repo, "checkout", "--detach")
     _git(repo, "branch", "-D", "trunk")
 
-    selection = affected.select_affected(repo, "origin/main")
-
-    assert selection.mode == "full"
-    assert selection.tests == ["tests/test_a.py"]
-    assert selection.changed_files == []
-    assert selection.escalations[0].startswith("base_ref_unavailable:")
-    assert selection.reasons == {}
+    # The base-owned harness fails closed when no trustworthy diff exists.
+    # Sidebar changes must not introduce a governance fallback here.
+    with pytest.raises(affected.GraphBuildError, match="no usable base ref"):
+        affected.select_affected(repo, "origin/main")
 
 
 def test_unborn_checkout_still_rejects_missing_base(tmp_path: Path) -> None:
