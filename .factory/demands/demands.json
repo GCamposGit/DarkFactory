@@ -391,7 +391,7 @@
     "project_id": "jarvis",
     "title": "Configurar e Homologar Fallback do Groq Cloud Whisper",
     "origin": "user",
-    "status": "planned",
+    "status": "completed",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "later",
@@ -419,7 +419,8 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-09-15T16:25:13.208701Z",
-    "updated_at": "2026-09-30T22:00:00Z"
+    "updated_at": "2026-10-08T16:00:00Z",
+    "delivery_evidence": "Homologado em 08/10/2026 com a GROQ_API_KEY do .env do Jarvis: scripts/homologate_groq_whisper.py retornou engine_used=cloud_groq_whisper (whisper-large-v3-turbo), latency_ms=312.5, [SUCESSO] e exit 0."
   },
   {
     "id": "USR-42",
@@ -4039,8 +4040,8 @@
     "project_id": "darkfac",
     "title": "Worker de testes do Desktop para de responder ao iniciar o passo paralelo do portao",
     "origin": "user",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "Patch aplicado pelo owner no main (commit afac42b, a partir de docs/proposals/USR-141-147-harness-resilience.patch): remote_worker inicia o filho do pytest com prioridade reduzida (verificado no Desktop em 08/10/2026: processos python em BelowNormal, /health com git_sha=afac42b, busy=false); remote_dispatch sonda /health antes de abandonar um worker silencioso (teto 180 s); 29 testes novos em tests/test_remote_dispatch_resilience.py. CI do afac42b verde (ubuntu, windows e Continuous Deployment). Nota: lock de arquivo com pid morto e liberado pelo SO ao encerrar o processo; a linha de log desse evento nao foi implementada.",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -4062,7 +4063,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-04T17:06:34.784102Z",
-    "updated_at": "2026-10-04T17:06:34.784102Z"
+    "updated_at": "2026-10-08T16:00:00Z"
   },
   {
     "id": "USR-142",
@@ -4216,8 +4217,8 @@
     "project_id": "darkfac",
     "title": "Governança: Aplicar patch de proteção de suite lock e remote probe no core/harness (caminho protegido)",
     "origin": "user",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "Patch aplicado pelo owner no main (commit afac42b): suite_lock detecta dono vivo e travado (CPU quase nulo na arvore do dono apos DARKFAC_SUITE_LOCK_STALL_AFTER_SEC, aviso '[SUITE_LOCK] holder appears stalled', encerramento so com DARKFAC_SUITE_LOCK_REAP_STALLED=1); probe de saude do Desktop com timeout configuravel (DARKFAC_WORKER_HEALTH_TIMEOUT_SEC); runner toma o lock antes do execute() no caminho --no-cache. 18 testes novos em tests/test_suite_lock_stalled.py. Medicao no Notebook com o patch: 3452 testes, HARNESS_PASS, passo paralelo 886,3 s e serial 192,5 s.",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -4239,7 +4240,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-05T22:42:41.687764Z",
-    "updated_at": "2026-10-05T22:42:41.687764Z"
+    "updated_at": "2026-10-08T16:00:00Z"
   },
   {
     "id": "USR-148",
@@ -4360,6 +4361,276 @@
     "dependencies": [],
     "created_at": "2026-10-07T20:06:28.291051Z",
     "updated_at": "2026-10-08T09:40:00Z"
+  },
+  {
+    "id": "USR-152",
+    "project_id": "darkfac",
+    "title": "Cancelar run da linha deve interromper o agente de desenvolvimento em andamento",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "Evidencia 07/10/2026: o run run-6594bec531c2 (menu vertical, piloto USR-62) foi cancelado pelo owner as 10:27Z (cause owner_cancelled), mas o agente de desenvolvimento continuou e fez o commit cf141ab as 10:45Z, 18 min depois. Cancelar o job nao interrompe o processo do agente nem impede o push da branch df/run-*, gastando cota e produzindo commits de um run cancelado.",
+    "core_journey": [
+      "Evidencia 07/10/2026: o run run-6594bec531c2 (menu vertical, piloto USR-62) foi cancelado pelo owner as 10:27Z (cause owner_cancelled), mas o agente de desenvolvimento continuou e fez o commit cf141ab as 10:45Z, 18 min depois. Cancelar o job nao interrompe o processo do agente nem impede o push da branch df/run-*, gastando cota e produzindo commits de um run cancelado."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Ao cancelar um run (/cancelar ou owner_cancelled), o processo do agente em andamento e encerrado em ate 60 s e nenhum commit novo do run e empurrado depois do cancelamento",
+      "O job fica com causa owner_cancelled e o workspace do run e marcado como cancelado, sem commits posteriores",
+      "Teste focal com agente falso de longa duracao: cancelar interrompe o processo e impede o commit"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-08T13:38:37.178111Z",
+    "updated_at": "2026-10-08T13:38:37.178111Z"
+  },
+  {
+    "id": "USR-153",
+    "project_id": "darkfac",
+    "title": "Etapa development deve tratar base vermelha (teste que falha igual no origin/main) sem queimar as 3 iteracoes",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "Evidencia: o run run-46efca7e11d5 (07/10/2026) rodou 3 iteracoes de ~450 s de validacao e terminou validate_exhausted porque o mesmo teste falhava no origin/main (base vermelha), nao por causa do codigo do ticket. A etapa integration ja trata base_red (USR-86); a etapa development nao, entao o desenvolvedor gasta toda a cota de iteracoes tentando consertar um teste que nao e dele.",
+    "core_journey": [
+      "Evidencia: o run run-46efca7e11d5 (07/10/2026) rodou 3 iteracoes de ~450 s de validacao e terminou validate_exhausted porque o mesmo teste falhava no origin/main (base vermelha), nao por causa do codigo do ticket. A etapa integration ja trata base_red (USR-86); a etapa development nao, entao o desenvolvedor gasta toda a cota de iteracoes tentando consertar um teste que nao e dele."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Quando a validacao do development falha apenas em testes que tambem falham no origin/main, a etapa classifica a falha como base_red com a lista dos testes, sem consumir iteracoes do desenvolvedor",
+      "O run segue para a etapa seguinte (ou aguarda a correcao da base) com causa estruturada, sem validate_exhausted",
+      "Teste focal cobrindo falha so na base, falha so no codigo do ticket e falha mista"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-08T13:38:38.505002Z",
+    "updated_at": "2026-10-08T13:38:38.505002Z"
+  },
+  {
+    "id": "USR-154",
+    "project_id": "darkfac",
+    "title": "run_ticket deve avisar quando nao consegue publicar progresso na Esteira ao vivo",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "O USR-140 (PR #187) publica as fases do run_ticket na tabela local_run_events do control store, mas de forma best-effort e silenciosa: sem DARKFAC_HF02_DATABASE_URL (ou DARKHUB_LINE_DATABASE_URL) com permissao de CREATE TABLE/INSERT, nada e publicado e nao ha aviso. O owner continua vendo 'Fora da esteira' sem saber por que.",
+    "core_journey": [
+      "O USR-140 (PR #187) publica as fases do run_ticket na tabela local_run_events do control store, mas de forma best-effort e silenciosa: sem DARKFAC_HF02_DATABASE_URL (ou DARKHUB_LINE_DATABASE_URL) com permissao de CREATE TABLE/INSERT, nada e publicado e nao ha aviso. O owner continua vendo 'Fora da esteira' sem saber por que."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Na primeira falha ou ausencia de configuracao, o run_ticket imprime um unico aviso claro (variavel ausente, sem permissao de escrita ou banco inalcancavel) e continua normalmente",
+      "O aviso nunca bloqueia nem altera o resultado do run; fica no maximo uma vez por run",
+      "Documentar no runbook a variavel necessaria e a permissao do usuario do Postgres; teste focal com store falho"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-08T13:38:39.452144Z",
+    "updated_at": "2026-10-08T13:38:39.452144Z"
+  },
+  {
+    "id": "USR-155",
+    "project_id": "darkfac",
+    "title": "Notificar o owner quando o varredor parqueia um run orfao em waiting_human",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "O varredor de runs orfaos (USR-142, PR #185) move para waiting_human com cause_code orphan_run_no_successor quando nao ha sucessor possivel, mas so registra log WARNING e aparece no painel. Sem notificacao, o run parqueado pode ficar esquecido.",
+    "core_journey": [
+      "O varredor de runs orfaos (USR-142, PR #185) move para waiting_human com cause_code orphan_run_no_successor quando nao ha sucessor possivel, mas so registra log WARNING e aparece no painel. Sem notificacao, o run parqueado pode ficar esquecido."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Quando um run e parqueado por orphan_run_no_successor, o owner recebe uma notificacao (Telegram/hub) com run_id, etapa e a acao sugerida",
+      "A notificacao e enviada uma unica vez por run e uma falha de envio nao desfaz o parqueamento",
+      "Teste focal com notificador falso cobrindo envio unico e falha de envio"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-08T13:38:40.376953Z",
+    "updated_at": "2026-10-08T13:38:40.376953Z"
+  },
+  {
+    "id": "USR-156",
+    "project_id": "darkfac",
+    "title": "Atualizar o roadmap do DarkHub e o cache de scripts apos o reconhecimento de alertas sem confirmacao",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "O USR-61 (PR #189) removeu a caixa de confirmacao ao reconhecer um alerta e adicionou reconhecimento em lote, mas docs/DARKHUB_ROADMAP.md (DH-17) ainda diz que o reconhecimento e 'com confirmacao', e o parametro ?v= dos scripts em hub/frontend/index.html nao foi alterado (varios testes o fixam), entao navegadores com cache podem precisar de hard refresh.",
+    "core_journey": [
+      "O USR-61 (PR #189) removeu a caixa de confirmacao ao reconhecer um alerta e adicionou reconhecimento em lote, mas docs/DARKHUB_ROADMAP.md (DH-17) ainda diz que o reconhecimento e 'com confirmacao', e o parametro ?v= dos scripts em hub/frontend/index.html nao foi alterado (varios testes o fixam), entao navegadores com cache podem precisar de hard refresh."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "docs/DARKHUB_ROADMAP.md (DH-17) descreve o reconhecimento em um clique e em lote, com o hash do roadmap atualizado sem quebrar o teste de hash",
+      "O parametro ?v= dos scripts do hub e atualizado de forma unica e os testes que o fixam acompanham a mudanca",
+      "Testes de hub e do hash do roadmap passam"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-08T13:38:41.311802Z",
+    "updated_at": "2026-10-08T13:38:41.311802Z"
+  },
+  {
+    "id": "USR-157",
+    "project_id": "darkfac",
+    "title": "Esclarecer a causa raiz do R02 EFFECT_SERVICE_UNAVAILABLE (WinError 10053) no spike de runtime",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "O USR-111 fechou o PermissionError do ledger de uso (core/usage/store.py) com causa raiz, mas o R02 EFFECT_SERVICE_UNAVAILABLE (ConnectionAbortedError WinError 10053 no effect_server, run 37596976676) recebeu apenas mitigacao (backlog 128 e handle_error silencioso); a causa raiz nao foi provada.",
+    "core_journey": [
+      "O USR-111 fechou o PermissionError do ledger de uso (core/usage/store.py) com causa raiz, mas o R02 EFFECT_SERVICE_UNAVAILABLE (ConnectionAbortedError WinError 10053 no effect_server, run 37596976676) recebeu apenas mitigacao (backlog 128 e handle_error silencioso); a causa raiz nao foi provada."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Reproduzir ou instrumentar o R02 no Windows com evidencia (tempo, ordem dos eventos e stderr) e documentar a causa raiz",
+      "30 execucoes consecutivas do spike no job windows do CI sem falha de R02",
+      "Se a causa for o controller matando o driver, tornar o encerramento ordenado e cobrir com teste"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-08T13:38:42.299317Z",
+    "updated_at": "2026-10-08T13:38:42.299317Z"
+  },
+  {
+    "id": "USR-158",
+    "project_id": "darkfac",
+    "title": "Retirar o patch obsoleto usr-143-harness-core.patch apos a resiliencia do portao entrar no main",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "O patch docs/proposals/USR-141-147-harness-resilience.patch foi aplicado no main (commit afac42b) e sobrepoe os mesmos trechos de .factory/patches/usr-143-harness-core.patch, que encerra o dono parado por padrao e olha so o CPU do processo raiz, podendo matar uma suite saudavel. Os dois nao devem ser aplicados juntos e o antigo ficou como armadilha.",
+    "core_journey": [
+      "O patch docs/proposals/USR-141-147-harness-resilience.patch foi aplicado no main (commit afac42b) e sobrepoe os mesmos trechos de .factory/patches/usr-143-harness-core.patch, que encerra o dono parado por padrao e olha so o CPU do processo raiz, podendo matar uma suite saudavel. Os dois nao devem ser aplicados juntos e o antigo ficou como armadilha."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Verificar o que do patch usr-143 ainda nao esta no main (last_probe_failure_reason e limpeza de sidecar de pid morto) e portar apenas o que for seguro",
+      "Remover .factory/patches/usr-143-harness-core.patch ou marca-lo como substituido com referencia ao commit afac42b",
+      "Registrar a decisao do que foi portado e do que foi descartado"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-08T13:38:43.291078Z",
+    "updated_at": "2026-10-08T13:38:43.291078Z"
+  },
+  {
+    "id": "USR-159",
+    "project_id": "darkfac",
+    "title": "Higiene de worktrees: limpar worktrees de agentes e branches mergeadas sem falhar",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "Evidencia 07-08/10/2026: ao mergear, 'gh pr merge --delete-branch' falhou ao remover worktrees ('Directory not empty') e ficaram worktrees de subagentes travadas (locked) em .claude/worktrees e .worktrees, alem de dezenas de worktrees antigas de sessoes encerradas. Isso polui o git worktree list e o disco.",
+    "core_journey": [
+      "Evidencia 07-08/10/2026: ao mergear, 'gh pr merge --delete-branch' falhou ao remover worktrees ('Directory not empty') e ficaram worktrees de subagentes travadas (locked) em .claude/worktrees e .worktrees, alem de dezenas de worktrees antigas de sessoes encerradas. Isso polui o git worktree list e o disco."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Rotina segura que remove worktrees e branches locais cujo PR ja foi mergeado ou cujo run terminou, preservando as ativas, travadas por outra sessao ou com alteracoes nao commitadas",
+      "Falha ao remover um diretorio ('Directory not empty') e tentada de novo e registrada, sem interromper o merge",
+      "Teste focal com repositorio temporario cobrindo worktree ativa, mergeada, travada e com alteracoes locais"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-08T13:38:44.247047Z",
+    "updated_at": "2026-10-08T13:38:44.247047Z"
+  },
+  {
+    "id": "USR-160",
+    "project_id": "darkfac",
+    "title": "Corpus E2E da fabrica: plugar driver real e injecao de falhas de recuperacao",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "O USR-133 (PR #190) entregou o framework, o validador, o replay deterministico, os recibos e o corpus semente de 6 casos, mas sem execucao real contra a linha: falta um driver real que rode os casos e um orquestrador que injete as falhas de recovery.fault e grave os eventos fault_injected.",
+    "core_journey": [
+      "O USR-133 (PR #190) entregou o framework, o validador, o replay deterministico, os recibos e o corpus semente de 6 casos, mas sem execucao real contra a linha: falta um driver real que rode os casos e um orquestrador que injete as falhas de recovery.fault e grave os eventos fault_injected."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Driver que executa um caso do corpus contra a linha autonoma e grava a trajetoria no formato do replay, respeitando o anti-vazamento (o agente so ve id e brief)",
+      "Orquestrador que injeta as falhas do cenario de recuperacao e grava fault_injected e eventos correlatos",
+      "Relatorio comparavel entre duas execucoes reais e teste de integracao com driver falso"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-08T13:38:45.039386Z",
+    "updated_at": "2026-10-08T13:38:45.039386Z"
   },
   {
     "id": "USR-162",
