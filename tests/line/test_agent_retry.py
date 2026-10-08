@@ -7,8 +7,10 @@ nothing waits and nothing touches the network or a real CLI.
 
 from __future__ import annotations
 
+import itertools
 import json
 import subprocess
+import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Callable, Optional
@@ -18,7 +20,7 @@ import pytest
 import run_ticket
 from core.line import agent_cli, agent_retry, stage_build
 from core.line.agent_cli import STDERR_TAIL_CHARS, AgentRequest, AgentResult, run_agent
-from core.line.agent_retry import RetryReport, classify_failure, run_with_retry
+from core.line.agent_retry import RetryReport, backoff_delay, classify_failure, run_with_retry
 from core.line.routing import RoutingConfig, record_result
 from tests.line.conftest import set_fake_response
 
@@ -182,6 +184,58 @@ def test_capability_binary_and_login_failures_exclude_the_harness_without_waitin
     assert sleeps == []  # retrying a harness that cannot work is pointless
     assert picker.calls[-1]["exclude"] == {("grok", None)}
     assert classify_failure(_fail(kind, "grok")) == "exclude"
+
+
+@pytest.mark.parametrize(
+    "kind", ["not_installed", "unsupported_mode", "auth_expired", "no_authenticated_harness", "rate_limited"]
+)
+@pytest.mark.parametrize("retry_no", [0, 1, 2, 7])
+def test_backoff_delay_is_none_for_every_failure_that_must_not_be_repeated(kind: str, retry_no: int) -> None:
+    """USR-151: the single decision point for sleeping never grants a delay to a non-transient failure."""
+    assert backoff_delay(_fail(kind, "claude"), retry_no) is None
+
+
+def test_backoff_delay_follows_the_documented_schedule_for_transient_failures() -> None:
+    crash = _fail("crash", "codex")
+    assert [backoff_delay(crash, n) for n in range(4)] == [30.0, 120.0, None, None]
+    timeout = _fail("timeout", "codex", exit_code=None)
+    assert [backoff_delay(timeout, n) for n in range(3)] == [30.0, None, None]  # USR-114: one repeat only
+    unknown = AgentResult(ok=False, text="", harness="codex", duration_s=0.1)
+    assert backoff_delay(unknown, 0) == 30.0 and backoff_delay(unknown, 2) is None
+
+
+def test_a_not_installed_harness_never_sleeps_over_fifty_runs_in_any_order_with_late_results() -> None:
+    """USR-151 regression: classification arriving late or in an adversarial order never produces a backoff.
+
+    Every run uses a fresh sleep recorder; the dead harnesses answer `not_installed` after a small real
+    delay (so their results are interleaved with the clock), in every permutation, and the healthy one
+    comes last. The same process repeats the scenario 50 times to prove there is no state carried over.
+    """
+    dead = [("claude", "sonnet"), ("grok", None)]
+    healthy = ("codex", None)
+    orders = list(itertools.permutations(dead))
+    for run_no in range(50):
+        order = orders[run_no % len(orders)]
+        routes = [*order, healthy]
+        delays = {order[0][0]: 0.0, order[1][0]: 0.002 if run_no % 3 == 0 else 0.0005}
+        sleeps: list[float] = []
+
+        def late_agent(req: AgentRequest) -> AgentResult:
+            if req.harness == healthy[0]:
+                return _ok(req.harness)
+            time.sleep(delays[req.harness])  # the REAL clock: the injected recorder must stay untouched
+            return _fail("not_installed", req.harness, exit_code=None)
+
+        picker = _Picker(routes)
+        report = run_with_retry(
+            _request, routes[0], host_caps=_CAPS, run_func=late_agent, pick_func=picker,
+            sleep_fn=sleeps.append, record_func=lambda *a, **k: None,
+        )
+
+        assert report.ok and report.route == healthy, run_no
+        assert sleeps == [], f"run {run_no}: unexpected backoff {sleeps}"
+        assert [a.harness for a in report.attempts] == [r[0] for r in routes], run_no
+        assert picker.calls[-1]["exclude"] == set(order), run_no
 
 
 def test_the_real_antigravity_write_refusal_is_skipped_immediately_in_favour_of_the_next_harness(
