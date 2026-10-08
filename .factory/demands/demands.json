@@ -4911,5 +4911,35 @@
     "dependencies": [],
     "created_at": "2026-10-08T22:27:27.403290Z",
     "updated_at": "2026-10-08T22:27:27.403290Z"
+  },
+  {
+    "id": "USR-179",
+    "project_id": "darkfac",
+    "title": "Pytest focal nao deve esperar o SUITE_LOCK de outra execucao do portao",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "Subagente do USR-164 (08/10/2026): execucoes de pytest com 100 ou mais itens esperam o SUITE_LOCK (core/harness/suite_lock.py) enquanto outro agente roda o harness; um pytest focal ficou mais de 15 min preso. O lock e intencional para a suite completa, mas atrasa sessoes paralelas que so querem validar poucos testes.",
+    "core_journey": [
+      "Subagente do USR-164 (08/10/2026): execucoes de pytest com 100 ou mais itens esperam o SUITE_LOCK (core/harness/suite_lock.py) enquanto outro agente roda o harness; um pytest focal ficou mais de 15 min preso. O lock e intencional para a suite completa, mas atrasa sessoes paralelas que so querem validar poucos testes."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Definir o criterio do lock (suite completa vs selecao focal) e documentar",
+      "Execucao focal explicita (ex.: variavel ou flag) nao espera o lock e nao o toma, sem permitir duas suites completas simultaneas",
+      "Teste cobrindo os dois caminhos"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-08T22:35:17.003386Z",
+    "updated_at": "2026-10-08T22:35:17.003386Z"
   }
 ]
