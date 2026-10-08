@@ -65,6 +65,21 @@ A fonte única e canônica de modelos, provedores, timeouts e cascatas para a es
 
 ---
 
+## 2b. Subagentes de desenvolvimento: elegibilidade do Haiku 5.5
+
+Esta regra vale para SUBAGENTES do harness (Agent tool com `model` haiku, sonnet ou opus). Ela não altera o cascade da esteira (`.factory/config/line_routing.json`) nem `core.line.routing.pick`. Implementação pura em `core/line/subagent_routing.py` (`pick_subagent_model`), parâmetros em `.factory/config/subagent_model_routing.json` (modelos: Haiku `claude-haiku-5-5`, Sonnet `claude-sonnet-5-5`, Opus `claude-opus-5-5`).
+
+| Situação | Modelo | Condições |
+| :--- | :--- | :--- |
+| **Elegível ao Haiku** | `claude-haiku-5-5` | TODAS: (1) `task_type` em mechanical_edit (rename, format, lint, typing), docs_sync, test_from_spec, config_data, boilerplate_from_template, test_run_distill, ledger_update; (2) complexidade `low` (docs_sync e test_run_distill também `medium`); (3) no máximo 3 arquivos e 150 linhas alteradas; (4) critério de aceite executável e rápido pré-definido pelo planejador; (5) ambiguidade resolvida (Gate G1 decidido, handoff aprovado); (6) zero falhas anteriores do Haiku na tarefa |
+| **Proibido ao Haiku (vai ao Sonnet)** | `claude-sonnet-5-5` | QUALQUER: caminho protegido por governança (`core.orchestrator.guard.audit_paths`); tag de risco (security, credentials, auth, payments, concurrency, locking, transactions, migration, data_deletion, public_contract, routing, quota, flaky_test, root_cause_debug, architecture); estágio grill, review ou integration; sem aceite executável; ambiguidade pendente; arquivos ou linhas acima do limite; tipo ou complexidade fora da lista |
+| **Planejamento** | `claude-opus-5-5` | Estágio planning segue a regra existente (Opus); Haiku nunca planeja, revisa nem resolve conflito de integração |
+| **Escalonamento** | Haiku, depois Sonnet | UMA tentativa Haiku. Se o portão focado falhar ou a revisão apontar defeito de correção, nova tentativa com Sonnet (nunca 3 iterações com Haiku). Haiku nunca escala sozinho para Opus nem Fable |
+
+Invariantes inalteradas: piso de cota de $15\%$ (o Haiku consome a mesma conta Anthropic), revisão sempre em família diferente do implementador (o revisor nunca é Haiku), portão único `python core/harness/runner.py --quick` e `forbidden_autonomous_models` (fable, claude-fable, astra, gpt-6-astra) continuam proibidos. Qualquer entrada inválida resolve para Sonnet (fail-closed).
+
+---
+
 ## 3. Continuous Self-Improvement & RCA de Roteamento
 
 - **RCA em Falhas de Inferência**: Se um modelo produzir falhas de sintaxe repetidas ou alucinações, registre o RCA via `python -m core.learning.cli rca` e recalibre a classe de complexidade ou ordem de fallback na configuração.
