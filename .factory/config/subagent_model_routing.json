@@ -1,0 +1,42 @@
+{
+  "_comment": "Politica de modelo para SUBAGENTES de desenvolvimento do harness (USR-168). Nao altera o cascade da esteira (line_routing.json). Consumido por core/line/subagent_routing.py.",
+  "models": {
+    "haiku": "claude-haiku-5-5",
+    "sonnet": "claude-sonnet-5-5",
+    "opus": "claude-opus-5-5"
+  },
+  "limits": {
+    "max_files": 3,
+    "max_changed_lines": 150,
+    "max_haiku_attempts": 1
+  },
+  "eligible_task_types": {
+    "mechanical_edit": ["low"],
+    "docs_sync": ["low", "medium"],
+    "test_from_spec": ["low"],
+    "config_data": ["low"],
+    "boilerplate_from_template": ["low"],
+    "test_run_distill": ["low", "medium"],
+    "ledger_update": ["low"]
+  },
+  "forbidden_tags": [
+    "security",
+    "credentials",
+    "auth",
+    "payments",
+    "concurrency",
+    "locking",
+    "transactions",
+    "migration",
+    "data_deletion",
+    "public_contract",
+    "routing",
+    "quota",
+    "flaky_test",
+    "root_cause_debug",
+    "architecture"
+  ],
+  "forbidden_stages": ["planning", "grill", "review", "integration"],
+  "opus_stages": ["planning"],
+  "forbidden_autonomous_models": ["fable", "claude-fable", "astra", "gpt-6-astra"]
+}

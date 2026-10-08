@@ -37,7 +37,13 @@ Detectamos e configuramos nativamente o cluster local em `http://localhost:11434
 - **Papel**: Arquiteto Chefe e Refatorador Cirúrgico.
 - **Destaque**: Liderança comprovada em SWE-bench e raciocínio causal estrito. Ideal para fatiamento de épicos, definição de interfaces rígidas e PRDs onde ambiguidades custam caro.
 
-### 4. Modelos Chineses de Alto Rendimento (DeepSeek & Qwen)
+### 4. Claude Haiku 5.5 (`claude-haiku-5-5`)
+- **Papel**: executor econômico de fatias mecânicas e bem especificadas, como subagente de desenvolvimento do harness (e destilador de testes em `.claude/agents/test-runner.md`). Política implementada em `core/line/subagent_routing.py` com parâmetros em `.factory/config/subagent_model_routing.json`; não altera o cascade da esteira (`line_routing.json`).
+- **Quando usar** (TODAS as condições): tipo mechanical_edit (rename, format, lint, typing), docs_sync, test_from_spec, config_data, boilerplate_from_template, test_run_distill ou ledger_update; complexidade `low` (`medium` só em docs_sync e test_run_distill); no máximo 3 arquivos e 150 linhas alteradas; critério de aceite executável e rápido já definido pelo planejador; ambiguidade resolvida (Gate G1); nenhuma falha anterior do Haiku na tarefa.
+- **Quando NÃO usar**: caminhos protegidos por governança; tags de risco (security, credentials, auth, payments, concurrency, locking, transactions, migration, data_deletion, public_contract, routing, quota, flaky_test, root_cause_debug, architecture); estágios planning, grill, review e integration (Haiku nunca planeja, revisa nem resolve conflito de integração); tarefas sem aceite executável, com ambiguidade pendente ou acima dos limites. Nesses casos vale o Sonnet (`claude-sonnet-5-5`) e, em planning, o Opus (`claude-opus-5-5`).
+- **Escalonamento**: uma única tentativa com Haiku. Se o portão focado falhar ou a revisão apontar defeito de correção, nova tentativa com Sonnet (sem iterar 3 vezes com Haiku). Haiku nunca escala sozinho para Opus nem Fable. Piso de cota de 15% (mesma conta Anthropic), revisão em família diferente do implementador e portão único `runner.py --quick` permanecem.
+
+### 5. Modelos Chineses de Alto Rendimento (DeepSeek & Qwen)
 - **DeepSeek-R1**: O modelo de raciocínio lógico/matemático com o melhor custo-benefício do planeta. Ideal para validação de algoritmos, geração de testes de mutação e auditoria adversarial profunda.
 - **DeepSeek-V4 Pro**: Especialista em código com precificação de frações de centavo por milhão de tokens.
 - **Qwen3-Max / Qwen3-Coder**: O ápice da engenharia aberta chinesa para refatoração e transformações de código em lote.
