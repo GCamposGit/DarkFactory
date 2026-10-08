@@ -391,7 +391,7 @@
     "project_id": "jarvis",
     "title": "Configurar e Homologar Fallback do Groq Cloud Whisper",
     "origin": "user",
-    "status": "planned",
+    "status": "completed",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "later",
@@ -419,7 +419,8 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-09-15T16:25:13.208701Z",
-    "updated_at": "2026-09-30T22:00:00Z"
+    "updated_at": "2026-10-08T16:00:00Z",
+    "delivery_evidence": "Homologado em 08/10/2026 com a GROQ_API_KEY do .env do Jarvis: scripts/homologate_groq_whisper.py retornou engine_used=cloud_groq_whisper (whisper-large-v3-turbo), latency_ms=312.5, [SUCESSO] e exit 0."
   },
   {
     "id": "USR-42",
@@ -4039,8 +4040,8 @@
     "project_id": "darkfac",
     "title": "Worker de testes do Desktop para de responder ao iniciar o passo paralelo do portao",
     "origin": "user",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "Patch aplicado pelo owner no main (commit afac42b, a partir de docs/proposals/USR-141-147-harness-resilience.patch): remote_worker inicia o filho do pytest com prioridade reduzida (verificado no Desktop em 08/10/2026: processos python em BelowNormal, /health com git_sha=afac42b, busy=false); remote_dispatch sonda /health antes de abandonar um worker silencioso (teto 180 s); 29 testes novos em tests/test_remote_dispatch_resilience.py. CI do afac42b verde (ubuntu, windows e Continuous Deployment). Nota: lock de arquivo com pid morto e liberado pelo SO ao encerrar o processo; a linha de log desse evento nao foi implementada.",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -4062,7 +4063,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-04T17:06:34.784102Z",
-    "updated_at": "2026-10-04T17:06:34.784102Z"
+    "updated_at": "2026-10-08T16:00:00Z"
   },
   {
     "id": "USR-142",
@@ -4216,8 +4217,8 @@
     "project_id": "darkfac",
     "title": "Governança: Aplicar patch de proteção de suite lock e remote probe no core/harness (caminho protegido)",
     "origin": "user",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "Patch aplicado pelo owner no main (commit afac42b): suite_lock detecta dono vivo e travado (CPU quase nulo na arvore do dono apos DARKFAC_SUITE_LOCK_STALL_AFTER_SEC, aviso '[SUITE_LOCK] holder appears stalled', encerramento so com DARKFAC_SUITE_LOCK_REAP_STALLED=1); probe de saude do Desktop com timeout configuravel (DARKFAC_WORKER_HEALTH_TIMEOUT_SEC); runner toma o lock antes do execute() no caminho --no-cache. 18 testes novos em tests/test_suite_lock_stalled.py. Medicao no Notebook com o patch: 3452 testes, HARNESS_PASS, passo paralelo 886,3 s e serial 192,5 s.",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -4239,7 +4240,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-05T22:42:41.687764Z",
-    "updated_at": "2026-10-05T22:42:41.687764Z"
+    "updated_at": "2026-10-08T16:00:00Z"
   },
   {
     "id": "USR-148",
