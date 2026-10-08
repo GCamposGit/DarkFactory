@@ -4730,8 +4730,8 @@
     "project_id": "darkfac",
     "title": "Espera por base vermelha no development nao atualiza a branch do run quando a base fica verde",
     "origin": "user",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "PR #217 (542103c): core/line/base_sync.py novo; ao sair da espera base_red o DevelopmentStage faz fetch e merge de origin/<default> na branch do run, preservando as edicoes nao commitadas (WIP commit descartavel + cherry-pick --no-commit). Conflito de edicao volta ao desenvolvedor com prompt base_sync_conflict; conflito de branch falha com cause base_sync_conflict e refs estruturadas; o sync nao consome iteracao. 9 testes novos com repositorio git temporario (base vermelha, corrigida na base, retomada valida contra a base nova). CI ubuntu e windows verdes. Lacuna conhecida: espera sem marcador base_red (retry por rota) nao sincroniza a branch.",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -4753,15 +4753,15 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-08T19:30:14.568988Z",
-    "updated_at": "2026-10-08T19:30:14.568988Z"
+    "updated_at": "2026-10-08T23:30:00Z"
   },
   {
     "id": "USR-166",
     "project_id": "darkfac",
     "title": "Cancelamento por run no launcher headless run_ticket.py",
     "origin": "user",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "PR #218 (eba9802): core/line/local_cancel.py novo; run_ticket.py cancela por arquivo de controle por ticket (python run_ticket.py --cancel USR-XX) ou por sinal (SIGINT/SIGTERM/SIGBREAK), reutilizando o mecanismo do USR-152 (CancelToken/_run_bounded) para matar a arvore do agente, do portao e da entrega; autonomy._run_git/_run_gh recusam commit/push/pr create/pr merge apos o cancelamento; sai com codigo 130 e a Esteira ao vivo mostra a fase ativa como cancelada (causa owner_cancelled). 13 testes novos, incluindo agente falso de longa duracao. CI ubuntu e windows verdes. Mudanca de comportamento: portao com limite de 2 h e subprocesso de entrega com limite de 6 h. Limitacao: o sleep de backoff de retry do agente nao e interrompido pelo arquivo (o proximo run_agent devolve cancelled).",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -4783,15 +4783,15 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-08T19:30:15.159255Z",
-    "updated_at": "2026-10-08T19:30:15.159255Z"
+    "updated_at": "2026-10-08T23:30:00Z"
   },
   {
     "id": "USR-167",
     "project_id": "darkfac",
     "title": "Testar contra Postgres real o add_job_evidence e a tabela local_run_events",
     "origin": "user",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "PR #216 (3d54e2c): tests/test_postgres_real_integration.py com 11 testes marcados postgres_integration (desligados sem DARKFAC_TEST_POSTGRES_DSN; pytest.ini registra o marker). Executado em 08/10/2026 contra PostgreSQL 16.15 real (binarios portateis, sem Docker na maquina): 11 passed em 31,77 s, sem defeito no SQL de add_job_evidence nem no DDL/INSERT de local_run_events. GRANT minimo verificado documentado em docs/runbooks/live_progress.md (CREATE no schema e obrigatorio mesmo com a tabela existente; add_job_evidence precisa de SELECT, UPDATE em jobs). Job de CI com service container nao incluido porque ci.yml e arquivo de governanca protegido.",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -4813,7 +4813,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-08T19:30:15.889542Z",
-    "updated_at": "2026-10-08T19:30:15.889542Z"
+    "updated_at": "2026-10-08T23:30:00Z"
   },
   {
     "id": "USR-168",
@@ -4846,6 +4846,40 @@
     "dependencies": [],
     "created_at": "2026-10-08T20:36:51.432814Z",
     "updated_at": "2026-10-08T20:36:51.432814Z"
+  },
+  {
+    "id": "USR-177",
+    "project_id": "darkfac",
+    "title": "Refinar a politica de subagentes Haiku 5.5: tipos somente leitura, recusa como gatilho, aceite verificado e telemetria",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "Seguimento do USR-168. A documentacao oficial do Haiku 5.5 (posicionamento: classificacao, roteamento, extracao e subagentes; Sonnet 5.5 e Opus 5.5 seguem melhores em codificacao agentica complexa) mostra lacunas na politica v1: (1) nao ha tipos elegiveis somente leitura (busca de codigo, destilar logs, triagem), onde o Haiku traz a maior economia com menor risco; (2) stop_reason refusal do Haiku (sem fallback no servidor) nao e gatilho explicito de escalonamento; (3) o Haiku as vezes relata a mudanca como pronta sem verificar, e a politica nao exige que o orquestrador rode o aceite; (4) falta prompt-padrao do Haiku (esforco medium, max_tokens com folga para thinking, trechos de verificar antes de concluir e continuar ate terminar); (5) os limites de 3 arquivos e 150 linhas sao hipoteses sem medicao e nao ha telemetria por modelo (sucesso na primeira tentativa, tokens, escalacoes).",
+    "core_journey": [
+      "Seguimento do USR-168. A documentacao oficial do Haiku 5.5 (posicionamento: classificacao, roteamento, extracao e subagentes; Sonnet 5.5 e Opus 5.5 seguem melhores em codificacao agentica complexa) mostra lacunas na politica v1: (1) nao ha tipos elegiveis somente leitura (busca de codigo, destilar logs, triagem), onde o Haiku traz a maior economia com menor risco; (2) stop_reason refusal do Haiku (sem fallback no servidor) nao e gatilho explicito de escalonamento; (3) o Haiku as vezes relata a mudanca como pronta sem verificar, e a politica nao exige que o orquestrador rode o aceite; (4) falta prompt-padrao do Haiku (esforco medium, max_tokens com folga para thinking, trechos de verificar antes de concluir e continuar ate terminar); (5) os limites de 3 arquivos e 150 linhas sao hipoteses sem medicao e nao ha telemetria por modelo (sucesso na primeira tentativa, tokens, escalacoes)."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Tipos somente leitura repo_lookup, log_distill e triage_classify elegiveis ao Haiku em subagent_model_routing.json e core/line/subagent_routing.py, sem permitir escrita nem arquivos protegidos",
+      "stop_reason refusal do Haiku e falha de portao focado escalam para Sonnet (reason code REFUSAL_ESCALATION), com testes",
+      "Regra e codigo: o aceite do Haiku so vale quando o orquestrador roda o comando de aceite; auto-relato nunca e prova",
+      "Prompt-padrao para subagentes Haiku (esforco medium, folga de max_tokens, trechos de verificacao e persistencia) documentado em skill 03, CLAUDE.md e MODEL_SELECTION_GUIDE",
+      "Telemetria por ticket (modelo, sucesso na primeira tentativa, tokens, escalacoes) e procedimento de calibracao dos limites via skill 14 antes de ampliar os limites",
+      "Texto das mudancas em AGENTS.md e FACTORY_RULES.md entregue como proposta em docs/proposals, sem editar protegidos",
+      "Portao runner.py --quick com HARNESS_PASS, PR mergeado e deploy pos-merge"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-08T21:57:36.426364Z",
+    "updated_at": "2026-10-08T21:57:36.426364Z"
   },
   {
     "id": "USR-169",

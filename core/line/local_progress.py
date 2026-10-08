@@ -80,7 +80,11 @@ ABANDON_AFTER_SECONDS = 6 * 3600
 
 TABLE = "local_run_events"
 ENV_RUN_ID = "DARKFAC_LOCAL_RUN_ID"
+# "off" disables publishing; "local" keeps the machine's own control.db on purpose (a local Hub reads it).
 ENV_SWITCH = "DARKFAC_LOCAL_PROGRESS"
+SWITCH_OFF = frozenset({"0", "off", "false", "no"})
+SWITCH_LOCAL = "local"
+PROVISION_SCRIPT = r"C:\dev\DarkFac\scripts\provision_live_writer.py"
 # Set for a delivery subprocess once the parent already warned: one warning per run, not per process.
 ENV_WARNED = "DARKFAC_LOCAL_PROGRESS_WARNED"
 RUNBOOK = "docs/runbooks/live_progress.md"
@@ -126,7 +130,7 @@ CREATE TABLE IF NOT EXISTS {TABLE} (
 CREATE INDEX IF NOT EXISTS idx_local_run_events_run ON {TABLE} (run_id, event_id)
 """
 
-PhaseStatus = Literal["running", "succeeded", "failed", "skipped"]
+PhaseStatus = Literal["running", "succeeded", "failed", "skipped", "cancelled"]
 _COLUMNS = ("run_id", "ticket_id", "project_id", "title", "phase", "status", "harness", "worker", "cause_code", "message", "at")
 _MAX_MESSAGE = 400
 _MAX_LOCAL_EVENTS = 200
@@ -201,31 +205,36 @@ class SqliteSink:
 
 
 class PostgresSink:
-    """Appends to the cloud control database with short connect/statement timeouts."""
+    """Appends to the cloud control database with short connect/statement timeouts.
+
+    It inserts first and only runs the DDL when the table is missing (USR-164): the restricted writer
+    role (``INSERT`` on ``local_run_events`` only, no ``CREATE`` on the schema) therefore never runs DDL,
+    while a privileged role still bootstraps the table on its first write.
+    """
 
     def __init__(self, url: str, *, connect_timeout_s: int = 3) -> None:
         self._url = url
         self.connect_timeout_s = connect_timeout_s
-        self._ready = False
 
     def write(self, event: LocalRunEvent) -> None:
         import psycopg  # type: ignore[import-not-found]
 
+        insert = f"INSERT INTO {TABLE} ({', '.join(_COLUMNS)}) VALUES ({', '.join('%s' for _ in _COLUMNS)})"
         with psycopg.connect(
             self._url,
             connect_timeout=self.connect_timeout_s,
             autocommit=True,
             options="-c statement_timeout=3000",
         ) as conn:
-            if not self._ready:
-                for statement in POSTGRES_DDL.split(";"):
-                    if statement.strip():
-                        conn.execute(statement)
-                self._ready = True
-            conn.execute(
-                f"INSERT INTO {TABLE} ({', '.join(_COLUMNS)}) VALUES ({', '.join('%s' for _ in _COLUMNS)})",
-                _row(event),
-            )
+            try:
+                conn.execute(insert, _row(event))
+                return
+            except psycopg.errors.UndefinedTable:
+                pass  # first write ever: create the table (autocommit: the failed INSERT left no open transaction)
+            for statement in POSTGRES_DDL.split(";"):
+                if statement.strip():
+                    conn.execute(statement)
+            conn.execute(insert, _row(event))
 
 
 def resolve_sink(environ: Mapping[str, str] | None = None) -> ProgressSink | None:
@@ -240,9 +249,10 @@ def resolve_sink(environ: Mapping[str, str] | None = None) -> ProgressSink | Non
         env: Mapping[str, str] = os.environ
     else:
         env = environ
-    if env.get(ENV_SWITCH, "").strip().lower() in {"0", "off", "false", "no"}:
+    switch = env.get(ENV_SWITCH, "").strip().lower()
+    if switch in SWITCH_OFF:
         return None
-    for name in WRITE_DATABASE_URL_ENVS:
+    for name in () if switch == SWITCH_LOCAL else WRITE_DATABASE_URL_ENVS:
         value = env.get(name, "").strip()
         if value and not value.startswith("mock"):
             return PostgresSink(value)
@@ -268,12 +278,30 @@ def missing_sink_reason(environ: Mapping[str, str] | None = None) -> str | None:
         env: Mapping[str, str] = os.environ
     else:
         env = environ
-    if env.get(ENV_SWITCH, "").strip().lower() in {"0", "off", "false", "no"}:
+    if env.get(ENV_SWITCH, "").strip().lower() in SWITCH_OFF:
         return None
     names = " ou ".join(WRITE_DATABASE_URL_ENVS[:2])
     if any(env.get(name, "").strip() for name in WRITE_DATABASE_URL_ENVS):
         return f"as variaveis de banco definidas nao apontam para um banco real (valor mock); defina {names}"
     return f"variavel de banco ausente: defina {names} com um usuario que possa gravar"
+
+
+def local_only_reason(environ: Mapping[str, str] | None = None) -> str | None:
+    """Why a resolved ``SqliteSink`` is a visibility gap (USR-164), or ``None`` when local on purpose.
+
+    The cloud DarkHub never reads a machine's own ``control.db``: a run recorded only there is invisible
+    on ``/live``. The only deliberate case is ``DARKFAC_LOCAL_PROGRESS=local`` (a Hub running on this
+    machine reads that file).
+    """
+    env: Mapping[str, str] = os.environ if environ is None else environ
+    if env.get(ENV_SWITCH, "").strip().lower() == SWITCH_LOCAL:
+        return None
+    names = " ou ".join(WRITE_DATABASE_URL_ENVS[:2])
+    return (
+        f"defina {names} com o Postgres da nuvem (usuario restrito a {TABLE}, "
+        f"provisionado por {PROVISION_SCRIPT}); se um Hub local le este control.db de proposito, "
+        f"use {ENV_SWITCH}=local"
+    )
 
 
 def describe_publish_failure(exc: BaseException) -> str:
@@ -289,7 +317,10 @@ def describe_publish_failure(exc: BaseException) -> str:
         or "read-only" in text
         or "must be owner" in text
     ):
-        return f"sem permissao de escrita: o usuario do banco precisa de CREATE e INSERT em {TABLE}"
+        return (
+            f"sem permissao de escrita em {TABLE}: use o papel restrito criado por {PROVISION_SCRIPT} "
+            f"(ou conceda INSERT e USAGE na sequence ao usuario do banco)"
+        )
     if isinstance(exc, (OSError, TimeoutError)) or name in {"OperationalError", "InterfaceError"} or "connect" in text:
         return "banco inalcancavel ou conexao recusada (host, porta, credenciais ou rede)"
     return f"falha ao gravar ({name})"
@@ -341,6 +372,8 @@ class ProgressPublisher:
         clock: Callable[[], datetime] = _utc_now,
         warn: Callable[[str], None] | None = None,
         unconfigured_reason: str | None = None,
+        local_only_reason: str | None = None,
+        active_phase: str | None = None,
     ) -> None:
         self.ticket_id = ticket_id
         self.project_id = project_id or "darkfac"
@@ -354,6 +387,7 @@ class ProgressPublisher:
         self._clock = clock
         self._warn = warn
         self._unconfigured_reason = unconfigured_reason
+        self._local_only_reason = local_only_reason
         self.warning: str | None = None  # the single warning of this run, once emitted
         self._failures = 0
         self._muted = False
@@ -363,11 +397,22 @@ class ProgressPublisher:
         self._buffer: list[LocalRunEvent] = []
         self._outcome_message = ""
         self._outcome_cause: str | None = None
+        self._active_phase: str | None = active_phase  # last phase published as running and not yet closed
         self.run_id = run_id or self._new_run_id()
         self.events: list[LocalRunEvent] = []  # what was attempted (capped), for diagnostics and tests
 
     def _new_run_id(self) -> str:
         return f"local-{self.ticket_id}-{self._clock().strftime('%Y%m%dT%H%M%S')}"[:160]
+
+    @property
+    def active_phase(self) -> str | None:
+        """The phase published as ``running`` and not yet closed (``None`` when none)."""
+        return self._active_phase
+
+    @property
+    def failures(self) -> int:
+        """Consecutive failed writes (0 after any successful one)."""
+        return self._failures
 
     @property
     def enabled(self) -> bool:
@@ -428,7 +473,29 @@ class ProgressPublisher:
                 RUN_PHASE, "failed", message or self._outcome_message, cause=cause or self._outcome_cause
             )
 
+    def cancel(self, message: str = "", *, cause: str = "owner_cancelled") -> None:
+        """Record that the run was cancelled (USR-166): the phase in progress and, if owned, the run.
+
+        The board shows the phase as ``cancelada`` and the run as cancelled. Idempotent; never raises.
+        """
+        try:
+            if self._finished:
+                return
+            text = message or "execucao cancelada pelo owner"
+            if self._active_phase is not None:
+                self.phase(self._active_phase, "cancelled", text, cause=cause)
+            if self.owns_run:
+                self._finished = True
+                self.phase(RUN_PHASE, "cancelled", text, cause=cause)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("local progress: cancel failed: %s", type(exc).__name__)
+
     def _publish(self, phase: str, status: PhaseStatus, message: str, cause: str | None) -> None:
+        if phase != RUN_PHASE:
+            if status == "running":
+                self._active_phase = phase
+            elif self._active_phase == phase:
+                self._active_phase = None
         event = LocalRunEvent(
             run_id=self.run_id,
             ticket_id=self.ticket_id,
@@ -451,15 +518,22 @@ class ProgressPublisher:
             return
         self._send(event)
 
-    def _emit_warning(self, reason: str) -> None:
+    def _emit_warning(self, reason: str, *, local_only: bool = False) -> None:
         """At most one warning per run; never raises and never touches the run result."""
         if self.warning is not None:
             return
         try:
-            text = (
-                f"[AVISO] Esteira ao vivo: progresso desta execucao nao sera publicado - {reason}. "
-                f"A execucao continua normalmente. Veja {RUNBOOK}."
-            )
+            if local_only:
+                text = (
+                    "[AVISO] Esteira ao vivo: este run so sera gravado no control.db local desta maquina e "
+                    f"NAO aparecera em darkhub.ggcampos.com/live - {reason}. "
+                    f"A execucao continua normalmente. Veja {RUNBOOK}."
+                )
+            else:
+                text = (
+                    f"[AVISO] Esteira ao vivo: progresso desta execucao nao sera publicado - {reason}. "
+                    f"A execucao continua normalmente. Veja {RUNBOOK}."
+                )
             self.warning = sanitize_database_url(text)
             if self._warn is not None:
                 self._warn(self.warning)
@@ -473,6 +547,8 @@ class ProgressPublisher:
             return
         if not self.enabled:
             return
+        if self._local_only_reason:
+            self._emit_warning(self._local_only_reason, local_only=True)
         sink = self.sink
         phase, status = event.phase, event.status
         try:
@@ -510,12 +586,18 @@ def open_progress(
     environ: Mapping[str, str] | None = None,
     harness: str | None = None,
     warn: Callable[[str], None] | None | Literal["default"] = "default",
+    run_id: str | None = None,
+    worker: str | None = None,
+    active_phase: str | None = None,
 ) -> ProgressPublisher:
     """A publisher for ``ticket_id``; joins the parent run when ``DARKFAC_LOCAL_RUN_ID`` is set.
 
     Never raises: any failure resolving the sink yields a publisher that simply does not publish.
     ``warn`` receives the single "cannot publish" warning of the run (USR-154). By default it goes to
     stderr, except under ``pytest`` or when a parent process already warned; pass ``None`` to silence it.
+    The same warning fires when the resolved sink is the machine's own ``control.db`` (USR-164): the
+    cloud Hub never reads it. ``run_id``/``worker``/``active_phase`` resume a run opened by another
+    process (the interactive-session CLI); they override the inherited parent run.
     """
     try:
         env = os.environ if environ is None else environ
@@ -526,16 +608,24 @@ def open_progress(
             under_pytest = environ is None and bool(os.environ.get("PYTEST_CURRENT_TEST"))
             warn = None if already or under_pytest else stderr_warning
         reason = missing_sink_reason(environ) if resolved is None and warn is not None else None
+        local_reason = (
+            local_only_reason(environ)
+            if sink is None and isinstance(resolved, SqliteSink) and warn is not None
+            else None
+        )
         return ProgressPublisher(
             ticket_id=ticket_id,
             project_id=project_id,
             title=title,
-            run_id=inherited or None,
+            run_id=run_id or inherited or None,
             sink=resolved,
+            worker=worker,
             harness=harness,
-            owns_run=not inherited,
+            owns_run=not (inherited and not run_id),
             warn=warn,
             unconfigured_reason=reason,
+            local_only_reason=local_reason,
+            active_phase=active_phase,
         )
     except Exception as exc:  # noqa: BLE001
         logger.warning("local progress: disabled (%s)", type(exc).__name__)

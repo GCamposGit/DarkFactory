@@ -390,6 +390,51 @@ def _isolate_ambient_worker_config_env(monkeypatch: pytest.MonkeyPatch, tmp_path
     monkeypatch.setenv("DARKFAC_ONPREM_BACKUP_DIR", str(tmp_path / "onprem_backup_mirror"))
 
 
+# Prefixes/names of external-service settings that a developer or worker machine legitimately exports
+# (Telegram bots, Cloudflare R2 backup target, backup vault key) but that no offline test may inherit.
+# With them set, `load_telegram_config` lets the environment win over the fixtures a test writes, and
+# `R2StorageClient()` leaves its built-in mock mode and tries the real network (USR-163).
+_EXTERNAL_SERVICE_ENV_PREFIXES = ("TELEGRAM_", "R2_")
+_EXTERNAL_SERVICE_ENV_NAMES = ("DARKHUB_TELEGRAM_AUTO_WEBHOOK", "DARKFAC_BACKUP_ENCRYPTION_KEY")
+
+
+@pytest.fixture(autouse=True)
+def _isolate_external_service_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Telegram and R2/backup settings of the host machine must never reach a test.
+
+    - `TELEGRAM_*` in the process environment outranks `.factory/telegram/*.json` fixtures and the
+      `TELEGRAM_ALLOWED_*` variables a test sets, so the same test passed or failed per machine.
+    - `R2_*` makes `R2StorageClient()` (and so `CloudBackupService()` / `run_autonomous_backup_cycle`)
+      go live; without them it uses its in-memory mock, which is what the offline suite needs.
+    - `Telegram`'s repo-root `.env` fallback is ignored for the real checkout; a test that targets a
+      tmp root (`root=...`/`DARKFAC_PROJECT_ROOT`) still reads that root's `.env` as before.
+
+    A test that needs a value sets it itself (monkeypatch/mock.patch.dict run after this fixture).
+    """
+
+    for name in [
+        key
+        for key in os.environ
+        if key.startswith(_EXTERNAL_SERVICE_ENV_PREFIXES) or key in _EXTERNAL_SERVICE_ENV_NAMES
+    ]:
+        monkeypatch.delenv(name, raising=False)
+
+    from core.integrations import telegram as telegram_module
+
+    real_read_env_fallback = telegram_module._read_env_fallback
+
+    def read_env_fallback_without_real_checkout(root: Path | None = None) -> dict[str, str]:
+        target = Path(root) if root is not None else telegram_module.project_root()
+        try:
+            if target.resolve() == IMPORT_ROOT.resolve():
+                return {}
+        except OSError:
+            pass
+        return real_read_env_fallback(root)
+
+    monkeypatch.setattr(telegram_module, "_read_env_fallback", read_env_fallback_without_real_checkout)
+
+
 @pytest.fixture(autouse=True)
 def _never_sweep_the_real_checkout(monkeypatch: pytest.MonkeyPatch) -> None:
     """`GitAutonomyManager.sweep_stale` must never run against the checkout that holds the tests.

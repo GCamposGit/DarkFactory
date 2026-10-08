@@ -722,6 +722,7 @@ _LOCAL_STAGE_STATUS: dict[str, str] = {
     "succeeded": "succeeded",
     "failed": "failed",
     "skipped": "cancelled",
+    "cancelled": "cancelled",  # run_ticket cancelled by the owner (USR-166)
 }
 _LOCAL_ROLE = "run_ticket"
 
@@ -757,7 +758,8 @@ def _fold_local_runs(
         closing_event = next((e for e in reversed(items) if e.get("phase") == LOCAL_RUN_PHASE), None)
         completed_at: datetime | None
         if closing_event is not None:
-            status = "completed" if str(closing_event.get("status")) == "succeeded" else "failed"
+            closing_status = str(closing_event.get("status"))
+            status = {"succeeded": "completed", "cancelled": "cancelled"}.get(closing_status, "failed")
             completed_at = _parse_dt(closing_event.get("at"))
         elif (now - last_at).total_seconds() > ABANDON_AFTER_SECONDS:
             status, completed_at = "aborted", last_at
@@ -808,6 +810,17 @@ def _fold_local_runs(
                 target = running[-1] if running else list(folded)[-1]
                 folded[target].update(
                     status="failed",
+                    finished=completed_at,
+                    cause=closing_event.get("cause_code") or None,
+                    message=str(closing_event.get("message") or ""),
+                )
+        # Cancelled by the owner (USR-166) before any phase carried it: pin it on the phase that was active.
+        if status == "cancelled" and closing_event is not None and folded:
+            if not any(f["status"] == "cancelled" for f in folded.values()):
+                running = [name for name, f in folded.items() if f["status"] == "running"]
+                target = running[-1] if running else list(folded)[-1]
+                folded[target].update(
+                    status="cancelled",
                     finished=completed_at,
                     cause=closing_event.get("cause_code") or None,
                     message=str(closing_event.get("message") or ""),
