@@ -46,7 +46,7 @@ from typing import Any, Callable, Iterable, Optional
 from pydantic import BaseModel, Field
 
 from core.git import ci_checks
-from core.line import agent_retry, base_probe, diagnostics, workspace
+from core.line import agent_retry, base_probe, cancellation, diagnostics, workspace
 from core.line.agent_cli import AgentRequest, AgentResult, headless_development_preamble, run_agent
 from core.line.route_wait import RouteWaiter
 from core.line.routing import RoutingConfig, load_routing_config, pick, record_result
@@ -497,6 +497,8 @@ class DevelopmentStage:
                     )
                 )
                 record_result(agent_result, config=self.routing_config)
+                # USR-152: a run cancelled while the agent worked must not validate, commit or push its output.
+                cancellation.ensure_not_cancelled(run_id)
 
                 # Quota/login/missing binary say nothing about the ticket: retry the stage later instead of
                 # burning a validate iteration (policy shared with run_ticket in core.line.agent_retry).

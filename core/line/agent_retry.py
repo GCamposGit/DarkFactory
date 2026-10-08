@@ -263,6 +263,10 @@ def run_with_retry(
             if result.ok:
                 return RetryReport(ok=True, result=result, route=route, attempts=attempts)
 
+            if result.error_kind == "cancelled":
+                # USR-152: the run was cancelled; never retry, back off or fall back to another route.
+                return RetryReport(ok=False, result=result, route=route, attempts=attempts)
+
             failure = classify_failure(result)
             emit(
                 f"Agent attempt {attempt.number} failed: harness={harness} model={model or '-'} "

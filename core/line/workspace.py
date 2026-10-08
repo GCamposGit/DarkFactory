@@ -47,6 +47,7 @@ from pydantic import BaseModel
 
 from core.git.safe_show import safe_show
 from core.git.state_guard import check_staged_state_files
+from core.line import cancellation
 from core.projects.models import ProjectDescriptor
 from core.projects.registry import normalize_repo_url
 
@@ -60,6 +61,8 @@ _PUSH_BACKOFF_S = 2.0
 _MIRROR_DIRNAME = ".mirror"
 _RUNS_DIRNAME = "runs"
 _CONTEXT_DIRNAME = ".darkfac/runs"
+# Marker kept in the worktree's private git dir (never part of the tree, so `git add -A` cannot commit it).
+_CANCELLED_MARKER = "darkfac-run-cancelled"
 
 _AUTH_HEADER_PATTERN = re.compile(r"(AUTHORIZATION:\s*basic\s+)\S+", re.IGNORECASE)
 
@@ -351,6 +354,62 @@ def write_context(ws: RunWorkspace, name: str, content: str) -> Path:
     return target
 
 
+def _marker_path(path: Path) -> Optional[Path]:
+    proc = _run_git(["rev-parse", "--absolute-git-dir"], cwd=path, check=False)
+    git_dir = (proc.stdout or "").strip()
+    if proc.returncode != 0 or not git_dir:
+        return None
+    return Path(git_dir) / _CANCELLED_MARKER
+
+
+def mark_cancelled(path: Path, reason: str = cancellation.CANCELLED_CAUSE) -> bool:
+    """Mark the run worktree at `path` as cancelled: `commit`/`commit_paths`/`push` refuse from now on.
+
+    Best effort (a missing worktree is not an error); returns True when the marker was written.
+    """
+    if not Path(path).is_dir():
+        return False
+    try:
+        marker = _marker_path(Path(path))
+        if marker is None:
+            return False
+        stamp = datetime.now(timezone.utc).isoformat()
+        marker.write_text(f"{reason}\n{stamp}\n", encoding="utf-8")
+        return True
+    except (OSError, WorkspaceError) as exc:
+        logger.warning("could not mark workspace %s as cancelled: %s", path, exc)
+        return False
+
+
+def mark_run_cancelled(project_id: str, run_id: str, reason: str = cancellation.CANCELLED_CAUSE) -> bool:
+    """`mark_cancelled` for `<workspace_root>/<project_id>/runs/<run_id>`."""
+    return mark_cancelled(_run_dir(workspace_root(), project_id, run_id), reason)
+
+
+def is_cancelled(ws: RunWorkspace) -> bool:
+    """True when the worktree carries the cancelled marker."""
+    try:
+        marker = _marker_path(ws.path)
+    except WorkspaceError:
+        return False
+    return marker is not None and marker.exists()
+
+
+def _guard_not_cancelled(ws: RunWorkspace) -> None:
+    """Refuse to publish for a cancelled run (USR-152).
+
+    Re-verifies against the store (through the active cancellation scope, if any) and against the
+    worktree marker, and marks the worktree when the store says cancelled.
+    """
+    try:
+        cancellation.ensure_not_cancelled(ws.run_id)
+    except cancellation.RunCancelledError:
+        mark_cancelled(ws.path)
+        raise
+    if is_cancelled(ws):
+        raise cancellation.RunCancelledError(ws.run_id)
+
+
 def commit(ws: RunWorkspace, message: str, job_key: str) -> str:
     """Stage everything and commit with a `DarkFac-Job: <job_key>` trailer.
 
@@ -359,6 +418,7 @@ def commit(ws: RunWorkspace, message: str, job_key: str) -> str:
     """
     if not job_key or not job_key.strip():
         raise WorkspaceError("job_key must be non-empty")
+    _guard_not_cancelled(ws)
     _run_git(["add", "-A"], cwd=ws.path)
     diff_check = _run_git(["diff", "--cached", "--quiet"], cwd=ws.path, check=False)
     if diff_check.returncode == 0:
@@ -386,6 +446,7 @@ def commit_paths(ws: RunWorkspace, message: str, job_key: str, paths: list[Path]
     """
     if not job_key or not job_key.strip():
         raise WorkspaceError("job_key must be non-empty")
+    _guard_not_cancelled(ws)
     relative = [str(Path(p).resolve().relative_to(ws.path.resolve())) for p in paths]
     _run_git(["add", "--", *relative], cwd=ws.path)
     diff_check = _run_git(["diff", "--cached", "--quiet", "--", *relative], cwd=ws.path, check=False)
@@ -412,6 +473,7 @@ def push(ws: RunWorkspace, *, sleep: Callable[[float], None] = time.sleep) -> No
     """
     if not ws.branch.startswith("df/"):
         raise WorkspaceError(f"refusing to push non-df branch '{ws.branch}'")
+    _guard_not_cancelled(ws)
     repo_url = _remote_url(ws.path)
     last_error: Optional[WorkspaceError] = None
     for attempt in range(1, _PUSH_RETRIES + 1):
