@@ -377,19 +377,58 @@ def test_explicit_base_ref_used_when_present(tmp_path: Path) -> None:
 # --- smoke test against the real repository -----------------------------------
 
 
+def test_shallow_detached_checkout_rejects_unavailable_base(tmp_path: Path) -> None:
+    source = tmp_path / "source"
+    _init_repo(source, branch="trunk")
+    _write(source, "tests/test_a.py", "def test_a() -> None:\n    assert True\n")
+    _write(source, "tests/test_canaletto.py", "def test_local() -> None:\n    assert False\n")
+    _commit_all(source, "first")
+    _write(source, "core/example.py", "VALUE = 1\n")
+    _commit_all(source, "second")
+    repo = tmp_path / "clone"
+    _git(tmp_path, "clone", "--depth=1", source.as_uri(), str(repo))
+    _git(repo, "checkout", "--detach")
+    _git(repo, "branch", "-D", "trunk")
+
+    # The base-owned harness fails closed when no trustworthy diff exists.
+    # Sidebar changes must not introduce a governance fallback here.
+    with pytest.raises(affected.GraphBuildError, match="no usable base ref"):
+        affected.select_affected(repo, "origin/main")
+
+
+def test_unborn_checkout_still_rejects_missing_base(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    _init_repo(repo, branch="trunk")
+    with pytest.raises(affected.GraphBuildError, match="no usable base ref"):
+        affected.select_affected(repo, "origin/main")
+
+
 # The official quick gate runs this test in the serial step so xdist workers do
 # not make the absolute latency budget depend on unrelated CPU contention.
 @pytest.mark.serial
-def test_smoke_real_repo_json_is_valid_and_fast() -> None:
+@pytest.mark.parametrize("shallow_detached", [False, True])
+def test_smoke_real_repo_json_is_valid_and_fast(
+    tmp_path: Path, shallow_detached: bool
+) -> None:
     here = Path(__file__).resolve().parent
     try:
         repo_root = affected.find_repo_root(here)
     except Exception:
         pytest.skip("not running inside a git checkout")
 
+    if shallow_detached:
+        clone = tmp_path / "clone"
+        _git(tmp_path, "clone", "--depth=1", "--no-local", str(repo_root), str(clone))
+        _git(clone, "checkout", "--detach")
+        assert _git(clone, "rev-parse", "--is-shallow-repository").strip() == "true"
+        repo_root = clone
+
     started = time.monotonic()
     result = subprocess.run(
-        [sys.executable, "-m", "core.harness.affected", "--json"],
+        # This smoke checks CLI output and latency, not branch discovery.
+        # HEAD exists even in the validation stage's shallow detached clone;
+        # missing-base rejection is covered independently above.
+        [sys.executable, "-m", "core.harness.affected", "--base", "HEAD", "--json"],
         cwd=str(repo_root),
         capture_output=True,
         text=True,

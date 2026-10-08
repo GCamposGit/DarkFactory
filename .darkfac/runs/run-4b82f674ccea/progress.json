@@ -1,0 +1,12 @@
+{
+  "harness": "codex",
+  "model": null,
+  "tickets_done": [
+    "T1",
+    "T2",
+    "T3",
+    "fix-validation-caba6de37050",
+    "fix-ci-2",
+    "fix-validation-842b164fbe29"
+  ]
+}
