@@ -126,7 +126,7 @@ CREATE TABLE IF NOT EXISTS {TABLE} (
 CREATE INDEX IF NOT EXISTS idx_local_run_events_run ON {TABLE} (run_id, event_id)
 """
 
-PhaseStatus = Literal["running", "succeeded", "failed", "skipped"]
+PhaseStatus = Literal["running", "succeeded", "failed", "skipped", "cancelled"]
 _COLUMNS = ("run_id", "ticket_id", "project_id", "title", "phase", "status", "harness", "worker", "cause_code", "message", "at")
 _MAX_MESSAGE = 400
 _MAX_LOCAL_EVENTS = 200
@@ -363,6 +363,7 @@ class ProgressPublisher:
         self._buffer: list[LocalRunEvent] = []
         self._outcome_message = ""
         self._outcome_cause: str | None = None
+        self._active_phase: str | None = None  # last phase published as running and not yet closed
         self.run_id = run_id or self._new_run_id()
         self.events: list[LocalRunEvent] = []  # what was attempted (capped), for diagnostics and tests
 
@@ -428,7 +429,29 @@ class ProgressPublisher:
                 RUN_PHASE, "failed", message or self._outcome_message, cause=cause or self._outcome_cause
             )
 
+    def cancel(self, message: str = "", *, cause: str = "owner_cancelled") -> None:
+        """Record that the run was cancelled (USR-166): the phase in progress and, if owned, the run.
+
+        The board shows the phase as ``cancelada`` and the run as cancelled. Idempotent; never raises.
+        """
+        try:
+            if self._finished:
+                return
+            text = message or "execucao cancelada pelo owner"
+            if self._active_phase is not None:
+                self.phase(self._active_phase, "cancelled", text, cause=cause)
+            if self.owns_run:
+                self._finished = True
+                self.phase(RUN_PHASE, "cancelled", text, cause=cause)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("local progress: cancel failed: %s", type(exc).__name__)
+
     def _publish(self, phase: str, status: PhaseStatus, message: str, cause: str | None) -> None:
+        if phase != RUN_PHASE:
+            if status == "running":
+                self._active_phase = phase
+            elif self._active_phase == phase:
+                self._active_phase = None
         event = LocalRunEvent(
             run_id=self.run_id,
             ticket_id=self.ticket_id,
