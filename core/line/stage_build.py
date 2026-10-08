@@ -11,6 +11,9 @@ Implements the "development" and "validation" halves of the contract in
   passing iteration is committed (trailer-stamped, idempotent) and pushed;
   an exhausted ticket either asks for a replan (agent reported
   `SPEC_CONFLICT:`) or fails with `cause_code="validate_exhausted"`.
+  A validate that fails ONLY in tests that also fail on the base branch is not the developer's to
+  fix (USR-153): it waits as `retry("base_red not_before=...")` (then `failed(base_red_exhausted)`)
+  without consuming iterations; a mix of base-red and ticket-only failures keeps iterating.
 - `ValidationStage` is deterministic and LLM-free: it clones the pushed
   branch tip into a throwaway directory and re-runs `setup` + `validate` +
   `build` there, to catch "works in the dirty worktree, breaks on a clean
@@ -36,12 +39,14 @@ import subprocess
 import sys
 import tempfile
 import time
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable, Iterable, Optional
 
 from pydantic import BaseModel, Field
 
-from core.line import agent_retry, diagnostics, workspace
+from core.git import ci_checks
+from core.line import agent_retry, base_probe, diagnostics, workspace
 from core.line.agent_cli import AgentRequest, AgentResult, headless_development_preamble, run_agent
 from core.line.route_wait import RouteWaiter
 from core.line.routing import RoutingConfig, load_routing_config, pick, record_result
@@ -351,6 +356,10 @@ def _write_progress(ws: RunWorkspace, progress: DevelopmentProgress) -> None:
 # --------------------------------------------------------------------------
 
 
+BaseProbe = Callable[[RunWorkspace, ProjectDescriptor, "list[str]"], Optional["set[str]"]]
+"""`(ws, project, failing_test_ids) -> ids that fail on the base branch too`, or `None` if unknown."""
+
+
 class DevelopmentStage:
     """Runs the write-mode agent + validate loop for every pending ticket."""
 
@@ -364,7 +373,15 @@ class DevelopmentStage:
         agent_timeout_s: int = 1800,
         command_timeout_s: int = 1800,
         route_waiter: Optional[RouteWaiter] = None,
+        base_probe_func: Optional[BaseProbe] = None,
+        base_red_attempts: Optional[Callable[[str], int]] = None,
+        base_red_wait_minutes: int = ci_checks.BASE_RED_RETRY_MINUTES,
+        base_red_max_retries: int = ci_checks.BASE_RED_MAX_RETRIES,
+        clock: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
     ) -> None:
+        """`base_probe_func(ws, project, test_ids)` returns which failing tests also fail on the base
+        branch (`None` = cannot tell); `base_red_attempts(run_id)` counts the `base_red` waits this run
+        already spent in this stage (USR-153). Tests inject fakes for all three."""
         self.run_agent_func = run_agent_func
         self.pick_func = pick_func
         self.host_caps = list(host_caps)
@@ -372,6 +389,11 @@ class DevelopmentStage:
         self.agent_timeout_s = agent_timeout_s
         self.command_timeout_s = command_timeout_s
         self.route_waiter = route_waiter or RouteWaiter()
+        self.base_probe_func = base_probe_func
+        self.base_red_attempts = base_red_attempts
+        self.base_red_wait_minutes = base_red_wait_minutes
+        self.base_red_max_retries = base_red_max_retries
+        self.clock = clock
 
     # -- prompt building ---------------------------------------------------
 
@@ -436,65 +458,73 @@ class DevelopmentStage:
             if ticket_index == 0 and not any(cmd.strip() for cmd in commands.validate_cmds):
                 extra_instruction = _MISSING_TESTS_INSTRUCTION
 
-            route = self._pick_route(excluded)
-            if route is None:
-                self._persist_diagnostics(ws, run_id, ticket.id)
-                # No route is a matter of time (cooldown / quota reset), not of the owner (USR-87):
-                # wait for it with `retry` + `not_before`; `waiting_human` only past the run budget.
-                return self.route_waiter.no_route_result(
-                    "development", project, run_id,
-                    host_caps=self.host_caps, config=self.routing_config, mode="write",
-                )
-            harness, model = route
-            prompt = self._build_prompt(
-                ticket,
-                commands,
-                extra_instruction=extra_instruction,
-                last_validate_log=last_validate_log,
-                last_review_log=last_review_log,
-                spec_text=spec_text,
-                harness=harness,
-            )
-
-            agent_result = self.run_agent_func(
-                AgentRequest(
-                    prompt=prompt,
-                    cwd=ws.path,
-                    mode="write",
+            marker = self._read_base_red_marker(ws, ticket.id) if iteration == 1 else None
+            if marker is not None and self._has_implementation_changes(ws):
+                # Resuming a `base_red` wait on the host that holds the agent's edits: the developer
+                # already did the work (USR-153), so validate again instead of calling it a second time.
+                harness, model = marker.get("harness") or "unknown", marker.get("model")
+                agent_result = AgentResult(ok=True, text="", harness=harness, model=model, duration_s=0.0)
+                self._clear_base_red_marker(ws, ticket.id)
+            else:
+                route = self._pick_route(excluded)
+                if route is None:
+                    self._persist_diagnostics(ws, run_id, ticket.id)
+                    # No route is a matter of time (cooldown / quota reset), not of the owner (USR-87):
+                    # wait for it with `retry` + `not_before`; `waiting_human` only past the run budget.
+                    return self.route_waiter.no_route_result(
+                        "development", project, run_id,
+                        host_caps=self.host_caps, config=self.routing_config, mode="write",
+                    )
+                harness, model = route
+                prompt = self._build_prompt(
+                    ticket,
+                    commands,
+                    extra_instruction=extra_instruction,
+                    last_validate_log=last_validate_log,
+                    last_review_log=last_review_log,
+                    spec_text=spec_text,
                     harness=harness,
-                    model=model,
-                    timeout_s=self.agent_timeout_s,
                 )
-            )
-            record_result(agent_result, config=self.routing_config)
 
-            # Quota/login/missing binary say nothing about the ticket: retry the stage later instead of
-            # burning a validate iteration (policy shared with run_ticket in core.line.agent_retry).
-            if agent_retry.is_stage_retryable(agent_result):
-                return StageResult(
-                    outcome="retry", cause_code=f"agent_{agent_result.error_kind}", output_refs=[]
+                agent_result = self.run_agent_func(
+                    AgentRequest(
+                        prompt=prompt,
+                        cwd=ws.path,
+                        mode="write",
+                        harness=harness,
+                        model=model,
+                        timeout_s=self.agent_timeout_s,
+                    )
                 )
-            if not agent_result.ok:
-                if agent_result.error_kind == "timeout" and self._has_implementation_changes(ws):
-                    logger.info(
-                        "Agent timed out on %s, but implementation changes are present in %s; proceeding to validate",
-                        harness, ws.path
+                record_result(agent_result, config=self.routing_config)
+
+                # Quota/login/missing binary say nothing about the ticket: retry the stage later instead of
+                # burning a validate iteration (policy shared with run_ticket in core.line.agent_retry).
+                if agent_retry.is_stage_retryable(agent_result):
+                    return StageResult(
+                        outcome="retry", cause_code=f"agent_{agent_result.error_kind}", output_refs=[]
                     )
-                else:
-                    last_validate_log = (
-                        f"Falha ao invocar agente ({agent_result.error_kind}): {agent_result.text}"
-                    )
-                    last_failure_refs = [f"agent_failed:{agent_result.error_kind}", f"validate_log:{log_name}"]
-                    _write_validate_log(
-                        ws, ticket.id, iteration, last_validate_log,
-                        meta={
-                            "harness": agent_result.harness, "model": agent_result.model,
-                            "error_kind": agent_result.error_kind, "duration_s": agent_result.duration_s,
-                            "note": "agent invocation failed",
-                        },
-                    )
-                    agent_retry.exclude_route(excluded, harness, model)
-                    continue
+                if not agent_result.ok:
+                    if agent_result.error_kind == "timeout" and self._has_implementation_changes(ws):
+                        logger.info(
+                            "Agent timed out on %s, but implementation changes are present in %s; proceeding to validate",
+                            harness, ws.path
+                        )
+                    else:
+                        last_validate_log = (
+                            f"Falha ao invocar agente ({agent_result.error_kind}): {agent_result.text}"
+                        )
+                        last_failure_refs = [f"agent_failed:{agent_result.error_kind}", f"validate_log:{log_name}"]
+                        _write_validate_log(
+                            ws, ticket.id, iteration, last_validate_log,
+                            meta={
+                                "harness": agent_result.harness, "model": agent_result.model,
+                                "error_kind": agent_result.error_kind, "duration_s": agent_result.duration_s,
+                                "note": "agent invocation failed",
+                            },
+                        )
+                        agent_retry.exclude_route(excluded, harness, model)
+                        continue
 
             # Re-detect after the agent ran: it may have just created the
             # minimal test infrastructure the extra instruction asked for.
@@ -546,6 +576,7 @@ class DevelopmentStage:
                 if ticket.id not in progress.tickets_done:
                     progress.tickets_done.append(ticket.id)
                 _write_progress(ws, progress)
+                self._clear_base_red_marker(ws, ticket.id)
                 sha = workspace.commit(ws, f"feat: {ticket.title}", job_key=job_key)
                 workspace.push(ws)
                 return StageResult(outcome="success", output_refs=[sha])
@@ -563,10 +594,110 @@ class DevelopmentStage:
                 self._persist_diagnostics(ws, run_id, ticket.id)
                 return StageResult(outcome="replan", cause_code="spec_conflict", output_refs=[])
 
+            # A test that fails the same way on the base branch is not this ticket's: no developer
+            # iteration can fix it (USR-153). Only when EVERY failing test is red there too.
+            base_only, ticket_only = self._split_base_failures(ws, project, validate_result)
+            if base_only and not ticket_only:
+                return self._base_red_result(
+                    ws, run_id, ticket, base_only, harness=harness, model=model, log_name=log_name
+                )
+            if base_only:
+                last_validate_log += (
+                    "\n\n## Testes que tambem falham na branch base (nao sao da sua mudanca, ignore-os)\n"
+                    + "\n".join(f"- {node}" for node in base_only)
+                )
+
         self._persist_diagnostics(ws, run_id, ticket.id)
         return StageResult(
             outcome="failed", cause_code="validate_exhausted", output_refs=[], evidence_refs=last_failure_refs
         )
+
+    # -- base_red (USR-153) --------------------------------------------
+
+    def _split_base_failures(
+        self, ws: RunWorkspace, project: ProjectDescriptor, result: CommandRunResult
+    ) -> tuple[list[str], list[str]]:
+        """`(failing tests that are red on the base too, tests only the ticket breaks)` of a failed validate.
+
+        `([], [])` when no test id can be told apart (non-pytest failure, timeout): the caller then keeps
+        the normal "the developer iterates" reading.
+        """
+        if result.exit_code == 124:  # validate timed out: the summary is incomplete, nothing is proven
+            return [], []
+        ids = diagnostics.failed_test_ids(result.combined_output)
+        if not ids:
+            return [], []
+        probe = self.base_probe_func or base_probe.probe_base_failures
+        try:
+            base_failures = probe(ws, project, ids)
+        except Exception as exc:  # noqa: BLE001 - a broken probe means "not proven", never a crash
+            logger.warning("base_red probe failed for run %s: %s", ws.run_id, type(exc).__name__)
+            return [], ids
+        return base_probe.split_by_base(ids, base_failures)
+
+    def _base_red_waits_spent(self, run_id: str) -> int:
+        """`base_red` waits this run already returned from this stage; a counter failure fails closed."""
+        if self.base_red_attempts is None:
+            return 0
+        try:
+            return max(int(self.base_red_attempts(run_id)), 0)
+        except Exception as exc:  # noqa: BLE001 - an unreadable counter must not become an endless wait
+            logger.warning("base_red attempt counter failed for %s: %s", run_id, type(exc).__name__)
+            return self.base_red_max_retries
+
+    def _base_red_result(
+        self,
+        ws: RunWorkspace,
+        run_id: str,
+        ticket: TicketSpec,
+        base_only: list[str],
+        *,
+        harness: str,
+        model: Optional[str],
+        log_name: str,
+    ) -> StageResult:
+        """Wait for the base instead of re-iterating the developer: no iteration is consumed.
+
+        `retry("base_red not_before=...")` while the run has waits left (the agent's edits stay in the
+        worktree and a marker lets the retry validate without calling the agent again), else a structured
+        `failed(base_red_exhausted)`, never `validate_exhausted`.
+        """
+        limit = diagnostics.MAX_FAILURE_TEST_REFS
+        refs = [f"base_red:{node}" for node in base_only[:limit]]
+        if len(base_only) > limit:
+            refs.append(f"base_red:+{len(base_only) - limit} more")
+        refs.append(f"validate_log:{log_name}")
+        workspace.write_context(
+            ws, _base_red_marker_name(ticket.id),
+            json.dumps({"harness": harness, "model": model, "tests": base_only}, indent=2),
+        )
+        self._persist_diagnostics(ws, run_id, ticket.id)
+        spent = self._base_red_waits_spent(run_id)
+        if spent >= self.base_red_max_retries:
+            logger.warning(
+                "%s: %d test(s) still red on the base branch after %d waits; ending the stage (base_red_exhausted)",
+                ticket.id, len(base_only), spent,
+            )
+            return StageResult(outcome="failed", cause_code="base_red_exhausted", output_refs=[], evidence_refs=refs)
+        not_before = self.clock() + timedelta(minutes=self.base_red_wait_minutes)
+        logger.warning(
+            "%s: every failing test is already red on the base branch (%s); waiting %d min (wait %d/%d) "
+            "instead of re-iterating the developer",
+            ticket.id, ", ".join(base_only[:limit]), self.base_red_wait_minutes, spent + 1, self.base_red_max_retries,
+        )
+        return StageResult(
+            outcome="retry", cause_code=ci_checks.base_red_cause_code(not_before), output_refs=[], evidence_refs=refs
+        )
+
+    def _read_base_red_marker(self, ws: RunWorkspace, ticket_id: str) -> Optional[dict[str, Any]]:
+        data = _read_context_json(ws, _base_red_marker_name(ticket_id))
+        return data or None
+
+    def _clear_base_red_marker(self, ws: RunWorkspace, ticket_id: str) -> None:
+        try:
+            (workspace.context_dir(ws) / _base_red_marker_name(ticket_id)).unlink(missing_ok=True)
+        except OSError:
+            logger.debug("could not remove the base_red marker of %s", ticket_id)
 
     def _pick_route(self, excluded: set[tuple[str, Optional[str]]]) -> Optional[tuple[str, Optional[str]]]:
         """Next (harness, model), skipping pairs that crashed; falls back to them if nothing else is routable."""
@@ -654,6 +785,10 @@ class DevelopmentStage:
             last_sha = result.output_refs[0]
 
         return StageResult(outcome="success", output_refs=[last_sha] if last_sha else [])
+
+
+def _base_red_marker_name(ticket_id: str) -> str:
+    return f"base-red-{ticket_id}.json"
 
 
 def _read_context_text(ws: RunWorkspace, name: str) -> str:

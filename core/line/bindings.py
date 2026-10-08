@@ -155,10 +155,11 @@ def _route_waiter_for(store: Any) -> RouteWaiter:
     return RouteWaiter(run_started_at=run_started_at_lookup(store))
 
 
-def base_red_attempt_counter(store: Any) -> Callable[[str], int]:
-    """`run_id -> integration waits already returned as ``base_red``` (USR-86).
+def base_red_attempt_counter(store: Any, stage: str = "integration") -> Callable[[str], int]:
+    """`run_id -> waits of `stage` already returned as ``base_red``` (USR-86, USR-153).
 
-    Counts the run's finished `integration` jobs whose persisted cause code is a `base_red` wait;
+    Counts the run's finished jobs of `stage` (`integration` by default, `development` for the
+    base-red wait of the validate loop) whose persisted cause code is a `base_red` wait;
     `ci_pending` polls and other retries do not count. A store without `get_run_status` raises, and
     the integration stage then falls back to the job iteration.
     """
@@ -168,7 +169,7 @@ def base_red_attempt_counter(store: Any) -> Callable[[str], int]:
         return sum(
             1
             for job in status.get("jobs", [])
-            if job.get("stage") == "integration" and ci_checks.is_base_red_cause(job.get("cause_code"))
+            if job.get("stage") == stage and ci_checks.is_base_red_cause(job.get("cause_code"))
         )
 
     return _count
@@ -617,7 +618,8 @@ def build_line_registry(
             intake_service=intake_service, route_waiter=waiter,
         ),
         "development": DevelopmentStageHandler(
-            project_resolver=resolver, host_caps=host_caps, routing_config=cfg, route_waiter=waiter
+            project_resolver=resolver, host_caps=host_caps, routing_config=cfg, route_waiter=waiter,
+            base_red_attempts=base_red_attempt_counter(store, "development"),
         ),
         "validation": ValidationStageHandler(project_resolver=resolver),
         "independent_review": ReviewStageHandler(
