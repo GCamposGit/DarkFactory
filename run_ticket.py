@@ -13,6 +13,7 @@ shared checkout. The agent, the official gate, the commit and the delivery all h
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import logging
 import os
@@ -35,12 +36,13 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from core.demands.models import UserTicket
 from core.demands.store import DemandsStore
-from core.line import agent_retry
+from core.line import agent_retry, cancellation, local_cancel
 from core.line.agent_cli import (
     HARNESS_CAPABILITIES,
     AgentRequest,
     AgentResult,
     check_optional_mcp_servers,
+    _run_bounded,
     headless_development_preamble,
     redact_secrets,
     run_agent,
@@ -61,6 +63,13 @@ logger = logging.getLogger("darkfac.run_ticket")
 
 # The launcher asks the agent to edit files in the checkout, so the route must declare `write`.
 DEVELOPMENT_MODE = "write"
+
+# Exit code of a run cancelled by the owner (USR-166): the conventional 128 + SIGINT.
+EXIT_CANCELLED = 130
+# Upper bound of the official gate; it also lets a cancellation kill the gate's process tree.
+GATE_TIMEOUT_S = 7200.0
+# Upper bound of the delivery subprocess (gate, PR, CI wait, merge): same as the board's "presumed dead".
+DELIVERY_TIMEOUT_S = 6 * 3600.0
 
 
 def estimate_ticket_size(ticket: UserTicket) -> tuple[str, list[str]]:
@@ -243,6 +252,14 @@ def build_parser() -> argparse.ArgumentParser:
         help="Reaplicar rebase em origin/main, portão oficial e entrega para uma worktree já desenvolvida (USR-116)",
     )
     parser.add_argument(
+        "--cancel",
+        nargs="?",
+        const=True,
+        default=None,
+        metavar="TICKET_ID",
+        help="Cancelar o run_ticket em andamento deste ticket (grava o arquivo de controle; USR-166)",
+    )
+    parser.add_argument(
         "--worktree",
         default=None,
         help="Caminho da worktree para retomar entrega (padrão: busca automática da worktree ativa do ticket)",
@@ -397,6 +414,42 @@ def rebase_on_origin_main(cwd: Path) -> tuple[bool, list[str], str]:
     return False, conflict_files, rebase.stderr.strip() or rebase.stdout.strip()
 
 
+def _cancelled() -> bool:
+    """True when the run in this process was cancelled (control file, signal or the line's token)."""
+    token = cancellation.current_token()
+    return token is not None and token.refresh()
+
+
+def _cancel_message() -> str:
+    token = cancellation.current_token()
+    reason = token.reason if token is not None else cancellation.CANCELLED_CAUSE
+    how = "sinal" if reason == local_cancel.SIGNAL_REASON else "arquivo de controle"
+    return f"execucao cancelada pelo owner ({how})"
+
+
+def _abort_cancelled(
+    progress: ProgressPublisher,
+    ticket_id: str,
+    as_json: bool,
+    *,
+    workspace: Optional[TicketWorkspace] = None,
+) -> int:
+    """Close a cancelled launcher run (USR-166): live board `cancelada`, no delivery, exit 130."""
+    message = _cancel_message()
+    progress.cancel(message)
+    print(
+        f"[CANCELADO] Ticket {ticket_id}: {message}. "
+        f"Nenhum commit, push ou PR foi feito apos o cancelamento.",
+        file=sys.stderr,
+    )
+    if workspace is not None:
+        _report_workspace_fate(workspace, as_json)
+    if as_json:
+        print(json.dumps({"ok": False, "cause": "cancelled", "ticket_id": ticket_id, "reason": message},
+                         indent=2, ensure_ascii=False))
+    return EXIT_CANCELLED
+
+
 def resume_delivery(
     ticket_id: str,
     worktree_path: Optional[Path | str] = None,
@@ -426,7 +479,10 @@ def resume_delivery(
         return result
     finally:
         if progress is None and holder:
-            holder[0].finish(code == 0, "" if code == 0 else f"entrega terminou com codigo {code}")
+            if code == EXIT_CANCELLED:
+                holder[0].cancel(_cancel_message())
+            else:
+                holder[0].finish(code == 0, "" if code == 0 else f"entrega terminou com codigo {code}")
 
 
 def _resume_delivery(
@@ -438,6 +494,23 @@ def _resume_delivery(
     as_json: bool,
     return_result: bool,
     holder: list[ProgressPublisher],
+) -> Any:
+    with contextlib.ExitStack() as stack:
+        return _resume_delivery_scoped(
+            ticket_id, worktree_path, skip_validation, no_commit, no_push, as_json, return_result, holder, stack
+        )
+
+
+def _resume_delivery_scoped(
+    ticket_id: str,
+    worktree_path: Optional[Path | str],
+    skip_validation: bool,
+    no_commit: bool,
+    no_push: bool,
+    as_json: bool,
+    return_result: bool,
+    holder: list[ProgressPublisher],
+    stack: contextlib.ExitStack,
 ) -> Any:
     from core.git.autonomy import GitAutonomyManager
     from core.git.ticket_workspace import find_ticket_worktree
@@ -485,6 +558,17 @@ def _resume_delivery(
     else:
         progress = open_progress(ticket.id, ticket.project_id, ticket.title)
         holder.append(progress)
+    # USR-166: honour the ticket's cancel request (control file or signal). Reuses the launcher's scope
+    # when the delivery runs in-process; a delivery subprocess joins the parent's run and never erases
+    # the request it did not create.
+    stack.enter_context(
+        local_cancel.watch(
+            ticket.id,
+            progress.run_id,
+            fresh=progress.owns_run and not os.environ.get(local_cancel.ENV_PARENT),
+            not_before=local_cancel.LAUNCHED_AT,
+        )
+    )
     git_mgr.on_phase = lambda phase, status, message, cause: progress.phase(  # type: ignore[arg-type]
         phase, status, message, cause=cause
     )
@@ -500,7 +584,52 @@ def _resume_delivery(
         print(f"    Worktree: {target_worktree}")
         print(f"    Branch: {current_branch}")
 
+    def cancelled_payload() -> Any:
+        """Nothing is committed, pushed or merged after the cancellation (USR-166)."""
+        message = _cancel_message()
+        progress.cancel(message)
+        print(f"[CANCELADO] Entrega do ticket {ticket.id} interrompida: {message}.", file=sys.stderr)
+        print(f"[i] Worktree preservada: {target_worktree}", file=sys.stderr)
+        payload = {
+            "exit_code": EXIT_CANCELLED,
+            "ok": False,
+            "cause": "cancelled",
+            "ticket_id": ticket.id,
+            "branch": current_branch,
+            "worktree": str(target_worktree),
+            "resume_command": resume_cmd,
+        }
+        if as_json and not return_result:
+            print(json.dumps(payload, indent=2, ensure_ascii=False))
+        return payload if return_result else EXIT_CANCELLED
+
+    try:
+        return _deliver_worktree(
+            git_mgr, ticket, target_worktree, current_branch, resume_cmd,
+            skip_validation, no_commit, no_push, as_json, return_result, progress, cancelled_payload,
+        )
+    except cancellation.RunCancelledError:
+        return cancelled_payload()
+
+
+def _deliver_worktree(
+    git_mgr: Any,
+    ticket: UserTicket,
+    target_worktree: Path,
+    current_branch: str,
+    resume_cmd: str,
+    skip_validation: bool,
+    no_commit: bool,
+    no_push: bool,
+    as_json: bool,
+    return_result: bool,
+    progress: ProgressPublisher,
+    cancelled_payload: Any,
+) -> Any:
+    """Rebase, gate and delivery of one worktree, checking the cancel request before every step."""
     # 1. Commit uncommitted changes in worktree if any (required before rebase)
+    if _cancelled():
+        return cancelled_payload()
     progress.phase("gate", "running", "sincronizando com origin/main antes do portao")
     if not no_commit and git_mgr.is_dirty(cwd=target_worktree):
         if not as_json:
@@ -515,6 +644,8 @@ def _resume_delivery(
     current_sha = git_mgr.get_current_sha(target_worktree)
 
     # 2. Rebase on origin/main
+    if _cancelled():
+        return cancelled_payload()
     if not as_json:
         print("--> Sincronizando e rebaseando branch em origin/main...")
     ok, conflict_files, msg = rebase_on_origin_main(target_worktree)
@@ -559,20 +690,22 @@ def _resume_delivery(
     current_sha = git_mgr.get_current_sha(target_worktree)
 
     # 3. Official Validation Gate
+    if _cancelled():
+        return cancelled_payload()
     if skip_validation:
         progress.phase("gate", "skipped", "validacao pulada (--skip-validation)")
     else:
         progress.phase("gate", "running", "portao oficial (core/harness/runner.py --quick)")
         if not as_json:
             print("\n--> Executando portão oficial da fábrica (python core/harness/runner.py --quick)...")
-        gate_res = subprocess.run(
+        # Bounded runner: a cancellation (USR-166) kills the gate's whole process tree.
+        gate_res = _run_bounded(
             [sys.executable, str(target_worktree / "core" / "harness" / "runner.py"), "--quick"],
-            cwd=str(target_worktree),
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
+            cwd=target_worktree,
+            timeout_s=GATE_TIMEOUT_S,
         )
+        if getattr(gate_res, "cancelled", False) is True or _cancelled():
+            return cancelled_payload()
         if gate_res.returncode != 0:
             print(f"[ERRO NO PORTÃO OFICIAL]:\n{gate_res.stdout}\n{gate_res.stderr}", file=sys.stderr)
             print(f"[i] Worktree preservada para diagnóstico: {target_worktree}", file=sys.stderr)
@@ -603,6 +736,8 @@ def _resume_delivery(
             print("[+] Portão oficial aprovado com sucesso: [HARNESS_PASS]!")
 
     # 4. Autonomous Git Lifecycle Completion (PR, merge, cleanup)
+    if _cancelled():
+        return cancelled_payload()
     completion_report = None
     if not no_commit:
         completion_report = git_mgr.complete_ticket(
@@ -611,6 +746,8 @@ def _resume_delivery(
             auto_push=not no_push,
             auto_commit=True,
         )
+        if _cancelled() and (completion_report is None or not completion_report.ok):
+            return cancelled_payload()
 
     delivered = completion_report is None or completion_report.ok
     current_sha = git_mgr.get_current_sha(target_worktree) if target_worktree.exists() else current_sha
@@ -694,14 +831,42 @@ def main(argv: Optional[list[str]] = None) -> int:
     finally:
         if box:
             box[0].release()
-            if code != 0:
-                box[0].set_outcome(f"run_ticket terminou com codigo {code}", f"exit_{code}", only_if_unset=True)
-            box[0].finish(code == 0)
+            if code == EXIT_CANCELLED:
+                box[0].cancel(_cancel_message())
+            else:
+                if code != 0:
+                    box[0].set_outcome(f"run_ticket terminou com codigo {code}", f"exit_{code}", only_if_unset=True)
+                box[0].finish(code == 0)
 
 
 def _main(argv: Optional[list[str]], box: list[ProgressPublisher]) -> int:
+    """Parse the arguments and run; the cancellation scope of the run lives as long as this call."""
+    with contextlib.ExitStack() as stack:
+        return _run(argv, box, stack)
+
+
+def _request_cancel(args: argparse.Namespace) -> int:
+    """`--cancel TICKET_ID`: ask the run in progress for that ticket to stop (USR-166)."""
+    target = args.cancel if isinstance(args.cancel, str) and args.cancel.strip() else args.ticket_id
+    if not target:
+        print("[ERRO] --cancel requer um TICKET_ID.", file=sys.stderr)
+        return 1
+    path = local_cancel.request_cancel(target.strip())
+    print(
+        f"[+] Cancelamento do ticket {target.strip()} solicitado ({path}). "
+        f"O run_ticket em andamento encerra o agente (e a arvore de processos) em ate alguns segundos "
+        f"e nao faz commit nem push depois disso."
+    )
+    return 0
+
+
+def _run(argv: Optional[list[str]], box: list[ProgressPublisher], stack: contextlib.ExitStack) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
+
+    # 00. Cancel mode (USR-166): only writes the control file the running launcher watches
+    if args.cancel:
+        return _request_cancel(args)
 
     # 0. Resume delivery mode (USR-116): rebase, validate, and deliver an existing worktree in a fresh process
     if args.resume_delivery:
@@ -890,6 +1055,16 @@ def _main(argv: Optional[list[str]], box: list[ProgressPublisher]) -> int:
     )
     progress.release()
 
+    # Cancellation scope (USR-166): the same token/guards the line uses (USR-152), fed by the per-ticket
+    # control file and termination signals. `_run_bounded` kills the agent's process tree when it fires.
+    stack.enter_context(
+        local_cancel.watch(
+            ticket.id, progress.run_id, fresh=progress.owns_run, not_before=local_cancel.LAUNCHED_AT
+        )
+    )
+    if _cancelled():
+        return _abort_cancelled(progress, ticket.id, args.json)
+
     # 3. Own worktree (USR-69): the agent, the gate and the commit never touch the shared checkout
     from core.git.ticket_workspace import WorkspaceError
 
@@ -910,6 +1085,8 @@ def _main(argv: Optional[list[str]], box: list[ProgressPublisher]) -> int:
             f"[+] Worktree própria: {workspace.path} "
             f"(branch {workspace.branch}, base {workspace.base_ref}@{workspace.base_sha[:12]})"
         )
+    if _cancelled():
+        return _abort_cancelled(progress, ticket.id, args.json, workspace=workspace)
 
     # 4. Execution Phase
     mcp_healthy, mcp_reasons = check_optional_mcp_servers()
@@ -981,6 +1158,21 @@ def _main(argv: Optional[list[str]], box: list[ProgressPublisher]) -> int:
         pinned=bool(args.harness),
         on_event=_report_progress,
     )
+    cancelled_by_owner = (
+        report.result is not None and report.result.error_kind == "cancelled"
+    ) or _cancelled()
+    if cancelled_by_owner and (not report.ok or report.result is None):
+        # The agent was cancelled (its process tree is already dead): record the quota it burned and stop.
+        cost_record = record_ticket_quota_cost(
+            ticket_id=ticket.id,
+            harness=selected_harness,
+            before_headroom=before_headroom,
+            after_headroom=inspect_quotas().get(selected_harness, {}).get("headroom"),
+            duration_s=report.total_duration_s,
+        )
+        if not args.json:
+            print(f"\n{format_ticket_quota_summary(cost_record)}", file=sys.stderr)
+        return _abort_cancelled(progress, ticket.id, args.json, workspace=workspace)
     if not report.ok or report.result is None:
         failure = format_agent_failure(report)
         progress.phase("agent", "failed", failure, cause="agent_failed")
@@ -1022,6 +1214,9 @@ def _main(argv: Optional[list[str]], box: list[ProgressPublisher]) -> int:
     )
     if not args.json:
         print(f"\n{format_ticket_quota_summary(cost_record)}")
+
+    if _cancelled():  # cancelled right as the agent finished: do not even look at its output
+        return _abort_cancelled(progress, ticket.id, args.json, workspace=workspace)
 
     from core.git.autonomy import GitAutonomyManager
 
@@ -1088,24 +1283,22 @@ def _main(argv: Optional[list[str]], box: list[ProgressPublisher]) -> int:
         if args.no_push:
             delivery_cmd.append("--no-push")
 
-        delivery_kwargs: dict[str, Any] = {}
-        if progress.enabled or progress.warning:
-            child_env = dict(os.environ)
-            if progress.enabled:
-                # The delivery subprocess joins this run: same run id, so the board shows one run.
-                child_env[ENV_RUN_ID] = progress.run_id
-            if progress.warning:
-                # USR-154: the user was already warned; the subprocess must not repeat it.
-                child_env[ENV_WARNED] = "1"
-            delivery_kwargs["env"] = child_env
-        delivery_proc = subprocess.run(
+        child_env = dict(os.environ)
+        # The delivery subprocess joins this run for cancellation too: it must honour the request the
+        # parent watches and never erase it as "stale" (it starts later than the request was written).
+        child_env[local_cancel.ENV_PARENT] = progress.run_id
+        if progress.enabled:
+            # The delivery subprocess joins this run: same run id, so the board shows one run.
+            child_env[ENV_RUN_ID] = progress.run_id
+        if progress.warning:
+            # USR-154: the user was already warned; the subprocess must not repeat it.
+            child_env[ENV_WARNED] = "1"
+        # Bounded runner (USR-166): a cancellation of this launcher also kills the delivery's process tree.
+        delivery_proc = _run_bounded(
             delivery_cmd,
-            cwd=str(PROJECT_ROOT),
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            **delivery_kwargs,
+            cwd=PROJECT_ROOT,
+            env=child_env,
+            timeout_s=DELIVERY_TIMEOUT_S,
         )
         exit_code = delivery_proc.returncode
         if not args.json and delivery_proc.stderr:
@@ -1128,6 +1321,14 @@ def _main(argv: Optional[list[str]], box: list[ProgressPublisher]) -> int:
         )
         exit_code = res.get("exit_code", 0) if isinstance(res, dict) else int(res)
         completion_info = res if isinstance(res, dict) else {"ok": exit_code == 0}
+
+    delivery_done = exit_code == 0 and completion_info.get("ok", False)
+    if (
+        exit_code == EXIT_CANCELLED
+        or completion_info.get("cause") == "cancelled"
+        or (_cancelled() and not delivery_done)  # e.g. the delivery process was killed with this launcher
+    ):
+        return _abort_cancelled(progress, ticket.id, args.json, workspace=workspace)
 
     delivered = exit_code == 0 and completion_info.get("ok", False)
     if not delivered:
