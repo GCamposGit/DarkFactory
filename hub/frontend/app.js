@@ -254,10 +254,14 @@ function toggleHubSidebar() {
 }
 
 function setHubSidebarActive(id) {
-  document.querySelectorAll("#hub-sidebar [data-sidebar-id]").forEach((item) => {
-    if (item.dataset.sidebarId === id) item.setAttribute("aria-current", "page");
-    else item.removeAttribute("aria-current");
+  const sidebar = document.getElementById("hub-sidebar");
+  sidebar.querySelectorAll("[aria-current]").forEach((item) => {
+    item.removeAttribute("aria-current");
   });
+  const active = Array.from(sidebar.querySelectorAll("[data-sidebar-id]")).find(
+    (item) => item.dataset.sidebarId === id,
+  );
+  active?.setAttribute("aria-current", "page");
 }
 
 function setupEventListeners() {

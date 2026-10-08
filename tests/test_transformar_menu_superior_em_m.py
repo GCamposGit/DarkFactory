@@ -134,3 +134,53 @@ def test_stylesheet_has_sidebar_utilities():
         r".lg\:static { position: static; }",
     ):
         assert rule in desktop.group(1)
+
+
+def app_source():
+    return (ROOT / "hub/frontend/app.js").read_text(encoding="utf-8")
+
+
+def test_app_js_defines_sidebar_toggle_api():
+    source = app_source()
+    for name in ("openHubSidebar", "closeHubSidebar", "toggleHubSidebar", "setHubSidebarActive"):
+        assert f"function {name}(" in source
+    setup = source.split("function setupEventListeners()", 1)[1]
+    assert 'addEventListener("click", toggleHubSidebar)' in setup
+    assert 'setHubSidebarActive(item.dataset.sidebarId)' in setup
+    assert source.count('window.addEventListener("keydown"') == 1
+
+
+def test_sidebar_escape_and_focus_return_implemented():
+    source = app_source()
+    escape = source.split('e.key === "Escape"', 1)[1].split('// Search input', 1)[0]
+    assert re.search(r'if .*aria-expanded.*=== "true".*closeHubSidebar\(\);.*else.*closeAllModals\(\);', escape, re.S)
+    assert 'if (returnFocus && wasOpen && window.innerWidth < 1024) toggle.focus();' in source
+
+
+def test_sidebar_toggle_syncs_aria_expanded_and_overlay():
+    source = app_source()
+    opening = source.split('function openHubSidebar()', 1)[1].split('function closeHubSidebar', 1)[0]
+    closing = source.split('function closeHubSidebar', 1)[1].split('function toggleHubSidebar', 1)[0]
+    assert 'if (window.innerWidth >= 1024) return;' in opening
+    assert 'classList.remove("hidden")' in opening
+    assert 'setAttribute("aria-expanded", "true")' in opening
+    assert 'classList.add("hidden")' in closing
+    assert 'setAttribute("aria-expanded", "false")' in closing
+    assert '"hub-sidebar-overlay").addEventListener("click", () => closeHubSidebar())' in source
+    assert 'closeHubSidebar(false);' in source.split('function setupEventListeners()', 1)[1]
+
+
+def test_set_hub_sidebar_active_keeps_single_aria_current():
+    active = app_source().split('function setHubSidebarActive(id)', 1)[1].split('function setupEventListeners', 1)[0]
+    assert '[aria-current]' in active
+    assert active.index('removeAttribute("aria-current")') < active.index('setAttribute("aria-current", "page")')
+    assert '.find(' in active  # Select one item even if a malformed DOM repeats its identifier.
+
+
+def test_sidebar_closes_after_item_selection_on_mobile():
+    setup = app_source().split('function setupEventListeners()', 1)[1]
+    click = setup.split('"hub-sidebar").addEventListener("click"', 1)[1].split('window.addEventListener', 1)[0]
+    assert 'event.target.closest("[data-sidebar-id]")' in click
+    assert 'if (window.innerWidth < 1024) closeHubSidebar();' in click
+    assert '}, true);' in click  # Close before the original drawer handler moves focus.
+    assert 'preventDefault' not in click and 'stopPropagation' not in click
