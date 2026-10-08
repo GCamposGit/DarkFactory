@@ -216,6 +216,13 @@ _SECRET_ENVIRONMENT_KEYS = (
     "ZHIPU_API_KEY",
     "MINIMAX_API_KEY",
     "ARTIFICIAL_ANALYSIS_API_KEY",
+    # Production control-store URLs: a developer machine that exports one must never let a test accept
+    # demands into (or claim jobs from) the real line. On 2026-10-07 `tests/test_cloud_e2e_task.py` did
+    # exactly that and left three fake-grilled "HF-03-08" runs looping on `grill_not_ready` in
+    # production. A test that needs a URL sets it itself (monkeypatch/mock://), as before.
+    "DARKFAC_HF02_DATABASE_URL",
+    "DARKHUB_LINE_DATABASE_URL",
+    "DARKHUB_CONTROL_DATABASE_URL",
 )
 
 

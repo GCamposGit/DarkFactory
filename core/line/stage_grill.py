@@ -619,7 +619,15 @@ def run_grill(
 
     existing = workspace.find_commit_by_job(ws, _job_key(run_id))
     if existing:
-        return StageResult(outcome="success", output_refs=[existing])
+        missing = grill_artifacts_missing(ws)
+        if not missing:
+            return StageResult(outcome="success", output_refs=[existing])
+        # A grill is only `succeeded` with recoverable artifacts: a job commit whose context files are
+        # gone from the tree is not trusted, so the grill runs again instead of feeding planning nothing.
+        logger.warning(
+            "grill job commit %s of run %s has no %s on branch %s; running the grill again",
+            existing, run_id, ", ".join(missing), ws.branch,
+        )
 
     pending = _load_pending(ws)
     if pending is not None:
@@ -703,6 +711,20 @@ def run_grill(
         output_refs=[sha],
         evidence_refs=[f"grill_deadline:{deadline.isoformat()}"],
     )
+
+
+def grill_artifacts_missing(ws: workspace.RunWorkspace) -> list[str]:
+    """Names of the grill context files (`DEMAND.md`, `GRILL.md`) absent or empty in the run's checkout."""
+    missing: list[str] = []
+    for name in (_DEMAND_FILE, GRILL_FILE):
+        path = workspace.context_dir(ws) / name
+        try:
+            present = path.is_file() and bool(path.read_text(encoding="utf-8", errors="replace").strip())
+        except OSError:
+            present = False
+        if not present:
+            missing.append(name)
+    return missing
 
 
 def _adopt_previous_grill(ws: workspace.RunWorkspace, run_id: str, previous_run_id: str) -> Optional[str]:

@@ -140,11 +140,12 @@ def test_planning_is_idempotent_on_replay(project, monkeypatch):
     assert calls["n"] == 1
 
 
-def test_planning_retries_when_grill_not_ready(project):
-    # No DEMAND.md/GRILL.md committed yet for this run.
+def test_planning_asks_for_the_grill_again_when_its_artifacts_are_missing(project):
+    # No DEMAND.md/GRILL.md committed for this run: no same-stage polling (see
+    # test_planning_grill_artifacts.py), the grill is rescheduled once.
     result = run_planning(project, "run-3")
     assert result.outcome == "retry"
-    assert result.cause_code == "grill_not_ready"
+    assert result.cause_code == "retry:grill\ngrill_artifacts_missing"
 
 
 # --------------------------------------------------------------------------
