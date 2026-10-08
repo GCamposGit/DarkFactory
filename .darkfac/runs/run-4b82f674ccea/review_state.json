@@ -1,0 +1,11 @@
+{
+  "rounds": [
+    {
+      "round": 1,
+      "verdict": "approve",
+      "sha": null,
+      "forced": false
+    }
+  ],
+  "agent_error_streak": 0
+}
