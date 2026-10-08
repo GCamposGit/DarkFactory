@@ -75,7 +75,7 @@ Prioridade: **Agora** = próximo ciclo; **Depois** = após os itens Agora;
 | DH-14 | Agora | **Cobertura visível no Hub**: endpoint e badge com o placar do gate e a lista de pendências | `hub/backend/coverage.py`, `hub/backend/api.py`, `hub/frontend/coverage.js` | Entregue em `USR-45`; badge mostra a % coberta e abre a lista de pendências por `DH-xx` em drawer slide-over |
 | DH-15 | Agora | **Higiene do ledger de demandas**: remover USR-19…USR-41 e isolar o teste que grava no ledger real | `.factory/demands/demands.json`, testes da CLI | Suíte roda sem alterar arquivos versionados |
 | DH-16 | Depois | **Aposentar fontes legadas do Painel de Tarefas** (`state.json`, `orchestrator.sqlite3`): painel consolidado exclusivamente no control store canônico e testes legados migrados. Entregue em `USR-50` | `hub/backend/service.py` | Painel usa exclusivamente o control store canônico |
-| DH-17 | Depois | **Ações operacionais de saúde**: reconhecer alerta, checar cotas (pode enviar Telegram), sync/trigger n8n (produção), drill HF-15 — cada uma com diálogo de confirmação. Entregue em `USR-56` | `POST notifications/{notification_id}/acknowledge`, `POST notifications/check-quotas`, `POST integrations/n8n/sync`, `POST integrations/n8n/trigger`, `POST hf15/rollback/drill` | Toda ação mostra o efeito antes, exige confirmação explícita e registra auditoria |
+| DH-17 | Depois | **Ações operacionais de saúde**: reconhecer alerta (um clique, sem confirmação, também em lote com "Reconhecer selecionadas" — `USR-61`), checar cotas (pode enviar Telegram), sync/trigger n8n (produção), drill HF-15 — as demais com diálogo de confirmação. Entregue em `USR-56` | `POST notifications/{notification_id}/acknowledge`, `POST notifications/check-quotas`, `POST integrations/n8n/sync`, `POST integrations/n8n/trigger`, `POST hf15/rollback/drill` | Toda ação com efeito externo mostra o efeito antes, exige confirmação explícita e registra auditoria; reconhecer alerta é reversível e dispensa confirmação |
 
 ## Entregue em USR-43
 
@@ -236,8 +236,8 @@ Prioridade: **Agora** = próximo ciclo; **Depois** = após os itens Agora;
   - Módulo core coberto: `core/planning`.
   - Superfície mapeada: `tasks-dashboard-section`.
 - **DH-17 — Ações Operacionais de Saúde (Mutações com Salvaguarda de 2 Passos):**
-  - Módulo modular `hub/frontend/health_ops.js` com modal de confirmação em 2 passos (`#health-ops-modal`) exibindo o impacto e parâmetros de cada operação antes da execução.
-  - `POST /api/notifications/{notification_id}/acknowledge`: Botão contextual "Reconhecer" em cada alerta da faixa superior (`#factory-alerts-strip`) com confirmação e renovação imediata.
+  - Módulo modular `hub/frontend/health_ops.js` com modal de confirmação em 2 passos (`#health-ops-modal`) exibindo o impacto e parâmetros de cada operação com efeito externo (checar cotas, n8n, drill) antes da execução; o reconhecimento de alertas não usa o modal.
+  - `POST /api/notifications/{notification_id}/acknowledge`: Botão contextual "Reconhecer" em cada alerta da faixa superior (`#factory-alerts-strip`): reconhecimento em um clique, sem caixa de confirmação (USR-61); a mensagem de sucesso (aria-live) some sozinha em 3 s. Checkbox por alerta, "selecionar todos" e botão "Reconhecer selecionadas" reconhecem em lote (um `POST` por item); sucesso limpa a seleção e falhas parciais continuam listadas e selecionadas.
   - `POST /api/notifications/check-quotas`: Botão "Checar Cotas" no card de saúde do Telegram com toggle para ignorar cache e despacho de alerta imediato ao Telegram se atingir limiar crítico (&le; 10%).
   - `POST /api/integrations/n8n/sync`: Botão "Sincronizar" no card de status do n8n permitindo caminho customizado e ativação automática de workflows higienizados.
   - `POST /api/integrations/n8n/trigger`: Botão "Disparar Webhook" no card de workflows do n8n com editor interativo de payload JSON e feedback imediato de resposta.
