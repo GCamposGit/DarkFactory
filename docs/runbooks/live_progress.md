@@ -128,6 +128,8 @@ O que o script concede (e nada alem disso): `CONNECT` no banco, `USAGE` no schem
 para o papel de leitura. A auditoria confirma pelo catalogo (`has_*_privilege`) que o papel nao tem
 `CREATE` no schema, nem qualquer privilegio em outra tabela, nem e superuser.
 
+Verificado contra PostgreSQL 16.15 real em 2026-10-09.
+
 ## Permissao do usuario do Postgres
 
 O caminho recomendado e o papel restrito da secao anterior. Esta secao descreve o papel de escrita
