@@ -4663,5 +4663,35 @@
     "dependencies": [],
     "created_at": "2026-10-08T14:09:14.155266Z",
     "updated_at": "2026-10-08T14:09:14.155273Z"
+  },
+  {
+    "id": "USR-163",
+    "project_id": "darkfac",
+    "title": "Isolar testes de Telegram e backup das credenciais reais do ambiente",
+    "origin": "agent",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand",
+      "bug",
+      "test-isolation"
+    ],
+    "problem_statement": "Portao oficial do merge b95f7cc em 2026-10-08: 3394 passed, 6 failed, 5 skipped. Falhas: tests/test_audio_grill_and_demands.py::test_hub_service_telegram_webhook_dispatch_and_status; tests/test_telegram_dual_bot.py::test_telegram_environment_precedes_local_config; tests/test_infra08_three_tier_backup.py::{test_cli_backup_commands_integration,test_autonomous_backup_cycle_success,test_autonomous_backup_cycle_drill_failure_alerts,test_autonomous_backup_cli_main}. Variaveis externas de Telegram prevalecem sobre fixtures e configuracoes reais de R2 tentam acessar rede bloqueada pela suite offline. Esses arquivos nao foram alterados pelo merge. Worker remoto inacessivel; fallback local funcionou.",
+    "core_journey": [],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Reproduzir as seis falhas com valores sinteticos de configuracao externa, sem expor credenciais.",
+      "Isolar fixtures de Telegram e backup de configuracao externa e substituir I/O de R2 por fake nos testes offline.",
+      "Passar python core/harness/runner.py --quick com e sem configuracao externa."
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-08T15:25:09.313300Z",
+    "updated_at": "2026-10-08T15:25:09.313314Z"
   }
 ]
