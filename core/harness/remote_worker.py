@@ -58,6 +58,16 @@ DEFAULT_WORKER_PORT = 8080
 DEFAULT_WORKER_HOST = "0.0.0.0"
 ENV_WORKER_TOKEN = "DARKFAC_WORKER_TOKEN"
 ENV_WORKER_STATE_DIR = "DARKFAC_WORKER_STATE_DIR"
+#: USR-141: scheduling priority of the job child (``runner.py --quick --local``
+#: and, by inheritance, every pytest-xdist worker). ``below_normal`` (default)
+#: keeps the worker's own HTTP server responsive while the suite saturates the
+#: CPU; ``normal`` restores the previous behaviour.
+ENV_WORKER_CHILD_PRIORITY = "DARKFAC_WORKER_CHILD_PRIORITY"
+CHILD_PRIORITY_NORMAL = "normal"
+CHILD_PRIORITY_BELOW_NORMAL = "below_normal"
+POSIX_CHILD_NICE_INCREMENT = 5
+#: ``subprocess.BELOW_NORMAL_PRIORITY_CLASS`` (Windows only attribute).
+_WINDOWS_BELOW_NORMAL_PRIORITY_CLASS = 0x00004000
 JOB_LOG_KEEP = 20
 JOB_WATCHDOG_POLL_SEC = 1.0
 DEFAULT_JOB_TIMEOUT_SEC = 1800.0
@@ -247,6 +257,42 @@ def _extract_harness_result(log_text: str) -> Optional[Dict[str, Any]]:
             with contextlib.suppress(json.JSONDecodeError):
                 result = json.loads(stripped[len(prefix):])
     return result
+
+
+def child_priority_mode() -> str:
+    """Resolve ``DARKFAC_WORKER_CHILD_PRIORITY``; invalid values -> ``below_normal``."""
+
+    raw = os.environ.get(ENV_WORKER_CHILD_PRIORITY, "").strip().lower()
+    if raw in (CHILD_PRIORITY_NORMAL, CHILD_PRIORITY_BELOW_NORMAL):
+        return raw
+    if raw:
+        logger.warning(
+            "Ignoring invalid %s=%r (expected 'normal' or 'below_normal'); using 'below_normal'",
+            ENV_WORKER_CHILD_PRIORITY,
+            raw,
+        )
+    return CHILD_PRIORITY_BELOW_NORMAL
+
+
+def apply_child_priority(cmd: list[str]) -> tuple[list[str], dict[str, Any]]:
+    """Return ``(cmd, extra_popen_kwargs)`` lowering the job child's priority.
+
+    Windows uses ``BELOW_NORMAL_PRIORITY_CLASS`` via ``creationflags``; POSIX
+    prefixes the command with ``nice -n 5`` (``preexec_fn`` is avoided: it is
+    unsafe in a multi-threaded process such as this worker). Both are
+    inherited by grandchildren (pytest-xdist workers). With mode ``normal``
+    (or no ``nice`` binary on POSIX) the command is returned unchanged.
+    """
+
+    if child_priority_mode() == CHILD_PRIORITY_NORMAL:
+        return cmd, {}
+    if os.name == "nt":
+        flag = getattr(subprocess, "BELOW_NORMAL_PRIORITY_CLASS", _WINDOWS_BELOW_NORMAL_PRIORITY_CLASS)
+        return cmd, {"creationflags": flag}
+    nice = shutil.which("nice")
+    if nice is None:
+        return cmd, {}
+    return [nice, "-n", str(POSIX_CHILD_NICE_INCREMENT), *cmd], {}
 
 
 def _job_timeout_sec(worktree_path: Path, *, quick: bool, include_holdout: bool) -> float:
@@ -485,6 +531,7 @@ class JobManager:
             # block-buffered bursts (stdout is a pipe here, not a console).
             env["PYTHONUNBUFFERED"] = "1"
 
+            cmd, priority_kwargs = apply_child_priority(cmd)
             with open(log_file_path, "w", encoding="utf-8") as log_fh:
                 process = subprocess.Popen(
                     cmd,
@@ -496,6 +543,7 @@ class JobManager:
                     encoding="utf-8",
                     errors="replace",
                     bufsize=1,
+                    **priority_kwargs,
                 )
                 job.process = process
                 deadline = time.monotonic() + timeout_sec

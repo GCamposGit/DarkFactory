@@ -84,6 +84,11 @@ ENV_TEST_WORKERS = "DARKFAC_TEST_WORKERS"
 ENV_REMOTE_HARNESS = "DARKFAC_REMOTE_HARNESS"  # auto (default) | off | required
 ENV_WORKER_TOKEN = "DARKFAC_WORKER_TOKEN"
 ENV_BUSY_WAIT_SEC = "DARKFAC_REMOTE_BUSY_WAIT_SEC"
+#: USR-141: ceiling (seconds without a successful job poll) after which a worker
+#: that still answers ``/health`` is finally declared unavailable.
+ENV_WORKER_SILENCE_FALLBACK_SEC = "DARKFAC_WORKER_SILENCE_FALLBACK_SEC"
+#: USR-147: timeout (seconds) of the ``/health`` probe (default 2.0).
+ENV_WORKER_HEALTH_TIMEOUT_SEC = "DARKFAC_WORKER_HEALTH_TIMEOUT_SEC"
 ENV_WORKER_JOB = "DARKFAC_HARNESS_WORKER_JOB"
 #: Test-only escape hatch: a loopback test dispatches to a worker running on
 #: 127.0.0.1 on purpose, which the real self-dispatch guard would otherwise
@@ -95,8 +100,18 @@ DEFAULT_BUSY_WAIT_SEC = 300.0
 HEALTH_PROBE_TIMEOUT_SEC = 2.0
 POLL_INTERVAL_SEC = 2.0
 #: A worker that stops answering GET /harness/jobs/{id} for longer than this
-#: (network blip vs. genuinely gone) triggers a local fallback.
+#: is probed on ``/health`` (USR-141): a worker that still answers ``/health``
+#: is merely SLOW (e.g. a saturated CPU running ``pytest -n``) and keeps being
+#: awaited up to ``worker_silence_ceiling_sec()``; one that does not is gone
+#: and triggers a local fallback.
 WORKER_SILENCE_FALLBACK_SEC = 60.0
+#: Default ceiling for a slow-but-alive worker (``DARKFAC_WORKER_SILENCE_FALLBACK_SEC``).
+DEFAULT_WORKER_SILENCE_CEILING_SEC = 180.0
+#: ``/health`` probes of a silent worker use at least this timeout: the point
+#: is to tell "slow" from "dead", so the probe must tolerate a busy host.
+SLOW_WORKER_PROBE_TIMEOUT_SEC = 10.0
+#: Minimum spacing between two ``/health`` probes of the same silent worker.
+SLOW_WORKER_PROBE_INTERVAL_SEC = 10.0
 SUBMIT_TIMEOUT_SEC = 30.0
 POLL_HTTP_TIMEOUT_SEC = 10.0
 
@@ -154,6 +169,35 @@ def _busy_wait_sec() -> float:
     return value if value >= 0 else DEFAULT_BUSY_WAIT_SEC
 
 
+def _positive_float_env(name: str, default: float) -> float:
+    """Parse a strictly positive float env var; anything invalid -> ``default``."""
+
+    raw = os.environ.get(name, "").strip()
+    if not raw:
+        return default
+    try:
+        value = float(raw)
+    except ValueError:
+        return default
+    if value != value or value in (float("inf"), float("-inf")) or value <= 0:
+        return default
+    return value
+
+
+def health_probe_timeout_sec() -> float:
+    """Timeout of the ``/health`` probe (``DARKFAC_WORKER_HEALTH_TIMEOUT_SEC``)."""
+
+    return _positive_float_env(ENV_WORKER_HEALTH_TIMEOUT_SEC, HEALTH_PROBE_TIMEOUT_SEC)
+
+
+def worker_silence_ceiling_sec() -> float:
+    """Longest a still-healthy-but-silent worker is awaited (never below the
+    plain silence threshold)."""
+
+    configured = _positive_float_env(ENV_WORKER_SILENCE_FALLBACK_SEC, DEFAULT_WORKER_SILENCE_CEILING_SEC)
+    return max(configured, WORKER_SILENCE_FALLBACK_SEC)
+
+
 def _auth_headers(extra: dict[str, str] | None = None) -> dict[str, str]:
     headers = dict(extra or {})
     token = os.environ.get(ENV_WORKER_TOKEN, "").strip()
@@ -200,7 +244,9 @@ def is_self_dispatch(base_url: str, health: dict[str, Any] | None) -> bool:
 # --- HTTP plumbing (stdlib only -- consistent with core.harness.test_subagent) --
 
 
-def probe_health(base_url: str, timeout: float = HEALTH_PROBE_TIMEOUT_SEC) -> dict[str, Any] | None:
+def probe_health(base_url: str, timeout: float | None = None) -> dict[str, Any] | None:
+    if timeout is None:
+        timeout = health_probe_timeout_sec()
     url = f"{base_url.rstrip('/')}/health"
     try:
         req = urllib.request.Request(url, headers=_auth_headers())
@@ -342,6 +388,8 @@ def _stream_job(base_url: str, job_id: str, *, deadline: float) -> dict[str, Any
 
     offset = 0
     last_ok = time.monotonic()
+    last_probe = float("-inf")
+    announced_slow = False
     step_times: dict[str, str] = {}
     while True:
         now = time.monotonic()
@@ -351,9 +399,29 @@ def _stream_job(base_url: str, job_id: str, *, deadline: float) -> dict[str, Any
         try:
             payload = _poll_job(base_url, job_id, offset)
             last_ok = time.monotonic()
+            announced_slow = False
         except Exception:
-            if time.monotonic() - last_ok > WORKER_SILENCE_FALLBACK_SEC:
-                raise _WorkerUnavailable("worker stopped responding for >60s mid-run")
+            silent_for = time.monotonic() - last_ok
+            if silent_for > WORKER_SILENCE_FALLBACK_SEC:
+                # USR-141: distinguish a SLOW worker from a DEAD one before
+                # abandoning the run. A saturated host can miss job polls
+                # while its HTTP server still answers /health.
+                ceiling = worker_silence_ceiling_sec()
+                if silent_for > ceiling:
+                    raise _WorkerUnavailable(f"worker stopped responding for >{ceiling:.0f}s mid-run")
+                if time.monotonic() - last_probe >= SLOW_WORKER_PROBE_INTERVAL_SEC:
+                    last_probe = time.monotonic()
+                    alive = probe_health(base_url, timeout=max(health_probe_timeout_sec(), SLOW_WORKER_PROBE_TIMEOUT_SEC))
+                    if alive is None:
+                        raise _WorkerUnavailable(
+                            f"worker stopped responding for >{silent_for:.0f}s mid-run and /health is unreachable"
+                        )
+                    if not announced_slow:
+                        announced_slow = True
+                        print(
+                            f"[REMOTE {base_url}] job polls silent for {silent_for:.0f}s but /health answers "
+                            f"(busy={alive.get('busy')}); worker is slow, not dead - waiting up to {ceiling:.0f}s"
+                        )
             time.sleep(POLL_INTERVAL_SEC)
             continue
 

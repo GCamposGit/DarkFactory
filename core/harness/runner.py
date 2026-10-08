@@ -599,13 +599,20 @@ def run_with_cache(
             return remote_result
 
     if cache_key is None:
-        return execute(
-            config,
-            config_hash=config_hash,
-            quick=quick,
-            include_holdout=include_holdout,
-            config_path=config_path,
-        )
+        # USR-135/147: take the machine-wide suite lock HERE, before spawning
+        # the step subprocesses. Otherwise the pytest child acquires it itself
+        # (tests/conftest.py) and the time spent waiting for another run
+        # counts against the step timeout, ending in a false timeout with
+        # count=0. `suite_lock()` exports DARKFAC_SUITE_LOCK_HELD=1 so the
+        # child does not try to take the lock again.
+        with harness_suite_lock.suite_lock() as _lock:  # noqa: F841 - context manager for its side effect
+            return execute(
+                config,
+                config_hash=config_hash,
+                quick=quick,
+                include_holdout=include_holdout,
+                config_path=config_path,
+            )
 
     total_timeout_sec = float(sum(step.timeout_sec for step in steps))
     lease_sec = harness_cache.inflight_lease_sec()
