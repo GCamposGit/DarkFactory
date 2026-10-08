@@ -13,7 +13,9 @@ Implements the "development" and "validation" halves of the contract in
   `SPEC_CONFLICT:`) or fails with `cause_code="validate_exhausted"`.
   A validate that fails ONLY in tests that also fail on the base branch is not the developer's to
   fix (USR-153): it waits as `retry("base_red not_before=...")` (then `failed(base_red_exhausted)`)
-  without consuming iterations; a mix of base-red and ticket-only failures keeps iterating.
+  without consuming iterations; a mix of base-red and ticket-only failures keeps iterating. When the
+  wait ends the run branch first merges the (possibly fixed) base, keeping the developer's edits
+  (`core.line.base_sync`, USR-165); a clash is a structured `base_sync_conflict` handed back to the developer.
 - `ValidationStage` is deterministic and LLM-free: it clones the pushed
   branch tip into a throwaway directory and re-runs `setup` + `validate` +
   `build` there, to catch "works in the dirty worktree, breaks on a clean
@@ -46,7 +48,7 @@ from typing import Any, Callable, Iterable, Optional
 from pydantic import BaseModel, Field
 
 from core.git import ci_checks
-from core.line import agent_retry, base_probe, cancellation, diagnostics, workspace
+from core.line import agent_retry, base_probe, base_sync, cancellation, diagnostics, workspace
 from core.line.agent_cli import AgentRequest, AgentResult, headless_development_preamble, run_agent
 from core.line.route_wait import RouteWaiter
 from core.line.routing import RoutingConfig, load_routing_config, pick, record_result
@@ -374,6 +376,7 @@ class DevelopmentStage:
         command_timeout_s: int = 1800,
         route_waiter: Optional[RouteWaiter] = None,
         base_probe_func: Optional[BaseProbe] = None,
+        base_sync_func: Callable[[RunWorkspace, ProjectDescriptor], base_sync.SyncResult] = base_sync.sync_with_base,
         base_red_attempts: Optional[Callable[[str], int]] = None,
         base_red_wait_minutes: int = ci_checks.BASE_RED_RETRY_MINUTES,
         base_red_max_retries: int = ci_checks.BASE_RED_MAX_RETRIES,
@@ -381,7 +384,8 @@ class DevelopmentStage:
     ) -> None:
         """`base_probe_func(ws, project, test_ids)` returns which failing tests also fail on the base
         branch (`None` = cannot tell); `base_red_attempts(run_id)` counts the `base_red` waits this run
-        already spent in this stage (USR-153). Tests inject fakes for all three."""
+        already spent in this stage (USR-153); `base_sync_func(ws, project)` merges the current base into the run
+        branch when a `base_red` wait ends (USR-165). Tests inject fakes for these."""
         self.run_agent_func = run_agent_func
         self.pick_func = pick_func
         self.host_caps = list(host_caps)
@@ -390,6 +394,7 @@ class DevelopmentStage:
         self.command_timeout_s = command_timeout_s
         self.route_waiter = route_waiter or RouteWaiter()
         self.base_probe_func = base_probe_func
+        self.base_sync_func = base_sync_func
         self.base_red_attempts = base_red_attempts
         self.base_red_wait_minutes = base_red_wait_minutes
         self.base_red_max_retries = base_red_max_retries
@@ -450,6 +455,9 @@ class DevelopmentStage:
         # What the LAST failed iteration broke, surfaced as `evidence_refs` of a `failed` result: the live
         # board otherwise shows nothing but `validate_exhausted` (USR-62 pilot, 07/10).
         last_failure_refs: list[str] = []
+        # `base_sync_conflict:<path>` refs of a resume that clashed with the new base (USR-165); kept on the
+        # final `validate_exhausted` so the board still shows why the developer had to resolve a conflict.
+        sync_conflict_refs: list[str] = []
 
         for iteration in range(1, max_iterations + 1):
             log_name = f"validate-{ticket.id}-{iteration}.log.md"
@@ -459,7 +467,28 @@ class DevelopmentStage:
                 extra_instruction = _MISSING_TESTS_INSTRUCTION
 
             marker = self._read_base_red_marker(ws, ticket.id) if iteration == 1 else None
-            if marker is not None and self._has_implementation_changes(ws):
+            resume = marker is not None
+            if marker is not None:
+                # Leaving a `base_red` wait: validate against the base as it is NOW, not as it was (USR-165).
+                synced = self._sync_with_base(ws, project)
+                if synced is not None and synced.status == "branch_conflict":
+                    self._clear_base_red_marker(ws, ticket.id)
+                    self._persist_diagnostics(ws, run_id, ticket.id)
+                    return StageResult(
+                        outcome="failed",
+                        cause_code=base_sync.BASE_SYNC_CONFLICT_CAUSE,
+                        output_refs=[],
+                        evidence_refs=base_sync.conflict_refs(synced.conflicts),
+                    )
+                if synced is not None and synced.status == "edit_conflict":
+                    # The developer's edits clash with the new base: hand the markers back to the developer
+                    # (a normal agent call below) instead of validating a half-merged tree.
+                    resume = False
+                    sync_conflict_refs = base_sync.conflict_refs(synced.conflicts)
+                    last_validate_log = _base_sync_conflict_feedback(synced)
+                    last_failure_refs = [*sync_conflict_refs, f"validate_log:{log_name}"]
+                    self._clear_base_red_marker(ws, ticket.id)
+            if marker is not None and resume and self._has_implementation_changes(ws):
                 # Resuming a `base_red` wait on the host that holds the agent's edits: the developer
                 # already did the work (USR-153), so validate again instead of calling it a second time.
                 harness, model = marker.get("harness") or "unknown", marker.get("model")
@@ -611,7 +640,10 @@ class DevelopmentStage:
 
         self._persist_diagnostics(ws, run_id, ticket.id)
         return StageResult(
-            outcome="failed", cause_code="validate_exhausted", output_refs=[], evidence_refs=last_failure_refs
+            outcome="failed",
+            cause_code="validate_exhausted",
+            output_refs=[],
+            evidence_refs=[*last_failure_refs, *(r for r in sync_conflict_refs if r not in last_failure_refs)],
         )
 
     # -- base_red (USR-153) --------------------------------------------
@@ -636,6 +668,16 @@ class DevelopmentStage:
             logger.warning("base_red probe failed for run %s: %s", ws.run_id, type(exc).__name__)
             return [], ids
         return base_probe.split_by_base(ids, base_failures)
+
+    def _sync_with_base(self, ws: RunWorkspace, project: ProjectDescriptor) -> Optional[base_sync.SyncResult]:
+        """Merge the current base into the run branch (USR-165); `None` = could not tell, validate as before."""
+        try:
+            result = self.base_sync_func(ws, project)
+        except Exception as exc:  # noqa: BLE001 - a broken sync means "not synced", never a crash
+            logger.warning("base sync failed for run %s: %s", ws.run_id, type(exc).__name__)
+            return None
+        logger.info("%s: base sync %s (%s)", ws.run_id, result.status, result.base_ref)
+        return result
 
     def _base_red_waits_spent(self, run_id: str) -> int:
         """`base_red` waits this run already returned from this stage; a counter failure fails closed."""
@@ -787,6 +829,21 @@ class DevelopmentStage:
             last_sha = result.output_refs[0]
 
         return StageResult(outcome="success", output_refs=[last_sha] if last_sha else [])
+
+
+_NL = chr(10)
+
+
+def _base_sync_conflict_feedback(result: base_sync.SyncResult) -> str:
+    paths = _NL.join(f"- {path}" for path in result.conflicts)
+    return (
+        f"## base_sync_conflict{_NL}{_NL}"
+        f"A branch da execucao foi atualizada com `{result.base_ref}` (a base mudou enquanto a etapa esperava a "
+        f"base voltar a ficar verde), mas suas alteracoes entram em conflito com a base nestes arquivos:{_NL}"
+        f"{paths}{_NL}{_NL}"
+        f"Os marcadores de conflito (`<<<<<<<`, `=======`, `>>>>>>>`) estao nos arquivos. Resolva-os mantendo a "
+        f"intencao do ticket sobre o codigo atual da base e remova todos os marcadores. Nao use git."
+    )
 
 
 def _base_red_marker_name(ticket_id: str) -> str:
