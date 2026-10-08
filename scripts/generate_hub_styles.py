@@ -339,6 +339,9 @@ body {
 .col-span-full { grid-column: 1 / -1; }
 """)
 
+    # Sidebar width (w-64) also needs a matching content offset.
+    sections.append(".ml-64 { margin-left: 16rem; }")
+
     # 4. Spacing (Paddings, Margins, Spaces)
     spacing_map = {
         "0": "0px",
@@ -876,6 +879,10 @@ body {
   .lg\\:flex { display: flex; }
   .lg\\:grid { display: grid; }
   .lg\\:hidden { display: none; }
+
+  .lg\\:ml-64 { margin-left: 16rem; }
+  .lg\\:translate-x-0 { --tw-translate-x: 0px; transform: translateX(0px); }
+  .lg\\:static { position: static; }
 
   .lg\\:flex-row { flex-direction: row; }
   .lg\\:items-center { align-items: center; }
