@@ -13,12 +13,16 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import logging
 import re
+from collections.abc import Callable
 from typing import Any, Protocol
 
 from pydantic import BaseModel, ConfigDict
 
 from evals.e2e.models import E2ECase, Expectation, HttpStep, JourneyResult, OracleStep
+
+logger = logging.getLogger(__name__)
 
 
 class Observation(BaseModel):
@@ -83,8 +87,18 @@ def check_expectation(expect: Expectation, observed: Observation) -> list[str]:
     return failures
 
 
-def evaluate_journey(case: E2ECase, driver: OracleDriver) -> list[JourneyResult]:
-    """Run every step in order; a driver exception counts as a failed step."""
+def evaluate_journey(
+    case: E2ECase,
+    driver: OracleDriver,
+    *,
+    after_step: Callable[[str], None] | None = None,
+) -> list[JourneyResult]:
+    """Run every step in order; a driver exception counts as a failed step.
+
+    ``after_step`` (optional) is called with the step id once the step has been
+    judged, so an orchestrator can inject a runtime fault between two steps.  A
+    crashing hook never changes the verdict of the journey.
+    """
 
     results: list[JourneyResult] = []
     for step in case.journey:
@@ -94,4 +108,9 @@ def evaluate_journey(case: E2ECase, driver: OracleDriver) -> list[JourneyResult]
         except Exception:  # noqa: BLE001 - a crashing product must fail the step, not the evaluator
             passed = False
         results.append(JourneyResult(step_id=step.id, passed=passed))
+        if after_step is not None:
+            try:
+                after_step(step.id)
+            except Exception:  # noqa: BLE001 - fault injection is best effort and evaluator-side
+                logger.warning("after_step hook failed for step %s", step.id)
     return results

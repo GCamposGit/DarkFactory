@@ -10,10 +10,13 @@ trajectories and never calls models or the network.
 from __future__ import annotations
 
 __all__ = [
+    "ControlStoreLineRunner",
     "Corpus",
     "E2ECase",
+    "E2EOrchestrator",
     "E2EReport",
     "LeakScanner",
+    "LineRunner",
     "Trajectory",
     "agent_view",
     "build_report",
@@ -42,4 +45,12 @@ def __getattr__(name: str):
         from evals.e2e import replay
 
         return getattr(replay, name)
+    if name in {"LineRunner", "ControlStoreLineRunner"}:
+        from evals.e2e import driver
+
+        return getattr(driver, name)
+    if name == "E2EOrchestrator":
+        from evals.e2e.orchestrator import E2EOrchestrator
+
+        return E2EOrchestrator
     raise AttributeError(name)
