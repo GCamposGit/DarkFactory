@@ -34,6 +34,7 @@ from core.demands.store import DemandsStore
 from core.git import secret_scan, ticket_workspace
 from core.git.safe_show import safe_show
 from core.git.state_guard import DEFAULT_PROTECTED_STATE_PATHS, check_staged_state_files
+from core.line import cancellation
 from core.git.ci_checks import (
     DEFAULT_MAIN_WORKFLOW,
     CiVerdict,
@@ -108,8 +109,25 @@ _ADD_CHUNK = 100
 GhRunner = Callable[[Sequence[str], Path], "subprocess.CompletedProcess[str]"]
 
 
+# Subcommands that publish work: refused once the run is cancelled (USR-166). Read-only calls stay allowed.
+_PUBLISHING_GIT = frozenset({"commit", "push"})
+_PUBLISHING_GH = frozenset({"create", "merge"})
+
+
+def _refuse_if_cancelled(args: Sequence[str], publishing: frozenset[str]) -> None:
+    """Raise ``RunCancelledError`` when ``args`` would publish and the active run was cancelled.
+
+    No-op outside a cancellation scope (cloud worker run scope, or the launcher's ``local_cancel.watch``).
+    The check re-verifies the scope's probe, so a request written a moment ago is honoured at once.
+    """
+    words = [a for a in args if not str(a).startswith("-")]
+    if publishing.intersection(words[:2]):
+        cancellation.ensure_not_cancelled()
+
+
 def _run_gh(args: Sequence[str], cwd: Path = PROJECT_ROOT) -> subprocess.CompletedProcess[str]:
     """Execute the GitHub CLI; never raises (missing gh yields returncode 127)."""
+    _refuse_if_cancelled(args, _PUBLISHING_GH)
     cmd = ["gh", *args]
     try:
         return subprocess.run(
@@ -154,6 +172,7 @@ def _run_git(
     check: bool = False,
 ) -> subprocess.CompletedProcess[str]:
     """Execute a git command with UTF-8 encoding and sanitized error handling."""
+    _refuse_if_cancelled(args, _PUBLISHING_GIT)
     cmd = ["git", *args]
     try:
         proc = subprocess.run(

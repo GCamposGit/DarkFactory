@@ -108,3 +108,24 @@ nao dependem de Postgres.
 
 Depois de configurar, rode um ticket real (`--dry-run` nao publica nada) e confirme em
 `darkhub.ggcampos.com/live` que a execucao aparece. Sem o aviso no stderr, a publicacao esta funcionando.
+
+## Cancelar um run_ticket em andamento (USR-166)
+
+O cancelamento usa o mesmo mecanismo do cancelamento de runs da linha (USR-152): ao ser cancelado, o
+launcher mata a arvore de processos do agente (e do portao oficial) e nenhum `git commit`, `git push`,
+`gh pr create` ou `gh pr merge` e executado depois. A Esteira ao vivo mostra a fase em andamento e o run
+como `Cancelada` (causa `owner_cancelled`). O exit code do launcher e `130`.
+
+Por arquivo de controle (portatil, funciona no Windows):
+
+```powershell
+python C:\dev\DarkFac\run_ticket.py --cancel USR-XX
+```
+
+O comando grava `.factory/local_cancel/USR-XX.cancel` (em `DARKFAC_STATE_ROOT` quando definido); o
+launcher consulta o arquivo a cada ~1 s e o consome ao encerrar. Um pedido gravado antes do launcher
+iniciar e descartado como obsoleto. Tambem encerra o run: Ctrl+C, `SIGTERM` ou `SIGBREAK` entregues ao
+processo do launcher (um segundo sinal volta ao comportamento padrao e interrompe de imediato).
+
+A worktree do ticket e preservada quando o agente ja alterou arquivos; para retomar depois, use
+`python C:\dev\DarkFac\run_ticket.py --resume-delivery USR-XX`.
