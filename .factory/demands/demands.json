@@ -3843,7 +3843,7 @@
     "title": "Rollback de produção deve preservar contexto para correção automática",
     "origin": "review",
     "status": "implementing",
-    "delivery_evidence": "PR #143 em validação: contexto do run ancorado em ref remoto; smoke falho restaura SPEC/tickets e gera um único fix idempotente. A limpeza do ref e a prova operacional permanecem pendentes.",
+    "delivery_evidence": "PR #143 integrado, SHA 376f3003e50895a21be33d00cd8e5977fb553cc5; CI Linux/Windows aprovado. Revisao em 2026-10-08 confirmou cobertura dos criterios em tests/line/test_recovery_context.py. Deploy dos quatro servicos concluido, VPS em 0d71e59487cbed74184d9cb47593e8d0ca7e9005, backup/drill verificado. Conclusao bloqueada pelo portao atual: etapa paralela timeout 1501.7s, TEST_COUNT=0, HARNESS_FAIL; HEAD compartilhado mudou de 0d71e59 para 72c40a4 durante validacao. USR-135 reaberto para timeout; USR-162 para worker remoto; USR-169 para politica de limpeza do contexto.",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -3871,7 +3871,7 @@
     "estimated_complexity": "large",
     "dependencies": [],
     "created_at": "2026-10-03T21:26:22.640747Z",
-    "updated_at": "2026-10-05T21:50:00Z"
+    "updated_at": "2026-10-08T21:05:52.351109Z"
   },
   {
     "id": "CNR-01",
@@ -3913,8 +3913,8 @@
     "project_id": "darkfac",
     "title": "Adequar limite do portão oficial à suíte completa no Notebook",
     "origin": "review",
-    "status": "completed",
-    "delivery_evidence": "Commit 4ef7783 (owner): timeout_sec do passo unit_and_integration_tests_parallel de 900 para 1500 s. Medicao no Notebook em 08/10/2026 com o patch de resiliencia aplicado: 3452 testes, HARNESS_PASS, passo paralelo 886,3 s e serial 192,5 s (total 18 min 04 s), margem de apenas 1,5% sobre o limite antigo. O CI Windows do PR do piloto USR-62 chegou a estourar os 900 s (901,4 s, count=0). O trusted-pr-policy permanece verde.",
+    "status": "planned",
+    "delivery_evidence": null,
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -3924,7 +3924,7 @@
       "wave-current",
       "protected-governance"
     ],
-    "problem_statement": "Em 04/10/2026, runner.py --quick --local --no-cache interrompeu o bloco paralelo em 908,5s por timeout de 900s, count=0. A mesma suíte com limite diagnóstico de 2400s terminou em 916,1s, descobriu 2971 testes (2959 passaram, 6 falharam, 6 pulados antes de corrigir os seis). A CI do PR #136 bloqueou alterar harness.config.json porque o arquivo só aceita commit direto humano.",
+    "problem_statement": "Em 04/10/2026, runner.py --quick --local --no-cache interrompeu o bloco paralelo em 908,5s por timeout de 900s, count=0. A mesma suíte com limite diagnóstico de 2400s terminou em 916,1s, descobriu 2971 testes (2959 passaram, 6 falharam, 6 pulados antes de corrigir os seis). A CI do PR #136 bloqueou alterar harness.config.json porque o arquivo só aceita commit direto humano.\n\nRecorrencia em 2026-10-08 ao validar USR-134: python core/harness/runner.py --quick fez fallback local apos perda do worker e excedeu timeout1500: STEP_TIME=1501.7s, TEST_COUNT=0, HARNESS_FAIL. Investigar causa e restaurar conclusao verificavel; nao apenas aumentar limite sem evidencia.",
     "core_journey": [
       "Portão oficial completo no Notebook produz contagem positiva e veredito antes do prazo; preserva o bloqueio a mudanças do harness por agentes."
     ],
@@ -3942,7 +3942,7 @@
     "estimated_complexity": "small",
     "dependencies": [],
     "created_at": "2026-10-04T08:18:40.458904Z",
-    "updated_at": "2026-10-08T19:40:00Z"
+    "updated_at": "2026-10-08T21:05:52.357116Z"
   },
   {
     "id": "USR-138",
@@ -4648,7 +4648,7 @@
       "bug",
       "test-worker"
     ],
-    "problem_statement": "Durante python scripts/line_validate.py do T2 em 2026-10-08, job 535d787ecec547058c894111d3c68025 no worker http://100.78.181.90:8080 parou de responder durante unit_and_integration_tests_parallel. /health respondeu busy=False. Apos >180s o harness caiu para execucao local. Evidencia: /tmp/t2-validation.log no agente de desenvolvimento; snapshot a127ff6e32e6.",
+    "problem_statement": "Durante python scripts/line_validate.py do T2 em 2026-10-08, job 535d787ecec547058c894111d3c68025 no worker http://100.78.181.90:8080 parou de responder durante unit_and_integration_tests_parallel. /health respondeu busy=False. Apos >180s o harness caiu para execucao local. Evidencia: /tmp/t2-validation.log no agente de desenvolvimento; snapshot a127ff6e32e6.\n\nOcorrencia adicional 2026-10-08: job e524a6054d044fec8027e73e7bab49bd ficou sem resposta >180s apesar de health busy=False; portao acionou fallback local.",
     "core_journey": [],
     "non_goals": [
       "Alterar a navegacao DarkHub ou ampliar o T2."
@@ -4663,7 +4663,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-08T14:09:14.155266Z",
-    "updated_at": "2026-10-08T14:09:14.155273Z"
+    "updated_at": "2026-10-08T21:05:52.364102Z"
   },
   {
     "id": "USR-163",
@@ -4876,5 +4876,33 @@
     "dependencies": [],
     "created_at": "2026-10-08T20:38:02.644959Z",
     "updated_at": "2026-10-08T20:38:02.644959Z"
+  },
+  {
+    "id": "USR-175",
+    "project_id": "darkfac",
+    "title": "Isolar candidato do portao oficial contra atualizacao concorrente do checkout",
+    "origin": "review",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "Na verificacao de USR-134 em 2026-10-08 o portao foi executado no checkout compartilhado. HEAD mudou de 0d71e59 para 72c40a4 (PR #214) durante a suite. O harness recusou corretamente emitir evidencia: Candidate HEAD changed during harness execution. A execucao deveria ter usado candidato imutavel em worktree isolada. Formalizar prevencao operacional sem relaxar a recusa fail-closed nem modificar checkouts concorrentes.",
+    "core_journey": [],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Validacao de tickets usa candidato imutavel em worktree isolada.",
+      "Atualizacao concorrente de main nao altera o candidato nem invalida o resultado isolado.",
+      "Mudanca do proprio candidato continua impedindo emissao de evidencia de sucesso."
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-08T21:05:53.366213Z",
+    "updated_at": "2026-10-08T21:05:53.366213Z"
   }
 ]
