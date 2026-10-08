@@ -94,3 +94,4 @@ Thumbs.db
 
 # DarkHub runtime marker for applied catalog revisions (USR-42)
 hub/data/catalog_meta.json
+.factory/live_runs/

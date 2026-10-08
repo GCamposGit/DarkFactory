@@ -113,3 +113,21 @@ Regra do owner: se o usuário opera a fábrica por um harness específico, esse 
 - **Roteamento Unificado**: Tanto o `run_ticket.py` quanto a linha de produção contínua consomem `core.line.routing.pick` e a mesma matriz de capacidades (`core.line.agent_cli.HARNESS_CAPABILITIES`), garantindo que apenas harnesses com capacidade `write` (Claude, Codex, Grok Build) sejam eleitos para implementação.
 - **Configuração Canônica**: Configurações de timeout, modelos e provedores são lidas diretamente de `.factory/config/line_routing.json`, evitando duplicidade de regras.
 
+---
+
+## 5. Publicar fases na Esteira ao vivo quando a implementação é feita no chat (USR-164)
+
+O `run_ticket.py` publica sozinho as fases em `/live`. Quando o ticket é implementado **no chat** (subagentes em worktrees, `git` e `gh` pela própria sessão), nada publica: a Esteira mostra zero runs ativos enquanto o trabalho acontece. Nesse fluxo a sessão abre e atualiza **um run local por ticket** com o CLI fino `scripts/live_run.py` (runbook `docs/runbooks/live_progress.md`):
+
+```powershell
+python C:\dev\DarkFac\scripts\live_run.py open --ticket USR-XX --title "Titulo" --harness claude
+python C:\dev\DarkFac\scripts\live_run.py phase workspace --ticket USR-XX --message "worktree propria"
+python C:\dev\DarkFac\scripts\live_run.py phase agent --ticket USR-XX --message "subagente implementando"
+python C:\dev\DarkFac\scripts\live_run.py finish --ticket USR-XX --message "entregue (PR #N)"
+```
+
+- Fases, na ordem do ciclo autônomo: `preflight` (aberta pelo `open`), `workspace`, `agent`, `gate`, `commit`, `pr`, `ci`, `merge`, `deploy`. Iniciar uma fase encerra a anterior como bem-sucedida; em falha use `phase NOME --status failed --cause CODIGO` e, para terminar o run com erro, `finish --failed`; para cancelar, `cancel`.
+- Chame o CLI nas transições reais (subagente despachado, PR aberto, CI verde, merge, deploy) e **sempre** feche com `finish` ou `cancel`. Todos os comandos são idempotentes.
+- O CLI **nunca falha a sessão**: URL de banco ausente ou banco fora do ar só gera um `[AVISO]` no stderr e exit code 0. Se aparecer o aviso, relate-o ao owner (a configuração da URL de escrita está no runbook); não tente contorná-lo.
+- Harness e máquina vão em cada fase (`DARKFAC_OPERATING_HARNESS` ou `--harness`; host da máquina). Uma sessão que executa `run_ticket.py` **não** precisa chamar o CLI: o launcher já publica.
+
