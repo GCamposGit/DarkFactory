@@ -525,17 +525,58 @@ class CloudWorker:
             input_refs=input_refs,
         )
 
-    def _start_lease_heartbeat(self, claim: Claim) -> tuple[threading.Event, threading.Thread]:
-        """Background thread renewing `claim`'s lease while a (possibly ~30min) handler runs."""
+    def _observe_cancellation(self, claim: Claim, token: Any) -> bool:
+        """USR-152: True (and the run's agent is told to stop) once the store says the run is cancelled.
+
+        Setting the token makes `agent_cli._run_bounded` kill the agent's process tree and makes every
+        workspace commit/push guard refuse; the worktree is also marked so a later process cannot publish.
+        """
+        if not token.refresh():
+            return False
+        run_id = claim.job_key.run_id
+        logger.warning(
+            "Run %s was cancelled (%s) while %s was executing; stopping the agent",
+            run_id, token.reason, claim.job_key.stage,
+        )
+        try:
+            project = self._project_for(claim)
+            if project is not None:
+                from core.line import workspace as line_workspace
+
+                line_workspace.mark_run_cancelled(project.id, run_id, token.reason)
+        except Exception as exc:  # pragma: no cover - defensive, the token alone already stops everything
+            logger.debug("Could not mark workspace of cancelled run %s: %s", run_id, exc)
+        return True
+
+    def _start_lease_heartbeat(
+        self, claim: Claim, token: Any = None
+    ) -> tuple[threading.Event, threading.Thread]:
+        """Background thread renewing `claim`'s lease while a (possibly ~30min) handler runs.
+
+        With a cancel `token` (USR-152) the same thread also polls the run's cancellation state at least
+        every `CANCEL_POLL_INTERVAL_S`, independently of the (slower) lease renewal cadence.
+        """
+        from core.line import cancellation
+
         stop_event = threading.Event()
         interval = max(5.0, getattr(self.store, "lease_duration_sec", 45) / 3.0)
+        poll = min(interval, cancellation.CANCEL_POLL_INTERVAL_S) if token is not None else interval
 
         def _loop() -> None:
-            while not stop_event.wait(interval):
+            next_beat = time.monotonic() + interval
+            while not stop_event.wait(poll):
+                if token is not None and self._observe_cancellation(claim, token):
+                    return
+                if time.monotonic() < next_beat:
+                    continue
+                next_beat = time.monotonic() + interval
                 try:
                     self.store.heartbeat(claim, datetime.now(UTC))
                 except Exception as exc:
                     logger.warning("Lease heartbeat failed for %s: %s", claim.lease_id, exc)
+                    # A cancel releases the claim, so the heartbeat of a cancelled run fails first.
+                    if token is not None:
+                        self._observe_cancellation(claim, token)
                     return
 
         thread = threading.Thread(target=_loop, name=f"lease-heartbeat-{claim.lease_id}", daemon=True)
@@ -758,8 +799,16 @@ class CloudWorker:
         run_id = claim.job_key.run_id
 
         def _execute_stage() -> dict[str, Any]:
+            from core.line import cancellation
+
+            with cancellation.run_scope(run_id, cancellation.store_probe(self.store, run_id)) as token:
+                return _execute_stage_in_scope(token)
+
+        def _execute_stage_in_scope(token: Any) -> dict[str, Any]:
+            from core.line import cancellation
+
             context = self._build_stage_context(claim)
-            stop_heartbeat, heartbeat_thread = self._start_lease_heartbeat(claim)
+            stop_heartbeat, heartbeat_thread = self._start_lease_heartbeat(claim, token)
             try:
                 unavailable = self._agent_route_unavailable(stage)
                 if unavailable is not None:
@@ -787,6 +836,9 @@ class CloudWorker:
                     )
                 else:
                     stage_result = self.registry.dispatch(context)
+            except cancellation.RunCancelledError:
+                token.cancel()
+                stage_result = StageResult(outcome="failed", cause_code=cancellation.CANCELLED_CAUSE)
             except Exception as exc:
                 logger.error(
                     "Handler for %s raised %s: %s; recording as retry(handler_error)",
@@ -799,6 +851,16 @@ class CloudWorker:
             finally:
                 stop_heartbeat.set()
                 heartbeat_thread.join(timeout=2.0)
+
+            if token.refresh():
+                # USR-152: the store already holds the job as `cancelled` (cause owner_cancelled) and the
+                # claim is released; finishing, notifying or scheduling successors would only resurrect it.
+                self._observe_cancellation(claim, token)
+                logger.info(
+                    "Job %s ended as %s after the run was cancelled; result discarded",
+                    claim.job_key.canonical_key(), cancellation.CANCELLED_CAUSE,
+                )
+                return {"cancelled": True, "cause_code": cancellation.CANCELLED_CAUSE}
 
             self._log_stage_outcome(claim, stage_result)
 

@@ -40,6 +40,7 @@ from pathlib import Path
 from typing import Any, Callable, Literal, Optional
 from urllib.parse import urlparse
 
+from core.line import cancellation
 from core.paths import project_root, state_root
 
 from pydantic import BaseModel, Field, field_validator
@@ -74,6 +75,9 @@ ErrorKind = Optional[
         # `not_installed` so a capability gap is never mistaken for a missing
         # binary.
         "unsupported_mode",
+        # The run was cancelled by the owner while the agent ran (USR-152): the process tree was killed
+        # and the result must not be retried, routed around or counted against a route.
+        "cancelled",
     ]
 ]
 
@@ -560,6 +564,7 @@ class BoundedProcessResult:
     returncode: int = 0
     duration_s: float = 0.0
     timed_out: bool = False
+    cancelled: bool = False
 
 
 def _kill_process_tree(pid: int) -> None:
@@ -689,9 +694,46 @@ def _run_bounded(
     timed_out = False
     returncode = 0
 
+    token = cancellation.current_token()
+    cancelled = False
     try:
-        stdout, stderr = proc.communicate(input=input_text, timeout=timeout_s)
-        returncode = proc.returncode
+        if token is None:
+            stdout, stderr = proc.communicate(input=input_text, timeout=timeout_s)
+        else:
+            # USR-152: poll the run's cancel token while the agent runs, so cancelling the run kills
+            # the process tree within ~RUNNER_POLL_INTERVAL_S instead of letting it burn quota.
+            deadline = time.monotonic() + float(timeout_s)
+            pending_input: Optional[str] = input_text
+            while True:
+                if token.is_cancelled():
+                    cancelled = True
+                    break
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise subprocess.TimeoutExpired(argv, timeout_s)
+                try:
+                    stdout, stderr = proc.communicate(
+                        input=pending_input, timeout=min(cancellation.RUNNER_POLL_INTERVAL_S, remaining)
+                    )
+                    break
+                except subprocess.TimeoutExpired:
+                    pending_input = None  # communicate() refuses input after the first call
+        if cancelled:
+            logger.warning("run %s cancelled: terminating agent process tree (pid %s)", token.run_id, proc.pid)
+            _kill_process_tree(proc.pid)
+            try:
+                stdout, stderr = proc.communicate(timeout=grace_s)
+            except (subprocess.TimeoutExpired, Exception):
+                try:
+                    if proc.stdout:
+                        proc.stdout.close()
+                    if proc.stderr:
+                        proc.stderr.close()
+                except Exception:
+                    pass
+            returncode = proc.returncode if proc.returncode is not None else -1
+        else:
+            returncode = proc.returncode
     except subprocess.TimeoutExpired as exc:
         timed_out = True
         _kill_process_tree(proc.pid)
@@ -721,6 +763,7 @@ def _run_bounded(
         returncode=returncode,
         duration_s=duration_s,
         timed_out=timed_out,
+        cancelled=cancelled,
     )
 
 
@@ -1185,6 +1228,17 @@ def _unsupported_mode_result(harness: str, req: AgentRequest) -> AgentResult:
     )
 
 
+def _cancelled_result(req: AgentRequest, duration_s: float) -> AgentResult:
+    return AgentResult(
+        ok=False,
+        text="agent call aborted: the run was cancelled (owner_cancelled)",
+        harness=req.harness,
+        model=req.model,
+        duration_s=duration_s,
+        error_kind="cancelled",
+    )
+
+
 def run_agent(req: AgentRequest) -> AgentResult:
     """Run a single agent-CLI invocation and return a normalized result."""
     harness = req.harness.lower().strip()
@@ -1197,7 +1251,14 @@ def run_agent(req: AgentRequest) -> AgentResult:
         )
     if not supports(harness, req.mode):
         return _unsupported_mode_result(harness, req)
+    token = cancellation.current_token()
+    if token is not None and token.refresh():
+        return _cancelled_result(req, 0.0)
     res = runner(req)
+    if token is not None and token.is_cancelled():
+        # The runner's own verdict (partial output, a crash from the kill) is meaningless: the owner
+        # cancelled the run, so the call is reported as `cancelled` and nothing downstream retries it.
+        return _cancelled_result(req, res.duration_s)
     # Read mode exists to *return text* (grill/planning/review answers), so an
     # "ok" result with none is a failure to retry, not a success to parse. Write
     # mode legitimately edits files and may print nothing.
