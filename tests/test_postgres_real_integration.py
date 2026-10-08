@@ -260,7 +260,10 @@ def test_insert_only_role_publishes_because_the_sink_inserts_before_any_ddl(scra
 
 def test_provisioned_restricted_writer_publishes_and_passes_the_audit(scratch: ScratchDb) -> None:
     """USR-164: the plan of ``scripts/provision_live_writer.py`` yields a role that only inserts events."""
+    from urllib.parse import quote
+
     import psycopg
+    from psycopg.conninfo import conninfo_to_dict
 
     from core.line import live_writer
 
@@ -276,7 +279,13 @@ def test_provisioned_restricted_writer_publishes_and_passes_the_audit(scratch: S
             audit = live_writer.audit_role(conn, role)
         assert audit.ok, audit.problems
 
-        url = live_writer.writer_url(scratch.admin, role, password)
+        # `scratch.admin` is a key/value conninfo (make_conninfo); `writer_url` takes the URL the owner exports.
+        info = conninfo_to_dict(scratch.admin)
+        admin_url = (
+            f"postgresql://{quote(str(info['user']), safe='')}:{quote(str(info['password']), safe='')}"
+            f"@{info['host']}:{info['port']}/{info['dbname']}"
+        )
+        url = live_writer.writer_url(admin_url, role, password)
         PostgresSink(url).write(_event("local-USR-164-restricted", "preflight", "running"))
         assert scratch.admin_exec(f"SELECT count(*) FROM {TABLE} WHERE run_id = 'local-USR-164-restricted'") == [(1,)]
         with pytest.raises(psycopg.errors.InsufficientPrivilege), psycopg.connect(url, autocommit=True) as conn:
