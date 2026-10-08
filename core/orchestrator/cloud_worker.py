@@ -181,6 +181,7 @@ class CloudWorker:
         artifact_sweeper: Callable[..., Any] | None = None,
         orphan_run_sweep_interval_s: float = 300.0,
         orphan_run_sweeper: Callable[..., list[Any]] | None = None,
+        parked_orphan_notifier: Callable[..., list[Any]] | None = None,
     ) -> None:
         self.worker_id = worker_id or os.environ.get("DARKFAC_WORKER_ID", "cloud-worker-1")
         self.max_slots = (
@@ -224,6 +225,7 @@ class CloudWorker:
         # (or are parked on waiting_human) instead of sitting idle forever.
         self._orphan_run_sweep_interval_s = orphan_run_sweep_interval_s
         self._orphan_run_sweeper = orphan_run_sweeper
+        self._parked_orphan_notifier = parked_orphan_notifier
         self._last_orphan_run_sweep_at: datetime | None = None
 
         if capabilities is not None:
@@ -913,7 +915,20 @@ class CloudWorker:
         actions = sweeper(self.store, now=now or datetime.now(UTC))
         if actions:
             logger.info("Orphan run sweep repaired %d run(s): %s", len(actions), actions)
+        try:
+            actions = [*actions, *self._notify_parked_orphan_runs()]
+        except Exception as exc:  # the parking above already happened; delivery is retried next sweep
+            logger.warning("Parked orphan run notification failed: %s", exc)
         return actions
+
+    def _notify_parked_orphan_runs(self) -> list[Any]:
+        """Tell the owner, once per run, about runs parked on `orphan_run_no_successor` (USR-155)."""
+        notifier = self._parked_orphan_notifier
+        if notifier is None:
+            if os.environ.get("PYTEST_CURRENT_TEST"):
+                return []  # tests must never message the owner unless they inject a notifier
+            from core.line.orphan_runs import notify_parked_orphan_runs as notifier
+        return notifier(self.store, send=self._send_owner_text)
 
     def sweep_stale_workspaces(self, now: datetime | None = None) -> list[str]:
         """Delete workspaces of terminal runs older than the retention (default 3 days); never an active run.

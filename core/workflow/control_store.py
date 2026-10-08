@@ -1451,6 +1451,52 @@ class SQLiteControlStore:
         finally:
             conn.close()
 
+    def add_job_evidence(self, job_key: JobKey, ref: str) -> bool:
+        """Append `ref` to the `evidence_refs` of a job parked in `waiting_human` (USR-155).
+
+        Idempotent and status-guarded: returns `True` when the ref is persisted on the job (now or
+        already), `False` when the job is unknown or not `waiting_human`. `updated_at` is left alone so
+        the marker never looks like job activity. Used as the durable "owner already notified" mark.
+        """
+        conn = self._connect()
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            cur = conn.cursor()
+            cur.execute(
+                """
+                SELECT evidence_refs FROM jobs
+                WHERE run_id = ? AND ticket_id = ? AND plan_version = ? AND stage = ? AND iteration = ?
+                  AND status = 'waiting_human'
+                """,
+                job_key.to_tuple(),
+            )
+            row = cur.fetchone()
+            if row is None:
+                conn.rollback()
+                return False
+            try:
+                refs = json.loads(row["evidence_refs"] or "[]")
+            except (TypeError, json.JSONDecodeError):
+                refs = []
+            if not isinstance(refs, list):
+                refs = []
+            if ref not in refs:
+                refs.append(ref)
+                cur.execute(
+                    """
+                    UPDATE jobs SET evidence_refs = ?
+                    WHERE run_id = ? AND ticket_id = ? AND plan_version = ? AND stage = ? AND iteration = ?
+                    """,
+                    (json.dumps(refs), *job_key.to_tuple()),
+                )
+            conn.commit()
+            return True
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+
     def list_waiting_jobs(
         self, statuses: tuple[str, ...] = ("waiting_human", "waiting_dependency")
     ) -> list[JobKey]:

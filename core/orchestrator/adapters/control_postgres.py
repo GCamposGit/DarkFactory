@@ -1339,6 +1339,52 @@ class PostgresControlStore:
         except Exception as exc:
             raise StoreUnavailableError(f"PostgreSQL resume_job failed: {exc}") from exc
 
+    def add_job_evidence(self, job_key: JobKey, ref: str) -> bool:
+        """Append `ref` to the `evidence_refs` of a `waiting_human` job; idempotent (USR-155).
+
+        `True` when the ref is on the job afterwards, `False` for an unknown or non-`waiting_human` job.
+        """
+        if self.mock_mode:
+            return self._backend.add_job_evidence(job_key, ref)
+
+        try:
+            with self._psycopg.connect(self.raw_url) as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        UPDATE jobs
+                        SET evidence_refs = COALESCE(evidence_refs, '[]'::jsonb) || jsonb_build_array(%s::text)
+                        WHERE run_id = %s AND ticket_id = %s AND plan_version = %s AND stage = %s AND iteration = %s
+                          AND status = 'waiting_human'
+                          AND NOT (COALESCE(evidence_refs, '[]'::jsonb) @> jsonb_build_array(%s::text))
+                        """,
+                        (
+                            ref,
+                            job_key.run_id,
+                            job_key.ticket_id,
+                            job_key.plan_version,
+                            job_key.stage,
+                            job_key.iteration,
+                            ref,
+                        ),
+                    )
+                    changed = cur.rowcount > 0
+                    if not changed:
+                        # Either already marked (fine) or not a waiting_human job (not fine).
+                        cur.execute(
+                            """
+                            SELECT 1 FROM jobs
+                            WHERE run_id = %s AND ticket_id = %s AND plan_version = %s AND stage = %s
+                              AND iteration = %s AND status = 'waiting_human'
+                            """,
+                            (job_key.run_id, job_key.ticket_id, job_key.plan_version, job_key.stage, job_key.iteration),
+                        )
+                        changed = cur.fetchone() is not None
+                    conn.commit()
+                    return changed
+        except Exception as exc:
+            raise StoreUnavailableError(f"PostgreSQL add_job_evidence failed: {exc}") from exc
+
     def list_waiting_jobs(
         self, statuses: tuple[str, ...] = ("waiting_human", "waiting_dependency")
     ) -> list[JobKey]:

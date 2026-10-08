@@ -26,6 +26,11 @@ such runs and repairs them:
    `waiting_human` job whose `cause_code` is `ORPHAN_NO_SUCCESSOR_CAUSE`, so it is visible to the
    owner instead of silently idle. A parked run has an open job, so a second sweep ignores it
    (idempotent); `ControlStore.resume_job` wakes it.
+4. A parked run is announced to the owner once (`notify_parked_orphan_runs`, USR-155): a
+   `HumanRequest(kind="infra")` with run, stage and the suggested action (`/linha <ticket>` or
+   `/cancelar <run_id>`). Delivery is a separate step from parking, so a failed send never undoes the
+   park and is retried by the next sweep; `ORPHAN_NOTIFIED_MARKER` in the parked job's `evidence_refs`
+   is the durable once-only guard (survives restarts, shared by every worker).
 
 The functions only use the public `ControlStore` surface (`list_active_run_ids`, `get_run_status`,
 `max_iteration`) plus `materialize_result`, so any store (or a fake) that implements it works.
@@ -39,6 +44,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any, Callable, Iterable, Mapping, Optional, Sequence
 
+from core.line.human import HumanRequest, NotifySender, notify_human_request
 from core.line.route_wait import parse_run_created_at
 from core.workflow.control_contracts import JobKey, StageResult
 from core.workflow.control_store import RUN_OPEN_JOB_STATUSES
@@ -49,6 +55,8 @@ logger = logging.getLogger(__name__)
 
 ORPHAN_IDLE_LIMIT: timedelta = QUEUED_STALL_LIMIT
 ORPHAN_NO_SUCCESSOR_CAUSE = "orphan_run_no_successor"
+# Durable "owner already told" mark, stored in the parked job's `evidence_refs` (USR-155).
+ORPHAN_NOTIFIED_MARKER = "owner_notified:orphan_run_no_successor"
 MAX_ACTIONS_PER_SWEEP = 25
 
 # Terminal job status -> the `StageResult.outcome` that produced it (`db_status` in materialize_result).
@@ -270,6 +278,117 @@ def _repair(store: Any, orphan: OrphanRun, *, now: datetime, materialize: Materi
     return OrphanRunAction(orphan.run_id, "parked", stage, ORPHAN_NO_SUCCESSOR_CAUSE)
 
 
+# --------------------------------------------------------------------------
+# Owner notification for parked runs (USR-155)
+# --------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class ParkedOrphan:
+    """A run parked on `waiting_human(orphan_run_no_successor)` whose owner was not told yet."""
+
+    run_id: str
+    job: JobKey
+
+
+def find_unnotified_parked_orphan(status: Mapping[str, Any]) -> Optional[ParkedOrphan]:
+    """`ParkedOrphan` for a `get_run_status()` payload, or None when nothing is left to notify.
+
+    Pure. The durable state is the parked job itself: a `waiting_human` job with cause
+    `ORPHAN_NO_SUCCESSOR_CAUSE` that has no `ORPHAN_NOTIFIED_MARKER` in its `evidence_refs`. A run where
+    ANY job already carries the marker is considered notified (one message per run, not per parking).
+    """
+    if status.get("status") != "active":
+        return None
+    run_id = str(status.get("run_id") or "")
+    jobs: list[Mapping[str, Any]] = [j for j in (status.get("jobs") or []) if isinstance(j, Mapping)]
+    if not run_id or not jobs:
+        return None
+
+    def _refs(job: Mapping[str, Any]) -> list[Any]:
+        refs = job.get("evidence_refs")
+        return refs if isinstance(refs, list) else []
+
+    if any(ORPHAN_NOTIFIED_MARKER in _refs(job) for job in jobs):
+        return None
+    parked = [
+        job for job in jobs
+        if job.get("status") == "waiting_human" and job.get("cause_code") == ORPHAN_NO_SUCCESSOR_CAUSE
+    ]
+    if not parked:
+        return None
+    newest = max(parked, key=lambda j: int(j.get("iteration") or 0))
+    key = _job_key(newest, run_id)
+    return ParkedOrphan(run_id=run_id, job=key) if key is not None else None
+
+
+def build_parked_orphan_request(parked: ParkedOrphan) -> HumanRequest:
+    """The `HumanRequest(kind="infra")` the owner gets: run, stage and what to do about it."""
+    job = parked.job
+    guide = (
+        f"O run {parked.run_id} (ticket {job.ticket_id}) ficou sem proxima etapa a executar e foi parqueado "
+        f"aguardando voce na etapa '{job.stage}' (causa {ORPHAN_NO_SUCCESSOR_CAUSE}). "
+        f"Para retomar, envie /linha {job.ticket_id}. "
+        f"Para descartar, envie /cancelar {parked.run_id}."
+    )
+    return HumanRequest(kind="infra", run_id=parked.run_id, blocking_stage=job.stage, guide_md=guide)
+
+
+def notify_parked_orphan_runs(
+    store: Any,
+    *,
+    send: Optional[NotifySender] = None,
+    max_actions: int = MAX_ACTIONS_PER_SWEEP,
+    only_run_ids: Optional[Iterable[str]] = None,
+) -> list[OrphanRunAction]:
+    """Tell the owner (once per run) about every run parked on `ORPHAN_NO_SUCCESSOR_CAUSE`.
+
+    Idempotent across sweeps and restarts: after a delivered message the marker
+    `ORPHAN_NOTIFIED_MARKER` is written to the parked job's `evidence_refs` (`store.add_job_evidence`),
+    and only unmarked parked jobs are notified. A failed delivery leaves the run parked and unmarked, so
+    the next sweep tries again; a delivered message whose marker could not be written is retried too
+    (at-least-once beats silence). A store without `add_job_evidence` cannot dedupe, so it never sends.
+
+    Returns one `OrphanRunAction` per attempt: `notified`, `notify_failed` or `error`. Never raises.
+    """
+    if send is None:
+        return []
+    lister = getattr(store, "list_active_run_ids", None)
+    marker = getattr(store, "add_job_evidence", None)
+    if lister is None or marker is None:
+        return []
+    try:
+        run_ids = list(lister())
+    except Exception as exc:
+        logger.warning("Parked orphan notification could not list active runs: %s", exc)
+        return []
+    if only_run_ids is not None:
+        wanted = set(only_run_ids)
+        run_ids = [run_id for run_id in run_ids if run_id in wanted]
+
+    actions: list[OrphanRunAction] = []
+    for run_id in run_ids:
+        if len(actions) >= max_actions:
+            break
+        try:
+            status = store.get_run_status(run_id)
+            parked = find_unnotified_parked_orphan(status) if status else None
+            if parked is None:
+                continue
+            stage = parked.job.stage
+            if not notify_human_request(build_parked_orphan_request(parked), send=send):
+                logger.warning("Owner notification for parked orphan run %s was not delivered; will retry", run_id)
+                actions.append(OrphanRunAction(parked.run_id, "notify_failed", stage, ORPHAN_NO_SUCCESSOR_CAUSE))
+                continue
+            if not marker(parked.job, ORPHAN_NOTIFIED_MARKER):
+                logger.warning("Owner notified about parked orphan run %s but the marker was not stored", run_id)
+            actions.append(OrphanRunAction(parked.run_id, "notified", stage, ORPHAN_NO_SUCCESSOR_CAUSE))
+        except Exception as exc:
+            logger.warning("Parked orphan notification failed for run %s: %s", run_id, exc)
+            actions.append(OrphanRunAction(run_id=str(run_id), action="error", stage="", detail=str(exc)[:200]))
+    return actions
+
+
 def main(argv: Optional[Sequence[str]] = None) -> int:
     """`python -m core.line.orphan_runs [--run-id RUN_ID ...] [--dry-run]`: one sweep on the control store.
 
@@ -304,11 +423,16 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 __all__ = [
     "MAX_ACTIONS_PER_SWEEP",
     "ORPHAN_IDLE_LIMIT",
+    "ORPHAN_NOTIFIED_MARKER",
     "ORPHAN_NO_SUCCESSOR_CAUSE",
     "OrphanRun",
     "OrphanRunAction",
+    "ParkedOrphan",
+    "build_parked_orphan_request",
     "find_orphan_run",
+    "find_unnotified_parked_orphan",
     "main",
+    "notify_parked_orphan_runs",
     "sweep_orphan_runs",
 ]
 
