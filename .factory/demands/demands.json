@@ -4814,5 +4814,35 @@
     "dependencies": [],
     "created_at": "2026-10-08T19:30:15.889542Z",
     "updated_at": "2026-10-08T19:30:15.889542Z"
+  },
+  {
+    "id": "USR-169",
+    "project_id": "darkfac",
+    "title": "Definir e implementar limpeza segura das referencias de contexto de recuperacao",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "Durante a conclusao de USR-134 foi verificado que core/line/recovery_context.py preserva refs/heads/darkfac-context/<run_id> sem mecanismo de limpeza. A retencao apos sucesso ou falha terminal nao esta definida. PR #143 resolve recuperacao e seus criterios de aceite, mas a higiene das referencias requer politica explicita sem remover contexto necessario ao retry.",
+    "core_journey": [
+      "Durante a conclusao de USR-134 foi verificado que core/line/recovery_context.py preserva refs/heads/darkfac-context/<run_id> sem mecanismo de limpeza. A retencao apos sucesso ou falha terminal nao esta definida. PR #143 resolve recuperacao e seus criterios de aceite, mas a higiene das referencias requer politica explicita sem remover contexto necessario ao retry."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Esclarecer com o Owner a politica de retencao e os estados que autorizam limpeza.",
+      "Implementar limpeza idempotente com protecao contra alteracao concorrente da referencia.",
+      "Provar que rollback e retry preservam contexto recuperavel e que apenas referencias elegiveis sao removidas."
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-08T20:38:02.644959Z",
+    "updated_at": "2026-10-08T20:38:02.644959Z"
   }
 ]
