@@ -377,7 +377,7 @@ def test_explicit_base_ref_used_when_present(tmp_path: Path) -> None:
 # --- smoke test against the real repository -----------------------------------
 
 
-def test_shallow_detached_checkout_selects_full_suite(tmp_path: Path) -> None:
+def test_shallow_detached_checkout_rejects_missing_base(tmp_path: Path) -> None:
     source = tmp_path / "source"
     _init_repo(source, branch="trunk")
     _write(source, "tests/test_a.py", "def test_a() -> None:\n    assert True\n")
@@ -390,11 +390,8 @@ def test_shallow_detached_checkout_selects_full_suite(tmp_path: Path) -> None:
     _git(repo, "checkout", "--detach")
     _git(repo, "branch", "-D", "trunk")
 
-    selection = affected.select_affected(repo, "origin/main")
-
-    assert selection.mode == "full"
-    assert selection.tests == ["tests/test_a.py"]
-    assert any("no usable base ref" in reason for reason in selection.escalations)
+    with pytest.raises(affected.GraphBuildError, match="no usable base ref"):
+        affected.select_affected(repo, "origin/main")
 
 
 def test_unborn_checkout_still_rejects_missing_base(tmp_path: Path) -> None:
