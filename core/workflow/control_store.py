@@ -934,6 +934,27 @@ class SQLiteControlStore:
                     (claim.lease_id,),
                 )
 
+            if result.outcome != "success" and result.evidence_refs:
+                # A failed/retry/waiting stage explains itself through its evidence refs (failing test ids,
+                # log names): the success branch persists them, the others used to drop them, so the live
+                # board showed a bare `validate_exhausted` (USR-62 pilot). Empty refs never clobber a value.
+                cur.execute(
+                    """
+                    UPDATE jobs SET evidence_refs = ?
+                    WHERE run_id = ? AND ticket_id = ? AND plan_version = ?
+                      AND stage = ? AND iteration = ? AND fencing_token = ?
+                    """,
+                    (
+                        json.dumps(result.evidence_refs),
+                        jk.run_id,
+                        jk.ticket_id,
+                        jk.plan_version,
+                        jk.stage,
+                        jk.iteration,
+                        claim.fencing_token,
+                    ),
+                )
+
             conn.commit()
         except Exception:
             conn.rollback()
