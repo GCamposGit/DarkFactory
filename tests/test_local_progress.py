@@ -492,3 +492,184 @@ def test_a_failed_delivery_still_fails_the_run_and_records_why(
     assert sink.events[-1].cause_code == "delivery_failed"
     assert "CI failed on build" in sink.events[-1].message
     capsys.readouterr()
+
+
+# ------------------------------------------------------------------ USR-154: one warning when it cannot publish
+
+# Built by concatenation so no tracked file carries a literal URL with a password (test_no_tracked_secrets).
+_PW_URL = "postgresql://" + "writer:" + "hunter2" + "@10.0.0.9:5432/control"
+
+
+class _RaisingSink:
+    def __init__(self, exc: BaseException) -> None:
+        self.exc = exc
+        self.calls = 0
+
+    def write(self, event: LocalRunEvent) -> None:
+        self.calls += 1
+        raise self.exc
+
+
+def test_no_database_url_warns_once_with_the_variable_names_and_never_publishes(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("DARKFAC_STATE_ROOT", str(tmp_path))  # no control.db here: nothing to fall back to
+    warnings: list[str] = []
+    progress = open_progress("USR-9", "darkfac", "t", environ={}, warn=warnings.append)
+    assert progress.sink is None
+
+    for index in range(4):
+        progress.phase("agent", "running", f"fase {index}")
+    progress.finish(True)
+
+    assert len(warnings) == 1
+    assert "DARKFAC_HF02_DATABASE_URL" in warnings[0] and "DARKHUB_LINE_DATABASE_URL" in warnings[0]
+    assert "live_progress.md" in warnings[0]
+    assert progress.warning == warnings[0]
+
+
+def test_unconfigured_warning_is_off_for_the_explicit_switch_pytest_and_a_parent_that_warned(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("DARKFAC_STATE_ROOT", str(tmp_path))
+    warnings: list[str] = []
+    off = open_progress("USR-9", "darkfac", "t", environ={ENV_SWITCH: "off"}, warn=warnings.append)
+    off.phase("agent", "running")
+    assert warnings == [] and off.warning is None
+
+    # default channel under pytest (default environment): silent, so existing suites never see it
+    default = open_progress("USR-9", "darkfac", "t")
+    default.phase("agent", "running")
+    assert default.warning is None
+
+    # a delivery subprocess whose parent already warned stays quiet
+    child = open_progress("USR-9", "darkfac", "t", environ={local_progress.ENV_WARNED: "1"})
+    child.phase("agent", "running")
+    assert child.warning is None
+
+
+def test_a_dry_run_never_warns_about_missing_configuration(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("DARKFAC_STATE_ROOT", str(tmp_path))
+    warnings: list[str] = []
+    progress = open_progress("USR-9", "darkfac", "t", environ={}, warn=warnings.append)
+    progress.hold()
+    progress.phase("preflight", "running")
+    progress.discard()
+    progress.release()
+    assert warnings == []
+
+
+@pytest.mark.parametrize(
+    ("exc", "expected"),
+    [
+        (PermissionError("permission denied for schema public"), "sem permissao de escrita"),
+        (RuntimeError("attempt to write a readonly database"), "sem permissao de escrita"),
+        (TimeoutError("progress write exceeded 5s"), "inalcancavel"),
+        (ConnectionRefusedError("could not connect to server"), "inalcancavel"),
+        (ModuleNotFoundError("No module named 'psycopg'"), "psycopg"),
+        (ValueError("weird " + _PW_URL), "falha ao gravar (ValueError)"),
+    ],
+    ids=["permission", "readonly", "timeout", "refused", "driver", "other"],
+)
+def test_a_failing_sink_warns_once_at_the_first_failure_with_a_sanitized_reason(
+    exc: BaseException, expected: str
+) -> None:
+    warnings: list[str] = []
+    progress = _publisher(_RaisingSink(exc), warn=warnings.append)
+
+    progress.phase("preflight", "running")
+    progress.phase("agent", "running")
+    progress.phase("gate", "running")
+    progress.finish(True)
+
+    assert len(warnings) == 1
+    assert expected in warnings[0]
+    assert "hunter2" not in warnings[0] and "postgresql://" not in warnings[0]
+    assert not progress.enabled  # muted after repeated failures, run unaffected
+
+
+def test_a_sink_that_recovers_after_one_failure_still_warned_only_once() -> None:
+    state = {"fail": True}
+
+    class Flaky:
+        def write(self, event: LocalRunEvent) -> None:
+            if state["fail"]:
+                raise OSError("flap")
+
+    warnings: list[str] = []
+    progress = _publisher(Flaky(), warn=warnings.append)
+    progress.phase("preflight", "running")
+    state["fail"] = False
+    progress.phase("agent", "running")
+    state["fail"] = True
+    progress.phase("gate", "running")
+    assert len(warnings) == 1
+
+
+def test_a_warn_callback_that_raises_never_breaks_publishing() -> None:
+    def boom(_text: str) -> None:
+        raise RuntimeError("stderr closed")
+
+    progress = _publisher(_RaisingSink(OSError("down")), warn=boom)
+    progress.phase("agent", "running")  # does not raise
+    progress.finish(True)
+
+
+def test_stderr_warning_writes_to_stderr_only(capsys: pytest.CaptureFixture[str]) -> None:
+    local_progress.stderr_warning("[AVISO] teste")
+    captured = capsys.readouterr()
+    assert captured.out == "" and "[AVISO] teste" in captured.err
+
+
+def test_missing_sink_reason_distinguishes_absent_and_mock_urls() -> None:
+    assert "ausente" in (local_progress.missing_sink_reason({}) or "")
+    assert "mock" in (local_progress.missing_sink_reason({"DARKFAC_HF02_DATABASE_URL": "mock://"}) or "")
+    assert local_progress.missing_sink_reason({ENV_SWITCH: "0"}) is None
+    assert local_progress.missing_sink_reason() is None  # under pytest with the default environment
+
+
+def test_json_run_without_configuration_keeps_stdout_clean_and_exit_code(
+    launcher: Callable[[Any], _Launcher],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setenv("DARKFAC_STATE_ROOT", str(tmp_path))
+    launcher(None)
+    _delivery_ok(monkeypatch)
+
+    def make(ticket_id: str, project_id: str = "darkfac", title: str = "", **_: Any) -> ProgressPublisher:
+        return open_progress(ticket_id, project_id, title, environ={}, warn=local_progress.stderr_warning)
+
+    monkeypatch.setattr(run_ticket, "open_progress", make)
+
+    assert main(["USR-99", "--harness", "codex", "--skip-validation", "--json"]) == 0
+
+    captured = capsys.readouterr()
+    assert json.loads(captured.out)["ok"] is True  # stdout is still exactly one JSON document
+    assert captured.err.count("[AVISO] Esteira ao vivo") == 1
+    assert "DARKFAC_HF02_DATABASE_URL" in captured.err
+
+
+def test_json_run_with_a_failing_store_warns_on_stderr_once_and_does_not_change_the_result(
+    launcher: Callable[[Any], _Launcher], monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    sink = _RaisingSink(PermissionError("permission denied for table local_run_events " + _PW_URL))
+    launcher(sink)
+
+    def make(ticket_id: str, project_id: str = "darkfac", title: str = "", **_: Any) -> ProgressPublisher:
+        return ProgressPublisher(
+            ticket_id=ticket_id, project_id=project_id, title=title, sink=sink, worker="HOST-A",
+            warn=local_progress.stderr_warning,
+        )
+
+    monkeypatch.setattr(run_ticket, "open_progress", make)
+    _delivery_ok(monkeypatch)
+
+    assert main(["USR-99", "--harness", "codex", "--skip-validation", "--json"]) == 0
+
+    captured = capsys.readouterr()
+    assert json.loads(captured.out)["ok"] is True
+    assert captured.err.count("[AVISO] Esteira ao vivo") == 1
+    assert "sem permissao de escrita" in captured.err
+    assert "hunter2" not in captured.err + captured.out

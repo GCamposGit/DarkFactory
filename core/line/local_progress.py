@@ -25,6 +25,7 @@ import logging
 import os
 import socket
 import sqlite3
+import sys
 import threading
 from collections.abc import Callable, Mapping
 from contextlib import closing
@@ -80,6 +81,9 @@ ABANDON_AFTER_SECONDS = 6 * 3600
 TABLE = "local_run_events"
 ENV_RUN_ID = "DARKFAC_LOCAL_RUN_ID"
 ENV_SWITCH = "DARKFAC_LOCAL_PROGRESS"
+# Set for a delivery subprocess once the parent already warned: one warning per run, not per process.
+ENV_WARNED = "DARKFAC_LOCAL_PROGRESS_WARNED"
+RUNBOOK = "docs/runbooks/live_progress.md"
 # Writer-capable URLs first: the Hub's read-only role (DARKHUB_CONTROL_DATABASE_URL) is the last resort.
 WRITE_DATABASE_URL_ENVS: tuple[str, ...] = (
     "DARKFAC_HF02_DATABASE_URL",
@@ -251,6 +255,54 @@ def resolve_sink(environ: Mapping[str, str] | None = None) -> ProgressSink | Non
     return SqliteSink(local_db) if local_db.is_file() else None
 
 
+def missing_sink_reason(environ: Mapping[str, str] | None = None) -> str | None:
+    """Why no sink could be resolved, or ``None`` when publishing is off on purpose.
+
+    Off on purpose: running under ``pytest`` with the default environment, or the explicit
+    ``DARKFAC_LOCAL_PROGRESS=off`` switch. Any other absence of a sink is a configuration gap the
+    operator should hear about (USR-154).
+    """
+    if environ is None:
+        if os.environ.get("PYTEST_CURRENT_TEST"):
+            return None
+        env: Mapping[str, str] = os.environ
+    else:
+        env = environ
+    if env.get(ENV_SWITCH, "").strip().lower() in {"0", "off", "false", "no"}:
+        return None
+    names = " ou ".join(WRITE_DATABASE_URL_ENVS[:2])
+    if any(env.get(name, "").strip() for name in WRITE_DATABASE_URL_ENVS):
+        return f"as variaveis de banco definidas nao apontam para um banco real (valor mock); defina {names}"
+    return f"variavel de banco ausente: defina {names} com um usuario que possa gravar"
+
+
+def describe_publish_failure(exc: BaseException) -> str:
+    """Short, credential-free reason for a failed write (never echoes the driver message)."""
+    name = type(exc).__name__
+    text = str(exc).lower()
+    if isinstance(exc, ImportError):
+        return "driver psycopg nao instalado neste ambiente"
+    if (
+        name == "InsufficientPrivilege"
+        or "permission denied" in text
+        or "readonly" in text
+        or "read-only" in text
+        or "must be owner" in text
+    ):
+        return f"sem permissao de escrita: o usuario do banco precisa de CREATE e INSERT em {TABLE}"
+    if isinstance(exc, (OSError, TimeoutError)) or name in {"OperationalError", "InterfaceError"} or "connect" in text:
+        return "banco inalcancavel ou conexao recusada (host, porta, credenciais ou rede)"
+    return f"falha ao gravar ({name})"
+
+
+def stderr_warning(text: str) -> None:
+    """Default warning channel: stderr only, so ``--json`` consumers keep a clean stdout."""
+    try:
+        print(text, file=sys.stderr, flush=True)
+    except Exception:  # noqa: BLE001 - a closed or odd stderr must not matter
+        pass
+
+
 def _run_bounded(fn: Callable[[], None], timeout_s: float) -> None:
     """Run ``fn`` in a daemon thread; raise on error or if it exceeds ``timeout_s``."""
     outcome: list[BaseException] = []
@@ -287,6 +339,8 @@ class ProgressPublisher:
         timeout_s: float = 5.0,
         max_consecutive_failures: int = 2,
         clock: Callable[[], datetime] = _utc_now,
+        warn: Callable[[str], None] | None = None,
+        unconfigured_reason: str | None = None,
     ) -> None:
         self.ticket_id = ticket_id
         self.project_id = project_id or "darkfac"
@@ -298,6 +352,9 @@ class ProgressPublisher:
         self.timeout_s = timeout_s
         self.max_consecutive_failures = max_consecutive_failures
         self._clock = clock
+        self._warn = warn
+        self._unconfigured_reason = unconfigured_reason
+        self.warning: str | None = None  # the single warning of this run, once emitted
         self._failures = 0
         self._muted = False
         self._finished = False
@@ -394,8 +451,27 @@ class ProgressPublisher:
             return
         self._send(event)
 
+    def _emit_warning(self, reason: str) -> None:
+        """At most one warning per run; never raises and never touches the run result."""
+        if self.warning is not None:
+            return
+        try:
+            text = (
+                f"[AVISO] Esteira ao vivo: progresso desta execucao nao sera publicado - {reason}. "
+                f"A execucao continua normalmente. Veja {RUNBOOK}."
+            )
+            self.warning = sanitize_database_url(text)
+            if self._warn is not None:
+                self._warn(self.warning)
+        except Exception:  # noqa: BLE001
+            pass
+
     def _send(self, event: LocalRunEvent) -> None:
-        if not self.enabled or self.sink is None:
+        if self.sink is None:
+            if self._unconfigured_reason and not self._discarded:
+                self._emit_warning(self._unconfigured_reason)
+            return
+        if not self.enabled:
             return
         sink = self.sink
         phase, status = event.phase, event.status
@@ -404,6 +480,7 @@ class ProgressPublisher:
             self._failures = 0
         except Exception as exc:  # noqa: BLE001 - network, driver, lock, timeout: all contained
             self._failures += 1
+            self._emit_warning(describe_publish_failure(exc))
             logger.warning(
                 "local progress: publish failed for %s %s/%s (%s: %s)",
                 self.run_id,
@@ -432,15 +509,23 @@ def open_progress(
     sink: ProgressSink | None = None,
     environ: Mapping[str, str] | None = None,
     harness: str | None = None,
+    warn: Callable[[str], None] | None | Literal["default"] = "default",
 ) -> ProgressPublisher:
     """A publisher for ``ticket_id``; joins the parent run when ``DARKFAC_LOCAL_RUN_ID`` is set.
 
     Never raises: any failure resolving the sink yields a publisher that simply does not publish.
+    ``warn`` receives the single "cannot publish" warning of the run (USR-154). By default it goes to
+    stderr, except under ``pytest`` or when a parent process already warned; pass ``None`` to silence it.
     """
     try:
         env = os.environ if environ is None else environ
         inherited = env.get(ENV_RUN_ID, "").strip()
         resolved = sink if sink is not None else resolve_sink(environ)
+        if warn == "default":
+            already = bool(env.get(ENV_WARNED, "").strip())
+            under_pytest = environ is None and bool(os.environ.get("PYTEST_CURRENT_TEST"))
+            warn = None if already or under_pytest else stderr_warning
+        reason = missing_sink_reason(environ) if resolved is None and warn is not None else None
         return ProgressPublisher(
             ticket_id=ticket_id,
             project_id=project_id,
@@ -449,6 +534,8 @@ def open_progress(
             sink=resolved,
             harness=harness,
             owns_run=not inherited,
+            warn=warn,
+            unconfigured_reason=reason,
         )
     except Exception as exc:  # noqa: BLE001
         logger.warning("local progress: disabled (%s)", type(exc).__name__)
