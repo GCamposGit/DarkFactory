@@ -377,6 +377,33 @@ def test_explicit_base_ref_used_when_present(tmp_path: Path) -> None:
 # --- smoke test against the real repository -----------------------------------
 
 
+def test_shallow_detached_checkout_selects_full_suite(tmp_path: Path) -> None:
+    source = tmp_path / "source"
+    _init_repo(source, branch="trunk")
+    _write(source, "tests/test_a.py", "def test_a() -> None:\n    assert True\n")
+    _write(source, "tests/test_canaletto.py", "def test_local() -> None:\n    assert False\n")
+    _commit_all(source, "first")
+    _write(source, "core/example.py", "VALUE = 1\n")
+    _commit_all(source, "second")
+    repo = tmp_path / "clone"
+    _git(tmp_path, "clone", "--depth=1", source.as_uri(), str(repo))
+    _git(repo, "checkout", "--detach")
+    _git(repo, "branch", "-D", "trunk")
+
+    selection = affected.select_affected(repo, "origin/main")
+
+    assert selection.mode == "full"
+    assert selection.tests == ["tests/test_a.py"]
+    assert any("no usable base ref" in reason for reason in selection.escalations)
+
+
+def test_unborn_checkout_still_rejects_missing_base(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    _init_repo(repo, branch="trunk")
+    with pytest.raises(affected.GraphBuildError, match="no usable base ref"):
+        affected.select_affected(repo, "origin/main")
+
+
 # The official quick gate runs this test in the serial step so xdist workers do
 # not make the absolute latency budget depend on unrelated CPU contention.
 @pytest.mark.serial

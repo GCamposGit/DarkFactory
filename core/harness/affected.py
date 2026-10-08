@@ -592,7 +592,21 @@ def _select_tests_for_non_python_change(
 
 
 def select_affected(repo_root: Path, base_ref_requested: str) -> Selection:
-    resolved_base = resolve_base_ref(repo_root, base_ref_requested)
+    try:
+        resolved_base = resolve_base_ref(repo_root, base_ref_requested)
+    except GraphBuildError as exc:
+        if not _git_ref_exists(repo_root, "HEAD"):
+            raise
+        # Detached shallow validation clones may have no comparison ref.
+        # Comparing HEAD to itself would silently skip tests; run all instead.
+        graph = build_import_graph(repo_root)
+        return Selection(
+            mode="full",
+            tests=sorted(graph.test_paths),
+            reasons={},
+            escalations=[f"base_ref_unavailable: {exc}"],
+            changed_files=[],
+        )
     merge_base = compute_merge_base(repo_root, resolved_base)
     changed_files = [f for f in get_changed_files(repo_root, merge_base) if f not in EXCLUDED_TEST_FILES]
 
