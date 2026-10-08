@@ -1262,7 +1262,7 @@
     "project_id": "darkfac",
     "title": "Transformar menu superior em menu vertical lateral esquerdo no DarkHub",
     "origin": "user",
-    "status": "planned",
+    "status": "completed",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -1306,7 +1306,8 @@
       "USR-86"
     ],
     "created_at": "2026-09-29T15:19:20.681698Z",
-    "updated_at": "2026-10-08T09:40:00Z"
+    "updated_at": "2026-10-08T19:40:00Z",
+    "delivery_evidence": "Piloto V1 entregue pela linha autonoma: run-4b82f674ccea (grill, planning, development, validation, review e integration) gerou o PR #202 (menu lateral aside id=hub-sidebar com sidebar colapsavel, aria-current e offset lg:ml-64). O CI Windows do PR falhou por defeito portatil do gerador (generate_hub_styles.py gravava CRLF no Windows; corrigido no commit 93198fb) e por estouro do limite de 900 s do passo paralelo (USR-135); apos a correcao o PR passou nos dois sistemas e foi mergeado em c0aab80. Verificado em producao em 08/10/2026 apos o deploy: darkhub.ggcampos.com tem aside id=hub-sidebar, lg:ml-64 e uma unica versao ?v=20261008c. Nota: o criterio V1 sem toque humano nao foi cumprido integralmente, houve uma correcao manual do gerador na branch do run e o reenvio do job Windows do CI."
   },
   {
     "id": "USR-63",
@@ -3912,8 +3913,8 @@
     "project_id": "darkfac",
     "title": "Adequar limite do portão oficial à suíte completa no Notebook",
     "origin": "review",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "Commit 4ef7783 (owner): timeout_sec do passo unit_and_integration_tests_parallel de 900 para 1500 s. Medicao no Notebook em 08/10/2026 com o patch de resiliencia aplicado: 3452 testes, HARNESS_PASS, passo paralelo 886,3 s e serial 192,5 s (total 18 min 04 s), margem de apenas 1,5% sobre o limite antigo. O CI Windows do PR do piloto USR-62 chegou a estourar os 900 s (901,4 s, count=0). O trusted-pr-policy permanece verde.",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -3941,7 +3942,7 @@
     "estimated_complexity": "small",
     "dependencies": [],
     "created_at": "2026-10-04T08:18:40.458904Z",
-    "updated_at": "2026-10-04T08:18:40.458904Z"
+    "updated_at": "2026-10-08T19:40:00Z"
   },
   {
     "id": "USR-138",
@@ -4367,8 +4368,8 @@
     "project_id": "darkfac",
     "title": "Cancelar run da linha deve interromper o agente de desenvolvimento em andamento",
     "origin": "user",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "PR #211: core/line/cancellation.py (CancelToken por run) e CloudWorker sondam o cancelamento a cada 10 s; agent_cli encerra a arvore de processos do agente em ate ~11 s (erro cancelled, sem retry); workspace.commit, commit_paths e push recusam depois do cancelamento (marcador no gitdir privado); o resultado do handler de um run cancelado e descartado. tests/line/test_run_cancel_agent.py: 11 passed (agente falso com filho, git real); CI ubuntu e windows verdes. Limite: o launcher headless run_ticket.py nao tem cancelamento por run.",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -4390,15 +4391,15 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-08T13:38:37.178111Z",
-    "updated_at": "2026-10-08T13:38:37.178111Z"
+    "updated_at": "2026-10-08T19:40:00Z"
   },
   {
     "id": "USR-153",
     "project_id": "darkfac",
     "title": "Etapa development deve tratar base vermelha (teste que falha igual no origin/main) sem queimar as 3 iteracoes",
     "origin": "user",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "PR #209: quando a validacao do development falha apenas em testes que tambem falham no origin/main (core/line/base_probe.py reexecuta os node ids num worktree destacado), a etapa devolve retry base_red (mesma causa da integracao) sem consumir iteracao do desenvolvedor, com teto de 6 esperas e fim failed(base_red_exhausted), nunca validate_exhausted; falha mista continua consumindo iteracoes. tests/line/test_stage_build_base_red.py: 13 passed; CI verde.",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -4420,15 +4421,15 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-08T13:38:38.505002Z",
-    "updated_at": "2026-10-08T13:38:38.505002Z"
+    "updated_at": "2026-10-08T19:40:00Z"
   },
   {
     "id": "USR-154",
     "project_id": "darkfac",
     "title": "run_ticket deve avisar quando nao consegue publicar progresso na Esteira ao vivo",
     "origin": "user",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "PR #207: run_ticket imprime um unico aviso no stderr (sem URL nem senha) quando nao consegue publicar progresso na Esteira ao vivo (variavel ausente, sem permissao, banco inalcancavel, driver ausente), sem alterar o exit code nem o stdout --json; runbook docs/runbooks/live_progress.md. tests/test_local_progress.py: 34 passed; CI verde.",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -4450,15 +4451,15 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-08T13:38:39.452144Z",
-    "updated_at": "2026-10-08T13:38:39.452144Z"
+    "updated_at": "2026-10-08T19:40:00Z"
   },
   {
     "id": "USR-155",
     "project_id": "darkfac",
     "title": "Notificar o owner quando o varredor parqueia um run orfao em waiting_human",
     "origin": "user",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "PR #206: notify_parked_orphan_runs notifica o owner uma unica vez por run parqueado em waiting_human (orphan_run_no_successor) com run_id, etapa e acao sugerida (/linha ou /cancelar); idempotencia duravel pelo marcador owner_notified:orphan_run_no_successor em evidence_refs (add_job_evidence em SQLite e Postgres); falha de envio nunca desfaz o parqueamento e e retentada na varredura seguinte. tests/line/test_orphan_notifications.py; CI verde. Postgres real nao testado (so SQLite e mock).",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -4480,15 +4481,15 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-08T13:38:40.376953Z",
-    "updated_at": "2026-10-08T13:38:40.376953Z"
+    "updated_at": "2026-10-08T19:40:00Z"
   },
   {
     "id": "USR-156",
     "project_id": "darkfac",
     "title": "Atualizar o roadmap do DarkHub e o cache de scripts apos o reconhecimento de alertas sem confirmacao",
     "origin": "user",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "PR #204: docs/DARKHUB_ROADMAP.md (DH-17) descreve o reconhecimento em um clique e em lote. O parametro ?v= dos scripts ja estava unificado em 20261008c pelo PR #202 do piloto e nao havia hash de roadmap a regenerar. 65 testes focais passed; CI verde.",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -4510,7 +4511,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-08T13:38:41.311802Z",
-    "updated_at": "2026-10-08T13:38:41.311802Z"
+    "updated_at": "2026-10-08T19:40:00Z"
   },
   {
     "id": "USR-157",
@@ -4547,8 +4548,8 @@
     "project_id": "darkfac",
     "title": "Retirar o patch obsoleto usr-143-harness-core.patch apos a resiliencia do portao entrar no main",
     "origin": "user",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "PR #205: .factory/patches/usr-143-harness-core.patch removido; docs/proposals/USR-158-usr143-patch-retirement.md registra a tabela portar e descartar (so last_probe_failure_reason seria candidato a porte futuro, descrito em texto e nao portado) e o relatorio do USR-143 aponta o commit afac42b. Nenhum caminho protegido tocado; CI verde.",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -4570,15 +4571,15 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-08T13:38:43.291078Z",
-    "updated_at": "2026-10-08T13:38:43.291078Z"
+    "updated_at": "2026-10-08T19:40:00Z"
   },
   {
     "id": "USR-159",
     "project_id": "darkfac",
     "title": "Higiene de worktrees: limpar worktrees de agentes e branches mergeadas sem falhar",
     "origin": "user",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "PR #208: core/git/worktree_gc.py (CLI python -m core.git.worktree_gc, dry-run por padrao) remove apenas worktrees MERGED limpas, com retry e backoff para Directory not empty e prune; nunca toca ACTIVE, LOCKED, UNMERGED, fora dos roots ou o checkout principal; falha fechada sem informacao do gh. tests/test_worktree_gc.py: 22 passed com repositorios temporarios; CI verde. Nao executado com --apply no checkout real.",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -4600,15 +4601,15 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-08T13:38:44.247047Z",
-    "updated_at": "2026-10-08T13:38:44.247047Z"
+    "updated_at": "2026-10-08T19:40:00Z"
   },
   {
     "id": "USR-160",
     "project_id": "darkfac",
     "title": "Corpus E2E da fabrica: plugar driver real e injecao de falhas de recuperacao",
     "origin": "user",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "PR #210: evals/e2e/driver.py (protocolo LineRunner e ControlStoreLineRunner sobre ControlStore injetado, recusa mock e Postgres sem permissao explicita), evals/e2e/orchestrator.py (injecao de recovery.fault e fault_injected gravado so quando aplicado) e CLI run e compare; anti-vazamento preservado (o runner so recebe AgentView). tests/test_factory_e2e_driver.py: 31 passed; CI verde. Nenhuma execucao real contra a linha: o operador precisa fornecer a fabrica do runner e os fault_hooks reais (docs/EVAL_E2E.md).",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -4630,7 +4631,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-08T13:38:45.039386Z",
-    "updated_at": "2026-10-08T13:38:45.039386Z"
+    "updated_at": "2026-10-08T19:40:00Z"
   },
   {
     "id": "USR-162",
@@ -4723,5 +4724,95 @@
     "dependencies": [],
     "created_at": "2026-10-08T17:58:05.189744Z",
     "updated_at": "2026-10-08T17:58:05.189744Z"
+  },
+  {
+    "id": "USR-165",
+    "project_id": "darkfac",
+    "title": "Espera por base vermelha no development nao atualiza a branch do run quando a base fica verde",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "Seguimento do USR-153 (PR #209): quando a etapa development entra em espera base_red, a branch do run nao e atualizada com a base ja corrigida; se a base ficar verde o retry ainda valida o codigo contra a base antiga e so a integracao (update do PR) resolveria. O run so destrava se algo rebasear a branch.",
+    "core_journey": [
+      "Seguimento do USR-153 (PR #209): quando a etapa development entra em espera base_red, a branch do run nao e atualizada com a base ja corrigida; se a base ficar verde o retry ainda valida o codigo contra a base antiga e so a integracao (update do PR) resolveria. O run so destrava se algo rebasear a branch."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Ao sair da espera base_red, a branch do run e atualizada (rebase ou merge) sobre a base atual antes de revalidar",
+      "Falha de rebase por conflito gera causa estruturada e devolve ao desenvolvedor, sem consumir iteracoes por engano",
+      "Teste focal com repositorio git temporario: base vermelha, correcao na base, retomada valida contra a base nova"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-08T19:30:14.568988Z",
+    "updated_at": "2026-10-08T19:30:14.568988Z"
+  },
+  {
+    "id": "USR-166",
+    "project_id": "darkfac",
+    "title": "Cancelamento por run no launcher headless run_ticket.py",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "Seguimento do USR-152 (PR #211): o cancelamento interrompe o agente apenas nos runs da linha (worker com store e escopo por run). O launcher headless run_ticket.py usa o mesmo _run_bounded mas nao tem store nem escopo por run, entao /cancelar nao alcanca o agente de um ticket executado localmente.",
+    "core_journey": [
+      "Seguimento do USR-152 (PR #211): o cancelamento interrompe o agente apenas nos runs da linha (worker com store e escopo por run). O launcher headless run_ticket.py usa o mesmo _run_bounded mas nao tem store nem escopo por run, entao /cancelar nao alcanca o agente de um ticket executado localmente."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Um run_ticket em andamento pode ser cancelado por sinal ou arquivo de controle por ticket e encerra a arvore de processos do agente sem commit nem push posteriores",
+      "O cancelamento aparece na Esteira ao vivo (USR-140) como fase cancelada",
+      "Teste focal com agente falso de longa duracao"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-08T19:30:15.159255Z",
+    "updated_at": "2026-10-08T19:30:15.159255Z"
+  },
+  {
+    "id": "USR-167",
+    "project_id": "darkfac",
+    "title": "Testar contra Postgres real o add_job_evidence e a tabela local_run_events",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "Seguimento dos USR-155 (PR #206) e USR-140 (PR #187): o SQL de add_job_evidence (jsonb_build_array, @>, ||) e o DDL e INSERT de local_run_events no Postgres so foram exercitados nos caminhos SQLite e mock; a permissao CREATE TABLE e INSERT do usuario do banco tambem so foi lida do codigo.",
+    "core_journey": [
+      "Seguimento dos USR-155 (PR #206) e USR-140 (PR #187): o SQL de add_job_evidence (jsonb_build_array, @>, ||) e o DDL e INSERT de local_run_events no Postgres so foram exercitados nos caminhos SQLite e mock; a permissao CREATE TABLE e INSERT do usuario do banco tambem so foi lida do codigo."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Teste de integracao opcional (marcado, desligado por padrao) contra um Postgres descartavel valida add_job_evidence idempotente e local_run_events",
+      "Documentar no runbook o GRANT minimo verificado",
+      "Rodar o teste em CI ou em container local e registrar o resultado"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-08T19:30:15.889542Z",
+    "updated_at": "2026-10-08T19:30:15.889542Z"
   }
 ]
