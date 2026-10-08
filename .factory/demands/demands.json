@@ -1284,12 +1284,18 @@
     ],
     "reachability_contract": "python -m pytest tests/test_transformar_menu_superior_em_m.py -v",
     "acceptance_criteria": [
-      "A funcionalidade descrita em 'Transformar menu superior em menu vertical lateral esquerdo no DarkHub' opera sem erros sintáticos ou de tipos.",
-      "Validação headless executada com sucesso via `python -m pytest tests/test_transformar_menu_superior_em_m.py -v`.",
-      "O status e histórico do ticket são atualizados no backlog da Dark Factory."
+      "O header nao contem mais os itens de navegacao; existe um unico <aside id=\"hub-sidebar\"> com <nav aria-label> em coluna a esquerda, com todos os itens e handlers originais preservados.",
+      "A topbar mantem marca, busca Ctrl+K, seletor #global-project-select, badges e botao Novo.",
+      "O <main> recebe offset lg:ml-64; abaixo de 1024px a sidebar e colapsavel (hamburguer, overlay, Escape, aria-expanded), com aria-current=\"page\" no item ativo.",
+      "As tags <script> de index.html compartilham uma unica versao ?v=, e hub/frontend/styles.css e hub/frontend/static/styles.css sao identicos e gerados por scripts/generate_hub_styles.py.",
+      "python scripts/line_validate.py termina com exit 0 e tests/test_transformar_menu_superior_em_m.py passa."
     ],
     "suggested_files": [
-      "core/transformar_menu_superior_em_m/service.py",
+      "scripts/generate_hub_styles.py",
+      "hub/frontend/index.html",
+      "hub/frontend/app.js",
+      "hub/frontend/styles.css",
+      "hub/frontend/static/styles.css",
       "tests/test_transformar_menu_superior_em_m.py"
     ],
     "estimated_complexity": "medium",
@@ -1299,7 +1305,7 @@
       "USR-86"
     ],
     "created_at": "2026-09-29T15:19:20.681698Z",
-    "updated_at": "2026-09-30T22:00:00Z"
+    "updated_at": "2026-10-08T09:40:00Z"
   },
   {
     "id": "USR-63",
@@ -4330,8 +4336,8 @@
     "project_id": "darkfac",
     "title": "Stabilize auto-routed fallback after an unavailable harness",
     "origin": "user",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "PR #195: core/line/agent_retry.py ganhou backoff_delay(), unico ponto que decide espera (so falha transient com retentativas restantes dorme; not_installed, unsupported_mode, auth_expired, no_authenticated_harness e rate_limited nunca dormem); tests/test_run_ticket_routing.py roda o fallback 50 vezes no mesmo processo com thread vizinha dormindo e prova sleeps == []; tests/line/test_agent_retry.py cobre o cronograma 30/120 s. Causa: o candidato do CI que falhou (0bb6f32) ainda nao continha o #180 (isolamento do time do run_ticket); o produto era deterministico. CI ubuntu e windows verdes.",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -4353,6 +4359,6 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-07T20:06:28.291051Z",
-    "updated_at": "2026-10-07T20:06:28.291051Z"
+    "updated_at": "2026-10-08T09:40:00Z"
   }
 ]
