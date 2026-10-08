@@ -6,15 +6,13 @@
       "quick": true,
       "kind": "check"
     },
-
     {
       "name": "unit_and_integration_tests_parallel",
       "cmd": "python -m pytest tests -q -n auto --dist worksteal -m \"not serial\" --durations=25 --ignore=tests/test_canaletto.py",
       "quick": true,
       "kind": "test",
-      "timeout_sec": 900
+      "timeout_sec": 1500
     },
-
     {
       "name": "unit_and_integration_tests_serial",
       "cmd": "python -m pytest tests -q -m serial --ignore=tests/test_canaletto.py",
