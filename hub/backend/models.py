@@ -619,13 +619,14 @@ class PriorityInterventionKind(str, Enum):
     GRILL = "grill"
     DEPLOY_G8 = "deploy_g8"
     WAITING_HUMAN = "waiting_human"
+    OWNER_ACTION = "owner_action"
 
 
 class PriorityInterventionItem(BaseModel):
     """An individual action requiring owner intervention (Grill, G8 Deploy, or WAITING_HUMAN)."""
 
     id: str = Field(description="Unique identifier of the intervention (e.g. grill:USR-09, task:job_123, deploy:site-ggcampos)")
-    kind: PriorityInterventionKind = Field(description="Intervention classification: grill, deploy_g8, waiting_human")
+    kind: PriorityInterventionKind = Field(description="Intervention classification: grill, deploy_g8, waiting_human, owner_action")
     title: str = Field(description="Short human-friendly title of the required action")
     description: str = Field(default="", description="Detailed context or why human input is mandatory")
     project_id: str = Field(default="darkfac", description="Project identifier")
@@ -643,8 +644,47 @@ class PriorityInterventionsReport(BaseModel):
     grill_count: int = Field(ge=0, description="Pending clarifying grill sessions")
     deploy_count: int = Field(ge=0, description="Pending G8 deployment gates requiring owner approval")
     waiting_human_count: int = Field(ge=0, description="Tasks blocked in WAITING_HUMAN")
+    owner_action_count: int = Field(default=0, ge=0, description="Open owner actions/decisions from .factory/owner_actions (USR-190)")
+    owner_action_warnings: List[str] = Field(default_factory=list, description="Non-fatal problems reading the owner action backlog")
     items: List[PriorityInterventionItem] = Field(default_factory=list, description="Ordered list of intervention items")
     generated_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat(), description="Generation timestamp")
+
+
+class OwnerActionAnswerRequest(BaseModel):
+    """Owner's answer to a decision item (USR-190)."""
+
+    option_id: str = Field(min_length=1, description="Chosen option id")
+    note: str = Field(default="", max_length=2000, description="Optional free-text note")
+
+
+class OwnerActionDoneRequest(BaseModel):
+    """Optional note when marking an owner action done (USR-190)."""
+
+    note: str = Field(default="", max_length=2000)
+
+
+class OwnerActionView(BaseModel):
+    """An owner action with the derived dependency fields the UI needs."""
+
+    action: Dict[str, Any] = Field(description="The OwnerAction record (JSON)")
+    blocked_by: List[str] = Field(default_factory=list, description="Unresolved depends_on ids")
+    unblocks: List[str] = Field(default_factory=list, description="Open items waiting on this one")
+
+
+class OwnerActionsReport(BaseModel):
+    """The whole owner action backlog (open and optionally done)."""
+
+    open_count: int = Field(ge=0)
+    done_count: int = Field(ge=0)
+    items: List[OwnerActionView] = Field(default_factory=list)
+    warnings: List[str] = Field(default_factory=list)
+    generated_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+
+
+class OwnerActionResolveResult(BaseModel):
+    ok: bool = True
+    item: OwnerActionView
+    annotated_tickets: List[str] = Field(default_factory=list, description="Blocked tickets that received the decision")
 
 
 class LineStatusResponse(BaseModel):

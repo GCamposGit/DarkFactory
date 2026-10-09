@@ -110,6 +110,9 @@ from core.roadmap.models import (
     RoadmapSourceDocument,
 )
 from hub.backend.models import (
+    OwnerActionResolveResult,
+    OwnerActionsReport,
+    OwnerActionView,
     PriorityInterventionItem,
     PriorityInterventionKind,
     PriorityInterventionsReport,
@@ -150,6 +153,14 @@ from hub.backend.webhooks import (
     WebhookEventRecord,
 )
 from core.integrations.telegram import TelegramGateway, TelegramConfig
+from core.owner_actions.models import ActionStatus, OwnerAction, PRIORITY_RANK
+from core.owner_actions.propagate import annotate_blocked_tickets
+from core.owner_actions.store import (
+    ENV_PATH as OWNER_ACTIONS_ENV_PATH,
+    OwnerActionStore,
+    blocked_by as owner_action_blocked_by,
+    unblocks as owner_action_unblocks,
+)
 from core.integrations.n8n import N8nProbe, N8nConfig, N8nApiClient
 from core.orchestrator.release_pipeline import ReleasePipelineService
 from core.acceptance.environment import HF15EnvironmentManager, load_hf15_config
@@ -350,6 +361,21 @@ class HubService:
                             shutil.copy2(seed_item, dest)
                     except Exception as exc:
                         logger.warning(f"Failed to copy seed item {seed_item.name}: {exc}")
+
+        # Owner action backlog (USR-190). Definitions: tracked in the repository and shipped in the
+        # image (or isolated under data_dir for tests/embedded use). Resolutions made in the Hub go
+        # to an overlay on the persistent data volume so a redeploy never resurrects an item the
+        # owner already closed.
+        if data_dir is not None:
+            owner_actions_path: Path = self.data_dir / "owner_actions" / "owner_actions.json"
+        elif os.environ.get(OWNER_ACTIONS_ENV_PATH, "").strip():
+            owner_actions_path = Path(os.environ[OWNER_ACTIONS_ENV_PATH].strip())
+        else:
+            owner_actions_path = repository_root / ".factory" / "owner_actions" / "owner_actions.json"
+        self.owner_action_store = OwnerActionStore(
+            owner_actions_path,
+            overlay_path=self.data_dir / "owner_actions" / "resolutions.json",
+        )
 
         self.task_state_path = Path(state_path) if state_path is not None else state_root() / "state.json"
         self.orchestrator_path = (
@@ -958,17 +984,130 @@ class HubService:
         except Exception as exc:
             logger.warning("Error collecting G8 deploy gates: %s", exc)
 
+        # 4. Backlog de acoes humanas (.factory/owner_actions) - USR-190
+        owner_action_items, owner_action_warnings = self._collect_owner_action_items()
+        items.extend(owner_action_items)
+
         urgency_rank = {"critical": 0, "high": 1, "medium": 2, "low": 3}
-        items.sort(key=lambda it: (urgency_rank.get(it.urgency, 4), it.created_at))
+        items.sort(
+            key=lambda it: (
+                urgency_rank.get(it.urgency, 4),
+                bool(it.metadata.get("blocked_by")),
+                it.created_at,
+            )
+        )
 
         return PriorityInterventionsReport(
             total_count=len(items),
             grill_count=grill_count,
             deploy_count=deploy_count,
             waiting_human_count=waiting_human_count,
+            owner_action_count=len(owner_action_items),
+            owner_action_warnings=owner_action_warnings,
             items=items,
             generated_at=datetime.now(timezone.utc).isoformat(),
         )
+
+    # ------------------------------------------------------------------
+    # Owner action backlog (USR-190)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _owner_action_view(
+        action: OwnerAction, by_id: Dict[str, OwnerAction], everything: List[OwnerAction]
+    ) -> OwnerActionView:
+        return OwnerActionView(
+            action=action.model_dump(mode="json"),
+            blocked_by=owner_action_blocked_by(action, by_id),
+            unblocks=owner_action_unblocks(action, everything),
+        )
+
+    def _collect_owner_action_items(self) -> Tuple[List[PriorityInterventionItem], List[str]]:
+        """Open owner actions as priority-queue items. Never raises: the queue must keep working."""
+        try:
+            loaded = self.owner_action_store.load()
+        except Exception as exc:  # pragma: no cover - the store already swallows read errors
+            logger.warning("Error collecting owner actions: %s", exc)
+            return [], ["backlog de acoes humanas indisponivel"]
+        by_id = {a.id: a for a in loaded.actions}
+        items: List[PriorityInterventionItem] = []
+        for action in loaded.actions:
+            if action.status == ActionStatus.DONE:
+                continue
+            view = self._owner_action_view(action, by_id, loaded.actions)
+            record = view.action
+            items.append(
+                PriorityInterventionItem(
+                    id=f"owner_action:{action.id}",
+                    kind=PriorityInterventionKind.OWNER_ACTION,
+                    title=f"{action.id} - {action.title}",
+                    description=action.why,
+                    project_id="darkfac",
+                    urgency=action.priority.value,
+                    created_at=record["created_at"],
+                    action_type="owner_action",
+                    action_target_id=action.id,
+                    metadata={
+                        "oa_id": action.id,
+                        "action_kind": action.kind.value,
+                        "status": action.status.value,
+                        "why": action.why,
+                        "blocks": record["blocks"],
+                        "depends_on": record["depends_on"],
+                        "blocked_by": view.blocked_by,
+                        "unblocks": view.unblocks,
+                        "steps": record["steps"],
+                        "verify": action.verify,
+                        "options": record.get("options", []),
+                        "created_by": action.created_by,
+                    },
+                )
+            )
+        return items, list(loaded.warnings)
+
+    def get_owner_actions(self, *, include_done: bool = False) -> OwnerActionsReport:
+        """The owner action backlog, with dependency fields (GET /owner-actions)."""
+        loaded = self.owner_action_store.load()
+        by_id = {a.id: a for a in loaded.actions}
+        views = [
+            self._owner_action_view(a, by_id, loaded.actions)
+            for a in loaded.actions
+            if include_done or a.status != ActionStatus.DONE
+        ]
+        views.sort(
+            key=lambda v: (
+                v.action["status"] == "done",
+                PRIORITY_RANK.get(v.action["priority"], 4),
+                bool(v.blocked_by),
+                v.action["created_at"],
+            )
+        )
+        done = sum(1 for a in loaded.actions if a.status == ActionStatus.DONE)
+        return OwnerActionsReport(
+            open_count=len(loaded.actions) - done,
+            done_count=done,
+            items=views,
+            warnings=list(loaded.warnings),
+        )
+
+    def _owner_action_result(self, action: OwnerAction, annotated: List[str]) -> OwnerActionResolveResult:
+        loaded = self.owner_action_store.load()
+        by_id = {a.id: a for a in loaded.actions}
+        return OwnerActionResolveResult(
+            item=self._owner_action_view(by_id.get(action.id, action), by_id, loaded.actions),
+            annotated_tickets=annotated,
+        )
+
+    def mark_owner_action_done(self, action_id: str, note: str = "") -> OwnerActionResolveResult:
+        """Owner closed an `action` item in the DarkHub. Persists to the resolutions overlay."""
+        action = self.owner_action_store.resolve(action_id, note=note, to_overlay=True)
+        return self._owner_action_result(action, [])
+
+    def answer_owner_decision(self, action_id: str, option_id: str, note: str = "") -> OwnerActionResolveResult:
+        """Owner answered a `decision`: persist it and attach it to the tickets it blocks."""
+        action = self.owner_action_store.resolve(action_id, option_id=option_id, note=note, to_overlay=True)
+        annotated = annotate_blocked_tickets(action, self.demands_service.store)
+        return self._owner_action_result(action, annotated)
 
     def notify_pending_grill(
         self,

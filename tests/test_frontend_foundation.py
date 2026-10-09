@@ -4,8 +4,8 @@ Covers:
   (a) hub/frontend/index.html does not reference cdn.tailwindcss.com;
   (b) No external CSS resources or CDNs are loaded in runtime;
   (c) /static/styles.css exists, is served with 200, is not empty, and has representative size (> 10 KB);
-  (d) All script tags share the exact cache version ?v=20261008c;
-  (e) Stylesheet link uses the shared cache version ?v=20261008c;
+  (d) All script tags share the exact cache version ?v=20261009a;
+  (e) Stylesheet link uses the shared cache version ?v=20261009a;
   (f) Stylesheet contains essential utility classes (colors, layout, flex/grid, transitions).
 """
 
@@ -84,11 +84,11 @@ def test_all_script_tags_share_one_cache_version():
     assert len(versions) == 1 and next(iter(versions)), f"All script tags must share one non-empty cache version, found {versions}"
 
 
-def test_stylesheet_link_uses_cache_version_20261008c():
-    """Verify that the stylesheet link in index.html uses ?v=20261008c."""
+def test_stylesheet_link_uses_cache_version_20261009a():
+    """Verify that the stylesheet link in index.html uses ?v=20261009a."""
     html = INDEX_HTML.read_text(encoding="utf-8")
-    assert '<link rel="stylesheet" href="/static/styles.css?v=20261008c">' in html, (
-        "index.html must link styles.css with ?v=20261008c"
+    assert '<link rel="stylesheet" href="/static/styles.css?v=20261009a">' in html, (
+        "index.html must link styles.css with ?v=20261009a"
     )
 
 
