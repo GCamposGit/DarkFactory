@@ -29,7 +29,7 @@ runbook descreve o que roda sozinho, os limiares, os comandos de emergencia e co
 | Limpeza pre/pos-deploy da linha | `core/line/stage_release.py` (estagio `build_deploy`, alvos Dokploy) | antes e depois de cada deploy | mesma politica; nunca altera o resultado do estagio |
 | Limpeza de emergencia | `scripts/dokploy_redeploy.py` | quando um build falha com assinatura de disco cheio | poda tudo e manda rodar o redeploy de novo |
 | Retencao de workspaces da linha | `CloudWorker` (`core/line/workspace.py::sweep_stale_workspaces`) | a cada 6h | apaga `/workspaces/<projeto>/runs/<run>` de runs terminais ha mais de 3 dias (`DARKFAC_WORKSPACE_RETENTION_DAYS`, 0 desliga); nunca run ativo/com job vivo/em andamento neste worker; orfaos so apos 14 dias |
-| Retencao de artefatos de workflows (USR-148) | `CloudWorker` (`core/orchestrator/artifact_retention.py::sweep_stale_artifacts`) | a cada 6h (e no primeiro poll do worker) | remove `/app/.factory/artifacts/<run_id>/` de runs terminais ha mais de 30 dias (`DARKFAC_ARTIFACT_RETENTION_DAYS`, 0 desliga); ver secao 8 |
+| Retencao de artefatos de workflows (USR-148) | `CloudWorker` (`core/orchestrator/artifact_retention.py::sweep_stale_artifacts`) | a cada 6h (e no primeiro poll do worker) | remove `/app/.factory/artifacts/<run_id>/` de runs terminais ha mais de 30 dias (`DARKFAC_ARTIFACT_RETENTION_DAYS`, 0 desliga); ver secao 9 |
 | Logs de container limitados | `deploy/dokploy/docker-compose.{cloud,hub,n8n}.yml` | sempre | `json-file`, `max-size 10m`, `max-file 3` por servico |
 | Limpeza nativa do Dokploy | Dokploy | diario 23:50 UTC | continua como rede de seguranca |
 
@@ -130,12 +130,37 @@ python C:\dev\DarkFac\scripts\dokploy_redeploy.py --list
 4. Apos um redeploy, a saida traz `[DISK HYGIENE] pre-deploy: ...` e `[DISK HYGIENE] post-deploy: ...`.
 5. Workspaces: `docker exec darkfac-worker-1 du -sh /workspaces` fica estavel ao longo dos dias.
 
-## 7. Limites conhecidos
+## 7. Timeout de settings.cleanUnusedImages (USR-180)
+
+No closeout de USR-134 (2026-10-09, depois do PR 227) os quatro servicos terminaram `done`, a VPS
+convergiu e o backup/drill passou. O stderr ainda registrou
+`settings.cleanUnusedImages failed: The read operation timed out`
+(`.factory/test_logs/usr134_closeout.err`).
+
+Causa: o cliente HTTP do redeploy usa timeout de socket de 30s nas leituras de status. O Dokploy
+segura `settings.cleanUnusedImages` por ate 300s (`dockerSafeExec`) enquanto executa
+`docker image prune --all --force`. A leitura que passa do budget sai de `http.client` como
+`TimeoutError: The read operation timed out`, e o transporte antigo so convertia `HTTPError` e
+`URLError`. O resumo `[DISK HYGIENE]` dizia `cleaned` mesmo com a poda de imagens incompleta.
+
+Tratamento atual:
+
+- Chamadas a `settings.cleanUnusedImages` e `settings.cleanDockerBuilder` usam pelo menos 420s.
+  As demais chamadas da API continuam em 30s.
+- Se a leitura ainda estourar, o registro fica `hygiene_status=transient` e `action=incomplete`,
+  na stdout e na stderr, com o texto original do erro. O exit code do deploy e o backup nao mudam.
+- Esse timeout nao dispara outra poda na mesma chamada: o servidor pode continuar o
+  `docker image prune --all --force`, que so remove imagens sem container. O disk guard tenta de
+  novo no ciclo seguinte.
+- Falha de conexao (a poda nao chegou a comecar) tem no maximo uma nova tentativa do mesmo
+  endpoint. Nenhum outro endpoint de limpeza e usado.
+
+## 8. Limites conhecidos
 
 - O espelho git por projeto (`/workspaces/<projeto>/.mirror`) cresce lentamente com o repositorio.
 - O Postgres de controle fica em outro servico do Dokploy (fora destes composes); acompanhe pelo alerta de disco.
 
-## 8. Retencao do volume `darkfac-artifacts` (USR-148)
+## 9. Retencao do volume `darkfac-artifacts` (USR-148)
 
 O volume guarda um diretorio por workflow (`<run_id>/`, escrito por `CloudArtifactStore`) mais arquivos de
 estado na raiz (`build_ledger.json`, `disk_guard_state.json`, ...). O `CloudWorker` aplica a politica abaixo

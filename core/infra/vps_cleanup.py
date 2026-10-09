@@ -39,8 +39,24 @@ DEFAULT_MIN_FREE_GB = 8.0
 # Below this much free space a build is about to fail anyway: prune even if a deploy is running.
 EMERGENCY_FREE_GB = 2.0
 MIN_FREE_GB_ENV = "DARKFAC_VPS_MIN_FREE_GB"
-# Dokploy's prune endpoints wait up to 300s for docker to be idle before running (dockerSafeExec).
+# Dokploy's prune endpoints wait up to 300s for docker to be idle before running (dockerSafeExec),
+# then run `docker image prune --all --force` / `docker builder prune --all --force`. The redeploy
+# HTTP client defaults to 30s. A read that exceeds that budget surfaces as
+# TimeoutError: The read operation timed out (USR-134 closeout stderr, fixed by USR-180).
+# Prune calls therefore use at least PRUNE_TIMEOUT_SECONDS, which sits above the 300s server wait.
+DOKPLOY_DOCKER_SAFE_EXEC_WAIT_SECONDS = 300.0
 PRUNE_TIMEOUT_SECONDS = 420.0
+# One extra attempt only when the request never started a prune (connect failure).
+# A read timeout is not retried: Dokploy may still be inside docker image prune, and a second
+# call would stack another prune of the same safe endpoint.
+PRUNE_CONNECT_RETRIES = 1
+
+# The only Dokploy endpoints this module may call to reclaim disk. Both map to docker prune
+# commands that leave containers, volumes, and images referenced by a container alone.
+SAFE_PRUNE_PATHS = frozenset({
+    "/api/settings.cleanDockerBuilder",
+    "/api/settings.cleanUnusedImages",
+})
 
 DISK_FAILURE_PATTERNS = (
     "you don't have enough free space",
@@ -51,6 +67,116 @@ DISK_FAILURE_PATTERNS = (
     "/var/cache/apt/archives",
     "error writing to output file",
 )
+
+
+def timeout_for_dokploy_path(path: str, default: float) -> float:
+    """Socket budget for one Dokploy call.
+
+    Status and discovery stay on `default` (30s in the redeploy client). The two safe prune
+    endpoints borrow at least `PRUNE_TIMEOUT_SECONDS`, because Dokploy blocks inside
+    dockerSafeExec for up to 300s before the prune itself returns.
+    """
+    normalized = str(path or "").split("?", 1)[0]
+    if normalized and not normalized.startswith("/"):
+        normalized = "/" + normalized
+    if normalized in SAFE_PRUNE_PATHS:
+        return max(float(default), PRUNE_TIMEOUT_SECONDS)
+    return float(default)
+
+
+_READ_TIMEOUT_MARKERS = ("timed out", "timeout", "time out")
+_CONNECT_MARKERS = (
+    "connection refused",
+    "connection reset",
+    "connection aborted",
+    "connection error",
+    "temporarily unavailable",
+    "temporary failure",
+    "name or service not known",
+    "nodename nor servname",
+    "network is unreachable",
+    "unreachable",
+    "http 502",
+    "http 503",
+    "http 504",
+)
+
+
+def prune_failure_kind(exc: BaseException) -> str:
+    """Classify a failed safe-prune call.
+
+    ``read_timeout``: the HTTP read exceeded the socket budget. The server may still be
+    running ``docker image prune --all --force``, which removes only images not referenced
+    by a container. Do not issue another prune in this call.
+
+    ``connect``: the request likely never started a prune. One same-endpoint retry is safe.
+
+    ``hard``: record the error and stop. This is never a reason to call a broader prune.
+    """
+    if isinstance(exc, TimeoutError):
+        return "read_timeout"
+    reason = getattr(exc, "reason", None)
+    if isinstance(reason, TimeoutError):
+        return "read_timeout"
+    blob = f"{exc} {reason or ''}".lower()
+    if any(marker in blob for marker in _READ_TIMEOUT_MARKERS):
+        return "read_timeout"
+    if isinstance(exc, (ConnectionError, urllib.error.URLError)):
+        return "connect"
+    if any(marker in blob for marker in _CONNECT_MARKERS):
+        return "connect"
+    return "hard"
+
+
+def aggregate_hygiene_status(outcomes: Dict[str, str]) -> str:
+    """Roll per-endpoint outcomes into one explicit hygiene status."""
+    relevant = [value for value in outcomes.values() if value != "skipped"]
+    if not relevant:
+        return "skipped"
+    if all(value == "ok" for value in relevant):
+        return "ok"
+    if any(value == "failed" for value in relevant):
+        return "failed"
+    if any(value == "transient" for value in relevant):
+        return "transient"
+    return "failed"
+
+
+def format_hygiene_record(stage: str, report: Optional[Dict[str, Any]]) -> str:
+    """One log line that states the policy action and the prune outcome.
+
+    A transient ``cleanUnusedImages`` timeout stays in this line. Deploy and backup success
+    are separate facts and are not implied here.
+    """
+    res = report if isinstance(report, dict) else {}
+    nested = res.get("result") if isinstance(res.get("result"), dict) else None
+    source = nested if nested is not None else res
+    status = res.get("hygiene_status") or source.get("hygiene_status") or "n/a"
+
+    def _flag(name: str) -> str:
+        holder = source if name in source else res
+        if name not in holder:
+            return "n/a"
+        value = holder[name]
+        if isinstance(value, bool):
+            return "true" if value else "false"
+        return str(value)
+
+    freed = f" freed_gb={res['freed_gb']}" if "freed_gb" in res else ""
+    notes = [str(item) for item in (res.get("notes") or [])]
+    if not notes and nested is not None:
+        notes = [str(item) for item in (nested.get("notes") or [])]
+    errors = [str(item) for item in (res.get("errors") or [])]
+    extra = ""
+    if notes:
+        extra += " notes=" + " | ".join(notes)
+    if errors:
+        extra += " errors=" + " | ".join(errors)
+    return (
+        f"[DISK HYGIENE] {stage}: {res.get('action')} ({res.get('reason', '')}) "
+        f"hygiene_status={status} cleanDockerBuilder={_flag('cleanDockerBuilder')} "
+        f"cleanUnusedImages={_flag('cleanUnusedImages')}{freed}{extra}"
+    )
 
 
 def is_disk_space_failure(error_text: Optional[str]) -> Optional[str]:
@@ -81,7 +207,10 @@ def clean_vps_docker_cache(
     Safety contract (verified against the Dokploy source, 2026-10):
     - settings.cleanDockerBuilder runs `docker builder prune --all --force` (ALL unused build cache).
     - settings.cleanUnusedImages runs `docker image prune --all --force` (ALL images not used by a container).
-    - NEVER prunes docker volumes or running containers.
+    - NEVER prunes docker volumes or running containers, and a failed call is never retried through
+      any other endpoint. Images referenced by a container stay.
+    - A read timeout is recorded as ``hygiene_status=transient`` and is not retried: the server may
+      still be pruning. A connect failure (the prune never started) is retried once, on the same path.
     - Because there is no age filter, callers must not run this while a deployment is being built
       (use `clean_vps_if_needed`, which checks that first).
     """
@@ -89,9 +218,15 @@ def clean_vps_docker_cache(
         "cleanDockerBuilder": False,
         "cleanUnusedImages": False,
         "errors": [],
+        "notes": [],
+        "outcomes": {},
+        "attempts": {},
+        "failure_kind": {},
     }
 
     def _call(path: str) -> Any:
+        if path not in SAFE_PRUNE_PATHS:
+            raise RuntimeError(f"refusing prune path outside the safe set: {path}")
         if transport is not None:
             return transport("POST", path, {})
         url = f"{api_url.rstrip('/')}{path}"
@@ -105,30 +240,52 @@ def clean_vps_docker_cache(
             },
             method="POST",
         )
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
+        call_timeout = timeout_for_dokploy_path(path, timeout)
+        with urllib.request.urlopen(req, timeout=call_timeout) as resp:
             raw = resp.read().decode("utf-8", errors="replace")
             return json.loads(raw) if raw else {}
 
-    # 1. Clean Docker Builder cache
+    def _run_prune(name: str, path: str) -> None:
+        attempt = 0
+        while True:
+            attempt += 1
+            try:
+                _call(path)
+            except Exception as exc:
+                kind = prune_failure_kind(exc)
+                if kind == "connect" and attempt <= PRUNE_CONNECT_RETRIES:
+                    note = f"settings.{name} transient connect (attempt {attempt}): {exc}"
+                    report["notes"].append(note)
+                    logger.warning("%s; retrying the same endpoint once", note)
+                    continue
+                status = "transient" if kind in {"read_timeout", "connect"} else "failed"
+                msg = f"settings.{name} failed: {exc}"
+                logger.warning(
+                    "%s (hygiene_status=%s kind=%s attempts=%s; no broader prune)",
+                    msg,
+                    status,
+                    kind,
+                    attempt,
+                )
+                report["errors"].append(msg)
+                report["outcomes"][name] = status
+                report["attempts"][name] = attempt
+                report["failure_kind"][name] = kind
+                return
+            report[name] = True
+            report["outcomes"][name] = "ok"
+            report["attempts"][name] = attempt
+            return
+
     if builder:
-        try:
-            _call("/api/settings.cleanDockerBuilder")
-            report["cleanDockerBuilder"] = True
-        except Exception as exc:
-            msg = f"settings.cleanDockerBuilder failed: {exc}"
-            logger.warning(msg)
-            report["errors"].append(msg)
-
-    # 2. Clean unused images
+        _run_prune("cleanDockerBuilder", "/api/settings.cleanDockerBuilder")
+    else:
+        report["outcomes"]["cleanDockerBuilder"] = "skipped"
     if images:
-        try:
-            _call("/api/settings.cleanUnusedImages")
-            report["cleanUnusedImages"] = True
-        except Exception as exc:
-            msg = f"settings.cleanUnusedImages failed: {exc}"
-            logger.warning(msg)
-            report["errors"].append(msg)
-
+        _run_prune("cleanUnusedImages", "/api/settings.cleanUnusedImages")
+    else:
+        report["outcomes"]["cleanUnusedImages"] = "skipped"
+    report["hygiene_status"] = aggregate_hygiene_status(report["outcomes"])
     return report
 
 
@@ -254,9 +411,15 @@ def make_dokploy_transport(api_url: str, api_key: str, *, timeout: float = 30.0)
         if data is not None:
             headers["Content-Type"] = "application/json"
         request = urllib.request.Request(url, data=data, headers=headers, method=method)
+        call_timeout = timeout_for_dokploy_path(path, timeout)
         try:
-            with urllib.request.urlopen(request, timeout=timeout) as response:
+            with urllib.request.urlopen(request, timeout=call_timeout) as response:
                 raw = response.read().decode("utf-8", errors="replace")
+        except TimeoutError as exc:
+            # A stalled read leaves getresponse() as TimeoutError, not URLError.
+            # Keep that type so hygiene can tell an in-flight prune from a connect failure.
+            text = str(exc).replace(api_key, "***") if api_key else str(exc)
+            raise TimeoutError(text) from None
         except urllib.error.HTTPError as exc:
             raise RuntimeError(f"Dokploy API HTTP {exc.code} for {method} {path}") from None
         except urllib.error.URLError as exc:
@@ -369,7 +532,13 @@ def clean_vps_if_needed(
       If the running-deployment check itself fails, the prune is skipped (fail closed).
     - Never touches volumes or running containers. Never raises.
     """
-    report: Dict[str, Any] = {"stage": stage, "action": "skipped", "reason": "", "errors": []}
+    report: Dict[str, Any] = {
+        "stage": stage,
+        "action": "skipped",
+        "reason": "",
+        "errors": [],
+        "hygiene_status": "skipped",
+    }
     probe = disk_probe or (lambda: get_local_disk_usage("/"))
     threshold = min_free_gb if min_free_gb is not None else min_free_gb_from_env(env)
     try:
@@ -413,10 +582,16 @@ def clean_vps_if_needed(
         result = clean_vps_docker_cache(
             "", "", transport=transport, builder=do_builder, images=True, timeout=PRUNE_TIMEOUT_SECONDS
         )
-        report["action"] = "cleaned"
+        status = str(result.get("hygiene_status") or "failed")
+        report["hygiene_status"] = status
+        # "cleaned" only when every requested prune finished. A read timeout stays
+        # "incomplete" so the caller records it and the disk guard retries next cycle.
+        report["action"] = "cleaned" if status == "ok" else "incomplete"
         report["reason"] = "low_disk" if low else "forced"
         report["result"] = result
-        report["errors"].extend(result.get("errors", []))
+        report["errors"].extend(result.get("errors") or [])
+        if result.get("notes"):
+            report["notes"] = list(result["notes"])
         try:
             after = probe() or {}
             report["after"] = after
@@ -429,6 +604,8 @@ def clean_vps_if_needed(
         logger.warning("clean_vps_if_needed failed (stage=%s): %s", stage, exc)
         report["errors"].append(str(exc))
         report["reason"] = report["reason"] or "error"
+        if report.get("hygiene_status") in (None, "", "skipped"):
+            report["hygiene_status"] = "failed"
         return report
 
 

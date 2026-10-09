@@ -487,9 +487,16 @@ def make_urllib_transport(api_url: str, api_key: str, timeout: float = 30.0) -> 
         if data is not None:
             headers["Content-Type"] = "application/json"
         request = urllib.request.Request(url, data=data, headers=headers, method=method)
+        from core.infra.vps_cleanup import timeout_for_dokploy_path
+
+        # Prune endpoints block inside Dokploy for up to 300s. The 30s default is for
+        # status polls; applying it to cleanUnusedImages produced the USR-134 read timeout.
+        call_timeout = timeout_for_dokploy_path(path, timeout)
         try:
-            with urllib.request.urlopen(request, timeout=timeout) as response:
+            with urllib.request.urlopen(request, timeout=call_timeout) as response:
                 raw = response.read().decode("utf-8", errors="replace")
+        except TimeoutError as exc:
+            raise TimeoutError(_sanitize(str(exc), api_key)) from None
         except urllib.error.HTTPError as exc:
             try:
                 body_text = exc.read().decode("utf-8", errors="replace")
@@ -879,7 +886,19 @@ def _run_main(
             cleanup_res = clean_dokploy_build_cache_and_images(transport)
             builder_ok = cleanup_res.get("cleanDockerBuilder", False)
             images_ok = cleanup_res.get("cleanUnusedImages", False)
-            print(f"[DOKPLOY CLEANUP] Done: builder_cache={builder_ok}, unused_images={images_ok}", file=out, flush=True)
+            status = cleanup_res.get("hygiene_status", "n/a")
+            print(
+                f"[DOKPLOY CLEANUP] Done: hygiene_status={status} "
+                f"builder_cache={builder_ok}, unused_images={images_ok}",
+                file=out,
+                flush=True,
+            )
+            if cleanup_res.get("errors"):
+                print(
+                    "[DOKPLOY CLEANUP] Recorded: " + " | ".join(str(item) for item in cleanup_res["errors"]),
+                    file=err,
+                    flush=True,
+                )
         except Exception as exc:
             print(f"[DOKPLOY CLEANUP] Warning: cleanup failed: {exc}", file=err, flush=True)
 
@@ -894,8 +913,14 @@ def _run_main(
         try:
             res = hygiene_runner(transport, stage, **kwargs)
             res = res if isinstance(res, dict) else {}
-            freed = f" freed_gb={res['freed_gb']}" if "freed_gb" in res else ""
-            print(f"[DISK HYGIENE] {stage}: {res.get('action')} ({res.get('reason', '')}){freed}", file=out, flush=True)
+            from core.infra.vps_cleanup import format_hygiene_record
+
+            line = format_hygiene_record(stage, res)
+            print(line, file=out, flush=True)
+            # stderr keeps the same explicit record when the prune did not finish,
+            # so a closeout log shows hygiene_status instead of only the raw timeout.
+            if res.get("errors") or res.get("hygiene_status") in {"transient", "failed"} or res.get("action") == "incomplete":
+                print(line, file=err, flush=True)
         except Exception as exc:  # housekeeping must never break a deploy
             print(f"[DISK HYGIENE] {stage}: failed: {exc}", file=err, flush=True)
 

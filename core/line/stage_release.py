@@ -513,11 +513,19 @@ class ReleaseStageHandler:
     def _disk_hygiene(self, stage: str) -> None:
         try:
             report = self.disk_cleaner(stage)
-            if isinstance(report, dict) and report.get("action") == "cleaned":
-                logger.info(
-                    "Release %s disk cleanup for project %s: freed_gb=%s reason=%s",
-                    stage, self.project.id, report.get("freed_gb"), report.get("reason"),
-                )
+            from core.infra.vps_cleanup import format_hygiene_record
+
+            line = format_hygiene_record(stage, report if isinstance(report, dict) else {"action": "unknown", "reason": repr(report)})
+            status = ""
+            if isinstance(report, dict):
+                status = str(report.get("hygiene_status") or "")
+            attention = status in {"transient", "failed"} or (
+                isinstance(report, dict) and (report.get("errors") or report.get("action") == "incomplete")
+            )
+            if attention:
+                logger.warning("Release disk cleanup recorded for project %s: %s", self.project.id, line)
+            else:
+                logger.info("Release disk cleanup for project %s: %s", self.project.id, line)
         except Exception as exc:  # never let housekeeping break a deploy
             logger.warning("Release %s disk cleanup failed for project %s: %s", stage, self.project.id, exc)
 
