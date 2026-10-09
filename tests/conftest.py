@@ -348,6 +348,10 @@ def isolated_state_root(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Pa
     old_val = os.environ.get("DARKFAC_STATE_ROOT")
     state_dir = tmp_path_factory.mktemp("darkfac_state_root")
     os.environ["DARKFAC_STATE_ROOT"] = str(state_dir)
+    # USR-190: the owner action backlog (.factory/owner_actions) is tracked data; code paths that
+    # mirror line HumanRequests into it must never write to the real file during tests.
+    old_owner_actions = os.environ.get("DARKFAC_OWNER_ACTIONS_PATH")
+    os.environ["DARKFAC_OWNER_ACTIONS_PATH"] = str(state_dir / "owner_actions" / "owner_actions.json")
     try:
         yield state_dir
     finally:
@@ -355,6 +359,10 @@ def isolated_state_root(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Pa
             os.environ.pop("DARKFAC_STATE_ROOT", None)
         else:
             os.environ["DARKFAC_STATE_ROOT"] = old_val
+        if old_owner_actions is None:
+            os.environ.pop("DARKFAC_OWNER_ACTIONS_PATH", None)
+        else:
+            os.environ["DARKFAC_OWNER_ACTIONS_PATH"] = old_owner_actions
 
 
 @pytest.fixture(autouse=True)
