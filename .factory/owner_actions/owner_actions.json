@@ -251,7 +251,7 @@
       "kind": "action",
       "title": "Destravar o Desktop (DESKTOP-G45IPEM): o git pull do worker nao chega ao commit atual e todo deploy sai com codigo 1",
       "priority": "critical",
-      "status": "open",
+      "status": "done",
       "why": "Desde o commit de 09/10 que desversionou .factory/telegram/config.json (USR-184), o Desktop fica preso em e8fff1d: o deploy imprime 'Desktop update did not reach expected SHA', sai com codigo 1 e PULA o backup pos-deploy. A causa mais provavel e o git pull do worker abortar porque o config.json local do Desktop tem modificacoes (por exemplo o token novo gravado nele). A fabrica nao consegue corrigir isso remotamente: o worker so executa git pull. Enquanto isso, o worker do Desktop roda codigo desatualizado e os backups pos-deploy nao rodam.",
       "blocks": [
         "USR-186",
@@ -285,10 +285,10 @@
           "command": "python C:\\dev\\DarkFac\\scripts\\dokploy_redeploy.py"
         }
       ],
-      "verify": "O deploy termina com codigo 0, imprime 'NODE SYNC' convergido para os tres nos e executa o backup pos-deploy; curl/Invoke-RestMethod em http://100.78.181.90:8080/health mostra git_sha igual ao origin/main.",
+      "verify": "Confirmado: o owner marcou como feito no DarkHub e o deploy de 10/10/2026 (a95ea32) terminou com codigo 0, com o Desktop (DESKTOP-G45IPEM) em git_sha a95ea32 e o backup pos-deploy executado.",
       "created_at": "2026-10-10T00:40:00Z",
       "created_by": "claude-code",
-      "resolved_at": null
+      "resolved_at": "2026-10-10T00:49:13Z"
     },
     {
       "id": "OA-009",
