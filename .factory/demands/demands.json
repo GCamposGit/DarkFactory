@@ -4969,5 +4969,35 @@
     "dependencies": [],
     "created_at": "2026-10-08T21:05:53.366213Z",
     "updated_at": "2026-10-08T21:05:53.366213Z"
+  },
+  {
+    "id": "USR-180",
+    "project_id": "darkfac",
+    "title": "Tratar timeout de settings.cleanUnusedImages na higiene pos-deploy",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "No deploy de USR-134 apos PR227 em 2026-10-09, os quatro servicos terminaram done, a VPS convergiu em cf760100dbb00d14b8045aef9b374d6893ee3fbf e backup/drill passaram. Contudo stderr registrou settings.cleanUnusedImages failed: The read operation timed out. Log: .factory/test_logs/usr134_closeout.err. Investigar e tratar a falha de higiene sem mascarar diagnostico e sem afetar sucesso verificavel do deploy.",
+    "core_journey": [
+      "No deploy de USR-134 apos PR227 em 2026-10-09, os quatro servicos terminaram done, a VPS convergiu em cf760100dbb00d14b8045aef9b374d6893ee3fbf e backup/drill passaram. Contudo stderr registrou settings.cleanUnusedImages failed: The read operation timed out. Log: .factory/test_logs/usr134_closeout.err. Investigar e tratar a falha de higiene sem mascarar diagnostico e sem afetar sucesso verificavel do deploy."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Reproduzir ou diagnosticar o timeout da operacao cleanUnusedImages com evidencia.",
+      "Definir tratamento limitado de falhas transitorias sem apagar imagens em uso.",
+      "Preservar o resultado de deploy e backup e registrar explicitamente o resultado da higiene."
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-09T00:36:38.722571Z",
+    "updated_at": "2026-10-09T00:36:38.722571Z"
   }
 ]
