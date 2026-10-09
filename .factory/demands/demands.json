@@ -4947,8 +4947,8 @@
     "project_id": "darkfac",
     "title": "Isolar candidato do portao oficial contra atualizacao concorrente do checkout",
     "origin": "review",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "PR #238 (7d20842): core/git/gate_isolation.py + scripts/gate_isolated.py rodam o portao oficial em worktree destacada fixada no SHA do candidato (git worktree add --detach), sem tocar o checkout compartilhado; o sucesso exige HEAD igual ao SHA e arvore limpa apos a execucao (codigo 3 caso contrario, mesmo com portao 0); a recusa 'Candidate HEAD changed' do runner.py ficou intacta. 12 testes hermeticos, runbook docs/runbooks/gate_isolated.md e skill 19-run-ticket atualizada. Guard PASS; CI ubuntu e windows verdes. Limitacao: so testa o que esta commitado no SHA; o cache de verdicts nao sobrevive a worktree.",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -4968,15 +4968,15 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-08T21:05:53.366213Z",
-    "updated_at": "2026-10-08T21:05:53.366213Z"
+    "updated_at": "2026-10-09T21:40:00Z"
   },
   {
     "id": "USR-180",
     "project_id": "darkfac",
     "title": "Tratar timeout de settings.cleanUnusedImages na higiene pos-deploy",
     "origin": "user",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "PR #239 (37e3ee4): chamadas de prune seguras usam orcamento de 420 s (acima da espera de 300 s do Dokploy); read timeout de cleanUnusedImages vira hygiene_status=transient sem repeticao (o servidor pode estar podando), falha de conexao tem uma tentativa extra no mesmo endpoint, so os endpoints cleanDockerBuilder/cleanUnusedImages sao aceitos (nunca prune mais amplo), action=incomplete mantem o prune devido no disk_guard e o log [DISK HYGIENE] registra hygiene_status sem afetar o sucesso do deploy/backup. 147 testes focais verdes, guard PASS, CI ubuntu e windows verdes. Portao local nao concluiu: o worker remoto reprova test_suite_lock_stalled (USR-187) e a execucao local estoura 1500 s (USR-178); o CI do PR foi o portao de merge.",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -4998,7 +4998,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-09T00:36:38.722571Z",
-    "updated_at": "2026-10-09T00:36:38.722571Z"
+    "updated_at": "2026-10-09T21:40:00Z"
   },
   {
     "id": "USR-181",
@@ -5035,8 +5035,8 @@
     "project_id": "darkfac",
     "title": "Descobrir quem reinicia o worker remoto no meio de um job: node_sync ignora queue_length",
     "origin": "user",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "PR #237 (90ab964): NodeStatus ganhou queue_length e o node_sync trata busy, active_runs > 0 ou queue_length > 0 como no ocupado (nao atualiza nem reinicia e registra a convergencia pendente). Causa do restart do worker: ver USR-186. Testes novos em tests/test_node_sync.py; CI ubuntu e windows verdes.",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -5058,7 +5058,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-09T04:30:00Z",
-    "updated_at": "2026-10-09T04:30:00Z"
+    "updated_at": "2026-10-09T21:40:00Z"
   },
   {
     "id": "USR-183",
@@ -5163,7 +5163,7 @@
     "title": "Restart do worker do Desktop apos /system/update deixa o worker desligado: bind 8080 em uso e deploy sai com codigo 1",
     "origin": "user",
     "status": "planned",
-    "delivery_evidence": null,
+    "delivery_evidence": "PARCIAL. PR #237 (90ab964) entregou (b) recuperacao pela tarefa agendada 'DarkFac Test Worker' (schtasks /End + /Run, uma tentativa) quando o worker fica offline apos /system/restart ou apos update falho, e (c) 5 testes focais. PENDENTE (a): core/harness/remote_worker.py (_restart_after_exit/_wait_for_released_port espera so ~10 s e desiste deixando o worker desligado) e arquivo protegido pelo guard e exige commit humano do owner (junto com o PR #230 do USR-162, USR-181); verificar tambem se o filho lancado em trigger_daemon_restart herda o socket de escuta.",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -5185,6 +5185,66 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-09T06:30:00Z",
-    "updated_at": "2026-10-09T06:30:00Z"
+    "updated_at": "2026-10-09T21:40:00Z"
+  },
+  {
+    "id": "USR-187",
+    "project_id": "darkfac",
+    "title": "Teste test_suite_lock_stalled reprova no worker remoto do Desktop (DESKTOP-G45IPEM) mas passa local e no CI",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "Durante o USR-180 (09/10/2026), o portao despachado ao worker remoto http://100.78.181.90:8080 (DESKTOP-G45IPEM) terminou com 3704 passed e 1 failed: tests/test_suite_lock_stalled.py::test_idle_live_holder_triggers_a_stalled_warning_but_is_not_killed, duas vezes seguidas, inclusive apos elevar o timeout do teste de 6 para 15 s (portanto nao e so carga). Isolado e no arquivo inteiro o teste passa 3 de 3 nesta maquina e no CI ubuntu e windows. Todo portao despachado a essa maquina reprova ate a causa ser achada (hipoteses: amostragem de CPU do holder via psutil/permissao, hostname ou politica de AV na maquina).",
+    "core_journey": [
+      "Durante o USR-180 (09/10/2026), o portao despachado ao worker remoto http://100.78.181.90:8080 (DESKTOP-G45IPEM) terminou com 3704 passed e 1 failed: tests/test_suite_lock_stalled.py::test_idle_live_holder_triggers_a_stalled_warning_but_is_not_killed, duas vezes seguidas, inclusive apos elevar o timeout do teste de 6 para 15 s (portanto nao e so carga). Isolado e no arquivo inteiro o teste passa 3 de 3 nesta maquina e no CI ubuntu e windows. Todo portao despachado a essa maquina reprova ate a causa ser achada (hipoteses: amostragem de CPU do holder via psutil/permissao, hostname ou politica de AV na maquina)."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Capturar a saida completa da falha no worker remoto (assert e stdout do teste) e identificar a causa",
+      "Corrigir o teste ou o ambiente do worker; o portao despachado ao Desktop passa sem excecoes",
+      "Teste de regressao ou diagnostico do worker que detecte a divergencia de ambiente"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-09T21:40:00Z",
+    "updated_at": "2026-10-09T21:40:00Z"
+  },
+  {
+    "id": "USR-188",
+    "project_id": "darkfac",
+    "title": "Harness do Codex nao abre terminal no run_ticket headless: helper_unknown_error: setup refresh had errors",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "Em 09/10/2026, python run_ticket.py USR-180 --harness codex terminou em 45 s sem alterar arquivo: tres tentativas de iniciar o terminal do Codex foram rejeitadas com 'helper_unknown_error: setup refresh had errors', entao o agente nao leu MISSION.md nem o codigo. A cota do Codex estava saudavel (60%). O roteador deveria tratar esse erro como falha de infraestrutura do harness (cooldown e failover para outro harness com write) em vez de devolver o ticket sem alteracao. Pode ter relacao com outra sessao do Codex em uso no mesmo host (USR-134).",
+    "core_journey": [
+      "Em 09/10/2026, python run_ticket.py USR-180 --harness codex terminou em 45 s sem alterar arquivo: tres tentativas de iniciar o terminal do Codex foram rejeitadas com 'helper_unknown_error: setup refresh had errors', entao o agente nao leu MISSION.md nem o codigo. A cota do Codex estava saudavel (60%). O roteador deveria tratar esse erro como falha de infraestrutura do harness (cooldown e failover para outro harness com write) em vez de devolver o ticket sem alteracao. Pode ter relacao com outra sessao do Codex em uso no mesmo host (USR-134)."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Diagnosticar a causa do helper_unknown_error do terminal do Codex neste host (sessao concorrente, sandbox, setup refresh)",
+      "run_ticket/agent_cli classifica esse erro como infraestrutura e aplica cooldown e failover para outro harness com write",
+      "Teste focal com agente falso que devolve esse erro"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-09T21:40:00Z",
+    "updated_at": "2026-10-09T21:40:00Z"
   }
 ]
