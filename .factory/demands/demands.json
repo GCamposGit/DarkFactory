@@ -5246,5 +5246,35 @@
     "dependencies": [],
     "created_at": "2026-10-09T21:40:00Z",
     "updated_at": "2026-10-09T21:40:00Z"
+  },
+  {
+    "id": "USR-191",
+    "project_id": "darkfac",
+    "title": "Reconciliar baseline e decisões do roadmap de segurança e qualidade",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "Executar a entrada da Onda 0 do roadmap de segurança e qualidade: registrar decisões explícitas do Owner, reconciliar a baseline atual de DarkFac com backlog, PRs, execuções e dependências, e preparar a sequência sem duplicar itens existentes. Escopo inicial confirmado: somente DarkFac. Classificação aprovada: público, interno, confidencial e restrito; perfil ausente bloqueia efeitos sensíveis. Preservar decisões anteriores sobre dados sintéticos, minimização de dados reais, evidências sanitizadas restritas, red team apenas em ambientes isolados e autorização por alvo para produção, radar diário/mensal/incident response, estratégia/dicionário/manuais por módulo e função, e verificação de versão/integridade/ACL antes de consulta.",
+    "core_journey": [
+      "Executar a entrada da Onda 0 do roadmap de segurança e qualidade: registrar decisões explícitas do Owner, reconciliar a baseline atual de DarkFac com backlog, PRs, execuções e dependências, e preparar a sequência sem duplicar itens existentes. Escopo inicial confirmado: somente DarkFac. Classificação aprovada: público, interno, confidencial e restrito; perfil ausente bloqueia efeitos sensíveis. Preservar decisões anteriores sobre dados sintéticos, minimização de dados reais, evidências sanitizadas restritas, red team apenas em ambientes isolados e autorização por alvo para produção, radar diário/mensal/incident response, estratégia/dicionário/manuais por módulo e função, e verificação de versão/integridade/ACL antes de consulta."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "DECISIONS.md registra cada decisão com fonte, estado e consequência; valores ainda pendentes permanecem explicitamente pendentes e não são inferidos.",
+      "BASELINE.md reconcilia SHA atual, backlog, PRs, claims e dependências a partir da referência atual de origin/main; nenhuma frente duplicada é criada.",
+      "O relatório registra responsáveis e critérios objetivos de retomada por frente; a próxima etapa é SQ-02/SQ-03 conforme sequência crítica, sem ativar scanners, agendadores ou campanhas durante Onda 0."
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-09T20:03:42.173856Z",
+    "updated_at": "2026-10-09T20:03:42.173856Z"
   }
 ]
