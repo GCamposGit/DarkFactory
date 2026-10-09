@@ -772,7 +772,7 @@ async function postOwnerActionResolution(id, suffix, payload, button, successMes
   if (button) button.disabled = true;
   try {
     const request = typeof hubFetch === "function" ? hubFetch : fetch;
-    const response = await request(`/api/owner-actions/${encodeURIComponent(id)}/${suffix}`, {
+    const response = await request(`/api/owner-actions/${encodeURIComponent(id)}${suffix}`, {
       method: "POST",
       headers: { "Content-Type": "application/json", Accept: "application/json" },
       body: JSON.stringify(payload),
@@ -798,7 +798,7 @@ async function postOwnerActionResolution(id, suffix, payload, button, successMes
 
 function markOwnerActionDone(id, button) {
   if (!window.confirm(`Confirmar que ${id} foi concluída?`)) return;
-  return postOwnerActionResolution(id, "done", {}, button, `${id} marcada como feita.`);
+  return postOwnerActionResolution(id, "/done", {}, button, `${id} marcada como feita.`);
 }
 
 function answerOwnerDecision(id, button) {
@@ -811,7 +811,7 @@ function answerOwnerDecision(id, button) {
   const note = card.querySelector("textarea");
   return postOwnerActionResolution(
     id,
-    "answer",
+    "/answer",
     { option_id: chosen.value, note: note ? note.value.trim() : "" },
     button,
     `Decisão ${id} registrada (opção ${chosen.value}).`,

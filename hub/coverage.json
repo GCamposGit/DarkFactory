@@ -191,6 +191,15 @@
     "GET /api/interventions/priority": {
       "surface": "interventions-hero-strip"
     },
+    "GET /api/owner-actions": {
+      "surface": "owner-actions-section"
+    },
+    "POST /api/owner-actions/{action_id}/answer": {
+      "surface": "owner-actions-section"
+    },
+    "POST /api/owner-actions/{action_id}/done": {
+      "surface": "owner-actions-section"
+    },
     "POST /api/interventions/notify-grill/{ticket_id}": {
       "machine": "Disparo automatico e programatico de notificacao Telegram para o Owner quando demanda entra em Grill pendente (USR-58)."
     },
@@ -450,6 +459,9 @@
     },
     "orchestrator": {
       "surface": "tasks-dashboard-section"
+    },
+    "owner_actions": {
+      "surface": "owner-actions-section"
     },
     "paths": {
       "internal": "Resolução de caminhos do repositório; utilitário sem estado próprio"
