@@ -68,6 +68,12 @@ flowchart TD
    ```
    Nenhum ticket é considerado concluído sem o marcador `[HARNESS_PASS]`.
 
+   **Candidato imutável (USR-175)**: o `run_ticket.py` já roda o portão na worktree própria do ticket. Quando a sessão precisa rodar o portão manualmente (verificação de ticket já mergeado, revisão), NUNCA o execute no checkout compartilhado: `main` pode avançar durante a suíte e o harness recusa emitir evidência (`Candidate HEAD changed during harness execution`, incidente USR-134). Use o caminho oficial isolado, que fixa uma worktree destacada no SHA do candidato, roda o portão nela e a remove:
+   ```powershell
+   python C:\dev\DarkFac\scripts\gate_isolated.py --ref <sha|branch>
+   ```
+   Detalhes e códigos de saída em `docs/runbooks/gate_isolated.md`. A recusa fail-closed do harness permanece: se o próprio candidato mudar ou ficar sujo, não há sucesso.
+
 ---
 
 ## 2b. Harness de Operação como Desenvolvedor Principal (USR-109)
