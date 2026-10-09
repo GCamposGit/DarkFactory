@@ -5283,8 +5283,8 @@
     "project_id": "darkfac",
     "title": "DarkHub exibe o backlog de acoes humanas (.factory/owner_actions) como fila prioritaria com passo a passo, resolucao e decisoes",
     "origin": "user",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "PR #247 (1811757): pacote core/owner_actions (schema Pydantic com rejeicao de credenciais, store tolerante a arquivo ausente/corrompido com escrita atomica, CLI scripts/owner_action.py add|list|done|answer, notificacao Telegram para critical/high, espelho de HumanRequest como OA-HR-<run>-<estagio>); Hub: kind owner_action na fila de intervencoes, GET /api/owner-actions e POST done/answer (exigem sessao do owner), overlay resolutions.json no volume persistente darkhub-hub-data, decisao anexada aos tickets bloqueados; UI com cartoes, passo a passo, botao copiar, opcoes de decisao, filtro e contador no menu; runbook docs/runbooks/owner_actions.md e skill 19-run-ticket secao 6. 46 testes novos, gate de cobertura do Hub atualizado, guard PASS, CI ubuntu e windows verdes. Latencia real: item novo ou alterado por agente aparece no Hub de producao apos merge em main mais redeploy (a imagem embute .factory); marcar/responder pelo Hub e imediato e persiste. Verificacao em producao registrada no runbook.",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -5312,7 +5312,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-09T22:20:00Z",
-    "updated_at": "2026-10-09T22:20:00Z"
+    "updated_at": "2026-10-10T00:10:00Z"
   },
   {
     "id": "USR-191",
@@ -5373,5 +5373,65 @@
     "dependencies": [],
     "created_at": "2026-10-09T20:37:48.707823Z",
     "updated_at": "2026-10-09T20:37:48.707823Z"
+  },
+  {
+    "id": "USR-194",
+    "project_id": "darkfac",
+    "title": "Linha na VPS publica HumanRequest no backlog de acoes humanas do Hub (canal de escrita linha para Hub)",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "Seguimento do USR-190: request_human_help espelha cada HumanRequest como owner_action no arquivo do processo da linha; no worker da VPS isso fica no container dele e nao chega ao Hub, entao pedidos humanos gerados pela linha autonoma na nuvem podem nao aparecer no DarkHub. Falta um canal de escrita da linha para o Hub (ou o ledger compartilhado do USR-136).",
+    "core_journey": [
+      "Seguimento do USR-190: request_human_help espelha cada HumanRequest como owner_action no arquivo do processo da linha; no worker da VPS isso fica no container dele e nao chega ao Hub, entao pedidos humanos gerados pela linha autonoma na nuvem podem nao aparecer no DarkHub. Falta um canal de escrita da linha para o Hub (ou o ledger compartilhado do USR-136)."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Todo HumanRequest criado por um worker na VPS aparece no DarkHub em ate 1 minuto, sem depender de deploy",
+      "Idempotencia por run/estagio e fechamento automatico quando a linha retoma",
+      "Teste focal com Hub e worker falsos e verificacao em producao"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-10T00:10:00Z",
+    "updated_at": "2026-10-10T00:10:00Z"
+  },
+  {
+    "id": "USR-195",
+    "project_id": "darkfac",
+    "title": "Anotacao duravel no ticket quando o owner responde uma decisao pelo DarkHub",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "Seguimento do USR-190: a resposta do owner a uma decisao e duravel (overlay no volume do Hub), mas a tag owner-decision:OA-NNN=X e o paragrafo no ticket bloqueado vao para o demands.json do container, que e efemero. A anotacao permanente hoje exige que um agente rode owner_action.py answer no repositorio e passe pelo ciclo autonomo, o que deixa a linha sem enxergar a decisao ate la.",
+    "core_journey": [
+      "Seguimento do USR-190: a resposta do owner a uma decisao e duravel (overlay no volume do Hub), mas a tag owner-decision:OA-NNN=X e o paragrafo no ticket bloqueado vao para o demands.json do container, que e efemero. A anotacao permanente hoje exige que um agente rode owner_action.py answer no repositorio e passe pelo ciclo autonomo, o que deixa a linha sem enxergar a decisao ate la."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Uma resposta dada no Hub chega ao demands.json do repositorio (ou ao store compartilhado do USR-136) automaticamente, com commit autonomo",
+      "O ticket bloqueado e destravado sem acao do owner no chat",
+      "Teste focal do fluxo resposta no Hub para ticket anotado"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-10T00:10:00Z",
+    "updated_at": "2026-10-10T00:10:00Z"
   }
 ]
