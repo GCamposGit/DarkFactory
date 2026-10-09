@@ -26,13 +26,21 @@ COMPOSE_DIR = REPO_ROOT / "deploy" / "dokploy"
 class FakeDokploy:
     """Records calls; `project.all` reports the services statuses given."""
 
-    def __init__(self, statuses: Optional[Dict[str, str]] = None, fail_projects: bool = False) -> None:
+    def __init__(
+        self,
+        statuses: Optional[Dict[str, str]] = None,
+        fail_projects: bool = False,
+        fail_paths: Optional[Dict[str, BaseException]] = None,
+    ) -> None:
         self.calls: List[tuple[str, str]] = []
         self.statuses = statuses or {}
         self.fail_projects = fail_projects
+        self.fail_paths = dict(fail_paths or {})
 
     def __call__(self, method: str, path: str, body: Optional[Dict[str, Any]]) -> Any:
         self.calls.append((method, path))
+        if path in self.fail_paths:
+            raise self.fail_paths[path]
         if path == "/api/project.all":
             if self.fail_projects:
                 raise RuntimeError("boom")
@@ -175,6 +183,31 @@ def test_missing_credentials_is_reported_not_silent(monkeypatch: pytest.MonkeyPa
     # Under pytest real credentials are never read; the reason must be explicit.
     report = vc.clean_vps_if_needed(disk_probe=probe_of(5.0), min_free_gb=8.0, env={})
     assert report["action"] == "skipped" and report["reason"] == "no_credentials"
+
+
+def test_post_deploy_read_timeout_is_incomplete_and_is_not_retried() -> None:
+    """USR-180: the closeout timeout stays visible and does not start a second prune."""
+    api = FakeDokploy(
+        {"darkfac-cloud": "done"},
+        fail_paths={"/api/settings.cleanUnusedImages": TimeoutError("The read operation timed out")},
+    )
+    report = vc.clean_vps_if_needed(
+        transport=api,
+        disk_probe=probe_of(30.0),
+        min_free_gb=8.0,
+        force_images=True,
+        stage="post-deploy",
+    )
+    assert report["action"] == "incomplete"
+    assert report["reason"] == "forced"
+    assert report["hygiene_status"] == "transient"
+    assert api.prunes() == ["/api/settings.cleanUnusedImages"]
+    assert report["errors"] == ["settings.cleanUnusedImages failed: The read operation timed out"]
+    line = vc.format_hygiene_record("post-deploy", report)
+    assert "hygiene_status=transient" in line
+    assert "cleanUnusedImages=false" in line
+    assert "The read operation timed out" in line
+    assert all("volume" not in path.lower() and "container" not in path.lower() for _method, path in api.calls)
 
 
 def test_min_free_gb_from_env() -> None:
@@ -391,6 +424,35 @@ def test_daemon_runs_6h_prune_on_schedule_and_retries_skipped_prunes() -> None:
     assert prune_flags == [True, True, False, True, False]
 
 
+def test_daemon_retries_incomplete_transient_prune_next_cycle() -> None:
+    clock = {"t": 0.0}
+    prune_flags: List[bool] = []
+    results = iter(
+        [
+            {"cleanup": {"action": "incomplete", "reason": "forced", "hygiene_status": "transient"}},
+            {"cleanup": {"action": "cleaned", "hygiene_status": "ok"}},
+            {"cleanup": {"action": "skipped", "reason": "disk_ok", "hygiene_status": "skipped"}},
+        ]
+    )
+
+    def cycle(prune_due: bool = False, **_: Any) -> Dict[str, Any]:
+        prune_flags.append(prune_due)
+        return next(results)
+
+    def sleep(seconds: float) -> None:
+        clock["t"] += seconds
+
+    disk_guard.run_daemon(
+        check_interval_minutes=30,
+        prune_interval_hours=1,
+        sleep_fn=sleep,
+        clock_fn=lambda: clock["t"],
+        max_cycles=3,
+        cycle_fn=cycle,
+    )
+    assert prune_flags == [True, True, False]
+
+
 def test_start_background_guard_disabled_with_zero() -> None:
     assert disk_guard.start_background_guard(check_interval_minutes=0) is None
 
@@ -580,6 +642,32 @@ def test_release_deploy_runs_pre_and_post_disk_hygiene(tmp_path: Path) -> None:
     operation, _cfg, failure = handler._deploy("a" * 40, None)
     assert failure is None and operation is not None
     assert stages == ["pre-deploy", "post-deploy"]
+
+
+def test_release_records_transient_hygiene_without_failing_the_deploy(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
+    import logging
+
+    def cleaner(stage: str) -> Dict[str, Any]:
+        if stage == "post-deploy":
+            return {
+                "action": "incomplete",
+                "reason": "forced",
+                "hygiene_status": "transient",
+                "errors": ["settings.cleanUnusedImages failed: The read operation timed out"],
+                "result": {
+                    "cleanUnusedImages": False,
+                    "cleanDockerBuilder": False,
+                    "hygiene_status": "transient",
+                },
+            }
+        return {"action": "skipped", "reason": "disk_ok", "hygiene_status": "skipped"}
+
+    handler = _release_handler(cleaner, tmp_path)
+    with caplog.at_level(logging.INFO, logger="core.line.stage_release"):
+        operation, _cfg, failure = handler._deploy("c" * 40, None)
+    assert failure is None and operation is not None
+    assert "hygiene_status=transient" in caplog.text
+    assert "settings.cleanUnusedImages failed: The read operation timed out" in caplog.text
 
 
 def test_release_disk_hygiene_failure_never_breaks_the_deploy(tmp_path: Path) -> None:

@@ -165,8 +165,9 @@ def run_daemon(
         prune_due = last_prune is None or current - last_prune >= prune_every
         result = runner(prune_due=prune_due)
         cleanup = (result or {}).get("cleanup") or {}
-        # Only a prune that actually ran (or was legitimately not needed) resets the 6h timer; a prune
-        # skipped for a running deploy or missing credentials is retried next cycle.
+        # A finished prune (action=cleaned) or a disk that did not need one (disk_ok) resets the
+        # timer. A running deploy, missing credentials, or action=incomplete after a cleanUnusedImages
+        # read timeout stays due and is retried on the next cycle, not inside the timed-out call.
         if prune_due and (cleanup.get("action") == "cleaned" or cleanup.get("reason") == "disk_ok"):
             last_prune = current
         cycles += 1

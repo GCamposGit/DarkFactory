@@ -16,11 +16,15 @@ from __future__ import annotations
 
 import io
 import sys
+import urllib.request
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import pytest
 
 from scripts import dokploy_redeploy as mod
+
+# Captured before the autouse fixture replaces the name with a no-op runner.
+_REAL_DEFAULT_DISK_HYGIENE = mod.default_disk_hygiene_runner
 
 
 @pytest.fixture(autouse=True)
@@ -1471,6 +1475,102 @@ def test_disk_hygiene_runs_before_and_after_deploy_and_can_be_skipped(monkeypatc
     stages.clear()
     code, _ = run(["--skip-disk-hygiene"])
     assert code == mod.EXIT_OK and stages == []
+
+
+def test_redeploy_transport_gives_prune_paths_the_long_budget(monkeypatch: pytest.MonkeyPatch) -> None:
+    from core.infra import vps_cleanup as vc
+
+    seen: List[Tuple[str, float]] = []
+
+    class _Body:
+        def read(self) -> bytes:
+            return b"{}"
+
+        def __enter__(self) -> "_Body":
+            return self
+
+        def __exit__(self, *args: object) -> bool:
+            return False
+
+    def fake_urlopen(request: urllib.request.Request, timeout: float = 0) -> _Body:
+        seen.append((request.full_url, timeout))
+        return _Body()
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+    transport = mod.make_urllib_transport("https://dokploy.example", "k", timeout=30)
+    transport("GET", "/api/project.all", None)
+    transport("POST", "/api/settings.cleanUnusedImages", {})
+    assert seen[0][1] == 30.0
+    assert "project.all" in seen[0][0]
+    assert seen[1][1] == vc.PRUNE_TIMEOUT_SECONDS
+    assert seen[1][0].endswith("/api/settings.cleanUnusedImages")
+
+
+def test_prune_read_timeout_does_not_leak_the_api_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    from core.infra import vps_cleanup as vc
+
+    key = "super-secret-dokploy-key"
+
+    def fake_urlopen(request: urllib.request.Request, timeout: float = 0) -> Any:
+        raise TimeoutError(f"The read operation timed out {key}")
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+    transport = mod.make_urllib_transport("https://dokploy.example", key, timeout=30)
+    with pytest.raises(TimeoutError) as caught:
+        transport("POST", "/api/settings.cleanUnusedImages", {})
+    assert "timed out" in str(caught.value).lower()
+    assert key not in str(caught.value)
+    assert vc.prune_failure_kind(caught.value) == "read_timeout"
+
+
+def test_transient_image_hygiene_keeps_deploy_and_backup(monkeypatch: pytest.MonkeyPatch) -> None:
+    """USR-180: a cleanUnusedImages read timeout is recorded and does not skip backup."""
+    monkeypatch.setattr(mod, "get_local_origin_main_subject", lambda: "feat: algo")
+    base = _cloud_transport()
+    prune_calls: List[str] = []
+
+    def transport(method: str, path: str, body: Optional[Dict[str, Any]]) -> Any:
+        if path == "/api/settings.cleanUnusedImages":
+            prune_calls.append(path)
+            raise TimeoutError("The read operation timed out")
+        return base(method, path, body)
+
+    backups: List[str] = []
+
+    def backup(project_id: str = "darkfac") -> Dict[str, Any]:
+        backups.append(project_id)
+        return {"snapshot_id": "snp_usr180", "drill_verified": True}
+
+    def runner(transport_obj: Any, stage: str, **kwargs: Any) -> Dict[str, Any]:
+        return _REAL_DEFAULT_DISK_HYGIENE(
+            transport_obj,
+            stage,
+            health=lambda: {"disk_percent": 20.0, "disk_free_gb": 30.0, "disk_total_gb": 40.0},
+            **kwargs,
+        )
+
+    out, err = io.StringIO(), io.StringIO()
+    code = mod.main(
+        ["--only", "darkfac-cloud", "--skip-node-sync"],
+        env=_ENV,
+        registry_reader=_no_registry,
+        transport_factory=lambda url, key: transport,
+        sleep_fn=lambda _s: None,
+        backup_runner=backup,
+        disk_hygiene_runner=runner,
+        stdout=out,
+        stderr=err,
+    )
+    stdout = out.getvalue()
+    stderr = err.getvalue()
+    assert code == mod.EXIT_OK
+    assert backups == ["darkfac"]
+    assert "[BACKUP] ran: snapshot=snp_usr180, drill_verified=True" in stdout
+    assert prune_calls == ["/api/settings.cleanUnusedImages"]
+    assert "hygiene_status=transient" in stdout
+    assert "settings.cleanUnusedImages failed: The read operation timed out" in stdout
+    assert "hygiene_status=transient" in stderr
+    assert "The read operation timed out" in stderr
 
 
 def test_disk_hygiene_failure_never_changes_the_exit_code(monkeypatch: pytest.MonkeyPatch) -> None:
