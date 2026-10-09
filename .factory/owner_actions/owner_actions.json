@@ -1,0 +1,151 @@
+{
+  "schema_version": 1,
+  "description": "Backlog de acoes que SO o owner pode fazer. Fonte unica exibida no DarkHub (fila de intervencoes prioritarias). Quem identificar uma acao humana DEVE registra-la aqui no mesmo turno, com passo a passo completo; o owner nunca deve precisar perguntar no chat o que tem de fazer.",
+  "actions": [
+    {
+      "id": "OA-001",
+      "kind": "action",
+      "title": "Mergear o PR #230 (USR-162, worker remoto) com commit humano em core/harness/*",
+      "priority": "critical",
+      "status": "open",
+      "why": "O PR #230 tem a correcao da perda de resposta do worker remoto (USR-162), pronta e testada (17 testes). core/harness/* e protegido pelo guard e o CI reprova qualquer PR que o altere, entao so uma acao humana destrava. Sem isso o worker do Desktop continua perdendo jobs no restart, e o item (a) do USR-186 (restart que deixa o worker desligado) fica bloqueado junto (USR-181).",
+      "blocks": ["USR-162", "USR-181", "USR-186"],
+      "depends_on": [],
+      "steps": [
+        {"text": "Abra https://github.com/GCamposGit/DarkFactory/pull/230 e clique na aba 'Files changed'. Confira que so aparecem core/harness/remote_dispatch.py, core/harness/remote_worker.py, tests/test_remote_job_recovery.py e docs/HARNESS_INTEROP.md."},
+        {"text": "Volte para a aba 'Conversation' e role ate o fim. O check 'Enforce base-owned governance policy' vai estar vermelho: e esperado, porque os arquivos sao protegidos. Os demais testes nao rodaram por causa dele."},
+        {"text": "Opcao A (tentar primeiro): no quadro de merge, se existir a caixa 'Merge without waiting for requirements to be met (bypass rules)' (voce e administrador do repositorio), marque-a e clique em 'Squash and merge' > 'Confirm squash and merge'."},
+        {"text": "Opcao B (se a caixa nao existir): abra https://github.com/GCamposGit/DarkFactory/settings/rules, clique no ruleset 'main-requer-ci-verde', na secao 'Bypass list' clique em 'Add bypass', escolha 'Repository admin', salve com 'Save changes'; volte ao PR #230 e repita a Opcao A. Isto registra uma excecao permanente para commits humanos em arquivos de governanca: so faca se concordar."},
+        {"text": "Depois do merge, no PowerShell do Desktop, confirme a sincronizacao e reinicie o deploy:", "command": "cd C:\\dev\\DarkFac; git pull --ff-only; python C:\\dev\\DarkFac\\scripts\\dokploy_redeploy.py"}
+      ],
+      "verify": "gh pr view 230 --json state mostra MERGED; o USR-162 aparece como completed no DarkHub; python C:\\dev\\DarkFac\\scripts\\dokploy_redeploy.py termina com codigo 0 (Desktop convergido).",
+      "created_at": "2026-10-09T22:00:00Z",
+      "created_by": "claude-code",
+      "resolved_at": null
+    },
+    {
+      "id": "OA-002",
+      "kind": "action",
+      "title": "Colocar o token novo do Telegram no Dokploy, no Desktop e no Notebook",
+      "priority": "high",
+      "status": "open",
+      "why": "O token antigo do bot foi revogado na rotacao (USR-100). Enquanto as maquinas e a VPS ainda tiverem o token antigo, notificacoes e Grills por Telegram falham. O arquivo .factory/telegram/config.json deixou de ser versionado (USR-184); o sistema le primeiro as variaveis TELEGRAM_* do ambiente.",
+      "blocks": ["USR-100", "USR-184"],
+      "depends_on": [],
+      "steps": [
+        {"text": "No Dokploy (https://dokploy.ggcampos.com) abra o projeto 'darkfac-core'. Para CADA servico que ja tem alguma variavel TELEGRAM_* (abra o servico > aba 'Environment' e procure por TELEGRAM_), substitua o valor de TELEGRAM_BOT_TOKEN (e TELEGRAM_OPS_BOT_TOKEN / TELEGRAM_OWNER_BOT_TOKEN, se existirem) pelo token novo e clique em 'Save'."},
+        {"text": "Ainda no Dokploy, em cada servico alterado clique em 'Deploy' (ou 'Redeploy') e aguarde o status 'Done'."},
+        {"text": "No Desktop e no Notebook, abra o PowerShell (menu Iniciar > digite PowerShell > Enter) e rode, trocando <TOKEN_NOVO> pelo token (nao cole o token em arquivos do repositorio):", "command": "[Environment]::SetEnvironmentVariable(\"TELEGRAM_BOT_TOKEN\", \"<TOKEN_NOVO>\", \"User\")"},
+        {"text": "Feche e abra o PowerShell. Se as maquinas usam os arquivos .factory\\telegram\\owner_config.json / ops_config.json (nao versionados), atualize o bot_token dentro deles tambem."}
+      ],
+      "verify": "Envie /status ao bot no Telegram e confirme que ele responde; no DarkHub o aviso de token divergente some.",
+      "created_at": "2026-10-09T22:00:00Z",
+      "created_by": "claude-code",
+      "resolved_at": null
+    },
+    {
+      "id": "OA-003",
+      "kind": "action",
+      "title": "Criar o papel de escrita restrito da Esteira ao vivo no Postgres da nuvem",
+      "priority": "high",
+      "status": "open",
+      "why": "Sem esse papel, o trabalho que roda em suas maquinas (run_ticket e sessoes do Claude Code) nao aparece em darkhub.ggcampos.com/live. O script ja foi validado em PostgreSQL 16.15 real (USR-164): cria o papel darkfac_live_writer que so consegue INSERT em local_run_events e audita os privilegios.",
+      "blocks": ["USR-164"],
+      "depends_on": [],
+      "steps": [
+        {"text": "Abra https://dokploy.ggcampos.com > projeto 'darkfac-core' > compose 'darkfac-coordinator' > aba 'Environment' e copie o valor de DARKFAC_HF02_DATABASE_URL."},
+        {"text": "Na URL copiada troque o host darkfaccore-postgresprimary-aebh67 por 100.83.176.60. O formato final e postgresql://USUARIO:SENHA@100.83.176.60:5432/BANCO."},
+        {"text": "No Desktop abra um PowerShell novo e defina a URL SO nesta janela (nao use setx):", "command": "$env:DARKFAC_ADMIN_DATABASE_URL = \"postgresql://USUARIO:SENHA@100.83.176.60:5432/BANCO\""},
+        {"text": "Opcional: veja o SQL antes (nao conecta e esconde a senha):", "command": "python C:\\dev\\DarkFac\\scripts\\provision_live_writer.py --print-sql"},
+        {"text": "Execute. Confirme antes se o papel de leitura do Hub se chama darkhub_ro (se o Hub usa a URL completa do coordinator, retire --reader-role darkhub_ro):", "command": "python C:\\dev\\DarkFac\\scripts\\provision_live_writer.py --reader-role darkhub_ro"},
+        {"text": "No final aparece UMA linha 'DARKFAC_HF02_DATABASE_URL=postgresql://darkfac_live_writer:...'. COPIE-A AGORA: a senha nao e mostrada de novo. Guarde-a em um gerenciador de senhas."},
+        {"text": "Feche essa janela do PowerShell para apagar a URL de administrador da memoria."}
+      ],
+      "verify": "O script termina com '[ok] auditoria: darkfac_live_writer so insere em local_run_events'. Prossiga para OA-004.",
+      "created_at": "2026-10-09T22:00:00Z",
+      "created_by": "claude-code",
+      "resolved_at": null
+    },
+    {
+      "id": "OA-004",
+      "kind": "action",
+      "title": "Configurar a URL do papel restrito no Desktop e no Notebook e conferir o /live",
+      "priority": "high",
+      "status": "open",
+      "why": "Depois de OA-003, cada maquina que roda tickets precisa da URL do papel restrito para publicar na Esteira ao vivo. Sem URL, o run_ticket avisa e grava so num banco local que o Hub nao le.",
+      "blocks": ["USR-164"],
+      "depends_on": ["OA-003"],
+      "steps": [
+        {"text": "No Desktop abra o PowerShell e rode, colando no lugar de <URL> so a parte depois de 'DARKFAC_HF02_DATABASE_URL=' da linha do OA-003:", "command": "[Environment]::SetEnvironmentVariable(\"DARKFAC_HF02_DATABASE_URL\", \"<URL>\", \"User\")"},
+        {"text": "Repita o mesmo comando no Notebook. Se alguma maquina ja usa DARKFAC_HF02_DATABASE_URL para outro fim (por exemplo o worker on-prem), use DARKHUB_LINE_DATABASE_URL no lugar."},
+        {"text": "Feche e abra o PowerShell em cada maquina e teste:", "command": "python C:\\dev\\DarkFac\\scripts\\live_run.py open --ticket USR-TESTE --title \"Teste da esteira\" --harness claude"},
+        {"text": "Finalize o teste:", "command": "python C:\\dev\\DarkFac\\scripts\\live_run.py finish --ticket USR-TESTE"},
+        {"text": "Abra https://darkhub.ggcampos.com/live e confirme que o run USR-TESTE apareceu em ate 5 segundos com harness e maquina."}
+      ],
+      "verify": "A saida do live_run.py diz '(publicado)' sem '[AVISO]' e o run aparece em /live.",
+      "created_at": "2026-10-09T22:00:00Z",
+      "created_by": "claude-code",
+      "resolved_at": null
+    },
+    {
+      "id": "OA-005",
+      "kind": "decision",
+      "title": "Decidir a retencao do contexto de recuperacao dos runs (USR-169)",
+      "priority": "medium",
+      "status": "open",
+      "why": "core/line/recovery_context.py guarda refs/heads/darkfac-context/<run_id> sem nenhuma limpeza. O ticket USR-169 exige a politica do owner antes de implementar a limpeza (Gate G1): nao pode ser assumida.",
+      "blocks": ["USR-169"],
+      "depends_on": [],
+      "options": [
+        {"id": "A", "label": "Limpar 14 dias apos estado terminal (recomendado)", "detail": "Mantem o contexto enquanto o run esta ativo ou aguardando retry; apaga 14 dias depois de sucesso mergeado ou falha final, com protecao contra a referencia ter mudado no meio."},
+        {"id": "B", "label": "Limpar 7 dias apos estado terminal", "detail": "Mesma regra com retencao menor; menos referencias acumuladas, menos tempo para investigar falhas."},
+        {"id": "C", "label": "Nunca limpar automaticamente", "detail": "Limpeza so por comando manual do owner."}
+      ],
+      "steps": [
+        {"text": "Escolha uma opcao (A, B ou C) e registre a resposta neste item no DarkHub (campo de decisao). A fabrica destrava o USR-169 sozinha."}
+      ],
+      "verify": "O item aparece como respondido e o USR-169 sai de bloqueado.",
+      "created_at": "2026-10-09T22:00:00Z",
+      "created_by": "claude-code",
+      "resolved_at": null
+    },
+    {
+      "id": "OA-006",
+      "kind": "action",
+      "title": "Atualizar o Notebook sem perder o config.json do Telegram (git pull seguro)",
+      "priority": "medium",
+      "status": "open",
+      "why": "Com o USR-184, .factory/telegram/config.json deixou de ser versionado: o proximo git pull no Notebook apaga o arquivo local (ou aborta se ele tiver modificacoes locais). O sistema le primeiro as variaveis TELEGRAM_* e depois owner_config.json/ops_config.json.",
+      "blocks": ["USR-184"],
+      "depends_on": ["OA-002"],
+      "steps": [
+        {"text": "No Notebook abra o PowerShell e va para o repositorio:", "command": "cd C:\\dev\\DarkFac"},
+        {"text": "Faca uma copia de seguranca (os arquivos .json dessa pasta ja sao ignorados pelo git):", "command": "Copy-Item .factory\\telegram\\config.json .factory\\telegram\\config.pre-usr184.bak.json -ErrorAction SilentlyContinue"},
+        {"text": "Confirme que o token novo esta em TELEGRAM_BOT_TOKEN (passo OA-002) e entao atualize:", "command": "git pull --ff-only"}
+      ],
+      "verify": "git status nao mostra .factory/telegram/config.json e o bot continua respondendo no Telegram.",
+      "created_at": "2026-10-09T22:00:00Z",
+      "created_by": "claude-code",
+      "resolved_at": null
+    },
+    {
+      "id": "OA-007",
+      "kind": "action",
+      "title": "Copiar a regra 'acoes humanas no DarkHub' para o AGENTS.md (arquivo protegido)",
+      "priority": "medium",
+      "status": "open",
+      "why": "A regra ja esta no CLAUDE.md, mas o AGENTS.md vale para todos os harnesses (Codex, Grok, Antigravity) e so um commit humano pode altera-lo.",
+      "blocks": [],
+      "depends_on": [],
+      "steps": [
+        {"text": "Abra C:\\dev\\DarkFac\\AGENTS.md num editor e, na secao de comunicacao com o usuario, acrescente exatamente este texto: 'Toda acao que so o owner pode fazer deve ser registrada no mesmo turno no backlog de acoes humanas (.factory/owner_actions/owner_actions.json, exibido no DarkHub) com passo a passo completo, comandos absolutos, criterio de verificacao e tickets bloqueados. E proibido pedir ao owner, no chat, que descubra ou lembre o que precisa fazer.'"},
+        {"text": "Salve, depois no PowerShell:", "command": "cd C:\\dev\\DarkFac; git add AGENTS.md; git commit -m \"docs(governance): acoes humanas vivem no DarkHub\"; git push"},
+        {"text": "Se o push for recusado pela regra 'main-requer-ci-verde', use o mesmo caminho do OA-001 (PR + bypass de administrador)."}
+      ],
+      "verify": "git log -1 -- AGENTS.md mostra o seu commit.",
+      "created_at": "2026-10-09T22:00:00Z",
+      "created_by": "claude-code",
+      "resolved_at": null
+    }
+  ]
+}
