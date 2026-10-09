@@ -147,3 +147,22 @@ python C:\dev\DarkFac\scripts\live_run.py finish --ticket USR-XX --message "entr
 - O CLI **nunca falha a sessão**: URL de banco ausente ou banco fora do ar só gera um `[AVISO]` no stderr e exit code 0. Se aparecer o aviso, relate-o ao owner (a configuração da URL de escrita está no runbook); não tente contorná-lo.
 - Harness e máquina vão em cada fase (`DARKFAC_OPERATING_HARNESS` ou `--harness`; host da máquina). Uma sessão que executa `run_ticket.py` **não** precisa chamar o CLI: o launcher já publica.
 
+
+---
+
+## 6. Ações humanas: registro obrigatório no DarkHub (USR-190)
+
+Toda ação que SÓ o owner pode executar ou decidir (commit humano em arquivo protegido, segredo/token, passo em portal, decisão de política, aprovação) é registrada **no mesmo turno** no backlog `.factory/owner_actions/owner_actions.json`, exibido no DarkHub (menu "Ações do Owner" e fila de intervenções prioritárias). Descrever a ação só no chat não vale: o owner não deve precisar perguntar o que tem de fazer.
+
+```powershell
+python C:\dev\DarkFac\scripts\owner_action.py add --title "Titulo" --priority high --why "Motivo" --blocks USR-XX --step "Passo tela a tela" --cmd "comando absoluto" --verify "Como saber que deu certo"
+python C:\dev\DarkFac\scripts\owner_action.py list
+python C:\dev\DarkFac\scripts\owner_action.py done OA-001
+python C:\dev\DarkFac\scripts\owner_action.py answer OA-005 --option A --note "Resposta do owner"
+```
+
+- Prioridades: critical, high, medium, low. Decisões usam o tipo decision com pelo menos duas opções. Segredos nunca entram no arquivo (use placeholders); o schema rejeita credenciais.
+- Item critical ou high avisa o owner no Telegram sozinho; falha de envio não falha o comando.
+- Quem resolve o bloqueio marca o item como feito (ou responde a decisão, que é anexada aos tickets bloqueados) e cita os IDs OA-xxx no relatório do turno.
+- O registro segue o ciclo autônomo (commit, PR, merge, deploy): o Hub de produção só enxerga o item depois do deploy pós-merge. Fluxo completo e latência em `docs/runbooks/owner_actions.md`.
+- Toda HumanRequest da linha (`core/line/human.py`) já é espelhada como item do backlog; não registre a mesma ação duas vezes.

@@ -152,6 +152,25 @@ def notify_human_request(
         return False
 
 
+def _mirror_owner_action(request: HumanRequest) -> None:
+    """Show the request in the DarkHub owner-action queue (USR-190). Best effort, idempotent."""
+    try:
+        from core.owner_actions.mirror import mirror_human_request
+
+        mirror_human_request(request)
+    except Exception as exc:  # pragma: no cover - the line must never fail because of the mirror
+        logger.warning("Failed to mirror human request for run %s as owner action: %s", request.run_id, exc)
+
+
+def _close_owner_action_mirror(run_id: str, blocking_stage: str) -> None:
+    try:
+        from core.owner_actions.mirror import close_mirrored_request
+
+        close_mirrored_request(run_id, blocking_stage)
+    except Exception as exc:  # pragma: no cover - best effort
+        logger.warning("Failed to close owner action mirror for run %s: %s", run_id, exc)
+
+
 def request_human_help(
     project: ProjectDescriptor,
     request: HumanRequest,
@@ -160,6 +179,7 @@ def request_human_help(
 ) -> None:
     """Persist + notify a HumanRequest. Called by a stage handler once, when it first blocks."""
     save_request(project, request)
+    _mirror_owner_action(request)
     notify_human_request(request, send=send)
 
 
@@ -203,7 +223,10 @@ def resume_blocked_job(
     if job_key is None:
         logger.info("No waiting job found for run %s stage %s; nothing to resume", run_id, blocking_stage)
         return False
-    return store.resume_job(job_key, now or datetime.now(UTC))
+    resumed = store.resume_job(job_key, now or datetime.now(UTC))
+    if resumed:
+        _close_owner_action_mirror(run_id, blocking_stage)
+    return resumed
 
 
 def probe_and_resume(

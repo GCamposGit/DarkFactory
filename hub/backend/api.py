@@ -56,6 +56,10 @@ from hub.backend.models import (
     ProgressProjection,
     PortfolioOverviewResponse,
     PortfolioProjectDetailResponse,
+    OwnerActionAnswerRequest,
+    OwnerActionDoneRequest,
+    OwnerActionResolveResult,
+    OwnerActionsReport,
     PriorityInterventionItem,
     PriorityInterventionKind,
     PriorityInterventionsReport,
@@ -1205,6 +1209,60 @@ def notify_pending_grill_endpoint(
 ) -> Dict[str, Any]:
     """Dispatches an active Telegram notification to the Owner for a demand pending grill."""
     return service.notify_pending_grill(ticket_id, hub_base_url=hub_base_url)
+
+
+# ------------------------------------------------------------------------------
+# Owner action backlog (USR-190)
+# ------------------------------------------------------------------------------
+
+
+def _owner_action_http_error(exc: Exception) -> HTTPException:
+    from core.owner_actions.store import OwnerActionNotFound, OwnerActionStoreCorrupt
+
+    if isinstance(exc, OwnerActionNotFound):
+        return HTTPException(status_code=404, detail=str(exc))
+    if isinstance(exc, OwnerActionStoreCorrupt):
+        return HTTPException(status_code=503, detail=str(exc))
+    return HTTPException(status_code=422, detail=str(exc))
+
+
+@router.get("/owner-actions", response_model=OwnerActionsReport)
+def get_owner_actions_endpoint(
+    include_done: bool = Query(default=False, description="Also list resolved items"),
+    service: HubService = Depends(get_hub_service),
+) -> OwnerActionsReport:
+    """The backlog of actions only the owner can perform, with steps, blockers and decision options."""
+    return service.get_owner_actions(include_done=include_done)
+
+
+@router.post("/owner-actions/{action_id}/done", response_model=OwnerActionResolveResult)
+def mark_owner_action_done_endpoint(
+    action_id: str,
+    payload: OwnerActionDoneRequest = Body(default_factory=OwnerActionDoneRequest),
+    service: HubService = Depends(require_owner_session),
+) -> OwnerActionResolveResult:
+    """Owner confirms an `action` item is done (sets resolved_at)."""
+    from core.owner_actions.store import OwnerActionError
+
+    try:
+        return service.mark_owner_action_done(action_id, payload.note)
+    except OwnerActionError as exc:
+        raise _owner_action_http_error(exc) from exc
+
+
+@router.post("/owner-actions/{action_id}/answer", response_model=OwnerActionResolveResult)
+def answer_owner_decision_endpoint(
+    action_id: str,
+    payload: OwnerActionAnswerRequest,
+    service: HubService = Depends(require_owner_session),
+) -> OwnerActionResolveResult:
+    """Owner answers a `decision` item; the answer is attached to the tickets it blocks."""
+    from core.owner_actions.store import OwnerActionError
+
+    try:
+        return service.answer_owner_decision(action_id, payload.option_id, payload.note)
+    except OwnerActionError as exc:
+        raise _owner_action_http_error(exc) from exc
 
 
 # ------------------------------------------------------------------------------

@@ -9,6 +9,12 @@ const interventionsState = {
   loading: false,
   report: null,
   activeGrillSession: null,
+  // Owner action backlog (USR-190)
+  ownerActionFilter: "all",
+  ownerActionOpen: {},
+  ownerActionCommands: {},
+  ownerActionDrafts: {},
+  ownerActionSignature: "",
 };
 
 document.addEventListener("DOMContentLoaded", () => {
@@ -20,6 +26,9 @@ document.addEventListener("DOMContentLoaded", () => {
     const match = hash.match(/^#grill=([A-Za-z0-9_-]+)$/);
     if (match && match[1]) {
       setTimeout(() => openGrillModal(match[1]), 150);
+    }
+    if (hash === "#owner-actions") {
+      setTimeout(() => document.getElementById("owner-actions-section")?.scrollIntoView({ behavior: "smooth" }), 600);
     }
   }
   handleUrlHash();
@@ -69,6 +78,8 @@ async function loadPriorityInterventions(force = false) {
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     interventionsState.report = await response.json();
     renderInterventionsHeroStrip();
+    renderOwnerActionsSection();
+    updateOwnerActionsSidebarBadge();
   } catch (err) {
     console.warn("Could not load priority interventions:", err);
   } finally {
@@ -108,8 +119,10 @@ function renderInterventionsHeroStrip() {
   const grillCount = report.grill_count || 0;
   const deployCount = report.deploy_count || 0;
   const waitingCount = report.waiting_human_count || 0;
+  const ownerActionCount = report.owner_action_count || 0;
 
-  const itemsHtml = (report.items || []).map((item) => {
+  // Owner actions have their own detailed section below the strip (renderOwnerActionsSection).
+  const itemsHtml = (report.items || []).filter((item) => item.kind !== "owner_action").map((item) => {
     let badgeClass = "bg-amber-500/10 text-amber-300 border-amber-500/30";
     let icon = "🔥";
     let actionBtn = "";
@@ -195,6 +208,7 @@ function renderInterventionsHeroStrip() {
           ${grillCount ? `<span class="px-2 py-0.5 rounded bg-amber-500/10 border border-amber-500/20 text-amber-300">${grillCount} Grill(s)</span>` : ""}
           ${deployCount ? `<span class="px-2 py-0.5 rounded bg-rose-500/10 border border-rose-500/20 text-rose-300">${deployCount} Deploy(s)</span>` : ""}
           ${waitingCount ? `<span class="px-2 py-0.5 rounded bg-indigo-500/10 border border-indigo-500/20 text-indigo-300">${waitingCount} Bloqueio(s)</span>` : ""}
+          ${ownerActionCount ? `<button type="button" onclick="document.getElementById('owner-actions-section')?.scrollIntoView({behavior: 'smooth'})" title="Ver o passo a passo das ações do owner" class="px-2 py-0.5 rounded bg-indigo-500/10 border border-indigo-500/20 text-indigo-300 hover:bg-indigo-500/20 cursor-pointer">${ownerActionCount} Ação(ões) do Owner ↓</button>` : ""}
           <button 
             onclick="loadPriorityInterventions(true)" 
             title="Recarregar fila prioritária"
@@ -500,6 +514,317 @@ async function submitGrillModalAnswers(ticketId) {
     }
   }
 }
+
+
+// ---------------------------------------------------------------------------
+// Owner Action Backlog (USR-190): what only the owner can do, with full detail
+// ---------------------------------------------------------------------------
+
+const OWNER_ACTION_PRIORITIES = ["critical", "high", "medium", "low"];
+const OWNER_ACTION_PRIORITY_LABELS = { critical: "Crítica", high: "Alta", medium: "Média", low: "Baixa" };
+const OWNER_ACTION_PRIORITY_CLASSES = {
+  critical: "bg-rose-500/15 text-rose-300 border-rose-500/40",
+  high: "bg-amber-500/15 text-amber-300 border-amber-500/40",
+  medium: "bg-indigo-500/15 text-indigo-300 border-indigo-500/40",
+  low: "bg-slate-700/40 text-slate-300 border-slate-600/60",
+};
+
+function getOwnerActionItems() {
+  const items = (interventionsState.report && interventionsState.report.items) || [];
+  return items.filter((item) => item.kind === "owner_action");
+}
+
+function setOwnerActionPriorityFilter(priority) {
+  interventionsState.ownerActionFilter = OWNER_ACTION_PRIORITIES.includes(priority) ? priority : "all";
+  interventionsState.ownerActionSignature = "";
+  renderOwnerActionsSection();
+}
+
+function updateOwnerActionsSidebarBadge() {
+  const badge = document.getElementById("owner-actions-sidebar-count");
+  if (!badge) return;
+  const items = getOwnerActionItems();
+  const hasCritical = items.some((item) => item.urgency === "critical");
+  badge.textContent = String(items.length);
+  badge.classList.toggle("hidden", items.length === 0);
+  badge.classList.toggle("bg-rose-500/20", hasCritical);
+  badge.classList.toggle("text-rose-300", hasCritical);
+  badge.classList.toggle("bg-amber-500/20", !hasCritical);
+  badge.classList.toggle("text-amber-300", !hasCritical);
+  badge.setAttribute("aria-label", `${items.length} ações do owner pendentes`);
+}
+
+function captureOwnerActionDrafts() {
+  const drafts = interventionsState.ownerActionDrafts;
+  document.querySelectorAll("[data-oa-card]").forEach((card) => {
+    const id = card.getAttribute("data-oa-card");
+    const chosen = card.querySelector("input[type=radio]:checked");
+    const note = card.querySelector("textarea");
+    if (chosen || (note && note.value)) {
+      drafts[id] = { option: chosen ? chosen.value : "", note: note ? note.value : "" };
+    }
+  });
+}
+
+function restoreOwnerActionDrafts() {
+  const drafts = interventionsState.ownerActionDrafts;
+  document.querySelectorAll("[data-oa-card]").forEach((card) => {
+    const draft = drafts[card.getAttribute("data-oa-card")];
+    if (!draft) return;
+    card.querySelectorAll("input[type=radio]").forEach((radio) => {
+      radio.checked = radio.value === draft.option;
+    });
+    const note = card.querySelector("textarea");
+    if (note && draft.note) note.value = draft.note;
+  });
+}
+
+function onOwnerActionToggle(id, isOpen) {
+  interventionsState.ownerActionOpen[id] = Boolean(isOpen);
+}
+
+function ownerActionIsOpen(item) {
+  const stored = interventionsState.ownerActionOpen[item.action_target_id];
+  if (stored !== undefined) return stored;
+  return item.urgency === "critical" || item.urgency === "high" || item.metadata.action_kind === "decision";
+}
+
+function renderOwnerActionCard(item) {
+  const meta = item.metadata || {};
+  const id = item.action_target_id;
+  const priority = item.urgency || "medium";
+  const isDecision = meta.action_kind === "decision";
+  const blockedBy = meta.blocked_by || [];
+  const unblocks = meta.unblocks || [];
+  const blocks = meta.blocks || [];
+  const steps = meta.steps || [];
+  const options = meta.options || [];
+  const eid = escapeInterventionsHtml(id);
+
+  const blocksHtml = blocks.length
+    ? `<span class="text-[10px] text-slate-500 font-mono">Bloqueia:</span>` +
+      blocks.map((t) => `<span class="px-1.5 py-0.5 rounded bg-slate-800 border border-slate-700 text-[10px] font-mono text-slate-300">${escapeInterventionsHtml(t)}</span>`).join("")
+    : "";
+  const blockedHtml = blockedBy.length
+    ? `<span class="px-2 py-0.5 rounded border border-amber-500/40 bg-amber-500/10 text-amber-300 text-[10px] font-mono">Aguarda ${blockedBy.map((b) => escapeInterventionsHtml(b)).join(", ")}</span>`
+    : "";
+  const unblocksHtml = unblocks.length
+    ? `<span class="px-2 py-0.5 rounded border border-emerald-500/30 bg-emerald-500/10 text-emerald-300 text-[10px] font-mono">Libera ${unblocks.map((b) => escapeInterventionsHtml(b)).join(", ")}</span>`
+    : "";
+
+  const stepsHtml = steps.length
+    ? `<ol class="space-y-2" style="list-style:none;padding:0;margin:0">` +
+      steps.map((step, index) => {
+        const key = `${id}:${index}`;
+        interventionsState.ownerActionCommands[key] = step.command || "";
+        const commandHtml = step.command
+          ? `<div class="mt-1.5 flex items-start gap-2">
+               <pre class="flex-1 overflow-x-auto whitespace-pre-wrap rounded-lg bg-slate-950 border border-slate-800 px-2.5 py-1.5 text-[11px] font-mono text-emerald-200">${escapeInterventionsHtml(step.command)}</pre>
+               <button type="button" onclick="copyOwnerActionCommand('${escapeInterventionsHtml(key)}', this)" title="Copiar comando"
+                 class="shrink-0 px-2 py-1 rounded-lg border border-slate-700 bg-slate-800 hover:bg-slate-700 text-[11px] text-slate-200 cursor-pointer">Copiar</button>
+             </div>`
+          : "";
+        return `<li class="text-xs text-slate-200 leading-relaxed"><span class="font-mono text-slate-500">${index + 1}.</span> <span>${escapeInterventionsHtml(step.text)}</span>${commandHtml}</li>`;
+      }).join("") +
+      `</ol>`
+    : "";
+
+  const verifyHtml = meta.verify
+    ? `<div class="rounded-lg border border-emerald-500/20 bg-emerald-500/5 px-3 py-2">
+         <p class="text-[10px] font-mono uppercase tracking-wider text-emerald-400 mb-0.5">Como verificar</p>
+         <p class="text-xs text-slate-300 leading-relaxed">${escapeInterventionsHtml(meta.verify)}</p>
+       </div>`
+    : "";
+
+  let actionHtml = "";
+  if (isDecision) {
+    const optionsHtml = options.map((opt, index) => `
+      <label class="flex items-start gap-3 p-2.5 rounded-xl border border-slate-800 bg-slate-900/60 hover:border-indigo-500/40 cursor-pointer">
+        <input type="radio" name="oa_opt_${eid}" value="${escapeInterventionsHtml(opt.id)}" class="mt-1 cursor-pointer">
+        <span class="space-y-0.5">
+          <span class="text-xs font-semibold text-slate-100"><span class="font-mono text-slate-400">${escapeInterventionsHtml(opt.id)}.</span> ${escapeInterventionsHtml(opt.label)}</span>
+          ${opt.detail ? `<span class="block text-[11px] text-slate-400 leading-snug">${escapeInterventionsHtml(opt.detail)}</span>` : ""}
+        </span>
+      </label>`).join("");
+    actionHtml = `
+      <div class="space-y-2">
+        <p class="text-[10px] font-mono uppercase tracking-wider text-indigo-300">Escolha uma opção</p>
+        <div class="space-y-2">${optionsHtml}</div>
+        <textarea id="oa_note_${eid}" rows="2" maxlength="2000" placeholder="Nota opcional (vai junto com a resposta para os tickets bloqueados)"
+          class="w-full px-3 py-1.5 rounded-xl bg-slate-900 border border-slate-800 text-xs text-slate-200 placeholder-slate-600 focus:outline-none focus:border-indigo-500"></textarea>
+        <button type="button" onclick="answerOwnerDecision('${eid}', this)"
+          class="px-4 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-xs cursor-pointer">Responder decisão</button>
+      </div>`;
+  } else {
+    actionHtml = `
+      <button type="button" onclick="markOwnerActionDone('${eid}', this)"
+        class="px-4 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs cursor-pointer">Marcar como feito</button>`;
+  }
+
+  return `
+    <details data-oa-card="${eid}" ${ownerActionIsOpen(item) ? "open" : ""} ontoggle="onOwnerActionToggle('${eid}', this.open)"
+      class="rounded-2xl border border-slate-800 bg-slate-900/70">
+      <summary class="cursor-pointer p-3 flex flex-col gap-2" style="list-style:none">
+        <div class="flex items-center gap-2 flex-wrap">
+          <span class="px-2 py-0.5 rounded border text-[10px] font-mono font-semibold uppercase ${OWNER_ACTION_PRIORITY_CLASSES[priority] || OWNER_ACTION_PRIORITY_CLASSES.medium}">${escapeInterventionsHtml(OWNER_ACTION_PRIORITY_LABELS[priority] || priority)}</span>
+          <span class="px-2 py-0.5 rounded border border-slate-700 bg-slate-800 text-[10px] font-mono text-slate-300">${isDecision ? "Decisão" : "Ação"}</span>
+          <span class="text-[10px] font-mono text-slate-500">${eid}</span>
+          ${blockedHtml}${unblocksHtml}
+        </div>
+        <h3 class="text-sm font-bold text-slate-100 leading-snug">${escapeInterventionsHtml(String(item.title || "").replace(/^OA-[A-Za-z0-9._-]+ - /, ""))}</h3>
+        <div class="flex items-center gap-1.5 flex-wrap">${blocksHtml}</div>
+      </summary>
+      <div class="px-3 pb-4 space-y-3 border-t border-slate-800 pt-3">
+        ${meta.why ? `<p class="text-xs text-slate-300 leading-relaxed"><span class="font-semibold text-slate-100">Por que: </span>${escapeInterventionsHtml(meta.why)}</p>` : ""}
+        ${stepsHtml}
+        ${verifyHtml}
+        ${actionHtml}
+      </div>
+    </details>`;
+}
+
+function renderOwnerActionsSection() {
+  const container = document.getElementById("owner-actions-section");
+  if (!container) return;
+  const all = getOwnerActionItems();
+  const warnings = (interventionsState.report && interventionsState.report.owner_action_warnings) || [];
+  const filter = interventionsState.ownerActionFilter || "all";
+  const items = filter === "all" ? all : all.filter((item) => item.urgency === filter);
+
+  // Skip identical renders (the 30s poll): keeps open cards, typed notes and focus intact.
+  const signature = JSON.stringify([filter, all, warnings]);
+  if (signature === interventionsState.ownerActionSignature) return;
+  captureOwnerActionDrafts();
+  interventionsState.ownerActionSignature = signature;
+
+  if (!all.length && !warnings.length) {
+    container.classList.add("hidden");
+    container.innerHTML = "";
+    return;
+  }
+  container.classList.remove("hidden");
+
+  const counts = { all: all.length };
+  OWNER_ACTION_PRIORITIES.forEach((p) => { counts[p] = all.filter((item) => item.urgency === p).length; });
+  const filterButtons = ["all", ...OWNER_ACTION_PRIORITIES].map((p) => {
+    const active = p === filter;
+    const label = p === "all" ? "Todas" : OWNER_ACTION_PRIORITY_LABELS[p];
+    return `<button type="button" onclick="setOwnerActionPriorityFilter('${p}')" aria-pressed="${active}"
+      class="px-2.5 py-1 rounded-lg border text-[11px] font-mono cursor-pointer ${active ? "bg-indigo-600 border-indigo-500 text-white" : "bg-slate-900 border-slate-700 text-slate-300 hover:border-indigo-500/50"}">${label} (${counts[p] || 0})</button>`;
+  }).join("");
+
+  const warningsHtml = warnings.length
+    ? `<div class="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[11px] text-amber-200 space-y-0.5">
+         <p class="font-semibold">Avisos ao ler o backlog (a fila continua funcionando):</p>
+         ${warnings.map((w) => `<p class="font-mono">${escapeInterventionsHtml(w)}</p>`).join("")}
+       </div>`
+    : "";
+
+  container.innerHTML = `
+    <div class="rounded-2xl border border-indigo-500/30 bg-slate-900/80 p-4 sm:p-5 space-y-4">
+      <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+        <div>
+          <h2 class="text-sm font-bold text-white flex items-center gap-2 flex-wrap">
+            <span>Ações do Owner</span>
+            <span class="px-2 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 text-xs font-mono font-bold">${all.length}</span>
+          </h2>
+          <p class="text-[11px] text-slate-400">Tudo que só você pode fazer ou decidir, com o passo a passo completo. O backlog é atualizado a cada merge e deploy.</p>
+        </div>
+        <div class="flex items-center gap-1.5 flex-wrap">${filterButtons}</div>
+      </div>
+      ${warningsHtml}
+      <div class="space-y-2.5">
+        ${items.length ? items.map(renderOwnerActionCard).join("") : `<p class="text-xs text-slate-400 py-4 text-center">Nenhum item com esta prioridade.</p>`}
+      </div>
+    </div>`;
+  restoreOwnerActionDrafts();
+}
+
+async function copyOwnerActionCommand(key, button) {
+  const command = interventionsState.ownerActionCommands[key] || "";
+  if (!command) return;
+  let copied = false;
+  try {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      await navigator.clipboard.writeText(command);
+      copied = true;
+    }
+  } catch (_) {}
+  if (!copied) {
+    const area = document.createElement("textarea");
+    area.value = command;
+    area.setAttribute("readonly", "");
+    area.style.position = "fixed";
+    area.style.opacity = "0";
+    document.body.appendChild(area);
+    area.select();
+    try { copied = document.execCommand("copy"); } catch (_) {}
+    document.body.removeChild(area);
+  }
+  if (button) {
+    const original = button.textContent;
+    button.textContent = copied ? "Copiado" : "Falhou";
+    setTimeout(() => { button.textContent = original; }, 1500);
+  }
+}
+
+async function postOwnerActionResolution(id, suffix, payload, button, successMessage) {
+  if (button) button.disabled = true;
+  try {
+    const request = typeof hubFetch === "function" ? hubFetch : fetch;
+    const response = await request(`/api/owner-actions/${encodeURIComponent(id)}${suffix}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify(payload),
+    });
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({}));
+      throw new Error(typeof err.detail === "string" ? err.detail : `HTTP ${response.status}`);
+    }
+    const result = await response.json();
+    delete interventionsState.ownerActionDrafts[id];
+    if (typeof showToast === "function") {
+      const extra = (result.annotated_tickets || []).length ? ` Anexada a ${result.annotated_tickets.join(", ")}.` : "";
+      showToast(`${successMessage}${extra}`, "success");
+    }
+    interventionsState.ownerActionSignature = "";
+    await loadPriorityInterventions(true);
+  } catch (err) {
+    if (button) button.disabled = false;
+    if (typeof showToast === "function") showToast(`Não foi possível registrar: ${err.message}`, "error");
+    else alert(`Não foi possível registrar: ${err.message}`);
+  }
+}
+
+function markOwnerActionDone(id, button) {
+  if (!window.confirm(`Confirmar que ${id} foi concluída?`)) return;
+  return postOwnerActionResolution(id, "/done", {}, button, `${id} marcada como feita.`);
+}
+
+function answerOwnerDecision(id, button) {
+  const card = document.querySelector(`[data-oa-card="${id}"]`);
+  const chosen = card ? card.querySelector("input[type=radio]:checked") : null;
+  if (!chosen) {
+    if (typeof showToast === "function") showToast("Escolha uma das opções antes de responder.", "error");
+    return;
+  }
+  const note = card.querySelector("textarea");
+  return postOwnerActionResolution(
+    id,
+    "/answer",
+    { option_id: chosen.value, note: note ? note.value.trim() : "" },
+    button,
+    `Decisão ${id} registrada (opção ${chosen.value}).`,
+  );
+}
+
+window.setOwnerActionPriorityFilter = setOwnerActionPriorityFilter;
+window.updateOwnerActionsSidebarBadge = updateOwnerActionsSidebarBadge;
+window.copyOwnerActionCommand = copyOwnerActionCommand;
+window.markOwnerActionDone = markOwnerActionDone;
+window.answerOwnerDecision = answerOwnerDecision;
+window.onOwnerActionToggle = onOwnerActionToggle;
+window.renderOwnerActionsSection = renderOwnerActionsSection;
 
 // Export functions to global scope
 window.openGrillModal = openGrillModal;

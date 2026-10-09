@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>DarkHub - AI & Dev Command Center</title>
-  <link rel="stylesheet" href="/static/styles.css?v=20261008c">
+  <link rel="stylesheet" href="/static/styles.css?v=20261009a">
 </head>
 <body class="bg-slate-950 text-slate-100 min-h-screen font-sans selection:bg-indigo-500 selection:text-white antialiased relative">
 
@@ -55,6 +55,15 @@
           class="w-full text-left flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-emerald-300 border border-slate-800 hover:border-emerald-500/30 transition-all text-xs font-medium" data-sidebar-id="hub-nav-5">
           <span>📝</span>
           <span class="inline">Demandas</span>
+        </button>
+      <button
+          id="owner-actions-trigger-btn"
+          onclick="document.getElementById('owner-actions-section')?.scrollIntoView({behavior: 'smooth'})"
+          title="Ações que só o owner pode fazer, com passo a passo"
+          class="w-full text-left flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-indigo-300 border border-slate-800 hover:border-indigo-500/30 transition-all text-xs font-medium" data-sidebar-id="hub-nav-owner-actions">
+          <span>🙋</span>
+          <span class="inline">Ações do Owner</span>
+          <span id="owner-actions-sidebar-count" style="margin-left:auto" class="hidden px-1.5 py-0.5 rounded-full bg-amber-500/20 text-amber-300 text-[10px] font-mono font-bold"></span>
         </button>
       <button
           onclick="openTelemetryDrawer()"
@@ -200,6 +209,11 @@
     
     <!-- Priority Interventions Action Banner / Hero Strip (USR-58) -->
     <section id="interventions-hero-strip" aria-label="Seção Prioritária de Intervenções Humanas">
+      <!-- Carregado dinamicamente por interventions.js -->
+    </section>
+
+    <!-- Owner Action Backlog (USR-190): detailed cards rendered by interventions.js -->
+    <section id="owner-actions-section" class="hidden" style="scroll-margin-top:5rem" aria-label="Ações do Owner (backlog de ações humanas)">
       <!-- Carregado dinamicamente por interventions.js -->
     </section>
 
@@ -1762,25 +1776,25 @@
   </div>
 
   <!-- Scripts -->
-  <script src="/static/app.js?v=20261008c"></script>
-  <script src="/static/usage.js?v=20261008c"></script>
-  <script src="/static/credits.js?v=20261008c"></script>
-  <script src="/static/health.js?v=20261008c"></script>
-  <script src="/static/health_ops.js?v=20261008c"></script>
-  <script src="/static/infra.js?v=20261008c"></script>
-  <script src="/static/tasks.js?v=20261008c"></script>
-  <script src="/static/roadmap.js?v=20261008c"></script>
-  <script src="/static/audio.js?v=20261008c"></script>
-  <script src="/static/demands.js?v=20261008c"></script>
-  <script src="/static/interventions.js?v=20261008c"></script>
-  <script src="/static/telemetry.js?v=20261008c"></script>
-  <script src="/static/catalog.js?v=20261008c"></script>
-  <script src="/static/enterprise.js?v=20261008c"></script>
-  <script src="/static/coverage.js?v=20261008c"></script>
-  <script src="/static/benchmarks.js?v=20261008c"></script>
-  <script src="/static/learning.js?v=20261008c"></script>
-  <script src="/static/portfolio.js?v=20261008c"></script>
-  <script src="/static/studio.js?v=20261008c"></script>
-  <script src="/static/harness.js?v=20261008c"></script>
+  <script src="/static/app.js?v=20261009a"></script>
+  <script src="/static/usage.js?v=20261009a"></script>
+  <script src="/static/credits.js?v=20261009a"></script>
+  <script src="/static/health.js?v=20261009a"></script>
+  <script src="/static/health_ops.js?v=20261009a"></script>
+  <script src="/static/infra.js?v=20261009a"></script>
+  <script src="/static/tasks.js?v=20261009a"></script>
+  <script src="/static/roadmap.js?v=20261009a"></script>
+  <script src="/static/audio.js?v=20261009a"></script>
+  <script src="/static/demands.js?v=20261009a"></script>
+  <script src="/static/interventions.js?v=20261009a"></script>
+  <script src="/static/telemetry.js?v=20261009a"></script>
+  <script src="/static/catalog.js?v=20261009a"></script>
+  <script src="/static/enterprise.js?v=20261009a"></script>
+  <script src="/static/coverage.js?v=20261009a"></script>
+  <script src="/static/benchmarks.js?v=20261009a"></script>
+  <script src="/static/learning.js?v=20261009a"></script>
+  <script src="/static/portfolio.js?v=20261009a"></script>
+  <script src="/static/studio.js?v=20261009a"></script>
+  <script src="/static/harness.js?v=20261009a"></script>
 </body>
 </html>
