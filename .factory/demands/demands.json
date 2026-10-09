@@ -4638,8 +4638,8 @@
     "project_id": "darkfac",
     "title": "Investigar perda de resposta do worker remoto durante validacao T2",
     "origin": "user",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "PR #230 (9b7600b), mergeado pelo owner em 10/10/2026 (core/harness/* e protegido pelo guard). Causa raiz provada: o worker guardava os jobs so em memoria; apos restart o job_id era desconhecido, /health dizia busy=False e GET /harness/jobs/<id> dava 404, e o cliente esperava o teto de 180 s tratando o 404 definitivo como silencio. Correcao: jobs persistidos em <state_dir>/jobs/<id>.json, job queued/running com dono morto vira failed (worker_restarted), 404 estruturado job_not_found, /health com instance_id, cliente com RemoteJobLost estruturado ([REMOTE_JOB_LOST], evidencias em remote_jobs/<job_id>.json) e fallback local preservado. 17 testes novos hermeticos. Nao confirmado: por que o worker real reiniciou (ver USR-182/186).",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -4663,7 +4663,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-08T14:09:14.155266Z",
-    "updated_at": "2026-10-08T21:05:52.364102Z"
+    "updated_at": "2026-10-10T11:30:00Z"
   },
   {
     "id": "USR-163",
@@ -5005,8 +5005,8 @@
     "project_id": "darkfac",
     "title": "Guard de governanca bloqueia correcoes do worker remoto em core/harness/remote_*.py (PR #230 do USR-162 vermelho)",
     "origin": "user",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "Resolvido pelo caminho humano: o owner mergeou o PR #230 (9b7600b) com os arquivos protegidos de core/harness. O guard continua protegendo core/harness/*; novas correcoes nesses arquivos entram como itens do backlog de acoes humanas (.factory/owner_actions).",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -5028,7 +5028,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-09T04:30:00Z",
-    "updated_at": "2026-10-09T04:30:00Z"
+    "updated_at": "2026-10-10T11:30:00Z"
   },
   {
     "id": "USR-182",
@@ -5464,5 +5464,35 @@
     "dependencies": [],
     "created_at": "2026-10-10T00:40:00Z",
     "updated_at": "2026-10-10T00:40:00Z"
+  },
+  {
+    "id": "USR-197",
+    "project_id": "darkfac",
+    "title": "Telegram: /status verdadeiro (acoes do owner, tickets, runs, nos) e script de checagem de tokens por papel e fonte",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "09-10/10/2026: (1) o comando /status do bot responde texto fixo 'Pipeline da Dark Factory ativo e operacional' mais tickets[-1] de uma lista nao ordenada (um ticket de teste antigo, USR-AUTO), sem refletir o estado real; (2) o teste da Notebook mostrou tokens revogados (HTTP 401) em .env e em .factory/telegram/*_config.json mesmo com o token novo valido no ambiente, e o aviso de divergencia so mostra fingerprints truncados, sem dizer qual fonte e valida; falta uma checagem de tokens por papel e fonte. Acao humana associada: o item de limpeza de tokens no backlog de acoes humanas.",
+    "core_journey": [
+      "09-10/10/2026: (1) o comando /status do bot responde texto fixo 'Pipeline da Dark Factory ativo e operacional' mais tickets[-1] de uma lista nao ordenada (um ticket de teste antigo, USR-AUTO), sem refletir o estado real; (2) o teste da Notebook mostrou tokens revogados (HTTP 401) em .env e em .factory/telegram/*_config.json mesmo com o token novo valido no ambiente, e o aviso de divergencia so mostra fingerprints truncados, sem dizer qual fonte e valida; falta uma checagem de tokens por papel e fonte. Acao humana associada: o item de limpeza de tokens no backlog de acoes humanas."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "/status mostra acoes humanas abertas do owner (com link do DarkHub), tickets por estado, proximo ticket, runs ativos e convergencia dos nos, cada bloco isolado contra falhas",
+      "scripts/telegram_tokens_check.py valida via getMe cada fonte por papel (ambiente, .env, JSON), nunca imprime o token inteiro e sai com codigo 1 se a fonte efetiva ou uma secundaria estiver revogada",
+      "Testes hermeticos com getMe falso; runbook atualizado"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-10T11:30:00Z",
+    "updated_at": "2026-10-10T11:30:00Z"
   }
 ]
