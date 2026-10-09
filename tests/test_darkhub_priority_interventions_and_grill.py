@@ -189,8 +189,10 @@ def test_hub_service_aggregates_g8_deploy_gates(mock_hub_service: HubService):
 # ==============================================================================
 
 
-def test_notify_pending_grill_success(mock_hub_service: HubService):
+def test_notify_pending_grill_success(mock_hub_service: HubService, monkeypatch: pytest.MonkeyPatch):
     """Ensure active Telegram notification is dispatched with formatted text and link."""
+    # USR-184: the token no longer comes from a tracked .factory/telegram/config.json.
+    monkeypatch.setenv("TELEGRAM_OPS_BOT_TOKEN", "unit-test-fake-token")
     with patch("core.integrations.telegram.TelegramGateway.send_message", return_value=True) as mock_send:
         res = mock_hub_service.notify_pending_grill("USR-TEST-02", hub_base_url="https://darkhub.test")
         assert res["ok"] is True
