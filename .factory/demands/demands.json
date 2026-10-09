@@ -5277,5 +5277,35 @@
     "dependencies": [],
     "created_at": "2026-10-09T19:55:30.373070Z",
     "updated_at": "2026-10-09T19:55:30.373070Z"
+  },
+  {
+    "id": "USR-192",
+    "project_id": "darkfac",
+    "title": "Corrigir falha '[Errno 2] git' ao registrar demanda pelo Telegram",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "Ao enviar /demand no canal DarkFac Orchestrator do Telegram, a resposta é '❌ Failed to register demand: [Errno 2] No such file or directory: git'. Causa: core/demands/id_allocator.py (_git) executa subprocess.run(['git', ...]) sem caminho absoluto; o processo do orquestrador roda sem git no PATH (git existe em C:\\Program Files\\Git\\cmd\\git.exe no shell do usuário). Erro emitido em core/integrations/telegram.py:748 e :781. Fix esperado: resolver git por shutil.which com fallback para caminhos padrão do Windows, e falhar com mensagem clara em português quando ausente, sem traceback cru ao usuário.",
+    "core_journey": [
+      "Ao enviar /demand no canal DarkFac Orchestrator do Telegram, a resposta é '❌ Failed to register demand: [Errno 2] No such file or directory: git'. Causa: core/demands/id_allocator.py (_git) executa subprocess.run(['git', ...]) sem caminho absoluto; o processo do orquestrador roda sem git no PATH (git existe em C:\\Program Files\\Git\\cmd\\git.exe no shell do usuário). Erro emitido em core/integrations/telegram.py:748 e :781. Fix esperado: resolver git por shutil.which com fallback para caminhos padrão do Windows, e falhar com mensagem clara em português quando ausente, sem traceback cru ao usuário."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Com git fora do PATH do processo, o orquestrador localiza o binário pelo fallback e registra a demanda",
+      "Com git realmente ausente, a resposta do Telegram é mensagem clara indicando a dependência, sem '[Errno 2]' cru",
+      "Teste automatizado cobre _git com PATH vazio e com fallback"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-09T20:05:27.909170Z",
+    "updated_at": "2026-10-09T20:05:27.909170Z"
   }
 ]
