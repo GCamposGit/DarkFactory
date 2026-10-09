@@ -346,19 +346,9 @@ _POSTGRES = "postgres_url_with_password"
 # fixture so it no longer looks like a credential; if the shape is the point of
 # the test (redaction, probes), list the path, the exact pattern and the reason.
 ALLOWLIST: tuple[AllowlistEntry, ...] = (
-    # --- TEMPORARY (USR-100): the real Telegram bot token is committed. ----------
-    # Rotation is the owner's action. Untracking the file comes after it, because
-    # the Desktop/Notebook nodes read the local copy and a `git pull` would delete
-    # it. (The same value was also pasted into two HF-15 fixtures; they now build a
-    # FAKE token at runtime and their entries were removed.) When a file is
-    # untracked or cleaned, its entry turns stale and the gate fails until the
-    # entry is removed.
-    AllowlistEntry(
-        path=".factory/telegram/config.json",
-        patterns=(_TELEGRAM,),
-        reason="token de bot real exposto no repositorio publico (commit 0c7514e); desversionar apos a rotacao",
-        ticket="USR-100",
-    ),
+    # USR-100/USR-184: o antigo token real do Telegram foi rotacionado (o valor antigo
+    # esta revogado) e `.factory/telegram/*.json` deixou de ser rastreado; nao ha mais
+    # entrada para ele. Qualquer reaparecimento de segredo nesses arquivos falha o portao.
     # --- Sentinelas de teste: o formato E o ponto (redacao, probes, validacao). --
     AllowlistEntry(
         path="tests/line/test_agent_failure_visibility.py",

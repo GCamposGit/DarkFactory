@@ -142,11 +142,30 @@ def test_allowlist_entries_are_well_formed_and_justified() -> None:
         assert not any(ch in entry.path for ch in "*?["), f"{entry.path}: sem curingas na allowlist"
 
 
-def test_the_exposed_telegram_token_entry_is_explicit_temporary_and_tied_to_usr_100() -> None:
-    (entry,) = [e for e in scan.ALLOWLIST if e.path == ".factory/telegram/config.json"]
-    assert entry.patterns == (TELEGRAM,)
-    assert entry.ticket == "USR-100"
-    assert "token" in entry.reason
+def test_telegram_runtime_config_is_untracked_and_has_no_allowlist_entry() -> None:
+    """USR-184: after the token rotation the runtime Telegram files left the index for good."""
+    allowlisted = [e for e in scan.ALLOWLIST if e.path.startswith(".factory/telegram/")]
+    assert not allowlisted, "nao pode haver allowlist para .factory/telegram/*: " + ", ".join(
+        e.path for e in allowlisted
+    )
+    assert not [e for e in scan.ALLOWLIST if e.ticket == "USR-100"], "entradas temporarias do USR-100 devem ter sumido"
+
+    env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+    try:
+        result = subprocess.run(
+            ["git", "ls-files", "-z", "--", ".factory/telegram/"],
+            cwd=str(REPO_ROOT),
+            env=env,
+            capture_output=True,
+            timeout=120,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        pytest.skip(f"checkout sem git utilizavel: {exc}")
+    if result.returncode != 0:
+        pytest.skip("checkout sem git utilizavel")
+    tracked = sorted(p for p in result.stdout.decode("utf-8", errors="replace").split("\0") if p)
+    assert tracked == [".factory/telegram/config.example.json"], tracked
 
 
 # --- mutation tests on throwaway repositories --------------------------------

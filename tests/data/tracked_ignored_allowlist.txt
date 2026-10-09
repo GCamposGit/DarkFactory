@@ -13,7 +13,5 @@
 # linhas de comentario que precedem um grupo dizem de qual ticket ele e.
 
 
-# [USR-100] .factory/telegram/*.json: config.json contem token de bot exposto no
-# repositorio publico. Desversionar so apos a rotacao do token pelo owner.
-.factory/telegram/config.json
-.factory/telegram/gateway_state.json
+# (vazia desde o USR-184: .factory/telegram/config.json e gateway_state.json foram
+# desversionados apos a rotacao do token pelo owner; a lista so pode encolher.)
