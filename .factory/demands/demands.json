@@ -4820,8 +4820,8 @@
     "project_id": "darkfac",
     "title": "Regra de roteamento de subagentes de desenvolvimento para o modelo Haiku 5.5",
     "origin": "user",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "PR #223 (4a36258): politica de modelo para subagentes de desenvolvimento. Haiku 5.5 (claude-haiku-5-5) so em fatias mecanicas (ate 3 arquivos e 150 linhas, aceite executavel, ambiguidade resolvida), Sonnet padrao, Opus em planning, uma tentativa Haiku e escalonamento para Sonnet. core/line/subagent_routing.py + .factory/config/subagent_model_routing.json, 126 testes novos, CLAUDE.md, skills 03/17/19 espelhadas, MODEL_SELECTION_GUIDE e test-runner em claude-haiku-5-5. Portao local HARNESS_PASS (3671 testes) e CI do PR verde; deploy dokploy concluido. Pendente do owner: aplicar docs/proposals/AGENTS_FACTORY_RULES_haiku_routing.md em AGENTS.md, FACTORY_RULES.md e core/harness/test_subagent.py (protegidos pelo guard). Seguimentos: USR-177 (refinos) e USR-178 (timeout do portao).",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -4845,7 +4845,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-08T20:36:51.432814Z",
-    "updated_at": "2026-10-08T20:36:51.432814Z"
+    "updated_at": "2026-10-09T02:00:00Z"
   },
   {
     "id": "USR-177",
