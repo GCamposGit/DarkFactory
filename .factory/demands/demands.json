@@ -5095,8 +5095,8 @@
     "project_id": "darkfac",
     "title": "Desversionar .factory/telegram/config.json e remover a allowlist temporaria do USR-100 apos a rotacao do token",
     "origin": "user",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "PR #233 (d6b641d): .factory/telegram/config.json e gateway_state.json desversionados (git rm --cached; .gitignore ja cobria .factory/telegram/*.json); entrada temporaria ticket=USR-100 removida da ALLOWLIST de core/git/secret_scan.py; teste trocado por test_telegram_runtime_config_is_untracked_and_has_no_allowlist_entry; docs atualizados; test_notify_pending_grill_success deixou de depender do token versionado. Guard PASS sem arquivo protegido. CI ubuntu e windows verdes. Historia do git nao reescrita (token antigo ja revogado). Nos checkouts, o git pull remove o config.json local: o loader le TELEGRAM_* do ambiente, depois owner_config.json/ops_config.json.",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -5118,7 +5118,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-09T05:10:00Z",
-    "updated_at": "2026-10-09T05:10:00Z"
+    "updated_at": "2026-10-09T06:30:00Z"
   },
   {
     "id": "USR-185",
@@ -5156,5 +5156,35 @@
     "dependencies": [],
     "created_at": "2026-10-09T07:01:39.369233Z",
     "updated_at": "2026-10-09T07:01:39.369233Z"
+  },
+  {
+    "id": "USR-186",
+    "project_id": "darkfac",
+    "title": "Restart do worker do Desktop apos /system/update deixa o worker desligado: bind 8080 em uso e deploy sai com codigo 1",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "Deploy de 09/10/2026 (815d461): o node_sync chamou /system/update do worker do Desktop e depois /system/restart; a resposta nao trouxe o SHA esperado ('Desktop update did not reach expected SHA'), o deploy saiu com codigo 1 e o backup pos-deploy foi pulado (deploy did not converge). O daemon.log do worker mostra [Errno 10048] bind em 0.0.0.0:8080 falhando: a instancia nova nao subiu porque a antiga ainda segurava a porta, e o worker ficou DESLIGADO (nada ouvindo na 8080, tarefa 'DarkFac Test Worker' em Ready) ate eu iniciar a tarefa manualmente. Relacionado a USR-182 e USR-117.",
+    "core_journey": [
+      "Deploy de 09/10/2026 (815d461): o node_sync chamou /system/update do worker do Desktop e depois /system/restart; a resposta nao trouxe o SHA esperado ('Desktop update did not reach expected SHA'), o deploy saiu com codigo 1 e o backup pos-deploy foi pulado (deploy did not converge). O daemon.log do worker mostra [Errno 10048] bind em 0.0.0.0:8080 falhando: a instancia nova nao subiu porque a antiga ainda segurava a porta, e o worker ficou DESLIGADO (nada ouvindo na 8080, tarefa 'DarkFac Test Worker' em Ready) ate eu iniciar a tarefa manualmente. Relacionado a USR-182 e USR-117."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "O restart do worker espera a instancia antiga liberar a porta (ou reusa o socket) antes de subir a nova, sem deixar o worker desligado",
+      "Se a nova instancia nao subir, node_sync aciona a recuperacao pela tarefa agendada (schtasks /End + /Run) e so entao declara divergencia",
+      "Teste focal com porta ocupada simulada; deploy convergente com codigo 0 e backup executado"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-09T06:30:00Z",
+    "updated_at": "2026-10-09T06:30:00Z"
   }
 ]
