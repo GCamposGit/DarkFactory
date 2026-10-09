@@ -2727,6 +2727,50 @@ class HubService:
         client = DokployDeployClient()
         return client.trigger_deploy(service_name=service_name, custom_url=custom_url)
 
+    def telegram_status_summary(self) -> str:
+        """Short, real factory status for the Telegram ``/status`` command (USR-197).
+
+        Every block reads cheap, already-cached data and fails in isolation (see ``telegram_status``).
+        """
+        from core.integrations.telegram_status import build_status_message, read_convergence_snapshot
+
+        def _owner_actions() -> list[dict[str, Any]]:
+            report = self.get_owner_actions()
+            return [
+                {
+                    "id": item.action.get("id"),
+                    "title": item.action.get("title"),
+                    "priority": item.action.get("priority"),
+                }
+                for item in report.items
+            ]
+
+        def _runs() -> list[dict[str, Any]]:
+            snapshot = self.get_line_live()
+            rows: list[dict[str, Any]] = []
+            for run in snapshot.runs:
+                if run.state not in ("running", "queued", "attention"):
+                    continue
+                waiting = run.current_stage_status == "waiting_human"
+                label = snapshot.stage_labels.get(run.current_stage or "", run.current_stage or "-")
+                rows.append(
+                    {
+                        "ticket_id": run.ticket_id or run.demand_id,
+                        "title": run.title,
+                        "stage": label,
+                        "state": run.state,
+                        "waiting_human": waiting,
+                    }
+                )
+            return rows
+
+        return build_status_message(
+            owner_actions=_owner_actions,
+            tickets=lambda: self.list_demand_tickets("darkfac"),
+            runs=_runs,
+            convergence=lambda: read_convergence_snapshot(state_root()),
+        )
+
     def _build_telegram_gateway(self, role: str = "ops") -> TelegramGateway:
         """Constructs TelegramGateway with bound handlers to DarkHub core services.
 
@@ -2814,12 +2858,7 @@ class HubService:
                 if ticket:
                     return {"summary": f"Ticket {ticket.id}: status={ticket.status.value}, title={ticket.title}"}
                 return {"summary": f"Ticket '{ticket_id}' não encontrado no backlog."}
-            try:
-                tickets = self.list_demand_tickets("darkfac")
-                last_ticket_str = f"\nÚltimo ticket: {tickets[-1].id} - {tickets[-1].title} ({tickets[-1].status.value})" if tickets else ""
-                return {"summary": f"Pipeline da Dark Factory ativo e operacional.{last_ticket_str}"}
-            except Exception:
-                return {"summary": "Pipeline da Dark Factory ativo e operacional. 0 incidentes bloqueantes."}
+            return {"summary": self.telegram_status_summary()}
 
         def _handle_grill(ticket_id: str, choice: str, user_id: int) -> Dict[str, Any]:
             try:

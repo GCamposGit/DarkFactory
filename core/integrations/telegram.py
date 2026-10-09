@@ -864,13 +864,16 @@ class TelegramGateway:
             if self.status_handler:
                 try:
                     res = self.status_handler(ticket_id_query)
-                    summary = res.get("summary", "All systems operational.")
+                    summary = res.get("summary") or "Resumo de status indisponivel."
                     result.response_text = f"📊 DarkFac Status:\n{summary}"
                 except Exception as exc:
                     result.error = str(exc)
                     result.response_text = f"❌ Failed to fetch status: {exc}"
             else:
-                result.response_text = "📊 DarkFac Status: Pipeline active, 0 blocking incidents."
+                result.response_text = (
+                    "📊 DarkFac Status:\nResumo real indisponivel neste bot (sem status_handler). "
+                    "Use o bot de operacoes ou o DarkHub (/live)."
+                )
 
         elif cmd_str == "/grill":
             result.action = TelegramActionType.GRILL
