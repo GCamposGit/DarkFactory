@@ -258,8 +258,14 @@ def load_telegram_config(
 
     distinct_tokens = set(sources.values())
     if len(distinct_tokens) > 1:
-        details = ", ".join(f"{src}={_token_fp(t)}" for src, t in sources.items())
-        logger.warning("Telegram token sources diverge for role=%s: %s", role, details)
+        # Only the last 4 characters are logged; the first source listed is the one in use (USR-197).
+        details = ", ".join(f"{src}=...{t.strip()[-4:]}" for src, t in sources.items())
+        logger.warning(
+            "Telegram token sources diverge for role=%s (precedencia: env > .env > JSON): %s. "
+            "Rode python C:/dev/DarkFac/scripts/telegram_tokens_check.py para ver qual esta revogada.",
+            role,
+            details,
+        )
 
     if not token:
         token = local_token
