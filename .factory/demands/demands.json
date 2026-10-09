@@ -5119,5 +5119,42 @@
     "dependencies": [],
     "created_at": "2026-10-09T05:10:00Z",
     "updated_at": "2026-10-09T05:10:00Z"
+  },
+  {
+    "id": "USR-185",
+    "project_id": "darkfac",
+    "title": "Registro de modelos autonomo: descoberta, qualificacao, promocao e rollback sem edicao manual",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "Decisao do owner (09/10/2026): trocar ou adicionar modelo nao pode exigir trabalho manual. Evidencia: o USR-168 (adotar Haiku 5.5) exigiu cerca de 25 passos, incluindo o owner editar a mao AGENTS.md, FACTORY_RULES.md e core/harness/test_subagent.py (protegidos pelo guard.py) e empurrar para a main com bypass de admin. Hoje ha 99 arquivos e 475 ocorrencias de ids de modelo escritos a mao (skills .agents/.claude, core/line, core/usage, core/content, core/router, core/harness, hub, benchmark_catalog.json, test-runner.md, docs, testes), inclusive nos arquivos protegidos. Cada lancamento de modelo vira um trabalho manual recorrente. Meta: 99% autonomo, com Grill (WAITING_HUMAN) apenas diante de duvida importante. Os detalhes de qual modelo usar devem morrer fora dos arquivos protegidos: AGENTS.md e FACTORY_RULES.md passam a apontar para um arquivo de consulta editavel pela fabrica, e as invariantes (piso de cota 15%, revisor de outra familia, modelos proibidos como fable) continuam nos protegidos e sao validadas por teste. Absorve os refinos do USR-177. Ticket grande: fatiar em ondas no planejamento (registro e leitor, migracao dos ids, geracao de docs, descoberta, qualificacao, promocao e rollback).",
+    "core_journey": [
+      "Decisao do owner (09/10/2026): trocar ou adicionar modelo nao pode exigir trabalho manual. Evidencia: o USR-168 (adotar Haiku 5.5) exigiu cerca de 25 passos, incluindo o owner editar a mao AGENTS.md, FACTORY_RULES.md e core/harness/test_subagent.py (protegidos pelo guard.py) e empurrar para a main com bypass de admin. Hoje ha 99 arquivos e 475 ocorrencias de ids de modelo escritos a mao (skills .agents/.claude, core/line, core/usage, core/content, core/router, core/harness, hub, benchmark_catalog.json, test-runner.md, docs, testes), inclusive nos arquivos protegidos. Cada lancamento de modelo vira um trabalho manual recorrente. Meta: 99% autonomo, com Grill (WAITING_HUMAN) apenas diante de duvida importante. Os detalhes de qual modelo usar devem morrer fora dos arquivos protegidos: AGENTS.md e FACTORY_RULES.md passam a apontar para um arquivo de consulta editavel pela fabrica, e as invariantes (piso de cota 15%, revisor de outra familia, modelos proibidos como fable) continuam nos protegidos e sao validadas por teste. Absorve os refinos do USR-177. Ticket grande: fatiar em ondas no planejamento (registro e leitor, migracao dos ids, geracao de docs, descoberta, qualificacao, promocao e rollback)."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Registro unico .factory/config/model_registry.json (nao protegido) com aliases e papeis por provedor, model id, familia, tier, preco, contexto, saida maxima, capacidades, status candidate/active/deprecated/retired e datas de lancamento e aposentadoria, mais schema Pydantic e validador de invariantes que rejeita: modelo proibido como autonomo, revisor da mesma familia do implementador, rota sem qualificacao aprovada e piso de cota abaixo de 15%",
+      "API unica core/models/registry.py (resolver alias ou papel para model id, listar candidatos, fallback embutido se o arquivo faltar); todo codigo em core/line, core/usage, core/content, core/router, core/benchmarks, hub e scripts le o registro; subagent_model_routing.json e line_routing.json referenciam aliases e papeis, nao ids; teste de lint falha o CI quando surgir id de modelo literal fora de uma allowlist (fixtures marcadas), e o relatorio final mostra o contador de ids literais restantes com meta zero",
+      "Arquivos protegidos: AGENTS.md e FACTORY_RULES.md passam a citar o registro e a politica por papel, sem nomes de modelo; core/harness/test_subagent.py passa a ler o registro; entregue como UMA ultima proposta em docs/proposals com passo a passo para leigo (worktree limpa, edicao, teste, push), e depois nunca mais exigir edicao manual de modelo",
+      "Descoberta autonoma diaria (reaproveitar a skill 12 e DailyBenchmarkService): consulta a Models API de cada provedor (Anthropic, OpenAI, xAI, Google, OpenRouter), detecta modelo novo ou nova versao e cria entrada candidate com preco, contexto, capacidades e quebras de API conhecidas; sem chamar modelos pagos fora do teto de gasto configurado",
+      "Qualificacao automatica de candidatos: smoke test real com teto de gasto, sondagem de compatibilidade de parametros (thinking, sampling, tool_choice, prefill, esforco), e mini-corrida A/B contra o titular (skill 14) em tarefas reais da fabrica medindo pass@1, custo e latencia; criterios de promocao declarados no proprio registro",
+      "Promocao e rollback autonomos: PR automatico chore(models) com a mudanca do registro, docs regerados e ledger; merge com CI verde e deploy sem toque humano; telemetria pos-promocao (taxa de falha, escalonamentos, custo) e rollback automatico acima do limiar; aposentadoria automatica de modelos deprecated; incorpora refinos do USR-177 (tipos somente leitura, recusa como gatilho, aceite verificado pelo orquestrador, telemetria por modelo)",
+      "Grill so quando houver duvida relevante: aumento de preco acima de limiar, nova familia ou tier, quebra de contrato nao mapeada, qualificacao ambigua ou conflito com invariante; vira WAITING_HUMAN com notificacao no Telegram, recomendacao pronta e instrucoes passo a passo para leigo; fora isso, zero toque humano",
+      "Artefatos derivados regerados a partir do registro por blocos delimitados por marcadores: CLAUDE.md, skills 03/17/19 (com espelho via scripts/sync_skills.py), docs/MODEL_SELECTION_GUIDE.md, benchmark_catalog.json e .claude/agents/test-runner.md; teste de deriva falha quando divergirem",
+      "Testes que hoje citam ids de modelo passam a usar alias, registro ou fixtures; suite inteira verde; prova de ponta a ponta com provedor falso e modelo ficticio (descoberta, qualificacao, promocao e rollback sem nenhum toque humano)",
+      "Portao runner.py --quick com HARNESS_PASS, PR mergeado e deploy pos-merge"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-09T07:01:39.369233Z",
+    "updated_at": "2026-10-09T07:01:39.369233Z"
   }
 ]
