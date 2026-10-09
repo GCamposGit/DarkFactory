@@ -5277,5 +5277,41 @@
     "dependencies": [],
     "created_at": "2026-10-09T19:55:30.373070Z",
     "updated_at": "2026-10-09T19:55:30.373070Z"
+  },
+  {
+    "id": "USR-190",
+    "project_id": "darkfac",
+    "title": "DarkHub exibe o backlog de acoes humanas (.factory/owner_actions) como fila prioritaria com passo a passo, resolucao e decisoes",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "Mandato do owner (09/10/2026): o backlog de acoes humanas precisa estar sempre atualizado e acessivel, com todos os detalhes, via DarkHub, para o owner nunca precisar perguntar no chat o que tem de fazer. Hoje get_priority_interventions (hub/backend/service.py) so agrega Grills, tarefas em WAITING_HUMAN e aprovacoes G8; acoes como commit humano em core/harness/*, token do Telegram, papel do Postgres e decisoes de politica nao aparecem. O backlog inicial (7 itens OA-001..OA-007, com passo a passo) foi semeado em .factory/owner_actions/owner_actions.json e a regra de registro obrigatorio entrou no CLAUDE.md; falta o Hub le-lo, exibi-lo e permitir resolver.",
+    "core_journey": [
+      "Mandato do owner (09/10/2026): o backlog de acoes humanas precisa estar sempre atualizado e acessivel, com todos os detalhes, via DarkHub, para o owner nunca precisar perguntar no chat o que tem de fazer. Hoje get_priority_interventions (hub/backend/service.py) so agrega Grills, tarefas em WAITING_HUMAN e aprovacoes G8; acoes como commit humano em core/harness/*, token do Telegram, papel do Postgres e decisoes de politica nao aparecem. O backlog inicial (7 itens OA-001..OA-007, com passo a passo) foi semeado em .factory/owner_actions/owner_actions.json e a regra de registro obrigatorio entrou no CLAUDE.md; falta o Hub le-lo, exibi-lo e permitir resolver."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Backend: novo kind owner_action em PriorityInterventionKind; get_priority_interventions inclui os itens com status open (e waiting) de .factory/owner_actions/owner_actions.json, com urgency = priority, title, why, blocks, depends_on, steps (texto + comando), verify, options (para kind=decision) em metadata; ordenacao critical primeiro; contadores no report (owner_action_count)",
+      "Fonte do dado: usar o mesmo caminho pelo qual o Hub em producao ja recebe o backlog de demandas (verificar USR-136/PR #167) para que um item novo apareca em producao sem depender de redeploy manual; documentar a latencia real e, se depender de deploy, garantir que o deploy pos-merge o publica",
+      "UI (hub/frontend/interventions.js e index.html): cartao por acao com prioridade, bloqueios, passo a passo numerado com botao copiar nos comandos, criterio de verificacao e badge de itens dependentes (depends_on) bloqueados; filtro por prioridade; contador no menu lateral",
+      "Resolucao: endpoint POST para marcar item done (com resolved_at) e para responder decisoes (opcao escolhida + nota) persistindo no store; ao resolver uma decisao, registrar a resposta e anexar ao ticket bloqueado (comentario/tag) para a linha retomar sozinha",
+      "CLI para agentes: python C:\\dev\\DarkFac\\scripts\\owner_action.py add|list|done|answer (valida schema, ids OA-NNN sequenciais, nunca imprime segredos) e skill 19-run-ticket com secao curta sobre o registro obrigatorio",
+      "Notificacao: criar item critical ou high dispara aviso ao owner pelo Telegram (reusar o mecanismo de notify_pending_grill) com link para o DarkHub",
+      "Integracao com HumanRequest (core/line/human.py): toda HumanRequest da linha tambem aparece como owner_action com os passos tela a tela que ela ja gera",
+      "Testes: schema, agregacao no service, endpoints, CLI e fallback quando o arquivo estiver ausente ou corrompido (a fila continua funcionando)",
+      "Verificacao em producao: /api interventions/priority em darkhub.ggcampos.com lista OA-001..OA-007 apos o deploy"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-09T22:20:00Z",
+    "updated_at": "2026-10-09T22:20:00Z"
   }
 ]
