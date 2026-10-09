@@ -5186,5 +5186,36 @@
     "dependencies": [],
     "created_at": "2026-10-09T06:30:00Z",
     "updated_at": "2026-10-09T06:30:00Z"
+  },
+  {
+    "id": "USR-187",
+    "project_id": "darkfac",
+    "title": "Corrigir falha '[Errno 2] git' ao registrar demanda pelo Telegram",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "Ao enviar /demand no canal DarkFac Orchestrator do Telegram, o orquestrador responde '❌ Failed to register demand: [Errno 2] No such file or directory: git'. Causa provável: core/demands/id_allocator.py (_git) chama subprocess.run(['git', ...]) sem caminho absoluto e sem tratar FileNotFoundError; o processo do orquestrador do Telegram roda sem git no PATH (git existe em C:\\Program Files\\Git\\cmd\\git.exe no shell do usuário). Erro é emitido em core/integrations/telegram.py:748/781. Evidência: mensagem recebida no Telegram em 2026-10-09 ao tentar criar demanda para listar número e descrição de tickets abertos. Fix esperado: resolver o executável git de forma robusta (shutil.which com fallback para caminhos padrão do Windows, ou variável de configuração) e falhar com mensagem clara e fail-closed quando ausente, sem vazar traceback cru ao usuário; garantir que o orquestrador herde PATH com git.",
+    "core_journey": [
+      "Ao enviar /demand no canal DarkFac Orchestrator do Telegram, o orquestrador responde '❌ Failed to register demand: [Errno 2] No such file or directory: git'. Causa provável: core/demands/id_allocator.py (_git) chama subprocess.run(['git', ...]) sem caminho absoluto e sem tratar FileNotFoundError; o processo do orquestrador do Telegram roda sem git no PATH (git existe em C:\\Program Files\\Git\\cmd\\git.exe no shell do usuário). Erro é emitido em core/integrations/telegram.py:748/781. Evidência: mensagem recebida no Telegram em 2026-10-09 ao tentar criar demanda para listar número e descrição de tickets abertos. Fix esperado: resolver o executável git de forma robusta (shutil.which com fallback para caminhos padrão do Windows, ou variável de configuração) e falhar com mensagem clara e fail-closed quando ausente, sem vazar traceback cru ao usuário; garantir que o orquestrador herde PATH com git."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Quando git não está no PATH do processo, o orquestrador localiza o binário pelo fallback configurado e registra a demanda normalmente",
+      "Quando git realmente não existe, a resposta do Telegram é uma mensagem clara em português indicando a dependência ausente, sem '[Errno 2]' cru",
+      "Teste automatizado cobre _git com git ausente do PATH (monkeypatch de PATH vazio) e com fallback",
+      "Demanda via /demand no Telegram retorna ticket_id registrado"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-09T19:53:15.599294Z",
+    "updated_at": "2026-10-09T19:53:15.599294Z"
   }
 ]
