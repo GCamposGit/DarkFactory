@@ -7,7 +7,7 @@
       "kind": "action",
       "title": "Mergear o PR #230 (USR-162, worker remoto) com commit humano em core/harness/*",
       "priority": "critical",
-      "status": "open",
+      "status": "done",
       "why": "O PR #230 tem a correcao da perda de resposta do worker remoto (USR-162), pronta e testada (17 testes). core/harness/* e protegido pelo guard e o CI reprova qualquer PR que o altere, entao so uma acao humana destrava. Sem isso o worker do Desktop continua perdendo jobs no restart, e o item (a) do USR-186 (restart que deixa o worker desligado) fica bloqueado junto (USR-181).",
       "blocks": [
         "USR-162",
@@ -33,10 +33,10 @@
           "command": "cd C:\\dev\\DarkFac; git pull --ff-only; python C:\\dev\\DarkFac\\scripts\\dokploy_redeploy.py"
         }
       ],
-      "verify": "gh pr view 230 --json state mostra MERGED; o USR-162 aparece como completed no DarkHub; python C:\\dev\\DarkFac\\scripts\\dokploy_redeploy.py termina com codigo 0 (Desktop convergido).",
+      "verify": "Feito pelo owner: PR #230 mergeado (9b7600b) em 10/10/2026.",
       "created_at": "2026-10-09T22:00:00Z",
       "created_by": "claude-code",
-      "resolved_at": null
+      "resolved_at": "2026-10-10T11:30:00Z"
     },
     {
       "id": "OA-002",
@@ -287,6 +287,43 @@
       ],
       "verify": "O deploy termina com codigo 0, imprime 'NODE SYNC' convergido para os tres nos e executa o backup pos-deploy; curl/Invoke-RestMethod em http://100.78.181.90:8080/health mostra git_sha igual ao origin/main.",
       "created_at": "2026-10-10T00:40:00Z",
+      "created_by": "claude-code",
+      "resolved_at": null
+    },
+    {
+      "id": "OA-009",
+      "kind": "action",
+      "title": "Limpar tokens revogados do Telegram no Notebook e no Desktop e definir TELEGRAM_OWNER_BOT_TOKEN / TELEGRAM_OPS_BOT_TOKEN",
+      "priority": "high",
+      "status": "open",
+      "why": "Em 10/10/2026 a fabrica testou os tokens do Notebook com getMe: TELEGRAM_BOT_TOKEN (variavel User) e valido, mas tinha espaco/quebra de linha nas pontas; o .env (OWNER, OPS e BOT) e os arquivos .factory\\telegram\\ops_config.json e owner_config.json ainda guardam tokens REVOGADOS (HTTP 401); TELEGRAM_OWNER_BOT_TOKEN e TELEGRAM_OPS_BOT_TOKEN nao existem no ambiente. O loader le a variavel de ambiente primeiro, entao o papel ops funciona, mas o papel owner cai no .env/JSON revogado e falha silenciosamente nesta maquina. Em producao (Dokploy) esta tudo certo: webhooks ops e owner registrados sem erro e o /status respondeu. O Desktop precisa da mesma verificacao.",
+      "blocks": [
+        "USR-100",
+        "USR-197"
+      ],
+      "depends_on": [],
+      "steps": [
+        {
+          "text": "Pegue os dois tokens validos (owner e ops): os mesmos que voce colocou no Dokploy (projeto darkfac-core > servico com TELEGRAM_* > aba Environment) ou gere de novo no BotFather (/mybots > bot > API Token)."
+        },
+        {
+          "text": "No PowerShell de CADA maquina (Notebook e Desktop) grave as tres variaveis do usuario, SEM espaco nem quebra de linha antes ou depois do token:",
+          "command": "[Environment]::SetEnvironmentVariable(\"TELEGRAM_OWNER_BOT_TOKEN\", \"<TOKEN_OWNER>\", \"User\"); [Environment]::SetEnvironmentVariable(\"TELEGRAM_OPS_BOT_TOKEN\", \"<TOKEN_OPS>\", \"User\"); [Environment]::SetEnvironmentVariable(\"TELEGRAM_BOT_TOKEN\", \"<TOKEN_OPS>\", \"User\")"
+        },
+        {
+          "text": "Abra C:\\dev\\DarkFac\\.env no Bloco de Notas e APAGUE as linhas TELEGRAM_OWNER_BOT_TOKEN, TELEGRAM_OPS_BOT_TOKEN e TELEGRAM_BOT_TOKEN (ou troque pelos tokens novos). O ambiente tem prioridade, mas o arquivo com token revogado causa o aviso de divergencia."
+        },
+        {
+          "text": "Apague os arquivos de fallback com token revogado (eles sao ignorados pelo git):",
+          "command": "Remove-Item C:\\dev\\DarkFac\\.factory\\telegram\\ops_config.json, C:\\dev\\DarkFac\\.factory\\telegram\\owner_config.json -ErrorAction SilentlyContinue"
+        },
+        {
+          "text": "Feche e abra o PowerShell e verifique com o script de checagem (nunca imprime o token inteiro; disponivel apos o merge do USR-197):",
+          "command": "python C:\\dev\\DarkFac\\scripts\\telegram_tokens_check.py"
+        }
+      ],
+      "verify": "O script lista owner e ops como VALIDO (@bot) na fonte efetiva e nenhuma fonte REVOGADA; saida com codigo 0.",
+      "created_at": "2026-10-10T11:30:00Z",
       "created_by": "claude-code",
       "resolved_at": null
     }
