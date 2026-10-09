@@ -115,3 +115,42 @@ Webhook:     https://darkhub.ggcampos.com/api/webhooks/telegram/owner (pending=0
    - O bot deve responder com o menu operacional de boas-vindas da Dark Factory.
 3. No chat com `@darkfac_bot`, envie a mensagem: `/start`.
    - O bot deve responder indicando que é o canal exclusivo de alertas e apontar para o `@darkfac_ops_bot`.
+
+---
+
+## 6. Conferir todas as fontes de token por papel (USR-197)
+
+O loader (`load_telegram_config`) usa esta precedencia: **variavel de ambiente do processo > `.env` > `.factory/telegram/<papel>_config.json` > `config.json`**. Um token revogado esquecido em uma fonte secundaria so aparece quando a fonte de cima falha, e o aviso `Telegram token sources diverge` do log nao diz qual delas esta revogada. O script abaixo responde isso de uma vez.
+
+### Passo 6.1: Rodar a conferencia completa (com rede)
+No PowerShell do Notebook ou do Desktop:
+```powershell
+python C:\dev\DarkFac\scripts\telegram_tokens_check.py
+```
+
+Para cada papel (`owner`, `ops`) e cada fonte (variaveis de ambiente do processo, variaveis do escopo **User** do Windows, `.env`, JSON em `.factory/telegram`), o script chama `getMe` com timeout curto e imprime uma tabela `papel | fonte | final | estado`:
+
+| Estado | Significado |
+| :--- | :--- |
+| `VALIDO(@bot)` | Telegram aceitou o token (mostra o bot dono dele) |
+| `REVOGADO` | Telegram respondeu 401/404: token antigo ou invalido |
+| `vazio` | A chave existe mas esta em branco |
+| `ausente` | A chave/arquivo nao existe nessa fonte |
+| `ERRO(rede)` | Nao foi possivel consultar o Telegram (nao conta como revogado) |
+| `FORMATO INVALIDO` | O valor nao tem o formato `numero:segredo` |
+
+A coluna `final` mostra somente os **4 ultimos caracteres**; o token inteiro nunca e impresso. A linha marcada `<- EFETIVA (usada pelo loader)` e a fonte que o bot de fato usa (o script chama o proprio loader). A linha `env(User Windows)` nao e lida pelo loader, mas e herdada por qualquer terminal novo, entao pode virar a fonte efetiva depois de um logoff.
+
+O script avisa quando o valor tem **espacos ou quebra de linha** nas pontas (comum ao colar o token) e sai com **codigo 1** se a fonte efetiva ou qualquer fonte secundaria estiver `REVOGADA`, ou se o papel ficar sem token efetivo.
+
+### Passo 6.2: Limpar uma fonte revogada
+1. Anote na tabela qual `fonte` esta `REVOGADO` e qual e a `EFETIVA`.
+2. Se for `.env` ou JSON: abra o arquivo indicado (`C:\dev\DarkFac\.env` ou `C:\dev\DarkFac\.factory\telegram\<papel>_config.json`), apague o valor revogado (ou troque pelo token valido da secao 3) e salve.
+3. Se for `env(User Windows)`: pressione `Win` + `R`, digite `rundll32 sysdm.cpl,EditEnvironmentVariables`, selecione a variavel em **Variaveis de usuario**, clique em **Excluir** (ou **Editar** e cole o token valido), confirme com **OK** e abra um novo terminal.
+4. Rode o script de novo ate sair `OK (codigo 0)`.
+
+### Passo 6.3: Conferir so formato e espacos (sem rede)
+```powershell
+python C:\dev\DarkFac\scripts\telegram_tokens_check.py --offline
+```
+Util sem internet: valida apenas formato e espacos nas pontas, sem chamar a API do Telegram.

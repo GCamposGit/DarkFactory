@@ -258,8 +258,14 @@ def load_telegram_config(
 
     distinct_tokens = set(sources.values())
     if len(distinct_tokens) > 1:
-        details = ", ".join(f"{src}={_token_fp(t)}" for src, t in sources.items())
-        logger.warning("Telegram token sources diverge for role=%s: %s", role, details)
+        # Only the last 4 characters are logged; the first source listed is the one in use (USR-197).
+        details = ", ".join(f"{src}=...{t.strip()[-4:]}" for src, t in sources.items())
+        logger.warning(
+            "Telegram token sources diverge for role=%s (precedencia: env > .env > JSON): %s. "
+            "Rode python C:/dev/DarkFac/scripts/telegram_tokens_check.py para ver qual esta revogada.",
+            role,
+            details,
+        )
 
     if not token:
         token = local_token
@@ -864,13 +870,16 @@ class TelegramGateway:
             if self.status_handler:
                 try:
                     res = self.status_handler(ticket_id_query)
-                    summary = res.get("summary", "All systems operational.")
+                    summary = res.get("summary") or "Resumo de status indisponivel."
                     result.response_text = f"📊 DarkFac Status:\n{summary}"
                 except Exception as exc:
                     result.error = str(exc)
                     result.response_text = f"❌ Failed to fetch status: {exc}"
             else:
-                result.response_text = "📊 DarkFac Status: Pipeline active, 0 blocking incidents."
+                result.response_text = (
+                    "📊 DarkFac Status:\nResumo real indisponivel neste bot (sem status_handler). "
+                    "Use o bot de operacoes ou o DarkHub (/live)."
+                )
 
         elif cmd_str == "/grill":
             result.action = TelegramActionType.GRILL
