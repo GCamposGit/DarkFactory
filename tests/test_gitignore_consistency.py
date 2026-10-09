@@ -118,7 +118,8 @@ def repo_report() -> ConsistencyReport:
 
 def test_allowlist_file_is_well_formed() -> None:
     assert ALLOWLIST_FILE.is_file()
-    assert load_allowlist(), "a allowlist nao pode estar vazia enquanto USR-100/USR-102 estiverem abertos"
+    # USR-184: a allowlist so encolhe e pode chegar a zero (nada rastreado-e-ignorado).
+    assert isinstance(load_allowlist(), list)
 
 
 def test_no_tracked_file_is_ignored_outside_the_allowlist(repo_report: ConsistencyReport) -> None:
