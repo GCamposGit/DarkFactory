@@ -5246,5 +5246,36 @@
     "dependencies": [],
     "created_at": "2026-10-09T21:40:00Z",
     "updated_at": "2026-10-09T21:40:00Z"
+  },
+  {
+    "id": "USR-189",
+    "project_id": "darkfac",
+    "title": "Criar comando /tickets no Telegram para listar tickets abertos",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "Pedido do owner via Telegram (canal DarkFac Orchestrator): criar um comando que liste o número (ID) e a descrição de todos os tickets abertos. Tentativa anterior por /demand foi rejeitada com '[Errno 2] git' (ticket USR-187 em correção). Escopo: novo comando no handler de core/integrations/telegram.py que lê a fila de demandas (.factory/demands/demands.json, status não concluído) e responde com lista ID + título/descrição, formatada em HTML para Telegram e truncada em limite de tamanho de mensagem.",
+    "core_journey": [
+      "Pedido do owner via Telegram (canal DarkFac Orchestrator): criar um comando que liste o número (ID) e a descrição de todos os tickets abertos. Tentativa anterior por /demand foi rejeitada com '[Errno 2] git' (ticket USR-187 em correção). Escopo: novo comando no handler de core/integrations/telegram.py que lê a fila de demandas (.factory/demands/demands.json, status não concluído) e responde com lista ID + título/descrição, formatada em HTML para Telegram e truncada em limite de tamanho de mensagem."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Comando /tickets (ou equivalente acordado) no canal DarkFac Orchestrator responde com todos os tickets com status aberto, cada linha com ID e descrição",
+      "Tickets concluídos ou cancelados não aparecem na listagem",
+      "Mensagens longas são divididas em partes abaixo do limite de 4096 caracteres do Telegram",
+      "Teste automatizado cobre filtro de status e formatação da listagem"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-09T19:55:30.373070Z",
+    "updated_at": "2026-10-09T19:55:30.373070Z"
   }
 ]
