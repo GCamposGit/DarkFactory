@@ -216,6 +216,34 @@ de CPU/tempo da suíte, desde que o worker esteja disponível.
    localmente sem avisar (mesma seriedade de qualquer erro de configuração
    do harness).
 
+5. **Job despachado que nunca entrega veredito (USR-162)** → o cliente não
+   desiste mais de forma anônima. Causa raiz do incidente de 2026-10-08
+   (T2): o worker guardava os jobs só em memória; ao reiniciar/cair no meio
+   do job, o processo novo respondia `GET /harness/jobs/<id>` com 404 e
+   `/health` com `busy=false`, e o cliente tratava o 404 como "silêncio"
+   até o teto de 180s (USR-141). Agora:
+   - O worker persiste cada transição do job em
+     `<DARKFAC_WORKER_STATE_DIR>/jobs/<job_id>.json` e o log por linha em
+     `logs/<job_id>.log`. No start-up, um job `queued`/`running` cujo
+     processo dono morreu vira `failed` com `error_code=worker_restarted`
+     (log preservado, filho do runner encerrado); jobs terminais continuam
+     consultáveis. `POST /system/restart` fecha os jobs ativos com a mesma
+     causa antes de sair. `/health` expõe `instance_id`/`started_at` e o
+     submit devolve `worker_instance_id`, para o cliente saber que o worker
+     reiniciou depois do envio.
+   - O 404 de job desconhecido é estruturado
+     (`error_code=job_not_found`, `job_id`, `worker_instance_id`) e o
+     cliente o trata como definitivo na hora (401/403 também); falhas
+     transitórias seguem a lógica lento-vs-morto do USR-141, com uma
+     última leitura do job antes de desistir.
+   - Ao abandonar, o cliente imprime `[REMOTE_JOB_LOST] {json}` (job_id,
+     causa, último status/offset, saúde do worker, se houve restart) e grava
+     `<DARKFAC_HARNESS_STATE_DIR>/remote_jobs/<job_id>.json` com o rabo do
+     log; em seguida cai para execução local como nas regras 1-4. Um job
+     `failed` com `error_code` de infraestrutura (`worker_restarted`,
+     `worker_internal_error`, `worker_setup_failed`) nunca é reportado como
+     falha de teste.
+
 Três guardas de segurança desligam o despacho remoto **incondicionalmente**
 (mesmo com `--remote-required`, nunca lançam erro — apenas seguem local em
 silêncio): `CI` truthy; o processo já está rodando **dentro** de um job do
