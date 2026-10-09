@@ -4670,8 +4670,8 @@
     "project_id": "darkfac",
     "title": "Isolar testes de Telegram e backup das credenciais reais do ambiente",
     "origin": "agent",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "PR #221 (7f05caf): fixture autouse _isolate_external_service_env em tests/conftest.py remove TELEGRAM_*, R2_*, DARKHUB_TELEGRAM_AUTO_WEBHOOK e DARKFAC_BACKUP_ENCRYPTION_KEY e ignora o .env do checkout real; sem R2 o cliente usa o mock em memoria existente. As 6 falhas foram reproduzidas com valores sinteticos antes da correcao e passam com e sem ambiente externo (73 passed, 1 skipped preexistente; 243 passed em 11 arquivos vizinhos). 4 testes de regressao novos. CI ubuntu e windows verdes.",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -4693,15 +4693,15 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-08T15:25:09.313300Z",
-    "updated_at": "2026-10-08T15:25:09.313314Z"
+    "updated_at": "2026-10-09T04:30:00Z"
   },
   {
     "id": "USR-164",
     "project_id": "darkfac",
     "title": "Esteira ao vivo nao enxerga trabalho local: Notebook sem URL de escrita e sessoes interativas do Claude Code nao publicam",
     "origin": "user",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "PRs #222 (1225161) e #226 (67b73ca): open_progress avisa em destaque quando o sink e o control.db local invisivel ao Hub (DARKFAC_LOCAL_PROGRESS=local mantem o SQLite de proposito); CLI scripts/live_run.py open|phase|finish|cancel para sessoes interativas e por subagentes, nunca falha a sessao; core/line/live_writer.py + scripts/provision_live_writer.py criam o papel darkfac_live_writer restrito a INSERT em local_run_events com auditoria de privilegios; PostgresSink insere primeiro e so roda DDL se a tabela faltar; skill 19-run-ticket e runbook atualizados. Verificado em PostgreSQL 16.15 real em 09/10/2026 (script de ponta a ponta, idempotencia, --rotate-password, publicacao via live_run, leitura pelo papel do Hub e negativos do writer). PENDENTE DO OWNER: provisionar o papel no Postgres da nuvem e definir DARKFAC_HF02_DATABASE_URL no Notebook e no Desktop (passo a passo em docs/runbooks/live_progress.md), depois conferir /live em ate 5 s.",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -4723,7 +4723,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-08T17:58:05.189744Z",
-    "updated_at": "2026-10-08T17:58:05.189744Z"
+    "updated_at": "2026-10-09T04:30:00Z"
   },
   {
     "id": "USR-165",
@@ -4999,5 +4999,95 @@
     "dependencies": [],
     "created_at": "2026-10-09T00:36:38.722571Z",
     "updated_at": "2026-10-09T00:36:38.722571Z"
+  },
+  {
+    "id": "USR-181",
+    "project_id": "darkfac",
+    "title": "Guard de governanca bloqueia correcoes do worker remoto em core/harness/remote_*.py (PR #230 do USR-162 vermelho)",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "O PR #230 (USR-162) tem a correcao pronta e testada (17 testes), mas o guard (core/orchestrator/guard.py) reprova o PR porque core/harness/* esta em PROTECTED_PATTERNS e so aceita commit humano direto; todos os checks do CI falham antes dos testes. O USR-141 ja alterou esses arquivos. Evidencia: PR #230, branch fix/usr-162-remote-worker-lost-response.",
+    "core_journey": [
+      "O PR #230 (USR-162) tem a correcao pronta e testada (17 testes), mas o guard (core/orchestrator/guard.py) reprova o PR porque core/harness/* esta em PROTECTED_PATTERNS e so aceita commit humano direto; todos os checks do CI falham antes dos testes. O USR-141 ja alterou esses arquivos. Evidencia: PR #230, branch fix/usr-162-remote-worker-lost-response."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Owner decide: commit humano de core/harness/remote_dispatch.py e remote_worker.py do PR #230, ou reclassificar remote_*.py fora dos padroes protegidos",
+      "Se reclassificar, atualizar o guard e o teste de governanca com justificativa",
+      "PR #230 verde no CI e mergeado; USR-162 concluido"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-09T04:30:00Z",
+    "updated_at": "2026-10-09T04:30:00Z"
+  },
+  {
+    "id": "USR-182",
+    "project_id": "darkfac",
+    "title": "Descobrir quem reinicia o worker remoto no meio de um job: node_sync ignora queue_length",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "Seguimento do USR-162: a perda de resposta e explicada por job em memoria perdido no restart, mas a causa do restart no Desktop nao foi confirmada. Hipotese: node_sync so olha busy e active_runs e um job queued aparece como busy=False. Fonte a coletar: %LOCALAPPDATA%\\DarkFac\\worker\\daemon.log e o historico da tarefa agendada DarkFac Test Worker.",
+    "core_journey": [
+      "Seguimento do USR-162: a perda de resposta e explicada por job em memoria perdido no restart, mas a causa do restart no Desktop nao foi confirmada. Hipotese: node_sync so olha busy e active_runs e um job queued aparece como busy=False. Fonte a coletar: %LOCALAPPDATA%\\DarkFac\\worker\\daemon.log e o historico da tarefa agendada DarkFac Test Worker."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "node_sync considera queue_length > 0 como ocupado e nao reinicia o worker nesse estado",
+      "Coletar daemon.log e historico da tarefa agendada e registrar a causa confirmada do restart",
+      "Teste focal do node_sync com job enfileirado"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-09T04:30:00Z",
+    "updated_at": "2026-10-09T04:30:00Z"
+  },
+  {
+    "id": "USR-183",
+    "project_id": "darkfac",
+    "title": "Watchdog do worker remoto mata so o processo de topo: netos do xdist podem manter o pipe aberto",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "Seguimento do USR-162: se o runner morre mas netos (xdist) mantem o pipe de stdout aberto, o loop de leitura do worker pode nao terminar, e o watchdog hoje encerra apenas o processo de topo e nao a arvore. Sem relacao provada com o incidente original (la o busy era False). Tambem: o teste live em tests/test_remote_dispatch.py (uvicorn com log_config padrao) pode quebrar com I/O operation on closed file ao encerrar.",
+    "core_journey": [
+      "Seguimento do USR-162: se o runner morre mas netos (xdist) mantem o pipe de stdout aberto, o loop de leitura do worker pode nao terminar, e o watchdog hoje encerra apenas o processo de topo e nao a arvore. Sem relacao provada com o incidente original (la o busy era False). Tambem: o teste live em tests/test_remote_dispatch.py (uvicorn com log_config padrao) pode quebrar com I/O operation on closed file ao encerrar."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Watchdog e /system/restart encerram a arvore de processos do runner",
+      "Teste com filho neto que segura o pipe aberto",
+      "Teste live do uvicorn usa log_config=None"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-09T04:30:00Z",
+    "updated_at": "2026-10-09T04:30:00Z"
   }
 ]
