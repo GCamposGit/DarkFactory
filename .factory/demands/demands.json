@@ -5433,5 +5433,36 @@
     "dependencies": [],
     "created_at": "2026-10-10T00:10:00Z",
     "updated_at": "2026-10-10T00:10:00Z"
+  },
+  {
+    "id": "USR-196",
+    "project_id": "darkfac",
+    "title": "Deploy: erro real do update do Desktop invisivel, pull aborta com arquivo desversionado e divergencia do Desktop pula o backup da VPS",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "Deploy de 09-10/10/2026: o Desktop (DESKTOP-G45IPEM) ficou em e8fff1d e todo redeploy saiu com codigo 1 ('Desktop update did not reach expected SHA'), pulando o backup pos-deploy; a mensagem nao traz a causa do git pull do worker (provavel conflito com o config.json do Telegram desversionado pelo USR-184). Tres falhas de processo: (1) o erro real do /system/update nao chega ao log do deploy; (2) o worker nao trata arquivos rastreados que deixam de ser versionados; (3) a divergencia so do Desktop derruba o backup da VPS, que nao depende dele. Humano pendente: OA-008.",
+    "core_journey": [
+      "Deploy de 09-10/10/2026: o Desktop (DESKTOP-G45IPEM) ficou em e8fff1d e todo redeploy saiu com codigo 1 ('Desktop update did not reach expected SHA'), pulando o backup pos-deploy; a mensagem nao traz a causa do git pull do worker (provavel conflito com o config.json do Telegram desversionado pelo USR-184). Tres falhas de processo: (1) o erro real do /system/update nao chega ao log do deploy; (2) o worker nao trata arquivos rastreados que deixam de ser versionados; (3) a divergencia so do Desktop derruba o backup da VPS, que nao depende dele. Humano pendente: OA-008."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "O erro (stderr do git) do /system/update do worker aparece no relatorio do node_sync/deploy, sem segredos",
+      "O update do worker lida com arquivos rastreados removidos pelo upstream (preserva copia e descarta a modificacao local de arquivos que deixaram de ser versionados) sem perder dados",
+      "O backup pos-deploy da VPS roda quando a VPS convergiu, e a divergencia do Desktop fica registrada como pendencia explicita; teste focal",
+      "Item do owner OA-008 fechado e deploy com codigo 0"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-10T00:40:00Z",
+    "updated_at": "2026-10-10T00:40:00Z"
   }
 ]
