@@ -515,3 +515,158 @@ def test_node_status_records_commit_date() -> None:
     assert notebook.commit_date == "2026-10-03T18:00:00+00:00"
 
 
+@pytest.fixture(autouse=True)
+def _never_touch_real_scheduled_task(monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    """Hermetico: nenhum teste deste modulo pode acionar schtasks de verdade (USR-186)."""
+    calls: list[str] = []
+
+    def fake(task_name: str = "DarkFac Test Worker") -> bool:
+        calls.append(task_name)
+        return True
+
+    monkeypatch.setattr(mod, "recover_scheduled_task", fake)
+    return calls
+
+
+class _PortHeldDesktop(FakeHttp):
+    """Simula USR-186: o restart deixa o worker desligado (porta 8080 presa) ate a tarefa agendada reiniciar."""
+
+    def __init__(self) -> None:
+        super().__init__(desktop=OLD)
+        self.restarting = False
+        self.recovered = False
+
+    def __call__(self, method: str, url: str, payload: dict[str, Any] | None, token: str | None) -> dict[str, Any]:
+        self.calls.append((method, url))
+        if ":8080" in url:
+            if url.endswith("/system/restart"):
+                self.restarting = True
+                return {"status": "restarting"}
+            if url.endswith("/system/update"):
+                return {"success": True, "current_commit": SHA}
+            if method == "GET":
+                if self.recovered:
+                    return {"git_sha": SHA, "restart_safe": True, "busy": False, "active_runs": 0, "queue_length": 0}
+                if self.restarting:
+                    raise OSError("[Errno 10048] bind: porta 8080 ocupada; worker nao subiu")
+                return {"git_sha": OLD, "restart_safe": True, "busy": False, "active_runs": 0, "queue_length": 0}
+        return super().__call__(method, url, payload, token)
+
+
+def test_restart_with_port_held_recovers_via_scheduled_task() -> None:
+    """USR-186: se a nova instancia nao sobe apos /system/restart, node_sync aciona schtasks /End + /Run."""
+    http = _PortHeldDesktop()
+    vclock = VirtualClock()
+    recovery_calls: list[str] = []
+
+    def fake_recovery(task_name: str) -> bool:
+        recovery_calls.append(task_name)
+        http.recovered = True
+        return True
+
+    report = mod.sync(
+        root=Path("."), git=FakeGit(), http=http, task_recovery=fake_recovery,
+        timeout=10, interval=2, clock=vclock.clock, sleep=vclock.sleep,
+    )
+    assert report.ok
+    assert recovery_calls == ["DarkFac Test Worker"]
+    assert ("POST", f"{mod.DESKTOP_URL}/system/restart") in http.calls
+
+
+def test_restart_with_port_held_and_recovery_failing_reports_offline_with_cause() -> None:
+    """USR-186: se nem a tarefa agendada levanta o worker, o relatorio diz isso (sem mascarar como divergente)."""
+    http = _PortHeldDesktop()
+    vclock = VirtualClock()
+    recovery_calls: list[str] = []
+
+    def fake_recovery(task_name: str) -> bool:
+        recovery_calls.append(task_name)
+        return False
+
+    report = mod.sync(
+        root=Path("."), git=FakeGit(), http=http, task_recovery=fake_recovery,
+        timeout=6, interval=2, clock=vclock.clock, sleep=vclock.sleep,
+    )
+    assert not report.ok
+    assert report.nodes[1].state == "offline"
+    assert "tarefa agendada" in (report.nodes[1].reason or "")
+    assert recovery_calls == ["DarkFac Test Worker"]  # uma unica tentativa de recuperacao, sem loop
+
+
+def test_update_failure_with_worker_left_offline_triggers_recovery() -> None:
+    """USR-186: update sem SHA esperado e worker desligado em seguida -> recuperacao antes de declarar divergencia."""
+    class UpdateWithoutShaThenDown(_PortHeldDesktop):
+        def __call__(self, method: str, url: str, payload: dict[str, Any] | None, token: str | None) -> dict[str, Any]:
+            if url.endswith("/system/update"):
+                self.calls.append((method, url))
+                self.restarting = True  # o worker se reiniciou sozinho e nao voltou
+                return {"success": True, "current_commit": ""}
+            return super().__call__(method, url, payload, token)
+
+    http = UpdateWithoutShaThenDown()
+    vclock = VirtualClock()
+    recovery_calls: list[str] = []
+
+    def fake_recovery(task_name: str) -> bool:
+        recovery_calls.append(task_name)
+        http.recovered = True
+        return True
+
+    report = mod.sync(
+        root=Path("."), git=FakeGit(), http=http, task_recovery=fake_recovery,
+        timeout=10, interval=2, clock=vclock.clock, sleep=vclock.sleep,
+    )
+    assert report.ok
+    assert recovery_calls == ["DarkFac Test Worker"]
+
+
+def test_update_failure_with_worker_alive_does_not_trigger_recovery() -> None:
+    """Update sem SHA com worker vivo: reporta divergencia, nao mata o worker via tarefa agendada."""
+    class UpdateWithoutSha(FakeHttp):
+        def __call__(self, method: str, url: str, payload: dict[str, Any] | None, token: str | None) -> dict[str, Any]:
+            if url.endswith("/system/update"):
+                self.calls.append((method, url))
+                return {"success": False, "current_commit": ""}
+            return super().__call__(method, url, payload, token)
+
+    http = UpdateWithoutSha(desktop=OLD)
+    vclock = VirtualClock()
+    recovery_calls: list[str] = []
+    report = mod.sync(
+        root=Path("."), git=FakeGit(), http=http, task_recovery=lambda name: recovery_calls.append(name) or True,
+        timeout=4, interval=2, clock=vclock.clock, sleep=vclock.sleep,
+    )
+    assert not report.ok
+    assert report.nodes[1].state == "divergent"
+    assert "expected SHA" in (report.nodes[1].reason or "")
+    assert recovery_calls == []
+
+
+def test_sync_no_restart_when_desktop_has_queued_job() -> None:
+    """USR-182: job `queued` (busy=False, active_runs=0, queue_length>0) conta como ocupado."""
+    class QueuedDesktop(FakeHttp):
+        def __call__(self, method: str, url: str, payload: dict[str, Any] | None, token: str | None) -> dict[str, Any]:
+            if method == "GET" and ":8080" in url:
+                self.calls.append((method, url))
+                return {
+                    "git_sha": self.desktop, "restart_safe": True,
+                    "busy": False, "active_runs": 0, "queue_length": 1,
+                }
+            return super().__call__(method, url, payload, token)
+
+    http = QueuedDesktop(desktop=OLD)
+    vclock = VirtualClock()
+    recovery_calls: list[str] = []
+    report = mod.sync(
+        root=Path("."), git=FakeGit(), http=http, task_recovery=lambda name: recovery_calls.append(name) or True,
+        clock=vclock.clock, sleep=vclock.sleep, retries=3, retry_delay=0.01,
+    )
+    assert not report.ok
+    assert report.nodes[1].state == "divergent"
+    assert report.nodes[1].queue_length == 1
+    assert "busy" in (report.nodes[1].reason or "").lower()
+    assert "queue_length" in (report.nodes[1].reason or "")
+    assert not any(method == "POST" and ":8080" in url for method, url in http.calls)
+    assert recovery_calls == []
+
+

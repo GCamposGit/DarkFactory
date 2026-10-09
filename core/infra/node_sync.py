@@ -33,6 +33,7 @@ class NodeStatus(BaseModel):
     reason: str | None = None
     busy: bool | None = None
     active_runs: int | None = None
+    queue_length: int | None = None
     is_legacy: bool | None = None
     sync_classification: Literal["converged", "behind", "ahead", "diverged", "dirty"] | None = None
     local_commits: list[str] = Field(default_factory=list)
@@ -142,30 +143,31 @@ def _probe(
     busy = bool(data.get("busy")) if "busy" in data else None
     active_runs = int(data.get("active_runs")) if "active_runs" in data and data.get("active_runs") is not None else None
     restart_safe = bool(data.get("restart_safe")) if "restart_safe" in data else False
+    queue_length = int(data.get("queue_length")) if "queue_length" in data and data.get("queue_length") is not None else None
     commit_date = str(data.get("commit_date")) if data.get("commit_date") else None
     if observed is None:
         if unknown_without_sha:
             return NodeStatus(
                 name=name, state="unknown", last_contact=now,
                 reason="health reports no git_sha (DARKFAC_GIT_SHA not provided at deploy); cannot verify",
-                busy=busy, active_runs=active_runs, is_legacy=False, commit_date=commit_date,
+                busy=busy, active_runs=active_runs, queue_length=queue_length, is_legacy=False, commit_date=commit_date,
             )
         is_legacy = not restart_safe
         if is_legacy:
             return NodeStatus(
                 name=name, state="divergent", last_contact=now,
                 reason="legacy test worker on :8080 (no git_sha / restart_safe)",
-                busy=busy, active_runs=active_runs, is_legacy=True, commit_date=commit_date,
+                busy=busy, active_runs=active_runs, queue_length=queue_length, is_legacy=True, commit_date=commit_date,
             )
         return NodeStatus(
             name=name, state="divergent", last_contact=now,
             reason="health response has no full git_sha",
-            busy=busy, active_runs=active_runs, is_legacy=False, commit_date=commit_date,
+            busy=busy, active_runs=active_runs, queue_length=queue_length, is_legacy=False, commit_date=commit_date,
         )
     return NodeStatus(
         name=name, state="converged" if observed == expected else "divergent",
         git_sha=observed, last_contact=now,
-        busy=busy, active_runs=active_runs, is_legacy=False, commit_date=commit_date,
+        busy=busy, active_runs=active_runs, queue_length=queue_length, is_legacy=False, commit_date=commit_date,
     )
 
 
@@ -535,11 +537,13 @@ def sync(
     clock: Callable[[], float] = time.monotonic,
     sleep: Callable[[float], None] = time.sleep,
     vps_redeploy: VpsRedeploy = redeploy_vps,
-    task_recovery: TaskRecovery = recover_scheduled_task,
+    task_recovery: TaskRecovery | None = None,
     retries: int = 3, retry_delay: float = 0.5,
     notifier: Callable[[str], bool] | None = None,
     track_divergence: bool = False,
 ) -> SyncReport:
+    if task_recovery is None:
+        task_recovery = recover_scheduled_task
     initial = verify(
         root=root, git=git, http=http, desktop_url=desktop_url, vps_url=vps_url,
         retries=retries, retry_delay=retry_delay, sleep=sleep, notifier=notifier,
@@ -630,11 +634,32 @@ def sync(
                     latest_desktop.reason = f"Desktop worker reiniciou mas permaneceu legado/sem git_sha apos {timeout:.0f}s"
                 return latest_desktop
 
+            def _recover_if_offline(result: NodeStatus) -> NodeStatus:
+                """USR-186: se a nova instancia nao subiu (ex.: porta 8080 ainda presa pela antiga),
+                aciona a tarefa agendada (schtasks /End + /Run) antes de declarar divergencia."""
+                if result.state != "offline":
+                    return result
+                task_recovery("DarkFac Test Worker")
+                recovered = _wait_for_restart()
+                if recovered.state == "offline":
+                    recovered.reason = (
+                        "Desktop worker offline apos restart e apos recuperacao pela tarefa agendada "
+                        f"(excedeu timeout de {timeout:.0f}s)"
+                    )
+                return recovered
+
             try:
                 health = http("GET", f"{desktop_url.rstrip('/')}/health", None, None)
-                is_busy = bool(health.get("busy")) or int(health.get("active_runs") or 0) > 0
+                # USR-182: um job `queued` aparece como busy=False/active_runs=0; queue_length cobre queued+running.
+                is_busy = (
+                    bool(health.get("busy"))
+                    or int(health.get("active_runs") or 0) > 0
+                    or int(health.get("queue_length") or 0) > 0
+                )
                 if is_busy:
-                    desktop.reason = "Desktop is busy (busy=True or active_runs > 0); update and restart skipped"
+                    desktop.reason = (
+                        "Desktop is busy (busy=True, active_runs > 0 or queue_length > 0); update and restart skipped"
+                    )
                     record_pending_convergence("Desktop", expected, desktop.reason)
                     initial.nodes[1] = desktop
                 elif desktop.is_legacy or (health.get("restart_safe") is not True and _sha(health.get("git_sha")) is None):
@@ -649,10 +674,24 @@ def sync(
                     if response.get("success") is not True or _sha(response.get("current_commit")) != expected:
                         raise RuntimeError("Desktop update did not reach expected SHA")
                     http("POST", f"{desktop_url.rstrip('/')}/system/restart", {}, token)
-                    initial.nodes[1] = _wait_for_restart()
+                    initial.nodes[1] = _recover_if_offline(_wait_for_restart())
             except Exception as exc:
                 desktop.reason = str(exc)
                 initial.nodes[1] = desktop
+                try:
+                    # O worker pode ter reiniciado sozinho (ou morrido) durante o update: se ficou desligado,
+                    # a recuperacao pela tarefa agendada vem antes de declarar divergencia (USR-186).
+                    probe = _probe(
+                        "Desktop", f"{desktop_url.rstrip('/')}/health", expected, http,
+                        retries=1, retry_delay=retry_delay, sleep=sleep,
+                    )
+                    if probe.state == "offline":
+                        recovered = _recover_if_offline(probe)
+                        if recovered.state != "converged" and not recovered.reason:
+                            recovered.reason = desktop.reason
+                        initial.nodes[1] = recovered
+                except Exception:
+                    pass
     else:
         initial.nodes[1] = desktop
 
