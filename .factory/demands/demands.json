@@ -5313,5 +5313,35 @@
     "dependencies": [],
     "created_at": "2026-10-09T22:20:00Z",
     "updated_at": "2026-10-09T22:20:00Z"
+  },
+  {
+    "id": "USR-193",
+    "project_id": "darkfac",
+    "title": "Alocador de ID de demanda usa origin/main local sem fetch e pode colidir",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "Evidência: ao criar USR-187 (2026-10-09 21:53), o alocador reservou USR-187 com base no origin/main local em 37e3ee4. Enquanto isso, o commit f11eea3 (#240) já registrava USR-187 e USR-188 em origin/main. O registro falhou com 'demands.json ticket ID collision' e a PR ficou DIRTY. Causa: core/demands/id_allocator.py (reserve_ticket_id) lê 'origin/main:.factory/demands/demands.json' e refs ticket/ locais sem executar git fetch antes. Fix esperado: fazer fetch de origin/main e das refs ticket/ antes de reservar o ID, e rejeitar reserva cujo ID já exista no origin/main após o fetch (fail-closed, sem merge de ID duplicado).",
+    "core_journey": [
+      "Evidência: ao criar USR-187 (2026-10-09 21:53), o alocador reservou USR-187 com base no origin/main local em 37e3ee4. Enquanto isso, o commit f11eea3 (#240) já registrava USR-187 e USR-188 em origin/main. O registro falhou com 'demands.json ticket ID collision' e a PR ficou DIRTY. Causa: core/demands/id_allocator.py (reserve_ticket_id) lê 'origin/main:.factory/demands/demands.json' e refs ticket/ locais sem executar git fetch antes. Fix esperado: fazer fetch de origin/main e das refs ticket/ antes de reservar o ID, e rejeitar reserva cujo ID já exista no origin/main após o fetch (fail-closed, sem merge de ID duplicado)."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Antes de reservar, o alocador atualiza origin/main e refs ticket/ (fetch) e reserva o próximo ID livre",
+      "Se o ID reservado já existir em origin/main após o fetch, a reserva é recalculada em vez de colidir",
+      "Teste automatizado simula origin/main com ID já registrado e verifica que o novo ID não colide"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-09T20:37:48.707823Z",
+    "updated_at": "2026-10-09T20:37:48.707823Z"
   }
 ]
