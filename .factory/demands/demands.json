@@ -5470,8 +5470,8 @@
     "project_id": "darkfac",
     "title": "Telegram: /status verdadeiro (acoes do owner, tickets, runs, nos) e script de checagem de tokens por papel e fonte",
     "origin": "user",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "PR #250 (a95ea32): /status do bot calcula o estado real (acoes humanas abertas do owner com link do DarkHub, tickets por estado sem tickets sinteticos, proximo ticket, runs ativos da Esteira e convergencia dos nos pelos snapshots do deploy), cada bloco isolado contra falhas e a mensagem limitada a 3600 caracteres; /status USR-123 preservado. scripts/telegram_tokens_check.py valida via getMe cada fonte por papel (ambiente do processo, ambiente User do Windows, .env, JSON), marca a fonte efetiva usada pelo loader, mostra so os 4 ultimos caracteres, avisa espacos nas pontas e sai com codigo 1 se houver fonte revogada. 22 testes novos hermeticos, runbook telegram_rotation.md secao 6, CI ubuntu e windows verdes. Verificado em 10/10/2026: deploy com codigo 0, Desktop convergido e o backlog de acoes humanas servido em producao; o script apontou tokens revogados no Notebook (acao do owner OA-009).",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -5493,6 +5493,6 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-10T11:30:00Z",
-    "updated_at": "2026-10-10T11:30:00Z"
+    "updated_at": "2026-10-10T12:30:00Z"
   }
 ]
