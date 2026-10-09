@@ -2742,8 +2742,8 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-09-30T23:30:00Z",
-    "updated_at": "2026-10-01T16:30:00Z",
-    "delivery_evidence": "17c1d68215997b5d688dfdcb95c7691d8b9aec64"
+    "updated_at": "2026-10-09T05:10:00Z",
+    "delivery_evidence": "17c1d68215997b5d688dfdcb95c7691d8b9aec64 | Atualizacao 09/10/2026: o owner informou no chat que o token do bot do Telegram exposto foi ROTACIONADO (token antigo revogado); o segredo antigo permanece apenas na historia do git, ja inutilizado. Desversionamento do config.json e remocao da allowlist temporaria: USR-184."
   },
   {
     "id": "USR-101",
@@ -5089,5 +5089,35 @@
     "dependencies": [],
     "created_at": "2026-10-09T04:30:00Z",
     "updated_at": "2026-10-09T04:30:00Z"
+  },
+  {
+    "id": "USR-184",
+    "project_id": "darkfac",
+    "title": "Desversionar .factory/telegram/config.json e remover a allowlist temporaria do USR-100 apos a rotacao do token",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "Seguimento do USR-100: o owner rotacionou o token do bot do Telegram em 09/10/2026, o que libera o desversionamento de .factory/telegram/config.json (ainda rastreado, com o token antigo ja revogado) e a remocao das entradas temporarias ticket=USR-100 da ALLOWLIST de core/git/secret_scan.py e do teste que as fixa em tests/test_no_tracked_secrets.py.",
+    "core_journey": [
+      "Seguimento do USR-100: o owner rotacionou o token do bot do Telegram em 09/10/2026, o que libera o desversionamento de .factory/telegram/config.json (ainda rastreado, com o token antigo ja revogado) e a remocao das entradas temporarias ticket=USR-100 da ALLOWLIST de core/git/secret_scan.py e do teste que as fixa em tests/test_no_tracked_secrets.py."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "git rm --cached de .factory/telegram/config.json e entrada no .gitignore; o config.example.json permanece versionado",
+      "Entradas ticket=USR-100 removidas da ALLOWLIST e o teste que as fixa substituido por um que garanta que o arquivo nao e rastreado",
+      "Gate de segredos rastreados (tests/test_no_tracked_secrets.py) verde sem allowlist para o config.json; docs atualizados"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-09T05:10:00Z",
+    "updated_at": "2026-10-09T05:10:00Z"
   }
 ]
