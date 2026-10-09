@@ -215,7 +215,7 @@
           "command": "git pull --ff-only"
         }
       ],
-      "verify": "Feito pela fabrica no Notebook (AI_Notebook) em 10/10/2026: backup em .factory\telegram\\config.pre-usr184.bak.json e git pull sem erro. O Desktop (DESKTOP-G45IPEM) esta bloqueado: ver OA-008.",
+      "verify": "Feito pela fabrica no Notebook (AI_Notebook) em 10/10/2026: backup em .factory\\telegram\\config.pre-usr184.bak.json e git pull sem erro. O Desktop (DESKTOP-G45IPEM) esta bloqueado: ver OA-008.",
       "created_at": "2026-10-09T22:00:00Z",
       "created_by": "claude-code",
       "resolved_at": "2026-10-10T00:40:00Z"
@@ -270,7 +270,7 @@
         },
         {
           "text": "Guarde uma copia dos arquivos locais do Telegram (eles sao ignorados pelo git e nao vao para o repositorio):",
-          "command": "Copy-Item .factory\telegram\\config.json .factory\telegram\\config.pre-usr184.bak.json -ErrorAction SilentlyContinue"
+          "command": "Copy-Item .factory\\telegram\\config.json .factory\\telegram\\config.pre-usr184.bak.json -ErrorAction SilentlyContinue"
         },
         {
           "text": "Descarte a modificacao local do arquivo que deixou de ser versionado e atualize:",
