@@ -43,6 +43,7 @@ output.
 from __future__ import annotations
 
 import base64
+import collections
 import contextlib
 import json
 import os
@@ -114,6 +115,13 @@ SLOW_WORKER_PROBE_TIMEOUT_SEC = 10.0
 SLOW_WORKER_PROBE_INTERVAL_SEC = 10.0
 SUBMIT_TIMEOUT_SEC = 30.0
 POLL_HTTP_TIMEOUT_SEC = 10.0
+#: USR-162: worker ``error_code`` values of a ``failed`` job that is NOT a test
+#: verdict (the run never finished). They fall back like an unavailable worker.
+INFRASTRUCTURE_ERROR_CODES = frozenset({"worker_restarted", "worker_internal_error", "worker_setup_failed"})
+#: Lines of streamed job log kept as evidence when a job is given up on.
+EVIDENCE_TAIL_LINES = 400
+LOST_JOBS_SUBDIR = "remote_jobs"
+MARKER_REMOTE_JOB_LOST = "[REMOTE_JOB_LOST]"
 
 
 class RemoteRequiredError(RuntimeError):
@@ -125,7 +133,23 @@ class RemoteRequiredError(RuntimeError):
 
 class _WorkerUnavailable(Exception):
     """Internal signal: abandon this worker and try the next one (or fall
-    back to local); NOT a definitive remote verdict."""
+    back to local); NOT a definitive remote verdict.
+
+    ``details`` carries the structured cause (USR-162): ``error_code``,
+    ``job_id``, ``worker_url`` and whatever evidence was gathered, so the
+    abandoned job is never reduced to an anonymous "stopped responding"."""
+
+    def __init__(self, message: str = "", details: dict[str, Any] | None = None) -> None:
+        super().__init__(message)
+        self.details: dict[str, Any] = dict(details or {})
+
+
+class RemoteJobLost(_WorkerUnavailable):
+    """A remote job that was dispatched but will never deliver a verdict
+    (unknown to the worker after a restart, worker silent past the ceiling,
+    credentials rejected, worker-side infrastructure failure). The caller
+    falls back exactly as for any ``_WorkerUnavailable``; the evidence was
+    already printed (``[REMOTE_JOB_LOST]``) and written to disk."""
 
 
 # --- env helpers -------------------------------------------------------------
@@ -380,63 +404,186 @@ def _relative_config_path(config_path: Path, project_root: Path) -> str:
 
 
 _REMOTE_STEP_TIME_RE = re.compile(r"^\[CHILD_STEP_TIME\] (\S+) ([0-9]+(?:\.[0-9]+)?)s")
+_HEALTH_EVIDENCE_KEYS = (
+    "busy",
+    "queue_length",
+    "active_runs",
+    "instance_id",
+    "started_at",
+    "git_sha",
+    "hostname",
+    "node_id",
+    "status",
+)
 
 
-def _stream_job(base_url: str, job_id: str, *, deadline: float) -> dict[str, Any]:
+def _health_subset(health: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not isinstance(health, dict):
+        return None
+    return {key: health[key] for key in _HEALTH_EVIDENCE_KEYS if key in health}
+
+
+def _record_lost_job(details: dict[str, Any], log_tail: str) -> None:
+    """Print the structured ``[REMOTE_JOB_LOST]`` line and keep the evidence
+    on disk (``<harness state>/remote_jobs/<job_id>.json``). Never raises."""
+
+    with contextlib.suppress(Exception):
+        print(f"{MARKER_REMOTE_JOB_LOST} {sanitize_child_output(json.dumps(details, sort_keys=True, default=str))}")
+    with contextlib.suppress(Exception):
+        directory = harness_cache.state_dir() / LOST_JOBS_SUBDIR
+        directory.mkdir(parents=True, exist_ok=True)
+        safe_id = re.sub(r"[^A-Za-z0-9_.-]", "_", str(details.get("job_id") or "unknown"))[:80]
+        record = {"details": details, "log_tail": log_tail, "recorded_at": time.time()}
+        tmp_path = directory / f"{safe_id}.json.tmp"
+        tmp_path.write_text(json.dumps(record, indent=2, default=str), encoding="utf-8")
+        os.replace(tmp_path, directory / f"{safe_id}.json")
+
+
+def _hard_poll_failure(exc: Exception) -> tuple[str, str] | None:
+    """Classify a failed job poll. Returns ``(error_code, message)`` when the
+    answer is DEFINITIVE (retrying cannot help), ``None`` for the transient
+    kind (timeout, refused connection, 5xx, a bare 404 from a proxy) that the
+    USR-141 silence logic handles."""
+
+    if not isinstance(exc, urllib.error.HTTPError):
+        return None
+    if exc.code in (401, 403):
+        return (
+            "worker_rejected_credentials",
+            f"worker rejected the job poll with HTTP {exc.code} (check DARKFAC_WORKER_TOKEN)",
+        )
+    if exc.code == 404:
+        body: Any = {}
+        with contextlib.suppress(Exception):
+            body = json.loads(exc.read().decode("utf-8", errors="replace"))
+        if isinstance(body, dict) and (body.get("error_code") == "job_not_found" or body.get("detail") == "job not found"):
+            return (
+                "job_lost_on_worker",
+                "the worker has no record of this job (HTTP 404 job not found)",
+            )
+    return None
+
+
+def _recover_terminal_state(base_url: str, job_id: str, offset: int) -> dict[str, Any] | None:
+    """One last read of the job before giving up: a worker that was merely
+    slow may hold the terminal verdict (and the rest of the log), or be
+    answering again."""
+
+    try:
+        payload = _poll_job(base_url, job_id, offset)
+    except Exception:  # noqa: BLE001 - recovery is best effort
+        return None
+    return payload if isinstance(payload, dict) and payload.get("status") else None
+
+
+def _stream_job(
+    base_url: str,
+    job_id: str,
+    *,
+    deadline: float,
+    submitted_instance_id: str | None = None,
+) -> dict[str, Any]:
     """Poll until the job reaches a terminal status; stream sanitized log
-    chunks prefixed with the worker's URL as they arrive."""
+    chunks prefixed with the worker's URL as they arrive.
+
+    Never gives up anonymously (USR-162): every abandonment raises
+    :class:`RemoteJobLost` carrying ``job_id``, the cause and the evidence
+    gathered, after one last attempt to read a terminal verdict."""
 
     offset = 0
     last_ok = time.monotonic()
     last_probe = float("-inf")
     announced_slow = False
+    last_status: str | None = None
     step_times: dict[str, str] = {}
+    log_tail: collections.deque[str] = collections.deque(maxlen=EVIDENCE_TAIL_LINES)
+
+    def _give_up(error_code: str, message: str, *, health: dict[str, Any] | None = None) -> RemoteJobLost:
+        if health is None:
+            health = probe_health(base_url)
+        current_instance = health.get("instance_id") if isinstance(health, dict) else None
+        restarted: bool | None = None
+        if submitted_instance_id and current_instance:
+            restarted = submitted_instance_id != current_instance
+        full_message = f"job {job_id} on {base_url}: {message}"
+        if restarted:
+            full_message += (
+                f"; the worker process restarted after the job was submitted "
+                f"(instance {submitted_instance_id} -> {current_instance})"
+            )
+        details = {
+            "error_code": error_code,
+            "job_id": job_id,
+            "worker_url": base_url,
+            "message": message,
+            "last_status": last_status,
+            "last_offset": offset,
+            "silent_for_sec": round(time.monotonic() - last_ok, 1),
+            "submitted_instance_id": submitted_instance_id,
+            "worker_restarted_since_submit": restarted,
+            "health": _health_subset(health),
+        }
+        _record_lost_job(details, "\n".join(log_tail))
+        return RemoteJobLost(full_message, details)
+
     while True:
         now = time.monotonic()
         if now > deadline:
             _cancel_job(base_url, job_id)
-            raise _WorkerUnavailable("client-side deadline exceeded")
+            raise _give_up("client_deadline_exceeded", "client-side deadline exceeded")
         try:
             payload = _poll_job(base_url, job_id, offset)
             last_ok = time.monotonic()
             announced_slow = False
-        except Exception:
+        except Exception as exc:  # noqa: BLE001
+            hard = _hard_poll_failure(exc)
+            if hard is not None:
+                raise _give_up(*hard) from exc
             silent_for = time.monotonic() - last_ok
+            recovered: dict[str, Any] | None = None
             if silent_for > WORKER_SILENCE_FALLBACK_SEC:
                 # USR-141: distinguish a SLOW worker from a DEAD one before
                 # abandoning the run. A saturated host can miss job polls
                 # while its HTTP server still answers /health.
                 ceiling = worker_silence_ceiling_sec()
                 if silent_for > ceiling:
-                    raise _WorkerUnavailable(f"worker stopped responding for >{ceiling:.0f}s mid-run")
-                if time.monotonic() - last_probe >= SLOW_WORKER_PROBE_INTERVAL_SEC:
+                    recovered = _recover_terminal_state(base_url, job_id, offset)
+                    if recovered is None:
+                        raise _give_up("worker_silent", f"worker stopped responding for >{ceiling:.0f}s mid-run") from exc
+                    last_ok = time.monotonic()
+                elif time.monotonic() - last_probe >= SLOW_WORKER_PROBE_INTERVAL_SEC:
                     last_probe = time.monotonic()
                     alive = probe_health(base_url, timeout=max(health_probe_timeout_sec(), SLOW_WORKER_PROBE_TIMEOUT_SEC))
                     if alive is None:
-                        raise _WorkerUnavailable(
-                            f"worker stopped responding for >{silent_for:.0f}s mid-run and /health is unreachable"
-                        )
+                        raise _give_up(
+                            "worker_unreachable",
+                            f"worker stopped responding for >{silent_for:.0f}s mid-run and /health is unreachable",
+                            health={},
+                        ) from exc
                     if not announced_slow:
                         announced_slow = True
                         print(
                             f"[REMOTE {base_url}] job polls silent for {silent_for:.0f}s but /health answers "
                             f"(busy={alive.get('busy')}); worker is slow, not dead - waiting up to {ceiling:.0f}s"
                         )
-            time.sleep(POLL_INTERVAL_SEC)
-            continue
+            if recovered is None:
+                time.sleep(POLL_INTERVAL_SEC)
+                continue
+            payload = recovered
 
         chunk = payload.get("log_chunk") or ""
         if chunk:
             for line in sanitize_child_output(chunk).splitlines():
                 print(f"[REMOTE {base_url}] {line}")
+                log_tail.append(line)
                 timing = _REMOTE_STEP_TIME_RE.match(line)
                 if timing:
                     step_times[timing.group(1)] = timing.group(2)
         offset = int(payload.get("next_offset", offset))
-        status = payload.get("status")
-        if status in ("done", "failed", "cancelled"):
+        last_status = payload.get("status")
+        if last_status in ("done", "failed", "cancelled"):
             # Display-only: remote timings never feed the verdict.
-            return {**payload, "_step_times": step_times}
+            return {**payload, "_step_times": step_times, "_log_tail": "\n".join(log_tail)}
         time.sleep(POLL_INTERVAL_SEC)
 
 
@@ -456,10 +603,30 @@ def _finalize_remote_result(
     config_hash: str,
     base_url: str,
     health: dict[str, Any],
+    job_id: str | None = None,
 ) -> tuple[bool, HarnessResult | None]:
     status = payload.get("status")
     if status not in ("done", "failed"):
         raise _WorkerUnavailable(f"unexpected terminal job status: {status!r}")
+
+    error_code = payload.get("error_code")
+    if status == "failed" and error_code in INFRASTRUCTURE_ERROR_CODES:
+        # The worker closed the job without a verdict (restart, crash, setup
+        # failure): that is not a test failure and must not be reported as one.
+        worker_error = str(payload.get("error") or error_code)
+        details = {
+            "error_code": error_code,
+            "job_id": job_id or payload.get("job_id"),
+            "worker_url": base_url,
+            "message": worker_error,
+            "last_status": status,
+            "worker_instance_id": payload.get("worker_instance_id"),
+            "health": _health_subset(health),
+        }
+        _record_lost_job(details, str(payload.get("_log_tail") or ""))
+        raise RemoteJobLost(
+            f"job {details['job_id']} on {base_url} ended without a verdict ({error_code}): {worker_error}", details
+        )
 
     raw_result = payload.get("result_json")
     if not raw_result:
@@ -570,8 +737,9 @@ def _dispatch_one_job(
 
     print(f"[REMOTE] dispatched suite to {base_url} (job {job_id})")
     deadline = time.monotonic() + total_timeout_sec
+    submitted_instance_id = submit_response["body"].get("worker_instance_id") or health.get("instance_id")
     try:
-        payload = _stream_job(base_url, job_id, deadline=deadline)
+        payload = _stream_job(base_url, job_id, deadline=deadline, submitted_instance_id=submitted_instance_id)
     except KeyboardInterrupt:
         print(f"[REMOTE] interrupted; cancelling job {job_id} on {base_url}")
         _cancel_job(base_url, job_id)
@@ -583,6 +751,7 @@ def _dispatch_one_job(
         config_hash=config_hash,
         base_url=base_url,
         health=health,
+        job_id=job_id,
     )
 
 

@@ -72,6 +72,21 @@ JOB_LOG_KEEP = 20
 JOB_WATCHDOG_POLL_SEC = 1.0
 DEFAULT_JOB_TIMEOUT_SEC = 1800.0
 JOB_TIMEOUT_BUFFER_SEC = 120.0
+#: USR-162: job state is persisted (``<state_dir>/jobs/<job_id>.json``) on every
+#: transition, so a worker restart/crash leaves a terminal, queryable record
+#: instead of an unknown job id (HTTP 404) that /health cannot explain.
+JOBS_STATE_SUBDIR = "jobs"
+#: ``error_code`` of a job whose worker process died/restarted while it was queued or running.
+ERROR_CODE_WORKER_RESTARTED = "worker_restarted"
+#: ``error_code`` of an unexpected failure of the worker's own job thread.
+ERROR_CODE_WORKER_INTERNAL = "worker_internal_error"
+#: ``error_code`` of a job that could not even start (e.g. ``git worktree add`` failed): no verdict.
+ERROR_CODE_WORKER_SETUP = "worker_setup_failed"
+#: ``error_code`` of a poll for a job id this worker has no record of.
+ERROR_CODE_JOB_NOT_FOUND = "job_not_found"
+#: Tolerance when comparing a recorded process start time with the live one (pid reuse guard).
+_PROCESS_START_TOLERANCE_SEC = 2.0
+_JOB_ID_RE = re.compile(r"[A-Za-z0-9_-]{1,64}")
 
 
 class WorkerHealthStatus(BaseModel):
@@ -101,6 +116,14 @@ class WorkerHealthStatus(BaseModel):
     restart_safe: bool = Field(
         default=True,
         description="True when /system/restart relaunches this HTTP daemon itself (USR-64), so node_sync may update+restart it",
+    )
+    instance_id: Optional[str] = Field(
+        default=None,
+        description="Random id of this worker process (USR-162); changes on every restart, so a client can tell its job was submitted to a previous instance",
+    )
+    started_at: Optional[float] = Field(
+        default=None,
+        description="Unix time at which this worker process created its JobManager (USR-162)",
     )
 
 
@@ -306,6 +329,69 @@ def _job_timeout_sec(worktree_path: Path, *, quick: bool, include_holdout: bool)
     return DEFAULT_JOB_TIMEOUT_SEC
 
 
+def _process_started_at(pid: Optional[int] = None) -> float:
+    """Start time (unix) of ``pid`` (default: this process); falls back to ``time.time()``."""
+
+    try:
+        import psutil
+
+        return float(psutil.Process(pid).create_time())
+    except Exception:  # noqa: BLE001 - psutil missing, no such process, access denied
+        return time.time()
+
+
+#: Start time of the process that hosts this module's JobManagers (a pid-reuse guard).
+_THIS_PROCESS_STARTED_AT = _process_started_at()
+
+
+def _process_alive(pid: Optional[int], started_at: Optional[float]) -> bool:
+    """True unless ``pid`` is provably gone or was recycled by a younger process.
+
+    Unknown (no psutil, access denied) counts as alive: recovery must never
+    declare a job of a still-running worker dead.
+    """
+
+    if not pid:
+        return False
+    try:
+        import psutil
+    except ImportError:
+        return True
+    try:
+        proc = psutil.Process(int(pid))
+        if started_at is not None and abs(proc.create_time() - float(started_at)) > _PROCESS_START_TOLERANCE_SEC:
+            return False
+        return proc.status() != psutil.STATUS_ZOMBIE
+    except psutil.NoSuchProcess:
+        return False
+    except Exception:  # noqa: BLE001 - AccessDenied & co: cannot prove it is dead
+        return True
+
+
+def _terminate_process_tree(pid: Optional[int], started_at: Optional[float]) -> None:
+    """Best-effort kill of ``pid`` and its descendants (pytest-xdist workers),
+    only when ``pid`` still is the process we recorded."""
+
+    if not pid:
+        return
+    try:
+        import psutil
+
+        proc = psutil.Process(int(pid))
+        if started_at is not None and abs(proc.create_time() - float(started_at)) > _PROCESS_START_TOLERANCE_SEC:
+            return
+        victims = [*proc.children(recursive=True), proc]
+        for victim in victims:
+            with contextlib.suppress(psutil.NoSuchProcess, psutil.AccessDenied):
+                victim.terminate()
+        _gone, alive = psutil.wait_procs(victims, timeout=3.0)
+        for victim in alive:
+            with contextlib.suppress(psutil.NoSuchProcess, psutil.AccessDenied):
+                victim.kill()
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("Could not terminate process tree of pid %s: %s", pid, exc)
+
+
 @dataclass
 class HarnessJob:
     """One remote-dispatched harness run: queued -> running -> done|failed|cancelled."""
@@ -322,11 +408,22 @@ class HarnessJob:
     result_json: Optional[Dict[str, Any]] = None
     returncode: Optional[int] = None
     error: Optional[str] = None
+    #: Machine-readable cause of a ``failed`` job that is NOT a test verdict (USR-162).
+    error_code: Optional[str] = None
     worktree_path: Optional[Path] = None
     process: Optional["subprocess.Popen[str]"] = None
     cancel_requested: bool = False
+    #: Set when the worker itself ends the job (restart); the run thread must not overwrite that verdict.
+    interrupted: bool = False
     created_at: float = dataclass_field(default_factory=time.time)
+    updated_at: float = dataclass_field(default_factory=time.time)
+    #: Process that owns the job (pid + start time): a dead owner means an orphaned job.
+    owner_pid: int = dataclass_field(default_factory=os.getpid)
+    owner_started_at: float = dataclass_field(default_factory=lambda: _THIS_PROCESS_STARTED_AT)
+    child_pid: Optional[int] = None
+    child_started_at: Optional[float] = None
     lock: threading.Lock = dataclass_field(default_factory=threading.Lock)
+    log_fh: Any = dataclass_field(default=None, repr=False)
 
     def append_log(self, text: str) -> None:
         with self.lock:
@@ -336,6 +433,59 @@ class HarnessJob:
         with self.lock:
             full = "".join(self.log_chunks)
         return full[offset:], len(full)
+
+    def is_terminal(self) -> bool:
+        return self.status in ("done", "failed", "cancelled")
+
+    def to_record(self) -> Dict[str, Any]:
+        """JSON-able persisted form (the log itself lives in ``logs/<job_id>.log``)."""
+
+        return {
+            "job_id": self.job_id,
+            "candidate_sha": self.candidate_sha,
+            "tree_sha": self.tree_sha,
+            "quick": self.quick,
+            "include_holdout": self.include_holdout,
+            "requesting_host": self.requesting_host,
+            "ref_name": self.ref_name,
+            "status": self.status,
+            "result_json": self.result_json,
+            "returncode": self.returncode,
+            "error": self.error,
+            "error_code": self.error_code,
+            "created_at": self.created_at,
+            "updated_at": self.updated_at,
+            "owner_pid": self.owner_pid,
+            "owner_started_at": self.owner_started_at,
+            "child_pid": self.child_pid,
+            "child_started_at": self.child_started_at,
+            "worktree_path": str(self.worktree_path) if self.worktree_path else None,
+        }
+
+    @classmethod
+    def from_record(cls, record: Dict[str, Any]) -> "HarnessJob":
+        worktree = record.get("worktree_path")
+        return cls(
+            job_id=str(record["job_id"]),
+            candidate_sha=str(record.get("candidate_sha", "")),
+            tree_sha=str(record.get("tree_sha", "")),
+            quick=bool(record.get("quick", True)),
+            include_holdout=bool(record.get("include_holdout", False)),
+            requesting_host=str(record.get("requesting_host", "unknown")),
+            ref_name=str(record.get("ref_name", "")),
+            status=str(record.get("status", "failed")),
+            result_json=record.get("result_json"),
+            returncode=record.get("returncode"),
+            error=record.get("error"),
+            error_code=record.get("error_code"),
+            worktree_path=Path(worktree) if worktree else None,
+            created_at=float(record.get("created_at") or time.time()),
+            updated_at=float(record.get("updated_at") or time.time()),
+            owner_pid=int(record.get("owner_pid") or 0),
+            owner_started_at=float(record.get("owner_started_at") or 0.0),
+            child_pid=record.get("child_pid"),
+            child_started_at=record.get("child_started_at"),
+        )
 
 
 class JobManager:
@@ -349,13 +499,164 @@ class JobManager:
         self.state_dir.mkdir(parents=True, exist_ok=True)
         (self.state_dir / "logs").mkdir(parents=True, exist_ok=True)
         (self.state_dir / "worktrees").mkdir(parents=True, exist_ok=True)
+        (self.state_dir / JOBS_STATE_SUBDIR).mkdir(parents=True, exist_ok=True)
+        #: Changes on every worker (re)start; lets a client tell that its job
+        #: was submitted to a previous incarnation of this daemon (USR-162).
+        self.instance_id = uuid.uuid4().hex
+        self.started_at = time.time()
         self.jobs: Dict[str, HarnessJob] = {}
         self._jobs_lock = threading.Lock()
+        self._persist_lock = threading.Lock()
         self._queue: "queue.Queue[str]" = queue.Queue()
+        self._recover_persisted_jobs()
         self._worker_thread = threading.Thread(
             target=self._worker_loop, daemon=True, name="darkfac-worker-jobs"
         )
         self._worker_thread.start()
+
+    # --- persistence + recovery (USR-162) -------------------------------------
+
+    def _jobs_dir(self) -> Path:
+        return self.state_dir / JOBS_STATE_SUBDIR
+
+    def _log_path(self, job_id: str) -> Path:
+        return self.state_dir / "logs" / f"{job_id}.log"
+
+    def _persist(self, job: HarnessJob) -> None:
+        """Atomically write the job record. Never raises: persistence is
+        evidence, it must not be able to fail a job."""
+
+        try:
+            job.updated_at = time.time()
+            path = self._jobs_dir() / f"{job.job_id}.json"
+            tmp_path = path.with_suffix(f".{uuid.uuid4().hex[:8]}.tmp")
+            payload = json.dumps(job.to_record(), ensure_ascii=False)
+            with self._persist_lock:
+                tmp_path.write_text(payload, encoding="utf-8")
+                os.replace(tmp_path, path)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Could not persist state of job %s: %s", job.job_id, exc)
+
+    def _register(self, job: HarnessJob) -> None:
+        with self._jobs_lock:
+            self.jobs[job.job_id] = job
+        self._persist(job)
+
+    def _set_status(self, job: HarnessJob, status: str, **fields: Any) -> None:
+        """Move ``job`` to ``status`` (plus extra fields) and persist the transition.
+
+        A job the worker already closed itself (``interrupted``) keeps that verdict.
+        """
+
+        if job.interrupted and job.is_terminal():
+            return
+        for name, value in fields.items():
+            setattr(job, name, value)
+        job.status = status
+        self._persist(job)
+        if job.is_terminal():
+            self._close_log(job)
+
+    def _append_log(self, job: HarnessJob, text: str) -> None:
+        """Append to the in-memory log AND the on-disk log, flushed per call, so
+        a crash/restart still leaves the evidence gathered so far."""
+
+        job.append_log(text)
+        try:
+            if job.log_fh is None:
+                job.log_fh = open(self._log_path(job.job_id), "a", encoding="utf-8")  # noqa: SIM115 - closed on terminal
+            job.log_fh.write(text)
+            job.log_fh.flush()
+        except (OSError, ValueError) as exc:
+            logger.debug("Could not write log of job %s: %s", job.job_id, exc)
+
+    def _close_log(self, job: HarnessJob) -> None:
+        fh, job.log_fh = job.log_fh, None
+        if fh is not None:
+            with contextlib.suppress(OSError, ValueError):
+                fh.close()
+
+    def _recover_persisted_jobs(self) -> None:
+        """Load job records written by previous worker processes.
+
+        Terminal records come back as they are (the result stays queryable).
+        A queued/running record whose owner process is gone is closed as a
+        structured ``worker_restarted`` failure (its log is kept) and its
+        leftovers (child process tree, worktree, ref) are cleaned. Records
+        whose owner is still alive belong to another live manager and are left
+        strictly alone.
+        """
+
+        try:
+            record_paths = sorted(
+                self._jobs_dir().glob("*.json"), key=lambda path: path.stat().st_mtime, reverse=True
+            )[: JOB_LOG_KEEP * 2]
+        except OSError:
+            return
+        for record_path in record_paths:
+            try:
+                record = json.loads(record_path.read_text(encoding="utf-8"))
+                job = HarnessJob.from_record(record)
+            except (OSError, ValueError, KeyError, TypeError) as exc:
+                logger.warning("Ignoring unreadable job record %s: %s", record_path.name, exc)
+                continue
+            if not job.is_terminal():
+                if _process_alive(job.owner_pid, job.owner_started_at):
+                    continue  # owned by a live worker process: not ours to touch
+                self._close_orphan(job)
+            try:
+                log_text = self._log_path(job.job_id).read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                log_text = ""
+            if log_text:
+                job.log_chunks.append(log_text)
+            with self._jobs_lock:
+                self.jobs.setdefault(job.job_id, job)
+
+    def _close_orphan(self, job: HarnessJob) -> None:
+        was = job.status
+        _terminate_process_tree(job.child_pid, job.child_started_at)
+        message = (
+            f"worker process (pid {job.owner_pid}) ended while the job was {was}; "
+            f"job state recovered by worker instance {self.instance_id} "
+            f"(started {time.strftime('%Y-%m-%dT%H:%M:%S', time.localtime(self.started_at))}). "
+            "The test run did not finish: no verdict exists for this job."
+        )
+        job.status = "failed"
+        job.error_code = ERROR_CODE_WORKER_RESTARTED
+        job.error = message
+        job.interrupted = True
+        self._persist(job)
+        try:
+            with open(self._log_path(job.job_id), "a", encoding="utf-8") as fh:
+                fh.write(f"[WORKER {ERROR_CODE_WORKER_RESTARTED}] {message}\n")
+        except OSError as exc:
+            logger.debug("Could not append recovery note to log of job %s: %s", job.job_id, exc)
+        with contextlib.suppress(Exception):  # leftovers are best effort; the verdict is already persisted
+            self._cleanup_worktree(job)
+        logger.warning("Recovered orphaned job %s (%s -> failed/%s)", job.job_id, was, job.error_code)
+
+    def mark_interrupted(self, reason: str) -> list[str]:
+        """Close every queued/running job as ``worker_restarted`` because the
+        worker is about to exit (``POST /system/restart``). The job child is
+        terminated (not left orphaned holding the suite lock). Returns the ids."""
+
+        with self._jobs_lock:
+            active = [job for job in self.jobs.values() if job.status in ("queued", "running")]
+        closed: list[str] = []
+        for job in active:
+            message = f"worker restarting ({reason}); the test run was interrupted and has no verdict"
+            self._append_log(job, f"[WORKER {ERROR_CODE_WORKER_RESTARTED}] {message}\n")
+            process = job.process
+            job.interrupted = True
+            self._set_status(job, "failed", error_code=ERROR_CODE_WORKER_RESTARTED, error=message)
+            if process is not None and process.poll() is None:
+                # Descendants first: once the runner dies, its pytest-xdist workers are orphans.
+                _terminate_process_tree(job.child_pid, job.child_started_at)
+                with contextlib.suppress(Exception):
+                    process.terminate()
+            closed.append(job.job_id)
+        return closed
 
     # --- introspection for /health -----------------------------------------
 
@@ -443,27 +744,48 @@ class JobManager:
             requesting_host=str(metadata.get("requesting_host", "unknown")),
             ref_name=ref_name,
         )
-        with self._jobs_lock:
-            self.jobs[job.job_id] = job
+        self._register(job)
         self._queue.put(job.job_id)
         logger.info(
             "Queued harness job %s for candidate %s (from %s)",
             job.job_id, candidate_sha[:12], job.requesting_host,
         )
-        return 200, {"job_id": job.job_id}
+        return 200, {
+            "job_id": job.job_id,
+            "worker_instance_id": self.instance_id,
+            "worker_started_at": self.started_at,
+        }
 
     def status(self, job_id: str, offset: int) -> Optional[Dict[str, Any]]:
+        """Read-only snapshot of a job. Takes only that job's own (short-held)
+        log lock -- never ``_jobs_lock``, never disk, never a subprocess -- so
+        the query path cannot stall behind a busy run (USR-162)."""
+
         job = self.jobs.get(job_id)
         if job is None:
             return None
         log_chunk, next_offset = job.log_slice(offset)
         return {
+            "job_id": job.job_id,
             "status": job.status,
             "log_chunk": log_chunk,
             "next_offset": next_offset,
             "result_json": job.result_json,
             "returncode": job.returncode,
             "error": job.error,
+            "error_code": job.error_code,
+            "worker_instance_id": self.instance_id,
+        }
+
+    def not_found_body(self, job_id: str) -> Dict[str, Any]:
+        """Structured body of the 404 for an id this worker has no record of."""
+
+        return {
+            "detail": "job not found",
+            "error_code": ERROR_CODE_JOB_NOT_FOUND,
+            "job_id": job_id,
+            "worker_instance_id": self.instance_id,
+            "worker_started_at": self.started_at,
         }
 
     def cancel(self, job_id: str) -> bool:
@@ -472,7 +794,7 @@ class JobManager:
             return False
         job.cancel_requested = True
         if job.status == "queued":
-            job.status = "cancelled"
+            self._set_status(job, "cancelled")
         process = job.process
         if process is not None and process.poll() is None:
             with contextlib.suppress(Exception):
@@ -488,20 +810,19 @@ class JobManager:
             if job is None:
                 continue
             if job.cancel_requested:
-                job.status = "cancelled"
+                self._set_status(job, "cancelled")
                 continue
             try:
                 self._run_job(job)
-            except Exception as exc:  # noqa: BLE001 - the worker thread must never die
+            except BaseException as exc:  # noqa: BLE001 - the worker thread must never die silently
                 logger.error("Unhandled error running job %s: %s", job_id, exc, exc_info=True)
-                job.status = "failed"
-                job.error = str(exc)
+                self._set_status(job, "failed", error=str(exc), error_code=ERROR_CODE_WORKER_INTERNAL)
 
     def _run_job(self, job: HarnessJob) -> None:
-        job.status = "running"
+        self._set_status(job, "running")
         worktree_path = self.state_dir / "worktrees" / job.job_id
         job.worktree_path = worktree_path
-        log_file_path = self.state_dir / "logs" / f"{job.job_id}.log"
+        self._persist(job)
 
         try:
             add = subprocess.run(
@@ -514,9 +835,9 @@ class JobManager:
                 check=False,
             )
             if add.returncode != 0:
-                job.status = "failed"
-                job.error = f"git worktree add failed: {add.stderr.strip()[:1000]}"
-                job.append_log(job.error)
+                error = f"git worktree add failed: {add.stderr.strip()[:1000]}"
+                self._append_log(job, error)
+                self._set_status(job, "failed", error=error, error_code=ERROR_CODE_WORKER_SETUP)
                 return
 
             self._sync_requirements(worktree_path, job)
@@ -532,54 +853,63 @@ class JobManager:
             env["PYTHONUNBUFFERED"] = "1"
 
             cmd, priority_kwargs = apply_child_priority(cmd)
-            with open(log_file_path, "w", encoding="utf-8") as log_fh:
-                process = subprocess.Popen(
-                    cmd,
-                    cwd=str(worktree_path),
-                    env=env,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.STDOUT,
-                    text=True,
-                    encoding="utf-8",
-                    errors="replace",
-                    bufsize=1,
-                    **priority_kwargs,
-                )
-                job.process = process
-                deadline = time.monotonic() + timeout_sec
-                stop_watchdog = threading.Event()
+            process = subprocess.Popen(
+                cmd,
+                cwd=str(worktree_path),
+                env=env,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                bufsize=1,
+                **priority_kwargs,
+            )
+            job.process = process
+            child_pid = getattr(process, "pid", None)
+            if isinstance(child_pid, int):
+                # Recorded so a successor worker can reap an orphaned run (USR-162).
+                job.child_pid = child_pid
+                job.child_started_at = _process_started_at(child_pid)
+            self._persist(job)
+            deadline = time.monotonic() + timeout_sec
+            stop_watchdog = threading.Event()
 
-                def _watchdog() -> None:
-                    while not stop_watchdog.wait(JOB_WATCHDOG_POLL_SEC):
-                        if job.cancel_requested or time.monotonic() > deadline:
-                            with contextlib.suppress(Exception):
-                                process.kill()
-                            return
+            def _watchdog() -> None:
+                while not stop_watchdog.wait(JOB_WATCHDOG_POLL_SEC):
+                    if job.cancel_requested or time.monotonic() > deadline:
+                        with contextlib.suppress(Exception):
+                            process.kill()
+                        return
 
-                watchdog = threading.Thread(target=_watchdog, daemon=True)
-                watchdog.start()
-                try:
-                    assert process.stdout is not None
-                    for line in process.stdout:
-                        job.append_log(line)
-                        log_fh.write(line)
-                finally:
-                    stop_watchdog.set()
-                    process.wait()
+            watchdog = threading.Thread(target=_watchdog, daemon=True)
+            watchdog.start()
+            try:
+                assert process.stdout is not None
+                for line in process.stdout:
+                    self._append_log(job, line)
+            finally:
+                stop_watchdog.set()
+                process.wait()
 
-            job.returncode = process.returncode
+            if job.interrupted:
+                return  # the worker closed this job itself (restart); keep that verdict
 
             if job.cancel_requested:
-                job.status = "cancelled"
+                self._set_status(job, "cancelled", returncode=process.returncode)
                 return
 
             full_log = "".join(job.log_chunks)
-            job.result_json = _extract_harness_result(full_log)
-            job.status = "done" if process.returncode == 0 and job.result_json is not None else "failed"
+            result_json = _extract_harness_result(full_log)
+            self._set_status(
+                job,
+                "done" if process.returncode == 0 and result_json is not None else "failed",
+                returncode=process.returncode,
+                result_json=result_json,
+            )
         except Exception as exc:  # noqa: BLE001
-            job.status = "failed"
-            job.error = str(exc)
-            job.append_log(f"[WORKER ERROR] {exc}")
+            self._append_log(job, f"[WORKER ERROR] {exc}")
+            self._set_status(job, "failed", error=str(exc), error_code=ERROR_CODE_WORKER_INTERNAL)
         finally:
             self._cleanup_worktree(job)
             self._prune_old_job_logs()
@@ -614,6 +944,8 @@ class JobManager:
         for stale in log_files[JOB_LOG_KEEP:]:
             with contextlib.suppress(OSError):
                 stale.unlink()
+            with contextlib.suppress(OSError):
+                (self._jobs_dir() / f"{stale.stem}.json").unlink()
 
     def _sync_requirements(self, worktree_path: Path, job: HarnessJob) -> None:
         """HF-27-11: Ensure worker venv dependencies match worktree requirements.txt."""
@@ -896,6 +1228,8 @@ def create_worker_app(
             known_shas=known_validated_shas(root_path),
             harness_version="1",
             git_sha=current_git_sha(root_path),
+            instance_id=job_manager.instance_id,
+            started_at=job_manager.started_at,
         )
 
     @worker_app.get("/metrics/hardware", response_model=HardwareMetrics)
@@ -932,7 +1266,7 @@ def create_worker_app(
         _check_auth(request)
         payload = job_manager.status(job_id, offset)
         if payload is None:
-            raise HTTPException(status_code=404, detail="job not found")
+            return JSONResponse(status_code=404, content=job_manager.not_found_body(job_id))
         return JSONResponse(status_code=200, content=payload)
 
     @worker_app.delete("/harness/jobs/{job_id}")
@@ -1066,6 +1400,9 @@ def create_worker_app(
     def restart_daemon(request: Request) -> Dict[str, str]:
         """Spawns a new headless daemon process and terminates this instance."""
         _check_auth(request)
+        # USR-162: close in-flight jobs with a cause (and reap their child) BEFORE
+        # the process exits, instead of leaving an unexplained, unknown job id.
+        job_manager.mark_interrupted("POST /system/restart")
         trigger_daemon_restart(root_path, host, port, node_id)
         return {"status": "restarting", "node_id": node_id, "message": "Worker is restarting headless in background."}
 
