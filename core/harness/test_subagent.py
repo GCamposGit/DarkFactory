@@ -136,11 +136,11 @@ def get_harness_test_runner_spec(
         else:
             return HarnessRunnerSpec(
                 harness=norm_harness,
-                model_id="anthropic/claude-3.5-haiku",
+                model_id="anthropic/claude-haiku-5-5",
                 reasoning_effort="none",
                 execution_tier=ExecutionTier.LIGHT_HARNESS,
-                rationale="Claude 3.5 Haiku: Subagent standard for lightweight, ultra-low latency command execution and output distillation.",
-                config_snippet='claude --model claude-3-5-haiku-latest (subagent in .claude/agents/test-runner.md)',
+                rationale="Claude Haiku 5.5: Subagent standard for lightweight, ultra-low latency command execution and output distillation.",
+                config_snippet='claude --model claude-haiku-5-5 (subagent in .claude/agents/test-runner.md)',
             )
 
     raise ValueError(f"Unknown harness: {harness}")

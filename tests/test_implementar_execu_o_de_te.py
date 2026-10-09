@@ -264,7 +264,7 @@ def test_harness_test_runner_specs():
     # 4. Claude Code: Claude 3.5 Haiku as standard test runner subagent
     claude_spec = get_harness_test_runner_spec(HarnessType.CLAUDE_CODE)
     assert claude_spec.harness == HarnessType.CLAUDE_CODE
-    assert claude_spec.model_id == "anthropic/claude-3.5-haiku"
+    assert claude_spec.model_id == "anthropic/claude-haiku-5-5"
     assert claude_spec.execution_tier == ExecutionTier.LIGHT_HARNESS
 
     # 5. Local-first preference rule ($0 cost)
@@ -288,5 +288,5 @@ def test_generate_subagent_prompt_multi_harness():
 
     claude_prompt = generate_subagent_prompt(instr, harness=HarnessType.CLAUDE_CODE)
     assert "CLAUDE_CODE" in claude_prompt
-    assert "claude-3.5-haiku" in claude_prompt
+    assert "claude-haiku-5-5" in claude_prompt
 
