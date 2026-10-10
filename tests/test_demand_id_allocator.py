@@ -7,6 +7,9 @@ import json
 from pathlib import Path
 import subprocess
 
+import pytest
+
+import core.demands.id_allocator as id_allocator
 from core.demands.id_allocator import LEDGER, reserve_ticket_id, title_collisions
 from core.demands.store import DemandsStore
 
@@ -106,3 +109,103 @@ def test_allocator_works_without_git_binary(tmp_path: Path, monkeypatch) -> None
 
     assert reserve_ticket_id(path, "USR") == "USR-08"
     assert reserve_ticket_id(path, "USR") == "USR-09"
+
+
+def _init_repo(path: Path) -> None:
+    path.mkdir(parents=True, exist_ok=True)
+    git(path, "init", "-b", "main")
+    git(path, "config", "user.email", "test@example.com")
+    git(path, "config", "user.name", "Test")
+
+
+def test_allocator_fetches_origin_before_reserving_and_skips_taken_ids(tmp_path: Path) -> None:
+    """A stale origin/main ref must not mint an ID the remote already registered (USR-193)."""
+    remote = tmp_path / "remote"
+    _init_repo(remote)
+    ledger(remote, ("USR-186", "stale max"))
+    git(remote, "add", LEDGER)
+    git(remote, "commit", "-m", "seed")
+
+    local = tmp_path / "local"
+    git(tmp_path, "clone", str(remote), str(local))
+    stale_main = git(local, "rev-parse", "origin/main")
+
+    ledger(
+        remote,
+        ("USR-186", "stale max"),
+        ("USR-187", "registered on main"),
+        ("USR-188", "registered on main"),
+    )
+    git(remote, "add", LEDGER)
+    git(remote, "commit", "-m", "register USR-187 and USR-188")
+    git(remote, "checkout", "-b", "ticket/usr-190")
+    ledger(
+        remote,
+        ("USR-186", "stale max"),
+        ("USR-187", "registered on main"),
+        ("USR-188", "registered on main"),
+        ("USR-190", "reserved on ticket branch"),
+    )
+    git(remote, "add", LEDGER)
+    git(remote, "commit", "-m", "ticket branch reserves USR-190")
+    git(remote, "checkout", "main")
+
+    reserved = reserve_ticket_id(local / LEDGER, "USR")
+
+    assert reserved == "USR-191"
+    assert reserved not in {"USR-186", "USR-187", "USR-188", "USR-190"}
+    assert git(local, "rev-parse", "origin/main") != stale_main
+    assert "USR-187" in git(local, "show", f"origin/main:{LEDGER}")
+    assert "USR-188" in git(local, "show", f"origin/main:{LEDGER}")
+    ticket_ledger = git(local, "show", f"refs/remotes/origin/ticket/usr-190:{LEDGER}")
+    assert "USR-190" in ticket_ledger
+
+
+def test_allocator_recalculates_when_candidate_is_already_on_origin_main(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """If the candidate is on origin/main after the snapshot, reserve the next free ID."""
+    root = tmp_path / "repo"
+    _init_repo(root)
+    path = ledger(root, ("USR-186", "seed"))
+    git(root, "add", LEDGER)
+    git(root, "commit", "-m", "seed")
+    git(root, "update-ref", "refs/remotes/origin/main", git(root, "rev-parse", "HEAD"))
+
+    real_show = id_allocator._show_ledger
+    origin_reads = {"count": 0}
+
+    def show(root_path: Path, ref: str) -> str | None:
+        raw = real_show(root_path, ref)
+        if ref != "origin/main" or raw is None:
+            return raw
+        origin_reads["count"] += 1
+        if origin_reads["count"] == 1:
+            return raw
+        rows = json.loads(raw)
+        if not any(row.get("id") == "USR-187" for row in rows):
+            rows.append({"id": "USR-187", "title": "landed on origin/main"})
+        return json.dumps(rows)
+
+    monkeypatch.setattr(id_allocator, "_show_ledger", show)
+
+    assert reserve_ticket_id(path, "USR") == "USR-188"
+    assert origin_reads["count"] >= 2
+    common = Path(git(root, "rev-parse", "--path-format=absolute", "--git-common-dir"))
+    saved = json.loads((common / "darkfac-ids.json").read_text(encoding="utf-8"))
+    assert saved["USR"] == 188
+
+
+def test_allocator_fails_closed_when_origin_fetch_fails(tmp_path: Path) -> None:
+    root = tmp_path / "repo"
+    _init_repo(root)
+    path = ledger(root, ("USR-186", "seed"))
+    git(root, "add", LEDGER)
+    git(root, "commit", "-m", "seed")
+    git(root, "remote", "add", "origin", str(tmp_path / "missing.git"))
+
+    with pytest.raises(RuntimeError, match="Cannot fetch origin/main"):
+        reserve_ticket_id(path, "USR")
+
+    common = Path(git(root, "rev-parse", "--path-format=absolute", "--git-common-dir"))
+    assert not (common / "darkfac-ids.json").exists()
