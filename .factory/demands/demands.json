@@ -3924,9 +3924,9 @@
       "wave-current",
       "protected-governance"
     ],
-    "problem_statement": "Em 04/10/2026, runner.py --quick --local --no-cache interrompeu o bloco paralelo em 908,5s por timeout de 900s, count=0. A mesma suíte com limite diagnóstico de 2400s terminou em 916,1s, descobriu 2971 testes (2959 passaram, 6 falharam, 6 pulados antes de corrigir os seis). A CI do PR #136 bloqueou alterar harness.config.json porque o arquivo só aceita commit direto humano.\n\nRecorrencia em 2026-10-08 ao validar USR-134: python core/harness/runner.py --quick fez fallback local apos perda do worker e excedeu timeout1500: STEP_TIME=1501.7s, TEST_COUNT=0, HARNESS_FAIL. Investigar causa e restaurar conclusao verificavel; nao apenas aumentar limite sem evidencia.\n\nRecorrencia isolada em 2026-10-09: candidato b8fd5c1 em .worktrees/usr134-frozen-gate-20261009 excedeu 1500s (1508.7s), exit124 e count0; sem mudanca de HEAD. CI Windows do mesmo candidato/config aprovou 3577 testes e 8 skips em 2026-10-08. Investigar ambiente Notebook; log .factory/test_logs/usr134_frozen_gate.log.",
+    "problem_statement": "Em 04/10/2026, runner.py --quick --local --no-cache interrompeu o bloco paralelo em 908,5s por timeout de 900s, count=0. A mesma suíte com limite diagnóstico de 2400s terminou em 916,1s, descobriu 2971 testes (2959 passaram, 6 falharam, 6 pulados antes de corrigir os seis). A CI do PR #136 bloqueou alterar harness.config.json porque o arquivo só aceita commit direto humano.\n\nRecorrencia em 2026-10-08 ao validar USR-134: python core/harness/runner.py --quick fez fallback local apos perda do worker e excedeu timeout1500: STEP_TIME=1501.7s, TEST_COUNT=0, HARNESS_FAIL. Investigar causa e restaurar conclusao verificavel; nao apenas aumentar limite sem evidencia.\n\nRecorrencia isolada em 2026-10-09: candidato b8fd5c1 em .worktrees/usr134-frozen-gate-20261009 excedeu 1500s (1508.7s), exit124 e count0; sem mudanca de HEAD. CI Windows do mesmo candidato/config aprovou 3577 testes e 8 skips em 2026-10-08. Investigar ambiente Notebook; log .factory/test_logs/usr134_frozen_gate.log. ATUALIZACAO (10/10/2026): o owner aplicou o limite na main (commit eb37442, OA-011): timeout_sec 3000 no passo unit_and_integration_tests_parallel e 300 no serial. Motivo medido: a suite de 3818 testes levou 1447 s a 1503 s no worker do Desktop e o passo foi cortado em 1502,9 s e 1503,3 s sem nenhum teste falhar (USR-187 e USR-193). Depois disso os portoes dos USR-187 e USR-189 passaram. Cumprido: decisao e aplicacao do owner (criterio 2). Pendente: medir de novo a duracao da suite completa no Notebook (criterio 1) e registrar um portao aprovado com contagem positiva no Notebook (criterio 3); os portoes recentes rodaram no Desktop.",
     "core_journey": [
-      "Portão oficial completo no Notebook produz contagem positiva e veredito antes do prazo; preserva o bloqueio a mudanças do harness por agentes."
+      "Em 04/10/2026, runner.py --quick --local --no-cache interrompeu o bloco paralelo em 908,5s por timeout de 900s, count=0. A mesma suíte com limite diagnóstico de 2400s terminou em 916,1s, descobriu 2971 testes (2959 passaram, 6 falharam, 6 pulados antes de corrigir os seis). A CI do PR #136 bloqueou alterar harness.config.json porque o arquivo só aceita commit direto humano.\n\nRecorrencia em 2026-10-08 ao validar USR-134: python core/harness/runner.py --quick fez fallback local apos perda do worker e excedeu timeout1500: STEP_TIME=1501.7s, TEST_COUNT=0, HARNESS_FAIL. Investigar causa e restaurar conclusao verificavel; nao apenas aumentar limite sem evidencia.\n\nRecorrencia isolada em 2026-10-09: candidato b8fd5c1 em .worktrees/usr134-frozen-gate-20261009 excedeu 1500s (1508.7s), exit124 e count0; sem mudanca de HEAD. CI Windows do mesmo candidato/config aprovou 3577 testes e 8 skips em 2026-10-08. Investigar ambiente Notebook; log .factory/test_logs/usr134_frozen_gate.log. ATUALIZACAO (10/10/2026): o owner aplicou o limite na main (commit eb37442, OA-011): timeout_sec 3000 no passo unit_and_integration_tests_parallel e 300 no serial. Motivo medido: a suite de 3818 testes levou 1447 s a 1503 s no worker do Desktop e o passo foi cortado em 1502,9 s e 1503,3 s sem nenhum teste falhar (USR-187 e USR-193). Depois disso os portoes dos USR-187 e USR-189 passaram. Cumprido: decisao e aplicacao do owner (criterio 2). Pendente: medir de novo a duracao da suite completa no Notebook (criterio 1) e registrar um portao aprovado com contagem positiva no Notebook (criterio 3); os portoes recentes rodaram no Desktop."
     ],
     "non_goals": [],
     "reachability_contract": "",
@@ -3942,7 +3942,7 @@
     "estimated_complexity": "small",
     "dependencies": [],
     "created_at": "2026-10-04T08:18:40.458904Z",
-    "updated_at": "2026-10-08T21:05:52.357116Z"
+    "updated_at": "2026-10-10T19:55:00Z"
   },
   {
     "id": "USR-138",
@@ -4526,9 +4526,9 @@
     "tags": [
       "user-demand"
     ],
-    "problem_statement": "O USR-111 fechou o PermissionError do ledger de uso (core/usage/store.py) com causa raiz, mas o R02 EFFECT_SERVICE_UNAVAILABLE (ConnectionAbortedError WinError 10053 no effect_server, run 37596976676) recebeu apenas mitigacao (backlog 128 e handle_error silencioso); a causa raiz nao foi provada.",
+    "problem_statement": "O USR-111 fechou o PermissionError do ledger de uso (core/usage/store.py) com causa raiz, mas o R02 EFFECT_SERVICE_UNAVAILABLE (ConnectionAbortedError WinError 10053 no effect_server, run 37596976676) recebeu apenas mitigacao (backlog 128 e handle_error silencioso); a causa raiz nao foi provada. ATUALIZACAO (10/10/2026): segunda ocorrencia do R02 na CI da main (run 38075939123, commit dc89843, job main-validation windows), desta vez como \"'usr157-R02-1' is stale or expired\" (lease expirado) no teste test_r02_crash_lands_at_the_parked_checkpoint_and_orders_diagnostics; os runs seguintes da main (commits c0f67ba e 6e30ce8) passaram, entao a falha nao e deterministica. Incluir esse sintoma na investigacao; hipotese a confirmar: o lease expira antes de o checkpoint estacionado ser alcancado quando o runner Windows esta lento.",
     "core_journey": [
-      "O USR-111 fechou o PermissionError do ledger de uso (core/usage/store.py) com causa raiz, mas o R02 EFFECT_SERVICE_UNAVAILABLE (ConnectionAbortedError WinError 10053 no effect_server, run 37596976676) recebeu apenas mitigacao (backlog 128 e handle_error silencioso); a causa raiz nao foi provada."
+      "O USR-111 fechou o PermissionError do ledger de uso (core/usage/store.py) com causa raiz, mas o R02 EFFECT_SERVICE_UNAVAILABLE (ConnectionAbortedError WinError 10053 no effect_server, run 37596976676) recebeu apenas mitigacao (backlog 128 e handle_error silencioso); a causa raiz nao foi provada. ATUALIZACAO (10/10/2026): segunda ocorrencia do R02 na CI da main (run 38075939123, commit dc89843, job main-validation windows), desta vez como \"'usr157-R02-1' is stale or expired\" (lease expirado) no teste test_r02_crash_lands_at_the_parked_checkpoint_and_orders_diagnostics; os runs seguintes da main (commits c0f67ba e 6e30ce8) passaram, entao a falha nao e deterministica. Incluir esse sintoma na investigacao; hipotese a confirmar: o lease expira antes de o checkpoint estacionado ser alcancado quando o runner Windows esta lento."
     ],
     "non_goals": [],
     "reachability_contract": "",
@@ -4541,7 +4541,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-08T13:38:42.299317Z",
-    "updated_at": "2026-10-08T13:38:42.299317Z"
+    "updated_at": "2026-10-10T19:55:00Z"
   },
   {
     "id": "USR-158",
@@ -6280,9 +6280,9 @@
     "tags": [
       "user-demand"
     ],
-    "problem_statement": "O ultimo run concluido do workflow 'DarkFac CI' em main (SHA dc8984336cbf722ecafd912110d276d8125919e7) terminou em 'failure'. Jobs vermelhos: main-validation (windows-latest). Run: https://github.com/GCamposGit/DarkFactory/actions/runs/38075939123. Detectado por 'python -m core.git.autonomy check-main' (USR-85); PRs com CI vermelho nao sao mais mesclados automaticamente, entao ate corrigir este defeito a entrega de codigo fica bloqueada.",
+    "problem_statement": "O ultimo run concluido do workflow 'DarkFac CI' em main (SHA dc8984336cbf722ecafd912110d276d8125919e7) terminou em 'failure'. Jobs vermelhos: main-validation (windows-latest). Run: https://github.com/GCamposGit/DarkFactory/actions/runs/38075939123. Detectado por 'python -m core.git.autonomy check-main' (USR-85); PRs com CI vermelho nao sao mais mesclados automaticamente, entao ate corrigir este defeito a entrega de codigo fica bloqueada. ATUALIZACAO (10/10/2026): a main voltou a ficar verde (runs de 18:49Z e 18:55Z concluidos com sucesso apos dc89843), o que cumpre o criterio 1. Causa da falha em dc89843: um unico teste, tests/test_runtime_spike_scenarios.py::test_r02_crash_lands_at_the_parked_checkpoint_and_orders_diagnostics, com \"'usr157-R02-1' is stale or expired\" (lease expirado) no job windows (3792 passaram, 1 falhou). E o mesmo cenario R02 do USR-157, agora com sintoma de lease expirado em vez de WinError 10053; tratar a causa raiz la e fechar este ticket quando o USR-157 cobrir o teste.",
     "core_journey": [
-      "O ultimo run concluido do workflow 'DarkFac CI' em main (SHA dc8984336cbf722ecafd912110d276d8125919e7) terminou em 'failure'. Jobs vermelhos: main-validation (windows-latest). Run: https://github.com/GCamposGit/DarkFactory/actions/runs/38075939123. Detectado por 'python -m core.git.autonomy check-main' (USR-85); PRs com CI vermelho nao sao mais mesclados automaticamente, entao ate corrigir este defeito a entrega de codigo fica bloqueada."
+      "O ultimo run concluido do workflow 'DarkFac CI' em main (SHA dc8984336cbf722ecafd912110d276d8125919e7) terminou em 'failure'. Jobs vermelhos: main-validation (windows-latest). Run: https://github.com/GCamposGit/DarkFactory/actions/runs/38075939123. Detectado por 'python -m core.git.autonomy check-main' (USR-85); PRs com CI vermelho nao sao mais mesclados automaticamente, entao ate corrigir este defeito a entrega de codigo fica bloqueada. ATUALIZACAO (10/10/2026): a main voltou a ficar verde (runs de 18:49Z e 18:55Z concluidos com sucesso apos dc89843), o que cumpre o criterio 1. Causa da falha em dc89843: um unico teste, tests/test_runtime_spike_scenarios.py::test_r02_crash_lands_at_the_parked_checkpoint_and_orders_diagnostics, com \"'usr157-R02-1' is stale or expired\" (lease expirado) no job windows (3792 passaram, 1 falhou). E o mesmo cenario R02 do USR-157, agora com sintoma de lease expirado em vez de WinError 10053; tratar a causa raiz la e fechar este ticket quando o USR-157 cobrir o teste."
     ],
     "non_goals": [],
     "reachability_contract": "",
@@ -6294,7 +6294,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-10T18:46:56.288810Z",
-    "updated_at": "2026-10-10T18:46:56.288810Z"
+    "updated_at": "2026-10-10T19:55:00Z"
   },
   {
     "id": "USR-221",
