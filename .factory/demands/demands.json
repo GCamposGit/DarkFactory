@@ -5878,5 +5878,239 @@
     "dependencies": [],
     "created_at": "2026-10-10T14:54:15.953502Z",
     "updated_at": "2026-10-10T14:54:15.953502Z"
+  },
+  {
+    "id": "USR-215",
+    "project_id": "darkfac",
+    "title": "Painel de aceite da linha le o streak errado e nao explica o que falta para V1 e V2",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand",
+      "darkhub",
+      "acceptance",
+      "canary",
+      "bug"
+    ],
+    "problem_statement": "O painel 'Linha de Producao & Aceite' mostra 'Canario: 0 dias verdes' e V1/V2 'Pendente' sem dizer o que fazer. GET /api/line/status no Hub retorna canary_streak 0 e last_canary_report null porque core/line/acceptance.py::verify_v2 le relatorios de canario em arquivos locais (core.line.canary.REPORTS_DIR) que nao existem no container do Hub; o control store (Postgres) mostra os canarios de 06/10 a 10/10 'succeeded', ou seja, streak real de 5/7. verify_v1 so considera runs de intake 'owner'/'dogfood' e cai num 'contrato pronto' quando nao ha run concluido, sem informar ao owner qual entrega ponta a ponta precisa acontecer. Diagnostico de 10/10/2026 (sessao interativa Claude Code, complementos do owner sobre o DarkHub).",
+    "core_journey": [
+      "O painel 'Linha de Producao & Aceite' mostra 'Canario: 0 dias verdes' e V1/V2 'Pendente' sem dizer o que fazer. GET /api/line/status no Hub retorna canary_streak 0 e last_canary_report null porque core/line/acceptance.py::verify_v2 le relatorios de canario em arquivos locais (core.line.canary.REPORTS_DIR) que nao existem no container do Hub; o control store (Postgres) mostra os canarios de 06/10 a 10/10 'succeeded', ou seja, streak real de 5/7. verify_v1 so considera runs de intake 'owner'/'dogfood' e cai num 'contrato pronto' quando nao ha run concluido, sem informar ao owner qual entrega ponta a ponta precisa acontecer. Diagnostico de 10/10/2026 (sessao interativa Claude Code, complementos do owner sobre o DarkHub)."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "verify_v2 calcula o streak a partir dos runs de canario do control store (fonte unica, mesma da Esteira ao vivo); teste com historico real: 04/10 verde, 04-05/10 falhos, 06-10/10 verdes => streak 5.",
+      "Cada criterio pendente mostra no Hub, em linguagem simples, o que falta e o proximo passo (ex.: 'faltam 2 dias verdes; proxima verificacao 11/10'; para V1: qual demanda real precisa passar intake -> grill -> planning -> development -> validation -> review -> integration -> release sem ajuda humana, com link para disparar/acompanhar).",
+      "Quando V1 for satisfeito, o run usado como prova aparece com link para a Esteira ao vivo."
+    ],
+    "suggested_files": [
+      "core/line/acceptance.py",
+      "core/line/canary.py",
+      "hub/backend/service.py",
+      "hub/frontend/tasks.js",
+      "hub/frontend/index.html"
+    ],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-10T15:10:25.550364Z",
+    "updated_at": "2026-10-10T15:10:25.550364Z"
+  },
+  {
+    "id": "USR-216",
+    "project_id": "darkfac",
+    "title": "Remover codigos de ticket e de skill dos nomes visiveis do Hub (HF-27, DH-11, Skill 17...)",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand",
+      "darkhub",
+      "ux",
+      "mechanical_edit"
+    ],
+    "problem_statement": "O owner nao quer nada no Hub nomeado por numero de ticket ou skill. Exemplos atuais: 'Linha de Producao & Aceite HF-27', 'Validacao sob Demanda & Harness Remoto (DH-11) Skill 17', 'Catalogo Cross-Projeto & Auto-Evolucao (HF-25 / DH-04)', 'Estudio de Conteudo Anti-Slop & Atelie Visual (DH-07) Skill 15 & 16'. Diagnostico de 10/10/2026 (sessao interativa Claude Code, complementos do owner sobre o DarkHub).",
+    "core_journey": [
+      "O owner nao quer nada no Hub nomeado por numero de ticket ou skill. Exemplos atuais: 'Linha de Producao & Aceite HF-27', 'Validacao sob Demanda & Harness Remoto (DH-11) Skill 17', 'Catalogo Cross-Projeto & Auto-Evolucao (HF-25 / DH-04)', 'Estudio de Conteudo Anti-Slop & Atelie Visual (DH-07) Skill 15 & 16'. Diagnostico de 10/10/2026 (sessao interativa Claude Code, complementos do owner sobre o DarkHub)."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Nenhum titulo, subtitulo, badge ou rotulo visivel do Hub (index.html, live.html e textos gerados nos .js e no backend) contem padroes de codigo interno como HF-NN, DH-NN, USR-NN em titulo de secao, 'Skill NN' ou 'G1/G4' sem explicacao.",
+      "Teste estatico varre hub/frontend e falha se esses padroes voltarem em cabecalhos/rotulos (IDs de ticket continuam permitidos como dado de uma linha, ex.: o ticket de um run).",
+      "Cada secao ganha um nome que diz o que ela faz para o owner."
+    ],
+    "suggested_files": [
+      "hub/frontend/index.html",
+      "hub/frontend/",
+      "tests/"
+    ],
+    "estimated_complexity": "low",
+    "dependencies": [],
+    "created_at": "2026-10-10T15:10:25.606987Z",
+    "updated_at": "2026-10-10T15:10:25.606987Z"
+  },
+  {
+    "id": "USR-217",
+    "project_id": "darkfac",
+    "title": "Desktop aparece Offline no Hub mesmo acessivel: unificar a vivacidade dos nos numa fonte so",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "operations",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand",
+      "darkhub",
+      "infra",
+      "telemetry",
+      "worker",
+      "bug"
+    ],
+    "problem_statement": "Em 10/10 15:05 UTC, GET /api/harness/workers alcancou o Desktop (DESKTOP-G45IPEM, http://100.78.181.90:8080, healthy, 632 ms, busy, 1 run ativo), mas GET /api/infra/metrics marcou o mesmo no (onprem-z97-server) como is_live false / offline sem last_contact_at, e o painel de validacao mostra 'Workers Conectados: 0/2'. O owner acessa o Desktop por Chrome Remote Desktop e Tailscale normalmente. Tres paineis calculam vivacidade de formas diferentes (cards com probe_liveness, metrics sem sonda/heartbeat, workers por /health). Diagnostico de 10/10/2026 (sessao interativa Claude Code, complementos do owner sobre o DarkHub).",
+    "core_journey": [
+      "Em 10/10 15:05 UTC, GET /api/harness/workers alcancou o Desktop (DESKTOP-G45IPEM, http://100.78.181.90:8080, healthy, 632 ms, busy, 1 run ativo), mas GET /api/infra/metrics marcou o mesmo no (onprem-z97-server) como is_live false / offline sem last_contact_at, e o painel de validacao mostra 'Workers Conectados: 0/2'. O owner acessa o Desktop por Chrome Remote Desktop e Tailscale normalmente. Tres paineis calculam vivacidade de formas diferentes (cards com probe_liveness, metrics sem sonda/heartbeat, workers por /health). Diagnostico de 10/10/2026 (sessao interativa Claude Code, complementos do owner sobre o DarkHub)."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Um unico servico de vivacidade de nos (sonda /health via Tailscale + heartbeat enviado pelo proprio no) alimenta cartoes de infraestrutura, metricas, Esteira ao vivo e o contador de workers; os tres paineis nunca divergem para o mesmo no.",
+      "Desktop e Notebook enviam heartbeat com hardware real (CPU/RAM/disco/GPU) e o Hub mostra last_contact_at e latencia.",
+      "No ocupado (busy) aparece como 'online - ocupado', nunca como offline.",
+      "Teste de contrato: mesmo payload de /health gera o mesmo status nos tres endpoints."
+    ],
+    "suggested_files": [
+      "core/infra/cards.py",
+      "hub/backend/service.py",
+      "hub/backend/api.py",
+      "hub/frontend/infra.js"
+    ],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-10T15:10:25.644411Z",
+    "updated_at": "2026-10-10T15:10:25.644411Z"
+  },
+  {
+    "id": "USR-218",
+    "project_id": "darkfac",
+    "title": "Validacao sob demanda pelo Hub falha com exit code 4 em local_fallback",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "operations",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand",
+      "darkhub",
+      "harness",
+      "bug"
+    ],
+    "problem_statement": "No painel de validacao sob demanda do Hub, 'Executar Testes' (Quick Runner, Headless Subagent) retornou '[HARNESS_FAIL] Exit code 4 in 2.08s, Worker: local, Modo: local_fallback'. Exit code 4 do pytest e erro de uso (argumentos/caminho invalidos): o container do Hub na VPS nao tem a suite/ambiente e cai num fallback local inutil em vez de despachar para o worker do Desktop, que estava online. Diagnostico de 10/10/2026 (sessao interativa Claude Code, complementos do owner sobre o DarkHub).",
+    "core_journey": [
+      "No painel de validacao sob demanda do Hub, 'Executar Testes' (Quick Runner, Headless Subagent) retornou '[HARNESS_FAIL] Exit code 4 in 2.08s, Worker: local, Modo: local_fallback'. Exit code 4 do pytest e erro de uso (argumentos/caminho invalidos): o container do Hub na VPS nao tem a suite/ambiente e cai num fallback local inutil em vez de despachar para o worker do Desktop, que estava online. Diagnostico de 10/10/2026 (sessao interativa Claude Code, complementos do owner sobre o DarkHub)."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "O disparo pelo Hub despacha para um worker online (Desktop/Notebook) pelo mesmo caminho do portao oficial; o fallback local na VPS e removido ou bloqueado com mensagem clara.",
+      "Sem worker disponivel, a UI diz isso explicitamente (nao 'exit code 4').",
+      "Teste cobre a selecao de worker e o erro de 'nenhum worker'."
+    ],
+    "suggested_files": [
+      "hub/backend/api.py",
+      "hub/backend/service.py",
+      "core/harness/"
+    ],
+    "estimated_complexity": "low",
+    "dependencies": [
+      "USR-217"
+    ],
+    "created_at": "2026-10-10T15:10:25.683672Z",
+    "updated_at": "2026-10-10T15:10:25.683672Z"
+  },
+  {
+    "id": "USR-219",
+    "project_id": "darkfac",
+    "title": "Reorganizar o Hub: colapsar secoes secundarias, mover Estudio para o menu e remover o painel de tarefas redundante",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand",
+      "darkhub",
+      "ux",
+      "layout"
+    ],
+    "problem_statement": "Pedidos do owner: (1) 'Conteineres & Cargas de Trabalho Ativas' deve vir colapsado com botao para abrir; (2) 'Catalogo Cross-Projeto & Auto-Evolucao' colapsado; (3) 'Estudio de Conteudo Anti-Slop & Atelie Visual' sai da pagina principal e vai para o menu lateral; (4) a secao 'Aguardando Decisao do Owner (WAITING_HUMAN) - Somente Leitura' (hub/frontend/tasks.js) e os cards que vem em sequencia sao redundantes e desatualizados (ex.: Canario 2026-09-30, run-d4d10d4aee94): juntar o que for util na secao prioritaria do topo do Hub e remover o resto. Diagnostico de 10/10/2026 (sessao interativa Claude Code, complementos do owner sobre o DarkHub).",
+    "core_journey": [
+      "Pedidos do owner: (1) 'Conteineres & Cargas de Trabalho Ativas' deve vir colapsado com botao para abrir; (2) 'Catalogo Cross-Projeto & Auto-Evolucao' colapsado; (3) 'Estudio de Conteudo Anti-Slop & Atelie Visual' sai da pagina principal e vai para o menu lateral; (4) a secao 'Aguardando Decisao do Owner (WAITING_HUMAN) - Somente Leitura' (hub/frontend/tasks.js) e os cards que vem em sequencia sao redundantes e desatualizados (ex.: Canario 2026-09-30, run-d4d10d4aee94): juntar o que for util na secao prioritaria do topo do Hub e remover o resto. Diagnostico de 10/10/2026 (sessao interativa Claude Code, complementos do owner sobre o DarkHub)."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Conteineres e Catalogo renderizam colapsados por padrao, com botao abrir/fechar e estado lembrado por navegador.",
+      "Estudio de Conteudo/Atelie Visual acessivel pelo menu lateral e ausente da pagina principal.",
+      "Painel de tarefas de tasks.js removido da pagina principal; bloqueios acionaveis aparecem so na fila prioritaria do topo (com acao direta) e execucoes em andamento so na Esteira ao vivo; nenhuma informacao util se perde (listar no PR o que foi migrado para onde).",
+      "Teste/smoke do frontend confirma que a pagina carrega sem as secoes removidas e sem erros de console."
+    ],
+    "suggested_files": [
+      "hub/frontend/index.html",
+      "hub/frontend/tasks.js",
+      "hub/frontend/infra.js",
+      "hub/frontend/"
+    ],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-10T15:10:25.720813Z",
+    "updated_at": "2026-10-10T15:10:25.720813Z"
+  },
+  {
+    "id": "USR-220",
+    "project_id": "darkfac",
+    "title": "Catalogo cross-projeto vazio: registrar automaticamente componentes e auto-evolucoes entregues",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand",
+      "darkhub",
+      "catalog",
+      "evolution"
+    ],
+    "problem_statement": "A secao de catalogo cross-projeto (Atrium, Jarvis, DarkFac) nunca lista componentes reutilizaveis nem auto-evolucoes, embora a fabrica entregue modulos e melhorias de skills toda semana; GET /api/catalog/components e /api/evolution/status nao recebem nada do ciclo de entrega. O owner considera a secao inutil hoje. Diagnostico de 10/10/2026 (sessao interativa Claude Code, complementos do owner sobre o DarkHub).",
+    "core_journey": [
+      "A secao de catalogo cross-projeto (Atrium, Jarvis, DarkFac) nunca lista componentes reutilizaveis nem auto-evolucoes, embora a fabrica entregue modulos e melhorias de skills toda semana; GET /api/catalog/components e /api/evolution/status nao recebem nada do ciclo de entrega. O owner considera a secao inutil hoje. Diagnostico de 10/10/2026 (sessao interativa Claude Code, complementos do owner sobre o DarkHub)."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Ao concluir um ticket (complete_ticket/merge), a fabrica registra no catalogo os componentes reutilizaveis criados ou alterados (heuristica documentada + marcacao explicita no ticket) e as evolucoes de skills/regras, com link para PR e ticket.",
+      "Backfill dos ultimos 30 dias de entregas executado uma vez e verificavel no Hub.",
+      "Secao mostra estado vazio explicativo apenas quando de fato nao ha itens.",
+      "Teste cobre o registro automatico a partir de uma entrega simulada."
+    ],
+    "suggested_files": [
+      "core/git/autonomy.py",
+      "hub/backend/api.py",
+      "hub/backend/service.py"
+    ],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-10T15:10:25.757956Z",
+    "updated_at": "2026-10-10T15:10:25.757956Z"
   }
 ]
