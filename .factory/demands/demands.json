@@ -5524,5 +5524,35 @@
     "dependencies": [],
     "created_at": "2026-10-10T09:53:10.279361Z",
     "updated_at": "2026-10-10T09:53:10.279361Z"
+  },
+  {
+    "id": "USR-200",
+    "project_id": "darkfac",
+    "title": "Executar investigação do timeout do portão planejada em USR-176",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "O portão oficial em candidato limpo e congelado caiu do worker remoto indisponível para execução local, passou syntax_and_types, mas unit_and_integration_tests_parallel expirou em 1502.8s com código 124 e count=0. Evidência: candidato adfd5fb9cc931960bcffe2810603a35ba30801ac sobre origin/main a2364736ec720dd611b038000c74a05f3e5e39c8, executado por run_ticket --resume-delivery USR-191 em 2026-10-10. Executar a investigação anteriormente reservada em USR-176, sem criar outra cópia de seu planejamento.",
+    "core_journey": [
+      "O portão oficial em candidato limpo e congelado caiu do worker remoto indisponível para execução local, passou syntax_and_types, mas unit_and_integration_tests_parallel expirou em 1502.8s com código 124 e count=0. Evidência: candidato adfd5fb9cc931960bcffe2810603a35ba30801ac sobre origin/main a2364736ec720dd611b038000c74a05f3e5e39c8, executado por run_ticket --resume-delivery USR-191 em 2026-10-10. Executar a investigação anteriormente reservada em USR-176, sem criar outra cópia de seu planejamento."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Reproduzir em candidato limpo e congelado, distinguindo espera por lock, descoberta/collection, execução dos testes e falha do worker; registrar causa provável com evidência vinculada ao SHA.",
+      "Preservar o portão único e a exigência de suíte completa: não ampliar limites sem causa demonstrada e nunca aceitar timeout, count=0, cache inválido ou execução incompleta como PASS.",
+      "Em timeout ou cancelamento, encerrar somente processos pertencentes à execução, liberar o lock com segurança e retornar diagnóstico e artefatos ligados ao candidato; demonstrar pelo portão oficial real."
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-10T10:12:38.427434Z",
+    "updated_at": "2026-10-10T10:12:38.427434Z"
   }
 ]
