@@ -73,8 +73,12 @@ def cmd_telegram_process_update(args: argparse.Namespace) -> int:
         print(json.dumps(result.model_dump(), indent=2))
     else:
         print(f"Update {result.update_id}: action={result.action.value}, authorized={result.authorized}, duplicate={result.duplicate}")
-        if result.response_text:
-            print(f"Response: {result.response_text}")
+        parts = [part for part in (result.response_parts or []) if part]
+        if not parts and result.response_text:
+            parts = [result.response_text]
+        for index, part in enumerate(parts, start=1):
+            label = "Response" if len(parts) == 1 else f"Response {index}/{len(parts)}"
+            print(f"{label}: {part}")
         if result.error:
             print(f"Error: {result.error}", file=sys.stderr)
 

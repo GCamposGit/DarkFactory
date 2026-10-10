@@ -302,6 +302,7 @@ class TelegramActionType(str, Enum):
     APPROVE = "approve"
     ACCEPT = "accept"
     ALERTS = "alerts"
+    TICKETS = "tickets"
     UNKNOWN = "unknown"
     UNAUTHORIZED = "unauthorized"
 
@@ -318,8 +319,21 @@ class TelegramDispatchResult(BaseModel):
     duplicate: bool = False
     target_id: Optional[str] = None
     response_text: str = ""
+    # When set, each entry is one Telegram message (used by /tickets so a long
+    # list is delivered in parts under the 4096-character cap).
+    response_parts: List[str] = Field(default_factory=list)
     resumed: bool = False
     error: Optional[str] = None
+
+
+def reply_messages(result: TelegramDispatchResult) -> list[str]:
+    """Outbound texts for one dispatch. Parts replace ``response_text`` when present."""
+
+    parts = [part for part in (result.response_parts or []) if part]
+    if parts:
+        return parts
+    text = result.response_text or ""
+    return [text] if text else []
 
 
 class OutboxNotification(BaseModel):
@@ -690,6 +704,7 @@ class TelegramGateway:
                     "• <code>/alerts</code> - Consultar alertas de segurança, orçamento e cotas\n"
                     "• <code>/status [ticket_id]</code> - Consultar status de pipelines e jobs\n"
                     "• <code>/demand [texto da demanda]</code> - Registrar demanda prioritária do Owner\n"
+                    "• <code>/tickets</code> - Listar ID e descrição dos tickets abertos\n"
                     "• <code>/linha [ticket_id]</code> - Enviar um ticket existente para a linha autônoma\n"
                     "• <code>/cancelar [ticket_id|run_id]</code> - Cancelar run da linha autônoma\n\n"
                     "ℹ️ <i>Demandas operacionais e backlog geral são gerenciadas no @darkfac_ops_bot</i>"
@@ -700,6 +715,7 @@ class TelegramGateway:
                     "Canal oficial de operações autônomas, fila de demandas e status da fábrica.\n\n"
                     "Comandos disponíveis:\n"
                     "• <code>/demand [texto da demanda]</code> - Ingerir nova demanda no backlog autônomo\n"
+                    "• <code>/tickets</code> - Listar ID e descrição dos tickets abertos\n"
                     "• <code>/linha [ticket_id]</code> - Enviar um ticket existente para a linha autônoma\n"
                     "• <code>/cancelar [ticket_id|run_id]</code> - Cancelar run da linha autônoma\n"
                     "• <code>/status [ticket_id]</code> - Consultar status de pipelines e jobs\n"
@@ -713,6 +729,7 @@ class TelegramGateway:
                     "👋 <b>Dark Factory Autonomous Control Bot</b>\n\n"
                     "Available commands:\n"
                     "• <code>/demand [text]</code> - Ingest a new demand into backlog\n"
+                    "• <code>/tickets</code> - List open tickets (ID and description)\n"
                     "• <code>/linha [ticket_id]</code> - Send existing ticket to autonomous line\n"
                     "• <code>/cancelar [ticket_id|run_id]</code> - Cancel an in-flight autonomous line run\n"
                     "• <code>/status [ticket_id]</code> - Check status of runs and pipelines\n"
@@ -865,6 +882,20 @@ class TelegramGateway:
                     result.error = str(exc)
                     result.response_text = f"Falha ao cancelar {target}: {exc}"
 
+        elif cmd_str == "/tickets":
+            result.action = TelegramActionType.TICKETS
+            try:
+                from core.integrations import telegram_tickets as tickets_mod
+
+                rows = tickets_mod.load_open_tickets()
+                parts = tickets_mod.format_open_tickets_messages(rows)
+                result.response_parts = parts
+                result.response_text = parts[0]
+            except Exception as exc:
+                logger.error("Telegram /tickets failed: %s", exc)
+                result.error = str(exc)
+                result.response_text = "❌ Não foi possível listar os tickets abertos."
+
         elif cmd_str == "/status":
             result.action = TelegramActionType.STATUS
             ticket_id_query = arg_str.strip() or None
@@ -963,7 +994,7 @@ class TelegramGateway:
                                 f"🆔 <b>ID:</b> <code>{latest.id}</code>\n"
                                 f"📌 <b>Título:</b> {latest.title}\n"
                                 f"📊 <b>Status:</b> {latest.status.value}\n"
-                                f"📝 <b>Descrição:</b> {latest.problem[:140]}..."
+                                f"📝 <b>Descrição:</b> {(latest.problem_statement or latest.title)[:140]}..."
                             )
                         else:
                             result.response_text = "ℹ️ Nenhum ticket registrado no momento."
@@ -1153,13 +1184,13 @@ class TelegramGateway:
                 for u in updates:
                     res = self.process_update(u)
                     results.append(res)
-                    if res.response_text and not res.duplicate:
+                    if not res.duplicate:
                         chat_id = (
                             u.get("message", {}).get("chat", {}).get("id")
                             or u.get("callback_query", {}).get("message", {}).get("chat", {}).get("id")
                         )
                         if chat_id:
-                            self.send_message(chat_id, res.response_text)
+                            self.deliver_reply(chat_id, res)
                 return results
         except Exception as exc:
             status_code = getattr(exc, "code", None)
@@ -1181,6 +1212,14 @@ class TelegramGateway:
                     f" (HTTP {status_code})" if isinstance(status_code, int) else "",
                 )
             return []
+
+    def deliver_reply(self, chat_id: int, result: TelegramDispatchResult) -> None:
+        """Send every part of a dispatch. No-op for duplicates and empty replies."""
+
+        if result.duplicate or not chat_id:
+            return
+        for text in reply_messages(result):
+            self.send_message(chat_id, text)
 
     def send_message(
         self,
