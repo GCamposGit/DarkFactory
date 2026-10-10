@@ -5230,14 +5230,16 @@
     "tags": [
       "user-demand"
     ],
-    "problem_statement": "Em 09/10/2026, python run_ticket.py USR-180 --harness codex terminou em 45 s sem alterar arquivo: tres tentativas de iniciar o terminal do Codex foram rejeitadas com 'helper_unknown_error: setup refresh had errors', entao o agente nao leu MISSION.md nem o codigo. A cota do Codex estava saudavel (60%). O roteador deveria tratar esse erro como falha de infraestrutura do harness (cooldown e failover para outro harness com write) em vez de devolver o ticket sem alteracao. Pode ter relacao com outra sessao do Codex em uso no mesmo host (USR-134).",
+    "problem_statement": "Em 09/10/2026, python run_ticket.py USR-180 --harness codex terminou em 45 s sem alterar arquivo: tres tentativas de iniciar o terminal do Codex foram rejeitadas com 'helper_unknown_error: setup refresh had errors', entao o agente nao leu MISSION.md nem o codigo. A cota do Codex estava saudavel (60%). O roteador deveria tratar esse erro como falha de infraestrutura do harness (cooldown e failover para outro harness com write) em vez de devolver o ticket sem alteracao. Pode ter relacao com outra sessao do Codex em uso no mesmo host (USR-134). DIAGNOSTICO (10/10/2026, sessao interativa): o log %USERPROFILE%\\.codex\\.sandbox\\sandbox.AAAA-MM-DD.log mostra que o codex-windows-sandbox-setup.exe falha ao validar a ACL de leitura/execucao de ...\\OpenAI\\Codex\\runtimes\\cua_node\\<hash>\\bin\\node_repl.exe com 'O arquivo ja esta sendo usado por outro processo (os error 32)'. Esse binario fica aberto por varios node_repl.exe mantidos pelo app Codex Desktop (servidor MCP node_repl do config.toml), entao todo 'codex exec --sandbox workspace-write' headless falha enquanto o app estiver aberto. Reproduzido em USR-193 (run_ticket sem harness explicito: o roteador elegeu codex e o agente terminou em 50 s sem alterar arquivo). O sandbox nunca deve ser desligado para contornar isso.",
     "core_journey": [
-      "Em 09/10/2026, python run_ticket.py USR-180 --harness codex terminou em 45 s sem alterar arquivo: tres tentativas de iniciar o terminal do Codex foram rejeitadas com 'helper_unknown_error: setup refresh had errors', entao o agente nao leu MISSION.md nem o codigo. A cota do Codex estava saudavel (60%). O roteador deveria tratar esse erro como falha de infraestrutura do harness (cooldown e failover para outro harness com write) em vez de devolver o ticket sem alteracao. Pode ter relacao com outra sessao do Codex em uso no mesmo host (USR-134)."
+      "Em 09/10/2026, python run_ticket.py USR-180 --harness codex terminou em 45 s sem alterar arquivo: tres tentativas de iniciar o terminal do Codex foram rejeitadas com 'helper_unknown_error: setup refresh had errors', entao o agente nao leu MISSION.md nem o codigo. A cota do Codex estava saudavel (60%). O roteador deveria tratar esse erro como falha de infraestrutura do harness (cooldown e failover para outro harness com write) em vez de devolver o ticket sem alteracao. Pode ter relacao com outra sessao do Codex em uso no mesmo host (USR-134). DIAGNOSTICO (10/10/2026, sessao interativa): o log %USERPROFILE%\\.codex\\.sandbox\\sandbox.AAAA-MM-DD.log mostra que o codex-windows-sandbox-setup.exe falha ao validar a ACL de leitura/execucao de ...\\OpenAI\\Codex\\runtimes\\cua_node\\<hash>\\bin\\node_repl.exe com 'O arquivo ja esta sendo usado por outro processo (os error 32)'. Esse binario fica aberto por varios node_repl.exe mantidos pelo app Codex Desktop (servidor MCP node_repl do config.toml), entao todo 'codex exec --sandbox workspace-write' headless falha enquanto o app estiver aberto. Reproduzido em USR-193 (run_ticket sem harness explicito: o roteador elegeu codex e o agente terminou em 50 s sem alterar arquivo). O sandbox nunca deve ser desligado para contornar isso."
     ],
     "non_goals": [],
     "reachability_contract": "",
     "acceptance_criteria": [
       "Diagnosticar a causa do helper_unknown_error do terminal do Codex neste host (sessao concorrente, sandbox, setup refresh)",
+      "Diagnostico registrado: causa = refresh de ACL do sandbox do Codex em node_repl.exe aberto pelo app Codex Desktop (os error 32); a deteccao usa o texto 'helper_unknown_error'/'setup refresh had errors' na saida do agente",
+      "Mitigacao avaliada sem afrouxar o sandbox: o argv headless do Codex nao depende do servidor MCP node_repl nem dos plugins de computer-use do app Desktop (override por -c no build_codex_argv) ou o launcher repete uma vez antes do failover; danger-full-access e bypass NAO sao aceitos como solucao no Desktop/Notebook",
       "run_ticket/agent_cli classifica esse erro como infraestrutura e aplica cooldown e failover para outro harness com write",
       "Teste focal com agente falso que devolve esse erro"
     ],
@@ -5245,7 +5247,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-09T21:40:00Z",
-    "updated_at": "2026-10-09T21:40:00Z"
+    "updated_at": "2026-10-10T09:55:00Z"
   },
   {
     "id": "USR-189",
