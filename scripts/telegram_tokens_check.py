@@ -52,7 +52,7 @@ NETWORK_ERROR = "ERRO(rede)"
 BAD_FORMAT = "FORMATO INVALIDO"
 FORMAT_OK = "formato ok"
 
-# fetch(token, timeout) -> (outcome, bot_username); outcome in {"valid", "revoked", "error"}.
+# fetch(token, timeout) -> (outcome, bot_username | error_detail); outcome in {"valid", "revoked", "error"}.
 Fetch = Callable[[str, float], tuple[str, str | None]]
 UserEnvReader = Callable[[str], str | None]
 
@@ -90,9 +90,12 @@ def fetch_get_me(token: str, timeout: float = DEFAULT_TIMEOUT) -> tuple[str, str
             data = json.loads(response.read().decode("utf-8"))
     except urllib.error.HTTPError as exc:
         # Telegram answers 401 for a revoked token and 404 for a malformed one.
-        return ("revoked", None) if exc.code in (401, 404) else ("error", None)
-    except Exception:
-        return ("error", None)
+        return ("revoked", None) if exc.code in (401, 404) else ("error", f"HTTP {exc.code}")
+    except Exception as exc:
+        # Only class names are reported: exception messages may embed the request URL (and the token).
+        reason = getattr(exc, "reason", None)
+        detail = type(exc).__name__ + (f"/{type(reason).__name__}" if reason is not None else "")
+        return ("error", detail)
     if isinstance(data, dict) and data.get("ok"):
         result = data.get("result")
         username = result.get("username") if isinstance(result, dict) else None
@@ -212,7 +215,7 @@ def evaluate(
         elif outcome == "revoked":
             row.state = REVOKED
         else:
-            row.state = NETWORK_ERROR
+            row.state = f"{NETWORK_ERROR} {username}" if username else NETWORK_ERROR
 
 
 def _render(rows: list[SourceRow]) -> list[str]:
