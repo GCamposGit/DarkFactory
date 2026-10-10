@@ -520,8 +520,12 @@ def test_hub_service_survives_unavailable_demands(
 
 
 @pytest.fixture()
-def client(tmp_path: Path, seeded: tuple[Path, dict[str, str]]) -> TestClient:
+def client(
+    tmp_path: Path, seeded: tuple[Path, dict[str, str]], monkeypatch: pytest.MonkeyPatch
+) -> TestClient:
     db, _ = seeded
+    # The seed is anchored at NOW; the real clock would age finished runs out of the board over time.
+    monkeypatch.setattr("core.workflow.line_live._utc_now", lambda: NOW)
     service = _make_service(tmp_path, db)
     app.dependency_overrides[get_hub_service] = lambda: service
     try:
