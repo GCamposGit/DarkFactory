@@ -117,7 +117,7 @@
       "kind": "action",
       "title": "Configurar a URL do papel restrito no Desktop e no Notebook e conferir o /live",
       "priority": "high",
-      "status": "open",
+      "status": "done",
       "why": "Depois de OA-003, cada maquina que roda tickets precisa da URL do papel restrito para publicar na Esteira ao vivo. Sem URL, o run_ticket avisa e grava so num banco local que o Hub nao le.",
       "blocks": [
         "USR-164"
@@ -148,7 +148,7 @@
       "verify": "A saida do live_run.py diz '(publicado)' sem '[AVISO]' e o run aparece em /live.",
       "created_at": "2026-10-09T22:00:00Z",
       "created_by": "claude-code",
-      "resolved_at": null
+      "resolved_at": "2026-10-10T15:58:00Z"
     },
     {
       "id": "OA-005",
@@ -225,7 +225,7 @@
       "kind": "action",
       "title": "Copiar a regra 'acoes humanas no DarkHub' para o AGENTS.md (arquivo protegido)",
       "priority": "medium",
-      "status": "open",
+      "status": "done",
       "why": "A regra ja esta no CLAUDE.md, mas o AGENTS.md vale para todos os harnesses (Codex, Grok, Antigravity) e so um commit humano pode altera-lo.",
       "blocks": [],
       "depends_on": [],
@@ -244,7 +244,7 @@
       "verify": "git log -1 -- AGENTS.md mostra o seu commit.",
       "created_at": "2026-10-09T22:00:00Z",
       "created_by": "claude-code",
-      "resolved_at": null
+      "resolved_at": "2026-10-10T14:20:00Z"
     },
     {
       "id": "OA-008",
@@ -326,6 +326,38 @@
       "created_at": "2026-10-10T11:30:00Z",
       "created_by": "claude-code",
       "resolved_at": "2026-10-10T09:05:00Z"
+    },
+    {
+      "id": "OA-010",
+      "kind": "action",
+      "title": "Configurar DARKFAC_TELEMETRY_KEY no Notebook para o Hub voltar a receber as cotas",
+      "priority": "critical",
+      "status": "open",
+      "why": "A sincronizacao de cotas Notebook -> Hub esta parada desde 03/10 porque a chave nao existe no Notebook (o Hub tem). Copiar segredo entre sistemas foi bloqueado para o agente. Sem isso o AI Account Monitor continua errado ate o USR-206 ser entregue.",
+      "blocks": [
+        "USR-206"
+      ],
+      "depends_on": [],
+      "steps": [
+        {
+          "text": "Abra https://dokploy.ggcampos.com, entre no projeto darkfac-core > environment production > compose Darkhub > aba Environment."
+        },
+        {
+          "text": "Copie apenas o valor da linha DARKFAC_TELEMETRY_KEY (sem aspas, sem espacos)."
+        },
+        {
+          "text": "No PowerShell do Notebook, grave a variavel de usuario substituindo <VALOR_COPIADO>:",
+          "command": "[Environment]::SetEnvironmentVariable(\"DARKFAC_TELEMETRY_KEY\",\"<VALOR_COPIADO>\",\"User\")"
+        },
+        {
+          "text": "Reinicie a tarefa de sincronizacao (o agente ja a reapontou para C:\\dev\\DarkFac):",
+          "command": "Stop-ScheduledTask -TaskName \"DarkFac-Usage-Cloud-Sync\"; Start-ScheduledTask -TaskName \"DarkFac-Usage-Cloud-Sync\""
+        }
+      ],
+      "verify": "Em ate 2 min, Get-Content C:\\dev\\DarkFac\\.factory\\logs\\usage_sync.log -Tail 5 mostra sincronizacao OK e o AI Account Monitor do Hub mostra Anthropic, OpenAI e xAI com as mesmas porcentagens do roteador.",
+      "created_at": "2026-10-10T14:54:15Z",
+      "created_by": "claude-code",
+      "resolved_at": null
     }
   ]
 }

@@ -5589,5 +5589,356 @@
     "dependencies": [],
     "created_at": "2026-10-10T13:51:44.721619Z",
     "updated_at": "2026-10-10T13:51:44.721619Z"
+  },
+  {
+    "id": "USR-205",
+    "project_id": "darkfac",
+    "title": "run_ticket repete 3 vezes (~45 min) quando o agente e cancelado ao editar caminho protegido (core/harness/*): tratar como bloqueio humano, nao como falha transitoria",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "Em 10/10/2026 o run_ticket USR-183 --harness grok falhou 3 vezes seguidas com stopReason=cancelled (permission mode auto), 800 s + 829 s + 1072 s, e removeu a worktree sem alteracoes. Nas tres sessoes gravadas em ~/.grok/sessions a chamada cancelada foi o mesmo search_replace em core/harness/remote_worker.py, caminho protegido por core/orchestrator/guard.py (PROTECTED_PATTERNS inclui core/harness/*; so o owner commita, e o padrao do projeto e entregar um patch em docs/proposals, como em USR-141-147-harness-resilience). agent_cli classifica o cancelamento como error_kind=crash e core/line/agent_retry repete com o mesmo prompt, entao o resultado e sempre o mesmo. Efeito: tempo de Grok desperdicado, nenhum sinal para o owner, e o ticket volta como se tivesse sido tentado. Tickets cujo escopo cai em caminho protegido (hoje USR-183, USR-178 e a parte (a) do USR-186) precisam de outro fluxo.",
+    "core_journey": [
+      "Em 10/10/2026 o run_ticket USR-183 --harness grok falhou 3 vezes seguidas com stopReason=cancelled (permission mode auto), 800 s + 829 s + 1072 s, e removeu a worktree sem alteracoes. Nas tres sessoes gravadas em ~/.grok/sessions a chamada cancelada foi o mesmo search_replace em core/harness/remote_worker.py, caminho protegido por core/orchestrator/guard.py (PROTECTED_PATTERNS inclui core/harness/*; so o owner commita, e o padrao do projeto e entregar um patch em docs/proposals, como em USR-141-147-harness-resilience). agent_cli classifica o cancelamento como error_kind=crash e core/line/agent_retry repete com o mesmo prompt, entao o resultado e sempre o mesmo. Efeito: tempo de Grok desperdicado, nenhum sinal para o owner, e o ticket volta como se tivesse sido tentado. Tickets cujo escopo cai em caminho protegido (hoje USR-183, USR-178 e a parte (a) do USR-186) precisam de outro fluxo."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "agent_cli distingue stopReason=cancelled causado por edicao em caminho protegido (comparando a chamada cancelada com PROTECTED_PATTERNS de core/orchestrator/guard.py) de um cancelamento de permissao comum, com um error_kind proprio (por exemplo protected_path) e o caminho envolvido no diagnostico",
+      "agent_retry nao repete esse error_kind: encerra na primeira ocorrencia, preserva o trabalho ja feito na worktree e nao tenta outro harness com o mesmo escopo",
+      "Ao encerrar assim, o run_ticket registra uma acao humana OA-NNN em .factory/owner_actions/owner_actions.json (titulo, prioridade, ticket bloqueado, caminho protegido, passo do owner) e orienta a entrega do patch em docs/proposals, sem editar o arquivo protegido",
+      "Opcional e preferivel: o prompt de desenvolvimento ja informa ao agente a lista de caminhos protegidos e manda entregar proposta e patch em docs/proposals em vez de editar",
+      "Teste focal com agente falso que devolve stopReason=cancelled apos tentar editar core/harness/remote_worker.py: uma unica tentativa, error_kind protected_path e OA registrada"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-10T14:28:04.177236Z",
+    "updated_at": "2026-10-10T14:28:04.177236Z"
+  },
+  {
+    "id": "USR-206",
+    "project_id": "darkfac",
+    "title": "Monitor de contas do Hub com a mesma fonte de cotas do roteador (fim dos saldos errados)",
+    "origin": "user",
+    "status": "completed",
+    "delivery_evidence": "1f596faa7a6744016332eb4fab495c5f84b5579e",
+    "item_type": "infrastructure",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand",
+      "darkhub",
+      "quota",
+      "routing",
+      "usage-sync",
+      "critical"
+    ],
+    "problem_statement": "O AI Account Monitor do Hub (VPS) mostra 2 ativas/0 limitadas e Claude, Grok e Antigravity como 'nao instalado/nao autenticado', enquanto o roteador do Notebook mede Anthropic semanal 9%, OpenAI 56%, xAI 98,67% (.factory/usage/providers, 10/10 14:25 UTC). Causas confirmadas: (1) o Hub na VPS sonda CLIs localmente (claude/grok/codex nao existem no container) em vez de ler o que o roteador usa; (2) o loop DarkFac-Usage-Cloud-Sync roda desde 03/10 a partir de uma worktree velha do Codex (C:\\Users\\guigc\\.codex\\worktrees\\usr-124-postmerge) e esta em SYNC_DEGRADED desde entao porque DARKFAC_TELEMETRY_KEY nao existe no Notebook (o Hub tem a chave) - ninguem foi alertado por 7 dias; (3) os snapshots recebidos em POST /api/usage/sync vao para /app/.factory/usage/providers, fora dos volumes do compose, e somem a cada redeploy (11 redeploys em 10/10); (4) o botao 'Atualizar cotas' chama POST /api/usage/accounts/refresh, que so re-sonda a VPS e por isso nunca muda nada. Diagnostico de 10/10/2026 (sessao interativa Claude Code, pedido do owner sobre o DarkHub).",
+    "core_journey": [
+      "O AI Account Monitor do Hub (VPS) mostra 2 ativas/0 limitadas e Claude, Grok e Antigravity como 'nao instalado/nao autenticado', enquanto o roteador do Notebook mede Anthropic semanal 9%, OpenAI 56%, xAI 98,67% (.factory/usage/providers, 10/10 14:25 UTC). Causas confirmadas: (1) o Hub na VPS sonda CLIs localmente (claude/grok/codex nao existem no container) em vez de ler o que o roteador usa; (2) o loop DarkFac-Usage-Cloud-Sync roda desde 03/10 a partir de uma worktree velha do Codex (C:\\Users\\guigc\\.codex\\worktrees\\usr-124-postmerge) e esta em SYNC_DEGRADED desde entao porque DARKFAC_TELEMETRY_KEY nao existe no Notebook (o Hub tem a chave) - ninguem foi alertado por 7 dias; (3) os snapshots recebidos em POST /api/usage/sync vao para /app/.factory/usage/providers, fora dos volumes do compose, e somem a cada redeploy (11 redeploys em 10/10); (4) o botao 'Atualizar cotas' chama POST /api/usage/accounts/refresh, que so re-sonda a VPS e por isso nunca muda nada. Diagnostico de 10/10/2026 (sessao interativa Claude Code, pedido do owner sobre o DarkHub)."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Existe uma unica fonte de verdade de cotas: o snapshot que core.line.routing.pick usa (por provedor, com checked_at, node de origem e janelas) e publicado pelo host medidor no control store Postgres (DARKHUB_CONTROL_DATABASE_URL) a cada medicao; o Hub le dali e nunca sonda CLIs na VPS.",
+      "Teste de contrato: para um mesmo snapshot, o headroom exibido pelo Hub e o headroom calculado pelo roteador sao identicos (sem fixture inventada: usar fixture real capturada, ver docs/QUOTA_METER_CONTRACT.md).",
+      "Cada cartao mostra idade do dado e origem; dado com mais de 10 min aparece como 'desatualizado' em destaque, nunca como 'desconectado' ou zerado.",
+      "Botao 'Atualizar cotas' cria uma solicitacao de remedicao que o host medidor executa em ate 60 s; a UI mostra o progresso e o novo checked_at, ou o motivo exato da falha (host offline, chave ausente).",
+      "Falha de sincronizacao (chave ausente, 401, sem sucesso ha mais de 5 min) gera alerta critico no Hub (fila de intervencoes) e no Telegram ops na primeira ocorrencia, em vez de so escrever em log local.",
+      "A tarefa agendada de sincronizacao e instalada por script idempotente que aponta para C:\\dev\\DarkFac (nunca worktree) e se re-registra quando o caminho muda; teste cobre o instalador.",
+      "Snapshots sobrevivem a redeploy do Hub (Postgres ou volume nomeado)."
+    ],
+    "suggested_files": [
+      "core/usage/monitor.py",
+      "core/usage/adapters.py",
+      "hub/backend/service.py",
+      "hub/backend/api.py",
+      "scripts/sync_usage_to_cloud.py",
+      "hub/frontend/"
+    ],
+    "estimated_complexity": "high",
+    "dependencies": [],
+    "created_at": "2026-10-10T14:53:37.888426Z",
+    "updated_at": "2026-10-10T14:54:36.216103Z"
+  },
+  {
+    "id": "USR-207",
+    "project_id": "darkfac",
+    "title": "Hub cai a cada merge: redeploy sem downtime, deploy deduplicado e frontend resiliente",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "operations",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand",
+      "darkhub",
+      "deploy",
+      "dokploy",
+      "uptime"
+    ],
+    "problem_statement": "O owner viu o Hub sair do ar durante testes em 10/10. O compose Darkhub (Dokploy wuH-sjZBig74xFGdk4IsL) teve 12 deploys em 10/10 (08:43 a 14:45), cada um reconstruindo a imagem na VPS (2 vCPU, 3,7 GB, RAM em 79%) e recriando o container darkhub-cloud-247 (stop-then-start, ~1 min fora). Ha deploy duplo: autoDeploy 'NEW CHANGES' em todo push no main mais 'Manual deployment' via scripts/dokploy_redeploy.py, mesmo quando o merge so mexeu no ledger. Durante a janela o frontend mostra erros crus como 'Falha na telemetria de infraestrutura: Failed to fetch' (hub/frontend/infra.js) sem nova tentativa. Limite de memoria do container: 512 MB. Diagnostico de 10/10/2026 (sessao interativa Claude Code, pedido do owner sobre o DarkHub).",
+    "core_journey": [
+      "O owner viu o Hub sair do ar durante testes em 10/10. O compose Darkhub (Dokploy wuH-sjZBig74xFGdk4IsL) teve 12 deploys em 10/10 (08:43 a 14:45), cada um reconstruindo a imagem na VPS (2 vCPU, 3,7 GB, RAM em 79%) e recriando o container darkhub-cloud-247 (stop-then-start, ~1 min fora). Ha deploy duplo: autoDeploy 'NEW CHANGES' em todo push no main mais 'Manual deployment' via scripts/dokploy_redeploy.py, mesmo quando o merge so mexeu no ledger. Durante a janela o frontend mostra erros crus como 'Falha na telemetria de infraestrutura: Failed to fetch' (hub/frontend/infra.js) sem nova tentativa. Limite de memoria do container: 512 MB. Diagnostico de 10/10/2026 (sessao interativa Claude Code, pedido do owner sobre o DarkHub)."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Redeploy do Hub sem indisponibilidade: imagem construida fora da VPS (CI publica no GHCR) e troca gated por healthcheck (start-first ou blue/green via Traefik); medir com sonda de 1 s durante um deploy real: zero respostas diferentes de 200 em /health.",
+      "Um merge gera no maximo um deploy do Hub, e merges que nao tocam no que a imagem embute nao reconstroem nada (ou atualizam so os dados sem recriar o container).",
+      "Frontend: toda chamada fetch do Hub passa por um helper unico com retry/backoff; durante indisponibilidade aparece um aviso 'Hub atualizando, reconectando...' e os paineis se recuperam sozinhos, sem mensagem 'Failed to fetch'.",
+      "Sonda externa de disponibilidade do Hub alerta no Telegram ops quando /health falha por mais de 2 min.",
+      "Uso de memoria do container avaliado sob carga (todas as abas abertas + refresh) e limite ajustado com evidencia; OOMKilled monitorado."
+    ],
+    "suggested_files": [
+      "deploy/dokploy/docker-compose.hub.yml",
+      "deploy/dokploy/Dockerfile.hub",
+      "scripts/dokploy_redeploy.py",
+      ".github/workflows/",
+      "hub/frontend/"
+    ],
+    "estimated_complexity": "high",
+    "dependencies": [],
+    "created_at": "2026-10-10T14:53:42.327437Z",
+    "updated_at": "2026-10-10T14:53:42.327437Z"
+  },
+  {
+    "id": "USR-208",
+    "project_id": "darkfac",
+    "title": "Registro universal de execucoes: codigo unico por etapa e heartbeat para a Esteira ao vivo",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "infrastructure",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand",
+      "darkhub",
+      "live",
+      "telemetry",
+      "observability"
+    ],
+    "problem_statement": "A Esteira ao vivo (/live, core/workflow/line_live.py) so enxerga runs do control store e run_ticket local. Em 10/10 o snapshot tinha 28 runs: execucoes 'USR-TESTE / Teste da esteira' (uma 'active' presa desde 09:58), canarios e nada dos desenvolvimentos reais do dia (ex.: USR-187, OA-004/OA-007, sessoes interativas e subagentes). Requisito do owner: toda acao no ambiente DarkFac - Telegram, sessoes Codex, Grok, Antigravity, Claude (principal e subagentes), run_ticket, pump, linha na VPS - gera obrigatoriamente um codigo unico de execucao por etapa e aparece no Hub Live; abrir /live deve mostrar 100% do que esta em andamento. Diagnostico de 10/10/2026 (sessao interativa Claude Code, pedido do owner sobre o DarkHub).",
+    "core_journey": [
+      "A Esteira ao vivo (/live, core/workflow/line_live.py) so enxerga runs do control store e run_ticket local. Em 10/10 o snapshot tinha 28 runs: execucoes 'USR-TESTE / Teste da esteira' (uma 'active' presa desde 09:58), canarios e nada dos desenvolvimentos reais do dia (ex.: USR-187, OA-004/OA-007, sessoes interativas e subagentes). Requisito do owner: toda acao no ambiente DarkFac - Telegram, sessoes Codex, Grok, Antigravity, Claude (principal e subagentes), run_ticket, pump, linha na VPS - gera obrigatoriamente um codigo unico de execucao por etapa e aparece no Hub Live; abrir /live deve mostrar 100% do que esta em andamento. Diagnostico de 10/10/2026 (sessao interativa Claude Code, pedido do owner sobre o DarkHub)."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Modulo unico core/workflow/execution_registry.py com start(source, harness, stage, ticket_id?, parent_execution_id?) -> execution_id unico, heartbeat(), finish(status, evidence); grava no control store Postgres com fila local de reenvio quando offline.",
+      "Fontes obrigatorias ligadas ao registro: run_ticket, pump/linha da VPS, handlers do Telegram (pedidos e comandos), subagentes e etapas (planning, development, validation, review, integration).",
+      "Execucao sem heartbeat por mais de 3 min vira 'perdida' e sai de 'em andamento' (nada de run 'active' eterno).",
+      "/live mostra todas as execucoes ativas agrupadas por fonte (Telegram, Claude, Codex, Grok, Antigravity, VPS) e etapa, com execution_id, ticket, harness/modelo, inicio e ultimo heartbeat.",
+      "'Concluidas recentemente' lista entregas reais (ticket concluido, PR mergeado, deploy) dos ultimos 7 dias; fixtures de teste (USR-TESTE e afins) e canarios ficam ocultos por padrao com filtro para exibir.",
+      "Testes: contrato do registro (ids unicos, TTL, reenvio offline) e projecao do /live com fontes mistas."
+    ],
+    "suggested_files": [
+      "core/workflow/line_live.py",
+      "core/workflow/",
+      "run_ticket.py",
+      "hub/frontend/live.js",
+      "core/telegram/"
+    ],
+    "estimated_complexity": "high",
+    "dependencies": [],
+    "created_at": "2026-10-10T14:53:47.851829Z",
+    "updated_at": "2026-10-10T14:53:47.851829Z"
+  },
+  {
+    "id": "USR-209",
+    "project_id": "darkfac",
+    "title": "Sessoes interativas e subagentes de todos os harnesses publicam no registro de execucoes",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "infrastructure",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand",
+      "darkhub",
+      "live",
+      "harness",
+      "hooks"
+    ],
+    "problem_statement": "Depende do registro universal de execucoes. Sessoes abertas pelo owner no Claude Code (desktop/CLI), Codex, Grok Build e Antigravity, e os subagentes que elas lancam, nao aparecem em lugar nenhum do Hub; o owner precisa ver tudo o que esta em andamento. Diagnostico de 10/10/2026 (sessao interativa Claude Code, pedido do owner sobre o DarkHub).",
+    "core_journey": [
+      "Depende do registro universal de execucoes. Sessoes abertas pelo owner no Claude Code (desktop/CLI), Codex, Grok Build e Antigravity, e os subagentes que elas lancam, nao aparecem em lugar nenhum do Hub; o owner precisa ver tudo o que esta em andamento. Diagnostico de 10/10/2026 (sessao interativa Claude Code, pedido do owner sobre o DarkHub)."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Claude Code: hooks versionados no repositorio (SessionStart, SubagentStart/SubagentStop, Stop) registram e encerram execucoes com o id da sessao/subagente e o ticket quando houver.",
+      "Codex, Grok Build e Antigravity: wrapper ou hook equivalente documentado e testado registra inicio, heartbeat e fim; quando o harness nao suportar hooks, o comando canonico de lancamento faz o registro.",
+      "Falha de rede no registro nunca bloqueia a sessao (fila local e reenvio).",
+      "Verificacao manual descrita em docs: abrir uma sessao em cada harness e ve-la em /live em ate 10 s."
+    ],
+    "suggested_files": [
+      ".claude/settings.json",
+      "core/workflow/execution_registry.py",
+      "docs/OPERATING_HARNESS.md"
+    ],
+    "estimated_complexity": "medium",
+    "dependencies": [
+      "USR-208"
+    ],
+    "created_at": "2026-10-10T14:53:54.302042Z",
+    "updated_at": "2026-10-10T14:53:54.302042Z"
+  },
+  {
+    "id": "USR-210",
+    "project_id": "darkfac",
+    "title": "Intervencao WAITING_HUMAN sem alvo: 'Ver tarefa' rola a pagina em vez de abrir a acao",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand",
+      "darkhub",
+      "interventions",
+      "bug"
+    ],
+    "problem_statement": "Na fila prioritaria, o item 'Bloqueio WAITING_HUMAN:  - Canario diario 2026-09-30 / Causa: grill_pending' tem id 'waiting_human:', action_target_id, task_id e ticket_id vazios (GET /api/interventions/priority). Causa: hub/backend/service.py (bloco 'Tarefas bloqueadas em WAITING_HUMAN') le os campos id/ticket_id, mas o dashboard de tarefas entrega task_id (dem-722f8e52bd7c) e run_id (run-d4d10d4aee94). Sem alvo, 'Ver tarefa' rola para a lista de tarefas, onde nao ha acao disponivel. Diagnostico de 10/10/2026 (sessao interativa Claude Code, pedido do owner sobre o DarkHub).",
+    "core_journey": [
+      "Na fila prioritaria, o item 'Bloqueio WAITING_HUMAN:  - Canario diario 2026-09-30 / Causa: grill_pending' tem id 'waiting_human:', action_target_id, task_id e ticket_id vazios (GET /api/interventions/priority). Causa: hub/backend/service.py (bloco 'Tarefas bloqueadas em WAITING_HUMAN') le os campos id/ticket_id, mas o dashboard de tarefas entrega task_id (dem-722f8e52bd7c) e run_id (run-d4d10d4aee94). Sem alvo, 'Ver tarefa' rola para a lista de tarefas, onde nao ha acao disponivel. Diagnostico de 10/10/2026 (sessao interativa Claude Code, pedido do owner sobre o DarkHub)."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "A intervencao usa task_id/run_id reais; teste de regressao com o formato atual do dashboard.",
+      "'Ver tarefa' nunca rola a pagina: abre um modal com a causa, instrucoes de resolucao e botoes de acao direta conforme o cause_code (responder o Grill, retomar, cancelar o run), cada um chamando o endpoint existente.",
+      "Todo cause_code conhecido tem texto de instrucao; cause_code desconhecido mostra a evidencia crua e o botao de cancelar."
+    ],
+    "suggested_files": [
+      "hub/backend/service.py",
+      "hub/frontend/interventions.js"
+    ],
+    "estimated_complexity": "low",
+    "dependencies": [],
+    "created_at": "2026-10-10T14:53:59.431274Z",
+    "updated_at": "2026-10-10T14:53:59.431274Z"
+  },
+  {
+    "id": "USR-211",
+    "project_id": "darkfac",
+    "title": "Canario diario fica preso em WAITING_HUMAN (grill_pending) e grava titulo com acentos corrompidos",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "operations",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand",
+      "canary",
+      "bug",
+      "encoding"
+    ],
+    "problem_statement": "O run run-d4d10d4aee94 do 'Canario diario 2026-09-30' (projeto darkfac-canary) esta em WAITING_HUMAN na etapa grill desde 30/09 e ocupa a fila prioritaria do Hub ha 10 dias. Os titulos dos canarios chegam como 'CanÃ¡rio diÃ¡rio' (UTF-8 decodificado duas vezes) no control store. Um canario sintetico nunca deveria pedir decisao humana. Diagnostico de 10/10/2026 (sessao interativa Claude Code, pedido do owner sobre o DarkHub).",
+    "core_journey": [
+      "O run run-d4d10d4aee94 do 'Canario diario 2026-09-30' (projeto darkfac-canary) esta em WAITING_HUMAN na etapa grill desde 30/09 e ocupa a fila prioritaria do Hub ha 10 dias. Os titulos dos canarios chegam como 'CanÃ¡rio diÃ¡rio' (UTF-8 decodificado duas vezes) no control store. Um canario sintetico nunca deveria pedir decisao humana. Diagnostico de 10/10/2026 (sessao interativa Claude Code, pedido do owner sobre o DarkHub)."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Demanda de canario nunca entra em WAITING_HUMAN: o Grill e dispensado ou respondido automaticamente para o projeto darkfac-canary; teste cobre.",
+      "Canario sem conclusao em 24 h e encerrado como falho com evidencia, e o run de 30/09 e os demais presos sao fechados.",
+      "Titulos gravados em UTF-8 correto; teste reproduz a dupla decodificacao e os registros existentes sao corrigidos."
+    ],
+    "suggested_files": [
+      "core/line/",
+      "deploy/dokploy/docker-compose.cloud.yml"
+    ],
+    "estimated_complexity": "low",
+    "dependencies": [],
+    "created_at": "2026-10-10T14:54:05.373313Z",
+    "updated_at": "2026-10-10T14:54:05.373313Z"
+  },
+  {
+    "id": "USR-212",
+    "project_id": "darkfac",
+    "title": "Telemetria de infraestrutura atribui as metricas da VPS ao Notebook (predator-neo-16)",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "operations",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand",
+      "darkhub",
+      "infra",
+      "telemetry",
+      "bug"
+    ],
+    "problem_statement": "GET /api/infra/metrics no Hub de producao retorna host_node_id 'predator-neo-16' com hardware da VPS (2 nucleos, 3,73 GB de RAM): o container do Hub se identifica como o Notebook, entao o painel mostra os numeros errados para os dois nos. Diagnostico de 10/10/2026 (sessao interativa Claude Code, pedido do owner sobre o DarkHub).",
+    "core_journey": [
+      "GET /api/infra/metrics no Hub de producao retorna host_node_id 'predator-neo-16' com hardware da VPS (2 nucleos, 3,73 GB de RAM): o container do Hub se identifica como o Notebook, entao o painel mostra os numeros errados para os dois nos. Diagnostico de 10/10/2026 (sessao interativa Claude Code, pedido do owner sobre o DarkHub)."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "O Hub na VPS se identifica pelo node_id da VPS (variavel de ambiente explicita no compose, com fallback por hostname do container), nunca pelo default do Notebook.",
+      "Metricas do Notebook e do Desktop vem dos proprios nos (agente/heartbeat), com idade do dado exibida.",
+      "Teste cobre a resolucao do node_id no container."
+    ],
+    "suggested_files": [
+      "hub/backend/",
+      "deploy/dokploy/docker-compose.hub.yml",
+      "hub/frontend/infra.js"
+    ],
+    "estimated_complexity": "low",
+    "dependencies": [],
+    "created_at": "2026-10-10T14:54:12.116107Z",
+    "updated_at": "2026-10-10T14:54:12.116107Z"
+  },
+  {
+    "id": "USR-213",
+    "project_id": "darkfac",
+    "title": "Quick Launch Dock: remover Canaletto e incluir Grok",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand",
+      "darkhub",
+      "quick-launch",
+      "mechanical_edit"
+    ],
+    "problem_statement": "Pedido do owner: tirar o atalho 'Canaletto Gallery & AI Studio' (id canaletto-gallery) do Quick Launch Dock e incluir o Grok. Atencao: hub/data/services.json fica no volume darkhub-hub-data, entao mudar so hub/data/default_services.json nao altera o Hub de producao. Diagnostico de 10/10/2026 (sessao interativa Claude Code, pedido do owner sobre o DarkHub).",
+    "core_journey": [
+      "Pedido do owner: tirar o atalho 'Canaletto Gallery & AI Studio' (id canaletto-gallery) do Quick Launch Dock e incluir o Grok. Atencao: hub/data/services.json fica no volume darkhub-hub-data, entao mudar so hub/data/default_services.json nao altera o Hub de producao. Diagnostico de 10/10/2026 (sessao interativa Claude Code, pedido do owner sobre o DarkHub)."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "canaletto-gallery removido de hub/data/default_services.json e hub/data/services.json.",
+      "Novo servico Grok (https://grok.com) fixado no dock, com icone e categoria coerentes com os outros assistentes.",
+      "Migracao idempotente aplica a mudanca ao services.json persistido no volume no boot do Hub; teste cobre."
+    ],
+    "suggested_files": [
+      "hub/data/default_services.json",
+      "hub/data/services.json",
+      "hub/backend/"
+    ],
+    "estimated_complexity": "low",
+    "dependencies": [],
+    "created_at": "2026-10-10T14:54:15.953502Z",
+    "updated_at": "2026-10-10T14:54:15.953502Z"
   }
 ]
