@@ -1,0 +1,1993 @@
+{
+  "schema_version": 1,
+  "kind": "scoped_active_roadmap",
+  "date": "2026-10-10",
+  "timezone": "Europe/Budapest",
+  "state": "SCOPED_WAVE_0_ACTIVE",
+  "execution_authorized": true,
+  "activate_scheduler": false,
+  "add_line_ok": false,
+  "baseline_code_sha": "85795d880204f096a6a24b3e589d50619aef9c40",
+  "document_worktree_sha": "5e454e2",
+  "decisions": [
+    {
+      "id": "redteam_targets",
+      "state": "confirmed",
+      "source": "explicit_user_reply",
+      "value": "isolated_environments; production requires target_specific_authorization"
+    },
+    {
+      "id": "radar_cadence",
+      "state": "confirmed",
+      "source": "explicit_user_reply",
+      "value": "daily_alert_monitoring; monthly_research; extraordinary_critical_incident_review"
+    },
+    {
+      "id": "data_policy",
+      "state": "confirmed",
+      "source": "explicit_user_reply",
+      "value": "synthetic_tests; minimized_real_data; restricted_sanitized_evidence; no_additional_known_requirement; legal_requirements_per_project_grill"
+    },
+    {
+      "id": "campaign_limits_retention",
+      "state": "pending_per_campaign",
+      "required_fields": [
+        "duration",
+        "requests",
+        "concurrency",
+        "cost",
+        "evidence_size",
+        "storage",
+        "retention",
+        "exclusions"
+      ]
+    },
+    {
+      "id": "quality_performance_limits",
+      "state": "pending_baseline_and_grill",
+      "proposal": "product_specific_SLOs; no_universal_percentage"
+    },
+    {
+      "id": "data_dictionary_and_manuals",
+      "state": "confirmed",
+      "source": "explicit_user_followup",
+      "value": "strategy_and_dictionary_per_module; dictionary_and_manual_per_function; portfolio_semantic_consistency; affected_manuals_updated_each_PR_and_development_round; version_checked_each_query"
+    },
+    {
+      "id": "scope",
+      "state": "confirmed",
+      "source": "explicit_owner_reply_2026-10-09",
+      "value": "darkfac_only; scoped_wave_0_execution"
+    },
+    {
+      "id": "data_classification",
+      "state": "confirmed",
+      "source": "explicit_owner_reply_2026-10-09",
+      "value": [
+        "public",
+        "internal",
+        "confidential",
+        "restricted"
+      ]
+    },
+    {
+      "id": "missing_profile",
+      "state": "confirmed",
+      "source": "explicit_owner_reply_2026-10-09",
+      "value": "block_sensitive_effects_fail_closed"
+    }
+  ],
+  "validation_blockers": [
+    "USR-162",
+    "USR-176",
+    "USR-188"
+  ],
+  "formal_findings": [
+    "USR-170",
+    "USR-171",
+    "USR-172",
+    "USR-173",
+    "USR-174",
+    "USR-176"
+  ],
+  "existing_dependencies": [
+    "USR-134",
+    "USR-136",
+    "USR-162",
+    "USR-163",
+    "USR-164",
+    "USR-165",
+    "USR-166",
+    "USR-167",
+    "USR-168",
+    "USR-169",
+    "USR-175",
+    "USR-188"
+  ],
+  "do_not_duplicate": [
+    "HF-24",
+    "USR-59",
+    "USR-100",
+    "core.catalog",
+    "core.infra.inventory",
+    "core.enterprise",
+    "core.line.stage_review",
+    "core.research"
+  ],
+  "wave_exit_criteria": {
+    "0": "resolved_material_decisions_and_reconciled_baseline",
+    "1": "candidate_bound_fail_closed_checks",
+    "2": "proven_execution_boundary_and_data_policy",
+    "3": "complete_inventory_data_contracts_manuals_equivalence_and_per_PR_drift_checks",
+    "4": "authorized_isolated_attacks_and_remediation_retest",
+    "5": "validated_policy_updates_and_silent_unchanged_monitoring",
+    "6": "factory_and_product_pilot",
+    "7": "system_campaign_and_observed_delivery"
+  },
+  "items": [
+    {
+      "id": "SQ-01",
+      "wave": 0,
+      "title": "Reconciliar baseline, frentes e Grill",
+      "status": "in_progress",
+      "execution_authorized": true,
+      "objective": "Identificar SHA, PRs, claims, consumidores e dependências sem duplicar tickets;resolver decisões materiais antes da SPEC executável",
+      "dependencies": [],
+      "reuse_existing": [
+        "core/line/dogfood.py",
+        "core/demands/store.py",
+        "docs/SECURITY_CODE_QUALITY_ROADMAP_2026-10-08.md"
+      ],
+      "reuse_planned_predecessors": [],
+      "proposed_primary_files": [
+        "docs/plans/security-quality-2026-10-08/DECISIONS.md",
+        "docs/plans/security-quality-2026-10-08/BASELINE.md"
+      ],
+      "acceptance_criteria": [
+        "Todas as decisões têm fonte e nenhuma pendência material é tratada como resposta",
+        "cada frente tem responsável e condição objetiva de retomada"
+      ],
+      "prospective_tests": [
+        "tests/test_planning_baseline.py"
+      ],
+      "validate_commands": [
+        "python -m pytest tests/test_planning_baseline.py -q",
+        "python core/harness/runner.py --quick"
+      ],
+      "validation_commands_status": "prospective focused file; official gate already exists; neither proves feature delivery until implemented",
+      "required_evidence": [
+        "candidate_digest",
+        "policy_and_tool_versions",
+        "positive_and_negative_cases",
+        "independent_review",
+        "official_gate_and_ci",
+        "effect_or_behavior_proof"
+      ],
+      "source_ids": [
+        "R01",
+        "R10"
+      ]
+    },
+    {
+      "id": "SQ-02",
+      "wave": 0,
+      "title": "Perfis de segurança e threat model por projeto",
+      "status": "ready_for_ticket",
+      "execution_authorized": true,
+      "objective": "Definir classificação de dados, ativos, fronteiras e controles aplicáveis para fábrica e produtos",
+      "dependencies": [
+        "SQ-01"
+      ],
+      "reuse_existing": [
+        "core/enterprise/models.py",
+        "core/projects/models.py"
+      ],
+      "reuse_planned_predecessors": [],
+      "proposed_primary_files": [
+        "core/security/models.py",
+        "core/security/profiles.py",
+        "core/security/threat_model.py"
+      ],
+      "acceptance_criteria": [
+        "Perfil ausente bloqueia efeitos sensíveis",
+        "cada ameaça aplicável aponta controle e teste, com N/A justificado"
+      ],
+      "prospective_tests": [
+        "tests/test_security_profiles.py"
+      ],
+      "validate_commands": [
+        "python -m pytest tests/test_security_profiles.py -q",
+        "python core/harness/runner.py --quick"
+      ],
+      "validation_commands_status": "prospective focused file; official gate already exists; neither proves feature delivery until implemented",
+      "required_evidence": [
+        "candidate_digest",
+        "policy_and_tool_versions",
+        "positive_and_negative_cases",
+        "independent_review",
+        "official_gate_and_ci",
+        "effect_or_behavior_proof"
+      ],
+      "source_ids": [
+        "R01",
+        "R04",
+        "R06",
+        "R10"
+      ]
+    },
+    {
+      "id": "SQ-03",
+      "wave": 0,
+      "title": "Planejar evolução legítima da governança",
+      "status": "planned_unreleased",
+      "execution_authorized": false,
+      "objective": "Especificar extensão do portão único e proteção base-owned antes de modificar caminhos protegidos",
+      "dependencies": [
+        "SQ-01"
+      ],
+      "reuse_existing": [
+        "core/orchestrator/guard.py",
+        ".github/workflows/ci.yml",
+        "harness.config.json"
+      ],
+      "reuse_planned_predecessors": [],
+      "proposed_primary_files": [
+        "docs/proposals/security_quality_governance.md",
+        "docs/handoffs/security-quality-governance.md"
+      ],
+      "acceptance_criteria": [
+        "Nenhum candidato controla a própria aprovação ou usa bypass global",
+        "procedimento autônomo autorizado preserva auditoria, revisão independente e rollback"
+      ],
+      "prospective_tests": [
+        "tests/test_security_governance.py"
+      ],
+      "validate_commands": [
+        "python -m pytest tests/test_security_governance.py -q",
+        "python core/harness/runner.py --quick"
+      ],
+      "validation_commands_status": "prospective focused file; official gate already exists; neither proves feature delivery until implemented",
+      "required_evidence": [
+        "candidate_digest",
+        "policy_and_tool_versions",
+        "positive_and_negative_cases",
+        "independent_review",
+        "official_gate_and_ci",
+        "effect_or_behavior_proof"
+      ],
+      "source_ids": [
+        "R01",
+        "R11"
+      ]
+    },
+    {
+      "id": "SQ-04",
+      "wave": 1,
+      "title": "Fortalecer evidências e trilha de auditoria",
+      "status": "planned_unreleased",
+      "execution_authorized": false,
+      "objective": "Reusar auditoria e tornar corrupção, ausência, concorrência e identidade verificáveis",
+      "dependencies": [
+        "SQ-02",
+        "SQ-03",
+        "USR-170"
+      ],
+      "reuse_existing": [
+        "core/enterprise/audit_chain.py",
+        "core/workflow/control_contracts.py"
+      ],
+      "reuse_planned_predecessors": [],
+      "proposed_primary_files": [
+        "core/security/evidence.py",
+        "core/enterprise/audit_chain.py",
+        "core/security/evidence_store.py"
+      ],
+      "acceptance_criteria": [
+        "Evidência inválida ou ilegível bloqueia e nunca vira genesis válida",
+        "checkpoint autenticado e ACL externa ao build são verificados em prova isolada"
+      ],
+      "prospective_tests": [
+        "tests/test_security_evidence.py"
+      ],
+      "validate_commands": [
+        "python -m pytest tests/test_security_evidence.py -q",
+        "python core/harness/runner.py --quick"
+      ],
+      "validation_commands_status": "prospective focused file; official gate already exists; neither proves feature delivery until implemented",
+      "required_evidence": [
+        "candidate_digest",
+        "policy_and_tool_versions",
+        "positive_and_negative_cases",
+        "independent_review",
+        "official_gate_and_ci",
+        "effect_or_behavior_proof"
+      ],
+      "source_ids": [
+        "R01",
+        "R06",
+        "R11"
+      ]
+    },
+    {
+      "id": "SQ-05",
+      "wave": 1,
+      "title": "Ligar revisão e validação ao candidato",
+      "status": "planned_unreleased",
+      "execution_authorized": false,
+      "objective": "Invalidar aprovação após mudança relevante de candidato, política ou corpus;preservar independência de família",
+      "dependencies": [
+        "SQ-04",
+        "USR-171"
+      ],
+      "reuse_existing": [
+        "core/line/stage_review.py",
+        "core/line/stage_integration.py",
+        "core/git/ci_checks.py"
+      ],
+      "reuse_planned_predecessors": [],
+      "proposed_primary_files": [
+        "core/line/stage_review.py",
+        "core/security/evidence_gate.py",
+        "core/line/stage_integration.py"
+      ],
+      "acceptance_criteria": [
+        "Replay só reutiliza evidência do candidato correto",
+        "mudança de árvore exige revisão ou determinação confiável de impacto"
+      ],
+      "prospective_tests": [
+        "tests/test_review_candidate_binding.py"
+      ],
+      "validate_commands": [
+        "python -m pytest tests/test_review_candidate_binding.py -q",
+        "python core/harness/runner.py --quick"
+      ],
+      "validation_commands_status": "prospective focused file; official gate already exists; neither proves feature delivery until implemented",
+      "required_evidence": [
+        "candidate_digest",
+        "policy_and_tool_versions",
+        "positive_and_negative_cases",
+        "independent_review",
+        "official_gate_and_ci",
+        "effect_or_behavior_proof"
+      ],
+      "source_ids": [
+        "R06",
+        "R11"
+      ]
+    },
+    {
+      "id": "SQ-06",
+      "wave": 1,
+      "title": "Scan de segredos e SAST com adapters",
+      "status": "planned_unreleased",
+      "execution_authorized": false,
+      "objective": "Integrar scanner de segredos e SAST fixados, sem duplicar guardas existentes",
+      "dependencies": [
+        "SQ-04"
+      ],
+      "reuse_existing": [
+        "core/git/secret_scan.py",
+        "tests/test_no_tracked_secrets.py"
+      ],
+      "reuse_planned_predecessors": [],
+      "proposed_primary_files": [
+        "core/security/scanners.py",
+        "core/security/secret_adapter.py",
+        "core/security/sast_adapter.py"
+      ],
+      "acceptance_criteria": [
+        "Fixtures negativas são encontradas sem expor valores",
+        "scanner ausente, saída inválida ou corpus vazio não gera PASS"
+      ],
+      "prospective_tests": [
+        "tests/test_security_scanners.py"
+      ],
+      "validate_commands": [
+        "python -m pytest tests/test_security_scanners.py -q",
+        "python core/harness/runner.py --quick"
+      ],
+      "validation_commands_status": "prospective focused file; official gate already exists; neither proves feature delivery until implemented",
+      "required_evidence": [
+        "candidate_digest",
+        "policy_and_tool_versions",
+        "positive_and_negative_cases",
+        "independent_review",
+        "official_gate_and_ci",
+        "effect_or_behavior_proof"
+      ],
+      "source_ids": [
+        "R01",
+        "R06"
+      ]
+    },
+    {
+      "id": "SQ-07",
+      "wave": 1,
+      "title": "Dependências, imagens, IaC e provenance",
+      "status": "planned_unreleased",
+      "execution_authorized": false,
+      "objective": "Definir resolução isolada, lock/digest, SBOM e provenance por artefato",
+      "dependencies": [
+        "SQ-04"
+      ],
+      "reuse_existing": [
+        "requirements.txt",
+        "deploy/dokploy/docker-compose.cloud.yml"
+      ],
+      "reuse_planned_predecessors": [],
+      "proposed_primary_files": [
+        "core/security/supply_chain.py",
+        "core/security/artifact_manifest.py",
+        "core/security/sca_adapter.py",
+        "core/security/iac_adapter.py"
+      ],
+      "acceptance_criteria": [
+        "Artefato e dependências são identificados por digest",
+        "dependência vulnerável/maliciosa de fixture e imagem/config insegura plantada impedem o release conforme política"
+      ],
+      "prospective_tests": [
+        "tests/test_security_supply_chain.py"
+      ],
+      "validate_commands": [
+        "python -m pytest tests/test_security_supply_chain.py -q",
+        "python core/harness/runner.py --quick"
+      ],
+      "validation_commands_status": "prospective focused file; official gate already exists; neither proves feature delivery until implemented",
+      "required_evidence": [
+        "candidate_digest",
+        "policy_and_tool_versions",
+        "positive_and_negative_cases",
+        "independent_review",
+        "official_gate_and_ci",
+        "effect_or_behavior_proof"
+      ],
+      "source_ids": [
+        "R01",
+        "R11",
+        "R13"
+      ]
+    },
+    {
+      "id": "SQ-08",
+      "wave": 1,
+      "title": "Lint, tipos e adoção gradual de qualidade",
+      "status": "planned_unreleased",
+      "execution_authorized": false,
+      "objective": "Homologar Ruff e um checker;separar sintaxe de tipos e aplicar baseline de não regressão",
+      "dependencies": [
+        "SQ-03",
+        "USR-173"
+      ],
+      "reuse_existing": [
+        "harness.config.json",
+        "core/harness/runner.py"
+      ],
+      "reuse_planned_predecessors": [],
+      "proposed_primary_files": [
+        "core/quality/static_checks.py",
+        "quality.config.json",
+        "requirements-quality.txt"
+      ],
+      "acceptance_criteria": [
+        "Erro de tipo público controlado é detectado",
+        "nenhuma exclusão ou ignore amplo é criado pelo candidato para passar o gate"
+      ],
+      "prospective_tests": [
+        "tests/test_quality_static_checks.py"
+      ],
+      "validate_commands": [
+        "python -m pytest tests/test_quality_static_checks.py -q",
+        "python core/harness/runner.py --quick"
+      ],
+      "validation_commands_status": "prospective focused file; official gate already exists; neither proves feature delivery until implemented",
+      "required_evidence": [
+        "candidate_digest",
+        "policy_and_tool_versions",
+        "positive_and_negative_cases",
+        "independent_review",
+        "official_gate_and_ci",
+        "effect_or_behavior_proof"
+      ],
+      "source_ids": [
+        "R01"
+      ]
+    },
+    {
+      "id": "SQ-09",
+      "wave": 2,
+      "title": "Isolamento real por tarefa e provas de fronteira",
+      "status": "planned_unreleased",
+      "execution_authorized": false,
+      "objective": "Definir fronteira Windows/Linux por run e negar recursos fora do escopo",
+      "dependencies": [
+        "SQ-02",
+        "SQ-04",
+        "USR-172",
+        "USR-163"
+      ],
+      "reuse_existing": [
+        "core/execution/sandbox.py",
+        "core/line/agent_cli.py"
+      ],
+      "reuse_planned_predecessors": [],
+      "proposed_primary_files": [
+        "core/execution/sandbox.py",
+        "core/security/execution_policy.py",
+        "core/line/agent_cli.py",
+        "deploy/dokploy/docker-compose.cloud.yml"
+      ],
+      "acceptance_criteria": [
+        "Probes reais em réplica negam caminhos/segredos externos, egress indevido e descendentes após cancelamento",
+        "ausência de sandbox efetiva bloqueia antes do agente"
+      ],
+      "prospective_tests": [
+        "tests/test_execution_security_boundary.py"
+      ],
+      "validate_commands": [
+        "python -m pytest tests/test_execution_security_boundary.py -q",
+        "python core/harness/runner.py --quick"
+      ],
+      "validation_commands_status": "prospective focused file; official gate already exists; neither proves feature delivery until implemented",
+      "required_evidence": [
+        "candidate_digest",
+        "policy_and_tool_versions",
+        "positive_and_negative_cases",
+        "independent_review",
+        "official_gate_and_ci",
+        "effect_or_behavior_proof"
+      ],
+      "source_ids": [
+        "R06",
+        "R07"
+      ]
+    },
+    {
+      "id": "SQ-10",
+      "wave": 2,
+      "title": "Broker de efeitos e identidades separadas",
+      "status": "planned_unreleased",
+      "execution_authorized": false,
+      "objective": "Remover credenciais de deploy/backup do build e mediar efeitos por política;manter autonomia interna de entrega",
+      "dependencies": [
+        "SQ-09"
+      ],
+      "reuse_existing": [
+        "core/git/autonomy.py",
+        "core/line/stage_release.py",
+        "core/orchestrator/deployment_adapter.py"
+      ],
+      "reuse_planned_predecessors": [],
+      "proposed_primary_files": [
+        "core/security/capabilities.py",
+        "core/security/effect_broker.py",
+        "core/git/autonomy.py",
+        "core/line/stage_release.py"
+      ],
+      "acceptance_criteria": [
+        "Capability ligada a identidade/projeto/alvo expira e resiste a replay",
+        "executor autorizado entrega autonomamente após portões sem segredo disponível ao agente"
+      ],
+      "prospective_tests": [
+        "tests/test_effect_broker.py"
+      ],
+      "validate_commands": [
+        "python -m pytest tests/test_effect_broker.py -q",
+        "python core/harness/runner.py --quick"
+      ],
+      "validation_commands_status": "prospective focused file; official gate already exists; neither proves feature delivery until implemented",
+      "required_evidence": [
+        "candidate_digest",
+        "policy_and_tool_versions",
+        "positive_and_negative_cases",
+        "independent_review",
+        "official_gate_and_ci",
+        "effect_or_behavior_proof"
+      ],
+      "source_ids": [
+        "R06",
+        "R11"
+      ]
+    },
+    {
+      "id": "SQ-11",
+      "wave": 2,
+      "title": "Homologação e quarentena de skills",
+      "status": "planned_unreleased",
+      "execution_authorized": false,
+      "objective": "Verificar origem, includes/scripts, licença, digests e capabilities de toda skill;upgrade volta à análise",
+      "dependencies": [
+        "SQ-09",
+        "SQ-10"
+      ],
+      "reuse_existing": [
+        "scripts/sync_skills.py",
+        ".agents/skills/",
+        "core/evolution"
+      ],
+      "reuse_planned_predecessors": [],
+      "proposed_primary_files": [
+        "core/security/skill_manifest.py",
+        "core/security/skill_review.py",
+        "core/security/skill_quarantine.py",
+        "scripts/sync_skills.py"
+      ],
+      "acceptance_criteria": [
+        "Skill alterada ou dependência não homologada fica bloqueada",
+        "fixture maliciosa não altera política, não acessa segredo nem amplia ferramenta"
+      ],
+      "prospective_tests": [
+        "tests/test_skill_supply_chain.py"
+      ],
+      "validate_commands": [
+        "python -m pytest tests/test_skill_supply_chain.py -q",
+        "python core/harness/runner.py --quick"
+      ],
+      "validation_commands_status": "prospective focused file; official gate already exists; neither proves feature delivery until implemented",
+      "required_evidence": [
+        "candidate_digest",
+        "policy_and_tool_versions",
+        "positive_and_negative_cases",
+        "independent_review",
+        "official_gate_and_ci",
+        "effect_or_behavior_proof"
+      ],
+      "source_ids": [
+        "R07",
+        "R08"
+      ]
+    },
+    {
+      "id": "SQ-12",
+      "wave": 2,
+      "title": "Confiança de MCP, memória e conteúdo externo",
+      "status": "planned_unreleased",
+      "execution_authorized": false,
+      "objective": "Separar instruções de dados, vincular chamadas a capacidades e isolar memória por projeto",
+      "dependencies": [
+        "SQ-09",
+        "SQ-10"
+      ],
+      "reuse_existing": [
+        "core/knowledge",
+        "core/line/agent_cli.py"
+      ],
+      "reuse_planned_predecessors": [],
+      "proposed_primary_files": [
+        "core/security/tool_policy.py",
+        "core/security/context_provenance.py",
+        "core/security/memory_policy.py"
+      ],
+      "acceptance_criteria": [
+        "Entrada externa não concede autorização",
+        "corpus de injection e contaminação entre projetos não executa efeito indevido"
+      ],
+      "prospective_tests": [
+        "tests/test_agent_tool_context_security.py"
+      ],
+      "validate_commands": [
+        "python -m pytest tests/test_agent_tool_context_security.py -q",
+        "python core/harness/runner.py --quick"
+      ],
+      "validation_commands_status": "prospective focused file; official gate already exists; neither proves feature delivery until implemented",
+      "required_evidence": [
+        "candidate_digest",
+        "policy_and_tool_versions",
+        "positive_and_negative_cases",
+        "independent_review",
+        "official_gate_and_ci",
+        "effect_or_behavior_proof"
+      ],
+      "source_ids": [
+        "R06",
+        "R07",
+        "R09"
+      ]
+    },
+    {
+      "id": "SQ-13",
+      "wave": 2,
+      "title": "Proteção de dados nos caminhos reais",
+      "status": "planned_unreleased",
+      "execution_authorized": false,
+      "objective": "Aplicar minimização, residência e política de exportação a inferência, logs, backups e release;definir matriz por projeto",
+      "dependencies": [
+        "SQ-02",
+        "SQ-10",
+        "USR-174"
+      ],
+      "reuse_existing": [
+        "core/enterprise/residency.py",
+        "core/router",
+        "core/line/stage_release.py"
+      ],
+      "reuse_planned_predecessors": [],
+      "proposed_primary_files": [
+        "core/enterprise/residency.py",
+        "core/security/data_policy.py",
+        "core/line/agent_cli.py",
+        "core/line/stage_release.py"
+      ],
+      "acceptance_criteria": [
+        "Rota não permitida e política ilegível bloqueiam efeito real",
+        "dados sintéticos não atravessam projeto/tenant ou saem em logs/exportações indevidas"
+      ],
+      "prospective_tests": [
+        "tests/test_data_policy_enforcement.py"
+      ],
+      "validate_commands": [
+        "python -m pytest tests/test_data_policy_enforcement.py -q",
+        "python core/harness/runner.py --quick"
+      ],
+      "validation_commands_status": "prospective focused file; official gate already exists; neither proves feature delivery until implemented",
+      "required_evidence": [
+        "candidate_digest",
+        "policy_and_tool_versions",
+        "positive_and_negative_cases",
+        "independent_review",
+        "official_gate_and_ci",
+        "effect_or_behavior_proof"
+      ],
+      "source_ids": [
+        "R01",
+        "R03",
+        "R06"
+      ]
+    },
+    {
+      "id": "SQ-14",
+      "wave": 3,
+      "title": "Inventário estático completo de Python",
+      "status": "planned_unreleased",
+      "execution_authorized": false,
+      "objective": "Extrair arquivos, funções, métodos, classes e assinaturas sem importar candidato",
+      "dependencies": [
+        "SQ-02",
+        "SQ-04"
+      ],
+      "reuse_existing": [
+        "core/catalog/models.py",
+        "core/infra/inventory.py"
+      ],
+      "reuse_planned_predecessors": [],
+      "proposed_primary_files": [
+        "core/quality/inventory_models.py",
+        "core/quality/python_inventory.py",
+        "core/quality/inventory_store.py"
+      ],
+      "acceptance_criteria": [
+        "Manifesto reconcilia todos os arquivos elegíveis e excluídos",
+        "assinaturas têm origem/digest e símbolos dinâmicos desconhecidos ficam explícitos"
+      ],
+      "prospective_tests": [
+        "tests/test_python_code_inventory.py"
+      ],
+      "validate_commands": [
+        "python -m pytest tests/test_python_code_inventory.py -q",
+        "python core/harness/runner.py --quick"
+      ],
+      "validation_commands_status": "prospective focused file; official gate already exists; neither proves feature delivery until implemented",
+      "required_evidence": [
+        "candidate_digest",
+        "policy_and_tool_versions",
+        "positive_and_negative_cases",
+        "independent_review",
+        "official_gate_and_ci",
+        "effect_or_behavior_proof"
+      ],
+      "source_ids": [
+        "R01"
+      ]
+    },
+    {
+      "id": "SQ-15",
+      "wave": 3,
+      "title": "Inventário de frontend, scripts e produtos",
+      "status": "planned_unreleased",
+      "execution_authorized": false,
+      "objective": "Estender por linguagem para rotas, CLI, jobs, eventos e serviços;ligar ao catálogo e inventário de infraestrutura",
+      "dependencies": [
+        "SQ-14"
+      ],
+      "reuse_existing": [
+        "core/projects",
+        "core/adoption",
+        "core/catalog"
+      ],
+      "reuse_planned_predecessors": [],
+      "proposed_primary_files": [
+        "core/quality/inventory_adapters.py",
+        "core/quality/entrypoints.py",
+        "core/quality/component_links.py"
+      ],
+      "acceptance_criteria": [
+        "Nenhum stack adotado é omitido silenciosamente",
+        "entrypoints e componentes possuem IDs, fonte, permissões e estados de análise conhecidos"
+      ],
+      "prospective_tests": [
+        "tests/test_polyglot_code_inventory.py"
+      ],
+      "validate_commands": [
+        "python -m pytest tests/test_polyglot_code_inventory.py -q",
+        "python core/harness/runner.py --quick"
+      ],
+      "validation_commands_status": "prospective focused file; official gate already exists; neither proves feature delivery until implemented",
+      "required_evidence": [
+        "candidate_digest",
+        "policy_and_tool_versions",
+        "positive_and_negative_cases",
+        "independent_review",
+        "official_gate_and_ci",
+        "effect_or_behavior_proof"
+      ],
+      "source_ids": [
+        "R01",
+        "R04"
+      ]
+    },
+    {
+      "id": "SQ-16",
+      "wave": 3,
+      "title": "Documentação e contratos de arquitetura",
+      "status": "planned_unreleased",
+      "execution_authorized": false,
+      "objective": "Gerar índice e documentar responsabilidades/invariantes;homologar Import Linter",
+      "dependencies": [
+        "SQ-08",
+        "SQ-14",
+        "SQ-15"
+      ],
+      "reuse_existing": [
+        "docs/ARCHITECTURE.md",
+        "core/catalog"
+      ],
+      "reuse_planned_predecessors": [],
+      "proposed_primary_files": [
+        "core/quality/architecture_rules.py",
+        "core/quality/documentation.py",
+        "architecture.contracts.toml"
+      ],
+      "acceptance_criteria": [
+        "Violação de camada em fixture é detectada",
+        "API pública e inventário mudam juntos sem documentação de símbolos inexistentes"
+      ],
+      "prospective_tests": [
+        "tests/test_architecture_documentation.py"
+      ],
+      "validate_commands": [
+        "python -m pytest tests/test_architecture_documentation.py -q",
+        "python core/harness/runner.py --quick"
+      ],
+      "validation_commands_status": "prospective focused file; official gate already exists; neither proves feature delivery until implemented",
+      "required_evidence": [
+        "candidate_digest",
+        "policy_and_tool_versions",
+        "positive_and_negative_cases",
+        "independent_review",
+        "official_gate_and_ci",
+        "effect_or_behavior_proof"
+      ],
+      "source_ids": [
+        "R01"
+      ]
+    },
+    {
+      "id": "SQ-17",
+      "wave": 3,
+      "title": "Etapa obrigatória de avaliação de refatoração",
+      "status": "planned_unreleased",
+      "execution_authorized": false,
+      "objective": "Aplicar avaliação antes/depois do ticket e consolidação por módulo;resultado justificado quando nenhuma transformação for necessária",
+      "dependencies": [
+        "SQ-05",
+        "SQ-08",
+        "SQ-16",
+        "SQ-33",
+        "SQ-36"
+      ],
+      "reuse_existing": [
+        "core/line/stage_build.py",
+        "core/line/stage_review.py",
+        "run_ticket.py"
+      ],
+      "reuse_planned_predecessors": [],
+      "proposed_primary_files": [
+        "core/quality/refactoring.py",
+        "core/line/stage_build.py",
+        "core/line/stage_review.py",
+        "run_ticket.py"
+      ],
+      "acceptance_criteria": [
+        "Todo caminho de desenvolvimento emite assessment ligado ao candidato",
+        "duplicação/atalho identificado recebe correção ou dívida explícita, sem no-op autodeclarado"
+      ],
+      "prospective_tests": [
+        "tests/test_refactoring_lifecycle.py"
+      ],
+      "validate_commands": [
+        "python -m pytest tests/test_refactoring_lifecycle.py -q",
+        "python core/harness/runner.py --quick"
+      ],
+      "validation_commands_status": "prospective focused file; official gate already exists; neither proves feature delivery until implemented",
+      "required_evidence": [
+        "candidate_digest",
+        "policy_and_tool_versions",
+        "positive_and_negative_cases",
+        "independent_review",
+        "official_gate_and_ci",
+        "effect_or_behavior_proof"
+      ],
+      "source_ids": [
+        "R01"
+      ]
+    },
+    {
+      "id": "SQ-18",
+      "wave": 3,
+      "title": "Piloto de consolidação e performance",
+      "status": "planned_unreleased",
+      "execution_authorized": false,
+      "objective": "Escolher hotspot ativo por churn/incidentes e responsabilidade;caracterizar comportamento e medir efeito",
+      "dependencies": [
+        "SQ-16",
+        "SQ-17",
+        "SQ-33",
+        "SQ-36",
+        "USR-165"
+      ],
+      "reuse_existing": [
+        "core/line"
+      ],
+      "reuse_planned_predecessors": [
+        "core/quality"
+      ],
+      "proposed_primary_files": [
+        "core/quality/hotspots.py",
+        "core/quality/benchmark.py",
+        "docs/plans/security-quality-2026-10-08/PILOT_REPORT.md"
+      ],
+      "acceptance_criteria": [
+        "Contratos, estado e outputs antes/depois são equivalentes",
+        "SLO de performance não regride e melhoria tem medida, não promessa universal"
+      ],
+      "prospective_tests": [
+        "tests/test_refactoring_equivalence.py"
+      ],
+      "validate_commands": [
+        "python -m pytest tests/test_refactoring_equivalence.py -q",
+        "python core/harness/runner.py --quick"
+      ],
+      "validation_commands_status": "prospective focused file; official gate already exists; neither proves feature delivery until implemented",
+      "required_evidence": [
+        "candidate_digest",
+        "policy_and_tool_versions",
+        "positive_and_negative_cases",
+        "independent_review",
+        "official_gate_and_ci",
+        "effect_or_behavior_proof"
+      ],
+      "source_ids": [
+        "R01"
+      ]
+    },
+    {
+      "id": "SQ-19",
+      "wave": 4,
+      "title": "Autorização e contrato de campanha",
+      "status": "planned_unreleased",
+      "execution_authorized": false,
+      "objective": "Vincular ownership, alvo, técnicas, exclusões e budgets a candidato;produção exige autorização individual",
+      "dependencies": [
+        "SQ-02",
+        "SQ-04",
+        "SQ-09",
+        "SQ-10"
+      ],
+      "reuse_existing": [
+        "core/projects/models.py",
+        "core/line/store_selection.py"
+      ],
+      "reuse_planned_predecessors": [],
+      "proposed_primary_files": [
+        "core/security/redteam_models.py",
+        "core/security/campaign_policy.py",
+        "core/security/campaign_store.py"
+      ],
+      "acceptance_criteria": [
+        "Alvo não autorizado, redirect fora de escopo ou limite ausente bloqueia",
+        "red team não pode editar a própria autorização"
+      ],
+      "prospective_tests": [
+        "tests/test_redteam_authorization.py"
+      ],
+      "validate_commands": [
+        "python -m pytest tests/test_redteam_authorization.py -q",
+        "python core/harness/runner.py --quick"
+      ],
+      "validation_commands_status": "prospective focused file; official gate already exists; neither proves feature delivery until implemented",
+      "required_evidence": [
+        "candidate_digest",
+        "policy_and_tool_versions",
+        "positive_and_negative_cases",
+        "independent_review",
+        "official_gate_and_ci",
+        "effect_or_behavior_proof"
+      ],
+      "source_ids": [
+        "R04",
+        "R05",
+        "R06"
+      ]
+    },
+    {
+      "id": "SQ-20",
+      "wave": 4,
+      "title": "Laboratório efêmero e interruptor",
+      "status": "planned_unreleased",
+      "execution_authorized": false,
+      "objective": "Criar réplica descartável com dados sintéticos e isolamento de produção;testar interrupção e limpeza",
+      "dependencies": [
+        "SQ-19",
+        "USR-163",
+        "USR-166"
+      ],
+      "reuse_existing": [
+        "core/infra/backup_service.py",
+        "core/line/cancellation.py"
+      ],
+      "reuse_planned_predecessors": [],
+      "proposed_primary_files": [
+        "core/security/lab.py",
+        "core/security/campaign_control.py",
+        "deploy/security-lab/compose.yml"
+      ],
+      "acceptance_criteria": [
+        "Probes negam acesso a produção/terceiros e credenciais reais",
+        "cancelamento interrompe tráfego/processos e restauração/limpeza tem prova"
+      ],
+      "prospective_tests": [
+        "tests/test_redteam_lab.py"
+      ],
+      "validate_commands": [
+        "python -m pytest tests/test_redteam_lab.py -q",
+        "python core/harness/runner.py --quick"
+      ],
+      "validation_commands_status": "prospective focused file; official gate already exists; neither proves feature delivery until implemented",
+      "required_evidence": [
+        "candidate_digest",
+        "policy_and_tool_versions",
+        "positive_and_negative_cases",
+        "independent_review",
+        "official_gate_and_ci",
+        "effect_or_behavior_proof"
+      ],
+      "source_ids": [
+        "R05",
+        "R06"
+      ]
+    },
+    {
+      "id": "SQ-21",
+      "wave": 4,
+      "title": "DAST autenticado e lógica de negócio",
+      "status": "planned_unreleased",
+      "execution_authorized": false,
+      "objective": "Usar ZAP e fixtures próprias para sessões, roles, tenants, autorização de objetos e abuso de negócio",
+      "dependencies": [
+        "SQ-20"
+      ],
+      "reuse_existing": [
+        "core/projects"
+      ],
+      "reuse_planned_predecessors": [
+        "core/security/scanners.py"
+      ],
+      "proposed_primary_files": [
+        "core/security/zap_adapter.py",
+        "core/security/web_scenarios.py",
+        "core/security/authorization_oracles.py"
+      ],
+      "acceptance_criteria": [
+        "Vulnerabilidade semeada em fixture é detectada",
+        "matriz de papéis/tenants e endpoints aplicáveis é exercitada, scanner sem cobertura não passa"
+      ],
+      "prospective_tests": [
+        "tests/test_redteam_web.py"
+      ],
+      "validate_commands": [
+        "python -m pytest tests/test_redteam_web.py -q",
+        "python core/harness/runner.py --quick"
+      ],
+      "validation_commands_status": "prospective focused file; official gate already exists; neither proves feature delivery until implemented",
+      "required_evidence": [
+        "candidate_digest",
+        "policy_and_tool_versions",
+        "positive_and_negative_cases",
+        "independent_review",
+        "official_gate_and_ci",
+        "effect_or_behavior_proof"
+      ],
+      "source_ids": [
+        "R04",
+        "R05"
+      ]
+    },
+    {
+      "id": "SQ-22",
+      "wave": 4,
+      "title": "Campanhas sobre agentes e GenAI",
+      "status": "planned_unreleased",
+      "execution_authorized": false,
+      "objective": "Homologar PyRIT ou garak e corpus de injection, memória/skills, tool abuse e exfiltração sintética",
+      "dependencies": [
+        "SQ-11",
+        "SQ-12",
+        "SQ-20"
+      ],
+      "reuse_existing": [],
+      "reuse_planned_predecessors": [
+        "core/security/campaign_policy.py"
+      ],
+      "proposed_primary_files": [
+        "core/security/genai_adapter.py",
+        "core/security/agent_scenarios.py",
+        "core/security/attack_corpus.py"
+      ],
+      "acceptance_criteria": [
+        "Corpus versionado identifica violações intencionais do laboratório",
+        "nenhum cenário promove capacidade, publica resultado ou envia dados para sink externo"
+      ],
+      "prospective_tests": [
+        "tests/test_redteam_agentic.py"
+      ],
+      "validate_commands": [
+        "python -m pytest tests/test_redteam_agentic.py -q",
+        "python core/harness/runner.py --quick"
+      ],
+      "validation_commands_status": "prospective focused file; official gate already exists; neither proves feature delivery until implemented",
+      "required_evidence": [
+        "candidate_digest",
+        "policy_and_tool_versions",
+        "positive_and_negative_cases",
+        "independent_review",
+        "official_gate_and_ci",
+        "effect_or_behavior_proof"
+      ],
+      "source_ids": [
+        "R06",
+        "R07",
+        "R08",
+        "R09",
+        "R12",
+        "R14",
+        "R15"
+      ]
+    },
+    {
+      "id": "SQ-23",
+      "wave": 4,
+      "title": "Marcos, remediação e reteste",
+      "status": "planned_unreleased",
+      "execution_authorized": false,
+      "objective": "Disparar em módulo estável e antes de conclusão;triagem gera ticket e reteste independente por candidato",
+      "dependencies": [
+        "SQ-05",
+        "SQ-18",
+        "SQ-21",
+        "SQ-22",
+        "USR-134",
+        "USR-167"
+      ],
+      "reuse_existing": [
+        "core/line/stage_integration.py",
+        "core/line/stage_release.py",
+        "core/demands/store.py"
+      ],
+      "reuse_planned_predecessors": [],
+      "proposed_primary_files": [
+        "core/security/milestones.py",
+        "core/security/findings.py",
+        "core/security/retest.py",
+        "core/line/stage_release.py"
+      ],
+      "acceptance_criteria": [
+        "Achado impeditivo impede conclusão e fecha apenas com reteste",
+        "mudança de candidato invalida ou exige revalidação por impacto, sem campanha inteira em cada PR"
+      ],
+      "prospective_tests": [
+        "tests/test_security_milestones.py"
+      ],
+      "validate_commands": [
+        "python -m pytest tests/test_security_milestones.py -q",
+        "python core/harness/runner.py --quick"
+      ],
+      "validation_commands_status": "prospective focused file; official gate already exists; neither proves feature delivery until implemented",
+      "required_evidence": [
+        "candidate_digest",
+        "policy_and_tool_versions",
+        "positive_and_negative_cases",
+        "independent_review",
+        "official_gate_and_ci",
+        "effect_or_behavior_proof"
+      ],
+      "source_ids": [
+        "R01",
+        "R04",
+        "R05",
+        "R06"
+      ]
+    },
+    {
+      "id": "SQ-24",
+      "wave": 5,
+      "title": "Radar e ingestão de fontes oficiais",
+      "status": "planned_unreleased",
+      "execution_authorized": false,
+      "objective": "Reusar pesquisa e jobs existentes;monitoramento diário, pesquisa mensal e revisão extraordinária em incidentes críticos, conforme resposta explícita",
+      "dependencies": [
+        "SQ-02",
+        "SQ-04"
+      ],
+      "reuse_existing": [
+        "core/research",
+        "core/learning"
+      ],
+      "reuse_planned_predecessors": [],
+      "proposed_primary_files": [
+        "core/research/security_radar.py",
+        "core/security/advisory_mapping.py",
+        "core/security/source_registry.py"
+      ],
+      "acceptance_criteria": [
+        "Fonte tem URL, versão, data e status draft/final",
+        "indisponibilidade não gera atualização inventada e advisory só é acionável após vínculo a ativos"
+      ],
+      "prospective_tests": [
+        "tests/test_security_radar.py"
+      ],
+      "validate_commands": [
+        "python -m pytest tests/test_security_radar.py -q",
+        "python core/harness/runner.py --quick"
+      ],
+      "validation_commands_status": "prospective focused file; official gate already exists; neither proves feature delivery until implemented",
+      "required_evidence": [
+        "candidate_digest",
+        "policy_and_tool_versions",
+        "positive_and_negative_cases",
+        "independent_review",
+        "official_gate_and_ci",
+        "effect_or_behavior_proof"
+      ],
+      "source_ids": [
+        "R01",
+        "R02",
+        "R13"
+      ]
+    },
+    {
+      "id": "SQ-25",
+      "wave": 5,
+      "title": "Atualização validada de controles, skill e corpus",
+      "status": "planned_unreleased",
+      "execution_authorized": false,
+      "objective": "Transformar insight em proposta, casos negativos, revisão e entrega canônica;sincronizar espelho após aprovação",
+      "dependencies": [
+        "SQ-11",
+        "SQ-23",
+        "SQ-24"
+      ],
+      "reuse_existing": [
+        "core/evolution",
+        ".agents/skills",
+        "scripts/sync_skills.py"
+      ],
+      "reuse_planned_predecessors": [],
+      "proposed_primary_files": [
+        "core/security/control_updates.py",
+        "core/security/update_validation.py",
+        ".agents/skills/20-secure-development/SKILL.md",
+        ".claude/skills/20-secure-development/SKILL.md"
+      ],
+      "acceptance_criteria": [
+        "Web/skill não altera diretamente permissões",
+        "controle e corpus são testados e rollback comprovado, conteúdo das skills acompanha módulo real"
+      ],
+      "prospective_tests": [
+        "tests/test_security_control_updates.py"
+      ],
+      "validate_commands": [
+        "python -m pytest tests/test_security_control_updates.py -q",
+        "python core/harness/runner.py --quick"
+      ],
+      "validation_commands_status": "prospective focused file; official gate already exists; neither proves feature delivery until implemented",
+      "required_evidence": [
+        "candidate_digest",
+        "policy_and_tool_versions",
+        "positive_and_negative_cases",
+        "independent_review",
+        "official_gate_and_ci",
+        "effect_or_behavior_proof"
+      ],
+      "source_ids": [
+        "R01",
+        "R02",
+        "R06"
+      ]
+    },
+    {
+      "id": "SQ-26",
+      "wave": 5,
+      "title": "Operação de achados e resposta",
+      "status": "planned_unreleased",
+      "execution_authorized": false,
+      "objective": "Definir responsáveis, triagem, retenção e alertas sanitizados;rotacionar/revogar por executor autorizado quando aplicável",
+      "dependencies": [
+        "SQ-13",
+        "SQ-23",
+        "SQ-24"
+      ],
+      "reuse_existing": [
+        "core/notifications",
+        "core/infra/backup_cron.py"
+      ],
+      "reuse_planned_predecessors": [],
+      "proposed_primary_files": [
+        "core/security/incident_policy.py",
+        "core/security/finding_lifecycle.py",
+        "core/security/notification_view.py"
+      ],
+      "acceptance_criteria": [
+        "Falhas críticas geram ação rastreável e evidência preservada",
+        "alerta não contém segredo/payload e pesquisa sem novidade acionável permanece silenciosa"
+      ],
+      "prospective_tests": [
+        "tests/test_security_incident_lifecycle.py"
+      ],
+      "validate_commands": [
+        "python -m pytest tests/test_security_incident_lifecycle.py -q",
+        "python core/harness/runner.py --quick"
+      ],
+      "validation_commands_status": "prospective focused file; official gate already exists; neither proves feature delivery until implemented",
+      "required_evidence": [
+        "candidate_digest",
+        "policy_and_tool_versions",
+        "positive_and_negative_cases",
+        "independent_review",
+        "official_gate_and_ci",
+        "effect_or_behavior_proof"
+      ],
+      "source_ids": [
+        "R01",
+        "R06",
+        "R13"
+      ]
+    },
+    {
+      "id": "SQ-27",
+      "wave": 6,
+      "title": "Adoção universal em fábrica e produtos",
+      "status": "planned_unreleased",
+      "execution_authorized": false,
+      "objective": "Aplicar controles mínimos a greenfield/brownfield e produtos;Enterprise complementa sem retirar baseline",
+      "dependencies": [
+        "SQ-13",
+        "SQ-17",
+        "SQ-23",
+        "SQ-25",
+        "SQ-32",
+        "SQ-36",
+        "SQ-37"
+      ],
+      "reuse_existing": [
+        "core/adoption",
+        "core/archetypes",
+        "core/catalog"
+      ],
+      "reuse_planned_predecessors": [],
+      "proposed_primary_files": [
+        "core/adoption/security_profile.py",
+        "core/archetypes/security_controls.py",
+        "core/catalog/security_metadata.py"
+      ],
+      "acceptance_criteria": [
+        "Novo produto não inicia execução sensível sem perfil/controles",
+        "projeto legado tem migração e dívida rastreável, nenhum cliente é excluído por não ser Enterprise"
+      ],
+      "prospective_tests": [
+        "tests/test_security_adoption.py"
+      ],
+      "validate_commands": [
+        "python -m pytest tests/test_security_adoption.py -q",
+        "python core/harness/runner.py --quick"
+      ],
+      "validation_commands_status": "prospective focused file; official gate already exists; neither proves feature delivery until implemented",
+      "required_evidence": [
+        "candidate_digest",
+        "policy_and_tool_versions",
+        "positive_and_negative_cases",
+        "independent_review",
+        "official_gate_and_ci",
+        "effect_or_behavior_proof"
+      ],
+      "source_ids": [
+        "R01",
+        "R04",
+        "R06"
+      ]
+    },
+    {
+      "id": "SQ-28",
+      "wave": 6,
+      "title": "Visibilidade de evidências e bloqueios no Hub",
+      "status": "planned_unreleased",
+      "execution_authorized": false,
+      "objective": "Mostrar cobertura aplicável, validade/candidato, achados sanitizados e próxima ação;reusar telemetria",
+      "dependencies": [
+        "SQ-04",
+        "SQ-14",
+        "SQ-23",
+        "SQ-26",
+        "SQ-37",
+        "USR-164"
+      ],
+      "reuse_existing": [
+        "core/line/local_progress.py",
+        "hub/backend/service.py"
+      ],
+      "reuse_planned_predecessors": [],
+      "proposed_primary_files": [
+        "hub/backend/service.py",
+        "hub/backend/api.py",
+        "hub/frontend/security.js",
+        "core/security/summary_view.py"
+      ],
+      "acceptance_criteria": [
+        "Hub distingue PASS, blocked, incomplete e expired",
+        "download de evidência restrita exige autorização e telas não revelam dados ofensivos ou segredos"
+      ],
+      "prospective_tests": [
+        "tests/test_security_hub.py"
+      ],
+      "validate_commands": [
+        "python -m pytest tests/test_security_hub.py -q",
+        "python core/harness/runner.py --quick"
+      ],
+      "validation_commands_status": "prospective focused file; official gate already exists; neither proves feature delivery until implemented",
+      "required_evidence": [
+        "candidate_digest",
+        "policy_and_tool_versions",
+        "positive_and_negative_cases",
+        "independent_review",
+        "official_gate_and_ci",
+        "effect_or_behavior_proof"
+      ],
+      "source_ids": [
+        "R06"
+      ]
+    },
+    {
+      "id": "SQ-29",
+      "wave": 6,
+      "title": "Piloto DarkFac e produto isolado",
+      "status": "planned_unreleased",
+      "execution_authorized": false,
+      "objective": "Exercitar fábrica e um produto não comercial em réplica;provar dado, refatoração, ataques, reparo e reteste",
+      "dependencies": [
+        "SQ-18",
+        "SQ-27",
+        "SQ-28",
+        "SQ-37",
+        "SQ-38",
+        "USR-136",
+        "USR-165",
+        "USR-166",
+        "USR-167"
+      ],
+      "reuse_existing": [
+        "core/line",
+        "core/adoption",
+        "core/infra"
+      ],
+      "reuse_planned_predecessors": [],
+      "proposed_primary_files": [
+        "docs/plans/security-quality-2026-10-08/PILOT_ACCEPTANCE.md",
+        "tests/security_lab/pilot_manifest.json"
+      ],
+      "acceptance_criteria": [
+        "Uma falha plantada vira correção e reteste no ciclo autônomo",
+        "custos, tempos, cobertura e intervenções são observados sem efeitos em produção"
+      ],
+      "prospective_tests": [
+        "tests/test_security_quality_pilot.py"
+      ],
+      "validate_commands": [
+        "python -m pytest tests/test_security_quality_pilot.py -q",
+        "python core/harness/runner.py --quick"
+      ],
+      "validation_commands_status": "prospective focused file; official gate already exists; neither proves feature delivery until implemented",
+      "required_evidence": [
+        "candidate_digest",
+        "policy_and_tool_versions",
+        "positive_and_negative_cases",
+        "independent_review",
+        "official_gate_and_ci",
+        "effect_or_behavior_proof"
+      ],
+      "source_ids": [
+        "R01",
+        "R04",
+        "R05",
+        "R06"
+      ]
+    },
+    {
+      "id": "SQ-30",
+      "wave": 7,
+      "title": "Aceite integrado e prontidão para operação",
+      "status": "planned_unreleased",
+      "execution_authorized": false,
+      "objective": "Concluir inventário, consolidação e campanha do sistema;verificar efeitos reais da implementação futura e operação do radar",
+      "dependencies": [
+        "SQ-29",
+        "SQ-38"
+      ],
+      "reuse_existing": [
+        "core/git/autonomy.py"
+      ],
+      "reuse_planned_predecessors": [
+        "core/security",
+        "core/quality"
+      ],
+      "proposed_primary_files": [
+        "docs/plans/security-quality-2026-10-08/FINAL_ACCEPTANCE.md",
+        "docs/runbooks/security_quality.md"
+      ],
+      "acceptance_criteria": [
+        "Nenhum achado impeditivo permanece sem mitigação validada",
+        "CI, candidato, merge/deploy/smoke e plano de operação estão vinculados, com risco residual explícito"
+      ],
+      "prospective_tests": [
+        "tests/test_security_quality_acceptance.py"
+      ],
+      "validate_commands": [
+        "python -m pytest tests/test_security_quality_acceptance.py -q",
+        "python core/harness/runner.py --quick"
+      ],
+      "validation_commands_status": "prospective focused file; official gate already exists; neither proves feature delivery until implemented",
+      "required_evidence": [
+        "candidate_digest",
+        "policy_and_tool_versions",
+        "positive_and_negative_cases",
+        "independent_review",
+        "official_gate_and_ci",
+        "effect_or_behavior_proof"
+      ],
+      "source_ids": [
+        "R01",
+        "R04",
+        "R05",
+        "R06",
+        "R11"
+      ]
+    },
+    {
+      "id": "SQ-31",
+      "wave": 0,
+      "title": "Vocabulário semântico e nomenclatura do portfólio",
+      "status": "planned_unreleased",
+      "execution_authorized": false,
+      "objective": "Definir IDs estáveis, namespaces, termos, aliases e nomes de código por linguagem;separar significado, nome físico e permissão de acesso",
+      "dependencies": [
+        "SQ-01",
+        "SQ-02"
+      ],
+      "reuse_existing": [
+        "core/catalog/models.py",
+        "core/projects/models.py"
+      ],
+      "reuse_planned_predecessors": [],
+      "proposed_primary_files": [
+        "core/quality/semantic_models.py",
+        "core/quality/semantic_registry.py",
+        "docs/standards/data_naming.md"
+      ],
+      "acceptance_criteria": [
+        "Conceitos homônimos distintos não colidem e aliases têm destino/versionamento",
+        "registro compartilha metadados autorizados sem dados de outros clientes"
+      ],
+      "prospective_tests": [
+        "tests/test_portfolio_semantic_registry.py"
+      ],
+      "validate_commands": [
+        "python -m pytest tests/test_portfolio_semantic_registry.py -q",
+        "python core/harness/runner.py --quick"
+      ],
+      "validation_commands_status": "prospective focused file; official gate already exists; neither proves feature delivery until implemented",
+      "required_evidence": [
+        "candidate_digest",
+        "policy_and_tool_versions",
+        "positive_and_negative_cases",
+        "independent_review",
+        "official_gate_and_ci",
+        "effect_or_behavior_proof"
+      ],
+      "source_ids": [
+        "R16",
+        "R17",
+        "R18"
+      ]
+    },
+    {
+      "id": "SQ-32",
+      "wave": 3,
+      "title": "Estratégia e contrato de dados de cada módulo",
+      "status": "planned_unreleased",
+      "execution_authorized": false,
+      "objective": "Documentar finalidade, origem, fluxo, classificação, qualidade, retenção e consumidores;homologar perfil ODCS para datasets e schemas existentes para interfaces",
+      "dependencies": [
+        "SQ-13",
+        "SQ-14",
+        "SQ-31"
+      ],
+      "reuse_existing": [
+        "core/enterprise/policy.py",
+        "core/enterprise/residency.py",
+        "core/catalog"
+      ],
+      "reuse_planned_predecessors": [],
+      "proposed_primary_files": [
+        "core/quality/data_contract_models.py",
+        "core/quality/module_data_strategy.py",
+        "core/quality/data_contract_adapter.py",
+        "docs/templates/module_data_strategy.md"
+      ],
+      "acceptance_criteria": [
+        "Todo módulo possui estratégia validada ou declara ausência de persistência com justificativa",
+        "teste sintético rejeita dados inválidos e acesso proibido, sem conectar a produção"
+      ],
+      "prospective_tests": [
+        "tests/test_module_data_contract.py"
+      ],
+      "validate_commands": [
+        "python -m pytest tests/test_module_data_contract.py -q",
+        "python core/harness/runner.py --quick"
+      ],
+      "validation_commands_status": "prospective focused file; official gate already exists; neither proves feature delivery until implemented",
+      "required_evidence": [
+        "candidate_digest",
+        "policy_and_tool_versions",
+        "positive_and_negative_cases",
+        "independent_review",
+        "official_gate_and_ci",
+        "effect_or_behavior_proof"
+      ],
+      "source_ids": [
+        "R16",
+        "R18",
+        "R21"
+      ]
+    },
+    {
+      "id": "SQ-33",
+      "wave": 3,
+      "title": "Dicionário por função e compatibilidade entre módulos",
+      "status": "planned_unreleased",
+      "execution_authorized": false,
+      "objective": "Ligar parâmetros, retornos, campos, eventos e variáveis semânticas ao vocabulário;comparar contratos produtor/consumidor e mudanças incompatíveis",
+      "dependencies": [
+        "SQ-08",
+        "SQ-15",
+        "SQ-32"
+      ],
+      "reuse_existing": [
+        "core/catalog"
+      ],
+      "reuse_planned_predecessors": [
+        "core/quality/inventory_models.py"
+      ],
+      "proposed_primary_files": [
+        "core/quality/data_dictionary.py",
+        "core/quality/symbol_data_bindings.py",
+        "core/quality/data_compatibility.py",
+        "core/quality/data_lineage.py"
+      ],
+      "acceptance_criteria": [
+        "Todas as funções do manifesto têm dicionário de entradas/saídas/efeitos e relações verificadas",
+        "fixture com unidade, nullability ou significado divergente falha mesmo quando o tipo coincide"
+      ],
+      "prospective_tests": [
+        "tests/test_symbol_data_dictionary.py"
+      ],
+      "validate_commands": [
+        "python -m pytest tests/test_symbol_data_dictionary.py -q",
+        "python core/harness/runner.py --quick"
+      ],
+      "validation_commands_status": "prospective focused file; official gate already exists; neither proves feature delivery until implemented",
+      "required_evidence": [
+        "candidate_digest",
+        "policy_and_tool_versions",
+        "positive_and_negative_cases",
+        "independent_review",
+        "official_gate_and_ci",
+        "effect_or_behavior_proof"
+      ],
+      "source_ids": [
+        "R16",
+        "R17",
+        "R19",
+        "R20",
+        "R21"
+      ]
+    },
+    {
+      "id": "SQ-34",
+      "wave": 3,
+      "title": "Manual próprio de cada função",
+      "status": "planned_unreleased",
+      "execution_authorized": false,
+      "objective": "Gerar referência navegável e legível por IA com finalidade, assinatura, termos, regras, erros, efeitos, exemplos sintéticos e testes;homologar mkdocstrings/Griffe em modo estático",
+      "dependencies": [
+        "SQ-16",
+        "SQ-33"
+      ],
+      "reuse_existing": [],
+      "reuse_planned_predecessors": [
+        "core/quality/documentation.py",
+        "core/quality/python_inventory.py"
+      ],
+      "proposed_primary_files": [
+        "core/quality/function_manuals.py",
+        "core/quality/manual_render.py",
+        "docs/templates/function_manual.md"
+      ],
+      "acceptance_criteria": [
+        "Cada função possui entrada útil ligada a símbolo/versão, inclusive privada/interna",
+        "assinatura isolada ou texto vazio não aprova e exemplos verificados não executam imports ou I/O irrestritos"
+      ],
+      "prospective_tests": [
+        "tests/test_function_manuals.py"
+      ],
+      "validate_commands": [
+        "python -m pytest tests/test_function_manuals.py -q",
+        "python core/harness/runner.py --quick"
+      ],
+      "validation_commands_status": "prospective focused file; official gate already exists; neither proves feature delivery until implemented",
+      "required_evidence": [
+        "candidate_digest",
+        "policy_and_tool_versions",
+        "positive_and_negative_cases",
+        "independent_review",
+        "official_gate_and_ci",
+        "effect_or_behavior_proof"
+      ],
+      "source_ids": [
+        "R20",
+        "R22",
+        "R23",
+        "E05"
+      ]
+    },
+    {
+      "id": "SQ-35",
+      "wave": 3,
+      "title": "Manuais completos de módulos e projetos",
+      "status": "planned_unreleased",
+      "execution_authorized": false,
+      "objective": "Organizar referência, tutoriais, tarefas e explicações;documentar integração, operação, dados, segurança, recuperação e limitações por módulo/projeto",
+      "dependencies": [
+        "SQ-32",
+        "SQ-34"
+      ],
+      "reuse_existing": [
+        "docs/ARCHITECTURE.md",
+        "core/catalog"
+      ],
+      "reuse_planned_predecessors": [],
+      "proposed_primary_files": [
+        "core/quality/project_manuals.py",
+        "docs/templates/module_manual.md",
+        "docs/templates/project_manual.md",
+        "docs/standards/manual_information_architecture.md"
+      ],
+      "acceptance_criteria": [
+        "Manual do projeto resolve todos os módulos/funções e fluxos suportados do manifesto",
+        "leitor humano e agente executam cenário sintético pela documentação sem informação oculta"
+      ],
+      "prospective_tests": [
+        "tests/test_module_project_manuals.py"
+      ],
+      "validate_commands": [
+        "python -m pytest tests/test_module_project_manuals.py -q",
+        "python core/harness/runner.py --quick"
+      ],
+      "validation_commands_status": "prospective focused file; official gate already exists; neither proves feature delivery until implemented",
+      "required_evidence": [
+        "candidate_digest",
+        "policy_and_tool_versions",
+        "positive_and_negative_cases",
+        "independent_review",
+        "official_gate_and_ci",
+        "effect_or_behavior_proof"
+      ],
+      "source_ids": [
+        "R16",
+        "R22",
+        "E05",
+        "M06"
+      ]
+    },
+    {
+      "id": "SQ-36",
+      "wave": 3,
+      "title": "Atualização obrigatória de dicionários e manuais em cada PR",
+      "status": "planned_unreleased",
+      "execution_authorized": false,
+      "objective": "Detectar impacto direto/transitivo em assinatura, comportamento, dados, configuração e guias;atualizar documentos afetados a cada rodada/push e validar na revisão/portão único",
+      "dependencies": [
+        "SQ-03",
+        "SQ-05",
+        "SQ-33",
+        "SQ-34",
+        "SQ-35"
+      ],
+      "reuse_existing": [
+        "core/line/stage_build.py",
+        "core/line/stage_review.py",
+        "core/harness/runner.py"
+      ],
+      "reuse_planned_predecessors": [],
+      "proposed_primary_files": [
+        "core/quality/docs_impact.py",
+        "core/quality/manual_validation.py",
+        "core/line/stage_build.py",
+        "core/line/stage_review.py"
+      ],
+      "acceptance_criteria": [
+        "PR com mudança de comportamento sem assinatura e manual antigo é bloqueado",
+        "renomear campo atualiza consumidores/dicionário/exemplos e apenas alterar timestamp não aprova"
+      ],
+      "prospective_tests": [
+        "tests/test_documentation_drift_gate.py"
+      ],
+      "validate_commands": [
+        "python -m pytest tests/test_documentation_drift_gate.py -q",
+        "python core/harness/runner.py --quick"
+      ],
+      "validation_commands_status": "prospective focused file; official gate already exists; neither proves feature delivery until implemented",
+      "required_evidence": [
+        "candidate_digest",
+        "policy_and_tool_versions",
+        "positive_and_negative_cases",
+        "independent_review",
+        "official_gate_and_ci",
+        "effect_or_behavior_proof"
+      ],
+      "source_ids": [
+        "R16",
+        "R20",
+        "R23",
+        "M06"
+      ]
+    },
+    {
+      "id": "SQ-37",
+      "wave": 6,
+      "title": "Consulta de manual vinculado à versão do código",
+      "status": "planned_unreleased",
+      "execution_authorized": false,
+      "objective": "Publicar manual com manifesto após commit e associar ao artefato implantado;resolver projeto/versão e validar ACL, digest e índice antes de cada consulta humana ou de IA",
+      "dependencies": [
+        "SQ-04",
+        "SQ-35",
+        "SQ-36"
+      ],
+      "reuse_existing": [
+        "core/knowledge",
+        "core/catalog"
+      ],
+      "reuse_planned_predecessors": [
+        "core/quality/documentation.py"
+      ],
+      "proposed_primary_files": [
+        "core/quality/manual_manifest.py",
+        "core/quality/manual_store.py",
+        "core/quality/manual_query.py",
+        "core/quality/manual_query_adapters.py"
+      ],
+      "acceptance_criteria": [
+        "Código, manual e índice incompatíveis geram bloqueio explícito e recuperação rastreável",
+        "consulta histórica usa versão histórica e nenhuma busca cruza cliente ou retorna manual antigo como atual"
+      ],
+      "prospective_tests": [
+        "tests/test_version_bound_manual_queries.py"
+      ],
+      "validate_commands": [
+        "python -m pytest tests/test_version_bound_manual_queries.py -q",
+        "python core/harness/runner.py --quick"
+      ],
+      "validation_commands_status": "prospective focused file; official gate already exists; neither proves feature delivery until implemented",
+      "required_evidence": [
+        "candidate_digest",
+        "policy_and_tool_versions",
+        "positive_and_negative_cases",
+        "independent_review",
+        "official_gate_and_ci",
+        "effect_or_behavior_proof"
+      ],
+      "source_ids": [
+        "R18",
+        "R23",
+        "M06"
+      ]
+    },
+    {
+      "id": "SQ-38",
+      "wave": 6,
+      "title": "Migração e piloto de consistência no portfólio",
+      "status": "planned_unreleased",
+      "execution_authorized": false,
+      "objective": "Adotar dicionário e manuais incrementalmente em legado e novos projetos;pilotar dois módulos e produto com termos compartilhados, aliases e migração de contrato",
+      "dependencies": [
+        "SQ-18",
+        "SQ-32",
+        "SQ-33",
+        "SQ-35",
+        "SQ-36",
+        "SQ-37"
+      ],
+      "reuse_existing": [
+        "core/adoption",
+        "core/catalog",
+        "core/projects"
+      ],
+      "reuse_planned_predecessors": [],
+      "proposed_primary_files": [
+        "core/adoption/data_manual_profile.py",
+        "core/catalog/documentation_metadata.py",
+        "docs/plans/security-quality-2026-10-08/DATA_MANUAL_PILOT.md"
+      ],
+      "acceptance_criteria": [
+        "Refatoração preserva IDs e links",
+        "PR afetando dois consumidores atualiza ambos e consulta resolve o manual correto após entrega, com cobertura integral do manifesto no aceite final"
+      ],
+      "prospective_tests": [
+        "tests/test_portfolio_data_manual_pilot.py"
+      ],
+      "validate_commands": [
+        "python -m pytest tests/test_portfolio_data_manual_pilot.py -q",
+        "python core/harness/runner.py --quick"
+      ],
+      "validation_commands_status": "prospective focused file; official gate already exists; neither proves feature delivery until implemented",
+      "required_evidence": [
+        "candidate_digest",
+        "policy_and_tool_versions",
+        "positive_and_negative_cases",
+        "independent_review",
+        "official_gate_and_ci",
+        "effect_or_behavior_proof"
+      ],
+      "source_ids": [
+        "R16",
+        "R17",
+        "R18",
+        "R20",
+        "E05",
+        "M06"
+      ]
+    }
+  ],
+  "execution_scope": {
+    "projects": [
+      "darkfac"
+    ],
+    "wave": 0,
+    "per_ticket": true,
+    "prohibited_without_separate_authorization": [
+      "external_projects",
+      "production_targets",
+      "active_scanners",
+      "scheduled_jobs",
+      "red_team_campaigns"
+    ]
+  },
+  "updated_at": "2026-10-09T23:12:39Z"
+}
