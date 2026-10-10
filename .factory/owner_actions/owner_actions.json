@@ -225,7 +225,7 @@
       "kind": "action",
       "title": "Copiar a regra 'acoes humanas no DarkHub' para o AGENTS.md (arquivo protegido)",
       "priority": "medium",
-      "status": "open",
+      "status": "done",
       "why": "A regra ja esta no CLAUDE.md, mas o AGENTS.md vale para todos os harnesses (Codex, Grok, Antigravity) e so um commit humano pode altera-lo.",
       "blocks": [],
       "depends_on": [],
@@ -244,7 +244,7 @@
       "verify": "git log -1 -- AGENTS.md mostra o seu commit.",
       "created_at": "2026-10-09T22:00:00Z",
       "created_by": "claude-code",
-      "resolved_at": null
+      "resolved_at": "2026-10-10T14:20:00Z"
     },
     {
       "id": "OA-008",
