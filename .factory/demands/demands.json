@@ -6266,5 +6266,34 @@
     "dependencies": [],
     "created_at": "2026-10-10T14:59:59.181594Z",
     "updated_at": "2026-10-10T14:59:59.182600Z"
+  },
+  {
+    "id": "USR-223",
+    "project_id": "darkfac",
+    "title": "CI vermelho no main @dc89843: main-validation (windows-latest)",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "O ultimo run concluido do workflow 'DarkFac CI' em main (SHA dc8984336cbf722ecafd912110d276d8125919e7) terminou em 'failure'. Jobs vermelhos: main-validation (windows-latest). Run: https://github.com/GCamposGit/DarkFactory/actions/runs/38075939123. Detectado por 'python -m core.git.autonomy check-main' (USR-85); PRs com CI vermelho nao sao mais mesclados automaticamente, entao ate corrigir este defeito a entrega de codigo fica bloqueada.",
+    "core_journey": [
+      "O ultimo run concluido do workflow 'DarkFac CI' em main (SHA dc8984336cbf722ecafd912110d276d8125919e7) terminou em 'failure'. Jobs vermelhos: main-validation (windows-latest). Run: https://github.com/GCamposGit/DarkFactory/actions/runs/38075939123. Detectado por 'python -m core.git.autonomy check-main' (USR-85); PRs com CI vermelho nao sao mais mesclados automaticamente, entao ate corrigir este defeito a entrega de codigo fica bloqueada."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "O workflow 'DarkFac CI' volta a ficar verde em main (novo run concluido com sucesso depois de dc89843).",
+      "A causa raiz esta corrigida ou coberta por teste de regressao."
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-10T18:46:56.288810Z",
+    "updated_at": "2026-10-10T18:46:56.288810Z"
   }
 ]
