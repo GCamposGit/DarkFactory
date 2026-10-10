@@ -6295,5 +6295,37 @@
     "dependencies": [],
     "created_at": "2026-10-10T18:46:56.288810Z",
     "updated_at": "2026-10-10T18:46:56.288810Z"
+  },
+  {
+    "id": "USR-221",
+    "project_id": "darkfac",
+    "title": "Cron na VPS a cada 15 min dispara o proximo ticket liberado em qualquer worker disponivel",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "Se o owner ficar sem internet, a fabrica nao pode parar. Criar um cron job na VPS (Dokploy) que a cada 15 minutos dispara o proximo ticket liberado na linha de producao, de qualquer projeto, usando qualquer worker disponivel, enquanto houver algo para fazer (demanda original do owner via Telegram /demand, que falhou por falta de git no container do Hub).",
+    "core_journey": [
+      "Se o owner ficar sem internet, a fabrica nao pode parar. Criar um cron job na VPS (Dokploy) que a cada 15 minutos dispara o proximo ticket liberado na linha de producao, de qualquer projeto, usando qualquer worker disponivel, enquanto houver algo para fazer (demanda original do owner via Telegram /demand, que falhou por falta de git no container do Hub)."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "A cada 15 min a VPS seleciona o proximo ticket elegivel (dependencias liberadas, qualquer projeto) e o submete a linha sem acao do owner",
+      "Usa qualquer worker/harness disponivel respeitando o piso de cota de 15% e o roteamento existente",
+      "Nao dispara se ja houver run em andamento para o mesmo ticket (idempotente, sem duplicar) e para quando a fila esvazia",
+      "Registra cada disparo/skip em log observavel (DarkHub/Telegram /status)",
+      "Teste cobre: fila vazia, ticket bloqueado, run duplicado, worker indisponivel"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-10T18:33:56.375232Z",
+    "updated_at": "2026-10-10T18:33:56.375232Z"
   }
 ]
