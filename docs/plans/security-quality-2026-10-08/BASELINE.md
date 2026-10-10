@@ -1,9 +1,9 @@
 # Baseline reconciliada — segurança e qualidade
 
-**Fotografia:** `origin/main` em `60bdbaaae76cca88a96ba9e122593d616df5d1df` (após PR #251 / reconciliação do USR-197).
-**Coleta:** 2026-10-09 23:12 UTC / 2026-10-10 01:12 Europe/Budapest.
+**Fotografia:** `origin/main` em `11a2ebbd35dd4d4a950feedc374d15fea813e68d` (após PR #259 / diagnóstico do USR-187).
+**Coleta:** 2026-10-10 14:04 UTC / 2026-10-10 16:04 Europe/Budapest.
 **Escopo:** apenas DarkFac.
-**Complemento desta candidata:** incorpora os quatro documentos da branch `codex/security-quality-plan-20261008` (HEAD `5e454e2`) e recupera os seis registros reservados USR-170..174 e USR-176; a base atual tem 155 demands e a candidata passa a ter 161, sem IDs duplicados. USR-175 já existe na base como concluído.
+**Complemento desta candidata:** incorpora os quatro documentos da branch `codex/security-quality-plan-20261008` (HEAD `5e454e2`) e recupera os seis registros reservados USR-170..174 e USR-176; a base atual tem 157 demands e a candidata passa a ter 163, sem IDs duplicados. USR-175 já existe na base como concluído.
 
 > Esta fotografia substitui os status da seção 2.2 do roadmap de 08/10. Essa seção é preservada como histórico. A aprovação dos checks do PR #244 validou o registro de USR-191, não as features de segurança.
 
@@ -36,18 +36,21 @@
 | USR-174 — consumo real da política de dados/residência | `planned` (ID reservado recuperado) | Não atribuído | Retomar em SQ-13 após perfil DarkFac e identidade/efeitos definidos; provar consumidor real, não apenas componente. |
 | USR-175 — candidato imutável do portão | `completed` | Concluído | Reusar a validação isolada por SHA. |
 | USR-176 — timeout local do portão | `planned` (ID reservado recuperado), depende de USR-162 | Não atribuído | Separar timeout local da perda remota; só fechar após evidência da causa/resultado. Não abrir outro ticket para perda de worker. |
-| USR-188 — helper Codex headless | `planned` | Sem claim verificável | Reproduzir e tratar helper/setup refresh com teste focal e failover. USR-191 confirmou a falha antes de qualquer edição; não criou ticket duplicado. |
+| USR-187 — PID do holder no Windows | `planned`; diagnóstico integrado pelo PR #259 | Sem claim verificável | O diagnóstico aponta divergência entre `Popen.pid` e `os.getpid()` no launcher do Windows; corrigir o marcador do holder e validar no worker Desktop antes de contar o portão remoto como utilizável. |
+| USR-188 — helper Codex headless | `planned`; diagnóstico integrado pelo PR #255 | Sem claim verificável | A causa é o refresh de ACL sobre `node_repl.exe` mantido aberto pelo app. A branch `ticket/usr-188` contém correção candidata com override `mcp_servers.node_repl.enabled=false`; teste focal e chamada headless read-only passaram, mas o portão oficial segue aguardando `SUITE_LOCK`. Sem integração ou PASS. |
+| USR-198 — dependência opcional do psycopg | `planned`; registro integrado pelo PR #256 | Sem claim verificável | Implementar a declaração opcional e aviso de instalação exigidos; o PR #256 registrou a demanda, não entregou a feature. |
+| USR-200 — diagnóstico de timeout/lock do portão | `planned`; registro integrado pelo PR #258 | Sem claim verificável | Investigar o timeout de 1.502,8 s com `count=0` e a espera atual pelo lock; preservar suíte completa e evidência vinculada ao SHA. Dependência do USR-162 satisfeita. |
 | USR-179 — isolamento de pytest focal e `SUITE_LOCK` | `planned`; PR #225 aberto, mergeability `UNKNOWN` | Sem claim verificável | O gate oficial reproduziu falha em teste de `suite_lock` dentro da suíte completa; reprodução focal local passa. Investigar contaminação de estado no contexto xdist/worker. |
 | USR-190 — ações do Owner no Hub | `completed`; PR #247 merged em `1811757` | Entrega integrada | Confirmar a latência publicada pelo runbook ao usar a fila em produção; não confundir a entrega do Hub com o escopo deste plano. |
 | USR-191 — reconciliação | `planned` na base desta fotografia | Este ticket | Fechar somente após documentos reconciliados, portão oficial e integração. |
 | USR-193 — allocator de IDs usa base local sem fetch | `planned`, registro integrado pelo PR #246 em `2476f6d` | Sem claim verificável | Corrigir leitura/refresh e colisões via ticket próprio; PR #246 valida apenas o registro. |
 | USR-197 — estado/verificação de tokens Telegram | `completed`; PR #251 merged em `60bdbaa`, 2026-10-09T22:51:26Z | PR #250 entrega implementação; PR #251 reconcilia status e evidência após merge | Sem dependência do roadmap. |
 
-USR-170..174 e USR-176 vieram de registros já reservados na branch documental e não estavam em `origin/main`; foram recuperados nesta candidata, mantendo seus IDs e critérios. USR-175 já estava concluído. USR-192 existe como registro proposto no PR #245, ainda aberto e sem mergeability confirmada; não é contado como ticket ativo na base. A perda remota de worker já foi integrada em USR-162/PR #230; não foi criado item duplicado.
+USR-170..174 e USR-176 vieram de registros já reservados na branch documental e não estavam em `origin/main`; foram recuperados nesta candidata, mantendo seus IDs e critérios. USR-175 já estava concluído. USR-192 existe como registro proposto no PR #245, ainda aberto e sem mergeability confirmada; não é contado como ticket ativo na base. A perda remota de worker já foi integrada em USR-162/PR #230; não foi criado item duplicado. A fotografia nova inclui os registros/diagnósticos de USR-187, USR-188, USR-198 e USR-200, sem inferir conclusão de implementação a partir dos PRs de backlog.
 
 ## Pull requests observados
 
-| PR | Estado em 23:06 UTC | Checks/nota | Relação |
+| PR | Estado em 2026-10-10 14:04 UTC | Checks/nota | Relação |
 |---|---|---|---|
 | [#244](https://github.com/GCamposGit/DarkFactory/pull/244) | Merged em `b59d0ad` | Ubuntu e Windows passaram; registro de USR-191. | Só valida backlog do ticket, não a feature. |
 | [#246](https://github.com/GCamposGit/DarkFactory/pull/246) | Merged em `2476f6d` | Ubuntu e Windows passaram. | Registro do USR-193. |
@@ -55,6 +58,11 @@ USR-170..174 e USR-176 vieram de registros já reservados na branch documental e
 | [#249](https://github.com/GCamposGit/DarkFactory/pull/249) | Merged em `6cfb157`. | USR-162/181 concluídos e demanda/ação do Owner atualizadas. | Registros do backlog após entregas integradas. |
 | [#250](https://github.com/GCamposGit/DarkFactory/pull/250) | Merged em `a95ea32`. | Implementação USR-197 integrada. | `/status` do Telegram e verificação de tokens por papel/fonte. |
 | [#251](https://github.com/GCamposGit/DarkFactory/pull/251) | Merged em `60bdbaa`. | USR-197 concluído; OA-008 fechado após convergência do Desktop e deploy código 0. | Reconciliação de backlog/ação do Owner. |
+| [#254](https://github.com/GCamposGit/DarkFactory/pull/254) | Merged em `3d94481`. | OA-003 feito. | Configuração do papel `darkfac_live_writer`; fora da entrega de segurança. |
+| [#255](https://github.com/GCamposGit/DarkFactory/pull/255) | Merged em `ebb4c22`. | Diagnóstico/registro do USR-188. | Não é a implementação da correção do helper. |
+| [#256](https://github.com/GCamposGit/DarkFactory/pull/256) | Merged em `46a4ba4`. | Registro do USR-198. | Não entrega a dependência opcional de psycopg. |
+| [#258](https://github.com/GCamposGit/DarkFactory/pull/258) | Merged em `d85cd71`. | Registro do USR-200; checks Ubuntu/Windows concluídos. | Abre a execução do diagnóstico do portão/lock. |
+| [#259](https://github.com/GCamposGit/DarkFactory/pull/259) | Merged em `11a2ebb`. | Diagnóstico do USR-187. | Aponta divergência de PID do launcher no worker Windows. |
 | [#245](https://github.com/GCamposGit/DarkFactory/pull/245) | Aberto; mergeability `UNKNOWN` na consulta atual. | Checks Ubuntu/Windows passaram na última execução disponível. | Registro proposto de USR-192 (`[Errno 2] git` no Telegram). |
 | [#230](https://github.com/GCamposGit/DarkFactory/pull/230) | Merged em `2026-10-09T21:37:33Z`. | Entrega USR-162 integrada. | Perda de resposta do worker remoto; sem duplicar. |
 | [#225](https://github.com/GCamposGit/DarkFactory/pull/225) | Aberto; mergeability `UNKNOWN` na consulta atual. | Checks Ubuntu/Windows passaram na execução registrada. | USR-179; investigar o bloqueio de `suite_lock` nesta execução. |
@@ -72,10 +80,12 @@ Estados são fotografia, não prova de propriedade. PR aberto, worktree presente
 
 ## Execução e validação até a fotografia
 
-- A cota do Codex estava acima do piso (59% semanal); o helper Codex falhou antes de abrir o terminal ou tocar arquivos (`helper_unknown_error: setup refresh had errors`). A ocorrência pertence ao USR-188 já planejado.
+- A cota do Codex estava acima do piso (57% semanal na última verificação); o helper Codex falhou antes de abrir o terminal ou tocar arquivos (`helper_unknown_error: setup refresh had errors`). O diagnóstico foi registrado no PR #255/USR-188. A branch de implementação candidata desabilita somente o MCP `node_repl` por `-c`; mantém `workspace-write`/`read-only`, não altera config global e não desliga o sandbox. O teste focal passou (24 casos) e uma chamada Codex headless read-only respondeu como esperado.
 - O launcher bloqueou Claude ao chegar a 15,0% restante; nenhum `--force` foi usado. O ticket voltou ao roteamento Codex.
-- A criação inicial da worktree exigiu permissão Git para atualizar `FETCH_HEAD`; resolvido sem alterar conteúdo compartilhado. A branch `ticket/usr-191` foi rebaseada sobre `origin/main` `60bdbaaae76cca88a96ba9e122593d616df5d1df`, preservando as integrações concorrentes de USR-190/PR #247, USR-197/PR #250 e a atualização de backlog/USR-197 pelo PR #251.
-- O PR #244 passou seu próprio CI, mas isso não é `HARNESS_PASS` das features. O gate oficial do candidato `d5770d61cf40cd28558d564bb4a310696081f293` terminou `[HARNESS_FAIL]`: 3.767 passaram, 22 foram ignorados, 1 falhou (3.790 descobertos), em `tests/test_suite_lock_stalled.py::test_idle_live_holder_triggers_a_stalled_warning_but_is_not_killed`. O holder esperado era PID 7836; o waiter reportou PID 11512 no diretório global do worker. A reprodução focal local passou com `--basetemp` dentro do worktree; a causa ocorre apenas no contexto da suíte completa e segue sem confirmação. O problema está vinculado ao escopo de USR-179/PR #225, sem ticket duplicado. O gate do candidato `1991d679c0409bd70d1146a3cecd9a9af2a0ab09` também terminou `[HARNESS_FAIL]`: sintaxe/tipos passaram, mas `unit_and_integration_tests_parallel` excedeu 1.504,4s (código 124; 0 testes reportados). O timeout fica vinculado ao USR-176, com a perda remota já rastreada por USR-162; sem ticket duplicado. O rebase subsequente para `60bdbaa` ainda não tem gate executado e não há PASS oficial.
+- A criação inicial da worktree exigiu permissão Git para atualizar `FETCH_HEAD`; resolvido sem alterar conteúdo compartilhado. A branch `ticket/usr-191` foi rebaseada sobre `origin/main` `11a2ebbd35dd4d4a950feedc374d15fea813e68d`, preservando as integrações concorrentes até PR #259 e recuperando os seis registros reservados sem IDs duplicados.
+- O PR #244 passou seu próprio CI, mas isso não é `HARNESS_PASS` das features. O gate oficial do candidato `d5770d61cf40cd28558d564bb4a310696081f293` terminou `[HARNESS_FAIL]`: 3.767 passaram, 22 foram ignorados, 1 falhou (3.790 descobertos), em `tests/test_suite_lock_stalled.py::test_idle_live_holder_triggers_a_stalled_warning_but_is_not_killed`. O holder esperado era PID 7836; o waiter reportou PID 11512 no diretório global do worker. A reprodução focal local passou com `--basetemp` dentro do worktree. O diagnóstico posterior do USR-187 identifica divergência entre `Popen.pid` e o PID real do holder (`os.getpid()`) no launcher Windows do worker Desktop; ainda depende de correção e portão remoto verde. O problema não é duplicado.
+- O gate do candidato `1991d679c0409bd70d1146a3cecd9a9af2a0ab09` terminou `[HARNESS_FAIL]`: sintaxe/tipos passaram, mas `unit_and_integration_tests_parallel` excedeu 1.504,4s (código 124; 0 testes reportados). No candidato documental `adfd5fb9cc931960bcffe2810603a35ba30801ac`, rebaseado sobre `a236473`, o mesmo estágio excedeu 1.502,8s (código 124; `count=0`). USR-200 foi registrado pelo PR #258 para executar a investigação planejada em USR-176, sem duplicar a perda remota já coberta por USR-162.
+- No candidato USR-188 `07d1b7768035e98fa9fdfa84ffb21690cd238704`, syntax/types passou, mas a tentativa oficial subsequente ficou aguardando o lock global. O sidecar aponta PID 18676 desde 12:41; `psutil.pid_exists(18676)` retornou falso, enquanto o runner atual aguarda o arquivo lock. Nenhum teste começou e não há PASS. Não removemos o lock nem desativamos o mecanismo; a situação está vinculada ao USR-200 e ao diagnóstico de PID USR-187.
 - A revisão automatizada por harness externo foi recusada anteriormente porque exportaria documentos internos a destino externo não especificado; nada foi exportado. Esta reconciliação permanece local até o PR autorizado.
 
 ## Próximas etapas e critérios de retomada
