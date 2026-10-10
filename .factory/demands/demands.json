@@ -5324,8 +5324,8 @@
     "project_id": "darkfac",
     "title": "Reconciliar baseline e decisões do roadmap de segurança e qualidade",
     "origin": "user",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "72439b761f3e4d9564bab90400c30e25fec6daa6",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -5347,7 +5347,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-09T20:03:42.173856Z",
-    "updated_at": "2026-10-09T20:03:42.173856Z"
+    "updated_at": "2026-10-10T20:41:03.249177Z"
   },
   {
     "id": "USR-193",
@@ -6327,5 +6327,191 @@
     "dependencies": [],
     "created_at": "2026-10-10T18:33:56.375232Z",
     "updated_at": "2026-10-10T18:33:56.375232Z"
+  },
+  {
+    "id": "USR-170",
+    "project_id": "darkfac",
+    "title": "Fortalecer validade e rastreabilidade das evidencias de auditoria",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "security",
+    "lifecycle_stage": "next_steps",
+    "horizon": "unscheduled",
+    "tags": [
+      "user-demand",
+      "planning-only",
+      "security-quality-2026-10-08",
+      "not-authorized-for-execution"
+    ],
+    "problem_statement": "Evidencia sintetica restrita registrada no planejamento de seguranca de 08/10/2026. O componente de auditoria precisa distinguir evidencia integra, ilegivel e ausente; a garantia atual precisa ser calibrada. Detalhes ficam fora do repositorio publico. Escopo deste turno: apenas registro e planejamento; nao despachar implementacao.",
+    "core_journey": [],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Dados malformados e falhas de leitura produzem erro estruturado e bloqueiam a verificacao.",
+      "Testes negativos com dados sinteticos cobrem corrupcao, truncamento e concorrencia; declaracoes de garantia correspondem ao controle real."
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-08T21:01:19.062511Z",
+    "updated_at": "2026-10-08T21:01:19.062511Z"
+  },
+  {
+    "id": "USR-171",
+    "project_id": "darkfac",
+    "title": "Vincular retomada da revisao independente ao candidato atual",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "security",
+    "lifecycle_stage": "next_steps",
+    "horizon": "unscheduled",
+    "tags": [
+      "user-demand",
+      "planning-only",
+      "security-quality-2026-10-08",
+      "not-authorized-for-execution"
+    ],
+    "problem_statement": "Reproducao restrita do planejamento de 08/10/2026 identificou uma lacuna de vinculo entre evidencia de revisao e candidato retomado. Investigar e corrigir sem divulgar reproducoes antes da remediacao. Escopo deste turno: apenas registro e planejamento; nao despachar implementacao.",
+    "core_journey": [],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Aprovacao so pode ser reutilizada para o mesmo digest de candidato e politica.",
+      "Alteracao de candidato ou evidencia ausente invalida a aprovacao e exige revisao independente."
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-08T21:01:20.172392Z",
+    "updated_at": "2026-10-08T21:01:20.172392Z"
+  },
+  {
+    "id": "USR-172",
+    "project_id": "darkfac",
+    "title": "Separar privilegios e credenciais dos agentes de desenvolvimento",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "security",
+    "lifecycle_stage": "next_steps",
+    "horizon": "unscheduled",
+    "tags": [
+      "user-demand",
+      "planning-only",
+      "security-quality-2026-10-08",
+      "not-authorized-for-execution"
+    ],
+    "problem_statement": "Revisao documental da topologia encontrou concentracao de credenciais operacionais no ambiente usado pelo desenvolvimento. Planejar isolamento por tarefa e broker de efeitos, com provas de fronteira antes de considerar o contêiner suficiente. Escopo deste turno: apenas registro e planejamento; nao despachar implementacao.",
+    "core_journey": [],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Agente de build recebe apenas capacidades do ticket; credenciais de deploy e backup ficam fora do processo.",
+      "Probes em clone isolado negam leitura de segredos de outros papeis e acesso de rede fora da allowlist.",
+      "Preservar autonomia de Git por executor separado, sem contornar os guardrails."
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-08T21:01:21.366941Z",
+    "updated_at": "2026-10-08T21:01:21.366941Z"
+  },
+  {
+    "id": "USR-173",
+    "project_id": "darkfac",
+    "title": "Tornar verificacao de tipos explicita e mensuravel no portao",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "security",
+    "lifecycle_stage": "next_steps",
+    "horizon": "unscheduled",
+    "tags": [
+      "user-demand",
+      "planning-only",
+      "security-quality-2026-10-08",
+      "not-authorized-for-execution"
+    ],
+    "problem_statement": "O passo syntax_and_types em harness.config.json executa compileall, que verifica sintaxe sem fazer analise estatica de tipos. Correcao deve passar pelo fluxo legitimo de evolucao de governanca. Escopo deste turno: apenas registro e planejamento; nao despachar implementacao.",
+    "core_journey": [],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Comando e relatorio distinguem sintaxe de tipos; compilacao nao e reportada como type checking.",
+      "Contrato publico com erro de tipo controlado e detectado por checker fixado; regressao fica coberta.",
+      "Preservar portao oficial unico e protecao de arquivos de governanca."
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-08T21:01:22.461000Z",
+    "updated_at": "2026-10-08T21:01:22.461000Z"
+  },
+  {
+    "id": "USR-174",
+    "project_id": "darkfac",
+    "title": "Vincular politica de protecao de dados e residencia aos executores reais",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "security",
+    "lifecycle_stage": "next_steps",
+    "horizon": "unscheduled",
+    "tags": [
+      "user-demand",
+      "planning-only",
+      "security-quality-2026-10-08",
+      "not-authorized-for-execution"
+    ],
+    "problem_statement": "HF-24 ja oferece configuracao, auditoria e avaliacao Enterprise; busca documental em core/line, core/git e run_ticket.py nao demonstrou consumo obrigatorio dessa politica nos caminhos de inferencia e entrega. Exigir prova operacional antes de declarar protecao transversal. Escopo deste turno: apenas registro e planejamento; nao despachar implementacao.",
+    "core_journey": [],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Rotas de inferencia, exportacao e entrega consomem politica por projeto; teste de caminho real demonstra bloqueio.",
+      "Protecao minima vale para todos os projetos; aceite comercial mantem criterio requires_commercial_acceptance.",
+      "Politica indisponivel ou ilegivel bloqueia efeitos sensiveis com erro estruturado."
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-08T21:01:23.668336Z",
+    "updated_at": "2026-10-08T21:01:23.668336Z"
+  },
+  {
+    "id": "USR-176",
+    "project_id": "darkfac",
+    "title": "Investigar timeout local de 1500 segundos no portao oficial apos fallback",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "security",
+    "lifecycle_stage": "next_steps",
+    "horizon": "unscheduled",
+    "tags": [
+      "user-demand",
+      "planning-only",
+      "security-quality-2026-10-08",
+      "not-authorized-for-execution"
+    ],
+    "problem_statement": "Na worktree documental baseada em 72c40a4, o portao oficial no candidato 85dd870 perdeu o worker remoto (USR-162) e o passo local unit_and_integration_tests_parallel expirou em 1505.8s, com limite 1500s. A atualizacao documental durante a execucao tambem invalidou a limpeza do candidato; nao ha HARNESS_PASS e nao se infere causa raiz do timeout dessa observacao. USR-135/147 constam completed; investigar esta ocorrencia antes de reutilizar a baseline para implementacao. Evidencia restrita local: .factory/test_logs/security-quality-plan/official-gate.log. Apenas registro planejado nesta sessao, sem despacho.",
+    "core_journey": [],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Reproduzir em candidato limpo e congelado, separando espera por lock, collection, execucao e falha do worker; identificar causa com diagnostico util.",
+      "Correcao preserva portao unico e nao amplia limites arbitrariamente nem aceita count=0, cache invalido ou suite incompleta como PASS.",
+      "Cancelar/expirar encerra somente os processos da execucao, libera locks e retorna evidencias ligadas ao candidato; validar pela execucao oficial real."
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [
+      "USR-162"
+    ],
+    "created_at": "2026-10-08T21:53:17.795560Z",
+    "updated_at": "2026-10-08T21:53:17.795560Z"
   }
 ]
