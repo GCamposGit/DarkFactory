@@ -197,16 +197,24 @@ def test_fetch_get_me_maps_http_codes(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(ttc.urllib.request, "urlopen", raiser(401))
     assert ttc.fetch_get_me(OPS_NEW, 1.0) == ("revoked", None)
     monkeypatch.setattr(ttc.urllib.request, "urlopen", raiser(500))
-    assert ttc.fetch_get_me(OPS_NEW, 1.0) == ("error", None)
+    assert ttc.fetch_get_me(OPS_NEW, 1.0) == ("error", "HTTP 500")
 
     def timeout(request, timeout=None):
         raise TimeoutError("boom")
 
     monkeypatch.setattr(ttc.urllib.request, "urlopen", timeout)
-    assert ttc.fetch_get_me(OPS_NEW, 1.0) == ("error", None)
+    assert ttc.fetch_get_me(OPS_NEW, 1.0) == ("error", "TimeoutError")
 
 
 def test_main_returns_run_check_code(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys) -> None:
     monkeypatch.setattr(ttc, "run_check", lambda **kw: (["linha"], 1))
     assert ttc.main(["--offline"]) == 1
     assert "linha" in capsys.readouterr().out
+
+
+def test_loader_strips_whitespace_around_env_token(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from core.integrations.telegram import load_telegram_config
+
+    monkeypatch.setenv("TELEGRAM_OWNER_BOT_TOKEN", f"  {OWNER_NEW}\r\n")
+    cfg = load_telegram_config(role="owner", config_dir=tmp_path / ".factory" / "telegram")
+    assert cfg.bot_token == OWNER_NEW
