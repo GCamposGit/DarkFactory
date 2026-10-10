@@ -20,6 +20,7 @@
 - Sempre que um passo envolver configuração manual pelo usuário (dashboards, portais, integrações, arquivos de ambiente, etc.), forneça instruções passo a passo, tela por tela na versão atual da interface da plataforma.
 - Forneça sugestões de conteúdo para absolutamente todos os campos que precisam ser preenchidos e seletores.
 - Nunca assuma que o usuário tem experiência na configuração ou sabe o que está fazendo; o guia deve ser à prova de falhas e retrabalho.
+- Toda ação que só o owner pode fazer deve ser registrada no mesmo turno no backlog de ações humanas (.factory/owner_actions/owner_actions.json, exibido no DarkHub) com passo a passo completo, comandos absolutos, criterio de verificacao e tickets bloqueados. E proibido pedir ao owner, apenas no chat, que descubra ou lembre o que precisa fazer.
 
 ## Intake e Portão de Ambiguidade (Gate G1)
 
