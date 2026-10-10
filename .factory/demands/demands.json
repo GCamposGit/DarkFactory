@@ -6543,5 +6543,35 @@
     "dependencies": [],
     "created_at": "2026-10-10T21:29:13.790197Z",
     "updated_at": "2026-10-10T21:29:13.790197Z"
+  },
+  {
+    "id": "USR-225",
+    "project_id": "darkfac",
+    "title": "run_ticket nao reaproveita a worktree de uma tentativa que estourou o tempo: cria outra e o agente recomeca do zero",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "Em 11/10/2026, run_ticket USR-205 --harness grok estourou o limite do agente (1800 s, error_kind=timeout) com implementacao ja presente na worktree usr-205-20261010T212842Z (6 arquivos alterados, modulo novo e testes novos); o agent_retry parou as tentativas e preservou a worktree, como previsto. Ao rodar run_ticket USR-205 de novo, o launcher criou uma worktree NOVA (usr-205-20261010T215956Z, branch ticket/usr-205-20261010T215956Z) e iniciou o agente do zero, em vez de continuar o trabalho preservado. O aviso de continuacao do USR-113 (_build_request em run_ticket.py) so atua quando ha alteracoes na worktree corrente do mesmo run, entao nao cobre uma segunda invocacao. Efeito: ~30 min de agente desperdicados por ticket grande e duas branches/worktrees para o mesmo ticket. A saida foi entregar a worktree antiga por run_ticket --resume-delivery, que passou o portao (HARNESS_PASS, PR 285).",
+    "core_journey": [
+      "Em 11/10/2026, run_ticket USR-205 --harness grok estourou o limite do agente (1800 s, error_kind=timeout) com implementacao ja presente na worktree usr-205-20261010T212842Z (6 arquivos alterados, modulo novo e testes novos); o agent_retry parou as tentativas e preservou a worktree, como previsto. Ao rodar run_ticket USR-205 de novo, o launcher criou uma worktree NOVA (usr-205-20261010T215956Z, branch ticket/usr-205-20261010T215956Z) e iniciou o agente do zero, em vez de continuar o trabalho preservado. O aviso de continuacao do USR-113 (_build_request em run_ticket.py) so atua quando ha alteracoes na worktree corrente do mesmo run, entao nao cobre uma segunda invocacao. Efeito: ~30 min de agente desperdicados por ticket grande e duas branches/worktrees para o mesmo ticket. A saida foi entregar a worktree antiga por run_ticket --resume-delivery, que passou o portao (HARNESS_PASS, PR 285)."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Ao iniciar run_ticket para um ticket que ja tem worktree preservada (branch ticket/<id> com alteracoes ou commits fora da base), o launcher reaproveita essa worktree e injeta o aviso de continuacao, em vez de criar outra",
+      "Se houver mais de uma worktree preservada do mesmo ticket, o launcher escolhe a mais recente com alteracoes e informa as demais, sem apagar nada",
+      "Teste focal: duas invocacoes seguidas do mesmo ticket com agente falso que estoura o tempo na primeira; a segunda usa a mesma worktree e o prompt contem o aviso de continuacao"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-10T22:46:08.951489Z",
+    "updated_at": "2026-10-10T22:46:08.951489Z"
   }
 ]
