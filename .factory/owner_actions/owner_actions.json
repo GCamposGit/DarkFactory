@@ -332,7 +332,7 @@
       "kind": "action",
       "title": "Configurar DARKFAC_TELEMETRY_KEY no Notebook para o Hub voltar a receber as cotas",
       "priority": "critical",
-      "status": "open",
+      "status": "done",
       "why": "A sincronizacao de cotas Notebook -> Hub esta parada desde 03/10 porque a chave nao existe no Notebook (o Hub tem). Copiar segredo entre sistemas foi bloqueado para o agente. Sem isso o AI Account Monitor continua errado ate o USR-206 ser entregue.",
       "blocks": [
         "USR-206"
@@ -357,7 +357,7 @@
       "verify": "Em ate 2 min, Get-Content C:\\dev\\DarkFac\\.factory\\logs\\usage_sync.log -Tail 5 mostra sincronizacao OK e o AI Account Monitor do Hub mostra Anthropic, OpenAI e xAI com as mesmas porcentagens do roteador.",
       "created_at": "2026-10-10T14:54:15Z",
       "created_by": "claude-code",
-      "resolved_at": null
+      "resolved_at": "2026-10-10T18:29:14Z"
     },
     {
       "id": "OA-011",
