@@ -6513,5 +6513,35 @@
     ],
     "created_at": "2026-10-08T21:53:17.795560Z",
     "updated_at": "2026-10-08T21:53:17.795560Z"
+  },
+  {
+    "id": "USR-224",
+    "project_id": "darkfac",
+    "title": "Limpeza da lixeira de worktrees falha com Acesso negado (WinError 5) em .factory/backups/trash a cada entrega",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "Em 10/10/2026, ao final de run_ticket --resume-delivery USR-193, darkfac.git.ticket_workspace registrou 11 avisos \"Could not purge trash entry C:\\dev\\DarkFac\\.factory\\backups\\trash\\usr-104-... [WinError 5] Acesso negado\" (entradas usr-65, usr-66, usr-67, usr-75, usr-76, usr-80-fix, usr-94, usr-104, usr-121 e outras de 01/10). As entradas ficam acumuladas no disco, cada entrega repete a mesma tentativa e o mesmo aviso, e o aviso enterra mensagens uteis do log da entrega. Hipoteses a confirmar: arquivos somente leitura dentro de .git de worktrees antigas (Windows nao remove sem limpar o atributo), arquivo aberto por outro processo, ou ACL do diretorio.",
+    "core_journey": [
+      "Em 10/10/2026, ao final de run_ticket --resume-delivery USR-193, darkfac.git.ticket_workspace registrou 11 avisos \"Could not purge trash entry C:\\dev\\DarkFac\\.factory\\backups\\trash\\usr-104-... [WinError 5] Acesso negado\" (entradas usr-65, usr-66, usr-67, usr-75, usr-76, usr-80-fix, usr-94, usr-104, usr-121 e outras de 01/10). As entradas ficam acumuladas no disco, cada entrega repete a mesma tentativa e o mesmo aviso, e o aviso enterra mensagens uteis do log da entrega. Hipoteses a confirmar: arquivos somente leitura dentro de .git de worktrees antigas (Windows nao remove sem limpar o atributo), arquivo aberto por outro processo, ou ACL do diretorio."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Diagnosticar a causa do WinError 5 em uma das entradas (atributo somente leitura, handle aberto ou ACL) com evidencia",
+      "A limpeza remove as entradas elegiveis (tratando atributo somente leitura, com nova tentativa) e registra uma unica linha de resumo por entrega em vez de um aviso por entrada; o que nao puder ser removido fica listado uma vez com o motivo",
+      "Teste focal com uma entrada somente leitura simulada (Windows) comprovando que a limpeza a remove sem erro"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-10T21:29:13.790197Z",
+    "updated_at": "2026-10-10T21:29:13.790197Z"
   }
 ]
