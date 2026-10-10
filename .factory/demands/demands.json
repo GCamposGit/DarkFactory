@@ -5595,8 +5595,8 @@
     "project_id": "darkfac",
     "title": "run_ticket repete 3 vezes (~45 min) quando o agente e cancelado ao editar caminho protegido (core/harness/*): tratar como bloqueio humano, nao como falha transitoria",
     "origin": "user",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "d99baf0f979ad7945dcc2cf80509ae6210dca6b0",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -5620,7 +5620,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-10T14:28:04.177236Z",
-    "updated_at": "2026-10-10T14:28:04.177236Z"
+    "updated_at": "2026-10-10T22:29:37.947441Z"
   },
   {
     "id": "USR-206",
