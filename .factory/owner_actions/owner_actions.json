@@ -364,7 +364,7 @@
       "kind": "action",
       "title": "Aumentar o limite do passo paralelo do portao (harness.config.json) de 1500 s para 2400 s",
       "priority": "critical",
-      "status": "open",
+      "status": "done",
       "why": "A suite completa (3818 testes) leva 1447 s a 1503 s no worker do Desktop e o limite do passo unit_and_integration_tests_parallel e 1500 s: em 10/10/2026 o portao do USR-187 reprovou por timeout em 1502,9 s sem nenhum teste falhar, e o do USR-193 passou por 52 s de folga. Qualquer teste novo ou carga extra reprova entregas validas. harness.config.json e protegido por core/orchestrator/guard.py (so o owner commita direto na main). Medidas: Notebook 916 s (2971 testes), Desktop 1447 s e 1503 s (3818 testes); o diagnostico do USR-135 usou 2400 s.",
       "blocks": [
         "USR-135",
@@ -401,7 +401,7 @@
       "verify": "git -C C:\\dev\\DarkFac show origin/main:harness.config.json deve mostrar \"timeout_sec\": 2400 no passo unit_and_integration_tests_parallel e 300 no serial; o proximo run_ticket passa o portao sem timeout.",
       "created_at": "2026-10-10T15:13:28Z",
       "created_by": "claude-session-2026-10-10",
-      "resolved_at": null
+      "resolved_at": "2026-10-10T19:05:15Z"
     }
   ]
 }
