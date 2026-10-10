@@ -5565,8 +5565,8 @@
     "project_id": "darkfac",
     "title": "Monitor de contas do Hub com a mesma fonte de cotas do roteador (fim dos saldos errados)",
     "origin": "user",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "1f596faa7a6744016332eb4fab495c5f84b5579e",
     "item_type": "infrastructure",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -5604,7 +5604,7 @@
     "estimated_complexity": "high",
     "dependencies": [],
     "created_at": "2026-10-10T14:53:37.888426Z",
-    "updated_at": "2026-10-10T14:53:37.888426Z"
+    "updated_at": "2026-10-10T14:54:36.216103Z"
   },
   {
     "id": "USR-207",
