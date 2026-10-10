@@ -295,7 +295,7 @@
       "kind": "action",
       "title": "Limpar tokens revogados do Telegram no Notebook e no Desktop e definir TELEGRAM_OWNER_BOT_TOKEN / TELEGRAM_OPS_BOT_TOKEN",
       "priority": "high",
-      "status": "open",
+      "status": "done",
       "why": "Em 10/10/2026 a fabrica testou os tokens do Notebook com getMe: TELEGRAM_BOT_TOKEN (variavel User) e valido, mas tinha espaco/quebra de linha nas pontas; o .env (OWNER, OPS e BOT) e os arquivos .factory\\telegram\\ops_config.json e owner_config.json ainda guardam tokens REVOGADOS (HTTP 401); TELEGRAM_OWNER_BOT_TOKEN e TELEGRAM_OPS_BOT_TOKEN nao existem no ambiente. O loader le a variavel de ambiente primeiro, entao o papel ops funciona, mas o papel owner cai no .env/JSON revogado e falha silenciosamente nesta maquina. Em producao (Dokploy) esta tudo certo: webhooks ops e owner registrados sem erro e o /status respondeu. O Desktop precisa da mesma verificacao.",
       "blocks": [
         "USR-100",
@@ -325,7 +325,7 @@
       "verify": "O script lista owner e ops como VALIDO (@bot) na fonte efetiva e nenhuma fonte REVOGADA; saida com codigo 0.",
       "created_at": "2026-10-10T11:30:00Z",
       "created_by": "claude-code",
-      "resolved_at": null
+      "resolved_at": "2026-10-10T09:05:00Z"
     }
   ]
 }
