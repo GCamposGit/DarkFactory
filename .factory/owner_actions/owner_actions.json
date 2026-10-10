@@ -75,7 +75,7 @@
       "kind": "action",
       "title": "Criar o papel de escrita restrito da Esteira ao vivo no Postgres da nuvem",
       "priority": "high",
-      "status": "open",
+      "status": "done",
       "why": "Sem esse papel, o trabalho que roda em suas maquinas (run_ticket e sessoes do Claude Code) nao aparece em darkhub.ggcampos.com/live. O script ja foi validado em PostgreSQL 16.15 real (USR-164): cria o papel darkfac_live_writer que so consegue INSERT em local_run_events e audita os privilegios.",
       "blocks": [
         "USR-164"
@@ -110,7 +110,7 @@
       "verify": "O script termina com '[ok] auditoria: darkfac_live_writer so insere em local_run_events'. Prossiga para OA-004.",
       "created_at": "2026-10-09T22:00:00Z",
       "created_by": "claude-code",
-      "resolved_at": null
+      "resolved_at": "2026-10-10T09:40:00Z"
     },
     {
       "id": "OA-004",
