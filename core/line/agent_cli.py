@@ -78,6 +78,9 @@ ErrorKind = Optional[
         # The run was cancelled by the owner while the agent ran (USR-152): the process tree was killed
         # and the result must not be retried, routed around or counted against a route.
         "cancelled",
+        # Grok cancelled an edit of a guard.py protected path (USR-205). Not a transient crash:
+        # the same prompt cancels again, so the launcher stops and asks the owner.
+        "protected_path",
     ]
 ]
 
@@ -110,9 +113,15 @@ HEADLESS_DEVELOPMENT_PREAMBLE = (
 
 
 def headless_development_preamble(harness: str, headroom: Optional[float] = None) -> str:
-    """Explain the already completed routing decision to a headless development agent."""
+    """Explain the already completed routing decision to a headless development agent.
+
+    Also lists ``PROTECTED_PATTERNS`` and tells the agent to deliver a proposal under
+    ``docs/proposals`` instead of editing those paths (USR-205).
+    """
+    from core.line.protected_edit import protected_paths_notice
+
     quota = f" (headroom {headroom:.1f}%)" if headroom is not None else ""
-    return HEADLESS_DEVELOPMENT_PREAMBLE.format(harness=harness, headroom=quota)
+    return HEADLESS_DEVELOPMENT_PREAMBLE.format(harness=harness, headroom=quota) + protected_paths_notice()
 
 
 def supports(harness: str, mode: str) -> bool:
@@ -149,6 +158,8 @@ class AgentResult(BaseModel):
     # ~2000 characters of stderr; both stay at their defaults for non-subprocess results.
     exit_code: Optional[int] = None
     stderr_tail: str = ""
+    # Set when ``error_kind`` is ``protected_path``: the repo-relative path the cancelled edit targeted.
+    protected_path: Optional[str] = None
 
     @field_validator("text", mode="before")
     @classmethod
@@ -978,7 +989,9 @@ def _run_grok_write(req: AgentRequest, executable: str) -> AgentResult:
     "usage": {input_tokens, output_tokens, ...}, "num_turns", "total_cost_usd", "modelUsage"}`; a failed
     run prints `{"type": "error", "message": ...}` and exits non-zero. A call that needs approval the
     headless run cannot give ends with `stopReason: "cancelled"` and exit 0, which is reported as a crash
-    (never as a silent success) with the permission mode in the message.
+    (never as a silent success) with the permission mode in the message. When the cancelled call is an
+    edit of a path in ``PROTECTED_PATTERNS`` (read from the Grok session), the kind is ``protected_path``
+    and the path is in the diagnosis (USR-205).
     """
     mocked_tmp = REPO_ROOT / ".factory" / "tmp"
     tmp_dir = mocked_tmp if (REPO_ROOT != project_root()) else (state_root() / "tmp")
@@ -1053,13 +1066,23 @@ def _run_grok_write(req: AgentRequest, executable: str) -> AgentResult:
             error_kind=_classify_error(combined), reset_at=_extract_reset_at(combined), **diag,
         )
     if stop_reason == "cancelled":
-        detail = (
-            f"Grok stopped with stopReason=cancelled (permission mode '{grok_permission_mode()}'): "
-            "a tool call that needs approval is cancelled in headless runs."
+        from core.line.protected_edit import diagnose_grok_cancellation
+
+        session_id = parsed.get("sessionId") if isinstance(parsed, dict) else None
+        if not isinstance(session_id, str):
+            session_id = None
+        diagnosis = diagnose_grok_cancellation(
+            cwd=req.cwd,
+            session_id=session_id,
+            permission_mode=grok_permission_mode(),
+            agent_text=result_text,
         )
         return AgentResult(
-            ok=False, text=redact_secrets(f"{detail} {result_text}".strip()), harness="grok", model=req.model,
-            duration_s=duration, usage=usage, cost_usd=cost_usd, error_kind="crash", **diag,
+            ok=False, text=redact_secrets(diagnosis.text), harness="grok", model=req.model,
+            duration_s=duration, usage=usage, cost_usd=cost_usd,
+            error_kind=diagnosis.error_kind,  # type: ignore[arg-type]
+            protected_path=diagnosis.protected_path,
+            **diag,
         )
     return AgentResult(
         ok=True, text=redact_secrets(result_text), harness="grok", model=req.model,

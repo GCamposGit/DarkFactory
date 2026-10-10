@@ -13,6 +13,8 @@ one place that owns the policy, so both import it instead of re-implementing it:
   `timeout`, `crash`) repeat on the same route with backoff and then exclude the harness; a capability or
   binary problem (`unsupported_mode`, `not_installed`) and a login problem exclude it at once; a quota
   failure is recorded as a cooldown (`routing.record_result`, honouring `reset_at`) and excludes it.
+  `protected_path` (USR-205) stops on the first attempt: no backoff, no other harness, and the worktree
+  is left as the agent left it.
 
 Everything is injectable (`run_func`, `pick_func`, `sleep_fn`, `record_func`) so tests drive it with fake
 agents and no real waiting.
@@ -86,6 +88,15 @@ def is_stage_retryable(result: AgentResult) -> bool:
     return not result.ok and result.error_kind in STAGE_RETRY_ERRORS
 
 
+def is_protected_path_block(result: AgentResult) -> bool:
+    """True when the agent was cancelled while editing a guard-protected path (USR-205).
+
+    Callers stop on this result: it is a human block, not a transient failure and not a reason
+    to try another harness on the same scope.
+    """
+    return not result.ok and result.error_kind == "protected_path"
+
+
 def exclude_route(excluded: set[Route], harness: str, model: Optional[str]) -> None:
     """Remember a (harness, model) pair that failed, so the next pick for this job skips it."""
     excluded.add((harness, model))
@@ -147,6 +158,8 @@ def backoff_delay(
     failures and quota failures return None, so the loop falls straight through to the next healthy route
     without a single sleep.
     """
+    if result.error_kind in {"cancelled", "protected_path"}:
+        return None
     if classify_failure(result) != "transient":
         return None
     effective_retries = timeout_retries if result.error_kind == "timeout" else transient_retries
@@ -190,6 +203,8 @@ class RetryReport(BaseModel):
     result: Optional[AgentResult] = None
     route: Optional[Route] = None
     attempts: list[AgentAttempt] = Field(default_factory=list)
+    # USR-205: the launcher must not delete the worktree after a protected-path block.
+    preserve_worktree: bool = False
 
     @property
     def total_duration_s(self) -> float:
@@ -266,6 +281,18 @@ def run_with_retry(
             if result.error_kind == "cancelled":
                 # USR-152: the run was cancelled; never retry, back off or fall back to another route.
                 return RetryReport(ok=False, result=result, route=route, attempts=attempts)
+
+            if is_protected_path_block(result):
+                # USR-205: the same edit is cancelled again on every harness. Stop on the first
+                # attempt and leave whatever the agent already wrote in the worktree.
+                emit(
+                    "Protected-path edit was cancelled"
+                    + (f" ({result.protected_path})" if result.protected_path else "")
+                    + "; stopping on the first attempt without retry or another harness"
+                )
+                return RetryReport(
+                    ok=False, result=result, route=route, attempts=attempts, preserve_worktree=True,
+                )
 
             failure = classify_failure(result)
             emit(
