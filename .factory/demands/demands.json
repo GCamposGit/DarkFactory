@@ -6234,5 +6234,37 @@
     "dependencies": [],
     "created_at": "2026-10-10T13:59:57.757825Z",
     "updated_at": "2026-10-10T13:59:57.757825Z"
+  },
+  {
+    "id": "USR-214",
+    "project_id": "darkfac",
+    "title": "Roteador bloqueia desenvolvimento por snapshot Codex obsoleto apesar de cota atual disponível",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "Evidência em 2026-10-10: core.line.routing.pick('development', ['harness:claude','harness:codex','harness:grok']) retornou None e registrou que a telemetria OpenAI estava mais antiga que 3600 s. O accounts --refresh manteve OpenAI/Codex degradado com checked_at de 2026-10-08, erro de timeout da resposta do Codex e sinal de plausibilidade suspeito; ao mesmo tempo, a leitura oficial da conta Codex no app mostrou 0% usado na janela de 5 h e 44% usado na semanal (56% restante). Claude tinha 9% semanal restante, Grok não respondeu e os outros provedores não estavam configurados, então o roteador bloqueou o desenvolvimento embora a conta Codex tivesse headroom acima do piso. Investigar e corrigir a captura/recuperação da quota Codex e a consistência do snapshot, mantendo fail-closed quando não existir evidência atual verificável.",
+    "core_journey": [
+      "Evidência em 2026-10-10: core.line.routing.pick('development', ['harness:claude','harness:codex','harness:grok']) retornou None e registrou que a telemetria OpenAI estava mais antiga que 3600 s. O accounts --refresh manteve OpenAI/Codex degradado com checked_at de 2026-10-08, erro de timeout da resposta do Codex e sinal de plausibilidade suspeito; ao mesmo tempo, a leitura oficial da conta Codex no app mostrou 0% usado na janela de 5 h e 44% usado na semanal (56% restante). Claude tinha 9% semanal restante, Grok não respondeu e os outros provedores não estavam configurados, então o roteador bloqueou o desenvolvimento embora a conta Codex tivesse headroom acima do piso. Investigar e corrigir a captura/recuperação da quota Codex e a consistência do snapshot, mantendo fail-closed quando não existir evidência atual verificável."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Teste reproduz o timeout transiente da sonda Codex seguido de recuperação e confirma que o snapshot só recebe checked_at novo quando dados atuais são verificados.",
+      "Teste com snapshot antigo ou leitura suspeita confirma que pick('development') não usa quota obsoleta e mantém fail-closed.",
+      "Após uma leitura atual validada com mais de 15% de headroom, o roteador volta a eleger um harness compatível com write.",
+      "O resultado distingue indisponibilidade da sonda, snapshot stale e cota efetivamente crítica sem expor credenciais.",
+      "O portão oficial python core/harness/runner.py --quick passa."
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-10T14:59:59.181594Z",
+    "updated_at": "2026-10-10T14:59:59.182600Z"
   }
 ]
