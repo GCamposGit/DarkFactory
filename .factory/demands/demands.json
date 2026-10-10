@@ -6266,5 +6266,35 @@
     "dependencies": [],
     "created_at": "2026-10-10T14:59:59.181594Z",
     "updated_at": "2026-10-10T14:59:59.182600Z"
+  },
+  {
+    "id": "USR-222",
+    "project_id": "darkfac",
+    "title": "Deploy pos-merge diverge e pula o backup quando o checkout compartilhado do Notebook esta em outra branch",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "Em 10/10/2026 scripts/dokploy_redeploy.py saiu com codigo 1 e 'BACKUP skipped: deploy did not converge' porque o checkout C:\\dev\\DarkFac do Notebook estava na branch fix/demand-id-allocator-no-git (outra sessao, com alteracoes nao commitadas em core/demands/id_allocator.py): 'main checkout is on branch ..., not main; no git operation attempted'. O mesmo checkout compartilhado ja recebeu por engano um commit do owner (AGENTS.md) numa branch de PR. Sessoes paralelas e o owner dividem um unico working tree.",
+    "core_journey": [
+      "Em 10/10/2026 scripts/dokploy_redeploy.py saiu com codigo 1 e 'BACKUP skipped: deploy did not converge' porque o checkout C:\\dev\\DarkFac do Notebook estava na branch fix/demand-id-allocator-no-git (outra sessao, com alteracoes nao commitadas em core/demands/id_allocator.py): 'main checkout is on branch ..., not main; no git operation attempted'. O mesmo checkout compartilhado ja recebeu por engano um commit do owner (AGENTS.md) numa branch de PR. Sessoes paralelas e o owner dividem um unico working tree."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "O deploy pos-merge nao depende do checkout interativo estar em main (usa worktree/clone dedicado ou git fetch + ref) e o backup pos-deploy roda",
+      "O processo deixa claro (docs/runbook) que sessoes de agente usam worktree propria e nunca trocam a branch do checkout principal",
+      "Teste cobre o node_sync com checkout em branch diferente de main"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-10T18:34:47.416295Z",
+    "updated_at": "2026-10-10T18:34:47.416295Z"
   }
 ]
