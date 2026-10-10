@@ -558,6 +558,60 @@ def test_validate_exhausted_after_agent_crashes_names_the_agent_failure(
     assert result.evidence_refs[1].startswith("validate_log:validate-T1-")
 
 
+def test_a_cancelled_protected_edit_stops_the_stage_and_registers_an_owner_action(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """USR-205: one protected-path cancellation parks the line for the owner. No second harness."""
+    origin = _init_bare_origin(
+        tmp_path, extra_files={"requirements.txt": "", "check_status.py": _CHECK_STATUS_SCRIPT}
+    )
+    project = _project(str(origin), commands=_CHECK_COMMANDS)
+    _write_tickets(
+        tmp_path / "root",
+        monkeypatch,
+        project,
+        "run-protected",
+        [{"id": "USR-205", "title": "protected harness edit"}],
+    )
+    actions = tmp_path / "owner_actions.json"
+    monkeypatch.setenv("DARKFAC_OWNER_ACTIONS_PATH", str(actions))
+    monkeypatch.setattr(
+        "core.owner_actions.notify.notify_owner_action",
+        lambda *_args, **_kwargs: {"sent": False},
+    )
+    calls: list[AgentRequest] = []
+
+    def blocked(req: AgentRequest) -> AgentResult:
+        calls.append(req)
+        return AgentResult(
+            ok=False,
+            text="edit of protected path core/harness/remote_worker.py was cancelled",
+            harness=req.harness,
+            model=req.model,
+            duration_s=0.01,
+            error_kind="protected_path",
+            protected_path="core/harness/remote_worker.py",
+        )
+
+    stage = DevelopmentStage(
+        run_agent_func=blocked, pick_func=_fixed_route(), routing_config=load_routing_config()
+    )
+
+    result = stage.run(project, "run-protected")
+
+    assert len(calls) == 1
+    assert "docs/proposals" in calls[0].prompt and "core/harness/*" in calls[0].prompt
+    assert result.outcome == "waiting_human" and result.cause_code == "protected_path"
+    assert "protected_path:core/harness/remote_worker.py" in result.evidence_refs
+    assert any(ref.startswith("owner_action:OA-") for ref in result.evidence_refs)
+    action = json.loads(actions.read_text(encoding="utf-8"))["actions"][0]
+    assert action["id"].startswith("OA-")
+    assert action["priority"] == "high"
+    assert action["blocks"] == ["USR-205"]
+    assert "core/harness/remote_worker.py" in action["title"]
+    assert "docs/proposals" in json.dumps(action, ensure_ascii=False)
+
+
 def test_clean_validation_retry_carries_the_failing_tests_as_evidence_refs(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

@@ -535,6 +535,20 @@ class DevelopmentStage:
                     return StageResult(
                         outcome="retry", cause_code=f"agent_{agent_result.error_kind}", output_refs=[]
                     )
+                if agent_retry.is_protected_path_block(agent_result):
+                    # USR-205: another iteration or harness edits the same protected path and is
+                    # cancelled again. Park the run for the owner and keep the worktree.
+                    owner_ref = _register_protected_path_block(project, ticket.id, agent_result, ws.path)
+                    self._persist_diagnostics(ws, run_id, ticket.id)
+                    return StageResult(
+                        outcome="waiting_human",
+                        cause_code="protected_path",
+                        output_refs=[],
+                        evidence_refs=[
+                            f"protected_path:{agent_result.protected_path or 'unknown'}",
+                            owner_ref,
+                        ],
+                    )
                 if not agent_result.ok:
                     if agent_result.error_kind == "timeout" and self._has_implementation_changes(ws):
                         logger.info(
@@ -832,6 +846,25 @@ class DevelopmentStage:
 
 
 _NL = chr(10)
+
+
+def _register_protected_path_block(project: ProjectDescriptor, ticket_id: str, result: AgentResult, workspace: Path) -> str:
+    """Record the owner action for a protected-path block. Never raises into the stage."""
+
+    try:
+        from core.line.protected_edit import register_protected_path_owner_action
+
+        checkout = project.resolve_path()
+        action = register_protected_path_owner_action(
+            ticket_id=ticket_id,
+            protected_path=result.protected_path or "caminho protegido",
+            workspace_path=workspace,
+            checkout_root=checkout,
+        )
+        return f"owner_action:{action.id}"
+    except Exception as exc:  # the stage must still stop; the log says why the OA was not written
+        logger.warning("Could not register the protected-path owner action for %s: %s", ticket_id, exc)
+        return "owner_action:unregistered"
 
 
 def _base_sync_conflict_feedback(result: base_sync.SyncResult) -> str:

@@ -450,6 +450,75 @@ def _abort_cancelled(
     return EXIT_CANCELLED
 
 
+def _finish_protected_path(
+    progress: ProgressPublisher,
+    ticket: UserTicket,
+    workspace: TicketWorkspace,
+    report: agent_retry.RetryReport,
+    *,
+    as_json: bool,
+    harness: str,
+    before_headroom: Optional[float],
+    ticket_size: str,
+) -> int:
+    """Stop a protected-path block on the first attempt and register the owner action (USR-205).
+
+    The worktree is kept even when git reports no implementation diff: discarding it is what made
+    the repeated cancellations look like a ticket that was never tried. The protected file is not
+    edited; the owner action points at ``docs/proposals``.
+    """
+    from core.line.protected_edit import register_protected_path_owner_action
+
+    result = report.result
+    protected = (result.protected_path if result is not None and result.protected_path else "") or "caminho protegido"
+    owner_action_id = ""
+    try:
+        action = register_protected_path_owner_action(
+            ticket_id=ticket.id,
+            protected_path=protected,
+            workspace_path=workspace.path,
+            checkout_root=workspace.main_root,
+        )
+        owner_action_id = action.id
+    except Exception as exc:  # still a human block: do not retry the agent because the backlog write failed
+        logger.warning("Could not register the protected-path owner action for %s: %s", ticket.id, exc)
+
+    message = (
+        f"[BLOQUEIO HUMANO] Ticket {ticket.id}: edicao em caminho protegido ({protected}) "
+        f"cancelada na primeira tentativa (error_kind=protected_path). "
+        f"Nenhum outro harness sera tentado com o mesmo escopo. "
+        f"Entregue a proposta e o patch em docs/proposals (modelo "
+        f"docs/proposals/USR-141-147-harness-resilience.md) e nao edite o arquivo protegido. "
+        f"Acao do owner: {owner_action_id or 'nao registrada'}."
+    )
+    progress.phase("agent", "failed", message, cause="protected_path", harness=harness)
+    print(message, file=sys.stderr)
+    print(f"[i] Worktree preservada: {workspace.path}", file=sys.stderr)
+    cost_record = record_ticket_quota_cost(
+        ticket_id=ticket.id,
+        harness=harness,
+        before_headroom=before_headroom,
+        after_headroom=inspect_quotas().get(harness, {}).get("headroom"),
+        duration_s=report.total_duration_s,
+    )
+    if not as_json:
+        print(f"\n{format_ticket_quota_summary(cost_record)}", file=sys.stderr)
+    else:
+        print(json.dumps({
+            "ok": False,
+            "cause": "protected_path",
+            "ticket_id": ticket.id,
+            "protected_path": protected,
+            "owner_action": owner_action_id or None,
+            "estimated_size": ticket_size,
+            "quota_usage": cost_record,
+            "workspace": str(workspace.path),
+            "branch": workspace.branch,
+            "attempts": [a.model_dump() for a in report.attempts],
+        }, indent=2, ensure_ascii=False))
+    return 1
+
+
 def resume_delivery(
     ticket_id: str,
     worktree_path: Optional[Path | str] = None,
@@ -1173,6 +1242,17 @@ def _run(argv: Optional[list[str]], box: list[ProgressPublisher], stack: context
         if not args.json:
             print(f"\n{format_ticket_quota_summary(cost_record)}", file=sys.stderr)
         return _abort_cancelled(progress, ticket.id, args.json, workspace=workspace)
+    if report.result is not None and agent_retry.is_protected_path_block(report.result):
+        return _finish_protected_path(
+            progress,
+            ticket,
+            workspace,
+            report,
+            as_json=args.json,
+            harness=report.result.harness or selected_harness or "unknown",
+            before_headroom=before_headroom,
+            ticket_size=ticket_size,
+        )
     if not report.ok or report.result is None:
         failure = format_agent_failure(report)
         progress.phase("agent", "failed", failure, cause="agent_failed")
