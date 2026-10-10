@@ -5192,8 +5192,8 @@
     "project_id": "darkfac",
     "title": "Teste test_suite_lock_stalled reprova no worker remoto do Desktop (DESKTOP-G45IPEM) mas passa local e no CI",
     "origin": "user",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "a87e860d01365d3b16ba95502dd1f3753cc98c17",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -5218,7 +5218,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-09T21:40:00Z",
-    "updated_at": "2026-10-10T10:45:00Z"
+    "updated_at": "2026-10-10T15:41:19.404131Z"
   },
   {
     "id": "USR-188",
@@ -5561,12 +5561,74 @@
     "updated_at": "2026-10-10T10:12:38.427434Z"
   },
   {
+    "id": "USR-201",
+    "project_id": "darkfac",
+    "title": "Fixar e registrar modelo e esforco dos harnesses headless (Grok e Codex): hoje valem o padrao do CLI e o modelo usado nao fica no registro do run",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "Em 10/10/2026, ao verificar o run do USR-183/187 pelo Grok, constatou-se que run_ticket monta AgentRequest com model=None e nunca repassa effort: AgentRequest.effort existe (core/line/agent_cli.py) mas nenhum build_*_argv o usa. build_grok_write_argv so passa -m se req.model existir e build_codex_argv idem. Resultado: o modelo e o esforco efetivos sao o padrao do CLI na maquina (Grok: grok-4.7 com reasoning_effort high, lido de ~/.grok/sessions/*/summary.json; Codex: gpt-6-luna high do ~/.codex/config.toml do usuario), podem mudar sem a fabrica saber, e AgentResult.model fica None porque o campo modelUsage do JSON do Grok nao e persistido. Relacionado a USR-185 (registro de modelos) e USR-177 (esforco dos subagentes Haiku).",
+    "core_journey": [
+      "Em 10/10/2026, ao verificar o run do USR-183/187 pelo Grok, constatou-se que run_ticket monta AgentRequest com model=None e nunca repassa effort: AgentRequest.effort existe (core/line/agent_cli.py) mas nenhum build_*_argv o usa. build_grok_write_argv so passa -m se req.model existir e build_codex_argv idem. Resultado: o modelo e o esforco efetivos sao o padrao do CLI na maquina (Grok: grok-4.7 com reasoning_effort high, lido de ~/.grok/sessions/*/summary.json; Codex: gpt-6-luna high do ~/.codex/config.toml do usuario), podem mudar sem a fabrica saber, e AgentResult.model fica None porque o campo modelUsage do JSON do Grok nao e persistido. Relacionado a USR-185 (registro de modelos) e USR-177 (esforco dos subagentes Haiku)."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Rota de desenvolvimento (config de roteamento) declara modelo e esforco por harness, e build_grok_write_argv e build_codex_argv repassam ao CLI quando declarados (flags confirmadas em --help da versao instalada), sem afrouxar sandbox nem permissoes",
+      "AgentResult.model e a telemetria do run passam a registrar o modelo e o esforco efetivos lidos da saida do CLI (modelUsage do Grok, eventos do Codex), mesmo quando nada foi fixado",
+      "Teste focal com agente falso confirma que o argv inclui modelo e esforco declarados e que o modelo efetivo chega ao registro do run"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-10T13:51:44.721619Z",
+    "updated_at": "2026-10-10T13:51:44.721619Z"
+  },
+  {
+    "id": "USR-205",
+    "project_id": "darkfac",
+    "title": "run_ticket repete 3 vezes (~45 min) quando o agente e cancelado ao editar caminho protegido (core/harness/*): tratar como bloqueio humano, nao como falha transitoria",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "Em 10/10/2026 o run_ticket USR-183 --harness grok falhou 3 vezes seguidas com stopReason=cancelled (permission mode auto), 800 s + 829 s + 1072 s, e removeu a worktree sem alteracoes. Nas tres sessoes gravadas em ~/.grok/sessions a chamada cancelada foi o mesmo search_replace em core/harness/remote_worker.py, caminho protegido por core/orchestrator/guard.py (PROTECTED_PATTERNS inclui core/harness/*; so o owner commita, e o padrao do projeto e entregar um patch em docs/proposals, como em USR-141-147-harness-resilience). agent_cli classifica o cancelamento como error_kind=crash e core/line/agent_retry repete com o mesmo prompt, entao o resultado e sempre o mesmo. Efeito: tempo de Grok desperdicado, nenhum sinal para o owner, e o ticket volta como se tivesse sido tentado. Tickets cujo escopo cai em caminho protegido (hoje USR-183, USR-178 e a parte (a) do USR-186) precisam de outro fluxo.",
+    "core_journey": [
+      "Em 10/10/2026 o run_ticket USR-183 --harness grok falhou 3 vezes seguidas com stopReason=cancelled (permission mode auto), 800 s + 829 s + 1072 s, e removeu a worktree sem alteracoes. Nas tres sessoes gravadas em ~/.grok/sessions a chamada cancelada foi o mesmo search_replace em core/harness/remote_worker.py, caminho protegido por core/orchestrator/guard.py (PROTECTED_PATTERNS inclui core/harness/*; so o owner commita, e o padrao do projeto e entregar um patch em docs/proposals, como em USR-141-147-harness-resilience). agent_cli classifica o cancelamento como error_kind=crash e core/line/agent_retry repete com o mesmo prompt, entao o resultado e sempre o mesmo. Efeito: tempo de Grok desperdicado, nenhum sinal para o owner, e o ticket volta como se tivesse sido tentado. Tickets cujo escopo cai em caminho protegido (hoje USR-183, USR-178 e a parte (a) do USR-186) precisam de outro fluxo."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "agent_cli distingue stopReason=cancelled causado por edicao em caminho protegido (comparando a chamada cancelada com PROTECTED_PATTERNS de core/orchestrator/guard.py) de um cancelamento de permissao comum, com um error_kind proprio (por exemplo protected_path) e o caminho envolvido no diagnostico",
+      "agent_retry nao repete esse error_kind: encerra na primeira ocorrencia, preserva o trabalho ja feito na worktree e nao tenta outro harness com o mesmo escopo",
+      "Ao encerrar assim, o run_ticket registra uma acao humana OA-NNN em .factory/owner_actions/owner_actions.json (titulo, prioridade, ticket bloqueado, caminho protegido, passo do owner) e orienta a entrega do patch em docs/proposals, sem editar o arquivo protegido",
+      "Opcional e preferivel: o prompt de desenvolvimento ja informa ao agente a lista de caminhos protegidos e manda entregar proposta e patch em docs/proposals em vez de editar",
+      "Teste focal com agente falso que devolve stopReason=cancelled apos tentar editar core/harness/remote_worker.py: uma unica tentativa, error_kind protected_path e OA registrada"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-10T14:28:04.177236Z",
+    "updated_at": "2026-10-10T14:28:04.177236Z"
+  },
+  {
     "id": "USR-206",
     "project_id": "darkfac",
     "title": "Monitor de contas do Hub com a mesma fonte de cotas do roteador (fim dos saldos errados)",
     "origin": "user",
-    "status": "completed",
-    "delivery_evidence": "1f596faa7a6744016332eb4fab495c5f84b5579e",
+    "status": "planned",
+    "delivery_evidence": null,
     "item_type": "infrastructure",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -6112,5 +6174,65 @@
     "dependencies": [],
     "created_at": "2026-10-10T15:10:25.757956Z",
     "updated_at": "2026-10-10T15:10:25.757956Z"
+  },
+  {
+    "id": "USR-202",
+    "project_id": "darkfac",
+    "title": "live_run finish/cancel nao deve limpar o estado local quando a publicacao falhou",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "Em 10/10/2026 um 'live_run.py finish' rodado numa janela sem DARKFAC_HF02_DATABASE_URL gravou o fim so no control.db local e apagou live_runs/<TICKET>.json (core/line/live_run.py clear_state). O run ficou aberto para sempre na Esteira ao vivo ('Possivelmente travado', Preflight ha 3h56) e nao ha como republicar o encerramento, porque o estado que identifica o run_id foi perdido.",
+    "core_journey": [
+      "Em 10/10/2026 um 'live_run.py finish' rodado numa janela sem DARKFAC_HF02_DATABASE_URL gravou o fim so no control.db local e apagou live_runs/<TICKET>.json (core/line/live_run.py clear_state). O run ficou aberto para sempre na Esteira ao vivo ('Possivelmente travado', Preflight ha 3h56) e nao ha como republicar o encerramento, porque o estado que identifica o run_id foi perdido."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "finish/cancel so apagam o estado local quando a publicacao teve sucesso; se falhou, mantem o estado e avisa",
+      "Um novo finish na maquina com a URL correta republica o encerramento do mesmo run_id",
+      "Teste cobre: finish sem sink alcancavel preserva o estado e finish posterior publica"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-10T13:56:25.564629Z",
+    "updated_at": "2026-10-10T13:56:25.564629Z"
+  },
+  {
+    "id": "USR-204",
+    "project_id": "darkfac",
+    "title": "/status do Telegram: bloco Nos sempre indisponivel porque o snapshot de convergencia so existe no Notebook",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "O /status roda na VPS (Dokploy) e read_convergence_snapshot (core/integrations/telegram_status.py) le node_sync_divergence.json do state_dir local. Esse arquivo e escrito pelo ciclo scripts/dokploy_redeploy.py, que roda no Notebook; na VPS ele nao existe, entao o bloco 'Nos' mostra 'indisponivel (sem ciclo de deploy registrado)' mesmo com todos os nos convergidos (observado em 10/10/2026).",
+    "core_journey": [
+      "O /status roda na VPS (Dokploy) e read_convergence_snapshot (core/integrations/telegram_status.py) le node_sync_divergence.json do state_dir local. Esse arquivo e escrito pelo ciclo scripts/dokploy_redeploy.py, que roda no Notebook; na VPS ele nao existe, entao o bloco 'Nos' mostra 'indisponivel (sem ciclo de deploy registrado)' mesmo com todos os nos convergidos (observado em 10/10/2026)."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "O /status na VPS mostra o ultimo ciclo de convergencia por no (ou o estado real do node_sync), nao 'indisponivel', quando o deploy convergiu",
+      "A fonte do dado nao exige rede lenta nem git no caminho da resposta do chat",
+      "Teste cobre: snapshot presente e snapshot ausente (continua degradando so o bloco Nos)"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-10T13:59:57.757825Z",
+    "updated_at": "2026-10-10T13:59:57.757825Z"
   }
 ]
