@@ -10,6 +10,7 @@ from __future__ import annotations
 import contextlib
 import json
 import os
+import re
 import socket
 import subprocess
 import sys
@@ -17,11 +18,13 @@ import textwrap
 import time
 from pathlib import Path
 
+import psutil
 import pytest
 
 from core.harness import runner, suite_lock
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+_PID_IN_OUTPUT = re.compile(r"\bpid (\d+)\b")
 
 
 @pytest.fixture(autouse=True)
@@ -41,8 +44,28 @@ def _isolated_state_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path
     return state_dir
 
 
+class _LiveHolder:
+    """Subprocess handle plus the interpreter pid that actually holds the lock.
+
+    ``proc.pid`` is whatever ``Popen`` started. On Windows that is often a
+    launcher (venv redirector, Store alias) which ``CreateProcess``es the real
+    interpreter and waits. The lock sidecar records that interpreter's
+    ``os.getpid()``, so assertions and ``psutil`` lookups must use ``pid``.
+    """
+
+    def __init__(self, proc: subprocess.Popen[bytes], pid: int) -> None:
+        self.proc = proc
+        self.pid = pid
+
+    def poll(self) -> int | None:
+        return self.proc.poll()
+
+    def wait(self, timeout: float | None = None) -> int:
+        return self.proc.wait(timeout=timeout)
+
+
 def _idle_holder_script(state_dir: Path, marker: Path) -> str:
-    """A process that takes the lock and then sleeps (alive, ~0% CPU)."""
+    """A process that takes the lock, publishes its own os.getpid(), then sleeps."""
 
     return textwrap.dedent(
         f"""
@@ -53,27 +76,110 @@ def _idle_holder_script(state_dir: Path, marker: Path) -> str:
         from core.harness import suite_lock
         lock = suite_lock.SuiteLock(timeout_sec=30)
         lock.acquire()
-        open({str(marker)!r}, "w", encoding="utf-8").write("acquired")
+        marker = {str(marker)!r}
+        temporary = marker + ".tmp"
+        with open(temporary, "w", encoding="utf-8") as handle:
+            handle.write(str(os.getpid()))
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, marker)
         time.sleep(120)
         """
     )
 
 
+def _windows_python_launcher(directory: Path) -> list[str]:
+    """A parent that spawns ``sys.executable`` and waits, like the Windows launcher.
+
+    ``Popen.pid`` is this parent. The descendant that runs ``-c`` has a
+    different ``os.getpid()``. That is the split that failed the Desktop gate.
+    """
+
+    script = directory / "python_launcher.py"
+    script.write_text(
+        "import subprocess, sys\n"
+        "child = subprocess.Popen([sys.executable, *sys.argv[1:]])\n"
+        "raise SystemExit(child.wait())\n",
+        encoding="utf-8",
+    )
+    return [sys.executable, str(script)]
+
+
+def _mentions_pid(out: str, pid: int) -> bool:
+    return any(int(match) == pid for match in _PID_IN_OUTPUT.findall(out))
+
+
+def _assert_names_interpreter(out: str, holder: _LiveHolder) -> None:
+    """The warning must name the sidecar pid, never the launcher's Popen.pid."""
+
+    assert _mentions_pid(out, holder.pid), (
+        "suite lock must name the interpreter that wrote the sidecar "
+        f"(os.getpid()={holder.pid}, Popen.pid={holder.proc.pid})\n{out}"
+    )
+    if holder.proc.pid != holder.pid:
+        assert not _mentions_pid(out, holder.proc.pid), (
+            "environment divergence: Popen.pid is the launcher, not the lock holder "
+            f"(os.getpid()={holder.pid}, Popen.pid={holder.proc.pid})\n{out}"
+        )
+
+
+def _interpreter_alive(pid: int) -> bool:
+    try:
+        proc = psutil.Process(pid)
+    except psutil.NoSuchProcess:
+        return False
+    return proc.is_running() and proc.status() != psutil.STATUS_ZOMBIE
+
+
+def _stop_process_tree(proc: subprocess.Popen[bytes]) -> None:
+    """Kill ``proc`` and its descendants.
+
+    Killing only a Windows launcher orphans the interpreter that holds the
+    lock; that child would keep sleeping (and holding the file lock) after
+    the test finished.
+    """
+
+    try:
+        root = psutil.Process(proc.pid)
+        members = [*root.children(recursive=True), root]
+        for member in members:
+            with contextlib.suppress(psutil.NoSuchProcess, psutil.AccessDenied):
+                member.kill()
+        psutil.wait_procs(members, timeout=15)
+    except (psutil.Error, OSError):
+        with contextlib.suppress(OSError):
+            proc.kill()
+    with contextlib.suppress(OSError, subprocess.TimeoutExpired):
+        proc.wait(timeout=15)
+
+
 @contextlib.contextmanager
-def _idle_holder(tmp_path: Path):
+def _idle_holder(tmp_path: Path, *, command_prefix: list[str] | None = None):
     state_dir = tmp_path / "state"
     marker = tmp_path / "holder_acquired.txt"
-    proc = subprocess.Popen([sys.executable, "-c", _idle_holder_script(state_dir, marker)])
+    command = [*(command_prefix or [sys.executable]), "-c", _idle_holder_script(state_dir, marker)]
+    proc = subprocess.Popen(command)
     try:
         deadline = time.monotonic() + 30
-        while not marker.exists() and time.monotonic() < deadline:
+        published = ""
+        while time.monotonic() < deadline:
+            if proc.poll() is not None and not marker.exists():
+                break
+            if marker.exists():
+                try:
+                    published = marker.read_text(encoding="utf-8").strip()
+                except OSError:
+                    published = ""
+                if published.isdigit():
+                    break
             time.sleep(0.05)
-        assert marker.exists(), "holder never acquired the lock"
-        yield proc
+        assert published.isdigit(), (
+            "holder never published its own os.getpid() "
+            f"(exit={proc.poll()}, marker={published!r})"
+        )
+        yield _LiveHolder(proc, int(published))
     finally:
-        if proc.poll() is None:
-            proc.kill()
-        proc.wait(timeout=15)
+        _stop_process_tree(proc)
 
 
 # --- env parsing ------------------------------------------------------------------
@@ -117,10 +223,43 @@ def test_idle_live_holder_triggers_a_stalled_warning_but_is_not_killed(
             waiter.acquire()
         out = capsys.readouterr().out
         assert "[SUITE_LOCK] holder appears stalled" in out
-        assert f"pid {holder.pid}" in out
+        _assert_names_interpreter(out, holder)
         assert socket.gethostname() in out
         assert "DARKFAC_SUITE_LOCK_REAP_STALLED=1" in out
-        assert holder.poll() is None, "reaping is opt-in; the holder must still be alive"
+        assert holder.poll() is None, "reaping is opt-in; the launcher/holder process must still be alive"
+        assert _interpreter_alive(holder.pid), (
+            "reaping is opt-in; the interpreter that holds the lock must still be alive"
+        )
+
+
+def test_launcher_wrapper_stall_warning_uses_interpreter_pid_not_popen_pid(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """USR-187: a Windows python launcher makes Popen.pid differ from os.getpid().
+
+    The Desktop gate (DESKTOP-G45IPEM, 2026-10-10) failed with
+    ``assert 'pid 5456' in '... held by pid 15064 on DESKTOP-G45IPEM ...'``.
+    5456 was ``Popen.pid`` of the launcher; 15064 was the interpreter that
+    wrote the sidecar. This wrapper spawns a child the same way, on every OS.
+    """
+
+    monkeypatch.setenv("DARKFAC_SUITE_LOCK_STALL_AFTER_SEC", "0")
+    monkeypatch.setenv("DARKFAC_SUITE_LOCK_STALL_WINDOW_SEC", "1")
+    with _idle_holder(tmp_path, command_prefix=_windows_python_launcher(tmp_path)) as holder:
+        assert holder.proc.pid != holder.pid, (
+            "launcher wrapper must create a child interpreter so the two pids diverge "
+            f"(Popen.pid={holder.proc.pid}, os.getpid()={holder.pid})"
+        )
+        with pytest.raises(suite_lock.SuiteLockTimeout):
+            suite_lock.SuiteLock(timeout_sec=6).acquire()
+        out = capsys.readouterr().out
+        assert "[SUITE_LOCK] holder appears stalled" in out
+        _assert_names_interpreter(out, holder)
+        assert _interpreter_alive(holder.pid)
+        assert suite_lock._sample_holder_tree(holder.pid, started_at=1.0) is None
+        sample = suite_lock._sample_holder_tree(holder.pid, started_at=time.time())
+        assert sample is not None and holder.pid in sample
+        assert holder.proc.pid not in sample
 
 
 def test_stall_check_waits_for_the_configured_wait_before_sampling(
@@ -139,23 +278,32 @@ def test_stall_check_waits_for_the_configured_wait_before_sampling(
     assert "appears stalled" not in capsys.readouterr().out
 
 
+@pytest.mark.parametrize("through_launcher", [False, True])
 def test_reap_enabled_terminates_the_stalled_holder_and_takes_the_slot(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    through_launcher: bool,
 ) -> None:
     monkeypatch.setenv("DARKFAC_SUITE_LOCK_STALL_AFTER_SEC", "0")
     monkeypatch.setenv("DARKFAC_SUITE_LOCK_STALL_WINDOW_SEC", "1")
     monkeypatch.setenv("DARKFAC_SUITE_LOCK_REAP_STALLED", "1")
-    with _idle_holder(tmp_path) as holder:
+    prefix = _windows_python_launcher(tmp_path) if through_launcher else None
+    with _idle_holder(tmp_path, command_prefix=prefix) as holder:
+        if through_launcher:
+            assert holder.proc.pid != holder.pid
         waiter = suite_lock.SuiteLock(timeout_sec=30)
         waiter.acquire()
         try:
             assert waiter.held
             assert holder.wait(timeout=15) is not None
+            assert not _interpreter_alive(holder.pid)
         finally:
             waiter.release()
     out = capsys.readouterr().out
     assert "holder appears stalled" in out
     assert "terminated stalled holder" in out
+    _assert_names_interpreter(out, holder)
 
 
 # --- deterministic unit tests of the detector -------------------------------------------
@@ -236,12 +384,19 @@ def test_own_pid_is_never_inspected_or_reaped(tmp_path: Path, monkeypatch: pytes
     assert suite_lock._reap_holder(os.getpid()) is False
 
 
-def test_recycled_pid_is_not_mistaken_for_the_holder(tmp_path: Path) -> None:
-    with _idle_holder(tmp_path) as holder:
+@pytest.mark.parametrize("through_launcher", [False, True])
+def test_recycled_pid_is_not_mistaken_for_the_holder(tmp_path: Path, through_launcher: bool) -> None:
+    prefix = _windows_python_launcher(tmp_path) if through_launcher else None
+    with _idle_holder(tmp_path, command_prefix=prefix) as holder:
+        if through_launcher:
+            assert holder.proc.pid != holder.pid
         # Sidecar claims the lock was taken long before the process existed -> pid reuse.
+        # Sample the interpreter that called os.getpid(), not Popen.pid.
         assert suite_lock._sample_holder_tree(holder.pid, started_at=1.0) is None
         sample = suite_lock._sample_holder_tree(holder.pid, started_at=time.time())
         assert sample is not None and holder.pid in sample
+        if holder.proc.pid != holder.pid:
+            assert holder.proc.pid not in sample
 
 
 def test_detector_failure_never_breaks_lock_acquisition(
