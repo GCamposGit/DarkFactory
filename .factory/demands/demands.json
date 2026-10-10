@@ -5559,5 +5559,35 @@
     "dependencies": [],
     "created_at": "2026-10-10T10:12:38.427434Z",
     "updated_at": "2026-10-10T10:12:38.427434Z"
+  },
+  {
+    "id": "USR-204",
+    "project_id": "darkfac",
+    "title": "/status do Telegram: bloco Nos sempre indisponivel porque o snapshot de convergencia so existe no Notebook",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "O /status roda na VPS (Dokploy) e read_convergence_snapshot (core/integrations/telegram_status.py) le node_sync_divergence.json do state_dir local. Esse arquivo e escrito pelo ciclo scripts/dokploy_redeploy.py, que roda no Notebook; na VPS ele nao existe, entao o bloco 'Nos' mostra 'indisponivel (sem ciclo de deploy registrado)' mesmo com todos os nos convergidos (observado em 10/10/2026).",
+    "core_journey": [
+      "O /status roda na VPS (Dokploy) e read_convergence_snapshot (core/integrations/telegram_status.py) le node_sync_divergence.json do state_dir local. Esse arquivo e escrito pelo ciclo scripts/dokploy_redeploy.py, que roda no Notebook; na VPS ele nao existe, entao o bloco 'Nos' mostra 'indisponivel (sem ciclo de deploy registrado)' mesmo com todos os nos convergidos (observado em 10/10/2026)."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "O /status na VPS mostra o ultimo ciclo de convergencia por no (ou o estado real do node_sync), nao 'indisponivel', quando o deploy convergiu",
+      "A fonte do dado nao exige rede lenta nem git no caminho da resposta do chat",
+      "Teste cobre: snapshot presente e snapshot ausente (continua degradando so o bloco Nos)"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-10T13:59:57.757825Z",
+    "updated_at": "2026-10-10T13:59:57.757825Z"
   }
 ]
