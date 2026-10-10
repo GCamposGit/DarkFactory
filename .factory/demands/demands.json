@@ -5200,22 +5200,25 @@
     "tags": [
       "user-demand"
     ],
-    "problem_statement": "Durante o USR-180 (09/10/2026), o portao despachado ao worker remoto http://100.78.181.90:8080 (DESKTOP-G45IPEM) terminou com 3704 passed e 1 failed: tests/test_suite_lock_stalled.py::test_idle_live_holder_triggers_a_stalled_warning_but_is_not_killed, duas vezes seguidas, inclusive apos elevar o timeout do teste de 6 para 15 s (portanto nao e so carga). Isolado e no arquivo inteiro o teste passa 3 de 3 nesta maquina e no CI ubuntu e windows. Todo portao despachado a essa maquina reprova ate a causa ser achada (hipoteses: amostragem de CPU do holder via psutil/permissao, hostname ou politica de AV na maquina).",
+    "problem_statement": "Durante o USR-180 (09/10/2026), o portao despachado ao worker remoto http://100.78.181.90:8080 (DESKTOP-G45IPEM) terminou com 3704 passed e 1 failed: tests/test_suite_lock_stalled.py::test_idle_live_holder_triggers_a_stalled_warning_but_is_not_killed, duas vezes seguidas, inclusive apos elevar o timeout do teste de 6 para 15 s (portanto nao e so carga). Isolado e no arquivo inteiro o teste passa 3 de 3 nesta maquina e no CI ubuntu e windows. Todo portao despachado a essa maquina reprova ate a causa ser achada (hipoteses: amostragem de CPU do holder via psutil/permissao, hostname ou politica de AV na maquina). DIAGNOSTICO (10/10/2026, run_ticket USR-193, portao no Desktop): a unica falha em 3818 testes foi tests/test_suite_lock_stalled.py::test_idle_live_holder_triggers_a_stalled_warning_but_is_not_killed, com \"assert 'pid 5456' in '[SUITE_LOCK] waiting: held by pid 15064 on DESKTOP-G45IPEM (...)'\". Causa provavel e verificavel: o teste compara holder.pid (pid devolvido por subprocess.Popen([sys.executable, '-c', ...]), linha 66 e 120) com o pid que o script gravou no lock (os.getpid() do interpretador real). No Desktop sys.executable e um launcher do Windows que cria um processo filho, entao os dois pids diferem (Linux do CI e Notebook nao tem o launcher, por isso passa la). Correcao esperada: o script do holder grava o proprio os.getpid() no marcador e o teste usa esse pid (linhas 120, 148, 242-244), sem depender do pid do Popen. Este teste reprova o portao de TODO ticket despachado ao worker do Desktop, entao tem prioridade sobre os demais.",
     "core_journey": [
-      "Durante o USR-180 (09/10/2026), o portao despachado ao worker remoto http://100.78.181.90:8080 (DESKTOP-G45IPEM) terminou com 3704 passed e 1 failed: tests/test_suite_lock_stalled.py::test_idle_live_holder_triggers_a_stalled_warning_but_is_not_killed, duas vezes seguidas, inclusive apos elevar o timeout do teste de 6 para 15 s (portanto nao e so carga). Isolado e no arquivo inteiro o teste passa 3 de 3 nesta maquina e no CI ubuntu e windows. Todo portao despachado a essa maquina reprova ate a causa ser achada (hipoteses: amostragem de CPU do holder via psutil/permissao, hostname ou politica de AV na maquina)."
+      "Durante o USR-180 (09/10/2026), o portao despachado ao worker remoto http://100.78.181.90:8080 (DESKTOP-G45IPEM) terminou com 3704 passed e 1 failed: tests/test_suite_lock_stalled.py::test_idle_live_holder_triggers_a_stalled_warning_but_is_not_killed, duas vezes seguidas, inclusive apos elevar o timeout do teste de 6 para 15 s (portanto nao e so carga). Isolado e no arquivo inteiro o teste passa 3 de 3 nesta maquina e no CI ubuntu e windows. Todo portao despachado a essa maquina reprova ate a causa ser achada (hipoteses: amostragem de CPU do holder via psutil/permissao, hostname ou politica de AV na maquina). DIAGNOSTICO (10/10/2026, run_ticket USR-193, portao no Desktop): a unica falha em 3818 testes foi tests/test_suite_lock_stalled.py::test_idle_live_holder_triggers_a_stalled_warning_but_is_not_killed, com \"assert 'pid 5456' in '[SUITE_LOCK] waiting: held by pid 15064 on DESKTOP-G45IPEM (...)'\". Causa provavel e verificavel: o teste compara holder.pid (pid devolvido por subprocess.Popen([sys.executable, '-c', ...]), linha 66 e 120) com o pid que o script gravou no lock (os.getpid() do interpretador real). No Desktop sys.executable e um launcher do Windows que cria um processo filho, entao os dois pids diferem (Linux do CI e Notebook nao tem o launcher, por isso passa la). Correcao esperada: o script do holder grava o proprio os.getpid() no marcador e o teste usa esse pid (linhas 120, 148, 242-244), sem depender do pid do Popen. Este teste reprova o portao de TODO ticket despachado ao worker do Desktop, entao tem prioridade sobre os demais."
     ],
     "non_goals": [],
     "reachability_contract": "",
     "acceptance_criteria": [
       "Capturar a saida completa da falha no worker remoto (assert e stdout do teste) e identificar a causa",
       "Corrigir o teste ou o ambiente do worker; o portao despachado ao Desktop passa sem excecoes",
-      "Teste de regressao ou diagnostico do worker que detecte a divergencia de ambiente"
+      "Teste de regressao ou diagnostico do worker que detecte a divergencia de ambiente",
+      "O holder do teste informa o proprio os.getpid() (via marcador) e os testes de suite_lock_stalled usam esse pid em vez de Popen.pid; o teste passa em Windows com launcher de python que cria processo filho (simular com um wrapper que faz exec de um filho)"
     ],
-    "suggested_files": [],
+    "suggested_files": [
+      "tests/test_suite_lock_stalled.py"
+    ],
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-09T21:40:00Z",
-    "updated_at": "2026-10-09T21:40:00Z"
+    "updated_at": "2026-10-10T10:45:00Z"
   },
   {
     "id": "USR-188",
