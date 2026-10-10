@@ -5559,5 +5559,35 @@
     "dependencies": [],
     "created_at": "2026-10-10T10:12:38.427434Z",
     "updated_at": "2026-10-10T10:12:38.427434Z"
+  },
+  {
+    "id": "USR-201",
+    "project_id": "darkfac",
+    "title": "Fixar e registrar modelo e esforco dos harnesses headless (Grok e Codex): hoje valem o padrao do CLI e o modelo usado nao fica no registro do run",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "Em 10/10/2026, ao verificar o run do USR-183/187 pelo Grok, constatou-se que run_ticket monta AgentRequest com model=None e nunca repassa effort: AgentRequest.effort existe (core/line/agent_cli.py) mas nenhum build_*_argv o usa. build_grok_write_argv so passa -m se req.model existir e build_codex_argv idem. Resultado: o modelo e o esforco efetivos sao o padrao do CLI na maquina (Grok: grok-4.7 com reasoning_effort high, lido de ~/.grok/sessions/*/summary.json; Codex: gpt-6-luna high do ~/.codex/config.toml do usuario), podem mudar sem a fabrica saber, e AgentResult.model fica None porque o campo modelUsage do JSON do Grok nao e persistido. Relacionado a USR-185 (registro de modelos) e USR-177 (esforco dos subagentes Haiku).",
+    "core_journey": [
+      "Em 10/10/2026, ao verificar o run do USR-183/187 pelo Grok, constatou-se que run_ticket monta AgentRequest com model=None e nunca repassa effort: AgentRequest.effort existe (core/line/agent_cli.py) mas nenhum build_*_argv o usa. build_grok_write_argv so passa -m se req.model existir e build_codex_argv idem. Resultado: o modelo e o esforco efetivos sao o padrao do CLI na maquina (Grok: grok-4.7 com reasoning_effort high, lido de ~/.grok/sessions/*/summary.json; Codex: gpt-6-luna high do ~/.codex/config.toml do usuario), podem mudar sem a fabrica saber, e AgentResult.model fica None porque o campo modelUsage do JSON do Grok nao e persistido. Relacionado a USR-185 (registro de modelos) e USR-177 (esforco dos subagentes Haiku)."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Rota de desenvolvimento (config de roteamento) declara modelo e esforco por harness, e build_grok_write_argv e build_codex_argv repassam ao CLI quando declarados (flags confirmadas em --help da versao instalada), sem afrouxar sandbox nem permissoes",
+      "AgentResult.model e a telemetria do run passam a registrar o modelo e o esforco efetivos lidos da saida do CLI (modelUsage do Grok, eventos do Codex), mesmo quando nada foi fixado",
+      "Teste focal com agente falso confirma que o argv inclui modelo e esforco declarados e que o modelo efetivo chega ao registro do run"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-10T13:51:44.721619Z",
+    "updated_at": "2026-10-10T13:51:44.721619Z"
   }
 ]
