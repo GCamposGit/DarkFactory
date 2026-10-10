@@ -43,7 +43,7 @@
       "kind": "action",
       "title": "Colocar o token novo do Telegram no Dokploy, no Desktop e no Notebook",
       "priority": "high",
-      "status": "open",
+      "status": "done",
       "why": "O token antigo do bot foi revogado na rotacao (USR-100). Enquanto as maquinas e a VPS ainda tiverem o token antigo, notificacoes e Grills por Telegram falham. O arquivo .factory/telegram/config.json deixou de ser versionado (USR-184); o sistema le primeiro as variaveis TELEGRAM_* do ambiente.",
       "blocks": [
         "USR-100",
@@ -68,7 +68,7 @@
       "verify": "Envie /status ao bot no Telegram e confirme que ele responde; no DarkHub o aviso de token divergente some.",
       "created_at": "2026-10-09T22:00:00Z",
       "created_by": "claude-code",
-      "resolved_at": null
+      "resolved_at": "2026-10-10T08:50:00Z"
     },
     {
       "id": "OA-003",
