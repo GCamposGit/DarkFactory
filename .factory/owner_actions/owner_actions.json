@@ -117,7 +117,7 @@
       "kind": "action",
       "title": "Configurar a URL do papel restrito no Desktop e no Notebook e conferir o /live",
       "priority": "high",
-      "status": "open",
+      "status": "done",
       "why": "Depois de OA-003, cada maquina que roda tickets precisa da URL do papel restrito para publicar na Esteira ao vivo. Sem URL, o run_ticket avisa e grava so num banco local que o Hub nao le.",
       "blocks": [
         "USR-164"
@@ -148,7 +148,7 @@
       "verify": "A saida do live_run.py diz '(publicado)' sem '[AVISO]' e o run aparece em /live.",
       "created_at": "2026-10-09T22:00:00Z",
       "created_by": "claude-code",
-      "resolved_at": null
+      "resolved_at": "2026-10-10T15:58:00Z"
     },
     {
       "id": "OA-005",
