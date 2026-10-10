@@ -5494,5 +5494,35 @@
     "dependencies": [],
     "created_at": "2026-10-10T11:30:00Z",
     "updated_at": "2026-10-10T12:30:00Z"
+  },
+  {
+    "id": "USR-198",
+    "project_id": "darkfac",
+    "title": "Declarar psycopg[binary] como dependencia opcional documentada e avisar com o comando de instalacao",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "A Esteira ao vivo (core/line/live_writer.py, live_run.py, local_progress) importa psycopg de forma lazy, mas requirements.txt nao o declara. Em 10/10/2026 o Desktop (Python 3.11.9) nao tinha o driver: o run_ticket publicou 'NAO publicado' com ModuleNotFoundError. Os Dockerfiles ja fixam psycopg[binary]>=3.2.0,<3.3.0.",
+    "core_journey": [
+      "A Esteira ao vivo (core/line/live_writer.py, live_run.py, local_progress) importa psycopg de forma lazy, mas requirements.txt nao o declara. Em 10/10/2026 o Desktop (Python 3.11.9) nao tinha o driver: o run_ticket publicou 'NAO publicado' com ModuleNotFoundError. Os Dockerfiles ja fixam psycopg[binary]>=3.2.0,<3.3.0."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "requirements.txt ou um extra opcional declara psycopg[binary]>=3.2.0,<3.3.0 consistente com deploy/dokploy/Dockerfile.cloud",
+      "O aviso '[AVISO] driver psycopg nao instalado' inclui o comando exato: python -m pip install \"psycopg[binary]>=3.2.0,<3.3.0\"",
+      "Teste cobre a mensagem do aviso"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-10T09:53:10.279361Z",
+    "updated_at": "2026-10-10T09:53:10.279361Z"
   }
 ]
