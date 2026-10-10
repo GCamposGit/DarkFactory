@@ -358,6 +358,50 @@
       "created_at": "2026-10-10T14:54:15Z",
       "created_by": "claude-code",
       "resolved_at": null
+    },
+    {
+      "id": "OA-011",
+      "kind": "action",
+      "title": "Aumentar o limite do passo paralelo do portao (harness.config.json) de 1500 s para 2400 s",
+      "priority": "critical",
+      "status": "open",
+      "why": "A suite completa (3818 testes) leva 1447 s a 1503 s no worker do Desktop e o limite do passo unit_and_integration_tests_parallel e 1500 s: em 10/10/2026 o portao do USR-187 reprovou por timeout em 1502,9 s sem nenhum teste falhar, e o do USR-193 passou por 52 s de folga. Qualquer teste novo ou carga extra reprova entregas validas. harness.config.json e protegido por core/orchestrator/guard.py (so o owner commita direto na main). Medidas: Notebook 916 s (2971 testes), Desktop 1447 s e 1503 s (3818 testes); o diagnostico do USR-135 usou 2400 s.",
+      "blocks": [
+        "USR-135",
+        "USR-178",
+        "USR-187",
+        "USR-193"
+      ],
+      "depends_on": [],
+      "steps": [
+        {
+          "text": "Abra o PowerShell e atualize a main (comando abaixo).",
+          "command": "git -C C:\\dev\\DarkFac pull --ff-only origin main"
+        },
+        {
+          "text": "Abra o arquivo no Bloco de Notas (comando abaixo). Use Ctrl+F e procure unit_and_integration_tests_parallel; na linha timeout_sec logo abaixo troque 1500 por 2400 (NAO mexa no outro timeout_sec, o de 300). Salve com Ctrl+S e feche.",
+          "command": "notepad C:\\dev\\DarkFac\\harness.config.json"
+        },
+        {
+          "text": "Confira que mudou exatamente 1 linha (esperado: 1 insertion, 1 deletion).",
+          "command": "git -C C:\\dev\\DarkFac diff --stat -- harness.config.json"
+        },
+        {
+          "text": "Faca o commit somente desse arquivo (nunca git add -A).",
+          "command": "git -C C:\\dev\\DarkFac add harness.config.json\ngit -C C:\\dev\\DarkFac commit -m \"chore(harness): limite do passo paralelo do portao 1500 s -> 2400 s [USR-135]\""
+        },
+        {
+          "text": "Publique direto na main (sem PR: um PR seria reprovado pelo trusted-pr-policy). Este e o mesmo procedimento de push com bypass de admin que voce ja usa para arquivos protegidos.",
+          "command": "git -C C:\\dev\\DarkFac push origin main"
+        },
+        {
+          "text": "Depois marque esta acao como feita no DarkHub (ou peca a um agente para rodar owner_action done)."
+        }
+      ],
+      "verify": "git -C C:\\dev\\DarkFac show origin/main:harness.config.json deve mostrar \"timeout_sec\": 2400 no passo unit_and_integration_tests_parallel e 300 no serial; o proximo run_ticket passa o portao sem timeout.",
+      "created_at": "2026-10-10T15:13:28Z",
+      "created_by": "claude-session-2026-10-10",
+      "resolved_at": null
     }
   ]
 }
