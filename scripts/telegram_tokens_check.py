@@ -172,7 +172,7 @@ def _mark_effective(role: str, rows: list[SourceRow], root: Path) -> None:
     if not token:
         return
     for row in rows:
-        if row.loader_reads and row.value and row.value == token:
+        if row.loader_reads and row.value and row.value.strip() == token:
             row.effective = True
             return
 

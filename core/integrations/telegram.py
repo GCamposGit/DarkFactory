@@ -231,7 +231,8 @@ def load_telegram_config(
         elif env_vars.get(key):
             sources[f".env:{key}"] = env_vars[key]
 
-    token = next((value for key in keys if (value := os.environ.get(key) or env_vars.get(key))), None)
+    # Whitespace/newlines around a pasted token make Telegram answer 404; the value is never meaningful.
+    token = next((value.strip() for key in keys if (value := (os.environ.get(key) or env_vars.get(key) or "").strip())), None)
 
     cfg_dir = config_dir or (root_dir / ".factory" / "telegram")
     files = (

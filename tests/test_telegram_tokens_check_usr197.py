@@ -210,3 +210,11 @@ def test_main_returns_run_check_code(tmp_path: Path, monkeypatch: pytest.MonkeyP
     monkeypatch.setattr(ttc, "run_check", lambda **kw: (["linha"], 1))
     assert ttc.main(["--offline"]) == 1
     assert "linha" in capsys.readouterr().out
+
+
+def test_loader_strips_whitespace_around_env_token(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from core.integrations.telegram import load_telegram_config
+
+    monkeypatch.setenv("TELEGRAM_OWNER_BOT_TOKEN", f"  {OWNER_NEW}\r\n")
+    cfg = load_telegram_config(role="owner", config_dir=tmp_path / ".factory" / "telegram")
+    assert cfg.bot_token == OWNER_NEW
