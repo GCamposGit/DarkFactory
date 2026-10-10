@@ -152,7 +152,7 @@ from hub.backend.webhooks import (
     WebhookEngine,
     WebhookEventRecord,
 )
-from core.integrations.telegram import TelegramGateway, TelegramConfig
+from core.integrations.telegram import TelegramConfig, TelegramGateway, reply_messages
 from core.owner_actions.models import ActionStatus, OwnerAction, PRIORITY_RANK
 from core.owner_actions.propagate import annotate_blocked_tickets
 from core.owner_actions.store import (
@@ -2934,13 +2934,13 @@ class HubService:
             }
         gateway = self._build_telegram_gateway(role=role)
         result = gateway.process_update(payload)
-        if result.response_text and not result.duplicate:
+        if not result.duplicate and reply_messages(result):
             msg_obj = payload.get("message") or payload.get("callback_query", {}).get("message")
             chat_id = msg_obj.get("chat", {}).get("id") if isinstance(msg_obj, dict) else None
             if not chat_id:
                 chat_id = (payload.get("callback_query", {}) or {}).get("from", {}).get("id") or (payload.get("message", {}) or {}).get("from", {}).get("id")
             if chat_id:
-                gateway.send_message(chat_id, result.response_text)
+                gateway.deliver_reply(chat_id, result)
         return result.model_dump()
 
     def get_telegram_gateway_status(self) -> Dict[str, Any]:
