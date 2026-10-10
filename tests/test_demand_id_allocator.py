@@ -93,3 +93,16 @@ def test_title_collision_reports_both_titles() -> None:
     branch = json.dumps([{"id": "USR-67", "title": "DarkHub"}])
     assert title_collisions(base, branch) == ["USR-67: origin/main='Original', branch='DarkHub'"]
     assert title_collisions(base, base) == []
+
+
+def test_allocator_works_without_git_binary(tmp_path: Path, monkeypatch) -> None:
+    """The slim DarkHub container ships no git; reservation must use the isolated ledger."""
+    path = ledger(tmp_path, ("USR-07", "seed"))
+
+    def no_git(*_args, **_kwargs):
+        raise FileNotFoundError(2, "No such file or directory: 'git'")
+
+    monkeypatch.setattr(subprocess, "run", no_git)
+
+    assert reserve_ticket_id(path, "USR") == "USR-08"
+    assert reserve_ticket_id(path, "USR") == "USR-09"

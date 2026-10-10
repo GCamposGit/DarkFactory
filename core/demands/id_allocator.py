@@ -16,10 +16,14 @@ LEDGER = ".factory/demands/demands.json"
 
 
 def _git(root: Path, *args: str) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
-        ["git", *args], cwd=root, capture_output=True, text=True,
-        encoding="utf-8", errors="replace", timeout=30, check=False,
-    )
+    try:
+        return subprocess.run(
+            ["git", *args], cwd=root, capture_output=True, text=True,
+            encoding="utf-8", errors="replace", timeout=30, check=False,
+        )
+    except FileNotFoundError as exc:
+        # No git binary (e.g. the slim DarkHub container): behave like "not a repository".
+        return subprocess.CompletedProcess(["git", *args], 127, "", str(exc))
 
 
 @contextmanager
