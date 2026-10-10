@@ -5559,5 +5559,35 @@
     "dependencies": [],
     "created_at": "2026-10-10T10:12:38.427434Z",
     "updated_at": "2026-10-10T10:12:38.427434Z"
+  },
+  {
+    "id": "USR-202",
+    "project_id": "darkfac",
+    "title": "live_run finish/cancel nao deve limpar o estado local quando a publicacao falhou",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "Em 10/10/2026 um 'live_run.py finish' rodado numa janela sem DARKFAC_HF02_DATABASE_URL gravou o fim so no control.db local e apagou live_runs/<TICKET>.json (core/line/live_run.py clear_state). O run ficou aberto para sempre na Esteira ao vivo ('Possivelmente travado', Preflight ha 3h56) e nao ha como republicar o encerramento, porque o estado que identifica o run_id foi perdido.",
+    "core_journey": [
+      "Em 10/10/2026 um 'live_run.py finish' rodado numa janela sem DARKFAC_HF02_DATABASE_URL gravou o fim so no control.db local e apagou live_runs/<TICKET>.json (core/line/live_run.py clear_state). O run ficou aberto para sempre na Esteira ao vivo ('Possivelmente travado', Preflight ha 3h56) e nao ha como republicar o encerramento, porque o estado que identifica o run_id foi perdido."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "finish/cancel so apagam o estado local quando a publicacao teve sucesso; se falhou, mantem o estado e avisa",
+      "Um novo finish na maquina com a URL correta republica o encerramento do mesmo run_id",
+      "Teste cobre: finish sem sink alcancavel preserva o estado e finish posterior publica"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-10T13:56:25.564629Z",
+    "updated_at": "2026-10-10T13:56:25.564629Z"
   }
 ]
