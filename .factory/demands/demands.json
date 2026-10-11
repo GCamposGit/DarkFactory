@@ -6594,8 +6594,8 @@
     "project_id": "darkfac",
     "title": "run_ticket nao reaproveita a worktree de uma tentativa que estourou o tempo: cria outra e o agente recomeca do zero",
     "origin": "user",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "f3cb226879cef5974b857aed03fde72ce039ab93",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -6618,7 +6618,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-10T22:46:08.951489Z",
-    "updated_at": "2026-10-11T17:49:17.206876Z"
+    "updated_at": "2026-10-11T22:30:08.710347Z"
   },
   {
     "id": "USR-227",
