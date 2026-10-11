@@ -6905,8 +6905,8 @@
     "project_id": "darkfac",
     "title": "PRs de registro de fila ficam abertos ou em conflito e o ticket nunca chega ao backlog da main",
     "origin": "agent",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "dcc89281f77fa6929acfe5b17c955b30eef5ff56",
     "item_type": "operations",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -6939,7 +6939,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-11T17:49:17.206876Z",
-    "updated_at": "2026-10-11T17:49:17.206876Z"
+    "updated_at": "2026-10-11T23:36:01.001990Z"
   },
   {
     "id": "USR-232",
