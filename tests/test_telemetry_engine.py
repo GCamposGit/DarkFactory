@@ -390,10 +390,9 @@ def test_openrouter_provider_telemetry_emission_with_reasoning(tmp_path: Path) -
 # 4. DarkHub REST API Endpoints Tests
 # ---------------------------------------------------------------------------
 
-def test_darkhub_api_telemetry_endpoints(tmp_path: Path) -> None:
+def test_darkhub_api_telemetry_endpoints(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     client = TestClient(app)
 
-    # 1. Post a telemetry event via REST API
     event_payload = {
         "ticket_id": "API-TEST-01",
         "provider": "openrouter",
@@ -408,11 +407,43 @@ def test_darkhub_api_telemetry_endpoints(tmp_path: Path) -> None:
         "cost_usd": 0.0004,
         "success": True,
     }
+
+    # 1a. No DARKFAC_TELEMETRY_KEY configured on the host: ingestion stays open and
+    # requires no header (tests/conftest.py strips the var by default; this is explicit
+    # here because the endpoint's behavior hinges on it -- USR-229).
+    monkeypatch.delenv("DARKFAC_TELEMETRY_KEY", raising=False)
     res_post = client.post("/api/telemetry/events", json=event_payload)
     assert res_post.status_code == 200
     created = res_post.json()
     assert created["ticket_id"] == "API-TEST-01"
     assert created["total_tokens"] == 400
+
+    # 1b. Once a key is configured (as OA-010 does on the real host), a matching
+    # X-DarkFac-Telemetry-Key is accepted.
+    monkeypatch.setenv("DARKFAC_TELEMETRY_KEY", "unit-test-telemetry-key")
+    res_post_valid_key = client.post(
+        "/api/telemetry/events",
+        json={**event_payload, "ticket_id": "API-TEST-01B"},
+        headers={"X-DarkFac-Telemetry-Key": "unit-test-telemetry-key"},
+    )
+    assert res_post_valid_key.status_code == 200
+    assert res_post_valid_key.json()["ticket_id"] == "API-TEST-01B"
+
+    # 1c. A wrong key, or no key at all, is rejected with 401 while a key is configured.
+    res_post_wrong_key = client.post(
+        "/api/telemetry/events",
+        json={**event_payload, "ticket_id": "API-TEST-01C"},
+        headers={"X-DarkFac-Telemetry-Key": "wrong-key"},
+    )
+    assert res_post_wrong_key.status_code == 401
+
+    res_post_missing_key = client.post(
+        "/api/telemetry/events",
+        json={**event_payload, "ticket_id": "API-TEST-01D"},
+    )
+    assert res_post_missing_key.status_code == 401
+
+    monkeypatch.delenv("DARKFAC_TELEMETRY_KEY", raising=False)
 
     # 2. Get runs
     res_runs = client.get("/api/telemetry/runs?ticket_id=API-TEST-01")
