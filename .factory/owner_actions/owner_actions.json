@@ -414,7 +414,7 @@
       "kind": "action",
       "title": "Publicar a regra do congelamento V0 no AGENTS.md (vale para Codex, Grok e Antigravity)",
       "priority": "high",
-      "status": "open",
+      "status": "done",
       "why": "Em 11/10/2026 o owner decidiu congelar tudo que nao e critico ate a linha entregar 5 tickets seguidos sem resgate (docs/plans/V0_OPERACIONAL_2026-10-11.md). A fila ja foi marcada (13 tickets v0-critico, 34 congelado-v0) e o CLAUDE.md ja tem a regra, mas Codex, Grok e Antigravity so leem o AGENTS.md, que e protegido pelo guard.py (so o owner commita direto na main). Sem isso, outro harness pode continuar implementando ticket congelado.",
       "blocks": [
         "USR-178",
@@ -452,7 +452,7 @@
       "verify": "git -C C:\\dev\\DarkFac show origin/main:AGENTS.md termina com a secao '## Congelamento V0 (vigente desde 11/10/2026, todos os harnesses)'.",
       "created_at": "2026-10-11T17:51:15Z",
       "created_by": "claude-code",
-      "resolved_at": null
+      "resolved_at": "2026-10-11T18:54:22Z"
     }
   ]
 }
