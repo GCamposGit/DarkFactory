@@ -143,7 +143,7 @@ from core.infra.metrics import (
     InfraMetricsReport,
     build_infra_metrics_report,
 )
-from core.workflow.job_board import JobBoardEntry, read_job_board
+from core.workflow.job_board import GHOST_OPEN_JOB_CAUSE, JobBoardEntry, is_ghost_open_job, read_job_board
 from core.workflow.line_live import LineLiveSnapshot, read_line_live
 from hub.backend.webhooks import (
     CloudGatewayStatus,
@@ -170,6 +170,31 @@ from core.acceptance.models import HF15MetricsSummary, RollbackExecutionRecord
 
 
 logger = logging.getLogger("darkhub.service")
+
+
+def _queue_text(task: Any, *names: str) -> str:
+    """First non-empty field on a dashboard row (dict or model)."""
+    for name in names:
+        value = task.get(name) if isinstance(task, dict) else getattr(task, name, None)
+        if value:
+            return str(value)
+    return ""
+
+
+def _queue_project(task: Any) -> str:
+    """Project of a dashboard row. The row itself has no project_id; the evidence does."""
+    explicit = _queue_text(task, "project_id")
+    if explicit:
+        return explicit
+    evidence = task.get("evidence") if isinstance(task, dict) else getattr(task, "evidence", None)
+    for entry in evidence or []:
+        label = entry.get("label") if isinstance(entry, dict) else getattr(entry, "label", "")
+        if str(label) != "projeto":
+            continue
+        value = entry.get("value") if isinstance(entry, dict) else getattr(entry, "value", "")
+        if value:
+            return str(value)
+    return "darkfac"
 
 # One control-store read per window, shared by all /api/line/live clients and streams (USR-138).
 LINE_LIVE_CACHE_TTL_SECONDS = 2.5
@@ -690,10 +715,11 @@ class HubService:
             for ref in entry.evidence_refs[:9]
         )
         exceptions: list[str] = []
-        if entry.needs_attention:
+        ghost = is_ghost_open_job(entry.run_status, entry.status)
+        if entry.needs_attention and not ghost:
             reason = entry.cause_code or "sem cause_code registrado"
             exceptions.append(f"{entry.status}: {reason} (tentativa {entry.retry_count}/{entry.max_retries})")
-        status = entry.status.upper()
+        status = (entry.run_status if ghost else entry.status).upper()
         title = entry.title or titles.get(entry.demand_id) or titles.get(entry.ticket_id) or entry.demand_id
         # Real cloud rows carry ticket_id = project_id (e.g. "darkfac"), which is not a
         # meaningful task identifier; use the unique demand_id instead in that case (USR-44).
@@ -711,8 +737,12 @@ class HubService:
             "updated_at": entry.updated_at,
             "evidence": evidence,
             "exceptions": exceptions,
-            "cause_code": entry.cause_code,
-            "diagnostic": entry.diagnostic,
+            "cause_code": GHOST_OPEN_JOB_CAUSE if ghost else entry.cause_code,
+            "diagnostic": (
+                "Job aberto em run ja encerrado; nao exige decisao do owner"
+                if ghost
+                else entry.diagnostic
+            ),
         }
     @staticmethod
     def _dashboard_priority(value: Any) -> int:
@@ -925,30 +955,33 @@ class HubService:
                 for task in task_rep.queue:
                     t_status = getattr(task, "status", None) if not isinstance(task, dict) else task.get("status")
                     if str(t_status or "").upper() == "WAITING_HUMAN":
-                        t_id = getattr(task, "id", "") if not isinstance(task, dict) else task.get("id", "")
-                        t_ticket = getattr(task, "ticket_id", "") if not isinstance(task, dict) else task.get("ticket_id", "")
-                        t_title = getattr(task, "title", "") if not isinstance(task, dict) else task.get("title", "")
-                        t_proj = getattr(task, "project_id", "darkfac") if not isinstance(task, dict) else task.get("project_id", "darkfac")
-                        t_cause = getattr(task, "cause_code", "") if not isinstance(task, dict) else task.get("cause_code", "")
+                        t_id = _queue_text(task, "task_id", "id")
+                        t_ticket = _queue_text(task, "ticket_id") or t_id
+                        t_run = _queue_text(task, "run_id")
+                        t_title = _queue_text(task, "title")
+                        t_proj = _queue_project(task)
+                        t_cause = _queue_text(task, "cause_code")
+                        label = t_ticket or t_run or t_id
                         if project_id and t_proj != project_id:
                             continue
-                        if any(item.action_target_id == t_ticket and item.kind == PriorityInterventionKind.GRILL for item in items):
+                        if any(item.action_target_id == label and item.kind == PriorityInterventionKind.GRILL for item in items):
                             continue
 
                         waiting_human_count += 1
                         items.append(
                             PriorityInterventionItem(
-                                id=f"waiting_human:{t_id or t_ticket}",
+                                id=f"waiting_human:{label}",
                                 kind=PriorityInterventionKind.WAITING_HUMAN,
-                                title=f"Bloqueio WAITING_HUMAN: {t_ticket or t_id} - {t_title or 'Interrupção'}",
+                                title=f"Bloqueio WAITING_HUMAN: {label} - {t_title or 'Interrupção'}",
                                 description=f"Causa: {t_cause or 'Tarefa requer decisão humana ou replan para prosseguir.'}",
                                 project_id=t_proj,
                                 urgency="high",
                                 action_type="modal_task",
-                                action_target_id=t_ticket or t_id,
+                                action_target_id=label,
                                 metadata={
-                                    "task_id": t_id,
+                                    "task_id": t_id or t_ticket,
                                     "ticket_id": t_ticket,
+                                    "run_id": t_run,
                                     "cause_code": t_cause,
                                 },
                             )
