@@ -453,6 +453,31 @@
       "created_at": "2026-10-11T17:51:15Z",
       "created_by": "claude-code",
       "resolved_at": "2026-10-11T18:54:22Z"
+    },
+    {
+      "id": "OA-013",
+      "kind": "action",
+      "title": "Limpar as 22 entradas travadas por ACL da lixeira de worktrees (PowerShell elevado)",
+      "priority": "low",
+      "status": "open",
+      "why": "Causa confirmada no USR-224: o .pytest_cache de worktrees antigas foi criado com ACL restrita (so SYSTEM/Administradores), entao a limpeza automatica sem elevacao nao consegue apagar 22 entradas em .factory/backups/trash. Elas ocupam disco e repetem uma linha de aviso por varredura. Nao bloqueia entregas.",
+      "blocks": [
+        "USR-224"
+      ],
+      "depends_on": [],
+      "steps": [
+        {
+          "text": "Clique no menu Iniciar, digite PowerShell, clique com o botao direito em Windows PowerShell e escolha Executar como administrador (confirme o aviso do Controle de Conta de Usuario com Sim)."
+        },
+        {
+          "text": "Cole o comando abaixo e tecle Enter: ele so mexe nas entradas com mais de 7 dias (as mais novas ficam, porque a lixeira as guarda de proposito para recuperacao); toma posse, libera o .pytest_cache e apaga a entrada.",
+          "command": "Get-ChildItem C:\\dev\\DarkFac\\.factory\\backups\\trash -Directory | Where-Object { $_.LastWriteTime -lt (Get-Date).AddDays(-7) } | ForEach-Object { takeown /F \"$($_.FullName)\" /R /D Y | Out-Null; icacls \"$($_.FullName)\" /grant '*S-1-5-32-544:(OI)(CI)F' /T /C | Out-Null; Remove-Item -LiteralPath $_.FullName -Recurse -Force -ErrorAction Continue }"
+        }
+      ],
+      "verify": "Get-ChildItem C:\\dev\\DarkFac\\.factory\\backups\\trash -Directory | Where-Object { $_.LastWriteTime -lt (Get-Date).AddDays(-7) } | Measure-Object deve mostrar Count : 0. Depois marque esta acao como feita no DarkHub.",
+      "created_at": "2026-10-11T19:15:29Z",
+      "created_by": "claude-code",
+      "resolved_at": null
     }
   ]
 }

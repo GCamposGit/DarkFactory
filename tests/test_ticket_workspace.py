@@ -606,3 +606,125 @@ def test_run_ticket_keeps_the_worktree_when_a_failed_agent_left_work_behind(
     assert run_ticket.main(["USR-96", "--harness", "codex", "--skip-validation", "--json"]) == 1
 
     assert (seen["cwd"] / "half_done.py").exists()  # the partial work is never destroyed
+
+
+# ----------------------------------------------------------------------
+# USR-224: trash purge -- read-only entries, one summary line, unremovable listed once
+# ----------------------------------------------------------------------
+
+_OLD_STAMP = (NOW - timedelta(days=30)).strftime("%Y%m%dT%H%M%SZ")
+
+
+def _old_entry(local: Path, name: str) -> Path:
+    entry = local / ".factory" / "backups" / "trash" / f"{name}-{_OLD_STAMP}"
+    entry.mkdir(parents=True)
+    return entry
+
+
+def _purge_records(caplog: pytest.LogCaptureFixture) -> list[str]:
+    return [r.getMessage() for r in caplog.records if r.name == "darkfac.git.ticket_workspace"]
+
+
+@pytest.mark.skipif(os.name != "nt", reason="read-only attribute semantics of Windows")
+def test_purge_trash_removes_readonly_entry_without_error(
+    repo: SimpleNamespace, caplog: pytest.LogCaptureFixture
+) -> None:
+    entry = _old_entry(repo.local, "usr-65")
+    objects = entry / "objs" / "pack"
+    objects.mkdir(parents=True)
+    packed = objects / "pack-1.idx"
+    packed.write_text("x", encoding="utf-8")
+    (entry / "top.txt").write_text("y", encoding="utf-8")
+    for read_only in (packed, entry / "top.txt"):
+        os.chmod(read_only, 0o444)  # FILE_ATTRIBUTE_READONLY
+    os.chmod(objects, 0o555)  # the attribute on a directory as well
+    assert not os.access(packed, os.W_OK)
+
+    with caplog.at_level("INFO", logger="darkfac.git.ticket_workspace"):
+        report = purge_trash(repo.local, now_fn=lambda: NOW)
+
+    assert report.purged == [entry.name] and report.failed == []
+    assert not entry.exists()
+    messages = _purge_records(caplog)
+    assert len(messages) == 1 and "1 purged" in messages[0]
+    assert not any(r.levelname == "WARNING" for r in caplog.records)
+
+
+def test_purge_trash_unremovable_entries_are_one_summary_line_with_reason(
+    repo: SimpleNamespace, caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    stuck = [_old_entry(repo.local, f"usr-{n}") for n in (65, 66, 67)]
+    free = _old_entry(repo.local, "usr-94")
+    for entry in stuck:
+        (entry / ".pytest_cache").mkdir()
+    real_purge = ticket_workspace._purge_tree
+
+    def fake_purge(path: Path) -> list[tuple[str, OSError]]:
+        if (path / ".pytest_cache").exists():  # emulates a protected ACL that nothing can clear
+            denied = PermissionError(13, "Access is denied", str(path / ".pytest_cache"))
+            denied.winerror = 5  # type: ignore[attr-defined]
+            return [(str(path / ".pytest_cache"), denied)]
+        return real_purge(path)
+
+    monkeypatch.setattr(ticket_workspace, "_purge_tree", fake_purge)
+    reclaimed: list[Path] = []
+
+    with caplog.at_level("INFO", logger="darkfac.git.ticket_workspace"):
+        report = purge_trash(
+            repo.local, now_fn=lambda: NOW, reclaim_fn=lambda p: reclaimed.append(p) or False
+        )
+
+    assert report.purged == [free.name]
+    assert [f.split(":")[0] for f in report.failed] == [e.name for e in stuck]
+    assert all("WinError 5" in f and ".pytest_cache" in f for f in report.failed)
+    assert all(e.exists() for e in stuck)  # nothing is lost when it cannot be removed
+    assert len(reclaimed) == 3  # one reclaim attempt per stuck entry
+    messages = _purge_records(caplog)
+    assert len(messages) == 1  # ONE line, not one warning per entry
+    assert "3 unremovable" in messages[0] and "1 purged" in messages[0]
+    assert all(e.name in messages[0] for e in stuck)
+
+
+def test_purge_trash_reclaim_unblocks_the_retry(
+    repo: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    entry = _old_entry(repo.local, "usr-76")
+    (entry / ".pytest_cache").mkdir()
+    state = {"reclaimed": False}
+
+    def fake_purge(path: Path) -> list[tuple[str, OSError]]:
+        if not state["reclaimed"]:
+            denied = PermissionError(13, "Access is denied", str(path / ".pytest_cache"))
+            denied.winerror = 5  # type: ignore[attr-defined]
+            return [(str(path / ".pytest_cache"), denied)]
+        for child in path.iterdir():
+            child.rmdir()
+        path.rmdir()
+        return []
+
+    def reclaim(_path: Path) -> bool:
+        state["reclaimed"] = True
+        return True
+
+    monkeypatch.setattr(ticket_workspace, "_purge_tree", fake_purge)
+    report = purge_trash(repo.local, now_fn=lambda: NOW, reclaim_fn=reclaim)
+
+    assert report.purged == [entry.name] and report.failed == [] and not entry.exists()
+
+
+def test_purge_trash_keeps_walking_past_a_blocked_path(repo: SimpleNamespace) -> None:
+    entry = _old_entry(repo.local, "usr-80-fix")
+    (entry / "a").mkdir()
+    (entry / "a" / "f.txt").write_text("1", encoding="utf-8")
+    (entry / "z.txt").write_text("2", encoding="utf-8")
+    blocked = ticket_workspace._purge_tree(entry)
+    assert blocked == [] and not entry.exists()
+
+
+def test_purge_trash_summary_is_silent_when_there_is_nothing_to_do(
+    repo: SimpleNamespace, caplog: pytest.LogCaptureFixture
+) -> None:
+    (repo.local / ".factory" / "backups" / "trash").mkdir(parents=True)
+    with caplog.at_level("DEBUG", logger="darkfac.git.ticket_workspace"):
+        report = purge_trash(repo.local, now_fn=lambda: NOW)
+    assert report.purged == [] and report.failed == [] and _purge_records(caplog) == []
