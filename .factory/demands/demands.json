@@ -4923,9 +4923,10 @@
     "lifecycle_stage": "execution",
     "horizon": "now",
     "tags": [
-      "user-demand"
+      "user-demand",
+      "owner-decision:OA-005=A"
     ],
-    "problem_statement": "Durante a conclusao de USR-134 foi verificado que core/line/recovery_context.py preserva refs/heads/darkfac-context/<run_id> sem mecanismo de limpeza. A retencao apos sucesso ou falha terminal nao esta definida. PR #143 resolve recuperacao e seus criterios de aceite, mas a higiene das referencias requer politica explicita sem remover contexto necessario ao retry.",
+    "problem_statement": "Durante a conclusao de USR-134 foi verificado que core/line/recovery_context.py preserva refs/heads/darkfac-context/<run_id> sem mecanismo de limpeza. A retencao apos sucesso ou falha terminal nao esta definida. PR #143 resolve recuperacao e seus criterios de aceite, mas a higiene das referencias requer politica explicita sem remover contexto necessario ao retry.\n\n[Decisao do owner OA-005] Decidir a retencao do contexto de recuperacao dos runs (USR-169) -> opcao A (Limpar 14 dias apos estado terminal (recomendado)), em 2026-10-11T07:46:09Z. Nota do owner: Owner escolheu opcao A: Limpar 14 dias apos estado terminal (confirmado no chat)",
     "core_journey": [
       "Durante a conclusao de USR-134 foi verificado que core/line/recovery_context.py preserva refs/heads/darkfac-context/<run_id> sem mecanismo de limpeza. A retencao apos sucesso ou falha terminal nao esta definida. PR #143 resolve recuperacao e seus criterios de aceite, mas a higiene das referencias requer politica explicita sem remover contexto necessario ao retry."
     ],
@@ -4940,7 +4941,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-08T20:38:02.644959Z",
-    "updated_at": "2026-10-08T20:38:02.644959Z"
+    "updated_at": "2026-10-11T07:46:09.499266Z"
   },
   {
     "id": "USR-175",
