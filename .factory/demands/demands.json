@@ -6665,5 +6665,34 @@
     "dependencies": [],
     "created_at": "2026-10-11T05:45:09.817800Z",
     "updated_at": "2026-10-11T05:45:09.817800Z"
+  },
+  {
+    "id": "USR-229",
+    "project_id": "darkfac",
+    "title": "Isolar DARKFAC_TELEMETRY_KEY em test_darkhub_api_telemetry_endpoints",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "Apos OA-010 configurar DARKFAC_TELEMETRY_KEY no host, test_darkhub_api_telemetry_endpoints falha com 401 em client.post('/api/telemetry/events') por falta de isolamento de ambiente (monkeypatch) e envio de header X-DarkFac-Telemetry-Key. Tambem a tarefa de sync de uso em background toca .factory/usage durante a suite.",
+    "core_journey": [
+      "Apos OA-010 configurar DARKFAC_TELEMETRY_KEY no host, test_darkhub_api_telemetry_endpoints falha com 401 em client.post('/api/telemetry/events') por falta de isolamento de ambiente (monkeypatch) e envio de header X-DarkFac-Telemetry-Key. Tambem a tarefa de sync de uso em background toca .factory/usage durante a suite."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "test_darkhub_api_telemetry_endpoints isola DARKFAC_TELEMETRY_KEY via monkeypatch para o caso sem chave e testa com X-DarkFac-Telemetry-Key valido e invalido",
+      "pytest tests/test_telemetry_engine.py passa localmente independente de variaveis de ambiente do host"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-11T07:29:42.477385Z",
+    "updated_at": "2026-10-11T07:29:42.477385Z"
   }
 ]
