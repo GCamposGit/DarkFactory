@@ -155,12 +155,17 @@
       "kind": "decision",
       "title": "Decidir a retencao do contexto de recuperacao dos runs (USR-169)",
       "priority": "medium",
-      "status": "open",
+      "status": "done",
       "why": "core/line/recovery_context.py guarda refs/heads/darkfac-context/<run_id> sem nenhuma limpeza. O ticket USR-169 exige a politica do owner antes de implementar a limpeza (Gate G1): nao pode ser assumida.",
       "blocks": [
         "USR-169"
       ],
       "depends_on": [],
+      "steps": [
+        {
+          "text": "Escolha uma opcao (A, B ou C) e registre a resposta neste item no DarkHub (campo de decisao). A fabrica destrava o USR-169 sozinha."
+        }
+      ],
       "options": [
         {
           "id": "A",
@@ -178,15 +183,16 @@
           "detail": "Limpeza so por comando manual do owner."
         }
       ],
-      "steps": [
-        {
-          "text": "Escolha uma opcao (A, B ou C) e registre a resposta neste item no DarkHub (campo de decisao). A fabrica destrava o USR-169 sozinha."
-        }
-      ],
       "verify": "O item aparece como respondido e o USR-169 sai de bloqueado.",
       "created_at": "2026-10-09T22:00:00Z",
       "created_by": "claude-code",
-      "resolved_at": null
+      "resolved_at": "2026-10-11T07:46:09Z",
+      "answer": {
+        "option_id": "A",
+        "note": "Owner escolheu opcao A: Limpar 14 dias apos estado terminal (confirmado no chat)",
+        "answered_at": "2026-10-11T07:46:09Z",
+        "answered_by": "owner"
+      }
     },
     {
       "id": "OA-006",
