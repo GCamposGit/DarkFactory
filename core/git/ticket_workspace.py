@@ -619,34 +619,180 @@ def _trash_age(entry: Path, now: datetime) -> timedelta:
         return timedelta(0)
 
 
+ReclaimFn = Callable[[Path], bool]
+
+_WINERROR_ACCESS_DENIED = 5
+_PURGE_MAX_PASSES = 3
+_SUMMARY_MAX_NAMES = 5
+
+
+def _is_access_denied(exc: BaseException) -> bool:
+    """True for ``PermissionError`` / ``[WinError 5] Access is denied``."""
+    return isinstance(exc, PermissionError) or getattr(exc, "winerror", None) == _WINERROR_ACCESS_DENIED
+
+
+def _purge_tree(path: Path) -> list[tuple[str, OSError]]:
+    """Delete as much of ``path`` as possible; return the ``(path, error)`` pairs that resisted.
+
+    Each failing step first gets the read-only bit cleared and ONE retry
+    (``shutil.rmtree`` ``onexc`` hook); a step that still fails is recorded and the walk goes on, so
+    one blocked directory no longer stops its siblings from being deleted. When a directory was only
+    unreadable because of the read-only bit, a further pass (at most ``_PURGE_MAX_PASSES``) picks up
+    the contents that the first pass had to skip.
+    """
+    blocked: list[tuple[str, OSError]] = []
+
+    def hook(func: Callable[[str], Any], target: str, exc: BaseException) -> None:
+        if isinstance(exc, FileNotFoundError):
+            return
+        try:
+            os.chmod(target, stat.S_IWRITE | stat.S_IREAD | stat.S_IEXEC)
+        except OSError:
+            pass
+        try:
+            func(target)
+        except FileNotFoundError:
+            return
+        except OSError as again:
+            blocked.append((target, again))
+
+    for _ in range(_PURGE_MAX_PASSES):
+        blocked.clear()
+        try:
+            shutil.rmtree(path, onexc=hook)
+        except FileNotFoundError:
+            return []
+        if not path.exists() or not blocked:
+            break
+    return list(blocked) if path.exists() else []
+
+
+def _reclaim_windows_access(path: Path) -> bool:
+    """Best effort: take ownership of ``path`` and grant the current user full control (Windows only).
+
+    Needs an elevated token when the owner is another identity; without it both commands fail and
+    this returns False (the caller then reports the entry as unremovable, once).
+    """
+    if sys.platform != "win32":
+        return False
+    import getpass
+
+    user = getpass.getuser()
+    commands = (
+        ["takeown", "/F", str(path), "/R", "/D", "Y"],
+        ["icacls", str(path), "/grant", f"{user}:(OI)(CI)F", "/T", "/C", "/Q"],
+    )
+    ok = True
+    for cmd in commands:
+        try:
+            done = subprocess.run(
+                cmd, capture_output=True, text=True, encoding="utf-8", errors="replace",
+                timeout=_GIT_TIMEOUT_S, **_win_kwargs(),
+            )
+        except (OSError, subprocess.SubprocessError) as exc:
+            logger.debug("Reclaim command %s failed to run: %s", cmd[0], exc)
+            return False
+        ok = ok and done.returncode == 0
+    return ok
+
+
+def _describe_failure(entry: Path, blocked: Sequence[tuple[str, OSError]], exc: Optional[OSError]) -> str:
+    """Short, single-line reason an entry could not be removed (the first blocker is enough)."""
+    if blocked:
+        target, error = blocked[0]
+        try:
+            where = str(Path(target).relative_to(entry))
+        except ValueError:
+            where = target
+        if _is_access_denied(error):
+            return f"access denied (WinError 5) at {where}: protected ACL or foreign owner"
+        return f"{error.strerror or error} at {where}"
+    if exc is not None:
+        return "access denied (WinError 5): protected ACL or foreign owner" if _is_access_denied(exc) else str(exc)
+    return "entry still present after removal"
+
+
 def purge_trash(
     main_root: Path,
     *,
     retention_days: float = TRASH_RETENTION_DAYS,
     now_fn: Optional[NowFn] = None,
     rmtree_fn: Optional[RmtreeFn] = None,
+    reclaim_fn: Optional[ReclaimFn] = None,
 ) -> TrashReport:
-    """Delete trash entries older than ``retention_days``; younger ones stay recoverable."""
+    """Delete trash entries older than ``retention_days``; younger ones stay recoverable.
+
+    Read-only files and directories are cleared and retried (see :func:`_purge_tree`). Failures are
+    NOT logged one by one: the sweep emits ONE summary line per call (purged / kept / unremovable
+    with the reason) so a stuck entry cannot bury useful messages (USR-224). The per-entry reasons
+    are also in ``TrashReport.failed`` (``"<entry>: <reason>"``).
+
+    Diagnosis of the recurring ``[WinError 5]`` (USR-224, evidence collected on the real trash,
+    22 entries, read-only probes only): the read-only attribute was NOT the cause (0 files with
+    ``FILE_ATTRIBUTE_READONLY`` in 31 entries). Exactly one directory per entry resists, the
+    ``.pytest_cache`` at its root: ``icacls`` on it answers "Acesso negado", ``Get-Acl`` fails with
+    "unauthorized operation" and ``CreateFileW`` with DELETE access returns error 5, while the
+    entry itself and every other file open fine. ``pytest`` creates that directory with
+    ``tempfile.mkdtemp`` (mode 0o700), which on Windows applies a PROTECTED DACL granting only
+    SYSTEM, Administrators and OWNER RIGHTS (reproduced: ``icacls`` of a fresh ``mkdtemp`` shows
+    just those three, no inheritance). Created by another identity (an elevated or sandboxed
+    agent run), the owner is not the interactive user, whose token carries Administrators only as
+    deny-only; neither DELETE on the object nor DELETE_CHILD on the parent is available, so even
+    ``git worktree remove``/``rmtree`` fail and the worktree lands in the trash in the first place.
+    No handle was open (sharing violations are WinError 32, not 5). Only an elevated
+    ``takeown``/``icacls`` can fix those entries; ``reclaim_fn`` tries that when the process has the
+    rights and is otherwise a harmless no-op.
+    """
     report = TrashReport()
     trash = main_root / TRASH_RELATIVE
     if not trash.is_dir():
         return report
     now = (now_fn or utc_now)()
-    remove_tree = rmtree_fn or robust_rmtree
+    reclaim = reclaim_fn or _reclaim_windows_access
     for entry in sorted(trash.iterdir(), key=lambda p: p.name):
         if _trash_age(entry, now) < timedelta(days=retention_days):
             report.kept.append(entry.name)
             continue
+        blocked: list[tuple[str, OSError]] = []
+        failure: Optional[OSError] = None
         try:
             if entry.is_dir() and not entry.is_symlink():
-                remove_tree(entry)
+                if rmtree_fn is not None:
+                    rmtree_fn(entry)
+                else:
+                    blocked = _purge_tree(entry)
+                    denied = sorted({t for t, e in blocked if _is_access_denied(e)})
+                    if denied and os.path.lexists(entry):
+                        if any(reclaim(Path(target)) for target in denied):
+                            blocked = _purge_tree(entry)
             else:
-                entry.unlink()
-            report.purged.append(entry.name)
+                try:
+                    entry.unlink()
+                except PermissionError:
+                    os.chmod(entry, stat.S_IWRITE | stat.S_IREAD)
+                    entry.unlink()
         except OSError as exc:
-            logger.warning("Could not purge trash entry %s: %s", entry, exc)
-            report.failed.append(f"{entry.name}: {exc}")
+            failure = exc
+        if not os.path.lexists(entry):
+            report.purged.append(entry.name)
+        else:
+            report.failed.append(f"{entry.name}: {_describe_failure(entry, blocked, failure)}")
+    _log_purge_summary(report)
     return report
+
+
+def _log_purge_summary(report: TrashReport) -> None:
+    """ONE line per sweep; unremovable entries are listed once, with the reason of each."""
+    if not (report.purged or report.failed):
+        return
+    summary = f"Trash purge: {len(report.purged)} purged, {len(report.kept)} kept (recoverable)"
+    if not report.failed:
+        logger.info(summary)
+        return
+    shown = "; ".join(report.failed[:_SUMMARY_MAX_NAMES])
+    extra = len(report.failed) - _SUMMARY_MAX_NAMES
+    more = f"; +{extra} more (see TrashReport.failed)" if extra > 0 else ""
+    logger.warning("%s, %d unremovable: %s%s", summary, len(report.failed), shown, more)
 
 
 def find_ticket_worktree(
