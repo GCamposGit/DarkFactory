@@ -6701,8 +6701,8 @@
     "project_id": "darkfac",
     "title": "agent_cli: _run_antigravity devolve ok=True com exit code diferente de zero e o erro vira parecer valido",
     "origin": "user",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "339bc829fbc88cd22ddea4ffb1fe906b7bf58f0a",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -6725,6 +6725,6 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-11T09:13:33.461163Z",
-    "updated_at": "2026-10-11T09:13:33.461163Z"
+    "updated_at": "2026-10-11T10:02:17.823383Z"
   }
 ]
