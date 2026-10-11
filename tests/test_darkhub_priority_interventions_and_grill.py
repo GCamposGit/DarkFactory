@@ -163,6 +163,30 @@ def test_hub_service_aggregates_waiting_human_tasks(mock_hub_service: HubService
         assert any(it.action_target_id == "USR-99" for it in waiting_items)
 
 
+def test_waiting_human_intervention_reads_the_dashboard_task_id(mock_hub_service: HubService):
+    """The task board exposes task_id, not id/ticket_id. The queue must still name the demand."""
+    fake_task = {
+        "task_id": "dem-722f8e52bd7c",
+        "title": "Canário diário 2026-09-30",
+        "status": "WAITING_HUMAN",
+        "run_id": "run-d4d10d4aee94",
+        "cause_code": "grill_pending",
+        "evidence": [{"label": "projeto", "value": "darkfac-canary"}],
+    }
+    with patch.object(mock_hub_service, "get_task_dashboard") as mock_dash:
+        mock_dash.return_value = MagicMock(queue=[fake_task])
+        report = mock_hub_service.get_priority_interventions()
+    waiting = [
+        item for item in report.items
+        if item.kind == PriorityInterventionKind.WAITING_HUMAN and item.action_target_id == "dem-722f8e52bd7c"
+    ]
+    assert len(waiting) == 1
+    assert waiting[0].title == "Bloqueio WAITING_HUMAN: dem-722f8e52bd7c - Canário diário 2026-09-30"
+    assert waiting[0].project_id == "darkfac-canary"
+    assert waiting[0].metadata["task_id"] == "dem-722f8e52bd7c"
+    assert waiting[0].metadata["run_id"] == "run-d4d10d4aee94"
+
+
 def test_hub_service_aggregates_g8_deploy_gates(mock_hub_service: HubService):
     """Ensure projects requiring owner signoff are aggregated into G8 deploy gates."""
     from core.enterprise.policy import EnterprisePolicyGuard

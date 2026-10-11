@@ -7195,5 +7195,39 @@
     "dependencies": [],
     "created_at": "2026-10-11T20:27:57.158166Z",
     "updated_at": "2026-10-11T20:27:57.158166Z"
+  },
+  {
+    "id": "USR-241",
+    "project_id": "darkfac",
+    "title": "Fechar job WAITING_HUMAN orfao de run ja encerrado",
+    "origin": "user",
+    "status": "completed",
+    "delivery_evidence": "c73d03bc3dac9ca971834321346366db1a513d45",
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "O canario de 2026-09-30 (dem-722f8e52bd7c, run-d4d10d4aee94) ficou 11 dias na fila de intervencoes do DarkHub. O run ja estava completed e o job de grill seguia waiting_human. A fila lia id/ticket_id, campos que o dashboard nao tem, e o titulo saia sem identificador.",
+    "core_journey": [
+      "O owner abre o DarkHub e nao ve mais o canario de 2026-09-30 como bloqueio."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Job waiting_human cujo run esta completed, failed ou cancelled nao entra na fila de intervencoes.",
+      "O sweeper de waiting_human cancela esse job.",
+      "A intervencao de um WAITING_HUMAN real mostra o task_id do dashboard."
+    ],
+    "suggested_files": [
+      "core/workflow/job_board.py",
+      "hub/backend/service.py",
+      "core/orchestrator/cloud_worker.py"
+    ],
+    "estimated_complexity": "low",
+    "dependencies": [],
+    "created_at": "2026-10-11T17:32:33.046439Z",
+    "updated_at": "2026-10-11T17:41:04.398223Z"
   }
 ]
