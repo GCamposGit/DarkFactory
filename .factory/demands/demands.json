@@ -3917,14 +3917,15 @@
     "delivery_evidence": null,
     "item_type": "feature",
     "lifecycle_stage": "execution",
-    "horizon": "now",
+    "horizon": "later",
     "tags": [
       "user-demand",
       "autonomy-throughput",
       "wave-current",
-      "protected-governance"
+      "protected-governance",
+      "congelado-v0"
     ],
-    "problem_statement": "Em 04/10/2026, runner.py --quick --local --no-cache interrompeu o bloco paralelo em 908,5s por timeout de 900s, count=0. A mesma suíte com limite diagnóstico de 2400s terminou em 916,1s, descobriu 2971 testes (2959 passaram, 6 falharam, 6 pulados antes de corrigir os seis). A CI do PR #136 bloqueou alterar harness.config.json porque o arquivo só aceita commit direto humano.\n\nRecorrencia em 2026-10-08 ao validar USR-134: python core/harness/runner.py --quick fez fallback local apos perda do worker e excedeu timeout1500: STEP_TIME=1501.7s, TEST_COUNT=0, HARNESS_FAIL. Investigar causa e restaurar conclusao verificavel; nao apenas aumentar limite sem evidencia.\n\nRecorrencia isolada em 2026-10-09: candidato b8fd5c1 em .worktrees/usr134-frozen-gate-20261009 excedeu 1500s (1508.7s), exit124 e count0; sem mudanca de HEAD. CI Windows do mesmo candidato/config aprovou 3577 testes e 8 skips em 2026-10-08. Investigar ambiente Notebook; log .factory/test_logs/usr134_frozen_gate.log. ATUALIZACAO (10/10/2026): o owner aplicou o limite na main (commit eb37442, OA-011): timeout_sec 3000 no passo unit_and_integration_tests_parallel e 300 no serial. Motivo medido: a suite de 3818 testes levou 1447 s a 1503 s no worker do Desktop e o passo foi cortado em 1502,9 s e 1503,3 s sem nenhum teste falhar (USR-187 e USR-193). Depois disso os portoes dos USR-187 e USR-189 passaram. Cumprido: decisao e aplicacao do owner (criterio 2). Pendente: medir de novo a duracao da suite completa no Notebook (criterio 1) e registrar um portao aprovado com contagem positiva no Notebook (criterio 3); os portoes recentes rodaram no Desktop.",
+    "problem_statement": "Em 04/10/2026, runner.py --quick --local --no-cache interrompeu o bloco paralelo em 908,5s por timeout de 900s, count=0. A mesma suíte com limite diagnóstico de 2400s terminou em 916,1s, descobriu 2971 testes (2959 passaram, 6 falharam, 6 pulados antes de corrigir os seis). A CI do PR #136 bloqueou alterar harness.config.json porque o arquivo só aceita commit direto humano.\n\nRecorrencia em 2026-10-08 ao validar USR-134: python core/harness/runner.py --quick fez fallback local apos perda do worker e excedeu timeout1500: STEP_TIME=1501.7s, TEST_COUNT=0, HARNESS_FAIL. Investigar causa e restaurar conclusao verificavel; nao apenas aumentar limite sem evidencia.\n\nRecorrencia isolada em 2026-10-09: candidato b8fd5c1 em .worktrees/usr134-frozen-gate-20261009 excedeu 1500s (1508.7s), exit124 e count0; sem mudanca de HEAD. CI Windows do mesmo candidato/config aprovou 3577 testes e 8 skips em 2026-10-08. Investigar ambiente Notebook; log .factory/test_logs/usr134_frozen_gate.log. ATUALIZACAO (10/10/2026): o owner aplicou o limite na main (commit eb37442, OA-011): timeout_sec 3000 no passo unit_and_integration_tests_parallel e 300 no serial. Motivo medido: a suite de 3818 testes levou 1447 s a 1503 s no worker do Desktop e o passo foi cortado em 1502,9 s e 1503,3 s sem nenhum teste falhar (USR-187 e USR-193). Depois disso os portoes dos USR-187 e USR-189 passaram. Cumprido: decisao e aplicacao do owner (criterio 2). Pendente: medir de novo a duracao da suite completa no Notebook (criterio 1) e registrar um portao aprovado com contagem positiva no Notebook (criterio 3); os portoes recentes rodaram no Desktop.\n\nCONGELADO em 11/10/2026 (plano V0, docs/plans/V0_OPERACIONAL_2026-10-11.md): fora do caminho critico da linha. Consolidado em USR-178 (portao confiavel).",
     "core_journey": [
       "Em 04/10/2026, runner.py --quick --local --no-cache interrompeu o bloco paralelo em 908,5s por timeout de 900s, count=0. A mesma suíte com limite diagnóstico de 2400s terminou em 916,1s, descobriu 2971 testes (2959 passaram, 6 falharam, 6 pulados antes de corrigir os seis). A CI do PR #136 bloqueou alterar harness.config.json porque o arquivo só aceita commit direto humano.\n\nRecorrencia em 2026-10-08 ao validar USR-134: python core/harness/runner.py --quick fez fallback local apos perda do worker e excedeu timeout1500: STEP_TIME=1501.7s, TEST_COUNT=0, HARNESS_FAIL. Investigar causa e restaurar conclusao verificavel; nao apenas aumentar limite sem evidencia.\n\nRecorrencia isolada em 2026-10-09: candidato b8fd5c1 em .worktrees/usr134-frozen-gate-20261009 excedeu 1500s (1508.7s), exit124 e count0; sem mudanca de HEAD. CI Windows do mesmo candidato/config aprovou 3577 testes e 8 skips em 2026-10-08. Investigar ambiente Notebook; log .factory/test_logs/usr134_frozen_gate.log. ATUALIZACAO (10/10/2026): o owner aplicou o limite na main (commit eb37442, OA-011): timeout_sec 3000 no passo unit_and_integration_tests_parallel e 300 no serial. Motivo medido: a suite de 3818 testes levou 1447 s a 1503 s no worker do Desktop e o passo foi cortado em 1502,9 s e 1503,3 s sem nenhum teste falhar (USR-187 e USR-193). Depois disso os portoes dos USR-187 e USR-189 passaram. Cumprido: decisao e aplicacao do owner (criterio 2). Pendente: medir de novo a duracao da suite completa no Notebook (criterio 1) e registrar um portao aprovado com contagem positiva no Notebook (criterio 3); os portoes recentes rodaram no Desktop."
     ],
@@ -3942,7 +3943,7 @@
     "estimated_complexity": "small",
     "dependencies": [],
     "created_at": "2026-10-04T08:18:40.458904Z",
-    "updated_at": "2026-10-10T19:55:00Z"
+    "updated_at": "2026-10-11T17:49:17.206876Z"
   },
   {
     "id": "USR-138",
@@ -4522,11 +4523,12 @@
     "delivery_evidence": null,
     "item_type": "feature",
     "lifecycle_stage": "execution",
-    "horizon": "now",
+    "horizon": "later",
     "tags": [
-      "user-demand"
+      "user-demand",
+      "congelado-v0"
     ],
-    "problem_statement": "O USR-111 fechou o PermissionError do ledger de uso (core/usage/store.py) com causa raiz, mas o R02 EFFECT_SERVICE_UNAVAILABLE (ConnectionAbortedError WinError 10053 no effect_server, run 37596976676) recebeu apenas mitigacao (backlog 128 e handle_error silencioso); a causa raiz nao foi provada. ATUALIZACAO (10/10/2026): segunda ocorrencia do R02 na CI da main (run 38075939123, commit dc89843, job main-validation windows), desta vez como \"'usr157-R02-1' is stale or expired\" (lease expirado) no teste test_r02_crash_lands_at_the_parked_checkpoint_and_orders_diagnostics; os runs seguintes da main (commits c0f67ba e 6e30ce8) passaram, entao a falha nao e deterministica. Incluir esse sintoma na investigacao; hipotese a confirmar: o lease expira antes de o checkpoint estacionado ser alcancado quando o runner Windows esta lento.",
+    "problem_statement": "O USR-111 fechou o PermissionError do ledger de uso (core/usage/store.py) com causa raiz, mas o R02 EFFECT_SERVICE_UNAVAILABLE (ConnectionAbortedError WinError 10053 no effect_server, run 37596976676) recebeu apenas mitigacao (backlog 128 e handle_error silencioso); a causa raiz nao foi provada. ATUALIZACAO (10/10/2026): segunda ocorrencia do R02 na CI da main (run 38075939123, commit dc89843, job main-validation windows), desta vez como \"'usr157-R02-1' is stale or expired\" (lease expirado) no teste test_r02_crash_lands_at_the_parked_checkpoint_and_orders_diagnostics; os runs seguintes da main (commits c0f67ba e 6e30ce8) passaram, entao a falha nao e deterministica. Incluir esse sintoma na investigacao; hipotese a confirmar: o lease expira antes de o checkpoint estacionado ser alcancado quando o runner Windows esta lento.\n\nCONGELADO em 11/10/2026 (plano V0, docs/plans/V0_OPERACIONAL_2026-10-11.md): fora do caminho critico da linha.",
     "core_journey": [
       "O USR-111 fechou o PermissionError do ledger de uso (core/usage/store.py) com causa raiz, mas o R02 EFFECT_SERVICE_UNAVAILABLE (ConnectionAbortedError WinError 10053 no effect_server, run 37596976676) recebeu apenas mitigacao (backlog 128 e handle_error silencioso); a causa raiz nao foi provada. ATUALIZACAO (10/10/2026): segunda ocorrencia do R02 na CI da main (run 38075939123, commit dc89843, job main-validation windows), desta vez como \"'usr157-R02-1' is stale or expired\" (lease expirado) no teste test_r02_crash_lands_at_the_parked_checkpoint_and_orders_diagnostics; os runs seguintes da main (commits c0f67ba e 6e30ce8) passaram, entao a falha nao e deterministica. Incluir esse sintoma na investigacao; hipotese a confirmar: o lease expira antes de o checkpoint estacionado ser alcancado quando o runner Windows esta lento."
     ],
@@ -4541,7 +4543,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-08T13:38:42.299317Z",
-    "updated_at": "2026-10-10T19:55:00Z"
+    "updated_at": "2026-10-11T17:49:17.206876Z"
   },
   {
     "id": "USR-158",
@@ -4856,11 +4858,12 @@
     "delivery_evidence": null,
     "item_type": "feature",
     "lifecycle_stage": "execution",
-    "horizon": "now",
+    "horizon": "later",
     "tags": [
-      "user-demand"
+      "user-demand",
+      "congelado-v0"
     ],
-    "problem_statement": "Seguimento do USR-168. A documentacao oficial do Haiku 5.5 (posicionamento: classificacao, roteamento, extracao e subagentes; Sonnet 5.5 e Opus 5.5 seguem melhores em codificacao agentica complexa) mostra lacunas na politica v1: (1) nao ha tipos elegiveis somente leitura (busca de codigo, destilar logs, triagem), onde o Haiku traz a maior economia com menor risco; (2) stop_reason refusal do Haiku (sem fallback no servidor) nao e gatilho explicito de escalonamento; (3) o Haiku as vezes relata a mudanca como pronta sem verificar, e a politica nao exige que o orquestrador rode o aceite; (4) falta prompt-padrao do Haiku (esforco medium, max_tokens com folga para thinking, trechos de verificar antes de concluir e continuar ate terminar); (5) os limites de 3 arquivos e 150 linhas sao hipoteses sem medicao e nao ha telemetria por modelo (sucesso na primeira tentativa, tokens, escalacoes).",
+    "problem_statement": "Seguimento do USR-168. A documentacao oficial do Haiku 5.5 (posicionamento: classificacao, roteamento, extracao e subagentes; Sonnet 5.5 e Opus 5.5 seguem melhores em codificacao agentica complexa) mostra lacunas na politica v1: (1) nao ha tipos elegiveis somente leitura (busca de codigo, destilar logs, triagem), onde o Haiku traz a maior economia com menor risco; (2) stop_reason refusal do Haiku (sem fallback no servidor) nao e gatilho explicito de escalonamento; (3) o Haiku as vezes relata a mudanca como pronta sem verificar, e a politica nao exige que o orquestrador rode o aceite; (4) falta prompt-padrao do Haiku (esforco medium, max_tokens com folga para thinking, trechos de verificar antes de concluir e continuar ate terminar); (5) os limites de 3 arquivos e 150 linhas sao hipoteses sem medicao e nao ha telemetria por modelo (sucesso na primeira tentativa, tokens, escalacoes).\n\nCONGELADO em 11/10/2026 (plano V0, docs/plans/V0_OPERACIONAL_2026-10-11.md): fora do caminho critico da linha.",
     "core_journey": [
       "Seguimento do USR-168. A documentacao oficial do Haiku 5.5 (posicionamento: classificacao, roteamento, extracao e subagentes; Sonnet 5.5 e Opus 5.5 seguem melhores em codificacao agentica complexa) mostra lacunas na politica v1: (1) nao ha tipos elegiveis somente leitura (busca de codigo, destilar logs, triagem), onde o Haiku traz a maior economia com menor risco; (2) stop_reason refusal do Haiku (sem fallback no servidor) nao e gatilho explicito de escalonamento; (3) o Haiku as vezes relata a mudanca como pronta sem verificar, e a politica nao exige que o orquestrador rode o aceite; (4) falta prompt-padrao do Haiku (esforco medium, max_tokens com folga para thinking, trechos de verificar antes de concluir e continuar ate terminar); (5) os limites de 3 arquivos e 150 linhas sao hipoteses sem medicao e nao ha telemetria por modelo (sucesso na primeira tentativa, tokens, escalacoes)."
     ],
@@ -4879,7 +4882,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-08T21:57:36.426364Z",
-    "updated_at": "2026-10-08T21:57:36.426364Z"
+    "updated_at": "2026-10-11T17:49:17.206876Z"
   },
   {
     "id": "USR-178",
@@ -4892,7 +4895,8 @@
     "lifecycle_stage": "execution",
     "horizon": "now",
     "tags": [
-      "user-demand"
+      "user-demand",
+      "v0-critico"
     ],
     "problem_statement": "Em 08-09/10/2026, durante o USR-168, runner.py --quick falhou duas vezes com STEP_FAIL unit_and_integration_tests_parallel (timeout 1502s e 1506s, TEST_COUNT 0, exit 124): o worker do Desktop (http://100.78.181.90:8080) respondia /health com busy=False mas ficava silencioso por mais de 180s no passo paralelo (mesmo sintoma do USR-141, ja concluido) e a execucao local caiu na fila do suite_lock atras de outros harnesses. Com --local e host livre, a mesma arvore passou: 3600 passed em 1439s no passo paralelo, ou seja 96% do limite de 1500s, sem margem. O limite fixo e o tempo da suite estao no mesmo patamar, entao qualquer concorrencia reprova uma arvore valida.",
     "core_journey": [
@@ -4910,7 +4914,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-08T22:27:27.403290Z",
-    "updated_at": "2026-10-08T22:27:27.403290Z"
+    "updated_at": "2026-10-11T17:49:17.206876Z"
   },
   {
     "id": "USR-169",
@@ -5072,7 +5076,8 @@
     "lifecycle_stage": "execution",
     "horizon": "now",
     "tags": [
-      "user-demand"
+      "user-demand",
+      "v0-critico"
     ],
     "problem_statement": "Seguimento do USR-162: se o runner morre mas netos (xdist) mantem o pipe de stdout aberto, o loop de leitura do worker pode nao terminar, e o watchdog hoje encerra apenas o processo de topo e nao a arvore. Sem relacao provada com o incidente original (la o busy era False). Tambem: o teste live em tests/test_remote_dispatch.py (uvicorn com log_config padrao) pode quebrar com I/O operation on closed file ao encerrar.",
     "core_journey": [
@@ -5089,7 +5094,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-09T04:30:00Z",
-    "updated_at": "2026-10-09T04:30:00Z"
+    "updated_at": "2026-10-11T17:49:17.206876Z"
   },
   {
     "id": "USR-184",
@@ -5130,11 +5135,12 @@
     "delivery_evidence": null,
     "item_type": "feature",
     "lifecycle_stage": "execution",
-    "horizon": "now",
+    "horizon": "later",
     "tags": [
-      "user-demand"
+      "user-demand",
+      "congelado-v0"
     ],
-    "problem_statement": "Decisao do owner (09/10/2026): trocar ou adicionar modelo nao pode exigir trabalho manual. Evidencia: o USR-168 (adotar Haiku 5.5) exigiu cerca de 25 passos, incluindo o owner editar a mao AGENTS.md, FACTORY_RULES.md e core/harness/test_subagent.py (protegidos pelo guard.py) e empurrar para a main com bypass de admin. Hoje ha 99 arquivos e 475 ocorrencias de ids de modelo escritos a mao (skills .agents/.claude, core/line, core/usage, core/content, core/router, core/harness, hub, benchmark_catalog.json, test-runner.md, docs, testes), inclusive nos arquivos protegidos. Cada lancamento de modelo vira um trabalho manual recorrente. Meta: 99% autonomo, com Grill (WAITING_HUMAN) apenas diante de duvida importante. Os detalhes de qual modelo usar devem morrer fora dos arquivos protegidos: AGENTS.md e FACTORY_RULES.md passam a apontar para um arquivo de consulta editavel pela fabrica, e as invariantes (piso de cota 15%, revisor de outra familia, modelos proibidos como fable) continuam nos protegidos e sao validadas por teste. Absorve os refinos do USR-177. Ticket grande: fatiar em ondas no planejamento (registro e leitor, migracao dos ids, geracao de docs, descoberta, qualificacao, promocao e rollback).",
+    "problem_statement": "Decisao do owner (09/10/2026): trocar ou adicionar modelo nao pode exigir trabalho manual. Evidencia: o USR-168 (adotar Haiku 5.5) exigiu cerca de 25 passos, incluindo o owner editar a mao AGENTS.md, FACTORY_RULES.md e core/harness/test_subagent.py (protegidos pelo guard.py) e empurrar para a main com bypass de admin. Hoje ha 99 arquivos e 475 ocorrencias de ids de modelo escritos a mao (skills .agents/.claude, core/line, core/usage, core/content, core/router, core/harness, hub, benchmark_catalog.json, test-runner.md, docs, testes), inclusive nos arquivos protegidos. Cada lancamento de modelo vira um trabalho manual recorrente. Meta: 99% autonomo, com Grill (WAITING_HUMAN) apenas diante de duvida importante. Os detalhes de qual modelo usar devem morrer fora dos arquivos protegidos: AGENTS.md e FACTORY_RULES.md passam a apontar para um arquivo de consulta editavel pela fabrica, e as invariantes (piso de cota 15%, revisor de outra familia, modelos proibidos como fable) continuam nos protegidos e sao validadas por teste. Absorve os refinos do USR-177. Ticket grande: fatiar em ondas no planejamento (registro e leitor, migracao dos ids, geracao de docs, descoberta, qualificacao, promocao e rollback).\n\nCONGELADO em 11/10/2026 (plano V0, docs/plans/V0_OPERACIONAL_2026-10-11.md): fora do caminho critico da linha.",
     "core_journey": [
       "Decisao do owner (09/10/2026): trocar ou adicionar modelo nao pode exigir trabalho manual. Evidencia: o USR-168 (adotar Haiku 5.5) exigiu cerca de 25 passos, incluindo o owner editar a mao AGENTS.md, FACTORY_RULES.md e core/harness/test_subagent.py (protegidos pelo guard.py) e empurrar para a main com bypass de admin. Hoje ha 99 arquivos e 475 ocorrencias de ids de modelo escritos a mao (skills .agents/.claude, core/line, core/usage, core/content, core/router, core/harness, hub, benchmark_catalog.json, test-runner.md, docs, testes), inclusive nos arquivos protegidos. Cada lancamento de modelo vira um trabalho manual recorrente. Meta: 99% autonomo, com Grill (WAITING_HUMAN) apenas diante de duvida importante. Os detalhes de qual modelo usar devem morrer fora dos arquivos protegidos: AGENTS.md e FACTORY_RULES.md passam a apontar para um arquivo de consulta editavel pela fabrica, e as invariantes (piso de cota 15%, revisor de outra familia, modelos proibidos como fable) continuam nos protegidos e sao validadas por teste. Absorve os refinos do USR-177. Ticket grande: fatiar em ondas no planejamento (registro e leitor, migracao dos ids, geracao de docs, descoberta, qualificacao, promocao e rollback)."
     ],
@@ -5156,7 +5162,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-09T07:01:39.369233Z",
-    "updated_at": "2026-10-09T07:01:39.369233Z"
+    "updated_at": "2026-10-11T17:49:17.206876Z"
   },
   {
     "id": "USR-186",
@@ -5169,7 +5175,8 @@
     "lifecycle_stage": "execution",
     "horizon": "now",
     "tags": [
-      "user-demand"
+      "user-demand",
+      "v0-critico"
     ],
     "problem_statement": "Deploy de 09/10/2026 (815d461): o node_sync chamou /system/update do worker do Desktop e depois /system/restart; a resposta nao trouxe o SHA esperado ('Desktop update did not reach expected SHA'), o deploy saiu com codigo 1 e o backup pos-deploy foi pulado (deploy did not converge). O daemon.log do worker mostra [Errno 10048] bind em 0.0.0.0:8080 falhando: a instancia nova nao subiu porque a antiga ainda segurava a porta, e o worker ficou DESLIGADO (nada ouvindo na 8080, tarefa 'DarkFac Test Worker' em Ready) ate eu iniciar a tarefa manualmente. Relacionado a USR-182 e USR-117.",
     "core_journey": [
@@ -5186,7 +5193,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-09T06:30:00Z",
-    "updated_at": "2026-10-09T21:40:00Z"
+    "updated_at": "2026-10-11T17:49:17.206876Z"
   },
   {
     "id": "USR-187",
@@ -5232,7 +5239,8 @@
     "lifecycle_stage": "execution",
     "horizon": "now",
     "tags": [
-      "user-demand"
+      "user-demand",
+      "v0-critico"
     ],
     "problem_statement": "Em 09/10/2026, python run_ticket.py USR-180 --harness codex terminou em 45 s sem alterar arquivo: tres tentativas de iniciar o terminal do Codex foram rejeitadas com 'helper_unknown_error: setup refresh had errors', entao o agente nao leu MISSION.md nem o codigo. A cota do Codex estava saudavel (60%). O roteador deveria tratar esse erro como falha de infraestrutura do harness (cooldown e failover para outro harness com write) em vez de devolver o ticket sem alteracao. Pode ter relacao com outra sessao do Codex em uso no mesmo host (USR-134). DIAGNOSTICO (10/10/2026, sessao interativa): o log %USERPROFILE%\\.codex\\.sandbox\\sandbox.AAAA-MM-DD.log mostra que o codex-windows-sandbox-setup.exe falha ao validar a ACL de leitura/execucao de ...\\OpenAI\\Codex\\runtimes\\cua_node\\<hash>\\bin\\node_repl.exe com 'O arquivo ja esta sendo usado por outro processo (os error 32)'. Esse binario fica aberto por varios node_repl.exe mantidos pelo app Codex Desktop (servidor MCP node_repl do config.toml), entao todo 'codex exec --sandbox workspace-write' headless falha enquanto o app estiver aberto. Reproduzido em USR-193 (run_ticket sem harness explicito: o roteador elegeu codex e o agente terminou em 50 s sem alterar arquivo). O sandbox nunca deve ser desligado para contornar isso.",
     "core_journey": [
@@ -5251,7 +5259,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-09T21:40:00Z",
-    "updated_at": "2026-10-10T09:55:00Z"
+    "updated_at": "2026-10-11T17:49:17.206876Z"
   },
   {
     "id": "USR-189",
@@ -5389,11 +5397,12 @@
     "delivery_evidence": null,
     "item_type": "feature",
     "lifecycle_stage": "execution",
-    "horizon": "now",
+    "horizon": "later",
     "tags": [
-      "user-demand"
+      "user-demand",
+      "congelado-v0"
     ],
-    "problem_statement": "Seguimento do USR-190: request_human_help espelha cada HumanRequest como owner_action no arquivo do processo da linha; no worker da VPS isso fica no container dele e nao chega ao Hub, entao pedidos humanos gerados pela linha autonoma na nuvem podem nao aparecer no DarkHub. Falta um canal de escrita da linha para o Hub (ou o ledger compartilhado do USR-136).",
+    "problem_statement": "Seguimento do USR-190: request_human_help espelha cada HumanRequest como owner_action no arquivo do processo da linha; no worker da VPS isso fica no container dele e nao chega ao Hub, entao pedidos humanos gerados pela linha autonoma na nuvem podem nao aparecer no DarkHub. Falta um canal de escrita da linha para o Hub (ou o ledger compartilhado do USR-136).\n\nCONGELADO em 11/10/2026 (plano V0, docs/plans/V0_OPERACIONAL_2026-10-11.md): fora do caminho critico da linha.",
     "core_journey": [
       "Seguimento do USR-190: request_human_help espelha cada HumanRequest como owner_action no arquivo do processo da linha; no worker da VPS isso fica no container dele e nao chega ao Hub, entao pedidos humanos gerados pela linha autonoma na nuvem podem nao aparecer no DarkHub. Falta um canal de escrita da linha para o Hub (ou o ledger compartilhado do USR-136)."
     ],
@@ -5408,7 +5417,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-10T00:10:00Z",
-    "updated_at": "2026-10-10T00:10:00Z"
+    "updated_at": "2026-10-11T17:49:17.206876Z"
   },
   {
     "id": "USR-195",
@@ -5419,11 +5428,12 @@
     "delivery_evidence": null,
     "item_type": "feature",
     "lifecycle_stage": "execution",
-    "horizon": "now",
+    "horizon": "later",
     "tags": [
-      "user-demand"
+      "user-demand",
+      "congelado-v0"
     ],
-    "problem_statement": "Seguimento do USR-190: a resposta do owner a uma decisao e duravel (overlay no volume do Hub), mas a tag owner-decision:OA-NNN=X e o paragrafo no ticket bloqueado vao para o demands.json do container, que e efemero. A anotacao permanente hoje exige que um agente rode owner_action.py answer no repositorio e passe pelo ciclo autonomo, o que deixa a linha sem enxergar a decisao ate la.",
+    "problem_statement": "Seguimento do USR-190: a resposta do owner a uma decisao e duravel (overlay no volume do Hub), mas a tag owner-decision:OA-NNN=X e o paragrafo no ticket bloqueado vao para o demands.json do container, que e efemero. A anotacao permanente hoje exige que um agente rode owner_action.py answer no repositorio e passe pelo ciclo autonomo, o que deixa a linha sem enxergar a decisao ate la.\n\nCONGELADO em 11/10/2026 (plano V0, docs/plans/V0_OPERACIONAL_2026-10-11.md): fora do caminho critico da linha.",
     "core_journey": [
       "Seguimento do USR-190: a resposta do owner a uma decisao e duravel (overlay no volume do Hub), mas a tag owner-decision:OA-NNN=X e o paragrafo no ticket bloqueado vao para o demands.json do container, que e efemero. A anotacao permanente hoje exige que um agente rode owner_action.py answer no repositorio e passe pelo ciclo autonomo, o que deixa a linha sem enxergar a decisao ate la."
     ],
@@ -5438,7 +5448,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-10T00:10:00Z",
-    "updated_at": "2026-10-10T00:10:00Z"
+    "updated_at": "2026-10-11T17:49:17.206876Z"
   },
   {
     "id": "USR-196",
@@ -5451,7 +5461,8 @@
     "lifecycle_stage": "execution",
     "horizon": "now",
     "tags": [
-      "user-demand"
+      "user-demand",
+      "v0-critico"
     ],
     "problem_statement": "Deploy de 09-10/10/2026: o Desktop (DESKTOP-G45IPEM) ficou em e8fff1d e todo redeploy saiu com codigo 1 ('Desktop update did not reach expected SHA'), pulando o backup pos-deploy; a mensagem nao traz a causa do git pull do worker (provavel conflito com o config.json do Telegram desversionado pelo USR-184). Tres falhas de processo: (1) o erro real do /system/update nao chega ao log do deploy; (2) o worker nao trata arquivos rastreados que deixam de ser versionados; (3) a divergencia so do Desktop derruba o backup da VPS, que nao depende dele. Humano pendente: OA-008.",
     "core_journey": [
@@ -5469,7 +5480,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-10T00:40:00Z",
-    "updated_at": "2026-10-10T00:40:00Z"
+    "updated_at": "2026-10-11T17:49:17.206876Z"
   },
   {
     "id": "USR-197",
@@ -5540,11 +5551,12 @@
     "delivery_evidence": null,
     "item_type": "feature",
     "lifecycle_stage": "execution",
-    "horizon": "now",
+    "horizon": "later",
     "tags": [
-      "user-demand"
+      "user-demand",
+      "congelado-v0"
     ],
-    "problem_statement": "O portão oficial em candidato limpo e congelado caiu do worker remoto indisponível para execução local, passou syntax_and_types, mas unit_and_integration_tests_parallel expirou em 1502.8s com código 124 e count=0. Evidência: candidato adfd5fb9cc931960bcffe2810603a35ba30801ac sobre origin/main a2364736ec720dd611b038000c74a05f3e5e39c8, executado por run_ticket --resume-delivery USR-191 em 2026-10-10. Executar a investigação anteriormente reservada em USR-176, sem criar outra cópia de seu planejamento.",
+    "problem_statement": "O portão oficial em candidato limpo e congelado caiu do worker remoto indisponível para execução local, passou syntax_and_types, mas unit_and_integration_tests_parallel expirou em 1502.8s com código 124 e count=0. Evidência: candidato adfd5fb9cc931960bcffe2810603a35ba30801ac sobre origin/main a2364736ec720dd611b038000c74a05f3e5e39c8, executado por run_ticket --resume-delivery USR-191 em 2026-10-10. Executar a investigação anteriormente reservada em USR-176, sem criar outra cópia de seu planejamento.\n\nCONGELADO em 11/10/2026 (plano V0, docs/plans/V0_OPERACIONAL_2026-10-11.md): fora do caminho critico da linha. Consolidado em USR-178 (portao confiavel).",
     "core_journey": [
       "O portão oficial em candidato limpo e congelado caiu do worker remoto indisponível para execução local, passou syntax_and_types, mas unit_and_integration_tests_parallel expirou em 1502.8s com código 124 e count=0. Evidência: candidato adfd5fb9cc931960bcffe2810603a35ba30801ac sobre origin/main a2364736ec720dd611b038000c74a05f3e5e39c8, executado por run_ticket --resume-delivery USR-191 em 2026-10-10. Executar a investigação anteriormente reservada em USR-176, sem criar outra cópia de seu planejamento."
     ],
@@ -5559,7 +5571,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-10T10:12:38.427434Z",
-    "updated_at": "2026-10-10T10:12:38.427434Z"
+    "updated_at": "2026-10-11T17:49:17.206876Z"
   },
   {
     "id": "USR-201",
@@ -5572,7 +5584,8 @@
     "lifecycle_stage": "execution",
     "horizon": "now",
     "tags": [
-      "user-demand"
+      "user-demand",
+      "v0-critico"
     ],
     "problem_statement": "Em 10/10/2026, ao verificar o run do USR-183/187 pelo Grok, constatou-se que run_ticket monta AgentRequest com model=None e nunca repassa effort: AgentRequest.effort existe (core/line/agent_cli.py) mas nenhum build_*_argv o usa. build_grok_write_argv so passa -m se req.model existir e build_codex_argv idem. Resultado: o modelo e o esforco efetivos sao o padrao do CLI na maquina (Grok: grok-4.7 com reasoning_effort high, lido de ~/.grok/sessions/*/summary.json; Codex: gpt-6-luna high do ~/.codex/config.toml do usuario), podem mudar sem a fabrica saber, e AgentResult.model fica None porque o campo modelUsage do JSON do Grok nao e persistido. Relacionado a USR-185 (registro de modelos) e USR-177 (esforco dos subagentes Haiku).",
     "core_journey": [
@@ -5589,7 +5602,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-10T13:51:44.721619Z",
-    "updated_at": "2026-10-10T13:51:44.721619Z"
+    "updated_at": "2026-10-11T17:49:17.206876Z"
   },
   {
     "id": "USR-205",
@@ -5632,16 +5645,17 @@
     "delivery_evidence": null,
     "item_type": "infrastructure",
     "lifecycle_stage": "execution",
-    "horizon": "now",
+    "horizon": "later",
     "tags": [
       "user-demand",
       "darkhub",
       "quota",
       "routing",
       "usage-sync",
-      "critical"
+      "critical",
+      "congelado-v0"
     ],
-    "problem_statement": "O AI Account Monitor do Hub (VPS) mostra 2 ativas/0 limitadas e Claude, Grok e Antigravity como 'nao instalado/nao autenticado', enquanto o roteador do Notebook mede Anthropic semanal 9%, OpenAI 56%, xAI 98,67% (.factory/usage/providers, 10/10 14:25 UTC). Causas confirmadas: (1) o Hub na VPS sonda CLIs localmente (claude/grok/codex nao existem no container) em vez de ler o que o roteador usa; (2) o loop DarkFac-Usage-Cloud-Sync roda desde 03/10 a partir de uma worktree velha do Codex (C:\\Users\\guigc\\.codex\\worktrees\\usr-124-postmerge) e esta em SYNC_DEGRADED desde entao porque DARKFAC_TELEMETRY_KEY nao existe no Notebook (o Hub tem a chave) - ninguem foi alertado por 7 dias; (3) os snapshots recebidos em POST /api/usage/sync vao para /app/.factory/usage/providers, fora dos volumes do compose, e somem a cada redeploy (11 redeploys em 10/10); (4) o botao 'Atualizar cotas' chama POST /api/usage/accounts/refresh, que so re-sonda a VPS e por isso nunca muda nada. Diagnostico de 10/10/2026 (sessao interativa Claude Code, pedido do owner sobre o DarkHub).",
+    "problem_statement": "O AI Account Monitor do Hub (VPS) mostra 2 ativas/0 limitadas e Claude, Grok e Antigravity como 'nao instalado/nao autenticado', enquanto o roteador do Notebook mede Anthropic semanal 9%, OpenAI 56%, xAI 98,67% (.factory/usage/providers, 10/10 14:25 UTC). Causas confirmadas: (1) o Hub na VPS sonda CLIs localmente (claude/grok/codex nao existem no container) em vez de ler o que o roteador usa; (2) o loop DarkFac-Usage-Cloud-Sync roda desde 03/10 a partir de uma worktree velha do Codex (C:\\Users\\guigc\\.codex\\worktrees\\usr-124-postmerge) e esta em SYNC_DEGRADED desde entao porque DARKFAC_TELEMETRY_KEY nao existe no Notebook (o Hub tem a chave) - ninguem foi alertado por 7 dias; (3) os snapshots recebidos em POST /api/usage/sync vao para /app/.factory/usage/providers, fora dos volumes do compose, e somem a cada redeploy (11 redeploys em 10/10); (4) o botao 'Atualizar cotas' chama POST /api/usage/accounts/refresh, que so re-sonda a VPS e por isso nunca muda nada. Diagnostico de 10/10/2026 (sessao interativa Claude Code, pedido do owner sobre o DarkHub).\n\nCONGELADO em 11/10/2026 (plano V0, docs/plans/V0_OPERACIONAL_2026-10-11.md): fora do caminho critico da linha.",
     "core_journey": [
       "O AI Account Monitor do Hub (VPS) mostra 2 ativas/0 limitadas e Claude, Grok e Antigravity como 'nao instalado/nao autenticado', enquanto o roteador do Notebook mede Anthropic semanal 9%, OpenAI 56%, xAI 98,67% (.factory/usage/providers, 10/10 14:25 UTC). Causas confirmadas: (1) o Hub na VPS sonda CLIs localmente (claude/grok/codex nao existem no container) em vez de ler o que o roteador usa; (2) o loop DarkFac-Usage-Cloud-Sync roda desde 03/10 a partir de uma worktree velha do Codex (C:\\Users\\guigc\\.codex\\worktrees\\usr-124-postmerge) e esta em SYNC_DEGRADED desde entao porque DARKFAC_TELEMETRY_KEY nao existe no Notebook (o Hub tem a chave) - ninguem foi alertado por 7 dias; (3) os snapshots recebidos em POST /api/usage/sync vao para /app/.factory/usage/providers, fora dos volumes do compose, e somem a cada redeploy (11 redeploys em 10/10); (4) o botao 'Atualizar cotas' chama POST /api/usage/accounts/refresh, que so re-sonda a VPS e por isso nunca muda nada. Diagnostico de 10/10/2026 (sessao interativa Claude Code, pedido do owner sobre o DarkHub)."
     ],
@@ -5667,7 +5681,7 @@
     "estimated_complexity": "high",
     "dependencies": [],
     "created_at": "2026-10-10T14:53:37.888426Z",
-    "updated_at": "2026-10-10T14:54:36.216103Z"
+    "updated_at": "2026-10-11T17:49:17.206876Z"
   },
   {
     "id": "USR-207",
@@ -5678,15 +5692,16 @@
     "delivery_evidence": null,
     "item_type": "operations",
     "lifecycle_stage": "execution",
-    "horizon": "now",
+    "horizon": "later",
     "tags": [
       "user-demand",
       "darkhub",
       "deploy",
       "dokploy",
-      "uptime"
+      "uptime",
+      "congelado-v0"
     ],
-    "problem_statement": "O owner viu o Hub sair do ar durante testes em 10/10. O compose Darkhub (Dokploy wuH-sjZBig74xFGdk4IsL) teve 12 deploys em 10/10 (08:43 a 14:45), cada um reconstruindo a imagem na VPS (2 vCPU, 3,7 GB, RAM em 79%) e recriando o container darkhub-cloud-247 (stop-then-start, ~1 min fora). Ha deploy duplo: autoDeploy 'NEW CHANGES' em todo push no main mais 'Manual deployment' via scripts/dokploy_redeploy.py, mesmo quando o merge so mexeu no ledger. Durante a janela o frontend mostra erros crus como 'Falha na telemetria de infraestrutura: Failed to fetch' (hub/frontend/infra.js) sem nova tentativa. Limite de memoria do container: 512 MB. Diagnostico de 10/10/2026 (sessao interativa Claude Code, pedido do owner sobre o DarkHub).",
+    "problem_statement": "O owner viu o Hub sair do ar durante testes em 10/10. O compose Darkhub (Dokploy wuH-sjZBig74xFGdk4IsL) teve 12 deploys em 10/10 (08:43 a 14:45), cada um reconstruindo a imagem na VPS (2 vCPU, 3,7 GB, RAM em 79%) e recriando o container darkhub-cloud-247 (stop-then-start, ~1 min fora). Ha deploy duplo: autoDeploy 'NEW CHANGES' em todo push no main mais 'Manual deployment' via scripts/dokploy_redeploy.py, mesmo quando o merge so mexeu no ledger. Durante a janela o frontend mostra erros crus como 'Falha na telemetria de infraestrutura: Failed to fetch' (hub/frontend/infra.js) sem nova tentativa. Limite de memoria do container: 512 MB. Diagnostico de 10/10/2026 (sessao interativa Claude Code, pedido do owner sobre o DarkHub).\n\nCONGELADO em 11/10/2026 (plano V0, docs/plans/V0_OPERACIONAL_2026-10-11.md): fora do caminho critico da linha.",
     "core_journey": [
       "O owner viu o Hub sair do ar durante testes em 10/10. O compose Darkhub (Dokploy wuH-sjZBig74xFGdk4IsL) teve 12 deploys em 10/10 (08:43 a 14:45), cada um reconstruindo a imagem na VPS (2 vCPU, 3,7 GB, RAM em 79%) e recriando o container darkhub-cloud-247 (stop-then-start, ~1 min fora). Ha deploy duplo: autoDeploy 'NEW CHANGES' em todo push no main mais 'Manual deployment' via scripts/dokploy_redeploy.py, mesmo quando o merge so mexeu no ledger. Durante a janela o frontend mostra erros crus como 'Falha na telemetria de infraestrutura: Failed to fetch' (hub/frontend/infra.js) sem nova tentativa. Limite de memoria do container: 512 MB. Diagnostico de 10/10/2026 (sessao interativa Claude Code, pedido do owner sobre o DarkHub)."
     ],
@@ -5709,7 +5724,7 @@
     "estimated_complexity": "high",
     "dependencies": [],
     "created_at": "2026-10-10T14:53:42.327437Z",
-    "updated_at": "2026-10-10T14:53:42.327437Z"
+    "updated_at": "2026-10-11T17:49:17.206876Z"
   },
   {
     "id": "USR-208",
@@ -5720,15 +5735,16 @@
     "delivery_evidence": null,
     "item_type": "infrastructure",
     "lifecycle_stage": "execution",
-    "horizon": "now",
+    "horizon": "later",
     "tags": [
       "user-demand",
       "darkhub",
       "live",
       "telemetry",
-      "observability"
+      "observability",
+      "congelado-v0"
     ],
-    "problem_statement": "A Esteira ao vivo (/live, core/workflow/line_live.py) so enxerga runs do control store e run_ticket local. Em 10/10 o snapshot tinha 28 runs: execucoes 'USR-TESTE / Teste da esteira' (uma 'active' presa desde 09:58), canarios e nada dos desenvolvimentos reais do dia (ex.: USR-187, OA-004/OA-007, sessoes interativas e subagentes). Requisito do owner: toda acao no ambiente DarkFac - Telegram, sessoes Codex, Grok, Antigravity, Claude (principal e subagentes), run_ticket, pump, linha na VPS - gera obrigatoriamente um codigo unico de execucao por etapa e aparece no Hub Live; abrir /live deve mostrar 100% do que esta em andamento. Diagnostico de 10/10/2026 (sessao interativa Claude Code, pedido do owner sobre o DarkHub).",
+    "problem_statement": "A Esteira ao vivo (/live, core/workflow/line_live.py) so enxerga runs do control store e run_ticket local. Em 10/10 o snapshot tinha 28 runs: execucoes 'USR-TESTE / Teste da esteira' (uma 'active' presa desde 09:58), canarios e nada dos desenvolvimentos reais do dia (ex.: USR-187, OA-004/OA-007, sessoes interativas e subagentes). Requisito do owner: toda acao no ambiente DarkFac - Telegram, sessoes Codex, Grok, Antigravity, Claude (principal e subagentes), run_ticket, pump, linha na VPS - gera obrigatoriamente um codigo unico de execucao por etapa e aparece no Hub Live; abrir /live deve mostrar 100% do que esta em andamento. Diagnostico de 10/10/2026 (sessao interativa Claude Code, pedido do owner sobre o DarkHub).\n\nCONGELADO em 11/10/2026 (plano V0, docs/plans/V0_OPERACIONAL_2026-10-11.md): fora do caminho critico da linha.",
     "core_journey": [
       "A Esteira ao vivo (/live, core/workflow/line_live.py) so enxerga runs do control store e run_ticket local. Em 10/10 o snapshot tinha 28 runs: execucoes 'USR-TESTE / Teste da esteira' (uma 'active' presa desde 09:58), canarios e nada dos desenvolvimentos reais do dia (ex.: USR-187, OA-004/OA-007, sessoes interativas e subagentes). Requisito do owner: toda acao no ambiente DarkFac - Telegram, sessoes Codex, Grok, Antigravity, Claude (principal e subagentes), run_ticket, pump, linha na VPS - gera obrigatoriamente um codigo unico de execucao por etapa e aparece no Hub Live; abrir /live deve mostrar 100% do que esta em andamento. Diagnostico de 10/10/2026 (sessao interativa Claude Code, pedido do owner sobre o DarkHub)."
     ],
@@ -5752,7 +5768,7 @@
     "estimated_complexity": "high",
     "dependencies": [],
     "created_at": "2026-10-10T14:53:47.851829Z",
-    "updated_at": "2026-10-10T14:53:47.851829Z"
+    "updated_at": "2026-10-11T17:49:17.206876Z"
   },
   {
     "id": "USR-209",
@@ -5763,15 +5779,16 @@
     "delivery_evidence": null,
     "item_type": "infrastructure",
     "lifecycle_stage": "execution",
-    "horizon": "now",
+    "horizon": "later",
     "tags": [
       "user-demand",
       "darkhub",
       "live",
       "harness",
-      "hooks"
+      "hooks",
+      "congelado-v0"
     ],
-    "problem_statement": "Depende do registro universal de execucoes. Sessoes abertas pelo owner no Claude Code (desktop/CLI), Codex, Grok Build e Antigravity, e os subagentes que elas lancam, nao aparecem em lugar nenhum do Hub; o owner precisa ver tudo o que esta em andamento. Diagnostico de 10/10/2026 (sessao interativa Claude Code, pedido do owner sobre o DarkHub).",
+    "problem_statement": "Depende do registro universal de execucoes. Sessoes abertas pelo owner no Claude Code (desktop/CLI), Codex, Grok Build e Antigravity, e os subagentes que elas lancam, nao aparecem em lugar nenhum do Hub; o owner precisa ver tudo o que esta em andamento. Diagnostico de 10/10/2026 (sessao interativa Claude Code, pedido do owner sobre o DarkHub).\n\nCONGELADO em 11/10/2026 (plano V0, docs/plans/V0_OPERACIONAL_2026-10-11.md): fora do caminho critico da linha.",
     "core_journey": [
       "Depende do registro universal de execucoes. Sessoes abertas pelo owner no Claude Code (desktop/CLI), Codex, Grok Build e Antigravity, e os subagentes que elas lancam, nao aparecem em lugar nenhum do Hub; o owner precisa ver tudo o que esta em andamento. Diagnostico de 10/10/2026 (sessao interativa Claude Code, pedido do owner sobre o DarkHub)."
     ],
@@ -5793,7 +5810,7 @@
       "USR-208"
     ],
     "created_at": "2026-10-10T14:53:54.302042Z",
-    "updated_at": "2026-10-10T14:53:54.302042Z"
+    "updated_at": "2026-10-11T17:49:17.206876Z"
   },
   {
     "id": "USR-210",
@@ -5804,14 +5821,15 @@
     "delivery_evidence": null,
     "item_type": "feature",
     "lifecycle_stage": "execution",
-    "horizon": "now",
+    "horizon": "later",
     "tags": [
       "user-demand",
       "darkhub",
       "interventions",
-      "bug"
+      "bug",
+      "congelado-v0"
     ],
-    "problem_statement": "Na fila prioritaria, o item 'Bloqueio WAITING_HUMAN:  - Canario diario 2026-09-30 / Causa: grill_pending' tem id 'waiting_human:', action_target_id, task_id e ticket_id vazios (GET /api/interventions/priority). Causa: hub/backend/service.py (bloco 'Tarefas bloqueadas em WAITING_HUMAN') le os campos id/ticket_id, mas o dashboard de tarefas entrega task_id (dem-722f8e52bd7c) e run_id (run-d4d10d4aee94). Sem alvo, 'Ver tarefa' rola para a lista de tarefas, onde nao ha acao disponivel. Diagnostico de 10/10/2026 (sessao interativa Claude Code, pedido do owner sobre o DarkHub).",
+    "problem_statement": "Na fila prioritaria, o item 'Bloqueio WAITING_HUMAN:  - Canario diario 2026-09-30 / Causa: grill_pending' tem id 'waiting_human:', action_target_id, task_id e ticket_id vazios (GET /api/interventions/priority). Causa: hub/backend/service.py (bloco 'Tarefas bloqueadas em WAITING_HUMAN') le os campos id/ticket_id, mas o dashboard de tarefas entrega task_id (dem-722f8e52bd7c) e run_id (run-d4d10d4aee94). Sem alvo, 'Ver tarefa' rola para a lista de tarefas, onde nao ha acao disponivel. Diagnostico de 10/10/2026 (sessao interativa Claude Code, pedido do owner sobre o DarkHub).\n\nCONGELADO em 11/10/2026 (plano V0, docs/plans/V0_OPERACIONAL_2026-10-11.md): fora do caminho critico da linha.",
     "core_journey": [
       "Na fila prioritaria, o item 'Bloqueio WAITING_HUMAN:  - Canario diario 2026-09-30 / Causa: grill_pending' tem id 'waiting_human:', action_target_id, task_id e ticket_id vazios (GET /api/interventions/priority). Causa: hub/backend/service.py (bloco 'Tarefas bloqueadas em WAITING_HUMAN') le os campos id/ticket_id, mas o dashboard de tarefas entrega task_id (dem-722f8e52bd7c) e run_id (run-d4d10d4aee94). Sem alvo, 'Ver tarefa' rola para a lista de tarefas, onde nao ha acao disponivel. Diagnostico de 10/10/2026 (sessao interativa Claude Code, pedido do owner sobre o DarkHub)."
     ],
@@ -5829,7 +5847,7 @@
     "estimated_complexity": "low",
     "dependencies": [],
     "created_at": "2026-10-10T14:53:59.431274Z",
-    "updated_at": "2026-10-10T14:53:59.431274Z"
+    "updated_at": "2026-10-11T17:49:17.206876Z"
   },
   {
     "id": "USR-211",
@@ -5840,14 +5858,15 @@
     "delivery_evidence": null,
     "item_type": "operations",
     "lifecycle_stage": "execution",
-    "horizon": "now",
+    "horizon": "later",
     "tags": [
       "user-demand",
       "canary",
       "bug",
-      "encoding"
+      "encoding",
+      "congelado-v0"
     ],
-    "problem_statement": "O run run-d4d10d4aee94 do 'Canario diario 2026-09-30' (projeto darkfac-canary) esta em WAITING_HUMAN na etapa grill desde 30/09 e ocupa a fila prioritaria do Hub ha 10 dias. Os titulos dos canarios chegam como 'CanÃ¡rio diÃ¡rio' (UTF-8 decodificado duas vezes) no control store. Um canario sintetico nunca deveria pedir decisao humana. Diagnostico de 10/10/2026 (sessao interativa Claude Code, pedido do owner sobre o DarkHub).",
+    "problem_statement": "O run run-d4d10d4aee94 do 'Canario diario 2026-09-30' (projeto darkfac-canary) esta em WAITING_HUMAN na etapa grill desde 30/09 e ocupa a fila prioritaria do Hub ha 10 dias. Os titulos dos canarios chegam como 'CanÃ¡rio diÃ¡rio' (UTF-8 decodificado duas vezes) no control store. Um canario sintetico nunca deveria pedir decisao humana. Diagnostico de 10/10/2026 (sessao interativa Claude Code, pedido do owner sobre o DarkHub).\n\nCONGELADO em 11/10/2026 (plano V0, docs/plans/V0_OPERACIONAL_2026-10-11.md): fora do caminho critico da linha.",
     "core_journey": [
       "O run run-d4d10d4aee94 do 'Canario diario 2026-09-30' (projeto darkfac-canary) esta em WAITING_HUMAN na etapa grill desde 30/09 e ocupa a fila prioritaria do Hub ha 10 dias. Os titulos dos canarios chegam como 'CanÃ¡rio diÃ¡rio' (UTF-8 decodificado duas vezes) no control store. Um canario sintetico nunca deveria pedir decisao humana. Diagnostico de 10/10/2026 (sessao interativa Claude Code, pedido do owner sobre o DarkHub)."
     ],
@@ -5865,7 +5884,7 @@
     "estimated_complexity": "low",
     "dependencies": [],
     "created_at": "2026-10-10T14:54:05.373313Z",
-    "updated_at": "2026-10-10T14:54:05.373313Z"
+    "updated_at": "2026-10-11T17:49:17.206876Z"
   },
   {
     "id": "USR-212",
@@ -5876,15 +5895,16 @@
     "delivery_evidence": null,
     "item_type": "operations",
     "lifecycle_stage": "execution",
-    "horizon": "now",
+    "horizon": "later",
     "tags": [
       "user-demand",
       "darkhub",
       "infra",
       "telemetry",
-      "bug"
+      "bug",
+      "congelado-v0"
     ],
-    "problem_statement": "GET /api/infra/metrics no Hub de producao retorna host_node_id 'predator-neo-16' com hardware da VPS (2 nucleos, 3,73 GB de RAM): o container do Hub se identifica como o Notebook, entao o painel mostra os numeros errados para os dois nos. Diagnostico de 10/10/2026 (sessao interativa Claude Code, pedido do owner sobre o DarkHub).",
+    "problem_statement": "GET /api/infra/metrics no Hub de producao retorna host_node_id 'predator-neo-16' com hardware da VPS (2 nucleos, 3,73 GB de RAM): o container do Hub se identifica como o Notebook, entao o painel mostra os numeros errados para os dois nos. Diagnostico de 10/10/2026 (sessao interativa Claude Code, pedido do owner sobre o DarkHub).\n\nCONGELADO em 11/10/2026 (plano V0, docs/plans/V0_OPERACIONAL_2026-10-11.md): fora do caminho critico da linha.",
     "core_journey": [
       "GET /api/infra/metrics no Hub de producao retorna host_node_id 'predator-neo-16' com hardware da VPS (2 nucleos, 3,73 GB de RAM): o container do Hub se identifica como o Notebook, entao o painel mostra os numeros errados para os dois nos. Diagnostico de 10/10/2026 (sessao interativa Claude Code, pedido do owner sobre o DarkHub)."
     ],
@@ -5903,7 +5923,7 @@
     "estimated_complexity": "low",
     "dependencies": [],
     "created_at": "2026-10-10T14:54:12.116107Z",
-    "updated_at": "2026-10-10T14:54:12.116107Z"
+    "updated_at": "2026-10-11T17:49:17.206876Z"
   },
   {
     "id": "USR-213",
@@ -5914,14 +5934,15 @@
     "delivery_evidence": null,
     "item_type": "feature",
     "lifecycle_stage": "execution",
-    "horizon": "now",
+    "horizon": "later",
     "tags": [
       "user-demand",
       "darkhub",
       "quick-launch",
-      "mechanical_edit"
+      "mechanical_edit",
+      "congelado-v0"
     ],
-    "problem_statement": "Pedido do owner: tirar o atalho 'Canaletto Gallery & AI Studio' (id canaletto-gallery) do Quick Launch Dock e incluir o Grok. Atencao: hub/data/services.json fica no volume darkhub-hub-data, entao mudar so hub/data/default_services.json nao altera o Hub de producao. Diagnostico de 10/10/2026 (sessao interativa Claude Code, pedido do owner sobre o DarkHub).",
+    "problem_statement": "Pedido do owner: tirar o atalho 'Canaletto Gallery & AI Studio' (id canaletto-gallery) do Quick Launch Dock e incluir o Grok. Atencao: hub/data/services.json fica no volume darkhub-hub-data, entao mudar so hub/data/default_services.json nao altera o Hub de producao. Diagnostico de 10/10/2026 (sessao interativa Claude Code, pedido do owner sobre o DarkHub).\n\nCONGELADO em 11/10/2026 (plano V0, docs/plans/V0_OPERACIONAL_2026-10-11.md): fora do caminho critico da linha.",
     "core_journey": [
       "Pedido do owner: tirar o atalho 'Canaletto Gallery & AI Studio' (id canaletto-gallery) do Quick Launch Dock e incluir o Grok. Atencao: hub/data/services.json fica no volume darkhub-hub-data, entao mudar so hub/data/default_services.json nao altera o Hub de producao. Diagnostico de 10/10/2026 (sessao interativa Claude Code, pedido do owner sobre o DarkHub)."
     ],
@@ -5940,7 +5961,7 @@
     "estimated_complexity": "low",
     "dependencies": [],
     "created_at": "2026-10-10T14:54:15.953502Z",
-    "updated_at": "2026-10-10T14:54:15.953502Z"
+    "updated_at": "2026-10-11T17:49:17.206876Z"
   },
   {
     "id": "USR-215",
@@ -5951,15 +5972,16 @@
     "delivery_evidence": null,
     "item_type": "feature",
     "lifecycle_stage": "execution",
-    "horizon": "now",
+    "horizon": "later",
     "tags": [
       "user-demand",
       "darkhub",
       "acceptance",
       "canary",
-      "bug"
+      "bug",
+      "congelado-v0"
     ],
-    "problem_statement": "O painel 'Linha de Producao & Aceite' mostra 'Canario: 0 dias verdes' e V1/V2 'Pendente' sem dizer o que fazer. GET /api/line/status no Hub retorna canary_streak 0 e last_canary_report null porque core/line/acceptance.py::verify_v2 le relatorios de canario em arquivos locais (core.line.canary.REPORTS_DIR) que nao existem no container do Hub; o control store (Postgres) mostra os canarios de 06/10 a 10/10 'succeeded', ou seja, streak real de 5/7. verify_v1 so considera runs de intake 'owner'/'dogfood' e cai num 'contrato pronto' quando nao ha run concluido, sem informar ao owner qual entrega ponta a ponta precisa acontecer. Diagnostico de 10/10/2026 (sessao interativa Claude Code, complementos do owner sobre o DarkHub).",
+    "problem_statement": "O painel 'Linha de Producao & Aceite' mostra 'Canario: 0 dias verdes' e V1/V2 'Pendente' sem dizer o que fazer. GET /api/line/status no Hub retorna canary_streak 0 e last_canary_report null porque core/line/acceptance.py::verify_v2 le relatorios de canario em arquivos locais (core.line.canary.REPORTS_DIR) que nao existem no container do Hub; o control store (Postgres) mostra os canarios de 06/10 a 10/10 'succeeded', ou seja, streak real de 5/7. verify_v1 so considera runs de intake 'owner'/'dogfood' e cai num 'contrato pronto' quando nao ha run concluido, sem informar ao owner qual entrega ponta a ponta precisa acontecer. Diagnostico de 10/10/2026 (sessao interativa Claude Code, complementos do owner sobre o DarkHub).\n\nCONGELADO em 11/10/2026 (plano V0, docs/plans/V0_OPERACIONAL_2026-10-11.md): fora do caminho critico da linha.",
     "core_journey": [
       "O painel 'Linha de Producao & Aceite' mostra 'Canario: 0 dias verdes' e V1/V2 'Pendente' sem dizer o que fazer. GET /api/line/status no Hub retorna canary_streak 0 e last_canary_report null porque core/line/acceptance.py::verify_v2 le relatorios de canario em arquivos locais (core.line.canary.REPORTS_DIR) que nao existem no container do Hub; o control store (Postgres) mostra os canarios de 06/10 a 10/10 'succeeded', ou seja, streak real de 5/7. verify_v1 so considera runs de intake 'owner'/'dogfood' e cai num 'contrato pronto' quando nao ha run concluido, sem informar ao owner qual entrega ponta a ponta precisa acontecer. Diagnostico de 10/10/2026 (sessao interativa Claude Code, complementos do owner sobre o DarkHub)."
     ],
@@ -5980,7 +6002,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-10T15:10:25.550364Z",
-    "updated_at": "2026-10-10T15:10:25.550364Z"
+    "updated_at": "2026-10-11T17:49:17.206876Z"
   },
   {
     "id": "USR-216",
@@ -5991,14 +6013,15 @@
     "delivery_evidence": null,
     "item_type": "feature",
     "lifecycle_stage": "execution",
-    "horizon": "now",
+    "horizon": "later",
     "tags": [
       "user-demand",
       "darkhub",
       "ux",
-      "mechanical_edit"
+      "mechanical_edit",
+      "congelado-v0"
     ],
-    "problem_statement": "O owner nao quer nada no Hub nomeado por numero de ticket ou skill. Exemplos atuais: 'Linha de Producao & Aceite HF-27', 'Validacao sob Demanda & Harness Remoto (DH-11) Skill 17', 'Catalogo Cross-Projeto & Auto-Evolucao (HF-25 / DH-04)', 'Estudio de Conteudo Anti-Slop & Atelie Visual (DH-07) Skill 15 & 16'. Diagnostico de 10/10/2026 (sessao interativa Claude Code, complementos do owner sobre o DarkHub).",
+    "problem_statement": "O owner nao quer nada no Hub nomeado por numero de ticket ou skill. Exemplos atuais: 'Linha de Producao & Aceite HF-27', 'Validacao sob Demanda & Harness Remoto (DH-11) Skill 17', 'Catalogo Cross-Projeto & Auto-Evolucao (HF-25 / DH-04)', 'Estudio de Conteudo Anti-Slop & Atelie Visual (DH-07) Skill 15 & 16'. Diagnostico de 10/10/2026 (sessao interativa Claude Code, complementos do owner sobre o DarkHub).\n\nCONGELADO em 11/10/2026 (plano V0, docs/plans/V0_OPERACIONAL_2026-10-11.md): fora do caminho critico da linha.",
     "core_journey": [
       "O owner nao quer nada no Hub nomeado por numero de ticket ou skill. Exemplos atuais: 'Linha de Producao & Aceite HF-27', 'Validacao sob Demanda & Harness Remoto (DH-11) Skill 17', 'Catalogo Cross-Projeto & Auto-Evolucao (HF-25 / DH-04)', 'Estudio de Conteudo Anti-Slop & Atelie Visual (DH-07) Skill 15 & 16'. Diagnostico de 10/10/2026 (sessao interativa Claude Code, complementos do owner sobre o DarkHub)."
     ],
@@ -6017,7 +6040,7 @@
     "estimated_complexity": "low",
     "dependencies": [],
     "created_at": "2026-10-10T15:10:25.606987Z",
-    "updated_at": "2026-10-10T15:10:25.606987Z"
+    "updated_at": "2026-10-11T17:49:17.206876Z"
   },
   {
     "id": "USR-217",
@@ -6028,16 +6051,17 @@
     "delivery_evidence": null,
     "item_type": "operations",
     "lifecycle_stage": "execution",
-    "horizon": "now",
+    "horizon": "later",
     "tags": [
       "user-demand",
       "darkhub",
       "infra",
       "telemetry",
       "worker",
-      "bug"
+      "bug",
+      "congelado-v0"
     ],
-    "problem_statement": "Em 10/10 15:05 UTC, GET /api/harness/workers alcancou o Desktop (DESKTOP-G45IPEM, http://100.78.181.90:8080, healthy, 632 ms, busy, 1 run ativo), mas GET /api/infra/metrics marcou o mesmo no (onprem-z97-server) como is_live false / offline sem last_contact_at, e o painel de validacao mostra 'Workers Conectados: 0/2'. O owner acessa o Desktop por Chrome Remote Desktop e Tailscale normalmente. Tres paineis calculam vivacidade de formas diferentes (cards com probe_liveness, metrics sem sonda/heartbeat, workers por /health). Diagnostico de 10/10/2026 (sessao interativa Claude Code, complementos do owner sobre o DarkHub).",
+    "problem_statement": "Em 10/10 15:05 UTC, GET /api/harness/workers alcancou o Desktop (DESKTOP-G45IPEM, http://100.78.181.90:8080, healthy, 632 ms, busy, 1 run ativo), mas GET /api/infra/metrics marcou o mesmo no (onprem-z97-server) como is_live false / offline sem last_contact_at, e o painel de validacao mostra 'Workers Conectados: 0/2'. O owner acessa o Desktop por Chrome Remote Desktop e Tailscale normalmente. Tres paineis calculam vivacidade de formas diferentes (cards com probe_liveness, metrics sem sonda/heartbeat, workers por /health). Diagnostico de 10/10/2026 (sessao interativa Claude Code, complementos do owner sobre o DarkHub).\n\nCONGELADO em 11/10/2026 (plano V0, docs/plans/V0_OPERACIONAL_2026-10-11.md): fora do caminho critico da linha.",
     "core_journey": [
       "Em 10/10 15:05 UTC, GET /api/harness/workers alcancou o Desktop (DESKTOP-G45IPEM, http://100.78.181.90:8080, healthy, 632 ms, busy, 1 run ativo), mas GET /api/infra/metrics marcou o mesmo no (onprem-z97-server) como is_live false / offline sem last_contact_at, e o painel de validacao mostra 'Workers Conectados: 0/2'. O owner acessa o Desktop por Chrome Remote Desktop e Tailscale normalmente. Tres paineis calculam vivacidade de formas diferentes (cards com probe_liveness, metrics sem sonda/heartbeat, workers por /health). Diagnostico de 10/10/2026 (sessao interativa Claude Code, complementos do owner sobre o DarkHub)."
     ],
@@ -6058,7 +6082,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-10T15:10:25.644411Z",
-    "updated_at": "2026-10-10T15:10:25.644411Z"
+    "updated_at": "2026-10-11T17:49:17.206876Z"
   },
   {
     "id": "USR-218",
@@ -6069,14 +6093,15 @@
     "delivery_evidence": null,
     "item_type": "operations",
     "lifecycle_stage": "execution",
-    "horizon": "now",
+    "horizon": "later",
     "tags": [
       "user-demand",
       "darkhub",
       "harness",
-      "bug"
+      "bug",
+      "congelado-v0"
     ],
-    "problem_statement": "No painel de validacao sob demanda do Hub, 'Executar Testes' (Quick Runner, Headless Subagent) retornou '[HARNESS_FAIL] Exit code 4 in 2.08s, Worker: local, Modo: local_fallback'. Exit code 4 do pytest e erro de uso (argumentos/caminho invalidos): o container do Hub na VPS nao tem a suite/ambiente e cai num fallback local inutil em vez de despachar para o worker do Desktop, que estava online. Diagnostico de 10/10/2026 (sessao interativa Claude Code, complementos do owner sobre o DarkHub).",
+    "problem_statement": "No painel de validacao sob demanda do Hub, 'Executar Testes' (Quick Runner, Headless Subagent) retornou '[HARNESS_FAIL] Exit code 4 in 2.08s, Worker: local, Modo: local_fallback'. Exit code 4 do pytest e erro de uso (argumentos/caminho invalidos): o container do Hub na VPS nao tem a suite/ambiente e cai num fallback local inutil em vez de despachar para o worker do Desktop, que estava online. Diagnostico de 10/10/2026 (sessao interativa Claude Code, complementos do owner sobre o DarkHub).\n\nCONGELADO em 11/10/2026 (plano V0, docs/plans/V0_OPERACIONAL_2026-10-11.md): fora do caminho critico da linha.",
     "core_journey": [
       "No painel de validacao sob demanda do Hub, 'Executar Testes' (Quick Runner, Headless Subagent) retornou '[HARNESS_FAIL] Exit code 4 in 2.08s, Worker: local, Modo: local_fallback'. Exit code 4 do pytest e erro de uso (argumentos/caminho invalidos): o container do Hub na VPS nao tem a suite/ambiente e cai num fallback local inutil em vez de despachar para o worker do Desktop, que estava online. Diagnostico de 10/10/2026 (sessao interativa Claude Code, complementos do owner sobre o DarkHub)."
     ],
@@ -6097,7 +6122,7 @@
       "USR-217"
     ],
     "created_at": "2026-10-10T15:10:25.683672Z",
-    "updated_at": "2026-10-10T15:10:25.683672Z"
+    "updated_at": "2026-10-11T17:49:17.206876Z"
   },
   {
     "id": "USR-219",
@@ -6108,14 +6133,15 @@
     "delivery_evidence": null,
     "item_type": "feature",
     "lifecycle_stage": "execution",
-    "horizon": "now",
+    "horizon": "later",
     "tags": [
       "user-demand",
       "darkhub",
       "ux",
-      "layout"
+      "layout",
+      "congelado-v0"
     ],
-    "problem_statement": "Pedidos do owner: (1) 'Conteineres & Cargas de Trabalho Ativas' deve vir colapsado com botao para abrir; (2) 'Catalogo Cross-Projeto & Auto-Evolucao' colapsado; (3) 'Estudio de Conteudo Anti-Slop & Atelie Visual' sai da pagina principal e vai para o menu lateral; (4) a secao 'Aguardando Decisao do Owner (WAITING_HUMAN) - Somente Leitura' (hub/frontend/tasks.js) e os cards que vem em sequencia sao redundantes e desatualizados (ex.: Canario 2026-09-30, run-d4d10d4aee94): juntar o que for util na secao prioritaria do topo do Hub e remover o resto. Diagnostico de 10/10/2026 (sessao interativa Claude Code, complementos do owner sobre o DarkHub).",
+    "problem_statement": "Pedidos do owner: (1) 'Conteineres & Cargas de Trabalho Ativas' deve vir colapsado com botao para abrir; (2) 'Catalogo Cross-Projeto & Auto-Evolucao' colapsado; (3) 'Estudio de Conteudo Anti-Slop & Atelie Visual' sai da pagina principal e vai para o menu lateral; (4) a secao 'Aguardando Decisao do Owner (WAITING_HUMAN) - Somente Leitura' (hub/frontend/tasks.js) e os cards que vem em sequencia sao redundantes e desatualizados (ex.: Canario 2026-09-30, run-d4d10d4aee94): juntar o que for util na secao prioritaria do topo do Hub e remover o resto. Diagnostico de 10/10/2026 (sessao interativa Claude Code, complementos do owner sobre o DarkHub).\n\nCONGELADO em 11/10/2026 (plano V0, docs/plans/V0_OPERACIONAL_2026-10-11.md): fora do caminho critico da linha.",
     "core_journey": [
       "Pedidos do owner: (1) 'Conteineres & Cargas de Trabalho Ativas' deve vir colapsado com botao para abrir; (2) 'Catalogo Cross-Projeto & Auto-Evolucao' colapsado; (3) 'Estudio de Conteudo Anti-Slop & Atelie Visual' sai da pagina principal e vai para o menu lateral; (4) a secao 'Aguardando Decisao do Owner (WAITING_HUMAN) - Somente Leitura' (hub/frontend/tasks.js) e os cards que vem em sequencia sao redundantes e desatualizados (ex.: Canario 2026-09-30, run-d4d10d4aee94): juntar o que for util na secao prioritaria do topo do Hub e remover o resto. Diagnostico de 10/10/2026 (sessao interativa Claude Code, complementos do owner sobre o DarkHub)."
     ],
@@ -6136,7 +6162,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-10T15:10:25.720813Z",
-    "updated_at": "2026-10-10T15:10:25.720813Z"
+    "updated_at": "2026-10-11T17:49:17.206876Z"
   },
   {
     "id": "USR-220",
@@ -6147,14 +6173,15 @@
     "delivery_evidence": null,
     "item_type": "feature",
     "lifecycle_stage": "execution",
-    "horizon": "now",
+    "horizon": "later",
     "tags": [
       "user-demand",
       "darkhub",
       "catalog",
-      "evolution"
+      "evolution",
+      "congelado-v0"
     ],
-    "problem_statement": "A secao de catalogo cross-projeto (Atrium, Jarvis, DarkFac) nunca lista componentes reutilizaveis nem auto-evolucoes, embora a fabrica entregue modulos e melhorias de skills toda semana; GET /api/catalog/components e /api/evolution/status nao recebem nada do ciclo de entrega. O owner considera a secao inutil hoje. Diagnostico de 10/10/2026 (sessao interativa Claude Code, complementos do owner sobre o DarkHub).",
+    "problem_statement": "A secao de catalogo cross-projeto (Atrium, Jarvis, DarkFac) nunca lista componentes reutilizaveis nem auto-evolucoes, embora a fabrica entregue modulos e melhorias de skills toda semana; GET /api/catalog/components e /api/evolution/status nao recebem nada do ciclo de entrega. O owner considera a secao inutil hoje. Diagnostico de 10/10/2026 (sessao interativa Claude Code, complementos do owner sobre o DarkHub).\n\nCONGELADO em 11/10/2026 (plano V0, docs/plans/V0_OPERACIONAL_2026-10-11.md): fora do caminho critico da linha.",
     "core_journey": [
       "A secao de catalogo cross-projeto (Atrium, Jarvis, DarkFac) nunca lista componentes reutilizaveis nem auto-evolucoes, embora a fabrica entregue modulos e melhorias de skills toda semana; GET /api/catalog/components e /api/evolution/status nao recebem nada do ciclo de entrega. O owner considera a secao inutil hoje. Diagnostico de 10/10/2026 (sessao interativa Claude Code, complementos do owner sobre o DarkHub)."
     ],
@@ -6174,7 +6201,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-10T15:10:25.757956Z",
-    "updated_at": "2026-10-10T15:10:25.757956Z"
+    "updated_at": "2026-10-11T17:49:17.206876Z"
   },
   {
     "id": "USR-202",
@@ -6215,11 +6242,12 @@
     "delivery_evidence": null,
     "item_type": "feature",
     "lifecycle_stage": "execution",
-    "horizon": "now",
+    "horizon": "later",
     "tags": [
-      "user-demand"
+      "user-demand",
+      "congelado-v0"
     ],
-    "problem_statement": "O /status roda na VPS (Dokploy) e read_convergence_snapshot (core/integrations/telegram_status.py) le node_sync_divergence.json do state_dir local. Esse arquivo e escrito pelo ciclo scripts/dokploy_redeploy.py, que roda no Notebook; na VPS ele nao existe, entao o bloco 'Nos' mostra 'indisponivel (sem ciclo de deploy registrado)' mesmo com todos os nos convergidos (observado em 10/10/2026).",
+    "problem_statement": "O /status roda na VPS (Dokploy) e read_convergence_snapshot (core/integrations/telegram_status.py) le node_sync_divergence.json do state_dir local. Esse arquivo e escrito pelo ciclo scripts/dokploy_redeploy.py, que roda no Notebook; na VPS ele nao existe, entao o bloco 'Nos' mostra 'indisponivel (sem ciclo de deploy registrado)' mesmo com todos os nos convergidos (observado em 10/10/2026).\n\nCONGELADO em 11/10/2026 (plano V0, docs/plans/V0_OPERACIONAL_2026-10-11.md): fora do caminho critico da linha.",
     "core_journey": [
       "O /status roda na VPS (Dokploy) e read_convergence_snapshot (core/integrations/telegram_status.py) le node_sync_divergence.json do state_dir local. Esse arquivo e escrito pelo ciclo scripts/dokploy_redeploy.py, que roda no Notebook; na VPS ele nao existe, entao o bloco 'Nos' mostra 'indisponivel (sem ciclo de deploy registrado)' mesmo com todos os nos convergidos (observado em 10/10/2026)."
     ],
@@ -6234,7 +6262,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-10T13:59:57.757825Z",
-    "updated_at": "2026-10-10T13:59:57.757825Z"
+    "updated_at": "2026-10-11T17:49:17.206876Z"
   },
   {
     "id": "USR-214",
@@ -6247,7 +6275,8 @@
     "lifecycle_stage": "execution",
     "horizon": "now",
     "tags": [
-      "user-demand"
+      "user-demand",
+      "v0-critico"
     ],
     "problem_statement": "Evidência em 2026-10-10: core.line.routing.pick('development', ['harness:claude','harness:codex','harness:grok']) retornou None e registrou que a telemetria OpenAI estava mais antiga que 3600 s. O accounts --refresh manteve OpenAI/Codex degradado com checked_at de 2026-10-08, erro de timeout da resposta do Codex e sinal de plausibilidade suspeito; ao mesmo tempo, a leitura oficial da conta Codex no app mostrou 0% usado na janela de 5 h e 44% usado na semanal (56% restante). Claude tinha 9% semanal restante, Grok não respondeu e os outros provedores não estavam configurados, então o roteador bloqueou o desenvolvimento embora a conta Codex tivesse headroom acima do piso. Investigar e corrigir a captura/recuperação da quota Codex e a consistência do snapshot, mantendo fail-closed quando não existir evidência atual verificável.",
     "core_journey": [
@@ -6266,7 +6295,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-10T14:59:59.181594Z",
-    "updated_at": "2026-10-10T14:59:59.182600Z"
+    "updated_at": "2026-10-11T17:49:17.206876Z"
   },
   {
     "id": "USR-223",
@@ -6279,7 +6308,8 @@
     "lifecycle_stage": "execution",
     "horizon": "now",
     "tags": [
-      "user-demand"
+      "user-demand",
+      "v0-critico"
     ],
     "problem_statement": "O ultimo run concluido do workflow 'DarkFac CI' em main (SHA dc8984336cbf722ecafd912110d276d8125919e7) terminou em 'failure'. Jobs vermelhos: main-validation (windows-latest). Run: https://github.com/GCamposGit/DarkFactory/actions/runs/38075939123. Detectado por 'python -m core.git.autonomy check-main' (USR-85); PRs com CI vermelho nao sao mais mesclados automaticamente, entao ate corrigir este defeito a entrega de codigo fica bloqueada. ATUALIZACAO (10/10/2026): a main voltou a ficar verde (runs de 18:49Z e 18:55Z concluidos com sucesso apos dc89843), o que cumpre o criterio 1. Causa da falha em dc89843: um unico teste, tests/test_runtime_spike_scenarios.py::test_r02_crash_lands_at_the_parked_checkpoint_and_orders_diagnostics, com \"'usr157-R02-1' is stale or expired\" (lease expirado) no job windows (3792 passaram, 1 falhou). E o mesmo cenario R02 do USR-157, agora com sintoma de lease expirado em vez de WinError 10053; tratar a causa raiz la e fechar este ticket quando o USR-157 cobrir o teste.",
     "core_journey": [
@@ -6295,7 +6325,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-10T18:46:56.288810Z",
-    "updated_at": "2026-10-10T19:55:00Z"
+    "updated_at": "2026-10-11T17:49:17.206876Z"
   },
   {
     "id": "USR-221",
@@ -6306,11 +6336,12 @@
     "delivery_evidence": null,
     "item_type": "feature",
     "lifecycle_stage": "execution",
-    "horizon": "now",
+    "horizon": "later",
     "tags": [
-      "user-demand"
+      "user-demand",
+      "congelado-v0"
     ],
-    "problem_statement": "Se o owner ficar sem internet, a fabrica nao pode parar. Criar um cron job na VPS (Dokploy) que a cada 15 minutos dispara o proximo ticket liberado na linha de producao, de qualquer projeto, usando qualquer worker disponivel, enquanto houver algo para fazer (demanda original do owner via Telegram /demand, que falhou por falta de git no container do Hub).",
+    "problem_statement": "Se o owner ficar sem internet, a fabrica nao pode parar. Criar um cron job na VPS (Dokploy) que a cada 15 minutos dispara o proximo ticket liberado na linha de producao, de qualquer projeto, usando qualquer worker disponivel, enquanto houver algo para fazer (demanda original do owner via Telegram /demand, que falhou por falta de git no container do Hub).\n\nCONGELADO em 11/10/2026 (plano V0, docs/plans/V0_OPERACIONAL_2026-10-11.md): fora do caminho critico da linha.",
     "core_journey": [
       "Se o owner ficar sem internet, a fabrica nao pode parar. Criar um cron job na VPS (Dokploy) que a cada 15 minutos dispara o proximo ticket liberado na linha de producao, de qualquer projeto, usando qualquer worker disponivel, enquanto houver algo para fazer (demanda original do owner via Telegram /demand, que falhou por falta de git no container do Hub)."
     ],
@@ -6327,7 +6358,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-10T18:33:56.375232Z",
-    "updated_at": "2026-10-10T18:33:56.375232Z"
+    "updated_at": "2026-10-11T17:49:17.206876Z"
   },
   {
     "id": "USR-170",
@@ -6338,14 +6369,15 @@
     "delivery_evidence": null,
     "item_type": "security",
     "lifecycle_stage": "next_steps",
-    "horizon": "unscheduled",
+    "horizon": "later",
     "tags": [
       "user-demand",
       "planning-only",
       "security-quality-2026-10-08",
-      "not-authorized-for-execution"
+      "not-authorized-for-execution",
+      "congelado-v0"
     ],
-    "problem_statement": "Evidencia sintetica restrita registrada no planejamento de seguranca de 08/10/2026. O componente de auditoria precisa distinguir evidencia integra, ilegivel e ausente; a garantia atual precisa ser calibrada. Detalhes ficam fora do repositorio publico. Escopo deste turno: apenas registro e planejamento; nao despachar implementacao.",
+    "problem_statement": "Evidencia sintetica restrita registrada no planejamento de seguranca de 08/10/2026. O componente de auditoria precisa distinguir evidencia integra, ilegivel e ausente; a garantia atual precisa ser calibrada. Detalhes ficam fora do repositorio publico. Escopo deste turno: apenas registro e planejamento; nao despachar implementacao.\n\nCONGELADO em 11/10/2026 (plano V0, docs/plans/V0_OPERACIONAL_2026-10-11.md): fora do caminho critico da linha.",
     "core_journey": [],
     "non_goals": [],
     "reachability_contract": "",
@@ -6357,7 +6389,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-08T21:01:19.062511Z",
-    "updated_at": "2026-10-08T21:01:19.062511Z"
+    "updated_at": "2026-10-11T17:49:17.206876Z"
   },
   {
     "id": "USR-171",
@@ -6368,14 +6400,15 @@
     "delivery_evidence": null,
     "item_type": "security",
     "lifecycle_stage": "next_steps",
-    "horizon": "unscheduled",
+    "horizon": "later",
     "tags": [
       "user-demand",
       "planning-only",
       "security-quality-2026-10-08",
-      "not-authorized-for-execution"
+      "not-authorized-for-execution",
+      "congelado-v0"
     ],
-    "problem_statement": "Reproducao restrita do planejamento de 08/10/2026 identificou uma lacuna de vinculo entre evidencia de revisao e candidato retomado. Investigar e corrigir sem divulgar reproducoes antes da remediacao. Escopo deste turno: apenas registro e planejamento; nao despachar implementacao.",
+    "problem_statement": "Reproducao restrita do planejamento de 08/10/2026 identificou uma lacuna de vinculo entre evidencia de revisao e candidato retomado. Investigar e corrigir sem divulgar reproducoes antes da remediacao. Escopo deste turno: apenas registro e planejamento; nao despachar implementacao.\n\nCONGELADO em 11/10/2026 (plano V0, docs/plans/V0_OPERACIONAL_2026-10-11.md): fora do caminho critico da linha.",
     "core_journey": [],
     "non_goals": [],
     "reachability_contract": "",
@@ -6387,7 +6420,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-08T21:01:20.172392Z",
-    "updated_at": "2026-10-08T21:01:20.172392Z"
+    "updated_at": "2026-10-11T17:49:17.206876Z"
   },
   {
     "id": "USR-172",
@@ -6398,14 +6431,15 @@
     "delivery_evidence": null,
     "item_type": "security",
     "lifecycle_stage": "next_steps",
-    "horizon": "unscheduled",
+    "horizon": "later",
     "tags": [
       "user-demand",
       "planning-only",
       "security-quality-2026-10-08",
-      "not-authorized-for-execution"
+      "not-authorized-for-execution",
+      "congelado-v0"
     ],
-    "problem_statement": "Revisao documental da topologia encontrou concentracao de credenciais operacionais no ambiente usado pelo desenvolvimento. Planejar isolamento por tarefa e broker de efeitos, com provas de fronteira antes de considerar o contêiner suficiente. Escopo deste turno: apenas registro e planejamento; nao despachar implementacao.",
+    "problem_statement": "Revisao documental da topologia encontrou concentracao de credenciais operacionais no ambiente usado pelo desenvolvimento. Planejar isolamento por tarefa e broker de efeitos, com provas de fronteira antes de considerar o contêiner suficiente. Escopo deste turno: apenas registro e planejamento; nao despachar implementacao.\n\nCONGELADO em 11/10/2026 (plano V0, docs/plans/V0_OPERACIONAL_2026-10-11.md): fora do caminho critico da linha.",
     "core_journey": [],
     "non_goals": [],
     "reachability_contract": "",
@@ -6418,7 +6452,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-08T21:01:21.366941Z",
-    "updated_at": "2026-10-08T21:01:21.366941Z"
+    "updated_at": "2026-10-11T17:49:17.206876Z"
   },
   {
     "id": "USR-173",
@@ -6429,14 +6463,15 @@
     "delivery_evidence": null,
     "item_type": "security",
     "lifecycle_stage": "next_steps",
-    "horizon": "unscheduled",
+    "horizon": "later",
     "tags": [
       "user-demand",
       "planning-only",
       "security-quality-2026-10-08",
-      "not-authorized-for-execution"
+      "not-authorized-for-execution",
+      "congelado-v0"
     ],
-    "problem_statement": "O passo syntax_and_types em harness.config.json executa compileall, que verifica sintaxe sem fazer analise estatica de tipos. Correcao deve passar pelo fluxo legitimo de evolucao de governanca. Escopo deste turno: apenas registro e planejamento; nao despachar implementacao.",
+    "problem_statement": "O passo syntax_and_types em harness.config.json executa compileall, que verifica sintaxe sem fazer analise estatica de tipos. Correcao deve passar pelo fluxo legitimo de evolucao de governanca. Escopo deste turno: apenas registro e planejamento; nao despachar implementacao.\n\nCONGELADO em 11/10/2026 (plano V0, docs/plans/V0_OPERACIONAL_2026-10-11.md): fora do caminho critico da linha.",
     "core_journey": [],
     "non_goals": [],
     "reachability_contract": "",
@@ -6449,7 +6484,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-08T21:01:22.461000Z",
-    "updated_at": "2026-10-08T21:01:22.461000Z"
+    "updated_at": "2026-10-11T17:49:17.206876Z"
   },
   {
     "id": "USR-174",
@@ -6460,14 +6495,15 @@
     "delivery_evidence": null,
     "item_type": "security",
     "lifecycle_stage": "next_steps",
-    "horizon": "unscheduled",
+    "horizon": "later",
     "tags": [
       "user-demand",
       "planning-only",
       "security-quality-2026-10-08",
-      "not-authorized-for-execution"
+      "not-authorized-for-execution",
+      "congelado-v0"
     ],
-    "problem_statement": "HF-24 ja oferece configuracao, auditoria e avaliacao Enterprise; busca documental em core/line, core/git e run_ticket.py nao demonstrou consumo obrigatorio dessa politica nos caminhos de inferencia e entrega. Exigir prova operacional antes de declarar protecao transversal. Escopo deste turno: apenas registro e planejamento; nao despachar implementacao.",
+    "problem_statement": "HF-24 ja oferece configuracao, auditoria e avaliacao Enterprise; busca documental em core/line, core/git e run_ticket.py nao demonstrou consumo obrigatorio dessa politica nos caminhos de inferencia e entrega. Exigir prova operacional antes de declarar protecao transversal. Escopo deste turno: apenas registro e planejamento; nao despachar implementacao.\n\nCONGELADO em 11/10/2026 (plano V0, docs/plans/V0_OPERACIONAL_2026-10-11.md): fora do caminho critico da linha.",
     "core_journey": [],
     "non_goals": [],
     "reachability_contract": "",
@@ -6480,7 +6516,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-08T21:01:23.668336Z",
-    "updated_at": "2026-10-08T21:01:23.668336Z"
+    "updated_at": "2026-10-11T17:49:17.206876Z"
   },
   {
     "id": "USR-176",
@@ -6491,14 +6527,15 @@
     "delivery_evidence": null,
     "item_type": "security",
     "lifecycle_stage": "next_steps",
-    "horizon": "unscheduled",
+    "horizon": "later",
     "tags": [
       "user-demand",
       "planning-only",
       "security-quality-2026-10-08",
-      "not-authorized-for-execution"
+      "not-authorized-for-execution",
+      "congelado-v0"
     ],
-    "problem_statement": "Na worktree documental baseada em 72c40a4, o portao oficial no candidato 85dd870 perdeu o worker remoto (USR-162) e o passo local unit_and_integration_tests_parallel expirou em 1505.8s, com limite 1500s. A atualizacao documental durante a execucao tambem invalidou a limpeza do candidato; nao ha HARNESS_PASS e nao se infere causa raiz do timeout dessa observacao. USR-135/147 constam completed; investigar esta ocorrencia antes de reutilizar a baseline para implementacao. Evidencia restrita local: .factory/test_logs/security-quality-plan/official-gate.log. Apenas registro planejado nesta sessao, sem despacho.",
+    "problem_statement": "Na worktree documental baseada em 72c40a4, o portao oficial no candidato 85dd870 perdeu o worker remoto (USR-162) e o passo local unit_and_integration_tests_parallel expirou em 1505.8s, com limite 1500s. A atualizacao documental durante a execucao tambem invalidou a limpeza do candidato; nao ha HARNESS_PASS e nao se infere causa raiz do timeout dessa observacao. USR-135/147 constam completed; investigar esta ocorrencia antes de reutilizar a baseline para implementacao. Evidencia restrita local: .factory/test_logs/security-quality-plan/official-gate.log. Apenas registro planejado nesta sessao, sem despacho.\n\nCONGELADO em 11/10/2026 (plano V0, docs/plans/V0_OPERACIONAL_2026-10-11.md): fora do caminho critico da linha. Consolidado em USR-178 (portao confiavel).",
     "core_journey": [],
     "non_goals": [],
     "reachability_contract": "",
@@ -6513,7 +6550,7 @@
       "USR-162"
     ],
     "created_at": "2026-10-08T21:53:17.795560Z",
-    "updated_at": "2026-10-08T21:53:17.795560Z"
+    "updated_at": "2026-10-11T17:49:17.206876Z"
   },
   {
     "id": "USR-224",
@@ -6526,7 +6563,8 @@
     "lifecycle_stage": "execution",
     "horizon": "now",
     "tags": [
-      "user-demand"
+      "user-demand",
+      "v0-critico"
     ],
     "problem_statement": "Em 10/10/2026, ao final de run_ticket --resume-delivery USR-193, darkfac.git.ticket_workspace registrou 11 avisos \"Could not purge trash entry C:\\dev\\DarkFac\\.factory\\backups\\trash\\usr-104-... [WinError 5] Acesso negado\" (entradas usr-65, usr-66, usr-67, usr-75, usr-76, usr-80-fix, usr-94, usr-104, usr-121 e outras de 01/10). As entradas ficam acumuladas no disco, cada entrega repete a mesma tentativa e o mesmo aviso, e o aviso enterra mensagens uteis do log da entrega. Hipoteses a confirmar: arquivos somente leitura dentro de .git de worktrees antigas (Windows nao remove sem limpar o atributo), arquivo aberto por outro processo, ou ACL do diretorio.",
     "core_journey": [
@@ -6543,7 +6581,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-10T21:29:13.790197Z",
-    "updated_at": "2026-10-10T21:29:13.790197Z"
+    "updated_at": "2026-10-11T17:49:17.206876Z"
   },
   {
     "id": "USR-225",
@@ -6556,7 +6594,8 @@
     "lifecycle_stage": "execution",
     "horizon": "now",
     "tags": [
-      "user-demand"
+      "user-demand",
+      "v0-critico"
     ],
     "problem_statement": "Em 11/10/2026, run_ticket USR-205 --harness grok estourou o limite do agente (1800 s, error_kind=timeout) com implementacao ja presente na worktree usr-205-20261010T212842Z (6 arquivos alterados, modulo novo e testes novos); o agent_retry parou as tentativas e preservou a worktree, como previsto. Ao rodar run_ticket USR-205 de novo, o launcher criou uma worktree NOVA (usr-205-20261010T215956Z, branch ticket/usr-205-20261010T215956Z) e iniciou o agente do zero, em vez de continuar o trabalho preservado. O aviso de continuacao do USR-113 (_build_request em run_ticket.py) so atua quando ha alteracoes na worktree corrente do mesmo run, entao nao cobre uma segunda invocacao. Efeito: ~30 min de agente desperdicados por ticket grande e duas branches/worktrees para o mesmo ticket. A saida foi entregar a worktree antiga por run_ticket --resume-delivery, que passou o portao (HARNESS_PASS, PR 285).",
     "core_journey": [
@@ -6573,7 +6612,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-10T22:46:08.951489Z",
-    "updated_at": "2026-10-10T22:46:08.951489Z"
+    "updated_at": "2026-10-11T17:49:17.206876Z"
   },
   {
     "id": "USR-227",
@@ -6584,11 +6623,12 @@
     "delivery_evidence": null,
     "item_type": "feature",
     "lifecycle_stage": "execution",
-    "horizon": "now",
+    "horizon": "later",
     "tags": [
-      "user-demand"
+      "user-demand",
+      "congelado-v0"
     ],
-    "problem_statement": "SQ03 autorizado por USR191: documentar base confiavel, guard e CI sem enfraquecer controles. Escopo docs/proposals/security_quality_governance.md e docs/handoffs/security-quality-governance.md. Reutilizar USR173 para tipos; nenhum arquivo protegido ou ativacao.",
+    "problem_statement": "SQ03 autorizado por USR191: documentar base confiavel, guard e CI sem enfraquecer controles. Escopo docs/proposals/security_quality_governance.md e docs/handoffs/security-quality-governance.md. Reutilizar USR173 para tipos; nenhum arquivo protegido ou ativacao.\n\nCONGELADO em 11/10/2026 (plano V0, docs/plans/V0_OPERACIONAL_2026-10-11.md): fora do caminho critico da linha.",
     "core_journey": [
       "SQ03 autorizado por USR191: documentar base confiavel, guard e CI sem enfraquecer controles. Escopo docs/proposals/security_quality_governance.md e docs/handoffs/security-quality-governance.md. Reutilizar USR173 para tipos; nenhum arquivo protegido ou ativacao."
     ],
@@ -6603,7 +6643,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-11T05:39:04.963655Z",
-    "updated_at": "2026-10-11T05:39:04.963655Z"
+    "updated_at": "2026-10-11T17:49:17.206876Z"
   },
   {
     "id": "USR-226",
@@ -6614,11 +6654,12 @@
     "delivery_evidence": null,
     "item_type": "feature",
     "lifecycle_stage": "execution",
-    "horizon": "now",
+    "horizon": "later",
     "tags": [
-      "user-demand"
+      "user-demand",
+      "congelado-v0"
     ],
-    "problem_statement": "Authorized Wave0 SQ02 D01-D08. DarkFac-only profile contracts and threat model; synthetic fixtures only. No campaigns, real network probes, internal document exports or protected governance edits. Missing profile denies sensitive effects through explicit helper; executor-wide integration remains SQ13/USR174. Correct stale SQ01 state with USR191 PR282 merge SHA47f314c.",
+    "problem_statement": "Authorized Wave0 SQ02 D01-D08. DarkFac-only profile contracts and threat model; synthetic fixtures only. No campaigns, real network probes, internal document exports or protected governance edits. Missing profile denies sensitive effects through explicit helper; executor-wide integration remains SQ13/USR174. Correct stale SQ01 state with USR191 PR282 merge SHA47f314c.\n\nCONGELADO em 11/10/2026 (plano V0, docs/plans/V0_OPERACIONAL_2026-10-11.md): fora do caminho critico da linha.",
     "core_journey": [
       "Authorized Wave0 SQ02 D01-D08. DarkFac-only profile contracts and threat model; synthetic fixtures only. No campaigns, real network probes, internal document exports or protected governance edits. Missing profile denies sensitive effects through explicit helper; executor-wide integration remains SQ13/USR174. Correct stale SQ01 state with USR191 PR282 merge SHA47f314c."
     ],
@@ -6635,7 +6676,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-11T05:38:59.241192Z",
-    "updated_at": "2026-10-11T05:38:59.241192Z"
+    "updated_at": "2026-10-11T17:49:17.206876Z"
   },
   {
     "id": "USR-228",
@@ -6646,11 +6687,12 @@
     "delivery_evidence": null,
     "item_type": "feature",
     "lifecycle_stage": "execution",
-    "horizon": "now",
+    "horizon": "later",
     "tags": [
-      "user-demand"
+      "user-demand",
+      "congelado-v0"
     ],
-    "problem_statement": "Inventario SQ03 USR227 observou que core/orchestrator/guard.py is_governance_evolution_authorized valida somente flag de ambiente, sem verificar ticket, aprovador, caminhos ou candidato. O docstring menciona verified ticket mas isso nao e implementado. Lacuna distinta dos tickets de timeout e de tipos; nenhuma flag foi ativada nesta investigacao.",
+    "problem_statement": "Inventario SQ03 USR227 observou que core/orchestrator/guard.py is_governance_evolution_authorized valida somente flag de ambiente, sem verificar ticket, aprovador, caminhos ou candidato. O docstring menciona verified ticket mas isso nao e implementado. Lacuna distinta dos tickets de timeout e de tipos; nenhuma flag foi ativada nesta investigacao.\n\nCONGELADO em 11/10/2026 (plano V0, docs/plans/V0_OPERACIONAL_2026-10-11.md): fora do caminho critico da linha.",
     "core_journey": [
       "Inventario SQ03 USR227 observou que core/orchestrator/guard.py is_governance_evolution_authorized valida somente flag de ambiente, sem verificar ticket, aprovador, caminhos ou candidato. O docstring menciona verified ticket mas isso nao e implementado. Lacuna distinta dos tickets de timeout e de tipos; nenhuma flag foi ativada nesta investigacao."
     ],
@@ -6665,7 +6707,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-11T05:45:09.817800Z",
-    "updated_at": "2026-10-11T05:45:09.817800Z"
+    "updated_at": "2026-10-11T17:49:17.206876Z"
   },
   {
     "id": "USR-229",
@@ -6738,7 +6780,8 @@
     "lifecycle_stage": "execution",
     "horizon": "now",
     "tags": [
-      "user-demand"
+      "user-demand",
+      "v0-critico"
     ],
     "problem_statement": "Em 11/10/2026, ao rodar run_ticket --resume-delivery com o diretorio de trabalho DENTRO da worktree do ticket, a entrega terminou com HARNESS_PASS e merge, mas a limpeza falhou nas duas execucoes (USR-169 e USR-198): git worktree remove falha com 'Permission denied' (a pasta ja foi desregistrada), depois rmtree e a movida para a lixeira falham com WinError 32 (arquivo em uso) porque o proprio processo do run_ticket usa a pasta como cwd; no Windows um processo nao apaga o proprio diretorio de trabalho. Sobra uma pasta vazia em .worktrees e um aviso de erro no fim, e a limpeza so se resolve a mao. O fluxo normal (rodar de C:\\dev\\DarkFac) nao tem o problema, mas o comando aceita --worktree e e invocado de dentro da worktree por sessoes de chat.",
     "core_journey": [
@@ -6756,6 +6799,140 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-11T09:53:42.317104Z",
-    "updated_at": "2026-10-11T09:53:42.317104Z"
+    "updated_at": "2026-10-11T17:49:17.206876Z"
+  },
+  {
+    "id": "USR-179",
+    "project_id": "darkfac",
+    "title": "Pytest focal nao deve esperar o SUITE_LOCK de outra execucao do portao",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "later",
+    "tags": [
+      "user-demand",
+      "congelado-v0"
+    ],
+    "problem_statement": "Subagente do USR-164 (08/10/2026): execucoes de pytest com 100 ou mais itens esperam o SUITE_LOCK (core/harness/suite_lock.py) enquanto outro agente roda o harness; um pytest focal ficou mais de 15 min preso. O lock e intencional para a suite completa, mas atrasa sessoes paralelas que so querem validar poucos testes.\n\nCONGELADO em 11/10/2026 (plano V0, docs/plans/V0_OPERACIONAL_2026-10-11.md): fora do caminho critico da linha.",
+    "core_journey": [
+      "Subagente do USR-164 (08/10/2026): execucoes de pytest com 100 ou mais itens esperam o SUITE_LOCK (core/harness/suite_lock.py) enquanto outro agente roda o harness; um pytest focal ficou mais de 15 min preso. O lock e intencional para a suite completa, mas atrasa sessoes paralelas que so querem validar poucos testes."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Definir o criterio do lock (suite completa vs selecao focal) e documentar",
+      "Execucao focal explicita (ex.: variavel ou flag) nao espera o lock e nao o toma, sem permitir duas suites completas simultaneas",
+      "Teste cobrindo os dois caminhos"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-08T22:35:17.003386Z",
+    "updated_at": "2026-10-11T17:49:17.206876Z"
+  },
+  {
+    "id": "USR-192",
+    "project_id": "darkfac",
+    "title": "Corrigir falha '[Errno 2] git' ao registrar demanda pelo Telegram",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "later",
+    "tags": [
+      "user-demand",
+      "congelado-v0"
+    ],
+    "problem_statement": "Ao enviar /demand no canal DarkFac Orchestrator do Telegram, a resposta é '❌ Failed to register demand: [Errno 2] No such file or directory: git'. Causa: core/demands/id_allocator.py (_git) executa subprocess.run(['git', ...]) sem caminho absoluto; o processo do orquestrador roda sem git no PATH (git existe em C:\\Program Files\\Git\\cmd\\git.exe no shell do usuário). Erro emitido em core/integrations/telegram.py:748 e :781. Fix esperado: resolver git por shutil.which com fallback para caminhos padrão do Windows, e falhar com mensagem clara em português quando ausente, sem traceback cru ao usuário.\n\nCONGELADO em 11/10/2026 (plano V0, docs/plans/V0_OPERACIONAL_2026-10-11.md): fora do caminho critico da linha.",
+    "core_journey": [
+      "Ao enviar /demand no canal DarkFac Orchestrator do Telegram, a resposta é '❌ Failed to register demand: [Errno 2] No such file or directory: git'. Causa: core/demands/id_allocator.py (_git) executa subprocess.run(['git', ...]) sem caminho absoluto; o processo do orquestrador roda sem git no PATH (git existe em C:\\Program Files\\Git\\cmd\\git.exe no shell do usuário). Erro emitido em core/integrations/telegram.py:748 e :781. Fix esperado: resolver git por shutil.which com fallback para caminhos padrão do Windows, e falhar com mensagem clara em português quando ausente, sem traceback cru ao usuário."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Com git fora do PATH do processo, o orquestrador localiza o binário pelo fallback e registra a demanda",
+      "Com git realmente ausente, a resposta do Telegram é mensagem clara indicando a dependência, sem '[Errno 2]' cru",
+      "Teste automatizado cobre _git com PATH vazio e com fallback"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-09T20:05:27.909170Z",
+    "updated_at": "2026-10-11T17:49:17.206876Z"
+  },
+  {
+    "id": "USR-222",
+    "project_id": "darkfac",
+    "title": "Deploy pos-merge diverge e pula o backup quando o checkout compartilhado do Notebook esta em outra branch",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand",
+      "v0-critico"
+    ],
+    "problem_statement": "Em 10/10/2026 scripts/dokploy_redeploy.py saiu com codigo 1 e 'BACKUP skipped: deploy did not converge' porque o checkout C:\\dev\\DarkFac do Notebook estava na branch fix/demand-id-allocator-no-git (outra sessao, com alteracoes nao commitadas em core/demands/id_allocator.py): 'main checkout is on branch ..., not main; no git operation attempted'. O mesmo checkout compartilhado ja recebeu por engano um commit do owner (AGENTS.md) numa branch de PR. Sessoes paralelas e o owner dividem um unico working tree.",
+    "core_journey": [
+      "Em 10/10/2026 scripts/dokploy_redeploy.py saiu com codigo 1 e 'BACKUP skipped: deploy did not converge' porque o checkout C:\\dev\\DarkFac do Notebook estava na branch fix/demand-id-allocator-no-git (outra sessao, com alteracoes nao commitadas em core/demands/id_allocator.py): 'main checkout is on branch ..., not main; no git operation attempted'. O mesmo checkout compartilhado ja recebeu por engano um commit do owner (AGENTS.md) numa branch de PR. Sessoes paralelas e o owner dividem um unico working tree."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "O deploy pos-merge nao depende do checkout interativo estar em main (usa worktree/clone dedicado ou git fetch + ref) e o backup pos-deploy roda",
+      "O processo deixa claro (docs/runbook) que sessoes de agente usam worktree propria e nunca trocam a branch do checkout principal",
+      "Teste cobre o node_sync com checkout em branch diferente de main"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-10T18:34:47.416295Z",
+    "updated_at": "2026-10-11T17:49:17.206876Z"
+  },
+  {
+    "id": "USR-238",
+    "project_id": "darkfac",
+    "title": "PRs de registro de fila ficam abertos ou em conflito e o ticket nunca chega ao backlog da main",
+    "origin": "agent",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "operations",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand",
+      "bug",
+      "v0-critico"
+    ],
+    "problem_statement": "Em 11/10/2026 havia PRs de registro (chore(backlog), kind=queue) parados dias sem merge: #225 (USR-179, aberto desde 08/10, mergeable UNKNOWN), #245 (USR-192, CONFLICTING desde 09/10) e #276 (USR-222, CONFLICTING desde 10/10). Os tres tickets nunca chegaram ao demands.json da main e foram resgatados manualmente no PR de congelamento V0. Tambem havia PRs antigos sem dono (#20, #22, #167, #290) e mais de 20 worktrees em .worktrees/. Registrar ticket precisa ser confiavel: um registro que nao chega na main e um defeito perdido.",
+    "core_journey": [
+      "Agente roda run_ticket --create --queue-only.",
+      "O PR de registro passa no CI e e mergeado sozinho, mesmo com outros registros concorrentes.",
+      "Se nao conseguir mergear, o ticket fica visivel como registro pendente com o motivo."
+    ],
+    "non_goals": [
+      "Mudar o formato do demands.json",
+      "Implementar os tickets registrados"
+    ],
+    "reachability_contract": "python C:\\dev\\DarkFac\\run_ticket.py --create --queue-only --title ... ; gh pr list --state open",
+    "acceptance_criteria": [
+      "Registro concorrente (dois --queue-only em paralelo) termina com os dois tickets na main sem acao humana; teste automatizado cobre o conflito do demands.json.",
+      "Um PR de registro que nao mergeia em 30 min gera alerta (HumanRequest ou OA) com o motivo, em vez de ficar aberto em silencio.",
+      "Diagnostico documentado de por que #225, #245 e #276 nao mergearam, e os tres PRs fechados com referencia ao resgate."
+    ],
+    "suggested_files": [
+      "core/git/autonomy.py",
+      "core/demands/merge.py",
+      "run_ticket.py"
+    ],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-11T17:49:17.206876Z",
+    "updated_at": "2026-10-11T17:49:17.206876Z"
   }
 ]
