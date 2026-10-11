@@ -4528,7 +4528,7 @@
       "user-demand",
       "congelado-v0"
     ],
-    "problem_statement": "O USR-111 fechou o PermissionError do ledger de uso (core/usage/store.py) com causa raiz, mas o R02 EFFECT_SERVICE_UNAVAILABLE (ConnectionAbortedError WinError 10053 no effect_server, run 37596976676) recebeu apenas mitigacao (backlog 128 e handle_error silencioso); a causa raiz nao foi provada. ATUALIZACAO (10/10/2026): segunda ocorrencia do R02 na CI da main (run 38075939123, commit dc89843, job main-validation windows), desta vez como \"'usr157-R02-1' is stale or expired\" (lease expirado) no teste test_r02_crash_lands_at_the_parked_checkpoint_and_orders_diagnostics; os runs seguintes da main (commits c0f67ba e 6e30ce8) passaram, entao a falha nao e deterministica. Incluir esse sintoma na investigacao; hipotese a confirmar: o lease expira antes de o checkpoint estacionado ser alcancado quando o runner Windows esta lento.\n\nCONGELADO em 11/10/2026 (plano V0, docs/plans/V0_OPERACIONAL_2026-10-11.md): fora do caminho critico da linha.",
+    "problem_statement": "O USR-111 fechou o PermissionError do ledger de uso (core/usage/store.py) com causa raiz, mas o R02 EFFECT_SERVICE_UNAVAILABLE (ConnectionAbortedError WinError 10053 no effect_server, run 37596976676) recebeu apenas mitigacao (backlog 128 e handle_error silencioso); a causa raiz nao foi provada. ATUALIZACAO (10/10/2026): segunda ocorrencia do R02 na CI da main (run 38075939123, commit dc89843, job main-validation windows), desta vez como \"'usr157-R02-1' is stale or expired\" (lease expirado) no teste test_r02_crash_lands_at_the_parked_checkpoint_and_orders_diagnostics; os runs seguintes da main (commits c0f67ba e 6e30ce8) passaram, entao a falha nao e deterministica. Incluir esse sintoma na investigacao; hipotese a confirmar: o lease expira antes de o checkpoint estacionado ser alcancado quando o runner Windows esta lento.\n\nCONGELADO em 11/10/2026 (plano V0, docs/plans/V0_OPERACIONAL_2026-10-11.md): fora do caminho critico da linha.\n\nNOVA EVIDENCIA (11/10/2026): o push de 31d565b na main falhou so no windows-latest com tests/test_runtime_spike_scenarios.py::test_cli_run_verify_and_summarize_native_core - subprocess.TimeoutExpired (spikes.runtime_choice.cli run --runtime native_sqlite --suite core --lease-seconds 10.0) apos 60 s; 1 failed, 3856 passed em 802 s (run 38129330131); o commit seguinte passou sem mudanca de codigo. Mesma familia do R02.",
     "core_journey": [
       "O USR-111 fechou o PermissionError do ledger de uso (core/usage/store.py) com causa raiz, mas o R02 EFFECT_SERVICE_UNAVAILABLE (ConnectionAbortedError WinError 10053 no effect_server, run 37596976676) recebeu apenas mitigacao (backlog 128 e handle_error silencioso); a causa raiz nao foi provada. ATUALIZACAO (10/10/2026): segunda ocorrencia do R02 na CI da main (run 38075939123, commit dc89843, job main-validation windows), desta vez como \"'usr157-R02-1' is stale or expired\" (lease expirado) no teste test_r02_crash_lands_at_the_parked_checkpoint_and_orders_diagnostics; os runs seguintes da main (commits c0f67ba e 6e30ce8) passaram, entao a falha nao e deterministica. Incluir esse sintoma na investigacao; hipotese a confirmar: o lease expira antes de o checkpoint estacionado ser alcancado quando o runner Windows esta lento."
     ],
@@ -5679,7 +5679,13 @@
       "hub/frontend/"
     ],
     "estimated_complexity": "high",
-    "dependencies": [],
+    "dependencies": [
+      "USR-232",
+      "USR-233",
+      "USR-234",
+      "USR-235",
+      "USR-236"
+    ],
     "created_at": "2026-10-10T14:53:37.888426Z",
     "updated_at": "2026-10-11T17:49:17.206876Z"
   },
@@ -6302,8 +6308,8 @@
     "project_id": "darkfac",
     "title": "CI vermelho no main @dc89843: main-validation (windows-latest)",
     "origin": "user",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "Criterio 1 cumprido: a main ficou verde apos dc89843; DarkFac CI concluiu com sucesso em 147b3cf (10:47Z), df69b21 (18:08Z) e 5d827ce (18:24Z) em 11/10/2026, alem dos runs de 10/10 18:49Z e 18:55Z. Criterio 2: a causa foi um unico teste flaky (tests/test_runtime_spike_scenarios.py::test_r02_crash_lands_at_the_parked_checkpoint_and_orders_diagnostics, lease expirado so no job windows); nao reproduziu nos runs seguintes e a causa raiz segue rastreada no USR-157 (congelado-v0, plano V0 de 11/10/2026). Fechado conforme docs/plans/V0_OPERACIONAL_2026-10-11.md (onda 0).",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -6325,7 +6331,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-10T18:46:56.288810Z",
-    "updated_at": "2026-10-11T17:49:17.206876Z"
+    "updated_at": "2026-10-11T18:58:51.757495Z"
   },
   {
     "id": "USR-221",
@@ -6557,8 +6563,8 @@
     "project_id": "darkfac",
     "title": "Limpeza da lixeira de worktrees falha com Acesso negado (WinError 5) em .factory/backups/trash a cada entrega",
     "origin": "user",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "6082e6c52e44dfe979f57640737586a7edb3511b",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -6581,15 +6587,15 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-10T21:29:13.790197Z",
-    "updated_at": "2026-10-11T17:49:17.206876Z"
+    "updated_at": "2026-10-11T20:37:50.588315Z"
   },
   {
     "id": "USR-225",
     "project_id": "darkfac",
     "title": "run_ticket nao reaproveita a worktree de uma tentativa que estourou o tempo: cria outra e o agente recomeca do zero",
     "origin": "user",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "f3cb226879cef5974b857aed03fde72ce039ab93",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -6612,7 +6618,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-10T22:46:08.951489Z",
-    "updated_at": "2026-10-11T17:49:17.206876Z"
+    "updated_at": "2026-10-11T22:30:08.710347Z"
   },
   {
     "id": "USR-227",
@@ -6774,8 +6780,8 @@
     "project_id": "darkfac",
     "title": "run_ticket --resume-delivery: sair do diretorio da worktree antes da limpeza (WinError 32 deixa a pasta orfa)",
     "origin": "user",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "c21923d47aaaf0f28027e43a0ea0e4cc85f7c490",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -6799,7 +6805,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-11T09:53:42.317104Z",
-    "updated_at": "2026-10-11T17:49:17.206876Z"
+    "updated_at": "2026-10-11T19:42:47.103582Z"
   },
   {
     "id": "USR-179",
@@ -6909,7 +6915,7 @@
       "bug",
       "v0-critico"
     ],
-    "problem_statement": "Em 11/10/2026 havia PRs de registro (chore(backlog), kind=queue) parados dias sem merge: #225 (USR-179, aberto desde 08/10, mergeable UNKNOWN), #245 (USR-192, CONFLICTING desde 09/10) e #276 (USR-222, CONFLICTING desde 10/10). Os tres tickets nunca chegaram ao demands.json da main e foram resgatados manualmente no PR de congelamento V0. Tambem havia PRs antigos sem dono (#20, #22, #167, #290) e mais de 20 worktrees em .worktrees/. Registrar ticket precisa ser confiavel: um registro que nao chega na main e um defeito perdido.",
+    "problem_statement": "Em 11/10/2026 havia PRs de registro (chore(backlog), kind=queue) parados dias sem merge: #225 (USR-179, aberto desde 08/10, mergeable UNKNOWN), #245 (USR-192, CONFLICTING desde 09/10) e #276 (USR-222, CONFLICTING desde 10/10). Os tres tickets nunca chegaram ao demands.json da main e foram resgatados manualmente no PR de congelamento V0. Tambem havia PRs antigos sem dono (#20, #22, #167, #290) e mais de 20 worktrees em .worktrees/. Registrar ticket precisa ser confiavel: um registro que nao chega na main e um defeito perdido.\n\nNOVA EVIDENCIA (11/10/2026, mesma familia do #225 com mergeable UNKNOWN): o PR de registro #300 abriu com mergeable=null/UNKNOWN; o job trusted-pr-policy fez checkout de refs/pull/300/merge antes de o GitHub cria-la ('couldn't find remote ref refs/pull/300/merge', 3 tentativas) e o workflow pull_request (pr-validation) nem disparou. GitAutonomyManager.deliver_branch classificou como ci_failed, retirou o merge e deixou PR e branch abertos. So voltou depois de fechar e reabrir o PR com a ref ja criada. A assinatura e distinguivel de falha real (mergeable desconhecido e ausencia de refs/pull/N/merge); o registro deve esperar a mergeabilidade e reabrir o PR ate duas vezes antes de desistir.",
     "core_journey": [
       "Agente roda run_ticket --create --queue-only.",
       "O PR de registro passa no CI e e mergeado sozinho, mesmo com outros registros concorrentes.",
@@ -6934,6 +6940,261 @@
     "dependencies": [],
     "created_at": "2026-10-11T17:49:17.206876Z",
     "updated_at": "2026-10-11T17:49:17.206876Z"
+  },
+  {
+    "id": "USR-232",
+    "project_id": "darkfac",
+    "title": "USR-206 fatia 1: Hub persiste os snapshots de cotas sincronizados e le deles em vez de sondar CLIs na VPS",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "later",
+    "tags": [
+      "user-demand",
+      "congelado-v0",
+      "usr-206-slice"
+    ],
+    "problem_statement": "Fatia do USR-206 (Monitor de contas do Hub com a mesma fonte de cotas do roteador). O AI Account Monitor do Hub (VPS) mostrava saldos errados: (1) sonda CLIs que nao existem no container em vez de ler o snapshot que core.line.routing.pick usa, (2) o loop DarkFac-Usage-Cloud-Sync ficou 7 dias em SYNC_DEGRADED sem alerta (a chave DARKFAC_TELEMETRY_KEY ja foi configurada no host pela OA-010), (3) os snapshots de POST /api/usage/sync somem a cada redeploy, (4) o botao Atualizar cotas so re-sonda a VPS. Contrato e fixtures reais: docs/QUOTA_METER_CONTRACT.md e tests/fixtures/usage/. Cobre as causas (1) e (3). IMPLEMENTACAO ESTACIONADA (nao entregar durante o congelamento V0): branch origin/ticket/usr-232 (SyncedSnapshotAdapter, DARKHUB_QUOTA_SOURCE, DARKHUB_USAGE_DIR, escrita atomica, validacao de provider_id contra path traversal, 400 no endpoint de creditos; 40 + 60 testes focais verdes).",
+    "core_journey": [
+      "Fatia do USR-206 (Monitor de contas do Hub com a mesma fonte de cotas do roteador). O AI Account Monitor do Hub (VPS) mostrava saldos errados: (1) sonda CLIs que nao existem no container em vez de ler o snapshot que core.line.routing.pick usa, (2) o loop DarkFac-Usage-Cloud-Sync ficou 7 dias em SYNC_DEGRADED sem alerta (a chave DARKFAC_TELEMETRY_KEY ja foi configurada no host pela OA-010), (3) os snapshots de POST /api/usage/sync somem a cada redeploy, (4) o botao Atualizar cotas so re-sonda a VPS. Contrato e fixtures reais: docs/QUOTA_METER_CONTRACT.md e tests/fixtures/usage/. Cobre as causas (1) e (3). IMPLEMENTACAO ESTACIONADA (nao entregar durante o congelamento V0): branch origin/ticket/usr-232 (SyncedSnapshotAdapter, DARKHUB_QUOTA_SOURCE, DARKHUB_USAGE_DIR, escrita atomica, validacao de provider_id contra path traversal, 400 no endpoint de creditos; 40 + 60 testes focais verdes)."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Snapshots de POST /api/usage/sync ficam em diretorio de volume nomeado do Hub (variavel de ambiente explicita) e sobrevivem a redeploy",
+      "O monitor do Hub usa o snapshot sincronizado como fonte dos provedores medidos fora da VPS e nunca sonda CLI nem rede local para eles; sem snapshot aparece como sem dado sincronizado, distinto de desconectado",
+      "Teste de contrato com as fixtures reais de tests/fixtures/usage/: o headroom do Hub e identico ao do roteador para o mesmo snapshot"
+    ],
+    "suggested_files": [
+      "core/usage/adapters.py",
+      "core/usage/monitor.py",
+      "hub/backend/service.py",
+      "deploy/dokploy/docker-compose.hub.yml"
+    ],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-11T20:27:26.404985Z",
+    "updated_at": "2026-10-11T20:27:26.404985Z"
+  },
+  {
+    "id": "USR-233",
+    "project_id": "darkfac",
+    "title": "USR-206 fatia 2: cartoes de cotas do Hub mostram idade e origem do dado, e dado com mais de 10 min aparece como desatualizado",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "later",
+    "tags": [
+      "user-demand",
+      "congelado-v0",
+      "usr-206-slice"
+    ],
+    "problem_statement": "Fatia do USR-206 (Monitor de contas do Hub com a mesma fonte de cotas do roteador). O AI Account Monitor do Hub (VPS) mostrava saldos errados: (1) sonda CLIs que nao existem no container em vez de ler o snapshot que core.line.routing.pick usa, (2) o loop DarkFac-Usage-Cloud-Sync ficou 7 dias em SYNC_DEGRADED sem alerta (a chave DARKFAC_TELEMETRY_KEY ja foi configurada no host pela OA-010), (3) os snapshots de POST /api/usage/sync somem a cada redeploy, (4) o botao Atualizar cotas so re-sonda a VPS. Contrato e fixtures reais: docs/QUOTA_METER_CONTRACT.md e tests/fixtures/usage/. Cobre a exibicao: idade, origem e estado desatualizado, nunca desconectado ou zerado.",
+    "core_journey": [
+      "Fatia do USR-206 (Monitor de contas do Hub com a mesma fonte de cotas do roteador). O AI Account Monitor do Hub (VPS) mostrava saldos errados: (1) sonda CLIs que nao existem no container em vez de ler o snapshot que core.line.routing.pick usa, (2) o loop DarkFac-Usage-Cloud-Sync ficou 7 dias em SYNC_DEGRADED sem alerta (a chave DARKFAC_TELEMETRY_KEY ja foi configurada no host pela OA-010), (3) os snapshots de POST /api/usage/sync somem a cada redeploy, (4) o botao Atualizar cotas so re-sonda a VPS. Contrato e fixtures reais: docs/QUOTA_METER_CONTRACT.md e tests/fixtures/usage/. Cobre a exibicao: idade, origem e estado desatualizado, nunca desconectado ou zerado."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "O modelo de conta do Hub expoe checked_at, no de origem, idade em segundos e indicador de desatualizado (mais de 600 s); teste cobre o limite exato",
+      "Cada cartao mostra idade e origem; dado com mais de 10 min aparece com selo desatualizado em destaque, nunca como desconectado nem zerado",
+      "Teste do frontend (ou do formatador JS) cobre recente, desatualizado e sem dado sincronizado"
+    ],
+    "suggested_files": [
+      "core/usage/models.py",
+      "hub/backend/service.py",
+      "hub/frontend/"
+    ],
+    "estimated_complexity": "medium",
+    "dependencies": [
+      "USR-232"
+    ],
+    "created_at": "2026-10-11T20:27:26.550305Z",
+    "updated_at": "2026-10-11T20:27:26.550305Z"
+  },
+  {
+    "id": "USR-234",
+    "project_id": "darkfac",
+    "title": "USR-206 fatia 3: Atualizar cotas cria uma solicitacao de remedicao que o host medidor executa em ate 60 s",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "later",
+    "tags": [
+      "user-demand",
+      "congelado-v0",
+      "usr-206-slice"
+    ],
+    "problem_statement": "Fatia do USR-206 (Monitor de contas do Hub com a mesma fonte de cotas do roteador). O AI Account Monitor do Hub (VPS) mostrava saldos errados: (1) sonda CLIs que nao existem no container em vez de ler o snapshot que core.line.routing.pick usa, (2) o loop DarkFac-Usage-Cloud-Sync ficou 7 dias em SYNC_DEGRADED sem alerta (a chave DARKFAC_TELEMETRY_KEY ja foi configurada no host pela OA-010), (3) os snapshots de POST /api/usage/sync somem a cada redeploy, (4) o botao Atualizar cotas so re-sonda a VPS. Contrato e fixtures reais: docs/QUOTA_METER_CONTRACT.md e tests/fixtures/usage/. Cobre a causa (4): o botao precisa pedir uma nova medicao ao host que mede.",
+    "core_journey": [
+      "Fatia do USR-206 (Monitor de contas do Hub com a mesma fonte de cotas do roteador). O AI Account Monitor do Hub (VPS) mostrava saldos errados: (1) sonda CLIs que nao existem no container em vez de ler o snapshot que core.line.routing.pick usa, (2) o loop DarkFac-Usage-Cloud-Sync ficou 7 dias em SYNC_DEGRADED sem alerta (a chave DARKFAC_TELEMETRY_KEY ja foi configurada no host pela OA-010), (3) os snapshots de POST /api/usage/sync somem a cada redeploy, (4) o botao Atualizar cotas so re-sonda a VPS. Contrato e fixtures reais: docs/QUOTA_METER_CONTRACT.md e tests/fixtures/usage/. Cobre a causa (4): o botao precisa pedir uma nova medicao ao host que mede."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "POST /api/usage/accounts/refresh cria uma solicitacao persistente (id, status, requested_at, no alvo) em vez de re-sondar a VPS, e ha endpoint de consulta do estado",
+      "O loop do host medidor (scripts/sync_usage_to_cloud.py) consulta solicitacoes pendentes, mede, sincroniza e fecha a solicitacao com o novo checked_at em ate 60 s",
+      "A UI mostra progresso e novo checked_at, ou o motivo exato da falha (host offline, chave ausente); testes com Hub e host falsos"
+    ],
+    "suggested_files": [
+      "hub/backend/api.py",
+      "hub/backend/service.py",
+      "scripts/sync_usage_to_cloud.py",
+      "hub/frontend/"
+    ],
+    "estimated_complexity": "medium",
+    "dependencies": [
+      "USR-232"
+    ],
+    "created_at": "2026-10-11T20:27:26.592368Z",
+    "updated_at": "2026-10-11T20:27:26.592368Z"
+  },
+  {
+    "id": "USR-235",
+    "project_id": "darkfac",
+    "title": "USR-206 fatia 4: falha de sincronizacao de cotas gera alerta critico no Hub e no Telegram ops na primeira ocorrencia",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "later",
+    "tags": [
+      "user-demand",
+      "congelado-v0",
+      "usr-206-slice"
+    ],
+    "problem_statement": "Fatia do USR-206 (Monitor de contas do Hub com a mesma fonte de cotas do roteador). O AI Account Monitor do Hub (VPS) mostrava saldos errados: (1) sonda CLIs que nao existem no container em vez de ler o snapshot que core.line.routing.pick usa, (2) o loop DarkFac-Usage-Cloud-Sync ficou 7 dias em SYNC_DEGRADED sem alerta (a chave DARKFAC_TELEMETRY_KEY ja foi configurada no host pela OA-010), (3) os snapshots de POST /api/usage/sync somem a cada redeploy, (4) o botao Atualizar cotas so re-sonda a VPS. Contrato e fixtures reais: docs/QUOTA_METER_CONTRACT.md e tests/fixtures/usage/. Cobre a causa (2): ninguem foi alertado por 7 dias porque a falha so ia para log local.",
+    "core_journey": [
+      "Fatia do USR-206 (Monitor de contas do Hub com a mesma fonte de cotas do roteador). O AI Account Monitor do Hub (VPS) mostrava saldos errados: (1) sonda CLIs que nao existem no container em vez de ler o snapshot que core.line.routing.pick usa, (2) o loop DarkFac-Usage-Cloud-Sync ficou 7 dias em SYNC_DEGRADED sem alerta (a chave DARKFAC_TELEMETRY_KEY ja foi configurada no host pela OA-010), (3) os snapshots de POST /api/usage/sync somem a cada redeploy, (4) o botao Atualizar cotas so re-sonda a VPS. Contrato e fixtures reais: docs/QUOTA_METER_CONTRACT.md e tests/fixtures/usage/. Cobre a causa (2): ninguem foi alertado por 7 dias porque a falha so ia para log local."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Chave ausente, 401 ou nenhuma sincronizacao com sucesso ha mais de 5 min gera item critico na fila de intervencoes do Hub (idempotente por causa) e mensagem no Telegram ops na primeira ocorrencia, sem repetir",
+      "O alerta de ausencia de sincronizacao e decidido no lado do Hub (host parado nao avisa sozinho) e o item fecha sozinho quando a sincronizacao volta",
+      "Testes cobrem chave ausente, 401, atraso maior que 5 min, deduplicacao e fechamento automatico, sem rede nem token reais"
+    ],
+    "suggested_files": [
+      "scripts/sync_usage_to_cloud.py",
+      "hub/backend/service.py",
+      "core/owner_actions/",
+      "core/integrations/telegram_status.py"
+    ],
+    "estimated_complexity": "medium",
+    "dependencies": [
+      "USR-232"
+    ],
+    "created_at": "2026-10-11T20:27:26.701115Z",
+    "updated_at": "2026-10-11T20:27:26.701115Z"
+  },
+  {
+    "id": "USR-236",
+    "project_id": "darkfac",
+    "title": "USR-206 fatia 5: instalador idempotente da tarefa agendada DarkFac-Usage-Cloud-Sync apontando para C:/dev/DarkFac",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "later",
+    "tags": [
+      "user-demand",
+      "congelado-v0",
+      "usr-206-slice"
+    ],
+    "problem_statement": "Fatia do USR-206 (Monitor de contas do Hub com a mesma fonte de cotas do roteador). O AI Account Monitor do Hub (VPS) mostrava saldos errados: (1) sonda CLIs que nao existem no container em vez de ler o snapshot que core.line.routing.pick usa, (2) o loop DarkFac-Usage-Cloud-Sync ficou 7 dias em SYNC_DEGRADED sem alerta (a chave DARKFAC_TELEMETRY_KEY ja foi configurada no host pela OA-010), (3) os snapshots de POST /api/usage/sync somem a cada redeploy, (4) o botao Atualizar cotas so re-sonda a VPS. Contrato e fixtures reais: docs/QUOTA_METER_CONTRACT.md e tests/fixtures/usage/. Cobre o instalador: a tarefa rodou 7 dias a partir de uma worktree velha do Codex. IMPLEMENTACAO ESTACIONADA (nao entregar durante o congelamento V0): branch origin/ticket/usr-236 (core/usage/sync_task.py puro, scripts/install_usage_sync_task.py, runbook; 88 testes verdes; o plano contra a tarefa viva ja da keep).",
+    "core_journey": [
+      "Fatia do USR-206 (Monitor de contas do Hub com a mesma fonte de cotas do roteador). O AI Account Monitor do Hub (VPS) mostrava saldos errados: (1) sonda CLIs que nao existem no container em vez de ler o snapshot que core.line.routing.pick usa, (2) o loop DarkFac-Usage-Cloud-Sync ficou 7 dias em SYNC_DEGRADED sem alerta (a chave DARKFAC_TELEMETRY_KEY ja foi configurada no host pela OA-010), (3) os snapshots de POST /api/usage/sync somem a cada redeploy, (4) o botao Atualizar cotas so re-sonda a VPS. Contrato e fixtures reais: docs/QUOTA_METER_CONTRACT.md e tests/fixtures/usage/. Cobre o instalador: a tarefa rodou 7 dias a partir de uma worktree velha do Codex. IMPLEMENTACAO ESTACIONADA (nao entregar durante o congelamento V0): branch origin/ticket/usr-236 (core/usage/sync_task.py puro, scripts/install_usage_sync_task.py, runbook; 88 testes verdes; o plano contra a tarefa viva ja da keep)."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Script registra ou atualiza a tarefa DarkFac-Usage-Cloud-Sync apontando sempre para o checkout principal, nunca para worktree (.worktrees, .claude/worktrees, .codex/worktrees), e re-registra quando o caminho difere",
+      "A decisao criar/manter/atualizar e uma funcao Python pura testada em Linux e Windows (tarefa ausente, igual, em worktree, outro caminho, recusa de raiz de worktree)",
+      "Runbook curto com o comando exato de instalacao e verificacao, e a elevacao (se houver) registrada como acao do owner"
+    ],
+    "suggested_files": [
+      "scripts/install_usage_sync_task.py",
+      "core/usage/sync_task.py",
+      "docs/runbooks/usage_sync_task.md"
+    ],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-11T20:27:26.753647Z",
+    "updated_at": "2026-10-11T20:27:26.753647Z"
+  },
+  {
+    "id": "USR-239",
+    "project_id": "darkfac",
+    "title": "Varrer testes ancorados em data fixa que dependem do relogio real (bomba-relogio) e fixar o relogio ou usar datas relativas",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand",
+      "v0-critico"
+    ],
+    "problem_statement": "Em 11/10/2026 a suite completa falhou em qualquer checagem (ubuntu e windows) a partir de 15:00 UTC: tests/test_line_live.py::test_api_line_live_includes_local_runs levantava StopIteration, porque RECENT_RUN_WINDOW e de 7 dias, a semente ancora em 2026-10-04 15:00 UTC e o teste usava o relogio real. Vermelhou a main e todo PR por cerca de 3 horas e bloqueou o registro de tickets e todo portao local; foi corrigido pelo PR 302 (fixture autouse), depois de uma correcao parcial anterior (PR 264, fechado) ter deixado este teste de fora. Impede a condicao 'main verde' do V0: outro teste com data fixa pode quebrar do mesmo modo durante a sequencia. Arquivos de teste com datetime(2026, 10, ...) fixo: test_artifact_retention, test_cloud_worker_active_loop, test_control_store_failure_evidence, test_line_acceptance, test_line_dogfood, test_line_live, test_line_owner_intake_expired, test_local_progress_visibility, test_local_progress, test_postgres_real_integration, test_run_ticket_cancel, test_telegram_status_usr197.",
+    "core_journey": [
+      "Em 11/10/2026 a suite completa falhou em qualquer checagem (ubuntu e windows) a partir de 15:00 UTC: tests/test_line_live.py::test_api_line_live_includes_local_runs levantava StopIteration, porque RECENT_RUN_WINDOW e de 7 dias, a semente ancora em 2026-10-04 15:00 UTC e o teste usava o relogio real. Vermelhou a main e todo PR por cerca de 3 horas e bloqueou o registro de tickets e todo portao local; foi corrigido pelo PR 302 (fixture autouse), depois de uma correcao parcial anterior (PR 264, fechado) ter deixado este teste de fora. Impede a condicao 'main verde' do V0: outro teste com data fixa pode quebrar do mesmo modo durante a sequencia. Arquivos de teste com datetime(2026, 10, ...) fixo: test_artifact_retention, test_cloud_worker_active_loop, test_control_store_failure_evidence, test_line_acceptance, test_line_dogfood, test_line_live, test_line_owner_intake_expired, test_local_progress_visibility, test_local_progress, test_postgres_real_integration, test_run_ticket_cancel, test_telegram_status_usr197."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Levantamento dos testes que misturam data fixa com codigo que le o relogio real (janelas de dias, TTL, idade), com a lista registrada no ticket",
+      "Cada um passa a fixar o relogio ou a usar datas relativas ao agora; nenhum depende da data de execucao",
+      "Teste guarda roda os testes de dominio com o relogio avancado em 30, 90 e 365 dias e prova que nenhum quebra"
+    ],
+    "suggested_files": [
+      "tests/"
+    ],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-11T20:27:42.065018Z",
+    "updated_at": "2026-10-11T20:27:42.065018Z"
+  },
+  {
+    "id": "USR-240",
+    "project_id": "darkfac",
+    "title": "scripts/install_sync_task.ps1 deriva a raiz do repositorio do proprio caminho e reproduz o incidente da worktree velha quando rodado de dentro de uma worktree",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "later",
+    "tags": [
+      "user-demand",
+      "congelado-v0"
+    ],
+    "problem_statement": "O script PowerShell que instala a tarefa agendada de sincronizacao de cotas calcula repoRoot com Split-Path -Parent a partir de $MyInvocation; rodado de uma worktree, registra a tarefa apontando para ela, exatamente o incidente de 03 a 10/10/2026 (tarefa rodando por 7 dias a partir de uma worktree velha do Codex). Achado ao implementar o USR-236, que entrega um instalador Python com recusa de worktree mas nao altera o .ps1.",
+    "core_journey": [
+      "O script PowerShell que instala a tarefa agendada de sincronizacao de cotas calcula repoRoot com Split-Path -Parent a partir de $MyInvocation; rodado de uma worktree, registra a tarefa apontando para ela, exatamente o incidente de 03 a 10/10/2026 (tarefa rodando por 7 dias a partir de uma worktree velha do Codex). Achado ao implementar o USR-236, que entrega um instalador Python com recusa de worktree mas nao altera o .ps1."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "install_sync_task.ps1 delega ao instalador Python (install_usage_sync_task.py --apply) ou recusa raiz dentro de .worktrees, .claude/worktrees e .codex/worktrees",
+      "Teste ou verificacao estatica garante que o .ps1 nao calcula a raiz do proprio caminho sem a recusa"
+    ],
+    "suggested_files": [
+      "scripts/install_sync_task.ps1",
+      "scripts/install_usage_sync_task.py"
+    ],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-11T20:27:57.158166Z",
+    "updated_at": "2026-10-11T20:27:57.158166Z"
   },
   {
     "id": "USR-241",
