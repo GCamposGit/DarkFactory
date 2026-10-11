@@ -35,10 +35,11 @@ import stat
 import subprocess
 import sys
 import time
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, Callable, Optional, Sequence
+from typing import Any, Callable, Iterator, Optional, Sequence
 
 from core.paths import state_root
 
@@ -369,6 +370,80 @@ def _prune(main_root: Path, runner: GitRunner) -> None:
     runner(["worktree", "prune"], main_root)
 
 
+def _is_within(candidate: Path | str, root: Path | str) -> bool:
+    """True when ``candidate`` is ``root`` or lives below it (resolved, case-folded on Windows)."""
+    try:
+        return os.path.commonpath([_norm(candidate), _norm(root)]) == _norm(root)
+    except ValueError:  # different drives
+        return False
+
+
+@contextmanager
+def _outside_dir(path: Path, fallback_root: Path) -> Iterator[None]:
+    """Make sure the process cwd is NOT inside ``path`` while the body runs (USR-231).
+
+    On Windows a process whose cwd is a directory holds a handle on it: ``git worktree
+    remove``, ``rmtree`` and the trash rename all fail with WinError 32 against the
+    worktree the caller itself is standing in. When the cwd is inside ``path`` (or no
+    longer resolvable) it is moved to ``fallback_root`` (the main checkout); on exit the
+    previous cwd is restored when it still exists, also if the body raised.
+    """
+    try:
+        previous: Optional[Path] = Path.cwd()
+    except OSError:
+        previous = None
+    moved = previous is None or _is_within(previous, path)
+    if moved:
+        try:
+            os.chdir(fallback_root)
+            logger.info("cwd moved from %s to %s before removing %s", previous, fallback_root, path)
+        except OSError as exc:
+            moved = False
+            logger.warning("could not leave %s (chdir %s failed): %s", path, fallback_root, exc)
+    try:
+        yield
+    finally:
+        if moved and previous is not None and previous.exists():
+            try:
+                os.chdir(previous)
+            except OSError as exc:
+                logger.warning("could not restore cwd %s: %s", previous, exc)
+
+
+def _find_holders(path: Path) -> list[str]:
+    """Best-effort ``name (pid)`` of processes whose cwd is inside ``path`` (needs psutil; else empty)."""
+    try:
+        import psutil  # optional
+    except ImportError:
+        return []
+    holders: list[str] = []
+    try:
+        for proc in psutil.process_iter(["pid", "name"]):
+            try:
+                if _is_within(proc.cwd(), path):
+                    holders.append(f"{proc.info.get('name')} (pid {proc.info.get('pid')})")
+            except Exception:  # noqa: BLE001 -- access denied / vanished process
+                continue
+    except Exception:  # noqa: BLE001
+        return holders
+    return holders
+
+
+def removal_hint(path: Path, main_root: Path) -> str:
+    """Final-warning text: who may hold ``path`` and the exact command to finish the cleanup."""
+    holders = _find_holders(path)
+    who = (
+        "processes with cwd inside it: " + ", ".join(holders)
+        if holders
+        else "a process (shell, editor, antivirus, agent) still has a handle or cwd inside it"
+    )
+    return (
+        f"{path} could not be removed ({who}). Close that process, then run: "
+        f'git -C "{main_root}" worktree remove --force "{path}" ; '
+        f'Remove-Item -LiteralPath "{path}" -Recurse -Force ; git -C "{main_root}" worktree prune'
+    )
+
+
 def cleanup(
     path: Path,
     main_root: Path,
@@ -388,8 +463,27 @@ def cleanup(
     3. when the directory is still there: RENAME it into the trash (never lose
        data, never leave a half-registered worktree) and ``git worktree prune``.
 
+    The process cwd is moved out of ``path`` for the whole operation (:func:`_outside_dir`).
     Never raises; ``CleanupResult.removed`` says whether ``path`` is gone.
     """
+    with _outside_dir(path, main_root):
+        return _cleanup_outside(
+            path, main_root, sleep_fn=sleep_fn, retries=retries, backoff_s=backoff_s,
+            run_git=run_git, rmtree_fn=rmtree_fn, now_fn=now_fn,
+        )
+
+
+def _cleanup_outside(
+    path: Path,
+    main_root: Path,
+    *,
+    sleep_fn: Optional[SleepFn],
+    retries: int,
+    backoff_s: Sequence[float],
+    run_git: Optional[GitRunner],
+    rmtree_fn: Optional[RmtreeFn],
+    now_fn: Optional[NowFn],
+) -> CleanupResult:
     runner = run_git or _git
     sleeper = sleep_fn or time.sleep
     remove_tree = rmtree_fn or robust_rmtree
@@ -440,8 +534,8 @@ def cleanup(
         result.trash_path = trash_directory(path, main_root, now_fn=now_fn)
     except OSError as exc:
         result.errors.append(f"trash: {exc}")
-        result.detail = f"could not remove or move {path}: {exc}"
-        logger.error("Could not remove or trash %s: %s", path, exc)
+        result.detail = f"could not remove or move {path}: {exc}. {removal_hint(path, main_root)}"
+        logger.error("Could not remove or trash %s: %s", path, result.detail)
         return result
     _prune(main_root, runner)
     result.removed, result.method = True, "trash"
