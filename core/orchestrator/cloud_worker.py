@@ -179,6 +179,8 @@ class CloudWorker:
         workspace_sweeper: Callable[..., list[str]] | None = None,
         artifact_sweep_interval_s: float = 6 * 3600.0,
         artifact_sweeper: Callable[..., Any] | None = None,
+        context_sweep_interval_s: float = 6 * 3600.0,
+        context_sweeper: Callable[..., Any] | None = None,
         orphan_run_sweep_interval_s: float = 300.0,
         orphan_run_sweeper: Callable[..., list[Any]] | None = None,
         parked_orphan_notifier: Callable[..., list[Any]] | None = None,
@@ -221,6 +223,10 @@ class CloudWorker:
         self._artifact_sweep_interval_s = artifact_sweep_interval_s
         self._artifact_sweeper = artifact_sweeper
         self._last_artifact_sweep_at: datetime | None = None
+        # USR-169: same cadence for the remote recovery refs `darkfac-context/<run_id>` (core.line.context_retention).
+        self._context_sweep_interval_s = context_sweep_interval_s
+        self._context_sweeper = context_sweeper
+        self._last_context_sweep_at: datetime | None = None
         # USR-142: active runs with no open job and no activity for 30 min get their successor scheduled
         # (or are parked on waiting_human) instead of sitting idle forever.
         self._orphan_run_sweep_interval_s = orphan_run_sweep_interval_s
@@ -1047,6 +1053,35 @@ class CloudWorker:
         )
         return list(getattr(report, "removed_ids", []) or [])
 
+    def sweep_recovery_contexts(self, now: datetime | None = None) -> list[str]:
+        """Apply the recovery-context ref retention (USR-169); never touches an active/waiting run.
+
+        Env: `DARKFAC_CONTEXT_RETENTION_DAYS` (default 14 after the terminal state; 0 disables),
+        `DARKFAC_CONTEXT_RETENTION_DRY_RUN` (log only). Returns the run ids whose ref was removed
+        (or would be removed, in dry-run).
+        """
+        from core.line import context_retention as retention
+
+        config = retention.context_retention_config_from_env()
+        if not config.enabled:
+            return []
+        sweeper = self._context_sweeper
+        if sweeper is None:
+            if os.environ.get("PYTEST_CURRENT_TEST"):
+                return []  # tests must never touch a remote repository unless they inject a sweeper
+            sweeper = retention.sweep_recovery_contexts
+        from core.projects.registry import get_project_registry
+
+        protected = {key.rsplit(":", 1)[0] for key in list(self._active_tasks)}
+        report = sweeper(
+            projects=get_project_registry().list_projects(),
+            run_status=self.store.get_run_status,
+            protected_run_ids=protected,
+            config=config,
+            now=(now.timestamp() if now is not None else None),
+        )
+        return list(getattr(report, "removed_ids", []) or [])
+
     def poll_and_execute_once(self, now: datetime | None = None) -> bool:
         """Attempt to claim one pending job and execute it.
 
@@ -1087,6 +1122,16 @@ class CloudWorker:
                 self.sweep_stale_artifacts(now=effective_now)
             except Exception as exc:
                 logger.warning("Artifact retention sweep failed: %s", exc)
+
+        if (
+            self._last_context_sweep_at is None
+            or (effective_now - self._last_context_sweep_at).total_seconds() >= self._context_sweep_interval_s
+        ):
+            self._last_context_sweep_at = effective_now
+            try:
+                self.sweep_recovery_contexts(now=effective_now)
+            except Exception as exc:
+                logger.warning("Recovery context retention sweep failed: %s", exc)
 
         if (
             self._last_orphan_run_sweep_at is None

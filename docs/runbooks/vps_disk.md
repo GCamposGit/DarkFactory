@@ -30,6 +30,7 @@ runbook descreve o que roda sozinho, os limiares, os comandos de emergencia e co
 | Limpeza de emergencia | `scripts/dokploy_redeploy.py` | quando um build falha com assinatura de disco cheio | poda tudo e manda rodar o redeploy de novo |
 | Retencao de workspaces da linha | `CloudWorker` (`core/line/workspace.py::sweep_stale_workspaces`) | a cada 6h | apaga `/workspaces/<projeto>/runs/<run>` de runs terminais ha mais de 3 dias (`DARKFAC_WORKSPACE_RETENTION_DAYS`, 0 desliga); nunca run ativo/com job vivo/em andamento neste worker; orfaos so apos 14 dias |
 | Retencao de artefatos de workflows (USR-148) | `CloudWorker` (`core/orchestrator/artifact_retention.py::sweep_stale_artifacts`) | a cada 6h (e no primeiro poll do worker) | remove `/app/.factory/artifacts/<run_id>/` de runs terminais ha mais de 30 dias (`DARKFAC_ARTIFACT_RETENTION_DAYS`, 0 desliga); ver secao 9 |
+| Retencao das refs de contexto de recuperacao (USR-169) | `CloudWorker` (`core/line/context_retention.py::sweep_recovery_contexts`) | a cada 6h (e no primeiro poll do worker) | remove do GitHub `refs/heads/darkfac-context/<run_id>` de runs terminais ha 14 dias ou mais, sem job vivo (`DARKFAC_CONTEXT_RETENTION_DAYS`, 0 desliga); ver secao 10 |
 | Logs de container limitados | `deploy/dokploy/docker-compose.{cloud,hub,n8n}.yml` | sempre | `json-file`, `max-size 10m`, `max-file 3` por servico |
 | Limpeza nativa do Dokploy | Dokploy | diario 23:50 UTC | continua como rede de seguranca |
 
@@ -192,3 +193,60 @@ Variaveis (ambiente do compose `darkfac-cloud`, servico `worker`):
 Para validar antes de confiar: ponha `DARKFAC_ARTIFACT_RETENTION_DRY_RUN=1`, faca o deploy, e procure nos logs
 do worker no Dokploy a linha `artifact_retention_sweep` (campos `would_remove` e `bytes_reclaimable`);
 remova a variavel para ativar a remocao real. Valores invalidos (texto, negativos) voltam ao padrao.
+
+## 10. Retencao das refs de contexto de recuperacao (USR-169, decisao OA-005 opcao A)
+
+A integracao remove o contexto do run (`.darkfac/runs/<run_id>/`) da branch do produto, e o commit
+pre-strip fica fixado no repositorio do projeto-alvo na ref `refs/heads/darkfac-context/<run_id>`
+(`core/line/recovery_context.py`), para um rollback/retry em outro worker ainda ler SPEC e tickets. Sem
+limpeza, essas refs se acumulavam para sempre no GitHub. A politica do owner e: **limpar 14 dias apos o
+estado terminal**. O `CloudWorker` a aplica a cada 6h (e no primeiro poll do worker); o resultado vai para o
+log do worker como uma linha `context_retention_sweep {json}` com `scanned`, `kept`, `kept_reasons`,
+`removed` (run, ref e sha de cada remocao), `would_remove` (dry-run), `lease_lost` e `errors`.
+
+| Situacao da ref `darkfac-context/<run_id>` | Acao |
+|---|---|
+| Run terminal (`completed`/`failed`/`cancelled`/`succeeded`), sem job vivo, concluido ha 14 dias ou mais (contados de `completed_at`, senao `updated_at`, nunca da data do commit) | **Removida** |
+| Run terminal concluido ha menos de 14 dias | Mantida (`too_recent`) |
+| Run `active`, `waiting_*`, qualquer status nao terminal ou com job vivo (`pending`/`running`/`retry`/`replan`/`waiting_dependency`/`waiting_human`) | **Nunca removida**, por mais antiga que seja |
+| Run em execucao neste worker agora | Nunca removida (`protected`) |
+| Run desconhecido do control store (orfao) | Mantida (`unknown_run`): sem estado terminal nao ha como contar os 14 dias |
+| Run de outro projeto, run terminal sem `completed_at`/`updated_at`, falha ao consultar o control store | Mantida (fail-closed) |
+| Ref reapontada entre a leitura e a remocao | Mantida (`lease_lost`), nao e erro |
+| Nome fora de `darkfac-context/<run_id>` valido; qualquer outra ref (`df/*`, `ticket/*`, branch padrao, tags) | Nunca tocada (`invalid_ref_name`) |
+
+A remocao e segura e idempotente: o run e consultado de novo imediatamente antes de apagar (um run
+reaberto no meio mantem a ref), e o delete e um compare-and-swap
+(`git push --force-with-lease=<ref>:<sha> origin :<ref>`). Rodar de novo, ou dois workers varrendo ao mesmo
+tempo, nao gera erro. Um erro de git ou de rede em um projeto ou ref vai para `errors` e a varredura
+segue; a proxima varredura repete. O sweep usa um repositorio bare vazio em
+`/workspaces/<projeto>/.context-retention.git` so como diretorio de trabalho (sem checkout nem worktree).
+
+Variaveis (ambiente do compose `darkfac-cloud`, servico `worker`):
+
+| Variavel | Padrao | Efeito |
+|---|---|---|
+| `DARKFAC_CONTEXT_RETENTION_DAYS` | `14` | Idade minima, apos o estado terminal, para remover a ref; `0` desliga o sweep (nenhuma chamada de git) |
+| `DARKFAC_CONTEXT_RETENTION_DRY_RUN` | desligado | `1`/`true`/`yes`/`on`: so loga o que removeria, nao apaga nada |
+
+Valores invalidos (texto, vazio, negativos, `nan`) voltam ao padrao de 14 dias.
+
+Para validar antes de confiar: ponha `DARKFAC_CONTEXT_RETENTION_DRY_RUN=1`, faca o deploy, e procure nos logs
+do worker no Dokploy a linha `context_retention_sweep` (campo `would_remove`); remova a variavel para ativar a
+remocao real. Para listar as refs que existem hoje no repositorio do DarkFac:
+
+```powershell
+git -C C:\dev\DarkFac ls-remote origin "refs/heads/darkfac-context/*"
+```
+
+Recuperacao: se uma ref foi removida e o run precisa dela (por exemplo, o owner reabriu um run antigo), o sha
+removido esta no campo `removed[].sha` da linha `context_retention_sweep` daquele dia. Enquanto o GitHub
+ainda guardar o commit, a ref volta com:
+
+```powershell
+git -C C:\dev\DarkFac push origin <sha>:refs/heads/darkfac-context/<run_id>
+```
+
+Se o commit ja nao existir mais, o `restore_context` devolve `False` e o estagio falha com causa estruturada
+em vez de voltar ao desenvolvimento sem tickets; nesse caso o run precisa ser replanejado. Para suspender a
+limpeza enquanto investiga, ponha `DARKFAC_CONTEXT_RETENTION_DAYS=0` e faca o deploy.
