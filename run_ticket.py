@@ -331,6 +331,42 @@ class SharedCheckoutDirty(RuntimeError):
         )
 
 
+def _resume_preserved_workspace(ticket: UserTicket, *, as_json: bool) -> Optional[TicketWorkspace]:
+    """Worktree an interrupted earlier attempt of this ticket left behind, or None (USR-225).
+
+    A run that timed out keeps its worktree (and the agent's partial work); a second `run_ticket <ID>`
+    must continue there instead of starting from scratch in a new worktree. The most recent preserved
+    worktree with work is reused; the others are only listed. Lookup failures never block a fresh start.
+    """
+    from core.git.ticket_workspace import find_preserved_workspaces
+
+    try:
+        lookup = find_preserved_workspaces(ticket.id, cwd=PROJECT_ROOT, ignore_paths=(LEDGER_RELATIVE,))
+    except Exception as exc:  # noqa: BLE001 - a lookup problem falls back to a new worktree
+        logger.warning("Could not look for a preserved worktree of %s: %s", ticket.id, exc)
+        return None
+    for note in lookup.notes:
+        logger.info("Preserved-worktree candidate skipped: %s", note)
+    chosen = lookup.chosen
+    if chosen is None:
+        return None
+    logger.info("Reusing preserved worktree %s for %s", chosen.workspace.path, ticket.id)
+    if not as_json:
+        print(
+            f"[+] Reaproveitando a worktree preservada de uma tentativa anterior: {chosen.workspace.path} "
+            f"(branch {chosen.workspace.branch}; {len(chosen.changed_paths)} arquivo(s) alterado(s), "
+            f"{chosen.commits_ahead} commit(s) fora da base)",
+            file=sys.stderr,
+        )
+        for other in lookup.others:
+            print(
+                f"[i] Outra worktree preservada do mesmo ticket (nao usada, nada foi apagado): {other.workspace.path} "
+                f"({len(other.changed_paths)} arquivo(s), {other.commits_ahead} commit(s))",
+                file=sys.stderr,
+            )
+    return chosen.workspace
+
+
 def _prepare_workspace(args: argparse.Namespace, ticket: UserTicket) -> TicketWorkspace:
     """Refuse a dirty shared checkout, then create the ticket's own worktree from origin/main (USR-69).
 
@@ -343,7 +379,9 @@ def _prepare_workspace(args: argparse.Namespace, ticket: UserTicket) -> TicketWo
         dirty = shared_checkout_dirty_paths(PROJECT_ROOT, ignore_prefixes=VOLATILE_STATE_PREFIXES)
         if dirty:
             raise SharedCheckoutDirty(dirty)
-    workspace = create_workspace(ticket.id, cwd=PROJECT_ROOT)
+    workspace = _resume_preserved_workspace(ticket, as_json=bool(getattr(args, "json", False)))
+    if workspace is None:
+        workspace = create_workspace(ticket.id, cwd=PROJECT_ROOT)
     ledger = DemandsStore(workspace.path / ".factory" / "demands" / "demands.json")
     if ledger.get_ticket(ticket.id) is None:
         ledger.save_ticket(ticket)
@@ -1184,6 +1222,19 @@ def _run(argv: Optional[list[str]], box: list[ProgressPublisher], stack: context
         existing_changes = [
             p for p in git_mgr.changed_paths(workspace.path) if p != LEDGER_RELATIVE
         ]
+        # A preserved worktree (USR-225) may hold commits already; they count as work too.
+        try:
+            from core.git.autonomy import _run_git
+
+            committed = _run_git(["diff", "--name-only", f"{workspace.base_sha}..HEAD"], cwd=workspace.path)
+        except Exception as exc:  # noqa: BLE001 - the continuation hint is best effort
+            logger.debug("Could not list committed changes in %s: %s", workspace.path, exc)
+            committed = None
+        if committed is not None and committed.returncode == 0:
+            committed_paths = [p.strip() for p in committed.stdout.splitlines() if p.strip()]
+            existing_changes = list(
+                dict.fromkeys(existing_changes + [p for p in committed_paths if p != LEDGER_RELATIVE])
+            )
         continuation_prompt = ""
         if existing_changes:
             changed_preview = ", ".join(existing_changes[:8])

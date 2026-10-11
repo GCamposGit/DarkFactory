@@ -840,3 +840,131 @@ def find_ticket_worktree(
     candidates.sort(key=latest_mtime, reverse=True)
     return candidates[0]
 
+
+# ----------------------------------------------------------------------
+# Reuse of a preserved worktree (USR-225)
+# ----------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class PreservedWorkspace:
+    """A worktree an earlier attempt of the same ticket left behind WITH work in it."""
+
+    workspace: TicketWorkspace
+    changed_paths: tuple[str, ...]
+    commits_ahead: int
+
+
+@dataclass
+class PreservedLookup:
+    """Outcome of :func:`find_preserved_workspaces`.
+
+    ``chosen`` is the worktree to resume (most recent one with work); ``others`` are the remaining ones
+    with work (reported, never touched); ``notes`` explain every candidate that was left out.
+    """
+
+    chosen: Optional[PreservedWorkspace] = None
+    others: list[PreservedWorkspace] = field(default_factory=list)
+    notes: list[str] = field(default_factory=list)
+
+
+def _status_paths(porcelain_z: str) -> list[str]:
+    """Paths from ``git status --porcelain=v1 -z`` (rename sources are skipped, targets kept)."""
+    paths: list[str] = []
+    tokens = porcelain_z.split("\0")
+    index = 0
+    while index < len(tokens):
+        token = tokens[index]
+        index += 1
+        if len(token) < 4 or token[2] != " ":
+            continue
+        status, path = token[:2], token[3:]
+        if "R" in status or "C" in status:
+            index += 1
+        paths.append(path)
+    return list(dict.fromkeys(paths))
+
+
+def find_preserved_workspaces(
+    ticket_id: str,
+    *,
+    cwd: Path,
+    base: str = "main",
+    remote: str = "origin",
+    fetch: bool = True,
+    ignore_paths: Sequence[str] = (),
+    run_git: Optional[GitRunner] = None,
+) -> PreservedLookup:
+    """Worktrees of ``ticket_id`` that an interrupted attempt preserved and that can be resumed (USR-225).
+
+    A candidate is a worktree REGISTERED in git, living at ``<main>/.worktrees/<id>-<UTC stamp>`` (the
+    names :func:`create_workspace` hands out) on branch ``ticket/<id>`` or ``ticket/<dir name>``, whose
+    directory exists, that is neither ``git worktree lock``-ed / prunable nor holding a git ``index.lock``
+    (another session is using it), and that has work: changed paths other than ``ignore_paths`` or commits
+    ahead of ``<remote>/<base>``. The most recent one by name stamp is ``chosen``. Nothing is modified or
+    deleted: worktrees of other tickets are never looked at.
+    """
+    runner = run_git or _git
+    lookup = PreservedLookup()
+    main_root = main_checkout_root(cwd, runner)
+    if fetch:
+        runner(["fetch", remote, base], main_root)  # best effort: create_workspace is the one that insists
+    base_ref = f"{remote}/{base}"
+    if not _ref_exists(f"{base_ref}^{{commit}}", main_root, runner):
+        return lookup
+
+    slug = _slug(ticket_id)
+    name_pattern = re.compile(rf"^{re.escape(slug)}-(\d{{8}}T\d{{6}}Z)(?:-(\d+))?$")
+    worktrees_dir = main_root / WORKTREES_DIRNAME
+    ignored = set(ignore_paths)
+    ranked: list[tuple[tuple[str, int], PreservedWorkspace]] = []
+
+    for entry in list_worktrees(main_root, runner)[1:]:  # [0] is the primary checkout
+        path = Path(entry["worktree"])
+        match = name_pattern.match(path.name)
+        if not match or _norm(path.parent) != _norm(worktrees_dir):
+            continue
+        branch = entry.get("branch", "").removeprefix("refs/heads/")
+        if branch.lower() not in (f"ticket/{slug}", f"ticket/{path.name.lower()}"):
+            lookup.notes.append(f"{path} (branch {branch or 'destacada'} nao e deste ticket; ignorada)")
+            continue
+        if not path.is_dir():
+            lookup.notes.append(f"{path} (diretorio inexistente; ignorada)")
+            continue
+        if "locked" in entry or "prunable" in entry:
+            lookup.notes.append(f"{path} (worktree bloqueada/prunable no git; ignorada)")
+            continue
+        git_dir = runner(["rev-parse", "--absolute-git-dir"], path)
+        if git_dir.returncode != 0:
+            lookup.notes.append(f"{path} (git ilegivel; ignorada)")
+            continue
+        if (Path(git_dir.stdout.strip()) / "index.lock").exists():
+            lookup.notes.append(f"{path} (index.lock presente: em uso por outra sessao; ignorada)")
+            continue
+        status = runner(["status", "--porcelain=v1", "-z", "--untracked-files=all"], path)
+        if status.returncode != 0:
+            lookup.notes.append(f"{path} (git status falhou; ignorada)")
+            continue
+        changed = tuple(p for p in _status_paths(status.stdout) if p not in ignored)
+        ahead_res = runner(["rev-list", "--count", f"{base_ref}..HEAD"], path)
+        ahead = int(ahead_res.stdout.strip()) if ahead_res.returncode == 0 and ahead_res.stdout.strip().isdigit() else 0
+        if not changed and ahead == 0:
+            lookup.notes.append(f"{path} (sem alteracoes nem commits fora da base; ignorada)")
+            continue
+        base_sha_res = runner(["merge-base", base_ref, "HEAD"], path)
+        base_sha = base_sha_res.stdout.strip() if base_sha_res.returncode == 0 else ""
+        if not base_sha:
+            base_sha = runner(["rev-parse", base_ref], main_root).stdout.strip()
+        workspace = TicketWorkspace(
+            ticket_id=ticket_id, path=path, branch=branch, main_root=main_root, base_ref=base_ref, base_sha=base_sha
+        )
+        ranked.append(
+            ((match.group(1), int(match.group(2) or 1)), PreservedWorkspace(workspace, changed, ahead))
+        )
+
+    ranked.sort(key=lambda item: item[0], reverse=True)
+    if ranked:
+        lookup.chosen = ranked[0][1]
+        lookup.others = [item[1] for item in ranked[1:]]
+    return lookup
+
