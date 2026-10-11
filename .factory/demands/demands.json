@@ -6726,5 +6726,36 @@
     "dependencies": [],
     "created_at": "2026-10-11T09:13:33.461163Z",
     "updated_at": "2026-10-11T09:13:33.461163Z"
+  },
+  {
+    "id": "USR-231",
+    "project_id": "darkfac",
+    "title": "run_ticket --resume-delivery: sair do diretorio da worktree antes da limpeza (WinError 32 deixa a pasta orfa)",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "Em 11/10/2026, ao rodar run_ticket --resume-delivery com o diretorio de trabalho DENTRO da worktree do ticket, a entrega terminou com HARNESS_PASS e merge, mas a limpeza falhou nas duas execucoes (USR-169 e USR-198): git worktree remove falha com 'Permission denied' (a pasta ja foi desregistrada), depois rmtree e a movida para a lixeira falham com WinError 32 (arquivo em uso) porque o proprio processo do run_ticket usa a pasta como cwd; no Windows um processo nao apaga o proprio diretorio de trabalho. Sobra uma pasta vazia em .worktrees e um aviso de erro no fim, e a limpeza so se resolve a mao. O fluxo normal (rodar de C:\\dev\\DarkFac) nao tem o problema, mas o comando aceita --worktree e e invocado de dentro da worktree por sessoes de chat.",
+    "core_journey": [
+      "Em 11/10/2026, ao rodar run_ticket --resume-delivery com o diretorio de trabalho DENTRO da worktree do ticket, a entrega terminou com HARNESS_PASS e merge, mas a limpeza falhou nas duas execucoes (USR-169 e USR-198): git worktree remove falha com 'Permission denied' (a pasta ja foi desregistrada), depois rmtree e a movida para a lixeira falham com WinError 32 (arquivo em uso) porque o proprio processo do run_ticket usa a pasta como cwd; no Windows um processo nao apaga o proprio diretorio de trabalho. Sobra uma pasta vazia em .worktrees e um aviso de erro no fim, e a limpeza so se resolve a mao. O fluxo normal (rodar de C:\\dev\\DarkFac) nao tem o problema, mas o comando aceita --worktree e e invocado de dentro da worktree por sessoes de chat."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Antes da limpeza da worktree (core.git.ticket_workspace.cleanup / GitAutonomyManager), o processo muda o cwd para fora da worktree (raiz do checkout principal) e restaura o valor anterior se ainda existir",
+      "Teste reproduz o cenario no Windows (cwd dentro da worktree) e prova que a pasta e removida sem WinError 32; em Linux o teste apenas confirma que o cwd muda",
+      "Se a pasta ainda assim nao puder ser removida, o aviso final diz qual processo ou handle a segura e o comando exato de limpeza",
+      "Portao runner.py --quick com HARNESS_PASS, PR mergeado e deploy pos-merge"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-11T09:53:42.317104Z",
+    "updated_at": "2026-10-11T09:53:42.317104Z"
   }
 ]
