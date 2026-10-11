@@ -83,6 +83,18 @@ def stage_mode(stage: str) -> str:
     return STAGE_MODES.get(stage, _DEFAULT_STAGE_MODE)
 
 
+class HarnessPin(BaseModel):
+    """CLI model and reasoning effort declared for one harness on a stage (USR-201).
+
+    The cascade tuple stays the routing key (`pick()` still returns it). This pin is what the
+    headless CLI is asked to run, so a harness whose cascade model is null does not silently
+    inherit whatever the machine's CLI config happens to say today.
+    """
+
+    model: Optional[str] = None
+    effort: Optional[str] = None
+
+
 class StageRoute(BaseModel):
     """Routing policy for a single production-line stage."""
 
@@ -93,6 +105,7 @@ class StageRoute(BaseModel):
     openrouter_model: Optional[str] = None
     effort: Optional[str] = None
     local_ok: bool = False
+    harness_pins: dict[str, HarnessPin] = Field(default_factory=dict)
 
 
 class RunCaps(BaseModel):
@@ -155,6 +168,11 @@ def _default_routing_config() -> RoutingConfig:
                 cascade=[("claude", "sonnet"), ("codex", None)],
                 openrouter_ok=False,  # write stage: OpenRouter is read-only, never a fallback here
                 openrouter_model=cheap_model,
+                harness_pins={
+                    "claude": HarnessPin(model="sonnet"),
+                    "codex": HarnessPin(model="gpt-6-luna", effort="high"),
+                    "grok": HarnessPin(model="grok-4.7", effort="high"),
+                },
             ),
             "review": StageRoute(
                 cascade="other_family_than_development",
@@ -207,6 +225,35 @@ def load_routing_config(path: Optional[Path] = None) -> RoutingConfig:
                 logger.warning("Routing config %s: %s (pick() will skip it)", target, violation)
             return config
     return _default_routing_config()
+
+
+def harness_cli_pin(
+    harness: str,
+    route_model: Optional[str],
+    *,
+    stage: str = "development",
+    config: Optional[RoutingConfig] = None,
+) -> tuple[Optional[str], Optional[str]]:
+    """Model and effort the stage declares for `harness`'s CLI, plus the cascade model as fallback.
+
+    A pin model that is a forbidden autonomous model is ignored (the cascade model is kept).
+    An absent pin keeps `route_model` and sends no effort. The cascade key itself does not change:
+    `pick()` still returns `(harness, route_model)` for exclusion and ranking.
+    """
+    cfg = config or load_routing_config()
+    stage_cfg = cfg.stages.get(stage)
+    if stage_cfg is None:
+        return route_model, None
+    pin = stage_cfg.harness_pins.get(harness.strip().lower())
+    if pin is None:
+        return route_model, None
+    forbidden = {item.lower().strip() for item in cfg.forbidden_autonomous_models}
+    pinned_model = pin.model.strip() if isinstance(pin.model, str) and pin.model.strip() else None
+    if pinned_model and pinned_model.lower() in forbidden:
+        logger.warning("Ignoring forbidden pinned model %s for harness %s", pinned_model, harness)
+        pinned_model = None
+    pinned_effort = pin.effort.strip() if isinstance(pin.effort, str) and pin.effort.strip() else None
+    return pinned_model or route_model, pinned_effort
 
 
 # --------------------------------------------------------------------------

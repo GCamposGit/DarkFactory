@@ -101,6 +101,8 @@ class ModelCallEvent(BaseModel):
     cost_usd: Optional[float] = Field(default=None, ge=0.0)
     latency_ms: Optional[float] = Field(default=None, ge=0.0)
     source: str = Field(default="runtime", max_length=160)
+    # Effective reasoning effort reported by the CLI, or the one the request declared (USR-201).
+    reasoning_effort: Optional[str] = Field(default=None, max_length=32)
     timestamp: str = Field(default_factory=utc_now_iso)
 
 

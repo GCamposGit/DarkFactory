@@ -94,6 +94,9 @@ class ModelUsageLedger:
                 except ValueError:
                     mode = ExecutionMode.HEADLESS
 
+            metadata: Dict[str, Any] = {}
+            if event.reasoning_effort:
+                metadata["reasoning_effort"] = event.reasoning_effort
             store.record(
                 TelemetryRecordCreate(
                     id=event.invocation_id,
@@ -110,6 +113,7 @@ class ModelUsageLedger:
                     latency_ms=event.latency_ms or 0.0,
                     cost_usd=event.cost_usd or 0.0,
                     success=event.success,
+                    metadata=metadata,
                 )
             )
         except Exception:
