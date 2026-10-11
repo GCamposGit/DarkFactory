@@ -88,6 +88,8 @@ PROVISION_SCRIPT = r"C:\dev\DarkFac\scripts\provision_live_writer.py"
 # Set for a delivery subprocess once the parent already warned: one warning per run, not per process.
 ENV_WARNED = "DARKFAC_LOCAL_PROGRESS_WARNED"
 RUNBOOK = "docs/runbooks/live_progress.md"
+# Exact fix for a missing driver (USR-198); same pin as requirements-live.txt and the dokploy Dockerfiles.
+PSYCOPG_INSTALL_CMD = 'python -m pip install "psycopg[binary]>=3.2.0,<3.3.0"'
 # Writer-capable URLs first: the Hub's read-only role (DARKHUB_CONTROL_DATABASE_URL) is the last resort.
 WRITE_DATABASE_URL_ENVS: tuple[str, ...] = (
     "DARKFAC_HF02_DATABASE_URL",
@@ -309,7 +311,7 @@ def describe_publish_failure(exc: BaseException) -> str:
     name = type(exc).__name__
     text = str(exc).lower()
     if isinstance(exc, ImportError):
-        return "driver psycopg nao instalado neste ambiente"
+        return f"driver psycopg nao instalado neste ambiente: instale com {PSYCOPG_INSTALL_CMD}"
     if (
         name == "InsufficientPrivilege"
         or "permission denied" in text
