@@ -6757,5 +6757,35 @@
     "dependencies": [],
     "created_at": "2026-10-11T09:53:42.317104Z",
     "updated_at": "2026-10-11T09:53:42.317104Z"
+  },
+  {
+    "id": "USR-237",
+    "project_id": "darkfac",
+    "title": "Ligar o alerta de 2 ou mais ciclos divergentes do node_sync (USR-78) ao dokploy_redeploy",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "Seguimento do USR-204: node_sync.verify/sync aceitam um notifier que alerta quando um no diverge por 2 ou mais ciclos consecutivos (USR-78), mas scripts/dokploy_redeploy.py nao passa notifier ao node_sync.sync. Com track_divergence agora ativo (USR-204), o contador de ciclos divergentes passa a existir, porem ninguem e avisado quando o Desktop fica divergente por varios deploys seguidos.",
+    "core_journey": [
+      "Seguimento do USR-204: node_sync.verify/sync aceitam um notifier que alerta quando um no diverge por 2 ou mais ciclos consecutivos (USR-78), mas scripts/dokploy_redeploy.py nao passa notifier ao node_sync.sync. Com track_divergence agora ativo (USR-204), o contador de ciclos divergentes passa a existir, porem ninguem e avisado quando o Desktop fica divergente por varios deploys seguidos."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "dokploy_redeploy passa um notifier (Telegram de ops) ao node_sync.sync",
+      "Alerta enviado uma unica vez quando um no atinge 2 ciclos divergentes consecutivos, sem segredos na mensagem",
+      "Falha de envio nunca falha o deploy; teste focal cobre alerta enviado, nao enviado com no convergido e erro de envio"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-11T17:18:01.983173Z",
+    "updated_at": "2026-10-11T17:18:01.983173Z"
   }
 ]
