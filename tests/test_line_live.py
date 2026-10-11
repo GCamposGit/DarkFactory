@@ -26,6 +26,16 @@ from tests.fixtures.line_live_seed import _emit_local_run, seed_line_live_demo, 
 NOW = datetime(2026, 10, 4, 15, 0, 0, tzinfo=timezone.utc)
 
 
+@pytest.fixture(autouse=True)
+def _pin_line_live_clock(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Every seed here is anchored at NOW; the real clock ages the runs out of the board.
+
+    `RECENT_RUN_WINDOW` is 7 days, so from 2026-10-11 15:00 UTC any test that reads the board through the
+    HTTP surface without passing `now=` stopped seeing its runs (date time bomb that turned every PR red).
+    """
+    monkeypatch.setattr("core.workflow.line_live._utc_now", lambda: NOW)
+
+
 @pytest.fixture()
 def seeded(tmp_path: Path) -> tuple[Path, dict[str, str]]:
     db = tmp_path / "control.db"
