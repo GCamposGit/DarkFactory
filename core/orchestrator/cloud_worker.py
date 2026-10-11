@@ -33,6 +33,7 @@ from core.workflow.control_contracts import (
     StaleLeaseError,
 )
 from core.workflow.handlers import HandlerRegistry
+from core.workflow.job_board import GHOST_OPEN_JOB_CAUSE, TERMINAL_RUN_STATUSES
 from core.workflow.successors import materialize_result
 
 logger = logging.getLogger("darkfac.cloud_worker")
@@ -899,6 +900,32 @@ class CloudWorker:
 
         return self.execute_step(run_id, stage, _execute_stage)
 
+    def _close_ghost_open_job(self, run_id: str, now: datetime) -> bool:
+        """Cancel an open job whose run is already terminal. Returns True when the run was closed.
+
+        The 2026-09-30 canary left a `waiting_human` grill on a `completed` run. The owner
+        queue follows the job, so that leftover stayed on the DarkHub for days. A finished
+        run has nothing for the owner to answer.
+        """
+        getter = getattr(self.store, "get_run_status", None)
+        cancel = getattr(self.store, "cancel_run", None)
+        if getter is None or cancel is None:
+            return False
+        try:
+            snapshot = getter(run_id) or {}
+        except Exception as exc:
+            logger.warning("Failed to read run %s before ghost-job close: %s", run_id, exc)
+            return False
+        if str(snapshot.get("status") or "").lower() not in TERMINAL_RUN_STATUSES:
+            return False
+        try:
+            cancel(run_id, reason=GHOST_OPEN_JOB_CAUSE, actor="waiting_human_sweep", now=now)
+        except Exception as exc:
+            logger.warning("Failed to close ghost open job of run %s: %s", run_id, exc)
+            return False
+        logger.info("Closed ghost open job on terminal run %s", run_id)
+        return True
+
     def sweep_waiting_human_requests(self, now: datetime | None = None) -> list[str]:
         """Sweep waiting_human jobs, probe deterministic checks, and resume green non-grill requests (USR-105)."""
         effective_now = now or datetime.now(UTC)
@@ -915,6 +942,9 @@ class CloudWorker:
             if run_id in seen_runs:
                 continue
             seen_runs.add(run_id)
+
+            if self._close_ghost_open_job(run_id, effective_now):
+                continue
 
             try:
                 from core.line.bindings import default_project_resolver

@@ -240,6 +240,31 @@ def _setup_waiting_human_job(store, stage: str = "integration") -> tuple[str, An
     return run_id, claim.job_key
 
 
+def test_human_probe_sweeper_closes_waiting_job_on_a_finished_run(temp_stores):
+    """A completed run must not keep a waiting_human job in the owner queue."""
+    store, artifact_store = temp_stores
+    ghost_id, _ghost_key = _setup_waiting_human_job(store)
+    live_id, _live_key = _setup_waiting_human_job(store)
+    conn = store._backend._connect()
+    try:
+        conn.execute("UPDATE runs SET status = 'completed' WHERE run_id = ?", (ghost_id,))
+        conn.commit()
+    finally:
+        conn.close()
+
+    worker = CloudWorker(worker_id="test-sweeper", store=store, artifact_store=artifact_store)
+    assert worker.sweep_waiting_human_requests() == []
+
+    ghost = store.get_run_status(ghost_id)
+    assert ghost["status"] == "cancelled"
+    assert {job["status"] for job in ghost["jobs"]} == {"cancelled"}
+    assert all(job["cause_code"] == "ghost_open_job_on_terminal_run" for job in ghost["jobs"])
+
+    live = store.get_run_status(live_id)
+    assert live["status"] == "active"
+    assert any(job["status"] == "waiting_human" for job in live["jobs"])
+
+
 def test_human_probe_sweeper_resumes_green_infra_request(temp_stores):
     store, artifact_store = temp_stores
     run_id, job_key = _setup_waiting_human_job(store, "integration")

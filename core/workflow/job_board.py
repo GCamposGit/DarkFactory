@@ -32,6 +32,18 @@ DEFAULT_ROW_LIMIT = 500
 ATTENTION_STATUSES: frozenset[str] = frozenset(
     {"failed", "waiting_human", "retry", "replan", "waiting_dependency"}
 )
+# A run already finished (the 2026-09-30 canary: run `completed`, grill job still
+# `waiting_human`) is not an owner decision. The open job is a leftover row.
+TERMINAL_RUN_STATUSES: frozenset[str] = frozenset({"completed", "failed", "cancelled", "succeeded"})
+OPEN_JOB_STATUSES: frozenset[str] = frozenset(
+    {"pending", "running", "waiting_human", "waiting_dependency"}
+)
+GHOST_OPEN_JOB_CAUSE = "ghost_open_job_on_terminal_run"
+
+
+def is_ghost_open_job(run_status: str, job_status: str) -> bool:
+    """True when an open job sits on a run that has already finished."""
+    return run_status.lower() in TERMINAL_RUN_STATUSES and job_status.lower() in OPEN_JOB_STATUSES
 
 _JOB_QUERY = """
 SELECT j.run_id, j.ticket_id, j.stage, j.iteration, j.status, j.role, j.cause_code,

@@ -6,7 +6,13 @@ import json
 from pathlib import Path
 
 from core.workflow.control_store import SQLiteControlStore
-from core.workflow.job_board import fold_job_rows, read_job_board, read_sqlite_job_board
+from core.workflow.job_board import (
+    GHOST_OPEN_JOB_CAUSE,
+    fold_job_rows,
+    is_ghost_open_job,
+    read_job_board,
+    read_sqlite_job_board,
+)
 from hub.backend.service import HubService
 
 NOW = "2026-09-23T10:00:00+00:00"
@@ -120,6 +126,45 @@ def test_postgres_failure_never_leaks_credentials(tmp_path: Path) -> None:
     assert snapshot.backend == "postgres"
     assert snapshot.source == "error"
     assert "super-secret-pw" not in json.dumps(snapshot.model_dump())
+
+
+def test_ghost_open_job_is_a_finished_run_with_an_open_job() -> None:
+    assert is_ghost_open_job("completed", "waiting_human")
+    assert is_ghost_open_job("CANCELLED", "pending")
+    assert not is_ghost_open_job("active", "waiting_human")
+    assert not is_ghost_open_job("completed", "succeeded")
+
+
+def test_task_dashboard_does_not_raise_a_waiting_human_on_a_finished_run(tmp_path: Path) -> None:
+    """The 2026-09-30 canary: run completed, grill job still waiting_human."""
+    db = tmp_path / "control.db"
+    now = "2026-09-30T00:48:06+00:00"
+    store = SQLiteControlStore(db_path=db)
+    with store._connect() as conn:
+        conn.execute(
+            "INSERT INTO runs (run_id, project_id, demand_id, demand_version, runtime_owner, mode, status,"
+            " plan_digest, config_version, created_at, updated_at)"
+            " VALUES ('run-ghost', 'darkfac-canary', 'dem-722f8e52bd7c', 'v1', 'hf05_sqlite', 'autonomous',"
+            " 'completed', 'd', 'c', ?, ?)",
+            (now, now),
+        )
+        conn.execute(
+            "INSERT INTO jobs (run_id, ticket_id, plan_version, stage, iteration, status, role, cause_code,"
+            " actual_cost, evidence_refs, created_at, updated_at)"
+            " VALUES ('run-ghost', 'darkfac-canary', 'p1', 'grill', 0, 'waiting_human', 'grill_engine',"
+            " NULL, 0, '[]', ?, ?)",
+            (now, now),
+        )
+        conn.commit()
+
+    report = _make_service(tmp_path, db).get_task_dashboard()
+
+    assert report.exception_count == 0
+    row = report.queue[0]
+    assert row.task_id == "dem-722f8e52bd7c"
+    assert row.status == "COMPLETED"
+    assert row.cause_code == GHOST_OPEN_JOB_CAUSE
+    assert row.run_id == "run-ghost"
 
 
 def test_task_dashboard_surfaces_control_jobs_first_when_waiting_human(tmp_path: Path) -> None:
