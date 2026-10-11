@@ -7229,5 +7229,96 @@
     "dependencies": [],
     "created_at": "2026-10-11T17:32:33.046439Z",
     "updated_at": "2026-10-11T17:41:04.398223Z"
+  },
+  {
+    "id": "USR-242",
+    "project_id": "darkfac",
+    "title": "Ligar o alerta de 2 ou mais ciclos divergentes do node_sync (USR-78) ao dokploy_redeploy",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "later",
+    "tags": [
+      "user-demand",
+      "congelado-v0"
+    ],
+    "problem_statement": "Seguimento do USR-204: node_sync.verify/sync aceitam um notifier que alerta quando um no diverge por 2 ou mais ciclos consecutivos (USR-78), mas scripts/dokploy_redeploy.py nao passa notifier ao node_sync.sync. Com track_divergence ativo, o contador existe, mas ninguem e avisado quando o Desktop fica divergente por varios deploys seguidos. (Substitui o registro do PR #301, que ficou parado.)",
+    "core_journey": [
+      "Seguimento do USR-204: node_sync.verify/sync aceitam um notifier que alerta quando um no diverge por 2 ou mais ciclos consecutivos (USR-78), mas scripts/dokploy_redeploy.py nao passa notifier ao node_sync.sync. Com track_divergence ativo, o contador existe, mas ninguem e avisado quando o Desktop fica divergente por varios deploys seguidos. (Substitui o registro do PR #301, que ficou parado.)"
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "dokploy_redeploy passa um notifier (Telegram de ops) ao node_sync.sync",
+      "Alerta enviado uma unica vez quando um no atinge 2 ciclos divergentes consecutivos, sem segredos na mensagem",
+      "Falha de envio nunca falha o deploy; teste focal cobre alerta enviado, nao enviado com no convergido e erro de envio"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-11T23:53:05.729651Z",
+    "updated_at": "2026-10-11T23:53:05.729651Z"
+  },
+  {
+    "id": "USR-243",
+    "project_id": "darkfac",
+    "title": "Evitar que o pytest crie .pytest_cache com ACL restrita em worktrees de agentes (WinError 5 na lixeira)",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "later",
+    "tags": [
+      "user-demand",
+      "congelado-v0"
+    ],
+    "problem_statement": "Seguimento do USR-224: o .pytest_cache de worktrees antigas foi criado via tempfile.mkdtemp com ACL protegida (so SYSTEM/Administradores), entao git worktree remove, rmtree e a limpeza da lixeira falham com WinError 5 e 22 entradas ficam presas (OA-013 limpa as existentes). Falta prevenir na origem. -p no:cacheprovider no pytest.ini quebraria o --lf de core/harness/test_subagent.py (protegido).",
+    "core_journey": [
+      "Seguimento do USR-224: o .pytest_cache de worktrees antigas foi criado via tempfile.mkdtemp com ACL protegida (so SYSTEM/Administradores), entao git worktree remove, rmtree e a limpeza da lixeira falham com WinError 5 e 22 entradas ficam presas (OA-013 limpa as existentes). Falta prevenir na origem. -p no:cacheprovider no pytest.ini quebraria o --lf de core/harness/test_subagent.py (protegido)."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Runs de agentes nao deixam .pytest_cache com ACL restrita dentro da worktree (cache_dir fora da worktree ou ACL corrigida ao fim do run), sem quebrar o --lf do harness",
+      "Teste ou verificacao prova que git worktree remove remove a pasta sem WinError 5 depois de um run de pytest"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-11T23:53:10.723816Z",
+    "updated_at": "2026-10-11T23:53:10.723816Z"
+  },
+  {
+    "id": "USR-244",
+    "project_id": "darkfac",
+    "title": "CI rapida (ou fila de merge) para PRs que mudam so o ledger de demandas",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "later",
+    "tags": [
+      "user-demand",
+      "congelado-v0"
+    ],
+    "problem_statement": "Seguimento do USR-238: todo PR de registro de fila altera o fim de .factory/demands/demands.json e espera ~15 min do job pr-validation (windows) antes do merge; qualquer outro merge no intervalo gera conflito. O USR-238 mitigou com ate 3 ressincronizacoes e alerta, mas a solucao definitiva (caminho rapido de CI so para o ledger, ou merge queue do GitHub) mexe em .github/workflows/*, que e protegido: exige patch em docs/proposals e acao do owner (OA).",
+    "core_journey": [
+      "Seguimento do USR-238: todo PR de registro de fila altera o fim de .factory/demands/demands.json e espera ~15 min do job pr-validation (windows) antes do merge; qualquer outro merge no intervalo gera conflito. O USR-238 mitigou com ate 3 ressincronizacoes e alerta, mas a solucao definitiva (caminho rapido de CI so para o ledger, ou merge queue do GitHub) mexe em .github/workflows/*, que e protegido: exige patch em docs/proposals e acao do owner (OA)."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "PR cujo diff toca somente .factory/demands/** e .factory/owner_actions/** passa por um caminho de CI curto (ou merge queue), sem enfraquecer a validacao dos demais PRs",
+      "Patch do workflow entregue em docs/proposals com OA para o owner aplicar (arquivo protegido)"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-11T23:53:16.657703Z",
+    "updated_at": "2026-10-11T23:53:16.657703Z"
   }
 ]
