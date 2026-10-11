@@ -6695,5 +6695,36 @@
     "dependencies": [],
     "created_at": "2026-10-11T07:29:42.477385Z",
     "updated_at": "2026-10-11T08:12:19.000961Z"
+  },
+  {
+    "id": "USR-230",
+    "project_id": "darkfac",
+    "title": "agent_cli: _run_antigravity devolve ok=True com exit code diferente de zero e o erro vira parecer valido",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "Em 11/10/2026 run_agent(harness antigravity, mode read) devolveu ok=True, exit_code=1 e text com o JSON de erro {error: ANTIGRAVITY_LS_ADDRESS is not set}, apos 2 s, sem executar revisao alguma. Em core/line/agent_cli.py (_run_antigravity, ~linha 1171) a falha so e reconhecida quando o exit code e diferente de zero E o stdout esta vazio; como o CLI escreve o erro no stdout, o resultado passa como parecer concluido e uma etapa de review da linha poderia aprovar sem revisao. O roteador elege o antigravity para review (ele e somente leitura e de outra familia), entao o caso e alcancavel. Nao ha teste do caminho de sucesso nem de falha do runner (tests/line/test_agent_cli.py so cobre a recusa de modo write).",
+    "core_journey": [
+      "Em 11/10/2026 run_agent(harness antigravity, mode read) devolveu ok=True, exit_code=1 e text com o JSON de erro {error: ANTIGRAVITY_LS_ADDRESS is not set}, apos 2 s, sem executar revisao alguma. Em core/line/agent_cli.py (_run_antigravity, ~linha 1171) a falha so e reconhecida quando o exit code e diferente de zero E o stdout esta vazio; como o CLI escreve o erro no stdout, o resultado passa como parecer concluido e uma etapa de review da linha poderia aprovar sem revisao. O roteador elege o antigravity para review (ele e somente leitura e de outra familia), entao o caso e alcancavel. Nao ha teste do caminho de sucesso nem de falha do runner (tests/line/test_agent_cli.py so cobre a recusa de modo write)."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "_run_antigravity retorna ok=False com error_kind classificado (rate_limited, auth_expired ou crash) sempre que o exit code for diferente de zero, preservando o texto redigido para diagnostico",
+      "A falta de ANTIGRAVITY_LS_ADDRESS (CLI sem language server) e reportada como indisponibilidade do harness, nunca como texto de parecer",
+      "Testes com binario falso cobrem exit 1 com stdout nao vazio, exit 0 com texto e exit 1 sem saida, e rodam em Linux e Windows",
+      "Portao runner.py --quick com HARNESS_PASS, PR mergeado e deploy pos-merge"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-11T09:13:33.461163Z",
+    "updated_at": "2026-10-11T09:13:33.461163Z"
   }
 ]
