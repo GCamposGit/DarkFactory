@@ -6557,8 +6557,8 @@
     "project_id": "darkfac",
     "title": "Limpeza da lixeira de worktrees falha com Acesso negado (WinError 5) em .factory/backups/trash a cada entrega",
     "origin": "user",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "6082e6c52e44dfe979f57640737586a7edb3511b",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -6581,7 +6581,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-10T21:29:13.790197Z",
-    "updated_at": "2026-10-11T17:49:17.206876Z"
+    "updated_at": "2026-10-11T20:37:50.588315Z"
   },
   {
     "id": "USR-225",
