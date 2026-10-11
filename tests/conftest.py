@@ -216,6 +216,11 @@ _SECRET_ENVIRONMENT_KEYS = (
     "ZHIPU_API_KEY",
     "MINIMAX_API_KEY",
     "ARTIFICIAL_ANALYSIS_API_KEY",
+    # OA-010 configures this on the Hub host so /api/telemetry/events and /api/usage/sync require
+    # X-DarkFac-Telemetry-Key. Left set, a test that posts without the header gets a real 401 instead
+    # of exercising the "no key configured" path. A test that needs the authenticated path sets it
+    # itself via monkeypatch (USR-229).
+    "DARKFAC_TELEMETRY_KEY",
     # Production control-store URLs: a developer machine that exports one must never let a test accept
     # demands into (or claim jobs from) the real line. On 2026-10-07 `tests/test_cloud_e2e_task.py` did
     # exactly that and left three fake-grilled "HF-03-08" runs looping on `grill_not_ready` in
