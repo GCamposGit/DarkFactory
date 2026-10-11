@@ -408,6 +408,51 @@
       "created_at": "2026-10-10T15:13:28Z",
       "created_by": "claude-session-2026-10-10",
       "resolved_at": "2026-10-10T19:05:15Z"
+    },
+    {
+      "id": "OA-012",
+      "kind": "action",
+      "title": "Publicar a regra do congelamento V0 no AGENTS.md (vale para Codex, Grok e Antigravity)",
+      "priority": "high",
+      "status": "open",
+      "why": "Em 11/10/2026 o owner decidiu congelar tudo que nao e critico ate a linha entregar 5 tickets seguidos sem resgate (docs/plans/V0_OPERACIONAL_2026-10-11.md). A fila ja foi marcada (13 tickets v0-critico, 34 congelado-v0) e o CLAUDE.md ja tem a regra, mas Codex, Grok e Antigravity so leem o AGENTS.md, que e protegido pelo guard.py (so o owner commita direto na main). Sem isso, outro harness pode continuar implementando ticket congelado.",
+      "blocks": [
+        "USR-178",
+        "USR-183",
+        "USR-188",
+        "USR-201",
+        "USR-214"
+      ],
+      "depends_on": [],
+      "steps": [
+        {
+          "text": "Abra o PowerShell e atualize a main (o texto da regra ja esta nela).",
+          "command": "git -C C:\\dev\\DarkFac pull --ff-only origin main"
+        },
+        {
+          "text": "Acrescente o bloco pronto ao final do AGENTS.md (um comando, nada para digitar).",
+          "command": "Get-Content -Raw -Encoding utf8 C:\\dev\\DarkFac\\docs\\proposals\\agents_md_congelamento_v0.md | Add-Content -NoNewline -Encoding utf8 C:\\dev\\DarkFac\\AGENTS.md"
+        },
+        {
+          "text": "Confira que so o AGENTS.md mudou e que o final dele mostra a secao 'Congelamento V0'.",
+          "command": "git -C C:\\dev\\DarkFac diff --stat; Get-Content -Tail 8 -Encoding utf8 C:\\dev\\DarkFac\\AGENTS.md"
+        },
+        {
+          "text": "Faca o commit somente desse arquivo (nunca git add -A).",
+          "command": "git -C C:\\dev\\DarkFac add AGENTS.md\ngit -C C:\\dev\\DarkFac commit -m \"docs(governance): congelamento V0 no AGENTS.md\""
+        },
+        {
+          "text": "Publique direto na main, como nos outros arquivos protegidos (push com bypass de admin).",
+          "command": "git -C C:\\dev\\DarkFac push origin main"
+        },
+        {
+          "text": "Marque esta acao como feita no DarkHub (ou peca a um agente para rodar owner_action done)."
+        }
+      ],
+      "verify": "git -C C:\\dev\\DarkFac show origin/main:AGENTS.md termina com a secao '## Congelamento V0 (vigente desde 11/10/2026, todos os harnesses)'.",
+      "created_at": "2026-10-11T17:51:15Z",
+      "created_by": "claude-code",
+      "resolved_at": null
     }
   ]
 }

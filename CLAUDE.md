@@ -4,6 +4,15 @@ Este documento governa a operação do Claude Code no repositório DarkFac, em e
 
 ---
 
+## 0. Congelamento V0 (vigente desde 11/10/2026)
+
+- Só se implementam tickets com a tag `v0-critico` no `.factory/demands/demands.json`. O resto está com a tag `congelado-v0` e `horizon: later`. Plano, critério de saída e ordem: `docs/plans/V0_OPERACIONAL_2026-10-11.md`.
+- Pedido novo fora do V0 entra como `congelado-v0`, salvo se o owner disser explicitamente que quer furar o congelamento.
+- Defeito encontrado continua virando correção ou ticket (seção 3), com triagem: se impede uma condição do V0, `v0-critico`; se não, registrar com `horizon: later` e a tag `congelado-v0`.
+- Uma sessão opera a linha por vez; tickets com no máximo 3 critérios de aceite.
+
+---
+
 ## 1. Regra Inviolável de Proteção de Quota e Execução de Tickets (Skill 19-run-ticket)
 
 - **Preflight Obrigatório de Cota**:
