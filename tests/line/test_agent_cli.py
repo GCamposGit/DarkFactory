@@ -371,3 +371,159 @@ def test_not_installed_returns_error_kind_for_unknown_harness(tmp_path):
 
     assert result.ok is False
     assert result.error_kind == "not_installed"
+
+
+# --------------------------------------------------------------------------
+# Antigravity: a non-zero exit is a failure even when the CLI printed text (USR-230)
+# --------------------------------------------------------------------------
+
+_LS_ERROR_STDOUT = json.dumps({"error": "ANTIGRAVITY_LS_ADDRESS is not set"})
+
+
+def _fake_antigravity(make_fake_cli, monkeypatch, spec):
+    """Fake `antigravity` binary (a python shim from `write_python_shim`) driven by `spec`."""
+    cmd_path, env_var = make_fake_cli("antigravity")
+    monkeypatch.setattr(agent_cli, "find_antigravity_binary", lambda: cmd_path)
+    set_fake_response(monkeypatch, env_var, spec)
+
+
+def _antigravity_request(tmp_path):
+    return AgentRequest(prompt="review the diff", cwd=tmp_path, mode="read", harness="antigravity")
+
+
+def test_antigravity_exit_zero_with_text_is_success(tmp_path, make_fake_cli, monkeypatch):
+    record_path = tmp_path / "record.json"
+    _fake_antigravity(
+        make_fake_cli, monkeypatch,
+        {"record_path": str(record_path), "stdout": "  looks good to me\n", "returncode": 0},
+    )
+    result = run_agent(_antigravity_request(tmp_path))
+
+    assert result.ok is True
+    assert result.error_kind is None
+    assert result.text == "looks good to me"
+    assert result.exit_code == 0
+    assert result.model == "flash"
+    record = json.loads(record_path.read_text(encoding="utf-8"))
+    assert record["argv"] == ["new-conversation", "--model=flash", "review the diff"]
+
+
+def test_antigravity_ls_address_missing_on_stdout_is_harness_unavailable(tmp_path, make_fake_cli, monkeypatch):
+    """The 11/10/2026 incident: exit 1 + the error on STDOUT used to come back as ok=True review text."""
+    _fake_antigravity(make_fake_cli, monkeypatch, {"stdout": _LS_ERROR_STDOUT, "returncode": 1})
+    result = run_agent(_antigravity_request(tmp_path))
+
+    assert result.ok is False
+    assert result.error_kind == "crash"
+    assert result.exit_code == 1
+    assert "ANTIGRAVITY_LS_ADDRESS" in result.text
+    assert "unavailable" in result.text.lower()
+
+
+def test_antigravity_ls_address_missing_on_stderr_is_harness_unavailable(tmp_path, make_fake_cli, monkeypatch):
+    _fake_antigravity(
+        make_fake_cli, monkeypatch,
+        {"stdout": "", "stderr": "fatal: ANTIGRAVITY_LS_ADDRESS is not set", "returncode": 2},
+    )
+    result = run_agent(_antigravity_request(tmp_path))
+
+    assert result.ok is False
+    assert result.error_kind == "crash"
+    assert result.exit_code == 2
+    assert "ANTIGRAVITY_LS_ADDRESS" in result.stderr_tail
+    assert "unavailable" in result.text.lower()
+
+
+def test_antigravity_ls_address_failure_puts_harness_in_routing_cooldown(tmp_path, make_fake_cli, monkeypatch):
+    """`crash` is the kind routing cools down, so the router stops electing a harness with no language server."""
+    from core.line import routing
+
+    _fake_antigravity(make_fake_cli, monkeypatch, {"stdout": _LS_ERROR_STDOUT, "returncode": 1})
+    result = run_agent(_antigravity_request(tmp_path))
+    cooldown_path = tmp_path / "antigravity_cooldowns.json"
+
+    routing.record_result(result, config=routing.RoutingConfig(), cooldown_path=cooldown_path)
+
+    stored = json.loads(cooldown_path.read_text(encoding="utf-8"))
+    assert stored["antigravity"]["reason"] == "crash"
+
+
+def test_antigravity_nonzero_exit_with_verdict_like_stdout_is_not_ok(tmp_path, make_fake_cli, monkeypatch):
+    """Non-empty stdout must not make a failed run look like a finished review."""
+    verdict = json.dumps({"verdict": "APPROVED", "findings": []})
+    _fake_antigravity(
+        make_fake_cli, monkeypatch,
+        {"stdout": verdict, "stderr": "traceback: something exploded", "returncode": 1},
+    )
+    result = run_agent(_antigravity_request(tmp_path))
+
+    assert result.ok is False
+    assert result.error_kind == "crash"
+    assert result.exit_code == 1
+    assert result.text == verdict  # preserved for diagnosis, never as a verdict (ok is False)
+    assert result.stderr_tail == "traceback: something exploded"
+
+
+def test_antigravity_nonzero_exit_without_any_output(tmp_path, make_fake_cli, monkeypatch):
+    _fake_antigravity(make_fake_cli, monkeypatch, {"stdout": "", "stderr": "", "returncode": 1})
+    result = run_agent(_antigravity_request(tmp_path))
+
+    assert result.ok is False
+    assert result.error_kind == "crash"
+    assert result.exit_code == 1
+    assert result.text == ""
+    assert result.stderr_tail == ""
+
+
+@pytest.mark.parametrize(
+    ("stdout", "stderr", "expected_kind"),
+    [
+        ("Error: usage limit exceeded. Try again in 2 hours.", "", "rate_limited"),
+        ('{"error": "429 Too Many Requests: rate limit"}', "", "rate_limited"),
+        ("Error: unauthorized (401). Please login again.", "", "auth_expired"),
+        ("", "Error: session expired, login required", "auth_expired"),
+    ],
+)
+def test_antigravity_nonzero_exit_classifies_rate_limit_and_auth(
+    tmp_path, make_fake_cli, monkeypatch, stdout, stderr, expected_kind
+):
+    _fake_antigravity(make_fake_cli, monkeypatch, {"stdout": stdout, "stderr": stderr, "returncode": 1})
+    result = run_agent(_antigravity_request(tmp_path))
+
+    assert result.ok is False
+    assert result.error_kind == expected_kind
+    assert result.exit_code == 1
+    if expected_kind == "rate_limited" and "2 hours" in stdout:
+        assert result.reset_at is not None
+
+
+def test_antigravity_failure_text_and_stderr_tail_are_redacted(tmp_path, make_fake_cli, monkeypatch):
+    _fake_antigravity(
+        make_fake_cli, monkeypatch,
+        {
+            "stdout": "boom ANTHROPIC_API_KEY=sk-ant-supersecret123 leaked",
+            "stderr": "OPENAI_API_KEY=sk-live-abcdefghijklmnopqrstuvwxyz",
+            "returncode": 1,
+        },
+    )
+    result = run_agent(_antigravity_request(tmp_path))
+
+    assert result.ok is False
+    assert "sk-ant-supersecret123" not in result.text
+    assert "[REDACTED]" in result.text
+    assert "sk-live-abcdefghijklmnopqrstuvwxyz" not in result.stderr_tail
+    assert "[REDACTED]" in result.stderr_tail
+
+
+def test_antigravity_timeout_keeps_timeout_error_kind(tmp_path, monkeypatch):
+    monkeypatch.setattr(agent_cli, "find_antigravity_binary", lambda: "antigravity-fake-path")
+
+    def _raise_timeout(*args, **kwargs):
+        raise subprocess.TimeoutExpired(cmd="antigravity", timeout=1)
+
+    monkeypatch.setattr(agent_cli.subprocess, "run", _raise_timeout)
+    req = AgentRequest(prompt="review the diff", cwd=tmp_path, mode="read", harness="antigravity", timeout_s=1)
+    result = run_agent(req)
+
+    assert result.ok is False
+    assert result.error_kind == "timeout"

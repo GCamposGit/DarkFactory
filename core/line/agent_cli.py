@@ -1135,6 +1135,10 @@ def _run_grok(req: AgentRequest) -> AgentResult:
     return AgentResult(ok=True, text=output_text, harness="grok", model=req.model, duration_s=duration, **diag)
 
 
+# Env var the Antigravity CLI needs to reach its language server; its absence is printed on stdout (USR-230).
+_ANTIGRAVITY_LS_ENV = "ANTIGRAVITY_LS_ADDRESS"
+
+
 def _run_antigravity(req: AgentRequest) -> AgentResult:
     # Read-only: `run_agent` refuses `write` via HARNESS_CAPABILITIES before reaching this runner.
     executable = find_antigravity_binary()
@@ -1168,10 +1172,25 @@ def _run_antigravity(req: AgentRequest) -> AgentResult:
     output_text = (res.stdout or "").strip()
     stderr = res.stderr or ""
     diag: dict[str, Any] = {"exit_code": res.returncode, "stderr_tail": _stderr_tail(stderr)}
-    if res.returncode != 0 and not output_text:
+    if res.returncode != 0:
+        # USR-230: the CLI writes its errors to STDOUT, so a non-zero exit is a failure even when stdout
+        # holds text; that text is diagnostic output, never a verdict. Keep it (redacted) for diagnosis.
         combined = f"{output_text}\n{stderr}"
+        failure_text = redact_secrets(output_text)
+        if _ANTIGRAVITY_LS_ENV in combined:
+            # No language server behind the CLI: the harness is unavailable on this host. `crash` is the
+            # kind routing records as a short cooldown, so the router stops re-electing it for review.
+            failure_text = (
+                f"Antigravity harness unavailable: language server not reachable ({_ANTIGRAVITY_LS_ENV} "
+                f"is not set); the call did not run."
+                + (f" Output: {failure_text}" if failure_text else "")
+            )
+            return AgentResult(
+                ok=False, text=failure_text, harness="antigravity", model=tier, duration_s=duration,
+                error_kind="crash", **diag,
+            )
         return AgentResult(
-            ok=False, text="", harness="antigravity", model=tier, duration_s=duration,
+            ok=False, text=failure_text, harness="antigravity", model=tier, duration_s=duration,
             error_kind=_classify_error(combined), reset_at=_extract_reset_at(combined), **diag,
         )
     return AgentResult(ok=True, text=output_text, harness="antigravity", model=tier, duration_s=duration, **diag)
