@@ -36,7 +36,7 @@ Sob `pytest` o aviso nunca aparece e nada e publicado.
 | variaveis ... valor mock | a variavel aponta para `mock://...` | apontar para o Postgres real |
 | sem permissao de escrita | o usuario do banco nao pode inserir em `local_run_events` (ou a tabela nao existe e ele nao pode cria-la) | provisionar o papel restrito (secao seguinte a "Variavel necessaria") |
 | banco inalcancavel ou conexao recusada | host/porta/rede (Tailscale), credenciais erradas ou timeout (3 s de conexao) | testar a conexao com `psql` a partir desta maquina |
-| driver psycopg nao instalado | falta `psycopg` no Python usado pelo run_ticket | `python -m pip install "psycopg[binary]"` |
+| driver psycopg nao instalado | falta `psycopg` no Python usado pelo run_ticket | `python -m pip install "psycopg[binary]>=3.2.0,<3.3.0"` (mesma versao das imagens `deploy/dokploy/Dockerfile.cloud` e `Dockerfile.hub`); ou, na raiz do repositorio, `python -m pip install -r requirements-live.txt` |
 
 ## Variavel necessaria
 

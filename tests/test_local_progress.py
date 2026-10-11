@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import threading
 import time
 from collections.abc import Callable
@@ -586,6 +587,64 @@ def test_a_failing_sink_warns_once_at_the_first_failure_with_a_sanitized_reason(
     assert expected in warnings[0]
     assert "hunter2" not in warnings[0] and "postgresql://" not in warnings[0]
     assert not progress.enabled  # muted after repeated failures, run unaffected
+
+
+_PSYCOPG_INSTALL_CMD = 'python -m pip install "psycopg[binary]>=3.2.0,<3.3.0"'
+
+
+@pytest.mark.parametrize(
+    "exc",
+    [ImportError("no psycopg"), ModuleNotFoundError("No module named 'psycopg'")],
+    ids=["import-error", "module-not-found"],
+)
+def test_a_missing_driver_reason_carries_the_exact_pip_command(exc: ImportError) -> None:
+    reason = local_progress.describe_publish_failure(exc)
+
+    assert "driver psycopg nao instalado" in reason
+    assert _PSYCOPG_INSTALL_CMD in reason
+    assert local_progress.PSYCOPG_INSTALL_CMD == _PSYCOPG_INSTALL_CMD  # one source of truth in the module
+    assert "postgresql://" not in reason and "hunter2" not in reason
+
+
+def test_the_stderr_warning_for_a_missing_driver_carries_the_exact_pip_command(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    sink = _RaisingSink(ModuleNotFoundError("No module named 'psycopg' " + _PW_URL))
+    progress = _publisher(sink, warn=local_progress.stderr_warning)
+
+    progress.phase("preflight", "running")
+    progress.phase("agent", "running")
+    progress.finish(True)
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err.count("[AVISO] Esteira ao vivo") == 1
+    assert (
+        "[AVISO] Esteira ao vivo: progresso desta execucao nao sera publicado - "
+        "driver psycopg nao instalado neste ambiente"
+    ) in captured.err
+    assert _PSYCOPG_INSTALL_CMD in captured.err
+    assert "docs/runbooks/live_progress.md" in captured.err
+    assert "hunter2" not in captured.err and "postgresql://" not in captured.err
+
+
+def test_the_psycopg_pin_is_the_same_in_the_live_requirements_dockerfiles_and_runbook() -> None:
+    root = Path(__file__).resolve().parents[1]
+    spec_re = re.compile(r"psycopg\[binary\]([^\s\"']+)")
+
+    def specs(relative: str) -> list[str]:
+        return spec_re.findall((root / relative).read_text(encoding="utf-8"))
+
+    live = specs("requirements-live.txt")
+    assert live == [">=3.2.0,<3.3.0"]
+    for dockerfile in ("deploy/dokploy/Dockerfile.cloud", "deploy/dokploy/Dockerfile.hub"):
+        assert specs(dockerfile) == live, f"{dockerfile} pins a different psycopg than requirements-live.txt"
+    assert _PSYCOPG_INSTALL_CMD == f'python -m pip install "psycopg[binary]{live[0]}"'
+
+    live_lines = (root / "requirements-live.txt").read_text(encoding="utf-8").splitlines()
+    assert "-r requirements.txt" in (line.strip() for line in live_lines)  # optional extra on top of the base
+    assert "psycopg" not in (root / "requirements.txt").read_text(encoding="utf-8").lower()
+    assert _PSYCOPG_INSTALL_CMD in (root / "docs" / "runbooks" / "live_progress.md").read_text(encoding="utf-8")
 
 
 def test_a_sink_that_recovers_after_one_failure_still_warned_only_once() -> None:
