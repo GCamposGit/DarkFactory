@@ -6575,6 +6575,36 @@
     "updated_at": "2026-10-10T22:46:08.951489Z"
   },
   {
+    "id": "USR-227",
+    "project_id": "darkfac",
+    "title": "SQ-03: documentar evolucao legitima de governanca",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "SQ03 autorizado por USR191: documentar base confiavel, guard e CI sem enfraquecer controles. Escopo docs/proposals/security_quality_governance.md e docs/handoffs/security-quality-governance.md. Reutilizar USR173 para tipos; nenhum arquivo protegido ou ativacao.",
+    "core_journey": [
+      "SQ03 autorizado por USR191: documentar base confiavel, guard e CI sem enfraquecer controles. Escopo docs/proposals/security_quality_governance.md e docs/handoffs/security-quality-governance.md. Reutilizar USR173 para tipos; nenhum arquivo protegido ou ativacao."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Inventario verificavel de guard, CI e caminhos protegidos",
+      "Rota explicita de proposta, owner, revisao independente, rollback e evidencia vinculada ao candidato",
+      "Somente dois documentos; portao oficial CI PR merge deploy ou bloqueio honesto"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-11T05:39:04.963655Z",
+    "updated_at": "2026-10-11T05:39:04.963655Z"
+  },
+  {
     "id": "USR-226",
     "project_id": "darkfac",
     "title": "SQ02 DarkFac security profiles and threat model contracts",
