@@ -31,7 +31,7 @@ from core.demands.models import DemandOrigin, TAG_USER_DEMAND, UserTicket
 from core.demands.id_allocator import title_collisions
 from core.demands.merge import merge_demands_3way
 from core.demands.store import DemandsStore
-from core.git import secret_scan, ticket_workspace
+from core.git import queue_registration, secret_scan, ticket_workspace
 from core.git.safe_show import safe_show
 from core.git.state_guard import DEFAULT_PROTECTED_STATE_PATHS, check_staged_state_files
 from core.line import cancellation
@@ -50,6 +50,14 @@ from core.roadmap.models import DeliveryStatus, LifecycleStage, PlanningHorizon,
 logger = logging.getLogger("darkfac.git.autonomy")
 
 _POLICY_BLOCK_MARKER = "base branch policy prohibits"
+
+# Re-syncs (and CI re-runs) attempted when `gh pr merge` reports the PR as not mergeable (USR-238).
+_MERGE_RESYNC_ATTEMPTS = 3
+
+
+def _is_unmergeable(text: str) -> bool:
+    """True when a lower-cased `gh pr merge` output means main moved under the PR."""
+    return "not mergeable" in text or "conflict" in text or "out of date" in text
 
 _LEDGER_RELATIVE = ".factory/demands/demands.json"
 
@@ -795,6 +803,9 @@ class GitAutonomyManager:
         """
         target = cwd or self.root
         runner = gh_runner or _run_gh
+        if kind == "queue" and merge:
+            # USR-238: every registration also reports queue PRs that stayed open too long.
+            queue_registration.check_stalled_queue_prs(target, runner)
         try:
             if kind not in ("queue", "implementation"):
                 raise ValueError(f"Unknown delivery kind: {kind}")
@@ -802,6 +813,8 @@ class GitAutonomyManager:
         except Exception as exc:  # fail-closed report instead of crashing the pipeline
             logger.exception("deliver_branch failed for %s", ticket_id)
             report = DeliveryReport(ok=False, action="error", message=str(exc))
+        if kind == "queue" and not report.ok and report.pr_url:
+            queue_registration.alert_queue_pr_stuck(ticket_id, report.pr_url, report.message)
         self._close_open_phase(report)
         return report
 
@@ -963,23 +976,36 @@ class GitAutonomyManager:
                             f"gh said: {(merge_res.stderr or merge_res.stdout).strip()}"
                         ),
                     )
-            elif "not mergeable" in err or "conflict" in err or "out of date" in err:
-                _run_git(["fetch", "origin"], cwd=cwd)
-                collision = self._ledger_collision(cwd, remote_ref)
-                if collision:
-                    return DeliveryReport(ok=False, action="conflict", pr_url=pr_url, branch=branch, message=collision)
-                ok, files, msg = self._sync_with_base(base, cwd, preserve_commits=kind == "implementation")
-                if not ok:
-                    return DeliveryReport(
-                        ok=False, action="conflict", pr_url=pr_url, branch=branch, conflict_files=files,
-                        message=f"Conflict on retry: {', '.join(files) or msg}",
+            elif _is_unmergeable(err):
+                # USR-238: every re-sync pushes a new head that needs a fresh CI run, and main keeps
+                # moving (most merges touch demands.json) while that run is in flight, so a single
+                # retry loses the race. Re-apply onto the newest origin/main up to
+                # _MERGE_RESYNC_ATTEMPTS times; the 3-way ledger merge keeps every ticket on both sides.
+                for attempt in range(1, _MERGE_RESYNC_ATTEMPTS + 1):
+                    _run_git(["fetch", "origin"], cwd=cwd)
+                    collision = self._ledger_collision(cwd, remote_ref)
+                    if collision:
+                        return DeliveryReport(ok=False, action="conflict", pr_url=pr_url, branch=branch, message=collision)
+                    ok, files, msg = self._sync_with_base(base, cwd, preserve_commits=kind == "implementation")
+                    if not ok:
+                        return DeliveryReport(
+                            ok=False, action="conflict", pr_url=pr_url, branch=branch, conflict_files=files,
+                            message=f"Conflict on retry {attempt}: {', '.join(files) or msg}",
+                        )
+                    _run_git(["push", "--force-with-lease", "origin", branch], cwd=cwd, timeout_s=180.0)
+                    blocked, gate_note = self._ci_gate(number, pr_url, branch, base, cwd, runner, kind)
+                    if blocked is not None:
+                        return blocked
+                    merge_res = runner(merge_args, cwd)
+                    state, merge_sha = self._pr_state(number, cwd, runner)
+                    if state == "MERGED" or merge_res.returncode == 0:
+                        break
+                    if not _is_unmergeable(f"{merge_res.stderr}{merge_res.stdout}".lower()):
+                        break
+                    logger.warning(
+                        "PR #%s still unmergeable after re-sync %s/%s; main moved during CI",
+                        number, attempt, _MERGE_RESYNC_ATTEMPTS,
                     )
-                _run_git(["push", "--force-with-lease", "origin", branch], cwd=cwd, timeout_s=180.0)
-                blocked, gate_note = self._ci_gate(number, pr_url, branch, base, cwd, runner, kind)
-                if blocked is not None:
-                    return blocked
-                merge_res = runner(merge_args, cwd)
-                state, merge_sha = self._pr_state(number, cwd, runner)
         if state != "MERGED":
             return DeliveryReport(
                 ok=False, action="error", pr_url=pr_url, branch=branch,
