@@ -1008,7 +1008,10 @@ def update_api_credit_account_endpoint(
     service: HubService = Depends(get_hub_service),
 ) -> ProviderCreditCard:
     """Updates manual/synchronized credit values for a specific provider."""
-    return service.update_credit_account(provider_id, payload)
+    try:
+        return service.update_credit_account(provider_id, payload)
+    except ValueError as exc:  # unsafe provider id (USR-232): nothing was written
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 # ==============================================================================

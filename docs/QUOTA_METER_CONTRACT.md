@@ -45,3 +45,28 @@ Para confirmar uma leitura Grok suspeita após comparar o painel, executar
 `scripts/quota_audit.py --provider xai --expect xai=VALOR --confirm`. O comando
 só grava a confirmação local se a leitura bruta estiver a até 5 pontos do
 valor informado; a confirmação vale apenas para o mesmo período e percentual.
+
+## Fonte do Hub
+
+Quem mede as cotas é o host medidor (o Notebook), onde existem as CLIs e as credenciais de Claude,
+Codex, Grok e Antigravity. O Hub na VPS roda em container sem nenhuma delas; sondar o CLI ali só
+produz "não instalado" ou "não autenticado". O Hub recebe as leituras reais em
+`POST /api/usage/sync` (a cada 60 s) e as guarda em `<usage_dir>/providers/<provedor>.json`.
+
+| Variável | Valores | Efeito |
+| --- | --- | --- |
+| `DARKHUB_QUOTA_SOURCE` | `snapshot` ou `probe` (padrão) | `snapshot`: Claude (`anthropic`), OpenAI/Codex (`openai`), xAI/Grok (`xai`) e Antigravity (`google`) usam `SyncedSnapshotAdapter`, que só lê o snapshot sincronizado (sem processo, sem credencial, sem rede, sem limite de idade). `probe`: comportamento histórico, cada adaptador sonda o que existe na máquina. Valor inválido cai em `probe` com aviso no log. Ollama e as chaves de API mantêm os adaptadores de sempre. |
+| `DARKHUB_USAGE_DIR` | caminho de diretório (opcional) | Diretório de uso do Hub. O argumento explícito `usage_dir` de `HubService` vence a variável; sem nenhum dos dois vale o padrão anterior (`<data_dir>/usage` ou `<state_root>/usage`). O compose de produção usa `/app/hub/data/usage`, dentro do volume `darkhub-hub-data`, para os snapshots sobreviverem a redeploy. |
+
+O compose de produção (`deploy/dokploy/docker-compose.hub.yml`) define `DARKHUB_QUOTA_SOURCE=snapshot`
+e `DARKHUB_USAGE_DIR=/app/hub/data/usage`. Em Hub local numa máquina com as CLIs, deixe as duas
+variáveis sem definir.
+
+Provedor sem snapshot aparece com status `unknown`, adaptador `synced_snapshot` e a mensagem
+"Sem dado sincronizado do host medidor.", estado distinto de `disconnected` (CLI ou credencial
+sondada e ausente). Em modo `snapshot`, `inspect(force=True)` apenas relê os arquivos.
+
+O headroom que o Hub expõe (menor `remaining_percent` entre as janelas) é idêntico ao do roteador
+para o mesmo snapshot; `tests/test_hub_quota_snapshot_source.py` prova isso com as fixtures reais.
+A exibição da idade do dado, o aviso de dado vencido e o ciclo de atualização ficam para as fatias
+seguintes do USR-206; esta fatia não impõe limite de idade ao snapshot sincronizado.

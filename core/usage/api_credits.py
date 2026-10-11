@@ -87,7 +87,10 @@ class ApiCreditsMonitor:
 
     def save_snapshot(self, provider_id: str, payload: Dict[str, Any]) -> None:
         """Persists or updates an offline credit snapshot JSON file."""
-        file_target = self.snapshot_dir / f"{provider_id}.json"
+        # Lazy import: the account monitor pulls in every provider adapter, which credits do not need.
+        from core.usage.monitor import snapshot_path
+
+        file_target = snapshot_path(self.snapshot_dir, provider_id)
         existing = self._read_snapshot(provider_id) or {}
         existing.update(payload)
         file_target.write_text(json.dumps(existing, indent=2, ensure_ascii=False), encoding="utf-8")
@@ -133,6 +136,9 @@ class ApiCreditsMonitor:
 
     def _read_snapshot(self, provider_id: str) -> Optional[Dict[str, Any]]:
         """Safely reads offline snapshot JSON from env or filesystem."""
+        from core.usage.monitor import snapshot_path
+
+        file_candidate = snapshot_path(self.snapshot_dir, provider_id)  # ValueError for an unsafe id
         env_var = f"DARKFAC_{provider_id.upper()}_CREDITS_JSON"
         configured = os.environ.get(env_var)
         if configured:
@@ -150,7 +156,6 @@ class ApiCreditsMonitor:
                 except json.JSONDecodeError:
                     logger.warning("%s contains invalid JSON data", env_var)
 
-        file_candidate = self.snapshot_dir / f"{provider_id}.json"
         if file_candidate.is_file():
             try:
                 return json.loads(file_candidate.read_text(encoding="utf-8"))

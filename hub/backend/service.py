@@ -93,7 +93,8 @@ from core.benchmarks import (
 )
 from core.usage.ledger import ModelUsageLedger, infer_model_tier
 from core.usage.models import ModelCallEvent, ModelModality, ModelTier
-from core.usage.monitor import AccountUsageMonitor
+from core.usage.adapters import build_synced_snapshot_adapters
+from core.usage.monitor import AccountUsageMonitor, is_valid_provider_id
 from core.usage.api_credits import (
     ApiCreditsMonitor,
     ApiCreditsReport,
@@ -174,6 +175,35 @@ logger = logging.getLogger("darkhub.service")
 # One control-store read per window, shared by all /api/line/live clients and streams (USR-138).
 LINE_LIVE_CACHE_TTL_SECONDS = 2.5
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
+
+# Where the AI Account Monitor gets its numbers (USR-232). `probe` (default) lets each adapter read its
+# CLI/credential on this machine; `snapshot` reads only what the metering host posted to
+# POST /api/usage/sync, which is the only correct source inside the Hub container on the VPS.
+QUOTA_SOURCE_ENV = "DARKHUB_QUOTA_SOURCE"
+QUOTA_SOURCE_PROBE = "probe"
+QUOTA_SOURCE_SNAPSHOT = "snapshot"
+# Directory that holds the usage state (synced provider snapshots, ledger, credits). Production points
+# it inside the named volume so it survives a redeploy.
+USAGE_DIR_ENV = "DARKHUB_USAGE_DIR"
+
+
+def resolve_quota_source() -> str:
+    """`DARKHUB_QUOTA_SOURCE` as `snapshot` or `probe`; unset or invalid falls back to `probe`."""
+    raw = os.environ.get(QUOTA_SOURCE_ENV, "").strip().lower()
+    if not raw:
+        return QUOTA_SOURCE_PROBE
+    if raw in (QUOTA_SOURCE_PROBE, QUOTA_SOURCE_SNAPSHOT):
+        return raw
+    logger.warning(
+        "Ignoring invalid %s=%r (expected %r or %r); using %r",
+        QUOTA_SOURCE_ENV,
+        raw,
+        QUOTA_SOURCE_SNAPSHOT,
+        QUOTA_SOURCE_PROBE,
+        QUOTA_SOURCE_PROBE,
+    )
+    return QUOTA_SOURCE_PROBE
+
 
 BLOCKED_SSRF_NETWORKS = [
     ipaddress.ip_network("169.254.0.0/16"),     # Link-local / Cloud Metadata (AWS, GCP, Azure, etc.)
@@ -314,14 +344,32 @@ class HubService:
             env_seed_dir = os.environ.get("DARKHUB_SEED_DIR", "").strip()
             self.seed_dir = Path(env_seed_dir) if env_seed_dir else None
         self.ollama_base_url = ollama_base_url
+        # The explicit argument wins over DARKHUB_USAGE_DIR (deterministic tests/embedding), which wins
+        # over the historical defaults.
+        env_usage_dir = os.environ.get(USAGE_DIR_ENV, "").strip()
         if usage_dir is not None:
             self.usage_dir = Path(usage_dir)
+        elif env_usage_dir:
+            self.usage_dir = Path(env_usage_dir).expanduser()
+            try:
+                self.usage_dir.mkdir(parents=True, exist_ok=True)
+            except OSError as exc:
+                logger.warning("Cannot create %s=%s: %s", USAGE_DIR_ENV, self.usage_dir, exc)
         elif data_dir is not None:
             self.usage_dir = self.data_dir / "usage"
         else:
             self.usage_dir = state_root() / "usage"
         self.model_usage_ledger = ModelUsageLedger(self.usage_dir)
-        self.account_usage_monitor = AccountUsageMonitor(self.usage_dir / "providers")
+        providers_dir = self.usage_dir / "providers"
+        self.quota_source = resolve_quota_source()
+        if self.quota_source == QUOTA_SOURCE_SNAPSHOT:
+            # Never probe a CLI or the local network for Claude/Codex/Grok/Antigravity here: the Hub
+            # container has none of them. The metering host posts the real readings.
+            self.account_usage_monitor = AccountUsageMonitor(
+                providers_dir, adapters=build_synced_snapshot_adapters(providers_dir)
+            )
+        else:
+            self.account_usage_monitor = AccountUsageMonitor(providers_dir)
         self.api_credits_monitor = ApiCreditsMonitor(self.usage_dir / "credits")
         from core.telemetry.store import TelemetryStore
         self.telemetry_store = TelemetryStore(self.usage_dir.parent / "telemetry.db")
@@ -1503,10 +1551,12 @@ class HubService:
             if not isinstance(account, dict):
                 continue
             provider_id = account.get("provider_id")
-            if not provider_id:
+            if not is_valid_provider_id(provider_id):
+                # The id names a file on disk: never write it, never echo more than a short repr.
+                logger.warning("Ignoring account snapshot with invalid provider_id %s", repr(provider_id)[:40])
                 continue
             try:
-                self.account_usage_monitor.save_snapshot(str(provider_id), account)
+                self.account_usage_monitor.save_snapshot(provider_id, account)
                 accounts_updated += 1
             except Exception as exc:
                 logger.warning("Failed to save account snapshot for %s: %s", provider_id, exc)
@@ -1516,10 +1566,11 @@ class HubService:
             if not isinstance(credit, dict):
                 continue
             provider_id = credit.get("provider_id")
-            if not provider_id:
+            if not is_valid_provider_id(provider_id):
+                logger.warning("Ignoring credit snapshot with invalid provider_id %s", repr(provider_id)[:40])
                 continue
             try:
-                self.api_credits_monitor.save_snapshot(str(provider_id), credit)
+                self.api_credits_monitor.save_snapshot(provider_id, credit)
                 credits_updated += 1
             except Exception as exc:
                 logger.warning("Failed to save credit snapshot for %s: %s", provider_id, exc)

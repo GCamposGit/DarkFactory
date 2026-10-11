@@ -1805,3 +1805,56 @@ def build_default_adapters(snapshot_dir: Path) -> Iterable[AccountUsageAdapter]:
             yield OllamaAccountAdapter(spec, snapshot_dir)
         else:
             yield EnvironmentAccountAdapter(spec, snapshot_dir)
+
+
+# Providers whose quota is measured by a CLI or a local credential on the metering host (the
+# Notebook): Codex, Grok Build, the Antigravity Language Server and Claude Code. A host without
+# those tools (the Hub container on the VPS) must read what the metering host synchronized.
+SYNCED_SNAPSHOT_PROVIDER_IDS: frozenset[str] = frozenset({"openai", "xai", "google", "anthropic"})
+SYNCED_SNAPSHOT_ADAPTER_NAME = "synced_snapshot"
+
+
+class SyncedSnapshotAdapter(AccountUsageAdapter):
+    """Snapshot-only adapter for a provider measured on another host.
+
+    The metering host posts its `ProviderAccountUsage` to `POST /api/usage/sync`, which stores it as
+    `<snapshot_dir>/<provider_id>.json`. This adapter only reads that file: it never opens a process,
+    never touches a credential and never makes a network call, so a Hub container without the CLIs
+    cannot report a measured provider as "not installed" or "not authenticated". The snapshot age is
+    deliberately not enforced here; its `checked_at` is passed through untouched for the caller to show.
+    A provider with no snapshot yet is reported as UNKNOWN (no synchronized data), which is distinct
+    from DISCONNECTED (a CLI or credential that was probed and found absent).
+    """
+
+    def inspect(self, force: bool = False) -> ProviderAccountUsage:
+        # `force` only matters to adapters that probe; re-reading the file is always cheap.
+        payload = self._snapshot_payload()
+        if payload is None:
+            return ProviderAccountUsage(
+                provider_id=self.spec.provider_id,
+                provider_name=self.spec.provider_name,
+                family=self.spec.family,
+                status=AccountConnectionStatus.UNKNOWN,
+                adapter=SYNCED_SNAPSHOT_ADAPTER_NAME,
+                quota_supported=False,
+                message="Sem dado sincronizado do host medidor.",
+                dashboard_url=self.spec.dashboard_url,
+            )
+        return self._from_snapshot(payload, adapter=SYNCED_SNAPSHOT_ADAPTER_NAME)
+
+
+def build_synced_snapshot_adapters(snapshot_dir: Path) -> Iterable[AccountUsageAdapter]:
+    """Same providers and order as `build_default_adapters`, never probing a CLI for a measured one.
+
+    Providers that depend on a local CLI/credential (`SYNCED_SNAPSHOT_PROVIDER_IDS`) read the
+    synchronized snapshot only. Ollama and the API-key providers do not depend on such a CLI, so they
+    keep their existing adapters. Nothing here changes `build_default_adapters`, which the metering
+    host and the router keep using.
+    """
+    for spec in DEFAULT_PROVIDER_SPECS:
+        if spec.provider_id in SYNCED_SNAPSHOT_PROVIDER_IDS:
+            yield SyncedSnapshotAdapter(spec, snapshot_dir)
+        elif spec.provider_id == "ollama":
+            yield OllamaAccountAdapter(spec, snapshot_dir)
+        else:
+            yield EnvironmentAccountAdapter(spec, snapshot_dir)

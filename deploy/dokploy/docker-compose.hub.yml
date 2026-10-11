@@ -44,6 +44,11 @@ services:
       - DARKHUB_SERVICE_URL_OVERRIDES=${DARKHUB_SERVICE_URL_OVERRIDES:-}
       - DATA_DIR=/app/hub/data
       - FACTORY_DIR=/app/.factory
+      # USR-232: AI Account Monitor reads only the snapshots the metering host posts to
+      # /api/usage/sync (this container has no Claude/Codex/Grok/Antigravity CLI to probe), and
+      # stores them inside the darkhub-hub-data volume so a redeploy does not wipe them.
+      - DARKHUB_QUOTA_SOURCE=snapshot
+      - DARKHUB_USAGE_DIR=/app/hub/data/usage
       # Integrations (Telegram & n8n Community)
       - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}
       - TELEGRAM_OPS_BOT_TOKEN=${TELEGRAM_OPS_BOT_TOKEN:-}
