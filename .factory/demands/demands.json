@@ -4917,8 +4917,8 @@
     "project_id": "darkfac",
     "title": "Definir e implementar limpeza segura das referencias de contexto de recuperacao",
     "origin": "user",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "31e98a7e559cd2346573b9a3bcf019cad8007cc0",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -4941,7 +4941,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-08T20:38:02.644959Z",
-    "updated_at": "2026-10-11T07:46:09.499266Z"
+    "updated_at": "2026-10-11T08:56:18.131817Z"
   },
   {
     "id": "USR-175",
