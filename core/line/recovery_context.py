@@ -4,6 +4,9 @@ The pre-strip commit is pinned by a per-run Git ref in the target repository.
 It is absent from the merged product tree and can be fetched by another worker
 after the run branch has been deleted. Only the planning inputs needed for a
 new development attempt are restored; progress from the failed candidate is not.
+
+The refs are removed 14 days after the run reaches a terminal state; the retention
+policy lives in `core.line.context_retention` (USR-169) and never changes this module.
 """
 
 from __future__ import annotations
