@@ -6635,5 +6635,35 @@
     "dependencies": [],
     "created_at": "2026-10-11T05:38:59.241192Z",
     "updated_at": "2026-10-11T05:38:59.241192Z"
+  },
+  {
+    "id": "USR-228",
+    "project_id": "darkfac",
+    "title": "Guard: vincular autorizacao de evolucao a decisao verificavel",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "Inventario SQ03 USR227 observou que core/orchestrator/guard.py is_governance_evolution_authorized valida somente flag de ambiente, sem verificar ticket, aprovador, caminhos ou candidato. O docstring menciona verified ticket mas isso nao e implementado. Lacuna distinta dos tickets de timeout e de tipos; nenhuma flag foi ativada nesta investigacao.",
+    "core_journey": [
+      "Inventario SQ03 USR227 observou que core/orchestrator/guard.py is_governance_evolution_authorized valida somente flag de ambiente, sem verificar ticket, aprovador, caminhos ou candidato. O docstring menciona verified ticket mas isso nao e implementado. Lacuna distinta dos tickets de timeout e de tipos; nenhuma flag foi ativada nesta investigacao."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Autoridade confiavel valida decisao explicita, ticket, caminhos e candidato; agente build nao emite sua propria autorizacao",
+      "Flag isolada ou prova ausente invalida expirada ou de outro candidato bloqueia; testes negativos e CI base-owned preservados",
+      "Evolucao protegida segue proposta SQ03 e autorizacao formal sem enfraquecer guard; revisao independente portao oficial CI merge deploy verificaveis"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-11T05:45:09.817800Z",
+    "updated_at": "2026-10-11T05:45:09.817800Z"
   }
 ]
