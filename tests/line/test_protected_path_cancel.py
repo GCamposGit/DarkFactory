@@ -394,7 +394,10 @@ def test_run_ticket_treats_one_cancelled_protected_edit_as_a_human_block(
         exit_code = run_ticket.main(["USR-99", "--harness", "grok", "--skip-validation", "--no-commit"])
         captured = capsys.readouterr()
         assert exit_code == 1
-        assert fake.calls and len(fake.calls) == 1  # a single Grok process, no retry
+        # A single Grok process, no retry. Only the agent calls count: the continuation notice
+        # (USR-225) also runs a read-only `git diff --name-only` through the same fake.
+        grok_calls = [argv for argv in fake.calls if argv and argv[0] == "grok-fake"]
+        assert len(grok_calls) == 1
         assert sleeps == []
         assert fake.prompts and "docs/proposals" in fake.prompts[0] and "core/harness/*" in fake.prompts[0]
         assert "error_kind=protected_path" in captured.err
