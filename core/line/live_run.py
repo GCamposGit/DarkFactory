@@ -23,6 +23,13 @@ Contract
   opens the run implicitly.
 * Starting a phase closes the previous one as ``succeeded``; ``finish`` closes the phase in progress
   (``succeeded``, or ``failed`` with ``--failed``); ``cancel`` records phase and run as ``cancelled``.
+* ``finish``/``cancel`` discard the state file only once the closing is settled (USR-202): it reached a
+  sink the cloud Hub reads, or publishing is off / local on purpose (``DARKFAC_LOCAL_PROGRESS=off|local``).
+  Otherwise (no URL, ``control.db`` fallback, failed or partial write, exception) the state is KEPT with
+  the pending closing recorded, so running the same ``finish``/``cancel`` again with the right write URL
+  republishes the closing of the SAME ``run_id`` (closes the saved active phase, then the run). The sink
+  is append-only and the Hub folds the last event per phase and the last ``run`` event, so a repeated
+  closing is harmless. ``open``/``phase`` behave as before and drop a pending closing (work resumed).
 * It NEVER fails the session because of the board: an unreachable or unconfigured sink, an unwritable
   state directory or a corrupt state file only produce one ``[AVISO]`` on stderr per run. The exit code
   is 0 in all of those cases; only a malformed command line exits with 2.
@@ -53,7 +60,10 @@ from core.line.local_progress import (
     ProgressPublisher,
     ProgressSink,
     SqliteSink,
+    local_only_reason,
+    missing_sink_reason,
     open_progress,
+    stderr_warning,
 )
 
 logger = logging.getLogger("darkfac.live_run")
@@ -63,6 +73,12 @@ ENV_HARNESS = "DARKFAC_OPERATING_HARNESS"
 DEFAULT_HARNESS = "claude"
 PHASE_STATUSES: tuple[str, ...] = ("running", "succeeded", "failed", "skipped")
 _SAFE_TICKET = re.compile(r"[^A-Za-z0-9_.-]")
+CLOSING_COMMANDS = frozenset({"finish", "cancel"})
+# One sentence, appended to the single per-run warning when a finish/cancel could not be published (USR-202).
+STATE_KEPT_NOTICE = (
+    "O estado do run foi mantido: rode o mesmo comando de novo, com a URL de escrita correta "
+    "(DARKFAC_HF02_DATABASE_URL), para republicar o encerramento."
+)
 
 
 class LiveRunState(BaseModel):
@@ -81,6 +97,11 @@ class LiveRunState(BaseModel):
     last_status: str | None = None
     last_message: str = ""
     warned: bool = False
+    # Pending closing (USR-202): set when a finish/cancel was not settled, so the same command can replay it.
+    closing: Literal["finish", "cancel"] | None = None
+    closing_failed: bool = False
+    closing_message: str = ""
+    closing_cause: str | None = None
     opened_at: str
     updated_at: str
 
@@ -101,8 +122,12 @@ def _state_path(directory: Path, ticket_id: str) -> Path:
     return directory / f"{_SAFE_TICKET.sub('_', ticket_id.strip()) or '_'}.json"
 
 
-def load_state(directory: Path, ticket_id: str) -> LiveRunState | None:
-    """The live run of ``ticket_id`` or ``None`` (missing, corrupt, unreadable or abandoned)."""
+def load_state(directory: Path, ticket_id: str, *, keep_pending_close: bool = False) -> LiveRunState | None:
+    """The live run of ``ticket_id`` or ``None`` (missing, corrupt, unreadable or abandoned).
+
+    ``keep_pending_close`` (finish/cancel only) returns a run whose closing is still pending even when it
+    is older than the abandonment window: republishing the closing is the point of keeping the state.
+    """
     try:
         state = LiveRunState.model_validate_json(_state_path(directory, ticket_id).read_text(encoding="utf-8"))
         updated = datetime.fromisoformat(state.updated_at)
@@ -110,7 +135,7 @@ def load_state(directory: Path, ticket_id: str) -> LiveRunState | None:
             updated = updated.replace(tzinfo=timezone.utc)
     except (OSError, ValueError, ValidationError):
         return None
-    if (_now() - updated).total_seconds() > ABANDON_AFTER_SECONDS:
+    if (_now() - updated).total_seconds() > ABANDON_AFTER_SECONDS and not (keep_pending_close and state.closing):
         return None  # the Hub already shows it as abandoned: start a fresh run
     return state
 
@@ -271,6 +296,88 @@ def _apply(
     return "run cancelado"
 
 
+def _swallow(text: str) -> None:
+    """Warning channel handed to the publisher: ``run_command`` delivers the one per-run warning itself."""
+
+
+def _resolve_channel(
+    warn: Callable[[str], None] | None | Literal["default"], env: Mapping[str, str]
+) -> Callable[[str], None] | None:
+    """The real warning channel (``"default"`` is stderr unless a parent process already warned)."""
+    if warn == "default":
+        return None if env.get(ENV_WARNED, "").strip() else stderr_warning
+    return warn  # type: ignore[return-value]  # narrowed: the literal was handled above
+
+
+def _deliver(channel: Callable[[str], None], text: str) -> None:
+    try:
+        channel(text)
+    except Exception as exc:  # noqa: BLE001 - a broken warning channel must not matter
+        logger.warning("live_run: warning channel failed (%s)", type(exc).__name__)
+
+
+def _writes_clean(pub: ProgressPublisher | None) -> bool:
+    """No write of this call failed. A later success resets ``failures``, but never clears ``warning``."""
+    return pub is not None and pub.failures == 0 and pub.warning is None
+
+
+def _hub_visible(pub: ProgressPublisher | None) -> bool:
+    """Visible to the cloud Hub: a real sink, every write ok; the machine's own control.db does not count."""
+    return (
+        _writes_clean(pub)
+        and pub is not None
+        and pub.sink is not None
+        and not isinstance(pub.sink, SqliteSink)
+    )
+
+
+def _closing_settled(pub: ProgressPublisher | None, env: Mapping[str, str], *, applied: bool) -> bool:
+    """Whether a finish/cancel is done for good, so the local state may be discarded (USR-202).
+
+    Settled: visible to the cloud Hub, or unpublished on purpose (``DARKFAC_LOCAL_PROGRESS=off``, or
+    ``=local`` where a Hub on this machine reads the control.db). Anything else (no sink, a ``control.db``
+    fallback nobody reads, a failed or partial write, an exception) keeps the state for a replay.
+    """
+    if not applied or pub is None or not _writes_clean(pub):
+        return False
+    if _hub_visible(pub):
+        return True
+    if pub.sink is None:
+        return missing_sink_reason(env) is None  # off on purpose; any other missing sink is a gap
+    if isinstance(pub.sink, SqliteSink):
+        return local_only_reason(env) is None  # local on purpose; otherwise a visibility gap
+    return False
+
+
+def _with_pending_close(args: argparse.Namespace, state: LiveRunState) -> argparse.Namespace:
+    """A repeated finish/cancel replays what the pending one carried when the caller omits it."""
+    if state.closing != args.command:
+        return args  # nothing pending, or a different closing: the new command is authoritative
+    merged = argparse.Namespace(**vars(args))
+    merged.message = args.message or state.closing_message
+    if args.command == "finish":
+        merged.failed = bool(args.failed) or state.closing_failed
+        merged.cause = args.cause or state.closing_cause
+    return merged
+
+
+def _record_pending_close(state: LiveRunState, args: argparse.Namespace) -> None:
+    state.closing = args.command
+    state.closing_failed = bool(getattr(args, "failed", False))
+    state.closing_message = args.message or ""
+    state.closing_cause = getattr(args, "cause", None)
+
+
+def _forget_pending_close(state: LiveRunState) -> bool:
+    """open/phase resume the work: the pending closing no longer applies. Returns whether one was dropped."""
+    dropped = state.closing is not None
+    state.closing = None
+    state.closing_failed = False
+    state.closing_message = ""
+    state.closing_cause = None
+    return dropped
+
+
 def run_command(
     args: argparse.Namespace,
     *,
@@ -282,54 +389,76 @@ def run_command(
 ) -> dict[str, Any]:
     """Execute one parsed command; never raises. Returns the machine-readable outcome."""
     command = args.command
-    state = load_state(directory, args.ticket)
+    closing_command = command in CLOSING_COMMANDS
+    state = load_state(directory, args.ticket, keep_pending_close=closing_command)
     if state is None:
-        if command in {"finish", "cancel"}:
+        if closing_command:
             return {"ok": True, "action": command, "ticket_id": args.ticket, "run_id": None,
-                    "published": False, "warning": None, "detail": "nenhum run aberto para este ticket (nada a fazer)"}
+                    "published": False, "state_kept": False, "warning": None,
+                    "detail": "nenhum run aberto para este ticket (nada a fazer)"}
         state = _new_state(args, env, hostname)
     elif command == "open":
         # idempotent open: keep the run, refresh the descriptive fields the caller passed explicitly
         state.title = args.title or state.title
         state.harness = args.harness or state.harness
         state.worker = args.worker or state.worker
+        reopened = _forget_pending_close(state)
         state.updated_at = _now().isoformat()
         save_state(directory, state)
+        detail = "run ja aberto: reaproveitado (nada a publicar)"
+        if reopened:
+            detail += "; encerramento pendente descartado (o proximo finish fecha este mesmo run)"
         return {"ok": True, "action": "open", "ticket_id": state.ticket_id, "run_id": state.run_id,
-                "published": False, "warning": None, "detail": "run ja aberto: reaproveitado (nada a publicar)"}
+                "published": False, "state_kept": False, "warning": None, "detail": detail}
     elif command == "phase" and (args.harness or args.worker or args.title):
         state.title = args.title or state.title
         state.harness = args.harness or state.harness
         state.worker = args.worker or state.worker
+    if closing_command:
+        args = _with_pending_close(args, state)
+    else:
+        _forget_pending_close(state)
 
+    warned_before = state.warned
+    channel = _resolve_channel(warn, env)
     detail = "falha inesperada ao publicar"
     pub: ProgressPublisher | None = None
+    applied = False
     try:
-        pub = _publisher(state, env, sink, warn)
+        # the publisher only needs *a* channel to explain gaps; the single per-run warning is delivered below
+        pub = _publisher(state, env, sink, None if channel is None else _swallow)
         detail = _apply(args, state, pub)
+        applied = True
     except Exception as exc:  # noqa: BLE001 - nothing here may fail the session
         logger.warning("live_run: %s failed (%s)", command, type(exc).__name__)
         detail = f"nao foi possivel publicar ({type(exc).__name__})"
 
     warning = pub.warning if pub is not None else None
+    state_kept = closing_command and not _closing_settled(pub, env, applied=applied)
+    if state_kept:
+        # Keep the state AS IS (notably ``active_phase``): the replay must close the phase that is still open.
+        warning = (
+            f"{warning} {STATE_KEPT_NOTICE}"
+            if warning
+            else f"[AVISO] Esteira ao vivo: o encerramento deste run nao foi publicado. {STATE_KEPT_NOTICE}"
+        )
+        detail = f"{detail}, mas o encerramento NAO foi publicado. {STATE_KEPT_NOTICE}"
     if warning:
         state.warned = True
-    if command in {"finish", "cancel"}:
+        if channel is not None and not warned_before:
+            _deliver(channel, warning)  # one [AVISO] per run, with the "state kept" sentence when it applies
+    if state_kept:
+        _record_pending_close(state, args)
+        save_state(directory, state)
+    elif closing_command:
         clear_state(directory, state.ticket_id)
     else:
         state.active_phase = pub.active_phase if pub is not None else state.active_phase
         state.updated_at = _now().isoformat()
         save_state(directory, state)
-    # "published" means visible to the cloud Hub: the machine's own control.db does not count.
-    published = bool(
-        pub is not None
-        and pub.sink is not None
-        and not isinstance(pub.sink, SqliteSink)
-        and pub.failures == 0
-    )
     return {"ok": True, "action": command, "ticket_id": state.ticket_id, "run_id": state.run_id,
-            "harness": state.harness, "worker": state.worker, "published": published,
-            "warning": warning, "detail": detail}
+            "harness": state.harness, "worker": state.worker, "published": _hub_visible(pub),
+            "state_kept": state_kept, "warning": warning, "detail": detail}
 
 
 def main(

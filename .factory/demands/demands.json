@@ -6181,8 +6181,8 @@
     "project_id": "darkfac",
     "title": "live_run finish/cancel nao deve limpar o estado local quando a publicacao falhou",
     "origin": "user",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "78eca7e50ebce1dbd0f9f734b7090077117a41f6",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -6204,7 +6204,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-10T13:56:25.564629Z",
-    "updated_at": "2026-10-10T13:56:25.564629Z"
+    "updated_at": "2026-10-11T10:34:47.744243Z"
   },
   {
     "id": "USR-204",

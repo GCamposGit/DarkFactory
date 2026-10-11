@@ -221,11 +221,16 @@ Regras do comando:
   fase/estado/mensagem nao publica nada; mudar a `--message` publica uma atualizacao de andamento.
 - `finish` fecha a fase em andamento e o run; com `--failed` marca falha (`--cause`, `--message`).
   `cancel` registra fase e run como cancelados (`owner_cancelled`). Sem run aberto, ambos nao fazem nada.
+- **`finish`/`cancel` que nao publicou mantem o estado (USR-202).** Sem URL de escrita, com so o `control.db`
+  local, banco inalcancavel ou escrita parcial, o estado `.factory/live_runs/USR-XX.json` NAO e apagado e o
+  `[AVISO]` diz isso (`state_kept` no JSON). Corrija a URL e rode o mesmo `finish` (ou `cancel`) de novo: ele
+  republica o encerramento do MESMO run (repetir o evento e inofensivo). So apos publicar o estado e apagado.
+  Com `DARKFAC_LOCAL_PROGRESS=local` ou `off` (de proposito) o estado e apagado normalmente.
 - `phase` sem `open` previo abre o run implicitamente.
 - **Nunca derruba a sessao.** URL ausente, banco inalcancavel, diretorio de estado sem escrita ou arquivo
   de estado corrompido geram no maximo UM `[AVISO]` por run no stderr e exit code `0`. Somente comando
   malformado (fase inexistente, falta `--ticket`) sai com `2`. Com `--json`, o stdout e um documento JSON
-  (`ok`, `run_id`, `published`, `warning`, `detail`).
+  (`ok`, `run_id`, `published`, `state_kept`, `warning`, `detail`).
 - O estado do run fica em `.factory/live_runs/USR-XX.json` (em `DARKFAC_STATE_ROOT` quando definido,
   ignorado pelo git). Um run sem evento ha mais de 6 h e dado como abandonado e o proximo `open` abre outro.
 
