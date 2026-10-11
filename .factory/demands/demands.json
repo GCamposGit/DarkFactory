@@ -5665,7 +5665,13 @@
       "hub/frontend/"
     ],
     "estimated_complexity": "high",
-    "dependencies": [],
+    "dependencies": [
+      "USR-232",
+      "USR-233",
+      "USR-234",
+      "USR-235",
+      "USR-236"
+    ],
     "created_at": "2026-10-10T14:53:37.888426Z",
     "updated_at": "2026-10-10T14:54:36.216103Z"
   },
@@ -6757,5 +6763,214 @@
     "dependencies": [],
     "created_at": "2026-10-11T09:53:42.317104Z",
     "updated_at": "2026-10-11T09:53:42.317104Z"
+  },
+  {
+    "id": "USR-232",
+    "project_id": "darkfac",
+    "title": "USR-206 fatia 1: Hub persiste os snapshots de cotas sincronizados e le deles em vez de sondar CLIs na VPS",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand",
+      "darkhub",
+      "quota",
+      "usage-sync",
+      "usr-206-slice",
+      "routing"
+    ],
+    "problem_statement": "Fatia do USR-206 (Monitor de contas do Hub com a mesma fonte de cotas do roteador). Contexto: o AI Account Monitor do Hub (VPS) mostrava saldos errados porque (1) sonda CLIs que nao existem no container em vez de ler o snapshot que core.line.routing.pick usa, (2) o loop DarkFac-Usage-Cloud-Sync ficou 7 dias em SYNC_DEGRADED sem alerta (a chave DARKFAC_TELEMETRY_KEY ja foi configurada no host pela OA-010), (3) os snapshots recebidos em POST /api/usage/sync vao para /app/.factory/usage/providers, fora dos volumes do compose, e somem a cada redeploy, (4) o botao Atualizar cotas so re-sonda a VPS. Contrato das fontes e fixtures reais: docs/QUOTA_METER_CONTRACT.md e tests/fixtures/usage/. Esta fatia cobre as causas (1) e (3): fonte unica de verdade e persistencia.",
+    "core_journey": [
+      "Fatia do USR-206 (Monitor de contas do Hub com a mesma fonte de cotas do roteador). Contexto: o AI Account Monitor do Hub (VPS) mostrava saldos errados porque (1) sonda CLIs que nao existem no container em vez de ler o snapshot que core.line.routing.pick usa, (2) o loop DarkFac-Usage-Cloud-Sync ficou 7 dias em SYNC_DEGRADED sem alerta (a chave DARKFAC_TELEMETRY_KEY ja foi configurada no host pela OA-010), (3) os snapshots recebidos em POST /api/usage/sync vao para /app/.factory/usage/providers, fora dos volumes do compose, e somem a cada redeploy, (4) o botao Atualizar cotas so re-sonda a VPS. Contrato das fontes e fixtures reais: docs/QUOTA_METER_CONTRACT.md e tests/fixtures/usage/. Esta fatia cobre as causas (1) e (3): fonte unica de verdade e persistencia."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Os snapshots recebidos em POST /api/usage/sync sao gravados em diretorio de volume nomeado do Hub (compose darkhub, variavel de ambiente explicita com default seguro) e sobrevivem a redeploy; teste cobre a resolucao do diretorio e a persistencia entre duas instancias do monitor",
+      "O AccountUsageMonitor do Hub usa o snapshot sincronizado como fonte de cada provedor (Claude, OpenAI/Codex, xAI/Grok, Antigravity) e nunca sonda CLI nem rede local na VPS para eles; provedor sem snapshot aparece como sem dado sincronizado, estado distinto de desconectado",
+      "Teste de contrato com as fixtures reais de tests/fixtures/usage/: para o mesmo snapshot, o headroom exibido pelo Hub e identico ao calculado por core.line.routing, sem fixture inventada",
+      "Portao runner.py --quick com HARNESS_PASS, PR mergeado e deploy pos-merge; verificar em producao que um POST /api/usage/sync sobrevive a um redeploy"
+    ],
+    "suggested_files": [
+      "core/usage/monitor.py",
+      "core/usage/adapters.py",
+      "hub/backend/service.py",
+      "deploy/dokploy/docker-compose.hub.yml",
+      "tests/test_quota_meter_contract.py"
+    ],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-11T16:55:15.319368Z",
+    "updated_at": "2026-10-11T16:55:15.319368Z"
+  },
+  {
+    "id": "USR-233",
+    "project_id": "darkfac",
+    "title": "USR-206 fatia 2: cartoes de cotas do Hub mostram idade e origem do dado, e dado com mais de 10 min aparece como desatualizado",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand",
+      "darkhub",
+      "quota",
+      "usage-sync",
+      "usr-206-slice",
+      "ux"
+    ],
+    "problem_statement": "Fatia do USR-206 (Monitor de contas do Hub com a mesma fonte de cotas do roteador). Contexto: o AI Account Monitor do Hub (VPS) mostrava saldos errados porque (1) sonda CLIs que nao existem no container em vez de ler o snapshot que core.line.routing.pick usa, (2) o loop DarkFac-Usage-Cloud-Sync ficou 7 dias em SYNC_DEGRADED sem alerta (a chave DARKFAC_TELEMETRY_KEY ja foi configurada no host pela OA-010), (3) os snapshots recebidos em POST /api/usage/sync vao para /app/.factory/usage/providers, fora dos volumes do compose, e somem a cada redeploy, (4) o botao Atualizar cotas so re-sonda a VPS. Contrato das fontes e fixtures reais: docs/QUOTA_METER_CONTRACT.md e tests/fixtures/usage/. Esta fatia cobre a exibicao: idade, origem e estado desatualizado, nunca desconectado ou zerado.",
+    "core_journey": [
+      "Fatia do USR-206 (Monitor de contas do Hub com a mesma fonte de cotas do roteador). Contexto: o AI Account Monitor do Hub (VPS) mostrava saldos errados porque (1) sonda CLIs que nao existem no container em vez de ler o snapshot que core.line.routing.pick usa, (2) o loop DarkFac-Usage-Cloud-Sync ficou 7 dias em SYNC_DEGRADED sem alerta (a chave DARKFAC_TELEMETRY_KEY ja foi configurada no host pela OA-010), (3) os snapshots recebidos em POST /api/usage/sync vao para /app/.factory/usage/providers, fora dos volumes do compose, e somem a cada redeploy, (4) o botao Atualizar cotas so re-sonda a VPS. Contrato das fontes e fixtures reais: docs/QUOTA_METER_CONTRACT.md e tests/fixtures/usage/. Esta fatia cobre a exibicao: idade, origem e estado desatualizado, nunca desconectado ou zerado."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "O modelo de conta do Hub expoe checked_at, no de origem, idade em segundos e o indicador de desatualizado (mais de 600 s); teste de backend cobre o limite exato",
+      "Cada cartao do AI Account Monitor mostra idade e origem; dado com mais de 10 min aparece com selo desatualizado em destaque, nunca como desconectado nem com valor zerado",
+      "Teste do frontend (ou do formatador JS) cobre os tres estados: recente, desatualizado e sem dado sincronizado",
+      "Portao runner.py --quick com HARNESS_PASS, PR mergeado e deploy pos-merge"
+    ],
+    "suggested_files": [
+      "core/usage/models.py",
+      "hub/backend/service.py",
+      "hub/frontend/"
+    ],
+    "estimated_complexity": "medium",
+    "dependencies": [
+      "USR-232"
+    ],
+    "created_at": "2026-10-11T16:55:21.732433Z",
+    "updated_at": "2026-10-11T16:55:21.732433Z"
+  },
+  {
+    "id": "USR-234",
+    "project_id": "darkfac",
+    "title": "USR-206 fatia 3: Atualizar cotas cria uma solicitacao de remedicao que o host medidor executa em ate 60 s",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand",
+      "darkhub",
+      "quota",
+      "usage-sync",
+      "usr-206-slice"
+    ],
+    "problem_statement": "Fatia do USR-206 (Monitor de contas do Hub com a mesma fonte de cotas do roteador). Contexto: o AI Account Monitor do Hub (VPS) mostrava saldos errados porque (1) sonda CLIs que nao existem no container em vez de ler o snapshot que core.line.routing.pick usa, (2) o loop DarkFac-Usage-Cloud-Sync ficou 7 dias em SYNC_DEGRADED sem alerta (a chave DARKFAC_TELEMETRY_KEY ja foi configurada no host pela OA-010), (3) os snapshots recebidos em POST /api/usage/sync vao para /app/.factory/usage/providers, fora dos volumes do compose, e somem a cada redeploy, (4) o botao Atualizar cotas so re-sonda a VPS. Contrato das fontes e fixtures reais: docs/QUOTA_METER_CONTRACT.md e tests/fixtures/usage/. Esta fatia cobre a causa (4): o botao precisa pedir uma nova medicao ao host que mede, nao re-sondar a VPS.",
+    "core_journey": [
+      "Fatia do USR-206 (Monitor de contas do Hub com a mesma fonte de cotas do roteador). Contexto: o AI Account Monitor do Hub (VPS) mostrava saldos errados porque (1) sonda CLIs que nao existem no container em vez de ler o snapshot que core.line.routing.pick usa, (2) o loop DarkFac-Usage-Cloud-Sync ficou 7 dias em SYNC_DEGRADED sem alerta (a chave DARKFAC_TELEMETRY_KEY ja foi configurada no host pela OA-010), (3) os snapshots recebidos em POST /api/usage/sync vao para /app/.factory/usage/providers, fora dos volumes do compose, e somem a cada redeploy, (4) o botao Atualizar cotas so re-sonda a VPS. Contrato das fontes e fixtures reais: docs/QUOTA_METER_CONTRACT.md e tests/fixtures/usage/. Esta fatia cobre a causa (4): o botao precisa pedir uma nova medicao ao host que mede, nao re-sondar a VPS."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "POST /api/usage/accounts/refresh cria uma solicitacao persistente (id, status, requested_at, no alvo) em vez de re-sondar a VPS, e existe endpoint de consulta do estado da solicitacao",
+      "O loop de sincronizacao do host medidor (scripts/sync_usage_to_cloud.py) consulta solicitacoes pendentes em intervalo curto, mede, sincroniza e fecha a solicitacao com o novo checked_at, tudo em ate 60 s",
+      "A UI mostra o progresso e o novo checked_at, ou o motivo exato da falha (host offline = sem contato ha mais de 60 s, chave ausente); testes com Hub e host falsos cobrem sucesso, host offline e chave ausente",
+      "Portao runner.py --quick com HARNESS_PASS, PR mergeado e deploy pos-merge"
+    ],
+    "suggested_files": [
+      "hub/backend/api.py",
+      "hub/backend/service.py",
+      "scripts/sync_usage_to_cloud.py",
+      "hub/frontend/"
+    ],
+    "estimated_complexity": "medium",
+    "dependencies": [
+      "USR-232"
+    ],
+    "created_at": "2026-10-11T16:55:27.511745Z",
+    "updated_at": "2026-10-11T16:55:27.511745Z"
+  },
+  {
+    "id": "USR-235",
+    "project_id": "darkfac",
+    "title": "USR-206 fatia 4: falha de sincronizacao de cotas gera alerta critico no Hub e no Telegram ops na primeira ocorrencia",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand",
+      "darkhub",
+      "quota",
+      "usage-sync",
+      "usr-206-slice",
+      "alerting"
+    ],
+    "problem_statement": "Fatia do USR-206 (Monitor de contas do Hub com a mesma fonte de cotas do roteador). Contexto: o AI Account Monitor do Hub (VPS) mostrava saldos errados porque (1) sonda CLIs que nao existem no container em vez de ler o snapshot que core.line.routing.pick usa, (2) o loop DarkFac-Usage-Cloud-Sync ficou 7 dias em SYNC_DEGRADED sem alerta (a chave DARKFAC_TELEMETRY_KEY ja foi configurada no host pela OA-010), (3) os snapshots recebidos em POST /api/usage/sync vao para /app/.factory/usage/providers, fora dos volumes do compose, e somem a cada redeploy, (4) o botao Atualizar cotas so re-sonda a VPS. Contrato das fontes e fixtures reais: docs/QUOTA_METER_CONTRACT.md e tests/fixtures/usage/. Esta fatia cobre a causa (2): ninguem foi alertado por 7 dias porque a falha so ia para log local.",
+    "core_journey": [
+      "Fatia do USR-206 (Monitor de contas do Hub com a mesma fonte de cotas do roteador). Contexto: o AI Account Monitor do Hub (VPS) mostrava saldos errados porque (1) sonda CLIs que nao existem no container em vez de ler o snapshot que core.line.routing.pick usa, (2) o loop DarkFac-Usage-Cloud-Sync ficou 7 dias em SYNC_DEGRADED sem alerta (a chave DARKFAC_TELEMETRY_KEY ja foi configurada no host pela OA-010), (3) os snapshots recebidos em POST /api/usage/sync vao para /app/.factory/usage/providers, fora dos volumes do compose, e somem a cada redeploy, (4) o botao Atualizar cotas so re-sonda a VPS. Contrato das fontes e fixtures reais: docs/QUOTA_METER_CONTRACT.md e tests/fixtures/usage/. Esta fatia cobre a causa (2): ninguem foi alertado por 7 dias porque a falha so ia para log local."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Chave ausente, resposta 401 ou nenhuma sincronizacao com sucesso ha mais de 5 min gera item critico na fila de intervencoes do Hub (backlog de acoes do owner, idempotente por causa) e mensagem no Telegram ops na primeira ocorrencia, sem repetir a cada tentativa",
+      "O alerta de ausencia de sincronizacao e decidido no lado do Hub (um host medidor parado nao consegue avisar sozinho) e o item fecha automaticamente quando uma sincronizacao volta a ter sucesso",
+      "Testes cobrem chave ausente, 401, atraso maior que 5 min, deduplicacao e fechamento automatico, sem rede real nem token real",
+      "Portao runner.py --quick com HARNESS_PASS, PR mergeado e deploy pos-merge"
+    ],
+    "suggested_files": [
+      "scripts/sync_usage_to_cloud.py",
+      "hub/backend/service.py",
+      "core/owner_actions/",
+      "core/integrations/telegram_status.py"
+    ],
+    "estimated_complexity": "medium",
+    "dependencies": [
+      "USR-232"
+    ],
+    "created_at": "2026-10-11T16:55:33.222543Z",
+    "updated_at": "2026-10-11T16:55:33.222543Z"
+  },
+  {
+    "id": "USR-236",
+    "project_id": "darkfac",
+    "title": "USR-206 fatia 5: instalador idempotente da tarefa agendada DarkFac-Usage-Cloud-Sync apontando para C:/dev/DarkFac",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand",
+      "darkhub",
+      "quota",
+      "usage-sync",
+      "usr-206-slice",
+      "installer"
+    ],
+    "problem_statement": "Fatia do USR-206 (Monitor de contas do Hub com a mesma fonte de cotas do roteador). Contexto: o AI Account Monitor do Hub (VPS) mostrava saldos errados porque (1) sonda CLIs que nao existem no container em vez de ler o snapshot que core.line.routing.pick usa, (2) o loop DarkFac-Usage-Cloud-Sync ficou 7 dias em SYNC_DEGRADED sem alerta (a chave DARKFAC_TELEMETRY_KEY ja foi configurada no host pela OA-010), (3) os snapshots recebidos em POST /api/usage/sync vao para /app/.factory/usage/providers, fora dos volumes do compose, e somem a cada redeploy, (4) o botao Atualizar cotas so re-sonda a VPS. Contrato das fontes e fixtures reais: docs/QUOTA_METER_CONTRACT.md e tests/fixtures/usage/. Esta fatia cobre o instalador: a tarefa rodou 7 dias a partir de uma worktree velha do Codex, que ja nao e a versao atual.",
+    "core_journey": [
+      "Fatia do USR-206 (Monitor de contas do Hub com a mesma fonte de cotas do roteador). Contexto: o AI Account Monitor do Hub (VPS) mostrava saldos errados porque (1) sonda CLIs que nao existem no container em vez de ler o snapshot que core.line.routing.pick usa, (2) o loop DarkFac-Usage-Cloud-Sync ficou 7 dias em SYNC_DEGRADED sem alerta (a chave DARKFAC_TELEMETRY_KEY ja foi configurada no host pela OA-010), (3) os snapshots recebidos em POST /api/usage/sync vao para /app/.factory/usage/providers, fora dos volumes do compose, e somem a cada redeploy, (4) o botao Atualizar cotas so re-sonda a VPS. Contrato das fontes e fixtures reais: docs/QUOTA_METER_CONTRACT.md e tests/fixtures/usage/. Esta fatia cobre o instalador: a tarefa rodou 7 dias a partir de uma worktree velha do Codex, que ja nao e a versao atual."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Script de instalacao registra ou atualiza a tarefa agendada DarkFac-Usage-Cloud-Sync apontando sempre para o checkout principal C:/dev/DarkFac, nunca para uma worktree (recusa caminhos dentro de .worktrees, .claude/worktrees e .codex/worktrees), e se re-registra quando o caminho da tarefa existente difere",
+      "A logica de decisao (criar, manter ou atualizar) fica numa funcao Python pura e testavel em Linux e Windows; teste cobre tarefa ausente, igual, apontando para worktree e apontando para outro caminho, e a recusa de caminho de worktree",
+      "Runbook curto com o comando exato de instalacao e verificacao; a execucao do instalador no Notebook e registrada como acao do owner no backlog (OA) se exigir elevacao",
+      "Portao runner.py --quick com HARNESS_PASS, PR mergeado e deploy pos-merge"
+    ],
+    "suggested_files": [
+      "scripts/install_usage_sync_task.py",
+      "scripts/sync_usage_to_cloud.py",
+      "docs/runbooks/"
+    ],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-11T16:55:39.378053Z",
+    "updated_at": "2026-10-11T16:55:39.378053Z"
   }
 ]
