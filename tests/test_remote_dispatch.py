@@ -663,7 +663,9 @@ def test_end_to_end_loopback_dispatch_real_server(tmp_path: Path, monkeypatch: p
     port = _free_port()
 
     app = create_worker_app(project_root=repo, node_id="loopback-e2e")
-    server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=port, log_level="warning"))
+    # log_config=None (USR-183): uvicorn's default dictConfig would replace the logging handlers
+    # pytest owns, and at shutdown they write to a closed capture stream ("I/O operation on closed file").
+    server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=port, log_level="warning", log_config=None))
     thread = threading.Thread(target=server.run, daemon=True)
     thread.start()
     try:

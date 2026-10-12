@@ -670,3 +670,94 @@ def test_sync_no_restart_when_desktop_has_queued_job() -> None:
     assert recovery_calls == []
 
 
+
+
+# --- USR-196: o erro real do /system/update chega ao relatorio, sem segredos ---------------------------------
+
+class _FailingUpdate(FakeHttp):
+    def __init__(self, output: str, *, current_commit: str = OLD) -> None:
+        super().__init__(desktop=OLD)
+        self.output = output
+        self.current_commit = current_commit
+
+    def __call__(self, method: str, url: str, payload: dict[str, Any] | None, token: str | None) -> dict[str, Any]:
+        if url.endswith("/system/update"):
+            self.calls.append((method, url))
+            return {"success": False, "output": self.output, "current_commit": self.current_commit}
+        return super().__call__(method, url, payload, token)
+
+
+def _sync_with_update_failure(output: str, *, token: str | None = None) -> mod.SyncReport:
+    http = _FailingUpdate(output)
+    vclock = VirtualClock()
+    return mod.sync(
+        root=Path("."), git=FakeGit(), http=http, token=token, task_recovery=lambda name: True,
+        timeout=4, interval=2, clock=vclock.clock, sleep=vclock.sleep,
+    )
+
+
+def test_update_failure_reports_worker_git_stderr_in_reason() -> None:
+    stderr = (
+        "error: The following untracked working tree files would be overwritten by merge:\n"
+        "\t.factory/state.json\nPlease move or remove them before you merge.\nAborting"
+    )
+    report = _sync_with_update_failure(stderr)
+    desktop = report.nodes[1]
+    assert desktop.state == "divergent"
+    assert "expected SHA" in (desktop.reason or "")
+    assert "would be overwritten by merge" in (desktop.reason or "")
+    assert ".factory/state.json" in (desktop.reason or "")
+    assert "\n" not in (desktop.reason or "")
+
+
+def test_update_failure_redacts_secrets_and_truncates_output() -> None:
+    token = "tok-secret-1234567890"
+    # Montado em tempo de execucao para o varredor de segredos do commit nao ver um literal.
+    gh_token = "gh" + "p_" + "abcdefghijklmnopqrstuvwxyz0123456789"
+    stderr = (
+        f"fatal: unable to access 'https://user:{gh_token}@github.com/o/r.git/': 403\n"
+        f"remote: Authorization: Bearer {token}\n"
+        f"worker saw {token} and password=hunter2\n" + ("x" * 5000)
+    )
+    report = _sync_with_update_failure(stderr, token=token)
+    reason = report.nodes[1].reason or ""
+    for secret in (token, gh_token, "user:gh" + "p_", "hunter2"):
+        assert secret not in reason
+    assert "[REDACTED]" in reason
+    assert "github.com" in reason  # o host continua util para o diagnostico
+    assert len(reason) < 1300
+    assert "truncado" in reason
+
+
+def test_update_failure_is_recorded_as_pending_convergence() -> None:
+    mod.clear_pending_convergence()
+    _sync_with_update_failure("error: Your local changes would be overwritten by merge")
+    pending = mod.load_pending_convergence()
+    assert pending is not None
+    assert pending["node"] == "Desktop"
+    assert pending["expected_sha"] == SHA
+    assert "would be overwritten" in pending["reason"]
+    mod.clear_pending_convergence()
+
+
+def test_update_success_with_wrong_commit_also_reports_output() -> None:
+    class Reply(_FailingUpdate):
+        def __call__(self, method: str, url: str, payload: dict[str, Any] | None, token: str | None) -> dict[str, Any]:
+            if url.endswith("/system/update"):
+                self.calls.append((method, url))
+                return {"success": True, "output": "Already up to date.", "current_commit": OLD}
+            return super().__call__(method, url, payload, token)
+
+    http = Reply("unused")
+    vclock = VirtualClock()
+    report = mod.sync(
+        root=Path("."), git=FakeGit(), http=http, task_recovery=lambda name: True,
+        timeout=4, interval=2, clock=vclock.clock, sleep=vclock.sleep,
+    )
+    assert "Already up to date." in (report.nodes[1].reason or "")
+
+
+def test_redact_worker_output_handles_empty_and_plain_text() -> None:
+    assert mod.redact_worker_output(None) == ""
+    assert mod.redact_worker_output("") == ""
+    assert mod.redact_worker_output("Already up to date.") == "Already up to date."

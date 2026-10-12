@@ -1021,6 +1021,10 @@ def _run_main(
     # clean on main, Desktop update+restart, VPS = the deploy just done). The
     # sync must not trigger another redeploy, and node_sync's own redeploy
     # passes --skip-node-sync, so there is no re-entry loop.
+    # USR-196: o backup pos-deploy depende so da convergencia da VPS (deploy + /health + titulo do commit),
+    # nao da do Desktop. `backup_ok` espelha `all_ok` ate aqui; falhas de Notebook/VPS ainda o derrubam.
+    backup_ok = all_ok
+    desktop_pending: Optional[str] = None
     if getattr(args, "skip_node_sync", False):
         print("[NODE SYNC] skipped (--skip-node-sync)", file=out, flush=True)
     else:
@@ -1042,6 +1046,11 @@ def _run_main(
             if node.state == "converged":
                 continue
             all_ok = False
+            if node.name == "Desktop":
+                # USR-196: o backup da VPS nao depende do Desktop; a divergencia vira pendencia explicita.
+                desktop_pending = node.reason or "(none)"
+            else:
+                backup_ok = False
             if getattr(node, "sync_classification", None) == "dirty" or "dirty worktree" in (node.reason or ""):
                 node_sync_dirty = True
             else:
@@ -1064,6 +1073,7 @@ def _run_main(
                 # Weaker than a runtime SHA, so a missing/different title fails closed.
                 if not matches:
                     all_ok = False
+                    backup_ok = False
                     other_failure = True
                     print(f"[NODE SYNC] VPS service {svc.name}: does not match local origin/main", file=err, flush=True)
             elif not matches:
@@ -1089,9 +1099,15 @@ def _run_main(
 
     if getattr(args, "skip_backup", False):
         print("[BACKUP] skipped: --skip-backup flag provided", file=out, flush=True)
-    elif not all_ok:
+    elif not backup_ok:
         print("[BACKUP] skipped: deploy did not converge (all_ok is False)", file=out, flush=True)
     else:
+        if desktop_pending is not None:
+            print(
+                "[BACKUP] VPS converged; running post-deploy backup despite pending Desktop convergence (USR-196)",
+                file=out,
+                flush=True,
+            )
         try:
             print("\n[AUTONOMOUS POST-DEPLOY BACKUP] Executing 3-tier backup & restore drill...", file=out, flush=True)
             runner = backup_runner or default_backup_runner
@@ -1104,6 +1120,16 @@ def _run_main(
             print(f"[BACKUP] failed: {exc}", file=err, flush=True)
             print(f"[AUTONOMOUS POST-DEPLOY BACKUP] Warning: autonomous backup cycle failed: {exc}", file=err, flush=True)
 
+    if desktop_pending is not None:
+        # Exit code decision (USR-196): permanece != 0 enquanto qualquer no divergir (all_ok False), mesmo que o
+        # backup da VPS tenha rodado; o Desktop e declarado pendencia explicita para nao ser esquecido.
+        print(
+            f"[PENDING] Desktop divergent: {desktop_pending}; VPS backup "
+            f"{'attempted' if backup_ok and not getattr(args, 'skip_backup', False) else 'not attempted'}; "
+            "retry convergence with: python -m core.infra.node_sync retry (cwd C:\\dev\\DarkFac)",
+            file=err,
+            flush=True,
+        )
     if all_ok:
         return EXIT_OK
     if node_sync_dirty and not other_failure:

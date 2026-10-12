@@ -1,0 +1,119 @@
+diff --git a/core/harness/remote_worker.py b/core/harness/remote_worker.py
+index fcbbc97..2500741 100644
+--- a/core/harness/remote_worker.py
++++ b/core/harness/remote_worker.py
+@@ -1180,6 +1180,97 @@ def trigger_daemon_restart(root_path: Path, host: str = DEFAULT_WORKER_HOST,
+     t.start()
+ 
+ 
++#: USR-196: where local copies of files that upstream stopped versioning are preserved.
++WORKER_UPDATE_BACKUP_SUBDIR = Path(".factory") / "backups" / "worker_update"
++_UPDATE_GIT_CHUNK = 50
++
++
++def _git_capture(args: list[str], root_path: Path, subp_kwargs: Dict[str, Any]) -> Optional[str]:
++    """Run ``git <args>`` without a shell; stdout on success, ``None`` on any failure."""
++    try:
++        res = subprocess.run(
++            ["git", *args],
++            capture_output=True,
++            text=True,
++            encoding="utf-8",
++            errors="replace",
++            cwd=str(root_path),
++            timeout=60,
++            **subp_kwargs,
++        )
++    except Exception:
++        return None
++    if res.returncode != 0 or not isinstance(res.stdout, str):
++        return None
++    return res.stdout
++
++
++def preserve_files_unversioned_upstream(root_path: Path, subp_kwargs: Optional[Dict[str, Any]] = None) -> list[str]:
++    """Make ``git pull`` survive tracked files that upstream stopped versioning (USR-196).
++
++    When upstream removes a file from the index (``git rm --cached`` + ``.gitignore``) while the
++    worker checkout still tracks it with local modifications, ``git pull`` aborts with "would be
++    overwritten by merge" and the node never converges. For exactly those files (deleted upstream
++    since the merge base AND modified locally) this copies the working file to
++    ``.factory/backups/worker_update/<timestamp>/<path>`` and only then restores it to ``HEAD`` so the
++    pull can delete it. A file that stays versioned upstream is never touched, and a file whose copy
++    fails is never discarded. Never raises; returns human-readable notes for the update output.
++    """
++    kwargs = subp_kwargs or {}
++    notes: list[str] = []
++    try:
++        upstream = (_git_capture(["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"], root_path, kwargs) or "").strip()
++        if not upstream or _git_capture(["fetch", "--quiet"], root_path, kwargs) is None:
++            return notes
++        base = (_git_capture(["merge-base", "HEAD", upstream], root_path, kwargs) or "").strip()
++        if not base:
++            return notes
++        removed_raw = _git_capture(
++            ["diff", "--name-only", "--no-renames", "--diff-filter=D", "-z", base, upstream], root_path, kwargs
++        )
++        modified_raw = _git_capture(["diff", "--name-only", "--no-renames", "-z", "HEAD"], root_path, kwargs)
++        if not removed_raw or not modified_raw:
++            return notes
++        removed = {item for item in removed_raw.split("\0") if item}
++        candidates = sorted(item for item in modified_raw.split("\0") if item in removed)
++        if not candidates:
++            return notes
++
++        root_resolved = root_path.resolve()
++        backup_dir = root_resolved / WORKER_UPDATE_BACKUP_SUBDIR / time.strftime("%Y%m%dT%H%M%S")
++        saved: list[str] = []
++        for rel in candidates:
++            source = (root_resolved / rel).resolve()
++            try:
++                source.relative_to(root_resolved)
++            except ValueError:
++                notes.append(f"[USR-196] skipped {rel}: path outside the checkout")
++                continue
++            if not source.is_file():
++                continue
++            target = backup_dir / rel
++            try:
++                target.parent.mkdir(parents=True, exist_ok=True)
++                shutil.copy2(source, target)
++            except Exception as exc:
++                notes.append(f"[USR-196] kept local changes of {rel}: backup failed ({exc})")
++                continue
++            saved.append(rel)
++        for start in range(0, len(saved), _UPDATE_GIT_CHUNK):
++            chunk = saved[start : start + _UPDATE_GIT_CHUNK]
++            if _git_capture(["checkout", "HEAD", "--", *chunk], root_path, kwargs) is None:
++                notes.append(f"[USR-196] could not restore {len(chunk)} file(s) to HEAD; backup kept in {backup_dir}")
++        if saved:
++            notes.insert(
++                0,
++                f"[USR-196] {len(saved)} file(s) no longer versioned upstream: local copy kept in "
++                f"{backup_dir}, local modification discarded: {', '.join(saved)}",
++            )
++    except Exception as exc:  # pragma: no cover - defensive: the update must never fail because of the prep
++        logger.warning("USR-196 pre-pull preparation failed: %s", exc)
++    return notes
++
++
+ def create_worker_app(
+     project_root: Optional[Path] = None,
+     node_id: str = DEFAULT_WORKER_NODE_ID,
+@@ -1366,6 +1457,7 @@ def create_worker_app(
+                     cwd=str(root_path),
+                     **subp_kwargs,
+                 )
++            preserved_notes = preserve_files_unversioned_upstream(root_path, subp_kwargs)
+             pull_res = subprocess.run(
+                 "git pull",
+                 shell=True,
+@@ -1384,6 +1476,8 @@ def create_worker_app(
+             )
+             commit = rev_res.stdout.strip() if rev_res.returncode == 0 else "unknown"
+             output = (pull_res.stdout or "") + ("\n" + pull_res.stderr if pull_res.stderr else "")
++            if preserved_notes:
++                output = "\n".join(preserved_notes) + "\n" + output
+             return SystemUpdateResponse(
+                 success=pull_res.returncode == 0,
+                 output=output.strip(),
