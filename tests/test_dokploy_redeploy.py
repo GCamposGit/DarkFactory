@@ -1587,3 +1587,107 @@ def test_disk_hygiene_failure_never_changes_the_exit_code(monkeypatch: pytest.Mo
     )
     assert code == mod.EXIT_OK
     assert "[DISK HYGIENE] pre-deploy: failed" in err.getvalue()
+
+
+# ---------------------------------------------------------------------------
+# USR-196: a divergencia so do Desktop nao derruba o backup pos-deploy da VPS
+# ---------------------------------------------------------------------------
+
+def _report_with(desktop: Any, notebook: Any = None, vps: Any = None) -> Any:
+    from core.infra import node_sync
+
+    return node_sync.SyncReport(
+        expected_sha="a" * 40,
+        nodes=[
+            notebook or node_sync.NodeStatus(name="Notebook", state="converged", git_sha="a" * 40),
+            desktop,
+            vps or node_sync.NodeStatus(name="VPS", state="converged", git_sha="a" * 40),
+        ],
+    )
+
+
+def _run_with_sync_report(monkeypatch: pytest.MonkeyPatch, report: Any) -> Tuple[int, str, str, List[str]]:
+    from core.infra import node_sync
+
+    monkeypatch.setattr(node_sync, "sync", lambda **kwargs: report)
+    monkeypatch.setattr(mod, "get_local_origin_main_subject", lambda: "feat: algo")
+    backups: List[str] = []
+
+    def backup(project_id: str = "darkfac") -> Dict[str, Any]:
+        backups.append(project_id)
+        return {"snapshot_id": "snp_usr196", "drill_verified": True}
+
+    out, err = io.StringIO(), io.StringIO()
+    code = mod.main(
+        ["--only", "darkfac-cloud", "--skip-check-main"],
+        env=_ENV, registry_reader=_no_registry,
+        transport_factory=lambda url, key: _cloud_transport(),
+        backup_runner=backup, sleep_fn=lambda _s: None, stdout=out, stderr=err,
+    )
+    return code, out.getvalue(), err.getvalue(), backups
+
+
+def test_desktop_divergence_does_not_skip_vps_backup_and_is_reported_as_pending(monkeypatch: pytest.MonkeyPatch) -> None:
+    """USR-196: VPS convergiu, Desktop nao -> backup roda; pendencia explicita; saida continua != 0.
+
+    Decisao do codigo de saida: enquanto qualquer no divergir o deploy NAO e "limpo", entao EXIT_DEPLOY_FAILED (1)
+    permanece (nada de mascarar divergencia como sucesso); so o backup, que nao depende do Desktop, deixa de ser pulado.
+    """
+    from core.infra import node_sync
+
+    desktop = node_sync.NodeStatus(
+        name="Desktop", state="divergent", git_sha="b" * 40,
+        reason="Desktop update did not reach expected SHA; worker output: error: would be overwritten by merge",
+    )
+    code, out, err, backups = _run_with_sync_report(monkeypatch, _report_with(desktop))
+    assert backups == ["darkfac"]
+    assert "[BACKUP] ran: snapshot=snp_usr196" in out
+    assert "[BACKUP] skipped" not in out
+    assert code == mod.EXIT_DEPLOY_FAILED
+    assert "[PENDING] Desktop divergent" in err
+    assert "would be overwritten by merge" in err  # o erro real do worker aparece no relatorio do deploy
+    assert "backup attempted" in err
+
+
+def test_vps_divergence_still_skips_backup(monkeypatch: pytest.MonkeyPatch) -> None:
+    from core.infra import node_sync
+
+    vps = node_sync.NodeStatus(name="VPS", state="divergent", git_sha="b" * 40, reason="old build")
+    desktop = node_sync.NodeStatus(name="Desktop", state="converged", git_sha="a" * 40)
+    code, out, _err, backups = _run_with_sync_report(monkeypatch, _report_with(desktop, vps=vps))
+    assert backups == []
+    assert "[BACKUP] skipped: deploy did not converge" in out
+    assert code == mod.EXIT_DEPLOY_FAILED
+
+
+def test_notebook_divergence_still_skips_backup(monkeypatch: pytest.MonkeyPatch) -> None:
+    from core.infra import node_sync
+
+    notebook = node_sync.NodeStatus(name="Notebook", state="divergent", sync_classification="dirty", reason="dirty worktree")
+    desktop = node_sync.NodeStatus(name="Desktop", state="converged", git_sha="a" * 40)
+    code, out, _err, backups = _run_with_sync_report(monkeypatch, _report_with(desktop, notebook=notebook))
+    assert backups == []
+    assert "[BACKUP] skipped" in out
+    assert code == mod.EXIT_NODE_DIRTY
+
+
+def test_desktop_and_vps_both_divergent_skips_backup(monkeypatch: pytest.MonkeyPatch) -> None:
+    from core.infra import node_sync
+
+    vps = node_sync.NodeStatus(name="VPS", state="offline", reason="health unavailable")
+    desktop = node_sync.NodeStatus(name="Desktop", state="divergent", reason="x")
+    _code, out, err, backups = _run_with_sync_report(monkeypatch, _report_with(desktop, vps=vps))
+    assert backups == []
+    assert "[BACKUP] skipped" in out
+    assert "[PENDING] Desktop divergent" in err
+    assert "backup not attempted" in err
+
+
+def test_all_converged_runs_backup_without_pending_line(monkeypatch: pytest.MonkeyPatch) -> None:
+    from core.infra import node_sync
+
+    desktop = node_sync.NodeStatus(name="Desktop", state="converged", git_sha="a" * 40)
+    code, out, err, backups = _run_with_sync_report(monkeypatch, _report_with(desktop))
+    assert code == mod.EXIT_OK
+    assert backups == ["darkfac"]
+    assert "[PENDING]" not in err

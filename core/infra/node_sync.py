@@ -108,6 +108,32 @@ def recover_scheduled_task(task_name: str = "DarkFac Test Worker") -> bool:
         return False
 
 
+WORKER_OUTPUT_LIMIT = 800
+_URL_CREDENTIALS = re.compile(r"(?i)\b([a-z][a-z0-9+.-]*://)[^\s/@:]*(?::[^\s/@]*)?@")
+_BEARER = re.compile(r"(?i)\b(bearer|basic)\s+[A-Za-z0-9._~+/=-]{8,}")
+_KEY_VALUE_SECRET = re.compile(
+    r"(?i)\b([\w.-]*(?:token|secret|password|passwd|api[_-]?key|authorization)[\w.-]*)(\s*[=:]\s*)[^\s&\"',;]+"
+)
+_KNOWN_TOKEN_SHAPES = re.compile(
+    r"\b(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|sk-[A-Za-z0-9_-]{20,}|xox[a-z]-[A-Za-z0-9-]{10,})\b"
+)
+
+
+def redact_worker_output(text: Any, *, token: str | None = None, limit: int = WORKER_OUTPUT_LIMIT) -> str:
+    """Sanitize git/worker output for reports: redact credentials, flatten lines and truncate (USR-196)."""
+    value = str(text or "")
+    if token and len(token) >= 4:
+        value = value.replace(token, "[REDACTED]")
+    value = _URL_CREDENTIALS.sub(r"\1[REDACTED]@", value)
+    value = _BEARER.sub(lambda m: f"{m.group(1)} [REDACTED]", value)
+    value = _KNOWN_TOKEN_SHAPES.sub("[REDACTED]", value)
+    value = _KEY_VALUE_SECRET.sub(lambda m: f"{m.group(1)}{m.group(2)}[REDACTED]", value)
+    value = " | ".join(line.strip() for line in value.splitlines() if line.strip())
+    if len(value) > limit:
+        value = value[:limit].rstrip() + f"... [truncado: {len(value)} caracteres]"
+    return value
+
+
 def _sha(value: Any) -> str | None:
     candidate = str(value or "").lower()
     return candidate if SHA_PATTERN.fullmatch(candidate) else None
@@ -672,12 +698,19 @@ def sync(
                     # so a worker exposing it restarts itself safely even if it predates `restart_safe`.
                     response = http("POST", f"{desktop_url.rstrip('/')}/system/update", {}, token)
                     if response.get("success") is not True or _sha(response.get("current_commit")) != expected:
-                        raise RuntimeError("Desktop update did not reach expected SHA")
+                        # USR-196: o stderr/stdout real do `git pull` do worker (campo `output`) vai ao relatorio.
+                        detail = redact_worker_output(response.get("output"), token=token)
+                        message = "Desktop update did not reach expected SHA"
+                        if detail:
+                            message += f"; worker output: {detail}"
+                        raise RuntimeError(message)
                     http("POST", f"{desktop_url.rstrip('/')}/system/restart", {}, token)
                     initial.nodes[1] = _recover_if_offline(_wait_for_restart())
             except Exception as exc:
-                desktop.reason = str(exc)
+                desktop.reason = redact_worker_output(exc, token=token, limit=WORKER_OUTPUT_LIMIT + 200)
                 initial.nodes[1] = desktop
+                # USR-196: a divergencia do Desktop fica registrada como pendencia explicita (retomavel por `retry`).
+                record_pending_convergence("Desktop", expected, desktop.reason)
                 try:
                     # O worker pode ter reiniciado sozinho (ou morrido) durante o update: se ficou desligado,
                     # a recuperacao pela tarefa agendada vem antes de declarar divergencia (USR-186).

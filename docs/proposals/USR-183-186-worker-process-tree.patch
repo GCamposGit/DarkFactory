@@ -1,0 +1,368 @@
+diff --git a/core/harness/remote_worker.py b/core/harness/remote_worker.py
+index 2500741..141d98e 100644
+--- a/core/harness/remote_worker.py
++++ b/core/harness/remote_worker.py
+@@ -70,6 +70,20 @@ POSIX_CHILD_NICE_INCREMENT = 5
+ _WINDOWS_BELOW_NORMAL_PRIORITY_CLASS = 0x00004000
+ JOB_LOG_KEEP = 20
+ JOB_WATCHDOG_POLL_SEC = 1.0
++#: USR-183: how often the watchdog snapshots the runner's descendants (pytest-xdist workers and
++#: their children), so they can still be killed after the runner itself is gone.
++JOB_TREE_SNAPSHOT_SEC = 5.0
++#: USR-183: how long the log reader may keep the stdout pipe open after the runner exited. A
++#: grandchild that inherited the pipe keeps it open; past this grace the leftovers are killed.
++JOB_PIPE_DRAIN_GRACE_SEC = 10.0
++#: USR-186: how long the restart helper waits for the old listener to release the port (seconds,
++#: exponential backoff 0.25 s -> 2 s), overridable through the environment.
++ENV_WORKER_PORT_WAIT_SEC = "DARKFAC_WORKER_PORT_WAIT_SEC"
++DEFAULT_PORT_WAIT_SEC = 60.0
++PORT_WAIT_INITIAL_DELAY_SEC = 0.25
++PORT_WAIT_MAX_DELAY_SEC = 2.0
++#: Extra wait after a stale worker still holding the port was terminated.
++PORT_REAP_SETTLE_SEC = 10.0
+ DEFAULT_JOB_TIMEOUT_SEC = 1800.0
+ JOB_TIMEOUT_BUFFER_SEC = 120.0
+ #: USR-162: job state is persisted (``<state_dir>/jobs/<job_id>.json``) on every
+@@ -368,7 +382,23 @@ def _process_alive(pid: Optional[int], started_at: Optional[float]) -> bool:
+         return True
+ 
+ 
+-def _terminate_process_tree(pid: Optional[int], started_at: Optional[float]) -> None:
++def _stop_processes(victims: list[Any], *, force: bool) -> None:
++    """Terminate ``victims`` (psutil processes), then kill whoever survives 3 s; ``force`` kills at once."""
++
++    import psutil
++
++    pending = list(victims)
++    if not force:
++        for victim in pending:
++            with contextlib.suppress(psutil.NoSuchProcess, psutil.AccessDenied):
++                victim.terminate()
++        _gone, pending = psutil.wait_procs(pending, timeout=3.0)
++    for victim in pending:
++        with contextlib.suppress(psutil.NoSuchProcess, psutil.AccessDenied):
++            victim.kill()
++
++
++def _terminate_process_tree(pid: Optional[int], started_at: Optional[float], *, force: bool = False) -> None:
+     """Best-effort kill of ``pid`` and its descendants (pytest-xdist workers),
+     only when ``pid`` still is the process we recorded."""
+ 
+@@ -380,18 +410,65 @@ def _terminate_process_tree(pid: Optional[int], started_at: Optional[float]) ->
+         proc = psutil.Process(int(pid))
+         if started_at is not None and abs(proc.create_time() - float(started_at)) > _PROCESS_START_TOLERANCE_SEC:
+             return
+-        victims = [*proc.children(recursive=True), proc]
+-        for victim in victims:
+-            with contextlib.suppress(psutil.NoSuchProcess, psutil.AccessDenied):
+-                victim.terminate()
+-        _gone, alive = psutil.wait_procs(victims, timeout=3.0)
+-        for victim in alive:
+-            with contextlib.suppress(psutil.NoSuchProcess, psutil.AccessDenied):
+-                victim.kill()
++        _stop_processes([*proc.children(recursive=True), proc], force=force)
+     except Exception as exc:  # noqa: BLE001
+         logger.debug("Could not terminate process tree of pid %s: %s", pid, exc)
+ 
+ 
++class _ProcessTree:
++    """The runner process and every descendant seen while it lived (USR-183).
++
++    Killing only the top process is not enough: once the runner dies its pytest-xdist workers are
++    reparented, can no longer be found through the runner, and keep the stdout pipe (and the suite
++    lock) alive. Snapshots taken while the runner is alive keep them reachable; psutil's process
++    identity includes the creation time, so a recycled pid is never killed by mistake.
++    """
++
++    def __init__(self, pid: Optional[int], started_at: Optional[float]) -> None:
++        self.pid = int(pid) if pid else None
++        self.started_at = started_at
++        self._known: Dict[int, Any] = {}
++        self._lock = threading.Lock()
++
++    def refresh(self) -> None:
++        """Add the runner and its current descendants to the known set (never raises)."""
++
++        if not self.pid:
++            return
++        try:
++            import psutil
++
++            root = psutil.Process(self.pid)
++            if self.started_at is not None and abs(root.create_time() - float(self.started_at)) > _PROCESS_START_TOLERANCE_SEC:
++                return
++            found = {proc.pid: proc for proc in [root, *root.children(recursive=True)]}
++        except Exception as exc:  # noqa: BLE001 - runner already gone, access denied, psutil missing
++            logger.debug("Could not snapshot process tree of pid %s: %s", self.pid, exc)
++            return
++        with self._lock:
++            self._known.update(found)
++
++    def kill(self, *, force: bool = True) -> int:
++        """Stop every still-running process of the tree; returns how many were targeted."""
++
++        self.refresh()
++        with self._lock:
++            known = list(self._known.values())
++        victims: list[Any] = []
++        for proc in known:
++            try:
++                if proc.pid != os.getpid() and proc.is_running():
++                    victims.append(proc)
++            except Exception:  # noqa: BLE001 - vanished or inaccessible
++                continue
++        if victims:
++            try:
++                _stop_processes(victims, force=force)
++            except Exception as exc:  # noqa: BLE001
++                logger.debug("Could not stop process tree of pid %s: %s", self.pid, exc)
++        return len(victims)
++
++
+ @dataclass
+ class HarnessJob:
+     """One remote-dispatched harness run: queued -> running -> done|failed|cancelled."""
+@@ -422,6 +499,8 @@ class HarnessJob:
+     owner_started_at: float = dataclass_field(default_factory=lambda: _THIS_PROCESS_STARTED_AT)
+     child_pid: Optional[int] = None
+     child_started_at: Optional[float] = None
++    #: Runner + descendants snapshot (USR-183); in memory only, never persisted.
++    process_tree: Optional[_ProcessTree] = dataclass_field(default=None, repr=False)
+     lock: threading.Lock = dataclass_field(default_factory=threading.Lock)
+     log_fh: Any = dataclass_field(default=None, repr=False)
+ 
+@@ -650,9 +729,13 @@ class JobManager:
+             process = job.process
+             job.interrupted = True
+             self._set_status(job, "failed", error_code=ERROR_CODE_WORKER_RESTARTED, error=message)
+-            if process is not None and process.poll() is None:
++            if job.process_tree is not None:
++                # USR-183: also when the runner already exited, its leftover descendants hold the pipe.
++                job.process_tree.kill(force=False)
++            elif process is not None and process.poll() is None:
+                 # Descendants first: once the runner dies, its pytest-xdist workers are orphans.
+                 _terminate_process_tree(job.child_pid, job.child_started_at)
++            if process is not None and process.poll() is None:
+                 with contextlib.suppress(Exception):
+                     process.terminate()
+             closed.append(job.job_id)
+@@ -871,26 +954,56 @@ class JobManager:
+                 # Recorded so a successor worker can reap an orphaned run (USR-162).
+                 job.child_pid = child_pid
+                 job.child_started_at = _process_started_at(child_pid)
++            tree = _ProcessTree(job.child_pid, job.child_started_at)
++            job.process_tree = tree
+             self._persist(job)
+             deadline = time.monotonic() + timeout_sec
+             stop_watchdog = threading.Event()
+ 
+             def _watchdog() -> None:
++                last_snapshot = float("-inf")
+                 while not stop_watchdog.wait(JOB_WATCHDOG_POLL_SEC):
++                    if time.monotonic() - last_snapshot >= JOB_TREE_SNAPSHOT_SEC:
++                        last_snapshot = time.monotonic()
++                        tree.refresh()
+                     if job.cancel_requested or time.monotonic() > deadline:
++                        # USR-183: the whole tree, not just the runner (xdist workers keep the pipe open).
++                        tree.kill(force=True)
+                         with contextlib.suppress(Exception):
+                             process.kill()
+                         return
+ 
++            def _pump_output() -> None:
++                stream = process.stdout
++                if stream is None:
++                    return
++                try:
++                    for line in stream:
++                        self._append_log(job, line)
++                except (OSError, ValueError) as exc:  # pipe broken or closed under us
++                    logger.debug("Log reader of job %s stopped: %s", job.job_id, exc)
++
+             watchdog = threading.Thread(target=_watchdog, daemon=True)
+             watchdog.start()
++            # The reader runs in its own thread: if the runner is gone but a grandchild still holds
++            # the pipe, this thread must not block on it forever (USR-183).
++            reader = threading.Thread(target=_pump_output, daemon=True, name=f"darkfac-job-log-{job.job_id}")
++            reader.start()
+             try:
+-                assert process.stdout is not None
+-                for line in process.stdout:
+-                    self._append_log(job, line)
++                process.wait()
++                reader.join(JOB_PIPE_DRAIN_GRACE_SEC)
++                if reader.is_alive():
++                    leftovers = tree.kill(force=True)
++                    self._append_log(
++                        job,
++                        f"[WORKER] output pipe still open {JOB_PIPE_DRAIN_GRACE_SEC:g}s after the runner exited; "
++                        f"terminated {leftovers} leftover process(es)\n",
++                    )
++                    reader.join(JOB_PIPE_DRAIN_GRACE_SEC)
++                    if reader.is_alive():
++                        self._append_log(job, "[WORKER] output pipe still open; stopped reading it\n")
+             finally:
+                 stop_watchdog.set()
+-                process.wait()
+ 
+             if job.interrupted:
+                 return  # the worker closed this job itself (restart); keep that verdict
+@@ -1115,17 +1228,121 @@ def get_available_harnesses() -> list[str]:
+ 
+ 
+ 
+-def _wait_for_released_port(host: str, port: int, *, attempts: int = 40) -> bool:
+-    """Wait briefly for the old HTTP listener to release its address."""
+-    for _ in range(attempts):
+-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
++def _port_is_free(host: str, port: int) -> bool:
++    """True when ``host:port`` can be bound right now (nobody is listening on it)."""
++    family = socket.AF_INET6 if ":" in host else socket.AF_INET
++    with socket.socket(family, socket.SOCK_STREAM) as probe:
++        if sys.platform != "win32":
++            # Like uvicorn: a TIME_WAIT leftover must not look like a live listener. Never on
++            # Windows, where SO_REUSEADDR would let the probe bind over a live listener.
++            probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
++        try:
++            probe.bind((host, port))
++        except OSError:
++            return False
++    return True
++
++
++def _port_wait_timeout_sec() -> float:
++    """Seconds the restart helper waits for the old listener (``DARKFAC_WORKER_PORT_WAIT_SEC``, default 60)."""
++    raw = os.environ.get(ENV_WORKER_PORT_WAIT_SEC, "").strip()
++    try:
++        value = float(raw) if raw else DEFAULT_PORT_WAIT_SEC
++    except ValueError:
++        return DEFAULT_PORT_WAIT_SEC
++    return value if value > 0 else DEFAULT_PORT_WAIT_SEC
++
++
++def _poll_port_free(
++    host: str, port: int, timeout_sec: float, *, sleep: Any = time.sleep, clock: Any = time.monotonic
++) -> bool:
++    """Poll :func:`_port_is_free` with exponential backoff (0.25 s -> 2 s) for up to ``timeout_sec``."""
++    deadline = clock() + timeout_sec
++    delay = PORT_WAIT_INITIAL_DELAY_SEC
++    while True:
++        if _port_is_free(host, port):
++            return True
++        remaining = deadline - clock()
++        if remaining <= 0:
++            return False
++        sleep(min(delay, remaining))
++        delay = min(delay * 1.5, PORT_WAIT_MAX_DELAY_SEC)
++
++
++def _worker_answers_health(port: int) -> bool:
++    """True when a worker already answers ``GET /health`` on this machine's ``port``."""
++    import http.client
++
++    try:
++        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=3.0)
++        try:
++            conn.request("GET", "/health")
++            return conn.getresponse().status == 200
++        finally:
++            conn.close()
++    except Exception:  # noqa: BLE001 - refused, timed out, not HTTP
++        return False
++
++
++def _reap_stale_worker_listener(port: int) -> int:
++    """Terminate OTHER processes of this worker script that listen on ``port`` yet do not serve
++    (a hung predecessor). Returns how many were terminated; never raises."""
++    terminated = 0
++    try:
++        import psutil
++
++        me = os.getpid()
++        script = Path(__file__).name
++        for conn in psutil.net_connections(kind="inet"):
++            if conn.status != psutil.CONN_LISTEN or not conn.laddr or conn.laddr.port != port:
++                continue
++            if not conn.pid or conn.pid == me:
++                continue
+             try:
+-                probe.bind((host, port))
+-            except OSError:
+-                time.sleep(0.25)
++                proc = psutil.Process(conn.pid)
++                if script not in " ".join(proc.cmdline()):
++                    continue
++                logger.warning("Terminating stale worker pid %s that still holds port %s", conn.pid, port)
++                _terminate_process_tree(proc.pid, proc.create_time())
++                terminated += 1
++            except psutil.Error:
+                 continue
++    except Exception as exc:  # noqa: BLE001 - psutil missing or net_connections denied
++        logger.debug("Could not look for a stale worker on port %s: %s", port, exc)
++    return terminated
++
++
++def _wait_for_released_port(
++    host: str, port: int, *, timeout_sec: Optional[float] = None, sleep: Any = time.sleep, clock: Any = time.monotonic
++) -> bool:
++    """Wait for the old HTTP listener to release its address (USR-186).
++
++    Polls with backoff for ``DARKFAC_WORKER_PORT_WAIT_SEC`` (default 60 s; it used to give up after
++    10 s and leave the worker down with ``[Errno 10048]``). If the port is still held: a worker that
++    answers ``/health`` is already serving (nothing to relaunch -> False); a stale worker process
++    that does not answer is terminated and the port is awaited once more.
++    """
++    limit = _port_wait_timeout_sec() if timeout_sec is None else timeout_sec
++    if _poll_port_free(host, port, limit, sleep=sleep, clock=clock):
+         return True
+-    return False
++    if _worker_answers_health(port):
++        logger.warning("Port %s is held by a worker that answers /health; nothing to relaunch", port)
++        return False
++    if _reap_stale_worker_listener(port) == 0:
++        return False
++    return _poll_port_free(host, port, PORT_REAP_SETTLE_SEC, sleep=sleep, clock=clock)
++
++
++def _detached_popen_kwargs(root_path: Path) -> Dict[str, Any]:
++    """Popen kwargs for a detached daemon child: no std handles and, explicitly, no inherited
++    descriptors -- so the child can never keep this daemon's listening socket (port 8080) alive
++    after this process exits (USR-186)."""
++    kwargs: Dict[str, Any] = {"cwd": str(root_path), "stdin": subprocess.DEVNULL,
++                              "stdout": subprocess.DEVNULL, "stderr": subprocess.DEVNULL,
++                              "close_fds": True}
++    if sys.platform == "win32":
++        kwargs["creationflags"] = subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
++    return kwargs
+ 
+ 
+ def _restart_after_exit(root_path: Path, host: str, port: int, node_id: str) -> None:
+@@ -1134,14 +1351,12 @@ def _restart_after_exit(root_path: Path, host: str, port: int, node_id: str) ->
+         logger.error("Worker port %s remained occupied; refusing duplicate launch", port)
+         return
+ 
+-    subp_kwargs: Dict[str, Any] = {"cwd": str(root_path), "stdin": subprocess.DEVNULL,
+-                                   "stdout": subprocess.DEVNULL, "stderr": subprocess.DEVNULL}
++    subp_kwargs = _detached_popen_kwargs(root_path)
+     if sys.platform == "win32":
+-        subp_kwargs["creationflags"] = subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
+         task = subprocess.run(
+             ["powershell.exe", "-NoProfile", "-Command",
+              "if (Get-ScheduledTask -TaskName 'DarkFac Test Worker' -ErrorAction SilentlyContinue) { exit 0 } else { exit 1 }"],
+-            capture_output=True, **{k: v for k, v in subp_kwargs.items() if k not in ("stdout", "stderr", "creationflags")},
++            capture_output=True, cwd=str(root_path), stdin=subprocess.DEVNULL,
+         )
+         if task.returncode == 0:
+             started = subprocess.run(
+@@ -1165,10 +1380,7 @@ def trigger_daemon_restart(root_path: Path, host: str = DEFAULT_WORKER_HOST,
+     """Start a detached restart helper, then terminate this daemon."""
+     def _deferred() -> None:
+         time.sleep(1.0)
+-        subp_kwargs: Dict[str, Any] = {"cwd": str(root_path), "stdin": subprocess.DEVNULL,
+-                                       "stdout": subprocess.DEVNULL, "stderr": subprocess.DEVNULL}
+-        if sys.platform == "win32":
+-            subp_kwargs["creationflags"] = subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
++        subp_kwargs = _detached_popen_kwargs(root_path)
+         subprocess.Popen(
+             [sys.executable, str(Path(__file__).resolve()), "--restart-wait", "--project-root", str(root_path),
+              "--host", host, "--port", str(port), "--node-id", node_id],
