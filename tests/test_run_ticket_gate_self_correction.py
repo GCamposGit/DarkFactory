@@ -194,6 +194,43 @@ def test_focal_test_failure_rejects_before_the_official_gate_runs(tmp_path: Path
     assert "--resume-delivery USR-245" in captured.err
 
 
+def test_focal_sweep_is_dropped_when_a_changed_module_is_too_widely_imported(tmp_path: Path) -> None:
+    """USR-188: a foundational module (e.g. `routing.py`) is genuinely imported by dozens of test
+    files; sweeping all of them in made the pre-check run well past FOCAL_TEST_TIMEOUT_S on a
+    memory-constrained worker (xdist capped to 1 worker). Past FOCAL_SWEEP_MAX_EXTRA_FILES matches, the
+    sweep is dropped entirely rather than trimmed arbitrarily, keeping only the changed test files
+    themselves -- the official gate downstream remains the complete, final check either way."""
+    tests_dir = tmp_path / "tests"
+    tests_dir.mkdir()
+    changed_test = tests_dir / "test_widely_used.py"
+    changed_test.write_text("def test_noop():\n    pass\n", encoding="utf-8")
+    for i in range(run_ticket.FOCAL_SWEEP_MAX_EXTRA_FILES + 1):
+        (tests_dir / f"test_dependent_{i}.py").write_text(
+            "from core.line import widely_used\n", encoding="utf-8"
+        )
+
+    targets = run_ticket._focal_test_targets(
+        tmp_path, ["core/line/widely_used.py", "tests/test_widely_used.py"]
+    )
+
+    assert targets == ["tests/test_widely_used.py"]
+
+
+def test_focal_sweep_is_kept_under_the_cap(tmp_path: Path) -> None:
+    """The counterpart of the previous test: a module referenced by a small, legitimate number of
+    tests still gets its dependents swept in."""
+    tests_dir = tmp_path / "tests"
+    tests_dir.mkdir()
+    for i in range(run_ticket.FOCAL_SWEEP_MAX_EXTRA_FILES):
+        (tests_dir / f"test_dependent_{i}.py").write_text(
+            "from core.line import narrow_module\n", encoding="utf-8"
+        )
+
+    targets = run_ticket._focal_test_targets(tmp_path, ["core/line/narrow_module.py"])
+
+    assert len(targets) == run_ticket.FOCAL_SWEEP_MAX_EXTRA_FILES
+
+
 def test_focal_test_fix_on_second_pass_reaches_merge_without_resume_delivery(tmp_path: Path, capsys) -> None:
     """A fake agent that leaves a broken test on the first pass and fixes it on the second: the ticket
     reaches merge from a single `resume_delivery` call, with no `--resume-delivery` round trip (AC3)."""

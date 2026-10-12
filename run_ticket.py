@@ -83,6 +83,13 @@ GATE_FIX_ATTEMPTS = 2
 # Upper bound of the focal-test pre-check (fast, scoped to the changed files' tests), well under
 # GATE_TIMEOUT_S since it exists to catch an unverified agent turn before paying for the full gate.
 FOCAL_TEST_TIMEOUT_S = 300.0
+# Cap on test files the "mentions a changed module" sweep in `_focal_test_targets` may add beyond the
+# changed test files themselves (USR-188). A foundational module (e.g. `routing.py`, `run_ticket.py`)
+# is genuinely imported by dozens of test files; running all of them serially-equivalent (this machine's
+# memory caps xdist to 1 worker, see `_worker_capacity`) blew well past FOCAL_TEST_TIMEOUT_S. Past the
+# cap, the sweep is dropped entirely rather than trimmed arbitrarily — the pre-check stays fast (just
+# the changed test files) and the official gate remains the final, complete word either way.
+FOCAL_SWEEP_MAX_EXTRA_FILES = 15
 # Harnesses the in-place fix agent (USR-245) may be routed to; same set `_run()` offers development.
 _DEV_HOST_CAPS: tuple[str, ...] = ("harness:claude", "harness:codex", "harness:grok", "harness:antigravity")
 
@@ -495,10 +502,16 @@ def _focal_test_targets(cwd: Path, changed_paths: list[str]) -> list[str]:
     """Test files to run as a fast pre-check before the official gate (USR-245).
 
     Includes every changed test file verbatim, plus any OTHER test file under ``tests/`` whose source
-    mentions a changed (non-test) module's filename: a module a ticket edits can break a test it never
-    touches (the USR-201 rescue: 3 tests broke that the agent never looked at). Best-effort by design —
-    a module whose name is too generic to search for, or a test with no textual reference, is simply not
-    found; the full official gate downstream is still the final word.
+    actually imports or references a changed (non-test) module: a module a ticket edits can break a
+    test it never touches (the USR-201 rescue: 3 tests broke that the agent never looked at).
+    Best-effort by design — a module whose name is too generic to search for, or a test with no textual
+    reference, is simply not found; the full official gate downstream is still the final word.
+
+    The reference must look like an import or an attribute/call on the module (``import stem``,
+    ``stem import ...``, ``stem.attr``, ``stem(...)``), not just the bare word anywhere in the file:
+    a stem like ``routing`` or ``run_ticket`` is also plain prose/an unrelated identifier, and a naive
+    whole-file word search swept in dozens of unrelated test files (USR-188: 61 targets for a 2-module
+    change, serialized well past ``FOCAL_TEST_TIMEOUT_S``).
     """
     targets: set[str] = set()
     module_stems: list[str] = []
@@ -517,14 +530,21 @@ def _focal_test_targets(cwd: Path, changed_paths: list[str]) -> list[str]:
     if module_stems:
         tests_dir = cwd / "tests"
         if tests_dir.is_dir():
-            pattern = re.compile(r"\b(" + "|".join(re.escape(s) for s in dict.fromkeys(module_stems)) + r")\b")
+            stem_patterns = [
+                rf"\bimport\s+{re.escape(s)}\b|\b{re.escape(s)}\s+import\b|\b{re.escape(s)}\.\w|\b{re.escape(s)}\("
+                for s in dict.fromkeys(module_stems)
+            ]
+            pattern = re.compile("(?:" + "|".join(stem_patterns) + ")")
+            swept: set[str] = set()
             for test_file in tests_dir.rglob("test_*.py"):
                 try:
                     text = test_file.read_text(encoding="utf-8", errors="replace")
                 except OSError:
                     continue
                 if pattern.search(text):
-                    targets.add(str(test_file.relative_to(cwd)).replace("\\", "/"))
+                    swept.add(str(test_file.relative_to(cwd)).replace("\\", "/"))
+            if len(swept - targets) <= FOCAL_SWEEP_MAX_EXTRA_FILES:
+                targets |= swept
     return sorted(targets)
 
 
@@ -533,14 +553,22 @@ def _run_focal_tests(cwd: Path, targets: list[str]) -> Optional[Any]:
 
     A ``DistilledTestReport`` (core.harness.test_subagent) on success or failure; never raises — a
     broken pre-check must never block the real gate from having the final word.
+
+    Runs under pytest-xdist (``-n auto --dist worksteal``), same as the official gate's parallel step
+    (`harness.config.json`), excluding ``-m serial`` tests the same way: those assume exclusive access
+    (shared state, fixed ports, the suite lock) and the official gate re-checks them anyway, so the
+    pre-check only needs the parallel-safe majority. Without this, `TestSubagentEngine.execute_local`
+    runs plain single-process pytest, and even a handful of target files can exceed
+    ``FOCAL_TEST_TIMEOUT_S`` serially (USR-188).
     """
     if not targets:
         return None
     from core.harness.test_subagent import TestExecutionInstruction, TestSubagentEngine
 
     engine = TestSubagentEngine(project_root=cwd)
+    extra_args = ["-n", "auto", "--dist", "worksteal", "-m", "not serial", *targets]
     instruction = TestExecutionInstruction(
-        target=None, extra_args=list(targets), timeout_seconds=int(FOCAL_TEST_TIMEOUT_S), worker_mode="local"
+        target=None, extra_args=extra_args, timeout_seconds=int(FOCAL_TEST_TIMEOUT_S), worker_mode="local"
     )
     try:
         return engine.execute_local(instruction)
