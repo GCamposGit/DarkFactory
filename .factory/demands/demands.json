@@ -4898,7 +4898,7 @@
       "user-demand",
       "v0-critico"
     ],
-    "problem_statement": "Em 08-09/10/2026, durante o USR-168, runner.py --quick falhou duas vezes com STEP_FAIL unit_and_integration_tests_parallel (timeout 1502s e 1506s, TEST_COUNT 0, exit 124): o worker do Desktop (http://100.78.181.90:8080) respondia /health com busy=False mas ficava silencioso por mais de 180s no passo paralelo (mesmo sintoma do USR-141, ja concluido) e a execucao local caiu na fila do suite_lock atras de outros harnesses. Com --local e host livre, a mesma arvore passou: 3600 passed em 1439s no passo paralelo, ou seja 96% do limite de 1500s, sem margem. O limite fixo e o tempo da suite estao no mesmo patamar, entao qualquer concorrencia reprova uma arvore valida.",
+    "problem_statement": "Em 08-09/10/2026, durante o USR-168, runner.py --quick falhou duas vezes com STEP_FAIL unit_and_integration_tests_parallel (timeout 1502s e 1506s, TEST_COUNT 0, exit 124): o worker do Desktop (http://100.78.181.90:8080) respondia /health com busy=False mas ficava silencioso por mais de 180s no passo paralelo (mesmo sintoma do USR-141, ja concluido) e a execucao local caiu na fila do suite_lock atras de outros harnesses. Com --local e host livre, a mesma arvore passou: 3600 passed em 1439s no passo paralelo, ou seja 96% do limite de 1500s, sem margem. O limite fixo e o tempo da suite estao no mesmo patamar, entao qualquer concorrencia reprova uma arvore valida.\n\nNOVA EVIDENCIA (12/10/2026, primeiro lancamento unico da V0, USR-239): o worker do Desktop respondia a /health em 09:06 e ficou inacessivel depois (timeout de 25 s as 13:04; um sondagem anterior das 09:05 ja falhara com timeout de 8 s e ping de ~260 ms). O portao do run_ticket USR-239 foi para execucao LOCAL no Notebook (RAM livre ~4 GiB de 31,7 GiB com varias sessoes) e o passo paralelo expirou em exatamente 3000 s (09:28:42 a 10:18:42), codigo 124. A retomada pela outra sessao as 12:22 tambem rodou o portao local (pytest tests -n 6 no Notebook).",
     "core_journey": [
       "Em 08-09/10/2026, durante o USR-168, runner.py --quick falhou duas vezes com STEP_FAIL unit_and_integration_tests_parallel (timeout 1502s e 1506s, TEST_COUNT 0, exit 124): o worker do Desktop (http://100.78.181.90:8080) respondia /health com busy=False mas ficava silencioso por mais de 180s no passo paralelo (mesmo sintoma do USR-141, ja concluido) e a execucao local caiu na fila do suite_lock atras de outros harnesses. Com --local e host livre, a mesma arvore passou: 3600 passed em 1439s no passo paralelo, ou seja 96% do limite de 1500s, sem margem. O limite fixo e o tempo da suite estao no mesmo patamar, entao qualquer concorrencia reprova uma arvore valida."
     ],
@@ -4914,7 +4914,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-08T22:27:27.403290Z",
-    "updated_at": "2026-10-11T17:49:17.206876Z"
+    "updated_at": "2026-10-12T11:06:09.342744Z"
   },
   {
     "id": "USR-169",
@@ -7424,5 +7424,40 @@
     "dependencies": [],
     "created_at": "2026-10-12T06:47:19.417120Z",
     "updated_at": "2026-10-12T06:47:19.417120Z"
+  },
+  {
+    "id": "USR-249",
+    "project_id": "darkfac",
+    "title": "Autocorrecao do portao (USR-245) reinvoca o agente quando o portao falha por timeout ou infraestrutura, e o pre-teste focal que expira perde a saida parcial",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand",
+      "v0-critico",
+      "bug"
+    ],
+    "problem_statement": "Em 12/10/2026 o primeiro lancamento unico da V0, 'run_ticket USR-239', terminou com codigo 124 depois de 98 min (09:08 a 10:46). Cronologia: o agente concluiu em 18,5 min; o pre-teste focal passou em 3,7 s (27 testes); o portao oficial rodou em execucao LOCAL no Notebook (RAM livre ~4 GiB de 31,7; o worker do Desktop estava inacessivel) de 09:28:42 a 10:18:42, exatamente 3000 s, e reprovou por TIMEOUT, nao por teste. Mesmo assim o laco de autocorrecao do USR-245 reinvocou o agente duas vezes (10:18 e 10:33), e cada reinvocacao foi seguida de um pytest focal que ficou 600 s sem imprimir nada ([TIMEOUT EXPIRED], log de 21 bytes), ate esgotar as tentativas: cerca de 28 min extras sem nada para o agente consertar. A worktree foi preservada e outra sessao precisou retomar com --resume-delivery (resgate: zera o contador do V0). Esse mesmo pytest focal roda em 2 s com a maquina livre. Alem disso execute_local descarta a saida parcial quando o subprocesso expira (TimeoutExpired.stdout vem em bytes e o codigo so aceita str), entao nao ha como saber se o travamento foi lock de suite, falta de memoria ou outra coisa (core/harness/test_subagent.py e caminho protegido: correcao dessa parte por patch em docs/proposals e OA).",
+    "core_journey": [
+      "Em 12/10/2026 o primeiro lancamento unico da V0, 'run_ticket USR-239', terminou com codigo 124 depois de 98 min (09:08 a 10:46). Cronologia: o agente concluiu em 18,5 min; o pre-teste focal passou em 3,7 s (27 testes); o portao oficial rodou em execucao LOCAL no Notebook (RAM livre ~4 GiB de 31,7; o worker do Desktop estava inacessivel) de 09:28:42 a 10:18:42, exatamente 3000 s, e reprovou por TIMEOUT, nao por teste. Mesmo assim o laco de autocorrecao do USR-245 reinvocou o agente duas vezes (10:18 e 10:33), e cada reinvocacao foi seguida de um pytest focal que ficou 600 s sem imprimir nada ([TIMEOUT EXPIRED], log de 21 bytes), ate esgotar as tentativas: cerca de 28 min extras sem nada para o agente consertar. A worktree foi preservada e outra sessao precisou retomar com --resume-delivery (resgate: zera o contador do V0). Esse mesmo pytest focal roda em 2 s com a maquina livre. Alem disso execute_local descarta a saida parcial quando o subprocesso expira (TimeoutExpired.stdout vem em bytes e o codigo so aceita str), entao nao ha como saber se o travamento foi lock de suite, falta de memoria ou outra coisa (core/harness/test_subagent.py e caminho protegido: correcao dessa parte por patch em docs/proposals e OA)."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Quando o portao ou o pre-teste focal falha por timeout ou infraestrutura (codigo 124, [TIMEOUT EXPIRED], REMOTE_JOB_LOST, fallback local estourado), a autocorrecao NAO reinvoca o agente: o run termina na hora com causa explicita (gate_timeout ou focal_timeout), worktree preservada e o motivo no relatorio final",
+      "O relatorio final do run_ticket lista cada reinvocacao do agente e cada timeout com causa, duracao e limite aplicado, para o resgate saber o motivo sem abrir logs",
+      "Teste com portao e foco falsos cobre: timeout do portao (sem reinvocar), falha de teste (reinvoca e corrige) e timeout do foco (sem reinvocar)"
+    ],
+    "suggested_files": [
+      "run_ticket.py",
+      "tests/test_run_ticket_gate_self_correction.py"
+    ],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-12T11:06:09.271100Z",
+    "updated_at": "2026-10-12T11:06:09.271100Z"
   }
 ]
