@@ -333,13 +333,31 @@ def _snapshot_max_age(provider_dir: Path) -> float:
     return _SNAPSHOT_MAX_AGE_SECONDS
 
 
-def _default_quota_headroom(provider_id: str) -> Optional[float]:
+# Credential-free reason behind a `None` headroom (or "healthy" for a verified, current reading);
+# see `_quota_headroom_diagnosis`. Never carries raw probe output, tokens or account identifiers.
+QuotaDiagnosisReason = Literal[
+    "healthy", "stale_snapshot", "probe_unavailable", "suspicious_reading", "unknown"
+]
+
+
+def _quota_headroom_diagnosis(provider_id: str) -> tuple[Optional[float], QuotaDiagnosisReason]:
     """Real quota probe via core.usage.adapters reading providers. Fail-closed on stale/missing.
 
     A stale snapshot is not the end of the road: the adapter is asked again (`force=True`, a live probe
     or, for Codex inside the cloud container, the rate limits Codex logged in its own session files) and
-    only a result whose `checked_at` is within the max age counts. Anything older, unreadable or absent is
-    None, which `pick()` treats as unknown (fail-closed).
+    only a result whose `checked_at` is within the max age and passes the plausibility check counts.
+    Anything older, unreadable, suspicious or absent is `(None, reason)`, which `pick()` treats as
+    unknown (fail-closed); `reason` distinguishes, for observability only:
+      * "stale_snapshot" — nothing on disk was recent enough and no re-probe was warranted (the disk
+        reading itself was within the max age, or there was never one, but the adapter still came back
+        with evidence older than the max age).
+      * "probe_unavailable" — the disk snapshot WAS stale (or absent) so a re-probe was forced, but no
+        current, verifiable evidence came back (probe timeout/crash, disconnected, no meter exposed).
+      * "suspicious_reading" — a reading came back inside the max age but failed the plausibility check
+        (`ProviderAccountUsage.plausibility_flags`), so it is never trusted even though it is fresh.
+      * "unknown" — no adapter is registered for `provider_id`, or a defensive failure occurred.
+    A non-`None` headroom always comes with "healthy"; the caller (`pick()`) applies its own critical
+    threshold to decide whether "healthy" is actually usable.
     """
     try:
         from core.router.token_budget import _quota_headroom
@@ -366,20 +384,33 @@ def _default_quota_headroom(provider_id: str) -> Optional[float]:
                 logger.debug("Failed parsing checked_at for provider %s: %s", provider_id, e)
 
         for adapter in build_default_adapters(provider_dir):
-            if adapter.spec.provider_id == provider_id:
-                usage = adapter.inspect(force=snapshot_stale)
-                checked = _parse_iso_utc(usage.checked_at)
-                if checked is None or (datetime.now(timezone.utc) - checked).total_seconds() > max_age:
-                    logger.warning("Quota data for %s is older than %ss; failing closed", provider_id, max_age)
-                    return None
-                raw_headroom = _quota_headroom(usage)
-                if raw_headroom is None:
-                    return None
-                reserved = QuotaReservationManager().get_active_reserved_percent(provider_id)
-                return max(0.0, raw_headroom - reserved)
+            if adapter.spec.provider_id != provider_id:
+                continue
+            usage = adapter.inspect(force=snapshot_stale)
+            checked = _parse_iso_utc(usage.checked_at)
+            if checked is None or (datetime.now(timezone.utc) - checked).total_seconds() > max_age:
+                reason: QuotaDiagnosisReason = "probe_unavailable" if snapshot_stale else "stale_snapshot"
+                logger.warning(
+                    "Quota data for %s is older than %ss (%s); failing closed", provider_id, max_age, reason
+                )
+                return None, reason
+            raw_headroom = _quota_headroom(usage)
+            if raw_headroom is None:
+                reason = "suspicious_reading" if usage.plausibility_flags else "probe_unavailable"
+                logger.info("Quota for %s is not usable (%s); failing closed", provider_id, reason)
+                return None, reason
+            reserved = QuotaReservationManager().get_active_reserved_percent(provider_id)
+            return max(0.0, raw_headroom - reserved), "healthy"
     except Exception as exc:  # pragma: no cover - defensive
         logger.debug("Quota lookup failed for provider %s: %s", provider_id, exc)
-    return None
+    return None, "unknown"
+
+
+def _default_quota_headroom(provider_id: str) -> Optional[float]:
+    """Headroom-only view of `_quota_headroom_diagnosis`, matching the `quota_lookup` contract
+    callers inject into `pick()` (`Callable[[str], Optional[float]]`).
+    """
+    return _quota_headroom_diagnosis(provider_id)[0]
 
 
 # --------------------------------------------------------------------------
@@ -576,6 +607,15 @@ def pick(
 
         # Fail-closed: unknown quota or quota <= critical is strictly critical/ineligible
         is_critical = remaining is None or remaining <= critical_threshold
+        if is_critical and not cooling:
+            # Distinguish, for observability only (never credentials/raw probe output): a known
+            # reading under the floor ("critical") from one with no current, verifiable evidence at
+            # all ("unknown" — stale snapshot, probe unavailable, or a suspicious reading; see
+            # `_quota_headroom_diagnosis` for the exact reason when the default lookup is in play).
+            logger.info(
+                "pick: harness %s quota is %s for stage %s (remaining=%s, floor=%.1f)",
+                harness, "critical" if remaining is not None else "unknown", stage, remaining, critical_threshold,
+            )
 
         if (harness, model) == extra_candidate:
             # Outside the cascade: electable only by the operating-harness preference below. It takes no

@@ -12,6 +12,7 @@ from core.line.agent_cli import AgentResult
 from core.line.routing import (
     RoutingConfig,
     StageRoute,
+    _quota_headroom_diagnosis,
     default_config_path,
     load_routing_config,
     pick,
@@ -82,6 +83,138 @@ def test_pick_unknown_quota_counts_as_ineligible_fail_closed():
         cooldown_path=Path("does-not-exist.json"),
     )
     assert choice is None
+
+
+def _write_codex_snapshot(providers_dir: Path, *, checked_at: str, remaining_percent, **extra) -> None:
+    providers_dir.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "provider_id": "openai",
+        "provider_name": "OpenAI / Codex",
+        "family": "frontier",
+        "status": "connected",
+        "adapter": "codex_app_server",
+        "quota_supported": True,
+        "windows": [{"id": "secondary", "remaining_percent": remaining_percent, "window_duration_minutes": 10080}],
+        "message": "evidence",
+        "checked_at": checked_at,
+    }
+    payload.update(extra)
+    (providers_dir / "openai.json").write_text(json.dumps(payload), encoding="utf-8")
+
+
+def test_pick_development_fails_closed_on_stale_codex_snapshot_then_recovers_after_verified_read(
+    tmp_path, monkeypatch
+):
+    """USR-214: a Codex account the factory could never re-verify (old snapshot, probe unavailable)
+    must never be read as healthy quota, even though it reports 56% remaining; once a current,
+    verified reading lands, pick('development') elects Codex again."""
+    from core.usage.adapters import CodexAccountAdapter
+
+    monkeypatch.setenv("DARKFAC_STATE_ROOT", str(tmp_path))
+    monkeypatch.setattr(CodexAccountAdapter, "_find_codex", lambda self: None)
+    monkeypatch.setattr(CodexAccountAdapter, "_from_session_files", lambda self: None)
+
+    providers_dir = tmp_path / "usage" / "providers"
+    cfg = load_routing_config(default_config_path())
+
+    old_checked_at = (datetime.now(timezone.utc) - timedelta(days=40)).isoformat()
+    _write_codex_snapshot(providers_dir, checked_at=old_checked_at, remaining_percent=56.0)
+
+    stale_choice = pick(
+        "development", ["harness:codex"], config=cfg, quota_lookup=None, cooldown_path=Path("does-not-exist.json"),
+    )
+    assert stale_choice is None  # the 40-day-old reading is never trusted, even though it says 56% remaining
+
+    fresh_checked_at = datetime.now(timezone.utc).isoformat()
+    _write_codex_snapshot(providers_dir, checked_at=fresh_checked_at, remaining_percent=56.0)
+
+    fresh_choice = pick(
+        "development", ["harness:codex"], config=cfg, quota_lookup=None, cooldown_path=Path("does-not-exist.json"),
+    )
+    assert fresh_choice == ("codex", None)  # a validated current read above the 15% floor elects Codex again
+
+
+def test_pick_development_fails_closed_on_suspicious_codex_reading_even_when_fresh(tmp_path, monkeypatch):
+    """A fresh Codex reading that fails the plausibility check (USR-214, `record_probe`) must never be
+    read as healthy quota, even though its `checked_at` is current."""
+    from core.usage.adapters import CodexAccountAdapter
+
+    monkeypatch.setenv("DARKFAC_STATE_ROOT", str(tmp_path))
+    monkeypatch.setattr(CodexAccountAdapter, "_find_codex", lambda self: None)
+    monkeypatch.setattr(CodexAccountAdapter, "_from_session_files", lambda self: None)
+
+    providers_dir = tmp_path / "usage" / "providers"
+    _write_codex_snapshot(
+        providers_dir,
+        checked_at=datetime.now(timezone.utc).isoformat(),
+        remaining_percent=None,
+        status="degraded",
+        plausibility_flags=["secondary: used_percent decreased in same period"],
+    )
+
+    cfg = load_routing_config(default_config_path())
+    choice = pick(
+        "development", ["harness:codex"], config=cfg, quota_lookup=None, cooldown_path=Path("does-not-exist.json"),
+    )
+    assert choice is None
+
+
+def test_quota_headroom_diagnosis_distinguishes_stale_probe_unavailable_suspicious_and_healthy(
+    tmp_path, monkeypatch
+):
+    """USR-214 criterion: the result must tell apart a stale disk reading, a probe that could not be
+    reached despite being forced, a suspicious (implausible) reading, and a genuinely healthy one —
+    without ever carrying raw probe output or credentials."""
+    from core.usage.adapters import CodexAccountAdapter
+
+    from core.usage.models import AccountConnectionStatus, ProviderAccountUsage, ProviderFamily
+
+    monkeypatch.setenv("DARKFAC_STATE_ROOT", str(tmp_path))
+    providers_dir = tmp_path / "usage" / "providers"
+    monkeypatch.setattr(CodexAccountAdapter, "_find_codex", lambda self: None)
+
+    # No snapshot on disk at all (so no re-probe was forced), but the only other evidence this host
+    # has — Codex's own old session logs — is itself too old to trust: "stale_snapshot", not
+    # "probe_unavailable" (nothing was even attempted beyond reading what already existed).
+    old_session_checked_at = (datetime.now(timezone.utc) - timedelta(days=40)).isoformat()
+    monkeypatch.setattr(
+        CodexAccountAdapter,
+        "_from_session_files",
+        lambda self: ProviderAccountUsage(
+            provider_id="openai", provider_name="OpenAI / Codex", family=ProviderFamily.FRONTIER,
+            status=AccountConnectionStatus.CONNECTED, adapter="codex_session_files",
+            message="old session evidence", checked_at=old_session_checked_at,
+        ),
+    )
+    headroom, reason = _quota_headroom_diagnosis("openai")
+    assert (headroom, reason) == (None, "stale_snapshot")
+
+    # Now neither a snapshot nor usable session evidence exists, and the live probe is unreachable.
+    monkeypatch.setattr(CodexAccountAdapter, "_from_session_files", lambda self: None)
+    headroom, reason = _quota_headroom_diagnosis("openai")
+    assert (headroom, reason) == (None, "probe_unavailable")
+
+    # A verified, current reading: healthy, with the real headroom value.
+    _write_codex_snapshot(providers_dir, checked_at=datetime.now(timezone.utc).isoformat(), remaining_percent=56.0)
+    headroom, reason = _quota_headroom_diagnosis("openai")
+    assert (headroom, reason) == (56.0, "healthy")
+
+    # The same reading, but old: never trusted, and tagged as a stale snapshot rather than critical.
+    old_checked_at = (datetime.now(timezone.utc) - timedelta(days=40)).isoformat()
+    _write_codex_snapshot(providers_dir, checked_at=old_checked_at, remaining_percent=56.0)
+    headroom, reason = _quota_headroom_diagnosis("openai")
+    assert (headroom, reason) == (None, "probe_unavailable")  # disk was stale, so a re-probe was forced and failed
+
+    # A fresh reading that fails the plausibility check must not be confused with either of the above.
+    _write_codex_snapshot(
+        providers_dir,
+        checked_at=datetime.now(timezone.utc).isoformat(),
+        remaining_percent=None,
+        status="degraded",
+        plausibility_flags=["secondary: used_percent decreased in same period"],
+    )
+    headroom, reason = _quota_headroom_diagnosis("openai")
+    assert (headroom, reason) == (None, "suspicious_reading")
 
 
 def test_record_result_sets_cooldown_then_next_pick_uses_next_in_cascade(tmp_path):
