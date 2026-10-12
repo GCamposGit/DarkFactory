@@ -58,6 +58,7 @@ from core.line.routing import (
     load_routing_config,
     pick,
 )
+from core.line.stage_build import distill_log
 from core.usage.history import history_path, read_history
 from core.usage.ticket_cost import format_ticket_quota_summary, record_ticket_quota_cost
 from core.roadmap.models import DeliveryStatus
@@ -76,6 +77,14 @@ EXIT_CANCELLED = 130
 GATE_TIMEOUT_S = 7200.0
 # Upper bound of the delivery subprocess (gate, PR, CI wait, merge): same as the board's "presumed dead".
 DELIVERY_TIMEOUT_S = 6 * 3600.0
+# How many times the delivery phase reinvokes the agent in-place after a focal-test or gate failure,
+# before giving the ticket back with a resume command (USR-245). 2 reinvocations = 3 total attempts.
+GATE_FIX_ATTEMPTS = 2
+# Upper bound of the focal-test pre-check (fast, scoped to the changed files' tests), well under
+# GATE_TIMEOUT_S since it exists to catch an unverified agent turn before paying for the full gate.
+FOCAL_TEST_TIMEOUT_S = 300.0
+# Harnesses the in-place fix agent (USR-245) may be routed to; same set `_run()` offers development.
+_DEV_HOST_CAPS: tuple[str, ...] = ("harness:claude", "harness:codex", "harness:grok", "harness:antigravity")
 
 
 def estimate_ticket_size(ticket: UserTicket) -> tuple[str, list[str]]:
@@ -458,6 +467,252 @@ def rebase_on_origin_main(cwd: Path) -> tuple[bool, list[str], str]:
     return False, conflict_files, rebase.stderr.strip() or rebase.stdout.strip()
 
 
+_TEST_FILE_RE = re.compile(r"(^|/)tests?/.*test_[^/]+\.py$|(^|/)test_[^/]+\.py$")
+
+
+def _implementation_diff_paths(cwd: Path) -> list[str]:
+    """Repo-relative paths this ticket touched: the committed diff since the rebased base, plus any
+    still-uncommitted edit (e.g. one just made by an in-place self-correction agent call, USR-245)."""
+    from core.git.autonomy import GitAutonomyManager, _run_git
+
+    base_ref = "origin/main"
+    if _run_git(["rev-parse", "--verify", base_ref], cwd=cwd).returncode != 0:
+        base_ref = "main"
+    committed = _run_git(["diff", "--name-only", f"{base_ref}...HEAD"], cwd=cwd)
+    committed_paths = (
+        [p.strip() for p in committed.stdout.splitlines() if p.strip()] if committed.returncode == 0 else []
+    )
+    dirty_paths = GitAutonomyManager(PROJECT_ROOT).changed_paths(cwd)
+    merged = list(dict.fromkeys([*committed_paths, *dirty_paths]))
+    return [p for p in merged if p != LEDGER_RELATIVE]
+
+
+def _focal_test_targets(cwd: Path, changed_paths: list[str]) -> list[str]:
+    """Test files to run as a fast pre-check before the official gate (USR-245).
+
+    Includes every changed test file verbatim, plus any OTHER test file under ``tests/`` whose source
+    mentions a changed (non-test) module's filename: a module a ticket edits can break a test it never
+    touches (the USR-201 rescue: 3 tests broke that the agent never looked at). Best-effort by design —
+    a module whose name is too generic to search for, or a test with no textual reference, is simply not
+    found; the full official gate downstream is still the final word.
+    """
+    targets: set[str] = set()
+    module_stems: list[str] = []
+    for raw in changed_paths:
+        if not raw.endswith(".py"):
+            continue
+        normalized = raw.replace("\\", "/")
+        if _TEST_FILE_RE.search(normalized):
+            if (cwd / normalized).is_file():
+                targets.add(normalized)
+            continue
+        stem = Path(normalized).stem
+        if stem and stem != "__init__":
+            module_stems.append(stem)
+
+    if module_stems:
+        tests_dir = cwd / "tests"
+        if tests_dir.is_dir():
+            pattern = re.compile(r"\b(" + "|".join(re.escape(s) for s in dict.fromkeys(module_stems)) + r")\b")
+            for test_file in tests_dir.rglob("test_*.py"):
+                try:
+                    text = test_file.read_text(encoding="utf-8", errors="replace")
+                except OSError:
+                    continue
+                if pattern.search(text):
+                    targets.add(str(test_file.relative_to(cwd)).replace("\\", "/"))
+    return sorted(targets)
+
+
+def _run_focal_tests(cwd: Path, targets: list[str]) -> Optional[Any]:
+    """Run pytest scoped to `targets`; `None` when there is nothing to focus on (USR-245).
+
+    A ``DistilledTestReport`` (core.harness.test_subagent) on success or failure; never raises — a
+    broken pre-check must never block the real gate from having the final word.
+    """
+    if not targets:
+        return None
+    from core.harness.test_subagent import TestExecutionInstruction, TestSubagentEngine
+
+    engine = TestSubagentEngine(project_root=cwd)
+    instruction = TestExecutionInstruction(
+        target=None, extra_args=list(targets), timeout_seconds=int(FOCAL_TEST_TIMEOUT_S), worker_mode="local"
+    )
+    try:
+        return engine.execute_local(instruction)
+    except Exception as exc:  # noqa: BLE001 - a broken focal pre-check must never block the real gate
+        logger.warning("Focal test pre-check could not run in %s: %s", cwd, exc)
+        return None
+
+
+def _build_gate_fix_prompt(ticket: UserTicket, stage_label: str, feedback: str) -> str:
+    return (
+        f"Voce e o agente de desenvolvimento autonomo da DarkFac corrigindo o ticket {ticket.id} "
+        f"('{ticket.title}') depois que a fase de entrega reprovou nos {stage_label}.\n"
+        f"NAO encerre o turno esperando uma tarefa em segundo plano (ex.: 'vou esperar o pytest terminar'): "
+        f"a correcao so conta como concluida quando os testes abaixo passarem de fato, de forma sincrona, "
+        f"antes de voce terminar o turno.\n\n"
+        f"## Log destilado da falha\n{feedback}\n\n"
+        f"Corrija o codigo e/ou os testes nesta mesma worktree (nao crie outra, nao faca checkout de outra "
+        f"branch). Nao faca commit, push nem merge: a fabrica entrega.\n"
+    )
+
+
+def _invoke_fix_agent(
+    target_worktree: Path, ticket: UserTicket, stage_label: str, feedback: str
+) -> Optional[AgentResult]:
+    """Reinvoke the development agent in-place with the distilled failure, for self-correction (USR-245).
+
+    Best-effort: if no route is available or the call itself fails, the next focal/gate attempt simply
+    fails again for the same reason, which the caller already treats as an (eventually final) failure.
+    """
+    route = pick("development", list(_DEV_HOST_CAPS), mode=DEVELOPMENT_MODE)
+    if route is None:
+        logger.warning("No route available to reinvoke the agent for %s after a delivery failure", ticket.id)
+        return None
+    harness, model = route
+    cli_model, cli_effort = harness_cli_pin(harness, model, stage="development", config=load_routing_config())
+    headroom = inspect_quotas().get(harness, {}).get("headroom")
+    request = AgentRequest(
+        prompt=headless_development_preamble(harness, headroom) + _build_gate_fix_prompt(ticket, stage_label, feedback),
+        cwd=target_worktree,
+        mode=DEVELOPMENT_MODE,
+        harness=harness,
+        model=cli_model,
+        effort=cli_effort,
+        timeout_s=1800,
+    )
+    try:
+        return run_agent(request)
+    except Exception as exc:  # noqa: BLE001 - a crashed correction attempt must not crash the delivery
+        logger.warning("Fix agent invocation failed for %s: %s", ticket.id, exc)
+        return None
+
+
+def _run_gate_with_self_correction(
+    target_worktree: Path,
+    current_branch: str,
+    current_sha: str,
+    ticket: UserTicket,
+    resume_cmd: str,
+    skip_validation: bool,
+    as_json: bool,
+    return_result: bool,
+    progress: ProgressPublisher,
+    cancelled_payload: Any,
+) -> Any:
+    """Focal tests + the official gate, self-correcting up to GATE_FIX_ATTEMPTS times (USR-245).
+
+    A headless agent that ends its turn deferring verification to a background task ("vou esperar o
+    pytest em segundo plano") never gets to see the gate fail before the ticket is handed back to the
+    operator (the USR-201 rescue). The focal pre-check runs regardless of `--skip-validation` (it is
+    the new, fast, mandatory check); `--skip-validation` only still skips the expensive official gate.
+
+    Returns `None` on success (the caller proceeds to commit/push), or the usual failure payload/exit
+    code once every attempt is exhausted.
+    """
+    last_output = ""
+    last_cause = "gate_failed"
+    last_exit_code = 1
+
+    for attempt in range(GATE_FIX_ATTEMPTS + 1):
+        if _cancelled():
+            return cancelled_payload()
+
+        changed = _implementation_diff_paths(target_worktree)
+        focal_targets = _focal_test_targets(target_worktree, changed)
+        focal_report = _run_focal_tests(target_worktree, focal_targets) if focal_targets else None
+
+        if focal_report is not None and not focal_report.success:
+            last_output = focal_report.agent_feedback
+            last_cause = "focal_tests_failed"
+            last_exit_code = focal_report.exit_code or 1
+            if not as_json:
+                print(
+                    f"[ERRO NOS TESTES FOCAIS]: {focal_report.concise_summary}\n{focal_report.agent_feedback}",
+                    file=sys.stderr,
+                )
+            if attempt >= GATE_FIX_ATTEMPTS:
+                break
+            progress.phase(
+                "gate", "failed",
+                f"testes focais reprovados (tentativa {attempt + 1}/{GATE_FIX_ATTEMPTS + 1}): "
+                f"{focal_report.concise_summary}",
+                cause="focal_tests_failed",
+            )
+            if not as_json:
+                print(f"\n--> Reinvocando o agente na mesma worktree para corrigir ({', '.join(focal_targets)})...")
+            _invoke_fix_agent(target_worktree, ticket, "testes focais dos arquivos alterados", focal_report.agent_feedback)
+            if _cancelled():
+                return cancelled_payload()
+            continue
+
+        if _cancelled():
+            return cancelled_payload()
+
+        if skip_validation:
+            progress.phase("gate", "skipped", "validacao pulada (--skip-validation)")
+            return None
+
+        progress.phase("gate", "running", "portao oficial (core/harness/runner.py --quick)")
+        if not as_json:
+            print("\n--> Executando portão oficial da fábrica (python core/harness/runner.py --quick)...")
+        # Bounded runner: a cancellation (USR-166) kills the gate's whole process tree.
+        gate_res = _run_bounded(
+            [sys.executable, str(target_worktree / "core" / "harness" / "runner.py"), "--quick"],
+            cwd=target_worktree,
+            timeout_s=GATE_TIMEOUT_S,
+        )
+        if getattr(gate_res, "cancelled", False) is True or _cancelled():
+            return cancelled_payload()
+
+        if gate_res.returncode == 0:
+            progress.phase("gate", "succeeded", "portao oficial aprovado")
+            if not as_json:
+                print("[+] Portão oficial aprovado com sucesso: [HARNESS_PASS]!")
+            return None
+
+        last_output = f"{gate_res.stdout}\n{gate_res.stderr}"
+        last_cause = "gate_failed"
+        last_exit_code = gate_res.returncode
+        if not as_json:
+            print(f"[ERRO NO PORTÃO OFICIAL]:\n{gate_res.stdout}\n{gate_res.stderr}", file=sys.stderr)
+        if attempt >= GATE_FIX_ATTEMPTS:
+            break
+        progress.phase(
+            "gate", "failed",
+            f"portao oficial falhou (tentativa {attempt + 1}/{GATE_FIX_ATTEMPTS + 1}, codigo {gate_res.returncode}): "
+            f"{redacted_head((gate_res.stdout or gate_res.stderr or '')[-600:], 300)}",
+            cause="gate_failed",
+        )
+        if not as_json:
+            print("\n--> Reinvocando o agente na mesma worktree com o log destilado do portao...")
+        _invoke_fix_agent(target_worktree, ticket, "portao oficial (python core/harness/runner.py --quick)", distill_log(last_output))
+        if _cancelled():
+            return cancelled_payload()
+
+    print(f"[i] Worktree preservada para diagnóstico: {target_worktree}", file=sys.stderr)
+    print(f"[i] Comando para retomar entrega após correção:\n  {resume_cmd}", file=sys.stderr)
+    progress.phase(
+        "gate", "failed",
+        f"{last_cause} apos {GATE_FIX_ATTEMPTS + 1} tentativa(s): {redacted_head(last_output[-600:], 300)}",
+        cause=last_cause,
+    )
+    gate_payload = {
+        "exit_code": last_exit_code,
+        "ok": False,
+        "cause": last_cause,
+        "ticket_id": ticket.id,
+        "branch": current_branch,
+        "current_sha": current_sha,
+        "worktree": str(target_worktree),
+        "resume_command": resume_cmd,
+    }
+    if as_json and not return_result:
+        print(json.dumps(gate_payload, indent=2, ensure_ascii=False))
+    return gate_payload if return_result else gate_payload["exit_code"]
+
+
 def _cancelled() -> bool:
     """True when the run in this process was cancelled (control file, signal or the line's token)."""
     token = cancellation.current_token()
@@ -802,51 +1057,15 @@ def _deliver_worktree(
 
     current_sha = git_mgr.get_current_sha(target_worktree)
 
-    # 3. Official Validation Gate
+    # 3. Focal tests + Official Validation Gate, with in-place self-correction (USR-245)
     if _cancelled():
         return cancelled_payload()
-    if skip_validation:
-        progress.phase("gate", "skipped", "validacao pulada (--skip-validation)")
-    else:
-        progress.phase("gate", "running", "portao oficial (core/harness/runner.py --quick)")
-        if not as_json:
-            print("\n--> Executando portão oficial da fábrica (python core/harness/runner.py --quick)...")
-        # Bounded runner: a cancellation (USR-166) kills the gate's whole process tree.
-        gate_res = _run_bounded(
-            [sys.executable, str(target_worktree / "core" / "harness" / "runner.py"), "--quick"],
-            cwd=target_worktree,
-            timeout_s=GATE_TIMEOUT_S,
-        )
-        if getattr(gate_res, "cancelled", False) is True or _cancelled():
-            return cancelled_payload()
-        if gate_res.returncode != 0:
-            print(f"[ERRO NO PORTÃO OFICIAL]:\n{gate_res.stdout}\n{gate_res.stderr}", file=sys.stderr)
-            print(f"[i] Worktree preservada para diagnóstico: {target_worktree}", file=sys.stderr)
-            print(f"[i] Comando para retomar entrega após correção:\n  {resume_cmd}", file=sys.stderr)
-            progress.phase(
-                "gate",
-                "failed",
-                f"portao oficial falhou (codigo {gate_res.returncode}): "
-                f"{redacted_head((gate_res.stdout or gate_res.stderr or '')[-600:], 300)}",
-                cause="gate_failed",
-            )
-            gate_payload = {
-                "exit_code": gate_res.returncode,
-                "ok": False,
-                "cause": "gate_failed",
-                "ticket_id": ticket.id,
-                "branch": current_branch,
-                "current_sha": current_sha,
-                "worktree": str(target_worktree),
-                "resume_command": resume_cmd,
-            }
-            if as_json and not return_result:
-                print(json.dumps(gate_payload, indent=2, ensure_ascii=False))
-            return gate_payload if return_result else gate_res.returncode
-
-        progress.phase("gate", "succeeded", "portao oficial aprovado")
-        if not as_json:
-            print("[+] Portão oficial aprovado com sucesso: [HARNESS_PASS]!")
+    gate_outcome = _run_gate_with_self_correction(
+        target_worktree, current_branch, current_sha, ticket, resume_cmd,
+        skip_validation, as_json, return_result, progress, cancelled_payload,
+    )
+    if gate_outcome is not None:
+        return gate_outcome
 
     # 4. Autonomous Git Lifecycle Completion (PR, merge, cleanup)
     if _cancelled():
