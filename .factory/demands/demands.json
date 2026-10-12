@@ -7351,5 +7351,78 @@
     "dependencies": [],
     "created_at": "2026-10-12T01:41:30.643038Z",
     "updated_at": "2026-10-12T04:14:00.359542Z"
+  },
+  {
+    "id": "USR-246",
+    "project_id": "darkfac",
+    "title": "Alerta de PR de registro preso grava a OA no checkout compartilhado sem commit e o proximo run_ticket recusa com SharedCheckoutDirty",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand",
+      "v0-critico",
+      "bug"
+    ],
+    "problem_statement": "Em 12/10/2026 o PR de registro #317 (kind=queue) ficou preso por CI vermelho na base e o mecanismo do USR-238 gravou a OA-QR-317 em .factory/owner_actions/owner_actions.json DENTRO do checkout compartilhado (C:/dev/DarkFac), sem commit: git status mostra o arquivo modificado (29 linhas). Esse prefixo (.factory/owner_actions/) nao esta em VOLATILE_STATE_PREFIXES de run_ticket.py, entao shared_checkout_dirty_paths faz o proximo 'run_ticket <ID>' abortar com SharedCheckoutDirty (ou exige --allow-dirty-shared-checkout): o alerta que deveria ajudar vira a causa de um resgate manual, e o vigia de lancamento tambem recusa. A OA tambem nunca chega a main, entao o Hub nao a mostra.",
+    "core_journey": [
+      "Em 12/10/2026 o PR de registro #317 (kind=queue) ficou preso por CI vermelho na base e o mecanismo do USR-238 gravou a OA-QR-317 em .factory/owner_actions/owner_actions.json DENTRO do checkout compartilhado (C:/dev/DarkFac), sem commit: git status mostra o arquivo modificado (29 linhas). Esse prefixo (.factory/owner_actions/) nao esta em VOLATILE_STATE_PREFIXES de run_ticket.py, entao shared_checkout_dirty_paths faz o proximo 'run_ticket <ID>' abortar com SharedCheckoutDirty (ou exige --allow-dirty-shared-checkout): o alerta que deveria ajudar vira a causa de um resgate manual, e o vigia de lancamento tambem recusa. A OA tambem nunca chega a main, entao o Hub nao a mostra."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "A OA de PR de registro preso e gravada por um caminho que nao suja o checkout compartilhado (PR de ledger com commit autonomo, ou store fora da arvore rastreada) e chega ao backlog visivel no Hub",
+      "Com uma OA da fila aberta, run_ticket <ID> a partir do checkout compartilhado limpo nao e bloqueado por SharedCheckoutDirty",
+      "Teste cobre: PR preso gera a OA sem sujar o checkout; PR mergeado depois fecha a OA sozinha"
+    ],
+    "suggested_files": [
+      "core/git/autonomy.py",
+      "run_ticket.py",
+      "core/owner_actions/"
+    ],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-12T06:47:09.786311Z",
+    "updated_at": "2026-10-12T06:47:09.786311Z"
+  },
+  {
+    "id": "USR-247",
+    "project_id": "darkfac",
+    "title": "main vermelha por horas sem alerta: falha do CI de push na main precisa abrir alerta unico e fechar sozinho quando voltar a verde",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand",
+      "v0-critico",
+      "bug"
+    ],
+    "problem_statement": "Em 12/10/2026 a main ficou vermelha do merge do #316 (USR-245, ~01:30) ate o hotfix #318 (06:44): o job main-validation (ubuntu-latest) falhou em tests/test_run_ticket_gate_self_correction.py (.pyc obsoleto, flaky por tempo) e nada avisou ninguem; so foi percebido porque um PR de registro caiu com base_red=True. Antes, em 11/10, a bomba-relogio de tests/test_line_live.py deixou a main vermelha a partir de 15:00 UTC pelo mesmo motivo (silencio). O V0 exige main verde e falha sempre explicita (nunca em silencio); hoje so o redeploy consulta o estado da main (CHECK-MAIN) e so quando alguem o roda.",
+    "core_journey": [
+      "Em 12/10/2026 a main ficou vermelha do merge do #316 (USR-245, ~01:30) ate o hotfix #318 (06:44): o job main-validation (ubuntu-latest) falhou em tests/test_run_ticket_gate_self_correction.py (.pyc obsoleto, flaky por tempo) e nada avisou ninguem; so foi percebido porque um PR de registro caiu com base_red=True. Antes, em 11/10, a bomba-relogio de tests/test_line_live.py deixou a main vermelha a partir de 15:00 UTC pelo mesmo motivo (silencio). O V0 exige main verde e falha sempre explicita (nunca em silencio); hoje so o redeploy consulta o estado da main (CHECK-MAIN) e so quando alguem o roda."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Quando o CI de push da main termina vermelho, abre-se um unico alerta critico (item no backlog de acoes do owner e mensagem no Telegram ops) com o run, o job e os testes que falharam, sem repetir a cada commit",
+      "O alerta fecha sozinho quando um CI de push seguinte da main termina verde",
+      "Teste com gh falso cobre: vermelho gera um alerta, vermelho repetido nao duplica, verde fecha"
+    ],
+    "suggested_files": [
+      "core/git/ci_checks.py",
+      "scripts/dokploy_redeploy.py",
+      "core/owner_actions/",
+      "core/integrations/telegram_status.py"
+    ],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-12T06:47:19.417120Z",
+    "updated_at": "2026-10-12T06:47:19.417120Z"
   }
 ]
