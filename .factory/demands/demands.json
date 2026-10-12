@@ -7144,7 +7144,7 @@
       "user-demand",
       "v0-critico"
     ],
-    "problem_statement": "Em 11/10/2026 a suite completa falhou em qualquer checagem (ubuntu e windows) a partir de 15:00 UTC: tests/test_line_live.py::test_api_line_live_includes_local_runs levantava StopIteration, porque RECENT_RUN_WINDOW e de 7 dias, a semente ancora em 2026-10-04 15:00 UTC e o teste usava o relogio real. Vermelhou a main e todo PR por cerca de 3 horas e bloqueou o registro de tickets e todo portao local; foi corrigido pelo PR 302 (fixture autouse), depois de uma correcao parcial anterior (PR 264, fechado) ter deixado este teste de fora. Impede a condicao 'main verde' do V0: outro teste com data fixa pode quebrar do mesmo modo durante a sequencia. Arquivos de teste com datetime(2026, 10, ...) fixo: test_artifact_retention, test_cloud_worker_active_loop, test_control_store_failure_evidence, test_line_acceptance, test_line_dogfood, test_line_live, test_line_owner_intake_expired, test_local_progress_visibility, test_local_progress, test_postgres_real_integration, test_run_ticket_cancel, test_telegram_status_usr197.",
+    "problem_statement": "Em 11/10/2026 a suite completa falhou em qualquer checagem (ubuntu e windows) a partir de 15:00 UTC: tests/test_line_live.py::test_api_line_live_includes_local_runs levantava StopIteration, porque RECENT_RUN_WINDOW e de 7 dias, a semente ancora em 2026-10-04 15:00 UTC e o teste usava o relogio real. Vermelhou a main e todo PR por cerca de 3 horas e bloqueou o registro de tickets e todo portao local; foi corrigido pelo PR 302 (fixture autouse), depois de uma correcao parcial anterior (PR 264, fechado) ter deixado este teste de fora. Impede a condicao 'main verde' do V0: outro teste com data fixa pode quebrar do mesmo modo durante a sequencia. Arquivos de teste com datetime(2026, 10, ...) fixo: test_artifact_retention, test_cloud_worker_active_loop, test_control_store_failure_evidence, test_line_acceptance, test_line_dogfood, test_line_live, test_line_owner_intake_expired, test_local_progress_visibility, test_local_progress, test_postgres_real_integration, test_run_ticket_cancel, test_telegram_status_usr197.\n\nCRITERIO 3 AFINADO (12/10/2026): a versao original (rodar os testes de dominio com o relogio avancado 30, 90 e 365 dias) exigia tres passadas da suite e um mecanismo de deslocar o tempo, acima do limite de 30 min do agente headless. Foi trocada por uma guarda estatica que impede a reincidencia da mesma classe de defeito (data fixa sem relogio fixado) em segundos; o criterio 2 continua exigindo que os arquivos levantados nao dependam da data de execucao.",
     "core_journey": [
       "Em 11/10/2026 a suite completa falhou em qualquer checagem (ubuntu e windows) a partir de 15:00 UTC: tests/test_line_live.py::test_api_line_live_includes_local_runs levantava StopIteration, porque RECENT_RUN_WINDOW e de 7 dias, a semente ancora em 2026-10-04 15:00 UTC e o teste usava o relogio real. Vermelhou a main e todo PR por cerca de 3 horas e bloqueou o registro de tickets e todo portao local; foi corrigido pelo PR 302 (fixture autouse), depois de uma correcao parcial anterior (PR 264, fechado) ter deixado este teste de fora. Impede a condicao 'main verde' do V0: outro teste com data fixa pode quebrar do mesmo modo durante a sequencia. Arquivos de teste com datetime(2026, 10, ...) fixo: test_artifact_retention, test_cloud_worker_active_loop, test_control_store_failure_evidence, test_line_acceptance, test_line_dogfood, test_line_live, test_line_owner_intake_expired, test_local_progress_visibility, test_local_progress, test_postgres_real_integration, test_run_ticket_cancel, test_telegram_status_usr197."
     ],
@@ -7153,7 +7153,7 @@
     "acceptance_criteria": [
       "Levantamento dos testes que misturam data fixa com codigo que le o relogio real (janelas de dias, TTL, idade), com a lista registrada no ticket",
       "Cada um passa a fixar o relogio ou a usar datas relativas ao agora; nenhum depende da data de execucao",
-      "Teste guarda roda os testes de dominio com o relogio avancado em 30, 90 e 365 dias e prova que nenhum quebra"
+      "Teste guarda estatico (analisa o codigo com ast, sem executar os outros testes, em menos de 5 s) falha para todo arquivo de tests/ que cria data fixa de 2026 (datetime/date com ano 2026 ou string ISO 2026-) e nao fixa o relogio no mesmo arquivo (monkeypatch de _utc_now ou do relogio, freezer, ou now= passado explicitamente), a menos que conste numa lista de excecoes versionada com o motivo; a mensagem de falha aponta arquivo e linha"
     ],
     "suggested_files": [
       "tests/"
@@ -7161,7 +7161,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-11T20:27:42.065018Z",
-    "updated_at": "2026-10-11T20:27:42.065018Z"
+    "updated_at": "2026-10-12T06:22:15.741742Z"
   },
   {
     "id": "USR-240",
