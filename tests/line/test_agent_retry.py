@@ -166,6 +166,11 @@ def test_a_missing_error_kind_is_treated_as_transient() -> None:
     assert classify_failure(AgentResult(ok=False, text="", harness="codex", duration_s=0.1)) == "transient"
 
 
+def test_harness_infra_error_classifies_as_transient() -> None:
+    """USR-188: it repeats once, like a generic transient failure; the pin override is what differs."""
+    assert classify_failure(_fail("harness_infra_error", "codex")) == "transient"
+
+
 # --------------------------------------------------------------------------
 # Immediate exclusion: capability, binary, login
 # --------------------------------------------------------------------------
@@ -374,6 +379,53 @@ def test_a_pinned_harness_retries_transient_failures_but_never_falls_through() -
     assert agent.harnesses == ["codex", "codex", "codex"]
     assert sleeps == [30.0, 120.0]
     assert picker.calls == []  # an explicit --harness is honoured: no other route is ever picked
+
+
+def test_harness_infra_error_retries_once_then_falls_over_even_when_pinned() -> None:
+    """USR-188: Codex's own terminal/sandbox setup failed to start the call (helper_unknown_error).
+    Unlike a generic `crash`, this falls over to another harness even under an explicit --harness pin,
+    because the chosen harness's own tooling is broken, not its model, quota or the prompt."""
+    agent = _Agent(
+        {
+            "codex": [_fail("harness_infra_error", "codex"), _fail("harness_infra_error", "codex")],
+            "claude": [_ok("claude", "sonnet")],
+        }
+    )
+    picker = _Picker([("codex", None), ("claude", "sonnet")])
+    sleeps: list[float] = []
+
+    report = _run(agent, ("codex", None), picker, sleeps, pinned=True)
+
+    assert report.ok and report.route == ("claude", "sonnet")
+    assert agent.harnesses == ["codex", "codex", "claude"]  # one repeat, then fallback despite the pin
+    assert sleeps == [30.0]
+    assert picker.calls[-1]["exclude"] == {("codex", None)}
+
+
+def test_backoff_delay_retries_a_harness_infra_error_once_then_stops() -> None:
+    infra = _fail("harness_infra_error", "codex")
+    assert [backoff_delay(infra, n) for n in range(3)] == [30.0, None, None]
+
+
+def test_harness_infra_error_puts_the_harness_in_a_short_cooldown_through_record_result(
+    tmp_path: Path,
+) -> None:
+    cooldown = tmp_path / "cooldowns.json"
+    config = RoutingConfig(crash_cooldown_minutes=10)
+    agent = _Agent(
+        {"codex": [_fail("harness_infra_error", "codex"), _fail("harness_infra_error", "codex")]}
+    )
+
+    _run(
+        agent, ("codex", None), _Picker([("codex", None)]), [],
+        record_func=lambda result, config=None: record_result(result, config=config, cooldown_path=cooldown),
+        config=config, pinned=True,
+    )
+
+    entry = json.loads(cooldown.read_text(encoding="utf-8"))["codex"]
+    until = datetime.fromisoformat(entry["until"])
+    assert entry["reason"] == "harness_infra_error"
+    assert 5 < (until - datetime.now(timezone.utc)).total_seconds() / 60 <= 10
 
 
 def test_a_pinned_harness_that_cannot_work_fails_at_once() -> None:

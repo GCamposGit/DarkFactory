@@ -81,6 +81,11 @@ ErrorKind = Optional[
         # Grok cancelled an edit of a guard.py protected path (USR-205). Not a transient crash:
         # the same prompt cancels again, so the launcher stops and asks the owner.
         "protected_path",
+        # The harness's own CLI tooling (sandbox/terminal setup, not the model or the quota) failed to
+        # even start the call, e.g. Codex's `helper_unknown_error: setup refresh had errors` when the
+        # Codex Desktop app holds a lock on a sandboxed runtime binary (USR-188). Distinct from `crash`
+        # so the launcher can fail over to another harness even when this one was explicitly pinned.
+        "harness_infra_error",
     ]
 ]
 
@@ -226,6 +231,13 @@ def _stderr_tail(value: Any) -> str:
 # Error classification
 # --------------------------------------------------------------------------
 
+# USR-188: the Codex CLI's own terminal/sandbox setup failing to even start the call, independent of
+# the model, the quota or the prompt. Seen on Windows as `helper_unknown_error: setup refresh had errors`
+# when `codex-windows-sandbox-setup.exe` cannot refresh the ACL of a sandboxed runtime binary (e.g.
+# `node_repl.exe`) that the Codex Desktop app's own MCP server keeps open (os error 32). The CLI may
+# report this on stderr with a non-zero exit, or still exit 0 after giving up on the terminal, so the
+# text is checked before the exit code is trusted.
+_INFRA_ERROR_PATTERN = re.compile(r"helper_unknown_error|setup refresh had errors", re.IGNORECASE)
 _RATE_LIMIT_PATTERN = re.compile(
     r"rate[\s_-]?limit|usage[\s_-]?limit|\b429\b"
     # Claude Code subscription messages: "You've hit your session limit", "weekly limit reached",
@@ -321,6 +333,8 @@ def _classify_error(text: str) -> ErrorKind:
     """Classify a combined stdout/stderr/error-message blob into an ErrorKind."""
     if not text:
         return "crash"
+    if _INFRA_ERROR_PATTERN.search(text):
+        return "harness_infra_error"
     if _RATE_LIMIT_PATTERN.search(text):
         return "rate_limited"
     if _AUTH_PATTERN.search(text):
@@ -1170,6 +1184,14 @@ def _run_codex(req: AgentRequest) -> AgentResult:
     stderr = res.stderr
     combined = f"{output_text}\n{stderr}"
     diag: dict[str, Any] = {"exit_code": res.returncode, "stderr_tail": _stderr_tail(stderr)}
+    if _INFRA_ERROR_PATTERN.search(combined):
+        # USR-188: the CLI may still exit 0 after giving up on its own sandboxed terminal, so this check
+        # runs before the exit-code branch below and overrides whatever verdict the exit code implies.
+        return AgentResult(
+            ok=False, text=redact_secrets(output_text), harness="codex", model=model, effort=effort,
+            duration_s=duration, usage=usage, cost_usd=cost_usd,
+            error_kind="harness_infra_error", **diag,
+        )
     if res.returncode != 0:
         return AgentResult(
             ok=False, text=output_text, harness="codex", model=model, effort=effort, duration_s=duration,

@@ -261,6 +261,67 @@ def test_codex_rate_limited_from_stderr(tmp_path, make_fake_cli, monkeypatch):
     assert result.reset_at is not None
 
 
+def test_codex_helper_unknown_error_nonzero_exit_is_harness_infra_error(tmp_path, make_fake_cli, monkeypatch):
+    """USR-188: Codex's own sandbox/terminal setup failing is infra, not a generic crash."""
+    cmd_path, env_var = make_fake_cli("codex")
+    monkeypatch.setattr(agent_cli, "find_codex_binary", lambda: cmd_path)
+    set_fake_response(
+        monkeypatch,
+        env_var,
+        {"stderr": "helper_unknown_error: setup refresh had errors", "returncode": 1},
+    )
+    req = AgentRequest(prompt="implement ticket", cwd=tmp_path, mode="write", harness="codex")
+    result = run_agent(req)
+
+    assert result.ok is False
+    assert result.error_kind == "harness_infra_error"
+
+
+def test_codex_helper_unknown_error_exit_zero_is_still_a_failure(tmp_path, make_fake_cli, monkeypatch):
+    """The 09/10/2026 incident: Codex gave up on its sandboxed terminal but still exited 0 with no
+    real work done, so the exit code alone must never be trusted when this signature is present."""
+    cmd_path, env_var = make_fake_cli("codex")
+    monkeypatch.setattr(agent_cli, "find_codex_binary", lambda: cmd_path)
+    record_path = tmp_path / "record.json"
+    set_fake_response(
+        monkeypatch,
+        env_var,
+        {
+            "record_path": str(record_path),
+            "stdout": "helper_unknown_error: setup refresh had errors",
+            "tmp_out_content": "",
+            "returncode": 0,
+        },
+    )
+    req = AgentRequest(prompt="implement ticket", cwd=tmp_path, mode="write", harness="codex")
+    result = run_agent(req)
+
+    assert result.ok is False
+    assert result.error_kind == "harness_infra_error"
+    assert result.exit_code == 0
+
+
+def test_codex_helper_unknown_error_puts_the_harness_in_a_cooldown(tmp_path, make_fake_cli, monkeypatch):
+    """`harness_infra_error` is cooled down like `crash` (USR-188), so the router stops re-electing a
+    Codex blocked by the Desktop app's sandbox lock straight away."""
+    from core.line import routing
+
+    cmd_path, env_var = make_fake_cli("codex")
+    monkeypatch.setattr(agent_cli, "find_codex_binary", lambda: cmd_path)
+    set_fake_response(
+        monkeypatch,
+        env_var,
+        {"stderr": "helper_unknown_error: setup refresh had errors", "returncode": 1},
+    )
+    result = run_agent(AgentRequest(prompt="implement", cwd=tmp_path, mode="write", harness="codex"))
+    cooldown_path = tmp_path / "codex_cooldowns.json"
+
+    routing.record_result(result, config=routing.RoutingConfig(), cooldown_path=cooldown_path)
+
+    stored = json.loads(cooldown_path.read_text(encoding="utf-8"))
+    assert stored["codex"]["reason"] == "harness_infra_error"
+
+
 def test_codex_write_mode_forwards_the_declared_reasoning_effort(tmp_path, make_fake_cli, monkeypatch):
     """USR-201: a stage's harness pin reaches the Codex CLI as `-c model_reasoning_effort="..."`."""
     cmd_path, env_var = make_fake_cli("codex")

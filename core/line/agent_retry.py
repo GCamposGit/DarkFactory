@@ -10,11 +10,14 @@ one place that owns the policy, so both import it instead of re-implementing it:
 - `is_stage_retryable`: failures that say nothing about the job (quota, login, missing binary), which the
   line retries later instead of spending one of a ticket's validate iterations;
 - `classify_failure` + `run_with_retry`: the launcher loop. Transient failures (`empty_output`,
-  `timeout`, `crash`) repeat on the same route with backoff and then exclude the harness; a capability or
-  binary problem (`unsupported_mode`, `not_installed`) and a login problem exclude it at once; a quota
-  failure is recorded as a cooldown (`routing.record_result`, honouring `reset_at`) and excludes it.
-  `protected_path` (USR-205) stops on the first attempt: no backoff, no other harness, and the worktree
-  is left as the agent left it.
+  `timeout`, `crash`, `harness_infra_error`) repeat on the same route with backoff and then exclude the
+  harness; a capability or binary problem (`unsupported_mode`, `not_installed`) and a login problem
+  exclude it at once; a quota failure is recorded as a cooldown (`routing.record_result`, honouring
+  `reset_at`) and excludes it. `protected_path` (USR-205) stops on the first attempt: no backoff, no
+  other harness, and the worktree is left as the agent left it. `harness_infra_error` (USR-188) also
+  gets a cooldown like `crash` and, uniquely, falls over to another harness even under an explicit
+  `--harness` pin — the harness's own tooling failed to start the call, so staying pinned to it would
+  just fail again.
 
 Everything is injectable (`run_func`, `pick_func`, `sleep_fn`, `record_func`) so tests drive it with fake
 agents and no real waiting.
@@ -52,6 +55,11 @@ TRANSIENT_RETRIES = 2
 # Timeout policy (USR-114): at most 1 retry for timeouts, and if implementation changes are
 # already present in the worktree, the flow follows to validate rather than repeating from scratch.
 TIMEOUT_RETRIES = 1
+# Infra policy (USR-188): the harness's own terminal/sandbox tooling failed to start the call (e.g.
+# Codex's `helper_unknown_error`), nothing about the prompt. One repeat is cheap insurance against a
+# one-off hiccup; a second attempt is pointless when the cause is a held lock that outlives the run,
+# so this fails over sooner than a generic `crash`.
+INFRA_ERROR_RETRIES = 1
 BACKOFF_SECONDS: tuple[float, ...] = (30.0, 120.0)
 MAX_ROUTES = 3
 
@@ -148,21 +156,27 @@ def backoff_delay(
     *,
     transient_retries: int = TRANSIENT_RETRIES,
     timeout_retries: int = TIMEOUT_RETRIES,
+    infra_error_retries: int = INFRA_ERROR_RETRIES,
     backoff_s: Sequence[float] = BACKOFF_SECONDS,
 ) -> Optional[float]:
     """Seconds to wait before repeating the same route, or None when the route must not be repeated (USR-151).
 
     This is the ONLY place that decides a backoff, and `run_with_retry` calls `sleep_fn` only with the
-    value returned here. Only a `transient` failure (`empty_output`, `crash`, `timeout`, a missing or
-    unknown `error_kind`) that still has retries left waits; `not_installed`, `unsupported_mode`, login
-    failures and quota failures return None, so the loop falls straight through to the next healthy route
-    without a single sleep.
+    value returned here. Only a `transient` failure (`empty_output`, `crash`, `timeout`,
+    `harness_infra_error`, a missing or unknown `error_kind`) that still has retries left waits;
+    `not_installed`, `unsupported_mode`, login failures and quota failures return None, so the loop falls
+    straight through to the next healthy route without a single sleep.
     """
     if result.error_kind in {"cancelled", "protected_path"}:
         return None
     if classify_failure(result) != "transient":
         return None
-    effective_retries = timeout_retries if result.error_kind == "timeout" else transient_retries
+    if result.error_kind == "timeout":
+        effective_retries = timeout_retries
+    elif result.error_kind == "harness_infra_error":
+        effective_retries = infra_error_retries
+    else:
+        effective_retries = transient_retries
     if retry_no >= effective_retries:
         return None
     return backoff_s[min(retry_no, len(backoff_s) - 1)] if backoff_s else 0.0
@@ -227,6 +241,7 @@ def run_with_retry(
     max_routes: int = MAX_ROUTES,
     transient_retries: int = TRANSIENT_RETRIES,
     timeout_retries: int = TIMEOUT_RETRIES,
+    infra_error_retries: int = INFRA_ERROR_RETRIES,
     backoff_s: Sequence[float] = BACKOFF_SECONDS,
     has_changes_fn: Optional[Callable[[Path], bool]] = None,
     on_event: Optional[Callable[[str], None]] = None,
@@ -245,8 +260,11 @@ def run_with_retry(
       and the route is excluded.
 
     At most `max_routes` routes are tried. `pinned` (an explicit `--harness`) keeps the caller's choice:
-    transient retries still happen but the loop never falls through to another harness. `pick_func` must
-    accept `exclude=`, `config=` and `mode=`. `build_request(harness, model)` builds each request.
+    transient retries still happen but the loop never falls through to another harness — except for
+    `harness_infra_error` (USR-188), where the chosen harness's own tooling (not its model, quota or the
+    prompt) failed to even start the call; sticking to it would just fail again, so the loop falls
+    through to the next healthy route even when pinned. `pick_func` must accept `exclude=`, `config=`
+    and `mode=`. `build_request(harness, model)` builds each request.
     """
     caps = list(host_caps)
     excluded: set[Route] = set()
@@ -266,7 +284,7 @@ def run_with_retry(
     while route is not None and routes_tried < max_routes:
         routes_tried += 1
         harness, model = route
-        max_loop_retries = max(transient_retries, timeout_retries)
+        max_loop_retries = max(transient_retries, timeout_retries, infra_error_retries)
         stopped_due_to_changes = False
         for retry_no in range(max_loop_retries + 1):
             req = build_request(harness, model)
@@ -316,7 +334,8 @@ def run_with_retry(
 
             delay = backoff_delay(
                 result, retry_no,
-                transient_retries=transient_retries, timeout_retries=timeout_retries, backoff_s=backoff_s,
+                transient_retries=transient_retries, timeout_retries=timeout_retries,
+                infra_error_retries=infra_error_retries, backoff_s=backoff_s,
             )
             if delay is None:
                 break
@@ -328,7 +347,12 @@ def run_with_retry(
 
         exclude_route(excluded, harness, model)
         if pinned:
-            break
+            if result.error_kind != "harness_infra_error":
+                break
+            emit(
+                f"Harness infra failure on {harness} under an explicit --harness pin; "
+                "falling over to another harness with write despite the pin (USR-188)"
+            )
         route = pick_route(
             pick_func, stage, caps, config, excluded, retry_without_exclusions=False, mode=mode
         )
