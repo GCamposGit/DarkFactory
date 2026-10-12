@@ -225,7 +225,10 @@ def test_focal_test_fix_on_second_pass_reaches_merge_without_resume_delivery(tmp
 
     def fake_fix_that_actually_fixes_it(cwd, fixed_ticket, stage_label, feedback):
         fix_calls.append(stage_label)
-        (Path(cwd) / "calc.py").write_text("def add(a, b):\n    return a + b\n", encoding="utf-8")
+        # The fixed source must differ in SIZE from the broken one ("a - b"): a .pyc is validated by the source
+        # mtime in whole seconds plus its size, and the focal pytest re-run happens within the same second on a
+        # fast runner, so a same-size rewrite kept the stale bytecode (CI flake that turned main red on Linux).
+        (Path(cwd) / "calc.py").write_text("def add(a, b):\n    return a + b  # fixed\n", encoding="utf-8")
         return AgentResult(ok=True, text="corrigido", harness="claude", duration_s=0.1)
 
     fake_success_report = TicketCompletionReport(
