@@ -234,7 +234,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("ticket_id", nargs="?", default=None, help="Ticket ID to run (e.g. USR-59)")
     parser.add_argument(
         "--harness", default=None,
-        help="Explicitly requested harness (must support write mode: claude, codex). Never falls back to another harness",
+        help=(
+            "Explicitly requested harness (must support write mode: claude, codex). Never falls back to "
+            "another harness, except on a harness_infra_error (USR-188: the harness's own terminal/sandbox "
+            "tooling failed to start the call)"
+        ),
     )
     parser.add_argument("--force", action="store_true", help="Explicit override to allow running on a critical quota harness")
     parser.add_argument("--prompt", default="", help="User natural language prompt (checked for explicit override)")

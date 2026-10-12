@@ -123,8 +123,9 @@ class RoutingConfig(BaseModel):
 
     pressure_thresholds: dict[str, float] = Field(default_factory=lambda: dict(_DEFAULT_PRESSURE_THRESHOLDS))
     cooldown_default_minutes: int = 60
-    # A harness whose CLI crashes (not a quota/login problem) sits out briefly, so the next stage or
-    # job does not pick it again straight away.
+    # A harness whose CLI crashes, or whose own terminal/sandbox tooling fails to start the call
+    # (`harness_infra_error`, USR-188) — not a quota/login problem — sits out briefly, so the next
+    # stage or job does not pick it again straight away.
     crash_cooldown_minutes: int = 10
     forbidden_autonomous_models: list[str] = Field(
         default_factory=lambda: list(_DEFAULT_FORBIDDEN_AUTONOMOUS_MODELS)
@@ -324,12 +325,12 @@ def record_result(
         except Exception as exc:
             logger.debug("Failed releasing quota reservation %s: %s", reservation_id, exc)
 
-    if result.error_kind not in ("rate_limited", "crash"):
+    if result.error_kind not in ("rate_limited", "crash", "harness_infra_error"):
         return
     cfg = config or load_routing_config()
     path = cooldown_path or default_cooldown_path()
 
-    if result.error_kind == "crash":
+    if result.error_kind in ("crash", "harness_infra_error"):
         if result.harness in ("", "none", "openrouter"):
             return
         until = datetime.now(timezone.utc) + timedelta(minutes=max(cfg.crash_cooldown_minutes, 0))
