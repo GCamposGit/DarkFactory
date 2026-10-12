@@ -261,6 +261,88 @@ def test_codex_rate_limited_from_stderr(tmp_path, make_fake_cli, monkeypatch):
     assert result.reset_at is not None
 
 
+def test_codex_write_mode_forwards_the_declared_reasoning_effort(tmp_path, make_fake_cli, monkeypatch):
+    """USR-201: a stage's harness pin reaches the Codex CLI as `-c model_reasoning_effort="..."`."""
+    cmd_path, env_var = make_fake_cli("codex")
+    monkeypatch.setattr(agent_cli, "find_codex_binary", lambda: cmd_path)
+    record_path = tmp_path / "record.json"
+    set_fake_response(
+        monkeypatch,
+        env_var,
+        {"record_path": str(record_path), "tmp_out_content": "done", "returncode": 0},
+    )
+
+    req = AgentRequest(
+        prompt="implement ticket HF-1", cwd=tmp_path, mode="write", harness="codex",
+        model="gpt-6-luna", effort="high",
+    )
+    result = run_agent(req)
+
+    assert result.ok is True
+    record = json.loads(record_path.read_text(encoding="utf-8"))
+    argv = record["argv"]
+    assert "-m" in argv and argv[argv.index("-m") + 1] == "gpt-6-luna"
+    assert "-c" in argv and argv[argv.index("-c") + 1] == 'model_reasoning_effort="high"'
+
+
+def test_codex_write_mode_drops_an_effort_value_that_is_not_a_single_token(
+    tmp_path, make_fake_cli, monkeypatch, caplog
+):
+    """A reasoning-effort value must never smuggle another flag into the Codex argv."""
+    cmd_path, env_var = make_fake_cli("codex")
+    monkeypatch.setattr(agent_cli, "find_codex_binary", lambda: cmd_path)
+    record_path = tmp_path / "record.json"
+    set_fake_response(
+        monkeypatch,
+        env_var,
+        {"record_path": str(record_path), "tmp_out_content": "done", "returncode": 0},
+    )
+
+    req = AgentRequest(
+        prompt="implement ticket HF-1", cwd=tmp_path, mode="write", harness="codex",
+        effort="high --dangerously-bypass-approvals-and-sandbox",
+    )
+    with caplog.at_level("WARNING", logger="core.line.agent_cli"):
+        result = run_agent(req)
+
+    assert result.ok is True
+    record = json.loads(record_path.read_text(encoding="utf-8"))
+    assert "-c" not in record["argv"]
+    assert "--dangerously-bypass-approvals-and-sandbox" not in record["argv"]
+
+
+def test_codex_effective_model_and_effort_are_read_from_the_cli_events_when_not_requested(
+    tmp_path, make_fake_cli, monkeypatch
+):
+    """USR-201: with no model/effort declared, the effective values come from the CLI's own `--json` events."""
+    cmd_path, env_var = make_fake_cli("codex")
+    monkeypatch.setattr(agent_cli, "find_codex_binary", lambda: cmd_path)
+    record_path = tmp_path / "record.json"
+    tmp_out_content = "\n".join(
+        [
+            json.dumps({"type": "thread.started", "thread_id": "deadbeef12345678"}),
+            json.dumps({"model": "gpt-6-luna", "reasoning_effort": "high"}),
+            json.dumps({"usage": {"input_tokens": 50, "output_tokens": 10}, "total_cost_usd": 0.001}),
+        ]
+    )
+    set_fake_response(
+        monkeypatch,
+        env_var,
+        {"record_path": str(record_path), "tmp_out_content": tmp_out_content, "returncode": 0},
+    )
+
+    req = AgentRequest(prompt="implement ticket HF-1", cwd=tmp_path, mode="write", harness="codex")
+    result = run_agent(req)
+
+    assert result.ok is True
+    assert result.model == "gpt-6-luna"
+    assert result.effort == "high"
+    # Nothing was declared, so the executed argv carries neither flag -- the model only came back
+    # on the CLI's report, not because it was asked for.
+    record = json.loads(record_path.read_text(encoding="utf-8"))
+    assert "-m" not in record["argv"] and "-c" not in record["argv"]
+
+
 # Grok write mode (USR-109) is covered in tests/line/test_grok_runner.py.
 
 

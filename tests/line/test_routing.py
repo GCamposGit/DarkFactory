@@ -10,10 +10,12 @@ import pytest
 
 from core.line.agent_cli import AgentResult
 from core.line.routing import (
+    HarnessPin,
     RoutingConfig,
     StageRoute,
     _quota_headroom_diagnosis,
     default_config_path,
+    harness_cli_pin,
     load_routing_config,
     pick,
     record_result,
@@ -504,6 +506,55 @@ def test_pick_skips_forbidden_autonomous_models():
     )
     # codex with gpt-6-astra is forbidden; falls through to claude opus
     assert choice == ("claude", "opus")
+
+
+# --------------------------------------------------------------------------
+# harness_cli_pin (USR-201): declared model/effort per harness per stage
+# --------------------------------------------------------------------------
+
+
+def test_harness_cli_pin_returns_the_declared_model_and_effort():
+    cfg = load_routing_config(default_config_path())
+
+    model, effort = harness_cli_pin("codex", None, stage="development", config=cfg)
+
+    assert model == "gpt-6-luna"
+    assert effort == "high"
+
+
+def test_harness_cli_pin_falls_back_to_the_cascade_model_without_a_pin():
+    cfg = RoutingConfig(stages={"development": StageRoute(cascade=[("antigravity", "flash")])})
+
+    model, effort = harness_cli_pin("antigravity", "flash", stage="development", config=cfg)
+
+    assert model == "flash"
+    assert effort is None
+
+
+def test_harness_cli_pin_ignores_a_forbidden_pinned_model():
+    cfg = RoutingConfig(
+        forbidden_autonomous_models=["gpt-6-astra"],
+        stages={
+            "development": StageRoute(
+                cascade=[("codex", None)],
+                harness_pins={"codex": HarnessPin(model="gpt-6-astra", effort="high")},
+            )
+        },
+    )
+
+    model, effort = harness_cli_pin("codex", None, stage="development", config=cfg)
+
+    assert model is None  # the forbidden pin is dropped, and the cascade model was None
+    assert effort == "high"  # effort is unaffected by the model-forbidding check
+
+
+def test_harness_cli_pin_on_an_unknown_stage_returns_the_cascade_model_unchanged():
+    cfg = load_routing_config(default_config_path())
+
+    model, effort = harness_cli_pin("codex", "some-model", stage="no-such-stage", config=cfg)
+
+    assert model == "some-model"
+    assert effort is None
 
 
 def test_quota_reservation_manager_reserve_and_release(tmp_path):

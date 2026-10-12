@@ -1491,6 +1491,7 @@ def _run(argv: Optional[list[str]], box: list[ProgressPublisher], stack: context
             "quota_usage": cost_record,
             "harness": selected_harness,
             "model": selected_model,
+            "effort": selected_effort,
             "duration_s": agent_result.duration_s,
             "workspace": str(workspace.path),
             "branch": workspace.branch,

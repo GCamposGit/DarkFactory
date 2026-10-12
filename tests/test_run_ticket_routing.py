@@ -307,6 +307,29 @@ def test_an_auto_routed_ticket_falls_back_to_the_next_healthy_harness(
     assert all(f"harness {r.harness}" in r.prompt.splitlines()[0] for r in requests)
 
 
+def test_json_payload_reports_the_effective_model_and_effort_from_the_cli(
+    env: dict[str, Any], monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """USR-201: the routing config's harness pin (codex -> gpt-6-luna/high) reaches the agent request, and
+    the CLI's own reported model/effort -- not just the pin alias -- lands in the run's JSON record."""
+    monkeypatch.setattr(run_ticket, "pick", MagicMock(return_value=("codex", None)))
+    env["agent"].side_effect = lambda req: AgentResult(
+        ok=True, text="done", harness=req.harness, model="gpt-6-luna-2026-10-01", effort="high", duration_s=4.0,
+    )
+
+    assert main(["USR-99", "--skip-validation", "--no-commit", "--json"]) == 0
+
+    sent: AgentRequest = env["agent"].call_args.args[0]
+    assert sent.harness == "codex"
+    assert sent.model == "gpt-6-luna"  # the stage's harness_pins declaration reached the request
+    assert sent.effort == "high"
+
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["ok"] is True
+    assert payload["model"] == "gpt-6-luna-2026-10-01"  # the CLI's own report, not only the pin alias
+    assert payload["effort"] == "high"
+
+
 def test_a_not_installed_harness_never_backs_off_in_fifty_runs_despite_sleeping_neighbours(
     env: dict[str, Any], monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:

@@ -204,6 +204,49 @@ def test_model_and_max_turns_are_forwarded_when_set(install_fake, tmp_path: Path
     assert argv[argv.index("--max-turns") + 1] == "9"
 
 
+def test_reasoning_effort_is_forwarded_when_declared(install_fake, tmp_path: Path) -> None:
+    """USR-201: a stage's harness pin reaches the Grok CLI as `--reasoning-effort`."""
+    fake = install_fake(stdout=json.dumps(_GROK_OK_JSON))
+
+    run_agent(_write_request(tmp_path, model="grok-4.7", effort="high"))
+
+    argv = fake.argv
+    assert argv[argv.index("--reasoning-effort") + 1] == "high"
+
+
+def test_an_effort_value_that_is_not_a_single_token_is_dropped(
+    install_fake, tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A reasoning-effort value must never smuggle another flag into the Grok argv."""
+    fake = install_fake(stdout=json.dumps(_GROK_OK_JSON))
+
+    with caplog.at_level(logging.WARNING, logger="core.line.agent_cli"):
+        run_agent(_write_request(tmp_path, effort="high --always-approve"))
+
+    assert "--reasoning-effort" not in fake.argv
+    assert "--always-approve" not in fake.argv
+
+
+def test_effective_model_and_effort_are_read_from_model_usage_when_not_requested(
+    install_fake, tmp_path: Path
+) -> None:
+    """USR-201: with no model/effort declared, the effective values come from the CLI's own `modelUsage`."""
+    payload = {
+        **_GROK_OK_JSON,
+        "modelUsage": {
+            "grok-4.7-build": {
+                "inputTokens": 32999, "outputTokens": 251, "costUSD": 0.0233648, "reasoningEffort": "high",
+            }
+        },
+    }
+    install_fake(stdout=json.dumps(payload))
+
+    result = run_agent(_write_request(tmp_path))
+
+    assert result.model == "grok-4.7-build"
+    assert result.effort == "high"
+
+
 # --------------------------------------------------------------------------
 # DARKFAC_GROK_PERMISSION_MODE
 # --------------------------------------------------------------------------
