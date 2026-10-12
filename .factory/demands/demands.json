@@ -4889,8 +4889,8 @@
     "project_id": "darkfac",
     "title": "Portao local estoura o limite de 1500s sob concorrencia e o worker do Desktop silencia no passo paralelo",
     "origin": "user",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "Patches protegidos aplicados pelo owner por commit direto: 64fe3ee (USR-196, 183, 186) e 144bf4d (USR-178), conforme OA-014; testes focais dos patches passaram (bloco 3: 121 passed; blocos 1-2 validados em arvore limpa). Deploy de 12/10/2026 (dokploy_redeploy.py) saiu com codigo 0: VPS e Desktop convergidos em 144bf4d e backup pos-deploy verificado (snp3t_darkfac_20261012_210523_0a204a, drill_verified=True). Criterio 1: espera no suite_lock ja nao contava no timeout do passo (provado em teste) e agora e registrada (SuiteLock.waited_sec, linha [SUITE_LOCK] acquired). Criterio 2: queda do worker exige 3 sondas /health, retoma no mesmo offset ou cai limpo para o local, com diagnostico estruturado e [REMOTE_FALLBACK]. Criterio 3: [RUN_TIMING] e run_timings.jsonl separam lock_wait_sec de exec_sec. Seguimento aberto fora do V0: o watchdog do job no remote_worker conta a fila do suite_lock do Desktop.",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -4914,7 +4914,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-08T22:27:27.403290Z",
-    "updated_at": "2026-10-12T11:06:09.342744Z"
+    "updated_at": "2026-10-12T21:06:04.173155Z"
   },
   {
     "id": "USR-169",
@@ -5070,8 +5070,8 @@
     "project_id": "darkfac",
     "title": "Watchdog do worker remoto mata so o processo de topo: netos do xdist podem manter o pipe aberto",
     "origin": "user",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "Patches protegidos aplicados pelo owner por commit direto: 64fe3ee (USR-196, 183, 186) e 144bf4d (USR-178), conforme OA-014; testes focais dos patches passaram (bloco 3: 121 passed; blocos 1-2 validados em arvore limpa). Deploy de 12/10/2026 (dokploy_redeploy.py) saiu com codigo 0: VPS e Desktop convergidos em 144bf4d e backup pos-deploy verificado (snp3t_darkfac_20261012_210523_0a204a, drill_verified=True). Criterio 1: watchdog e /system/restart encerram a arvore de processos do runner (_ProcessTree, psutil). Criterio 2: teste com neto que segura o pipe aberto (tests/test_remote_worker_process_tree.py). Criterio 3: teste live do uvicorn usa log_config=None (tests/test_remote_dispatch.py).",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -5094,7 +5094,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-09T04:30:00Z",
-    "updated_at": "2026-10-11T17:49:17.206876Z"
+    "updated_at": "2026-10-12T21:06:04.186412Z"
   },
   {
     "id": "USR-184",
@@ -5169,8 +5169,8 @@
     "project_id": "darkfac",
     "title": "Restart do worker do Desktop apos /system/update deixa o worker desligado: bind 8080 em uso e deploy sai com codigo 1",
     "origin": "user",
-    "status": "planned",
-    "delivery_evidence": "PARCIAL. PR #237 (90ab964) entregou (b) recuperacao pela tarefa agendada 'DarkFac Test Worker' (schtasks /End + /Run, uma tentativa) quando o worker fica offline apos /system/restart ou apos update falho, e (c) 5 testes focais. PENDENTE (a): core/harness/remote_worker.py (_restart_after_exit/_wait_for_released_port espera so ~10 s e desiste deixando o worker desligado) e arquivo protegido pelo guard e exige commit humano do owner (junto com o PR #230 do USR-162, USR-181); verificar tambem se o filho lancado em trigger_daemon_restart herda o socket de escuta.",
+    "status": "completed",
+    "delivery_evidence": "Patches protegidos aplicados pelo owner por commit direto: 64fe3ee (USR-196, 183, 186) e 144bf4d (USR-178), conforme OA-014; testes focais dos patches passaram (bloco 3: 121 passed; blocos 1-2 validados em arvore limpa). Deploy de 12/10/2026 (dokploy_redeploy.py) saiu com codigo 0: VPS e Desktop convergidos em 144bf4d e backup pos-deploy verificado (snp3t_darkfac_20261012_210523_0a204a, drill_verified=True). Item (a): _wait_for_released_port espera ate 60 s com backoff (DARKFAC_WORKER_PORT_WAIT_SEC), nao relanca se ha worker respondendo e os filhos destacados nao herdam o socket; item (b) ja entregue no PR #237 (recuperacao pela tarefa agendada). Deploy convergente com codigo 0 e backup executado em 12/10/2026.",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -5193,7 +5193,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-09T06:30:00Z",
-    "updated_at": "2026-10-11T17:49:17.206876Z"
+    "updated_at": "2026-10-12T21:06:04.199923Z"
   },
   {
     "id": "USR-187",

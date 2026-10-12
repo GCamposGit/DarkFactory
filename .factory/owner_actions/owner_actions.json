@@ -482,9 +482,9 @@
     {
       "id": "OA-014",
       "kind": "action",
-      "priority": "high",
-      "status": "open",
       "title": "Aplicar os 3 patches protegidos do portao e do worker (USR-196, USR-183/186, USR-178) em ordem, com commit direto na main",
+      "priority": "high",
+      "status": "done",
       "why": "core/harness/* e protegido pelo guard.py: o CI reprova qualquer PR que o altere, entao so um commit seu destrava. Os 3 patches estao prontos, testados em worktree limpa e em docs/proposals. Sem eles: o update do worker do Desktop aborta com arquivo desversionado (USR-196), o worker deixa filhos do pytest vivos e o restart desliga o worker (USR-183/186), e o portao perde o worker no meio do passo e cai para ~50 min locais (USR-178). Estes sao os tickets das ondas 3 e 4 do plano V0.",
       "blocks": [
         "USR-196",
@@ -541,14 +541,14 @@
       "verify": "git -C C:\\dev\\DarkFac log origin/main -3 --oneline deve mostrar os 2 commits novos; python C:\\dev\\DarkFac\\core\\orchestrator\\guard.py origin/main volta a [GUARD PASS]; Invoke-RestMethod http://100.78.181.90:8080/health responde status ok.",
       "created_at": "2026-10-12T07:21:49Z",
       "created_by": "claude-session-2026-10-12-v0",
-      "resolved_at": null
+      "resolved_at": "2026-10-12T21:06:11Z"
     },
     {
       "id": "OA-015",
       "kind": "action",
       "title": "Religar o Desktop (darkfac-desktop, 100.78.181.90): o PC esta offline no Tailscale e todo portao cai para o Notebook e estoura 3000 s",
       "priority": "critical",
-      "status": "open",
+      "status": "done",
       "why": "Em 12/10/2026 o worker de testes do Desktop deixou de responder: o Tailscale mostra 'darkfac-desktop offline, last seen 46m ago' (as 13:24), sem resposta a ping nem as portas 8080, 3389 e 22, ou seja, o PC inteiro esta fora da rede (desligado, em suspensao ou sem Tailscale), nao so o worker. Sem o Desktop, o portao oficial cai para execucao local no Notebook (cerca de 4 GiB de RAM livre) e estoura o limite de 3000 s: foi assim que o primeiro lancamento unico da V0 (USR-239) terminou com codigo 124 e precisou de resgate. Enquanto o Desktop estiver fora, nenhum ticket v0-critico fecha limpo.",
       "blocks": [
         "USR-239",
@@ -583,14 +583,14 @@
       "verify": "Do Notebook, o comando 'Invoke-RestMethod -TimeoutSec 25 http://100.78.181.90:8080/health' responde com busy=False e queue_length=0, e 'tailscale status' mostra darkfac-desktop como active (sem 'offline').",
       "created_at": "2026-10-12T11:27:34Z",
       "created_by": "claude-code",
-      "resolved_at": null
+      "resolved_at": "2026-10-12T21:06:12Z"
     },
     {
       "id": "OA-016",
       "kind": "action",
-      "priority": "critical",
-      "status": "open",
       "title": "Ligar/acordar o Desktop (DESKTOP-G45IPEM): o worker de testes esta offline e nenhum portao passa",
+      "priority": "critical",
+      "status": "done",
       "why": "Em 12/10/2026 o Desktop ficou offline (Tailscale: 'offline, last seen 3h ago'). O worker em http://100.78.181.90:8080 e o worker primario de testes; sem ele o portao cai para a execucao local (~50 min, estoura o limite de 3000 s) e toda entrega de ticket falha por infraestrutura. O USR-239 esta com o codigo pronto esperando o portao. So voce pode ligar a maquina.",
       "blocks": [
         "USR-239",
@@ -623,7 +623,7 @@
       "verify": "Invoke-RestMethod http://100.78.181.90:8080/health deve mostrar status ok e busy False.",
       "created_at": "2026-10-12T14:06:59Z",
       "created_by": "claude-session-2026-10-12-v0",
-      "resolved_at": null
+      "resolved_at": "2026-10-12T21:06:12Z"
     }
   ]
 }
