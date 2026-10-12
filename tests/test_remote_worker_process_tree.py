@@ -125,6 +125,13 @@ def _run_job_with_real_runner(
 # --- USR-183: the process tree ------------------------------------------------------
 
 
+@pytest.mark.skipif(
+    sys.platform != "win32",
+    reason=(
+        "O worker de testes roda so no Windows (Desktop). Num Linux o neto de um runner que ja saiu e reparentado ao init "
+        "antes do primeiro snapshot da arvore e deixa de ser descendente, entao o patch nao o encontra (USR-251)."
+    ),
+)
 def test_run_job_does_not_block_when_the_runner_died_but_a_grandchild_holds_the_pipe(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
