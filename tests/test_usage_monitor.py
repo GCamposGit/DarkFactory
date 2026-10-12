@@ -136,6 +136,49 @@ def test_openai_and_xai_api_keys_are_connected_fallbacks(tmp_path: Path, monkeyp
     assert xai.quota_supported is False
 
 
+def test_codex_forced_refresh_recovers_right_after_a_transient_timeout(tmp_path: Path, monkeypatch) -> None:
+    """USR-214: a single Codex app-server timeout must not wedge an explicit refresh for the whole
+    10-minute backoff window. `inspect(force=True)` (what routing's stale-snapshot check and
+    `accounts --refresh` both ask for) has to retry the live probe immediately, and the snapshot on
+    disk must only pick up a new `checked_at` once that retry actually verifies current data."""
+    CodexAccountAdapter._app_server_retry_after = 0.0
+    monkeypatch.setattr(CodexAccountAdapter, "_find_codex", lambda self: "codex.exe")
+    monkeypatch.setattr(CodexAccountAdapter, "_from_session_files", lambda self: None)
+    monkeypatch.setattr(CodexAccountAdapter, "_codex_doctor", staticmethod(lambda executable: False))
+
+    calls = {"n": 0}
+
+    def flaky_read(self, executable, timeout_sec=15.0):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise TimeoutError("Codex response 2 timed out")
+        return {
+            "rateLimitsByLimitId": {
+                "codex": {
+                    "planType": "plus",
+                    "secondary": {"usedPercent": 44, "windowDurationMins": 10_080, "resetsAt": 4_000_000_000},
+                }
+            }
+        }
+
+    monkeypatch.setattr(CodexAccountAdapter, "_read_rate_limits", flaky_read)
+
+    adapter = CodexAccountAdapter(OPENAI_SPEC, tmp_path)
+    snapshot_file = tmp_path / "openai.json"
+
+    first = adapter.inspect(force=True)
+    assert first.status == AccountConnectionStatus.DISCONNECTED
+    assert not snapshot_file.exists()  # a transient failure never persists fabricated/old evidence as current
+
+    second = adapter.inspect(force=True)  # immediate retry, well inside the old 10-minute backoff
+    assert calls["n"] == 2  # the forced retry actually reached the live probe again, backoff or not
+    assert second.status == AccountConnectionStatus.CONNECTED
+    assert second.windows and second.windows[0].remaining_percent == 56.0
+
+    saved = json.loads(snapshot_file.read_text(encoding="utf-8"))
+    assert saved["checked_at"] == second.checked_at  # new checked_at only once current data is verified
+
+
 def test_gemini_adapter_parses_live_language_server_response(tmp_path: Path, monkeypatch) -> None:
     from core.usage.adapters import GeminiAccountAdapter
     spec = ProviderSpec("google", "Google / Gemini", ProviderFamily.FRONTIER, "https://one.google.com/")

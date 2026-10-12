@@ -413,16 +413,21 @@ class CodexAccountAdapter(AccountUsageAdapter):
             return self._from_snapshot(snapshot)
 
         executable = self._find_codex()
-        if executable and time.monotonic() >= CodexAccountAdapter._app_server_retry_after:
+        # `force` means the caller (routing's stale-snapshot check, or an explicit `accounts
+        # --refresh`) has no current verifiable evidence and needs one; it must bypass the backoff
+        # below, or a single transient timeout would keep the account fail-closed for the whole
+        # backoff window even though a retry right now would succeed (USR-214).
+        if executable and (force or time.monotonic() >= CodexAccountAdapter._app_server_retry_after):
             try:
                 usage = self._from_codex_response(self._read_rate_limits(executable))
                 usage = record_probe(usage, self.snapshot_dir)
                 self._save_snapshot(usage)
+                CodexAccountAdapter._app_server_retry_after = 0.0
                 return usage
             except Exception as exc:
                 logger.info("Codex quota probe unavailable: %s", exc)
                 # If the app-server is unavailable, avoid paying its 15 s timeout on every
-                # routing decision.
+                # non-forced routing decision.
                 CodexAccountAdapter._app_server_retry_after = time.monotonic() + _APP_SERVER_BACKOFF_SECONDS
 
         # No live probe (e.g. the cloud worker's container): the rate limits Codex itself recorded in
