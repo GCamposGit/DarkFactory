@@ -59,7 +59,13 @@ _STALL_CPU_EPSILON_SEC = 0.25
 
 
 class SuiteLockTimeout(RuntimeError):
-    """Raised when no slot became free before the configured timeout."""
+    """Raised when no slot became free before the configured timeout.
+
+    ``waited_sec`` (USR-178) is how long the caller waited before giving up, so
+    the harness telemetry can still account for the queue time of a refused run.
+    """
+
+    waited_sec: float = 0.0
 
 
 def _env_flag_off(name: str) -> bool:
@@ -380,6 +386,10 @@ class SuiteLock:
         self._timeout_sec = _timeout_sec() if timeout_sec is None else timeout_sec
         self._slots = _slot_count() if slots is None else slots
         self._handle: _LockHandle | None = None
+        #: USR-178: seconds spent in ``acquire()`` waiting for a free slot
+        #: (``None`` until the lock is acquired). The runner reports it in the
+        #: per-run timing record, separate from the suite execution time.
+        self.waited_sec: float | None = None
 
     @property
     def held(self) -> bool:
@@ -389,7 +399,8 @@ class SuiteLock:
         if self._handle is not None:
             return
         directory = state_dir()
-        deadline = time.monotonic() + self._timeout_sec
+        wait_started = time.monotonic()
+        deadline = wait_started + self._timeout_sec
         backoff = _POLL_MIN_SEC
         printed_wait = False
         stall_watch = _StallWatch(
@@ -404,13 +415,21 @@ class SuiteLock:
                 if handle is not None:
                     _write_sidecar(lock_path)
                     self._handle = _LockHandle(file=handle, path=lock_path, slot=slot)
+                    self.waited_sec = time.monotonic() - wait_started
+                    if printed_wait:
+                        print(
+                            f"[SUITE_LOCK] acquired slot {slot} after waiting {self.waited_sec:.1f}s "
+                            "(queue time is not counted against any step timeout)"
+                        )
                     return
             if time.monotonic() >= deadline:
                 sample = directory / "suite-0.lock"
-                raise SuiteLockTimeout(
+                timeout_error = SuiteLockTimeout(
                     f"[SUITE_LOCK] timed out after {self._timeout_sec:.0f}s waiting for a free "
                     f"slot ({self._describe_first_busy(directory)})"
                 )
+                timeout_error.waited_sec = time.monotonic() - wait_started
+                raise timeout_error
             if not printed_wait:
                 print(f"[SUITE_LOCK] waiting: {self._describe_first_busy(directory)}")
                 printed_wait = True

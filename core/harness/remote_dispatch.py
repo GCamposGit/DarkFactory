@@ -90,6 +90,10 @@ ENV_BUSY_WAIT_SEC = "DARKFAC_REMOTE_BUSY_WAIT_SEC"
 ENV_WORKER_SILENCE_FALLBACK_SEC = "DARKFAC_WORKER_SILENCE_FALLBACK_SEC"
 #: USR-147: timeout (seconds) of the ``/health`` probe (default 2.0).
 ENV_WORKER_HEALTH_TIMEOUT_SEC = "DARKFAC_WORKER_HEALTH_TIMEOUT_SEC"
+#: USR-178: consecutive failed ``/health`` probes (default 3) required before a
+#: silent worker is declared unreachable. One lost probe is a network blip, not
+#: a dead worker; abandoning a half-finished remote run costs a full local rerun.
+ENV_WORKER_DEAD_PROBES = "DARKFAC_WORKER_DEAD_PROBES"
 ENV_WORKER_JOB = "DARKFAC_HARNESS_WORKER_JOB"
 #: Test-only escape hatch: a loopback test dispatches to a worker running on
 #: 127.0.0.1 on purpose, which the real self-dispatch guard would otherwise
@@ -113,6 +117,15 @@ DEFAULT_WORKER_SILENCE_CEILING_SEC = 180.0
 SLOW_WORKER_PROBE_TIMEOUT_SEC = 10.0
 #: Minimum spacing between two ``/health`` probes of the same silent worker.
 SLOW_WORKER_PROBE_INTERVAL_SEC = 10.0
+#: USR-178: default for ``DARKFAC_WORKER_DEAD_PROBES`` and the pause between the
+#: confirmation probes that follow the first failed ``/health`` probe.
+DEFAULT_WORKER_DEAD_PROBES = 3
+MAX_WORKER_DEAD_PROBES = 10
+DEAD_PROBE_GAP_SEC = 0.5
+#: USR-178: a job abandoned for one of these causes is cancelled on the worker
+#: (best effort), so a half-alive worker is not left grinding a run nobody
+#: waits for while the local fallback starts.
+CANCEL_ON_LOSS_ERROR_CODES = frozenset({"worker_silent", "worker_unreachable"})
 SUBMIT_TIMEOUT_SEC = 30.0
 POLL_HTTP_TIMEOUT_SEC = 10.0
 #: USR-162: worker ``error_code`` values of a ``failed`` job that is NOT a test
@@ -122,6 +135,13 @@ INFRASTRUCTURE_ERROR_CODES = frozenset({"worker_restarted", "worker_internal_err
 EVIDENCE_TAIL_LINES = 400
 LOST_JOBS_SUBDIR = "remote_jobs"
 MARKER_REMOTE_JOB_LOST = "[REMOTE_JOB_LOST]"
+MARKER_REMOTE_FALLBACK = "[REMOTE_FALLBACK]"
+
+#: USR-178: one entry per remote attempt of the current ``maybe_dispatch_remote``
+#: call (worker, job, outcome, seconds spent). The runner copies it into the
+#: per-run timing record so remote time that ended in a local fallback is
+#: accounted for separately from the suite-lock queue time and the execution time.
+DISPATCH_ATTEMPTS: list[dict[str, Any]] = []
 
 
 class RemoteRequiredError(RuntimeError):
@@ -220,6 +240,26 @@ def worker_silence_ceiling_sec() -> float:
 
     configured = _positive_float_env(ENV_WORKER_SILENCE_FALLBACK_SEC, DEFAULT_WORKER_SILENCE_CEILING_SEC)
     return max(configured, WORKER_SILENCE_FALLBACK_SEC)
+
+
+def dead_probe_confirmations() -> int:
+    """How many consecutive failed ``/health`` probes declare a silent worker
+    unreachable (``DARKFAC_WORKER_DEAD_PROBES``; invalid values -> 3, clamped to 1..10)."""
+
+    raw = os.environ.get(ENV_WORKER_DEAD_PROBES, "").strip()
+    if not raw:
+        return DEFAULT_WORKER_DEAD_PROBES
+    try:
+        value = int(raw)
+    except ValueError:
+        return DEFAULT_WORKER_DEAD_PROBES
+    return min(max(value, 1), MAX_WORKER_DEAD_PROBES)
+
+
+def dispatch_attempts() -> list[dict[str, Any]]:
+    """Copy of the remote attempts recorded by the latest ``maybe_dispatch_remote``."""
+
+    return [dict(item) for item in DISPATCH_ATTEMPTS]
 
 
 def _auth_headers(extra: dict[str, str] | None = None) -> dict[str, str]:
@@ -404,6 +444,7 @@ def _relative_config_path(config_path: Path, project_root: Path) -> str:
 
 
 _REMOTE_STEP_TIME_RE = re.compile(r"^\[CHILD_STEP_TIME\] (\S+) ([0-9]+(?:\.[0-9]+)?)s")
+_REMOTE_STEP_START_RE = re.compile(r"^\[CHILD_STEP_START\] (\S+)")
 _HEALTH_EVIDENCE_KEYS = (
     "busy",
     "queue_length",
@@ -476,6 +517,26 @@ def _recover_terminal_state(base_url: str, job_id: str, offset: int) -> dict[str
     return payload if isinstance(payload, dict) and payload.get("status") else None
 
 
+def _confirm_worker_unreachable(base_url: str) -> tuple[dict[str, Any] | None, int]:
+    """Re-probe ``/health`` after the first failed probe of a silent worker (USR-178).
+
+    Returns ``(health, failed_probes)``: ``health`` is the first answer (the worker
+    is alive after all, so the caller keeps waiting for the job: resume) or ``None``
+    when ``dead_probe_confirmations()`` consecutive probes failed (declare it lost).
+    """
+
+    needed = dead_probe_confirmations()
+    timeout = max(health_probe_timeout_sec(), SLOW_WORKER_PROBE_TIMEOUT_SEC)
+    failed = 1  # the probe that made the caller call this function
+    while failed < needed:
+        time.sleep(DEAD_PROBE_GAP_SEC)
+        alive = probe_health(base_url, timeout=timeout)
+        if alive is not None:
+            return alive, failed
+        failed += 1
+    return None, failed
+
+
 def _stream_job(
     base_url: str,
     job_id: str,
@@ -491,10 +552,13 @@ def _stream_job(
     gathered, after one last attempt to read a terminal verdict."""
 
     offset = 0
-    last_ok = time.monotonic()
+    stream_started = time.monotonic()
+    last_ok = stream_started
     last_probe = float("-inf")
     announced_slow = False
+    failed_probes = 0
     last_status: str | None = None
+    last_step_started: str | None = None
     step_times: dict[str, str] = {}
     log_tail: collections.deque[str] = collections.deque(maxlen=EVIDENCE_TAIL_LINES)
 
@@ -522,8 +586,19 @@ def _stream_job(
             "submitted_instance_id": submitted_instance_id,
             "worker_restarted_since_submit": restarted,
             "health": _health_subset(health),
+            # USR-178: what the abandoned run had already achieved, so the time
+            # spent remotely is never an anonymous "stopped responding".
+            "remote_elapsed_sec": round(time.monotonic() - stream_started, 1),
+            "silence_ceiling_sec": worker_silence_ceiling_sec(),
+            "failed_health_probes": failed_probes,
+            "last_step_started": last_step_started,
+            "step_times": dict(step_times),
+            "cancel_requested": error_code in CANCEL_ON_LOSS_ERROR_CODES,
         }
         _record_lost_job(details, "\n".join(log_tail))
+        if error_code in CANCEL_ON_LOSS_ERROR_CODES:
+            # Free a half-alive worker before the local fallback starts; best effort.
+            _cancel_job(base_url, job_id)
         return RemoteJobLost(full_message, details)
 
     while True:
@@ -555,11 +630,23 @@ def _stream_job(
                     last_probe = time.monotonic()
                     alive = probe_health(base_url, timeout=max(health_probe_timeout_sec(), SLOW_WORKER_PROBE_TIMEOUT_SEC))
                     if alive is None:
-                        raise _give_up(
-                            "worker_unreachable",
-                            f"worker stopped responding for >{silent_for:.0f}s mid-run and /health is unreachable",
-                            health={},
-                        ) from exc
+                        # USR-178: one lost probe is not a dead worker. Re-probe a few
+                        # times; any answer means the worker is slow/blipping and the
+                        # job is resumed (same offset), otherwise it is declared lost.
+                        alive, failed_probes = _confirm_worker_unreachable(base_url)
+                        if alive is None:
+                            silent_for = time.monotonic() - last_ok
+                            raise _give_up(
+                                "worker_unreachable",
+                                f"worker stopped responding for >{silent_for:.0f}s mid-run and /health is unreachable "
+                                f"({failed_probes} consecutive failed probes)",
+                                health={},
+                            ) from exc
+                        print(
+                            f"[REMOTE {base_url}] /health failed {failed_probes} probe(s) but answered again; "
+                            f"resuming job {job_id} from offset {offset}"
+                        )
+                    failed_probes = 0
                     if not announced_slow:
                         announced_slow = True
                         print(
@@ -579,6 +666,9 @@ def _stream_job(
                 timing = _REMOTE_STEP_TIME_RE.match(line)
                 if timing:
                     step_times[timing.group(1)] = timing.group(2)
+                started = _REMOTE_STEP_START_RE.match(line)
+                if started:
+                    last_step_started = started.group(1)
         offset = int(payload.get("next_offset", offset))
         last_status = payload.get("status")
         if last_status in ("done", "failed", "cancelled"):
@@ -775,8 +865,14 @@ def maybe_dispatch_remote(
     already emitted -- caller returns this value directly), or ``None`` when
     remote dispatch did not happen at all and the caller should proceed with
     its existing local path unchanged.
+
+    USR-178: every remote attempt that did not resolve the run is recorded in
+    :data:`DISPATCH_ATTEMPTS` (see :func:`dispatch_attempts`) and announced with a
+    ``[REMOTE_FALLBACK]`` line, so the seconds spent remotely stay visible in the
+    per-run timing instead of vanishing into the local rerun.
     """
 
+    DISPATCH_ATTEMPTS.clear()
     if local_only:
         return None
 
@@ -805,7 +901,8 @@ def maybe_dispatch_remote(
         tried_any_reachable = True
 
         if health.get("busy"):
-            worker_deadline = time.monotonic() + _busy_wait_sec()
+            busy_wait_started = time.monotonic()
+            worker_deadline = busy_wait_started + _busy_wait_sec()
             while health is not None and health.get("busy"):
                 if time.monotonic() > worker_deadline:
                     health = None
@@ -816,6 +913,13 @@ def maybe_dispatch_remote(
                     health = None
             if health is None:
                 print(f"[REMOTE] {base_url} still busy after {_busy_wait_sec():.0f}s (or vanished)")
+                DISPATCH_ATTEMPTS.append(
+                    {
+                        "worker_url": base_url,
+                        "outcome": "busy_timeout",
+                        "elapsed_sec": round(time.monotonic() - busy_wait_started, 1),
+                    }
+                )
                 continue  # next worker / local
 
         worker_platform = str(health.get("platform_family") or "windows")
@@ -843,6 +947,7 @@ def maybe_dispatch_remote(
             return None  # let the existing local path produce the canonical error
 
         total_timeout_sec = float(sum(step.timeout_sec for step in steps)) + 120.0
+        attempt_started = time.monotonic()
         try:
             outcome = _dispatch_one_job(
                 base_url,
@@ -857,10 +962,35 @@ def maybe_dispatch_remote(
                 total_timeout_sec=total_timeout_sec,
             )
         except _WorkerUnavailable as exc:
+            spent_sec = round(time.monotonic() - attempt_started, 1)
+            error_code = str(exc.details.get("error_code") or "worker_unavailable")
+            DISPATCH_ATTEMPTS.append(
+                {
+                    "worker_url": base_url,
+                    "job_id": exc.details.get("job_id"),
+                    "outcome": "lost",
+                    "error_code": error_code,
+                    "elapsed_sec": spent_sec,
+                    "silent_for_sec": exc.details.get("silent_for_sec"),
+                    "last_step_started": exc.details.get("last_step_started"),
+                }
+            )
             print(f"[REMOTE] {base_url} unavailable ({exc}); trying next option")
+            print(
+                f"{MARKER_REMOTE_FALLBACK} worker={base_url} job={exc.details.get('job_id')} "
+                f"code={error_code} remote_spent={spent_sec:.0f}s; the next option starts a fresh step clock "
+                "(remote time and suite-lock queue time are not charged to any step timeout)"
+            )
             continue
 
         if outcome is None:
+            DISPATCH_ATTEMPTS.append(
+                {
+                    "worker_url": base_url,
+                    "outcome": "not_dispatched",
+                    "elapsed_sec": round(time.monotonic() - attempt_started, 1),
+                }
+            )
             continue
 
         success, result = outcome

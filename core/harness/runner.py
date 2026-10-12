@@ -4,16 +4,19 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import hashlib
 import importlib.util
+import json
 import os
 import re
 import shlex
+import socket
 import subprocess
 import sys
 import threading
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Sequence
 
@@ -516,6 +519,113 @@ def _emit_cache_hit(record: dict, *, config_path: Path) -> bool:
     return True
 
 
+# --- USR-178: per-run timing telemetry -----------------------------------------
+
+#: Informational line (NOT a supervisor marker) printed once per run, after the verdict.
+MARKER_RUN_TIMING = "[RUN_TIMING]"
+RUN_TIMINGS_LOG_NAME = "run_timings.jsonl"
+RUN_TIMINGS_LOG_MAX_BYTES = 512 * 1024
+RUN_TIMINGS_LOG_KEEP_LINES = 1000
+
+
+@dataclass
+class RunTimings:
+    """Where the wall-clock time of one ``run_with_cache`` call went.
+
+    ``lock_wait_sec`` (queue time on the machine-wide suite lock) is kept apart
+    from ``exec_sec`` (the steps themselves): only ``exec_sec`` is ever bounded
+    by a step timeout, so a valid tree no longer fails because the host was busy.
+    ``remote_lost_sec`` is time spent on remote attempts that ended in a local
+    fallback, so that time is accounted for instead of silently disappearing.
+    """
+
+    quick: bool = False
+    no_cache: bool = False
+    local_only: bool = False
+    started_at: float = field(default_factory=time.perf_counter)
+    lock_wait_sec: float = 0.0
+    lock_timed_out: bool = False
+    exec_sec: float = 0.0
+    path: str = "unresolved"
+    steps_timeout_sum_sec: float = 0.0
+    tree_hash: str | None = None
+    remote_attempts: list[dict] = field(default_factory=list)
+
+    def as_record(self, success: bool | None) -> dict:
+        lost = [item for item in self.remote_attempts if item.get("outcome") in ("lost", "busy_timeout", "not_dispatched")]
+        return {
+            "schema": 1,
+            "ts": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            "host": socket.gethostname(),
+            "path": self.path,
+            "success": success,
+            "quick": self.quick,
+            "no_cache": self.no_cache,
+            "local_only": self.local_only,
+            "worker_job": os.environ.get("DARKFAC_HARNESS_WORKER_JOB", "").strip().lower() in {"1", "true", "yes", "on"},
+            "tree_hash": self.tree_hash,
+            "lock_wait_sec": round(self.lock_wait_sec, 1),
+            "lock_timed_out": self.lock_timed_out,
+            "exec_sec": round(self.exec_sec, 1),
+            "total_sec": round(time.perf_counter() - self.started_at, 1),
+            "steps_timeout_sum_sec": self.steps_timeout_sum_sec,
+            "remote_lost_sec": round(sum(float(item.get("elapsed_sec") or 0.0) for item in lost), 1),
+            "remote_attempts": self.remote_attempts,
+        }
+
+
+def _append_run_timing(record: dict) -> None:
+    path = harness_suite_lock.state_dir() / RUN_TIMINGS_LOG_NAME
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(record, sort_keys=True) + "\n")
+    if path.stat().st_size > RUN_TIMINGS_LOG_MAX_BYTES:
+        lines = path.read_text(encoding="utf-8", errors="replace").splitlines()[-RUN_TIMINGS_LOG_KEEP_LINES:]
+        tmp_path = path.with_suffix(".tmp")
+        tmp_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        os.replace(tmp_path, path)
+
+
+def _finish_run_timing(timings: RunTimings, success: bool | None) -> None:
+    """Print the ``[RUN_TIMING]`` line and append it to the machine-global JSONL
+    log. Telemetry is best effort: it never changes the verdict or the exit code."""
+
+    with contextlib.suppress(Exception):
+        record = timings.as_record(success)
+        print(f"{MARKER_RUN_TIMING} {json.dumps(record, sort_keys=True)}")
+        _append_run_timing(record)
+
+
+@contextlib.contextmanager
+def _timed_suite_lock(timings: RunTimings):
+    """``suite_lock()`` that records how long acquiring it took (queue time).
+
+    The wait happens BEFORE any step subprocess exists, so it can never count
+    against a step ``timeout_sec`` (USR-135/147/178)."""
+
+    started = time.perf_counter()
+    acquired = False
+    try:
+        with harness_suite_lock.suite_lock() as lock:
+            acquired = True
+            waited = getattr(lock, "waited_sec", None)
+            timings.lock_wait_sec += float(waited) if isinstance(waited, (int, float)) else time.perf_counter() - started
+            yield lock
+    except harness_suite_lock.SuiteLockTimeout as exc:
+        if acquired:
+            raise
+        timings.lock_timed_out = True
+        timings.lock_wait_sec += float(getattr(exc, "waited_sec", 0.0) or (time.perf_counter() - started))
+        raise
+
+
+def _timed_execute(timings: RunTimings, config: HarnessConfig, **kwargs) -> bool:
+    started = time.perf_counter()
+    try:
+        return execute(config, **kwargs)
+    finally:
+        timings.exec_sec += time.perf_counter() - started
+
+
 def run_with_cache(
     config: HarnessConfig,
     *,
@@ -526,6 +636,45 @@ def run_with_cache(
     no_cache: bool = False,
     local_only: bool = False,
     remote_required: bool = False,
+) -> bool:
+    """Run the suite and record where the time went (USR-178).
+
+    Thin wrapper around :func:`_run_with_cache` (the real logic and its long
+    docstring): it adds the per-run ``[RUN_TIMING]`` record -- suite-lock queue
+    time, execution time and remote time lost to a fallback -- without touching
+    the verdict, the exit code or any marker emitted before it.
+    """
+
+    timings = RunTimings(quick=quick, no_cache=no_cache, local_only=local_only)
+    success: bool | None = None
+    try:
+        success = _run_with_cache(
+            config,
+            config_hash=config_hash,
+            quick=quick,
+            include_holdout=include_holdout,
+            config_path=config_path,
+            no_cache=no_cache,
+            local_only=local_only,
+            remote_required=remote_required,
+            timings=timings,
+        )
+        return success
+    finally:
+        _finish_run_timing(timings, success)
+
+
+def _run_with_cache(
+    config: HarnessConfig,
+    *,
+    config_hash: str,
+    quick: bool,
+    include_holdout: bool,
+    config_path: Path,
+    no_cache: bool = False,
+    local_only: bool = False,
+    remote_required: bool = False,
+    timings: RunTimings,
 ) -> bool:
     """Cache-aware, single-flighted, remote-dispatch-aware wrapper around
     :func:`execute`.
@@ -551,6 +700,7 @@ def run_with_cache(
     """
 
     steps = _selected_steps(config, quick=quick, include_holdout=include_holdout)
+    timings.steps_timeout_sum_sec = float(sum(step.timeout_sec for step in steps))
     cache_enabled = bool(steps) and not no_cache and not harness_cache.cache_disabled()
 
     tree_hash: str | None = None
@@ -562,6 +712,7 @@ def run_with_cache(
             cache_enabled = False  # let execute() below produce the real, matching error
         else:
             tree_hash = harness_cache.tree_sha(PROJECT_ROOT)
+            timings.tree_hash = tree_hash
             if tree_hash:
                 cache_key = harness_cache.compute_cache_key(
                     tree_hash=tree_hash,
@@ -574,6 +725,7 @@ def run_with_cache(
     if cache_key is not None:
         hit = harness_cache.get_verdict(cache_key)
         if hit is not None:
+            timings.path = "cache_hit"
             return _emit_cache_hit(hit, config_path=config_path)
 
     # Remote dispatch is orthogonal to the local verdict cache: it is tried
@@ -582,21 +734,40 @@ def run_with_cache(
     # verdict there either). `None` means "not resolved remotely at all",
     # so every existing local code path below is completely unaffected.
     if steps:
-        remote_result = remote_dispatch.maybe_dispatch_remote(
-            steps=steps,
-            config_hash=config_hash,
-            quick=quick,
-            include_holdout=include_holdout,
-            config_path=config_path,
-            project_root=PROJECT_ROOT,
-            cache_lookup_enabled=cache_key is not None,
-            local_only=local_only,
-            remote_required=remote_required,
-            emit_cache_hit=_emit_cache_hit,
-            notify_hub_on_pass=_notify_hub_on_pass,
-        )
+        with contextlib.suppress(Exception):
+            remote_dispatch.DISPATCH_ATTEMPTS.clear()
+        remote_started = time.perf_counter()
+        try:
+            remote_result = remote_dispatch.maybe_dispatch_remote(
+                steps=steps,
+                config_hash=config_hash,
+                quick=quick,
+                include_holdout=include_holdout,
+                config_path=config_path,
+                project_root=PROJECT_ROOT,
+                cache_lookup_enabled=cache_key is not None,
+                local_only=local_only,
+                remote_required=remote_required,
+                emit_cache_hit=_emit_cache_hit,
+                notify_hub_on_pass=_notify_hub_on_pass,
+            )
+        finally:
+            # USR-178: remote seconds that did not resolve the run stay visible
+            # (separate from the lock queue and the local execution time).
+            attempts_getter = getattr(remote_dispatch, "dispatch_attempts", None)
+            with contextlib.suppress(Exception):
+                if callable(attempts_getter):
+                    timings.remote_attempts = list(attempts_getter())
         if remote_result is not None:
+            timings.path = "remote"
+            timings.exec_sec += time.perf_counter() - remote_started
             return remote_result
+        if timings.remote_attempts:
+            timings.path = "local_after_remote"
+        else:
+            timings.path = "local"
+    else:
+        timings.path = "local"
 
     if cache_key is None:
         # USR-135/147: take the machine-wide suite lock HERE, before spawning
@@ -605,8 +776,9 @@ def run_with_cache(
         # counts against the step timeout, ending in a false timeout with
         # count=0. `suite_lock()` exports DARKFAC_SUITE_LOCK_HELD=1 so the
         # child does not try to take the lock again.
-        with harness_suite_lock.suite_lock() as _lock:  # noqa: F841 - context manager for its side effect
-            return execute(
+        with _timed_suite_lock(timings) as _lock:  # noqa: F841 - context manager for its side effect
+            return _timed_execute(
+                timings,
                 config,
                 config_hash=config_hash,
                 quick=quick,
@@ -628,9 +800,10 @@ def run_with_cache(
         harness_cache.set_local_verdict(cache_key, remote_hit)
         return _emit_cache_hit(remote_hit, config_path=config_path)
 
-    with harness_suite_lock.suite_lock() as _lock:  # noqa: F841 - context manager for its side effect
+    with _timed_suite_lock(timings) as _lock:  # noqa: F841 - context manager for its side effect
         hit = harness_cache.get_verdict(cache_key)
         if hit is not None:
+            timings.path = "cache_hit"
             return _emit_cache_hit(hit, config_path=config_path)
 
         inflight_owned = harness_cache.acquire_inflight(cache_key, expires_in_sec=lease_sec)
@@ -670,7 +843,8 @@ def run_with_cache(
         # and never re-acquires the lock its own parent is holding.
         captured: dict[str, HarnessResult] = {}
         try:
-            success = execute(
+            success = _timed_execute(
+                timings,
                 config,
                 config_hash=config_hash,
                 quick=quick,
