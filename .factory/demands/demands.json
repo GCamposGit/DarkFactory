@@ -7459,5 +7459,41 @@
     "dependencies": [],
     "created_at": "2026-10-12T11:06:09.271100Z",
     "updated_at": "2026-10-12T11:06:09.271100Z"
+  },
+  {
+    "id": "USR-250",
+    "project_id": "darkfac",
+    "title": "run_ticket nao tem trava de linha: dois lancamentos simultaneos (ate do mesmo ticket) disputam o pytest, o Desktop e a RAM e os dois travam",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand",
+      "v0-critico",
+      "bug"
+    ],
+    "problem_statement": "A regra 'uma sessao opera a linha por vez' (V0) e so convencao: nada impede um segundo run_ticket. Em 12/10/2026 dois lancamentos do MESMO ticket correram juntos: USR-239 as 09:08 (worktree usr-239-20261012T070850Z, branch ticket/usr-239) e de novo as 09:17 (worktree usr-239-20261012T071707Z, branch com sufixo porque a ticket/usr-239 ja estava tomada), cada um com uma solucao diferente (tests/test_time_bomb_guard.py contra tests/_clock_bomb_guard.py). Havia ainda worktrees de USR-178 e USR-183 de 09:02 com alteracoes nao entregues. Nos dois runs o pytest focal ficou 600 s sem imprimir nada ([TIMEOUT EXPIRED], logs de 21 bytes: 10:32 e 10:46 num, 09:46, 09:59 e 10:13 no outro) e o portao oficial do primeiro estourou 3000 s; o Desktop estava inacessivel e tudo caiu para o Notebook (RAM livre ~4 GiB de 31,7). Um vigia que so olha processos vivos antes de lancar nao enxerga um lancamento que comeca depois. O custo foi o primeiro lancamento unico da V0 terminando em falha e outra sessao retomando a worktree (resgate).",
+    "core_journey": [
+      "A regra 'uma sessao opera a linha por vez' (V0) e so convencao: nada impede um segundo run_ticket. Em 12/10/2026 dois lancamentos do MESMO ticket correram juntos: USR-239 as 09:08 (worktree usr-239-20261012T070850Z, branch ticket/usr-239) e de novo as 09:17 (worktree usr-239-20261012T071707Z, branch com sufixo porque a ticket/usr-239 ja estava tomada), cada um com uma solucao diferente (tests/test_time_bomb_guard.py contra tests/_clock_bomb_guard.py). Havia ainda worktrees de USR-178 e USR-183 de 09:02 com alteracoes nao entregues. Nos dois runs o pytest focal ficou 600 s sem imprimir nada ([TIMEOUT EXPIRED], logs de 21 bytes: 10:32 e 10:46 num, 09:46, 09:59 e 10:13 no outro) e o portao oficial do primeiro estourou 3000 s; o Desktop estava inacessivel e tudo caiu para o Notebook (RAM livre ~4 GiB de 31,7). Um vigia que so olha processos vivos antes de lancar nao enxerga um lancamento que comeca depois. O custo foi o primeiro lancamento unico da V0 terminando em falha e outra sessao retomando a worktree (resgate)."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "run_ticket <ID> (e --resume-delivery fora do proprio run) adquire uma trava exclusiva de linha no checkout compartilhado com PID, ticket, host, inicio e heartbeat; um segundo lancamento, do mesmo ticket ou de outro, recusa na hora com mensagem de quem segura, desde quando e como cancelar, sem criar worktree nem consumir cota",
+      "A trava e liberada em saida normal, falha e cancelamento; um dono morto (PID inexistente ou heartbeat vencido) e recuperado automaticamente com aviso, e a entrega em processo filho do proprio run herda a trava sem recusar",
+      "Teste cobre: segundo lancamento recusado, trava orfa recuperada, filho do dono permitido e liberacao apos falha"
+    ],
+    "suggested_files": [
+      "run_ticket.py",
+      "core/line/",
+      "tests/"
+    ],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-12T11:45:43.602209Z",
+    "updated_at": "2026-10-12T11:45:43.602209Z"
   }
 ]
