@@ -82,7 +82,11 @@ DELIVERY_TIMEOUT_S = 6 * 3600.0
 GATE_FIX_ATTEMPTS = 2
 # Upper bound of the focal-test pre-check (fast, scoped to the changed files' tests), well under
 # GATE_TIMEOUT_S since it exists to catch an unverified agent turn before paying for the full gate.
-FOCAL_TEST_TIMEOUT_S = 300.0
+# 600s (not 300s): even the capped, changed-files-only target set observed ~106s on an idle worker,
+# but this machine's xdist is capped to 1 worker under memory pressure (`_worker_capacity`), and a
+# concurrent session on the shared host (USR-188: the same contention this ticket's fix addresses for
+# Codex) can slow a serial run 3x+; 300s turned a passing pre-check into a false-positive timeout.
+FOCAL_TEST_TIMEOUT_S = 600.0
 # Cap on test files the "mentions a changed module" sweep in `_focal_test_targets` may add beyond the
 # changed test files themselves (USR-188). A foundational module (e.g. `routing.py`, `run_ticket.py`)
 # is genuinely imported by dozens of test files; running all of them serially-equivalent (this machine's
