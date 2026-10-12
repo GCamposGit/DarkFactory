@@ -183,6 +183,10 @@ def test_continuation_prompt_injected_when_workspace_has_changes(tmp_path: Path)
     fake_report.result = MagicMock()
     fake_report.result.text = "All tests pass"
     fake_report.result.duration_s = 45.0
+    # USR-201: run_ticket now copies the CLI-reported model/effort into the (JSON) output, so the
+    # fake result must carry concrete serializable values instead of auto-created MagicMock attributes.
+    fake_report.result.model = "claude-sonnet-5-5"
+    fake_report.result.effort = None
     fake_report.route = ("claude", "sonnet")
     fake_report.total_duration_s = 45.0
 

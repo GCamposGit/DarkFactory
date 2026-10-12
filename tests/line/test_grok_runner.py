@@ -304,7 +304,8 @@ def test_success_returns_the_final_text_usage_cost_and_diagnostics(install_fake,
     assert result.text == _GROK_OK_JSON["text"]
     assert result.usage == _GROK_OK_JSON["usage"]
     assert result.cost_usd == pytest.approx(0.0233648)
-    assert result.harness == "grok" and result.model == "grok-4.7"
+    # USR-201: the effective model is the one the CLI reports in `modelUsage`, not the requested alias.
+    assert result.harness == "grok" and result.model == "grok-4.7-build"
     assert result.exit_code == 0 and result.stderr_tail == "warn: something harmless"
 
 

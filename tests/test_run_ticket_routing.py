@@ -249,7 +249,9 @@ def test_a_final_failure_prints_harness_model_kind_exit_code_duration_and_stderr
     err = capsys.readouterr().err
     assert "[FALHA NA EXECUÇÃO DO AGENTE]" in err and err.count("[FALHA NA EXECUÇÃO DO AGENTE]:") == 0
     for expected in (
-        "harness: codex", "modelo: padrão", "error_kind: crash", "exit_code: 3", "duração: 2.5s",
+        # USR-201: the Codex pin from the routing config (gpt-6-luna) reaches the request, so the
+        # failure report names it instead of the CLI default ("padrão").
+        "harness: codex", "modelo: gpt-6-luna", "error_kind: crash", "exit_code: 3", "duração: 2.5s",
         "panic: sandbox unavailable", "at exec.rs:42",
     ):
         assert expected in err
