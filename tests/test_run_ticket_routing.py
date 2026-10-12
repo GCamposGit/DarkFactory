@@ -249,7 +249,9 @@ def test_a_final_failure_prints_harness_model_kind_exit_code_duration_and_stderr
     err = capsys.readouterr().err
     assert "[FALHA NA EXECUÇÃO DO AGENTE]" in err and err.count("[FALHA NA EXECUÇÃO DO AGENTE]:") == 0
     for expected in (
-        "harness: codex", "modelo: padrão", "error_kind: crash", "exit_code: 3", "duração: 2.5s",
+        # USR-201: the Codex pin from the routing config (gpt-6-luna) reaches the request, so the
+        # failure report names it instead of the CLI default ("padrão").
+        "harness: codex", "modelo: gpt-6-luna", "error_kind: crash", "exit_code: 3", "duração: 2.5s",
         "panic: sandbox unavailable", "at exec.rs:42",
     ):
         assert expected in err
@@ -305,6 +307,29 @@ def test_an_auto_routed_ticket_falls_back_to_the_next_healthy_harness(
     requests: list[AgentRequest] = [c.args[0] for c in env["agent"].call_args_list]
     assert [r.harness for r in requests] == ["claude", "codex"] and all(r.mode == "write" for r in requests)
     assert all(f"harness {r.harness}" in r.prompt.splitlines()[0] for r in requests)
+
+
+def test_json_payload_reports_the_effective_model_and_effort_from_the_cli(
+    env: dict[str, Any], monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """USR-201: the routing config's harness pin (codex -> gpt-6-luna/high) reaches the agent request, and
+    the CLI's own reported model/effort -- not just the pin alias -- lands in the run's JSON record."""
+    monkeypatch.setattr(run_ticket, "pick", MagicMock(return_value=("codex", None)))
+    env["agent"].side_effect = lambda req: AgentResult(
+        ok=True, text="done", harness=req.harness, model="gpt-6-luna-2026-10-01", effort="high", duration_s=4.0,
+    )
+
+    assert main(["USR-99", "--skip-validation", "--no-commit", "--json"]) == 0
+
+    sent: AgentRequest = env["agent"].call_args.args[0]
+    assert sent.harness == "codex"
+    assert sent.model == "gpt-6-luna"  # the stage's harness_pins declaration reached the request
+    assert sent.effort == "high"
+
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["ok"] is True
+    assert payload["model"] == "gpt-6-luna-2026-10-01"  # the CLI's own report, not only the pin alias
+    assert payload["effort"] == "high"
 
 
 def test_a_not_installed_harness_never_backs_off_in_fifty_runs_despite_sleeping_neighbours(

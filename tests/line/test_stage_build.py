@@ -162,6 +162,77 @@ def test_ticket_fails_once_then_passes_commits_and_writes_two_logs(
 
 
 # --------------------------------------------------------------------------
+# DevelopmentStage — the stage's harness pin reaches the agent request, and
+# the CLI's own reported model/effort (not just the pin) reaches progress.json
+# (USR-201).
+# --------------------------------------------------------------------------
+
+
+class _IdentityReportingFakeAgent(_RecordingFakeAgent):
+    """Like `_RecordingFakeAgent`, but the result reports a model/effort of its own -- what the
+    CLI actually ran, which may differ from what the request declared."""
+
+    def __init__(self, behavior: Callable[[int, AgentRequest], None], *, reported_model: str, reported_effort: str) -> None:
+        super().__init__(behavior)
+        self.reported_model = reported_model
+        self.reported_effort = reported_effort
+
+    def __call__(self, req: AgentRequest) -> AgentResult:
+        self.calls.append(req)
+        self.behavior(len(self.calls), req)
+        return AgentResult(
+            ok=True, text="ok", harness=req.harness,
+            model=self.reported_model, effort=self.reported_effort, duration_s=0.01,
+        )
+
+
+def test_development_stage_forwards_the_harness_pin_and_records_the_reported_identity(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The routing config's `harness_pins` (e.g. codex -> gpt-6-luna/high) reaches the agent request,
+    and the model/effort the fake CLI reports back lands in progress.json -- not just the pin alias."""
+    origin = _init_bare_origin(
+        tmp_path,
+        extra_files={"requirements.txt": "", "check_status.py": _CHECK_STATUS_SCRIPT},
+    )
+    project = _project(str(origin), commands=_CHECK_COMMANDS)
+    run_id = "run-pin"
+    _write_tickets(
+        tmp_path / "root",
+        monkeypatch,
+        project,
+        run_id,
+        [{"id": "T1", "title": "Add calc", "goal": "add numbers", "acceptance": ["2+2==4"]}],
+    )
+
+    def behavior(call_no: int, req: AgentRequest) -> None:
+        (req.cwd / "STATUS_OK").write_text("ok\n", encoding="utf-8")
+
+    fake_agent = _IdentityReportingFakeAgent(
+        behavior, reported_model="gpt-6-luna-2026-10-01", reported_effort="high"
+    )
+    stage = DevelopmentStage(
+        run_agent_func=fake_agent,
+        pick_func=_fixed_route("codex", None),  # the cascade entry itself declares no model
+        routing_config=load_routing_config(),
+    )
+
+    result = stage.run(project, run_id)
+
+    assert result.outcome == "success"
+    assert len(fake_agent.calls) == 1
+    sent = fake_agent.calls[0]
+    assert sent.harness == "codex"
+    assert sent.model == "gpt-6-luna"  # the stage's harness_pins declaration reached the request
+    assert sent.effort == "high"
+
+    ws = ws_mod.checkout(project, run_id)
+    progress = json.loads((ws_mod.context_dir(ws) / "progress.json").read_text(encoding="utf-8"))
+    assert progress["model"] == "gpt-6-luna-2026-10-01"  # the CLI's own report, not only the pin alias
+    assert progress["effort"] == "high"
+
+
+# --------------------------------------------------------------------------
 # DevelopmentStage — never passes, exhausts iterations
 # --------------------------------------------------------------------------
 

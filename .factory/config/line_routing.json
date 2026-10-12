@@ -16,6 +16,11 @@
     },
     "development": {
       "cascade": [["claude", "sonnet"], ["codex", null]],
+      "harness_pins": {
+        "claude": {"model": "sonnet"},
+        "codex": {"model": "gpt-6-luna", "effort": "high"},
+        "grok": {"model": "grok-4.7", "effort": "high"}
+      },
       "openrouter_ok": false,
       "openrouter_model": "deepseek/deepseek-v4.1-flash"
     },

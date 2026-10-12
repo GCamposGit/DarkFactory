@@ -149,6 +149,8 @@ class AgentResult(BaseModel):
     text: str
     harness: str
     model: Optional[str] = None
+    # Effective reasoning effort: the value the CLI reported, or the one the request declared.
+    effort: Optional[str] = None
     duration_s: float
     usage: Optional[dict[str, Any]] = None
     cost_usd: Optional[float] = None
@@ -498,6 +500,13 @@ def build_codex_argv(executable: str, req: AgentRequest, tmp_out: Path) -> list[
     argv += ["--skip-git-repo-check", "--json"]
     if req.model:
         argv += ["-m", req.model]
+    # codex-cli 0.162.0 has no --effort flag (`codex exec --help`). The documented override is
+    # `-c key=value`, and this build's config schema names the key `model_reasoning_effort`.
+    # The value is parsed as TOML, so a quoted string matches the help example `-c model="o3"`.
+    # Sandbox flags above are unchanged.
+    effort = _effort_cli_token(req.effort)
+    if effort:
+        argv += ["-c", f'model_reasoning_effort="{effort}"']
     argv += ["-o", str(tmp_out), "-"]
     return argv
 
@@ -537,13 +546,43 @@ def grok_permission_mode() -> str:
     return mode
 
 
+_EFFORT_TOKEN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,31}$")
+
+
+def _effort_cli_token(effort: Optional[str]) -> Optional[str]:
+    """A reasoning-effort token safe to place in argv, or None when it must not be sent.
+
+    Grok 1.0.50 accepts `--reasoning-effort` (alias `--effort`). Anything that is not a single
+    token is dropped so a value cannot smuggle another flag. Empty means "leave the CLI default".
+    """
+    if not isinstance(effort, str):
+        return None
+    token = effort.strip()
+    if not token:
+        return None
+    if _EFFORT_TOKEN.fullmatch(token) is None:
+        logger.warning("Ignoring reasoning effort %r: not a single CLI token", effort)
+        return None
+    return token
+
+
+def _prefer_reported(reported: Optional[str], requested: Optional[str]) -> Optional[str]:
+    """The CLI's own value when it reported one, otherwise what the request declared."""
+    if isinstance(reported, str) and reported.strip():
+        return reported.strip()
+    if isinstance(requested, str) and requested.strip():
+        return requested.strip()
+    return None
+
+
 def build_grok_write_argv(executable: str, req: AgentRequest, prompt_file: Path) -> list[str]:
-    """Build the Grok Build argv for write mode (verified against grok 1.0.46 `--help`).
+    """Build the Grok Build argv for write mode (verified against grok 1.0.50 `--help`).
 
     The prompt goes through `--prompt-file` (never on the command line: Windows caps it at ~32k
     characters and a long ticket prompt would also show up in process listings), the working directory
     is passed both as `--cwd` and as the subprocess cwd, and `--output-format json` yields one JSON
     object with the final text, `usage` and `total_cost_usd` (see `_run_grok_write`).
+    `--reasoning-effort` is passed only when the request declares one. The permission mode is unchanged.
     """
     argv = [
         executable, "--prompt-file", str(prompt_file), "--cwd", str(req.cwd),
@@ -551,6 +590,9 @@ def build_grok_write_argv(executable: str, req: AgentRequest, prompt_file: Path)
     ]
     if req.model:
         argv += ["-m", req.model]
+    effort = _effort_cli_token(req.effort)
+    if effort:
+        argv += ["--reasoning-effort", effort]
     if req.max_turns:
         argv += ["--max-turns", str(req.max_turns)]
     return argv
@@ -866,6 +908,184 @@ def _run_claude(req: AgentRequest) -> AgentResult:
     )
 
 
+_MODEL_KEYS = ("model", "model_id", "modelId", "primaryModelId", "primary_model_id")
+_EFFORT_KEYS = ("reasoning_effort", "reasoningEffort", "model_reasoning_effort", "effort")
+_THREAD_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{7,80}$")
+
+
+def _string_field(obj: Any, keys: tuple[str, ...]) -> Optional[str]:
+    if not isinstance(obj, dict):
+        return None
+    for key in keys:
+        value = obj.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return None
+
+
+def _json_events(blob: str) -> list[dict[str, Any]]:
+    """JSON object, JSON array of objects, or JSONL. Non-JSON lines are skipped."""
+    text = (blob or "").strip()
+    if not text:
+        return []
+    try:
+        parsed = json.loads(text)
+    except json.JSONDecodeError:
+        parsed = None
+    if isinstance(parsed, dict):
+        return [parsed]
+    if isinstance(parsed, list):
+        return [item for item in parsed if isinstance(item, dict)]
+    events: list[dict[str, Any]] = []
+    for line in text.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            item = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(item, dict):
+            events.append(item)
+    return events
+
+
+def _event_identity(event: dict[str, Any]) -> tuple[Optional[str], Optional[str], Optional[str]]:
+    """Model, effort and thread id carried by one Codex event (stdout JSONL or session rollout)."""
+    model = _string_field(event, _MODEL_KEYS)
+    effort = _string_field(event, _EFFORT_KEYS)
+    thread_id = _string_field(event, ("thread_id", "threadId"))
+    payload = event.get("payload") if isinstance(event.get("payload"), dict) else None
+    if payload is not None:
+        model = model or _string_field(payload, _MODEL_KEYS)
+        effort = effort or _string_field(payload, _EFFORT_KEYS)
+        settings = payload.get("thread_settings")
+        if isinstance(settings, dict):
+            model = model or _string_field(settings, _MODEL_KEYS)
+            effort = effort or _string_field(settings, _EFFORT_KEYS)
+        state = payload.get("state")
+        if isinstance(state, dict):
+            model = model or _string_field(state, _MODEL_KEYS)
+            effort = effort or _string_field(state, _EFFORT_KEYS)
+        if event.get("type") in {"session_meta", "thread.started"}:
+            thread_id = thread_id or _string_field(payload, ("id", "thread_id", "threadId"))
+    item = event.get("item")
+    if isinstance(item, dict):
+        model = model or _string_field(item, _MODEL_KEYS)
+        effort = effort or _string_field(item, _EFFORT_KEYS)
+    if event.get("type") == "thread.started":
+        thread_id = thread_id or _string_field(event, ("thread_id", "threadId"))
+    return model, effort, thread_id
+
+
+def _first_identity(events: list[dict[str, Any]]) -> tuple[Optional[str], Optional[str], Optional[str]]:
+    model: Optional[str] = None
+    effort: Optional[str] = None
+    thread_id: Optional[str] = None
+    for event in events:
+        found_model, found_effort, found_thread = _event_identity(event)
+        if model is None and found_model:
+            model = found_model
+        if effort is None and found_effort:
+            effort = found_effort
+        if thread_id is None and found_thread:
+            thread_id = found_thread
+        if model and effort and thread_id:
+            break
+    return model, effort, thread_id
+
+
+def _last_usage_and_cost(events: list[dict[str, Any]]) -> tuple[Optional[dict[str, Any]], Optional[float]]:
+    usage: Optional[dict[str, Any]] = None
+    cost_usd: Optional[float] = None
+    for event in events:
+        candidate = event.get("usage")
+        if isinstance(candidate, dict):
+            usage = candidate
+        raw_cost = event.get("total_cost_usd")
+        if isinstance(raw_cost, (int, float)) and not isinstance(raw_cost, bool):
+            cost_usd = float(raw_cost)
+    return usage, cost_usd
+
+
+def _codex_sessions_root() -> Path:
+    raw = os.environ.get("CODEX_HOME", "").strip()
+    base = Path(raw) if raw else (Path.home() / ".codex")
+    return base / "sessions"
+
+
+def _codex_rollout_identity(thread_id: Optional[str]) -> tuple[Optional[str], Optional[str]]:
+    """Model and effort from the Codex session rollout when `exec --json` omitted them.
+
+    codex-cli 0.162.0 emits `thread.started` with only `thread_id`. The session JSONL
+    (`event_msg` / `thread_settings_applied`, `turn_context`) is where this build records the
+    model and `reasoning_effort`. Only those two fields are read, and only from today's or
+    yesterday's session folder. A missing file leaves the gap empty.
+    """
+    if not thread_id or _THREAD_ID.fullmatch(thread_id) is None:
+        return None, None
+    root = _codex_sessions_root()
+    if not root.is_dir():
+        return None, None
+    today = datetime.now()
+    candidates: list[Path] = []
+    for offset in (0, 1):
+        day = today - timedelta(days=offset)
+        folder = root / f"{day.year:04d}" / f"{day.month:02d}" / f"{day.day:02d}"
+        if not folder.is_dir():
+            continue
+        candidates.extend(path for path in folder.glob(f"*{thread_id}*.jsonl") if path.is_file())
+    if not candidates:
+        return None, None
+    path = max(candidates, key=lambda item: item.stat().st_mtime)
+    try:
+        with path.open("r", encoding="utf-8", errors="replace") as handle:
+            blob = handle.read(256 * 1024)
+    except OSError as exc:
+        logger.debug("Could not read Codex session %s: %s", path.name, exc)
+        return None, None
+    model, effort, _thread = _first_identity(_json_events(blob))
+    return model, effort
+
+
+def _grok_reported_identity(parsed: dict[str, Any]) -> tuple[Optional[str], Optional[str]]:
+    """Effective model and effort from a Grok `--output-format json` object.
+
+    The model is `primaryModelId` when present, otherwise the `modelUsage` key with the
+    highest cost (then token count). Effort is read when the object carries it; grok 1.0.50's
+    documented JSON object does not always include it.
+    """
+    model = _string_field(parsed, ("primaryModelId", "primary_model_id"))
+    usage = parsed.get("modelUsage")
+    if model is None and isinstance(usage, dict):
+        best_name: Optional[str] = None
+        best_score: Optional[tuple[float, int]] = None
+        for name, row in usage.items():
+            if not isinstance(name, str) or not name.strip():
+                continue
+            cost = 0.0
+            tokens = 0
+            if isinstance(row, dict):
+                raw_cost = row.get("costUSD", row.get("cost_usd"))
+                if isinstance(raw_cost, (int, float)) and not isinstance(raw_cost, bool):
+                    cost = float(raw_cost)
+                for key in ("outputTokens", "output_tokens", "inputTokens", "input_tokens"):
+                    raw_tokens = row.get(key)
+                    if isinstance(raw_tokens, int) and not isinstance(raw_tokens, bool):
+                        tokens += raw_tokens
+            score = (cost, tokens)
+            if best_score is None or score > best_score:
+                best_score = score
+                best_name = name.strip()
+        model = best_name
+    effort = _string_field(parsed, _EFFORT_KEYS)
+    if effort is None and isinstance(usage, dict) and model:
+        row = usage.get(model)
+        if isinstance(row, dict):
+            effort = _string_field(row, _EFFORT_KEYS)
+    return model, effort
+
+
 def _run_codex(req: AgentRequest) -> AgentResult:
     executable = find_codex_binary()
     if not executable:
@@ -923,50 +1143,41 @@ def _run_codex(req: AgentRequest) -> AgentResult:
         )
 
     duration = res.duration_s
-    output_text = ""
-    usage: Optional[dict[str, Any]] = None
-    cost_usd: Optional[float] = None
+    file_text = ""
     if tmp_out.is_file():
         try:
-            raw = tmp_out.read_text(encoding="utf-8", errors="replace").strip()
+            file_text = tmp_out.read_text(encoding="utf-8", errors="replace").strip()
         except OSError:
-            raw = ""
-        output_text = raw
-        for line in reversed(raw.splitlines()):
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                event = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            if isinstance(event, dict):
-                candidate_usage = event.get("usage")
-                if isinstance(candidate_usage, dict) and usage is None:
-                    usage = candidate_usage
-                candidate_cost = event.get("total_cost_usd")
-                if isinstance(candidate_cost, (int, float)) and cost_usd is None:
-                    cost_usd = float(candidate_cost)
-                if usage is not None and cost_usd is not None:
-                    break
+            file_text = ""
         try:
             tmp_out.unlink(missing_ok=True)
         except OSError:
             pass
-    if not output_text and res.stdout.strip():
-        output_text = res.stdout.strip()
+    stdout_text = (res.stdout or "").strip()
+    # `-o` is the last message (the text the line already stores). `--json` events are on stdout.
+    # Parse both: older fakes put the JSONL in the `-o` file, and this CLI prints events on stdout.
+    output_text = file_text or stdout_text
+    events = _json_events(file_text) + _json_events(stdout_text)
+    usage, cost_usd = _last_usage_and_cost(events)
+    reported_model, reported_effort, thread_id = _first_identity(events)
+    if reported_model is None or reported_effort is None:
+        rollout_model, rollout_effort = _codex_rollout_identity(thread_id)
+        reported_model = reported_model or rollout_model
+        reported_effort = reported_effort or rollout_effort
+    model = _prefer_reported(reported_model, req.model)
+    effort = _prefer_reported(reported_effort, req.effort)
 
     stderr = res.stderr
     combined = f"{output_text}\n{stderr}"
     diag: dict[str, Any] = {"exit_code": res.returncode, "stderr_tail": _stderr_tail(stderr)}
     if res.returncode != 0:
         return AgentResult(
-            ok=False, text=output_text, harness="codex", model=req.model, duration_s=duration,
+            ok=False, text=output_text, harness="codex", model=model, effort=effort, duration_s=duration,
             usage=usage, cost_usd=cost_usd,
             error_kind=_classify_error(combined), reset_at=_extract_reset_at(combined), **diag,
         )
     return AgentResult(
-        ok=True, text=output_text, harness="codex", model=req.model, duration_s=duration,
+        ok=True, text=output_text, harness="codex", model=model, effort=effort, duration_s=duration,
         usage=usage, cost_usd=cost_usd, **diag,
     )
 
@@ -1058,10 +1269,15 @@ def _run_grok_write(req: AgentRequest, executable: str) -> AgentResult:
         cost_usd = float(cost_raw) if isinstance(cost_raw, (int, float)) and not isinstance(cost_raw, bool) else None
         stop_reason = parsed.get("stopReason") if isinstance(parsed.get("stopReason"), str) else None
 
+    reported_model, reported_effort = _grok_reported_identity(parsed) if isinstance(parsed, dict) else (None, None)
+    model = _prefer_reported(reported_model, req.model)
+    effort = _prefer_reported(reported_effort, req.effort)
+
     if res.returncode != 0 or is_error:
         combined = f"{error_text}\n{stderr}"
         return AgentResult(
-            ok=False, text=redact_secrets(result_text or stderr.strip()), harness="grok", model=req.model,
+            ok=False, text=redact_secrets(result_text or stderr.strip()), harness="grok",
+            model=model, effort=effort,
             duration_s=duration, usage=usage, cost_usd=cost_usd,
             error_kind=_classify_error(combined), reset_at=_extract_reset_at(combined), **diag,
         )
@@ -1078,14 +1294,14 @@ def _run_grok_write(req: AgentRequest, executable: str) -> AgentResult:
             agent_text=result_text,
         )
         return AgentResult(
-            ok=False, text=redact_secrets(diagnosis.text), harness="grok", model=req.model,
+            ok=False, text=redact_secrets(diagnosis.text), harness="grok", model=model, effort=effort,
             duration_s=duration, usage=usage, cost_usd=cost_usd,
             error_kind=diagnosis.error_kind,  # type: ignore[arg-type]
             protected_path=diagnosis.protected_path,
             **diag,
         )
     return AgentResult(
-        ok=True, text=redact_secrets(result_text), harness="grok", model=req.model,
+        ok=True, text=redact_secrets(result_text), harness="grok", model=model, effort=effort,
         duration_s=duration, usage=usage, cost_usd=cost_usd, **diag,
     )
 
@@ -1322,6 +1538,7 @@ def run_agent(req: AgentRequest) -> AgentResult:
         }
         prov = provider_map.get(harness, harness)
         model_name = res.model or (req.model or "unknown")
+        effort_name = res.effort or req.effort
         tier_val = infer_model_tier(prov, model_name)
 
         input_toks = None
@@ -1346,6 +1563,7 @@ def run_agent(req: AgentRequest) -> AgentResult:
                 cost_usd=res.cost_usd,
                 latency_ms=round(res.duration_s * 1000, 1),
                 source=f"agent_cli.{harness}",
+                reasoning_effort=effort_name,
             )
         )
     except Exception as exc:

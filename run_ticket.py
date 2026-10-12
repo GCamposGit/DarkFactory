@@ -51,7 +51,13 @@ from core.line.agent_cli import (
 from core.line.diagnostics import redacted_head
 from core.line.local_progress import ENV_RUN_ID, ENV_WARNED, ProgressPublisher, open_progress
 from core.line.operating_harness import detect_operating_harness
-from core.line.routing import _HARNESS_TO_PROVIDER, _default_quota_headroom, load_routing_config, pick
+from core.line.routing import (
+    _HARNESS_TO_PROVIDER,
+    _default_quota_headroom,
+    harness_cli_pin,
+    load_routing_config,
+    pick,
+)
 from core.usage.history import history_path, read_history
 from core.usage.ticket_cost import format_ticket_quota_summary, record_ticket_quota_cost
 from core.roadmap.models import DeliveryStatus
@@ -1248,11 +1254,19 @@ def _run(argv: Optional[list[str]], box: list[ProgressPublisher], stack: context
                 f"continue o desenvolvimento a partir de onde parou, ajuste os testes unitários e garanta que todos os critérios de aceite passem.\n"
             )
 
+        cli_model, cli_effort = harness_cli_pin(
+            harness, model, stage="development", config=load_routing_config()
+        )
         return AgentRequest(
             prompt=headless_development_preamble(
                 harness, quotas.get(harness, {}).get("headroom")
             ) + dev_prompt + continuation_prompt,
-            cwd=workspace.path, mode=DEVELOPMENT_MODE, harness=harness, model=model, timeout_s=1800,
+            cwd=workspace.path,
+            mode=DEVELOPMENT_MODE,
+            harness=harness,
+            model=cli_model,
+            effort=cli_effort,
+            timeout_s=1800,
         )
 
     def _report_progress(message: str) -> None:
@@ -1333,6 +1347,9 @@ def _run(argv: Optional[list[str]], box: list[ProgressPublisher], stack: context
     agent_result = report.result
     if report.route is not None:
         selected_harness, selected_model = report.route  # the harness that actually did the work
+    if agent_result.model:
+        selected_model = agent_result.model  # the model the CLI reported, not only the cascade alias
+    selected_effort = agent_result.effort
 
     quotas_after = inspect_quotas()
     after_headroom = quotas_after.get(selected_harness, {}).get("headroom")
@@ -1474,6 +1491,7 @@ def _run(argv: Optional[list[str]], box: list[ProgressPublisher], stack: context
             "quota_usage": cost_record,
             "harness": selected_harness,
             "model": selected_model,
+            "effort": selected_effort,
             "duration_s": agent_result.duration_s,
             "workspace": str(workspace.path),
             "branch": workspace.branch,

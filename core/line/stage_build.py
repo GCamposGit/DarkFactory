@@ -51,7 +51,7 @@ from core.git import ci_checks
 from core.line import agent_retry, base_probe, base_sync, cancellation, diagnostics, workspace
 from core.line.agent_cli import AgentRequest, AgentResult, headless_development_preamble, run_agent
 from core.line.route_wait import RouteWaiter
-from core.line.routing import RoutingConfig, load_routing_config, pick, record_result
+from core.line.routing import RoutingConfig, harness_cli_pin, load_routing_config, pick, record_result
 from core.line.workspace import RunWorkspace, WorkspaceError
 from core.projects.models import ProjectCommands, ProjectDescriptor
 from core.projects.registry import normalize_repo_url, resolve_commands
@@ -154,6 +154,7 @@ class DevelopmentProgress(BaseModel):
 
     harness: Optional[str] = None
     model: Optional[str] = None
+    effort: Optional[str] = None
     tickets_done: list[str] = Field(default_factory=list)
 
 
@@ -505,6 +506,9 @@ class DevelopmentStage:
                         host_caps=self.host_caps, config=self.routing_config, mode="write",
                     )
                 harness, model = route
+                cli_model, cli_effort = harness_cli_pin(
+                    harness, model, stage="development", config=self.routing_config
+                )
                 prompt = self._build_prompt(
                     ticket,
                     commands,
@@ -521,7 +525,8 @@ class DevelopmentStage:
                         cwd=ws.path,
                         mode="write",
                         harness=harness,
-                        model=model,
+                        model=cli_model,
+                        effort=cli_effort,
                         timeout_s=self.agent_timeout_s,
                     )
                 )
@@ -617,7 +622,8 @@ class DevelopmentStage:
                 # another host) reads the implementing harness from the branch,
                 # and it keeps a fix-up commit non-empty so its trailer lands.
                 progress.harness = harness
-                progress.model = model
+                progress.model = agent_result.model or model
+                progress.effort = agent_result.effort
                 if ticket.id not in progress.tickets_done:
                     progress.tickets_done.append(ticket.id)
                 _write_progress(ws, progress)
@@ -644,7 +650,11 @@ class DevelopmentStage:
             base_only, ticket_only = self._split_base_failures(ws, project, validate_result)
             if base_only and not ticket_only:
                 return self._base_red_result(
-                    ws, run_id, ticket, base_only, harness=harness, model=model, log_name=log_name
+                    ws, run_id, ticket, base_only,
+                    harness=harness,
+                    model=agent_result.model or model,
+                    effort=agent_result.effort,
+                    log_name=log_name,
                 )
             if base_only:
                 last_validate_log += (
@@ -713,6 +723,7 @@ class DevelopmentStage:
         harness: str,
         model: Optional[str],
         log_name: str,
+        effort: Optional[str] = None,
     ) -> StageResult:
         """Wait for the base instead of re-iterating the developer: no iteration is consumed.
 
@@ -727,7 +738,9 @@ class DevelopmentStage:
         refs.append(f"validate_log:{log_name}")
         workspace.write_context(
             ws, _base_red_marker_name(ticket.id),
-            json.dumps({"harness": harness, "model": model, "tests": base_only}, indent=2),
+            json.dumps(
+                {"harness": harness, "model": model, "effort": effort, "tests": base_only}, indent=2
+            ),
         )
         self._persist_diagnostics(ws, run_id, ticket.id)
         spent = self._base_red_waits_spent(run_id)

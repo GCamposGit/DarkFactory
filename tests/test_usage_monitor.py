@@ -502,6 +502,56 @@ def test_model_ledger_aggregates_modalities_and_is_idempotent(tmp_path: Path) ->
     assert {row.harness for row in report.aggregates} == {"gpt-review", "visual-studio"}
 
 
+def test_model_ledger_records_the_reasoning_effort_in_the_run_telemetry(tmp_path: Path) -> None:
+    """USR-201: the effective reasoning effort (CLI-reported or request-declared) reaches the run's
+    telemetry record, not just the in-memory event -- `core.line.agent_cli.run_agent` relies on this to
+    register what the headless CLI actually ran."""
+    from core.telemetry.models import TelemetryFilters
+    from core.telemetry.store import TelemetryStore
+
+    ledger = ModelUsageLedger(tmp_path / "usage")
+    ledger.record(
+        ModelCallEvent(
+            invocation_id="effort-call-001",
+            provider="xai",
+            model="grok-4.7-build",
+            tier=ModelTier.FRONTIER,
+            harness="grok",
+            reasoning_effort="high",
+            source="test",
+        )
+    )
+
+    store = TelemetryStore(tmp_path / "telemetry.db")
+    result = store.query_runs(TelemetryFilters(model="grok-4.7-build"))
+
+    assert len(result.runs) == 1
+    assert result.runs[0].metadata.get("reasoning_effort") == "high"
+
+
+def test_model_ledger_leaves_reasoning_effort_out_of_telemetry_metadata_when_absent(tmp_path: Path) -> None:
+    ledger = ModelUsageLedger(tmp_path / "usage")
+    ledger.record(
+        ModelCallEvent(
+            invocation_id="effort-call-002",
+            provider="anthropic",
+            model="sonnet",
+            tier=ModelTier.FRONTIER,
+            harness="claude",
+            source="test",
+        )
+    )
+
+    from core.telemetry.models import TelemetryFilters
+    from core.telemetry.store import TelemetryStore
+
+    store = TelemetryStore(tmp_path / "telemetry.db")
+    result = store.query_runs(TelemetryFilters(model="sonnet"))
+
+    assert len(result.runs) == 1
+    assert "reasoning_effort" not in result.runs[0].metadata
+
+
 def test_independent_ledger_instances_serialize_transactions(tmp_path: Path) -> None:
     def record(index: int) -> None:
         ModelUsageLedger(tmp_path).record(
