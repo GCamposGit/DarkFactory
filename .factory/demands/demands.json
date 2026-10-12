@@ -7424,5 +7424,36 @@
     "dependencies": [],
     "created_at": "2026-10-12T06:47:19.417120Z",
     "updated_at": "2026-10-12T06:47:19.417120Z"
+  },
+  {
+    "id": "USR-248",
+    "project_id": "darkfac",
+    "title": "Alerta OA-QR do registro de fila nao pode sujar o checkout compartilhado nem bloquear o run_ticket",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand",
+      "v0-critico"
+    ],
+    "problem_statement": "Defeito do USR-238 (11-12/10/2026): quando um PR de registro de fila desiste (ex.: main vermelha), core/git/queue_registration.py::raise_alert grava o item OA-QR-<PR> em .factory/owner_actions/owner_actions.json do CHECKOUT COMPARTILHADO (C:\\dev\\DarkFac) sem commit. O checkout fica sujo e todo `run_ticket <ID>` seguinte aborta com 'O checkout compartilhado tem alteracoes nao commitadas de outro ticket/sessao' (visto em 12/10 ao lancar o USR-239 com OA-QR-317), alem de o alerta nunca chegar ao DarkHub, que so le o arquivo do repositorio apos merge e deploy. O proprio mecanismo que deveria evitar o resgate manual passou a causar um.",
+    "core_journey": [
+      "Defeito do USR-238 (11-12/10/2026): quando um PR de registro de fila desiste (ex.: main vermelha), core/git/queue_registration.py::raise_alert grava o item OA-QR-<PR> em .factory/owner_actions/owner_actions.json do CHECKOUT COMPARTILHADO (C:\\dev\\DarkFac) sem commit. O checkout fica sujo e todo `run_ticket <ID>` seguinte aborta com 'O checkout compartilhado tem alteracoes nao commitadas de outro ticket/sessao' (visto em 12/10 ao lancar o USR-239 com OA-QR-317), alem de o alerta nunca chegar ao DarkHub, que so le o arquivo do repositorio apos merge e deploy. O proprio mecanismo que deveria evitar o resgate manual passou a causar um."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "O alerta OA-QR e entregue pelo ciclo autonomo (commit em worktree propria + PR/merge do ledger) ou gravado fora do arquivo versionado, sem deixar alteracao nao commitada no checkout compartilhado",
+      "run_ticket nao aborta por causa de um alerta OA-QR pendente; item resolvido quando o PR de registro fecha ou mergeia",
+      "Teste focal: desistencia de um registro de fila gera o alerta e git status do checkout principal continua limpo"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-12T07:04:17.734323Z",
+    "updated_at": "2026-10-12T07:04:17.734323Z"
   }
 ]
