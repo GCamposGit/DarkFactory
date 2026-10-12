@@ -7320,5 +7320,36 @@
     "dependencies": [],
     "created_at": "2026-10-11T23:53:16.657703Z",
     "updated_at": "2026-10-11T23:53:16.657703Z"
+  },
+  {
+    "id": "USR-245",
+    "project_id": "darkfac",
+    "title": "run_ticket headless: portao reprovado deve voltar ao agente com o log destilado antes de devolver o ticket",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand",
+      "v0-critico"
+    ],
+    "problem_statement": "Resgate no V0 (11-12/10/2026, USR-201): run_ticket USR-201 reaproveitou a worktree preservada (USR-225 ok), o agente headless (Claude) encerrou o turno com 'vou esperar o pytest em segundo plano' sem atualizar 3 testes que a propria mudanca quebrou (test_grok_runner, test_run_ticket_routing, test_ticket_quota_cost_and_continuation), e a fase de entrega foi direto ao portao, que reprovou (3 failed, 3940 passed em 1870 s). Nao houve volta de correcao: o run_ticket devolveu o ticket ao operador com 'Comando para retomar entrega', o que exigiu resgate manual e zerou o contador do V0. A linha autonoma (DevelopmentStage) tem ate 3 iteracoes de auto-correcao com log destilado; o launcher run_ticket nao.",
+    "core_journey": [
+      "Resgate no V0 (11-12/10/2026, USR-201): run_ticket USR-201 reaproveitou a worktree preservada (USR-225 ok), o agente headless (Claude) encerrou o turno com 'vou esperar o pytest em segundo plano' sem atualizar 3 testes que a propria mudanca quebrou (test_grok_runner, test_run_ticket_routing, test_ticket_quota_cost_and_continuation), e a fase de entrega foi direto ao portao, que reprovou (3 failed, 3940 passed em 1870 s). Nao houve volta de correcao: o run_ticket devolveu o ticket ao operador com 'Comando para retomar entrega', o que exigiu resgate manual e zerou o contador do V0. A linha autonoma (DevelopmentStage) tem ate 3 iteracoes de auto-correcao com log destilado; o launcher run_ticket nao."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Quando o portao reprova na fase de entrega do run_ticket, o launcher reinvoca o agente na mesma worktree (no maximo 2 vezes) com os testes reprovados e o log destilado, e roda o portao de novo",
+      "O agente headless que encerra o turno esperando tarefa em segundo plano nao conta como conclusao: o launcher roda os testes focais dos arquivos alterados antes do portao e trata falha como reprovacao",
+      "Teste focal com agente falso que deixa um teste quebrado na primeira passada e o corrige na segunda; o ticket chega ao merge sem --resume-delivery"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-12T01:41:30.643038Z",
+    "updated_at": "2026-10-12T01:41:30.643038Z"
   }
 ]
