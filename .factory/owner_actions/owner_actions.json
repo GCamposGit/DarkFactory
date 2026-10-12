@@ -542,6 +542,48 @@
       "created_at": "2026-10-12T07:21:49Z",
       "created_by": "claude-session-2026-10-12-v0",
       "resolved_at": null
+    },
+    {
+      "id": "OA-015",
+      "kind": "action",
+      "title": "Religar o Desktop (darkfac-desktop, 100.78.181.90): o PC esta offline no Tailscale e todo portao cai para o Notebook e estoura 3000 s",
+      "priority": "critical",
+      "status": "open",
+      "why": "Em 12/10/2026 o worker de testes do Desktop deixou de responder: o Tailscale mostra 'darkfac-desktop offline, last seen 46m ago' (as 13:24), sem resposta a ping nem as portas 8080, 3389 e 22, ou seja, o PC inteiro esta fora da rede (desligado, em suspensao ou sem Tailscale), nao so o worker. Sem o Desktop, o portao oficial cai para execucao local no Notebook (cerca de 4 GiB de RAM livre) e estoura o limite de 3000 s: foi assim que o primeiro lancamento unico da V0 (USR-239) terminou com codigo 124 e precisou de resgate. Enquanto o Desktop estiver fora, nenhum ticket v0-critico fecha limpo.",
+      "blocks": [
+        "USR-239",
+        "USR-178",
+        "USR-186"
+      ],
+      "depends_on": [],
+      "steps": [
+        {
+          "text": "Va ate o PC Desktop (DESKTOP-G45IPEM) e veja se ele esta ligado. Se a tela estiver apagada, mova o mouse ou aperte uma tecla; se estiver desligado ou hibernado, ligue pelo botao de energia e aguarde o Windows terminar de iniciar (cerca de 2 minutos)."
+        },
+        {
+          "text": "Confirme o Tailscale: o icone fica na bandeja do Windows (canto inferior direito, ao lado do relogio). Ele deve mostrar 'Connected'. Se pedir login, entre com a conta guigcam. Para conferir no PowerShell:",
+          "command": "tailscale status"
+        },
+        {
+          "text": "Abra o PowerShell (menu Iniciar, digite PowerShell, Enter) e veja se a tarefa agendada do worker de testes esta em execucao. A linha 'Status' deve dizer 'Em execucao' (ou 'Running').",
+          "command": "schtasks /Query /TN \"DarkFac Test Worker\" /FO LIST"
+        },
+        {
+          "text": "Se o Status for 'Pronto' (Ready) ou a tarefa nao estiver rodando, inicie-a:",
+          "command": "schtasks /Run /TN \"DarkFac Test Worker\""
+        },
+        {
+          "text": "Teste o worker no proprio Desktop (aguarde uns 10 segundos depois de iniciar). A resposta deve ser um JSON com \"status\" e \"busy\".",
+          "command": "Invoke-RestMethod -TimeoutSec 15 http://127.0.0.1:8080/health | Select-Object status, busy, queue_length, git_sha"
+        },
+        {
+          "text": "Opcional, para nao repetir: impeca a suspensao automatica. Configuracoes do Windows > Sistema > Energia e bateria > Tela e suspensao > em 'Quando conectado, colocar o dispositivo em suspensao apos' escolha 'Nunca'."
+        }
+      ],
+      "verify": "Do Notebook, o comando 'Invoke-RestMethod -TimeoutSec 25 http://100.78.181.90:8080/health' responde com busy=False e queue_length=0, e 'tailscale status' mostra darkfac-desktop como active (sem 'offline').",
+      "created_at": "2026-10-12T11:27:34Z",
+      "created_by": "claude-code",
+      "resolved_at": null
     }
   ]
 }
