@@ -34,6 +34,10 @@ def _isolated(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         "DARKFAC_WORKER_HEALTH_TIMEOUT_SEC",
         "DARKFAC_WORKER_DEAD_PROBES",
         "DARKFAC_WORKER_TOKEN",
+        # A CI desliga o despacho remoto de proposito (_unconditional_disable_reason); os testes simulam o despacho (USR-251).
+        "CI",
+        "DARKFAC_WORKER_JOB",
+        "DARKFAC_REMOTE_HARNESS",
     ):
         monkeypatch.delenv(name, raising=False)
     remote_dispatch.DISPATCH_ATTEMPTS.clear()
