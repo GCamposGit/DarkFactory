@@ -7495,5 +7495,67 @@
     "dependencies": [],
     "created_at": "2026-10-12T11:45:43.602209Z",
     "updated_at": "2026-10-12T11:45:43.602209Z"
+  },
+  {
+    "id": "USR-252",
+    "project_id": "darkfac",
+    "title": "Teste instavel tests/test_task_dashboard_client.py::test_task_dashboard_visible_polling_and_failure_cache estoura timeout no Windows da CI",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "later",
+    "tags": [
+      "user-demand",
+      "congelado-v0"
+    ],
+    "problem_statement": "Em 13/10/2026 o job pr-validation (windows-latest) do PR de backlog #328 falhou com subprocess.TimeoutExpired no 'node --test tests/js/task_dashboard...' (1 failed, 4006 passed) e passou no rerun, sem relacao com o diff. Teste instavel que pode vermelhar PRs e a main sem motivo.",
+    "core_journey": [
+      "Em 13/10/2026 o job pr-validation (windows-latest) do PR de backlog #328 falhou com subprocess.TimeoutExpired no 'node --test tests/js/task_dashboard...' (1 failed, 4006 passed) e passou no rerun, sem relacao com o diff. Teste instavel que pode vermelhar PRs e a main sem motivo."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Causa do timeout identificada (carga do runner, timeout curto do subprocess ou espera ativa) com evidencia",
+      "Timeout do subprocess proporcional ou teste deterministico, sem sleeps reais",
+      "10 execucoes seguidas no Windows sem falha"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-13T00:30:06.532856Z",
+    "updated_at": "2026-10-13T00:30:06.532856Z"
+  },
+  {
+    "id": "USR-253",
+    "project_id": "darkfac",
+    "title": "Watchdog do job em remote_worker.py conta a fila do suite_lock do Desktop no prazo do job",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "later",
+    "tags": [
+      "user-demand",
+      "congelado-v0"
+    ],
+    "problem_statement": "Seguimento do USR-178: JobManager._run_job usa deadline = soma dos timeout_sec dos passos + 120 s, e a espera na fila do suite_lock do Desktop corre dentro desse prazo; uma fila longa pode matar o job. A proposta docs/proposals/USR-178-gate-resilience.md (secao 6) traz o trecho: o worker estende o deadline pela linha '[SUITE_LOCK] acquired ... after waiting Xs', com teto de 3600 s. remote_worker.py e protegido (patch em docs/proposals e OA).",
+    "core_journey": [
+      "Seguimento do USR-178: JobManager._run_job usa deadline = soma dos timeout_sec dos passos + 120 s, e a espera na fila do suite_lock do Desktop corre dentro desse prazo; uma fila longa pode matar o job. A proposta docs/proposals/USR-178-gate-resilience.md (secao 6) traz o trecho: o worker estende o deadline pela linha '[SUITE_LOCK] acquired ... after waiting Xs', com teto de 3600 s. remote_worker.py e protegido (patch em docs/proposals e OA)."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "O watchdog do worker estende o prazo do job pelo tempo informado na linha [SUITE_LOCK] acquired, com teto configuravel",
+      "Teste com fila de lock maior que a soma dos timeouts nao mata o job",
+      "Patch entregue em docs/proposals com OA para o owner aplicar (arquivo protegido)"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-13T00:30:14.404999Z",
+    "updated_at": "2026-10-13T00:30:14.404999Z"
   }
 ]
