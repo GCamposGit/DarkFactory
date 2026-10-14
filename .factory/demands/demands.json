@@ -7592,5 +7592,39 @@
     "dependencies": [],
     "created_at": "2026-10-14T06:35:19.129693Z",
     "updated_at": "2026-10-14T06:35:19.131292Z"
+  },
+  {
+    "id": "USR-256",
+    "project_id": "darkfac",
+    "title": "Timeout do agente com alteracoes na worktree aborta o run_ticket em vez de seguir para foco, portao e autocorrecao",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand",
+      "v0-critico",
+      "bug"
+    ],
+    "problem_statement": "Em 14/10/2026 o lancamento unico 'run_ticket USR-246' (2a entrega da sequencia V0) terminou com codigo 1: o agente claude/sonnet estourou 1800 s com 6 arquivos alterados; agent_retry parou as tentativas ('implementation changes are already present in worktree') e documenta 'advance directly to validation', mas run_ticket.py trata o relatorio nao-ok como [FALHA NA EXECUCAO DO AGENTE], preserva a worktree e sai. O ticket ficou 'planned' sem motivo registrado. Exigiu resgate por --resume-delivery e zerou o contador do V0.",
+    "core_journey": [],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Quando o agente termina por timeout e agent_retry parou porque ja ha alteracoes na worktree, run_ticket segue para o pre-teste focal, o portao oficial e o laco de autocorrecao (USR-245/249) na mesma worktree, em vez de abortar",
+      "Se o run falhar depois disso (ou sem alteracoes), o ticket volta a planned com o motivo (causa, worktree e comando de retomada) gravado no ledger ou numa OA, nunca em silencio",
+      "Teste com agente falso cobre: timeout com alteracoes -> portao roda e entrega; timeout sem alteracoes -> falha explicita com motivo registrado"
+    ],
+    "suggested_files": [
+      "run_ticket.py",
+      "core/line/agent_retry.py",
+      "tests/"
+    ],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-14T09:13:11.666648Z",
+    "updated_at": "2026-10-14T09:13:11.666648Z"
   }
 ]
