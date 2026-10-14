@@ -152,20 +152,6 @@ def _run_git_quiet(args: list[str], cwd: Path, timeout: float = _REMOTE_ID_TIMEO
         return subprocess.CompletedProcess(args, 1, "", "")
 
 
-def _locate_in_repo(path: Path) -> tuple[Path, str] | None:
-    """``(repo_root, repo_relative_posix_path)`` for ``path``, or ``None`` outside a Git repo."""
-    directory = path.parent
-    result = _run_git_quiet(["rev-parse", "--show-toplevel"], directory)
-    if result.returncode != 0:
-        return None
-    root = Path(result.stdout.strip())
-    try:
-        rel = path.resolve().relative_to(root.resolve())
-    except (OSError, ValueError):
-        return None
-    return root.resolve(), rel.as_posix()
-
-
 def _raw_actions(payload: Any) -> list[Any]:
     if isinstance(payload, list):
         return payload
@@ -295,11 +281,12 @@ class OwnerActionStore:
         """
         if not self.remote_ref:
             return set()
-        located = _locate_in_repo(self.path)
-        if located is None:
+        directory = self.path.parent
+        if not directory.is_dir():
             return set()
-        root, rel = located
-        result = safe_show(self.remote_ref, rel, cwd=root, runner=_run_git_quiet)
+        # One local `git show <ref>:./<name>` relative to the file's directory: no rev-parse, no
+        # fetch, no network, 5 s cap; outside a repo or without the ref it simply fails fast.
+        result = safe_show(self.remote_ref, f"./{self.path.name}", cwd=directory, runner=_run_git_quiet)
         if result.returncode != 0:
             return set()
         try:

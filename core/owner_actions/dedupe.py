@@ -19,8 +19,9 @@ from __future__ import annotations
 
 import json
 import logging
+import subprocess
 from pathlib import Path
-from typing import Any
+from typing import Any, Sequence
 
 from core.git.safe_show import GitRunner, safe_show
 from core.owner_actions.models import SEQUENTIAL_ID_PATTERN
@@ -38,8 +39,22 @@ def _extract_rows(payload: Any) -> list[Any]:
     return []
 
 
+_GIT_TIMEOUT_S = 5.0
+
+
+def _bounded_git(args: Sequence[str], cwd: Path) -> subprocess.CompletedProcess[str]:
+    """Local-only ``git`` call: short timeout, never raises (a hang or a missing repo is a miss)."""
+    try:
+        return subprocess.run(
+            ["git", *args], cwd=cwd, capture_output=True, text=True,
+            encoding="utf-8", errors="replace", timeout=_GIT_TIMEOUT_S, check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return subprocess.CompletedProcess(list(args), 1, "", "")
+
+
 def _remote_rows(cwd: Path, remote_ref: str, runner: GitRunner | None) -> list[dict[str, Any]]:
-    result = safe_show(remote_ref, OWNER_ACTIONS_RELATIVE, cwd=cwd, runner=runner)
+    result = safe_show(remote_ref, OWNER_ACTIONS_RELATIVE, cwd=cwd, runner=runner or _bounded_git)
     if result.returncode != 0:
         return []
     try:
@@ -80,11 +95,6 @@ def renumber_duplicate_owner_actions(
     if not rows:
         return []
 
-    remote_rows = _remote_rows(cwd, remote_ref, runner)
-    remote_by_id: dict[str, dict[str, Any]] = {}
-    for row in remote_rows:
-        remote_by_id.setdefault(str(row.get("id", "")), row)
-
     groups: dict[str, list[int]] = {}
     for index, row in enumerate(rows):
         if not isinstance(row, dict):
@@ -92,6 +102,14 @@ def renumber_duplicate_owner_actions(
         action_id = str(row.get("id", ""))
         if action_id:
             groups.setdefault(action_id, []).append(index)
+
+    if not any(len(indices) > 1 for indices in groups.values()):
+        return []  # no duplicate: skip git entirely (no `git show`, no process spawn)
+
+    remote_rows = _remote_rows(cwd, remote_ref, runner)
+    remote_by_id: dict[str, dict[str, Any]] = {}
+    for row in remote_rows:
+        remote_by_id.setdefault(str(row.get("id", "")), row)
 
     used_numbers: set[int] = set()
     for action_id in (*groups, *remote_by_id):

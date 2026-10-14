@@ -628,3 +628,28 @@ def test_request_human_help_mirrors_via_env_path(monkeypatch: pytest.MonkeyPatch
 
     assert human.resume_blocked_job(_Store(), "run-darkfac-USR-9", "build") is True  # type: ignore[arg-type]
     assert OwnerActionStore(target).list_actions()[0].status is ActionStatus.DONE
+
+
+def test_dedupe_and_store_are_fast_and_quiet_without_origin(tmp_path: Path) -> None:
+    """Repo with no ``origin`` (or no ref): no-duplicate runs skip git, duplicates still repair, < 5 s (USR-255)."""
+    import time
+
+    repo = tmp_path / "repo"
+    _init_repo_with_oa(repo)
+    oa_path = repo / ".factory" / "owner_actions" / "owner_actions.json"
+    first = _draft().build("OA-001").to_record()
+    second = _draft(title="Outra").build("OA-001").to_record()
+
+    started = time.monotonic()
+    oa_path.write_text(json.dumps({"schema_version": 1, "actions": [first]}), encoding="utf-8")
+    assert renumber_duplicate_owner_actions(repo) == []  # nothing duplicated: no git needed
+
+    oa_path.write_text(json.dumps({"schema_version": 1, "actions": [first, second]}), encoding="utf-8")
+    changes = renumber_duplicate_owner_actions(repo, remote_ref="origin/main")  # no origin/main exists
+    assert changes == ["OA-001 -> OA-002"]
+    ids = [row["id"] for row in json.loads(oa_path.read_text(encoding="utf-8"))["actions"]]
+    assert ids == ["OA-001", "OA-002"]
+
+    assert OwnerActionStore(oa_path).next_id() == "OA-003"  # default remote_ref, missing ref: ignored
+    assert OwnerActionStore(tmp_path / "nowhere" / "x.json").next_id() == "OA-001"  # not even a directory
+    assert time.monotonic() - started < 5.0
