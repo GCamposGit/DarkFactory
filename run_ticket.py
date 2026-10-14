@@ -761,6 +761,61 @@ def _render_self_correction_log(attempts_log: list[dict[str, Any]]) -> str:
     return "\n".join(lines)
 
 
+def _tail_lines(text: str | None, count: int = 20) -> str:
+    """Last `count` lines of `text`, redacted of secrets (USR-257)."""
+    lines = (text or "").splitlines()[-count:]
+    return redacted_head(chr(10).join(lines), 4000) if lines else "(vazio)"
+
+
+def _report_delivery_child_failure(
+    proc: Any,
+    completion_info: dict[str, Any],
+    stdout_was_json: bool,
+    ticket_id: str,
+    worktree: Path,
+    stream: Any = None,
+) -> None:
+    """Human-mode console report for a failed delivery child: the child ran with --json so its own
+    human messages were suppressed; without this the console only shows the resume hint (USR-257)."""
+    out = stream if stream is not None else sys.stderr
+    exit_code = getattr(proc, "returncode", None)
+    if stdout_was_json:
+        parts = [f"causa: {completion_info.get('cause') or 'desconhecida'}"]
+        parts.append(f"erro: {completion_info.get('error') or '(sem detalhe)'}")
+        if completion_info.get("exit_code") is not None:
+            parts.append(f"codigo de saida do filho: {completion_info['exit_code']}")
+        print("[ERRO NA ENTREGA] " + "; ".join(parts), file=out)
+        log = completion_info.get("self_correction_log") or completion_info.get("attempts_log")
+        if log and isinstance(log, list):
+            try:
+                print(_render_self_correction_log(log), file=out)
+            except Exception:
+                print(f"[AUTOCORREÇÃO] {len(log)} tentativa(s) registrada(s)", file=out)
+        resume = completion_info.get("resume_command")
+    else:
+        duration = getattr(proc, "duration_s", 0.0) or 0.0
+        flags = []
+        if getattr(proc, "timed_out", False):
+            flags.append("timeout")
+        if getattr(proc, "cancelled", False):
+            flags.append("cancelado")
+        extra = f" ({', '.join(flags)})" if flags else ""
+        print(
+            f"[ERRO NA ENTREGA] processo filho terminou sem JSON valido{extra}: "
+            f"codigo de saida {exit_code}; duracao {duration:.1f}s",
+            file=out,
+        )
+        print("--- ultimas linhas do stdout do filho ---", file=out)
+        print(_tail_lines(getattr(proc, "stdout", "")), file=out)
+        print("--- ultimas linhas do stderr do filho ---", file=out)
+        print(_tail_lines(getattr(proc, "stderr", "")), file=out)
+        resume = None
+    if not resume:
+        resume = f"python {PROJECT_ROOT / 'run_ticket.py'} --resume-delivery {ticket_id} --worktree {worktree}"
+    print("[i] Comando para retomar entrega:", file=out)
+    print(f"  {resume}", file=out)
+
+
 def _run_gate_with_self_correction(
     target_worktree: Path,
     current_branch: str,
@@ -2018,10 +2073,18 @@ def _run(argv: Optional[list[str]], box: list[ProgressPublisher], stack: context
         exit_code = delivery_proc.returncode
         if not args.json and delivery_proc.stderr:
             print(delivery_proc.stderr, file=sys.stderr, end="")
+        stdout_was_json = True
         try:
             completion_info = json.loads(delivery_proc.stdout)
+            if not isinstance(completion_info, dict):
+                raise ValueError("delivery JSON is not an object")
         except Exception:
+            stdout_was_json = False
             completion_info = {"ok": exit_code == 0, "error": delivery_proc.stderr or delivery_proc.stdout}
+        if not args.json and not (exit_code == 0 and completion_info.get("ok", False))                 and exit_code != EXIT_CANCELLED and completion_info.get("cause") != "cancelled":
+            _report_delivery_child_failure(
+                delivery_proc, completion_info, stdout_was_json, ticket.id, workspace.path
+            )
     else:
         # In-process execution (for tests or embedded environments)
         res = resume_delivery(
