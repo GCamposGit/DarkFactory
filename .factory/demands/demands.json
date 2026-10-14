@@ -7135,8 +7135,8 @@
     "project_id": "darkfac",
     "title": "Varrer testes ancorados em data fixa que dependem do relogio real (bomba-relogio) e fixar o relogio ou usar datas relativas",
     "origin": "user",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "aace908041a6a9ff457e61b501ec0c921128439a",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -7161,7 +7161,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-11T20:27:42.065018Z",
-    "updated_at": "2026-10-12T06:22:15.741742Z"
+    "updated_at": "2026-10-14T03:15:12.482418Z"
   },
   {
     "id": "USR-240",
