@@ -125,10 +125,30 @@ def _file_fixes_the_clock(tree: ast.Module, source: str) -> bool:
     return False
 
 
+def _docstring_constants(tree: ast.Module) -> set[int]:
+    """`id()` of every string Constant that is a module/class/function docstring (narrative, not data)."""
+    ids: set[int] = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        body = node.body
+        if (
+            body
+            and isinstance(body[0], ast.Expr)
+            and isinstance(body[0].value, ast.Constant)
+            and isinstance(body[0].value.value, str)
+        ):
+            ids.add(id(body[0].value))
+    return ids
+
+
 def find_fixed_2026_dates(tree: ast.Module) -> list[tuple[int, str]]:
     """Every fixed-2026-date literal in `tree`, as `(line, detail)`, in source order."""
     hits: list[tuple[int, str]] = []
+    docstrings = _docstring_constants(tree)
     for node in ast.walk(tree):
+        if id(node) in docstrings:
+            continue
         detail = _is_fixed_2026_date_call(node) or _is_fixed_2026_iso_string(node)
         if detail is not None:
             hits.append((node.lineno, detail))
