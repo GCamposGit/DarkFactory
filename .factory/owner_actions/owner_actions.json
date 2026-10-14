@@ -669,7 +669,7 @@
       "resolved_at": null
     },
     {
-      "id": "OA-017",
+      "id": "OA-018",
       "kind": "action",
       "title": "Commit humano em core/harness/test_subagent.py (USR-249)",
       "priority": "medium",
