@@ -7626,5 +7626,38 @@
     "dependencies": [],
     "created_at": "2026-10-14T09:13:11.666648Z",
     "updated_at": "2026-10-14T11:53:18.619453Z"
+  },
+  {
+    "id": "USR-257",
+    "project_id": "darkfac",
+    "title": "Falha da entrega em processo filho fica silenciosa no console: run_ticket so mostra 'Worktree preservada' sem a causa",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand",
+      "v0-critico",
+      "bug"
+    ],
+    "problem_statement": "Em 14/10/2026 o lancamento unico 'run_ticket USR-255' (2a entrega da sequencia V0 reiniciada) terminou depois de ~50 min de portao local (1 worker xdist, 3,4 GiB livres; provavel timeout de 3000 s) e o console so mostrou '[i] Worktree preservada' e o comando de retomada, sem causa. A fase de entrega roda em processo filho com --json (run_ticket.py, delivery_cmd), que suprime as mensagens humanas; o pai so repassa o stderr e grava a causa apenas no painel (progress.set_outcome). Viola a condicao 'falha explicita' do V0 e obrigou a investigar arquivos de log.",
+    "core_journey": [],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Quando a entrega em processo filho falha, o run_ticket (modo humano) imprime no console a causa (cause), o erro, o resumo de tentativas da autocorrecao e o comando de retomada, a partir do JSON do filho",
+      "Se o stdout do filho nao for JSON valido (morte, timeout do DELIVERY_TIMEOUT_S), o console mostra o codigo de saida, a duracao e as ultimas linhas de stdout/stderr do filho",
+      "Teste com filho falso cobre: falha com JSON (causa impressa), saida nao-JSON (codigo e cauda impressos) e sucesso (nada extra)"
+    ],
+    "suggested_files": [
+      "run_ticket.py",
+      "tests/"
+    ],
+    "estimated_complexity": "low",
+    "dependencies": [],
+    "created_at": "2026-10-14T14:34:44.509055Z",
+    "updated_at": "2026-10-14T14:34:44.509055Z"
   }
 ]
