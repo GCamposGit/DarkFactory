@@ -48,6 +48,7 @@ from core.line.agent_cli import (
     run_agent,
     supports,
 )
+from core.line import gate_ram
 from core.line.diagnostics import redacted_head
 from core.line.local_progress import ENV_RUN_ID, ENV_WARNED, ProgressPublisher, open_progress
 from core.line.operating_harness import detect_operating_harness
@@ -852,6 +853,13 @@ def _report_delivery_child_failure(
     print(f"  {resume}", file=out)
 
 
+def _wait_gate_ram_if_local(as_json: bool) -> "gate_ram.RamWaitResult | None":
+    """USR-262: only when the gate would run locally (no idle remote worker); None = nothing to wait for."""
+    if gate_ram.remote_worker_available():
+        return None
+    return gate_ram.wait_for_gate_ram(announce=None if not as_json else (lambda _msg: None))
+
+
 def _run_gate_with_self_correction(
     target_worktree: Path,
     current_branch: str,
@@ -964,6 +972,24 @@ def _run_gate_with_self_correction(
         if skip_validation:
             progress.phase("gate", "skipped", "validacao pulada (--skip-validation)")
             return None
+
+        # USR-262: gate local com 1 worker passa de GATE_TIMEOUT; espera RAM para 2+ workers ou falha explicito.
+        ram_wait = _wait_gate_ram_if_local(as_json)
+        if ram_wait is not None and not ram_wait.ok:
+            last_cause = gate_ram.CAUSE_INSUFFICIENT_RAM
+            last_exit_code = 1
+            last_output = (
+                f"{last_cause}: RAM livre {ram_wait.reading.available_gib:.1f} GiB, "
+                f"{ram_wait.reading.workers} workers possiveis (minimo {gate_ram.MIN_GATE_WORKERS}) "
+                f"apos {ram_wait.waited_s:.0f} s de espera; portao NAO executado. Retome com: {resume_cmd}"
+            )
+            attempts_log.append({
+                "event": "infra_error", "attempt": attempt + 1, "stage": "gate", "cause": last_cause,
+                "error": last_output,
+            })
+            if not as_json:
+                print(f"[RAM INSUFICIENTE PARA O PORTAO]: {last_output}", file=sys.stderr)
+            break
 
         progress.phase("gate", "running", "portao oficial (core/harness/runner.py --quick)")
         if not as_json:

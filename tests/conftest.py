@@ -496,3 +496,11 @@ def stereo_wav(tmp_path: Path) -> Path:
     path = tmp_path / "meeting_stereo.wav"
     sf.write(path, data, sample_rate, subtype="PCM_16")
     return path
+
+
+@pytest.fixture(autouse=True)
+def _no_real_gate_ram_wait(monkeypatch: pytest.MonkeyPatch) -> None:
+    """USR-262: run_ticket's pre-gate RAM wait must never measure the real host or probe workers in tests."""
+    run_ticket_module = sys.modules.get("run_ticket")
+    if run_ticket_module is not None and hasattr(run_ticket_module, "_wait_gate_ram_if_local"):
+        monkeypatch.setattr(run_ticket_module, "_wait_gate_ram_if_local", lambda as_json: None)
