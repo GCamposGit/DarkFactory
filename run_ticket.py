@@ -36,7 +36,7 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from core.demands.models import UserTicket
 from core.demands.store import DemandsStore
-from core.line import agent_retry, cancellation, local_cancel
+from core.line import agent_retry, cancellation, line_lock, local_cancel
 from core.line.agent_cli import (
     HARNESS_CAPABILITIES,
     AgentRequest,
@@ -1228,6 +1228,32 @@ def _request_cancel(args: argparse.Namespace) -> int:
     return 0
 
 
+def _needs_line_lock(args: argparse.Namespace) -> bool:
+    """False for invocations that never touch pytest/the Desktop worker/the agent (USR-250).
+
+    ``--dry-run`` only inspects quotas/routing, ``--create --queue-only`` only registers a ticket row
+    (its own throwaway worktree, no agent, no gate), and no ticket at all just prints the quota report;
+    none of these is the contention this guards against.
+    """
+    if args.dry_run:
+        return False
+    if args.create and args.queue_only:
+        return False
+    if not args.resume_delivery and not args.ticket_id and not args.create:
+        return False
+    return True
+
+
+def _resume_delivery_target(args: argparse.Namespace) -> Optional[str]:
+    if not args.resume_delivery:
+        return None
+    return (
+        args.resume_delivery
+        if isinstance(args.resume_delivery, str) and args.resume_delivery.strip()
+        else args.ticket_id
+    )
+
+
 def _run(argv: Optional[list[str]], box: list[ProgressPublisher], stack: contextlib.ExitStack) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
@@ -1236,13 +1262,24 @@ def _run(argv: Optional[list[str]], box: list[ProgressPublisher], stack: context
     if args.cancel:
         return _request_cancel(args)
 
+    resume_target = _resume_delivery_target(args)
+
+    # 000. Line lock (USR-250): one run_ticket (this main flow, or a standalone --resume-delivery) at a
+    # time per shared checkout. Acquired before anything else -- quota probe, ticket creation, worktree --
+    # so a second launch is refused on the spot instead of discovering the collision after paying for it.
+    # The delivery subprocess this same run later spawns for itself inherits the lock (ENV_INHERITED,
+    # set on its environment below) instead of trying to acquire it a second time.
+    if _needs_line_lock(args):
+        lock_label = resume_target or args.ticket_id or (f"novo:{args.title}" if args.create else "desconhecido")
+        try:
+            stack.enter_context(line_lock.guard(lock_label))
+        except line_lock.LineLockHeld as exc:
+            print(f"\n{exc}\n", file=sys.stderr)
+            return 2
+
     # 0. Resume delivery mode (USR-116): rebase, validate, and deliver an existing worktree in a fresh process
     if args.resume_delivery:
-        target_ticket_id = (
-            args.resume_delivery
-            if isinstance(args.resume_delivery, str) and args.resume_delivery.strip()
-            else args.ticket_id
-        )
+        target_ticket_id = resume_target
         if not target_ticket_id:
             print("[ERRO] --resume-delivery requer um TICKET_ID.", file=sys.stderr)
             return 1
@@ -1687,6 +1724,9 @@ def _run(argv: Optional[list[str]], box: list[ProgressPublisher], stack: context
             delivery_cmd.append("--no-push")
 
         child_env = dict(os.environ)
+        # The delivery subprocess is part of THIS run, not a second launch (USR-250): it inherits the
+        # line lock instead of trying to acquire (and refusing itself on) a lock its own parent holds.
+        child_env = line_lock.mark_inherited(child_env)
         # The delivery subprocess joins this run for cancellation too: it must honour the request the
         # parent watches and never erase it as "stale" (it starts later than the request was written).
         child_env[local_cancel.ENV_PARENT] = progress.run_id
