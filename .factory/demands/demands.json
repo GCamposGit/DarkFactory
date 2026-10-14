@@ -7659,5 +7659,45 @@
     "dependencies": [],
     "created_at": "2026-10-14T14:34:44.509055Z",
     "updated_at": "2026-10-14T14:34:44.509055Z"
+  },
+  {
+    "id": "USR-259",
+    "project_id": "darkfac",
+    "title": "run_ticket entrega demanda de qualquer projeto de cliente: worktree, agente, portao e merge no repositorio do proprio projeto, com a validacao que o projeto declara (nunca a suite da fabrica)",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "next",
+    "tags": [
+      "user-demand",
+      "congelado-v0",
+      "pos-v0-prioridade-absoluta",
+      "cliente-e2e"
+    ],
+    "problem_statement": "Decisao do owner em 14/10/2026: prioridade absoluta depois do V0 -- a fabrica e inutil se nao entrega demanda de desenvolvimento de cliente de ponta a ponta, de qualquer tipo (nao so site). Hoje run_ticket.py esta preso ao checkout da DarkFac (PROJECT_ROOT): cria a worktree a partir de C:\\dev\\DarkFac, o agente trabalha la e o portao e sempre core/harness/runner.py --quick (~4089 testes da propria fabrica). .factory/projects.json ja descreve cada projeto (path, repo_url, default_branch, commands.setup/validate, deploy, smoke), mas so a linha V1 (core/line/stage_build.py, nunca provada de ponta a ponta) usa isso, e varios projetos estao com commands: null. A suite da fabrica so deve rodar quando o codigo da fabrica muda.",
+    "core_journey": [
+      "Decisao do owner em 14/10/2026: prioridade absoluta depois do V0 -- a fabrica e inutil se nao entrega demanda de desenvolvimento de cliente de ponta a ponta, de qualquer tipo (nao so site). Hoje run_ticket.py esta preso ao checkout da DarkFac (PROJECT_ROOT): cria a worktree a partir de C:\\dev\\DarkFac, o agente trabalha la e o portao e sempre core/harness/runner.py --quick (~4089 testes da propria fabrica). .factory/projects.json ja descreve cada projeto (path, repo_url, default_branch, commands.setup/validate, deploy, smoke), mas so a linha V1 (core/line/stage_build.py, nunca provada de ponta a ponta) usa isso, e varios projetos estao com commands: null. A suite da fabrica so deve rodar quando o codigo da fabrica muda."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "python C:\\dev\\DarkFac\\run_ticket.py <ID> com project_id diferente de darkfac cria a worktree, roda o agente e abre/mergeia o PR no repositorio do projeto (path, repo_url e default_branch de .factory/projects.json), sem tocar no repositorio da DarkFac",
+      "O portao desse ticket roda somente o que o projeto declara (commands.setup, commands.validate e, quando houver, deploy e smoke), seja qual for a stack; projeto sem validate declarado falha fechado com instrucao para declarar no onboarding (skill 07, Project Adoption Gateway), e a suite da DarkFac nunca roda",
+      "Teste com projeto falso (repositorio git temporario, validate de outra stack, ex.: node ou comando de shell) cobre: worktree e PR no repo certo, validate do projeto executado e falhando o portao quando reprova, ausencia de validate recusada"
+    ],
+    "suggested_files": [
+      "run_ticket.py",
+      "core/git/ticket_workspace.py",
+      "core/git/autonomy.py",
+      "core/line/",
+      ".factory/projects.json",
+      "tests/"
+    ],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-14T17:38:12.364718Z",
+    "updated_at": "2026-10-14T17:38:12.364718Z"
   }
 ]

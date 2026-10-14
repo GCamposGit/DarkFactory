@@ -62,4 +62,6 @@ Continuam registrados e com status `planned`. Nada foi cancelado.
 
 ## 5. Descongelamento
 
-Quando o V0 for atingido, o owner revisa a lista congelada. Ordem sugerida para o V1: USR-192 (intake pelo Telegram), USR-221 (cron na VPS), USR-207 (Hub fora do ar a cada merge), USR-211 e USR-215 (canário e painel de aceite). A trilha de segurança (USR-170 a 174 e 226 a 228) entra antes de qualquer projeto de cliente pago.
+**Prioridade absoluta depois do V0 (owner, 14/10/2026): entregar demanda de desenvolvimento de cliente de ponta a ponta, de qualquer tipo.** A fabrica e inutil se nao consegue. Ticket USR-259: run_ticket por projeto, no repositorio do cliente e com a validacao que o projeto declara, nunca a suite da fabrica. Tag `pos-v0-prioridade-absoluta`.
+
+Quando o V0 for atingido, o owner revisa a lista congelada. Em seguida, ordem sugerida para o V1: USR-192 (intake pelo Telegram), USR-221 (cron na VPS), USR-207 (Hub fora do ar a cada merge), USR-211 e USR-215 (canário e painel de aceite). A trilha de segurança (USR-170 a 174 e 226 a 228) entra antes de qualquer projeto de cliente pago.
