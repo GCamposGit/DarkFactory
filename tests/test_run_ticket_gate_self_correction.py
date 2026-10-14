@@ -79,6 +79,7 @@ def test_gate_failure_reinvokes_agent_with_distilled_log_then_retries(tmp_path: 
         fix_calls.append(stage_label)
         assert fixed_ticket.id == "USR-245"
         assert feedback  # the distilled gate log, never empty
+        (Path(cwd) / "code.py").write_text("x = 2  # fixed\n", encoding="utf-8")  # edited, NOT committed
         return AgentResult(ok=True, text="fixed", harness="claude", duration_s=0.1)
 
     fake_success_report = TicketCompletionReport(
@@ -96,10 +97,16 @@ def test_gate_failure_reinvokes_agent_with_distilled_log_then_retries(tmp_path: 
 
     assert result["exit_code"] == 0
     assert len(gate_calls) == 2, "the gate must be rerun after the in-place fix"
+    assert subprocess.run(
+        ["git", "status", "--porcelain"], cwd=str(repo), capture_output=True, text=True
+    ).stdout.strip() == "", "the agent's uncommitted edit must have been committed before the gate reran"
+    assert "fix(autocorrecao): ajuste do agente apos falha em gate [USR-245]" in subprocess.run(
+        ["git", "log", "--format=%s"], cwd=str(repo), capture_output=True, text=True
+    ).stdout
     assert fix_calls == ["portao oficial (python core/harness/runner.py --quick)"]
     assert result["self_correction_log"] == [{
         "event": "reinvocation", "attempt": 1, "stage": "gate", "cause": "gate_failed",
-        "duration_s": 0.1, "limit_s": run_ticket.FIX_AGENT_TIMEOUT_S,
+        "duration_s": 0.1, "limit_s": run_ticket.FIX_AGENT_TIMEOUT_S, "changed": True,
     }], "the final report must list every reinvocation with cause, duration, and limit (USR-249, AC2)"
 
 
@@ -128,6 +135,7 @@ def test_gate_failure_gives_up_after_max_fix_attempts(tmp_path: Path, capsys) ->
 
     def fake_fix(cwd, fixed_ticket, stage_label, feedback):
         fix_calls.append(stage_label)
+        (Path(cwd) / "code.py").write_text(f"x = {len(fix_calls) + 10}\n", encoding="utf-8")
         return AgentResult(ok=True, text="tentei mas nao corrigi", harness="claude", duration_s=0.1)
 
     with patch("run_ticket.PROJECT_ROOT", repo), \
@@ -356,6 +364,7 @@ def test_focal_test_failure_rejects_before_the_official_gate_runs(tmp_path: Path
         "    assert add(2, 3) == 5\n",
         encoding="utf-8",
     )
+    (repo / ".gitignore").write_text("__pycache__/\n.pytest_cache/\n.factory/test_logs/\n", encoding="utf-8")
     _commit_all(repo, "feat: broken add (agent never checked)")
 
     fix_calls: list[str] = []
@@ -378,7 +387,7 @@ def test_focal_test_failure_rejects_before_the_official_gate_runs(tmp_path: Path
         code = run_ticket.resume_delivery("USR-245", worktree_path=repo, skip_validation=False)
 
     assert code != 0
-    assert len(fix_calls) == run_ticket.GATE_FIX_ATTEMPTS
+    assert len(fix_calls) == 1, "an agent that changed nothing is not reinvoked again (USR-249)"
     assert gate_calls == [], "the official gate must never run while focal tests keep rejecting the ticket"
 
     captured = capsys.readouterr()
@@ -551,6 +560,7 @@ def _gate_first_output_reinvokes(tmp_path: Path, stdout: str, returncode: int = 
 
     def fake_fix(cwd, fixed_ticket, stage_label, feedback):
         fix_calls.append(stage_label)
+        (Path(cwd) / "code.py").write_text("x = 3  # fixed\n", encoding="utf-8")
         return AgentResult(ok=True, text="fixed", harness="claude", duration_s=0.1)
 
     report = TicketCompletionReport(ok=True, ticket_id="USR-249", commit_sha="cafebabe", message="ok")
@@ -591,3 +601,133 @@ def test_remote_job_lost_without_pytest_failure_does_not_reinvoke_the_agent(tmp_
     fix_calls, result = _gate_first_output_reinvokes(tmp_path, "[REMOTE_JOB_LOST] worker gone\n")
     assert fix_calls == []
     assert result["cause"] == "gate_timeout"
+
+
+def _repo_on_ticket_branch(tmp_path: Path) -> Path:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _init_git_repo(repo)
+    ticket = UserTicket(
+        id="USR-249", project_id="darkfac", title="Test Ticket",
+        problem_statement="Test problem", status=DeliveryStatus.PLANNED,
+    )
+    _seed_ticket_ledger(repo, ticket)
+    _branch(repo, "ticket/usr-249")
+    (repo / "code.py").write_text("x = 1\n", encoding="utf-8")
+    _commit_all(repo, "feat: code")
+    return repo
+
+
+def test_fix_agent_that_edits_without_committing_is_committed_and_gate_reruns_clean(tmp_path: Path) -> None:
+    """USR-249: the gate refuses a dirty candidate, so the loop commits the agent's edit before rerunning."""
+    repo = _repo_on_ticket_branch(tmp_path)
+    dirty_at_gate: list[bool] = []
+
+    def fake_run_bounded(argv, **kwargs):
+        dirty = bool(subprocess.run(
+            ["git", "status", "--porcelain"], cwd=str(repo), capture_output=True, text=True
+        ).stdout.strip())
+        dirty_at_gate.append(dirty)
+        if dirty:
+            return BoundedProcessResult(
+                stdout="[ERROR] Candidate worktree is dirty; commit or use a clean checkout\n[HARNESS_FAIL]",
+                stderr="", returncode=1, duration_s=0.1,
+            )
+        if len(dirty_at_gate) == 1:
+            return BoundedProcessResult(stdout="1 failed", stderr="", returncode=1, duration_s=0.1)
+        return BoundedProcessResult(stdout="11 passed", stderr="", returncode=0, duration_s=0.1)
+
+    def fake_fix(cwd, fixed_ticket, stage_label, feedback):
+        (Path(cwd) / "code.py").write_text("x = 99  # fixed\n", encoding="utf-8")
+        return AgentResult(ok=True, text="fixed", harness="claude", duration_s=0.1)
+
+    report = TicketCompletionReport(ok=True, ticket_id="USR-249", commit_sha="cafebabe", message="ok")
+    with patch("run_ticket.PROJECT_ROOT", repo), \
+         patch("run_ticket._run_bounded", new=fake_run_bounded), \
+         patch("run_ticket._invoke_fix_agent", new=fake_fix), \
+         patch.object(GitAutonomyManager, "complete_ticket", return_value=report), \
+         patch.object(GitAutonomyManager, "sweep_stale"):
+        result = run_ticket.resume_delivery("USR-249", worktree_path=repo, skip_validation=False, return_result=True)
+
+    assert result["exit_code"] == 0
+    assert dirty_at_gate == [False, False]
+    assert result["self_correction_log"][0]["changed"] is True
+
+
+def test_fix_agent_that_changes_nothing_stops_with_fix_agent_no_changes(tmp_path: Path) -> None:
+    repo = _repo_on_ticket_branch(tmp_path)
+    gate_calls: list[list[str]] = []
+    fix_calls: list[str] = []
+
+    def fake_run_bounded(argv, **kwargs):
+        gate_calls.append(argv)
+        return BoundedProcessResult(stdout="1 failed, 10 passed", stderr="", returncode=1, duration_s=0.1)
+
+    def fake_fix(cwd, fixed_ticket, stage_label, feedback):
+        fix_calls.append(stage_label)
+        return AgentResult(ok=True, text="nada a fazer", harness="claude", duration_s=0.1)
+
+    with patch("run_ticket.PROJECT_ROOT", repo), \
+         patch("run_ticket._run_bounded", new=fake_run_bounded), \
+         patch("run_ticket._invoke_fix_agent", new=fake_fix):
+        result = run_ticket.resume_delivery("USR-249", worktree_path=repo, skip_validation=False, return_result=True)
+
+    assert result["ok"] is False
+    assert result["cause"] == "fix_agent_no_changes"
+    assert len(fix_calls) == 1 and len(gate_calls) == 1
+    assert result["self_correction_log"][0]["changed"] is False
+
+
+def test_gate_reporting_dirty_worktree_stops_without_reinvoking_the_agent(tmp_path: Path) -> None:
+    repo = _repo_on_ticket_branch(tmp_path)
+    fix_calls: list[str] = []
+
+    def fake_run_bounded(argv, **kwargs):
+        return BoundedProcessResult(
+            stdout="[ERROR] Candidate worktree is dirty; commit or use a clean checkout before running "
+                   "the official harness\n[HARNESS_FAIL]",
+            stderr="", returncode=1, duration_s=0.1,
+        )
+
+    def fake_fix(cwd, fixed_ticket, stage_label, feedback):
+        fix_calls.append(stage_label)
+        return AgentResult(ok=True, text="fixed", harness="claude", duration_s=0.1)
+
+    with patch("run_ticket.PROJECT_ROOT", repo), \
+         patch("run_ticket._run_bounded", new=fake_run_bounded), \
+         patch("run_ticket._invoke_fix_agent", new=fake_fix):
+        result = run_ticket.resume_delivery("USR-249", worktree_path=repo, skip_validation=False, return_result=True)
+
+    assert fix_calls == []
+    assert result["ok"] is False
+    assert result["cause"] == "gate_dirty_worktree"
+
+
+def test_fix_commit_failure_ends_the_loop_with_fix_commit_failed(tmp_path: Path, capsys) -> None:
+    repo = _repo_on_ticket_branch(tmp_path)
+    fix_calls: list[str] = []
+
+    def fake_run_bounded(argv, **kwargs):
+        return BoundedProcessResult(stdout="1 failed, 10 passed", stderr="", returncode=1, duration_s=0.1)
+
+    def fake_fix(cwd, fixed_ticket, stage_label, feedback):
+        fix_calls.append(stage_label)
+        (Path(cwd) / "code.py").write_text("x = 7\n", encoding="utf-8")
+        return AgentResult(ok=True, text="fixed", harness="claude", duration_s=0.1)
+
+    with patch("run_ticket.PROJECT_ROOT", repo), \
+         patch("run_ticket._run_bounded", new=fake_run_bounded), \
+         patch("run_ticket._invoke_fix_agent", new=fake_fix), \
+         patch.object(GitAutonomyManager, "commit_ticket", side_effect=RuntimeError("secret detected")):
+        result = run_ticket.resume_delivery("USR-249", worktree_path=repo, skip_validation=False, return_result=True)
+
+    assert result["ok"] is False
+    assert result["cause"] == "fix_commit_failed"
+    assert len(fix_calls) == 1
+    assert result["self_correction_log"][-1] == {
+        "event": "infra_error", "attempt": 1, "stage": "gate", "cause": "fix_commit_failed",
+        "error": "secret detected",
+    }
+    err = capsys.readouterr().err
+    assert "Worktree preservada" in err
+    assert "secret detected" in err

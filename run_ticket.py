@@ -692,6 +692,49 @@ def _focal_test_timeout_s(target_count: int) -> float:
     return min(FOCAL_TEST_TIMEOUT_CEILING_S, max(FOCAL_TEST_TIMEOUT_S, scaled))
 
 
+# Output of the official gate (`core/harness/runner.py`) when it refuses a dirty candidate worktree. It is
+# a loop-infrastructure error (the previous fix-agent edit was never committed), never something another
+# agent reinvocation can fix (USR-249).
+_GATE_DIRTY_WORKTREE_MARKER = "Candidate worktree is dirty"
+
+
+def _commit_fix_agent_changes(target_worktree: Path, ticket: UserTicket, stage: str) -> bool:
+    """Commit whatever the fix agent left uncommitted in the ticket worktree; True if it changed anything.
+
+    The official gate refuses a dirty candidate, and the fix prompt tells the agent not to commit, so the
+    loop itself commits the adjustment (reusing `GitAutonomyManager.commit_ticket`) before the next
+    focal/gate round (USR-249).
+    """
+    from core.git.autonomy import GitAutonomyManager
+
+    git_mgr = GitAutonomyManager(PROJECT_ROOT)
+    if not git_mgr.is_dirty(cwd=target_worktree):
+        return False
+    git_mgr.commit_ticket(
+        ticket_id=ticket.id,
+        title=ticket.title,
+        cwd=target_worktree,
+        custom_message=(
+            f"fix(autocorrecao): ajuste do agente apos falha em {stage} [{ticket.id}]\n\n"
+            f"DarkFac-Ticket: {ticket.id}\n"
+            f"DarkFac-Autonomy: zero-human-touch\n"
+        ),
+    )
+    return True
+
+
+def _commit_fix_agent_changes_safely(
+    target_worktree: Path, ticket: UserTicket, stage: str
+) -> tuple[bool, Optional[str]]:
+    """`_commit_fix_agent_changes` that turns a commit failure (secret scan, staged state...) into an
+    error message instead of a traceback, so the loop can end with `fix_commit_failed` (USR-249)."""
+    try:
+        return _commit_fix_agent_changes(target_worktree, ticket, stage), None
+    except Exception as exc:  # noqa: BLE001 - commit_ticket raises RuntimeError; any failure ends the loop cleanly
+        logger.warning("Could not commit the fix agent's changes for %s: %s", ticket.id, exc)
+        return False, str(exc)
+
+
 def _render_self_correction_log(attempts_log: list[dict[str, Any]]) -> str:
     """Human-readable summary of every agent reinvocation and every timeout hit during the delivery
     gate loop, so a rescue session knows what happened without opening logs (USR-249)."""
@@ -700,7 +743,13 @@ def _render_self_correction_log(attempts_log: list[dict[str, Any]]) -> str:
         if entry["event"] == "reinvocation":
             lines.append(
                 f"  {entry['attempt']}. reinvocação do agente apos falha em '{entry['stage']}' (causa: {entry['cause']}), "
-                f"levou {entry['duration_s']:.1f}s (limite {entry['limit_s']:.0f}s)"
+                f"levou {entry['duration_s']:.1f}s (limite {entry['limit_s']:.0f}s), "
+                f"alterou arquivos: {'sim' if entry.get('changed') else 'nao'}"
+            )
+        elif entry["event"] == "infra_error":
+            detail = f": {entry['error']}" if entry.get("error") else ""
+            lines.append(
+                f"  {entry['attempt']}. ERRO DE INFRAESTRUTURA ({entry['cause']}) em '{entry['stage']}'{detail} -- agente NAO reinvocado"
             )
         else:
             lines.append(
@@ -795,13 +844,25 @@ def _run_gate_with_self_correction(
             fix_result = _invoke_fix_agent(
                 target_worktree, ticket, "testes focais dos arquivos alterados", focal_report.agent_feedback
             )
+            fix_changed, commit_error = _commit_fix_agent_changes_safely(target_worktree, ticket, "focal")
+            if commit_error is not None:
+                last_cause = "fix_commit_failed"
+                last_output = commit_error
+                attempts_log.append({
+                    "event": "infra_error", "attempt": attempt + 1, "stage": "focal", "cause": last_cause,
+                    "error": commit_error,
+                })
+                break
             attempts_log.append({
                 "event": "reinvocation", "attempt": attempt + 1, "stage": "focal", "cause": last_cause,
                 "duration_s": round(fix_result.duration_s, 1) if fix_result else 0.0,
-                "limit_s": FIX_AGENT_TIMEOUT_S,
+                "limit_s": FIX_AGENT_TIMEOUT_S, "changed": fix_changed,
             })
             if _cancelled():
                 return cancelled_payload()
+            if not fix_changed:
+                last_cause = "fix_agent_no_changes"
+                break
             continue
 
         if _cancelled():
@@ -833,6 +894,19 @@ def _run_gate_with_self_correction(
         last_exit_code = gate_res.returncode
         if not as_json:
             print(f"[ERRO NO PORTÃO OFICIAL]:\n{gate_res.stdout}\n{gate_res.stderr}", file=sys.stderr)
+
+        if _GATE_DIRTY_WORKTREE_MARKER in last_output:
+            last_cause = "gate_dirty_worktree"
+            attempts_log.append({
+                "event": "infra_error", "attempt": attempt + 1, "stage": "gate", "cause": last_cause,
+            })
+            if not as_json:
+                print(
+                    "[WORKTREE SUJA NO PORTÃO OFICIAL]: o portao recusou o candidato sujo. Nao reinvocando "
+                    "o agente: e erro de infraestrutura do laco de autocorrecao (USR-249).",
+                    file=sys.stderr,
+                )
+            break
 
         if _gate_failure_is_timeout(gate_res):
             last_cause = "gate_timeout"
@@ -867,13 +941,25 @@ def _run_gate_with_self_correction(
         fix_result = _invoke_fix_agent(
             target_worktree, ticket, "portao oficial (python core/harness/runner.py --quick)", distill_log(last_output)
         )
+        fix_changed, commit_error = _commit_fix_agent_changes_safely(target_worktree, ticket, "gate")
+        if commit_error is not None:
+            last_cause = "fix_commit_failed"
+            last_output = commit_error
+            attempts_log.append({
+                "event": "infra_error", "attempt": attempt + 1, "stage": "gate", "cause": last_cause,
+                "error": commit_error,
+            })
+            break
         attempts_log.append({
             "event": "reinvocation", "attempt": attempt + 1, "stage": "gate", "cause": last_cause,
             "duration_s": round(fix_result.duration_s, 1) if fix_result else 0.0,
-            "limit_s": FIX_AGENT_TIMEOUT_S,
+            "limit_s": FIX_AGENT_TIMEOUT_S, "changed": fix_changed,
         })
         if _cancelled():
             return cancelled_payload()
+        if not fix_changed:
+            last_cause = "fix_agent_no_changes"
+            break
 
     print(f"[i] Worktree preservada para diagnóstico: {target_worktree}", file=sys.stderr)
     print(f"[i] Comando para retomar entrega após correção:\n  {resume_cmd}", file=sys.stderr)
