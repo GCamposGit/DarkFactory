@@ -41,20 +41,8 @@ from tests._clock_bomb_guard import scan_tests_tree
 CLOCK_BOMB_EXCEPTIONS: dict[str, str] = {
     # -- docstring/comment prose: the "2026-" text is narrative, not a literal fed to any comparison.
     "tests/line/test_no_route_contract.py": "prosa de docstring/comentario; nao e literal de data usada pelo teste",
-    "tests/line/test_planning_grill_artifacts.py": "docstring do modulo; nao e literal de data",
-    "tests/line/test_stage_review.py": "comentario ('Canary 2026-10-04/05: ...'); nao e literal de data usada pelo teste",
     "tests/line/test_retrospective.py": "seed SQL de um run buscado diretamente por run_id; RetrospectiveStageHandler nao filtra por RECENT_RUN_WINDOW, so lookups diretos por id",
     "tests/test_dokploy_release_identity.py": "docstring do modulo; nao e literal de data",
-    "tests/test_gate_isolation.py": "docstring do modulo; nao e literal de data",
-    "tests/test_hf12_release_staging_production_backup.py": "docstring do modulo; nao e literal de data",
-    "tests/test_hf15_acceptance_environment.py": "docstring do modulo; nao e literal de data",
-    "tests/test_hf15_runner.py": "docstring do modulo; nao e literal de data",
-    "tests/test_model_router_hf07.py": "docstring do modulo; nao e literal de data",
-    "tests/test_notification_system.py": "docstring do modulo; nao e literal de data",
-    "tests/test_remote_job_recovery.py": "docstring do modulo; nao e literal de data",
-    "tests/test_reusable_pilots.py": "comentario; nao e literal de data usada pelo teste",
-    "tests/test_suite_lock_stalled.py": "comentario; nao e literal de data usada pelo teste",
-    "tests/test_worker_capacity.py": "comentario ('O incidente de 2026-09-30: ...'); nao e literal de data",
     "tests/test_darkhub_priority_interventions_and_grill.py": "comentario ('Canario diario 2026-09-30'); nao e literal de data",
     # -- identifiers that are shaped like a date but are not one.
     "tests/line/test_stage_build.py": "'gpt-6-luna-2026-10-01' e nome de modelo, nao uma data",
@@ -77,6 +65,7 @@ CLOCK_BOMB_EXCEPTIONS: dict[str, str] = {
     "tests/test_infra08_three_tier_backup.py": "dt fixo so verifica se o assinador SigV4 formata UM datetime DADO corretamente; nunca comparado ao relogio real",
     "tests/test_line_acceptance.py": "base_date so alimenta green_streak (compara relatorios entre si) e jobs ja 'succeeded'; o branch de relogio real de run_state nao e alcancado",
     "tests/test_line_dogfood.py": "created_at so usado como chave de ordenacao relativa; o fallback de relogio real de submit_dogfood_item nao e exercitado com esse valor",
+    "tests/test_line_lock.py": "started_at e um epoch fixo so formatado para texto ('2026-10-12' no aviso); nunca comparado ao relogio real",
     "tests/test_line_owner_intake.py": "jobs semeados via SQL bruto nunca tem cause_code='no_route_available', unico caso em que run_state cairia no fallback de relogio real",
     "tests/test_local_progress_visibility.py": "T0 so alimenta o campo 'at' de um LocalRunEvent escrito via conexao psycopg fake; nunca e lido de volta nem comparado",
     "tests/test_marketing_engine.py": "campo de conteudo 'date' de um post de marketing, apenas armazenado/comparado como string; sem leitura do relogio real",
@@ -103,7 +92,6 @@ CLOCK_BOMB_EXCEPTIONS: dict[str, str] = {
     "tests/test_usage_monitor.py": "campo 'resets_at' de uma QuotaWindow stub; os asserts do teste checam used_percent/remaining_percent, nunca o reset contra o relogio real",
     "tests/test_context_policy.py": "'eval-2026-09-07' e um identificador de versao de avaliacao, armazenado verbatim; nao e uma data lida do relogio",
     "tests/test_dokploy_real_api_transport.py": "createdAt dos deployments simulados so e comparado como string com o baseline (outro createdAt fixo) em deployment_adapter; sem leitura do relogio real nessa comparacao",
-    "tests/test_hf11_resilient_execution_budget.py": "docstring do modulo (nome do plano HYBRID_WORKFLOW_PLAN_2026-09-08); nao e literal de data",
     "tests/test_waiting_human_consultation.py": "linhas de seed SQL para um teste de dashboard de waiting_human; sem filtro por idade",
 }
 
@@ -186,3 +174,20 @@ def test_clock_bomb_scanner_accepts_token_matched_clock_keywords_and_seams(tmp_p
     ):
         assert _scan_snippet(tmp_path, body) == [], body
 
+
+
+def test_clock_bomb_scanner_ignores_docstrings_but_flags_code_literals(tmp_path: Path) -> None:
+    """Docstrings narrating an incident (e.g. 2026-10-12) are prose; the same text in code is a bomb."""
+    prose = tmp_path / "test_prose.py"
+    prose.write_text(
+        "\"\"\"Incidente de 2026-10-12.\"\"\"\n\n"
+        "def test_x() -> None:\n"
+        "    \"\"\"Reproduz o caso de 2026-10-12.\"\"\"\n"
+        "    assert True\n",
+        encoding="utf-8",
+    )
+    assert scan_tests_tree(tmp_path, repo_root=tmp_path) == []
+    prose.unlink()
+    (tmp_path / "test_code.py").write_text('x = "2026-10-12"\n', encoding="utf-8")
+    hits = scan_tests_tree(tmp_path, repo_root=tmp_path)
+    assert [h.path for h in hits] == ["test_code.py"]
