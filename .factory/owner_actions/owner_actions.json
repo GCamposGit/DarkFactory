@@ -624,6 +624,49 @@
       "created_at": "2026-10-12T14:06:59Z",
       "created_by": "claude-session-2026-10-12-v0",
       "resolved_at": "2026-10-12T21:06:12Z"
+    },
+    {
+      "id": "OA-017",
+      "kind": "action",
+      "priority": "high",
+      "status": "open",
+      "title": "Liberar CPU e RAM para o portao: indexador do Segundo Cerebro no Desktop e Chrome no Notebook estao dobrando o tempo da suite",
+      "why": "Em 13/10/2026 o passo paralelo do portao rodou 3004 s no Desktop (antes 1450-1870 s) e estourou o limite de 3000 s. Medicao no Desktop (worker /metrics/hardware e lista de processos): CPU 86% e RAM 86,5% com busy=False, causados pelo processo 'segundocerebro.index.indexer --base bain' (~3,9 GB, 7684 s de CPU, prioridade Normal). No Notebook o runner so libera 1 worker de teste porque ha ~3 GB de RAM livre (Chrome ~4,7 GB); com 1 worker a suite local leva ~50 min. Nao e defeito de codigo. Esses dois processos sao seus: a fabrica nao mexe neles.",
+      "blocks": [
+        "USR-249",
+        "USR-250",
+        "USR-246",
+        "USR-247",
+        "USR-222",
+        "USR-239"
+      ],
+      "depends_on": [],
+      "steps": [
+        {
+          "text": "No Desktop (DESKTOP-G45IPEM), abra o PowerShell e baixe a prioridade do indexador do Segundo Cerebro para 'Idle'. Isso NAO o interrompe: ele continua trabalhando, mas so com a CPU que sobrar, e os testes passam na frente. A mudanca vale ate o processo reiniciar.",
+          "command": "Get-CimInstance Win32_Process -Filter \"CommandLine like '%segundocerebro.index.indexer%'\" | ForEach-Object { (Get-Process -Id $_.ProcessId).PriorityClass = 'Idle'; \"prioridade Idle: PID $($_.ProcessId)\" }"
+        },
+        {
+          "text": "Se preferir deixar o indexador parado durante os portoes, finalize-o pelo seu proprio painel do Segundo Cerebro em vez de matar o processo. (Opcional)"
+        },
+        {
+          "text": "No Notebook, feche o Chrome (ou as abas pesadas) e qualquer app que nao esteja usando. Meta: pelo menos 10 GB de RAM livre; com isso o runner passa de 1 para 4 ou 5 workers e a suite local cai para uns 15 min."
+        },
+        {
+          "text": "No Notebook, confira a RAM livre (esperado: FreeGB 10 ou mais).",
+          "command": "(Get-CimInstance Win32_OperatingSystem).FreePhysicalMemory / 1MB"
+        },
+        {
+          "text": "Recomendado, nao urgente: o disco C: do Desktop esta com 95,4% de uso (10 GB livres). As worktrees da fabrica ocupam so 0,6 GB; o resto e de outros programas. Libere espaco antes que acabe."
+        },
+        {
+          "text": "Marque esta acao como feita no DarkHub ou avise o agente no chat."
+        }
+      ],
+      "verify": "Invoke-RestMethod http://100.78.181.90:8080/metrics/hardware mostra cpu_percent abaixo de 40 com busy False; no Notebook, FreeGB 10 ou mais.",
+      "created_at": "2026-10-13T00:30:06Z",
+      "created_by": "claude-session-2026-10-13-v0",
+      "resolved_at": null
     }
   ]
 }
