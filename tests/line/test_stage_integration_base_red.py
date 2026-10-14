@@ -169,6 +169,7 @@ def _handler(project: ProjectDescriptor, gh_path: str, **kwargs: Any) -> Integra
     kwargs.setdefault("clock", lambda: NOW)
     kwargs.setdefault("human_notifier", _Recorder())
     kwargs.setdefault("defect_ticket_func", _Recorder(None))
+    kwargs.setdefault("main_ci_alert_sync", _Recorder())
     return IntegrationStageHandler(
         project, gh_executable=gh_path, host_caps=["harness:claude"], agent_runner=_no_agent, **kwargs
     )
@@ -197,6 +198,21 @@ def test_a_check_red_on_the_base_waits_an_hour_without_touching_the_agent(
     assert "pr merge" not in names
     assert not any("--log-failed" in c for c in calls())  # no log is handed back to development
     assert humans.calls == [] and tickets.calls == []
+
+
+def test_a_client_projects_red_base_never_touches_the_main_ci_alert(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fake_gh
+) -> None:
+    """Only the factory's own red base is an alert-worthy defect of this repository (USR-247)."""
+    gh_path, _set_spec, _calls = fake_gh
+    project = _branch(tmp_path, monkeypatch, "run-br1b")
+    alert_sync = _Recorder()
+    handler = _handler(project, gh_path, main_ci_alert_sync=alert_sync)
+
+    result = handler.handle(_context("run-br1b"))
+
+    assert result.outcome == "retry"
+    assert alert_sync.calls == []
 
 
 def test_the_wait_count_comes_from_the_injected_counter(
@@ -292,6 +308,40 @@ def test_the_factory_project_files_the_defect_ticket_best_effort(
     assert request.probe_cmd == "python -m core.git.autonomy check-main --branch main"
 
 
+def test_the_factory_projects_red_base_alerts_the_owner_on_the_very_first_wait(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fake_gh
+) -> None:
+    """The alert fires immediately (USR-247), not only after the six waits are exhausted: that is
+    exactly the silence the ticket is about (main was red for hours before anyone noticed)."""
+    gh_path, _set_spec, _calls = fake_gh
+    project = _branch(tmp_path, monkeypatch, "run-br-alert1", project_id="darkfac")
+    alert_sync = _Recorder()
+    handler = _handler(project, gh_path, main_ci_alert_sync=alert_sync)
+
+    result = handler.handle(_context("run-br-alert1"))
+
+    assert result.outcome == "retry"  # first wait, well before base_red_exhausted
+    assert alert_sync.calls == [("main",)]
+
+
+def test_the_factory_projects_red_base_alert_sync_runs_on_every_wait(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fake_gh
+) -> None:
+    """Repeated waits re-sync (and the singleton alert itself, tested in test_main_ci_alert.py,
+    is what keeps that from ever duplicating the owner action)."""
+    gh_path, _set_spec, _calls = fake_gh
+    project = _branch(tmp_path, monkeypatch, "run-br-alert2", project_id="darkfac")
+    alert_sync = _Recorder()
+    handler = _handler(
+        project, gh_path, main_ci_alert_sync=alert_sync,
+        base_red_attempts=lambda _run_id: ci_checks.BASE_RED_MAX_RETRIES - 1,
+    )
+
+    handler.handle(_context("run-br-alert2"))
+
+    assert alert_sync.calls == [("main",)]
+
+
 @pytest.mark.parametrize("opener", [_Recorder(fail=True), _Recorder(None), _Recorder({"ticket": {"id": None}})])
 def test_a_failed_defect_ticket_never_blocks_the_escalation(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fake_gh, opener: _Recorder
@@ -320,6 +370,18 @@ def test_a_failed_owner_notification_never_changes_the_outcome(
         base_red_attempts=lambda _run_id: ci_checks.BASE_RED_MAX_RETRIES,
     )
     assert handler.handle(_context("run-br8")).outcome == "waiting_human"
+
+
+def test_a_failed_main_ci_alert_sync_never_blocks_the_wait(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fake_gh
+) -> None:
+    gh_path, _set_spec, _calls = fake_gh
+    project = _branch(tmp_path, monkeypatch, "run-br-alert3", project_id="darkfac")
+    handler = _handler(project, gh_path, main_ci_alert_sync=_Recorder(fail=True))
+
+    result = handler.handle(_context("run-br-alert3"))
+
+    assert result.outcome == "retry"
 
 
 def test_the_infra_guide_is_step_by_step_and_promises_the_resume() -> None:
@@ -502,3 +564,18 @@ def test_the_base_red_wait_persists_its_not_before_on_the_successor() -> None:
 
 def test_stage_integration_exports_the_defect_ticket_opener() -> None:
     assert "open_base_red_ticket" in stage_integration.__all__
+
+
+def test_sync_main_ci_alert_default_delegates_to_run_check_main(monkeypatch: pytest.MonkeyPatch) -> None:
+    assert "sync_main_ci_alert" in stage_integration.__all__
+    seen: dict[str, Any] = {}
+
+    def fake_run_check_main(**kwargs: Any) -> tuple[int, dict[str, Any]]:
+        seen.update(kwargs)
+        return 0, {"state": "green"}
+
+    from core.git import autonomy
+
+    monkeypatch.setattr(autonomy, "run_check_main", fake_run_check_main)
+    stage_integration.sync_main_ci_alert("main")
+    assert seen == {"branch": "main", "alert_owner": True}

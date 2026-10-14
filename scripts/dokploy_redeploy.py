@@ -753,13 +753,17 @@ def build_arg_parser() -> argparse.ArgumentParser:
 
 
 def default_check_main_runner() -> Tuple[int, Dict[str, Any]]:
-    """Probe base branch CI and open defect ticket if red (USR-85)."""
+    """Probe base branch CI, open a defect ticket if red (USR-85) and keep the single
+    OA-MAIN-CI owner-action alert in sync: raised (never duplicated) on red, closed on
+    green (USR-247). This is the only automatic consultation of `check-main` today, so
+    every deploy -- the one thing that already runs after each push -- doubles as the
+    main-CI watchdog."""
     try:
         if str(REPO_ROOT) not in sys.path:
             sys.path.insert(0, str(REPO_ROOT))
         from core.git.autonomy import run_check_main
 
-        return run_check_main(open_ticket=True, notify=True)
+        return run_check_main(open_ticket=True, notify=True, alert_owner=True)
     except Exception as exc:
         return 2, {"state": "unknown", "error": str(exc)}
 

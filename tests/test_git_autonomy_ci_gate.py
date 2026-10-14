@@ -1116,8 +1116,58 @@ def test_check_main_cli_module_entrypoint_exposes_the_flags() -> None:
         cwd=str(Path(autonomy.__file__).resolve().parents[2]),
     )
     assert proc.returncode == 0, proc.stderr
-    for flag in ("--json", "--open-ticket", "--notify"):
+    for flag in ("--json", "--open-ticket", "--notify", "--alert-owner"):
         assert flag in proc.stdout
+
+
+# ----------------------------------------------------------------------
+# check-main --alert-owner: the singleton OA-MAIN-CI alert (USR-247)
+# ----------------------------------------------------------------------
+
+
+def test_check_main_alert_owner_raises_once_on_repeated_red(tmp_path: Path) -> None:
+    from core.owner_actions.models import ActionStatus
+    from core.owner_actions.store import OwnerActionStore
+
+    active = OwnerActionStore(tmp_path / "owner_actions.json")
+    notified: list[str] = []
+
+    for _ in range(3):
+        code, payload = autonomy.run_check_main(
+            runner=red_main_script(), alert_owner=True, owner_action_store=active,
+            owner_action_notifier=lambda a: notified.append(a.id),
+        )
+        assert code == 1
+        assert payload["owner_action"] == {"id": "OA-MAIN-CI", "closed": False}
+
+    actions = active.list_actions()
+    assert [a.id for a in actions] == ["OA-MAIN-CI"]
+    assert actions[0].status is ActionStatus.OPEN
+    assert notified == ["OA-MAIN-CI"]  # only the first red probe notifies
+
+
+def test_check_main_alert_owner_closes_on_green(tmp_path: Path) -> None:
+    from core.owner_actions.models import ActionStatus
+    from core.owner_actions.store import OwnerActionStore
+
+    active = OwnerActionStore(tmp_path / "owner_actions.json")
+    autonomy.run_check_main(runner=red_main_script(), alert_owner=True, owner_action_store=active)
+
+    green = GhScript(base_runs=[{"databaseId": 1, "conclusion": "success", "headSha": "a" * 40}])
+    code, payload = autonomy.run_check_main(runner=green, alert_owner=True, owner_action_store=active)
+
+    assert code == 0
+    assert payload["owner_action"] == {"id": "OA-MAIN-CI", "closed": True}
+    assert active.get("OA-MAIN-CI").status is ActionStatus.DONE
+
+
+def test_check_main_without_alert_owner_never_touches_the_backlog(tmp_path: Path) -> None:
+    from core.owner_actions.store import OwnerActionStore
+
+    active = OwnerActionStore(tmp_path / "owner_actions.json")
+    code, payload = autonomy.run_check_main(runner=red_main_script(), owner_action_store=active)
+    assert code == 1 and "owner_action" not in payload
+    assert active.list_actions() == []
 
 
 # ----------------------------------------------------------------------

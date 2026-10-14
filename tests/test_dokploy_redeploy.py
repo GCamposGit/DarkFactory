@@ -25,6 +25,7 @@ from scripts import dokploy_redeploy as mod
 
 # Captured before the autouse fixture replaces the name with a no-op runner.
 _REAL_DEFAULT_DISK_HYGIENE = mod.default_disk_hygiene_runner
+_REAL_DEFAULT_CHECK_MAIN_RUNNER = mod.default_check_main_runner
 
 
 @pytest.fixture(autouse=True)
@@ -178,6 +179,27 @@ def _old_shape_projects() -> List[Dict[str, Any]]:
             ],
         },
     ]
+
+
+# ---------------------------------------------------------------------------
+# default_check_main_runner (USR-247: every deploy also syncs the main-CI alert)
+# ---------------------------------------------------------------------------
+
+
+def test_default_check_main_runner_syncs_the_owner_action_alert(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: Dict[str, Any] = {}
+
+    def fake_run_check_main(**kwargs: Any) -> Tuple[int, Dict[str, Any]]:
+        seen.update(kwargs)
+        return 0, {"state": "green"}
+
+    from core.git import autonomy
+
+    monkeypatch.setattr(autonomy, "run_check_main", fake_run_check_main)
+    code, payload = _REAL_DEFAULT_CHECK_MAIN_RUNNER()
+
+    assert code == 0 and payload == {"state": "green"}
+    assert seen == {"open_ticket": True, "notify": True, "alert_owner": True}
 
 
 # ---------------------------------------------------------------------------

@@ -106,6 +106,17 @@ _FACTORY_BASE_PROBE = "python -m core.git.autonomy check-main --branch {branch}"
 BaseRedAttempts = Callable[[str], int]
 HumanNotifier = Callable[[HumanRequest], Any]
 DefectTicketFunc = Callable[[ci_checks.GhRunner, str], Optional[dict[str, Any]]]
+MainCiAlertSync = Callable[[str], None]
+
+
+def sync_main_ci_alert(base_branch: str) -> None:
+    """Best-effort: keep the singleton `OA-MAIN-CI` owner-action alert (USR-247) in sync with the
+    REAL current state of `base_branch`, re-probing `check_main` itself rather than trusting the
+    caller's own verdict (so a stale read never mis-raises or mis-resolves). Never raises.
+    """
+    from core.git import autonomy
+
+    autonomy.run_check_main(branch=base_branch, alert_owner=True)
 
 
 class IntegrationError(RuntimeError):
@@ -246,13 +257,15 @@ class IntegrationStageHandler:
         base_red_max_retries: int = ci_checks.BASE_RED_MAX_RETRIES,
         human_notifier: Optional[HumanNotifier] = None,
         defect_ticket_func: Optional[DefectTicketFunc] = None,
+        main_ci_alert_sync: Optional[MainCiAlertSync] = None,
         clock: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
         route_waiter: Optional[RouteWaiter] = None,
     ) -> None:
         """`base_red_attempts(run_id)` counts the `base_red` waits this run already spent (the store
         backed counter lives in `core.line.bindings`); without it the job's own iteration is the
         (over-)estimate, which can only shorten the wait, never extend it. `human_notifier` and
-        `defect_ticket_func` default to the owner bot and `open_base_red_ticket`; tests inject fakes.
+        `defect_ticket_func` default to the owner bot and `open_base_red_ticket`; `main_ci_alert_sync`
+        defaults to `sync_main_ci_alert`; tests inject fakes.
         """
         self.project = project
         self.gh_executable = gh_executable
@@ -269,6 +282,7 @@ class IntegrationStageHandler:
         self.base_red_max_retries = base_red_max_retries
         self.human_notifier = human_notifier
         self.defect_ticket_func = defect_ticket_func
+        self.main_ci_alert_sync = main_ci_alert_sync
         self.clock = clock
         self.route_waiter = route_waiter or RouteWaiter()
 
@@ -849,6 +863,7 @@ class IntegrationStageHandler:
         `retry("base_red not_before=<now + base_red_wait_minutes>")` while the run still has waits
         left; once they are spent, `waiting_human(infra)`.
         """
+        self._alert_base_red(base_branch)
         labels = ", ".join(ci_checks.check_label(c) for c in snapshot.failing)
         spent = self._base_red_waits_spent(ws, context)
         if spent < self.base_red_max_retries:
@@ -880,6 +895,20 @@ class IntegrationStageHandler:
         )
         self._notify_human(request)
         return StageResult(outcome="waiting_human", cause_code="base_red_exhausted")
+
+    def _alert_base_red(self, base_branch: str) -> None:
+        """`darkfac` only: raise (or keep) the singleton main-CI owner-action alert the MOMENT
+        `base_red` is first detected -- not only after the waits are exhausted (USR-247). Idempotent
+        (the alert is a singleton), so every hourly retry calling this again never duplicates it.
+        Best-effort; never raises.
+        """
+        if self.project.id != _FACTORY_PROJECT_ID:
+            return
+        sync = self.main_ci_alert_sync or sync_main_ci_alert
+        try:
+            sync(base_branch)
+        except Exception as exc:
+            logger.warning("Main CI alert sync failed for %s: %s", base_branch, _sanitize(str(exc)))
 
     def _open_base_red_ticket(self, ws: RunWorkspace, base_branch: str) -> Optional[str]:
         """`darkfac` only: best-effort defect ticket for its own red base. Never raises."""
@@ -1097,4 +1126,5 @@ __all__ = [
     "run_gh",
     "owner_repo",
     "open_base_red_ticket",
+    "sync_main_ci_alert",
 ]

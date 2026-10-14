@@ -31,7 +31,7 @@ from core.demands.models import DemandOrigin, TAG_USER_DEMAND, UserTicket
 from core.demands.id_allocator import title_collisions
 from core.demands.merge import merge_demands_3way
 from core.demands.store import DemandsStore
-from core.git import queue_registration, secret_scan, ticket_workspace
+from core.git import main_ci_alert, queue_registration, secret_scan, ticket_workspace
 from core.git.safe_show import safe_show
 from core.git.state_guard import DEFAULT_PROTECTED_STATE_PATHS, check_staged_state_files
 from core.line import cancellation
@@ -45,6 +45,7 @@ from core.git.ci_checks import (
     pending_check_labels,
     sanitize,
 )
+from core.owner_actions.store import OwnerActionStore
 from core.roadmap.models import DeliveryStatus, LifecycleStage, PlanningHorizon, RoadmapItemType
 
 logger = logging.getLogger("darkfac.git.autonomy")
@@ -1532,19 +1533,33 @@ def run_check_main(
     workflow: str = DEFAULT_MAIN_WORKFLOW,
     open_ticket: bool = False,
     notify: bool = False,
+    alert_owner: bool = False,
     ticket_finder: Optional[TicketFinder] = None,
     ticket_creator: Optional[TicketCreator] = None,
     notifier: Optional[Notifier] = None,
+    owner_action_store: Optional[OwnerActionStore] = None,
+    owner_action_notifier: Optional[main_ci_alert.Notifier] = None,
 ) -> tuple[int, dict[str, Any]]:
     """Probe the base branch CI. Exit code: 0 green, 1 red, 2 unknown (gh failure).
 
     ``open_ticket`` files ONE defect ticket per SHA (idempotent: an existing
     ticket mentioning the short SHA is reused). ``notify`` sends an alert on every
     invocation where the branch is red, so schedule it with a sensible cadence.
+    ``alert_owner`` keeps the single ``OA-MAIN-CI`` owner-action alert (DarkHub +
+    Telegram ops/owner) in sync (USR-247): raised, never duplicated, on red; closed
+    on green. With no ``owner_action_store`` the write lands on ``main`` through its
+    own autonomous ``queue`` PR (``core.git.main_ci_alert``), using ``root`` as the
+    checkout to branch the throwaway worktree from.
     """
     status = check_main(runner or _run_gh, root, branch=branch, workflow=workflow)
     payload: dict[str, Any] = status.to_dict()
     if status.state == "green":
+        if alert_owner:
+            resolved = main_ci_alert.sync_main_ci_status(
+                status, store=owner_action_store, cwd=root, gh_runner=runner or _run_gh,
+                notifier=owner_action_notifier,
+            )
+            payload["owner_action"] = {"id": resolved.id, "closed": True} if resolved else None
         return 0, payload
     if status.state == "unknown":
         return 2, payload
@@ -1575,6 +1590,12 @@ def run_check_main(
         except Exception as exc:  # never fatal
             logger.warning("Red-main alert failed: %s", sanitize(str(exc)))
             payload["notified"] = False
+    if alert_owner:
+        raised = main_ci_alert.sync_main_ci_status(
+            status, store=owner_action_store, cwd=root, gh_runner=runner or _run_gh,
+            notifier=owner_action_notifier,
+        )
+        payload["owner_action"] = {"id": raised.id, "closed": False} if raised else None
     return 1, payload
 
 
@@ -1582,7 +1603,11 @@ def format_check_main(payload: dict[str, Any]) -> str:
     """Plain-text (ASCII) rendering of a check-main payload."""
     head = f"{payload['workflow']} on {payload['branch']}"
     if payload["state"] == "green":
-        return f"[MAIN_GREEN] {head} is green (sha {payload['short_sha']})."
+        line = f"[MAIN_GREEN] {head} is green (sha {payload['short_sha']})."
+        owner_action = payload.get("owner_action")
+        if owner_action:
+            line += f"\n  owner action: {owner_action['id']} closed"
+        return line
     if payload["state"] == "unknown":
         return f"[MAIN_UNKNOWN] {head}: {payload.get('detail') or 'state could not be determined'}"
     lines = [
@@ -1599,6 +1624,9 @@ def format_check_main(payload: dict[str, Any]) -> str:
             lines.append(f"  ticket: not created ({ticket.get('error')})")
     if "notified" in payload:
         lines.append(f"  alert: {'sent' if payload['notified'] else 'not delivered'}")
+    owner_action = payload.get("owner_action")
+    if owner_action:
+        lines.append(f"  owner action: {owner_action['id']} open")
     return "\n".join(lines)
 
 
@@ -1659,12 +1687,17 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         "--open-ticket", action="store_true", help="File one defect ticket per red SHA (idempotent)"
     )
     cm_parser.add_argument("--notify", action="store_true", help="Send an alert when the branch is red")
+    cm_parser.add_argument(
+        "--alert-owner", action="store_true",
+        help="Raise/close the single OA-MAIN-CI owner-action alert (DarkHub + Telegram) to match the branch state",
+    )
 
     args = parser.parse_args(argv)
 
     if args.command == "check-main":
         code, payload = run_check_main(
-            branch=args.branch, workflow=args.workflow, open_ticket=args.open_ticket, notify=args.notify
+            branch=args.branch, workflow=args.workflow, open_ticket=args.open_ticket, notify=args.notify,
+            alert_owner=args.alert_owner,
         )
         print(json.dumps(payload, indent=2, ensure_ascii=False) if args.json else format_check_main(payload))
         return code
