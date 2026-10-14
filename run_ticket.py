@@ -1856,9 +1856,35 @@ def _run(argv: Optional[list[str]], box: list[ProgressPublisher], stack: context
             before_headroom=before_headroom,
             ticket_size=ticket_size,
         )
-    if not report.ok or report.result is None:
+    advance_after_timeout = (
+        not report.ok and report.result is not None and report.advance_to_validation
+    )
+    if advance_after_timeout:
+        # USR-256: timeout with work already in the worktree is not a failure; validate what exists.
+        progress.phase(
+            "agent", "running",
+            "agente estourou o tempo com alteracoes na worktree; seguindo para validacao",
+            cause="agent_timeout_with_changes",
+        )
+        print(
+            "[i] Agente estourou o tempo com alterações na worktree; seguindo para validação",
+            file=sys.stderr,
+        )
+    if (not report.ok or report.result is None) and not advance_after_timeout:
         failure = format_agent_failure(report)
-        progress.phase("agent", "failed", failure, cause="agent_failed")
+        timed_out = (
+            report.result is not None and report.result.error_kind == "timeout"
+        )
+        failure_cause = "agent_timeout" if timed_out else "agent_failed"
+        if timed_out:
+            # USR-256: no ledger field exists for a failure reason; the cause goes to the progress
+            # board and the resume command to stderr (the ticket stays `planned`).
+            failure += (
+                f"\n[i] Causa: agent_timeout. Worktree preservada: {workspace.path}\n"
+                f"[i] Para retomar: python C:\\dev\\DarkFac\\run_ticket.py --resume-delivery "
+                f"{ticket.id} --worktree {workspace.path}"
+            )
+        progress.phase("agent", "failed", failure, cause=failure_cause)
         print(failure, file=sys.stderr)
         quotas_after = inspect_quotas()
         after_headroom = quotas_after.get(selected_harness, {}).get("headroom")

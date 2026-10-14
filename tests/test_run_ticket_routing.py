@@ -650,3 +650,61 @@ def test_an_explicit_harness_is_reported_as_the_reason_and_the_operating_harness
     payload = json.loads(capsys.readouterr().out)
     assert payload["selected_harness"] == "codex"
     assert payload["operating_harness"] == "claude" and payload["route_reason"] == "explicit_harness"
+
+
+# --------------------------------------------------------------------------
+# USR-256: a timeout with changes in the worktree goes on to validation
+# --------------------------------------------------------------------------
+
+
+def test_timeout_with_worktree_changes_advances_to_delivery_and_gate(
+    env: dict[str, Any], monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setattr(agent_retry, "default_worktree_has_changes", lambda cwd: True)
+    delivery = MagicMock(return_value={"exit_code": 0, "ok": True})
+    monkeypatch.setattr(run_ticket, "resume_delivery", delivery)
+    env["agent"].side_effect = lambda req: _fail(
+        "timeout", req.harness, exit_code=None, duration_s=1800.0, text="parcial"
+    )
+
+    assert main(["USR-99", "--harness", "codex", "--skip-validation", "--no-commit"]) == 0
+
+    assert env["agent"].call_count == 1  # no retry from scratch over the existing work
+    delivery.assert_called_once()
+    assert delivery.call_args.kwargs["worktree_path"] == env["workspace"].path
+    err = capsys.readouterr().err
+    assert "[i] Agente estourou o tempo com alterações na worktree; seguindo para validação" in err
+    assert "[FALHA NA EXECUÇÃO DO AGENTE]" not in err
+
+
+def test_timeout_without_changes_fails_with_cause_and_resume_command(
+    env: dict[str, Any], monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setattr(agent_retry, "default_worktree_has_changes", lambda cwd: False)
+    delivery = MagicMock(side_effect=AssertionError("delivery must not run"))
+    monkeypatch.setattr(run_ticket, "resume_delivery", delivery)
+    env["agent"].side_effect = lambda req: _fail("timeout", req.harness, exit_code=None, duration_s=5.0)
+
+    assert main(["USR-99", "--harness", "codex", "--skip-validation", "--no-commit"]) == 1
+
+    err = capsys.readouterr().err
+    assert "[FALHA NA EXECUÇÃO DO AGENTE]" in err
+    assert "agent_timeout" in err
+    assert "run_ticket.py --resume-delivery USR-99 --worktree " + str(env["workspace"].path) in err
+    delivery.assert_not_called()
+
+
+def test_retry_report_flags_advance_only_when_timeout_left_changes() -> None:
+    def build(harness: str, model: Optional[str]) -> AgentRequest:
+        return AgentRequest(prompt="x", cwd=Path.cwd(), mode="write", harness=harness, model=model)
+
+    def run(has_changes: bool) -> agent_retry.RetryReport:
+        return agent_retry.run_with_retry(
+            build, ("codex", None), host_caps=["harness:codex"], mode="write",
+            run_func=lambda req: _fail("timeout", req.harness, exit_code=None),
+            pick_func=lambda *a, **k: None, sleep_fn=lambda s: None, record_func=lambda *a, **k: None,
+            has_changes_fn=lambda cwd: has_changes, pinned=True,
+        )
+
+    assert run(True).advance_to_validation is True
+    assert run(False).advance_to_validation is False
