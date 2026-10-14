@@ -602,6 +602,12 @@ def test_run_ticket_keeps_the_worktree_when_a_failed_agent_left_work_behind(
 
     _launcher_env(repo, monkeypatch, agent, FakeGh(repo.bare))
     monkeypatch.setattr(run_ticket.time, "sleep", lambda _s: None)  # the retry backoff must not really wait
+    # USR-256 gave the launcher a *separate* path for a timeout with changes already in the worktree
+    # (advance straight to the focal pre-test/gate/self-correction loop instead of failing); that path is
+    # covered on its own in tests/test_run_ticket_routing.py. This test is about the older, more general
+    # policy -- a failed agent run must never destroy partial work it leaves behind -- so it forces the
+    # plain failure branch here regardless of the real on-disk changes.
+    monkeypatch.setattr(run_ticket.agent_retry, "default_worktree_has_changes", lambda cwd: False)
 
     assert run_ticket.main(["USR-96", "--harness", "codex", "--skip-validation", "--json"]) == 1
 

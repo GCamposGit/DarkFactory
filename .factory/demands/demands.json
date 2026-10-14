@@ -7598,8 +7598,8 @@
     "project_id": "darkfac",
     "title": "Timeout do agente com alteracoes na worktree aborta o run_ticket em vez de seguir para foco, portao e autocorrecao",
     "origin": "user",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "709eb6926842c243115308ff24d459654947c343",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -7625,6 +7625,6 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-14T09:13:11.666648Z",
-    "updated_at": "2026-10-14T09:13:11.666648Z"
+    "updated_at": "2026-10-14T11:53:18.619453Z"
   }
 ]

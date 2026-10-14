@@ -219,6 +219,9 @@ class RetryReport(BaseModel):
     attempts: list[AgentAttempt] = Field(default_factory=list)
     # USR-205: the launcher must not delete the worktree after a protected-path block.
     preserve_worktree: bool = False
+    # USR-256: the agent timed out but already left implementation changes in the worktree, so the
+    # launcher must go on to focused pre-test, gate and self-correction instead of aborting.
+    advance_to_validation: bool = False
 
     @property
     def total_duration_s(self) -> float:
@@ -280,6 +283,7 @@ def run_with_retry(
 
     last_result: Optional[AgentResult] = None
     last_route: Optional[Route] = route
+    advance_to_validation = False
     routes_tried = 0
     while route is not None and routes_tried < max_routes:
         routes_tried += 1
@@ -343,6 +347,7 @@ def run_with_retry(
             sleep_fn(delay)
 
         if stopped_due_to_changes:
+            advance_to_validation = True
             break
 
         exclude_route(excluded, harness, model)
@@ -365,4 +370,7 @@ def run_with_retry(
             text=f"no route available for the '{stage}' stage in '{mode}' mode",
             harness="none", duration_s=0.0, error_kind="no_authenticated_harness",
         )
-    return RetryReport(ok=False, result=last_result, route=last_route, attempts=attempts)
+    return RetryReport(
+        ok=False, result=last_result, route=last_route, attempts=attempts,
+        advance_to_validation=advance_to_validation,
+    )
