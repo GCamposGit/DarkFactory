@@ -7557,5 +7557,40 @@
     "dependencies": [],
     "created_at": "2026-10-13T00:30:14.404999Z",
     "updated_at": "2026-10-13T00:30:14.404999Z"
+  },
+  {
+    "id": "USR-255",
+    "project_id": "darkfac",
+    "title": "IDs sequenciais de OA colidem entre branches: duas branches criam o mesmo OA-NNN e o portao reprova com 'item OA-NNN duplicado ignorado'",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "later",
+    "tags": [
+      "user-demand",
+      "congelado-v0",
+      "bug"
+    ],
+    "problem_statement": "Em 14/10/2026 a entrega do USR-249 reprovou no portao oficial (tests/test_owner_actions_core.py::test_seeded_backlog_is_valid_and_complete: 'item OA-017 duplicado ignorado'). A branch do USR-249 tinha criado OA-017 (patch protegido de core/harness/test_subagent.py) quando a main ainda nao tinha OA-017; o PR #330 mergeou outro OA-017 (carga do Desktop/Notebook) e o rebase juntou os dois sem conflito textual. scripts/owner_action.py add atribui o proximo numero olhando so o arquivo local. Custou um portao de ~25 min e um resgate manual (renumeracao para OA-018 no commit 0449d54).",
+    "core_journey": [],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Depois do rebase/sync com origin/main, a entrega (run_ticket e deliver_branch) detecta OA-NNN duplicado no owner_actions.json e renumera a OA da branch para o proximo numero livre antes do portao, registrando a troca no log",
+      "owner_action.py add calcula o proximo numero considerando tambem origin/main (git show origin/main:...) quando disponivel",
+      "Teste cobre: branch e main com o mesmo OA-NNN -> a da branch e renumerada e o backlog carrega sem avisos"
+    ],
+    "suggested_files": [
+      "core/owner_actions/",
+      "core/git/autonomy.py",
+      "run_ticket.py",
+      "tests/"
+    ],
+    "estimated_complexity": "low",
+    "dependencies": [],
+    "created_at": "2026-10-14T06:35:19.129693Z",
+    "updated_at": "2026-10-14T06:35:19.131292Z"
   }
 ]
