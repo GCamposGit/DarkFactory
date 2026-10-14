@@ -14,12 +14,14 @@ from core.demands.models import UserTicket
 from core.demands.store import DemandsStore
 from core.git import queue_registration
 from core.git.autonomy import GitAutonomyManager
+from core.git.ticket_workspace import shared_checkout_dirty_paths
 from core.owner_actions.models import ActionStatus
 from core.owner_actions.store import OwnerActionStore
 from core.roadmap.models import DeliveryStatus
 from tests.test_git_delivery import FakeGh, _git, _ident, env  # noqa: F401  (env is a fixture)
 
 LEDGER = ".factory/demands/demands.json"
+OA_LEDGER = ".factory/owner_actions/owner_actions.json"
 
 
 def _ticket(ticket_id: str, title: str) -> UserTicket:
@@ -32,6 +34,17 @@ def _main_ids(bare: Path) -> list[str]:
         capture_output=True, text=True, encoding="utf-8", check=True,
     ).stdout
     return [row["id"] for row in json.loads(shown)]
+
+
+def _main_owner_actions(bare: Path) -> list[dict]:
+    """The owner-action backlog as committed on ``bare``'s main, or ``[]`` if it was never written."""
+    shown = subprocess.run(
+        ["git", "--git-dir", str(bare), "show", f"refs/heads/main:{OA_LEDGER}"],
+        capture_output=True, text=True, encoding="utf-8",
+    )
+    if shown.returncode != 0:
+        return []
+    return json.loads(shown.stdout).get("actions", [])
 
 
 class MovingMainGh(FakeGh):
@@ -94,21 +107,30 @@ def test_concurrent_registration_survives_main_moving_during_every_ci_window(que
     assert rep.ok and rep.action == "merged", rep.message
     assert sorted(_main_ids(bare)) == ["USR-1", "USR-50", "USR-91", "USR-92"]
     assert sum(1 for call in gh.calls if call[:2] == ["pr", "merge"]) == 3
-    assert OwnerActionStore().list_actions(include_done=False) == []
+    assert _main_owner_actions(bare) == []
 
 
 def test_registration_that_never_merges_leaves_a_visible_alert(queue_env) -> None:
+    """USR-246: the alert reaches main as its own autonomous PR, and the shared checkout stays clean."""
     local, bare, other = queue_env
-    gh = MovingMainGh(bare, other, moves=10)
+    # Exactly enough moves to defeat the ticket's own merge + 3 re-sync attempts (USR-238); any
+    # further "pr merge" call -- namely the alert's own tiny single-file PR -- lands cleanly, so
+    # the test isolates "the ticket is stuck" from "nothing else can ever merge either".
+    gh = MovingMainGh(bare, other, moves=4)
     rep = _register(local, gh)
     assert not rep.ok and rep.pr_url
-    alerts = [a for a in OwnerActionStore().list_actions(include_done=False) if a.id.startswith("OA-QR-")]
+    actions = _main_owner_actions(bare)
+    alerts = [a for a in actions if a["id"].startswith("OA-QR-")]
     assert len(alerts) == 1
-    assert alerts[0].id == f"OA-QR-{rep.pr_url.rsplit('/', 1)[1]}"
-    assert "USR-50" in alerts[0].title and rep.pr_url in alerts[0].why and "not mergeable" in alerts[0].why
-    assert alerts[0].blocks == ["USR-50"]
+    assert alerts[0]["id"] == f"OA-QR-{rep.pr_url.rsplit('/', 1)[1]}"
+    assert alerts[0]["status"] == "open"
+    assert "USR-50" in alerts[0]["title"] and rep.pr_url in alerts[0]["why"] and "not mergeable" in alerts[0]["why"]
+    assert alerts[0]["blocks"] == ["USR-50"]
     # the ticket row is still intact on the PR branch, nothing was lost or half-merged
     assert "USR-50" not in _main_ids(bare)
+    # raising the alert never left the shared checkout dirty (the bug behind USR-246): the next
+    # `run_ticket <ID>` run from `local` would not be refused with SharedCheckoutDirty
+    assert shared_checkout_dirty_paths(local) == []
 
 
 class ListGh:
@@ -124,6 +146,26 @@ class ListGh:
         return subprocess.CompletedProcess(a, 0 if self.ok else 1, json.dumps(self.rows), "")
 
 
+class QueueWatchGh(FakeGh):
+    """FakeGh (full PR lifecycle against ``bare``) plus a controllable watchdog `pr list` response.
+
+    Used to exercise the real USR-246 path end to end: the watchdog's own alert/resolution commit
+    needs ``pr create``/``pr checks``/``pr merge`` to work exactly like a ticket's own registration,
+    which plain ``ListGh`` (ignorant of everything but ``pr list``) cannot provide.
+    """
+
+    def __init__(self, bare: Path, rows: list[dict]) -> None:
+        super().__init__(bare)
+        self.rows = rows
+
+    def __call__(self, args: Sequence[str], cwd: Path) -> "subprocess.CompletedProcess[str]":
+        a = list(args)
+        if a[:2] == ["pr", "list"] and "--label" in a:
+            self.calls.append(a)
+            return subprocess.CompletedProcess(a, 0, json.dumps(self.rows), "")
+        return super().__call__(args, cwd)
+
+
 def _row(number: int, created: str, mergeable: str = "CONFLICTING", state: str = "DIRTY") -> dict:
     return {
         "number": number, "url": f"https://github.com/x/y/pull/{number}", "createdAt": created,
@@ -133,6 +175,30 @@ def _row(number: int, created: str, mergeable: str = "CONFLICTING", state: str =
 
 
 NOW = datetime(2026, 10, 11, 12, 0, tzinfo=timezone.utc)
+
+
+def test_watchdog_lands_alert_as_its_own_pr_then_closes_it_once_the_pr_merges(queue_env) -> None:
+    """USR-246: without an injected store, raise and close each commit via an isolated worktree.
+
+    No `--allow-dirty-shared-checkout` escape hatch is needed afterwards: `local` -- the shared
+    checkout the watchdog ran from -- is never left dirty by either the alert or its resolution.
+    """
+    local, bare, _other = queue_env
+    old_pr = _row(99, "2026-10-11T11:00:00Z")  # 60 min old: past the 30-minute stall threshold
+    gh = QueueWatchGh(bare, [old_pr])
+
+    raised = queue_registration.check_stalled_queue_prs(local, gh, now=NOW)
+    assert [a.id for a in raised] == ["OA-QR-99"]
+    actions = _main_owner_actions(bare)
+    assert any(a["id"] == "OA-QR-99" and a["status"] == "open" for a in actions)
+    assert shared_checkout_dirty_paths(local) == []
+
+    gh.rows = []  # PR #99 merged (or closed) since the last scan
+    closed = queue_registration.check_stalled_queue_prs(local, gh, now=NOW)
+    assert closed == []
+    actions = _main_owner_actions(bare)
+    assert any(a["id"] == "OA-QR-99" and a["status"] == "done" for a in actions)
+    assert shared_checkout_dirty_paths(local) == []
 
 
 def test_watchdog_alerts_only_prs_older_than_thirty_minutes(tmp_path: Path) -> None:

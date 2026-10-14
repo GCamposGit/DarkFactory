@@ -47,6 +47,24 @@ inteira de CI, longa o bastante para a main andar de novo; (c) so um retry; (d) 
 * `tests/test_queue_registration.py`: duas entregas concorrentes (a main muda duas vezes durante o CI) terminam com os
   dois tickets na main; entrega que nunca mergeia deixa o alerta; vigia (limiar, idempotencia, `gh` fora do ar).
 
+## Checkout sujo pelo proprio alerta (USR-246)
+
+Em 12/10/2026 o PR de registro #317 ficou preso e o mecanismo acima gravou `OA-QR-317` direto em
+`.factory/owner_actions/owner_actions.json` **dentro do checkout compartilhado**, sem commit: o
+`OwnerActionStore()` default resolve o caminho a partir de onde o modulo `core/owner_actions/store.py`
+foi importado (`C:\dev\DarkFac`, ja que `run_ticket.py` e sempre invocado de la), nao do `cwd`/worktree
+que a entrega estava usando. Ninguem commita esse arquivo, entao `run_ticket <ID>` seguinte recusava
+com `SharedCheckoutDirty` -- o alerta que deveria ajudar virava a causa de um resgate manual, e o item
+tambem nunca chegava a main (o Hub le o arquivo do commit, nao o working tree de ninguem).
+
+Correcao: `.factory/owner_actions/` entrou em `LEDGER_PREFIXES` (`core/git/ci_checks.is_ledger_only`),
+junto de `.factory/demands/` e `.factory/roadmap/`. `raise_alert`/`check_stalled_queue_prs` agora, sem
+um `store` explicito (so os testes injetam um), abrem seu proprio worktree descartavel a partir de
+`origin/main` (`core.git.queue_registration._commit_owner_action_changes`) e entregam a mutacao como
+um PR `queue` autonomo igual ao de um registro de ticket -- nunca escrevendo no checkout de onde a
+chamada partiu. `GitAutonomyManager.deliver_branch` ganhou `supervise_queue=False` para essa entrega
+interna, senao ela re-executaria o proprio vigia sobre si mesma (recursao).
+
 ## Limites conhecidos
 
 * Tres tentativas nao garantem o merge numa main muito movimentada: cada uma custa ~15 min de CI. O alerta cobre esse

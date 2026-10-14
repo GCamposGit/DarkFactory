@@ -51,8 +51,10 @@ _MAX_LOG_RUNS = 2
 
 DEFAULT_MAIN_WORKFLOW = "DarkFac CI"
 
-# Paths whose changes carry no executable code: the ticket ledger and roadmap.
-LEDGER_PREFIXES: tuple[str, ...] = (".factory/demands/", ".factory/roadmap/")
+# Paths whose changes carry no executable code: the ticket ledger, the roadmap and the
+# owner-action backlog (USR-246: the latter lets a stuck-PR alert land via the same
+# lightweight "queue" PR path instead of writing straight into a shared checkout).
+LEDGER_PREFIXES: tuple[str, ...] = (".factory/demands/", ".factory/roadmap/", ".factory/owner_actions/")
 
 _RED_CONCLUSIONS = frozenset({"failure", "timed_out", "startup_failure"})
 _INCONCLUSIVE_CONCLUSIONS = frozenset({"cancelled", "skipped", "stale", ""})

@@ -7357,8 +7357,8 @@
     "project_id": "darkfac",
     "title": "Alerta de PR de registro preso grava a OA no checkout compartilhado sem commit e o proximo run_ticket recusa com SharedCheckoutDirty",
     "origin": "user",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "6117ac9574b421da487e9b9438715c0c5efa7fc8",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -7386,7 +7386,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-12T06:47:09.786311Z",
-    "updated_at": "2026-10-12T06:47:09.786311Z"
+    "updated_at": "2026-10-14T10:26:34.949920Z"
   },
   {
     "id": "USR-247",
