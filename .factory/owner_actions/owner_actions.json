@@ -795,6 +795,35 @@
       "created_at": "2026-10-14T19:19:07Z",
       "created_by": "claude-code",
       "resolved_at": null
+    },
+    {
+      "id": "OA-QR-347",
+      "kind": "action",
+      "title": "PR de registro #347 (USR-263) aberto sem mergear: o ticket nao chegou ao backlog da main",
+      "priority": "high",
+      "status": "open",
+      "why": "Motivo: CI still pending after 1201s (DarkFac CI / pr-validation (windows-latest); pending after 1201s); merge withheld, PR and branch left open. ci_gate=pending_timeout. PR: https://github.com/GCamposGit/DarkFactory/pull/347",
+      "blocks": [
+        "USR-263"
+      ],
+      "depends_on": [],
+      "steps": [
+        {
+          "text": "Veja o estado e os checks do PR #347.",
+          "command": "gh pr view 347 --json mergeable,mergeStateStatus,statusCheckRollup"
+        },
+        {
+          "text": "Se o PR esta CONFLICTING ou atrasado, peca a um agente (Claude Code) o resgate descrito em docs/runbooks/queue_registration.md: re-aplicar a linha do ticket sobre a origin/main atual, esperar o CI e mergear (squash). Nao e preciso editar JSON a mao."
+        },
+        {
+          "text": "Se o ticket ja entrou na main por outro caminho, feche o PR duplicado.",
+          "command": "gh pr close 347 --delete-branch"
+        }
+      ],
+      "verify": "O PR #347 aparece como MERGED e o ticket USR-263 esta em .factory/demands/demands.json na main.",
+      "created_at": "2026-10-14T20:16:04Z",
+      "created_by": "queue-registration",
+      "resolved_at": null
     }
   ]
 }
