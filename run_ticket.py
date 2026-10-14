@@ -351,6 +351,8 @@ VOLATILE_STATE_PREFIXES: tuple[str, ...] = (
     ".factory/test_logs/",
     ".factory/tmp/",
     ".factory/pids/",
+    ".factory/line_lock/",
+    ".factory/local_cancel/",
 )
 
 

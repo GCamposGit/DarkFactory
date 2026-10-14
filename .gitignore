@@ -65,6 +65,8 @@ models/.locks/
 .factory/enterprise/
 .factory/artifacts/
 .factory/pids/
+.factory/line_lock/
+.factory/local_cancel/
 .factory/tmp/
 .factory/*.db*
 
