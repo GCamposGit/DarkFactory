@@ -1021,10 +1021,13 @@ def _run_main(
     # clean on main, Desktop update+restart, VPS = the deploy just done). The
     # sync must not trigger another redeploy, and node_sync's own redeploy
     # passes --skip-node-sync, so there is no re-entry loop.
-    # USR-196: o backup pos-deploy depende so da convergencia da VPS (deploy + /health + titulo do commit),
-    # nao da do Desktop. `backup_ok` espelha `all_ok` ate aqui; falhas de Notebook/VPS ainda o derrubam.
+    # USR-196/USR-222: o backup pos-deploy depende so da convergencia da VPS (deploy + /health +
+    # titulo do commit), nem da do Desktop nem da do Notebook. `backup_ok` espelha `all_ok` ate
+    # aqui; so uma falha de VPS ainda o derruba -- Desktop e Notebook divergentes virao pendencia
+    # explicita (desktop_pending / notebook_pending) sem bloquear o backup.
     backup_ok = all_ok
     desktop_pending: Optional[str] = None
+    notebook_pending: Optional[str] = None
     if getattr(args, "skip_node_sync", False):
         print("[NODE SYNC] skipped (--skip-node-sync)", file=out, flush=True)
     else:
@@ -1049,6 +1052,13 @@ def _run_main(
             if node.name == "Desktop":
                 # USR-196: o backup da VPS nao depende do Desktop; a divergencia vira pendencia explicita.
                 desktop_pending = node.reason or "(none)"
+            elif node.name == "Notebook" and getattr(node, "sync_classification", None) == "other_branch":
+                # USR-222: o checkout compartilhado do Notebook esta em outra branch por uma sessao
+                # paralela de outro ticket (nao uma arvore suja na propria main); isso nao e evidencia
+                # de que o deploy em si divergiu, so vira pendencia explicita, sem derrubar o backup da
+                # VPS. Um Notebook genuinamente sujo/divergente em `main` (dirty/ahead/diverged) continua
+                # derrubando o backup, como antes.
+                notebook_pending = node.reason or "(none)"
             else:
                 backup_ok = False
             if getattr(node, "sync_classification", None) == "dirty" or "dirty worktree" in (node.reason or ""):
@@ -1108,6 +1118,12 @@ def _run_main(
                 file=out,
                 flush=True,
             )
+        if notebook_pending is not None:
+            print(
+                "[BACKUP] VPS converged; running post-deploy backup despite pending Notebook convergence (USR-222)",
+                file=out,
+                flush=True,
+            )
         try:
             print("\n[AUTONOMOUS POST-DEPLOY BACKUP] Executing 3-tier backup & restore drill...", file=out, flush=True)
             runner = backup_runner or default_backup_runner
@@ -1125,6 +1141,16 @@ def _run_main(
         # backup da VPS tenha rodado; o Desktop e declarado pendencia explicita para nao ser esquecido.
         print(
             f"[PENDING] Desktop divergent: {desktop_pending}; VPS backup "
+            f"{'attempted' if backup_ok and not getattr(args, 'skip_backup', False) else 'not attempted'}; "
+            "retry convergence with: python -m core.infra.node_sync retry (cwd C:\\dev\\DarkFac)",
+            file=err,
+            flush=True,
+        )
+    if notebook_pending is not None:
+        # USR-222: o checkout compartilhado do Notebook pode estar em outra branch de outra sessao;
+        # isso e uma pendencia de higiene do checkout, nao motivo para pular o backup da VPS.
+        print(
+            f"[PENDING] Notebook divergent: {notebook_pending}; VPS backup "
             f"{'attempted' if backup_ok and not getattr(args, 'skip_backup', False) else 'not attempted'}; "
             "retry convergence with: python -m core.infra.node_sync retry (cwd C:\\dev\\DarkFac)",
             file=err,

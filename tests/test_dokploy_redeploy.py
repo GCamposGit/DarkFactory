@@ -1671,6 +1671,27 @@ def test_notebook_divergence_still_skips_backup(monkeypatch: pytest.MonkeyPatch)
     assert code == mod.EXIT_NODE_DIRTY
 
 
+def test_notebook_other_branch_does_not_skip_backup_and_is_reported_as_pending(monkeypatch: pytest.MonkeyPatch) -> None:
+    """USR-222: o checkout compartilhado do Notebook esta em outra branch (sessao paralela de outro
+    ticket) -- isso NAO e um Notebook sujo na propria main (esse caso continua coberto por
+    test_notebook_divergence_still_skips_backup), entao o backup da VPS roda normalmente."""
+    from core.infra import node_sync
+
+    notebook = node_sync.NodeStatus(
+        name="Notebook", state="divergent", sync_classification="other_branch",
+        reason="main checkout is on branch 'fix/demand-id-allocator-no-git' (parallel session); local main ref behind origin/main",
+    )
+    desktop = node_sync.NodeStatus(name="Desktop", state="converged", git_sha="a" * 40)
+    code, out, err, backups = _run_with_sync_report(monkeypatch, _report_with(desktop, notebook=notebook))
+    assert backups == ["darkfac"]
+    assert "[BACKUP] ran: snapshot=snp_usr196" in out
+    assert "[BACKUP] skipped" not in out
+    assert code == mod.EXIT_DEPLOY_FAILED
+    assert "[PENDING] Notebook divergent" in err
+    assert "parallel session" in err
+    assert "backup attempted" in err
+
+
 def test_desktop_and_vps_both_divergent_skips_backup(monkeypatch: pytest.MonkeyPatch) -> None:
     from core.infra import node_sync
 

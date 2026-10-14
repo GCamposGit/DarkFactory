@@ -6874,8 +6874,8 @@
     "project_id": "darkfac",
     "title": "Deploy pos-merge diverge e pula o backup quando o checkout compartilhado do Notebook esta em outra branch",
     "origin": "user",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "9077a13db7e4c694b443165d311687ed8db101a0",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -6898,7 +6898,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-10T18:34:47.416295Z",
-    "updated_at": "2026-10-11T17:49:17.206876Z"
+    "updated_at": "2026-10-14T08:23:38.794472Z"
   },
   {
     "id": "USR-238",

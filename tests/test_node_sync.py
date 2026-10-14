@@ -16,11 +16,25 @@ OLD = "b" * 40
 
 
 class FakeGit:
-    def __init__(self, *, dirty: bool = False, old: bool = False, branch: str = "main", worktree: bool = False) -> None:
+    def __init__(
+        self,
+        *,
+        dirty: bool = False,
+        old: bool = False,
+        branch: str = "main",
+        worktree: bool = False,
+        local_main_old: bool = False,
+        fail_fetch_ref: bool = False,
+    ) -> None:
         self.dirty = dirty
         self.branch = branch
         self.worktree = worktree
         self.head = OLD if old else SHA
+        # SHA the local `main` branch ref points at -- independent of `head`/`branch`, since a shared
+        # checkout parked on another branch for a parallel session still has its own `main` ref that
+        # can be fast-forwarded without touching HEAD or the working tree (USR-222).
+        self.local_main = OLD if local_main_old else SHA
+        self.fail_fetch_ref = fail_fetch_ref
         self.calls: list[list[str]] = []
 
     def __call__(self, root: Path, args: list[str]) -> str:
@@ -29,6 +43,8 @@ class FakeGit:
             return SHA
         if args == ["rev-parse", "HEAD"]:
             return self.head
+        if args == ["rev-parse", "refs/heads/main"]:
+            return self.local_main
         if args == ["rev-parse", "--git-dir"]:
             return "C:/repo/.git/worktrees/x" if self.worktree else ".git"
         if args == ["rev-parse", "--git-common-dir"]:
@@ -38,6 +54,11 @@ class FakeGit:
         if args == ["status", "--porcelain"]:
             return " M file" if self.dirty else ""
         if args == ["fetch", "origin", "main"]:
+            return ""
+        if args == ["fetch", "origin", "main:refs/heads/main"]:
+            if self.fail_fetch_ref:
+                raise RuntimeError("git fetch failed (exit 1)")
+            self.local_main = SHA
             return ""
         if args == ["merge", "--ff-only", "origin/main"]:
             self.head = SHA
@@ -208,21 +229,64 @@ def test_redeploy_vps_passes_skip_node_sync(monkeypatch: pytest.MonkeyPatch) -> 
     assert "--skip-node-sync" in captured[0] and "--skip-backup" in captured[0]
 
 
-@pytest.mark.parametrize("kwargs, needle", [
-    ({"branch": "feature/x", "old": True}, "branch"),
-    ({"worktree": True, "old": True}, "worktree"),
-    ({"branch": "feature/x"}, "branch"),  # same SHA on another branch is still not converged
-])
-def test_notebook_outside_main_is_divergent_and_untouched(kwargs: dict[str, Any], needle: str) -> None:
-    git = FakeGit(**kwargs)
+def test_notebook_worktree_is_divergent_and_untouched() -> None:
+    """A checkout that is itself a linked worktree (e.g. a ticket's own worktree) is never touched:
+    some other session may be mid-work in it, regardless of what branch it is on."""
+    git = FakeGit(worktree=True, old=True)
     report = mod.sync(root=Path("."), git=git, http=FakeHttp())
     notebook = report.nodes[0]
     assert notebook.state == "divergent"
-    assert needle in (notebook.reason or "")
+    assert "worktree" in (notebook.reason or "")
     assert not report.ok
     assert ["fetch", "origin", "main"] not in git.calls
+    assert ["fetch", "origin", "main:refs/heads/main"] not in git.calls
     assert ["merge", "--ff-only", "origin/main"] not in git.calls
     assert ["status", "--porcelain"] not in git.calls
+
+
+# --- USR-222: checkout compartilhado em outra branch (sessao paralela) --------------------------
+
+
+def test_notebook_on_other_branch_converges_via_local_main_ref_without_touching_head() -> None:
+    """A shared checkout parked on another branch for a parallel session (even with a dirty working
+    tree there) still converges, because convergence is judged by the local `main` ref, never by
+    HEAD or the working tree of whatever branch is actually checked out."""
+    git = FakeGit(branch="fix/demand-id-allocator-no-git", dirty=True, old=True)
+    report = mod.sync(root=Path("."), git=git, http=FakeHttp())
+    assert report.ok
+    notebook = report.nodes[0]
+    assert notebook.state == "converged"
+    assert notebook.reason is None
+    # The other session's branch and working tree are never inspected or switched.
+    assert ["status", "--porcelain"] not in git.calls
+    assert ["rev-parse", "HEAD"] not in git.calls or git.head == OLD  # HEAD, if read at all, is untouched
+    assert git.branch == "fix/demand-id-allocator-no-git"
+
+
+def test_notebook_on_other_branch_fast_forwards_stale_local_main_ref() -> None:
+    """The local `main` ref itself can be behind (e.g. nobody fast-forwarded it in a while); `sync`
+    advances it with a ref-only fetch instead of skipping convergence entirely (USR-222)."""
+    git = FakeGit(branch="fix/demand-id-allocator-no-git", local_main_old=True)
+    report = mod.sync(root=Path("."), git=git, http=FakeHttp())
+    assert report.ok
+    notebook = report.nodes[0]
+    assert notebook.state == "converged"
+    assert ["fetch", "origin", "main:refs/heads/main"] in git.calls
+    assert ["fetch", "origin", "main"] not in git.calls
+    assert ["merge", "--ff-only", "origin/main"] not in git.calls
+    assert git.local_main == SHA
+
+
+def test_notebook_on_other_branch_reports_pending_when_ref_fetch_fails() -> None:
+    """If the ref-only fetch itself fails (e.g. network issue), Notebook is reported divergent with
+    a clear reason instead of silently converging or crashing the whole sync."""
+    git = FakeGit(branch="fix/demand-id-allocator-no-git", local_main_old=True, fail_fetch_ref=True)
+    report = mod.sync(root=Path("."), git=git, http=FakeHttp())
+    assert not report.ok
+    notebook = report.nodes[0]
+    assert notebook.state == "divergent"
+    assert "branch" in (notebook.reason or "")
+    assert "fast-forward" in (notebook.reason or "")
 
 
 def test_notebook_clean_main_fast_forwards() -> None:

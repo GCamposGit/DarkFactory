@@ -416,6 +416,50 @@ espera) em funções puras, separadas do transporte HTTP, testadas em
 real — mesma convenção do `DokployDeploymentAdapter` em
 `core/orchestrator/deployment_adapter.py`).
 
+### Checkout compartilhado do Notebook e disciplina de worktree (USR-222)
+
+`C:\dev\DarkFac` (o checkout principal do Notebook, raiz de `MAIN_CHECKOUT`
+em `core/infra/node_sync.py`) é compartilhado: o Owner e qualquer sessão de
+agente que rode ali sem abrir uma worktree própria disputam o mesmo HEAD.
+Toda sessão de agente (Claude Code, Codex, Grok, Antigravity) que for
+implementar um ticket **deve** trabalhar na sua própria worktree
+(`.worktrees/<ticket>-<timestamp>/`, criada por `run_ticket.py`) e **nunca**
+trocar a branch do checkout principal (`git checkout`/`git switch` em
+`C:\dev\DarkFac` diretamente) nem deixá-lo sujo — isso é exatamente o que
+causou o USR-222 (um commit do Owner em `AGENTS.md` foi perdido numa branch
+de PR, e depois o deploy pós-merge saiu com `BACKUP skipped` porque o
+checkout estava parado em `fix/demand-id-allocator-no-git` com alterações
+não commitadas).
+
+Por isso `node_sync.sync()`/`verify()` (chamado por
+`dokploy_redeploy.py` depois de cada deploy) **não exige** que o checkout
+principal esteja na branch `main` nem limpo para considerar o nó "Notebook"
+convergido:
+- Se o checkout principal estiver em qualquer branch diferente de `main`
+  (sessão paralela de outro ticket, inclusive com a árvore de trabalho
+  suja), a convergência é julgada pelo ref local `refs/heads/main` — nunca
+  por `HEAD` nem pela árvore de trabalho da branch em uso. Esse ref pode ser
+  avançado com `git fetch origin main:refs/heads/main`, que só atualiza um
+  ponteiro de branch (sem `checkout`, `merge` nem tocar a árvore de
+  trabalho), logo é seguro mesmo com outra sessão no meio do trabalho ali.
+- Se o checkout principal já estiver em `main` e limpo mas atrás de
+  `origin/main`, o comportamento antigo continua: `git fetch` + `git merge
+  --ff-only origin/main`.
+- Uma árvore de trabalho suja **na própria `main`** (não numa branch de
+  ticket) continua bloqueando o backup pós-deploy como antes — isso é sinal
+  de um problema real, não de uma sessão paralela legítima.
+- Um checkout que é ele mesmo uma worktree vinculada (`git-dir` ≠
+  `git-common-dir`) nunca é tocado, pelo mesmo motivo.
+
+Consequência prática: o backup pós-deploy (3 camadas) não é mais pulado só
+porque o checkout do Notebook estava em outra branch — ele depende apenas da
+convergência da VPS (como já valia para o Desktop desde o USR-196). Uma
+divergência do Notebook (sujo em `main`, ou ref `main` que não avançou
+mesmo após o fetch) ainda aparece como `[PENDING] Notebook divergent` na
+saída e mantém o código de saída diferente de zero, mas nunca mais bloqueia
+sozinha o backup de rodar quando a causa é só "outra sessão estava usando o
+checkout compartilhado".
+
 ## Política de contexto seletivo e promoção de aprendizado (DF-19)
 
 Para prevenir injeção excessiva de tokens e viés de confirmação entre diferentes harnesses:
