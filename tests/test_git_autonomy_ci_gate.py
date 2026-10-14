@@ -218,6 +218,7 @@ def test_condense_log_lists_early_error_annotations_when_the_tail_is_long() -> N
 def test_is_ledger_only() -> None:
     assert is_ledger_only([".factory/demands/demands.json"])
     assert is_ledger_only([".factory/demands/demands.json", ".factory/roadmap/darkfac.json"])
+    assert is_ledger_only([".factory/owner_actions/owner_actions.json"])
     assert not is_ledger_only([])
     assert not is_ledger_only([".factory/demands/demands.json", "core/git/autonomy.py"])
     assert not is_ledger_only([".factory/state.json"])

@@ -795,15 +795,19 @@ class GitAutonomyManager:
         gh_runner: Optional[GhRunner] = None,
         merge: bool = True,
         kind: Literal["queue", "implementation"] = "implementation",
+        *,
+        supervise_queue: bool = True,
     ) -> DeliveryReport:
         """Commit, push, open PR, merge (squash) and clean up a ticket branch.
 
         With merge=False (commercial acceptance required) the PR is opened but
-        neither merged nor cleaned up.
+        neither merged nor cleaned up. ``supervise_queue=False`` skips the stuck-PR watchdog and
+        alert below: :mod:`core.git.queue_registration` sets it when this delivery IS the stuck-PR
+        alert's own commit, so landing it never recurses into supervising itself (USR-246).
         """
         target = cwd or self.root
         runner = gh_runner or _run_gh
-        if kind == "queue" and merge:
+        if kind == "queue" and merge and supervise_queue:
             # USR-238: every registration also reports queue PRs that stayed open too long.
             queue_registration.check_stalled_queue_prs(target, runner)
         try:
@@ -813,8 +817,10 @@ class GitAutonomyManager:
         except Exception as exc:  # fail-closed report instead of crashing the pipeline
             logger.exception("deliver_branch failed for %s", ticket_id)
             report = DeliveryReport(ok=False, action="error", message=str(exc))
-        if kind == "queue" and not report.ok and report.pr_url:
-            queue_registration.alert_queue_pr_stuck(ticket_id, report.pr_url, report.message)
+        if kind == "queue" and not report.ok and report.pr_url and supervise_queue:
+            queue_registration.alert_queue_pr_stuck(
+                ticket_id, report.pr_url, report.message, cwd=target, gh_runner=runner
+            )
         self._close_open_phase(report)
         return report
 
