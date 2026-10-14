@@ -7430,8 +7430,8 @@
     "project_id": "darkfac",
     "title": "Autocorrecao do portao (USR-245) reinvoca o agente quando o portao falha por timeout ou infraestrutura, e o pre-teste focal que expira perde a saida parcial",
     "origin": "user",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "0449d542117fbaddd9701917748344485ff83efc",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -7458,7 +7458,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-12T11:06:09.271100Z",
-    "updated_at": "2026-10-12T11:06:09.271100Z"
+    "updated_at": "2026-10-14T06:14:22.622033Z"
   },
   {
     "id": "USR-250",
