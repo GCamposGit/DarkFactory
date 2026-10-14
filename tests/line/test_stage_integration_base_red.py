@@ -308,7 +308,6 @@ def test_the_factory_project_files_the_defect_ticket_best_effort(
     assert request.probe_cmd == "python -m core.git.autonomy check-main --branch main"
 
 
-@pytest.mark.parametrize("opener", [_Recorder(fail=True), _Recorder(None), _Recorder({"ticket": {"id": None}})])
 def test_the_factory_projects_red_base_alerts_the_owner_on_the_very_first_wait(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fake_gh
 ) -> None:
@@ -343,6 +342,7 @@ def test_the_factory_projects_red_base_alert_sync_runs_on_every_wait(
     assert alert_sync.calls == [("main",)]
 
 
+@pytest.mark.parametrize("opener", [_Recorder(fail=True), _Recorder(None), _Recorder({"ticket": {"id": None}})])
 def test_a_failed_defect_ticket_never_blocks_the_escalation(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fake_gh, opener: _Recorder
 ) -> None:
