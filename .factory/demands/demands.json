@@ -7699,5 +7699,39 @@
     "dependencies": [],
     "created_at": "2026-10-14T17:38:12.364718Z",
     "updated_at": "2026-10-14T17:38:12.364718Z"
+  },
+  {
+    "id": "USR-262",
+    "project_id": "darkfac",
+    "title": "Portao local inicia com 1 worker quando a RAM livre do Notebook cai e estoura 3000 s: run_ticket deve esperar RAM para 2+ workers ou despachar ao Desktop",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand",
+      "v0-critico",
+      "bug"
+    ],
+    "problem_statement": "Em 14/10/2026 quatro portoes locais (USR-255 tres vezes, USR-257 uma vez) estouraram exatamente 3000 s com 0 testes contabilizados. O diagnostico (suite completa em modo verboso) passou 4089 testes em 1814 s com 2 workers; com 1 worker a suite passa de 3000 s. O harness escolhe os workers pela RAM livre no inicio ([WORKERS] allowed N, reserva 2 GiB, 2 GiB por worker) e a RAM do Notebook oscila entre 3,4 e 8,6 GiB (Chrome, ChatGPT, agente headless). Cada estouro custa 50 min e um resgate.",
+    "core_journey": [],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Antes do portao oficial local, run_ticket mede a RAM livre e, se nao couberem 2 workers, espera (com aviso periodico e limite configuravel) ou despacha ao worker remoto quando este estiver livre; nunca inicia o portao local com 1 worker sem avisar",
+      "Quando o limite de espera vence, o run termina com causa explicita gate_insufficient_ram (RAM medida, workers possiveis, comando de retomada), sem gastar o portao",
+      "Teste com medidor de RAM falso cobre: RAM suficiente segue direto; RAM baixa que sobe segue apos espera; RAM baixa ate o limite termina com gate_insufficient_ram"
+    ],
+    "suggested_files": [
+      "run_ticket.py",
+      "core/line/",
+      "tests/"
+    ],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-14T18:17:48.400065Z",
+    "updated_at": "2026-10-14T18:17:48.400065Z"
   }
 ]
