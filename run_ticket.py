@@ -94,8 +94,21 @@ FOCAL_TEST_TIMEOUT_S = 600.0
 # cap, the sweep is dropped entirely rather than trimmed arbitrarily — the pre-check stays fast (just
 # the changed test files) and the official gate remains the final, complete word either way.
 FOCAL_SWEEP_MAX_EXTRA_FILES = 15
+# FOCAL_TEST_TIMEOUT_S above was calibrated against the changed-files-only set (~106s observed on an
+# idle worker); it was never budgeted for a full sweep of up to FOCAL_SWEEP_MAX_EXTRA_FILES extra files.
+# USR-249 (USR-245's own delivery): a legitimate 16-file sweep (15 extra, right at the cap) exceeded
+# 600s serialized under this host's 1-worker memory cap, even though every individual test passed --
+# the flat floor undercounted a sweep at the boundary it itself allows. The budget now scales with how
+# many files were actually swept, keeping the flat floor for small target sets (<=8 files, matching the
+# original calibration) and bounded by a ceiling well under GATE_TIMEOUT_S so a maximal sweep still
+# fails fast relative to the full gate.
+FOCAL_TEST_TIMEOUT_PER_TARGET_S = 75.0
+FOCAL_TEST_TIMEOUT_CEILING_S = 1800.0
 # Harnesses the in-place fix agent (USR-245) may be routed to; same set `_run()` offers development.
 _DEV_HOST_CAPS: tuple[str, ...] = ("harness:claude", "harness:codex", "harness:grok", "harness:antigravity")
+# Upper bound of one in-place fix-agent reinvocation (USR-245's `_invoke_fix_agent`); reported alongside
+# every reinvocation in `attempts_log` (USR-249) the same way `GATE_TIMEOUT_S`/`FOCAL_TEST_TIMEOUT_S` are.
+FIX_AGENT_TIMEOUT_S = 1800.0
 
 
 def estimate_ticket_size(ticket: UserTicket) -> tuple[str, list[str]]:
@@ -563,7 +576,8 @@ def _run_focal_tests(cwd: Path, targets: list[str]) -> Optional[Any]:
     (shared state, fixed ports, the suite lock) and the official gate re-checks them anyway, so the
     pre-check only needs the parallel-safe majority. Without this, `TestSubagentEngine.execute_local`
     runs plain single-process pytest, and even a handful of target files can exceed
-    ``FOCAL_TEST_TIMEOUT_S`` serially (USR-188).
+    ``FOCAL_TEST_TIMEOUT_S`` serially (USR-188). The actual timeout budget scales with ``len(targets)``
+    (``_focal_test_timeout_s``, USR-249) rather than staying flat at ``FOCAL_TEST_TIMEOUT_S``.
     """
     if not targets:
         return None
@@ -572,7 +586,7 @@ def _run_focal_tests(cwd: Path, targets: list[str]) -> Optional[Any]:
     engine = TestSubagentEngine(project_root=cwd)
     extra_args = ["-n", "auto", "--dist", "worksteal", "-m", "not serial", *targets]
     instruction = TestExecutionInstruction(
-        target=None, extra_args=extra_args, timeout_seconds=int(FOCAL_TEST_TIMEOUT_S), worker_mode="local"
+        target=None, extra_args=extra_args, timeout_seconds=int(_focal_test_timeout_s(len(targets))), worker_mode="local"
     )
     try:
         return engine.execute_local(instruction)
@@ -616,13 +630,84 @@ def _invoke_fix_agent(
         harness=harness,
         model=cli_model,
         effort=cli_effort,
-        timeout_s=1800,
+        timeout_s=int(FIX_AGENT_TIMEOUT_S),
     )
     try:
         return run_agent(request)
     except Exception as exc:  # noqa: BLE001 - a crashed correction attempt must not crash the delivery
         logger.warning("Fix agent invocation failed for %s: %s", ticket.id, exc)
         return None
+
+
+# Substrings in the official gate's combined stdout/stderr that mean a failure was a timeout or an
+# infrastructure hiccup, not something a reinvoked agent could fix by editing code (USR-249): a harness
+# step hitting its own internal budget (`core/harness/runner.py::run_step`, `[STEP_FAIL] ... (timeout
+# exceeded)`), a remote test worker lost mid-run whose local fallback then runs out of road the same
+# way (`core/harness/remote_dispatch.py`, USR-178: `[REMOTE_JOB_LOST]`/`[REMOTE_FALLBACK]`), and the
+# machine-wide suite lock (`core/harness/suite_lock.py`, USR-249) spending the whole step budget queued
+# behind a sibling session's run on the same host instead of ever reaching collection -- reproduced live
+# while diagnosing USR-249's own delivery: a concurrent worktree held the lock for the full window,
+# leaving `discovered_count=0` with no code-level failure to fix.
+_GATE_TIMEOUT_MARKERS = ("(timeout exceeded)", "[SUITE_LOCK] timed out")
+# Remote-worker loss markers are infra only when the output carries no real pytest failure: if the
+# worker dropped and the local fallback then ran and reprovou a real test, that is fixable by the agent.
+# `[SUITE_LOCK] acquired slot`/`waiting` also appear in normal runs and are NOT infra signals.
+_GATE_REMOTE_INFRA_MARKERS = ("[REMOTE_JOB_LOST]", "[REMOTE_FALLBACK]")
+_PYTEST_REAL_FAILURE_RE = re.compile(r"^(?:FAILED|ERROR) |\b\d+ (?:failed|errors?)\b", re.MULTILINE)
+# `TestSubagentEngine.execute_local` (core/harness/test_subagent.py) sets this exit code only from
+# `subprocess.TimeoutExpired`; any other nonzero code is an actual pytest failure the agent can act on.
+_FOCAL_TIMEOUT_EXIT_CODE = 124
+
+
+def _gate_failure_is_timeout(gate_res: Any) -> bool:
+    """True when an official-gate failure was a timeout or infra issue, not a real test failure.
+
+    Covers the outer `_run_bounded` deadline (`timed_out`) as well as the text markers above, which
+    show up with the gate's own internal step budget still returning 0/1/2 (never 124) to this process.
+    """
+    if getattr(gate_res, "timed_out", False):
+        return True
+    combined = f"{gate_res.stdout}\n{gate_res.stderr}"
+    if any(marker in combined for marker in _GATE_TIMEOUT_MARKERS):
+        return True
+    if any(marker in combined for marker in _GATE_REMOTE_INFRA_MARKERS):
+        return _PYTEST_REAL_FAILURE_RE.search(combined) is None
+    return False
+
+
+def _focal_failure_is_timeout(focal_report: Any) -> bool:
+    """True when the focal pre-check failure was a timeout, not a real test failure."""
+    return focal_report.exit_code == _FOCAL_TIMEOUT_EXIT_CODE
+
+
+def _focal_test_timeout_s(target_count: int) -> float:
+    """Timeout budget for the focal pre-check given how many files it will actually run (USR-249).
+
+    `FOCAL_TEST_TIMEOUT_S` alone was calibrated for the changed-files-only set; a sweep up to
+    `FOCAL_SWEEP_MAX_EXTRA_FILES` extra files serialized onto one xdist worker needs more wall-clock
+    than that flat floor, so the budget grows with `target_count` -- bounded by
+    `FOCAL_TEST_TIMEOUT_CEILING_S` so even a maximal sweep stays far cheaper than `GATE_TIMEOUT_S`.
+    """
+    scaled = target_count * FOCAL_TEST_TIMEOUT_PER_TARGET_S
+    return min(FOCAL_TEST_TIMEOUT_CEILING_S, max(FOCAL_TEST_TIMEOUT_S, scaled))
+
+
+def _render_self_correction_log(attempts_log: list[dict[str, Any]]) -> str:
+    """Human-readable summary of every agent reinvocation and every timeout hit during the delivery
+    gate loop, so a rescue session knows what happened without opening logs (USR-249)."""
+    lines = ["[AUTOCORREÇÃO] Resumo de tentativas:"]
+    for entry in attempts_log:
+        if entry["event"] == "reinvocation":
+            lines.append(
+                f"  {entry['attempt']}. reinvocação do agente apos falha em '{entry['stage']}' (causa: {entry['cause']}), "
+                f"levou {entry['duration_s']:.1f}s (limite {entry['limit_s']:.0f}s)"
+            )
+        else:
+            lines.append(
+                f"  {entry['attempt']}. TIMEOUT ({entry['cause']}) em '{entry['stage']}' apos "
+                f"{entry['duration_s']:.1f}s (limite {entry['limit_s']:.0f}s) -- agente NAO reinvocado"
+            )
+    return "\n".join(lines)
 
 
 def _run_gate_with_self_correction(
@@ -636,6 +721,7 @@ def _run_gate_with_self_correction(
     return_result: bool,
     progress: ProgressPublisher,
     cancelled_payload: Any,
+    attempts_log: list[dict[str, Any]],
 ) -> Any:
     """Focal tests + the official gate, self-correcting up to GATE_FIX_ATTEMPTS times (USR-245).
 
@@ -644,8 +730,15 @@ def _run_gate_with_self_correction(
     operator (the USR-201 rescue). The focal pre-check runs regardless of `--skip-validation` (it is
     the new, fast, mandatory check); `--skip-validation` only still skips the expensive official gate.
 
+    A timeout or infra hiccup (`_gate_failure_is_timeout`/`_focal_failure_is_timeout`, USR-249) never
+    reinvokes the agent: nothing in the diff caused it, so retrying just burns another
+    ``FOCAL_TEST_TIMEOUT_S``/``GATE_TIMEOUT_S`` for nothing (the USR-239 incident: ~28 extra minutes
+    across 2 blind reinvocations after a 3000s gate timeout). `attempts_log` is appended in place with
+    one entry per reinvocation and per timeout (cause, duration, limit applied) so the final report can
+    list them without opening logs.
+
     Returns `None` on success (the caller proceeds to commit/push), or the usual failure payload/exit
-    code once every attempt is exhausted.
+    code once every attempt is exhausted or a timeout/infra failure is hit.
     """
     last_output = ""
     last_cause = "gate_failed"
@@ -661,13 +754,34 @@ def _run_gate_with_self_correction(
 
         if focal_report is not None and not focal_report.success:
             last_output = focal_report.agent_feedback
-            last_cause = "focal_tests_failed"
             last_exit_code = focal_report.exit_code or 1
             if not as_json:
                 print(
                     f"[ERRO NOS TESTES FOCAIS]: {focal_report.concise_summary}\n{focal_report.agent_feedback}",
                     file=sys.stderr,
                 )
+
+            if _focal_failure_is_timeout(focal_report):
+                focal_timeout_limit = _focal_test_timeout_s(len(focal_targets))
+                last_cause = "focal_timeout"
+                attempts_log.append({
+                    "event": "timeout",
+                    "attempt": attempt + 1,
+                    "stage": "focal",
+                    "cause": last_cause,
+                    "duration_s": round(focal_report.duration_seconds, 1),
+                    "limit_s": focal_timeout_limit,
+                })
+                if not as_json:
+                    print(
+                        f"[TIMEOUT NO PRE-TESTE FOCAL]: {focal_report.duration_seconds:.1f}s "
+                        f"(limite {focal_timeout_limit:.0f}s). Nao reinvocando o agente: timeout de "
+                        f"infraestrutura nao e algo que uma correcao de codigo resolva (USR-249).",
+                        file=sys.stderr,
+                    )
+                break
+
+            last_cause = "focal_tests_failed"
             if attempt >= GATE_FIX_ATTEMPTS:
                 break
             progress.phase(
@@ -678,7 +792,14 @@ def _run_gate_with_self_correction(
             )
             if not as_json:
                 print(f"\n--> Reinvocando o agente na mesma worktree para corrigir ({', '.join(focal_targets)})...")
-            _invoke_fix_agent(target_worktree, ticket, "testes focais dos arquivos alterados", focal_report.agent_feedback)
+            fix_result = _invoke_fix_agent(
+                target_worktree, ticket, "testes focais dos arquivos alterados", focal_report.agent_feedback
+            )
+            attempts_log.append({
+                "event": "reinvocation", "attempt": attempt + 1, "stage": "focal", "cause": last_cause,
+                "duration_s": round(fix_result.duration_s, 1) if fix_result else 0.0,
+                "limit_s": FIX_AGENT_TIMEOUT_S,
+            })
             if _cancelled():
                 return cancelled_payload()
             continue
@@ -709,10 +830,30 @@ def _run_gate_with_self_correction(
             return None
 
         last_output = f"{gate_res.stdout}\n{gate_res.stderr}"
-        last_cause = "gate_failed"
         last_exit_code = gate_res.returncode
         if not as_json:
             print(f"[ERRO NO PORTÃO OFICIAL]:\n{gate_res.stdout}\n{gate_res.stderr}", file=sys.stderr)
+
+        if _gate_failure_is_timeout(gate_res):
+            last_cause = "gate_timeout"
+            attempts_log.append({
+                "event": "timeout",
+                "attempt": attempt + 1,
+                "stage": "gate",
+                "cause": last_cause,
+                "duration_s": round(gate_res.duration_s, 1),
+                "limit_s": GATE_TIMEOUT_S,
+            })
+            if not as_json:
+                print(
+                    f"[TIMEOUT/INFRA NO PORTÃO OFICIAL]: {gate_res.duration_s:.1f}s "
+                    f"(limite {GATE_TIMEOUT_S:.0f}s). Nao reinvocando o agente: timeout ou falha de "
+                    f"infraestrutura nao e algo que uma correcao de codigo resolva (USR-249).",
+                    file=sys.stderr,
+                )
+            break
+
+        last_cause = "gate_failed"
         if attempt >= GATE_FIX_ATTEMPTS:
             break
         progress.phase(
@@ -723,15 +864,25 @@ def _run_gate_with_self_correction(
         )
         if not as_json:
             print("\n--> Reinvocando o agente na mesma worktree com o log destilado do portao...")
-        _invoke_fix_agent(target_worktree, ticket, "portao oficial (python core/harness/runner.py --quick)", distill_log(last_output))
+        fix_result = _invoke_fix_agent(
+            target_worktree, ticket, "portao oficial (python core/harness/runner.py --quick)", distill_log(last_output)
+        )
+        attempts_log.append({
+            "event": "reinvocation", "attempt": attempt + 1, "stage": "gate", "cause": last_cause,
+            "duration_s": round(fix_result.duration_s, 1) if fix_result else 0.0,
+            "limit_s": FIX_AGENT_TIMEOUT_S,
+        })
         if _cancelled():
             return cancelled_payload()
 
     print(f"[i] Worktree preservada para diagnóstico: {target_worktree}", file=sys.stderr)
     print(f"[i] Comando para retomar entrega após correção:\n  {resume_cmd}", file=sys.stderr)
+    if attempts_log and not as_json:
+        print(_render_self_correction_log(attempts_log), file=sys.stderr)
+    attempts_tried = attempt + 1
     progress.phase(
         "gate", "failed",
-        f"{last_cause} apos {GATE_FIX_ATTEMPTS + 1} tentativa(s): {redacted_head(last_output[-600:], 300)}",
+        f"{last_cause} apos {attempts_tried} tentativa(s): {redacted_head(last_output[-600:], 300)}",
         cause=last_cause,
     )
     gate_payload = {
@@ -743,6 +894,7 @@ def _run_gate_with_self_correction(
         "current_sha": current_sha,
         "worktree": str(target_worktree),
         "resume_command": resume_cmd,
+        "self_correction_log": attempts_log,
     }
     if as_json and not return_result:
         print(json.dumps(gate_payload, indent=2, ensure_ascii=False))
@@ -1096,12 +1248,16 @@ def _deliver_worktree(
     # 3. Focal tests + Official Validation Gate, with in-place self-correction (USR-245)
     if _cancelled():
         return cancelled_payload()
+    attempts_log: list[dict[str, Any]] = []
     gate_outcome = _run_gate_with_self_correction(
         target_worktree, current_branch, current_sha, ticket, resume_cmd,
         skip_validation, as_json, return_result, progress, cancelled_payload,
+        attempts_log,
     )
     if gate_outcome is not None:
         return gate_outcome
+    if attempts_log and not as_json:
+        print(_render_self_correction_log(attempts_log))
 
     # 4. Autonomous Git Lifecycle Completion (PR, merge, cleanup)
     if _cancelled():
@@ -1175,6 +1331,8 @@ def _deliver_worktree(
     }
     if completion_report and completion_report.sync_result:
         success_payload["sync_action"] = completion_report.sync_result.action
+    if attempts_log:
+        success_payload["self_correction_log"] = attempts_log
     if as_json and not return_result:
         print(json.dumps(success_payload, indent=2, ensure_ascii=False))
 

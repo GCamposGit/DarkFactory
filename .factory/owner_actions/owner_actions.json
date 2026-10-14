@@ -667,6 +667,40 @@
       "created_at": "2026-10-13T00:30:06Z",
       "created_by": "claude-session-2026-10-13-v0",
       "resolved_at": null
+    },
+    {
+      "id": "OA-017",
+      "kind": "action",
+      "title": "Commit humano em core/harness/test_subagent.py (USR-249)",
+      "priority": "medium",
+      "status": "open",
+      "why": "core/harness/test_subagent.py e protegido por core/orchestrator/guard.py; a fabrica nao pode editar esse arquivo. O ticket USR-249 pede que o pre-teste focal pare de descartar a saida parcial quando o timeout estoura (TimeoutExpired.stdout chega em bytes e o guard isinstance(..., str) jogava tudo fora). A correcao e pequena (um helper _decode_partial + 2 linhas no except TimeoutExpired) e ja esta testada e pronta como patch em docs/proposals.",
+      "blocks": [
+        "USR-249"
+      ],
+      "depends_on": [],
+      "steps": [
+        {
+          "text": "No main atualizado, confirme que o patch aplica limpo.",
+          "command": "git -C C:/dev/DarkFac pull --ff-only origin main && git -C C:/dev/DarkFac apply --check C:/dev/DarkFac/docs/proposals/USR-249-focal-timeout-partial-output.patch"
+        },
+        {
+          "text": "Aplique o patch e copie o teste novo para tests/.",
+          "command": "git -C C:/dev/DarkFac apply C:/dev/DarkFac/docs/proposals/USR-249-focal-timeout-partial-output.patch; Copy-Item C:/dev/DarkFac/docs/proposals/USR-249-test_focal_timeout_partial_output.py.txt C:/dev/DarkFac/tests/test_focal_timeout_partial_output.py"
+        },
+        {
+          "text": "Rode os testes focais do patch antes de commitar.",
+          "command": "python -m pytest C:/dev/DarkFac/tests/test_focal_timeout_partial_output.py C:/dev/DarkFac/tests/test_worker_onprem_test_subagent.py -q -p no:cacheprovider"
+        },
+        {
+          "text": "Commite SOMENTE os 2 caminhos do patch (nunca git add -A) e sincronize com o main.",
+          "command": "git -C C:/dev/DarkFac add core/harness/test_subagent.py tests/test_focal_timeout_partial_output.py && git -C C:/dev/DarkFac commit -m \"fix(harness): pre-teste focal preserva saida parcial em bytes quando o timeout estoura [USR-249]\" && git -C C:/dev/DarkFac fetch origin && git -C C:/dev/DarkFac rebase origin/main && git -C C:/dev/DarkFac push origin HEAD:main"
+        }
+      ],
+      "verify": "python C:/dev/DarkFac/core/orchestrator/guard.py origin/main imprime [GUARD PASS] depois do push; core/harness/test_subagent.py no main contem _decode_partial; os 3 testes de tests/test_focal_timeout_partial_output.py passam.",
+      "created_at": "2026-10-12T20:38:46Z",
+      "created_by": "claude-code",
+      "resolved_at": null
     }
   ]
 }
