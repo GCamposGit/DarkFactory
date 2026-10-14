@@ -38,7 +38,10 @@ logger = logging.getLogger("darkfac.git.ci_checks")
 
 CI_WAIT_ENV = "DARKFAC_CI_WAIT_SECONDS"
 NO_CHECKS_GRACE_ENV = "DARKFAC_CI_NO_CHECKS_GRACE_SECONDS"
-DEFAULT_CI_WAIT_SECONDS = 1200.0
+# Max wait for the PR checks. 40 min: pr-validation (windows-latest) took 21 min 49 s on 2026-10-14
+# (USR-263 / PR #347 gave up at 20 min with every check green).
+# Fits DELIVERY_TIMEOUT_S in run_ticket.py: gate 7200 s + CI 2400 s << 21600 s.
+DEFAULT_CI_WAIT_SECONDS = 2400.0
 DEFAULT_POLL_SECONDS = 20.0
 # Right after a push/PR creation GitHub needs a few seconds to register the
 # workflow runs: "no checks reported" inside this window is not yet proof that
@@ -393,7 +396,7 @@ class CiVerdict:
 
 
 def resolve_wait_seconds(timeout_s: Optional[float] = None) -> float:
-    """Explicit value, else ``DARKFAC_CI_WAIT_SECONDS``, else 1200 s."""
+    """Explicit value, else ``DARKFAC_CI_WAIT_SECONDS``, else 2400 s."""
     if timeout_s is not None:
         return max(0.0, float(timeout_s))
     return _env_seconds(CI_WAIT_ENV, DEFAULT_CI_WAIT_SECONDS)
@@ -476,7 +479,7 @@ def ensure_green(
     * any failing check returns ``failed`` immediately (fail fast), carrying the
       failing check names, a sanitized log tail and ``base_red``;
     * pending checks (and transient ``gh`` errors) are polled every ``poll_s``
-      until ``timeout_s`` (default ``DARKFAC_CI_WAIT_SECONDS``, 1200 s), then the
+      until ``timeout_s`` (default ``DARKFAC_CI_WAIT_SECONDS``, 2400 s), then the
       verdict is ``pending_timeout``;
     * "no checks reported" is only accepted as ``no_checks`` after a short grace
       window (``DARKFAC_CI_NO_CHECKS_GRACE_SECONDS``, 30 s); a shorter timeout

@@ -360,12 +360,12 @@ def test_runner_exceptions_count_as_errors() -> None:
 
 
 def test_wait_seconds_come_from_the_environment(monkeypatch: pytest.MonkeyPatch) -> None:
-    assert ci_checks.resolve_wait_seconds() == 1200
+    assert ci_checks.resolve_wait_seconds() == 2400
     monkeypatch.setenv(ci_checks.CI_WAIT_ENV, "45")
     assert ci_checks.resolve_wait_seconds() == 45
     assert ci_checks.resolve_wait_seconds(7) == 7
     monkeypatch.setenv(ci_checks.CI_WAIT_ENV, "not-a-number")
-    assert ci_checks.resolve_wait_seconds() == 1200
+    assert ci_checks.resolve_wait_seconds() == 2400
 
     monkeypatch.setenv(ci_checks.CI_WAIT_ENV, "25")
     clock = FakeClock()
@@ -1261,3 +1261,7 @@ def test_a_raising_on_phase_hook_never_changes_the_delivery(repo: tuple[Path, Pa
     rep = mgr.deliver_branch("USR-90", "Gate", cwd=local, gh_runner=gh)
 
     assert rep.ok and rep.action == "merged", rep.message
+
+
+def test_default_ci_wait_covers_slow_windows_checks() -> None:
+    assert ci_checks.DEFAULT_CI_WAIT_SECONDS >= 2400
