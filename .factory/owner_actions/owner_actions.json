@@ -767,6 +767,34 @@
       "created_at": "2026-10-14T16:18:57Z",
       "created_by": "claude-code",
       "resolved_at": null
+    },
+    {
+      "id": "OA-021",
+      "kind": "action",
+      "title": "Fila parada: Desktop offline e Notebook sem RAM para o portao (precisa de 6 GiB livres, ha 5,4)",
+      "priority": "critical",
+      "status": "open",
+      "why": "Em 14/10 ~16h o Desktop (darkfac-desktop, 100.78.181.90) ficou offline no Tailscale e o Notebook so tem 5,4 GiB livres (Chrome 6,0 GiB, ChatGPT 1,75 GiB). O portao local libera 1 worker abaixo de 6 GiB e com 1 worker a suite (~4089 testes) passa do limite de 3000 s. USR-257, USR-255 e USR-262 estao prontos e esperando portao.",
+      "blocks": [
+        "USR-257",
+        "USR-255",
+        "USR-262"
+      ],
+      "depends_on": [],
+      "steps": [
+        {
+          "text": "Opcao rapida: no Notebook, feche o ChatGPT e as abas do Chrome que nao estiver usando enquanto a fabrica roda (libera ~2 GiB; 6 GiB livres = 2 workers, 8 GiB = 3 workers).",
+          "command": "powershell -NoProfile -Command \"(Get-CimInstance Win32_OperatingSystem).FreePhysicalMemory/1MB\""
+        },
+        {
+          "text": "Ou: ligue o Desktop (DESKTOP-G45IPEM) e confirme que ele aparece online no Tailscale e que o worker responde.",
+          "command": "curl.exe -s -m 20 http://100.78.181.90:8080/health"
+        }
+      ],
+      "verify": "O comando de RAM mostra 6 ou mais (GiB) OU o health do Desktop responde com busy=false; a fabrica retoma sozinha as entregas USR-257, USR-255 e USR-262.",
+      "created_at": "2026-10-14T19:19:07Z",
+      "created_by": "claude-code",
+      "resolved_at": null
     }
   ]
 }
