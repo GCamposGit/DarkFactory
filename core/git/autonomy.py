@@ -265,6 +265,24 @@ class GitAutonomyManager:
         except Exception as exc:  # noqa: BLE001 - progress reporting must not alter delivery
             logger.warning("on_phase hook failed for %s/%s: %s", phase, status, type(exc).__name__)
 
+    def _child_manager(self, root: Path) -> "GitAutonomyManager":
+        """A manager for a disposable worktree (e.g. the queue-registration alert's own commit).
+
+        Shares this manager's injectable clock/sleep/timeout settings (USR-246): without this, a
+        manager built with ``GitAutonomyManager(root)`` falls back to real ``time.sleep`` for its
+        CI gate even when the delivery that triggered it is running under a test's fake clock,
+        turning a deterministic test into one that really waits out the CI poll/backoff loop.
+        """
+        return GitAutonomyManager(
+            root,
+            ci_timeout_s=self.ci_timeout_s,
+            ci_poll_s=self.ci_poll_s,
+            ci_sleep_fn=self.ci_sleep_fn,
+            ci_clock_fn=self.ci_clock_fn,
+            cleanup_sleep_fn=self.cleanup_sleep_fn,
+            now_fn=self.now_fn,
+        )
+
     def _close_open_phase(self, report: DeliveryReport) -> None:
         """A delivery that returned early leaves its phase open: close it with the outcome."""
         phase = self._open_phase
@@ -809,7 +827,7 @@ class GitAutonomyManager:
         runner = gh_runner or _run_gh
         if kind == "queue" and merge and supervise_queue:
             # USR-238: every registration also reports queue PRs that stayed open too long.
-            queue_registration.check_stalled_queue_prs(target, runner)
+            queue_registration.check_stalled_queue_prs(target, runner, manager_factory=self._child_manager)
         try:
             if kind not in ("queue", "implementation"):
                 raise ValueError(f"Unknown delivery kind: {kind}")
@@ -819,7 +837,8 @@ class GitAutonomyManager:
             report = DeliveryReport(ok=False, action="error", message=str(exc))
         if kind == "queue" and not report.ok and report.pr_url and supervise_queue:
             queue_registration.alert_queue_pr_stuck(
-                ticket_id, report.pr_url, report.message, cwd=target, gh_runner=runner
+                ticket_id, report.pr_url, report.message, cwd=target, gh_runner=runner,
+                manager_factory=self._child_manager,
             )
         self._close_open_phase(report)
         return report

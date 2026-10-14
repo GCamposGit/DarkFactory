@@ -34,10 +34,13 @@ import logging
 from pathlib import Path
 import re
 import subprocess
-from typing import Any, Callable, Optional, Sequence, TypeVar
+from typing import TYPE_CHECKING, Any, Callable, Optional, Sequence, TypeVar
 
 from core.owner_actions.models import ActionKind, ActionPriority, ActionStatus, ActionStep, OwnerAction, redact
 from core.owner_actions.store import OwnerActionStore
+
+if TYPE_CHECKING:
+    from core.git.autonomy import GitAutonomyManager
 
 logger = logging.getLogger("darkfac.git.queue_registration")
 
@@ -46,6 +49,7 @@ ALERT_PREFIX = "OA-QR-"
 RUNBOOK = "docs/runbooks/queue_registration.md"
 
 GhRunner = Callable[[Sequence[str], Path], "subprocess.CompletedProcess[str]"]
+ManagerFactory = Callable[[Path], "GitAutonomyManager"]
 
 T = TypeVar("T")
 
@@ -115,6 +119,7 @@ def _commit_owner_action_changes(
     title: str,
     mutate: Callable[[OwnerActionStore], T],
     gh_runner: Optional[GhRunner] = None,
+    manager_factory: Optional[ManagerFactory] = None,
 ) -> Optional[T]:
     """Apply ``mutate`` to the owner-action ledger inside its own throwaway worktree (USR-246).
 
@@ -125,6 +130,12 @@ def _commit_owner_action_changes(
     the same path a ticket's own registration PR takes) and the disposable worktree is cleaned up by
     that delivery; a no-op mutation (idempotent re-raise/re-resolve) just discards the worktree.
     Returns ``mutate``'s result, or ``None`` if the worktree could not even be created. Never raises.
+
+    ``manager_factory`` builds the manager used for that landing delivery (default: a plain
+    ``GitAutonomyManager(root)``). The caller's own ``deliver_branch`` passes its ``_child_manager``
+    bound method so the nested delivery shares its CI timeout/poll and, critically, its injected
+    clock/sleep functions -- without that, a test driving the outer delivery with a fake clock would
+    have this inner one fall back to real ``time.sleep`` (USR-246).
     """
     from core.git.autonomy import GitAutonomyManager
     from core.git.ticket_workspace import WorkspaceError, cleanup, create_workspace
@@ -141,7 +152,7 @@ def _commit_owner_action_changes(
         logger.warning("owner_actions: mutation failed for %s: %s", label, exc)
         cleanup(workspace.path, workspace.main_root)
         return None
-    mgr = GitAutonomyManager(workspace.main_root)
+    mgr = (manager_factory or GitAutonomyManager)(workspace.main_root)
     if not mgr.is_dirty(cwd=workspace.path):
         cleanup(workspace.path, workspace.main_root)
         return result
@@ -161,6 +172,7 @@ def raise_alert(
     store: Optional[OwnerActionStore] = None,
     cwd: Optional[Path] = None,
     gh_runner: Optional[GhRunner] = None,
+    manager_factory: Optional[ManagerFactory] = None,
 ) -> Optional[OwnerAction]:
     """Idempotent upsert of the alert. ``None`` on any failure (never raises).
 
@@ -185,6 +197,7 @@ def raise_alert(
             return None
         return _commit_owner_action_changes(
             cwd, label=f"oa-{alert_id(number)}", title=action.title, mutate=_upsert, gh_runner=gh_runner,
+            manager_factory=manager_factory,
         )
     except Exception as exc:  # noqa: BLE001 - supervision must never break the delivery
         logger.warning("Could not raise the owner action for queue PR #%s: %s", number, exc)
@@ -196,12 +209,16 @@ def alert_queue_pr_stuck(
     store: Optional[OwnerActionStore] = None,
     cwd: Optional[Path] = None,
     gh_runner: Optional[GhRunner] = None,
+    manager_factory: Optional[ManagerFactory] = None,
 ) -> Optional[OwnerAction]:
     """The delivery gave up on an open queue PR: raise the alert straight away."""
     match = _PR_NUMBER.search(pr_url or "")
     if not match:
         return None
-    return raise_alert(int(match.group(1)), pr_url, ticket_id, reason, store=store, cwd=cwd, gh_runner=gh_runner)
+    return raise_alert(
+        int(match.group(1)), pr_url, ticket_id, reason, store=store, cwd=cwd, gh_runner=gh_runner,
+        manager_factory=manager_factory,
+    )
 
 
 def _age_s(created_at: str, now: datetime) -> Optional[float]:
@@ -221,6 +238,7 @@ def check_stalled_queue_prs(
     now: Optional[datetime] = None,
     threshold_s: float = STALL_THRESHOLD_S,
     store: Optional[OwnerActionStore] = None,
+    manager_factory: Optional[ManagerFactory] = None,
 ) -> list[OwnerAction]:
     """Alert on open ``queue`` PRs older than ``threshold_s`` and close alerts of PRs no longer open.
 
@@ -273,7 +291,7 @@ def check_stalled_queue_prs(
             return _scan(store)
         return _commit_owner_action_changes(
             cwd, label="oa-queue-watchdog", title="Varredura de PRs de registro presos (USR-238)",
-            mutate=_scan, gh_runner=runner,
+            mutate=_scan, gh_runner=runner, manager_factory=manager_factory,
         ) or []
     except Exception as exc:  # noqa: BLE001 - supervision must never break the delivery
         logger.warning("Stalled queue PR check failed: %s", exc)
