@@ -193,6 +193,19 @@ navegador a partir da mesma maquina. Se o navegador tambem nao conseguir,
 o problema e de rede/VPN/Tailscale (fora do escopo deste script), nao do
 token.
 
+**Apareceu `[PENDING] Notebook divergent: main checkout is on branch ...` no
+stderr**
+Normal quando outra sessao de agente esta trabalhando em `C:\dev\DarkFac`
+numa branch de ticket (sem worktree propria) no momento do deploy. O backup
+pos-deploy da VPS roda normalmente mesmo assim (USR-222) -- essa pendencia e
+so sobre o checkout compartilhado do Notebook, nao sobre o deploy em si.
+Toda sessao de agente deve abrir sua propria worktree (`.worktrees/<ticket>-<timestamp>/`,
+via `run_ticket.py`) e nunca trocar a branch do checkout principal; se a
+pendencia persistir depois que a outra sessao terminar, rode
+`python -m core.infra.node_sync retry` (cwd `C:\dev\DarkFac`) ou veja a
+secao "Checkout compartilhado do Notebook e disciplina de worktree (USR-222)"
+em `docs/HARNESS_INTEROP.md`.
+
 **Quero rodar em outra maquina (por exemplo a VPS) alem da que configurei
 primeiro**
 Repita a secao 2 (variante Linux/macOS, se for o caso) naquela maquina --

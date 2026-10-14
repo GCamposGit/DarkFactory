@@ -35,7 +35,7 @@ class NodeStatus(BaseModel):
     active_runs: int | None = None
     queue_length: int | None = None
     is_legacy: bool | None = None
-    sync_classification: Literal["converged", "behind", "ahead", "diverged", "dirty"] | None = None
+    sync_classification: Literal["converged", "behind", "ahead", "diverged", "dirty", "other_branch"] | None = None
     local_commits: list[str] = Field(default_factory=list)
     dirty_files: dict[str, list[str]] = Field(default_factory=dict)
     backup_branch: str | None = None
@@ -493,16 +493,30 @@ def safe_repair_divergent_checkout(
     return backup_branch
 
 
-def _notebook_blocker(root: Path, git: GitRunner) -> str | None:
-    """Why the Notebook checkout must never be touched, or ``None`` when it may be synced."""
+def _notebook_worktree_blocker(root: Path, git: GitRunner) -> str | None:
+    """Non-``None`` when ``root`` is itself a linked worktree (not the shared main checkout) --
+    that case must never run any git operation against it, since another ticket's own worktree
+    session owns it. A shared main checkout parked on a non-``main`` branch is *not* blocked here
+    (USR-222): see ``_local_main_ref_sha`` / the branch handling in ``verify``/``sync`` below, which
+    judge and advance convergence via the local ``main`` ref without touching HEAD or the working
+    tree of whatever branch is currently checked out there."""
     git_dir = git(root, ["rev-parse", "--git-dir"])
     common_dir = git(root, ["rev-parse", "--git-common-dir"])
     if Path(git_dir) != Path(common_dir):
         return "checkout is a git worktree, not the main checkout; no git operation attempted"
-    branch = git(root, ["rev-parse", "--abbrev-ref", "HEAD"])
-    if branch != "main":
-        return f"main checkout is on branch {branch!r}, not 'main'; no git operation attempted"
     return None
+
+
+def _local_main_ref_sha(root: Path, git: GitRunner) -> str | None:
+    """SHA the local ``main`` branch ref points at, independent of what is currently checked out.
+
+    Reading/advancing this ref (see the fetch-with-refspec call in ``sync``) never touches HEAD,
+    the index or the working tree, so it is safe to use even while the shared checkout is parked on
+    a different branch for an unrelated session (USR-222)."""
+    try:
+        return _sha(git(root, ["rev-parse", "refs/heads/main"]))
+    except Exception:
+        return None
 
 
 def verify(
@@ -522,23 +536,45 @@ def verify(
         return SyncReport(nodes=[NodeStatus(name=n, state="unknown", reason="origin/main unavailable") for n in ("Notebook", "Desktop", "VPS")])
     try:
         local = _sha(git(root, ["rev-parse", "HEAD"]))
-        blocker = _notebook_blocker(root, git)
-        if blocker:
-            classification, local_commits, dirty_files, classification_reason = None, [], {}, blocker
-            reason = blocker
-            state = "divergent"
+        worktree_blocker = _notebook_worktree_blocker(root, git)
+        if worktree_blocker:
+            notebook = NodeStatus(name="Notebook", state="divergent", git_sha=local, reason=worktree_blocker)
         else:
-            classification, local_commits, dirty_files, classification_reason = classify_checkout(root, git, expected)
-            reason = classification_reason
-            state = "converged" if local == expected and classification == "converged" else "divergent"
-        try:
-            notebook_commit_date = git(root, ["show", "-s", "--format=%cI", local]) if local else None
-        except Exception:
-            notebook_commit_date = None
-        notebook = NodeStatus(
-            name="Notebook", state=state, git_sha=local, reason=reason, commit_date=notebook_commit_date,
-            sync_classification=classification, local_commits=local_commits, dirty_files=dirty_files,
-        )
+            branch = git(root, ["rev-parse", "--abbrev-ref", "HEAD"])
+            if branch != "main":
+                # Shared checkout is mid-work on another branch for a parallel session (USR-222):
+                # never read/touch its working tree. Judge convergence from the local `main` ref
+                # instead, which `sync()` can fast-forward with a ref-only fetch regardless of what
+                # is checked out here.
+                local_main = _local_main_ref_sha(root, git)
+                state = "converged" if local_main == expected else "divergent"
+                reason = None
+                if state != "converged":
+                    reason = (
+                        f"main checkout is on branch {branch!r} (parallel session); local main ref "
+                        + ("unknown" if local_main is None else "behind origin/main")
+                    )
+                try:
+                    notebook_commit_date = git(root, ["show", "-s", "--format=%cI", local_main]) if local_main else None
+                except Exception:
+                    notebook_commit_date = None
+                notebook = NodeStatus(
+                    name="Notebook", state=state, git_sha=local_main, reason=reason,
+                    commit_date=notebook_commit_date,
+                    sync_classification="converged" if state == "converged" else "other_branch",
+                )
+            else:
+                classification, local_commits, dirty_files, classification_reason = classify_checkout(root, git, expected)
+                reason = classification_reason
+                state = "converged" if local == expected and classification == "converged" else "divergent"
+                try:
+                    notebook_commit_date = git(root, ["show", "-s", "--format=%cI", local]) if local else None
+                except Exception:
+                    notebook_commit_date = None
+                notebook = NodeStatus(
+                    name="Notebook", state=state, git_sha=local, reason=reason, commit_date=notebook_commit_date,
+                    sync_classification=classification, local_commits=local_commits, dirty_files=dirty_files,
+                )
     except Exception:
         notebook = NodeStatus(name="Notebook", state="unknown", reason="checkout unavailable")
     desktop = _probe(
@@ -581,9 +617,30 @@ def sync(
     notebook = initial.nodes[0]
     if notebook.state != "converged":
         try:
-            blocker = _notebook_blocker(root, git)
-            if blocker:
-                notebook.reason = blocker
+            worktree_blocker = _notebook_worktree_blocker(root, git)
+            if worktree_blocker:
+                notebook.reason = worktree_blocker
+            elif notebook.sync_classification == "other_branch":
+                # Shared checkout parked on another branch for a parallel session (USR-222): fast-
+                # forward only the local `main` ref via a ref-only fetch. This never touches HEAD,
+                # the index or the working tree of whatever branch is checked out there, so it is
+                # safe regardless of that other session's state (dirty, mid-commit, etc.).
+                try:
+                    git(root, ["fetch", "origin", "main:refs/heads/main"])
+                    refreshed = _local_main_ref_sha(root, git)
+                except Exception as exc:
+                    refreshed = None
+                    notebook.reason = f"{notebook.reason}; failed to fast-forward local main ref: {exc}"
+                if refreshed is not None:
+                    notebook.git_sha = refreshed
+                    if refreshed == expected:
+                        notebook.state = "converged"
+                        notebook.sync_classification = "converged"
+                        notebook.reason = None
+                    else:
+                        notebook.reason = (
+                            f"{notebook.reason}; local main ref still behind origin/main after fetch"
+                        )
             elif notebook.sync_classification == "dirty":
                 remediated = remediate_dirty_checkout(root, git, notebook.dirty_files, notifier=notifier)
                 if remediated:
@@ -741,7 +798,9 @@ def sync(
     )
     for old, new in zip(initial.nodes, final.nodes):
         if new.state != "converged":
-            if old.reason and (not new.reason or "busy" in old.reason or "offline" in old.reason):
+            if old.reason and (
+                not new.reason or "busy" in old.reason or "offline" in old.reason or "failed to fast-forward" in old.reason
+            ):
                 new.reason = old.reason
     if final.nodes[1].state == "converged":
         pending = load_pending_convergence()
