@@ -701,6 +701,72 @@
       "created_at": "2026-10-12T20:38:46Z",
       "created_by": "claude-code",
       "resolved_at": null
+    },
+    {
+      "id": "OA-019",
+      "kind": "decision",
+      "title": "V0: escolher como dar capacidade ao portao (suite de ~4000 testes estoura 3000 s com 1 worker no Notebook)",
+      "priority": "high",
+      "status": "open",
+      "why": "Em 14/10 o portao local passou em ~21 min com 2-3 workers, mas quando a RAM livre do Notebook cai (<6 GiB com Chrome/ChatGPT abertos e o agente headless) o harness libera 1 worker e a suite estoura o limite de 3000 s do passo paralelo. O Desktop esta reservado para a indexacao do Segundo Cerebro. Sem capacidade estavel, nenhuma sequencia de 5 entregas sem resgate fecha.",
+      "blocks": [
+        "USR-255"
+      ],
+      "depends_on": [],
+      "steps": [],
+      "options": [
+        {
+          "id": "A",
+          "label": "Liberar o Notebook durante portoes",
+          "detail": "Fechar Chrome/ChatGPT enquanto a fabrica roda; nada muda no codigo"
+        },
+        {
+          "id": "B",
+          "label": "Voltar a usar o Desktop em paralelo apos a indexacao",
+          "detail": "Quando a indexacao terminar, a fabrica usa o Desktop para o segundo portao"
+        },
+        {
+          "id": "C",
+          "label": "Subir o limite do passo para 3600 s",
+          "detail": "Commit humano em harness.config.json (protegido): unit_and_integration_tests_parallel timeout 3000 -> 3600"
+        }
+      ],
+      "verify": "Proximas 3 entregas com portao abaixo do limite (STEP_TIME unit_and_integration_tests_parallel < limite)",
+      "created_at": "2026-10-14T16:18:57Z",
+      "created_by": "claude-code",
+      "resolved_at": null
+    },
+    {
+      "id": "OA-020",
+      "kind": "decision",
+      "title": "V0: quais tickets congelados entram na sequencia de 5 entregas sem resgate",
+      "priority": "high",
+      "status": "open",
+      "why": "Depois de USR-255 e USR-257 a fila v0-critico fica vazia, mas o criterio do V0 exige 5 tickets v0-critico seguidos lancados uma vez com run_ticket <ID> ate o merge sem resgate. Hoje a sequencia esta em 0 (USR-247 entregou sozinho; USR-246 e USR-255 precisaram de resgate e viraram USR-256/257).",
+      "blocks": [],
+      "depends_on": [],
+      "steps": [],
+      "options": [
+        {
+          "id": "A",
+          "label": "Promover USR-179 e USR-192",
+          "detail": "Velocidade do pytest focal e intake de demanda pelo Telegram; os dois servem ao objetivo de lancar demanda nova sem resgate"
+        },
+        {
+          "id": "B",
+          "label": "Promover os 5 primeiros congelados da ordem do plano",
+          "detail": "USR-192, 221, 207, 211, 215"
+        },
+        {
+          "id": "C",
+          "label": "Outra lista",
+          "detail": "Responder com os IDs"
+        }
+      ],
+      "verify": "Os tickets escolhidos com tag v0-critico e horizon now em .factory/demands/demands.json",
+      "created_at": "2026-10-14T16:18:57Z",
+      "created_by": "claude-code",
+      "resolved_at": null
     }
   ]
 }
