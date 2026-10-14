@@ -415,8 +415,11 @@ def test_an_agent_failure_closes_the_run_as_failed_on_the_agent_phase(
 ) -> None:
     sink = RecordingSink()
     env = launcher(sink)
+    # Not "timeout": USR-256 gave a timeout with real changes in the worktree its own path (advance
+    # straight to the gate instead of failing, with its own cause code), covered on its own in
+    # tests/test_run_ticket_routing.py. This test is about the plain agent-failure phase transitions.
     env.agent.side_effect = lambda req: AgentResult(
-        ok=False, harness=req.harness, error_kind="timeout", exit_code=None, stderr_tail="", duration_s=9.0, text=""
+        ok=False, harness=req.harness, error_kind="crash", exit_code=None, stderr_tail="", duration_s=9.0, text=""
     )
 
     assert main(["USR-99", "--harness", "codex", "--skip-validation", "--json"]) == 1

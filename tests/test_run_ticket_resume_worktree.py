@@ -223,8 +223,16 @@ def launcher(monkeypatch: pytest.MonkeyPatch, repo: SimpleNamespace) -> SimpleNa
 
 
 def test_second_invocation_reuses_the_worktree_and_carries_the_continuation_notice(
-    repo: SimpleNamespace, launcher: SimpleNamespace, capsys: pytest.CaptureFixture[str]
+    repo: SimpleNamespace, launcher: SimpleNamespace, capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    # USR-256 gave a timeout with real changes in the worktree its own path (advance straight to the
+    # focal pre-test/gate/self-correction loop instead of failing outright); that path is covered on its
+    # own in tests/test_run_ticket_routing.py. This test is about an older, separate concern -- CLI
+    # worktree reuse and the continuation notice across two *separate* invocations -- so it forces the
+    # plain timeout-failure branch here regardless of the real on-disk changes the fake agent leaves.
+    monkeypatch.setattr(run_ticket.agent_retry, "default_worktree_has_changes", lambda cwd: False)
+
     assert run_ticket.main(["USR-205", "--harness", "grok"]) == 1  # attempt 1: timeout, work preserved
     first_cwd = Path(launcher.requests[-1].cwd)
     assert _worktree_names(repo) == [first_cwd.name]
