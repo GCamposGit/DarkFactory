@@ -20,6 +20,7 @@ import contextlib
 import json
 import logging
 import os
+import subprocess
 import threading
 import time
 from dataclasses import dataclass, field
@@ -28,6 +29,7 @@ from typing import Any, Callable, Iterator
 
 from pydantic import ValidationError
 
+from core.git.safe_show import safe_show
 from core.owner_actions.models import (
     SEQUENTIAL_ID_PATTERN,
     ActionKind,
@@ -136,6 +138,34 @@ def _read_json(path: Path) -> tuple[Any, str | None]:
         return None, f"{path.name}: JSON corrompido ({exc.msg} na linha {exc.lineno}); backlog tratado como vazio"
 
 
+_REMOTE_ID_TIMEOUT_S = 5.0
+
+
+def _run_git_quiet(args: list[str], cwd: Path, timeout: float = _REMOTE_ID_TIMEOUT_S) -> subprocess.CompletedProcess[str]:
+    """``git`` call that never raises: a missing repo or a hung process is just a miss (USR-255)."""
+    try:
+        return subprocess.run(
+            ["git", *args], cwd=cwd, capture_output=True, text=True,
+            encoding="utf-8", errors="replace", timeout=timeout, check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return subprocess.CompletedProcess(args, 1, "", "")
+
+
+def _locate_in_repo(path: Path) -> tuple[Path, str] | None:
+    """``(repo_root, repo_relative_posix_path)`` for ``path``, or ``None`` outside a Git repo."""
+    directory = path.parent
+    result = _run_git_quiet(["rev-parse", "--show-toplevel"], directory)
+    if result.returncode != 0:
+        return None
+    root = Path(result.stdout.strip())
+    try:
+        rel = path.resolve().relative_to(root.resolve())
+    except (OSError, ValueError):
+        return None
+    return root.resolve(), rel.as_posix()
+
+
 def _raw_actions(payload: Any) -> list[Any]:
     if isinstance(payload, list):
         return payload
@@ -166,9 +196,17 @@ def apply_resolution(action: OwnerAction, resolution: Resolution | None) -> Owne
 class OwnerActionStore:
     """File-backed backlog. ``overlay_path`` is optional (the Hub sets it, agents usually do not)."""
 
-    def __init__(self, path: Path | str | None = None, *, overlay_path: Path | str | None = None) -> None:
+    def __init__(
+        self,
+        path: Path | str | None = None,
+        *,
+        overlay_path: Path | str | None = None,
+        remote_ref: str | None = "origin/main",
+    ) -> None:
         self.path = Path(path) if path is not None else default_path()
         self.overlay_path = Path(overlay_path) if overlay_path is not None else None
+        # Best-effort id reservation against a branch's unsynced base (USR-255); None disables it.
+        self.remote_ref = remote_ref
 
     # ------------------------------------------------------------------ read
 
@@ -245,7 +283,36 @@ class OwnerActionStore:
                 match = SEQUENTIAL_ID_PATTERN.match(str(raw.get("id", "")))
                 if match:
                     highest = max(highest, int(match.group(1)))
+        highest = max([highest, *self._remote_reserved_numbers()])
         return f"OA-{highest + 1:03d}"
+
+    def _remote_reserved_numbers(self) -> set[int]:
+        """``OA-NNN`` numbers already used by ``self.remote_ref``'s copy of the file (USR-255).
+
+        A branch that has not rebased yet only sees its own file, so two branches each adding the
+        next free id collide once merged. Looking at the base branch too closes most of that gap;
+        it is purely additive and never raises - a missing repo, remote or ref is just an empty set.
+        """
+        if not self.remote_ref:
+            return set()
+        located = _locate_in_repo(self.path)
+        if located is None:
+            return set()
+        root, rel = located
+        result = safe_show(self.remote_ref, rel, cwd=root, runner=_run_git_quiet)
+        if result.returncode != 0:
+            return set()
+        try:
+            payload = json.loads(result.stdout)
+        except json.JSONDecodeError:
+            return set()
+        numbers: set[int] = set()
+        for raw in _raw_actions(payload):
+            if isinstance(raw, dict):
+                match = SEQUENTIAL_ID_PATTERN.match(str(raw.get("id", "")))
+                if match:
+                    numbers.add(int(match.group(1)))
+        return numbers
 
     # ----------------------------------------------------------------- write
 
@@ -271,9 +338,12 @@ class OwnerActionStore:
     def add(self, draft: OwnerActionDraft) -> OwnerAction:
         """Validate and append a new item (sequential ``OA-NNN`` unless the draft brings an id)."""
 
+        # Resolved before the lock: a hung `git show` must not hold the file lock (USR-255).
+        remote_reserved = self._remote_reserved_numbers()
+
         def _append(document: dict[str, Any], rows: list[Any]) -> OwnerAction:
             existing_ids = {str(r.get("id")) for r in rows if isinstance(r, dict)}
-            action_id = draft.id or self._next_id_from_rows(rows)
+            action_id = draft.id or self._next_id_from_rows(rows, remote_reserved)
             if action_id in existing_ids:
                 raise OwnerActionInvalid(f"{action_id} ja existe")
             try:
@@ -285,14 +355,15 @@ class OwnerActionStore:
 
         return self._mutate_definitions(_append)
 
-    @staticmethod
-    def _next_id_from_rows(rows: list[Any]) -> str:
+    def _next_id_from_rows(self, rows: list[Any], remote_reserved: set[int] | None = None) -> str:
         highest = 0
         for raw in rows:
             if isinstance(raw, dict):
                 match = SEQUENTIAL_ID_PATTERN.match(str(raw.get("id", "")))
                 if match:
                     highest = max(highest, int(match.group(1)))
+        reserved = self._remote_reserved_numbers() if remote_reserved is None else remote_reserved
+        highest = max([highest, *reserved])
         return f"OA-{highest + 1:03d}"
 
     def upsert(self, action: OwnerAction) -> tuple[OwnerAction, bool]:

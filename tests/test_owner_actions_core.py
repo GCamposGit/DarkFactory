@@ -15,6 +15,7 @@ from core.demands.models import UserTicket
 from core.demands.store import DemandsStore
 from core.line.human import HumanRequest
 from core.owner_actions import cli
+from core.owner_actions.dedupe import renumber_duplicate_owner_actions
 from core.owner_actions.mirror import (
     close_mirrored_request,
     human_request_to_action,
@@ -187,6 +188,115 @@ def test_add_assigns_sequential_ids_and_writes_atomically(store: OwnerActionStor
     assert not list(store.path.parent.glob("*.tmp"))
     assert not list(store.path.parent.glob("*.lock"))
     assert [a.id for a in store.list_actions()] == ["OA-001", "OA-002"]
+
+
+def _git(*args: str, cwd: Path) -> None:
+    result = subprocess.run(["git", *args], cwd=str(cwd), capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
+
+
+def _init_repo_with_oa(cwd: Path) -> None:
+    cwd.mkdir(parents=True, exist_ok=True)
+    _git("init", "-b", "main", cwd=cwd)
+    _git("config", "user.name", "Test User", cwd=cwd)
+    _git("config", "user.email", "test@darkfac.local", cwd=cwd)
+    (cwd / ".factory" / "owner_actions").mkdir(parents=True)
+
+
+# ---------------------------------------------------- next id vs. origin/main (USR-255)
+
+
+def test_next_id_and_add_consider_the_base_branch(tmp_path: Path) -> None:
+    """Two branches that each pick the next free OA-NNN without seeing the other must not collide.
+
+    ``main`` (standing in for ``origin/main``) gains ``OA-001`` on a commit a ticket branch never
+    synced; the branch's own file still has no actions. ``next_id``/``add`` must look at that base
+    branch too, not just the local file, so the branch picks ``OA-002`` instead of colliding on
+    ``OA-001`` once it is eventually rebased (USR-255).
+    """
+    repo = tmp_path / "repo"
+    _init_repo_with_oa(repo)
+    oa_path = repo / ".factory" / "owner_actions" / "owner_actions.json"
+    oa_path.write_text(json.dumps({"schema_version": 1, "actions": []}), encoding="utf-8")
+    _git("add", "-A", cwd=repo)
+    _git("commit", "-m", "init", cwd=repo)
+
+    _git("checkout", "-b", "ticket/usr-255", cwd=repo)
+
+    # main (the base branch) advances without the ticket branch's knowledge.
+    _git("checkout", "main", cwd=repo)
+    remote_action = _draft().build("OA-001").to_record()
+    oa_path.write_text(json.dumps({"schema_version": 1, "actions": [remote_action]}), encoding="utf-8")
+    _git("commit", "-am", "main adds OA-001", cwd=repo)
+
+    # Back on the ticket branch: its own working tree still has no actions at all.
+    _git("checkout", "ticket/usr-255", cwd=repo)
+    assert json.loads(oa_path.read_text(encoding="utf-8"))["actions"] == []
+
+    # Without the lookup, the branch would pick OA-001 too -- the exact USR-255 collision.
+    assert OwnerActionStore(oa_path, remote_ref=None).next_id() == "OA-001"
+
+    local_store = OwnerActionStore(oa_path, remote_ref="main")
+    assert local_store.next_id() == "OA-002"
+    created = local_store.add(_draft(title="Registrado pela branch do ticket"))
+    assert created.id == "OA-002"
+
+    # A file outside any repo just skips the lookup instead of raising.
+    isolated = tmp_path / "isolated.json"
+    isolated.write_text(json.dumps({"schema_version": 1, "actions": []}), encoding="utf-8")
+    assert OwnerActionStore(isolated, remote_ref="main").next_id() == "OA-001"
+
+
+def test_renumber_duplicate_owner_actions_after_sync(tmp_path: Path) -> None:
+    """A rebase/merge that lands the same OA-NNN twice is repaired before the gate (USR-255).
+
+    Builds the exact failure state from the USR-249 incident directly (two rows sharing
+    ``OA-002``, one matching ``origin/main``'s copy) rather than fighting Git's line-based merge
+    heuristics for a non-conflicting collision, since the fix operates on the resulting file, not
+    on how the merge produced it.
+    """
+    repo = tmp_path / "repo"
+    _init_repo_with_oa(repo)
+    oa_path = repo / ".factory" / "owner_actions" / "owner_actions.json"
+
+    base_action = _draft().build("OA-001").to_record()
+    oa_path.write_text(json.dumps({"schema_version": 1, "actions": [base_action]}), encoding="utf-8")
+    _git("add", "-A", cwd=repo)
+    _git("commit", "-m", "init", cwd=repo)
+
+    # origin/main independently gains OA-002 (another PR's registration).
+    remote_action = _draft(title="Veio de outro PR em origin/main").build("OA-002").to_record()
+    oa_path.write_text(
+        json.dumps({"schema_version": 1, "actions": [base_action, remote_action]}), encoding="utf-8"
+    )
+    _git("commit", "-am", "origin adds OA-002", cwd=repo)
+
+    # The branch's own OA-002 (a different reason) ends up alongside it: the state a non-conflicting
+    # rebase/merge of the two independent additions leaves behind.
+    branch_action = _draft(title="Registrado pela branch do ticket").build("OA-002").to_record()
+    oa_path.write_text(
+        json.dumps({"schema_version": 1, "actions": [base_action, remote_action, branch_action]}),
+        encoding="utf-8",
+    )
+
+    changes = renumber_duplicate_owner_actions(repo, remote_ref="main")
+    assert changes == ["OA-002 -> OA-003"]
+
+    document = json.loads(oa_path.read_text(encoding="utf-8"))
+    assert [row["id"] for row in document["actions"]] == ["OA-001", "OA-002", "OA-003"]
+    # The row that matched origin/main kept its id; only the branch's own row moved.
+    assert document["actions"][1]["title"] == "Veio de outro PR em origin/main"
+    assert document["actions"][2]["title"] == "Registrado pela branch do ticket"
+
+    result = OwnerActionStore(oa_path).load()
+    assert result.warnings == []
+    assert [a.id for a in result.actions] == ["OA-001", "OA-002", "OA-003"]
+
+    # A clean file (no collision) is left untouched.
+    assert renumber_duplicate_owner_actions(repo, remote_ref="main") == []
+    # A repo with no such ref, or no owner_actions.json at all, is just a no-op.
+    assert renumber_duplicate_owner_actions(repo, remote_ref="origin/main") == []
+    assert renumber_duplicate_owner_actions(tmp_path / "not-a-repo", remote_ref="main") == []
 
 
 def test_add_rejects_invalid_and_secret_drafts(store: OwnerActionStore) -> None:

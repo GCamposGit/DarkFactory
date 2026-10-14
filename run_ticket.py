@@ -497,6 +497,42 @@ def rebase_on_origin_main(cwd: Path) -> tuple[bool, list[str], str]:
     return False, conflict_files, rebase.stderr.strip() or rebase.stdout.strip()
 
 
+def repair_owner_action_duplicates_before_gate(git_mgr: Any, ticket_id: str, cwd: Path) -> list[str]:
+    """Renumber OA-NNN collisions with origin/main right after the rebase, before the gate (USR-255).
+
+    A rebase can merge two branches that each picked the next free OA-NNN (neither had seen the
+    other's commit) without a textual conflict, leaving the same id twice in
+    ``owner_actions.json``. Left alone, that is only caught once the official gate's
+    ``tests/test_owner_actions_core.py::test_seeded_backlog_is_valid_and_complete`` fails with
+    "item OA-NNN duplicado ignorado" -- well after the rebase already succeeded (~25min lost on
+    USR-249's delivery on 2026-10-14). Returns the ``"OLD -> NEW"`` lines, or ``[]`` when nothing
+    collided; never raises.
+    """
+    from core.owner_actions.dedupe import OWNER_ACTIONS_RELATIVE, renumber_duplicate_owner_actions
+
+    try:
+        changes = renumber_duplicate_owner_actions(cwd, remote_ref="origin/main")
+    except Exception as exc:  # a repair attempt must never block the delivery
+        logger.warning("owner_actions: dedupe pre-portao falhou para %s: %s", ticket_id, exc)
+        return []
+    if not changes:
+        return []
+    logger.info("owner_actions: renumerado pre-portao para %s: %s", ticket_id, "; ".join(changes))
+    message = (
+        f"fix(owner-actions): renumera OA duplicado apos sync com origin/main [{ticket_id}]\n\n"
+        + "\n".join(changes)
+        + f"\n\nDarkFac-Ticket: {ticket_id}\nDarkFac-Autonomy: zero-human-touch\n"
+    )
+    try:
+        git_mgr.commit_ticket(
+            ticket_id, "renumera OA duplicado apos sync", cwd=cwd,
+            paths=[OWNER_ACTIONS_RELATIVE], custom_message=message,
+        )
+    except Exception as exc:
+        logger.warning("owner_actions: commit da renumeracao pre-portao falhou para %s: %s", ticket_id, exc)
+    return changes
+
+
 _TEST_FILE_RE = re.compile(r"(^|/)tests?/.*test_[^/]+\.py$|(^|/)test_[^/]+\.py$")
 
 
@@ -1387,6 +1423,12 @@ def _deliver_worktree(
         return conflict_payload if return_result else 2
 
     current_sha = git_mgr.get_current_sha(target_worktree)
+
+    owner_action_changes = repair_owner_action_duplicates_before_gate(git_mgr, ticket.id, target_worktree)
+    if owner_action_changes:
+        if not as_json:
+            print(f"[+] OA renumerada apos sync com origin/main: {'; '.join(owner_action_changes)}")
+        current_sha = git_mgr.get_current_sha(target_worktree)
 
     # 3. Focal tests + Official Validation Gate, with in-place self-correction (USR-245)
     if _cancelled():
