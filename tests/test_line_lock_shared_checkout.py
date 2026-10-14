@@ -23,7 +23,11 @@ def test_gitignore_lists_line_lock_and_local_cancel() -> None:
     assert ".factory/line_lock/" in run_ticket.VOLATILE_STATE_PREFIXES
 
 
-def test_held_line_lock_does_not_dirty_shared_checkout(tmp_path: Path) -> None:
+def test_held_line_lock_does_not_dirty_shared_checkout(tmp_path: Path, monkeypatch) -> None:
+    # The gate itself may run as a delivery subprocess with the inheritance env var already set
+    # (USR-250); without clearing it here, guard() would treat the lock as already held by an
+    # ancestor and skip creating it, failing the assertions below for a reason unrelated to the code.
+    monkeypatch.delenv(line_lock.ENV_INHERITED, raising=False)
     repo = tmp_path / "repo"
     repo.mkdir()
     _git(repo, "init", "-q")
