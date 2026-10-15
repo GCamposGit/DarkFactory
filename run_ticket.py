@@ -1499,11 +1499,17 @@ def _deliver_worktree(
         print(f"  {resume_cmd}", file=sys.stderr)
         print("=" * 68 + "\n", file=sys.stderr)
 
-        progress.set_outcome(error_msg, "delivery_failed")
+        delivery_report = completion_report.delivery if completion_report else None
+        fail_cause = (
+            delivery_report.action
+            if delivery_report is not None and delivery_report.action == "staged_inspect_failed"
+            else "delivery_failed"
+        )
+        progress.set_outcome(error_msg, fail_cause)
         fail_payload = {
             "exit_code": 1,
             "ok": False,
-            "cause": "delivery_failed",
+            "cause": fail_cause,
             "ticket_id": ticket.id,
             "error": error_msg,
             "branch": current_branch,

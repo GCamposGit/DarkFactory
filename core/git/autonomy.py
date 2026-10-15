@@ -19,6 +19,7 @@ from pathlib import Path
 import re
 import subprocess
 import sys
+import time
 from typing import Any, Callable, Literal, Optional, Sequence
 
 from pydantic import BaseModel, Field
@@ -82,7 +83,8 @@ class DeliveryReport(BaseModel):
     ok: bool
     action: str = Field(
         description=(
-            "merged, conflict, awaiting_commercial_acceptance, no_changes, ci_pending "
+            "merged, conflict, awaiting_commercial_acceptance, no_changes, staged_inspect_failed "
+            "(the index could not be read for the secret scan; resumable), ci_pending "
             "(checks still pending after the wait), ci_failed (a check is red), base_red "
             "(every red check is already red on the base branch) or error; ci_pending, "
             "ci_failed and base_red never merge and leave the PR and branch open"
@@ -115,6 +117,11 @@ class SweepReport(BaseModel):
 
 # Paths per `git add` call when staging a ticket's changed files (command-line length on Windows).
 _ADD_CHUNK = 100
+# USR-264: ``git show :path`` on the index can fail transiently under git contention right after
+# the gate. Retry a few times with a short pause before giving up on the delivery.
+_STAGED_SHOW_ATTEMPTS = 3
+_STAGED_SHOW_PAUSE_S = 1.0
+STAGED_INSPECT_FAILED = "staged_inspect_failed"
 
 GhRunner = Callable[[Sequence[str], Path], "subprocess.CompletedProcess[str]"]
 
@@ -215,6 +222,20 @@ def _run_git(
         )
 
 
+class StagedInspectError(RuntimeError):
+    """The index blob of a staged path could not be read even after retries (USR-264)."""
+
+    def __init__(self, path: str, returncode: int, stderr: str, attempts: int) -> None:
+        self.path = path
+        self.returncode = returncode
+        self.stderr = stderr
+        self.attempts = attempts
+        super().__init__(
+            f"{STAGED_INSPECT_FAILED}: Cannot inspect staged content: {path} "
+            f"(git show :{path} exit {returncode} after {attempts} attempt(s)): {stderr or '<no stderr>'}"
+        )
+
+
 class GitAutonomyManager:
     """Manages autonomous Git operations for the Dark Factory."""
 
@@ -232,8 +253,11 @@ class GitAutonomyManager:
         trash_retention_days: float = ticket_workspace.TRASH_RETENTION_DAYS,
         protected_state_paths: Sequence[str] = DEFAULT_PROTECTED_STATE_PATHS,
         on_phase: Optional[PhaseCallback] = None,
+        staged_show_sleep_fn: Optional[Callable[[float], None]] = None,
     ) -> None:
         self.root = root
+        # Pause between retries of a failed index read (USR-264); injectable so tests never sleep.
+        self.staged_show_sleep_fn = staged_show_sleep_fn or time.sleep
         # Optional best-effort progress hook (USR-140): called as (phase, status, message, cause) on
         # commit/pr/ci/merge transitions. It can never affect delivery: errors are swallowed.
         self.on_phase = on_phase
@@ -283,6 +307,7 @@ class GitAutonomyManager:
             ci_clock_fn=self.ci_clock_fn,
             cleanup_sleep_fn=self.cleanup_sleep_fn,
             now_fn=self.now_fn,
+            staged_show_sleep_fn=self.staged_show_sleep_fn,
         )
 
     def _close_open_phase(self, report: DeliveryReport) -> None:
@@ -310,9 +335,7 @@ class GitAutonomyManager:
         paths = [path for path in names.stdout.split("\0") if path]
         findings: list[secret_scan.Finding] = []
         for path in paths:
-            blob = safe_show("", path, cwd=cwd)
-            if blob.returncode != 0:
-                raise RuntimeError(f"Cannot inspect staged content: {path}")
+            blob = self._show_staged_blob(path, cwd)
             if Path(path).suffix.lower() in secret_scan.BINARY_EXTENSIONS:
                 continue
             if len(blob.stdout.encode("utf-8")) > secret_scan.MAX_FILE_BYTES or "\0" in blob.stdout[:8192]:
@@ -325,6 +348,24 @@ class GitAutonomyManager:
         if violations:
             details = "\n".join(f"  - {finding.render()}" for finding in violations)
             raise RuntimeError(f"Staged content contains potential secrets:\n{details}")
+
+    def _show_staged_blob(self, path: str, cwd: Path) -> subprocess.CompletedProcess[str]:
+        """Read ``:path`` from the index, retrying transient failures (USR-264)."""
+        blob: Optional[subprocess.CompletedProcess[str]] = None
+        for attempt in range(1, _STAGED_SHOW_ATTEMPTS + 1):
+            blob = safe_show("", path, cwd=cwd, runner=lambda args, directory: _run_git(args, cwd=directory))
+            if blob.returncode == 0:
+                if attempt > 1:
+                    logger.info("git show :%s succeeded on attempt %d", path, attempt)
+                return blob
+            logger.warning(
+                "git show :%s failed (attempt %d/%d, exit %s): %s",
+                path, attempt, _STAGED_SHOW_ATTEMPTS, blob.returncode, (blob.stderr or "").strip(),
+            )
+            if attempt < _STAGED_SHOW_ATTEMPTS:
+                self.staged_show_sleep_fn(_STAGED_SHOW_PAUSE_S)
+        assert blob is not None
+        raise StagedInspectError(path, blob.returncode, (blob.stderr or "").strip(), _STAGED_SHOW_ATTEMPTS)
 
     def _check_ignored_staged_additions(self, cwd: Path) -> None:
         added = _run_git(["diff", "--cached", "--name-only", "--diff-filter=A", "-z"], cwd=cwd)
@@ -1300,6 +1341,18 @@ class GitAutonomyManager:
             self._phase("commit", "running", "commit da implementacao e do registro de conclusao")
             try:
                 commit_sha = self._record_completion(ticket.id, ticket.title, target_dir, custom_message)
+            except StagedInspectError as exc:
+                # Explicit, resumable cause instead of a traceback after an approved gate (USR-264).
+                self._phase("commit", "failed", str(exc), STAGED_INSPECT_FAILED)
+                return TicketCompletionReport(
+                    ok=False,
+                    ticket_id=ticket_id,
+                    delivery=DeliveryReport(
+                        ok=False, action=STAGED_INSPECT_FAILED,
+                        branch=self._current_branch(target_dir), message=str(exc),
+                    ),
+                    message=str(exc),
+                )
             except Exception as exc:
                 self._phase("commit", "failed", str(exc), type(exc).__name__)
                 raise
