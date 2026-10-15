@@ -421,6 +421,29 @@ def _prepare_workspace(args: argparse.Namespace, ticket: UserTicket) -> TicketWo
     """
     from core.git.ticket_workspace import create_workspace, shared_checkout_dirty_paths
 
+    if ticket.project_id != "darkfac":
+        from core.projects.registry import get_project_registry
+        from core.projects.ticket_execution import project_checkout, setup_project
+
+        project = get_project_registry().get_project(ticket.project_id)
+        if project is None:
+            raise RuntimeError(f"Projeto '{ticket.project_id}' não existe em .factory/projects.json")
+        if not project.commands.validate_cmds:
+            raise RuntimeError(
+                f"Projeto {project.id} não declara commands.validate. Execute o Project Adoption Gateway "
+                "(skill 07) no onboarding e declare comandos de validação antes de executar tickets."
+            )
+        project_root = project_checkout(project)
+        workspace = create_workspace(ticket.id, cwd=project_root, base=project.default_branch)
+        setup = setup_project(project, workspace.path)
+        if not setup.ok:
+            from core.git.ticket_workspace import cleanup
+
+            cleanup(workspace.path, workspace.main_root)
+            raise RuntimeError(f"commands.setup do projeto {project.id} falhou:\n{setup.combined_output}")
+        # External repositories do not carry DarkFac's central demand ledger.
+        return workspace
+
     if not args.allow_dirty_shared_checkout:
         dirty = shared_checkout_dirty_paths(PROJECT_ROOT, ignore_prefixes=VOLATILE_STATE_PREFIXES)
         if dirty:
@@ -439,7 +462,7 @@ def _discard_untouched_workspace(workspace: TicketWorkspace) -> bool:
     from core.git.autonomy import GitAutonomyManager, _run_git
     from core.git.ticket_workspace import cleanup
 
-    mgr = GitAutonomyManager(PROJECT_ROOT)
+    mgr = GitAutonomyManager(workspace.main_root)
     head = _run_git(["rev-parse", "HEAD"], cwd=workspace.path).stdout.strip()
     if not head or head != workspace.base_sha:
         return False
@@ -496,6 +519,25 @@ def rebase_on_origin_main(cwd: Path) -> tuple[bool, list[str], str]:
     conflict_files = [f.strip() for f in diff_u.stdout.splitlines() if f.strip()]
     _run_git(["rebase", "--abort"], cwd=cwd)
     return False, conflict_files, rebase.stderr.strip() or rebase.stdout.strip()
+
+
+def rebase_on_project_base(cwd: Path, base: str) -> tuple[bool, list[str], str]:
+    """Synchronize a client ticket branch with the project's registered default branch."""
+    from core.git.autonomy import _run_git
+
+    _run_git(["fetch", "origin", base], cwd=cwd)
+    remote_ref = f"origin/{base}"
+    if _run_git(["rev-parse", "--verify", remote_ref], cwd=cwd).returncode != 0:
+        return False, [], f"base registrada não encontrada: {remote_ref}"
+    if _run_git(["merge-base", "--is-ancestor", remote_ref, "HEAD"], cwd=cwd).returncode == 0:
+        return True, [], "already up to date"
+    rebase = _run_git(["rebase", remote_ref], cwd=cwd)
+    if rebase.returncode == 0:
+        return True, [], "rebased successfully"
+    diff_u = _run_git(["diff", "--name-only", "--diff-filter=U"], cwd=cwd)
+    conflicts = [f.strip() for f in diff_u.stdout.splitlines() if f.strip()]
+    _run_git(["rebase", "--abort"], cwd=cwd)
+    return False, conflicts, rebase.stderr.strip() or rebase.stdout.strip()
 
 
 def repair_owner_action_duplicates_before_gate(git_mgr: Any, ticket_id: str, cwd: Path) -> list[str]:
@@ -767,7 +809,12 @@ def _commit_fix_agent_changes(target_worktree: Path, ticket: UserTicket, stage: 
     """
     from core.git.autonomy import GitAutonomyManager
 
-    git_mgr = GitAutonomyManager(PROJECT_ROOT)
+    from core.git.ticket_workspace import main_checkout_root
+    try:
+        git_root = main_checkout_root(target_worktree)
+    except Exception:
+        git_root = PROJECT_ROOT
+    git_mgr = GitAutonomyManager(git_root)
     if not git_mgr.is_dirty(cwd=target_worktree):
         return False
     git_mgr.commit_ticket(
@@ -918,6 +965,51 @@ def _run_gate_with_self_correction(
     Returns `None` on success (the caller proceeds to commit/push), or the usual failure payload/exit
     code once every attempt is exhausted or a timeout/infra failure is hit.
     """
+    if ticket.project_id != "darkfac":
+        from core.projects.registry import get_project_registry
+        from core.projects.ticket_execution import ProjectExecutionError, validate_project_commands
+
+        project = get_project_registry().get_project(ticket.project_id)
+        if project is None:
+            detail = f"Projeto '{ticket.project_id}' não existe em .factory/projects.json."
+            progress.phase("gate", "failed", detail, cause="project_not_registered")
+            return {"exit_code": 1, "ok": False, "cause": "project_not_registered", "error": detail}
+        if not project.commands.validate_cmds:
+            detail = (
+                f"Projeto {project.id} não declara commands.validate. Execute o Project Adoption Gateway "
+                "(skill 07) no onboarding e declare comandos de validação antes de executar tickets."
+            )
+            progress.phase("gate", "failed", detail, cause="project_validate_missing")
+            return {"exit_code": 1, "ok": False, "cause": "project_validate_missing", "error": detail}
+        if skip_validation:
+            # Client delivery always fails closed without its declared project gate.
+            skip_validation = False
+        try:
+            report = validate_project_commands(project, target_worktree, timeout_s=int(GATE_TIMEOUT_S))
+            if report.ok and project.commands.smoke:
+                from core.projects.ticket_execution import run_project_commands
+                report = run_project_commands(project.commands.smoke, target_worktree, timeout_s=int(GATE_TIMEOUT_S))
+        except ProjectExecutionError as exc:
+            detail = str(exc)
+            progress.phase("gate", "failed", detail, cause="project_validate_missing")
+            return {"exit_code": 1, "ok": False, "cause": "project_validate_missing", "error": detail}
+        if report.ok:
+            progress.phase("gate", "succeeded", "portão declarado pelo projeto aprovado")
+            if not as_json:
+                print("[+] Validação declarada pelo projeto aprovada: [HARNESS_PASS]!")
+            return None
+        detail = report.combined_output
+        progress.phase("gate", "failed", redacted_head(detail[-1200:], 600), cause="project_validate_failed")
+        if not as_json:
+            print(f"[ERRO NO PORTÃO DO PROJETO]:\n{detail}", file=sys.stderr)
+        return {
+            "exit_code": report.exit_code or 1,
+            "ok": False,
+            "cause": "project_validate_failed",
+            "error": detail,
+            "worktree": str(target_worktree),
+        }
+
     last_output = ""
     last_cause = "gate_failed"
     last_exit_code = 1
@@ -1332,7 +1424,12 @@ def _resume_delivery_scoped(
                 return {"exit_code": 1, "ok": False, "error": f"Worktree not found for {ticket_id}"}
             return 1
 
-    git_mgr = GitAutonomyManager(PROJECT_ROOT)
+    from core.git.ticket_workspace import main_checkout_root
+    try:
+        git_root = main_checkout_root(target_worktree)
+    except Exception:
+        git_root = PROJECT_ROOT
+    git_mgr = GitAutonomyManager(git_root)
     store = DemandsStore(target_worktree / ".factory" / "demands" / "demands.json")
     ticket = store.get_ticket(ticket_id)
     if ticket is None:
@@ -1427,7 +1524,13 @@ def _deliver_worktree(
     # 1. Commit uncommitted changes in worktree if any (required before rebase)
     if _cancelled():
         return cancelled_payload()
-    progress.phase("gate", "running", "sincronizando com origin/main antes do portao")
+    external_project = ticket.project_id != "darkfac"
+    project = None
+    if external_project:
+        from core.projects.registry import get_project_registry
+        project = get_project_registry().get_project(ticket.project_id)
+    base_branch = project.default_branch if project is not None else "main"
+    progress.phase("gate", "running", f"sincronizando com origin/{base_branch} antes do portao")
     if not no_commit and git_mgr.is_dirty(cwd=target_worktree):
         if not as_json:
             print("[+] Comitando alterações pendentes antes do rebase...")
@@ -1444,12 +1547,15 @@ def _deliver_worktree(
     if _cancelled():
         return cancelled_payload()
     if not as_json:
-        print("--> Sincronizando e rebaseando branch em origin/main...")
-    ok, conflict_files, msg = rebase_on_origin_main(target_worktree)
+        print(f"--> Sincronizando e rebaseando branch em origin/{base_branch}...")
+    if external_project:
+        ok, conflict_files, msg = rebase_on_project_base(target_worktree, base_branch)
+    else:
+        ok, conflict_files, msg = rebase_on_origin_main(target_worktree)
     if not ok:
         print("\n" + "=" * 68, file=sys.stderr)
         print(
-            f"[ERRO DE CONFLITO NO REBASE] Conflito ao rebasear a branch {current_branch} em origin/main.",
+            f"[ERRO DE CONFLITO NO REBASE] Conflito ao rebasear a branch {current_branch} em origin/{base_branch}.",
             file=sys.stderr,
         )
         if conflict_files:
@@ -1486,7 +1592,10 @@ def _deliver_worktree(
 
     current_sha = git_mgr.get_current_sha(target_worktree)
 
-    owner_action_changes = repair_owner_action_duplicates_before_gate(git_mgr, ticket.id, target_worktree)
+    owner_action_changes = (
+        repair_owner_action_duplicates_before_gate(git_mgr, ticket.id, target_worktree)
+        if not external_project else []
+    )
     if owner_action_changes:
         if not as_json:
             print(f"[+] OA renumerada apos sync com origin/main: {'; '.join(owner_action_changes)}")
@@ -1510,7 +1619,40 @@ def _deliver_worktree(
     if _cancelled():
         return cancelled_payload()
     completion_report = None
-    if not no_commit:
+    if external_project and project is not None and not no_commit:
+        if git_mgr.is_dirty(cwd=target_worktree):
+            git_mgr.commit_ticket(
+                ticket_id=ticket.id, title=ticket.title, cwd=target_worktree,
+                custom_message=f"feat: {ticket.title} [{ticket.id}]",
+            )
+        if no_push:
+            completion_report = None
+        else:
+            delivery = git_mgr.deliver_branch(
+                ticket.id, ticket.title, cwd=target_worktree, base=project.default_branch,
+                merge=not project.requires_commercial_acceptance, kind="implementation",
+            )
+            completion_report = delivery
+            if delivery.ok and delivery.merge_sha and project.deploy is not None:
+                progress.phase("deploy", "running", f"deploy pós-merge do projeto {project.id}")
+                release_error = _release_external_project(
+                    project, ticket, delivery, progress, git_mgr.root
+                )
+                if release_error:
+                    progress.phase("deploy", "failed", release_error, cause="project_release_failed")
+                    delivery.ok = False
+                    delivery.action = "error"
+                    delivery.message = release_error
+                else:
+                    progress.phase("deploy", "succeeded", f"deploy e smoke do projeto {project.id} aprovados")
+            elif delivery.ok and delivery.merge_sha and project.smoke:
+                smoke_error = _smoke_external_project(project)
+                if smoke_error:
+                    progress.phase("deploy", "failed", smoke_error, cause="project_smoke_failed")
+                    delivery.ok = False
+                    delivery.action = "error"
+                    delivery.message = smoke_error
+    elif not no_commit:
         completion_report = git_mgr.complete_ticket(
             ticket_id=ticket.id,
             cwd=target_worktree,
@@ -1535,7 +1677,9 @@ def _deliver_worktree(
         print(f"  {resume_cmd}", file=sys.stderr)
         print("=" * 68 + "\n", file=sys.stderr)
 
-        delivery_report = completion_report.delivery if completion_report else None
+        delivery_report = (
+            completion_report if external_project else completion_report.delivery
+        ) if completion_report else None
         fail_cause = (
             delivery_report.action
             if delivery_report is not None and delivery_report.action == "staged_inspect_failed"
@@ -1557,20 +1701,26 @@ def _deliver_worktree(
             print(json.dumps(fail_payload, indent=2, ensure_ascii=False))
         return fail_payload if return_result else 1
 
-    if delivered:
+    if delivered and not external_project:
         progress.phase(
             "deploy", "skipped", "deploy pos-merge nao faz parte do run_ticket (scripts/dokploy_redeploy.py)"
         )
+    if delivered:
         try:
-            git_mgr.sweep_stale(cwd=PROJECT_ROOT)
+            git_mgr.sweep_stale(cwd=git_mgr.root)
         except Exception as exc:
             logger.warning("Sweep after delivery warning: %s", exc)
 
     if not as_json:
         if completion_report:
+            delivered_sha = (
+                getattr(completion_report, "commit_sha", None)
+                or getattr(completion_report, "merge_sha", None)
+                or current_sha
+            )
             print(
                 f"[+] Autonomia Git: Ticket {ticket.id} concluído, comitado "
-                f"({completion_report.commit_sha}) e sincronizado com sucesso."
+                f"({delivered_sha}) e sincronizado com sucesso."
             )
         print(f"\n[SUCESSO] Ticket {ticket.id} entregue e validado com sucesso!")
 
@@ -1579,10 +1729,10 @@ def _deliver_worktree(
         "ok": True,
         "ticket_id": ticket.id,
         "branch": current_branch,
-        "commit_sha": completion_report.commit_sha if completion_report else current_sha,
+        "commit_sha": getattr(completion_report, "commit_sha", None) if completion_report else current_sha,
         "worktree": str(target_worktree),
     }
-    if completion_report and completion_report.sync_result:
+    if completion_report and getattr(completion_report, "sync_result", None):
         success_payload["sync_action"] = completion_report.sync_result.action
     if attempts_log:
         success_payload["self_correction_log"] = attempts_log
@@ -1598,6 +1748,49 @@ def _describe_workspace(workspace: TicketWorkspace) -> str:
         return f"{workspace.path.name} ({workspace.branch}@{workspace.base_sha[:12]})"
     except Exception:  # noqa: BLE001
         return "worktree criada"
+
+
+def _release_external_project(
+    project: Any, ticket: UserTicket, report: Any, progress: ProgressPublisher, project_root: Path
+) -> Optional[str]:
+    """Run the project's configured post-merge deploy/smoke flow, if one is declared."""
+    if project.deploy is None or not getattr(report, "merge_sha", None):
+        return None
+    from core.line.stage_release import ReleaseStageHandler
+    from core.workflow.control_contracts import Claim, JobKey, StageContext
+    from datetime import datetime, timezone
+
+    release_project = project.model_copy(update={"path": str(project_root)})
+    handler = ReleaseStageHandler(release_project)
+    run_id = progress.run_id or f"run-ticket-{ticket.id}"
+    claim = Claim(
+        job_key=JobKey(run_id=run_id, ticket_id=ticket.id, plan_version="run-ticket", stage="release", iteration=0),
+        lease_id=f"run-ticket-{ticket.id}", owner="run_ticket", fencing_token=1,
+        expires_at=datetime.now(timezone.utc).isoformat(),
+    )
+    context = StageContext(
+        claim=claim, plan_ref=ticket.id, plan_digest=report.merge_sha, config_version="run-ticket",
+        environment_ref="production", identity="run_ticket", route_ref="run_ticket", memory_version="0",
+        input_refs=[report.pr_url or "", report.merge_sha],
+    )
+    result = handler.handle(context)
+    if result.outcome != "success":
+        return f"release do projeto {project.id} terminou em {result.outcome}: {result.cause_code or ''}"
+    return None
+
+
+def _smoke_external_project(project: Any) -> Optional[str]:
+    """Run registered HTTP smoke checks for a project without a deployment adapter."""
+    if project.deploy is not None or not project.smoke:
+        return None
+    from core.line.stage_release import _run_smoke_http
+
+    failures: list[str] = []
+    for check in project.smoke:
+        ok, detail = _run_smoke_http(check, retries=1, delay_s=0, sleep=lambda _seconds: None)
+        if not ok:
+            failures.append(detail)
+    return "\n".join(failures) if failures else None
 
 
 def main(argv: Optional[list[str]] = None) -> int:
@@ -1891,7 +2084,7 @@ def _run(argv: Optional[list[str]], box: list[ProgressPublisher], stack: context
         progress.phase("workspace", "failed", "checkout compartilhado sujo", cause="shared_checkout_dirty")
         print(f"[ERRO] {exc}", file=sys.stderr)
         return 3
-    except WorkspaceError as exc:
+    except (WorkspaceError, RuntimeError) as exc:
         progress.phase("workspace", "failed", str(exc), cause="workspace_error")
         print(f"[ERRO] Não foi possível criar a worktree do ticket {ticket.id}: {exc}", file=sys.stderr)
         return 1
@@ -1927,7 +2120,7 @@ def _run(argv: Optional[list[str]], box: list[ProgressPublisher], stack: context
 
     def _build_request(harness: str, model: Optional[str]) -> AgentRequest:
         from core.git.autonomy import GitAutonomyManager
-        git_mgr = GitAutonomyManager(PROJECT_ROOT)
+        git_mgr = GitAutonomyManager(workspace.main_root)
         existing_changes = [
             p for p in git_mgr.changed_paths(workspace.path) if p != LEDGER_RELATIVE
         ]
@@ -2097,7 +2290,7 @@ def _run(argv: Optional[list[str]], box: list[ProgressPublisher], stack: context
 
     from core.git.autonomy import GitAutonomyManager
 
-    git_mgr = GitAutonomyManager(PROJECT_ROOT)
+    git_mgr = GitAutonomyManager(workspace.main_root)
     implementation_paths = [
         path for path in git_mgr.changed_paths(workspace.path) if path != LEDGER_RELATIVE
     ]
