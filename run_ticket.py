@@ -620,12 +620,32 @@ def _run_focal_tests(cwd: Path, targets: list[str]) -> Optional[Any]:
     """
     if not targets:
         return None
+    if gate_ram.remote_worker_available():
+        logger.info(
+            "[FOCAL] pre-teste local pulado: worker remoto livre; validacao integral fica para o portao oficial"
+        )
+        return None
+
+    ram_wait = gate_ram.wait_for_gate_ram(announce=logger.info)
+    if not ram_wait.ok:
+        logger.warning(
+            "[FOCAL] pre-teste local pulado: RAM insuficiente apos %.0f s de espera "
+            "(%.1f GiB livres, %s workers possiveis); o portao oficial decidira se pode executar",
+            ram_wait.waited_s,
+            ram_wait.reading.available_gib,
+            ram_wait.reading.workers,
+        )
+        return None
+
     from core.harness.test_subagent import TestExecutionInstruction, TestSubagentEngine
 
     engine = TestSubagentEngine(project_root=cwd)
     extra_args = ["-n", "auto", "--dist", "worksteal", "-m", "not serial", *targets]
     instruction = TestExecutionInstruction(
-        target=None, extra_args=extra_args, timeout_seconds=int(_focal_test_timeout_s(len(targets))), worker_mode="local"
+        target=None,
+        extra_args=extra_args,
+        timeout_seconds=int(_focal_test_timeout_s(len(targets))),
+        worker_mode="local",
     )
     try:
         return engine.execute_local(instruction)

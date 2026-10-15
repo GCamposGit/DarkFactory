@@ -11,6 +11,7 @@ failure reinvokes the agent in the same worktree with the distilled failure, up 
 
 from __future__ import annotations
 
+import logging
 import subprocess
 from pathlib import Path
 from unittest.mock import patch
@@ -471,13 +472,55 @@ def test_run_focal_tests_passes_the_scaled_timeout_to_the_engine(tmp_path: Path)
         captured_instructions.append(instruction)
         return None
 
-    with patch.object(TestSubagentEngine, "execute_local", new=fake_execute_local):
+    ready = run_ticket.gate_ram.RamWaitResult(
+        True, run_ticket.gate_ram.RamReading(available_gib=8.0, workers=2), waited_s=0.0
+    )
+    with patch.object(run_ticket.gate_ram, "remote_worker_available", return_value=False), \
+         patch.object(run_ticket.gate_ram, "wait_for_gate_ram", return_value=ready) as wait_for_ram, \
+         patch.object(TestSubagentEngine, "execute_local", new=fake_execute_local):
         run_ticket._run_focal_tests(tmp_path, targets)
 
+    wait_for_ram.assert_called_once()
     assert len(captured_instructions) == 1
     expected = run_ticket._focal_test_timeout_s(len(targets))
     assert captured_instructions[0].timeout_seconds == int(expected)
+    assert captured_instructions[0].worker_mode == "local"
     assert expected > run_ticket.FOCAL_TEST_TIMEOUT_S, "the test setup should exercise actual scaling"
+
+
+def test_run_focal_tests_skips_local_pretest_when_remote_worker_is_free(tmp_path: Path, caplog) -> None:
+    """USR-265: leave candidate validation to the official remote gate when a worker is free."""
+    from core.harness.test_subagent import TestSubagentEngine
+
+    caplog.set_level(logging.INFO, logger="darkfac.run_ticket")
+    with patch.object(run_ticket.gate_ram, "remote_worker_available", return_value=True), \
+         patch.object(run_ticket.gate_ram, "wait_for_gate_ram") as wait_for_ram, \
+         patch.object(TestSubagentEngine, "execute_local") as execute_local:
+        report = run_ticket._run_focal_tests(tmp_path, ["tests/test_git_autonomy_ci_gate.py"])
+
+    assert report is None
+    wait_for_ram.assert_not_called()
+    execute_local.assert_not_called()
+    assert "worker remoto livre" in caplog.text
+    assert "validacao integral fica para o portao oficial" in caplog.text
+
+
+def test_run_focal_tests_skips_local_pretest_when_ram_wait_expires(tmp_path: Path, caplog) -> None:
+    """USR-265: do not start a heavy focal suite after the USR-262 RAM wait fails."""
+    from core.harness.test_subagent import TestSubagentEngine
+
+    insufficient = run_ticket.gate_ram.RamWaitResult(
+        False, run_ticket.gate_ram.RamReading(available_gib=1.0, workers=0), waited_s=120.0
+    )
+    with patch.object(run_ticket.gate_ram, "remote_worker_available", return_value=False), \
+         patch.object(run_ticket.gate_ram, "wait_for_gate_ram", return_value=insufficient) as wait_for_ram, \
+         patch.object(TestSubagentEngine, "execute_local") as execute_local:
+        report = run_ticket._run_focal_tests(tmp_path, ["tests/test_git_autonomy_ci_gate.py"])
+
+    assert report is None
+    wait_for_ram.assert_called_once()
+    execute_local.assert_not_called()
+    assert "RAM insuficiente" in caplog.text
 
 
 def test_focal_test_fix_on_second_pass_reaches_merge_without_resume_delivery(tmp_path: Path, capsys) -> None:
