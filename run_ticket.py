@@ -49,7 +49,7 @@ from core.line.agent_cli import (
     supports,
 )
 from core.line import gate_ram
-from core.line.diagnostics import redacted_head
+from core.line.diagnostics import failed_test_ids, redacted_head
 from core.line.local_progress import ENV_RUN_ID, ENV_WARNED, ProgressPublisher, open_progress
 from core.line.operating_harness import detect_operating_harness
 from core.line.routing import (
@@ -822,6 +822,13 @@ def _report_delivery_child_failure(
         if completion_info.get("exit_code") is not None:
             parts.append(f"codigo de saida do filho: {completion_info['exit_code']}")
         print("[ERRO NA ENTREGA] " + "; ".join(parts), file=out)
+        failed_tests = completion_info.get("failed_tests")
+        if isinstance(failed_tests, list) and failed_tests:
+            print("Testes reprovados: " + ", ".join(str(test_id) for test_id in failed_tests), file=out)
+        gate_log_tail = completion_info.get("gate_log_tail")
+        if isinstance(gate_log_tail, str) and gate_log_tail:
+            print("Cauda do log do portao:", file=out)
+            print(gate_log_tail, file=out)
         log = completion_info.get("self_correction_log") or completion_info.get("attempts_log")
         if log and isinstance(log, list):
             try:
@@ -893,6 +900,8 @@ def _run_gate_with_self_correction(
     last_output = ""
     last_cause = "gate_failed"
     last_exit_code = 1
+    failed_tests: list[str] = []
+    gate_log_tail = ""
 
     for attempt in range(GATE_FIX_ATTEMPTS + 1):
         if _cancelled():
@@ -1011,6 +1020,10 @@ def _run_gate_with_self_correction(
 
         last_output = f"{gate_res.stdout}\n{gate_res.stderr}"
         last_exit_code = gate_res.returncode
+        # Keep the latest official gate diagnostics in the final payload, including when the
+        # in-place fixer makes no changes or exits with an infrastructure error.
+        failed_tests = failed_test_ids(last_output)
+        gate_log_tail = _tail_lines(last_output, count=40)
         if not as_json:
             print(f"[ERRO NO PORTÃO OFICIAL]:\n{gate_res.stdout}\n{gate_res.stderr}", file=sys.stderr)
 
@@ -1100,6 +1113,8 @@ def _run_gate_with_self_correction(
         "worktree": str(target_worktree),
         "resume_command": resume_cmd,
         "self_correction_log": attempts_log,
+        "failed_tests": failed_tests,
+        "gate_log_tail": gate_log_tail,
     }
     if as_json and not return_result:
         print(json.dumps(gate_payload, indent=2, ensure_ascii=False))

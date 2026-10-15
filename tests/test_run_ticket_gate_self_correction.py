@@ -678,6 +678,68 @@ def test_fix_agent_that_changes_nothing_stops_with_fix_agent_no_changes(tmp_path
     assert result["self_correction_log"][0]["changed"] is False
 
 
+def test_failed_gate_test_ids_reach_delivery_child_console_report(tmp_path: Path, capsys) -> None:
+    repo = _repo_on_ticket_branch(tmp_path)
+    gate_output = "\n".join([
+        "=========================== short test summary info ===========================",
+        "FAILED tests/test_alpha.py::test_first - AssertionError",
+        "FAILED tests/test_beta.py::test_second - RuntimeError",
+        "========================= 2 failed in 0.1s ==========================",
+    ])
+
+    def fake_run_bounded(argv, **kwargs):
+        return BoundedProcessResult(stdout=gate_output, stderr="", returncode=1, duration_s=0.1)
+
+    def fake_fix(cwd, fixed_ticket, stage_label, feedback):
+        return AgentResult(ok=True, text="nada a fazer", harness="claude", duration_s=0.1)
+
+    with patch("run_ticket.PROJECT_ROOT", repo), \
+         patch("run_ticket._run_bounded", new=fake_run_bounded), \
+         patch("run_ticket._invoke_fix_agent", new=fake_fix):
+        result = run_ticket.resume_delivery("USR-249", worktree_path=repo, skip_validation=False, return_result=True)
+
+    run_ticket._report_delivery_child_failure(
+        BoundedProcessResult(returncode=1), result, True, "USR-249", repo
+    )
+    console = capsys.readouterr().err
+    assert result["failed_tests"] == [
+        "tests/test_alpha.py::test_first", "tests/test_beta.py::test_second",
+    ]
+    assert "Testes reprovados: tests/test_alpha.py::test_first, tests/test_beta.py::test_second" in console
+    assert "Cauda do log do portao:" in console
+    assert "2 failed in 0.1s" in console
+
+
+def test_failed_gate_without_pytest_failure_lines_shows_redacted_log_tail(tmp_path: Path, capsys) -> None:
+    repo = _repo_on_ticket_branch(tmp_path)
+    secret = "sk-abcdefghijklmnopqrs"
+    gate_output = (
+        "runner infrastructure failed\n[HARNESS_FAIL] worker unavailable\n"
+        f"OPENAI_API_KEY={secret}"
+    )
+
+    def fake_run_bounded(argv, **kwargs):
+        return BoundedProcessResult(stdout=gate_output, stderr="", returncode=1, duration_s=0.1)
+
+    def fake_fix(cwd, fixed_ticket, stage_label, feedback):
+        return AgentResult(ok=True, text="nada a fazer", harness="claude", duration_s=0.1)
+
+    with patch("run_ticket.PROJECT_ROOT", repo), \
+         patch("run_ticket._run_bounded", new=fake_run_bounded), \
+         patch("run_ticket._invoke_fix_agent", new=fake_fix):
+        result = run_ticket.resume_delivery("USR-249", worktree_path=repo, skip_validation=False, return_result=True)
+
+    run_ticket._report_delivery_child_failure(
+        BoundedProcessResult(returncode=1), result, True, "USR-249", repo
+    )
+    console = capsys.readouterr().err
+    assert result["failed_tests"] == []
+    assert "Cauda do log do portao:" in console
+    assert "runner infrastructure failed\n[HARNESS_FAIL] worker unavailable" in console
+    assert secret not in result["gate_log_tail"]
+    assert result["gate_log_tail"].endswith("[REDACTED]")
+
+
 def test_gate_reporting_dirty_worktree_stops_without_reinvoking_the_agent(tmp_path: Path) -> None:
     repo = _repo_on_ticket_branch(tmp_path)
     fix_calls: list[str] = []
