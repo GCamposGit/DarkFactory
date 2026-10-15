@@ -191,7 +191,9 @@ def test_client_deadline_still_wins_over_a_slow_worker(monkeypatch: pytest.Monke
 @pytest.mark.parametrize("raw", ["", "abc", "-3", "0", "nan", "inf", " "])
 def test_invalid_health_timeout_env_falls_back_to_default(monkeypatch: pytest.MonkeyPatch, raw: str) -> None:
     monkeypatch.setenv("DARKFAC_WORKER_HEALTH_TIMEOUT_SEC", raw)
-    assert remote_dispatch.health_probe_timeout_sec() == remote_dispatch.HEALTH_PROBE_TIMEOUT_SEC == 2.0
+    assert remote_dispatch.health_probe_timeout_sec() == remote_dispatch.HEALTH_PROBE_TIMEOUT_SEC
+    # 2.0 s was the original default; 10.0 s (grokbox via DERP relay) is the proposed one: both must stay sane.
+    assert 2.0 <= remote_dispatch.HEALTH_PROBE_TIMEOUT_SEC <= 10.0
 
 
 def test_health_timeout_env_is_honoured_by_probe_health(monkeypatch: pytest.MonkeyPatch) -> None:

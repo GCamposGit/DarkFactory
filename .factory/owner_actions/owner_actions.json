@@ -795,6 +795,26 @@
       "created_at": "2026-10-14T19:19:07Z",
       "created_by": "claude-code",
       "resolved_at": null
+    },
+    {
+      "id": "OA-022",
+      "kind": "action",
+      "title": "Commit humano: grokbox como worker padrao e sonda /health de 10 s (core/harness/remote_dispatch.py)",
+      "priority": "high",
+      "status": "open",
+      "why": "core/harness/* e protegido pelo guard; so o owner commita. O grokbox (100.77.130.5) fecha o portao em ~143 s contra 23-30 min no Notebook, mas o padrao do codigo so conhece o Desktop e a sonda /health de 2 s estoura na rota DERP (10 s funciona).",
+      "blocks": [],
+      "depends_on": [],
+      "steps": [
+        {
+          "text": "Aplicar o patch e commitar SOMENTE core/harness/remote_dispatch.py e core/harness/test_subagent.py (proposta em docs/proposals/GROKBOX-default-workers.md)",
+          "command": "git -C C:\\dev\\DarkFac pull --ff-only origin main\ngit -C C:\\dev\\DarkFac apply C:\\dev\\DarkFac\\docs\\proposals\\GROKBOX-default-workers.patch\ngit -C C:\\dev\\DarkFac add core/harness/remote_dispatch.py core/harness/test_subagent.py\ngit -C C:\\dev\\DarkFac commit -m \"feat(harness): grokbox como worker padrao e sonda /health de 10 s [GROKBOX]\"\ngit -C C:\\dev\\DarkFac push origin HEAD:main"
+        }
+      ],
+      "verify": "python -c \"from core.harness import remote_dispatch as r; print(r.DEFAULT_WORKERS, r.HEALTH_PROBE_TIMEOUT_SEC)\" mostra grokbox primeiro e 10.0; core/orchestrator/guard.py origin/main volta a [GUARD PASS].",
+      "created_at": "2026-10-15T01:28:15Z",
+      "created_by": "claude-subagent",
+      "resolved_at": null
     }
   ]
 }

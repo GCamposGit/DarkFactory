@@ -126,8 +126,10 @@ services:
       - REMOTE_HARNESS_URL=${REMOTE_HARNESS_URL:-http://100.78.181.90:8080}
       # Test offload for the official gate (`runner.py --quick`, used by the line's
       # clean-tree validation of the darkfac project via scripts/line_validate.py):
-      # dispatched to the Desktop test worker over the tailnet, local fallback.
-      - DARKFAC_TEST_WORKERS=${DARKFAC_TEST_WORKERS:-http://100.78.181.90:8080}
+      # dispatched over the tailnet to the grokbox (Linux, fast) first, then the Desktop; local fallback.
+      - DARKFAC_TEST_WORKERS=${DARKFAC_TEST_WORKERS:-http://100.77.130.5:8080,http://100.78.181.90:8080}
+      # grokbox is reached through a DERP relay: the 2 s /health probe is too tight, 10 s works.
+      - DARKFAC_WORKER_HEALTH_TIMEOUT_SEC=${DARKFAC_WORKER_HEALTH_TIMEOUT_SEC:-10}
       - DARKFAC_WORKER_TOKEN=${DARKFAC_WORKER_TOKEN:-}
       - DARKFAC_REMOTE_BUSY_WAIT_SEC=${DARKFAC_REMOTE_BUSY_WAIT_SEC:-900}
       # HF-27-10 PR #37 review item 4: core.line.human's owner notifications

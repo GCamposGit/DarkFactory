@@ -84,7 +84,8 @@ def test_canary_polls_every_fifteen_minutes_with_retry_and_dogfood_env(compose: 
 
 def test_worker_offloads_the_official_gate_to_the_desktop_test_worker(compose: dict) -> None:
     env = "\n".join(compose["services"]["darkfac-worker"]["environment"])
-    assert "DARKFAC_TEST_WORKERS=${DARKFAC_TEST_WORKERS:-http://100.78.181.90:8080}" in env
+    assert "DARKFAC_TEST_WORKERS=${DARKFAC_TEST_WORKERS:-http://100.77.130.5:8080,http://100.78.181.90:8080}" in env
+    assert "DARKFAC_WORKER_HEALTH_TIMEOUT_SEC=${DARKFAC_WORKER_HEALTH_TIMEOUT_SEC:-10}" in env
     assert "DARKFAC_WORKER_TOKEN=${DARKFAC_WORKER_TOKEN:-}" in env
 
 

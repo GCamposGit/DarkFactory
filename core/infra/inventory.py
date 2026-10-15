@@ -145,6 +145,35 @@ def build_default_inventory() -> InfraInventory:
         updated_at=now,
     )
 
+    # 2b. grokbox: Linux VM, official remote test worker (first in DARKFAC_TEST_WORKERS)
+    grokbox_node = InfraNode(
+        id="grokbox-test-worker",
+        name="grokbox (Linux test worker, grok-bot-vm-418374532)",
+        role=NodeRole.ON_PREM_SERVER,
+        status=NodeStatus.ACTIVE,
+        provider="Remote Linux VM (Tailscale node grokbox)",
+        network=NetworkSpec(
+            tailscale_ip="100.77.130.5",
+            notes=(
+                "Tailscale node grokbox, reached through a DERP relay (no direct UDP): the /health probe needs "
+                "DARKFAC_WORKER_HEALTH_TIMEOUT_SEC=10. Linux, Python 3.13, project_root /workspace/darkfac/DarkFactory; "
+                "official gate in ~143 s (4157 passed on 14/10/2026) versus 23-30 min on the Notebook."
+            ),
+        ),
+        services=[
+            ServiceItem(
+                name="darkfac-test-worker",
+                description="Remote test worker (FastAPI, port 8080): first in DARKFAC_TEST_WORKERS, ahead of the Desktop",
+                status=NodeStatus.ACTIVE,
+                port=8080,
+                container_engine=None,
+            ),
+        ],
+        cost_monthly_usd=0.0,
+        tags=["remote-test-worker", "linux", "tailscale-active", "active", "project:darkfac"],
+        updated_at=now,
+    )
+
     # 3. Cloud VPS: Hetzner Cloud Production Hub (darkfac-vps-primary)
     cloud_vps_node = InfraNode(
         id="darkfac-vps-primary",
@@ -423,7 +452,7 @@ def build_default_inventory() -> InfraInventory:
         ),
     ]
 
-    nodes = [predator_node, onprem_node, cloud_vps_node, cloudflare_node, hostinger_node, n8n_node, google_node]
+    nodes = [predator_node, onprem_node, grokbox_node, cloud_vps_node, cloudflare_node, hostinger_node, n8n_node, google_node]
     total_cost = sum(n.cost_monthly_usd for n in nodes)
 
     return InfraInventory(
