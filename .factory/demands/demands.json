@@ -6816,10 +6816,10 @@
     "delivery_evidence": null,
     "item_type": "feature",
     "lifecycle_stage": "execution",
-    "horizon": "later",
+    "horizon": "now",
     "tags": [
       "user-demand",
-      "congelado-v0"
+      "v0-critico"
     ],
     "problem_statement": "Subagente do USR-164 (08/10/2026): execucoes de pytest com 100 ou mais itens esperam o SUITE_LOCK (core/harness/suite_lock.py) enquanto outro agente roda o harness; um pytest focal ficou mais de 15 min preso. O lock e intencional para a suite completa, mas atrasa sessoes paralelas que so querem validar poucos testes.\n\nCONGELADO em 11/10/2026 (plano V0, docs/plans/V0_OPERACIONAL_2026-10-11.md): fora do caminho critico da linha.",
     "core_journey": [
@@ -6836,7 +6836,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-08T22:35:17.003386Z",
-    "updated_at": "2026-10-11T17:49:17.206876Z"
+    "updated_at": "2026-10-15T07:57:46.949264Z"
   },
   {
     "id": "USR-192",
@@ -6847,10 +6847,10 @@
     "delivery_evidence": null,
     "item_type": "feature",
     "lifecycle_stage": "execution",
-    "horizon": "later",
+    "horizon": "now",
     "tags": [
       "user-demand",
-      "congelado-v0"
+      "v0-critico"
     ],
     "problem_statement": "Ao enviar /demand no canal DarkFac Orchestrator do Telegram, a resposta é '❌ Failed to register demand: [Errno 2] No such file or directory: git'. Causa: core/demands/id_allocator.py (_git) executa subprocess.run(['git', ...]) sem caminho absoluto; o processo do orquestrador roda sem git no PATH (git existe em C:\\Program Files\\Git\\cmd\\git.exe no shell do usuário). Erro emitido em core/integrations/telegram.py:748 e :781. Fix esperado: resolver git por shutil.which com fallback para caminhos padrão do Windows, e falhar com mensagem clara em português quando ausente, sem traceback cru ao usuário.\n\nCONGELADO em 11/10/2026 (plano V0, docs/plans/V0_OPERACIONAL_2026-10-11.md): fora do caminho critico da linha.",
     "core_journey": [
@@ -6867,7 +6867,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-09T20:05:27.909170Z",
-    "updated_at": "2026-10-11T17:49:17.206876Z"
+    "updated_at": "2026-10-15T07:57:46.949264Z"
   },
   {
     "id": "USR-222",
@@ -7669,12 +7669,12 @@
     "delivery_evidence": null,
     "item_type": "feature",
     "lifecycle_stage": "execution",
-    "horizon": "next",
+    "horizon": "now",
     "tags": [
       "user-demand",
-      "congelado-v0",
       "pos-v0-prioridade-absoluta",
-      "cliente-e2e"
+      "cliente-e2e",
+      "v0-critico"
     ],
     "problem_statement": "Decisao do owner em 14/10/2026: prioridade absoluta depois do V0 -- a fabrica e inutil se nao entrega demanda de desenvolvimento de cliente de ponta a ponta, de qualquer tipo (nao so site). Hoje run_ticket.py esta preso ao checkout da DarkFac (PROJECT_ROOT): cria a worktree a partir de C:\\dev\\DarkFac, o agente trabalha la e o portao e sempre core/harness/runner.py --quick (~4089 testes da propria fabrica). .factory/projects.json ja descreve cada projeto (path, repo_url, default_branch, commands.setup/validate, deploy, smoke), mas so a linha V1 (core/line/stage_build.py, nunca provada de ponta a ponta) usa isso, e varios projetos estao com commands: null. A suite da fabrica so deve rodar quando o codigo da fabrica muda.",
     "core_journey": [
@@ -7698,7 +7698,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-14T17:38:12.364718Z",
-    "updated_at": "2026-10-14T17:38:12.364718Z"
+    "updated_at": "2026-10-15T07:57:46.949264Z"
   },
   {
     "id": "USR-262",
@@ -7809,11 +7809,11 @@
     "delivery_evidence": null,
     "item_type": "feature",
     "lifecycle_stage": "execution",
-    "horizon": "later",
+    "horizon": "now",
     "tags": [
       "user-demand",
-      "congelado-v0",
-      "bug"
+      "bug",
+      "v0-critico"
     ],
     "problem_statement": "Em 14/10/2026 a retomada do USR-263 com DARKFAC_TEST_WORKERS (grokbox primeiro) nunca chegou a despachar: o pre-teste focal (USR-245, _run_focal_tests, worker_mode='local') rodou no Notebook com pouca RAM e estourou 600 s. Com worker remoto disponivel, o focal deveria ir para ele ou ficar enxuto; hoje um focal grande (ex.: tests/test_git_autonomy_ci_gate.py, 62 testes de git) custa ~10 min locais e bloqueia o uso do worker.",
     "core_journey": [],
@@ -7832,6 +7832,39 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-15T01:53:56.344293Z",
-    "updated_at": "2026-10-15T01:53:56.344293Z"
+    "updated_at": "2026-10-15T07:57:46.949264Z"
+  },
+  {
+    "id": "USR-266",
+    "project_id": "darkfac",
+    "title": "Portao reprovado dentro da entrega nao mostra no console quais testes falharam (erro: sem detalhe)",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand",
+      "v0-critico",
+      "bug"
+    ],
+    "problem_statement": "Em 14/10/2026 o run_ticket USR-264 terminou com '[ERRO NA ENTREGA] causa: fix_agent_no_changes; erro: (sem detalhe)'. A fase de entrega roda em processo filho com --json (USR-257 passou a imprimir causa e tentativas), mas o JSON do filho nao traz os testes que falharam nem a cauda do log do portao. Foi preciso rodar o portao de novo num worker remoto (~40 min no Desktop) so para descobrir que a falha era tests/test_clock_bomb_guard.py (orcamento de tempo instavel).",
+    "core_journey": [],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Quando o portao reprova dentro do resume_delivery, o JSON do filho inclui failed_tests (ids pytest FAILED/ERROR) e gate_log_tail (ultimas ~40 linhas, com segredos redigidos)",
+      "O run_ticket em modo humano imprime esses testes e a cauda no bloco [ERRO NA ENTREGA]",
+      "Teste com portao falso cobre: falha com 2 testes FAILED aparece no console; falha sem linhas FAILED mostra a cauda"
+    ],
+    "suggested_files": [
+      "run_ticket.py",
+      "tests/"
+    ],
+    "estimated_complexity": "low",
+    "dependencies": [],
+    "created_at": "2026-10-15T07:58:00.991659Z",
+    "updated_at": "2026-10-15T07:58:00.991659Z"
   }
 ]

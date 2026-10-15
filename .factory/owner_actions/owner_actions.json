@@ -707,7 +707,7 @@
       "kind": "decision",
       "title": "V0: escolher como dar capacidade ao portao (suite de ~4000 testes estoura 3000 s com 1 worker no Notebook)",
       "priority": "high",
-      "status": "open",
+      "status": "done",
       "why": "Em 14/10 o portao local passou em ~21 min com 2-3 workers, mas quando a RAM livre do Notebook cai (<6 GiB com Chrome/ChatGPT abertos e o agente headless) o harness libera 1 worker e a suite estoura o limite de 3000 s do passo paralelo. O Desktop esta reservado para a indexacao do Segundo Cerebro. Sem capacidade estavel, nenhuma sequencia de 5 entregas sem resgate fecha. Atualizacao 14/10 22h: com 2+ workers a suite passa em ~23-30 min; o passo serial estourava 300 s (corrigido no codigo pelo USR-263). O USR-262 faz o run_ticket esperar RAM antes do portao local.",
       "blocks": [
         "USR-255"
@@ -739,14 +739,20 @@
       "verify": "Proximas 3 entregas com portao abaixo do limite (STEP_TIME unit_and_integration_tests_parallel < limite)",
       "created_at": "2026-10-14T16:18:57Z",
       "created_by": "claude-code",
-      "resolved_at": null
+      "resolved_at": "2026-10-15T07:58:02Z",
+      "answer": {
+        "option_id": "B",
+        "note": "Owner (15/10): encerrar. grokbox (~2,5 min por portao) + Desktop como segundo worker; USR-262 espera RAM no Notebook e USR-263 derrubou o passo serial.",
+        "answered_at": "2026-10-15T07:58:02Z",
+        "answered_by": "owner"
+      }
     },
     {
       "id": "OA-020",
       "kind": "decision",
       "title": "V0: quais tickets congelados entram na sequencia de 5 entregas sem resgate",
       "priority": "high",
-      "status": "open",
+      "status": "done",
       "why": "Depois de USR-255 e USR-257 a fila v0-critico fica vazia, mas o criterio do V0 exige 5 tickets v0-critico seguidos lancados uma vez com run_ticket <ID> ate o merge sem resgate. Hoje a sequencia esta em 0 (USR-247 entregou sozinho; USR-246 e USR-255 precisaram de resgate e viraram USR-256/257).",
       "blocks": [],
       "depends_on": [],
@@ -771,7 +777,13 @@
       "verify": "Os tickets escolhidos com tag v0-critico e horizon now em .factory/demands/demands.json",
       "created_at": "2026-10-14T16:18:57Z",
       "created_by": "claude-code",
-      "resolved_at": null
+      "resolved_at": "2026-10-15T07:58:18Z",
+      "answer": {
+        "option_id": "C",
+        "note": "Owner (15/10): lista do Claude -- USR-266, USR-265, USR-179, USR-192, USR-259 promovidos a v0-critico.",
+        "answered_at": "2026-10-15T07:58:18Z",
+        "answered_by": "owner"
+      }
     },
     {
       "id": "OA-021",
@@ -806,7 +818,7 @@
       "kind": "action",
       "title": "Commit humano: grokbox como worker padrao e sonda /health de 10 s (core/harness/remote_dispatch.py)",
       "priority": "high",
-      "status": "open",
+      "status": "done",
       "why": "core/harness/* e protegido pelo guard; so o owner commita. O grokbox (100.77.130.5) fecha o portao em ~143 s contra 23-30 min no Notebook, mas o padrao do codigo so conhece o Desktop e a sonda /health de 2 s estoura na rota DERP (10 s funciona).",
       "blocks": [],
       "depends_on": [],
@@ -819,7 +831,7 @@
       "verify": "python -c \"from core.harness import remote_dispatch as r; print(r.DEFAULT_WORKERS, r.HEALTH_PROBE_TIMEOUT_SEC)\" mostra grokbox primeiro e 10.0; core/orchestrator/guard.py origin/main volta a [GUARD PASS].",
       "created_at": "2026-10-15T01:28:15Z",
       "created_by": "claude-subagent",
-      "resolved_at": null
+      "resolved_at": "2026-10-15T07:58:01Z"
     }
   ]
 }
