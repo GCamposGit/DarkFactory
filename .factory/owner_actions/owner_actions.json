@@ -708,7 +708,7 @@
       "title": "V0: escolher como dar capacidade ao portao (suite de ~4000 testes estoura 3000 s com 1 worker no Notebook)",
       "priority": "high",
       "status": "open",
-      "why": "Em 14/10 o portao local passou em ~21 min com 2-3 workers, mas quando a RAM livre do Notebook cai (<6 GiB com Chrome/ChatGPT abertos e o agente headless) o harness libera 1 worker e a suite estoura o limite de 3000 s do passo paralelo. O Desktop esta reservado para a indexacao do Segundo Cerebro. Sem capacidade estavel, nenhuma sequencia de 5 entregas sem resgate fecha.",
+      "why": "Em 14/10 o portao local passou em ~21 min com 2-3 workers, mas quando a RAM livre do Notebook cai (<6 GiB com Chrome/ChatGPT abertos e o agente headless) o harness libera 1 worker e a suite estoura o limite de 3000 s do passo paralelo. O Desktop esta reservado para a indexacao do Segundo Cerebro. Sem capacidade estavel, nenhuma sequencia de 5 entregas sem resgate fecha. Atualizacao 14/10 22h: com 2+ workers a suite passa em ~23-30 min; o passo serial estourava 300 s (corrigido no codigo pelo USR-263). O USR-262 faz o run_ticket esperar RAM antes do portao local.",
       "blocks": [
         "USR-255"
       ],
@@ -729,6 +729,11 @@
           "id": "C",
           "label": "Subir o limite do passo para 3600 s",
           "detail": "Commit humano em harness.config.json (protegido): unit_and_integration_tests_parallel timeout 3000 -> 3600"
+        },
+        {
+          "id": "D",
+          "label": "Subir o limite do passo serial para 600 s",
+          "detail": "Commit humano em harness.config.json: unit_and_integration_tests_serial timeout 300 -> 600. O USR-263 ja derrubou o passo serial de ~280 s para ~50 s; isto e so folga extra."
         }
       ],
       "verify": "Proximas 3 entregas com portao abaixo do limite (STEP_TIME unit_and_integration_tests_parallel < limite)",
@@ -773,7 +778,7 @@
       "kind": "action",
       "title": "Fila parada: Desktop offline e Notebook sem RAM para o portao (precisa de 6 GiB livres, ha 5,4)",
       "priority": "critical",
-      "status": "open",
+      "status": "done",
       "why": "Em 14/10 ~16h o Desktop (darkfac-desktop, 100.78.181.90) ficou offline no Tailscale e o Notebook so tem 5,4 GiB livres (Chrome 6,0 GiB, ChatGPT 1,75 GiB). O portao local libera 1 worker abaixo de 6 GiB e com 1 worker a suite (~4089 testes) passa do limite de 3000 s. USR-257, USR-255 e USR-262 estao prontos e esperando portao.",
       "blocks": [
         "USR-257",
@@ -794,7 +799,7 @@
       "verify": "O comando de RAM mostra 6 ou mais (GiB) OU o health do Desktop responde com busy=false; a fabrica retoma sozinha as entregas USR-257, USR-255 e USR-262.",
       "created_at": "2026-10-14T19:19:07Z",
       "created_by": "claude-code",
-      "resolved_at": null
+      "resolved_at": "2026-10-15T01:53:56Z"
     },
     {
       "id": "OA-022",

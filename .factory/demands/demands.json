@@ -7563,8 +7563,8 @@
     "project_id": "darkfac",
     "title": "IDs sequenciais de OA colidem entre branches: duas branches criam o mesmo OA-NNN e o portao reprova com 'item OA-NNN duplicado ignorado'",
     "origin": "user",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "da10562",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -7591,7 +7591,7 @@
     "estimated_complexity": "low",
     "dependencies": [],
     "created_at": "2026-10-14T06:35:19.129693Z",
-    "updated_at": "2026-10-14T06:35:19.131292Z"
+    "updated_at": "2026-10-15T01:53:45.402589Z"
   },
   {
     "id": "USR-256",
@@ -7632,8 +7632,8 @@
     "project_id": "darkfac",
     "title": "Falha da entrega em processo filho fica silenciosa no console: run_ticket so mostra 'Worktree preservada' sem a causa",
     "origin": "user",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "da10562",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -7658,7 +7658,7 @@
     "estimated_complexity": "low",
     "dependencies": [],
     "created_at": "2026-10-14T14:34:44.509055Z",
-    "updated_at": "2026-10-14T14:34:44.509055Z"
+    "updated_at": "2026-10-15T01:53:45.415593Z"
   },
   {
     "id": "USR-259",
@@ -7705,8 +7705,8 @@
     "project_id": "darkfac",
     "title": "Portao local inicia com 1 worker quando a RAM livre do Notebook cai e estoura 3000 s: run_ticket deve esperar RAM para 2+ workers ou despachar ao Desktop",
     "origin": "user",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "da10562",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -7732,7 +7732,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-14T18:17:48.400065Z",
-    "updated_at": "2026-10-14T18:17:48.400065Z"
+    "updated_at": "2026-10-15T01:53:45.428104Z"
   },
   {
     "id": "USR-263",
@@ -7766,5 +7766,72 @@
     "dependencies": [],
     "created_at": "2026-10-14T19:55:44.648189Z",
     "updated_at": "2026-10-14T21:43:07.757205Z"
+  },
+  {
+    "id": "USR-264",
+    "project_id": "darkfac",
+    "title": "Falha transitoria de git show no indice derruba a entrega com traceback depois do portao aprovado",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand",
+      "v0-critico",
+      "bug"
+    ],
+    "problem_statement": "Em 14/10/2026, ~18:40, a entrega do USR-263 passou no portao oficial e quebrou em complete_ticket -> commit_ticket -> _check_staged_secrets com 'RuntimeError: Cannot inspect staged content: .factory/demands/demands.json' (core/git/autonomy.py). O mesmo git show :path funcionou logo depois (transitorio, provavel contencao de git sob carga). Saiu como traceback, sem causa explicita, e custou um portao inteiro.",
+    "core_journey": [],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "_check_staged_secrets tenta de novo (ate 3 vezes, com pausa curta) quando git show do indice falha, registrando stderr e codigo de saida",
+      "Se continuar falhando, a entrega termina com causa explicita (staged_inspect_failed, caminho, stderr) e comando de retomada, sem traceback",
+      "Teste com runner de git falso cobre: falha transitoria seguida de sucesso commita; falha persistente termina com a causa explicita"
+    ],
+    "suggested_files": [
+      "core/git/autonomy.py",
+      "tests/"
+    ],
+    "estimated_complexity": "low",
+    "dependencies": [],
+    "created_at": "2026-10-15T01:53:51.147904Z",
+    "updated_at": "2026-10-15T01:53:51.147904Z"
+  },
+  {
+    "id": "USR-265",
+    "project_id": "darkfac",
+    "title": "Pre-teste focal do run_ticket roda sempre local: com worker remoto ele estoura 600 s no Notebook antes de o portao despachar",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "later",
+    "tags": [
+      "user-demand",
+      "congelado-v0",
+      "bug"
+    ],
+    "problem_statement": "Em 14/10/2026 a retomada do USR-263 com DARKFAC_TEST_WORKERS (grokbox primeiro) nunca chegou a despachar: o pre-teste focal (USR-245, _run_focal_tests, worker_mode='local') rodou no Notebook com pouca RAM e estourou 600 s. Com worker remoto disponivel, o focal deveria ir para ele ou ficar enxuto; hoje um focal grande (ex.: tests/test_git_autonomy_ci_gate.py, 62 testes de git) custa ~10 min locais e bloqueia o uso do worker.",
+    "core_journey": [],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Com um worker remoto configurado e livre, o pre-teste focal e despachado a ele (mesmo protocolo do portao) ou e pulado em favor do portao remoto, com log da decisao",
+      "Sem worker remoto, o focal local respeita a espera de RAM do USR-262 e o limite de 600 s continua valendo",
+      "Teste com worker falso cobre: focal remoto quando ha worker livre; focal local quando nao ha"
+    ],
+    "suggested_files": [
+      "run_ticket.py",
+      "core/line/gate_ram.py",
+      "tests/"
+    ],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-15T01:53:56.344293Z",
+    "updated_at": "2026-10-15T01:53:56.344293Z"
   }
 ]
