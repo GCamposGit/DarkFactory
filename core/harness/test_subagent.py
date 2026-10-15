@@ -159,7 +159,7 @@ class TestExecutionInstruction(BaseModel):
     # wrong code. Full-suite offload goes through core/harness/runner.py, which
     # ships the candidate commit as a git bundle.
     worker_mode: str = Field(default="local", description="Worker execution mode: 'local', 'auto', or 'remote' (remote runs the worker's own checkout)")
-    remote_worker_url: Optional[str] = Field(default="http://100.78.181.90:8080", description="URL of the on-premise dedicated test worker")
+    remote_worker_url: Optional[str] = Field(default="http://100.77.130.5:8080", description="URL of the dedicated test worker (grokbox; Desktop is the second one)")
     allow_fallback: bool = Field(default=True, description="Fallback to local execution if remote worker is unreachable or errors")
     worker_probe_timeout: float = Field(default=1.0, description="Healthcheck probe timeout in seconds")
 
@@ -576,7 +576,7 @@ def main() -> None:
     parser.add_argument("--timeout", type=int, default=60, help="Timeout in seconds")
     parser.add_argument("-x", "--fail-fast", action="store_true", help="Fail fast on first error")
     parser.add_argument("--worker-mode", type=str, default="local", choices=["auto", "remote", "local"], help="Worker execution mode (remote runs the worker's own checkout, not local edits)")
-    parser.add_argument("--worker-url", type=str, default="http://100.78.181.90:8080", help="Remote worker daemon URL")
+    parser.add_argument("--worker-url", type=str, default="http://100.77.130.5:8080", help="Remote worker daemon URL")
     parser.add_argument("--no-fallback", action="store_false", dest="allow_fallback", default=True, help="Disable local fallback on remote worker failure")
     parser.add_argument("--json", action="store_true", help="Output full JSON DistilledTestReport")
     args = parser.parse_args()

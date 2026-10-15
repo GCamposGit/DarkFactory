@@ -100,9 +100,13 @@ ENV_WORKER_JOB = "DARKFAC_HARNESS_WORKER_JOB"
 #: (correctly) refuse. Never meant to be set outside a test process.
 ENV_SELF_DISPATCH_TEST_OVERRIDE = "DARKFAC_REMOTE_DISPATCH_TEST_OVERRIDE"
 
-DEFAULT_WORKERS = "http://100.78.181.90:8080"
+#: grokbox (Linux, Tailscale 100.77.130.5) first: it runs the official gate in ~143 s
+#: (4157 passed, 14/10/2026) versus 23-30 min on the Notebook; the Desktop is second.
+DEFAULT_WORKERS = "http://100.77.130.5:8080,http://100.78.181.90:8080"
 DEFAULT_BUSY_WAIT_SEC = 300.0
-HEALTH_PROBE_TIMEOUT_SEC = 2.0
+#: 10 s, not 2 s: the grokbox is reached through a Tailscale DERP relay (no direct UDP), so the
+#: /health round trip sometimes exceeds 2 s and the worker was skipped; 10 s worked every time (14/10/2026).
+HEALTH_PROBE_TIMEOUT_SEC = 10.0
 POLL_INTERVAL_SEC = 2.0
 #: A worker that stops answering GET /harness/jobs/{id} for longer than this
 #: is probed on ``/health`` (USR-141): a worker that still answers ``/health``
