@@ -7,6 +7,7 @@ import json
 import os
 from pathlib import Path
 import re
+import shutil
 import subprocess
 import time
 from typing import Iterator
@@ -14,19 +15,44 @@ from typing import Iterator
 
 LEDGER = ".factory/demands/demands.json"
 _MAX_ID_RESERVATION_ATTEMPTS = 5
+_GIT_NOT_FOUND = "Git não foi encontrado. Instale o Git ou configure o PATH do orquestrador."
+
+
+def _git_executable(env: dict[str, str] | None = None) -> str | None:
+    """Resolve Git from PATH, then from standard Windows installation paths."""
+    search_path = (env if env is not None else os.environ).get("PATH")
+    executable = shutil.which("git", path=search_path)
+    if executable:
+        return executable
+
+    if os.name != "nt":
+        return None
+
+    variables = env if env is not None else os.environ
+    roots = [
+        Path(variables.get("ProgramFiles", r"C:\Program Files")),
+        Path(variables.get("ProgramFiles(x86)", r"C:\Program Files (x86)")),
+        Path(variables.get("LOCALAPPDATA", Path.home() / "AppData" / "Local")) / "Programs",
+    ]
+    candidates = [root / "Git" / "cmd" / "git.exe" for root in roots]
+    candidates.extend(root / "Git" / "bin" / "git.exe" for root in roots)
+    return next((str(candidate) for candidate in candidates if candidate.is_file()), None)
 
 
 def _git(
     root: Path, *args: str, env: dict[str, str] | None = None,
 ) -> subprocess.CompletedProcess[str]:
+    executable = _git_executable(env)
+    if executable is None:
+        return subprocess.CompletedProcess(["git", *args], 127, "", _GIT_NOT_FOUND)
     try:
         return subprocess.run(
-            ["git", *args], cwd=root, capture_output=True, text=True,
+            [executable, *args], cwd=root, capture_output=True, text=True,
             encoding="utf-8", errors="replace", timeout=30, check=False, env=env,
         )
     except FileNotFoundError as exc:
-        # No git binary (e.g. the slim DarkHub container): behave like "not a repository".
-        return subprocess.CompletedProcess(["git", *args], 127, "", str(exc))
+        # Git may be removed between resolution and process creation.
+        return subprocess.CompletedProcess([executable, *args], 127, "", _GIT_NOT_FOUND)
 
 
 @contextmanager
@@ -232,6 +258,8 @@ def reserve_ticket_id(path: Path, prefix: str) -> str:
     path = path.resolve()
     root = path.parent
     common = _git(root, "rev-parse", "--path-format=absolute", "--git-common-dir")
+    if common.returncode == 127 and any((ancestor / ".git").exists() for ancestor in (root, *root.parents)):
+        raise RuntimeError(common.stderr or _GIT_NOT_FOUND)
     in_git = common.returncode == 0
     if in_git:
         common_dir = Path(common.stdout.strip()).resolve()

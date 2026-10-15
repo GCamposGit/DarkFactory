@@ -101,14 +101,53 @@ def test_title_collision_reports_both_titles() -> None:
 def test_allocator_works_without_git_binary(tmp_path: Path, monkeypatch) -> None:
     """The slim DarkHub container ships no git; reservation must use the isolated ledger."""
     path = ledger(tmp_path, ("USR-07", "seed"))
-
-    def no_git(*_args, **_kwargs):
-        raise FileNotFoundError(2, "No such file or directory: 'git'")
-
-    monkeypatch.setattr(subprocess, "run", no_git)
+    monkeypatch.setattr(id_allocator, "_git_executable", lambda _env=None: None)
 
     assert reserve_ticket_id(path, "USR") == "USR-08"
     assert reserve_ticket_id(path, "USR") == "USR-09"
+
+
+@pytest.mark.skipif(id_allocator.os.name != "nt", reason="Windows Git fallback")
+def test_git_uses_windows_fallback_when_path_is_empty(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    git_exe = tmp_path / "Program Files" / "Git" / "cmd" / "git.exe"
+    git_exe.parent.mkdir(parents=True)
+    git_exe.touch()
+    monkeypatch.setattr(id_allocator.shutil, "which", lambda *_args, **_kwargs: None)
+    monkeypatch.setenv("PATH", "")
+    monkeypatch.setenv("ProgramFiles", str(tmp_path / "Program Files"))
+    monkeypatch.delenv("ProgramFiles(x86)", raising=False)
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "LocalAppData"))
+    calls: list[list[str]] = []
+
+    def run(args, **kwargs):
+        calls.append(args)
+        return subprocess.CompletedProcess(args, 0, "ok", "")
+
+    monkeypatch.setattr(subprocess, "run", run)
+
+    result = id_allocator._git(
+        tmp_path,
+        "--version",
+        env={
+            "PATH": "",
+            "ProgramFiles": str(tmp_path / "Program Files"),
+            "LOCALAPPDATA": str(tmp_path / "LocalAppData"),
+        },
+    )
+
+    assert result.returncode == 0
+    assert calls[0][0] == str(git_exe)
+
+
+def test_allocator_reports_missing_git_for_repository(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    root = tmp_path / "repo"
+    root.mkdir()
+    (root / ".git").mkdir()
+    path = ledger(root, ("USR-07", "seed"))
+    monkeypatch.setattr(id_allocator, "_git_executable", lambda _env=None: None)
+
+    with pytest.raises(RuntimeError, match="Git não foi encontrado"):
+        reserve_ticket_id(path, "USR")
 
 
 def _init_repo(path: Path) -> None:

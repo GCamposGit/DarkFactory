@@ -307,6 +307,24 @@ class TelegramActionType(str, Enum):
     UNAUTHORIZED = "unauthorized"
 
 
+def _is_missing_git_error(exc: Exception) -> bool:
+    detail = str(exc)
+    return "git" in detail.lower() and (
+        isinstance(exc, FileNotFoundError)
+        or "[Errno 2]" in detail
+        or "git não foi encontrado" in detail.lower()
+    )
+
+
+def _demand_failure_response(exc: Exception) -> str:
+    detail = str(exc)
+    if _is_missing_git_error(exc) and "git não foi encontrado" not in detail.lower():
+        return "❌ Falha ao registrar demanda: Git não foi encontrado. Instale o Git ou configure o PATH do orquestrador."
+    if "git não foi encontrado" in detail.lower():
+        return f"❌ Falha ao registrar demanda: {detail}"
+    return f"❌ Failed to register demand: {exc}"
+
+
 
 class TelegramDispatchResult(BaseModel):
     """Result of processing an incoming update."""
@@ -769,7 +787,7 @@ class TelegramGateway:
                     except Exception as exc:
                         logger.error("Telegram intake_service error: %s", exc)
                         result.error = str(exc)
-                        result.response_text = f"❌ Failed to register demand: {exc}"
+                        result.response_text = _demand_failure_response(exc)
                 elif self.demand_handler:
                     try:
                         res = self.demand_handler(arg_str, user_id or 0)
@@ -802,7 +820,7 @@ class TelegramGateway:
                     except Exception as exc:
                         logger.error("Demand handler error: %s", exc)
                         result.error = str(exc)
-                        result.response_text = f"❌ Failed to register demand: {exc}"
+                        result.response_text = _demand_failure_response(exc)
                 else:
                     try:
                         from core.demands.models import DemandInput
@@ -839,8 +857,12 @@ class TelegramGateway:
                             )
                     except Exception as exc:
                         logger.error("Durable demand creation error: %s", exc)
-                        result.target_id = "DEMAND-RECORDED"
-                        result.response_text = f"✅ Demanda recebida e enfileirada: {arg_str[:120]}"
+                        if _is_missing_git_error(exc):
+                            result.error = str(exc)
+                            result.response_text = _demand_failure_response(exc)
+                        else:
+                            result.target_id = "DEMAND-RECORDED"
+                            result.response_text = f"✅ Demanda recebida e enfileirada: {arg_str[:120]}"
 
         elif cmd_str in ("/linha", "/line"):
             result.action = TelegramActionType.DEMAND
