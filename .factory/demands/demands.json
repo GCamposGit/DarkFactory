@@ -7866,5 +7866,71 @@
     "dependencies": [],
     "created_at": "2026-10-15T07:58:00.991659Z",
     "updated_at": "2026-10-15T18:07:31.217013Z"
+  },
+  {
+    "id": "USR-267",
+    "project_id": "darkfac",
+    "title": "Testes herdam variaveis de workers reais do ambiente (DARKFAC_TEST_WORKERS, sonda de 10 s) e sondam hosts de verdade no fallback local",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand",
+      "v0-critico",
+      "bug"
+    ],
+    "problem_statement": "Em 15/10/2026 o Notebook do owner passou a ter DARKFAC_TEST_WORKERS (grokbox, Desktop) e DARKFAC_WORKER_HEALTH_TIMEOUT_SEC=10 no ambiente de usuario, e o run_ticket as exporta. Testes que nao limpam essas variaveis sondam os workers reais: medido com os dois hosts fora do ar, tests/test_gate_ram_wait.py foi de 3,4 s para 14,6 s (uma sonda de 10 s); test_node_sync 8,1 -> 8,6 s. No CI nao aparece porque as variaveis nao existem la. Referencia de uma correcao possivel (fixture autouse em tests/conftest.py que remove as variaveis de infraestrutura remota de todo teste, mais um teste guarda com pytest filho poluido): branch ref/test-env-isolation-subagent (commit 6e2b5b1).",
+    "core_journey": [],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Nenhum teste herda do ambiente as variaveis que apontam a fabrica para workers reais (DARKFAC_TEST_WORKERS, DARKFAC_WORKER_HEALTH_TIMEOUT_SEC, DARKFAC_REMOTE_HARNESS, DARKFAC_HARNESS_WORKER_JOB, REMOTE_HARNESS_URL(S) e afins documentados); testes que precisam delas continuam podendo seta-las",
+      "Com essas variaveis exportadas apontando para hosts inalcancaveis, tests/test_gate_ram_wait.py e tests/test_node_sync.py rodam no mesmo tempo que sem elas (folga de 2 s)",
+      "Teste guarda lanca um pytest filho com o ambiente poluido e falha se alguma variavel chegar a um teste"
+    ],
+    "suggested_files": [
+      "tests/conftest.py",
+      "tests/"
+    ],
+    "estimated_complexity": "low",
+    "dependencies": [],
+    "created_at": "2026-10-15T21:13:51.932769Z",
+    "updated_at": "2026-10-15T21:13:51.932769Z"
+  },
+  {
+    "id": "USR-268",
+    "project_id": "darkfac",
+    "title": "Fallback local do portao apos perder os workers remotos estoura 3000 s sem saida: medir e corrigir a causa",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand",
+      "v0-critico",
+      "bug"
+    ],
+    "problem_statement": "Em 15/10/2026 (USR-192) o grokbox e o Desktop cairam no meio do job; o runner caiu para o Notebook com 6 workers xdist as 17:11 e o passo paralelo estourou 3000 s (18:01) com 0 testes contabilizados. Com 2 workers e sem variaveis de worker, a mesma suite levou 1814 s no Notebook em 14/10. A isolacao das variaveis de worker explica so ~10 s por sonda. A saida parcial do pytest e perdida no timeout (patch protegido pendente na OA-018), entao nao se sabe se travou ou ficou lento.",
+    "core_journey": [],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Reproduzir o fallback local com os workers inalcancaveis (DARKFAC_TEST_WORKERS apontando para hosts fora do ar) e registrar no ticket a duracao e os testes mais lentos ou travados (--durations e saida parcial gravada em arquivo)",
+      "Corrigir a causa encontrada (teste travado, espera de rede, contencao) de forma que o fallback local com 4+ workers termine abaixo de 1800 s",
+      "Teste ou guarda que impede a regressao da causa encontrada"
+    ],
+    "suggested_files": [
+      "tests/",
+      "run_ticket.py"
+    ],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-15T21:14:03.900067Z",
+    "updated_at": "2026-10-15T21:14:03.900067Z"
   }
 ]
