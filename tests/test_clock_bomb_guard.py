@@ -98,7 +98,6 @@ CLOCK_BOMB_EXCEPTIONS: dict[str, str] = {
 
 def test_no_unpinned_fixed_2026_dates_outside_the_exceptions_list() -> None:
     """Fails for any tests/ file mixing a fixed 2026 date with an un-pinned real clock (USR-239)."""
-    started = time.monotonic()
     repo_root = project_root()
     hits = scan_tests_tree(repo_root / "tests", repo_root=repo_root)
 
@@ -117,8 +116,20 @@ def test_no_unpinned_fixed_2026_dates_outside_the_exceptions_list() -> None:
         f"entries:\n" + "\n".join(f"  {path}" for path in stale)
     )
 
-    elapsed = time.monotonic() - started
-    assert elapsed < 5.0, f"Clock-bomb guard took {elapsed:.2f}s, must stay under 5s (AST only, no test execution)"
+
+def test_clock_bomb_scan_stays_cheap_in_cpu_time() -> None:
+    """The scan must stay a cheap static (AST-only) guard: bounded by process CPU time, not wall clock.
+
+    Evidence (2026-10-15): the former wall-clock budget (``time.monotonic() < 5 s``) took 9.31 s on the
+    loaded Desktop worker (indexer running, parallel suite) and failed the USR-264 gate although its code
+    was unrelated. ``time.process_time()`` only counts this process's own CPU, so it ignores contention
+    from other processes; the limit is loose on purpose, it only catches the scan turning expensive.
+    """
+    repo_root = project_root()
+    started = time.process_time()
+    scan_tests_tree(repo_root / "tests", repo_root=repo_root)
+    cpu = time.process_time() - started
+    assert cpu < 15.0, f"Clock-bomb guard used {cpu:.2f}s of CPU, must stay under 15s (AST only, no test execution)"
 
 
 def test_clock_bomb_scanner_flags_a_fixed_date_without_a_pinned_clock(tmp_path: Path) -> None:
