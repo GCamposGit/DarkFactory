@@ -67,10 +67,16 @@ todos estourando o timeout de 1200s. Três mecanismos resolvem isso, todos em
    o lock se o processo morrer, então nunca sobra lock travado). Garante que
    só `DARKFAC_SUITE_SLOTS` (padrão 1) execuções completas da suíte corram
    por vez naquele host. Um segundo processo esperando imprime
-   `[SUITE_LOCK] waiting: held by pid ... on ... since ...`. Vale tanto para
-   `python core/harness/runner.py --quick` quanto para qualquer `pytest`
-   direto na pasta `tests/` (via `tests/conftest.py`) — ou seja, cobre
-   qualquer agente/harness, não só o harness oficial.
+   `[SUITE_LOCK] waiting: held by pid ... on ... since ...`. O portão oficial
+   sempre usa o lock. Em `pytest` direto, `tests/conftest.py` considera completa
+   a execução com `testpaths` padrão e sem seletores: execução completa sem
+   xdist toma o lock após a coleta; com xdist, toma antes de iniciar workers.
+   Um caminho ou node ID explícito, `-k`, `-m`, `--ignore`, `--ignore-glob` ou
+   `--deselect` define uma seleção focal: ela não espera nem toma o lock, mesmo
+   se selecionar 100 ou mais itens. Para uma execução focal, por exemplo, use
+   `python -m pytest tests/test_suite_lock.py -q`; para a suíte completa, use
+   `python -m pytest` sem seletores. Assim, suítes completas continuam
+   serializadas enquanto seleções focais podem rodar em paralelo.
 2. **Verdict cache (`core/harness/cache.py`)** — a chave é um hash sobre a
    *árvore* do commit (`git rev-parse HEAD^{tree}`, não o SHA), o hash da
    config, os nomes dos steps selecionados, as flags `--quick`/`--holdout`,
@@ -124,7 +130,6 @@ todos estourando o timeout de 1200s. Três mecanismos resolvem isso, todos em
 | `DARKFAC_SUITE_LOCK_TIMEOUT_SEC` | Timeout de espera por um slot livre | `3600` |
 | `DARKFAC_SUITE_LOCK` | `off` desliga o lock inteiramente | ligado |
 | `DARKFAC_SUITE_LOCK_HELD` | Setado automaticamente por quem já detém o lock, para o `pytest` filho não tentar adquirir de novo (não setar manualmente) | — |
-| `DARKFAC_SUITE_LOCK_MIN_ITEMS` | Nº mínimo de itens coletados por um `pytest` avulso (não-xdist) para valer o lock; runs pequenos e focados nunca bloqueiam | `100` |
 | `DARKFAC_HARNESS_CACHE` | `off` desativa o cache de verdicts (sempre roda fresco) | ligado |
 | `DARKFAC_HF02_DATABASE_URL` | Postgres compartilhado (Tailscale) para cache remoto e single-flight cross-host; ausente = local-only | — |
 | `DARKFAC_HARNESS_REMOTE_WAIT_SEC` | Teto de espera fazendo polling pelo verdict de outro host | `900` |
