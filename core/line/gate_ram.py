@@ -81,6 +81,26 @@ def remote_worker_available() -> bool:
     return False
 
 
+def remote_workers_configured() -> bool:
+    """True when the official gate is configured to try remote workers.
+
+    The focal pre-check must not fall back to an expensive local run just because a
+    configured worker is momentarily busy or its health probe blips. The official
+    dispatcher owns availability polling and fallback, so this predicate deliberately
+    checks effective configuration rather than current worker health.
+    """
+    try:
+        from core.harness import remote_dispatch as rd
+
+        return (
+            rd._effective_mode(remote_required=False) != "off"
+            and rd._unconditional_disable_reason() is None
+            and bool(rd.worker_urls())
+        )
+    except Exception:
+        return False
+
+
 def wait_for_gate_ram(
     *,
     measure: Callable[[], RamReading] = measure_workers,
