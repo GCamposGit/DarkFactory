@@ -147,6 +147,23 @@ def _msg(update_id: int, text: str) -> dict:
     }
 
 
+def test_demand_git_dependency_error_is_clear_to_telegram_user(tmp_path: Path) -> None:
+    class MissingGitIntake:
+        def accept(self, *_args: Any) -> None:
+            raise FileNotFoundError(2, "No such file or directory: 'git'")
+
+    gateway = TelegramGateway(
+        config=TelegramConfig(bot_token="tok_ops", role="ops", authorized_user_ids=[10]),
+        state_dir=tmp_path,
+        intake_service=MissingGitIntake(),
+    )
+
+    result = gateway.process_update(_msg(1, "/demand Corrigir intake"))
+
+    assert "Git não foi encontrado" in result.response_text
+    assert "[Errno 2]" not in result.response_text
+
+
 def test_owner_bot_is_alerts_only_and_points_commands_to_the_ops_bot(tmp_path: Path) -> None:
     """Owner bot (@darkfac_bot) handles nothing: commands get a pointer to @darkfac_ops_bot."""
     grill_mock = MagicMock(return_value={"resumed": True})
