@@ -188,6 +188,16 @@ rodar qualquer coisa neste processo — via `core/harness/remote_dispatch.py`
 que dispare `runner.py` (Notebook interativo, VPS, outro agente) do custo
 de CPU/tempo da suíte, desde que o worker esteja disponível.
 
+### Workers de teste oficiais (14/10/2026)
+
+| Ordem | Worker | URL | SO | Portao `--quick` | Observacao |
+| --- | --- | --- | --- | --- | --- |
+| 1 | grokbox (`grok-bot-vm-418374532`) | `http://100.77.130.5:8080` | Linux, Python 3.13 | ~143 s (4157 passed) | rota via relay DERP; sonda `/health` de 10 s (`DARKFAC_WORKER_HEALTH_TIMEOUT_SEC=10`) |
+| 2 | Desktop (`darkfac-desktop`) | `http://100.78.181.90:8080` | Windows 10 | ~10 min | segundo da lista |
+| 3 | local (Notebook) | - | Windows 11 | 23-30 min | fallback quando nenhum worker responde |
+
+Runbook do grokbox: `docs/runbooks/grokbox_test_worker.md`.
+
 ### Topologia e decisão do owner (final)
 
 - **Desktop** (`darkfac-desktop`, Tailscale `100.78.181.90`, Windows 10,
@@ -326,7 +336,8 @@ Tailscale (o que já é verdade para qualquer host no tailnet).
 
 | Variável | Efeito | Default |
 | --- | --- | --- |
-| `DARKFAC_TEST_WORKERS` | Lista ordenada (vírgula) de base URLs de workers; o primeiro alcançável, não-ocupado e que não seja a própria máquina vence | `http://100.78.181.90:8080` |
+| `DARKFAC_TEST_WORKERS` | Lista ordenada (vírgula) de base URLs de workers; o primeiro alcançável, não-ocupado e que não seja a própria máquina vence | `http://100.78.181.90:8080` (padrao no codigo; grokbox primeiro no deploy da VPS e, apos o patch `docs/proposals/GROKBOX-default-workers.md`, tambem no codigo) |
+| `DARKFAC_WORKER_HEALTH_TIMEOUT_SEC` | Timeout da sonda `/health` de cada worker (segundos) | `2` no codigo hoje; `10` no deploy da VPS e apos o patch GROKBOX |
 | `DARKFAC_REMOTE_HARNESS` | `auto` (tenta remoto, cai para local), `off` (nunca despacha), `required` (exige remoto; falha em vez de cair para local) | `auto` |
 | `DARKFAC_WORKER_TOKEN` | Bearer token opcional (cliente e worker) | — |
 | `DARKFAC_REMOTE_BUSY_WAIT_SEC` | Teto de espera fazendo polling de um worker ocupado antes de tentar o próximo/local | `300` |

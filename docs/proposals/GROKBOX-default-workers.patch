@@ -1,0 +1,42 @@
+diff --git a/core/harness/remote_dispatch.py b/core/harness/remote_dispatch.py
+index d9d9dd1..28abe6d 100644
+--- a/core/harness/remote_dispatch.py
++++ b/core/harness/remote_dispatch.py
+@@ -100,9 +100,13 @@ ENV_WORKER_JOB = "DARKFAC_HARNESS_WORKER_JOB"
+ #: (correctly) refuse. Never meant to be set outside a test process.
+ ENV_SELF_DISPATCH_TEST_OVERRIDE = "DARKFAC_REMOTE_DISPATCH_TEST_OVERRIDE"
+ 
+-DEFAULT_WORKERS = "http://100.78.181.90:8080"
++#: grokbox (Linux, Tailscale 100.77.130.5) first: it runs the official gate in ~143 s
++#: (4157 passed, 14/10/2026) versus 23-30 min on the Notebook; the Desktop is second.
++DEFAULT_WORKERS = "http://100.77.130.5:8080,http://100.78.181.90:8080"
+ DEFAULT_BUSY_WAIT_SEC = 300.0
+-HEALTH_PROBE_TIMEOUT_SEC = 2.0
++#: 10 s, not 2 s: the grokbox is reached through a Tailscale DERP relay (no direct UDP), so the
++#: /health round trip sometimes exceeds 2 s and the worker was skipped; 10 s worked every time (14/10/2026).
++HEALTH_PROBE_TIMEOUT_SEC = 10.0
+ POLL_INTERVAL_SEC = 2.0
+ #: A worker that stops answering GET /harness/jobs/{id} for longer than this
+ #: is probed on ``/health`` (USR-141): a worker that still answers ``/health``
+diff --git a/core/harness/test_subagent.py b/core/harness/test_subagent.py
+index aeee251..4975c70 100644
+--- a/core/harness/test_subagent.py
++++ b/core/harness/test_subagent.py
+@@ -159,7 +159,7 @@ class TestExecutionInstruction(BaseModel):
+     # wrong code. Full-suite offload goes through core/harness/runner.py, which
+     # ships the candidate commit as a git bundle.
+     worker_mode: str = Field(default="local", description="Worker execution mode: 'local', 'auto', or 'remote' (remote runs the worker's own checkout)")
+-    remote_worker_url: Optional[str] = Field(default="http://100.78.181.90:8080", description="URL of the on-premise dedicated test worker")
++    remote_worker_url: Optional[str] = Field(default="http://100.77.130.5:8080", description="URL of the dedicated test worker (grokbox; Desktop is the second one)")
+     allow_fallback: bool = Field(default=True, description="Fallback to local execution if remote worker is unreachable or errors")
+     worker_probe_timeout: float = Field(default=1.0, description="Healthcheck probe timeout in seconds")
+ 
+@@ -576,7 +576,7 @@ def main() -> None:
+     parser.add_argument("--timeout", type=int, default=60, help="Timeout in seconds")
+     parser.add_argument("-x", "--fail-fast", action="store_true", help="Fail fast on first error")
+     parser.add_argument("--worker-mode", type=str, default="local", choices=["auto", "remote", "local"], help="Worker execution mode (remote runs the worker's own checkout, not local edits)")
+-    parser.add_argument("--worker-url", type=str, default="http://100.78.181.90:8080", help="Remote worker daemon URL")
++    parser.add_argument("--worker-url", type=str, default="http://100.77.130.5:8080", help="Remote worker daemon URL")
+     parser.add_argument("--no-fallback", action="store_false", dest="allow_fallback", default=True, help="Disable local fallback on remote worker failure")
+     parser.add_argument("--json", action="store_true", help="Output full JSON DistilledTestReport")
+     args = parser.parse_args()

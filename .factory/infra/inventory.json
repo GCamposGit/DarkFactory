@@ -157,6 +157,43 @@
       "updated_at": "2026-09-26T02:53:17.585272Z"
     },
     {
+      "id": "grokbox-test-worker",
+      "name": "grokbox (Linux test worker, grok-bot-vm-418374532)",
+      "role": "on_prem_server",
+      "status": "active",
+      "provider": "Remote Linux VM (Tailscale node grokbox)",
+      "hardware": null,
+      "network": {
+        "private_ip": null,
+        "public_ip": null,
+        "ipv6": null,
+        "tailscale_ip": "100.77.130.5",
+        "public_dns": null,
+        "cloudflare_tunnel": false,
+        "open_ports": [],
+        "notes": "Tailscale node grokbox, reached through a DERP relay (no direct UDP): the /health probe needs DARKFAC_WORKER_HEALTH_TIMEOUT_SEC=10. Linux, Python 3.13, project_root /workspace/darkfac/DarkFactory; official gate in ~143 s (4157 passed on 14/10/2026) versus 23-30 min on the Notebook."
+      },
+      "services": [
+        {
+          "name": "darkfac-test-worker",
+          "description": "Remote test worker (FastAPI, port 8080): first in DARKFAC_TEST_WORKERS, ahead of the Desktop",
+          "container_engine": null,
+          "port": 8080,
+          "status": "active",
+          "managed_by": null
+        }
+      ],
+      "cost_monthly_usd": 0.0,
+      "tags": [
+        "remote-test-worker",
+        "linux",
+        "tailscale-active",
+        "active",
+        "project:darkfac"
+      ],
+      "updated_at": "2026-10-15T01:26:08.812661Z"
+    },
+    {
       "id": "darkfac-vps-primary",
       "name": "Hetzner CX23 (#165058444)",
       "role": "cloud_vps",

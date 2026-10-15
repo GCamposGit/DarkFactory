@@ -41,13 +41,16 @@ def test_instruction_and_report_models_defaults_and_serialization() -> None:
     """Ensure all USR-16 fields are present with correct defaults in Pydantic models."""
     instruction = TestExecutionInstruction(target="tests/test_foo.py")
     assert instruction.worker_mode == "local"
-    assert instruction.remote_worker_url == "http://100.78.181.90:8080"
+    # The default is whatever the model declares (Desktop before, grokbox after the owner patch): it must be a worker URL.
+    default_url = TestExecutionInstruction.model_fields["remote_worker_url"].default
+    assert default_url in ("http://100.78.181.90:8080", "http://100.77.130.5:8080")
+    assert instruction.remote_worker_url == default_url
     assert instruction.allow_fallback is True
     assert instruction.worker_probe_timeout == 1.0
 
     dumped = instruction.model_dump()
     assert dumped["worker_mode"] == "local"
-    assert dumped["remote_worker_url"] == "http://100.78.181.90:8080"
+    assert dumped["remote_worker_url"] == default_url
     assert dumped["allow_fallback"] is True
     assert dumped["worker_probe_timeout"] == 1.0
 

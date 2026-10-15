@@ -2664,6 +2664,15 @@ class HubService:
         """Probes known test worker nodes (e.g. desktop-g45ipem on Tailscale) and returns status."""
         workers = [
             {
+                "id": "grokbox-test-worker",
+                "name": "Remote Test Worker (grokbox, Linux)",
+                "url": "http://100.77.130.5:8080",
+                "ip": "100.77.130.5",
+                "port": 8080,
+                "role": "remote_test_worker",
+                "description": "Official gate worker (first in DARKFAC_TEST_WORKERS), Linux VM via Tailscale DERP relay; gate in ~143 s",
+            },
+            {
                 "id": "onprem-z97-server",
                 "name": "Dedicated Test Worker (desktop-g45ipem)",
                 "url": "http://100.78.181.90:8080",
@@ -2689,7 +2698,7 @@ class HubService:
         for w in workers:
             w_info = dict(w)
             start_t = time.perf_counter()
-            health = engine.probe_remote_worker(w["url"], timeout=0.8)
+            health = engine.probe_remote_worker(w["url"], timeout=0.8 if w["id"] != "grokbox-test-worker" else 3.0)
             latency_ms = round((time.perf_counter() - start_t) * 1000, 1)
 
             if health:
