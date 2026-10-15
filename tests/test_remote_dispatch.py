@@ -193,8 +193,13 @@ def _noop_emit_cache_hit(record: dict, *, config_path: Path) -> bool:  # pragma:
 # =============================================================================
 
 
-def test_worker_urls_defaults_to_desktop_primary() -> None:
-    assert remote_dispatch.worker_urls() == [remote_dispatch.DEFAULT_WORKERS]
+def test_worker_urls_defaults_to_grokbox_then_desktop(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("DARKFAC_TEST_WORKERS", raising=False)
+    expected = [u.strip() for u in remote_dispatch.DEFAULT_WORKERS.split(",") if u.strip()]
+    urls = remote_dispatch.worker_urls()
+    assert urls == expected
+    assert urls[0] == "http://100.77.130.5:8080"  # grokbox first
+    assert urls[1] == "http://100.78.181.90:8080"  # Desktop second
 
 
 def test_worker_urls_parses_comma_separated_list(monkeypatch: pytest.MonkeyPatch) -> None:
