@@ -7665,8 +7665,8 @@
     "project_id": "darkfac",
     "title": "run_ticket entrega demanda de qualquer projeto de cliente: worktree, agente, portao e merge no repositorio do proprio projeto, com a validacao que o projeto declara (nunca a suite da fabrica)",
     "origin": "user",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "82f2fa18e19d289f70a01fcb522cc972a2aa1295",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -7698,7 +7698,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-14T17:38:12.364718Z",
-    "updated_at": "2026-10-15T07:57:46.949264Z"
+    "updated_at": "2026-10-15T23:52:19.150494Z"
   },
   {
     "id": "USR-262",
