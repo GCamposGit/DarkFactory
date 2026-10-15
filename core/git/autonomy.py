@@ -45,6 +45,7 @@ from core.git.ci_checks import (
     pending_check_labels,
     sanitize,
 )
+from core.owner_actions.dedupe import OWNER_ACTIONS_RELATIVE, renumber_duplicate_owner_actions
 from core.owner_actions.store import OwnerActionStore
 from core.roadmap.models import DeliveryStatus, LifecycleStage, PlanningHorizon, RoadmapItemType
 
@@ -658,6 +659,36 @@ class GitAutonomyManager:
         _run_git(["merge", "--abort"], cwd=cwd)
         return False, files, (merge.stderr or merge.stdout).strip()
 
+    def _repair_owner_action_duplicates(self, ticket_id: str, cwd: Path, remote_ref: str) -> list[str]:
+        """Renumber any OA-NNN this branch collided on with ``remote_ref`` (USR-255).
+
+        Runs right after the sync, before the branch is pushed and gated: a rebase/merge can leave
+        the same id twice in ``owner_actions.json`` without a textual conflict (two branches each
+        picked the next free number before either saw the other's commit). Left alone, the official
+        gate fails with "item OA-NNN duplicado ignorado" well after the sync already succeeded.
+        """
+        try:
+            changes = renumber_duplicate_owner_actions(cwd, remote_ref=remote_ref)
+        except Exception:  # pragma: no cover - a repair attempt must never block delivery
+            logger.exception("owner_actions: dedupe apos sync falhou para %s", ticket_id)
+            return []
+        if not changes:
+            return []
+        logger.info("owner_actions: renumerado apos sync com %s para %s: %s", remote_ref, ticket_id, "; ".join(changes))
+        message = (
+            f"fix(owner-actions): renumera OA duplicado apos sync com {remote_ref} [{ticket_id}]\n\n"
+            + "\n".join(changes)
+            + f"\n\nDarkFac-Ticket: {ticket_id}\nDarkFac-Autonomy: zero-human-touch\n"
+        )
+        try:
+            self.commit_ticket(
+                ticket_id, "renumera OA duplicado apos sync", cwd=cwd,
+                paths=[OWNER_ACTIONS_RELATIVE], custom_message=message,
+            )
+        except Exception:  # pragma: no cover - the file fix stands even if this commit fails
+            logger.exception("owner_actions: commit da renumeracao falhou para %s", ticket_id)
+        return changes
+
     def _ledger_collision(self, cwd: Path, remote_ref: str) -> str:
         """Reject conflicting ticket identities before Git can resolve ledger rows."""
         candidate = cwd / _LEDGER_RELATIVE
@@ -892,6 +923,10 @@ class GitAutonomyManager:
                 conflict_files=files,
                 message=f"Conflict with {remote_ref}: {', '.join(files) or msg}",
             )
+        if kind == "implementation":
+            # Queue PRs only ever touch the ledger (enforced below); the OA backlog collision this
+            # guards against is only introduced by implementation branches (USR-255).
+            self._repair_owner_action_duplicates(ticket_id, cwd, remote_ref)
 
         ahead = self._git_out(["rev-list", "--count", f"{remote_ref}..HEAD"], cwd)
         if ahead == "0":

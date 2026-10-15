@@ -48,6 +48,7 @@ from core.line.agent_cli import (
     run_agent,
     supports,
 )
+from core.line import gate_ram
 from core.line.diagnostics import redacted_head
 from core.line.local_progress import ENV_RUN_ID, ENV_WARNED, ProgressPublisher, open_progress
 from core.line.operating_harness import detect_operating_harness
@@ -497,6 +498,42 @@ def rebase_on_origin_main(cwd: Path) -> tuple[bool, list[str], str]:
     return False, conflict_files, rebase.stderr.strip() or rebase.stdout.strip()
 
 
+def repair_owner_action_duplicates_before_gate(git_mgr: Any, ticket_id: str, cwd: Path) -> list[str]:
+    """Renumber OA-NNN collisions with origin/main right after the rebase, before the gate (USR-255).
+
+    A rebase can merge two branches that each picked the next free OA-NNN (neither had seen the
+    other's commit) without a textual conflict, leaving the same id twice in
+    ``owner_actions.json``. Left alone, that is only caught once the official gate's
+    ``tests/test_owner_actions_core.py::test_seeded_backlog_is_valid_and_complete`` fails with
+    "item OA-NNN duplicado ignorado" -- well after the rebase already succeeded (~25min lost on
+    USR-249's delivery on 2026-10-14). Returns the ``"OLD -> NEW"`` lines, or ``[]`` when nothing
+    collided; never raises.
+    """
+    from core.owner_actions.dedupe import OWNER_ACTIONS_RELATIVE, renumber_duplicate_owner_actions
+
+    try:
+        changes = renumber_duplicate_owner_actions(cwd, remote_ref="origin/main")
+    except Exception as exc:  # a repair attempt must never block the delivery
+        logger.warning("owner_actions: dedupe pre-portao falhou para %s: %s", ticket_id, exc)
+        return []
+    if not changes:
+        return []
+    logger.info("owner_actions: renumerado pre-portao para %s: %s", ticket_id, "; ".join(changes))
+    message = (
+        f"fix(owner-actions): renumera OA duplicado apos sync com origin/main [{ticket_id}]\n\n"
+        + "\n".join(changes)
+        + f"\n\nDarkFac-Ticket: {ticket_id}\nDarkFac-Autonomy: zero-human-touch\n"
+    )
+    try:
+        git_mgr.commit_ticket(
+            ticket_id, "renumera OA duplicado apos sync", cwd=cwd,
+            paths=[OWNER_ACTIONS_RELATIVE], custom_message=message,
+        )
+    except Exception as exc:
+        logger.warning("owner_actions: commit da renumeracao pre-portao falhou para %s: %s", ticket_id, exc)
+    return changes
+
+
 _TEST_FILE_RE = re.compile(r"(^|/)tests?/.*test_[^/]+\.py$|(^|/)test_[^/]+\.py$")
 
 
@@ -761,6 +798,68 @@ def _render_self_correction_log(attempts_log: list[dict[str, Any]]) -> str:
     return "\n".join(lines)
 
 
+def _tail_lines(text: str | None, count: int = 20) -> str:
+    """Last `count` lines of `text`, redacted of secrets (USR-257)."""
+    lines = (text or "").splitlines()[-count:]
+    return redacted_head(chr(10).join(lines), 4000) if lines else "(vazio)"
+
+
+def _report_delivery_child_failure(
+    proc: Any,
+    completion_info: dict[str, Any],
+    stdout_was_json: bool,
+    ticket_id: str,
+    worktree: Path,
+    stream: Any = None,
+) -> None:
+    """Human-mode console report for a failed delivery child: the child ran with --json so its own
+    human messages were suppressed; without this the console only shows the resume hint (USR-257)."""
+    out = stream if stream is not None else sys.stderr
+    exit_code = getattr(proc, "returncode", None)
+    if stdout_was_json:
+        parts = [f"causa: {completion_info.get('cause') or 'desconhecida'}"]
+        parts.append(f"erro: {completion_info.get('error') or '(sem detalhe)'}")
+        if completion_info.get("exit_code") is not None:
+            parts.append(f"codigo de saida do filho: {completion_info['exit_code']}")
+        print("[ERRO NA ENTREGA] " + "; ".join(parts), file=out)
+        log = completion_info.get("self_correction_log") or completion_info.get("attempts_log")
+        if log and isinstance(log, list):
+            try:
+                print(_render_self_correction_log(log), file=out)
+            except Exception:
+                print(f"[AUTOCORREÇÃO] {len(log)} tentativa(s) registrada(s)", file=out)
+        resume = completion_info.get("resume_command")
+    else:
+        duration = getattr(proc, "duration_s", 0.0) or 0.0
+        flags = []
+        if getattr(proc, "timed_out", False):
+            flags.append("timeout")
+        if getattr(proc, "cancelled", False):
+            flags.append("cancelado")
+        extra = f" ({', '.join(flags)})" if flags else ""
+        print(
+            f"[ERRO NA ENTREGA] processo filho terminou sem JSON valido{extra}: "
+            f"codigo de saida {exit_code}; duracao {duration:.1f}s",
+            file=out,
+        )
+        print("--- ultimas linhas do stdout do filho ---", file=out)
+        print(_tail_lines(getattr(proc, "stdout", "")), file=out)
+        print("--- ultimas linhas do stderr do filho ---", file=out)
+        print(_tail_lines(getattr(proc, "stderr", "")), file=out)
+        resume = None
+    if not resume:
+        resume = f"python {PROJECT_ROOT / 'run_ticket.py'} --resume-delivery {ticket_id} --worktree {worktree}"
+    print("[i] Comando para retomar entrega:", file=out)
+    print(f"  {resume}", file=out)
+
+
+def _wait_gate_ram_if_local(as_json: bool) -> "gate_ram.RamWaitResult | None":
+    """USR-262: only when the gate would run locally (no idle remote worker); None = nothing to wait for."""
+    if gate_ram.remote_worker_available():
+        return None
+    return gate_ram.wait_for_gate_ram(announce=None if not as_json else (lambda _msg: None))
+
+
 def _run_gate_with_self_correction(
     target_worktree: Path,
     current_branch: str,
@@ -873,6 +972,24 @@ def _run_gate_with_self_correction(
         if skip_validation:
             progress.phase("gate", "skipped", "validacao pulada (--skip-validation)")
             return None
+
+        # USR-262: gate local com 1 worker passa de GATE_TIMEOUT; espera RAM para 2+ workers ou falha explicito.
+        ram_wait = _wait_gate_ram_if_local(as_json)
+        if ram_wait is not None and not ram_wait.ok:
+            last_cause = gate_ram.CAUSE_INSUFFICIENT_RAM
+            last_exit_code = 1
+            last_output = (
+                f"{last_cause}: RAM livre {ram_wait.reading.available_gib:.1f} GiB, "
+                f"{ram_wait.reading.workers} workers possiveis (minimo {gate_ram.MIN_GATE_WORKERS}) "
+                f"apos {ram_wait.waited_s:.0f} s de espera; portao NAO executado. Retome com: {resume_cmd}"
+            )
+            attempts_log.append({
+                "event": "infra_error", "attempt": attempt + 1, "stage": "gate", "cause": last_cause,
+                "error": last_output,
+            })
+            if not as_json:
+                print(f"[RAM INSUFICIENTE PARA O PORTAO]: {last_output}", file=sys.stderr)
+            break
 
         progress.phase("gate", "running", "portao oficial (core/harness/runner.py --quick)")
         if not as_json:
@@ -1332,6 +1449,12 @@ def _deliver_worktree(
         return conflict_payload if return_result else 2
 
     current_sha = git_mgr.get_current_sha(target_worktree)
+
+    owner_action_changes = repair_owner_action_duplicates_before_gate(git_mgr, ticket.id, target_worktree)
+    if owner_action_changes:
+        if not as_json:
+            print(f"[+] OA renumerada apos sync com origin/main: {'; '.join(owner_action_changes)}")
+        current_sha = git_mgr.get_current_sha(target_worktree)
 
     # 3. Focal tests + Official Validation Gate, with in-place self-correction (USR-245)
     if _cancelled():
@@ -2018,10 +2141,18 @@ def _run(argv: Optional[list[str]], box: list[ProgressPublisher], stack: context
         exit_code = delivery_proc.returncode
         if not args.json and delivery_proc.stderr:
             print(delivery_proc.stderr, file=sys.stderr, end="")
+        stdout_was_json = True
         try:
             completion_info = json.loads(delivery_proc.stdout)
+            if not isinstance(completion_info, dict):
+                raise ValueError("delivery JSON is not an object")
         except Exception:
+            stdout_was_json = False
             completion_info = {"ok": exit_code == 0, "error": delivery_proc.stderr or delivery_proc.stdout}
+        if not args.json and not (exit_code == 0 and completion_info.get("ok", False))                 and exit_code != EXIT_CANCELLED and completion_info.get("cause") != "cancelled":
+            _report_delivery_child_failure(
+                delivery_proc, completion_info, stdout_was_json, ticket.id, workspace.path
+            )
     else:
         # In-process execution (for tests or embedded environments)
         res = resume_delivery(

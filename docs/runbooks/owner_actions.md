@@ -88,6 +88,10 @@ python C:\dev\DarkFac\scripts\owner_action.py answer OA-005 --option A --note "p
 - O CLI grava o arquivo (escrita atomica) e **nao** faz commit: o registro segue o ciclo autonomo
   (commit, PR, merge, deploy). Arquivo corrompido: o `list` mostra vazio com aviso; o `add` recusa gravar
   por cima, corrija o JSON primeiro.
+- `add` escolhe o proximo `OA-NNN` olhando o arquivo local **e** `origin/main` (`git show`, melhor esforco).
+  Mesmo assim, duas branches podem gerar o mesmo id antes de sincronizar uma com a outra; se isso
+  acontecer, `run_ticket`/`deliver_branch` renumeram sozinhos a OA da branch logo apos o rebase/sync,
+  antes do portao (USR-255; secao 7).
 - Quem resolve o bloqueio marca `done` (ou `answer`) e cita os `OA-xxx` no relatorio do turno.
 
 ## 4. Decisoes: como a linha retoma
@@ -165,3 +169,4 @@ e o aviso Telegram original da `HumanRequest` continua sendo o unico (o espelho 
 | Aviso amarelo "JSON corrompido" | `owner_actions.json` com erro de sintaxe | Abra o arquivo, corrija o JSON (o CLI `list` indica a linha); a fila de outras intervencoes segue normal |
 | `[ERRO] ... credential-shaped` no `add` | Passo com token/senha literal | Troque por placeholder (`<TOKEN_NOVO>`) |
 | Cliquei em Marcar como feito e voltou 401 | Sessao do Hub expirada | Recarregue a pagina e tente de novo |
+| Portao reprova com "item OA-NNN duplicado ignorado" | Duas branches escolheram o mesmo `OA-NNN` sem ver a commit uma da outra; o rebase/merge juntou as duas sem conflito textual | Normalmente ja autocorrigido: `run_ticket`/`deliver_branch` renumeram a OA da branch logo apos o sync com `origin/main`, antes do portao (USR-255). Se persistir, edite o arquivo a mao, renumere a entrada duplicada da sua branch e rode `python C:\dev\DarkFac\scripts\owner_action.py list` para conferir |

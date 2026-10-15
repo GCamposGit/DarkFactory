@@ -273,6 +273,95 @@ def test_resume_delivery_happy_path(tmp_path: Path, capsys: pytest.CaptureFixtur
     mock_sweep.assert_called_once()
 
 
+def test_resume_delivery_renumbers_duplicate_owner_action_before_gate(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A branch-local OA-NNN colliding with origin/main is renumbered before the gate (USR-255).
+
+    Reproduces the USR-249 incident: the ticket branch committed its own OA-002 while origin/main
+    independently had a different OA-002 (both picked the same next free number). A rebase/merge
+    between the two can land both rows side by side without a textual conflict, so the gate's
+    ``test_seeded_backlog_is_valid_and_complete`` would fail on "item OA-002 duplicado ignorado".
+    The branch's own commit here stands in for that merged state; the fix must renumber the
+    branch's row, commit it, and let delivery succeed.
+    """
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _init_git_repo(repo)
+
+    demands_dir = repo / ".factory" / "demands"
+    demands_dir.mkdir(parents=True)
+    ledger = demands_dir / "demands.json"
+    store = DemandsStore(ledger)
+    ticket = UserTicket(
+        id="USR-255",
+        project_id="darkfac",
+        title="Test Ticket",
+        problem_statement="Test problem",
+        status=DeliveryStatus.PLANNED,
+    )
+    store.save_ticket(ticket)
+
+    oa_dir = repo / ".factory" / "owner_actions"
+    oa_dir.mkdir(parents=True)
+    oa_path = oa_dir / "owner_actions.json"
+    oa_001 = {"id": "OA-001", "title": "Item ja existente", "kind": "action", "priority": "medium",
+              "status": "open", "steps": [{"text": "Faca algo"}]}
+    remote_oa_002 = {"id": "OA-002", "title": "Veio de outro PR em origin/main", "kind": "action",
+                      "priority": "high", "status": "open", "steps": [{"text": "Passo do origin/main"}]}
+    oa_path.write_text(json.dumps({"schema_version": 1, "actions": [oa_001]}), encoding="utf-8")
+    subprocess.run(["git", "add", "-A"], cwd=str(repo), check=True, capture_output=True)
+    subprocess.run(["git", "commit", "-m", "init"], cwd=str(repo), check=True, capture_output=True)
+
+    # origin/main gains OA-002 on a commit the ticket branch will be based on.
+    oa_path.write_text(json.dumps({"schema_version": 1, "actions": [oa_001, remote_oa_002]}), encoding="utf-8")
+    subprocess.run(["git", "commit", "-am", "chore: origin adds OA-002"], cwd=str(repo), check=True, capture_output=True)
+    subprocess.run(
+        ["git", "update-ref", "refs/remotes/origin/main", "main"], cwd=str(repo), check=True, capture_output=True
+    )
+
+    # The ticket branch, based on that same commit, independently registered its OWN OA-002 (a
+    # different reason) before ever seeing origin/main's -- the state a non-conflicting rebase/merge
+    # of the two would leave behind.
+    subprocess.run(["git", "checkout", "-b", "ticket/usr-255"], cwd=str(repo), check=True, capture_output=True)
+    branch_oa_002 = {"id": "OA-002", "title": "Registrado pela branch do ticket", "kind": "action",
+                      "priority": "high", "status": "open", "steps": [{"text": "Passo da branch"}]}
+    oa_path.write_text(
+        json.dumps({"schema_version": 1, "actions": [oa_001, remote_oa_002, branch_oa_002]}), encoding="utf-8"
+    )
+    (repo / "code.py").write_text("x = 1\n", encoding="utf-8")
+    subprocess.run(["git", "add", "-A"], cwd=str(repo), check=True, capture_output=True)
+    subprocess.run(
+        ["git", "commit", "-m", "feat: usr-255 implementation"], cwd=str(repo), check=True, capture_output=True
+    )
+
+    fake_success_report = TicketCompletionReport(
+        ok=True, ticket_id="USR-255", commit_sha="deadbeef", message="Delivered successfully",
+    )
+
+    with patch("run_ticket.PROJECT_ROOT", repo), \
+         patch.object(GitAutonomyManager, "complete_ticket", return_value=fake_success_report), \
+         patch.object(GitAutonomyManager, "sweep_stale"):
+        code = run_ticket.resume_delivery("USR-255", worktree_path=repo, skip_validation=True)
+        assert code == 0
+
+    captured = capsys.readouterr()
+    assert "OA renumerada apos sync com origin/main: OA-002 -> OA-003" in captured.out
+    assert "[SUCESSO] Ticket USR-255 entregue e validado com sucesso!" in captured.out
+
+    document = json.loads(oa_path.read_text(encoding="utf-8"))
+    assert [row["id"] for row in document["actions"]] == ["OA-001", "OA-002", "OA-003"]
+
+    status = subprocess.run(
+        ["git", "status", "--porcelain"], cwd=str(repo), check=True, capture_output=True, text=True
+    )
+    assert status.stdout.strip() == ""
+    log = subprocess.run(
+        ["git", "log", "--oneline", "-3"], cwd=str(repo), check=True, capture_output=True, text=True
+    )
+    assert "renumera OA duplicado" in log.stdout
+
+
 def test_delivery_in_fresh_process_prevents_stale_module_value_error(tmp_path: Path) -> None:
     """Delivery phase executes via fresh subprocess, immune to in-memory stale imports (USR-116)."""
     # In the parent process, simulate a stale module state where UserTicket lacks a new field

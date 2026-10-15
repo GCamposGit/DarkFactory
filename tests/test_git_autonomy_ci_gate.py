@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import ast
 import json
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -16,7 +17,9 @@ from typing import Any, Callable, Optional, Sequence
 
 import pytest
 
-pytestmark = [pytest.mark.serial]
+# USR-263: not serial. Every repository lives under tmp_path (private copy of a module-scoped
+# template), gh is scripted, the clock is injected: no fixed ports, no real-repo mutation, no
+# latency budget. It runs in the parallel step, where its ~60 git-heavy tests are spread over workers.
 
 from core.git import autonomy
 from core.git import ci_checks
@@ -357,12 +360,12 @@ def test_runner_exceptions_count_as_errors() -> None:
 
 
 def test_wait_seconds_come_from_the_environment(monkeypatch: pytest.MonkeyPatch) -> None:
-    assert ci_checks.resolve_wait_seconds() == 1200
+    assert ci_checks.resolve_wait_seconds() == 2400
     monkeypatch.setenv(ci_checks.CI_WAIT_ENV, "45")
     assert ci_checks.resolve_wait_seconds() == 45
     assert ci_checks.resolve_wait_seconds(7) == 7
     monkeypatch.setenv(ci_checks.CI_WAIT_ENV, "not-a-number")
-    assert ci_checks.resolve_wait_seconds() == 1200
+    assert ci_checks.resolve_wait_seconds() == 2400
 
     monkeypatch.setenv(ci_checks.CI_WAIT_ENV, "25")
     clock = FakeClock()
@@ -521,12 +524,14 @@ class FakeRepoGh(GhScript):
         return super().__call__(args, cwd)
 
 
-@pytest.fixture
-def repo(tmp_path: Path) -> tuple[Path, Path]:
-    bare = tmp_path / "origin.git"
+@pytest.fixture(scope="module")
+def _repo_template(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    """Build the base repository pair (local clone + bare origin) once per module (USR-263)."""
+    root = tmp_path_factory.mktemp("repo_template")
+    bare = root / "origin.git"
     bare.mkdir()
     _git(bare, "init", "--bare", "--quiet", "-b", "main")
-    local = tmp_path / "local"
+    local = root / "local"
     local.mkdir()
     _git(local, "init", "--quiet", "-b", "main")
     _ident(local)
@@ -534,8 +539,21 @@ def repo(tmp_path: Path) -> tuple[Path, Path]:
     _git(local, "add", "-A")
     _git(local, "commit", "--quiet", "-m", "chore: initial")
     _git(local, "remote", "add", "origin", "https://github.com/x/y.git")
-    _git(local, "config", f"url.{bare.as_posix()}.insteadOf", "https://github.com/x/y.git")
+    insteadof = f"url.{bare.as_posix()}.insteadOf"
+    _git(local, "config", insteadof, "https://github.com/x/y.git")
     _git(local, "push", "--quiet", "-u", "origin", "main")
+    _git(local, "config", "--unset", insteadof)
+    return root
+
+
+@pytest.fixture
+def repo(_repo_template: Path, tmp_path: Path) -> tuple[Path, Path]:
+    """Per-test private copy of the template; only the absolute insteadOf URL is rewritten."""
+    bare = tmp_path / "origin.git"
+    local = tmp_path / "local"
+    shutil.copytree(_repo_template / "origin.git", bare)
+    shutil.copytree(_repo_template / "local", local)
+    _git(local, "config", f"url.{bare.as_posix()}.insteadOf", "https://github.com/x/y.git")
     return local, bare
 
 
@@ -1243,3 +1261,7 @@ def test_a_raising_on_phase_hook_never_changes_the_delivery(repo: tuple[Path, Pa
     rep = mgr.deliver_branch("USR-90", "Gate", cwd=local, gh_runner=gh)
 
     assert rep.ok and rep.action == "merged", rep.message
+
+
+def test_default_ci_wait_covers_slow_windows_checks() -> None:
+    assert ci_checks.DEFAULT_CI_WAIT_SECONDS >= 2400
