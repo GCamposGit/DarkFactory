@@ -620,9 +620,10 @@ def _run_focal_tests(cwd: Path, targets: list[str]) -> Optional[Any]:
     """
     if not targets:
         return None
-    if gate_ram.remote_worker_available():
+    if gate_ram.remote_workers_configured():
         logger.info(
-            "[FOCAL] pre-teste local pulado: worker remoto livre; validacao integral fica para o portao oficial"
+            "[FOCAL] pre-teste local pulado: workers remotos configurados; "
+            "disponibilidade e validacao integral ficam para o portao oficial"
         )
         return None
 

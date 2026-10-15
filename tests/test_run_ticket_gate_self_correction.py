@@ -382,7 +382,12 @@ def test_focal_test_failure_rejects_before_the_official_gate_runs(tmp_path: Path
         gate_calls.append(argv)
         return BoundedProcessResult(stdout="should never run", stderr="", returncode=0, duration_s=0.0)
 
+    focal_ram_ready = run_ticket.gate_ram.RamWaitResult(
+        True, run_ticket.gate_ram.RamReading(available_gib=8.0, workers=2), waited_s=0.0
+    )
     with patch("run_ticket.PROJECT_ROOT", repo), \
+         patch.object(run_ticket.gate_ram, "remote_workers_configured", return_value=False), \
+         patch.object(run_ticket.gate_ram, "wait_for_gate_ram", return_value=focal_ram_ready), \
          patch("run_ticket._invoke_fix_agent", new=fake_fix), \
          patch("run_ticket._run_bounded", new=fake_run_bounded):
         code = run_ticket.resume_delivery("USR-245", worktree_path=repo, skip_validation=False)
@@ -475,7 +480,8 @@ def test_run_focal_tests_passes_the_scaled_timeout_to_the_engine(tmp_path: Path)
     ready = run_ticket.gate_ram.RamWaitResult(
         True, run_ticket.gate_ram.RamReading(available_gib=8.0, workers=2), waited_s=0.0
     )
-    with patch.object(run_ticket.gate_ram, "remote_worker_available", return_value=False), \
+    with patch.object(run_ticket.gate_ram, "remote_workers_configured", return_value=False), \
+         patch.object(run_ticket.gate_ram, "remote_worker_available", return_value=False), \
          patch.object(run_ticket.gate_ram, "wait_for_gate_ram", return_value=ready) as wait_for_ram, \
          patch.object(TestSubagentEngine, "execute_local", new=fake_execute_local):
         run_ticket._run_focal_tests(tmp_path, targets)
@@ -488,12 +494,13 @@ def test_run_focal_tests_passes_the_scaled_timeout_to_the_engine(tmp_path: Path)
     assert expected > run_ticket.FOCAL_TEST_TIMEOUT_S, "the test setup should exercise actual scaling"
 
 
-def test_run_focal_tests_skips_local_pretest_when_remote_worker_is_free(tmp_path: Path, caplog) -> None:
-    """USR-265: leave candidate validation to the official remote gate when a worker is free."""
+def test_run_focal_tests_skips_local_pretest_when_remote_workers_are_configured(tmp_path: Path, caplog) -> None:
+    """USR-265: let the official dispatcher own health checks, queueing, and fallback."""
     from core.harness.test_subagent import TestSubagentEngine
 
     caplog.set_level(logging.INFO, logger="darkfac.run_ticket")
-    with patch.object(run_ticket.gate_ram, "remote_worker_available", return_value=True), \
+    with patch.object(run_ticket.gate_ram, "remote_workers_configured", return_value=True), \
+         patch.object(run_ticket.gate_ram, "remote_worker_available", return_value=False), \
          patch.object(run_ticket.gate_ram, "wait_for_gate_ram") as wait_for_ram, \
          patch.object(TestSubagentEngine, "execute_local") as execute_local:
         report = run_ticket._run_focal_tests(tmp_path, ["tests/test_git_autonomy_ci_gate.py"])
@@ -501,8 +508,24 @@ def test_run_focal_tests_skips_local_pretest_when_remote_worker_is_free(tmp_path
     assert report is None
     wait_for_ram.assert_not_called()
     execute_local.assert_not_called()
-    assert "worker remoto livre" in caplog.text
-    assert "validacao integral fica para o portao oficial" in caplog.text
+    assert "workers remotos configurados" in caplog.text
+    assert "validacao integral ficam para o portao oficial" in caplog.text
+
+
+def test_remote_workers_configured_ignores_transient_health_and_busy_state() -> None:
+    """USR-265: configuration, not a single health probe, decides whether to avoid local focal work."""
+    from core.harness import remote_dispatch
+
+    with patch.object(remote_dispatch, "_effective_mode", return_value="auto"), \
+         patch.object(remote_dispatch, "_unconditional_disable_reason", return_value=None), \
+         patch.object(remote_dispatch, "worker_urls", return_value=["http://worker.test"]), \
+         patch.object(remote_dispatch, "probe_health", return_value=None):
+        assert run_ticket.gate_ram.remote_workers_configured() is True
+
+    with patch.object(remote_dispatch, "_effective_mode", return_value="off"), \
+         patch.object(remote_dispatch, "_unconditional_disable_reason", return_value=None), \
+         patch.object(remote_dispatch, "worker_urls", return_value=["http://worker.test"]):
+        assert run_ticket.gate_ram.remote_workers_configured() is False
 
 
 def test_run_focal_tests_skips_local_pretest_when_ram_wait_expires(tmp_path: Path, caplog) -> None:
@@ -512,7 +535,8 @@ def test_run_focal_tests_skips_local_pretest_when_ram_wait_expires(tmp_path: Pat
     insufficient = run_ticket.gate_ram.RamWaitResult(
         False, run_ticket.gate_ram.RamReading(available_gib=1.0, workers=0), waited_s=120.0
     )
-    with patch.object(run_ticket.gate_ram, "remote_worker_available", return_value=False), \
+    with patch.object(run_ticket.gate_ram, "remote_workers_configured", return_value=False), \
+         patch.object(run_ticket.gate_ram, "remote_worker_available", return_value=False), \
          patch.object(run_ticket.gate_ram, "wait_for_gate_ram", return_value=insufficient) as wait_for_ram, \
          patch.object(TestSubagentEngine, "execute_local") as execute_local:
         report = run_ticket._run_focal_tests(tmp_path, ["tests/test_git_autonomy_ci_gate.py"])
@@ -564,7 +588,12 @@ def test_focal_test_fix_on_second_pass_reaches_merge_without_resume_delivery(tmp
         ok=True, ticket_id="USR-245", commit_sha="deadbeef", message="Delivered successfully",
     )
 
+    focal_ram_ready = run_ticket.gate_ram.RamWaitResult(
+        True, run_ticket.gate_ram.RamReading(available_gib=8.0, workers=2), waited_s=0.0
+    )
     with patch("run_ticket.PROJECT_ROOT", repo), \
+         patch.object(run_ticket.gate_ram, "remote_workers_configured", return_value=False), \
+         patch.object(run_ticket.gate_ram, "wait_for_gate_ram", return_value=focal_ram_ready), \
          patch("run_ticket._invoke_fix_agent", new=fake_fix_that_actually_fixes_it), \
          patch.object(GitAutonomyManager, "complete_ticket", return_value=fake_success_report), \
          patch.object(GitAutonomyManager, "sweep_stale"):
