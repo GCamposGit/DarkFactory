@@ -7805,8 +7805,8 @@
     "project_id": "darkfac",
     "title": "Pre-teste focal do run_ticket roda sempre local: com worker remoto ele estoura 600 s no Notebook antes de o portao despachar",
     "origin": "user",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "dc4a0cd9dbf5012aed7ac4f401eb378faca0c5d1",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -7832,7 +7832,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-15T01:53:56.344293Z",
-    "updated_at": "2026-10-15T07:57:46.949264Z"
+    "updated_at": "2026-10-15T18:56:40.051545Z"
   },
   {
     "id": "USR-266",
