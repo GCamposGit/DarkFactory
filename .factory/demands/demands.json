@@ -7772,8 +7772,8 @@
     "project_id": "darkfac",
     "title": "Falha transitoria de git show no indice derruba a entrega com traceback depois do portao aprovado",
     "origin": "user",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "5fc3b75aa10147342d6f39ee8e59364c98642660",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -7798,7 +7798,7 @@
     "estimated_complexity": "low",
     "dependencies": [],
     "created_at": "2026-10-15T01:53:51.147904Z",
-    "updated_at": "2026-10-15T01:53:51.147904Z"
+    "updated_at": "2026-10-15T02:25:58.097540Z"
   },
   {
     "id": "USR-265",
