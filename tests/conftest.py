@@ -420,6 +420,49 @@ def _isolate_operating_harness_env(monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.delenv(name, raising=False)
 
 
+# Variables that point the factory at REAL remote infrastructure (test workers on the tailnet) or
+# tune how long it waits for them. The process that launches `run_ticket` exports them (and on the
+# owner's Notebook they live in the Windows user environment), so every pytest child inherits them.
+# With the workers down, each probe then waits up to DARKFAC_WORKER_HEALTH_TIMEOUT_SEC and the local
+# fallback of the gate blew its 3000 s budget (15/10 incident, USR-192).
+#   DARKFAC_TEST_WORKERS               comma list of worker URLs (remote_dispatch / gate_ram / node_sync)
+#   DARKFAC_WORKER_HEALTH_TIMEOUT_SEC  seconds per /health probe
+#   DARKFAC_REMOTE_HARNESS             on/off switch for remote gate dispatch
+#   DARKFAC_HARNESS_WORKER_JOB         job id marker set inside a worker-executed gate
+#   DARKFAC_WORKER_DEAD_PROBES         consecutive failed probes before a worker is declared dead
+#   DARKFAC_REMOTE_BUSY_WAIT_SEC       how long to wait for a busy worker to free up
+#   DARKFAC_HARNESS_REMOTE_WAIT_SEC    cap of the cache-layer wait for a remote verdict
+#   DARKFAC_WORKER_SILENCE_FALLBACK_SEC ceiling for a slow-but-alive (silent) worker
+#   DARKFAC_REMOTE_DISPATCH_TEST_OVERRIDE self-dispatch test override
+#   REMOTE_HARNESS_URL / REMOTE_HARNESS_URLS legacy worker URL settings
+# Deliberately NOT cleared: DARKFAC_MAX_WORKERS and PYTEST_XDIST_* (they control pytest itself) and
+# the worker identity settings (DARKFAC_WORKER_ID/TOKEN/CAPS/PRIORITY), which point nowhere on their own.
+AMBIENT_REMOTE_INFRA_ENV = (
+    "DARKFAC_TEST_WORKERS",
+    "DARKFAC_WORKER_HEALTH_TIMEOUT_SEC",
+    "DARKFAC_REMOTE_HARNESS",
+    "DARKFAC_HARNESS_WORKER_JOB",
+    "DARKFAC_WORKER_DEAD_PROBES",
+    "DARKFAC_REMOTE_BUSY_WAIT_SEC",
+    "DARKFAC_HARNESS_REMOTE_WAIT_SEC",
+    "DARKFAC_WORKER_SILENCE_FALLBACK_SEC",
+    "DARKFAC_REMOTE_DISPATCH_TEST_OVERRIDE",
+    "REMOTE_HARNESS_URL",
+    "REMOTE_HARNESS_URLS",
+)
+
+
+@pytest.fixture(autouse=True)
+def _isolate_remote_infra_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """No test inherits the pointers to real remote workers from the launching environment.
+
+    A test that exercises remote dispatch sets what it needs with `monkeypatch.setenv` (runs after).
+    """
+
+    for name in AMBIENT_REMOTE_INFRA_ENV:
+        monkeypatch.delenv(name, raising=False)
+
+
 @pytest.fixture(autouse=True)
 def _isolate_ambient_worker_config_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """Cloud-worker container settings must not leak into tests.
