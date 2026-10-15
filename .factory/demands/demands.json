@@ -7839,8 +7839,8 @@
     "project_id": "darkfac",
     "title": "Portao reprovado dentro da entrega nao mostra no console quais testes falharam (erro: sem detalhe)",
     "origin": "user",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "8cc76b450b546eda0de611c55754179621d936d3",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -7865,6 +7865,6 @@
     "estimated_complexity": "low",
     "dependencies": [],
     "created_at": "2026-10-15T07:58:00.991659Z",
-    "updated_at": "2026-10-15T07:58:00.991659Z"
+    "updated_at": "2026-10-15T18:07:31.217013Z"
   }
 ]
