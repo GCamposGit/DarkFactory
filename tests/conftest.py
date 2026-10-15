@@ -29,11 +29,9 @@ from tests import _tree_hygiene, _worker_capacity
 # Mitigate Windows WMI query crashes (0x8007000e) during worker startup (USR-95)
 _worker_capacity.mitigate_windows_wmi_startup()
 
-_DEFAULT_SUITE_LOCK_MIN_ITEMS = 100
-
 # Set by pytest_sessionstart (xdist controller) or pytest_collection_finish
-# (plain, non-distributed run with enough items to count as "the full
-# suite"). Released in pytest_sessionfinish. A raw `pytest` invocation by ANY
+# (plain, non-distributed run). Released in pytest_sessionfinish. A raw
+# complete-suite `pytest` invocation by ANY
 # harness/agent on this machine goes through this lock too -- not only the
 # official `core/harness/runner.py` -- so two full suites never fight over
 # CPU and sqlite state at once.
@@ -67,6 +65,41 @@ def _requested_numprocesses(config: pytest.Config) -> int | None:
     if not value or value in ("0",):
         return None
     return value
+
+
+def _is_explicit_focal_selection(config: pytest.Config) -> bool:
+    """Whether pytest was explicitly asked to select less than the test suite.
+
+    Selection happens before collection finishes, but the resulting item count
+    is not enough to identify a focal run: one file can contain 100+ tests.
+    Keep default ``testpaths`` (the complete suite) eligible for the lock while
+    treating explicit paths, node IDs, and pytest filters as focal selections.
+    """
+
+    option = config.option
+    if any(
+        getattr(option, name, None)
+        for name in ("keyword", "markexpr", "deselect", "ignore", "ignore_glob")
+    ):
+        return True
+
+    selected_paths = getattr(config, "args", ())
+    if not selected_paths:
+        return False
+
+    rootpath = Path(getattr(config, "rootpath", IMPORT_ROOT))
+
+    def resolve_from_root(path: Path) -> Path:
+        return (path if path.is_absolute() else rootpath / path).resolve()
+
+    default_paths = config.getini("testpaths")
+    default_resolved = {resolve_from_root(Path(path)) for path in default_paths}
+    for selected in selected_paths:
+        # Pytest node IDs append ``::class::test`` to a file path.
+        selected_path = str(selected).split("::", 1)[0]
+        if resolve_from_root(Path(selected_path)) not in default_resolved:
+            return True
+    return False
 
 
 @pytest.hookimpl(tryfirst=True)
@@ -145,27 +178,29 @@ def _finish_tree_guard(session: pytest.Session) -> None:
 
 
 def pytest_sessionstart(session: pytest.Session) -> None:
-    """xdist controller acquires the machine-wide lock before workers spawn."""
+    """Lock complete xdist runs before workers inherit the held-lock marker."""
 
     config = session.config
-    if not _lock_should_be_skipped(config) and _requested_numprocesses(config) is not None:
+    if (
+        not _lock_should_be_skipped(config)
+        and _requested_numprocesses(config) is not None
+        and not _is_explicit_focal_selection(config)
+    ):
         _acquire_session_lock()
     _start_tree_guard(config)
 
 
 def pytest_collection_finish(session: pytest.Session) -> None:
-    """Non-distributed run: only queue once collection proves this is a big run."""
+    """Lock complete-suite runs after collection, leaving focal runs unqueued."""
 
     config = session.config
     if _lock_should_be_skipped(config):
         return
     if _session_suite_lock is not None:
-        return  # already acquired at sessionstart (xdist controller path)
-    if _requested_numprocesses(config) is not None:
-        return  # xdist requested but sessionstart already handled it
-    min_items = int(os.environ.get("DARKFAC_SUITE_LOCK_MIN_ITEMS", str(_DEFAULT_SUITE_LOCK_MIN_ITEMS)))
-    if len(session.items) >= min_items:
-        _acquire_session_lock()
+        return
+    if _is_explicit_focal_selection(config):
+        return
+    _acquire_session_lock()
 
 
 @pytest.hookimpl(trylast=True)
