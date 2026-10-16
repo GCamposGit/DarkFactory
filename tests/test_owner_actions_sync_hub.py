@@ -67,3 +67,34 @@ def test_sync_endpoint_authentication_persistence_and_forbidden_fields(tmp_path:
         assert client.post("/api/owner-actions/sync", json={**payload, "closed": True}, headers=headers).status_code == 200
         assert client.post("/api/owner-actions/sync", json=payload, headers=headers).json()["status"] == "done"
     assert not (tmp_path / "tracked.json").exists()
+
+
+@pytest.mark.parametrize("first,second", [
+    (("a-b", "c"), ("a", "b-c")),
+    (("unsafe/x", "stage"), ("unsafe?x", "stage")),
+    (("x" * 100 + "a", "stage"), ("x" * 100 + "b", "stage")),
+])
+def test_dynamic_identity_collision_cannot_close_another_request(tmp_path: Path, first: tuple[str, str], second: tuple[str, str]) -> None:
+    store = OwnerActionStore(tmp_path / "tracked.json", dynamic_path=tmp_path / "dynamic.json", remote_ref=None)
+    first_request = request().model_copy(update={"run_id": first[0], "blocking_stage": first[1]})
+    second_request = request().model_copy(update={"run_id": second[0], "blocking_stage": second[1]})
+    action = store.sync_human_request(first_request, closed=False)
+    assert action.id == mirrored_id(*second)
+    original = store.dynamic_path.read_bytes()
+    with pytest.raises(OwnerActionInvalid, match="identity"):
+        store.sync_human_request(second_request, closed=True)
+    assert store.dynamic_path.read_bytes() == original
+    assert store.get(action.id).status is ActionStatus.OPEN
+    store.sync_human_request(first_request, closed=True)
+    assert store.get(action.id).status is ActionStatus.DONE
+
+
+def test_dynamic_legacy_without_identity_fails_closed(tmp_path: Path) -> None:
+    from core.owner_actions.mirror import human_request_to_action
+    dynamic_path = tmp_path / "dynamic.json"
+    OwnerActionStore(dynamic_path, remote_ref=None).upsert(human_request_to_action(request()))
+    store = OwnerActionStore(tmp_path / "tracked.json", dynamic_path=dynamic_path, remote_ref=None)
+    original = dynamic_path.read_bytes()
+    with pytest.raises(OwnerActionInvalid, match="identity"):
+        store.sync_human_request(request(), closed=True)
+    assert dynamic_path.read_bytes() == original

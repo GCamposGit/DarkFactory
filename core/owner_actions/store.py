@@ -268,8 +268,14 @@ class OwnerActionStore:
         dynamic = OwnerActionStore(self.dynamic_path, remote_ref=None)
 
         def apply(document: dict[str, Any], rows: list[Any]) -> OwnerAction:
+            identity = [request.run_id, request.blocking_stage]
+            identities = document.setdefault("human_request_identities", {})
+            if not isinstance(identities, dict):
+                raise OwnerActionInvalid("invalid dynamic identity metadata")
             for index, raw in enumerate(rows):
                 if isinstance(raw, dict) and raw.get("id") == action.id:
+                    if identities.get(action.id) != identity:
+                        raise OwnerActionInvalid("dynamic owner action identity conflict or missing identity")
                     existing = OwnerAction.model_validate(raw)
                     if existing.status is ActionStatus.DONE or not closed:
                         return existing
@@ -277,6 +283,7 @@ class OwnerActionStore:
                     rows[index] = done.to_record()
                     return done
             saved = OwnerAction.model_validate({**action.to_record(), "status": "done"}) if closed else action
+            identities[action.id] = identity
             rows.append(saved.to_record())
             return saved
 
