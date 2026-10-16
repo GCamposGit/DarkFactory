@@ -123,6 +123,12 @@ class ProjectDescriptor(BaseModel):
         default=False, description="Blocks automatic deploy until commercial/business acceptance is given"
     )
 
+    @field_validator("commands", mode="before")
+    @classmethod
+    def _empty_commands_when_unconfigured(cls, value: object) -> object:
+        """Older project registries may spell unconfigured commands as JSON null."""
+        return ProjectCommands() if value is None else value
+
     def resolve_path(self, platform_name: Optional[str] = None) -> Optional[Path]:
         """Resolve workspace path for the current OS platform or darkfac core (USR-101)."""
         if self.id == "darkfac":
