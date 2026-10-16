@@ -8333,8 +8333,8 @@
     "project_id": "darkfac",
     "title": "F2: reserva transacional de ciclo e host com fencing",
     "origin": "user",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "PR: Reserva transacional de ciclo e host com fencing (F2 do throughput de 3 workers). Adicionada tabela fleet_reservations com unicidade de ticket ativo e 1 ciclo por host (teto de 3 slots simultaneos) em SQLiteControlStore e PostgresControlStore; claims de etapa subordinados ao ciclo ativo e afinidade de host; fencing_token validado em finish(), heartbeat() e record_operation(); heartbeat_reservation, drain_host, expiracao e reconciliacao de operacoes desconhecidas. Suite com 27 testes em tests/test_line_fleet_reservations.py; portao runner.py --quick verde.",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -8365,7 +8365,7 @@
       "USR-280"
     ],
     "created_at": "2026-10-16T15:34:48.807216Z",
-    "updated_at": "2026-10-16T15:34:48.807216Z"
+    "updated_at": "2026-10-16T21:31:55.546167+00:00"
   },
   {
     "id": "USR-282",
