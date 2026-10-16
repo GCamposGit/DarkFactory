@@ -8610,9 +8610,9 @@
   {
     "id": "USR-291",
     "project_id": "darkfac",
-    "title": "Teste instavel tests/test_line_lock.py::test_heartbeat_thread_refreshes colide no os.replace no Windows",
+    "title": "Estabilizar leitura do teste de heartbeat no Windows",
     "origin": "user",
-    "status": "planned",
+    "status": "implementing",
     "delivery_evidence": null,
     "item_type": "feature",
     "lifecycle_stage": "execution",
@@ -8620,7 +8620,7 @@
     "tags": [
       "user-demand"
     ],
-    "problem_statement": "test_heartbeat_thread_refreshes_the_sidecar_while_held le line.lock a cada 50ms enquanto a thread de heartbeat faz os.replace(tmp, path) a cada 50ms, causando PermissionError 13 esporadico no Windows NTFS durante pytest\n\nEvidencia adicional da sessao USR-194 (16/10/2026): um teste CAS do outbox registrou PermissionError transitorio em publish_closed; arquivo/op e causa nao foram capturados. Reexecucao completa 20 PASS e focal instrumentado 1 PASS, sem relaxar assercoes. Teste agora registra filename/errno/winerror se repetir. Relacao causal com line.lock NAO comprovada; reproduzir antes de ampliar a correcao. PR371 (alerta USR-292) encerrado como duplicata do incidente line.lock ja registrado aqui; CI run38927481009 teve4219PASS/23skip/1falha.",
+    "problem_statement": "test_heartbeat_thread_refreshes_the_sidecar_while_held le line.lock a cada 50ms enquanto a thread de heartbeat faz os.replace(tmp, path) a cada 50ms, causando PermissionError 13 esporadico no Windows NTFS durante pytest\n\nEvidencia adicional da sessao USR-194 (16/10/2026): um teste CAS do outbox registrou PermissionError transitorio em publish_closed; arquivo/op e causa nao foram capturados. Reexecucao completa 20 PASS e focal instrumentado 1 PASS, sem relaxar assercoes. Teste agora registra filename/errno/winerror se repetir. Relacao causal com line.lock NAO comprovada; reproduzir antes de ampliar a correcao. PR371 (alerta USR-292) encerrado como duplicata do incidente line.lock ja registrado aqui; CI run38927481009 teve4219PASS/23skip/1falha.\n\nDiagnostico confirmado no run38927481009: excecao em tests/test_line_lock.py:177 ocorre em Path.read_text -> Path.open(r), no leitor do teste; NAO em os.replace da thread de heartbeat. Correcao restrita ao teste: snapshots via _read_lock, None nao representa sucesso, deadline2s e intervalo0.05s preservados. RED1falha/1pass com injeção de PermissionError so no leitor; GREENarquivo21PASS; contraprovas exigem falha se nao houver avanço real.",
     "core_journey": [
       "test_heartbeat_thread_refreshes_the_sidecar_while_held le line.lock a cada 50ms enquanto a thread de heartbeat faz os.replace(tmp, path) a cada 50ms, causando PermissionError 13 esporadico no Windows NTFS durante pytest"
     ],
@@ -8634,6 +8634,6 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-16T17:44:57.794931Z",
-    "updated_at": "2026-10-16T17:44:57.794931Z"
+    "updated_at": "2026-10-16T21:06:36.850001Z"
   }
 ]
