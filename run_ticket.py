@@ -984,10 +984,16 @@ def _run_gate_with_self_correction(
         if skip_validation:
             # Client delivery always fails closed without its declared project gate.
             skip_validation = False
+        failure_cause = "project_validate_failed"
         try:
             report = validate_project_commands(project, target_worktree, timeout_s=int(GATE_TIMEOUT_S))
+            if report.ok and project.commands.build:
+                from core.projects.ticket_execution import run_project_commands
+                failure_cause = "project_build_failed"
+                report = run_project_commands(project.commands.build, target_worktree, timeout_s=int(GATE_TIMEOUT_S))
             if report.ok and project.commands.smoke:
                 from core.projects.ticket_execution import run_project_commands
+                failure_cause = "project_smoke_failed"
                 report = run_project_commands(project.commands.smoke, target_worktree, timeout_s=int(GATE_TIMEOUT_S))
         except ProjectExecutionError as exc:
             detail = str(exc)
@@ -998,14 +1004,14 @@ def _run_gate_with_self_correction(
             if not as_json:
                 print("[+] Validação declarada pelo projeto aprovada: [HARNESS_PASS]!")
             return None
-        detail = report.combined_output
-        progress.phase("gate", "failed", redacted_head(detail[-1200:], 600), cause="project_validate_failed")
+        detail = redact_secrets(report.combined_output)
+        progress.phase("gate", "failed", redacted_head(detail[-1200:], 600), cause=failure_cause)
         if not as_json:
             print(f"[ERRO NO PORTÃO DO PROJETO]:\n{detail}", file=sys.stderr)
         return {
             "exit_code": report.exit_code or 1,
             "ok": False,
-            "cause": "project_validate_failed",
+            "cause": failure_cause,
             "error": detail,
             "worktree": str(target_worktree),
         }

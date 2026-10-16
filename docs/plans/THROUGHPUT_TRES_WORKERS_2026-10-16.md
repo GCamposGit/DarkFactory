@@ -4,7 +4,7 @@ Data: 16/10/2026. Entrega deste ticket: planejamento e fila de implementação. 
 
 ## Decisões do owner
 
-Fonte: respostas explícitas ao Grill nesta conversa, em 16/10/2026; OA-024, OA-025 e OA-026.
+Fonte: respostas explícitas ao Grill nesta conversa, em 16/10/2026; OA-026, OA-027 e OA-028.
 
 - Uma demanda completa por máquina, em paralelo e de forma independente. Ordem de preferência para máquinas disponíveis: **Grokbox → Notebook → Desktop**.
 - A vaga permanece ocupada durante testes e demais etapas do ciclo. Até três ciclos executando; subagentes internos continuam permitidos conforme as regras existentes.

@@ -8058,6 +8058,204 @@
     "updated_at": "2026-10-16T12:47:18.616711Z"
   },
   {
+    "id": "USR-273",
+    "project_id": "darkfac",
+    "title": "Cadastro executavel de projetos pela CLI preserva contratos existentes",
+    "origin": "agent",
+    "status": "completed",
+    "delivery_evidence": "2cf0213b7cc2766249cf75ee6c79eb80329587e6",
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand",
+      "pos-v0-autonomia",
+      "standalone-projects",
+      "bug"
+    ],
+    "problem_statement": "Auditoria pos-V0 de 16/10/2026: core/projects/cli.py register cria ProjectDescriptor apenas com flags legadas; ProjectRegistry.register_project substitui o objeto inteiro. Atualizar nome ou caminho de um ID existente apaga repo_url, default_branch, commands, deploy e smoke. A CLI tambem nao permite fornecer esses contratos completos. Isso impede onboarding confiavel de projeto stand alone. Evidencia: core/projects/cli.py ramo register e core/projects/registry.py register_project.",
+    "core_journey": [],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "CLI importa descriptor JSON validado com repo, branch, commands, deploy e smoke, preservando alias validate e compatibilidade do cadastro legado",
+      "Atualizar um projeto com flags ou campos parciais preserva todos os campos omitidos, inclusive prefixo, descricao e contratos executaveis; teste reproduz a perda anterior",
+      "Entrada invalida e conflito de identificador retornam erro estruturado sem alterar o registro; testes focados e portao oficial passam"
+    ],
+    "suggested_files": [
+      "core/projects/cli.py",
+      "tests/test_project_registry_cli.py"
+    ],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-16T15:25:54.709796Z",
+    "updated_at": "2026-10-16T15:31:46.384040Z"
+  },
+  {
+    "id": "USR-274",
+    "project_id": "darkfac",
+    "title": "Conectar bootstrap greenfield a remoto privado e registro executavel do projeto",
+    "origin": "agent",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "later",
+    "tags": [
+      "user-demand",
+      "pos-v0-autonomia",
+      "standalone-projects",
+      "onboarding",
+      "congelado-v0"
+    ],
+    "problem_statement": "core.adoption.initialize_project cria Git e README, mas nao cria remoto nem registra o projeto. O harness gerado nao alimenta commands.validate no registro exigido pelo launcher. O owner autorizou em 16/10/2026 criar repositorios privados na sua conta GitHub e ambientes separados na infraestrutura existente, sem novas contratacoes; a primeira prova sera piloto tecnico descartavel.",
+    "core_journey": [],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Bootstrap de projeto novo conecta repositorio privado autorizado, branch e registro executavel sem alterar o repositorio do core",
+      "Replay retoma os mesmos recursos sem duplicacao e falha parcial deixa diagnostico e estado retomavel sem remover dados preexistentes",
+      "Teste com repositorios temporarios comprova bootstrap ate ticket executavel e bloqueio explicito se testes ou credenciais indispensaveis faltarem"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-16T15:26:06.126657Z",
+    "updated_at": "2026-10-16T15:30:47.423629Z"
+  },
+  {
+    "id": "USR-275",
+    "project_id": "darkfac",
+    "title": "Executar projetos externos em ambiente proprio sem herdar dependencias e credenciais do core",
+    "origin": "agent",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "later",
+    "tags": [
+      "user-demand",
+      "pos-v0-autonomia",
+      "standalone-projects",
+      "environment",
+      "credentials",
+      "congelado-v0"
+    ],
+    "problem_statement": "core.line.stage_build.run_shell_commands herda o ambiente do processo. No launcher de projeto externo, ambiente proprio depende apenas de comandos informais do projeto; python -m pytest pode resolver o Python/PATH da fabrica. O owner exige produto stand alone, com testes e ambiente proprios. Separar contrato de ambiente e prova de independencia, sem impor stack unica a todos os produtos.",
+    "core_journey": [],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Contrato do projeto declara ambiente e setup reproduzivel; execucao usa o ambiente escolhido e nao depende do Python/PATH/PYTHONPATH do core",
+      "Segredos e configuracao de producao da fabrica nao chegam ao produto por heranca; referencias explicitas necessarias sao resolvidas sem valores em logs ou Git",
+      "Teste com projeto temporario executa setup, testes e build fora do checkout da fabrica, incluindo contraprova de dependencia indevida e erro estruturado de ambiente ausente"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-16T15:26:17.261761Z",
+    "updated_at": "2026-10-16T15:30:47.441652Z"
+  },
+  {
+    "id": "USR-276",
+    "project_id": "darkfac",
+    "title": "Launcher de projeto externo executa build declarado antes de smoke e entrega",
+    "origin": "agent",
+    "status": "completed",
+    "delivery_evidence": "12338c56425500c3363b92279c58018e41b2076b",
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand",
+      "pos-v0-autonomia",
+      "standalone-projects",
+      "bug"
+    ],
+    "problem_statement": "Auditoria de run_ticket.py pos-USR259: o ramo de projeto externo executa validate e commands.smoke, mas ignora commands.build. O contrato ProjectCommands possui build e a linha stage_build ja o usa. Um projeto pode passar nos testes sem produzir o artefato de entrega exigido pelo proprio projeto.",
+    "core_journey": [],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Launcher externo executa o build declarado depois da validacao e antes do smoke e entrega, no diretorio e contexto do projeto",
+      "Falha de build bloqueia smoke, commit de conclusao e publicacao, com comando e erro sanitizados; build vazio preserva compatibilidade",
+      "Teste de projeto isolado produz artefato proprio, verifica ordem e caminho e cobre falha sem invocar a suite da fabrica como teste do produto"
+    ],
+    "suggested_files": [
+      "run_ticket.py",
+      "tests/test_project_ticket_execution.py"
+    ],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-16T15:26:27.051400Z",
+    "updated_at": "2026-10-16T15:31:52.889431Z"
+  },
+  {
+    "id": "USR-278",
+    "project_id": "darkfac",
+    "title": "Telegram encaminha demanda ao projeto correto e permite iniciar onboarding greenfield",
+    "origin": "agent",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "later",
+    "tags": [
+      "user-demand",
+      "pos-v0-autonomia",
+      "standalone-projects",
+      "intake",
+      "congelado-v0"
+    ],
+    "problem_statement": "core/integrations/telegram.py fixa project_id=darkfac no fluxo /demand; owner_intake permite apenas darkfac por padrao. O Hub ja transporta project_id. E necessario ligar a demanda de produto novo ou projeto cadastrado ao seu registro e repositorio, sem tratar codigo de produto como mudanca do core.",
+    "core_journey": [],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Intake distingue projeto existente e produto novo, preserva project_id ate a linha e nunca redireciona silenciosamente para darkfac",
+      "Projeto desconhecido ou decisao de negocio ausente gera Grill ou onboarding explicito, sem iniciar codigo no core",
+      "Teste de Telegram e linha comprova isolamento de dois projetos, replay idempotente e compatibilidade das demandas internas"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-16T15:26:45.580995Z",
+    "updated_at": "2026-10-16T15:30:47.459704Z"
+  },
+  {
+    "id": "USR-279",
+    "project_id": "darkfac",
+    "title": "Provar entrega autonoma de piloto greenfield stand alone em repositorio e ambiente privados separados",
+    "origin": "agent",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "later",
+    "tags": [
+      "user-demand",
+      "pos-v0-autonomia",
+      "standalone-projects",
+      "pilot",
+      "needs-slicing",
+      "congelado-v0"
+    ],
+    "problem_statement": "Decisao explicita do owner em 16/10/2026: piloto tecnico pequeno e descartavel; criar repositorio privado na sua conta GitHub e ambiente separado na infraestrutura existente, sem novas contratacoes. Provar a fabrica recebendo uma demanda de projeto novo ate publicacao e verificacao, com minima intervencao e sem dependencia de runtime do core para o produto funcionar. Fatiar execucao em marcos pequenos antes de implementar.",
+    "core_journey": [],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Planejamento registra o piloto, fronteiras do produto, ambiente, validacao, destino permitido e marcos executaveis de ate tres criterios cada, sem nova decisao de negocio inventada",
+      "Demanda percorre intake, planejamento, implementacao, revisao, PR, CI, merge, deploy e smoke do projeto com evidencias reais vinculadas ao SHA",
+      "Clone do produto instala, testa, constroi e executa sem checkout ou servico DarkFac; falhas sao retomadas ou diagnosticadas e o owner recebe relatorio final"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-16T15:26:57.986877Z",
+    "updated_at": "2026-10-16T15:30:47.477227Z"
+  },
+  {
     "id": "USR-277",
     "project_id": "darkfac",
     "title": "Planejar throughput com tres demandas e prioridade Grokbox, Notebook, Desktop",
@@ -8073,7 +8271,7 @@
       "pos-v0",
       "throughput"
     ],
-    "problem_statement": "Planejamento solicitado pelo owner em 16/10/2026. Grill resolvido nas OA-024/025/026: uma demanda completa por host, independente; Grokbox > Notebook > Desktop; vaga permanece durante testes/CI; subagentes internos preservados; todos os projetos aptos, reposicao continua ate fila executavel vazia. Owner declarou V0 concluido. Roteador de harness permanece vigente. Plano normativo: docs/plans/THROUGHPUT_TRES_WORKERS_2026-10-16.md. Baseline auditada d465e2e4377e47cf5eb1ac3ac14aa20fc8b5df02. Este ticket entrega planejamento e fila; nao ativa concorrencia em producao.",
+    "problem_statement": "Planejamento solicitado pelo owner em 16/10/2026. Grill resolvido nas OA-026/027/028: uma demanda completa por host, independente; Grokbox > Notebook > Desktop; vaga permanece durante testes/CI; subagentes internos preservados; todos os projetos aptos, reposicao continua ate fila executavel vazia. Owner declarou V0 concluido. Roteador de harness permanece vigente. Plano normativo: docs/plans/THROUGHPUT_TRES_WORKERS_2026-10-16.md. Baseline auditada d465e2e4377e47cf5eb1ac3ac14aa20fc8b5df02. Este ticket entrega planejamento e fila; nao ativa concorrencia em producao.",
     "core_journey": [],
     "non_goals": [],
     "reachability_contract": "",
@@ -8109,7 +8307,7 @@
       "concurrency",
       "routing"
     ],
-    "problem_statement": "Fatia do plano USR-277: docs/plans/THROUGHPUT_TRES_WORKERS_2026-10-16.md. Decisoes OA-024/025/026 do owner em 16/10/2026. F1: politica de admissao Grokbox, Notebook, Desktop. Lacuna confirmada no baseline: admissao por etapa e topologia anterior nao garantem um ciclo completo por host em todos os projetos. Preservar core.line.routing.pick, cotas >15%, revisao independente e subagentes. Escopo de implementacao limitado aos arquivos sugeridos; core/harness, governanca e workflow CI sao somente leitura.",
+    "problem_statement": "Fatia do plano USR-277: docs/plans/THROUGHPUT_TRES_WORKERS_2026-10-16.md. Decisoes OA-026/027/028 do owner em 16/10/2026. F1: politica de admissao Grokbox, Notebook, Desktop. Lacuna confirmada no baseline: admissao por etapa e topologia anterior nao garantem um ciclo completo por host em todos os projetos. Preservar core.line.routing.pick, cotas >15%, revisao independente e subagentes. Escopo de implementacao limitado aos arquivos sugeridos; core/harness, governanca e workflow CI sao somente leitura.",
     "core_journey": [],
     "non_goals": [],
     "reachability_contract": "Testes focados no criterio 3; depois python C:/dev/DarkFac/core/harness/runner.py --quick na worktree do candidato; nunca duplicar suite completa.",
@@ -8147,7 +8345,7 @@
       "concurrency",
       "routing"
     ],
-    "problem_statement": "Fatia do plano USR-277: docs/plans/THROUGHPUT_TRES_WORKERS_2026-10-16.md. Decisoes OA-024/025/026 do owner em 16/10/2026. F2: reserva transacional de ciclo e host com fencing. Lacuna confirmada no baseline: admissao por etapa e topologia anterior nao garantem um ciclo completo por host em todos os projetos. Preservar core.line.routing.pick, cotas >15%, revisao independente e subagentes. Escopo de implementacao limitado aos arquivos sugeridos; core/harness, governanca e workflow CI sao somente leitura.",
+    "problem_statement": "Fatia do plano USR-277: docs/plans/THROUGHPUT_TRES_WORKERS_2026-10-16.md. Decisoes OA-026/027/028 do owner em 16/10/2026. F2: reserva transacional de ciclo e host com fencing. Lacuna confirmada no baseline: admissao por etapa e topologia anterior nao garantem um ciclo completo por host em todos os projetos. Preservar core.line.routing.pick, cotas >15%, revisao independente e subagentes. Escopo de implementacao limitado aos arquivos sugeridos; core/harness, governanca e workflow CI sao somente leitura.",
     "core_journey": [],
     "non_goals": [],
     "reachability_contract": "Testes focados no criterio 3; depois python C:/dev/DarkFac/core/harness/runner.py --quick na worktree do candidato; nunca duplicar suite completa.",
@@ -8186,7 +8384,7 @@
       "concurrency",
       "routing"
     ],
-    "problem_statement": "Fatia do plano USR-277: docs/plans/THROUGHPUT_TRES_WORKERS_2026-10-16.md. Decisoes OA-024/025/026 do owner em 16/10/2026. F3: afinidade de ciclo e reposicao continua dos workers. Lacuna confirmada no baseline: admissao por etapa e topologia anterior nao garantem um ciclo completo por host em todos os projetos. Preservar core.line.routing.pick, cotas >15%, revisao independente e subagentes. Escopo de implementacao limitado aos arquivos sugeridos; core/harness, governanca e workflow CI sao somente leitura.",
+    "problem_statement": "Fatia do plano USR-277: docs/plans/THROUGHPUT_TRES_WORKERS_2026-10-16.md. Decisoes OA-026/027/028 do owner em 16/10/2026. F3: afinidade de ciclo e reposicao continua dos workers. Lacuna confirmada no baseline: admissao por etapa e topologia anterior nao garantem um ciclo completo por host em todos os projetos. Preservar core.line.routing.pick, cotas >15%, revisao independente e subagentes. Escopo de implementacao limitado aos arquivos sugeridos; core/harness, governanca e workflow CI sao somente leitura.",
     "core_journey": [],
     "non_goals": [],
     "reachability_contract": "Testes focados no criterio 3; depois python C:/dev/DarkFac/core/harness/runner.py --quick na worktree do candidato; nunca duplicar suite completa.",
@@ -8225,7 +8423,7 @@
       "concurrency",
       "routing"
     ],
-    "problem_statement": "Fatia do plano USR-277: docs/plans/THROUGHPUT_TRES_WORKERS_2026-10-16.md. Decisoes OA-024/025/026 do owner em 16/10/2026. F4: alimentador continuo do backlog de todos os projetos. Lacuna confirmada no baseline: admissao por etapa e topologia anterior nao garantem um ciclo completo por host em todos os projetos. Preservar core.line.routing.pick, cotas >15%, revisao independente e subagentes. Escopo de implementacao limitado aos arquivos sugeridos; core/harness, governanca e workflow CI sao somente leitura.",
+    "problem_statement": "Fatia do plano USR-277: docs/plans/THROUGHPUT_TRES_WORKERS_2026-10-16.md. Decisoes OA-026/027/028 do owner em 16/10/2026. F4: alimentador continuo do backlog de todos os projetos. Lacuna confirmada no baseline: admissao por etapa e topologia anterior nao garantem um ciclo completo por host em todos os projetos. Preservar core.line.routing.pick, cotas >15%, revisao independente e subagentes. Escopo de implementacao limitado aos arquivos sugeridos; core/harness, governanca e workflow CI sao somente leitura.",
     "core_journey": [],
     "non_goals": [],
     "reachability_contract": "Testes focados no criterio 3; depois python C:/dev/DarkFac/core/harness/runner.py --quick na worktree do candidato; nunca duplicar suite completa.",
@@ -8265,7 +8463,7 @@
       "concurrency",
       "routing"
     ],
-    "problem_statement": "Fatia do plano USR-277: docs/plans/THROUGHPUT_TRES_WORKERS_2026-10-16.md. Decisoes OA-024/025/026 do owner em 16/10/2026. F5: admissao compartilhada do CLI e testes no host atribuido. Lacuna confirmada no baseline: admissao por etapa e topologia anterior nao garantem um ciclo completo por host em todos os projetos. Preservar core.line.routing.pick, cotas >15%, revisao independente e subagentes. Escopo de implementacao limitado aos arquivos sugeridos; core/harness, governanca e workflow CI sao somente leitura.",
+    "problem_statement": "Fatia do plano USR-277: docs/plans/THROUGHPUT_TRES_WORKERS_2026-10-16.md. Decisoes OA-026/027/028 do owner em 16/10/2026. F5: admissao compartilhada do CLI e testes no host atribuido. Lacuna confirmada no baseline: admissao por etapa e topologia anterior nao garantem um ciclo completo por host em todos os projetos. Preservar core.line.routing.pick, cotas >15%, revisao independente e subagentes. Escopo de implementacao limitado aos arquivos sugeridos; core/harness, governanca e workflow CI sao somente leitura.",
     "core_journey": [],
     "non_goals": [],
     "reachability_contract": "Testes focados no criterio 3; depois python C:/dev/DarkFac/core/harness/runner.py --quick na worktree do candidato; nunca duplicar suite completa.",
@@ -8305,7 +8503,7 @@
       "concurrency",
       "routing"
     ],
-    "problem_statement": "Fatia do plano USR-277: docs/plans/THROUGHPUT_TRES_WORKERS_2026-10-16.md. Decisoes OA-024/025/026 do owner em 16/10/2026. F6: exclusao de integracao e deploy por recurso. Lacuna confirmada no baseline: admissao por etapa e topologia anterior nao garantem um ciclo completo por host em todos os projetos. Preservar core.line.routing.pick, cotas >15%, revisao independente e subagentes. Escopo de implementacao limitado aos arquivos sugeridos; core/harness, governanca e workflow CI sao somente leitura.",
+    "problem_statement": "Fatia do plano USR-277: docs/plans/THROUGHPUT_TRES_WORKERS_2026-10-16.md. Decisoes OA-026/027/028 do owner em 16/10/2026. F6: exclusao de integracao e deploy por recurso. Lacuna confirmada no baseline: admissao por etapa e topologia anterior nao garantem um ciclo completo por host em todos os projetos. Preservar core.line.routing.pick, cotas >15%, revisao independente e subagentes. Escopo de implementacao limitado aos arquivos sugeridos; core/harness, governanca e workflow CI sao somente leitura.",
     "core_journey": [],
     "non_goals": [],
     "reachability_contract": "Testes focados no criterio 3; depois python C:/dev/DarkFac/core/harness/runner.py --quick na worktree do candidato; nunca duplicar suite completa.",
@@ -8345,7 +8543,7 @@
       "concurrency",
       "routing"
     ],
-    "problem_statement": "Fatia do plano USR-277: docs/plans/THROUGHPUT_TRES_WORKERS_2026-10-16.md. Decisoes OA-024/025/026 do owner em 16/10/2026. F7: ativacao da frota com um ciclo por host e drain. Lacuna confirmada no baseline: admissao por etapa e topologia anterior nao garantem um ciclo completo por host em todos os projetos. Preservar core.line.routing.pick, cotas >15%, revisao independente e subagentes. Escopo de implementacao limitado aos arquivos sugeridos; core/harness, governanca e workflow CI sao somente leitura.",
+    "problem_statement": "Fatia do plano USR-277: docs/plans/THROUGHPUT_TRES_WORKERS_2026-10-16.md. Decisoes OA-026/027/028 do owner em 16/10/2026. F7: ativacao da frota com um ciclo por host e drain. Lacuna confirmada no baseline: admissao por etapa e topologia anterior nao garantem um ciclo completo por host em todos os projetos. Preservar core.line.routing.pick, cotas >15%, revisao independente e subagentes. Escopo de implementacao limitado aos arquivos sugeridos; core/harness, governanca e workflow CI sao somente leitura.",
     "core_journey": [],
     "non_goals": [],
     "reachability_contract": "Testes focados no criterio 3; depois python C:/dev/DarkFac/core/harness/runner.py --quick na worktree do candidato; nunca duplicar suite completa.",
@@ -8387,7 +8585,7 @@
       "concurrency",
       "routing"
     ],
-    "problem_statement": "Fatia do plano USR-277: docs/plans/THROUGHPUT_TRES_WORKERS_2026-10-16.md. Decisoes OA-024/025/026 do owner em 16/10/2026. F8: evidencia de reposicao e visibilidade da frota na Esteira. Lacuna confirmada no baseline: admissao por etapa e topologia anterior nao garantem um ciclo completo por host em todos os projetos. Preservar core.line.routing.pick, cotas >15%, revisao independente e subagentes. Escopo de implementacao limitado aos arquivos sugeridos; core/harness, governanca e workflow CI sao somente leitura.",
+    "problem_statement": "Fatia do plano USR-277: docs/plans/THROUGHPUT_TRES_WORKERS_2026-10-16.md. Decisoes OA-026/027/028 do owner em 16/10/2026. F8: evidencia de reposicao e visibilidade da frota na Esteira. Lacuna confirmada no baseline: admissao por etapa e topologia anterior nao garantem um ciclo completo por host em todos os projetos. Preservar core.line.routing.pick, cotas >15%, revisao independente e subagentes. Escopo de implementacao limitado aos arquivos sugeridos; core/harness, governanca e workflow CI sao somente leitura.",
     "core_journey": [],
     "non_goals": [],
     "reachability_contract": "Testes focados no criterio 3; depois python C:/dev/DarkFac/core/harness/runner.py --quick na worktree do candidato; nunca duplicar suite completa.",

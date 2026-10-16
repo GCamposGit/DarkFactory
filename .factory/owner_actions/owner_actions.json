@@ -894,6 +894,77 @@
     {
       "id": "OA-024",
       "kind": "decision",
+      "title": "Primeira prova real de projeto independente pos-V0",
+      "priority": "medium",
+      "status": "done",
+      "why": "Gate G1 da demanda de autonomia e projeto stand alone. Decisao recebida no chat de 16/10/2026.",
+      "blocks": [
+        "USR-279"
+      ],
+      "depends_on": [],
+      "steps": [],
+      "options": [
+        {
+          "id": "A",
+          "label": "Piloto tecnico descartavel",
+          "detail": "Projeto pequeno definido tecnicamente para comprovar o fluxo completo"
+        },
+        {
+          "id": "B",
+          "label": "Produto real",
+          "detail": "Owner descreve produto e regras de negocio"
+        }
+      ],
+      "verify": "Decisao vinculada ao piloto e preservada no plano pos-V0",
+      "created_at": "2026-10-16T15:26:58Z",
+      "created_by": "codex",
+      "resolved_at": "2026-10-16T15:26:58Z",
+      "answer": {
+        "option_id": "A",
+        "note": "Resposta explicita do owner no chat em 16/10/2026; opcao recomendada escolhida.",
+        "answered_at": "2026-10-16T15:26:58Z",
+        "answered_by": "owner-chat"
+      }
+    },
+    {
+      "id": "OA-025",
+      "kind": "decision",
+      "title": "Permissao de criacao e publicacao de projetos novos",
+      "priority": "medium",
+      "status": "done",
+      "why": "Gate G1: visibilidade e destino nao devem ser inventados. Owner respondeu explicitamente no chat de 16/10/2026.",
+      "blocks": [
+        "USR-274",
+        "USR-279"
+      ],
+      "depends_on": [],
+      "steps": [],
+      "options": [
+        {
+          "id": "A",
+          "label": "Privados e infraestrutura existente",
+          "detail": "Autoriza repositorios privados na conta GitHub do owner e ambientes separados na infraestrutura existente, sem novas contratacoes"
+        },
+        {
+          "id": "B",
+          "label": "Decidir por projeto",
+          "detail": "Repositorio e destino definidos no Grill de cada projeto"
+        }
+      ],
+      "verify": "Criacao preserva repositorio privado, isolamento de ambiente e ausencia de novas contratacoes",
+      "created_at": "2026-10-16T15:26:58Z",
+      "created_by": "codex",
+      "resolved_at": "2026-10-16T15:26:58Z",
+      "answer": {
+        "option_id": "A",
+        "note": "Resposta explicita do owner no chat em 16/10/2026; opcao recomendada escolhida.",
+        "answered_at": "2026-10-16T15:26:58Z",
+        "answered_by": "owner-chat"
+      }
+    },
+    {
+      "id": "OA-026",
+      "kind": "decision",
       "title": "Definir distribuicao das tres demandas entre maquinas",
       "priority": "medium",
       "status": "done",
@@ -932,7 +1003,7 @@
       }
     },
     {
-      "id": "OA-025",
+      "id": "OA-027",
       "kind": "decision",
       "title": "Definir quando liberar a vaga de uma demanda",
       "priority": "medium",
@@ -972,7 +1043,7 @@
       }
     },
     {
-      "id": "OA-026",
+      "id": "OA-028",
       "kind": "decision",
       "title": "Decidir excecao ao congelamento V0 para throughput",
       "priority": "medium",
