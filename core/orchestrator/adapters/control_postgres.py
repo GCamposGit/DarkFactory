@@ -332,6 +332,7 @@ class PostgresControlStore:
                         # generic default with no line intent, since the real
                         # registered "darkfac" project legitimately has its
                         # own repo_url/deploy config.
+                        ticket_id = str(command.payload.get("ticket_id") or command.project_id)
                         cur.execute(
                             """
                             INSERT INTO jobs (
@@ -341,7 +342,7 @@ class PostgresControlStore:
                                 created_at, updated_at, ready_at
                             ) VALUES (%s, %s, '1.0', 'grill', 0, 'pending', 'grill_engine', '[]'::jsonb, 0, 1800, 0, 3, 0.0, '[]'::jsonb, '[]'::jsonb, %s, %s, %s)
                             """,
-                            (run_id, command.project_id, now_utc, now_utc, now_utc),
+                            (run_id, ticket_id, now_utc, now_utc, now_utc),
                         )
 
                         outbox_payload = json.dumps(
@@ -461,12 +462,7 @@ class PostgresControlStore:
                             nb_dt = nb_dt.astimezone(UTC) if nb_dt.tzinfo else nb_dt.replace(tzinfo=UTC)
                             if nb_dt > now_utc:
                                 continue
-                        if ready_age_sec > 0.0:
-                            ready_reference = r[10] or r[8]
-                            if not _is_ready_enough(ready_reference, now_utc, ready_age_sec):
-                                continue
-
-                        # Subordination of stage claims to fleet cycle reservation (USR-281)
+                        # Subordination of stage claims to fleet cycle reservation (USR-281/USR-282)
                         cur.execute(
                             """
                             SELECT reservation_id, host_id, status, expires_at
@@ -487,8 +483,13 @@ class PostgresControlStore:
                             if res_host not in worker_lower and worker_lower not in res_host:
                                 continue  # Reserved for a different host
                             matched_reservation_id = res_id
+                            # Host affinity confirmed: executes immediately without fixed priority delay
                         else:
                             matched_reservation_id = None
+                            if ready_age_sec > 0.0:
+                                ready_reference = r[10] or r[8]
+                                if not _is_ready_enough(ready_reference, now_utc, ready_age_sec):
+                                    continue
 
                         chosen = r
                         break
@@ -2106,6 +2107,28 @@ class PostgresControlStore:
         except Exception as exc:
             raise StoreUnavailableError(f"PostgreSQL get_active_reservation_for_host failed: {exc}") from exc
 
+    def get_active_reservation_for_run(self, run_id: str) -> FleetReservation | None:
+        """Find active reservation for a run (USR-282)."""
+        if self.mock_mode:
+            return self._backend.get_active_reservation_for_run(run_id)
+
+        try:
+            with self._psycopg.connect(self.raw_url) as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        SELECT reservation_id, project_id, ticket_id, run_id, host_id, status, fencing_token,
+                               acquired_at, heartbeat_at, expires_at, metadata
+                        FROM fleet_reservations
+                        WHERE run_id = %s AND status IN ('active', 'draining')
+                        """,
+                        (run_id,),
+                    )
+                    row = cur.fetchone()
+                    return self._row_to_reservation(row) if row else None
+        except Exception as exc:
+            raise StoreUnavailableError(f"PostgreSQL get_active_reservation_for_run failed: {exc}") from exc
+
     def list_active_reservations(self) -> list[FleetReservation]:
         """List all active fleet reservations (USR-281)."""
         if self.mock_mode:
@@ -2119,7 +2142,7 @@ class PostgresControlStore:
                         SELECT reservation_id, project_id, ticket_id, run_id, host_id, status, fencing_token,
                                acquired_at, heartbeat_at, expires_at, metadata
                         FROM fleet_reservations
-                        WHERE status = 'active'
+                        WHERE status IN ('active', 'draining')
                         ORDER BY acquired_at ASC
                         """
                     )
@@ -2226,3 +2249,28 @@ class PostgresControlStore:
                     ]
         except Exception as exc:
             raise StoreUnavailableError(f"PostgreSQL reconcile_unknown_operations failed: {exc}") from exc
+
+    def list_eligible_admission_jobs(self, limit: int = 50) -> list[dict[str, Any]]:
+        """List pending jobs of active runs eligible for fleet cycle admission (USR-282)."""
+        if self.mock_mode:
+            return self._backend.list_eligible_admission_jobs(limit=limit)
+
+        try:
+            with self._psycopg.connect(self.raw_url) as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        SELECT j.run_id, j.ticket_id, r.project_id, j.stage, j.status, j.created_at
+                        FROM jobs j
+                        JOIN runs r ON j.run_id = r.run_id
+                        WHERE j.status = 'pending' AND r.status = 'active'
+                        ORDER BY j.created_at ASC
+                        LIMIT %s
+                        """,
+                        (limit,),
+                    )
+                    rows = cur.fetchall()
+                    cols = [desc[0] for desc in cur.description]
+                    return [dict(zip(cols, r)) for r in rows]
+        except Exception as exc:
+            raise StoreUnavailableError(f"PostgreSQL list_eligible_admission_jobs failed: {exc}") from exc
