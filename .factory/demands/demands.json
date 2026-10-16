@@ -7932,5 +7932,37 @@
     "dependencies": [],
     "created_at": "2026-10-15T21:14:03.900067Z",
     "updated_at": "2026-10-15T21:14:03.900067Z"
+  },
+  {
+    "id": "USR-269",
+    "project_id": "darkfac",
+    "title": "Restaurar CI main: testes MCP offline colidem com portas efemeras",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand",
+      "v0-critico",
+      "bug"
+    ],
+    "problem_statement": "CI main 2404b28 falhou no Linux: tests/test_mcp_fail_fast_usr125.py::test_segundo_cerebro_client_http_health_check_fails_fast retornou available=True; 4200 passaram, 1 falhou. Evidencia https://github.com/GCamposGit/DarkFactory/actions/runs/38893497089 . Impede main verde do V0; investigar contrato de timeout e corrigir a causa sem relaxar fail-fast. Diagnostico: porta fixa 59126 caiu na faixa efemera do Linux; listener alheio torna o probe TCP corretamente saudavel. Correcao: reservar porta dinamica sem listen durante cada teste offline, sem mudar o cliente.",
+    "core_journey": [
+      "CI main 2404b28 falhou no Linux: tests/test_mcp_fail_fast_usr125.py::test_segundo_cerebro_client_http_health_check_fails_fast retornou available=True; 4200 passaram, 1 falhou. Evidencia https://github.com/GCamposGit/DarkFactory/actions/runs/38893497089 . Impede main verde do V0; investigar contrato de timeout e corrigir a causa sem relaxar fail-fast."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Reproduzir e explicar a falha do health-check lento com teste deterministico",
+      "Corrigir causa preservando contrato fail-fast e comportamento de servidor saudavel",
+      "Portao oficial e CI Linux e Windows verdes"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-16T12:28:35.457480Z",
+    "updated_at": "2026-10-16T12:28:35.457480Z"
   }
 ]
