@@ -176,3 +176,57 @@ def test_external_delivery_opens_pr_from_project_worktree_against_registered_bas
     delivery.assert_called_once_with(
         ticket.id, ticket.title, cwd=worktree, base="trunk", merge=True, kind="implementation",
     )
+
+
+@pytest.mark.parametrize("build_mode", ["success", "empty", "failure"])
+def test_external_project_build_precedes_smoke_and_blocks_delivery_on_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, build_mode: str,
+) -> None:
+    import sys
+    import core.projects.registry as registry
+    import run_ticket
+
+    def command(source: str) -> str:
+        import os
+        import shlex
+        argv = [sys.executable, "-c", source]
+        return subprocess.list2cmdline(argv) if os.name == "nt" else shlex.join(argv)
+
+    monkeypatch.setenv("OPENAI_API_KEY", "build-test-secret")
+    validate = command("from pathlib import Path; Path('validated').write_text('ok')")
+    build = command(
+        "from pathlib import Path; assert Path('validated').exists(); "
+        + ("print('password=build-test-secret'); raise SystemExit(19)" if build_mode == "failure" else
+           "Path('artifact.txt').write_text('client artifact')")
+    )
+    smoke = command(
+        "from pathlib import Path; assert Path('validated').exists(); "
+        + ("assert Path('artifact.txt').read_text() == 'client artifact'; " if build_mode != "empty" else "")
+        + "Path('smoked').write_text('ok')"
+    )
+    project = ProjectDescriptor(
+        id="fake-client", name="Fake Client", path=str(tmp_path),
+        commands={"validate": [validate], "build": [] if build_mode == "empty" else [build], "smoke": [smoke]},
+    )
+    monkeypatch.setattr(registry, "get_project_registry", lambda: SimpleNamespace(get_project=lambda _id: project))
+    # A product gate must never call the factory's focal runner.
+    monkeypatch.setattr(run_ticket, "_run_focal_tests", Mock(side_effect=AssertionError("factory suite forbidden")))
+    progress = SimpleNamespace(phase=Mock())
+    ticket = UserTicket(id="USR-259", project_id="fake-client", title="client build")
+    result = run_ticket._run_gate_with_self_correction(
+        tmp_path, "ticket/client", "abc", ticket, "resume", False, True, True,
+        progress, lambda: None, [],
+    )
+    assert (tmp_path / "validated").exists()
+    if build_mode == "failure":
+        assert result["ok"] is False
+        assert result["cause"] == "project_build_failed"
+        assert result["exit_code"] == 19
+        assert "build-test-secret" not in result["error"]
+        assert "build-test-secret" not in str(progress.phase.call_args_list)
+        assert not (tmp_path / "smoked").exists()
+        assert not (tmp_path / "artifact.txt").exists()
+    else:
+        assert result is None
+        assert (tmp_path / "smoked").exists()
+        assert (tmp_path / "artifact.txt").exists() == (build_mode == "success")
