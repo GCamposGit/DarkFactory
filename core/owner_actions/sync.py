@@ -8,6 +8,7 @@ import os
 import threading
 import time
 import urllib.request
+from urllib.error import HTTPError
 from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict
@@ -98,7 +99,7 @@ def publish_closed(run_id: str, blocking_stage: str) -> None:
 
 
 def flush_pending(*, force: bool = False) -> int:
-    """Retry at most every 30s in existing polls/heartbeats, without sleeping."""
+    """Drain at most two HTTP requests; quarantine bad rows without blocking peers."""
     url = os.environ.get("DARKHUB_CLOUD_URL", "").strip().rstrip("/")
     key = os.environ.get("DARKFAC_TELEMETRY_KEY", "").strip()
     path = outbox_path()
@@ -107,13 +108,32 @@ def flush_pending(*, force: bool = False) -> int:
     sent = 0
     try:
         now = time.time()
+        config_id = hashlib.sha256((url + "\0" + key).encode()).hexdigest()
+        transport_state = path.with_name(path.name + ".transport-state")
+        state = _load(transport_state)
+        if not force and state.get("config_id") == config_id and now < state.get("next_attempt", 0):
+            return 0
         with _file_lock(path):
-            pending = [
-                (k, row["event"]) for k, row in _load(path).items()
-                if not row["sent"] and (force or now >= row.get("next_attempt", 0))
-            ][:2]
-        for event_key, data in pending:
-            event = SyncEvent.model_validate(data)
+            rows = _load(path)  # Invalid whole documents remain untouched: fail closed.
+            pending = []
+            changed = False
+            for event_key, row in rows.items():
+                if isinstance(row, dict) and row.get("quarantined") is True:
+                    continue
+                try:
+                    if not isinstance(row, dict) or type(row.get("sent")) is not bool:
+                        raise ValueError("invalid outbox row")
+                    event = SyncEvent.model_validate(row["event"])
+                    due = float(row.get("next_attempt", 0))
+                    if not row["sent"] and (force or now >= due) and len(pending) < 2:
+                        pending.append((event_key, row["event"], event))
+                except Exception as exc:
+                    rows[event_key] = {"raw": row, "quarantined": True, "sent": False, "error": type(exc).__name__}
+                    logger.warning("owner action sync quarantined (%s)", type(exc).__name__)
+                    changed = True
+            if changed:
+                _atomic_write_json(path, rows)
+        for event_key, data, event in pending:
             with _file_lock(path):
                 rows = _load(path)
                 if rows.get(event_key, {}).get("event") != data:
@@ -127,13 +147,32 @@ def flush_pending(*, force: bool = False) -> int:
             try:
                 with urllib.request.urlopen(req, timeout=HTTP_TIMEOUT_SEC):
                     pass
+            except HTTPError as exc:
+                code = exc.code
+                exc.close()
+                diagnostic = f"HTTP{code}"
+                logger.warning("owner action sync deferred (%s)", diagnostic)
+                if code in (401, 403):
+                    # Credential failures affect every row. Keep all events retryable;
+                    # persist bounded backoff, and retry immediately after config changes.
+                    _atomic_write_json(transport_state, {
+                        "config_id": config_id, "next_attempt": now + RETRY_INTERVAL_SEC, "error": diagnostic,
+                    })
+                    break
+                if code in (400, 409, 413, 422):
+                    with _file_lock(path):
+                        rows = _load(path)
+                        if rows.get(event_key, {}).get("event") == data:
+                            rows[event_key].update(quarantined=True, sent=False, error=diagnostic)
+                            _atomic_write_json(path, rows)
+                continue
             except Exception as exc:
                 logger.warning("owner action sync deferred (%s)", type(exc).__name__)
                 continue
             with _file_lock(path):
                 rows = _load(path)
                 # Do not ACK a newer close queued while the open POST was in flight.
-                if event_key in rows and rows[event_key]["event"] == data:
+                if event_key in rows and rows[event_key].get("event") == data:
                     rows[event_key]["sent"] = True
                     _atomic_write_json(path, rows)
                     sent += 1

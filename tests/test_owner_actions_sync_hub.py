@@ -57,7 +57,7 @@ def test_sync_endpoint_authentication_persistence_and_forbidden_fields(tmp_path:
     with TestClient(app) as client:
         monkeypatch.delenv("DARKFAC_TELEMETRY_KEY", raising=False)
         assert client.post("/api/owner-actions/sync", json=payload).status_code == 503
-        monkeypatch.setenv("DARKFAC_TELEMETRY_KEY", "test-machine-key")
+        monkeypatch.setenv("DARKFAC_TELEMETRY_KEY", "  test-machine-key ")
         assert client.post("/api/owner-actions/sync", json=payload).status_code == 401
         headers = {"X-DarkFac-Telemetry-Key": "test-machine-key"}
         response = client.post("/api/owner-actions/sync", json=payload, headers=headers)
@@ -98,3 +98,45 @@ def test_dynamic_legacy_without_identity_fails_closed(tmp_path: Path) -> None:
     with pytest.raises(OwnerActionInvalid, match="identity"):
         store.sync_human_request(request(), closed=True)
     assert dynamic_path.read_bytes() == original
+
+
+def test_worker_transport_reaches_separate_hub_volume_and_survives_reload(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from urllib.parse import urlsplit
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from hub.backend.api import router, get_hub_service
+    from hub.backend.service import HubService
+    from core.owner_actions import sync
+
+    worker_root, hub_root = tmp_path / "worker", tmp_path / "hub"
+    monkeypatch.setenv("DARKFAC_STATE_ROOT", str(worker_root))
+    monkeypatch.setenv("DARKHUB_CLOUD_URL", "https://test-hub.invalid")
+    monkeypatch.setenv("DARKFAC_TELEMETRY_KEY", "  integration-machine-key  ")
+    service = HubService(data_dir=hub_root)
+    tracked = service.owner_action_store.path
+    original = tracked.read_bytes() if tracked.exists() else None
+    app = FastAPI()
+    app.include_router(router)
+    app.dependency_overrides[get_hub_service] = lambda: service
+    class Response:
+        def __enter__(self): return self
+        def __exit__(self, *args): return None
+    with TestClient(app) as client:
+        def forward(req, **kwargs):
+            result = client.post(urlsplit(req.full_url).path, content=req.data, headers=dict(req.header_items()))
+            assert result.status_code == 200
+            return Response()
+        monkeypatch.setattr(sync.urllib.request, "urlopen", forward)
+        event = request().model_copy(update={"run_id": "cross-host-contract"})
+        action_id = mirrored_id(event.run_id, event.blocking_stage)
+        sync.publish_request(event)
+        assert sync.outbox_path().is_relative_to(worker_root)
+        assert service.owner_action_store.dynamic_path.is_relative_to(hub_root)
+        assert service.owner_action_store.get(action_id).status is ActionStatus.OPEN
+        service = HubService(data_dir=hub_root)
+        assert service.owner_action_store.get(action_id).status is ActionStatus.OPEN
+        sync.publish_closed(event.run_id, event.blocking_stage)
+        sync.publish_request(event)
+        service = HubService(data_dir=hub_root)
+        assert service.owner_action_store.get(action_id).status is ActionStatus.DONE
+    assert (tracked.read_bytes() if tracked.exists() else None) == original

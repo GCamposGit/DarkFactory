@@ -8620,7 +8620,7 @@
     "tags": [
       "user-demand"
     ],
-    "problem_statement": "test_heartbeat_thread_refreshes_the_sidecar_while_held le line.lock a cada 50ms enquanto a thread de heartbeat faz os.replace(tmp, path) a cada 50ms, causando PermissionError 13 esporadico no Windows NTFS durante pytest",
+    "problem_statement": "test_heartbeat_thread_refreshes_the_sidecar_while_held le line.lock a cada 50ms enquanto a thread de heartbeat faz os.replace(tmp, path) a cada 50ms, causando PermissionError 13 esporadico no Windows NTFS durante pytest\n\nEvidencia adicional da sessao USR-194 (16/10/2026): um teste CAS do outbox registrou PermissionError transitorio em publish_closed; arquivo/op e causa nao foram capturados. Reexecucao completa 20 PASS e focal instrumentado 1 PASS, sem relaxar assercoes. Teste agora registra filename/errno/winerror se repetir. Relacao causal com line.lock NAO comprovada; reproduzir antes de ampliar a correcao. PR371 (alerta USR-292) encerrado como duplicata do incidente line.lock ja registrado aqui; CI run38927481009 teve4219PASS/23skip/1falha.",
     "core_journey": [
       "test_heartbeat_thread_refreshes_the_sidecar_while_held le line.lock a cada 50ms enquanto a thread de heartbeat faz os.replace(tmp, path) a cada 50ms, causando PermissionError 13 esporadico no Windows NTFS durante pytest"
     ],

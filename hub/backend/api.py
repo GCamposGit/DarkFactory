@@ -1234,7 +1234,7 @@ def sync_owner_action_endpoint(
     service: HubService = Depends(get_hub_service),
 ) -> dict[str, str]:
     """Receive machine-only HumanRequest events without notifying Telegram."""
-    configured_key = os.environ.get("DARKFAC_TELEMETRY_KEY")
+    configured_key = (os.environ.get("DARKFAC_TELEMETRY_KEY") or "").strip()
     if not configured_key:
         raise HTTPException(status_code=503, detail="Owner action synchronization is disabled.")
     if not x_darkfac_telemetry_key or not secrets.compare_digest(x_darkfac_telemetry_key, configured_key):

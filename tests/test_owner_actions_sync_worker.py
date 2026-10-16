@@ -103,6 +103,16 @@ def test_open_ack_cannot_ack_a_concurrent_close(tmp_path: Path, monkeypatch: pyt
     monkeypatch.setenv("DARKHUB_CLOUD_URL", "https://hub.example.invalid")
     monkeypatch.setenv("DARKFAC_TELEMETRY_KEY", "test-key")
 
+    write_failures = []
+    atomic_write = sync._atomic_write_json
+    def traced_write(path, document):
+        try:
+            return atomic_write(path, document)
+        except OSError as exc:
+            write_failures.append((path.name, type(exc).__name__, exc.errno, getattr(exc, "winerror", None)))
+            raise
+    monkeypatch.setattr(sync, "_atomic_write_json", traced_write)
+
     class Response:
         def __enter__(self):
             sync.publish_closed("race", "release")
@@ -112,7 +122,9 @@ def test_open_ack_cannot_ack_a_concurrent_close(tmp_path: Path, monkeypatch: pyt
             return None
 
     monkeypatch.setattr(sync.urllib.request, "urlopen", lambda *args, **kwargs: Response())
-    assert sync.flush_pending(force=True) == 0
+    first_sent = sync.flush_pending(force=True)
+    assert not write_failures, f"atomic write failure (file, class, errno, winerror): {write_failures}"
+    assert first_sent == 0
     row = next(iter(json.loads(sync.outbox_path().read_text(encoding="utf-8")).values()))
     assert row["event"]["closed"] is True
     assert row["sent"] is False
@@ -147,3 +159,109 @@ def test_long_job_heartbeat_flushes_without_new_daemon(monkeypatch: pytest.Monke
     assert calls == ["flush"]
     assert max(waits) <= 15
     assert sync.RETRY_INTERVAL_SEC <= 60
+
+
+@pytest.mark.parametrize("poison", [None, {"sent": False, "event": {"invalid": "private-secret"}}, {"sent": False, "event": {}, "next_attempt": "bad"}])
+def test_poison_row_is_quarantined_without_starving_valid_rows(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture, poison: object) -> None:
+    from core.owner_actions import sync
+    monkeypatch.setenv("DARKFAC_STATE_ROOT", str(tmp_path))
+    monkeypatch.setenv("DARKHUB_CLOUD_URL", "https://hub.example.invalid")
+    monkeypatch.setenv("DARKFAC_TELEMETRY_KEY", "machine-secret")
+    event = sync.SyncEvent(request=HumanRequest(kind="infra", run_id="valid", blocking_stage="release", guide_md="1. Check"))
+    path = sync.outbox_path()
+    path.parent.mkdir(parents=True)
+    path.write_text(json.dumps({"poison": poison, "valid": {"event": event.model_dump(mode="json"), "sent": False}}), encoding="utf-8")
+    class Response:
+        def __enter__(self): return self
+        def __exit__(self, *args): return None
+    calls = []
+    monkeypatch.setattr(sync.urllib.request, "urlopen", lambda *args, **kwargs: calls.append(1) or Response())
+    assert sync.flush_pending(force=True) == 1
+    rows = json.loads(path.read_text(encoding="utf-8"))
+    assert rows["poison"]["quarantined"] is True
+    assert rows["poison"]["sent"] is False
+    assert rows["valid"]["sent"] is True
+    assert sync.flush_pending(force=True) == 0
+    assert len(calls) == 1
+    assert "private-secret" not in caplog.text
+
+
+def test_http_rejection_is_quarantined_and_auth_is_retryable(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture) -> None:
+    from urllib.error import HTTPError
+    from core.owner_actions import sync
+    monkeypatch.setenv("DARKFAC_STATE_ROOT", str(tmp_path))
+    monkeypatch.setenv("DARKHUB_CLOUD_URL", "https://hub.example.invalid")
+    monkeypatch.setenv("DARKFAC_TELEMETRY_KEY", "machine-secret")
+    event = sync.SyncEvent(request=HumanRequest(kind="infra", run_id="valid", blocking_stage="release", guide_md="1. Check"))
+    path = sync.outbox_path()
+    path.parent.mkdir(parents=True)
+    path.write_text(json.dumps({key: {"event": event.model_dump(mode="json"), "sent": False} for key in ("rejected", "valid")}), encoding="utf-8")
+    calls = []
+    class Response:
+        def __enter__(self): return self
+        def __exit__(self, *args): return None
+    def transport(*args, **kwargs):
+        calls.append(1)
+        if len(calls) == 1: raise HTTPError("https://hub.invalid", 422, "private-secret", {}, None)
+        return Response()
+    monkeypatch.setattr(sync.urllib.request, "urlopen", transport)
+    assert sync.flush_pending(force=True) == 1
+    rows = json.loads(path.read_text(encoding="utf-8"))
+    assert rows["rejected"]["quarantined"] is True
+    assert rows["rejected"]["sent"] is False
+    assert rows["rejected"]["error"] == "HTTP422"
+    assert len(calls) == 2
+    rows["valid"]["sent"] = False
+    path.write_text(json.dumps(rows), encoding="utf-8")
+    auth_calls = []
+    def unauthorized(*args, **kwargs):
+        auth_calls.append(1)
+        raise HTTPError("https://hub.invalid", 401, "private-secret", {}, None)
+    monkeypatch.setattr(sync.urllib.request, "urlopen", unauthorized)
+    assert sync.flush_pending(force=True) == 0
+    rows = json.loads(path.read_text(encoding="utf-8"))
+    assert not rows["valid"].get("quarantined", False)
+    assert rows["valid"]["sent"] is False
+    assert sync.flush_pending() == 0
+    assert len(auth_calls) == 1
+    state = json.loads(path.with_name(path.name + ".transport-state").read_text(encoding="utf-8"))
+    assert state["error"] == "HTTP401"
+    assert "machine-secret" not in json.dumps(state)
+    monkeypatch.setenv("DARKFAC_TELEMETRY_KEY", "fixed-machine-key")
+    monkeypatch.setattr(sync.urllib.request, "urlopen", lambda *args, **kwargs: Response())
+    assert sync.flush_pending(force=True) == 1
+    assert "private-secret" not in caplog.text
+
+
+def test_whole_outbox_corruption_is_not_overwritten(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from core.owner_actions import sync
+    monkeypatch.setenv("DARKFAC_STATE_ROOT", str(tmp_path))
+    monkeypatch.setenv("DARKHUB_CLOUD_URL", "https://hub.example.invalid")
+    monkeypatch.setenv("DARKFAC_TELEMETRY_KEY", "machine-secret")
+    path = sync.outbox_path()
+    path.parent.mkdir(parents=True)
+    path.write_text("{broken", encoding="utf-8")
+    monkeypatch.setattr(sync.urllib.request, "urlopen", lambda *args, **kwargs: pytest.fail("must fail closed"))
+    assert sync.flush_pending(force=True) == 0
+    assert path.read_text(encoding="utf-8") == "{broken"
+
+
+def test_http_budget_does_not_count_quarantined_rows(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from core.owner_actions import sync
+    monkeypatch.setenv("DARKFAC_STATE_ROOT", str(tmp_path))
+    monkeypatch.setenv("DARKHUB_CLOUD_URL", "https://hub.example.invalid")
+    monkeypatch.setenv("DARKFAC_TELEMETRY_KEY", "machine-secret")
+    event = sync.SyncEvent(request=HumanRequest(kind="infra", run_id="valid", blocking_stage="release", guide_md="1. Check"))
+    path = sync.outbox_path()
+    path.parent.mkdir(parents=True)
+    rows = {"poison": None, **{str(index): {"event": event.model_dump(mode="json"), "sent": False} for index in range(3)}}
+    path.write_text(json.dumps(rows), encoding="utf-8")
+    calls = []
+    class Response:
+        def __enter__(self): return self
+        def __exit__(self, *args): return None
+    monkeypatch.setattr(sync.urllib.request, "urlopen", lambda *args, **kwargs: calls.append(1) or Response())
+    assert sync.flush_pending() == 2
+    assert len(calls) == 2
+    assert sync.flush_pending() == 1
+    assert len(calls) == 3

@@ -13,6 +13,10 @@ tem timeout de 1,5 segundo, até dois eventos por chamada e retry persistido em
 todos os slots ocupados; o heartbeat acorda em até 15 segundos. Indisponibilidade
 mantém o evento pendente e emite diagnóstico sem credenciais.
 
+Linhas inválidas e rejeições determinísticas ficam em quarentena durável, sem ACK
+falso e sem bloquear outros pedidos. Erros de credencial mantêm os eventos e um
+backoff global persistido; os diagnósticos contêm apenas classe ou código HTTP.
+
 No Hub, `data_dir/owner_actions/dynamic.json` guarda os pedidos dinâmicos e o par
 canônico run/etapa. Não altera definições versionadas. Colisão de ID com outra
 identidade ou com uma ação curada é rejeitada antes de mutação. Conclusão é
