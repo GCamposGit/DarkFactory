@@ -867,7 +867,7 @@
       "kind": "action",
       "title": "PR de registro #364 (USR-269) aberto sem mergear: o ticket nao chegou ao backlog da main",
       "priority": "high",
-      "status": "open",
+      "status": "done",
       "why": "Motivo: CI failed on DarkFac CI / pr-validation (windows-latest); merge withheld, PR and branch left open. ci_gate=failed\n--- failed job log tail ---\nErrors: Process completed with exit code 1.\n---\nC_TEST_POSTGRES_DSN not set: real-PostgreSQL integration tests are opt-in\nSKIPPED [1] tests\\test_reusable_pilots.py:454: Historical experiment results.json not found\nSKIPPED [1] tests\\test_dokploy_redeploy.py:412: this test targets the non-win32 short-circuit\nSKIPPED [1] tests\\test_executor_contract.py:134: POSIX descendant regression requires Linux /proc\nSKIPPED [1] tests\\test_audio_transcriber.py:147: ensaio live desabilitado; use --run-live-audio explicitamente\nFAILED tests/test_runtime_spike_effects.py::test_http_approval_only_forwards_to_bound_subject - TimeoutError: timed out\n1 failed, 4202 passed, 23 skipped, 2 warnings in 892.74s (0:14:52)\n[STEP_FAIL] unit_and_integration_tests_parallel (exit code: 1)\n[STEP_TIME] unit_and_integration_tests_parallel 894.1s\n[TEST_COUNT] count=4226\n[HARNESS_RESULT] {\"schema_version\":\"1\",\"candidate_sha\":\"819f9c7c70ba80a6e68b23ddc59b25ea2f3ee69a\",\"config_hash\":\"5fbdfdca494daf34f2b15dcffc07c5df48933fd0135b57d5a469775621fb14ac\",\"required_steps\":[\"syntax_and_types\",\"unit_and_integration_tests_parallel\",\"unit_and_integration_tests_serial\"],\"started_steps\":[\"syntax_and_types\",\"unit_and_integration_tests_parallel\"],\"passed_steps\":[\"syntax_and_types\"],\"failed_steps\":[\"unit_and_integration_tests_parallel\"],\"discovered_count\":4226,\"passed_count\":4202,\"skipped_count\":23,\"exit_codes\":{\"syntax_and_types\":0,\"unit_and_integration_tests_parallel\":1},\"artifact_refs\":[\"D:\\\\a\\\\DarkFactory\\\\DarkFactory\\\\candidate\\\\harness.config.json\"],\"reused_from\":null,\"executed_on\":null}\n[HARNESS_FAIL]\n[RUN_TIMING] {\"exec_sec\": 895.3, \"host\": \"runnervm0xl3a\", \"local_only\": false, \"lock_timed_out\": false, \"lock_wait_sec\": 0.0, \"no_cache\": false, \"path\": \"local\", \"quick\": true, \"remote_attempts\": [], \"remote_lost_sec\": 0, \"schema\": 1, \"steps_timeout_sum_sec\": 3420.0, \"success\": false, \"total_sec\": 895.3, \"tree_hash\": null, \"ts\": \"2026-10-16T12:45:09Z\", \"worker_job\": false}\n##[error]Process completed with exit code 1.. PR: https://github.com/GCamposGit/DarkFactory/pull/364",
       "blocks": [
         "USR-269"
@@ -889,7 +889,7 @@
       "verify": "O PR #364 aparece como MERGED e o ticket USR-269 esta em .factory/demands/demands.json na main.",
       "created_at": "2026-10-16T12:45:41Z",
       "created_by": "queue-registration",
-      "resolved_at": null
+      "resolved_at": "2026-10-16T17:45:07Z"
     },
     {
       "id": "OA-024",
