@@ -8256,6 +8256,358 @@
     "updated_at": "2026-10-16T15:30:47.477227Z"
   },
   {
+    "id": "USR-277",
+    "project_id": "darkfac",
+    "title": "Planejar throughput com tres demandas e prioridade Grokbox, Notebook, Desktop",
+    "origin": "user",
+    "status": "completed",
+    "delivery_evidence": "fd963913850aa48473bbf346ee65d4457134464a",
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand",
+      "planning-only",
+      "pos-v0",
+      "throughput"
+    ],
+    "problem_statement": "Planejamento solicitado pelo owner em 16/10/2026. Grill resolvido nas OA-026/027/028: uma demanda completa por host, independente; Grokbox > Notebook > Desktop; vaga permanece durante testes/CI; subagentes internos preservados; todos os projetos aptos, reposicao continua ate fila executavel vazia. Owner declarou V0 concluido. Roteador de harness permanece vigente. Plano normativo: docs/plans/THROUGHPUT_TRES_WORKERS_2026-10-16.md. Baseline auditada d465e2e4377e47cf5eb1ac3ac14aa20fc8b5df02. Este ticket entrega planejamento e fila; nao ativa concorrencia em producao.",
+    "core_journey": [],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Registrar respostas explicitas do owner as tres decisoes do Grill antes de especificar.",
+      "Produzir plano baseado na linha atual preservando model router, isolamento e exclusao de suites por maquina.",
+      "Fatiar implementacao em tickets com ate tres criterios de aceite e dependencias verificaveis."
+    ],
+    "suggested_files": [
+      "docs/plans/THROUGHPUT_TRES_WORKERS_2026-10-16.md",
+      ".factory/demands/demands.json",
+      ".factory/owner_actions/owner_actions.json"
+    ],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-16T15:27:04.976901Z",
+    "updated_at": "2026-10-16T15:35:37.249042Z"
+  },
+  {
+    "id": "USR-280",
+    "project_id": "darkfac",
+    "title": "F1: politica de admissao Grokbox, Notebook, Desktop",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand",
+      "pos-v0",
+      "throughput",
+      "concurrency",
+      "routing"
+    ],
+    "problem_statement": "Fatia do plano USR-277: docs/plans/THROUGHPUT_TRES_WORKERS_2026-10-16.md. Decisoes OA-026/027/028 do owner em 16/10/2026. F1: politica de admissao Grokbox, Notebook, Desktop. Lacuna confirmada no baseline: admissao por etapa e topologia anterior nao garantem um ciclo completo por host em todos os projetos. Preservar core.line.routing.pick, cotas >15%, revisao independente e subagentes. Escopo de implementacao limitado aos arquivos sugeridos; core/harness, governanca e workflow CI sao somente leitura.",
+    "core_journey": [],
+    "non_goals": [],
+    "reachability_contract": "Testes focados no criterio 3; depois python C:/dev/DarkFac/core/harness/runner.py --quick na worktree do candidato; nunca duplicar suite completa.",
+    "acceptance_criteria": [
+      "Politica pura escolhe hosts livres e compativeis na ordem Grokbox > Notebook > Desktop, com 1 ciclo por host e teto 3; host ocupado nao atrasa outro livre.",
+      "Fila preserva ordem por prontidao/idade com desempate estavel; pula bloqueados sem perder diagnostico e nao altera escolha de harness pelo roteador.",
+      "Testes cobrem tres hosts livres, ocupado/offline/drain, capacidade insuficiente e nenhuma rota; python -m pytest tests/test_line_fleet_policy.py -q passa."
+    ],
+    "suggested_files": [
+      "core/line/fleet_policy.py",
+      ".factory/config/line_fleet.json",
+      "tests/test_line_fleet_policy.py"
+    ],
+    "estimated_complexity": "high",
+    "dependencies": [
+      "USR-277"
+    ],
+    "created_at": "2026-10-16T15:34:48.793705Z",
+    "updated_at": "2026-10-16T15:34:48.793705Z"
+  },
+  {
+    "id": "USR-281",
+    "project_id": "darkfac",
+    "title": "F2: reserva transacional de ciclo e host com fencing",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand",
+      "pos-v0",
+      "throughput",
+      "concurrency",
+      "routing"
+    ],
+    "problem_statement": "Fatia do plano USR-277: docs/plans/THROUGHPUT_TRES_WORKERS_2026-10-16.md. Decisoes OA-026/027/028 do owner em 16/10/2026. F2: reserva transacional de ciclo e host com fencing. Lacuna confirmada no baseline: admissao por etapa e topologia anterior nao garantem um ciclo completo por host em todos os projetos. Preservar core.line.routing.pick, cotas >15%, revisao independente e subagentes. Escopo de implementacao limitado aos arquivos sugeridos; core/harness, governanca e workflow CI sao somente leitura.",
+    "core_journey": [],
+    "non_goals": [],
+    "reachability_contract": "Testes focados no criterio 3; depois python C:/dev/DarkFac/core/harness/runner.py --quick na worktree do candidato; nunca duplicar suite completa.",
+    "acceptance_criteria": [
+      "Migracao aditiva e adaptadores reservam atomicamente (projeto,ticket,run,host), com unicidade de ticket ativo, um ciclo por host e teto tres; claims de etapa subordinados ao ciclo.",
+      "Heartbeat, drain, expiracao e fencing impedem publicacao pelo dono antigo; efeitos desconhecidos sao reconciliados antes de retry e reserva e liberada uma vez.",
+      "python -m pytest tests/test_line_fleet_reservations.py -q passa; executar tambem com C_TEST_POSTGRES_DSN configurado e registrar corrida em Postgres real entre dois coordenadores, sem aceitar skip como prova distribuida."
+    ],
+    "suggested_files": [
+      "core/workflow/control_contracts.py",
+      "core/workflow/control_store.py",
+      "core/orchestrator/adapters/control_postgres.py",
+      "tests/test_line_fleet_reservations.py"
+    ],
+    "estimated_complexity": "high",
+    "dependencies": [
+      "USR-280"
+    ],
+    "created_at": "2026-10-16T15:34:48.807216Z",
+    "updated_at": "2026-10-16T15:34:48.807216Z"
+  },
+  {
+    "id": "USR-282",
+    "project_id": "darkfac",
+    "title": "F3: afinidade de ciclo e reposicao continua dos workers",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand",
+      "pos-v0",
+      "throughput",
+      "concurrency",
+      "routing"
+    ],
+    "problem_statement": "Fatia do plano USR-277: docs/plans/THROUGHPUT_TRES_WORKERS_2026-10-16.md. Decisoes OA-026/027/028 do owner em 16/10/2026. F3: afinidade de ciclo e reposicao continua dos workers. Lacuna confirmada no baseline: admissao por etapa e topologia anterior nao garantem um ciclo completo por host em todos os projetos. Preservar core.line.routing.pick, cotas >15%, revisao independente e subagentes. Escopo de implementacao limitado aos arquivos sugeridos; core/harness, governanca e workflow CI sao somente leitura.",
+    "core_journey": [],
+    "non_goals": [],
+    "reachability_contract": "Testes focados no criterio 3; depois python C:/dev/DarkFac/core/harness/runner.py --quick na worktree do candidato; nunca duplicar suite completa.",
+    "acceptance_criteria": [
+      "Demanda permanece no host reservado entre etapas e durante testes/CI; coordenador admite no maximo tres ciclos e consulta disponibilidade real sem atraso fixo de prioridade.",
+      "Conclusao/falha esgotada/cancelamento libera vaga e recolhe proximo apto; bloqueio humano estaciona sem executar quarto ciclo, retomada readmite, offline recupera com fencing.",
+      "python -m pytest tests/test_line_fleet_loop.py tests/test_cloud_worker_topology_hf2709.py -q passa com reposicao simultanea, restart e fila vazia/novas entradas."
+    ],
+    "suggested_files": [
+      "core/orchestrator/cloud_worker.py",
+      "core/orchestrator/cloud_coordinator.py",
+      "tests/test_line_fleet_loop.py",
+      "tests/test_cloud_worker_topology_hf2709.py"
+    ],
+    "estimated_complexity": "high",
+    "dependencies": [
+      "USR-281"
+    ],
+    "created_at": "2026-10-16T15:34:48.820278Z",
+    "updated_at": "2026-10-16T15:34:48.820278Z"
+  },
+  {
+    "id": "USR-283",
+    "project_id": "darkfac",
+    "title": "F4: alimentador continuo do backlog de todos os projetos",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand",
+      "pos-v0",
+      "throughput",
+      "concurrency",
+      "routing"
+    ],
+    "problem_statement": "Fatia do plano USR-277: docs/plans/THROUGHPUT_TRES_WORKERS_2026-10-16.md. Decisoes OA-026/027/028 do owner em 16/10/2026. F4: alimentador continuo do backlog de todos os projetos. Lacuna confirmada no baseline: admissao por etapa e topologia anterior nao garantem um ciclo completo por host em todos os projetos. Preservar core.line.routing.pick, cotas >15%, revisao independente e subagentes. Escopo de implementacao limitado aos arquivos sugeridos; core/harness, governanca e workflow CI sao somente leitura.",
+    "core_journey": [],
+    "non_goals": [],
+    "reachability_contract": "Testes focados no criterio 3; depois python C:/dev/DarkFac/core/harness/runner.py --quick na worktree do candidato; nunca duplicar suite completa.",
+    "acceptance_criteria": [
+      "Alimentador concilia tickets abertos de todos os projetos registrados e aptos com runs existentes, sem depender da allowlist padrao apenas darkfac e sem duplicar intake.",
+      "G1, dependencias, acessos, status terminal e limites de retry sao respeitados. Reavaliar tickets adiados exclusivamente pelo V0, sem exclusao silenciosa por tag historica; preservar adiamento intencional de negocio/data com motivo visivel e procurar os outros aptos.",
+      "python -m pytest tests/test_line_backlog_feeder.py tests/test_line_owner_intake.py -q passa para dois projetos, replay, mudanca de estado e indisponibilidade do banco com falha explicita."
+    ],
+    "suggested_files": [
+      "core/line/backlog_feeder.py",
+      "core/line/owner_intake.py",
+      "tests/test_line_backlog_feeder.py",
+      "tests/test_line_owner_intake.py"
+    ],
+    "estimated_complexity": "high",
+    "dependencies": [
+      "USR-280",
+      "USR-281"
+    ],
+    "created_at": "2026-10-16T15:34:48.834293Z",
+    "updated_at": "2026-10-16T15:34:48.834293Z"
+  },
+  {
+    "id": "USR-284",
+    "project_id": "darkfac",
+    "title": "F5: admissao compartilhada do CLI e testes no host atribuido",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand",
+      "pos-v0",
+      "throughput",
+      "concurrency",
+      "routing"
+    ],
+    "problem_statement": "Fatia do plano USR-277: docs/plans/THROUGHPUT_TRES_WORKERS_2026-10-16.md. Decisoes OA-026/027/028 do owner em 16/10/2026. F5: admissao compartilhada do CLI e testes no host atribuido. Lacuna confirmada no baseline: admissao por etapa e topologia anterior nao garantem um ciclo completo por host em todos os projetos. Preservar core.line.routing.pick, cotas >15%, revisao independente e subagentes. Escopo de implementacao limitado aos arquivos sugeridos; core/harness, governanca e workflow CI sao somente leitura.",
+    "core_journey": [],
+    "non_goals": [],
+    "reachability_contract": "Testes focados no criterio 3; depois python C:/dev/DarkFac/core/harness/runner.py --quick na worktree do candidato; nunca duplicar suite completa.",
+    "acceptance_criteria": [
+      "Launcher manual e worker continuo respeitam a mesma reserva de host/ticket, preservando trava local e impedindo um quarto ciclo ou lancamento duplicado.",
+      "No modo frota, DarkFac executa portao oficial local no host reservado usando interfaces existentes; projeto externo usa seus proprios comandos, sem alterar core/harness protegido.",
+      "python -m pytest tests/test_line_fleet_execution.py tests/test_run_ticket_line_lock.py -q passa; subagentes permanecem permitidos e duas suites completas nao executam juntas na mesma maquina."
+    ],
+    "suggested_files": [
+      "run_ticket.py",
+      "core/line/line_lock.py",
+      "core/line/stage_build.py",
+      "tests/test_line_fleet_execution.py"
+    ],
+    "estimated_complexity": "high",
+    "dependencies": [
+      "USR-281",
+      "USR-282"
+    ],
+    "created_at": "2026-10-16T15:34:48.846803Z",
+    "updated_at": "2026-10-16T15:34:48.846803Z"
+  },
+  {
+    "id": "USR-285",
+    "project_id": "darkfac",
+    "title": "F6: exclusao de integracao e deploy por recurso",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand",
+      "pos-v0",
+      "throughput",
+      "concurrency",
+      "routing"
+    ],
+    "problem_statement": "Fatia do plano USR-277: docs/plans/THROUGHPUT_TRES_WORKERS_2026-10-16.md. Decisoes OA-026/027/028 do owner em 16/10/2026. F6: exclusao de integracao e deploy por recurso. Lacuna confirmada no baseline: admissao por etapa e topologia anterior nao garantem um ciclo completo por host em todos os projetos. Preservar core.line.routing.pick, cotas >15%, revisao independente e subagentes. Escopo de implementacao limitado aos arquivos sugeridos; core/harness, governanca e workflow CI sao somente leitura.",
+    "core_journey": [],
+    "non_goals": [],
+    "reachability_contract": "Testes focados no criterio 3; depois python C:/dev/DarkFac/core/harness/runner.py --quick na worktree do candidato; nunca duplicar suite completa.",
+    "acceptance_criteria": [
+      "Integracao adquire lease compartilhado por repositorio/branch antes de sincronizar base e mergear; candidato alterado exige evidencia correspondente e CI verde.",
+      "Deploy e exclusivo por destino, projetos independentes prosseguem; perda de posse impede efeitos tardios e deploy/backup continuam autonomos.",
+      "python -m pytest tests/test_line_resource_lease.py -q passa para mesmo recurso, recursos distintos, crash e retomada sem duplicar merge/deploy."
+    ],
+    "suggested_files": [
+      "core/line/resource_lease.py",
+      "core/line/stage_integration.py",
+      "core/line/stage_release.py",
+      "tests/test_line_resource_lease.py"
+    ],
+    "estimated_complexity": "high",
+    "dependencies": [
+      "USR-281",
+      "USR-282"
+    ],
+    "created_at": "2026-10-16T15:34:48.861340Z",
+    "updated_at": "2026-10-16T15:34:48.861340Z"
+  },
+  {
+    "id": "USR-286",
+    "project_id": "darkfac",
+    "title": "F7: ativacao da frota com um ciclo por host e drain",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand",
+      "pos-v0",
+      "throughput",
+      "concurrency",
+      "routing"
+    ],
+    "problem_statement": "Fatia do plano USR-277: docs/plans/THROUGHPUT_TRES_WORKERS_2026-10-16.md. Decisoes OA-026/027/028 do owner em 16/10/2026. F7: ativacao da frota com um ciclo por host e drain. Lacuna confirmada no baseline: admissao por etapa e topologia anterior nao garantem um ciclo completo por host em todos os projetos. Preservar core.line.routing.pick, cotas >15%, revisao independente e subagentes. Escopo de implementacao limitado aos arquivos sugeridos; core/harness, governanca e workflow CI sao somente leitura.",
+    "core_journey": [],
+    "non_goals": [],
+    "reachability_contract": "Testes focados no criterio 3; depois python C:/dev/DarkFac/core/harness/runner.py --quick na worktree do candidato; nunca duplicar suite completa.",
+    "acceptance_criteria": [
+      "Inventario verifica Grokbox Linux, Notebook e Desktop Windows, acesso ao controle e projetos e CLIs autenticados; servicos usam prioridade 1/2/3 e capacidade 1/1/1, sem fixar harness/modelo.",
+      "Bootstrap idempotente, inicio automatico, drain e atualizacao segura preservam ciclos dos outros hosts; rollback suspende admissao e preserva worktrees e evidencias.",
+      "python -m pytest tests/test_fleet_worker_bootstrap.py -q passa; registrar probes reais dos tres hosts. Acesso exclusivo do owner vira OA completa; nao delegar Git/deploy/backup ao owner."
+    ],
+    "suggested_files": [
+      "scripts/start_onprem_worker.ps1",
+      "scripts/start_fleet_worker.py",
+      "docs/runbooks/fleet_workers.md",
+      "tests/test_fleet_worker_bootstrap.py"
+    ],
+    "estimated_complexity": "high",
+    "dependencies": [
+      "USR-282",
+      "USR-283",
+      "USR-284",
+      "USR-285"
+    ],
+    "created_at": "2026-10-16T15:34:48.875851Z",
+    "updated_at": "2026-10-16T15:34:48.875851Z"
+  },
+  {
+    "id": "USR-287",
+    "project_id": "darkfac",
+    "title": "F8: evidencia de reposicao e visibilidade da frota na Esteira",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand",
+      "pos-v0",
+      "throughput",
+      "concurrency",
+      "routing"
+    ],
+    "problem_statement": "Fatia do plano USR-277: docs/plans/THROUGHPUT_TRES_WORKERS_2026-10-16.md. Decisoes OA-026/027/028 do owner em 16/10/2026. F8: evidencia de reposicao e visibilidade da frota na Esteira. Lacuna confirmada no baseline: admissao por etapa e topologia anterior nao garantem um ciclo completo por host em todos os projetos. Preservar core.line.routing.pick, cotas >15%, revisao independente e subagentes. Escopo de implementacao limitado aos arquivos sugeridos; core/harness, governanca e workflow CI sao somente leitura.",
+    "core_journey": [],
+    "non_goals": [],
+    "reachability_contract": "Testes focados no criterio 3; depois python C:/dev/DarkFac/core/harness/runner.py --quick na worktree do candidato; nunca duplicar suite completa.",
+    "acceptance_criteria": [
+      "Esteira existente mostra projeto/ticket/host, estado da reserva, motivo de ociosidade/bloqueio e fila executavel; manter API headless e distinguir vazia de bloqueada.",
+      "Piloto com seis tickets de pelo menos dois projetos comprova tres ciclos independentes, testes por host, reposicao de duas vagas, falha/retomada sem duplicacao e integracao segura.",
+      "python -m pytest tests/test_line_fleet_live.py -q passa; relatorio registra entregas/hora, ocupacao, espera em testes e reposicao com evidencias reais, sem afirmar ganho de 3x sem medicao."
+    ],
+    "suggested_files": [
+      "core/workflow/line_live.py",
+      "hub/frontend/live.js",
+      "tests/test_line_fleet_live.py",
+      "docs/reports/fleet_throughput_pilot.md"
+    ],
+    "estimated_complexity": "high",
+    "dependencies": [
+      "USR-286"
+    ],
+    "created_at": "2026-10-16T15:34:48.889889Z",
+    "updated_at": "2026-10-16T15:34:48.889889Z"
+  },
+  {
     "id": "USR-291",
     "project_id": "darkfac",
     "title": "Teste instavel tests/test_line_lock.py::test_heartbeat_thread_refreshes colide no os.replace no Windows",
