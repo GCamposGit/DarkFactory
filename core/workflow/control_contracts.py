@@ -63,6 +63,22 @@ class UnknownProjectError(ControlError):
     """The specified project identifier is unknown or disallowed."""
 
 
+class ReservationConflictError(ControlError):
+    """Base exception for fleet cycle reservation conflicts."""
+
+
+class HostBusyError(ReservationConflictError):
+    """The host machine already has an active cycle reservation."""
+
+
+class TicketAlreadyActiveError(ReservationConflictError):
+    """The demand ticket already has an active cycle reservation."""
+
+
+class FleetCapacityExceededError(ReservationConflictError):
+    """The global ceiling of active cycles in the fleet has been reached."""
+
+
 # ---------------------------------------------------------------------------
 # Enums and Type Aliases
 # ---------------------------------------------------------------------------
@@ -448,3 +464,40 @@ class OutboxEvent(ContractModel):
     @property
     def dispatched_at(self) -> str | None:
         return self.published_at
+
+
+class FleetReservation(ContractModel):
+    """Transactional reservation binding a demand cycle to a specific fleet host (USR-281).
+
+    Enforces:
+    - Atomicity across (project, ticket, run, host)
+    - Uniqueness of active ticket across the fleet
+    - Exactly 1 cycle per host
+    - Maximum 3 concurrent cycles fleet-wide
+    - Fencing token monotonicity preventing stale owner publications
+    """
+
+    reservation_id: Annotated[str, Field(min_length=1, max_length=160)]
+    project_id: Annotated[str, Field(min_length=1, max_length=160)]
+    ticket_id: Annotated[str, Field(min_length=1, max_length=64)]
+    run_id: Annotated[str, Field(min_length=1, max_length=160)]
+    host_id: Annotated[str, Field(min_length=1, max_length=64)]
+    status: Literal[
+        "active",
+        "released",
+        "expired",
+        "stolen",
+        "draining",
+        "completed",
+        "failed",
+        "cancelled",
+    ] = "active"
+    fencing_token: Annotated[int, Field(ge=1)] = 1
+    acquired_at: str  # ISO 8601 UTC
+    heartbeat_at: str  # ISO 8601 UTC
+    expires_at: str  # ISO 8601 UTC
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+    @property
+    def is_active(self) -> bool:
+        return self.status == "active"

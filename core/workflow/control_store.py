@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import time
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, Protocol
@@ -16,6 +17,9 @@ from uuid import uuid4
 from core.workflow.control_contracts import (
     Claim,
     ExternalOperation,
+    FleetCapacityExceededError,
+    FleetReservation,
+    HostBusyError,
     IdempotencyConflict,
     IntakeCommand,
     IntakeReceipt,
@@ -24,9 +28,11 @@ from core.workflow.control_contracts import (
     OutboxEvent,
     OutboxNotFoundError,
     ReconcilePage,
+    ReservationConflictError,
     RuntimeOwner,
     StageResult,
     StaleLeaseError,
+    TicketAlreadyActiveError,
     normalize_cause_code,
 )
 
@@ -136,6 +142,66 @@ class ControlStore(Protocol):
         now: datetime | None = None,
     ) -> dict[str, Any]:
         """Cancel an in-flight run and all its open jobs with audit logging (USR-123)."""
+        ...
+
+    def reserve_cycle(
+        self,
+        project_id: str,
+        ticket_id: str,
+        run_id: str,
+        host_id: str,
+        now: datetime,
+        lease_duration_sec: int = 45,
+        max_fleet_slots: int = 3,
+        metadata: dict[str, Any] | None = None,
+    ) -> FleetReservation:
+        """Atomically reserve a demand cycle on a specific fleet host (USR-281)."""
+        ...
+
+    def heartbeat_reservation(
+        self,
+        reservation_id: str,
+        fencing_token: int,
+        now: datetime,
+        lease_duration_sec: int | None = None,
+    ) -> FleetReservation:
+        """Extend active cycle reservation lease (USR-281)."""
+        ...
+
+    def release_reservation(
+        self,
+        reservation_id: str,
+        fencing_token: int,
+        status: str = "released",
+        now: datetime | None = None,
+    ) -> FleetReservation:
+        """Release active cycle reservation (USR-281)."""
+        ...
+
+    def get_reservation(self, reservation_id: str) -> FleetReservation | None:
+        """Retrieve reservation by ID (USR-281)."""
+        ...
+
+    def get_active_reservation_for_ticket(
+        self, project_id: str, ticket_id: str
+    ) -> FleetReservation | None:
+        """Find active reservation for a project ticket (USR-281)."""
+        ...
+
+    def get_active_reservation_for_host(self, host_id: str) -> FleetReservation | None:
+        """Find active reservation currently occupying a host (USR-281)."""
+        ...
+
+    def list_active_reservations(self) -> list[FleetReservation]:
+        """List all active fleet reservations (USR-281)."""
+        ...
+
+    def drain_host(self, host_id: str, reason: str, now: datetime) -> int:
+        """Mark host and any active reservations for drain (USR-281)."""
+        ...
+
+    def reconcile_fleet_reservations(self, now: datetime) -> list[FleetReservation]:
+        """Sweep expired fleet reservations and release slots (USR-281)."""
         ...
 
 
@@ -327,6 +393,34 @@ class SQLiteControlStore:
                     recorded_at TEXT NOT NULL,
                     PRIMARY KEY (run_id, question_id)
                 );
+
+                CREATE TABLE IF NOT EXISTS fleet_reservations (
+                    reservation_id TEXT PRIMARY KEY,
+                    project_id TEXT NOT NULL,
+                    ticket_id TEXT NOT NULL,
+                    run_id TEXT NOT NULL,
+                    host_id TEXT NOT NULL,
+                    status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'released', 'expired', 'stolen', 'draining', 'completed', 'failed', 'cancelled')),
+                    fencing_token INTEGER NOT NULL DEFAULT 1,
+                    acquired_at TEXT NOT NULL,
+                    heartbeat_at TEXT NOT NULL,
+                    expires_at TEXT NOT NULL,
+                    metadata TEXT NOT NULL DEFAULT '{}'
+                );
+
+                CREATE UNIQUE INDEX IF NOT EXISTS uq_fleet_reservations_active_ticket 
+                    ON fleet_reservations (project_id, ticket_id) 
+                    WHERE status = 'active';
+
+                CREATE UNIQUE INDEX IF NOT EXISTS uq_fleet_reservations_active_host 
+                    ON fleet_reservations (host_id) 
+                    WHERE status = 'active';
+
+                CREATE INDEX IF NOT EXISTS idx_fleet_reservations_run_id 
+                    ON fleet_reservations (run_id);
+
+                CREATE INDEX IF NOT EXISTS idx_fleet_reservations_expiry 
+                    ON fleet_reservations (expires_at, status);
                 """
             )
             self._migrate_jobs_columns(conn)
@@ -568,6 +662,35 @@ class SQLiteControlStore:
                     ready_reference = row["ready_at"] or row["created_at"]
                     if not _is_ready_enough(ready_reference, now, ready_age_sec):
                         continue
+
+                # Subordination of stage claims to fleet cycle reservation (USR-281)
+                cur.execute(
+                    """
+                    SELECT reservation_id, host_id, status, expires_at
+                    FROM fleet_reservations
+                    WHERE run_id = ? AND status IN ('active', 'draining')
+                    """,
+                    (row["run_id"],),
+                )
+                res_row = cur.fetchone()
+                if res_row:
+                    res_expires = datetime.fromisoformat(str(res_row["expires_at"]))
+                    if res_expires.tzinfo is None and now.tzinfo is not None:
+                        res_expires = res_expires.replace(tzinfo=now.tzinfo)
+                    elif res_expires.tzinfo is not None and now.tzinfo is None:
+                        now_comp = now.replace(tzinfo=res_expires.tzinfo)
+                    else:
+                        now_comp = now
+                    if res_expires < now_comp:
+                        continue  # Expired cycle reservation
+                    res_host = str(res_row["host_id"]).lower()
+                    worker_lower = worker.lower()
+                    if res_host not in worker_lower and worker_lower not in res_host:
+                        continue  # Reserved for a different host machine
+                    matched_reservation_id = res_row["reservation_id"]
+                else:
+                    matched_reservation_id = None
+
                 chosen_row = row
                 break
 
@@ -583,7 +706,7 @@ class SQLiteControlStore:
             old_fencing_token = chosen_row["fencing_token"]
             new_fencing_token = old_fencing_token + 1
             lease_id = f"lease-{uuid4().hex[:12]}"
-            reservation_id = f"res-{uuid4().hex[:8]}"
+            reservation_id = matched_reservation_id or f"res-{uuid4().hex[:8]}"
             route_ref = "default"
 
             cur.execute(
@@ -708,6 +831,25 @@ class SQLiteControlStore:
                     f"Fencing token mismatch for job: job={job_row['fencing_token']}, claim={claim.fencing_token}"
                 )
 
+            # If claim belongs to a fleet cycle reservation, verify reservation is active and valid (USR-281)
+            if claim.reservation_id and claim.reservation_id.startswith("fres-"):
+                cur.execute(
+                    "SELECT status, expires_at FROM fleet_reservations WHERE reservation_id = ?",
+                    (claim.reservation_id,),
+                )
+                res_row = cur.fetchone()
+                if res_row:
+                    res_expires = datetime.fromisoformat(str(res_row["expires_at"]))
+                    if res_expires.tzinfo is None and now.tzinfo is not None:
+                        res_expires = res_expires.replace(tzinfo=now.tzinfo)
+                    elif res_expires.tzinfo is not None and now.tzinfo is None:
+                        now_comp = now.replace(tzinfo=res_expires.tzinfo)
+                    else:
+                        now_comp = now
+                    if res_row["status"] not in ("active", "draining") or res_expires < now_comp:
+                        conn.rollback()
+                        raise StaleLeaseError(f"Fleet cycle reservation '{claim.reservation_id}' is no longer active ({res_row['status']}).")
+
             # Update expiration
             cur.execute(
                 "UPDATE claims SET expires_at = ? WHERE lease_id = ? AND fencing_token = ? AND status = 'active'",
@@ -790,6 +932,27 @@ class SQLiteControlStore:
                 raise StaleLeaseError(
                     f"Fencing token mismatch on finish: job={job_row['fencing_token']}, claim={claim.fencing_token}"
                 )
+
+            # If claim belongs to a fleet cycle reservation, verify reservation is active and valid (USR-281)
+            if claim.reservation_id and claim.reservation_id.startswith("fres-"):
+                cur.execute(
+                    "SELECT status, expires_at FROM fleet_reservations WHERE reservation_id = ?",
+                    (claim.reservation_id,),
+                )
+                res_row = cur.fetchone()
+                if res_row:
+                    res_expires = datetime.fromisoformat(str(res_row["expires_at"]))
+                    if res_expires.tzinfo is None and now.tzinfo is not None:
+                        res_expires = res_expires.replace(tzinfo=now.tzinfo)
+                    elif res_expires.tzinfo is not None and now.tzinfo is None:
+                        now_comp = now.replace(tzinfo=res_expires.tzinfo)
+                    else:
+                        now_comp = now
+                    if res_row["status"] not in ("active", "draining") or res_expires < now_comp:
+                        conn.rollback()
+                        raise StaleLeaseError(
+                            f"Fleet cycle reservation '{claim.reservation_id}' is no longer active ({res_row['status']}). Old owner cannot publish."
+                        )
 
             # Apply state update
             if result.outcome == "success":
@@ -1177,6 +1340,26 @@ class SQLiteControlStore:
             ):
                 conn.rollback()
                 raise StaleLeaseError("Job fencing token mismatch.")
+
+            # If claim belongs to a fleet cycle reservation, verify reservation is active and valid (USR-281)
+            if claim.reservation_id and claim.reservation_id.startswith("fres-"):
+                cur.execute(
+                    "SELECT status, expires_at FROM fleet_reservations WHERE reservation_id = ?",
+                    (claim.reservation_id,),
+                )
+                res_row = cur.fetchone()
+                if res_row:
+                    res_expires = datetime.fromisoformat(str(res_row["expires_at"]))
+                    now_op = datetime.fromisoformat(str(operation.observed_at)) if operation.observed_at else datetime.now(UTC)
+                    if res_expires.tzinfo is None and now_op.tzinfo is not None:
+                        res_expires = res_expires.replace(tzinfo=now_op.tzinfo)
+                    elif res_expires.tzinfo is not None and now_op.tzinfo is None:
+                        now_op = now_op.replace(tzinfo=res_expires.tzinfo)
+                    if res_row["status"] not in ("active", "draining") or res_expires < now_op:
+                        conn.rollback()
+                        raise StaleLeaseError(
+                            f"Fleet cycle reservation '{claim.reservation_id}' is no longer active ({res_row['status']}). Old owner cannot record operation."
+                        )
 
             cur.execute(
                 """
@@ -1770,6 +1953,12 @@ class SQLiteControlStore:
                 (run_id,),
             )
 
+            # 2b. Cancel active fleet reservations for this run (USR-281)
+            cur.execute(
+                "UPDATE fleet_reservations SET status = 'cancelled', heartbeat_at = ? WHERE run_id = ? AND status IN ('active', 'draining')",
+                (now_iso, run_id),
+            )
+
             # 3. Cancel the run
             cur.execute(
                 "UPDATE runs SET status = 'cancelled', completed_at = ?, updated_at = ? WHERE run_id = ?",
@@ -1802,5 +1991,491 @@ class SQLiteControlStore:
         except Exception:
             conn.rollback()
             raise
+        finally:
+            conn.close()
+
+    @staticmethod
+    def _row_to_reservation(row: sqlite3.Row) -> FleetReservation:
+        raw_meta = row["metadata"]
+        try:
+            meta = json.loads(raw_meta) if isinstance(raw_meta, str) else (raw_meta or {})
+        except Exception:
+            meta = {}
+        return FleetReservation(
+            reservation_id=row["reservation_id"],
+            project_id=row["project_id"],
+            ticket_id=row["ticket_id"],
+            run_id=row["run_id"],
+            host_id=row["host_id"],
+            status=row["status"],
+            fencing_token=row["fencing_token"],
+            acquired_at=str(row["acquired_at"]),
+            heartbeat_at=str(row["heartbeat_at"]),
+            expires_at=str(row["expires_at"]),
+            metadata=meta,
+        )
+
+    def reserve_cycle(
+        self,
+        project_id: str,
+        ticket_id: str,
+        run_id: str,
+        host_id: str,
+        now: datetime,
+        lease_duration_sec: int = 45,
+        max_fleet_slots: int = 3,
+        metadata: dict[str, Any] | None = None,
+    ) -> FleetReservation:
+        """Atomically reserve a demand cycle on a specific fleet host (USR-281)."""
+        now_iso = now.isoformat()
+        expires_at = (now + timedelta(seconds=lease_duration_sec)).isoformat()
+
+        max_retries = 10
+        for attempt in range(max_retries):
+            conn = self._connect()
+            try:
+                conn.execute("BEGIN IMMEDIATE")
+                cur = conn.cursor()
+
+                # 1. Sweep expired active reservations to release slots
+                cur.execute(
+                    """
+                    UPDATE fleet_reservations
+                    SET status = 'expired'
+                    WHERE status = 'active' AND expires_at < ?
+                    """,
+                    (now_iso,),
+                )
+
+                # 2. Check active ticket uniqueness
+                cur.execute(
+                    """
+                    SELECT reservation_id, project_id, ticket_id, run_id, host_id, status, fencing_token,
+                           acquired_at, heartbeat_at, expires_at, metadata
+                    FROM fleet_reservations
+                    WHERE project_id = ? AND ticket_id = ? AND status = 'active'
+                    """,
+                    (project_id, ticket_id),
+                )
+                ticket_row = cur.fetchone()
+                if ticket_row:
+                    if ticket_row["run_id"] == run_id and ticket_row["host_id"] == host_id:
+                        conn.commit()
+                        return self._row_to_reservation(ticket_row)
+                    conn.rollback()
+                    raise TicketAlreadyActiveError(
+                        f"Ticket '{ticket_id}' in project '{project_id}' already has active reservation "
+                        f"'{ticket_row['reservation_id']}' on host '{ticket_row['host_id']}'."
+                    )
+
+                # 3. Check 1 cycle per host
+                cur.execute(
+                    """
+                    SELECT reservation_id, ticket_id, run_id
+                    FROM fleet_reservations
+                    WHERE host_id = ? AND status = 'active'
+                    """,
+                    (host_id,),
+                )
+                host_row = cur.fetchone()
+                if host_row:
+                    conn.rollback()
+                    raise HostBusyError(
+                        f"Host '{host_id}' already has active reservation '{host_row['reservation_id']}' "
+                        f"for ticket '{host_row['ticket_id']}'."
+                    )
+
+                # 4. Check fleet ceiling of max 3 active cycles
+                cur.execute(
+                    "SELECT COUNT(*) as count FROM fleet_reservations WHERE status = 'active'"
+                )
+                count = cur.fetchone()["count"]
+                if count >= max_fleet_slots:
+                    conn.rollback()
+                    raise FleetCapacityExceededError(
+                        f"Fleet capacity ceiling of {max_fleet_slots} active cycles reached (currently {count} active)."
+                    )
+
+                # 5. Insert new reservation
+                reservation_id = f"fres-{uuid4().hex[:12]}"
+                meta_json = json.dumps(metadata or {})
+                cur.execute(
+                    """
+                    INSERT INTO fleet_reservations (
+                        reservation_id, project_id, ticket_id, run_id, host_id,
+                        status, fencing_token, acquired_at, heartbeat_at, expires_at, metadata
+                    ) VALUES (?, ?, ?, ?, ?, 'active', 1, ?, ?, ?, ?)
+                    """,
+                    (
+                        reservation_id,
+                        project_id,
+                        ticket_id,
+                        run_id,
+                        host_id,
+                        now_iso,
+                        now_iso,
+                        expires_at,
+                        meta_json,
+                    ),
+                )
+                conn.commit()
+                return FleetReservation(
+                    reservation_id=reservation_id,
+                    project_id=project_id,
+                    ticket_id=ticket_id,
+                    run_id=run_id,
+                    host_id=host_id,
+                    status="active",
+                    fencing_token=1,
+                    acquired_at=now_iso,
+                    heartbeat_at=now_iso,
+                    expires_at=expires_at,
+                    metadata=metadata or {},
+                )
+            except sqlite3.IntegrityError as ie:
+                conn.rollback()
+                msg = str(ie).lower()
+                if "host" in msg:
+                    raise HostBusyError(f"Host '{host_id}' already has active reservation.") from ie
+                elif "ticket" in msg:
+                    raise TicketAlreadyActiveError(f"Ticket '{ticket_id}' in project '{project_id}' already has active reservation.") from ie
+                raise ReservationConflictError(f"Fleet reservation integrity conflict: {ie}") from ie
+            except sqlite3.OperationalError as oe:
+                conn.rollback()
+                err_msg = str(oe).lower()
+                if ("locked" in err_msg or "busy" in err_msg) and attempt < max_retries - 1:
+                    time.sleep(0.02 * (attempt + 1))
+                    continue
+                if "locked" in err_msg or "busy" in err_msg:
+                    raise HostBusyError(f"Host '{host_id}' lock contention: {oe}") from oe
+                raise
+            except Exception:
+                conn.rollback()
+                raise
+            finally:
+                conn.close()
+
+    def heartbeat_reservation(
+        self,
+        reservation_id: str,
+        fencing_token: int,
+        now: datetime,
+        lease_duration_sec: int | None = None,
+    ) -> FleetReservation:
+        """Extend active cycle reservation lease (USR-281)."""
+        now_iso = now.isoformat()
+        dur = lease_duration_sec if lease_duration_sec is not None else self.lease_duration_sec
+        new_expires_at = (now + timedelta(seconds=dur)).isoformat()
+
+        conn = self._connect()
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            cur = conn.cursor()
+            cur.execute(
+                """
+                SELECT reservation_id, project_id, ticket_id, run_id, host_id, status, fencing_token,
+                       acquired_at, heartbeat_at, expires_at, metadata
+                FROM fleet_reservations
+                WHERE reservation_id = ?
+                """,
+                (reservation_id,),
+            )
+            row = cur.fetchone()
+            if not row:
+                conn.rollback()
+                raise StaleLeaseError(f"Reservation '{reservation_id}' not found.")
+            if row["status"] not in ("active", "draining"):
+                conn.rollback()
+                raise StaleLeaseError(f"Reservation '{reservation_id}' is in non-active status '{row['status']}'.")
+            if row["fencing_token"] != fencing_token:
+                conn.rollback()
+                raise StaleLeaseError(
+                    f"Fencing token mismatch on heartbeat: token={fencing_token}, active={row['fencing_token']}."
+                )
+            res_expires = datetime.fromisoformat(str(row["expires_at"]))
+            if res_expires.tzinfo is None and now.tzinfo is not None:
+                res_expires = res_expires.replace(tzinfo=now.tzinfo)
+            elif res_expires.tzinfo is not None and now.tzinfo is None:
+                now_comp = now.replace(tzinfo=res_expires.tzinfo)
+            else:
+                now_comp = now
+            if res_expires < now_comp:
+                cur.execute("UPDATE fleet_reservations SET status = 'expired' WHERE reservation_id = ?", (reservation_id,))
+                conn.commit()
+                raise StaleLeaseError(f"Reservation '{reservation_id}' expired at {row['expires_at']}.")
+
+            cur.execute(
+                """
+                UPDATE fleet_reservations
+                SET heartbeat_at = ?, expires_at = ?
+                WHERE reservation_id = ?
+                """,
+                (now_iso, new_expires_at, reservation_id),
+            )
+            conn.commit()
+            return FleetReservation(
+                reservation_id=row["reservation_id"],
+                project_id=row["project_id"],
+                ticket_id=row["ticket_id"],
+                run_id=row["run_id"],
+                host_id=row["host_id"],
+                status=row["status"],
+                fencing_token=row["fencing_token"],
+                acquired_at=str(row["acquired_at"]),
+                heartbeat_at=now_iso,
+                expires_at=new_expires_at,
+                metadata=json.loads(row["metadata"]) if isinstance(row["metadata"], str) else (row["metadata"] or {}),
+            )
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+
+    def release_reservation(
+        self,
+        reservation_id: str,
+        fencing_token: int,
+        status: str = "released",
+        now: datetime | None = None,
+    ) -> FleetReservation:
+        """Release active cycle reservation (USR-281)."""
+        now_dt = now or datetime.now(UTC)
+        now_iso = now_dt.isoformat()
+
+        conn = self._connect()
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            cur = conn.cursor()
+            cur.execute(
+                """
+                SELECT reservation_id, project_id, ticket_id, run_id, host_id, status, fencing_token,
+                       acquired_at, heartbeat_at, expires_at, metadata
+                FROM fleet_reservations
+                WHERE reservation_id = ?
+                """,
+                (reservation_id,),
+            )
+            row = cur.fetchone()
+            if not row:
+                conn.rollback()
+                raise StaleLeaseError(f"Reservation '{reservation_id}' not found.")
+            if row["fencing_token"] != fencing_token:
+                conn.rollback()
+                raise StaleLeaseError(
+                    f"Fencing token mismatch on release: token={fencing_token}, active={row['fencing_token']}."
+                )
+            if row["status"] in ("released", "completed", "failed", "cancelled"):
+                conn.commit()
+                return self._row_to_reservation(row)
+            if row["status"] == "expired":
+                conn.rollback()
+                raise StaleLeaseError(f"Reservation '{reservation_id}' has already expired and cannot be released.")
+
+            cur.execute(
+                "UPDATE fleet_reservations SET status = ?, heartbeat_at = ? WHERE reservation_id = ?",
+                (status, now_iso, reservation_id),
+            )
+            conn.commit()
+            return FleetReservation(
+                reservation_id=row["reservation_id"],
+                project_id=row["project_id"],
+                ticket_id=row["ticket_id"],
+                run_id=row["run_id"],
+                host_id=row["host_id"],
+                status=status,
+                fencing_token=row["fencing_token"],
+                acquired_at=str(row["acquired_at"]),
+                heartbeat_at=now_iso,
+                expires_at=str(row["expires_at"]),
+                metadata=json.loads(row["metadata"]) if isinstance(row["metadata"], str) else (row["metadata"] or {}),
+            )
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+
+    def get_reservation(self, reservation_id: str) -> FleetReservation | None:
+        """Retrieve reservation by ID (USR-281)."""
+        conn = self._connect()
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                """
+                SELECT reservation_id, project_id, ticket_id, run_id, host_id, status, fencing_token,
+                       acquired_at, heartbeat_at, expires_at, metadata
+                FROM fleet_reservations
+                WHERE reservation_id = ?
+                """,
+                (reservation_id,),
+            )
+            row = cur.fetchone()
+            return self._row_to_reservation(row) if row else None
+        finally:
+            conn.close()
+
+    def get_active_reservation_for_ticket(
+        self, project_id: str, ticket_id: str
+    ) -> FleetReservation | None:
+        """Find active reservation for a project ticket (USR-281)."""
+        conn = self._connect()
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                """
+                SELECT reservation_id, project_id, ticket_id, run_id, host_id, status, fencing_token,
+                       acquired_at, heartbeat_at, expires_at, metadata
+                FROM fleet_reservations
+                WHERE project_id = ? AND ticket_id = ? AND status = 'active'
+                """,
+                (project_id, ticket_id),
+            )
+            row = cur.fetchone()
+            return self._row_to_reservation(row) if row else None
+        finally:
+            conn.close()
+
+    def get_active_reservation_for_host(self, host_id: str) -> FleetReservation | None:
+        """Find active reservation currently occupying a host (USR-281)."""
+        conn = self._connect()
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                """
+                SELECT reservation_id, project_id, ticket_id, run_id, host_id, status, fencing_token,
+                       acquired_at, heartbeat_at, expires_at, metadata
+                FROM fleet_reservations
+                WHERE host_id = ? AND status = 'active'
+                """,
+                (host_id,),
+            )
+            row = cur.fetchone()
+            return self._row_to_reservation(row) if row else None
+        finally:
+            conn.close()
+
+    def list_active_reservations(self) -> list[FleetReservation]:
+        """List all active fleet reservations (USR-281)."""
+        conn = self._connect()
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                """
+                SELECT reservation_id, project_id, ticket_id, run_id, host_id, status, fencing_token,
+                       acquired_at, heartbeat_at, expires_at, metadata
+                FROM fleet_reservations
+                WHERE status = 'active'
+                ORDER BY acquired_at ASC
+                """
+            )
+            return [self._row_to_reservation(row) for row in cur.fetchall()]
+        finally:
+            conn.close()
+
+    def drain_host(self, host_id: str, reason: str, now: datetime) -> int:
+        """Mark host and any active reservations for drain (USR-281)."""
+        conn = self._connect()
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            cur = conn.cursor()
+            cur.execute(
+                """
+                SELECT reservation_id, metadata
+                FROM fleet_reservations
+                WHERE host_id = ? AND status = 'active'
+                """,
+                (host_id,),
+            )
+            rows = cur.fetchall()
+            for r in rows:
+                meta = json.loads(r["metadata"]) if isinstance(r["metadata"], str) else (r["metadata"] or {})
+                meta["drain_reason"] = reason
+                cur.execute(
+                    "UPDATE fleet_reservations SET status = 'draining', metadata = ? WHERE reservation_id = ?",
+                    (json.dumps(meta), r["reservation_id"]),
+                )
+            conn.commit()
+            return len(rows)
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+
+    def reconcile_fleet_reservations(self, now: datetime) -> list[FleetReservation]:
+        """Sweep expired fleet reservations and release slots (USR-281)."""
+        now_iso = now.isoformat()
+        conn = self._connect()
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            cur = conn.cursor()
+            cur.execute(
+                """
+                SELECT reservation_id, project_id, ticket_id, run_id, host_id, status, fencing_token,
+                       acquired_at, heartbeat_at, expires_at, metadata
+                FROM fleet_reservations
+                WHERE status IN ('active', 'draining') AND expires_at < ?
+                """,
+                (now_iso,),
+            )
+            rows = cur.fetchall()
+            expired: list[FleetReservation] = []
+            for r in rows:
+                res = self._row_to_reservation(r)
+                expired.append(res)
+                cur.execute(
+                    "UPDATE fleet_reservations SET status = 'expired' WHERE reservation_id = ?",
+                    (r["reservation_id"],),
+                )
+                cur.execute(
+                    """
+                    INSERT INTO reconciliation_ledger (
+                        cycle_id, action_type, target_key, reason, status, recorded_at
+                    ) VALUES (?, 'expire_fleet_reservation', ?, 'lease_expired', 'success', ?)
+                    """,
+                    (
+                        f"recon-{uuid4().hex[:8]}",
+                        json.dumps({"reservation_id": res.reservation_id, "ticket_id": res.ticket_id, "host_id": res.host_id}),
+                        now_iso,
+                    ),
+                )
+            conn.commit()
+            return expired
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+
+    def reconcile_unknown_operations(self, now: datetime) -> list[ExternalOperation]:
+        """Sweep and report operations left in 'unknown' state for reconciliation before retry (USR-281)."""
+        conn = self._connect()
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                """
+                SELECT operation_key, request_digest, provider, external_id, status,
+                       claim_lease_id, fencing_token, observed_at, response_digest, error_details
+                FROM external_operations
+                WHERE status = 'unknown'
+                """
+            )
+            rows = cur.fetchall()
+            return [
+                ExternalOperation(
+                    operation_key=row["operation_key"],
+                    request_digest=row["request_digest"],
+                    provider=row["provider"],
+                    external_id=row["external_id"],
+                    status=row["status"],
+                    claim_lease_id=row["claim_lease_id"],
+                    fencing_token=row["fencing_token"],
+                    observed_at=row["observed_at"],
+                    response_digest=row["response_digest"],
+                    error_details=row["error_details"],
+                )
+                for row in rows
+            ]
         finally:
             conn.close()

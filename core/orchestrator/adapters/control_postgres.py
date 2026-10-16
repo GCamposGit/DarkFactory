@@ -18,6 +18,9 @@ from core.workflow.control_contracts import (
     Claim,
     ControlError,
     ExternalOperation,
+    FleetCapacityExceededError,
+    FleetReservation,
+    HostBusyError,
     IdempotencyConflict,
     IntakeCommand,
     IntakeReceipt,
@@ -26,10 +29,12 @@ from core.workflow.control_contracts import (
     OutboxEvent,
     OutboxNotFoundError,
     ReconcilePage,
+    ReservationConflictError,
     RuntimeOwner,
     StageResult,
     StaleLeaseError,
     StoreUnavailableError,
+    TicketAlreadyActiveError,
     normalize_cause_code,
 )
 from core.workflow.control_store import ControlStore, SQLiteControlStore, _is_ready_enough, RUN_OPEN_JOB_STATUSES
@@ -177,6 +182,35 @@ CREATE TABLE IF NOT EXISTS grill_answers (
     recorded_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (run_id, question_id)
 );
+
+CREATE TABLE IF NOT EXISTS fleet_reservations (
+    reservation_id VARCHAR(160) PRIMARY KEY,
+    project_id VARCHAR(160) NOT NULL,
+    ticket_id VARCHAR(64) NOT NULL,
+    run_id VARCHAR(160) NOT NULL,
+    host_id VARCHAR(64) NOT NULL,
+    status VARCHAR(32) NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'released', 'expired', 'stolen', 'draining', 'completed', 'failed', 'cancelled')),
+    fencing_token INTEGER NOT NULL DEFAULT 1,
+    acquired_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    heartbeat_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    expires_at TIMESTAMPTZ NOT NULL,
+    metadata JSONB NOT NULL DEFAULT '{}'::jsonb
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_fleet_reservations_active_ticket 
+    ON fleet_reservations (project_id, ticket_id) 
+    WHERE status = 'active';
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_fleet_reservations_active_host 
+    ON fleet_reservations (host_id) 
+    WHERE status = 'active';
+
+CREATE INDEX IF NOT EXISTS idx_fleet_reservations_run_id 
+    ON fleet_reservations (run_id);
+
+CREATE INDEX IF NOT EXISTS idx_fleet_reservations_expiry 
+    ON fleet_reservations (expires_at, status) 
+    WHERE status = 'active';
 """
 
 
@@ -431,6 +465,31 @@ class PostgresControlStore:
                             ready_reference = r[10] or r[8]
                             if not _is_ready_enough(ready_reference, now_utc, ready_age_sec):
                                 continue
+
+                        # Subordination of stage claims to fleet cycle reservation (USR-281)
+                        cur.execute(
+                            """
+                            SELECT reservation_id, host_id, status, expires_at
+                            FROM fleet_reservations
+                            WHERE run_id = %s AND status IN ('active', 'draining')
+                            """,
+                            (r[0],),
+                        )
+                        res_row = cur.fetchone()
+                        if res_row:
+                            res_id, h_id, st, exp_at = res_row
+                            res_expires = exp_at if hasattr(exp_at, "astimezone") else datetime.fromisoformat(str(exp_at))
+                            res_expires = res_expires.astimezone(UTC) if res_expires.tzinfo else res_expires.replace(tzinfo=UTC)
+                            if res_expires < now_utc:
+                                continue  # Expired cycle reservation
+                            res_host = str(h_id).lower()
+                            worker_lower = worker.lower()
+                            if res_host not in worker_lower and worker_lower not in res_host:
+                                continue  # Reserved for a different host
+                            matched_reservation_id = res_id
+                        else:
+                            matched_reservation_id = None
+
                         chosen = r
                         break
 
@@ -441,7 +500,7 @@ class PostgresControlStore:
                     run_id, ticket_id, plan_version, stage, iteration, old_token, role, _req, _created_at, _nb, _ra = chosen
                     new_token = old_token + 1
                     lease_id = f"lease-{uuid4().hex[:12]}"
-                    reservation_id = f"res-{uuid4().hex[:8]}"
+                    reservation_id = matched_reservation_id or f"res-{uuid4().hex[:8]}"
                     route_ref = "default"
 
                     cur.execute(
@@ -535,6 +594,20 @@ class PostgresControlStore:
                     if not job_row or job_row[0] != claim.fencing_token or job_row[1] != claim.lease_id:
                         raise StaleLeaseError("Fencing token mismatch on heartbeat.")
 
+                    # If claim belongs to a fleet cycle reservation, verify reservation is active and valid (USR-281)
+                    if claim.reservation_id and claim.reservation_id.startswith("fres-"):
+                        cur.execute(
+                            "SELECT status, expires_at FROM fleet_reservations WHERE reservation_id = %s FOR UPDATE",
+                            (claim.reservation_id,),
+                        )
+                        res_row = cur.fetchone()
+                        if res_row:
+                            st, exp_at = res_row[0], res_row[1]
+                            res_expires = exp_at if hasattr(exp_at, "astimezone") else datetime.fromisoformat(str(exp_at))
+                            res_expires = res_expires.astimezone(UTC) if res_expires.tzinfo else res_expires.replace(tzinfo=UTC)
+                            if st not in ("active", "draining") or res_expires < now_utc:
+                                raise StaleLeaseError(f"Fleet cycle reservation '{claim.reservation_id}' is no longer active ({st}).")
+
                     cur.execute(
                         "UPDATE claims SET expires_at = %s WHERE lease_id = %s AND fencing_token = %s",
                         (new_expires_utc, claim.lease_id, claim.fencing_token),
@@ -595,6 +668,20 @@ class PostgresControlStore:
                     job_row = cur.fetchone()
                     if not job_row or job_row[0] != claim.fencing_token or job_row[1] != claim.lease_id:
                         raise StaleLeaseError("Fencing token mismatch on finish.")
+
+                    # If claim belongs to a fleet cycle reservation, verify reservation is active and valid (USR-281)
+                    if claim.reservation_id and claim.reservation_id.startswith("fres-"):
+                        cur.execute(
+                            "SELECT status, expires_at FROM fleet_reservations WHERE reservation_id = %s FOR UPDATE",
+                            (claim.reservation_id,),
+                        )
+                        res_row = cur.fetchone()
+                        if res_row:
+                            st, exp_at = res_row[0], res_row[1]
+                            res_expires = exp_at if hasattr(exp_at, "astimezone") else datetime.fromisoformat(str(exp_at))
+                            res_expires = res_expires.astimezone(UTC) if res_expires.tzinfo else res_expires.replace(tzinfo=UTC)
+                            if st not in ("active", "draining") or res_expires < now_utc:
+                                raise StaleLeaseError(f"Fleet cycle reservation '{claim.reservation_id}' is no longer active ({st}). Old owner cannot publish.")
 
                     if result.outcome == "success":
                         cur.execute(
@@ -903,6 +990,20 @@ class PostgresControlStore:
                     job_row = cur.fetchone()
                     if not job_row or job_row[0] != claim.fencing_token or job_row[1] != claim.lease_id:
                         raise StaleLeaseError("Job fencing token mismatch.")
+
+                    # If claim belongs to a fleet cycle reservation, verify reservation is active and valid (USR-281)
+                    if claim.reservation_id and claim.reservation_id.startswith("fres-"):
+                        cur.execute(
+                            "SELECT status, expires_at FROM fleet_reservations WHERE reservation_id = %s FOR UPDATE",
+                            (claim.reservation_id,),
+                        )
+                        res_row = cur.fetchone()
+                        if res_row:
+                            st, exp_at = res_row[0], res_row[1]
+                            res_expires = exp_at if hasattr(exp_at, "astimezone") else datetime.fromisoformat(str(exp_at))
+                            res_expires = res_expires.astimezone(UTC) if res_expires.tzinfo else res_expires.replace(tzinfo=UTC)
+                            if st not in ("active", "draining") or res_expires < now_utc:
+                                raise StaleLeaseError(f"Fleet cycle reservation '{claim.reservation_id}' is no longer active ({st}). Old owner cannot record operation.")
 
                     cur.execute(
                         """
@@ -1609,6 +1710,12 @@ class PostgresControlStore:
                         (run_id,),
                     )
 
+                    # 2b. Cancel active fleet reservations for this run (USR-281)
+                    cur.execute(
+                        "UPDATE fleet_reservations SET status = 'cancelled', heartbeat_at = %s WHERE run_id = %s AND status IN ('active', 'draining')",
+                        (now_utc, run_id),
+                    )
+
                     cur.execute(
                         "UPDATE runs SET status = 'cancelled', completed_at = %s, updated_at = %s WHERE run_id = %s",
                         (now_utc, now_utc, run_id),
@@ -1637,3 +1744,485 @@ class PostgresControlStore:
                     }
         except Exception as exc:
             raise StoreUnavailableError(f"PostgreSQL cancel_run failed: {exc}") from exc
+
+    @staticmethod
+    def _row_to_reservation(row: tuple) -> FleetReservation:
+        res_id, p_id, t_id, r_id, h_id, st, f_tok, ac_at, hb_at, exp_at, meta = row
+        return FleetReservation(
+            reservation_id=res_id,
+            project_id=p_id,
+            ticket_id=t_id,
+            run_id=r_id,
+            host_id=h_id,
+            status=st,
+            fencing_token=f_tok,
+            acquired_at=ac_at.isoformat() if hasattr(ac_at, "isoformat") else str(ac_at),
+            heartbeat_at=hb_at.isoformat() if hasattr(hb_at, "isoformat") else str(hb_at),
+            expires_at=exp_at.isoformat() if hasattr(exp_at, "isoformat") else str(exp_at),
+            metadata=meta if isinstance(meta, dict) else {},
+        )
+
+    def reserve_cycle(
+        self,
+        project_id: str,
+        ticket_id: str,
+        run_id: str,
+        host_id: str,
+        now: datetime,
+        lease_duration_sec: int = 45,
+        max_fleet_slots: int = 3,
+        metadata: dict[str, Any] | None = None,
+    ) -> FleetReservation:
+        """Atomically reserve a demand cycle on a specific fleet host (USR-281)."""
+        if self.mock_mode:
+            return self._backend.reserve_cycle(
+                project_id=project_id,
+                ticket_id=ticket_id,
+                run_id=run_id,
+                host_id=host_id,
+                now=now,
+                lease_duration_sec=lease_duration_sec,
+                max_fleet_slots=max_fleet_slots,
+                metadata=metadata,
+            )
+
+        now_utc = now.astimezone(UTC)
+        expires_at_utc = now_utc + timedelta(seconds=lease_duration_sec)
+        try:
+            with self._psycopg.connect(self.raw_url) as conn:
+                with conn.cursor() as cur:
+                    # Advisory transaction lock serializes concurrent ceiling checks
+                    cur.execute("SELECT pg_advisory_xact_lock(hashtext('darkfac_fleet_reservation_lock'))")
+
+                    # 1. Sweep expired active reservations to release slots
+                    cur.execute(
+                        """
+                        UPDATE fleet_reservations
+                        SET status = 'expired'
+                        WHERE status = 'active' AND expires_at < %s
+                        """,
+                        (now_utc,),
+                    )
+
+                    # 2. Check active ticket uniqueness
+                    cur.execute(
+                        """
+                        SELECT reservation_id, project_id, ticket_id, run_id, host_id, status, fencing_token,
+                               acquired_at, heartbeat_at, expires_at, metadata
+                        FROM fleet_reservations
+                        WHERE project_id = %s AND ticket_id = %s AND status = 'active'
+                        FOR UPDATE
+                        """,
+                        (project_id, ticket_id),
+                    )
+                    ticket_row = cur.fetchone()
+                    if ticket_row:
+                        if ticket_row[3] == run_id and ticket_row[4] == host_id:
+                            return self._row_to_reservation(ticket_row)
+                        raise TicketAlreadyActiveError(
+                            f"Ticket '{ticket_id}' in project '{project_id}' already has active reservation "
+                            f"'{ticket_row[0]}' on host '{ticket_row[4]}'."
+                        )
+
+                    # 3. Check 1 cycle per host
+                    cur.execute(
+                        """
+                        SELECT reservation_id, ticket_id, run_id
+                        FROM fleet_reservations
+                        WHERE host_id = %s AND status = 'active'
+                        FOR UPDATE
+                        """,
+                        (host_id,),
+                    )
+                    host_row = cur.fetchone()
+                    if host_row:
+                        raise HostBusyError(
+                            f"Host '{host_id}' already has active reservation '{host_row[0]}' "
+                            f"for ticket '{host_row[1]}'."
+                        )
+
+                    # 4. Check fleet ceiling of max 3 active cycles
+                    cur.execute(
+                        "SELECT COUNT(*) FROM fleet_reservations WHERE status = 'active'"
+                    )
+                    count = cur.fetchone()[0]
+                    if count >= max_fleet_slots:
+                        raise FleetCapacityExceededError(
+                            f"Fleet capacity ceiling of {max_fleet_slots} active cycles reached (currently {count} active)."
+                        )
+
+                    # 5. Insert new reservation
+                    reservation_id = f"fres-{uuid4().hex[:12]}"
+                    cur.execute(
+                        """
+                        INSERT INTO fleet_reservations (
+                            reservation_id, project_id, ticket_id, run_id, host_id,
+                            status, fencing_token, acquired_at, heartbeat_at, expires_at, metadata
+                        ) VALUES (%s, %s, %s, %s, %s, 'active', 1, %s, %s, %s, %s::jsonb)
+                        """,
+                        (
+                            reservation_id,
+                            project_id,
+                            ticket_id,
+                            run_id,
+                            host_id,
+                            now_utc,
+                            now_utc,
+                            expires_at_utc,
+                            json.dumps(metadata or {}),
+                        ),
+                    )
+                    conn.commit()
+                    return FleetReservation(
+                        reservation_id=reservation_id,
+                        project_id=project_id,
+                        ticket_id=ticket_id,
+                        run_id=run_id,
+                        host_id=host_id,
+                        status="active",
+                        fencing_token=1,
+                        acquired_at=now_utc.isoformat(),
+                        heartbeat_at=now_utc.isoformat(),
+                        expires_at=expires_at_utc.isoformat(),
+                        metadata=metadata or {},
+                    )
+        except ReservationConflictError:
+            raise
+        except Exception as exc:
+            msg = str(exc).lower()
+            if "uq_fleet_reservations_active_host" in msg or "host_id" in msg:
+                raise HostBusyError(f"Host '{host_id}' already has active reservation (race condition).") from exc
+            if "uq_fleet_reservations_active_ticket" in msg or "ticket_id" in msg:
+                raise TicketAlreadyActiveError(f"Ticket '{ticket_id}' in project '{project_id}' already has active reservation (race condition).") from exc
+            raise StoreUnavailableError(f"PostgreSQL reserve_cycle failed: {exc}") from exc
+
+    def heartbeat_reservation(
+        self,
+        reservation_id: str,
+        fencing_token: int,
+        now: datetime,
+        lease_duration_sec: int | None = None,
+    ) -> FleetReservation:
+        """Extend active cycle reservation lease (USR-281)."""
+        if self.mock_mode:
+            return self._backend.heartbeat_reservation(
+                reservation_id=reservation_id,
+                fencing_token=fencing_token,
+                now=now,
+                lease_duration_sec=lease_duration_sec,
+            )
+
+        now_utc = now.astimezone(UTC)
+        dur = lease_duration_sec if lease_duration_sec is not None else self.lease_duration_sec
+        new_expires_utc = now_utc + timedelta(seconds=dur)
+        try:
+            with self._psycopg.connect(self.raw_url) as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        SELECT reservation_id, project_id, ticket_id, run_id, host_id, status, fencing_token,
+                               acquired_at, heartbeat_at, expires_at, metadata
+                        FROM fleet_reservations
+                        WHERE reservation_id = %s
+                        FOR UPDATE
+                        """,
+                        (reservation_id,),
+                    )
+                    row = cur.fetchone()
+                    if not row:
+                        raise StaleLeaseError(f"Reservation '{reservation_id}' not found.")
+                    st, f_tok, exp_at = row[5], row[6], row[9]
+                    if st not in ("active", "draining"):
+                        raise StaleLeaseError(f"Reservation '{reservation_id}' is in non-active status '{st}'.")
+                    if f_tok != fencing_token:
+                        raise StaleLeaseError(
+                            f"Fencing token mismatch on heartbeat: token={fencing_token}, active={f_tok}."
+                        )
+                    res_expires = exp_at if hasattr(exp_at, "astimezone") else datetime.fromisoformat(str(exp_at))
+                    res_expires = res_expires.astimezone(UTC) if res_expires.tzinfo else res_expires.replace(tzinfo=UTC)
+                    if res_expires < now_utc:
+                        cur.execute("UPDATE fleet_reservations SET status = 'expired' WHERE reservation_id = %s", (reservation_id,))
+                        conn.commit()
+                        raise StaleLeaseError(f"Reservation '{reservation_id}' expired at {res_expires.isoformat()}.")
+
+                    cur.execute(
+                        """
+                        UPDATE fleet_reservations
+                        SET heartbeat_at = %s, expires_at = %s
+                        WHERE reservation_id = %s
+                        """,
+                        (now_utc, new_expires_utc, reservation_id),
+                    )
+                    conn.commit()
+                    return FleetReservation(
+                        reservation_id=row[0],
+                        project_id=row[1],
+                        ticket_id=row[2],
+                        run_id=row[3],
+                        host_id=row[4],
+                        status=row[5],
+                        fencing_token=row[6],
+                        acquired_at=row[7].isoformat() if hasattr(row[7], "isoformat") else str(row[7]),
+                        heartbeat_at=now_utc.isoformat(),
+                        expires_at=new_expires_utc.isoformat(),
+                        metadata=row[10] if isinstance(row[10], dict) else {},
+                    )
+        except StaleLeaseError:
+            raise
+        except Exception as exc:
+            raise StoreUnavailableError(f"PostgreSQL heartbeat_reservation failed: {exc}") from exc
+
+    def release_reservation(
+        self,
+        reservation_id: str,
+        fencing_token: int,
+        status: str = "released",
+        now: datetime | None = None,
+    ) -> FleetReservation:
+        """Release active cycle reservation (USR-281)."""
+        if self.mock_mode:
+            return self._backend.release_reservation(
+                reservation_id=reservation_id,
+                fencing_token=fencing_token,
+                status=status,
+                now=now,
+            )
+
+        now_dt = (now or datetime.now(UTC)).astimezone(UTC)
+        try:
+            with self._psycopg.connect(self.raw_url) as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        SELECT reservation_id, project_id, ticket_id, run_id, host_id, status, fencing_token,
+                               acquired_at, heartbeat_at, expires_at, metadata
+                        FROM fleet_reservations
+                        WHERE reservation_id = %s
+                        FOR UPDATE
+                        """,
+                        (reservation_id,),
+                    )
+                    row = cur.fetchone()
+                    if not row:
+                        raise StaleLeaseError(f"Reservation '{reservation_id}' not found.")
+                    st, f_tok = row[5], row[6]
+                    if f_tok != fencing_token:
+                        raise StaleLeaseError(
+                            f"Fencing token mismatch on release: token={fencing_token}, active={f_tok}."
+                        )
+                    if st in ("released", "completed", "failed", "cancelled"):
+                        return self._row_to_reservation(row)
+                    if st == "expired":
+                        raise StaleLeaseError(f"Reservation '{reservation_id}' has already expired and cannot be released.")
+
+                    cur.execute(
+                        "UPDATE fleet_reservations SET status = %s, heartbeat_at = %s WHERE reservation_id = %s",
+                        (status, now_dt, reservation_id),
+                    )
+                    conn.commit()
+                    return FleetReservation(
+                        reservation_id=row[0],
+                        project_id=row[1],
+                        ticket_id=row[2],
+                        run_id=row[3],
+                        host_id=row[4],
+                        status=status,
+                        fencing_token=row[6],
+                        acquired_at=row[7].isoformat() if hasattr(row[7], "isoformat") else str(row[7]),
+                        heartbeat_at=now_dt.isoformat(),
+                        expires_at=row[9].isoformat() if hasattr(row[9], "isoformat") else str(row[9]),
+                        metadata=row[10] if isinstance(row[10], dict) else {},
+                    )
+        except StaleLeaseError:
+            raise
+        except Exception as exc:
+            raise StoreUnavailableError(f"PostgreSQL release_reservation failed: {exc}") from exc
+
+    def get_reservation(self, reservation_id: str) -> FleetReservation | None:
+        """Retrieve reservation by ID (USR-281)."""
+        if self.mock_mode:
+            return self._backend.get_reservation(reservation_id)
+
+        try:
+            with self._psycopg.connect(self.raw_url) as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        SELECT reservation_id, project_id, ticket_id, run_id, host_id, status, fencing_token,
+                               acquired_at, heartbeat_at, expires_at, metadata
+                        FROM fleet_reservations
+                        WHERE reservation_id = %s
+                        """,
+                        (reservation_id,),
+                    )
+                    row = cur.fetchone()
+                    return self._row_to_reservation(row) if row else None
+        except Exception as exc:
+            raise StoreUnavailableError(f"PostgreSQL get_reservation failed: {exc}") from exc
+
+    def get_active_reservation_for_ticket(
+        self, project_id: str, ticket_id: str
+    ) -> FleetReservation | None:
+        """Find active reservation for a project ticket (USR-281)."""
+        if self.mock_mode:
+            return self._backend.get_active_reservation_for_ticket(project_id, ticket_id)
+
+        try:
+            with self._psycopg.connect(self.raw_url) as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        SELECT reservation_id, project_id, ticket_id, run_id, host_id, status, fencing_token,
+                               acquired_at, heartbeat_at, expires_at, metadata
+                        FROM fleet_reservations
+                        WHERE project_id = %s AND ticket_id = %s AND status = 'active'
+                        """,
+                        (project_id, ticket_id),
+                    )
+                    row = cur.fetchone()
+                    return self._row_to_reservation(row) if row else None
+        except Exception as exc:
+            raise StoreUnavailableError(f"PostgreSQL get_active_reservation_for_ticket failed: {exc}") from exc
+
+    def get_active_reservation_for_host(self, host_id: str) -> FleetReservation | None:
+        """Find active reservation currently occupying a host (USR-281)."""
+        if self.mock_mode:
+            return self._backend.get_active_reservation_for_host(host_id)
+
+        try:
+            with self._psycopg.connect(self.raw_url) as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        SELECT reservation_id, project_id, ticket_id, run_id, host_id, status, fencing_token,
+                               acquired_at, heartbeat_at, expires_at, metadata
+                        FROM fleet_reservations
+                        WHERE host_id = %s AND status = 'active'
+                        """,
+                        (host_id,),
+                    )
+                    row = cur.fetchone()
+                    return self._row_to_reservation(row) if row else None
+        except Exception as exc:
+            raise StoreUnavailableError(f"PostgreSQL get_active_reservation_for_host failed: {exc}") from exc
+
+    def list_active_reservations(self) -> list[FleetReservation]:
+        """List all active fleet reservations (USR-281)."""
+        if self.mock_mode:
+            return self._backend.list_active_reservations()
+
+        try:
+            with self._psycopg.connect(self.raw_url) as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        SELECT reservation_id, project_id, ticket_id, run_id, host_id, status, fencing_token,
+                               acquired_at, heartbeat_at, expires_at, metadata
+                        FROM fleet_reservations
+                        WHERE status = 'active'
+                        ORDER BY acquired_at ASC
+                        """
+                    )
+                    rows = cur.fetchall()
+                    return [self._row_to_reservation(r) for r in rows]
+        except Exception as exc:
+            raise StoreUnavailableError(f"PostgreSQL list_active_reservations failed: {exc}") from exc
+
+    def drain_host(self, host_id: str, reason: str, now: datetime) -> int:
+        """Mark host and any active reservations for drain (USR-281)."""
+        if self.mock_mode:
+            return self._backend.drain_host(host_id=host_id, reason=reason, now=now)
+
+        try:
+            with self._psycopg.connect(self.raw_url) as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        UPDATE fleet_reservations
+                        SET status = 'draining',
+                            metadata = metadata || jsonb_build_object('drain_reason', %s)
+                        WHERE host_id = %s AND status = 'active'
+                        """,
+                        (reason, host_id),
+                    )
+                    count = cur.rowcount
+                    conn.commit()
+                    return count
+        except Exception as exc:
+            raise StoreUnavailableError(f"PostgreSQL drain_host failed: {exc}") from exc
+
+    def reconcile_fleet_reservations(self, now: datetime) -> list[FleetReservation]:
+        """Sweep expired fleet reservations and release slots (USR-281)."""
+        if self.mock_mode:
+            return self._backend.reconcile_fleet_reservations(now=now)
+
+        now_utc = now.astimezone(UTC)
+        try:
+            with self._psycopg.connect(self.raw_url) as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        UPDATE fleet_reservations
+                        SET status = 'expired'
+                        WHERE status IN ('active', 'draining') AND expires_at < %s
+                        RETURNING reservation_id, project_id, ticket_id, run_id, host_id, status, fencing_token,
+                                  acquired_at, heartbeat_at, expires_at, metadata
+                        """,
+                        (now_utc,),
+                    )
+                    rows = cur.fetchall()
+                    expired: list[FleetReservation] = []
+                    for row in rows:
+                        res = self._row_to_reservation(row)
+                        expired.append(res)
+                        cur.execute(
+                            """
+                            INSERT INTO reconciliation_ledger (
+                                cycle_id, action_type, target_key, reason, status, recorded_at
+                            ) VALUES (%s, 'expire_fleet_reservation', %s::jsonb, 'lease_expired', 'success', %s)
+                            """,
+                            (
+                                f"recon-{uuid4().hex[:8]}",
+                                json.dumps({"reservation_id": res.reservation_id, "ticket_id": res.ticket_id, "host_id": res.host_id}),
+                                now_utc,
+                            ),
+                        )
+                    conn.commit()
+                    return expired
+        except Exception as exc:
+            raise StoreUnavailableError(f"PostgreSQL reconcile_fleet_reservations failed: {exc}") from exc
+
+    def reconcile_unknown_operations(self, now: datetime) -> list[ExternalOperation]:
+        """Sweep and report operations left in 'unknown' state for reconciliation before retry (USR-281)."""
+        if self.mock_mode:
+            return self._backend.reconcile_unknown_operations(now=now)
+
+        try:
+            with self._psycopg.connect(self.raw_url) as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        SELECT operation_key, request_digest, provider, external_id, status,
+                               claim_lease_id, fencing_token, observed_at, response_digest, error_details
+                        FROM external_operations
+                        WHERE status = 'unknown'
+                        """
+                    )
+                    rows = cur.fetchall()
+                    return [
+                        ExternalOperation(
+                            operation_key=r[0],
+                            request_digest=r[1],
+                            provider=r[2],
+                            external_id=r[3],
+                            status=r[4],
+                            claim_lease_id=r[5],
+                            fencing_token=r[6],
+                            observed_at=r[7].isoformat() if hasattr(r[7], "isoformat") else str(r[7]),
+                            response_digest=r[8],
+                            error_details=r[9],
+                        )
+                        for r in rows
+                    ]
+        except Exception as exc:
+            raise StoreUnavailableError(f"PostgreSQL reconcile_unknown_operations failed: {exc}") from exc
