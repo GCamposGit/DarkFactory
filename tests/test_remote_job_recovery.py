@@ -534,6 +534,7 @@ def test_lost_job_falls_back_to_local_through_maybe_dispatch_remote(
     from core.harness.models import HarnessStepConfig
 
     repo_root = Path(__file__).resolve().parents[1]
+    monkeypatch.setenv("DARKFAC_WORKER_RESTART_RETRIES", "0")  # sem reenvio: este teste cobre so o fallback
     monkeypatch.setenv("DARKFAC_TEST_WORKERS", "http://127.0.0.1:1")
     monkeypatch.setenv(remote_dispatch.ENV_SELF_DISPATCH_TEST_OVERRIDE, "1")
     monkeypatch.setattr(

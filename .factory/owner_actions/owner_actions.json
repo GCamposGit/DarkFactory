@@ -832,6 +832,35 @@
       "created_at": "2026-10-15T01:28:15Z",
       "created_by": "claude-subagent",
       "resolved_at": "2026-10-15T07:58:01Z"
+    },
+    {
+      "id": "OA-023",
+      "kind": "action",
+      "title": "Commit humano: dispatch reenvia no mesmo worker apos restart/congelamento da VM e worker nao apaga worktree de job ativo",
+      "priority": "critical",
+      "status": "open",
+      "why": "Em 15/10/2026 a plataforma congelou/restaurou a VM do grokbox no meio do portao do USR-192; a recuperacao do worker apagou o worktree do job e gerou 432 falhas falsas, e o Notebook caiu para outro worker perdendo o tempo ja gasto. core/harness/* e protegido: so o owner commita.",
+      "blocks": [
+        "USR-192"
+      ],
+      "depends_on": [],
+      "steps": [
+        {
+          "text": "Em C:\\dev\\DarkFac, com main atualizado, aplique o patch, copie o teste e rode os testes (sem portao em andamento); detalhes em docs/proposals/WORKER-RESTART-resilience.md secao 3",
+          "command": "git -C C:\\dev\\DarkFac pull --ff-only origin main; git -C C:\\dev\\DarkFac apply C:\\dev\\DarkFac\\docs\\proposals\\WORKER-RESTART-resilience.patch; Copy-Item C:\\dev\\DarkFac\\docs\\proposals\\WORKER-RESTART-test_remote_restart_retry.py.txt C:\\dev\\DarkFac\\tests\\test_remote_restart_retry.py"
+        },
+        {
+          "text": "Rode os testes focais e commite SOMENTE os 3 caminhos, depois push direto no main",
+          "command": "python -m pytest C:\\dev\\DarkFac\\tests\\test_remote_restart_retry.py C:\\dev\\DarkFac\\tests\\test_remote_dispatch.py C:\\dev\\DarkFac\\tests\\test_remote_job_recovery.py C:\\dev\\DarkFac\\tests\\test_worker_silence_resume.py -q -p no:cacheprovider; git -C C:\\dev\\DarkFac add core/harness/remote_dispatch.py core/harness/remote_worker.py tests/test_remote_restart_retry.py; git -C C:\\dev\\DarkFac commit -m 'feat(harness): portao reenvia no mesmo worker apos restart [WORKER-RESTART]'; git -C C:\\dev\\DarkFac push origin HEAD:main"
+        },
+        {
+          "text": "Atualize e reinicie o worker do grokbox para carregar o novo remote_worker.py (POST /system/update e /system/restart, ou git pull + sudo systemctl restart darkfac-test-worker na VM)"
+        }
+      ],
+      "verify": "git apply --check do patch antes; apos o push, GUARD PASS; um portao com o grokbox congelado por 1 min mostra [REMOTE_RETRY] e termina no mesmo worker",
+      "created_at": "2026-10-15T22:23:23Z",
+      "created_by": "claude-code",
+      "resolved_at": null
     }
   ]
 }

@@ -125,3 +125,23 @@ O job do worker exporta `DARKFAC_HARNESS_WORKER_JOB=1` (`remote_dispatch.ENV_WOR
 CI e so falhava dentro do job do worker: a fixture autouse limpava um nome errado
 (`DARKFAC_WORKER_JOB`). Testes que simulam o despacho devem remover `DARKFAC_HARNESS_WORKER_JOB`,
 `CI`, `DARKFAC_REMOTE_HARNESS` e `DARKFAC_TEST_WORKERS`; ver `tests/test_worker_silence_resume.py`.
+
+## 8. VM congelada/restaurada pela plataforma
+
+Evidencia (15/10/2026): o kernel do grokbox registrou "virtual machine fork"; as 18:12:29 IP e gateway
+mudaram e o Tailscale ficou fora ate 18:13. No portao do USR-192 o processo do worker (pid 303996) terminou
+no meio do job, outra instancia recuperou o estado e marcou o job `worker_restarted`, e essa recuperacao
+apagou o worktree do job: 432 testes falharam por arquivo ausente (falhas falsas, nao veredito). O Notebook
+viu `/health` sumir (3 sondas), `[REMOTE_JOB_LOST]` e caiu para o proximo worker / local.
+
+Regras:
+
+- Isso e infraestrutura: `worker_restarted`/job perdido nunca e `[HARNESS_FAIL]` do candidato. Com o patch
+  `docs/proposals/WORKER-RESTART-resilience.md` aplicado, o dispatch espera o mesmo worker voltar
+  (`DARKFAC_WORKER_RESTART_GRACE_SEC`, 180 s) e reenvia ate `DARKFAC_WORKER_RESTART_RETRIES` (2) vezes
+  (linhas `[REMOTE_RETRY]`), e a recuperacao do worker nao apaga o worktree de job ativo.
+- Testes destrutivos no worker (reiniciar o servico, `kill`, `tailscale down`, mexer em `worktrees/`,
+  `systemctl restart`) so com a fila parada: confirme `curl.exe http://100.77.130.5:8080/health` com
+  `busy=false` e nenhum portao em andamento no Notebook/VPS antes de comecar.
+- Ao ver `worker_restarted` num log, olhe `journalctl -k | grep -i fork` e `tailscale status` na VM antes de
+  culpar o candidato; se o job voltou em outra tentativa (`[REMOTE_RETRY]`), nada a fazer.
