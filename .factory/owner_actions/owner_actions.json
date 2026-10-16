@@ -961,6 +961,126 @@
         "answered_at": "2026-10-16T15:26:58Z",
         "answered_by": "owner-chat"
       }
+    },
+    {
+      "id": "OA-026",
+      "kind": "decision",
+      "title": "Definir distribuicao das tres demandas entre maquinas",
+      "priority": "medium",
+      "status": "done",
+      "why": "Falta decidir a que recurso se aplica a ordem Grokbox, Notebook, Desktop.",
+      "blocks": [
+        "USR-277"
+      ],
+      "depends_on": [],
+      "steps": [
+        {
+          "text": "Nesta conversa do Codex, responda a pergunta de mesmo titulo com A, B ou a regra desejada. O agente registra a decisao; nenhum comando manual e necessario."
+        },
+        {
+          "text": "Alternativa no DarkHub: abra Acoes do Owner, localize este titulo, selecione a opcao A ou B descrita no item e confirme sua resposta."
+        }
+      ],
+      "options": [
+        {
+          "id": "A",
+          "label": "Uma demanda por maquina incluindo seus testes"
+        },
+        {
+          "id": "B",
+          "label": "Tres desenvolvimentos com fila de testes separada"
+        }
+      ],
+      "verify": "Resposta explicita do owner registrada com fonte e data. Plano avanca apos as tres decisoes resolvidas.",
+      "created_at": "2026-10-16T15:27:05Z",
+      "created_by": "codex",
+      "resolved_at": "2026-10-16T15:34:48Z",
+      "answer": {
+        "option_id": "A",
+        "note": "Fonte: resposta explicita do owner nesta conversa em 16/10/2026. Uma demanda completa por maquina, paralela e independente, de qualquer projeto, prioridade Grokbox > Notebook > Desktop; reposicao ate esgotar trabalho executavel.",
+        "answered_at": "2026-10-16T15:34:48Z",
+        "answered_by": "owner"
+      }
+    },
+    {
+      "id": "OA-027",
+      "kind": "decision",
+      "title": "Definir quando liberar a vaga de uma demanda",
+      "priority": "medium",
+      "status": "done",
+      "why": "Define limite de trabalho em andamento e alimentacao da fila de testes.",
+      "blocks": [
+        "USR-277"
+      ],
+      "depends_on": [],
+      "steps": [
+        {
+          "text": "Nesta conversa do Codex, responda a pergunta de mesmo titulo com A, B ou a regra desejada. O agente registra a decisao; nenhum comando manual e necessario."
+        },
+        {
+          "text": "Alternativa no DarkHub: abra Acoes do Owner, localize este titulo, selecione a opcao A ou B descrita no item e confirme sua resposta."
+        }
+      ],
+      "options": [
+        {
+          "id": "A",
+          "label": "Manter vaga ate concluir ciclo: no maximo tres em andamento"
+        },
+        {
+          "id": "B",
+          "label": "Liberar ao entrar em testes: mais de tres podem ficar em andamento"
+        }
+      ],
+      "verify": "Resposta explicita do owner registrada com fonte e data. Plano avanca apos as tres decisoes resolvidas.",
+      "created_at": "2026-10-16T15:27:05Z",
+      "created_by": "codex",
+      "resolved_at": "2026-10-16T15:34:48Z",
+      "answer": {
+        "option_id": "A",
+        "note": "Fonte: owner em 16/10/2026: opcao 1, vaga permanece ocupada no ciclo completo; multiplos subagentes por harness continuam permitidos.",
+        "answered_at": "2026-10-16T15:34:48Z",
+        "answered_by": "owner"
+      }
+    },
+    {
+      "id": "OA-028",
+      "kind": "decision",
+      "title": "Decidir excecao ao congelamento V0 para throughput",
+      "priority": "medium",
+      "status": "done",
+      "why": "O contrato vigente restringe implementacao e operacao concorrente.",
+      "blocks": [
+        "USR-277"
+      ],
+      "depends_on": [],
+      "steps": [
+        {
+          "text": "Nesta conversa do Codex, responda a pergunta de mesmo titulo com A, B ou a regra desejada. O agente registra a decisao; nenhum comando manual e necessario."
+        },
+        {
+          "text": "Alternativa no DarkHub: abra Acoes do Owner, localize este titulo, selecione a opcao A ou B descrita no item e confirme sua resposta."
+        }
+      ],
+      "options": [
+        {
+          "id": "A",
+          "label": "Autorizar excecao ao V0 para futura implementacao"
+        },
+        {
+          "id": "B",
+          "label": "Somente planejar; implementacao permanece congelada"
+        }
+      ],
+      "verify": "Resposta explicita do owner registrada com fonte e data. Plano avanca apos as tres decisoes resolvidas.",
+      "created_at": "2026-10-16T15:27:05Z",
+      "created_by": "codex",
+      "resolved_at": "2026-10-16T15:34:48Z",
+      "answer": {
+        "option_id": "A",
+        "note": "Fonte: owner em 16/10/2026: Sim, o V0 ja foi concluido. Autoriza esta evolucao apos o planejamento; esta sessao nao revalida evidencias historicas do V0.",
+        "answered_at": "2026-10-16T15:34:48Z",
+        "answered_by": "owner"
+      }
     }
   ]
 }
