@@ -7964,5 +7964,36 @@
     "dependencies": [],
     "created_at": "2026-10-16T12:28:35.457480Z",
     "updated_at": "2026-10-16T12:28:35.457480Z"
+  },
+  {
+    "id": "USR-270",
+    "project_id": "darkfac",
+    "title": "Grokbox encerra pytest com SIGTERM antes da descoberta da suite",
+    "origin": "agent",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand",
+      "v0-critico",
+      "bug",
+      "infra"
+    ],
+    "problem_statement": "Portao isolado ca2c910 no grokbox, job 4648af3ed69a46559c62bba0e8c5ac29 em 16/10/2026 12:33:55 UTC: syntax PASS; pytest paralelo exit -15 em 0.9s com 0 testes descobertos, RAM 3.2 GiB cap 1 worker. Nao e veredito de correcao do candidato. Health informou restart_safe true e git_sha fde6b327. Investigar processo/ambiente antes de repetir.",
+    "core_journey": [],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Identificar e registrar origem do SIGTERM com evidencia de processo ou logs",
+      "Corrigir causa sem alterar timeouts ou mascarar falhas de testes",
+      "Portao oficial completa no grokbox e emite HARNESS_PASS com testes descobertos"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-16T12:36:20.495866Z",
+    "updated_at": "2026-10-16T12:36:20.495866Z"
   }
 ]
