@@ -162,7 +162,7 @@ index 28abe6d..ad0943b 100644
                  health=health,
                  project_root=project_root,
 diff --git a/core/harness/remote_worker.py b/core/harness/remote_worker.py
-index 141d98e..e37eae0 100644
+index 141d98e..74b1e4a 100644
 --- a/core/harness/remote_worker.py
 +++ b/core/harness/remote_worker.py
 @@ -69,6 +69,10 @@ POSIX_CHILD_NICE_INCREMENT = 5
@@ -221,14 +221,23 @@ index 141d98e..e37eae0 100644
          logger.warning("Recovered orphaned job %s (%s -> failed/%s)", job.job_id, was, job.error_code)
  
      def mark_interrupted(self, reason: str) -> list[str]:
-@@ -1008,6 +1024,15 @@ class JobManager:
+@@ -923,6 +939,8 @@ class JobManager:
+                 self._set_status(job, "failed", error=error, error_code=ERROR_CODE_WORKER_SETUP)
+                 return
+ 
++            # Only a worktree that really existed after `git worktree add` can later "disappear".
++            worktree_was_created = worktree_path.exists()
+             self._sync_requirements(worktree_path, job)
+ 
+             timeout_sec = _job_timeout_sec(worktree_path, quick=job.quick, include_holdout=job.include_holdout)
+@@ -1008,6 +1026,15 @@ class JobManager:
              if job.interrupted:
                  return  # the worker closed this job itself (restart); keep that verdict
  
-+            lost_reason = self._lost_underfoot_reason(job, worktree_path)
++            lost_reason = self._lost_underfoot_reason(job, worktree_path, expect_worktree=worktree_was_created)
 +            if lost_reason is not None:
-+                # Another worker instance closed the job as worker_restarted, or its worktree vanished: the
-+                # test failures (if any) are an artifact of the missing files, never a verdict.
++                # Another worker instance closed the job as worker_restarted: the outcome of this run is
++                # not a verdict.
 +                job.interrupted = True
 +                self._append_log(job, f"[WORKER {ERROR_CODE_WORKER_RESTARTED}] {lost_reason}\n")
 +                self._set_status(job, "failed", error=lost_reason, error_code=ERROR_CODE_WORKER_RESTARTED)
@@ -237,15 +246,18 @@ index 141d98e..e37eae0 100644
              if job.cancel_requested:
                  self._set_status(job, "cancelled", returncode=process.returncode)
                  return
-@@ -1027,6 +1052,24 @@ class JobManager:
+@@ -1027,6 +1054,27 @@ class JobManager:
              self._cleanup_worktree(job)
              self._prune_old_job_logs()
  
-+    def _lost_underfoot_reason(self, job: HarnessJob, worktree_path: Path) -> Optional[str]:
-+        """Why this job's run cannot be trusted (or ``None``): its worktree is gone, or the on-disk
-+        record was closed as ``worker_restarted`` by a successor worker instance."""
++    def _lost_underfoot_reason(
++        self, job: HarnessJob, worktree_path: Path, *, expect_worktree: bool = True
++    ) -> Optional[str]:
++        """Why this job's run cannot be trusted (or ``None``): its worktree is gone (only when it was
++        expected to exist), or the on-disk record was closed as ``worker_restarted`` by a successor
++        worker instance."""
 +
-+        if not worktree_path.exists():
++        if expect_worktree and not worktree_path.exists():
 +            return f"worktree {worktree_path} disappeared while the job ran; the test run has no verdict"
 +        try:
 +            record = json.loads((self._jobs_dir() / f"{job.job_id}.json").read_text(encoding="utf-8"))

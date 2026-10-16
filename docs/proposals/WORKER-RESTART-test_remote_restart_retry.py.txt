@@ -45,6 +45,7 @@ def _env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setenv("DARKFAC_HARNESS_STATE_DIR", str(tmp_path / "harness_state"))
     monkeypatch.setenv("DARKFAC_WORKER_STATE_DIR", str(tmp_path / "worker_state"))
     monkeypatch.setenv("DARKFAC_SUITE_LOCK", "off")
+    remote_dispatch.DISPATCH_ATTEMPTS.clear()  # module-level list: other tests in the same worker leave entries
     for key in (
         "CI",
         "DARKFAC_WORKER_TOKEN",
