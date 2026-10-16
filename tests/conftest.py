@@ -420,6 +420,33 @@ def _isolate_operating_harness_env(monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.delenv(name, raising=False)
 
 
+# These settings direct the harness at real remote workers or change how long it
+# waits for them. `run_ticket` exports them to pytest children, so a developer's
+# machine can otherwise make ordinary unit tests probe tailnet hosts. Tests that
+# cover remote dispatch set the values they need with monkeypatch.
+AMBIENT_REMOTE_INFRA_ENV = (
+    "DARKFAC_TEST_WORKERS",
+    "DARKFAC_WORKER_HEALTH_TIMEOUT_SEC",
+    "DARKFAC_REMOTE_HARNESS",
+    "DARKFAC_HARNESS_WORKER_JOB",
+    "DARKFAC_WORKER_DEAD_PROBES",
+    "DARKFAC_REMOTE_BUSY_WAIT_SEC",
+    "DARKFAC_HARNESS_REMOTE_WAIT_SEC",
+    "DARKFAC_WORKER_SILENCE_FALLBACK_SEC",
+    "DARKFAC_REMOTE_DISPATCH_TEST_OVERRIDE",
+    "REMOTE_HARNESS_URL",
+    "REMOTE_HARNESS_URLS",
+)
+
+
+@pytest.fixture(autouse=True)
+def _isolate_remote_infra_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Prevent tests from inheriting real worker addresses and probe settings."""
+
+    for name in AMBIENT_REMOTE_INFRA_ENV:
+        monkeypatch.delenv(name, raising=False)
+
+
 @pytest.fixture(autouse=True)
 def _isolate_ambient_worker_config_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """Cloud-worker container settings must not leak into tests.
