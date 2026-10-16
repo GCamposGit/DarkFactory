@@ -7938,8 +7938,8 @@
     "project_id": "darkfac",
     "title": "Restaurar CI main: testes MCP offline colidem com portas efemeras",
     "origin": "user",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "3267a4a8346f681f0e74ef642917bdd74a9e20db",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -7963,7 +7963,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-16T12:28:35.457480Z",
-    "updated_at": "2026-10-16T12:28:35.457480Z"
+    "updated_at": "2026-10-16T12:58:29.055703Z"
   },
   {
     "id": "USR-270",
