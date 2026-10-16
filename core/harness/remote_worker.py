@@ -69,6 +69,10 @@ POSIX_CHILD_NICE_INCREMENT = 5
 #: ``subprocess.BELOW_NORMAL_PRIORITY_CLASS`` (Windows only attribute).
 _WINDOWS_BELOW_NORMAL_PRIORITY_CLASS = 0x00004000
 JOB_LOG_KEEP = 20
+#: Worktrees of terminal jobs are only garbage-collected by startup recovery once the record is at
+#: least this old; a freshly closed (e.g. ``worker_restarted``) job keeps its directory as evidence and
+#: because its real owner may still be alive (VM freeze/restore, 15/10/2026).
+WORKTREE_GC_MIN_AGE_SEC = 3600.0
 JOB_WATCHDOG_POLL_SEC = 1.0
 #: USR-183: how often the watchdog snapshots the runner's descendants (pytest-xdist workers and
 #: their children), so they can still be killed after the runner itself is gone.
@@ -660,10 +664,12 @@ class JobManager:
 
         Terminal records come back as they are (the result stays queryable).
         A queued/running record whose owner process is gone is closed as a
-        structured ``worker_restarted`` failure (its log is kept) and its
-        leftovers (child process tree, worktree, ref) are cleaned. Records
-        whose owner is still alive belong to another live manager and are left
-        strictly alone.
+        structured ``worker_restarted`` failure (its log is kept) and its child
+        process tree is terminated. Its worktree is PRESERVED: the owner may
+        still be alive on a frozen/restored VM and still be using it. Only the
+        worktrees of OLD terminal jobs are removed (``WORKTREE_GC_MIN_AGE_SEC``).
+        Records whose owner is still alive belong to another live manager and
+        are left strictly alone.
         """
 
         try:
@@ -691,6 +697,17 @@ class JobManager:
                 job.log_chunks.append(log_text)
             with self._jobs_lock:
                 self.jobs.setdefault(job.job_id, job)
+            self._gc_old_terminal_worktree(job)
+
+    def _gc_old_terminal_worktree(self, job: HarnessJob) -> None:
+        """Remove the worktree of a terminal job only when its record is old enough."""
+
+        if not job.is_terminal() or job.worktree_path is None or not job.worktree_path.exists():
+            return
+        if time.time() - job.updated_at < WORKTREE_GC_MIN_AGE_SEC:
+            return
+        with contextlib.suppress(Exception):
+            self._cleanup_worktree(job)
 
     def _close_orphan(self, job: HarnessJob) -> None:
         was = job.status
@@ -711,8 +728,7 @@ class JobManager:
                 fh.write(f"[WORKER {ERROR_CODE_WORKER_RESTARTED}] {message}\n")
         except OSError as exc:
             logger.debug("Could not append recovery note to log of job %s: %s", job.job_id, exc)
-        with contextlib.suppress(Exception):  # leftovers are best effort; the verdict is already persisted
-            self._cleanup_worktree(job)
+        # The worktree is deliberately NOT removed here (see _recover_persisted_jobs).
         logger.warning("Recovered orphaned job %s (%s -> failed/%s)", job.job_id, was, job.error_code)
 
     def mark_interrupted(self, reason: str) -> list[str]:
@@ -923,6 +939,8 @@ class JobManager:
                 self._set_status(job, "failed", error=error, error_code=ERROR_CODE_WORKER_SETUP)
                 return
 
+            # Only a worktree that really existed after `git worktree add` can later "disappear".
+            worktree_was_created = worktree_path.exists()
             self._sync_requirements(worktree_path, job)
 
             timeout_sec = _job_timeout_sec(worktree_path, quick=job.quick, include_holdout=job.include_holdout)
@@ -1008,6 +1026,15 @@ class JobManager:
             if job.interrupted:
                 return  # the worker closed this job itself (restart); keep that verdict
 
+            lost_reason = self._lost_underfoot_reason(job, worktree_path, expect_worktree=worktree_was_created)
+            if lost_reason is not None:
+                # Another worker instance closed the job as worker_restarted: the outcome of this run is
+                # not a verdict.
+                job.interrupted = True
+                self._append_log(job, f"[WORKER {ERROR_CODE_WORKER_RESTARTED}] {lost_reason}\n")
+                self._set_status(job, "failed", error=lost_reason, error_code=ERROR_CODE_WORKER_RESTARTED)
+                return
+
             if job.cancel_requested:
                 self._set_status(job, "cancelled", returncode=process.returncode)
                 return
@@ -1026,6 +1053,27 @@ class JobManager:
         finally:
             self._cleanup_worktree(job)
             self._prune_old_job_logs()
+
+    def _lost_underfoot_reason(
+        self, job: HarnessJob, worktree_path: Path, *, expect_worktree: bool = True
+    ) -> Optional[str]:
+        """Why this job's run cannot be trusted (or ``None``): its worktree is gone (only when it was
+        expected to exist), or the on-disk record was closed as ``worker_restarted`` by a successor
+        worker instance."""
+
+        if expect_worktree and not worktree_path.exists():
+            return f"worktree {worktree_path} disappeared while the job ran; the test run has no verdict"
+        try:
+            record = json.loads((self._jobs_dir() / f"{job.job_id}.json").read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return None
+        if (
+            isinstance(record, dict)
+            and record.get("status") == "failed"
+            and record.get("error_code") == ERROR_CODE_WORKER_RESTARTED
+        ):
+            return "another worker instance recovered this job as worker_restarted; the test run has no verdict"
+        return None
 
     def _cleanup_worktree(self, job: HarnessJob) -> None:
         if job.worktree_path is not None and job.worktree_path.exists():

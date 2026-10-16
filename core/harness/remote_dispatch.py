@@ -94,6 +94,12 @@ ENV_WORKER_HEALTH_TIMEOUT_SEC = "DARKFAC_WORKER_HEALTH_TIMEOUT_SEC"
 #: silent worker is declared unreachable. One lost probe is a network blip, not
 #: a dead worker; abandoning a half-finished remote run costs a full local rerun.
 ENV_WORKER_DEAD_PROBES = "DARKFAC_WORKER_DEAD_PROBES"
+#: How long (seconds, default 180) the SAME worker is awaited after its job ended as
+#: ``worker_restarted`` / ``worker_unreachable`` / ``job_lost_on_worker`` (platform VM freeze/restore,
+#: service restart) before the next worker or the local fallback is used.
+ENV_WORKER_RESTART_GRACE_SEC = "DARKFAC_WORKER_RESTART_GRACE_SEC"
+#: How many times (default 2) the job is resubmitted to the same worker once it is back.
+ENV_WORKER_RESTART_RETRIES = "DARKFAC_WORKER_RESTART_RETRIES"
 ENV_WORKER_JOB = "DARKFAC_HARNESS_WORKER_JOB"
 #: Test-only escape hatch: a loopback test dispatches to a worker running on
 #: 127.0.0.1 on purpose, which the real self-dispatch guard would otherwise
@@ -135,11 +141,21 @@ POLL_HTTP_TIMEOUT_SEC = 10.0
 #: USR-162: worker ``error_code`` values of a ``failed`` job that is NOT a test
 #: verdict (the run never finished). They fall back like an unavailable worker.
 INFRASTRUCTURE_ERROR_CODES = frozenset({"worker_restarted", "worker_internal_error", "worker_setup_failed"})
+#: Default of ``DARKFAC_WORKER_RESTART_GRACE_SEC`` / ``DARKFAC_WORKER_RESTART_RETRIES``.
+DEFAULT_WORKER_RESTART_GRACE_SEC = 180.0
+DEFAULT_WORKER_RESTART_RETRIES = 2
+MAX_WORKER_RESTART_RETRIES = 5
+#: Gap between ``/health`` probes while waiting for a restarted worker to come back.
+RESTART_PROBE_GAP_SEC = 5.0
+#: Loss causes that mean "the worker (or its VM) went away under the job", not "the worker
+#: is unsuitable": the same worker is awaited and the job resubmitted before falling back.
+RESTART_RETRY_ERROR_CODES = frozenset({"worker_restarted", "worker_unreachable", "job_lost_on_worker"})
 #: Lines of streamed job log kept as evidence when a job is given up on.
 EVIDENCE_TAIL_LINES = 400
 LOST_JOBS_SUBDIR = "remote_jobs"
 MARKER_REMOTE_JOB_LOST = "[REMOTE_JOB_LOST]"
 MARKER_REMOTE_FALLBACK = "[REMOTE_FALLBACK]"
+MARKER_REMOTE_RETRY = "[REMOTE_RETRY]"
 
 #: USR-178: one entry per remote attempt of the current ``maybe_dispatch_remote``
 #: call (worker, job, outcome, seconds spent). The runner copies it into the
@@ -258,6 +274,26 @@ def dead_probe_confirmations() -> int:
     except ValueError:
         return DEFAULT_WORKER_DEAD_PROBES
     return min(max(value, 1), MAX_WORKER_DEAD_PROBES)
+
+
+def worker_restart_grace_sec() -> float:
+    """Seconds the same worker is awaited after a restart (``DARKFAC_WORKER_RESTART_GRACE_SEC``, default 180)."""
+
+    return _positive_float_env(ENV_WORKER_RESTART_GRACE_SEC, DEFAULT_WORKER_RESTART_GRACE_SEC)
+
+
+def worker_restart_retries() -> int:
+    """Resubmissions to the same worker after a restart (``DARKFAC_WORKER_RESTART_RETRIES``;
+    default 2, clamped to 0..5, invalid -> default)."""
+
+    raw = os.environ.get(ENV_WORKER_RESTART_RETRIES, "").strip()
+    if not raw:
+        return DEFAULT_WORKER_RESTART_RETRIES
+    try:
+        value = int(raw)
+    except ValueError:
+        return DEFAULT_WORKER_RESTART_RETRIES
+    return min(max(value, 0), MAX_WORKER_RESTART_RETRIES)
 
 
 def dispatch_attempts() -> list[dict[str, Any]]:
@@ -849,6 +885,87 @@ def _dispatch_one_job(
     )
 
 
+def _wait_for_worker_back(
+    base_url: str,
+    grace_sec: float,
+    *,
+    sleep: Callable[[float], None] | None = None,
+    monotonic: Callable[[], float] | None = None,
+) -> dict[str, Any] | None:
+    """Probe ``/health`` until the worker answers and is idle, up to ``grace_sec``.
+
+    Returns the health payload, or ``None`` when the grace elapsed (or the URL turned out to be
+    this very host). ``sleep``/``monotonic`` are injectable so tests never really wait."""
+
+    sleep_fn = sleep or time.sleep
+    clock = monotonic or time.monotonic
+    deadline = clock() + grace_sec
+    timeout = max(health_probe_timeout_sec(), SLOW_WORKER_PROBE_TIMEOUT_SEC)
+    while True:
+        health = probe_health(base_url, timeout=timeout)
+        if health is not None:
+            if is_self_dispatch(base_url, health):
+                return None
+            if not health.get("busy"):
+                return health
+        remaining = deadline - clock()
+        if remaining <= 0:
+            return None
+        sleep_fn(min(RESTART_PROBE_GAP_SEC, remaining))
+
+
+def _dispatch_with_restart_retry(
+    base_url: str,
+    *,
+    health: dict[str, Any],
+    sleep: Callable[[float], None] | None = None,
+    monotonic: Callable[[], float] | None = None,
+    **job_kwargs: Any,
+) -> tuple[bool, HarnessResult | None] | None:
+    """Run :func:`_dispatch_one_job`; when the job is lost because the worker restarted (or its VM was
+    frozen/restored), wait for the SAME worker and resubmit, up to ``worker_restart_retries()`` times.
+
+    A restart is infrastructure, never a verdict: ``_finalize_remote_result`` already turns
+    ``INFRASTRUCTURE_ERROR_CODES`` into :class:`RemoteJobLost`, so a restarted job can never surface as
+    ``[HARNESS_FAIL]``. When the retries or the grace are exhausted the last
+    :class:`_WorkerUnavailable` is re-raised and the caller falls back to the next worker / local."""
+
+    clock = monotonic or time.monotonic
+    max_retries = worker_restart_retries()
+    grace_sec = worker_restart_grace_sec()
+    retry = 0
+    while True:
+        attempt_started = clock()
+        try:
+            return _dispatch_one_job(base_url, health=health, **job_kwargs)
+        except _WorkerUnavailable as exc:
+            error_code = str(exc.details.get("error_code") or "worker_unavailable")
+            if error_code not in RESTART_RETRY_ERROR_CODES or retry >= max_retries:
+                raise
+            retry += 1
+            reason = f"{error_code}: {str(exc)[:200]}"
+            print(f"{MARKER_REMOTE_RETRY} worker={base_url} attempt={retry}/{max_retries} reason={reason}")
+            back = _wait_for_worker_back(base_url, grace_sec, sleep=sleep, monotonic=monotonic)
+            DISPATCH_ATTEMPTS.append(
+                {
+                    "worker_url": base_url,
+                    "job_id": exc.details.get("job_id"),
+                    "outcome": "lost_retrying",
+                    "error_code": error_code,
+                    "elapsed_sec": round(clock() - attempt_started, 1),
+                    "retry": retry,
+                    "worker_back": back is not None,
+                }
+            )
+            if back is None:
+                print(
+                    f"{MARKER_REMOTE_RETRY} worker={base_url} attempt={retry}/{max_retries} "
+                    f"reason=worker did not return within {grace_sec:.0f}s; giving up on it"
+                )
+                raise
+            health = back
+
+
 def maybe_dispatch_remote(
     *,
     steps: list[HarnessStepConfig],
@@ -953,7 +1070,7 @@ def maybe_dispatch_remote(
         total_timeout_sec = float(sum(step.timeout_sec for step in steps)) + 120.0
         attempt_started = time.monotonic()
         try:
-            outcome = _dispatch_one_job(
+            outcome = _dispatch_with_restart_retry(
                 base_url,
                 health=health,
                 project_root=project_root,
