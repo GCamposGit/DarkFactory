@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 import socket
 import time
+from collections.abc import Iterator
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -35,6 +36,15 @@ from core.line.agent_cli import (
 )
 
 pytestmark = [pytest.mark.offline]
+
+
+@pytest.fixture
+def offline_mcp_url(monkeypatch: pytest.MonkeyPatch) -> Iterator[str]:
+    """Reserve an unlistening port, excluding unrelated loopback listeners."""
+    monkeypatch.delenv("DARKFAC_KNOWLEDGE_MOCK", raising=False)
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as reserved:
+        reserved.bind(("127.0.0.1", 0))
+        yield f"http://127.0.0.1:{reserved.getsockname()[1]}/mcp"
 
 
 # ---------------------------------------------------------------------------
@@ -84,16 +94,14 @@ def test_check_optional_mcp_servers_healthy_server(tmp_path: Path):
         server_sock.close()
 
 
-def test_check_optional_mcp_servers_offline_fails_fast(tmp_path: Path):
-    # Port that is not bound
-    unused_port = 59123
+def test_check_optional_mcp_servers_offline_fails_fast(tmp_path: Path, offline_mcp_url: str):
     cfg_file = tmp_path / "offline_claude.json"
     cfg_file.write_text(
         json.dumps({
             "mcpServers": {
                 "segundocerebro": {
                     "type": "http",
-                    "url": f"http://127.0.0.1:{unused_port}/mcp",
+                    "url": offline_mcp_url,
                     "headers": {
                         "Authorization": "Bearer secret_token_1234567890"
                     }
@@ -109,7 +117,7 @@ def test_check_optional_mcp_servers_offline_fails_fast(tmp_path: Path):
 
     assert healthy is False
     assert len(reasons) == 1
-    assert f"127.0.0.1:{unused_port}" in reasons[0]
+    assert offline_mcp_url.removeprefix("http://").removesuffix("/mcp") in reasons[0]
     # Probing must finish in a short window (far below the 1800s agent timeout)
     assert elapsed < 1.5
 
@@ -173,7 +181,9 @@ def test_build_claude_argv_strict_mcp_flag():
     assert "--strict-mcp-config" in argv_strict
 
 
-def test_run_claude_injects_strict_mcp_when_degraded(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+def test_run_claude_injects_strict_mcp_when_degraded(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, offline_mcp_url: str
+):
     from core.line import agent_cli
 
     fake_claude_json = tmp_path / ".claude.json"
@@ -182,7 +192,7 @@ def test_run_claude_injects_strict_mcp_when_degraded(tmp_path: Path, monkeypatch
             "mcpServers": {
                 "segundocerebro": {
                     "type": "http",
-                    "url": "http://127.0.0.1:59125/mcp"
+                    "url": offline_mcp_url
                 }
             }
         }),
@@ -222,9 +232,8 @@ def test_run_claude_injects_strict_mcp_when_degraded(tmp_path: Path, monkeypatch
 # ---------------------------------------------------------------------------
 
 
-def test_segundo_cerebro_client_http_health_check_fails_fast():
-    # Point client to an offline HTTP MCP endpoint
-    offline_url = "http://127.0.0.1:59126/mcp"
+def test_segundo_cerebro_client_http_health_check_fails_fast(offline_mcp_url: str):
+    offline_url = offline_mcp_url
     client = SegundoCerebroClient(mcp_url=offline_url)
 
     t0 = time.perf_counter()
@@ -239,8 +248,8 @@ def test_segundo_cerebro_client_http_health_check_fails_fast():
     assert elapsed < 1.5
 
 
-def test_segundo_cerebro_client_search_fails_fast_with_insufficient_evidence():
-    offline_url = "http://127.0.0.1:59127/mcp"
+def test_segundo_cerebro_client_search_fails_fast_with_insufficient_evidence(offline_mcp_url: str):
+    offline_url = offline_mcp_url
     client = SegundoCerebroClient(mcp_url=offline_url)
 
     query = KnowledgeQuery(
@@ -261,13 +270,28 @@ def test_segundo_cerebro_client_search_fails_fast_with_insufficient_evidence():
     assert elapsed < 4.0
 
 
-def test_segundo_cerebro_client_redacts_auth_token_in_http_failure(monkeypatch: pytest.MonkeyPatch):
+def test_segundo_cerebro_client_redacts_auth_token_in_http_failure(
+    monkeypatch: pytest.MonkeyPatch, offline_mcp_url: str
+):
     secret_token = "sk-super-secret-key-12345678"
     monkeypatch.setenv("SEGUNDO_CEREBRO_API_KEY", secret_token)
 
-    offline_url = "http://127.0.0.1:59128/mcp"
+    offline_url = offline_mcp_url
     client = SegundoCerebroClient(mcp_url=offline_url)
 
     res = client._execute_mcp_tool("search", {"consulta": "teste"})
     assert "error" in res
     assert secret_token not in res["error"]
+
+
+def test_offline_health_probe_ignores_an_unrelated_listener(offline_mcp_url: str):
+    """A live loopback service cannot satisfy the reserved offline endpoint."""
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as listener:
+        listener.bind(("127.0.0.1", 0))
+        listener.listen(1)
+        live_url = f"http://127.0.0.1:{listener.getsockname()[1]}/mcp"
+        assert live_url != offline_mcp_url
+        assert SegundoCerebroClient(mcp_url=live_url).check_health(timeout_sec=0.5).available
+        status = SegundoCerebroClient(mcp_url=offline_mcp_url).check_health(timeout_sec=0.5)
+        assert status.available is False
+        assert status.mcp_endpoint == offline_mcp_url
