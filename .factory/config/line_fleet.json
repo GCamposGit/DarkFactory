@@ -1,0 +1,30 @@
+{
+  "_comment": "Topologia da frota de execucao distribuida com ate 3 demandas simultaneas (USR-277 / USR-280). Prioridade Grokbox > Notebook > Desktop.",
+  "max_fleet_slots": 3,
+  "hosts": [
+    {
+      "id": "grokbox",
+      "name": "Grokbox",
+      "priority": 1,
+      "max_slots": 1,
+      "platform": "linux",
+      "tags": ["remote", "grokbox"]
+    },
+    {
+      "id": "notebook",
+      "name": "Notebook",
+      "priority": 2,
+      "max_slots": 1,
+      "platform": "windows",
+      "tags": ["local", "notebook"]
+    },
+    {
+      "id": "desktop",
+      "name": "Desktop",
+      "priority": 3,
+      "max_slots": 1,
+      "platform": "windows",
+      "tags": ["remote", "desktop", "test_worker"]
+    }
+  ]
+}
