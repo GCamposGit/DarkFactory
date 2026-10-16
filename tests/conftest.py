@@ -11,6 +11,27 @@ import urllib.request
 from pathlib import Path
 from typing import Any, Iterator
 
+# These settings direct the harness at real remote workers or change how long it
+# waits for them. Scrub them before test modules are imported or collected: an
+# autouse fixture alone runs too late for module-level configuration and is not
+# inherited safely by pytest subprocesses started during collection.
+AMBIENT_REMOTE_INFRA_ENV = (
+    "DARKFAC_TEST_WORKERS",
+    "DARKFAC_WORKER_HEALTH_TIMEOUT_SEC",
+    "DARKFAC_REMOTE_HARNESS",
+    "DARKFAC_WORKER_TOKEN",
+    "DARKFAC_HARNESS_WORKER_JOB",
+    "DARKFAC_WORKER_DEAD_PROBES",
+    "DARKFAC_REMOTE_BUSY_WAIT_SEC",
+    "DARKFAC_HARNESS_REMOTE_WAIT_SEC",
+    "DARKFAC_WORKER_SILENCE_FALLBACK_SEC",
+    "DARKFAC_REMOTE_DISPATCH_TEST_OVERRIDE",
+    "REMOTE_HARNESS_URL",
+    "REMOTE_HARNESS_URLS",
+)
+for _remote_env_name in AMBIENT_REMOTE_INFRA_ENV:
+    os.environ.pop(_remote_env_name, None)
+
 if "DARKFAC_STATE_ROOT" not in os.environ:
     _EARLY_STATE_ROOT = tempfile.mkdtemp(prefix="darkfac_state_")
     os.environ["DARKFAC_STATE_ROOT"] = _EARLY_STATE_ROOT
@@ -418,25 +439,6 @@ def _isolate_operating_harness_env(monkeypatch: pytest.MonkeyPatch) -> None:
 
     for name in (OPERATING_HARNESS_ENV, *(name for name, _harness in AUTODETECT_ENV_SIGNALS)):
         monkeypatch.delenv(name, raising=False)
-
-
-# These settings direct the harness at real remote workers or change how long it
-# waits for them. `run_ticket` exports them to pytest children, so a developer's
-# machine can otherwise make ordinary unit tests probe tailnet hosts. Tests that
-# cover remote dispatch set the values they need with monkeypatch.
-AMBIENT_REMOTE_INFRA_ENV = (
-    "DARKFAC_TEST_WORKERS",
-    "DARKFAC_WORKER_HEALTH_TIMEOUT_SEC",
-    "DARKFAC_REMOTE_HARNESS",
-    "DARKFAC_HARNESS_WORKER_JOB",
-    "DARKFAC_WORKER_DEAD_PROBES",
-    "DARKFAC_REMOTE_BUSY_WAIT_SEC",
-    "DARKFAC_HARNESS_REMOTE_WAIT_SEC",
-    "DARKFAC_WORKER_SILENCE_FALLBACK_SEC",
-    "DARKFAC_REMOTE_DISPATCH_TEST_OVERRIDE",
-    "REMOTE_HARNESS_URL",
-    "REMOTE_HARNESS_URLS",
-)
 
 
 @pytest.fixture(autouse=True)
