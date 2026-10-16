@@ -7995,5 +7995,66 @@
     "dependencies": [],
     "created_at": "2026-10-16T12:36:20.495866Z",
     "updated_at": "2026-10-16T12:36:20.495866Z"
+  },
+  {
+    "id": "USR-271",
+    "project_id": "darkfac",
+    "title": "Revisao Grok read fica presa em MCP opcional indisponivel",
+    "origin": "agent",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "later",
+    "tags": [
+      "user-demand",
+      "bug",
+      "congelado-v0"
+    ],
+    "problem_statement": "Revisao independente USR-269 por core.line.agent_cli.run_agent modo read excedeu 180s e 240s. Segunda tentativa em cwd temporario retornou init failed segundocerebro_fibra http://127.0.0.1:18790/mcp ConnectionRefused, sem veredito. Artefatos .factory/test_logs/usr269-review.json e usr269-review-retry.json. CLI read nao aplica prevencao MCP equivalente ao Claude. Nao confundir falha de infraestrutura com aprovacao.",
+    "core_journey": [],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Reproduzir MCP offline no Grok read sem chamada paga desnecessaria",
+      "Invocacao de revisao limitada ao diff evita espera por MCP opcional e retorna veredito ou erro estruturado rapido",
+      "Teste de regressao deterministico para invocacao e classificacao de timeout"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-16T12:43:20.920483Z",
+    "updated_at": "2026-10-16T12:43:20.920483Z"
+  },
+  {
+    "id": "USR-272",
+    "project_id": "darkfac",
+    "title": "Teste HTTP de approval runtime spike expira no CI Windows sob carga",
+    "origin": "agent",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand",
+      "v0-critico",
+      "bug",
+      "flaky_test"
+    ],
+    "problem_statement": "PR364 CI run38900827030 Windows falhou tests/test_runtime_spike_effects.py::test_http_approval_only_forwards_to_bound_subject TimeoutError; 4202 passed 1 failed em 892.74s, SHA819f9c7. Impede registrar demanda e main verde. https://github.com/GCamposGit/DarkFactory/actions/runs/38900827030 . Investigar espera HTTP local e teardown sem relaxar vinculo da aprovacao ao sujeito.",
+    "core_journey": [],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Explicar timeout a partir do traceback e reproduzir teste focal",
+      "Corrigir sincronizacao ou limite do teste preservando checagem de subject e rejeicoes",
+      "Teste focal e portao oficial com CI Windows Linux passam"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-16T12:47:18.616711Z",
+    "updated_at": "2026-10-16T12:47:18.616711Z"
   }
 ]
