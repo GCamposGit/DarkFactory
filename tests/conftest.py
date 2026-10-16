@@ -441,10 +441,18 @@ AMBIENT_REMOTE_INFRA_ENV = (
 
 @pytest.fixture(autouse=True)
 def _isolate_remote_infra_env(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Prevent tests from inheriting real worker addresses and probe settings."""
+    """Prevent tests from inheriting real worker addresses and probe settings.
+
+    `core.harness.remote_dispatch.DEFAULT_WORKERS` points at REAL tailnet hosts (since 91fb348),
+    so merely deleting `DARKFAC_REMOTE_HARNESS`/`DARKFAC_TEST_WORKERS` would make any unmocked
+    call to `maybe_dispatch_remote`/`worker_urls`/`probe_health` probe or dispatch to them.
+    Every test therefore starts in the safe mode `DARKFAC_REMOTE_HARNESS=off`; tests of the remote
+    mode opt in with `monkeypatch.setenv(..., "auto")` (or `delenv`) and mock the network.
+    """
 
     for name in AMBIENT_REMOTE_INFRA_ENV:
         monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("DARKFAC_REMOTE_HARNESS", "off")
 
 
 @pytest.fixture(autouse=True)
