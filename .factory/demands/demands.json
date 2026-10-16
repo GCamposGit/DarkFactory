@@ -8254,5 +8254,34 @@
     "dependencies": [],
     "created_at": "2026-10-16T15:26:57.986877Z",
     "updated_at": "2026-10-16T15:30:47.477227Z"
+  },
+  {
+    "id": "USR-291",
+    "project_id": "darkfac",
+    "title": "Teste instavel tests/test_line_lock.py::test_heartbeat_thread_refreshes colide no os.replace no Windows",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "test_heartbeat_thread_refreshes_the_sidecar_while_held le line.lock a cada 50ms enquanto a thread de heartbeat faz os.replace(tmp, path) a cada 50ms, causando PermissionError 13 esporadico no Windows NTFS durante pytest",
+    "core_journey": [
+      "test_heartbeat_thread_refreshes_the_sidecar_while_held le line.lock a cada 50ms enquanto a thread de heartbeat faz os.replace(tmp, path) a cada 50ms, causando PermissionError 13 esporadico no Windows NTFS durante pytest"
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Leitura do teste trata PermissionError transiente com retry ou usa _read_lock",
+      "python -m pytest tests/test_line_lock.py -q passa de forma deterministica"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-16T17:44:57.794931Z",
+    "updated_at": "2026-10-16T17:44:57.794931Z"
   }
 ]
