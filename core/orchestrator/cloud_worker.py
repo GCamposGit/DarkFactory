@@ -567,11 +567,12 @@ class CloudWorker:
 
         stop_event = threading.Event()
         interval = max(5.0, getattr(self.store, "lease_duration_sec", 45) / 3.0)
-        poll = min(interval, cancellation.CANCEL_POLL_INTERVAL_S) if token is not None else interval
+        poll = min(interval, cancellation.CANCEL_POLL_INTERVAL_S, 15.0) if token is not None else min(interval, 15.0)
 
         def _loop() -> None:
             next_beat = time.monotonic() + interval
             while not stop_event.wait(poll):
+                self._sync_owner_actions()
                 if token is not None and self._observe_cancellation(claim, token):
                     return
                 if time.monotonic() < next_beat:
@@ -1112,11 +1113,20 @@ class CloudWorker:
         )
         return list(getattr(report, "removed_ids", []) or [])
 
+    def _sync_owner_actions(self) -> None:
+        """Flush durable human-request transport even when all execution slots are busy."""
+        try:
+            from core.owner_actions.sync import flush_pending
+            flush_pending()
+        except Exception as exc:
+            logger.warning("Owner action sync deferred (%s)", type(exc).__name__)
+
     def poll_and_execute_once(self, now: datetime | None = None) -> bool:
         """Attempt to claim one pending job and execute it.
 
         Returns True if a job was claimed and executed; False otherwise.
         """
+        self._sync_owner_actions()
         if self._draining:
             return False
         if len(self._active_tasks) >= self.max_slots:

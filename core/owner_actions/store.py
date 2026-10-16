@@ -188,8 +188,10 @@ class OwnerActionStore:
         *,
         overlay_path: Path | str | None = None,
         remote_ref: str | None = "origin/main",
+        dynamic_path: Path | str | None = None,
     ) -> None:
         self.path = Path(path) if path is not None else default_path()
+        self.dynamic_path = Path(dynamic_path) if dynamic_path is not None else None
         self.overlay_path = Path(overlay_path) if overlay_path is not None else None
         # Best-effort id reservation against a branch's unsynced base (USR-255); None disables it.
         self.remote_ref = remote_ref
@@ -241,6 +243,11 @@ class OwnerActionStore:
 
         try:
             result = self._load_definitions()
+            if self.dynamic_path is not None:
+                dynamic = OwnerActionStore(self.dynamic_path, remote_ref=None)._load_definitions()
+                curated_ids = {action.id for action in result.actions}
+                result.actions.extend(action for action in dynamic.actions if action.id not in curated_ids)
+                result.warnings.extend(dynamic.warnings)
             resolutions, warnings = self._load_resolutions()
             result.warnings.extend(warnings)
             result.actions = [apply_resolution(a, resolutions.get(a.id)) for a in result.actions]
@@ -248,6 +255,39 @@ class OwnerActionStore:
         except Exception as exc:  # pragma: no cover - last-resort guard: the queue must keep working
             logger.warning("owner_actions: leitura falhou (%s)", exc)
             return LoadResult(warnings=[f"leitura do backlog falhou: {exc.__class__.__name__}"])
+
+    def sync_human_request(self, request: Any, *, closed: bool) -> OwnerAction:
+        """Apply a machine event only to dynamic HumanRequests; done is terminal."""
+        from core.owner_actions.mirror import human_request_to_action
+
+        if self.dynamic_path is None:
+            raise OwnerActionInvalid("dynamic owner action storage is not configured")
+        action = human_request_to_action(request)
+        if any(item.id == action.id for item in self._load_definitions().actions):
+            raise OwnerActionInvalid("machine event conflicts with curated owner action")
+        dynamic = OwnerActionStore(self.dynamic_path, remote_ref=None)
+
+        def apply(document: dict[str, Any], rows: list[Any]) -> OwnerAction:
+            identity = [request.run_id, request.blocking_stage]
+            identities = document.setdefault("human_request_identities", {})
+            if not isinstance(identities, dict):
+                raise OwnerActionInvalid("invalid dynamic identity metadata")
+            for index, raw in enumerate(rows):
+                if isinstance(raw, dict) and raw.get("id") == action.id:
+                    if identities.get(action.id) != identity:
+                        raise OwnerActionInvalid("dynamic owner action identity conflict or missing identity")
+                    existing = OwnerAction.model_validate(raw)
+                    if existing.status is ActionStatus.DONE or not closed:
+                        return existing
+                    done = OwnerAction.model_validate({**existing.to_record(), "status": "done"})
+                    rows[index] = done.to_record()
+                    return done
+            saved = OwnerAction.model_validate({**action.to_record(), "status": "done"}) if closed else action
+            identities[action.id] = identity
+            rows.append(saved.to_record())
+            return saved
+
+        return dynamic._mutate_definitions(apply)
 
     def list_actions(self, *, include_done: bool = True) -> list[OwnerAction]:
         actions = self.load().actions

@@ -400,6 +400,7 @@ class HubService:
         self.owner_action_store = OwnerActionStore(
             owner_actions_path,
             overlay_path=self.data_dir / "owner_actions" / "resolutions.json",
+            dynamic_path=self.data_dir / "owner_actions" / "dynamic.json",
         )
 
         self.task_state_path = Path(state_path) if state_path is not None else state_root() / "state.json"

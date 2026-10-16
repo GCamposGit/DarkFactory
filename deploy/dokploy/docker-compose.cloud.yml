@@ -76,6 +76,8 @@ services:
     command: ["python", "-m", "core.orchestrator.cloud_worker"]
     environment:
       - DARKFAC_ROLE=worker
+      - DARKFAC_TELEMETRY_KEY=${DARKFAC_TELEMETRY_KEY:-}
+      - DARKHUB_CLOUD_URL=${DARKHUB_CLOUD_URL:-https://darkhub.ggcampos.com}
       - DARKFAC_WORKER_ID=${DARKFAC_WORKER_ID:-cloud-worker-1}
       # HF-27-09 topology: VPS caps/priority. Desktop and Notebook run the
       # same image/command on-prem via scripts/start_onprem_worker.ps1 with

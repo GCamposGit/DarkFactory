@@ -110,6 +110,9 @@ def human_request_to_action(request: Any) -> OwnerAction:
 def mirror_human_request(request: Any, *, store: Optional[OwnerActionStore] = None) -> Optional[OwnerAction]:
     """Persist the request as an owner action. Returns the action, or ``None`` on any failure."""
 
+    from core.owner_actions.sync import publish_request
+
+    publish_request(request)
     try:
         action = human_request_to_action(request)
         saved, _created = (store or OwnerActionStore()).upsert(action)
@@ -122,6 +125,9 @@ def mirror_human_request(request: Any, *, store: Optional[OwnerActionStore] = No
 def close_mirrored_request(run_id: str, blocking_stage: str, *, store: Optional[OwnerActionStore] = None) -> bool:
     """Mark the mirrored item done once the line resumed. Best effort; ``False`` when nothing changed."""
 
+    from core.owner_actions.sync import publish_closed
+
+    publish_closed(run_id, blocking_stage)
     try:
         active = store or OwnerActionStore()
         action = active.get(mirrored_id(run_id, blocking_stage))

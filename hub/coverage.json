@@ -194,6 +194,9 @@
     "GET /api/owner-actions": {
       "surface": "owner-actions-section"
     },
+    "POST /api/owner-actions/sync": {
+      "machine": "Sincronizacao autenticada de HumanRequests do worker para o backlog persistente do Hub (USR-194); as acoes resultantes aparecem em owner-actions-section."
+    },
     "POST /api/owner-actions/{action_id}/answer": {
       "surface": "owner-actions-section"
     },
