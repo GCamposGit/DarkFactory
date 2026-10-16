@@ -66,6 +66,7 @@ from hub.backend.models import (
     LineStatusResponse,
 )
 from core.workflow.line_live import LineLiveSnapshot
+from core.owner_actions.sync import SyncEvent
 from hub.backend.service import HubService
 from core.portfolio.models import PortfolioEfficiencyReport
 from core.usage.models import AccountUsageReport, ModelCallEvent, ModelUsageReport
@@ -1224,6 +1225,27 @@ def _owner_action_http_error(exc: Exception) -> HTTPException:
     if isinstance(exc, OwnerActionStoreCorrupt):
         return HTTPException(status_code=503, detail=str(exc))
     return HTTPException(status_code=422, detail=str(exc))
+
+
+@router.post("/owner-actions/sync")
+def sync_owner_action_endpoint(
+    payload: SyncEvent,
+    x_darkfac_telemetry_key: Optional[str] = Header(default=None, alias="X-DarkFac-Telemetry-Key"),
+    service: HubService = Depends(get_hub_service),
+) -> dict[str, str]:
+    """Receive machine-only HumanRequest events without notifying Telegram."""
+    configured_key = os.environ.get("DARKFAC_TELEMETRY_KEY")
+    if not configured_key:
+        raise HTTPException(status_code=503, detail="Owner action synchronization is disabled.")
+    if not x_darkfac_telemetry_key or not secrets.compare_digest(x_darkfac_telemetry_key, configured_key):
+        raise HTTPException(status_code=401, detail="Invalid telemetry key.")
+    from core.owner_actions.store import OwnerActionError
+
+    try:
+        action = service.owner_action_store.sync_human_request(payload.request, closed=payload.closed)
+    except OwnerActionError as exc:
+        raise _owner_action_http_error(exc) from exc
+    return {"id": action.id, "status": action.status.value}
 
 
 @router.get("/owner-actions", response_model=OwnerActionsReport)

@@ -5393,14 +5393,14 @@
     "project_id": "darkfac",
     "title": "Linha na VPS publica HumanRequest no backlog de acoes humanas do Hub (canal de escrita linha para Hub)",
     "origin": "user",
-    "status": "planned",
+    "status": "implementing",
     "delivery_evidence": null,
     "item_type": "feature",
     "lifecycle_stage": "execution",
-    "horizon": "later",
+    "horizon": "now",
     "tags": [
       "user-demand",
-      "congelado-v0"
+      "pos-v0-autonomia"
     ],
     "problem_statement": "Seguimento do USR-190: request_human_help espelha cada HumanRequest como owner_action no arquivo do processo da linha; no worker da VPS isso fica no container dele e nao chega ao Hub, entao pedidos humanos gerados pela linha autonoma na nuvem podem nao aparecer no DarkHub. Falta um canal de escrita da linha para o Hub (ou o ledger compartilhado do USR-136).\n\nCONGELADO em 11/10/2026 (plano V0, docs/plans/V0_OPERACIONAL_2026-10-11.md): fora do caminho critico da linha.",
     "core_journey": [
@@ -5417,7 +5417,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-10T00:10:00Z",
-    "updated_at": "2026-10-11T17:49:17.206876Z"
+    "updated_at": "2026-10-16T15:45:09.165717Z"
   },
   {
     "id": "USR-195",
@@ -7981,7 +7981,7 @@
       "bug",
       "infra"
     ],
-    "problem_statement": "Portao isolado ca2c910 no grokbox, job 4648af3ed69a46559c62bba0e8c5ac29 em 16/10/2026 12:33:55 UTC: syntax PASS; pytest paralelo exit -15 em 0.9s com 0 testes descobertos, RAM 3.2 GiB cap 1 worker. Nao e veredito de correcao do candidato. Health informou restart_safe true e git_sha fde6b327. Investigar processo/ambiente antes de repetir.",
+    "problem_statement": "Portao isolado ca2c910 no grokbox, job 4648af3ed69a46559c62bba0e8c5ac29 em 16/10/2026 12:33:55 UTC: syntax PASS; pytest paralelo exit -15 em 0.9s com 0 testes descobertos, RAM 3.2 GiB cap 1 worker. Nao e veredito de correcao do candidato. Health informou restart_safe true e git_sha fde6b327. Investigar processo/ambiente antes de repetir.\n\n16/10/2026 15:30 UTC: Tailscale reportou Grokbox offline durante prova efemera de um teste xdist; sem retorno da captura de emissor. PATH/Python corretos. Causa de SIGTERM ainda nao comprovada; sem restart ou alteracao global. Suite do lote273/276 foi despachada ao Desktop.",
     "core_journey": [],
     "non_goals": [],
     "reachability_contract": "",
@@ -8011,7 +8011,7 @@
       "bug",
       "congelado-v0"
     ],
-    "problem_statement": "Revisao independente USR-269 por core.line.agent_cli.run_agent modo read excedeu 180s e 240s. Segunda tentativa em cwd temporario retornou init failed segundocerebro_fibra http://127.0.0.1:18790/mcp ConnectionRefused, sem veredito. Artefatos .factory/test_logs/usr269-review.json e usr269-review-retry.json. CLI read nao aplica prevencao MCP equivalente ao Claude. Nao confundir falha de infraestrutura com aprovacao.",
+    "problem_statement": "Revisao independente USR-269 por core.line.agent_cli.run_agent modo read excedeu 180s e 240s. Segunda tentativa em cwd temporario retornou init failed segundocerebro_fibra http://127.0.0.1:18790/mcp ConnectionRefused, sem veredito. Artefatos .factory/test_logs/usr269-review.json e usr269-review-retry.json. CLI read nao aplica prevencao MCP equivalente ao Claude. Nao confundir falha de infraestrutura com aprovacao.\n\n16/10/2026: revisao verbatim do PR publico367 expirou300s; recuperacao com reasoning-effort low em andamento. MCP ou causa do atraso continuam nao comprovados.",
     "core_journey": [],
     "non_goals": [],
     "reachability_contract": "",

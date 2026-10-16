@@ -88,3 +88,14 @@ def test_cloud_env_template_safety_and_completeness() -> None:
         "env.cloud.example must not contain live serialized DSNs"
     )
     assert "password=" not in content.lower() or "strong_password" in content.lower()
+
+
+def test_worker_owner_action_sync_uses_existing_credentials_and_persistent_volume() -> None:
+    from pathlib import Path
+    import yaml
+
+    manifest = yaml.safe_load((Path(__file__).resolve().parents[1] / "deploy/dokploy/docker-compose.cloud.yml").read_text(encoding="utf-8"))
+    worker = manifest["services"]["darkfac-worker"]
+    assert "DARKFAC_TELEMETRY_KEY=${DARKFAC_TELEMETRY_KEY:-}" in worker["environment"]
+    assert "DARKHUB_CLOUD_URL=${DARKHUB_CLOUD_URL:-https://darkhub.ggcampos.com}" in worker["environment"]
+    assert "darkfac-artifacts:/app/.factory/artifacts" in worker["volumes"]
