@@ -7872,8 +7872,8 @@
     "project_id": "darkfac",
     "title": "Testes herdam variaveis de workers reais do ambiente (DARKFAC_TEST_WORKERS, sonda de 10 s) e sondam hosts de verdade no fallback local",
     "origin": "user",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "8f2c9c53b142db02ef2585588000934108560442",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -7898,7 +7898,7 @@
     "estimated_complexity": "low",
     "dependencies": [],
     "created_at": "2026-10-15T21:13:51.932769Z",
-    "updated_at": "2026-10-15T21:13:51.932769Z"
+    "updated_at": "2026-10-16T03:49:38.120520Z"
   },
   {
     "id": "USR-268",

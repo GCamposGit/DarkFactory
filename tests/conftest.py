@@ -11,6 +11,27 @@ import urllib.request
 from pathlib import Path
 from typing import Any, Iterator
 
+# These settings direct the harness at real remote workers or change how long it
+# waits for them. Scrub them before test modules are imported or collected: an
+# autouse fixture alone runs too late for module-level configuration and is not
+# inherited safely by pytest subprocesses started during collection.
+AMBIENT_REMOTE_INFRA_ENV = (
+    "DARKFAC_TEST_WORKERS",
+    "DARKFAC_WORKER_HEALTH_TIMEOUT_SEC",
+    "DARKFAC_REMOTE_HARNESS",
+    "DARKFAC_WORKER_TOKEN",
+    "DARKFAC_HARNESS_WORKER_JOB",
+    "DARKFAC_WORKER_DEAD_PROBES",
+    "DARKFAC_REMOTE_BUSY_WAIT_SEC",
+    "DARKFAC_HARNESS_REMOTE_WAIT_SEC",
+    "DARKFAC_WORKER_SILENCE_FALLBACK_SEC",
+    "DARKFAC_REMOTE_DISPATCH_TEST_OVERRIDE",
+    "REMOTE_HARNESS_URL",
+    "REMOTE_HARNESS_URLS",
+)
+for _remote_env_name in AMBIENT_REMOTE_INFRA_ENV:
+    os.environ.pop(_remote_env_name, None)
+
 if "DARKFAC_STATE_ROOT" not in os.environ:
     _EARLY_STATE_ROOT = tempfile.mkdtemp(prefix="darkfac_state_")
     os.environ["DARKFAC_STATE_ROOT"] = _EARLY_STATE_ROOT
@@ -418,6 +439,22 @@ def _isolate_operating_harness_env(monkeypatch: pytest.MonkeyPatch) -> None:
 
     for name in (OPERATING_HARNESS_ENV, *(name for name, _harness in AUTODETECT_ENV_SIGNALS)):
         monkeypatch.delenv(name, raising=False)
+
+
+@pytest.fixture(autouse=True)
+def _isolate_remote_infra_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Prevent tests from inheriting real worker addresses and probe settings.
+
+    `core.harness.remote_dispatch.DEFAULT_WORKERS` points at REAL tailnet hosts (since 91fb348),
+    so merely deleting `DARKFAC_REMOTE_HARNESS`/`DARKFAC_TEST_WORKERS` would make any unmocked
+    call to `maybe_dispatch_remote`/`worker_urls`/`probe_health` probe or dispatch to them.
+    Every test therefore starts in the safe mode `DARKFAC_REMOTE_HARNESS=off`; tests of the remote
+    mode opt in with `monkeypatch.setenv(..., "auto")` (or `delenv`) and mock the network.
+    """
+
+    for name in AMBIENT_REMOTE_INFRA_ENV:
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("DARKFAC_REMOTE_HARNESS", "off")
 
 
 @pytest.fixture(autouse=True)
