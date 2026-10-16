@@ -60,7 +60,7 @@ def test_load_fleet_config(tmp_path: Path):
 
 def test_sort_queue_ordering():
     """Verify queue sorts unblocked, now horizon, oldest first, with stable tie-breaker."""
-    base_time = datetime(2026, 10, 16, 12, 0, 0, tzinfo=timezone.utc)
+    base_time = datetime(2025, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
     
     t_blocked = TicketCandidate(ticket_id="USR-100", created_at=base_time, blocked_reason="waiting_human")
     t_later = TicketCandidate(ticket_id="USR-101", created_at=base_time, horizon="later")
@@ -82,7 +82,7 @@ def test_sort_queue_ordering():
 
 def test_three_hosts_free_order(default_fleet: FleetConfig):
     """When all three hosts are free, three tickets fill Grokbox, Notebook, and Desktop in order."""
-    base_time = datetime(2026, 10, 16, 12, 0, 0, tzinfo=timezone.utc)
+    base_time = datetime(2025, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
     t1 = TicketCandidate(ticket_id="USR-280", created_at=base_time)
     t2 = TicketCandidate(ticket_id="USR-281", created_at=base_time + timedelta(seconds=1))
     t3 = TicketCandidate(ticket_id="USR-282", created_at=base_time + timedelta(seconds=2))
