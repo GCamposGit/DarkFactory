@@ -8531,8 +8531,8 @@
     "project_id": "darkfac",
     "title": "F7: ativacao da frota com um ciclo por host e drain",
     "origin": "user",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "pr:#382 commit:a41e9f1205f354863aeacc5d7befd867da8023d5 snapshot:snp3t_darkfac_20261017_065436_ced218",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -8566,7 +8566,7 @@
       "USR-285"
     ],
     "created_at": "2026-10-16T15:34:48.875851Z",
-    "updated_at": "2026-10-16T15:34:48.875851Z"
+    "updated_at": "2026-10-17T06:55:06.364775+00:00"
   },
   {
     "id": "USR-287",
