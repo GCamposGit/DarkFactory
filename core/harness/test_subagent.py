@@ -28,6 +28,22 @@ from pydantic import BaseModel, Field
 logger = logging.getLogger("core.harness.test_subagent")
 
 
+def _decode_partial(value: Any) -> str:
+    """Best-effort decode of ``subprocess.TimeoutExpired``'s partial stdout/stderr (USR-249).
+
+    Despite ``text=True``, CPython raises ``TimeoutExpired`` with the RAW bytes buffered so far on
+    ``.stdout``/``.stderr``: the text decoding normally happens inside ``Popen.communicate()``, which
+    never runs to completion on a timeout. The previous ``isinstance(..., str)`` guard silently
+    discarded this, which is exactly the partial output (how far pytest got, which test was running,
+    whether collection even finished) a rescue needs to tell a machine lockup from any other cause.
+    """
+    if isinstance(value, str):
+        return value
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="replace")
+    return ""
+
+
 class TestScope(StrEnum):
     __test__ = False
     ALL = "all"
@@ -507,8 +523,8 @@ class TestSubagentEngine:
 
             exit_code = res.returncode
         except subprocess.TimeoutExpired as exc:
-            raw_stdout = exc.stdout or "" if isinstance(exc.stdout, str) else ""
-            raw_stderr = exc.stderr or "" if isinstance(exc.stderr, str) else ""
+            raw_stdout = _decode_partial(exc.stdout)
+            raw_stderr = _decode_partial(exc.stderr)
             combined_output = raw_stdout + "\n[TIMEOUT EXPIRED]\n" + raw_stderr
             exit_code = 124
         except Exception as exc:
