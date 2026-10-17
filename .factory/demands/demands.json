@@ -8032,16 +8032,9 @@
     "title": "Teste HTTP de approval runtime spike expira no CI Windows sob carga",
     "origin": "agent",
     "status": "completed",
-    "delivery_evidence": {
-      "pr_url": "https://github.com/GCamposGit/DarkFactory/pull/385",
-      "merge_commit": "821c9245f9990c7861d4018365041db2e83831fa",
-      "ci_url": "https://github.com/GCamposGit/DarkFactory/actions/runs/39020209258",
-      "dokploy_deploy": "done",
-      "backup_snapshot": "snp3t_darkfac_20261017_093616_ab03a1",
-      "summary": "Estabilizado timeout de conexao HTTP no runtime spike effect_server e request_json sob carga Windows."
-    },
+    "delivery_evidence": "PR #385 merged (821c924), Dokploy redeployed, backup drill verified (snp3t_darkfac_20261017_093616_ab03a1). Estabilizado timeout de conexao HTTP no runtime spike effect_server e request_json sob carga Windows.",
     "item_type": "feature",
-    "lifecycle_stage": "completed",
+    "lifecycle_stage": "execution",
     "horizon": "now",
     "tags": [
       "user-demand",
