@@ -351,6 +351,8 @@ def submit_ticket_to_line(
     demands_store: DemandsStore,
     store: ControlStore | None = None,
     now: datetime | None = None,
+    allow_registered_projects: bool = False,
+    project_registry: Any | None = None,
 ) -> LineSubmission:
     """Push an existing demands.json ticket into the production line.
 
@@ -366,7 +368,15 @@ def submit_ticket_to_line(
     ticket = demands_store.get_ticket(ticket_id)
     if ticket is None:
         return LineSubmission(ok=False, ticket_id=ticket_id, message=f"Ticket '{ticket_id}' nao encontrado.")
-    if ticket.project_id not in allowed_projects():
+
+    is_allowed = ticket.project_id in allowed_projects()
+    if not is_allowed and allow_registered_projects:
+        from core.projects.registry import ProjectRegistry
+
+        reg = project_registry if project_registry is not None else ProjectRegistry()
+        is_allowed = reg.get_project(ticket.project_id) is not None
+
+    if not is_allowed:
         return LineSubmission(
             ok=False,
             ticket_id=ticket.id,

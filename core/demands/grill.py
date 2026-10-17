@@ -591,3 +591,6 @@ class DemandGrillEngine:
             readiness_justification="Grill concluído com todas as decisões materiais respondidas e critérios consolidados.",
         )
         return refinement.refined_ticket, grill_record, refinement
+
+
+GrillService = DemandGrillEngine
