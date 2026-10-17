@@ -7917,7 +7917,11 @@
     ],
     "problem_statement": "Em 15/10/2026 (USR-192) o grokbox e o Desktop cairam no meio do job; o runner caiu para o Notebook com 6 workers xdist as 17:11 e o passo paralelo estourou 3000 s (18:01) com 0 testes contabilizados. Com 2 workers e sem variaveis de worker, a mesma suite levou 1814 s no Notebook em 14/10. A isolacao das variaveis de worker explica so ~10 s por sonda. A saida parcial do pytest e perdida no timeout (patch protegido pendente na OA-018), entao nao se sabe se travou ou ficou lento.",
     "core_journey": [],
-    "non_goals": [],
+    "non_goals": [
+      "Não alterar os limites de 1.800 s e 3.000 s confirmados pelo Owner.",
+      "Não mascarar, ignorar ou excluir falhas ou descobertas de testes.",
+      "Não expandir a correção para além do runner e dos testes envolvidos no fallback local."
+    ],
     "reachability_contract": "",
     "acceptance_criteria": [
       "Reproduzir o fallback local com os workers inalcancaveis (DARKFAC_TEST_WORKERS apontando para hosts fora do ar) e registrar no ticket a duracao e os testes mais lentos ou travados (--durations e saida parcial gravada em arquivo)",
@@ -7931,7 +7935,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-15T21:14:03.900067Z",
-    "updated_at": "2026-10-15T21:14:03.900067Z"
+    "updated_at": "2026-10-17T13:03:50.945139Z"
   },
   {
     "id": "USR-269",
@@ -7983,7 +7987,11 @@
     ],
     "problem_statement": "Portao isolado ca2c910 no grokbox, job 4648af3ed69a46559c62bba0e8c5ac29 em 16/10/2026 12:33:55 UTC: syntax PASS; pytest paralelo exit -15 em 0.9s com 0 testes descobertos, RAM 3.2 GiB cap 1 worker. Nao e veredito de correcao do candidato. Health informou restart_safe true e git_sha fde6b327. Investigar processo/ambiente antes de repetir.\n\n16/10/2026 15:30 UTC: Tailscale reportou Grokbox offline durante prova efemera de um teste xdist; sem retorno da captura de emissor. PATH/Python corretos. Causa de SIGTERM ainda nao comprovada; sem restart ou alteracao global. Suite do lote273/276 foi despachada ao Desktop.",
     "core_journey": [],
-    "non_goals": [],
+    "non_goals": [
+      "Não alterar timeouts nem mascarar, ignorar ou suprimir falhas de testes.",
+      "Não abrir portas públicas.",
+      "Não recriar a VM."
+    ],
     "reachability_contract": "",
     "acceptance_criteria": [
       "Identificar e registrar origem do SIGTERM com evidencia de processo ou logs",
@@ -7994,7 +8002,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-16T12:36:20.495866Z",
-    "updated_at": "2026-10-16T12:36:20.495866Z"
+    "updated_at": "2026-10-17T13:03:50.960133Z"
   },
   {
     "id": "USR-271",
@@ -8673,6 +8681,43 @@
     "dependencies": [],
     "created_at": "2026-10-17T10:09:40.544220Z",
     "updated_at": "2026-10-17T11:44:33.163230+00:00"
+  },
+  {
+    "id": "USR-299",
+    "project_id": "darkfac",
+    "title": "Probe da frota falha ao importar core quando executado pelo runbook",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "infrastructure",
+    "lifecycle_stage": "execution",
+    "horizon": "later",
+    "tags": [
+      "user-demand",
+      "bug",
+      "infra",
+      "congelado-v0"
+    ],
+    "problem_statement": "O comando documentado `python scripts/start_fleet_worker.py probe --host notebook --json`, executado na raiz do repositório, termina com ModuleNotFoundError: No module named core em probe_host_inventory. O comando start funciona e o daemon pode subir, mas o probe não consegue validar banco, ferramentas nem capacidades dos hosts da frota.",
+    "core_journey": [
+      "Executar o probe documentado a partir de um checkout limpo e receber um HostInventory válido."
+    ],
+    "non_goals": [
+      "Não alterar credenciais, serviço Tailscale, chaves de acesso nem políticas do worker."
+    ],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "O comando documentado python scripts/start_fleet_worker.py probe --host notebook --json importa os módulos do repositório e retorna HostInventory válido, sem ModuleNotFoundError.",
+      "O probe informa database_status e disponibilidade de ferramentas/harnesses; erros de banco permanecem estruturados e não exibem URL nem senha."
+    ],
+    "suggested_files": [
+      "scripts/start_fleet_worker.py",
+      "tests/test_fleet_worker_bootstrap.py"
+    ],
+    "estimated_complexity": "low",
+    "dependencies": [],
+    "created_at": "2026-10-17T12:46:37.066166Z",
+    "updated_at": "2026-10-17T12:46:37.066166Z"
   },
   {
     "id": "USR-298",
