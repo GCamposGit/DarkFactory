@@ -122,9 +122,9 @@ antes de qualquer chamada HTTP, já que a permissão do Claude Code libera
 Detalhes completos, variáveis, exit codes e o runbook de configuração do
 token em `docs/HARNESS_INTEROP.md` e `docs/runbooks/dokploy_redeploy.md`.
 
-## Congelamento V0 (vigente desde 11/10/2026, todos os harnesses)
+## Pós-V0 (conclusão declarada pelo Owner em 17/10/2026)
 
-- Só se implementam tickets com a tag `v0-critico` no `.factory/demands/demands.json`. O resto está com a tag `congelado-v0` e `horizon: later`. Plano, critério de saída e ordem: `docs/plans/V0_OPERACIONAL_2026-10-11.md`.
-- Pedido novo fora do V0 entra como `congelado-v0`, salvo se o owner disser explicitamente que quer furar o congelamento.
-- A regra "Defeito Encontrado = Correção Imediata ou Ticket Formal" continua valendo, com triagem: se o defeito impede uma condição do V0, o ticket recebe `v0-critico`; se não impede, é registrado com `horizon: later` e a tag `congelado-v0`.
-- Uma sessão opera a linha por vez. Tickets com no máximo 3 critérios de aceite; ticket maior é fatiado antes de rodar.
+- O congelamento V0 foi encerrado. As tags `v0-critico` e `congelado-v0` não restringem a fila ativa; remova `v0-critico` dos tickets ainda abertos e preserve tags antigas em tickets concluídos como histórico.
+- A fila volta a ser alimentada pelo workflow atual, respeitando Gate G1, dependências, estado do ticket e capacidade disponível. A frota pode executar até 3 ciclos simultâneos, em hosts distintos na prioridade Grokbox, Notebook e Desktop, quando estiverem saudáveis e compatíveis.
+- Não há limite geral de critérios de aceite nem fatiamento obrigatório por quantidade de critérios. Gate G1 continua obrigatório para ambiguidades materiais.
+- A regra "Defeito Encontrado = Correção Imediata ou Ticket Formal" continua valendo. Registre o defeito com evidência e critérios de aceite, sem triagem ou tags específicas do V0.
