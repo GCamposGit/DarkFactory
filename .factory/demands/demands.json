@@ -8451,8 +8451,8 @@
     "project_id": "darkfac",
     "title": "F5: admissao compartilhada do CLI e testes no host atribuido",
     "origin": "user",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "pr:#380 commit:e34dc5c76ac2f0532d5ea11d8bf810df7e268a31 snapshot:snp3t_darkfac_20261017_040326_ae8f54",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -8484,7 +8484,7 @@
       "USR-282"
     ],
     "created_at": "2026-10-16T15:34:48.846803Z",
-    "updated_at": "2026-10-16T15:34:48.846803Z"
+    "updated_at": "2026-10-17T04:04:10.953828+00:00"
   },
   {
     "id": "USR-285",
