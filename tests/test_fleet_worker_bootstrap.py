@@ -272,3 +272,95 @@ def test_owner_action_generation_when_credentials_missing() -> None:
     all_text = " ".join(s.text + " " + (s.command or "") for s in action.steps)
     for term in forbidden_terms:
         assert term not in all_text
+
+
+def test_fleet_worker_probe_database_status_ready(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """database_connected é True quando DatabaseProbeResult.status == 'ready'."""
+    from core.orchestrator.cloud_db import DatabaseProbeResult
+
+    monkeypatch.setattr(
+        "core.orchestrator.cloud_db.probe_cloud_database",
+        lambda url=None: DatabaseProbeResult(
+            status="ready",
+            database_name="darkfac_hf02_prod",
+            current_user="darkfac_worker",
+            is_unprivileged=True,
+        ),
+    )
+
+    inv = probe_host_inventory(
+        host_id="notebook",
+        database_url="postgresql://darkfac_worker:secret@localhost:5432/darkfac_hf02_prod",
+        repo_root=tmp_path,
+    )
+    assert inv.database_connected is True
+    assert inv.database_status == "ready"
+    assert inv.database_diagnostic is None
+
+
+def test_fleet_worker_probe_database_status_blocked_and_error(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """database_connected é False para status blocked, error ou exceção, com diagnóstico."""
+    from core.orchestrator.cloud_db import DatabaseProbeResult
+
+    # 1. status == blocked
+    monkeypatch.setattr(
+        "core.orchestrator.cloud_db.probe_cloud_database",
+        lambda url=None: DatabaseProbeResult(
+            status="blocked",
+            error_message="superuser forbidden (waiting_access)",
+        ),
+    )
+    inv_blocked = probe_host_inventory(host_id="notebook", repo_root=tmp_path)
+    assert inv_blocked.database_connected is False
+    assert inv_blocked.database_status == "blocked"
+    assert inv_blocked.database_diagnostic == "superuser forbidden (waiting_access)"
+
+    # 2. status == error
+    monkeypatch.setattr(
+        "core.orchestrator.cloud_db.probe_cloud_database",
+        lambda url=None: DatabaseProbeResult(
+            status="error",
+            error_message="connection to 100.83.176.60:5432 failed: connection refused",
+        ),
+    )
+    inv_error = probe_host_inventory(host_id="notebook", repo_root=tmp_path)
+    assert inv_error.database_connected is False
+    assert inv_error.database_status == "error"
+    assert "connection refused" in (inv_error.database_diagnostic or "")
+
+    # 3. exception raised by probe
+    def _raise(url=None):
+        raise ConnectionResetError("network unreachable")
+
+    monkeypatch.setattr("core.orchestrator.cloud_db.probe_cloud_database", _raise)
+    inv_exc = probe_host_inventory(host_id="notebook", repo_root=tmp_path)
+    assert inv_exc.database_connected is False
+    assert inv_exc.database_status == "error"
+    assert "network unreachable" in (inv_exc.database_diagnostic or "")
+
+
+def test_fleet_worker_probe_database_sanitizes_credentials(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """DSN ou senha secreta nunca aparecem no diagnóstico ou serialização do inventário."""
+    from core.orchestrator.cloud_db import DatabaseProbeResult
+
+    secret_pw = "super_secret_pw99_unleaked"
+    raw_url = f"postgresql://darkfac_worker:{secret_pw}@100.83.176.60:5432/darkfac_hf02_prod"
+
+    def _probe_leaker(url=None):
+        return DatabaseProbeResult(
+            status="error",
+            error_message=f"failed connecting to {url}",
+        )
+
+    monkeypatch.setattr("core.orchestrator.cloud_db.probe_cloud_database", _probe_leaker)
+
+    inv = probe_host_inventory(host_id="desktop", database_url=raw_url, repo_root=tmp_path)
+    assert inv.database_connected is False
+    assert inv.database_status == "error"
+
+    # Credential must NOT be present anywhere in the inventory serialization
+    dumped = inv.model_dump_json()
+    assert secret_pw not in dumped
+    assert secret_pw not in (inv.database_diagnostic or "")
+    assert ":***@" in (inv.database_diagnostic or "")
+
