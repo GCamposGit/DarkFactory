@@ -8641,8 +8641,8 @@
     "project_id": "darkfac",
     "title": "Corrigir o probe de prontidao da frota para refletir o status do Postgres",
     "origin": "user",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "PR #386 merged (42e4d13), Dokploy redeployed, backup drill verified (snp3t_darkfac_20261017_114310_dc1919), all nodes converged (42e4d13). Mapeado status de DatabaseProbeResult no probe da frota sem vazar credenciais.",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -8672,6 +8672,6 @@
     "estimated_complexity": "small",
     "dependencies": [],
     "created_at": "2026-10-17T10:09:40.544220Z",
-    "updated_at": "2026-10-17T10:09:40.544220Z"
+    "updated_at": "2026-10-17T11:44:33.163230+00:00"
   }
 ]
