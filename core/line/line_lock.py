@@ -43,6 +43,13 @@ from pathlib import Path
 from typing import Any, Iterator, Optional
 
 from core.paths import state_root
+from core.workflow.control_contracts import (
+    FleetCapacityExceededError,
+    FleetReservation,
+    HostBusyError,
+    ReservationConflictError,
+    TicketAlreadyActiveError,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -146,6 +153,43 @@ def mark_inherited(env: Optional[dict[str, str]] = None) -> dict[str, str]:
     return result
 
 
+def is_fleet_mode() -> bool:
+    """True when distributed fleet execution mode is active (USR-284)."""
+    val = os.environ.get("DARKFAC_FLEET_MODE", "").strip().lower()
+    return val in ("1", "true", "on", "yes", "fleet")
+
+
+def resolve_host_id(host_id: Optional[str] = None) -> str:
+    """Resolve logical fleet host ID (grokbox, notebook, desktop) or fallback to hostname."""
+    if host_id and host_id.strip():
+        return host_id.strip().lower()
+    env_host = os.environ.get("DARKFAC_HOST_ID")
+    if env_host and env_host.strip():
+        return env_host.strip().lower()
+    raw_name = socket.gethostname().lower()
+    for known in ("grokbox", "notebook", "desktop"):
+        if known in raw_name:
+            return known
+    return raw_name
+
+
+def get_lock_info(root: Optional[Path] = None) -> Optional[LineLockInfo]:
+    """Return active LineLockInfo if held by a live process, None otherwise."""
+    path = lock_path(root)
+    existing = _read_lock(path)
+    if existing is not None and not _is_stale(existing, now=time.time()):
+        return existing
+    return None
+
+
+def is_locked(root: Optional[Path] = None) -> bool:
+    """True when the local machine lock is held by another process."""
+    info = get_lock_info(root)
+    if info is None:
+        return False
+    return info.pid != os.getpid()
+
+
 def _pid_alive(pid: int) -> bool:
     """Best-effort liveness check; a PID this process cannot inspect is assumed alive (fail safe)."""
     if pid <= 0:
@@ -245,13 +289,34 @@ def _write_lock(path: Path, info: LineLockInfo) -> None:
 
 
 class LineLock:
-    """Context manager acquiring the exclusive, cross-process line lock (USR-250)."""
+    """Context manager acquiring the exclusive, cross-process line lock (USR-250 / USR-284)."""
 
-    def __init__(self, ticket_id: str, *, root: Optional[Path] = None) -> None:
+    def __init__(
+        self,
+        ticket_id: str,
+        *,
+        root: Optional[Path] = None,
+        store: Optional[Any] = None,
+        host_id: Optional[str] = None,
+        project_id: str = "darkfac",
+        run_id: Optional[str] = None,
+        fleet_mode: Optional[bool] = None,
+        lease_duration_sec: int = 45,
+        max_fleet_slots: int = 3,
+    ) -> None:
         self._ticket_id = ticket_id
         self._path = lock_path(root)
+        self._root = root
+        self._store = store
+        self._host_id = host_id
+        self._project_id = project_id
+        self._run_id = run_id
+        self._fleet_mode = fleet_mode
+        self._lease_duration_sec = lease_duration_sec
+        self._max_fleet_slots = max_fleet_slots
         self._acquired = False
         self._inherited = False
+        self._reservation: Optional[FleetReservation] = None
         self._heartbeat_thread: Optional[threading.Thread] = None
         self._stop_heartbeat = threading.Event()
 
@@ -263,11 +328,16 @@ class LineLock:
     def inherited(self) -> bool:
         return self._inherited
 
+    @property
+    def reservation(self) -> Optional[FleetReservation]:
+        return self._reservation
+
     def acquire(self) -> None:
         """Take the lock, recover a dead holder's, or raise ``LineLockHeld`` immediately.
 
-        Never waits or retries against a live holder: a second launch must be refused on the spot,
-        not queued, so it never pays for a worktree or an agent call it was always going to lose.
+        When fleet mode is active or store is configured, also transactionally reserves
+        the cycle on the host machine, rejecting duplicate tickets, busy hosts, or fleet
+        overcapacity (USR-284).
         """
         if self._acquired or self._inherited:
             return
@@ -281,9 +351,6 @@ class LineLock:
             pid=os.getpid(), ticket_id=self._ticket_id, hostname=socket.gethostname(),
             started_at=now, heartbeat_at=now,
         )
-        # Two attempts: the first may find a stale lock and clear it; the second must then succeed.
-        # A second collision (another process recreated it between our unlink and retry) is treated
-        # as a live holder rather than retried forever -- fail closed, same as any other contention.
         for _ in range(2):
             try:
                 fd = os.open(str(self._path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
@@ -312,15 +379,53 @@ class LineLock:
                 with os.fdopen(fd, "w", encoding="utf-8") as handle:
                     handle.write(json.dumps(info.to_dict()))
                 self._acquired = True
-                self._start_heartbeat(info)
-                return
+                break
+        else:
+            existing = _read_lock(self._path)
+            raise LineLockHeld(
+                existing
+                if existing is not None
+                else LineLockInfo(pid=-1, ticket_id="desconhecido", hostname="desconhecido", started_at=now, heartbeat_at=now)
+            )
 
-        existing = _read_lock(self._path)
-        raise LineLockHeld(
-            existing
-            if existing is not None
-            else LineLockInfo(pid=-1, ticket_id="desconhecido", hostname="desconhecido", started_at=now, heartbeat_at=now)
+        # Fleet reservation coordination (USR-284)
+        effective_fleet = (
+            self._fleet_mode
+            if self._fleet_mode is not None
+            else (is_fleet_mode() or self._store is not None)
         )
+        if effective_fleet:
+            if self._store is None:
+                try:
+                    from core.line.store_selection import default_control_store
+
+                    self._store = default_control_store()
+                except Exception as exc:
+                    logger.debug("default_control_store not available for line_lock: %s", exc)
+                    self._store = None
+
+            if self._store is not None and hasattr(self._store, "reserve_cycle"):
+                host_id = resolve_host_id(self._host_id)
+                run_id = self._run_id or os.environ.get("DARKFAC_RUN_ID") or f"run-{self._ticket_id}-{int(now)}"
+                now_utc = datetime.now(timezone.utc)
+                try:
+                    self._reservation = self._store.reserve_cycle(
+                        project_id=self._project_id,
+                        ticket_id=self._ticket_id,
+                        run_id=run_id,
+                        host_id=host_id,
+                        now=now_utc,
+                        lease_duration_sec=self._lease_duration_sec,
+                        max_fleet_slots=self._max_fleet_slots,
+                    )
+                except ReservationConflictError:
+                    # Clean up local lock file so machine is not left locked on conflict
+                    with contextlib.suppress(FileNotFoundError, OSError):
+                        self._path.unlink()
+                    self._acquired = False
+                    raise
+
+        self._start_heartbeat(info)
 
     def _start_heartbeat(self, info: LineLockInfo) -> None:
         def beat() -> None:
@@ -333,6 +438,19 @@ class LineLock:
                             started_at=info.started_at, heartbeat_at=time.time(),
                         ),
                     )
+                if (
+                    self._reservation is not None
+                    and self._store is not None
+                    and hasattr(self._store, "heartbeat_reservation")
+                ):
+                    try:
+                        self._store.heartbeat_reservation(
+                            reservation_id=self._reservation.reservation_id,
+                            fencing_token=self._reservation.fencing_token,
+                            now=datetime.now(timezone.utc),
+                        )
+                    except Exception as exc:
+                        logger.debug("Fleet reservation heartbeat warning: %s", exc)
 
         self._stop_heartbeat.clear()
         thread = threading.Thread(target=beat, name="line-lock-heartbeat", daemon=True)
@@ -350,6 +468,23 @@ class LineLock:
         if self._heartbeat_thread is not None:
             self._heartbeat_thread.join(timeout=2.0)
             self._heartbeat_thread = None
+
+        if (
+            self._reservation is not None
+            and self._store is not None
+            and hasattr(self._store, "release_reservation")
+        ):
+            try:
+                self._store.release_reservation(
+                    reservation_id=self._reservation.reservation_id,
+                    fencing_token=self._reservation.fencing_token,
+                    status="released",
+                    now=datetime.now(timezone.utc),
+                )
+            except Exception as exc:
+                logger.debug("Fleet reservation release warning: %s", exc)
+            self._reservation = None
+
         with contextlib.suppress(FileNotFoundError, OSError):
             self._path.unlink()
         self._acquired = False
@@ -363,9 +498,30 @@ class LineLock:
 
 
 @contextlib.contextmanager
-def guard(ticket_id: str, *, root: Optional[Path] = None) -> Iterator[LineLock]:
+def guard(
+    ticket_id: str,
+    *,
+    root: Optional[Path] = None,
+    store: Optional[Any] = None,
+    host_id: Optional[str] = None,
+    project_id: str = "darkfac",
+    run_id: Optional[str] = None,
+    fleet_mode: Optional[bool] = None,
+    lease_duration_sec: int = 45,
+    max_fleet_slots: int = 3,
+) -> Iterator[LineLock]:
     """Acquire the line lock for ``ticket_id`` and release it on any exit, including an exception."""
-    lock = LineLock(ticket_id, root=root)
+    lock = LineLock(
+        ticket_id,
+        root=root,
+        store=store,
+        host_id=host_id,
+        project_id=project_id,
+        run_id=run_id,
+        fleet_mode=fleet_mode,
+        lease_duration_sec=lease_duration_sec,
+        max_fleet_slots=max_fleet_slots,
+    )
     lock.acquire()
     try:
         yield lock
@@ -375,15 +531,24 @@ def guard(ticket_id: str, *, root: Optional[Path] = None) -> Iterator[LineLock]:
 
 __all__ = [
     "ENV_INHERITED",
+    "FleetCapacityExceededError",
+    "FleetReservation",
     "HEARTBEAT_INTERVAL_SEC",
     "HEARTBEAT_STALE_PID_ALIVE_SEC",
     "HEARTBEAT_STALE_SEC",
+    "HostBusyError",
     "LineLock",
     "LineLockHeld",
     "LineLockInfo",
+    "ReservationConflictError",
+    "TicketAlreadyActiveError",
+    "get_lock_info",
     "guard",
+    "is_fleet_mode",
     "is_inherited",
+    "is_locked",
     "lock_dir",
     "lock_path",
     "mark_inherited",
+    "resolve_host_id",
 ]

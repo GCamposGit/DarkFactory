@@ -36,6 +36,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import os
 import shutil
 import subprocess
 import sys
@@ -198,7 +199,11 @@ def _win_kwargs() -> dict[str, Any]:
 
 
 def run_shell_commands(
-    commands: Iterable[str], cwd: Path, *, timeout_s: int = 1800
+    commands: Iterable[str],
+    cwd: Path,
+    *,
+    timeout_s: int = 1800,
+    env: Optional[dict[str, str]] = None,
 ) -> CommandRunResult:
     """Run each command in `commands` sequentially in `cwd`, stopping at the first failure.
 
@@ -221,6 +226,7 @@ def run_shell_commands(
                 encoding="utf-8",
                 errors="replace",
                 timeout=timeout_s,
+                env=env,
                 **_win_kwargs(),
             )
         except subprocess.TimeoutExpired:
@@ -589,6 +595,21 @@ class DevelopmentStage:
                 continue
 
             executable_validate = [cmd for cmd in commands.validate_cmds if cmd.strip()]
+
+            from core.line import line_lock
+            from core.projects.models import ProjectKind
+
+            is_fleet = line_lock.is_fleet_mode()
+            is_core_darkfac = (project.id == "darkfac" or getattr(project, "kind", None) == ProjectKind.CORE)
+            cmd_env: dict[str, str] | None = None
+            if is_fleet and is_core_darkfac:
+                cmd_env = dict(os.environ)
+                cmd_env["DARKFAC_REMOTE_HARNESS"] = "off"
+                executable_validate = [
+                    f"{cmd} --local" if ("runner.py" in cmd and "--local" not in cmd) else cmd
+                    for cmd in executable_validate
+                ]
+
             if not executable_validate:
                 # Still nothing to validate against, even after the extra
                 # instruction (ticket 0) or normally (later tickets should
@@ -602,8 +623,11 @@ class DevelopmentStage:
                     duration_s=0.0,
                 )
             else:
+                kwargs: dict[str, Any] = {}
+                if cmd_env is not None:
+                    kwargs["env"] = cmd_env
                 validate_result = run_shell_commands(
-                    executable_validate, ws.path, timeout_s=self.command_timeout_s
+                    executable_validate, ws.path, timeout_s=self.command_timeout_s, **kwargs
                 )
 
             distilled = _distill_with_test_subagent(validate_result)
@@ -1092,6 +1116,16 @@ class ValidationStage:
             all_ok = bool(executable_validate)
             failed_refs: list[str] = []
 
+            from core.line import line_lock
+            from core.projects.models import ProjectKind
+
+            is_fleet = line_lock.is_fleet_mode()
+            is_core_darkfac = (project.id == "darkfac" or getattr(project, "kind", None) == ProjectKind.CORE)
+            cmd_env: dict[str, str] | None = None
+            if is_fleet and is_core_darkfac:
+                cmd_env = dict(os.environ)
+                cmd_env["DARKFAC_REMOTE_HARNESS"] = "off"
+
             for stage_name, cmd_list in (
                 ("setup", commands.setup),
                 ("validate", executable_validate),
@@ -1106,7 +1140,16 @@ class ValidationStage:
                             "configure testes executaveis antes da revisao."
                         )
                     continue
-                result = run_shell_commands(cmd_list, tmp_dir, timeout_s=self.command_timeout_s)
+                target_cmds = list(cmd_list)
+                if stage_name == "validate" and is_fleet and is_core_darkfac:
+                    target_cmds = [
+                        f"{c} --local" if ("runner.py" in c and "--local" not in c) else c
+                        for c in target_cmds
+                    ]
+                kwargs: dict[str, Any] = {}
+                if cmd_env is not None:
+                    kwargs["env"] = cmd_env
+                result = run_shell_commands(target_cmds, tmp_dir, timeout_s=self.command_timeout_s, **kwargs)
                 report["commands"][stage_name] = {
                     "ran": True,
                     "ok": result.ok,

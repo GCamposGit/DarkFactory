@@ -308,6 +308,18 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Caminho da worktree para retomar entrega (padrão: busca automática da worktree ativa do ticket)",
     )
+    parser.add_argument(
+        "--fleet",
+        action="store_true",
+        default=False,
+        help="Habilitar coordenacao na frota e reserva duravel de ciclo no host (USR-284)",
+    )
+    parser.add_argument(
+        "--host-id",
+        type=str,
+        default=None,
+        help="Identificador do host na frota (grokbox, notebook, desktop)",
+    )
     return parser
 
 
@@ -1123,8 +1135,11 @@ def _run_gate_with_self_correction(
         if not as_json:
             print("\n--> Executando portão oficial da fábrica (python core/harness/runner.py --quick)...")
         # Bounded runner: a cancellation (USR-166) kills the gate's whole process tree.
+        gate_cmd = [sys.executable, str(target_worktree / "core" / "harness" / "runner.py"), "--quick"]
+        if line_lock.is_fleet_mode():
+            gate_cmd.append("--local")
         gate_res = _run_bounded(
-            [sys.executable, str(target_worktree / "core" / "harness" / "runner.py"), "--quick"],
+            gate_cmd,
             cwd=target_worktree,
             timeout_s=GATE_TIMEOUT_S,
         )
@@ -1881,10 +1896,25 @@ def _run(argv: Optional[list[str]], box: list[ProgressPublisher], stack: context
     # set on its environment below) instead of trying to acquire it a second time.
     if _needs_line_lock(args):
         lock_label = resume_target or args.ticket_id or (f"novo:{args.title}" if args.create else "desconhecido")
+        fleet_mode = getattr(args, "fleet", False) or line_lock.is_fleet_mode()
+        host_id = getattr(args, "host_id", None) or line_lock.resolve_host_id()
+        project_id = getattr(args, "project", "darkfac") or "darkfac"
+        if fleet_mode:
+            os.environ["DARKFAC_FLEET_MODE"] = "1"
         try:
-            stack.enter_context(line_lock.guard(lock_label))
+            stack.enter_context(
+                line_lock.guard(
+                    lock_label,
+                    fleet_mode=fleet_mode,
+                    host_id=host_id,
+                    project_id=project_id,
+                )
+            )
         except line_lock.LineLockHeld as exc:
             print(f"\n{exc}\n", file=sys.stderr)
+            return 2
+        except line_lock.ReservationConflictError as exc:
+            print(f"\n[RESERVA DE FROTA] {exc}\n", file=sys.stderr)
             return 2
 
     # 0. Resume delivery mode (USR-116): rebase, validate, and deliver an existing worktree in a fresh process

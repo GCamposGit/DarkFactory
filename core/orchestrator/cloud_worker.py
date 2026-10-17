@@ -828,10 +828,16 @@ class CloudWorker:
         run_id = claim.job_key.run_id
 
         def _execute_stage() -> dict[str, Any]:
-            from core.line import cancellation
+            from core.line import cancellation, line_lock
 
-            with cancellation.run_scope(run_id, cancellation.store_probe(self.store, run_id)) as token:
-                return _execute_stage_in_scope(token)
+            with line_lock.guard(
+                f"{claim.job_key.ticket_id}:{claim.job_key.stage}",
+                host_id=self.host_id,
+                run_id=run_id,
+                fleet_mode=False,
+            ):
+                with cancellation.run_scope(run_id, cancellation.store_probe(self.store, run_id)) as token:
+                    return _execute_stage_in_scope(token)
 
         def _execute_stage_in_scope(token: Any) -> dict[str, Any]:
             from core.line import cancellation
@@ -1227,6 +1233,12 @@ class CloudWorker:
         if self._draining:
             return False
         if len(self._active_tasks) >= self.max_slots:
+            return False
+
+        from core.line import line_lock
+
+        if line_lock.is_locked():
+            logger.debug("Local line lock held on host %s; skipping poll", self.host_id)
             return False
 
         effective_now = now or datetime.now(UTC)
