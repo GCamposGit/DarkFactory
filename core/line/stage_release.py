@@ -437,6 +437,7 @@ class ReleaseStageHandler:
         sleep: Callable[[float], None] = time.sleep,
         validate_timeout_s: int = 1800,
         disk_cleaner: Optional[Callable[[str], Any]] = None,
+        resource_coordinator: Optional[Any] = None,
     ) -> None:
         self.project = project
         # Disk hygiene around Dokploy deploys (2026-10-06 VPS incident): called with "pre-deploy" and
@@ -455,6 +456,7 @@ class ReleaseStageHandler:
         self.digest_delay_s = digest_delay_s
         self.sleep = sleep
         self.validate_timeout_s = validate_timeout_s
+        self.resource_coordinator = resource_coordinator
 
     # ----------------------------------------------------------------
     # target/adapter selection
@@ -843,93 +845,126 @@ class ReleaseStageHandler:
                 ],
             )
 
-        # Only an acceptance recorded by the owner (record_commercial_acceptance)
-        # opens the gate; re-invoking the stage must never open it by itself.
-        if self.project.requires_commercial_acceptance and run_state.commercial_accepted_sha != merge_sha:
-            return self._commercial_acceptance_guide(pr_url, merge_sha)
+        from core.line.resource_lease import (
+            ResourceBusyError,
+            deploy_resource_id,
+            get_resource_coordinator,
+        )
 
-        deploy_type = self.project.deploy.type if self.project.deploy else DeployTargetType.NONE
-        ticket_smoke_entries = _fetch_ticket_smoke_entries(pr_url, Path(self.project.path or "."))
-        if deploy_type != DeployTargetType.NONE:
-            preflight_target = self._target_config(merge_sha, state.last_good_sha)
-            if not self._has_executable_smoke(ticket_smoke_entries, preflight_target):
-                return StageResult(outcome="failed", cause_code="smoke_not_configured")
+        coord = self.resource_coordinator or get_resource_coordinator()
+        res_id = deploy_resource_id(self.project)
+        try:
+            lease = coord.acquire(
+                res_id,
+                resource_type="deploy",
+                holder_id=run_id,
+                metadata={"project_id": self.project.id, "merge_sha": merge_sha},
+            )
+        except ResourceBusyError as exc:
+            return StageResult(
+                outcome="retry",
+                cause_code=f"resource_busy:{res_id}",
+                evidence_refs=[f"resource_busy:{res_id}:not_before={exc.expires_at}"],
+            )
 
-        operation, target_config, deploy_error = self._deploy(merge_sha, state.last_good_sha)
-        if deploy_error is not None:
-            return deploy_error
+        try:
+            # Only an acceptance recorded by the owner (record_commercial_acceptance)
+            # opens the gate; re-invoking the stage must never open it by itself.
+            if self.project.requires_commercial_acceptance and run_state.commercial_accepted_sha != merge_sha:
+                return self._commercial_acceptance_guide(pr_url, merge_sha)
 
-        adapter = self._adapter_for(deploy_type)
-        smoke_ok, smoke_log = self._smoke(merge_sha, target_config, adapter, extra_entries=ticket_smoke_entries)
+            deploy_type = self.project.deploy.type if self.project.deploy else DeployTargetType.NONE
+            ticket_smoke_entries = _fetch_ticket_smoke_entries(pr_url, Path(self.project.path or "."))
+            if deploy_type != DeployTargetType.NONE:
+                preflight_target = self._target_config(merge_sha, state.last_good_sha)
+                if not self._has_executable_smoke(ticket_smoke_entries, preflight_target):
+                    return StageResult(outcome="failed", cause_code="smoke_not_configured")
 
-        if smoke_ok:
-            state.last_good_sha = merge_sha
-            state.last_success_operation_id = operation.operation_id if operation else f"local:{merge_sha}"
-            smoke_ref = f"smoke:{run_id}:{merge_sha[:12]}"
-            state.last_success_smoke_ref = smoke_ref
-            run_state.consecutive_smoke_failures = 0
+            # Fencing check: verify lease is still held before executing deploy side effect
+            if not coord.is_held_by(res_id, run_id, fencing_token=lease.fencing_token):
+                return StageResult(outcome="retry", cause_code="lease_lost")
+
+            operation, target_config, deploy_error = self._deploy(merge_sha, state.last_good_sha)
+            if deploy_error is not None:
+                return deploy_error
+
+            # Fencing check: verify lease is still held before smoke & state write
+            if not coord.is_held_by(res_id, run_id, fencing_token=lease.fencing_token):
+                return StageResult(outcome="retry", cause_code="lease_lost")
+
+            adapter = self._adapter_for(deploy_type)
+            smoke_ok, smoke_log = self._smoke(merge_sha, target_config, adapter, extra_entries=ticket_smoke_entries)
+
+            if smoke_ok:
+                state.last_good_sha = merge_sha
+                state.last_success_operation_id = operation.operation_id if operation else f"local:{merge_sha}"
+                smoke_ref = f"smoke:{run_id}:{merge_sha[:12]}"
+                state.last_success_smoke_ref = smoke_ref
+                run_state.consecutive_smoke_failures = 0
+                run_state.last_sha = merge_sha
+                state.runs[run_id] = run_state
+                self.state_store.save(self.project.id, state)
+                return StageResult(outcome="success", output_refs=[state.last_success_operation_id, smoke_ref])
+
+            # Smoke failed.
+            run_state.consecutive_smoke_failures += 1
             run_state.last_sha = merge_sha
             state.runs[run_id] = run_state
-            self.state_store.save(self.project.id, state)
-            return StageResult(outcome="success", output_refs=[state.last_success_operation_id, smoke_ref])
+            exhausted = run_state.consecutive_smoke_failures >= _MAX_CONSECUTIVE_SMOKE_FAILURES
 
-        # Smoke failed.
-        run_state.consecutive_smoke_failures += 1
-        run_state.last_sha = merge_sha
-        state.runs[run_id] = run_state
-        exhausted = run_state.consecutive_smoke_failures >= _MAX_CONSECUTIVE_SMOKE_FAILURES
+            if adapter is None or target_config is None or not state.last_good_sha:
+                # No deploy target (local-only smoke) or nothing to roll back to.
+                self.state_store.save(self.project.id, state)
+                if exhausted:
+                    return StageResult(outcome="failed", cause_code=f"prod_smoke_failed:\n{smoke_log}")
+                recovered = self._persist_smoke_failure_log(run_id, merge_sha, "smoke_failed_no_rollback_target", smoke_log)
+                if not recovered and self.project.repo_url:
+                    return StageResult(outcome="failed", cause_code="rollback_context_unavailable")
+                return StageResult(
+                    outcome="retry",
+                    cause_code=f"retry:development\nsmoke_failed_no_rollback_target:{merge_sha[:12]}",
+                )
 
-        if adapter is None or target_config is None or not state.last_good_sha:
-            # No deploy target (local-only smoke) or nothing to roll back to.
+            target_config.last_known_good_digest = state.last_good_sha
             self.state_store.save(self.project.id, state)
+            rollback = adapter.rollback(
+                target_config=target_config,
+                failed_digest=merge_sha,
+                reason="post-deploy smoke check failed",
+                claim=context.claim,
+            )
+            # Production must be proven back up: a failed rollback, or a previous
+            # SHA that no longer passes smoke, needs a human, not another retry.
+            if rollback.status == DeploymentStatus.FAILED or rollback.restored_digest != state.last_good_sha:
+                return StageResult(
+                    outcome="failed",
+                    cause_code=(
+                        f"rollback_failed:status={rollback.status.value},"
+                        f"restored={rollback.restored_digest}\n{smoke_log}"
+                    ),
+                )
+            restored_ok, restored_log = self._smoke(state.last_good_sha, target_config, adapter)
+            if not restored_ok:
+                return StageResult(
+                    outcome="failed",
+                    cause_code=f"rollback_smoke_failed:{state.last_good_sha[:12]}\n{restored_log}\n{smoke_log}",
+                )
             if exhausted:
+                logger.error(
+                    "release %s: smoke failed twice; restored last good sha %s before stopping",
+                    run_id, state.last_good_sha,
+                )
                 return StageResult(outcome="failed", cause_code=f"prod_smoke_failed:\n{smoke_log}")
-            recovered = self._persist_smoke_failure_log(run_id, merge_sha, "smoke_failed_no_rollback_target", smoke_log)
+            rollback_reason = f"prod_smoke_failed_rolled_back_to_{state.last_good_sha[:12]}"
+            recovered = self._persist_smoke_failure_log(run_id, merge_sha, rollback_reason, smoke_log)
             if not recovered and self.project.repo_url:
                 return StageResult(outcome="failed", cause_code="rollback_context_unavailable")
             return StageResult(
                 outcome="retry",
-                cause_code=f"retry:development\nsmoke_failed_no_rollback_target:{merge_sha[:12]}",
+                cause_code=f"retry:development\n{rollback_reason}:{merge_sha[:12]}",
             )
-
-        target_config.last_known_good_digest = state.last_good_sha
-        self.state_store.save(self.project.id, state)
-        rollback = adapter.rollback(
-            target_config=target_config,
-            failed_digest=merge_sha,
-            reason="post-deploy smoke check failed",
-            claim=context.claim,
-        )
-        # Production must be proven back up: a failed rollback, or a previous
-        # SHA that no longer passes smoke, needs a human, not another retry.
-        if rollback.status == DeploymentStatus.FAILED or rollback.restored_digest != state.last_good_sha:
-            return StageResult(
-                outcome="failed",
-                cause_code=(
-                    f"rollback_failed:status={rollback.status.value},"
-                    f"restored={rollback.restored_digest}\n{smoke_log}"
-                ),
-            )
-        restored_ok, restored_log = self._smoke(state.last_good_sha, target_config, adapter)
-        if not restored_ok:
-            return StageResult(
-                outcome="failed",
-                cause_code=f"rollback_smoke_failed:{state.last_good_sha[:12]}\n{restored_log}\n{smoke_log}",
-            )
-        if exhausted:
-            logger.error(
-                "release %s: smoke failed twice; restored last good sha %s before stopping",
-                run_id, state.last_good_sha,
-            )
-            return StageResult(outcome="failed", cause_code=f"prod_smoke_failed:\n{smoke_log}")
-        rollback_reason = f"prod_smoke_failed_rolled_back_to_{state.last_good_sha[:12]}"
-        recovered = self._persist_smoke_failure_log(run_id, merge_sha, rollback_reason, smoke_log)
-        if not recovered and self.project.repo_url:
-            return StageResult(outcome="failed", cause_code="rollback_context_unavailable")
-        return StageResult(
-            outcome="retry",
-            cause_code=f"retry:development\n{rollback_reason}:{merge_sha[:12]}",
-        )
+        finally:
+            coord.release(lease)
 
 
 __all__ = [

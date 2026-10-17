@@ -260,6 +260,7 @@ class IntegrationStageHandler:
         main_ci_alert_sync: Optional[MainCiAlertSync] = None,
         clock: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
         route_waiter: Optional[RouteWaiter] = None,
+        resource_coordinator: Optional[Any] = None,
     ) -> None:
         """`base_red_attempts(run_id)` counts the `base_red` waits this run already spent (the store
         backed counter lives in `core.line.bindings`); without it the job's own iteration is the
@@ -285,6 +286,7 @@ class IntegrationStageHandler:
         self.main_ci_alert_sync = main_ci_alert_sync
         self.clock = clock
         self.route_waiter = route_waiter or RouteWaiter()
+        self.resource_coordinator = resource_coordinator
 
     # ----------------------------------------------------------------
     # git helpers (reuse workspace's auth/sanitization plumbing)
@@ -1082,41 +1084,70 @@ class IntegrationStageHandler:
                     return ancestry_error
                 return StageResult(outcome="success", output_refs=[merged.get("url") or "", merged_sha])
 
-        rebase_result = self._rebase_onto_default(ws, default_branch)
-        if rebase_result is not None:
-            return rebase_result
+        from core.line.resource_lease import (
+            ResourceBusyError,
+            get_resource_coordinator,
+            integration_resource_id,
+        )
 
-        push_result = self._push_force_with_lease(ws)
-        if push_result is not None:
-            return push_result
+        coord = self.resource_coordinator or get_resource_coordinator()
+        res_id = integration_resource_id(self.project, default_branch)
+        try:
+            lease = coord.acquire(
+                res_id,
+                resource_type="repo",
+                holder_id=run_id,
+                metadata={"project_id": self.project.id, "branch": default_branch},
+            )
+        except ResourceBusyError as exc:
+            return StageResult(
+                outcome="retry",
+                cause_code=f"resource_busy:{res_id}",
+                evidence_refs=[f"resource_busy:{res_id}:not_before={exc.expires_at}"],
+            )
 
-        title, body, strip_error = self._strip_context(ws, context)
-        if strip_error is not None:
-            return strip_error
+        try:
+            rebase_result = self._rebase_onto_default(ws, default_branch)
+            if rebase_result is not None:
+                return rebase_result
 
-        pr = self._find_or_create_pr(ws, default_branch, title, body)
-        if pr is None:
-            return StageResult(outcome="failed", cause_code="gh_pr_create_failed")
+            push_result = self._push_force_with_lease(ws)
+            if push_result is not None:
+                return push_result
 
-        pr_number = pr.get("number")
-        if not isinstance(pr_number, int):
-            return StageResult(outcome="failed", cause_code="gh_pr_missing_number")
+            title, body, strip_error = self._strip_context(ws, context)
+            if strip_error is not None:
+                return strip_error
 
-        ci_result = self._evaluate_checks(ws, pr_number, context)
-        if ci_result is not None:
-            return ci_result
+            pr = self._find_or_create_pr(ws, default_branch, title, body)
+            if pr is None:
+                return StageResult(outcome="failed", cause_code="gh_pr_create_failed")
 
-        merge_sha, merge_error = self._merge_pr(ws, pr_number)
-        if merge_error is not None:
-            return merge_error
-        assert merge_sha is not None
+            pr_number = pr.get("number")
+            if not isinstance(pr_number, int):
+                return StageResult(outcome="failed", cause_code="gh_pr_missing_number")
 
-        ancestry_error = self._confirm_remote_ancestry(ws, default_branch, merge_sha)
-        if ancestry_error is not None:
-            return ancestry_error
+            ci_result = self._evaluate_checks(ws, pr_number, context)
+            if ci_result is not None:
+                return ci_result
 
-        pr_url = pr.get("url") or ""
-        return StageResult(outcome="success", output_refs=[pr_url, merge_sha])
+            # Fencing check: verify lease is still held before executing merge
+            if not coord.is_held_by(res_id, run_id, fencing_token=lease.fencing_token):
+                return StageResult(outcome="retry", cause_code="lease_lost")
+
+            merge_sha, merge_error = self._merge_pr(ws, pr_number)
+            if merge_error is not None:
+                return merge_error
+            assert merge_sha is not None
+
+            ancestry_error = self._confirm_remote_ancestry(ws, default_branch, merge_sha)
+            if ancestry_error is not None:
+                return ancestry_error
+
+            pr_url = pr.get("url") or ""
+            return StageResult(outcome="success", output_refs=[pr_url, merge_sha])
+        finally:
+            coord.release(lease)
 
 
 __all__ = [
