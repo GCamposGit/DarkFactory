@@ -27,18 +27,37 @@ def payload_hash(operation_key: str) -> str:
     return hashlib.sha256(operation_key.encode("utf-8")).hexdigest()
 
 
-def request_json(method: str, url: str, payload: dict[str, object] | None = None) -> tuple[int, dict[str, object]]:
+def request_json(
+    method: str,
+    url: str,
+    payload: dict[str, object] | None = None,
+    *,
+    timeout: float = 15.0,
+    retries: int = 1,
+) -> tuple[int, dict[str, object]]:
+    import time
     body = None if payload is None else json.dumps(payload).encode("utf-8")
-    request = Request(url, method=method, data=body)
-    if body is not None:
-        request.add_header("Content-Type", "application/json")
-    try:
-        with urlopen(request, timeout=5) as response:
-            return response.status, json.loads(response.read().decode("utf-8"))
-    except HTTPError as error:
-        return error.code, json.loads(error.read().decode("utf-8"))
-    except (URLError, ConnectionError, OSError):
-        raise
+    last_error: Exception | None = None
+    for attempt in range(max(1, retries + 1)):
+        request = Request(url, method=method, data=body)
+        if body is not None:
+            request.add_header("Content-Type", "application/json")
+        try:
+            with urlopen(request, timeout=timeout) as response:
+                return response.status, json.loads(response.read().decode("utf-8"))
+        except HTTPError as error:
+            return error.code, json.loads(error.read().decode("utf-8"))
+        except TimeoutError as error:
+            last_error = error
+            if attempt < retries:
+                time.sleep(0.2)
+                continue
+            raise
+        except (URLError, ConnectionError, OSError):
+            raise
+    if last_error is not None:
+        raise last_error
+    raise RuntimeError("unreachable in request_json")
 
 
 def effect_payload(operation_key: str, *, payload_hash_value: str | None = None) -> dict[str, object]:

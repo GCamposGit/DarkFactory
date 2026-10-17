@@ -62,6 +62,8 @@ class HostInventory(BaseModel):
     priority: int = Field(ge=1, description="Host priority: 1=Grokbox, 2=Notebook, 3=Desktop")
     max_slots: int = Field(default=1, description="Capacity ceiling: 1 cycle per host")
     database_connected: bool = Field(default=False, description="Postgres control store connectivity")
+    database_status: str = Field(default="unknown", description="Postgres probe status: ready, blocked, or error")
+    database_diagnostic: Optional[str] = Field(default=None, description="Sanitized diagnostic message")
     projects_accessible: dict[str, bool] = Field(default_factory=dict, description="Project path reachability")
     tooling: dict[str, bool] = Field(default_factory=dict, description="Availability of git, gh, node, python")
     harnesses: dict[str, bool] = Field(default_factory=dict, description="Detected CLI harnesses on PATH")
@@ -181,14 +183,23 @@ def probe_host_inventory(
     # 3. Database connectivity
     db_url = database_url or os.environ.get("DARKFAC_HF02_DATABASE_URL")
     db_connected = False
-    if db_url:
-        try:
-            from core.orchestrator.cloud_db import probe_cloud_database
+    db_status = "blocked"
+    db_diagnostic: Optional[str] = None
+    try:
+        from core.orchestrator.cloud_db import probe_cloud_database, sanitize_database_url
 
-            probe = probe_cloud_database(db_url)
-            db_connected = probe.connected
-        except Exception:
-            db_connected = False
+        probe = probe_cloud_database(db_url)
+        db_status = getattr(probe, "status", "error")
+        db_connected = (db_status == "ready")
+        if not db_connected:
+            err_msg = getattr(probe, "error_message", None)
+            db_diagnostic = sanitize_database_url(str(err_msg or f"database probe status: {db_status}"))
+    except Exception as exc:
+        from core.orchestrator.cloud_db import sanitize_database_url
+
+        db_status = "error"
+        db_connected = False
+        db_diagnostic = sanitize_database_url(str(exc))
 
     # 4. Project accessibility
     projects_acc: dict[str, bool] = {"darkfac": root.exists()}
@@ -217,6 +228,8 @@ def probe_host_inventory(
         priority=priority,
         max_slots=1,
         database_connected=db_connected,
+        database_status=db_status,
+        database_diagnostic=db_diagnostic,
         projects_accessible=projects_acc,
         tooling=tooling,
         harnesses=harnesses,

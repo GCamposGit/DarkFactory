@@ -8031,8 +8031,8 @@
     "project_id": "darkfac",
     "title": "Teste HTTP de approval runtime spike expira no CI Windows sob carga",
     "origin": "agent",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "PR #385 merged (821c924), Dokploy redeployed, backup drill verified (snp3t_darkfac_20261017_093616_ab03a1). Estabilizado timeout de conexao HTTP no runtime spike effect_server e request_json sob carga Windows.",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -8055,7 +8055,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-16T12:47:18.616711Z",
-    "updated_at": "2026-10-16T12:47:18.616711Z"
+    "updated_at": "2026-10-17T09:37:16.162187+00:00"
   },
   {
     "id": "USR-273",
@@ -8573,8 +8573,8 @@
     "project_id": "darkfac",
     "title": "F8: evidencia de reposicao e visibilidade da frota na Esteira",
     "origin": "user",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "PR #383 merged (06bda4a), Dokploy redeployed, backup drill verified (snp3t_darkfac_20261017_081758_9d6c22). Pilot report docs/reports/fleet_throughput_pilot.md and tests/test_line_fleet_live.py verified with 4,336 tests passing on Desktop.",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -8610,17 +8610,17 @@
   {
     "id": "USR-291",
     "project_id": "darkfac",
-    "title": "Teste instavel tests/test_line_lock.py::test_heartbeat_thread_refreshes colide no os.replace no Windows",
+    "title": "Estabilizar leitura do teste de heartbeat no Windows",
     "origin": "user",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "fcd779902b2de1694825f32c998b0d964ee81a0a",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
     "tags": [
       "user-demand"
     ],
-    "problem_statement": "test_heartbeat_thread_refreshes_the_sidecar_while_held le line.lock a cada 50ms enquanto a thread de heartbeat faz os.replace(tmp, path) a cada 50ms, causando PermissionError 13 esporadico no Windows NTFS durante pytest\n\nEvidencia adicional da sessao USR-194 (16/10/2026): um teste CAS do outbox registrou PermissionError transitorio em publish_closed; arquivo/op e causa nao foram capturados. Reexecucao completa 20 PASS e focal instrumentado 1 PASS, sem relaxar assercoes. Teste agora registra filename/errno/winerror se repetir. Relacao causal com line.lock NAO comprovada; reproduzir antes de ampliar a correcao. PR371 (alerta USR-292) encerrado como duplicata do incidente line.lock ja registrado aqui; CI run38927481009 teve4219PASS/23skip/1falha.",
+    "problem_statement": "test_heartbeat_thread_refreshes_the_sidecar_while_held le line.lock a cada 50ms enquanto a thread de heartbeat faz os.replace(tmp, path) a cada 50ms, causando PermissionError 13 esporadico no Windows NTFS durante pytest\n\nEvidencia adicional da sessao USR-194 (16/10/2026): um teste CAS do outbox registrou PermissionError transitorio em publish_closed; arquivo/op e causa nao foram capturados. Reexecucao completa 20 PASS e focal instrumentado 1 PASS, sem relaxar assercoes. Teste agora registra filename/errno/winerror se repetir. Relacao causal com line.lock NAO comprovada; reproduzir antes de ampliar a correcao. PR371 (alerta USR-292) encerrado como duplicata do incidente line.lock ja registrado aqui; CI run38927481009 teve4219PASS/23skip/1falha.\n\nDiagnostico confirmado no run38927481009: excecao em tests/test_line_lock.py:177 ocorre em Path.read_text -> Path.open(r), no leitor do teste; NAO em os.replace da thread de heartbeat. Correcao restrita ao teste: snapshots via _read_lock, None nao representa sucesso, deadline2s e intervalo0.05s preservados. RED1falha/1pass com injeção de PermissionError so no leitor; GREENarquivo21PASS; contraprovas exigem falha se nao houver avanço real.",
     "core_journey": [
       "test_heartbeat_thread_refreshes_the_sidecar_while_held le line.lock a cada 50ms enquanto a thread de heartbeat faz os.replace(tmp, path) a cada 50ms, causando PermissionError 13 esporadico no Windows NTFS durante pytest"
     ],
@@ -8634,12 +8634,50 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-16T17:44:57.794931Z",
-    "updated_at": "2026-10-16T17:44:57.794931Z"
+    "updated_at": "2026-10-16T21:08:05.504764Z"
   },
   {
-    "id": "USR-293",
+    "id": "USR-294",
     "project_id": "darkfac",
-    "title": "CI vermelho no main @050bc62: main-validation (windows-latest)",
+    "title": "Corrigir o probe de prontidao da frota para refletir o status do Postgres",
+    "origin": "user",
+    "status": "completed",
+    "delivery_evidence": "PR #386 merged (42e4d13), Dokploy redeployed, backup drill verified (snp3t_darkfac_20261017_114310_dc1919), all nodes converged (42e4d13). Mapeado status de DatabaseProbeResult no probe da frota sem vazar credenciais.",
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand",
+      "bug",
+      "fleet",
+      "probe",
+      "pos-v0"
+    ],
+    "problem_statement": "scripts/start_fleet_worker.py consulta probe_cloud_database, cujo contrato expoe status=ready|blocked|error, mas le um atributo inexistente probe.connected e captura a excecao como database_connected=false. Assim, mesmo uma conexao valida ao Postgres aparece indisponivel. Mapear o status real sem expor DSN ou senha.",
+    "core_journey": [
+      "O owner ou operador executa o probe de um host antes de admitir um ciclo na frota."
+    ],
+    "non_goals": [
+      "Nao mudar privilegios, credenciais, schema ou conectividade do Postgres."
+    ],
+    "reachability_contract": "python -m pytest tests/test_fleet_worker_bootstrap.py -q; depois python C:/dev/DarkFac/core/harness/runner.py --quick",
+    "acceptance_criteria": [
+      "database_connected e true somente quando DatabaseProbeResult.status == ready; blocked/error permanecem false com diagnostico estruturado e sanitizado.",
+      "Testes cobrem status ready, blocked e error e garantem que DSN/senha nao aparecam na saida."
+    ],
+    "suggested_files": [
+      "scripts/start_fleet_worker.py",
+      "tests/test_fleet_worker_bootstrap.py"
+    ],
+    "estimated_complexity": "small",
+    "dependencies": [],
+    "created_at": "2026-10-17T10:09:40.544220Z",
+    "updated_at": "2026-10-17T11:44:33.163230+00:00"
+  },
+  {
+    "id": "USR-298",
+    "project_id": "darkfac",
+    "title": "Resiliência do worker grokbox: SIGTERM por congelamento da VM não pode ser veredito",
     "origin": "user",
     "status": "planned",
     "delivery_evidence": null,
@@ -8649,20 +8687,22 @@
     "tags": [
       "user-demand"
     ],
-    "problem_statement": "O ultimo run concluido do workflow 'DarkFac CI' em main (SHA 050bc62ec9c0fd428a63bf5c5ae2c72998387e84) terminou em 'failure'. Jobs vermelhos: main-validation (windows-latest). Run: https://github.com/GCamposGit/DarkFactory/actions/runs/39011701283. Detectado por 'python -m core.git.autonomy check-main' (USR-85); PRs com CI vermelho nao sao mais mesclados automaticamente, entao ate corrigir este defeito a entrega de codigo fica bloqueada.",
+    "problem_statement": "# Resiliência do worker grokbox a congelamentos da VM (SIGTERM tratado como veredito)\n\n## Contexto\nO grokbox (100.77.130.5:8080) é o worker principal do portão oficial (`runner.py --quick`, ~143 s a 261 s). A plataforma congela e restaura a VM várias vezes por dia (confirmado pelo suporte, ticket T-H65476: não há como desativar). A cada restauração o IP/gateway mudam, o Tailscale fica Online=false por 4 a 15 min e processos em execução recebem SIGTERM.\n\n## Problema (evidência 15 a 17/10)\nEm 11 dos 15 jobs de 16/10 17:40 a 17/10 06:53 o pytest morreu com `exit code: -15` em ~2 s (ex.: job 33c87b47). O worker (`remote_worker.py`, ~linha 1043) grava o job como `failed` com `result_json` do harness e o despachante (`remote_dispatch.py`) lê isso como `[HARNESS_FAIL]`, ou seja, veredito de candidato. O retry existente (`RESTART_RETRY_ERROR_CODES`: worker_restarted, worker_unreachable, job_lost_on_worker) nunca dispara nesse caso.\n\n## Escopo\n1. Morte por sinal é infraestrutura, não veredito.\n   - No worker: se `returncode < 0` (SIGTERM/SIGKILL) ou algum passo terminar com exit code negativo, ou o job durar < 15 s sem nenhum teste executado, marcar `failed` com `error_code=\"worker_signal_killed\"` e sem tratar o resultado como veredito.\n   - No despachante: incluir `worker_signal_killed` em `INFRASTRUCTURE_ERROR_CODES` e em `RESTART_RETRY_ERROR_CODES`; manter grace de 180 s e 2 reenvios no mesmo worker antes de cair para o Desktop.\n2. Portão de estabilidade antes de enviar: o despachante só submete ao grokbox depois de 3 `/health` ok seguidos (intervalo 20 s) com o mesmo `instance_id`/`started_at`. Opcional no worker: recusar job (HTTP 503, `settling`) por 60 s depois de mudança de gateway/IP.\n3. Diagnóstico: no processo do runner, capturar SIGTERM com `signal.sigwaitinfo` (thread) e registrar no log do job o PID/UID de quem enviou, horário e estado do Tailscale. Hoje só se vê o exit code.\n4. (Fase 2, opcional) Shards do pytest com cache de PASS por shard e árvore, para o retry rodar só o que não terminou.\n5. Testes frágeis sob congelamento: `tests/test_remote_job_recovery.py::test_a_live_owner_is_never_taken_over` e `::test_root_cause_restart_mid_job_used_to_look_like_silence` falharam no gate de 17/10 06:53 (job 0d4fc6c5). Torná-los tolerantes a pausa da VM ou com retry.\n\n## Critérios de aceite\n- Um job morto por SIGTERM no grokbox nunca aparece como `[HARNESS_FAIL]`; aparece `[REMOTE_RETRY]` e o job é reenviado.\n- Testes unitários cobrindo o novo código de erro no worker e no despachante.\n- Gate oficial passando; nenhuma regressão no fallback para o Desktop.\n- Documentar em docs a regra: congelamento de VM = infraestrutura.\n\n## Fora do escopo (já feito fora do repo)\nSupervisor do grokbox: reload do worker só quando ocioso (rechecado no momento) e registro de eventos da VM em `/workspace/darkfac/run/vm-events.log`.",
     "core_journey": [
-      "O ultimo run concluido do workflow 'DarkFac CI' em main (SHA 050bc62ec9c0fd428a63bf5c5ae2c72998387e84) terminou em 'failure'. Jobs vermelhos: main-validation (windows-latest). Run: https://github.com/GCamposGit/DarkFactory/actions/runs/39011701283. Detectado por 'python -m core.git.autonomy check-main' (USR-85); PRs com CI vermelho nao sao mais mesclados automaticamente, entao ate corrigir este defeito a entrega de codigo fica bloqueada."
+      "# Resiliência do worker grokbox a congelamentos da VM (SIGTERM tratado como veredito)\n\n## Contexto\nO grokbox (100.77.130.5:8080) é o worker principal do portão oficial (`runner.py --quick`, ~143 s a 261 s). A plataforma congela e restaura a VM várias vezes por dia (confirmado pelo suporte, ticket T-H65476: não há como desativar). A cada restauração o IP/gateway mudam, o Tailscale fica Online=false por 4 a 15 min e processos em execução recebem SIGTERM.\n\n## Problema (evidência 15 a 17/10)\nEm 11 dos 15 jobs de 16/10 17:40 a 17/10 06:53 o pytest morreu com `exit code: -15` em ~2 s (ex.: job 33c87b47). O worker (`remote_worker.py`, ~linha 1043) grava o job como `failed` com `result_json` do harness e o despachante (`remote_dispatch.py`) lê isso como `[HARNESS_FAIL]`, ou seja, veredito de candidato. O retry existente (`RESTART_RETRY_ERROR_CODES`: worker_restarted, worker_unreachable, job_lost_on_worker) nunca dispara nesse caso.\n\n## Escopo\n1. Morte por sinal é infraestrutura, não veredito.\n   - No worker: se `returncode < 0` (SIGTERM/SIGKILL) ou algum passo terminar com exit code negativo, ou o job durar < 15 s sem nenhum teste executado, marcar `failed` com `error_code=\"worker_signal_killed\"` e sem tratar o resultado como veredito.\n   - No despachante: incluir `worker_signal_killed` em `INFRASTRUCTURE_ERROR_CODES` e em `RESTART_RETRY_ERROR_CODES`; manter grace de 180 s e 2 reenvios no mesmo worker antes de cair para o Desktop.\n2. Portão de estabilidade antes de enviar: o despachante só submete ao grokbox depois de 3 `/health` ok seguidos (intervalo 20 s) com o mesmo `instance_id`/`started_at`. Opcional no worker: recusar job (HTTP 503, `settling`) por 60 s depois de mudança de gateway/IP.\n3. Diagnóstico: no processo do runner, capturar SIGTERM com `signal.sigwaitinfo` (thread) e registrar no log do job o PID/UID de quem enviou, horário e estado do Tailscale. Hoje só se vê o exit code.\n4. (Fase 2, opcional) Shards do pytest com cache de PASS por shard e árvore, para o retry rodar só o que não terminou.\n5. Testes frágeis sob congelamento: `tests/test_remote_job_recovery.py::test_a_live_owner_is_never_taken_over` e `::test_root_cause_restart_mid_job_used_to_look_like_silence` falharam no gate de 17/10 06:53 (job 0d4fc6c5). Torná-los tolerantes a pausa da VM ou com retry.\n\n## Critérios de aceite\n- Um job morto por SIGTERM no grokbox nunca aparece como `[HARNESS_FAIL]`; aparece `[REMOTE_RETRY]` e o job é reenviado.\n- Testes unitários cobrindo o novo código de erro no worker e no despachante.\n- Gate oficial passando; nenhuma regressão no fallback para o Desktop.\n- Documentar em docs a regra: congelamento de VM = infraestrutura.\n\n## Fora do escopo (já feito fora do repo)\nSupervisor do grokbox: reload do worker só quando ocioso (rechecado no momento) e registro de eventos da VM em `/workspace/darkfac/run/vm-events.log`."
     ],
     "non_goals": [],
     "reachability_contract": "",
     "acceptance_criteria": [
-      "O workflow 'DarkFac CI' volta a ficar verde em main (novo run concluido com sucesso depois de 050bc62).",
-      "A causa raiz esta corrigida ou coberta por teste de regressao."
+      "Job morto por SIGTERM (exit code negativo ou job < 15 s sem testes) no grokbox vira error_code worker_signal_killed, entra em INFRASTRUCTURE_ERROR_CODES e RESTART_RETRY_ERROR_CODES e nunca aparece como HARNESS_FAIL; ha [REMOTE_RETRY] e reenvio ao mesmo worker.",
+      "Despachante exige 3 /health ok seguidos (20 s) com mesmo instance_id antes de submeter ao grokbox; worker pode recusar job (503 settling) por 60 s apos mudanca de gateway.",
+      "Runner registra no log do job quem enviou o SIGTERM (si_pid), horario e estado do Tailscale.",
+      "Testes test_remote_job_recovery.py tolerantes a pausa da VM; testes novos cobrem worker_signal_killed no worker e no despachante; gate oficial verde e fallback para o Desktop sem regressao."
     ],
     "suggested_files": [],
     "estimated_complexity": "medium",
     "dependencies": [],
-    "created_at": "2026-10-17T08:03:02.134024Z",
-    "updated_at": "2026-10-17T08:03:02.134024Z"
+    "created_at": "2026-10-17T12:04:25.878707Z",
+    "updated_at": "2026-10-17T12:04:25.878713Z"
   }
 ]
