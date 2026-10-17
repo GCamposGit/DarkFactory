@@ -606,3 +606,44 @@ def test_previous_attempt_run_ids_is_fail_safe(store) -> None:
             return {}
 
     assert owner_intake.previous_attempt_run_ids(Broken(), {"ticket_id": "USR-1", "attempt": 2}) == []
+
+
+def test_submit_ticket_with_allow_registered_projects(store, demands, tmp_path: Path) -> None:
+    from core.projects.models import ProjectDescriptor, ProjectKind
+    from core.projects.registry import ProjectRegistry
+
+    reg_file = tmp_path / "projects.json"
+    registry = ProjectRegistry(projects_file=reg_file)
+    registry.register_project(
+        ProjectDescriptor(
+            id="proj-ext",
+            name="External Project",
+            path=str(tmp_path / "ext"),
+            kind=ProjectKind.CLIENT_PORTFOLIO,
+            prefix="EXT",
+        )
+    )
+
+    _ticket(demands, "EXT-01", project_id="proj-ext")
+
+    # Without allow_registered_projects: refused
+    refused = owner_intake.submit_ticket_to_line(
+        "EXT-01", demands_store=demands, store=store, allow_registered_projects=False, project_registry=registry
+    )
+    assert refused.ok is False and "nao esta habilitado" in refused.message
+
+    # With allow_registered_projects: accepted
+    accepted = owner_intake.submit_ticket_to_line(
+        "EXT-01", demands_store=demands, store=store, allow_registered_projects=True, project_registry=registry
+    )
+    assert accepted.ok is True
+    assert accepted.project_id == "proj-ext"
+    assert accepted.run_id is not None
+
+    # Unregistered project still refused even with allow_registered_projects=True
+    _ticket(demands, "UNREG-01", project_id="totally-unregistered")
+    unreg = owner_intake.submit_ticket_to_line(
+        "UNREG-01", demands_store=demands, store=store, allow_registered_projects=True, project_registry=registry
+    )
+    assert unreg.ok is False and "nao esta habilitado" in unreg.message
+

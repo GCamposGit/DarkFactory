@@ -41,6 +41,7 @@ class DeliveryStatus(str, Enum):
     VALIDATING = "validating"
     COMPLETED = "completed"
     CANCELLED = "cancelled"
+    WAITING_HUMAN = "waiting_human"
 
 
 class PlanningHorizon(str, Enum):
