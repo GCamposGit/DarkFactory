@@ -623,8 +623,11 @@ class DevelopmentStage:
                     duration_s=0.0,
                 )
             else:
+                kwargs: dict[str, Any] = {}
+                if cmd_env is not None:
+                    kwargs["env"] = cmd_env
                 validate_result = run_shell_commands(
-                    executable_validate, ws.path, timeout_s=self.command_timeout_s, env=cmd_env
+                    executable_validate, ws.path, timeout_s=self.command_timeout_s, **kwargs
                 )
 
             distilled = _distill_with_test_subagent(validate_result)
@@ -1143,7 +1146,10 @@ class ValidationStage:
                         f"{c} --local" if ("runner.py" in c and "--local" not in c) else c
                         for c in target_cmds
                     ]
-                result = run_shell_commands(target_cmds, tmp_dir, timeout_s=self.command_timeout_s, env=cmd_env)
+                kwargs: dict[str, Any] = {}
+                if cmd_env is not None:
+                    kwargs["env"] = cmd_env
+                result = run_shell_commands(target_cmds, tmp_dir, timeout_s=self.command_timeout_s, **kwargs)
                 report["commands"][stage_name] = {
                     "ran": True,
                     "ok": result.ok,
