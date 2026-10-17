@@ -649,14 +649,18 @@
     const r = {
       id: h('span', { class: 'ticket-id' }), badge: h('span', { class: 'proj-badge' }), chip: h('span'),
       stalled: h('span', { class: 'state-chip tone-stalled', hidden: true }, icon('alert'), 'Possivelmente travado'),
+      hostBadge: h('span', { class: 'state-chip tone-host', hidden: true }),
+      resBadge: h('span', { class: 'state-chip tone-reservation', hidden: true }),
       title: h('div', { class: 'lane-title' }),
+      blockReason: h('div', { class: 'lane-block-reason', hidden: true }),
       age: h('span', { class: 'age', 'data-live': 'elapsed' }), cost: h('span', { class: 'cost' }),
       stepper: h('ol', { class: 'stepper', 'aria-label': 'Etapas do run' }), timebar: h('div', { class: 'timebar' }), now: h('div', { class: 'lane-now' }),
     };
     const lane = h('article', { class: 'lane', tabindex: '0' },
       h('div', { class: 'lane-head' },
-        h('div', { class: 'lane-id-row' }, r.id, r.badge, r.chip, r.stalled),
+        h('div', { class: 'lane-id-row' }, r.id, r.badge, r.chip, r.stalled, r.hostBadge, r.resBadge),
         r.title,
+        r.blockReason,
         h('div', { class: 'lane-meta' }, r.age, r.cost)),
       h('div', { class: 'lane-body' }, h('div', { class: 'stepper-wrap' }, r.stepper), r.timebar, r.now));
     lane._r = r;
@@ -701,6 +705,24 @@
     }
     r.stalled.hidden = !run.stalled;
     r.stalled.title = run.stalled_reason || 'Sem progresso além do esperado';
+    if (run.host_id) {
+      r.hostBadge.hidden = false;
+      setText(r.hostBadge, 'host: ' + run.host_id);
+    } else {
+      r.hostBadge.hidden = true;
+    }
+    if (run.reservation_state) {
+      r.resBadge.hidden = false;
+      setText(r.resBadge, 'reserva: ' + run.reservation_state);
+    } else {
+      r.resBadge.hidden = true;
+    }
+    if (run.idle_or_blocked_reason) {
+      r.blockReason.hidden = false;
+      setText(r.blockReason, 'Bloqueio/espera: ' + run.idle_or_blocked_reason);
+    } else {
+      r.blockReason.hidden = true;
+    }
     lane.setAttribute('aria-label', run.ticket_id + ' — ' + (run.title || '') + ' — ' + rs.text);
 
     const gen = parseTime(snap.generated_at);
@@ -752,7 +774,14 @@
       kids.push(h('strong', { text: 'Nenhum run corresponde aos filtros.' }));
       kids.push(h('button', { class: 'btn', type: 'button', 'data-clear-filters': '' }, 'Limpar filtros'));
     } else {
-      kids.push(h('strong', { text: 'Nenhum run ativo — a fábrica está ociosa.' }));
+      const q = snap.executable_queue || {};
+      if (q.is_blocked) {
+        kids.push(h('strong', { class: 'text-warn', text: 'Fila bloqueada (' + (q.blocked_count || 0) + ' ticket(s) bloqueado(s)): ' + (q.blocked_reason || 'dependência ou limite') }));
+      } else if (q.is_empty) {
+        kids.push(h('strong', { text: 'Fila executável vazia — a fábrica está ociosa.' }));
+      } else {
+        kids.push(h('strong', { text: 'Nenhum run ativo (' + (q.executable_count || 0) + ' ticket(s) pronto(s) para despacho na fila).' }));
+      }
       let next = null;
       (snap.backlog || []).forEach(function (b) { if (!next && b.next && b.next.length && (state.filters.project === 'all' || b.project_id === state.filters.project)) next = b.next[0]; });
       if (next) kids.push(h('div', { class: 'next' }, 'Próximo do backlog: ', h('span', { class: 'ticket-id', text: next.id }), ' — ' + (next.title || '')));
@@ -1020,6 +1049,9 @@
       cell('Custo total', formatMoney(run.total_cost_usd)),
       cell('Iterações', String(run.iterations_total != null ? run.iterations_total : '—')),
       cell('Modo', run.mode || '—'),
+      cell('Host / Worker', run.host_id || '—'),
+      cell('Estado da reserva', run.reservation_state || '—'),
+      cell('Motivo ociosidade / bloqueio', run.idle_or_blocked_reason || '—'),
       cell('Criado', formatDateTime(parseTime(run.created_at))),
       cell('Atualizado', formatDateTime(parseTime(run.updated_at))),
       cell('Concluído', run.completed_at ? formatDateTime(parseTime(run.completed_at)) : '—'),

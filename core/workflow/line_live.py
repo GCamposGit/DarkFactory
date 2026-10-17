@@ -186,6 +186,9 @@ class LiveRun(_Model):
     total_cost_usd: float = 0.0
     iterations_total: int = 0
     stages: list[LiveStage] = Field(default_factory=list)
+    host_id: str | None = None
+    reservation_state: str | None = None
+    idle_or_blocked_reason: str | None = None
 
 
 class LiveEvent(_Model):
@@ -240,6 +243,40 @@ class LiveTicket(_Model):
     updated_at: str | None = None
 
 
+class LiveFleetHost(_Model):
+    host_id: str
+    name: str
+    priority: int
+    max_slots: int = 1
+    status: str = "online"
+    active_run_id: str | None = None
+    active_ticket_id: str | None = None
+    drain_reason: str | None = None
+
+
+class LiveFleetStatus(_Model):
+    max_fleet_slots: int = 3
+    active_slots: int = 0
+    hosts: list[LiveFleetHost] = Field(default_factory=list)
+
+
+class LiveQueueCandidate(_Model):
+    ticket_id: str
+    project_id: str
+    eligible: bool
+    reason: str | None = None
+    message: str = ""
+    assigned_host_id: str | None = None
+
+
+class LiveExecutableQueue(_Model):
+    is_empty: bool = True
+    is_blocked: bool = False
+    eligible_count: int = 0
+    blocked_count: int = 0
+    candidates: list[LiveQueueCandidate] = Field(default_factory=list)
+
+
 class LineLiveSnapshot(_Model):
     generated_at: str
     version: str
@@ -252,6 +289,8 @@ class LineLiveSnapshot(_Model):
     kpis: LiveKpis = Field(default_factory=LiveKpis)
     backlog: list[LiveBacklogProject] = Field(default_factory=list)
     off_line: list[LiveTicket] = Field(default_factory=list)
+    fleet: LiveFleetStatus | None = None
+    executable_queue: LiveExecutableQueue = Field(default_factory=LiveExecutableQueue)
 
 
 # --------------------------------------------------------------------------- helpers
@@ -354,6 +393,7 @@ class _RawStore:
     claims: list[dict[str, Any]] = field(default_factory=list)
     intake: list[dict[str, Any]] = field(default_factory=list)
     local_events: list[dict[str, Any]] = field(default_factory=list)
+    reservations: list[dict[str, Any]] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
 
 
@@ -400,6 +440,15 @@ def _load_with(
         )
     except Exception as exc:  # noqa: BLE001 - driver specific errors (missing table is the common one)
         logger.info("Live line: local run progress unreadable: %s", sanitize_database_url(str(exc)))
+    try:
+        raw.reservations = execute(
+            "SELECT reservation_id, project_id, ticket_id, run_id, host_id, status, fencing_token, "
+            "acquired_at, heartbeat_at, expires_at, metadata FROM fleet_reservations "
+            "ORDER BY acquired_at DESC LIMIT 50",
+            (),
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.info("Live line: fleet_reservations unreadable: %s", sanitize_database_url(str(exc)))
     run_ids = [str(row["run_id"]) for row in runs]
     if not run_ids:
         return raw
@@ -890,6 +939,12 @@ def _build_runs(
         if title:
             intake_titles[str(run_id)] = title
 
+    reservations_by_run: dict[str, dict[str, Any]] = {}
+    for res in getattr(raw, "reservations", []):
+        rid = str(res.get("run_id") or "")
+        if rid and rid not in reservations_by_run:
+            reservations_by_run[rid] = res
+
     runs: list[LiveRun] = []
     events: list[LiveEvent] = []
     cost_points: dict[str, list[tuple[datetime, float]]] = {}
@@ -991,6 +1046,26 @@ def _build_runs(
         if not active:
             cycle = _seconds(created, completed or updated)
 
+        res = reservations_by_run.get(run_id)
+        host_id = str(res.get("host_id")) if res and res.get("host_id") else None
+        res_state = str(res.get("status")) if res and res.get("status") else None
+        if not host_id:
+            for claim in claims_by_key.values():
+                if claim.get("run_id") == run_id:
+                    owner_str = str(claim.get("owner") or "").lower()
+                    for known_host in ("grokbox", "notebook", "desktop"):
+                        if known_host in owner_str:
+                            host_id = known_host
+                            break
+                    if host_id:
+                        break
+
+        idle_reason: str | None = None
+        if attention:
+            idle_reason = attention.cause_code or attention.diagnostic
+        elif stall:
+            idle_reason = stall
+
         run = LiveRun(
             run_id=run_id,
             ticket_id=ticket_id,
@@ -1013,6 +1088,9 @@ def _build_runs(
             total_cost_usd=round(sum(p[1] for p in points), 6),
             iterations_total=len(run_jobs),
             stages=stages,
+            host_id=host_id,
+            reservation_state=res_state,
+            idle_or_blocked_reason=idle_reason,
         )
         runs.append(run)
 
@@ -1220,6 +1298,122 @@ def compute_version(payload: Mapping[str, Any]) -> str:
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:16]
 
 
+def _build_fleet(raw: _RawStore | None, now: datetime) -> LiveFleetStatus:
+    fleet_hosts = [
+        {"id": "grokbox", "name": "Grokbox", "priority": 1},
+        {"id": "notebook", "name": "Notebook", "priority": 2},
+        {"id": "desktop", "name": "Desktop", "priority": 3},
+    ]
+
+    active_by_host: dict[str, dict[str, Any]] = {}
+    if raw is not None and getattr(raw, "reservations", None):
+        for res in raw.reservations:
+            hid = str(res.get("host_id") or "").lower()
+            status = str(res.get("status") or "").lower()
+            expires = _parse_dt(res.get("expires_at"))
+            if status == "active" and (expires is None or expires > now):
+                if hid not in active_by_host:
+                    active_by_host[hid] = res
+
+    pids_dir = Path(__file__).resolve().parents[2] / ".factory" / "pids"
+    hosts_output: list[LiveFleetHost] = []
+    active_count = 0
+
+    for fh in fleet_hosts:
+        hid = fh["id"]
+        res = active_by_host.get(hid)
+        drain_file = pids_dir / f"fleet_worker_{hid}.drain"
+        status = "draining" if drain_file.exists() else "online"
+
+        active_run_id = str(res["run_id"]) if res and res.get("run_id") else None
+        active_ticket_id = str(res["ticket_id"]) if res and res.get("ticket_id") else None
+        if active_run_id:
+            active_count += 1
+
+        hosts_output.append(
+            LiveFleetHost(
+                host_id=hid,
+                name=fh["name"],
+                priority=fh["priority"],
+                max_slots=1,
+                status=status,
+                active_run_id=active_run_id,
+                active_ticket_id=active_ticket_id,
+                drain_reason="drain_file_present" if status == "draining" else None,
+            )
+        )
+
+    return LiveFleetStatus(
+        max_fleet_slots=3,
+        active_slots=active_count,
+        hosts=hosts_output,
+    )
+
+
+def _build_executable_queue(
+    tickets: Sequence[Mapping[str, Any]],
+    runs: Sequence[LiveRun],
+) -> LiveExecutableQueue:
+    in_line_tickets = {r.ticket_id for r in runs if r.state in ("running", "queued", "attention")}
+    in_line_demands = {r.demand_id for r in runs if r.state in ("running", "queued", "attention")}
+
+    completed_tickets = {
+        _ticket_field(t, "id") for t in tickets if str(_ticket_field(t, "status")).lower() == "completed"
+    }
+
+    candidates: list[LiveQueueCandidate] = []
+    planned_tickets = [
+        t for t in tickets
+        if str(_ticket_field(t, "status")).lower() in ("planned", "open")
+        and _ticket_field(t, "id") not in in_line_tickets
+        and _ticket_field(t, "id") not in in_line_demands
+    ]
+
+    for t in planned_tickets:
+        tid = _ticket_field(t, "id")
+        pid = _ticket_field(t, "project_id") or "darkfac"
+        tags = [str(x).lower() for x in t.get("tags") or []]
+        deps = [str(x) for x in t.get("dependencies") or []]
+
+        blocked_reason: str | None = None
+        message = "Apto para admissão"
+
+        if any(tag in ("postponed-business", "deferred", "hold", "intentional_postponement") for tag in tags):
+            blocked_reason = "intentional_postponement"
+            message = "Postergado intencionalmente por planejamento ou negócio"
+        elif deps and not all(d in completed_tickets for d in deps):
+            missing = [d for d in deps if d not in completed_tickets]
+            blocked_reason = f"waiting_dependencies:{','.join(missing)}"
+            message = f"Aguardando conclusão de dependência(s): {', '.join(missing)}"
+        elif str(t.get("problem_statement") or "").strip() == "":
+            blocked_reason = "missing_specification"
+            message = "Especificação incompleta ou ambígua (Gate G1)"
+
+        eligible = blocked_reason is None
+        candidates.append(
+            LiveQueueCandidate(
+                ticket_id=tid,
+                project_id=pid,
+                eligible=eligible,
+                reason=blocked_reason,
+                message=message,
+            )
+        )
+
+    eligible_count = sum(1 for c in candidates if c.eligible)
+    blocked_count = sum(1 for c in candidates if not c.eligible)
+    is_empty = len(candidates) == 0
+    is_blocked = len(candidates) > 0 and eligible_count == 0
+
+    return LiveExecutableQueue(
+        is_empty=is_empty,
+        is_blocked=is_blocked,
+        eligible_count=eligible_count,
+        blocked_count=blocked_count,
+        candidates=candidates,
+    )
+
+
 def build_line_live(
     raw: _RawStore | None,
     source: LiveSource,
@@ -1240,6 +1434,8 @@ def build_line_live(
     extra = [item.stage for run in runs for item in run.stages if item.stage not in LINE_STAGES]
     labels = {stage: _label(stage) for stage in (*stage_order, *dict.fromkeys(extra))}
     labels.update({stage: label for stage, label in STAGE_LABELS.items() if stage not in labels})
+    fleet = _build_fleet(raw, now=now)
+    executable_queue = _build_executable_queue(tickets, runs)
     snapshot = LineLiveSnapshot(
         generated_at=now.isoformat(),
         version="0" * 16,
@@ -1252,6 +1448,8 @@ def build_line_live(
         kpis=kpis,
         backlog=backlog,
         off_line=off_line,
+        fleet=fleet,
+        executable_queue=executable_queue,
     )
     snapshot.version = compute_version(snapshot.model_dump(mode="json"))
     return snapshot
