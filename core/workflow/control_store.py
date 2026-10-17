@@ -133,6 +133,10 @@ class ControlStore(Protocol):
         """Ids of every run whose `runs.status` is `active`, oldest first (USR-142 orphan-run sweep)."""
         ...
 
+    def list_eligible_admission_jobs(self, limit: int = 50) -> list[dict[str, Any]]:
+        """List pending jobs of active runs eligible for fleet cycle admission (USR-282)."""
+        ...
+
     def cancel_run(
         self,
         run_id: str,
@@ -190,6 +194,10 @@ class ControlStore(Protocol):
 
     def get_active_reservation_for_host(self, host_id: str) -> FleetReservation | None:
         """Find active reservation currently occupying a host (USR-281)."""
+        ...
+
+    def get_active_reservation_for_run(self, run_id: str) -> FleetReservation | None:
+        """Find active reservation for a run (USR-282)."""
         ...
 
     def list_active_reservations(self) -> list[FleetReservation]:
@@ -516,6 +524,7 @@ class SQLiteControlStore:
                 # across test_control_store.py, test_public_autonomous_intake.py,
                 # etc. Left as a documented gap for a future ticket to close
                 # properly (e.g. an explicit is_line flag on IntakeCommand).
+                ticket_id = str(command.payload.get("ticket_id") or command.project_id)
                 cur.execute(
                     """
                     INSERT INTO jobs (
@@ -527,7 +536,7 @@ class SQLiteControlStore:
                     """,
                     (
                         run_id,
-                        command.project_id,
+                        ticket_id,
                         now_iso,
                         now_iso,
                         now_iso,
@@ -658,12 +667,7 @@ class SQLiteControlStore:
                             compare_now = compare_now.replace(tzinfo=not_before_dt.tzinfo)
                         if not_before_dt > compare_now:
                             continue
-                if ready_age_sec > 0.0:
-                    ready_reference = row["ready_at"] or row["created_at"]
-                    if not _is_ready_enough(ready_reference, now, ready_age_sec):
-                        continue
-
-                # Subordination of stage claims to fleet cycle reservation (USR-281)
+                # Subordination of stage claims to fleet cycle reservation (USR-281/USR-282)
                 cur.execute(
                     """
                     SELECT reservation_id, host_id, status, expires_at
@@ -688,8 +692,13 @@ class SQLiteControlStore:
                     if res_host not in worker_lower and worker_lower not in res_host:
                         continue  # Reserved for a different host machine
                     matched_reservation_id = res_row["reservation_id"]
+                    # Host affinity confirmed: executes immediately without fixed priority delay
                 else:
                     matched_reservation_id = None
+                    if ready_age_sec > 0.0:
+                        ready_reference = row["ready_at"] or row["created_at"]
+                        if not _is_ready_enough(ready_reference, now, ready_age_sec):
+                            continue
 
                 chosen_row = row
                 break
@@ -2355,6 +2364,25 @@ class SQLiteControlStore:
         finally:
             conn.close()
 
+    def get_active_reservation_for_run(self, run_id: str) -> FleetReservation | None:
+        """Find active reservation for a run (USR-282)."""
+        conn = self._connect()
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                """
+                SELECT reservation_id, project_id, ticket_id, run_id, host_id, status, fencing_token,
+                       acquired_at, heartbeat_at, expires_at, metadata
+                FROM fleet_reservations
+                WHERE run_id = ? AND status IN ('active', 'draining')
+                """,
+                (run_id,),
+            )
+            row = cur.fetchone()
+            return self._row_to_reservation(row) if row else None
+        finally:
+            conn.close()
+
     def list_active_reservations(self) -> list[FleetReservation]:
         """List all active fleet reservations (USR-281)."""
         conn = self._connect()
@@ -2365,7 +2393,7 @@ class SQLiteControlStore:
                 SELECT reservation_id, project_id, ticket_id, run_id, host_id, status, fencing_token,
                        acquired_at, heartbeat_at, expires_at, metadata
                 FROM fleet_reservations
-                WHERE status = 'active'
+                WHERE status IN ('active', 'draining')
                 ORDER BY acquired_at ASC
                 """
             )
@@ -2477,5 +2505,26 @@ class SQLiteControlStore:
                 )
                 for row in rows
             ]
+        finally:
+            conn.close()
+
+    def list_eligible_admission_jobs(self, limit: int = 50) -> list[dict[str, Any]]:
+        """List pending jobs of active runs eligible for fleet cycle admission (USR-282)."""
+        conn = self._connect()
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                """
+                SELECT j.run_id, j.ticket_id, r.project_id, j.stage, j.status, j.created_at
+                FROM jobs j
+                JOIN runs r ON j.run_id = r.run_id
+                WHERE j.status = 'pending' AND r.status = 'active'
+                ORDER BY j.created_at ASC
+                LIMIT ?
+                """,
+                (limit,),
+            )
+            rows = cur.fetchall()
+            return [dict(r) for r in rows]
         finally:
             conn.close()

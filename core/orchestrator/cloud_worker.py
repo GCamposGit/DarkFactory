@@ -155,6 +155,7 @@ class CloudWorker:
     def __init__(
         self,
         worker_id: str | None = None,
+        host_id: str | None = None,
         max_slots: int | None = None,
         database_url: str | None = None,
         capabilities: list[str] | None = None,
@@ -187,6 +188,12 @@ class CloudWorker:
         parked_orphan_notifier: Callable[..., list[Any]] | None = None,
     ) -> None:
         self.worker_id = worker_id or os.environ.get("DARKFAC_WORKER_ID", "cloud-worker-1")
+        self.host_id = host_id or os.environ.get("DARKFAC_HOST_ID")
+        if not self.host_id:
+            for known in ("grokbox", "notebook", "desktop"):
+                if known in self.worker_id.lower():
+                    self.host_id = known
+                    break
         self.max_slots = (
             max_slots
             if max_slots is not None
@@ -579,7 +586,21 @@ class CloudWorker:
                     continue
                 next_beat = time.monotonic() + interval
                 try:
-                    self.store.heartbeat(claim, datetime.now(UTC))
+                    now_hb = datetime.now(UTC)
+                    self.store.heartbeat(claim, now_hb)
+                    # Heartbeat cycle reservation if bound (USR-282)
+                    res_id = getattr(claim, "reservation_id", None)
+                    if res_id and hasattr(self.store, "get_reservation") and hasattr(self.store, "heartbeat_reservation"):
+                        try:
+                            res = self.store.get_reservation(res_id)
+                            if res and res.is_active:
+                                self.store.heartbeat_reservation(
+                                    reservation_id=res.reservation_id,
+                                    fencing_token=res.fencing_token,
+                                    now=now_hb,
+                                )
+                        except Exception as r_exc:
+                            logger.debug("Reservation heartbeat warning for %s: %s", res_id, r_exc)
                 except Exception as exc:
                     logger.warning("Lease heartbeat failed for %s: %s", claim.lease_id, exc)
                     # A cancel releases the claim, so the heartbeat of a cancelled run fails first.
@@ -868,6 +889,11 @@ class CloudWorker:
                     "Job %s ended as %s after the run was cancelled; result discarded",
                     claim.job_key.canonical_key(), cancellation.CANCELLED_CAUSE,
                 )
+                self._handle_cycle_completion_or_parking(
+                    claim,
+                    StageResult(outcome="cancelled", cause_code=cancellation.CANCELLED_CAUSE),
+                    datetime.now(UTC),
+                )
                 return {"cancelled": True, "cause_code": cancellation.CANCELLED_CAUSE}
 
             self._log_stage_outcome(claim, stage_result)
@@ -880,7 +906,7 @@ class CloudWorker:
             except Exception as exc:  # pragma: no cover - defensive, must never block finish
                 logger.warning("Owner notification failed for %s: %s", claim.job_key.canonical_key(), exc)
 
-            finish_now = datetime.now(UTC)
+            finish_now = now or datetime.now(UTC)
             try:
                 self.store.finish(claim, stage_result, now=finish_now)
             except (StaleLeaseError, InvalidResultError):
@@ -894,12 +920,83 @@ class CloudWorker:
                     claim.job_key.canonical_key(), type(exc).__name__, exc,
                 )
                 stage_result = StageResult(outcome="failed", cause_code=f"finish_failed:{type(exc).__name__}"[:60])
-                self.store.finish(claim, stage_result, now=datetime.now(UTC))
+                self.store.finish(claim, stage_result, now=finish_now)
             materialize_result(claim.job_key, stage_result, self.store, now=finish_now)
+
+            # USR-282: Cycle reservation release and slot replenishment
+            self._handle_cycle_completion_or_parking(claim, stage_result, now=finish_now)
 
             return {"stage_result": stage_result.model_dump()}
 
         return self.execute_step(run_id, stage, _execute_stage)
+
+    def _handle_cycle_completion_or_parking(
+        self,
+        claim: Claim,
+        stage_result: StageResult,
+        now: datetime,
+    ) -> None:
+        """Release fleet cycle reservation when run completes, fails, cancels, or parks on waiting_human (USR-282)."""
+        if not hasattr(self.store, "release_reservation"):
+            return
+
+        run_id = claim.job_key.run_id
+        should_release = False
+        release_status = "released"
+
+        if stage_result.outcome == "waiting_human":
+            # Human intervention needed: park demand, release host slot for other cycles
+            should_release = True
+            release_status = "released"
+        elif stage_result.outcome == "cancelled":
+            should_release = True
+            release_status = "cancelled"
+        else:
+            # Check if run reached a terminal state
+            getter = getattr(self.store, "get_run_status", None)
+            if getter is not None:
+                try:
+                    run_info = getter(run_id) or {}
+                    st = str(run_info.get("status") or "").lower()
+                    if st in TERMINAL_RUN_STATUSES:
+                        jobs = run_info.get("jobs", [])
+                        open_jobs = [
+                            j for j in jobs
+                            if str(j.get("status") or "").lower() in ("pending", "running", "waiting_human", "waiting_dependency")
+                        ]
+                        if not open_jobs:
+                            should_release = True
+                            release_status = st
+                except Exception as exc:
+                    logger.debug("Could not inspect run %s status: %s", run_id, exc)
+
+        if should_release:
+            res = None
+            if getattr(claim, "reservation_id", None) and hasattr(self.store, "get_reservation"):
+                try:
+                    res = self.store.get_reservation(claim.reservation_id)
+                except Exception:
+                    res = None
+            if res is None and hasattr(self.store, "get_active_reservation_for_run"):
+                try:
+                    res = self.store.get_active_reservation_for_run(run_id)
+                except Exception:
+                    res = None
+
+            if res is not None and res.is_active:
+                try:
+                    self.store.release_reservation(
+                        reservation_id=res.reservation_id,
+                        fencing_token=res.fencing_token,
+                        status=release_status,
+                        now=now,
+                    )
+                    logger.info(
+                        "Cycle finished/parked: released fleet reservation %s for run %s (status=%s)",
+                        res.reservation_id, run_id, release_status,
+                    )
+                except Exception as exc:
+                    logger.warning("Failed to release reservation %s: %s", res.reservation_id, exc)
 
     def _close_ghost_open_job(self, run_id: str, now: datetime) -> bool:
         """Cancel an open job whose run is already terminal. Returns True when the run was closed.
@@ -1183,9 +1280,14 @@ class CloudWorker:
             except Exception as exc:
                 logger.warning("Orphan run sweep failed: %s", exc)
 
+        claim_worker = (
+            f"{self.worker_id}:{self.host_id}"
+            if (self.host_id and self.host_id.lower() not in self.worker_id.lower())
+            else self.worker_id
+        )
         try:
             claim = self.store.claim(
-                worker=self.worker_id,
+                worker=claim_worker,
                 capabilities=self.capabilities,
                 now=effective_now,
                 ready_age_sec=self.ready_age_sec,

@@ -7,20 +7,26 @@ import signal
 import secrets
 import threading
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, Sequence
 from pydantic import BaseModel, ConfigDict, Field
 
 from core.orchestrator.adapters.control_postgres import PostgresControlStore
 from core.orchestrator.cloud_db import probe_cloud_database, sanitize_database_url
 from core.workflow.control_contracts import (
+    FleetCapacityExceededError,
+    FleetReservation,
+    HostBusyError,
     IdempotencyConflict,
     IntakeCommand,
     IntakeReceipt,
     RuntimeOwner,
+    TicketAlreadyActiveError,
 )
 from core.workflow.reconciliation import reconcile_portfolio_state
 
 logger = logging.getLogger("darkfac.cloud_coordinator")
+
+DEFAULT_FLEET_HOSTS: tuple[str, ...] = ("grokbox", "notebook", "desktop")
 
 
 class CoordinatorStatus(BaseModel):
@@ -32,8 +38,10 @@ class CoordinatorStatus(BaseModel):
     application_version: str = "v1"
     database_status: str = Field(description="'ready', 'waiting_access', or 'error'")
     dbos_engine: str = Field(description="'active', 'absent', or 'offline'")
-    max_concurrent_slots: int = 2
+    max_concurrent_slots: int = 3
     active_workflows_count: int = 0
+    active_fleet_reservations_count: int = 0
+    fleet_hosts: list[str] = Field(default_factory=lambda: list(DEFAULT_FLEET_HOSTS))
     recovered_workflows_count: int = 0
     error_message: str | None = None
     http_port: int = 8001
@@ -48,24 +56,33 @@ class CloudCoordinator:
         max_concurrent_slots: int | None = None,
         application_version: str = "v1",
         port: int | None = None,
+        store: Any | None = None,
+        fleet_hosts: Sequence[str] | None = None,
+        host_health_prober: Callable[[str], bool] | None = None,
     ) -> None:
         self.database_url = database_url or os.environ.get("DARKFAC_HF02_DATABASE_URL")
         self.max_slots = (
             max_concurrent_slots
             if max_concurrent_slots is not None
-            else int(os.environ.get("DARKFAC_MAX_CONCURRENT_SLOTS", "2"))
+            else int(os.environ.get("DARKFAC_MAX_CONCURRENT_SLOTS", "3"))
         )
         self.application_version = application_version
         self.port = port if port is not None else int(os.environ.get("DARKFAC_COORDINATOR_PORT", "8001"))
+        self.host_health_prober = host_health_prober
+        if fleet_hosts is not None:
+            self.fleet_hosts = list(fleet_hosts)
+        else:
+            raw_hosts = os.environ.get("DARKFAC_FLEET_HOSTS", "grokbox,notebook,desktop")
+            self.fleet_hosts = [h.strip() for h in raw_hosts.split(",") if h.strip()]
         self._dbos_instance: Any = None
         self._running = False
         self._stop_event: threading.Event | None = None
         self._recovered_ids: list[str] = []
-        self._store_instance: PostgresControlStore | None = None
+        self._store_instance: Any = store
         self._uvicorn_server: Any = None
 
     @property
-    def store(self) -> PostgresControlStore:
+    def store(self) -> Any:
         if self._store_instance is None:
             self._store_instance = PostgresControlStore(
                 database_url=self.database_url,
@@ -76,8 +93,13 @@ class CloudCoordinator:
 
     def inspect_status(self) -> CoordinatorStatus:
         """Inspect coordinator operational status without throwing exceptions."""
-        probe = probe_cloud_database(self.database_url)
-        db_status = "ready" if probe.status == "ready" else "waiting_access"
+        if self._store_instance is not None:
+            db_status = "ready"
+            probe_err = None
+        else:
+            probe = probe_cloud_database(self.database_url)
+            db_status = "ready" if probe.status == "ready" else "waiting_access"
+            probe_err = probe.error_message
 
         dbos_available = False
         try:
@@ -88,6 +110,13 @@ class CloudCoordinator:
 
         engine_status = "active" if (dbos_available and db_status == "ready") else ("absent" if not dbos_available else "offline")
 
+        active_reservations_count = 0
+        if db_status == "ready" and hasattr(self.store, "list_active_reservations"):
+            try:
+                active_reservations_count = len(self.store.list_active_reservations())
+            except Exception:
+                active_reservations_count = 0
+
         return CoordinatorStatus(
             role="coordinator",
             application_version=self.application_version,
@@ -95,10 +124,112 @@ class CloudCoordinator:
             dbos_engine=engine_status,
             max_concurrent_slots=self.max_slots,
             active_workflows_count=0,
+            active_fleet_reservations_count=active_reservations_count,
+            fleet_hosts=list(self.fleet_hosts),
             recovered_workflows_count=len(self._recovered_ids),
-            error_message=probe.error_message if db_status != "ready" else None,
+            error_message=probe_err if db_status != "ready" else None,
             http_port=self.port,
         )
+
+    def admit_eligible_cycles(self, now: datetime | None = None) -> list[FleetReservation]:
+        """Admit eligible pending cycles to free fleet hosts (USR-282).
+
+        Enforces:
+        - At most 3 concurrent cycles across the fleet.
+        - First healthy, free, and compatible host in order Grokbox, Notebook, Desktop.
+        - Real availability check without fixed priority delays.
+        - Human blocks (waiting_human) remain parked without exceeding ceiling.
+        - Idempotent: tickets already reserved stay on their reserved host.
+        """
+        now_utc = now or datetime.now(UTC)
+
+        if not hasattr(self.store, "list_active_reservations") or not hasattr(self.store, "reserve_cycle"):
+            return []
+
+        # 1. Sweep expired reservations
+        if hasattr(self.store, "reconcile_fleet_reservations"):
+            try:
+                self.store.reconcile_fleet_reservations(now_utc)
+            except Exception as exc:
+                logger.warning("Fleet reservation sweep warning: %s", exc)
+
+        # 2. Check active reservations
+        try:
+            active_reservations = self.store.list_active_reservations()
+        except Exception as exc:
+            logger.warning("Failed to list active reservations: %s", exc)
+            return []
+
+        occupied_hosts = {r.host_id.lower() for r in active_reservations}
+        active_tickets = {(r.project_id, r.ticket_id) for r in active_reservations}
+        active_runs = {r.run_id for r in active_reservations}
+
+        available_slots = self.max_slots - len(active_reservations)
+        if available_slots <= 0:
+            return []
+
+        # 3. Determine free hosts in priority order (skipping occupied, draining, or offline hosts)
+        free_hosts = [
+            h for h in self.fleet_hosts
+            if h.lower() not in occupied_hosts
+            and (self.host_health_prober is None or self.host_health_prober(h))
+        ]
+        if not free_hosts:
+            return []
+
+        # 4. Query pending jobs eligible for admission
+        if not hasattr(self.store, "list_eligible_admission_jobs"):
+            return []
+
+        try:
+            eligible_jobs = self.store.list_eligible_admission_jobs(limit=50)
+        except Exception as exc:
+            logger.warning("Failed to list eligible admission jobs: %s", exc)
+            return []
+
+        admitted: list[FleetReservation] = []
+
+        for job in eligible_jobs:
+            if not free_hosts or len(admitted) >= available_slots:
+                break
+            proj_id = job["project_id"]
+            tick_id = job["ticket_id"]
+            r_id = job["run_id"]
+
+            if (proj_id, tick_id) in active_tickets or r_id in active_runs:
+                continue
+
+            reserved = False
+            while free_hosts and len(admitted) < available_slots:
+                host = free_hosts.pop(0)
+                try:
+                    reservation = self.store.reserve_cycle(
+                        project_id=proj_id,
+                        ticket_id=tick_id,
+                        run_id=r_id,
+                        host_id=host,
+                        now=now_utc,
+                    )
+                    admitted.append(reservation)
+                    active_tickets.add((proj_id, tick_id))
+                    active_runs.add(r_id)
+                    occupied_hosts.add(host.lower())
+                    logger.info(
+                        "Admitted ticket %s (run %s) on host %s (reservation %s)",
+                        tick_id, r_id, host, reservation.reservation_id,
+                    )
+                    reserved = True
+                    break
+                except (HostBusyError, TicketAlreadyActiveError, FleetCapacityExceededError) as exc:
+                    logger.debug("Could not reserve %s on %s: %s", tick_id, host, exc)
+                    continue
+                except Exception as exc:
+                    logger.warning("Unexpected error reserving %s on %s: %s", tick_id, host, exc)
+                    continue
+            if not reserved and not free_hosts:
+                break
+
+        return admitted
 
     def scan_and_recover_pending(self) -> list[str]:
         """Scan system database for pending/interrupted workflows and queue recovery."""
@@ -127,7 +258,24 @@ class CloudCoordinator:
         except Exception as exc:
             logger.warning("Outbox sweep warning: %s", exc)
 
-        # 3. DBOS recovery if available
+        # 3. Sweep fleet reservations and reconcile unknown operations (USR-282)
+        try:
+            if hasattr(self.store, "reconcile_fleet_reservations"):
+                self.store.reconcile_fleet_reservations(now_utc)
+            if hasattr(self.store, "reconcile_unknown_operations"):
+                self.store.reconcile_unknown_operations(now_utc)
+        except Exception as exc:
+            logger.warning("Fleet reconciliation scan warning: %s", exc)
+
+        # 4. Admit eligible cycles to available fleet hosts (USR-282)
+        try:
+            admitted = self.admit_eligible_cycles(now_utc)
+            if admitted:
+                logger.info("Fleet admission admitted %d new cycle(s)", len(admitted))
+        except Exception as exc:
+            logger.warning("Fleet cycle admission scan warning: %s", exc)
+
+        # 5. DBOS recovery if available
         recovered: list[str] = []
         try:
             import dbos  # type: ignore[import-not-found]
