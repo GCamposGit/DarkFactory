@@ -1104,6 +1104,38 @@
       "created_at": "2026-10-16T18:22:32Z",
       "created_by": "main-ci-watch",
       "resolved_at": "2026-10-16T18:56:32Z"
+    },
+    {
+      "id": "OA-029",
+      "kind": "action",
+      "title": "Corrigir a conexão do Notebook ao control store para usar darkfac_worker",
+      "priority": "high",
+      "status": "open",
+      "why": "O preflight HF-03 da conexão atual falha porque a variável de usuário DARKFAC_HF02_DATABASE_URL usa o superusuário postgres, proibido pela política. Sem credencial limitada válida, a linha não pode admitir ciclos com segurança nem usar o Notebook em paralelo. Os tickets USR-268, USR-270 e USR-294 ficam bloqueados.",
+      "blocks": [
+        "USR-268",
+        "USR-270",
+        "USR-294"
+      ],
+      "depends_on": [],
+      "steps": [
+        {
+          "text": "No Windows 11, abra Iniciar, pesquise Configurações avançadas do sistema, abra a guia Avançado e clique em Variáveis de Ambiente. A Microsoft também documenta Win+R > SystemPropertiesAdvanced: https://support.microsoft.com/en-us/windows/experience/system-configuration-tools-in-windows"
+        },
+        {
+          "text": "Em Variáveis de usuário para guigc, selecione DARKFAC_HF02_DATABASE_URL e clique Editar. No campo Valor, use o DSN autorizado do usuário darkfac_worker para o banco darkfac_hf02_prod, formato postgresql://darkfac_worker:<SEGREDO_APROVADO>@<HOST_INTERNO_OU_TAILSCALE>:5432/darkfac_hf02_prod. Não use postgres e não cole o segredo no chat, em ticket ou em arquivo versionado. Se precisar localizar a variável de serviço no Dokploy, abra Projeto darkfac-core > ambiente production > serviço darkfac-coordinator > Environment; documentação oficial: https://docs.dokploy.com/docs/core/variables. Se não houver um DSN aprovado para darkfac_worker, mantenha esta ação aberta e siga o handoff docs/handoffs/HF-03.md para provisão restrita antes de continuar."
+        },
+        {
+          "text": "Clique OK em cada janela aberta e feche completamente o Codex. Abra-o novamente para carregar a variável de usuário atualizada; abra um terminal com a pasta C:\\dev\\DarkFac como diretório."
+        },
+        {
+          "text": "Execute o comando de verificação. Ele imprime somente status, usuário e nome do banco; não imprime o DSN nem a senha."
+        }
+      ],
+      "verify": "Set-Location C:\\dev\\DarkFac; & \"C:\\Users\\guigc\\AppData\\Local\\Programs\\Python\\Python312\\python.exe\" -c \"import os; from core.orchestrator.cloud_db import probe_cloud_database; p=probe_cloud_database(os.getenv('DARKFAC_HF02_DATABASE_URL')); print('status=%s user=%s database=%s' % (p.status,p.current_user,p.database_name)); raise SystemExit(0 if p.status=='ready' and p.current_user=='darkfac_worker' and p.database_name=='darkfac_hf02_prod' else 1)\"",
+      "created_at": "2026-10-17T10:10:58Z",
+      "created_by": "codex",
+      "resolved_at": null
     }
   ]
 }

@@ -8635,5 +8635,43 @@
     "dependencies": [],
     "created_at": "2026-10-16T17:44:57.794931Z",
     "updated_at": "2026-10-16T21:08:05.504764Z"
+  },
+  {
+    "id": "USR-294",
+    "project_id": "darkfac",
+    "title": "Corrigir o probe de prontidao da frota para refletir o status do Postgres",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand",
+      "bug",
+      "fleet",
+      "probe",
+      "pos-v0"
+    ],
+    "problem_statement": "scripts/start_fleet_worker.py consulta probe_cloud_database, cujo contrato expoe status=ready|blocked|error, mas le um atributo inexistente probe.connected e captura a excecao como database_connected=false. Assim, mesmo uma conexao valida ao Postgres aparece indisponivel. Mapear o status real sem expor DSN ou senha.",
+    "core_journey": [
+      "O owner ou operador executa o probe de um host antes de admitir um ciclo na frota."
+    ],
+    "non_goals": [
+      "Nao mudar privilegios, credenciais, schema ou conectividade do Postgres."
+    ],
+    "reachability_contract": "python -m pytest tests/test_fleet_worker_bootstrap.py -q; depois python C:/dev/DarkFac/core/harness/runner.py --quick",
+    "acceptance_criteria": [
+      "database_connected e true somente quando DatabaseProbeResult.status == ready; blocked/error permanecem false com diagnostico estruturado e sanitizado.",
+      "Testes cobrem status ready, blocked e error e garantem que DSN/senha nao aparecam na saida."
+    ],
+    "suggested_files": [
+      "scripts/start_fleet_worker.py",
+      "tests/test_fleet_worker_bootstrap.py"
+    ],
+    "estimated_complexity": "small",
+    "dependencies": [],
+    "created_at": "2026-10-17T10:09:40.544220Z",
+    "updated_at": "2026-10-17T10:09:40.544220Z"
   }
 ]
