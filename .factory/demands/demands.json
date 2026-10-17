@@ -7917,7 +7917,11 @@
     ],
     "problem_statement": "Em 15/10/2026 (USR-192) o grokbox e o Desktop cairam no meio do job; o runner caiu para o Notebook com 6 workers xdist as 17:11 e o passo paralelo estourou 3000 s (18:01) com 0 testes contabilizados. Com 2 workers e sem variaveis de worker, a mesma suite levou 1814 s no Notebook em 14/10. A isolacao das variaveis de worker explica so ~10 s por sonda. A saida parcial do pytest e perdida no timeout (patch protegido pendente na OA-018), entao nao se sabe se travou ou ficou lento.",
     "core_journey": [],
-    "non_goals": [],
+    "non_goals": [
+      "Não alterar os limites de 1.800 s e 3.000 s confirmados pelo Owner.",
+      "Não mascarar, ignorar ou excluir falhas ou descobertas de testes.",
+      "Não expandir a correção para além do runner e dos testes envolvidos no fallback local."
+    ],
     "reachability_contract": "",
     "acceptance_criteria": [
       "Reproduzir o fallback local com os workers inalcancaveis (DARKFAC_TEST_WORKERS apontando para hosts fora do ar) e registrar no ticket a duracao e os testes mais lentos ou travados (--durations e saida parcial gravada em arquivo)",
@@ -7931,7 +7935,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-15T21:14:03.900067Z",
-    "updated_at": "2026-10-15T21:14:03.900067Z"
+    "updated_at": "2026-10-17T13:03:50.945139Z"
   },
   {
     "id": "USR-269",
@@ -7983,7 +7987,11 @@
     ],
     "problem_statement": "Portao isolado ca2c910 no grokbox, job 4648af3ed69a46559c62bba0e8c5ac29 em 16/10/2026 12:33:55 UTC: syntax PASS; pytest paralelo exit -15 em 0.9s com 0 testes descobertos, RAM 3.2 GiB cap 1 worker. Nao e veredito de correcao do candidato. Health informou restart_safe true e git_sha fde6b327. Investigar processo/ambiente antes de repetir.\n\n16/10/2026 15:30 UTC: Tailscale reportou Grokbox offline durante prova efemera de um teste xdist; sem retorno da captura de emissor. PATH/Python corretos. Causa de SIGTERM ainda nao comprovada; sem restart ou alteracao global. Suite do lote273/276 foi despachada ao Desktop.",
     "core_journey": [],
-    "non_goals": [],
+    "non_goals": [
+      "Não alterar timeouts nem mascarar, ignorar ou suprimir falhas de testes.",
+      "Não abrir portas públicas.",
+      "Não recriar a VM."
+    ],
     "reachability_contract": "",
     "acceptance_criteria": [
       "Identificar e registrar origem do SIGTERM com evidencia de processo ou logs",
@@ -7994,7 +8002,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-16T12:36:20.495866Z",
-    "updated_at": "2026-10-16T12:36:20.495866Z"
+    "updated_at": "2026-10-17T13:03:50.960133Z"
   },
   {
     "id": "USR-271",
@@ -8675,34 +8683,40 @@
     "updated_at": "2026-10-17T11:44:33.163230+00:00"
   },
   {
-    "id": "USR-298",
+    "id": "USR-299",
     "project_id": "darkfac",
-    "title": "Resiliência do worker grokbox: SIGTERM por congelamento da VM não pode ser veredito",
+    "title": "Probe da frota falha ao importar core quando executado pelo runbook",
     "origin": "user",
     "status": "planned",
     "delivery_evidence": null,
-    "item_type": "feature",
+    "item_type": "infrastructure",
     "lifecycle_stage": "execution",
-    "horizon": "now",
+    "horizon": "later",
     "tags": [
-      "user-demand"
+      "user-demand",
+      "bug",
+      "infra",
+      "congelado-v0"
     ],
-    "problem_statement": "# Resiliência do worker grokbox a congelamentos da VM (SIGTERM tratado como veredito)\n\n## Contexto\nO grokbox (100.77.130.5:8080) é o worker principal do portão oficial (`runner.py --quick`, ~143 s a 261 s). A plataforma congela e restaura a VM várias vezes por dia (confirmado pelo suporte, ticket T-H65476: não há como desativar). A cada restauração o IP/gateway mudam, o Tailscale fica Online=false por 4 a 15 min e processos em execução recebem SIGTERM.\n\n## Problema (evidência 15 a 17/10)\nEm 11 dos 15 jobs de 16/10 17:40 a 17/10 06:53 o pytest morreu com `exit code: -15` em ~2 s (ex.: job 33c87b47). O worker (`remote_worker.py`, ~linha 1043) grava o job como `failed` com `result_json` do harness e o despachante (`remote_dispatch.py`) lê isso como `[HARNESS_FAIL]`, ou seja, veredito de candidato. O retry existente (`RESTART_RETRY_ERROR_CODES`: worker_restarted, worker_unreachable, job_lost_on_worker) nunca dispara nesse caso.\n\n## Escopo\n1. Morte por sinal é infraestrutura, não veredito.\n   - No worker: se `returncode < 0` (SIGTERM/SIGKILL) ou algum passo terminar com exit code negativo, ou o job durar < 15 s sem nenhum teste executado, marcar `failed` com `error_code=\"worker_signal_killed\"` e sem tratar o resultado como veredito.\n   - No despachante: incluir `worker_signal_killed` em `INFRASTRUCTURE_ERROR_CODES` e em `RESTART_RETRY_ERROR_CODES`; manter grace de 180 s e 2 reenvios no mesmo worker antes de cair para o Desktop.\n2. Portão de estabilidade antes de enviar: o despachante só submete ao grokbox depois de 3 `/health` ok seguidos (intervalo 20 s) com o mesmo `instance_id`/`started_at`. Opcional no worker: recusar job (HTTP 503, `settling`) por 60 s depois de mudança de gateway/IP.\n3. Diagnóstico: no processo do runner, capturar SIGTERM com `signal.sigwaitinfo` (thread) e registrar no log do job o PID/UID de quem enviou, horário e estado do Tailscale. Hoje só se vê o exit code.\n4. (Fase 2, opcional) Shards do pytest com cache de PASS por shard e árvore, para o retry rodar só o que não terminou.\n5. Testes frágeis sob congelamento: `tests/test_remote_job_recovery.py::test_a_live_owner_is_never_taken_over` e `::test_root_cause_restart_mid_job_used_to_look_like_silence` falharam no gate de 17/10 06:53 (job 0d4fc6c5). Torná-los tolerantes a pausa da VM ou com retry.\n\n## Critérios de aceite\n- Um job morto por SIGTERM no grokbox nunca aparece como `[HARNESS_FAIL]`; aparece `[REMOTE_RETRY]` e o job é reenviado.\n- Testes unitários cobrindo o novo código de erro no worker e no despachante.\n- Gate oficial passando; nenhuma regressão no fallback para o Desktop.\n- Documentar em docs a regra: congelamento de VM = infraestrutura.\n\n## Fora do escopo (já feito fora do repo)\nSupervisor do grokbox: reload do worker só quando ocioso (rechecado no momento) e registro de eventos da VM em `/workspace/darkfac/run/vm-events.log`.",
+    "problem_statement": "O comando documentado `python scripts/start_fleet_worker.py probe --host notebook --json`, executado na raiz do repositório, termina com ModuleNotFoundError: No module named core em probe_host_inventory. O comando start funciona e o daemon pode subir, mas o probe não consegue validar banco, ferramentas nem capacidades dos hosts da frota.",
     "core_journey": [
-      "# Resiliência do worker grokbox a congelamentos da VM (SIGTERM tratado como veredito)\n\n## Contexto\nO grokbox (100.77.130.5:8080) é o worker principal do portão oficial (`runner.py --quick`, ~143 s a 261 s). A plataforma congela e restaura a VM várias vezes por dia (confirmado pelo suporte, ticket T-H65476: não há como desativar). A cada restauração o IP/gateway mudam, o Tailscale fica Online=false por 4 a 15 min e processos em execução recebem SIGTERM.\n\n## Problema (evidência 15 a 17/10)\nEm 11 dos 15 jobs de 16/10 17:40 a 17/10 06:53 o pytest morreu com `exit code: -15` em ~2 s (ex.: job 33c87b47). O worker (`remote_worker.py`, ~linha 1043) grava o job como `failed` com `result_json` do harness e o despachante (`remote_dispatch.py`) lê isso como `[HARNESS_FAIL]`, ou seja, veredito de candidato. O retry existente (`RESTART_RETRY_ERROR_CODES`: worker_restarted, worker_unreachable, job_lost_on_worker) nunca dispara nesse caso.\n\n## Escopo\n1. Morte por sinal é infraestrutura, não veredito.\n   - No worker: se `returncode < 0` (SIGTERM/SIGKILL) ou algum passo terminar com exit code negativo, ou o job durar < 15 s sem nenhum teste executado, marcar `failed` com `error_code=\"worker_signal_killed\"` e sem tratar o resultado como veredito.\n   - No despachante: incluir `worker_signal_killed` em `INFRASTRUCTURE_ERROR_CODES` e em `RESTART_RETRY_ERROR_CODES`; manter grace de 180 s e 2 reenvios no mesmo worker antes de cair para o Desktop.\n2. Portão de estabilidade antes de enviar: o despachante só submete ao grokbox depois de 3 `/health` ok seguidos (intervalo 20 s) com o mesmo `instance_id`/`started_at`. Opcional no worker: recusar job (HTTP 503, `settling`) por 60 s depois de mudança de gateway/IP.\n3. Diagnóstico: no processo do runner, capturar SIGTERM com `signal.sigwaitinfo` (thread) e registrar no log do job o PID/UID de quem enviou, horário e estado do Tailscale. Hoje só se vê o exit code.\n4. (Fase 2, opcional) Shards do pytest com cache de PASS por shard e árvore, para o retry rodar só o que não terminou.\n5. Testes frágeis sob congelamento: `tests/test_remote_job_recovery.py::test_a_live_owner_is_never_taken_over` e `::test_root_cause_restart_mid_job_used_to_look_like_silence` falharam no gate de 17/10 06:53 (job 0d4fc6c5). Torná-los tolerantes a pausa da VM ou com retry.\n\n## Critérios de aceite\n- Um job morto por SIGTERM no grokbox nunca aparece como `[HARNESS_FAIL]`; aparece `[REMOTE_RETRY]` e o job é reenviado.\n- Testes unitários cobrindo o novo código de erro no worker e no despachante.\n- Gate oficial passando; nenhuma regressão no fallback para o Desktop.\n- Documentar em docs a regra: congelamento de VM = infraestrutura.\n\n## Fora do escopo (já feito fora do repo)\nSupervisor do grokbox: reload do worker só quando ocioso (rechecado no momento) e registro de eventos da VM em `/workspace/darkfac/run/vm-events.log`."
+      "Executar o probe documentado a partir de um checkout limpo e receber um HostInventory válido."
     ],
-    "non_goals": [],
+    "non_goals": [
+      "Não alterar credenciais, serviço Tailscale, chaves de acesso nem políticas do worker."
+    ],
     "reachability_contract": "",
     "acceptance_criteria": [
-      "Job morto por SIGTERM (exit code negativo ou job < 15 s sem testes) no grokbox vira error_code worker_signal_killed, entra em INFRASTRUCTURE_ERROR_CODES e RESTART_RETRY_ERROR_CODES e nunca aparece como HARNESS_FAIL; ha [REMOTE_RETRY] e reenvio ao mesmo worker.",
-      "Despachante exige 3 /health ok seguidos (20 s) com mesmo instance_id antes de submeter ao grokbox; worker pode recusar job (503 settling) por 60 s apos mudanca de gateway.",
-      "Runner registra no log do job quem enviou o SIGTERM (si_pid), horario e estado do Tailscale.",
-      "Testes test_remote_job_recovery.py tolerantes a pausa da VM; testes novos cobrem worker_signal_killed no worker e no despachante; gate oficial verde e fallback para o Desktop sem regressao."
+      "O comando documentado python scripts/start_fleet_worker.py probe --host notebook --json importa os módulos do repositório e retorna HostInventory válido, sem ModuleNotFoundError.",
+      "O probe informa database_status e disponibilidade de ferramentas/harnesses; erros de banco permanecem estruturados e não exibem URL nem senha."
     ],
-    "suggested_files": [],
-    "estimated_complexity": "medium",
+    "suggested_files": [
+      "scripts/start_fleet_worker.py",
+      "tests/test_fleet_worker_bootstrap.py"
+    ],
+    "estimated_complexity": "low",
     "dependencies": [],
-    "created_at": "2026-10-17T12:04:25.878707Z",
-    "updated_at": "2026-10-17T12:04:25.878713Z"
+    "created_at": "2026-10-17T12:46:37.066166Z",
+    "updated_at": "2026-10-17T12:46:37.066166Z"
   }
 ]

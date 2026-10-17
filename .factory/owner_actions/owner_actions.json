@@ -673,7 +673,7 @@
       "kind": "action",
       "title": "Commit humano em core/harness/test_subagent.py (USR-249)",
       "priority": "medium",
-      "status": "open",
+      "status": "done",
       "why": "core/harness/test_subagent.py e protegido por core/orchestrator/guard.py; a fabrica nao pode editar esse arquivo. O ticket USR-249 pede que o pre-teste focal pare de descartar a saida parcial quando o timeout estoura (TimeoutExpired.stdout chega em bytes e o guard isinstance(..., str) jogava tudo fora). A correcao e pequena (um helper _decode_partial + 2 linhas no except TimeoutExpired) e ja esta testada e pronta como patch em docs/proposals.",
       "blocks": [
         "USR-249"
@@ -697,10 +697,10 @@
           "command": "git -C C:/dev/DarkFac add core/harness/test_subagent.py tests/test_focal_timeout_partial_output.py && git -C C:/dev/DarkFac commit -m \"fix(harness): pre-teste focal preserva saida parcial em bytes quando o timeout estoura [USR-249]\" && git -C C:/dev/DarkFac fetch origin && git -C C:/dev/DarkFac rebase origin/main && git -C C:/dev/DarkFac push origin HEAD:main"
         }
       ],
-      "verify": "python C:/dev/DarkFac/core/orchestrator/guard.py origin/main imprime [GUARD PASS] depois do push; core/harness/test_subagent.py no main contem _decode_partial; os 3 testes de tests/test_focal_timeout_partial_output.py passam.",
+      "verify": "Feito pelo owner no commit ca62f21: core/harness/test_subagent.py contem _decode_partial e 3/3 testes passam.",
       "created_at": "2026-10-12T20:38:46Z",
       "created_by": "claude-code",
-      "resolved_at": null
+      "resolved_at": "2026-10-17T13:21:19.573850+00:00"
     },
     {
       "id": "OA-019",
@@ -1108,10 +1108,10 @@
     {
       "id": "OA-029",
       "kind": "action",
-      "title": "Corrigir a conexão do Notebook ao control store para usar darkfac_worker",
+      "title": "Verificar e configurar com segurança a conexão do Notebook ao control store",
       "priority": "high",
-      "status": "open",
-      "why": "O preflight HF-03 da conexão atual falha porque a variável de usuário DARKFAC_HF02_DATABASE_URL usa o superusuário postgres, proibido pela política. Sem credencial limitada válida, a linha não pode admitir ciclos com segurança nem usar o Notebook em paralelo. Os tickets USR-268, USR-270 e USR-294 ficam bloqueados.",
+      "status": "done",
+      "why": "Verificação somente de leitura no host AI_Notebook confirmou DARKFAC_HF02_DATABASE_URL no escopo de usuário/processo, com usuário postgres e banco darkfac_hf02_prod; os aliases DARKHUB_LINE_DATABASE_URL e DARKHUB_CONTROL_DATABASE_URL não estão definidos nos escopos processo, usuário ou máquina. A política HF-03 proíbe postgres. Esta é uma configuração legada, não uma falha do Grokbox. O owner encontrou um DSN candidato com usuário darkfac_worker, host Tailscale 100.83.176.60 e banco darkfac_hf02_prod; a senha foi ocultada e ainda não foi validada. Só atualizar o Notebook com o valor completo obtido da fonte segura e manter esta ação aberta até o probe confirmar ready.",
       "blocks": [
         "USR-268",
         "USR-270",
@@ -1120,20 +1120,51 @@
       "depends_on": [],
       "steps": [
         {
-          "text": "No Windows 11, abra Iniciar, pesquise Configurações avançadas do sistema, abra a guia Avançado e clique em Variáveis de Ambiente. A Microsoft também documenta Win+R > SystemPropertiesAdvanced: https://support.microsoft.com/en-us/windows/experience/system-configuration-tools-in-windows"
+          "text": "Não altere o Windows ainda. O valor atual já foi verificado sem exibir segredo: DARKFAC_HF02_DATABASE_URL está definido para o usuário guigc e usa postgres no banco darkfac_hf02_prod. Nenhum dos aliases DARKHUB_LINE_DATABASE_URL e DARKHUB_CONTROL_DATABASE_URL está definido no processo, usuário ou máquina."
         },
         {
-          "text": "Em Variáveis de usuário para guigc, selecione DARKFAC_HF02_DATABASE_URL e clique Editar. No campo Valor, use o DSN autorizado do usuário darkfac_worker para o banco darkfac_hf02_prod, formato postgresql://darkfac_worker:<SEGREDO_APROVADO>@<HOST_INTERNO_OU_TAILSCALE>:5432/darkfac_hf02_prod. Não use postgres e não cole o segredo no chat, em ticket ou em arquivo versionado. Se precisar localizar a variável de serviço no Dokploy, abra Projeto darkfac-core > ambiente production > serviço darkfac-coordinator > Environment; documentação oficial: https://docs.dokploy.com/docs/core/variables. Se não houver um DSN aprovado para darkfac_worker, mantenha esta ação aberta e siga o handoff docs/handoffs/HF-03.md para provisão restrita antes de continuar."
+          "text": "No navegador, abra https://dokploy.ggcampos.com e entre no painel. No Dashboard, abra o projeto darkfac-core, selecione o ambiente production e abra o serviço darkfac-coordinator. Na aba Environment, procure DARKFAC_HF02_DATABASE_URL, DARKHUB_LINE_DATABASE_URL e DARKHUB_CONTROL_DATABASE_URL. Verifique também as variáveis compartilhadas do projeto e do ambiente production, pois o Dokploy permite variáveis nos três níveis. Não edite nem remova nenhuma variável do serviço; esta etapa é apenas consulta. Documentação oficial: https://docs.dokploy.com/docs/core/variables."
         },
         {
-          "text": "Clique OK em cada janela aberta e feche completamente o Codex. Abra-o novamente para carregar a variável de usuário atualizada; abra um terminal com a pasta C:\\dev\\DarkFac como diretório."
+          "text": "Só considere utilizável um DSN cuja conta seja darkfac_worker e cujo banco seja darkfac_hf02_prod. Se a variável apontar para uma referência ${{vault...}}, confira no provedor indicado se existe o segredo correspondente, sem revelar ou colar o valor em chat, ticket ou arquivo. Se encontrar um DSN aprovado, obtenha o valor pelo canal seguro já autorizado. Se não encontrar, se estiver mascarado sem acesso à fonte, ou se o usuário/banco forem diferentes, PARE: não adivinhe, não crie usuário/banco, não abra porta externa do PostgreSQL e não altere o Windows. Deixe esta ação aberta para o provisionamento restrito conforme docs/handoffs/HF-03.md."
         },
         {
-          "text": "Execute o comando de verificação. Ele imprime somente status, usuário e nome do banco; não imprime o DSN nem a senha."
+          "text": "Somente depois de obter o DSN completo pela fonte segura, no AI_Notebook pressione Win+R, digite SystemPropertiesAdvanced e pressione Enter. Na janela Propriedades do Sistema, abra Avançado > Variáveis de Ambiente. Em Variáveis de usuário para guigc, selecione DARKFAC_HF02_DATABASE_URL e clique Editar. Mantenha o nome da variável e substitua o campo Valor pelo DSN aprovado completo: postgresql://darkfac_worker:<SEGREDO_APROVADO>@100.83.176.60:5432/darkfac_hf02_prod. A senha precisa ser a real e qualquer caractere reservado deve estar codificado como no DSN emitido pela fonte segura; não digite literalmente <senha>, não use postgres, endereço público ou aspas. Clique OK nas janelas para salvar. A Microsoft documenta este caminho em https://support.microsoft.com/en-us/windows/experience/system-configuration-tools-in-windows."
+        },
+        {
+          "text": "Feche completamente o Codex e abra-o novamente para carregar a variável de usuário. Abra o terminal integrado com C:\\dev\\DarkFac como pasta atual e execute a verificação abaixo. Ela imprime somente status, usuário e nome do banco, nunca o DSN ou a senha. Se o resultado não for ready/darkfac_worker/darkfac_hf02_prod, pare e mantenha a ação aberta; não tente outros valores."
         }
       ],
       "verify": "Set-Location C:\\dev\\DarkFac; & \"C:\\Users\\guigc\\AppData\\Local\\Programs\\Python\\Python312\\python.exe\" -c \"import os; from core.orchestrator.cloud_db import probe_cloud_database; p=probe_cloud_database(os.getenv('DARKFAC_HF02_DATABASE_URL')); print('status=%s user=%s database=%s' % (p.status,p.current_user,p.database_name)); raise SystemExit(0 if p.status=='ready' and p.current_user=='darkfac_worker' and p.database_name=='darkfac_hf02_prod' else 1)\"",
       "created_at": "2026-10-17T10:10:58Z",
+      "created_by": "codex",
+      "resolved_at": "2026-10-17T12:06:24Z"
+    },
+    {
+      "id": "OA-030",
+      "kind": "action",
+      "title": "Confirmar e restabelecer a conectividade Tailscale do Grokbox",
+      "priority": "medium",
+      "status": "open",
+      "why": "Em 17/10/2026, o Notebook observou timeouts repetidos no ping Tailscale e em http://100.77.130.5:8080/health. O netcheck local registrou troca de gateway/IP às 09:22:42; apesar de uma resposta posterior via DERP, as sondas seguintes voltaram a falhar. A janela de cinco minutos estáveis exigida antes de encaminhar USR-270 ainda não foi alcançada.",
+      "blocks": [
+        "USR-270"
+      ],
+      "depends_on": [],
+      "steps": [
+        {
+          "text": "No navegador do Notebook, abra https://login.tailscale.com/admin/machines e entre no tailnet DarkFac. Na página Machines, procure o dispositivo grokbox (hostname grok-bot-vm-418374532, IP 100.77.130.5) e confira o estado Online e Last seen. Não use Remove, não altere ACLs e não mude a expiração da chave."
+        },
+        {
+          "text": "Se o peer estiver Offline, abra a console já existente da VM Grokbox no provedor onde ela foi criada. Execute somente a consulta abaixo e copie o estado do serviço e o JSON de health para esta ação. Não reinicie serviços, não recrie a VM e não abra portas públicas.",
+          "command": "/usr/bin/systemctl is-active tailscaled; /usr/bin/curl -fsS --max-time 5 http://127.0.0.1:8080/health"
+        },
+        {
+          "text": "Depois que o peer aparecer Online, mantenha o Notebook conectado e aguarde a verificação automática da DarkFac: ping respondido e /health com status=ok, busy=false e queue_length=0 continuamente por cinco minutos. O USR-270 só será encaminhado após esse critério."
+        }
+      ],
+      "verify": "No Notebook, o monitor deve registrar pelo menos 10 amostras consecutivas ao longo de >=300 s; cada amostra precisa conter pong from grokbox via Tailscale e HTTP /health status=ok, busy=false, queue_length=0. O comando de inspeção de uma amostra é: & \"C:\\Program Files\\Tailscale\\tailscale.exe\" ping --c 1 --timeout 5s grokbox; & \"C:\\Windows\\System32\\curl.exe\" -fsS --max-time 15 http://100.77.130.5:8080/health",
+      "created_at": "2026-10-17T12:32:40Z",
       "created_by": "codex",
       "resolved_at": null
     },
