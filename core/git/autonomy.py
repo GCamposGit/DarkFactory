@@ -46,6 +46,7 @@ from core.git.ci_checks import (
     pending_check_labels,
     sanitize,
 )
+from core.owner_actions.merge import merge_owner_actions_3way
 from core.owner_actions.dedupe import OWNER_ACTIONS_RELATIVE, renumber_duplicate_owner_actions
 from core.owner_actions.store import OwnerActionStore
 from core.roadmap.models import DeliveryStatus, LifecycleStage, PlanningHorizon, RoadmapItemType
@@ -629,7 +630,50 @@ class GitAutonomyManager:
             return False
         return runner(["auth", "status"], target).returncode == 0
 
-    def _resolve_ledger_conflict(self, cwd: Path, remote_ref: str) -> tuple[bool, str]:
+    def _resolve_known_conflicts(self, cwd: Path, remote_ref: str, files: Sequence[str]) -> tuple[bool, str]:
+        """Resolve conflicts limited to the demands ledger and/or owner_actions.json (USR-312)."""
+        known = {_LEDGER_RELATIVE, OWNER_ACTIONS_RELATIVE}
+        if not files or not set(files) <= known:
+            return False, "conflict outside the auto-resolvable files"
+        if _LEDGER_RELATIVE in files:
+            resolved, msg = self._resolve_ledger_conflict(cwd, remote_ref, commit=OWNER_ACTIONS_RELATIVE not in files)
+            if not resolved:
+                return False, msg
+        if OWNER_ACTIONS_RELATIVE in files:
+            resolved, msg = self._resolve_owner_actions_conflict(cwd, remote_ref)
+            if not resolved:
+                return False, msg
+        return True, "merged"
+
+    def _resolve_owner_actions_conflict(self, cwd: Path, remote_ref: str) -> tuple[bool, str]:
+        """3-way merge of owner_actions.json by id, then renumber id collisions and commit (USR-312)."""
+        target = cwd / OWNER_ACTIONS_RELATIVE
+        mb = self._git_out(["merge-base", "HEAD", remote_ref], cwd)
+        base_raw = ""
+        if mb:
+            res_base = safe_show(mb, OWNER_ACTIONS_RELATIVE, cwd=cwd)
+            if res_base.returncode == 0:
+                base_raw = res_base.stdout
+        res_ours = safe_show("HEAD", OWNER_ACTIONS_RELATIVE, cwd=cwd)
+        res_theirs = safe_show(remote_ref, OWNER_ACTIONS_RELATIVE, cwd=cwd)
+        if res_ours.returncode != 0 or res_theirs.returncode != 0:
+            return False, "failed to read owner_actions.json revisions for 3-way merge"
+        ok, merged_text, err = merge_owner_actions_3way(base_raw, res_ours.stdout, res_theirs.stdout)
+        if not ok:
+            return False, err or "owner_actions.json 3-way merge failed"
+        target.write_text(merged_text, encoding="utf-8")
+        changes = renumber_duplicate_owner_actions(cwd, remote_ref=remote_ref)
+        if changes:
+            logger.info("owner_actions: colisao de id resolvida no merge: %s", "; ".join(changes))
+        add_res = _run_git(["add", OWNER_ACTIONS_RELATIVE], cwd=cwd)
+        if add_res.returncode != 0:
+            return False, f"git add {OWNER_ACTIONS_RELATIVE} failed: {add_res.stderr.strip()}"
+        commit_res = _run_git(["commit", "--no-edit"], cwd=cwd)
+        if commit_res.returncode != 0:
+            return False, f"git commit --no-edit failed: {commit_res.stderr.strip()}"
+        return True, "merged"
+
+    def _resolve_ledger_conflict(self, cwd: Path, remote_ref: str, *, commit: bool = True) -> tuple[bool, str]:
         """Attempt a 3-way line/ticket merge of .factory/demands/demands.json (USR-112)."""
         ledger_path = cwd / _LEDGER_RELATIVE
         if not ledger_path.is_file():
@@ -653,6 +697,8 @@ class GitAutonomyManager:
         add_res = _run_git(["add", _LEDGER_RELATIVE], cwd=cwd)
         if add_res.returncode != 0:
             return False, f"git add {_LEDGER_RELATIVE} failed: {add_res.stderr.strip()}"
+        if not commit:
+            return True, "staged"
         commit_res = _run_git(["commit", "--no-edit"], cwd=cwd)
         if commit_res.returncode != 0:
             return False, f"git commit --no-edit failed: {commit_res.stderr.strip()}"
@@ -674,8 +720,8 @@ class GitAutonomyManager:
             if merge.returncode == 0:
                 return True, [], "merged"
             files = self._conflict_files(cwd)
-            if files == [_LEDGER_RELATIVE]:
-                resolved, msg = self._resolve_ledger_conflict(cwd, remote_ref)
+            if files and set(files) <= {_LEDGER_RELATIVE, OWNER_ACTIONS_RELATIVE}:
+                resolved, msg = self._resolve_known_conflicts(cwd, remote_ref, files)
                 if resolved:
                     return True, [], "merged"
                 _run_git(["merge", "--abort"], cwd=cwd)
@@ -691,8 +737,8 @@ class GitAutonomyManager:
         if merge.returncode == 0:
             return True, [], "merged"
         files = self._conflict_files(cwd) or files
-        if files == [_LEDGER_RELATIVE]:
-            resolved, msg = self._resolve_ledger_conflict(cwd, remote_ref)
+        if files and set(files) <= {_LEDGER_RELATIVE, OWNER_ACTIONS_RELATIVE}:
+            resolved, msg = self._resolve_known_conflicts(cwd, remote_ref, files)
             if resolved:
                 return True, [], "merged"
             _run_git(["merge", "--abort"], cwd=cwd)
