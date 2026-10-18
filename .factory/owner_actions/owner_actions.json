@@ -1260,7 +1260,7 @@
       "kind": "action",
       "title": "Publicar na main a correcao protegida do USR-298 (SIGTERM do grokbox vira infraestrutura com reenvio)",
       "priority": "critical",
-      "status": "open",
+      "status": "done",
       "why": "O grokbox (worker principal do portao) mata o pytest com SIGTERM em ~1 s e o portao publica [HARNESS_FAIL] com 0 testes, como se o candidato estivesse errado (visto de novo em 18/10 02:18 UTC no USR-252, que ainda acionou a autocorrecao do agente sem motivo). A correcao esta pronta e revisada na worktree, mas so altera core/harness/*, que e protegido pelo guard: agente nao pode commitar. Ate publicar, o portao so funciona no Desktop (um ciclo por vez).",
       "blocks": [
         "USR-298",
@@ -1291,7 +1291,7 @@
       "verify": "gh api repos/GCamposGit/DarkFactory/contents/core/harness/remote_worker.py?ref=main --jq .content | base64 -d contem worker_signal_killed; um portao no grokbox depois da atualizacao do worker termina com [HARNESS_PASS] e [TEST_COUNT] positivo, ou com [REMOTE_RETRY] em vez de [HARNESS_FAIL] se a VM congelar.",
       "created_at": "2026-10-18T05:30:03Z",
       "created_by": "claude-code",
-      "resolved_at": null
+      "resolved_at": "2026-10-18T11:53:17Z"
     },
     {
       "id": "OA-033",
@@ -1440,6 +1440,35 @@
       "verify": "O PR #411 aparece como MERGED e o ticket USR-313 esta em .factory/demands/demands.json na main.",
       "created_at": "2026-10-18T12:12:07Z",
       "created_by": "queue-registration",
+      "resolved_at": null
+    },
+    {
+      "id": "OA-035",
+      "kind": "action",
+      "title": "Atualizar o worker do grokbox para a main (USR-298) e coletar quem envia o SIGTERM ao pytest",
+      "priority": "critical",
+      "status": "open",
+      "why": "O codigo do USR-298 esta na main (32fd792), mas o worker do grokbox continua no commit antigo d6d0c0b (/health git_sha) e nao se atualiza sozinho. Em 18/10 10:31 UTC, logo depois de a VM voltar (sem congelamento), um portao so no grokbox morreu de novo: 'bringing up nodes...' e o pytest -n 1 terminou com exit -15 em 0,9 s, 0 testes. Nada no repositorio envia sinal na coleta (conftest/pytest.ini verificados), entao o emissor esta fora do candidato (worker antigo, supervisor da VM, limite de processos/cgroup). Sem o worker novo, todo portao no grokbox vira [HARNESS_FAIL] falso e a fila depende do Desktop (o host mais lento).",
+      "blocks": [
+        "USR-298",
+        "USR-270"
+      ],
+      "depends_on": [],
+      "steps": [
+        {
+          "text": "Abra o chat do Grok 'Chief of Staff' (o que tem acesso a VM grok-bot-vm-418374532) e envie a mensagem do passo 2, copiando o bloco inteiro."
+        },
+        {
+          "text": "Mensagem para o Chief of Staff: 'Na VM do grokbox: (1) cd /workspace/darkfac/DarkFactory && git fetch origin && git checkout main && git pull --ff-only (deve ficar em 32fd792 ou mais novo); (2) reinicie o worker de testes pelo mesmo supervisor que o mantem de pe hoje, so com ele ocioso (curl -s http://127.0.0.1:8080/health mostrando busy=false); (3) confirme que o /health mostra o git_sha novo; (4) colete e me devolva: dmesg | tail -50, cat /sys/fs/cgroup/pids.max e /sys/fs/cgroup/memory.max (se existirem), ulimit -a, e a config do supervisor do worker; (5) reproduza a mao: cd /workspace/darkfac/DarkFactory && python -m pytest -n 1 tests/test_clock_bomb_guard.py -q; echo exit=$? e me devolva a saida.'"
+        },
+        {
+          "text": "Cole a resposta do Chief of Staff no chat do Claude Code (ou num comentario desta acao). O agente roda o portao de prova so no grokbox e, com o worker novo, o job log passa a ter a linha [SIGTERM_PROBE] com PID/UID de quem mandou o sinal.",
+          "command": "Invoke-RestMethod http://100.77.130.5:8080/health -TimeoutSec 15 | Select-Object git_sha, busy"
+        }
+      ],
+      "verify": "GET http://100.77.130.5:8080/health devolve git_sha igual ou posterior a 32fd792; um portao 'runner.py --quick --no-cache --remote-required' so no grokbox termina com [HARNESS_PASS] e [TEST_COUNT] positivo, ou mostra [SIGTERM_PROBE] e [REMOTE_RETRY] em vez de [HARNESS_FAIL].",
+      "created_at": "2026-10-18T11:53:17Z",
+      "created_by": "claude-code",
       "resolved_at": null
     }
   ]

@@ -9059,5 +9059,77 @@
     "dependencies": [],
     "created_at": "2026-10-18T11:19:44.953004Z",
     "updated_at": "2026-10-18T11:19:44.953004Z"
+  },
+  {
+    "id": "USR-313",
+    "project_id": "darkfac",
+    "title": "Publicacao de arquivo protegido por push direto na main pula o CI e deixou a main vermelha (32fd792)",
+    "origin": "agent",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand",
+      "bug",
+      "governance-process"
+    ],
+    "problem_statement": "Em 18/10/2026 o owner publicou o USR-298 (core/harness/*, protegido) por push direto na main, seguindo a OA-032. A instrucao trocou o portao completo por testes focados (o Desktop estava ocupado), e o push direto nao passa pelo CI de PR. tests/test_clock_bomb_guard.py reprovou datetime(2026, ...) em tests/test_remote_signal_killed.py:272 e a main ficou vermelha; o PR #405 (USR-212) falhou no CI por isso. Corrigido pelo PR #406, mas o processo continua permitindo o mesmo erro.",
+    "core_journey": [],
+    "non_goals": [
+      "Nao relaxar a protecao do guard nem permitir que agentes commitem core/harness/*.",
+      "Nao alterar o ruleset da main sem decisao do owner."
+    ],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "O runbook/OA de publicacao protegida manda primeiro push numa branch owner/* com PR para o CI rodar (pr-validation Linux e Windows), e so depois o push direto na main, com o mesmo SHA.",
+      "O gerador de OA de publicacao protegida (owner_action/autonomy) inclui esse passo e o comando gh pr checks para conferir o CI verde antes do push na main.",
+      "Teste cobre o texto/passos gerados para uma OA de publicacao protegida."
+    ],
+    "suggested_files": [
+      "docs/runbooks/",
+      "scripts/owner_action.py",
+      "core/owner_actions/"
+    ],
+    "estimated_complexity": "low",
+    "dependencies": [],
+    "created_at": "2026-10-18T11:53:17.759154Z",
+    "updated_at": "2026-10-18T11:53:17.759154Z"
+  },
+  {
+    "id": "USR-311",
+    "project_id": "darkfac",
+    "title": "Testes do spike de runtime nativo instaveis no Windows da CI (test_runtime_spike_native e lab usr157 R02)",
+    "origin": "agent",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand",
+      "bug",
+      "flaky_test"
+    ],
+    "problem_statement": "Em 18/10/2026 dois PRs sem relacao com o runtime reprovaram so no job windows-latest, cada um num teste do spike nativo: (1) PR #406, run 39119475416, job 117651949241: tests/test_runtime_spike_native.py::test_native_adapter_executes_core_path_and_keeps_capability_gaps - AssertionError: workflow 'workflow-1' did not reach a terminal event (1 failed, 4361 passed, 1075,9 s). (2) PR #401 (USR-210), run 39104215090: cenario usr157 R02 NATIVE_SQLITE com StaleLeaseError 'usr157-R02-1 is stale or expired' e error_code STORE_UNAVAILABLE (1 failed, 4341 passed, 1023 s). Os dois passaram no Ubuntu e no portao do Desktop. Relacionado ao USR-157 (causa do R02), mas este ticket trata da instabilidade do teste na CI.",
+    "core_journey": [],
+    "non_goals": [
+      "Nao pular, marcar xfail nem adicionar retry automatico aos testes.",
+      "Nao alterar timeouts/leases de producao do runtime para esconder a falha."
+    ],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Causa da instabilidade de cada teste identificada com evidencia (lease por relogio real, espera ativa, carga do runner Windows).",
+      "Testes deterministicos (relogio/lease injetados), sem esperas reais dependentes de carga.",
+      "20 execucoes seguidas de cada teste no Windows sem falha, inclusive com xdist ativo."
+    ],
+    "suggested_files": [
+      "tests/test_runtime_spike_native.py"
+    ],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-18T11:53:17.772862Z",
+    "updated_at": "2026-10-18T11:53:17.772862Z"
   }
 ]
