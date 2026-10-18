@@ -646,8 +646,8 @@ const FACTORY_HEALTH_SOURCES = [
   { id: "n8n-workflows", label: "n8n — Workflows", url: "/api/integrations/n8n/workflows?limit=50", render: renderN8nWorkflowsHealthCard },
   { id: "harness-workers", label: "Workers do Harness", url: "/api/harness/workers", render: renderHarnessWorkersHealthCard },
   { id: "webhooks", label: "Eventos de Webhook", url: "/api/webhooks/events?limit=20", render: renderWebhookEventsHealthCard },
-  { id: "hf15-status", label: "HF-15 — Ambiente", url: "/api/hf15/status", render: renderHf15StatusHealthCard },
-  { id: "hf15-metrics", label: "HF-15 — Métricas SLA", url: "/api/hf15/metrics", render: renderHf15MetricsHealthCard },
+  { id: "hf15-status", label: "Ambiente de aceite", url: "/api/hf15/status", render: renderHf15StatusHealthCard },
+  { id: "hf15-metrics", label: "Métricas de SLA", url: "/api/hf15/metrics", render: renderHf15MetricsHealthCard },
 ];
 
 function mountFactoryHealthBlock() {
@@ -666,7 +666,7 @@ function mountFactoryHealthBlock() {
           <span id="factory-health-pill" class="rounded-full border border-slate-700 bg-slate-900/60 px-2 py-0.5 text-[10px] font-mono text-slate-400">sincronizando</span>
         </h3>
         <p class="mt-1 text-[11px] text-slate-400">
-          Telegram, n8n, workers do harness, eventos de webhook e ambiente HF-15 — leitura direta, sem ações mutáveis.
+          Telegram, n8n, workers do harness, eventos de webhook e ambiente de aceite — leitura direta, sem ações mutáveis.
         </p>
       </div>
       <button id="factory-health-refresh" type="button" class="inline-flex items-center gap-1.5 self-start rounded-lg border border-indigo-500/40 bg-indigo-500/10 px-3 py-1.5 text-[11px] font-medium text-indigo-300 transition hover:bg-indigo-500/20 active:scale-95">
@@ -903,7 +903,7 @@ function renderHf15StatusHealthCard(data, fetchedAt) {
       ? `<div class="text-rose-300">Falhas: ${failedChecks.map((c) => healthEscapeHtml(c.name || "—")).join(", ")}</div>`
       : "",
   ].join("");
-  return healthCardShell("HF-15 — Ambiente", healthDotClass(state), rows, healthRelativeAge(fetchedAt));
+  return healthCardShell("Ambiente de aceite", healthDotClass(state), rows, healthRelativeAge(fetchedAt));
 }
 
 function renderHf15MetricsHealthCard(data, fetchedAt) {
@@ -919,7 +919,7 @@ function renderHf15MetricsHealthCard(data, fetchedAt) {
     healthRow("SLA atingido", slasMet === true ? "sim" : slasMet === false ? "não" : "—"),
   ].join("");
   const actionBtn = '<button type="button" onclick="openRollbackDrillModal()" class="px-2 py-0.5 rounded text-[10px] font-mono border border-amber-500/40 bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 transition active:scale-95">Rollback Drill</button>';
-  return healthCardShell("HF-15 — Métricas SLA", healthDotClass(state), rows, healthRelativeAge(fetchedAt), actionBtn);
+  return healthCardShell("Métricas de SLA", healthDotClass(state), rows, healthRelativeAge(fetchedAt), actionBtn);
 }
 
 // =============================================================================

@@ -444,7 +444,7 @@ async function loadPortfolioEfficiency() {
           <div class="flex items-center justify-between">
             <div>
               <h3 class="text-sm font-bold text-white flex items-center gap-2">
-                <span>🖥️</span> Worker Execution Slots (HF-23)
+                <span>🖥️</span> Vagas de execução dos workers
               </h3>
               <p class="text-xs text-slate-400 mt-0.5">Slots de concorrência calibrados para ambiente Windows e GPU compartilhada.</p>
             </div>
@@ -574,7 +574,7 @@ function renderPortfolioLineTab() {
   if (!container || !portfolioState.data) return;
 
   const stages = [
-    { id: "grill", name: "1. Grill (Intake & Desambiguação)", desc: "Entrevista determinística Gate G1 para eliminar lacunas materiais." },
+    { id: "grill", name: "1. Grill (Intake & Desambiguação)", desc: "Entrevista determinística para eliminar lacunas materiais." },
     { id: "planning", name: "2. Planejamento (PRD & Handoffs)", desc: "Design técnico com contratos Pydantic v2 e handoffs pequenos." },
     { id: "build", name: "3. Build (Implementação & Testes)", desc: "Ciclo PIV com protocolo fail-closed e testes determinísticos." },
     { id: "review", name: "4. Review Adversarial Independente", desc: "Auditoria estrita de outra família de modelos sem acoplamento." },
@@ -589,7 +589,7 @@ function renderPortfolioLineTab() {
         <div class="flex items-center justify-between">
           <div>
             <h3 class="text-sm font-bold text-white flex items-center gap-2">
-              <span>🏭</span> Esteira Autônoma de Produção (HF-27)
+              <span>🏭</span> Esteira autônoma de produção
             </h3>
             <p class="text-xs text-slate-400 mt-0.5">Estágios padronizados para levar uma demanda do intake ao release em produção.</p>
           </div>
@@ -614,7 +614,7 @@ function renderPortfolioLineTab() {
       <div class="grid grid-cols-1 md:grid-cols-2 gap-5">
         <div class="p-5 rounded-2xl bg-slate-900 border border-slate-800 space-y-3">
           <h3 class="text-xs font-mono font-bold uppercase tracking-wider text-amber-400 flex items-center gap-2">
-            <span>🧪</span> Pilotos Estatísticos & Avaliações Shadow (HF-23-02)
+            <span>🧪</span> Pilotos estatísticos e avaliações em sombra
           </h3>
           <p class="text-xs text-slate-400">Avaliações rigorosas de acurácia com intervalo de confiança de Wilson e teste de McNemar.</p>
           <div class="p-3 rounded-xl bg-slate-950 border border-slate-800 font-mono text-xs space-y-1">
