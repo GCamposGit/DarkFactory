@@ -29,9 +29,11 @@ import json
 import logging
 import os
 import re
+import shutil
 import socket
 import subprocess
 import sys
+import tempfile
 import time
 import uuid
 from dataclasses import dataclass
@@ -1328,6 +1330,108 @@ def _run_grok_write(req: AgentRequest, executable: str) -> AgentResult:
     )
 
 
+# --------------------------------------------------------------------------
+# Grok read mode: optional MCP isolation (USR-271)
+# --------------------------------------------------------------------------
+# Grok Build 1.0.50 has no `--strict-mcp-config` equivalent. `GROK_CONFIG` overlays cannot touch
+# `mcp_servers` (allowlist: models/features/toolset/shell_environment_policy) and a per-server
+# `startup_timeout_sec` beats `GROK_MCP_STARTUP_TIMEOUT_SECS`. The mechanism the CLI really supports
+# is `$GROK_HOME` (documented env var): a read run gets a throwaway home whose `config.toml` is the
+# user's minus the unreachable MCP servers, plus a copy of `auth.json`.
+
+_GROK_MCP_FAILURE_PATTERN = re.compile(
+    r"init failed\s+\S+\s+https?://\S+|mcp[^\n]{0,80}(?:ConnectionRefused|connection refused)", re.IGNORECASE
+)
+_TOML_TABLE_HEADER = re.compile(r"^\s*\[+\s*([^\]]+?)\s*\]+\s*(?:#.*)?$")
+
+
+def _grok_home() -> Path:
+    raw = os.environ.get("GROK_HOME", "").strip()
+    return Path(raw) if raw else Path.home() / ".grok"
+
+
+def check_grok_optional_mcp_servers(
+    config_path: Optional[Path] = None,
+    timeout_sec: float = DEFAULT_MCP_PROBE_TIMEOUT,
+) -> tuple[list[str], list[str]]:
+    """Probe the enabled HTTP MCP servers of the Grok `config.toml`.
+
+    Returns ``(unreachable_server_names, reasons)``. Fail-open: a missing/unreadable config yields no
+    names. ``DARKFAC_STRICT_MCP_CONFIG`` follows the Claude semantics (on = drop every URL server).
+    """
+    import tomllib
+
+    path = config_path or (_grok_home() / "config.toml")
+    try:
+        data = tomllib.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError, UnicodeDecodeError):
+        return [], []
+    servers = data.get("mcp_servers")
+    if not isinstance(servers, dict):
+        return [], []
+    disabled = data.get("disabled_mcp_servers")
+    disabled_set = {str(n) for n in disabled} if isinstance(disabled, list) else set()
+    env_strict = os.environ.get("DARKFAC_STRICT_MCP_CONFIG", "").strip().lower()
+    names: list[str] = []
+    reasons: list[str] = []
+    for name, cfg in servers.items():
+        if not isinstance(cfg, dict) or cfg.get("enabled") is False or name in disabled_set:
+            continue
+        url = cfg.get("url")
+        if not isinstance(url, str) or not url:
+            continue
+        parsed = urlparse(url)
+        host = parsed.hostname
+        if not host:
+            continue
+        if env_strict in ("1", "true", "yes", "on"):
+            names.append(name)
+            reasons.append(f"MCP server '{name}' dropped (DARKFAC_STRICT_MCP_CONFIG)")
+            continue
+        if env_strict in ("0", "false", "no", "off"):
+            continue
+        try:
+            port = parsed.port or (443 if parsed.scheme == "https" else 80)
+            with socket.create_connection((host, port), timeout=timeout_sec):
+                pass
+        except Exception as exc:
+            names.append(name)
+            reasons.append(f"MCP server '{name}' at {host} unreachable ({type(exc).__name__})")
+    return names, reasons
+
+
+def filter_grok_config_text(text: str, drop: list[str]) -> str:
+    """Remove the `[mcp_servers.<name>]` tables (and sub-tables) of ``drop`` from TOML ``text``."""
+    prefixes = tuple(f"mcp_servers.{n}" for n in drop)
+    out: list[str] = []
+    skipping = False
+    for line in text.splitlines(keepends=True):
+        m = _TOML_TABLE_HEADER.match(line)
+        if m:
+            header = m.group(1).replace('"', "").replace("'", "").replace(" ", "")
+            skipping = any(header == p or header.startswith(p + ".") for p in prefixes)
+        if not skipping:
+            out.append(line)
+    return "".join(out)
+
+
+def prepare_isolated_grok_home(drop: list[str], dest: Path, source: Optional[Path] = None) -> Path:
+    """Build a throwaway ``$GROK_HOME`` at ``dest`` without the unreachable MCP servers."""
+    src = source or _grok_home()
+    dest.mkdir(parents=True, exist_ok=True)
+    try:
+        text = (src / "config.toml").read_text(encoding="utf-8")
+    except OSError:
+        text = ""
+    (dest / "config.toml").write_text(filter_grok_config_text(text, drop), encoding="utf-8")
+    for extra in ("auth.json", "mcp_credentials.json", "agent_id"):
+        try:
+            shutil.copyfile(src / extra, dest / extra)
+        except OSError:
+            pass
+    return dest
+
+
 def _run_grok(req: AgentRequest) -> AgentResult:
     executable = find_grok_binary()
     if not executable:
@@ -1337,33 +1441,53 @@ def _run_grok(req: AgentRequest) -> AgentResult:
         )
     if req.mode == "write":
         return _run_grok_write(req, executable)
-    # Read mode: one-shot `-p` call that returns plain text (unchanged since HF-27-03).
+    # Read mode: one-shot `-p` call that returns plain text (HF-27-03). USR-271: optional MCP servers
+    # that are down are left out of a throwaway $GROK_HOME so the handshake cannot eat the timeout.
     argv = [executable, "-p", req.prompt, "--output-format", "plain"]
     if req.model:
         argv += ["-m", req.model]
+    dropped, mcp_reasons = check_grok_optional_mcp_servers()
+    env: Optional[dict[str, str]] = None
+    isolated: Optional[Path] = None
+    if dropped:
+        logger.warning("[MCP] Grok read launched without unavailable MCP server(s): %s", "; ".join(mcp_reasons))
+        try:
+            isolated = prepare_isolated_grok_home(dropped, Path(tempfile.mkdtemp(prefix="grok_read_home_")))
+            env = {**os.environ, "GROK_HOME": str(isolated)}
+        except OSError as exc:
+            logger.warning("[MCP] could not build an isolated GROK_HOME (%s); running with the user config", exc)
     try:
-        res = _run_bounded(
-            argv,
-            cwd=req.cwd,
-            timeout_s=req.timeout_s,
-        )
-    except OSError as exc:
-        return AgentResult(
-            ok=False, text=str(exc), harness="grok", model=req.model,
-            duration_s=0.0, error_kind="crash",
-        )
+        try:
+            res = _run_bounded(argv, cwd=req.cwd, timeout_s=req.timeout_s, env=env)
+        except OSError as exc:
+            return AgentResult(
+                ok=False, text=str(exc), harness="grok", model=req.model,
+                duration_s=0.0, error_kind="crash",
+            )
+    finally:
+        if isolated is not None:
+            shutil.rmtree(isolated, ignore_errors=True)
     if res.timed_out:
         partial = redact_secrets(f"{res.stdout}\n{res.stderr}".strip())
+        mcp_hit = bool(_GROK_MCP_FAILURE_PATTERN.search(partial)) or (bool(dropped) and env is None)
         return AgentResult(
-            ok=False, text=f"timed out after {req.timeout_s}s" + (f": {partial}" if partial else ""),
+            ok=False,
+            text=("mcp_unavailable: " if mcp_hit else "") + f"timed out after {req.timeout_s}s"
+            + (f": {partial}" if partial else ""),
             harness="grok", model=req.model,
-            duration_s=res.duration_s, error_kind="timeout",
+            duration_s=res.duration_s, error_kind="harness_infra_error" if mcp_hit else "timeout",
             stderr_tail=_stderr_tail(res.stderr),
         )
     duration = res.duration_s
     output_text = (res.stdout or "").strip()
     stderr = res.stderr or ""
     diag: dict[str, Any] = {"exit_code": res.returncode, "stderr_tail": _stderr_tail(stderr)}
+    if _GROK_MCP_FAILURE_PATTERN.search(f"{output_text}\n{stderr}") and (res.returncode != 0 or not output_text):
+        # Infrastructure failure, never a verdict: no review text is returned (USR-271).
+        return AgentResult(
+            ok=False, text="mcp_unavailable: " + redact_secrets(stderr.strip() or output_text)[:500],
+            harness="grok", model=req.model, duration_s=duration, error_kind="harness_infra_error", **diag,
+        )
     if res.returncode != 0 and not output_text:
         combined = f"{output_text}\n{stderr}"
         return AgentResult(
