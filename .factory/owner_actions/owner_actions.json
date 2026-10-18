@@ -1330,7 +1330,7 @@
       "kind": "action",
       "title": "Ativar envio de e-mail da DarkFac para o grokbot via Cloudflare Email Workers",
       "priority": "medium",
-      "status": "open",
+      "status": "done",
       "why": "A DarkFac nao tem nenhum canal de envio de e-mail. O owner escolheu Cloudflare Email Workers (gratis, dominio ggcampos.com ja no Email Routing) para enviar a guigrokchief@mail.grokbot.com. Verificar o destino, criar o Worker, o binding e o secret exigem login no painel da Cloudflare e acesso a caixa do grokbot, que so o owner tem. O codigo do Worker esta versionado em infra/cloudflare/darkfac-mailer/worker.js.",
       "blocks": [
         "USR-310"
@@ -1364,25 +1364,25 @@
           "command": "Get-Content C:\\dev\\DarkFac\\infra\\cloudflare\\darkfac-mailer\\worker.js -Raw | Set-Clipboard"
         },
         {
-          "text": "Volte para a pagina do Worker darkfac-mailer, abra a aba Settings e role ate Bindings. Clique em Add binding, escolha Send email (pode aparecer como Email / Send Email). Em Variable name digite GROKBOT_MAIL; em destino escolha Specific address / Allowed destination address e selecione guigrokchief@mail.grokbot.com. Salve/Deploy. Se o tipo Send email NAO aparecer na lista, pare aqui e avise o agente: ele publica pelo wrangler com um API token."
+          "text": "Volte para a pagina do Worker darkfac-mailer, abra a aba Settings e role ate Bindings. Clique em Add binding, escolha Email Service (nome atual do binding send_email) e clique em Add Binding. Em Variable name digite GROKBOT_MAIL, mantenha 'Use production value' marcado e clique em Add Binding. Nao ha campo de destino: o codigo so envia para o endereco verificado."
         },
         {
           "text": "Ainda em Settings, na secao Variables and Secrets, clique em Add. Type: Secret; Variable name: MAILER_TOKEN; Value: cole o token gerado no passo 5 (Ctrl+V; se a area de transferencia mudou, rode o comando deste passo para copiar de novo). Clique em Deploy.",
           "command": "[Environment]::GetEnvironmentVariable('DARKFAC_MAILER_TOKEN', 'User') | Set-Clipboard"
         },
         {
-          "text": "Grave a URL do Worker como variavel de ambiente do usuario (troque <seu-subdominio> pelo valor anotado no passo 7).",
-          "command": "[Environment]::SetEnvironmentVariable('DARKFAC_MAILER_URL', 'https://darkfac-mailer.<seu-subdominio>.workers.dev', 'User')"
+          "text": "Copie a URL real do Worker (Settings > Domains & Routes, ou ao lado de Visit; ex.: https://darkfac-mailer.guigcam.workers.dev) e grave-a como variavel de ambiente do usuario. Cole so a URL, sem espacos; nao deixe o placeholder <seu-subdominio> (gera 'error code: 1042').",
+          "command": "[Environment]::SetEnvironmentVariable('DARKFAC_MAILER_URL', 'https://darkfac-mailer.guigcam.workers.dev', 'User')"
         },
         {
           "text": "Abra um PowerShell NOVO (para carregar as variaveis) e envie o e-mail de teste. A resposta esperada e ok=True; depois confira a caixa de guigrokchief@mail.grokbot.com (veja tambem o spam).",
           "command": "Invoke-RestMethod -Method Post -Uri $env:DARKFAC_MAILER_URL -Headers @{ Authorization = \"Bearer $env:DARKFAC_MAILER_TOKEN\" } -ContentType 'application/json; charset=utf-8' -Body '{\"subject\":\"Teste DarkFac\",\"text\":\"Primeiro e-mail da DarkFac para o grokbot.\"}'"
         }
       ],
-      "verify": "O comando do ultimo passo responde ok=True e o e-mail 'Teste DarkFac' chega em guigrokchief@mail.grokbot.com; DARKFAC_MAILER_URL e DARKFAC_MAILER_TOKEN existem no ambiente do usuario. Requisicao sem o header Authorization recebe 401.",
+      "verify": "O comando do ultimo passo responde ok=True e o e-mail 'Teste DarkFac' chega em guigrokchief@mail.grokbot.com; DARKFAC_MAILER_URL e DARKFAC_MAILER_TOKEN existem no ambiente do usuario. Requisicao sem o header Authorization recebe 401. RESOLVIDO: Worker darkfac-mailer publicado em https://darkfac-mailer.guigcam.workers.dev com binding Email Service GROKBOT_MAIL e secret MAILER_TOKEN. Teste em 18/10/2026: POST autenticado retornou ok=true e o e-mail 'Teste DarkFac' de darkfac@ggcampos.com chegou na caixa de entrada de guigrokchief@mail.grokbot.com (nao no spam); POST sem token retorna 401. DARKFAC_MAILER_URL e DARKFAC_MAILER_TOKEN gravados no ambiente do usuario do Notebook. Proximo: USR-310 (cliente Python).",
       "created_at": "2026-10-18T11:19:44Z",
       "created_by": "claude",
-      "resolved_at": null
+      "resolved_at": "2026-10-18T19:09:14Z"
     },
     {
       "id": "OA-QR-409",
