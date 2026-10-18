@@ -29,6 +29,8 @@ if str(IMPORT_ROOT) not in sys.path:
 from core.paths import project_root
 
 PROJECT_ROOT = project_root()
+STEP_TIMEOUT_LOG_DIR = Path(".factory") / "test_logs" / "step-timeouts"
+WINDOWS_XDIST_MAX_WORKERS = 4
 
 # Ensure UTF-8 output on Windows
 if hasattr(sys.stdout, "reconfigure"):
@@ -220,26 +222,78 @@ def _is_test_step(step: HarnessStepConfig) -> bool:
     return step.kind == "test" or (step.kind is None and "pytest" in step.cmd.casefold())
 
 
+def _timeout_output_text(value: object) -> str:
+    """Decode the raw bytes returned by ``TimeoutExpired`` without losing diagnostics."""
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="replace")
+    return value if isinstance(value, str) else ""
+
+
+def _record_step_timeout(step: HarnessStepConfig, exc: subprocess.TimeoutExpired, elapsed: float) -> None:
+    """Persist and emit partial child output so a timed-out test step remains diagnosable."""
+    stdout = _timeout_output_text(getattr(exc, "stdout", None) or getattr(exc, "output", None))
+    stderr = _timeout_output_text(getattr(exc, "stderr", None))
+    output = stdout
+    if stderr and stderr not in output:
+        output += ("\n" if output and not output.endswith("\n") else "") + stderr
+
+    safe_step = re.sub(r"[^A-Za-z0-9_.-]+", "-", step.name).strip(".-") or "step"
+    timestamp = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
+    log_path = PROJECT_ROOT / STEP_TIMEOUT_LOG_DIR / f"{timestamp}-{time.time_ns()}-{safe_step}.log"
+    sanitized = sanitize_child_output(output) if output else "[No partial child output was captured.]"
+    saved_output = sanitized if sanitized.endswith("\n") else sanitized + "\n"
+    contents = (
+        f"step: {step.name}\n"
+        f"elapsed_seconds: {elapsed:.1f}\n"
+        "partial_output_begin\n"
+        f"{saved_output}"
+        "partial_output_end\n"
+    )
+    try:
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        log_path.write_text(contents, encoding="utf-8")
+    except OSError as log_error:
+        print(f"[STEP_TIMEOUT_LOG] unable to persist partial output: {log_error}", file=sys.stderr)
+    else:
+        print(f"[STEP_TIMEOUT_LOG] {log_path}")
+
+    print(sanitized, end="" if sanitized.endswith("\n") else "\n")
+
+
 def normalize_xdist_workers(command: list[str]) -> list[str]:
-    """On Windows, cap -n auto to min(6, os.cpu_count()) to prevent pagefile exhaustion and worker crashes."""
+    """Bound Windows auto workers without overriding pytest's memory-aware worker hook."""
     if os.name != "nt":
         return command
-    capped: list[str] = []
-    i = 0
-    while i < len(command):
-        token = command[i]
-        if token == "-n" and i + 1 < len(command) and command[i + 1].casefold() == "auto":
-            max_workers = str(min(6, os.cpu_count() or 4))
-            capped.extend(["-n", max_workers])
-            i += 2
-            continue
-        if token.startswith("-n=") and token[3:].casefold() == "auto":
-            max_workers = str(min(6, os.cpu_count() or 4))
-            capped.append(f"-n={max_workers}")
-            i += 1
-            continue
-        capped.append(token)
-        i += 1
+    auto_requested = any(
+        (token == "-n" and i + 1 < len(command) and command[i + 1].casefold() == "auto")
+        or (token.startswith("-n=") and token[3:].casefold() == "auto")
+        for i, token in enumerate(command)
+    )
+    if not auto_requested:
+        return command
+
+    # Keep ``auto`` intact: tests.conftest's xdist hook selects fewer workers
+    # when RAM is constrained. Replacing auto with a fixed count bypasses that
+    # safety cap and caused the Notebook fallback to launch six workers anyway.
+    max_processes = WINDOWS_XDIST_MAX_WORKERS
+    capped = list(command)
+    for i, token in enumerate(capped):
+        if token == "--maxprocesses" and i + 1 < len(capped):
+            try:
+                max_processes = min(max_processes, int(capped[i + 1]))
+            except ValueError:
+                return command
+            capped[i + 1] = str(max_processes)
+            break
+        if token.startswith("--maxprocesses="):
+            try:
+                max_processes = min(max_processes, int(token.split("=", 1)[1]))
+            except ValueError:
+                return command
+            capped[i] = f"--maxprocesses={max_processes}"
+            break
+    else:
+        capped.append(f"--maxprocesses={max_processes}")
     return capped
 
 
@@ -285,7 +339,8 @@ def run_step(step: HarnessStepConfig) -> StepExecution:
         print(f"{marker} {step.name}{suffix}")
         print(f"{MARKER_STEP_TIME} {step.name} {_elapsed():.1f}s")
         return execution
-    except subprocess.TimeoutExpired:
+    except subprocess.TimeoutExpired as exc:
+        _record_step_timeout(step, exc, _elapsed())
         print(f"{MARKER_STEP_FAIL} {step.name} (timeout exceeded)")
         print(f"{MARKER_STEP_TIME} {step.name} {_elapsed():.1f}s")
         return StepExecution(step.name, 124, 0, 0, 0)
