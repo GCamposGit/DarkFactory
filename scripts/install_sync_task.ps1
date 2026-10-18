@@ -20,12 +20,21 @@ foreach ($marker in @('\.worktrees', '\.claude\worktrees', '\.codex\worktrees'))
 $isSecondaryWorktree = $false
 $gitCmd = Get-Command git -ErrorAction SilentlyContinue
 if ($gitCmd) {
-    # $ErrorActionPreference = "Stop" transforma a saida padrao de erro do git.exe em excecao
-    # terminante no Windows PowerShell 5.1, mesmo com "2>$null" (nao ha stream para suprimir
-    # antes da checagem de exit code). O escopo filho isola a preferencia so para estas chamadas.
-    $gitDir = & { $ErrorActionPreference = "SilentlyContinue"; git -C $repoRoot rev-parse --absolute-git-dir 2>$null }
-    $gitCommon = & { $ErrorActionPreference = "SilentlyContinue"; git -C $repoRoot rev-parse --path-format=absolute --git-common-dir 2>$null }
-    if ($LASTEXITCODE -eq 0 -and $gitDir -and $gitCommon) {
+    # PS 5.1 transforma stderr de executavel nativo em erro terminante sob 'Stop'; tolerar aqui.
+    $prevEap = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        $gitDir = & git -C $repoRoot rev-parse --absolute-git-dir 2>$null
+        $rc1 = $LASTEXITCODE
+        $gitCommon = & git -C $repoRoot rev-parse --path-format=absolute --git-common-dir 2>$null
+        $rc2 = $LASTEXITCODE
+    } catch {
+        $rc1 = 1
+        $rc2 = 1
+    } finally {
+        $ErrorActionPreference = $prevEap
+    }
+    if ($rc1 -eq 0 -and $rc2 -eq 0 -and $gitDir -and $gitCommon) {
         $a = ([string]$gitDir -replace '/', '').TrimEnd('').ToLowerInvariant()
         $b = ([string]$gitCommon -replace '/', '').TrimEnd('').ToLowerInvariant()
         if ($a -ne $b) { $isSecondaryWorktree = $true }
