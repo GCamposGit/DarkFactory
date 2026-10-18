@@ -187,6 +187,47 @@ def test_waiting_human_intervention_reads_the_dashboard_task_id(mock_hub_service
     assert waiting[0].metadata["run_id"] == "run-d4d10d4aee94"
 
 
+def test_waiting_human_intervention_from_real_dashboard_payload(mock_hub_service: HubService):
+    """USR-210: feed the intervention with the rows the real dashboard projection produces."""
+    from core.workflow.job_board import JobBoardEntry
+    from hub.backend.models import TaskDashboardItem
+
+    entry = JobBoardEntry(
+        run_id="run-d4d10d4aee94",
+        ticket_id="darkfac-canary",
+        project_id="darkfac-canary",
+        demand_id="dem-722f8e52bd7c",
+        mode="autonomous",
+        run_status="active",
+        stage="grill",
+        status="waiting_human",
+        role="grill_engine",
+        iteration=0,
+    )
+    row = HubService._control_dashboard_row(entry, {"dem-722f8e52bd7c": "Canario diario 2026-09-30"})
+    item = TaskDashboardItem(
+        task_id=row["task_id"], title=row["title"], status=row["status"], stage=row["stage"],
+        priority=row["priority"], queue_position=1, run_id=row["run_id"], run_status=row["run_status"],
+        step_index=row["step_index"], cost_usd=row["cost_usd"], updated_at=row["updated_at"],
+        evidence=row["evidence"], exceptions=row["exceptions"],
+        cause_code=row["cause_code"], diagnostic=row["diagnostic"],
+    )
+    with patch.object(mock_hub_service, "get_task_dashboard") as mock_dash:
+        mock_dash.return_value = MagicMock(queue=[item])
+        report = mock_hub_service.get_priority_interventions()
+    waiting = [it for it in report.items if it.kind == PriorityInterventionKind.WAITING_HUMAN]
+    assert len(waiting) == 1
+    got = waiting[0]
+    assert got.id == "waiting_human:dem-722f8e52bd7c"
+    assert got.action_target_id == "dem-722f8e52bd7c"
+    assert got.project_id == "darkfac-canary"
+    assert got.metadata["task_id"] == "dem-722f8e52bd7c"
+    assert got.metadata["run_id"] == "run-d4d10d4aee94"
+    assert got.metadata["cause_code"] == "grill_pending"
+    assert got.metadata["stage"] == "grill"
+    assert any(ev["label"] == "projeto" for ev in got.metadata["evidence"])
+
+
 def test_hub_service_aggregates_g8_deploy_gates(mock_hub_service: HubService):
     """Ensure projects requiring owner signoff are aggregated into G8 deploy gates."""
     from core.enterprise.policy import EnterprisePolicyGuard
