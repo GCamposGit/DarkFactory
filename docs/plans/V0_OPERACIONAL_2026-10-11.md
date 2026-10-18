@@ -2,6 +2,12 @@
 
 Decisão do owner em 11/10/2026: a própria DarkFac é a primeira entrega real e o owner é o cliente. Antes de abrir qualquer projeto novo, a linha precisa ser operacional e confiável. Tudo que não estiver no caminho crítico fica congelado até o V0 ser atingido.
 
+## Encerramento atualizado (17/10/2026)
+
+O Owner declarou o V0 concluído em 17/10/2026 e encerrou o congelamento. Esta decisão retira as regras operacionais específicas do V0, inclusive a exigência de tag `v0-critico`, a promoção automática de novos tickets para `congelado-v0`, a operação de uma sessão por vez e o limite de três critérios de aceite. O workflow atual retoma a fila com Gate G1, dependências e até três ciclos em hosts distintos (Grokbox, Notebook e Desktop), conforme disponibilidade e compatibilidade.
+
+As evidências e pendências abaixo são o registro histórico do estado verificado em 16/10/2026; não são uma declaração independente de CI, deploy ou backup. A conclusão acima registra a decisão do Owner.
+
 ## 1. O que é o V0
 
 Decisão do owner em 16/10/2026: falhas intermediárias, retomadas e resgates fazem parte do desenvolvimento e não zeram o contador de entregas. Esta decisão substitui a exigência anterior de cinco lançamentos únicos sem intervenção. O V0 está atingido quando todas as condições abaixo valem ao mesmo tempo:
@@ -47,7 +53,7 @@ Plano histórico de 11/10/2026. Cada onda reduz os obstáculos à entrega; o est
 | USR-192 | #360 | `df1705f` | 19:59 |
 | USR-259 | #361 | `8ae3de7` | 21:05 |
 
-**Encerramento ainda pendente:** comprovar CI verde da `main` em Linux e Windows, deploy com código 0 e backup verificado no lote de encerramento. O contador completo, isoladamente, não declara o V0 concluído; a condição de falha explícita também permanece obrigatória.
+**Registro histórico em 16/10/2026:** nessa data ainda constava como pendente comprovar CI verde da `main` em Linux e Windows, deploy com código 0 e backup verificado no lote de encerramento. O Owner declarou o V0 concluído em 17/10/2026, conforme a atualização no início deste documento.
 
 **Dívida aberta — USR-268:** o fallback local após perder os workers remotos excedeu 3000 segundos. O ticket permanece `planned`, sem alegação de correção: faltam reprodução, diagnóstico e comprovação de duração abaixo de 1800 segundos. Sob o critério atualizado, ele não zera o contador e pode permanecer aberto se não impedir as condições de encerramento. Se bloquear a validação do lote atual, torna-se bloqueador desse encerramento.
 
@@ -64,7 +70,9 @@ Lista histórica do congelamento; o ledger determina o estado atual. USR-179 e U
 - **Spike de runtime:** USR-157
 - **Trilha de segurança e qualidade:** USR-170, 171, 172, 173, 174, 226, 227, 228
 
-## 4. Regras durante o congelamento
+## 4. Regras históricas durante o congelamento (retiradas em 17/10/2026)
+
+As regras abaixo documentam o período do congelamento e não governam a fila após a conclusão declarada pelo Owner.
 
 1. Só se implementam tickets com a tag `v0-critico`. Pedido novo do owner fora do V0 entra como `congelado-v0`, a menos que o owner diga explicitamente que quer furar o congelamento.
 2. A regra "defeito encontrado = correção ou ticket" continua valendo, com triagem: se o defeito impede alguma condição do V0, vira `v0-critico`; se não impede, é registrado com `horizon: later` e a tag `congelado-v0`.
