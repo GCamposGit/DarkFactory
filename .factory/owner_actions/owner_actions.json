@@ -1470,6 +1470,31 @@
       "created_at": "2026-10-18T11:53:17Z",
       "created_by": "claude-code",
       "resolved_at": null
+    },
+    {
+      "id": "OA-036",
+      "kind": "action",
+      "title": "Publicar na main a correcao protegida do USR-268 (portao local do Notebook trava 3000 s com 6 workers fixos)",
+      "priority": "critical",
+      "status": "open",
+      "why": "No Windows, core/harness/runner.py troca '-n auto' por 6 workers fixos e ignora o calculo por RAM do tests/conftest.py; com ~5 GiB livres o portao local do Notebook trava e estoura 3000 s sem descobrir testes (visto no USR-252 em 18/10). O Codex corrigiu no PR #397 (limite de 4 workers respeitando a RAM e saida parcial salva no timeout), mas core/harness e protegido: o guard reprova o PR e so o owner publica. A worktree ja foi rebaseada na main atual (com o hotfix #406) e passou 93 testes focados, incluindo test_clock_bomb_guard e test_harness_contract. Sem isso, o Notebook nao serve de host de portao e a fila depende do Desktop.",
+      "blocks": [
+        "USR-268"
+      ],
+      "depends_on": [],
+      "steps": [
+        {
+          "text": "Abra o PowerShell (Iniciar > digite PowerShell > Enter) e rode o comando abaixo. Ele atualiza a worktree pronta com a main e publica. Esperado: uma linha terminando em 'HEAD -> main'. Se for recusado porque a main andou, rode o mesmo comando de novo.",
+          "command": "git -C C:\\dev\\DarkFac\\.worktrees\\owner-usr268 fetch origin; git -C C:\\dev\\DarkFac\\.worktrees\\owner-usr268 rebase origin/main; git -C C:\\dev\\DarkFac\\.worktrees\\owner-usr268 push origin HEAD:main"
+        },
+        {
+          "text": "Avise um agente (Claude Code): ele acompanha o CI da main, fecha o PR #397 como substituido, passa as entregas para portao local no Notebook e marca esta acao como feita."
+        }
+      ],
+      "verify": "gh api repos/GCamposGit/DarkFactory/contents/core/harness/runner.py?ref=main --jq .content | base64 -d contem WINDOWS_XDIST_MAX_WORKERS; o CI da main nesse commit fica verde.",
+      "created_at": "2026-10-18T12:54:43Z",
+      "created_by": "claude-code",
+      "resolved_at": null
     }
   ]
 }
