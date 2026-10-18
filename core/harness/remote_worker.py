@@ -19,6 +19,7 @@ import os
 import queue
 import re
 import shutil
+import signal
 import socket
 import subprocess
 import sys
@@ -100,6 +101,14 @@ ERROR_CODE_WORKER_RESTARTED = "worker_restarted"
 ERROR_CODE_WORKER_INTERNAL = "worker_internal_error"
 #: ``error_code`` of a job that could not even start (e.g. ``git worktree add`` failed): no verdict.
 ERROR_CODE_WORKER_SETUP = "worker_setup_failed"
+#: USR-298: the runner (or one of its steps) was killed by a signal, or the job ended in seconds
+#: without running a single test (VM freeze/restore): no verdict, never ``[HARNESS_FAIL]``.
+ERROR_CODE_WORKER_SIGNAL_KILLED = "worker_signal_killed"
+#: A job that ends sooner than this without executing any test is treated as killed from outside.
+SIGNAL_KILLED_MAX_JOB_SEC = 15.0
+#: ``DARKFAC_WORKER_SIGTERM_PROBE=off`` disables the SIGTERM sender probe wrapper (POSIX only).
+ENV_WORKER_SIGTERM_PROBE = "DARKFAC_WORKER_SIGTERM_PROBE"
+_TEST_COUNT_RE = re.compile(r"\[TEST_COUNT\]\s+count=(\d+)")
 #: ``error_code`` of a poll for a job id this worker has no record of.
 ERROR_CODE_JOB_NOT_FOUND = "job_not_found"
 #: Tolerance when comparing a recorded process start time with the live one (pid reuse guard).
@@ -298,6 +307,65 @@ def _extract_harness_result(log_text: str) -> Optional[Dict[str, Any]]:
             with contextlib.suppress(json.JSONDecodeError):
                 result = json.loads(stripped[len(prefix):])
     return result
+
+
+def _describe_signal(signum: int) -> str:
+    try:
+        return f"{signal.Signals(signum).name} ({signum})"
+    except ValueError:
+        return str(signum)
+
+
+def classify_signal_kill(
+    returncode: Optional[int],
+    result_json: Optional[Dict[str, Any]],
+    log_text: str,
+    duration_sec: float,
+) -> Optional[str]:
+    """USR-298: why a finished job has NO test verdict because something outside killed it, or ``None``.
+
+    Covered: the runner subprocess ended with a negative return code (killed by a signal); a harness
+    step recorded a negative exit code inside a runner that itself ended normally; or the job lasted
+    less than :data:`SIGNAL_KILLED_MAX_JOB_SEC` without executing a single test and without any step
+    reporting a positive exit code (a real failure, e.g. a syntax error, keeps its verdict)."""
+
+    if returncode is not None and returncode < 0:
+        return (
+            f"runner subprocess was terminated by signal {_describe_signal(-returncode)} "
+            f"(return code {returncode}); no test verdict exists"
+        )
+    exit_codes: Dict[str, Any] = {}
+    if isinstance(result_json, dict) and isinstance(result_json.get("exit_codes"), dict):
+        exit_codes = result_json["exit_codes"]
+    for step, code in exit_codes.items():
+        if isinstance(code, int) and not isinstance(code, bool) and code < 0:
+            return (
+                f"harness step {step!r} was terminated by signal {_describe_signal(-code)} "
+                f"(exit code {code}); no test verdict exists"
+            )
+    counts = [int(match) for match in _TEST_COUNT_RE.findall(log_text)]
+    executed_tests = max(counts) if counts else 0
+    has_positive_exit = any(isinstance(code, int) and code > 0 for code in exit_codes.values())
+    if duration_sec < SIGNAL_KILLED_MAX_JOB_SEC and executed_tests == 0 and not has_positive_exit:
+        return (
+            f"job ended after {duration_sec:.1f}s (< {SIGNAL_KILLED_MAX_JOB_SEC:g}s) without executing any "
+            f"test (return code {returncode}); treated as killed from outside, no test verdict exists"
+        )
+    return None
+
+
+def _wrap_with_sigterm_probe(cmd: list[str], worktree_path: Path) -> list[str]:
+    """USR-298: on POSIX run the runner under ``core.harness.sigterm_probe`` so a SIGTERM aimed at the
+    job records who sent it (PID/UID/time) in the job log. No-op on Windows, without
+    ``signal.sigwaitinfo``, when disabled by env, or when the candidate tree lacks the module."""
+
+    if os.name == "nt" or not hasattr(signal, "sigwaitinfo"):
+        return cmd
+    if os.environ.get(ENV_WORKER_SIGTERM_PROBE, "").strip().lower() in ("off", "0", "false"):
+        return cmd
+    if not (worktree_path / "core" / "harness" / "sigterm_probe.py").is_file():
+        return cmd
+    return [sys.executable, "-m", "core.harness.sigterm_probe", "--", *cmd]
 
 
 def child_priority_mode() -> str:
@@ -947,6 +1015,7 @@ class JobManager:
             cmd = [sys.executable, "core/harness/runner.py", "--quick", "--local"]
             if job.include_holdout:
                 cmd.append("--holdout")
+            cmd = _wrap_with_sigterm_probe(cmd, worktree_path)
             env = dict(os.environ)
             env["DARKFAC_HARNESS_WORKER_JOB"] = "1"
             # Stream step output to the client as it happens instead of in
@@ -966,6 +1035,7 @@ class JobManager:
                 bufsize=1,
                 **priority_kwargs,
             )
+            job_started_monotonic = time.monotonic()
             job.process = process
             child_pid = getattr(process, "pid", None)
             if isinstance(child_pid, int):
@@ -1041,6 +1111,23 @@ class JobManager:
 
             full_log = "".join(job.log_chunks)
             result_json = _extract_harness_result(full_log)
+            kill_reason = classify_signal_kill(
+                process.returncode, result_json, full_log, time.monotonic() - job_started_monotonic
+            )
+            if kill_reason is not None:
+                self._append_log(
+                    job,
+                    f"[WORKER {ERROR_CODE_WORKER_SIGNAL_KILLED}] {kill_reason}; "
+                    f"runner returncode={process.returncode}\n",
+                )
+                self._set_status(
+                    job,
+                    "failed",
+                    returncode=process.returncode,
+                    error=kill_reason,
+                    error_code=ERROR_CODE_WORKER_SIGNAL_KILLED,
+                )
+                return
             self._set_status(
                 job,
                 "done" if process.returncode == 0 and result_json is not None else "failed",

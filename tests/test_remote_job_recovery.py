@@ -23,6 +23,7 @@ disk, then falls back to local execution as before.
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 import threading
@@ -69,6 +70,25 @@ def _isolated_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         return opener.open(req, timeout=timeout)
 
     monkeypatch.setattr(remote_dispatch.urllib.request, "urlopen", _loopback_urlopen)
+
+
+@pytest.fixture
+def _stable_own_process_clock(monkeypatch: pytest.MonkeyPatch) -> None:
+    """USR-298: ``psutil`` derives ``create_time()`` from the boot time, which shifts when the VM is frozen
+    and restored; the pid-reuse guard (2 s tolerance) would then declare the live test process "recycled".
+    Pin the own-process start time to the value the worker module recorded at import, so these tests do
+    not depend on the host clock staying still. Other pids keep their real start time."""
+
+    import psutil
+
+    original = psutil.Process.create_time
+
+    def _create_time(self: Any) -> float:
+        if self.pid == os.getpid():
+            return remote_worker._THIS_PROCESS_STARTED_AT
+        return original(self)
+
+    monkeypatch.setattr(psutil.Process, "create_time", _create_time)
 
 
 def _job(job_id: str = "a" * 32) -> HarnessJob:
@@ -174,7 +194,7 @@ def test_terminal_result_survives_a_restart(tmp_path: Path) -> None:
     assert payload["next_offset"] == len("line one\n")
 
 
-def test_a_live_owner_is_never_taken_over(tmp_path: Path) -> None:
+def test_a_live_owner_is_never_taken_over(tmp_path: Path, _stable_own_process_clock: None) -> None:
     """A second JobManager on the same state dir (a test process, a tool importing
     the module) must not declare a job of a still-running worker dead."""
 
@@ -338,7 +358,7 @@ def loopback_worker(tmp_path: Path):
     server = uvicorn.Server(uvicorn.Config(switch, host="127.0.0.1", port=port, log_level="warning", log_config=None))
     thread = threading.Thread(target=server.run, daemon=True)
     thread.start()
-    deadline = time.monotonic() + 15.0
+    deadline = time.monotonic() + 120.0
     while not server.started and time.monotonic() < deadline:
         time.sleep(0.02)
     assert server.started
@@ -359,13 +379,16 @@ def loopback_worker(tmp_path: Path):
 
 
 def test_root_cause_restart_mid_job_used_to_look_like_silence(
-    loopback_worker: Any, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    loopback_worker: Any,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    _stable_own_process_clock: None,
 ) -> None:
     """End-to-end reproduction of the incident. /health says busy=False, the job is unknown
     to the (restarted) worker; the client must say so at once, with the job id and cause,
     instead of waiting out the silence ceiling."""
 
-    monkeypatch.setattr(remote_dispatch, "WORKER_SILENCE_FALLBACK_SEC", 30.0)  # the old path would wait this long
+    monkeypatch.setattr(remote_dispatch, "WORKER_SILENCE_FALLBACK_SEC", 600.0)  # the old path would wait this long
     job = _running_job(loopback_worker.manager, log_text="[STEP_START] unit_and_integration_tests_parallel\n")
     pre_restart_health = remote_dispatch.probe_health(loopback_worker.url)
     loopback_worker.restart()
@@ -381,10 +404,11 @@ def test_root_cause_restart_mid_job_used_to_look_like_silence(
         remote_dispatch._stream_job(
             loopback_worker.url,
             job.job_id,
-            deadline=time.monotonic() + 60,
+            deadline=time.monotonic() + 3600,
             submitted_instance_id=pre_restart_health["instance_id"],
         )
-    assert time.monotonic() - started < 5.0, "a definitive 404 must not be waited out as silence"
+    # Generous bound (a VM pause must not fail this); still far below the 600 s silence wait it replaces.
+    assert time.monotonic() - started < 300.0, "a definitive 404 must not be waited out as silence"
 
     details = excinfo.value.details
     assert details["error_code"] == "job_lost_on_worker"

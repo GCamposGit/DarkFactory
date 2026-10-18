@@ -140,7 +140,9 @@ SUBMIT_TIMEOUT_SEC = 30.0
 POLL_HTTP_TIMEOUT_SEC = 10.0
 #: USR-162: worker ``error_code`` values of a ``failed`` job that is NOT a test
 #: verdict (the run never finished). They fall back like an unavailable worker.
-INFRASTRUCTURE_ERROR_CODES = frozenset({"worker_restarted", "worker_internal_error", "worker_setup_failed"})
+INFRASTRUCTURE_ERROR_CODES = frozenset(
+    {"worker_restarted", "worker_internal_error", "worker_setup_failed", "worker_signal_killed"}
+)
 #: Default of ``DARKFAC_WORKER_RESTART_GRACE_SEC`` / ``DARKFAC_WORKER_RESTART_RETRIES``.
 DEFAULT_WORKER_RESTART_GRACE_SEC = 180.0
 DEFAULT_WORKER_RESTART_RETRIES = 2
@@ -149,7 +151,18 @@ MAX_WORKER_RESTART_RETRIES = 5
 RESTART_PROBE_GAP_SEC = 5.0
 #: Loss causes that mean "the worker (or its VM) went away under the job", not "the worker
 #: is unsuitable": the same worker is awaited and the job resubmitted before falling back.
-RESTART_RETRY_ERROR_CODES = frozenset({"worker_restarted", "worker_unreachable", "job_lost_on_worker"})
+RESTART_RETRY_ERROR_CODES = frozenset(
+    {"worker_restarted", "worker_unreachable", "job_lost_on_worker", "worker_signal_killed"}
+)
+#: USR-298: a worker must answer ``/health`` this many times in a row (same instance) before a job is
+#: submitted, ``DARKFAC_WORKER_STABLE_CHECKS`` apart by ``DARKFAC_WORKER_STABLE_INTERVAL_SEC``.
+ENV_WORKER_STABLE_CHECKS = "DARKFAC_WORKER_STABLE_CHECKS"
+ENV_WORKER_STABLE_INTERVAL_SEC = "DARKFAC_WORKER_STABLE_INTERVAL_SEC"
+DEFAULT_WORKER_STABLE_CHECKS = 3
+MAX_WORKER_STABLE_CHECKS = 10
+DEFAULT_WORKER_STABLE_INTERVAL_SEC = 20.0
+#: Probe rounds allowed per required check before giving up on an unstable worker.
+STABLE_ROUNDS_PER_CHECK = 3
 #: Lines of streamed job log kept as evidence when a job is given up on.
 EVIDENCE_TAIL_LINES = 400
 LOST_JOBS_SUBDIR = "remote_jobs"
@@ -294,6 +307,26 @@ def worker_restart_retries() -> int:
     except ValueError:
         return DEFAULT_WORKER_RESTART_RETRIES
     return min(max(value, 0), MAX_WORKER_RESTART_RETRIES)
+
+
+def worker_stable_checks() -> int:
+    """Consecutive identical ``/health`` answers required before submitting
+    (``DARKFAC_WORKER_STABLE_CHECKS``; default 3, clamped to 1..10, invalid -> default)."""
+
+    raw = os.environ.get(ENV_WORKER_STABLE_CHECKS, "").strip()
+    if not raw:
+        return DEFAULT_WORKER_STABLE_CHECKS
+    try:
+        value = int(raw)
+    except ValueError:
+        return DEFAULT_WORKER_STABLE_CHECKS
+    return min(max(value, 1), MAX_WORKER_STABLE_CHECKS)
+
+
+def worker_stable_interval_sec() -> float:
+    """Seconds between the stability checks (``DARKFAC_WORKER_STABLE_INTERVAL_SEC``, default 20)."""
+
+    return _positive_float_env(ENV_WORKER_STABLE_INTERVAL_SEC, DEFAULT_WORKER_STABLE_INTERVAL_SEC)
 
 
 def dispatch_attempts() -> list[dict[str, Any]]:
@@ -914,6 +947,58 @@ def _wait_for_worker_back(
         sleep_fn(min(RESTART_PROBE_GAP_SEC, remaining))
 
 
+def _instance_identity(health: dict[str, Any]) -> tuple[Any, Any] | None:
+    """``(instance_id, started_at)`` of a worker, or ``None`` for an old worker that reports neither."""
+
+    instance_id = health.get("instance_id")
+    started_at = health.get("started_at")
+    if instance_id is None and started_at is None:
+        return None
+    return instance_id, started_at
+
+
+def _await_worker_stable(
+    base_url: str,
+    health: dict[str, Any],
+    *,
+    sleep: Callable[[float], None] | None = None,
+) -> dict[str, Any] | None:
+    """USR-298: a worker on a VM that is being frozen/restored answers ``/health`` once and dies under the
+    job. Require ``worker_stable_checks()`` consecutive ``/health`` answers (idle, same ``instance_id`` /
+    ``started_at``), ``worker_stable_interval_sec()`` apart, before submitting. The ``health`` already in
+    hand is check number one. Returns the latest health, or ``None`` when the worker never became stable
+    (the caller then tries the next option). A worker that reports no identity is not delayed.
+    ``sleep`` is injectable so tests never really wait."""
+
+    needed = worker_stable_checks()
+    identity = _instance_identity(health)
+    if needed <= 1 or identity is None:
+        return health
+    sleep_fn = sleep or time.sleep
+    interval = worker_stable_interval_sec()
+    timeout = max(health_probe_timeout_sec(), SLOW_WORKER_PROBE_TIMEOUT_SEC)
+    streak = 1
+    current = health
+    for _ in range(needed * STABLE_ROUNDS_PER_CHECK):
+        if streak >= needed:
+            return current
+        sleep_fn(interval)
+        probed = probe_health(base_url, timeout=timeout)
+        if probed is None or probed.get("busy") or is_self_dispatch(base_url, probed):
+            print(f"[REMOTE] {base_url} not stable ({streak}/{needed} consecutive /health checks): restarting count")
+            streak, identity = 0, None
+            continue
+        new_identity = _instance_identity(probed)
+        if identity is not None and new_identity != identity:
+            print(f"[REMOTE] {base_url} instance changed during the stability check; restarting count")
+            streak = 1
+        else:
+            streak += 1
+        identity = new_identity
+        current = probed
+    return current if streak >= needed else None
+
+
 def _dispatch_with_restart_retry(
     base_url: str,
     *,
@@ -963,7 +1048,14 @@ def _dispatch_with_restart_retry(
                     f"reason=worker did not return within {grace_sec:.0f}s; giving up on it"
                 )
                 raise
-            health = back
+            stable = _await_worker_stable(base_url, back, sleep=sleep)
+            if stable is None:
+                print(
+                    f"{MARKER_REMOTE_RETRY} worker={base_url} attempt={retry}/{max_retries} "
+                    "reason=worker came back but did not stay stable; giving up on it"
+                )
+                raise
+            health = stable
 
 
 def maybe_dispatch_remote(
@@ -1042,6 +1134,13 @@ def maybe_dispatch_remote(
                     }
                 )
                 continue  # next worker / local
+
+        stable_health = _await_worker_stable(base_url, health)
+        if stable_health is None:
+            print(f"[REMOTE] {base_url} did not stay stable across consecutive /health checks; trying next option")
+            DISPATCH_ATTEMPTS.append({"worker_url": base_url, "outcome": "unstable", "elapsed_sec": 0.0})
+            continue
+        health = stable_health
 
         worker_platform = str(health.get("platform_family") or "windows")
         worker_python = str(health.get("python_version") or "") or None

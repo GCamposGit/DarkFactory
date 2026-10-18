@@ -145,3 +145,27 @@ Regras:
   `busy=false` e nenhum portao em andamento no Notebook/VPS antes de comecar.
 - Ao ver `worker_restarted` num log, olhe `journalctl -k | grep -i fork` e `tailscale status` na VM antes de
   culpar o candidato; se o job voltou em outra tentativa (`[REMOTE_RETRY]`), nada a fazer.
+
+## 9. Congelamento de VM = infraestrutura (USR-298)
+
+Sintoma: o pytest do job morre com exit `-15` (SIGTERM) em 1-2 s, com 0 testes. O suporte da plataforma
+(T-H65476) confirma que a VM e congelada/restaurada; na restauracao o Tailscale fica offline e os processos
+recebem SIGTERM. Nunca e veredito do candidato.
+
+Regras (codigo em `core/harness/remote_worker.py` e `core/harness/remote_dispatch.py`):
+
+- O worker fecha o job como `failed` com `error_code=worker_signal_killed` (sem `result_json` de veredito)
+  quando o runner termina com returncode negativo, quando algum passo do harness tem exit code negativo, ou
+  quando o job dura menos de 15 s sem executar nenhum teste e sem nenhum passo com exit code positivo. O
+  exit code e o nome do sinal ficam na linha `[WORKER worker_signal_killed]` do log do job.
+- O despachante trata `worker_signal_killed` como infraestrutura: imprime `[REMOTE_RETRY]` (nunca
+  `[HARNESS_FAIL]`), espera o mesmo worker voltar (`DARKFAC_WORKER_RESTART_GRACE_SEC`, 180 s) e reenvia ate
+  `DARKFAC_WORKER_RESTART_RETRIES` (2) vezes antes de cair para o proximo worker (Desktop).
+- Portao de estabilidade: antes de submeter, o despachante exige 3 respostas seguidas de `/health` (ocioso,
+  mesmo `instance_id`/`started_at`) com 20 s de intervalo (`DARKFAC_WORKER_STABLE_CHECKS`,
+  `DARKFAC_WORKER_STABLE_INTERVAL_SEC`). Com `DARKFAC_WORKER_STABLE_CHECKS=1` a espera some. Worker que nao
+  reporta identidade, e execucao so-local, nao esperam.
+- Diagnostico do emissor: no Linux o runner roda sob `python -m core.harness.sigterm_probe -- ...`, que
+  registra no log do job a linha `[SIGTERM_PROBE] received SIGTERM ... from pid=<PID> uid=<UID>` e depois
+  encerra por SIGTERM normalmente (o sinal nao e engolido). `DARKFAC_WORKER_SIGTERM_PROBE=off` desliga.
+  Para fechar a causa, correlacione esse PID/horario com `/workspace/darkfac/run/vm-events.log` e `journalctl`.
