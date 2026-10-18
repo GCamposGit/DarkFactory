@@ -8990,8 +8990,8 @@
     "project_id": "darkfac",
     "title": "Teste instavel tests/test_worker_silence_resume.py::test_lost_job_is_announced_and_its_seconds_are_recorded_for_the_local_fallback no Windows da CI",
     "origin": "agent",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "2ff81b5e9322d8f91277ee838570b389c57d56a1",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -9018,6 +9018,6 @@
     "estimated_complexity": "low",
     "dependencies": [],
     "created_at": "2026-10-18T05:30:03.048499Z",
-    "updated_at": "2026-10-18T05:30:03.048499Z"
+    "updated_at": "2026-10-18T08:16:22.535968Z"
   }
 ]
