@@ -12,7 +12,7 @@ $repoRoot = Split-Path -Parent $scriptDir
 # Guarda USR-240: nunca registrar a tarefa a partir de uma worktree (incidente 03-10/10/2026).
 # Deve rodar antes de qualquer efeito colateral.
 $correctCommand = 'powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File C:\dev\DarkFac\scripts\install_sync_task.ps1'
-$normalizedRoot = ($repoRoot -replace '/', '').ToLowerInvariant()
+$normalizedRoot = ($repoRoot -replace '/', '\').ToLowerInvariant()
 $isWorktreePath = $false
 foreach ($marker in @('\.worktrees', '\.claude\worktrees', '\.codex\worktrees')) {
     if (($normalizedRoot + '').Contains($marker)) { $isWorktreePath = $true }
