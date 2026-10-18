@@ -8009,8 +8009,8 @@
     "project_id": "darkfac",
     "title": "Revisao Grok read fica presa em MCP opcional indisponivel",
     "origin": "agent",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "aede39c93a57b69adb44a5b99a5abffbafa7e2a0",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "later",
@@ -8032,7 +8032,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-16T12:43:20.920483Z",
-    "updated_at": "2026-10-16T12:43:20.920483Z"
+    "updated_at": "2026-10-18T15:36:05.122497Z"
   },
   {
     "id": "USR-272",
