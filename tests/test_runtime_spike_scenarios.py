@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 import subprocess
 import sys
+from contextlib import closing
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -170,9 +173,26 @@ def _r02_config(tmp_path: Path, effect_base_url: str) -> LabConfig:
         workflow_version=WorkflowVersion.V1,
         database_alias="darkfac_hf02_usr157",
         effect_base_url=effect_base_url,
-        lease_seconds=3.0,
+        # USR-311: the lease is long enough that no step of the resumed driver can outlive
+        # it on a loaded runner; the dead driver's lease is expired explicitly instead of
+        # being waited out in wall-clock time (see _DeterministicLeaseController).
+        lease_seconds=300.0,
         scenario_timeout_seconds=30.0,
     )
+
+
+class _DeterministicLeaseController(ScenarioController):
+    """Expires the killed driver's lease directly in the store instead of sleeping."""
+
+    def _await_lease_expiry(self) -> None:
+        (database,) = self.config.root_dir.glob("run_R02_*/native/orchestrator.sqlite3")
+        long_ago = (datetime.now(UTC) - timedelta(hours=1)).isoformat()
+        with closing(sqlite3.connect(database, timeout=30.0)) as connection:
+            with connection:
+                updated = connection.execute(
+                    "UPDATE leases SET expires_at = ? WHERE released_at IS NULL", (long_ago,)
+                ).rowcount
+        assert updated == 1, "expected exactly the killed driver's lease to expire"
 
 
 def _index_of(diagnostic: str, fragment: str) -> int:
@@ -192,7 +212,7 @@ def test_r02_crash_lands_at_the_parked_checkpoint_and_orders_diagnostics(tmp_pat
     r02_spec = next(s for s in load_scenario_catalog() if s.scenario_id == "R02")
 
     with EffectServer(tmp_path) as server:
-        controller = ScenarioController(_r02_config(tmp_path, server.base_url), effect_server=server)
+        controller = _DeterministicLeaseController(_r02_config(tmp_path, server.base_url), effect_server=server)
         try:
             trace = controller.run_scenario(r02_spec)
         finally:

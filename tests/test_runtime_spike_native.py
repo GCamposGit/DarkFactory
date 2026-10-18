@@ -38,6 +38,7 @@ from spikes.runtime_choice.driver import run_jsonl
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 TERMINAL_EVENT_DEADLINE_SECONDS = 60.0
+HANG_GUARD_SECONDS = 300.0
 
 
 def make_config(tmp_path: Path, effect_base_url: str) -> LabConfig:
@@ -65,16 +66,37 @@ def start_command(workflow_id: str, *, approval_pre_resolved: bool = True) -> Dr
 
 
 def wait_for_terminal(adapter: NativeAdapter, workflow_id: str) -> list:
-    events = []
-    deadline = time.monotonic() + 15
-    while time.monotonic() < deadline:
+    """Collect events until the workflow reports a terminal event.
+
+    USR-311: the wait is driven by the workflow thread, not by a short wall-clock
+    deadline.  It ends as soon as a terminal event arrives, or as soon as the worker
+    thread has exited without one (a real defect, reported with the events seen).  The
+    only time bound is a hang guard that is far above any loaded-runner duration.
+    """
+
+    events: list = []
+    hang_guard = time.monotonic() + HANG_GUARD_SECONDS
+    while time.monotonic() < hang_guard:
         event = adapter.poll_event(timeout=0.2)
         if event is None:
-            continue
+            with adapter._lock:
+                worker = adapter._threads.get(workflow_id)
+            if worker is None or not worker.is_alive():
+                event = adapter.poll_event(timeout=0.0)  # drain what the worker emitted last
+                if event is None:
+                    raise AssertionError(
+                        f"workflow {workflow_id!r} worker exited without a terminal event; "
+                        f"events={[(e.kind.value, e.step_id, e.code) for e in events]}"
+                    )
+            else:
+                continue
         events.append(event)
         if event.workflow_id == workflow_id and event.kind in {DriverEventKind.COMPLETED, DriverEventKind.ERROR}:
             return events
-    raise AssertionError(f"workflow {workflow_id!r} did not reach a terminal event")
+    raise AssertionError(
+        f"workflow {workflow_id!r} hung for {HANG_GUARD_SECONDS}s; "
+        f"events={[(e.kind.value, e.step_id, e.code) for e in events]}"
+    )
 
 
 def test_native_adapter_executes_core_path_and_keeps_capability_gaps(tmp_path: Path) -> None:
