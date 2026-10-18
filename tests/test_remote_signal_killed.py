@@ -269,11 +269,11 @@ def test_probe_wrapper_is_posix_only_and_needs_the_module(tmp_path: Path, monkey
 
 
 def test_probe_line_names_sender_and_time() -> None:
-    when = dt.datetime(2026, 10, 18, 3, 4, 5, tzinfo=dt.timezone.utc)
+    when = dt.datetime(2030, 1, 2, 3, 4, 5, tzinfo=dt.timezone.utc)
     line = sigterm_probe.format_probe_line(15, 1, 0, when, "/sbin/init")
     assert line.startswith(sigterm_probe.PROBE_MARKER)
     assert "SIGTERM (15)" in line and "pid=1" in line and "uid=0" in line
-    assert "2026-10-18T03:04:05+00:00" in line and "/sbin/init" in line
+    assert "2030-01-02T03:04:05+00:00" in line and "/sbin/init" in line
 
 
 @pytest.mark.skipif(not sigterm_probe.probe_supported(), reason="sigwaitinfo exists on POSIX only")
