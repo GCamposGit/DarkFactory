@@ -45,7 +45,7 @@ if str(IMPORT_ROOT) not in sys.path:
     sys.path.insert(0, str(IMPORT_ROOT))
 
 from core.harness import suite_lock as _suite_lock
-from tests import _tree_hygiene, _worker_capacity
+from tests import _cache_dir, _tree_hygiene, _worker_capacity
 
 # Mitigate Windows WMI query crashes (0x8007000e) during worker startup (USR-95)
 _worker_capacity.mitigate_windows_wmi_startup()
@@ -196,6 +196,13 @@ def _finish_tree_guard(session: pytest.Session) -> None:
             reporter.write_line(line)
     if session.exitstatus == pytest.ExitCode.OK:
         session.exitstatus = int(pytest.ExitCode.TESTS_FAILED)
+
+
+@pytest.hookimpl(tryfirst=True)
+def pytest_configure(config: pytest.Config) -> None:
+    """Keep ``.pytest_cache`` (protected ACL on Windows) out of the worktree."""
+
+    _cache_dir.redirect_cache_dir(config)
 
 
 def pytest_sessionstart(session: pytest.Session) -> None:
