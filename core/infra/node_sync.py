@@ -315,8 +315,12 @@ def record_divergence_cycle(
         if state == "divergent":
             cycles = data.get(node_name, 0) + 1
             data[node_name] = cycles
-            if cycles > 1 and notifier:
-                notifier(f"ALERTA: Nó {node_name} permanece divergente por {cycles} ciclos de deploy consecutivos!")
+            if cycles == 2 and notifier:
+                # USR-242: alerta uma unica vez ao atingir 2 ciclos; falha de envio nunca perde o contador.
+                try:
+                    notifier(f"ALERTA: Nó {node_name} permanece divergente por {cycles} ciclos de deploy consecutivos!")
+                except Exception:
+                    pass
         else:
             data[node_name] = 0
             cycles = 0
