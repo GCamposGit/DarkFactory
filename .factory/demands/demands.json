@@ -9023,42 +9023,45 @@
   {
     "id": "USR-310",
     "project_id": "darkfac",
-    "title": "Cliente Python para enviar e-mail ao grokbot pelo Worker darkfac-mailer da Cloudflare",
+    "title": "E-mail ao grokbot: cliente do Worker darkfac-mailer e pre-flight que acorda o grokbox quando o worker de testes esta fora do ar",
     "origin": "user",
     "status": "planned",
     "delivery_evidence": null,
     "item_type": "infrastructure",
     "lifecycle_stage": "execution",
-    "horizon": "later",
+    "horizon": "now",
     "tags": [
       "user-demand",
       "infra",
       "integration",
-      "congelado-v0"
+      "v0-critico"
     ],
-    "problem_statement": "O owner quer que a DarkFac envie e-mail para guigrokchief@mail.grokbot.com. O envio sai pelo Worker darkfac-mailer (Cloudflare Email Workers, binding send_email), configurado pelo owner na OA-034; falta o lado da fabrica: um cliente que faca POST autenticado no Worker usando DARKFAC_MAILER_URL e DARKFAC_MAILER_TOKEN.",
+    "problem_statement": "O grokbox (worker oficial do portao, ~2,5 min contra 23-40 min no Notebook/Desktop) cai com frequencia e hoje so volta quando alguem percebe. O canal de e-mail para o grokbot ja funciona (OA-034): Worker Cloudflare darkfac-mailer, POST JSON {subject,text} com Authorization Bearer DARKFAC_MAILER_TOKEN em DARKFAC_MAILER_URL, resposta {ok:true}; envio manual em 18/10/2026 acordou o grokbot. Falta a fabrica fazer isso sozinha: no pre-flight do run_ticket, sondar o /health do grokbox (DARKFAC_GROKBOX_URL, padrao http://100.77.130.5:8080, timeout DARKFAC_WORKER_HEALTH_TIMEOUT_SEC) e, se nao responder, mandar e-mail pedindo para deixar o grokbox pronto (VM Online no Tailscale, worker do runbook docs/runbooks/grokbox_test_worker.md com repo atualizado, /health OK). Antes do portao oficial, se o grokbox estava fora, esperar ate DARKFAC_GROKBOX_WAKE_WAIT_SEC (padrao 300) por /health e depois seguir o fallback atual. core/harness/* e protegido: o gancho fica em run_ticket.py e num modulo novo; pode importar core.harness.remote_dispatch.probe_health sem altera-lo.",
     "core_journey": [
-      "Um modulo da fabrica chama send_grokbot_email(subject, text) e o e-mail chega na caixa do grokbot."
+      "run_ticket encontra o grokbox fora do ar no pre-flight, manda o e-mail ao grokbot e, ao chegar no portao, usa o grokbox ja acordado."
     ],
     "non_goals": [
-      "Nao enviar para destinatarios arbitrarios nem guardar o token no repositorio.",
-      "Nao alterar a configuracao do Worker na Cloudflare (isso e da OA-034)."
+      "Nao alterar core/harness/* nem a configuracao do Worker na Cloudflare.",
+      "Nao enviar para outro destinatario nem gravar o token no repositorio ou em logs.",
+      "Falha de e-mail ou de sonda nunca bloqueia nem muda o resultado do ticket."
     ],
     "reachability_contract": "",
     "acceptance_criteria": [
-      "core/integrations/email_worker.py expoe send_grokbot_email(subject, text) que faz POST JSON no DARKFAC_MAILER_URL com Authorization Bearer DARKFAC_MAILER_TOKEN e retorna sucesso apenas com ok=true (teste com transporte simulado).",
-      "Sem as variaveis de ambiente, ou com resposta 401/502, a funcao falha fechada com erro estruturado que nao exibe o token (teste).",
-      "CLI python -m core.integrations.email_worker --subject ... --text ... envia o e-mail e retorna codigo 0 em sucesso e diferente de 0 em falha."
+      "core/integrations/email_worker.py expoe send_grokbot_email(subject, text) que faz POST JSON em DARKFAC_MAILER_URL com Bearer DARKFAC_MAILER_TOKEN e so retorna sucesso com ok=true; sem variaveis, com 401/502 ou erro de rede devolve resultado estruturado de falha sem expor o token (testes com transporte simulado).",
+      "No pre-flight do run_ticket, se o /health do grokbox nao responde, o e-mail de acordar e enviado no maximo uma vez a cada 30 min (estado persistido em disco) e qualquer falha de sonda ou envio so gera log, sem bloquear nem mudar o desfecho (testes).",
+      "Antes do portao oficial, se o grokbox estava fora no pre-flight, o run_ticket espera ate DARKFAC_GROKBOX_WAKE_WAIT_SEC (padrao 300) pelo /health e depois segue o fluxo atual; com grokbox no ar nao ha espera nem e-mail (testes)."
     ],
     "suggested_files": [
       "core/integrations/email_worker.py",
+      "core/line/grokbox_wake.py",
+      "run_ticket.py",
       "tests/test_email_worker.py",
-      "infra/cloudflare/darkfac-mailer/worker.js"
+      "tests/line/test_grokbox_wake.py"
     ],
     "estimated_complexity": "low",
     "dependencies": [],
     "created_at": "2026-10-18T11:19:44.953004Z",
-    "updated_at": "2026-10-18T11:19:44.953004Z"
+    "updated_at": "2026-10-18T19:17:13.875299Z"
   },
   {
     "id": "USR-313",
