@@ -39,6 +39,9 @@ document.addEventListener("DOMContentLoaded", () => {
     if (event.key === "Escape" && !document.getElementById("grill-modal")?.classList.contains("hidden")) {
       closeGrillModal();
     }
+    if (event.key === "Escape" && !document.getElementById("task-intervention-modal")?.classList.contains("hidden")) {
+      closeTaskInterventionModal();
+    }
   });
 
   // Periodic poll for priority interventions (every 30s)
@@ -154,7 +157,7 @@ function renderInterventionsHeroStrip() {
       icon = "🛑 WAITING_HUMAN";
       actionBtn = `
         <button 
-          onclick="document.getElementById('tasks-dashboard-section')?.scrollIntoView({behavior: 'smooth'})"
+          data-item-id="${escapeInterventionsHtml(item.id)}" onclick="openTaskInterventionModal(this.dataset.itemId)"
           class="px-3 py-1 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white font-medium text-xs shadow-md shadow-indigo-600/20 transition-all flex items-center gap-1.5 cursor-pointer">
           <span>Ver Tarefa</span>
           <span>→</span>
@@ -832,3 +835,225 @@ window.closeGrillModal = closeGrillModal;
 window.loadPriorityInterventions = loadPriorityInterventions;
 window.autoSelectRecommendedGrillOptions = autoSelectRecommendedGrillOptions;
 window.submitGrillModalAnswers = submitGrillModalAnswers;
+
+// ---------------------------------------------------------------------------
+// WAITING_HUMAN task modal (USR-210): "Ver Tarefa" never scrolls the page.
+// ---------------------------------------------------------------------------
+
+// Instruction text per known cause_code. Sources: core/workflow/job_board.py
+// (_resolve_cause_and_diagnostic), core/line/route_wait.py (NO_ROUTE_CAUSE),
+// core/line/orphan_runs.py (ORPHAN_NO_SUCCESSOR_CAUSE), core/line/stage_integration.py
+// (base_red_exhausted, kind=repo_setting guide), core/line/stage_release.py (kind=commercial_acceptance guide).
+const TASK_CAUSE_GUIDES = {
+  grill_pending: {
+    title: "Grill pendente com o Owner",
+    instructions: "A demanda aguarda as respostas do Grill (Gate G1). Responda as perguntas de desambiguação para a linha continuar. Se a demanda não vale mais, cancele o run.",
+    actions: ["grill", "cancel"],
+  },
+  waiting_dependency: {
+    title: "Dependência manual pendente",
+    instructions: "O job aguarda uma dependência que só uma pessoa resolve. Resolva a dependência indicada na evidência e depois retome. Se ela não será resolvida, cancele o run.",
+    actions: ["resume", "cancel"],
+  },
+  no_route_available: {
+    title: "Nenhum harness elegível",
+    instructions: "Nenhum harness com cota acima do piso de 15% pôde assumir o estágio. Aguarde a recuperação de cota ou retome para tentar o roteamento de novo. Se o run perdeu a utilidade, cancele.",
+    actions: ["resume", "cancel"],
+  },
+  orphan_run_no_successor: {
+    title: "Run sem estágio sucessor",
+    instructions: "O run terminou um estágio e nenhum estágio seguinte foi aberto. Retome para a linha reavaliar o próximo estágio ou cancele o run.",
+    actions: ["resume", "cancel"],
+  },
+  base_red_exhausted: {
+    title: "Base vermelha esgotou as tentativas",
+    instructions: "A branch base falha nos testes mesmo sem a mudança do ticket. Corrija a base (ou abra um ticket de correção), depois retome. Se não for corrigir agora, cancele o run.",
+    actions: ["resume", "cancel"],
+  },
+  manual_decision_pending: {
+    title: "Decisão manual pendente",
+    instructions: "O job aguarda uma decisão do Owner sem causa mais específica. Leia a evidência abaixo, decida e retome. Para encerrar sem decidir, cancele o run.",
+    actions: ["resume", "cancel"],
+  },
+  ghost_open_job_on_terminal_run: {
+    title: "Job aberto em run já encerrado",
+    instructions: "O run já terminou; este job é resíduo e não exige decisão do Owner. Cancele para remover da fila.",
+    actions: ["cancel"],
+  },
+};
+
+const TASK_CAUSE_PREFIX_GUIDES = [
+  {
+    prefix: "waiting_human_",
+    guide: {
+      title: "Decisão manual em um estágio da linha",
+      instructions: "O estágio indicado pediu decisão humana sem causa específica. Leia a evidência, decida e retome. Para encerrar sem decidir, cancele o run.",
+      actions: ["resume", "cancel"],
+    },
+  },
+  {
+    prefix: "kind=repo_setting",
+    guide: {
+      title: "Configuração do repositório exige ação humana",
+      instructions: "Siga o passo a passo exibido na evidência (configuração do GitHub). Depois de aplicar, a fábrica detecta a mudança; se não avançar, retome.",
+      actions: ["resume", "cancel"],
+    },
+  },
+  {
+    prefix: "kind=commercial_acceptance",
+    guide: {
+      title: "Aceite comercial pendente",
+      instructions: "Este projeto exige aceite comercial antes do deploy. Revise o PR e o SHA exibidos na evidência e confirme o aceite para a fábrica seguir.",
+      actions: ["cancel"],
+    },
+  },
+];
+
+const TASK_UNKNOWN_CAUSE_GUIDE = {
+  title: "Causa não catalogada",
+  instructions: "Esta causa ainda não tem instrução própria. Leia a evidência crua abaixo. Se não for possível resolver, cancele o run.",
+  actions: ["cancel"],
+};
+
+function resolveTaskInterventionGuide(causeCode) {
+  const cause = String(causeCode || "").trim();
+  if (cause && Object.prototype.hasOwnProperty.call(TASK_CAUSE_GUIDES, cause)) {
+    return { ...TASK_CAUSE_GUIDES[cause], known: true };
+  }
+  for (const entry of TASK_CAUSE_PREFIX_GUIDES) {
+    if (cause.startsWith(entry.prefix)) return { ...entry.guide, known: true };
+  }
+  return { ...TASK_UNKNOWN_CAUSE_GUIDE, known: false };
+}
+
+// Buttons actually offered: only actions whose existing endpoint can be addressed with the ids we have.
+function taskInterventionActions(item) {
+  const meta = (item && item.metadata) || {};
+  const guide = resolveTaskInterventionGuide(meta.cause_code);
+  const ticketId = meta.ticket_id || "";
+  const runId = meta.run_id || "";
+  const out = [];
+  for (const kind of guide.actions) {
+    if (kind === "grill" && ticketId) {
+      out.push({ kind, label: "Responder Grill" });
+    } else if (kind === "resume" && ticketId) {
+      // POST /api/demands/tickets/{ticket_id}/line (hub/backend/api.py: submit_demand_ticket_to_line)
+      out.push({ kind, label: "Retomar na linha" });
+    } else if (kind === "cancel" && (runId || ticketId)) {
+      // POST /api/line/runs/{run_id}/cancel or /api/demands/tickets/{ticket_id}/line/cancel
+      out.push({ kind, label: "Cancelar run" });
+    }
+  }
+  return out;
+}
+
+function findTaskIntervention(itemId) {
+  const items = (interventionsState.report && interventionsState.report.items) || [];
+  return items.find((it) => it.id === itemId) || null;
+}
+
+function openTaskInterventionModal(itemId) {
+  const item = findTaskIntervention(itemId);
+  const modal = document.getElementById("task-intervention-modal");
+  const content = document.getElementById("task-intervention-modal-content");
+  if (!modal || !content || !item) return;
+  interventionsState.activeTaskItem = item;
+
+  const meta = item.metadata || {};
+  const guide = resolveTaskInterventionGuide(meta.cause_code);
+  const titleEl = document.getElementById("task-intervention-modal-title");
+  const subtitleEl = document.getElementById("task-intervention-modal-subtitle");
+  if (titleEl) titleEl.textContent = item.title || "Tarefa bloqueada";
+  if (subtitleEl) subtitleEl.textContent = guide.title;
+
+  const evidenceLines = [];
+  if (meta.cause_code) evidenceLines.push(`cause_code: ${meta.cause_code}`);
+  if (meta.diagnostic) evidenceLines.push(`diagnóstico: ${meta.diagnostic}`);
+  if (meta.stage) evidenceLines.push(`etapa: ${meta.stage}`);
+  if (meta.task_id) evidenceLines.push(`task_id: ${meta.task_id}`);
+  if (meta.run_id) evidenceLines.push(`run_id: ${meta.run_id}`);
+  (meta.evidence || []).forEach((ev) => evidenceLines.push(`${ev.label}: ${ev.value}`));
+
+  const actions = taskInterventionActions(item);
+  const actionClass = {
+    grill: "bg-amber-500 hover:bg-amber-400 text-slate-950",
+    resume: "bg-emerald-600 hover:bg-emerald-500 text-white",
+    cancel: "bg-rose-600 hover:bg-rose-500 text-white",
+  };
+  content.innerHTML = `
+    <div class="space-y-1">
+      <p class="text-[10px] font-mono uppercase text-slate-500">Causa</p>
+      <p class="text-xs text-slate-200">${escapeInterventionsHtml(item.description)}</p>
+    </div>
+    <div class="space-y-1">
+      <p class="text-[10px] font-mono uppercase text-slate-500">Como resolver</p>
+      <p class="text-xs text-slate-300 leading-snug">${escapeInterventionsHtml(guide.instructions)}</p>
+      ${actions.length ? "" : '<p class="text-[11px] text-amber-300">Nenhuma ação direta disponível para esta tarefa: siga a instrução acima.</p>'}
+    </div>
+    <div class="space-y-1">
+      <p class="text-[10px] font-mono uppercase text-slate-500">${guide.known ? "Evidência" : "Evidência crua"}</p>
+      <pre class="text-[11px] font-mono text-slate-400 bg-slate-950/60 border border-slate-800 rounded-lg p-3 whitespace-pre-wrap break-words">${escapeInterventionsHtml(evidenceLines.join("\n") || "Sem evidência registrada.")}</pre>
+    </div>
+    <p id="task-intervention-feedback" class="text-[11px] font-mono text-slate-400" role="status"></p>
+    <div class="flex flex-wrap gap-2">
+      ${actions.map((a) => `<button type="button" data-task-action="${a.kind}" onclick="runTaskInterventionAction('${a.kind}')" class="px-3 py-1.5 rounded-lg font-bold text-xs cursor-pointer ${actionClass[a.kind]}">${escapeInterventionsHtml(a.label)}</button>`).join("")}
+      <button type="button" onclick="closeTaskInterventionModal()" class="px-3 py-1.5 rounded-lg bg-slate-800 text-slate-200 text-xs cursor-pointer">Fechar</button>
+    </div>
+  `;
+  modal.classList.remove("hidden");
+  document.body.classList.add("overflow-hidden");
+}
+
+function closeTaskInterventionModal() {
+  const modal = document.getElementById("task-intervention-modal");
+  if (modal) modal.classList.add("hidden");
+  document.body.classList.remove("overflow-hidden");
+  interventionsState.activeTaskItem = null;
+}
+
+async function runTaskInterventionAction(kind) {
+  const item = interventionsState.activeTaskItem;
+  if (!item) return;
+  const meta = item.metadata || {};
+  const feedback = document.getElementById("task-intervention-feedback");
+  const say = (text) => { if (feedback) feedback.textContent = text; };
+
+  if (kind === "grill") {
+    closeTaskInterventionModal();
+    openGrillModal(meta.ticket_id);
+    return;
+  }
+
+  let url = "";
+  if (kind === "resume") {
+    url = `/api/demands/tickets/${encodeURIComponent(meta.ticket_id)}/line`;
+  } else if (kind === "cancel") {
+    if (typeof confirm === "function" && !confirm("Cancelar o run desta tarefa? Isso não pode ser desfeito.")) return;
+    url = meta.run_id
+      ? `/api/line/runs/${encodeURIComponent(meta.run_id)}/cancel`
+      : `/api/demands/tickets/${encodeURIComponent(meta.ticket_id)}/line/cancel`;
+  } else {
+    return;
+  }
+
+  say("Enviando...");
+  try {
+    const request = typeof hubFetch === "function" ? hubFetch : fetch;
+    const response = await request(url, { method: "POST", headers: { Accept: "application/json" } });
+    let payload = null;
+    try { payload = await response.json(); } catch (_) { payload = null; }
+    if (!response.ok) {
+      const detail = payload && (payload.detail || payload.message);
+      throw new Error(`HTTP ${response.status}${detail ? `: ${detail}` : ""}`);
+    }
+    say(kind === "resume" ? "Tarefa reenviada à linha." : "Run cancelado.");
+    loadPriorityInterventions(true);
+    setTimeout(closeTaskInterventionModal, 900);
+  } catch (err) {
+    say(`Falha: ${err.message}`);
+  }
+}
+
+if (typeof module !== "undefined" && module.exports) {
+  module.exports = { resolveTaskInterventionGuide, taskInterventionActions, TASK_CAUSE_GUIDES };
+}

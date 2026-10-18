@@ -181,6 +181,17 @@ def _queue_text(task: Any, *names: str) -> str:
     return ""
 
 
+def _queue_evidence(task: Any) -> list[dict[str, str]]:
+    """Raw evidence of a dashboard row as plain label/value pairs (shown by the Hub task modal)."""
+    evidence = task.get("evidence") if isinstance(task, dict) else getattr(task, "evidence", None)
+    out: list[dict[str, str]] = []
+    for ev in evidence or []:
+        label = ev.get("label") if isinstance(ev, dict) else getattr(ev, "label", "")
+        value = ev.get("value") if isinstance(ev, dict) else getattr(ev, "value", "")
+        out.append({"label": str(label or ""), "value": str(value or "")[:500]})
+    return out[:12]
+
+
 def _queue_project(task: Any) -> str:
     """Project of a dashboard row. The row itself has no project_id; the evidence does."""
     explicit = _queue_text(task, "project_id")
@@ -962,6 +973,8 @@ class HubService:
                         t_title = _queue_text(task, "title")
                         t_proj = _queue_project(task)
                         t_cause = _queue_text(task, "cause_code")
+                        t_stage = _queue_text(task, "stage")
+                        t_diag = _queue_text(task, "diagnostic")
                         label = t_ticket or t_run or t_id
                         if project_id and t_proj != project_id:
                             continue
@@ -984,6 +997,9 @@ class HubService:
                                     "ticket_id": t_ticket,
                                     "run_id": t_run,
                                     "cause_code": t_cause,
+                                    "stage": t_stage,
+                                    "diagnostic": t_diag,
+                                    "evidence": _queue_evidence(task),
                                 },
                             )
                         )
