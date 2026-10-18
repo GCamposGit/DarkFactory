@@ -1225,6 +1225,33 @@
       "created_at": "2026-10-17T13:16:47Z",
       "created_by": "queue-registration",
       "resolved_at": null
+    },
+    {
+      "id": "OA-031",
+      "kind": "action",
+      "title": "Publicar regra pós-V0 no AGENTS.md protegido",
+      "priority": "medium",
+      "status": "done",
+      "why": "O Owner declarou o V0 concluído em 17/10/2026. O rascunho local de AGENTS.md remove o congelamento e o limite de critérios, mas core/orchestrator/guard.py protege AGENTS.md de PRs de agentes; a publicação exige o fluxo owner-only do repositório.",
+      "blocks": [
+        "USR-268",
+        "USR-270",
+        "USR-299"
+      ],
+      "depends_on": [],
+      "steps": [
+        {
+          "text": "No Codex, revise o diff local de C:\\dev\\DarkFac\\AGENTS.md na seção Pós-V0.",
+          "command": "git -C C:\\dev\\DarkFac diff -- AGENTS.md"
+        },
+        {
+          "text": "Publique o AGENTS.md pelo fluxo de governança reservado ao Owner; o guard do repositório impede merge de PR de agente que altere esse arquivo."
+        }
+      ],
+      "verify": "Publicada em origin/main no commit 0a55547413cccfe775fccdc5d16efe091cebb07f; guard local passou com autorização do Owner e o check trusted-pr-policy confirmou que AGENTS.md continua protegido. CI de main 39083278947 passou em Linux e Windows; redeploy reportou os quatro serviços done e sync da VPS no mesmo SHA.",
+      "created_at": "2026-10-17T18:30:09Z",
+      "created_by": "claude-code",
+      "resolved_at": "2026-10-18T00:58:37Z"
     }
   ]
 }
