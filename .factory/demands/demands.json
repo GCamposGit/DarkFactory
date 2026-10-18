@@ -7501,8 +7501,8 @@
     "project_id": "darkfac",
     "title": "Teste instavel tests/test_task_dashboard_client.py::test_task_dashboard_visible_polling_and_failure_cache estoura timeout no Windows da CI",
     "origin": "user",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "c8e5bdd10a112f286fb204e51cb55408513719f6",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "later",
@@ -7525,7 +7525,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-13T00:30:06.532856Z",
-    "updated_at": "2026-10-13T00:30:06.532856Z"
+    "updated_at": "2026-10-18T05:40:10.276173Z"
   },
   {
     "id": "USR-253",
