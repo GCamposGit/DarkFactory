@@ -129,7 +129,7 @@
     "icon": "zap",
     "color": "#ef4444",
     "is_favorite": true,
-    "pinned": false,
+    "pinned": true,
     "is_local": false,
     "catalog_revision": "2026-09-23"
   },
@@ -294,30 +294,6 @@
     "is_favorite": false,
     "pinned": false,
     "is_local": false
-  },
-  {
-    "id": "canaletto-gallery",
-    "name": "Canaletto Gallery & AI Studio",
-    "url": "http://127.0.0.1:8899",
-    "category": "image_audio",
-    "description": "Galeria do mestre Giovanni Antonio Canaletto (1697-1768) em alta definição com ranking por data e fama, visualizador HD e ateliê de IA para transformar fotos em vedutas venezianas.",
-    "tags": [
-      "canaletto",
-      "arte",
-      "vedutismo",
-      "galeria",
-      "ai-studio",
-      "alta-definicao"
-    ],
-    "icon": "palette",
-    "color": "#d4af37",
-    "is_favorite": true,
-    "pinned": true,
-    "is_local": true,
-    "launch_script": "../Canaletto/run_canaletto.py",
-    "fallback_urls": [
-      "http://127.0.0.1:8900"
-    ]
   },
   {
     "id": "dokploy-console",
