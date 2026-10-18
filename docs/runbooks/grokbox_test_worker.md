@@ -45,9 +45,30 @@ tailscale ping grokbox
 Esperado: JSON com `status` ok, `busy` false, `platform_family` linux. `tailscale ping` mostrando
 `via DERP(...)` e normal (e o motivo do timeout de 10 s).
 
-## 4. Subir no boot (systemd)
+## 4. Quem mantem o worker de pe
 
-O worker foi iniciado a mao e cai se a VM reiniciar. A causa do SIGTERM de 14/10 foi o worker rodando
+Estado verificado em 18/10/2026 (OA-035): a VM NAO tem `systemctl` nem `journalctl`. O worker
+(`.venv/bin/python core/harness/remote_worker.py --host 0.0.0.0 --port 8080 --node-id grokbox`) e filho
+de um script supervisor da propria VM, com um watchdog em paralelo; quando o worker morre, o supervisor
+o relanca em ~1 s. O supervisor deveria recarregar o worker ocioso quando o HEAD muda, mas em 18/10 nao
+recarregou em 3 min. Para atualizar:
+
+```bash
+curl -s http://127.0.0.1:8080/health          # so siga com "busy": false
+ps -eo pid,ppid,etime,cmd | grep -v grep | grep remote_worker.py
+cd /workspace/darkfac/DarkFactory && git status --short && git fetch origin && git checkout main && git pull --ff-only
+# espere ~3 min pelo reload; se o git_sha do /health nao mudar e o worker continuar ocioso:
+kill -TERM <PID do remote_worker.py>          # o supervisor relanca em ~1 s
+curl -s http://127.0.0.1:8080/health          # git_sha novo, busy=false
+```
+
+Logs do kernel: `dmesg` (nao ha journal). Congelamentos ficam em `/workspace/darkfac/run/vm-events.log`.
+
+A unidade systemd abaixo e a alternativa caso a VM passe a ter systemd; nao esta instalada hoje.
+
+### 4.1 Alternativa: subir no boot com systemd
+
+Sem supervisor, o worker iniciado a mao cai se a VM reiniciar. A causa do SIGTERM de 14/10 foi o worker rodando
 sem o Python certo no PATH. Entrypoint (o mesmo que `scripts/install_test_worker.ps1` registra no
 Windows): `python core/harness/remote_worker.py --host 0.0.0.0 --port 8080 --node-id <id>`.
 
@@ -87,7 +108,8 @@ curl -s -m 5 http://127.0.0.1:8080/health
 ```
 
 O Vigia do Tailscale no grokbox roda a cada 5 min e cuida SOMENTE do Tailscale; ele nao reinicia o
-worker. Quem mantem o worker de pe e o systemd (`Restart=always`).
+worker. Quem mantem o worker de pe hoje e o script supervisor da VM (secao 4); com a unidade acima instalada,
+seria o systemd (`Restart=always`).
 
 ## 5. Quando o Tailscale perde o servidor de controle
 
@@ -100,7 +122,7 @@ para o local. O portao nunca trava por isso, apenas fica lento. Para recuperar:
 2. No grokbox (console da VM), `sudo tailscale status`; se disser "Logged out" ou "can't reach
    control", rode `sudo tailscale up` e confira se o no volta a `100.77.130.5` (o Vigia tenta isso a
    cada 5 min).
-3. Confirme que o worker segue de pe (`systemctl status darkfac-test-worker`) e repita o `curl.exe`
+3. Confirme que o worker segue de pe (`ps -eo pid,etime,cmd | grep remote_worker.py`) e repita o `curl.exe`
    do item 3.
 4. Se a VM nao responder, registre/atualize uma OA em `.factory/owner_actions/owner_actions.json`.
 
@@ -143,7 +165,7 @@ Regras:
 - Testes destrutivos no worker (reiniciar o servico, `kill`, `tailscale down`, mexer em `worktrees/`,
   `systemctl restart`) so com a fila parada: confirme `curl.exe http://100.77.130.5:8080/health` com
   `busy=false` e nenhum portao em andamento no Notebook/VPS antes de comecar.
-- Ao ver `worker_restarted` num log, olhe `journalctl -k | grep -i fork` e `tailscale status` na VM antes de
+- Ao ver `worker_restarted` num log, olhe `dmesg | grep -i fork` e `tailscale status` na VM antes de
   culpar o candidato; se o job voltou em outra tentativa (`[REMOTE_RETRY]`), nada a fazer.
 
 ## 9. Congelamento de VM = infraestrutura (USR-298)
@@ -168,4 +190,4 @@ Regras (codigo em `core/harness/remote_worker.py` e `core/harness/remote_dispatc
 - Diagnostico do emissor: no Linux o runner roda sob `python -m core.harness.sigterm_probe -- ...`, que
   registra no log do job a linha `[SIGTERM_PROBE] received SIGTERM ... from pid=<PID> uid=<UID>` e depois
   encerra por SIGTERM normalmente (o sinal nao e engolido). `DARKFAC_WORKER_SIGTERM_PROBE=off` desliga.
-  Para fechar a causa, correlacione esse PID/horario com `/workspace/darkfac/run/vm-events.log` e `journalctl`.
+  Para fechar a causa, correlacione esse PID/horario com `/workspace/darkfac/run/vm-events.log` e `dmesg`.

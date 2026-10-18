@@ -9205,5 +9205,42 @@
     "dependencies": [],
     "created_at": "2026-10-18T19:13:22.523968Z",
     "updated_at": "2026-10-18T19:13:22.523968Z"
+  },
+  {
+    "id": "USR-315",
+    "project_id": "darkfac",
+    "title": "Supervisor do grokbox nao recarrega o worker ocioso quando o HEAD muda e nao esta versionado no repositorio",
+    "origin": "agent",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand",
+      "bug",
+      "infra",
+      "grokbox"
+    ],
+    "problem_statement": "Em 18/10/2026 ~17:20 BRT (OA-035), depois de 'git pull --ff-only' para be1bb6f no /workspace/darkfac/DarkFactory do grokbox, o script supervisor da VM (PID 198590, watchdog PID 8616) nao recarregou o worker ocioso em ~3 min, embora tivesse recarregado as 16:16. Foi preciso SIGTERM manual no worker (PID 417103); o supervisor o relancou em 1 s (instancia c57b77c5, /health git_sha be1bb6f). O supervisor vive so na VM, fora do repositorio, e o runbook docs/runbooks/grokbox_test_worker.md descrevia systemd, que a VM nao tem. Sem recarga confiavel, o grokbox fica em codigo antigo e correcoes como USR-298 nao chegam ao portao.",
+    "core_journey": [],
+    "non_goals": [
+      "Nao instalar systemd na VM.",
+      "Nao reiniciar worker com job em andamento."
+    ],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "O script supervisor do grokbox passa a ser versionado em scripts/ e o runbook aponta para ele.",
+      "Com o worker ocioso (busy=false), uma mudanca de HEAD em project_root faz o worker ser relancado em ate 60 s e o /health passar a mostrar o git_sha novo; com busy=true, a recarga espera o job terminar.",
+      "Teste automatizado da logica de decisao (HEAD mudou x ocioso/ocupado) sem depender da VM."
+    ],
+    "suggested_files": [
+      "scripts/",
+      "docs/runbooks/grokbox_test_worker.md"
+    ],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-18T20:25:34.048076Z",
+    "updated_at": "2026-10-18T20:25:34.048076Z"
   }
 ]

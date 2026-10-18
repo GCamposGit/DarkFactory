@@ -1448,7 +1448,7 @@
       "title": "Atualizar o worker do grokbox para a main (USR-298) e coletar quem envia o SIGTERM ao pytest",
       "priority": "critical",
       "status": "open",
-      "why": "O codigo do USR-298 esta na main (32fd792), mas o worker do grokbox continua no commit antigo d6d0c0b (/health git_sha) e nao se atualiza sozinho. Em 18/10 10:31 UTC, logo depois de a VM voltar (sem congelamento), um portao so no grokbox morreu de novo: 'bringing up nodes...' e o pytest -n 1 terminou com exit -15 em 0,9 s, 0 testes. Nada no repositorio envia sinal na coleta (conftest/pytest.ini verificados), entao o emissor esta fora do candidato (worker antigo, supervisor da VM, limite de processos/cgroup). Sem o worker novo, todo portao no grokbox vira [HARNESS_FAIL] falso e a fila depende do Desktop (o host mais lento).",
+      "why": "Parte de atualizacao concluida em 18/10/2026 ~17:20 BRT pelo Grok Chief of Staff: worker estava ocioso (git_sha 765c7e0, que ja contem 32fd792), repo limpo, fast-forward para be1bb6f; o supervisor da VM (script, PID 198590, com watchdog PID 8616; NAO ha systemd nem journalctl) nao recarregou o worker sozinho em ~3 min, entao o worker ocioso recebeu SIGTERM e foi relancado em 1 s (instancia c57b77c5, /health git_sha be1bb6f, busy=false). Reproducao manual 'pytest -n 1 tests/test_clock_bomb_guard.py' na VM: 7 passed, exit=0. Diagnostico: sem cgroup pids.max/memory.max, ulimit sem limite relevante; dmesg com 20x 'crng reseeded due to virtual machine fork' e rajada de 'virtio_balloon: Out of puff' (pressao de memoria do balao, 2,8 GiB livres); vm-events.log com 105 congelamentos, hoje a cada 8-12 min com pausas de 2-11 min (17:05, 17:12, 17:20). Falta so a prova: um portao remoto-obrigatorio so no grokbox rodado do Notebook. Motivo original: em 18/10 10:31 UTC um portao so no grokbox morreu com exit -15 em 0,9 s e 0 testes; sem o worker novo, todo portao no grokbox vira [HARNESS_FAIL] falso e a fila depende do Desktop.",
       "blocks": [
         "USR-298",
         "USR-270"
@@ -1456,17 +1456,21 @@
       "depends_on": [],
       "steps": [
         {
-          "text": "Abra o chat do Grok 'Chief of Staff' (o que tem acesso a VM grok-bot-vm-418374532) e envie a mensagem do passo 2, copiando o bloco inteiro."
+          "text": "FEITO em 18/10 ~17:20 BRT: worker do grokbox atualizado para be1bb6f e relancado pelo supervisor da VM; diagnostico coletado (ver 'why')."
         },
         {
-          "text": "Mensagem para o Chief of Staff: 'Na VM do grokbox: (1) cd /workspace/darkfac/DarkFactory && git fetch origin && git checkout main && git pull --ff-only (deve ficar em 32fd792 ou mais novo); (2) reinicie o worker de testes pelo mesmo supervisor que o mantem de pe hoje, so com ele ocioso (curl -s http://127.0.0.1:8080/health mostrando busy=false); (3) confirme que o /health mostra o git_sha novo; (4) colete e me devolva: dmesg | tail -50, cat /sys/fs/cgroup/pids.max e /sys/fs/cgroup/memory.max (se existirem), ulimit -a, e a config do supervisor do worker; (5) reproduza a mao: cd /workspace/darkfac/DarkFactory && python -m pytest -n 1 tests/test_clock_bomb_guard.py -q; echo exit=$? e me devolva a saida.'"
+          "text": "No Notebook, abra o PowerShell (menu Iniciar > digite PowerShell > Enter) e confira que o worker esta ocioso e no codigo novo: git_sha deve comecar com be1bb6f (ou mais novo) e busy deve ser False. Se der timeout, o Tailscale caiu (OA-030) ou a VM esta congelada: espere 5 min e repita.",
+          "command": "Invoke-RestMethod http://100.77.130.5:8080/health -TimeoutSec 15 | Select-Object git_sha, busy, status"
         },
         {
-          "text": "Cole a resposta do Chief of Staff no chat do Claude Code (ou num comentario desta acao). O agente roda o portao de prova so no grokbox e, com o worker novo, o job log passa a ter a linha [SIGTERM_PROBE] com PID/UID de quem mandou o sinal.",
-          "command": "Invoke-RestMethod http://100.77.130.5:8080/health -TimeoutSec 15 | Select-Object git_sha, busy"
+          "text": "Ainda no PowerShell, rode o portao de prova so no grokbox, sem cache e sem cair para local (leva ~3 min; a espera de estabilidade de 60 s antes do envio e normal).",
+          "command": "$env:DARKFAC_TEST_WORKERS = \"http://100.77.130.5:8080\"; $env:DARKFAC_WORKER_HEALTH_TIMEOUT_SEC = \"10\"; python C:\\dev\\DarkFac\\core\\harness\\runner.py --quick --no-cache --remote-required"
+        },
+        {
+          "text": "Cole no chat do Claude Code as ultimas 30 linhas da saida do passo anterior. O agente fecha esta acao e encaminha USR-298 e USR-270; se aparecer [SIGTERM_PROBE], o PID/UID e cruzado com /workspace/darkfac/run/vm-events.log."
         }
       ],
-      "verify": "GET http://100.77.130.5:8080/health devolve git_sha igual ou posterior a 32fd792; um portao 'runner.py --quick --no-cache --remote-required' so no grokbox termina com [HARNESS_PASS] e [TEST_COUNT] positivo, ou mostra [SIGTERM_PROBE] e [REMOTE_RETRY] em vez de [HARNESS_FAIL].",
+      "verify": "GET http://100.77.130.5:8080/health devolve git_sha igual ou posterior a 32fd792 (cumprido: be1bb6f em 18/10 ~17:20 BRT); um portao 'runner.py --quick --no-cache --remote-required' so no grokbox termina com [HARNESS_PASS] e [TEST_COUNT] positivo, ou mostra [SIGTERM_PROBE] e [REMOTE_RETRY] em vez de [HARNESS_FAIL].",
       "created_at": "2026-10-18T11:53:17Z",
       "created_by": "claude-code",
       "resolved_at": null
