@@ -9169,5 +9169,41 @@
     "dependencies": [],
     "created_at": "2026-10-18T16:59:57.084768Z",
     "updated_at": "2026-10-18T16:59:57.084768Z"
+  },
+  {
+    "id": "USR-312",
+    "project_id": "darkfac",
+    "title": "Registro em fila falha com conflito em owner_actions.json quando o watchdog mergeia OA no meio (sem resolucao automatica)",
+    "origin": "agent",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand",
+      "bug",
+      "queue-registration"
+    ],
+    "problem_statement": "GitAutonomyManager.deliver_branch(kind='queue') resolve conflitos do demands.json por ID, mas nao os de .factory/owner_actions/owner_actions.json. Em 18/10/2026 dois registros em lote falharam com action='conflict' conflict_files=['.factory/owner_actions/owner_actions.json'] porque o watchdog de fila mergeou OAs (PR #398 e #407) entre a criacao da worktree e o merge, forcando reexecucao manual.",
+    "core_journey": [],
+    "non_goals": [
+      "Nao mudar a resolucao do demands.json.",
+      "Nao resolver conflito real (mesmo item alterado dos dois lados)."
+    ],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Conflito em owner_actions.json resolvido por merge de 3 vias por id: novo de qualquer lado entra, alteracao de um lado so vence; alteracao dos dois lados continua conflito.",
+      "Colisao de id criada dos dois lados e renumerada no lado da branch para o proximo OA-NNN livre.",
+      "Testes com repositorio git temporario real cobrem os casos."
+    ],
+    "suggested_files": [
+      "core/git/autonomy.py",
+      "core/owner_actions/merge.py"
+    ],
+    "estimated_complexity": "low",
+    "dependencies": [],
+    "created_at": "2026-10-18T19:13:22.523968Z",
+    "updated_at": "2026-10-18T19:13:22.523968Z"
   }
 ]
