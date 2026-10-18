@@ -7912,7 +7912,6 @@
     "horizon": "now",
     "tags": [
       "user-demand",
-      "v0-critico",
       "bug"
     ],
     "problem_statement": "Em 15/10/2026 (USR-192) o grokbox e o Desktop cairam no meio do job; o runner caiu para o Notebook com 6 workers xdist as 17:11 e o passo paralelo estourou 3000 s (18:01) com 0 testes contabilizados. Com 2 workers e sem variaveis de worker, a mesma suite levou 1814 s no Notebook em 14/10. A isolacao das variaveis de worker explica so ~10 s por sonda. A saida parcial do pytest e perdida no timeout (patch protegido pendente na OA-018), entao nao se sabe se travou ou ficou lento.",
@@ -7935,7 +7934,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-15T21:14:03.900067Z",
-    "updated_at": "2026-10-17T13:03:50.945139Z"
+    "updated_at": "2026-10-17T18:28:34.691821Z"
   },
   {
     "id": "USR-269",
@@ -7981,7 +7980,6 @@
     "horizon": "now",
     "tags": [
       "user-demand",
-      "v0-critico",
       "bug",
       "infra"
     ],
@@ -8002,7 +8000,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-16T12:36:20.495866Z",
-    "updated_at": "2026-10-17T13:03:50.960133Z"
+    "updated_at": "2026-10-17T18:28:34.708120Z"
   },
   {
     "id": "USR-271",
@@ -8717,7 +8715,7 @@
     "estimated_complexity": "low",
     "dependencies": [],
     "created_at": "2026-10-17T12:46:37.066166Z",
-    "updated_at": "2026-10-17T12:46:37.066166Z"
+    "updated_at": "2026-10-17T18:28:34.722914Z"
   },
   {
     "id": "USR-298",
