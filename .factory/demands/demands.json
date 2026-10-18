@@ -5897,8 +5897,8 @@
     "project_id": "darkfac",
     "title": "Telemetria de infraestrutura atribui as metricas da VPS ao Notebook (predator-neo-16)",
     "origin": "user",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "d920de0826082738d0c3abbc1a2d131f564728a9",
     "item_type": "operations",
     "lifecycle_stage": "execution",
     "horizon": "later",
@@ -5929,7 +5929,7 @@
     "estimated_complexity": "low",
     "dependencies": [],
     "created_at": "2026-10-10T14:54:12.116107Z",
-    "updated_at": "2026-10-11T17:49:17.206876Z"
+    "updated_at": "2026-10-18T10:23:40.332321Z"
   },
   {
     "id": "USR-213",
