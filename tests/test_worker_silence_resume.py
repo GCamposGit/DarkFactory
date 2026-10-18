@@ -238,8 +238,10 @@ def test_a_vanished_job_is_not_cancelled_it_is_already_gone(
 
 
 def test_lost_job_is_announced_and_its_seconds_are_recorded_for_the_local_fallback(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], clock: _VirtualClock
 ) -> None:
+    # USR-309: relogio virtual (sem tempo real) e sem subprocesso `git rev-parse` (lento sob carga).
+    monkeypatch.setattr(harness_cache, "tree_sha", lambda root: "b" * 40)
     repo_root = Path(__file__).resolve().parents[1]
     monkeypatch.setenv("DARKFAC_WORKER_RESTART_RETRIES", "0")  # sem reenvio: este teste cobre so o fallback
     monkeypatch.setenv("DARKFAC_TEST_WORKERS", "http://127.0.0.1:1")
@@ -252,6 +254,7 @@ def test_lost_job_is_announced_and_its_seconds_are_recorded_for_the_local_fallba
     monkeypatch.setattr(remote_dispatch, "_local_candidate_sha", lambda root: "c" * 40)
 
     def _lost(*_a: object, **_k: object):
+        clock.sleep(75.2)  # o job "demorou" 75,2 s no relogio virtual
         raise remote_dispatch.RemoteJobLost(
             "job j9 lost",
             {"error_code": "worker_unreachable", "job_id": "j9", "silent_for_sec": 75.2, "last_step_started": "parallel"},
@@ -282,7 +285,8 @@ def test_lost_job_is_announced_and_its_seconds_are_recorded_for_the_local_fallba
     assert attempt["error_code"] == "worker_unreachable"
     assert attempt["job_id"] == "j9"
     assert attempt["last_step_started"] == "parallel"
-    assert attempt["elapsed_sec"] >= 0
+    assert attempt["elapsed_sec"] == 75.2
+    assert "remote_spent=75s" in out
 
 
 def test_attempt_log_is_reset_on_every_dispatch_call(monkeypatch: pytest.MonkeyPatch) -> None:
