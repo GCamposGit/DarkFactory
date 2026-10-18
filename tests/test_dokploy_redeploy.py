@@ -1734,3 +1734,83 @@ def test_all_converged_runs_backup_without_pending_line(monkeypatch: pytest.Monk
     assert code == mod.EXIT_OK
     assert backups == ["darkfac"]
     assert "[PENDING]" not in err
+
+
+# --- USR-242: alerta de ops quando um no diverge por 2 ciclos consecutivos --------------------------
+
+
+def _run_with_divergence_cycles(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Any, states: List[str], send: Callable[[str], bool]
+) -> List[int]:
+    from core.infra import node_sync
+
+    state_file = tmp_path / "divergence.json"
+    cycle = {"i": 0}
+
+    def fake_sync(**kwargs: Any) -> node_sync.SyncReport:
+        state = states[cycle["i"]]
+        cycle["i"] += 1
+        node_sync.record_divergence_cycle("Desktop", state, state_path=state_file, notifier=kwargs.get("notifier"))
+        return node_sync.SyncReport(
+            expected_sha="a" * 40,
+            nodes=[
+                node_sync.NodeStatus(name="Notebook", state="converged", git_sha="a" * 40),
+                node_sync.NodeStatus(name="Desktop", state="converged", git_sha="a" * 40),
+                node_sync.NodeStatus(name="VPS", state="converged", git_sha="a" * 40),
+            ],
+        )
+
+    monkeypatch.setattr(node_sync, "sync", fake_sync)
+    codes: List[int] = []
+    for _ in states:
+        out, err = io.StringIO(), io.StringIO()
+        codes.append(
+            mod.main(
+                ["--only", "darkfac-cloud", "--skip-backup", "--skip-check-main"],
+                env=_ENV, registry_reader=_no_registry,
+                transport_factory=lambda url, key: _cloud_transport(),
+                stdout=out, stderr=err, ops_notifier=send,
+            )
+        )
+    return codes
+
+
+def test_ops_alert_sent_once_at_two_consecutive_divergent_cycles(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Any
+) -> None:
+    sent: List[str] = []
+    codes = _run_with_divergence_cycles(
+        monkeypatch, tmp_path, ["divergent", "divergent", "divergent"], lambda m: sent.append(m) or True
+    )
+    assert codes == [mod.EXIT_OK] * 3
+    assert len(sent) == 1
+    assert "Desktop" in sent[0] and "2 ciclos" in sent[0]
+
+
+def test_ops_alert_not_sent_when_node_converged(monkeypatch: pytest.MonkeyPatch, tmp_path: Any) -> None:
+    sent: List[str] = []
+    _run_with_divergence_cycles(
+        monkeypatch, tmp_path, ["divergent", "converged", "divergent"], lambda m: sent.append(m) or True
+    )
+    assert sent == []
+
+
+def test_ops_alert_send_error_does_not_fail_deploy(monkeypatch: pytest.MonkeyPatch, tmp_path: Any) -> None:
+    calls: List[str] = []
+
+    def boom(message: str) -> bool:
+        calls.append(message)
+        raise RuntimeError("telegram down")
+
+    codes = _run_with_divergence_cycles(monkeypatch, tmp_path, ["divergent", "divergent"], boom)
+    assert codes == [mod.EXIT_OK, mod.EXIT_OK]
+    assert len(calls) == 1
+
+
+def test_ops_notifier_redacts_secrets() -> None:
+    sent: List[str] = []
+    notify = mod.make_safe_ops_notifier(lambda m: sent.append(m) or True)
+    # Built at runtime so the staged-secrets scanner does not flag the fake key.
+    fake_key = "sk-" + "ant-api03-" + "abcdefghijklmnopqrstuvwxyz0123456789"
+    assert notify(f"Desktop token={fake_key} divergente") is True
+    assert "abcdefghijklmnopqrstuvwxyz0123456789" not in sent[0]

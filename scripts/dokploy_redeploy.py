@@ -676,6 +676,29 @@ def wait_for_darkhub_sha(
 # ---------------------------------------------------------------------------
 
 
+def default_ops_notifier(message: str) -> bool:
+    """Envia ao Telegram de ops pelo mesmo caminho do auth_bootstrap (ops, depois owner)."""
+    from core.line.auth_bootstrap import _notify_human
+
+    return _notify_human(message)
+
+
+def make_safe_ops_notifier(sender: Optional[Callable[[str], bool]] = None) -> Callable[[str], bool]:
+    """Notifier para node_sync (USR-242): redige segredos e nunca levanta; falha de envio nao afeta o deploy."""
+    send = sender or default_ops_notifier
+
+    def _notify(message: str) -> bool:
+        try:
+            from core.line.agent_cli import redact_secrets
+
+            return bool(send(redact_secrets(message)))
+        except Exception as exc:  # noqa: BLE001
+            logging.getLogger(__name__).warning("ops notifier failed: %s", exc.__class__.__name__)
+            return False
+
+    return _notify
+
+
 def build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="dokploy_redeploy.py",
@@ -830,6 +853,7 @@ def _run_main(
     out: Any,
     err: Any,
     disk_hygiene_runner: Optional[Callable[..., Dict[str, Any]]] = None,
+    ops_notifier: Optional[Callable[[str], bool]] = None,
 ) -> int:
     parser = build_arg_parser()
     args = parser.parse_args(list(argv) if argv is not None else None)
@@ -1046,6 +1070,7 @@ def _run_main(
             "vps_redeploy": lambda: True,  # VPS was just deployed above; never redeploy again from here
             "clock": clock_fn,
             "sleep": sleep_fn,
+            "notifier": make_safe_ops_notifier(ops_notifier),
         }
         node_sync_dirty = False
         sync_report = node_sync.sync(**sync_kwargs)
@@ -1179,6 +1204,7 @@ def main(
     backup_runner: Optional[Callable[..., Any]] = None,
     check_main_runner: Optional[Callable[[], Tuple[int, Dict[str, Any]]]] = None,
     disk_hygiene_runner: Optional[Callable[..., Dict[str, Any]]] = None,
+    ops_notifier: Optional[Callable[[str], bool]] = None,
     stdout: Any = None,
     stderr: Any = None,
 ) -> int:
@@ -1211,6 +1237,7 @@ def main(
             out=out,
             err=err,
             disk_hygiene_runner=disk_hygiene_runner,
+            ops_notifier=ops_notifier,
         )
     except DokployUsageError as exc:
         print(str(exc), file=err, flush=True)
