@@ -1412,6 +1412,35 @@
       "created_at": "2026-10-18T11:45:28Z",
       "created_by": "queue-registration",
       "resolved_at": null
+    },
+    {
+      "id": "OA-QR-411",
+      "kind": "action",
+      "title": "PR de registro #411 (USR-313) aberto sem mergear: o ticket nao chegou ao backlog da main",
+      "priority": "high",
+      "status": "open",
+      "why": "Motivo: Conflict on retry 1: .factory/owner_actions/owner_actions.json. PR: https://github.com/GCamposGit/DarkFactory/pull/411",
+      "blocks": [
+        "USR-313"
+      ],
+      "depends_on": [],
+      "steps": [
+        {
+          "text": "Veja o estado e os checks do PR #411.",
+          "command": "gh pr view 411 --json mergeable,mergeStateStatus,statusCheckRollup"
+        },
+        {
+          "text": "Se o PR esta CONFLICTING ou atrasado, peca a um agente (Claude Code) o resgate descrito em docs/runbooks/queue_registration.md: re-aplicar a linha do ticket sobre a origin/main atual, esperar o CI e mergear (squash). Nao e preciso editar JSON a mao."
+        },
+        {
+          "text": "Se o ticket ja entrou na main por outro caminho, feche o PR duplicado.",
+          "command": "gh pr close 411 --delete-branch"
+        }
+      ],
+      "verify": "O PR #411 aparece como MERGED e o ticket USR-313 esta em .factory/demands/demands.json na main.",
+      "created_at": "2026-10-18T12:12:07Z",
+      "created_by": "queue-registration",
+      "resolved_at": null
     }
   ]
 }
