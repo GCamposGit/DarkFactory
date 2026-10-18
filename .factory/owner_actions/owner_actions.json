@@ -1254,6 +1254,76 @@
       "created_at": "2026-10-18T05:08:53Z",
       "created_by": "queue-registration",
       "resolved_at": null
+    },
+    {
+      "id": "OA-032",
+      "kind": "action",
+      "title": "Publicar na main a correcao protegida do USR-298 (SIGTERM do grokbox vira infraestrutura com reenvio)",
+      "priority": "critical",
+      "status": "open",
+      "why": "O grokbox (worker principal do portao) mata o pytest com SIGTERM em ~1 s e o portao publica [HARNESS_FAIL] com 0 testes, como se o candidato estivesse errado (visto de novo em 18/10 02:18 UTC no USR-252, que ainda acionou a autocorrecao do agente sem motivo). A correcao esta pronta e revisada na worktree, mas so altera core/harness/*, que e protegido pelo guard: agente nao pode commitar. Ate publicar, o portao so funciona no Desktop (um ciclo por vez).",
+      "blocks": [
+        "USR-298",
+        "USR-270"
+      ],
+      "depends_on": [],
+      "steps": [
+        {
+          "text": "Abra o PowerShell (menu Iniciar > digite PowerShell > Enter). Confira os 6 arquivos alterados na worktree pronta (devem aparecer: core/harness/remote_dispatch.py, core/harness/remote_worker.py, core/harness/sigterm_probe.py, docs/runbooks/grokbox_test_worker.md, tests/test_remote_job_recovery.py, tests/test_remote_signal_killed.py).",
+          "command": "git -C C:\\dev\\DarkFac\\.worktrees\\usr-298-20261018T021249Z status --short"
+        },
+        {
+          "text": "Adicione exatamente esses arquivos e faca o commit.",
+          "command": "git -C C:\\dev\\DarkFac\\.worktrees\\usr-298-20261018T021249Z add core/harness/remote_dispatch.py core/harness/remote_worker.py core/harness/sigterm_probe.py docs/runbooks/grokbox_test_worker.md tests/test_remote_job_recovery.py tests/test_remote_signal_killed.py; git -C C:\\dev\\DarkFac\\.worktrees\\usr-298-20261018T021249Z commit -m \"fix(harness): SIGTERM no worker vira infraestrutura com reenvio, nao veredito [USR-298] [USR-270]\""
+        },
+        {
+          "text": "Rode o portao oficial na worktree usando so o Desktop (o grokbox ainda nao tem a correcao). Leva 30 a 40 min; espere aparecer [HARNESS_PASS] no fim. Se aparecer [HARNESS_FAIL], NAO publique: peca a um agente para analisar o log.",
+          "command": "Set-Location C:\\dev\\DarkFac\\.worktrees\\usr-298-20261018T021249Z; $env:DARKFAC_TEST_WORKERS='http://100.78.181.90:8080'; $env:DARKFAC_WORKER_HEALTH_TIMEOUT_SEC='10'; python C:\\dev\\DarkFac\\.worktrees\\usr-298-20261018T021249Z\\core\\harness\\runner.py --quick"
+        },
+        {
+          "text": "Publique direto na main (bypass de admin do ruleset). Se o push for recusado porque a main andou, repita este mesmo comando.",
+          "command": "git -C C:\\dev\\DarkFac\\.worktrees\\usr-298-20261018T021249Z fetch origin; git -C C:\\dev\\DarkFac\\.worktrees\\usr-298-20261018T021249Z rebase origin/main; git -C C:\\dev\\DarkFac\\.worktrees\\usr-298-20261018T021249Z push origin HEAD:main"
+        },
+        {
+          "text": "Avise um agente (Claude Code) que publicou: ele atualiza o worker do grokbox, roda o portao no grokbox para o criterio do USR-270 (HARNESS_PASS com testes descobertos), marca USR-298/USR-270 como concluidos e esta OA como feita."
+        }
+      ],
+      "verify": "gh api repos/GCamposGit/DarkFactory/contents/core/harness/remote_worker.py?ref=main --jq .content | base64 -d contem worker_signal_killed; um portao no grokbox depois da atualizacao do worker termina com [HARNESS_PASS] e [TEST_COUNT] positivo, ou com [REMOTE_RETRY] em vez de [HARNESS_FAIL] se a VM congelar.",
+      "created_at": "2026-10-18T05:30:03Z",
+      "created_by": "claude-code",
+      "resolved_at": null
+    },
+    {
+      "id": "OA-033",
+      "kind": "action",
+      "title": "Atualizar a secao 0 do CLAUDE.md para a regra pos-V0 (ainda descreve o congelamento V0)",
+      "priority": "high",
+      "status": "open",
+      "why": "O AGENTS.md ja publicou a regra pos-V0 (commit 0a55547, OA-031), mas a secao 0 do CLAUDE.md ainda manda implementar so tickets v0-critico, uma sessao por vez e no maximo 3 criterios. O Claude Code le os dois e recebe regras contraditorias. O classificador de permissoes bloqueia o agente de reescrever o proprio arquivo de instrucoes, entao a edicao e do owner.",
+      "blocks": [],
+      "depends_on": [],
+      "steps": [
+        {
+          "text": "Crie uma worktree limpa a partir da main (nao edite em C:\\dev\\DarkFac, que e compartilhado).",
+          "command": "git -C C:\\dev\\DarkFac worktree add C:\\dev\\DarkFac\\.worktrees\\owner-claude-md -b owner/claude-md-pos-v0 origin/main"
+        },
+        {
+          "text": "Abra o arquivo no Bloco de Notas. Substitua o bloco que vai de '## 0. Congelamento V0 (vigente desde 11/10/2026)' ate a linha '- Uma sessao opera a linha por vez; tickets com no maximo 3 criterios de aceite.' pelo texto do arquivo .factory/owner_actions/OA-claude-md-pos-v0.md (secao 'Texto novo'). Salve (Ctrl+S) mantendo UTF-8.",
+          "command": "notepad C:\\dev\\DarkFac\\.worktrees\\owner-claude-md\\CLAUDE.md"
+        },
+        {
+          "text": "Commite e publique na main.",
+          "command": "git -C C:\\dev\\DarkFac\\.worktrees\\owner-claude-md add CLAUDE.md; git -C C:\\dev\\DarkFac\\.worktrees\\owner-claude-md commit -m \"docs(claude): secao 0 segue a regra pos-V0 do AGENTS.md\"; git -C C:\\dev\\DarkFac\\.worktrees\\owner-claude-md fetch origin; git -C C:\\dev\\DarkFac\\.worktrees\\owner-claude-md rebase origin/main; git -C C:\\dev\\DarkFac\\.worktrees\\owner-claude-md push origin HEAD:main"
+        },
+        {
+          "text": "Remova a worktree.",
+          "command": "git -C C:\\dev\\DarkFac worktree remove C:\\dev\\DarkFac\\.worktrees\\owner-claude-md"
+        }
+      ],
+      "verify": "gh api repos/GCamposGit/DarkFactory/contents/CLAUDE.md?ref=main --jq .content | base64 -d mostra '## 0. Pos-V0' e nao mostra 'Congelamento V0 (vigente'.",
+      "created_at": "2026-10-18T05:30:04Z",
+      "created_by": "claude-code",
+      "resolved_at": null
     }
   ]
 }

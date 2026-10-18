@@ -8948,5 +8948,76 @@
     "dependencies": [],
     "created_at": "2026-10-18T01:10:10.460395Z",
     "updated_at": "2026-10-18T01:10:10.460395Z"
+  },
+  {
+    "id": "USR-308",
+    "project_id": "darkfac",
+    "title": "Autocorrecao do run_ticket e acionada quando o portao remoto falha sem nenhum teste descoberto (passo com exit negativo)",
+    "origin": "agent",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand",
+      "bug",
+      "harness-delivery"
+    ],
+    "problem_statement": "Em 18/10/2026 02:18 UTC a entrega do USR-252 (run_ticket --resume-delivery) despachou o portao ao grokbox; o passo unit_and_integration_tests_parallel terminou com exit -15 em 0,9 s, discovered_count=0, e o portao publicou [HARNESS_FAIL]. O run_ticket tratou isso como veredito e reinvocou o agente de desenvolvimento (Claude, modo degradado) para corrigir um candidato sem defeito; a execucao foi interrompida manualmente. O USR-249 so cobre timeout do portao. USR-298 corrige a classificacao no worker; este ticket e a defesa do lado do run_ticket para qualquer worker/fallback.",
+    "core_journey": [],
+    "non_goals": [
+      "Nao alterar timeouts do portao nem mascarar falhas reais de teste.",
+      "Nao alterar core/harness/* (coberto por USR-298)."
+    ],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "HarnessResult com discovered_count=0 e algum exit code negativo (ou passo de testes sem nenhum teste executado) e classificado como infraestrutura pelo run_ticket: agente NAO e reinvocado e a mensagem cita a causa.",
+      "Falha real (testes descobertos e falhando, ou exit positivo como erro de sintaxe) continua acionando a autocorrecao como hoje.",
+      "Testes unitarios cobrem os dois casos usando o HarnessResult real do job de 18/10 02:18 UTC como fixture."
+    ],
+    "suggested_files": [
+      "run_ticket.py",
+      "core/line/autocorrect.py"
+    ],
+    "estimated_complexity": "low",
+    "dependencies": [],
+    "created_at": "2026-10-18T05:30:03.048499Z",
+    "updated_at": "2026-10-18T05:30:03.048499Z"
+  },
+  {
+    "id": "USR-309",
+    "project_id": "darkfac",
+    "title": "Teste instavel tests/test_worker_silence_resume.py::test_lost_job_is_announced_and_its_seconds_are_recorded_for_the_local_fallback no Windows da CI",
+    "origin": "agent",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand",
+      "bug",
+      "flaky_test"
+    ],
+    "problem_statement": "No run 38308520964 (PR #328, branch chore/fechar-onda3, 13/10/2026) o job windows-latest falhou com 1 failed / 4006 passed em 777,5 s; o unico teste falho no --log-failed foi test_worker_silence_resume.py::test_lost_job_is_announced_and_its_seconds_are_recorded_for_the_local_fallback, sem relacao com o diff; o attempt 2 passou. Encontrado ao investigar o USR-252 em 18/10/2026.",
+    "core_journey": [],
+    "non_goals": [
+      "Nao pular o teste, nao usar xfail nem retry automatico.",
+      "Nao alterar timeouts de producao do despachante."
+    ],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Causa da instabilidade identificada com evidencia (relogio real, sleep, ordem de threads ou carga).",
+      "Teste deterministico (relogio/sleep injetado), sem esperas reais.",
+      "20 execucoes seguidas no Windows sem falha."
+    ],
+    "suggested_files": [
+      "tests/test_worker_silence_resume.py"
+    ],
+    "estimated_complexity": "low",
+    "dependencies": [],
+    "created_at": "2026-10-18T05:30:03.048499Z",
+    "updated_at": "2026-10-18T05:30:03.048499Z"
   }
 ]
