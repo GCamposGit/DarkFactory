@@ -1324,6 +1324,94 @@
       "created_at": "2026-10-18T05:30:04Z",
       "created_by": "claude-code",
       "resolved_at": null
+    },
+    {
+      "id": "OA-034",
+      "kind": "action",
+      "title": "Ativar envio de e-mail da DarkFac para o grokbot via Cloudflare Email Workers",
+      "priority": "medium",
+      "status": "open",
+      "why": "A DarkFac nao tem nenhum canal de envio de e-mail. O owner escolheu Cloudflare Email Workers (gratis, dominio ggcampos.com ja no Email Routing) para enviar a guigrokchief@mail.grokbot.com. Verificar o destino, criar o Worker, o binding e o secret exigem login no painel da Cloudflare e acesso a caixa do grokbot, que so o owner tem. O codigo do Worker esta versionado em infra/cloudflare/darkfac-mailer/worker.js.",
+      "blocks": [
+        "USR-310"
+      ],
+      "depends_on": [],
+      "steps": [
+        {
+          "text": "Abra https://dash.cloudflare.com no navegador e entre na conta da Cloudflare. Na lista de dominios, clique em ggcampos.com."
+        },
+        {
+          "text": "No menu da esquerda, clique em Email e depois em Email Routing. Se a pagina pedir para ativar o Email Routing, clique em Get started / Enable e aceite os registros DNS sugeridos (o inventario indica que ja esta ativo)."
+        },
+        {
+          "text": "Abra a aba Destination addresses e clique em Add destination address. No campo, digite guigrokchief@mail.grokbot.com e clique em Save (ou Send verification email)."
+        },
+        {
+          "text": "Abra a caixa de entrada de guigrokchief@mail.grokbot.com, procure o e-mail da Cloudflare (assunto parecido com 'Verify your email address') e clique em Verify email address. Volte ao painel e confirme que o status ficou Verified. Sem isso o Worker nao consegue enviar."
+        },
+        {
+          "text": "Gere o token compartilhado no PowerShell do Notebook e grave como variavel de ambiente do usuario. O ultimo comando copia o token para a area de transferencia; nao cole o token no chat.",
+          "command": "$b = New-Object byte[] 32; [System.Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($b); $tok = -join ($b | ForEach-Object { $_.ToString('x2') }); [Environment]::SetEnvironmentVariable('DARKFAC_MAILER_TOKEN', $tok, 'User'); $tok | Set-Clipboard"
+        },
+        {
+          "text": "No painel da Cloudflare, volte para a pagina inicial da conta (clique no nome da conta no topo) e, no menu da esquerda, clique em Compute (Workers) > Workers & Pages (em paineis antigos: Workers & Pages). Clique em Create, depois em Start with Hello World! (ou Create Worker)."
+        },
+        {
+          "text": "Em Worker name, digite darkfac-mailer e clique em Deploy. Anote a URL exibida, no formato https://darkfac-mailer.<seu-subdominio>.workers.dev."
+        },
+        {
+          "text": "Clique em Edit code. Apague todo o conteudo de worker.js, cole o conteudo do arquivo do repositorio abaixo e clique em Deploy no canto superior direito.",
+          "command": "Get-Content C:\\dev\\DarkFac\\infra\\cloudflare\\darkfac-mailer\\worker.js -Raw | Set-Clipboard"
+        },
+        {
+          "text": "Volte para a pagina do Worker darkfac-mailer, abra a aba Settings e role ate Bindings. Clique em Add binding, escolha Send email (pode aparecer como Email / Send Email). Em Variable name digite GROKBOT_MAIL; em destino escolha Specific address / Allowed destination address e selecione guigrokchief@mail.grokbot.com. Salve/Deploy. Se o tipo Send email NAO aparecer na lista, pare aqui e avise o agente: ele publica pelo wrangler com um API token."
+        },
+        {
+          "text": "Ainda em Settings, na secao Variables and Secrets, clique em Add. Type: Secret; Variable name: MAILER_TOKEN; Value: cole o token gerado no passo 5 (Ctrl+V; se a area de transferencia mudou, rode o comando deste passo para copiar de novo). Clique em Deploy.",
+          "command": "[Environment]::GetEnvironmentVariable('DARKFAC_MAILER_TOKEN', 'User') | Set-Clipboard"
+        },
+        {
+          "text": "Grave a URL do Worker como variavel de ambiente do usuario (troque <seu-subdominio> pelo valor anotado no passo 7).",
+          "command": "[Environment]::SetEnvironmentVariable('DARKFAC_MAILER_URL', 'https://darkfac-mailer.<seu-subdominio>.workers.dev', 'User')"
+        },
+        {
+          "text": "Abra um PowerShell NOVO (para carregar as variaveis) e envie o e-mail de teste. A resposta esperada e ok=True; depois confira a caixa de guigrokchief@mail.grokbot.com (veja tambem o spam).",
+          "command": "Invoke-RestMethod -Method Post -Uri $env:DARKFAC_MAILER_URL -Headers @{ Authorization = \"Bearer $env:DARKFAC_MAILER_TOKEN\" } -ContentType 'application/json; charset=utf-8' -Body '{\"subject\":\"Teste DarkFac\",\"text\":\"Primeiro e-mail da DarkFac para o grokbot.\"}'"
+        }
+      ],
+      "verify": "O comando do ultimo passo responde ok=True e o e-mail 'Teste DarkFac' chega em guigrokchief@mail.grokbot.com; DARKFAC_MAILER_URL e DARKFAC_MAILER_TOKEN existem no ambiente do usuario. Requisicao sem o header Authorization recebe 401.",
+      "created_at": "2026-10-18T11:19:44Z",
+      "created_by": "claude",
+      "resolved_at": null
+    },
+    {
+      "id": "OA-QR-409",
+      "kind": "action",
+      "title": "PR de registro #409 (USR-310) aberto sem mergear: o ticket nao chegou ao backlog da main",
+      "priority": "high",
+      "status": "open",
+      "why": "Motivo: demands.json ticket ID collision; merge blocked: USR-310: origin/main='Cliente Python para enviar e-mail ao grokbot pelo Worker darkfac-mailer da Cloudflare', branch='Publicacao de arquivo protegido por push direto na main pula o CI e deixou a main vermelha (32fd792)'. PR: https://github.com/GCamposGit/DarkFactory/pull/409",
+      "blocks": [
+        "USR-310"
+      ],
+      "depends_on": [],
+      "steps": [
+        {
+          "text": "Veja o estado e os checks do PR #409.",
+          "command": "gh pr view 409 --json mergeable,mergeStateStatus,statusCheckRollup"
+        },
+        {
+          "text": "Se o PR esta CONFLICTING ou atrasado, peca a um agente (Claude Code) o resgate descrito em docs/runbooks/queue_registration.md: re-aplicar a linha do ticket sobre a origin/main atual, esperar o CI e mergear (squash). Nao e preciso editar JSON a mao."
+        },
+        {
+          "text": "Se o ticket ja entrou na main por outro caminho, feche o PR duplicado.",
+          "command": "gh pr close 409 --delete-branch"
+        }
+      ],
+      "verify": "O PR #409 aparece como MERGED e o ticket USR-310 esta em .factory/demands/demands.json na main.",
+      "created_at": "2026-10-18T11:45:28Z",
+      "created_by": "queue-registration",
+      "resolved_at": null
     }
   ]
 }
