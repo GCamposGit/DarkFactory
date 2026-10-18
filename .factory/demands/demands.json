@@ -9131,5 +9131,40 @@
     "dependencies": [],
     "created_at": "2026-10-18T11:53:17.772862Z",
     "updated_at": "2026-10-18T11:53:17.772862Z"
+  },
+  {
+    "id": "USR-314",
+    "project_id": "darkfac",
+    "title": "run_ticket --resume-delivery nao encontra ticket registrado na main depois da criacao da worktree",
+    "origin": "agent",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand",
+      "bug",
+      "harness-delivery"
+    ],
+    "problem_statement": "Em 18/10/2026 'run_ticket.py --resume-delivery USR-311 --worktree ...usr-311-20261018T114031Z' falhou em 1 s com '[ERRO] Ticket USR-311 nao encontrado no ledger de demandas'. O USR-311 foi registrado na main (PR #411) depois que a worktree foi criada (base 081d55f). _resume_delivery_scoped (run_ticket.py ~1454) procura so no ledger da worktree e no checkout compartilhado (PROJECT_ROOT, que estava na branch codex/oa031-queue-cleanup, antiga), nunca em origin/main. Contornado fazendo commit do trabalho e rebase da worktree.",
+    "core_journey": [],
+    "non_goals": [
+      "Nao mudar o formato do ledger.",
+      "Nao buscar em outras branches alem de origin/<base>."
+    ],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Quando o ticket nao esta no ledger da worktree nem no checkout compartilhado, a entrega le o ledger de origin/main (git show) apos fetch e continua.",
+      "Mensagem de erro cita os tres lugares procurados quando o ticket nao existe em nenhum.",
+      "Teste com repositorio git temporario cobre ticket presente so em origin/main."
+    ],
+    "suggested_files": [
+      "run_ticket.py"
+    ],
+    "estimated_complexity": "low",
+    "dependencies": [],
+    "created_at": "2026-10-18T16:59:57.084768Z",
+    "updated_at": "2026-10-18T16:59:57.084768Z"
   }
 ]
