@@ -1,0 +1,739 @@
+{
+  "decision_source": "Owner nesta conversa em 17/10/2026: priorizar, nao criar tickets, apenas organizar e deixar a esteira assumir; nenhum desenvolvimento iniciado por esta publicacao.",
+  "baseline": "61824c26334e512791521e53d5f5cce877df0363",
+  "created_at": "2026-10-18T02:11:40.768900+00:00",
+  "scope": "Somente metadados: especificacoes e dependencias. Sem implementar, despachar tickets, promover branches de codigo ou declarar correcao. Direitos de segredo e mudancas protegidas permanecem verificados no workflow.",
+  "rank_is_advisory_until_USR_304": true,
+  "enforced_precedence": "dependencies no demands.json, incluindo precedencia operacional explicitamente identificada",
+  "absorbed": {
+    "USR-135": "USR-268",
+    "USR-176": "USR-268",
+    "USR-200": "USR-268",
+    "USR-177": "USR-185",
+    "USR-221": "USR-304"
+  },
+  "tickets": [
+    {
+      "rank": 1,
+      "ticket_id": "USR-303",
+      "priority": "p0",
+      "technical_dependencies": [],
+      "execution_precedence": [],
+      "dependencies": [],
+      "title": "Separar identidade de projeto e ticket na entrada real da linha"
+    },
+    {
+      "rank": 2,
+      "ticket_id": "USR-305",
+      "priority": "p0",
+      "technical_dependencies": [],
+      "execution_precedence": [],
+      "dependencies": [],
+      "title": "Corrigir falso positivo do G1 e contrato de prontidao dos tickets criados"
+    },
+    {
+      "rank": 3,
+      "ticket_id": "USR-227",
+      "priority": "p2",
+      "technical_dependencies": [],
+      "execution_precedence": [],
+      "dependencies": [],
+      "title": "SQ-03: documentar evolucao legitima de governanca"
+    },
+    {
+      "rank": 4,
+      "ticket_id": "USR-244",
+      "priority": "p0",
+      "technical_dependencies": [],
+      "execution_precedence": [
+        "USR-227"
+      ],
+      "dependencies": [
+        "USR-227"
+      ],
+      "title": "CI rapida (ou fila de merge) para PRs que mudam so o ledger de demandas"
+    },
+    {
+      "rank": 5,
+      "ticket_id": "USR-271",
+      "priority": "p0",
+      "technical_dependencies": [],
+      "execution_precedence": [],
+      "dependencies": [],
+      "title": "Revisao Grok read fica presa em MCP opcional indisponivel"
+    },
+    {
+      "rank": 6,
+      "ticket_id": "USR-299",
+      "priority": "p0",
+      "technical_dependencies": [],
+      "execution_precedence": [
+        "USR-303"
+      ],
+      "dependencies": [
+        "USR-303"
+      ],
+      "title": "Probe da frota falha ao importar core quando executado pelo runbook"
+    },
+    {
+      "rank": 7,
+      "ticket_id": "USR-298",
+      "priority": "p0",
+      "technical_dependencies": [],
+      "execution_precedence": [
+        "USR-299",
+        "USR-227"
+      ],
+      "dependencies": [
+        "USR-299",
+        "USR-227"
+      ],
+      "title": "Resiliência do worker grokbox: SIGTERM por congelamento da VM não pode ser veredito"
+    },
+    {
+      "rank": 8,
+      "ticket_id": "USR-253",
+      "priority": "p0",
+      "technical_dependencies": [],
+      "execution_precedence": [
+        "USR-299",
+        "USR-227"
+      ],
+      "dependencies": [
+        "USR-299",
+        "USR-227"
+      ],
+      "title": "Watchdog do job em remote_worker.py conta a fila do suite_lock do Desktop no prazo do job"
+    },
+    {
+      "rank": 9,
+      "ticket_id": "USR-268",
+      "priority": "p0",
+      "technical_dependencies": [],
+      "execution_precedence": [
+        "USR-253",
+        "USR-227"
+      ],
+      "dependencies": [
+        "USR-253",
+        "USR-227"
+      ],
+      "title": "Fallback local do portao apos perder os workers remotos estoura 3000 s sem saida: medir e corrigir a causa"
+    },
+    {
+      "rank": 10,
+      "ticket_id": "USR-304",
+      "priority": "p0",
+      "technical_dependencies": [
+        "USR-303",
+        "USR-305"
+      ],
+      "execution_precedence": [],
+      "dependencies": [
+        "USR-303",
+        "USR-305"
+      ],
+      "title": "Conectar alimentador do backlog ao loop operacional e comprovar reposicao"
+    },
+    {
+      "rank": 11,
+      "ticket_id": "USR-300",
+      "priority": "p0",
+      "technical_dependencies": [],
+      "execution_precedence": [
+        "USR-244"
+      ],
+      "dependencies": [
+        "USR-244"
+      ],
+      "title": "Acelerar o CI do GitHub: shards no Windows, filtro por caminho e cancelamento de execuções antigas"
+    },
+    {
+      "rank": 12,
+      "ticket_id": "USR-217",
+      "priority": "p0",
+      "technical_dependencies": [],
+      "execution_precedence": [
+        "USR-299"
+      ],
+      "dependencies": [
+        "USR-299"
+      ],
+      "title": "Desktop aparece Offline no Hub mesmo acessivel: unificar a vivacidade dos nos numa fonte so"
+    },
+    {
+      "rank": 13,
+      "ticket_id": "USR-306",
+      "priority": "p0",
+      "technical_dependencies": [
+        "USR-304",
+        "USR-217",
+        "USR-298",
+        "USR-299",
+        "USR-253",
+        "USR-268"
+      ],
+      "execution_precedence": [],
+      "dependencies": [
+        "USR-304",
+        "USR-217",
+        "USR-298",
+        "USR-299",
+        "USR-253",
+        "USR-268"
+      ],
+      "title": "Validar afinidade e disponibilidade da frota pelo caminho de producao"
+    },
+    {
+      "rank": 14,
+      "ticket_id": "USR-307",
+      "priority": "p1",
+      "technical_dependencies": [],
+      "execution_precedence": [
+        "USR-305"
+      ],
+      "dependencies": [
+        "USR-305"
+      ],
+      "title": "Reconciliar acoes do owner obsoletas e PRs de registro duplicados"
+    },
+    {
+      "rank": 15,
+      "ticket_id": "USR-207",
+      "priority": "p1",
+      "technical_dependencies": [],
+      "execution_precedence": [
+        "USR-244"
+      ],
+      "dependencies": [
+        "USR-244"
+      ],
+      "title": "Hub cai a cada merge: redeploy sem downtime, deploy deduplicado e frontend resiliente"
+    },
+    {
+      "rank": 16,
+      "ticket_id": "USR-195",
+      "priority": "p1",
+      "technical_dependencies": [
+        "USR-303",
+        "USR-304"
+      ],
+      "execution_precedence": [],
+      "dependencies": [
+        "USR-303",
+        "USR-304"
+      ],
+      "title": "Anotacao duravel no ticket quando o owner responde uma decisao pelo DarkHub"
+    },
+    {
+      "rank": 17,
+      "ticket_id": "USR-210",
+      "priority": "p1",
+      "technical_dependencies": [],
+      "execution_precedence": [
+        "USR-195"
+      ],
+      "dependencies": [
+        "USR-195"
+      ],
+      "title": "Intervencao WAITING_HUMAN sem alvo: 'Ver tarefa' rola a pagina em vez de abrir a acao"
+    },
+    {
+      "rank": 18,
+      "ticket_id": "USR-232",
+      "priority": "p1",
+      "technical_dependencies": [],
+      "execution_precedence": [
+        "USR-306"
+      ],
+      "dependencies": [
+        "USR-306"
+      ],
+      "title": "USR-206 fatia 1: Hub persiste os snapshots de cotas sincronizados e le deles em vez de sondar CLIs na VPS"
+    },
+    {
+      "rank": 19,
+      "ticket_id": "USR-240",
+      "priority": "p1",
+      "technical_dependencies": [],
+      "execution_precedence": [
+        "USR-306"
+      ],
+      "dependencies": [
+        "USR-306"
+      ],
+      "title": "scripts/install_sync_task.ps1 deriva a raiz do repositorio do proprio caminho e reproduz o incidente da worktree velha quando rodado de dentro de uma worktree"
+    },
+    {
+      "rank": 20,
+      "ticket_id": "USR-236",
+      "priority": "p1",
+      "technical_dependencies": [
+        "USR-240"
+      ],
+      "execution_precedence": [],
+      "dependencies": [
+        "USR-240"
+      ],
+      "title": "USR-206 fatia 5: instalador idempotente da tarefa agendada DarkFac-Usage-Cloud-Sync apontando para C:/dev/DarkFac"
+    },
+    {
+      "rank": 21,
+      "ticket_id": "USR-233",
+      "priority": "p1",
+      "technical_dependencies": [
+        "USR-232"
+      ],
+      "execution_precedence": [],
+      "dependencies": [
+        "USR-232"
+      ],
+      "title": "USR-206 fatia 2: cartoes de cotas do Hub mostram idade e origem do dado, e dado com mais de 10 min aparece como desatualizado"
+    },
+    {
+      "rank": 22,
+      "ticket_id": "USR-234",
+      "priority": "p1",
+      "technical_dependencies": [
+        "USR-232",
+        "USR-236"
+      ],
+      "execution_precedence": [],
+      "dependencies": [
+        "USR-232",
+        "USR-236"
+      ],
+      "title": "USR-206 fatia 3: Atualizar cotas cria uma solicitacao de remedicao que o host medidor executa em ate 60 s"
+    },
+    {
+      "rank": 23,
+      "ticket_id": "USR-235",
+      "priority": "p1",
+      "technical_dependencies": [
+        "USR-232"
+      ],
+      "execution_precedence": [],
+      "dependencies": [
+        "USR-232"
+      ],
+      "title": "USR-206 fatia 4: falha de sincronizacao de cotas gera alerta critico no Hub e no Telegram ops na primeira ocorrencia"
+    },
+    {
+      "rank": 24,
+      "ticket_id": "USR-206",
+      "priority": "p1",
+      "technical_dependencies": [
+        "USR-232",
+        "USR-233",
+        "USR-234",
+        "USR-235",
+        "USR-236"
+      ],
+      "execution_precedence": [],
+      "dependencies": [
+        "USR-232",
+        "USR-233",
+        "USR-234",
+        "USR-235",
+        "USR-236"
+      ],
+      "title": "Monitor de contas do Hub com a mesma fonte de cotas do roteador (fim dos saldos errados)"
+    },
+    {
+      "rank": 25,
+      "ticket_id": "USR-208",
+      "priority": "p1",
+      "technical_dependencies": [],
+      "execution_precedence": [
+        "USR-306"
+      ],
+      "dependencies": [
+        "USR-306"
+      ],
+      "title": "Registro universal de execucoes: codigo unico por etapa e heartbeat para a Esteira ao vivo"
+    },
+    {
+      "rank": 26,
+      "ticket_id": "USR-209",
+      "priority": "p1",
+      "technical_dependencies": [
+        "USR-208"
+      ],
+      "execution_precedence": [],
+      "dependencies": [
+        "USR-208"
+      ],
+      "title": "Sessoes interativas e subagentes de todos os harnesses publicam no registro de execucoes"
+    },
+    {
+      "rank": 27,
+      "ticket_id": "USR-212",
+      "priority": "p1",
+      "technical_dependencies": [
+        "USR-217"
+      ],
+      "execution_precedence": [],
+      "dependencies": [
+        "USR-217"
+      ],
+      "title": "Telemetria de infraestrutura atribui as metricas da VPS ao Notebook (predator-neo-16)"
+    },
+    {
+      "rank": 28,
+      "ticket_id": "USR-242",
+      "priority": "p1",
+      "technical_dependencies": [],
+      "execution_precedence": [
+        "USR-217"
+      ],
+      "dependencies": [
+        "USR-217"
+      ],
+      "title": "Ligar o alerta de 2 ou mais ciclos divergentes do node_sync (USR-78) ao dokploy_redeploy"
+    },
+    {
+      "rank": 29,
+      "ticket_id": "USR-204",
+      "priority": "p1",
+      "technical_dependencies": [
+        "USR-217",
+        "USR-242"
+      ],
+      "execution_precedence": [],
+      "dependencies": [
+        "USR-217",
+        "USR-242"
+      ],
+      "title": "/status do Telegram: bloco Nos sempre indisponivel porque o snapshot de convergencia so existe no Notebook"
+    },
+    {
+      "rank": 30,
+      "ticket_id": "USR-218",
+      "priority": "p1",
+      "technical_dependencies": [
+        "USR-217",
+        "USR-268"
+      ],
+      "execution_precedence": [],
+      "dependencies": [
+        "USR-217",
+        "USR-268"
+      ],
+      "title": "Validacao sob demanda pelo Hub falha com exit code 4 em local_fallback"
+    },
+    {
+      "rank": 31,
+      "ticket_id": "USR-211",
+      "priority": "p1",
+      "technical_dependencies": [],
+      "execution_precedence": [
+        "USR-303",
+        "USR-305"
+      ],
+      "dependencies": [
+        "USR-303",
+        "USR-305"
+      ],
+      "title": "Canario diario fica preso em WAITING_HUMAN (grill_pending) e grava titulo com acentos corrompidos"
+    },
+    {
+      "rank": 32,
+      "ticket_id": "USR-215",
+      "priority": "p1",
+      "technical_dependencies": [
+        "USR-211",
+        "USR-208"
+      ],
+      "execution_precedence": [],
+      "dependencies": [
+        "USR-211",
+        "USR-208"
+      ],
+      "title": "Painel de aceite da linha le o streak errado e nao explica o que falta para V1 e V2"
+    },
+    {
+      "rank": 33,
+      "ticket_id": "USR-270",
+      "priority": "p1",
+      "technical_dependencies": [],
+      "execution_precedence": [
+        "USR-298"
+      ],
+      "dependencies": [
+        "USR-298"
+      ],
+      "title": "Grokbox encerra pytest com SIGTERM antes da descoberta da suite"
+    },
+    {
+      "rank": 34,
+      "ticket_id": "USR-252",
+      "priority": "p1",
+      "technical_dependencies": [],
+      "execution_precedence": [
+        "USR-299"
+      ],
+      "dependencies": [
+        "USR-299"
+      ],
+      "title": "Teste instavel tests/test_task_dashboard_client.py::test_task_dashboard_visible_polling_and_failure_cache estoura timeout no Windows da CI"
+    },
+    {
+      "rank": 35,
+      "ticket_id": "USR-243",
+      "priority": "p1",
+      "technical_dependencies": [],
+      "execution_precedence": [
+        "USR-268",
+        "USR-227"
+      ],
+      "dependencies": [
+        "USR-268",
+        "USR-227"
+      ],
+      "title": "Evitar que o pytest crie .pytest_cache com ACL restrita em worktrees de agentes (WinError 5 na lixeira)"
+    },
+    {
+      "rank": 36,
+      "ticket_id": "USR-157",
+      "priority": "p1",
+      "technical_dependencies": [],
+      "execution_precedence": [
+        "USR-268"
+      ],
+      "dependencies": [
+        "USR-268"
+      ],
+      "title": "Esclarecer a causa raiz do R02 EFFECT_SERVICE_UNAVAILABLE (WinError 10053) no spike de runtime"
+    },
+    {
+      "rank": 37,
+      "ticket_id": "USR-170",
+      "priority": "p2",
+      "technical_dependencies": [],
+      "execution_precedence": [
+        "USR-306"
+      ],
+      "dependencies": [
+        "USR-306"
+      ],
+      "title": "Fortalecer validade e rastreabilidade das evidencias de auditoria"
+    },
+    {
+      "rank": 38,
+      "ticket_id": "USR-171",
+      "priority": "p2",
+      "technical_dependencies": [
+        "USR-170"
+      ],
+      "execution_precedence": [],
+      "dependencies": [
+        "USR-170"
+      ],
+      "title": "Vincular retomada da revisao independente ao candidato atual"
+    },
+    {
+      "rank": 39,
+      "ticket_id": "USR-226",
+      "priority": "p2",
+      "technical_dependencies": [],
+      "execution_precedence": [
+        "USR-306"
+      ],
+      "dependencies": [
+        "USR-306"
+      ],
+      "title": "SQ02 DarkFac security profiles and threat model contracts"
+    },
+    {
+      "rank": 40,
+      "ticket_id": "USR-172",
+      "priority": "p2",
+      "technical_dependencies": [
+        "USR-226"
+      ],
+      "execution_precedence": [],
+      "dependencies": [
+        "USR-226"
+      ],
+      "title": "Separar privilegios e credenciais dos agentes de desenvolvimento"
+    },
+    {
+      "rank": 41,
+      "ticket_id": "USR-173",
+      "priority": "p2",
+      "technical_dependencies": [],
+      "execution_precedence": [
+        "USR-244",
+        "USR-227"
+      ],
+      "dependencies": [
+        "USR-244",
+        "USR-227"
+      ],
+      "title": "Tornar verificacao de tipos explicita e mensuravel no portao"
+    },
+    {
+      "rank": 42,
+      "ticket_id": "USR-174",
+      "priority": "p2",
+      "technical_dependencies": [
+        "USR-226",
+        "USR-172"
+      ],
+      "execution_precedence": [],
+      "dependencies": [
+        "USR-226",
+        "USR-172"
+      ],
+      "title": "Vincular politica de protecao de dados e residencia aos executores reais"
+    },
+    {
+      "rank": 43,
+      "ticket_id": "USR-228",
+      "priority": "p2",
+      "technical_dependencies": [
+        "USR-227",
+        "USR-170"
+      ],
+      "execution_precedence": [],
+      "dependencies": [
+        "USR-227",
+        "USR-170"
+      ],
+      "title": "Guard: vincular autorizacao de evolucao a decisao verificavel"
+    },
+    {
+      "rank": 44,
+      "ticket_id": "USR-185",
+      "priority": "p2",
+      "technical_dependencies": [
+        "USR-228"
+      ],
+      "execution_precedence": [],
+      "dependencies": [
+        "USR-228"
+      ],
+      "title": "Registro de modelos autonomo: descoberta, qualificacao, promocao e rollback sem edicao manual"
+    },
+    {
+      "rank": 45,
+      "ticket_id": "USR-274",
+      "priority": "p2",
+      "technical_dependencies": [],
+      "execution_precedence": [
+        "USR-306"
+      ],
+      "dependencies": [
+        "USR-306"
+      ],
+      "title": "Conectar bootstrap greenfield a remoto privado e registro executavel do projeto"
+    },
+    {
+      "rank": 46,
+      "ticket_id": "USR-275",
+      "priority": "p2",
+      "technical_dependencies": [
+        "USR-274"
+      ],
+      "execution_precedence": [],
+      "dependencies": [
+        "USR-274"
+      ],
+      "title": "Executar projetos externos em ambiente proprio sem herdar dependencias e credenciais do core"
+    },
+    {
+      "rank": 47,
+      "ticket_id": "USR-278",
+      "priority": "p2",
+      "technical_dependencies": [
+        "USR-274",
+        "USR-303"
+      ],
+      "execution_precedence": [],
+      "dependencies": [
+        "USR-274",
+        "USR-303"
+      ],
+      "title": "Telegram encaminha demanda ao projeto correto e permite iniciar onboarding greenfield"
+    },
+    {
+      "rank": 48,
+      "ticket_id": "USR-279",
+      "priority": "p2",
+      "technical_dependencies": [
+        "USR-274",
+        "USR-275",
+        "USR-278",
+        "USR-306"
+      ],
+      "execution_precedence": [],
+      "dependencies": [
+        "USR-274",
+        "USR-275",
+        "USR-278",
+        "USR-306"
+      ],
+      "title": "Provar entrega autonoma de piloto greenfield stand alone em repositorio e ambiente privados separados"
+    },
+    {
+      "rank": 49,
+      "ticket_id": "USR-220",
+      "priority": "p2",
+      "technical_dependencies": [],
+      "execution_precedence": [
+        "USR-279"
+      ],
+      "dependencies": [
+        "USR-279"
+      ],
+      "title": "Catalogo cross-projeto vazio: registrar automaticamente componentes e auto-evolucoes entregues"
+    },
+    {
+      "rank": 50,
+      "ticket_id": "USR-213",
+      "priority": "p2",
+      "technical_dependencies": [],
+      "execution_precedence": [
+        "USR-279"
+      ],
+      "dependencies": [
+        "USR-279"
+      ],
+      "title": "Quick Launch Dock: remover Canaletto e incluir Grok"
+    },
+    {
+      "rank": 51,
+      "ticket_id": "USR-216",
+      "priority": "p2",
+      "technical_dependencies": [],
+      "execution_precedence": [
+        "USR-279"
+      ],
+      "dependencies": [
+        "USR-279"
+      ],
+      "title": "Remover codigos de ticket e de skill dos nomes visiveis do Hub (HF-27, DH-11, Skill 17...)"
+    },
+    {
+      "rank": 52,
+      "ticket_id": "USR-219",
+      "priority": "p2",
+      "technical_dependencies": [],
+      "execution_precedence": [
+        "USR-279"
+      ],
+      "dependencies": [
+        "USR-279"
+      ],
+      "title": "Reorganizar o Hub: colapsar secoes secundarias, mover Estudio para o menu e remover o painel de tarefas redundante"
+    }
+  ],
+  "validation": {
+    "no_new_ids": true,
+    "no_cycles": true,
+    "missing_dependencies": 0,
+    "g1_clear": 52,
+    "g1_blocked": 0
+  },
+  "governance": "USR-227 prepara a rota existente de proposta/autorizacao antes dos reparos protegidos. Nao modificar a politica nem exigir que USR-228 inteiro esteja pronto para um reparo pela rota vigente."
+}
