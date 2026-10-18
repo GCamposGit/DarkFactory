@@ -8954,8 +8954,8 @@
     "project_id": "darkfac",
     "title": "Autocorrecao do run_ticket e acionada quando o portao remoto falha sem nenhum teste descoberto (passo com exit negativo)",
     "origin": "agent",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "bcfdccb56983a7ea317b0e596ad2a0be84c0ed63",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -8983,7 +8983,7 @@
     "estimated_complexity": "low",
     "dependencies": [],
     "created_at": "2026-10-18T05:30:03.048499Z",
-    "updated_at": "2026-10-18T05:30:03.048499Z"
+    "updated_at": "2026-10-18T16:31:22.965214Z"
   },
   {
     "id": "USR-309",

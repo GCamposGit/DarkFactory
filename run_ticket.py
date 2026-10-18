@@ -789,6 +789,90 @@ def _gate_failure_is_timeout(gate_res: Any) -> bool:
     return False
 
 
+# USR-308: two more gate failures a reinvoked agent cannot (or must not) fix.
+GATE_CAUSE_INFRA_NO_TESTS = "gate_infra_no_tests"
+GATE_CAUSE_BASE_RED = "base_red_suspected"
+_HARNESS_RESULT_PREFIX = "[HARNESS_RESULT]"
+_FAILED_FILE_RE = re.compile(r"^(?:FAILED|ERROR)[ \t]+(\S+?\.py)(?:::|\s|$)", re.MULTILINE)
+_FAILED_LINE_RE = re.compile(r"^(?:FAILED|ERROR)[ \t]+\S+", re.MULTILINE)
+# A diff touching any of these can change test behaviour without being imported by name.
+_GLOBAL_TEST_CONFIG_NAMES = frozenset(
+    {"conftest.py", "pytest.ini", "pyproject.toml", "setup.cfg", "tox.ini", "harness.config.json"}
+)
+
+
+def _parse_harness_result(output: str) -> Optional[dict[str, Any]]:
+    """The `[HARNESS_RESULT] {json}` payload printed by the official gate, or None."""
+    for line in reversed((output or "").splitlines()):
+        stripped = line.strip()
+        if stripped.startswith(_HARNESS_RESULT_PREFIX):
+            try:
+                payload = json.loads(stripped[len(_HARNESS_RESULT_PREFIX):].strip())
+            except ValueError:
+                return None
+            return payload if isinstance(payload, dict) else None
+    return None
+
+
+def _gate_failure_is_infra_no_tests(output: str) -> bool:
+    """True when the gate ran zero tests because a step was killed (e.g. SIGTERM, exit -15), USR-308.
+
+    `discovered_count == 0` plus a negative exit code (signal death), or a tests step that exited 0
+    without discovering anything, means the candidate was never exercised: not a code defect. A positive
+    exit code (syntax/type error) with zero tests is a real failure and stays fixable by the agent.
+    """
+    payload = _parse_harness_result(output)
+    if payload is None or payload.get("discovered_count") != 0:
+        return False
+    exit_codes = payload.get("exit_codes")
+    if not isinstance(exit_codes, dict):
+        return False
+    codes = {k: v for k, v in exit_codes.items() if isinstance(v, int) and not isinstance(v, bool)}
+    if any(code < 0 for code in codes.values()):
+        return True
+    return any("test" in name.lower() and code == 0 for name, code in codes.items())
+
+
+def _gate_failure_is_base_red(output: str, diff_paths: list[str], cwd: Path) -> bool:
+    """True when every failed test file is untouched by the candidate diff, USR-308 (cheap + conservative).
+
+    Requires parseable `FAILED path::test` lines (all of them), no failed file in the diff, no diff file
+    that is global test config, and no failed file referencing (import/attr/call) a module the diff
+    touches. Anything undeterminable returns False so the current reinvoke behaviour stays.
+    """
+    if not diff_paths:
+        return False
+    lines = _FAILED_LINE_RE.findall(output or "")
+    files = _FAILED_FILE_RE.findall(output or "")
+    if not lines or len(files) != len(lines):
+        return False
+    failed_files = {f.replace("\\", "/") for f in files}
+    diff_norm = [p.replace("\\", "/") for p in diff_paths]
+    if failed_files & set(diff_norm):
+        return False
+    if any(Path(p).name in _GLOBAL_TEST_CONFIG_NAMES for p in diff_norm):
+        return False
+    stems = [Path(p).stem for p in diff_norm if p.endswith(".py") and Path(p).stem not in ("", "__init__")]
+    pattern = None
+    if stems:
+        pattern = re.compile("(?:" + "|".join(
+            rf"\bimport\s+{re.escape(s)}\b|\b{re.escape(s)}\s+import\b|\b{re.escape(s)}\.\w|\b{re.escape(s)}\("
+            for s in dict.fromkeys(stems)
+        ) + ")")
+    for failed in failed_files:
+        path = cwd / failed
+        if not path.is_file():
+            return False
+        if pattern is not None:
+            try:
+                text = path.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                return False
+            if pattern.search(text):
+                return False
+    return True
+
+
 def _focal_failure_is_timeout(focal_report: Any) -> bool:
     """True when the focal pre-check failure was a timeout, not a real test failure."""
     return focal_report.exit_code == _FOCAL_TIMEOUT_EXIT_CODE
@@ -1189,6 +1273,34 @@ def _run_gate_with_self_correction(
                     f"[TIMEOUT/INFRA NO PORTÃO OFICIAL]: {gate_res.duration_s:.1f}s "
                     f"(limite {GATE_TIMEOUT_S:.0f}s). Nao reinvocando o agente: timeout ou falha de "
                     f"infraestrutura nao e algo que uma correcao de codigo resolva (USR-249).",
+                    file=sys.stderr,
+                )
+            break
+
+        if _gate_failure_is_infra_no_tests(last_output):
+            last_cause = GATE_CAUSE_INFRA_NO_TESTS
+            attempts_log.append({
+                "event": "infra_error", "attempt": attempt + 1, "stage": "gate", "cause": last_cause,
+            })
+            if not as_json:
+                print(
+                    "[INFRA NO PORTÃO OFICIAL]: zero testes descobertos e um passo morto por sinal "
+                    "(exit code negativo, ex.: SIGTERM). Nao reinvocando o agente: o candidato nao foi "
+                    "exercitado; e falha de infraestrutura (USR-308).",
+                    file=sys.stderr,
+                )
+            break
+
+        if _gate_failure_is_base_red(last_output, _implementation_diff_paths(target_worktree), target_worktree):
+            last_cause = GATE_CAUSE_BASE_RED
+            attempts_log.append({
+                "event": "infra_error", "attempt": attempt + 1, "stage": "gate", "cause": last_cause,
+            })
+            if not as_json:
+                print(
+                    "[BASE VERMELHA SUSPEITA]: todos os testes reprovados estao em arquivos que o diff do "
+                    "ticket nao toca nem referencia (base_red_suspected). Nao reinvocando o agente: "
+                    "corrija a main e retome a entrega com o comando abaixo (USR-308).",
                     file=sys.stderr,
                 )
             break
