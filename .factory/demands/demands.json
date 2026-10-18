@@ -8763,7 +8763,7 @@
     "tags": [
       "user-demand"
     ],
-    "problem_statement": "# Acelerar o CI do GitHub (hoje 17 a 19 min por PR)\n\n## Evidência (17/10/2026)\nPR #389 (run 39032554922): Ubuntu roda o harness em 173 s; Windows em 1.069 s (~18 min), que define o tempo total. A main repete tudo no push (13 a 19 min) e o deploy Dokploy espera o main-validation. PRs que só tocam `.factory/demands/demands.json` (#387, #388, #389) também gastam ~19 min cada.\n\n## Escopo\n1. Dividir o job Windows em N fatias (matrix shard, N=4) rodando em paralelo, cada uma com uma fração dos testes; o runner aceita parâmetro de fatia e o resultado final só passa se todas passarem. Sem escrita compartilhada entre fatias. Meta: Windows <= 6 min. Alteração em `core/harness` e `ci.yml` precisa de aprovação do dono (governança).\n2. Filtro por caminho: PRs e pushes que alteram somente `.factory/**`, `docs/**` e `*.md` pulam os jobs pesados (job de detecção de mudança + `if` nos demais; jobs pulados contam como aprovados nas verificações obrigatórias). `trusted-pr-policy`/guard continua rodando.\n4. `concurrency` com `cancel-in-progress: true` apenas em `pull_request` (nunca em push na main), para cancelar execuções antigas de um PR que recebeu novo push.\n\n## Critérios de aceite\n- PR de código: CI total <= 8 min; Windows e Ubuntu continuam rodando a mesma suíte completa (soma das fatias = todos os testes, sem teste perdido).\n- PR só de backlog/docs: CI < 2 min e merge normal.\n- Push na main continua sem cancelamento e com deploy condicionado ao main-validation.\n- Documentar em docs e manter o gate oficial verde.\n\n## Fora do escopo\nDeploy sem esperar o Windows, runner Windows maior, merge queue e demands.json por arquivo (decisões separadas).",
+    "problem_statement": "# Acelerar o CI do GitHub (hoje 17 a 19 min por PR)\n\n## Evidência (17/10/2026)\nPR #389 (run 39032554922): Ubuntu roda o harness em 173 s; Windows em 1.069 s (~18 min), que define o tempo total. A main repete tudo no push (13 a 19 min) e o deploy Dokploy espera o main-validation. PRs que só tocam `.factory/demands/demands.json` (#387, #388, #389) também gastam ~19 min cada.\n\n## Escopo\n1. Dividir o job Windows em N fatias (matrix shard, N=4) rodando em paralelo, cada uma com uma fração dos testes; o runner aceita parâmetro de fatia e o resultado final só passa se todas passarem. Sem escrita compartilhada entre fatias. Meta: Windows <= 6 min. Alteração em `core/harness` e `ci.yml` precisa de aprovação do dono (governança).\n2. Filtro por caminho: PRs e pushes que alteram somente `.factory/**`, `docs/**` e `*.md` pulam os jobs pesados (job de detecção de mudança + `if` nos demais; jobs pulados contam como aprovados nas verificações obrigatórias). `trusted-pr-policy`/guard continua rodando.\n4. `concurrency` com `cancel-in-progress: true` apenas em `pull_request` (nunca em push na main), para cancelar execuções antigas de um PR que recebeu novo push.\n\n## Critérios de aceite\n- PR de código: CI total <= 8 min; Windows e Ubuntu continuam rodando a mesma suíte completa (soma das fatias = todos os testes, sem teste perdido).\n- PR só de backlog/docs: CI < 2 min e merge normal.\n- Push na main continua sem cancelamento e com deploy condicionado ao main-validation.\n- Documentar em docs e manter o gate oficial verde.\n\n## Fora do escopo\nDeploy sem esperar o Windows, runner Windows maior, merge queue e demands.json por arquivo (decisões separadas).\n\n[Achado de revisao, auditoria 17/10/2026]: o filtro leve proposto para .factory/** inclui .factory/config/line_routing.json, subagent_model_routing.json e .factory/holdout/**. Sao configuracoes de execucao e verificacao, nao apenas cadastro. Planejamento deve restringir allowlist de dados (demands/owner_actions/roadmap com validacao semantica) e garantir testes apropriados para configuracoes/holdouts; nao implementar skip amplo. Achado registrado sem alterar as decisoes originais do owner.",
     "core_journey": [
       "# Acelerar o CI do GitHub (hoje 17 a 19 min por PR)\n\n## Evidência (17/10/2026)\nPR #389 (run 39032554922): Ubuntu roda o harness em 173 s; Windows em 1.069 s (~18 min), que define o tempo total. A main repete tudo no push (13 a 19 min) e o deploy Dokploy espera o main-validation. PRs que só tocam `.factory/demands/demands.json` (#387, #388, #389) também gastam ~19 min cada.\n\n## Escopo\n1. Dividir o job Windows em N fatias (matrix shard, N=4) rodando em paralelo, cada uma com uma fração dos testes; o runner aceita parâmetro de fatia e o resultado final só passa se todas passarem. Sem escrita compartilhada entre fatias. Meta: Windows <= 6 min. Alteração em `core/harness` e `ci.yml` precisa de aprovação do dono (governança).\n2. Filtro por caminho: PRs e pushes que alteram somente `.factory/**`, `docs/**` e `*.md` pulam os jobs pesados (job de detecção de mudança + `if` nos demais; jobs pulados contam como aprovados nas verificações obrigatórias). `trusted-pr-policy`/guard continua rodando.\n4. `concurrency` com `cancel-in-progress: true` apenas em `pull_request` (nunca em push na main), para cancelar execuções antigas de um PR que recebeu novo push.\n\n## Critérios de aceite\n- PR de código: CI total <= 8 min; Windows e Ubuntu continuam rodando a mesma suíte completa (soma das fatias = todos os testes, sem teste perdido).\n- PR só de backlog/docs: CI < 2 min e merge normal.\n- Push na main continua sem cancelamento e com deploy condicionado ao main-validation.\n- Documentar em docs e manter o gate oficial verde.\n\n## Fora do escopo\nDeploy sem esperar o Windows, runner Windows maior, merge queue e demands.json por arquivo (decisões separadas)."
     ],
@@ -8779,6 +8779,174 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-17T13:16:46.929233Z",
-    "updated_at": "2026-10-17T13:16:46.929241Z"
+    "updated_at": "2026-10-18T01:12:36.385064Z"
+  },
+  {
+    "id": "USR-303",
+    "project_id": "darkfac",
+    "title": "Separar identidade de projeto e ticket na entrada real da linha",
+    "origin": "review",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand",
+      "audit-flow",
+      "priority:p1"
+    ],
+    "problem_statement": "Auditoria de 17/10/2026: accept() usa payload.ticket_id em JobKey.ticket_id, enquanto bindings._resolve_project interpreta esse campo como project_id. No Postgres real os runs run-73c89bc83bb8 (USR-268), run-8635a8296794 e run-9ea9d05d03d5 (USR-270), run-495c1bab76a7 (USR-299) falharam ou foram cancelados no grill; ha retries UnknownProjectError e causa workflow_project_resolution_bug. Reproducao em SQLite :memory: com command_for_ticket gera run.project_id=darkfac e jobs.ticket_id=AUDIT-READONLY; _resolve_project procura projeto com esse ID de ticket. Corrigir o contrato ponta a ponta, preservando compatibilidade com runs antigos e reservando a identidade de ticket para admissao.",
+    "core_journey": [],
+    "non_goals": [
+      "Nao reabrir runs cancelados sem reconciliar efeitos e tentativas.",
+      "Nao suprimir UnknownProjectError nem cadastrar projetos artificiais com IDs de ticket."
+    ],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Entrada publica de ticket com project_id=darkfac chega ao handler grill do projeto darkfac, preservando USR-ID no payload/reserva e sem UnknownProjectError; teste percorre accept, claim e dispatch sem substituir o resolver por stub permissivo.",
+      "SQLite e Postgres seguem o mesmo contrato; runs legados e sucessores resolvem o projeto correto; repeticao nao duplica runs nem efeitos.",
+      "Portao oficial e revisao independente aprovados; prova operacional com ticket registrado, merge, deploy e smoke vinculados ao candidato."
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-18T01:09:10.280480Z",
+    "updated_at": "2026-10-18T01:09:10.280480Z"
+  },
+  {
+    "id": "USR-304",
+    "project_id": "darkfac",
+    "title": "Conectar alimentador do backlog ao loop operacional e comprovar reposicao",
+    "origin": "review",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand",
+      "audit-flow",
+      "priority:p1"
+    ],
+    "problem_statement": "Auditoria de 17/10/2026: USR-283 esta completed, mas busca por BacklogFeeder/reconcile_and_feed em core, scripts, hub e run_ticket.py encontra apenas a propria definicao em core/line/backlog_feeder.py. CloudCoordinator.scan_and_recover_pending admite jobs existentes no banco, mas nao importa tickets do ledger. Postgres consultado nao tinha run ativo apesar de 52 tickets planejados no ledger; essa observacao isolada nao prova elegibilidade de todos. Fechar o binding operacional do requisito ja aprovado em USR-277/283; USR-221 descreve capacidade sobreposta e deve ser reconciliado, sem criar outro scheduler concorrente.",
+    "core_journey": [],
+    "non_goals": [
+      "Nao substituir o Postgres compartilhado por fila local.",
+      "Nao relaxar Gate G1, dependencias ou cota.",
+      "Nao implantar segundo cron concorrente para a mesma funcao."
+    ],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Servico operacional existente chama o alimentador em ciclo limitado e observavel, com a fonte de backlog correta, sem depender do chat, de comando manual ou de novo registro.",
+      "Teste de integracao usa o loop publico: ticket elegivel persistido chega a run; conclusao libera e inicia o proximo; ticket bloqueado e ignorado com motivo; replay e dois coordenadores nao duplicam.",
+      "Prova em ambiente real registra duas reposicoes sucessivas e o motivo de fila sem trabalho executavel; reconciliar a sobreposicao com USR-221/283; portao oficial, revisao e entrega autonoma."
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-18T01:09:32.401853Z",
+    "updated_at": "2026-10-18T01:09:32.401853Z"
+  },
+  {
+    "id": "USR-305",
+    "project_id": "darkfac",
+    "title": "Corrigir falso positivo do G1 e contrato de prontidao dos tickets criados",
+    "origin": "review",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand",
+      "audit-flow",
+      "priority:p1"
+    ],
+    "problem_statement": "Auditoria de 17/10/2026, baseline 249 tickets: 49 dos 52 planned falham evaluate_ambiguity por non_goals ausente; 6 desses tambem falham pelo marcador todo encontrado como substring. Reproducao isolada com problema \"Validar todos os caminhos conhecidos sem alterar as regras.\", non_goals e aceite preenchidos retorna ambiguidade TODO/TBD. run_ticket._build_ticket nao recebe nem preenche non_goals, portanto sua criacao padrao gera linha planned recusada pelo alimentador. Ausencia de metadado nao prova ausencia de decisao de negocio: distinguir normalizacao tecnica de ambiguidade material; nao inventar decisoes do owner. Reproducao adicional: _build_executable_queue(backlog_original, []) publica 46 elegiveis e 6 bloqueados, enquanto evaluate_ambiguity libera apenas 3. Reutilizar avaliacao canonica de prontidao na projecao.",
+    "core_journey": [],
+    "non_goals": [
+      "Nao assumir regras de negocio, limiares ou permissoes.",
+      "Nao desbloquear a fila em massa por preenchimento generico.",
+      "Nao enfraquecer as invariantes do Gate G1."
+    ],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "G1 nao acusa TODO/TBD dentro de palavras como todos; placeholders explicitos e ambiguidade material continuam bloqueados, com testes positivos e negativos.",
+      "Entradas publicas CLI/Hub/Telegram preservam limites de escopo informados e representam prontidao ou pendencia de forma coerente; nao adicionar non_goals ficticios apenas para passar.",
+      "Inventario dos 52 tickets classifica lacuna documental versus decisao humana real, reaproveita decisoes existentes e registra apenas decisoes realmente ausentes como HumanRequest; portao oficial e entrega autonoma."
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-18T01:09:47.448919Z",
+    "updated_at": "2026-10-18T01:12:36.371060Z"
+  },
+  {
+    "id": "USR-306",
+    "project_id": "darkfac",
+    "title": "Validar afinidade e disponibilidade da frota pelo caminho de producao",
+    "origin": "review",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand",
+      "audit-flow",
+      "priority:p1"
+    ],
+    "problem_statement": "Auditoria de 17/10/2026: Postgres tem 155 reservas expired (149 grokbox, 6 notebook), nenhuma dessas com heartbeat_at maior que acquired_at; ha duas reservas renovadas em outros estados. Nao inferir causa apenas desses totais. CloudCoordinator.host_health_prober e opcional e sem prober presume hosts disponiveis; claim aceita jobs sem reserva ativa pelo caminho legado. O ensaio real de tres ciclos do plano USR-277 nao foi demonstrado nesta auditoria, embora F1-F8 estejam completed. Investigar binding de disponibilidade, renovacao entre etapas e claims fora da admissao, aproveitando os testes existentes; evitar tratar teste unitario de componente como aceite operacional. Reproducao adicional: core.workflow.line_live._build_fleet(None, now) publica grokbox/notebook/desktop online mesmo sem fonte de saude. Exigir que a projecao preserve estado desconhecido/offline observado em vez de presumir online.",
+    "core_journey": [],
+    "non_goals": [
+      "Nao remover fencing, leases ou exclusao de suite.",
+      "Nao mudar prioridades de host ou aumentar slots por maquina.",
+      "Nao atribuir causalidade a timeout de uma unica sonda."
+    ],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Reproduzir via coordenador, workers e Postgres real: tres tickets em hosts distintos, permanencia da reserva durante handler longo e espera de CI, e reposicao de duas vagas sem quarto ciclo.",
+      "Host sem health/capacidade verificada nao recebe ciclo novo; perda de lease impede efeitos do dono antigo; caminho legado nao contorna capacidade no modo gerenciado, mantendo compatibilidade explicitamente testada.",
+      "Explicar as reservas sem renovacao com evidencias e corrigir os bindings confirmados; publicar relatorio de duracoes e ocupacao real, portao oficial e revisao independente, sem declarar ganho teorico de 3x."
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-18T01:10:00.486432Z",
+    "updated_at": "2026-10-18T01:12:36.357058Z"
+  },
+  {
+    "id": "USR-307",
+    "project_id": "darkfac",
+    "title": "Reconciliar acoes do owner obsoletas e PRs de registro duplicados",
+    "origin": "review",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand",
+      "audit-flow",
+      "priority:p1"
+    ],
+    "problem_statement": "Auditoria de 17/10/2026: OA-013 ainda bloqueia USR-224 completed; OA-017 bloqueia seis tickets completed (222,239,246,247,249,250); OA-023 bloqueia USR-192 completed. OA-QR-384 permanece open apesar de PR384 CLOSED sem merge. PRs387 e390 abertos registram a mesma varredura oa-queue-watchdog, com 390 CONFLICTING. OA030 possui relatorio local de 11/11 amostras aceitas, mas uma sonda nova expirou; conectividade e RCA nao devem ser encerradas por inferencia. Registrar evidencia e reconciliar estado sem transferir operacao git ao owner.",
+    "core_journey": [],
+    "non_goals": [
+      "Nao apagar historico nem concluir OA030 sem nova evidencia suficiente.",
+      "Nao pedir ao owner resgate manual de PR ou sincronizacao."
+    ],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Reconciliacao distingue acao ainda necessaria de bloqueio obsoleto, preserva historico e nao fecha automaticamente acao apenas porque um ticket esta completed; PR fechado duplicado deixa OA com desfecho explicado.",
+      "PRs duplicados da mesma operacao sao conciliados por identidade sem criar novas cadeias de PR de alerta; regressao cobre replay, encerramento e conflito de registro.",
+      "DarkHub mostra acoes com bloqueios atuais e origem verificavel; o agente executa o reparo de Git e sincronizacao; portao oficial e entrega autonoma."
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-18T01:10:10.460395Z",
+    "updated_at": "2026-10-18T01:10:10.460395Z"
   }
 ]
