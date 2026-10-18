@@ -346,7 +346,7 @@ function renderInfraMetrics(data) {
   const items = containers.items || [];
   const nodes = data.nodes || [];
   const notebookNode = nodes.find((node) => node.role === "dev_workstation") || {
-    node_id: hw.node_id || "predator-neo-16",
+    node_id: hw.node_id || "nó desconhecido",
     status: "healthy",
     is_live: true,
     hardware: hw,
@@ -372,6 +372,7 @@ function renderInfraMetrics(data) {
     critical: "border-rose-600/60 bg-rose-950/40 text-rose-300",
     degraded: "border-orange-600/60 bg-orange-950/40 text-orange-300",
     offline: "border-slate-600/60 bg-slate-900/70 text-slate-300",
+    no_recent_data: "border-slate-600/60 bg-slate-900/70 text-slate-300",
   };
   const healthClass = healthPills[data.overall_health] || healthPills.healthy;
   const escapeHtml = (value) => String(value ?? "").replace(/[&<>"']/g, (char) => ({
@@ -388,10 +389,24 @@ function renderInfraMetrics(data) {
     const parsed = new Date(value);
     return Number.isNaN(parsed.getTime()) ? "Indisponível" : parsed.toLocaleString("pt-BR");
   };
+  const formatAge = (value) => {
+    if (!value) return "";
+    const ms = Date.now() - new Date(value).getTime();
+    if (!Number.isFinite(ms)) return "";
+    const minutes = Math.max(0, Math.floor(ms / 60000));
+    if (minutes < 1) return "há menos de 1 min";
+    if (minutes < 60) return `há ${minutes} min`;
+    const hoursAgo = Math.floor(minutes / 60);
+    return hoursAgo < 48 ? `há ${hoursAgo} h` : `há ${Math.floor(hoursAgo / 24)} dias`;
+  };
   const renderHardwareNode = (node, label) => {
-    const nodeHw = node.hardware;
+    const noRecent = node.status === "no_recent_data";
+    const nodeHw = noRecent ? null : node.hardware;
     const isOnline = Boolean(node.is_live && nodeHw);
     const nodeStatus = node.status || (isOnline ? "healthy" : "offline");
+    const statusText = noRecent ? "Sem dado recente" : nodeStatus;
+    const offlineDetail = noRecent ? "Sem dado recente deste nó" : `Sem leitura enquanto o ${label} está offline`;
+    const ageText = formatAge(node.last_contact_at || (nodeHw && nodeHw.collected_at));
     const nodeHealthClass = healthPills[nodeStatus] || healthPills.offline;
     const lastContact = formatLastContact(node.last_contact_at || (nodeHw && nodeHw.collected_at));
     const metrics = isOnline ? [
@@ -415,10 +430,10 @@ function renderInfraMetrics(data) {
         detail: `Desde ${formatLastContact(nodeHw.boot_time)}`,
       },
     ] : [
-      { label: "Processador (CPU)", value: "—", percent: null, detail: "Sem leitura enquanto o Desktop está offline" },
-      { label: "Memória RAM", value: "—", percent: null, detail: "Sem leitura enquanto o Desktop está offline" },
-      { label: "Armazenamento", value: "—", percent: null, detail: "Sem leitura enquanto o Desktop está offline" },
-      { label: "Uptime", value: "—", percent: null, detail: "Sem leitura enquanto o Desktop está offline" },
+      { label: "Processador (CPU)", value: "—", percent: null, detail: offlineDetail },
+      { label: "Memória RAM", value: "—", percent: null, detail: offlineDetail },
+      { label: "Armazenamento", value: "—", percent: null, detail: offlineDetail },
+      { label: "Uptime", value: "—", percent: null, detail: offlineDetail },
     ];
     const metricCards = metrics.map((metric) => {
       const hasReading = metric.percent !== null;
@@ -440,11 +455,11 @@ function renderInfraMetrics(data) {
         <div class="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800/80 pb-2">
           <div class="min-w-0">
             <h4 class="text-xs font-bold text-white font-mono">${label} <span class="font-normal text-slate-500">${escapeHtml(node.node_id)}</span></h4>
-            <p class="text-[10px] text-slate-500 font-mono">${isOnline ? escapeHtml(nodeHw.os_platform) : "Último contato: " + lastContact}</p>
+            <p class="text-[10px] text-slate-500 font-mono">${isOnline ? escapeHtml(nodeHw.os_platform) : "Último contato: " + lastContact + (ageText ? " (" + ageText + ")" : "")}</p>
           </div>
-          <span class="rounded-full border px-2 py-0.5 text-[10px] font-mono ${nodeHealthClass}">${escapeHtml(nodeStatus)}</span>
+          <span class="rounded-full border px-2 py-0.5 text-[10px] font-mono ${nodeHealthClass}">${escapeHtml(statusText)}</span>
         </div>
-        ${isOnline ? `<p class="text-[10px] text-slate-500 font-mono">Último contato: ${lastContact}</p>` : ""}
+        ${isOnline ? `<p class="text-[10px] text-slate-500 font-mono">Último contato: ${lastContact}${ageText ? " (" + ageText + ")" : ""}</p>` : ""}
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">${metricCards}</div>
       </section>`;
   };

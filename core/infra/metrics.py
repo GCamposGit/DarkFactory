@@ -180,8 +180,41 @@ def get_dokploy_credentials(
 # ==============================================================================
 
 
-def collect_host_hardware_metrics(node_id: str = "predator-neo-16") -> HardwareMetrics:
+NOTEBOOK_NODE_ID = "predator-neo-16"
+VPS_NODE_ID = "darkfac-vps-primary"
+DESKTOP_NODE_ID = "onprem-z97-server"
+NODE_ID_ENV = "DARKFAC_NODE_ID"
+_HOSTNAME_NODE_IDS = {
+    "predator-neo-16": NOTEBOOK_NODE_ID,
+    "ai_notebook": NOTEBOOK_NODE_ID,  # real Windows hostname of the Notebook (socket.gethostname())
+    "desktop-g45ipem": DESKTOP_NODE_ID,
+    "onprem-z97-server": DESKTOP_NODE_ID,
+    "darkfac-vps-primary": VPS_NODE_ID,
+}
+
+
+def resolve_host_node_id(env: Optional[Dict[str, str]] = None, hostname: Optional[str] = None) -> str:
+    """Identify the node running this process (USR-212).
+
+    Order: explicit DARKFAC_NODE_ID > hostname (known hosts; the Hub container is
+    named ``darkhub-*`` and runs on the VPS) > the raw hostname. Never falls back
+    to the Notebook id, so a container cannot masquerade as the Notebook.
+    """
+    environ = os.environ if env is None else env
+    explicit = (environ.get(NODE_ID_ENV) or "").strip()
+    if explicit:
+        return explicit
+    name = (hostname if hostname is not None else platform.node() or "").strip().lower()
+    if name in _HOSTNAME_NODE_IDS:
+        return _HOSTNAME_NODE_IDS[name]
+    if name.startswith("darkhub-"):
+        return VPS_NODE_ID
+    return name or "unknown-host"
+
+
+def collect_host_hardware_metrics(node_id: Optional[str] = None) -> HardwareMetrics:
     """Collects real-time host hardware metrics using psutil with fail-safe fallbacks."""
+    node_id = node_id or resolve_host_node_id()
     now = datetime.now(timezone.utc)
     try:
         cpu_pct = float(psutil.cpu_percent(interval=0.05))
@@ -410,6 +443,7 @@ def collect_containers_metrics(
 
 DESKTOP_WORKER_METRICS_URL = "http://100.78.181.90:8080/metrics/hardware"
 DESKTOP_METRICS_MAX_TIMEOUT_SECONDS = 0.75
+_notebook_last_contact_at: Optional[datetime] = None
 _desktop_last_contact_at: Optional[datetime] = None
 _desktop_contact_lock = threading.Lock()
 
@@ -471,18 +505,19 @@ def collect_desktop_hardware_node(
 
 
 def build_infra_metrics_report(
-    node_id: str = "predator-neo-16",
+    node_id: Optional[str] = None,
     timeout: float = 3.0,
     credentials_override: Optional[Tuple[str, str]] = None,
 ) -> InfraMetricsReport:
     """Builds a complete, UI-ready InfraMetricsReport combining hardware and containers."""
     now = datetime.now(timezone.utc)
+    node_id = node_id or resolve_host_node_id()
     hw = collect_host_hardware_metrics(node_id=node_id)
     containers = collect_containers_metrics(timeout=timeout, credentials_override=credentials_override)
     desktop_node = collect_desktop_hardware_node(timeout=timeout)
 
-    notebook_status = _hardware_health_status(hw)
-    node_statuses = [notebook_status, desktop_node.status]
+    host_status = _hardware_health_status(hw)
+    node_statuses = [host_status, desktop_node.status]
     if "critical" in node_statuses:
         overall_health = "critical"
     elif "warning" in node_statuses:
@@ -492,27 +527,50 @@ def build_infra_metrics_report(
     else:
         overall_health = "healthy"
 
-    # Composite node list
-    nodes: List[NodeLiveMetrics] = [
-        NodeLiveMetrics(
-            node_id="predator-neo-16",
+    vps_live = containers.dokploy_api_connected or len(containers.items) > 0
+    on_vps = node_id == VPS_NODE_ID
+    on_notebook = node_id == NOTEBOOK_NODE_ID
+    # No per-node heartbeat/hardware source exists for the Notebook, so when the Hub
+    # is not running on it, the node is "sem dado recente" with the last known age.
+    with _desktop_contact_lock:
+        notebook_last = _notebook_last_contact_at
+    if on_notebook:
+        with _desktop_contact_lock:
+            globals()["_notebook_last_contact_at"] = hw.collected_at
+        notebook_node = NodeLiveMetrics(
+            node_id=NOTEBOOK_NODE_ID,
             node_name="Notebook (predator-neo-16)",
             role="dev_workstation",
             is_live=True,
-            status=notebook_status,
+            status=host_status,
             hardware=hw,
             container_count=0,
             last_contact_at=hw.collected_at,
             reported_at=now,
-        ),
+        )
+    else:
+        notebook_node = NodeLiveMetrics(
+            node_id=NOTEBOOK_NODE_ID,
+            node_name="Notebook (predator-neo-16)",
+            role="dev_workstation",
+            is_live=False,
+            status="no_recent_data",
+            hardware=None,
+            container_count=0,
+            last_contact_at=notebook_last,
+            reported_at=now,
+        )
+    nodes: List[NodeLiveMetrics] = [
+        notebook_node,
         NodeLiveMetrics(
-            node_id="darkfac-vps-primary",
+            node_id=VPS_NODE_ID,
             node_name="Hetzner CX23 Cloud VPS",
             role="cloud_vps",
-            is_live=containers.dokploy_api_connected or len(containers.items) > 0,
-            status="online" if containers.dokploy_api_connected or len(containers.items) > 0 else "offline",
-            hardware=None,
+            is_live=vps_live or on_vps,
+            status=host_status if on_vps else ("online" if vps_live else "offline"),
+            hardware=hw if on_vps else None,
             container_count=containers.total_containers,
+            last_contact_at=hw.collected_at if on_vps else None,
             reported_at=now,
         ),
         desktop_node,
