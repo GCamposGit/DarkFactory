@@ -114,6 +114,8 @@ from core.harness.test_subagent import (
 from core.infra.cards import InfraCard, InfraCardsReport
 from core.infra.metrics import InfraMetricsReport
 
+from hub.backend.service_migrations import apply_service_migrations
+
 router = APIRouter(prefix="/api", tags=["DarkHub API"])
 roadmap_router = APIRouter(prefix="/projects", tags=["Operational Roadmap"])
 
@@ -125,6 +127,7 @@ def get_hub_service() -> HubService:
     global _service_instance
     if _service_instance is None:
         _service_instance = HubService()
+        apply_service_migrations(_service_instance.data_dir)
     return _service_instance
 
 
