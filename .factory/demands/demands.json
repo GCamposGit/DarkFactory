@@ -9019,5 +9019,45 @@
     "dependencies": [],
     "created_at": "2026-10-18T05:30:03.048499Z",
     "updated_at": "2026-10-18T08:16:22.535968Z"
+  },
+  {
+    "id": "USR-310",
+    "project_id": "darkfac",
+    "title": "Cliente Python para enviar e-mail ao grokbot pelo Worker darkfac-mailer da Cloudflare",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "infrastructure",
+    "lifecycle_stage": "execution",
+    "horizon": "later",
+    "tags": [
+      "user-demand",
+      "infra",
+      "integration",
+      "congelado-v0"
+    ],
+    "problem_statement": "O owner quer que a DarkFac envie e-mail para guigrokchief@mail.grokbot.com. O envio sai pelo Worker darkfac-mailer (Cloudflare Email Workers, binding send_email), configurado pelo owner na OA-034; falta o lado da fabrica: um cliente que faca POST autenticado no Worker usando DARKFAC_MAILER_URL e DARKFAC_MAILER_TOKEN.",
+    "core_journey": [
+      "Um modulo da fabrica chama send_grokbot_email(subject, text) e o e-mail chega na caixa do grokbot."
+    ],
+    "non_goals": [
+      "Nao enviar para destinatarios arbitrarios nem guardar o token no repositorio.",
+      "Nao alterar a configuracao do Worker na Cloudflare (isso e da OA-034)."
+    ],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "core/integrations/email_worker.py expoe send_grokbot_email(subject, text) que faz POST JSON no DARKFAC_MAILER_URL com Authorization Bearer DARKFAC_MAILER_TOKEN e retorna sucesso apenas com ok=true (teste com transporte simulado).",
+      "Sem as variaveis de ambiente, ou com resposta 401/502, a funcao falha fechada com erro estruturado que nao exibe o token (teste).",
+      "CLI python -m core.integrations.email_worker --subject ... --text ... envia o e-mail e retorna codigo 0 em sucesso e diferente de 0 em falha."
+    ],
+    "suggested_files": [
+      "core/integrations/email_worker.py",
+      "tests/test_email_worker.py",
+      "infra/cloudflare/darkfac-mailer/worker.js"
+    ],
+    "estimated_complexity": "low",
+    "dependencies": [],
+    "created_at": "2026-10-18T11:19:44.953004Z",
+    "updated_at": "2026-10-18T11:19:44.953004Z"
   }
 ]
