@@ -6946,8 +6946,8 @@
     "project_id": "darkfac",
     "title": "USR-206 fatia 1: Hub persiste os snapshots de cotas sincronizados e le deles em vez de sondar CLIs na VPS",
     "origin": "user",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "039a0106b689085e94d097b4b8884a7c4b7b1675",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "later",
@@ -6976,7 +6976,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-11T20:27:26.404985Z",
-    "updated_at": "2026-10-11T20:27:26.404985Z"
+    "updated_at": "2026-10-19T05:14:14.141767Z"
   },
   {
     "id": "USR-233",
