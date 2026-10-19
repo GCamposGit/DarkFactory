@@ -1243,6 +1243,17 @@
     state.receivedAt = Date.now();
     try { checkNotifications(data); } catch (e) { /* ignora */ }
     render();
+    openDeepLinkedRun();
+  }
+
+  // USR-215: /live.html?run=<run_id> abre o detalhe do run (link da prova do criterio V1).
+  function openDeepLinkedRun() {
+    if (state.deepLinkDone) return;
+    state.deepLinkDone = true;
+    try {
+      const id = new URLSearchParams(location.search).get('run');
+      if (id && findRun(id)) openDrawer(id, null, null);
+    } catch (e) { /* ignora */ }
   }
 
   function fetchSnapshot() {

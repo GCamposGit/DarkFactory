@@ -669,13 +669,29 @@ class HubService:
 
         streak = 0
         last_canary: dict[str, Any] | None = None
+        live_criteria: dict[str, Any] = {}
         try:
-            reports = load_reports(REPORTS_DIR, limit=10)
-            streak = green_streak(reports)
-            if reports:
-                last_canary = reports[-1].model_dump(mode="json")
+            # USR-215: the streak and V1/V2 come from the control store (same source as the live
+            # board); the canary report files only exist on the host that ran the canary.
+            from core.line.acceptance import verify_v1, verify_v2
+
+            line_store = self._line_control_store()
+            v2 = verify_v2(store=line_store)
+            streak = int(v2.details.get("streak", 0) or 0)
+            if v2.details.get("last_date"):
+                last_canary = {"date": v2.details["last_date"], "source": "control_store"}
+            live_criteria["V2"] = v2.model_dump(mode="json")
+            live_criteria["V1"] = verify_v1(store=line_store).model_dump(mode="json")
         except Exception as exc:
-            logger.warning("Failed to load canary streak for line status: %s", exc)
+            logger.warning("Failed to load canary streak from control store for line status: %s", exc)
+        if not live_criteria:
+            try:
+                reports = load_reports(REPORTS_DIR, limit=10)
+                streak = green_streak(reports)
+                if reports:
+                    last_canary = reports[-1].model_dump(mode="json")
+            except Exception as exc:
+                logger.warning("Failed to load canary streak for line status: %s", exc)
 
         active_runs: list[dict[str, Any]] = []
         try:
@@ -712,6 +728,11 @@ class HubService:
                 acceptance_data = json.loads(ACCEPTANCE_JSON.read_text(encoding="utf-8"))
         except Exception as exc:
             logger.warning("Failed to load acceptance report for line status: %s", exc)
+        if live_criteria:
+            acceptance_data = dict(acceptance_data or {})
+            merged = {str(c.get("id")): c for c in acceptance_data.get("criteria", []) if isinstance(c, dict)}
+            merged.update(live_criteria)
+            acceptance_data["criteria"] = [merged[key] for key in sorted(merged)]
 
         return LineStatusResponse(
             canary_streak=streak,

@@ -47,6 +47,34 @@ document.addEventListener("DOMContentLoaded", () => {
   });
 });
 
+// USR-215: o que falta e o proximo passo de cada criterio, em linguagem simples (+ link da prova do V1).
+function renderLineCriterionHint(statusEl, crit) {
+  const id = `${statusEl.id}-hint`;
+  let hint = document.getElementById(id);
+  if (!hint) {
+    hint = document.createElement("div");
+    hint.id = id;
+    hint.className = "mt-1 text-[10px] leading-snug text-slate-400";
+    statusEl.insertAdjacentElement("afterend", hint);
+  }
+  hint.textContent = "";
+  const details = crit.details || {};
+  const lines = crit.verified ? [] : [details.missing, details.next_step].filter(Boolean);
+  for (const text of lines) {
+    const p = document.createElement("p");
+    p.textContent = String(text);
+    hint.appendChild(p);
+  }
+  const proofUrl = typeof details.proof_url === "string" && details.proof_url.startsWith("/live.html") ? details.proof_url : "";
+  if (crit.verified && proofUrl) {
+    const a = document.createElement("a");
+    a.href = proofUrl;
+    a.className = "text-indigo-300 hover:text-indigo-200 underline";
+    a.textContent = `Ver a entrega na Esteira ao vivo (${details.proof_run_id || "run"})`;
+    hint.appendChild(a);
+  }
+}
+
 async function loadLineStatus() {
   const card = document.getElementById("line-status-card");
   if (!card) return;
@@ -74,6 +102,7 @@ async function loadLineStatus() {
         if (el) {
           el.textContent = crit.verified ? "Aprovado" : "Pendente";
           el.className = crit.verified ? "font-medium text-emerald-400 mt-0.5" : "font-medium text-amber-400 mt-0.5";
+          renderLineCriterionHint(el, crit);
         }
       }
     }
