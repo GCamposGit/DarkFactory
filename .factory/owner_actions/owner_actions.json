@@ -1505,28 +1505,28 @@
       "kind": "action",
       "title": "Grokbox mata o pytest com SIGTERM no inicio de todo portao: identificar e desligar o emissor na VM",
       "priority": "high",
-      "status": "open",
-      "why": "Em 19/10/2026 02:38-02:42 BRT, 3 jobs seguidos do portao no grokbox (worker em b68dfe4, com USR-298) morreram com SIGTERM (-15) logo no inicio do pytest xdist, com /health saudavel; nenhuma linha [SIGTERM_PROBE]. O USR-298 ja classifica isso como infraestrutura e reenvia, entao nao ha HARNESS_FAIL falso, mas o grokbox (host mais rapido, ~3 min) esta fora do rodizio: a fila roda so no Notebook e no Desktop. Hipotese nao comprovada: vigia de memoria da VM (earlyoom/systemd-oomd/watchdog do sandbox) com ~3,2 GiB livres. Pedido de diagnostico somente leitura ja enviado ao grokbot por e-mail (darkfac-mailer) em 19/10 02:50. ATUALIZACAO 19/10 ~06:30 BRT (Claude Code): diagnostico do grokbot sem OOM, sem PSI, sem vigia de memoria e sem fork da VM nos horarios; 9 jobs de 4 candidatos morrem ~1,5 s apos o passo paralelo, o ultimo verde foi c32bab5 as 21:45. Entre c32bab5 e a main so mudou core/harness/runner.py (USR-268), que no Linux so trata timeout. Replay exato do job (nice -n 5 + sigterm_probe + runner.py --quick --local, DARKFAC_HARNESS_WORKER_JOB=1) na main b5fd37e num Linux limpo: 4511 testes, HARNESS_PASS, sem SIGTERM. Return code -15 sem [SIGTERM_PROBE] significa que o sinal foi direto ao runner (filho da sonda). Suspeita: ambiente do grokbox (venv compartilhado alterado por _sync_requirements ou variavel do worker), nao o codigo do candidato. Proximo passo: replay do job no grokbox sob strace.",
+      "status": "done",
+      "why": "Em 19/10/2026 02:38-02:42 BRT, 3 jobs seguidos do portao no grokbox (worker em b68dfe4, com USR-298) morreram com SIGTERM (-15) logo no inicio do pytest xdist, com /health saudavel; nenhuma linha [SIGTERM_PROBE]. O USR-298 ja classifica isso como infraestrutura e reenvia, entao nao ha HARNESS_FAIL falso, mas o grokbox (host mais rapido, ~3 min) esta fora do rodizio: a fila roda so no Notebook e no Desktop. Hipotese nao comprovada: vigia de memoria da VM (earlyoom/systemd-oomd/watchdog do sandbox) com ~3,2 GiB livres. Pedido de diagnostico somente leitura ja enviado ao grokbot por e-mail (darkfac-mailer) em 19/10 02:50. ATUALIZACAO 19/10 ~06:30 BRT (Claude Code): diagnostico do grokbot sem OOM, sem PSI, sem vigia de memoria e sem fork da VM nos horarios; 9 jobs de 4 candidatos morrem ~1,5 s apos o passo paralelo, o ultimo verde foi c32bab5 as 21:45. Entre c32bab5 e a main so mudou core/harness/runner.py (USR-268), que no Linux so trata timeout. Replay exato do job (nice -n 5 + sigterm_probe + runner.py --quick --local, DARKFAC_HARNESS_WORKER_JOB=1) na main b5fd37e num Linux limpo: 4511 testes, HARNESS_PASS, sem SIGTERM. Return code -15 sem [SIGTERM_PROBE] significa que o sinal foi direto ao runner (filho da sonda). Suspeita: ambiente do grokbox (venv compartilhado alterado por _sync_requirements ou variavel do worker), nao o codigo do candidato. Proximo passo: replay do job no grokbox sob strace. ATUALIZACAO 19/10 ~09:00 BRT: causa da suite corrigida no PR #444 (3cb118b). 19/10 11:48 UTC: portao isolado no grokbox (candidato 08c00b6, ja com o #444). Tentativa 1 morreu com SIGTERM no inicio do passo serial; [SIGTERM_PROBE] apontou pid=1289515 cmdline 'python -c import fastapi, uvicorn, pydantic, core.harness.remote_worker' (checagem de prontidao do supervisor da VM apos atualizar o checkout). core/harness/remote_worker.py:2298 faz 'app = create_worker_app()' na importacao, entao importar o modulo cria o JobManager na pasta real do worker e roda a recuperacao de orfaos, que mata o job vivo por causa da deriva do create_time. Tentativa 2 (REMOTE_RETRY): HARNESS_PASS, 4519 descobertos, 4488 passed, 31 skipped. Falta isolar a checagem de prontidao do supervisor. RESOLVIDO 19/10: na VM, venv_ok em grokbox-common.sh (linha 143, recarregado pelo supervisor a cada checagem) passou a rodar o import com DARKFAC_WORKER_STATE_DIR=\"$(mktemp -d)\"; comando de inicio do worker inalterado, bash -n ok, /health busy=false com o mesmo instance_id, backup grokbox-common.sh.bak-20261019. Correcao definitiva no codigo protegido segue no USR-317.",
       "blocks": [
         "USR-270"
       ],
       "depends_on": [],
       "steps": [
         {
-          "text": "FEITO: diagnostico somente leitura do grokbot (/workspace/darkfac/diag-sigterm-2026-10-19.md)."
+          "text": "FEITO: causa na suite corrigida (PR #444) e portao pelo worker do grokbox verde na segunda tentativa."
         },
         {
-          "text": "Abra o chat do Grok Chief of Staff e envie a mensagem preparada pelo Claude Code no chat de 19/10 (variaveis do worker, pacotes do .venv instalados por volta de 22:50, e replay do job sob strace com o worker ocioso). Cole a resposta no chat do Claude Code."
+          "text": "FEITO: Peca ao Grok Chief of Staff que, no grokbox-common.sh (funcao venv_ok), rode a checagem de prontidao com DARKFAC_WORKER_STATE_DIR apontando para uma pasta temporaria, sem mudar o comando que inicia o worker, e confirme /health com busy=false.",
+          "command": "DARKFAC_WORKER_STATE_DIR=\"$(mktemp -d)\" /workspace/darkfac/DarkFactory/.venv/bin/python -c \"import fastapi, uvicorn, pydantic, core.harness.remote_worker\""
         },
         {
-          "text": "Com a resposta, o agente identifica o emissor, corrige (ticket ou ajuste no worker) e roda o portao de prova so no grokbox.",
-          "command": "Invoke-RestMethod http://100.77.130.5:8080/health -TimeoutSec 15 | Select-Object git_sha, busy"
+          "text": "FEITO: Cole a confirmacao no chat do Claude Code; o agente marca esta acao como feita. A correcao definitiva no codigo protegido fica no USR-317."
         }
       ],
       "verify": "Um portao 'runner.py --quick --no-cache --remote-required' so no grokbox termina com [HARNESS_PASS] e [TEST_COUNT] positivo, sem [WORKER worker_signal_killed].",
       "created_at": "2026-10-19T05:44:04Z",
       "created_by": "claude-code",
-      "resolved_at": null
+      "resolved_at": "2026-10-19T13:35:53Z"
     }
   ]
 }
