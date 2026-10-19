@@ -57,6 +57,9 @@ _POLICY_BLOCK_MARKER = "base branch policy prohibits"
 
 # Re-syncs (and CI re-runs) attempted when `gh pr merge` reports the PR as not mergeable (USR-238).
 _MERGE_RESYNC_ATTEMPTS = 3
+# Confirming the merge sha on origin/base: fetch can fail or lag right after GitHub reports MERGED.
+_MERGE_CONFIRM_ATTEMPTS = 4
+_MERGE_CONFIRM_DELAY_S = 5.0
 
 
 def _is_unmergeable(text: str) -> bool:
@@ -1163,8 +1166,16 @@ class GitAutonomyManager:
             )
 
         # (g) confirm merge sha reached origin/base
-        _run_git(["fetch", "origin"], cwd=cwd)
-        if not merge_sha or _run_git(["merge-base", "--is-ancestor", merge_sha, remote_ref], cwd=cwd).returncode != 0:
+        # GitHub already reports MERGED: a failed or not-yet-propagated fetch must not turn into a false error.
+        reached = False
+        for attempt in range(_MERGE_CONFIRM_ATTEMPTS):
+            _run_git(["fetch", "origin"], cwd=cwd)
+            if merge_sha and _run_git(["merge-base", "--is-ancestor", merge_sha, remote_ref], cwd=cwd).returncode == 0:
+                reached = True
+                break
+            if attempt + 1 < _MERGE_CONFIRM_ATTEMPTS:
+                (self.ci_sleep_fn or time.sleep)(_MERGE_CONFIRM_DELAY_S)
+        if not reached:
             return DeliveryReport(
                 ok=False, action="error", pr_url=pr_url, branch=branch, merge_sha=merge_sha,
                 message=f"merge commit {merge_sha} not found in {remote_ref}",
