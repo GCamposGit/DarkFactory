@@ -1083,6 +1083,8 @@ class GitAutonomyManager:
                                       message=f"Could not label {kind} PR: {label.stderr.strip()}")
 
         self._phase("pr", "succeeded", pr_url)
+        if kind == "implementation":
+            self._register_catalog(ticket_id, title, cwd, base, pr_url)
         if not merge:
             return DeliveryReport(
                 ok=True,
@@ -1176,6 +1178,28 @@ class GitAutonomyManager:
             ok=True, action="merged", pr_url=pr_url, merge_sha=merge_sha, cleaned=cleaned, branch=branch,
             message=f"PR {pr_url} merged into {base}. {gate_note}",
         )
+
+    def _register_catalog(self, ticket_id: str, title: str, cwd: Path, base: str, pr_url: str) -> None:
+        """Best-effort cross-project catalog/evolution registration (USR-220).
+
+        Writes only to git-ignored runtime state, so it never adds files to the PR. Any failure is
+        logged and swallowed: it must not change the delivery outcome.
+        """
+        try:
+            from core.catalog.delivery import read_from_worktree, register_delivery
+
+            res = _run_git(["diff", "--name-status", "--no-renames", f"origin/{base}...HEAD"], cwd=cwd)
+            if res.returncode != 0:
+                return
+            changes = [(parts[0], parts[-1]) for parts in (ln.split(chr(9)) for ln in res.stdout.splitlines()) if len(parts) >= 2]
+            tags: list[str] = []
+            ledger = cwd / _LEDGER_RELATIVE
+            if ledger.is_file():
+                ticket = DemandsStore(ledger).get_ticket(ticket_id)
+                tags = list(ticket.tags) if ticket else []
+            register_delivery(ticket_id, title, changes, read_from_worktree(cwd), tags, pr_url, push=True)
+        except Exception as exc:  # noqa: BLE001 - advisory only
+            logger.warning("catalog registration failed for %s: %s", ticket_id, exc)
 
     def _cleanup(self, branch: str, base: str, cwd: Path) -> bool:
         """Prune, fast-forward the main checkout, delete local branch, remove secondary worktree."""

@@ -41,6 +41,9 @@
     "GET /api/catalog/components": {
       "surface": "cross-catalog-section"
     },
+    "POST /api/catalog/delivery-sync": {
+      "machine": "Registro de componentes e evolucoes entregues, enviado pela estacao local apos cada entrega (chave compartilhada)"
+    },
     "POST /api/catalog/sync": {
       "surface": "cross-catalog-section"
     },
