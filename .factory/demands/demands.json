@@ -9068,8 +9068,8 @@
     "project_id": "darkfac",
     "title": "Publicacao de arquivo protegido por push direto na main pula o CI e deixou a main vermelha (32fd792)",
     "origin": "agent",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "66c368f174da0f12aae89eb1d0d2806828c4fd09",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -9086,9 +9086,9 @@
     ],
     "reachability_contract": "",
     "acceptance_criteria": [
-      "O runbook/OA de publicacao protegida manda primeiro push numa branch owner/* com PR para o CI rodar (pr-validation Linux e Windows), e so depois o push direto na main, com o mesmo SHA.",
-      "O gerador de OA de publicacao protegida (owner_action/autonomy) inclui esse passo e o comando gh pr checks para conferir o CI verde antes do push na main.",
-      "Teste cobre o texto/passos gerados para uma OA de publicacao protegida."
+      "O runbook/OA de publicacao protegida exige, ANTES do push direto na main, rodar o portao oficial completo no commit candidato exato (python C:\\dev\\DarkFac\\core\\harness\\runner.py --quick) e so publicar se a saida contiver [HARNESS_PASS]; lista antes os guardas rapidos (test_clock_bomb_guard, test_hub_coverage, test_safe_git_state, test_harness_contract). Nunca trocar o portao completo por testes focados.",
+      "Depois do push, os passos mandam conferir o CI da main (gh run list --branch main --limit 3 / gh run watch) e, se vermelho, o agente abre o hotfix (o owner nao corrige). Criterio original de branch owner/* com PR foi revisto: o trusted-pr-policy reprova esse PR sem rodar testes.",
+      "Teste cobre os passos gerados (portao antes do push, checagem de CI presente)."
     ],
     "suggested_files": [
       "docs/runbooks/",
@@ -9098,7 +9098,7 @@
     "estimated_complexity": "low",
     "dependencies": [],
     "created_at": "2026-10-18T11:53:17.759154Z",
-    "updated_at": "2026-10-18T11:53:17.759154Z"
+    "updated_at": "2026-10-19T15:13:49.856423Z"
   },
   {
     "id": "USR-311",
@@ -9211,8 +9211,8 @@
     "project_id": "darkfac",
     "title": "Supervisor do grokbox nao recarrega o worker ocioso quando o HEAD muda e nao esta versionado no repositorio",
     "origin": "agent",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "5de6a9c697c2a393d494b64396a693b587069378",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -9241,7 +9241,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-18T20:25:34.048076Z",
-    "updated_at": "2026-10-18T20:25:34.048076Z"
+    "updated_at": "2026-10-19T15:15:18.098069Z"
   },
   {
     "id": "USR-316",

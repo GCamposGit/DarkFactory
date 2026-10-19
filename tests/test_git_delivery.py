@@ -218,6 +218,50 @@ def test_sweep_removes_only_merged(env: tuple[Path, Path, FakeGh]) -> None:
     assert _git(local, "branch", "--list", "ticket/unmerged")
 
 
+class LaggingGh(FakeGh):
+    """GitHub reports MERGED before origin/main shows the merge commit (propagation lag)."""
+
+    def __init__(self, bare: Path) -> None:
+        super().__init__(bare)
+        self.pending_sha: str | None = None
+
+    def __call__(self, args: Sequence[str], cwd: Path) -> subprocess.CompletedProcess[str]:
+        a = list(args)
+        if a[:2] != ["pr", "merge"]:
+            return super().__call__(a, cwd)
+        self.calls.append(a)
+        p = self.prs[int(a[2])]
+        sha = self._bare("rev-parse", f"refs/heads/{p['head']}").stdout.strip()
+        p.update(state="MERGED", oid=sha, tip=sha)
+        self.pending_sha = sha
+        return subprocess.CompletedProcess(a, 0, "", "")
+
+    def propagate(self, _delay: float) -> None:
+        if self.pending_sha:
+            self._bare("update-ref", "refs/heads/main", self.pending_sha)
+            self.pending_sha = None
+
+
+def test_merge_confirmation_retries_fetch_until_origin_shows_merge(env: tuple[Path, Path, FakeGh]) -> None:
+    local, bare, _ = env
+    gh = LaggingGh(bare)
+    (local / "lag.py").write_text("x = 1\n", encoding="utf-8")
+    manager = GitAutonomyManager(local, ci_sleep_fn=gh.propagate)
+    rep = manager.deliver_branch("USR-79", "Lag", cwd=local, gh_runner=gh)
+    assert rep.ok and rep.action == "merged", rep.message
+
+
+def test_merge_confirmation_still_fails_when_merge_never_reaches_origin(env: tuple[Path, Path, FakeGh]) -> None:
+    local, bare, _ = env
+    gh = LaggingGh(bare)
+    sleeps: list[float] = []
+    (local / "never.py").write_text("x = 1\n", encoding="utf-8")
+    manager = GitAutonomyManager(local, ci_sleep_fn=sleeps.append)
+    rep = manager.deliver_branch("USR-80", "Never", cwd=local, gh_runner=gh)
+    assert not rep.ok and "not found in" in rep.message
+    assert len(sleeps) >= 3
+
+
 def _seed_ticket(local: Path, ticket_id: str) -> None:
     (local / ".factory" / "demands").mkdir(parents=True)
     DemandsStore(local / ".factory" / "demands" / "demands.json").save_ticket(
