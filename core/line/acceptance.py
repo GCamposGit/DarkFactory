@@ -19,8 +19,9 @@ import json
 import logging
 import os
 import sys
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
+from urllib.parse import quote
 from typing import Any
 
 from pydantic import BaseModel, Field
@@ -96,7 +97,14 @@ def verify_v1(store: Any | None = None) -> CriterionResult:
                     title=title,
                     verified=True,
                     evidence=f"Run {run_id} entregue autonomamente: {evidence}",
-                    details={"run_id": run_id, "delivery_evidence": evidence},
+                    details={
+                        "run_id": run_id,
+                        "delivery_evidence": evidence,
+                        "proof_run_id": run_id,
+                        "proof_url": live_run_url(run_id),
+                        "missing": "",
+                        "next_step": "",
+                    },
                 )
 
         # Fallback contract check: check if the line stages exist and are wired
@@ -110,7 +118,7 @@ def verify_v1(store: Any | None = None) -> CriterionResult:
                 title=title,
                 verified=False,
                 evidence="Pipeline integro, aguardando execucao de run real entregue no control store",
-                details={"stages_wired": expected_stages},
+                details={"stages_wired": expected_stages, **_v1_pending_guidance()},
             )
     except Exception as exc:
         logger.warning("Error checking V1 acceptance: %s", exc)
@@ -120,19 +128,166 @@ def verify_v1(store: Any | None = None) -> CriterionResult:
         title=title,
         verified=False,
         evidence="Nenhum run entregue de ponta a ponta verificado no control store",
-        details={},
+        details=_v1_pending_guidance(),
     )
 
 
-def verify_v2(reports_dir: Path | None = None, min_streak: int = 7) -> CriterionResult:
-    """V2: Canary streak meets the required threshold (default 7 consecutive days)."""
+def live_run_url(run_id: str) -> str:
+    """Deep link to a run on the live line board (Esteira ao vivo)."""
+    return f"/live.html?run={quote(run_id, safe='')}"
+
+
+def _v1_pending_guidance() -> dict[str, str]:
+    return {
+        "missing": "Nenhuma demanda real foi entregue de ponta a ponta pela linha ainda.",
+        "next_step": (
+            "Passe uma demanda real (ticket do backlog) pelas etapas intake, grill, planning, "
+            "development, validation, review e release sem intervencao humana alem do intake/grill; "
+            "ex.: python C:\\dev\\DarkFac\\run_ticket.py <ID_DO_TICKET>."
+        ),
+    }
+
+
+class CanaryDay(BaseModel):
+    """One calendar day of the daily canary, aggregated from control-store runs."""
+
+    day: date
+    green: bool
+    run_id: str | None = None
+
+
+def _parse_run_day(value: Any) -> date | None:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        parsed = value
+    else:
+        text = str(value).strip()
+        if not text:
+            return None
+        if text[-1] in "Zz":
+            text = text[:-1] + "+00:00"
+        try:
+            parsed = datetime.fromisoformat(text)
+        except ValueError:
+            return None
+    if parsed.tzinfo is not None:
+        parsed = parsed.astimezone(UTC)
+    return parsed.date()
+
+
+def load_canary_days_from_store(store: Any, *, limit: int = 120) -> list[CanaryDay]:
+    """Canary days read (read-only) from the control store: the same source as the live board.
+
+    A day is green when at least one of its canary runs (project `darkfac-canary`) delivered
+    every required stage (`run_state == "succeeded"`).
+    """
+    from core.line.canary import CANARY_PROJECT_ID
+
+    conn = getattr(store, "_connect", None)
+    if conn is None:
+        raise RuntimeError("control store sem acesso de leitura aos runs")
+    with conn() as c:
+        rows = c.execute(
+            f"SELECT run_id, created_at FROM runs WHERE project_id = '{CANARY_PROJECT_ID}' "
+            f"ORDER BY created_at DESC LIMIT {int(limit)}"
+        ).fetchall()
+    by_day: dict[date, CanaryDay] = {}
+    for row in rows:
+        run_id, created_at = row[0], row[1]
+        day = _parse_run_day(created_at)
+        if day is None or not run_id:
+            continue
+        ok = run_state(store, run_id) == "succeeded"
+        current = by_day.get(day)
+        if current is None or (ok and not current.green):
+            by_day[day] = CanaryDay(day=day, green=ok, run_id=run_id)
+    return sorted(by_day.values(), key=lambda d: d.day)
+
+
+def canary_streak_from_days(days: list[CanaryDay], now: datetime | None = None) -> int:
+    """Consecutive green days ending at the latest day; a gap before `now` (> 1 day) resets it."""
+    if not days:
+        return 0
+    today = (now or datetime.now(UTC)).astimezone(UTC).date()
+    ordered = sorted(days, key=lambda d: d.day)
+    if ordered[-1].day < today - timedelta(days=1):
+        return 0
+    streak = 0
+    expected: date | None = None
+    for day in reversed(ordered):
+        if expected is not None and day.day != expected:
+            break
+        if not day.green:
+            break
+        streak += 1
+        expected = day.day - timedelta(days=1)
+    return streak
+
+
+def _fmt_day(day: date) -> str:
+    return day.strftime("%d/%m")
+
+
+def _v2_guidance(days: list[CanaryDay], streak: int, min_streak: int, today: date) -> dict[str, str]:
+    remaining = max(min_streak - streak, 0)
+    if remaining == 0:
+        return {"missing": "", "next_step": ""}
+    plural = "dia verde" if remaining == 1 else "dias verdes"
+    latest = days[-1] if days else None
+    next_check = today + timedelta(days=1) if latest is not None and latest.day >= today else today
+    if latest is None:
+        missing = f"Faltam {remaining} {plural}: nenhum canario registrado ainda."
+    elif streak == 0:
+        missing = f"Faltam {remaining} {plural}: o ultimo canario ({_fmt_day(latest.day)}) nao fechou verde."
+    else:
+        missing = f"Faltam {remaining} {plural} seguidos (streak atual {streak}/{min_streak})."
+    return {
+        "missing": missing,
+        "next_step": (
+            f"Nada a fazer manualmente: o canario roda sozinho todo dia; proxima verificacao {_fmt_day(next_check)}. "
+            "Se falhar, a falha vira ticket e o streak recomeca."
+        ),
+    }
+
+
+def verify_v2(
+    reports_dir: Path | None = None,
+    min_streak: int = 7,
+    *,
+    store: Any | None = None,
+    now: datetime | None = None,
+    days: list[CanaryDay] | None = None,
+) -> CriterionResult:
+    """V2: Canary streak meets the required threshold (default 7 consecutive days).
+
+    Source of the streak: the canary runs in the control store (`store`, or pre-loaded `days`),
+    the same source as the live board. Without either, the local canary report files are used.
+    """
     title = f"Canario diario E2E com streak >= {min_streak} dias verdes"
-    target_dir = reports_dir or REPORTS_DIR
     try:
-        reports = load_reports(target_dir, limit=min_streak + 2)
-        streak = green_streak(reports)
+        if days is not None or store is not None:
+            loaded = days if days is not None else load_canary_days_from_store(store)
+            moment = (now or datetime.now(UTC)).astimezone(UTC)
+            streak = canary_streak_from_days(loaded, moment)
+            last_date = loaded[-1].day.isoformat() if loaded else None
+            source = "control_store"
+            guidance = _v2_guidance(loaded, streak, min_streak, moment.date())
+        else:
+            target_dir = reports_dir or REPORTS_DIR
+            reports = load_reports(target_dir, limit=min_streak + 2)
+            streak = green_streak(reports)
+            last_date = getattr(reports[-1], "date", None) if reports else None
+            source = "report_files"
+            guidance = (
+                {"missing": "", "next_step": ""}
+                if streak >= min_streak
+                else {
+                    "missing": f"Faltam {min_streak - streak} dias verdes.",
+                    "next_step": "Nada a fazer manualmente: o canario roda sozinho todo dia.",
+                }
+            )
         verified = streak >= min_streak
-        last_date = getattr(reports[-1], "date", None) if reports else None
         evidence = (
             f"Streak de {streak} dias consecutivos verdes atinge a meta ({min_streak})"
             if verified
@@ -143,7 +298,13 @@ def verify_v2(reports_dir: Path | None = None, min_streak: int = 7) -> Criterion
             title=title,
             verified=verified,
             evidence=evidence,
-            details={"streak": streak, "min_streak": min_streak, "last_date": last_date},
+            details={
+                "streak": streak,
+                "min_streak": min_streak,
+                "last_date": last_date,
+                "source": source,
+                **guidance,
+            },
         )
     except Exception as exc:
         return CriterionResult(
@@ -151,7 +312,10 @@ def verify_v2(reports_dir: Path | None = None, min_streak: int = 7) -> Criterion
             title=title,
             verified=False,
             evidence=f"Falha ao inspecionar relatorios do canario: {exc}",
-            details={},
+            details={
+                "missing": "Nao foi possivel ler o historico do canario.",
+                "next_step": "Verifique a conexao do Hub com o control store (Postgres) e recarregue.",
+            },
         )
 
 
@@ -238,7 +402,7 @@ def run_acceptance_verification(
         c1.verified = v1_override
         c1.evidence = f"[override={v1_override}] {c1.evidence}"
 
-    c2 = verify_v2(reports_dir=reports_dir, min_streak=min_streak)
+    c2 = verify_v2(reports_dir=reports_dir, min_streak=min_streak, store=store if reports_dir is None else None)
     if v2_override is not None:
         c2.verified = v2_override
         c2.evidence = f"[override={v2_override}] {c2.evidence}"

@@ -200,3 +200,129 @@ def test_api_get_line_status() -> None:
     assert "active_runs_count" in data
     assert "nodes" in data
     assert "generated_at" in data
+
+
+# --- USR-215: V2 streak from the control store + guidance for pending criteria ---------------
+
+
+class _FakeCanaryStore:
+    """Read-only control store double: canary runs per day and their job outcomes."""
+
+    def __init__(self, days: dict[str, bool], now: datetime) -> None:
+        from core.line.bindings import LINE_STAGES
+
+        self._stages = [s for s in LINE_STAGES if s != "retrospective"]
+        self._green: dict[str, bool] = {}
+        self._rows: list[tuple[str, str]] = []
+        for key, green in days.items():
+            run_id = f"run-{key}"
+            self._green[run_id] = green
+            self._rows.append((run_id, f"{key}T06:00:00+00:00"))
+
+    def _connect(self):  # noqa: ANN202
+        rows = sorted(self._rows, key=lambda r: r[1], reverse=True)
+
+        class _Cur:
+            def fetchall(self_inner):  # noqa: ANN001, ANN202
+                return rows
+
+        class _Conn:
+            def __enter__(self_inner):  # noqa: ANN001, ANN202
+                return self_inner
+
+            def __exit__(self_inner, *a):  # noqa: ANN001, ANN002, ANN202
+                return False
+
+            def execute(self_inner, sql, params=()):  # noqa: ANN001, ANN202
+                assert "darkfac-canary" in sql
+                return _Cur()
+
+        return _Conn()
+
+    def get_run_status(self, run_id: str):  # noqa: ANN201
+        stages = self._stages if self._green[run_id] else self._stages[:2]
+        status = "succeeded"
+        jobs = [{"stage": s, "status": status} for s in stages]
+        if not self._green[run_id]:
+            jobs.append({"stage": "validation", "status": "failed"})
+        return {"status": "completed", "jobs": jobs}
+
+
+def _utc(y: int, m: int, d: int, h: int = 12) -> datetime:
+    return datetime(y, m, d, h, tzinfo=UTC)
+
+
+def test_verify_v2_streak_from_control_store_history() -> None:
+    now = _utc(2026, 10, 11)
+    # 04 green; 04-05 failures (04 also has a failed retry, 05 only failed); 06-10 green
+    store = _FakeCanaryStore(
+        {
+            "2026-10-04": True,
+            "2026-10-05": False,
+            "2026-10-06": True,
+            "2026-10-07": True,
+            "2026-10-08": True,
+            "2026-10-09": True,
+            "2026-10-10": True,
+        },
+        now,
+    )
+    result = verify_v2(store=store, now=now, min_streak=7)
+    assert result.verified is False
+    assert result.details["streak"] == 5
+    assert result.details["source"] == "control_store"
+    assert "Faltam 2 dias verdes" in result.details["missing"]
+    assert "11/10" in result.details["next_step"]
+
+
+def test_verify_v2_control_store_streak_resets_after_gap_and_reaches_target() -> None:
+    stale = _FakeCanaryStore({"2026-10-01": True, "2026-10-02": True}, _utc(2026, 10, 9))
+    assert verify_v2(store=stale, now=_utc(2026, 10, 9)).details["streak"] == 0
+
+    days = {f"2026-10-{d:02d}": True for d in range(4, 11)}
+    done = verify_v2(store=_FakeCanaryStore(days, _utc(2026, 10, 11)), now=_utc(2026, 10, 11))
+    assert done.verified is True
+    assert done.details["streak"] == 7
+    assert done.details["missing"] == ""
+
+
+def test_verify_v1_pending_explains_next_step() -> None:
+    result = verify_v1(store=_EmptyStore())
+    assert result.verified is False
+    assert "intake" in result.details["next_step"] and "release" in result.details["next_step"]
+    assert result.details["missing"]
+
+
+class _EmptyStore:
+    def find_intake_runs(self, *args, **kwargs):  # noqa: ANN002, ANN003, ANN201
+        return []
+
+
+def test_verify_v1_proof_links_to_live_board(tmp_path: Path) -> None:
+    demands = DemandsStore(tmp_path / "demands.json")
+    demands.save_ticket(_fake_ticket("USR-98"))
+    store = SQLiteControlStore(db_path=tmp_path / "control.db")
+    sub = submit_ticket_to_line("USR-98", demands_store=demands, store=store)
+    from core.line.bindings import LINE_STAGES
+
+    with store._connect() as conn:
+        conn.execute("UPDATE jobs SET status = 'succeeded' WHERE run_id = ?", (sub.run_id,))
+        for stage in LINE_STAGES:
+            if stage in ("grill", "retrospective"):
+                continue
+            conn.execute(
+                """
+                INSERT OR REPLACE INTO jobs (
+                    run_id, ticket_id, plan_version, stage, iteration, status,
+                    role, required_capabilities, fencing_token, timeout_seconds,
+                    retry_count, max_retries, actual_cost, output_refs, evidence_refs,
+                    created_at, updated_at, ready_at
+                ) VALUES (?, ?, '1.0', ?, 0, 'succeeded', 'worker', '[]', 0, 1800, 0, 3, 0.0, '[]', '[]',
+                    '2026-10-01T00:00:00Z', '2026-10-01T00:00:00Z', '2026-10-01T00:00:00Z')
+                """,
+                (sub.run_id, "USR-98", stage),
+            )
+        conn.commit()
+    result = verify_v1(store=store)
+    assert result.verified is True
+    assert result.details["proof_url"] == f"/live.html?run={sub.run_id}"
