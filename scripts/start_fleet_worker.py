@@ -37,6 +37,8 @@ from pydantic import BaseModel, Field
 logger = logging.getLogger("darkfac.fleet_worker")
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
 _PIDS_DIR = _REPO_ROOT / ".factory" / "pids"
 _FLEET_CONFIG_PATH = _REPO_ROOT / ".factory" / "config" / "line_fleet.json"
 
