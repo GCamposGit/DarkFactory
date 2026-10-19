@@ -357,8 +357,14 @@ class HubService:
         else:
             self.usage_dir = state_root() / "usage"
         self.model_usage_ledger = ModelUsageLedger(self.usage_dir)
-        self.account_usage_monitor = AccountUsageMonitor(self.usage_dir / "providers")
-        self.api_credits_monitor = ApiCreditsMonitor(self.usage_dir / "credits")
+        # USR-232: on the VPS the synced snapshots live in an explicit named-volume directory and the
+        # off-VPS providers are read from them only (never probed). Unset keeps the local behaviour.
+        snapshot_root_env = os.environ.get("DARKHUB_USAGE_SNAPSHOT_DIR", "").strip()
+        snapshot_root = Path(snapshot_root_env) if snapshot_root_env and usage_dir is None else self.usage_dir
+        self.account_usage_monitor = AccountUsageMonitor(
+            snapshot_root / "providers", synced_only=bool(snapshot_root_env) and usage_dir is None
+        )
+        self.api_credits_monitor = ApiCreditsMonitor(snapshot_root / "credits")
         from core.telemetry.store import TelemetryStore
         self.telemetry_store = TelemetryStore(self.usage_dir.parent / "telemetry.db")
         try:
