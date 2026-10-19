@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 from typing import Any, List, Optional
 from pydantic import BaseModel, ConfigDict, Field
 
+from core.infra.node_liveness import WORKER_NODE_IDS, get_node_liveness
 from core.infra.models import (
     InfraInventory,
     InfraNode,
@@ -65,6 +66,7 @@ class InfraCard(BaseModel):
     provider: str = Field(description="Provider or datacenter location")
     status: NodeStatus = Field(default=NodeStatus.ACTIVE)
     is_live_reachable: Optional[bool] = Field(default=None, description="Result of live network/liveness probe")
+    liveness_status: Optional[str] = Field(default=None, description="online, online_busy or offline (shared /health liveness, USR-217)")
     hardware_summary: Optional[str] = Field(default=None, description="Compact hardware specs")
     network_summary: dict[str, Any] = Field(default_factory=dict, description="IPs, mesh and ingress specs")
     services: List[InfraServiceSummary] = Field(default_factory=list)
@@ -363,7 +365,15 @@ def build_infra_cards_report(
         )
 
         if probe_network_liveness:
-            card.is_live_reachable = probe_liveness(card, timeout=probe_timeout)
+            primary = next((l for l in card.links if l.is_primary), None)
+            is_local = bool(primary and primary.url.startswith(("http://localhost", "http://127.0.0.1")))
+            if node.id in WORKER_NODE_IDS and not is_local:
+                # Same /health liveness as /api/harness/workers and /api/infra/metrics (USR-217).
+                live = get_node_liveness(node.id)
+                card.is_live_reachable = live.is_live
+                card.liveness_status = live.status
+            else:
+                card.is_live_reachable = probe_liveness(card, timeout=probe_timeout)
         else:
             # Default to active status if not probing
             card.is_live_reachable = (node.status == NodeStatus.ACTIVE)

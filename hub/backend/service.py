@@ -2684,59 +2684,41 @@ class HubService:
     # ---------------------------------------------------------------------------
 
     def get_test_workers_status(self) -> List[Dict[str, Any]]:
-        """Probes known test worker nodes (e.g. desktop-g45ipem on Tailscale) and returns status."""
-        workers = [
-            {
-                "id": "grokbox-test-worker",
-                "name": "Remote Test Worker (grokbox, Linux)",
-                "url": "http://100.77.130.5:8080",
-                "ip": "100.77.130.5",
-                "port": 8080,
-                "role": "remote_test_worker",
-                "description": "Official gate worker (first in DARKFAC_TEST_WORKERS), Linux VM via Tailscale DERP relay; gate in ~143 s",
-            },
-            {
-                "id": "onprem-z97-server",
-                "name": "Dedicated Test Worker (desktop-g45ipem)",
-                "url": "http://100.78.181.90:8080",
-                "ip": "100.78.181.90",
-                "port": 8080,
-                "role": "onprem_worker",
-                "description": "Dedicated i7-4790K / 16GB / 3TB E: on-premises validation node via Tailscale",
-            },
-            {
-                "id": "local-notebook",
-                "name": "Local Workstation Runner",
-                "url": os.environ.get("LOCAL_NOTEBOOK_WORKER_URL", "http://100.81.84.124:8080"),
-                "ip": "100.81.84.124",
-                "port": 8080,
-                "role": "local_worker",
-                "description": "Interactive developer laptop local test engine via Tailscale",
-            },
+        """Probes known test worker nodes via the shared liveness service (USR-217)."""
+        from core.infra.node_liveness import get_node_liveness, worker_nodes
+
+        meta = [
+            ("grokbox-test-worker", "grokbox-test-worker", "Remote Test Worker (grokbox, Linux)", "remote_test_worker",
+             "Official gate worker (first in DARKFAC_TEST_WORKERS), Linux VM via Tailscale DERP relay; gate in ~143 s"),
+            ("onprem-z97-server", "onprem-z97-server", "Dedicated Test Worker (desktop-g45ipem)", "onprem_worker",
+             "Dedicated i7-4790K / 16GB / 3TB E: on-premises validation node via Tailscale"),
+            ("predator-neo-16", "local-notebook", "Local Workstation Runner", "local_worker",
+             "Interactive developer laptop local test engine via Tailscale"),
         ]
-
-        engine = TestSubagentEngine(project_root=self.project_root)
+        nodes = worker_nodes()
         results = []
-
-        for w in workers:
-            w_info = dict(w)
-            start_t = time.perf_counter()
-            health = engine.probe_remote_worker(w["url"], timeout=0.8 if w["id"] != "grokbox-test-worker" else 3.0)
-            latency_ms = round((time.perf_counter() - start_t) * 1000, 1)
-
-            if health:
-                w_info["status"] = "online"
-                w_info["healthy"] = True
-                w_info["latency_ms"] = latency_ms
-                w_info["details"] = health
-            else:
-                w_info["status"] = "offline"
-                w_info["healthy"] = False
-                w_info["latency_ms"] = None
-                w_info["details"] = None
-
-            results.append(w_info)
-
+        for node_id, worker_id, name, role, description in meta:
+            spec = nodes.get(node_id, {})
+            url = spec.get("url", "")
+            if node_id == "predator-neo-16":
+                url = os.environ.get("LOCAL_NOTEBOOK_WORKER_URL", url)
+            live = get_node_liveness(node_id, url=url or None)
+            results.append({
+                "id": worker_id,
+                "node_id": node_id,
+                "name": name,
+                "url": live.url,
+                "ip": spec.get("ip"),
+                "port": spec.get("port"),
+                "role": role,
+                "description": description,
+                "status": live.status,
+                "healthy": live.is_live,
+                "busy": live.busy,
+                "latency_ms": live.latency_ms,
+                "last_contact_at": live.last_contact_at.isoformat() if live.last_contact_at else None,
+                "details": live.details,
+            })
         return results
 
     def execute_test_run(self, instruction: TestExecutionInstruction) -> DistilledTestReport:

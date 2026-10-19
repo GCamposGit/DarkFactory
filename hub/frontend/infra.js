@@ -371,6 +371,8 @@ function renderInfraMetrics(data) {
     warning: "border-amber-600/60 bg-amber-950/40 text-amber-300",
     critical: "border-rose-600/60 bg-rose-950/40 text-rose-300",
     degraded: "border-orange-600/60 bg-orange-950/40 text-orange-300",
+    online: "border-emerald-600/60 bg-emerald-950/40 text-emerald-300",
+    online_busy: "border-amber-600/60 bg-amber-950/40 text-amber-300",
     offline: "border-slate-600/60 bg-slate-900/70 text-slate-300",
     no_recent_data: "border-slate-600/60 bg-slate-900/70 text-slate-300",
   };
@@ -402,10 +404,11 @@ function renderInfraMetrics(data) {
   const renderHardwareNode = (node, label) => {
     const noRecent = node.status === "no_recent_data";
     const nodeHw = noRecent ? null : node.hardware;
-    const isOnline = Boolean(node.is_live && nodeHw);
-    const nodeStatus = node.status || (isOnline ? "healthy" : "offline");
-    const statusText = noRecent ? "Sem dado recente" : nodeStatus;
-    const offlineDetail = noRecent ? "Sem dado recente deste nó" : `Sem leitura enquanto o ${label} está offline`;
+    const isLive = Boolean(node.is_live);
+    const isOnline = Boolean(isLive && nodeHw);
+    const nodeStatus = node.status || (isLive ? "healthy" : "offline");
+    const statusText = noRecent ? "Sem dado recente" : nodeStatus === "online_busy" ? "online - ocupado" : nodeStatus;
+    const offlineDetail = noRecent ? "Sem dado recente deste nó" : isLive ? `Nó online; sem telemetria de hardware do ${label}` : `Sem leitura enquanto o ${label} está offline`;
     const ageText = formatAge(node.last_contact_at || (nodeHw && nodeHw.collected_at));
     const nodeHealthClass = healthPills[nodeStatus] || healthPills.offline;
     const lastContact = formatLastContact(node.last_contact_at || (nodeHw && nodeHw.collected_at));
@@ -459,7 +462,7 @@ function renderInfraMetrics(data) {
           </div>
           <span class="rounded-full border px-2 py-0.5 text-[10px] font-mono ${nodeHealthClass}">${escapeHtml(statusText)}</span>
         </div>
-        ${isOnline ? `<p class="text-[10px] text-slate-500 font-mono">Último contato: ${lastContact}${ageText ? " (" + ageText + ")" : ""}</p>` : ""}
+        ${isLive ? `<p class="text-[10px] text-slate-500 font-mono">Último contato: ${lastContact}${ageText ? " (" + ageText + ")" : ""}</p>` : ""}
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">${metricCards}</div>
       </section>`;
   };
@@ -845,19 +848,21 @@ function renderN8nWorkflowsHealthCard(data, fetchedAt) {
 
 function renderHarnessWorkersHealthCard(data, fetchedAt) {
   const workers = Array.isArray(data) ? data : [];
-  const onlineCount = workers.filter((w) => w && (w.status === "online" || w.healthy === true)).length;
+  const isWorkerLive = (w) => !!(w && (w.status === "online" || w.status === "online_busy" || w.healthy === true));
+  const onlineCount = workers.filter(isWorkerLive).length;
   const state = workers.length === 0 ? "warn" : onlineCount === workers.length ? "ok" : onlineCount > 0 ? "warn" : "error";
   const rows = workers.length
     ? workers
         .map((w) => {
           const name = (w && (w.name || w.id)) || "—";
-          const online = !!(w && (w.status === "online" || w.healthy === true));
+          const online = isWorkerLive(w);
+          const busy = !!(w && (w.status === "online_busy" || w.busy === true));
           const latency = w && w.latency_ms;
           const caps = w && Array.isArray(w.capabilities) ? w.capabilities.join(", ") : "";
           return `<div class="border-b border-slate-900 pb-1 last:border-0 last:pb-0">
             <div class="flex items-center justify-between gap-2">
               <span class="truncate text-slate-200" title="${healthEscapeHtml((w && w.url) || "")}">${healthEscapeHtml(name)}</span>
-              <span class="${online ? "text-emerald-400" : "text-rose-400"} text-[10px] font-mono shrink-0">${online ? "online" : "offline"}</span>
+              <span class="${busy ? "text-amber-300" : online ? "text-emerald-400" : "text-rose-400"} text-[10px] font-mono shrink-0">${busy ? "online - ocupado" : online ? "online" : "offline"}</span>
             </div>
             <div class="text-[10px] text-slate-500 font-mono truncate">${latency !== undefined && latency !== null ? `${healthEscapeHtml(latency)} ms` : "—"}${caps ? ` · ${healthEscapeHtml(caps)}` : ""}</div>
           </div>`;

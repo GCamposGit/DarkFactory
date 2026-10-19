@@ -67,6 +67,7 @@ def _sample_hardware(node_id: str = "onprem-z97-server") -> HardwareMetrics:
 
 def _hardware_response(hardware: HardwareMetrics) -> MagicMock:
     response = MagicMock()
+    response.status = 200
     response.__enter__.return_value = response
     response.__exit__.return_value = None
     response.read.return_value = hardware.model_dump_json().encode("utf-8")
@@ -238,6 +239,9 @@ def test_collect_desktop_hardware_metrics_offline_keeps_last_contact(monkeypatch
         online = collect_desktop_hardware_node()
     assert online.last_contact_at is not None
 
+    from core.infra.node_liveness import clear_probe_cache
+
+    clear_probe_cache()  # the 2 s probe cache would otherwise replay the online answer
     with patch("core.infra.metrics.urllib.request.urlopen", side_effect=urllib.error.URLError("offline")):
         offline = collect_desktop_hardware_node()
 
