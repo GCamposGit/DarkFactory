@@ -14,7 +14,9 @@ Acceptance criteria:
 from __future__ import annotations
 
 import json
+import os
 import subprocess
+import sys
 from datetime import UTC, datetime
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -379,3 +381,25 @@ def test_fleet_worker_probe_database_sanitizes_credentials(monkeypatch: pytest.M
     assert secret_pw not in (inv.database_diagnostic or "")
     assert ":***@" in (inv.database_diagnostic or "")
 
+
+
+def test_probe_cli_runs_from_repo_root_without_module_not_found() -> None:
+    """O CLI `probe` executado como script não pode falhar com ModuleNotFoundError de `core`."""
+    repo_root = Path(__file__).resolve().parents[1]
+    script = repo_root / "scripts" / "start_fleet_worker.py"
+    env = {k: v for k, v in os.environ.items() if k != "PYTHONPATH"}
+
+    result = subprocess.run(
+        [sys.executable, str(script), "probe", "--host", "notebook", "--json"],
+        cwd=str(repo_root),
+        env=env,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        timeout=120,
+    )
+
+    combined = result.stdout + result.stderr
+    assert "ModuleNotFoundError" not in combined
+    payload = json.loads(result.stdout)
+    assert payload["host_id"] == "notebook"
