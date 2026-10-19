@@ -47,6 +47,8 @@ services:
       - DARKHUB_ENABLE_LOCAL_SERVICE_LAUNCH=${DARKHUB_ENABLE_LOCAL_SERVICE_LAUNCH:-false}
       - DARKHUB_SERVICE_URL_OVERRIDES=${DARKHUB_SERVICE_URL_OVERRIDES:-}
       - DATA_DIR=/app/hub/data
+      # USR-232: synced quota/credit snapshots (POST /api/usage/sync) live in the darkhub-hub-data volume
+      - DARKHUB_USAGE_SNAPSHOT_DIR=/app/hub/data/usage-snapshots
       - FACTORY_DIR=/app/.factory
       # Integrations (Telegram & n8n Community)
       - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}
