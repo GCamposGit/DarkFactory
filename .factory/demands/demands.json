@@ -7099,8 +7099,8 @@
     "project_id": "darkfac",
     "title": "USR-206 fatia 5: instalador idempotente da tarefa agendada DarkFac-Usage-Cloud-Sync apontando para C:/dev/DarkFac",
     "origin": "user",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "facd3c3e0977f0b235e0153c862ebebaef6a3700",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "later",
@@ -7128,7 +7128,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-11T20:27:26.753647Z",
-    "updated_at": "2026-10-11T20:27:26.753647Z"
+    "updated_at": "2026-10-19T04:58:38.570779Z"
   },
   {
     "id": "USR-239",
