@@ -9025,8 +9025,8 @@
     "project_id": "darkfac",
     "title": "E-mail ao grokbot: cliente do Worker darkfac-mailer e pre-flight que acorda o grokbox quando o worker de testes esta fora do ar",
     "origin": "user",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "11799576844d84b7f4f2a99d37c5e6b181fd7669",
     "item_type": "infrastructure",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -9061,7 +9061,7 @@
     "estimated_complexity": "low",
     "dependencies": [],
     "created_at": "2026-10-18T11:19:44.953004Z",
-    "updated_at": "2026-10-18T19:17:13.875299Z"
+    "updated_at": "2026-10-19T01:31:33.342457Z"
   },
   {
     "id": "USR-313",
