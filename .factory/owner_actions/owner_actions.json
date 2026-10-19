@@ -1499,6 +1499,34 @@
       "created_at": "2026-10-18T12:54:43Z",
       "created_by": "claude-code",
       "resolved_at": "2026-10-19T01:11:51Z"
+    },
+    {
+      "id": "OA-037",
+      "kind": "action",
+      "title": "Grokbox mata o pytest com SIGTERM no inicio de todo portao: identificar e desligar o emissor na VM",
+      "priority": "high",
+      "status": "open",
+      "why": "Em 19/10/2026 02:38-02:42 BRT, 3 jobs seguidos do portao no grokbox (worker em b68dfe4, com USR-298) morreram com SIGTERM (-15) logo no inicio do pytest xdist, com /health saudavel; nenhuma linha [SIGTERM_PROBE]. O USR-298 ja classifica isso como infraestrutura e reenvia, entao nao ha HARNESS_FAIL falso, mas o grokbox (host mais rapido, ~3 min) esta fora do rodizio: a fila roda so no Notebook e no Desktop. Hipotese nao comprovada: vigia de memoria da VM (earlyoom/systemd-oomd/watchdog do sandbox) com ~3,2 GiB livres. Pedido de diagnostico somente leitura ja enviado ao grokbot por e-mail (darkfac-mailer) em 19/10 02:50.",
+      "blocks": [
+        "USR-270"
+      ],
+      "depends_on": [],
+      "steps": [
+        {
+          "text": "Leia a resposta do grokbot (Chief of Staff) ao e-mail '[DarkFac] grokbox: SIGTERM mata o pytest no inicio do portao'. Se nao houver resposta, peca no chat do Chief of Staff que rode na VM, somente leitura: dmesg -T | tail -80 ; ps aux | grep -iE 'earlyoom|oomd|watchdog|supervisor' ; free -m ; cat /proc/pressure/memory."
+        },
+        {
+          "text": "Se aparecer earlyoom/systemd-oomd ou outro vigia matando o maior processo, peca ao Chief of Staff para excluir o worker de testes (python do /workspace/darkfac/DarkFactory) da lista de vitimas ou subir o limite, e reiniciar o worker so com /health busy=false."
+        },
+        {
+          "text": "Avise um agente (Claude Code): ele roda o portao de prova so no grokbox e devolve o grokbox ao rodizio.",
+          "command": "Invoke-RestMethod http://100.77.130.5:8080/health -TimeoutSec 15 | Select-Object git_sha, busy"
+        }
+      ],
+      "verify": "Um portao 'runner.py --quick --no-cache --remote-required' so no grokbox termina com [HARNESS_PASS] e [TEST_COUNT] positivo, sem [WORKER worker_signal_killed].",
+      "created_at": "2026-10-19T05:44:04Z",
+      "created_by": "claude-code",
+      "resolved_at": null
     }
   ]
 }
