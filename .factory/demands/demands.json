@@ -9242,5 +9242,40 @@
     "dependencies": [],
     "created_at": "2026-10-18T20:25:34.048076Z",
     "updated_at": "2026-10-18T20:25:34.048076Z"
+  },
+  {
+    "id": "USR-316",
+    "project_id": "darkfac",
+    "title": "Teste instavel tests/test_canary_first_run_fixes.py::test_bootstrap_codex_login_relays_code_before_the_process_exits sob carga no portao local",
+    "origin": "agent",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand",
+      "bug",
+      "flaky_test"
+    ],
+    "problem_statement": "Em 18-19/10/2026 o teste reprovou duas vezes no portao local do Notebook sob carga (xdist + outro portao): entrega do USR-312 (1o portao, 2 failed / 4416 passed, 2261 s) e do USR-216 (fallback local apos SIGTERM no grokbox, 4454 testes, lock_wait 1277 s). Isolado ele passa (7 passed em 18 s). Sem relacao com os diffs; derruba entregas de 40 min.",
+    "core_journey": [],
+    "non_goals": [
+      "Nao pular, xfail nem retry automatico.",
+      "Nao alterar timeouts de producao do bootstrap do canario."
+    ],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Causa da instabilidade identificada com evidencia (espera por tempo de parede, leitura de pipe com prazo fixo, ordem de threads).",
+      "Teste deterministico (relogio/espera injetados ou sincronizacao por evento), sem sleeps reais dependentes de carga.",
+      "20 execucoes seguidas no Windows sem falha, inclusive com 4 processos de carga em paralelo."
+    ],
+    "suggested_files": [
+      "tests/test_canary_first_run_fixes.py"
+    ],
+    "estimated_complexity": "low",
+    "dependencies": [],
+    "created_at": "2026-10-19T03:02:15.173183Z",
+    "updated_at": "2026-10-19T03:02:15.173183Z"
   }
 ]
