@@ -365,6 +365,9 @@
     "POST /api/usage/sync": {
       "machine": "Sincronização de cotas pela estação local via scripts/sync_usage_to_cloud.py"
     },
+    "GET /api/owner-actions/answers": {
+      "machine": "Decisões respondidas no Hub lidas pelo loop de scripts/sync_usage_to_cloud.py (chave de telemetria) para anotar o ticket no repositório"
+    },
     "GET /api/visual/gallery": {
       "surface": "content-studio-section"
     },

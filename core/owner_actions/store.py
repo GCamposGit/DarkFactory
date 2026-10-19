@@ -293,6 +293,13 @@ class OwnerActionStore:
         actions = self.load().actions
         return actions if include_done else [a for a in actions if a.status is not ActionStatus.DONE]
 
+    def answered_decisions(self) -> list[OwnerAction]:
+        """Decisions already answered in the effective backlog (feeds the repo sync, USR-195)."""
+        return [
+            a for a in self.load().actions
+            if a.kind is ActionKind.DECISION and a.status is ActionStatus.DONE and a.answer is not None
+        ]
+
     def get(self, action_id: str) -> OwnerAction | None:
         return next((a for a in self.load().actions if a.id == action_id), None)
 

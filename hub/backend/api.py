@@ -1251,6 +1251,20 @@ def sync_owner_action_endpoint(
     return {"id": action.id, "status": action.status.value}
 
 
+@router.get("/owner-actions/answers")
+def get_owner_action_answers_endpoint(
+    x_darkfac_telemetry_key: Optional[str] = Header(default=None, alias="X-DarkFac-Telemetry-Key"),
+    service: HubService = Depends(get_hub_service),
+) -> dict[str, Any]:
+    """Answered decisions (overlay included) so the Notebook can persist them in the repo (USR-195)."""
+    configured_key = (os.environ.get("DARKFAC_TELEMETRY_KEY") or "").strip()
+    if not configured_key:
+        raise HTTPException(status_code=503, detail="Owner action synchronization is disabled.")
+    if not x_darkfac_telemetry_key or not secrets.compare_digest(x_darkfac_telemetry_key, configured_key):
+        raise HTTPException(status_code=401, detail="Invalid telemetry key.")
+    return {"answers": [a.to_record() for a in service.owner_action_store.answered_decisions()]}
+
+
 @router.get("/owner-actions", response_model=OwnerActionsReport)
 def get_owner_actions_endpoint(
     include_done: bool = Query(default=False, description="Also list resolved items"),
