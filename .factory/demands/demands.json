@@ -9295,7 +9295,7 @@
       "grokbox",
       "protected-governance"
     ],
-    "problem_statement": "Em 19/10/2026 o portao no grokbox morreu com SIGTERM (-15) em 9 jobs de 4 candidatos (OA-037). A causa imediata, corrigida no PR #444 (374734a), foi a suite montar o JobManager sobre a pasta real de estado do worker; a recuperacao de jobs orfaos tratou o job vivo como morto e matou a arvore dele. A causa de fundo continua no codigo de producao: core/harness/remote_worker.py compara psutil.Process.create_time() com o horario gravado, com tolerancia de 2 s (_PROCESS_START_TOLERANCE_SEC, linhas ~448, ~483 e ~514). No Linux, create_time = boot_time + starttime, e o boot_time e recalculado depois de cada congelamento ou restauro da VM (o grokbox congela a cada 5 a 12 min). Com isso: _process_alive declara morto um processo vivo (a recuperacao pode matar um job vivo de outra instancia), e _ProcessTree pode ignorar a raiz real (o watchdog deixa de matar a arvore no timeout). core/harness/suite_lock.py (~272) usa o mesmo criterio com 5 s. core/harness e caminho protegido: a correcao precisa de commit do owner (patch em docs/proposals + OA).",
+    "problem_statement": "Em 19/10/2026 o portao no grokbox morreu com SIGTERM (-15) em 9 jobs de 4 candidatos (OA-037). A causa imediata, corrigida no PR #444 (374734a), foi a suite montar o JobManager sobre a pasta real de estado do worker; a recuperacao de jobs orfaos tratou o job vivo como morto e matou a arvore dele. A causa de fundo continua no codigo de producao: core/harness/remote_worker.py compara psutil.Process.create_time() com o horario gravado, com tolerancia de 2 s (_PROCESS_START_TOLERANCE_SEC, linhas ~448, ~483 e ~514). No Linux, create_time = boot_time + starttime, e o boot_time e recalculado depois de cada congelamento ou restauro da VM (o grokbox congela a cada 5 a 12 min). Com isso: _process_alive declara morto um processo vivo (a recuperacao pode matar um job vivo de outra instancia), e _ProcessTree pode ignorar a raiz real (o watchdog deixa de matar a arvore no timeout). core/harness/suite_lock.py (~272) usa o mesmo criterio com 5 s. core/harness e caminho protegido: a correcao precisa de commit do owner (patch em docs/proposals + OA).\n\nEvidencia adicional: 19/10 11:48 UTC: portao isolado no grokbox (candidato 08c00b6, ja com o #444). Tentativa 1 morreu com SIGTERM no inicio do passo serial; [SIGTERM_PROBE] apontou pid=1289515 cmdline 'python -c import fastapi, uvicorn, pydantic, core.harness.remote_worker' (checagem de prontidao do supervisor da VM apos atualizar o checkout). core/harness/remote_worker.py:2298 faz 'app = create_worker_app()' na importacao, entao importar o modulo cria o JobManager na pasta real do worker e roda a recuperacao de orfaos, que mata o job vivo por causa da deriva do create_time. Tentativa 2 (REMOTE_RETRY): HARNESS_PASS, 4519 descobertos, 4488 passed, 31 skipped. A correcao tambem deve evitar criar o app (e o JobManager) como efeito colateral da importacao do modulo.",
     "core_journey": [],
     "non_goals": [
       "Nao desligar a recuperacao de jobs orfaos.",
@@ -9315,6 +9315,6 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-19T10:29:03.508653Z",
-    "updated_at": "2026-10-19T10:29:03.508653Z"
+    "updated_at": "2026-10-19T13:32:20.930992Z"
   }
 ]
