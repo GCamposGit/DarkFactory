@@ -1298,7 +1298,7 @@
       "kind": "action",
       "title": "Atualizar a secao 0 do CLAUDE.md para a regra pos-V0 (ainda descreve o congelamento V0)",
       "priority": "high",
-      "status": "open",
+      "status": "done",
       "why": "O AGENTS.md ja publicou a regra pos-V0 (commit 0a55547, OA-031), mas a secao 0 do CLAUDE.md ainda manda implementar so tickets v0-critico, uma sessao por vez e no maximo 3 criterios. O Claude Code le os dois e recebe regras contraditorias. O classificador de permissoes bloqueia o agente de reescrever o proprio arquivo de instrucoes, entao a edicao e do owner.",
       "blocks": [],
       "depends_on": [],
@@ -1323,7 +1323,7 @@
       "verify": "gh api repos/GCamposGit/DarkFactory/contents/CLAUDE.md?ref=main --jq .content | base64 -d mostra '## 0. Pos-V0' e nao mostra 'Congelamento V0 (vigente'.",
       "created_at": "2026-10-18T05:30:04Z",
       "created_by": "claude-code",
-      "resolved_at": null
+      "resolved_at": "2026-10-19T01:11:52Z"
     },
     {
       "id": "OA-034",
@@ -1447,8 +1447,8 @@
       "kind": "action",
       "title": "Atualizar o worker do grokbox para a main (USR-298) e coletar quem envia o SIGTERM ao pytest",
       "priority": "critical",
-      "status": "open",
-      "why": "Parte de atualizacao concluida em 18/10/2026 ~17:20 BRT pelo Grok Chief of Staff: worker estava ocioso (git_sha 765c7e0, que ja contem 32fd792), repo limpo, fast-forward para be1bb6f; o supervisor da VM (script, PID 198590, com watchdog PID 8616; NAO ha systemd nem journalctl) nao recarregou o worker sozinho em ~3 min, entao o worker ocioso recebeu SIGTERM e foi relancado em 1 s (instancia c57b77c5, /health git_sha be1bb6f, busy=false). Reproducao manual 'pytest -n 1 tests/test_clock_bomb_guard.py' na VM: 7 passed, exit=0. Diagnostico: sem cgroup pids.max/memory.max, ulimit sem limite relevante; dmesg com 20x 'crng reseeded due to virtual machine fork' e rajada de 'virtio_balloon: Out of puff' (pressao de memoria do balao, 2,8 GiB livres); vm-events.log com 105 congelamentos, hoje a cada 8-12 min com pausas de 2-11 min (17:05, 17:12, 17:20). Falta so a prova: um portao remoto-obrigatorio so no grokbox rodado do Notebook. Motivo original: em 18/10 10:31 UTC um portao so no grokbox morreu com exit -15 em 0,9 s e 0 testes; sem o worker novo, todo portao no grokbox vira [HARNESS_FAIL] falso e a fila depende do Desktop.",
+      "status": "done",
+      "why": "Parte de atualizacao concluida em 18/10/2026 ~17:20 BRT pelo Grok Chief of Staff: worker estava ocioso (git_sha 765c7e0, que ja contem 32fd792), repo limpo, fast-forward para be1bb6f; o supervisor da VM (script, PID 198590, com watchdog PID 8616; NAO ha systemd nem journalctl) nao recarregou o worker sozinho em ~3 min, entao o worker ocioso recebeu SIGTERM e foi relancado em 1 s (instancia c57b77c5, /health git_sha be1bb6f, busy=false). Reproducao manual 'pytest -n 1 tests/test_clock_bomb_guard.py' na VM: 7 passed, exit=0. Diagnostico: sem cgroup pids.max/memory.max, ulimit sem limite relevante; dmesg com 20x 'crng reseeded due to virtual machine fork' e rajada de 'virtio_balloon: Out of puff' (pressao de memoria do balao, 2,8 GiB livres); vm-events.log com 105 congelamentos, hoje a cada 8-12 min com pausas de 2-11 min (17:05, 17:12, 17:20). Falta so a prova: um portao remoto-obrigatorio so no grokbox rodado do Notebook. Motivo original: em 18/10 10:31 UTC um portao so no grokbox morreu com exit -15 em 0,9 s e 0 testes; sem o worker novo, todo portao no grokbox vira [HARNESS_FAIL] falso e a fila depende do Desktop. RESOLVIDO: Portao isolado so no grokbox em 19/10/2026 00:49 UTC (gate_isolated.py --ref origin/main, DARKFAC_REMOTE_HARNESS=required, cache off): candidato c32bab5, job 6c74ff60ba094dfe93e0b4828ecf702d, executed_on grok-bot-vm-418374532, 4427 descobertos, 4396 passed, 31 skipped, 266 s no worker / 315 s total, [HARNESS_PASS] e [ISOLATED_GATE_PASS], sem [SIGTERM_PROBE] nem [REMOTE_RETRY].",
       "blocks": [
         "USR-298",
         "USR-270"
@@ -1459,28 +1459,28 @@
           "text": "FEITO em 18/10 ~17:20 BRT: worker do grokbox atualizado para be1bb6f e relancado pelo supervisor da VM; diagnostico coletado (ver 'why')."
         },
         {
-          "text": "No Notebook, abra o PowerShell (menu Iniciar > digite PowerShell > Enter) e confira que o worker esta ocioso e no codigo novo: git_sha deve comecar com be1bb6f (ou mais novo) e busy deve ser False. Se der timeout, o Tailscale caiu (OA-030) ou a VM esta congelada: espere 5 min e repita.",
+          "text": "FEITO: No Notebook, abra o PowerShell (menu Iniciar > digite PowerShell > Enter) e confira que o worker esta ocioso e no codigo novo: git_sha deve comecar com be1bb6f (ou mais novo) e busy deve ser False. Se der timeout, o Tailscale caiu (OA-030) ou a VM esta congelada: espere 5 min e repita.",
           "command": "Invoke-RestMethod http://100.77.130.5:8080/health -TimeoutSec 15 | Select-Object git_sha, busy, status"
         },
         {
-          "text": "Ainda no PowerShell, rode o portao de prova so no grokbox, sem cache e sem cair para local (leva ~3 min; a espera de estabilidade de 60 s antes do envio e normal).",
-          "command": "$env:DARKFAC_TEST_WORKERS = \"http://100.77.130.5:8080\"; $env:DARKFAC_WORKER_HEALTH_TIMEOUT_SEC = \"10\"; python C:\\dev\\DarkFac\\core\\harness\\runner.py --quick --no-cache --remote-required"
+          "text": "FEITO: portao rodado pelo checkout isolado (o checkout compartilhado estava com arquivos modificados), equivalente a runner.py --quick --no-cache --remote-required.",
+          "command": "$env:DARKFAC_TEST_WORKERS = \"http://100.77.130.5:8080\"; $env:DARKFAC_WORKER_HEALTH_TIMEOUT_SEC = \"10\"; $env:DARKFAC_REMOTE_HARNESS = \"required\"; $env:DARKFAC_HARNESS_CACHE = \"off\"; python C:\\dev\\DarkFac\\scripts\\gate_isolated.py --ref origin/main"
         },
         {
-          "text": "Cole no chat do Claude Code as ultimas 30 linhas da saida do passo anterior. O agente fecha esta acao e encaminha USR-298 e USR-270; se aparecer [SIGTERM_PROBE], o PID/UID e cruzado com /workspace/darkfac/run/vm-events.log."
+          "text": "FEITO: Cole no chat do Claude Code as ultimas 30 linhas da saida do passo anterior. O agente fecha esta acao e encaminha USR-298 e USR-270; se aparecer [SIGTERM_PROBE], o PID/UID e cruzado com /workspace/darkfac/run/vm-events.log."
         }
       ],
       "verify": "GET http://100.77.130.5:8080/health devolve git_sha igual ou posterior a 32fd792 (cumprido: be1bb6f em 18/10 ~17:20 BRT); um portao 'runner.py --quick --no-cache --remote-required' so no grokbox termina com [HARNESS_PASS] e [TEST_COUNT] positivo, ou mostra [SIGTERM_PROBE] e [REMOTE_RETRY] em vez de [HARNESS_FAIL].",
       "created_at": "2026-10-18T11:53:17Z",
       "created_by": "claude-code",
-      "resolved_at": null
+      "resolved_at": "2026-10-19T00:58:33Z"
     },
     {
       "id": "OA-036",
       "kind": "action",
       "title": "Publicar na main a correcao protegida do USR-268 (portao local do Notebook trava 3000 s com 6 workers fixos)",
       "priority": "critical",
-      "status": "open",
+      "status": "done",
       "why": "No Windows, core/harness/runner.py troca '-n auto' por 6 workers fixos e ignora o calculo por RAM do tests/conftest.py; com ~5 GiB livres o portao local do Notebook trava e estoura 3000 s sem descobrir testes (visto no USR-252 em 18/10). O Codex corrigiu no PR #397 (limite de 4 workers respeitando a RAM e saida parcial salva no timeout), mas core/harness e protegido: o guard reprova o PR e so o owner publica. A worktree ja foi rebaseada na main atual (com o hotfix #406) e passou 93 testes focados, incluindo test_clock_bomb_guard e test_harness_contract. Sem isso, o Notebook nao serve de host de portao e a fila depende do Desktop.",
       "blocks": [
         "USR-268"
@@ -1498,7 +1498,7 @@
       "verify": "gh api repos/GCamposGit/DarkFactory/contents/core/harness/runner.py?ref=main --jq .content | base64 -d contem WINDOWS_XDIST_MAX_WORKERS; o CI da main nesse commit fica verde.",
       "created_at": "2026-10-18T12:54:43Z",
       "created_by": "claude-code",
-      "resolved_at": null
+      "resolved_at": "2026-10-19T01:11:51Z"
     }
   ]
 }
