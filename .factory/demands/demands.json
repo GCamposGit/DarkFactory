@@ -8687,8 +8687,8 @@
     "project_id": "darkfac",
     "title": "Probe da frota falha ao importar core quando executado pelo runbook",
     "origin": "user",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "fad9fcbeb74d5168256957c8af02eb3db2ef3294",
     "item_type": "infrastructure",
     "lifecycle_stage": "execution",
     "horizon": "later",
@@ -8717,7 +8717,7 @@
     "estimated_complexity": "low",
     "dependencies": [],
     "created_at": "2026-10-17T12:46:37.066166Z",
-    "updated_at": "2026-10-17T12:46:37.066166Z"
+    "updated_at": "2026-10-19T14:47:22.787780Z"
   },
   {
     "id": "USR-298",
