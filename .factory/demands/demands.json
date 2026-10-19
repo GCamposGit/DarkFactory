@@ -8757,8 +8757,8 @@
     "project_id": "darkfac",
     "title": "Acelerar o CI do GitHub: shards no Windows, filtro por caminho e cancelamento de execuções antigas",
     "origin": "user",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "3628336b6361b90bfea727f0d01783548f903832",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -8769,7 +8769,12 @@
     "core_journey": [
       "# Acelerar o CI do GitHub (hoje 17 a 19 min por PR)\n\n## Evidência (17/10/2026)\nPR #389 (run 39032554922): Ubuntu roda o harness em 173 s; Windows em 1.069 s (~18 min), que define o tempo total. A main repete tudo no push (13 a 19 min) e o deploy Dokploy espera o main-validation. PRs que só tocam `.factory/demands/demands.json` (#387, #388, #389) também gastam ~19 min cada.\n\n## Escopo\n1. Dividir o job Windows em N fatias (matrix shard, N=4) rodando em paralelo, cada uma com uma fração dos testes; o runner aceita parâmetro de fatia e o resultado final só passa se todas passarem. Sem escrita compartilhada entre fatias. Meta: Windows <= 6 min. Alteração em `core/harness` e `ci.yml` precisa de aprovação do dono (governança).\n2. Filtro por caminho: PRs e pushes que alteram somente `.factory/**`, `docs/**` e `*.md` pulam os jobs pesados (job de detecção de mudança + `if` nos demais; jobs pulados contam como aprovados nas verificações obrigatórias). `trusted-pr-policy`/guard continua rodando.\n4. `concurrency` com `cancel-in-progress: true` apenas em `pull_request` (nunca em push na main), para cancelar execuções antigas de um PR que recebeu novo push.\n\n## Critérios de aceite\n- PR de código: CI total <= 8 min; Windows e Ubuntu continuam rodando a mesma suíte completa (soma das fatias = todos os testes, sem teste perdido).\n- PR só de backlog/docs: CI < 2 min e merge normal.\n- Push na main continua sem cancelamento e com deploy condicionado ao main-validation.\n- Documentar em docs e manter o gate oficial verde.\n\n## Fora do escopo\nDeploy sem esperar o Windows, runner Windows maior, merge queue e demands.json por arquivo (decisões separadas)."
     ],
-    "non_goals": [],
+    "non_goals": [
+      "Nao fazer deploy sem esperar o Windows.",
+      "Nao usar runner Windows maior.",
+      "Nao adotar merge queue.",
+      "Nao dividir demands.json em um arquivo por demanda."
+    ],
     "reachability_contract": "",
     "acceptance_criteria": [
       "PR de código: CI total <= 8 min, Windows dividido em 4 fatias em paralelo cobrindo toda a suíte, sem teste perdido.",
@@ -8781,7 +8786,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-17T13:16:46.929233Z",
-    "updated_at": "2026-10-18T01:12:36.385064Z"
+    "updated_at": "2026-10-19T19:16:27.756329Z"
   },
   {
     "id": "USR-303",

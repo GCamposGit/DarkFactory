@@ -511,6 +511,9 @@
     "telemetry": {
       "surface": "telemetry-drawer"
     },
+    "testing": {
+      "internal": "Particao deterministica da suite em fatias para o CI (USR-300); utilitario sem estado nem superficie no Hub."
+    },
     "usage": {
       "surface": "ai-usage-section"
     },
