@@ -1810,3 +1810,41 @@ def build_default_adapters(snapshot_dir: Path) -> Iterable[AccountUsageAdapter]:
             yield OllamaAccountAdapter(spec, snapshot_dir)
         else:
             yield EnvironmentAccountAdapter(spec, snapshot_dir)
+
+
+# Providers whose quota is measured outside the Hub's VPS (CLI/OAuth sessions on the owner's
+# workstation or workers). The VPS never probes them: it only shows what was synced (USR-232).
+SYNCED_PROVIDER_IDS: frozenset[str] = frozenset({"openai", "xai", "google", "anthropic"})
+
+
+class SyncedSnapshotAdapter(AccountUsageAdapter):
+    """Read-only view over a snapshot received by ``POST /api/usage/sync``.
+
+    Never runs a CLI, reads a credential or touches the network: the headroom shown is derived by
+    ``_from_snapshot`` exactly like the adapters the router uses, so both see the same number.
+    A missing snapshot is "no synced data" (UNKNOWN), distinct from DISCONNECTED.
+    """
+
+    def inspect(self, force: bool = False) -> ProviderAccountUsage:
+        snapshot = self._snapshot_payload()
+        if snapshot:
+            return self._from_snapshot(snapshot, adapter=str(snapshot.get("adapter") or "synced_snapshot"))
+        return ProviderAccountUsage(
+            provider_id=self.spec.provider_id,
+            provider_name=self.spec.provider_name,
+            family=self.spec.family,
+            status=AccountConnectionStatus.UNKNOWN,
+            adapter="synced_snapshot",
+            quota_supported=False,
+            message="Sem dado sincronizado: nenhum snapshot desta conta chegou por /api/usage/sync.",
+            dashboard_url=self.spec.dashboard_url,
+        )
+
+
+def build_synced_adapters(snapshot_dir: Path) -> Iterable[AccountUsageAdapter]:
+    """Default adapters, except that off-VPS providers are snapshot-only (USR-232)."""
+    for adapter in build_default_adapters(snapshot_dir):
+        if adapter.spec.provider_id in SYNCED_PROVIDER_IDS:
+            yield SyncedSnapshotAdapter(adapter.spec, snapshot_dir)
+        else:
+            yield adapter

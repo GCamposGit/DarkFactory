@@ -10,7 +10,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
 
-from core.usage.adapters import AccountUsageAdapter, build_default_adapters
+from core.usage.adapters import AccountUsageAdapter, build_default_adapters, build_synced_adapters
 from core.usage.models import AccountConnectionStatus, AccountUsageReport, ProviderAccountUsage
 
 from datetime import datetime, timezone
@@ -27,9 +27,12 @@ class AccountUsageMonitor:
         snapshot_dir: Path,
         adapters: Optional[Iterable[AccountUsageAdapter]] = None,
         cache_ttl_sec: float = 30.0,
+        synced_only: bool = False,
     ) -> None:
         self.snapshot_dir = Path(snapshot_dir)
-        self.adapters = list(adapters) if adapters is not None else list(build_default_adapters(self.snapshot_dir))
+        self.adapters = list(adapters) if adapters is not None else list(
+            (build_synced_adapters if synced_only else build_default_adapters)(self.snapshot_dir)
+        )
         self.cache_ttl_sec = max(0.0, cache_ttl_sec)
         self._cache: Optional[AccountUsageReport] = None
         self._cached_at = 0.0
