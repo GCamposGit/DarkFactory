@@ -6983,8 +6983,8 @@
     "project_id": "darkfac",
     "title": "USR-206 fatia 2: cartoes de cotas do Hub mostram idade e origem do dado, e dado com mais de 10 min aparece como desatualizado",
     "origin": "user",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "3db31e3c9fe0b3290c3a68d9af828e19863996f8",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "later",
@@ -7014,7 +7014,7 @@
       "USR-232"
     ],
     "created_at": "2026-10-11T20:27:26.550305Z",
-    "updated_at": "2026-10-11T20:27:26.550305Z"
+    "updated_at": "2026-10-19T07:45:27.825745Z"
   },
   {
     "id": "USR-234",

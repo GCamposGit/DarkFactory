@@ -1562,6 +1562,8 @@ class HubService:
             if not provider_id:
                 continue
             try:
+                # Record which node sent the snapshot so the Hub can show its origin (USR-233).
+                account = {**account, "source_node": payload.client_node_id}
                 self.account_usage_monitor.save_snapshot(str(provider_id), account)
                 accounts_updated += 1
             except Exception as exc:
