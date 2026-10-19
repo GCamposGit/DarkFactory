@@ -45,71 +45,54 @@ tailscale ping grokbox
 Esperado: JSON com `status` ok, `busy` false, `platform_family` linux. `tailscale ping` mostrando
 `via DERP(...)` e normal (e o motivo do timeout de 10 s).
 
-## 4. Quem mantem o worker de pe
+## 4. Quem mantem o worker de pe (scripts/grokbox_supervisor.py)
 
-Estado verificado em 18/10/2026 (OA-035): a VM NAO tem `systemctl` nem `journalctl`. O worker
-(`.venv/bin/python core/harness/remote_worker.py --host 0.0.0.0 --port 8080 --node-id grokbox`) e filho
-de um script supervisor da propria VM, com um watchdog em paralelo; quando o worker morre, o supervisor
-o relanca em ~1 s. O supervisor deveria recarregar o worker ocioso quando o HEAD muda, mas em 18/10 nao
-recarregou em 3 min. Para atualizar:
+A VM NAO tem `systemctl` nem `journalctl` (verificado em 18/10/2026, OA-035) e nao vamos instalar systemd.
+O supervisor esta versionado em `scripts/grokbox_supervisor.py` (Python 3 stdlib, USR-315). Ele lanca
+`core/harness/remote_worker.py --host 0.0.0.0 --port 8080 --node-id grokbox --project-root <root>`,
+relanca o worker se morrer, e a cada ciclo (padrao 10 s) compara `git rev-parse HEAD` de `project_root`
+com o `git_sha` do `/health`: se mudou e `busy=false`, envia SIGTERM ao worker e o relanca (em ate ~60 s);
+com `busy=true` (ou `/health` inalcancavel) espera, nunca reinicia com job rodando.
+
+Subir (na VM, uma vez; o `git pull --ff-only` seguinte dispara o reload sozinho):
 
 ```bash
-curl -s http://127.0.0.1:8080/health          # so siga com "busy": false
-ps -eo pid,ppid,etime,cmd | grep -v grep | grep remote_worker.py
+cd /workspace/darkfac/DarkFactory && mkdir -p /workspace/darkfac/run
+nohup python3 scripts/grokbox_supervisor.py >> /workspace/darkfac/run/supervisor.log 2>&1 &
+```
+
+Configuracao (argumentos ou variaveis): `--project-root`/`GROKBOX_PROJECT_ROOT`
+(`/workspace/darkfac/DarkFactory`), `--python`/`GROKBOX_PYTHON` (`<root>/.venv/bin/python`),
+`--port`/`GROKBOX_PORT` (8080), `--node-id`/`GROKBOX_NODE_ID` (`grokbox`), `--host`/`GROKBOX_HOST`
+(`0.0.0.0`), `--interval`/`GROKBOX_POLL_SEC` (10), `--stop-file`/`GROKBOX_STOP_FILE`
+(`/workspace/darkfac/run/supervisor.stop`), `--pid-file`/`GROKBOX_PID_FILE`
+(`/workspace/darkfac/run/supervisor.pid`).
+
+Verificar:
+
+```bash
+cat /workspace/darkfac/run/supervisor.pid; ps -eo pid,ppid,etime,cmd | grep -v grep | grep -E "grokbox_supervisor|remote_worker.py"
+tail -n 20 /workspace/darkfac/run/supervisor.log
+curl -s http://127.0.0.1:8080/health          # git_sha == git rev-parse HEAD, busy=false
+```
+
+Parar o supervisor: `touch /workspace/darkfac/run/supervisor.stop` (ele sai no proximo ciclo e deixa o
+worker de pe; remova o arquivo antes de subir de novo) ou `kill $(cat /workspace/darkfac/run/supervisor.pid)`.
+Para parar tambem o worker, so com `busy=false`: `kill -TERM <PID do remote_worker.py>`.
+
+Atualizar a VM:
+
+```bash
+curl -s http://127.0.0.1:8080/health          # so siga com "busy": false (ou aceite que o reload espera o job)
 cd /workspace/darkfac/DarkFactory && git status --short && git fetch origin && git checkout main && git pull --ff-only
-# espere ~3 min pelo reload; se o git_sha do /health nao mudar e o worker continuar ocioso:
-kill -TERM <PID do remote_worker.py>          # o supervisor relanca em ~1 s
-curl -s http://127.0.0.1:8080/health          # git_sha novo, busy=false
+# o supervisor recarrega o worker ocioso em ate ~60 s; confira o git_sha novo no /health
 ```
 
-Logs do kernel: `dmesg` (nao ha journal). Congelamentos ficam em `/workspace/darkfac/run/vm-events.log`.
+Se o supervisor tambem estiver parado, suba-o pelo comando acima. Logs do kernel: `dmesg` (nao ha journal).
+Congelamentos ficam em `/workspace/darkfac/run/vm-events.log`.
 
-A unidade systemd abaixo e a alternativa caso a VM passe a ter systemd; nao esta instalada hoje.
-
-### 4.1 Alternativa: subir no boot com systemd
-
-Sem supervisor, o worker iniciado a mao cai se a VM reiniciar. A causa do SIGTERM de 14/10 foi o worker rodando
-sem o Python certo no PATH. Entrypoint (o mesmo que `scripts/install_test_worker.ps1` registra no
-Windows): `python core/harness/remote_worker.py --host 0.0.0.0 --port 8080 --node-id <id>`.
-
-Na VM, como root, crie `/etc/systemd/system/darkfac-test-worker.service` (ajuste `VENV` se o Python
-do repo estiver em outro diretorio e `User` para o usuario dono de `/workspace`):
-
-```ini
-[Unit]
-Description=DarkFac remote test worker (core/harness/remote_worker.py, port 8080)
-After=network-online.target tailscaled.service
-Wants=network-online.target tailscaled.service
-
-[Service]
-Type=simple
-User=root
-WorkingDirectory=/workspace/darkfac/DarkFactory
-# Python do repo ANTES do sistema: sem isso o worker usava outro python e recebia SIGTERM (14/10/2026).
-Environment=PATH=/workspace/darkfac/DarkFactory/.venv/bin:/usr/local/bin:/usr/bin:/bin
-Environment=PYTHONUTF8=1
-ExecStart=/workspace/darkfac/DarkFactory/.venv/bin/python core/harness/remote_worker.py --host 0.0.0.0 --port 8080 --node-id grokbox-test-worker --project-root /workspace/darkfac/DarkFactory
-Restart=always
-RestartSec=10
-
-[Install]
-WantedBy=multi-user.target
-```
-
-Se o repo nao usa `.venv`, troque os dois caminhos `.venv/bin` pelo diretorio do Python 3.13 correto
-(`command -v python3.13`).
-
-```bash
-sudo systemctl daemon-reload
-sudo systemctl enable --now darkfac-test-worker
-sudo systemctl status darkfac-test-worker --no-pager
-sudo journalctl -u darkfac-test-worker -f
-curl -s -m 5 http://127.0.0.1:8080/health
-```
-
-O Vigia do Tailscale no grokbox roda a cada 5 min e cuida SOMENTE do Tailscale; ele nao reinicia o
-worker. Quem mantem o worker de pe hoje e o script supervisor da VM (secao 4); com a unidade acima instalada,
-seria o systemd (`Restart=always`).
+O Vigia do Tailscale no grokbox roda a cada 5 min e cuida SOMENTE do Tailscale; ele nao reinicia o worker.
+O supervisor nao sobrevive a reboot da VM: depois de um reboot, suba-o de novo com o `nohup` acima.
 
 ## 5. Quando o Tailscale perde o servidor de controle
 
