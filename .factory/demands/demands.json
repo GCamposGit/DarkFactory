@@ -9068,8 +9068,8 @@
     "project_id": "darkfac",
     "title": "Publicacao de arquivo protegido por push direto na main pula o CI e deixou a main vermelha (32fd792)",
     "origin": "agent",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "66c368f174da0f12aae89eb1d0d2806828c4fd09",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -9098,7 +9098,7 @@
     "estimated_complexity": "low",
     "dependencies": [],
     "created_at": "2026-10-18T11:53:17.759154Z",
-    "updated_at": "2026-10-18T11:53:17.759154Z"
+    "updated_at": "2026-10-19T15:13:49.856423Z"
   },
   {
     "id": "USR-311",
