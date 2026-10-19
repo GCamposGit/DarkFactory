@@ -9248,8 +9248,8 @@
     "project_id": "darkfac",
     "title": "Teste instavel tests/test_canary_first_run_fixes.py::test_bootstrap_codex_login_relays_code_before_the_process_exits sob carga no portao local",
     "origin": "agent",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "05a701100d6ff2189cb7105b2613a9b364641a62",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -9276,6 +9276,6 @@
     "estimated_complexity": "low",
     "dependencies": [],
     "created_at": "2026-10-19T03:02:15.173183Z",
-    "updated_at": "2026-10-19T03:02:15.173183Z"
+    "updated_at": "2026-10-19T04:18:06.215650Z"
   }
 ]
