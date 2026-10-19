@@ -377,12 +377,22 @@ def test_notify_config_falls_back_to_owner_role(monkeypatch: pytest.MonkeyPatch)
 
 def test_bootstrap_codex_login_relays_code_before_the_process_exits(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """`codex login --device-auth` keeps running until approval; the message must go out first."""
+    # Deterministic: the fake CLI prints the code and then BLOCKS until the notifier
+    # drops a release file (the "owner approval"). If the relay only happened after the
+    # process exited it would never see the release and `saw_release` would not exist.
+    # No wall-clock thresholds: the 20 s bounds are only upper limits for a regression.
+    release = tmp_path / "release.flag"
+    saw_release = tmp_path / "saw_release.flag"
     script = tmp_path / "slow_codex.py"
     script.write_text(
-        "import sys, time\n"
+        "import pathlib, sys, time\n"
         "sys.stdout.write('\\x1b[1mOpen https://auth.openai.com/device\\x1b[0m\\nCode: WXYZ-12345\\n')\n"
         "sys.stdout.flush()\n"
-        "time.sleep(1.5)\n",
+        f"release = pathlib.Path({str(release)!r})\n"
+        "deadline = time.monotonic() + 60\n"
+        "while not release.exists() and time.monotonic() < deadline:\n"
+        "    time.sleep(0.02)\n"
+        f"if release.exists():\n    pathlib.Path({str(saw_release)!r}).write_text('1')\n",
         encoding="utf-8",
     )
     from tests.line.conftest import write_python_shim
@@ -394,20 +404,22 @@ def test_bootstrap_codex_login_relays_code_before_the_process_exits(tmp_path: Pa
         "probe_codex_status",
         lambda: auth_bootstrap.HarnessProbeResult(harness="codex", ok=True, detail="ok"),
     )
-    sent: list[tuple[str, float]] = []
-    start = time.monotonic()
-    result = auth_bootstrap.bootstrap_codex_login(
-        notifier=lambda msg: sent.append((msg, time.monotonic() - start)) or True,
-        timeout_s=20,
-        approval_wait_s=20,
-    )
+    sent: list[str] = []
+
+    def _notifier(msg: str) -> bool:
+        sent.append(msg)
+        release.write_text("1")  # approval arrives only after the message went out
+        return True
+
+    result = auth_bootstrap.bootstrap_codex_login(notifier=_notifier, timeout_s=20, approval_wait_s=20)
 
     assert result.ok is True
     assert len(sent) == 1
-    message, sent_at = sent[0]
+    message = sent[0]
     assert "https://auth.openai.com/device" in message and "\x1b" not in message
     assert "WXYZ-12345" in message
-    assert sent_at < 1.4  # relayed while the CLI was still waiting for approval
+    # The CLI was still alive and waiting when the message was relayed.
+    assert saw_release.exists()
 
 
 def test_periodic_reprobe_readds_capability_once_login_completes(monkeypatch: pytest.MonkeyPatch) -> None:
