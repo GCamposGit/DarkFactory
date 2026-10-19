@@ -3913,8 +3913,8 @@
     "project_id": "darkfac",
     "title": "Adequar limite do portão oficial à suíte completa no Notebook",
     "origin": "review",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "cancelled",
+    "delivery_evidence": "Superado: causa do timeout do portao no Notebook era o runner fixar 6 workers ignorando a RAM; corrigido no USR-268 (841efb1). Portao local volta a concluir (~38 min, HARNESS_PASS do USR-313 e do USR-317 em 19/10/2026) e o grokbox roda a suite em ~5 min.",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "later",
@@ -3943,7 +3943,7 @@
     "estimated_complexity": "small",
     "dependencies": [],
     "created_at": "2026-10-04T08:18:40.458904Z",
-    "updated_at": "2026-10-11T17:49:17.206876Z"
+    "updated_at": "2026-10-19T19:28:16.078552Z"
   },
   {
     "id": "USR-138",
@@ -4519,8 +4519,8 @@
     "project_id": "darkfac",
     "title": "Esclarecer a causa raiz do R02 EFFECT_SERVICE_UNAVAILABLE (WinError 10053) no spike de runtime",
     "origin": "user",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "cancelled",
+    "delivery_evidence": "Coberto pelo USR-311 (#429): spike nativo deterministico no Windows, espera sem prazo de parede e lease expirado explicito no R02; sem recorrencia do R02 na CI desde entao.",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "later",
@@ -4543,7 +4543,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-08T13:38:42.299317Z",
-    "updated_at": "2026-10-11T17:49:17.206876Z"
+    "updated_at": "2026-10-19T19:28:16.135057Z"
   },
   {
     "id": "USR-158",
@@ -5547,8 +5547,8 @@
     "project_id": "darkfac",
     "title": "Executar investigação do timeout do portão planejada em USR-176",
     "origin": "user",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "cancelled",
+    "delivery_evidence": "Superado: reexecucao da investigacao do USR-176, mesma causa corrigida no USR-268 (841efb1).",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "later",
@@ -5571,7 +5571,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-10T10:12:38.427434Z",
-    "updated_at": "2026-10-11T17:49:17.206876Z"
+    "updated_at": "2026-10-19T19:28:16.116516Z"
   },
   {
     "id": "USR-201",
@@ -6531,8 +6531,8 @@
     "project_id": "darkfac",
     "title": "Investigar timeout local de 1500 segundos no portao oficial apos fallback",
     "origin": "user",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "cancelled",
+    "delivery_evidence": "Superado pelo USR-268 (workers por RAM, 841efb1) e pelo portao no grokbox; mesma causa do USR-135. Portao local com HARNESS_PASS em 19/10/2026 (USR-313, USR-317).",
     "item_type": "security",
     "lifecycle_stage": "next_steps",
     "horizon": "later",
@@ -6558,7 +6558,7 @@
       "USR-162"
     ],
     "created_at": "2026-10-08T21:53:17.795560Z",
-    "updated_at": "2026-10-11T17:49:17.206876Z"
+    "updated_at": "2026-10-19T19:28:16.096997Z"
   },
   {
     "id": "USR-224",
@@ -7298,8 +7298,8 @@
     "project_id": "darkfac",
     "title": "CI rapida (ou fila de merge) para PRs que mudam so o ledger de demandas",
     "origin": "user",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "cancelled",
+    "delivery_evidence": "Incorporado ao USR-300: o patch docs/proposals/USR-300-ci-speedup.patch cria o caminho rapido ledger-fast para PRs que so mudam .factory/demands e .factory/owner_actions (OA-039).",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "later",
@@ -7321,7 +7321,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-11T23:53:16.657703Z",
-    "updated_at": "2026-10-11T23:53:16.657703Z"
+    "updated_at": "2026-10-19T19:28:16.154099Z"
   },
   {
     "id": "USR-245",
@@ -9285,8 +9285,8 @@
     "project_id": "darkfac",
     "title": "Identidade de processo do worker por create_time do psutil deriva apos congelamento da VM e faz processo vivo parecer morto",
     "origin": "agent",
-    "status": "completed",
-    "delivery_evidence": "15ca6f053ba9ec7f4b50bf4a116d8d9e4e8ffb42:live_provisional",
+    "status": "planned",
+    "delivery_evidence": "Correcao pronta como patch em docs/proposals/USR-317-process-identity.patch (core/harness protegido); aguardando publicacao do owner pela OA-038. (proposta: 15ca6f053ba9ec7f4b50bf4a116d8d9e4e8ffb42:live_provisional)",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -9317,6 +9317,6 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-19T10:29:03.508653Z",
-    "updated_at": "2026-10-19T16:24:09.654779Z"
+    "updated_at": "2026-10-19T19:28:16.177198Z"
   }
 ]
