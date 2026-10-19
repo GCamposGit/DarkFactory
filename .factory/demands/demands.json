@@ -5974,8 +5974,8 @@
     "project_id": "darkfac",
     "title": "Painel de aceite da linha le o streak errado e nao explica o que falta para V1 e V2",
     "origin": "user",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "e43b3b3308cadc6d29c88b8d2e84f557efaf11d4",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "later",
@@ -6008,7 +6008,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-10T15:10:25.550364Z",
-    "updated_at": "2026-10-11T17:49:17.206876Z"
+    "updated_at": "2026-10-19T08:03:05.766761Z"
   },
   {
     "id": "USR-216",
