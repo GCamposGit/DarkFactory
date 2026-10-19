@@ -1529,6 +1529,55 @@
       "resolved_at": "2026-10-19T13:35:53Z"
     },
     {
+      "id": "OA-039",
+      "kind": "action",
+      "title": "Publicar USR-300 (CI mais rapida: shards Windows, filtro de caminho, cancelamento)",
+      "priority": "medium",
+      "status": "open",
+      "why": "USR-300 e USR-244 alteram .github/workflows/ci.yml e core/harness/runner.py (caminhos protegidos: agentes nao conseguem commitar). O patch pronto esta em docs/proposals/USR-300-ci-speedup.patch (explicacao em docs/proposals/USR-300-ci-speedup.md). Sem a publicacao, o CI continua em 17-19 min por PR e PRs so de backlog tambem gastam ~19 min.",
+      "blocks": [
+        "USR-300",
+        "USR-244"
+      ],
+      "depends_on": [],
+      "steps": [
+        {
+          "text": "Crie uma worktree limpa a partir de origin/main e entre nela.",
+          "command": "git -C C:\\dev\\DarkFac fetch origin; git -C C:\\dev\\DarkFac worktree add C:\\dev\\DarkFac\\.worktrees\\publish-usr300 -b publish/usr-300 origin/main"
+        },
+        {
+          "text": "Confirme que a entrega nao protegida do USR-300 (scripts/ci_paths.py, core/testing/shards.py, tests/test_ci_shards_usr300.py, docs/proposals/USR-300-ci-speedup.*) ja esta na main; entao aplique o patch (altera so .github/workflows/ci.yml e core/harness/runner.py).",
+          "command": "git -C C:\\dev\\DarkFac\\.worktrees\\publish-usr300 apply C:\\dev\\DarkFac\\.worktrees\\publish-usr300\\docs\\proposals\\USR-300-ci-speedup.patch"
+        },
+        {
+          "text": "Rode os guardas rapidos.",
+          "command": "python -m pytest -q -p no:cacheprovider tests/test_clock_bomb_guard.py tests/test_harness_contract.py tests/test_hub_coverage.py tests/test_safe_git_state.py tests/test_ci_shards_usr300.py"
+        },
+        {
+          "text": "Rode o portao oficial completo e confirme que imprime [HARNESS_PASS] antes de qualquer push.",
+          "command": "python C:\\dev\\DarkFac\\.worktrees\\publish-usr300\\core\\harness\\runner.py --quick"
+        },
+        {
+          "text": "Faca o commit e o push direto na main (bypass de admin, como nos outros protegidos).",
+          "command": "git -C C:\\dev\\DarkFac\\.worktrees\\publish-usr300 add -A; git -C C:\\dev\\DarkFac\\.worktrees\\publish-usr300 commit -m \"ci: shards Windows, filtro de caminho e cancelamento (USR-300, USR-244)\"; git -C C:\\dev\\DarkFac\\.worktrees\\publish-usr300 push origin HEAD:main"
+        },
+        {
+          "text": "Confira a execucao do CI na main.",
+          "command": "gh run list --branch main --limit 3"
+        },
+        {
+          "text": "Confirme os nomes das verificacoes obrigatorias: GitHub > repositorio > Settings > Rules > Rulesets > main > Require status checks. Mantenha 'pr-validation (ubuntu-latest)', 'pr-validation (windows-latest)' e o check do trusted-pr-policy; eles agora sao jobs agregadores com os mesmos nomes. NAO adicione os jobs 'pr-tests (...)'. Nao e preciso alterar nada se os nomes ja forem esses."
+        },
+        {
+          "text": "Abra um PR so de docs e um PR de codigo pequeno e confirme os tempos; depois marque esta acao como feita e feche USR-300 e USR-244."
+        }
+      ],
+      "verify": "PR so de docs/backlog termina o CI em menos de 2 min; PR de codigo em ate 8 min (Windows em 4 fatias); push na main sem cancelamento e com deploy apos main-validation.",
+      "created_at": "2026-10-19T14:49:13Z",
+      "created_by": "claude-code",
+      "resolved_at": null
+    },
+    {
       "id": "OA-038",
       "kind": "action",
       "title": "Publicar USR-317 (identidade de processo do worker, core/harness protegido)",
