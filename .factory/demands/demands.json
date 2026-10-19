@@ -6095,8 +6095,8 @@
     "project_id": "darkfac",
     "title": "Validacao sob demanda pelo Hub falha com exit code 4 em local_fallback",
     "origin": "user",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "c823e728b38748d19369a03e275a268990ee19ea",
     "item_type": "operations",
     "lifecycle_stage": "execution",
     "horizon": "later",
@@ -6128,7 +6128,7 @@
       "USR-217"
     ],
     "created_at": "2026-10-10T15:10:25.683672Z",
-    "updated_at": "2026-10-11T17:49:17.206876Z"
+    "updated_at": "2026-10-19T14:24:10.554377Z"
   },
   {
     "id": "USR-219",

@@ -229,6 +229,17 @@ async function handleRunTests() {
     });
 
     const report = await res.json();
+    if (!res.ok) {
+      const detail = typeof report?.detail === "string" ? report.detail : `HTTP ${res.status}`;
+      if (resultsContainer) {
+        resultsContainer.innerHTML = `
+          <div class="py-4 text-xs text-amber-400">
+            <strong>[HARNESS_UNAVAILABLE]</strong> ${escapeHtml(detail)}
+          </div>
+        `;
+      }
+      return;
+    }
     harnessState.lastReport = report;
     renderDistilledReport(report);
   } catch (err) {
