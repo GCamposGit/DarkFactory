@@ -5860,8 +5860,8 @@
     "project_id": "darkfac",
     "title": "Canario diario fica preso em WAITING_HUMAN (grill_pending) e grava titulo com acentos corrompidos",
     "origin": "user",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "8068ee7643f5c965cb2d5ba8812399bb743810eb",
     "item_type": "operations",
     "lifecycle_stage": "execution",
     "horizon": "later",
@@ -5892,7 +5892,7 @@
     "estimated_complexity": "low",
     "dependencies": [],
     "created_at": "2026-10-10T14:54:05.373313Z",
-    "updated_at": "2026-10-11T17:49:17.206876Z"
+    "updated_at": "2026-10-19T17:04:52.782667Z"
   },
   {
     "id": "USR-212",
