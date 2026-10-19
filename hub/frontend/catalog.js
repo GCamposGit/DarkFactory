@@ -57,7 +57,7 @@ function mountCatalogSection() {
       <div>
         <div class="flex items-center gap-2">
           <span class="flex h-7 w-7 items-center justify-center rounded-lg bg-emerald-500/10 text-emerald-400 text-sm">📦</span>
-          <h2 class="text-base font-semibold text-slate-100">Catálogo Cross-Projeto & Auto-Evolução (HF-25 / DH-04)</h2>
+          <h2 class="text-base font-semibold text-slate-100">Catálogo entre projetos e autoevolução</h2>
           <span class="rounded-full bg-emerald-500/10 px-2 py-0.5 text-xs font-medium text-emerald-400 border border-emerald-500/20">Ações Habilitadas</span>
         </div>
         <p class="text-xs text-slate-400 mt-1">Componentes reutilizáveis compartilhados entre Atrium, Jarvis e DarkFac com salvaguardas de auto-evolução.</p>

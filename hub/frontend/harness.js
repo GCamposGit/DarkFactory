@@ -57,8 +57,8 @@ function mountHarnessSection() {
       <div>
         <div class="flex items-center gap-2">
           <span class="flex h-7 w-7 items-center justify-center rounded-lg bg-emerald-500/10 text-emerald-400 text-sm">🧪</span>
-          <h2 class="text-base font-semibold text-slate-100">Validação sob Demanda & Harness Remoto (DH-11)</h2>
-          <span class="rounded-full bg-emerald-500/10 px-2 py-0.5 text-xs font-medium text-emerald-400 border border-emerald-500/20 font-mono">Skill 17</span>
+          <h2 class="text-base font-semibold text-slate-100">Validação sob demanda</h2>
+          <span class="rounded-full bg-emerald-500/10 px-2 py-0.5 text-xs font-medium text-emerald-400 border border-emerald-500/20 font-mono">Testes remotos</span>
         </div>
         <p class="text-xs text-slate-400 mt-1">Disparo de suítes de teste a partir da web com relatório destilado, oráculos determinísticos e isolamento de logs.</p>
       </div>

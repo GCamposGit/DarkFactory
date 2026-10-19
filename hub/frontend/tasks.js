@@ -337,7 +337,7 @@ function switchTaskViewMode(mode) {
     if (btnQueue) btnQueue.className = "px-2.5 py-1 rounded-lg text-slate-400 hover:text-slate-200 font-mono text-[11px] transition";
     if (queueContainer) queueContainer.classList.add("hidden");
     if (dagContainer) dagContainer.classList.remove("hidden");
-    if (alert) alert.textContent = "Visualizando DAG causal e gates da autonomia contínua (HF-26 / HF-27)";
+    if (alert) alert.textContent = "Visualizando DAG causal e gates da autonomia contínua";
     loadAutonomyPlan();
   } else {
     if (btnQueue) btnQueue.className = "px-2.5 py-1 rounded-lg bg-indigo-600 text-white font-mono text-[11px] shadow-sm transition";
@@ -389,7 +389,7 @@ function renderAutonomyPlan(plan) {
   if (summaryEl) {
     const counts = plan.counts || {};
     summaryEl.innerHTML = [
-      taskSummaryCard("Total Unidades", plan.total_units || 33, "DAG canônico HF-26", "text-indigo-300"),
+      taskSummaryCard("Total Unidades", plan.total_units || 33, "Plano canônico de autonomia", "text-indigo-300"),
       taskSummaryCard("Concluídas", counts.completed || 0, "validadas no repositório", "text-emerald-300"),
       taskSummaryCard("Em Execução", counts.in_progress || 0, "slots ou workers", "text-cyan-300"),
       taskSummaryCard("Prontas p/ Handoff", counts.ready || 0, "contrato especificado", "text-amber-300"),

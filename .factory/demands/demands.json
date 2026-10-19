@@ -5424,8 +5424,8 @@
     "project_id": "darkfac",
     "title": "Anotacao duravel no ticket quando o owner responde uma decisao pelo DarkHub",
     "origin": "user",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "b948bc2c6bb2e61da3404fcd1df6bf790191d436",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "later",
@@ -5448,7 +5448,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-10T00:10:00Z",
-    "updated_at": "2026-10-11T17:49:17.206876Z"
+    "updated_at": "2026-10-19T06:11:19.390747Z"
   },
   {
     "id": "USR-196",
@@ -6015,8 +6015,8 @@
     "project_id": "darkfac",
     "title": "Remover codigos de ticket e de skill dos nomes visiveis do Hub (HF-27, DH-11, Skill 17...)",
     "origin": "user",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "0a46ef9de0a001b1efe2bd7af94af36b72997193",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "later",
@@ -6046,7 +6046,7 @@
     "estimated_complexity": "low",
     "dependencies": [],
     "created_at": "2026-10-10T15:10:25.606987Z",
-    "updated_at": "2026-10-11T17:49:17.206876Z"
+    "updated_at": "2026-10-19T06:16:11.792364Z"
   },
   {
     "id": "USR-217",

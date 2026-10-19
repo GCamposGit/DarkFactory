@@ -143,7 +143,7 @@ function renderInterventionsHeroStrip() {
       `;
     } else if (item.kind === "deploy_g8") {
       badgeClass = "bg-rose-500/10 text-rose-300 border-rose-500/30";
-      icon = "🚀 Deploy G8";
+      icon = "🚀 Deploy em produção";
       actionBtn = `
         <button 
           onclick="document.getElementById('enterprise-security-section')?.scrollIntoView({behavior: 'smooth'})"
@@ -847,7 +847,7 @@ window.submitGrillModalAnswers = submitGrillModalAnswers;
 const TASK_CAUSE_GUIDES = {
   grill_pending: {
     title: "Grill pendente com o Owner",
-    instructions: "A demanda aguarda as respostas do Grill (Gate G1). Responda as perguntas de desambiguação para a linha continuar. Se a demanda não vale mais, cancele o run.",
+    instructions: "A demanda aguarda as respostas do Grill de requisitos. Responda as perguntas de desambiguação para a linha continuar. Se a demanda não vale mais, cancele o run.",
     actions: ["grill", "cancel"],
   },
   waiting_dependency: {
