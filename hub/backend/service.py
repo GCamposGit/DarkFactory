@@ -153,6 +153,7 @@ from hub.backend.webhooks import (
     WebhookEventRecord,
 )
 from core.integrations.telegram import TelegramConfig, TelegramGateway, reply_messages
+from hub.backend.usage_sync_watch import UsageSyncWatch
 from core.owner_actions.models import ActionStatus, OwnerAction, PRIORITY_RANK
 from core.owner_actions.propagate import annotate_blocked_tickets
 from core.owner_actions.store import (
@@ -423,6 +424,8 @@ class HubService:
             overlay_path=self.data_dir / "owner_actions" / "resolutions.json",
             dynamic_path=self.data_dir / "owner_actions" / "dynamic.json",
         )
+
+        self.usage_sync_watch = UsageSyncWatch(self.data_dir / "usage_sync" / "state.json")
 
         self.task_state_path = Path(state_path) if state_path is not None else state_root() / "state.json"
         self.orchestrator_path = (
@@ -1067,6 +1070,7 @@ class HubService:
 
         # 4. Backlog de acoes humanas (.factory/owner_actions) - USR-190
         owner_action_items, owner_action_warnings = self._collect_owner_action_items()
+        owner_action_items.extend(self._collect_usage_sync_items())
         items.extend(owner_action_items)
 
         urgency_rank = {"critical": 0, "high": 1, "medium": 2, "low": 3}
@@ -1145,6 +1149,49 @@ class HubService:
                 )
             )
         return items, list(loaded.warnings)
+
+    def _collect_usage_sync_items(self) -> List[PriorityInterventionItem]:
+        """Critical item while the usage sync loop is refused or stale (USR-235); closes by itself."""
+        try:
+            alert = self.usage_sync_watch.evaluate()
+        except Exception as exc:
+            logger.warning("Error evaluating usage sync health: %s", exc)
+            return []
+        if alert is None:
+            return []
+        oa_id = f"usage_sync:{alert.cause}"
+        return [
+            PriorityInterventionItem(
+                id=f"owner_action:{oa_id}",
+                kind=PriorityInterventionKind.OWNER_ACTION,
+                title=alert.title,
+                description=alert.description,
+                project_id="darkfac",
+                urgency="critical",
+                created_at=alert.since,
+                action_type="owner_action",
+                action_target_id=oa_id,
+                metadata={
+                    "oa_id": oa_id,
+                    "action_kind": "action",
+                    "status": "open",
+                    "why": alert.description,
+                    "blocks": [],
+                    "depends_on": [],
+                    "blocked_by": [],
+                    "unblocks": [],
+                    "steps": [
+                        {"text": "Confirme que DARKFAC_TELEMETRY_KEY esta configurada no Hub (Dokploy) e igual a do host.", "command": ""},
+                        {"text": "No host, verifique a tarefa agendada DarkFac-Usage-Cloud-Sync.", "command": ""},
+                    ],
+                    "verify": "O item some sozinho quando POST /api/usage/sync voltar a responder com sucesso.",
+                    "options": [],
+                    "created_by": "usage_sync_watch",
+                    "cause": alert.cause,
+                    "last_success_at": alert.last_success_at,
+                },
+            )
+        ]
 
     def get_owner_actions(self, *, include_done: bool = False) -> OwnerActionsReport:
         """The owner action backlog, with dependency fields (GET /owner-actions)."""
@@ -1624,6 +1671,7 @@ class HubService:
             except Exception as exc:
                 logger.warning("Failed to save credit snapshot for %s: %s", provider_id, exc)
 
+        self.usage_sync_watch.record_success()
         now_str = datetime.now(timezone.utc).isoformat()
         return UsageSyncResponse(
             status="synchronized",

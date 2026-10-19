@@ -104,3 +104,26 @@ test("sem ids nenhum botao aparece", () => {
   const { exported } = load(async () => ({}));
   assert.equal(exported.taskInterventionActions({ metadata: { cause_code: "grill_pending" } }).length, 0);
 });
+
+test("item usage_sync_watch nao tem botao de concluir/responder e fecha sozinho (USR-235)", () => {
+  const { api } = load(async () => ({}));
+  const context = vm.createContext({
+    console, setTimeout: () => 0, setInterval: () => 0, history: {}, confirm: () => true,
+    hubFetch: async () => ({}), window: { location: { hash: "" } },
+    document: { addEventListener() {}, hidden: false, getElementById: () => null, body: { classList: { add() {}, remove() {} } } },
+    module: { exports: {} },
+  });
+  context.window.window = context.window;
+  vm.runInContext(source + "\n;globalThis.__render = renderOwnerActionCard;", context);
+  const base = {
+    id: "owner_action:usage_sync:stale", action_target_id: "usage_sync:stale", title: "Sync parado",
+    urgency: "critical", metadata: { action_kind: "action", created_by: "usage_sync_watch", steps: [{ text: "x", command: "" }] },
+  };
+  const html = context.__render(base);
+  assert.ok(html.includes("Fecha sozinho quando a sincronização voltar"));
+  assert.ok(!html.includes("markOwnerActionDone"));
+  assert.ok(!html.includes("answerOwnerDecision"));
+  const normal = context.__render({ ...base, id: "owner_action:OA-1", action_target_id: "OA-1", metadata: { action_kind: "action" } });
+  assert.ok(normal.includes("markOwnerActionDone"));
+  assert.ok(api);
+});

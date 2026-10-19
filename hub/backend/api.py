@@ -930,6 +930,7 @@ def sync_usage_endpoint(
     """Synchronizes account quota and credit snapshots from an authenticated local workstation or worker node."""
     configured_key = os.environ.get("DARKFAC_TELEMETRY_KEY")
     if not configured_key:
+        service.usage_sync_watch.record_refusal("key_missing")
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Usage synchronization is disabled; set DARKFAC_TELEMETRY_KEY.",
@@ -938,6 +939,7 @@ def sync_usage_endpoint(
         x_darkfac_telemetry_key,
         configured_key,
     ):
+        service.usage_sync_watch.record_refusal("unauthorized_401")
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid telemetry key.")
     return service.sync_usage_data(payload)
 
