@@ -464,6 +464,16 @@ class ScenarioController:
             ),
         )
 
+    def _await_lease_expiry(self) -> None:
+        """Block until the dead driver's lease can be reclaimed.
+
+        The default waits out the lease in wall-clock time with a margin for clock
+        jitter.  Tests that must not depend on machine load override this to expire
+        the lease explicitly and run with a long lease instead.
+        """
+
+        time.sleep(self.config.lease_seconds + 0.85)
+
     def _resume_on_second_driver(
         self,
         *,
@@ -483,8 +493,7 @@ class ScenarioController:
         """
 
         recovery_start = time.monotonic()
-        # Wait for lease to expire with margin for clock jitter under heavy xdist load
-        time.sleep(self.config.lease_seconds + 0.85)
+        self._await_lease_expiry()
         mark("lease wait finished")
 
         process2 = self._spawn_driver(config_path)
