@@ -1800,6 +1800,9 @@ def get_evolution_status_endpoint(
         "active_promotions": report.active_promotions,
         "rejected_count": report.rejected_count,
         "proposals": [p.model_dump(mode="json") for p in proposals],
+        "empty_reason": None if proposals else (
+            "Nenhuma evolucao registrada: melhorias de skills e regras entram aqui ao concluir tickets (USR-220)."
+        ),
     }
 
 
@@ -1893,7 +1896,30 @@ def list_catalog_components_endpoint(
     return {
         "count": len(components),
         "components": [c.model_dump(mode="json") for c in components],
+        "empty_reason": None if components else (
+            "Nenhum componente no catalogo: a fabrica registra componentes reutilizaveis "
+            "automaticamente ao concluir tickets (USR-220)."
+        ),
     }
+
+
+@router.post("/catalog/delivery-sync")
+def catalog_delivery_sync_endpoint(
+    payload: Dict[str, Any] = Body(...),
+    x_darkfac_telemetry_key: Optional[str] = Header(default=None, alias="X-DarkFac-Telemetry-Key"),
+) -> Dict[str, Any]:
+    """Machine channel (USR-220): merge catalog/evolution entries registered by a workstation delivery."""
+    configured_key = os.environ.get("DARKFAC_TELEMETRY_KEY")
+    if not configured_key:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Catalog synchronization is disabled; set DARKFAC_TELEMETRY_KEY.",
+        )
+    if not x_darkfac_telemetry_key or not secrets.compare_digest(x_darkfac_telemetry_key, configured_key):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid telemetry key.")
+    from core.catalog.delivery import merge_payload
+
+    return merge_payload(payload)
 
 
 @router.post("/catalog/sync")

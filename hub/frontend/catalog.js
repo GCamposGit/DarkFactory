@@ -160,11 +160,14 @@ async function loadCatalogData() {
   catalogState.loading = true;
   try {
     const [compRes, evoRes] = await Promise.all([
-      fetch("/api/catalog/components").then((r) => r.ok ? r.json() : { components: [] }),
+      fetch("/api/catalog/components").then((r) => r.ok ? r.json() : { components: [], error: true }),
       fetch("/api/evolution/status").then((r) => r.ok ? r.json() : null),
     ]);
 
     catalogState.components = compRes.components || [];
+    catalogState.componentsError = !!compRes.error;
+    catalogState.componentsEmptyReason = compRes.empty_reason || null;
+    catalogState.evolutionEmptyReason = evoRes?.empty_reason || null;
     catalogState.evolution = evoRes;
     catalogState.proposals = evoRes?.proposals || [];
     renderCatalogUI();
@@ -180,7 +183,10 @@ function renderCatalogUI() {
   if (!grid) return;
 
   if (!catalogState.components.length) {
-    grid.innerHTML = `<div class="col-span-full py-4 text-center text-xs text-slate-500">Nenhum componente registrado no catálogo cross-projeto.</div>`;
+    const emptyMsg = catalogState.componentsError
+      ? "Não foi possível carregar o catálogo agora. Use Atualizar para tentar novamente."
+      : (catalogState.componentsEmptyReason || "Nenhum componente registrado no catálogo cross-projeto.");
+    grid.innerHTML = `<div class="col-span-full py-4 text-center text-xs text-slate-500">${escapeHtml(emptyMsg)}</div>`;
   } else {
     grid.innerHTML = catalogState.components.map((c) => {
       const isSyncing = catalogState.syncingId === c.id;
@@ -192,6 +198,7 @@ function renderCatalogUI() {
               <span class="rounded bg-slate-800 px-1.5 py-0.5 text-[10px] font-mono text-slate-400">v${escapeHtml(c.version)}</span>
             </div>
             <p class="text-[11px] text-slate-400 leading-relaxed mb-3">${escapeHtml(c.description)}</p>
+            ${c.metadata && c.metadata.origin === "delivery" ? `<p class="text-[10px] font-mono text-slate-500 mb-2">${escapeHtml(c.metadata.ticket_id || "")}${c.metadata.pr_url ? ` · <a class="underline" target="_blank" rel="noopener" href="${escapeHtml(c.metadata.pr_url)}">PR</a>` : ""}</p>` : ""}
           </div>
           
           <div class="space-y-2 pt-2 border-t border-slate-800/50">
@@ -237,12 +244,17 @@ function renderCatalogUI() {
   const proposalsList = document.getElementById("evolution-proposals-list");
   if (proposalsList) {
     if (!catalogState.proposals.length) {
-      proposalsList.innerHTML = `<div class="py-2 text-slate-500 text-xs">Nenhuma proposta de mutação evolutiva registrada no momento.</div>`;
+      proposalsList.innerHTML = `<div class="py-2 text-slate-500 text-xs">${escapeHtml(catalogState.evolutionEmptyReason || "Nenhuma proposta de mutação evolutiva registrada no momento.")}</div>`;
     } else {
       proposalsList.innerHTML = catalogState.proposals.map((p) => {
-        const isEval = catalogState.evaluatingId === p.id;
-        const isProm = catalogState.promotingId === p.id;
-        const isRoll = catalogState.rollingBackId === p.id;
+        const pid = p.proposal_id || p.id;
+        const delivered = p.metadata && p.metadata.origin === "delivery";
+        const links = delivered
+          ? ` <span class="text-[10px] font-mono text-slate-500">${escapeHtml(p.metadata.ticket_id || "")}${p.metadata.pr_url ? ` · <a class="underline" target="_blank" rel="noopener" href="${escapeHtml(p.metadata.pr_url)}">PR</a>` : ""}</span>`
+          : "";
+        const isEval = catalogState.evaluatingId === pid;
+        const isProm = catalogState.promotingId === pid;
+        const isRoll = catalogState.rollingBackId === pid;
 
         let statusBadge = `<span class="px-2 py-0.5 rounded text-[10px] font-mono bg-slate-800 text-slate-300">${p.status}</span>`;
         if (p.status === "promoted") {
@@ -257,8 +269,8 @@ function renderCatalogUI() {
           <div class="p-3 rounded-xl border border-slate-800 bg-slate-950/40 flex flex-col md:flex-row md:items-center justify-between gap-3">
             <div class="space-y-1">
               <div class="flex items-center gap-2 flex-wrap">
-                <span class="font-mono font-semibold text-slate-200 text-xs">${escapeHtml(p.id)}</span>
-                ${statusBadge}
+                <span class="font-mono font-semibold text-slate-200 text-xs">${escapeHtml(pid)}</span>
+                ${statusBadge}${links}
                 <span class="text-[10px] text-slate-400 font-mono">${escapeHtml(p.target_path)}</span>
               </div>
               <p class="text-[11px] text-slate-400">${escapeHtml(p.rationale || "Sem justificativa")}</p>
@@ -267,7 +279,7 @@ function renderCatalogUI() {
             <div class="flex items-center gap-1.5 self-end md:self-auto flex-wrap">
               <button 
                 type="button" 
-                onclick="evaluateEvolutionProposal('${escapeHtml(p.id)}')"
+                onclick="evaluateEvolutionProposal('${escapeHtml(pid)}')"
                 ${isEval ? "disabled" : ""}
                 class="px-2.5 py-1 rounded-lg border border-indigo-500/40 bg-indigo-500/10 text-indigo-300 hover:bg-indigo-500/20 text-[11px] font-mono transition disabled:opacity-50">
                 ${isEval ? "Avaliando..." : "Avaliar"}
@@ -275,7 +287,7 @@ function renderCatalogUI() {
               
               <button 
                 type="button" 
-                onclick="promoteEvolutionProposal('${escapeHtml(p.id)}')"
+                onclick="promoteEvolutionProposal('${escapeHtml(pid)}')"
                 ${isProm || p.status === "promoted" ? "disabled" : ""}
                 class="px-2.5 py-1 rounded-lg border border-emerald-500/40 bg-emerald-500/10 text-emerald-300 hover:bg-emerald-500/20 text-[11px] font-mono transition disabled:opacity-40">
                 ${isProm ? "Promovendo..." : "Promover"}
@@ -283,8 +295,8 @@ function renderCatalogUI() {
 
               <button 
                 type="button" 
-                onclick="rollbackEvolutionProposal('${escapeHtml(p.id)}')"
-                ${isRoll || p.status !== "promoted" ? "disabled" : ""}
+                onclick="rollbackEvolutionProposal('${escapeHtml(pid)}')"
+                ${isRoll || delivered || p.status !== "promoted" ? "disabled" : ""}
                 class="px-2.5 py-1 rounded-lg border border-amber-500/40 bg-amber-500/10 text-amber-300 hover:bg-amber-500/20 text-[11px] font-mono transition disabled:opacity-40">
                 ${isRoll ? "Revertendo..." : "Reverter"}
               </button>
