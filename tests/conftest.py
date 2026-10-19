@@ -36,6 +36,14 @@ if "DARKFAC_STATE_ROOT" not in os.environ:
     _EARLY_STATE_ROOT = tempfile.mkdtemp(prefix="darkfac_state_")
     os.environ["DARKFAC_STATE_ROOT"] = _EARLY_STATE_ROOT
 
+# Always isolated, even when inherited: a test that builds the worker app without
+# a state dir (``create_worker_app()`` -> ``JobManager``) recovers the persisted
+# jobs it finds there. Pointed at the host's real worker state, it "recovered"
+# the live job running this very suite (its owner's psutil start time drifts
+# after a VM freeze/restore, so the live worker looked dead) and SIGTERMed the
+# job's process tree ~2 s into the parallel step (exit -15 on the grokbox).
+os.environ["DARKFAC_WORKER_STATE_DIR"] = tempfile.mkdtemp(prefix="darkfac_worker_state_")
+
 import numpy as np
 import pytest
 import soundfile as sf
