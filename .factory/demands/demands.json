@@ -9105,8 +9105,8 @@
     "project_id": "darkfac",
     "title": "Testes do spike de runtime nativo instaveis no Windows da CI (test_runtime_spike_native e lab usr157 R02)",
     "origin": "agent",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "b474aa3cc156009f9679b533c63ee5f02dfb16b0",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -9133,7 +9133,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-18T11:53:17.772862Z",
-    "updated_at": "2026-10-18T11:53:17.772862Z"
+    "updated_at": "2026-10-19T02:31:43.281927Z"
   },
   {
     "id": "USR-314",
