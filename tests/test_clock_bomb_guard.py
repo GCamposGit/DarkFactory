@@ -63,7 +63,6 @@ CLOCK_BOMB_EXCEPTIONS: dict[str, str] = {
     "tests/test_continuous_planning.py": "NOW usado para construir um expires_at sempre no passado (lease ja expirada); seguro para sempre porque o relogio real so avanca",
     "tests/test_control_store_failure_evidence.py": "_T0 passado explicitamente em todo accept/claim/finish; SQLiteControlStore só lê o relógio real quando now é omitido, nunca é o caso aqui",
     "tests/test_infra08_three_tier_backup.py": "dt fixo so verifica se o assinador SigV4 formata UM datetime DADO corretamente; nunca comparado ao relogio real",
-    "tests/test_line_acceptance.py": "base_date so alimenta green_streak (compara relatorios entre si) e jobs ja 'succeeded'; o branch de relogio real de run_state nao e alcancado",
     "tests/test_line_dogfood.py": "created_at so usado como chave de ordenacao relativa; o fallback de relogio real de submit_dogfood_item nao e exercitado com esse valor",
     "tests/test_line_lock.py": "started_at e um epoch fixo so formatado para texto ('2026-10-12' no aviso); nunca comparado ao relogio real",
     "tests/test_line_owner_intake.py": "jobs semeados via SQL bruto nunca tem cause_code='no_route_available', unico caso em que run_state cairia no fallback de relogio real",
