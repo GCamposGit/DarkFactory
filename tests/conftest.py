@@ -449,6 +449,15 @@ def _isolate_operating_harness_env(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.fixture(autouse=True)
+def _reset_node_liveness_cache() -> None:
+    """The short liveness cache must not leak a node status between tests (USR-217)."""
+
+    from core.infra import node_liveness
+
+    node_liveness.reset_cache()
+
+
+@pytest.fixture(autouse=True)
 def _isolate_remote_infra_env(monkeypatch: pytest.MonkeyPatch) -> None:
     """Prevent tests from inheriting real worker addresses and probe settings.
 

@@ -28,6 +28,8 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 import psutil
 from pydantic import BaseModel, ConfigDict, Field
 
+from core.infra.node_liveness import get_node_liveness
+
 logger = logging.getLogger(__name__)
 
 
@@ -114,7 +116,7 @@ class NodeLiveMetrics(BaseModel):
     node_name: str
     role: str
     is_live: bool
-    status: str = Field(default="online", description="Node health: healthy, warning, critical, offline")
+    status: str = Field(default="online", description="Node health: healthy, warning, critical, online, online_busy, offline")
     hardware: Optional[HardwareMetrics] = None
     container_count: int = Field(default=0)
     latency_ms: Optional[float] = None
@@ -461,47 +463,72 @@ def collect_desktop_hardware_node(
     timeout: float = DESKTOP_METRICS_MAX_TIMEOUT_SECONDS,
     worker_url: str = DESKTOP_WORKER_METRICS_URL,
 ) -> NodeLiveMetrics:
-    """Probe the Desktop worker and preserve the last successful contact time when offline."""
+    """Desktop node: liveness comes from the shared ``/health`` probe (USR-217).
+
+    Hardware telemetry is optional detail; a reachable-but-busy node is never offline.
+    """
     global _desktop_last_contact_at
 
     now = datetime.now(timezone.utc)
     bounded_timeout = min(max(timeout, 0.05), DESKTOP_METRICS_MAX_TIMEOUT_SECONDS)
-    request = urllib.request.Request(worker_url, headers={"Accept": "application/json"})
-    try:
-        with urllib.request.urlopen(request, timeout=bounded_timeout) as response:
-            payload = json.loads(response.read().decode("utf-8"))
-        hardware = HardwareMetrics.model_validate(payload)
-        if hardware.node_id not in {"onprem-z97-server", "desktop-g45ipem"}:
-            raise ValueError("Desktop worker returned telemetry for a different node")
-        contacted_at = datetime.now(timezone.utc)
-        with _desktop_contact_lock:
-            _desktop_last_contact_at = contacted_at
-        return NodeLiveMetrics(
-            node_id="onprem-z97-server",
-            node_name="Desktop (desktop-g45ipem)",
-            role="on_prem_server",
-            is_live=True,
-            status=_hardware_health_status(hardware),
-            hardware=hardware,
-            container_count=0,
-            last_contact_at=contacted_at,
-            reported_at=now,
-        )
-    except Exception as exc:
-        logger.debug("Desktop hardware telemetry is unavailable: %s", exc)
+    liveness = get_node_liveness(DESKTOP_NODE_ID, timeout=bounded_timeout)
+    node_name = "Desktop (desktop-g45ipem)"
+
+    def _offline(use_liveness_contact: bool = True) -> NodeLiveMetrics:
         with _desktop_contact_lock:
             last_contact_at = _desktop_last_contact_at
+        if use_liveness_contact and liveness.last_contact_at and (last_contact_at is None or liveness.last_contact_at > last_contact_at):
+            last_contact_at = liveness.last_contact_at
         return NodeLiveMetrics(
-            node_id="onprem-z97-server",
-            node_name="Desktop (desktop-g45ipem)",
+            node_id=DESKTOP_NODE_ID,
+            node_name=node_name,
             role="on_prem_server",
             is_live=False,
             status="offline",
             hardware=None,
             container_count=0,
+            latency_ms=None,
             last_contact_at=last_contact_at,
             reported_at=now,
         )
+
+    if not liveness.is_live:
+        return _offline()
+
+    hardware: Optional[HardwareMetrics] = None
+    try:
+        request = urllib.request.Request(worker_url, headers={"Accept": "application/json"})
+        with urllib.request.urlopen(request, timeout=bounded_timeout) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+        hardware = HardwareMetrics.model_validate(payload)
+        if hardware.node_id not in {DESKTOP_NODE_ID, "desktop-g45ipem"}:
+            logger.debug("Desktop worker returned telemetry for a different node")
+            return _offline(use_liveness_contact=False)
+    except Exception as exc:
+        logger.debug("Desktop hardware telemetry is unavailable (node is live): %s", exc)
+        hardware = None
+
+    contacted_at = liveness.last_contact_at or datetime.now(timezone.utc)
+    with _desktop_contact_lock:
+        _desktop_last_contact_at = contacted_at
+    if hardware is not None:
+        status = _hardware_health_status(hardware)
+        if liveness.busy and status == "healthy":
+            status = "online_busy"
+    else:
+        status = liveness.status
+    return NodeLiveMetrics(
+        node_id=DESKTOP_NODE_ID,
+        node_name=node_name,
+        role="on_prem_server",
+        is_live=True,
+        status=status,
+        hardware=hardware,
+        container_count=0,
+        latency_ms=liveness.latency_ms,
+        last_contact_at=contacted_at,
+        reported_at=now,
+    )
 
 
 def build_infra_metrics_report(
@@ -549,17 +576,35 @@ def build_infra_metrics_report(
             reported_at=now,
         )
     else:
-        notebook_node = NodeLiveMetrics(
-            node_id=NOTEBOOK_NODE_ID,
-            node_name="Notebook (predator-neo-16)",
-            role="dev_workstation",
-            is_live=False,
-            status="no_recent_data",
-            hardware=None,
-            container_count=0,
-            last_contact_at=notebook_last,
-            reported_at=now,
-        )
+        # Same /health probe as /api/harness/workers (USR-217): never disagree on reachability.
+        nb_liveness = get_node_liveness(NOTEBOOK_NODE_ID, timeout=min(timeout, DESKTOP_METRICS_MAX_TIMEOUT_SECONDS))
+        if nb_liveness.is_live:
+            with _desktop_contact_lock:
+                globals()["_notebook_last_contact_at"] = nb_liveness.last_contact_at
+            notebook_node = NodeLiveMetrics(
+                node_id=NOTEBOOK_NODE_ID,
+                node_name="Notebook (predator-neo-16)",
+                role="dev_workstation",
+                is_live=True,
+                status=nb_liveness.status,
+                hardware=None,
+                container_count=0,
+                latency_ms=nb_liveness.latency_ms,
+                last_contact_at=nb_liveness.last_contact_at,
+                reported_at=now,
+            )
+        else:
+            notebook_node = NodeLiveMetrics(
+                node_id=NOTEBOOK_NODE_ID,
+                node_name="Notebook (predator-neo-16)",
+                role="dev_workstation",
+                is_live=False,
+                status="no_recent_data",
+                hardware=None,
+                container_count=0,
+                last_contact_at=notebook_last,
+                reported_at=now,
+            )
     nodes: List[NodeLiveMetrics] = [
         notebook_node,
         NodeLiveMetrics(

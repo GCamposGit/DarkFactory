@@ -165,7 +165,7 @@ async function loadHarnessWorkers() {
       const workers = await res.json();
       harnessState.workers = workers || [];
       if (label) {
-        const available = workers.filter((w) => w.status === "available" || w.status === "ready").length;
+        const available = workers.filter((w) => w.status === "online" || w.status === "online_busy" || w.status === "available" || w.status === "ready").length;
         label.innerHTML = `Workers Conectados: <strong class="text-emerald-400 font-bold">${available}/${workers.length}</strong>`;
       }
     }
