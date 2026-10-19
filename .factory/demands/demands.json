@@ -6135,8 +6135,8 @@
     "project_id": "darkfac",
     "title": "Reorganizar o Hub: colapsar secoes secundarias, mover Estudio para o menu e remover o painel de tarefas redundante",
     "origin": "user",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "8f61b1ff598df5d4691f6676c1c76bf0cd519d03",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "later",
@@ -6168,7 +6168,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-10T15:10:25.720813Z",
-    "updated_at": "2026-10-11T17:49:17.206876Z"
+    "updated_at": "2026-10-19T13:47:11.280773Z"
   },
   {
     "id": "USR-220",
