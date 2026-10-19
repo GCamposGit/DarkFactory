@@ -24,6 +24,29 @@ from typing import Any
 ENV_MAILER_URL = "DARKFAC_MAILER_URL"
 ENV_MAILER_TOKEN = "DARKFAC_MAILER_TOKEN"
 DEFAULT_TIMEOUT_SEC = 15.0
+#: Cloudflare answers the default ``Python-urllib/x.y`` agent with 403 "error code: 1010"
+#: (browser integrity check) before the request ever reaches the Worker.
+USER_AGENT = "DarkFac-mailer-client/1.0"
+
+
+def _user_registry_env(name: str) -> str:
+    """Windows User environment (HKCU\\Environment); empty elsewhere or when unset."""
+    if os.name != "nt":
+        return ""
+    try:
+        import winreg
+
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, "Environment") as key:
+            raw, _kind = winreg.QueryValueEx(key, name)
+        return str(raw).strip()
+    except OSError:
+        return ""
+
+
+def _env(name: str) -> str:
+    """Process env first, then the Windows User environment: a shell opened before the
+    variable was set never inherits it (nor does a run_ticket launched from it)."""
+    return os.environ.get(name, "").strip() or _user_registry_env(name)
 
 
 def send_grokbot_email(subject: str, text: str, *, timeout: float = DEFAULT_TIMEOUT_SEC) -> dict[str, Any]:
@@ -32,8 +55,8 @@ def send_grokbot_email(subject: str, text: str, *, timeout: float = DEFAULT_TIME
     (missing env vars, HTTP error, network error) returns ``{"ok": False, "error": ...}``.
     """
 
-    url = os.environ.get(ENV_MAILER_URL, "").strip()
-    token = os.environ.get(ENV_MAILER_TOKEN, "").strip()
+    url = _env(ENV_MAILER_URL)
+    token = _env(ENV_MAILER_TOKEN)
     missing = [name for name, value in ((ENV_MAILER_URL, url), (ENV_MAILER_TOKEN, token)) if not value]
     if missing:
         return {"ok": False, "error": f"missing env var(s): {', '.join(missing)}"}
@@ -46,6 +69,7 @@ def send_grokbot_email(subject: str, text: str, *, timeout: float = DEFAULT_TIME
         headers={
             "Content-Type": "application/json; charset=utf-8",
             "Authorization": f"Bearer {token}",
+            "User-Agent": USER_AGENT,
         },
     )
     try:

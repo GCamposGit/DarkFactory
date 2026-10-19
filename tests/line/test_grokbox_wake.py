@@ -171,3 +171,16 @@ def test_wait_if_down_probe_exception_does_not_crash() -> None:
     )
 
     assert woke is False
+
+
+def test_state_dir_is_ignored_by_git_so_the_shared_checkout_stays_clean() -> None:
+    """The wake state lives in the shared checkout's .factory; if git saw it, the next
+    run_ticket would refuse with "checkout compartilhado sujo"."""
+    import subprocess
+
+    repo = Path(__file__).resolve().parents[2]
+    rel = f".factory/{grokbox_wake.STATE_SUBDIR}/{grokbox_wake.STATE_FILE_NAME}"
+    result = subprocess.run(
+        ["git", "check-ignore", "-q", rel], cwd=repo, capture_output=True, check=False
+    )
+    assert result.returncode == 0, f"{rel} must be ignored by .gitignore"
