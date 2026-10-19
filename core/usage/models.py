@@ -15,6 +15,30 @@ def utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+STALE_AFTER_SECONDS = 600
+
+
+def snapshot_age_seconds(checked_at: Optional[str], now: Optional[datetime] = None) -> Optional[int]:
+    """Whole seconds between ``checked_at`` and ``now`` (None when unparseable); never negative."""
+    if not checked_at:
+        return None
+    try:
+        parsed = datetime.fromisoformat(str(checked_at).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    reference = now or datetime.now(timezone.utc)
+    if reference.tzinfo is None:
+        reference = reference.replace(tzinfo=timezone.utc)
+    return max(0, int((reference - parsed).total_seconds()))
+
+
+def is_stale(age_seconds: Optional[int]) -> bool:
+    """Strictly older than 600 s is stale; exactly 600 s is still fresh."""
+    return age_seconds is not None and age_seconds > STALE_AFTER_SECONDS
+
+
 class AccountConnectionStatus(str, Enum):
     CONNECTED = "connected"
     LIMITED = "limited"
@@ -74,6 +98,17 @@ class ProviderAccountUsage(BaseModel):
     raw_fields: dict[str, Any] = Field(default_factory=dict)
     period_start: Optional[str] = None
     plausibility_flags: List[str] = Field(default_factory=list)
+    # Freshness of a synced snapshot (USR-233): node that sent it, age and the stale flag.
+    source_node: Optional[str] = None
+    age_seconds: Optional[int] = None
+    stale: bool = False
+
+    def with_freshness(self, now: Optional[datetime] = None) -> "ProviderAccountUsage":
+        """Fill ``age_seconds``/``stale`` from ``checked_at`` (status and windows stay untouched)."""
+        age = snapshot_age_seconds(self.checked_at, now)
+        self.age_seconds = age
+        self.stale = is_stale(age)
+        return self
 
 
 class AccountUsageReport(BaseModel):

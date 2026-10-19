@@ -222,7 +222,9 @@ class AccountUsageAdapter(ABC):
                 logger.warning("Cannot read quota snapshot %s: %s", candidate, exc)
         return None
 
-    def _from_snapshot(self, payload: Dict[str, Any], adapter: str = "json_snapshot") -> ProviderAccountUsage:
+    def _from_snapshot(
+        self, payload: Dict[str, Any], adapter: str = "json_snapshot", now: Optional[datetime] = None
+    ) -> ProviderAccountUsage:
         raw_windows = payload.get("windows", [])
         windows: List[QuotaWindow] = []
         if isinstance(raw_windows, list):
@@ -271,7 +273,8 @@ class AccountUsageAdapter(ABC):
             raw_fields=sanitize_raw(self.spec.provider_id, payload.get("raw_fields") or {}),
             period_start=payload.get("period_start"),
             plausibility_flags=payload.get("plausibility_flags") or [],
-        )
+            source_node=str(payload["source_node"]) if payload.get("source_node") else None,
+        ).with_freshness(now)
 
 
 _APP_SERVER_BACKOFF_SECONDS = 600.0
@@ -1825,10 +1828,10 @@ class SyncedSnapshotAdapter(AccountUsageAdapter):
     A missing snapshot is "no synced data" (UNKNOWN), distinct from DISCONNECTED.
     """
 
-    def inspect(self, force: bool = False) -> ProviderAccountUsage:
+    def inspect(self, force: bool = False, now: Optional[datetime] = None) -> ProviderAccountUsage:
         snapshot = self._snapshot_payload()
         if snapshot:
-            return self._from_snapshot(snapshot, adapter=str(snapshot.get("adapter") or "synced_snapshot"))
+            return self._from_snapshot(snapshot, adapter=str(snapshot.get("adapter") or "synced_snapshot"), now=now)
         return ProviderAccountUsage(
             provider_id=self.spec.provider_id,
             provider_name=self.spec.provider_name,

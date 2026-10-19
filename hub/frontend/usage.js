@@ -205,6 +205,10 @@ function renderAccountCard(account) {
     : `<div class="rounded-lg border border-dashed border-slate-800 px-3 py-2 text-[10px] text-slate-500">Percentual indisponível — não interpretado como 0%.</div>`;
   const plan = account.plan ? `<span class="text-slate-500">${usageEscapeHtml(account.plan)}</span>` : "";
   const checkedAt = usageEscapeHtml(account.checked_at || "");
+  const freshness = usageFreshness(account);
+  const staleBadge = freshness.stale
+    ? `<span data-stale-badge class="rounded-full border border-amber-400/60 bg-amber-500/20 px-2 py-0.5 text-[10px] font-bold uppercase text-amber-300">desatualizado</span>`
+    : "";
   return `
     <article class="rounded-xl border ${styles.border} bg-slate-950/65 p-3.5" data-provider="${usageEscapeHtml(account.provider_id)}">
       <div class="flex items-start justify-between gap-3">
@@ -214,13 +218,14 @@ function renderAccountCard(account) {
             <span>${usageEscapeHtml(account.family)}</span>${plan}
           </div>
         </div>
-        <span class="rounded-full px-2 py-0.5 text-[9px] font-mono ${styles.badge}">${styles.label}</span>
+        <div class="flex flex-col items-end gap-1">${staleBadge}<span class="rounded-full px-2 py-0.5 text-[9px] font-mono ${styles.badge}">${styles.label}</span></div>
       </div>
       <div class="mt-3 space-y-2">${quota}</div>
       <div class="mt-3 flex items-end justify-between gap-3">
         <div class="min-w-0">
           <p class="text-[10px] leading-4 text-slate-500">${usageEscapeHtml(account.message)}</p>
           <p class="mt-1 text-[9px] font-mono text-slate-600" title="${checkedAt}">${usageEscapeHtml(formatUsageCheckedAt(account.checked_at))}</p>
+          <p data-freshness class="mt-0.5 text-[9px] font-mono ${freshness.stale ? "text-amber-300" : "text-slate-500"}">${usageEscapeHtml(freshness.text)}</p>
         </div>
         <a href="${usageEscapeHtml(account.dashboard_url || "#")}" target="_blank" rel="noopener noreferrer" class="shrink-0 text-[9px] font-mono text-indigo-400 hover:text-indigo-300">painel ↗</a>
       </div>
@@ -298,6 +303,20 @@ function usageStatusStyle(status) {
     unknown: { label: "desconhecida", border: "border-slate-800", badge: "bg-slate-800 text-slate-400" },
   };
   return values[status] || values.unknown;
+}
+
+// Age/origin line for a card (USR-233). Server fields win; stale data stays visible, never zeroed.
+function usageFreshness(account) {
+  const age = Number.isFinite(account.age_seconds) ? account.age_seconds : null;
+  if (age === null) return { stale: false, text: "sem dado sincronizado" };
+  const stale = account.stale === true || age > 600;
+  let ago;
+  if (age < 60) ago = "há menos de 1 min";
+  else if (age < 3600) ago = `há ${Math.floor(age / 60)} min`;
+  else if (age < 86400) ago = `há ${Math.floor(age / 3600)} h`;
+  else ago = `há ${Math.floor(age / 86400)} d`;
+  const origin = account.source_node ? ` · origem: ${account.source_node}` : " · origem desconhecida";
+  return { stale, text: `dado ${ago}${origin}` };
 }
 
 function formatUsageCheckedAt(value) {
