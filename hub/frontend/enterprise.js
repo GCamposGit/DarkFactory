@@ -51,7 +51,6 @@ if (document.readyState === "loading") {
 function mountEnterpriseSection() {
   if (document.getElementById("enterprise-security-section")) return;
   const targetAnchor =
-    document.getElementById("content-studio-section") ||
     document.getElementById("cross-catalog-section") ||
     document.getElementById("infrastructure-cards-section") ||
     document.querySelector("main");

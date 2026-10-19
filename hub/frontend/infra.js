@@ -467,6 +467,7 @@ function renderInfraMetrics(data) {
       </section>`;
   };
 
+  const containersCollapsed = hubCollapseIsCollapsed("infra-containers");
   const containerRows = items.map((item) => {
     const isRunning = ["running", "done", "active", "healthy"].includes(item.status);
     const statusPill = isRunning
@@ -516,14 +517,17 @@ function renderInfraMetrics(data) {
       </div>
 
       <div class="space-y-2 pt-2 border-t border-slate-800/80">
-        <div class="flex items-center justify-between text-xs font-mono">
+        <div class="flex items-center justify-between gap-2 text-xs font-mono">
           <span class="text-slate-300 font-semibold flex items-center gap-1.5">
             <span>🐳</span> Contêineres & Cargas de Trabalho Ativas
             <span class="text-[10px] font-normal text-slate-400">(${containers.running_containers || 0}/${containers.total_containers || 0} ativos)</span>
           </span>
-          <span class="text-[10px] text-slate-400">Orquestradores: ${(containers.orchestrators_detected || []).join(', ') || 'Nenhum'}</span>
+          <span class="flex items-center gap-2">
+            <span class="text-[10px] text-slate-400">Orquestradores: ${(containers.orchestrators_detected || []).join(', ') || 'Nenhum'}</span>
+            ${hubCollapseButtonHtml("infra-containers", "infra-containers-body", containersCollapsed)}
+          </span>
         </div>
-        <div class="overflow-x-auto rounded-lg border border-slate-800 bg-slate-900/40">
+        <div id="infra-containers-body" class="${containersCollapsed ? "hidden " : ""}overflow-x-auto rounded-lg border border-slate-800 bg-slate-900/40">
           <table class="min-w-full divide-y divide-slate-800 text-left">
             <thead class="bg-slate-950/80 text-[10px] font-mono text-slate-400 uppercase">
               <tr>

@@ -42,15 +42,29 @@ if (document.readyState === "loading") {
   initStudio();
 }
 
+function openStudioDrawer() {
+  const drawer = document.getElementById("studio-drawer");
+  if (!drawer) return;
+  drawer.classList.remove("hidden");
+  document.body.style.overflow = "hidden";
+}
+
+function closeStudioDrawer() {
+  const drawer = document.getElementById("studio-drawer");
+  if (!drawer) return;
+  drawer.classList.add("hidden");
+  document.body.style.overflow = "";
+}
+
+window.openStudioDrawer = openStudioDrawer;
+window.closeStudioDrawer = closeStudioDrawer;
+
 function mountStudioSection() {
   if (document.getElementById("content-studio-section")) return;
 
-  const targetAnchor =
-    document.getElementById("cross-catalog-section") ||
-    document.getElementById("infrastructure-cards-section") ||
-    document.getElementById("api-credits-section") ||
-    document.querySelector("main");
-  if (!targetAnchor) return;
+  // USR-219: o Estúdio vive no painel aberto pelo menu lateral, nao na pagina principal.
+  const drawerBody = document.getElementById("studio-drawer-body");
+  if (!drawerBody) return;
 
   const section = document.createElement("section");
   section.id = "content-studio-section";
@@ -241,7 +255,7 @@ function mountStudioSection() {
     </div>
   `;
 
-  targetAnchor.parentNode.insertBefore(section, targetAnchor.nextSibling);
+  drawerBody.appendChild(section);
 
   // Wire Event Listeners
   document.getElementById("btn-refresh-studio")?.addEventListener("click", () => loadStudioData());

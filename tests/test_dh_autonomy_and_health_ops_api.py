@@ -188,7 +188,9 @@ def test_tasks_js_defines_autonomy_dag_functions():
     assert file_path.is_file()
     content = file_path.read_text(encoding="utf-8")
 
-    assert "function switchTaskViewMode(" in content
+    # USR-219: the Fila/DAG switcher was removed with the redundant task panel; the DAG stays
+    # in its own collapsed section.
+    assert "function switchTaskViewMode(" not in content
     assert "function loadAutonomyPlan(" in content
     assert "function renderAutonomyPlan(" in content
     assert "function openAutonomyUnitModal(" in content
@@ -198,9 +200,10 @@ def test_index_html_has_dag_switchers_and_containers():
     """Verify index.html contains required DOM IDs for DH-12 and DH-17."""
     html = (FRONTEND_DIR / "index.html").read_text(encoding="utf-8")
 
-    assert 'id="tasks-view-btn-queue"' in html
-    assert 'id="tasks-view-btn-dag"' in html
-    assert 'id="tasks-queue-container"' in html
+    # USR-219: no Fila/DAG switcher and no task queue on the main page; the DAG containers stay.
+    assert 'id="tasks-view-btn-queue"' not in html
+    assert 'id="tasks-view-btn-dag"' not in html
+    assert 'id="tasks-queue-container"' not in html
     assert 'id="tasks-dag-container"' in html
     assert 'id="autonomy-plan-summary"' in html
     assert 'id="autonomy-gates-grid"' in html

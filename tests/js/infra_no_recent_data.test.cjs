@@ -6,6 +6,8 @@ const vm = require("node:vm");
 
 const source = fs.readFileSync(path.join(__dirname, "..", "..", "hub", "frontend", "infra.js"), "utf8");
 
+const collapseSource = fs.readFileSync(path.join(__dirname, "..", "..", "hub", "frontend", "collapse.js"), "utf8");
+
 function render(data) {
   const panel = { innerHTML: "" };
   const el = () => ({ addEventListener() {}, classList: { add() {}, remove() {} }, style: {}, set innerHTML(v) {}, set textContent(v) {} });
@@ -14,7 +16,7 @@ function render(data) {
     window: {}, console, fetch: async () => ({ ok: false }), setInterval() {}, setTimeout() {},
   };
   vm.createContext(ctx);
-  vm.runInContext(source + "\n;this.__render = renderInfraMetrics;", ctx);
+  vm.runInContext(collapseSource + ";\n" + source + "\n;this.__render = renderInfraMetrics;", ctx);
   ctx.__render(data);
   return panel.innerHTML;
 }
