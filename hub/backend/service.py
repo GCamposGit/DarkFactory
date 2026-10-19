@@ -558,7 +558,19 @@ class HubService:
 
     def run_tests(self, instruction: TestExecutionInstruction) -> DistilledTestReport:
         """Execute test suite via headless test subagent engine and return distilled report."""
-        return self.test_subagent_engine.execute(instruction)
+        return self._dispatch_test_run(self.test_subagent_engine, instruction)
+
+    @staticmethod
+    def _dispatch_test_run(engine: TestSubagentEngine, instruction: TestExecutionInstruction) -> DistilledTestReport:
+        """USR-218: remote Hub dispatches to an online worker; no worker -> explicit 503."""
+        from fastapi import HTTPException
+
+        from hub.backend.test_dispatch import NoTestWorkerAvailable, dispatch_test_run
+
+        try:
+            return dispatch_test_run(engine, instruction)
+        except NoTestWorkerAvailable as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
 
     def get_task_dashboard(self) -> TaskDashboardReport:
         """Build a read-only projection of lifecycle, run, usage and evidence data from the canonical control store (DH-16)."""
@@ -2816,7 +2828,7 @@ class HubService:
     def execute_test_run(self, instruction: TestExecutionInstruction) -> DistilledTestReport:
         """Executes a test run via TestSubagentEngine with automatic failover."""
         engine = TestSubagentEngine(project_root=self.project_root, log_dir=state_root() / "test_logs")
-        return engine.execute(instruction)
+        return self._dispatch_test_run(engine, instruction)
 
     # ---------------------------------------------------------------------------
     # Cloud Gateway & Autonomous Webhooks Service Methods (USR-18 / INFRA-09 / DF-20)
