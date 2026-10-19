@@ -161,10 +161,14 @@ def test_safe_rolling_update_preserves_peer_hosts(monkeypatch: pytest.MonkeyPatc
     (pids_dir / "fleet_worker_desktop.pid").write_text("103", encoding="utf-8")
 
     monkeypatch.setattr("scripts.start_fleet_worker.is_pid_alive", lambda pid: pid in (101, 102, 103))
+    # The pids are fake: never deliver a real SIGTERM to whatever owns pid 101 on this host.
+    sent: list[tuple[int, int]] = []
+    monkeypatch.setattr("scripts.start_fleet_worker.os.kill", lambda pid, sig: sent.append((pid, sig)))
 
     # Drain and stop Grokbox for rolling update
     drain_fleet_worker("grokbox", reason="rolling_update_step_1")
     stop_fleet_worker("grokbox")
+    assert [pid for pid, _sig in sent] == [101]
 
     # Grokbox is now stopped
     st_grok = get_worker_status("grokbox")
