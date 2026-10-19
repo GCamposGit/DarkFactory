@@ -1506,20 +1506,20 @@
       "title": "Grokbox mata o pytest com SIGTERM no inicio de todo portao: identificar e desligar o emissor na VM",
       "priority": "high",
       "status": "open",
-      "why": "Em 19/10/2026 02:38-02:42 BRT, 3 jobs seguidos do portao no grokbox (worker em b68dfe4, com USR-298) morreram com SIGTERM (-15) logo no inicio do pytest xdist, com /health saudavel; nenhuma linha [SIGTERM_PROBE]. O USR-298 ja classifica isso como infraestrutura e reenvia, entao nao ha HARNESS_FAIL falso, mas o grokbox (host mais rapido, ~3 min) esta fora do rodizio: a fila roda so no Notebook e no Desktop. Hipotese nao comprovada: vigia de memoria da VM (earlyoom/systemd-oomd/watchdog do sandbox) com ~3,2 GiB livres. Pedido de diagnostico somente leitura ja enviado ao grokbot por e-mail (darkfac-mailer) em 19/10 02:50.",
+      "why": "Em 19/10/2026 02:38-02:42 BRT, 3 jobs seguidos do portao no grokbox (worker em b68dfe4, com USR-298) morreram com SIGTERM (-15) logo no inicio do pytest xdist, com /health saudavel; nenhuma linha [SIGTERM_PROBE]. O USR-298 ja classifica isso como infraestrutura e reenvia, entao nao ha HARNESS_FAIL falso, mas o grokbox (host mais rapido, ~3 min) esta fora do rodizio: a fila roda so no Notebook e no Desktop. Hipotese nao comprovada: vigia de memoria da VM (earlyoom/systemd-oomd/watchdog do sandbox) com ~3,2 GiB livres. Pedido de diagnostico somente leitura ja enviado ao grokbot por e-mail (darkfac-mailer) em 19/10 02:50. ATUALIZACAO 19/10 ~06:30 BRT (Claude Code): diagnostico do grokbot sem OOM, sem PSI, sem vigia de memoria e sem fork da VM nos horarios; 9 jobs de 4 candidatos morrem ~1,5 s apos o passo paralelo, o ultimo verde foi c32bab5 as 21:45. Entre c32bab5 e a main so mudou core/harness/runner.py (USR-268), que no Linux so trata timeout. Replay exato do job (nice -n 5 + sigterm_probe + runner.py --quick --local, DARKFAC_HARNESS_WORKER_JOB=1) na main b5fd37e num Linux limpo: 4511 testes, HARNESS_PASS, sem SIGTERM. Return code -15 sem [SIGTERM_PROBE] significa que o sinal foi direto ao runner (filho da sonda). Suspeita: ambiente do grokbox (venv compartilhado alterado por _sync_requirements ou variavel do worker), nao o codigo do candidato. Proximo passo: replay do job no grokbox sob strace.",
       "blocks": [
         "USR-270"
       ],
       "depends_on": [],
       "steps": [
         {
-          "text": "Leia a resposta do grokbot (Chief of Staff) ao e-mail '[DarkFac] grokbox: SIGTERM mata o pytest no inicio do portao'. Se nao houver resposta, peca no chat do Chief of Staff que rode na VM, somente leitura: dmesg -T | tail -80 ; ps aux | grep -iE 'earlyoom|oomd|watchdog|supervisor' ; free -m ; cat /proc/pressure/memory."
+          "text": "FEITO: diagnostico somente leitura do grokbot (/workspace/darkfac/diag-sigterm-2026-10-19.md)."
         },
         {
-          "text": "Se aparecer earlyoom/systemd-oomd ou outro vigia matando o maior processo, peca ao Chief of Staff para excluir o worker de testes (python do /workspace/darkfac/DarkFactory) da lista de vitimas ou subir o limite, e reiniciar o worker so com /health busy=false."
+          "text": "Abra o chat do Grok Chief of Staff e envie a mensagem preparada pelo Claude Code no chat de 19/10 (variaveis do worker, pacotes do .venv instalados por volta de 22:50, e replay do job sob strace com o worker ocioso). Cole a resposta no chat do Claude Code."
         },
         {
-          "text": "Avise um agente (Claude Code): ele roda o portao de prova so no grokbox e devolve o grokbox ao rodizio.",
+          "text": "Com a resposta, o agente identifica o emissor, corrige (ticket ou ajuste no worker) e roda o portao de prova so no grokbox.",
           "command": "Invoke-RestMethod http://100.77.130.5:8080/health -TimeoutSec 15 | Select-Object git_sha, busy"
         }
       ],
