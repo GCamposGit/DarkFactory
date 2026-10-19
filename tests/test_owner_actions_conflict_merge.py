@@ -86,7 +86,7 @@ def test_new_actions_on_both_sides_are_kept(repo, preserve: bool) -> None:
 
 def test_status_change_on_one_side_survives_new_item_on_other(repo) -> None:
     local, main_commit = repo
-    done = _row("OA-002", status="done", resolved_at="2026-10-18T10:00:00Z")
+    done = _row("OA-002", status="done", resolved_at="2030-01-02T10:00:00Z")
     _branch_commit(local, [_row("OA-001"), done])
     main_commit([_row("OA-001"), _row("OA-002"), _row("OA-003")])
     ok, files, _ = GitAutonomyManager(local)._sync_with_base("main", local, preserve_commits=True)
