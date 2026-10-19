@@ -365,6 +365,10 @@ class HubService:
             snapshot_root / "providers", synced_only=bool(snapshot_root_env) and usage_dir is None
         )
         self.api_credits_monitor = ApiCreditsMonitor(snapshot_root / "credits")
+        # USR-234: refresh requests for the metering host live next to the synced snapshots.
+        from core.usage.refresh_requests import RefreshRequestStore
+        self.refresh_request_store = RefreshRequestStore(snapshot_root / "refresh_requests.json")
+        self._probes_locally = not (bool(snapshot_root_env) and usage_dir is None)
         from core.telemetry.store import TelemetryStore
         self.telemetry_store = TelemetryStore(self.usage_dir.parent / "telemetry.db")
         try:
@@ -1548,6 +1552,23 @@ class HubService:
     def get_account_usage(self, force: bool = False) -> Any:
         """Return a partial-success report for every known AI platform."""
         return self.account_usage_monitor.inspect(force=force)
+
+    def request_account_refresh(self, target_node: Optional[str] = None) -> Any:
+        """Record a refresh request for the metering host; never probe CLIs on a synced-only Hub."""
+        from core.usage.refresh_requests import RefreshRequestUpdate, RefreshStatus
+
+        request = self.refresh_request_store.create(target_node)
+        if self._probes_locally:
+            # Local Hub is itself the metering host: measure now and close the request.
+            try:
+                report = self.account_usage_monitor.inspect(force=True)
+                change = RefreshRequestUpdate(
+                    status=RefreshStatus.DONE, checked_at=str(getattr(report, "checked_at", "") or "") or None
+                )
+            except Exception as exc:  # noqa: BLE001
+                change = RefreshRequestUpdate(status=RefreshStatus.FAILED, failure_reason=str(exc)[:300])
+            request = self.refresh_request_store.update(request.id, change) or request
+        return request
 
     def get_model_usage(self, project_id: Optional[str] = None) -> Any:
         """Return project-wide model counters and recent attempts."""

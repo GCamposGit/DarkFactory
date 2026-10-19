@@ -354,7 +354,16 @@
       "surface": "ai-usage-section"
     },
     "POST /api/usage/accounts/refresh": {
-      "surface": "ai-usage-section"
+      "surface": "refresh-ai-usage"
+    },
+    "GET /api/usage/accounts/refresh/{request_id}": {
+      "surface": "refresh-ai-usage"
+    },
+    "GET /api/usage/accounts/refresh-requests/pending": {
+      "machine": "Host medidor consulta solicitacoes pendentes de atualizacao de cotas (chave de telemetria)"
+    },
+    "POST /api/usage/accounts/refresh-requests/{request_id}/update": {
+      "machine": "Host medidor fecha a solicitacao de atualizacao de cotas com checked_at ou motivo de falha (chave de telemetria)"
     },
     "GET /api/usage/models": {
       "surface": "ai-usage-section"

@@ -7021,8 +7021,8 @@
     "project_id": "darkfac",
     "title": "USR-206 fatia 3: Atualizar cotas cria uma solicitacao de remedicao que o host medidor executa em ate 60 s",
     "origin": "user",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "f0fa8b091984ac3f89fcf9890f25a892703e3d32",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "later",
@@ -7053,7 +7053,7 @@
       "USR-232"
     ],
     "created_at": "2026-10-11T20:27:26.592368Z",
-    "updated_at": "2026-10-11T20:27:26.592368Z"
+    "updated_at": "2026-10-19T08:36:09.640872Z"
   },
   {
     "id": "USR-235",

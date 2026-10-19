@@ -54,6 +54,7 @@ function mountAIUsageMonitor() {
           <span id="usage-health-pill" class="rounded-full border border-slate-700 bg-slate-900 px-2 py-0.5 text-[10px] font-mono text-slate-400">carregando</span>
         </div>
         <p class="mt-1 text-[11px] text-slate-500">Cotas reais quando a plataforma as expõe; conexão e evidência honesta quando não expõe.</p>
+        <p id="usage-refresh-note" class="mt-1 text-[10px] font-mono text-slate-400" aria-live="polite"></p>
       </div>
       <div class="flex items-center gap-2">
         <button id="toggle-usage-expand-header" type="button" class="hidden sm:inline-flex items-center gap-1 rounded-lg border border-slate-700/80 bg-slate-800/60 px-2.5 py-1.5 text-[11px] font-medium text-slate-300 transition hover:border-slate-600 hover:text-white" title="Expandir ou recolher provedores">
@@ -101,6 +102,48 @@ function usageSkeleton(count) {
     </div>`).join("");
 }
 
+const REFRESH_POLL_MS = 3000;
+const REFRESH_OFFLINE_AFTER_S = 120;
+
+function setRefreshMessage(text, failed = false) {
+  const pill = document.getElementById("usage-health-pill");
+  usageState.refreshMessage = text;
+  const note = document.getElementById("usage-refresh-note");
+  if (note) {
+    note.textContent = text;
+    note.className = failed ? "text-[10px] font-mono text-rose-300" : "text-[10px] font-mono text-slate-400";
+  } else if (pill && text) {
+    pill.title = text;
+  }
+}
+
+async function requestAccountRefresh(button) {
+  const created = await fetch("/api/usage/accounts/refresh", { method: "POST" });
+  if (!created.ok) throw new Error("refresh request rejected");
+  let request = await created.json();
+  const startedAt = Date.now();
+  while (request.status === "pending" || request.status === "in_progress") {
+    const waited = Math.round((Date.now() - startedAt) / 1000);
+    if (waited > REFRESH_OFFLINE_AFTER_S) {
+      setRefreshMessage(`Host medidor offline: solicitacao ${request.id} segue pendente ha ${waited}s.`, true);
+      return request;
+    }
+    const label = request.status === "in_progress" ? "medindo" : "aguardando host medidor";
+    setRefreshMessage(`Atualizando cotas (${label}, ${waited}s)...`);
+    if (button) button.textContent = "Atualizando…";
+    await new Promise((resolve) => setTimeout(resolve, REFRESH_POLL_MS));
+    const polled = await fetch(`/api/usage/accounts/refresh/${encodeURIComponent(request.id)}`);
+    if (!polled.ok) throw new Error("refresh status unavailable");
+    request = await polled.json();
+  }
+  if (request.status === "failed") {
+    setRefreshMessage(`Falha ao atualizar: ${request.failure_reason || "motivo nao informado"}`, true);
+  } else {
+    setRefreshMessage(`Cotas atualizadas. Nova medicao: ${request.checked_at}`);
+  }
+  return request;
+}
+
 async function loadAIUsage(force = false) {
   if (usageState.loading) return;
   usageState.loading = true;
@@ -110,11 +153,10 @@ async function loadAIUsage(force = false) {
     button.textContent = "Atualizando…";
   }
   try {
-    const accountRequest = force
-      ? fetch("/api/usage/accounts/refresh", { method: "POST" })
-      : fetch("/api/usage/accounts");
+    // USR-234: the button asks the metering host to re-measure and waits for the request to close.
+    if (force) await requestAccountRefresh(button);
     const [accountsResponse, modelsResponse] = await Promise.all([
-      accountRequest,
+      fetch("/api/usage/accounts"),
       fetch("/api/usage/models"),
     ]);
     if (!accountsResponse.ok || !modelsResponse.ok) throw new Error("usage endpoint unavailable");
