@@ -31,6 +31,7 @@ from core.owner_actions.models import (
 )
 from core.owner_actions.notify import notify_owner_action, should_notify
 from core.owner_actions.propagate import annotate_blocked_tickets
+from core.owner_actions.protected_publish import build_protected_publish_draft
 from core.owner_actions.store import (
     DEFAULT_OVERLAY_PATH,
     OwnerActionError,
@@ -72,6 +73,13 @@ def _build_parser() -> argparse.ArgumentParser:
     add.add_argument("--no-notify", dest="no_notify", action="store_true", help="nao avisar no Telegram")
     add.add_argument("--hub-url", dest="hub_url", default=None)
     add.add_argument("--json", dest="as_json", action="store_true")
+
+    pub = sub.add_parser("protected-publish", help="Registra a OA de publicacao protegida por push direto (portao antes, CI depois)")
+    pub.add_argument("ticket")
+    pub.add_argument("--files", nargs="*", default=[], metavar="CAMINHO")
+    pub.add_argument("--created-by", dest="created_by", default="claude-code")
+    pub.add_argument("--no-notify", dest="no_notify", action="store_true", help="nao avisar no Telegram")
+    pub.add_argument("--hub-url", dest="hub_url", default=None)
 
     ls = sub.add_parser("list", help="Lista o backlog")
     ls.add_argument("--status", choices=["open", "done", "all"], default="open")
@@ -172,6 +180,16 @@ def run(
                 emit(f"[ok] {action.id} registrado ({action.priority.value}); aparece no DarkHub apos o deploy do merge.")
                 if should_notify(action) and not args.no_notify:
                     emit("[ok] owner avisado no Telegram." if result["notified"] else "[aviso] Telegram nao enviou (item registrado mesmo assim).")
+            return 0
+
+        if args.command == "protected-publish":
+            action = active.add(build_protected_publish_draft(args.ticket, args.files, created_by=args.created_by))
+            if not args.no_notify and should_notify(action):
+                try:
+                    (notifier or (lambda a: notify_owner_action(a, hub_base_url=args.hub_url)))(action)
+                except Exception:  # noqa: BLE001 - notification must never fail the command
+                    pass
+            emit(f"[ok] {action.id} registrado ({action.priority.value}): portao completo antes do push, CI da main depois.")
             return 0
 
         if args.command == "list":
