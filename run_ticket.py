@@ -1542,6 +1542,32 @@ def _resume_delivery(
         )
 
 
+def _ticket_from_origin_main(ticket_id: str, worktree: Path) -> Optional[UserTicket]:
+    """USR-314: look the ticket up in the ledger of ``origin/main`` (registered after the worktree was cut).
+
+    The later rebase onto ``origin/main`` brings the ledger entry into the worktree, so finding it here
+    is enough to proceed. Returns None when the fetch/show fails or the ticket is absent.
+    """
+    import tempfile
+
+    git = ["git", "-C", str(worktree)]
+    try:
+        subprocess.run(git + ["fetch", "origin", "-q"], capture_output=True, timeout=120, check=False)
+        shown = subprocess.run(
+            git + ["show", "origin/main:.factory/demands/demands.json"],
+            capture_output=True, timeout=60, check=False,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        logger.warning("Lookup do ticket %s em origin/main falhou: %s", ticket_id, exc)
+        return None
+    if shown.returncode != 0:
+        return None
+    with tempfile.TemporaryDirectory(prefix="darkfac-origin-ledger-") as tmp:
+        ledger = Path(tmp) / "demands.json"
+        ledger.write_bytes(shown.stdout)
+        return DemandsStore(ledger).get_ticket(ticket_id)
+
+
 def _resume_delivery_scoped(
     ticket_id: str,
     worktree_path: Optional[Path | str],
@@ -1588,7 +1614,15 @@ def _resume_delivery_scoped(
         shared_store = DemandsStore(PROJECT_ROOT / ".factory" / "demands" / "demands.json")
         ticket = shared_store.get_ticket(ticket_id)
     if ticket is None:
-        print(f"[ERRO] Ticket {ticket_id} não encontrado no ledger de demandas.", file=sys.stderr)
+        ticket = _ticket_from_origin_main(ticket_id, target_worktree)
+    if ticket is None:
+        print(
+            f"[ERRO] Ticket {ticket_id} não encontrado no ledger de demandas. Locais procurados: "
+            f"(1) ledger da worktree ({target_worktree / '.factory' / 'demands' / 'demands.json'}); "
+            f"(2) checkout compartilhado ({PROJECT_ROOT / '.factory' / 'demands' / 'demands.json'}); "
+            f"(3) origin/main (.factory/demands/demands.json, após git fetch).",
+            file=sys.stderr,
+        )
         if return_result:
             return {"exit_code": 1, "ok": False, "error": f"Ticket {ticket_id} not found in ledger"}
         return 1

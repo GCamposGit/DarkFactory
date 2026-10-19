@@ -9140,8 +9140,8 @@
     "project_id": "darkfac",
     "title": "run_ticket --resume-delivery nao encontra ticket registrado na main depois da criacao da worktree",
     "origin": "agent",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "ebec031f3a9096f74651e52c766990850d21d6ea",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -9168,7 +9168,7 @@
     "estimated_complexity": "low",
     "dependencies": [],
     "created_at": "2026-10-18T16:59:57.084768Z",
-    "updated_at": "2026-10-18T16:59:57.084768Z"
+    "updated_at": "2026-10-19T03:27:06.576358Z"
   },
   {
     "id": "USR-312",
