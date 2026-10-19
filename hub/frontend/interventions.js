@@ -640,7 +640,9 @@ function renderOwnerActionCard(item) {
     : "";
 
   let actionHtml = "";
-  if (isDecision) {
+  if (meta.created_by === "usage_sync_watch" || String(item.id || "").startsWith("owner_action:usage_sync:")) {
+    actionHtml = `<p class="text-xs text-slate-400 italic">Fecha sozinho quando a sincronização voltar</p>`;
+  } else if (isDecision) {
     const optionsHtml = options.map((opt, index) => `
       <label class="flex items-start gap-3 p-2.5 rounded-xl border border-slate-800 bg-slate-900/60 hover:border-indigo-500/40 cursor-pointer">
         <input type="radio" name="oa_opt_${eid}" value="${escapeInterventionsHtml(opt.id)}" class="mt-1 cursor-pointer">

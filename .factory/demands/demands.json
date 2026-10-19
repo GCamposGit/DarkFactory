@@ -7060,8 +7060,8 @@
     "project_id": "darkfac",
     "title": "USR-206 fatia 4: falha de sincronizacao de cotas gera alerta critico no Hub e no Telegram ops na primeira ocorrencia",
     "origin": "user",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "1a02d56dddc55a6e8bd5e7ff53e34e514599258a",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "later",
@@ -7092,7 +7092,7 @@
       "USR-232"
     ],
     "created_at": "2026-10-11T20:27:26.701115Z",
-    "updated_at": "2026-10-11T20:27:26.701115Z"
+    "updated_at": "2026-10-19T11:15:56.307955Z"
   },
   {
     "id": "USR-236",
