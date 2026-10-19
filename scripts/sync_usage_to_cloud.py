@@ -146,6 +146,28 @@ def send_sync_payload(
     )
 
 
+OWNER_ANSWER_SYNC_INTERVAL_S = 300.0
+
+
+def sync_owner_answers(target_url: str, telemetry_key: str) -> None:
+    """USR-195: persist decisions answered in the Hub into the repo ledger (autonomous queue PR).
+
+    Idempotent and never raises; it opens a worktree/PR only when an answered decision is missing
+    from the repository's ``owner_actions.json`` / blocked-ticket tags.
+    """
+    from core.owner_actions.answer_sync import make_http_fetcher, sync_answers_to_repo
+
+    try:
+        result = sync_answers_to_repo(REPO_ROOT, make_http_fetcher(target_url, telemetry_key))
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("[OA_ANSWER_SYNC_FAIL] %s", _redact_secret(str(exc), telemetry_key))
+        return
+    if result.error:
+        logger.warning("[OA_ANSWER_SYNC_DEFER] %s", _redact_secret(result.error, telemetry_key))
+    elif result.pending:
+        logger.info("[OA_ANSWER_SYNC] decisoes %s -> delivered=%s", ",".join(result.pending), result.delivered)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Synchronize local account quotas and credits to DarkHub cloud.")
     parser.add_argument(
@@ -180,6 +202,7 @@ def main() -> int:
     logger.info("Starting DarkFac usage synchronization (Node: %s)...", args.node_id)
 
     missing_key_logged = False
+    last_answer_sync = -OWNER_ANSWER_SYNC_INTERVAL_S
     while True:
         iteration_started = time.monotonic()
         telemetry_key = load_telemetry_key(REPO_ROOT)
@@ -236,6 +259,14 @@ def main() -> int:
             logger.error("[SYNC_FAIL] Synchronization attempt failed: %s", _redact_secret(str(exc), telemetry_key))
             if not args.loop:
                 return 1
+
+        if (
+            args.loop
+            and not args.dry_run
+            and time.monotonic() - last_answer_sync >= OWNER_ANSWER_SYNC_INTERVAL_S
+        ):
+            last_answer_sync = time.monotonic()
+            sync_owner_answers(args.target_url, telemetry_key)
 
         if not args.loop:
             break
