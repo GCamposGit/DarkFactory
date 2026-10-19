@@ -9175,8 +9175,8 @@
     "project_id": "darkfac",
     "title": "Registro em fila falha com conflito em owner_actions.json quando o watchdog mergeia OA no meio (sem resolucao automatica)",
     "origin": "agent",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "8be4999746c77a2005f595973fa4750a934d1011",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -9204,7 +9204,7 @@
     "estimated_complexity": "low",
     "dependencies": [],
     "created_at": "2026-10-18T19:13:22.523968Z",
-    "updated_at": "2026-10-18T19:13:22.523968Z"
+    "updated_at": "2026-10-19T02:21:32.975022Z"
   },
   {
     "id": "USR-315",
