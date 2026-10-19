@@ -9277,5 +9277,44 @@
     "dependencies": [],
     "created_at": "2026-10-19T03:02:15.173183Z",
     "updated_at": "2026-10-19T04:18:06.215650Z"
+  },
+  {
+    "id": "USR-317",
+    "project_id": "darkfac",
+    "title": "Identidade de processo do worker por create_time do psutil deriva apos congelamento da VM e faz processo vivo parecer morto",
+    "origin": "agent",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand",
+      "bug",
+      "infra",
+      "grokbox",
+      "protected-governance"
+    ],
+    "problem_statement": "Em 19/10/2026 o portao no grokbox morreu com SIGTERM (-15) em 9 jobs de 4 candidatos (OA-037). A causa imediata, corrigida no PR #444 (374734a), foi a suite montar o JobManager sobre a pasta real de estado do worker; a recuperacao de jobs orfaos tratou o job vivo como morto e matou a arvore dele. A causa de fundo continua no codigo de producao: core/harness/remote_worker.py compara psutil.Process.create_time() com o horario gravado, com tolerancia de 2 s (_PROCESS_START_TOLERANCE_SEC, linhas ~448, ~483 e ~514). No Linux, create_time = boot_time + starttime, e o boot_time e recalculado depois de cada congelamento ou restauro da VM (o grokbox congela a cada 5 a 12 min). Com isso: _process_alive declara morto um processo vivo (a recuperacao pode matar um job vivo de outra instancia), e _ProcessTree pode ignorar a raiz real (o watchdog deixa de matar a arvore no timeout). core/harness/suite_lock.py (~272) usa o mesmo criterio com 5 s. core/harness e caminho protegido: a correcao precisa de commit do owner (patch em docs/proposals + OA).",
+    "core_journey": [],
+    "non_goals": [
+      "Nao desligar a recuperacao de jobs orfaos.",
+      "Nao aumentar a tolerancia de tempo como unica correcao."
+    ],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "A identidade de processo no worker e na trava da suite deixa de depender do boot_time: no Linux usa o starttime em ticks de /proc/<pid>/stat (ou equivalente que nao deriva), mantendo o comportamento atual no Windows.",
+      "Teste que simula a deriva do boot_time (create_time deslocado em minutos com o mesmo starttime) prova que um processo vivo continua vivo para _process_alive, _ProcessTree e _sample_holder_tree.",
+      "Teste que um pid reciclado (starttime diferente) continua sendo tratado como outro processo, sem regressao em test_remote_job_recovery e test_suite_lock_stalled."
+    ],
+    "suggested_files": [
+      "core/harness/remote_worker.py",
+      "core/harness/suite_lock.py",
+      "tests/test_remote_job_recovery.py"
+    ],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-19T10:29:03.508653Z",
+    "updated_at": "2026-10-19T10:29:03.508653Z"
   }
 ]

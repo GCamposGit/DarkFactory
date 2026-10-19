@@ -14,6 +14,7 @@ Acceptance criteria:
 from __future__ import annotations
 
 import json
+import subprocess
 from datetime import UTC, datetime
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -161,10 +162,24 @@ def test_safe_rolling_update_preserves_peer_hosts(monkeypatch: pytest.MonkeyPatc
     (pids_dir / "fleet_worker_desktop.pid").write_text("103", encoding="utf-8")
 
     monkeypatch.setattr("scripts.start_fleet_worker.is_pid_alive", lambda pid: pid in (101, 102, 103))
+    # The pids are fake: never signal whatever owns pid 101 on this host
+    # (os.kill on POSIX, taskkill on Windows).
+    sent: list[int] = []
+    monkeypatch.setattr("scripts.start_fleet_worker.os.kill", lambda pid, sig: sent.append(pid))
+    real_run = subprocess.run
+
+    def fake_run(cmd, *args, **kwargs):
+        if cmd and cmd[0] == "taskkill":
+            sent.append(int(cmd[cmd.index("/PID") + 1]))
+            return subprocess.CompletedProcess(cmd, 0, "", "")
+        return real_run(cmd, *args, **kwargs)
+
+    monkeypatch.setattr("scripts.start_fleet_worker.subprocess.run", fake_run)
 
     # Drain and stop Grokbox for rolling update
     drain_fleet_worker("grokbox", reason="rolling_update_step_1")
     stop_fleet_worker("grokbox")
+    assert sent == [101]
 
     # Grokbox is now stopped
     st_grok = get_worker_status("grokbox")
