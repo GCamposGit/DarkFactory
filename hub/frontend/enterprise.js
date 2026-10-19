@@ -67,7 +67,7 @@ function mountEnterpriseSection() {
       <div>
         <div class="flex items-center gap-2">
           <span class="flex h-7 w-7 items-center justify-center rounded-lg bg-sky-500/10 text-sky-400 text-sm">🛡️</span>
-          <h2 class="text-base font-semibold text-slate-100">Governança Enterprise, Auditoria & Deploy Dokploy (DH-09)</h2>
+          <h2 class="text-base font-semibold text-slate-100">Governança, auditoria e deploy</h2>
           <span id="enterprise-badge" class="rounded-full bg-slate-800 px-2 py-0.5 text-xs font-medium text-slate-400 border border-slate-700">Auditando...</span>
         </div>
         <p class="text-xs text-slate-400 mt-1">Trilha de auditoria criptográfica imutável, conformidade SLA e disparo seguro de deploy Dokploy com avaliação em 2 etapas.</p>
@@ -95,7 +95,7 @@ function mountEnterpriseSection() {
       <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
           <div class="flex items-center gap-2">
-            <span class="text-xs font-mono font-semibold uppercase tracking-wider text-sky-300">🚀 Portão de Deploy Dokploy (Cenário G8)</span>
+            <span class="text-xs font-mono font-semibold uppercase tracking-wider text-sky-300">🚀 Portão de deploy em produção</span>
             <span id="deploy-gate-status-badge" class="px-2 py-0.5 rounded text-[10px] font-mono bg-slate-800 text-slate-400">Etapa 1: Requer Avaliação</span>
           </div>
           <p class="text-[11px] text-slate-400 mt-0.5">
@@ -266,7 +266,7 @@ function renderEnterpriseUI() {
       <span class="text-[10px] ${sla.is_compliant ? "text-emerald-400" : "text-rose-400"} mt-0.5 block">${sla.is_compliant ? "Dentro da meta contratual" : "Violação de RPO"}</span>
     </div>
     <div class="rounded-xl border border-slate-800 bg-slate-900/60 p-3">
-      <span class="text-[11px] text-slate-400">Aceite Humano (Scenario G8)</span>
+      <span class="text-[11px] text-slate-400">Aceite humano</span>
       <div class="text-sm font-semibold text-slate-200 mt-1">${config.require_owner_signoff ? "Obrigatório" : "Dispensado"}</div>
       <span class="text-[10px] text-slate-500 mt-0.5 block">Exige assinatura do Owner antes de prod</span>
     </div>
@@ -384,7 +384,7 @@ async function handleEvaluateDeploy() {
 
   if (btn) btn.disabled = true;
   if (statusBadge) {
-    statusBadge.textContent = "Avaliando oráculos (G8)...";
+    statusBadge.textContent = "Avaliando critérios de deploy...";
     statusBadge.className = "px-2 py-0.5 rounded text-[10px] font-mono bg-sky-950/60 text-sky-300 animate-pulse";
   }
 
@@ -409,7 +409,7 @@ async function handleEvaluateDeploy() {
       resultContainer.innerHTML = `
         <div class="flex items-center justify-between border-b border-slate-800 pb-2 mb-2">
           <span>Veredito: <strong class="${isApproved ? 'text-emerald-400' : 'text-rose-400'}">${isApproved ? 'APROVADO PARA PRODUÇÃO' : 'BLOQUEADO PELO GATE'}</strong></span>
-          <span class="text-slate-500">Cenário G8 · Risco: ${escapeHtml(data.risk_level || 'low')}</span>
+          <span class="text-slate-500">Risco: ${escapeHtml(data.risk_level || 'low')}</span>
         </div>
         <div class="text-[11px] text-slate-300">
           ${data.reasons ? data.reasons.map((r) => `<div>• ${escapeHtml(r)}</div>`).join("") : (data.recommendation || "Todas as salvaguardas enterprise foram verificadas com sucesso.")}

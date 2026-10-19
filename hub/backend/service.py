@@ -1025,7 +1025,7 @@ class HubService:
                         PriorityInterventionItem(
                             id=f"deploy_g8:{p_cfg.project_id}",
                             kind=PriorityInterventionKind.DEPLOY_G8,
-                            title=f"Aprovação de Deploy Dokploy (G8): {p_cfg.project_id}",
+                            title=f"Aprovação de deploy em produção: {p_cfg.project_id}",
                             description="Ambiente de produção exige aprovação em 2 etapas com signoff explícito do Owner.",
                             project_id=p_cfg.project_id,
                             urgency="critical",

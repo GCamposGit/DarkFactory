@@ -62,8 +62,8 @@ function mountStudioSection() {
       <div>
         <div class="flex items-center gap-2">
           <span class="flex h-7 w-7 items-center justify-center rounded-lg bg-purple-500/10 text-purple-400 text-sm">🎨</span>
-          <h2 class="text-base font-semibold text-slate-100">Estúdio de Conteúdo Anti-Slop & Ateliê Visual (DH-07)</h2>
-          <span class="rounded-full bg-purple-500/10 px-2.5 py-0.5 text-xs font-medium text-purple-300 border border-purple-500/20 font-mono">Skill 15 & 16</span>
+          <h2 class="text-base font-semibold text-slate-100">Estúdio de conteúdo e ateliê visual</h2>
+          <span class="rounded-full bg-purple-500/10 px-2.5 py-0.5 text-xs font-medium text-purple-300 border border-purple-500/20 font-mono">Texto e imagem</span>
         </div>
         <p class="text-xs text-slate-400 mt-1">
           Geração de texto calibrada por persona com auditoria de pureza léxica e estúdio de ativos visuais contextuais a custo zero ($0).

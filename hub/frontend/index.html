@@ -37,7 +37,7 @@
       <button
           id="portfolio-trigger-btn"
           onclick="openPortfolioDrawer()"
-          title="Abrir Portfólio Multiprojeto (DH-08)"
+          title="Abrir Portfólio Multiprojeto"
           class="w-full text-left flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-indigo-300 border border-slate-800 hover:border-indigo-500/30 transition-all text-xs font-medium" data-sidebar-id="hub-nav-3">
           <span>💼</span>
           <span class="inline">Portfólio</span>
@@ -74,14 +74,14 @@
         </button>
       <button
           onclick="document.getElementById('content-studio-section')?.scrollIntoView({behavior: 'smooth'})"
-          title="Estúdio de Conteúdo Anti-Slop & Ateliê Visual (DH-07)"
+          title="Estúdio de conteúdo e ateliê visual"
           class="w-full text-left flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-purple-300 border border-slate-800 hover:border-purple-500/30 transition-all text-xs font-medium" data-sidebar-id="hub-nav-7">
           <span>🎨</span>
           <span class="inline">Estúdio</span>
         </button>
       <button
           onclick="document.getElementById('harness-validation-section')?.scrollIntoView({behavior: 'smooth'})"
-          title="Validação sob Demanda & Harness Remoto (DH-11)"
+          title="Validação sob demanda"
           class="w-full text-left flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-emerald-300 border border-slate-800 hover:border-emerald-500/30 transition-all text-xs font-medium" data-sidebar-id="hub-nav-8">
           <span>🧪</span>
           <span class="inline">Testes</span>
@@ -138,7 +138,7 @@
             <button
               id="hub-coverage-badge"
               onclick="openCoverageDrawer()"
-              title="Cobertura da Fábrica no DarkHub (Gate USR-42 / DH-14)"
+              title="Cobertura da fábrica no DarkHub (governança contínua)"
               class="flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-[10px] font-mono hover:bg-emerald-500/20 transition-all cursor-pointer shadow-sm">
               <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
               <span id="hub-coverage-badge-text">...% Cobertura</span>
@@ -218,13 +218,13 @@
     </section>
 
     <!-- Production Line & Canary Acceptance Status Card (USR-93) -->
-    <section id="line-status-card" class="rounded-2xl border border-slate-800 bg-slate-900/60 p-4 space-y-3" aria-label="Status da Linha Autônoma e Aceite HF-27">
+    <section id="line-status-card" class="rounded-2xl border border-slate-800 bg-slate-900/60 p-4 space-y-3" aria-label="Status da linha de produção e aceite">
       <div class="flex flex-wrap items-center justify-between gap-3">
         <div class="flex items-center gap-2.5">
           <span class="inline-flex items-center justify-center w-7 h-7 rounded-lg bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-sm">🏭</span>
           <div>
             <h2 class="text-xs font-mono font-semibold uppercase tracking-wider text-slate-300 flex items-center gap-2">
-              <span>Linha de Produção & Aceite HF-27</span>
+              <span>Linha de produção e aceite</span>
               <span id="line-canary-streak-badge" class="px-2 py-0.5 rounded-full text-[10px] font-mono bg-emerald-500/10 text-emerald-300 border border-emerald-500/30">Canário: carregando…</span>
             </h2>
             <p class="text-[10px] text-slate-500 font-mono">Status em tempo real, canário diário e critérios de aceite V1-V4</p>
@@ -311,7 +311,7 @@
           <div class="flex items-center justify-between">
             <h3 class="text-xs font-semibold text-white flex items-center gap-2">
               <span>🛡️ Gates de Prontidão da Autonomia</span>
-              <span class="text-[10px] font-mono text-emerald-400 px-2 py-0.5 rounded-full bg-emerald-950/60 border border-emerald-700/60">Contratos HF-26</span>
+              <span class="text-[10px] font-mono text-emerald-400 px-2 py-0.5 rounded-full bg-emerald-950/60 border border-emerald-700/60">Contratos de autonomia</span>
             </h3>
             <span class="text-[10px] text-slate-500 font-mono">Preflight & Supervised Handoff</span>
           </div>
@@ -322,7 +322,7 @@
             <div>
               <h3 class="text-xs font-semibold text-white flex items-center gap-2">
                 <span>🕸️ Grafo Causal de Unidades (33 Unidades)</span>
-                <span id="autonomy-dag-badge" class="text-[10px] font-mono text-indigo-400 px-2 py-0.5 rounded-full bg-indigo-950/60 border border-indigo-700/60">HF-26-PLAN</span>
+                <span id="autonomy-dag-badge" class="text-[10px] font-mono text-indigo-400 px-2 py-0.5 rounded-full bg-indigo-950/60 border border-indigo-700/60">Plano de autonomia</span>
               </h3>
               <p class="text-[11px] text-slate-400 mt-0.5">Topologia de dependências causais, caminhos permitidos e oráculos executáveis.</p>
             </div>
@@ -389,7 +389,7 @@
             <div>
               <div class="flex items-center gap-2 flex-wrap">
                 <h2 id="portfolio-title" class="text-lg font-bold text-white">Portfólio Multiprojeto</h2>
-                <span class="roadmap-tag roadmap-tag-neutral">Somente leitura · DH-08</span>
+                <span class="roadmap-tag roadmap-tag-neutral">Somente leitura</span>
               </div>
               <p class="mt-1 text-xs text-slate-400">Estágio de desenvolvimento, saúde operacional, roadmap, último deploy e orçamentos dos repositórios adotados na Dark Factory.</p>
             </div>
@@ -434,7 +434,7 @@
               Catálogo de Arquétipos
             </button>
             <button id="portfolio-tab-line" type="button" role="tab" aria-selected="false" onclick="switchPortfolioTab('line')" class="px-3 py-1.5 rounded-xl text-xs font-mono font-medium transition-all text-slate-400 hover:text-slate-200 border border-transparent">
-              Esteira HF-27 & Pilotos
+              Esteira de produção e pilotos
             </button>
           </div>
           <div class="text-[10px] text-slate-500 font-mono">
@@ -887,7 +887,7 @@
           <div>
             <div class="flex items-center gap-2">
               <h2 id="grill-modal-title" class="text-sm font-bold text-white font-mono">Grill de Demanda</h2>
-              <span class="px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-300 border border-amber-500/20 text-[10px] font-mono">Gate G1</span>
+              <span class="px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-300 border border-amber-500/20 text-[10px] font-mono">Esclarecimento de requisitos</span>
             </div>
             <p id="grill-modal-subtitle" class="text-xs text-slate-400">Responda às questões essenciais para autorizar a execução do ticket.</p>
           </div>
@@ -1770,7 +1770,7 @@
             </div>
             <div>
               <h3 id="coverage-drawer-title" class="text-sm font-bold text-white tracking-tight">Cobertura & Gate de Drift</h3>
-              <p class="text-[10px] text-slate-400 font-mono">Governança contínua (USR-42 / DH-14)</p>
+              <p class="text-[10px] text-slate-400 font-mono">Governança contínua da fábrica</p>
             </div>
           </div>
           <button 

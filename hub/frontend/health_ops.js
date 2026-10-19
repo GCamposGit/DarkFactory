@@ -406,13 +406,13 @@ function openRollbackDrillModal() {
   const confirmBtn = document.getElementById("health-ops-modal-confirm-btn");
   if (!modal || !titleEl || !bodyEl || !confirmBtn) return;
 
-  titleEl.innerHTML = `<span>🛡️</span><span>Rollback Drill HF-15 (Sandbox Hermético)</span>`;
+  titleEl.innerHTML = `<span>🛡️</span><span>Simulado de rollback (ambiente isolado)</span>`;
   bodyEl.innerHTML = `
     <div class="space-y-3">
       <div class="p-3 rounded-xl bg-indigo-950/40 border border-indigo-800/50 space-y-1">
         <div class="font-semibold text-indigo-300">Ensaio Hermético Isolado (Risco Zero)</div>
         <p class="text-[11px] text-slate-300">
-          Exercita o motor real de rollback do HF-15 contra o projeto sentinela <code>proj-drill-01</code>. Mede os tempos de RPO e RTO e emite recibo criptográfico na Hash Chain SHA-256 sem afetar nenhum container em produção.
+          Exercita o motor real de rollback contra o projeto sentinela <code>proj-drill-01</code>. Mede os tempos de RPO e RTO e emite recibo criptográfico na Hash Chain SHA-256 sem afetar nenhum container em produção.
         </p>
       </div>
       <div class="space-y-1 text-[11px] text-slate-400">
@@ -439,7 +439,7 @@ function openRollbackDrillModal() {
       bodyEl.innerHTML = `
         <div class="space-y-3">
           <div class="p-3 rounded-xl ${passed ? "bg-emerald-950/40 border-emerald-800/60 text-emerald-300" : "bg-rose-950/40 border-rose-800/60 text-rose-300"} border">
-            ${passed ? "✓ Rollback Drill concluído com sucesso!" : "⚠ Rollback Drill finalizou com alertas."}
+            ${passed ? "✓ Simulado de rollback concluído com sucesso!" : "⚠ Simulado de rollback finalizou com alertas."}
           </div>
           <div class="grid grid-cols-2 gap-2 text-xs font-mono">
             <div class="p-2.5 rounded-lg bg-slate-950 border border-slate-800">
