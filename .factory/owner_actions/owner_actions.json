@@ -1527,6 +1527,52 @@
       "created_at": "2026-10-19T05:44:04Z",
       "created_by": "claude-code",
       "resolved_at": "2026-10-19T13:35:53Z"
+    },
+    {
+      "id": "OA-038",
+      "kind": "action",
+      "title": "Publicar USR-317 (identidade de processo do worker, core/harness protegido)",
+      "priority": "high",
+      "status": "open",
+      "why": "core/harness e protegido: o agente nao pode commitar. O patch docs/proposals/USR-317-process-identity.patch corrige o falso 'processo morto' causado por deriva do boot_time apos congelar/restaurar a VM do grokbox (recuperacao de orfaos matava job vivo; _ProcessTree ignorava a raiz; suite_lock igual) e torna o app do worker lazy (importar o modulo deixa de rodar a recuperacao). Ver docs/proposals/USR-317-process-identity.md.",
+      "blocks": [
+        "USR-317"
+      ],
+      "depends_on": [],
+      "steps": [
+        {
+          "text": "Criar worktree limpa a partir de origin/main (PowerShell). O PR do USR-317 (patch + testes + este item) precisa estar mergeado na main.",
+          "command": "git -C C:\\dev\\DarkFac fetch origin; git -C C:\\dev\\DarkFac worktree add C:\\dev\\DarkFac\\.worktrees\\usr-317-owner -b owner/usr-317 origin/main"
+        },
+        {
+          "text": "Aplicar o patch.",
+          "command": "git -C C:\\dev\\DarkFac\\.worktrees\\usr-317-owner apply docs\\proposals\\USR-317-process-identity.patch"
+        },
+        {
+          "text": "Rodar os guards rapidos.",
+          "command": "python -m pytest C:\\dev\\DarkFac\\.worktrees\\usr-317-owner\\tests\\test_clock_bomb_guard.py C:\\dev\\DarkFac\\.worktrees\\usr-317-owner\\tests\\test_harness_contract.py C:\\dev\\DarkFac\\.worktrees\\usr-317-owner\\tests\\test_remote_job_recovery.py C:\\dev\\DarkFac\\.worktrees\\usr-317-owner\\tests\\test_suite_lock_stalled.py C:\\dev\\DarkFac\\.worktrees\\usr-317-owner\\tests\\test_process_identity_usr317.py -q -p no:cacheprovider"
+        },
+        {
+          "text": "Rodar o portao oficial completo; so seguir se imprimir [HARNESS_PASS].",
+          "command": "python C:\\dev\\DarkFac\\.worktrees\\usr-317-owner\\core\\harness\\runner.py --quick"
+        },
+        {
+          "text": "Commitar como owner e dar push direto na main (bypass admin).",
+          "command": "git -C C:\\dev\\DarkFac\\.worktrees\\usr-317-owner add core\\harness; git -C C:\\dev\\DarkFac\\.worktrees\\usr-317-owner commit -m 'fix(harness): identidade de processo sem boot_time e app lazy [USR-317]'; git -C C:\\dev\\DarkFac\\.worktrees\\usr-317-owner push origin HEAD:main"
+        },
+        {
+          "text": "Conferir o CI da main.",
+          "command": "gh run list --branch main --limit 3"
+        },
+        {
+          "text": "Atualizar o worker do grokbox (git pull do checkout e reinicio do worker) e conferir /health com busy=false.",
+          "command": "python C:\\dev\\DarkFac\\scripts\\dokploy_redeploy.py"
+        }
+      ],
+      "verify": "Portao [HARNESS_PASS] antes do push; CI verde na main (gh run list --branch main --limit 3); tests/test_process_identity_usr317.py sem skip; apos atualizar o worker do grokbox, um job de portao sobrevive a congelar/restaurar sem SIGTERM e importar core.harness.remote_worker nao toca a pasta de estado real.",
+      "created_at": "2026-10-19T14:44:45Z",
+      "created_by": "claude-code",
+      "resolved_at": null
     }
   ]
 }
