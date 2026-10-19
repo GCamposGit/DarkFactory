@@ -16,7 +16,7 @@ import time
 from datetime import datetime, timezone
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
-from typing import Any, Dict, List, Mapping, Optional
+from typing import Any, Callable, Dict, List, Mapping, Optional
 
 # Anchor sys.path to repository root
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -149,6 +149,88 @@ def send_sync_payload(
 OWNER_ANSWER_SYNC_INTERVAL_S = 300.0
 
 
+def _refresh_headers(telemetry_key: str) -> Dict[str, str]:
+    return {"X-DarkFac-Telemetry-Key": telemetry_key, "User-Agent": "DarkFac-Sync/refresh"}
+
+
+def fetch_pending_refresh_requests(
+    target_url: str, telemetry_key: str, node_id: str, timeout: float = 10.0
+) -> List[Dict[str, Any]]:
+    """USR-234: refresh requests the Hub is holding for this node. Never raises."""
+    import httpx
+
+    try:
+        response = httpx.get(
+            f"{target_url.rstrip('/')}/api/usage/accounts/refresh-requests/pending",
+            params={"node_id": node_id},
+            headers=_refresh_headers(telemetry_key),
+            timeout=timeout,
+        )
+        if response.status_code == 200:
+            return list(response.json())
+        logger.warning("[REFRESH_FETCH_FAIL] HTTP %s", response.status_code)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("[REFRESH_FETCH_FAIL] %s", _redact_secret(str(exc), telemetry_key))
+    return []
+
+
+def close_refresh_request(
+    target_url: str,
+    telemetry_key: str,
+    request_id: str,
+    status: str,
+    checked_at: Optional[str] = None,
+    failure_reason: Optional[str] = None,
+    timeout: float = 10.0,
+) -> bool:
+    """Mark a request in_progress/done/failed on the Hub. Never raises."""
+    import httpx
+
+    body = {"status": status, "checked_at": checked_at, "failure_reason": failure_reason}
+    try:
+        response = httpx.post(
+            f"{target_url.rstrip('/')}/api/usage/accounts/refresh-requests/{request_id}/update",
+            json=body,
+            headers=_refresh_headers(telemetry_key),
+            timeout=timeout,
+        )
+        return response.status_code == 200
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("[REFRESH_CLOSE_FAIL] %s", _redact_secret(str(exc), telemetry_key))
+        return False
+
+
+def sync_with_refresh_requests(
+    target_url: str,
+    telemetry_key: str,
+    node_id: str,
+    collect: Callable[[], Dict[str, Any]],
+    send: Callable[[Dict[str, Any]], Dict[str, Any]],
+    fetch: Callable[[], List[Dict[str, Any]]],
+    close: Callable[..., bool],
+) -> Dict[str, Any]:
+    """One loop iteration: measure+sync once, closing any pending refresh requests with the outcome.
+
+    Collaborators are injected so tests run without network. Re-raises the measurement/sync error
+    after closing the requests as ``failed`` so the caller keeps its existing failure handling.
+    """
+    pending = fetch()
+    for request in pending:
+        close(request["id"], "in_progress")
+    try:
+        payload = collect()
+        result = send(payload)
+    except Exception as exc:
+        reason = _redact_secret(str(exc), telemetry_key)[:300] or exc.__class__.__name__
+        for request in pending:
+            close(request["id"], "failed", failure_reason=reason)
+        raise
+    checked_at = str(payload.get("timestamp") or datetime.now(timezone.utc).isoformat())
+    for request in pending:
+        close(request["id"], "done", checked_at=checked_at)
+    return result
+
+
 def sync_owner_answers(target_url: str, telemetry_key: str) -> None:
     """USR-195: persist decisions answered in the Hub into the repo ledger (autonomous queue PR).
 
@@ -234,27 +316,48 @@ def main() -> int:
             missing_key_logged = False
 
         try:
-            payload = collect_local_usage_payload(REPO_ROOT, node_id=args.node_id)
-            accounts_count = len(payload.get("accounts", []))
-            credits_count = len(payload.get("credits", []))
-
-            if args.dry_run:
-                logger.info(
-                    "[DRY_RUN] Collected %d accounts and %d credits. Payload preview:\n%s",
-                    accounts_count,
-                    credits_count,
-                    json.dumps(payload, indent=2)[:500] + "...",
+            if args.loop and not args.dry_run:
+                # USR-234: same measurement/sync, additionally closing pending Hub refresh requests.
+                result = sync_with_refresh_requests(
+                    args.target_url,
+                    telemetry_key,
+                    args.node_id,
+                    collect=lambda: collect_local_usage_payload(REPO_ROOT, node_id=args.node_id),
+                    send=lambda p: send_sync_payload(args.target_url, p, telemetry_key),
+                    fetch=lambda: fetch_pending_refresh_requests(args.target_url, telemetry_key, args.node_id),
+                    close=lambda rid, st, **kw: close_refresh_request(
+                        args.target_url, telemetry_key, rid, st, **kw
+                    ),
                 )
-                return 0
+                logger.info(
+                    "[SYNC_SUCCESS] Synchronized %d accounts and %d credits to %s: %s",
+                    result.get("accounts_updated", 0),
+                    result.get("credits_updated", 0),
+                    args.target_url,
+                    _redact_secret(str(result.get("message", "")), telemetry_key),
+                )
+            else:
+                payload = collect_local_usage_payload(REPO_ROOT, node_id=args.node_id)
+                accounts_count = len(payload.get("accounts", []))
+                credits_count = len(payload.get("credits", []))
 
-            result = send_sync_payload(args.target_url, payload, telemetry_key)
-            logger.info(
-                "[SYNC_SUCCESS] Synchronized %d accounts and %d credits to %s: %s",
-                result.get("accounts_updated", 0),
-                result.get("credits_updated", 0),
-                args.target_url,
-                _redact_secret(str(result.get("message", "")), telemetry_key),
-            )
+                if args.dry_run:
+                    logger.info(
+                        "[DRY_RUN] Collected %d accounts and %d credits. Payload preview:\n%s",
+                        accounts_count,
+                        credits_count,
+                        json.dumps(payload, indent=2)[:500] + "...",
+                    )
+                    return 0
+
+                result = send_sync_payload(args.target_url, payload, telemetry_key)
+                logger.info(
+                    "[SYNC_SUCCESS] Synchronized %d accounts and %d credits to %s: %s",
+                    result.get("accounts_updated", 0),
+                    result.get("credits_updated", 0),
+                    args.target_url,
+                    _redact_secret(str(result.get("message", "")), telemetry_key),
+                )
         except Exception as exc:
             logger.error("[SYNC_FAIL] Synchronization attempt failed: %s", _redact_secret(str(exc), telemetry_key))
             if not args.loop:

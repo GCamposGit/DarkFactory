@@ -116,6 +116,7 @@ from core.infra.metrics import InfraMetricsReport
 
 from hub.backend.service_migrations import apply_service_migrations
 
+from core.usage.refresh_requests import RefreshRequest, RefreshRequestUpdate
 router = APIRouter(prefix="/api", tags=["DarkHub API"])
 roadmap_router = APIRouter(prefix="/projects", tags=["Operational Roadmap"])
 
@@ -836,12 +837,58 @@ def get_account_usage_endpoint(
     return service.get_account_usage(force=refresh)
 
 
-@router.post("/usage/accounts/refresh", response_model=AccountUsageReport)
+@router.post("/usage/accounts/refresh", response_model=RefreshRequest)
 def refresh_account_usage_endpoint(
     service: HubService = Depends(get_hub_service),
-) -> AccountUsageReport:
-    """Force provider probes while preserving partial-success semantics."""
-    return service.get_account_usage(force=True)
+) -> RefreshRequest:
+    """USR-234: record a persistent refresh request for the metering host (the Hub never probes CLIs)."""
+    return service.request_account_refresh()
+
+
+@router.get("/usage/accounts/refresh/{request_id}", response_model=RefreshRequest)
+def get_account_refresh_request_endpoint(
+    request_id: str,
+    service: HubService = Depends(get_hub_service),
+) -> RefreshRequest:
+    """Progress of a refresh request: status, new checked_at or the exact failure reason."""
+    request = service.refresh_request_store.get(request_id)
+    if request is None:
+        raise HTTPException(status_code=404, detail="Refresh request not found.")
+    return request
+
+
+def _require_telemetry_key(provided: Optional[str]) -> None:
+    configured_key = (os.environ.get("DARKFAC_TELEMETRY_KEY") or "").strip()
+    if not configured_key:
+        raise HTTPException(status_code=503, detail="Refresh requests are disabled; set DARKFAC_TELEMETRY_KEY.")
+    if not provided or not secrets.compare_digest(provided, configured_key):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid telemetry key.")
+
+
+@router.get("/usage/accounts/refresh-requests/pending", response_model=List[RefreshRequest])
+def list_pending_refresh_requests_endpoint(
+    node_id: Optional[str] = Query(default=None),
+    x_darkfac_telemetry_key: Optional[str] = Header(default=None, alias="X-DarkFac-Telemetry-Key"),
+    service: HubService = Depends(get_hub_service),
+) -> List[RefreshRequest]:
+    """Metering host: pending refresh requests (authenticated)."""
+    _require_telemetry_key(x_darkfac_telemetry_key)
+    return service.refresh_request_store.pending(node_id)
+
+
+@router.post("/usage/accounts/refresh-requests/{request_id}/update", response_model=RefreshRequest)
+def update_refresh_request_endpoint(
+    request_id: str,
+    payload: RefreshRequestUpdate,
+    x_darkfac_telemetry_key: Optional[str] = Header(default=None, alias="X-DarkFac-Telemetry-Key"),
+    service: HubService = Depends(get_hub_service),
+) -> RefreshRequest:
+    """Metering host: mark a request in_progress, done (with checked_at) or failed (with reason)."""
+    _require_telemetry_key(x_darkfac_telemetry_key)
+    request = service.refresh_request_store.update(request_id, payload)
+    if request is None:
+        raise HTTPException(status_code=404, detail="Refresh request not found.")
+    return request
 
 
 @router.get("/usage/models", response_model=ModelUsageReport)
