@@ -48,7 +48,7 @@ from core.line.agent_cli import (
     run_agent,
     supports,
 )
-from core.line import gate_ram
+from core.line import gate_ram, grokbox_wake
 from core.line.diagnostics import failed_test_ids, redacted_head
 from core.line.local_progress import ENV_RUN_ID, ENV_WARNED, ProgressPublisher, open_progress
 from core.line.operating_harness import detect_operating_harness
@@ -1031,6 +1031,22 @@ def _wait_gate_ram_if_local(as_json: bool) -> "gate_ram.RamWaitResult | None":
     return gate_ram.wait_for_gate_ram(announce=None if not as_json else (lambda _msg: None))
 
 
+def _wait_gate_grokbox_if_needed(as_json: bool) -> None:
+    """USR-310: if the grokbox was down at pre-flight, give it a window to come back
+    online before the official gate runs. A no-op when it was already up; any probe
+    failure here only logs -- the existing worker fallback still decides the gate.
+    Skipped under pytest: same rationale as the preflight guard above -- this call
+    never originates the "down" state itself, it only ever consumes one a real
+    preflight wrote, so skipping it here is just belt-and-suspenders against stray
+    state from a previous real run on the same checkout."""
+    if os.environ.get("PYTEST_CURRENT_TEST"):
+        return
+    try:
+        grokbox_wake.wait_if_down(announce=None if as_json else (lambda msg: print(msg, file=sys.stderr)))
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Grokbox wake wait failed: %s", exc)
+
+
 def _run_gate_with_self_correction(
     target_worktree: Path,
     current_branch: str,
@@ -1196,6 +1212,9 @@ def _run_gate_with_self_correction(
         if skip_validation:
             progress.phase("gate", "skipped", "validacao pulada (--skip-validation)")
             return None
+
+        # USR-310: grokbox estava fora no pre-flight -- da uma janela para ele acordar antes do portao.
+        _wait_gate_grokbox_if_needed(as_json)
 
         # USR-262: gate local com 1 worker passa de GATE_TIMEOUT; espera RAM para 2+ workers ou falha explicito.
         ram_wait = _wait_gate_ram_if_local(as_json)
@@ -2104,6 +2123,17 @@ def _run(argv: Optional[list[str]], box: list[ProgressPublisher], stack: context
     progress.hold()
     box.append(progress)
     progress.phase("preflight", "running", "cota, tamanho do ticket e roteamento")
+
+    # 1a. Grokbox health probe + wake email (USR-310): a dead probe or a failed email
+    # only logs -- it never blocks or changes this run's outcome. Skipped under pytest
+    # (same guard as the delivery subprocess bypass below): the probe/email are already
+    # offline-safe on their own, but leaving "down" state in the real .factory of the
+    # checkout the suite runs from would make an unrelated test's gate wait for real.
+    if not os.environ.get("PYTEST_CURRENT_TEST"):
+        try:
+            grokbox_wake.preflight_check()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Grokbox preflight check failed: %s", exc)
 
     # 1b. Ticket size and quota risk estimation (USR-113)
     ticket_size, size_reasons = estimate_ticket_size(ticket)

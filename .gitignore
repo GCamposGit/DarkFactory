@@ -59,6 +59,7 @@ models/.locks/
 .factory/node_sync_*.json
 .factory/notifications/
 .factory/marketing/
+.factory/grokbox_wake/
 .factory/portfolio/
 .factory/catalog/
 .factory/evolution/
