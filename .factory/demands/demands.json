@@ -5869,14 +5869,16 @@
       "user-demand",
       "canary",
       "bug",
-      "encoding",
-      "congelado-v0"
+      "encoding"
     ],
     "problem_statement": "O run run-d4d10d4aee94 do 'Canario diario 2026-09-30' (projeto darkfac-canary) esta em WAITING_HUMAN na etapa grill desde 30/09 e ocupa a fila prioritaria do Hub ha 10 dias. Os titulos dos canarios chegam como 'CanÃ¡rio diÃ¡rio' (UTF-8 decodificado duas vezes) no control store. Um canario sintetico nunca deveria pedir decisao humana. Diagnostico de 10/10/2026 (sessao interativa Claude Code, pedido do owner sobre o DarkHub).\n\nCONGELADO em 11/10/2026 (plano V0, docs/plans/V0_OPERACIONAL_2026-10-11.md): fora do caminho critico da linha.",
     "core_journey": [
       "O run run-d4d10d4aee94 do 'Canario diario 2026-09-30' (projeto darkfac-canary) esta em WAITING_HUMAN na etapa grill desde 30/09 e ocupa a fila prioritaria do Hub ha 10 dias. Os titulos dos canarios chegam como 'CanÃ¡rio diÃ¡rio' (UTF-8 decodificado duas vezes) no control store. Um canario sintetico nunca deveria pedir decisao humana. Diagnostico de 10/10/2026 (sessao interativa Claude Code, pedido do owner sobre o DarkHub)."
     ],
-    "non_goals": [],
+    "non_goals": [
+      "Nao alterar o comportamento do Grill para projetos que nao sao canario.",
+      "Nao editar bancos de producao diretamente; o fechamento dos runs presos ocorre pela varredura quando implantada."
+    ],
     "reachability_contract": "",
     "acceptance_criteria": [
       "Demanda de canario nunca entra em WAITING_HUMAN: o Grill e dispensado ou respondido automaticamente para o projeto darkfac-canary; teste cobre.",

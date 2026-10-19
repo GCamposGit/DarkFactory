@@ -899,6 +899,84 @@ def _previous_notified(attempts: list[CanaryAttempt], attempt: int) -> NotifiedA
     return next((a.notified for a in attempts if a.attempt == attempt), None)
 
 
+# --------------------------------------------------------------------------
+# USR-211: mojibake repair + stale canary sweep
+# --------------------------------------------------------------------------
+
+STALE_CANARY_SECONDS = 24 * 60 * 60  # a canary without conclusion after 24 h is closed as failed
+STALE_CANARY_CAUSE = "canary_stale_24h"
+
+
+def repair_mojibake(text: str) -> str:
+    """Undo a UTF-8 -> latin-1 double decode ('CanÃ¡rio' -> 'Canário'); otherwise return `text` as is."""
+    if not isinstance(text, str) or not text:
+        return text
+    try:
+        fixed = text.encode("latin-1").decode("utf-8")
+    except (UnicodeEncodeError, UnicodeDecodeError):
+        return text
+    return fixed
+
+
+def sweep_stale_canaries(
+    store: Any,
+    *,
+    now: datetime,
+    max_age_seconds: float = STALE_CANARY_SECONDS,
+    evidence_dir: Optional[Path] = None,
+) -> list[dict[str, Any]]:
+    """Close every active `darkfac-canary` run older than `max_age_seconds` as failed, with evidence.
+
+    The run is cancelled with cause `canary_stale_24h` (jobs, claims and reservations released) and
+    one evidence record per run is returned (and written under `evidence_dir` when given): run id,
+    repaired title, age and the stage statuses seen. Best-effort: errors on one run never stop the rest.
+    """
+    closed: list[dict[str, Any]] = []
+    lister = getattr(store, "list_active_run_ids", None)
+    getter = getattr(store, "get_run_status", None)
+    if lister is None or getter is None:
+        return closed
+    try:
+        run_ids = list(lister())
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Canary sweep could not list active runs: %s", exc)
+        return closed
+    for run_id in run_ids:
+        try:
+            status = getter(run_id) or {}
+            if status.get("project_id") != CANARY_PROJECT_ID:
+                continue
+            age = _elapsed_seconds(str(status.get("created_at") or "") or None, now)
+            if age is None or age < max_age_seconds:
+                continue
+            payload_getter = getattr(store, "get_run_payload", None)
+            payload = payload_getter(run_id) if payload_getter else None
+            title = repair_mojibake(str((payload or {}).get("title") or ""))
+            stages = {
+                str(j.get("stage")): str(j.get("status")) for j in status.get("jobs", []) if isinstance(j, dict)
+            }
+            result = store.cancel_run(run_id, reason=STALE_CANARY_CAUSE, actor="canary_sweep", now=now)
+            record: dict[str, Any] = {
+                "run_id": run_id,
+                "title": title,
+                "outcome": "failed",
+                "cause_code": STALE_CANARY_CAUSE,
+                "age_seconds": round(age, 1),
+                "stages": stages,
+                "closed_at": now.isoformat(),
+                "cancel_ok": bool(result.get("ok", True)) if isinstance(result, dict) else True,
+            }
+            closed.append(record)
+            if evidence_dir is not None:
+                evidence_dir.mkdir(parents=True, exist_ok=True)
+                (evidence_dir / f"{run_id}.json").write_text(
+                    json.dumps(record, ensure_ascii=False, indent=2), encoding="utf-8"
+                )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Canary sweep failed for run %s: %s", run_id, exc)
+    return closed
+
+
 def run_daily(
     *,
     day: date | None = None,
@@ -964,6 +1042,12 @@ def run_daily(
     last = attempts[-1] if attempts else None
 
     store = store or default_control_store()
+    try:
+        swept = sweep_stale_canaries(store, now=clock.now(), evidence_dir=reports_dir / "stale")
+        if swept:
+            logger.warning("Canary sweep closed %d stale run(s): %s", len(swept), [r["run_id"] for r in swept])
+    except Exception as exc:  # noqa: BLE001 - the sweep must never break the daily canary
+        logger.warning("Canary stale sweep failed: %s", exc)
     service = AutonomousIntakeService(store=store, demands_store=demands_store)
 
     def evaluate(number: int) -> CanaryReport:
