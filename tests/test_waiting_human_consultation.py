@@ -4,7 +4,7 @@ Validates that:
 1. `core/workflow/job_board.py` projects WAITING_HUMAN jobs with proper cause_code
    and diagnostic information (e.g. Grill alignment or pending manual dependencies).
 2. `hub/frontend/tasks.js` is strictly read-only (zero POST/PATCH/DELETE mutation calls)
-   and renders the observation card at the top of the Operational Queue.
+   and no longer renders observation cards (USR-219: moved to the priority queue).
 """
 
 from __future__ import annotations
@@ -250,20 +250,14 @@ def test_tasks_js_strictly_read_only() -> None:
     assert not action_buttons, f"Mutation action buttons found in tasks.js: {action_buttons}"
 
 
-def test_tasks_js_renders_waiting_human_observation_card() -> None:
-    """hub/frontend/tasks.js must render the informative observation card for WAITING_HUMAN jobs."""
-    assert TASKS_JS_PATH.exists()
+def test_tasks_js_no_longer_renders_waiting_human_cards() -> None:
+    """USR-219: the redundant read-only WAITING_HUMAN cards left the main page.
+
+    Actionable blockers live in the priority queue (interventions.js, USR-210 modal).
+    """
     content = TASKS_JS_PATH.read_text(encoding="utf-8")
-
-    # 1. Visual indicator in prominent display
-    assert "Aguardando Decisão do Owner (WAITING_HUMAN)" in content
-
-    # 2. Canonical terminal resolution instructions
-    assert "Resolução pelo terminal canônico: python -m core.demands.cli grill" in content
-    assert "python -m core.demands.cli grill <ticket_id>" in content
-
-    # 3. Dynamic binding of demand title, run ID and suspension reason
-    assert "item.title" in content or "title" in content
-    assert "item.run_id" in content or "runId" in content
-    assert "Motivo da Suspensão" in content
-    assert "Somente Leitura" in content
+    assert "Aguardando Decisão do Owner (WAITING_HUMAN)" not in content
+    assert "renderWaitingHumanObservationCard" not in content
+    assert "/api/tasks/dashboard" not in content
+    interventions = (ROOT / "hub" / "frontend" / "interventions.js").read_text(encoding="utf-8")
+    assert "openTaskInterventionModal" in interventions

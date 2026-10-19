@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>DarkHub - AI & Dev Command Center</title>
-  <link rel="stylesheet" href="/static/styles.css?v=20261009a">
+  <link rel="stylesheet" href="/static/styles.css?v=20261019a">
 </head>
 <body class="bg-slate-950 text-slate-100 min-h-screen font-sans selection:bg-indigo-500 selection:text-white antialiased relative">
 
@@ -73,7 +73,7 @@
           <span class="inline">Telemetria</span>
         </button>
       <button
-          onclick="document.getElementById('content-studio-section')?.scrollIntoView({behavior: 'smooth'})"
+          onclick="openStudioDrawer()"
           title="Estúdio de conteúdo e ateliê visual"
           class="w-full text-left flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-purple-300 border border-slate-800 hover:border-purple-500/30 transition-all text-xs font-medium" data-sidebar-id="hub-nav-7">
           <span>🎨</span>
@@ -95,10 +95,10 @@
         </button>
       <button
           onclick="document.getElementById('tasks-dashboard-section')?.scrollIntoView({behavior: 'smooth'})"
-          title="Fila operacional de tarefas"
+          title="Plano de autonomia (DAG e gates)"
           class="w-full text-left flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-emerald-300 border border-slate-800 hover:border-emerald-500/30 transition-all text-xs font-medium" data-sidebar-id="hub-nav-10">
           <span>✅</span>
-          <span class="inline">Tarefas</span>
+          <span class="inline">Autonomia</span>
         </button>
       <button
           onclick="openPlaygroundDrawer()"
@@ -270,38 +270,17 @@
       </div>
     </section>
 
-    <!-- Operational Task Dashboard & Autonomy DAG (DH-12) -->
+    <!-- Plano de autonomia (DAG, DH-12). A fila de tarefas e os cartoes WAITING_HUMAN sairam (USR-219):
+         bloqueios ficam na fila prioritaria do topo e execucoes na Esteira ao vivo. -->
     <section id="tasks-dashboard-section" class="space-y-4" aria-labelledby="tasks-dashboard-title">
       <div class="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h2 id="tasks-dashboard-title" class="text-xs font-mono font-semibold uppercase tracking-wider text-slate-400 flex items-center gap-2">
-            <span>✅ Fila operacional & Autonomia</span>
-            <span class="text-[10px] text-slate-600 normal-case tracking-normal">runs, DAG de execução e gates de prontidão</span>
+            <span>✅ Plano de autonomia</span>
+            <span class="text-[10px] text-slate-600 normal-case tracking-normal">DAG de execução e gates de prontidão</span>
           </h2>
         </div>
-        <div class="flex items-center gap-2.5">
-          <!-- View Mode Switcher -->
-          <div class="flex items-center p-0.5 rounded-xl bg-slate-900 border border-slate-800 text-xs font-medium shadow-inner">
-            <button id="tasks-view-btn-queue" type="button" onclick="switchTaskViewMode('queue')" class="px-2.5 py-1 rounded-lg bg-indigo-600 text-white font-mono text-[11px] shadow-sm transition">
-              📋 Fila de Jobs
-            </button>
-            <button id="tasks-view-btn-dag" type="button" onclick="switchTaskViewMode('dag')" class="px-2.5 py-1 rounded-lg text-slate-400 hover:text-slate-200 font-mono text-[11px] transition">
-              🕸️ DAG & Autonomia
-            </button>
-          </div>
-          <button id="tasks-dashboard-refresh" type="button" class="rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-1.5 text-[11px] font-medium text-emerald-300 transition hover:bg-emerald-500/20 active:scale-95">
-            Atualizar
-          </button>
-        </div>
-      </div>
-      <div id="tasks-dashboard-alert" class="rounded-xl border border-slate-800 bg-slate-900/60 px-3 py-2 text-[11px] text-slate-400" role="status" aria-live="polite">
-        Consultando estado operacional…
-      </div>
-
-      <!-- Linear Queue Container -->
-      <div id="tasks-queue-container" class="space-y-4">
-        <div id="tasks-dashboard-summary" class="grid grid-cols-2 gap-3 lg:grid-cols-4"></div>
-        <div id="tasks-dashboard-queue" class="grid grid-cols-1 gap-3 lg:grid-cols-2"></div>
+        <button id="tasks-dag-toggle" type="button" data-collapse-key="tasks-dag" data-collapse-target="tasks-dag-container" aria-expanded="false" aria-controls="tasks-dag-container" onclick="hubToggleCollapse(this)" class="inline-flex items-center gap-1 rounded-lg border border-slate-700 bg-slate-800/80 px-3 py-1.5 text-[11px] font-medium text-slate-300 hover:bg-slate-700 hover:text-white transition">Abrir</button>
       </div>
 
       <!-- Autonomy DAG Container (DH-12) -->
@@ -336,6 +315,7 @@
           <div id="autonomy-dag-nodes-grid" class="space-y-4 pt-2"></div>
         </div>
       </div>
+
     </section>
 
     <!-- Toolbar: Search Bar + Category Pills -->
@@ -378,6 +358,16 @@
     </section>
 
   </main>
+
+  <!-- Estúdio de conteúdo e ateliê visual (USR-219): aberto pelo menu lateral, fora da página principal -->
+  <div id="studio-drawer" class="hidden fixed inset-0 z-50 bg-slate-950/90 backdrop-blur-md animate-in-quick" role="dialog" aria-modal="true" aria-label="Estúdio de conteúdo e ateliê visual">
+    <div class="w-full h-full max-w-[1600px] mx-auto bg-slate-950 border-x border-slate-800 overflow-y-auto">
+      <div class="sticky top-0 z-10 flex justify-end border-b border-slate-800 bg-slate-950/95 px-5 py-3 backdrop-blur-xl">
+        <button type="button" onclick="closeStudioDrawer()" aria-label="Fechar Estúdio" class="p-2 rounded-xl text-slate-500 hover:text-slate-200 hover:bg-slate-800">✕</button>
+      </div>
+      <div id="studio-drawer-body" class="p-4 sm:p-6"></div>
+    </div>
+  </div>
 
   <!-- Multi-Project Portfolio Drawer (DH-08) -->
   <div id="portfolio-drawer" class="hidden fixed inset-0 z-50 bg-slate-950/90 backdrop-blur-md animate-in-quick" role="dialog" aria-modal="true" aria-labelledby="portfolio-title">
@@ -1794,25 +1784,26 @@
   </div>
 
   <!-- Scripts -->
-  <script src="/static/app.js?v=20261009a"></script>
-  <script src="/static/usage.js?v=20261009a"></script>
-  <script src="/static/credits.js?v=20261009a"></script>
-  <script src="/static/health.js?v=20261009a"></script>
-  <script src="/static/health_ops.js?v=20261009a"></script>
-  <script src="/static/infra.js?v=20261009a"></script>
-  <script src="/static/tasks.js?v=20261009a"></script>
-  <script src="/static/roadmap.js?v=20261009a"></script>
-  <script src="/static/audio.js?v=20261009a"></script>
-  <script src="/static/demands.js?v=20261009a"></script>
-  <script src="/static/interventions.js?v=20261009a"></script>
-  <script src="/static/telemetry.js?v=20261009a"></script>
-  <script src="/static/catalog.js?v=20261009a"></script>
-  <script src="/static/enterprise.js?v=20261009a"></script>
-  <script src="/static/coverage.js?v=20261009a"></script>
-  <script src="/static/benchmarks.js?v=20261009a"></script>
-  <script src="/static/learning.js?v=20261009a"></script>
-  <script src="/static/portfolio.js?v=20261009a"></script>
-  <script src="/static/studio.js?v=20261009a"></script>
-  <script src="/static/harness.js?v=20261009a"></script>
+  <script src="/static/app.js?v=20261019a"></script>
+  <script src="/static/collapse.js?v=20261019a"></script>
+  <script src="/static/usage.js?v=20261019a"></script>
+  <script src="/static/credits.js?v=20261019a"></script>
+  <script src="/static/health.js?v=20261019a"></script>
+  <script src="/static/health_ops.js?v=20261019a"></script>
+  <script src="/static/infra.js?v=20261019a"></script>
+  <script src="/static/tasks.js?v=20261019a"></script>
+  <script src="/static/roadmap.js?v=20261019a"></script>
+  <script src="/static/audio.js?v=20261019a"></script>
+  <script src="/static/demands.js?v=20261019a"></script>
+  <script src="/static/interventions.js?v=20261019a"></script>
+  <script src="/static/telemetry.js?v=20261019a"></script>
+  <script src="/static/catalog.js?v=20261019a"></script>
+  <script src="/static/enterprise.js?v=20261019a"></script>
+  <script src="/static/coverage.js?v=20261019a"></script>
+  <script src="/static/benchmarks.js?v=20261019a"></script>
+  <script src="/static/learning.js?v=20261019a"></script>
+  <script src="/static/portfolio.js?v=20261019a"></script>
+  <script src="/static/studio.js?v=20261019a"></script>
+  <script src="/static/harness.js?v=20261019a"></script>
 </body>
 </html>

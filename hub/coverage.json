@@ -339,7 +339,7 @@
       "surface": "services-grid"
     },
     "GET /api/tasks/dashboard": {
-      "surface": "tasks-dashboard-section"
+      "machine": "Projecao read-only da fila de jobs para scripts e agentes; a pagina principal deixou de exibi-la no USR-219 (bloqueios na fila prioritaria, execucoes na Esteira ao vivo)."
     },
     "POST /api/telemetry/events": {
       "machine": "Ingestão de telemetria enviada pelos runners, protegida por chave"

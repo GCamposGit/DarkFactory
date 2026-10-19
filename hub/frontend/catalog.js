@@ -48,6 +48,7 @@ function mountCatalogSection() {
     document.querySelector("main");
   if (!targetAnchor) return;
 
+  const catalogCollapsed = hubCollapseIsCollapsed("cross-catalog");
   const section = document.createElement("section");
   section.id = "cross-catalog-section";
   section.className =
@@ -63,6 +64,7 @@ function mountCatalogSection() {
         <p class="text-xs text-slate-400 mt-1">Componentes reutilizáveis compartilhados entre Atrium, Jarvis e DarkFac com salvaguardas de auto-evolução.</p>
       </div>
       <div class="flex items-center gap-2 flex-wrap">
+        ${hubCollapseButtonHtml("cross-catalog", "cross-catalog-body", catalogCollapsed)}
         <button id="btn-open-propose-modal" type="button" class="inline-flex items-center gap-1.5 rounded-lg border border-indigo-500/40 bg-indigo-500/10 px-3 py-1.5 text-xs font-medium text-indigo-300 hover:bg-indigo-500/20 transition">
           <span>✨ Nova Proposta</span>
         </button>
@@ -72,6 +74,7 @@ function mountCatalogSection() {
       </div>
     </div>
 
+    <div id="cross-catalog-body" class="space-y-4${catalogCollapsed ? " hidden" : ""}">
     <!-- Components Grid -->
     <div>
       <h3 class="text-xs font-mono uppercase tracking-wider text-slate-400 mb-2">Componentes Reutilizáveis (Sincronização Ativa)</h3>
@@ -91,6 +94,8 @@ function mountCatalogSection() {
       <div id="evolution-proposals-list" class="space-y-2">
         <div class="py-2 text-slate-500 font-mono text-[11px]">Carregando propostas de evolução...</div>
       </div>
+    </div>
+
     </div>
 
     <!-- Propose Mutation Modal -->
