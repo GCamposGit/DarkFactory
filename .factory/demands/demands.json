@@ -9086,9 +9086,9 @@
     ],
     "reachability_contract": "",
     "acceptance_criteria": [
-      "O runbook/OA de publicacao protegida manda primeiro push numa branch owner/* com PR para o CI rodar (pr-validation Linux e Windows), e so depois o push direto na main, com o mesmo SHA.",
-      "O gerador de OA de publicacao protegida (owner_action/autonomy) inclui esse passo e o comando gh pr checks para conferir o CI verde antes do push na main.",
-      "Teste cobre o texto/passos gerados para uma OA de publicacao protegida."
+      "O runbook/OA de publicacao protegida exige, ANTES do push direto na main, rodar o portao oficial completo no commit candidato exato (python C:\\dev\\DarkFac\\core\\harness\\runner.py --quick) e so publicar se a saida contiver [HARNESS_PASS]; lista antes os guardas rapidos (test_clock_bomb_guard, test_hub_coverage, test_safe_git_state, test_harness_contract). Nunca trocar o portao completo por testes focados.",
+      "Depois do push, os passos mandam conferir o CI da main (gh run list --branch main --limit 3 / gh run watch) e, se vermelho, o agente abre o hotfix (o owner nao corrige). Criterio original de branch owner/* com PR foi revisto: o trusted-pr-policy reprova esse PR sem rodar testes.",
+      "Teste cobre os passos gerados (portao antes do push, checagem de CI presente)."
     ],
     "suggested_files": [
       "docs/runbooks/",
