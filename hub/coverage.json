@@ -406,6 +406,9 @@
     },
     "POST /api/webhooks/test": {
       "surface": "infrastructure-cards-section"
+    },
+    "POST /api/node-sync/convergence": {
+      "machine": "Snapshot de convergência dos nós enviado pelo ciclo scripts/dokploy_redeploy.py (chave de telemetria); exibido no /status do Telegram"
     }
   },
   "core_modules": {

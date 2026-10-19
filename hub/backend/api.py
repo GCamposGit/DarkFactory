@@ -51,6 +51,7 @@ from hub.backend.models import (
     VisualGenerateResponse,
     VisualIllustrateRequest,
     TaskDashboardReport,
+    NodeSyncConvergencePayload,
     UsageSyncPayload,
     UsageSyncResponse,
     ProgressProjection,
@@ -942,6 +943,30 @@ def sync_usage_endpoint(
         service.usage_sync_watch.record_refusal("unauthorized_401")
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid telemetry key.")
     return service.sync_usage_data(payload)
+
+
+@router.post("/node-sync/convergence")
+def sync_node_convergence_endpoint(
+    payload: NodeSyncConvergencePayload,
+    x_darkfac_telemetry_key: Optional[str] = Header(default=None, alias="X-DarkFac-Telemetry-Key"),
+) -> Dict[str, Any]:
+    """Receives the node-sync convergence snapshot from the Notebook deploy cycle (USR-204)."""
+    configured_key = os.environ.get("DARKFAC_TELEMETRY_KEY")
+    if not configured_key:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Convergence synchronization is disabled; set DARKFAC_TELEMETRY_KEY.",
+        )
+    if not x_darkfac_telemetry_key or not secrets.compare_digest(
+        x_darkfac_telemetry_key,
+        configured_key,
+    ):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid telemetry key.")
+    from core.infra.convergence_publish import ingest_convergence_snapshot
+    from core.paths import state_root
+
+    count = ingest_convergence_snapshot(state_root(), payload.nodes, payload.pending)
+    return {"status": "synchronized", "client_node_id": payload.client_node_id, "nodes": count}
 
 
 @router.get("/visual/gallery")

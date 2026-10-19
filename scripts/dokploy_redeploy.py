@@ -683,6 +683,29 @@ def default_ops_notifier(message: str) -> bool:
     return _notify_human(message)
 
 
+def _publish_convergence_best_effort(env: Any, err: Any) -> None:
+    """USR-204: send node_sync_divergence.json to the cloud Hub; never affects the deploy result."""
+    try:
+        from core.infra.convergence_publish import publish_convergence_snapshot
+        from core.paths import state_root
+
+        key = str(env.get("DARKFAC_TELEMETRY_KEY") or "").strip().strip("\"'")
+        if not key:
+            try:
+                for line in (REPO_ROOT / ".env").read_text(encoding="utf-8").splitlines():
+                    name, sep, value = line.strip().removeprefix("export ").partition("=")
+                    if sep and name.strip() == "DARKFAC_TELEMETRY_KEY":
+                        key = value.strip().strip("\"'")
+            except OSError:
+                pass
+        ok = publish_convergence_snapshot(
+            state_root(), telemetry_key=key, target_url=env.get("DARKHUB_CLOUD_URL")
+        )
+        print(f"[NODE SYNC] convergence snapshot published to Hub: {ok}", file=err, flush=True)
+    except Exception as exc:
+        print(f"[NODE SYNC] convergence publish skipped: {type(exc).__name__}", file=err, flush=True)
+
+
 def make_safe_ops_notifier(sender: Optional[Callable[[str], bool]] = None) -> Callable[[str], bool]:
     """Notifier para node_sync (USR-242): redige segredos e nunca levanta; falha de envio nao afeta o deploy."""
     send = sender or default_ops_notifier
@@ -1074,6 +1097,9 @@ def _run_main(
         }
         node_sync_dirty = False
         sync_report = node_sync.sync(**sync_kwargs)
+        # USR-204: o /status do Telegram roda na VPS; publica o snapshot de convergencia no Hub (best effort).
+        if not args.dry_run:
+            _publish_convergence_best_effort(env, err)
         for node in sync_report.nodes:
             if node.state == "converged":
                 continue

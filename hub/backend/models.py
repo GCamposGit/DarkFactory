@@ -502,6 +502,14 @@ class UsageSyncPayload(BaseModel):
     credits: List[Dict[str, Any]] = Field(default_factory=list, description="List of raw ProviderCreditCard payloads")
 
 
+class NodeSyncConvergencePayload(BaseModel):
+    """Convergence snapshot published by the Notebook deploy cycle so the VPS /status can show it (USR-204)."""
+
+    client_node_id: str = Field(default="workstation", max_length=80)
+    nodes: Dict[str, int] = Field(default_factory=dict, description="Consecutive divergent cycles per node")
+    pending: Optional[Dict[str, Any]] = Field(default=None, description="Unfinished convergence request, if any")
+
+
 class UsageSyncResponse(BaseModel):
     """Response returned by DarkHub upon successful synchronization."""
 
