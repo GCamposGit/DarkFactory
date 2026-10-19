@@ -239,7 +239,12 @@ def test_api_get_infra_cards(client: TestClient) -> None:
 
 def test_api_post_infra_cards_refresh(client: TestClient) -> None:
     """Verify POST /api/infra/cards/refresh forces probe refresh and returns 200."""
-    with patch("core.infra.cards.probe_liveness", return_value=True):
+    from core.infra.node_liveness import NodeLiveness
+
+    live = NodeLiveness(node_id="x", url="http://x", status="online")
+    with patch("core.infra.cards.probe_liveness", return_value=True), patch(
+        "core.infra.cards.get_node_liveness", return_value=live
+    ):
         resp = client.post("/api/infra/cards/refresh?timeout=0.1")
         assert resp.status_code == 200
         data = resp.json()
