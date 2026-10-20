@@ -8828,8 +8828,8 @@
     "project_id": "darkfac",
     "title": "Conectar alimentador do backlog ao loop operacional e comprovar reposicao",
     "origin": "review",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "799451f303018d81a45838e2343d0b3c45a3f7b2",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -8855,7 +8855,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-18T01:09:32.401853Z",
-    "updated_at": "2026-10-18T01:09:32.401853Z"
+    "updated_at": "2026-10-20T14:39:37.625303Z"
   },
   {
     "id": "USR-305",
