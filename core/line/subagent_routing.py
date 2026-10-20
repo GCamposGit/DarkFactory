@@ -29,6 +29,7 @@ from typing import Any, Literal, Mapping, Optional, Union
 
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt, ValidationError, field_validator, model_validator
 
+from core.models.registry import resolve as resolve_model
 from core.orchestrator.guard import audit_paths
 
 logger = logging.getLogger(__name__)
@@ -149,7 +150,7 @@ def _is_forbidden_model(model_id: str, forbidden: Union[set[str], frozenset[str]
 def default_config() -> SubagentRoutingConfig:
     """Embedded defaults (identical to the committed JSON; a test pins the equality)."""
     return SubagentRoutingConfig(
-        models={"haiku": "claude-haiku-5-5", "sonnet": "claude-sonnet-5-5", "opus": "claude-opus-5-5"},
+        models={alias: resolve_model(f"subagent.{alias}") for alias in _ALIASES},
         max_files=3,
         max_changed_lines=150,
         max_haiku_attempts=1,
