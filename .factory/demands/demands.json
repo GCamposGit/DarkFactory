@@ -8122,7 +8122,10 @@
     ],
     "problem_statement": "core.adoption.initialize_project cria Git e README, mas nao cria remoto nem registra o projeto. O harness gerado nao alimenta commands.validate no registro exigido pelo launcher. O owner autorizou em 16/10/2026 criar repositorios privados na sua conta GitHub e ambientes separados na infraestrutura existente, sem novas contratacoes; a primeira prova sera piloto tecnico descartavel.",
     "core_journey": [],
-    "non_goals": [],
+    "non_goals": [
+      "Nao criar repositorio publico.",
+      "Nao contratar servicos novos."
+    ],
     "reachability_contract": "",
     "acceptance_criteria": [
       "Bootstrap de projeto novo conecta repositorio privado autorizado, branch e registro executavel sem alterar o repositorio do core",

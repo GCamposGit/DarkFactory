@@ -1,5 +1,11 @@
 """Public API for the Dark Factory project-adoption gateway."""
 
+from .bootstrap import (
+    BootstrapBlockedError,
+    GitHubProvider,
+    LocalBareProvider,
+    bootstrap_project,
+)
 from .models import AdoptionPlan, AdoptionResult, ProjectInspection, TaskPreparation, VerificationReport
 from .service import (
     AdoptionBlockedError,
@@ -16,6 +22,10 @@ from .service import (
 __all__ = [
     "AdoptionBlockedError",
     "AdoptionError",
+    "BootstrapBlockedError",
+    "GitHubProvider",
+    "LocalBareProvider",
+    "bootstrap_project",
     "AdoptionPlan",
     "AdoptionResult",
     "ProjectInspection",
