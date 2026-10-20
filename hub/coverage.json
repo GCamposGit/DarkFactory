@@ -531,6 +531,9 @@
     },
     "governance": {
       "internal": "Verificador puro de autorizacao de evolucao de governanca (USR-228): le o registro na base confiavel; sem I/O exposto nem superficie no Hub."
+    },
+    "intake": {
+      "internal": "Roteamento de demanda por projeto e registro de pedidos de onboarding do Telegram (USR-278); sem superficie propria no Hub."
     }
   }
 }
