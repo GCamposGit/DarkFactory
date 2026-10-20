@@ -1868,6 +1868,39 @@
       "created_at": "2026-10-20T10:29:35Z",
       "created_by": "claude-code",
       "resolved_at": null
+    },
+    {
+      "id": "OA-047",
+      "kind": "action",
+      "title": "Piloto USR-279 M3: enviar pelo Telegram a demanda do pilot-hello (depois do deploy)",
+      "priority": "medium",
+      "status": "open",
+      "why": "O marco M3 do piloto greenfield exige que o owner envie a demanda real do produto pelo Telegram, para provar que o roteamento por projeto (USR-278) cai no projeto pilot-hello e nao em darkfac. So o owner pode enviar mensagem como owner no bot.",
+      "blocks": [
+        "USR-279"
+      ],
+      "depends_on": [
+        "OA-043"
+      ],
+      "steps": [
+        {
+          "text": "Espere o agente avisar que o deploy unico de 20/10 terminou (o Hub precisa conhecer o projeto pilot-hello registrado no USR-279 M1)."
+        },
+        {
+          "text": "No Telegram, abra a conversa com o bot da DarkFac e envie exatamente a mensagem abaixo.",
+          "command": "/demand pilot-hello: pagina inicial com o texto DarkFac pilot e endpoint /healthz que devolve status ok e a versao"
+        },
+        {
+          "text": "Se o bot fizer perguntas (Gate G1), responda com as decisoes ja tomadas na OA-042: nome pilot-hello, texto 'DarkFac pilot', deploy opcao A (Dokploy existente), manter arquivado, build no venv."
+        },
+        {
+          "text": "Confira no DarkHub (https://darkhub.ggcampos.com) que a demanda aparece no projeto pilot-hello com um ticket PH-..."
+        }
+      ],
+      "verify": "Existe ticket do projeto pilot-hello (prefixo PH) vinculado a demanda enviada; nenhum ticket novo USR- foi criado para ela.",
+      "created_at": "2026-10-20T15:39:28Z",
+      "created_by": "claude-session-43f612c4",
+      "resolved_at": null
     }
   ]
 }
