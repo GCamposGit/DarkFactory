@@ -36,6 +36,7 @@ from core.demands.models import (
     GrillSession,
     UserTicket,
 )
+from core.demands.readiness import ReadinessReport, evaluate_readiness
 from core.demands.specifier import DemandSpecifier, _extract_json_object
 from core.roadmap.models import utc_now
 
@@ -430,30 +431,19 @@ class DemandGrillEngine:
         doc_insights: list[str] | None = None,
     ) -> tuple[bool, list[str]]:
         """Evaluate if demand has material ambiguities requiring human clarification (Scenario G1).
-        
+
         Returns (is_clear, reasons).
         """
-        reasons: list[str] = []
-        prob = (ticket.problem_statement or "").strip()
+        report = evaluate_readiness(
+            ticket.problem_statement, ticket.non_goals, ticket.acceptance_criteria
+        )
+        return report.is_clear, report.reasons
 
-        # 1. Problem statement completeness
-        if len(prob) < 20:
-            reasons.append("Problem statement muito breve ou ausente")
-        elif any(marker in prob.lower() for marker in ("todo", "tbd", "a definir", "não sei", "ambíguo", "???")):
-            reasons.append("Problem statement contém marcadores explícitos de indefinição (TODO/TBD)")
-
-        # 2. Non-goals boundaries
-        if not ticket.non_goals or len([ng for ng in ticket.non_goals if ng.strip()]) == 0:
-            reasons.append("Fronteiras explícitas de escopo (non-goals) não foram delimitadas")
-
-        # 3. Measurable acceptance criteria
-        if not ticket.acceptance_criteria or len([ac for ac in ticket.acceptance_criteria if ac.strip()]) == 0:
-            reasons.append("Critérios de aceitação verificáveis ausentes")
-
-        is_clear = len(reasons) == 0
-        if is_clear:
-            reasons = ["Demanda clara e contextualizada; escopo, non-goals e critérios delimitados sem lacunas materiais."]
-        return is_clear, reasons
+    def classify_readiness(self, ticket: UserTicket) -> ReadinessReport:
+        """Canonical readiness classification (ready / documentary gap / human decision)."""
+        return evaluate_readiness(
+            ticket.problem_statement, ticket.non_goals, ticket.acceptance_criteria
+        )
 
     def conduct_integrated_grill(
         self,
