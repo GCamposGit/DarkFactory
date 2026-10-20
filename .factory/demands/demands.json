@@ -9241,8 +9241,8 @@
     "project_id": "darkfac",
     "title": "Supervisor do grokbox nao recarrega o worker ocioso quando o HEAD muda e nao esta versionado no repositorio",
     "origin": "agent",
-    "status": "planned",
-    "delivery_evidence": "Reaberto em 20/10/2026: a 1a versao comparava com o git_sha do /health, que e calculado do HEAD na hora e nunca dispararia a recarga (achado do Grok na VM); corrigido para comparar com o sha lancado pelo proprio supervisor. Falta levar a regra para o grokbox-supervisor.sh da VM e versiona-lo (OA-040 reescrita) e provar a recarga em ate 60 s. (anterior: 5de6a9c697c2a393d494b64396a693b587069378)",
+    "status": "completed",
+    "delivery_evidence": "OA-040 concluida pelo Owner em 20/10/2026: supervisor versionado instalado/reiniciado e prova de recarga do worker ocioso executada; USR-315 fechado (anterior: Reaberto em 20/10/2026: a 1a versao comparava com o git_sha do /health, que e calculado do HEAD na hora e nunca dispararia a recarga (achado do Grok na VM); corrigido para comparar com o sha lancado pelo proprio supervisor. Falta levar a regra para o grokbox-supervisor.sh da VM e versiona-lo (OA-040 reescrita) e provar a recarga em ate 60 s. (anterior: 5de6a9c697c2a393d494b64396a693b587069378))",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -9271,7 +9271,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-18T20:25:34.048076Z",
-    "updated_at": "2026-10-20T11:20:23.189046Z"
+    "updated_at": "2026-10-20T17:57:38.267933Z"
   },
   {
     "id": "USR-316",
