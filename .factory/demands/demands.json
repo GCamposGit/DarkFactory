@@ -5696,8 +5696,8 @@
     "project_id": "darkfac",
     "title": "Hub cai a cada merge: redeploy sem downtime, deploy deduplicado e frontend resiliente",
     "origin": "user",
-    "status": "completed",
-    "delivery_evidence": "1a416f4bb52f7047050c57b3d2d52cd2bf72019d",
+    "status": "planned",
+    "delivery_evidence": "Reaberto em 20/10/2026: codigo entregue (redeploy sem downtime/deploy deduplicado); falta a OA-044 do owner (autoDeploy off, GHCR, sonda) e a prova no deploy (anterior: 1a416f4bb52f7047050c57b3d2d52cd2bf72019d)",
     "item_type": "operations",
     "lifecycle_stage": "execution",
     "horizon": "later",
@@ -5734,7 +5734,7 @@
     "estimated_complexity": "high",
     "dependencies": [],
     "created_at": "2026-10-10T14:53:42.327437Z",
-    "updated_at": "2026-10-20T14:40:59.873593Z"
+    "updated_at": "2026-10-20T14:49:15.921450Z"
   },
   {
     "id": "USR-208",
