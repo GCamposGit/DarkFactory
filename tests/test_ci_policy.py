@@ -45,15 +45,20 @@ def test_pull_request_policy_uses_base_owned_verifier_and_exact_shas() -> None:
     assert workflow.count("persist-credentials: false") >= 4
 
     trusted_policy = workflow[
-        workflow.index("  trusted-pr-policy:") : workflow.index("  pr-validation:")
+        workflow.index("  trusted-pr-policy:") : workflow.index("  changes:")
     ]
     assert "pip install" not in trusted_policy
     assert "runner.py" not in trusted_policy
 
+    # USR-300: the heavy job is `pr-tests` (sharded on Windows); the required check names
+    # `pr-validation (ubuntu-latest)` / `pr-validation (windows-latest)` are aggregators over it.
+    assert "name: pr-validation (ubuntu-latest)" in workflow
+    assert "name: pr-validation (windows-latest)" in workflow
+
     guard_command = "python ../trusted/core/orchestrator/guard.py"
     materialize_command = "cp -R ../trusted/core/harness/. core/harness/"
     harness_command = "python core/harness/runner.py --quick"
-    validation_position = workflow.index("  pr-validation:")
+    validation_position = workflow.index("  pr-tests:")
     guard_position = workflow.index(guard_command, validation_position)
     materialize_position = workflow.index(materialize_command, validation_position)
     harness_position = workflow.index(harness_command, materialize_position)
