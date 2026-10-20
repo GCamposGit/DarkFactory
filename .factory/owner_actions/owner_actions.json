@@ -1650,44 +1650,39 @@
     {
       "id": "OA-040",
       "kind": "action",
-      "title": "Trocar o supervisor do grokbox pelo scripts/grokbox_supervisor.py versionado (USR-315)",
+      "title": "Grokbox: instalar o supervisor versionado (scripts/grokbox) com recarga a cada ciclo (USR-315)",
       "priority": "medium",
       "status": "open",
-      "why": "O supervisor atual vive so na VM, fora do repositorio, e nao recarregou o worker ocioso apos git pull em 18/10 (USR-315). O USR-315 (#456) versionou um supervisor novo que relanca o worker em ate 60 s quando o HEAD muda e o worker esta ocioso, nunca com job rodando. So quem acessa a VM pode troca-lo.",
+      "why": "O grokbox-supervisor.sh v2 da VM ja recarrega o worker apos git pull, mas so a cada ~5 min e com 300 s de uptime; a versao versionada em scripts/grokbox/ (copiada da VM, recarga a cada ciclo de 30 s e 60 s de uptime) atende o USR-315 e mantem a recuperacao do Tailscale. So quem acessa a VM instala.",
       "blocks": [
         "USR-315"
       ],
       "depends_on": [],
       "steps": [
         {
-          "text": "Na VM grokbox, atualizar o checkout para a main.",
-          "command": "cd /workspace/darkfac/DarkFactory && git pull --ff-only"
+          "text": "Na VM, com o worker ocioso (busy=false no /health), atualize o checkout e copie os scripts versionados por cima dos da VM.",
+          "command": "cd /workspace/darkfac/DarkFactory && git pull --ff-only && cp scripts/grokbox/grokbox-supervisor.sh scripts/grokbox/grokbox-common.sh /workspace/darkfac/"
         },
         {
-          "text": "Esperar o worker ficar ocioso (busy=false) antes de mexer no supervisor.",
-          "command": "curl -s http://127.0.0.1:8080/health | python3 -c \"import json,sys; print(json.load(sys.stdin)['busy'])\""
+          "text": "Reinicie o supervisor (o bootstrap/watchdog relanca com o arquivo novo).",
+          "command": "kill $(cat /workspace/darkfac/run/supervisor.pid)"
         },
         {
-          "text": "Parar o supervisor antigo (o processo do script atual da VM; o worker pode continuar de pe, o novo supervisor o adota e nao lanca outro na mesma porta).",
-          "command": "pkill -f <nome-do-script-supervisor-antigo>"
-        },
-        {
-          "text": "Iniciar o supervisor novo em segundo plano, conforme docs/runbooks/grokbox_test_worker.md secao 4.",
-          "command": "mkdir -p /workspace/darkfac/run && nohup python3 scripts/grokbox_supervisor.py >> /workspace/darkfac/run/supervisor.log 2>&1 &"
-        },
-        {
-          "text": "Como o worker atual nao foi lancado pelo supervisor novo, encerrar o worker uma vez com ele ocioso para o supervisor novo assumir (relanca em ate 10 s).",
-          "command": "pkill -TERM -f core/harness/remote_worker.py"
-        },
-        {
-          "text": "Conferir o log do supervisor e o /health com o git_sha da main.",
-          "command": "tail -n 20 /workspace/darkfac/run/supervisor.log; curl -s http://127.0.0.1:8080/health"
+          "text": "Teste: depois do proximo git pull com o worker ocioso, o instance_id do /health muda em 1-2 min.",
+          "command": "curl -s http://127.0.0.1:8080/health"
         }
       ],
-      "verify": "/health responde com git_sha igual ao HEAD de /workspace/darkfac/DarkFactory; depois de um novo git pull com o worker ocioso, o git_sha muda sozinho em ate 60 s.",
+      "verify": "status.json atualizado pelo supervisor novo; apos um pull com busy=false o instance_id muda em ate ~2 min; com busy=true espera.",
       "created_at": "2026-10-19T19:28:16Z",
       "created_by": "claude-code (sessao 19/10/2026)",
-      "resolved_at": null
+      "resolved_at": null,
+      "history": [
+        {
+          "at": "2026-10-20T11:20:23Z",
+          "outcome": "steps_updated",
+          "note": "Grok (operador da VM) apontou que trocar o supervisor removeria a recuperacao do Tailscale e que o git_sha do /health vem do HEAD; OA reescrita para integrar."
+        }
+      ]
     },
     {
       "id": "OA-041",

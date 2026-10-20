@@ -45,54 +45,37 @@ tailscale ping grokbox
 Esperado: JSON com `status` ok, `busy` false, `platform_family` linux. `tailscale ping` mostrando
 `via DERP(...)` e normal (e o motivo do timeout de 10 s).
 
-## 4. Quem mantem o worker de pe (scripts/grokbox_supervisor.py)
+## 4. Quem mantem o worker de pe (scripts/grokbox/grokbox-supervisor.sh)
 
 A VM NAO tem `systemctl` nem `journalctl` (verificado em 18/10/2026, OA-035) e nao vamos instalar systemd.
-O supervisor esta versionado em `scripts/grokbox_supervisor.py` (Python 3 stdlib, USR-315). Ele lanca
-`core/harness/remote_worker.py --host 0.0.0.0 --port 8080 --node-id grokbox --project-root <root>`,
-relanca o worker se morrer, e a cada ciclo (padrao 10 s) compara `git rev-parse HEAD` de `project_root`
-com o `git_sha` do `/health`: se mudou e `busy=false`, envia SIGTERM ao worker e o relanca (em ate ~60 s);
-com `busy=true` (ou `/health` inalcancavel) espera, nunca reinicia com job rodando.
+O supervisor e o par bash versionado em `scripts/grokbox/` (`grokbox-supervisor.sh` + `grokbox-common.sh`,
+copiados da VM em 20/10/2026, USR-315). Na VM eles rodam de `/workspace/darkfac/` (fora do checkout), junto com
+`grokbox-watchdog.sh` e `grokbox-bootstrap.sh` (ainda nao versionados). Alem de manter o worker, ele recupera o
+Tailscale apos cada congelamento, mantem o watchdog mutuo, confere venv/requirements, gira logs e escreve
+`/workspace/darkfac/status.json`. O bootstrap o relanca se ele sumir: nunca rode um segundo supervisor.
 
-Subir (na VM, uma vez; o `git pull --ff-only` seguinte dispara o reload sozinho):
+Recarga apos `git pull` (USR-315): o `git_sha` do `/health` e calculado do HEAD na hora da consulta, entao o
+supervisor guarda o sha visto quando cada NOVA instancia do worker responde (`W_BOOT_SHA`) e, a cada ciclo de
+30 s (`reload_if_repo_moved`), se o `/health` passar a mostrar outro sha, o worker estiver ocioso e no ar ha mais
+de `RELOAD_MIN_UPTIME_SEC` (60 s), reinicia o worker. Com job rodando, espera.
+
+Instalar/atualizar a copia da VM a partir do repositorio (com o worker ocioso):
 
 ```bash
-cd /workspace/darkfac/DarkFactory && mkdir -p /workspace/darkfac/run
-nohup python3 scripts/grokbox_supervisor.py >> /workspace/darkfac/run/supervisor.log 2>&1 &
+cd /workspace/darkfac/DarkFactory && git pull --ff-only
+cp scripts/grokbox/grokbox-supervisor.sh scripts/grokbox/grokbox-common.sh /workspace/darkfac/
+kill $(cat /workspace/darkfac/run/supervisor.pid)   # o bootstrap/watchdog relanca o supervisor com o arquivo novo
 ```
-
-Configuracao (argumentos ou variaveis): `--project-root`/`GROKBOX_PROJECT_ROOT`
-(`/workspace/darkfac/DarkFactory`), `--python`/`GROKBOX_PYTHON` (`<root>/.venv/bin/python`),
-`--port`/`GROKBOX_PORT` (8080), `--node-id`/`GROKBOX_NODE_ID` (`grokbox`), `--host`/`GROKBOX_HOST`
-(`0.0.0.0`), `--interval`/`GROKBOX_POLL_SEC` (10), `--stop-file`/`GROKBOX_STOP_FILE`
-(`/workspace/darkfac/run/supervisor.stop`), `--pid-file`/`GROKBOX_PID_FILE`
-(`/workspace/darkfac/run/supervisor.pid`).
 
 Verificar:
 
 ```bash
-cat /workspace/darkfac/run/supervisor.pid; ps -eo pid,ppid,etime,cmd | grep -v grep | grep -E "grokbox_supervisor|remote_worker.py"
-tail -n 20 /workspace/darkfac/run/supervisor.log
-curl -s http://127.0.0.1:8080/health          # git_sha == git rev-parse HEAD, busy=false
+cat /workspace/darkfac/status.json | head -c 600
+tail -n 20 /workspace/darkfac/supervisor.log
+curl -s http://127.0.0.1:8080/health          # instance_id muda em ~1-2 min apos um pull com busy=false
 ```
 
-Parar o supervisor: `touch /workspace/darkfac/run/supervisor.stop` (ele sai no proximo ciclo e deixa o
-worker de pe; remova o arquivo antes de subir de novo) ou `kill $(cat /workspace/darkfac/run/supervisor.pid)`.
-Para parar tambem o worker, so com `busy=false`: `kill -TERM <PID do remote_worker.py>`.
-
-Atualizar a VM:
-
-```bash
-curl -s http://127.0.0.1:8080/health          # so siga com "busy": false (ou aceite que o reload espera o job)
-cd /workspace/darkfac/DarkFactory && git status --short && git fetch origin && git checkout main && git pull --ff-only
-# o supervisor recarrega o worker ocioso em ate ~60 s; confira o git_sha novo no /health
-```
-
-Se o supervisor tambem estiver parado, suba-o pelo comando acima. Logs do kernel: `dmesg` (nao ha journal).
-Congelamentos ficam em `/workspace/darkfac/run/vm-events.log`.
-
-O Vigia do Tailscale no grokbox roda a cada 5 min e cuida SOMENTE do Tailscale; ele nao reinicia o worker.
-O supervisor nao sobrevive a reboot da VM: depois de um reboot, suba-o de novo com o `nohup` acima.
+Logs do kernel: `dmesg` (nao ha journal). Congelamentos ficam em `/workspace/darkfac/run/vm-events.log`.
 
 ## 5. Quando o Tailscale perde o servidor de controle
 

@@ -5781,8 +5781,8 @@
     "project_id": "darkfac",
     "title": "Sessoes interativas e subagentes de todos os harnesses publicam no registro de execucoes",
     "origin": "user",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "356eabdf97ec0f1ea0c166aa04ba7a953875a68d",
     "item_type": "infrastructure",
     "lifecycle_stage": "execution",
     "horizon": "later",
@@ -5791,14 +5791,16 @@
       "darkhub",
       "live",
       "harness",
-      "hooks",
-      "congelado-v0"
+      "hooks"
     ],
     "problem_statement": "Depende do registro universal de execucoes. Sessoes abertas pelo owner no Claude Code (desktop/CLI), Codex, Grok Build e Antigravity, e os subagentes que elas lancam, nao aparecem em lugar nenhum do Hub; o owner precisa ver tudo o que esta em andamento. Diagnostico de 10/10/2026 (sessao interativa Claude Code, pedido do owner sobre o DarkHub).\n\nCONGELADO em 11/10/2026 (plano V0, docs/plans/V0_OPERACIONAL_2026-10-11.md): fora do caminho critico da linha.",
     "core_journey": [
       "Depende do registro universal de execucoes. Sessoes abertas pelo owner no Claude Code (desktop/CLI), Codex, Grok Build e Antigravity, e os subagentes que elas lancam, nao aparecem em lugar nenhum do Hub; o owner precisa ver tudo o que esta em andamento. Diagnostico de 10/10/2026 (sessao interativa Claude Code, pedido do owner sobre o DarkHub)."
     ],
-    "non_goals": [],
+    "non_goals": [
+      "Nao alterar configuracoes globais do usuario fora do repositorio.",
+      "Nao bloquear a sessao quando o registro falhar."
+    ],
     "reachability_contract": "",
     "acceptance_criteria": [
       "Claude Code: hooks versionados no repositorio (SessionStart, SubagentStart/SubagentStop, Stop) registram e encerram execucoes com o id da sessao/subagente e o ticket quando houver.",
@@ -5816,7 +5818,7 @@
       "USR-208"
     ],
     "created_at": "2026-10-10T14:53:54.302042Z",
-    "updated_at": "2026-10-11T17:49:17.206876Z"
+    "updated_at": "2026-10-20T11:20:34.306341Z"
   },
   {
     "id": "USR-210",
@@ -6658,8 +6660,8 @@
     "project_id": "darkfac",
     "title": "SQ02 DarkFac security profiles and threat model contracts",
     "origin": "user",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "3034bd2a7889bbfa3a2d7daaa8516800408ad776",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "later",
@@ -6684,7 +6686,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-11T05:38:59.241192Z",
-    "updated_at": "2026-10-11T17:49:17.206876Z"
+    "updated_at": "2026-10-20T11:19:21.630316Z"
   },
   {
     "id": "USR-228",
@@ -7534,8 +7536,8 @@
     "project_id": "darkfac",
     "title": "Watchdog do job em remote_worker.py conta a fila do suite_lock do Desktop no prazo do job",
     "origin": "user",
-    "status": "completed",
-    "delivery_evidence": "797eb891d88aff7e373cfcc5151a047ee2eb3941",
+    "status": "planned",
+    "delivery_evidence": "Patch em docs/proposals/USR-253-watchdog-suite-lock.patch (core/harness protegido); aguardando publicacao do owner pela OA-041. (anterior: 797eb891d88aff7e373cfcc5151a047ee2eb3941)",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "later",
@@ -7558,7 +7560,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-13T00:30:14.404999Z",
-    "updated_at": "2026-10-20T10:24:25.493307Z"
+    "updated_at": "2026-10-20T11:20:23.207071Z"
   },
   {
     "id": "USR-255",
@@ -9218,8 +9220,8 @@
     "project_id": "darkfac",
     "title": "Supervisor do grokbox nao recarrega o worker ocioso quando o HEAD muda e nao esta versionado no repositorio",
     "origin": "agent",
-    "status": "completed",
-    "delivery_evidence": "5de6a9c697c2a393d494b64396a693b587069378",
+    "status": "planned",
+    "delivery_evidence": "Reaberto em 20/10/2026: a 1a versao comparava com o git_sha do /health, que e calculado do HEAD na hora e nunca dispararia a recarga (achado do Grok na VM); corrigido para comparar com o sha lancado pelo proprio supervisor. Falta levar a regra para o grokbox-supervisor.sh da VM e versiona-lo (OA-040 reescrita) e provar a recarga em ate 60 s. (anterior: 5de6a9c697c2a393d494b64396a693b587069378)",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -9248,7 +9250,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-18T20:25:34.048076Z",
-    "updated_at": "2026-10-19T15:15:18.098069Z"
+    "updated_at": "2026-10-20T11:20:23.189046Z"
   },
   {
     "id": "USR-316",
