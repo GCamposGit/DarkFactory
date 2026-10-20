@@ -11,7 +11,8 @@ from typing import Sequence
 
 from core.owner_actions.models import ActionPriority, ActionStep, OwnerActionDraft
 
-GATE_COMMAND = r"python C:\dev\DarkFac\core\harness\runner.py --quick"
+# Relative on purpose: run from the candidate worktree so its own (patched) runner and tree are gated.
+GATE_COMMAND = r"python core\harness\runner.py --quick"
 GATE_PASS_MARKER = "[HARNESS_PASS]"
 FAST_GUARD_TESTS: tuple[str, ...] = (
     "tests/test_clock_bomb_guard.py",
@@ -26,7 +27,7 @@ CI_WATCH_COMMAND = "gh run watch"
 def build_protected_publish_steps(
     ticket_id: str, files: Sequence[str], *, candidate_worktree: str = r"C:\dev\DarkFac\.worktrees\<WORKTREE_DO_CANDIDATO>"
 ) -> list[ActionStep]:
-    """Return the ordered steps: fast guards, full gate, direct push, main CI check (never skip the gate)."""
+    """Return the ordered steps: fast guards, local commit, full gate, direct push, main CI check."""
     shown = ", ".join(files) if files else "os arquivos protegidos"
     guards = " ".join(FAST_GUARD_TESTS)
     return [
@@ -36,6 +37,13 @@ def build_protected_publish_steps(
                 "Eles NAO substituem o portao completo."
             ),
             command=f"cd {candidate_worktree}\npython -m pytest {guards} -q",
+        ),
+        ActionStep(
+            text=(
+                "Faca o commit local ANTES do portao (ainda sem push): o portao recusa arvore suja "
+                "('Candidate worktree is dirty') e a evidencia fica presa ao SHA do commit."
+            ),
+            command=f'git add -A\ngit commit -m "<mensagem> [{ticket_id}]"\ngit status --short',
         ),
         ActionStep(
             text=(
