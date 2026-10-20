@@ -249,7 +249,7 @@ class LiveFleetHost(_Model):
     name: str
     priority: int
     max_slots: int = 1
-    status: str = "online"
+    status: str = "unknown"
     active_run_id: str | None = None
     active_ticket_id: str | None = None
     drain_reason: str | None = None
@@ -1299,6 +1299,14 @@ def compute_version(payload: Mapping[str, Any]) -> str:
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:16]
 
 
+FLEET_HEALTH_FRESH_SEC = 120
+
+
+def _reservation_heartbeat_fresh(res: Mapping[str, Any], now: datetime) -> bool:
+    beat = _parse_dt(res.get("heartbeat_at"))
+    return beat is not None and (now - beat).total_seconds() <= FLEET_HEALTH_FRESH_SEC
+
+
 def _build_fleet(raw: _RawStore | None, now: datetime) -> LiveFleetStatus:
     fleet_hosts = [
         {"id": "grokbox", "name": "Grokbox", "priority": 1},
@@ -1324,7 +1332,14 @@ def _build_fleet(raw: _RawStore | None, now: datetime) -> LiveFleetStatus:
         hid = fh["id"]
         res = active_by_host.get(hid)
         drain_file = pids_dir / f"fleet_worker_{hid}.drain"
-        status = "draining" if drain_file.exists() else "online"
+        # USR-306: online only with evidence (an active, unexpired reservation whose owner heartbeat is fresh);
+        # no health source means "unknown", never a presumed "online".
+        if drain_file.exists():
+            status = "draining"
+        elif res is not None and _reservation_heartbeat_fresh(res, now):
+            status = "online"
+        else:
+            status = "unknown"
 
         active_run_id = str(res["run_id"]) if res and res.get("run_id") else None
         active_ticket_id = str(res["ticket_id"]) if res and res.get("ticket_id") else None

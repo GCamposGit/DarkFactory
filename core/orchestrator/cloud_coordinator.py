@@ -21,6 +21,7 @@ from core.workflow.control_contracts import (
     IntakeReceipt,
     RuntimeOwner,
     TicketAlreadyActiveError,
+    fleet_managed_enabled,
 )
 from core.workflow.reconciliation import reconcile_portfolio_state
 
@@ -58,7 +59,7 @@ class CloudCoordinator:
         port: int | None = None,
         store: Any | None = None,
         fleet_hosts: Sequence[str] | None = None,
-        host_health_prober: Callable[[str], bool] | None = None,
+        host_health_prober: Callable[[str], bool | None] | None = None,
     ) -> None:
         self.database_url = database_url or os.environ.get("DARKFAC_HF02_DATABASE_URL")
         self.max_slots = (
@@ -131,6 +132,21 @@ class CloudCoordinator:
             http_port=self.port,
         )
 
+    def _host_verified_healthy(self, host: str) -> bool:
+        """USR-306: in managed mode only a host with verified health is eligible (no prober => unknown => no).
+
+        A prober answering anything but True (False, None = unknown/stale) or raising is not eligible. Unmanaged
+        (legacy) mode keeps presuming hosts available when no prober is configured.
+        """
+        if self.host_health_prober is None:
+            return not fleet_managed_enabled()
+        try:
+            verdict = self.host_health_prober(host)
+            return verdict is not None and bool(verdict)
+        except Exception as exc:
+            logger.warning("Host health probe failed for %s: %s", host, exc)
+            return False
+
     def admit_eligible_cycles(self, now: datetime | None = None) -> list[FleetReservation]:
         """Admit eligible pending cycles to free fleet hosts (USR-282).
 
@@ -145,6 +161,13 @@ class CloudCoordinator:
 
         if not hasattr(self.store, "list_active_reservations") or not hasattr(self.store, "reserve_cycle"):
             return []
+
+        # 0. Keep reservations of runs between stages / waiting on CI alive (USR-306)
+        if hasattr(self.store, "renew_open_run_reservations"):
+            try:
+                self.store.renew_open_run_reservations(now_utc)
+            except Exception as exc:
+                logger.warning("Fleet reservation renewal warning: %s", exc)
 
         # 1. Sweep expired reservations
         if hasattr(self.store, "reconcile_fleet_reservations"):
@@ -172,7 +195,7 @@ class CloudCoordinator:
         free_hosts = [
             h for h in self.fleet_hosts
             if h.lower() not in occupied_hosts
-            and (self.host_health_prober is None or self.host_health_prober(h))
+            and self._host_verified_healthy(h)
         ]
         if not free_hosts:
             return []

@@ -566,6 +566,34 @@ class CloudWorker:
             logger.debug("Could not mark workspace of cancelled run %s: %s", run_id, exc)
         return True
 
+    HEARTBEAT_MIN_INTERVAL_S = 5.0
+
+    def _beat_reservation(self, claim: Claim, now: datetime) -> bool:
+        """Renew the fleet cycle reservation of `claim`'s run (USR-282/USR-306). Returns True when renewed.
+
+        Resolves the reservation by the claim's binding and, failing that (legacy `res-` ids or a missing
+        binding), by the run's active reservation. Failures are logged at warning level: a silently swallowed
+        renewal error is what let reservations expire un-renewed.
+        """
+        if not (hasattr(self.store, "heartbeat_reservation") and hasattr(self.store, "get_reservation")):
+            return False
+        res_id = getattr(claim, "reservation_id", None)
+        try:
+            res = self.store.get_reservation(res_id) if res_id else None
+            if (res is None or not res.is_active) and hasattr(self.store, "get_active_reservation_for_run"):
+                res = self.store.get_active_reservation_for_run(claim.job_key.run_id)
+            if res is None or not res.is_active:
+                return False
+            self.store.heartbeat_reservation(
+                reservation_id=res.reservation_id,
+                fencing_token=res.fencing_token,
+                now=now,
+            )
+            return True
+        except Exception as r_exc:
+            logger.warning("Reservation heartbeat failed for run %s (%s): %s", claim.job_key.run_id, res_id, r_exc)
+            return False
+
     def _start_lease_heartbeat(
         self, claim: Claim, token: Any = None
     ) -> tuple[threading.Event, threading.Thread]:
@@ -577,10 +605,17 @@ class CloudWorker:
         from core.line import cancellation
 
         stop_event = threading.Event()
-        interval = max(5.0, getattr(self.store, "lease_duration_sec", 45) / 3.0)
+        interval = max(self.HEARTBEAT_MIN_INTERVAL_S, getattr(self.store, "lease_duration_sec", 45) / 3.0)
         poll = min(interval, cancellation.CANCEL_POLL_INTERVAL_S, 15.0) if token is not None else min(interval, 15.0)
 
         def _loop() -> None:
+            # USR-306: beat the cycle reservation at once. Waiting one full interval before the first renewal left
+            # short stages (< interval) and slow starts to finish without a single renewal.
+            try:
+                first_beat = datetime.fromisoformat(str(claim.acquired_at))
+            except (AttributeError, TypeError, ValueError):
+                first_beat = datetime.now(UTC)
+            self._beat_reservation(claim, first_beat if first_beat.tzinfo else first_beat.replace(tzinfo=UTC))
             next_beat = time.monotonic() + interval
             while not stop_event.wait(poll):
                 self._sync_owner_actions()
@@ -592,19 +627,8 @@ class CloudWorker:
                 try:
                     now_hb = datetime.now(UTC)
                     self.store.heartbeat(claim, now_hb)
-                    # Heartbeat cycle reservation if bound (USR-282)
-                    res_id = getattr(claim, "reservation_id", None)
-                    if res_id and hasattr(self.store, "get_reservation") and hasattr(self.store, "heartbeat_reservation"):
-                        try:
-                            res = self.store.get_reservation(res_id)
-                            if res and res.is_active:
-                                self.store.heartbeat_reservation(
-                                    reservation_id=res.reservation_id,
-                                    fencing_token=res.fencing_token,
-                                    now=now_hb,
-                                )
-                        except Exception as r_exc:
-                            logger.debug("Reservation heartbeat warning for %s: %s", res_id, r_exc)
+                    # Heartbeat cycle reservation if bound (USR-282); never blocks the lease heartbeat.
+                    self._beat_reservation(claim, now_hb)
                 except Exception as exc:
                     logger.warning("Lease heartbeat failed for %s: %s", claim.lease_id, exc)
                     # A cancel releases the claim, so the heartbeat of a cancelled run fails first.

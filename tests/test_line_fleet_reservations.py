@@ -337,7 +337,9 @@ def test_fencing_prevents_old_owner_from_finishing_job(store: ControlStore):
     assert claim is not None
 
     # Advance time and expire the cycle reservation
-    expired_reservations = store.reconcile_fleet_reservations(now=NOW + timedelta(seconds=20))
+    # (USR-306: the claim renews the reservation by the store lease of 30 s, so expire it beyond that.)
+    claim = store.heartbeat(claim, NOW + timedelta(seconds=25))  # job lease alive; reservation not renewed
+    expired_reservations = store.reconcile_fleet_reservations(now=NOW + timedelta(seconds=40))
     assert any(r.reservation_id == res.reservation_id for r in expired_reservations)
 
     # Old owner attempts to finish after reservation expired -> rejected!
@@ -347,7 +349,7 @@ def test_fencing_prevents_old_owner_from_finishing_job(store: ControlStore):
         evidence_refs=["ev-1"],
     )
     with pytest.raises(StaleLeaseError) as exc_finish:
-        store.finish(claim, stage_res, now=NOW + timedelta(seconds=25))
+        store.finish(claim, stage_res, now=NOW + timedelta(seconds=41))
     assert "no longer active" in str(exc_finish.value)
 
 
