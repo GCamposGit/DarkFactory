@@ -1,0 +1,43 @@
+{
+  "data": [
+    {
+      "id": "openai/gpt-6-astra",
+      "name": "OpenAI: GPT-6 Astra",
+      "created": 1790000000,
+      "context_length": 1000000,
+      "architecture": {"input_modalities": ["text", "image"], "output_modalities": ["text"]},
+      "pricing": {"prompt": "0.00001", "completion": "0.00004"},
+      "top_provider": {"context_length": 1000000, "max_completion_tokens": 64000}
+    },
+    {
+      "id": "google/gemini-3.1-pro",
+      "name": "Google: Gemini 3.1 Pro",
+      "created": 1780000000,
+      "context_length": 2000000,
+      "pricing": {"prompt": "0.000002", "completion": "0.000012"}
+    },
+    {
+      "id": "acme/nova-9",
+      "name": "Acme: Nova 9",
+      "created": 1791000000,
+      "context_length": 128000,
+      "architecture": {"input_modalities": ["text"], "output_modalities": ["text"]},
+      "pricing": {"prompt": "0.0000005", "completion": "0.0000015"},
+      "top_provider": {"context_length": 128000, "max_completion_tokens": 8192}
+    },
+    {
+      "id": "acme/fable-lite",
+      "name": "Acme: Fable Lite",
+      "context_length": 32000,
+      "pricing": {"prompt": "0", "completion": "0"}
+    },
+    {
+      "id": "beta/mystery",
+      "name": "Beta: Mystery",
+      "pricing": {"prompt": "-1", "completion": "-1"}
+    },
+    {
+      "name": "entry without id"
+    }
+  ]
+}

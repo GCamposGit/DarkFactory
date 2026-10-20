@@ -47,6 +47,8 @@ class ModelEntry(BaseModel):
     forbidden_autonomous: bool = False
     release_date: Optional[str] = None
     retirement_date: Optional[str] = None
+    discovered_at: Optional[str] = None  # set by autonomous discovery (slice 5)
+    source: Optional[str] = None  # discovery source name (e.g. openrouter)
 
 
 class ReviewPair(BaseModel):
