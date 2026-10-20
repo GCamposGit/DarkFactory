@@ -5741,8 +5741,8 @@
     "project_id": "darkfac",
     "title": "Registro universal de execucoes: codigo unico por etapa e heartbeat para a Esteira ao vivo",
     "origin": "user",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "3ec0851cfc74639b7d13a397e059ea383259a66c",
     "item_type": "infrastructure",
     "lifecycle_stage": "execution",
     "horizon": "later",
@@ -5780,7 +5780,7 @@
     "estimated_complexity": "high",
     "dependencies": [],
     "created_at": "2026-10-10T14:53:47.851829Z",
-    "updated_at": "2026-10-11T17:49:17.206876Z"
+    "updated_at": "2026-10-20T15:49:54.144960Z"
   },
   {
     "id": "USR-209",
