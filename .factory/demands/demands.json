@@ -5131,8 +5131,8 @@
     "project_id": "darkfac",
     "title": "Registro de modelos autonomo: descoberta, qualificacao, promocao e rollback sem edicao manual",
     "origin": "user",
-    "status": "completed",
-    "delivery_evidence": "bece1188bc477f2384fe55dbaced0fd12261da09. Fatia 4 (docs geradas) entregue em 20/10/2026; Fatia 3 (proposta protegidos) entregue em 20/10/2026, OA-046; Fatia 5 (descoberta) entregue em 20/10/2026; Fatia 6 (qualificacao) entregue em 20/10/2026; Fatia 7 (promocao e rollback) entregue em 20/10/2026; Fatia 8 (limiares do Grill) entregue em 20/10/2026",
+    "status": "planned",
+    "delivery_evidence": "Reaberto em 20/10/2026: Fatiças 1-8 e 8b entregues; aguardando OA-046 do Owner publicar docs/proposals/USR-185-F3-protected-registry.patch (anterior: bece1188bc477f2384fe55dbaced0fd12261da09. Fatia 4 (docs geradas) entregue em 20/10/2026; Fatia 3 (proposta protegidos) entregue em 20/10/2026, OA-046; Fatia 5 (descoberta) entregue em 20/10/2026; Fatia 6 (qualificacao) entregue em 20/10/2026; Fatia 7 (promocao e rollback) entregue em 20/10/2026; Fatia 8 (limiares do Grill) entregue em 20/10/2026)",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "later",
@@ -5164,7 +5164,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-09T07:01:39.369233Z",
-    "updated_at": "2026-10-20T17:47:13.368634Z"
+    "updated_at": "2026-10-20T18:30:39.045242Z"
   },
   {
     "id": "USR-186",
