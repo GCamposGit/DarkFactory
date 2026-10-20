@@ -1676,6 +1676,44 @@
       "created_at": "2026-10-19T19:28:16Z",
       "created_by": "claude-code (sessao 19/10/2026)",
       "resolved_at": null
+    },
+    {
+      "id": "OA-041",
+      "kind": "action",
+      "title": "Publicar arquivos protegidos de USR-253 por push direto (com portao completo)",
+      "priority": "high",
+      "status": "open",
+      "why": "Arquivos protegidos so o owner publica, e o push direto na main pula o CI de PR. Por isso o portao oficial completo roda antes do push e o CI da main e conferido depois.",
+      "blocks": [
+        "USR-253"
+      ],
+      "depends_on": [],
+      "steps": [
+        {
+          "text": "Crie a worktree a partir de origin/main, aplique o patch de USR-253 e faca o commit LOCAL (o portao recusa arvore suja). O patch altera core/harness/remote_worker.py (watchdog estende o deadline pelo tempo de fila do suite_lock); o teste tests/test_watchdog_suite_lock_wait.py ja esta na main.",
+          "command": "git -C C:\\dev\\DarkFac fetch origin\ngit -C C:\\dev\\DarkFac worktree add C:\\dev\\DarkFac\\.worktrees\\usr-253-publish -b owner/usr-253-publish origin/main\ncd C:\\dev\\DarkFac\\.worktrees\\usr-253-publish\ngit apply docs\\proposals\\USR-253-watchdog-suite-lock.patch\ngit commit -am \"feat(harness): watchdog estende o deadline pela fila do suite_lock [USR-253]\""
+        },
+        {
+          "text": "Na worktree do commit candidato de USR-253 (core/harness/remote_worker.py), rode primeiro os guardas rapidos. Eles NAO substituem o portao completo.",
+          "command": "cd C:\\dev\\DarkFac\\.worktrees\\<WORKTREE_DO_CANDIDATO>\npython -m pytest tests/test_clock_bomb_guard.py tests/test_hub_coverage.py tests/test_safe_git_state.py tests/test_harness_contract.py -q"
+        },
+        {
+          "text": "Rode o portao oficial COMPLETO no commit candidato exato (worker remoto ou local). So continue se a saida contiver [HARNESS_PASS]; qualquer outro resultado: NAO publique, avise o agente. Nunca troque o portao completo por testes focados.",
+          "command": "python C:\\dev\\DarkFac\\core\\harness\\runner.py --quick"
+        },
+        {
+          "text": "Somente com [HARNESS_PASS] no passo anterior, confirme que o HEAD e o commit candidato e publique por push direto na main.",
+          "command": "git rev-parse HEAD\ngit push origin HEAD:main"
+        },
+        {
+          "text": "Depois do push confira o CI da main ate ficar verde. Se ficar vermelho, avise o agente: ele abre o hotfix (voce nao corrige).",
+          "command": "gh run list --branch main --limit 3\ngh run watch"
+        }
+      ],
+      "verify": "[HARNESS_PASS] no portao antes do push e ultimo run da main verde em gh run list --branch main --limit 3.",
+      "created_at": "2026-10-20T10:07:13Z",
+      "created_by": "claude-code",
+      "resolved_at": null
     }
   ]
 }
