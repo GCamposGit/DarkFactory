@@ -1609,7 +1609,7 @@
       "kind": "action",
       "title": "Publicar USR-317 (identidade de processo do worker, core/harness protegido)",
       "priority": "high",
-      "status": "open",
+      "status": "done",
       "why": "core/harness e protegido: o agente nao pode commitar. O patch docs/proposals/USR-317-process-identity.patch corrige o falso 'processo morto' causado por deriva do boot_time apos congelar/restaurar a VM do grokbox (recuperacao de orfaos matava job vivo; _ProcessTree ignorava a raiz; suite_lock igual) e torna o app do worker lazy (importar o modulo deixa de rodar a recuperacao). Ver docs/proposals/USR-317-process-identity.md.",
       "blocks": [
         "USR-317"
@@ -1628,7 +1628,7 @@
       "verify": "Portao [HARNESS_PASS] antes do push; CI verde na main (gh run list --branch main --limit 3); tests/test_process_identity_usr317.py sem skip; apos atualizar o worker do grokbox, um job de portao sobrevive a congelar/restaurar sem SIGTERM e importar core.harness.remote_worker nao toca a pasta de estado real.",
       "created_at": "2026-10-19T14:44:45Z",
       "created_by": "claude-code",
-      "resolved_at": null,
+      "resolved_at": "2026-10-20T10:14:50Z",
       "history": [
         {
           "at": "2026-10-20T02:11:47Z",
@@ -1639,6 +1639,11 @@
           "at": "2026-10-20T05:10:37Z",
           "outcome": "steps_updated",
           "note": "Main andou (USR-305/307/303); o commit validado foi rebaseado e virou o PR #464 para nao depender de fast-forward. Push direto e PR de .github pelo agente foram negados pelo classificador."
+        },
+        {
+          "at": "2026-10-20T10:14:50Z",
+          "outcome": "done",
+          "note": "PR #464 mergeado pelo owner (08a79ec); CI da main verde. Atualizacao do worker do grokbox segue pela OA-040 (supervisor recarrega no HEAD novo)."
         }
       ]
     },
