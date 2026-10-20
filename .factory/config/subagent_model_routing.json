@@ -1,10 +1,5 @@
 {
-  "_comment": "Politica de modelo para SUBAGENTES de desenvolvimento do harness (USR-168). Nao altera o cascade da esteira (line_routing.json). Consumido por core/line/subagent_routing.py.",
-  "models": {
-    "haiku": "claude-haiku-5-5",
-    "sonnet": "claude-sonnet-5-5",
-    "opus": "claude-opus-5-5"
-  },
+  "_comment": "Politica de modelo para SUBAGENTES de desenvolvimento do harness (USR-168). Nao altera o cascade da esteira (line_routing.json). Os ids dos modelos vem do registro (.factory/config/model_registry.json, roles subagent.*). Consumido por core/line/subagent_routing.py.",
   "limits": {
     "max_files": 3,
     "max_changed_lines": 150,

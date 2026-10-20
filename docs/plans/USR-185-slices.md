@@ -14,11 +14,30 @@ familia, modelos proibidos como fable) ficam nos arquivos protegidos e sao valid
 - Pendencia conhecida: `.factory/config/subagent_model_routing.json` ainda carrega `models` literais; `parse_config`
   continua lendo-os (a fatia 2 os remove e passa a usar apenas o registro).
 
-## Fatia 2 - Migracao dos ids
+## Fatia 2 - Migracao dos ids (ENTREGUE em 20/10/2026; restante em 2b)
 
-Migrar leitores restantes (`core/line/routing.py`, `core/router/model_router.py`, `core/portfolio/router_optimizer.py`,
-`core/usage`, `core/content`, `core/harness` nao protegido, `line_routing.json`, hub, skills) para `resolve()`.
-Aceite: censo cai para o piso da allowlist; testes existentes verdes; comportamento identico.
+Entregue: leitores de codigo passam a usar o registro (`resolve`, novo `resolve_known` para modelos `deprecated`, `id_of`,
+`forbidden_markers`): `core/line/routing.py` (marcadores proibidos, pins `development.codex|grok`), `core/line/agent_cli.py`
+(`_DEFAULT_OPENROUTER_MODEL` = role `distill.openrouter`), `.factory/config/line_routing.json` (pins/openrouter_model como
+referencia de role, resolvidas no carregamento; lista proibida vem do registro), `core/line/subagent_routing.py`
+(`subagent_model_routing.json` sem `models`; chave legada ainda aceita), `core/router/model_router.py`,
+`core/portfolio/router_optimizer.py`, `core/usage/adapters.py` (modelo Antigravity). Novos aliases no registro:
+`grok-review`, `grok-dev`, `opus-legacy`; fallback embutido agora espelha o registro semeado (teste de paridade).
+Testes: `tests/test_model_registry_readers_usr185.py` (tabela antes/depois). Censo: 604/107 arquivos -> 554/105.
+
+### Fatia 2b (pendente)
+
+- `core/workflow/qualified_routes.py` (65): tabela de aliases/ids de provedor (`anthropic/...`, `xai/...`) - exige
+  modelar prefixo de provedor/gateway no registro.
+- `hub/backend/service.py`, `hub/data/*.json`, `core/execution/resilience.py`, `core/content/engine.py`, `core/game/cli.py`,
+  `core/visual/cloud_engine.py`, `core/acceptance/engine.py`: ids de gateway OpenRouter (`deepseek/deepseek-v4-pro`,
+  `anthropic/claude-3.7-sonnet`, imagens) que ainda nao existem no registro; cadastrar e migrar (mexer em hub/frontend
+  exige rodar testes JS-harness).
+- Ids de fio (UA `claude-code/x`, `claude-haiku-4-5-20251001` na sonda de quota) em `core/usage/adapters.py`: avaliar allowlist.
+- Dados: `.factory/planning/continuous-autonomy/bindings/executors.json`, `.factory/roadmap/darkfac.json`, skills
+  (`.claude|.agents/skills/*`) e docs - dependem da geracao de docs (fatia 4).
+- Protegidos (`core/harness/**`, AGENTS.md, FACTORY_RULES.md, CLAUDE.md): fatia 3.
+- Ids sem entrada no registro e mantidos literais: `gpt-luna-xhigh`, `opus-5.1`, `deepseek/deepseek-v4-pro`, `qwen*`, `gpt-oss*`.
 
 ## Fatia 3 - Proposta unica para arquivos protegidos
 

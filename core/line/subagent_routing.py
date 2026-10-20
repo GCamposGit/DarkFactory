@@ -29,7 +29,7 @@ from typing import Any, Literal, Mapping, Optional, Union
 
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt, ValidationError, field_validator, model_validator
 
-from core.models.registry import resolve as resolve_model
+from core.models.registry import forbidden_markers, resolve as resolve_model
 from core.orchestrator.guard import audit_paths
 
 logger = logging.getLogger(__name__)
@@ -139,7 +139,7 @@ _DEFAULT_FORBIDDEN_TAGS: tuple[str, ...] = (
     "transactions",
 )
 _DEFAULT_FORBIDDEN_STAGES: tuple[str, ...] = ("grill", "integration", "planning", "review")
-_DEFAULT_FORBIDDEN_MODELS: tuple[str, ...] = ("astra", "claude-fable", "fable", "gpt-6-astra")
+_DEFAULT_FORBIDDEN_MODELS: tuple[str, ...] = tuple(sorted(set(forbidden_markers())))  # from the registry
 
 
 def _is_forbidden_model(model_id: str, forbidden: Union[set[str], frozenset[str]]) -> bool:
@@ -147,10 +147,15 @@ def _is_forbidden_model(model_id: str, forbidden: Union[set[str], frozenset[str]
     return any(entry and entry in lowered for entry in forbidden)
 
 
+def registry_models() -> dict[str, str]:
+    """Alias -> model id for the subagent roles, from the model registry."""
+    return {alias: resolve_model(f"subagent.{alias}") for alias in _ALIASES}
+
+
 def default_config() -> SubagentRoutingConfig:
     """Embedded defaults (identical to the committed JSON; a test pins the equality)."""
     return SubagentRoutingConfig(
-        models={alias: resolve_model(f"subagent.{alias}") for alias in _ALIASES},
+        models=registry_models(),
         max_files=3,
         max_changed_lines=150,
         max_haiku_attempts=1,
@@ -176,7 +181,8 @@ def parse_config(raw: Mapping[str, Any]) -> SubagentRoutingConfig:
     if not isinstance(limits, Mapping):
         raise ValueError("limits must be an object")
     flat: dict[str, Any] = {
-        "models": raw.get("models"),
+        # USR-185: ``models`` is optional (legacy files may still carry it); absent means the model registry.
+        "models": raw["models"] if "models" in raw else registry_models(),
         "max_files": limits.get("max_files"),
         "max_changed_lines": limits.get("max_changed_lines"),
         "max_haiku_attempts": limits.get("max_haiku_attempts"),

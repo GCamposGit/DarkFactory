@@ -110,20 +110,46 @@ def parse_registry(raw: Any) -> ModelRegistry:
     return ModelRegistry.model_validate(raw)
 
 
+def _fb(model_id: str, provider: str, family: str, tier: str, aliases: list[str], status: str = "active", **extra: Any) -> dict[str, Any]:
+    return {"id": model_id, "provider": provider, "family": family, "tier": tier, "aliases": aliases, "status": status, **extra}
+
+
+# Fail-closed copy of the seeded registry (a test pins that every alias/role resolves to the same id as the file).
 _EMBEDDED_FALLBACK: dict[str, Any] = {
     "schema_version": 1,
     "quota_floor_percent": QUOTA_FLOOR_MIN,
     "forbidden_autonomous_markers": ["fable", "claude-fable", "astra", "gpt-6-astra"],
     "models": [
-        {"id": "claude-opus-5-5", "provider": "anthropic", "family": "claude", "tier": "high", "aliases": ["opus"], "status": "active"},
-        {"id": "claude-sonnet-5-5", "provider": "anthropic", "family": "claude", "tier": "mid", "aliases": ["sonnet"], "status": "active"},
-        {"id": "claude-haiku-5-5", "provider": "anthropic", "family": "claude", "tier": "low", "aliases": ["haiku"], "status": "active"},
+        _fb("claude-opus-5-5", "anthropic", "claude", "high", ["opus"]),
+        _fb("claude-sonnet-5-5", "anthropic", "claude", "mid", ["sonnet"]),
+        _fb("claude-haiku-5-5", "anthropic", "claude", "low", ["haiku"]),
+        _fb("claude-fable-5-1", "anthropic", "claude", "frontier", ["fable"], "candidate", forbidden_autonomous=True),
+        _fb("claude-opus-5", "anthropic", "claude", "high", ["opus-legacy"], "deprecated"),
+        _fb("gpt-6-luna", "openai", "openai", "mid", ["luna"]),
+        _fb("gpt-6-astra", "openai", "openai", "frontier", ["astra"], "candidate", forbidden_autonomous=True),
+        _fb("gpt-sol", "openai", "openai", "high", ["sol"]),
+        _fb("grok-4.6", "xai", "grok", "mid", ["grok-review"]),
+        _fb("grok-4.7", "xai", "grok", "mid", ["grok-dev"]),
+        _fb("gemini-3.8-flash", "google", "gemini", "low", ["flash"]),
+        _fb("deepseek/deepseek-v4.1-flash", "deepseek", "deepseek", "low", ["deepseek-flash"]),
     ],
     "roles": {
         "subagent.haiku": "claude-haiku-5-5",
         "subagent.sonnet": "claude-sonnet-5-5",
         "subagent.opus": "claude-opus-5-5",
+        "development.claude": "claude-sonnet-5-5",
+        "development.codex": "gpt-6-luna",
+        "development.grok": "grok-4.7",
+        "planning.claude": "claude-opus-5-5",
+        "review.codex": "gpt-6-luna",
+        "review.grok": "grok-4.6",
+        "distill.openrouter": "deepseek/deepseek-v4.1-flash",
     },
+    "review_pairs": [
+        {"implementer": "development.claude", "reviewer": "review.codex"},
+        {"implementer": "development.codex", "reviewer": "review.grok"},
+        {"implementer": "development.grok", "reviewer": "review.codex"},
+    ],
 }
 
 
@@ -182,3 +208,39 @@ def list_candidates(registry: Optional[ModelRegistry] = None) -> list[ModelEntry
     """Models in ``candidate`` status (awaiting qualification)."""
     reg = registry if registry is not None else get_registry()
     return [entry for entry in reg.models if entry.status == "candidate"]
+
+
+def resolve_known(alias_or_role: str, registry: Optional[ModelRegistry] = None) -> str:
+    """Like ``resolve`` but also accepts ``deprecated`` models (legacy readers that still route to them).
+
+    Still raises ``KeyError`` for unknown names, ``candidate``/``retired`` models and forbidden-autonomous ones.
+    """
+    reg = registry if registry is not None else get_registry()
+    key = alias_or_role.strip()
+    if key in reg.roles:
+        return reg.roles[key]
+    low = key.lower()
+    for entry in reg.models:
+        if low == entry.id.lower() or low in (a.strip().lower() for a in entry.aliases):
+            if entry.status not in ("active", "deprecated") or entry.forbidden_autonomous:
+                raise KeyError(
+                    f"{alias_or_role!r} resolves to {entry.id!r}, which is not routable (status={entry.status})"
+                )
+            return entry.id
+    raise KeyError(f"unknown model alias or role: {alias_or_role!r}")
+
+
+def forbidden_markers(registry: Optional[ModelRegistry] = None) -> list[str]:
+    """Substrings that mark a model as never autonomous (fable, astra, ...), from the registry."""
+    reg = registry if registry is not None else get_registry()
+    return list(reg.forbidden_autonomous_markers)
+
+
+def id_of(alias_or_id: str, registry: Optional[ModelRegistry] = None) -> str:
+    """Canonical id for a name regardless of status (naming only, NOT a routability check)."""
+    reg = registry if registry is not None else get_registry()
+    low = alias_or_id.strip().lower()
+    for entry in reg.models:
+        if low == entry.id.lower() or low in (a.strip().lower() for a in entry.aliases):
+            return entry.id
+    raise KeyError(f"unknown model alias or id: {alias_or_id!r}")

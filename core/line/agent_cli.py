@@ -43,6 +43,7 @@ from typing import Any, Callable, Literal, Optional
 from urllib.parse import urlparse
 
 from core.line import cancellation
+from core.models.registry import resolve as resolve_model
 from core.paths import project_root, state_root
 
 from pydantic import BaseModel, Field, field_validator
@@ -1558,7 +1559,7 @@ def _run_antigravity(req: AgentRequest) -> AgentResult:
     return AgentResult(ok=True, text=output_text, harness="antigravity", model=tier, duration_s=duration, **diag)
 
 
-_DEFAULT_OPENROUTER_MODEL = "deepseek/deepseek-v4.1-flash"
+_DEFAULT_OPENROUTER_MODEL = resolve_model("distill.openrouter")  # USR-185: from the model registry
 _OPENROUTER_MAX_TOKENS = 4096
 
 
