@@ -13,11 +13,13 @@ REPO = Path(__file__).resolve().parents[1]
 HOOK = REPO / "scripts" / "hooks" / "claude_execution_hook.py"
 WRAPPER = REPO / "scripts" / "harness_session.py"
 
+# One file per call: concurrent appends from several processes to one file interleave/lose lines on
+# Windows (seen in CI 20/10/2026); the time_ns prefix keeps the call order when reading them back.
 FAKE_CLI = """
-import sys, os
+import sys, os, time
 log = os.environ["FAKE_CLI_LOG"]
-with open(log, "a", encoding="utf-8") as fh:
-    fh.write(" ".join(sys.argv[1:]) + "\\n")
+with open(f"{log}.{time.time_ns():020d}.{os.getpid()}", "w", encoding="utf-8") as fh:
+    fh.write(" ".join(sys.argv[1:]))
 if sys.argv[1] == "start":
     print("exec-123")
 """
@@ -36,7 +38,9 @@ def _env(tmp_path: Path, monkeypatch, cli: Path | None = None) -> Path:
 
 
 def _lines(log: Path) -> list[str]:
-    return log.read_text(encoding="utf-8").splitlines() if log.exists() else []
+    files = sorted(log.parent.glob(f"{log.name}.*"), key=lambda p: p.name)
+    lines = [p.read_text(encoding="utf-8").strip() for p in files]
+    return [line for line in lines if line]  # a file caught between open() and write() is still empty
 
 
 def _wait(log: Path, predicate, timeout: float = 15.0) -> list[str]:
