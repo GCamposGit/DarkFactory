@@ -9377,5 +9377,73 @@
     "dependencies": [],
     "created_at": "2026-10-20T18:34:03.270018Z",
     "updated_at": "2026-10-20T18:34:03.270018Z"
+  },
+  {
+    "id": "USR-319",
+    "project_id": "darkfac",
+    "title": "Stabilize SQLite read-only board mtime assertion under xdist",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand",
+      "flaky_test",
+      "root_cause_debug"
+    ],
+    "problem_statement": "The official gate snapshot c1cb895c53d3d19f6fa48374643939f1780739f7 failed once at tests/test_control_job_board.py::test_sqlite_board_reads_without_writing: after read_sqlite_job_board returned source=ok, control.db mtime_ns changed (1792524080984740969 to 1792524081050743663). The same focused test passed on immediate serial rerun, so this is intermittent and needs diagnosis. No files from this M3 change touch core/workflow/job_board.py or this test.",
+    "core_journey": [
+      "Run the official gate under xdist",
+      "Inspect deterministic failure evidence",
+      "Repeat focused scenarios"
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Identify whether the mtime change is caused by SQLite WAL/journal behavior or a test race, with a deterministic reproducer.",
+      "Preserve the read-only board contract and make the assertion stable under the official xdist gate.",
+      "Run the focused test repeatedly and the official gate without this intermittent failure."
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-20T19:28:11.630943Z",
+    "updated_at": "2026-10-20T19:28:11.630951Z"
+  },
+  {
+    "id": "USR-320",
+    "project_id": "darkfac",
+    "title": "Investigate recurrent native SQLite runtime spike lease expiry under xdist",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand",
+      "flaky_test",
+      "root_cause_debug"
+    ],
+    "problem_statement": "The official gate snapshot c1cb895c53d3d19f6fa48374643939f1780739f7 failed once at tests/test_runtime_spike_scenarios.py::test_cli_run_verify_and_summarize_native_core. Scenario R02 returned STORE_UNAVAILABLE because lease for task lab-20261020-192140-R02-1 was stale or expired. A serial focused rerun passed (2 tests passed in 64.27s). This recurs in the same family as completed USR-83 (runtime spike STORE_UNAVAILABLE under test-worker load); investigate the new R02 evidence rather than assume resolved.",
+    "core_journey": [
+      "Run the official gate under xdist",
+      "Inspect deterministic failure evidence",
+      "Repeat focused scenarios"
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Reproduce or explain the R02 lease expiry with the 10-second lease while the test suite runs under xdist.",
+      "Make lease ownership deterministic under the tested runtime load and retain useful STORE_UNAVAILABLE diagnostics.",
+      "Run the focused scenario repeatedly and the official gate without an intermittent stale-lease failure."
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-20T19:28:12.864488Z",
+    "updated_at": "2026-10-20T19:28:12.864493Z"
   }
 ]

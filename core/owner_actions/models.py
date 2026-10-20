@@ -148,6 +148,7 @@ class OwnerAction(BaseModel):
     why: str = ""
     blocks: list[str] = Field(default_factory=list)
     depends_on: list[str] = Field(default_factory=list)
+    project_id: str | None = None
     steps: list[ActionStep] = Field(default_factory=list)
     options: list[DecisionOption] = Field(default_factory=list)
     verify: str = ""

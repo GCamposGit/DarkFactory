@@ -263,6 +263,12 @@ class GrillStageHandler:
         payload = self.store.get_run_payload(run_id) or {}
         demand_text = _render_demand_text(payload)
         parent_grill = payload.get("parent_grill")
+        from core.owner_actions.decisions import render_answered_decisions
+
+        prior_decisions = render_answered_decisions(
+            project_id=project.id,
+            ticket_id=context.claim.job_key.ticket_id,
+        )
         adopt_from = self._previous_attempt_runs(payload)
         result = stage_grill.run_grill(
             project,
@@ -271,6 +277,7 @@ class GrillStageHandler:
             host_caps=self.host_caps,
             routing_config=self.routing_config,
             parent_grill=parent_grill,
+            prior_decisions=prior_decisions,
             auto_policy=stage_grill.is_auto_grill(project, payload),
             answers=self._recorded_answers(run_id),
             adopt_from_runs=adopt_from,

@@ -584,6 +584,7 @@ def run_grill(
     send_message: Optional[TelegramSender] = None,
     now: Optional[datetime] = None,
     parent_grill: Optional[str] = None,
+    prior_decisions: Optional[str] = None,
     auto_policy: bool = False,
     answers: Optional[dict[str, str]] = None,
     adopt_from_runs: Iterable[str] = (),
@@ -647,7 +648,9 @@ def run_grill(
     prompt = render_prompt(
         load_prompt("grill.md"),
         demand=demand_text,
-        grill=parent_grill or "(nenhuma premissa anterior)",
+        grill="\n\n".join(
+            part for part in (parent_grill or "(nenhuma premissa anterior)", prior_decisions or "") if part
+        ),
         lessons=read_lessons(ws.path) or "(nenhuma)",
     )
     previous = diagnostics.load_attempts(ws, STAGE)

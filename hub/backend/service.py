@@ -2978,14 +2978,19 @@ class HubService:
         if updates:
             config = config.model_copy(update=updates)
 
-        def _handle_demand(text: str, user_id: int) -> Dict[str, Any]:
+        def _handle_demand(
+            text: str, user_id: int, project_id: str = "darkfac", *, external_id: str | None = None
+        ) -> Dict[str, Any]:
             from core.demands.models import DemandInput
 
+            message_ref = external_id or ""
             ticket = self.demands_service.create_ticket_from_input(
                 DemandInput(
                     title=f"Telegram: {text[:60].strip()}",
                     problem_statement=text,
-                    project_id="darkfac",
+                    core_journey=f"Telegram message {message_ref}" if message_ref else "Telegram demand",
+                    extra_tags=[message_ref] if message_ref else [],
+                    project_id=project_id,
                 ),
                 force_heuristic=True,
             )
@@ -3862,5 +3867,3 @@ class HubService:
 
 # Canonical alias for DarkHubService (HF-13-02)
 DarkHubService = HubService
-
-

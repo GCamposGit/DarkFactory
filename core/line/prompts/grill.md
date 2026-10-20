@@ -13,6 +13,8 @@ entender convencoes, stack e escopo antes de decidir o que perguntar.
 
 {grill}
 
+Decisoes respondidas listadas acima ja foram aprovadas pelo Owner. Nao pergunte novamente nem proponha reabri-las. Considere-as premissas fixas e pergunte apenas sobre lacunas novas que mudem a entrega.
+
 ## Licoes recentes da fabrica (se houver)
 
 {lessons}

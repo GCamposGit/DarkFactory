@@ -229,3 +229,34 @@ def test_grill_handler_first_attempt_has_no_adoption_candidates(monkeypatch) -> 
     _grill_handler(store).handle(_ctx("grill", ticket_id="acme", run_id="run-a1"))
 
     assert seen["adopt_from_runs"] == []
+
+
+def test_grill_handler_injects_relevant_answered_owner_decisions(monkeypatch, tmp_path) -> None:
+    from core.line import stage_grill
+    from core.owner_actions.models import DecisionAnswer, OwnerAction
+    from core.owner_actions.store import OwnerActionStore
+    from core.workflow.control_contracts import StageResult
+
+    actions = OwnerActionStore(tmp_path / "actions.json", remote_ref=None)
+    actions.upsert(OwnerAction(
+        id="OA-042",
+        kind="decision",
+        title="Pilot choices",
+        status="done",
+        project_id="acme",
+        options=[{"id": "yes", "label": "Use settled choices"}, {"id": "no", "label": "No"}],
+        answer=DecisionAnswer(option_id="yes", note="Do not ask the owner again"),
+    ))
+    monkeypatch.setenv("DARKFAC_OWNER_ACTIONS_PATH", str(actions.path))
+    store = _GrillStore(payloads={"run-a1": dict(_BASE_PAYLOAD)}, answers={})
+    seen: dict = {}
+
+    def _fake_run_grill(project, run_id, demand_text, **kwargs):
+        seen.update(kwargs)
+        return StageResult(outcome="success", output_refs=["abc"])
+
+    monkeypatch.setattr(stage_grill, "run_grill", _fake_run_grill)
+    _grill_handler(store).handle(_ctx("grill", ticket_id="USR-62", run_id="run-a1"))
+
+    assert "OA-042" in seen["prior_decisions"]
+    assert "Do not ask the owner again" in seen["prior_decisions"]

@@ -1695,6 +1695,7 @@
         "USR-279"
       ],
       "depends_on": [],
+      "project_id": "pilot-hello",
       "steps": [
         {
           "text": "Leia a secao 5 de docs/plans/USR-279-greenfield-pilot.md e responda no Hub as 5 decisoes (D1 nome do repo, D2 texto da pagina, D3 destino do deploy, D4 retencao, D5 ferramenta de build)."
@@ -1882,6 +1883,7 @@
       "depends_on": [
         "OA-043"
       ],
+      "project_id": null,
       "steps": [
         {
           "text": "Espere o agente avisar que o deploy unico de 20/10 terminou (o Hub precisa conhecer o projeto pilot-hello registrado no USR-279 M1)."
@@ -1900,7 +1902,14 @@
       "verify": "Existe ticket do projeto pilot-hello (prefixo PH) vinculado a demanda enviada; nenhum ticket novo USR- foi criado para ela.",
       "created_at": "2026-10-20T15:39:28Z",
       "created_by": "claude-session-43f612c4",
-      "resolved_at": null
+      "resolved_at": null,
+      "history": [
+        {
+          "at": "2026-10-20T19:07:20Z",
+          "outcome": "entry_missing",
+          "note": "Verificacao M3 em 2026-10-20: nenhuma demanda correlacionavel a mensagem Telegram foi encontrada no ledger; o roteamento resolve pilot-hello, mas nao ha ticket PH nem prova de webhook. Permanece aberta; apos deploy do Hub, o Owner deve reenviar o comando literal indicado abaixo e conferir PH no DarkHub."
+        }
+      ]
     },
     {
       "id": "OA-046",
@@ -1946,6 +1955,40 @@
       "verify": "[HARNESS_PASS] no portao antes do push, ultimo run da main verde em gh run list --branch main --limit 3, e python C:\\dev\\DarkFac\\scripts\\model_id_census.py --verbose nao lista AGENTS.md, CLAUDE.md, FACTORY_RULES.md nem core/harness/*.",
       "created_at": "2026-10-20T15:35:26Z",
       "created_by": "claude-code",
+      "resolved_at": null
+    },
+    {
+      "id": "OA-048",
+      "kind": "action",
+      "title": "Habilitar pilot-hello para autosubmit na linha do Dokploy",
+      "priority": "medium",
+      "status": "open",
+      "why": "Tickets PH do piloto sao registrados, mas DARKFAC_LINE_INTAKE_PROJECTS usa por padrao apenas darkfac; incluir pilot-hello e uma configuracao de ambiente do Hub que so o Owner pode alterar.",
+      "blocks": [
+        "USR-279"
+      ],
+      "depends_on": [],
+      "project_id": null,
+      "steps": [
+        {
+          "text": "Abra https://dokploy.ggcampos.com e entre no painel Dokploy."
+        },
+        {
+          "text": "No menu Projects, abra darkfac-core; selecione o compose do DarkHub (service id wuH-sjZBig74xFGdk4IsL) e abra a aba Environment."
+        },
+        {
+          "text": "Adicione ou atualize DARKFAC_LINE_INTAKE_PROJECTS com o valor darkfac,pilot-hello. Preserve quaisquer outros projetos registrados que ja estejam no valor atual."
+        },
+        {
+          "text": "Clique em Save e redeploy o compose do DarkHub para carregar a variavel. Nao altere DARKFAC_LINE_AUTOSUBMIT nem credenciais."
+        },
+        {
+          "text": "Depois do redeploy, envie a demanda pilot-hello no Telegram e confira que a resposta inclui PH-... e \"enviado a linha\"; no DarkHub confirme um run vinculado ao mesmo PH."
+        }
+      ],
+      "verify": "A aba Environment mostra DARKFAC_LINE_INTAKE_PROJECTS contendo darkfac,pilot-hello; o compose do DarkHub terminou o redeploy e uma demanda PH do projeto aparece com run da linha.",
+      "created_at": "2026-10-20T19:07:20Z",
+      "created_by": "codex (USR-279 M3)",
       "resolved_at": null
     }
   ]

@@ -16,6 +16,7 @@ Key Invariants:
 
 from __future__ import annotations
 
+import inspect
 import json
 import logging
 import os
@@ -380,6 +381,33 @@ class OutboxNotification(BaseModel):
 # ==============================================================================
 
 
+def _invoke_demand_handler(
+    handler: Callable[..., Dict[str, Any]], text: str, user_id: int, project_id: str, external_id: str
+) -> Dict[str, Any]:
+    """Call new project-aware handlers while preserving the historical two-argument contract."""
+    try:
+        signature = inspect.signature(handler)
+    except (TypeError, ValueError):
+        return handler(text, user_id)
+
+    parameters = signature.parameters
+    accepts_kwargs = any(p.kind is inspect.Parameter.VAR_KEYWORD for p in parameters.values())
+    accepts_external_id = "external_id" in parameters or accepts_kwargs
+    positional = [
+        p for p in parameters.values()
+        if p.kind in (inspect.Parameter.POSITIONAL_ONLY, inspect.Parameter.POSITIONAL_OR_KEYWORD)
+    ]
+    if any(p.kind is inspect.Parameter.VAR_POSITIONAL for p in parameters.values()) or len(positional) >= 3:
+        kwargs = {"external_id": external_id} if accepts_external_id else {}
+        return handler(text, user_id, project_id, **kwargs)
+    if "project_id" in parameters:
+        kwargs = {"project_id": project_id}
+        if accepts_external_id:
+            kwargs["external_id"] = external_id
+        return handler(text, user_id, **kwargs)
+    return handler(text, user_id)
+
+
 class TelegramGateway:
     """Headless Telegram Gateway managing authentication, polling, callbacks, and deduplication."""
 
@@ -389,7 +417,7 @@ class TelegramGateway:
         state_dir: Optional[Path] = None,
         state_file: Optional[Path] = None,
         intake_service: Optional[Any] = None,
-        demand_handler: Optional[Callable[[str, int], Dict[str, Any]]] = None,
+        demand_handler: Optional[Callable[..., Dict[str, Any]]] = None,
         grill_handler: Optional[Callable[[str, str, int], Dict[str, Any]]] = None,
         approval_handler: Optional[Callable[[str, str, int], Dict[str, Any]]] = None,
         status_handler: Optional[Callable[[Optional[str]], Dict[str, Any]]] = None,
@@ -787,7 +815,7 @@ class TelegramGateway:
             else:
                 demand_project = route.project_id
                 arg_str = route.text
-                if demand_project != "darkfac" and self.intake_service is None:
+                if demand_project != "darkfac" and self.intake_service is None and self.demand_handler is None:
                     result.response_text = (
                         f"Este canal nao encaminha demandas ao projeto {demand_project}: nada foi registrado."
                     )
@@ -820,7 +848,13 @@ class TelegramGateway:
                         result.response_text = _demand_failure_response(exc)
                 elif self.demand_handler:
                     try:
-                        res = self.demand_handler(arg_str, user_id or 0)
+                        res = _invoke_demand_handler(
+                            self.demand_handler,
+                            arg_str,
+                            user_id or 0,
+                            demand_project,
+                            f"tg-msg-{chat_id}-{msg.message_id}",
+                        )
                         ticket_id = res.get("ticket_id", "TICKET-AUTO")
                         title = res.get("title", arg_str[:60])
                         status_val = res.get("status", "planned")
@@ -1080,6 +1114,7 @@ class TelegramGateway:
                 result.response_text = f"❓ Unknown command: {cmd_str}. Send /help for command list."
 
         return result
+
 
     def _handle_callback(self, update: TelegramUpdate) -> TelegramDispatchResult:
         cb = update.callback_query

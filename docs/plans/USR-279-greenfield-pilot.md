@@ -64,10 +64,12 @@ M2 - Ambiente (USR-275) - CONCLUIDO em 20/10/2026 (evidencia: docs/evidence/USR-
 2. `setup_environment` cria o venv dentro do checkout do produto e os testes iniciais passam nele.
 3. Ambiente do processo filho nao contem `PYTHONPATH`, `VIRTUAL_ENV` do core nem `DARKFAC_*`; segredos mascarados nos logs.
 
-M3 - Demanda (USR-278)
+M3 - Demanda (USR-278) - IMPLEMENTACAO DO INTAKE CONCLUIDA; ENTRADA REAL PENDENTE (20/10/2026; evidencia: docs/evidence/USR-279-M3.md)
 1. Owner envia a demanda ("pagina e /healthz") por Telegram ou Hub e ela cai no projeto do piloto, nao em `darkfac`.
 2. Gate G1 aplicado: ambiguidades do produto viram perguntas ao owner (D1-D5), sem suposicao.
 3. Ticket do piloto registrado com ID, projeto e vinculo a demanda.
+
+O gateway agora repassa o projeto resolvido e o id externo da mensagem ao handler do Hub; decisoes respondidas da OA-042 sao escopadas para `pilot-hello` e entram no contexto do Grill. A verificacao de 20/10 exercitou `resolve_demand` e obteve `accept`, `project_id=pilot-hello`, mas nao encontrou mensagem correlacionada nem ticket PH no ledger; portanto M3 segue aberto e OA-047 permanece aberta com diagnostico. OA-048 registra a configuracao de `DARKFAC_LINE_INTAKE_PROJECTS` que o Owner precisa aplicar no Dokploy para o ticket PH tambem entrar na linha.
 
 M4 - Linha ate merge
 1. Implementacao, revisao em familia diferente do implementador e PR no repositorio privado.

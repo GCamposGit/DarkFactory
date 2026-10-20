@@ -485,6 +485,28 @@ class OwnerActionStore:
 
         return self._mutate_definitions(_apply)
 
+    def update_fields(self, action_id: str, **fields: Any) -> OwnerAction:
+        """Atomically update selected non-history fields without replacing an action row."""
+        allowed = {"project_id", "title", "why", "blocks", "depends_on", "steps", "verify"}
+        unknown = set(fields) - allowed
+        if unknown:
+            raise OwnerActionInvalid(f"campos nao atualizaveis: {', '.join(sorted(unknown))}")
+
+        def _apply(document: dict[str, Any], rows: list[Any]) -> OwnerAction:
+            for raw in rows:
+                if isinstance(raw, dict) and raw.get("id") == action_id:
+                    try:
+                        action = OwnerAction.model_validate(raw)
+                    except ValidationError as exc:
+                        raise OwnerActionInvalid(_summarise(exc)) from exc
+                    updated = OwnerAction.model_validate({**action.model_dump(), **fields})
+                    raw.clear()
+                    raw.update(updated.to_record())
+                    return updated
+            raise OwnerActionNotFound(f"{action_id} nao existe no backlog")
+
+        return self._mutate_definitions(_apply)
+
     def _resolve_in_definitions(self, action_id: str, answer: DecisionAnswer | None, note: str) -> OwnerAction:
         def _apply(document: dict[str, Any], rows: list[Any]) -> OwnerAction:
             for raw in rows:
