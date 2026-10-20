@@ -12,7 +12,4 @@
 - A escolha entre hosts já autorizados e o mecanismo de isolamento são decisões técnicas, sem necessidade de nova decisão de negócio.
 
 ## Decisoes do owner
-- (nenhuma pergunta bloqueante)
-
-## Aguardando decisao do owner
-- [intent] A varredura deve permitir o texto aprovado 'DarkFac pilot' em strings da página e dos testes, exigindo ausência de dependências da fábrica? M1 registra esse texto em arquivos de código, mas M6 exige ausência literal de 'darkfac' em código executável. (id=q1)
+- [intent] A varredura deve permitir o texto aprovado 'DarkFac pilot' em strings da página e dos testes, exigindo ausência de dependências da fábrica? M1 registra esse texto em arquivos de código, mas M6 exige ausência literal de 'darkfac' em código executável. -> **Permitir somente o texto aprovado; proibir imports, caminhos e chamadas da fábrica** (respondida pelo owner)
