@@ -8219,8 +8219,8 @@
     "project_id": "darkfac",
     "title": "Telegram encaminha demanda ao projeto correto e permite iniciar onboarding greenfield",
     "origin": "agent",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "8cd0a59e2b59adc28895104784ea79633098f090",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "later",
@@ -8247,7 +8247,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-16T15:26:45.580995Z",
-    "updated_at": "2026-10-16T15:30:47.459704Z"
+    "updated_at": "2026-10-20T14:43:50.470885Z"
   },
   {
     "id": "USR-279",
