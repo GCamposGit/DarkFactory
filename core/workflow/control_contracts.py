@@ -298,6 +298,7 @@ class StageContext(ContractModel):
     """Immutable context provided to StageHandler for execution."""
 
     claim: Claim
+    project_id: str | None = None
     plan_ref: str
     plan_digest: str
     candidate_digest: str | None = None

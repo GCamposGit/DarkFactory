@@ -268,7 +268,7 @@ def build_telegram_line_grill_handler(
     partial answers (not every question needs to be answered before the
     job resumes; a still-incomplete set returns `waiting_human` again).
     """
-    from core.line.bindings import default_project_resolver
+    from core.line.bindings import default_project_resolver, project_for_run
 
     resolver = project_resolver or default_project_resolver()
 
@@ -285,7 +285,7 @@ def build_telegram_line_grill_handler(
             # it on the next claim. Needs no git access, so the DarkHub (no git) can do it.
             recorder(run_id, question_id, index, datetime.now(UTC))
             return {"resumed": resume_blocked_job(store, run_id, "grill")}
-        project = resolver(job_key.ticket_id)
+        project = project_for_run(store, run_id, resolver, fallback_id=job_key.ticket_id)
         if project is None:
             return {"resumed": False}
         submitted = stage_grill.submit_grill_answers(project, run_id, {question_id: index})
@@ -306,7 +306,7 @@ def build_telegram_commercial_acceptance_handler(
     job's `input_refs` (`[pr_url, merge_sha]`, per `stage_release`'s own
     docstring), records the acceptance, then resumes only that job.
     """
-    from core.line.bindings import default_project_resolver
+    from core.line.bindings import default_project_resolver, project_for_run
 
     resolver = project_resolver or default_project_resolver()
 
@@ -317,7 +317,7 @@ def build_telegram_commercial_acceptance_handler(
         job_key = store.find_job(run_id, "build_deploy", status="waiting_human")
         if job_key is None:
             return {"resumed": False}
-        project = resolver(job_key.ticket_id)
+        project = project_for_run(store, run_id, resolver, fallback_id=job_key.ticket_id)
         if project is None:
             return {"resumed": False}
         input_refs = store.get_latest_success_output_refs(run_id, exclude_stage="build_deploy")
