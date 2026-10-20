@@ -1,0 +1,11 @@
+[
+  {
+    "attempt": 1,
+    "harness": "claude",
+    "model": "opus",
+    "error_kind": "invalid_json",
+    "duration_s": 97.017,
+    "note": "invalid_json",
+    "output": "```json\n{\"spec\":{\"objective\":\"Eliminar o UnknownProjectError em runs de tickets USR tornando runs.project_id a unica fonte do projeto na esteira: remover todo fallback que usa ticket_id (ou o prefixo do ticket) como projeto, falhar fechado com causa distinguivel quando o run nao tem projeto ou o projeto nao esta registrado, e reconciliar runs obsoletos de tickets ja entregues sem reimplementa-los nem quebrar o isolamento multi-projeto.\",\"out_of_scope\":[\"Nao relaxar o piso de cota de 15%, o Gate G1 nem o isolamento entre projetos\",\"Nao alterar o schema do control store nem o DAG de estagios da esteira\",\"Nao reimplementar USR-315 nem qualquer ticket com status completed\",\"Nao mexer em autenticacao/permissoes dos harnesses nem no roteamento de modelos\"],\"design\":\"A causa provada por leitura esta em tres fallbacks que confundem identidade de ticket com identidade de projeto: (1) core/line/bindings.py:183 (_resolve_project) usa `context.claim.job_key.ticket_id` quando `context.project_id` e None, produzindo literalmente \\\"unknown project 'USR-315'\\\"; (2) core/orchestrator/cloud_worker.py:713 e :1085 e core/line/human.py:288/:320 chamam `project_for_run(..., fallback_id=claim.job_key.ticket_id)`; (3) core/workflow/planning_jobs.py:191 deriva `project_id=ticket_id.split('-')[0].lower()` (-> 'usr') ao sintetizar a UserTicket de fallback do planning. Um worker antigo que constroi StageContext sem project_id (o campo e opcional desde USR-303) cai direto no caminho (1), o que explica o retry handler_error:UnknownProjectError no run-5c1eeae3564c mesmo com runs.project_id=darkfac persistido. Correcao: `_resolve_project` passa a ler project_id do contexto e, se ausente, do store via `project_id_for_run(store, run_id)` (nunca do ticket), com erros distintos `missing_run_project` e `unknown_project`; `project_for_run` perde o parametro fallback_id (ou o rejeita para ids com formato de ticket); planning_jobs usa o project_id do contexto/run em vez do prefixo. Em seguida, o CloudWork\n... [truncated, 8504 chars total]"
+  }
+]
