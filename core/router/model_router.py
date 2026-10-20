@@ -29,6 +29,7 @@ from core.benchmarks.frontier import (
     build_frontier_summary,
     get_top_candidates_for_tier,
 )
+from core.models.registry import forbidden_markers, id_of, resolve_known
 from core.router.token_budget import plan_token_stress
 from core.usage.ledger import ModelUsageLedger
 from core.usage.models import AccountUsageReport, ModelCallEvent, ModelModality, ModelTier
@@ -41,59 +42,70 @@ if hasattr(sys.stderr, "reconfigure"):
 
 OLLAMA_BASE_URL = "http://localhost:11434"
 
+
+def _m(alias: str) -> str:
+    """Routable model id for a registry alias (active or deprecated), USR-185."""
+    return resolve_known(alias)
+
+
+def _id(alias: str) -> str:
+    """Canonical registry id for an alias, regardless of status (naming only)."""
+    return id_of(alias)
+
+
 # Model Capability & Strategy Matrix
 MODEL_MATRIX = {
     "research": {
-        "primary": "gemini-3.8-flash",
+        "primary": _m("flash"),
         "primary_provider": "antigravity",
-        "secondary": "grok-4.6",
+        "secondary": _m("grok-review"),
         "secondary_provider": "xai",
         "local_fallback": "qwen-code-fast:latest",
         "notes": "Gemini 3.8 Flash handles 1M-2M token context ingestion; Grok 4.6 for live web/docs research."
     },
     "topic_research": {
-        "primary": "gemini-3.8-flash",
+        "primary": _m("flash"),
         "primary_provider": "antigravity",
-        "secondary": "grok-4.6",
+        "secondary": _m("grok-review"),
         "secondary_provider": "xai",
         "local_fallback": "qwen-code-deep:latest",
         "notes": "Gemini 3.8 Flash for paper/arXiv ingestion and formal theory synthesis; Grok 4.6 for cutting-edge live docs."
     },
     "code_scout": {
-        "primary": "gemini-3.8-flash",
+        "primary": _m("flash"),
         "primary_provider": "antigravity",
-        "secondary": "claude-opus-5",
+        "secondary": _m("opus-legacy"),
         "secondary_provider": "anthropic",
         "local_fallback": "qwen-code-fast:latest",
         "notes": "Gemini 3.8 Flash for repository tree inspection & AST checks; Claude Opus 5 for component reuse safety & license audits."
     },
     "architecture": {
-        "primary": "claude-opus-5",
+        "primary": _m("opus-legacy"),
         "primary_provider": "anthropic",
-        "secondary": "gpt-sol",
+        "secondary": _m("sol"),
         "secondary_provider": "openai",
         "local_fallback": "qwen-code-deep:latest",
         "notes": "Claude Opus 5 / GPT Sol for PRD and strict non-goals; DeepSeek-V4.1-Flash for cost-effective deep reasoning."
     },
     "coding": {
         "high_complexity": {
-            "primary": "claude-opus-5",
+            "primary": _m("opus-legacy"),
             "primary_provider": "anthropic",
-            "secondary": "gpt-sol",
+            "secondary": _m("sol"),
             "secondary_provider": "openai",
             "local_fallback": "qwen-code-deep:latest",
         },
         "medium_complexity": {
-            "primary": "gemini-3.8-flash",
+            "primary": _m("flash"),
             "primary_provider": "antigravity",
-            "secondary": "deepseek/deepseek-v4.1-flash",
+            "secondary": _m("deepseek-flash"),
             "secondary_provider": "openrouter",
             "local_fallback": "qwen-code-deep:latest",
         },
         "low_complexity": {
             "primary": "gpt-luna-xhigh",
             "primary_provider": "openai",
-            "secondary": "gemini-3.8-flash",
+            "secondary": _m("flash"),
             "secondary_provider": "antigravity",
             "local_fallback": "qwen-code-fast:latest",
         }
@@ -103,21 +115,21 @@ MODEL_MATRIX = {
         "primary_provider": "local_process",
         "secondary": "qwen-code-fast:latest",
         "secondary_provider": "ollama",
-        "evaluator": "gemini-3.8-flash",
+        "evaluator": _m("flash"),
         "notes": "Tests MUST be deterministic code. qwen-code-fast writes fixtures; Gemini 3.8 Flash analyzes failures."
     },
     "adversarial_review": {
         "tier1_local": "gpt-oss-clean:latest",
         "tier1_provider": "ollama",
-        "tier2_cloud": "deepseek/deepseek-v4.1-flash",
+        "tier2_cloud": _m("deepseek-flash"),
         "tier2_provider": "openrouter",
-        "tier2_alt": "grok-4.6",
+        "tier2_alt": _m("grok-review"),
         "notes": "Cross-model review rule: The reviewer MUST belong to a different model family than the implementer. DeepSeek-V4.1-Flash via OpenRouter as primary cloud reviewer (1M context, $0.15/M); Grok-4.6 as alt."
     },
     "content_generation": {
-        "primary": "claude-opus-5",
+        "primary": _m("opus-legacy"),
         "primary_provider": "anthropic",
-        "secondary": "gemini-3.8-flash",
+        "secondary": _m("flash"),
         "secondary_provider": "antigravity",
         "local_fallback": "qwen-code-deep:latest",
         "notes": "Claude Opus 5 for high-signal, anti-slop prose; Gemini 3.8 Flash for high-speed drafting; Qwen-deep for $0 local offline."
@@ -125,7 +137,7 @@ MODEL_MATRIX = {
     "anti_slop_scrub": {
         "primary": "gpt-oss-clean:latest",
         "primary_provider": "ollama",
-        "secondary": "gemini-3.8-flash",
+        "secondary": _m("flash"),
         "secondary_provider": "antigravity",
         "local_fallback": "deterministic-linter",
         "notes": "Deterministic regex & cadence linter + local GPT-OSS / Gemini 3.8 Flash for critique and polish passes."
@@ -143,10 +155,10 @@ MODEL_MATRIX = {
 }
 
 HIGH_INTELLIGENCE_BY_HARNESS: Dict[str, Dict[str, str]] = {
-    "antigravity": {"model": "gemini-3.8-flash", "provider": "google", "default_effort": "high"},
-    "grok_build": {"model": "grok-4.6", "provider": "xai", "default_effort": "high"},
+    "antigravity": {"model": _m("flash"), "provider": "google", "default_effort": "high"},
+    "grok_build": {"model": _m("grok-review"), "provider": "xai", "default_effort": "high"},
     "claude_code": {"model": "opus-5.1", "provider": "anthropic", "default_effort": "high"},
-    "codex": {"model": "gpt-6-astra", "provider": "openai", "default_effort": "high"},
+    "codex": {"model": _id("astra"), "provider": "openai", "default_effort": "high"},
 }
 
 ALLOWED_REASONING_EFFORTS = {"minimal", "low", "medium", "high", "max"}
@@ -170,16 +182,16 @@ def sanitize_reasoning_effort(effort: Optional[str], complexity: str = "medium")
 
 
 _QUOTA_FAILOVER_MODELS = {
-    "antigravity": "gemini-3.8-flash",
-    "google": "gemini-3.8-flash",
-    "xai": "grok-4.6",
-    "anthropic": "claude-opus-5",
+    "antigravity": _m("flash"),
+    "google": _m("flash"),
+    "xai": _m("grok-review"),
+    "anthropic": _m("opus-legacy"),
     "claude_code": "opus-5.1",
-    "openai": "gpt-sol",
-    "codex": "gpt-sol",
-    "deepseek": "deepseek/deepseek-v4.1-flash",   # openrouter: V4.1-Flash replaces V4-Pro as default DeepSeek failover
-    "openrouter": "deepseek/deepseek-v4.1-flash",  # explicit openrouter failover
-    "siliconflow": "deepseek/deepseek-v4.1-flash", # siliconflow routes to Pareto leader V4.1-Flash
+    "openai": _m("sol"),
+    "codex": _m("sol"),
+    "deepseek": _m("deepseek-flash"),   # openrouter: V4.1-Flash replaces V4-Pro as default DeepSeek failover
+    "openrouter": _m("deepseek-flash"),  # explicit openrouter failover
+    "siliconflow": _m("deepseek-flash"), # siliconflow routes to Pareto leader V4.1-Flash
     "qwen": "qwen3-8-flash-next",
 }
 
@@ -461,7 +473,7 @@ def recommend_model(
         }
     else:
         result = {
-            "model": "gemini-3.8-flash",
+            "model": _m("flash"),
             "provider": "antigravity",
             "reason": "Default versatile high-throughput orchestrator."
         }
@@ -489,8 +501,8 @@ def recommend_model(
     )
 
     # Strictly ban autonomous invocation of Fable and Astra
-    if planned_result.get("model") in ("gpt-6-astra", "astra", "claude-fable", "fable"):
-        planned_result["model"] = "gpt-sol" if "astra" in planned_result["model"] else "claude-opus-5"
+    if planned_result.get("model") in frozenset(forbidden_markers()):
+        planned_result["model"] = _m("sol") if "astra" in planned_result["model"] else _m("opus-legacy")
 
     return planned_result
 

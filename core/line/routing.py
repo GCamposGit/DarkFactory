@@ -26,10 +26,11 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable, Iterable, Literal, Optional, Union
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from core.line.agent_cli import AgentResult, _DEFAULT_OPENROUTER_MODEL, supports
 from core.line.operating_harness import resolve_operating_harness
+from core.models.registry import forbidden_markers, get_registry, resolve as resolve_model
 from core.paths import project_root, state_root
 
 logger = logging.getLogger(__name__)
@@ -44,12 +45,15 @@ _DEFAULT_PRESSURE_THRESHOLDS: dict[str, float] = {
     "critical": 15.0,
 }
 
-_DEFAULT_FORBIDDEN_AUTONOMOUS_MODELS: list[str] = [
-    "fable",
-    "claude-fable",
-    "astra",
-    "gpt-6-astra",
-]
+# USR-185: the never-autonomous markers (fable, astra, ...) come from the model registry.
+_DEFAULT_FORBIDDEN_AUTONOMOUS_MODELS: list[str] = forbidden_markers()
+
+
+def _resolve_role_ref(value: Optional[str]) -> Optional[str]:
+    """Map a registry role reference (``development.codex``) to its model id; any other value is kept as is."""
+    if isinstance(value, str) and value.strip() in get_registry().roles:
+        return resolve_model(value.strip())
+    return value
 
 _HARNESS_TO_PROVIDER: dict[str, str] = {
     "claude": "anthropic",
@@ -94,6 +98,11 @@ class HarnessPin(BaseModel):
     model: Optional[str] = None
     effort: Optional[str] = None
 
+    @field_validator("model", mode="after")
+    @classmethod
+    def _model_role_ref(cls, value: Optional[str]) -> Optional[str]:
+        return _resolve_role_ref(value)
+
 
 class StageRoute(BaseModel):
     """Routing policy for a single production-line stage."""
@@ -106,6 +115,11 @@ class StageRoute(BaseModel):
     effort: Optional[str] = None
     local_ok: bool = False
     harness_pins: dict[str, HarnessPin] = Field(default_factory=dict)
+
+    @field_validator("openrouter_model", mode="after")
+    @classmethod
+    def _openrouter_model_role_ref(cls, value: Optional[str]) -> Optional[str]:
+        return _resolve_role_ref(value)
 
 
 class RunCaps(BaseModel):
@@ -171,8 +185,8 @@ def _default_routing_config() -> RoutingConfig:
                 openrouter_model=cheap_model,
                 harness_pins={
                     "claude": HarnessPin(model="sonnet"),
-                    "codex": HarnessPin(model="gpt-6-luna", effort="high"),
-                    "grok": HarnessPin(model="grok-4.7", effort="high"),
+                    "codex": HarnessPin(model=resolve_model("development.codex"), effort="high"),
+                    "grok": HarnessPin(model=resolve_model("development.grok"), effort="high"),
                 },
             ),
             "review": StageRoute(

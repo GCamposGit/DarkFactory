@@ -28,6 +28,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
 
+from core.models.registry import resolve_known
 from core.usage.models import (
     AccountConnectionStatus,
     ProviderAccountUsage,
@@ -37,6 +38,8 @@ from core.usage.models import (
 from core.usage.history import record_probe, sanitize_raw
 
 logger = logging.getLogger(__name__)
+# USR-185: Antigravity quota model name comes from the model registry (alias "flash").
+_ANTIGRAVITY_MODEL = resolve_known("flash")
 _CREATE_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
 
@@ -1245,8 +1248,8 @@ class GeminiAccountAdapter(AccountUsageAdapter):
                         models_payload = json.loads(res.read().decode("utf-8"))
                     models = models_payload.get("response", {}).get("models", {})
                     target_model = (
-                        models.get("gemini-3.8-flash-high")
-                        or models.get("gemini-3.8-flash-medium")
+                        models.get(f"{_ANTIGRAVITY_MODEL}-high")
+                        or models.get(f"{_ANTIGRAVITY_MODEL}-medium")
                         or next((m for m in models.values() if isinstance(m, dict) and m.get("quotaInfo")), None)
                     )
                     if target_model and isinstance(target_model.get("quotaInfo"), dict):
@@ -1265,7 +1268,7 @@ class GeminiAccountAdapter(AccountUsageAdapter):
                             resets_at = _timestamp_to_iso(quota_info.get("resetTime"))
                             windows.append(
                                 QuotaWindow(
-                                    quota_id="antigravity:gemini-3.8-flash",
+                                    quota_id=f"antigravity:{_ANTIGRAVITY_MODEL}",
                                     label="Janela Móvel (5h)",
                                     used_percent=used_percent,
                                     remaining_percent=remaining_percent,

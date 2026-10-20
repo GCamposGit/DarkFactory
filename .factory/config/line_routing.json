@@ -1,39 +1,38 @@
 {
   "pressure_thresholds": {"guarded": 50, "stressed": 25, "critical": 15},
   "cooldown_default_minutes": 60,
-  "forbidden_autonomous_models": ["fable", "claude-fable", "astra", "gpt-6-astra"],
   "stages": {
     "grill": {
       "cascade": [["antigravity", null], ["claude", "sonnet"], ["codex", null]],
       "openrouter_ok": true,
-      "openrouter_model": "deepseek/deepseek-v4.1-flash"
+      "openrouter_model": "distill.openrouter"
     },
     "planning": {
       "cascade": [["claude", "opus"], ["codex", null], ["antigravity", null]],
       "effort": "high",
       "openrouter_ok": true,
-      "openrouter_model": "deepseek/deepseek-v4.1-flash"
+      "openrouter_model": "distill.openrouter"
     },
     "development": {
       "cascade": [["claude", "sonnet"], ["codex", null]],
       "harness_pins": {
         "claude": {"model": "sonnet"},
-        "codex": {"model": "gpt-6-luna", "effort": "high"},
-        "grok": {"model": "grok-4.7", "effort": "high"}
+        "codex": {"model": "development.codex", "effort": "high"},
+        "grok": {"model": "development.grok", "effort": "high"}
       },
       "openrouter_ok": false,
-      "openrouter_model": "deepseek/deepseek-v4.1-flash"
+      "openrouter_model": "distill.openrouter"
     },
     "review": {
       "cascade": "other_family_than_development",
       "openrouter_ok": true,
-      "openrouter_model": "deepseek/deepseek-v4.1-flash"
+      "openrouter_model": "distill.openrouter"
     },
     "distill": {
       "cascade": [],
       "openrouter_ok": true,
       "local_ok": true,
-      "openrouter_model": "deepseek/deepseek-v4.1-flash"
+      "openrouter_model": "distill.openrouter"
     }
   },
   "run_caps": {

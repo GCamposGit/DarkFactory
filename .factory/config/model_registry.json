@@ -100,7 +100,9 @@
       "provider": "anthropic",
       "family": "claude",
       "tier": "high",
-      "aliases": [],
+      "aliases": [
+        "opus-legacy"
+      ],
       "status": "deprecated",
       "price_input_per_mtok": 5.0,
       "price_output_per_mtok": 25.0,
@@ -184,7 +186,9 @@
       "provider": "xai",
       "family": "grok",
       "tier": "mid",
-      "aliases": [],
+      "aliases": [
+        "grok-review"
+      ],
       "status": "active",
       "price_input_per_mtok": 2.0,
       "price_output_per_mtok": 8.0,
@@ -204,7 +208,9 @@
       "provider": "xai",
       "family": "grok",
       "tier": "mid",
-      "aliases": [],
+      "aliases": [
+        "grok-dev"
+      ],
       "status": "active",
       "price_input_per_mtok": null,
       "price_output_per_mtok": null,

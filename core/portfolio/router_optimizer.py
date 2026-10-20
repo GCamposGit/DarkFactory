@@ -19,6 +19,7 @@ import logging
 import os
 from typing import Dict, Optional
 
+from core.models.registry import resolve_known
 from core.usage.api_credits import ApiCreditsMonitor
 from core.workflow.qualified_routes import RouteDecision, select_route
 from .budget_manager import PortfolioBudgetManager
@@ -28,13 +29,13 @@ logger = logging.getLogger("darkfac.portfolio.router")
 
 # Direct Paid Account Capabilities
 PAID_DIRECT_MODELS = {
-    "research": {"model": "gemini-3.8-flash", "provider": "antigravity", "cost_est": 0.0005},
-    "web_research": {"model": "grok-4.6", "provider": "xai", "cost_est": 0.005},
+    "research": {"model": resolve_known("flash"), "provider": "antigravity", "cost_est": 0.0005},
+    "web_research": {"model": resolve_known("grok-review"), "provider": "xai", "cost_est": 0.005},
     "architecture": {"model": "luna-xhigh", "provider": "openai", "cost_est": 0.015},
     "coding_high": {"model": "luna-xhigh", "provider": "openai", "cost_est": 0.015},
-    "coding_medium": {"model": "gemini-3.8-flash", "provider": "antigravity", "cost_est": 0.0005},
+    "coding_medium": {"model": resolve_known("flash"), "provider": "antigravity", "cost_est": 0.0005},
     "coding_low": {"model": "qwen-code-fast:latest", "provider": "ollama", "cost_est": 0.0},
-    "review": {"model": "grok-4.6", "provider": "xai", "cost_est": 0.005},
+    "review": {"model": resolve_known("grok-review"), "provider": "xai", "cost_est": 0.005},
 }
 
 # OpenRouter Frontier Cost-Benefit Models (Fallback Tier 2)
