@@ -1,0 +1,72 @@
+[
+  {
+    "id": "T1",
+    "title": "Fail-closed de acesso ao repositorio do projeto e afinidade de execucao do pilot-hello",
+    "goal": "Impedir que um host sem credencial para o repositorio privado do piloto reivindique ou quebre tarde um ticket do pilot-hello, com erro estruturado e remediacao, e pinar os jobs do piloto aos hosts autorizados.",
+    "files_hint": [
+      "core/projects/ticket_execution.py",
+      "core/line/bindings.py",
+      ".factory/projects.json",
+      "tests/test_project_ticket_execution.py",
+      ".factory/owner_actions/owner_actions.json",
+      "docs/evidence/USR-279-M3.md"
+    ],
+    "acceptance": [
+      "core.projects.ticket_execution verifica o alcance do repo_url (git ls-remote --exit-code, com timeout) antes de clonar ou usar o checkout e, quando o host nao tem acesso, levanta ProjectExecutionError estruturado com cause 'project_repo_unreachable', nome do projeto, host e instrucao de remediacao, sem vazar token; projetos sem repo_url seguem inalterados.",
+      "O descritor de pilot-hello em .factory/projects.json declara exec_affinity com a capability exigida dos hosts com acesso ao repositorio privado, e core.line.bindings.required_caps a propaga para os estagios de agente, validation e build_deploy do projeto.",
+      "Um item em .factory/owner_actions/owner_actions.json registra, passo a passo, a publicacao dessa capability em DARKFAC_WORKER_CAPS nos hosts do owner (ou a concessao de acesso ao token do worker de nuvem), com criterio de verificacao, e docs/evidence/USR-279-M3.md registra o diagnostico do 404 observado no worker de nuvem e o estado de M3 (lado fabrica pronto; entrada real do owner na OA-047)."
+    ],
+    "tests_to_add": [
+      "tests/test_project_ticket_execution.py: projeto com repo_url inalcancavel produz ProjectExecutionError com cause project_repo_unreachable e mensagem de remediacao, sem clonar.",
+      "tests/test_project_ticket_execution.py: projeto com remoto alcancavel (repo git local temporario) continua clonando/validando como antes e projeto sem repo_url nao dispara o pre-flight.",
+      "Teste de bindings: required_caps para os estagios do pilot-hello inclui a capability de exec_affinity declarada no descritor."
+    ],
+    "smoke": []
+  },
+  {
+    "id": "T2",
+    "title": "Script deterministico de prova de independencia do produto piloto (ferramenta de M6)",
+    "goal": "Automatizar a verificacao de que um clone limpo do produto instala, testa, builda, sobe e passa no smoke sem checkout nem servico DarkFac, emitindo relatorio JSON reaproveitavel como evidencia.",
+    "files_hint": [
+      "scripts/pilot_independence_check.py",
+      "tests/test_pilot_independence_check.py",
+      "core/projects/environment.py",
+      "docs/plans/USR-279-greenfield-pilot.md"
+    ],
+    "acceptance": [
+      "python C:\\dev\\DarkFac\\scripts\\pilot_independence_check.py --project pilot-hello [--json --report <path>] clona o repositorio registrado em diretorio temporario fora do checkout DarkFac e executa environment.setup e os comandos declarados (setup, validate, build, smoke) reusando core.projects.environment.setup_environment/run_in_environment, sem imports de core no produto.",
+      "O relatorio JSON traz SHA do clone, resultado por comando, chaves de ambiente observadas no processo filho (falhando se houver PYTHONPATH, DARKFAC_* ou VIRTUAL_ENV fora do venv do produto) e achados da varredura de codigo executavel por referencias a core./darkfac, ignorando documentacao e o texto de produto 'DarkFac pilot'; exit code diferente de zero em qualquer achado ou comando falho.",
+      "docs/plans/USR-279-greenfield-pilot.md aponta o script como forma de execucao do M6, sem alterar os criterios do marco, e o portao do darkfac (python scripts/line_validate.py) fica verde."
+    ],
+    "tests_to_add": [
+      "tests/test_pilot_independence_check.py: produto sintetico limpo (repo git temporario, camada de ambiente injetada/stub) passa e o relatorio tem o schema esperado com o SHA do clone.",
+      "tests/test_pilot_independence_check.py: produto com 'from core import ...' em codigo executavel reprova com achado apontando arquivo e linha, enquanto a mesma string em README/docs e o texto 'DarkFac pilot' nao reprovam.",
+      "tests/test_pilot_independence_check.py: ambiente filho poluido (PYTHONPATH/DARKFAC_*) reprova com causa explicita e comando falho propaga exit code diferente de zero."
+    ],
+    "smoke": []
+  },
+  {
+    "id": "T3",
+    "title": "Guardas e descritor-modelo de deploy do piloto, sem toque no darkfac-core (preparacao de M5)",
+    "goal": "Deixar o deploy pos-merge do pilot-hello pronto para ser ligado assim que o owner criar a aplicacao no Dokploy, impedindo por construcao que o piloto aponte para o servico do darkfac-core.",
+    "files_hint": [
+      "core/projects/registry.py",
+      "core/projects/models.py",
+      "docs/plans/USR-279-pilot-deploy-descriptor.json",
+      "tests/test_project_registry_cli.py",
+      ".factory/owner_actions/owner_actions.json",
+      "docs/plans/USR-279-greenfield-pilot.md"
+    ],
+    "acceptance": [
+      "core.projects.registry rejeita registrar um projeto cujo alvo efetivo de deploy (ex. dokploy service_name) ja pertence a outro projeto registrado, com erro claro e registry inalterado; as entradas atuais de .factory/projects.json continuam carregando sem migracao.",
+      "docs/plans/USR-279-pilot-deploy-descriptor.json traz o descritor parcial do pilot-hello (deploy dokploy com placeholders sem segredo, healthcheck e smoke HTTP de / e /healthz) pronto para merge idempotente via python -m core.projects.cli register --descriptor-file, e o plano do piloto documenta esse passo no M5.",
+      "A OA-043 em .factory/owner_actions/owner_actions.json e atualizada com os passos tela a tela do Dokploy para o projeto separado do piloto, o webhook do repositorio privado e o comando absoluto de registro do descritor, com criterio de verificacao objetivo."
+    ],
+    "tests_to_add": [
+      "tests/test_project_registry_cli.py: registrar segundo projeto reaproveitando o service_name de deploy de outro falha e preserva o registry; alvos distintos seguem registrando.",
+      "Teste de carga do registry real (.factory/projects.json) permanecendo valido sob a nova guarda.",
+      "Teste de que o descritor-modelo do piloto valida em ProjectDescriptor e, aplicado sobre a entrada atual via merge do CLI, preenche deploy e smoke sem perder commands/environment do M2."
+    ],
+    "smoke": []
+  }
+]

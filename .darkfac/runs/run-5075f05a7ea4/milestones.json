@@ -1,0 +1,22 @@
+[
+  {
+    "title": "M3 (execucao) - demanda real do owner pelo Telegram cai no projeto do piloto",
+    "demand_text": "Concluir a execucao do marco M3 do piloto greenfield: acompanhar a entrada real da demanda do pilot-hello enviada pelo owner no Telegram (OA-047), confirmar que o roteamento por projeto (USR-278) registra a demanda e o ticket no projeto pilot-hello com prefixo PH e vinculo a demanda, que o Gate G1 nao reabre as decisoes ja respondidas na OA-042 e que nenhum ticket USR- foi criado para ela; registrar evidencia com horario, id do ticket, projeto e trecho do roteamento, e resolver a OA-047 ou reabrir com diagnostico se a entrada falhar."
+  },
+  {
+    "title": "M4 - Linha do piloto ate o merge no repositorio privado",
+    "demand_text": "Executar o ticket PH do piloto pela linha completa no repositorio privado GCamposGit/pilot-hello: implementacao no checkout e ambiente proprios do produto, revisao independente em familia diferente do implementador, PR no repositorio privado, CI propria do produto verde para o SHA do PR, ausencia de conflito com main, merge squash e limpeza de branch/worktree; registrar SHAs de PR e merge, link do run de CI e o host que executou, sem usar o portao nem o runtime do core no produto."
+  },
+  {
+    "title": "M5 - Deploy em ambiente separado e smoke vinculado ao SHA",
+    "demand_text": "Ligar o deploy pos-merge do pilot-hello no Dokploy existente, em projeto separado do darkfac-core (opcao A ja decidida na OA-042), preenchendo o descritor de deploy e os smokes HTTP do projeto a partir da aplicacao criada pelo owner (OA-043); comprovar que GET /healthz responde 200 com a versao correspondente ao SHA mergeado e registrar evidencia com URL, SHA, saida do smoke e horario vinculada ao ticket do piloto."
+  },
+  {
+    "title": "M6 - Prova de independencia executada em clone limpo",
+    "demand_text": "Executar a prova de independencia do produto piloto em host autorizado, usando o script de verificacao da fabrica: clone novo fora de qualquer checkout DarkFac instala, testa e builda; o servidor sobe e o smoke passa com ambiente sem PYTHONPATH, VIRTUAL_ENV do core ou DARKFAC_* e sem servico DarkFac acessivel; a varredura nao encontra referencias a core. ou darkfac em codigo executavel. Anexar o relatorio JSON e o SHA verificado como evidencia do marco."
+  },
+  {
+    "title": "M7 - Relatorio final do piloto e decisao de retencao",
+    "demand_text": "Fechar o piloto greenfield com relatorio ao owner: linha do tempo de M1 a M6, SHAs, PR, CI, deploy, smoke, relatorio de independencia e contagem de intervencoes manuais; cada falha encontrada no caminho aparece retomada com commit/PR ou com ticket formal aberto; executar ou registrar a decisao D4 (manter arquivado) como acao do owner e marcar os criterios de aceite 2 e 3 do USR-279 com a evidencia correspondente."
+  }
+]
