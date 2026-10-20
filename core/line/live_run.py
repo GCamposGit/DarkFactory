@@ -70,7 +70,6 @@ logger = logging.getLogger("darkfac.live_run")
 
 STATE_DIRNAME = "live_runs"
 ENV_HARNESS = "DARKFAC_OPERATING_HARNESS"
-DEFAULT_HARNESS = "claude"
 PHASE_STATUSES: tuple[str, ...] = ("running", "succeeded", "failed", "skipped")
 _SAFE_TICKET = re.compile(r"[^A-Za-z0-9_.-]")
 CLOSING_COMMANDS = frozenset({"finish", "cancel"})
@@ -177,7 +176,7 @@ def _parser() -> argparse.ArgumentParser:
         p.add_argument("--ticket", required=True, help="id do ticket (ex.: USR-164)")
         p.add_argument("--title", default="", help="titulo mostrado no quadro")
         p.add_argument("--project", default="darkfac", help="projeto (padrao: %(default)s)")
-        p.add_argument("--harness", default=None, help=f"harness (padrao: ${ENV_HARNESS} ou {DEFAULT_HARNESS})")
+        p.add_argument("--harness", default=None, help=f"harness (padrao: ${ENV_HARNESS} ou deteccao da sessao)")
         p.add_argument("--worker", default=None, help="maquina (padrao: nome do host)")
         p.add_argument("--json", action="store_true", help="saida JSON em vez de texto")
 
@@ -191,6 +190,7 @@ def _parser() -> argparse.ArgumentParser:
     phase.add_argument("--status", default="running", choices=PHASE_STATUSES)
     phase.add_argument("--message", default="")
     phase.add_argument("--cause", default=None, help="codigo curto da causa (falhas)")
+    phase.add_argument("--stage-worker", default=None, help="worker desta fase, sem alterar o host do run")
 
     finish = sub.add_parser("finish", help="encerra o run (sucesso, ou falha com --failed)")
     common(finish)
@@ -243,11 +243,18 @@ def _new_state(args: argparse.Namespace, env: Mapping[str, str], hostname: str) 
         ticket_id=args.ticket,
         project_id=args.project or "darkfac",
         title=args.title or "",
-        harness=args.harness or env.get(ENV_HARNESS, "").strip() or DEFAULT_HARNESS,
+        harness=args.harness or _detect_harness(env),
         worker=args.worker or hostname,
         opened_at=moment.isoformat(),
         updated_at=moment.isoformat(),
     )
+
+
+def _detect_harness(env: Mapping[str, str]) -> str | None:
+    """Report only the configured or detected session harness; never guess Claude."""
+    from core.line.operating_harness import detect_operating_harness
+
+    return detect_operating_harness(env)
 
 
 def _emit(args: argparse.Namespace, payload: dict[str, Any], text: str) -> None:
@@ -278,7 +285,7 @@ def _apply(
         previous = pub.active_phase
         if status == "running" and previous not in (None, name):
             pub.phase(previous, "succeeded", f"encerrada ao iniciar {name}")  # type: ignore[arg-type]
-        pub.phase(name, status, message, cause=args.cause)  # type: ignore[arg-type]
+        pub.phase(name, status, message, cause=args.cause, worker=args.stage_worker)  # type: ignore[arg-type]
         state.last_phase, state.last_status, state.last_message = name, status, message
         return f"fase {name} {status}"
     if command == "finish":
