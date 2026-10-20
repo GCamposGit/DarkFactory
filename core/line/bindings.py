@@ -180,7 +180,7 @@ def base_red_attempt_counter(store: Any, stage: str = "integration") -> Callable
 
 
 def _resolve_project(context: StageContext, resolver: ProjectResolver) -> ProjectDescriptor:
-    project_id = context.project_id or context.claim.job_key.ticket_id  # legacy: no run project_id
+    project_id = getattr(context, "project_id", None) or context.claim.job_key.ticket_id  # legacy: no run project_id
     project = resolver(project_id)
     if project is None:
         raise UnknownProjectError(
@@ -547,7 +547,7 @@ class RetrospectiveStageHandler:
 
     def _build_summary(self, context: StageContext) -> dict[str, Any]:
         run_id = context.claim.job_key.run_id
-        project_id = context.project_id or context.claim.job_key.ticket_id
+        project_id = getattr(context, "project_id", None) or context.claim.job_key.ticket_id
         status: Optional[dict[str, Any]] = None
         getter = getattr(self.store, "get_run_status", None)
         if getter is not None:
