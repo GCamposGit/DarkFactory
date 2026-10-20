@@ -475,6 +475,9 @@
     "marketing": {
       "surface": "content-studio-section"
     },
+    "models": {
+      "internal": "Registro unico de modelos (USR-185); leitor sem estado proprio, consumido pelo roteamento"
+    },
     "notifications": {
       "surface": "factory-health-block"
     },
