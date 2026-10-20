@@ -8860,8 +8860,8 @@
     "project_id": "darkfac",
     "title": "Corrigir falso positivo do G1 e contrato de prontidao dos tickets criados",
     "origin": "review",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "a8cff233b381934b9e67a50b145b02f556779919",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -8887,7 +8887,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-18T01:09:47.448919Z",
-    "updated_at": "2026-10-18T01:12:36.371060Z"
+    "updated_at": "2026-10-20T02:26:14.489386Z"
   },
   {
     "id": "USR-306",
