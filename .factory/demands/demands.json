@@ -4854,8 +4854,8 @@
     "project_id": "darkfac",
     "title": "Refinar a politica de subagentes Haiku 5.5: tipos somente leitura, recusa como gatilho, aceite verificado e telemetria",
     "origin": "user",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "cancelled",
+    "delivery_evidence": "Absorvido pelo USR-185 (o proprio USR-185 incorpora os refinos do USR-177; fatias em docs/plans/USR-185-slices.md).",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "later",
@@ -4882,7 +4882,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-08T21:57:36.426364Z",
-    "updated_at": "2026-10-11T17:49:17.206876Z"
+    "updated_at": "2026-10-20T10:31:25.791520Z"
   },
   {
     "id": "USR-178",
@@ -8757,8 +8757,8 @@
     "project_id": "darkfac",
     "title": "Acelerar o CI do GitHub: shards no Windows, filtro por caminho e cancelamento de execuções antigas",
     "origin": "user",
-    "status": "planned",
-    "delivery_evidence": "Correcao pronta como patch em docs/proposals/USR-300-ci-speedup.patch (.github e core/harness protegidos); aguardando publicacao do owner pela OA-039. (proposta: 3628336b6361b90bfea727f0d01783548f903832)",
+    "status": "completed",
+    "delivery_evidence": "05cb6f4:live_provisional (push do owner 20/10/2026; portao HARNESS_PASS grokbox 05cb6f4; 1o run da main 39407745904 verde com 4 fatias Windows ~5 min e total ~5,5 min; deploy ok)",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -8786,7 +8786,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-17T13:16:46.929233Z",
-    "updated_at": "2026-10-20T02:11:47.597053Z"
+    "updated_at": "2026-10-20T10:31:25.681716Z"
   },
   {
     "id": "USR-303",
