@@ -47,6 +47,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterator
 
+from core.harness.process_identity import proc_start_ticks, same_process
+
 _DEFAULT_SLOTS = 1
 _DEFAULT_TIMEOUT_SEC = 3600
 _POLL_MIN_SEC = 0.5
@@ -228,6 +230,7 @@ def _write_sidecar(lock_path: Path) -> None:
         "cwd": str(Path.cwd()),
         "argv": sys.argv,
         "started_at": time.time(),
+        "start_ticks": proc_start_ticks(),
         "harness": _detect_harness(),
     }
     tmp_path = sidecar.with_suffix(".tmp")
@@ -255,7 +258,9 @@ def _describe_holder(lock_path: Path) -> str:
     )
 
 
-def _sample_holder_tree(pid: int, started_at: float | None) -> dict[int, float] | None:
+def _sample_holder_tree(
+    pid: int, started_at: float | None, start_ticks: int | None = None
+) -> dict[int, float] | None:
     """Accumulated CPU seconds of ``pid`` and all its descendants.
 
     ``None`` when the holder cannot be inspected (psutil unavailable, process
@@ -269,7 +274,7 @@ def _sample_holder_tree(pid: int, started_at: float | None) -> dict[int, float] 
         return None
     try:
         proc = psutil.Process(pid)
-        if started_at is not None and proc.create_time() > float(started_at) + 5.0:
+        if not same_process(proc, started_at, start_ticks, tolerance_sec=5.0, only_younger=True):
             return None
         sample: dict[int, float] = {}
         for member in [proc, *proc.children(recursive=True)]:
@@ -347,7 +352,11 @@ class _StallWatch:
         previous = self._baseline.get(lock_path)
         if previous is not None and previous[0] == pid and now - previous[1] < self._window:
             return
-        sample = _sample_holder_tree(pid, info.get("started_at"))
+        holder_ticks = info.get("start_ticks")
+        if holder_ticks is None:
+            sample = _sample_holder_tree(pid, info.get("started_at"))
+        else:
+            sample = _sample_holder_tree(pid, info.get("started_at"), holder_ticks)
         if sample is None:
             self._baseline.pop(lock_path, None)
             return

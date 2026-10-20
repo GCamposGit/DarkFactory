@@ -41,6 +41,7 @@ if str(REPO_ROOT) not in sys.path:
 
 from core.harness import cache as harness_cache
 from core.harness.markers import MARKER_HARNESS_RESULT
+from core.harness.process_identity import proc_start_ticks, same_process
 from core.harness.runner import _selected_steps as _harness_selected_steps
 from core.harness.runner import load_config as _load_harness_config
 from core.harness.test_subagent import (
@@ -112,7 +113,7 @@ _TEST_COUNT_RE = re.compile(r"\[TEST_COUNT\]\s+count=(\d+)")
 #: ``error_code`` of a poll for a job id this worker has no record of.
 ERROR_CODE_JOB_NOT_FOUND = "job_not_found"
 #: Tolerance when comparing a recorded process start time with the live one (pid reuse guard).
-_PROCESS_START_TOLERANCE_SEC = 2.0
+_PROCESS_START_TOLERANCE_SEC = 2.0  # create_time fallback only; Linux compares exact start ticks (USR-317)
 _JOB_ID_RE = re.compile(r"[A-Za-z0-9_-]{1,64}")
 
 
@@ -428,9 +429,11 @@ def _process_started_at(pid: Optional[int] = None) -> float:
 
 #: Start time of the process that hosts this module's JobManagers (a pid-reuse guard).
 _THIS_PROCESS_STARTED_AT = _process_started_at()
+#: Linux starttime in clock ticks (immune to boot_time drift after VM freeze/restore); None elsewhere.
+_THIS_PROCESS_START_TICKS = proc_start_ticks()
 
 
-def _process_alive(pid: Optional[int], started_at: Optional[float]) -> bool:
+def _process_alive(pid: Optional[int], started_at: Optional[float], start_ticks: Optional[int] = None) -> bool:
     """True unless ``pid`` is provably gone or was recycled by a younger process.
 
     Unknown (no psutil, access denied) counts as alive: recovery must never
@@ -445,7 +448,7 @@ def _process_alive(pid: Optional[int], started_at: Optional[float]) -> bool:
         return True
     try:
         proc = psutil.Process(int(pid))
-        if started_at is not None and abs(proc.create_time() - float(started_at)) > _PROCESS_START_TOLERANCE_SEC:
+        if not same_process(proc, started_at, start_ticks, tolerance_sec=_PROCESS_START_TOLERANCE_SEC):
             return False
         return proc.status() != psutil.STATUS_ZOMBIE
     except psutil.NoSuchProcess:
@@ -470,7 +473,9 @@ def _stop_processes(victims: list[Any], *, force: bool) -> None:
             victim.kill()
 
 
-def _terminate_process_tree(pid: Optional[int], started_at: Optional[float], *, force: bool = False) -> None:
+def _terminate_process_tree(
+    pid: Optional[int], started_at: Optional[float], *, force: bool = False, start_ticks: Optional[int] = None
+) -> None:
     """Best-effort kill of ``pid`` and its descendants (pytest-xdist workers),
     only when ``pid`` still is the process we recorded."""
 
@@ -480,7 +485,7 @@ def _terminate_process_tree(pid: Optional[int], started_at: Optional[float], *, 
         import psutil
 
         proc = psutil.Process(int(pid))
-        if started_at is not None and abs(proc.create_time() - float(started_at)) > _PROCESS_START_TOLERANCE_SEC:
+        if not same_process(proc, started_at, start_ticks, tolerance_sec=_PROCESS_START_TOLERANCE_SEC):
             return
         _stop_processes([*proc.children(recursive=True), proc], force=force)
     except Exception as exc:  # noqa: BLE001
@@ -496,10 +501,13 @@ class _ProcessTree:
     identity includes the creation time, so a recycled pid is never killed by mistake.
     """
 
-    def __init__(self, pid: Optional[int], started_at: Optional[float]) -> None:
+    def __init__(self, pid: Optional[int], started_at: Optional[float], start_ticks: Optional[int] = None) -> None:
         self.pid = int(pid) if pid else None
         self.started_at = started_at
+        self.start_ticks = start_ticks
         self._known: Dict[int, Any] = {}
+        #: Linux starttime of each known process, to tell it from a recycled pid without create_time.
+        self._ticks: Dict[int, Optional[int]] = {}
         self._lock = threading.Lock()
 
     def refresh(self) -> None:
@@ -511,14 +519,16 @@ class _ProcessTree:
             import psutil
 
             root = psutil.Process(self.pid)
-            if self.started_at is not None and abs(root.create_time() - float(self.started_at)) > _PROCESS_START_TOLERANCE_SEC:
+            if not same_process(root, self.started_at, self.start_ticks, tolerance_sec=_PROCESS_START_TOLERANCE_SEC):
                 return
             found = {proc.pid: proc for proc in [root, *root.children(recursive=True)]}
+            found_ticks = {pid: proc_start_ticks(pid) for pid in found}
         except Exception as exc:  # noqa: BLE001 - runner already gone, access denied, psutil missing
             logger.debug("Could not snapshot process tree of pid %s: %s", self.pid, exc)
             return
         with self._lock:
             self._known.update(found)
+            self._ticks.update(found_ticks)
 
     def kill(self, *, force: bool = True) -> int:
         """Stop every still-running process of the tree; returns how many were targeted."""
@@ -526,10 +536,16 @@ class _ProcessTree:
         self.refresh()
         with self._lock:
             known = list(self._known.values())
+            ticks = dict(self._ticks)
         victims: list[Any] = []
         for proc in known:
             try:
-                if proc.pid != os.getpid() and proc.is_running():
+                if proc.pid == os.getpid():
+                    continue
+                recorded = ticks.get(proc.pid)
+                # psutil's is_running() compares create_time, which drifts with boot_time on Linux.
+                running = proc_start_ticks(proc.pid) == recorded if recorded is not None else proc.is_running()
+                if running:
                     victims.append(proc)
             except Exception:  # noqa: BLE001 - vanished or inaccessible
                 continue
@@ -569,8 +585,10 @@ class HarnessJob:
     #: Process that owns the job (pid + start time): a dead owner means an orphaned job.
     owner_pid: int = dataclass_field(default_factory=os.getpid)
     owner_started_at: float = dataclass_field(default_factory=lambda: _THIS_PROCESS_STARTED_AT)
+    owner_start_ticks: Optional[int] = dataclass_field(default_factory=lambda: _THIS_PROCESS_START_TICKS)
     child_pid: Optional[int] = None
     child_started_at: Optional[float] = None
+    child_start_ticks: Optional[int] = None
     #: Runner + descendants snapshot (USR-183); in memory only, never persisted.
     process_tree: Optional[_ProcessTree] = dataclass_field(default=None, repr=False)
     lock: threading.Lock = dataclass_field(default_factory=threading.Lock)
@@ -608,8 +626,10 @@ class HarnessJob:
             "updated_at": self.updated_at,
             "owner_pid": self.owner_pid,
             "owner_started_at": self.owner_started_at,
+            "owner_start_ticks": self.owner_start_ticks,
             "child_pid": self.child_pid,
             "child_started_at": self.child_started_at,
+            "child_start_ticks": self.child_start_ticks,
             "worktree_path": str(self.worktree_path) if self.worktree_path else None,
         }
 
@@ -634,8 +654,10 @@ class HarnessJob:
             updated_at=float(record.get("updated_at") or time.time()),
             owner_pid=int(record.get("owner_pid") or 0),
             owner_started_at=float(record.get("owner_started_at") or 0.0),
+            owner_start_ticks=record.get("owner_start_ticks"),
             child_pid=record.get("child_pid"),
             child_started_at=record.get("child_started_at"),
+            child_start_ticks=record.get("child_start_ticks"),
         )
 
 
@@ -754,7 +776,7 @@ class JobManager:
                 logger.warning("Ignoring unreadable job record %s: %s", record_path.name, exc)
                 continue
             if not job.is_terminal():
-                if _process_alive(job.owner_pid, job.owner_started_at):
+                if _process_alive(job.owner_pid, job.owner_started_at, job.owner_start_ticks):
                     continue  # owned by a live worker process: not ours to touch
                 self._close_orphan(job)
             try:
@@ -779,7 +801,7 @@ class JobManager:
 
     def _close_orphan(self, job: HarnessJob) -> None:
         was = job.status
-        _terminate_process_tree(job.child_pid, job.child_started_at)
+        _terminate_process_tree(job.child_pid, job.child_started_at, start_ticks=job.child_start_ticks)
         message = (
             f"worker process (pid {job.owner_pid}) ended while the job was {was}; "
             f"job state recovered by worker instance {self.instance_id} "
@@ -818,7 +840,7 @@ class JobManager:
                 job.process_tree.kill(force=False)
             elif process is not None and process.poll() is None:
                 # Descendants first: once the runner dies, its pytest-xdist workers are orphans.
-                _terminate_process_tree(job.child_pid, job.child_started_at)
+                _terminate_process_tree(job.child_pid, job.child_started_at, start_ticks=job.child_start_ticks)
             if process is not None and process.poll() is None:
                 with contextlib.suppress(Exception):
                     process.terminate()
@@ -1042,7 +1064,8 @@ class JobManager:
                 # Recorded so a successor worker can reap an orphaned run (USR-162).
                 job.child_pid = child_pid
                 job.child_started_at = _process_started_at(child_pid)
-            tree = _ProcessTree(job.child_pid, job.child_started_at)
+                job.child_start_ticks = proc_start_ticks(child_pid)
+            tree = _ProcessTree(job.child_pid, job.child_started_at, job.child_start_ticks)
             job.process_tree = tree
             self._persist(job)
             deadline = time.monotonic() + timeout_sec
@@ -1438,7 +1461,7 @@ def _reap_stale_worker_listener(port: int) -> int:
                 if script not in " ".join(proc.cmdline()):
                     continue
                 logger.warning("Terminating stale worker pid %s that still holds port %s", conn.pid, port)
-                _terminate_process_tree(proc.pid, proc.create_time())
+                _terminate_process_tree(proc.pid, proc.create_time(), start_ticks=proc_start_ticks(proc.pid))
                 terminated += 1
             except psutil.Error:
                 continue
@@ -2295,7 +2318,25 @@ def create_worker_app(
     return worker_app
 
 
-app = create_worker_app()
+_LAZY_APP: Any = None
+_LAZY_APP_LOCK = threading.Lock()
+
+
+def __getattr__(name: str) -> Any:
+    """Build the module-level ``app`` on first access, not on import (USR-317).
+
+    Importing this module (e.g. a supervisor readiness check) must not create a
+    JobManager on the real worker state dir and run orphan recovery.
+    ``uvicorn core.harness.remote_worker:app`` and ``from ... import app`` still work.
+    """
+
+    global _LAZY_APP
+    if name == "app":
+        with _LAZY_APP_LOCK:
+            if _LAZY_APP is None:
+                _LAZY_APP = create_worker_app()
+            return _LAZY_APP
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 WORKER_DAEMON_LOG_MAX_BYTES = 10 * 1024 * 1024
