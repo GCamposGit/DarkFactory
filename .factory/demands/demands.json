@@ -9500,5 +9500,36 @@
     "dependencies": [],
     "created_at": "2026-10-20T23:42:03.508310Z",
     "updated_at": "2026-10-20T23:42:03.508310Z"
+  },
+  {
+    "id": "USR-326",
+    "project_id": "darkfac",
+    "title": "Run cancelado continua com execucoes Claude e subagentes emitindo heartbeat",
+    "origin": "agent",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "Em20/10/2026 o endpoint canonico cancelou run-2d40b6109e9e USR320 com ok jobs_cancelled1. /api/line/live confirmou run_status cancelled, mas executions.active listou claude_session path /workspaces/darkfac/runs/run-2d40b6109e9e com heartbeat23:51:09UTC e tres subagents com heartbeat23:51:31UTC apos cancelamento anterior23:44UTC. Pode haver subprocessosorfãos ou divergencia da telemetria; causa ainda nao comprovada. cancellation.store_probe depende get_run_status que pode converterfalha emNone.",
+    "core_journey": [],
+    "non_goals": [
+      "Nao matar processos por nome ou parar runs de outros tickets.",
+      "Nao marcar etapas produtivas como sucesso nem relaxar fencing."
+    ],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Reproduzir cancelamento no worker real com agente e subagente; distinguir processo vivo de telemetria obsoleta.",
+      "Cancelamento termina arvore e impede commits/push posteriores em prazo limitado, preservando historico e isolamento.",
+      "Falha do store nao causa continuacao silenciosa indefinida nem vazamento de credenciais."
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-20T23:53:37.650318Z",
+    "updated_at": "2026-10-20T23:53:37.650318Z"
   }
 ]
