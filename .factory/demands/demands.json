@@ -9346,5 +9346,36 @@
     "dependencies": [],
     "created_at": "2026-10-19T10:29:03.508653Z",
     "updated_at": "2026-10-20T10:14:50.243207Z"
+  },
+  {
+    "id": "USR-318",
+    "project_id": "darkfac",
+    "title": "Corrigir fases e metadados de execução na Esteira ao vivo do DarkHub",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "No exemplo enviado em 20/10/2026, a Esteira ao vivo mostra o Portão como etapa em andamento, mas deixa Preflight, Workspace e Agente em branco. O cartão identifica o run como host notebook e o executor como claude, embora a sessão esteja rodando no Codex; além disso, um dos portões foi executado no Grokbox, não no Notebook. O status ao vivo mistura ou omite a proveniência real das fases, dificultando entender o andamento e onde cada etapa está executando.",
+    "core_journey": [
+      "No exemplo enviado em 20/10/2026, a Esteira ao vivo mostra o Portão como etapa em andamento, mas deixa Preflight, Workspace e Agente em branco. O cartão identifica o run como host notebook e o executor como claude, embora a sessão esteja rodando no Codex; além disso, um dos portões foi executado no Grokbox, não no Notebook. O status ao vivo mistura ou omite a proveniência real das fases, dificultando entender o andamento e onde cada etapa está executando."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Para um run que já chegou ao Portão, o cartão exibe o estado registrado de Preflight, Workspace e Agente, em vez de deixá-los vazios.",
+      "O harness executor mostrado no cartão corresponde ao harness real da sessão (Codex neste caso), sem ser inferido de outro host ou configuração.",
+      "O host exibido para o Portão corresponde ao worker real daquela fase (Grokbox neste caso), distinguindo-o do host do run/ticket (Notebook).",
+      "Testes cobrem um run com sessão Codex, host do ticket Notebook e Portão no Grokbox, verificando fases anteriores e metadados corretos."
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-20T18:34:03.270018Z",
+    "updated_at": "2026-10-20T18:34:03.270018Z"
   }
 ]
