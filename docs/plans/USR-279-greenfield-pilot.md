@@ -54,7 +54,7 @@ Recomendacao (nao decisao): A, com o dominio gerado pela infraestrutura ja exist
 
 ## 6. Marcos executaveis (ate tres criterios cada)
 
-M1 - Bootstrap (USR-274)
+M1 - Bootstrap (USR-274) - CONCLUIDO em 20/10/2026 (evidencia: docs/evidence/USR-279-M1.md; https://github.com/GCamposGit/pilot-hello)
 1. Repositorio privado criado na conta do owner pelo `GitHubProvider`, com README, `pyproject.toml`, testes e CI do produto, e registro no registry de projetos.
 2. Reexecucao do bootstrap e idempotente (sem novo repositorio nem commits duplicados).
 3. Repositorio nao contem referencia a `C:\dev\DarkFac` nem import de `core.*`.

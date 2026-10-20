@@ -310,8 +310,11 @@ def test_real_registry_projects_json_loads_with_new_fields() -> None:
     data = json.loads(projects_file.read_text(encoding="utf-8"))
     projects = [ProjectDescriptor.model_validate(item) for item in data]
 
-    assert len(projects) == 5
+    # USR-279 M1 registered the private greenfield pilot (pilot-hello) as the 6th project.
+    assert len(projects) == 6
     by_id = {p.id: p for p in projects}
+    assert by_id["pilot-hello"].repo_url == "https://github.com/GCamposGit/pilot-hello.git"
+    assert by_id["pilot-hello"].environment is not None
     assert by_id["darkfac"].repo_url is not None
     assert by_id["site-ggcampos"].repo_url is not None
     assert by_id["segundo-cerebro"].repo_url is not None

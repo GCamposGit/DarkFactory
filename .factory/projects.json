@@ -130,5 +130,46 @@
       }
     ],
     "requires_commercial_acceptance": false
+  },
+  {
+    "id": "pilot-hello",
+    "name": "pilot-hello (DarkFac pilot)",
+    "description": "Piloto greenfield stand alone do USR-279 (servico HTTP minimo, repositorio privado separado).",
+    "path": "C:\\dev\\pilot-hello",
+    "paths": {},
+    "kind": "internal_product",
+    "prefix": "PH",
+    "domain": null,
+    "deploy_target": null,
+    "created_at": "2026-10-20T15:08:40.276262+00:00",
+    "repo_url": "https://github.com/GCamposGit/pilot-hello.git",
+    "default_branch": "main",
+    "commands": {
+      "setup": [
+        "python -m pip install -e . build"
+      ],
+      "validate": [
+        "python -m unittest discover -s tests -q"
+      ],
+      "build": [
+        "python -m compileall -q src",
+        "python -m build --wheel"
+      ],
+      "smoke": [
+        "python scripts/smoke.py"
+      ]
+    },
+    "environment": {
+      "kind": "venv",
+      "path": ".venv",
+      "setup": [
+        "python -m venv .venv"
+      ],
+      "env_allow": []
+    },
+    "deploy": null,
+    "smoke": [],
+    "exec_affinity": [],
+    "requires_commercial_acceptance": false
   }
 ]
