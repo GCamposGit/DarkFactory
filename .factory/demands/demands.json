@@ -6699,14 +6699,16 @@
     "lifecycle_stage": "execution",
     "horizon": "later",
     "tags": [
-      "user-demand",
-      "congelado-v0"
+      "user-demand"
     ],
     "problem_statement": "Inventario SQ03 USR227 observou que core/orchestrator/guard.py is_governance_evolution_authorized valida somente flag de ambiente, sem verificar ticket, aprovador, caminhos ou candidato. O docstring menciona verified ticket mas isso nao e implementado. Lacuna distinta dos tickets de timeout e de tipos; nenhuma flag foi ativada nesta investigacao.\n\nCONGELADO em 11/10/2026 (plano V0, docs/plans/V0_OPERACIONAL_2026-10-11.md): fora do caminho critico da linha.",
     "core_journey": [
       "Inventario SQ03 USR227 observou que core/orchestrator/guard.py is_governance_evolution_authorized valida somente flag de ambiente, sem verificar ticket, aprovador, caminhos ou candidato. O docstring menciona verified ticket mas isso nao e implementado. Lacuna distinta dos tickets de timeout e de tipos; nenhuma flag foi ativada nesta investigacao."
     ],
-    "non_goals": [],
+    "non_goals": [
+      "Nao enfraquecer o guard nem o CI base-owned.",
+      "Nao permitir que o agente de build emita a propria autorizacao."
+    ],
     "reachability_contract": "",
     "acceptance_criteria": [
       "Autoridade confiavel valida decisao explicita, ticket, caminhos e candidato; agente build nao emite sua propria autorizacao",
