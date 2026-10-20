@@ -450,6 +450,41 @@ class OwnerActionStore:
             return self._write_overlay(current, answer, note)
         return self._resolve_in_definitions(action_id, answer, note)
 
+    def reconcile_update(
+        self,
+        action_id: str,
+        *,
+        blocks: list[str] | None = None,
+        close: bool = False,
+        outcome: str,
+        note: str,
+    ) -> OwnerAction:
+        """Apply a reconciliation outcome (USR-307): optionally new ``blocks``/close, always append history.
+
+        Every other field is kept; the trail entry records what was decided and why.
+        """
+
+        def _apply(document: dict[str, Any], rows: list[Any]) -> OwnerAction:
+            for raw in rows:
+                if isinstance(raw, dict) and raw.get("id") == action_id:
+                    try:
+                        action = OwnerAction.model_validate(raw)
+                    except ValidationError as exc:
+                        raise OwnerActionInvalid(_summarise(exc)) from exc
+                    entry = {"at": iso_z(utc_now()), "outcome": outcome, "note": redact(note)}
+                    update: dict[str, Any] = {"history": [*action.history, entry]}
+                    if blocks is not None:
+                        update["blocks"] = blocks
+                    if close and action.status is not ActionStatus.DONE:
+                        update.update(status=ActionStatus.DONE, resolved_at=utc_now())
+                    updated = OwnerAction.model_validate({**action.model_dump(), **update})
+                    raw.clear()
+                    raw.update(updated.to_record())
+                    return updated
+            raise OwnerActionNotFound(f"{action_id} nao existe no backlog")
+
+        return self._mutate_definitions(_apply)
+
     def _resolve_in_definitions(self, action_id: str, answer: DecisionAnswer | None, note: str) -> OwnerAction:
         def _apply(document: dict[str, Any], rows: list[Any]) -> OwnerAction:
             for raw in rows:

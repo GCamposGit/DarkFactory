@@ -155,6 +155,8 @@ class OwnerAction(BaseModel):
     created_by: str = "claude-code"
     resolved_at: datetime | None = None
     answer: DecisionAnswer | None = None
+    # USR-307: append-only trail of reconciliation outcomes ({"at","outcome","note"}); never rewritten.
+    history: list[dict[str, str]] = Field(default_factory=list)
 
     @field_validator("id")
     @classmethod
@@ -219,6 +221,8 @@ class OwnerAction(BaseModel):
             record.pop("options", None)
         if self.answer is None:
             record.pop("answer", None)
+        if not self.history:
+            record.pop("history", None)
         for step in record["steps"]:
             if step.get("command") is None:
                 step.pop("command", None)

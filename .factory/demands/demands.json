@@ -8757,8 +8757,8 @@
     "project_id": "darkfac",
     "title": "Acelerar o CI do GitHub: shards no Windows, filtro por caminho e cancelamento de execuções antigas",
     "origin": "user",
-    "status": "completed",
-    "delivery_evidence": "3628336b6361b90bfea727f0d01783548f903832",
+    "status": "planned",
+    "delivery_evidence": "Correcao pronta como patch em docs/proposals/USR-300-ci-speedup.patch (.github e core/harness protegidos); aguardando publicacao do owner pela OA-039. (proposta: 3628336b6361b90bfea727f0d01783548f903832)",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -8786,7 +8786,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-17T13:16:46.929233Z",
-    "updated_at": "2026-10-19T19:16:27.756329Z"
+    "updated_at": "2026-10-20T02:11:47.597053Z"
   },
   {
     "id": "USR-303",
@@ -8928,8 +8928,8 @@
     "project_id": "darkfac",
     "title": "Reconciliar acoes do owner obsoletas e PRs de registro duplicados",
     "origin": "review",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "f6df7be98807733b6df2179705e9e4d193626a5c",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -8954,7 +8954,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-18T01:10:10.460395Z",
-    "updated_at": "2026-10-18T01:10:10.460395Z"
+    "updated_at": "2026-10-20T04:05:41.721770Z"
   },
   {
     "id": "USR-308",
