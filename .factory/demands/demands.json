@@ -9377,5 +9377,95 @@
     "dependencies": [],
     "created_at": "2026-10-20T18:34:03.270018Z",
     "updated_at": "2026-10-20T18:34:03.270018Z"
+  },
+  {
+    "id": "USR-319",
+    "project_id": "darkfac",
+    "title": "Projecao da fila ao vivo descarta especificacao e bloqueadores",
+    "origin": "user",
+    "status": "completed",
+    "delivery_evidence": "a6d40cfbb661a25b2f90e77de603503f23fd680c",
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "HubService.get_line_live omite problem_statement, non_goals, acceptance_criteria, tags e dependencies ao construir tickets para _build_executable_queue. Em producao todos os dez tickets aparecem falsamente missing_specification apesar do ledger especificado.",
+    "core_journey": [],
+    "non_goals": [
+      "Nao alterar Gate G1 nem a admissao real do feeder."
+    ],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Ticket especificado aparece elegivel pela superficie HubService.get_line_live.",
+      "Tags hold e dependencias pendentes continuam bloqueando a projecao.",
+      "Portao oficial runner.py --quick passa."
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-20T20:57:02.143263Z",
+    "updated_at": "2026-10-20T21:03:15.656379Z"
+  },
+  {
+    "id": "USR-320",
+    "project_id": "darkfac",
+    "title": "Planning da esteira falha UnknownProjectError em tickets USR",
+    "origin": "agent",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "Em 20/10/2026 api/line/live mostrou run-5c1eeae3564c USR-315 com retries handler_error:UnknownProjectError unknown project USR. O run registra project_id darkfac mas o handler parece cair no ticket_id como projeto. Causa ainda nao comprovada; pode envolver worker antigo, lookup do store ou contexto.",
+    "core_journey": [],
+    "non_goals": [
+      "Nao relaxar piso de cota, Gate G1 ou isolamento de projetos."
+    ],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Reproduzir contexto planning com project_id darkfac e ticket USR-315; resolver projeto registrado sem fallback incorreto.",
+      "Provar retomada de run real sem duplicar ticket ja entregue e preservar isolamento multi-projeto."
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-20T20:58:05.507716Z",
+    "updated_at": "2026-10-20T20:58:05.507716Z"
+  },
+  {
+    "id": "USR-321",
+    "project_id": "darkfac",
+    "title": "Investigar demora nao limitada do preflight de cota e wake",
+    "origin": "agent",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "Sessao de operacao observou run_ticket.py USR-318 --dry-run --json iniciado 16:55 e retornando aproximadamente 17:55 de 20/10/2026 durante sondagem de cota/wake; tentativa automatica de email do grokbox observada. Nova tentativa completou em38s. Causa ainda nao demonstrada; distinguir hibernacao, wrappers e timeout de rede antes de corrigir. Inspecao de deliver_parallel.py confirma rc7 escreve queue.txt aposentada, runner_grok reenfileira myqueue sem mutex; kind implementation falha em ledger-only USR315; runner_local usa gate local forcado e piso5.5GB contradiz scheduler7.5GB. Scripts operacionais fora do repo em C:/Users/guigc/darkfac-ops.",
+    "core_journey": [],
+    "non_goals": [
+      "Nao relaxar piso de cota, Gate G1 ou isolamento de projetos."
+    ],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Medir tempos por provedor e wake com relogio monotonic e reproduzir lentidao ou documentar causa observada.",
+      "Sondagens externas falham em prazo configurado com erro estruturado sem implementar com cota desconhecida.",
+      "Unificar reenqueue sob mutex na fila ativa e classificar corretamente entrega ledger-only.",
+      "Limitar despacho local a capacidade verificada e preservar workers ocupados."
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-20T20:58:23.680377Z",
+    "updated_at": "2026-10-20T20:58:23.680377Z"
   }
 ]
