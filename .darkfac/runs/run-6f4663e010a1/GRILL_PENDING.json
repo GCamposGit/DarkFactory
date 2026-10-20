@@ -1,0 +1,31 @@
+{
+  "assumptions": [
+    "Esta rodada é somente leitura; não executa a prova nem altera arquivos.",
+    "OA-042 resolveu D1–D5; OA-043 e OA-047 continuam como dependências existentes, sem repetir perguntas sobre acessos.",
+    "M1 e M2 serão reutilizados como antecedentes; suas evidências não substituem a execução real de M6.",
+    "A prova usará clone novo de GCamposGit/pilot-hello fora de qualquer checkout DarkFac, fixado no SHA mergeado do produto a verificar.",
+    "Serão usados Python 3.12+, venv exclusivo do produto e os comandos registrados setup, validate, build e smoke, incluindo geração de wheel.",
+    "O executor deverá comprovar ambiente sem PYTHONPATH, VIRTUAL_ENV do core ou DARKFAC_*, além de isolamento dos serviços DarkFac sem interromper serviços compartilhados.",
+    "O planejamento deverá localizar e verificar o script de prova mencionado na demanda; sua existência não foi confirmada nos arquivos consultados.",
+    "O relatório JSON deverá registrar SHA completo, host, horário, comandos, resultados de instalação/testes/build/smoke, isolamento e varredura; verificações não executadas não contarão como sucesso.",
+    "A escolha entre hosts já autorizados e o mecanismo de isolamento são decisões técnicas, sem necessidade de nova decisão de negócio."
+  ],
+  "technical": [],
+  "questions": [
+    {
+      "id": "q1",
+      "text": "A varredura deve permitir o texto aprovado 'DarkFac pilot' em strings da página e dos testes, exigindo ausência de dependências da fábrica? M1 registra esse texto em arquivos de código, mas M6 exige ausência literal de 'darkfac' em código executável.",
+      "kind": "intent",
+      "options": [
+        "Permitir somente o texto aprovado; proibir imports, caminhos e chamadas da fábrica",
+        "Exigir ausência literal, revisando o texto aprovado anteriormente"
+      ],
+      "recommended": "Permitir somente o texto aprovado; proibir imports, caminhos e chamadas da fábrica",
+      "why": "Preserva D2 da OA-042 e resolve a divergência entre o conteúdo aprovado e o critério literal de M6; a exceção deve aparecer explicitamente no relatório."
+    }
+  ],
+  "deadline": "2026-10-21T06:55:51.830169Z",
+  "answers": {},
+  "notified": false,
+  "auto_resolved": []
+}
