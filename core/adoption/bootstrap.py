@@ -18,7 +18,7 @@ from typing import Protocol
 from pydantic import BaseModel, Field
 
 from core.projects.detect import detect_commands
-from core.projects.models import ProjectCommands, ProjectDescriptor, ProjectKind
+from core.projects.models import ProjectCommands, ProjectDescriptor, ProjectEnvironment, ProjectKind
 from core.projects.registry import ProjectRegistry
 
 logger = logging.getLogger(__name__)
@@ -205,6 +205,16 @@ def _has_tests(root: Path) -> bool:
     return False
 
 
+def _merged_commands(explicit: ProjectCommands | None, validate: Sequence[str]) -> ProjectCommands:
+    """Explicit setup/build/smoke (and validate when given) win; otherwise use the validate list."""
+    if explicit is None:
+        return ProjectCommands(validate=list(validate))
+    merged = explicit.model_copy(deep=True)
+    if not merged.validate_cmds:
+        merged.validate_cmds = list(validate)
+    return merged
+
+
 def bootstrap_project(
     project_root: Path,
     *,
@@ -218,6 +228,8 @@ def bootstrap_project(
     default_branch: str = "main",
     validate_commands: Sequence[str] | None = None,
     require_tests: bool = True,
+    project_commands: ProjectCommands | None = None,
+    environment: ProjectEnvironment | None = None,
 ) -> BootstrapResult:
     """Connect ``project_root`` to a private remote and register it as executable.
 
@@ -241,6 +253,8 @@ def bootstrap_project(
         # Preflight: tests, commands, credentials.
         if require_tests and not _has_tests(root):
             raise BootstrapBlockedError("missing_tests", "project has no tests; refusing to register as executable")
+        if not validate_commands and project_commands is not None and project_commands.validate_cmds:
+            validate_commands = list(project_commands.validate_cmds)
         commands = list(validate_commands) if validate_commands else list(detect_commands(root).validate_cmds)
         if not commands:
             raise BootstrapBlockedError("missing_validate_commands", "no commands.validate could be determined")
@@ -287,7 +301,8 @@ def bootstrap_project(
             prefix=prefix,
             repo_url=repo.url,
             default_branch=default_branch,
-            commands=ProjectCommands(validate=commands),
+            commands=_merged_commands(project_commands, commands),
+            environment=environment,
         )
         existing = registry.get_project(project_id)
         if existing is not None:
@@ -302,6 +317,9 @@ def bootstrap_project(
                 commands = list(existing.commands.validate_cmds)
             else:
                 existing.commands = wanted.commands
+                registry.register_project(existing)
+            if existing.environment is None and environment is not None:
+                existing.environment = environment
                 registry.register_project(existing)
         else:
             registry.register_project(wanted)

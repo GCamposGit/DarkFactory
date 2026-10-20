@@ -111,3 +111,19 @@ def test_github_provider_requires_authorization_and_creates_private_only(tmp_pat
     assert err2.value.code == "owner_not_authorized"
     repo = provider.ensure_repository("guigc", "novo")
     assert repo.created and ["gh", "repo", "create", "guigc/novo", "--private"] in calls
+
+
+def test_bootstrap_registers_environment_and_full_command_set(tmp_path: Path) -> None:
+    from core.projects.models import EnvironmentKind, ProjectCommands, ProjectEnvironment
+
+    root = _project(tmp_path)
+    cmds = ProjectCommands(setup=["python -m venv .venv"], build=["python -m compileall -q src"], smoke=["echo smoke"])
+    env = ProjectEnvironment(kind=EnvironmentKind.VENV, path=".venv", setup=["python -m venv .venv"])
+    _boot(root, tmp_path, project_commands=cmds, environment=env)
+    _boot(root, tmp_path, project_commands=cmds, environment=env)
+    projects = ProjectRegistry(tmp_path / "reg" / "projects.json").list_projects()
+    assert [p.id for p in projects].count("novo") == 1
+    novo = next(p for p in projects if p.id == "novo")
+    assert novo.environment is not None and novo.environment.kind is EnvironmentKind.VENV
+    assert novo.commands.build == ["python -m compileall -q src"] and novo.commands.smoke == ["echo smoke"]
+    assert novo.commands.validate_cmds
