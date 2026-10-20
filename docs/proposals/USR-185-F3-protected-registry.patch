@@ -1,0 +1,209 @@
+diff --git a/AGENTS.md b/AGENTS.md
+index 2cdc0c5..c400e69 100644
+--- a/AGENTS.md
++++ b/AGENTS.md
+@@ -33,7 +33,7 @@
+ - **Preflight Obrigatório de Cota**: Antes de gerar código ou iniciar o PIV loop, o agente/harness deve verificar a saúde de cota via `core.line.routing.pick('development')`.
+ - **Bloqueio de Quota Crítica no Chat**: Se a conta associada ao harness atual estiver com cota restante <= 15.0% (semanal ou janela móvel), o agente é TERMINANTEMENTE PROIBIDO de implementar código com seu próprio modelo no chat interativo. Deve recusar no chat, informar a cota restante e delegar para o harness saudavel eleito para desenvolvimento (o roteador so elege harnesses com modo `write`: Claude, Codex e Grok Build; o Antigravity e somente leitura e nunca e eleito para `development`) ou acionar o launcher headless `python C:\dev\DarkFac\run_ticket.py <TICKET_ID>`.
+ - **Harness de Operacao como Desenvolvedor Principal**: se o usuario opera a fabrica por um harness especifico (variavel `DARKFAC_OPERATING_HARNESS` ou autodeteccao pelo ambiente do harness pai), esse harness e eleito como desenvolvedor do estagio `development` sempre que sua cota estiver acima do piso critico de 15.0% (vence o maior headroom e a preferencia por faixa de complexidade). Se estiver critico, em cooldown, com cota desconhecida ou sem modo `write`, vale o Dynamic Headroom. A preferencia nunca relaxa o piso de 15.0%, nao altera grill/planning/review/integration (a revisao continua em outra familia que o implementador) e nao impede subagentes mais simples nem testes no desktop.
+-- **Roteamento de Subagentes de Desenvolvimento no Claude Code (Haiku 5.5)**: o subagente de codigo usa Sonnet (`claude-sonnet-5-5`) por padrao e Opus (`claude-opus-5-5`) em planning; o Haiku 5.5 (`claude-haiku-5-5`) so e elegivel se TODAS valerem: tipo mecanico (mechanical_edit, docs_sync, test_from_spec, config_data, boilerplate_from_template, test_run_distill, ledger_update), complexidade `low` (`medium` apenas para docs_sync e test_run_distill), no maximo 3 arquivos e 150 linhas alteradas, criterio de aceite executavel pre-definido pelo planejador, ambiguidade resolvida (Gate G1) e zero falhas anteriores do Haiku na tarefa. O Haiku e PROIBIDO em caminhos protegidos por governanca, em tags de risco (security, credentials, auth, payments, concurrency, locking, transactions, migration, data_deletion, public_contract, routing, quota, flaky_test, root_cause_debug, architecture) e nos estagios planning, grill, review e integration (nunca planeja, revisa nem resolve conflito de integracao). Escalonamento: UMA tentativa com Haiku; se o portao focado falhar ou a revisao apontar defeito de correcao, nova tentativa com Sonnet (sem iterar 3 vezes com Haiku); o Haiku nunca escala sozinho para Opus nem Fable e `forbidden_autonomous_models` continua proibido. Piso de cota de 15.0% (mesma conta Anthropic), revisao em familia diferente do implementador (o revisor nunca e Haiku) e o portao unico `python C:\dev\DarkFac\core\harness\runner.py --quick` permanecem. Implementacao: `core/line/subagent_routing.py` e `.factory/config/subagent_model_routing.json`.
++- **Roteamento de Subagentes de Desenvolvimento no Claude Code (Haiku 5.5)**: o subagente de codigo usa Sonnet (alias `sonnet` do registro) por padrao e Opus (alias `opus` do registro) em planning; o Haiku 5.5 (alias `haiku` do registro) so e elegivel se TODAS valerem: tipo mecanico (mechanical_edit, docs_sync, test_from_spec, config_data, boilerplate_from_template, test_run_distill, ledger_update), complexidade `low` (`medium` apenas para docs_sync e test_run_distill), no maximo 3 arquivos e 150 linhas alteradas, criterio de aceite executavel pre-definido pelo planejador, ambiguidade resolvida (Gate G1) e zero falhas anteriores do Haiku na tarefa. O Haiku e PROIBIDO em caminhos protegidos por governanca, em tags de risco (security, credentials, auth, payments, concurrency, locking, transactions, migration, data_deletion, public_contract, routing, quota, flaky_test, root_cause_debug, architecture) e nos estagios planning, grill, review e integration (nunca planeja, revisa nem resolve conflito de integracao). Escalonamento: UMA tentativa com Haiku; se o portao focado falhar ou a revisao apontar defeito de correcao, nova tentativa com Sonnet (sem iterar 3 vezes com Haiku); o Haiku nunca escala sozinho para Opus nem Fable e `forbidden_autonomous_models` continua proibido. Piso de cota de 15.0% (mesma conta Anthropic), revisao em familia diferente do implementador (o revisor nunca e Haiku) e o portao unico `python C:\dev\DarkFac\core\harness\runner.py --quick` permanecem. Os ids concretos dos modelos vivem somente no registro `.factory/config/model_registry.json` (papeis e aliases, lido por `core.models.registry`; USR-185); este texto referencia apenas aliases. Implementacao: `core/line/subagent_routing.py` e `.factory/config/subagent_model_routing.json`.
+ - **Exceção de Override Explícito pelo Usuário**: A execução em um harness com cota <= 15.0% SÓ É PERMITIDA se o usuário exigir EXPLICITAMENTE no prompt (ex.: "forçar execução neste harness", "ignorar limite de cota", "estou ciente da cota crítica, prossiga" ou flag `--force`). Sem essa autorização textual inequívoca, o agente deve falhar fechado (*fail-closed*).
+ 
+ ## Autonomia de Git e Sincronização Multi-Ambiente (Zero Toque Humano Pós-Grill, USR-57)
+diff --git a/CLAUDE.md b/CLAUDE.md
+index 12facac..c3bb4fc 100644
+--- a/CLAUDE.md
++++ b/CLAUDE.md
+@@ -29,8 +29,8 @@ Este documento governa a operação do Claude Code no repositório DarkFac, em e
+ 
+ ## 1b. Modelo do Subagente de Desenvolvimento (Haiku 5.5, USR-168)
+ 
+-- **Padrão**: subagente de código usa Sonnet (`claude-sonnet-5-5`); planning usa Opus. Política em `core/line/subagent_routing.py` e `.factory/config/subagent_model_routing.json` (skills `03-model-router` seção 2b e `19-run-ticket` seção 2c). Não altera o cascade da esteira.
+-- **Haiku 5.5** (`claude-haiku-5-5`) é elegível SOMENTE se TODAS valerem: tipo mecânico (mechanical_edit, docs_sync, test_from_spec, config_data, boilerplate_from_template, test_run_distill, ledger_update); complexidade `low` (`medium` só para docs_sync e test_run_distill); no máximo 3 arquivos e 150 linhas; critério de aceite executável pré-definido; ambiguidade resolvida (Gate G1); zero falhas anteriores do Haiku.
++- **Padrão**: subagente de código usa Sonnet (alias `sonnet`; ids concretos vivem só em `.factory/config/model_registry.json`, lido por `core.models.registry`); planning usa Opus. Política em `core/line/subagent_routing.py` e `.factory/config/subagent_model_routing.json` (skills `03-model-router` seção 2b e `19-run-ticket` seção 2c). Não altera o cascade da esteira.
++- **Haiku 5.5** (alias `haiku` do registro) é elegível SOMENTE se TODAS valerem: tipo mecânico (mechanical_edit, docs_sync, test_from_spec, config_data, boilerplate_from_template, test_run_distill, ledger_update); complexidade `low` (`medium` só para docs_sync e test_run_distill); no máximo 3 arquivos e 150 linhas; critério de aceite executável pré-definido; ambiguidade resolvida (Gate G1); zero falhas anteriores do Haiku.
+ - **Haiku é proibido** em caminho protegido por governança, tags de risco (security, credentials, auth, payments, concurrency, locking, transactions, migration, data_deletion, public_contract, routing, quota, flaky_test, root_cause_debug, architecture) e nos estágios planning, grill, review e integration.
+ - **Escalonamento**: uma tentativa Haiku; se o portão focado falhar ou a revisão apontar defeito de correção, nova tentativa com Sonnet. Haiku nunca escala sozinho para Opus nem Fable. Piso de cota de 15%, revisão em família diferente do implementador e portão único permanecem.
+ 
+diff --git a/FACTORY_RULES.md b/FACTORY_RULES.md
+index 31044e8..5e6fe3c 100644
+--- a/FACTORY_RULES.md
++++ b/FACTORY_RULES.md
+@@ -14,5 +14,5 @@ Estas regras valem para Codex, Antigravity, Grok, Claude Code e qualquer outro h
+ 10. Mudanças de dependências devem atualizar `requirements.txt` (e `requirements-audio.txt` para o stack opcional de GPU) e a documentação de bootstrap.
+ 11. Autonomia Total de Git em Projetos Internos (Zero Toque Humano Pós-Grill, USR-57): Em desenvolvimentos do núcleo da fábrica e ferramentas internas (`project: darkfac`), a Dark Factory possui autonomia plena para criar branches, comitar alterações atômicas vinculadas a tickets, validar no portão oficial e sincronizar via push/merge para `origin/main` sem exigir aprovações humanas manuais. O ciclo de vida do ticket (Skill 19 / `run_ticket.py`) é encerrado de ponta a ponta pelo harness/agente. A exigência de aprovações manuais pré-merge restringe-se exclusivamente a projetos comerciais com flag `requires_commercial_acceptance: true` onde há clientes externos em produção real.
+ 12. Sincronização Contínua Multi-Ambiente (USR-57): Ao concluir qualquer ticket ou receber novos commits validados, os ambientes da fábrica (Desktop worker, VPS Dokploy e Notebook de dev) devem ser sincronizados via `core.git.autonomy` (`git fetch` + fast-forward ou push), assegurando que o próximo harness trabalhe sempre com a árvore limpa e no commit mais recente sem divergência.
+-13. Roteamento de Subagentes de Desenvolvimento no Claude Code (Haiku 5.5, USR-168): O modelo do subagente de desenvolvimento do harness segue `core/line/subagent_routing.py` (parametros em `.factory/config/subagent_model_routing.json`): Sonnet (`claude-sonnet-5-5`) por padrao, Opus (`claude-opus-5-5`) em planning e Haiku 5.5 (`claude-haiku-5-5`) somente para fatias mecanicas (mechanical_edit, docs_sync, test_from_spec, config_data, boilerplate_from_template, test_run_distill, ledger_update) de complexidade baixa (media apenas em docs_sync e test_run_distill), ate 3 arquivos e 150 linhas, com criterio de aceite executavel pre-definido, ambiguidade resolvida (Gate G1) e nenhuma falha anterior do Haiku. E proibido usar Haiku em caminhos protegidos, tags de risco (security, credentials, auth, payments, concurrency, locking, transactions, migration, data_deletion, public_contract, routing, quota, flaky_test, root_cause_debug, architecture) e nos estagios planning, grill, review e integration. Havera no maximo UMA tentativa com Haiku; falha do portao focado ou defeito de correcao apontado na revisao escala para Sonnet, e o Haiku nunca escala sozinho para Opus ou Fable. A regra nao relaxa o piso de cota de 15.0%, a revisao em familia diferente do implementador nem o portao unico de validacao.
++13. Roteamento de Subagentes de Desenvolvimento no Claude Code (Haiku 5.5, USR-168): O modelo do subagente de desenvolvimento do harness segue `core/line/subagent_routing.py` (parametros em `.factory/config/subagent_model_routing.json`): Sonnet (alias `sonnet` do registro) por padrao, Opus (alias `opus` do registro) em planning e Haiku 5.5 (alias `haiku` do registro) somente para fatias mecanicas (mechanical_edit, docs_sync, test_from_spec, config_data, boilerplate_from_template, test_run_distill, ledger_update) de complexidade baixa (media apenas em docs_sync e test_run_distill), ate 3 arquivos e 150 linhas, com criterio de aceite executavel pre-definido, ambiguidade resolvida (Gate G1) e nenhuma falha anterior do Haiku. E proibido usar Haiku em caminhos protegidos, tags de risco (security, credentials, auth, payments, concurrency, locking, transactions, migration, data_deletion, public_contract, routing, quota, flaky_test, root_cause_debug, architecture) e nos estagios planning, grill, review e integration. Havera no maximo UMA tentativa com Haiku; falha do portao focado ou defeito de correcao apontado na revisao escala para Sonnet, e o Haiku nunca escala sozinho para Opus ou Fable. Os ids concretos dos modelos vivem somente no registro `.factory/config/model_registry.json` (papeis e aliases, lido por `core.models.registry`; USR-185). A regra nao relaxa o piso de cota de 15.0%, a revisao em familia diferente do implementador nem o portao unico de validacao.
+ 
+diff --git a/core/harness/remote_worker.py b/core/harness/remote_worker.py
+index 6b89e33..2221d76 100644
+--- a/core/harness/remote_worker.py
++++ b/core/harness/remote_worker.py
+@@ -51,6 +51,7 @@ from core.harness.test_subagent import (
+ )
+ from core.infra.git_sha import current_git_sha
+ from core.infra.metrics import HardwareMetrics, collect_host_hardware_metrics
++from core.models.registry import gateway_id, id_of, resolve
+ 
+ logger = logging.getLogger("core.harness.remote_worker")
+ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
+@@ -219,7 +220,7 @@ class CodexExecutionResponse(BaseModel):
+     """Result of Codex execution on the node."""
+     success: bool = Field(..., description="True if Codex executed successfully")
+     text: str = Field(default="", description="Generated text / code / patch")
+-    model: str = Field(default="gpt-5.6-sol", description="Actual model used by Codex")
++    model: str = Field(default=gateway_id("sol"), description="Actual model used by Codex")
+     tokens_used: int = Field(default=0, description="Tokens recorded by Codex CLI")
+     duration_seconds: float = Field(..., description="Duration of execution in seconds")
+     error: Optional[str] = Field(default=None, description="Error message if failed")
+@@ -1926,7 +1927,7 @@ def create_worker_app(
+             if not output_text and proc.stdout.strip():
+                 output_text = proc.stdout.strip()
+ 
+-            detected_model = req_data.model or "gpt-5.6-sol"
++            detected_model = req_data.model or gateway_id("sol")
+             tokens_used = 0
+             if proc.stderr:
+                 for line in proc.stderr.splitlines():
+@@ -2018,7 +2019,7 @@ def create_worker_app(
+             )
+             duration = round(time.perf_counter() - start_t, 3)
+             output_text = proc.stdout.strip()
+-            detected_model = req_data.model or "grok-4.6"
++            detected_model = req_data.model or resolve("review.grok")
+ 
+             if proc.returncode != 0 and not output_text:
+                 err_msg = proc.stderr.strip() or f"Grok exited with code {proc.returncode}"
+@@ -2173,7 +2174,7 @@ def create_worker_app(
+                     success=False,
+                     harness="claude",
+                     text="",
+-                    model=req_data.model or "claude-sonnet",
++                    model=req_data.model or gateway_id("sonnet"),
+                     duration_seconds=duration,
+                     error=proc.stderr.strip()[:500] or f"Claude exited with code {proc.returncode}",
+                     node_id=node_id,
+@@ -2182,7 +2183,7 @@ def create_worker_app(
+                 success=True,
+                 harness="claude",
+                 text=output_text,
+-                model=req_data.model or "claude-sonnet",
++                model=req_data.model or gateway_id("sonnet"),
+                 duration_seconds=duration,
+                 node_id=node_id,
+             )
+@@ -2231,7 +2232,7 @@ def create_worker_app(
+                     success=False,
+                     harness="deepseek",
+                     text="",
+-                    model=req_data.model or "deepseek-coder",
++                    model=req_data.model or id_of("coder-legacy"),
+                     duration_seconds=duration,
+                     error=proc.stderr.strip()[:500] or f"DeepSeek exited with code {proc.returncode}",
+                     node_id=node_id,
+@@ -2240,7 +2241,7 @@ def create_worker_app(
+                 success=True,
+                 harness="deepseek",
+                 text=output_text,
+-                model=req_data.model or "deepseek-coder",
++                model=req_data.model or id_of("coder-legacy"),
+                 duration_seconds=duration,
+                 node_id=node_id,
+             )
+@@ -2295,7 +2296,7 @@ def create_worker_app(
+         return CodexExecutionResponse(
+             success=res.success,
+             text=res.text,
+-            model=res.model or "gpt-5.6-sol",
++            model=res.model or gateway_id("sol"),
+             tokens_used=res.tokens_used,
+             duration_seconds=res.duration_seconds,
+             error=res.error,
+diff --git a/core/harness/suite_lock.py b/core/harness/suite_lock.py
+index 2317142..19a7405 100644
+--- a/core/harness/suite_lock.py
++++ b/core/harness/suite_lock.py
+@@ -151,8 +151,8 @@ def is_held_by_ancestor() -> bool:
+ 
+ def _detect_harness() -> str | None:
+     for env_name, label in (
+-        ("CLAUDECODE", "claude-code"),
+-        ("CLAUDE_CODE_ENTRYPOINT", "claude-code"),
++        ("CLAUDECODE", "claude-code"),  # census: wire-id (harness label, not a model id)
++        ("CLAUDE_CODE_ENTRYPOINT", "claude-code"),  # census: wire-id (harness label, not a model id)
+         ("CODEX_SANDBOX", "codex"),
+         ("GROK_AGENT", "grok"),
+         ("GROK_SESSION_ID", "grok"),
+diff --git a/core/harness/test_subagent.py b/core/harness/test_subagent.py
+index 02b533f..073c95c 100644
+--- a/core/harness/test_subagent.py
++++ b/core/harness/test_subagent.py
+@@ -25,6 +25,8 @@ from typing import Any, Dict, List, Optional
+ 
+ from pydantic import BaseModel, Field
+ 
++from core.models.registry import gateway_id, id_of, resolve
++
+ logger = logging.getLogger("core.harness.test_subagent")
+ 
+ 
+@@ -112,27 +114,27 @@ def get_harness_test_runner_spec(
+         if deep_rca:
+             return HarnessRunnerSpec(
+                 harness=norm_harness,
+-                model_id="openai/gpt-5-6-luna-high",
++                model_id=gateway_id("luna"),
+                 reasoning_effort="max",
+                 execution_tier=ExecutionTier.DEEP_DIAGNOSTIC,
+                 rationale="Luna max: High-depth reasoning for complex test failure diagnosis, concurrency bugs, and architectural edge cases.",
+-                config_snippet='{"model": "openai/gpt-5-6-luna-high", "reasoning_effort": "max"}',
++                config_snippet=json.dumps({"model": gateway_id("luna"), "reasoning_effort": "max"}),
+             )
+         else:
+             return HarnessRunnerSpec(
+                 harness=norm_harness,
+-                model_id="openai/gpt-5-6-luna-high",
++                model_id=gateway_id("luna"),
+                 reasoning_effort="low",
+                 execution_tier=ExecutionTier.LIGHT_HARNESS,
+                 rationale="Luna low: Ultra-fast execution and syntactic failure parsing without excessive reasoning overhead (40% lower cost, ~0.45s latency).",
+-                config_snippet='{"model": "openai/gpt-5-6-luna-high", "reasoning_effort": "low"}',
++                config_snippet=json.dumps({"model": gateway_id("luna"), "reasoning_effort": "low"}),
+             )
+ 
+     elif norm_harness == HarnessType.GROK:
+         effort = "low" if not deep_rca else "high"
+         return HarnessRunnerSpec(
+             harness=norm_harness,
+-            model_id="xai/grok-4.6",
++            model_id=gateway_id(resolve("review.grok")),
+             reasoning_effort=effort,
+             execution_tier=ExecutionTier.LIGHT_HARNESS if not deep_rca else ExecutionTier.DEEP_DIAGNOSTIC,
+             rationale="Grok 4.6 with reasoning_effort='low' for rapid local terminal verification and parallel Arena subagent execution.",
+@@ -143,20 +145,20 @@ def get_harness_test_runner_spec(
+         if deep_rca:
+             return HarnessRunnerSpec(
+                 harness=norm_harness,
+-                model_id="anthropic/claude-3.7-sonnet",
++                model_id=gateway_id("legacy-sonnet"),
+                 reasoning_effort="medium",
+                 execution_tier=ExecutionTier.DEEP_DIAGNOSTIC,
+                 rationale="Claude 3.7 Sonnet with controlled thinking for architectural debugging and complex test regressions.",
+-                config_snippet='claude --model claude-3-7-sonnet --agent test-runner',
++                config_snippet=f"claude --model {id_of('legacy-sonnet')} --agent test-runner",
+             )
+         else:
+             return HarnessRunnerSpec(
+                 harness=norm_harness,
+-                model_id="anthropic/claude-haiku-5-5",
++                model_id=gateway_id("haiku"),
+                 reasoning_effort="none",
+                 execution_tier=ExecutionTier.LIGHT_HARNESS,
+                 rationale="Claude Haiku 5.5: Subagent standard for lightweight, ultra-low latency command execution and output distillation.",
+-                config_snippet='claude --model claude-haiku-5-5 (subagent in .claude/agents/test-runner.md)',
++                config_snippet=f"claude --model {id_of('haiku')} (subagent in .claude/agents/test-runner.md)",
+             )
+ 
+     raise ValueError(f"Unknown harness: {harness}")

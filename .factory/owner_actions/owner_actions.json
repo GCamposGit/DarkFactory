@@ -1901,6 +1901,52 @@
       "created_at": "2026-10-20T15:39:28Z",
       "created_by": "claude-session-43f612c4",
       "resolved_at": null
+    },
+    {
+      "id": "OA-046",
+      "kind": "action",
+      "title": "Publicar arquivos protegidos de USR-185 fatia 3 por push direto (com portao completo)",
+      "priority": "medium",
+      "status": "open",
+      "why": "Arquivos protegidos so o owner publica, e o push direto na main pula o CI de PR. A fatia 3 troca ids literais de modelo por referencia ao registro em AGENTS.md, CLAUDE.md, FACTORY_RULES.md, core/harness/test_subagent.py, core/harness/remote_worker.py e core/harness/suite_lock.py (comportamento identico). Por isso o portao oficial completo roda antes do push e o CI da main e conferido depois.",
+      "blocks": [
+        "USR-185"
+      ],
+      "depends_on": [],
+      "steps": [
+        {
+          "text": "Pre-requisito: o PR da fatia 3 (registro com os novos gateway_ids, teste de invariantes e docs/proposals/USR-185-F3-protected-registry.patch) precisa estar na origin/main; o patch usa gateway_id('sol'), gateway_id('sonnet'), gateway_id('haiku'), gateway_id('luna') e o alias 'coder-legacy', que so existem no registro dessa entrega. Confira.",
+          "command": "git -C C:\\dev\\DarkFac fetch origin\ngit -C C:\\dev\\DarkFac cat-file -e origin/main:docs/proposals/USR-185-F3-protected-registry.patch && echo PATCH_NA_MAIN"
+        },
+        {
+          "text": "Crie uma worktree limpa a partir de origin/main, aplique o patch (altera AGENTS.md, CLAUDE.md, FACTORY_RULES.md, core/harness/remote_worker.py, core/harness/suite_lock.py, core/harness/test_subagent.py) e rode os testes focados dos modulos tocados. Os passos seguintes usam essa worktree como candidata.",
+          "command": "cd C:\\dev\\DarkFac\ngit worktree add C:\\dev\\DarkFac\\.worktrees\\usr-185-f3-protegido origin/main --detach\ncd C:\\dev\\DarkFac\\.worktrees\\usr-185-f3-protegido\ngit apply --check docs\\proposals\\USR-185-F3-protected-registry.patch\ngit apply docs\\proposals\\USR-185-F3-protected-registry.patch\npython -m pytest tests/test_model_registry.py tests/test_model_registry_invariants_usr185.py tests/test_suite_lock.py tests/test_remote_worker_multi_harness.py tests/test_implementar_execu_o_de_te.py tests/test_worker_onprem_test_subagent.py -q -n0"
+        },
+        {
+          "text": "Na worktree do commit candidato de USR-185 fatia 3, rode primeiro os guardas rapidos. Eles NAO substituem o portao completo.",
+          "command": "cd C:\\dev\\DarkFac\\.worktrees\\usr-185-f3-protegido\npython -m pytest tests/test_clock_bomb_guard.py tests/test_hub_coverage.py tests/test_safe_git_state.py tests/test_harness_contract.py -q"
+        },
+        {
+          "text": "Faca o commit local ANTES do portao (ainda sem push): o portao recusa arvore suja ('Candidate worktree is dirty') e a evidencia fica presa ao SHA do commit.",
+          "command": "git add AGENTS.md CLAUDE.md FACTORY_RULES.md core/harness/remote_worker.py core/harness/suite_lock.py core/harness/test_subagent.py\ngit commit -m \"refactor(harness): ids de modelo dos protegidos passam a referenciar o registro [USR-185]\"\ngit status --short"
+        },
+        {
+          "text": "Rode o portao oficial COMPLETO no commit candidato exato, no worker grokbox. So continue se a saida contiver [HARNESS_PASS]; qualquer outro resultado: NAO publique, avise o agente. Nunca troque o portao completo por testes focados.",
+          "command": "$env:DARKFAC_TEST_WORKERS='http://100.77.130.5:8080'; python core\\harness\\runner.py --quick --remote-required"
+        },
+        {
+          "text": "Somente com [HARNESS_PASS] no passo anterior, confirme que o HEAD e o commit candidato e publique por push direto na main.",
+          "command": "git rev-parse HEAD\ngit fetch origin\ngit rebase origin/main\ngit push origin HEAD:main"
+        },
+        {
+          "text": "Depois do push confira o CI da main ate ficar verde. Se ficar vermelho, avise o agente: ele abre o hotfix (voce nao corrige). Depois remova a worktree.",
+          "command": "gh run list --branch main --limit 3\ngh run watch\ngit -C C:\\dev\\DarkFac worktree remove C:\\dev\\DarkFac\\.worktrees\\usr-185-f3-protegido --force"
+        }
+      ],
+      "verify": "[HARNESS_PASS] no portao antes do push, ultimo run da main verde em gh run list --branch main --limit 3, e python C:\\dev\\DarkFac\\scripts\\model_id_census.py --verbose nao lista AGENTS.md, CLAUDE.md, FACTORY_RULES.md nem core/harness/*.",
+      "created_at": "2026-10-20T15:35:26Z",
+      "created_by": "claude-code",
+      "resolved_at": null
     }
   ]
 }

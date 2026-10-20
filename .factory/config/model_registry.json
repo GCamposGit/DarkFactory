@@ -39,6 +39,9 @@
       "aliases": [
         "sonnet"
       ],
+      "gateway_ids": [
+        "claude-sonnet"
+      ],
       "status": "active",
       "price_input_per_mtok": null,
       "price_output_per_mtok": null,
@@ -59,6 +62,9 @@
       "tier": "low",
       "aliases": [
         "haiku"
+      ],
+      "gateway_ids": [
+        "anthropic/claude-haiku-5-5"
       ],
       "status": "active",
       "price_input_per_mtok": null,
@@ -128,6 +134,9 @@
       "aliases": [
         "luna"
       ],
+      "gateway_ids": [
+        "openai/gpt-5-6-luna-high"
+      ],
       "status": "active",
       "price_input_per_mtok": 0.2,
       "price_output_per_mtok": 1.2,
@@ -173,6 +182,9 @@
       "tier": "high",
       "aliases": [
         "sol"
+      ],
+      "gateway_ids": [
+        "gpt-5.6-sol"
       ],
       "status": "active",
       "price_input_per_mtok": 2.5,
@@ -377,7 +389,8 @@
       "family": "claude",
       "tier": "mid",
       "aliases": [
-        "claude-legacy-sonnet"
+        "claude-legacy-sonnet",
+        "legacy-sonnet"
       ],
       "gateway_ids": [
         "anthropic/claude-3.7-sonnet"
@@ -436,6 +449,28 @@
       "max_output_tokens": null,
       "capabilities": [
         "text"
+      ],
+      "forbidden_autonomous": false,
+      "release_date": null,
+      "retirement_date": null
+    },
+    {
+      "id": "deepseek-coder",
+      "provider": "deepseek",
+      "family": "deepseek",
+      "tier": "low",
+      "aliases": [
+        "coder-legacy"
+      ],
+      "gateway_ids": [],
+      "status": "deprecated",
+      "price_input_per_mtok": null,
+      "price_output_per_mtok": null,
+      "context_tokens": null,
+      "max_output_tokens": null,
+      "capabilities": [
+        "text",
+        "code"
       ],
       "forbidden_autonomous": false,
       "release_date": null,

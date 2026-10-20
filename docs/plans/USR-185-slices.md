@@ -43,11 +43,13 @@ Sobrou: `hub/data/*.json` (apenas prosa de descricao de servicos, nao lida como 
 dados de `executors.json`/roadmap/skills/docs (fatia 4); protegidos (fatia 3); aliases de catalogo `gemini-flash`,
 `gemini-pro`, `gpt-review` em `qualified_routes.py`.
 
-## Fatia 3 - Proposta unica para arquivos protegidos
+## Fatia 3 - Proposta unica para arquivos protegidos (PROPOSTA ENTREGUE, aguarda OA-046)
 
 Um documento em `docs/proposals/` com o diff dos protegidos (AGENTS.md, FACTORY_RULES.md, `core/harness/test_subagent.py`)
 trocando ids por referencia ao registro; owner publica uma vez. Aceite: proposta unica aplicavel; apos o push, nenhum id
 literal restante nos protegidos; teste de invariantes referenciando o registro.
+
+Entregue em 20/10/2026: `docs/proposals/USR-185-F3-protected-registry.{md,patch}` (AGENTS.md, CLAUDE.md, FACTORY_RULES.md, `core/harness/test_subagent.py`, `remote_worker.py`, `suite_lock.py`), `tests/test_model_registry_invariants_usr185.py` (piso 15%, fable/astra, revisor de outra familia) e OA-046 para o owner publicar. Novos `gateway_ids`/aliases no registro dao os mesmos ids de fio. Pendente: publicacao pela OA-046.
 
 ## Fatia 4 - Geracao de docs com teste de deriva (ENTREGUE em 20/10/2026, parcial no que sobrou)
 
