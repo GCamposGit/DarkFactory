@@ -26,7 +26,7 @@ async function authenticatedFetch(url, options = {}) {
   if (token) {
     headers.set("X-Hub-Session", token);
   }
-  return fetch(url, { ...options, headers });
+  return hubNetFetch(url, { ...options, headers });
 }
 
 function initCatalog() {
@@ -165,8 +165,8 @@ async function loadCatalogData() {
   catalogState.loading = true;
   try {
     const [compRes, evoRes] = await Promise.all([
-      fetch("/api/catalog/components").then((r) => r.ok ? r.json() : { components: [], error: true }),
-      fetch("/api/evolution/status").then((r) => r.ok ? r.json() : null),
+      hubNetFetch("/api/catalog/components").then((r) => r.ok ? r.json() : { components: [], error: true }),
+      hubNetFetch("/api/evolution/status").then((r) => r.ok ? r.json() : null),
     ]);
 
     catalogState.components = compRes.components || [];

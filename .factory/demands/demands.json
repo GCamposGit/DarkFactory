@@ -5696,8 +5696,8 @@
     "project_id": "darkfac",
     "title": "Hub cai a cada merge: redeploy sem downtime, deploy deduplicado e frontend resiliente",
     "origin": "user",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "1a416f4bb52f7047050c57b3d2d52cd2bf72019d",
     "item_type": "operations",
     "lifecycle_stage": "execution",
     "horizon": "later",
@@ -5706,14 +5706,16 @@
       "darkhub",
       "deploy",
       "dokploy",
-      "uptime",
-      "congelado-v0"
+      "uptime"
     ],
     "problem_statement": "O owner viu o Hub sair do ar durante testes em 10/10. O compose Darkhub (Dokploy wuH-sjZBig74xFGdk4IsL) teve 12 deploys em 10/10 (08:43 a 14:45), cada um reconstruindo a imagem na VPS (2 vCPU, 3,7 GB, RAM em 79%) e recriando o container darkhub-cloud-247 (stop-then-start, ~1 min fora). Ha deploy duplo: autoDeploy 'NEW CHANGES' em todo push no main mais 'Manual deployment' via scripts/dokploy_redeploy.py, mesmo quando o merge so mexeu no ledger. Durante a janela o frontend mostra erros crus como 'Falha na telemetria de infraestrutura: Failed to fetch' (hub/frontend/infra.js) sem nova tentativa. Limite de memoria do container: 512 MB. Diagnostico de 10/10/2026 (sessao interativa Claude Code, pedido do owner sobre o DarkHub).\n\nCONGELADO em 11/10/2026 (plano V0, docs/plans/V0_OPERACIONAL_2026-10-11.md): fora do caminho critico da linha.",
     "core_journey": [
       "O owner viu o Hub sair do ar durante testes em 10/10. O compose Darkhub (Dokploy wuH-sjZBig74xFGdk4IsL) teve 12 deploys em 10/10 (08:43 a 14:45), cada um reconstruindo a imagem na VPS (2 vCPU, 3,7 GB, RAM em 79%) e recriando o container darkhub-cloud-247 (stop-then-start, ~1 min fora). Ha deploy duplo: autoDeploy 'NEW CHANGES' em todo push no main mais 'Manual deployment' via scripts/dokploy_redeploy.py, mesmo quando o merge so mexeu no ledger. Durante a janela o frontend mostra erros crus como 'Falha na telemetria de infraestrutura: Failed to fetch' (hub/frontend/infra.js) sem nova tentativa. Limite de memoria do container: 512 MB. Diagnostico de 10/10/2026 (sessao interativa Claude Code, pedido do owner sobre o DarkHub)."
     ],
-    "non_goals": [],
+    "non_goals": [
+      "Nao trocar o Dokploy por outra plataforma de deploy.",
+      "Nao aumentar a VPS sem medicao de memoria."
+    ],
     "reachability_contract": "",
     "acceptance_criteria": [
       "Redeploy do Hub sem indisponibilidade: imagem construida fora da VPS (CI publica no GHCR) e troca gated por healthcheck (start-first ou blue/green via Traefik); medir com sonda de 1 s durante um deploy real: zero respostas diferentes de 200 em /health.",
@@ -5732,7 +5734,7 @@
     "estimated_complexity": "high",
     "dependencies": [],
     "created_at": "2026-10-10T14:53:42.327437Z",
-    "updated_at": "2026-10-11T17:49:17.206876Z"
+    "updated_at": "2026-10-20T14:40:59.873593Z"
   },
   {
     "id": "USR-208",

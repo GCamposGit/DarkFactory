@@ -644,6 +644,8 @@ def _fake_darkhub_health(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(mod, "get_origin_main_sha", lambda: "a" * 40)
     monkeypatch.setattr(mod, "get_origin_main_compose", lambda sha: (mod.REPO_ROOT / "deploy/dokploy/docker-compose.hub.yml").read_text(encoding="utf-8"))
     monkeypatch.setattr(mod, "fetch_darkhub_health", lambda: {"status": "ok", "git_sha": "a" * 40})
+    # USR-207: pre-deploy sha unknown => fail closed to a normal trigger (new tests override this).
+    monkeypatch.setattr(mod, "probe_deployed_sha", lambda: None)
 
 
 def _program_status(

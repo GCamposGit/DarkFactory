@@ -146,7 +146,7 @@ async function loadAutonomyPlan(force = false) {
   if (taskDashboardState.loadingPlan && !force) return;
   taskDashboardState.loadingPlan = true;
   try {
-    const res = await fetch("/api/autonomy/plan", {
+    const res = await hubNetFetch("/api/autonomy/plan", {
       headers: { Accept: "application/json" },
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);

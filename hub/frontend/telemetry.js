@@ -82,7 +82,7 @@ function stopTelemetryAutoRefresh() {
 
 async function loadTelemetryTickets() {
   try {
-    const res = await fetch("/api/telemetry/tickets");
+    const res = await hubNetFetch("/api/telemetry/tickets");
     if (!res.ok) return;
     const tickets = await res.json();
     telemetryState.tickets = tickets;
@@ -124,8 +124,8 @@ async function loadTelemetryData(silent = false) {
 
   try {
     const [runsRes, statsRes] = await Promise.all([
-      fetch(`/api/telemetry/runs?${queryParams.toString()}`),
-      fetch(`/api/telemetry/stats?${statsParams.toString()}`),
+      hubNetFetch(`/api/telemetry/runs?${queryParams.toString()}`),
+      hubNetFetch(`/api/telemetry/stats?${statsParams.toString()}`),
     ]);
 
     if (runsRes.ok) {

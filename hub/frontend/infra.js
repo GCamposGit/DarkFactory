@@ -113,7 +113,7 @@ async function loadInfraCards(force = false) {
       endpoint += `?project_id=${encodeURIComponent(activeProj)}`;
     }
     const method = force ? "POST" : "GET";
-    const response = await fetch(endpoint, { method });
+    const response = await hubNetFetch(endpoint, { method });
     if (!response.ok) throw new Error(`Infra API error: ${response.status}`);
     infraState.report = await response.json();
     renderInfraCards();
@@ -322,7 +322,7 @@ async function loadInfraMetrics(force = false) {
   try {
     const endpoint = force ? "/api/infra/metrics/refresh" : "/api/infra/metrics";
     const method = force ? "POST" : "GET";
-    const res = await fetch(endpoint, { method });
+    const res = await hubNetFetch(endpoint, { method });
     if (!res.ok) throw new Error(`Status ${res.status}`);
     const report = await res.json();
     renderInfraMetrics(report);
@@ -565,7 +565,7 @@ async function renderCloudGatewayBanner() {
   if (!banner) return;
 
   try {
-    const res = await fetch("/api/cloud/status");
+    const res = await hubNetFetch("/api/cloud/status");
     if (!res.ok) return;
     const status = await res.json();
 
@@ -614,7 +614,7 @@ async function renderCloudGatewayBanner() {
       const btn = document.getElementById("btn-test-webhook-ping");
       if (btn) btn.disabled = true;
       try {
-        const pingRes = await fetch("/api/webhooks/test", {
+        const pingRes = await hubNetFetch("/api/webhooks/test", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({

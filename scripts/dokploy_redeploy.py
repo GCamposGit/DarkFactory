@@ -45,7 +45,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
@@ -56,6 +56,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from core.git.safe_show import safe_show
+from core.infra import deploy_classifier
 from core.orchestrator.compose_render import (
     HUB_COMPOSE_PATH,
     SHA_PATTERN,
@@ -676,6 +677,81 @@ def wait_for_darkhub_sha(
 # ---------------------------------------------------------------------------
 
 
+# ---------------------------------------------------------------------------
+# USR-207: at most one Hub deploy per merge, and no rebuild for data-only merges
+# ---------------------------------------------------------------------------
+
+# A Dokploy deployment still "running" younger than this is treated as in flight (autoDeploy on push).
+INFLIGHT_MAX_AGE_SECONDS = 20 * 60
+DEPLOY_TRIGGER = "trigger"
+DEPLOY_SKIP = "skip"
+DEPLOY_JOIN = "join"
+
+
+def _utcnow() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def probe_deployed_sha() -> Optional[str]:
+    """Full git_sha the running Hub reports on /health, or None when unknown/unreachable."""
+    try:
+        observed = fetch_darkhub_health().get("git_sha")
+    except Exception:
+        return None
+    if isinstance(observed, str) and SHA_PATTERN.fullmatch(observed.strip().lower()):
+        return observed.strip().lower()
+    return None
+
+
+def get_changed_paths(base: str, head: str, repo_root: Path = REPO_ROOT) -> Optional[List[str]]:
+    """`git diff --name-only base head`; None on any failure (unknown commit, git missing)."""
+    if not (SHA_PATTERN.fullmatch(base) and SHA_PATTERN.fullmatch(head)):
+        return None
+    try:
+        result = subprocess.run(
+            ["git", "diff", "--name-only", base, head], cwd=repo_root,
+            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30, check=False,
+        )
+    except Exception:
+        return None
+    if result.returncode != 0:
+        return None
+    return [line.strip() for line in result.stdout.splitlines() if line.strip()]
+
+
+def is_deployment_inflight(
+    deployment: Optional[Deployment], now: datetime, max_age_seconds: float = INFLIGHT_MAX_AGE_SECONDS
+) -> bool:
+    """True when Dokploy already runs a deployment (e.g. autoDeploy started by the push to main)."""
+    if deployment is None or deployment.status != "running" or deployment.created_at is None:
+        return False
+    created = deployment.created_at
+    if created.tzinfo is None:
+        created = created.replace(tzinfo=timezone.utc)
+    return 0 <= (now - created).total_seconds() <= max_age_seconds
+
+
+def plan_darkhub_deploy(
+    *,
+    expected_sha: str,
+    deployed_sha: Optional[str],
+    baseline: Optional[Deployment],
+    changed_paths_fn: Callable[[str, str], Optional[List[str]]],
+    now: datetime,
+    force: bool = False,
+) -> Tuple[str, str]:
+    """Decide (action, reason): skip, join an in-flight deployment, or trigger a fresh one."""
+    if force:
+        return DEPLOY_TRIGGER, "--force"
+    if is_deployment_inflight(baseline, now):
+        return DEPLOY_JOIN, "deploy ja em andamento no Dokploy (autoDeploy); nao dispara outro"
+    if deployed_sha is None:
+        return DEPLOY_TRIGGER, "sha implantado desconhecido"
+    paths = changed_paths_fn(deployed_sha, expected_sha) if deployed_sha != expected_sha else []
+    rebuild, reason = deploy_classifier.classify(deployed_sha, expected_sha, paths)
+    return (DEPLOY_TRIGGER if rebuild else DEPLOY_SKIP), reason
+
+
 def default_ops_notifier(message: str) -> bool:
     """Envia ao Telegram de ops pelo mesmo caminho do auth_bootstrap (ops, depois owner)."""
     from core.line.auth_bootstrap import _notify_human
@@ -793,6 +869,11 @@ def build_arg_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Skip the automatic pre/post-deploy disk cleanup policy (images always after a deploy; build "
         "cache only when host free space is below DARKFAC_VPS_MIN_FREE_GB).",
+    )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="USR-207: trigger the Darkhub deploy even if the sha is already live, data-only, or in flight.",
     )
     parser.add_argument("-v", "--verbose", action="store_true", help="Enable debug logging.")
     return parser
@@ -987,6 +1068,22 @@ def _run_main(
             baseline_payload = fetch_service_status(transport, svc)
             baseline = latest_deployment(baseline_payload)
             if svc.name.lower() == "darkhub" and svc.kind == "compose":
+                action, reason = plan_darkhub_deploy(
+                    expected_sha=expected_sha or "",
+                    deployed_sha=probe_deployed_sha(),
+                    baseline=baseline,
+                    changed_paths_fn=get_changed_paths,
+                    now=_utcnow(),
+                    force=getattr(args, "force", False),
+                )
+                if action == DEPLOY_SKIP:
+                    print(f"[{svc.name}] deploy skipped (USR-207): {reason}", file=out, flush=True)
+                    continue
+                if action == DEPLOY_JOIN:
+                    print(f"[{svc.name}] joining in-flight deployment (USR-207): {reason}", file=out, flush=True)
+                    triggered.append(svc)
+                    baselines[svc.name] = None
+                    continue
                 set_compose_git_sha(transport, svc, baseline_payload, expected_sha, darkhub_compose)
             trigger_deploy(transport, svc)
         except DokployUsageError as exc:

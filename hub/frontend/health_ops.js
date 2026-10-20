@@ -27,7 +27,7 @@ async function healthOpsGetSessionToken() {
     if (stored) return stored;
   } catch (_) {}
   try {
-    const res = await fetch("/api/session");
+    const res = await hubNetFetch("/api/session");
     if (res.ok) {
       const data = await res.json();
       window.sessionToken = data.session_token;
@@ -47,7 +47,7 @@ async function healthOpsAuthenticatedFetch(url, options = {}) {
   if (token) {
     headers.set("X-Hub-Session", token);
   }
-  return fetch(url, { ...options, headers });
+  return hubNetFetch(url, { ...options, headers });
 }
 
 function healthOpsEscapeHtml(val) {

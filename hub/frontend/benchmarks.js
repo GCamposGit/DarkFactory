@@ -50,7 +50,7 @@ function switchBenchmarkTab(tab) {
 
 async function loadBenchmarkFrontier() {
   try {
-    const res = await fetch("/api/benchmarks/frontier");
+    const res = await hubNetFetch("/api/benchmarks/frontier");
     if (!res.ok) return;
     const frontier = await res.json();
     benchmarksUi.frontier = frontier;
@@ -63,7 +63,7 @@ async function loadBenchmarkDomains() {
   const container = document.getElementById("bench-domains-container");
   if (container) container.innerHTML = '<div class="py-8 text-center text-slate-500 text-xs font-mono">Carregando domínios...</div>';
   try {
-    const res = await fetch("/api/benchmarks/domains");
+    const res = await hubNetFetch("/api/benchmarks/domains");
     if (!res.ok) throw new Error("Falha ao consultar domínios");
     benchmarksUi.domains = await res.json();
     renderBenchmarkDomains();
@@ -78,7 +78,7 @@ async function loadDomainFrontier(domain) {
   const container = document.getElementById("bench-domain-frontier-results");
   if (container) container.innerHTML = '<div class="py-6 text-center text-slate-500 text-xs font-mono">Consultando fronteira do domínio...</div>';
   try {
-    const res = await fetch(`/api/benchmarks/domains/${encodeURIComponent(domain)}/frontier`);
+    const res = await hubNetFetch(`/api/benchmarks/domains/${encodeURIComponent(domain)}/frontier`);
     if (!res.ok) throw new Error("Fronteira não encontrada para este domínio");
     benchmarksUi.domainFrontier = await res.json();
     renderDomainFrontier();
@@ -151,8 +151,8 @@ async function loadSpeculativeAndProximity() {
   if (container) container.innerHTML = '<div class="py-8 text-center text-slate-500 text-xs font-mono">Carregando Top-3 e Proximidade de Fronteira...</div>';
   try {
     const [top3Res, proxRes] = await Promise.all([
-      fetch(`/api/benchmarks/speculative/top3?tier=${encodeURIComponent(benchmarksUi.selectedTier)}`),
-      fetch("/api/benchmarks/proximity"),
+      hubNetFetch(`/api/benchmarks/speculative/top3?tier=${encodeURIComponent(benchmarksUi.selectedTier)}`),
+      hubNetFetch("/api/benchmarks/proximity"),
     ]);
 
     benchmarksUi.speculativeTop3 = top3Res.ok ? await top3Res.json() : [];
@@ -236,7 +236,7 @@ async function loadEmpiricalBenchmarks() {
   const container = document.getElementById("bench-empirical-container");
   if (container) container.innerHTML = '<div class="py-8 text-center text-slate-500 text-xs font-mono">Consultando resultados empíricos da fábrica...</div>';
   try {
-    const res = await fetch("/api/benchmarks/empirical");
+    const res = await hubNetFetch("/api/benchmarks/empirical");
     if (!res.ok) throw new Error("Falha ao consultar benchmarks empíricos");
     benchmarksUi.empirical = await res.json();
     renderEmpiricalBenchmarks();
@@ -314,7 +314,7 @@ async function simulateTaskRouting() {
   resultsDiv.innerHTML = '<div class="py-6 text-center text-slate-400 text-xs font-mono">Analisando intenção e classificando domínios canônicos...</div>';
 
   try {
-    const res = await fetch("/api/benchmarks/route-task", {
+    const res = await hubNetFetch("/api/benchmarks/route-task", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ requirement, complexity, offline: false }),

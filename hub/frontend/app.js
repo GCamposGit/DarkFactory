@@ -88,10 +88,10 @@ async function hubFetch(url, options = {}) {
   if (token) {
     headers.set("X-Hub-Session", token);
   }
-  let res = await fetch(url, { ...options, headers });
+  let res = await hubNetFetch(url, { ...options, headers });
   if (res.status === 401) {
     try {
-      const sRes = await fetch("/api/session");
+      const sRes = await hubNetFetch("/api/session");
       if (sRes.ok) {
         const sData = await sRes.json();
         state.sessionToken = sData.session_token;
@@ -101,7 +101,7 @@ async function hubFetch(url, options = {}) {
         } catch (_) {}
         const retryHeaders = new Headers(options.headers || {});
         retryHeaders.set("X-Hub-Session", sData.session_token);
-        res = await fetch(url, { ...options, headers: retryHeaders });
+        res = await hubNetFetch(url, { ...options, headers: retryHeaders });
       }
     } catch (_) {}
   }
@@ -115,7 +115,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
 async function initSession() {
   try {
-    const res = await fetch(`${API_BASE}/session`);
+    const res = await hubNetFetch(`${API_BASE}/session`);
     if (res.ok) {
       const data = await res.json();
       state.sessionToken = data.session_token;
@@ -149,7 +149,7 @@ async function initGlobalProjectSwitcher() {
   if (!select) return;
 
   try {
-    const res = await fetch("/api/projects");
+    const res = await hubNetFetch("/api/projects");
     if (res.ok) {
       const projects = await res.json();
       if (Array.isArray(projects) && projects.length > 0) {
@@ -343,7 +343,7 @@ function setupEventListeners() {
 // Fetch Services from Backend
 async function loadServices() {
   try {
-    const res = await fetch(`${API_BASE}/services`);
+    const res = await hubNetFetch(`${API_BASE}/services`);
     if (res.ok) {
       state.services = await res.json();
       renderQuickDock();
@@ -358,7 +358,7 @@ async function loadServices() {
 // Fetch Ollama Status & Model Catalog
 async function loadOllamaStatus() {
   try {
-    const res = await fetch(`${API_BASE}/ollama/status`);
+    const res = await hubNetFetch(`${API_BASE}/ollama/status`);
     if (res.ok) {
       state.ollama = await res.json();
       renderOllamaBadge();
@@ -374,7 +374,7 @@ async function loadOllamaStatus() {
 // Fetch OpenRouter Status & Curated Models
 async function loadOpenRouterStatus() {
   try {
-    const res = await fetch(`${API_BASE}/openrouter/status`);
+    const res = await hubNetFetch(`${API_BASE}/openrouter/status`);
     if (res.ok) {
       state.openrouter = await res.json();
       renderOpenRouterBadge();
@@ -419,7 +419,7 @@ function renderOpenRouterBadge() {
 // Fetch Daily Benchmarks Ledger
 async function loadBenchmarks() {
   try {
-    const res = await fetch(`${API_BASE}/benchmarks/latest`);
+    const res = await hubNetFetch(`${API_BASE}/benchmarks/latest`);
     if (res.ok) {
       state.benchmarks = await res.json();
       renderBenchmarksView();
@@ -433,7 +433,7 @@ async function loadBenchmarks() {
 // Fetch Prompts Catalog
 async function loadPrompts() {
   try {
-    const res = await fetch(`${API_BASE}/prompts`);
+    const res = await hubNetFetch(`${API_BASE}/prompts`);
     if (res.ok) {
       state.prompts = await res.json();
       renderPromptsList();
@@ -446,7 +446,7 @@ async function loadPrompts() {
 // Background ping all services
 async function triggerBackgroundPings() {
   try {
-    const res = await fetch(`${API_BASE}/health/ping-all`);
+    const res = await hubNetFetch(`${API_BASE}/health/ping-all`);
     if (res.ok) {
       const results = await res.json();
       results.forEach((r) => {
@@ -1281,7 +1281,7 @@ async function handleRunPlayground() {
   `;
 
   try {
-    const res = await fetch(`${API_BASE}/playground/generate`, {
+    const res = await hubNetFetch(`${API_BASE}/playground/generate`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -1474,7 +1474,7 @@ async function refreshBenchmarksData() {
   }
 
   try {
-    const res = await fetch(`${API_BASE}/benchmarks/refresh`, { method: "POST" });
+    const res = await hubNetFetch(`${API_BASE}/benchmarks/refresh`, { method: "POST" });
     if (res.ok) {
       state.benchmarks = await res.json();
       renderBenchmarksView();
@@ -1687,7 +1687,7 @@ function closeBackupModal() {
 
 async function handleExportCatalog() {
   try {
-    const res = await fetch(`${API_BASE}/services/export`);
+    const res = await hubNetFetch(`${API_BASE}/services/export`);
     if (res.ok) {
       const data = await res.json();
       const dateStr = new Date().toISOString().split("T")[0];
@@ -1733,7 +1733,7 @@ async function handleImportFileSelected(event) {
       return;
     }
 
-    const res = await fetch(`${API_BASE}/services/import`, {
+    const res = await hubNetFetch(`${API_BASE}/services/import`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ services: servicesToImport, merge }),
@@ -1765,7 +1765,7 @@ async function handleResetDefaults() {
   }
 
   try {
-    const res = await fetch(`${API_BASE}/services/reset-defaults`, {
+    const res = await hubNetFetch(`${API_BASE}/services/reset-defaults`, {
       method: "POST",
     });
     if (res.ok) {

@@ -6,7 +6,7 @@ let hubCoverageData = null;
 async function loadHubCoverage(forceRefresh = false) {
   try {
     const url = forceRefresh ? '/api/hub/coverage?force_refresh=true' : '/api/hub/coverage';
-    const res = await fetch(url);
+    const res = await hubNetFetch(url);
     if (!res.ok) {
       console.warn('Falha ao carregar cobertura do DarkHub:', res.status);
       return;

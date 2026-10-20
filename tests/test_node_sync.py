@@ -825,3 +825,26 @@ def test_redact_worker_output_handles_empty_and_plain_text() -> None:
     assert mod.redact_worker_output(None) == ""
     assert mod.redact_worker_output("") == ""
     assert mod.redact_worker_output("Already up to date.") == "Already up to date."
+
+
+class _DiffGit(FakeGit):
+    def __init__(self, changed: str) -> None:
+        super().__init__()
+        self.changed = changed
+
+    def __call__(self, root: Path, args: list[str]) -> str:
+        if args[:2] == ["diff", "--name-only"]:
+            return self.changed
+        return super().__call__(root, args)
+
+
+@pytest.mark.parametrize(
+    "changed,state",
+    [(".factory/demands/demands.json\ndocs/a.md", "converged"), ("core/a.py\ndocs/a.md", "divergent")],
+)
+def test_vps_on_older_sha_is_converged_only_when_image_is_unchanged(changed: str, state: str) -> None:
+    """USR-207: data-only merges intentionally skip the Hub rebuild, so an older VPS sha is not drift."""
+    http = FakeHttp()
+    http.vps_sha = OLD
+    report = mod.verify(root=Path("."), git=_DiffGit(changed), http=http)
+    assert report.nodes[2].state == state
