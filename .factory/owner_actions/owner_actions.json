@@ -1685,6 +1685,111 @@
       ]
     },
     {
+      "id": "OA-042",
+      "kind": "decision",
+      "title": "Decidir o piloto greenfield do USR-279 (nome, texto, destino, retencao, build)",
+      "priority": "high",
+      "status": "done",
+      "why": "O plano docs/plans/USR-279-greenfield-pilot.md deixou 5 decisoes de produto/destino para o owner; sem elas M1 e M5 nao comecam.",
+      "blocks": [
+        "USR-279"
+      ],
+      "depends_on": [],
+      "steps": [
+        {
+          "text": "Leia a secao 5 de docs/plans/USR-279-greenfield-pilot.md e responda no Hub as 5 decisoes (D1 nome do repo, D2 texto da pagina, D3 destino do deploy, D4 retencao, D5 ferramenta de build)."
+        }
+      ],
+      "options": [
+        {
+          "id": "recomendado",
+          "label": "Aceitar todas as recomendacoes",
+          "detail": "D1 pilot-hello; D2 texto neutro 'DarkFac pilot'; D3 opcao A (projeto separado no Dokploy existente); D4 manter arquivado; D5 build no venv"
+        },
+        {
+          "id": "personalizar",
+          "label": "Personalizar",
+          "detail": "Responder D1-D5 individualmente no comentario"
+        }
+      ],
+      "verify": "Respostas D1-D5 registradas no Hub; o agente atualiza o plano e libera M1.",
+      "created_at": "2026-10-20T10:24:32Z",
+      "created_by": "claude-code",
+      "resolved_at": "2026-10-20T10:29:29Z",
+      "answer": {
+        "option_id": "recomendado",
+        "note": "Owner no chat em 20/10/2026: sim (D1 pilot-hello, D2 'DarkFac pilot', D3 opcao A Dokploy existente, D4 manter arquivado, D5 build no venv).",
+        "answered_at": "2026-10-20T10:29:29Z",
+        "answered_by": "owner"
+      }
+    },
+    {
+      "id": "OA-043",
+      "kind": "action",
+      "title": "Liberar acessos do piloto USR-279: gh com escopo repo, projeto Dokploy e webhook",
+      "priority": "high",
+      "status": "open",
+      "why": "O bootstrap (USR-274) cria o repositorio privado com o gh da sua conta e o deploy (M5) precisa de um projeto separado no Dokploy; so o owner concede esses acessos.",
+      "blocks": [
+        "USR-279"
+      ],
+      "depends_on": [],
+      "steps": [
+        {
+          "text": "Confirme que o gh esta autenticado com escopo repo na sua conta.",
+          "command": "gh auth status"
+        },
+        {
+          "text": "Se faltar o escopo repo, renove o login.",
+          "command": "gh auth refresh -s repo"
+        },
+        {
+          "text": "Se o destino escolhido for A ou B (OA de decisao do USR-279): no Dokploy (https://dokploy.ggcampos.com) crie um projeto novo chamado como o repo do piloto, sem acesso a outros repositorios. Tela: Projects > Create Project > nome = pilot-hello (ou o nome decidido) > Create."
+        },
+        {
+          "text": "Configure o webhook do repo do piloto para o Dokploy seguindo docs/runbooks/github_dokploy_webhook.md (depois que o agente criar o repo no M1)."
+        }
+      ],
+      "verify": "gh auth status mostra 'repo' nos escopos; projeto do piloto existe no Dokploy; webhook entrega 200 no primeiro push.",
+      "created_at": "2026-10-20T10:24:32Z",
+      "created_by": "claude-code",
+      "resolved_at": null
+    },
+    {
+      "id": "OA-044",
+      "kind": "action",
+      "title": "Hub sem queda no deploy (USR-207): desligar autoDeploy duplicado, credencial GHCR e agendar sonda",
+      "priority": "medium",
+      "status": "open",
+      "why": "O USR-207 entregou deploy deduplicado, classificador de mudancas, healthcheck e sonda de disponibilidade; a troca sem queda (imagem GHCR + start-first) e o fim do deploy duplo dependem de passos no Dokploy/GitHub que so o owner faz. Detalhes em docs/proposals/USR-207-zero-downtime.md.",
+      "blocks": [
+        "USR-207"
+      ],
+      "depends_on": [],
+      "steps": [
+        {
+          "text": "Leia docs/proposals/USR-207-zero-downtime.md (secoes de owner)."
+        },
+        {
+          "text": "No Dokploy, compose Darkhub (wuH-sjZBig74xFGdk4IsL): desligue o Auto Deploy para que so o scripts/dokploy_redeploy.py dispare deploys. Tela: Projects > Darkhub > General > Auto Deploy = off > Save."
+        },
+        {
+          "text": "Aplique o workflow de imagem (protegido) seguindo o fluxo de publicacao protegida: worktree da main, git apply docs\\proposals\\USR-207-ghcr-build.patch, commit local, portao completo, push.",
+          "command": "git -C C:\\dev\\DarkFac fetch origin; git -C C:\\dev\\DarkFac worktree add C:\\dev\\DarkFac\\.worktrees\\usr-207-publish -b owner/usr-207-publish origin/main"
+        },
+        {
+          "text": "Crie no Dokploy a credencial de pull do GHCR (Settings > Registry > Add > ghcr.io, usuario GitHub e token com read:packages)."
+        },
+        {
+          "text": "Agende a sonda externa de disponibilidade num no fora da VPS (comando na proposta)."
+        }
+      ],
+      "verify": "Um merge gera um unico deploy do Hub; durante um deploy real a sonda de 1 s nao ve respostas diferentes de 200 em /health.",
+      "created_at": "2026-10-20T10:24:33Z",
+      "created_by": "claude-code",
+      "resolved_at": null
+    },
+    {
       "id": "OA-041",
       "kind": "action",
       "title": "Publicar arquivos protegidos de USR-253 por push direto (com portao completo)",

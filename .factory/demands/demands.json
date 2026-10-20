@@ -8250,11 +8250,15 @@
       "standalone-projects",
       "pilot",
       "needs-slicing",
-      "congelado-v0"
+      "congelado-v0",
+      "owner-decision:OA-042=recomendado"
     ],
-    "problem_statement": "Decisao explicita do owner em 16/10/2026: piloto tecnico pequeno e descartavel; criar repositorio privado na sua conta GitHub e ambiente separado na infraestrutura existente, sem novas contratacoes. Provar a fabrica recebendo uma demanda de projeto novo ate publicacao e verificacao, com minima intervencao e sem dependencia de runtime do core para o produto funcionar. Fatiar execucao em marcos pequenos antes de implementar.",
+    "problem_statement": "Decisao explicita do owner em 16/10/2026: piloto tecnico pequeno e descartavel; criar repositorio privado na sua conta GitHub e ambiente separado na infraestrutura existente, sem novas contratacoes. Provar a fabrica recebendo uma demanda de projeto novo ate publicacao e verificacao, com minima intervencao e sem dependencia de runtime do core para o produto funcionar. Fatiar execucao em marcos pequenos antes de implementar. Fatia 1 (plano do piloto) em docs/plans/USR-279-greenfield-pilot.md; marcos M1-M7 seguem.\n\n[Decisao do owner OA-042] Decidir o piloto greenfield do USR-279 (nome, texto, destino, retencao, build) -> opcao recomendado (Aceitar todas as recomendacoes), em 2026-10-20T10:29:29Z. Nota do owner: Owner no chat em 20/10/2026: sim (D1 pilot-hello, D2 'DarkFac pilot', D3 opcao A Dokploy existente, D4 manter arquivado, D5 build no venv).",
     "core_journey": [],
-    "non_goals": [],
+    "non_goals": [
+      "Nao contratar servicos novos.",
+      "Nao inventar decisoes de negocio do produto."
+    ],
     "reachability_contract": "",
     "acceptance_criteria": [
       "Planejamento registra o piloto, fronteiras do produto, ambiente, validacao, destino permitido e marcos executaveis de ate tres criterios cada, sem nova decisao de negocio inventada",
@@ -8265,7 +8269,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-16T15:26:57.986877Z",
-    "updated_at": "2026-10-16T15:30:47.477227Z"
+    "updated_at": "2026-10-20T10:29:29.929556Z"
   },
   {
     "id": "USR-277",
