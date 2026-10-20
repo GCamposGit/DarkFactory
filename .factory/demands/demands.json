@@ -9352,8 +9352,8 @@
     "project_id": "darkfac",
     "title": "Corrigir fases e metadados de execução na Esteira ao vivo do DarkHub",
     "origin": "user",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "e5b6c2d98b627e65539add68f6f157dacde2c918",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -9376,7 +9376,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-20T18:34:03.270018Z",
-    "updated_at": "2026-10-20T18:34:03.270018Z"
+    "updated_at": "2026-10-20T21:40:44.013546Z"
   },
   {
     "id": "USR-319",
