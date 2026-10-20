@@ -5697,7 +5697,7 @@
     "title": "Hub cai a cada merge: redeploy sem downtime, deploy deduplicado e frontend resiliente",
     "origin": "user",
     "status": "planned",
-    "delivery_evidence": "Reaberto em 20/10/2026: codigo entregue (redeploy sem downtime/deploy deduplicado); falta a OA-044 do owner (autoDeploy off, GHCR, sonda) e a prova no deploy (anterior: 1a416f4bb52f7047050c57b3d2d52cd2bf72019d)",
+    "delivery_evidence": "Reaberto em 20/10/2026: codigo entregue (redeploy sem downtime/deploy deduplicado); falta a OA-044 do owner (autoDeploy off, GHCR, sonda) e a prova no deploy (anterior: 1a416f4bb52f7047050c57b3d2d52cd2bf72019d); Prova USR319 PR506: JOIN de Darkhub terminou done NEW CHANGES em1.4s, mas health permaneceu7433f3df em vez de c9117212. Recuperacao dirigida --force em Darkhub+n8n iniciada apos confirmar ambos done; verificar recuperacao automatica ao JOIN terminar SHA divergente.",
     "item_type": "operations",
     "lifecycle_stage": "execution",
     "horizon": "later",
@@ -9421,7 +9421,7 @@
     "tags": [
       "user-demand"
     ],
-    "problem_statement": "Em 20/10/2026 api/line/live mostrou run-5c1eeae3564c USR-315 com retries handler_error:UnknownProjectError unknown project USR. O run registra project_id darkfac mas o handler parece cair no ticket_id como projeto. Causa ainda nao comprovada; pode envolver worker antigo, lookup do store ou contexto.",
+    "problem_statement": "Em 20/10/2026 api/line/live mostrou run-5c1eeae3564c USR-315 com retries handler_error:UnknownProjectError unknown project USR. O run registra project_id darkfac mas o handler parece cair no ticket_id como projeto. Causa ainda nao comprovada; pode envolver worker antigo, lookup do store ou contexto. Consulta canonica open_line_store/get_run_status confirmou runs.project_id=darkfac para run-5c1eeae3564c; nao e project_id corrompido na linha runs.",
     "core_journey": [],
     "non_goals": [
       "Nao relaxar piso de cota, Gate G1 ou isolamento de projetos."
