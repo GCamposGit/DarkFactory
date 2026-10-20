@@ -22,6 +22,7 @@ from datetime import date, datetime
 from pathlib import Path
 from typing import Any, Callable, Optional
 
+from core.models.grill_policy import ModelChange, requires_grill
 from core.models.registry import (
     DEFAULT_REGISTRY_PATH,
     QUALIFIED_STATUSES,
@@ -117,6 +118,17 @@ def promote(
         raise LifecycleError(f"{model_id!r} has no approved qualification (status={qual.get('status')})")
     if role is not None and role not in raw.get("roles", {}):
         raise LifecycleError(f"unknown role {role!r}")
+
+    # Grill is a mandatory policy gate for promotions.  Keep the caller hook
+    # below as an additional, domain-specific veto; it must not be possible to
+    # bypass the registry thresholds by supplying a custom precheck.
+    decision = requires_grill(
+        ModelChange(kind="promote_candidate", model_id=model_id, role=role),
+        parse_registry(raw),
+    )
+    if decision.required:
+        reasons = "; ".join(decision.reasons)
+        raise LifecycleError(f"promotion requires WAITING_HUMAN (Grill): {reasons}")
     if precheck is not None:
         veto = precheck(raw, entry, role)
         if veto:

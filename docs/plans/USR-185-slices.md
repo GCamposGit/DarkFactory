@@ -95,3 +95,10 @@ Escopo original:
 Definir quando o Grill (WAITING_HUMAN) e obrigatorio: modelo proibido/frontier, preco acima do teto, mudanca de familia
 em papel de revisao, qualificacao ambigua. Aceite: limiares configurados no registro e cobertos por teste; todo o resto
 segue autonomo.
+
+## Fatia 8b - Bloqueio da promocao pelo Grill (ENTREGUE em 20/10/2026)
+
+Entregue: `lifecycle.promote()` integra `requires_grill()`: toda promocao consulta os limiares do registro e, quando a
+decisao for obrigatoria, recusa com `WAITING_HUMAN` e os motivos antes de escrever no registro ou no ledger. O caminho
+limpo segue autonomo e tem testes de bloqueio, promocao limpa e invariantes de registro. O docgen tambem publica a
+secao `grill_thresholds` no guia de selecao de modelos.

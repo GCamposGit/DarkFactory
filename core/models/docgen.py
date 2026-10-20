@@ -17,7 +17,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 
 # Docs (non-protected) that carry markers: relative path -> sections expected in it.
 TARGETS: dict[str, tuple[str, ...]] = {
-    "docs/MODEL_SELECTION_GUIDE.md": ("roles", "catalog"),
+    "docs/MODEL_SELECTION_GUIDE.md": ("roles", "catalog", "grill_thresholds"),
     ".agents/skills/03-model-router/SKILL.md": ("roles_skill",),
     ".claude/skills/03-model-router/SKILL.md": ("roles_skill",),
 }
@@ -74,11 +74,34 @@ def render_catalog(reg: ModelRegistry) -> str:
     return "\n".join(lines)
 
 
+def render_grill_thresholds(reg: ModelRegistry) -> str:
+    """Render the registry-controlled human-decision thresholds."""
+    th = reg.grill_thresholds
+    lines = [
+        "| Limite | Valor |",
+        "| --- | --- |",
+        f"| Preco maximo de entrada (US$/Mtok) | `{th.max_price_input_per_mtok:g}` |",
+        f"| Preco maximo de saida (US$/Mtok) | `{th.max_price_output_per_mtok:g}` |",
+        f"| Faixas frontier | {_cell(th.frontier_tiers)} |",
+        f"| Grill para preco desconhecido fora de active | `{str(th.require_grill_on_unknown_price).lower()}` |",
+        f"| Etapas minimas de qualificacao | `{th.min_qualification_steps}` |",
+        "",
+        "`promote()` recusa a promocao com `WAITING_HUMAN` quando `requires_grill()` retorna "
+        "motivos para a mudanca proposta.",
+    ]
+    return "\n".join(lines)
+
+
 def render_roles_skill(reg: ModelRegistry) -> str:
     return render_roles(reg, skip_gateway=True)
 
 
-RENDERERS: dict[str, Callable[[ModelRegistry], str]] = {"roles": render_roles, "roles_skill": render_roles_skill, "catalog": render_catalog}
+RENDERERS: dict[str, Callable[[ModelRegistry], str]] = {
+    "roles": render_roles,
+    "roles_skill": render_roles_skill,
+    "catalog": render_catalog,
+    "grill_thresholds": render_grill_thresholds,
+}
 
 
 @dataclass(frozen=True)
