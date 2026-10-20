@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import subprocess
 from pathlib import Path
 from typing import Iterable
@@ -53,6 +54,19 @@ def project_checkout(project: ProjectDescriptor) -> Path:
     return path
 
 
+def _run(project: ProjectDescriptor, commands: Iterable[str], cwd: Path, timeout_s: int, phase: str = "run") -> CommandRunResult:
+    """Run commands in the product's own environment when declared (USR-275); else legacy inherit."""
+    env = project.environment
+    if env is None:
+        return run_shell_commands(commands, cwd, timeout_s=timeout_s)
+    from core.projects.environment import ProjectEnvironmentError, run_in_environment
+
+    try:
+        return run_in_environment(env, commands, cwd, timeout_s=timeout_s, phase=phase)
+    except ProjectEnvironmentError as exc:
+        raise ProjectExecutionError(f"Projeto {project.id}: {json.dumps(exc.as_dict(), ensure_ascii=True)}") from exc
+
+
 def validate_project_commands(project: ProjectDescriptor, cwd: Path, *, timeout_s: int = 1800) -> CommandRunResult:
     """Run only explicitly declared setup and validation commands for a project."""
     commands = project.commands
@@ -61,14 +75,26 @@ def validate_project_commands(project: ProjectDescriptor, cwd: Path, *, timeout_
             f"Projeto {project.id} não declara commands.validate. Execute o Project Adoption Gateway "
             "(skill 07) no onboarding e declare comandos de validação antes de executar tickets."
         )
-    return run_shell_commands(commands.validate_cmds, cwd, timeout_s=timeout_s)
+    return _run(project, commands.validate_cmds, cwd, timeout_s)
 
 
 def setup_project(project: ProjectDescriptor, cwd: Path, *, timeout_s: int = 1800) -> CommandRunResult:
     """Run project-declared setup commands before starting the development agent."""
-    return run_shell_commands(project.commands.setup, cwd, timeout_s=timeout_s)
+    env = project.environment
+    if env is None:
+        return run_shell_commands(project.commands.setup, cwd, timeout_s=timeout_s)
+    from core.projects.environment import ProjectEnvironmentError, setup_environment
+
+    try:
+        return setup_environment(env, cwd, project.commands.setup, timeout_s=timeout_s)
+    except ProjectEnvironmentError as exc:
+        raise ProjectExecutionError(f"Projeto {project.id}: {json.dumps(exc.as_dict(), ensure_ascii=True)}") from exc
 
 
-def run_project_commands(commands: Iterable[str], cwd: Path, *, timeout_s: int = 1800) -> CommandRunResult:
+def run_project_commands(
+    commands: Iterable[str], cwd: Path, *, timeout_s: int = 1800, project: ProjectDescriptor | None = None
+) -> CommandRunResult:
     """Run project-declared command lists, stopping at the first failure."""
-    return run_shell_commands(commands, cwd, timeout_s=timeout_s)
+    if project is None:
+        return run_shell_commands(commands, cwd, timeout_s=timeout_s)
+    return _run(project, commands, cwd, timeout_s)

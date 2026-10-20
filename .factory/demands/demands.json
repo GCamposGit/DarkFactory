@@ -8142,8 +8142,8 @@
     "project_id": "darkfac",
     "title": "Executar projetos externos em ambiente proprio sem herdar dependencias e credenciais do core",
     "origin": "agent",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "e06cfee140aa81c6997a741f72b9073885aab4d7",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "later",
@@ -8157,7 +8157,10 @@
     ],
     "problem_statement": "core.line.stage_build.run_shell_commands herda o ambiente do processo. No launcher de projeto externo, ambiente proprio depende apenas de comandos informais do projeto; python -m pytest pode resolver o Python/PATH da fabrica. O owner exige produto stand alone, com testes e ambiente proprios. Separar contrato de ambiente e prova de independencia, sem impor stack unica a todos os produtos.",
     "core_journey": [],
-    "non_goals": [],
+    "non_goals": [
+      "Nao impor uma stack unica a todos os produtos.",
+      "Nao copiar segredos da fabrica para o produto."
+    ],
     "reachability_contract": "",
     "acceptance_criteria": [
       "Contrato do projeto declara ambiente e setup reproduzivel; execucao usa o ambiente escolhido e nao depende do Python/PATH/PYTHONPATH do core",
@@ -8168,7 +8171,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-16T15:26:17.261761Z",
-    "updated_at": "2026-10-16T15:30:47.441652Z"
+    "updated_at": "2026-10-20T11:46:07.087232Z"
   },
   {
     "id": "USR-276",
