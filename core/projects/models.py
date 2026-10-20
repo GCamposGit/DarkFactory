@@ -58,6 +58,48 @@ class ProjectCommands(BaseModel):
     smoke: list[str] = Field(default_factory=list, description="Local smoke/sanity commands run before deploy")
 
 
+class EnvironmentKind(str, Enum):
+    """How a product's own execution environment is provided (USR-275)."""
+    VENV = "venv"
+    SYSTEM = "system"
+    NONE = "none"
+
+
+_FORBIDDEN_ENV_ALLOW = re.compile(r"^(DARKFAC_|PYTHONPATH$|PYTHONHOME$|VIRTUAL_ENV$|PATH$)", re.IGNORECASE)
+
+
+class ProjectEnvironment(BaseModel):
+    """Environment contract of a stand-alone product (USR-275).
+
+    Absent (`None`) keeps the legacy behavior (inherit the process environment),
+    which the internal `darkfac` project relies on. When present, setup/validate/
+    build/smoke run with a minimal allowlisted environment that never carries the
+    factory's Python, PYTHONPATH, DARKFAC_* variables or secrets.
+    """
+    model_config = ConfigDict(extra="forbid")
+
+    kind: EnvironmentKind = Field(default=EnvironmentKind.SYSTEM, description="venv | system | none")
+    path: str = Field(
+        default=".venv", description="venv directory, relative to the product checkout (kind=venv only)"
+    )
+    setup: list[str] = Field(
+        default_factory=list,
+        description="Reproducible environment setup commands (e.g. create the venv, install deps)",
+    )
+    env_allow: list[str] = Field(
+        default_factory=list,
+        description="Names (never values) of host environment variables the product may receive",
+    )
+
+    @field_validator("env_allow")
+    @classmethod
+    def _check_env_allow(cls, value: list[str]) -> list[str]:
+        for name in value:
+            if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name) or _FORBIDDEN_ENV_ALLOW.search(name):
+                raise ValueError(f"env_allow name '{name}' is invalid or reserved for the factory")
+        return value
+
+
 class DeployConfig(BaseModel):
     """Deployment adapter selection and non-secret parameters."""
     type: DeployTargetType = Field(..., description="Deployment adapter identifier")
@@ -110,6 +152,10 @@ class ProjectDescriptor(BaseModel):
     commands: ProjectCommands = Field(
         default_factory=ProjectCommands,
         description="Explicit setup/validate/build/smoke commands; empty entries fall back to autodetection",
+    )
+    environment: Optional[ProjectEnvironment] = Field(
+        default=None,
+        description="Own execution environment contract; None keeps the legacy inherited environment",
     )
     deploy: Optional[DeployConfig] = Field(
         default=None, description="Deployment adapter configuration; params must not carry secret values"

@@ -5131,20 +5131,22 @@
     "project_id": "darkfac",
     "title": "Registro de modelos autonomo: descoberta, qualificacao, promocao e rollback sem edicao manual",
     "origin": "user",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "44a2f56f4d9549869e4e33c28e9f6ec4208b3c83",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "later",
     "tags": [
-      "user-demand",
-      "congelado-v0"
+      "user-demand"
     ],
-    "problem_statement": "Decisao do owner (09/10/2026): trocar ou adicionar modelo nao pode exigir trabalho manual. Evidencia: o USR-168 (adotar Haiku 5.5) exigiu cerca de 25 passos, incluindo o owner editar a mao AGENTS.md, FACTORY_RULES.md e core/harness/test_subagent.py (protegidos pelo guard.py) e empurrar para a main com bypass de admin. Hoje ha 99 arquivos e 475 ocorrencias de ids de modelo escritos a mao (skills .agents/.claude, core/line, core/usage, core/content, core/router, core/harness, hub, benchmark_catalog.json, test-runner.md, docs, testes), inclusive nos arquivos protegidos. Cada lancamento de modelo vira um trabalho manual recorrente. Meta: 99% autonomo, com Grill (WAITING_HUMAN) apenas diante de duvida importante. Os detalhes de qual modelo usar devem morrer fora dos arquivos protegidos: AGENTS.md e FACTORY_RULES.md passam a apontar para um arquivo de consulta editavel pela fabrica, e as invariantes (piso de cota 15%, revisor de outra familia, modelos proibidos como fable) continuam nos protegidos e sao validadas por teste. Absorve os refinos do USR-177. Ticket grande: fatiar em ondas no planejamento (registro e leitor, migracao dos ids, geracao de docs, descoberta, qualificacao, promocao e rollback).\n\nCONGELADO em 11/10/2026 (plano V0, docs/plans/V0_OPERACIONAL_2026-10-11.md): fora do caminho critico da linha.",
+    "problem_statement": "Decisao do owner (09/10/2026): trocar ou adicionar modelo nao pode exigir trabalho manual. Evidencia: o USR-168 (adotar Haiku 5.5) exigiu cerca de 25 passos, incluindo o owner editar a mao AGENTS.md, FACTORY_RULES.md e core/harness/test_subagent.py (protegidos pelo guard.py) e empurrar para a main com bypass de admin. Hoje ha 99 arquivos e 475 ocorrencias de ids de modelo escritos a mao (skills .agents/.claude, core/line, core/usage, core/content, core/router, core/harness, hub, benchmark_catalog.json, test-runner.md, docs, testes), inclusive nos arquivos protegidos. Cada lancamento de modelo vira um trabalho manual recorrente. Meta: 99% autonomo, com Grill (WAITING_HUMAN) apenas diante de duvida importante. Os detalhes de qual modelo usar devem morrer fora dos arquivos protegidos: AGENTS.md e FACTORY_RULES.md passam a apontar para um arquivo de consulta editavel pela fabrica, e as invariantes (piso de cota 15%, revisor de outra familia, modelos proibidos como fable) continuam nos protegidos e sao validadas por teste. Absorve os refinos do USR-177. Ticket grande: fatiar em ondas no planejamento (registro e leitor, migracao dos ids, geracao de docs, descoberta, qualificacao, promocao e rollback).\n\nCONGELADO em 11/10/2026 (plano V0, docs/plans/V0_OPERACIONAL_2026-10-11.md): fora do caminho critico da linha.\nFatia 1 (registro, leitor, validador e censo) entregue em 20/10/2026; fatias seguintes em docs/plans/USR-185-slices.md.",
     "core_journey": [
       "Decisao do owner (09/10/2026): trocar ou adicionar modelo nao pode exigir trabalho manual. Evidencia: o USR-168 (adotar Haiku 5.5) exigiu cerca de 25 passos, incluindo o owner editar a mao AGENTS.md, FACTORY_RULES.md e core/harness/test_subagent.py (protegidos pelo guard.py) e empurrar para a main com bypass de admin. Hoje ha 99 arquivos e 475 ocorrencias de ids de modelo escritos a mao (skills .agents/.claude, core/line, core/usage, core/content, core/router, core/harness, hub, benchmark_catalog.json, test-runner.md, docs, testes), inclusive nos arquivos protegidos. Cada lancamento de modelo vira um trabalho manual recorrente. Meta: 99% autonomo, com Grill (WAITING_HUMAN) apenas diante de duvida importante. Os detalhes de qual modelo usar devem morrer fora dos arquivos protegidos: AGENTS.md e FACTORY_RULES.md passam a apontar para um arquivo de consulta editavel pela fabrica, e as invariantes (piso de cota 15%, revisor de outra familia, modelos proibidos como fable) continuam nos protegidos e sao validadas por teste. Absorve os refinos do USR-177. Ticket grande: fatiar em ondas no planejamento (registro e leitor, migracao dos ids, geracao de docs, descoberta, qualificacao, promocao e rollback)."
     ],
-    "non_goals": [],
+    "non_goals": [
+      "Nao chamar modelos pagos fora do teto de gasto configurado.",
+      "Nao editar arquivos protegidos fora da proposta unica em docs/proposals."
+    ],
     "reachability_contract": "",
     "acceptance_criteria": [
       "Registro unico .factory/config/model_registry.json (nao protegido) com aliases e papeis por provedor, model id, familia, tier, preco, contexto, saida maxima, capacidades, status candidate/active/deprecated/retired e datas de lancamento e aposentadoria, mais schema Pydantic e validador de invariantes que rejeita: modelo proibido como autonomo, revisor da mesma familia do implementador, rota sem qualificacao aprovada e piso de cota abaixo de 15%",
@@ -5162,7 +5164,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-09T07:01:39.369233Z",
-    "updated_at": "2026-10-11T17:49:17.206876Z"
+    "updated_at": "2026-10-20T11:46:06.024685Z"
   },
   {
     "id": "USR-186",
@@ -8142,8 +8144,8 @@
     "project_id": "darkfac",
     "title": "Executar projetos externos em ambiente proprio sem herdar dependencias e credenciais do core",
     "origin": "agent",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "e06cfee140aa81c6997a741f72b9073885aab4d7",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "later",
@@ -8157,7 +8159,10 @@
     ],
     "problem_statement": "core.line.stage_build.run_shell_commands herda o ambiente do processo. No launcher de projeto externo, ambiente proprio depende apenas de comandos informais do projeto; python -m pytest pode resolver o Python/PATH da fabrica. O owner exige produto stand alone, com testes e ambiente proprios. Separar contrato de ambiente e prova de independencia, sem impor stack unica a todos os produtos.",
     "core_journey": [],
-    "non_goals": [],
+    "non_goals": [
+      "Nao impor uma stack unica a todos os produtos.",
+      "Nao copiar segredos da fabrica para o produto."
+    ],
     "reachability_contract": "",
     "acceptance_criteria": [
       "Contrato do projeto declara ambiente e setup reproduzivel; execucao usa o ambiente escolhido e nao depende do Python/PATH/PYTHONPATH do core",
@@ -8168,7 +8173,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-16T15:26:17.261761Z",
-    "updated_at": "2026-10-16T15:30:47.441652Z"
+    "updated_at": "2026-10-20T11:46:07.087232Z"
   },
   {
     "id": "USR-276",
@@ -8241,8 +8246,8 @@
     "project_id": "darkfac",
     "title": "Provar entrega autonoma de piloto greenfield stand alone em repositorio e ambiente privados separados",
     "origin": "agent",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "2dd380fb6b820d2b4fdf05534c930aac84269b26",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "later",
@@ -8252,11 +8257,15 @@
       "standalone-projects",
       "pilot",
       "needs-slicing",
-      "congelado-v0"
+      "congelado-v0",
+      "owner-decision:OA-042=recomendado"
     ],
-    "problem_statement": "Decisao explicita do owner em 16/10/2026: piloto tecnico pequeno e descartavel; criar repositorio privado na sua conta GitHub e ambiente separado na infraestrutura existente, sem novas contratacoes. Provar a fabrica recebendo uma demanda de projeto novo ate publicacao e verificacao, com minima intervencao e sem dependencia de runtime do core para o produto funcionar. Fatiar execucao em marcos pequenos antes de implementar.",
+    "problem_statement": "Decisao explicita do owner em 16/10/2026: piloto tecnico pequeno e descartavel; criar repositorio privado na sua conta GitHub e ambiente separado na infraestrutura existente, sem novas contratacoes. Provar a fabrica recebendo uma demanda de projeto novo ate publicacao e verificacao, com minima intervencao e sem dependencia de runtime do core para o produto funcionar. Fatiar execucao em marcos pequenos antes de implementar. Fatia 1 (plano do piloto) em docs/plans/USR-279-greenfield-pilot.md; marcos M1-M7 seguem.\n\n[Decisao do owner OA-042] Decidir o piloto greenfield do USR-279 (nome, texto, destino, retencao, build) -> opcao recomendado (Aceitar todas as recomendacoes), em 2026-10-20T10:29:29Z. Nota do owner: Owner no chat em 20/10/2026: sim (D1 pilot-hello, D2 'DarkFac pilot', D3 opcao A Dokploy existente, D4 manter arquivado, D5 build no venv).",
     "core_journey": [],
-    "non_goals": [],
+    "non_goals": [
+      "Nao contratar servicos novos.",
+      "Nao inventar decisoes de negocio do produto."
+    ],
     "reachability_contract": "",
     "acceptance_criteria": [
       "Planejamento registra o piloto, fronteiras do produto, ambiente, validacao, destino permitido e marcos executaveis de ate tres criterios cada, sem nova decisao de negocio inventada",
@@ -8267,7 +8276,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-16T15:26:57.986877Z",
-    "updated_at": "2026-10-16T15:30:47.477227Z"
+    "updated_at": "2026-10-20T14:37:27.083947Z"
   },
   {
     "id": "USR-277",
