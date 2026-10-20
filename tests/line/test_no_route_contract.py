@@ -38,7 +38,12 @@ AGENT_STAGE_MODULES = (
 )
 
 # Modules that call `pick` on purpose without parking the run on a missing route.
-NOT_A_ROUTE_PARK: dict[str, str] = {}
+NOT_A_ROUTE_PARK: dict[str, str] = {
+    "feeder_cycle.py": (
+        "USR-304: optional admission quota gate (DARKFAC_FEEDER_QUOTA_GATE) only asks whether ANY harness is above "
+        "the 15% floor before admitting tickets; it never runs or parks a stage, so there is no route to wait for."
+    ),
+}
 
 
 def _literals(node: ast.AST) -> list[str]:
