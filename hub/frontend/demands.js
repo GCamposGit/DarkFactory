@@ -45,7 +45,7 @@ function closeDemandsDrawer() {
 
 async function loadDemandsProjects() {
   try {
-    const response = await fetch("/api/projects");
+    const response = await hubNetFetch("/api/projects");
     if (!response.ok) return;
     const projects = await response.json();
     const select = document.getElementById("demand-project-select");
@@ -109,7 +109,7 @@ async function runDemandGuidance(forceHeuristic = false) {
 
   try {
     const query = forceHeuristic ? "?force_heuristic=true" : "";
-    const res = await fetch(`/api/demands/guide${query}`, {
+    const res = await hubNetFetch(`/api/demands/guide${query}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: jsonStringify(payload),
@@ -289,7 +289,7 @@ async function saveDemandToBacklog() {
   let ticketId = demandsUi.guidance?.suggested_ticket?.id;
   if (!ticketId) {
     try {
-      const idRes = await fetch(`/api/demands/next-id?project_id=${encodeURIComponent(projectSelect?.value || "darkfac")}`);
+      const idRes = await hubNetFetch(`/api/demands/next-id?project_id=${encodeURIComponent(projectSelect?.value || "darkfac")}`);
       if (idRes.ok) {
         const idData = await idRes.json();
         ticketId = idData.next_id;
@@ -331,7 +331,7 @@ async function saveDemandToBacklog() {
   }
 
   try {
-    const res = await fetch("/api/demands/tickets", {
+    const res = await hubNetFetch("/api/demands/tickets", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: jsonStringify(ticketPayload),
@@ -420,7 +420,7 @@ async function loadRecentDemands() {
   if (!container) return;
 
   try {
-    const res = await fetch(`/api/demands/tickets?project_id=${encodeURIComponent(demandsUi.projectId)}`);
+    const res = await hubNetFetch(`/api/demands/tickets?project_id=${encodeURIComponent(demandsUi.projectId)}`);
     if (!res.ok) return;
     const tickets = await res.json();
     demandsUi.recentTickets = tickets;
@@ -520,7 +520,7 @@ async function openGrillModal(ticketId) {
   document.body.classList.add("overflow-hidden");
 
   try {
-    const res = await fetch(`/api/demands/tickets/${encodeURIComponent(ticketId)}/grill`, {
+    const res = await hubNetFetch(`/api/demands/tickets/${encodeURIComponent(ticketId)}/grill`, {
       method: "POST",
     });
     if (!res.ok) {
@@ -655,7 +655,7 @@ async function submitGrillModalAnswers(autoAccept = false) {
   }
 
   try {
-    const res = await fetch(`/api/demands/tickets/${encodeURIComponent(ticketId)}/grill/submit`, {
+    const res = await hubNetFetch(`/api/demands/tickets/${encodeURIComponent(ticketId)}/grill/submit`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: jsonStringify({ answers: answers, auto_accept_unanswered: true }),

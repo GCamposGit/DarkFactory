@@ -471,13 +471,13 @@ async function submitGrillModalAnswers(ticketId) {
     if (response.status === 401) {
       // Direct session renewal fallback
       try {
-        const sRes = await fetch("/api/session");
+        const sRes = await hubNetFetch("/api/session");
         if (sRes.ok) {
           const sData = await sRes.json();
           window.sessionToken = sData.session_token;
           if (typeof state !== "undefined") state.sessionToken = sData.session_token;
           try { localStorage.setItem("darkhub_session_token", sData.session_token); } catch (_) {}
-          response = await fetch(`/api/demands/tickets/${encodeURIComponent(ticketId)}/grill/submit`, {
+          response = await hubNetFetch(`/api/demands/tickets/${encodeURIComponent(ticketId)}/grill/submit`, {
             method: "POST",
             headers: {
               "Content-Type": "application/json",

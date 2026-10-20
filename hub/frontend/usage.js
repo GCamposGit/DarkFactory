@@ -118,7 +118,7 @@ function setRefreshMessage(text, failed = false) {
 }
 
 async function requestAccountRefresh(button) {
-  const created = await fetch("/api/usage/accounts/refresh", { method: "POST" });
+  const created = await hubNetFetch("/api/usage/accounts/refresh", { method: "POST" });
   if (!created.ok) throw new Error("refresh request rejected");
   let request = await created.json();
   const startedAt = Date.now();
@@ -132,7 +132,7 @@ async function requestAccountRefresh(button) {
     setRefreshMessage(`Atualizando cotas (${label}, ${waited}s)...`);
     if (button) button.textContent = "Atualizando…";
     await new Promise((resolve) => setTimeout(resolve, REFRESH_POLL_MS));
-    const polled = await fetch(`/api/usage/accounts/refresh/${encodeURIComponent(request.id)}`);
+    const polled = await hubNetFetch(`/api/usage/accounts/refresh/${encodeURIComponent(request.id)}`);
     if (!polled.ok) throw new Error("refresh status unavailable");
     request = await polled.json();
   }
@@ -156,8 +156,8 @@ async function loadAIUsage(force = false) {
     // USR-234: the button asks the metering host to re-measure and waits for the request to close.
     if (force) await requestAccountRefresh(button);
     const [accountsResponse, modelsResponse] = await Promise.all([
-      fetch("/api/usage/accounts"),
-      fetch("/api/usage/models"),
+      hubNetFetch("/api/usage/accounts"),
+      hubNetFetch("/api/usage/models"),
     ]);
     if (!accountsResponse.ok || !modelsResponse.ok) throw new Error("usage endpoint unavailable");
     usageState.accounts = await accountsResponse.json();

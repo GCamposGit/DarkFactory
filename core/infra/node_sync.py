@@ -589,6 +589,17 @@ def verify(
         "VPS", vps_url, expected, http, unknown_without_sha=True,
         retries=retries, retry_delay=retry_delay, sleep=sleep,
     )
+    if vps.state == "divergent" and vps.git_sha:
+        # USR-207: a merge that only touches ledger/docs/tests leaves the Hub image unchanged on purpose.
+        try:
+            from core.infra import deploy_classifier
+
+            changed = [p for p in git(root, ["diff", "--name-only", vps.git_sha, expected]).splitlines() if p.strip()]
+            rebuild, why = deploy_classifier.classify(vps.git_sha, expected, changed)
+            if not rebuild:
+                vps = vps.model_copy(update={"state": "converged", "reason": f"imagem inalterada: {why}"})
+        except Exception:
+            pass
     if track_divergence:
         for node in (notebook, desktop, vps):
             record_divergence_cycle(node.name, node.state, notifier=notifier)

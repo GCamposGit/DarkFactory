@@ -78,7 +78,7 @@ async function loadPortfolioOverview() {
   }
 
   try {
-    const res = await fetch("/api/portfolio");
+    const res = await hubNetFetch("/api/portfolio");
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
     portfolioState.data = data;
@@ -247,7 +247,7 @@ async function inspectPortfolioProject(projectId) {
   `;
 
   try {
-    const res = await fetch(`/api/portfolio/projects/${encodeURIComponent(projectId)}`);
+    const res = await hubNetFetch(`/api/portfolio/projects/${encodeURIComponent(projectId)}`);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const detail = await res.json();
     portfolioState.selectedProject = detail;
@@ -432,7 +432,7 @@ async function loadPortfolioEfficiency() {
   `;
 
   try {
-    const res = await fetch("/api/portfolio/efficiency");
+    const res = await hubNetFetch("/api/portfolio/efficiency");
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const eff = await res.json();
     portfolioState.efficiency = eff;
@@ -524,7 +524,7 @@ async function loadPortfolioArchetypes() {
   `;
 
   try {
-    const res = await fetch("/api/portfolio/archetypes");
+    const res = await hubNetFetch("/api/portfolio/archetypes");
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const archetypes = await res.json();
     portfolioState.archetypes = archetypes;

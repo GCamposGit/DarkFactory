@@ -114,7 +114,7 @@ async function loadCredits(force = false) {
   try {
     const endpoint = force ? "/api/credits/refresh" : "/api/credits";
     const method = force ? "POST" : "GET";
-    const response = await fetch(endpoint, { method });
+    const response = await hubNetFetch(endpoint, { method });
     if (!response.ok) throw new Error(`Credits API failed: ${response.status}`);
     creditsState.report = await response.json();
     renderCredits();
@@ -289,7 +289,7 @@ async function promptEditCredits(providerId, currentSpend, currentCredit) {
   const creditVal = parseFloat(newCreditStr);
 
   try {
-    const res = await fetch(`/api/credits/accounts/${providerId}`, {
+    const res = await hubNetFetch(`/api/credits/accounts/${providerId}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({

@@ -23,7 +23,7 @@ async function harnessFetch(url, options = {}) {
   if (token) {
     headers.set("X-Hub-Session", token);
   }
-  return fetch(url, { ...options, headers });
+  return hubNetFetch(url, { ...options, headers });
 }
 
 function initHarness() {

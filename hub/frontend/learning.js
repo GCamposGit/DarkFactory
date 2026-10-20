@@ -76,7 +76,7 @@ async function loadLatestLearningPack() {
   }
 
   try {
-    const res = await fetch("/api/learning-packs/latest");
+    const res = await hubNetFetch("/api/learning-packs/latest");
     if (!res.ok) {
       throw new Error(res.status === 404 ? "Nenhum Learning Pack gerado ainda." : "Falha ao carregar Learning Pack");
     }
@@ -103,7 +103,7 @@ async function loadLearningPacks() {
   }
 
   try {
-    const res = await fetch("/api/learning-packs");
+    const res = await hubNetFetch("/api/learning-packs");
     if (!res.ok) throw new Error("Falha ao listar Learning Packs");
     const packs = await res.json();
     learningUi.packs = packs;
@@ -128,7 +128,7 @@ async function inspectLearningPack(packId) {
   switchLearningTab("latest");
 
   try {
-    const res = await fetch(`/api/learning-packs/${encodeURIComponent(packId)}`);
+    const res = await hubNetFetch(`/api/learning-packs/${encodeURIComponent(packId)}`);
     if (!res.ok) throw new Error("Falha ao carregar o pack selecionado");
     const pack = await res.json();
     learningUi.selectedPack = pack;

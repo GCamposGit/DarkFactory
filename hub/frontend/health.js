@@ -82,7 +82,7 @@ async function healthFetchJson(url) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), FACTORY_HEALTH_TIMEOUT_MS);
   try {
-    const response = await fetch(url, {
+    const response = await hubNetFetch(url, {
       signal: controller.signal,
       headers: { Accept: "application/json" },
     });

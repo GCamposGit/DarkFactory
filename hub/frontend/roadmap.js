@@ -75,7 +75,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
 async function loadRoadmapProjects() {
   try {
-    const response = await fetch("/api/projects");
+    const response = await hubNetFetch("/api/projects");
     if (!response.ok) throw new Error("Não foi possível consultar os projetos");
     roadmapUi.projects = await response.json();
     const selected = roadmapUi.projects.find((project) => project.id === roadmapUi.projectId);
@@ -169,7 +169,7 @@ async function loadRoadmapSnapshot() {
   });
   try {
     const query = params.toString() ? `?${params.toString()}` : "";
-    const response = await fetch(`/api/projects/${encodeURIComponent(roadmapUi.projectId)}/roadmap${query}`);
+    const response = await hubNetFetch(`/api/projects/${encodeURIComponent(roadmapUi.projectId)}/roadmap${query}`);
     if (!response.ok) {
       const detail = await response.json().catch(() => ({}));
       throw new Error(detail.detail || "Não foi possível consultar o snapshot");
@@ -464,7 +464,7 @@ async function selectRoadmapItem(itemId) {
   detail.classList.remove("hidden");
   detail.innerHTML = '<div class="roadmap-empty-state">Carregando proveniência…</div>';
   try {
-    const response = await fetch(`/api/projects/${encodeURIComponent(roadmapUi.projectId)}/roadmap/items/${encodeURIComponent(itemId)}`);
+    const response = await hubNetFetch(`/api/projects/${encodeURIComponent(roadmapUi.projectId)}/roadmap/items/${encodeURIComponent(itemId)}`);
     if (!response.ok) throw new Error("Item não encontrado no snapshot");
     const item = await response.json();
     detail.innerHTML = renderRoadmapDetail(item);
@@ -595,7 +595,7 @@ async function loadRoadmapHealth(projectId) {
   const container = document.getElementById("roadmap-health-view");
   if (container) container.innerHTML = '<div class="roadmap-empty-state">Consultando saúde do roadmap canônico…</div>';
   try {
-    const response = await fetch(`/api/projects/${encodeURIComponent(projectId)}/roadmap/health`);
+    const response = await hubNetFetch(`/api/projects/${encodeURIComponent(projectId)}/roadmap/health`);
     if (!response.ok) {
       const detail = await response.json().catch(() => ({}));
       throw new Error(detail.detail || "Não foi possível consultar a saúde do roadmap");
@@ -694,7 +694,7 @@ async function loadRoadmapHistory(projectId) {
   const container = document.getElementById("roadmap-history-view");
   if (container) container.innerHTML = '<div class="roadmap-empty-state">Consultando histórico de snapshots…</div>';
   try {
-    const response = await fetch(`/api/projects/${encodeURIComponent(projectId)}/roadmap/history`);
+    const response = await hubNetFetch(`/api/projects/${encodeURIComponent(projectId)}/roadmap/history`);
     if (!response.ok) {
       const detail = await response.json().catch(() => ({}));
       throw new Error(detail.detail || "Não foi possível consultar o histórico do roadmap");
@@ -806,7 +806,7 @@ async function executeRoadmapCompare() {
 
   try {
     const url = `/api/projects/${encodeURIComponent(roadmapUi.projectId)}/roadmap/history/compare?from_snapshot=${encodeURIComponent(fromSnapshot)}&to_snapshot=${encodeURIComponent(toSnapshot)}`;
-    const response = await fetch(url);
+    const response = await hubNetFetch(url);
     if (!response.ok) {
       const detail = await response.json().catch(() => ({}));
       throw new Error(detail.detail || "Falha na comparação de snapshots");
@@ -867,7 +867,7 @@ function clearRoadmapFilters() {
 async function loadRoadmapProgress(projectId) {
   if (!projectId) return;
   try {
-    const response = await fetch(`/api/projects/${encodeURIComponent(projectId)}/roadmap/progress`);
+    const response = await hubNetFetch(`/api/projects/${encodeURIComponent(projectId)}/roadmap/progress`);
     if (!response.ok) return;
     const progress = await response.json();
     renderRoadmapProgress(progress);

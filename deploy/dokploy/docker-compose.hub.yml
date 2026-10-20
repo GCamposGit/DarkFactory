@@ -20,6 +20,15 @@ services:
     # USR-212: hostname fallback for core.infra.metrics.resolve_host_node_id (darkhub-* => VPS)
     hostname: darkhub-cloud-247
     restart: unless-stopped
+    # USR-207: Traefik only routes to a healthy container, and a deploy is only "done" once /health answers.
+    # Phase 2 (start-first, no container_name) is in docs/proposals/USR-207-zero-downtime.md.
+    stop_grace_period: 20s
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=4)"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
     environment:
       - PORT=8000
       # USR-212: node identity of this Hub (the VPS), never the Notebook default
