@@ -5131,8 +5131,8 @@
     "project_id": "darkfac",
     "title": "Registro de modelos autonomo: descoberta, qualificacao, promocao e rollback sem edicao manual",
     "origin": "user",
-    "status": "completed",
-    "delivery_evidence": "44a2f56f4d9549869e4e33c28e9f6ec4208b3c83. Fatia 2 (migracao de ids) entregue em 20/10/2026; fatias 3-8 pendentes em docs/plans/USR-185-slices.md",
+    "status": "planned",
+    "delivery_evidence": "Reaberto em 20/10/2026: fatias 1-2 entregues (#475 e fatia 2); fatias 2b-8 pendentes em docs/plans/USR-185-slices.md (anterior: 44a2f56f4d9549869e4e33c28e9f6ec4208b3c83. Fatia 2 (migracao de ids) entregue em 20/10/2026; fatias 3-8 pendentes em docs/plans/USR-185-slices.md)",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "later",
@@ -5164,7 +5164,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-09T07:01:39.369233Z",
-    "updated_at": "2026-10-20T15:20:00.000000Z"
+    "updated_at": "2026-10-20T15:01:38.954380Z"
   },
   {
     "id": "USR-186",
