@@ -5781,8 +5781,8 @@
     "project_id": "darkfac",
     "title": "Sessoes interativas e subagentes de todos os harnesses publicam no registro de execucoes",
     "origin": "user",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "356eabdf97ec0f1ea0c166aa04ba7a953875a68d",
     "item_type": "infrastructure",
     "lifecycle_stage": "execution",
     "horizon": "later",
@@ -5818,7 +5818,7 @@
       "USR-208"
     ],
     "created_at": "2026-10-10T14:53:54.302042Z",
-    "updated_at": "2026-10-11T17:49:17.206876Z"
+    "updated_at": "2026-10-20T11:20:34.306341Z"
   },
   {
     "id": "USR-210",
