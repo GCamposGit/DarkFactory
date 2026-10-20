@@ -91,12 +91,13 @@ Piso de cota: 15%. Marcadores proibidos em papel autonomo: `fable`, `claude-fabl
 <!-- BEGIN model-registry:catalog -->
 | Modelo (id) | Provedor | Familia | Faixa | Aliases | Status | Entrada US$/Mtok | Saida US$/Mtok | Contexto |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| `claude-3-7-sonnet` | anthropic | claude | mid | `claude-legacy-sonnet` | deprecated | - | - | 200000 |
+| `claude-3-7-sonnet` | anthropic | claude | mid | `claude-legacy-sonnet`, `legacy-sonnet` | deprecated | - | - | 200000 |
 | `claude-fable-5-1` | anthropic | claude | frontier | `fable` | candidate (proibido autonomo) | 3.0 | 15.0 | 200000 |
 | `claude-haiku-5-5` | anthropic | claude | low | `haiku` | active | - | - | - |
 | `claude-opus-5` | anthropic | claude | high | `opus-legacy` | deprecated | 5.0 | 25.0 | 200000 |
 | `claude-opus-5-5` | anthropic | claude | high | `opus` | active | - | - | - |
 | `claude-sonnet-5-5` | anthropic | claude | mid | `sonnet` | active | - | - | - |
+| `deepseek-coder` | deepseek | deepseek | low | `coder-legacy` | deprecated | - | - | - |
 | `deepseek/deepseek-r1` | deepseek | deepseek | high | `deepseek-r1` | deprecated | - | - | 128000 |
 | `deepseek/deepseek-v4-pro` | deepseek | deepseek | high | `deepseek-v4-pro` | candidate | - | - | 256000 |
 | `deepseek/deepseek-v4.1-flash` | deepseek | deepseek | low | `deepseek-flash` | active | 0.15 | 0.6 | 1048576 |
