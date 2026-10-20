@@ -9445,5 +9445,44 @@
     "dependencies": [],
     "created_at": "2026-10-20T19:28:12.864488Z",
     "updated_at": "2026-10-20T19:28:12.864493Z"
+  },
+  {
+    "id": "USR-321",
+    "project_id": "darkfac",
+    "title": "Stabilize remote environment isolation child pytest timeout on Windows",
+    "origin": "agent",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "quality",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand",
+      "quality",
+      "flaky_test",
+      "root_cause_debug"
+    ],
+    "problem_statement": "Official gate snapshot d83bd2a4bb81a7163e5893a3019ba6fdf7f006ad on Windows failed only tests/test_remote_environment_isolation.py::test_polluted_worker_environment_is_removed_before_child_tests_run. The test's nested pytest process exceeded its hard-coded 30-second subprocess timeout under xdist load; the failure traceback ended in subprocess.TimeoutExpired, while 4,834 tests passed and 38 skipped. This is outside T2; investigate whether the timeout is test startup contention or an environment-scrubbing regression, then make the isolation check reliable under the official Windows gate.",
+    "core_journey": [
+      "Executar o teste de isolamento do ambiente dentro do gate Windows com xdist.",
+      "Confirmar que o processo pytest filho inicia dentro do limite sem deixar variáveis de worker."
+    ],
+    "non_goals": [
+      "Não alterar core/harness nem mudar a política de roteamento de workers.",
+      "Não remover a verificação de que o ambiente filho está limpo."
+    ],
+    "reachability_contract": "python -m pytest tests/test_remote_environment_isolation.py::test_polluted_worker_environment_is_removed_before_child_tests_run -q",
+    "acceptance_criteria": [
+      "Reproduce or explain the nested pytest startup exceeding 30 seconds under the official Windows xdist gate, with evidence distinguishing resource contention from leaked worker environment.",
+      "Preserve the assertion that all AMBIENT_REMOTE_INFRA_ENV variables are absent in the child pytest process.",
+      "Run the focused isolation test under Windows and the official gate with no timeout failure."
+    ],
+    "suggested_files": [
+      "tests/test_remote_environment_isolation.py"
+    ],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-20T20:04:19.648201Z",
+    "updated_at": "2026-10-20T20:04:19.648208Z"
   }
 ]

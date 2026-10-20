@@ -28,7 +28,7 @@ def render_answered_decisions(
         if matches_project or matches_ticket:
             relevant.append(action)
     if not relevant:
-        return "(nenhuma decisao respondida relevante registrada)"
+        return ""
 
     lines = ["Decisoes ja respondidas pelo Owner (nao reabra estas escolhas):"]
     for action in relevant[:max_items]:

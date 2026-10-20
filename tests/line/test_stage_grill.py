@@ -114,6 +114,50 @@ def test_no_blocking_questions_immediate_success(project, monkeypatch):
     assert not sent  # no Telegram message when nothing blocks
 
 
+def test_run_grill_prompt_includes_pilot_hello_owner_decisions(project, monkeypatch, tmp_path):
+    from core.owner_actions.decisions import render_answered_decisions
+    from core.owner_actions.models import DecisionAnswer, OwnerAction
+    from core.owner_actions.store import OwnerActionStore
+
+    pilot = ProjectDescriptor(id="pilot-hello", name="pilot-hello", repo_url=project.repo_url)
+    actions = OwnerActionStore(tmp_path / "owner_actions.json", remote_ref=None)
+    actions.upsert(OwnerAction(
+        id="OA-042", kind="decision", title="Piloto pilot-hello", status="done",
+        project_id="pilot-hello",
+        options=[{"id": "accepted", "label": "Aceitar D1-D5"}, {"id": "custom", "label": "Personalizar"}],
+        answer=DecisionAnswer(
+            option_id="accepted",
+            note="nome pilot-hello; texto 'DarkFac pilot'; deploy opcao A; manter arquivado; build no venv",
+        ),
+    ))
+    prior = render_answered_decisions(store=actions, project_id=pilot.id, ticket_id="USR-279")
+    seen = {}
+
+    def fake_agent(_stage, prompt, *_args, **_kwargs):
+        seen["prompt"] = prompt
+        return _fake_agent_reply({"questions": [], "assumptions": ["seguir premissas"], "is_product_scale": False})
+
+    monkeypatch.setattr(stage_grill, "run_read_agent", fake_agent)
+    result = run_grill(pilot, "run-pilot", "Executar M3", prior_decisions=prior)
+
+    assert result.outcome == "success"
+    for expected in ("OA-042", "pilot-hello", "DarkFac pilot", "opcao A", "manter arquivado", "venv"):
+        assert expected in seen["prompt"]
+
+
+def test_run_grill_keeps_premise_fallback_when_no_prior_decisions(project, monkeypatch):
+    seen = {}
+
+    def fake_agent(_stage, prompt, *_args, **_kwargs):
+        seen["prompt"] = prompt
+        return _fake_agent_reply({"questions": [], "assumptions": [], "is_product_scale": False})
+
+    monkeypatch.setattr(stage_grill, "run_read_agent", fake_agent)
+    run_grill(project, "run-no-prior-decisions", "Demanda sem decisoes", prior_decisions="")
+
+    assert "## Premissas conhecidas do projeto (se houver)\n\n(nenhuma premissa anterior)" in seen["prompt"]
+
+
 def test_no_blocking_questions_is_idempotent_on_replay(project, monkeypatch):
     reply = _fake_agent_reply({"questions": [], "assumptions": ["ok"], "is_product_scale": False})
     calls = {"n": 0}
