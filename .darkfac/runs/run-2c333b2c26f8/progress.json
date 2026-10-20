@@ -1,8 +1,9 @@
 {
   "harness": "codex",
   "model": "gpt-6-luna",
-  "effort": "high",
+  "effort": null,
   "tickets_done": [
-    "T1"
+    "T1",
+    "T2"
   ]
 }

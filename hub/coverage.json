@@ -442,6 +442,9 @@
     "evolution": {
       "surface": "evolution-status-container"
     },
+    "evidence": {
+      "internal": "Validadores documentais headless para contratos de evidência e auditoria; consumidos por relatórios e testes, sem superfície de operação no Hub."
+    },
     "execution": {
       "surface": "playground-drawer"
     },

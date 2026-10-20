@@ -89,6 +89,8 @@ M7 - Relatorio final
 2. Falhas encontradas retomadas ou diagnosticadas, cada uma com commit/PR ou ticket formal.
 3. D4 executada ou registrada como acao do owner; criterios 2 e 3 do USR-279 marcados com evidencia.
 
+Registro M7 (2026-10-20): relatorio publicado em `docs/evidence/USR-279-M7.md` e inventario em `docs/evidence/USR-279-M7-falhas.md`. M1/M2 confirmados dentro das evidencias existentes; M3-M6 e os criterios 2/3 do USR-279 permanecem pendentes. D4 (“manter arquivado”) esta registrada na decisao OA-042; arquivamento continua sendo acao posterior do owner.
+
 ## 7. Acoes do owner necessarias (a registrar como OA pelo orquestrador)
 
 1. Responder D1-D5 (secao 5) - prioridade high; bloqueia M1 e M5.

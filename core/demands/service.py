@@ -108,6 +108,19 @@ class DemandsService:
         logger.info(f"Updating user demand ticket {ticket_id} status to {status.value}")
         return self.store.update_status(ticket_id, status, notes=notes)
 
+    def update_ticket_delivery_evidence(self, ticket_id: str, evidence: str) -> UserTicket:
+        """Update delivery evidence without changing the ticket's lifecycle status."""
+        if not evidence.strip():
+            raise ValueError("Delivery evidence cannot be empty")
+        ticket = self.get_ticket(ticket_id)
+        if ticket is None:
+            raise KeyError(f"Ticket '{ticket_id}' not found")
+        return self.store.update_status(
+            ticket_id,
+            ticket.status,
+            delivery_evidence=evidence.strip(),
+        )
+
     def start_grill_session(
         self,
         ticket_id: str,

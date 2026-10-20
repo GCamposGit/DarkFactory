@@ -71,6 +71,10 @@ def main() -> int:
     status_p.add_argument("new_status", choices=[s.value for s in DeliveryStatus])
     status_p.add_argument("--notes", default=None, help="Status change notes")
 
+    evidence_p = subparsers.add_parser("evidence", help="Update ticket delivery evidence without changing status")
+    evidence_p.add_argument("ticket_id", help="Ticket ID (e.g. USR-279)")
+    evidence_p.add_argument("--text", required=True, help="Auditable delivery evidence text")
+
     # grill command
     grill_p = subparsers.add_parser("grill", help="Conduct clarifying Q&A (Grill) to stress scope and refine a ticket")
     grill_p.add_argument("ticket_id", help="Ticket ID (e.g. USR-09)")
@@ -261,6 +265,15 @@ def main() -> int:
             print(f"[OK] Ticket {updated.id} atualizado para status: {updated.status.value}")
             return 0
         except (KeyError, ValueError) as exc:  # ValueError: completed without delivery_evidence (USR-94)
+            print(f"[ERRO] {exc}", file=sys.stderr)
+            return 1
+
+    elif args.command == "evidence":
+        try:
+            updated = service.update_ticket_delivery_evidence(args.ticket_id, args.text)
+            print(f"[OK] Evidencia de entrega atualizada para {updated.id} (status: {updated.status.value})")
+            return 0
+        except (KeyError, ValueError, AttributeError) as exc:
             print(f"[ERRO] {exc}", file=sys.stderr)
             return 1
 
