@@ -47,6 +47,13 @@ Esperado: JSON com `status` ok, `busy` false, `platform_family` linux. `tailscal
 
 ## 4. Quem mantem o worker de pe (scripts/grokbox_supervisor.py)
 
+> **Atencao (20/10/2026):** NAO substitua o `grokbox-supervisor.sh` que roda hoje na VM por este script.
+> O supervisor da VM tambem recupera o Tailscale apos cada congelamento (`tailscale up` + restart do tailscaled),
+> mantem o watchdog e confere venv/requirements, e o bootstrap o relanca se ele sumir (dois supervisores
+> brigariam pelo worker). O caminho e levar a regra de recarga deste script (`decide()`: comparar o HEAD com
+> o sha em que o PROPRIO supervisor lancou o worker; o `git_sha` do `/health` e calculado do HEAD na hora e
+> nao prova que o processo recarregou) para dentro do `grokbox-supervisor.sh`, e versionar esse script aqui.
+
 A VM NAO tem `systemctl` nem `journalctl` (verificado em 18/10/2026, OA-035) e nao vamos instalar systemd.
 O supervisor esta versionado em `scripts/grokbox_supervisor.py` (Python 3 stdlib, USR-315). Ele lanca
 `core/harness/remote_worker.py --host 0.0.0.0 --port 8080 --node-id grokbox --project-root <root>`,

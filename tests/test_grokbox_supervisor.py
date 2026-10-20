@@ -38,6 +38,12 @@ def test_head_changed_idle_reloads(sup):
     assert sup.decide(state(sup, head_sha=NEW)) == sup.RELOAD
 
 
+def test_health_sha_follows_head_but_old_process_still_reloads(sup):
+    # Regression (20/10/2026): /health reports the HEAD sha computed on request, so after `git pull` it shows
+    # NEW while the process still runs the code launched at OLD.
+    assert sup.decide(state(sup, head_sha=NEW, health_sha=NEW, launch_sha=OLD)) == sup.RELOAD
+
+
 def test_head_changed_busy_waits(sup):
     assert sup.decide(state(sup, head_sha=NEW, health_busy=True)) == sup.WAIT
 

@@ -53,7 +53,9 @@ def decide(state: State) -> str:
     head = (state.head_sha or "").strip().lower()
     if not head:
         return NOOP
-    running = (state.health_sha or state.launch_sha or "").strip().lower()
+    # /health computes git_sha from HEAD at request time, not from the code the worker loaded, so after a
+    # pull it already reports the new sha with the old process: only the sha WE launched is trustworthy.
+    running = (state.launch_sha or "").strip().lower()
     if running == head:
         return NOOP
     # HEAD mudou: so recarrega com certeza de que esta ocioso.

@@ -1650,44 +1650,39 @@
     {
       "id": "OA-040",
       "kind": "action",
-      "title": "Trocar o supervisor do grokbox pelo scripts/grokbox_supervisor.py versionado (USR-315)",
+      "title": "Grokbox: levar a recarga do worker no HEAD novo para o grokbox-supervisor.sh e versiona-lo (USR-315)",
       "priority": "medium",
       "status": "open",
-      "why": "O supervisor atual vive so na VM, fora do repositorio, e nao recarregou o worker ocioso apos git pull em 18/10 (USR-315). O USR-315 (#456) versionou um supervisor novo que relanca o worker em ate 60 s quando o HEAD muda e o worker esta ocioso, nunca com job rodando. So quem acessa a VM pode troca-lo.",
+      "why": "O supervisor atual da VM (grokbox-supervisor.sh) recupera o Tailscale, mantem o watchdog e confere o venv, mas nao recarrega o worker quando o HEAD muda (USR-315). Nao substituir o script: incluir nele a regra de recarga e versiona-lo no repositorio. So quem acessa a VM faz isso.",
       "blocks": [
         "USR-315"
       ],
       "depends_on": [],
       "steps": [
         {
-          "text": "Na VM grokbox, atualizar o checkout para a main.",
-          "command": "cd /workspace/darkfac/DarkFactory && git pull --ff-only"
+          "text": "Na VM, envie o conteudo atual do supervisor para o agente versionar (cole no chat).",
+          "command": "cat <caminho>/grokbox-supervisor.sh"
         },
         {
-          "text": "Esperar o worker ficar ocioso (busy=false) antes de mexer no supervisor.",
-          "command": "curl -s http://127.0.0.1:8080/health | python3 -c \"import json,sys; print(json.load(sys.stdin)['busy'])\""
+          "text": "Inclua no grokbox-supervisor.sh a regra de recarga: guardar o sha do HEAD no momento em que o supervisor lanca o worker (LAUNCH_SHA); a cada ciclo, se git rev-parse HEAD != LAUNCH_SHA e /health disser busy=false, encerrar o worker (SIGTERM, 20 s, depois SIGKILL) e relancar, atualizando LAUNCH_SHA. Nunca usar o git_sha do /health para decidir (ele e calculado do HEAD na hora). Referencia: decide() em scripts/grokbox_supervisor.py.",
+          "command": ""
         },
         {
-          "text": "Parar o supervisor antigo (o processo do script atual da VM; o worker pode continuar de pe, o novo supervisor o adota e nao lanca outro na mesma porta).",
-          "command": "pkill -f <nome-do-script-supervisor-antigo>"
-        },
-        {
-          "text": "Iniciar o supervisor novo em segundo plano, conforme docs/runbooks/grokbox_test_worker.md secao 4.",
-          "command": "mkdir -p /workspace/darkfac/run && nohup python3 scripts/grokbox_supervisor.py >> /workspace/darkfac/run/supervisor.log 2>&1 &"
-        },
-        {
-          "text": "Como o worker atual nao foi lancado pelo supervisor novo, encerrar o worker uma vez com ele ocioso para o supervisor novo assumir (relanca em ate 10 s).",
-          "command": "pkill -TERM -f core/harness/remote_worker.py"
-        },
-        {
-          "text": "Conferir o log do supervisor e o /health com o git_sha da main.",
-          "command": "tail -n 20 /workspace/darkfac/run/supervisor.log; curl -s http://127.0.0.1:8080/health"
+          "text": "Teste: com o worker ocioso, faca git pull de um commit novo e confira que o instance_id do /health muda em ate 60 s.",
+          "command": "curl -s http://127.0.0.1:8080/health"
         }
       ],
-      "verify": "/health responde com git_sha igual ao HEAD de /workspace/darkfac/DarkFactory; depois de um novo git pull com o worker ocioso, o git_sha muda sozinho em ate 60 s.",
+      "verify": "Apos git pull com o worker ocioso, o instance_id do /health muda em ate 60 s; com busy=true a recarga espera o job.",
       "created_at": "2026-10-19T19:28:16Z",
       "created_by": "claude-code (sessao 19/10/2026)",
-      "resolved_at": null
+      "resolved_at": null,
+      "history": [
+        {
+          "at": "2026-10-20T11:20:23Z",
+          "outcome": "steps_updated",
+          "note": "Grok (operador da VM) apontou que trocar o supervisor removeria a recuperacao do Tailscale e que o git_sha do /health vem do HEAD; OA reescrita para integrar."
+        }
+      ]
     },
     {
       "id": "OA-041",
