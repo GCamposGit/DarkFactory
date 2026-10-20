@@ -68,6 +68,10 @@ contexto e datas. Aceite: fixture offline; nunca promove sozinho; respeita o tet
 
 ## Fatia 6 - Qualificacao
 
+Entregue: `core/models/qualification.py` + `scripts/qualify_model.py` (bateria em `.factory/config/qualification_battery.json`, executor injetavel, orcamento USD/tokens, evidencia em `.factory/models/qualification/<id>.json`, campo `qualification` no `ModelEntry`; `active` exige qualificacao `approved`/`grandfathered`). Teste: `tests/test_model_qualification_usr185.py`.
+
+Escopo original:
+
 Bateria deterministica (contrato, ferramentas, tarefas de referencia da fabrica) com orcamento maximo e evidencia
 persistida; resultado grava o registro de qualificacao do candidato. Aceite: candidato sem qualificacao aprovada nao
 vira `active` (validador); custo respeita o teto.

@@ -6,7 +6,7 @@ When the file is missing or invalid, an embedded fallback (the Claude 5.5 family
 Invariants enforced by the validator (the protected rules, now testable):
 * a forbidden-autonomous model (fable, astra, ...) can never be bound to a role;
 * the reviewer of a review pair must be of a different family than the implementer;
-* a role can only route to a model whose status is ``active`` (approved qualification);
+* a role can only route to a model whose status is ``active``, and ``active`` requires an approved (or grandfathered) qualification;
 * the quota floor can never be below 15%.
 """
 
@@ -27,6 +27,20 @@ DEFAULT_REGISTRY_PATH = REPO_ROOT / ".factory" / "config" / "model_registry.json
 QUOTA_FLOOR_MIN = 15.0
 
 ModelStatus = Literal["candidate", "active", "deprecated", "retired"]
+QualificationStatus = Literal["approved", "failed", "grandfathered"]
+QUALIFIED_STATUSES = ("approved", "grandfathered")
+
+
+class QualificationRecord(BaseModel):
+    """Result of the qualification battery (USR-185 slice 6); evidence lives in ``evidence_path``."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    status: QualificationStatus
+    battery_version: Optional[str] = None
+    qualified_at: Optional[str] = None
+    cost_usd: float = Field(default=0.0, ge=0)
+    evidence_path: Optional[str] = None
 
 
 class ModelEntry(BaseModel):
@@ -49,6 +63,7 @@ class ModelEntry(BaseModel):
     retirement_date: Optional[str] = None
     discovered_at: Optional[str] = None  # set by autonomous discovery (slice 5)
     source: Optional[str] = None  # discovery source name (e.g. openrouter)
+    qualification: Optional[QualificationRecord] = None
 
 
 class ReviewPair(BaseModel):
@@ -105,6 +120,9 @@ class ModelRegistry(BaseModel):
                 raise ValueError(
                     f"reviewer {pair.reviewer!r} is the same family as implementer {pair.implementer!r}"
                 )
+        for entry in self.models:
+            if entry.status == "active" and (entry.qualification is None or entry.qualification.status not in QUALIFIED_STATUSES):
+                raise ValueError(f"model {entry.id!r} cannot be active without approved qualification")
         return self
 
 
@@ -114,7 +132,10 @@ def parse_registry(raw: Any) -> ModelRegistry:
 
 
 def _fb(model_id: str, provider: str, family: str, tier: str, aliases: list[str], status: str = "active", **extra: Any) -> dict[str, Any]:
-    return {"id": model_id, "provider": provider, "family": family, "tier": tier, "aliases": aliases, "status": status, **extra}
+    entry = {"id": model_id, "provider": provider, "family": family, "tier": tier, "aliases": aliases, "status": status, **extra}
+    if status == "active":
+        entry["qualification"] = {"status": "grandfathered"}
+    return entry
 
 
 # Fail-closed copy of the seeded registry (a test pins that every alias/role resolves to the same id as the file).

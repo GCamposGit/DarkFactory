@@ -29,7 +29,10 @@
       ],
       "forbidden_autonomous": false,
       "release_date": null,
-      "retirement_date": null
+      "retirement_date": null,
+      "qualification": {
+        "status": "grandfathered"
+      }
     },
     {
       "id": "claude-sonnet-5-5",
@@ -53,7 +56,10 @@
       ],
       "forbidden_autonomous": false,
       "release_date": null,
-      "retirement_date": null
+      "retirement_date": null,
+      "qualification": {
+        "status": "grandfathered"
+      }
     },
     {
       "id": "claude-haiku-5-5",
@@ -77,7 +83,10 @@
       ],
       "forbidden_autonomous": false,
       "release_date": null,
-      "retirement_date": null
+      "retirement_date": null,
+      "qualification": {
+        "status": "grandfathered"
+      }
     },
     {
       "id": "claude-fable-5-1",
@@ -148,7 +157,10 @@
       ],
       "forbidden_autonomous": false,
       "release_date": null,
-      "retirement_date": null
+      "retirement_date": null,
+      "qualification": {
+        "status": "grandfathered"
+      }
     },
     {
       "id": "gpt-6-astra",
@@ -197,7 +209,10 @@
       ],
       "forbidden_autonomous": false,
       "release_date": null,
-      "retirement_date": null
+      "retirement_date": null,
+      "qualification": {
+        "status": "grandfathered"
+      }
     },
     {
       "id": "grok-4.6",
@@ -222,7 +237,10 @@
       "retirement_date": null,
       "gateway_ids": [
         "xai/grok-4.6"
-      ]
+      ],
+      "qualification": {
+        "status": "grandfathered"
+      }
     },
     {
       "id": "grok-4.7",
@@ -243,7 +261,10 @@
       ],
       "forbidden_autonomous": false,
       "release_date": null,
-      "retirement_date": null
+      "retirement_date": null,
+      "qualification": {
+        "status": "grandfathered"
+      }
     },
     {
       "id": "gemini-3.8-flash",
@@ -268,7 +289,10 @@
       "retirement_date": null,
       "gateway_ids": [
         "google/gemini-3.8-flash"
-      ]
+      ],
+      "qualification": {
+        "status": "grandfathered"
+      }
     },
     {
       "id": "deepseek/deepseek-v4.1-flash",
@@ -289,7 +313,10 @@
       ],
       "forbidden_autonomous": false,
       "release_date": null,
-      "retirement_date": null
+      "retirement_date": null,
+      "qualification": {
+        "status": "grandfathered"
+      }
     },
     {
       "id": "deepseek/deepseek-v4-pro",
