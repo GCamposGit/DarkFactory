@@ -61,7 +61,7 @@ Escopo original:
 Gerar de `model_registry.json` as secoes de docs/skills que listam modelos (marcadores BEGIN/END). Aceite: comando
 idempotente; teste de deriva falha se o doc gerado divergir do registro.
 
-## Fatia 5 - Descoberta
+## Fatia 5 - Descoberta (ENTREGUE em 20/10/2026)
 
 Job (sem chamadas pagas por padrao) que lista modelos novos dos provedores e registra como `candidate`, com preco,
 contexto e datas. Aceite: fixture offline; nunca promove sozinho; respeita o teto de gasto configurado.
