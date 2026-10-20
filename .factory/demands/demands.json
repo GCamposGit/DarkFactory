@@ -7534,8 +7534,8 @@
     "project_id": "darkfac",
     "title": "Watchdog do job em remote_worker.py conta a fila do suite_lock do Desktop no prazo do job",
     "origin": "user",
-    "status": "completed",
-    "delivery_evidence": "797eb891d88aff7e373cfcc5151a047ee2eb3941",
+    "status": "planned",
+    "delivery_evidence": "Patch em docs/proposals/USR-253-watchdog-suite-lock.patch (core/harness protegido); aguardando publicacao do owner pela OA-041. (anterior: 797eb891d88aff7e373cfcc5151a047ee2eb3941)",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "later",
@@ -7558,7 +7558,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-13T00:30:14.404999Z",
-    "updated_at": "2026-10-20T10:24:25.493307Z"
+    "updated_at": "2026-10-20T11:20:23.207071Z"
   },
   {
     "id": "USR-255",
@@ -9218,8 +9218,8 @@
     "project_id": "darkfac",
     "title": "Supervisor do grokbox nao recarrega o worker ocioso quando o HEAD muda e nao esta versionado no repositorio",
     "origin": "agent",
-    "status": "completed",
-    "delivery_evidence": "5de6a9c697c2a393d494b64396a693b587069378",
+    "status": "planned",
+    "delivery_evidence": "Reaberto em 20/10/2026: a 1a versao comparava com o git_sha do /health, que e calculado do HEAD na hora e nunca dispararia a recarga (achado do Grok na VM); corrigido para comparar com o sha lancado pelo proprio supervisor. Falta levar a regra para o grokbox-supervisor.sh da VM e versiona-lo (OA-040 reescrita) e provar a recarga em ate 60 s. (anterior: 5de6a9c697c2a393d494b64396a693b587069378)",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -9248,7 +9248,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-18T20:25:34.048076Z",
-    "updated_at": "2026-10-19T15:15:18.098069Z"
+    "updated_at": "2026-10-20T11:20:23.189046Z"
   },
   {
     "id": "USR-316",
