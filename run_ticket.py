@@ -1110,11 +1110,11 @@ def _run_gate_with_self_correction(
             if report.ok and project.commands.build:
                 from core.projects.ticket_execution import run_project_commands
                 failure_cause = "project_build_failed"
-                report = run_project_commands(project.commands.build, target_worktree, timeout_s=int(GATE_TIMEOUT_S))
+                report = run_project_commands(project.commands.build, target_worktree, timeout_s=int(GATE_TIMEOUT_S), project=project)
             if report.ok and project.commands.smoke:
                 from core.projects.ticket_execution import run_project_commands
                 failure_cause = "project_smoke_failed"
-                report = run_project_commands(project.commands.smoke, target_worktree, timeout_s=int(GATE_TIMEOUT_S))
+                report = run_project_commands(project.commands.smoke, target_worktree, timeout_s=int(GATE_TIMEOUT_S), project=project)
         except ProjectExecutionError as exc:
             detail = str(exc)
             progress.phase("gate", "failed", detail, cause="project_validate_missing")
