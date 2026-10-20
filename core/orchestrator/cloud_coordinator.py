@@ -60,6 +60,7 @@ class CloudCoordinator:
         store: Any | None = None,
         fleet_hosts: Sequence[str] | None = None,
         host_health_prober: Callable[[str], bool | None] | None = None,
+        feeder_cycle: Any | None = None,
     ) -> None:
         self.database_url = database_url or os.environ.get("DARKFAC_HF02_DATABASE_URL")
         self.max_slots = (
@@ -81,6 +82,22 @@ class CloudCoordinator:
         self._recovered_ids: list[str] = []
         self._store_instance: Any = store
         self._uvicorn_server: Any = None
+        # USR-304: ledger -> line feeder, bounded by interval. Explicit cycle wins; otherwise built
+        # lazily from env only against a real cloud database (never against an injected test store).
+        self._feeder_cycle: Any = feeder_cycle
+        self._feeder_resolved = feeder_cycle is not None
+
+    def _resolve_feeder_cycle(self) -> Any:
+        if not self._feeder_resolved:
+            self._feeder_resolved = True
+            if self.database_url:
+                try:
+                    from core.line.feeder_cycle import FeederCycle
+
+                    self._feeder_cycle = FeederCycle.from_env(self.store, max_active=self.max_slots)
+                except Exception as exc:
+                    logger.warning("Backlog feeder cycle unavailable: %s", exc)
+        return self._feeder_cycle
 
     @property
     def store(self) -> Any:
@@ -297,6 +314,14 @@ class CloudCoordinator:
                 logger.info("Fleet admission admitted %d new cycle(s)", len(admitted))
         except Exception as exc:
             logger.warning("Fleet cycle admission scan warning: %s", exc)
+
+        # 4b. Backlog feeder: import eligible ledger tickets into the line (USR-304, every 15 min)
+        try:
+            cycle = self._resolve_feeder_cycle()
+            if cycle is not None:
+                cycle.maybe_run(now=now_utc)
+        except Exception as exc:
+            logger.warning("Backlog feeder cycle warning: %s", exc)
 
         # 5. DBOS recovery if available
         recovered: list[str] = []
