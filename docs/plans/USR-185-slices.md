@@ -86,7 +86,11 @@ Promocao `candidate -> active` somente com qualificacao aprovada; rollback autom
 (falha de portao, custo, cota); `deprecated -> retired` por data. Aceite: transicoes auditadas no ledger, rollback testado,
 nenhuma edicao manual de arquivos protegidos.
 
-## Fatia 8 - Limiares do Grill
+## Fatia 8 - Limiares do Grill (ENTREGUE em 20/10/2026)
+
+Entregue: `core/models/grill_policy.py` (`requires_grill(ModelChange, registry) -> GrillDecision(required, reasons)`, funcao pura; tipos `promote_candidate`, `assign_role`, `swap_reviewer`) e bloco `grill_thresholds` no `model_registry.json` (validado por `GrillThresholds` em `registry.py`, fallback embutido espelhado): teto de preco entrada/saida (15/75 US$/Mtok), `frontier_tiers` (`frontier`), preco desconhecido em modelo nao ativo, `min_qualification_steps` (3). Motivos: proibido/frontier, preco acima do teto, mudanca de familia em papel de revisao (ou revisor/implementador na mesma familia), qualificacao ausente/reprovada/sem evidencia/etapas puladas/orcamento estourado. Todo o resto e autonomo. A fatia 7 (ou o orquestrador) chama `requires_grill` antes de aplicar a mudanca. Teste: `tests/test_model_grill_policy_usr185.py`.
+
+Escopo original:
 
 Definir quando o Grill (WAITING_HUMAN) e obrigatorio: modelo proibido/frontier, preco acima do teto, mudanca de familia
 em papel de revisao, qualificacao ambigua. Aceite: limiares configurados no registro e cobertos por teste; todo o resto

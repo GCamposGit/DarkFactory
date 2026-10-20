@@ -8,6 +8,13 @@
     "astra",
     "gpt-6-astra"
   ],
+  "grill_thresholds": {
+    "max_price_input_per_mtok": 15.0,
+    "max_price_output_per_mtok": 75.0,
+    "frontier_tiers": ["frontier"],
+    "require_grill_on_unknown_price": true,
+    "min_qualification_steps": 3
+  },
   "models": [
     {
       "id": "claude-opus-5-5",

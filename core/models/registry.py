@@ -28,6 +28,10 @@ QUOTA_FLOOR_MIN = 15.0
 
 ModelStatus = Literal["candidate", "active", "deprecated", "retired"]
 QualificationStatus = Literal["approved", "failed", "grandfathered"]
+DEFAULT_MAX_PRICE_INPUT_PER_MTOK = 15.0
+DEFAULT_MAX_PRICE_OUTPUT_PER_MTOK = 75.0
+DEFAULT_FRONTIER_TIERS = ("frontier",)
+DEFAULT_MIN_QUALIFICATION_STEPS = 3  # contract + tools + at least one reference task
 QUALIFIED_STATUSES = ("approved", "grandfathered")
 
 
@@ -73,6 +77,18 @@ class ReviewPair(BaseModel):
     reviewer: str
 
 
+class GrillThresholds(BaseModel):
+    """When a model change must pause in the Grill / WAITING_HUMAN (USR-185 slice 8); consumed by ``grill_policy``."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    max_price_input_per_mtok: float = Field(default=DEFAULT_MAX_PRICE_INPUT_PER_MTOK, ge=0)
+    max_price_output_per_mtok: float = Field(default=DEFAULT_MAX_PRICE_OUTPUT_PER_MTOK, ge=0)
+    frontier_tiers: list[str] = Field(default_factory=lambda: list(DEFAULT_FRONTIER_TIERS))
+    require_grill_on_unknown_price: bool = True  # non-active model without price data is ambiguous
+    min_qualification_steps: int = Field(default=DEFAULT_MIN_QUALIFICATION_STEPS, ge=1)
+
+
 class ModelRegistry(BaseModel):
     model_config = ConfigDict(extra="ignore", frozen=True)
 
@@ -82,6 +98,7 @@ class ModelRegistry(BaseModel):
     models: list[ModelEntry]
     roles: dict[str, str] = Field(default_factory=dict)
     review_pairs: list[ReviewPair] = Field(default_factory=list)
+    grill_thresholds: GrillThresholds = Field(default_factory=GrillThresholds)
 
     @model_validator(mode="after")
     def _invariants(self) -> "ModelRegistry":
@@ -143,6 +160,13 @@ _EMBEDDED_FALLBACK: dict[str, Any] = {
     "schema_version": 1,
     "quota_floor_percent": QUOTA_FLOOR_MIN,
     "forbidden_autonomous_markers": ["fable", "claude-fable", "astra", "gpt-6-astra"],
+    "grill_thresholds": {
+        "max_price_input_per_mtok": DEFAULT_MAX_PRICE_INPUT_PER_MTOK,
+        "max_price_output_per_mtok": DEFAULT_MAX_PRICE_OUTPUT_PER_MTOK,
+        "frontier_tiers": list(DEFAULT_FRONTIER_TIERS),
+        "require_grill_on_unknown_price": True,
+        "min_qualification_steps": DEFAULT_MIN_QUALIFICATION_STEPS,
+    },
     "models": [
         _fb("claude-opus-5-5", "anthropic", "claude", "high", ["opus"]),
         _fb("claude-sonnet-5-5", "anthropic", "claude", "mid", ["sonnet"], gateway_ids=["claude-sonnet"]),
@@ -267,6 +291,12 @@ def resolve_known(alias_or_role: str, registry: Optional[ModelRegistry] = None) 
             )
         return entry.id
     raise KeyError(f"unknown model alias or role: {alias_or_role!r}")
+
+
+def grill_thresholds(registry: Optional[ModelRegistry] = None) -> GrillThresholds:
+    """Grill thresholds from the registry (embedded defaults when the block is absent)."""
+    reg = registry if registry is not None else get_registry()
+    return reg.grill_thresholds
 
 
 def forbidden_markers(registry: Optional[ModelRegistry] = None) -> list[str]:
