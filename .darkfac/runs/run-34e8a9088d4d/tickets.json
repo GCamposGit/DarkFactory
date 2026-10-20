@@ -1,0 +1,101 @@
+[
+  {
+    "id": "T1",
+    "title": "Demanda do Telegram com projeto explicito registra ticket no projeto roteado (prefixo PH), nao em darkfac",
+    "goal": "Fazer `/demand pilot-hello: <texto>` registrar demanda e ticket no projeto pilot-hello com id de prefixo PH e vinculo rastreavel a mensagem do Telegram, eliminando a recusa 'nada foi registrado' e o project_id='darkfac' fixo do handler do DarkHub.",
+    "files_hint": [
+      "core/integrations/telegram.py",
+      "hub/backend/service.py",
+      "tests/test_telegram_project_demand.py"
+    ],
+    "acceptance": [
+      "O gateway repassa o project_id roteado por resolve_demand ao demand_handler de forma retrocompativel (handlers de 2 argumentos existentes continuam funcionando sem alteracao nos testes atuais).",
+      "`_handle_demand` do DarkHub cria o ticket com DemandInput(project_id=<projeto roteado>); para pilot-hello o id vem com prefixo PH (via DemandsStore.next_ticket_id/get_ticket_prefix) e nenhum ticket USR- e criado.",
+      "O ticket guarda o external_id da mensagem (`tg-msg-<chat_id>-<message_id>`) em tag e/ou core_journey, permitindo correlacionar mensagem -> demanda -> ticket na evidencia.",
+      "A recusa 'Este canal nao encaminha demandas ao projeto X' passa a valer somente quando o canal nao tem nenhum caminho de registro capaz (sem intake_service e sem demand_handler); com handler disponivel a demanda e registrada.",
+      "Sem regressao do USR-278: `/demand` sem projeto continua em darkfac e projeto desconhecido continua gerando solicitacao de onboarding sem registrar demanda.",
+      "`python scripts/line_validate.py` verde."
+    ],
+    "tests_to_add": [
+      "Gateway com demand_handler: `/demand pilot-hello: pagina inicial ...` chama o handler com project_id=pilot-hello e responde com o ticket registrado (sem a mensagem de recusa).",
+      "Handler do Hub em ledger temporario com registry contendo pilot-hello: ticket criado tem project_id=pilot-hello, id iniciando em PH- e carrega o external_id da mensagem.",
+      "Regressao: `/demand <texto>` sem projeto -> darkfac; `/demand projeto-inexistente: texto` -> onboarding e nenhum ticket criado.",
+      "Compatibilidade: handler legado de dois argumentos continua sendo chamado sem erro."
+    ],
+    "smoke": [
+      "/health"
+    ]
+  },
+  {
+    "id": "T2",
+    "title": "Gate G1 nao reabre decisoes ja respondidas pelo owner (OA-042 alimenta as premissas do grill)",
+    "goal": "Levar as decisoes de owner ja respondidas e relevantes ao projeto para o slot de premissas do grill da linha e proibir explicitamente reabri-las, de modo que a demanda do pilot-hello nao receba de volta as perguntas D1-D5 fechadas na OA-042.",
+    "files_hint": [
+      "core/owner_actions/decisions.py",
+      "core/owner_actions/models.py",
+      "core/line/stage_grill.py",
+      "core/line/prompts/grill.md",
+      "core/line/bindings.py",
+      ".factory/owner_actions/owner_actions.json",
+      "tests/test_grill_prior_decisions.py"
+    ],
+    "acceptance": [
+      "Helper novo renderiza em markdown as decisoes respondidas (OwnerActionStore.answered_decisions) relevantes ao projeto do run e/ou ao ticket do run (via blocks), com limite de itens, truncamento de texto e redacao de segredo; sem decisoes relevantes retorna vazio.",
+      "OwnerAction aceita campo opcional project_id (leitores antigos seguem funcionando por extra='ignore') e a OA-042 fica marcada com project_id=pilot-hello pelo store/merge oficiais, sem reescrever answer, status ou historico.",
+      "run_grill injeta essas decisoes no slot `{grill}` do prompt junto com parent_grill; quando nao ha nada, o texto de fallback atual e preservado.",
+      "core/line/prompts/grill.md instrui o agente a nunca perguntar de novo o que aparece nas decisoes ja tomadas (e a listar o item como suposicao).",
+      "`python scripts/line_validate.py` verde."
+    ],
+    "tests_to_add": [
+      "Helper: filtra por projeto e por ticket em blocks, ignora decisoes abertas/sem answer, respeita o limite e trunca textos longos.",
+      "run_grill com agente de leitura fake: o prompt enviado contem as decisoes da OA-042 (nome pilot-hello, texto 'DarkFac pilot', deploy opcao A, manter arquivado, build no venv) para um run do projeto pilot-hello.",
+      "run_grill sem decisoes relevantes mantem exatamente o texto de fallback de premissas (sem regressao em projetos existentes)."
+    ],
+    "smoke": []
+  },
+  {
+    "id": "T3",
+    "title": "Verificador read-only do M3: correlaciona mensagem, demanda e ticket PH e prova ausencia de ticket USR-",
+    "goal": "Entregar um verificador deterministico que produza o trecho de roteamento e os fatos do M3 (horario, id do ticket, projeto, vinculo a mensagem, ausencia de ticket USR- para a entrada) para alimentar a evidencia e a decisao sobre a OA-047.",
+    "files_hint": [
+      "scripts/pilot_m3_verify.py",
+      "tests/test_pilot_m3_verify.py"
+    ],
+    "acceptance": [
+      "`python C:\\dev\\DarkFac\\scripts\\pilot_m3_verify.py --project pilot-hello` imprime: decisao de roteamento da mensagem canonica da OA-047 (resolve_demand executado contra state dir temporario, sem criar onboarding nem qualquer escrita no repositorio), demandas/tickets do projeto com id, horario e vinculo (external_id) e o resultado da checagem de ausencia de ticket USR- com o texto da entrada.",
+      "Codigos de saida distintos e documentados: 0 criterios comprovados, 2 entrada ausente (diagnostico, nada registrado ainda), 1 violacao (entrada registrada no projeto errado ou ticket USR- criado para ela).",
+      "Script e somente leitura (nao escreve em .factory, nao envia mensagem, nao chama rede), aceita `--since <iso>` para limitar a janela e usa saida UTF-8 sem emoji.",
+      "`python scripts/line_validate.py` verde."
+    ],
+    "tests_to_add": [
+      "Ledger de fixture com ticket PH- vinculado a mensagem -> exit 0 e saida citando id, projeto e horario.",
+      "Ledger sem demanda do pilot-hello -> exit 2 com diagnostico de entrada ausente.",
+      "Ledger com ticket USR- criado para o texto da entrada (ou demanda em darkfac) -> exit 1 apontando a violacao.",
+      "Execucao do script nao cria nem modifica arquivos em .factory (incluindo onboarding_requests.json)."
+    ],
+    "smoke": []
+  },
+  {
+    "id": "T4",
+    "title": "Evidencia do M3 e desfecho da OA-047 (resolver ou reabrir com diagnostico)",
+    "goal": "Rodar o verificador contra o estado real, registrar docs/evidence/USR-279-M3.md com horario, id do ticket, projeto e trecho do roteamento, e dar desfecho formal a OA-047, abrindo OA para o que so o owner pode fazer.",
+    "files_hint": [
+      "docs/evidence/USR-279-M3.md",
+      "docs/plans/USR-279-greenfield-pilot.md",
+      ".factory/owner_actions/owner_actions.json",
+      "tests/test_pilot_m3_evidence.py"
+    ],
+    "acceptance": [
+      "docs/evidence/USR-279-M3.md registra: comando e saida do verificador, horario (UTC), id e projeto do ticket (ou a constatacao de que nao houve entrada), trecho da decisao de roteamento, verificacao de que nenhum ticket USR- foi criado para a entrada e o estado do Gate G1 (perguntas geradas x decisoes da OA-042).",
+      "OA-047 recebe desfecho explicito pelo store oficial: `done` com resolved_at apenas se o verificador retornar 0; caso contrario permanece/reabre aberta com entrada de historico contendo o diagnostico e o proximo passo (ex.: reenviar a mensagem depois da correcao do T1), sem apagar historico anterior.",
+      "Todo bloqueio que so o owner resolve fica registrado como OA com passo a passo e critterio de verificacao (ex.: reenvio da mensagem no Telegram; incluir pilot-hello em DARKFAC_LINE_INTAKE_PROJECTS no Dokploy para o ticket PH entrar na linha no M4); os IDs OA-xxx aparecem na evidencia.",
+      "docs/plans/USR-279-greenfield-pilot.md tem o status do M3 atualizado com link para a evidencia, sem declarar o marco concluido sem entrada real comprovada.",
+      "`python scripts/line_validate.py` verde."
+    ],
+    "tests_to_add": [
+      "Teste que docs/evidence/USR-279-M3.md existe e cita projeto pilot-hello, o comando do verificador e o desfecho da OA-047.",
+      "Teste de consistencia do ledger de owner actions: OA-047 esta `done` com resolved_at ou `open` com ao menos uma entrada de historico mencionando o diagnostico do M3, e o arquivo continua validando pelo modelo OwnerAction."
+    ],
+    "smoke": []
+  }
+]
