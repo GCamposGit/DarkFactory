@@ -29,7 +29,11 @@ def test_gate_precedes_push_and_ci_check_follows() -> None:
     steps = build_protected_publish_steps("USR-999", ["core/harness/runner.py"])
     gate, push = _index(steps, GATE_COMMAND), _index(steps, "git push origin HEAD:main")
     guards, ci = _index(steps, "pytest"), _index(steps, CI_LIST_COMMAND)
-    assert guards < gate < push < ci
+    commit = _index(steps, "git commit")
+    # The gate refuses a dirty tree: the local commit must come before it (OA-038/OA-039 incidents, 20/10/2026).
+    assert guards < commit < gate < push < ci
+    assert "dirty" in steps[commit].text
+    assert not GATE_COMMAND.startswith(r"python C:\dev\DarkFac\core")
     assert GATE_PASS_MARKER in steps[gate].text
     assert "gh run watch" in steps[ci].command
     assert "hotfix" in steps[ci].text
