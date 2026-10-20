@@ -59,7 +59,7 @@ M1 - Bootstrap (USR-274) - CONCLUIDO em 20/10/2026 (evidencia: docs/evidence/USR
 2. Reexecucao do bootstrap e idempotente (sem novo repositorio nem commits duplicados).
 3. Repositorio nao contem referencia a `C:\dev\DarkFac` nem import de `core.*`.
 
-M2 - Ambiente (USR-275)
+M2 - Ambiente (USR-275) - CONCLUIDO em 20/10/2026 (evidencia: docs/evidence/USR-279-M2.md)
 1. Descritor declara `environment` venv e comandos `setup/test/build/smoke`.
 2. `setup_environment` cria o venv dentro do checkout do produto e os testes iniciais passam nele.
 3. Ambiente do processo filho nao contem `PYTHONPATH`, `VIRTUAL_ENV` do core nem `DARKFAC_*`; segredos mascarados nos logs.
