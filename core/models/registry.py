@@ -37,6 +37,7 @@ class ModelEntry(BaseModel):
     family: str = Field(min_length=1)
     tier: str = Field(min_length=1)
     aliases: list[str] = Field(default_factory=list)
+    gateway_ids: list[str] = Field(default_factory=list)  # provider/gateway-prefixed ids (e.g. OpenRouter); naming only
     status: ModelStatus
     price_input_per_mtok: Optional[float] = Field(default=None, ge=0)
     price_output_per_mtok: Optional[float] = Field(default=None, ge=0)
@@ -76,7 +77,7 @@ class ModelRegistry(BaseModel):
                 raise ValueError(f"duplicate model id {entry.id!r}")
             by_id[entry.id] = entry
         for entry in self.models:
-            for alias in entry.aliases:
+            for alias in [*entry.aliases, *entry.gateway_ids]:
                 key = alias.strip().lower()
                 if key in names or key in by_id:
                     raise ValueError(f"alias {alias!r} collides with another alias or model id")
@@ -124,14 +125,21 @@ _EMBEDDED_FALLBACK: dict[str, Any] = {
         _fb("claude-sonnet-5-5", "anthropic", "claude", "mid", ["sonnet"]),
         _fb("claude-haiku-5-5", "anthropic", "claude", "low", ["haiku"]),
         _fb("claude-fable-5-1", "anthropic", "claude", "frontier", ["fable"], "candidate", forbidden_autonomous=True),
-        _fb("claude-opus-5", "anthropic", "claude", "high", ["opus-legacy"], "deprecated"),
+        _fb("claude-opus-5", "anthropic", "claude", "high", ["opus-legacy"], "deprecated", gateway_ids=["anthropic/claude-opus-5"]),
         _fb("gpt-6-luna", "openai", "openai", "mid", ["luna"]),
-        _fb("gpt-6-astra", "openai", "openai", "frontier", ["astra"], "candidate", forbidden_autonomous=True),
+        _fb("gpt-6-astra", "openai", "openai", "frontier", ["astra"], "candidate", forbidden_autonomous=True, gateway_ids=["openai/gpt-6-astra"]),
         _fb("gpt-sol", "openai", "openai", "high", ["sol"]),
-        _fb("grok-4.6", "xai", "grok", "mid", ["grok-review"]),
+        _fb("grok-4.6", "xai", "grok", "mid", ["grok-review"], gateway_ids=["xai/grok-4.6"]),
         _fb("grok-4.7", "xai", "grok", "mid", ["grok-dev"]),
-        _fb("gemini-3.8-flash", "google", "gemini", "low", ["flash"]),
+        _fb("gemini-3.8-flash", "google", "gemini", "low", ["flash"], gateway_ids=["google/gemini-3.8-flash"]),
         _fb("deepseek/deepseek-v4.1-flash", "deepseek", "deepseek", "low", ["deepseek-flash"]),
+        _fb("deepseek/deepseek-v4-pro", "deepseek", "deepseek", "high", ["deepseek-v4-pro"], "candidate"),
+        _fb("gemini-3.1-pro", "google", "gemini", "high", ["gemini-pro"], "candidate", gateway_ids=["google/gemini-3.1-pro"]),
+        _fb("gemini-3.1-flash-lite-image", "google", "gemini", "low", ["gemini-image-fast"], "candidate", gateway_ids=["google/gemini-3.1-flash-lite-image"]),
+        _fb("gpt-image-2", "openai", "openai", "high", ["gpt-image"], "candidate", gateway_ids=["openai/gpt-image-2"]),
+        _fb("claude-3-7-sonnet", "anthropic", "claude", "mid", ["claude-legacy-sonnet"], "deprecated", gateway_ids=["anthropic/claude-3.7-sonnet"]),
+        _fb("deepseek/deepseek-r1", "deepseek", "deepseek", "high", ["deepseek-r1"], "deprecated"),
+        _fb("gemini-2.0-flash-001", "google", "gemini", "low", ["gemini-legacy-flash"], "deprecated", gateway_ids=["google/gemini-2.0-flash-001"]),
     ],
     "roles": {
         "subagent.haiku": "claude-haiku-5-5",
@@ -184,6 +192,14 @@ def clear_cache() -> None:
     _cached_default.cache_clear()
 
 
+def _find(reg: ModelRegistry, name: str) -> Optional[ModelEntry]:
+    low = name.strip().lower()
+    for entry in reg.models:
+        if low == entry.id.lower() or low in (a.strip().lower() for a in [*entry.aliases, *entry.gateway_ids]):
+            return entry
+    return None
+
+
 def resolve(alias_or_role: str, registry: Optional[ModelRegistry] = None) -> str:
     """Resolve a role (``subagent.haiku``), alias (``haiku``) or exact id to an active model id.
 
@@ -194,13 +210,13 @@ def resolve(alias_or_role: str, registry: Optional[ModelRegistry] = None) -> str
     low = key.lower()
     if key in reg.roles:
         return reg.roles[key]
-    for entry in reg.models:
-        if low == entry.id.lower() or low in (a.strip().lower() for a in entry.aliases):
-            if entry.status != "active" or entry.forbidden_autonomous:
-                raise KeyError(
-                    f"{alias_or_role!r} resolves to {entry.id!r}, which is not routable (status={entry.status})"
-                )
-            return entry.id
+    entry = _find(reg, key)
+    if entry is not None:
+        if entry.status != "active" or entry.forbidden_autonomous:
+            raise KeyError(
+                f"{alias_or_role!r} resolves to {entry.id!r}, which is not routable (status={entry.status})"
+            )
+        return entry.id
     raise KeyError(f"unknown model alias or role: {alias_or_role!r}")
 
 
@@ -219,14 +235,13 @@ def resolve_known(alias_or_role: str, registry: Optional[ModelRegistry] = None) 
     key = alias_or_role.strip()
     if key in reg.roles:
         return reg.roles[key]
-    low = key.lower()
-    for entry in reg.models:
-        if low == entry.id.lower() or low in (a.strip().lower() for a in entry.aliases):
-            if entry.status not in ("active", "deprecated") or entry.forbidden_autonomous:
-                raise KeyError(
-                    f"{alias_or_role!r} resolves to {entry.id!r}, which is not routable (status={entry.status})"
-                )
-            return entry.id
+    entry = _find(reg, key)
+    if entry is not None:
+        if entry.status not in ("active", "deprecated") or entry.forbidden_autonomous:
+            raise KeyError(
+                f"{alias_or_role!r} resolves to {entry.id!r}, which is not routable (status={entry.status})"
+            )
+        return entry.id
     raise KeyError(f"unknown model alias or role: {alias_or_role!r}")
 
 
@@ -239,8 +254,19 @@ def forbidden_markers(registry: Optional[ModelRegistry] = None) -> list[str]:
 def id_of(alias_or_id: str, registry: Optional[ModelRegistry] = None) -> str:
     """Canonical id for a name regardless of status (naming only, NOT a routability check)."""
     reg = registry if registry is not None else get_registry()
-    low = alias_or_id.strip().lower()
-    for entry in reg.models:
-        if low == entry.id.lower() or low in (a.strip().lower() for a in entry.aliases):
-            return entry.id
+    entry = _find(reg, alias_or_id)
+    if entry is not None:
+        return entry.id
     raise KeyError(f"unknown model alias or id: {alias_or_id!r}")
+
+
+def gateway_id(alias_or_id: str, registry: Optional[ModelRegistry] = None) -> str:
+    """Provider/gateway-prefixed id (e.g. ``anthropic/claude-opus-5``) for a name, regardless of status.
+
+    Falls back to the canonical id when the model has no gateway id. Naming only, NOT a routability check.
+    """
+    reg = registry if registry is not None else get_registry()
+    entry = _find(reg, alias_or_id)
+    if entry is None:
+        raise KeyError(f"unknown model alias or id: {alias_or_id!r}")
+    return entry.gateway_ids[0] if entry.gateway_ids else entry.id

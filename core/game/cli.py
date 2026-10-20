@@ -31,14 +31,15 @@ from core.game.factory import (
     write_game_artifacts,
 )
 from core.game.models import GameManifest, ModelEvidence
+from core.models import registry as _models
 from core.visual import AssetType, AspectRatio, VisualPromptSpec, VisualStudio, VisualTheme
 
 
 LOCAL_MODEL = "qwen-code-fast:latest"
 BALANCED_MODEL = "mistralai/mistral-nemo"
-FRONTIER_MODEL = "openai/gpt-6-astra"
-FAST_IMAGE_MODEL = "google/gemini-3.1-flash-lite-image"
-FRONTIER_IMAGE_MODEL = "openai/gpt-image-2"
+FRONTIER_MODEL = _models.gateway_id("astra")
+FAST_IMAGE_MODEL = _models.gateway_id("gemini-image-fast")
+FRONTIER_IMAGE_MODEL = _models.gateway_id("gpt-image")
 
 
 def build_review_prompt(trace: dict) -> str:

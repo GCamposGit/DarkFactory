@@ -20,12 +20,14 @@ def test_embedded_fallback_matches_registry_file() -> None:
     file_reg = registry.load_registry()
     emb = registry.embedded_registry()
     assert emb.roles == file_reg.roles
+    assert {m.id for m in emb.models} == {m.id for m in file_reg.models}
     assert emb.review_pairs == file_reg.review_pairs
     assert emb.forbidden_autonomous_markers == file_reg.forbidden_autonomous_markers
     for entry in file_reg.models:
         twin = next(m for m in emb.models if m.id == entry.id)
-        assert (twin.aliases, twin.status, twin.family, twin.forbidden_autonomous) == (
+        assert (twin.aliases, twin.gateway_ids, twin.status, twin.family, twin.forbidden_autonomous) == (
             entry.aliases,
+            entry.gateway_ids,
             entry.status,
             entry.family,
             entry.forbidden_autonomous,
@@ -106,3 +108,63 @@ def test_router_optimizer_and_usage_ids_unchanged() -> None:
     assert paid["research"]["model"] == paid["coding_medium"]["model"] == "gemini-3.8-flash"
     assert paid["web_research"]["model"] == paid["review"]["model"] == "grok-4.6"
     assert adapters._ANTIGRAVITY_MODEL == "gemini-3.8-flash"
+
+
+def test_gateway_ids_resolve_naming_only() -> None:
+    assert registry.gateway_id("opus-legacy") == "anthropic/claude-opus-5"
+    assert registry.gateway_id("anthropic/claude-opus-5") == "anthropic/claude-opus-5"
+    assert registry.gateway_id("astra") == "openai/gpt-6-astra"
+    assert registry.gateway_id("deepseek-v4-pro") == "deepseek/deepseek-v4-pro"  # no gateway id: canonical id
+    assert registry.id_of("xai/grok-4.6") == "grok-4.6"
+    with pytest.raises(KeyError):
+        registry.gateway_id("nope/unknown")
+    # Gateway-only models were never routable: no role points at them and resolve() refuses them.
+    for name in ("deepseek-v4-pro", "gemini-pro", "gpt-image", "gemini-image-fast"):
+        with pytest.raises(KeyError):
+            registry.resolve(name)
+    assert registry.resolve_known("claude-legacy-sonnet") == "claude-3-7-sonnet"
+    routed = set(registry.get_registry().roles.values())
+    assert not routed & {"deepseek/deepseek-v4-pro", "gemini-3.1-pro", "gpt-image-2", "claude-3-7-sonnet"}
+
+
+def test_qualified_routes_ids_unchanged() -> None:
+    from core.workflow import qualified_routes as qr
+
+    fs = qr.FAMILY_SYNONYMS
+    for key, fam in {
+        "anthropic/claude-opus-5": "claude", "claude-opus-5": "claude", "gpt-6-astra": "gpt-oss",
+        "gemini-3.8-flash": "gemini", "google/gemini-3.8-flash": "gemini", "google/gemini-3.1-pro": "gemini",
+        "deepseek-v4-pro": "deepseek", "deepseek-v4.1-flash": "deepseek", "deepseek/deepseek-v4-pro": "deepseek",
+        "deepseek/deepseek-v4.1-flash": "deepseek", "grok-4.6": "grok", "xai/grok-4.6": "grok",
+    }.items():
+        assert fs[key] == fam
+    cat = qr._EMBEDDED_DEFAULT_CATALOG
+    assert cat["roles_mapping"]["high_architecture"]["allowed_models"] == [
+            "anthropic/claude-opus-5", "deepseek/deepseek-v4-pro", "google/gemini-3.1-pro",
+    ]
+    assert cat["roles_mapping"]["verifier"]["allowed_models"][1:] == ["deepseek/deepseek-v4.1-flash", "xai/grok-4.6"]
+
+
+def test_gateway_readers_ids_unchanged() -> None:
+    from core.acceptance import engine as acceptance
+    from core.execution import resilience
+    from core.game import cli as game_cli
+
+    assert resilience.DEFAULT_PARETO_FALLBACK_MODELS == {
+        "low": "qwen/qwen3-8-flash-next",
+        "medium": "deepseek/deepseek-v4-pro",
+        "high": "deepseek/deepseek-v4-pro",
+        "critical": "anthropic/claude-3.7-sonnet",
+    }
+    assert game_cli.FRONTIER_MODEL == "openai/gpt-6-astra"
+    assert game_cli.FAST_IMAGE_MODEL == "google/gemini-3.1-flash-lite-image"
+    assert game_cli.FRONTIER_IMAGE_MODEL == "openai/gpt-image-2"
+    assert acceptance._PARETO_FLASH == "deepseek-v4.1-flash"
+
+
+def test_subagent_forbidden_models_come_from_registry_when_absent() -> None:
+    raw = json.loads((REPO_ROOT / ".factory" / "config" / "subagent_model_routing.json").read_text(encoding="utf-8"))
+    assert "forbidden_autonomous_models" not in raw
+    cfg = subagent_routing.parse_config(raw)
+    assert cfg.forbidden_autonomous_models == ["astra", "claude-fable", "fable", "gpt-6-astra"]
+

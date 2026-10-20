@@ -26,6 +26,7 @@ from typing import Any, Callable
 from pydantic import BaseModel, ConfigDict, Field
 
 from core.execution.contracts import UnknownCostPolicy
+from core.models import registry as _models
 from core.execution.providers import (
     ModelProvider,
     OllamaModelProvider,
@@ -41,9 +42,9 @@ FORBIDDEN_FALLBACK_MODELS = frozenset({"fable-5.1", "fable", "fable-5.1-chat"})
 # Default Pareto cloud fallbacks (from model_router / frontier catalog)
 DEFAULT_PARETO_FALLBACK_MODELS = {
     "low": "qwen/qwen3-8-flash-next",
-    "medium": "deepseek/deepseek-v4-pro",
-    "high": "deepseek/deepseek-v4-pro",
-    "critical": "anthropic/claude-3.7-sonnet",
+    "medium": _models.id_of("deepseek-v4-pro"),
+    "high": _models.id_of("deepseek-v4-pro"),
+    "critical": _models.gateway_id("claude-legacy-sonnet"),
 }
 
 
@@ -256,7 +257,7 @@ class ResilientModelProvider:
         enable_fallback: bool = True,
         max_retries: int = 2,
         initial_backoff_seconds: float = 0.5,
-        default_cloud_fallback_model: str = "deepseek/deepseek-v4-pro",
+        default_cloud_fallback_model: str = _models.id_of("deepseek-v4-pro"),
         budget_check_callback: Callable[[str, float], bool] | None = None,
         time_func: Callable[[], float] = time.monotonic,
     ) -> None:
@@ -318,7 +319,7 @@ class ResilientModelProvider:
             complexity.lower(), self.default_cloud_fallback_model
         )
         if fallback.lower() in FORBIDDEN_FALLBACK_MODELS:
-            fallback = "deepseek/deepseek-v4-pro"
+            fallback = _models.id_of("deepseek-v4-pro")
         return fallback
 
     def _execute_with_retry(

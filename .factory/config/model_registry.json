@@ -115,7 +115,10 @@
       ],
       "forbidden_autonomous": false,
       "release_date": null,
-      "retirement_date": null
+      "retirement_date": null,
+      "gateway_ids": [
+        "anthropic/claude-opus-5"
+      ]
     },
     {
       "id": "gpt-6-luna",
@@ -158,7 +161,10 @@
       ],
       "forbidden_autonomous": true,
       "release_date": null,
-      "retirement_date": null
+      "retirement_date": null,
+      "gateway_ids": [
+        "openai/gpt-6-astra"
+      ]
     },
     {
       "id": "gpt-sol",
@@ -201,7 +207,10 @@
       ],
       "forbidden_autonomous": false,
       "release_date": null,
-      "retirement_date": null
+      "retirement_date": null,
+      "gateway_ids": [
+        "xai/grok-4.6"
+      ]
     },
     {
       "id": "grok-4.7",
@@ -244,7 +253,10 @@
       ],
       "forbidden_autonomous": false,
       "release_date": null,
-      "retirement_date": null
+      "retirement_date": null,
+      "gateway_ids": [
+        "google/gemini-3.8-flash"
+      ]
     },
     {
       "id": "deepseek/deepseek-v4.1-flash",
@@ -262,6 +274,168 @@
       "capabilities": [
         "text",
         "code"
+      ],
+      "forbidden_autonomous": false,
+      "release_date": null,
+      "retirement_date": null
+    },
+    {
+      "id": "deepseek/deepseek-v4-pro",
+      "provider": "deepseek",
+      "family": "deepseek",
+      "tier": "high",
+      "aliases": [
+        "deepseek-v4-pro"
+      ],
+      "gateway_ids": [],
+      "status": "candidate",
+      "price_input_per_mtok": null,
+      "price_output_per_mtok": null,
+      "context_tokens": 256000,
+      "max_output_tokens": null,
+      "capabilities": [
+        "text",
+        "code"
+      ],
+      "forbidden_autonomous": false,
+      "release_date": null,
+      "retirement_date": null
+    },
+    {
+      "id": "gemini-3.1-pro",
+      "provider": "google",
+      "family": "gemini",
+      "tier": "high",
+      "aliases": [
+        "gemini-pro"
+      ],
+      "gateway_ids": [
+        "google/gemini-3.1-pro"
+      ],
+      "status": "candidate",
+      "price_input_per_mtok": null,
+      "price_output_per_mtok": null,
+      "context_tokens": 1048576,
+      "max_output_tokens": null,
+      "capabilities": [
+        "text",
+        "code"
+      ],
+      "forbidden_autonomous": false,
+      "release_date": null,
+      "retirement_date": null
+    },
+    {
+      "id": "gemini-3.1-flash-lite-image",
+      "provider": "google",
+      "family": "gemini",
+      "tier": "low",
+      "aliases": [
+        "gemini-image-fast"
+      ],
+      "gateway_ids": [
+        "google/gemini-3.1-flash-lite-image"
+      ],
+      "status": "candidate",
+      "price_input_per_mtok": null,
+      "price_output_per_mtok": null,
+      "context_tokens": null,
+      "max_output_tokens": null,
+      "capabilities": [
+        "image"
+      ],
+      "forbidden_autonomous": false,
+      "release_date": null,
+      "retirement_date": null
+    },
+    {
+      "id": "gpt-image-2",
+      "provider": "openai",
+      "family": "openai",
+      "tier": "high",
+      "aliases": [
+        "gpt-image"
+      ],
+      "gateway_ids": [
+        "openai/gpt-image-2"
+      ],
+      "status": "candidate",
+      "price_input_per_mtok": null,
+      "price_output_per_mtok": null,
+      "context_tokens": null,
+      "max_output_tokens": null,
+      "capabilities": [
+        "image"
+      ],
+      "forbidden_autonomous": false,
+      "release_date": null,
+      "retirement_date": null
+    },
+    {
+      "id": "claude-3-7-sonnet",
+      "provider": "anthropic",
+      "family": "claude",
+      "tier": "mid",
+      "aliases": [
+        "claude-legacy-sonnet"
+      ],
+      "gateway_ids": [
+        "anthropic/claude-3.7-sonnet"
+      ],
+      "status": "deprecated",
+      "price_input_per_mtok": null,
+      "price_output_per_mtok": null,
+      "context_tokens": 200000,
+      "max_output_tokens": null,
+      "capabilities": [
+        "text",
+        "code",
+        "reasoning"
+      ],
+      "forbidden_autonomous": false,
+      "release_date": null,
+      "retirement_date": null
+    },
+    {
+      "id": "deepseek/deepseek-r1",
+      "provider": "deepseek",
+      "family": "deepseek",
+      "tier": "high",
+      "aliases": [
+        "deepseek-r1"
+      ],
+      "gateway_ids": [],
+      "status": "deprecated",
+      "price_input_per_mtok": null,
+      "price_output_per_mtok": null,
+      "context_tokens": 128000,
+      "max_output_tokens": null,
+      "capabilities": [
+        "text",
+        "reasoning"
+      ],
+      "forbidden_autonomous": false,
+      "release_date": null,
+      "retirement_date": null
+    },
+    {
+      "id": "gemini-2.0-flash-001",
+      "provider": "google",
+      "family": "gemini",
+      "tier": "low",
+      "aliases": [
+        "gemini-legacy-flash"
+      ],
+      "gateway_ids": [
+        "google/gemini-2.0-flash-001"
+      ],
+      "status": "deprecated",
+      "price_input_per_mtok": null,
+      "price_output_per_mtok": null,
+      "context_tokens": 1000000,
+      "max_output_tokens": null,
+      "capabilities": [
+        "text"
       ],
       "forbidden_autonomous": false,
       "release_date": null,

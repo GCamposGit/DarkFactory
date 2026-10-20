@@ -27,7 +27,9 @@ def test_committed_registry_is_valid_and_resolves() -> None:
     assert reg.resolve("haiku", parsed) == "claude-haiku-5-5"
     assert reg.resolve("subagent.sonnet", parsed) == "claude-sonnet-5-5"
     assert reg.resolve("opus", parsed) == "claude-opus-5-5"
-    assert [m.id for m in reg.list_candidates(parsed)] == ["claude-fable-5-1", "gpt-6-astra"]
+    cand = [m.id for m in reg.list_candidates(parsed)]
+    assert cand[:2] == ["claude-fable-5-1", "gpt-6-astra"]  # forbidden-autonomous candidates stay first
+    assert {"deepseek/deepseek-v4-pro", "gemini-3.1-pro", "gemini-3.1-flash-lite-image", "gpt-image-2"} == set(cand[2:])
 
 
 def test_resolve_unknown_and_forbidden() -> None:

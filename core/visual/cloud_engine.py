@@ -29,6 +29,7 @@ from PIL import Image
 from core.execution.budget import ExecutionBudgetManager
 from core.execution.contracts import AttemptOutcome, AttemptRecord
 from core.execution.providers import get_openrouter_api_key
+from core.models import registry as _models
 from core.visual.models import (
     ASPECT_DIMENSIONS,
     VisualAssetResult,
@@ -239,7 +240,7 @@ class CloudVisualEngine:
     def _generate_openrouter_image(self, spec: VisualPromptSpec, api_key: str) -> VisualAssetResult:
         """Call OpenRouter's dedicated Images API and persist the returned bytes."""
         start_time = time.time()
-        model = spec.model_override or "google/gemini-3.1-flash-lite-image"
+        model = spec.model_override or _models.gateway_id("gemini-image-fast")
 
         payload = {
             "model": model,

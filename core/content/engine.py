@@ -33,6 +33,7 @@ from core.content.models import (
 from core.content.presets import NEGATIVE_SLOP_PROMPT_INSTRUCTIONS, get_preset
 from core.execution.budget import ExecutionBudgetManager
 from core.execution.contracts import AttemptOutcome, AttemptRecord
+from core.models import registry as _models
 from core.execution.providers import (
     ModelProvider,
     ProviderResponse,
@@ -343,7 +344,7 @@ class ContentEngine:
         if openrouter_key:
             try:
                 openrouter_provider = get_model_provider("openrouter", api_key=openrouter_key, usage_ledger=self.model_usage_ledger)
-                model = request.model_override or "anthropic/claude-3.7-sonnet"
+                model = request.model_override or _models.gateway_id("claude-legacy-sonnet")
                 system_prompt = f"{preset['system_prompt']}\n\n{NEGATIVE_SLOP_PROMPT_INSTRUCTIONS}"
                 user_content = self._compose_user_input(request, tone)
                 start_time = time.perf_counter()
