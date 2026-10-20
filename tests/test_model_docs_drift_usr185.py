@@ -13,8 +13,8 @@ pytestmark = [pytest.mark.offline]
 
 _RAW = {
     "models": [
-        {"id": "m-a", "provider": "p", "family": "f1", "tier": "mid", "aliases": ["a"], "status": "active"},
-        {"id": "m-b", "provider": "q", "family": "f2", "tier": "low", "status": "active", "price_input_per_mtok": 1.5},
+        {"id": "m-a", "provider": "p", "family": "f1", "tier": "mid", "aliases": ["a"], "status": "active", "qualification": {"status": "grandfathered"}},
+        {"id": "m-b", "provider": "q", "family": "f2", "tier": "low", "status": "active", "price_input_per_mtok": 1.5, "qualification": {"status": "grandfathered"}},
     ],
     "roles": {"development.x": "m-a", "review.y": "m-b"},
     "review_pairs": [{"implementer": "development.x", "reviewer": "review.y"}],

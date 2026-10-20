@@ -66,7 +66,11 @@ idempotente; teste de deriva falha se o doc gerado divergir do registro.
 Job (sem chamadas pagas por padrao) que lista modelos novos dos provedores e registra como `candidate`, com preco,
 contexto e datas. Aceite: fixture offline; nunca promove sozinho; respeita o teto de gasto configurado.
 
-## Fatia 6 - Qualificacao
+## Fatia 6 - Qualificacao (ENTREGUE em 20/10/2026)
+
+Entregue: `core/models/qualification.py` + `scripts/qualify_model.py` (bateria em `.factory/config/qualification_battery.json`, executor injetavel, orcamento USD/tokens, evidencia em `.factory/models/qualification/<id>.json`, campo `qualification` no `ModelEntry`; `active` exige qualificacao `approved`/`grandfathered`). Teste: `tests/test_model_qualification_usr185.py`.
+
+Escopo original:
 
 Bateria deterministica (contrato, ferramentas, tarefas de referencia da fabrica) com orcamento maximo e evidencia
 persistida; resultado grava o registro de qualificacao do candidato. Aceite: candidato sem qualificacao aprovada nao
