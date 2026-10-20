@@ -1,0 +1,57 @@
+[
+  {
+    "id": "T1",
+    "title": "Garantir identidade de projeto no dispatch de planning",
+    "goal": "Investigar a regressão sobre USR-303 e corrigir o caminho lookup-contexto-handler com falha fechada.",
+    "files_hint": [
+      "core/line/bindings.py",
+      "core/orchestrator/cloud_worker.py",
+      "tests/line/test_bindings.py",
+      "tests/test_postgres_real_integration.py"
+    ],
+    "acceptance": [
+      "Comparar o SHA efetivamente carregado pelo worker do incidente com USR-303 e registrar evidências que distingam worker antigo, falha de lookup e perda de contexto; não declarar causa sem comprovação.",
+      "Reproduzir accept, claim e dispatch de planning com runs.project_id=darkfac e ticket USR-315, usando registry real de teste; resolver darkfac e preservar a identidade do ticket.",
+      "Lookup indisponível, run ausente e projeto não registrado produzem falhas estruturadas distinguíveis, sem consultar o resolver com ticket_id nem escolher darkfac implicitamente.",
+      "Runs legados e sucessores usam o projeto persistido; SQLite e Postgres mantêm o mesmo contrato e projetos distintos não compartilham resolução.",
+      "Terminar com python scripts/line_validate.py e python core/harness/runner.py --quick aprovados, marcador [HARNESS_PASS] e revisão independente de outra família."
+    ],
+    "tests_to_add": [
+      "Planning ponta a ponta com darkfac/USR-315 e sucessor, sem resolver permissivo.",
+      "Falha do store, run ausente, project_id ausente e projeto desconhecido, verificando ausência de fallback.",
+      "Dois projetos registrados com tickets de mesmo prefixo e contexto incompatível, garantindo que nenhum execute no projeto errado.",
+      "Paridade SQLite/Postgres e compatibilidade de run legado cuja identidade de ticket difere da identidade de projeto."
+    ],
+    "smoke": [
+      "/health",
+      "/api/line/live"
+    ]
+  },
+  {
+    "id": "T2",
+    "title": "Reconciliar run obsoleto sem duplicar entrega",
+    "goal": "Após T1, aplicar recuperação idempotente ao run real, verificando primeiro a entrega de USR-315.",
+    "files_hint": [
+      "core/line/recovery_context.py",
+      "tests/line/test_recovery_context.py"
+    ],
+    "acceptance": [
+      "Verificar estado e evidências de entrega de USR-315, incluindo a referência OA-040 registrada no backlog, antes de qualquer retomada; status completed isolado não basta.",
+      "Usar o mecanismo canônico existente e corrigir sua guarda de recuperação se necessário: entrega comprovada reconcilia o run obsoleto sem chamar planning ou development novamente; evidência insuficiente impede retomada automática.",
+      "Preservar run_id, tentativas, erros anteriores e referências de entrega, registrando motivo e resultado da reconciliação sem fabricar sucesso de etapas não executadas.",
+      "Repetição da recuperação e disputa com worker não criam novos tickets, runs ou efeitos; manter leases/fencing e limitar alterações ao par projeto/run alvo.",
+      "Após merge e deploy, comprovar no store real e em /api/line/live a reconciliação de run-5c1eeae3564c e a ausência de nova implementação de USR-315, vinculando evidências ao candidato e à versão carregada pelo worker.",
+      "Terminar com python scripts/line_validate.py e python core/harness/runner.py --quick aprovados, marcador [HARNESS_PASS] e revisão independente de outra família."
+    ],
+    "tests_to_add": [
+      "Run obsoleto com ticket entregue: reconciliação repetida preserva histórico e não invoca agente.",
+      "Ticket completed sem evidência suficiente: recuperação bloqueada sem efeitos.",
+      "Run pendente elegível: retomada única sob leases/fencing existentes.",
+      "Recuperações concorrentes e projeto distinto com ticket homônimo não duplicam efeitos nem alteram o outro projeto."
+    ],
+    "smoke": [
+      "/health",
+      "/api/line/live"
+    ]
+  }
+]
