@@ -1826,6 +1826,48 @@
       "created_at": "2026-10-20T10:07:13Z",
       "created_by": "claude-code",
       "resolved_at": null
+    },
+    {
+      "id": "OA-045",
+      "kind": "action",
+      "title": "Publicar arquivos protegidos de USR-228 por push direto (com portao completo)",
+      "priority": "high",
+      "status": "open",
+      "why": "Arquivos protegidos so o owner publica, e o push direto na main pula o CI de PR. Por isso o portao oficial completo roda antes do push e o CI da main e conferido depois.",
+      "blocks": [
+        "USR-228"
+      ],
+      "depends_on": [],
+      "steps": [
+        {
+          "text": "Crie uma worktree limpa a partir de origin/main (que ja contem docs/proposals/USR-228-guard-authorization.patch e core/governance/authorization.py) e aplique o patch em guard.py e tests/test_governance_guard.py. Os passos seguintes usam essa worktree como candidata.",
+          "command": "cd C:\\dev\\DarkFac\ngit fetch origin\ngit worktree add C:\\dev\\DarkFac\\.worktrees\\usr-228-protegido origin/main --detach\ncd C:\\dev\\DarkFac\\.worktrees\\usr-228-protegido\ngit apply --check docs\\proposals\\USR-228-guard-authorization.patch\ngit apply docs\\proposals\\USR-228-guard-authorization.patch\npython -m pytest tests/test_governance_guard.py tests/test_ci_policy.py tests/test_governance_authorization.py -q"
+        },
+        {
+          "text": "Na worktree do commit candidato de USR-228 (core/orchestrator/guard.py, tests/test_governance_guard.py), rode primeiro os guardas rapidos. Eles NAO substituem o portao completo.",
+          "command": "cd C:\\dev\\DarkFac\\.worktrees\\<WORKTREE_DO_CANDIDATO>\npython -m pytest tests/test_clock_bomb_guard.py tests/test_hub_coverage.py tests/test_safe_git_state.py tests/test_harness_contract.py -q"
+        },
+        {
+          "text": "Faca o commit local ANTES do portao (ainda sem push): o portao recusa arvore suja ('Candidate worktree is dirty') e a evidencia fica presa ao SHA do commit.",
+          "command": "git add -A\ngit commit -m \"<mensagem> [USR-228]\"\ngit status --short"
+        },
+        {
+          "text": "Rode o portao oficial COMPLETO no commit candidato exato (worker remoto ou local). So continue se a saida contiver [HARNESS_PASS]; qualquer outro resultado: NAO publique, avise o agente. Nunca troque o portao completo por testes focados.",
+          "command": "python core\\harness\\runner.py --quick"
+        },
+        {
+          "text": "Somente com [HARNESS_PASS] no passo anterior, confirme que o HEAD e o commit candidato e publique por push direto na main.",
+          "command": "git rev-parse HEAD\ngit push origin HEAD:main"
+        },
+        {
+          "text": "Depois do push confira o CI da main ate ficar verde. Se ficar vermelho, avise o agente: ele abre o hotfix (voce nao corrige).",
+          "command": "gh run list --branch main --limit 3\ngh run watch"
+        }
+      ],
+      "verify": "[HARNESS_PASS] no portao antes do push e ultimo run da main verde em gh run list --branch main --limit 3.",
+      "created_at": "2026-10-20T10:29:35Z",
+      "created_by": "claude-code",
+      "resolved_at": null
     }
   ]
 }

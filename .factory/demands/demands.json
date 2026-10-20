@@ -6695,20 +6695,22 @@
     "project_id": "darkfac",
     "title": "Guard: vincular autorizacao de evolucao a decisao verificavel",
     "origin": "user",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "17ce2a419fdbf3afd4d43f8b860a9f7dd629ffe6",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "later",
     "tags": [
-      "user-demand",
-      "congelado-v0"
+      "user-demand"
     ],
     "problem_statement": "Inventario SQ03 USR227 observou que core/orchestrator/guard.py is_governance_evolution_authorized valida somente flag de ambiente, sem verificar ticket, aprovador, caminhos ou candidato. O docstring menciona verified ticket mas isso nao e implementado. Lacuna distinta dos tickets de timeout e de tipos; nenhuma flag foi ativada nesta investigacao.\n\nCONGELADO em 11/10/2026 (plano V0, docs/plans/V0_OPERACIONAL_2026-10-11.md): fora do caminho critico da linha.",
     "core_journey": [
       "Inventario SQ03 USR227 observou que core/orchestrator/guard.py is_governance_evolution_authorized valida somente flag de ambiente, sem verificar ticket, aprovador, caminhos ou candidato. O docstring menciona verified ticket mas isso nao e implementado. Lacuna distinta dos tickets de timeout e de tipos; nenhuma flag foi ativada nesta investigacao."
     ],
-    "non_goals": [],
+    "non_goals": [
+      "Nao enfraquecer o guard nem o CI base-owned.",
+      "Nao permitir que o agente de build emita a propria autorizacao."
+    ],
     "reachability_contract": "",
     "acceptance_criteria": [
       "Autoridade confiavel valida decisao explicita, ticket, caminhos e candidato; agente build nao emite sua propria autorizacao",
@@ -6719,7 +6721,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-11T05:45:09.817800Z",
-    "updated_at": "2026-10-11T17:49:17.206876Z"
+    "updated_at": "2026-10-20T14:31:01.775988Z"
   },
   {
     "id": "USR-229",
