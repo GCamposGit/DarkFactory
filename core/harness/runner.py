@@ -41,6 +41,7 @@ if hasattr(sys.stderr, "reconfigure"):
 from core.harness import cache as harness_cache
 from core.harness import remote_dispatch
 from core.harness import suite_lock as harness_suite_lock
+from core.testing import shards as test_shards
 from core.harness.markers import (
     MARKER_HARNESS_FAIL,
     MARKER_HARNESS_PASS,
@@ -310,6 +311,10 @@ def run_step(step: HarnessStepConfig) -> StepExecution:
             raise ValueError("empty command")
         command = strip_xdist_args_if_unavailable(command)
         command = normalize_xdist_workers(command)
+        shard_spec = os.environ.get(test_shards.SHARD_ENV, "").strip()
+        if shard_spec and _is_test_step(step):
+            command = test_shards.command_for_shard(command, shard_spec, PROJECT_ROOT)
+            print(f"[SHARD] {shard_spec} -> {len(command)} pytest args")
         # DARKFAC_SUITE_LOCK_HELD is set by the caller (run_with_cache) while a
         # test step is running so a nested pytest invocation (this subprocess)
         # never re-acquires the machine-wide suite lock and deadlocks against
@@ -333,7 +338,10 @@ def run_step(step: HarnessStepConfig) -> StepExecution:
         if output:
             print(sanitize_child_output(output), end="" if output.endswith("\n") else "\n")
         discovered, passed, skipped = _pytest_counts(output) if _is_test_step(step) else (0, 0, 0)
-        execution = StepExecution(step.name, process.returncode, discovered, passed, skipped)
+        returncode = process.returncode
+        if returncode == 5 and os.environ.get(test_shards.SHARD_ENV, "").strip() and _is_test_step(step):
+            returncode = 0  # a shard may legitimately select no test (e.g. the serial step)
+        execution = StepExecution(step.name, returncode, discovered, passed, skipped)
         marker = MARKER_STEP_PASS if execution.passed else MARKER_STEP_FAIL
         suffix = "" if execution.passed else f" (exit code: {process.returncode})"
         print(f"{marker} {step.name}{suffix}")
@@ -949,7 +957,23 @@ def main(argv: Sequence[str] | None = None) -> int:
             "instead of silently falling back to local if no worker can run the job"
         ),
     )
+    parser.add_argument(
+        "--shard",
+        default=None,
+        metavar="I/N",
+        help="Run only shard I of N of the test files (1-based; forces --no-cache --local)",
+    )
     args = parser.parse_args(argv)
+    if args.shard:
+        try:
+            test_shards.parse_shard(args.shard)
+        except ValueError as exc:
+            print(f"[ERROR] {exc}")
+            print(MARKER_HARNESS_FAIL)
+            return 2
+        os.environ[test_shards.SHARD_ENV] = args.shard
+        args.no_cache = True
+        args.local = True
 
     config_path = Path(args.config)
     if not config_path.is_absolute():
