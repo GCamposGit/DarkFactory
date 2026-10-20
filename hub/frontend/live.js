@@ -156,7 +156,7 @@
 
   /** Deriva a visão (filtrada/ordenada) a partir do snapshot. Pura. */
   function deriveView(snapshot, filters) {
-    const f = Object.assign({ project: 'all', q: '', showDone: true }, filters || {});
+    const f = Object.assign({ project: 'all', q: '', showDone: true, showFixtures: false }, filters || {});
     const snap = snapshot || {};
     const runs = Array.isArray(snap.runs) ? snap.runs : [];
     const events = Array.isArray(snap.events) ? snap.events : [];
@@ -181,7 +181,17 @@
     const projects = Array.from(counts, function (e) { return { id: e[0], count: e[1] }; })
       .sort(function (a, b) { return a.id < b.id ? -1 : a.id > b.id ? 1 : 0; });
 
-    const filtered = runs.filter(function (r) { return okProject(r.project_id) && okQuery(r.ticket_id, r.run_id, r.demand_id, r.title); });
+    const okFixture = function (x) { return f.showFixtures || !x.fixture; };
+    const filtered = runs.filter(function (r) { return okFixture(r) && okProject(r.project_id) && okQuery(r.ticket_id, r.run_id, r.demand_id, r.title); });
+    const fixturesHidden = f.showFixtures ? 0 : runs.filter(function (r) { return r.fixture; }).length;
+    const ex = snap.executions || {};
+    const okExec = function (e) { return okFixture(e) && okQuery(e.ticket_id, e.execution_id, e.title, e.source, e.stage, e.harness); };
+    const execGroups = (Array.isArray(ex.active) ? ex.active : []).map(function (g) {
+      return { source: g.source, stage: g.stage, executions: (g.executions || []).filter(okExec) };
+    }).filter(function (g) { return g.executions.length > 0; });
+    const execLost = (Array.isArray(ex.lost) ? ex.lost : []).filter(okExec);
+    const execRecent = (Array.isArray(ex.recent) ? ex.recent : []).filter(okExec);
+    const execFixtures = f.showFixtures ? 0 : (Number(ex.fixtures_hidden) || 0);
     const isActive = function (r) { return ACTIVE_RANK[r.state] !== undefined; };
     const active = filtered.filter(isActive)
       .map(function (r, i) { return [r, i]; })
@@ -217,6 +227,10 @@
       backlog: backlog.filter(function (b) { return okProject(b.project_id); }),
       offLine: off.filter(function (t) { return okProject(t.project_id) && okQuery(t.id, t.title); }),
       hiddenByFilter: runs.length - filtered.length,
+      fixturesHidden: fixturesHidden + execFixtures,
+      execGroups: execGroups,
+      execLost: execLost,
+      execRecent: execRecent,
       filtersActive: (f.project && f.project !== 'all') || !!q,
     };
   }
@@ -373,7 +387,7 @@
     snapshot: null,
     receivedAt: 0,
     conn: 'connecting',
-    filters: { project: 'all', q: '', showDone: true },
+    filters: { project: 'all', q: '', showDone: true, showFixtures: false },
     doneLimit: DONE_PAGE,
     doneCollapsed: false,
     drawer: { open: false, runId: null, stage: null, sig: '', trigger: null },
@@ -394,7 +408,7 @@
 
   const el = {
     board: $('line-live-board'), app: $('live-app'), chips: $('project-chips'), search: $('search-input'),
-    toggleDone: $('toggle-done'), notifyBtn: $('notify-btn'), connPill: $('conn-pill'), connText: $('conn-text'),
+    toggleDone: $('toggle-done'), toggleFixtures: $('toggle-fixtures'), execBody: $('exec-body'), execCount: $('exec-count'), execEmpty: $('exec-empty'), notifyBtn: $('notify-btn'), connPill: $('conn-pill'), connText: $('conn-text'),
     fresh: $('freshness'), banner: $('alert-banner'), attnLive: $('attention-live'),
     secAttention: $('sec-attention'), attnList: $('attention-list'), attnCount: $('attention-count'),
     lanes: $('lanes'), lanesEmpty: $('lanes-empty'), runningCount: $('running-count'),
@@ -410,7 +424,7 @@
     const snap = state.snapshot;
     if (!snap) { renderConn(Date.now()); return; }
     const view = state.view = deriveView(snap, state.filters);
-    const steps = [renderChips, renderBanner, renderKpis, renderAttention, renderLanes, renderDone, renderEvents, renderBacklog, renderOffLine, renderFoot, renderTitle, renderDrawer];
+    const steps = [renderChips, renderBanner, renderKpis, renderAttention, renderLanes, renderExecutions, renderDone, renderEvents, renderBacklog, renderOffLine, renderFoot, renderTitle, renderDrawer];
     steps.forEach(function (fn) {
       try { fn(view, snap); } catch (e) { if (root.console) console.error('[LineLive] falha em ' + fn.name, e); }
     });
@@ -811,6 +825,49 @@
     ];
   }
 
+  /* ---- Execuções de todas as fontes (USR-208) ---- */
+
+  const EXEC_STATE = { active: 'Ativa', lost: 'Perdida', succeeded: 'Concluída', failed: 'Falhou', cancelled: 'Cancelada' };
+  const SOURCE_LABELS = { run_ticket: 'run_ticket', vps_line: 'Linha (VPS)', telegram: 'Telegram', claude_session: 'Sessão Claude', subagent: 'Subagente' };
+
+  function execRow(e) {
+    const who = [e.harness, e.model].filter(Boolean).join(' · ');
+    const tone = e.state === 'active' ? 'running' : e.state === 'succeeded' ? 'success' : e.state === 'lost' ? 'warn' : 'danger';
+    return h('li', { class: 'exec-item exec-' + e.state, 'data-exec': e.execution_id },
+      h('div', { class: 'row' },
+        h('span', { class: 'ticket-id', text: e.ticket_id || '—' }),
+        h('span', { class: 'state-chip tone-' + tone, text: EXEC_STATE[e.state] || e.state }),
+        who ? h('span', { class: 'exec-who', text: who }) : null),
+      h('div', { class: 'exec-meta' },
+        h('span', { class: 'exec-id', text: e.execution_id }),
+        ' · início ', liveEl('span', 'age', parseTime(e.started_at)),
+        ' · batimento ', liveEl('span', 'age', parseTime(e.last_heartbeat_at))),
+      e.evidence ? h('div', { class: 'exec-evidence', text: e.evidence }) : null);
+  }
+
+  function execSection(title, items, cls) {
+    return h('div', { class: 'exec-group ' + (cls || '') }, h('h3', { class: 'exec-title', text: title }), h('ul', { class: 'exec-list' }, items));
+  }
+
+  function renderExecutions(view) {
+    const groups = view.execGroups, lost = view.execLost, recent = view.execRecent;
+    const active = groups.reduce(function (n, g) { return n + g.executions.length; }, 0);
+    setText(el.execCount, String(active));
+    const sig = JSON.stringify([groups, lost, recent, view.fixturesHidden]);
+    if (el.execBody._sig !== sig) {
+      el.execBody._sig = sig;
+      const kids = [];
+      groups.forEach(function (g) {
+        kids.push(execSection((SOURCE_LABELS[g.source] || g.source) + ' · ' + g.stage + ' (' + g.executions.length + ')', g.executions.map(execRow)));
+      });
+      if (lost.length) kids.push(execSection('Perdidas — sem batimento há mais de 3 min (' + lost.length + ')', lost.map(execRow), 'exec-lost'));
+      if (recent.length) kids.push(execSection('Concluídas recentemente — 7 dias (' + recent.length + ')', recent.slice(0, 10).map(execRow)));
+      if (view.fixturesHidden > 0) kids.push(h('p', { class: 'note', text: view.fixturesHidden + ' registro(s) de teste/canário ocultos (use "Mostrar testes e canários").' }));
+      el.execBody.replaceChildren.apply(el.execBody, kids);
+    }
+    el.execEmpty.hidden = (active + lost.length + recent.length) > 0;
+  }
+
   function renderDone(view, snap) {
     const show = state.filters.showDone;
     el.secDone.hidden = !show;
@@ -1157,6 +1214,8 @@
       if (qs.has('project')) f.project = qs.get('project') || 'all';
       if (qs.get('done') === '0') f.showDone = false;
       if (qs.get('done') === '1') f.showDone = true;
+      if (qs.get('fixtures') === '1') f.showFixtures = true;
+
     } catch (e) { /* ignora */ }
     el.toggleDone.checked = f.showDone;
   }
@@ -1410,6 +1469,7 @@
       searchTimer = setTimeout(function () { state.filters.q = el.search.value; state.doneLimit = DONE_PAGE; render(); }, 120);
     });
     el.toggleDone.addEventListener('change', function () { state.filters.showDone = el.toggleDone.checked; filtersChanged(); });
+    el.toggleFixtures.addEventListener('change', function () { state.filters.showFixtures = el.toggleFixtures.checked; render(); });
     el.notifyBtn.addEventListener('click', toggleNotify);
     el.doneToggle.addEventListener('click', function () { state.doneCollapsed = !state.doneCollapsed; if (state.view) renderDone(state.view, state.snapshot); });
     el.doneMore.addEventListener('click', function () { state.doneLimit += DONE_PAGE; if (state.view) renderDone(state.view, state.snapshot); });

@@ -51,6 +51,7 @@ from core.line.agent_cli import (
 from core.line import gate_ram, grokbox_wake
 from core.line.diagnostics import failed_test_ids, redacted_head
 from core.line.local_progress import ENV_RUN_ID, ENV_WARNED, ProgressPublisher, open_progress
+from core.workflow import execution_registry
 from core.line.operating_harness import detect_operating_harness
 from core.line.routing import (
     _HARNESS_TO_PROVIDER,
@@ -1646,6 +1647,7 @@ def _resume_delivery_scoped(
     else:
         progress = open_progress(ticket.id, ticket.project_id, ticket.title)
         holder.append(progress)
+        execution_registry.attach_progress(progress, ticket.id, title=ticket.title)  # USR-208
     # USR-166: honour the ticket's cancel request (control file or signal). Reuses the launcher's scope
     # when the delivery runs in-process; a delivery subprocess joins the parent's run and never erases
     # the request it did not create.
@@ -2283,6 +2285,10 @@ def _run(argv: Optional[list[str]], box: list[ProgressPublisher], stack: context
         harness=selected_harness,
     )
     progress.release()
+    # USR-208: every ticket and phase is an execution with its own id in Hub Live (best effort, never raises).
+    exec_tracker = execution_registry.attach_progress(
+        progress, ticket.id, harness=selected_harness, model=selected_model, title=ticket.title
+    )
 
     # Cancellation scope (USR-166): the same token/guards the line uses (USR-152), fed by the per-ticket
     # control file and termination signals. `_run_bounded` kills the agent's process tree when it fires.
@@ -2580,6 +2586,8 @@ def _run(argv: Optional[list[str]], box: list[ProgressPublisher], stack: context
         # The delivery subprocess joins this run for cancellation too: it must honour the request the
         # parent watches and never erase it as "stale" (it starts later than the request was written).
         child_env[local_cancel.ENV_PARENT] = progress.run_id
+        if exec_tracker is not None:
+            child_env[execution_registry.ENV_EXECUTION_ID] = exec_tracker.root_id  # USR-208: stages nest under it
         if progress.enabled:
             # The delivery subprocess joins this run: same run id, so the board shows one run.
             child_env[ENV_RUN_ID] = progress.run_id

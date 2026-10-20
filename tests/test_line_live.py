@@ -438,14 +438,14 @@ def test_json_contract_field_names_are_frozen(seeded: tuple[Path, dict[str, str]
     data = _read(db).model_dump(mode="json")
     assert set(data) == {
         "generated_at", "version", "source", "warnings", "stage_order", "stage_labels", "runs",
-        "events", "kpis", "backlog", "off_line", "fleet", "executable_queue",
+        "events", "kpis", "backlog", "off_line", "fleet", "executable_queue", "executions",
     }
     run = next(item for item in data["runs"] if item["run_id"] == ids["dev_live"])
     assert set(run) == {
         "run_id", "ticket_id", "demand_id", "project_id", "title", "mode", "run_status", "state",
         "current_stage", "current_stage_status", "attention", "stalled", "stalled_reason", "created_at",
         "updated_at", "completed_at", "age_seconds", "cycle_seconds", "total_cost_usd", "iterations_total",
-        "stages", "host_id", "reservation_state", "idle_or_blocked_reason",
+        "stages", "host_id", "reservation_state", "idle_or_blocked_reason", "fixture",
     }
     stage = run["stages"][2]
     assert set(stage) == {

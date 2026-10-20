@@ -402,6 +402,8 @@ class ProgressPublisher:
         self._active_phase: str | None = active_phase  # last phase published as running and not yet closed
         self.run_id = run_id or self._new_run_id()
         self.events: list[LocalRunEvent] = []  # what was attempted (capped), for diagnostics and tests
+        # Phase observers (USR-208 execution registry): (phase, status, message, cause, harness).
+        self._observers: list[Callable[..., None]] = []
 
     def _new_run_id(self) -> str:
         return f"local-{self.ticket_id}-{self._clock().strftime('%Y%m%dT%H%M%S')}"[:160]
@@ -419,6 +421,10 @@ class ProgressPublisher:
     @property
     def enabled(self) -> bool:
         return self.sink is not None and not self._muted and not self._discarded
+
+    def add_observer(self, observer: Callable[..., None]) -> None:
+        """Register a callback for every phase transition (errors are swallowed, never reach the run)."""
+        self._observers.append(observer)
 
     def hold(self) -> None:
         """Buffer events instead of publishing them until ``release`` (or drop them with ``discard``)."""
@@ -513,6 +519,11 @@ class ProgressPublisher:
         )
         if self._discarded:
             return
+        for observer in list(self._observers):
+            try:
+                observer(phase, status, message, cause, self.harness)
+            except Exception as exc:  # noqa: BLE001 - observers must never affect the run
+                logger.warning("local progress: observer failed: %s", type(exc).__name__)
         if len(self.events) < _MAX_LOCAL_EVENTS:
             self.events.append(event)
         if self._held:

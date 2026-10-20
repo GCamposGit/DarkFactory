@@ -447,3 +447,13 @@ kbd { font-family: var(--font-mono); font-size: 11px; border: 1px solid var(--bo
   .st-running .node::before { animation: none; border-color: var(--info); border-right-color: transparent; }
   .conn-live .conn-dot::after { display: none; }
 }
+
+/* Execucoes de todas as fontes (USR-208) */
+.exec-body { display: flex; flex-direction: column; gap: 14px; }
+.exec-title { font-size: 12px; font-weight: 700; color: var(--muted); margin-bottom: 6px; }
+.exec-list { display: flex; flex-direction: column; gap: 6px; list-style: none; padding: 0; margin: 0; }
+.exec-item { display: flex; flex-direction: column; gap: 3px; padding: 8px 10px; border-radius: var(--radius-sm); background: var(--surface-2); border: 1px solid var(--border); }
+.exec-item .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.exec-meta, .exec-who, .exec-evidence { font-size: 12px; color: var(--muted); }
+.exec-id { font-family: var(--font-mono); }
+.exec-lost .exec-item { opacity: .75; border-style: dashed; }

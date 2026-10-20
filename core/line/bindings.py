@@ -601,6 +601,51 @@ class RetrospectiveStageHandler:
 
 
 # --------------------------------------------------------------------------
+# Execution registry (USR-208)
+# --------------------------------------------------------------------------
+
+_OUTCOME_STATUS = {"success": "succeeded", "cancelled": "cancelled"}
+
+
+class TrackedStageHandler:
+    """Registers every stage run of the VPS line/pump as an execution visible in Hub Live (USR-208).
+
+    Transparent decorator: attribute access falls through to the wrapped handler, and the registry never
+    raises or blocks (``core.workflow.execution_registry``), so the stage behaves exactly as before.
+    """
+
+    def __init__(self, stage: str, inner: Any, *, source: str = "vps_line") -> None:
+        self._tracked_stage = stage
+        self._tracked_inner = inner
+        self._tracked_source = source
+
+    def __getattr__(self, name: str) -> Any:
+        if name in ("_tracked_inner", "_tracked_stage", "_tracked_source"):
+            raise AttributeError(name)
+        return getattr(self._tracked_inner, name)
+
+    def handle(self, context: StageContext) -> StageResult:
+        from core.workflow import execution_registry as registry
+
+        key = context.claim.job_key
+        route = str(context.route_ref or context.claim.route_ref or "") or None
+        harness, _, model = (route or "").partition(":")
+        tracked = registry.TrackedExecution(
+            self._tracked_source,
+            harness or None,
+            self._tracked_stage,
+            str(getattr(key, "ticket_id", "") or "") or None,
+            title=f"{self._tracked_stage} {key.run_id}"[:240],
+            model=model or None,
+        )
+        with tracked:
+            result = self._tracked_inner.handle(context)
+            tracked.status = _OUTCOME_STATUS.get(result.outcome, "failed")
+            tracked.evidence = result.cause_code or result.outcome
+            return result
+
+
+# --------------------------------------------------------------------------
 # Registry construction
 # --------------------------------------------------------------------------
 
@@ -662,7 +707,7 @@ def build_line_registry(
 
     registry = HandlerRegistry()
     for stage, handler in bindings.items():
-        registry[(stage, "v1")] = handler
+        registry[(stage, "v1")] = TrackedStageHandler(stage, handler)
     return registry
 
 
@@ -677,6 +722,7 @@ __all__ = [
     "agent_route_unavailable",
     "base_red_attempt_counter",
     "build_line_registry",
+    "TrackedStageHandler",
     "GrillStageHandler",
     "PlanningStageHandler",
     "DevelopmentStageHandler",
