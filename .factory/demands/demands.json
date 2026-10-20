@@ -5694,8 +5694,8 @@
     "project_id": "darkfac",
     "title": "Hub cai a cada merge: redeploy sem downtime, deploy deduplicado e frontend resiliente",
     "origin": "user",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "1a416f4bb52f7047050c57b3d2d52cd2bf72019d",
     "item_type": "operations",
     "lifecycle_stage": "execution",
     "horizon": "later",
@@ -5732,7 +5732,7 @@
     "estimated_complexity": "high",
     "dependencies": [],
     "created_at": "2026-10-10T14:53:42.327437Z",
-    "updated_at": "2026-10-11T17:49:17.206876Z"
+    "updated_at": "2026-10-20T14:40:59.873593Z"
   },
   {
     "id": "USR-208",
