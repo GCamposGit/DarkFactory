@@ -105,7 +105,7 @@ def test_executable_queue_distinguishes_empty_from_blocked() -> None:
             "project_id": "darkfac",
             "title": "Pronto para desenvolvimento",
             "status": "planned",
-            "problem_statement": "Implementar funcionalidade",
+            "problem_statement": "Implementar funcionalidade", "non_goals": ["Nao alterar contratos publicos"], "acceptance_criteria": ["Teste focado verde"],
         },
     ]
     ready_q = _build_executable_queue(tickets_ready, [])

@@ -129,7 +129,11 @@ def test_import_does_not_build_app_or_job_manager() -> None:
         "app = m.app; assert app is m.app and m._LAZY_APP is app; print('LAZY_OK')"
     )
     env = {**os.environ, "DARKFAC_WORKER_STATE_DIR": os.path.join(os.environ.get("TEMP", "."), "usr317_state_probe")}
-    result = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, env=env, timeout=120)
+    # Import from this checkout, not from whatever directory pytest was launched in.
+    repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    result = subprocess.run(
+        [sys.executable, "-c", code], capture_output=True, text=True, env=env, timeout=120, cwd=repo_root
+    )
     assert "LAZY_OK" in result.stdout, result.stdout + result.stderr
 
 

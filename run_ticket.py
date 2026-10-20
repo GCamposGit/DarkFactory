@@ -271,6 +271,13 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--title", default="", help="Title for newly created ticket")
     parser.add_argument("--problem", default="", help="Problem statement for newly created ticket")
     parser.add_argument("--criteria", nargs="*", default=[], help="Acceptance criteria for newly created ticket")
+    parser.add_argument(
+        "--non-goal",
+        dest="non_goals",
+        action="append",
+        default=[],
+        help="Explicit scope limit for newly created ticket (repeatable). Never invented: omit when unknown.",
+    )
     parser.add_argument("--project", default="darkfac", help="Project identifier (default: darkfac)")
     parser.add_argument("--dry-run", action="store_true", help="Inspect quotas and resolve route without modifying code")
     parser.add_argument("--skip-validation", action="store_true", help="Skip running runner.py --quick after development")
@@ -331,6 +338,7 @@ def _build_ticket(args: argparse.Namespace, store: DemandsStore) -> UserTicket:
         title=args.title,
         problem_statement=args.problem,
         core_journey=[args.problem] if args.problem else [],
+        non_goals=[g.strip() for g in (getattr(args, "non_goals", None) or []) if g and g.strip()],
         acceptance_criteria=list(args.criteria),
         status=DeliveryStatus.PLANNED,
     )

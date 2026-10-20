@@ -29,6 +29,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from core.demands.readiness import evaluate_readiness
 from core.line.bindings import LINE_STAGES
 from core.line.local_progress import (
     ABANDON_AFTER_SECONDS,
@@ -1385,9 +1386,20 @@ def _build_executable_queue(
             missing = [d for d in deps if d not in completed_tickets]
             blocked_reason = f"waiting_dependencies:{','.join(missing)}"
             message = f"Aguardando conclusão de dependência(s): {', '.join(missing)}"
-        elif str(t.get("problem_statement") or "").strip() == "":
-            blocked_reason = "missing_specification"
-            message = "Especificação incompleta ou ambígua (Gate G1)"
+        else:
+            readiness = evaluate_readiness(
+                str(t.get("problem_statement") or ""),
+                [str(x) for x in t.get("non_goals") or []],
+                [str(x) for x in t.get("acceptance_criteria") or []],
+            )
+            if not readiness.is_clear:
+                # Same canonical G1 evaluation as the backlog feeder (USR-305).
+                blocked_reason = (
+                    "missing_specification"
+                    if readiness.human_decision_reasons
+                    else "g1_documentary_gap"
+                )
+                message = "Gate G1: " + "; ".join(readiness.reasons)
 
         eligible = blocked_reason is None
         candidates.append(
