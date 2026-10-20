@@ -1947,6 +1947,45 @@
       "created_at": "2026-10-20T15:35:26Z",
       "created_by": "claude-code",
       "resolved_at": null
+    },
+    {
+      "id": "OA-048",
+      "kind": "decision",
+      "title": "Autorizar revisão independente USR-321 pelo Grok",
+      "priority": "high",
+      "status": "done",
+      "why": "Auto-review recusou envio do código privado dos arquivos alterados ao harness Grok por falta de autorização específica ao destino. Revisão outra família obrigatória antes do merge USR-321.",
+      "blocks": [
+        "USR-321"
+      ],
+      "depends_on": [],
+      "steps": [
+        {
+          "text": "No chat de operação DarkFac, responda explicitamente se autoriza o envio dos arquivos alterados do USR-321 ao harness Grok apenas para revisão independente read-only."
+        }
+      ],
+      "options": [
+        {
+          "id": "A",
+          "label": "Autorizar Grok",
+          "detail": "Autorizar envio do candidato USR-321 ao harness Grok para revisão read-only."
+        },
+        {
+          "id": "B",
+          "label": "Manter código local",
+          "detail": "Não autorizar Grok; manter merge bloqueado até revisor local de outra família validado."
+        }
+      ],
+      "verify": "Decisão explícita registrada nesta OA e recibo de revisão vinculado ao SHA candidato antes do merge.",
+      "created_at": "2026-10-20T23:40:10Z",
+      "created_by": "codex",
+      "resolved_at": "2026-10-20T23:41:40Z",
+      "answer": {
+        "option_id": "A",
+        "note": "Owner respondeu a pergunta explicita de envio de arquivos/diff privados USR-321 ao Grok: Autorizar revisao pelo Grok. Evidencia recebida pelo coordenador nesta sessao.",
+        "answered_at": "2026-10-20T23:41:40Z",
+        "answered_by": "owner"
+      }
     }
   ]
 }

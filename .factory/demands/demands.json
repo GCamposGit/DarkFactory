@@ -9448,9 +9448,10 @@
     "lifecycle_stage": "execution",
     "horizon": "now",
     "tags": [
-      "user-demand"
+      "user-demand",
+      "owner-decision:OA-048=A"
     ],
-    "problem_statement": "Sessao de operacao observou run_ticket.py USR-318 --dry-run --json iniciado 16:55 e retornando aproximadamente 17:55 de 20/10/2026 durante sondagem de cota/wake; tentativa automatica de email do grokbox observada. Nova tentativa completou em38s. Causa ainda nao demonstrada; distinguir hibernacao, wrappers e timeout de rede antes de corrigir. Inspecao de deliver_parallel.py confirma rc7 escreve queue.txt aposentada, runner_grok reenfileira myqueue sem mutex; kind implementation falha em ledger-only USR315; runner_local usa gate local forcado e piso5.5GB contradiz scheduler7.5GB. Scripts operacionais fora do repo em C:/Users/guigc/darkfac-ops.",
+    "problem_statement": "Sessao de operacao observou run_ticket.py USR-318 --dry-run --json iniciado 16:55 e retornando aproximadamente 17:55 de 20/10/2026 durante sondagem de cota/wake; tentativa automatica de email do grokbox observada. Nova tentativa completou em38s. Causa ainda nao demonstrada; distinguir hibernacao, wrappers e timeout de rede antes de corrigir. Inspecao de deliver_parallel.py confirma rc7 escreve queue.txt aposentada, runner_grok reenfileira myqueue sem mutex; kind implementation falha em ledger-only USR315; runner_local usa gate local forcado e piso5.5GB contradiz scheduler7.5GB. Scripts operacionais fora do repo em C:/Users/guigc/darkfac-ops.\n\n[Decisao do owner OA-048] Autorizar revisão independente USR-321 pelo Grok -> opcao A (Autorizar Grok), em 2026-10-20T23:41:40Z. Nota do owner: Owner respondeu a pergunta explicita de envio de arquivos/diff privados USR-321 ao Grok: Autorizar revisao pelo Grok. Evidencia recebida pelo coordenador nesta sessao.",
     "core_journey": [],
     "non_goals": [
       "Nao relaxar piso de cota, Gate G1 ou isolamento de projetos."
@@ -9466,6 +9467,38 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-20T20:58:23.680377Z",
-    "updated_at": "2026-10-20T20:58:23.680377Z"
+    "updated_at": "2026-10-20T23:41:40.983014Z"
+  },
+  {
+    "id": "USR-322",
+    "project_id": "darkfac",
+    "title": "Evitar WinError206 em prompts longos de revisao Grok no Windows",
+    "origin": "agent",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "Revisao independente USR-321 em 20/10/2026: run_agent AgentRequest harness grok mode read com arquivos completos retornou ok=false error_kind=crash text=[WinError 206] O nome do arquivo ou a extensao e muito grande. _run_grok envia req.prompt integral no argumento -p. Prompt curto com leitura de arquivos e mitigacao operacional, nao corrige transporte longo.",
+    "core_journey": [],
+    "non_goals": [
+      "Nao alterar cota, modelos eleitos, permissao de divulgacao nem governanca."
+    ],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Prompt de revisao maior que32KiB executa no Windows sem WinError206 por transporte suportado prompt-file ou stdin.",
+      "Teste de construcao de argv demonstra ausencia do corpo integral no argumento para prompts longos.",
+      "Timeout, redacao de segredos, read-only e diagnostico estruturado preservados."
+    ],
+    "suggested_files": [
+      "core/line/agent_cli.py"
+    ],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-20T23:42:03.508310Z",
+    "updated_at": "2026-10-20T23:42:03.508310Z"
   }
 ]
