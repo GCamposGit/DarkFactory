@@ -1947,6 +1947,35 @@
       "created_at": "2026-10-20T15:35:26Z",
       "created_by": "claude-code",
       "resolved_at": null
+    },
+    {
+      "id": "OA-048",
+      "kind": "action",
+      "title": "Autenticar GitHub CLI para publicar a entrega do M7",
+      "priority": "medium",
+      "status": "open",
+      "why": "O push da branch df/run-2c333b2c26f8 e o registro remoto do USR-322 falharam porque o harness nao encontrou credenciais GitHub (fatal: could not read Username for https://github.com). A entrega local esta validada, mas precisa ser publicada para seguir o ciclo autonomo.",
+      "blocks": [
+        "USR-279"
+      ],
+      "depends_on": [],
+      "steps": [
+        {
+          "text": "No Windows, abra o PowerShell e inicie a autenticacao web do GitHub CLI com escopo repo. O CLI mostrara um codigo temporario; nao o compartilhe no chat nem o salve no repositorio.",
+          "command": "& 'C:\\Program Files\\GitHub CLI\\gh.exe' auth login --hostname github.com --web --scopes repo"
+        },
+        {
+          "text": "Na tela exibida pelo comando, copie o codigo temporario, abra https://github.com/login/device no navegador, informe o codigo, confira que a conta exibida e GCamposGit e autorize GitHub CLI. Volte ao PowerShell e aguarde a confirmacao."
+        },
+        {
+          "text": "Confirme a sessao e o escopo no PowerShell; nao cole tokens ou codigos temporarios em arquivos ou mensagens.",
+          "command": "& 'C:\\Program Files\\GitHub CLI\\gh.exe' auth status --hostname github.com"
+        }
+      ],
+      "verify": "O comando gh auth status --hostname github.com informa sessao ativa de GCamposGit com escopo repo. Entao a Dark Factory pode retomar o push e a publicacao autonomos das branches pendentes.",
+      "created_at": "2026-10-20T21:35:07Z",
+      "created_by": "codex",
+      "resolved_at": null
     }
   ]
 }
