@@ -43,6 +43,19 @@ def tracked_files(root: Path = REPO_ROOT) -> list[str]:
     return [line for line in out.stdout.splitlines() if line.strip()]
 
 
+def count_ids(text: str) -> int:
+    """Count literal ids, skipping wire-id lines and registry-generated blocks (derived, not hand-written)."""
+    total, generated = 0, False
+    for line in text.splitlines():
+        if "<!-- BEGIN model-registry:" in line:
+            generated = True
+        elif "<!-- END model-registry:" in line:
+            generated = False
+        elif not generated and WIRE_ID_MARKER not in line:
+            total += len(MODEL_ID_RE.findall(line))
+    return total
+
+
 def census(root: Path = REPO_ROOT) -> tuple[int, dict[str, int]]:
     """Return (total occurrences outside the allowlist, per-file counts)."""
     per_file: dict[str, int] = {}
@@ -53,7 +66,7 @@ def census(root: Path = REPO_ROOT) -> tuple[int, dict[str, int]]:
             text = (root / rel).read_text(encoding="utf-8", errors="ignore")
         except OSError:
             continue
-        count = sum(len(MODEL_ID_RE.findall(line)) for line in text.splitlines() if WIRE_ID_MARKER not in line)
+        count = count_ids(text)
         if count:
             per_file[rel] = count
     return sum(per_file.values()), per_file
