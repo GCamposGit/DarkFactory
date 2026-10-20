@@ -5741,8 +5741,8 @@
     "project_id": "darkfac",
     "title": "Registro universal de execucoes: codigo unico por etapa e heartbeat para a Esteira ao vivo",
     "origin": "user",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "3ec0851cfc74639b7d13a397e059ea383259a66c",
     "item_type": "infrastructure",
     "lifecycle_stage": "execution",
     "horizon": "later",
@@ -5751,14 +5751,16 @@
       "darkhub",
       "live",
       "telemetry",
-      "observability",
-      "congelado-v0"
+      "observability"
     ],
     "problem_statement": "A Esteira ao vivo (/live, core/workflow/line_live.py) so enxerga runs do control store e run_ticket local. Em 10/10 o snapshot tinha 28 runs: execucoes 'USR-TESTE / Teste da esteira' (uma 'active' presa desde 09:58), canarios e nada dos desenvolvimentos reais do dia (ex.: USR-187, OA-004/OA-007, sessoes interativas e subagentes). Requisito do owner: toda acao no ambiente DarkFac - Telegram, sessoes Codex, Grok, Antigravity, Claude (principal e subagentes), run_ticket, pump, linha na VPS - gera obrigatoriamente um codigo unico de execucao por etapa e aparece no Hub Live; abrir /live deve mostrar 100% do que esta em andamento. Diagnostico de 10/10/2026 (sessao interativa Claude Code, pedido do owner sobre o DarkHub).\n\nCONGELADO em 11/10/2026 (plano V0, docs/plans/V0_OPERACIONAL_2026-10-11.md): fora do caminho critico da linha.",
     "core_journey": [
       "A Esteira ao vivo (/live, core/workflow/line_live.py) so enxerga runs do control store e run_ticket local. Em 10/10 o snapshot tinha 28 runs: execucoes 'USR-TESTE / Teste da esteira' (uma 'active' presa desde 09:58), canarios e nada dos desenvolvimentos reais do dia (ex.: USR-187, OA-004/OA-007, sessoes interativas e subagentes). Requisito do owner: toda acao no ambiente DarkFac - Telegram, sessoes Codex, Grok, Antigravity, Claude (principal e subagentes), run_ticket, pump, linha na VPS - gera obrigatoriamente um codigo unico de execucao por etapa e aparece no Hub Live; abrir /live deve mostrar 100% do que esta em andamento. Diagnostico de 10/10/2026 (sessao interativa Claude Code, pedido do owner sobre o DarkHub)."
     ],
-    "non_goals": [],
+    "non_goals": [
+      "Nao implementar hooks de sessoes interativas (USR-209).",
+      "Nao bloquear a sessao quando o registro estiver indisponivel."
+    ],
     "reachability_contract": "",
     "acceptance_criteria": [
       "Modulo unico core/workflow/execution_registry.py com start(source, harness, stage, ticket_id?, parent_execution_id?) -> execution_id unico, heartbeat(), finish(status, evidence); grava no control store Postgres com fila local de reenvio quando offline.",
@@ -5778,7 +5780,7 @@
     "estimated_complexity": "high",
     "dependencies": [],
     "created_at": "2026-10-10T14:53:47.851829Z",
-    "updated_at": "2026-10-11T17:49:17.206876Z"
+    "updated_at": "2026-10-20T15:49:54.144960Z"
   },
   {
     "id": "USR-209",

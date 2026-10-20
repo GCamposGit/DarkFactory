@@ -6,7 +6,7 @@
   <meta name="color-scheme" content="dark">
   <meta name="theme-color" content="#020617">
   <title>Esteira ao vivo · DarkHub</title>
-  <link rel="stylesheet" href="/static/live.css?v=20261004c">
+  <link rel="stylesheet" href="/static/live.css?v=20261020a">
 </head>
 <body>
   <a class="skip-link" href="#line-live-board">Pular para o conteúdo</a>
@@ -41,6 +41,11 @@
             <input id="toggle-done" type="checkbox" checked>
             <span class="switch-track" aria-hidden="true"></span>
             <span class="switch-text">Mostrar concluídos</span>
+          </label>
+          <label class="switch" for="toggle-fixtures">
+            <input id="toggle-fixtures" type="checkbox">
+            <span class="switch-track" aria-hidden="true"></span>
+            <span class="switch-text">Mostrar testes e canários</span>
           </label>
           <button id="notify-btn" class="btn btn-ghost" type="button" hidden aria-pressed="false">Avisar no navegador</button>
         </div>
@@ -104,6 +109,12 @@
             <div id="lanes-empty" class="empty" hidden></div>
           </section>
 
+          <section id="sec-executions" class="panel" aria-labelledby="h-exec">
+            <h2 id="h-exec" class="panel-title">Execuções (todas as fontes) <span id="exec-count" class="count-pill">0</span></h2>
+            <div id="exec-body" class="exec-body"></div>
+            <div id="exec-empty" class="empty empty-small">Nenhuma execução registrada.</div>
+          </section>
+
           <section id="sec-done" class="panel" aria-labelledby="h-done">
             <h2 id="h-done" class="panel-title">
               <button id="done-toggle" class="title-toggle" type="button" aria-expanded="true" aria-controls="done-list">
@@ -155,6 +166,6 @@
   </div>
 
   <noscript><p class="noscript">A Esteira ao vivo precisa de JavaScript habilitado.</p></noscript>
-  <script src="/static/live.js?v=20261004c"></script>
+  <script src="/static/live.js?v=20261020a"></script>
 </body>
 </html>

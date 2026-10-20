@@ -42,6 +42,15 @@ from core.line.local_progress import (
     TABLE as LOCAL_EVENTS_TABLE,
 )
 from core.orchestrator.cloud_db import sanitize_database_url
+from core.workflow.execution_registry import (
+    EXEC_PHASE,
+    ExecutionGroup,
+    ExecutionRecord,
+    fold_executions,
+    group_active,
+    is_delivery,
+    is_fixture,
+)
 from core.workflow.job_board import (
     DATABASE_URL_ENVS,
     decode_refs,
@@ -59,6 +68,8 @@ MAX_NEXT_BACKLOG = 5
 RUNNING_IDLE_LIMIT = timedelta(minutes=20)
 QUEUED_STALL_LIMIT = timedelta(minutes=30)
 LOCAL_EVENT_LIMIT = 3000
+EXECUTION_EVENT_LIMIT = 6000
+RECENT_EXECUTION_LIMIT = 50
 
 STAGE_LABELS: dict[str, str] = {
     "grill": "Grill",
@@ -190,6 +201,7 @@ class LiveRun(_Model):
     host_id: str | None = None
     reservation_state: str | None = None
     idle_or_blocked_reason: str | None = None
+    fixture: bool = False  # test fixture / canary (USR-208): hidden by default in the Hub
 
 
 class LiveEvent(_Model):
@@ -278,6 +290,15 @@ class LiveExecutableQueue(_Model):
     candidates: list[LiveQueueCandidate] = Field(default_factory=list)
 
 
+class LiveExecutions(_Model):
+    """Unified execution registry projection (USR-208): every source, not only control-store runs."""
+
+    active: list[ExecutionGroup] = Field(default_factory=list)  # grouped by source and stage
+    lost: list[ExecutionRecord] = Field(default_factory=list)  # no heartbeat for > 3 min
+    recent: list[ExecutionRecord] = Field(default_factory=list)  # real deliveries of the last 7 days
+    fixtures_hidden: int = 0  # records flagged `fixture` (the Hub hides them unless asked)
+
+
 class LineLiveSnapshot(_Model):
     generated_at: str
     version: str
@@ -291,6 +312,7 @@ class LineLiveSnapshot(_Model):
     backlog: list[LiveBacklogProject] = Field(default_factory=list)
     off_line: list[LiveTicket] = Field(default_factory=list)
     fleet: LiveFleetStatus | None = None
+    executions: LiveExecutions = Field(default_factory=LiveExecutions)
     executable_queue: LiveExecutableQueue = Field(default_factory=LiveExecutableQueue)
 
 
@@ -394,6 +416,7 @@ class _RawStore:
     claims: list[dict[str, Any]] = field(default_factory=list)
     intake: list[dict[str, Any]] = field(default_factory=list)
     local_events: list[dict[str, Any]] = field(default_factory=list)
+    execution_events: list[dict[str, Any]] = field(default_factory=list)
     reservations: list[dict[str, Any]] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
 
@@ -435,12 +458,21 @@ def _load_with(
     # never hide the line itself.
     try:
         raw.local_events = execute(
-            f"SELECT {LOCAL_EVENT_COLUMNS} FROM {LOCAL_EVENTS_TABLE} "
+            f"SELECT {LOCAL_EVENT_COLUMNS} FROM {LOCAL_EVENTS_TABLE} WHERE phase <> '{EXEC_PHASE}' "
             f"ORDER BY event_id DESC LIMIT {LOCAL_EVENT_LIMIT}",
             (),
         )
     except Exception as exc:  # noqa: BLE001 - driver specific errors (missing table is the common one)
         logger.info("Live line: local run progress unreadable: %s", sanitize_database_url(str(exc)))
+    # Unified execution registry (USR-208): optional enrichment, same table, never hides the line.
+    try:
+        raw.execution_events = execute(
+            f"SELECT {LOCAL_EVENT_COLUMNS} FROM {LOCAL_EVENTS_TABLE} WHERE phase = '{EXEC_PHASE}' "
+            f"ORDER BY event_id DESC LIMIT {EXECUTION_EVENT_LIMIT}",
+            (),
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.info("Live line: execution registry unreadable: %s", sanitize_database_url(str(exc)))
     try:
         raw.reservations = execute(
             "SELECT reservation_id, project_id, ticket_id, run_id, host_id, status, fencing_token, "
@@ -1092,6 +1124,7 @@ def _build_runs(
             host_id=host_id,
             reservation_state=res_state,
             idle_or_blocked_reason=idle_reason,
+            fixture=is_fixture(ticket_id, None, title) or is_fixture(demand_id) or "canary" in project_id.lower(),
         )
         runs.append(run)
 
@@ -1273,6 +1306,22 @@ def _natural_key(value: str) -> tuple[Any, ...]:
     if buffer:
         parts.append((1, int(buffer), ""))
     return tuple(parts)
+
+
+def _build_executions(raw: _RawStore | None, *, now: datetime) -> LiveExecutions:
+    """Project the execution registry rows (USR-208): active by source/stage, lost, recent deliveries."""
+    if raw is None or not raw.execution_events:
+        return LiveExecutions()
+    records = fold_executions(raw.execution_events, now)
+    lost = [r for r in records if r.state == "lost"]
+    recent = [r for r in records if is_delivery(r)][:RECENT_EXECUTION_LIMIT]
+    active = group_active(records)
+    return LiveExecutions(
+        active=active,
+        lost=lost,
+        recent=recent,
+        fixtures_hidden=sum(1 for r in records if r.fixture),
+    )
 
 
 def compute_version(payload: Mapping[str, Any]) -> str:
@@ -1462,6 +1511,7 @@ def build_line_live(
     labels = {stage: _label(stage) for stage in (*stage_order, *dict.fromkeys(extra))}
     labels.update({stage: label for stage, label in STAGE_LABELS.items() if stage not in labels})
     fleet = _build_fleet(raw, now=now)
+    executions = _build_executions(raw, now=now)
     executable_queue = _build_executable_queue(tickets, runs)
     snapshot = LineLiveSnapshot(
         generated_at=now.isoformat(),
@@ -1477,6 +1527,7 @@ def build_line_live(
         off_line=off_line,
         fleet=fleet,
         executable_queue=executable_queue,
+        executions=executions,
     )
     snapshot.version = compute_version(snapshot.model_dump(mode="json"))
     return snapshot

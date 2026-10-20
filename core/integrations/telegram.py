@@ -294,6 +294,13 @@ def load_telegram_config(
     )
 
 
+def _tracked_telegram_execution(stage: str, update_id: int) -> Any:
+    """Context manager registering one Telegram request as an execution (never raises, never blocks)."""
+    from core.workflow.execution_registry import TrackedExecution
+
+    return TrackedExecution("telegram", "gateway", stage, title=f"telegram {stage} update {update_id}", heartbeat_interval=0)
+
+
 class TelegramActionType(str, Enum):
     START = "start"
     DEMAND = "demand"
@@ -539,18 +546,21 @@ class TelegramGateway:
                 response_text="Access Denied: You are not authorized to command Dark Factory.",
             )
 
-        # 4. Dispatch update
-        if update.message:
-            result = self._handle_message(update)
-        elif update.callback_query:
-            result = self._handle_callback(update)
-        else:
-            result = TelegramDispatchResult(
-                update_id=update.update_id,
-                action=TelegramActionType.UNKNOWN,
-                authorized=True,
-                response_text="Unsupported update event type.",
-            )
+        # 4. Dispatch update (every request/command is an execution visible in Hub Live, USR-208)
+        with _tracked_telegram_execution("command" if update.message else "callback", update.update_id) as tracked:
+            if update.message:
+                result = self._handle_message(update)
+            elif update.callback_query:
+                result = self._handle_callback(update)
+            else:
+                result = TelegramDispatchResult(
+                    update_id=update.update_id,
+                    action=TelegramActionType.UNKNOWN,
+                    authorized=True,
+                    response_text="Unsupported update event type.",
+                )
+            tracked.status = "failed" if result.error else "succeeded"
+            tracked.evidence = result.error or str(getattr(result.action, "value", result.action))
 
         # 5. Post-commit persistence: only advance offset and record IDs if transaction succeeded
         if result.error:
