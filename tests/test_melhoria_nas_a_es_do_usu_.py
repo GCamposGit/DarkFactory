@@ -112,6 +112,8 @@ const context = {
   encodeURIComponent,
   decodeURIComponent,
   fetch: fakeFetch,
+  // USR-207: hub modules call the shared retry helper (hub_net.js), loaded before them in index.html.
+  hubNetFetch: (url, options) => fakeFetch(url, options),
   confirm: () => { calls.confirm += 1; return true; },
   alert: () => { calls.alert += 1; },
   setTimeout: (fn, ms) => { timers.push({ fn, ms, cleared: false }); return timers.length - 1; },
