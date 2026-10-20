@@ -123,6 +123,7 @@ def _orphan_the_record(manager: JobManager, job_id: str) -> None:
     path = manager.state_dir / "jobs" / f"{job_id}.json"
     record = json.loads(path.read_text(encoding="utf-8"))
     record["owner_started_at"] = 1.0  # pid "reused" by a much younger process => original owner is gone
+    record["owner_start_ticks"] = 1  # USR-317: Linux identity uses /proc starttime ticks; make them mismatch too
     path.write_text(json.dumps(record), encoding="utf-8")
 
 
