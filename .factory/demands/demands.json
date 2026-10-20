@@ -5132,7 +5132,7 @@
     "title": "Registro de modelos autonomo: descoberta, qualificacao, promocao e rollback sem edicao manual",
     "origin": "user",
     "status": "completed",
-    "delivery_evidence": "bece1188bc477f2384fe55dbaced0fd12261da09. Fatia 4 (docs geradas) entregue em 20/10/2026; Fatia 3 (proposta protegidos) entregue em 20/10/2026, OA-046; Fatia 5 (descoberta) entregue em 20/10/2026; Fatia 6 (qualificacao) entregue em 20/10/2026",
+    "delivery_evidence": "bece1188bc477f2384fe55dbaced0fd12261da09. Fatia 4 (docs geradas) entregue em 20/10/2026; Fatia 3 (proposta protegidos) entregue em 20/10/2026, OA-046; Fatia 5 (descoberta) entregue em 20/10/2026; Fatia 6 (qualificacao) entregue em 20/10/2026; Fatia 7 (promocao e rollback) entregue em 20/10/2026",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "later",
@@ -5164,7 +5164,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-09T07:01:39.369233Z",
-    "updated_at": "2026-10-20T17:05:42.323587Z"
+    "updated_at": "2026-10-20T18:00:00Z"
   },
   {
     "id": "USR-186",
