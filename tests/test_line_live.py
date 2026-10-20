@@ -526,6 +526,30 @@ def test_hub_service_survives_unavailable_demands(
     assert any("demands indisponíveis" in warning for warning in snapshot.warnings)
 
 
+def test_hub_service_preserves_queue_readiness_and_blockers(
+    tmp_path: Path, seeded: tuple[Path, dict[str, str]], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from core.demands.models import UserTicket
+
+    db, _ = seeded
+    service = _make_service(tmp_path, db)
+    ready = UserTicket(
+        id="USR-ready", title="Ready ticket",
+        problem_statement="The live queue loses the specified ticket fields before evaluating admission.",
+        non_goals=["Do not change admission policy or execute any jobs."],
+        acceptance_criteria=["The live queue reports this fully specified ticket as eligible."],
+    )
+    postponed = ready.model_copy(update={"id": "USR-held", "tags": ["hold"]})
+    dependent = ready.model_copy(update={"id": "USR-dependent", "dependencies": ["USR-missing"]})
+    monkeypatch.setattr(service.demands_service, "list_tickets", lambda: [ready, postponed, dependent])
+
+    candidates = {c.ticket_id: c for c in service.get_line_live().executable_queue.candidates}
+
+    assert candidates[ready.id].eligible
+    assert candidates[postponed.id].reason == "intentional_postponement"
+    assert candidates[dependent.id].reason == "waiting_dependencies:USR-missing"
+
+
 # ---------------------------------------------------------------- HTTP surface
 
 

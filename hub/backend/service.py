@@ -662,6 +662,11 @@ class HubService:
                             "status": getattr(ticket.status, "value", ticket.status),
                             "horizon": getattr(ticket.horizon, "value", ticket.horizon),
                             "updated_at": ticket.updated_at,
+                            "problem_statement": ticket.problem_statement,
+                            "non_goals": ticket.non_goals,
+                            "acceptance_criteria": ticket.acceptance_criteria,
+                            "tags": ticket.tags,
+                            "dependencies": ticket.dependencies,
                         }
                     )
             except Exception as exc:  # demands are enrichment: never take the live board down
