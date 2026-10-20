@@ -1,0 +1,62 @@
+[
+  {
+    "id": "T1",
+    "title": "Inventariar falhas e lacunas de M1-M6 do piloto com vinculo de resolucao",
+    "goal": "Publicar o inventario das falhas e lacunas encontradas no percurso do piloto greenfield, cada uma com evidencia e vinculo a commit/PR, ticket formal ou acao do owner, abrindo ticket na fila para o que ainda estiver aberto.",
+    "files_hint": [
+      "docs/evidence/USR-279-M7-falhas.md",
+      "tests/test_usr279_m7_failures.py",
+      ".factory/demands/demands.json"
+    ],
+    "acceptance": [
+      "docs/evidence/USR-279-M7-falhas.md lista, em tabela, cada falha ou lacuna identificada em M1-M6 com descricao, evidencia (caminho de arquivo, SHA, horario ou saida de comando) e vinculo de resolucao: commit, PR, ticket (USR- ou PH-) ou acao do owner (OA-).",
+      "Toda lacuna ainda aberta tem ticket formal na fila (status planned, criado com `python C:\\dev\\DarkFac\\run_ticket.py --create --queue-only ...`) ou cita a OA existente (OA-043, OA-047); nenhuma linha fica apenas com diagnostico ou com a palavra 'depois'.",
+      "Todo ID citado no inventario existe em .factory/demands/demands.json ou .factory/owner_actions/owner_actions.json, e `python C:\\dev\\DarkFac\\scripts\\line_validate.py` passa."
+    ],
+    "tests_to_add": [
+      "tests/test_usr279_m7_failures.py: toda linha da tabela do inventario tem vinculo que casa com commit (7-40 hex), PR (#numero), ticket (USR-/PH-) ou OA-, e todo ticket/OA citado existe nos registros da fabrica."
+    ],
+    "smoke": []
+  },
+  {
+    "id": "T2",
+    "title": "Publicar o relatorio final M7 e o verificador de evidencia do piloto",
+    "goal": "Entregar docs/evidence/USR-279-M7.md com linha do tempo M1-M6, SHAs/PR/CI, deploy, smoke, prova de independencia e contagem de intervencoes manuais, junto com um verificador que impede declarar como confirmado o que nao tem referencia.",
+    "files_hint": [
+      "docs/evidence/USR-279-M7.md",
+      "core/evidence/greenfield_pilot.py",
+      "core/evidence/__init__.py",
+      "tests/test_usr279_m7_report.py",
+      "docs/plans/USR-279-greenfield-pilot.md"
+    ],
+    "acceptance": [
+      "O relatorio traz uma linha por marco de M1 a M6 com status `confirmado` ou `pendente`: confirmado cita referencia verificavel (caminho da evidencia, SHA, PR, URL de deploy, saida do smoke e horario) e pendente cita o bloqueador (OA-043, OA-047 ou ticket do inventario do T1).",
+      "O relatorio tem as secoes de SHAs/PR/CI, deploy e smoke, prova de independencia (clone separado, install, validate, wheel, execucao sem checkout/import/servico DarkFac, permitido o texto de produto 'DarkFac pilot') e contagem de intervencoes manuais, com as acoes humanas realizadas (finalidade, momento, referencia) separadas das pendentes, alem do vinculo para docs/evidence/USR-279-M7-falhas.md.",
+      "`core.evidence.greenfield_pilot.verify_report` nao retorna nenhum problema para o relatorio publicado, o relatorio nao declara o piloto concluido enquanto houver marco pendente, e `python C:\\dev\\DarkFac\\scripts\\line_validate.py` passa."
+    ],
+    "tests_to_add": [
+      "tests/test_usr279_m7_report.py: verificador rejeita fixtures com status desconhecido, confirmado sem referencia, pendente sem bloqueador e piloto declarado concluido com marco pendente; aceita o relatorio real sem problemas; linhas de M1 e M2 apontam para docs/evidence/USR-279-M1.md e docs/evidence/USR-279-M2.md e repetem os SHAs/horarios desses arquivos."
+    ],
+    "smoke": []
+  },
+  {
+    "id": "T3",
+    "title": "Registrar a decisao D4 e marcar os criterios 2 e 3 do USR-279 com evidencia",
+    "goal": "Registrar a retencao D4 (manter arquivado) como acao do owner com passo a passo e critério de verificacao, e reescrever a evidencia do USR-279 criterio por criterio, marcando atendido somente o que o relatorio M7 confirma.",
+    "files_hint": [
+      ".factory/owner_actions/owner_actions.json",
+      ".factory/demands/demands.json",
+      "tests/test_usr279_m7_criteria.py",
+      "core/evidence/greenfield_pilot.py"
+    ],
+    "acceptance": [
+      "Existe acao do owner (kind action, prioridade low, blocks USR-279) para a retencao D4 do pilot-hello, criada com `python C:\\dev\\DarkFac\\scripts\\owner_action.py add ...`, com passo a passo tela a tela (GitHub > repositorio pilot-hello > Settings > General > Danger Zone > Archive this repository > confirmar o nome) e critério de verificacao (repositorio aparece como Archived e `gh repo view GCamposGit/pilot-hello --json isArchived` devolve true); nenhuma OA duplicada para D4.",
+      "O delivery_evidence do USR-279 passa a mapear os tres criterios citando docs/evidence/USR-279-M7.md: criterio marcado como atendido somente quando o relatorio o lista como confirmado com referencia, e criterio sem evidencia fica explicitamente nao atendido com os bloqueadores (OA-043, OA-047 e marcos M3-M6) e o ticket nao vira completed sem a cadeia completa.",
+      "As atualizacoes sao feitas pelas CLIs (`core.demands` e `python C:\\dev\\DarkFac\\scripts\\owner_action.py`), sem edicao manual dos JSON, e `python C:\\dev\\DarkFac\\scripts\\line_validate.py` passa."
+    ],
+    "tests_to_add": [
+      "tests/test_usr279_m7_criteria.py: para cada criterio declarado atendido na evidencia do USR-279 existe linha `confirmado` com referencia no relatorio M7; criterios nao atendidos citam bloqueador existente em owner_actions.json ou demands.json; a OA de retencao D4 existe uma unica vez, com steps e verify preenchidos."
+    ],
+    "smoke": []
+  }
+]
