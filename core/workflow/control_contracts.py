@@ -25,6 +25,23 @@ from core.workflow.contracts import ContractModel
 
 logger = logging.getLogger(__name__)
 
+FLEET_MANAGED_ENV = "DARKFAC_FLEET_MANAGED"
+# Reservations of runs whose next stage is still pending are renewed by the coordinator only while the job
+# became ready within this window; beyond it the host is presumed dead and the reservation may expire (USR-306).
+RESERVATION_PENDING_GRACE_SEC = 300
+
+
+def fleet_managed_enabled() -> bool:
+    """True when the fleet runs in managed mode (USR-306).
+
+    Managed mode: only the coordinator admits cycles (reservation + verified host health). A job without an
+    active reservation is not claimable through the legacy path, so it cannot bypass the 1-per-host/3-per-fleet
+    capacity. Unmanaged (default) keeps the legacy behaviour for local and single-host use.
+    """
+    import os
+
+    return os.environ.get(FLEET_MANAGED_ENV, "").strip().lower() in {"1", "true", "yes", "on"}
+
 
 # ---------------------------------------------------------------------------
 # Exceptions

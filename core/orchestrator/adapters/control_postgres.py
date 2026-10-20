@@ -35,6 +35,8 @@ from core.workflow.control_contracts import (
     StaleLeaseError,
     StoreUnavailableError,
     TicketAlreadyActiveError,
+    RESERVATION_PENDING_GRACE_SEC,
+    fleet_managed_enabled,
     normalize_cause_code,
 )
 from core.workflow.control_store import ControlStore, SQLiteControlStore, _is_ready_enough, RUN_OPEN_JOB_STATUSES
@@ -485,6 +487,8 @@ class PostgresControlStore:
                             matched_reservation_id = res_id
                             # Host affinity confirmed: executes immediately without fixed priority delay
                         else:
+                            if fleet_managed_enabled():
+                                continue  # Managed mode: no legacy path without an admitted reservation (USR-306)
                             matched_reservation_id = None
                             if ready_age_sec > 0.0:
                                 ready_reference = r[10] or r[8]
@@ -543,6 +547,13 @@ class PostgresControlStore:
                             expires_at_utc,
                         ),
                     )
+                    if matched_reservation_id:
+                        # USR-306: claim proves host liveness; renew the cycle reservation in the same transaction.
+                        cur.execute(
+                            "UPDATE fleet_reservations SET heartbeat_at = %s, expires_at = %s "
+                            "WHERE reservation_id = %s AND status = 'active'",
+                            (now_utc, expires_at_utc, matched_reservation_id),
+                        )
                     conn.commit()
 
                     return Claim(
@@ -2173,6 +2184,38 @@ class PostgresControlStore:
                     return count
         except Exception as exc:
             raise StoreUnavailableError(f"PostgreSQL drain_host failed: {exc}") from exc
+
+    def renew_open_run_reservations(
+        self, now: datetime, pending_grace_sec: int = RESERVATION_PENDING_GRACE_SEC
+    ) -> int:
+        """Renew active reservations of runs between stages / waiting on dependencies (USR-306)."""
+        if self.mock_mode:
+            return self._backend.renew_open_run_reservations(now=now, pending_grace_sec=pending_grace_sec)
+
+        now_utc = now.astimezone(UTC)
+        expires_utc = now_utc + timedelta(seconds=self.lease_duration_sec)
+        cutoff_utc = now_utc - timedelta(seconds=pending_grace_sec)
+        try:
+            with self._psycopg.connect(self.raw_url) as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        UPDATE fleet_reservations
+                        SET heartbeat_at = %s, expires_at = %s
+                        WHERE status = 'active' AND expires_at >= %s
+                          AND run_id IN (
+                              SELECT run_id FROM jobs
+                              WHERE status = 'waiting_dependency'
+                                 OR (status = 'pending' AND updated_at >= %s)
+                          )
+                        """,
+                        (now_utc, expires_utc, now_utc, cutoff_utc),
+                    )
+                    renewed = cur.rowcount
+                    conn.commit()
+                    return int(renewed or 0)
+        except Exception as exc:
+            raise StoreUnavailableError(f"PostgreSQL renew_open_run_reservations failed: {exc}") from exc
 
     def reconcile_fleet_reservations(self, now: datetime) -> list[FleetReservation]:
         """Sweep expired fleet reservations and release slots (USR-281)."""

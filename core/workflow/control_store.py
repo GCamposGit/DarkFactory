@@ -33,6 +33,8 @@ from core.workflow.control_contracts import (
     StageResult,
     StaleLeaseError,
     TicketAlreadyActiveError,
+    RESERVATION_PENDING_GRACE_SEC,
+    fleet_managed_enabled,
     normalize_cause_code,
 )
 
@@ -694,6 +696,8 @@ class SQLiteControlStore:
                     matched_reservation_id = res_row["reservation_id"]
                     # Host affinity confirmed: executes immediately without fixed priority delay
                 else:
+                    if fleet_managed_enabled():
+                        continue  # Managed mode: no legacy path without an admitted reservation (USR-306)
                     matched_reservation_id = None
                     if ready_age_sec > 0.0:
                         ready_reference = row["ready_at"] or row["created_at"]
@@ -768,6 +772,14 @@ class SQLiteControlStore:
                     expires_at,
                 ),
             )
+            if matched_reservation_id:
+                # USR-306: the claim itself proves the host is alive; renew the cycle reservation right away so a
+                # short stage (< heartbeat interval) cannot leave it un-renewed until it expires.
+                cur.execute(
+                    "UPDATE fleet_reservations SET heartbeat_at = ?, expires_at = ? "
+                    "WHERE reservation_id = ? AND status = 'active'",
+                    (now_iso, expires_at, matched_reservation_id),
+                )
             conn.commit()
 
             return Claim(
@@ -2425,6 +2437,44 @@ class SQLiteControlStore:
                 )
             conn.commit()
             return len(rows)
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+
+    def renew_open_run_reservations(
+        self, now: datetime, pending_grace_sec: int = RESERVATION_PENDING_GRACE_SEC
+    ) -> int:
+        """Renew active reservations whose run is between stages or waiting on CI/dependencies (USR-306).
+
+        Without this the reservation is only renewed while a stage handler runs, so any gap between stages
+        (successor job pending, waiting_dependency) let it expire un-renewed. Running jobs are renewed by their
+        worker heartbeat; pending jobs only within `pending_grace_sec` of becoming ready (dead host => expires).
+        """
+        now_iso = now.isoformat()
+        expires_iso = (now + timedelta(seconds=self.lease_duration_sec)).isoformat()
+        cutoff_iso = (now - timedelta(seconds=pending_grace_sec)).isoformat()
+        conn = self._connect()
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            cur = conn.cursor()
+            cur.execute(
+                """
+                UPDATE fleet_reservations
+                SET heartbeat_at = ?, expires_at = ?
+                WHERE status = 'active' AND expires_at >= ?
+                  AND run_id IN (
+                      SELECT run_id FROM jobs
+                      WHERE status = 'waiting_dependency'
+                         OR (status = 'pending' AND updated_at >= ?)
+                  )
+                """,
+                (now_iso, expires_iso, now_iso, cutoff_iso),
+            )
+            renewed = cur.rowcount
+            conn.commit()
+            return int(renewed or 0)
         except Exception:
             conn.rollback()
             raise
