@@ -804,6 +804,36 @@ class GitAutonomyManager:
             return int(items[0]["number"]), str(items[0]["url"])
         return None
 
+    def _find_open_queue_duplicate(
+        self, pr_title: str, branch: str, cwd: Path, runner: GhRunner
+    ) -> Optional[tuple[int, str, str]]:
+        """Open ``queue`` PR with exactly ``pr_title`` on a branch other than ``branch`` (USR-307).
+
+        Returns ``(number, url, head_branch)`` of the oldest match, or ``None`` (also when ``gh``
+        fails: dedupe is best effort and must never block a registration).
+        """
+        try:
+            res = runner(
+                ["pr", "list", "--label", "queue", "--state", "open", "--limit", "100",
+                 "--json", "number,url,title,headRefName"],
+                cwd,
+            )
+            if res.returncode != 0:
+                return None
+            rows = json.loads(res.stdout or "[]")
+            matches = [
+                r for r in rows
+                if isinstance(r, dict) and r.get("title") == pr_title and r.get("headRefName")
+                and r.get("headRefName") != branch
+            ]
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("queue duplicate lookup failed: %s", exc)
+            return None
+        if not matches:
+            return None
+        first = min(matches, key=lambda r: int(r["number"]))
+        return int(first["number"]), str(first["url"]), str(first["headRefName"])
+
     def _pr_state(self, number: int, cwd: Path, runner: GhRunner) -> tuple[str, Optional[str]]:
         res = runner(["pr", "view", str(number), "--json", "state,mergeCommit"], cwd)
         if res.returncode != 0:
@@ -1030,16 +1060,29 @@ class GitAutonomyManager:
         if kind == "queue" and not is_ledger_only(self._changed_files(base, cwd)):
             return DeliveryReport(ok=False, action="error", branch=branch, message="Queue PR changes non-ledger files.")
 
-        # (d) push
+        # (d) push. USR-307: a queue registration is identified by its PR title (ticket + title). When
+        # an open queue PR with the same identity already exists on ANOTHER branch (replay of the same
+        # operation, e.g. a second oa-queue-watchdog sweep), its head is updated in place instead of
+        # opening a parallel chain of PRs.
+        remote_branch = branch
+        duplicate: Optional[tuple[int, str, str]] = None
+        if kind == "queue":
+            duplicate = self._find_open_queue_duplicate(
+                f"chore(backlog): registrar {ticket_id} - {title.strip()}", branch, cwd, runner
+            )
         self._phase("pr", "running", "push da branch e abertura do PR")
-        push = _run_git(["push", "--force-with-lease", "-u", "origin", branch], cwd=cwd, timeout_s=180.0)
+        if duplicate:
+            remote_branch = duplicate[2]
+            push = _run_git(["push", "--force", "origin", f"HEAD:refs/heads/{remote_branch}"], cwd=cwd, timeout_s=180.0)
+        else:
+            push = _run_git(["push", "--force-with-lease", "-u", "origin", branch], cwd=cwd, timeout_s=180.0)
         if push.returncode != 0:
             return DeliveryReport(
                 ok=False, action="error", branch=branch, message=f"push failed: {push.stderr.strip()}"
             )
 
         # (e) PR (reuse existing)
-        existing = self._find_open_pr(branch, cwd, runner)
+        existing = (duplicate[:2] if duplicate else None) or self._find_open_pr(branch, cwd, runner)
         if existing:
             number, pr_url = existing
         else:
@@ -1145,7 +1188,10 @@ class GitAutonomyManager:
                             ok=False, action="conflict", pr_url=pr_url, branch=branch, conflict_files=files,
                             message=f"Conflict on retry {attempt}: {', '.join(files) or msg}",
                         )
-                    _run_git(["push", "--force-with-lease", "origin", branch], cwd=cwd, timeout_s=180.0)
+                    if remote_branch != branch:
+                        _run_git(["push", "--force", "origin", f"HEAD:refs/heads/{remote_branch}"], cwd=cwd, timeout_s=180.0)
+                    else:
+                        _run_git(["push", "--force-with-lease", "origin", branch], cwd=cwd, timeout_s=180.0)
                     blocked, gate_note = self._ci_gate(number, pr_url, branch, base, cwd, runner, kind)
                     if blocked is not None:
                         return blocked

@@ -96,6 +96,13 @@ def _build_parser() -> argparse.ArgumentParser:
     answer.add_argument("--option", required=True)
     answer.add_argument("--note", default="")
     answer.add_argument("--json", dest="as_json", action="store_true")
+
+    rec = sub.add_parser("reconcile", help="Classifica OAs obsoletas/orfas; --apply grava so as propostas seguras")
+    rec.add_argument("--apply", action="store_true", help="Aplica as propostas seguras (historico preservado)")
+    rec.add_argument("--id", dest="only_ids", action="append", default=None, help="Limita a estas OAs (repetivel)")
+    rec.add_argument("--demands", default=None, help="Caminho do demands.json (padrao: o do repositorio)")
+    rec.add_argument("--no-gh", action="store_true", help="Nao consulta o GitHub (sem classificacao por PR)")
+    rec.add_argument("--json", dest="as_json", action="store_true")
     return parser
 
 
@@ -210,6 +217,31 @@ def run(
             else:
                 for a in rows:
                     emit(_line(a, blocked_by(a, by_id)))
+            return 0
+
+        if args.command == "reconcile":
+            from core.owner_actions import reconcile as rc
+
+            demands_path = (
+                Path(args.demands) if args.demands
+                else Path(__file__).resolve().parents[2] / ".factory" / "demands" / "demands.json"
+            )
+            proposals = rc.reconcile(
+                active.list_actions(include_done=False), rc.load_ticket_statuses(demands_path),
+                None if args.no_gh else rc.gh_pr_state,
+            )
+            if args.only_ids:
+                proposals = [p for p in proposals if p.action_id in set(args.only_ids)]
+            applied = rc.apply_proposals(active, proposals, only=args.only_ids) if args.apply else []
+            if args.as_json:
+                emit(json.dumps({"proposals": [p.to_dict() for p in proposals],
+                                 "applied": [p.action_id for p in applied]}, ensure_ascii=False, indent=2))
+            else:
+                for p in proposals:
+                    mark = "aplicado" if p in applied else ("seguro" if p.safe and p.outcome != "keep" else "nao aplica")
+                    emit(f"{p.action_id}  {p.classification.value:<16} {p.outcome:<13} [{mark}] {p.explanation}")
+                if not proposals:
+                    emit("Nenhuma OA aberta.")
             return 0
 
         if args.command == "done":
