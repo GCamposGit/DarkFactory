@@ -525,6 +525,9 @@
     },
     "security": {
       "internal": "Contratos Pydantic e helper puro de permissao sem estado, I/O, HTTP ou operacao exposta ao owner (USR-226/SQ-02). Nao integra executores reais. Manual: docs/manuals/security_profiles.md."
+    },
+    "governance": {
+      "internal": "Verificador puro de autorizacao de evolucao de governanca (USR-228): le o registro na base confiavel; sem I/O exposto nem superficie no Hub."
     }
   }
 }
