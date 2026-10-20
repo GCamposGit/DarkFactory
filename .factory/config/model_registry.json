@@ -1,0 +1,291 @@
+{
+  "schema_version": 1,
+  "_comment": "Registro unico de modelos (USR-185 fatia 1). Semeado dos ids em uso; editavel pela fabrica. Valores null = desconhecido (nao inventar). Consumido por core/models/registry.py.",
+  "quota_floor_percent": 15.0,
+  "forbidden_autonomous_markers": [
+    "fable",
+    "claude-fable",
+    "astra",
+    "gpt-6-astra"
+  ],
+  "models": [
+    {
+      "id": "claude-opus-5-5",
+      "provider": "anthropic",
+      "family": "claude",
+      "tier": "high",
+      "aliases": [
+        "opus"
+      ],
+      "status": "active",
+      "price_input_per_mtok": null,
+      "price_output_per_mtok": null,
+      "context_tokens": null,
+      "max_output_tokens": null,
+      "capabilities": [
+        "text",
+        "code",
+        "reasoning"
+      ],
+      "forbidden_autonomous": false,
+      "release_date": null,
+      "retirement_date": null
+    },
+    {
+      "id": "claude-sonnet-5-5",
+      "provider": "anthropic",
+      "family": "claude",
+      "tier": "mid",
+      "aliases": [
+        "sonnet"
+      ],
+      "status": "active",
+      "price_input_per_mtok": null,
+      "price_output_per_mtok": null,
+      "context_tokens": null,
+      "max_output_tokens": null,
+      "capabilities": [
+        "text",
+        "code"
+      ],
+      "forbidden_autonomous": false,
+      "release_date": null,
+      "retirement_date": null
+    },
+    {
+      "id": "claude-haiku-5-5",
+      "provider": "anthropic",
+      "family": "claude",
+      "tier": "low",
+      "aliases": [
+        "haiku"
+      ],
+      "status": "active",
+      "price_input_per_mtok": null,
+      "price_output_per_mtok": null,
+      "context_tokens": null,
+      "max_output_tokens": null,
+      "capabilities": [
+        "text",
+        "code"
+      ],
+      "forbidden_autonomous": false,
+      "release_date": null,
+      "retirement_date": null
+    },
+    {
+      "id": "claude-fable-5-1",
+      "provider": "anthropic",
+      "family": "claude",
+      "tier": "frontier",
+      "aliases": [
+        "fable"
+      ],
+      "status": "candidate",
+      "price_input_per_mtok": 3.0,
+      "price_output_per_mtok": 15.0,
+      "context_tokens": 200000,
+      "max_output_tokens": null,
+      "capabilities": [
+        "text",
+        "code",
+        "reasoning"
+      ],
+      "forbidden_autonomous": true,
+      "release_date": null,
+      "retirement_date": null
+    },
+    {
+      "id": "claude-opus-5",
+      "provider": "anthropic",
+      "family": "claude",
+      "tier": "high",
+      "aliases": [],
+      "status": "deprecated",
+      "price_input_per_mtok": 5.0,
+      "price_output_per_mtok": 25.0,
+      "context_tokens": 200000,
+      "max_output_tokens": null,
+      "capabilities": [
+        "text",
+        "code",
+        "reasoning"
+      ],
+      "forbidden_autonomous": false,
+      "release_date": null,
+      "retirement_date": null
+    },
+    {
+      "id": "gpt-6-luna",
+      "provider": "openai",
+      "family": "openai",
+      "tier": "mid",
+      "aliases": [
+        "luna"
+      ],
+      "status": "active",
+      "price_input_per_mtok": 0.2,
+      "price_output_per_mtok": 1.2,
+      "context_tokens": 1050000,
+      "max_output_tokens": null,
+      "capabilities": [
+        "text",
+        "code"
+      ],
+      "forbidden_autonomous": false,
+      "release_date": null,
+      "retirement_date": null
+    },
+    {
+      "id": "gpt-6-astra",
+      "provider": "openai",
+      "family": "openai",
+      "tier": "frontier",
+      "aliases": [
+        "astra"
+      ],
+      "status": "candidate",
+      "price_input_per_mtok": 10.0,
+      "price_output_per_mtok": 50.0,
+      "context_tokens": 1050000,
+      "max_output_tokens": null,
+      "capabilities": [
+        "text",
+        "code",
+        "reasoning"
+      ],
+      "forbidden_autonomous": true,
+      "release_date": null,
+      "retirement_date": null
+    },
+    {
+      "id": "gpt-sol",
+      "provider": "openai",
+      "family": "openai",
+      "tier": "high",
+      "aliases": [
+        "sol"
+      ],
+      "status": "active",
+      "price_input_per_mtok": 2.5,
+      "price_output_per_mtok": 10.0,
+      "context_tokens": 500000,
+      "max_output_tokens": null,
+      "capabilities": [
+        "text",
+        "code"
+      ],
+      "forbidden_autonomous": false,
+      "release_date": null,
+      "retirement_date": null
+    },
+    {
+      "id": "grok-4.6",
+      "provider": "xai",
+      "family": "grok",
+      "tier": "mid",
+      "aliases": [],
+      "status": "active",
+      "price_input_per_mtok": 2.0,
+      "price_output_per_mtok": 8.0,
+      "context_tokens": 524288,
+      "max_output_tokens": null,
+      "capabilities": [
+        "text",
+        "code",
+        "web_research"
+      ],
+      "forbidden_autonomous": false,
+      "release_date": null,
+      "retirement_date": null
+    },
+    {
+      "id": "grok-4.7",
+      "provider": "xai",
+      "family": "grok",
+      "tier": "mid",
+      "aliases": [],
+      "status": "active",
+      "price_input_per_mtok": null,
+      "price_output_per_mtok": null,
+      "context_tokens": null,
+      "max_output_tokens": null,
+      "capabilities": [
+        "text",
+        "code"
+      ],
+      "forbidden_autonomous": false,
+      "release_date": null,
+      "retirement_date": null
+    },
+    {
+      "id": "gemini-3.8-flash",
+      "provider": "google",
+      "family": "gemini",
+      "tier": "low",
+      "aliases": [
+        "flash"
+      ],
+      "status": "active",
+      "price_input_per_mtok": 0.75,
+      "price_output_per_mtok": 3.75,
+      "context_tokens": 1000000,
+      "max_output_tokens": null,
+      "capabilities": [
+        "text",
+        "code",
+        "long_context"
+      ],
+      "forbidden_autonomous": false,
+      "release_date": null,
+      "retirement_date": null
+    },
+    {
+      "id": "deepseek/deepseek-v4.1-flash",
+      "provider": "deepseek",
+      "family": "deepseek",
+      "tier": "low",
+      "aliases": [
+        "deepseek-flash"
+      ],
+      "status": "active",
+      "price_input_per_mtok": 0.15,
+      "price_output_per_mtok": 0.6,
+      "context_tokens": 1048576,
+      "max_output_tokens": null,
+      "capabilities": [
+        "text",
+        "code"
+      ],
+      "forbidden_autonomous": false,
+      "release_date": null,
+      "retirement_date": null
+    }
+  ],
+  "roles": {
+    "subagent.haiku": "claude-haiku-5-5",
+    "subagent.sonnet": "claude-sonnet-5-5",
+    "subagent.opus": "claude-opus-5-5",
+    "development.claude": "claude-sonnet-5-5",
+    "development.codex": "gpt-6-luna",
+    "development.grok": "grok-4.7",
+    "planning.claude": "claude-opus-5-5",
+    "review.codex": "gpt-6-luna",
+    "review.grok": "grok-4.6",
+    "distill.openrouter": "deepseek/deepseek-v4.1-flash"
+  },
+  "review_pairs": [
+    {
+      "implementer": "development.claude",
+      "reviewer": "review.codex"
+    },
+    {
+      "implementer": "development.codex",
+      "reviewer": "review.grok"
+    },
+    {
+      "implementer": "development.grok",
+      "reviewer": "review.codex"
+    }
+  ]
+}
