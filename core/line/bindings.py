@@ -64,12 +64,11 @@ class ProjectResolver(Protocol):
 
 
 class UnknownProjectError(RuntimeError):
-    """Raised when a job's project (JobKey.ticket_id, see D-f note below) is unregistered.
+    """Raised when the project persisted on a run (``runs.project_id``) is unregistered.
 
-    Line runs store `project_id` in `JobKey.ticket_id` (set by
-    `ControlStore.accept()`'s initial grill job insert); every other stage's
-    job is materialized from that same run, so `ticket_id` is stable across
-    the whole run.
+    ``JobKey.ticket_id`` is the business ticket identity (e.g. ``USR-303``) and is
+    never a project identity; legacy runs whose ``ticket_id`` still holds the
+    project id resolve through ``runs.project_id`` all the same.
     """
 
 
@@ -181,13 +180,41 @@ def base_red_attempt_counter(store: Any, stage: str = "integration") -> Callable
 
 
 def _resolve_project(context: StageContext, resolver: ProjectResolver) -> ProjectDescriptor:
-    project_id = context.claim.job_key.ticket_id
+    project_id = context.project_id or context.claim.job_key.ticket_id  # legacy: no run project_id
     project = resolver(project_id)
     if project is None:
         raise UnknownProjectError(
             f"unknown project '{project_id}' for job {context.claim.job_key.canonical_key()}"
         )
     return project
+
+
+def project_id_for_run(store: Any, run_id: str) -> Optional[str]:
+    """Return the project id persisted on the run (``runs.project_id``), if the run exists."""
+    getter = getattr(store, "get_run_status", None)
+    if getter is None:
+        return None
+    try:
+        status = getter(run_id)
+    except Exception as exc:
+        logger.warning("Could not resolve project for run %s: %s", run_id, exc)
+        return None
+    project_id = status.get("project_id") if isinstance(status, dict) else None
+    return str(project_id) if project_id else None
+
+
+def project_for_run(
+    store: Any,
+    run_id: str,
+    resolver: Optional[ProjectResolver] = None,
+    *,
+    fallback_id: Optional[str] = None,
+) -> Optional[ProjectDescriptor]:
+    """Resolve a run's registered project from ``runs.project_id`` (``fallback_id`` only if absent)."""
+    project_id = project_id_for_run(store, run_id) or fallback_id
+    if not project_id:
+        return None
+    return (resolver or default_project_resolver())(project_id)
 
 
 def _render_demand_text(payload: dict[str, Any]) -> str:
@@ -520,7 +547,7 @@ class RetrospectiveStageHandler:
 
     def _build_summary(self, context: StageContext) -> dict[str, Any]:
         run_id = context.claim.job_key.run_id
-        project_id = context.claim.job_key.ticket_id
+        project_id = context.project_id or context.claim.job_key.ticket_id
         status: Optional[dict[str, Any]] = None
         getter = getattr(self.store, "get_run_status", None)
         if getter is not None:
@@ -643,6 +670,8 @@ __all__ = [
     "LINE_STAGES",
     "ProjectResolver",
     "UnknownProjectError",
+    "project_id_for_run",
+    "project_for_run",
     "default_project_resolver",
     "required_caps",
     "agent_route_unavailable",

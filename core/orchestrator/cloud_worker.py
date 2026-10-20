@@ -522,6 +522,9 @@ class CloudWorker:
         (`core.line.workspace`), not in these HF-05 plan/candidate digests.
         """
         run_id = claim.job_key.run_id
+        from core.line.bindings import project_id_for_run
+
+        project_id = project_id_for_run(self.store, run_id)
         try:
             input_refs = self.store.get_latest_success_output_refs(run_id, exclude_stage=claim.job_key.stage)
         except Exception as exc:  # pragma: no cover - defensive, must never block dispatch
@@ -529,6 +532,7 @@ class CloudWorker:
             input_refs = []
         return StageContext(
             claim=claim,
+            project_id=project_id,
             plan_ref=f"plan://line/{run_id}",
             plan_digest="sha256:" + "0" * 64,
             config_version="1.0",
@@ -680,9 +684,9 @@ class CloudWorker:
             self._notify_once(claim, "failed", lambda: self._send_failure_summary(claim, stage_result))
 
     def _project_for(self, claim: Claim):
-        from core.line.bindings import default_project_resolver
+        from core.line.bindings import project_for_run
 
-        return default_project_resolver()(claim.job_key.ticket_id)
+        return project_for_run(self.store, claim.job_key.run_id, fallback_id=claim.job_key.ticket_id)
 
     def _send_commercial_acceptance_request(self, claim: Claim, stage_result: StageResult) -> bool:
         from core.line.human import HumanRequest, request_human_help
@@ -854,7 +858,7 @@ class CloudWorker:
                     project = self._project_for(claim)
                     if project is None:
                         project = ProjectDescriptor(
-                            id=claim.job_key.ticket_id,
+                            id=context.project_id or claim.job_key.ticket_id,
                             repo_url="",
                             default_branch="main",
                         )
@@ -1051,10 +1055,10 @@ class CloudWorker:
                 continue
 
             try:
-                from core.line.bindings import default_project_resolver
+                from core.line.bindings import project_for_run
                 from core.line.human import load_request, resume_blocked_job, run_probe
 
-                project = default_project_resolver()(job_key.ticket_id)
+                project = project_for_run(self.store, run_id, fallback_id=job_key.ticket_id)
                 if project is None:
                     continue
 
