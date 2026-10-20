@@ -522,6 +522,9 @@
     },
     "workflow": {
       "surface": "tasks-dashboard-section"
+    },
+    "security": {
+      "internal": "Contratos Pydantic e helper puro de permissao sem estado, I/O, HTTP ou operacao exposta ao owner (USR-226/SQ-02). Nao integra executores reais. Manual: docs/manuals/security_profiles.md."
     }
   }
 }

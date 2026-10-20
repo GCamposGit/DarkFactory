@@ -6660,8 +6660,8 @@
     "project_id": "darkfac",
     "title": "SQ02 DarkFac security profiles and threat model contracts",
     "origin": "user",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "3034bd2a7889bbfa3a2d7daaa8516800408ad776",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "later",
@@ -6686,7 +6686,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-11T05:38:59.241192Z",
-    "updated_at": "2026-10-11T17:49:17.206876Z"
+    "updated_at": "2026-10-20T11:19:21.630316Z"
   },
   {
     "id": "USR-228",
