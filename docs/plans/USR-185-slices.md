@@ -76,7 +76,11 @@ Bateria deterministica (contrato, ferramentas, tarefas de referencia da fabrica)
 persistida; resultado grava o registro de qualificacao do candidato. Aceite: candidato sem qualificacao aprovada nao
 vira `active` (validador); custo respeita o teto.
 
-## Fatia 7 - Promocao e rollback
+## Fatia 7 - Promocao e rollback (ENTREGUE em 20/10/2026)
+
+Entregue: `core/models/lifecycle.py` + `scripts/model_lifecycle.py` (`promote`, `rollback` por gate_failure/cost/quota, `retire_due`), ledger append-only `.factory/models/lifecycle_ledger.jsonl`, docs regeneradas apos cada escrita. Teste: `tests/test_model_lifecycle_usr185.py`.
+
+Escopo original:
 
 Promocao `candidate -> active` somente com qualificacao aprovada; rollback automatico para o modelo anterior em regressao
 (falha de portao, custo, cota); `deprecated -> retired` por data. Aceite: transicoes auditadas no ledger, rollback testado,
