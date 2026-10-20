@@ -8251,8 +8251,8 @@
     "project_id": "darkfac",
     "title": "Provar entrega autonoma de piloto greenfield stand alone em repositorio e ambiente privados separados",
     "origin": "agent",
-    "status": "completed",
-    "delivery_evidence": "2dd380fb6b820d2b4fdf05534c930aac84269b26",
+    "status": "planned",
+    "delivery_evidence": "Reaberto em 20/10/2026: fatia 1 (plano docs/plans/USR-279-greenfield-pilot.md) entregue no PR #481; falta M1 apos USR-274/275/278 na main (anterior: 2dd380fb6b820d2b4fdf05534c930aac84269b26)",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "later",
@@ -8281,7 +8281,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-16T15:26:57.986877Z",
-    "updated_at": "2026-10-20T14:37:27.083947Z"
+    "updated_at": "2026-10-20T14:47:23.068847Z"
   },
   {
     "id": "USR-277",
