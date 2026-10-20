@@ -5791,14 +5791,16 @@
       "darkhub",
       "live",
       "harness",
-      "hooks",
-      "congelado-v0"
+      "hooks"
     ],
     "problem_statement": "Depende do registro universal de execucoes. Sessoes abertas pelo owner no Claude Code (desktop/CLI), Codex, Grok Build e Antigravity, e os subagentes que elas lancam, nao aparecem em lugar nenhum do Hub; o owner precisa ver tudo o que esta em andamento. Diagnostico de 10/10/2026 (sessao interativa Claude Code, pedido do owner sobre o DarkHub).\n\nCONGELADO em 11/10/2026 (plano V0, docs/plans/V0_OPERACIONAL_2026-10-11.md): fora do caminho critico da linha.",
     "core_journey": [
       "Depende do registro universal de execucoes. Sessoes abertas pelo owner no Claude Code (desktop/CLI), Codex, Grok Build e Antigravity, e os subagentes que elas lancam, nao aparecem em lugar nenhum do Hub; o owner precisa ver tudo o que esta em andamento. Diagnostico de 10/10/2026 (sessao interativa Claude Code, pedido do owner sobre o DarkHub)."
     ],
-    "non_goals": [],
+    "non_goals": [
+      "Nao alterar configuracoes globais do usuario fora do repositorio.",
+      "Nao bloquear a sessao quando o registro falhar."
+    ],
     "reachability_contract": "",
     "acceptance_criteria": [
       "Claude Code: hooks versionados no repositorio (SessionStart, SubagentStart/SubagentStop, Stop) registram e encerram execucoes com o id da sessao/subagente e o ticket quando houver.",
