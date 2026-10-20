@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -40,7 +41,10 @@ def test_no_python_supervisor_competes_with_the_bash_one() -> None:
     assert not (ROOT / "scripts" / "grokbox_supervisor.py").exists()
 
 
-@pytest.mark.skipif(shutil.which("bash") is None, reason="bash not available")
+@pytest.mark.skipif(
+    shutil.which("bash") is None or sys.platform == "win32",
+    reason="the scripts run only on the Linux grokbox VM; Windows 'bash' may be the WSL launcher without a distro",
+)
 def test_scripts_parse_with_bash() -> None:
     for script in (SUP, COMMON):
         res = subprocess.run(["bash", "-n", str(script)], capture_output=True, text=True)

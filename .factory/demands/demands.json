@@ -6629,8 +6629,8 @@
     "project_id": "darkfac",
     "title": "SQ-03: documentar evolucao legitima de governanca",
     "origin": "user",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "1aeb3252c49bb084a2636679e64a02b0a741bc22",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "later",
@@ -6653,7 +6653,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-11T05:39:04.963655Z",
-    "updated_at": "2026-10-11T17:49:17.206876Z"
+    "updated_at": "2026-10-20T11:49:33.525715Z"
   },
   {
     "id": "USR-226",
