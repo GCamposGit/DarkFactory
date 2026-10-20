@@ -60,3 +60,54 @@ Para acessar os modelos de ponta chineses e globais com facilidade e economia:
 | **DeepSeek Platform** | DeepSeek V4 Pro, DeepSeek R1 | Acesso direto na fonte com Context Caching ativo (desconto de até 90% em tokens lidos). | [platform.deepseek.com](https://platform.deepseek.com) |
 | **OpenRouter** | Claude 3.7, Grok 4.6, DeepSeek, Qwen, GPT-5 | Uma única chave para todos os modelos com fallback automático entre provedores em caso de instabilidade. | [openrouter.ai](https://openrouter.ai) |
 | **Alibaba Cloud DashScope** | Família Qwen (Qwen-Max, Qwen-Plus, Qwen-Coder) | Plataforma nativa com a maior capacidade de throughput para os modelos Qwen. | [dashscope.aliyun.com](https://dashscope.aliyun.com) |
+
+## Registro de modelos (gerado)
+
+Gerado de `.factory/config/model_registry.json` por `python scripts/generate_model_docs.py`; nao edite entre os marcadores.
+
+### Papeis
+
+<!-- BEGIN model-registry:roles -->
+| Papel | Modelo (id) | Status |
+| --- | --- | --- |
+| `development.claude` | `claude-sonnet-5-5` | active |
+| `development.codex` | `gpt-6-luna` | active |
+| `development.grok` | `grok-4.7` | active |
+| `distill.openrouter` | `deepseek/deepseek-v4.1-flash` | active |
+| `planning.claude` | `claude-opus-5-5` | active |
+| `review.codex` | `gpt-6-luna` | active |
+| `review.grok` | `grok-4.6` | active |
+| `subagent.haiku` | `claude-haiku-5-5` | active |
+| `subagent.opus` | `claude-opus-5-5` | active |
+| `subagent.sonnet` | `claude-sonnet-5-5` | active |
+
+Pares implementador -> revisor (familias distintas): `development.claude` -> `review.codex`; `development.codex` -> `review.grok`; `development.grok` -> `review.codex`
+
+Piso de cota: 15%. Marcadores proibidos em papel autonomo: `fable`, `claude-fable`, `astra`, `gpt-6-astra`.
+<!-- END model-registry:roles -->
+
+### Catalogo
+
+<!-- BEGIN model-registry:catalog -->
+| Modelo (id) | Provedor | Familia | Faixa | Aliases | Status | Entrada US$/Mtok | Saida US$/Mtok | Contexto |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `claude-3-7-sonnet` | anthropic | claude | mid | `claude-legacy-sonnet` | deprecated | - | - | 200000 |
+| `claude-fable-5-1` | anthropic | claude | frontier | `fable` | candidate (proibido autonomo) | 3.0 | 15.0 | 200000 |
+| `claude-haiku-5-5` | anthropic | claude | low | `haiku` | active | - | - | - |
+| `claude-opus-5` | anthropic | claude | high | `opus-legacy` | deprecated | 5.0 | 25.0 | 200000 |
+| `claude-opus-5-5` | anthropic | claude | high | `opus` | active | - | - | - |
+| `claude-sonnet-5-5` | anthropic | claude | mid | `sonnet` | active | - | - | - |
+| `deepseek/deepseek-r1` | deepseek | deepseek | high | `deepseek-r1` | deprecated | - | - | 128000 |
+| `deepseek/deepseek-v4-pro` | deepseek | deepseek | high | `deepseek-v4-pro` | candidate | - | - | 256000 |
+| `deepseek/deepseek-v4.1-flash` | deepseek | deepseek | low | `deepseek-flash` | active | 0.15 | 0.6 | 1048576 |
+| `gemini-2.0-flash-001` | google | gemini | low | `gemini-legacy-flash` | deprecated | - | - | 1000000 |
+| `gemini-3.1-flash-lite-image` | google | gemini | low | `gemini-image-fast` | candidate | - | - | - |
+| `gemini-3.1-pro` | google | gemini | high | `gemini-pro` | candidate | - | - | 1048576 |
+| `gemini-3.8-flash` | google | gemini | low | `flash` | active | 0.75 | 3.75 | 1000000 |
+| `gpt-6-astra` | openai | openai | frontier | `astra` | candidate (proibido autonomo) | 10.0 | 50.0 | 1050000 |
+| `gpt-6-luna` | openai | openai | mid | `luna` | active | 0.2 | 1.2 | 1050000 |
+| `gpt-image-2` | openai | openai | high | `gpt-image` | candidate | - | - | - |
+| `gpt-sol` | openai | openai | high | `sol` | active | 2.5 | 10.0 | 500000 |
+| `grok-4.6` | xai | grok | mid | `grok-review` | active | 2.0 | 8.0 | 524288 |
+| `grok-4.7` | xai | grok | mid | `grok-dev` | active | - | - | - |
+<!-- END model-registry:catalog -->

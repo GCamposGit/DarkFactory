@@ -80,6 +80,30 @@ Invariantes inalteradas: piso de cota de $15\%$ (o Haiku consome a mesma conta A
 
 ---
 
+## 2c. Papeis e modelos (gerado do registro)
+
+Tabela gerada de `.factory/config/model_registry.json` por `python scripts/generate_model_docs.py`; nao edite entre os marcadores.
+
+<!-- BEGIN model-registry:roles_skill -->
+| Papel | Modelo (id) | Status |
+| --- | --- | --- |
+| `development.claude` | `claude-sonnet-5-5` | active |
+| `development.codex` | `gpt-6-luna` | active |
+| `development.grok` | `grok-4.7` | active |
+| `planning.claude` | `claude-opus-5-5` | active |
+| `review.codex` | `gpt-6-luna` | active |
+| `review.grok` | `grok-4.6` | active |
+| `subagent.haiku` | `claude-haiku-5-5` | active |
+| `subagent.opus` | `claude-opus-5-5` | active |
+| `subagent.sonnet` | `claude-sonnet-5-5` | active |
+
+Pares implementador -> revisor (familias distintas): `development.claude` -> `review.codex`; `development.codex` -> `review.grok`; `development.grok` -> `review.codex`
+
+1 papel(is) de gateway omitido(s); lista completa em `docs/MODEL_SELECTION_GUIDE.md`.
+
+Piso de cota: 15%. Marcadores proibidos em papel autonomo: `fable`, `claude-fable`, `astra`, `gpt-6-astra`.
+<!-- END model-registry:roles_skill -->
+
 ## 3. Continuous Self-Improvement & RCA de Roteamento
 
 - **RCA em Falhas de Inferência**: Se um modelo produzir falhas de sintaxe repetidas ou alucinações, registre o RCA via `python -m core.learning.cli rca` e recalibre a classe de complexidade ou ordem de fallback na configuração.

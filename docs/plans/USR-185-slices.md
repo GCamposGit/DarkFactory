@@ -49,7 +49,12 @@ Um documento em `docs/proposals/` com o diff dos protegidos (AGENTS.md, FACTORY_
 trocando ids por referencia ao registro; owner publica uma vez. Aceite: proposta unica aplicavel; apos o push, nenhum id
 literal restante nos protegidos; teste de invariantes referenciando o registro.
 
-## Fatia 4 - Geracao de docs com teste de deriva
+## Fatia 4 - Geracao de docs com teste de deriva (ENTREGUE em 20/10/2026, parcial no que sobrou)
+
+Entregue: `core/models/docgen.py` + `scripts/generate_model_docs.py [--check]` (idempotente) reescrevem blocos entre `<!-- BEGIN/END model-registry:<secao> -->` (secoes `roles`, `catalog`). Docs com marcadores: `docs/MODEL_SELECTION_GUIDE.md` (roles, catalog) e `03-model-router/SKILL.md` em `.agents` e `.claude` (roles, espelhos identicos). Teste: `tests/test_model_docs_drift_usr185.py`. O censo ignora blocos gerados. Censo: 530/104 arquivos -> 530/104 (tabelas geradas nao contam).
+Sobrou: `executors.json`/roadmap (dados lidos por outros consumidores; sem derivacao segura nesta fatia), demais skills/docs com ids em prosa, protegidos (fatia 3).
+
+Escopo original:
 
 Gerar de `model_registry.json` as secoes de docs/skills que listam modelos (marcadores BEGIN/END). Aceite: comando
 idempotente; teste de deriva falha se o doc gerado divergir do registro.
