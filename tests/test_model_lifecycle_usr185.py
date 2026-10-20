@@ -19,7 +19,10 @@ TODAY = date(2026, 10, 20)
 def _model(mid: str, family: str, status: str = "active", qual: str | None = "grandfathered", **extra: Any) -> dict[str, Any]:
     m: dict[str, Any] = {"id": mid, "provider": "p", "family": family, "tier": "mid", "status": status, **extra}
     if qual:
-        m["qualification"] = {"status": qual}
+        qualification = {"status": qual}
+        if status == "candidate" and qual == "approved":
+            qualification["evidence_path"] = "qualification.json"
+        m["qualification"] = qualification
     return m
 
 
@@ -30,7 +33,7 @@ def _raw() -> dict[str, Any]:
         "forbidden_autonomous_markers": ["fable"],
         "models": [
             _model("dev-old", "claude"),
-            _model("dev-new", "claude", "candidate", "approved"),
+            _model("dev-new", "claude", "candidate", "approved", price_input_per_mtok=0.5, price_output_per_mtok=2.0),
             _model("dev-unqualified", "claude", "candidate", None),
             _model("dev-failed", "claude", "candidate", "failed"),
             _model("claude-fable-9", "claude", "candidate", "approved", forbidden_autonomous=True),
@@ -85,6 +88,18 @@ def test_promote_precheck_can_veto(env: dict[str, Path]) -> None:
     assert _status(env, "dev-new") == "candidate"
 
 
+def test_promote_blocks_when_grill_is_required(env: dict[str, Path]) -> None:
+    raw = json.loads(env["registry_path"].read_text(encoding="utf-8"))
+    next(model for model in raw["models"] if model["id"] == "dev-new")["tier"] = "frontier"
+    env["registry_path"].write_text(json.dumps(raw), encoding="utf-8")
+
+    with pytest.raises(lc.LifecycleError, match="WAITING_HUMAN.*frontier"):
+        lc.promote("dev-new", now=NOW, **env)
+
+    assert _status(env, "dev-new") == "candidate"
+    assert lc.read_ledger(env["ledger_path"]) == []
+
+
 def test_rollback_restores_previous_and_audits(env: dict[str, Path]) -> None:
     lc.promote("dev-new", now=NOW, role="development.x", **env)
     audits = lc.rollback("development.x", "gate_failure", now=NOW, **env)
@@ -135,7 +150,16 @@ def test_retire_by_date_and_idempotent(env: dict[str, Path]) -> None:
 
 def test_invalid_resulting_registry_writes_nothing(env: dict[str, Path]) -> None:
     raw = json.loads(env["registry_path"].read_text(encoding="utf-8"))
-    raw["models"].append(_model("rev-claude", "claude", "candidate", "approved"))
+    raw["models"].append(
+        _model(
+            "rev-claude",
+            "claude",
+            "candidate",
+            "approved",
+            price_input_per_mtok=0.5,
+            price_output_per_mtok=2.0,
+        )
+    )
     env["registry_path"].write_text(json.dumps(raw), encoding="utf-8")
     before = env["registry_path"].read_text(encoding="utf-8")
     # binding a claude model to the review role would put reviewer in the implementer's family

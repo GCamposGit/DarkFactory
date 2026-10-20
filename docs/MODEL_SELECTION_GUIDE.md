@@ -112,3 +112,17 @@ Piso de cota: 15%. Marcadores proibidos em papel autonomo: `fable`, `claude-fabl
 | `grok-4.6` | xai | grok | mid | `grok-review` | active | 2.0 | 8.0 | 524288 |
 | `grok-4.7` | xai | grok | mid | `grok-dev` | active | - | - | - |
 <!-- END model-registry:catalog -->
+
+### Limiares do Grill
+
+<!-- BEGIN model-registry:grill_thresholds -->
+| Limite | Valor |
+| --- | --- |
+| Preco maximo de entrada (US$/Mtok) | `15` |
+| Preco maximo de saida (US$/Mtok) | `75` |
+| Faixas frontier | `frontier` |
+| Grill para preco desconhecido fora de active | `true` |
+| Etapas minimas de qualificacao | `3` |
+
+`promote()` recusa a promocao com `WAITING_HUMAN` quando `requires_grill()` retorna motivos para a mudanca proposta.
+<!-- END model-registry:grill_thresholds -->
