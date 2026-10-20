@@ -72,6 +72,14 @@ class UnknownProjectError(RuntimeError):
     """
 
 
+class ProjectIdentityError(RuntimeError):
+    """Dispatch cannot establish the persisted run's project identity."""
+
+    def __init__(self, cause_code: str) -> None:
+        self.cause_code = cause_code
+        super().__init__(cause_code)
+
+
 def default_project_resolver() -> ProjectResolver:
     return get_project_registry().get_project
 
@@ -180,7 +188,9 @@ def base_red_attempt_counter(store: Any, stage: str = "integration") -> Callable
 
 
 def _resolve_project(context: StageContext, resolver: ProjectResolver) -> ProjectDescriptor:
-    project_id = getattr(context, "project_id", None) or context.claim.job_key.ticket_id  # legacy: no run project_id
+    project_id = getattr(context, "project_id", None)
+    if not project_id:
+        raise ProjectIdentityError("run_project_missing")
     project = resolver(project_id)
     if project is None:
         raise UnknownProjectError(
@@ -189,18 +199,30 @@ def _resolve_project(context: StageContext, resolver: ProjectResolver) -> Projec
     return project
 
 
-def project_id_for_run(store: Any, run_id: str) -> Optional[str]:
+def project_id_for_run(store: Any, run_id: str, *, strict: bool = False) -> Optional[str]:
     """Return the project id persisted on the run (``runs.project_id``), if the run exists."""
-    getter = getattr(store, "get_run_status", None)
+    getter = getattr(store, "get_run_identity", None) or getattr(store, "get_run_status", None)
     if getter is None:
+        if strict:
+            raise ProjectIdentityError("project_lookup_unavailable")
         return None
     try:
         status = getter(run_id)
     except Exception as exc:
-        logger.warning("Could not resolve project for run %s: %s", run_id, exc)
+        logger.warning("Could not resolve project for run %s (%s)", run_id, type(exc).__name__)
+        if strict:
+            raise ProjectIdentityError("project_lookup_unavailable") from exc
+        return None
+    if status is None:
+        if strict:
+            raise ProjectIdentityError("run_missing")
         return None
     project_id = status.get("project_id") if isinstance(status, dict) else None
-    return str(project_id) if project_id else None
+    if not isinstance(project_id, str) or not project_id.strip():
+        if strict:
+            raise ProjectIdentityError("run_project_missing")
+        return None
+    return project_id
 
 
 def project_for_run(
@@ -210,8 +232,8 @@ def project_for_run(
     *,
     fallback_id: Optional[str] = None,
 ) -> Optional[ProjectDescriptor]:
-    """Resolve a run's registered project from ``runs.project_id`` (``fallback_id`` only if absent)."""
-    project_id = project_id_for_run(store, run_id) or fallback_id
+    """Resolve only ``runs.project_id``; ``fallback_id`` is retained for caller compatibility."""
+    project_id = project_id_for_run(store, run_id)
     if not project_id:
         return None
     return (resolver or default_project_resolver())(project_id)
