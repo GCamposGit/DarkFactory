@@ -9383,8 +9383,8 @@
     "project_id": "darkfac",
     "title": "Projecao da fila ao vivo descarta especificacao e bloqueadores",
     "origin": "user",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "a6d40cfbb661a25b2f90e77de603503f23fd680c",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -9406,7 +9406,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-20T20:57:02.143263Z",
-    "updated_at": "2026-10-20T20:57:02.143263Z"
+    "updated_at": "2026-10-20T21:03:15.656379Z"
   },
   {
     "id": "USR-320",
