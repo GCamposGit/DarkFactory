@@ -14,7 +14,7 @@ familia, modelos proibidos como fable) ficam nos arquivos protegidos e sao valid
 - Pendencia conhecida: `.factory/config/subagent_model_routing.json` ainda carrega `models` literais; `parse_config`
   continua lendo-os (a fatia 2 os remove e passa a usar apenas o registro).
 
-## Fatia 2 - Migracao dos ids (ENTREGUE em 20/10/2026; restante em 2b)
+## Fatia 2 - Migracao dos ids (ENTREGUE em 20/10/2026; 2b abaixo)
 
 Entregue: leitores de codigo passam a usar o registro (`resolve`, novo `resolve_known` para modelos `deprecated`, `id_of`,
 `forbidden_markers`): `core/line/routing.py` (marcadores proibidos, pins `development.codex|grok`), `core/line/agent_cli.py`
@@ -25,19 +25,23 @@ referencia de role, resolvidas no carregamento; lista proibida vem do registro),
 `grok-review`, `grok-dev`, `opus-legacy`; fallback embutido agora espelha o registro semeado (teste de paridade).
 Testes: `tests/test_model_registry_readers_usr185.py` (tabela antes/depois). Censo: 604/107 arquivos -> 554/105.
 
-### Fatia 2b (pendente)
+### Fatia 2b (ENTREGUE em 20/10/2026, parcial no que sobrou)
 
-- `core/workflow/qualified_routes.py` (65): tabela de aliases/ids de provedor (`anthropic/...`, `xai/...`) - exige
-  modelar prefixo de provedor/gateway no registro.
-- `hub/backend/service.py`, `hub/data/*.json`, `core/execution/resilience.py`, `core/content/engine.py`, `core/game/cli.py`,
-  `core/visual/cloud_engine.py`, `core/acceptance/engine.py`: ids de gateway OpenRouter (`deepseek/deepseek-v4-pro`,
-  `anthropic/claude-3.7-sonnet`, imagens) que ainda nao existem no registro; cadastrar e migrar (mexer em hub/frontend
-  exige rodar testes JS-harness).
-- Ids de fio (UA `claude-code/x`, `claude-haiku-4-5-20251001` na sonda de quota) em `core/usage/adapters.py`: avaliar allowlist.
-- Dados: `.factory/planning/continuous-autonomy/bindings/executors.json`, `.factory/roadmap/darkfac.json`, skills
-  (`.claude|.agents/skills/*`) e docs - dependem da geracao de docs (fatia 4).
-- Protegidos (`core/harness/**`, AGENTS.md, FACTORY_RULES.md, CLAUDE.md): fatia 3.
-- Ids sem entrada no registro e mantidos literais: `gpt-luna-xhigh`, `opus-5.1`, `deepseek/deepseek-v4-pro`, `qwen*`, `gpt-oss*`.
+Entregue: campo `gateway_ids` no registro (ids com prefixo de provedor/gateway; so nomeacao, nao altera roteabilidade) e
+`gateway_id()` em `core/models/registry.py`; `resolve`/`resolve_known`/`id_of` tambem aceitam o id de gateway. Novos modelos
+sem papel (nao roteaveis): `deepseek/deepseek-v4-pro`, `gemini-3.1-pro`, `gemini-3.1-flash-lite-image`, `gpt-image-2`
+(`candidate`) e `claude-3-7-sonnet`, `deepseek/deepseek-r1`, `gemini-2.0-flash-001` (`deprecated`). Migrados:
+`core/workflow/qualified_routes.py`, `core/execution/resilience.py`, `core/content/engine.py`, `core/game/cli.py`,
+`core/visual/cloud_engine.py`, `core/acceptance/engine.py`, `hub/backend/service.py` (3 ids do catalogo OpenRouter) e
+`forbidden_autonomous_models` removido de `subagent_model_routing.json` (ausente = marcadores do registro).
+Ids de fio de `core/usage/adapters.py` (User-Agent, `anthropic-beta`, modelo da sonda de quota, ids de quota Antigravity)
+ficam literais, marcados com `# census: wire-id` (excluidos do censo; justificativa no comentario).
+Censo: 554/105 arquivos -> 530/104.
+
+Sobrou: `hub/data/*.json` (apenas prosa de descricao de servicos, nao lida como id de modelo); ids sem entrada
+(`qwen*`, `gpt-oss*`, `gpt-luna-xhigh`, `opus-5.1`, `mistralai/mistral-nemo`, `meta-llama/*`, `nvidia/*`) mantidos literais;
+dados de `executors.json`/roadmap/skills/docs (fatia 4); protegidos (fatia 3); aliases de catalogo `gemini-flash`,
+`gemini-pro`, `gpt-review` em `qualified_routes.py`.
 
 ## Fatia 3 - Proposta unica para arquivos protegidos
 

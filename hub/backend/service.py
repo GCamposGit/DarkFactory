@@ -61,6 +61,7 @@ from hub.backend.models import (
     LineStatusResponse,
 )
 from core.paths import state_root
+from core.models import registry as _models
 from core.audio.engine import TranscriptionResult
 from core.execution.providers import get_openrouter_api_key
 from core.content import (
@@ -2340,7 +2341,7 @@ class HubService:
                 is_pareto=True,
             ),
             OpenRouterModelInfo(
-                id="anthropic/claude-3.7-sonnet",
+                id=_models.gateway_id("claude-legacy-sonnet"),
                 name="Claude 3.7 Sonnet (Thinking)",
                 context_length=200000,
                 input_cost_per_m=3.0,
@@ -2348,7 +2349,7 @@ class HubService:
                 is_pareto=True,
             ),
             OpenRouterModelInfo(
-                id="deepseek/deepseek-r1",
+                id=_models.id_of("deepseek-r1"),
                 name="DeepSeek R1 (Full Reasoning)",
                 context_length=128000,
                 input_cost_per_m=0.55,
@@ -2356,7 +2357,7 @@ class HubService:
                 is_pareto=True,
             ),
             OpenRouterModelInfo(
-                id="google/gemini-2.0-flash-001",
+                id=_models.gateway_id("gemini-legacy-flash"),
                 name="Google Gemini 2.0 Flash",
                 context_length=1000000,
                 input_cost_per_m=0.10,

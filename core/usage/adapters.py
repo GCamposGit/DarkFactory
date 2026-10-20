@@ -972,7 +972,7 @@ class GrokAccountAdapter(AccountUsageAdapter):
                     "https://cli-chat-proxy.grok.com/v1/user",
                     headers={
                         "Authorization": f"Bearer {access_token}",
-                        "User-Agent": "grok-cli/1.0.13",
+                        "User-Agent": "grok-cli/1.0.13",  # census: wire-id (protocol/telemetry identifier, not a model choice)
                         "Accept": "application/json",
                     },
                 )
@@ -1212,11 +1212,11 @@ class GeminiAccountAdapter(AccountUsageAdapter):
                     if bucket_win == "weekly" or "weekly" in str(b.get("bucketId", "")).lower():
                         dur = 10080
                         lbl = "Limite Semanal (1 semana)"
-                        qid = "antigravity:gemini-weekly"
+                        qid = "antigravity:gemini-weekly"  # census: wire-id (protocol/telemetry identifier, not a model choice)
                     else:
                         dur = 300
                         lbl = "Janela Móvel (5h)"
-                        qid = "antigravity:gemini-5h"
+                        qid = "antigravity:gemini-5h"  # census: wire-id (protocol/telemetry identifier, not a model choice)
                     windows.append(
                         QuotaWindow(
                             quota_id=qid,
@@ -1493,7 +1493,7 @@ class ClaudeCodeAccountAdapter(AccountUsageAdapter):
                 return None
 
         body = json.dumps({
-            "model": "claude-haiku-4-5-20251001",
+            "model": "claude-haiku-4-5-20251001",  # census: wire-id (protocol/telemetry identifier, not a model choice)
             "max_tokens": 1,
             "messages": [{"role": "user", "content": "ping"}],
         }).encode("utf-8")
@@ -1503,9 +1503,9 @@ class ClaudeCodeAccountAdapter(AccountUsageAdapter):
             headers={
                 "Authorization": f"Bearer {token}",
                 "anthropic-version": "2023-06-01",
-                "anthropic-beta": "claude-code-20250219",
+                "anthropic-beta": "claude-code-20250219",  # census: wire-id (protocol/telemetry identifier, not a model choice)
                 "Content-Type": "application/json",
-                "User-Agent": "claude-code/0.2.29",
+                "User-Agent": "claude-code/0.2.29",  # census: wire-id (protocol/telemetry identifier, not a model choice)
             },
             method="POST",
         )
@@ -1526,9 +1526,9 @@ class ClaudeCodeAccountAdapter(AccountUsageAdapter):
                             headers={
                                 "Authorization": f"Bearer {token}",
                                 "anthropic-version": "2023-06-01",
-                                "anthropic-beta": "claude-code-20250219",
+                                "anthropic-beta": "claude-code-20250219",  # census: wire-id (protocol/telemetry identifier, not a model choice)
                                 "Content-Type": "application/json",
-                                "User-Agent": "claude-code/0.2.29",
+                                "User-Agent": "claude-code/0.2.29",  # census: wire-id (protocol/telemetry identifier, not a model choice)
                             },
                             method="POST",
                         )

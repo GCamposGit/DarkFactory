@@ -32,6 +32,7 @@ from core.acceptance.models import (
     ScenarioStatus,
 )
 from core.acceptance.observability import HF15ObservabilityTracker
+from core.models import registry as _models
 from core.acceptance.rollback import HF15RollbackCoordinator
 from core.paths import project_root as get_project_root, state_root
 from core.acceptance.test_data import (
@@ -48,6 +49,9 @@ from core.acceptance.test_data import (
 )
 
 logger = logging.getLogger("darkfac.acceptance.engine")
+
+# Short (un-prefixed) name of the Pareto flash model, derived from the registry (USR-185).
+_PARETO_FLASH = _models.id_of("deepseek-flash").split("/")[-1]
 
 
 def get_current_git_sha(project_root: Optional[Path] = None) -> str:
@@ -381,11 +385,11 @@ class HF15AcceptanceEngine:
         urgent = f.payload.get("urgent_task", {})
 
         # Verify Pareto fallback without unauthorized spend
-        preferred_model = urgent.get("preferred_pareto_model", "deepseek-v4.1-flash")
+        preferred_model = urgent.get("preferred_pareto_model", _PARETO_FLASH)
         pareto_ok = (
             exhausted == "openai-paid"
             and credits_val == 0.00
-            and preferred_model in {"deepseek-v4.1-flash", "deepseek-chat", "qwen-fast"}
+            and preferred_model in {_PARETO_FLASH, "deepseek-chat", "qwen-fast"}
         )
 
         passed = pareto_ok

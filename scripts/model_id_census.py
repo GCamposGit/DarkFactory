@@ -16,6 +16,9 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
 MODEL_ID_RE = re.compile(r"\b(?:claude|gpt|grok|gemini|deepseek)-[a-z0-9][a-z0-9.\-]*[a-z0-9]", re.IGNORECASE)
+# A line carrying this marker holds a wire/protocol identifier (User-Agent, beta header, quota-probe model required by
+# the upstream API), not a model choice; the justification must be in the comment itself.
+WIRE_ID_MARKER = "census: wire-id"
 SCAN_SUFFIXES = {".py", ".json", ".md", ".yaml", ".yml", ".toml", ".txt", ".ps1", ".html", ".js", ".ts"}
 ALLOWLIST_PREFIXES: tuple[str, ...] = (
     ".factory/config/model_registry.json",
@@ -50,7 +53,7 @@ def census(root: Path = REPO_ROOT) -> tuple[int, dict[str, int]]:
             text = (root / rel).read_text(encoding="utf-8", errors="ignore")
         except OSError:
             continue
-        count = len(MODEL_ID_RE.findall(text))
+        count = sum(len(MODEL_ID_RE.findall(line)) for line in text.splitlines() if WIRE_ID_MARKER not in line)
         if count:
             per_file[rel] = count
     return sum(per_file.values()), per_file

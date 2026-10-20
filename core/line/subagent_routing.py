@@ -190,7 +190,10 @@ def parse_config(raw: Mapping[str, Any]) -> SubagentRoutingConfig:
         "forbidden_tags": raw.get("forbidden_tags"),
         "forbidden_stages": raw.get("forbidden_stages"),
         "opus_stages": raw.get("opus_stages"),
-        "forbidden_autonomous_models": raw.get("forbidden_autonomous_models"),
+        # USR-185: absent means the registry markers (a file may only tighten, never relax).
+        "forbidden_autonomous_models": raw["forbidden_autonomous_models"]
+        if "forbidden_autonomous_models" in raw
+        else list(_DEFAULT_FORBIDDEN_MODELS),
     }
     return SubagentRoutingConfig.model_validate(flat)
 

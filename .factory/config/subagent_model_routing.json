@@ -32,6 +32,5 @@
     "architecture"
   ],
   "forbidden_stages": ["planning", "grill", "review", "integration"],
-  "opus_stages": ["planning"],
-  "forbidden_autonomous_models": ["fable", "claude-fable", "astra", "gpt-6-astra"]
+  "opus_stages": ["planning"]
 }

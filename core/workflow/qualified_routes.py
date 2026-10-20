@@ -23,7 +23,24 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Union
 from pydantic import BaseModel, ConfigDict, Field
 
+from core.models import registry as _models
+
 logger = logging.getLogger("darkfac.workflow.qualified_routes")
+
+
+def _gw(name: str) -> str:
+    """Provider/gateway id of a registered model (USR-185)."""
+    return _models.gateway_id(name)
+
+
+def _mid(name: str) -> str:
+    """Canonical registry id of a model (USR-185)."""
+    return _models.id_of(name)
+
+
+def _short(name: str) -> str:
+    """Un-prefixed model name (``deepseek/x`` -> ``x``), as used by short aliases."""
+    return _models.id_of(name).split("/")[-1]
 
 # Default path to canonical executors catalog
 DEFAULT_CATALOG_PATH = Path(".factory/planning/continuous-autonomy/bindings/executors.json")
@@ -37,8 +54,8 @@ FAMILY_SYNONYMS: Dict[str, str] = {
     # Anthropic / Claude
     "claude": "claude",
     "anthropic": "claude",
-    "anthropic/claude-opus-5": "claude",
-    "claude-opus-5": "claude",
+    _gw("opus-legacy"): "claude",
+    _mid("opus-legacy"): "claude",
     "opus-5.1": "claude",
     # Qwen
     "qwen": "qwen",
@@ -55,26 +72,26 @@ FAMILY_SYNONYMS: Dict[str, str] = {
     "openai": "gpt-oss",
     "gpt": "gpt-oss",
     "luna-xhigh": "gpt-oss",
-    "gpt-6-astra": "gpt-oss",
+    _mid("astra"): "gpt-oss",
     # Google / Gemini
     "gemini": "gemini",
     "google": "gemini",
     "gemini-flash": "gemini",
     "gemini-pro": "gemini",
-    "gemini-3.8-flash": "gemini",
-    "google/gemini-3.8-flash": "gemini",
-    "google/gemini-3.1-pro": "gemini",
+    _mid("flash"): "gemini",
+    _gw("flash"): "gemini",
+    _gw("gemini-pro"): "gemini",
     # DeepSeek
     "deepseek": "deepseek",
-    "deepseek-v4-pro": "deepseek",
-    "deepseek-v4.1-flash": "deepseek",
-    "deepseek/deepseek-v4-pro": "deepseek",
-    "deepseek/deepseek-v4.1-flash": "deepseek",
+    _short("deepseek-v4-pro"): "deepseek",
+    _short("deepseek-flash"): "deepseek",
+    _mid("deepseek-v4-pro"): "deepseek",
+    _mid("deepseek-flash"): "deepseek",
     # xAI / Grok
     "grok": "grok",
     "xai": "grok",
-    "grok-4.6": "grok",
-    "xai/grok-4.6": "grok",
+    _mid("grok-review"): "grok",
+    _gw("grok-review"): "grok",
 }
 
 
@@ -199,7 +216,7 @@ _EMBEDDED_DEFAULT_CATALOG: Dict[str, Any] = {
             "provider_id": "google",
             "models": [
                 {
-                    "model_id": "google/gemini-3.8-flash",
+                    "model_id": _gw("flash"),
                     "alias": "gemini-flash",
                     "family": "gemini",
                     "context_window": 1048576,
@@ -210,7 +227,7 @@ _EMBEDDED_DEFAULT_CATALOG: Dict[str, Any] = {
                     "tool_capabilities": ["read_file", "write_file", "replace_file_content", "run_command"],
                 },
                 {
-                    "model_id": "google/gemini-3.1-pro",
+                    "model_id": _gw("gemini-pro"),
                     "alias": "gemini-pro",
                     "family": "gemini",
                     "context_window": 1048576,
@@ -226,8 +243,8 @@ _EMBEDDED_DEFAULT_CATALOG: Dict[str, Any] = {
             "provider_id": "anthropic",
             "models": [
                 {
-                    "model_id": "anthropic/claude-opus-5",
-                    "alias": "claude-opus-5",
+                    "model_id": _gw("opus-legacy"),
+                    "alias": _mid("opus-legacy"),
                     "family": "claude",
                     "context_window": 200000,
                     "cost_per_1k_input_usd": 0.005,
@@ -242,8 +259,8 @@ _EMBEDDED_DEFAULT_CATALOG: Dict[str, Any] = {
             "provider_id": "openrouter",
             "models": [
                 {
-                    "model_id": "deepseek/deepseek-v4-pro",
-                    "alias": "deepseek-v4-pro",
+                    "model_id": _mid("deepseek-v4-pro"),
+                    "alias": _short("deepseek-v4-pro"),
                     "family": "deepseek",
                     "context_window": 256000,
                     "cost_per_1k_input_usd": 0.00045,
@@ -253,8 +270,8 @@ _EMBEDDED_DEFAULT_CATALOG: Dict[str, Any] = {
                     "tool_capabilities": ["read_file", "write_file", "run_command"],
                 },
                 {
-                    "model_id": "deepseek/deepseek-v4.1-flash",
-                    "alias": "deepseek-v4.1-flash",
+                    "model_id": _mid("deepseek-flash"),
+                    "alias": _short("deepseek-flash"),
                     "family": "deepseek",
                     "context_window": 1048576,
                     "cost_per_1k_input_usd": 0.00015,
@@ -269,8 +286,8 @@ _EMBEDDED_DEFAULT_CATALOG: Dict[str, Any] = {
             "provider_id": "xai",
             "models": [
                 {
-                    "model_id": "xai/grok-4.6",
-                    "alias": "grok-4.6",
+                    "model_id": _gw("grok-review"),
+                    "alias": _mid("grok-review"),
                     "family": "grok",
                     "context_window": 131072,
                     "cost_per_1k_input_usd": 0.002,
@@ -288,40 +305,40 @@ _EMBEDDED_DEFAULT_CATALOG: Dict[str, Any] = {
             "allowed_models": [
                 "qwen-code-fast:latest",
                 "qwen-code-deep:latest",
-                "google/gemini-3.8-flash",
+                _gw("flash"),
             ],
             "fallback_order": [
                 "qwen-code-fast:latest",
                 "qwen-code-deep:latest",
-                "google/gemini-3.8-flash",
+                _gw("flash"),
             ],
         },
         "high_architecture": {
-            "primary_model": "anthropic/claude-opus-5",
+            "primary_model": _gw("opus-legacy"),
             "strict_floor_enforcement": True,
             "allowed_models": [
-                "anthropic/claude-opus-5",
-                "deepseek/deepseek-v4-pro",
-                "google/gemini-3.1-pro",
+                _gw("opus-legacy"),
+                _mid("deepseek-v4-pro"),
+                _gw("gemini-pro"),
             ],
             "fallback_order": [
-                "anthropic/claude-opus-5",
-                "deepseek/deepseek-v4-pro",
-                "google/gemini-3.1-pro",
+                _gw("opus-legacy"),
+                _mid("deepseek-v4-pro"),
+                _gw("gemini-pro"),
             ],
         },
         "verifier": {
             "primary_local": "gpt-review:latest",
-            "primary_cloud": "deepseek/deepseek-v4.1-flash",
+            "primary_cloud": _mid("deepseek-flash"),
             "allowed_models": [
                 "gpt-review:latest",
-                "deepseek/deepseek-v4.1-flash",
-                "xai/grok-4.6",
+                _mid("deepseek-flash"),
+                _gw("grok-review"),
             ],
             "fallback_order": [
                 "gpt-review:latest",
-                "deepseek/deepseek-v4.1-flash",
-                "xai/grok-4.6",
+                _mid("deepseek-flash"),
+                _gw("grok-review"),
             ],
             "isolation_rule": "Cross-Model Family Isolation",
         },
@@ -329,13 +346,13 @@ _EMBEDDED_DEFAULT_CATALOG: Dict[str, Any] = {
             "alias_of": "verifier",
             "allowed_models": [
                 "gpt-review:latest",
-                "deepseek/deepseek-v4.1-flash",
-                "xai/grok-4.6",
+                _mid("deepseek-flash"),
+                _gw("grok-review"),
             ],
             "fallback_order": [
                 "gpt-review:latest",
-                "deepseek/deepseek-v4.1-flash",
-                "xai/grok-4.6",
+                _mid("deepseek-flash"),
+                _gw("grok-review"),
             ],
         },
     },
