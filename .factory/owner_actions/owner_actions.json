@@ -1650,29 +1650,29 @@
     {
       "id": "OA-040",
       "kind": "action",
-      "title": "Grokbox: levar a recarga do worker no HEAD novo para o grokbox-supervisor.sh e versiona-lo (USR-315)",
+      "title": "Grokbox: instalar o supervisor versionado (scripts/grokbox) com recarga a cada ciclo (USR-315)",
       "priority": "medium",
       "status": "open",
-      "why": "O supervisor atual da VM (grokbox-supervisor.sh) recupera o Tailscale, mantem o watchdog e confere o venv, mas nao recarrega o worker quando o HEAD muda (USR-315). Nao substituir o script: incluir nele a regra de recarga e versiona-lo no repositorio. So quem acessa a VM faz isso.",
+      "why": "O grokbox-supervisor.sh v2 da VM ja recarrega o worker apos git pull, mas so a cada ~5 min e com 300 s de uptime; a versao versionada em scripts/grokbox/ (copiada da VM, recarga a cada ciclo de 30 s e 60 s de uptime) atende o USR-315 e mantem a recuperacao do Tailscale. So quem acessa a VM instala.",
       "blocks": [
         "USR-315"
       ],
       "depends_on": [],
       "steps": [
         {
-          "text": "Na VM, envie o conteudo atual do supervisor para o agente versionar (cole no chat).",
-          "command": "cat <caminho>/grokbox-supervisor.sh"
+          "text": "Na VM, com o worker ocioso (busy=false no /health), atualize o checkout e copie os scripts versionados por cima dos da VM.",
+          "command": "cd /workspace/darkfac/DarkFactory && git pull --ff-only && cp scripts/grokbox/grokbox-supervisor.sh scripts/grokbox/grokbox-common.sh /workspace/darkfac/"
         },
         {
-          "text": "Inclua no grokbox-supervisor.sh a regra de recarga: guardar o sha do HEAD no momento em que o supervisor lanca o worker (LAUNCH_SHA); a cada ciclo, se git rev-parse HEAD != LAUNCH_SHA e /health disser busy=false, encerrar o worker (SIGTERM, 20 s, depois SIGKILL) e relancar, atualizando LAUNCH_SHA. Nunca usar o git_sha do /health para decidir (ele e calculado do HEAD na hora). Referencia: decide() em scripts/grokbox_supervisor.py.",
-          "command": ""
+          "text": "Reinicie o supervisor (o bootstrap/watchdog relanca com o arquivo novo).",
+          "command": "kill $(cat /workspace/darkfac/run/supervisor.pid)"
         },
         {
-          "text": "Teste: com o worker ocioso, faca git pull de um commit novo e confira que o instance_id do /health muda em ate 60 s.",
+          "text": "Teste: depois do proximo git pull com o worker ocioso, o instance_id do /health muda em 1-2 min.",
           "command": "curl -s http://127.0.0.1:8080/health"
         }
       ],
-      "verify": "Apos git pull com o worker ocioso, o instance_id do /health muda em ate 60 s; com busy=true a recarga espera o job.",
+      "verify": "status.json atualizado pelo supervisor novo; apos um pull com busy=false o instance_id muda em ate ~2 min; com busy=true espera.",
       "created_at": "2026-10-19T19:28:16Z",
       "created_by": "claude-code (sessao 19/10/2026)",
       "resolved_at": null,
