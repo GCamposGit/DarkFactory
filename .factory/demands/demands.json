@@ -8233,7 +8233,10 @@
     ],
     "problem_statement": "core/integrations/telegram.py fixa project_id=darkfac no fluxo /demand; owner_intake permite apenas darkfac por padrao. O Hub ja transporta project_id. E necessario ligar a demanda de produto novo ou projeto cadastrado ao seu registro e repositorio, sem tratar codigo de produto como mudanca do core.",
     "core_journey": [],
-    "non_goals": [],
+    "non_goals": [
+      "Nao criar repositorios a partir do Telegram.",
+      "Nao redirecionar silenciosamente projeto desconhecido para darkfac."
+    ],
     "reachability_contract": "",
     "acceptance_criteria": [
       "Intake distingue projeto existente e produto novo, preserva project_id ate a linha e nunca redireciona silenciosamente para darkfac",

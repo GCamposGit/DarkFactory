@@ -758,15 +758,35 @@ class TelegramGateway:
 
         elif cmd_str == "/demand":
             result.action = TelegramActionType.DEMAND
+            route = None
+            if arg_str:
+                from core.intake.project_routing import resolve_demand
+
+                route = resolve_demand(
+                    arg_str, self.state_dir,
+                    external_id=f"tg-msg-{chat_id}-{msg.message_id}", requested_by=user_id,
+                )
             if not arg_str:
-                result.response_text = "⚠️ Usage: /demand <description of feature or bugfix>"
+                result.response_text = (
+                    "⚠️ Usage: /demand [<project_id>:] <description of feature or bugfix> "
+                    "(sem projeto = darkfac; /newproject <nome>: <texto> para produto novo)"
+                )
+            elif route.action != "accept":
+                result.target_id = route.onboarding_request_id
+                result.response_text = route.message
             else:
-                if self.intake_service is not None:
+                demand_project = route.project_id
+                arg_str = route.text
+                if demand_project != "darkfac" and self.intake_service is None:
+                    result.response_text = (
+                        f"Este canal nao encaminha demandas ao projeto {demand_project}: nada foi registrado."
+                    )
+                elif self.intake_service is not None:
                     try:
                         from core.workflow.control_contracts import IntakeCommand
                         ext_id = f"tg-msg-{chat_id}-{msg.message_id}"
                         cmd = IntakeCommand(
-                            project_id="darkfac",
+                            project_id=demand_project,
                             channel="telegram",
                             external_id=ext_id,
                             payload={
@@ -863,6 +883,17 @@ class TelegramGateway:
                         else:
                             result.target_id = "DEMAND-RECORDED"
                             result.response_text = f"✅ Demanda recebida e enfileirada: {arg_str[:120]}"
+
+        elif cmd_str == "/newproject":
+            from core.intake.project_routing import resolve_newproject
+
+            result.action = TelegramActionType.DEMAND
+            route = resolve_newproject(
+                arg_str, self.state_dir,
+                external_id=f"tg-msg-{chat_id}-{msg.message_id}", requested_by=user_id,
+            )
+            result.target_id = route.onboarding_request_id
+            result.response_text = route.message
 
         elif cmd_str in ("/linha", "/line"):
             result.action = TelegramActionType.DEMAND
