@@ -9790,5 +9790,35 @@
     "dependencies": [],
     "created_at": "2026-10-21T18:44:31.450717Z",
     "updated_at": "2026-10-21T20:40:19.603396Z"
+  },
+  {
+    "id": "USR-338",
+    "project_id": "darkfac",
+    "title": "Diagnose intermittent SQLite board read mtime regression",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "The full quick gate on Linux candidate a1e8cdbb failed tests/test_control_job_board.py::test_sqlite_board_reads_without_writing because the SQLite database mtime changed during a read-only board query (before 1792614153323653486, after 1792614153389656201). The same test passed when run alone (1 passed in 25.91s). Establish whether this is a real write, concurrency interference, or filesystem timing flake and correct the cause or assertion without weakening the read-only contract.",
+    "core_journey": [
+      "The full quick gate on Linux candidate a1e8cdbb failed tests/test_control_job_board.py::test_sqlite_board_reads_without_writing because the SQLite database mtime changed during a read-only board query (before 1792614153323653486, after 1792614153389656201). The same test passed when run alone (1 passed in 25.91s). Establish whether this is a real write, concurrency interference, or filesystem timing flake and correct the cause or assertion without weakening the read-only contract."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Reproduce the full-suite failure or document repeated full-suite and focused evidence showing its cause.",
+      "Ensure read_sqlite_job_board does not write to the source SQLite database and add deterministic coverage for the identified cause.",
+      "Run the affected test and the official quick gate successfully on Linux."
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-21T20:43:03.648724Z",
+    "updated_at": "2026-10-21T20:43:03.648730Z"
   }
 ]
