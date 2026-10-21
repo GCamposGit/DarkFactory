@@ -9413,15 +9413,16 @@
     "project_id": "darkfac",
     "title": "Planning da esteira falha UnknownProjectError em tickets USR",
     "origin": "agent",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "implementing",
+    "delivery_evidence": "; Ownership manual Codex candidato5f8d31c gatePASS4881/4841/40; mutacao somente runtime foi perdida apos redeploy e houve readmissao run65f8cbdbfe74. Status implementing agora persistido no ledger versionado antes da entrega para impedir duplicacao.",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
     "tags": [
-      "user-demand"
+      "user-demand",
+      "owner-decision:OA-049=A"
     ],
-    "problem_statement": "Em 20/10/2026 api/line/live mostrou run-5c1eeae3564c USR-315 com retries handler_error:UnknownProjectError unknown project USR. O run registra project_id darkfac mas o handler parece cair no ticket_id como projeto. Causa ainda nao comprovada; pode envolver worker antigo, lookup do store ou contexto. Consulta canonica open_line_store/get_run_status confirmou runs.project_id=darkfac para run-5c1eeae3564c; nao e project_id corrompido na linha runs.",
+    "problem_statement": "Em 20/10/2026 api/line/live mostrou run-5c1eeae3564c USR-315 com retries handler_error:UnknownProjectError unknown project USR. O run registra project_id darkfac mas o handler parece cair no ticket_id como projeto. Causa ainda nao comprovada; pode envolver worker antigo, lookup do store ou contexto. Consulta canonica open_line_store/get_run_status confirmou runs.project_id=darkfac para run-5c1eeae3564c; nao e project_id corrompido na linha runs.\n\n[Decisao do owner OA-049] Autorizar revisao independente do diff privado USR-320 pelo Grok -> opcao A (Autorizar Grok USR320), em 2026-10-21T03:46:29Z. Nota do owner: Owner respondeu explicitamente Autorizar USR-320 e USR-322 na pergunta async do chat root, autorizando envio dos arquivos alterados/diff privado ao Grok destes tickets. Registro pelo Codex em21/10/2026.",
     "core_journey": [],
     "non_goals": [
       "Nao relaxar piso de cota, Gate G1 ou isolamento de projetos."
@@ -9435,7 +9436,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-20T20:58:05.507716Z",
-    "updated_at": "2026-10-20T20:58:05.507716Z"
+    "updated_at": "2026-10-21T03:46:29.626040Z"
   },
   {
     "id": "USR-321",
@@ -9531,5 +9532,36 @@
     "dependencies": [],
     "created_at": "2026-10-20T23:53:37.650318Z",
     "updated_at": "2026-10-20T23:53:37.650318Z"
+  },
+  {
+    "id": "USR-327",
+    "project_id": "darkfac",
+    "title": "Ownership manual do ticket nao sobrevive ao reload e feeder duplica run",
+    "origin": "agent",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "USR320 foi marcado implementing pelo endpoint canonico e runs pendentes cancelados para takeovermanual em20/10. Apos reinicio/deploy e pausa de cota o ledger versionado ainda planned foi recarregado; em21/10 novo run65f8cbdbfe74 developmentpendingGrokbox apareceu apesar de candidato manual5f8d31c ja validado. Mutacao somente runtime nao foi ownership duravel. Mitigacao nesta retomada: persistir implementing no ledger versionado antes da entrega e cancelar somentedup alvo.",
+    "core_journey": [],
+    "non_goals": [
+      "Nao relaxar GateG1, cotas, leases ou isolamento deprojeto.",
+      "Nao cancelar ou impedir progresso de outros tickets."
+    ],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Ownership manual autorizado e persistido por mecanismo canonico sobrevive reload/deploy e pausa da sessao sem readmissao pelo feeder.",
+      "Termino ou cancelamento canonico libera ownership; estadoslegados/stale sao tratados explicitamente sem bloqueio infinito silencioso.",
+      "Teste reproduz implementingmanual, reloadledger e feeder, provando ausencia de segundo run e preservando trabalho original."
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-21T03:47:58.759537Z",
+    "updated_at": "2026-10-21T03:47:58.759537Z"
   }
 ]

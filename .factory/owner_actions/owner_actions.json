@@ -1992,7 +1992,7 @@
       "kind": "decision",
       "title": "Autorizar revisao independente do diff privado USR-320 pelo Grok",
       "priority": "high",
-      "status": "open",
+      "status": "done",
       "why": "Auto-review recusou enviar o diff USR320 ao Grok porque a autorizacao existente cobre apenas USR321. Payload concreto: diff do commit5f8d31c em codex/usr320-recovery-20261020 (identidade de projeto, adapters, worker, testes, relatorio e ledger); destino Grok, finalidade revisao independente somente leitura. Nenhum segredo sera enviado.",
       "blocks": [
         "USR-320"
@@ -2019,7 +2019,13 @@
       "verify": "Resposta explicita do Owner registrada e OA respondida; revisao independente tem veredito e candidato, ou bloqueio permanece visivel sem merge.",
       "created_at": "2026-10-20T23:55:05Z",
       "created_by": "codex",
-      "resolved_at": null
+      "resolved_at": "2026-10-21T03:46:29Z",
+      "answer": {
+        "option_id": "A",
+        "note": "Owner respondeu explicitamente Autorizar USR-320 e USR-322 na pergunta async do chat root, autorizando envio dos arquivos alterados/diff privado ao Grok destes tickets. Registro pelo Codex em21/10/2026.",
+        "answered_at": "2026-10-21T03:46:29Z",
+        "answered_by": "owner"
+      }
     }
   ]
 }
