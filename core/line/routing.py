@@ -22,6 +22,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable, Iterable, Literal, Optional, Union
@@ -527,6 +528,21 @@ def _extra_operating_candidate(
     return None
 
 
+CODEX_HEADLESS_BLOCK_REASON = "codex_headless_visible_windows"
+
+
+def codex_headless_blocked() -> bool:
+    """True when codex must not be elected for headless runs on this host (USR-336).
+
+    codex.exe launches `codex-windows-sandbox-setup.exe` itself, which shows a console window on every
+    command even when our own child is CREATE_NO_WINDOW. On Windows the block is the default; set
+    `DARKFAC_CODEX_HEADLESS_ALLOWED=1` (true/yes/on) to allow it (e.g. a dedicated headless host).
+    """
+    if sys.platform != "win32":
+        return False
+    return os.environ.get("DARKFAC_CODEX_HEADLESS_ALLOWED", "").strip().lower() not in ("1", "true", "yes", "on")
+
+
 def _routable_candidates(
     stage: str,
     stage_cfg: StageRoute,
@@ -556,6 +572,12 @@ def _routable_candidates(
         if harness in excluded_harnesses or (harness, model) in excluded_pairs:
             continue
         if f"harness:{harness}" not in caps:
+            continue
+        if harness == "codex" and codex_headless_blocked():
+            logger.info(
+                "Skipping harness codex for stage %s (%s; set DARKFAC_CODEX_HEADLESS_ALLOWED=1 to allow)",
+                stage, CODEX_HEADLESS_BLOCK_REASON,
+            )
             continue
         if not supports(harness, required_mode):
             logger.info(
