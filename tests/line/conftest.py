@@ -191,3 +191,10 @@ def _hermetic_agent_env(monkeypatch):
     """Line tests must not depend on the host's agent/routing config (the cloud worker sets these)."""
     for name in ("DARKFAC_CODEX_SANDBOX_MODE", "DARKFAC_OPENROUTER_CHEAP_MODEL"):
         monkeypatch.delenv(name, raising=False)
+
+
+@pytest.fixture(autouse=True)
+def _codex_headless_allowed(monkeypatch: pytest.MonkeyPatch) -> None:
+    """USR-336 blocks headless Codex on Windows by default; line tests assume it is routable."""
+    monkeypatch.setenv("DARKFAC_CODEX_HEADLESS_ALLOWED", "1")
+

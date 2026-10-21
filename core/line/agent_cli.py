@@ -615,11 +615,34 @@ def build_grok_write_argv(executable: str, req: AgentRequest, prompt_file: Path)
     return argv
 
 
-def _win_kwargs() -> dict[str, Any]:
-    kwargs: dict[str, Any] = {}
-    if sys.platform == "win32":
-        kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
+def hidden_creationflags(extra: int = 0) -> int:
+    """`creationflags` for a headless child: CREATE_NO_WINDOW on Windows (plus `extra`), 0 elsewhere (USR-336)."""
+    if sys.platform != "win32":
+        return 0
+    return int(extra) | subprocess.CREATE_NO_WINDOW
+
+
+def hidden_popen_kwargs(extra_flags: int = 0) -> dict[str, Any]:
+    """Popen/run kwargs hiding the console window of a headless child on Windows; `{}` elsewhere (USR-336).
+
+    Besides CREATE_NO_WINDOW it passes a STARTUPINFO with SW_HIDE so a shell or a grandchild that
+    inherits the startup info does not flash a window either.
+    """
+    if sys.platform != "win32":
+        return {}
+    kwargs: dict[str, Any] = {"creationflags": hidden_creationflags(extra_flags)}
+    try:
+        startupinfo = subprocess.STARTUPINFO()
+        startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+        startupinfo.wShowWindow = subprocess.SW_HIDE
+        kwargs["startupinfo"] = startupinfo
+    except AttributeError:  # pragma: no cover - non-Windows interpreter emulating win32
+        pass
     return kwargs
+
+
+def _win_kwargs() -> dict[str, Any]:
+    return hidden_popen_kwargs()
 
 
 _ORIGINAL_SUBPROCESS_RUN = subprocess.run
@@ -649,6 +672,7 @@ def _kill_process_tree(pid: int) -> None:
                 ["taskkill", "/PID", str(pid), "/T", "/F"],
                 capture_output=True,
                 timeout=5,
+                **hidden_popen_kwargs(),
             )
         except Exception as exc:
             logger.debug("taskkill failed for PID %s: %s", pid, exc)
@@ -711,6 +735,7 @@ def _run_bounded(
             "errors": "replace",
             "timeout": timeout_s,
             "cwd": str(cwd) if cwd is not None else None,
+            **hidden_popen_kwargs(),
         }
         if stdin is not None:
             kwargs["stdin"] = stdin
@@ -748,7 +773,7 @@ def _run_bounded(
         "env": env,
     }
     if sys.platform == "win32":
-        kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.CREATE_NO_WINDOW
+        kwargs.update(hidden_popen_kwargs(subprocess.CREATE_NEW_PROCESS_GROUP))
     else:
         kwargs["start_new_session"] = True
 
