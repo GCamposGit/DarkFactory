@@ -96,7 +96,10 @@ def test_cancel_kills_whole_tree_including_grandchild(tmp_path: Path) -> None:
         f"g=subprocess.Popen([sys.executable,'-c','import time;time.sleep(60)'],creationflags={NO_WINDOW});"
         f"pathlib.Path(r'{pidfile}').write_text(str(g.pid));time.sleep(60)"
     )
-    proc = subprocess.Popen([sys.executable, "-c", child], creationflags=NO_WINDOW)
+    # Own session on POSIX: killpg must never reach pytest or the gate worker (it did, USR-326).
+    proc = subprocess.Popen(
+        [sys.executable, "-c", child], creationflags=NO_WINDOW, start_new_session=sys.platform != "win32"
+    )
     for _ in range(100):
         if pidfile.exists() and pidfile.read_text():
             break
@@ -121,3 +124,17 @@ def test_publish_guard_refuses_after_cancel(tmp_path: Path, root: Path) -> None:
         local_cancel.request_cancel(TICKET)
         with pytest.raises(cancellation.RunCancelledError):
             autonomy._refuse_if_cancelled(["push", "origin", "x"], autonomy._PUBLISHING_GIT)
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="process groups are POSIX-only")
+def test_kill_tree_never_killpgs_its_own_process_group(monkeypatch: pytest.MonkeyPatch) -> None:
+    import os
+    import signal
+
+    killed: list[int] = []
+    monkeypatch.setattr(os, "getpgid", lambda _pid: 4242)
+    monkeypatch.setattr(os, "killpg", lambda *_a: pytest.fail("killpg on our own group"))
+    monkeypatch.setattr(os, "kill", lambda pid, _sig: killed.append(pid))
+    monkeypatch.setattr(agent_cli, "_descendant_pids", lambda _pid: [1002])
+    agent_cli._kill_process_tree_once(1001)
+    assert killed == [1002, 1001] and signal.SIGKILL
