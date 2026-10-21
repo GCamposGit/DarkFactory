@@ -583,6 +583,7 @@ def test_ok_agent_with_implementation_reaches_normal_completion(
 
 def _real_router_with(monkeypatch: pytest.MonkeyPatch, **by_provider: float) -> None:
     monkeypatch.setattr(routing, "_default_quota_headroom", lambda provider: by_provider.get(provider, 50.0))
+    monkeypatch.setenv("DARKFAC_CODEX_HEADLESS_ALLOWED", "1")  # USR-336: codex is blocked by default on Windows
 
 
 def test_dry_run_json_reports_the_operating_harness_and_why_it_was_elected(
