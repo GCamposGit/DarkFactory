@@ -1,7 +1,7 @@
 # USR-279 - Piloto greenfield stand alone (Fatia 1: plano)
 
-Status: plano. Nenhum codigo do produto e nenhum repositorio foram criados nesta fatia.
-Decisao do owner (16/10/2026): piloto tecnico pequeno e descartavel; repositorio privado na conta GitHub do owner; ambiente separado na infraestrutura existente; sem novas contratacoes.
+Status: M1 (bootstrap) e M2 (ambiente) concluidos em 20/10/2026. Nesta retomada, verificar e reutilizar as evidencias registradas; nao recriar repositorio, projeto Dokploy, checkout ou ambiente.
+Decisao do owner (16/10/2026; respostas D1-D5 registradas na OA-042 em 20/10/2026): repositorio privado `pilot-hello`, texto "DarkFac pilot", projeto Dokploy separado do `darkfac-core` (opcao A), manter arquivado apos M7 e usar `build` no venv.
 
 Dependencias (ainda nao mergeadas quando este plano foi escrito): USR-274 (bootstrap), USR-275 (contrato de ambiente), USR-278 (roteamento Telegram por projeto).
 
@@ -44,23 +44,23 @@ Opcoes de destino de deploy encontradas no repositorio (infra existente, sem nov
 
 Recomendacao (nao decisao): A, com o dominio gerado pela infraestrutura ja existente (sem novo dominio pago). A escolha final e do owner (D3).
 
-## 5. Decisoes do owner (nao decididas aqui)
+## 5. Decisoes do owner (resolvidas pela OA-042; nao reabrir)
 
-- D1 Nome do repositorio privado. Opcoes: `pilot-hello` (recomendado) ou nome livre.
-- D2 Texto da pagina. Opcoes: texto neutro "DarkFac pilot" (recomendado) ou texto do owner.
-- D3 Destino de deploy: A, B ou C (secao 4). Se A/B: nome do projeto Dokploy separado (sugestao `pilot-hello`) e visibilidade (publica pelo dominio da infra vs. so tailnet).
-- D4 Retencao apos M7: manter arquivado (recomendado) ou remover, por acao do proprio owner.
-- D5 Build: aceitar `build` como ferramenta de desenvolvimento no venv (recomendado) ou usar so compileall mais build da imagem Docker.
+- D1: `pilot-hello`.
+- D2: texto neutro "DarkFac pilot".
+- D3: opcao A, projeto separado `pilot-hello` no Dokploy existente, publicado pelo dominio da infraestrutura.
+- D4: manter arquivado apos M7.
+- D5: aceitar `build` como ferramenta de desenvolvimento no venv.
 
 ## 6. Marcos executaveis (ate tres criterios cada)
 
-M1 - Bootstrap (USR-274) - CONCLUIDO em 20/10/2026 (evidencia: docs/evidence/USR-279-M1.md; https://github.com/GCamposGit/pilot-hello)
+M1 - Bootstrap (USR-274) - CONCLUIDO em 20/10/2026 (evidencia: [docs/evidence/USR-279-M1.md](../evidence/USR-279-M1.md); repo privado [GCamposGit/pilot-hello](https://github.com/GCamposGit/pilot-hello); SHA inicial `23960d95add7595952c8b8ba679af13becc43348`). Evidencia reutilizada, sem novo bootstrap.
 1. Repositorio privado criado na conta do owner pelo `GitHubProvider`, com README, `pyproject.toml`, testes e CI do produto, e registro no registry de projetos.
 2. Reexecucao do bootstrap e idempotente (sem novo repositorio nem commits duplicados).
 3. Repositorio nao contem referencia a `C:\dev\DarkFac` nem import de `core.*`.
 
-M2 - Ambiente (USR-275) - CONCLUIDO em 20/10/2026 (evidencia: docs/evidence/USR-279-M2.md)
-1. Descritor declara `environment` venv e comandos `setup/test/build/smoke`.
+M2 - Ambiente (USR-275) - CONCLUIDO em 20/10/2026 (evidencia: [docs/evidence/USR-279-M2.md](../evidence/USR-279-M2.md), execucao do core no SHA `5eb0cb15c4f3d0703c5bf3feddf725b9f72cfc44`, aplicada ao checkout do repo privado `GCamposGit/pilot-hello` no SHA `23960d95add7595952c8b8ba679af13becc43348`). O projeto Dokploy existente `pilot-hello` foi confirmado em consulta somente leitura em 21/10/2026, ID `g2TBxsWnMna-qn6muYkH2`, separado do projeto `darkfac-core` (ID `RO_wy33fOi6H-Eycnr5BH`). OA-043 continua aberta para acesso ao repo privado e webhook; nao indica recriar o projeto. Evidencia reutilizada, sem recriar venv ou projeto.
+1. Descritor declara `environment` venv e comandos `setup/validate/build/smoke`.
 2. `setup_environment` cria o venv dentro do checkout do produto e os testes iniciais passam nele.
 3. Ambiente do processo filho nao contem `PYTHONPATH`, `VIRTUAL_ENV` do core nem `DARKFAC_*`; segredos mascarados nos logs.
 
@@ -91,8 +91,6 @@ M7 - Relatorio final
 
 ## 7. Acoes do owner necessarias (a registrar como OA pelo orquestrador)
 
-1. Responder D1-D5 (secao 5) - prioridade high; bloqueia M1 e M5.
-2. Confirmar `gh auth status` com escopo `repo` na conta do owner, para o `GitHubProvider` criar repositorio privado (sem expor token no chat) - high; bloqueia M1.
-3. Se destino A/B: criar no Dokploy o projeto separado e a aplicacao ligada ao repositorio privado, concedendo acesso (GitHub App ou deploy key) somente a esse repositorio, e conferir `DOKPLOY_API_KEY` no ambiente de usuario - high; bloqueia M5.
-4. Configurar o webhook GitHub para Dokploy no repositorio do piloto (runbook `github_dokploy_webhook.md`) - medium; bloqueia deploy automatico em M5.
-5. Apos M7: decidir a retencao (D4) - low.
+1. M1/M2: verificar e reutilizar as evidencias existentes; nao recriar recursos. O SHA de M1 identifica o conteudo do produto usado em M2; os dois SHAs de M2 distinguem o codigo do core executor do codigo do piloto.
+2. OA-043 continua aberta: conferir acesso GitHub/Dokploy e configurar o webhook no projeto existente `g2TBxsWnMna-qn6muYkH2`; nao repetir a criacao de `pilot-hello`. Registrar evidencia da aplicacao ligada ao repo privado e liberar M5 apos o webhook.
+3. Apos M7: cumprir a decisao D4 de manter o repositorio arquivado.
