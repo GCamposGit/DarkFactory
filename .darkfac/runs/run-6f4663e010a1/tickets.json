@@ -1,0 +1,81 @@
+[
+  {
+    "id": "T1",
+    "title": "Localizar e validar o script de prova de independencia",
+    "goal": "Confirmar a existencia, localizacao e contrato do script de verificacao da fabrica usado na prova de independencia, registrando comandos e saidas esperadas.",
+    "files_hint": [
+      "scripts/verify_independence.py",
+      "scripts/"
+    ],
+    "acceptance": [
+      "Script de prova localizado e caminho registrado",
+      "Contrato do script documentado (entradas, saidas, formato do relatorio JSON)",
+      "Comandos setup/validate/build/smoke mapeados ao script",
+      "Validate do projeto passa ao final do ticket"
+    ],
+    "tests_to_add": [
+      "Teste que verifica a presenca e o help/contrato do script de prova"
+    ],
+    "smoke": []
+  },
+  {
+    "id": "T2",
+    "title": "Preparar clone limpo e ambiente sanitizado",
+    "goal": "Clonar o produto piloto fora de qualquer checkout DarkFac no SHA mergeado e preparar venv exclusivo com ambiente sanitizado.",
+    "files_hint": [
+      "scripts/verify_independence.py"
+    ],
+    "acceptance": [
+      "Clone criado em diretorio fora de qualquer checkout DarkFac",
+      "SHA mergeado fixado e registrado completo",
+      "Venv exclusivo criado com Python 3.12+",
+      "Ambiente comprovadamente sem PYTHONPATH, VIRTUAL_ENV do core e DARKFAC_*",
+      "Validate do projeto passa ao final do ticket"
+    ],
+    "tests_to_add": [
+      "Teste que valida ausencia das variaveis proibidas no ambiente preparado"
+    ],
+    "smoke": []
+  },
+  {
+    "id": "T3",
+    "title": "Executar setup, validate, build e smoke no clone limpo",
+    "goal": "Rodar setup, validate, build (incluindo wheel) e smoke no clone limpo com ambiente sanitizado e sem servico DarkFac acessivel.",
+    "files_hint": [
+      "scripts/verify_independence.py"
+    ],
+    "acceptance": [
+      "Setup executa com sucesso no venv exclusivo",
+      "Validate executa com sucesso",
+      "Build gera wheel com sucesso",
+      "Servidor sobe e smoke passa",
+      "Servico DarkFac inacessivel comprovado sem interromper servicos compartilhados",
+      "Validate do projeto passa ao final do ticket"
+    ],
+    "tests_to_add": [
+      "Teste que verifica registro de resultados de setup/validate/build/smoke no relatorio"
+    ],
+    "smoke": []
+  },
+  {
+    "id": "T4",
+    "title": "Executar varredura de independencia e emitir relatorio JSON",
+    "goal": "Rodar a varredura permitindo apenas 'DarkFac pilot' em strings de pagina/testes e proibindo imports, caminhos e chamadas da fabrica, emitindo relatorio JSON com SHA verificado.",
+    "files_hint": [
+      "scripts/verify_independence.py",
+      "relatorio JSON de evidencia"
+    ],
+    "acceptance": [
+      "Varredura nao encontra imports, caminhos ou chamadas da fabrica em codigo executavel",
+      "Texto 'DarkFac pilot' permitido apenas em strings de pagina/testes",
+      "Relatorio JSON contem SHA completo, host, horario, comandos, resultados, isolamento e varredura",
+      "Verificacoes nao executadas nao contam como sucesso",
+      "Validate do projeto passa ao final do ticket"
+    ],
+    "tests_to_add": [
+      "Teste que valida schema e conteudo minimo do relatorio JSON",
+      "Teste que valida regra de varredura para 'DarkFac pilot'"
+    ],
+    "smoke": []
+  }
+]
