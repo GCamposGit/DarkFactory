@@ -1,0 +1,104 @@
+[
+  {
+    "id": "T1",
+    "title": "M3 — Comprovar intake real no projeto existente",
+    "goal": "Retomar o piloto pelas evidências M1/M2 e vincular a demanda real ao projeto pilot-hello.",
+    "files_hint": [
+      "docs/plans/USR-279-greenfield-pilot.md",
+      "docs/evidence/USR-279-M3.md",
+      ".factory/demands/demands.json"
+    ],
+    "acceptance": [
+      "Conferir repositório, SHA e descritor contra M1/M2, registrar desvios e reutilizar recursos existentes sem novo bootstrap.",
+      "Após cumprimento da OA-047, registrar mensagem real, demanda e ticket PH vinculados a pilot-hello, com decisões OA-042 reutilizadas e sem criar demanda equivalente em darkfac.",
+      "Registrar evidências de intake e planejamento; python scripts/line_validate.py passa e qualquer alteração no core passa também pelo portão oficial."
+    ],
+    "tests_to_add": [
+      "Nenhum teste novo para registro documental; reutilizar as verificações existentes de roteamento por projeto e conferir o vínculo real da mensagem ao ticket PH."
+    ],
+    "smoke": []
+  },
+  {
+    "id": "T2",
+    "title": "M4 — Entregar o candidato pela linha até merge",
+    "goal": "Executar o ticket PH real sobre a baseline existente, com revisão independente, PR, CI e merge comprovados.",
+    "files_hint": [
+      "GCamposGit/pilot-hello: src/pilot_hello/",
+      "GCamposGit/pilot-hello: tests/",
+      "GCamposGit/pilot-hello: .github/workflows/ci.yml",
+      "docs/evidence/USR-279-M4.md"
+    ],
+    "acceptance": [
+      "Ticket PH percorre implementação e revisão em família diferente; reutilizar código existente e alterar somente lacunas demonstradas, mantendo GET / com 'DarkFac pilot' e GET /healthz com status ok e versão.",
+      "PR no repositório privado possui revisão aprovada e CI verde no SHA final, com validate do produto, build de wheel e ausência de conflitos; python scripts/line_validate.py passa no DarkFac.",
+      "Merge squash confirmado em main, com vínculo entre SHA revisado, execução de CI e SHA de merge; limpar branch e worktree sem remover recursos compartilhados."
+    ],
+    "tests_to_add": [
+      "Reutilizar ou completar testes unittest para HTML de GET /, JSON e versão de GET /healthz e inicialização configurável por PORT.",
+      "Garantir que CI descubra testes, execute validate e produza wheel; toda alteração termina verde."
+    ],
+    "smoke": []
+  },
+  {
+    "id": "T3",
+    "title": "M5 — Publicar e verificar o piloto no Dokploy separado",
+    "goal": "Implantar o SHA mergeado na infraestrutura autorizada e provar saúde do serviço.",
+    "files_hint": [
+      "GCamposGit/pilot-hello: Dockerfile",
+      "GCamposGit/pilot-hello: scripts/smoke.py",
+      "docs/evidence/USR-279-M5.md"
+    ],
+    "acceptance": [
+      "Verificar cumprimento da OA-043 e reutilizar aplicação, projeto separado e acesso ao repositório privado; implantar somente no destino A aprovado, sem alterar darkfac-core.",
+      "Deploy termina com sucesso e GET / e GET /healthz retornam 200; página, status e versão conferem, com vínculo verificável entre SHA de merge, artefato e execução do Dokploy.",
+      "Registrar URL, horários, SHA e saídas sanitizadas; alterações de produto percorrem revisão, PR, CI e merge antes do deploy e todos os comandos validate aplicáveis passam."
+    ],
+    "tests_to_add": [
+      "Reutilizar ou completar smoke HTTP para conferir conteúdo da página, status ok e versão esperada, com timeout e encerramento do processo local.",
+      "Verificar imagem executando o pacote sem checkout ou serviços do DarkFac."
+    ],
+    "smoke": [
+      "/",
+      "/healthz"
+    ]
+  },
+  {
+    "id": "T4",
+    "title": "M6 — Demonstrar independência em clone limpo",
+    "goal": "Provar instalação, testes, wheel e execução do produto fora do checkout e dos serviços DarkFac.",
+    "files_hint": [
+      "GCamposGit/pilot-hello: scripts/smoke.py",
+      "GCamposGit/pilot-hello: tests/",
+      "docs/evidence/USR-279-M6.md"
+    ],
+    "acceptance": [
+      "Clonar o SHA publicado em diretório temporário fora do DarkFac; criar venv novo, instalar ferramentas de desenvolvimento, executar validate e construir wheel com sucesso.",
+      "Instalar o wheel em segundo venv limpo e executar python -m pilot_hello e smoke fora do checkout, sem PYTHONPATH, variáveis ou serviços do core; VIRTUAL_ENV pode apontar somente ao venv do produto.",
+      "Registrar comandos, SHA, hash do wheel e resultados; inspecionar dependências e código executável sem imports ou chamadas ao core, permitindo o texto 'DarkFac pilot'; todos os validates aplicáveis passam."
+    ],
+    "tests_to_add": [
+      "Verificação de instalação do wheel e execução fora da árvore de fontes, para detectar dependência acidental do checkout.",
+      "Verificação de isolamento do ambiente e de ausência de dependências DarkFac no pacote distribuído."
+    ],
+    "smoke": []
+  },
+  {
+    "id": "T5",
+    "title": "M7 — Consolidar evidências e aplicar retenção aprovada",
+    "goal": "Entregar relatório verificável ao owner e encerrar o piloto mantendo o repositório arquivado.",
+    "files_hint": [
+      "docs/evidence/USR-279-M7.md",
+      "docs/plans/USR-279-greenfield-pilot.md",
+      ".factory/demands/demands.json"
+    ],
+    "acceptance": [
+      "Relatório reúne M1–M6, mensagem de origem, ticket PH, decisões reutilizadas, revisão, PR, CI, SHAs, deploy, smoke, independência e quantidade de intervenções manuais reais; entrega ao owner ocorre pelo canal da linha.",
+      "Cada falha descoberta tem correção com commit/PR ou ticket formal com evidência e critérios de aceite; nenhuma etapa bloqueada ou não comprovada é declarada concluída.",
+      "Após finalizar verificações e alterações, aplicar e verificar arquivamento privado conforme OA-042; registrar a evidência, atualizar USR-279 somente com os aceites comprovados e terminar com python scripts/line_validate.py verde e portão oficial quando aplicável."
+    ],
+    "tests_to_add": [
+      "Nenhum teste unitário novo para o relatório; verificar referências da cadeia de evidências e consultar o estado privado e arquivado do repositório."
+    ],
+    "smoke": []
+  }
+]
