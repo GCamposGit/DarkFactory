@@ -1,0 +1,98 @@
+[
+  {
+    "id": "T1",
+    "title": "Reproduzir UnknownProjectError no contexto darkfac/USR-315",
+    "goal": "Escrever teste que reproduz o contexto de planning com runs.project_id=darkfac e ticket USR-315, exercitando o fallback de bindings.py para job_key.ticket_id, e observar a primeira validação falhar antes de implementar a correção no mesmo ticket.",
+    "files_hint": [
+      "core/line/bindings.py",
+      "tests/line/test_bindings_project_resolution.py"
+    ],
+    "acceptance": [
+      "Teste reproduz o caminho de resolução de projeto com project_id=darkfac e ticket_id=USR-315 e falha antes da correção.",
+      "Após a correção no mesmo ticket, o teste passa e a resolução usa runs.project_id, sem inferir projeto pelo prefixo USR.",
+      "validate do projeto (python scripts/line_validate.py) passa ao final do ticket."
+    ],
+    "tests_to_add": [
+      "tests/line/test_bindings_project_resolution.py::test_resolve_project_from_run_project_id_not_ticket_prefix",
+      "tests/line/test_bindings_project_resolution.py::test_no_fallback_to_ticket_id_when_project_id_present"
+    ],
+    "smoke": []
+  },
+  {
+    "id": "T2",
+    "title": "Falha estruturada para identidade de projeto ausente ou desconhecida",
+    "goal": "Garantir que, quando project_id estiver ausente ou desconhecido, a resolução falhe de forma estruturada (erro tipado) em vez de cair em fallback global para darkfac ou inferir pelo ticket_id.",
+    "files_hint": [
+      "core/line/bindings.py",
+      "core/line/planning.py",
+      "tests/line/test_planning_unknown_project.py"
+    ],
+    "acceptance": [
+      "Contexto sem project_id retorna erro tipado e não resolve para darkfac.",
+      "Contexto com project_id desconhecido retorna erro tipado e não usa ticket_id como projeto.",
+      "validate do projeto passa ao final do ticket."
+    ],
+    "tests_to_add": [
+      "tests/line/test_planning_unknown_project.py::test_missing_project_id_raises_structured_error",
+      "tests/line/test_planning_unknown_project.py::test_unknown_project_id_does_not_fallback_to_ticket"
+    ],
+    "smoke": []
+  },
+  {
+    "id": "T3",
+    "title": "Preservar isolamento multi-projeto na resolução de contexto",
+    "goal": "Adicionar cobertura que prova que a resolução de projeto mantém isolamento entre projetos distintos, sem vazamento de contexto entre darkfac e outro projeto.",
+    "files_hint": [
+      "core/line/bindings.py",
+      "core/line/store.py",
+      "tests/line/test_bindings_project_resolution.py"
+    ],
+    "acceptance": [
+      "Teste com dois projetos distintos resolve cada run para seu runs.project_id correto.",
+      "Nenhum contexto de um projeto é reutilizado para outro.",
+      "validate do projeto passa ao final do ticket."
+    ],
+    "tests_to_add": [
+      "tests/line/test_bindings_project_resolution.py::test_multi_project_isolation_in_context_resolution"
+    ],
+    "smoke": []
+  },
+  {
+    "id": "T4",
+    "title": "Reconciliar entrega de USR-315 sem duplicar ticket",
+    "goal": "Implementar reconciliação que reconhece USR-315 como completed com evidência de entrega, sem recriar ticket nem reexecutar trabalho, respeitando idempotência e leases.",
+    "files_hint": [
+      "core/line/store.py",
+      "core/line/planning.py",
+      "tests/line/test_planning_unknown_project.py"
+    ],
+    "acceptance": [
+      "Reconciliação de USR-315 preserva evidência de entrega existente.",
+      "Nenhum ticket duplicado é criado e nenhum trabalho já entregue é reexecutado.",
+      "validate do projeto passa ao final do ticket."
+    ],
+    "tests_to_add": [
+      "tests/line/test_planning_unknown_project.py::test_reconcile_completed_ticket_without_duplication",
+      "tests/line/test_planning_unknown_project.py::test_reconcile_respects_lease_and_idempotency"
+    ],
+    "smoke": []
+  },
+  {
+    "id": "T5",
+    "title": "Evidência de recuperação de run real e validação final",
+    "goal": "Adicionar teste/checagem que comprova recuperação operacional do run real (run-5c1eeae3564c) com project_id darkfac e ticket USR-315, sem duplicar entrega, e garantir que o portão oficial passa sem relaxar cota ou Gate G1.",
+    "files_hint": [
+      "scripts/line_validate.py",
+      "tests/line/test_planning_unknown_project.py"
+    ],
+    "acceptance": [
+      "Evidência de recuperação do run-5c1eeae3564c registrada com project_id darkfac e ticket USR-315.",
+      "Entrega de USR-315 não é duplicada e isolamento multi-projeto é preservado.",
+      "python scripts/line_validate.py passa sem alterar piso de cota ou Gate G1."
+    ],
+    "tests_to_add": [
+      "tests/line/test_planning_unknown_project.py::test_real_run_recovery_evidence_darkfac_usr315"
+    ],
+    "smoke": []
+  }
+]
