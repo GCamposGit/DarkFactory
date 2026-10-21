@@ -74,7 +74,7 @@ def test_project_for_run_uses_run_project_and_never_the_ticket_id(tmp_path) -> N
         asked.append(pid)
         return project if pid == "darkfac" else None
 
-    assert bindings.project_for_run(store, run_id, resolver, fallback_id="AUDIT-READONLY") is project
+    assert bindings.project_for_run(store, run_id, resolver) is project
     assert asked == ["darkfac"]
 
 
@@ -190,7 +190,7 @@ def test_identity_read_is_independent_from_job_telemetry(tmp_path, monkeypatch, 
 
 def test_project_lookup_never_uses_fallback_for_unknown_run(tmp_path) -> None:
     asked = []
-    assert bindings.project_for_run(_store(tmp_path), "missing", lambda pid: asked.append(pid), fallback_id="darkfac") is None
+    assert bindings.project_for_run(_store(tmp_path), "missing", lambda pid: asked.append(pid)) is None
     assert not asked
 
 
