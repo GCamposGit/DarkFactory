@@ -1,0 +1,112 @@
+[
+  {
+    "id": "T1",
+    "title": "M3 — Comprovar intake real e retomar o piloto existente",
+    "goal": "Vincular a demanda real do owner ao projeto pilot-hello e atualizar o plano com as decisões já aprovadas.",
+    "files_hint": [
+      "docs/plans/USR-279-greenfield-pilot.md",
+      "docs/evidence/USR-279-M3.md",
+      ".factory/projects.json",
+      ".factory/demands/demands.json"
+    ],
+    "acceptance": [
+      "Conferir repositório e descritor existentes contra M1/M2, mantendo recursos e comandos setup/validate/build/smoke; atualizar o plano com OA-042 e dependências OA-043/OA-047.",
+      "Após comprovação da OA-047, registrar mensagem real, horário, projeto pilot-hello e ticket PH vinculado; reutilizar D1–D5 sem novo grill ou ticket USR para a demanda do produto.",
+      "Registrar evidências de intake e planejamento sem declarar M3 concluído enquanto faltar mensagem real; python scripts/line_validate.py termina verde."
+    ],
+    "tests_to_add": [
+      "Reutilizar a validação existente do registry e conferir o vínculo mensagem–demanda–ticket–projeto com evidência real; não substituir essa prova por fixture."
+    ],
+    "smoke": []
+  },
+  {
+    "id": "T2",
+    "title": "M4 — Entregar o produto pela linha até merge",
+    "goal": "Conduzir o ticket PH de T1 pela implementação necessária, revisão independente, PR, CI e merge no repositório privado.",
+    "files_hint": [
+      "GCamposGit/pilot-hello: src/pilot_hello/",
+      "GCamposGit/pilot-hello: tests/",
+      "GCamposGit/pilot-hello: .github/workflows/ci.yml",
+      "docs/evidence/USR-279-M4.md"
+    ],
+    "acceptance": [
+      "Após T1, preservar a implementação existente e completar somente lacunas: GET / com 'DarkFac pilot', GET /healthz com status e versão, inicialização por python -m pilot_hello e PORT; runtime sem dependências externas.",
+      "Executar setup/validate/build/smoke do descritor e obter revisão aprovada em família diferente, PR e CI verde para o SHA final revisado; python scripts/line_validate.py passa.",
+      "Realizar merge squash sem conflitos, registrar SHA do PR e do merge, resultado de CI e limpeza da branch/worktree; nenhuma etapa é declarada concluída por evidência simulada."
+    ],
+    "tests_to_add": [
+      "Testes HTTP de GET /, JSON de /healthz e correspondência da versão com o pacote.",
+      "Teste de inicialização com PORT configurada e encerramento do processo.",
+      "Executar testes existentes de empacotamento e acrescentar cobertura apenas para lacunas encontradas."
+    ],
+    "smoke": []
+  },
+  {
+    "id": "T3",
+    "title": "M5 — Publicar no Dokploy separado e verificar o SHA",
+    "goal": "Implantar o SHA mergeado de T2 na infraestrutura autorizada e comprovar respostas HTTP reais.",
+    "files_hint": [
+      "GCamposGit/pilot-hello: Dockerfile",
+      "GCamposGit/pilot-hello: .dockerignore",
+      "GCamposGit/pilot-hello: .github/workflows/ci.yml",
+      "docs/evidence/USR-279-M5.md"
+    ],
+    "acceptance": [
+      "Após T2 e comprovação dos acessos da OA-043, reutilizar ou configurar somente o projeto Dokploy pilot-hello, separado de darkfac-core, com repositório privado e domínio da infraestrutura existente.",
+      "Publicar o SHA aprovado; qualquer alteração necessária passa por revisão, PR, CI e merge antes do deploy. Registrar projeto/aplicação, execução de deploy e associação verificável entre SHA, imagem e versão.",
+      "GET / e /healthz respondem 200, com texto e JSON esperados; registrar URL, horário e saída sanitizada. Validate do produto e python scripts/line_validate.py passam."
+    ],
+    "tests_to_add": [
+      "Verificar que a imagem inicia com a porta configurada e serve / e /healthz.",
+      "Smoke pós-deploy com validação de corpo e versão, além do status HTTP; comprovar SHA pelos metadados do deploy."
+    ],
+    "smoke": [
+      "/",
+      "/healthz"
+    ]
+  },
+  {
+    "id": "T4",
+    "title": "M6 — Provar instalação e execução independentes",
+    "goal": "Demonstrar que o SHA publicado funciona a partir de clone limpo e wheel, sem checkout ou serviço DarkFac.",
+    "files_hint": [
+      "GCamposGit/pilot-hello: scripts/smoke.py",
+      "GCamposGit/pilot-hello: tests/",
+      "GCamposGit/pilot-hello: pyproject.toml",
+      "docs/evidence/USR-279-M6.md"
+    ],
+    "acceptance": [
+      "Após T3, clonar o SHA publicado em diretório isolado fora do DarkFac, criar venv próprio, executar setup/validate/build e registrar wheel e hash do artefato.",
+      "Instalar o wheel em segundo venv limpo e executar python -m pilot_hello fora do checkout, sem PYTHONPATH, variáveis DARKFAC_* ou acesso a serviços do núcleo; / e /healthz passam.",
+      "Inspecionar código e dependências para excluir imports, caminhos ou chamadas DarkFac, permitindo o texto aprovado; registrar comandos, resultados e SHA. Python scripts/line_validate.py passa."
+    ],
+    "tests_to_add": [
+      "Smoke de instalação do wheel em venv limpo, execução fora da árvore de fontes e verificação HTTP.",
+      "Verificação de ausência de dependências do núcleo e de variáveis herdadas no processo do produto."
+    ],
+    "smoke": []
+  },
+  {
+    "id": "T5",
+    "title": "M7 — Consolidar provas e executar retenção aprovada",
+    "goal": "Encerrar o piloto com relatório verificável ao owner e repositório privado arquivado.",
+    "files_hint": [
+      "docs/evidence/USR-279-M7.md",
+      "docs/plans/USR-279-greenfield-pilot.md",
+      ".factory/demands/demands.json"
+    ],
+    "acceptance": [
+      "Após T1–T4, consolidar linha do tempo e referências reais de intake, planejamento, implementação, revisão, PR, CI, merge, deploy e smoke, distinguindo SHAs e contabilizando intervenções humanas.",
+      "Vincular cada falha encontrada à correção ou ticket formal com evidência e critérios; entregar relatório ao owner pelo canal autorizado da linha e registrar a entrega.",
+      "Após as verificações finais, arquivar GCamposGit/pilot-hello mantendo sua privacidade conforme OA-042, registrar confirmação e concluir USR-279 somente com provas completas. Python scripts/line_validate.py passa."
+    ],
+    "tests_to_add": [
+      "Conferência das referências e da cadeia de SHAs no relatório, incluindo comprovantes de entrega e arquivamento.",
+      "Reexecutar smoke final antes do arquivamento; reutilizar validadores existentes sem criar testes que apenas espelhem a documentação."
+    ],
+    "smoke": [
+      "/",
+      "/healthz"
+    ]
+  }
+]
