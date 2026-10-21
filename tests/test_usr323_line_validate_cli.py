@@ -47,10 +47,12 @@ def test_help_exits_zero_without_side_effects(lv, flag, capsys) -> None:
     assert lv.calls == []
 
 
-def test_unknown_argument_exits_two_without_side_effects(lv) -> None:
+def test_unknown_argument_exits_two_with_usage_without_side_effects(lv, capsys) -> None:
     with pytest.raises(SystemExit) as exc:
         lv.main(REPO_ROOT, ["--bogus"])
     assert exc.value.code == 2
+    output = capsys.readouterr()
+    assert "usage" in output.err.lower()
     assert lv.calls == []
 
 
@@ -77,8 +79,11 @@ def test_entrypoint_parses_process_arguments_before_operations(
 
     assert exc.value.code == exit_code
     assert operations == []
+    assert lv.calls == []
     output = capsys.readouterr()
     assert "usage" in (output.out + output.err).lower()
+    if exit_code == 2:
+        assert "unrecognized arguments: --bogus" in output.err
 
 
 def test_clean_tree_passes_exact_quick_command_and_exit_code_through(lv, monkeypatch) -> None:
