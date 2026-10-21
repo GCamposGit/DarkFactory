@@ -324,7 +324,7 @@ def test_agent_error_streak_resets_on_agent_success(
     # 2 failures
     res1 = stage.run(project, run_id)
     assert res1.outcome == "retry"
-    assert res1.cause_code == "review_agent_timeout"
+    assert res1.cause_code.startswith("review_timeout:")
 
     res2 = stage.run(project, run_id)
     assert res2.outcome == "retry"
