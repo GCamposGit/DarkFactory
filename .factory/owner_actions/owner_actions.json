@@ -2026,6 +2026,33 @@
         "answered_at": "2026-10-21T03:46:29Z",
         "answered_by": "owner"
       }
+    },
+    {
+      "id": "OA-050",
+      "kind": "action",
+      "title": "Publicar PR #517 (core/harness protegido): portao quebra no cache hit do veredito remoto",
+      "priority": "high",
+      "status": "open",
+      "why": "O portao oficial (runner.py --quick) termina em HARNESS_FAIL mesmo com veredito PASS reaproveitado do cache Postgres: o leitor devolve created_at em ISO e runner.py faz float(). Qualquer ticket cujo candidato ja foi aprovado em outro host falha no portao. core/harness e protegido; o CI recusa o PR do agente (GUARD VIOLATION).",
+      "blocks": [],
+      "depends_on": [],
+      "steps": [
+        {
+          "text": "Abra o PowerShell (Iniciar > digite PowerShell > Enter)."
+        },
+        {
+          "text": "Revise o diff (17 linhas): cache.py normaliza created_at para epoch + 1 teste de regressao.",
+          "command": "gh pr diff 517 --repo GCamposGit/DarkFactory"
+        },
+        {
+          "text": "Faca o merge com privilegio de administrador (bypass do guard de governanca).",
+          "command": "gh pr merge 517 --repo GCamposGit/DarkFactory --squash --admin --delete-branch"
+        }
+      ],
+      "verify": "gh pr view 517 --repo GCamposGit/DarkFactory --json state mostra MERGED; o portao com cache hit termina sem '[ERROR] could not convert string to float'.",
+      "created_at": "2026-10-21T16:09:07Z",
+      "created_by": "claude-opus-5.5",
+      "resolved_at": null
     }
   ]
 }
