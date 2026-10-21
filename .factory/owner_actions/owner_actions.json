@@ -1251,7 +1251,7 @@
       "kind": "action",
       "title": "PR de registro #396 (USR-307) aberto ha 174 min sem mergear: o ticket nao chegou ao backlog da main",
       "priority": "high",
-      "status": "open",
+      "status": "done",
       "why": "Motivo: a politica da main bloqueia o merge (checks obrigatorios pendentes ou vermelhos); mergeable=MERGEABLE. PR: https://github.com/GCamposGit/DarkFactory/pull/396",
       "blocks": [
         "USR-307"
@@ -1273,7 +1273,14 @@
       "verify": "O PR #396 aparece como MERGED e o ticket USR-307 esta em .factory/demands/demands.json na main.",
       "created_at": "2026-10-18T05:08:53Z",
       "created_by": "queue-registration",
-      "resolved_at": null
+      "resolved_at": "2026-10-21T18:00:00Z",
+      "history": [
+        {
+          "at": "2026-10-21T18:00:00Z",
+          "outcome": "resolved",
+          "note": "USR-307 ja estava na main (completed); PR #396 fechado como duplicado."
+        }
+      ]
     },
     {
       "id": "OA-032",
@@ -1753,7 +1760,14 @@
       "verify": "gh auth status mostra 'repo' nos escopos; projeto do piloto existe no Dokploy; webhook entrega 200 no primeiro push.",
       "created_at": "2026-10-20T10:24:32Z",
       "created_by": "claude-code",
-      "resolved_at": null
+      "resolved_at": null,
+      "history": [
+        {
+          "at": "2026-10-21T18:00:00Z",
+          "outcome": "evidence:keep_open",
+          "note": "Passos 1-2 cumpridos: gh com escopo repo. Faltam projeto Dokploy e webhook."
+        }
+      ]
     },
     {
       "id": "OA-044",
