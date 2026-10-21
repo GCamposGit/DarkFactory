@@ -2099,6 +2099,9 @@ def _run(argv: Optional[list[str]], box: list[ProgressPublisher], stack: context
                     fleet_mode=fleet_mode,
                     host_id=host_id,
                     project_id=project_id,
+                    # USR-330: a manual start reserves ticket/project in the canonical store (the same
+                    # unique-active-ticket reservation the line's admission takes) before any effect.
+                    require_reservation=bool(resume_target or args.ticket_id),
                 )
             )
         except line_lock.LineLockHeld as exc:
