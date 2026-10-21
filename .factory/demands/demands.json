@@ -9732,8 +9732,8 @@
     "project_id": "darkfac",
     "title": "Codex headless abre janelas de console visiveis no Notebook a cada comando",
     "origin": "user",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "483e28ff61c59a0008a9c7d2975562df3028fb37",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -9757,6 +9757,6 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-21T17:29:08.669337Z",
-    "updated_at": "2026-10-21T17:29:08.669337Z"
+    "updated_at": "2026-10-21T18:13:57.298708Z"
   }
 ]
