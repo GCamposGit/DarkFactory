@@ -102,3 +102,6 @@ hub/data/service_migrations.json
 .factory/owner_actions/*.lock
 .factory/owner_actions/*.tmp
 hub/data/owner_actions/
+
+# USR-321: lock entre processos do ledger
+.factory/demands/*.lock
