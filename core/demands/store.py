@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import os
+import tempfile
+import time
 from pathlib import Path
 from threading import Lock, RLock
 from typing import Any
@@ -19,14 +22,107 @@ DEFAULT_DEMANDS_PATH = Path(".factory/demands/demands.json")
 
 # One mutex per ledger file for the whole process: separate DemandsStore instances (threads, launchers)
 # pointing at the same file must serialize their read-modify-write cycles (USR-321).
-_PATH_LOCKS: dict[str, RLock] = {}
+_PATH_LOCKS: dict[str, "_PathMutex"] = {}
 _PATH_LOCKS_GUARD = Lock()
+LOCK_TIMEOUT_SECONDS = float(os.environ.get("DARKFAC_DEMANDS_LOCK_TIMEOUT", "30"))
 
 
-def _lock_for(path: Path) -> RLock:
+class DemandsLockTimeout(TimeoutError):
+    """Raised when the cross-process ledger lock cannot be acquired in time."""
+
+
+def _try_lock_file(fh: Any) -> bool:
+    if os.name == "nt":
+        import msvcrt
+
+        fh.seek(0)
+        try:
+            msvcrt.locking(fh.fileno(), msvcrt.LK_NBLCK, 1)
+            return True
+        except OSError:
+            return False
+    import fcntl
+
+    try:
+        fcntl.flock(fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        return True
+    except OSError:
+        return False
+
+
+def _unlock_file(fh: Any) -> None:
+    if os.name == "nt":
+        import msvcrt
+
+        fh.seek(0)
+        msvcrt.locking(fh.fileno(), msvcrt.LK_UNLCK, 1)
+    else:
+        import fcntl
+
+        fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
+
+
+class _PathMutex:
+    """Reentrant in-process lock plus an inter-process lockfile (``<ledger>.lock``), same API as RLock."""
+
+    def __init__(self, path: Path, timeout: float | None = None) -> None:
+        # Outside the repo: a lockfile next to the ledger would dirty every checkout (USR-321).
+        digest = hashlib.sha256(str(path).lower().encode("utf-8")).hexdigest()[:16]
+        self._lock_path = Path(tempfile.gettempdir()) / "darkfac-ledger-locks" / f"{digest}.lock"
+        self._lock_path.parent.mkdir(parents=True, exist_ok=True)
+        self._timeout = LOCK_TIMEOUT_SECONDS if timeout is None else timeout
+        self._rlock = RLock()
+        self._depth = 0
+        self._fh: Any = None
+
+    def acquire(self) -> bool:
+        if not self._rlock.acquire(timeout=self._timeout):
+            raise DemandsLockTimeout(f"Timed out after {self._timeout}s waiting for in-process lock on {self._lock_path}")
+        try:
+            if self._depth == 0:
+                self._lock_path.parent.mkdir(parents=True, exist_ok=True)
+                fh = open(self._lock_path, "a+b")
+                deadline = time.monotonic() + self._timeout
+                while not _try_lock_file(fh):
+                    if time.monotonic() >= deadline:
+                        fh.close()
+                        raise DemandsLockTimeout(
+                            f"Timed out after {self._timeout}s waiting for ledger lock {self._lock_path} (held by another process)"
+                        )
+                    time.sleep(0.02)
+                self._fh = fh
+            self._depth += 1
+            return True
+        except BaseException:
+            self._rlock.release()
+            raise
+
+    def release(self) -> None:
+        self._depth -= 1
+        try:
+            if self._depth == 0 and self._fh is not None:
+                fh, self._fh = self._fh, None
+                try:
+                    _unlock_file(fh)
+                finally:
+                    fh.close()
+        finally:
+            self._rlock.release()
+
+    def __enter__(self) -> "_PathMutex":
+        self.acquire()
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        self.release()
+
+
+def _lock_for(path: Path) -> _PathMutex:
     key = os.path.normcase(os.path.abspath(path))
     with _PATH_LOCKS_GUARD:
-        return _PATH_LOCKS.setdefault(key, RLock())
+        if key not in _PATH_LOCKS:
+            _PATH_LOCKS[key] = _PathMutex(Path(os.path.abspath(path)))
+        return _PATH_LOCKS[key]
 
 
 class DemandsStore:
