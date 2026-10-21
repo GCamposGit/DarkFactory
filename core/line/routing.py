@@ -398,7 +398,7 @@ def _snapshot_max_age(provider_dir: Path) -> float:
 # Credential-free reason behind a `None` headroom (or "healthy" for a verified, current reading);
 # see `_quota_headroom_diagnosis`. Never carries raw probe output, tokens or account identifiers.
 QuotaDiagnosisReason = Literal[
-    "healthy", "stale_snapshot", "probe_unavailable", "suspicious_reading", "unknown"
+    "healthy", "stale_snapshot", "probe_unavailable", "probe_timeout", "suspicious_reading", "unknown"
 ]
 
 
@@ -415,6 +415,8 @@ def _quota_headroom_diagnosis(provider_id: str) -> tuple[Optional[float], QuotaD
         with evidence older than the max age).
       * "probe_unavailable" — the disk snapshot WAS stale (or absent) so a re-probe was forced, but no
         current, verifiable evidence came back (probe timeout/crash, disconnected, no meter exposed).
+      * "probe_timeout" — the probe exceeded the configured deadline (`DARKFAC_PROBE_DEADLINE_SEC`,
+        default 10 s) and was abandoned; its process tree is killed. Quota stays unknown (fail-closed).
       * "suspicious_reading" — a reading came back inside the max age but failed the plausibility check
         (`ProviderAccountUsage.plausibility_flags`), so it is never trusted even though it is fresh.
       * "unknown" — no adapter is registered for `provider_id`, or a defensive failure occurred.
@@ -448,7 +450,13 @@ def _quota_headroom_diagnosis(provider_id: str) -> tuple[Optional[float], QuotaD
         for adapter in build_default_adapters(provider_dir):
             if adapter.spec.provider_id != provider_id:
                 continue
-            usage = adapter.inspect(force=snapshot_stale)
+            from core.usage.probe_deadline import ProbeTimeout, run_with_deadline
+
+            try:
+                usage = run_with_deadline(provider_id, lambda a=adapter: a.inspect(force=snapshot_stale))
+            except ProbeTimeout as timeout_exc:
+                logger.warning("Quota probe timed out %s; failing closed", timeout_exc.as_dict())
+                return None, "probe_timeout"
             checked = _parse_iso_utc(usage.checked_at)
             if checked is None or (datetime.now(timezone.utc) - checked).total_seconds() > max_age:
                 reason: QuotaDiagnosisReason = "probe_unavailable" if snapshot_stale else "stale_snapshot"
