@@ -9602,8 +9602,8 @@
     "project_id": "darkfac",
     "title": "Eliminar fallbacks residuais de identidade em resumo e ramo sem rota",
     "origin": "review",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "5b5f206f1dd976b0b0ed95a0a3b059bae5e0977c",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -9628,7 +9628,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-21T04:13:44.412155Z",
-    "updated_at": "2026-10-21T04:13:44.412155Z"
+    "updated_at": "2026-10-21T16:26:36.642097Z"
   },
   {
     "id": "USR-323",
