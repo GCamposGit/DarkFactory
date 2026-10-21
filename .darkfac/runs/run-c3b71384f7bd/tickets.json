@@ -1,0 +1,88 @@
+[
+  {
+    "id": "T1",
+    "title": "Verificar dependência OA-043 e preencher descritor de deploy do pilot-hello",
+    "goal": "Confirmar existência e identificadores da aplicação, domínio e webhook criados em OA-043 e preencher o descritor de deploy do pilot-hello apontando para o projeto Dokploy separado do darkfac-core.",
+    "files_hint": [
+      "deploy/dokploy/pilot-hello.yaml",
+      "scripts/line_validate.py"
+    ],
+    "acceptance": [
+      "Descritor de deploy do pilot-hello referencia a aplicação e o projeto Dokploy separado do darkfac-core",
+      "Identificadores de aplicação, domínio e webhook de OA-043 estão registrados no descritor sem segredos em texto claro",
+      "validate do projeto passa"
+    ],
+    "tests_to_add": [
+      "tests/test_deploy_descriptor_pilot_hello.py::test_descriptor_aponta_projeto_separado",
+      "tests/test_deploy_descriptor_pilot_hello.py::test_descriptor_sem_segredos_em_texto_claro"
+    ],
+    "smoke": []
+  },
+  {
+    "id": "T2",
+    "title": "Expor identidade do SHA mergeado em GET /healthz",
+    "goal": "Ajustar a rota /healthz do pilot-hello para retornar HTTP 200 com status ok, versão semver e identidade explícita correspondente ao SHA mergeado.",
+    "files_hint": [
+      "app/healthz.py",
+      "tests/test_healthz_identity.py"
+    ],
+    "acceptance": [
+      "GET /healthz retorna 200 com status ok, versão semver e campo de identidade igual ao SHA mergeado injetado no build",
+      "Ausência de identidade ou identidade divergente é detectável pelo payload",
+      "validate do projeto passa"
+    ],
+    "tests_to_add": [
+      "tests/test_healthz_identity.py::test_healthz_retorna_200_com_status_ok",
+      "tests/test_healthz_identity.py::test_healthz_expoe_sha_mergeado",
+      "tests/test_healthz_identity.py::test_healthz_sem_identidade_falha_verificacao"
+    ],
+    "smoke": [
+      "/healthz"
+    ]
+  },
+  {
+    "id": "T3",
+    "title": "Implementar smoke pós-deploy vinculado ao SHA",
+    "goal": "Criar script de smoke que consulta GET /healthz na URL do pilot-hello, valida HTTP 200, status ok e identidade igual ao SHA esperado, e emite evidência com URL, SHA esperado e observado, saída e horário UTC sem credenciais.",
+    "files_hint": [
+      "scripts/smoke_pilot_hello.py",
+      "tests/test_smoke_pilot_hello.py"
+    ],
+    "acceptance": [
+      "Smoke retorna sucesso apenas quando HTTP 200, status ok e identidade igual ao SHA esperado",
+      "Smoke retorna falha explícita quando identidade diverge ou está ausente",
+      "Evidência gerada contém URL, SHA esperado, SHA observado, saída do smoke e horário UTC, sem credenciais",
+      "validate do projeto passa"
+    ],
+    "tests_to_add": [
+      "tests/test_smoke_pilot_hello.py::test_smoke_sucesso_com_sha_correspondente",
+      "tests/test_smoke_pilot_hello.py::test_smoke_falha_com_sha_divergente",
+      "tests/test_smoke_pilot_hello.py::test_smoke_falha_sem_identidade",
+      "tests/test_smoke_pilot_hello.py::test_evidencia_sem_credenciais"
+    ],
+    "smoke": [
+      "/healthz"
+    ]
+  },
+  {
+    "id": "T4",
+    "title": "Registrar evidência de M5 vinculada ao ticket do piloto",
+    "goal": "Produzir e versionar o documento de evidência de M5 com URL consultada, SHA esperado e observado, saída do smoke e horário UTC, vinculado ao ticket do piloto.",
+    "files_hint": [
+      "docs/evidence/M5-pilot-hello.md",
+      "scripts/smoke_pilot_hello.py"
+    ],
+    "acceptance": [
+      "Documento de evidência contém URL, SHA esperado, SHA observado, saída do smoke e horário UTC",
+      "Evidência está vinculada ao ticket do piloto e não contém credenciais",
+      "validate do projeto passa"
+    ],
+    "tests_to_add": [
+      "tests/test_evidence_m5.py::test_evidencia_contem_campos_obrigatorios",
+      "tests/test_evidence_m5.py::test_evidencia_sem_credenciais"
+    ],
+    "smoke": [
+      "/healthz"
+    ]
+  }
+]
