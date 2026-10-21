@@ -1577,7 +1577,9 @@ def _ticket_from_origin_main(ticket_id: str, worktree: Path) -> Optional[UserTic
 
     git = ["git", "-C", str(worktree)]
     try:
-        subprocess.run(git + ["fetch", "origin", "-q"], capture_output=True, timeout=120, check=False)
+        fetched = subprocess.run(git + ["fetch", "origin", "-q"], capture_output=True, timeout=120, check=False)
+        if fetched.returncode != 0:
+            logger.warning("Fetch de origin falhou (offline?); usando origin/main local para %s", ticket_id)
         shown = subprocess.run(
             git + ["show", "origin/main:.factory/demands/demands.json"],
             capture_output=True, timeout=60, check=False,
@@ -2169,6 +2171,8 @@ def _run(argv: Optional[list[str]], box: list[ProgressPublisher], stack: context
             print(f"\n[+] Novo ticket criado: {ticket.id} - '{ticket.title}'")
     elif args.ticket_id:
         ticket = store.get_ticket(args.ticket_id)
+        if ticket is None:  # USR-335: checkout compartilhado atrasado; procurar no ledger de origin/main
+            ticket = _ticket_from_origin_main(args.ticket_id, PROJECT_ROOT)
         if ticket is None:
             print(f"[ERRO] Ticket {args.ticket_id} não encontrado no backlog.", file=sys.stderr)
             return 1
