@@ -9563,5 +9563,38 @@
     "dependencies": [],
     "created_at": "2026-10-21T03:47:58.759537Z",
     "updated_at": "2026-10-21T03:47:58.759537Z"
+  },
+  {
+    "id": "USR-328",
+    "project_id": "darkfac",
+    "title": "Diagnosticar timeouts sem veredito na revisao independente Grok",
+    "origin": "agent",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "USR-321 candidate8d413ed: revisao Grok autorizada pelo Owner nao emitiu veredito em tres execucoes limitadas. Logs duraveis na WTusr-321: review-usr321.json timeout362s apos ler SHA; review-usr321-final.json timeout302s semstdout; review-usr321-clean.json timeout182s semstdout/stderr mesmo com cwdtemporario, homeisolado semMCP, no-plan/tools/web/subagents. Nao confundir com WinError206 doUSR322. Gateoficial8dpass4839/44skip; mergeretido por ausencia de revisao.",
+    "core_journey": [],
+    "non_goals": [
+      "Nao converter timeout em aprovacao nem permitir revisao da mesma familia.",
+      "Nao assumir causa de rede, MCP ou quota sem reproduzir."
+    ],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Reproduzir com smoke curto e capturar duracao monotonic, codigo e stderr redigido.",
+      "Uma revisao outrafamilia devolve veredito verificavel vinculado ao candidato ou falha estruturada com proxima rota elegivel.",
+      "Deadline configurado termina arvore de processo e nao deixa execucao fantasma."
+    ],
+    "suggested_files": [
+      "core/line/agent_cli.py"
+    ],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-21T03:48:31.262926Z",
+    "updated_at": "2026-10-21T03:48:31.262926Z"
   }
 ]
