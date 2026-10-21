@@ -1462,7 +1462,7 @@ def _run_grok(req: AgentRequest) -> AgentResult:
             # Windows limits argv length; keep private prompt contents off process listings.
             with tempfile.TemporaryDirectory(prefix="grok_read_prompt_") as directory:
                 prompt_file = Path(directory) / "prompt.txt"
-                prompt_file.write_text(req.prompt, encoding="utf-8")
+                prompt_file.write_bytes(req.prompt.encode("utf-8"))
                 res = _run_bounded(
                     [*argv, "--prompt-file", str(prompt_file)],
                     cwd=req.cwd, timeout_s=req.timeout_s, env=env,
