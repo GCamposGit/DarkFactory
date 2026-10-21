@@ -261,6 +261,17 @@ def default_state_dir() -> Path | None:
         return None
 
 
+def _ticket_cancelled(ticket_id: str) -> bool:
+    if not ticket_id or ticket_id == "-":
+        return False
+    try:
+        from core.line import local_cancel
+
+        return local_cancel.cancel_requested(ticket_id)
+    except Exception:  # noqa: BLE001
+        return False
+
+
 def new_execution_id(clock: Callable[[], datetime]) -> str:
     return f"exec-{clock().strftime('%Y%m%dT%H%M%S')}-{uuid.uuid4().hex[:10]}"
 
@@ -341,12 +352,40 @@ class ExecutionRegistry:
             logger.warning("execution_registry: start failed (%s)", type(exc).__name__)
         return eid
 
-    def heartbeat(self, execution_id: str) -> None:
+    def heartbeat(self, execution_id: str) -> bool:
+        """Prove life. Returns False (and closes the execution as ``cancelled``) when its ticket's run was
+        cancelled (USR-326), so a subagent that checks the result stops instead of beating forever."""
         try:
             ctx = self._load_context(execution_id)
+            ticket = str((ctx.get("meta") or {}).get("k") or "-")
+            if _ticket_cancelled(ticket):
+                self.finish(execution_id, "cancelled", "run cancelled (USR-326)")
+                return False
             self._publish(execution_id, ctx, KIND_BEAT, "running", self._clock())
         except Exception as exc:  # noqa: BLE001
             logger.warning("execution_registry: heartbeat failed (%s)", type(exc).__name__)
+        return True
+
+    def cancel_ticket(self, ticket_id: str) -> list[str]:
+        """Finish every locally active execution of ``ticket_id`` as cancelled (parent and subagents)."""
+        done: list[str] = []
+        directory = self.state_dir
+        if directory is None or not ticket_id:
+            return done
+        try:
+            files = sorted((directory / "active").glob("*.json"))
+        except OSError:
+            return done
+        for path in files:
+            try:
+                data = json.loads(path.read_text(encoding="utf-8"))
+                if str((data.get("meta") or {}).get("k")) != ticket_id:
+                    continue
+            except (OSError, ValueError, AttributeError):
+                continue
+            self.finish(path.stem, "cancelled", "run cancelled (USR-326)")
+            done.append(path.stem)
+        return done
 
     def finish(self, execution_id: str, status: str = "succeeded", evidence: Any = None) -> None:
         try:
@@ -577,8 +616,8 @@ def start(
     return get_registry().start(source, harness, stage, ticket_id, parent_execution_id, **kwargs)
 
 
-def heartbeat(execution_id: str) -> None:
-    get_registry().heartbeat(execution_id)
+def heartbeat(execution_id: str) -> bool:
+    return get_registry().heartbeat(execution_id)
 
 
 def finish(execution_id: str, status: str = "succeeded", evidence: Any = None) -> None:

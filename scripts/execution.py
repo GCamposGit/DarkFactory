@@ -7,7 +7,7 @@
 
 ``start`` prints the new execution id (or JSON with ``--json``). The command NEVER fails the caller because of
 the registry: an unreachable store only queues the event for a later resend; exit code 0 except for a malformed
-command line (2).
+command line (2) and a heartbeat of a cancelled run (3: stop working).
 """
 
 from __future__ import annotations
@@ -23,6 +23,9 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from core.workflow import execution_registry  # noqa: E402
+
+
+CANCELLED_EXIT = 3  # heartbeat refused: the ticket's run was cancelled (USR-326)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -62,7 +65,8 @@ def main(argv: Sequence[str] | None = None, *, registry: execution_registry.Exec
             )
             print(json.dumps({"execution_id": eid}) if args.json else eid)
         elif args.command == "heartbeat":
-            reg.heartbeat(args.execution_id)
+            if reg.heartbeat(args.execution_id) is False:
+                return CANCELLED_EXIT  # run cancelled: the caller (subagent) must stop
         else:
             reg.finish(args.execution_id, args.status, args.evidence)
     except Exception:  # noqa: BLE001 - the session is never failed by the board
