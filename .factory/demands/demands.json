@@ -8257,7 +8257,7 @@
     "title": "Provar entrega autonoma de piloto greenfield stand alone em repositorio e ambiente privados separados",
     "origin": "agent",
     "status": "planned",
-    "delivery_evidence": "Reaberto em 20/10/2026: M1 (repo privado pilot-hello) e M2 (ambiente) concluidos; M3 aguarda deploy + OA-047 (demanda pelo Telegram) e M5 aguarda OA-043 (Dokploy/webhook) (anterior: b5ef8d3f4f6618f2e2712129fcac2d665385625c; M2 (ambiente) concluido em 20/10/2026)",
+    "delivery_evidence": "Retomada M3 em 2026-10-21: plano atualizado com decisoes OA-042. Descritor pilot-hello preserva repo, venv e comandos setup/validate/build/smoke; M1/M2 permanecem evidencias historicas. M3 NAO concluido: gh repo view nao resolveu GCamposGit/pilot-hello nesta sessao; nao ha intake real nem ticket PH vinculado no registry. OA-043 (acesso/projeto Dokploy/webhook) e OA-047 (mensagem real do owner) seguem abertas; evidencia parcial em docs/evidence/USR-279-M3.md.",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "later",
@@ -8267,7 +8267,6 @@
       "standalone-projects",
       "pilot",
       "needs-slicing",
-      "congelado-v0",
       "owner-decision:OA-042=recomendado"
     ],
     "problem_statement": "Decisao explicita do owner em 16/10/2026: piloto tecnico pequeno e descartavel; criar repositorio privado na sua conta GitHub e ambiente separado na infraestrutura existente, sem novas contratacoes. Provar a fabrica recebendo uma demanda de projeto novo ate publicacao e verificacao, com minima intervencao e sem dependencia de runtime do core para o produto funcionar. Fatiar execucao em marcos pequenos antes de implementar. Fatia 1 (plano do piloto) em docs/plans/USR-279-greenfield-pilot.md; marcos M1-M7 seguem.\n\n[Decisao do owner OA-042] Decidir o piloto greenfield do USR-279 (nome, texto, destino, retencao, build) -> opcao recomendado (Aceitar todas as recomendacoes), em 2026-10-20T10:29:29Z. Nota do owner: Owner no chat em 20/10/2026: sim (D1 pilot-hello, D2 'DarkFac pilot', D3 opcao A Dokploy existente, D4 manter arquivado, D5 build no venv).",
@@ -8286,7 +8285,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-16T15:26:57.986877Z",
-    "updated_at": "2026-10-20T15:48:12.919545Z"
+    "updated_at": "2026-10-21T15:30:21Z"
   },
   {
     "id": "USR-277",

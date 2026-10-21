@@ -1,9 +1,9 @@
 # USR-279 - Piloto greenfield stand alone (Fatia 1: plano)
 
-Status: plano. Nenhum codigo do produto e nenhum repositorio foram criados nesta fatia.
-Decisao do owner (16/10/2026): piloto tecnico pequeno e descartavel; repositorio privado na conta GitHub do owner; ambiente separado na infraestrutura existente; sem novas contratacoes.
+Status: execucao retomada. M1 (bootstrap) e M2 (ambiente) possuem evidencias historicas em `docs/evidence/USR-279-M1.md` e `docs/evidence/USR-279-M2.md`. Esta atualizacao nao declara M3 concluido: a mensagem real do owner ainda nao foi comprovada (OA-047 aberta).
+Decisoes do owner (OA-042, 20/10/2026): D1 `pilot-hello`; D2 texto da pagina `DarkFac pilot`; D3 opcao A, Dokploy existente em projeto separado; D4 manter arquivado; D5 build no venv. Registro: `.factory/owner_actions/owner_actions.json`.
 
-Dependencias (ainda nao mergeadas quando este plano foi escrito): USR-274 (bootstrap), USR-275 (contrato de ambiente), USR-278 (roteamento Telegram por projeto).
+Dependencias historicas: USR-274 (bootstrap), USR-275 (contrato de ambiente), USR-278 (roteamento Telegram por projeto). A verificacao atual da demanda real esta pendente de OA-043 (acessos/projeto Dokploy/webhook) e OA-047 (mensagem do owner pelo Telegram); nao simular nem inferir a entrega dessas acoes.
 
 ## 1. Piloto e fronteiras do produto
 
@@ -18,7 +18,7 @@ Dentro do escopo:
 
 Fora do escopo: banco de dados, autenticacao, dominio proprio, servicos pagos, qualquer import de `core.*` ou chamada a servico DarkFac em runtime, regras de negocio alem do texto da pagina.
 
-Nome do repositorio e texto da pagina sao detalhes do produto descartavel; ver decisoes D1 e D2.
+Nome do repositorio e texto da pagina foram aprovados pelo owner em OA-042 (D1/D2 acima).
 
 ## 2. Ambiente (contrato USR-275)
 
@@ -44,27 +44,27 @@ Opcoes de destino de deploy encontradas no repositorio (infra existente, sem nov
 
 Recomendacao (nao decisao): A, com o dominio gerado pela infraestrutura ja existente (sem novo dominio pago). A escolha final e do owner (D3).
 
-## 5. Decisoes do owner (nao decididas aqui)
+## 5. Decisoes do owner (OA-042, respondida)
 
-- D1 Nome do repositorio privado. Opcoes: `pilot-hello` (recomendado) ou nome livre.
-- D2 Texto da pagina. Opcoes: texto neutro "DarkFac pilot" (recomendado) ou texto do owner.
-- D3 Destino de deploy: A, B ou C (secao 4). Se A/B: nome do projeto Dokploy separado (sugestao `pilot-hello`) e visibilidade (publica pelo dominio da infra vs. so tailnet).
-- D4 Retencao apos M7: manter arquivado (recomendado) ou remover, por acao do proprio owner.
-- D5 Build: aceitar `build` como ferramenta de desenvolvimento no venv (recomendado) ou usar so compileall mais build da imagem Docker.
+- D1 Nome do repositorio privado: `pilot-hello`.
+- D2 Texto da pagina: `DarkFac pilot`.
+- D3 Destino: opcao A, projeto separado no Dokploy existente, usando dominio ja existente.
+- D4 Retencao apos M7: manter arquivado.
+- D5 Build: build no venv.
 
 ## 6. Marcos executaveis (ate tres criterios cada)
 
-M1 - Bootstrap (USR-274) - CONCLUIDO em 20/10/2026 (evidencia: docs/evidence/USR-279-M1.md; https://github.com/GCamposGit/pilot-hello)
+M1 - Bootstrap (USR-274) - CONCLUIDO conforme evidencia historica de 20/10/2026 (docs/evidence/USR-279-M1.md; https://github.com/GCamposGit/pilot-hello). Acesso atual ao repositorio nao foi confirmado nesta retomada; ver M3.
 1. Repositorio privado criado na conta do owner pelo `GitHubProvider`, com README, `pyproject.toml`, testes e CI do produto, e registro no registry de projetos.
 2. Reexecucao do bootstrap e idempotente (sem novo repositorio nem commits duplicados).
 3. Repositorio nao contem referencia a `C:\dev\DarkFac` nem import de `core.*`.
 
-M2 - Ambiente (USR-275) - CONCLUIDO em 20/10/2026 (evidencia: docs/evidence/USR-279-M2.md)
-1. Descritor declara `environment` venv e comandos `setup/test/build/smoke`.
+M2 - Ambiente (USR-275) - CONCLUIDO conforme evidencia historica de 20/10/2026 (docs/evidence/USR-279-M2.md)
+1. Descritor declara `environment` venv e comandos `setup/validate/build/smoke`.
 2. `setup_environment` cria o venv dentro do checkout do produto e os testes iniciais passam nele.
 3. Ambiente do processo filho nao contem `PYTHONPATH`, `VIRTUAL_ENV` do core nem `DARKFAC_*`; segredos mascarados nos logs.
 
-M3 - Demanda (USR-278)
+M3 - Demanda (USR-278) - PENDENTE: a evidencia de intake real ainda falta (OA-047 aberta; docs/evidence/USR-279-M3.md).
 1. Owner envia a demanda ("pagina e /healthz") por Telegram ou Hub e ela cai no projeto do piloto, nao em `darkfac`.
 2. Gate G1 aplicado: ambiguidades do produto viram perguntas ao owner (D1-D5), sem suposicao.
 3. Ticket do piloto registrado com ID, projeto e vinculo a demanda.
@@ -89,10 +89,9 @@ M7 - Relatorio final
 2. Falhas encontradas retomadas ou diagnosticadas, cada uma com commit/PR ou ticket formal.
 3. D4 executada ou registrada como acao do owner; criterios 2 e 3 do USR-279 marcados com evidencia.
 
-## 7. Acoes do owner necessarias (a registrar como OA pelo orquestrador)
+## 7. Acoes do owner necessarias (registradas no backlog)
 
-1. Responder D1-D5 (secao 5) - prioridade high; bloqueia M1 e M5.
-2. Confirmar `gh auth status` com escopo `repo` na conta do owner, para o `GitHubProvider` criar repositorio privado (sem expor token no chat) - high; bloqueia M1.
-3. Se destino A/B: criar no Dokploy o projeto separado e a aplicacao ligada ao repositorio privado, concedendo acesso (GitHub App ou deploy key) somente a esse repositorio, e conferir `DOKPLOY_API_KEY` no ambiente de usuario - high; bloqueia M5.
-4. Configurar o webhook GitHub para Dokploy no repositorio do piloto (runbook `github_dokploy_webhook.md`) - medium; bloqueia deploy automatico em M5.
-5. Apos M7: decidir a retencao (D4) - low.
+1. OA-042 (D1-D5): respondida em 20/10/2026; escolhas registradas na secao 5.
+2. OA-043 (acesso `gh`, projeto Dokploy separado e webhook): aberta; bloqueia confirmar acesso/publicacao e M5.
+3. OA-047 (enviar a demanda pelo Telegram e confirmar ticket PH): aberta e dependente de OA-043; bloqueia concluir M3.
+4. Apos M7, aplicar D4 (manter arquivado) e registrar a verificacao correspondente.
