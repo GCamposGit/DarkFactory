@@ -28,6 +28,7 @@ Exit code 0 only when everything passed.
 
 from __future__ import annotations
 
+import argparse
 import os
 import re
 import shutil
@@ -259,7 +260,19 @@ def run_steps_directly(root: Path, config_path: Path) -> int:
     return 0
 
 
-def main(root: Path = REPO_ROOT) -> int:
+def build_parser() -> argparse.ArgumentParser:
+    return argparse.ArgumentParser(
+        prog="line_validate.py",
+        description=(
+            "Run the official quick gate (core/harness/runner.py --quick) on a clean tree or on a "
+            "snapshot commit of a dirty one. Takes no arguments; exit 0 only when everything passed."
+        ),
+    )
+
+
+def main(root: Path = REPO_ROOT, argv: list[str] | None = None) -> int:
+    # Parse BEFORE any side effect: --help exits 0 and unknown args exit 2 without snapshot/runner.
+    build_parser().parse_args([] if argv is None else argv)
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     config_path = root / "harness.config.json"
@@ -284,4 +297,4 @@ def main(root: Path = REPO_ROOT) -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(main(argv=sys.argv[1:]))
