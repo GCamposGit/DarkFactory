@@ -42,7 +42,6 @@ from core.git.ci_checks import (
     MainStatus,
     check_main,
     ensure_green,
-    classify_delivery,
     is_ledger_only,
     pending_check_labels,
     sanitize,
@@ -900,7 +899,7 @@ class GitAutonomyManager:
         branch requires status checks, so merging before they settle is refused.
         """
         changed = self._changed_files(base, cwd)
-        if kind == "implementation" and classify_delivery(changed) == "ledger_only":
+        if kind == "implementation" and is_ledger_only(changed):
             return DeliveryReport(
                 ok=False, action="no_changes", pr_url=pr_url, branch=branch,
                 message="Implementation PR changes only the ledger; merge withheld.",
@@ -1056,7 +1055,7 @@ class GitAutonomyManager:
                 ok=True, action="no_changes", branch=branch, cleaned=cleaned,
                 message="Branch has no commits beyond base.",
             )
-        if kind == "implementation" and classify_delivery(self._changed_files(base, cwd)) == "ledger_only":
+        if kind == "implementation" and is_ledger_only(self._changed_files(base, cwd)):
             return DeliveryReport(ok=False, action="no_changes", branch=branch, message="Implementation changes only the ledger.")
         if kind == "queue" and not is_ledger_only(self._changed_files(base, cwd)):
             return DeliveryReport(ok=False, action="error", branch=branch, message="Queue PR changes non-ledger files.")

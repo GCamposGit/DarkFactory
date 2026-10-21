@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import os
+import tempfile
 import time
 from pathlib import Path
 from threading import Lock, RLock
@@ -64,7 +66,10 @@ class _PathMutex:
     """Reentrant in-process lock plus an inter-process lockfile (``<ledger>.lock``), same API as RLock."""
 
     def __init__(self, path: Path, timeout: float | None = None) -> None:
-        self._lock_path = path.with_name(path.name + ".lock")
+        # Outside the repo: a lockfile next to the ledger would dirty every checkout (USR-321).
+        digest = hashlib.sha256(str(path).lower().encode("utf-8")).hexdigest()[:16]
+        self._lock_path = Path(tempfile.gettempdir()) / "darkfac-ledger-locks" / f"{digest}.lock"
+        self._lock_path.parent.mkdir(parents=True, exist_ok=True)
         self._timeout = LOCK_TIMEOUT_SECONDS if timeout is None else timeout
         self._rlock = RLock()
         self._depth = 0

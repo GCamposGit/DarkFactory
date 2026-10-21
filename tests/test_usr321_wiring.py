@@ -62,7 +62,8 @@ def test_mutex_is_reentrant(tmp_path):
     with m:
         with m:
             pass
-    assert (tmp_path / "d.json.lock").exists()
+    assert m._lock_path.exists()
+    assert not (tmp_path / "d.json.lock").exists()  # never dirties the checkout
 
 
 def test_store_uses_path_mutex(tmp_path):
