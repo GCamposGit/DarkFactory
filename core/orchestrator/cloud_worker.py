@@ -710,7 +710,7 @@ class CloudWorker:
     def _project_for(self, claim: Claim):
         from core.line.bindings import project_for_run
 
-        return project_for_run(self.store, claim.job_key.run_id, fallback_id=claim.job_key.ticket_id)
+        return project_for_run(self.store, claim.job_key.run_id)
 
     def _send_commercial_acceptance_request(self, claim: Claim, stage_result: StageResult) -> bool:
         from core.line.human import HumanRequest, request_human_help
@@ -877,15 +877,16 @@ class CloudWorker:
                 if unavailable is not None:
                     from core.line import routing
                     from core.line.route_wait import RouteWaiter, run_started_at_lookup
-                    from core.projects.models import ProjectDescriptor
+                    from core.line.bindings import ProjectIdentityError
 
                     project = self._project_for(claim)
                     if project is None:
-                        project = ProjectDescriptor(
-                            id=context.project_id or claim.job_key.ticket_id,
-                            repo_url="",
-                            default_branch="main",
-                        )
+                        from core.line.bindings import UnknownProjectError
+
+                        if not context.project_id:
+                            raise ProjectIdentityError("run_project_missing")
+                        # A persisted but unregistered project fails closed; never synthesize it.
+                        raise UnknownProjectError(context.project_id)
                     waiter = self._route_waiter or RouteWaiter(
                         run_started_at=run_started_at_lookup(self.store)
                     )
@@ -1092,7 +1093,7 @@ class CloudWorker:
                 from core.line.bindings import project_for_run
                 from core.line.human import load_request, resume_blocked_job, run_probe
 
-                project = project_for_run(self.store, run_id, fallback_id=job_key.ticket_id)
+                project = project_for_run(self.store, run_id)
                 if project is None:
                     continue
 

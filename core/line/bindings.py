@@ -229,10 +229,8 @@ def project_for_run(
     store: Any,
     run_id: str,
     resolver: Optional[ProjectResolver] = None,
-    *,
-    fallback_id: Optional[str] = None,
 ) -> Optional[ProjectDescriptor]:
-    """Resolve only ``runs.project_id``; ``fallback_id`` is retained for caller compatibility."""
+    """Resolve only ``runs.project_id``; a ticket id is never a project identity."""
     project_id = project_id_for_run(store, run_id)
     if not project_id:
         return None
