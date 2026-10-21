@@ -1786,7 +1786,7 @@
       "kind": "action",
       "title": "Hub sem queda no deploy (USR-207): desligar autoDeploy duplicado, credencial GHCR e agendar sonda",
       "priority": "medium",
-      "status": "open",
+      "status": "done",
       "why": "O USR-207 entregou deploy deduplicado, classificador de mudancas, healthcheck e sonda de disponibilidade; a troca sem queda (imagem GHCR + start-first) e o fim do deploy duplo dependem de passos no Dokploy/GitHub que so o owner faz. Detalhes em docs/proposals/USR-207-zero-downtime.md.",
       "blocks": [
         "USR-207"
@@ -1813,7 +1813,14 @@
       "verify": "Um merge gera um unico deploy do Hub; durante um deploy real a sonda de 1 s nao ve respostas diferentes de 200 em /health.",
       "created_at": "2026-10-20T10:24:33Z",
       "created_by": "claude-code",
-      "resolved_at": null
+      "resolved_at": "2026-10-22T00:05:00Z",
+      "history": [
+        {
+          "at": "2026-10-22T00:05:00Z",
+          "outcome": "resolved",
+          "note": "Verificado pela API do Dokploy: compose Darkhub autoDeploy=False; registry ghcr (ghcr.io, GCamposGit) criado; sonda DarkFac-Hub-Availability agendada no Notebook (pythonw absoluto, LastTaskResult=0). Parte de codigo (patch GHCR, start-first) segue no USR-339."
+        }
+      ]
     },
     {
       "id": "OA-041",
