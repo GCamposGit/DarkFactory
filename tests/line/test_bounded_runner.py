@@ -192,7 +192,7 @@ def test_bounded_runner_kills_descendant_after_root_exits_with_pipes_open(tmp_pa
     pid = int(result.stdout.strip().splitlines()[-1])
 
     assert elapsed < 5, f"platform={sys.platform}, tolerance=2.0s, observed={elapsed:.3f}s"
-    assert result.outcome == "timeout"
+    assert result.outcome == "timeout", f"platform={sys.platform}, result={result}"
     assert result.returncode == 0
     assert result.process_tree_clean is True
     assert not _is_running(pid), f"descendant {pid} survived pipe-drain timeout"
