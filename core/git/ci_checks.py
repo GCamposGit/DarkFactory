@@ -572,6 +572,14 @@ def is_ledger_only(paths: Iterable[str]) -> bool:
     )
 
 
+def classify_delivery(paths: Iterable[str]) -> str:
+    """Classify a change set: ``empty``, ``ledger_only`` (queue/owner_actions) or ``implementation``."""
+    items = [p for p in paths if p and p.strip()]
+    if not items:
+        return "empty"
+    return "ledger_only" if is_ledger_only(items) else "implementation"
+
+
 # ----------------------------------------------------------------------
 # Base branch probe (backs `check-main`)
 # ----------------------------------------------------------------------
