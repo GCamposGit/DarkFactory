@@ -41,8 +41,20 @@ def test_deadline_kills_whole_tree_and_reports_duration(tmp_path: Path) -> None:
     while not pidfile.exists() and time.monotonic() < deadline:
         time.sleep(0.1)
     child_pid = int(pidfile.read_text())
-    time.sleep(0.5)
-    assert not psutil.pid_exists(child_pid), "ghost grandchild survived the deadline"
+    assert _wait_gone(child_pid), "ghost grandchild survived the deadline"
+
+
+def _wait_gone(pid: int, timeout_s: float = 5.0) -> bool:
+    """Dead or zombie (a killed orphan may stay a zombie in containers without an init reaper)."""
+    deadline = time.monotonic() + timeout_s
+    while time.monotonic() < deadline:
+        try:
+            if psutil.Process(pid).status() == psutil.STATUS_ZOMBIE:
+                return True
+        except psutil.NoSuchProcess:
+            return True
+        time.sleep(0.1)
+    return False
 
 
 def test_review_timeout_is_structured_failure_with_next_route(

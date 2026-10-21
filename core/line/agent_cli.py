@@ -689,9 +689,11 @@ def _kill_process_tree(pid: int) -> list[int]:
     """Terminate `pid` and its descendants; return PIDs that survived (USR-114, USR-328)."""
     if pid <= 0:
         return []
-    family = [pid, *_descendant_pids(pid)]
+    # Only descendants are verified/force-killed: the direct child belongs to the caller's Popen, which
+    # must reap it itself (psutil.wait_procs here would steal its exit status on POSIX).
+    descendants = _descendant_pids(pid)
     _kill_process_tree_once(pid)
-    survivors = _surviving_pids(family)
+    survivors = _surviving_pids(descendants)
     if survivors:
         try:
             import psutil
@@ -701,7 +703,9 @@ def _kill_process_tree(pid: int) -> list[int]:
                     psutil.Process(p).kill()
                 except Exception:
                     pass
-            psutil.wait_procs([psutil.Process(p) for p in survivors if psutil.pid_exists(p)], timeout=3)
+            deadline = time.monotonic() + 3
+            while _surviving_pids(survivors) and time.monotonic() < deadline:
+                time.sleep(0.1)
         except Exception:
             pass
         survivors = _surviving_pids(survivors)
