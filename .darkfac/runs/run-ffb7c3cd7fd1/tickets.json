@@ -1,0 +1,101 @@
+[
+  {
+    "id": "T1",
+    "title": "Reproduzir UnknownProjectError no contexto planning darkfac/USR-315",
+    "goal": "Adicionar teste de regressão que reproduz o cenário planning com project_id=darkfac e ticket USR-315, exercitando a cadeia de resolução de projeto e o fallback de bindings.py, terminando verde após a correção.",
+    "files_hint": [
+      "tests/line/test_bindings.py",
+      "core/line/bindings.py"
+    ],
+    "acceptance": [
+      "Teste reproduz o contexto planning com project_id=darkfac e ticket USR-315 sem lançar UnknownProjectError.",
+      "Teste cobre explicitamente o caminho de fallback de job_key.ticket_id em bindings.py.",
+      "validate do projeto passa ao final do ticket."
+    ],
+    "tests_to_add": [
+      "tests/line/test_bindings.py::test_planning_context_darkfac_usr315_resolves_project",
+      "tests/line/test_bindings.py::test_bindings_fallback_ticket_id_does_not_infer_project"
+    ],
+    "smoke": []
+  },
+  {
+    "id": "T2",
+    "title": "Usar runs.project_id como identidade canônica na resolução de projeto",
+    "goal": "Ajustar a resolução de projeto para consumir runs.project_id como fonte canônica, removendo qualquer inferência a partir do prefixo do ticket e garantindo que USR-315 não seja tratado como projeto.",
+    "files_hint": [
+      "core/line/bindings.py",
+      "core/line/store.py",
+      "tests/line/test_bindings.py",
+      "tests/line/test_store.py"
+    ],
+    "acceptance": [
+      "Resolução de projeto usa runs.project_id e ignora prefixo do ticket.",
+      "Consulta canônica open_line_store/get_run_status retorna project_id=darkfac para o run de teste.",
+      "validate do projeto passa ao final do ticket."
+    ],
+    "tests_to_add": [
+      "tests/line/test_store.py::test_get_run_status_returns_canonical_project_id",
+      "tests/line/test_bindings.py::test_ticket_prefix_not_used_as_project"
+    ],
+    "smoke": []
+  },
+  {
+    "id": "T3",
+    "title": "Falha estruturada para identidade de projeto ausente ou desconhecida",
+    "goal": "Substituir fallback silencioso por erro estruturado e explícito quando o project_id estiver ausente ou desconhecido, sem fallback global para darkfac.",
+    "files_hint": [
+      "core/line/bindings.py",
+      "tests/line/test_bindings.py"
+    ],
+    "acceptance": [
+      "Contexto sem project_id resulta em erro estruturado, não em fallback para darkfac.",
+      "Contexto com project_id desconhecido resulta em erro estruturado distinto de UnknownProjectError genérico.",
+      "validate do projeto passa ao final do ticket."
+    ],
+    "tests_to_add": [
+      "tests/line/test_bindings.py::test_missing_project_id_raises_structured_error",
+      "tests/line/test_bindings.py::test_unknown_project_id_raises_structured_error"
+    ],
+    "smoke": []
+  },
+  {
+    "id": "T4",
+    "title": "Preservar isolamento multi-projeto e idempotência na retomada",
+    "goal": "Garantir que a retomada de run real não duplique ticket já entregue e mantenha isolamento entre projetos distintos, com leases e idempotência respeitados.",
+    "files_hint": [
+      "core/line/worker.py",
+      "core/line/store.py",
+      "tests/line/test_worker.py"
+    ],
+    "acceptance": [
+      "Retomada de run com USR-315 completed não recria ticket nem reexecuta trabalho entregue.",
+      "Projeto distinto não herda contexto nem dados de darkfac.",
+      "Leases e idempotência são verificados em teste.",
+      "validate do projeto passa ao final do ticket."
+    ],
+    "tests_to_add": [
+      "tests/line/test_worker.py::test_resume_does_not_duplicate_completed_ticket",
+      "tests/line/test_worker.py::test_multi_project_isolation_on_resume",
+      "tests/line/test_worker.py::test_resume_respects_lease_and_idempotency"
+    ],
+    "smoke": []
+  },
+  {
+    "id": "T5",
+    "title": "Validar recuperação operacional com evidência do run real",
+    "goal": "Estender a validação oficial para cobrir o cenário de recuperação operacional com evidência do run real, sem relaxar cota ou Gate G1.",
+    "files_hint": [
+      "scripts/line_validate.py",
+      "tests/line/test_worker.py"
+    ],
+    "acceptance": [
+      "line_validate.py cobre contexto darkfac/USR-315, projeto distinto e identidade ausente/desconhecida.",
+      "Validação não relaxa piso de cota nem Gate G1.",
+      "validate do projeto passa ao final do ticket."
+    ],
+    "tests_to_add": [
+      "tests/line/test_worker.py::test_operational_recovery_evidence_darkfac_usr315"
+    ],
+    "smoke": []
+  }
+]
