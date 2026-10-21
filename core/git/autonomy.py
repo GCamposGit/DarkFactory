@@ -1549,17 +1549,12 @@ class GitAutonomyManager:
                     t.updated_at = datetime.now(timezone.utc)
                     store.save_ticket(t)
             else:
-                t = store.get_ticket(ticket.id)
                 failure_evidence = (
                     f"[LIVE_CONVERGENCE_FAILURE] Failed at {datetime.now(timezone.utc).isoformat()} "
                     f"on SHA {target_sha}: {verify_res}"
                 )
-                if t:
-                    t.status = DeliveryStatus.PLANNED
-                    t.delivery_evidence = None
-                    t.problem_statement = (t.problem_statement or "") + f"\n\n{failure_evidence}"
-                    t.updated_at = datetime.now(timezone.utc)
-                    store.save_ticket(t)
+                if store.get_ticket(ticket.id):
+                    store.requeue_ticket(ticket.id, reason=failure_evidence, reopen=True)
 
                 defect_id = store.next_ticket_id(ticket.project_id)
                 defect_ticket = UserTicket(

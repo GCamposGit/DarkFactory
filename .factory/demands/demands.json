@@ -9764,8 +9764,8 @@
     "project_id": "darkfac",
     "title": "Ligar despacho local ao fleet_policy com capacidade verificada e reabertura de ticket concluido via requeue",
     "origin": "user",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "ff2b901b8197b280833b02937f4fc91f69a85cdb",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -9789,7 +9789,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-21T18:44:31.450717Z",
-    "updated_at": "2026-10-21T18:44:31.450717Z"
+    "updated_at": "2026-10-21T20:40:19.603396Z"
   },
   {
     "id": "USR-338",

@@ -7,7 +7,7 @@ import signal
 import secrets
 import threading
 from datetime import UTC, datetime
-from typing import Any, Sequence
+from typing import Any, Callable, Sequence
 from pydantic import BaseModel, ConfigDict, Field
 
 from core.orchestrator.adapters.control_postgres import PostgresControlStore
@@ -61,6 +61,7 @@ class CloudCoordinator:
         fleet_hosts: Sequence[str] | None = None,
         host_health_prober: Callable[[str], bool | None] | None = None,
         feeder_cycle: Any | None = None,
+        capacity_probe: Callable[[], int] | None = None,
     ) -> None:
         self.database_url = database_url or os.environ.get("DARKFAC_HF02_DATABASE_URL")
         self.max_slots = (
@@ -71,6 +72,7 @@ class CloudCoordinator:
         self.application_version = application_version
         self.port = port if port is not None else int(os.environ.get("DARKFAC_COORDINATOR_PORT", "8001"))
         self.host_health_prober = host_health_prober
+        self.capacity_probe = capacity_probe
         if fleet_hosts is not None:
             self.fleet_hosts = list(fleet_hosts)
         else:
@@ -164,6 +166,33 @@ class CloudCoordinator:
             logger.warning("Host health probe failed for %s: %s", host, exc)
             return False
 
+    def _local_host_has_capacity(self, host: str) -> bool:
+        """USR-337: the local host is only admitted when measured gate capacity (RAM workers) allows it.
+
+        Same rule as ``fleet_policy.select_host_for_ticket(verified_capacity=...)``: capacity <= 0 means no new
+        cycle. Remote hosts are not measured here. Probe failure is fail-closed only in managed mode.
+        """
+        try:
+            from core.line.line_lock import resolve_host_id
+
+            if host.lower() != resolve_host_id().lower():
+                return True
+            if self.capacity_probe is not None:
+                workers = int(self.capacity_probe())
+            elif fleet_managed_enabled():
+                from core.line.gate_ram import measure_workers
+
+                workers = measure_workers().workers
+            else:
+                return True
+        except Exception as exc:
+            logger.warning("Capacity probe failed for %s: %s", host, exc)
+            return not fleet_managed_enabled()
+        if workers <= 0:
+            logger.info("Host %s skipped: verified capacity %d", host, workers)
+            return False
+        return True
+
     def admit_eligible_cycles(self, now: datetime | None = None) -> list[FleetReservation]:
         """Admit eligible pending cycles to free fleet hosts (USR-282).
 
@@ -213,6 +242,7 @@ class CloudCoordinator:
             h for h in self.fleet_hosts
             if h.lower() not in occupied_hosts
             and self._host_verified_healthy(h)
+            and self._local_host_has_capacity(h)
         ]
         if not free_hosts:
             return []

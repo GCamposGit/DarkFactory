@@ -153,16 +153,35 @@ class DemandsStore:
             self.save_ticket(updated)
             return updated
 
-    def requeue_ticket(self, ticket_id: str, reason: str = "") -> tuple[UserTicket, bool]:
+    def requeue_ticket(
+        self, ticket_id: str, reason: str = "", *, reopen: bool = False
+    ) -> tuple[UserTicket, bool]:
         """Single mutex-protected path to put a ticket back on the active queue (status ``planned``).
 
         Returns ``(ticket, changed)``. Terminal tickets (completed/cancelled) are never reopened here
         and an already planned ticket is left untouched (idempotent under concurrency).
+        With ``reopen=True`` (USR-337) a completed ticket is explicitly reopened: ``reason`` is required, the
+        delivery evidence is cleared and the reason is appended to ``problem_statement`` (history preserved).
+        Cancelled tickets are never reopened.
         """
         with self._lock:
             ticket = self.get_ticket(ticket_id)
             if not ticket:
                 raise KeyError(f"Ticket '{ticket_id}' not found")
+            if reopen and ticket.status == DeliveryStatus.COMPLETED:
+                if not reason.strip():
+                    raise ValueError(f"Reopening {ticket_id} requires a reason")
+                updated = ticket.model_copy(
+                    update={
+                        "status": DeliveryStatus.PLANNED,
+                        "delivery_evidence": None,
+                        "problem_statement": (ticket.problem_statement or "") + "\n\n" + reason,
+                        "updated_at": utc_now(),
+                    }
+                )
+                self.save_ticket(updated)
+                logger.info("Reopened %s (completed -> planned) %s", ticket_id, reason)
+                return updated, True
             if ticket.status in (DeliveryStatus.COMPLETED, DeliveryStatus.CANCELLED):
                 raise ValueError(f"Ticket {ticket_id} is {ticket.status.value}; refusing to requeue")
             if ticket.status == DeliveryStatus.PLANNED:
