@@ -9413,8 +9413,8 @@
     "project_id": "darkfac",
     "title": "Planning da esteira falha UnknownProjectError em tickets USR",
     "origin": "agent",
-    "status": "implementing",
-    "delivery_evidence": "; Ownership manual Codex candidato5f8d31c gatePASS4881/4841/40; mutacao somente runtime foi perdida apos redeploy e houve readmissao run65f8cbdbfe74. Status implementing agora persistido no ledger versionado antes da entrega para impedir duplicacao.",
+    "status": "completed",
+    "delivery_evidence": "; Ownership manual Codex candidato5f8d31c gatePASS4881/4841/40; mutacao somente runtime foi perdida apos redeploy e houve readmissao run65f8cbdbfe74. Status implementing agora persistido no ledger versionado antes da entrega para impedir duplicacao.; Implementacao 5f8d31c6b5962e364cabbc51172cb330f180d160; gate Desktop HARNESS_PASS 4881 discovered/4841 passed/40 skipped; revisao independente Grok focused approve sem blockers (independent-review-focused.json). PR #512.",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -9436,7 +9436,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-20T20:58:05.507716Z",
-    "updated_at": "2026-10-21T03:46:29.626040Z"
+    "updated_at": "2026-10-21T04:15:00Z"
   },
   {
     "id": "USR-321",
@@ -9596,5 +9596,67 @@
     "dependencies": [],
     "created_at": "2026-10-21T03:48:31.262926Z",
     "updated_at": "2026-10-21T03:48:31.262926Z"
+  },
+  {
+    "id": "USR-329",
+    "project_id": "darkfac",
+    "title": "Eliminar fallbacks residuais de identidade em resumo e ramo sem rota",
+    "origin": "review",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "Revisao independente Grok do USR-320 candidato5f8d31c aprovou sem blockers e identificou tres residuos: bindings._build_summary usa context.project_id or ticket_id; cloud_worker ramo no-route fabrica descritor com fallback ticket e projeto persistido nao registrado vira no_route_result; _project_for ainda passa fallback_id obsoleto ignorado. Contexto strict protege dispatch atual, portanto nao bloqueia entrega. Evidencia duravel .factory/test_logs/usr320/independent-review-focused.json (approve,189.781s).",
+    "core_journey": [],
+    "non_goals": [
+      "Nao relaxar lookup strict nem converter ausencia de identidade em projeto default."
+    ],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Resumo e descritor sintetico nunca usam ticket_id como identidade de projeto.",
+      "Projeto persistido nao registrado falha unknown_project tambem quando nao ha rota, preservando isolamento.",
+      "Remover argumento fallback_id obsoleto de _project_for sem quebrar compatibilidade publica; testes focados demonstram os tres casos e portao oficial PASS."
+    ],
+    "suggested_files": [
+      "core/line/bindings.py",
+      "core/orchestrator/cloud_worker.py"
+    ],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-21T04:13:44.412155Z",
+    "updated_at": "2026-10-21T04:13:44.412155Z"
+  },
+  {
+    "id": "USR-323",
+    "project_id": "darkfac",
+    "title": "line_validate ignora --help e dispara gate oficial com snapshot",
+    "origin": "agent",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "Em20/10/2026 a consulta python scripts/line_validate.py --help executou validacao real, criou snapshot a999132e882d e despachou suite oficial job6ade17ebb1a1430ea32ec25d35eabe07. O script nao interpreta argumentos antes de executar main, confundindo consulta de ajuda com acao custosa.",
+    "core_journey": [],
+    "non_goals": [
+      "Nao alterar semantica nem reduzir cobertura do portao oficial."
+    ],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "--help imprime uso e sai0 sem criar snapshot nem chamar runner.",
+      "Argumento desconhecido sai2 sem efeitos; chamada sem argumentos conserva validacao oficial."
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-20T23:44:32.426350Z",
+    "updated_at": "2026-10-20T23:44:32.426350Z"
   }
 ]

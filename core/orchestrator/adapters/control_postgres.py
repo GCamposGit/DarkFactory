@@ -1142,6 +1142,21 @@ class PostgresControlStore:
             logger.warning("PostgreSQL get_pending_outbox failed: %s", exc)
             return []
 
+    def get_run_identity(self, run_id: str) -> dict[str, str] | None:
+        """Read identity without a telemetry join or a silent unavailable/missing conflation."""
+        if self.mock_mode:
+            return self._backend.get_run_identity(run_id)
+        try:
+            with self._psycopg.connect(
+                self.raw_url, connect_timeout=5, options="-c statement_timeout=5000"
+            ) as conn:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT project_id FROM runs WHERE run_id = %s", (run_id,))
+                    row = cur.fetchone()
+                    return {"project_id": row[0]} if row is not None else None
+        except Exception as exc:
+            raise StoreUnavailableError("Run identity lookup unavailable") from exc
+
     def get_run_status(self, run_id: str) -> dict[str, Any] | None:
         """Query full status of a run and its jobs."""
         if self.mock_mode:

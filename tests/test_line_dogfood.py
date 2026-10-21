@@ -297,6 +297,7 @@ def test_retrospective_stage_handler_reconciles_delivered_ticket(tmp_path: Path)
     )
     context = StageContext(
         claim=claim,
+        project_id="darkfac",
         plan_ref="plan://line",
         plan_digest="a" * 64,
         config_version="1.0",

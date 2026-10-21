@@ -225,7 +225,7 @@ def _context(run_id: str) -> StageContext:
     key = JobKey(run_id=run_id, ticket_id="acme", plan_version="1.0", stage="planning", iteration=0)
     claim = Claim(job_key=key, lease_id="l1", owner="w1", fencing_token=1, expires_at="2099-01-01T00:00:00+00:00")
     return StageContext(
-        claim=claim, plan_ref="plan://line", plan_digest="a" * 64, config_version="1.0",
+        claim=claim, project_id="acme", plan_ref="plan://line", plan_digest="a" * 64, config_version="1.0",
         environment_ref="env", identity="w1", route_ref="route", memory_version="1.0", input_refs=[],
     )
 

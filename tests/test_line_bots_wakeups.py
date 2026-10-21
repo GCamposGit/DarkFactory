@@ -504,6 +504,7 @@ def test_grill_stage_handler_hands_the_recorded_answers_to_run_grill(monkeypatch
     monkeypatch.setattr(stage_grill, "run_grill", lambda *a, **k: seen.update(k) or None)
 
     class _Ctx:
+        project_id = "acme"
         class claim:
             class job_key:
                 ticket_id = "acme"

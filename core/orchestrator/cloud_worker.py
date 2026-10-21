@@ -524,7 +524,7 @@ class CloudWorker:
         run_id = claim.job_key.run_id
         from core.line.bindings import project_id_for_run
 
-        project_id = project_id_for_run(self.store, run_id)
+        project_id = project_id_for_run(self.store, run_id, strict=True)
         try:
             input_refs = self.store.get_latest_success_output_refs(run_id, exclude_stage=claim.job_key.stage)
         except Exception as exc:  # pragma: no cover - defensive, must never block dispatch
@@ -870,9 +870,9 @@ class CloudWorker:
         def _execute_stage_in_scope(token: Any) -> dict[str, Any]:
             from core.line import cancellation
 
-            context = self._build_stage_context(claim)
             stop_heartbeat, heartbeat_thread = self._start_lease_heartbeat(claim, token)
             try:
+                context = self._build_stage_context(claim)
                 unavailable = self._agent_route_unavailable(stage)
                 if unavailable is not None:
                     from core.line import routing
@@ -903,14 +903,24 @@ class CloudWorker:
                 token.cancel()
                 stage_result = StageResult(outcome="failed", cause_code=cancellation.CANCELLED_CAUSE)
             except Exception as exc:
-                logger.error(
-                    "Handler for %s raised %s: %s; recording as retry(handler_error)",
-                    claim.job_key.canonical_key(), type(exc).__name__, exc,
-                )
-                stage_result = StageResult(
-                    outcome="retry",
-                    cause_code=f"handler_error:{type(exc).__name__}: {exc}"[:500],
-                )
+                from core.line.bindings import ProjectIdentityError, UnknownProjectError
+
+                if isinstance(exc, ProjectIdentityError):
+                    stage_result = StageResult(
+                        outcome="retry" if exc.cause_code == "project_lookup_unavailable" else "failed",
+                        cause_code=exc.cause_code,
+                    )
+                elif isinstance(exc, UnknownProjectError):
+                    stage_result = StageResult(outcome="failed", cause_code="unknown_project")
+                else:
+                    logger.error(
+                        "Handler for %s raised %s: %s; recording as retry(handler_error)",
+                        claim.job_key.canonical_key(), type(exc).__name__, exc,
+                    )
+                    stage_result = StageResult(
+                        outcome="retry",
+                        cause_code=f"handler_error:{type(exc).__name__}: {exc}"[:500],
+                    )
             finally:
                 stop_heartbeat.set()
                 heartbeat_thread.join(timeout=2.0)

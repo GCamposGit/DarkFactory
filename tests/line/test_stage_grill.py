@@ -542,6 +542,7 @@ def test_grill_handler_passes_the_auto_policy_through_bindings(project, monkeypa
             ticket_id = "darkfac"
 
     class _Ctx:
+        project_id = "darkfac"
         claim = _Claim
 
     for payload, expected in (({"grill_policy": "auto"}, True), ({}, False)):
