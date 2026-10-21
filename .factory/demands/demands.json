@@ -9758,5 +9758,37 @@
     "dependencies": [],
     "created_at": "2026-10-21T17:29:08.669337Z",
     "updated_at": "2026-10-21T18:13:57.298708Z"
+  },
+  {
+    "id": "USR-337",
+    "project_id": "darkfac",
+    "title": "Ligar despacho local ao fleet_policy com capacidade verificada e reabertura de ticket concluido via requeue",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "Residuo do USR-321 (21/10/2026): select_host_for_ticket/evaluate_admission (core/line/fleet_policy.py) aceitam verified_capacity mas nao tem chamador de producao, entao o despacho local nao respeita core.line.gate_ram.measure_workers(); e core/git/autonomy.py (~linha 1558, falha de convergencia ao vivo) reescreve status=planned a mao porque DemandsStore.requeue_ticket recusa tickets completed.",
+    "core_journey": [
+      "Residuo do USR-321 (21/10/2026): select_host_for_ticket/evaluate_admission (core/line/fleet_policy.py) aceitam verified_capacity mas nao tem chamador de producao, entao o despacho local nao respeita core.line.gate_ram.measure_workers(); e core/git/autonomy.py (~linha 1558, falha de convergencia ao vivo) reescreve status=planned a mao porque DemandsStore.requeue_ticket recusa tickets completed."
+    ],
+    "non_goals": [
+      "Nao criar scheduler paralelo nem relaxar piso de cota, G1 ou isolamento."
+    ],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Despacho local real consulta fleet_policy com verified_capacity de measure_workers e nunca excede a capacidade nem interrompe worker ocupado.",
+      "requeue_ticket ganha modo explicito de reabertura (ex.: reopen=True com motivo) usado pela convergencia ao vivo, preservando historico; reescritas manuais de status saem do codigo.",
+      "Testes focados cobrem os dois caminhos."
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-21T18:44:31.450717Z",
+    "updated_at": "2026-10-21T18:44:31.450717Z"
   }
 ]
