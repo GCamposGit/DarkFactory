@@ -9694,5 +9694,37 @@
     "dependencies": [],
     "created_at": "2026-10-21T09:00:54.877369Z",
     "updated_at": "2026-10-21T09:00:54.877369Z"
+  },
+  {
+    "id": "USR-335",
+    "project_id": "darkfac",
+    "title": "run_ticket le backlog do checkout local defasado e recusa ticket existente na main",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "Em 21/10/2026 'python run_ticket.py USR-328 --harness codex' respondeu '[ERRO] Ticket USR-328 nao encontrado no backlog' porque C:\\dev\\DarkFac estava em HEAD detached antigo; o ticket existia em origin/main (registrado via PR). So funcionou apos 'git checkout --detach origin/main' manual.",
+    "core_journey": [
+      "Em 21/10/2026 'python run_ticket.py USR-328 --harness codex' respondeu '[ERRO] Ticket USR-328 nao encontrado no backlog' porque C:\\dev\\DarkFac estava em HEAD detached antigo; o ticket existia em origin/main (registrado via PR). So funcionou apos 'git checkout --detach origin/main' manual."
+    ],
+    "non_goals": [
+      "Nao alterar o checkout compartilhado do owner nem descartar arquivos nao versionados."
+    ],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Lancamento de ticket resolve o ledger a partir de origin/main apos fetch (ou da worktree fresca), nao do checkout local defasado.",
+      "Ticket ausente em origin/main continua recusado com erro claro; nenhum checkout compartilhado e alterado.",
+      "Teste focado reproduz checkout atrasado com ticket so na main."
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-21T16:20:27.034726Z",
+    "updated_at": "2026-10-21T16:20:27.034726Z"
   }
 ]
