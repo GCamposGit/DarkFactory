@@ -404,6 +404,14 @@ def submit_ticket_to_line(
     replay = False
     try:
         line_store = store if store is not None else open_line_store()
+        ownership_lookup = getattr(line_store, "get_manual_ticket_owner", None)
+        manual_owner = ownership_lookup(ticket.project_id, ticket.id, now=now or datetime.now(UTC)) if ownership_lookup else None
+        if manual_owner:
+            return LineSubmission(
+                ok=False, ticket_id=ticket.id, project_id=ticket.project_id,
+                run_id=manual_owner, state="manual_ownership",
+                message=f"Ticket possui execucao manual persistida ({manual_owner}); admissao retida.",
+            )
         service = AutonomousIntakeService(store=line_store, demands_store=None)  # None: never re-project a dem-* ticket
         attempts = _ticket_attempts(line_store, ticket.id)
         if attempts:

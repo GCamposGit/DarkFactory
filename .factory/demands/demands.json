@@ -9539,7 +9539,7 @@
     "title": "Ownership manual do ticket nao sobrevive ao reload e feeder duplica run",
     "origin": "agent",
     "status": "planned",
-    "delivery_evidence": null,
+    "delivery_evidence": "Em implementacao: guard consultivo via eventos locais compartilhados, 22 testes focados PASS; exclusao atomica de inicio manual rastreada em USR-330",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -9658,5 +9658,41 @@
     "dependencies": [],
     "created_at": "2026-10-20T23:44:32.426350Z",
     "updated_at": "2026-10-20T23:44:32.426350Z"
+  },
+  {
+    "id": "USR-330",
+    "project_id": "darkfac",
+    "title": "Reserva atomica para inicio manual concorrente com admissao da esteira",
+    "origin": "agent",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "Investigacao USR327 confirmou que local_run_events e telemetria best-effort append-only. O guard consultivo327 impede readmissao quando um inicio manual ja foi persistido, inclusive apos reload, mas nao exclui atomicamente a corrida entre inicio manual ainda nao publicado e intake concorrente. Claims/reservas da linha continuam atomicos; o inicio manual nao participa deles. Nao afirmar exclusao distribuida com consulta de logs.",
+    "core_journey": [],
+    "non_goals": [
+      "Nao transformar telemetria em lock nem criar scheduler paralelo.",
+      "Nao relaxar leases, fencing, cotas ou GateG1."
+    ],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Inicio manual canonicamente reserva ticket/projeto antes de permitir efeitos produtivos, competindo atomicamente com admissao da linha.",
+      "Dois coordenadores e inicio manual simultaneos produzem um unico dono ativo; perdedor recusa antes de executar.",
+      "Liberacao terminal, crash, expiracao e fencing usam politica canonica existente; falha do store falha fechada sem fallback local silencioso."
+    ],
+    "suggested_files": [
+      "core/line/live_run.py",
+      "run_ticket.py",
+      "core/line/owner_intake.py",
+      "core/workflow/control_store.py"
+    ],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-21T09:00:54.877369Z",
+    "updated_at": "2026-10-21T09:00:54.877369Z"
   }
 ]

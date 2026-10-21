@@ -1157,6 +1157,30 @@ class PostgresControlStore:
         except Exception as exc:
             raise StoreUnavailableError("Run identity lookup unavailable") from exc
 
+    def get_manual_ticket_owner(self, project_id: str, ticket_id: str, *, now: datetime) -> str | None:
+        """Read manual ownership from the shared progress table, failing closed on outages."""
+        from core.line.manual_ownership import active_manual_owner
+
+        if self.mock_mode:
+            return self._backend.get_manual_ticket_owner(project_id, ticket_id, now=now)
+        try:
+            with self._psycopg.connect(
+                self.raw_url, connect_timeout=5, options="-c statement_timeout=5000"
+            ) as conn:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT to_regclass('local_run_events')")
+                    if cur.fetchone()[0] is None:
+                        return None  # Explicit pre-local-progress compatibility.
+                    cur.execute(
+                        "SELECT run_id, phase, status, at FROM local_run_events "
+                        "WHERE project_id = %s AND ticket_id = %s ORDER BY event_id DESC",
+                        (project_id, ticket_id),
+                    )
+                    rows = [dict(zip(("run_id", "phase", "status", "at"), row)) for row in cur.fetchall()]
+                    return active_manual_owner(rows, now=now)
+        except Exception as exc:
+            raise StoreUnavailableError("Manual ownership lookup unavailable") from exc
+
     def get_run_status(self, run_id: str) -> dict[str, Any] | None:
         """Query full status of a run and its jobs."""
         if self.mock_mode:
