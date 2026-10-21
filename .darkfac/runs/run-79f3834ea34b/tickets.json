@@ -1,0 +1,85 @@
+[
+  {
+    "id": "T1",
+    "title": "Instrumentar e verificar deadline e limpeza do executor compartilhado",
+    "goal": "Garantir evidência fiel e término da árvore dentro do orçamento, reutilizando _run_bounded.",
+    "files_hint": [
+      "core/line/agent_cli.py",
+      "tests/line/test_bounded_runner.py"
+    ],
+    "acceptance": [
+      "Resultado distingue término normal, timeout, cancelamento e falha de limpeza, mantendo compatibilidade com consumidores existentes.",
+      "Duração total monotônica inclui encerramento e coleta, sem truncar artificialmente o valor observado; registra duração da limpeza, código real ou ausência explícita e resultado da inspeção de processos remanescentes.",
+      "Deadline encerra processo raiz e descendentes, inclusive os que mantêm pipes abertos; encerramento e coleta compartilham orçamento adicional de até 10 s.",
+      "Testes reais de processos comprovam ausência de execução fantasma em Windows e Linux; evidência identifica plataforma e tolerância técnica de medição.",
+      "python scripts/line_validate.py passa e o portão oficial python core/harness/runner.py --quick aprova o candidato final, sem duplicar a suíte quando o wrapper já o executou."
+    ],
+    "tests_to_add": [
+      "Processo silencioso que excede deadline e gera descendente mantendo stdout/stderr abertos.",
+      "Processo raiz que termina enquanto descendente mantém pipes abertos.",
+      "Saída parcial, término normal e código indisponível preservados sem sucesso implícito.",
+      "Falha de encerramento produz diagnóstico explícito; duração observada não é limitada artificialmente.",
+      "Regressão de cancelamento e execução normal nos dois sistemas operacionais."
+    ],
+    "smoke": []
+  },
+  {
+    "id": "T2",
+    "title": "Criar diagnóstico Grok curto e comparação com evidências históricas",
+    "goal": "Produzir relatório reproduzível dos timeouts sem presumir causa raiz.",
+    "files_hint": [
+      "core/line/review_diagnostics.py",
+      "tests/line/test_review_diagnostics.py",
+      "docs/runbooks/grok_review_timeouts.md"
+    ],
+    "acceptance": [
+      "Depende de T1 e oferece entrada headless explícita para smoke Grok de 30 s, usando o caminho atual de leitura e _run_bounded com coleta e limpeza adicionais de até 10 s.",
+      "Relatório registra plataforma, versão do CLI quando disponível, configuração não secreta, durações monotônicas, saída parcial, código ou ausência explícita, stderr redigido e processos remanescentes.",
+      "Segredos são redigidos antes de persistir ou emitir evidência, inclusive em erros; testes e validação não invocam provedores reais.",
+      "Compara os três logs históricos quando acessíveis, preservando referência e integridade das fontes; arquivos ausentes são identificados explicitamente.",
+      "Resolve 8d413ed para SHA completo em fonte Git verificável antes de usá-lo como candidato; indisponibilidade não autoriza substituir pelo HEAD atual.",
+      "Execução diagnóstica autorizada gera evidência real ou falha estruturada de indisponibilidade; não reprodução é uma conclusão limitada, nunca causa raiz presumida nem aprovação.",
+      "Relatório distingue a mudança de transporte do USR-322 dos sintomas de timeout e descreve apenas hipóteses sustentadas pelos dados.",
+      "python scripts/line_validate.py passa e o portão oficial aprova o candidato final, sem execução duplicada da suíte."
+    ],
+    "tests_to_add": [
+      "Smoke simulado silencioso, resposta normal, stderr parcial e executável indisponível.",
+      "Redação de tokens, credenciais em URLs e valores sensíveis antes da escrita e saída.",
+      "Leitura dos três formatos históricos e tratamento de logs ausentes ou inválidos.",
+      "Resolução inequívoca de SHA, objeto ausente e rejeição de associação ao candidato errado.",
+      "Relatório sem reprodução mantém limitação explícita e não atribui causa."
+    ],
+    "smoke": []
+  },
+  {
+    "id": "T3",
+    "title": "Vincular revisão ao SHA e emitir próxima rota elegível em falhas",
+    "goal": "Encerrar tentativas de revisão com veredito verificável ou falha estruturada acionável, mantendo o bloqueio de integração quando necessário.",
+    "files_hint": [
+      "core/line/stage_review.py",
+      "core/line/review_diagnostics.py",
+      "tests/line/test_stage_review.py",
+      "tests/line/test_review_diagnostics.py"
+    ],
+    "acceptance": [
+      "Depende de T1 e T2; cada tentativa registra SHA completo efetivamente examinado, família revisora, identidade da execução e referência à evidência.",
+      "Veredito válido é aceito somente para o candidato examinado; mudança de SHA durante a tentativa ou reutilização para outro candidato invalida o resultado.",
+      "Timeout, saída vazia, resposta inválida, indisponibilidade ou limpeza não confirmada produzem falha estruturada e mantêm integração bloqueada.",
+      "Falha consulta core.line.routing.pick para review, exclui rota já falhada na tentativa e respeita família diferente, disponibilidade, cota, cooldown e permissões de envio de código privado.",
+      "Próxima rota aparece com justificativa de elegibilidade; se faltar autorização ou não existir rota elegível, essa condição é explícita e nenhum código é enviado automaticamente.",
+      "Autorização histórica para Grok não é reutilizada como autorização para outro provedor; aprovação nunca deriva de esgotamento de tentativas.",
+      "Deadline da revisão completa continua configurável e independente dos 30 s do smoke.",
+      "Fluxo integrado retorna veredito independente verificável ou falha estruturada com próxima rota elegível ou motivo explícito de sua ausência.",
+      "python scripts/line_validate.py passa e o portão oficial aprova o candidato final, sem execução duplicada da suíte."
+    ],
+    "tests_to_add": [
+      "Veredito approve e changes_required vinculados ao SHA correto e rejeição de evidência obsoleta.",
+      "Timeout, saída vazia, JSON inválido e limpeza incompleta nunca aprovam.",
+      "Roteador rejeita mesma família, cota insuficiente, indisponibilidade e rota previamente falhada.",
+      "Rota alternativa sem autorização de código privado não recebe prompt ou diff.",
+      "Ausência de rota elegível produz falha explícita sem loop ilimitado.",
+      "Deadline completo configurável permanece distinto do smoke; fluxo integrado usa agentes simulados."
+    ],
+    "smoke": []
+  }
+]
