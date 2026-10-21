@@ -673,7 +673,7 @@ class BoundedProcessResult:
         return "completed"
 
 
-def _kill_process_tree(pid: int) -> None:
+def _kill_process_tree(pid: int, *, timeout_s: float = 5.0) -> None:
     """Terminate the process with PID `pid` and all its descendants (USR-114)."""
     if pid <= 0:
         return
@@ -684,7 +684,7 @@ def _kill_process_tree(pid: int) -> None:
             subprocess.run(
                 ["taskkill", "/PID", str(pid), "/T", "/F"],
                 capture_output=True,
-                timeout=5,
+                timeout=max(0.0, timeout_s),
                 **hidden_popen_kwargs(),
             )
         except Exception as exc:
@@ -868,11 +868,12 @@ def _run_bounded(
         cleanup_started = time.monotonic()
         cleanup_deadline = cleanup_started + min(10.0, max(0.0, float(grace_s)))
         try:
+            kill_budget = max(0.0, cleanup_deadline - time.monotonic())
             if sys.platform == "win32":
                 # Use the OS tree terminator while the root identity is still available, then
                 # kill every descendant observed during polling. The snapshot also covers the
                 # case where the root exited before the pipe-drain deadline.
-                _kill_process_tree(proc.pid)
+                _kill_process_tree(proc.pid, timeout_s=kill_budget)
                 for child in tracked.values():
                     try:
                         child.kill()
@@ -884,7 +885,7 @@ def _run_bounded(
                     except Exception:
                         pass
             else:
-                _kill_process_tree(proc.pid)
+                _kill_process_tree(proc.pid, timeout_s=kill_budget)
             remaining = max(0.0, cleanup_deadline - time.monotonic())
             try:
                 extra_out, extra_err = proc.communicate(timeout=remaining)
@@ -895,6 +896,19 @@ def _run_bounded(
                 stderr = _partial_output(last_exc.stderr if last_exc else None)
             except Exception as exc:
                 cleanup_error = f"pipe collection failed: {type(exc).__name__}: {exc}"
+            if tracked:
+                try:
+                    import psutil
+
+                    remaining = max(0.0, cleanup_deadline - time.monotonic())
+                    _gone, still_running = psutil.wait_procs(list(tracked.values()), timeout=remaining)
+                    if still_running and not cleanup_error:
+                        cleanup_error = "descendants did not exit before cleanup deadline: " + ",".join(
+                            str(child.pid) for child in still_running
+                        )
+                except Exception as exc:
+                    if not cleanup_error:
+                        cleanup_error = f"descendant collection failed: {type(exc).__name__}: {exc}"
             if proc.stdout:
                 proc.stdout.close()
             if proc.stderr:

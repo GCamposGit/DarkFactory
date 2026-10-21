@@ -211,9 +211,12 @@ def test_bounded_runner_timeout_preserves_missing_exit_code_explicitly(
     )
 
     original_kill = agent_cli._kill_process_tree
+    kill_budgets: list[float] = []
 
-    def _slow_failed_kill(pid: int) -> None:
+    def _slow_failed_kill(pid: int, *, timeout_s: float) -> None:
+        kill_budgets.append(timeout_s)
         time.sleep(0.3)
+        raise OSError("simulated process-tree termination failure")
 
     monkeypatch.setattr(agent_cli, "_kill_process_tree", _slow_failed_kill)
     try:
@@ -224,6 +227,7 @@ def test_bounded_runner_timeout_preserves_missing_exit_code_explicitly(
         assert result.cleanup_error
         assert result.cleanup_duration_s >= 0.3
         assert result.duration_s >= 0.8, "duration must report observed wall time, not a clipped budget"
+        assert kill_budgets and 0 <= kill_budgets[0] <= 0.2
     finally:
         # The deliberately un-killed root process is cleaned up by the test itself.
         monkeypatch.setattr(agent_cli, "_kill_process_tree", original_kill)
