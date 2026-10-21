@@ -1,0 +1,122 @@
+[
+  {
+    "id": "T1",
+    "title": "Verificar e consolidar M1–M2 e retomar o plano USR-279",
+    "goal": "Ler docs/plans/USR-279-greenfield-pilot.md e as evidências de M1/M2, confirmar que repositório privado GCamposGit/pilot-hello e projeto Dokploy separado existem, e atualizar o plano com o estado real e os marcos M3–M7 prontos para execução, sem recriar recursos.",
+    "files_hint": [
+      "docs/plans/USR-279-greenfield-pilot.md"
+    ],
+    "acceptance": [
+      "Plano registra estado verificado de M1 e M2 com referência às evidências existentes.",
+      "Marcos M3–M7 estão descritos com até três critérios cada e sem nova decisão de negócio inventada.",
+      "Comando `validate` do projeto passa na árvore final."
+    ],
+    "tests_to_add": [
+      "Checagem em scripts/line_validate.py de que o plano contém M1–M7 e referências de evidência de M1/M2."
+    ],
+    "smoke": []
+  },
+  {
+    "id": "T2",
+    "title": "Implementar app mínimo pilot-hello (página estática + /healthz)",
+    "goal": "Criar o projeto Python 3.12+ com página estática única e endpoint /healthz, usando apenas biblioteca padrão no runtime, sem banco, autenticação ou dependências do core.",
+    "files_hint": [
+      "pilot-hello/pyproject.toml",
+      "pilot-hello/src/pilot_hello/__init__.py",
+      "pilot-hello/src/pilot_hello/app.py",
+      "pilot-hello/static/index.html",
+      "pilot-hello/tests/test_app.py"
+    ],
+    "acceptance": [
+      "GET / retorna 200 com a página estática 'DarkFac pilot'.",
+      "GET /healthz retorna 200 com payload de saúde.",
+      "`validate` passa e nenhum import do darkfac-core aparece no código do piloto."
+    ],
+    "tests_to_add": [
+      "tests/test_app.py cobrindo GET / e GET /healthz com status 200 e conteúdo esperado."
+    ],
+    "smoke": [
+      "/",
+      "/healthz"
+    ]
+  },
+  {
+    "id": "T3",
+    "title": "Provar independência em clone limpo (instala, testa, builda, executa)",
+    "goal": "Adicionar teste e documentação que demonstrem instalação, execução de testes, build de wheel e execução do app em clone limpo fora do checkout DarkFac, sem imports ou serviços do core.",
+    "files_hint": [
+      "pilot-hello/tests/test_independence.py",
+      "pilot-hello/README.md",
+      "pilot-hello/pyproject.toml"
+    ],
+    "acceptance": [
+      "Teste de independência falha se houver import de darkfac-core ou dependência de serviço externo.",
+      "README descreve o fluxo de clone limpo, instalação, testes, build e execução.",
+      "`validate` passa na árvore final."
+    ],
+    "tests_to_add": [
+      "tests/test_independence.py verificando ausência de imports do core e execução do app em ambiente isolado."
+    ],
+    "smoke": []
+  },
+  {
+    "id": "T4",
+    "title": "Preparar build e deploy no Dokploy separado (opção A)",
+    "goal": "Adicionar Dockerfile e configuração de build no venv conforme D5, garantindo publicação em projeto Dokploy separado de darkfac-core usando o domínio da infraestrutura existente.",
+    "files_hint": [
+      "pilot-hello/Dockerfile",
+      "pilot-hello/pyproject.toml",
+      "pilot-hello/README.md"
+    ],
+    "acceptance": [
+      "Dockerfile constrói a imagem do piloto sem dependências do core.",
+      "Configuração de deploy aponta para projeto Dokploy separado de darkfac-core.",
+      "`validate` passa na árvore final."
+    ],
+    "tests_to_add": [
+      "Checagem em scripts/line_validate.py de que o Dockerfile existe e não referencia darkfac-core."
+    ],
+    "smoke": [
+      "/healthz"
+    ]
+  },
+  {
+    "id": "T5",
+    "title": "Fechar ciclo PR, CI, merge e smoke com evidências vinculadas ao SHA",
+    "goal": "Executar o fluxo completo de revisão independente, PR, CI, merge, deploy e smoke do pilot-hello, registrando evidências reais vinculadas ao SHA no plano USR-279.",
+    "files_hint": [
+      "docs/plans/USR-279-greenfield-pilot.md",
+      "pilot-hello/README.md"
+    ],
+    "acceptance": [
+      "Plano registra PR, CI, merge, deploy e smoke com SHA correspondente.",
+      "Smoke pós-deploy de / e /healthz retorna 2xx no ambiente Dokploy separado.",
+      "`validate` passa na árvore final."
+    ],
+    "tests_to_add": [
+      "Checagem em scripts/line_validate.py de que o plano contém SHA e referências de evidência de PR/CI/merge/deploy/smoke."
+    ],
+    "smoke": [
+      "/",
+      "/healthz"
+    ]
+  },
+  {
+    "id": "T6",
+    "title": "Relatório final ao owner e retomada de falhas",
+    "goal": "Consolidar relatório final ao owner com evidências de M3–M7, descrevendo como falhas foram retomadas ou diagnosticadas, e confirmar que o clone do produto instala, testa, constrói e executa sem checkout ou serviço DarkFac.",
+    "files_hint": [
+      "docs/plans/USR-279-greenfield-pilot.md",
+      "pilot-hello/README.md"
+    ],
+    "acceptance": [
+      "Relatório final lista evidências reais de M3–M7 vinculadas ao SHA.",
+      "Relatório descreve retomada ou diagnóstico de falhas ocorridas.",
+      "`validate` passa na árvore final."
+    ],
+    "tests_to_add": [
+      "Checagem em scripts/line_validate.py de que o relatório final existe e cobre M3–M7."
+    ],
+    "smoke": []
+  }
+]
