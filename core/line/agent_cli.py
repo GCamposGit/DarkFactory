@@ -660,10 +660,57 @@ class BoundedProcessResult:
     cancelled: bool = False
 
 
-def _kill_process_tree(pid: int) -> None:
-    """Terminate the process with PID `pid` and all its descendants (USR-114)."""
+def _descendant_pids(pid: int) -> list[int]:
+    try:
+        import psutil
+
+        return [c.pid for c in psutil.Process(pid).children(recursive=True)]
+    except Exception:
+        return []
+
+
+def _surviving_pids(pids: list[int]) -> list[int]:
+    """PIDs from `pids` that are still alive (USR-328: no ghost execution after a deadline)."""
+    try:
+        import psutil
+    except Exception:
+        return []
+    alive: list[int] = []
+    for p in pids:
+        try:
+            if psutil.pid_exists(p) and psutil.Process(p).status() != psutil.STATUS_ZOMBIE:
+                alive.append(p)
+        except Exception:
+            continue
+    return alive
+
+
+def _kill_process_tree(pid: int) -> list[int]:
+    """Terminate `pid` and its descendants; return PIDs that survived (USR-114, USR-328)."""
     if pid <= 0:
-        return
+        return []
+    family = [pid, *_descendant_pids(pid)]
+    _kill_process_tree_once(pid)
+    survivors = _surviving_pids(family)
+    if survivors:
+        try:
+            import psutil
+
+            for p in survivors:
+                try:
+                    psutil.Process(p).kill()
+                except Exception:
+                    pass
+            psutil.wait_procs([psutil.Process(p) for p in survivors if psutil.pid_exists(p)], timeout=3)
+        except Exception:
+            pass
+        survivors = _surviving_pids(survivors)
+        if survivors:
+            logger.error("deadline kill left surviving PIDs: %s", survivors)
+    return survivors
+
+
+def _kill_process_tree_once(pid: int) -> None:
     if sys.platform == "win32":
         try:
             # /F: forcefully terminate

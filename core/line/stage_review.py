@@ -106,6 +106,8 @@ MAX_REVIEW_AGENT_RETRIES: int = 5
 class ReviewState(BaseModel):
     rounds: list[ReviewRound] = Field(default_factory=list)
     agent_error_streak: int = 0
+    # USR-328: harnesses whose review hit the deadline without a verdict; the next pick skips them.
+    timed_out_harnesses: list[str] = Field(default_factory=list)
 
 
 def _load_prompt_template(name: str, fallback: str) -> str:
@@ -272,6 +274,7 @@ class ReviewStage:
             self.host_caps,
             implementing_harness=implementing_harness,
             config=self.routing_config,
+            exclude=list(state.timed_out_harnesses),
         )
         if route is None:
             # No route is a matter of time, not of the owner (USR-87): retry at the earliest reset.
@@ -315,6 +318,25 @@ class ReviewStage:
                     outcome="failed", cause_code="review_agent_exhausted", output_refs=[]
                 )
             state.agent_error_streak += 1
+            if agent_result.error_kind == "timeout":
+                # USR-328: a deadline is a structured failure, never a verdict or an approval. Record the
+                # duration and the next eligible route (other family, via the router) for diagnosis.
+                if harness not in state.timed_out_harnesses:
+                    state.timed_out_harnesses.append(harness)
+                _write_review_state(ws, state)
+                next_route = self.pick_func(
+                    "review", self.host_caps, implementing_harness=implementing_harness,
+                    config=self.routing_config, exclude=list(state.timed_out_harnesses),
+                )
+                nxt = f"{next_route[0]}/{next_route[1] or '-'}" if next_route else "none"
+                return StageResult(
+                    outcome="retry",
+                    cause_code=(
+                        f"review_timeout:harness={harness}:duration_s={agent_result.duration_s}"
+                        f":next_route={nxt}"
+                    ),
+                    output_refs=[],
+                )
             _write_review_state(ws, state)
             return StageResult(
                 outcome="retry", cause_code=f"review_agent_{agent_result.error_kind}", output_refs=[]
