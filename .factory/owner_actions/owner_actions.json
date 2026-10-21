@@ -2053,6 +2053,34 @@
       "created_at": "2026-10-21T16:09:07Z",
       "created_by": "claude-opus-5.5",
       "resolved_at": null
+    },
+    {
+      "id": "OA-051",
+      "kind": "action",
+      "title": "Trocar o terminal padrao do Windows para 'Janela de Console do Windows' (janelas piscando a cada comando dos agentes)",
+      "priority": "high",
+      "status": "open",
+      "why": "Com o Windows Terminal como terminal padrao, consoles que os agentes (Claude app, subagentes, Codex) criam ocultos aparecem como janelas a cada comando, deixando o Notebook inutilizavel durante o trabalho autonomo (relato do owner em 21/10/2026). A Janela de Console do Windows respeita o modo oculto.",
+      "blocks": [],
+      "depends_on": [],
+      "steps": [
+        {
+          "text": "Abra Configuracoes do Windows: tecla Windows + I."
+        },
+        {
+          "text": "Va em Sistema > Para desenvolvedores (no Windows 11: Sistema > Avancado > Terminal)."
+        },
+        {
+          "text": "Em 'Terminal', escolha 'Host da Janela de Console do Windows' (Windows Console Host) no lugar de 'Terminal do Windows' ou 'Deixar o Windows decidir'."
+        },
+        {
+          "text": "Alternativa: abra o Terminal do Windows > Configuracoes (Ctrl+,) > Inicializacao > 'Aplicativo de terminal padrao' = 'Host da Janela de Console do Windows' > Salvar."
+        }
+      ],
+      "verify": "Com um agente rodando comandos, nenhuma janela de console pisca por 2 minutos.",
+      "created_at": "2026-10-21T18:28:29Z",
+      "created_by": "claude-opus-5.5",
+      "resolved_at": null
     }
   ]
 }
