@@ -9475,8 +9475,8 @@
     "project_id": "darkfac",
     "title": "Evitar WinError206 em prompts longos de revisao Grok no Windows",
     "origin": "agent",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "86824939b3d9de176bec8acd3650891cde074f25",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -9500,7 +9500,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-20T23:42:03.508310Z",
-    "updated_at": "2026-10-20T23:42:03.508310Z"
+    "updated_at": "2026-10-21T09:45:31.626205Z"
   },
   {
     "id": "USR-326",
