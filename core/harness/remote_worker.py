@@ -51,6 +51,7 @@ from core.harness.test_subagent import (
 )
 from core.infra.git_sha import current_git_sha
 from core.infra.metrics import HardwareMetrics, collect_host_hardware_metrics
+from core.models.registry import gateway_id, id_of, resolve
 
 logger = logging.getLogger("core.harness.remote_worker")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
@@ -92,6 +93,11 @@ PORT_WAIT_MAX_DELAY_SEC = 2.0
 PORT_REAP_SETTLE_SEC = 10.0
 DEFAULT_JOB_TIMEOUT_SEC = 1800.0
 JOB_TIMEOUT_BUFFER_SEC = 120.0
+#: USR-253: time the runner spent queued on the host ``suite_lock`` ("[SUITE_LOCK] acquired slot N after
+#: waiting Xs") is not execution time: the job deadline is extended by it, up to this cap in total.
+ENV_SUITE_LOCK_WAIT_CAP_SEC = "DARKFAC_WORKER_SUITE_LOCK_WAIT_CAP_SEC"
+DEFAULT_SUITE_LOCK_WAIT_CAP_SEC = 3600.0
+_SUITE_LOCK_ACQUIRED_RE = re.compile(r"\[SUITE_LOCK\]\s+acquired\b.*?\bafter\s+waiting\s+([0-9]+(?:\.[0-9]+)?)\s*s\b")
 #: USR-162: job state is persisted (``<state_dir>/jobs/<job_id>.json``) on every
 #: transition, so a worker restart/crash leaves a terminal, queryable record
 #: instead of an unknown job id (HTTP 404) that /health cannot explain.
@@ -219,7 +225,7 @@ class CodexExecutionResponse(BaseModel):
     """Result of Codex execution on the node."""
     success: bool = Field(..., description="True if Codex executed successfully")
     text: str = Field(default="", description="Generated text / code / patch")
-    model: str = Field(default="gpt-5.6-sol", description="Actual model used by Codex")
+    model: str = Field(default=gateway_id("sol"), description="Actual model used by Codex")
     tokens_used: int = Field(default=0, description="Tokens recorded by Codex CLI")
     duration_seconds: float = Field(..., description="Duration of execution in seconds")
     error: Optional[str] = Field(default=None, description="Error message if failed")
@@ -414,6 +420,60 @@ def _job_timeout_sec(worktree_path: Path, *, quick: bool, include_holdout: bool)
     except Exception as exc:  # noqa: BLE001 - never let timeout computation crash a job
         logger.warning("Could not compute job timeout from worktree config: %s", exc)
     return DEFAULT_JOB_TIMEOUT_SEC
+
+
+def _suite_lock_wait_cap_sec() -> float:
+    """Total seconds of suite_lock queue time the job deadline may absorb (env override, default 3600)."""
+
+    raw = os.environ.get(ENV_SUITE_LOCK_WAIT_CAP_SEC, "").strip()
+    if raw:
+        try:
+            value = float(raw)
+        except ValueError:
+            value = -1.0
+        if value >= 0.0 and value != float("inf"):
+            return value
+        logger.warning("Ignoring invalid %s=%r", ENV_SUITE_LOCK_WAIT_CAP_SEC, raw)
+    return DEFAULT_SUITE_LOCK_WAIT_CAP_SEC
+
+
+def parse_suite_lock_wait_sec(line: str) -> Optional[float]:
+    """Seconds reported by a ``[SUITE_LOCK] acquired ... after waiting Xs`` line, else ``None``."""
+
+    match = _SUITE_LOCK_ACQUIRED_RE.search(line)
+    if match is None:
+        return None
+    try:
+        return float(match.group(1))
+    except ValueError:  # pragma: no cover - the regex only admits plain decimals
+        return None
+
+
+class _JobDeadline:
+    """Monotonic job deadline that grows by the suite_lock wait the runner reports (USR-253)."""
+
+    def __init__(self, timeout_sec: float, *, clock: Any = time.monotonic, cap_sec: Optional[float] = None) -> None:
+        self._clock = clock
+        self._lock = threading.Lock()
+        self._deadline = clock() + timeout_sec
+        self._cap_sec = _suite_lock_wait_cap_sec() if cap_sec is None else cap_sec
+        self._extended_sec = 0.0
+
+    def extend_for_line(self, line: str) -> float:
+        """Extend for a suite_lock line; returns the seconds actually added (0.0 if none)."""
+
+        waited = parse_suite_lock_wait_sec(line)
+        if waited is None:
+            return 0.0
+        with self._lock:
+            add = max(0.0, min(waited, self._cap_sec - self._extended_sec))
+            self._deadline += add
+            self._extended_sec += add
+        return add
+
+    def expired(self) -> bool:
+        with self._lock:
+            return self._clock() > self._deadline
 
 
 def _process_started_at(pid: Optional[int] = None) -> float:
@@ -1068,7 +1128,7 @@ class JobManager:
             tree = _ProcessTree(job.child_pid, job.child_started_at, job.child_start_ticks)
             job.process_tree = tree
             self._persist(job)
-            deadline = time.monotonic() + timeout_sec
+            deadline = _JobDeadline(timeout_sec)
             stop_watchdog = threading.Event()
 
             def _watchdog() -> None:
@@ -1077,7 +1137,7 @@ class JobManager:
                     if time.monotonic() - last_snapshot >= JOB_TREE_SNAPSHOT_SEC:
                         last_snapshot = time.monotonic()
                         tree.refresh()
-                    if job.cancel_requested or time.monotonic() > deadline:
+                    if job.cancel_requested or deadline.expired():
                         # USR-183: the whole tree, not just the runner (xdist workers keep the pipe open).
                         tree.kill(force=True)
                         with contextlib.suppress(Exception):
@@ -1091,6 +1151,12 @@ class JobManager:
                 try:
                     for line in stream:
                         self._append_log(job, line)
+                        extended = deadline.extend_for_line(line)
+                        if extended > 0.0:
+                            self._append_log(
+                                job,
+                                f"[WORKER] job deadline extended by {extended:.1f}s (suite_lock queue time)\n",
+                            )
                 except (OSError, ValueError) as exc:  # pipe broken or closed under us
                     logger.debug("Log reader of job %s stopped: %s", job.job_id, exc)
 
@@ -1926,7 +1992,7 @@ def create_worker_app(
             if not output_text and proc.stdout.strip():
                 output_text = proc.stdout.strip()
 
-            detected_model = req_data.model or "gpt-5.6-sol"
+            detected_model = req_data.model or gateway_id("sol")
             tokens_used = 0
             if proc.stderr:
                 for line in proc.stderr.splitlines():
@@ -2018,7 +2084,7 @@ def create_worker_app(
             )
             duration = round(time.perf_counter() - start_t, 3)
             output_text = proc.stdout.strip()
-            detected_model = req_data.model or "grok-4.6"
+            detected_model = req_data.model or resolve("review.grok")
 
             if proc.returncode != 0 and not output_text:
                 err_msg = proc.stderr.strip() or f"Grok exited with code {proc.returncode}"
@@ -2173,7 +2239,7 @@ def create_worker_app(
                     success=False,
                     harness="claude",
                     text="",
-                    model=req_data.model or "claude-sonnet",
+                    model=req_data.model or gateway_id("sonnet"),
                     duration_seconds=duration,
                     error=proc.stderr.strip()[:500] or f"Claude exited with code {proc.returncode}",
                     node_id=node_id,
@@ -2182,7 +2248,7 @@ def create_worker_app(
                 success=True,
                 harness="claude",
                 text=output_text,
-                model=req_data.model or "claude-sonnet",
+                model=req_data.model or gateway_id("sonnet"),
                 duration_seconds=duration,
                 node_id=node_id,
             )
@@ -2231,7 +2297,7 @@ def create_worker_app(
                     success=False,
                     harness="deepseek",
                     text="",
-                    model=req_data.model or "deepseek-coder",
+                    model=req_data.model or id_of("coder-legacy"),
                     duration_seconds=duration,
                     error=proc.stderr.strip()[:500] or f"DeepSeek exited with code {proc.returncode}",
                     node_id=node_id,
@@ -2240,7 +2306,7 @@ def create_worker_app(
                 success=True,
                 harness="deepseek",
                 text=output_text,
-                model=req_data.model or "deepseek-coder",
+                model=req_data.model or id_of("coder-legacy"),
                 duration_seconds=duration,
                 node_id=node_id,
             )
@@ -2295,7 +2361,7 @@ def create_worker_app(
         return CodexExecutionResponse(
             success=res.success,
             text=res.text,
-            model=res.model or "gpt-5.6-sol",
+            model=res.model or gateway_id("sol"),
             tokens_used=res.tokens_used,
             duration_seconds=res.duration_seconds,
             error=res.error,

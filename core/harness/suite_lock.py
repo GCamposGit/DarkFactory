@@ -151,8 +151,8 @@ def is_held_by_ancestor() -> bool:
 
 def _detect_harness() -> str | None:
     for env_name, label in (
-        ("CLAUDECODE", "claude-code"),
-        ("CLAUDE_CODE_ENTRYPOINT", "claude-code"),
+        ("CLAUDECODE", "claude-code"),  # census: wire-id (harness label, not a model id)
+        ("CLAUDE_CODE_ENTRYPOINT", "claude-code"),  # census: wire-id (harness label, not a model id)
         ("CODEX_SANDBOX", "codex"),
         ("GROK_AGENT", "grok"),
         ("GROK_SESSION_ID", "grok"),
