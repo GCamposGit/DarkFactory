@@ -654,10 +654,23 @@ class BoundedProcessResult:
 
     stdout: str = ""
     stderr: str = ""
-    returncode: int = 0
+    returncode: Optional[int] = 0
     duration_s: float = 0.0
     timed_out: bool = False
     cancelled: bool = False
+    cleanup_duration_s: float = 0.0
+    process_tree_clean: Optional[bool] = None
+    cleanup_error: Optional[str] = None
+
+    @property
+    def outcome(self) -> str:
+        if self.cleanup_error or self.process_tree_clean is False:
+            return "cleanup_failed"
+        if self.cancelled:
+            return "cancelled"
+        if self.timed_out:
+            return "timeout"
+        return "completed"
 
 
 def _kill_process_tree(pid: int) -> None:
@@ -724,7 +737,7 @@ def _run_bounded(
     communicate(), terminates the entire process tree (/T /F or killpg), and gathers
     partial output within a short grace period (default 10s).
     """
-    start = time.perf_counter()
+    start = time.monotonic()
 
     # Backwards-compatibility for existing tests monkeypatching agent_cli.subprocess.run:
     if subprocess.run is not _ORIGINAL_SUBPROCESS_RUN:
@@ -745,22 +758,24 @@ def _run_bounded(
             kwargs["env"] = env
         try:
             proc = subprocess.run(argv, **kwargs)
-            duration = round(time.perf_counter() - start, 3)
+            duration = round(time.monotonic() - start, 3)
             return BoundedProcessResult(
                 stdout=proc.stdout or "",
                 stderr=proc.stderr or "",
                 returncode=proc.returncode,
                 duration_s=duration,
                 timed_out=False,
+                process_tree_clean=True,
             )
         except subprocess.TimeoutExpired as exc:
-            duration = round(min(time.perf_counter() - start, float(timeout_s + grace_s)), 3)
+            duration = round(time.monotonic() - start, 3)
             return BoundedProcessResult(
                 stdout=_partial_output(exc.stdout),
                 stderr=_partial_output(exc.stderr),
-                returncode=-1,
+                returncode=None,
                 duration_s=duration,
                 timed_out=True,
+                process_tree_clean=None,
             )
 
     kwargs: dict[str, Any] = {
@@ -785,72 +800,125 @@ def _run_bounded(
         kwargs["stdin"] = subprocess.DEVNULL
 
     proc = subprocess.Popen(argv, **kwargs)
-    stdout, stderr = "", ""
-    timed_out = False
-    returncode = 0
-
+    stdout = stderr = ""
+    timed_out = cancelled = False
     token = cancellation.current_token()
-    cancelled = False
-    try:
-        if token is None:
-            stdout, stderr = proc.communicate(input=input_text, timeout=timeout_s)
-        else:
-            # USR-152: poll the run's cancel token while the agent runs, so cancelling the run kills
-            # the process tree within ~RUNNER_POLL_INTERVAL_S instead of letting it burn quota.
-            deadline = time.monotonic() + float(timeout_s)
-            pending_input: Optional[str] = input_text
-            while True:
-                if token.is_cancelled():
-                    cancelled = True
-                    break
-                remaining = deadline - time.monotonic()
-                if remaining <= 0:
-                    raise subprocess.TimeoutExpired(argv, timeout_s)
-                try:
-                    stdout, stderr = proc.communicate(
-                        input=pending_input, timeout=min(cancellation.RUNNER_POLL_INTERVAL_S, remaining)
-                    )
-                    break
-                except subprocess.TimeoutExpired:
-                    pending_input = None  # communicate() refuses input after the first call
-        if cancelled:
-            logger.warning("run %s cancelled: terminating agent process tree (pid %s)", token.run_id, proc.pid)
-            _kill_process_tree(proc.pid)
-            try:
-                stdout, stderr = proc.communicate(timeout=grace_s)
-            except (subprocess.TimeoutExpired, Exception):
-                try:
-                    if proc.stdout:
-                        proc.stdout.close()
-                    if proc.stderr:
-                        proc.stderr.close()
-                except Exception:
-                    pass
-            returncode = proc.returncode if proc.returncode is not None else -1
-        else:
-            returncode = proc.returncode
-    except subprocess.TimeoutExpired as exc:
-        timed_out = True
-        _kill_process_tree(proc.pid)
+    run_deadline = start + max(0.0, float(timeout_s))
+    pending_input: Optional[str] = input_text
+    last_exc: Optional[subprocess.TimeoutExpired] = None
+    tracked: dict[int, Any] = {}
+
+    def remember_descendants() -> None:
         try:
-            extra_out, extra_err = proc.communicate(timeout=grace_s)
-            stdout = extra_out or _partial_output(exc.stdout)
-            stderr = extra_err or _partial_output(exc.stderr)
-        except (subprocess.TimeoutExpired, Exception):
+            import psutil
+
+            for child in psutil.Process(proc.pid).children(recursive=True):
+                tracked[child.pid] = child
+        except Exception:
+            pass
+
+    def remaining_descendants() -> list[int]:
+        alive: set[int] = set()
+        for child in tracked.values():
             try:
-                if proc.stdout:
-                    proc.stdout.close()
-                if proc.stderr:
-                    proc.stderr.close()
+                if child.is_running() and child.status() != "zombie":
+                    alive.add(child.pid)
+            except Exception:
+                continue
+        if sys.platform != "win32":
+            try:
+                import psutil
+
+                for process in psutil.process_iter(("pid", "status")):
+                    try:
+                        if process.pid != proc.pid and os.getpgid(process.pid) == proc.pid:
+                            if process.info.get("status") != "zombie":
+                                alive.add(process.pid)
+                    except (ProcessLookupError, PermissionError, psutil.NoSuchProcess):
+                        continue
             except Exception:
                 pass
-            stdout = _partial_output(exc.stdout)
-            stderr = _partial_output(exc.stderr)
-        returncode = proc.returncode if proc.returncode is not None else -1
+        return sorted(alive)
 
-    elapsed = time.perf_counter() - start
-    max_allowed = float(timeout_s + grace_s)
-    duration_s = round(min(elapsed, max_allowed), 3) if timed_out else round(elapsed, 3)
+    while True:
+        remember_descendants()
+        if token is not None and token.is_cancelled():
+            cancelled = True
+            break
+        remaining = run_deadline - time.monotonic()
+        if remaining <= 0:
+            timed_out = True
+            break
+        try:
+            stdout, stderr = proc.communicate(
+                input=pending_input,
+                timeout=min(0.1, remaining),
+            )
+            break
+        except subprocess.TimeoutExpired as exc:
+            last_exc = exc
+            pending_input = None
+
+    cleanup_duration = 0.0
+    cleanup_error: Optional[str] = None
+    process_tree_clean: Optional[bool] = True
+    if timed_out or cancelled:
+        if cancelled and token is not None:
+            logger.warning("run %s cancelled: terminating agent process tree (pid %s)", token.run_id, proc.pid)
+        cleanup_started = time.monotonic()
+        cleanup_deadline = cleanup_started + min(10.0, max(0.0, float(grace_s)))
+        try:
+            if sys.platform == "win32":
+                # Use the OS tree terminator while the root identity is still available, then
+                # kill every descendant observed during polling. The snapshot also covers the
+                # case where the root exited before the pipe-drain deadline.
+                _kill_process_tree(proc.pid)
+                for child in tracked.values():
+                    try:
+                        child.kill()
+                    except Exception:
+                        pass
+                if proc.poll() is None:
+                    try:
+                        proc.kill()
+                    except Exception:
+                        pass
+            else:
+                _kill_process_tree(proc.pid)
+            remaining = max(0.0, cleanup_deadline - time.monotonic())
+            try:
+                extra_out, extra_err = proc.communicate(timeout=remaining)
+                stdout = extra_out or _partial_output(last_exc.stdout if last_exc else None)
+                stderr = extra_err or _partial_output(last_exc.stderr if last_exc else None)
+            except subprocess.TimeoutExpired:
+                stdout = _partial_output(last_exc.stdout if last_exc else None)
+                stderr = _partial_output(last_exc.stderr if last_exc else None)
+            except Exception as exc:
+                cleanup_error = f"pipe collection failed: {type(exc).__name__}: {exc}"
+            if proc.stdout:
+                proc.stdout.close()
+            if proc.stderr:
+                proc.stderr.close()
+            alive = remaining_descendants()
+            process_tree_clean = not alive and proc.poll() is not None
+            if not process_tree_clean and not cleanup_error:
+                cleanup_error = "processes remain after cleanup: " + ",".join(map(str, alive or [proc.pid]))
+        except Exception as exc:
+            process_tree_clean = False
+            cleanup_error = f"process cleanup failed: {type(exc).__name__}: {exc}"
+        cleanup_duration = time.monotonic() - cleanup_started
+    else:
+        # Record whether descendants remain even when the root exits successfully.
+        alive = remaining_descendants()
+        process_tree_clean = not alive
+        if alive:
+            cleanup_error = "processes remain after root exit: " + ",".join(map(str, alive))
+
+    returncode = proc.returncode
+    if last_exc is not None:
+        stdout = stdout or _partial_output(last_exc.stdout)
+        stderr = stderr or _partial_output(last_exc.stderr)
+    duration_s = round(time.monotonic() - start, 3)
 
     return BoundedProcessResult(
         stdout=stdout or "",
@@ -859,6 +927,9 @@ def _run_bounded(
         duration_s=duration_s,
         timed_out=timed_out,
         cancelled=cancelled,
+        cleanup_duration_s=round(cleanup_duration, 3),
+        process_tree_clean=process_tree_clean,
+        cleanup_error=cleanup_error,
     )
 
 
