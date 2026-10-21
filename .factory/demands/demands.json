@@ -9726,5 +9726,37 @@
     "dependencies": [],
     "created_at": "2026-10-21T16:20:27.034726Z",
     "updated_at": "2026-10-21T16:20:27.034726Z"
+  },
+  {
+    "id": "USR-336",
+    "project_id": "darkfac",
+    "title": "Codex headless abre janelas de console visiveis no Notebook a cada comando",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "Em 21/10/2026 o run headless 'run_ticket.py USR-328 --harness codex' fez o codex.exe exec disparar codex-windows-sandbox-setup.exe e cmd.exe visiveis a cada comando (~10 s), tornando o Notebook inutilizavel para o owner. Cadeia: run_ticket.py -> cmd /c codex.CMD -> runtime_dispatch.py -> codex.exe exec --sandbox workspace-write -> codex-windows-sandbox-setup.exe. Run cancelado.",
+    "core_journey": [
+      "Em 21/10/2026 o run headless 'run_ticket.py USR-328 --harness codex' fez o codex.exe exec disparar codex-windows-sandbox-setup.exe e cmd.exe visiveis a cada comando (~10 s), tornando o Notebook inutilizavel para o owner. Cadeia: run_ticket.py -> cmd /c codex.CMD -> runtime_dispatch.py -> codex.exe exec --sandbox workspace-write -> codex-windows-sandbox-setup.exe. Run cancelado."
+    ],
+    "non_goals": [
+      "Nao desabilitar o sandbox do Codex nem relaxar permissoes de escrita."
+    ],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Todo subprocesso de harness headless no Windows e criado sem janela (CREATE_NO_WINDOW / DETACHED) incluindo o wrapper codex.CMD e o runtime_dispatch.",
+      "Teste verifica as creationflags do launcher do Codex no Windows.",
+      "Se o sandbox do Codex ainda abrir console proprio, o roteador nao elege codex para runs headless no Notebook interativo ate a correcao, com motivo registrado."
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-21T17:29:08.669337Z",
+    "updated_at": "2026-10-21T17:29:08.669337Z"
   }
 ]
