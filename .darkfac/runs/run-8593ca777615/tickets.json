@@ -1,0 +1,109 @@
+[
+  {
+    "id": "T1",
+    "title": "M3: comprovar intake real no projeto existente",
+    "goal": "Retomar o piloto pelo fluxo real acompanhado pela OA-047, reutilizando decisões e evidências anteriores.",
+    "files_hint": [
+      "docs/plans/USR-279-greenfield-pilot.md",
+      "docs/evidence/USR-279-M3.md"
+    ],
+    "acceptance": [
+      "Confirmar remoto privado, descritor e referências de M1/M2 sem recriar recursos; registrar SHA atual e dependências OA-043/OA-047 verificadas.",
+      "Com OA-047 satisfeita, vincular mensagem real do Telegram ao ticket PH do projeto pilot-hello e ao grill que reutiliza OA-042; não fabricar entrada nem repetir decisões.",
+      "Registrar evidência rastreável de M3 e terminar com validate do produto e validação aplicável do DarkFac verdes."
+    ],
+    "tests_to_add": [
+      "Reutilizar testes existentes de roteamento por projeto; adicionar regressão somente se uma correção necessária revelar lacuna.",
+      "Executar validate do produto no ambiente registrado."
+    ],
+    "smoke": []
+  },
+  {
+    "id": "T2",
+    "title": "M4: entregar o produto pela linha até merge",
+    "goal": "Conduzir o ticket PH por implementação mínima necessária, revisão independente, PR e CI até merge verificável.",
+    "files_hint": [
+      "GCamposGit/pilot-hello: src/pilot_hello/",
+      "GCamposGit/pilot-hello: tests/",
+      "GCamposGit/pilot-hello: .github/workflows/ci.yml",
+      "docs/evidence/USR-279-M4.md"
+    ],
+    "acceptance": [
+      "Após T1, conferir e completar somente lacunas do contrato existente: página 'DarkFac pilot', healthz com status/versão e inicialização por PORT, sem dependências DarkFac.",
+      "Obter revisão da árvore final por família diferente do implementador e CI próprio verde para o SHA final do PR, executando instalação, validate e build da wheel.",
+      "Fazer merge sem conflito, comprovar SHA em main, limpar branch/worktree de trabalho e registrar PR, revisão e CI vinculados aos SHAs; validações aplicáveis verdes."
+    ],
+    "tests_to_add": [
+      "Cobrir GET /, JSON e versão de /healthz e configuração de porta, reaproveitando cobertura existente.",
+      "Garantir que CI execute testes reais e produza wheel instalável."
+    ],
+    "smoke": []
+  },
+  {
+    "id": "T3",
+    "title": "M5: publicar no Dokploy separado e verificar SHA",
+    "goal": "Implantar o SHA mergeado na infraestrutura aprovada e comprovar publicação real.",
+    "files_hint": [
+      "GCamposGit/pilot-hello: Dockerfile",
+      "GCamposGit/pilot-hello: scripts/smoke.py",
+      "docs/evidence/USR-279-M5.md"
+    ],
+    "acceptance": [
+      "Após T2 e conclusão verificada da OA-043, usar projeto/aplicação exclusivos do piloto, repositório privado e domínio da infraestrutura existente, preservando darkfac-core.",
+      "Implantar artefato associado ao SHA mergeado; GET / e GET /healthz respondem 200, com texto, status e versão esperados e correspondência verificável entre SHA e implantação.",
+      "Registrar URL, identificador do deploy, SHA, versão, horário e respostas do smoke sem segredos; validate e build do produto e validações aplicáveis do DarkFac permanecem verdes."
+    ],
+    "tests_to_add": [
+      "Verificar que a imagem inicia pelo comando documentado e atende à porta configurada.",
+      "Cobrir smoke com falha para resposta inválida e sucesso para status/versão esperados."
+    ],
+    "smoke": [
+      "/",
+      "/healthz"
+    ]
+  },
+  {
+    "id": "T4",
+    "title": "M6: provar independência por clone limpo e wheel",
+    "goal": "Demonstrar instalação, testes, build e execução do produto fora do checkout e dos serviços DarkFac.",
+    "files_hint": [
+      "GCamposGit/pilot-hello: pyproject.toml",
+      "GCamposGit/pilot-hello: scripts/smoke.py",
+      "GCamposGit/pilot-hello: tests/",
+      "docs/evidence/USR-279-M6.md"
+    ],
+    "acceptance": [
+      "Clonar o SHA publicado em diretório isolado sem checkout DarkFac, criar venv próprio, executar setup/validate/build e instalar a wheel em segundo ambiente limpo.",
+      "Executar python -m pilot_hello a partir da wheel fora do diretório-fonte, sem PYTHONPATH, variáveis ou serviços do core; GET / e /healthz passam.",
+      "Registrar comandos, SHAs e resultados; verificar ausência de imports/caminhos/dependências DarkFac em código executável, permitindo o texto aprovado 'DarkFac pilot'; qualquer correção retorna pelo fluxo de revisão, CI, merge e deploy antes de repetir a prova."
+    ],
+    "tests_to_add": [
+      "Verificar execução HTTP da wheel instalada fora do checkout.",
+      "Verificar dependências de runtime e ausência de imports do core sem rejeitar o texto aprovado da página."
+    ],
+    "smoke": []
+  },
+  {
+    "id": "T5",
+    "title": "M7: consolidar evidências e arquivar o piloto",
+    "goal": "Entregar relatório verificável ao owner e aplicar a retenção aprovada.",
+    "files_hint": [
+      "docs/evidence/USR-279-M7.md",
+      "docs/plans/USR-279-greenfield-pilot.md",
+      ".factory/demands/demands.json"
+    ],
+    "acceptance": [
+      "Após T1–T4, consolidar linha do tempo de M1–M7 com demanda real, intervenções humanas contadas, revisão, PR, CI, SHAs, deploy, smoke e prova de independência; entregar pelo canal autorizado da linha.",
+      "Resolver falhas ou vinculá-las a tickets formais com evidência e critérios de aceite, sem declarar entrega completa enquanto houver falha que invalide seus critérios.",
+      "Com validações finais verdes, persistir relatório, aplicar D4 arquivando o repositório privado sem removê-lo e registrar confirmação; marcar USR-279 concluído somente com todos os critérios comprovados."
+    ],
+    "tests_to_add": [
+      "Reutilizar validações existentes dos registros de demanda e executar os portões aplicáveis; não criar testes que apenas espelhem o relatório.",
+      "Reexecutar smoke do destino publicado e confirmar estado privado/arquivado do repositório."
+    ],
+    "smoke": [
+      "/",
+      "/healthz"
+    ]
+  }
+]
