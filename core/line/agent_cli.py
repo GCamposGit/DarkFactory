@@ -698,14 +698,15 @@ def _surviving_pids(pids: list[int]) -> list[int]:
     return alive
 
 
-def _kill_process_tree(pid: int) -> list[int]:
-    """Terminate `pid` and its descendants; return PIDs that survived (USR-114, USR-328)."""
+def _kill_process_tree(pid: int, *, timeout_s: float = 5.0) -> list[int]:
+    """Terminate `pid` and its descendants within a budget; return surviving descendant PIDs."""
     if pid <= 0:
         return []
+    deadline = time.monotonic() + min(10.0, max(0.0, float(timeout_s)))
     # Only descendants are verified/force-killed: the direct child belongs to the caller's Popen, which
     # must reap it itself (psutil.wait_procs here would steal its exit status on POSIX).
     descendants = _descendant_pids(pid)
-    _kill_process_tree_once(pid)
+    _kill_process_tree_once(pid, timeout_s=max(0.0, deadline - time.monotonic()))
     survivors = _surviving_pids(descendants)
     if survivors:
         try:
@@ -716,9 +717,8 @@ def _kill_process_tree(pid: int) -> list[int]:
                     psutil.Process(p).kill()
                 except Exception:
                     pass
-            deadline = time.monotonic() + 3
             while _surviving_pids(survivors) and time.monotonic() < deadline:
-                time.sleep(0.1)
+                time.sleep(min(0.1, max(0.0, deadline - time.monotonic())))
         except Exception:
             pass
         survivors = _surviving_pids(survivors)
@@ -727,7 +727,7 @@ def _kill_process_tree(pid: int) -> list[int]:
     return survivors
 
 
-def _kill_process_tree_once(pid: int) -> None:
+def _kill_process_tree_once(pid: int, *, timeout_s: float = 5.0) -> None:
     if sys.platform == "win32":
         try:
             # /F: forcefully terminate
@@ -735,7 +735,7 @@ def _kill_process_tree_once(pid: int) -> None:
             subprocess.run(
                 ["taskkill", "/PID", str(pid), "/T", "/F"],
                 capture_output=True,
-                timeout=5,
+                timeout=max(0.0, timeout_s),
                 **hidden_popen_kwargs(),
             )
         except Exception as exc:
@@ -913,17 +913,19 @@ def _run_bounded(
     cleanup_duration = 0.0
     cleanup_error: Optional[str] = None
     process_tree_clean: Optional[bool] = True
+    tree_survivors: list[int] = []
     if timed_out or cancelled:
         if cancelled and token is not None:
             logger.warning("run %s cancelled: terminating agent process tree (pid %s)", token.run_id, proc.pid)
         cleanup_started = time.monotonic()
         cleanup_deadline = cleanup_started + min(10.0, max(0.0, float(grace_s)))
         try:
+            kill_budget = max(0.0, cleanup_deadline - time.monotonic())
             if sys.platform == "win32":
                 # Use the OS tree terminator while the root identity is still available, then
                 # kill every descendant observed during polling. The snapshot also covers the
                 # case where the root exited before the pipe-drain deadline.
-                _kill_process_tree(proc.pid)
+                tree_survivors = _kill_process_tree(proc.pid, timeout_s=kill_budget)
                 for child in tracked.values():
                     try:
                         child.kill()
@@ -935,7 +937,7 @@ def _run_bounded(
                     except Exception:
                         pass
             else:
-                _kill_process_tree(proc.pid)
+                tree_survivors = _kill_process_tree(proc.pid, timeout_s=kill_budget)
             remaining = max(0.0, cleanup_deadline - time.monotonic())
             try:
                 extra_out, extra_err = proc.communicate(timeout=remaining)
@@ -946,14 +948,28 @@ def _run_bounded(
                 stderr = _partial_output(last_exc.stderr if last_exc else None)
             except Exception as exc:
                 cleanup_error = f"pipe collection failed: {type(exc).__name__}: {exc}"
+            if tracked:
+                try:
+                    import psutil
+
+                    remaining = max(0.0, cleanup_deadline - time.monotonic())
+                    _gone, still_running = psutil.wait_procs(list(tracked.values()), timeout=remaining)
+                    if still_running and not cleanup_error:
+                        cleanup_error = "descendants did not exit before cleanup deadline: " + ",".join(
+                            str(child.pid) for child in still_running
+                        )
+                except Exception as exc:
+                    if not cleanup_error:
+                        cleanup_error = f"descendant collection failed: {type(exc).__name__}: {exc}"
             if proc.stdout:
                 proc.stdout.close()
             if proc.stderr:
                 proc.stderr.close()
             alive = remaining_descendants()
-            process_tree_clean = not alive and proc.poll() is not None
+            process_tree_clean = not alive and not tree_survivors and proc.poll() is not None
             if not process_tree_clean and not cleanup_error:
-                cleanup_error = "processes remain after cleanup: " + ",".join(map(str, alive or [proc.pid]))
+                remaining_pids = alive or tree_survivors or [proc.pid]
+                cleanup_error = "processes remain after cleanup: " + ",".join(map(str, remaining_pids))
         except Exception as exc:
             process_tree_clean = False
             cleanup_error = f"process cleanup failed: {type(exc).__name__}: {exc}"
