@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import time
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -301,6 +302,9 @@ def test_remote_verdict_roundtrip_with_fake_driver(fake_postgres: _FakePsycopgMo
     assert fetched is not None
     assert fetched["tree_sha"] == record["tree_sha"]
     assert fetched["result"] == record["result"]
+    # Callers (runner cache hit, remote_worker) float() it; an ISO string crashed the gate.
+    assert fetched["created_at"] == datetime.fromisoformat("2026-01-01T00:00:00+00:00").timestamp()
+    assert float(fetched["created_at"]) > 0
 
 
 def test_get_verdict_checks_local_then_remote_and_backfills_local(fake_postgres: _FakePsycopgModule) -> None:
