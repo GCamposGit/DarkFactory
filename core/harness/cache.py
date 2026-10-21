@@ -39,6 +39,7 @@ import subprocess
 import sys
 import threading
 import time
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -206,6 +207,17 @@ def _connect(psycopg_module: Any, url: str) -> Any:
     return psycopg_module.connect(url, connect_timeout=_CONNECT_TIMEOUT_SEC)
 
 
+def _epoch_seconds(value: Any) -> float:
+    """Normalize a TIMESTAMPTZ to epoch seconds, the local-store contract that callers float()."""
+    if hasattr(value, "timestamp"):
+        return float(value.timestamp())
+    if isinstance(value, str):
+        with contextlib.suppress(ValueError):
+            return float(value)
+        return datetime.fromisoformat(value).timestamp()
+    return float(value)
+
+
 def get_remote_verdict(key: str) -> dict[str, Any] | None:
     """Fetch a cached PASS verdict from Postgres, or ``None`` on any failure/absence."""
 
@@ -237,7 +249,7 @@ def get_remote_verdict(key: str) -> dict[str, Any] | None:
                     "py_version": row[4],
                     "host": row[5],
                     "result": json.loads(row[6]),
-                    "created_at": created_at.isoformat() if hasattr(created_at, "isoformat") else str(created_at),
+                    "created_at": _epoch_seconds(created_at),
                 }
     except Exception as exc:  # noqa: BLE001 - any remote failure degrades to local-only
         _sanitized_warning("Remote verdict cache unavailable", exc)
