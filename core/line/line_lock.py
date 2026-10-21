@@ -303,7 +303,9 @@ class LineLock:
         fleet_mode: Optional[bool] = None,
         lease_duration_sec: int = 45,
         max_fleet_slots: int = 3,
+        require_reservation: bool = False,
     ) -> None:
+        self._require_reservation = require_reservation
         self._ticket_id = ticket_id
         self._path = lock_path(root)
         self._root = root
@@ -389,7 +391,7 @@ class LineLock:
             )
 
         # Fleet reservation coordination (USR-284)
-        effective_fleet = (
+        effective_fleet = self._require_reservation or (
             self._fleet_mode
             if self._fleet_mode is not None
             else (is_fleet_mode() or self._store is not None)
@@ -401,8 +403,16 @@ class LineLock:
 
                     self._store = default_control_store()
                 except Exception as exc:
+                    if self._require_reservation:
+                        self._fail_reservation_closed(f"store canonico indisponivel: {exc}")
                     logger.debug("default_control_store not available for line_lock: %s", exc)
                     self._store = None
+            if self._require_reservation and (
+                self._store is None
+                or getattr(self._store, "mock_mode", False)
+                or not hasattr(self._store, "reserve_cycle")
+            ):
+                self._fail_reservation_closed("store canonico sem reserva de ciclo (sem fallback local)")
 
             if self._store is not None and hasattr(self._store, "reserve_cycle"):
                 host_id = resolve_host_id(self._host_id)
@@ -417,6 +427,7 @@ class LineLock:
                         now=now_utc,
                         lease_duration_sec=self._lease_duration_sec,
                         max_fleet_slots=self._max_fleet_slots,
+                        metadata={"origin": "manual"} if self._require_reservation else None,
                     )
                 except ReservationConflictError:
                     # Clean up local lock file so machine is not left locked on conflict
@@ -424,8 +435,19 @@ class LineLock:
                         self._path.unlink()
                     self._acquired = False
                     raise
+                except Exception as exc:
+                    if self._require_reservation:
+                        self._fail_reservation_closed(f"falha do store ao reservar: {exc}")
+                    raise
 
         self._start_heartbeat(info)
+
+    def _fail_reservation_closed(self, reason: str) -> None:
+        """Manual start (USR-330): no canonical reservation means no run; never a silent local fallback."""
+        with contextlib.suppress(FileNotFoundError, OSError):
+            self._path.unlink()
+        self._acquired = False
+        raise ReservationConflictError(f"Reserva canonica do ticket {self._ticket_id} falhou fechada: {reason}")
 
     def _start_heartbeat(self, info: LineLockInfo) -> None:
         def beat() -> None:
@@ -509,6 +531,7 @@ def guard(
     fleet_mode: Optional[bool] = None,
     lease_duration_sec: int = 45,
     max_fleet_slots: int = 3,
+    require_reservation: bool = False,
 ) -> Iterator[LineLock]:
     """Acquire the line lock for ``ticket_id`` and release it on any exit, including an exception."""
     lock = LineLock(
@@ -521,6 +544,7 @@ def guard(
         fleet_mode=fleet_mode,
         lease_duration_sec=lease_duration_sec,
         max_fleet_slots=max_fleet_slots,
+        require_reservation=require_reservation,
     )
     lock.acquire()
     try:
