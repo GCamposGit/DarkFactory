@@ -1,0 +1,52 @@
+[
+  {
+    "id": "T1",
+    "title": "Aplicar fleet_policy à admissão real com capacidade local verificada",
+    "goal": "Substituir a decisão própria de capacidade do CloudCoordinator pela seleção canônica antes de reservar ciclos.",
+    "files_hint": [
+      "core/orchestrator/cloud_coordinator.py",
+      "tests/test_usr337_dispatch_requeue.py",
+      "tests/test_usr321_requeue_capacity.py"
+    ],
+    "acceptance": [
+      "admit_eligible_cycles chama select_host_for_ticket com verified_capacity contendo exclusivamente o host local e a capacidade obtida de measure_workers().workers; capacity_probe permanece disponível para testes.",
+      "Capacidade local zero ou exceção de medição impede novas reservas locais, inclusive fora do modo gerenciado, sem impedir hosts remotos elegíveis.",
+      "Admissões respeitam simultaneamente capacidade verificada, max_slots por host, teto global e reservas existentes; host ocupado não recebe outro ciclo nem tem seu worker interrompido.",
+      "Múltiplos candidatos, chamadas repetidas e conflitos de reserve_cycle não geram duplicidade nem excedem limites; a reserva atômica existente é preservada.",
+      "Prioridade, saúde, compatibilidade e bloqueios existentes continuam efetivos no caminho real de despacho.",
+      "Ao concluir, python scripts/line_validate.py e o portão oficial python core/harness/runner.py --quick passam."
+    ],
+    "tests_to_add": [
+      "Teste do caminho padrão com measure_workers simulado e observação da chamada real à política e do mapa verified_capacity.",
+      "Casos de capacidade zero, positiva e medição com exceção, incluindo modo não gerenciado e continuidade de admissão remota.",
+      "Casos com host ocupado, reservas anteriores, vários candidatos e limites local/global atingidos, verificando ausência de interrupção ou alteração de reservas existentes.",
+      "Caso de conflito na reserva e repetição do ciclo, comprovando seleção segura e ausência de duplicidade."
+    ],
+    "smoke": []
+  },
+  {
+    "id": "T2",
+    "title": "Validar reabertura explícita na falha de convergência ao vivo",
+    "goal": "Consolidar os testes da implementação existente de requeue_ticket e de seu chamador de produção, sem recriar a funcionalidade.",
+    "files_hint": [
+      "tests/test_usr337_dispatch_requeue.py",
+      "tests/test_git_autonomy_live_proof.py",
+      "core/demands/store.py",
+      "core/git/autonomy.py"
+    ],
+    "acceptance": [
+      "A falha de convergência ao vivo de ticket completed chama requeue_ticket com reopen=True e motivo contendo a evidência da falha, sem reescrita manual do status nesse caminho.",
+      "Após persistência e releitura, o ticket está planned, delivery_evidence está limpa e o conteúdo histórico anterior permanece junto do motivo da reabertura.",
+      "Reabertura de completed sem motivo ou sem opt-in continua recusada; cancelled continua recusado mesmo com reopen=True.",
+      "Repetir a requeue de um ticket já planned é idempotente e preserva o histórico registrado.",
+      "Preservar a implementação atual; ajustar store ou autonomia somente se os testes demonstrarem descumprimento desses contratos.",
+      "Ao concluir, python scripts/line_validate.py e o portão oficial python core/harness/runner.py --quick passam."
+    ],
+    "tests_to_add": [
+      "Complementar o teste integrado de falha de convergência para verificar os argumentos da chamada real a requeue_ticket e a evidência invalidada após releitura.",
+      "Verificar preservação do texto anterior e do motivo, além de idempotência após a primeira reabertura.",
+      "Aproveitar e complementar os casos existentes de motivo vazio, ausência de reopen e recusa de cancelled."
+    ],
+    "smoke": []
+  }
+]
