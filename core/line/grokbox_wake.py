@@ -33,6 +33,7 @@ from typing import Any
 from core.harness.remote_dispatch import probe_health
 from core.integrations.email_worker import send_grokbot_email
 from core.paths import state_root
+from core.usage.probe_deadline import run_with_deadline
 
 logger = logging.getLogger("darkfac.line.grokbox_wake")
 
@@ -122,13 +123,15 @@ def preflight_check(
 
     moment = now or datetime.now(UTC)
     state = _load_state()
+    t_start = time.monotonic()
 
     try:
-        healthy = bool(probe())
+        healthy = bool(run_with_deadline("grokbox_probe", probe))
     except Exception as exc:  # noqa: BLE001
         logger.warning("Grokbox pre-flight probe failed: %s", exc)
         healthy = False
 
+    logger.info("wake preflight probe healthy=%s duration_s=%.3f", healthy, time.monotonic() - t_start)
     if healthy:
         state["down"] = False
         _save_state(state)
@@ -146,7 +149,9 @@ def preflight_check(
 
     if should_send:
         try:
-            result = send_email(WAKE_EMAIL_SUBJECT, WAKE_EMAIL_TEXT)
+            t_mail = time.monotonic()
+            result = run_with_deadline("grokbox_wake_email", lambda: send_email(WAKE_EMAIL_SUBJECT, WAKE_EMAIL_TEXT))
+            logger.info("wake email duration_s=%.3f", time.monotonic() - t_mail)
             if isinstance(result, dict) and result.get("ok"):
                 state["last_email_sent_at"] = moment.isoformat()
             else:
@@ -196,7 +201,7 @@ def wait_if_down(
     try:
         while waited < limit:
             try:
-                if probe():
+                if run_with_deadline("grokbox_probe", probe):
                     woke_up = True
                     break
             except Exception as exc:  # noqa: BLE001
