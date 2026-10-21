@@ -1,0 +1,104 @@
+[
+  {
+    "id": "T1",
+    "title": "Verificar estado atual e identificar ticket PH",
+    "goal": "Confirmar evidências M1/M2, identificar o ticket PH vinculado ao projeto pilot-hello e à demanda de M3, e validar que o ambiente do produto (Python 3.12+, venv, comandos do descritor) está pronto para execução.",
+    "files_hint": [
+      "docs/evidence/USR-279-M1.md",
+      "docs/evidence/USR-279-M2.md",
+      "scripts/line_validate.py"
+    ],
+    "acceptance": [
+      "Evidências M1 e M2 verificadas e consistentes",
+      "Ticket PH identificado por vínculo ao projeto pilot-hello e à demanda de M3",
+      "Ambiente do produto validado com Python 3.12+, venv e comandos setup/validate/build/smoke do descritor",
+      "Nenhum recurso do core (portão/runtime) presente no produto"
+    ],
+    "tests_to_add": [
+      "Teste de verificação de presença e consistência das evidências M1/M2",
+      "Teste de identificação do ticket PH por vínculo ao projeto e demanda",
+      "Teste de validação do ambiente do produto (Python, venv, comandos)"
+    ],
+    "smoke": []
+  },
+  {
+    "id": "T2",
+    "title": "Implementar ticket PH no checkout do produto",
+    "goal": "Executar a implementação do ticket PH no checkout próprio de GCamposGit/pilot-hello, usando venv do produto e comandos setup/validate/build/smoke do descritor, sem runtime ou portão do core.",
+    "files_hint": [
+      "scripts/line_validate.py",
+      "requirements.txt"
+    ],
+    "acceptance": [
+      "Implementação do ticket PH concluída no checkout do produto",
+      "Comandos setup, validate, build e smoke do descritor executam com sucesso",
+      "Nenhum import, serviço ou portão do core no produto",
+      "SHA da implementação registrado para revisão"
+    ],
+    "tests_to_add": [
+      "Teste de execução do comando validate do descritor",
+      "Teste de execução do comando build do descritor",
+      "Teste de execução do comando smoke do descritor"
+    ],
+    "smoke": []
+  },
+  {
+    "id": "T3",
+    "title": "Revisão independente em família diferente",
+    "goal": "Acionar revisão independente do SHA implementado, garantindo revisor de família diferente do implementador, e registrar implementador, revisor e SHA revisado.",
+    "files_hint": [
+      "docs/evidence/USR-279-M4.md"
+    ],
+    "acceptance": [
+      "Revisor identificado em família diferente do implementador",
+      "SHA revisado registrado junto com implementador e revisor",
+      "Evidência de revisão independente documentada",
+      "Mudanças posteriores exigirão nova verificação das evidências afetadas"
+    ],
+    "tests_to_add": [
+      "Teste de verificação de família distinta entre implementador e revisor",
+      "Teste de registro de SHA revisado e evidência de revisão"
+    ],
+    "smoke": []
+  },
+  {
+    "id": "T4",
+    "title": "Abrir PR e validar CI própria do produto",
+    "goal": "Abrir PR no repositório privado GCamposGit/pilot-hello, obter CI própria do produto verde para o SHA final do PR e verificar ausência de conflito com main.",
+    "files_hint": [
+      "docs/evidence/USR-279-M4.md"
+    ],
+    "acceptance": [
+      "PR aberto no repositório privado com SHA do PR registrado",
+      "CI própria do produto verde para o SHA final do PR",
+      "Ausência de conflito com main confirmada",
+      "Link do run de CI e host executor registrados"
+    ],
+    "tests_to_add": [
+      "Teste de verificação de CI verde para o SHA do PR",
+      "Teste de verificação de ausência de conflito com main",
+      "Teste de registro de link de CI e host executor"
+    ],
+    "smoke": []
+  },
+  {
+    "id": "T5",
+    "title": "Merge squash e limpeza de branch/worktree",
+    "goal": "Executar merge squash após CI verde e ausência de conflito, limpar branch local/remota e worktree temporária, preservando checkout principal e evidências, e registrar SHA do merge.",
+    "files_hint": [
+      "docs/evidence/USR-279-M4.md"
+    ],
+    "acceptance": [
+      "Merge squash executado com SHA do merge registrado",
+      "Branch local/remota e worktree temporária removidas",
+      "Checkout principal e evidências preservados",
+      "Registro final contendo PR, SHA do PR, SHA do merge, link de CI e host executor"
+    ],
+    "tests_to_add": [
+      "Teste de verificação de merge squash e SHA do merge",
+      "Teste de verificação de limpeza de branch e worktree",
+      "Teste de preservação do checkout principal e evidências"
+    ],
+    "smoke": []
+  }
+]
