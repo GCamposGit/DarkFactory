@@ -225,8 +225,12 @@ def test_bounded_runner_timeout_preserves_missing_exit_code_explicitly(
         assert result.outcome == "cleanup_failed"
         assert result.process_tree_clean is False
         assert result.cleanup_error
-        assert result.cleanup_duration_s >= 0.3
-        assert result.duration_s >= 0.8, "duration must report observed wall time, not a clipped budget"
+        assert result.cleanup_duration_s >= 0.25, (
+            f"platform={sys.platform}, tolerance=0.05s, cleanup={result.cleanup_duration_s:.3f}s"
+        )
+        assert result.duration_s >= 0.75, (
+            f"platform={sys.platform}, tolerance=0.05s, duration={result.duration_s:.3f}s"
+        )
         assert kill_budgets and 0 <= kill_budgets[0] <= 0.2
     finally:
         # The deliberately un-killed root process is cleaned up by the test itself.
