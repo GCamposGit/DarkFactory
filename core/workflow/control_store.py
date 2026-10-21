@@ -70,6 +70,10 @@ def _is_ready_enough(created_at_raw: Any, now: datetime, ready_age_sec: float) -
 class ControlStore(Protocol):
     """Canonical transactional control store interface abstracting storage backends."""
 
+    def get_manual_ticket_owner(self, project_id: str, ticket_id: str, *, now: datetime) -> str | None:
+        """Consult durable manual progress before admission; storage errors must raise."""
+        ...
+
     def get_run_identity(self, run_id: str) -> dict[str, str] | None:
         """Read the persisted project independently of job telemetry; storage errors must raise."""
         ...
@@ -1500,6 +1504,26 @@ class SQLiteControlStore:
         try:
             row = conn.execute("SELECT project_id FROM runs WHERE run_id = ?", (run_id,)).fetchone()
             return {"project_id": row["project_id"]} if row is not None else None
+        finally:
+            conn.close()
+
+    def get_manual_ticket_owner(self, project_id: str, ticket_id: str, *, now: datetime) -> str | None:
+        """Read the durable manual-run admission guard for one project/ticket."""
+        from core.line.manual_ownership import active_manual_owner
+
+        conn = self._connect()
+        try:
+            exists = conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='local_run_events'"
+            ).fetchone()
+            if exists is None:
+                return None  # Explicit compatibility with pre-local-progress databases.
+            rows = conn.execute(
+                "SELECT run_id, phase, status, at FROM local_run_events "
+                "WHERE project_id = ? AND ticket_id = ? ORDER BY event_id DESC",
+                (project_id, ticket_id),
+            ).fetchall()
+            return active_manual_owner((dict(row) for row in rows), now=now)
         finally:
             conn.close()
 

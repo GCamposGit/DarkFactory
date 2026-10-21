@@ -201,6 +201,14 @@ class BacklogFeeder:
 
         # 7. Existing runs & retry limit check on ControlStore
         try:
+            ownership_lookup = getattr(ctrl_store, "get_manual_ticket_owner", None)
+            manual_owner = ownership_lookup(ticket.project_id, ticket.id, now=current_now) if ownership_lookup else None
+            if manual_owner:
+                return TicketEligibility(
+                    ticket_id=ticket.id, project_id=ticket.project_id, eligible=False,
+                    reason="manual_ownership", run_id=manual_owner, ticket=ticket,
+                    message=f"Ticket possui execucao manual persistida ({manual_owner}).",
+                )
             attempts = _ticket_attempts(ctrl_store, ticket.id)
             if attempts:
                 latest_attempt, latest_run = attempts[-1]
