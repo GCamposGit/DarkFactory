@@ -9443,8 +9443,8 @@
     "project_id": "darkfac",
     "title": "Investigar demora nao limitada do preflight de cota e wake",
     "origin": "agent",
-    "status": "completed",
-    "delivery_evidence": "5f256d319b28f8199408faa1de8556613d32f9d9",
+    "status": "planned",
+    "delivery_evidence": "Reaberto em 20/10/2026: fatias 1-2 entregues em 21/10 (deadline de sondas; mutex do ledger, requeue_ticket, classify_delivery, verified_capacity); falta ligar requeue_ticket aos launchers, classify_delivery na conclusao (bindings/autonomy), verified_capacity ao despacho real e lockfile entre processos no demands.json (anterior: 5f256d319b28f8199408faa1de8556613d32f9d9)",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -9468,7 +9468,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-20T20:58:23.680377Z",
-    "updated_at": "2026-10-21T17:21:43.438685Z"
+    "updated_at": "2026-10-21T17:45:40.192366Z"
   },
   {
     "id": "USR-322",
