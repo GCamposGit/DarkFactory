@@ -344,6 +344,15 @@ def _evidence(scratch: ScratchDb, key: JobKey) -> list[str]:
     return list(rows[0][0])
 
 
+def test_run_identity_reads_persisted_project_without_job_telemetry(scratch: ScratchDb, monkeypatch) -> None:
+    from core.line.bindings import project_id_for_run
+
+    store, key = _parked_job(scratch)
+    monkeypatch.setattr(store, "get_run_status", lambda run_id: None)
+    assert project_id_for_run(store, key.run_id, strict=True) == "darkfac"
+    assert store.get_run_identity("absent-run") is None
+
+
 def test_add_job_evidence_is_idempotent_on_real_postgres(scratch: ScratchDb) -> None:
     store, key = _parked_job(scratch)
 

@@ -43,6 +43,7 @@ def _create_ctx(stage: str = "retrospective", *, ticket_id: str = "acme", run_id
     )
     return StageContext(
         claim=claim,
+        project_id=ticket_id,
         plan_ref="plan://line",
         plan_digest="a" * 64,
         config_version="1.0",

@@ -22,7 +22,7 @@ def _ctx(stage: str, *, ticket_id: str = "acme", run_id: str = "run-x", input_re
         expires_at=(datetime.now(UTC) + timedelta(minutes=5)).isoformat(),
     )
     return StageContext(
-        claim=claim, plan_ref="plan://line", plan_digest="a" * 64, config_version="1.0",
+        claim=claim, project_id=ticket_id, plan_ref="plan://line", plan_digest="a" * 64, config_version="1.0",
         environment_ref="env", identity="w1", route_ref="route", memory_version="1.0",
         input_refs=input_refs or [],
     )

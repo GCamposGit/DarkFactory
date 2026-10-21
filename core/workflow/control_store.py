@@ -70,6 +70,10 @@ def _is_ready_enough(created_at_raw: Any, now: datetime, ready_age_sec: float) -
 class ControlStore(Protocol):
     """Canonical transactional control store interface abstracting storage backends."""
 
+    def get_run_identity(self, run_id: str) -> dict[str, str] | None:
+        """Read the persisted project independently of job telemetry; storage errors must raise."""
+        ...
+
     def accept(self, command: IntakeCommand, now: datetime) -> IntakeReceipt:
         """Accept an intake command transactionally with idempotency checking."""
         ...
@@ -1487,6 +1491,15 @@ class SQLiteControlStore:
             except (TypeError, json.JSONDecodeError):
                 return None
             return data if isinstance(data, dict) else None
+        finally:
+            conn.close()
+
+    def get_run_identity(self, run_id: str) -> dict[str, str] | None:
+        """Return the run identity, distinguishing absent rows from storage failure."""
+        conn = self._connect()
+        try:
+            row = conn.execute("SELECT project_id FROM runs WHERE run_id = ?", (run_id,)).fetchone()
+            return {"project_id": row["project_id"]} if row is not None else None
         finally:
             conn.close()
 
