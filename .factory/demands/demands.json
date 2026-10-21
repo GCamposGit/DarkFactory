@@ -9538,8 +9538,8 @@
     "project_id": "darkfac",
     "title": "Ownership manual do ticket nao sobrevive ao reload e feeder duplica run",
     "origin": "agent",
-    "status": "planned",
-    "delivery_evidence": "Em implementacao: guard consultivo via eventos locais compartilhados, 22 testes focados PASS; exclusao atomica de inicio manual rastreada em USR-330",
+    "status": "completed",
+    "delivery_evidence": "PR #516 (76d7a0c6) mergeado em 21/10/2026; revisao independente Claude Opus 5.5 aprovada; portao PASS 4889 testes (veredito em cache, candidato 4d1257b); CI verde.",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -9562,7 +9562,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-21T03:47:58.759537Z",
-    "updated_at": "2026-10-21T03:47:58.759537Z"
+    "updated_at": "2026-10-21T16:10:48.589646Z"
   },
   {
     "id": "USR-328",
