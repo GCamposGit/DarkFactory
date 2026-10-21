@@ -5,7 +5,7 @@ Validates:
    pipes. With timeout_s=2, _run_bounded returns in < 15s with timed_out=True, the entire
    tree is terminated (grandchild is dead, none surviving), and partial output is captured.
 2. Secret redaction on partial output: secrets emitted before timeout are redacted.
-3. duration_s constraint: duration_s never exceeds timeout_s + grace_s.
+3. duration_s measures monotonic elapsed time without clipping; cleanup is bounded.
 4. Codex runner preserves partial output: partial output from tmp_out and stdout/stderr
    is preserved and redacted on timeout.
 5. Cross-platform support: works on both Windows and POSIX.
@@ -118,8 +118,15 @@ def test_bounded_runner_terminates_grandchild_and_returns_under_15s(tmp_path: Pa
     assert elapsed < 15.0, f"_run_bounded took too long: {elapsed:.2f}s"
     assert res.timed_out is True
 
-    # 2. duration_s never exceeds timeout_s + grace_s
-    assert res.duration_s <= 2.0 + 5.0
+    # 2. Duration is not clipped; a real process deadline should be reached within
+    # the requested timeout plus the cleanup allowance and measurement tolerance.
+    assert res.duration_s >= 2.0
+    assert res.duration_s <= 2.0 + 5.0 + 1.0, (
+        f"platform={sys.platform}, tolerance=1.0s, observed={res.duration_s:.3f}s"
+    )
+    assert res.cleanup_duration_s <= 5.0 + 0.5, (
+        f"platform={sys.platform}, tolerance=0.5s, cleanup={res.cleanup_duration_s:.3f}s"
+    )
 
     # 3. Partial output captured
     assert "CHILD_OUTPUT_START" in res.stdout
@@ -140,7 +147,7 @@ def test_bounded_runner_terminates_grandchild_and_returns_under_15s(tmp_path: Pa
 
 
 def test_bounded_runner_duration_never_exceeds_timeout_plus_grace(tmp_path: Path) -> None:
-    """Verify that duration_s reported in BoundedProcessResult never exceeds timeout_s + grace_s."""
+    """The duration is monotonic wall time and must not be clipped to the budget."""
     child_script = tmp_path / "sleep.py"
     child_script.write_text("import time; time.sleep(10)", encoding="utf-8")
 
@@ -149,7 +156,145 @@ def test_bounded_runner_duration_never_exceeds_timeout_plus_grace(tmp_path: Path
     res = _run_bounded([sys.executable, str(child_script)], timeout_s=timeout_s, grace_s=grace_s)
 
     assert res.timed_out is True
-    assert res.duration_s <= timeout_s + grace_s
+    assert res.duration_s >= timeout_s
+    assert res.cleanup_duration_s >= 0
+    assert res.outcome == "timeout"
+    assert res.process_tree_clean is True
+
+
+def test_bounded_runner_reports_normal_exit_code_and_cleanup(tmp_path: Path) -> None:
+    script = tmp_path / "exit.py"
+    script.write_text("print('done'); raise SystemExit(7)", encoding="utf-8")
+
+    result = _run_bounded([sys.executable, str(script)], timeout_s=5)
+
+    assert result.outcome == "completed"
+    assert result.returncode == 7
+    assert result.stdout.strip() == "done"
+    assert result.timed_out is False
+    assert result.cancelled is False
+    assert result.process_tree_clean is True
+
+
+def test_bounded_runner_kills_silent_descendant_holding_pipes(tmp_path: Path) -> None:
+    script = tmp_path / "silent_tree.py"
+    pid_file = tmp_path / "silent_child.pid"
+    script.write_text(
+        "import pathlib, subprocess, sys, time\n"
+        "child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(30)'])\n"
+        f"pathlib.Path({str(pid_file)!r}).write_text(str(child.pid))\n"
+        "time.sleep(30)\n",
+        encoding="utf-8",
+    )
+
+    started = time.monotonic()
+    result = _run_bounded([sys.executable, str(script)], timeout_s=1, grace_s=2)
+    elapsed = time.monotonic() - started
+    child_pid = int(pid_file.read_text(encoding="utf-8"))
+
+    assert result.stdout == ""
+    assert result.stderr == ""
+    assert result.outcome == "timeout", f"platform={sys.platform}, result={result}"
+    assert result.process_tree_clean is True
+    assert elapsed <= 1 + 2 + 1, f"platform={sys.platform}, tolerance=1.0s, elapsed={elapsed:.3f}s"
+    assert not _is_running(child_pid), f"platform={sys.platform}: silent descendant {child_pid} survived"
+
+
+def test_bounded_runner_kills_descendant_after_root_exits_with_pipes_open(tmp_path: Path) -> None:
+    script = tmp_path / "root_exits.py"
+    script.write_text(
+        "import subprocess, sys, time\n"
+        "child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(30)'])\n"
+        "print(child.pid, flush=True)\n"
+        "time.sleep(0.2)\n",
+        encoding="utf-8",
+    )
+
+    started = time.monotonic()
+    result = _run_bounded([sys.executable, str(script)], timeout_s=2, grace_s=1)
+    elapsed = time.monotonic() - started
+    pid = int(result.stdout.strip().splitlines()[-1])
+
+    assert elapsed < 5, f"platform={sys.platform}, tolerance=2.0s, observed={elapsed:.3f}s"
+    assert result.outcome == "timeout", f"platform={sys.platform}, result={result}"
+    assert result.returncode == 0
+    assert result.process_tree_clean is True
+    assert not _is_running(pid), f"descendant {pid} survived pipe-drain timeout"
+
+
+def test_bounded_runner_timeout_preserves_missing_exit_code_explicitly(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    script = tmp_path / "wait.py"
+    pid_file = tmp_path / "pid.txt"
+    script.write_text(
+        "import os, pathlib, time\n"
+        f"pathlib.Path({str(pid_file)!r}).write_text(str(os.getpid()))\n"
+        "time.sleep(30)\n",
+        encoding="utf-8",
+    )
+
+    original_kill = agent_cli._kill_process_tree
+    kill_budgets: list[float] = []
+
+    def _slow_failed_kill(pid: int, *, timeout_s: float) -> None:
+        kill_budgets.append(timeout_s)
+        time.sleep(0.3)
+        raise OSError("simulated process-tree termination failure")
+
+    monkeypatch.setattr(agent_cli, "_kill_process_tree", _slow_failed_kill)
+    try:
+        result = _run_bounded([sys.executable, str(script)], timeout_s=0.5, grace_s=0.2)
+        assert result.returncode is None
+        assert result.outcome == "cleanup_failed"
+        assert result.process_tree_clean is False
+        assert result.cleanup_error
+        assert result.cleanup_duration_s >= 0.25, (
+            f"platform={sys.platform}, tolerance=0.05s, cleanup={result.cleanup_duration_s:.3f}s"
+        )
+        assert result.duration_s >= 0.75, (
+            f"platform={sys.platform}, tolerance=0.05s, duration={result.duration_s:.3f}s"
+        )
+        assert kill_budgets and 0 <= kill_budgets[0] <= 0.2
+    finally:
+        # The deliberately un-killed root process is cleaned up by the test itself.
+        monkeypatch.setattr(agent_cli, "_kill_process_tree", original_kill)
+        if pid_file.exists():
+            original_kill(int(pid_file.read_text(encoding="utf-8")))
+
+
+def test_bounded_runner_cancellation_terminates_process_tree(tmp_path: Path) -> None:
+    script = tmp_path / "cancel.py"
+    pid_file = tmp_path / "cancel.pid"
+    script.write_text(
+        "import os, pathlib, subprocess, sys, time\n"
+        "child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(30)'])\n"
+        f"pathlib.Path({str(pid_file)!r}).write_text(str(child.pid))\n"
+        "print('started', flush=True)\n"
+        "time.sleep(30)\n",
+        encoding="utf-8",
+    )
+
+    with agent_cli.cancellation.run_scope("bounded-cancel-test") as token:
+        import threading
+
+        timer = threading.Timer(1.5, token.cancel)
+        timer.start()
+        try:
+            result = _run_bounded([sys.executable, str(script)], timeout_s=10, grace_s=2)
+        finally:
+            timer.cancel()
+
+    assert result.outcome == "cancelled"
+    assert result.cancelled is True
+    assert result.timed_out is False
+    assert result.stdout.strip() == "started"
+    assert result.process_tree_clean is True
+    assert result.cleanup_duration_s <= 2.0 + 0.5, (
+        f"platform={sys.platform}, tolerance=0.5s, cleanup={result.cleanup_duration_s:.3f}s"
+    )
+    pid = int(pid_file.read_text(encoding="utf-8"))
+    assert not _is_running(pid), f"platform={sys.platform}: cancelled descendant {pid} is still running"
 
 
 def test_codex_timeout_preserves_partial_output_and_redacts_secrets(
@@ -319,4 +464,3 @@ def test_stage_build_timeout_proceeds_to_validate_when_worktree_has_changes(
     # 3. Succeeded!
     assert result.outcome == "success"
     assert result.output_refs == ["commit_sha_123"]
-
