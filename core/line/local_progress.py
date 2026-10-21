@@ -460,12 +460,13 @@ class ProgressPublisher:
         *,
         cause: str | None = None,
         harness: str | None = None,
+        worker: str | None = None,
     ) -> None:
         """Record a phase transition."""
         try:
             if harness:
                 self.harness = harness
-            self._publish(phase, status, message, cause)
+            self._publish(phase, status, message, cause, worker=worker)
         except Exception as exc:  # noqa: BLE001 - publishing must never affect the run
             logger.warning("local progress: could not build %s/%s event: %s", phase, status, type(exc).__name__)
 
@@ -498,7 +499,9 @@ class ProgressPublisher:
         except Exception as exc:  # noqa: BLE001
             logger.warning("local progress: cancel failed: %s", type(exc).__name__)
 
-    def _publish(self, phase: str, status: PhaseStatus, message: str, cause: str | None) -> None:
+    def _publish(
+        self, phase: str, status: PhaseStatus, message: str, cause: str | None, *, worker: str | None = None
+    ) -> None:
         if phase != RUN_PHASE:
             if status == "running":
                 self._active_phase = phase
@@ -512,7 +515,7 @@ class ProgressPublisher:
             phase=phase,
             status=status,
             harness=self.harness,
-            worker=self.worker,
+            worker=worker or self.worker,
             cause_code=(cause[:64] if cause else None),
             message=_clean(message),
             at=self._clock(),

@@ -823,6 +823,16 @@ def _parse_harness_result(output: str) -> Optional[dict[str, Any]]:
     return None
 
 
+def _gate_execution_worker(output: str) -> str | None:
+    """Return the runner-reported host for the gate, if it ran on a remote worker."""
+    payload = _parse_harness_result(output)
+    executed_on = payload.get("executed_on") if payload is not None else None
+    if not isinstance(executed_on, dict):
+        return None
+    host = executed_on.get("host")
+    return host.strip()[:160] if isinstance(host, str) and host.strip() else None
+
+
 def _gate_failure_is_infra_no_tests(output: str) -> bool:
     """True when the gate ran zero tests because a step was killed (e.g. SIGTERM, exit -15), USR-308.
 
@@ -1142,6 +1152,7 @@ def _run_gate_with_self_correction(
     last_exit_code = 1
     failed_tests: list[str] = []
     gate_log_tail = ""
+    last_gate_worker: str | None = None
 
     for attempt in range(GATE_FIX_ATTEMPTS + 1):
         if _cancelled():
@@ -1258,8 +1269,11 @@ def _run_gate_with_self_correction(
         if getattr(gate_res, "cancelled", False) is True or _cancelled():
             return cancelled_payload()
 
+        gate_output = f"{gate_res.stdout or ''}\n{gate_res.stderr or ''}"
+        last_gate_worker = _gate_execution_worker(gate_output)
+
         if gate_res.returncode == 0:
-            progress.phase("gate", "succeeded", "portao oficial aprovado")
+            progress.phase("gate", "succeeded", "portao oficial aprovado", worker=last_gate_worker)
             if not as_json:
                 print("[+] Portão oficial aprovado com sucesso: [HARNESS_PASS]!")
             return None
@@ -1341,6 +1355,7 @@ def _run_gate_with_self_correction(
             f"portao oficial falhou (tentativa {attempt + 1}/{GATE_FIX_ATTEMPTS + 1}, codigo {gate_res.returncode}): "
             f"{redacted_head((gate_res.stdout or gate_res.stderr or '')[-600:], 300)}",
             cause="gate_failed",
+            worker=last_gate_worker,
         )
         if not as_json:
             print("\n--> Reinvocando o agente na mesma worktree com o log destilado do portao...")
@@ -1376,6 +1391,7 @@ def _run_gate_with_self_correction(
         "gate", "failed",
         f"{last_cause} apos {attempts_tried} tentativa(s): {redacted_head(last_output[-600:], 300)}",
         cause=last_cause,
+        worker=last_gate_worker,
     )
     gate_payload = {
         "exit_code": last_exit_code,

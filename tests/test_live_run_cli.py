@@ -297,11 +297,11 @@ def test_usage_errors_are_the_only_non_zero_exit(cli: Any, capsys: pytest.Captur
     assert sink.events == []
 
 
-def test_the_default_harness_comes_from_the_operating_harness_variable(cli: Any) -> None:
+def test_harness_comes_from_session_signal_without_a_guessed_default(cli: Any) -> None:
     sink = RecordingSink()
     cli("open", "--ticket", "USR-164", sink=sink, environ={"DARKFAC_OPERATING_HARNESS": "codex"})
     cli("open", "--ticket", "USR-165", sink=sink)
-    assert [e.harness for e in sink.events] == ["codex", "claude"]
+    assert [e.harness for e in sink.events] == ["codex", None]
 
 
 # ---------------------------------------------------------------- an unpublished closing keeps the state (USR-202)
@@ -650,6 +650,45 @@ def test_cli_runs_appear_in_the_live_line_with_harness_and_machine(tmp_path: Pat
     done = next(r for r in read_line_live(db, database_url="", now=datetime.now(timezone.utc)).runs if r.ticket_id == "USR-164")
     assert done.state == "succeeded"
     assert {stage.stage: stage.status for stage in done.stages}["agent"] == "succeeded"
+
+
+def test_codex_run_keeps_ticket_host_separate_from_gate_worker(tmp_path: Path) -> None:
+    db = tmp_path / "control.db"
+    now = datetime.now(timezone.utc)
+    seed_line_live_demo(db, now)
+    sink = SqliteSink(db)
+    state = tmp_path / "live_runs"
+    codex_env = {"CODEX_THREAD_ID": "thread-usr-318"}
+
+    def call(*argv: str) -> int:
+        return live_run.main(
+            list(argv), environ=codex_env, sink=sink, state_dir=state, hostname="NOTEBOOK", warn=None
+        )
+
+    assert call("open", "--ticket", "USR-318", "--title", "Fases e proveniência") == 0
+    assert call("phase", "workspace", "--ticket", "USR-318") == 0
+    assert call("phase", "agent", "--ticket", "USR-318") == 0
+    assert call(
+        "phase", "gate", "--ticket", "USR-318", "--stage-worker", "Grokbox", "--message", "portão oficial"
+    ) == 0
+
+    snapshot = read_line_live(db, database_url="", now=datetime.now(timezone.utc))
+    run = next(item for item in snapshot.runs if item.ticket_id == "USR-318")
+    by_stage = {stage.stage: stage for stage in run.stages}
+    assert run.current_stage == "gate" and run.current_stage_status == "running"
+    assert {name: by_stage[name].status for name in ("preflight", "workspace", "agent")} == {
+        "preflight": "succeeded",
+        "workspace": "succeeded",
+        "agent": "succeeded",
+    }
+    assert run.host_id == "notebook"
+    assert (by_stage["gate"].worker, by_stage["gate"].route) == ("Grokbox", "codex")
+
+
+def test_live_run_does_not_infer_claude_when_harness_is_unknown(cli: Any) -> None:
+    sink = RecordingSink()
+    cli("open", "--ticket", "USR-318", sink=sink, environ={})
+    assert sink.events[0].harness is None
 
 
 def test_published_means_visible_to_the_cloud_hub(cli: Any, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:

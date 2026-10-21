@@ -8257,7 +8257,7 @@
     "title": "Provar entrega autonoma de piloto greenfield stand alone em repositorio e ambiente privados separados",
     "origin": "agent",
     "status": "planned",
-    "delivery_evidence": "M7 2026-10-20. Criterio 1: confirmado por docs/evidence/USR-279-M7.md, que lista o criterio como confirmado com referencia ao plano docs/plans/USR-279-greenfield-pilot.md (secoes 1-6), aprovado em OA-042. Criterio 2: pendente; docs/evidence/USR-279-M7.md confirma que M3, M4 e M5 seguem pendentes. Bloqueadores existentes: OA-043 (acessos, projeto Dokploy e webhook) e OA-047 (envio da demanda Telegram, dependente de OA-043); depois sao necessarios ticket do produto e evidencias de M4/M5. Criterio 3: pendente; docs/evidence/USR-279-M7.md confirma que M6 nao tem prova completa; M1/M2 sao evidencias parciais, sem wheel provada em clone novo. Bloqueadores: M3-M6 de USR-279, OA-043 e OA-047 para os marcos anteriores; ver lacunas em docs/evidence/USR-279-M7-falhas.md. D4 manter arquivado: decisao OA-042 e acao do owner OA-049 aberta; arquivamento nao executado. Relatorio: docs/evidence/USR-279-M7.md. USR-279 permanece planned ate haver evidencia da cadeia completa.",
+    "delivery_evidence": "M7 2026-10-20. Criterio 1: confirmado por docs/evidence/USR-279-M7.md, que lista o criterio como confirmado com referencia ao plano docs/plans/USR-279-greenfield-pilot.md (secoes 1-6), aprovado em OA-042. Criterio 2: pendente; docs/evidence/USR-279-M7.md confirma que M3, M4 e M5 seguem pendentes. Bloqueadores existentes: OA-043 (acessos, projeto Dokploy e webhook) e OA-047 (envio da demanda Telegram, dependente de OA-043); depois sao necessarios ticket do produto e evidencias de M4/M5. Criterio 3: pendente; docs/evidence/USR-279-M7.md confirma que M6 nao tem prova completa; M1/M2 sao evidencias parciais, sem wheel provada em clone novo. Bloqueadores: M3-M6 de USR-279, OA-043 e OA-047 para os marcos anteriores; ver lacunas em docs/evidence/USR-279-M7-falhas.md. D4 manter arquivado: decisao OA-042 e acao do owner OA-051 aberta; arquivamento nao executado. Relatorio: docs/evidence/USR-279-M7.md. USR-279 permanece planned ate haver evidencia da cadeia completa.",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "later",
@@ -9352,8 +9352,8 @@
     "project_id": "darkfac",
     "title": "Corrigir fases e metadados de execução na Esteira ao vivo do DarkHub",
     "origin": "user",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "e5b6c2d98b627e65539add68f6f157dacde2c918",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -9376,7 +9376,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-20T18:34:03.270018Z",
-    "updated_at": "2026-10-20T18:34:03.270018Z"
+    "updated_at": "2026-10-20T21:40:44.013546Z"
   },
   {
     "id": "USR-319",
@@ -9448,9 +9448,10 @@
     "lifecycle_stage": "execution",
     "horizon": "now",
     "tags": [
-      "user-demand"
+      "user-demand",
+      "owner-decision:OA-048=A"
     ],
-    "problem_statement": "Sessao de operacao observou run_ticket.py USR-318 --dry-run --json iniciado 16:55 e retornando aproximadamente 17:55 de 20/10/2026 durante sondagem de cota/wake; tentativa automatica de email do grokbox observada. Nova tentativa completou em38s. Causa ainda nao demonstrada; distinguir hibernacao, wrappers e timeout de rede antes de corrigir. Inspecao de deliver_parallel.py confirma rc7 escreve queue.txt aposentada, runner_grok reenfileira myqueue sem mutex; kind implementation falha em ledger-only USR315; runner_local usa gate local forcado e piso5.5GB contradiz scheduler7.5GB. Scripts operacionais fora do repo em C:/Users/guigc/darkfac-ops.",
+    "problem_statement": "Sessao de operacao observou run_ticket.py USR-318 --dry-run --json iniciado 16:55 e retornando aproximadamente 17:55 de 20/10/2026 durante sondagem de cota/wake; tentativa automatica de email do grokbox observada. Nova tentativa completou em38s. Causa ainda nao demonstrada; distinguir hibernacao, wrappers e timeout de rede antes de corrigir. Inspecao de deliver_parallel.py confirma rc7 escreve queue.txt aposentada, runner_grok reenfileira myqueue sem mutex; kind implementation falha em ledger-only USR315; runner_local usa gate local forcado e piso5.5GB contradiz scheduler7.5GB. Scripts operacionais fora do repo em C:/Users/guigc/darkfac-ops.\n\n[Decisao do owner OA-048] Autorizar revisão independente USR-321 pelo Grok -> opcao A (Autorizar Grok), em 2026-10-20T23:41:40Z. Nota do owner: Owner respondeu a pergunta explicita de envio de arquivos/diff privados USR-321 ao Grok: Autorizar revisao pelo Grok. Evidencia recebida pelo coordenador nesta sessao.",
     "core_journey": [],
     "non_goals": [
       "Nao relaxar piso de cota, Gate G1 ou isolamento de projetos."
@@ -9466,6 +9467,69 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-20T20:58:23.680377Z",
-    "updated_at": "2026-10-20T20:58:23.680377Z"
+    "updated_at": "2026-10-20T23:41:40.983014Z"
+  },
+  {
+    "id": "USR-322",
+    "project_id": "darkfac",
+    "title": "Evitar WinError206 em prompts longos de revisao Grok no Windows",
+    "origin": "agent",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "Revisao independente USR-321 em 20/10/2026: run_agent AgentRequest harness grok mode read com arquivos completos retornou ok=false error_kind=crash text=[WinError 206] O nome do arquivo ou a extensao e muito grande. _run_grok envia req.prompt integral no argumento -p. Prompt curto com leitura de arquivos e mitigacao operacional, nao corrige transporte longo.",
+    "core_journey": [],
+    "non_goals": [
+      "Nao alterar cota, modelos eleitos, permissao de divulgacao nem governanca."
+    ],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Prompt de revisao maior que32KiB executa no Windows sem WinError206 por transporte suportado prompt-file ou stdin.",
+      "Teste de construcao de argv demonstra ausencia do corpo integral no argumento para prompts longos.",
+      "Timeout, redacao de segredos, read-only e diagnostico estruturado preservados."
+    ],
+    "suggested_files": [
+      "core/line/agent_cli.py"
+    ],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-20T23:42:03.508310Z",
+    "updated_at": "2026-10-20T23:42:03.508310Z"
+  },
+  {
+    "id": "USR-326",
+    "project_id": "darkfac",
+    "title": "Run cancelado continua com execucoes Claude e subagentes emitindo heartbeat",
+    "origin": "agent",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "Em20/10/2026 o endpoint canonico cancelou run-2d40b6109e9e USR320 com ok jobs_cancelled1. /api/line/live confirmou run_status cancelled, mas executions.active listou claude_session path /workspaces/darkfac/runs/run-2d40b6109e9e com heartbeat23:51:09UTC e tres subagents com heartbeat23:51:31UTC apos cancelamento anterior23:44UTC. Pode haver subprocessosorfãos ou divergencia da telemetria; causa ainda nao comprovada. cancellation.store_probe depende get_run_status que pode converterfalha emNone.",
+    "core_journey": [],
+    "non_goals": [
+      "Nao matar processos por nome ou parar runs de outros tickets.",
+      "Nao marcar etapas produtivas como sucesso nem relaxar fencing."
+    ],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Reproduzir cancelamento no worker real com agente e subagente; distinguir processo vivo de telemetria obsoleta.",
+      "Cancelamento termina arvore e impede commits/push posteriores em prazo limitado, preservando historico e isolamento.",
+      "Falha do store nao causa continuacao silenciosa indefinida nem vazamento de credenciais."
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-20T23:53:37.650318Z",
+    "updated_at": "2026-10-20T23:53:37.650318Z"
   }
 ]

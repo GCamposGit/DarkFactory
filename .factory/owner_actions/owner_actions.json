@@ -1950,6 +1950,79 @@
     },
     {
       "id": "OA-048",
+      "kind": "decision",
+      "title": "Autorizar revisão independente USR-321 pelo Grok",
+      "priority": "high",
+      "status": "done",
+      "why": "Auto-review recusou envio do código privado dos arquivos alterados ao harness Grok por falta de autorização específica ao destino. Revisão outra família obrigatória antes do merge USR-321.",
+      "blocks": [
+        "USR-321"
+      ],
+      "depends_on": [],
+      "steps": [
+        {
+          "text": "No chat de operação DarkFac, responda explicitamente se autoriza o envio dos arquivos alterados do USR-321 ao harness Grok apenas para revisão independente read-only."
+        }
+      ],
+      "options": [
+        {
+          "id": "A",
+          "label": "Autorizar Grok",
+          "detail": "Autorizar envio do candidato USR-321 ao harness Grok para revisão read-only."
+        },
+        {
+          "id": "B",
+          "label": "Manter código local",
+          "detail": "Não autorizar Grok; manter merge bloqueado até revisor local de outra família validado."
+        }
+      ],
+      "verify": "Decisão explícita registrada nesta OA e recibo de revisão vinculado ao SHA candidato antes do merge.",
+      "created_at": "2026-10-20T23:40:10Z",
+      "created_by": "codex",
+      "resolved_at": "2026-10-20T23:41:40Z",
+      "answer": {
+        "option_id": "A",
+        "note": "Owner respondeu a pergunta explicita de envio de arquivos/diff privados USR-321 ao Grok: Autorizar revisao pelo Grok. Evidencia recebida pelo coordenador nesta sessao.",
+        "answered_at": "2026-10-20T23:41:40Z",
+        "answered_by": "owner"
+      }
+    },
+    {
+      "id": "OA-049",
+      "kind": "decision",
+      "title": "Autorizar revisao independente do diff privado USR-320 pelo Grok",
+      "priority": "high",
+      "status": "open",
+      "why": "Auto-review recusou enviar o diff USR320 ao Grok porque a autorizacao existente cobre apenas USR321. Payload concreto: diff do commit5f8d31c em codex/usr320-recovery-20261020 (identidade de projeto, adapters, worker, testes, relatorio e ledger); destino Grok, finalidade revisao independente somente leitura. Nenhum segredo sera enviado.",
+      "blocks": [
+        "USR-320"
+      ],
+      "depends_on": [],
+      "steps": [
+        {
+          "text": "Neste chat Codex, leia o resumo do candidato320 e escolha Autorizar revisao Grok320 ou Nao autorizar. A escolha vale para este diff e destino; nao autoriza terceiros adicionais."
+        },
+        {
+          "text": "Se autorizar, o agente executa a revisao somente leitura, registra veredito e vincula gate/PR ao candidato. Se nao autorizar, o agente preserva candidato e aguarda rota de revisao aprovada."
+        }
+      ],
+      "options": [
+        {
+          "id": "A",
+          "label": "Autorizar Grok USR320"
+        },
+        {
+          "id": "B",
+          "label": "Nao autorizar envio"
+        }
+      ],
+      "verify": "Resposta explicita do Owner registrada e OA respondida; revisao independente tem veredito e candidato, ou bloqueio permanece visivel sem merge.",
+      "created_at": "2026-10-20T23:55:05Z",
+      "created_by": "codex",
+      "resolved_at": null
+    },
+    {
+      "id": "OA-050",
       "kind": "action",
       "title": "Autenticar GitHub CLI para publicar a entrega do M7",
       "priority": "medium",
@@ -1978,7 +2051,7 @@
       "resolved_at": null
     },
     {
-      "id": "OA-049",
+      "id": "OA-051",
       "kind": "action",
       "title": "Executar D4: manter pilot-hello arquivado",
       "priority": "low",

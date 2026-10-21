@@ -89,7 +89,7 @@ M7 - Relatorio final
 2. Falhas encontradas retomadas ou diagnosticadas, cada uma com commit/PR ou ticket formal.
 3. D4 executada ou registrada como acao do owner; criterios 2 e 3 do USR-279 marcados com evidencia.
 
-Registro M7 (2026-10-20): relatorio publicado em `docs/evidence/USR-279-M7.md` e inventario em `docs/evidence/USR-279-M7-falhas.md`. M1/M2 confirmados dentro das evidencias existentes; M3-M6 e os criterios 2/3 do USR-279 permanecem pendentes. D4 (“manter arquivado”) foi decidida em OA-042 e a execucao tela a tela foi registrada na acao aberta OA-049; o repositorio continua sem ser arquivado.
+Registro M7 (2026-10-20): relatorio publicado em `docs/evidence/USR-279-M7.md` e inventario em `docs/evidence/USR-279-M7-falhas.md`. M1/M2 confirmados dentro das evidencias existentes; M3-M6 e os criterios 2/3 do USR-279 permanecem pendentes. D4 (“manter arquivado”) foi decidida em OA-042 e a execucao tela a tela foi registrada na acao aberta OA-051; o repositorio continua sem ser arquivado.
 
 ## 7. Acoes do owner necessarias (a registrar como OA pelo orquestrador)
 
@@ -97,4 +97,4 @@ Registro M7 (2026-10-20): relatorio publicado em `docs/evidence/USR-279-M7.md` e
 2. Confirmar `gh auth status` com escopo `repo` na conta do owner, para o `GitHubProvider` criar repositorio privado (sem expor token no chat) - high; bloqueia M1.
 3. Se destino A/B: criar no Dokploy o projeto separado e a aplicacao ligada ao repositorio privado, concedendo acesso (GitHub App ou deploy key) somente a esse repositorio, e conferir `DOKPLOY_API_KEY` no ambiente de usuario - high; bloqueia M5.
 4. Configurar o webhook GitHub para Dokploy no repositorio do piloto (runbook `github_dokploy_webhook.md`) - medium; bloqueia deploy automatico em M5.
-5. Apos M7: executar a retencao decidida em D4 (manter `pilot-hello` arquivado) - acao OA-049, prioridade low.
+5. Apos M7: executar a retencao decidida em D4 (manter `pilot-hello` arquivado) - acao OA-051, prioridade low.

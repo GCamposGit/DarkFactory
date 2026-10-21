@@ -55,6 +55,16 @@ def test_tests_step_exit_zero_without_tests_is_infra() -> None:
     assert run_ticket._gate_failure_is_infra_no_tests(_result_output(payload)) is True
 
 
+def test_gate_worker_comes_from_structured_remote_result() -> None:
+    output = _result_output({**GROKBOX_RESULT, "executed_on": {"host": "Grokbox"}})
+    assert run_ticket._gate_execution_worker(output) == "Grokbox"
+
+
+def test_gate_worker_is_unknown_for_local_or_invalid_result() -> None:
+    assert run_ticket._gate_execution_worker(_result_output(GROKBOX_RESULT)) is None
+    assert run_ticket._gate_execution_worker("[HARNESS_RESULT] {invalid") is None
+
+
 def test_discovered_tests_failing_is_not_infra() -> None:
     payload = {
         **GROKBOX_RESULT,
