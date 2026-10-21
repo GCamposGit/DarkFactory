@@ -9413,8 +9413,8 @@
     "project_id": "darkfac",
     "title": "Planning da esteira falha UnknownProjectError em tickets USR",
     "origin": "agent",
-    "status": "implementing",
-    "delivery_evidence": "Em20/10/2026: prova de USR315 PR503 merged7433f3d e OA040done; run5c1eeae3564c cancelado canonicamente superseded_by_verified_delivery_pr503, preservando11tentativas planning e zero development/integration. Runs320 readmitidos cancelados para codex_manual_takeover_usr320, ticket cloudimplementing; sem duplicacao. Causa operacional de versao carregada nao comprovada; corrigido caminho reproduzivel lookupNone->ticket_id e contexto fora try.",
+    "status": "completed",
+    "delivery_evidence": "5f8d31c6b5962e364cabbc51172cb330f180d160",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -9435,7 +9435,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-20T20:58:05.507716Z",
-    "updated_at": "2026-10-20T20:58:05.507716Z"
+    "updated_at": "2026-10-21T04:08:31.746375Z"
   },
   {
     "id": "USR-321",
