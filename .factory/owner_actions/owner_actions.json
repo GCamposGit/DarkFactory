@@ -848,7 +848,7 @@
       "kind": "action",
       "title": "Commit humano: dispatch reenvia no mesmo worker apos restart/congelamento da VM e worker nao apaga worktree de job ativo",
       "priority": "critical",
-      "status": "open",
+      "status": "done",
       "why": "Em 15/10/2026 a plataforma congelou/restaurou a VM do grokbox no meio do portao do USR-192; a recuperacao do worker apagou o worktree do job e gerou 432 falhas falsas, e o Notebook caiu para outro worker perdendo o tempo ja gasto. core/harness/* e protegido: so o owner commita.",
       "blocks": [],
       "depends_on": [],
@@ -868,7 +868,7 @@
       "verify": "git apply --check do patch antes; apos o push, GUARD PASS; um portao com o grokbox congelado por 1 min mostra [REMOTE_RETRY] e termina no mesmo worker",
       "created_at": "2026-10-15T22:23:23Z",
       "created_by": "claude-code",
-      "resolved_at": null,
+      "resolved_at": "2026-10-21T23:45:00Z",
       "history": [
         {
           "at": "2026-10-20T01:57:28Z",
@@ -879,6 +879,11 @@
           "at": "2026-10-20T01:57:35Z",
           "outcome": "evidence:keep_open",
           "note": "Passos 1-2 parecem cumpridos: tests/test_remote_restart_retry.py existe e core/harness/remote_dispatch.py contem [REMOTE_RETRY] na main. Passo 3 (atualizar/reiniciar o worker do grokbox) nao e verificavel daqui; mantida aberta ate o owner confirmar, entao pode ser fechada."
+        },
+        {
+          "at": "2026-10-21T23:45:00Z",
+          "outcome": "resolved",
+          "note": "Passos 1-2 ja na main; passo 3 feito: worker do grokbox atualizado e reiniciado em 21/10 (estava travado busy com CPU 2%)."
         }
       ]
     },
@@ -1165,7 +1170,7 @@
       "kind": "action",
       "title": "Confirmar e restabelecer a conectividade Tailscale do Grokbox",
       "priority": "medium",
-      "status": "open",
+      "status": "done",
       "why": "Em 17/10/2026, o Notebook observou timeouts repetidos no ping Tailscale e em http://100.77.130.5:8080/health. O netcheck local registrou troca de gateway/IP às 09:22:42; apesar de uma resposta posterior via DERP, as sondas seguintes voltaram a falhar. A janela de cinco minutos estáveis exigida antes de encaminhar USR-270 ainda não foi alcançada.",
       "blocks": [
         "USR-270"
@@ -1186,7 +1191,14 @@
       "verify": "No Notebook, o monitor deve registrar pelo menos 10 amostras consecutivas ao longo de >=300 s; cada amostra precisa conter pong from grokbox via Tailscale e HTTP /health status=ok, busy=false, queue_length=0. O comando de inspeção de uma amostra é: & \"C:\\Program Files\\Tailscale\\tailscale.exe\" ping --c 1 --timeout 5s grokbox; & \"C:\\Windows\\System32\\curl.exe\" -fsS --max-time 15 http://100.77.130.5:8080/health",
       "created_at": "2026-10-17T12:32:40Z",
       "created_by": "codex",
-      "resolved_at": null
+      "resolved_at": "2026-10-21T23:45:00Z",
+      "history": [
+        {
+          "at": "2026-10-21T23:45:00Z",
+          "outcome": "resolved",
+          "note": "Grokbox de volta na Tailscale: /health ok, busy=False apos reinicio em 21/10."
+        }
+      ]
     },
     {
       "id": "OA-QR-384",
@@ -1808,7 +1820,7 @@
       "kind": "action",
       "title": "Publicar arquivos protegidos de USR-253 por push direto (com portao completo)",
       "priority": "high",
-      "status": "open",
+      "status": "done",
       "why": "Arquivos protegidos so o owner publica, e o push direto na main pula o CI de PR. Por isso o portao oficial completo roda antes do push e o CI da main e conferido depois.",
       "blocks": [
         "USR-253"
@@ -1839,14 +1851,21 @@
       "verify": "[HARNESS_PASS] no portao antes do push e ultimo run da main verde em gh run list --branch main --limit 3.",
       "created_at": "2026-10-20T10:07:13Z",
       "created_by": "claude-code",
-      "resolved_at": null
+      "resolved_at": "2026-10-21T23:45:00Z",
+      "history": [
+        {
+          "at": "2026-10-21T23:45:00Z",
+          "outcome": "resolved",
+          "note": "Publicado no main em 24c23b85 (lote unico com USR-228/185) apos HARNESS_PASS."
+        }
+      ]
     },
     {
       "id": "OA-045",
       "kind": "action",
       "title": "Publicar arquivos protegidos de USR-228 por push direto (com portao completo)",
       "priority": "high",
-      "status": "open",
+      "status": "done",
       "why": "Arquivos protegidos so o owner publica, e o push direto na main pula o CI de PR. Por isso o portao oficial completo roda antes do push e o CI da main e conferido depois.",
       "blocks": [
         "USR-228"
@@ -1881,7 +1900,14 @@
       "verify": "[HARNESS_PASS] no portao antes do push e ultimo run da main verde em gh run list --branch main --limit 3.",
       "created_at": "2026-10-20T10:29:35Z",
       "created_by": "claude-code",
-      "resolved_at": null
+      "resolved_at": "2026-10-21T23:45:00Z",
+      "history": [
+        {
+          "at": "2026-10-21T23:45:00Z",
+          "outcome": "resolved",
+          "note": "Publicado no main em 24c23b85 apos HARNESS_PASS; testes ajustados a regra nova do guard."
+        }
+      ]
     },
     {
       "id": "OA-047",
@@ -1921,7 +1947,7 @@
       "kind": "action",
       "title": "Publicar arquivos protegidos de USR-185 fatia 3 por push direto (com portao completo)",
       "priority": "medium",
-      "status": "open",
+      "status": "done",
       "why": "Arquivos protegidos so o owner publica, e o push direto na main pula o CI de PR. A fatia 3 troca ids literais de modelo por referencia ao registro em AGENTS.md, CLAUDE.md, FACTORY_RULES.md, core/harness/test_subagent.py, core/harness/remote_worker.py e core/harness/suite_lock.py (comportamento identico). Por isso o portao oficial completo roda antes do push e o CI da main e conferido depois.",
       "blocks": [
         "USR-185"
@@ -1960,7 +1986,14 @@
       "verify": "[HARNESS_PASS] no portao antes do push, ultimo run da main verde em gh run list --branch main --limit 3, e python C:\\dev\\DarkFac\\scripts\\model_id_census.py --verbose nao lista AGENTS.md, CLAUDE.md, FACTORY_RULES.md nem core/harness/*.",
       "created_at": "2026-10-20T15:35:26Z",
       "created_by": "claude-code",
-      "resolved_at": null
+      "resolved_at": "2026-10-21T23:45:00Z",
+      "history": [
+        {
+          "at": "2026-10-21T23:45:00Z",
+          "outcome": "resolved",
+          "note": "Publicado no main em 24c23b85 apos HARNESS_PASS."
+        }
+      ]
     },
     {
       "id": "OA-048",
@@ -2046,7 +2079,7 @@
       "kind": "action",
       "title": "Publicar PR #517 (core/harness protegido): portao quebra no cache hit do veredito remoto",
       "priority": "high",
-      "status": "open",
+      "status": "done",
       "why": "O portao oficial (runner.py --quick) termina em HARNESS_FAIL mesmo com veredito PASS reaproveitado do cache Postgres: o leitor devolve created_at em ISO e runner.py faz float(). Qualquer ticket cujo candidato ja foi aprovado em outro host falha no portao. core/harness e protegido; o CI recusa o PR do agente (GUARD VIOLATION).",
       "blocks": [],
       "depends_on": [],
@@ -2066,7 +2099,14 @@
       "verify": "gh pr view 517 --repo GCamposGit/DarkFactory --json state mostra MERGED; o portao com cache hit termina sem '[ERROR] could not convert string to float'.",
       "created_at": "2026-10-21T16:09:07Z",
       "created_by": "claude-opus-5.5",
-      "resolved_at": null
+      "resolved_at": "2026-10-21T23:45:00Z",
+      "history": [
+        {
+          "at": "2026-10-21T23:45:00Z",
+          "outcome": "resolved",
+          "note": "PR #517 mergeado (admin) pelo owner."
+        }
+      ]
     },
     {
       "id": "OA-051",
