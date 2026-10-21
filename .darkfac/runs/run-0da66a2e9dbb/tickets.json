@@ -1,0 +1,28 @@
+[
+  {
+    "id": "T1",
+    "title": "Consolidar regressões da CLI segura de line_validate",
+    "goal": "Verificar a implementação existente e completar testes que protejam parsing antecipado e preservação da validação oficial, sem reimplementar comportamento já presente.",
+    "files_hint": [
+      "tests/test_usr323_line_validate_cli.py",
+      "scripts/line_validate.py"
+    ],
+    "acceptance": [
+      "--help e -h imprimem uso e encerram com código 0, sem consultar Git, criar snapshot, executar runner ou fallback.",
+      "Argumento desconhecido encerra com código 2 e diagnóstico de uso, sem efeitos operacionais.",
+      "O entrypoint encaminha os argumentos reais para o parser antes da validação.",
+      "Sem argumentos, árvore limpa chama core/harness/runner.py com --quick e propaga seu código de saída.",
+      "Sem argumentos, árvore suja usa snapshot e propaga o resultado; SnapshotError mantém o fallback existente, sem repetir a validação após falha do runner.",
+      "Os testes não iniciam validação real nem criam snapshots reais.",
+      "Ao concluir a implementação, passam os testes focados e python scripts/line_validate.py, cujo fluxo mantém o portão oficial python core/harness/runner.py --quick."
+    ],
+    "tests_to_add": [
+      "Preservar os testes existentes de --help, -h e argumento desconhecido com registro vazio de chamadas operacionais.",
+      "Exercitar o bloco __main__ com argv controlado e operações interceptadas para ajuda e argumento desconhecido.",
+      "Reforçar o teste de árvore limpa verificando comando exato com --quick e propagação de retorno não zero.",
+      "Adicionar testes sem argumentos para árvore suja, SnapshotError com fallback e retorno não zero do runner sem fallback.",
+      "Verificar que main(root) continua equivalente a main(root, []) independentemente dos argumentos do processo hospedeiro."
+    ],
+    "smoke": []
+  }
+]
