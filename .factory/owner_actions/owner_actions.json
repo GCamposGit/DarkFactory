@@ -1976,6 +1976,30 @@
       "created_at": "2026-10-20T21:35:07Z",
       "created_by": "codex",
       "resolved_at": null
+    },
+    {
+      "id": "OA-049",
+      "kind": "action",
+      "title": "Executar D4: manter pilot-hello arquivado",
+      "priority": "low",
+      "status": "open",
+      "why": "A decisao D4 do owner e manter o repositorio pilot-hello arquivado apos o M7; apenas o owner pode executar a acao na conta GitHub proprietaria.",
+      "blocks": [
+        "USR-279"
+      ],
+      "depends_on": [],
+      "steps": [
+        {
+          "text": "No GitHub, abra o repositorio GCamposGit/pilot-hello e selecione Settings > General."
+        },
+        {
+          "text": "Role ate Danger Zone, selecione Archive this repository e confirme digitando pilot-hello quando solicitado."
+        }
+      ],
+      "verify": "O repositorio aparece como Archived no GitHub e gh repo view GCamposGit/pilot-hello --json isArchived devolve true.",
+      "created_at": "2026-10-20T23:17:55Z",
+      "created_by": "claude-code",
+      "resolved_at": null
     }
   ]
 }

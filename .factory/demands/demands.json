@@ -8257,7 +8257,7 @@
     "title": "Provar entrega autonoma de piloto greenfield stand alone em repositorio e ambiente privados separados",
     "origin": "agent",
     "status": "planned",
-    "delivery_evidence": "M7 2026-10-20. Criterio 1: confirmado por docs/plans/USR-279-greenfield-pilot.md (plano e marcos aprovados em OA-042). Criterio 2: pendente: OA-043 libera acessos/projeto Dokploy e OA-047 aguarda para envio Telegram; M3-M5 sem evidencia verificavel. Criterio 3: pendente: falta prova M6 de clone novo com install, validate, wheel e smoke sem checkout/import/servico DarkFac; M1/M2 sao evidencias parciais. M1 confirmado por docs/evidence/USR-279-M1.md; M2 confirmado por docs/evidence/USR-279-M2.md. M3-M6 e lacunas de CI/wheel registrados em docs/evidence/USR-279-M7-falhas.md. D4 manter arquivado registrada na decisao concluida OA-042; arquivamento permanece acao do owner. Relatorio: docs/evidence/USR-279-M7.md.",
+    "delivery_evidence": "M7 2026-10-20. Criterio 1: confirmado por docs/evidence/USR-279-M7.md, que lista o criterio como confirmado com referencia ao plano docs/plans/USR-279-greenfield-pilot.md (secoes 1-6), aprovado em OA-042. Criterio 2: pendente; docs/evidence/USR-279-M7.md confirma que M3, M4 e M5 seguem pendentes. Bloqueadores existentes: OA-043 (acessos, projeto Dokploy e webhook) e OA-047 (envio da demanda Telegram, dependente de OA-043); depois sao necessarios ticket do produto e evidencias de M4/M5. Criterio 3: pendente; docs/evidence/USR-279-M7.md confirma que M6 nao tem prova completa; M1/M2 sao evidencias parciais, sem wheel provada em clone novo. Bloqueadores: M3-M6 de USR-279, OA-043 e OA-047 para os marcos anteriores; ver lacunas em docs/evidence/USR-279-M7-falhas.md. D4 manter arquivado: decisao OA-042 e acao do owner OA-049 aberta; arquivamento nao executado. Relatorio: docs/evidence/USR-279-M7.md. USR-279 permanece planned ate haver evidencia da cadeia completa.",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "later",
@@ -8286,7 +8286,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-16T15:26:57.986877Z",
-    "updated_at": "2026-10-20T22:38:30.268021Z"
+    "updated_at": "2026-10-20T23:18:08.143465Z"
   },
   {
     "id": "USR-277",

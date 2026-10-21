@@ -64,7 +64,7 @@ def parse_report(report: str) -> PilotReport:
     """Parse timeline and criterion tables from an M7 Markdown report."""
     completion = re.search(r"(?im)^Piloto conclu[ií]do\s*:\s*(sim|n[aã]o)\.?\s*$", report)
     timeline_rows = _table_rows(report, "## Linha do tempo M1-M6")
-    criteria_rows = _table_rows(report, "## Criterios 2 e 3 do USR-279")
+    criteria_rows = _table_rows(report, "## Criterios 1, 2 e 3 do USR-279")
     timeline = [
         MilestoneEvidence(
             milestone=row[0], status=row[1], reference=row[2] if len(row) > 2 else "",
@@ -104,7 +104,7 @@ def verify_report(
     required_headings = (
         "## Linha do tempo M1-M6", "## SHAs, PR e CI", "## Deploy e smoke",
         "## Prova de independencia", "## Intervencoes manuais", "## Falhas e lacunas",
-        "## Criterios 2 e 3 do USR-279",
+        "## Criterios 1, 2 e 3 do USR-279",
     )
     for heading in required_headings:
         if heading not in parsed.raw:
@@ -137,7 +137,7 @@ def verify_report(
         if item.criterion in criteria:
             problems.append(f"criterio {item.criterion} duplicado no relatorio")
         criteria[item.criterion] = item
-    for number in (2, 3):
+    for number in (1, 2, 3):
         item = criteria.get(number)
         if item is None:
             problems.append(f"criterio {number} ausente")
@@ -154,7 +154,7 @@ def verify_report(
             problems.append(f"criterio {number} pendente sem bloqueador")
     if demand is not None:
         evidence = str(demand.get("delivery_evidence") or "").lower()
-        for number in (2, 3):
+        for number in (1, 2, 3):
             item = criteria.get(number)
             if item is None:
                 continue
@@ -168,4 +168,6 @@ def verify_report(
                 problems.append(f"criterio {number} confirmado no relatorio mas nao no ticket")
             if item.status == "pendente" and not claimed_pending:
                 problems.append(f"criterio {number} pendente no relatorio mas nao no ticket")
+            if item.status == "confirmado" and claimed_pending:
+                problems.append(f"criterio {number} pendente no ticket apesar de confirmado no relatorio")
     return problems
