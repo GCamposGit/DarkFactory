@@ -6,7 +6,7 @@ import json
 import logging
 import os
 from pathlib import Path
-from threading import RLock
+from threading import Lock, RLock
 from typing import Any
 
 from core.demands.models import UserTicket
@@ -16,6 +16,17 @@ from core.roadmap.models import DeliveryStatus, utc_now
 logger = logging.getLogger(__name__)
 
 DEFAULT_DEMANDS_PATH = Path(".factory/demands/demands.json")
+
+# One mutex per ledger file for the whole process: separate DemandsStore instances (threads, launchers)
+# pointing at the same file must serialize their read-modify-write cycles (USR-321).
+_PATH_LOCKS: dict[str, RLock] = {}
+_PATH_LOCKS_GUARD = Lock()
+
+
+def _lock_for(path: Path) -> RLock:
+    key = os.path.normcase(os.path.abspath(path))
+    with _PATH_LOCKS_GUARD:
+        return _PATH_LOCKS.setdefault(key, RLock())
 
 
 class DemandsStore:
@@ -27,7 +38,7 @@ class DemandsStore:
         else:
             override = os.environ.get("DARKFAC_DEMANDS_PATH")
             self.path = Path(override) if override else DEFAULT_DEMANDS_PATH
-        self._lock = RLock()
+        self._lock = _lock_for(self.path)
         self._ensure_storage()
 
     def _ensure_storage(self) -> None:
@@ -141,3 +152,22 @@ class DemandsStore:
             updated = ticket.model_copy(update=updates)
             self.save_ticket(updated)
             return updated
+
+    def requeue_ticket(self, ticket_id: str, reason: str = "") -> tuple[UserTicket, bool]:
+        """Single mutex-protected path to put a ticket back on the active queue (status ``planned``).
+
+        Returns ``(ticket, changed)``. Terminal tickets (completed/cancelled) are never reopened here
+        and an already planned ticket is left untouched (idempotent under concurrency).
+        """
+        with self._lock:
+            ticket = self.get_ticket(ticket_id)
+            if not ticket:
+                raise KeyError(f"Ticket '{ticket_id}' not found")
+            if ticket.status in (DeliveryStatus.COMPLETED, DeliveryStatus.CANCELLED):
+                raise ValueError(f"Ticket {ticket_id} is {ticket.status.value}; refusing to requeue")
+            if ticket.status == DeliveryStatus.PLANNED:
+                return ticket, False
+            updated = ticket.model_copy(update={"status": DeliveryStatus.PLANNED, "updated_at": utc_now()})
+            self.save_ticket(updated)
+            logger.info("Requeued %s (%s -> planned) %s", ticket_id, ticket.status.value, reason)
+            return updated, True

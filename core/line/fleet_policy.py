@@ -179,6 +179,7 @@ def select_host_for_ticket(
     ticket: TicketCandidate,
     current_fleet_slots: int,
     max_fleet_slots: int = 3,
+    verified_capacity: Optional[dict[str, int]] = None,
 ) -> tuple[Optional[HostConfig], str]:
     """Select the highest-priority free and compatible host for a single ticket.
 
@@ -216,9 +217,12 @@ def select_host_for_ticket(
             unhealthy_hosts.append(f"{host.id}:maintenance")
             continue
 
-        # Capacity check on host
-        if state.active_slots >= host.max_slots:
-            busy_compatible_hosts.append(f"{host.id}:{state.active_slots}/{host.max_slots}")
+        # Never above verified capacity (e.g. free RAM); a busy worker is never reused or interrupted.
+        limit = host.max_slots
+        if verified_capacity is not None and host.id in verified_capacity:
+            limit = min(limit, max(0, verified_capacity[host.id]))
+        if state.active_slots >= limit:
+            busy_compatible_hosts.append(f"{host.id}:{state.active_slots}/{limit}")
             continue
 
         # Found the highest-priority free host!
@@ -238,6 +242,7 @@ def evaluate_admission(
     fleet_config: FleetConfig,
     host_states: dict[str, HostState],
     completed_tickets: Optional[set[str]] = None,
+    verified_capacity: Optional[dict[str, int]] = None,
 ) -> FleetAdmissionResult:
     """Evaluate pure fleet admission for candidate tickets across available hosts.
 
@@ -312,6 +317,7 @@ def evaluate_admission(
             ticket=ticket,
             current_fleet_slots=total_active_slots,
             max_fleet_slots=max_slots,
+            verified_capacity=verified_capacity,
         )
 
         if selected_host is not None:
