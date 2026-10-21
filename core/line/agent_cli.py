@@ -1442,9 +1442,9 @@ def _run_grok(req: AgentRequest) -> AgentResult:
         )
     if req.mode == "write":
         return _run_grok_write(req, executable)
-    # Read mode: one-shot `-p` call that returns plain text (HF-27-03). USR-271: optional MCP servers
+    # Read mode: one-shot prompt-file call returning plain text (USR-322). USR-271: optional MCP servers
     # that are down are left out of a throwaway $GROK_HOME so the handshake cannot eat the timeout.
-    argv = [executable, "-p", req.prompt, "--output-format", "plain"]
+    argv = [executable, "--output-format", "plain"]
     if req.model:
         argv += ["-m", req.model]
     dropped, mcp_reasons = check_grok_optional_mcp_servers()
@@ -1459,10 +1459,17 @@ def _run_grok(req: AgentRequest) -> AgentResult:
             logger.warning("[MCP] could not build an isolated GROK_HOME (%s); running with the user config", exc)
     try:
         try:
-            res = _run_bounded(argv, cwd=req.cwd, timeout_s=req.timeout_s, env=env)
+            # Windows limits argv length; keep private prompt contents off process listings.
+            with tempfile.TemporaryDirectory(prefix="grok_read_prompt_") as directory:
+                prompt_file = Path(directory) / "prompt.txt"
+                prompt_file.write_bytes(req.prompt.encode("utf-8"))
+                res = _run_bounded(
+                    [*argv, "--prompt-file", str(prompt_file)],
+                    cwd=req.cwd, timeout_s=req.timeout_s, env=env,
+                )
         except OSError as exc:
             return AgentResult(
-                ok=False, text=str(exc), harness="grok", model=req.model,
+                ok=False, text=redact_secrets(str(exc)), harness="grok", model=req.model,
                 duration_s=0.0, error_kind="crash",
             )
     finally:

@@ -539,11 +539,13 @@ def test_read_mode_keeps_the_plain_print_call(install_fake, tmp_path: Path, _her
 
     result = run_agent(req)
 
-    assert fake.argv == ["grok-fake", "-p", "review this", "--output-format", "plain", "-m", "grok-4.7"]
-    assert "--prompt-file" not in fake.argv and "--permission-mode" not in fake.argv
+    assert fake.argv[:5] == ["grok-fake", "--output-format", "plain", "-m", "grok-4.7"]
+    assert "--prompt-file" in fake.argv and "--permission-mode" not in fake.argv
+    assert fake.prompt_file_text == "review this"
+    assert fake.prompt_file_path is not None and not fake.prompt_file_path.exists()
     assert fake.kwargs["cwd"] == str(tmp_path) and "stdin" not in fake.kwargs
     assert result.ok is True and result.text == "grok says hi"
-    assert _leftover_prompt_files(_hermetic_grok) == []  # read mode never writes a prompt file
+    assert _leftover_prompt_files(_hermetic_grok) == []  # temporary read prompt is removed
 
 
 def test_read_mode_ignores_the_permission_override(
