@@ -9596,5 +9596,38 @@
     "dependencies": [],
     "created_at": "2026-10-21T03:48:31.262926Z",
     "updated_at": "2026-10-21T03:48:31.262926Z"
+  },
+  {
+    "id": "USR-329",
+    "project_id": "darkfac",
+    "title": "Eliminar fallbacks residuais de identidade em resumo e ramo sem rota",
+    "origin": "review",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "Revisao independente Grok do USR-320 candidato5f8d31c aprovou sem blockers e identificou tres residuos: bindings._build_summary usa context.project_id or ticket_id; cloud_worker ramo no-route fabrica descritor com fallback ticket e projeto persistido nao registrado vira no_route_result; _project_for ainda passa fallback_id obsoleto ignorado. Contexto strict protege dispatch atual, portanto nao bloqueia entrega. Evidencia duravel .factory/test_logs/usr320/independent-review-focused.json (approve,189.781s).",
+    "core_journey": [],
+    "non_goals": [
+      "Nao relaxar lookup strict nem converter ausencia de identidade em projeto default."
+    ],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Resumo e descritor sintetico nunca usam ticket_id como identidade de projeto.",
+      "Projeto persistido nao registrado falha unknown_project tambem quando nao ha rota, preservando isolamento.",
+      "Remover argumento fallback_id obsoleto de _project_for sem quebrar compatibilidade publica; testes focados demonstram os tres casos e portao oficial PASS."
+    ],
+    "suggested_files": [
+      "core/line/bindings.py",
+      "core/orchestrator/cloud_worker.py"
+    ],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-21T04:13:44.412155Z",
+    "updated_at": "2026-10-21T04:13:44.412155Z"
   }
 ]
