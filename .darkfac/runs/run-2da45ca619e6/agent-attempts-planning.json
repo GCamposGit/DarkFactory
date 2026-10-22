@@ -1,0 +1,11 @@
+[
+  {
+    "attempt": 1,
+    "harness": "claude",
+    "model": "opus",
+    "error_kind": "invalid_json",
+    "duration_s": 75.93,
+    "note": "invalid_json",
+    "output": "```json\n{\"spec\":{\"objective\":\"Tornar o preflight de cota/wake observavel e limitado no tempo: medir cada sondagem externa com relogio monotonic, falhar em prazo configurado com erro estruturado (fail-closed, nunca implementar com cota desconhecida) e documentar a causa observada da demora de ~60min no run_ticket.py USR-318 --dry-run --json. Os defeitos de fila/ledger/gate local (rc7/queue.txt aposentada, reenqueue sem mutex no runner_grok, kind implementation falhando em entrega ledger-only, piso 5.5GB do runner_local vs 7.5GB do scheduler) ficam fora desta rodada por decisao do owner e sao registrados como demandas formais separadas.\",\"out_of_scope\":[\"Nao relaxar o piso de cota de 15%, o Gate G1 ou o isolamento entre projetos.\",\"Nao corrigir nesta rodada rc7/queue.txt, reenqueue sem mutex do runner_grok, classificacao de entrega ledger-only nem unificacao do piso local 5.5GB/7.5GB (decisao do owner: opcao C, demandas separadas).\",\"Nao ler nem alterar scripts operacionais fora do repositorio (C:/Users/guigc/darkfac-ops) enquanto a pergunta de conta q4 estiver sem decisao do owner.\",\"Nao executar a revisao independente USR-321 pelo Grok dentro desta rodada (fluxo paralelo ja autorizado em OA-048).\",\"Nao reescrever o roteador de modelos nem a politica de cascade da esteira.\"],\"design\":\"1) Instrumentacao: introduzir um helper de medicao em core/line (ex. core/line/probe_timing.py) que envolve cada sondagem externa de cota/wake com time.monotonic(), registrando provedor, operacao, duracao_ms, resultado e causa; o preflight passa a emitir essas amostras em logging estruturado e num artefato JSON por execucao em .factory/executions/<run>/preflight_timing.json, sem alterar a decisao de roteamento. 2) Limite de tempo: cada sondagem externa recebe timeout explicito (deadline por provedor + deadline agregado do preflight) configuravel por .factory/config e variavel de ambiente, com default conservador; ao estourar, a sondagem retorna erro estruturado (provider, operation, ela\n... [truncated, 11436 chars total]"
+  }
+]
