@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from contextlib import closing
 from pathlib import Path
 
 from core.workflow.control_store import SQLiteControlStore
@@ -20,7 +21,7 @@ NOW = "2026-09-23T10:00:00+00:00"
 
 def _seed_control_db(path: Path) -> None:
     store = SQLiteControlStore(db_path=path)
-    with store._connect() as conn:
+    with closing(store._connect()) as conn, conn:
         conn.execute(
             "INSERT INTO runs (run_id, project_id, demand_id, demand_version, runtime_owner, mode, status,"
             " plan_digest, config_version, created_at, updated_at)"
@@ -55,7 +56,7 @@ def _seed_intake_command(
 ) -> None:
     """Seed one raw intake_commands row, as the intake pipeline would have written it."""
     store = SQLiteControlStore(db_path=path)
-    with store._connect() as conn:
+    with closing(store._connect()) as conn, conn:
         conn.execute(
             "INSERT INTO intake_commands (channel, external_id, project_id, payload_digest, payload, mode,"
             " policy_ref, demand_id, demand_version, run_id, initial_job_id, committed_at)"
@@ -140,7 +141,7 @@ def test_task_dashboard_does_not_raise_a_waiting_human_on_a_finished_run(tmp_pat
     db = tmp_path / "control.db"
     now = "2026-09-30T00:48:06+00:00"
     store = SQLiteControlStore(db_path=db)
-    with store._connect() as conn:
+    with closing(store._connect()) as conn, conn:
         conn.execute(
             "INSERT INTO runs (run_id, project_id, demand_id, demand_version, runtime_owner, mode, status,"
             " plan_digest, config_version, created_at, updated_at)"
@@ -250,7 +251,7 @@ def test_task_dashboard_uses_demand_id_as_task_id_when_ticket_equals_project(tmp
     """Real cloud rows carry ticket_id = project_id ("darkfac"); demand_id is the meaningful id."""
     db = tmp_path / "control.db"
     store = SQLiteControlStore(db_path=db)
-    with store._connect() as conn:
+    with closing(store._connect()) as conn, conn:
         conn.execute(
             "INSERT INTO runs (run_id, project_id, demand_id, demand_version, runtime_owner, mode, status,"
             " plan_digest, config_version, created_at, updated_at)"
