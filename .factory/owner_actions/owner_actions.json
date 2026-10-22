@@ -2287,29 +2287,37 @@
     {
       "id": "OA-054",
       "kind": "action",
-      "title": "Desktop: descobrir por que o worker morreu em 22/10 ~02:10Z e desligar suspensao",
+      "title": "Desktop: tela azul 0x50 do driver do Warsaw (modulo bancario) derrubou o worker em 21/10; atualizar ou remover o Warsaw",
       "priority": "medium",
       "status": "open",
-      "why": "USR-342: o processo do remote_worker (pid 5480) no darkfac-desktop morreu no meio do portao e so voltou ~17 min depois. Log de eventos e energia so sao acessiveis no proprio Desktop.",
+      "why": "Diagnostico remoto via /system/exec do worker (22/10): em 21/10 23:09 local o Desktop teve BugCheck 0x00000050 (PAGE_FAULT_IN_NONPAGED_AREA), reiniciou 23:22 (Kernel-Power 41, EventLog 6008) com dump em C:\\WINDOWS\\MEMORY.DMP; o Windows Error Reporting classificou a falha no bucket AV_wsddpp (driver wsddpp.sys do Warsaw/GAS Tecnologia, modulo de seguranca bancaria) e o servico 'Warsaw Technology' caiu de novo as 23:40. Nao foi suspensao: standby na tomada ja e 0. Instalar/remover software no Desktop e decisao do owner.",
       "blocks": [],
       "depends_on": [],
       "steps": [
         {
-          "text": "No Desktop, abrir PowerShell e listar eventos de energia/falha entre 21/10 23:00 e 23:35 (horario local)",
-          "command": "Get-WinEvent -FilterHashtable @{LogName='System','Application'; StartTime='2026-10-21 23:00'; EndTime='2026-10-21 23:35'} | ? { $_.Id -in 41,6008,1074,42,1000,1001,2004 } | fl TimeCreated,Id,ProviderName,Message > C:\\dev\\DarkFac\\.factory\\owner_actions\\OA-054-events.txt"
+          "text": "Decida: voce usa banco pelo navegador do Desktop? Se NAO, remova o Warsaw (opcao recomendada: o Desktop e worker de testes). Se SIM, apenas atualize-o pelo site do seu banco."
         },
         {
-          "text": "Desligar suspensao na tomada",
-          "command": "powercfg /change standby-timeout-ac 0"
+          "text": "Para remover: no Desktop, Iniciar > Configuracoes > Aplicativos > Aplicativos instalados; procure 'Warsaw' (ou 'Core de seguranca bancaria' / 'GAS Tecnologia'), clique nos tres pontos > Desinstalar > Desinstalar. Reinicie o Desktop quando pedir (avise antes, para nao cortar um portao)."
         },
         {
-          "text": "Avisar no chat que o arquivo de eventos foi gerado"
+          "text": "Para atualizar (se precisar do banco): baixe a versao atual do modulo de seguranca pelo site do seu banco e instale por cima; reinicie."
+        },
+        {
+          "text": "Avise no chat ('054 ok'): o agente confere pelo worker que o servico Warsaw sumiu (ou esta na versao nova) e que nao houve novo BugCheck."
         }
       ],
-      "verify": "Arquivo OA-054-events.txt existe; powercfg /q mostra standby AC = 0",
+      "verify": "Via /system/exec do worker do Desktop: Get-Service *warsaw* nao retorna nada (removido) ou mostra versao nova; nenhum evento Kernel-Power 41 / BugCheck depois da data da acao.",
       "created_at": "2026-10-22T12:00:00Z",
       "created_by": "claude",
-      "resolved_at": null
+      "resolved_at": null,
+      "history": [
+        {
+          "at": "2026-10-22T13:10:00Z",
+          "outcome": "evidence:keep_open",
+          "note": "Causa encontrada remotamente: BugCheck 0x50 com bucket AV_wsddpp (driver do Warsaw) em 21/10 23:09; suspensao ja desligada. Passos trocados para atualizar/remover o Warsaw."
+        }
+      ]
     }
   ]
 }
