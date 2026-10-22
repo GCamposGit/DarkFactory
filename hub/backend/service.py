@@ -3005,6 +3005,19 @@ class HubService:
                     response["status"] = self.get_demand_ticket(ticket.id).status.value
             return response
 
+        def _handle_project_demand(project_id: str, text: str, user_id: int) -> Dict[str, Any]:
+            from core.demands.models import DemandInput
+
+            ticket = self.demands_service.create_ticket_from_input(
+                DemandInput(
+                    title=f"Telegram: {text[:60].strip()}",
+                    problem_statement=text,
+                    project_id=project_id,
+                ),
+                force_heuristic=True,
+            )
+            return {"ticket_id": ticket.id, "title": ticket.title, "status": ticket.status.value}
+
         def _handle_line(ticket_id: str, user_id: int) -> Dict[str, Any]:
             submission = self.submit_ticket_to_line(ticket_id)
             return submission.model_dump()
@@ -3065,6 +3078,7 @@ class HubService:
             config=config,
             state_dir=telegram_state_dir,
             demand_handler=_handle_demand,
+            project_demand_handler=_handle_project_demand,
             line_handler=_handle_line,
             cancel_handler=_handle_cancel,
             status_handler=_handle_status,
