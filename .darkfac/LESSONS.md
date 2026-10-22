@@ -1,0 +1,3 @@
+- [no_route_available not_before=2026-10-21T22:41:12+00:00] Planejar janelas de execucao observando limites de cota e capacidade dos harnesses para prevenir degradacao de rotas.
+- [handler_error:IntegrationError: failed to launch gh: [W~bb4b53b3] Analisar causa raiz 'handler_error:IntegrationError: failed to launch gh: [W~bb4b53b3' no estagio 'integration' e incluir salvaguardas preventivas determinísticas.
+- [ci_pending:not_before=2026-10-22T02:45:51.266289+00:00] Acompanhar conclusao de checks do CI e politicas de branch antes de tentar merge da integracao.
