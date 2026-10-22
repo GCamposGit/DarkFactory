@@ -2256,7 +2256,7 @@
       "kind": "action",
       "title": "Mesclar PR #576 (USR-342 + conserto do CI vermelho USR-349) com --admin",
       "priority": "high",
-      "status": "open",
+      "status": "done",
       "why": "O PR toca core/harness (protegido); o GUARD barra o agente. Portao oficial passou no Desktop (4984 passed, 0 failed). Ele tambem corrige o CI vermelho da main (USR-349), que bloqueia todas as entregas.",
       "blocks": [
         "USR-342",
@@ -2275,7 +2275,7 @@
       "verify": "gh pr view 576 --repo GCamposGit/DarkFactory mostra MERGED",
       "created_at": "2026-10-22T11:50:00Z",
       "created_by": "claude",
-      "resolved_at": null
+      "resolved_at": "2026-10-22T12:35:00Z"
     },
     {
       "id": "OA-054",
