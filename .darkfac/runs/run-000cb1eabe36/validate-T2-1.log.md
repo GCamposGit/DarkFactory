@@ -1,0 +1,46 @@
+# development attempt log
+
+- iteration: 1
+- harness: codex
+- model: -
+- error_kind: -
+- duration_s: 44.472
+- note: validate passed (exit 0)
+
+## Output (redacted, first 2000 chars)
+
+```text
+verdict=PASSED (Exit code 0 in 44.47s)
+
+All tests passed successfully.
+```
+
+## Raw output tail (redacted, last 3000 chars)
+
+```text
+$ python scripts/line_validate.py
+[line_validate] dirty tree: validating a snapshot commit of the working tree
+[line_validate] snapshot f174e15df301 checked out at /tmp/line-validate-wt-8c6scj0h/tree; running the official harness (--quick)
+[STEP_START] syntax_and_types
+[STEP_PASS] syntax_and_types
+[STEP_TIME] syntax_and_types 0.0s (cache hit)
+[STEP_START] unit_and_integration_tests_parallel
+[STEP_PASS] unit_and_integration_tests_parallel
+[STEP_TIME] unit_and_integration_tests_parallel 0.0s (cache hit)
+[STEP_START] unit_and_integration_tests_serial
+[STEP_PASS] unit_and_integration_tests_serial
+[STEP_TIME] unit_and_integration_tests_serial 0.0s (cache hit)
+[TEST_COUNT] count=4953
+[CACHE_HIT] reusing PASS verdict from host=grok-bot-vm-418374532 candidate_sha=95c28cb972a0 age=65s (tree unchanged; skipping 3 step(s))
+[HARNESS_RESULT] {"schema_version":"1","candidate_sha":"f174e15df301534d8c3ffb26ec1113cbabdf45e6","config_hash":"5fbdfdca494daf34f2b15dcffc07c5df48933fd0135b57d5a469775621fb14ac","required_steps":["syntax_and_types","unit_and_integration_tests_parallel","unit_and_integration_tests_serial"],"started_steps":["syntax_and_types","unit_and_integration_tests_parallel","unit_and_integration_tests_serial"],"passed_steps":["syntax_and_types","unit_and_integration_tests_parallel","unit_and_integration_tests_serial"],"failed_steps":[],"discovered_count":4953,"passed_count":4908,"skipped_count":45,"exit_codes":{"syntax_and_types":0,"unit_and_integration_tests_parallel":0,"unit_and_integration_tests_serial":0},"artifact_refs":["/tmp/line-validate-wt-8c6scj0h/tree/harness.config.json"],"reused_from":{"host":"grok-bot-vm-418374532","candidate_sha":"95c28cb972a02f9094ccdd5a24909b17983c1325","age_sec":65.4},"executed_on":null}
+[HARNESS_PASS]
+[HUB] Benchmark refresh triggered → https://darkhub.ggcampos.com (200)
+[RUN_TIMING] {"exec_sec": 41.4, "host": "de5decf21295", "local_only": false, "lock_timed_out": false, "lock_wait_sec": 0.0, "no_cache": false, "path": "remote", "quick": true, "remote_attempts": [], "remote_lost_sec": 0, "schema": 1, "steps_timeout_sum_sec": 3420.0, "success": true, "total_sec": 41.7, "tree_hash": "bd650b9f0668aaf841519f64267f218444be1349", "ts": "2026-10-22T01:04:53Z", "worker_job": false}
+```
+
+## Remote dispatch lines (redacted)
+
+```text
+[line_validate] dirty tree: validating a snapshot commit of the working tree
+[line_validate] snapshot f174e15df301 checked out at /tmp/line-validate-wt-8c6scj0h/tree; running the official harness (--quick)
+```

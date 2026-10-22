@@ -183,23 +183,35 @@ def _ticket(store: DemandsStore, tid: str, status: DeliveryStatus) -> None:
     store.save_ticket(UserTicket(id=tid, title=tid, status=status, delivery_evidence=ev, problem_statement="orig"))
 
 
-def test_reopen_completed_preserves_history(tmp_path):
-    store = DemandsStore(tmp_path / "d.json")
+def test_reopen_completed_preserves_history_after_reload(tmp_path):
+    path = tmp_path / "d.json"
+    store = DemandsStore(path)
     _ticket(store, "USR-900", DeliveryStatus.COMPLETED)
-    t, changed = store.requeue_ticket("USR-900", reason="[LIVE_CONVERGENCE_FAILURE] x", reopen=True)
+    reason = "[LIVE_CONVERGENCE_FAILURE] failed on node desktop"
+    t, changed = store.requeue_ticket("USR-900", reason=reason, reopen=True)
+    reloaded = DemandsStore(path).get_ticket("USR-900")
+
     assert changed and t.status == DeliveryStatus.PLANNED and t.delivery_evidence is None
-    assert t.problem_statement.startswith("orig") and "LIVE_CONVERGENCE_FAILURE" in t.problem_statement
+    assert reloaded is not None
+    assert reloaded.status == DeliveryStatus.PLANNED and reloaded.delivery_evidence is None
+    assert reloaded.problem_statement.startswith("orig")
+    assert reason in reloaded.problem_statement
 
 
 def test_reopen_completed_is_idempotent_and_invalidates_delivery_evidence(tmp_path):
-    store = DemandsStore(tmp_path / "d.json")
+    path = tmp_path / "d.json"
+    store = DemandsStore(path)
     _ticket(store, "USR-903", DeliveryStatus.COMPLETED)
     first, changed_first = store.requeue_ticket("USR-903", reason="[LIVE_CONVERGENCE_FAILURE] retry", reopen=True)
-    second, changed_second = store.requeue_ticket("USR-903", reason="[LIVE_CONVERGENCE_FAILURE] retry", reopen=True)
+    recorded_history = first.problem_statement
+    second, changed_second = DemandsStore(path).requeue_ticket(
+        "USR-903", reason="[LIVE_CONVERGENCE_FAILURE] retry", reopen=True
+    )
     assert changed_first is True
     assert changed_second is False
     assert first.delivery_evidence is None and second.delivery_evidence is None
     assert second.problem_statement.count("LIVE_CONVERGENCE_FAILURE") == 1
+    assert second.problem_statement == recorded_history
 
 
 def test_reopen_requires_reason_and_default_still_refuses(tmp_path):
