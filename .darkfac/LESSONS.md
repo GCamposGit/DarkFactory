@@ -1,0 +1,3 @@
+- [no_route_available not_before=2026-10-20T22:17:07+00:00] Planejar janelas de execucao observando limites de cota e capacidade dos harnesses para prevenir degradacao de rotas.
+- [validate_exhausted] Garantir que os testes e comandos de validacao passem localmente antes do estagio 'development'.
+- [development_high_iterations] Estagio 'development' exigiu 3 iteracoes; planejar diffs mais atomicos e validacoes unitarias intermediarias.
