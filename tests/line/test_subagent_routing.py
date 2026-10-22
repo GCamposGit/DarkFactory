@@ -436,5 +436,6 @@ def test_model_ids_match_agent_definition_skills_and_docs() -> None:
 
     claude_md = (REPO_ROOT / "CLAUDE.md").read_text(encoding="utf-8")
     guide = (REPO_ROOT / "docs" / "MODEL_SELECTION_GUIDE.md").read_text(encoding="utf-8")
-    assert cfg.models["haiku"] in claude_md
+    # USR-185: CLAUDE.md references the registry alias instead of the literal id.
+    assert "alias `haiku` do registro" in claude_md
     assert cfg.models["haiku"] in guide

@@ -744,6 +744,15 @@ def _kill_process_tree_once(pid: int) -> None:
             import signal
 
             pgid = os.getpgid(pid)
+            if pgid == os.getpgid(0):
+                # A child sharing our process group: killpg would take down this process (and the
+                # gate worker running it). Kill only the target's own tree instead (USR-326).
+                for p in [*_descendant_pids(pid), pid]:
+                    try:
+                        os.kill(p, signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
+                return
             os.killpg(pgid, signal.SIGKILL)
         except ProcessLookupError:
             pass

@@ -17,6 +17,12 @@ import sys
 from pathlib import Path
 from typing import Sequence
 
+# USR-228: the guard may run as a script from a base-owned checkout; make the
+# sibling ``core.governance`` package of THAT checkout importable.
+_REPO_ROOT = str(Path(__file__).resolve().parents[2])
+if _REPO_ROOT not in sys.path:
+    sys.path.insert(0, _REPO_ROOT)
+
 PROTECTED_PATTERNS: tuple[str, ...] = (
     "AGENTS.md",
     "MISSION.md",
@@ -27,6 +33,7 @@ PROTECTED_PATTERNS: tuple[str, ...] = (
     ".agents/rules/*",
     "core/harness/*",
     "core/orchestrator/guard.py",
+    "core/governance/*",
     ".factory/holdout/*",
     "tests/test_ci_policy.py",
     "tests/test_governance_guard.py",
@@ -148,15 +155,41 @@ def audit_paths(file_list: Sequence[str]) -> list[str]:
                 break
     return violations
 
-def is_governance_evolution_authorized() -> bool:
-    """Check if governance modification is explicitly authorized via env flag or verified ticket."""
-    return os.environ.get("DARKFAC_ALLOW_GOVERNANCE_EVOLUTION", "").strip().lower() in ("1", "true", "yes")
+def is_governance_evolution_authorized(
+    violations: Sequence[str] = (),
+    *,
+    repository: Path | None = None,
+    trusted_base: str | None = None,
+) -> bool:
+    """Authorize protected changes only with an owner record on the trusted base.
+
+    The record (.factory/governance/authorizations/<id>.json) must bind ticket,
+    owner approver, the exact protected paths, the candidate (tree/commit) and an
+    unexpired date, and must exist on ``trusted_base`` (default origin/main), not
+    merely in the candidate. An environment flag alone is never sufficient.
+    """
+    from core.governance.authorization import DEFAULT_TRUSTED_BASE, verify_authorization
+
+    result = verify_authorization(
+        list(violations),
+        repository=repository if repository is not None else Path.cwd(),
+        trusted_base=trusted_base or DEFAULT_TRUSTED_BASE,
+    )
+    if not result.ok:
+        print(f"[GUARD] governance authorization rejected: {result.reason}", file=sys.stderr)
+    return result.ok
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     arguments = list(sys.argv[1:] if argv is None else argv)
     base_ref = "HEAD"
     repo_path: Path | None = None
+    trusted_base: str | None = None
+    if "--trusted-base" in arguments:
+        idx = arguments.index("--trusted-base")
+        if idx + 1 < len(arguments):
+            trusted_base = arguments[idx + 1]
+            arguments = arguments[:idx] + arguments[idx + 2 :]
     if arguments:
         if "--repo" in arguments:
             idx = arguments.index("--repo")
@@ -176,8 +209,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     violations = audit_paths(modified)
 
     if violations:
-        if is_governance_evolution_authorized():
-            print(f"[GUARD PASS] Governance modifications detected ({len(violations)} files), authorized by DARKFAC_ALLOW_GOVERNANCE_EVOLUTION.")
+        if is_governance_evolution_authorized(
+            violations, repository=repo_path, trusted_base=trusted_base
+        ):
+            print(f"[GUARD PASS] Governance modifications detected ({len(violations)} files), authorized by a verified owner record on the trusted base.")
             return 0
 
         print("==================================================")

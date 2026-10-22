@@ -190,5 +190,17 @@ def watch(
                 except (ValueError, OSError):
                     pass
             thread.join(timeout=2.0)
+            if fresh and (token.is_cancelled() or cancel_requested(ticket_id, root)):
+                _finish_cancelled_executions(ticket_id)
             if fresh:
                 clear_request(ticket_id, root)
+
+
+def _finish_cancelled_executions(ticket_id: str) -> None:
+    """Close parent and subagent executions of the cancelled ticket (USR-326); never raises."""
+    try:
+        from core.workflow import execution_registry
+
+        execution_registry.get_registry().cancel_ticket(ticket_id)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("could not finish cancelled executions of %s: %s", ticket_id, type(exc).__name__)

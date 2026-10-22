@@ -5131,8 +5131,8 @@
     "project_id": "darkfac",
     "title": "Registro de modelos autonomo: descoberta, qualificacao, promocao e rollback sem edicao manual",
     "origin": "user",
-    "status": "planned",
-    "delivery_evidence": "Reaberto em 20/10/2026: Fatiças 1-8 e 8b entregues; aguardando OA-046 do Owner publicar docs/proposals/USR-185-F3-protected-registry.patch (anterior: bece1188bc477f2384fe55dbaced0fd12261da09. Fatia 4 (docs geradas) entregue em 20/10/2026; Fatia 3 (proposta protegidos) entregue em 20/10/2026, OA-046; Fatia 5 (descoberta) entregue em 20/10/2026; Fatia 6 (qualificacao) entregue em 20/10/2026; Fatia 7 (promocao e rollback) entregue em 20/10/2026; Fatia 8 (limiares do Grill) entregue em 20/10/2026)",
+    "status": "completed",
+    "delivery_evidence": "0ecb98cfc5f633b7c90dd0bae967f15fd3895baa",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "later",
@@ -5164,7 +5164,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-09T07:01:39.369233Z",
-    "updated_at": "2026-10-20T18:30:39.045242Z"
+    "updated_at": "2026-10-22T00:21:20.802247Z"
   },
   {
     "id": "USR-186",
@@ -9507,8 +9507,8 @@
     "project_id": "darkfac",
     "title": "Run cancelado continua com execucoes Claude e subagentes emitindo heartbeat",
     "origin": "agent",
-    "status": "planned",
-    "delivery_evidence": null,
+    "status": "completed",
+    "delivery_evidence": "942e8be2d83c2cf4a392fe9ace14e52ecbb1af1a",
     "item_type": "feature",
     "lifecycle_stage": "execution",
     "horizon": "now",
@@ -9531,7 +9531,7 @@
     "estimated_complexity": "medium",
     "dependencies": [],
     "created_at": "2026-10-20T23:53:37.650318Z",
-    "updated_at": "2026-10-20T23:53:37.650318Z"
+    "updated_at": "2026-10-21T23:45:10.097241Z"
   },
   {
     "id": "USR-327",
@@ -9820,5 +9820,71 @@
     "dependencies": [],
     "created_at": "2026-10-21T20:43:03.648724Z",
     "updated_at": "2026-10-21T20:43:03.648730Z"
+  },
+  {
+    "id": "USR-339",
+    "project_id": "darkfac",
+    "title": "Hub sem queda: imagem GHCR e troca start-first (USR-207 parte 2)",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "OA-044 cumprida pelo owner em 21/10 (autoDeploy do compose Darkhub desligado, registry ghcr.io criado no Dokploy, sonda de disponibilidade agendada no Notebook). Falta a parte de codigo de docs/proposals/USR-207-zero-downtime.md secoes 2.1-2.2: aplicar USR-207-ghcr-build.patch (workflow protegido hub-image.yml), trocar build por image ghcr.io/gcamposgit/darkhub:SHA no compose do Hub, adaptar core/orchestrator/compose_render.py e o teste test_darkhub_build_pinned_before_deploy_and_health_converges, redeploy esperar a tag do sha, remover container_name fixo e usar start-first gated por healthcheck. Corrigir tambem o comando schtasks da secao 1 da proposta (aspas quebram no PowerShell; usar Register-ScheduledTask com pythonw.exe em caminho absoluto).",
+    "core_journey": [
+      "OA-044 cumprida pelo owner em 21/10 (autoDeploy do compose Darkhub desligado, registry ghcr.io criado no Dokploy, sonda de disponibilidade agendada no Notebook). Falta a parte de codigo de docs/proposals/USR-207-zero-downtime.md secoes 2.1-2.2: aplicar USR-207-ghcr-build.patch (workflow protegido hub-image.yml), trocar build por image ghcr.io/gcamposgit/darkhub:SHA no compose do Hub, adaptar core/orchestrator/compose_render.py e o teste test_darkhub_build_pinned_before_deploy_and_health_converges, redeploy esperar a tag do sha, remover container_name fixo e usar start-first gated por healthcheck. Corrigir tambem o comando schtasks da secao 1 da proposta (aspas quebram no PowerShell; usar Register-ScheduledTask com pythonw.exe em caminho absoluto)."
+    ],
+    "non_goals": [
+      "Nao aumentar a VPS sem medicao"
+    ],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Um merge gera uma unica imagem GHCR do sha e um unico deploy do Hub",
+      "Durante um deploy real a sonda de 1 s nao ve resposta diferente de 200 em /health",
+      "Comando de agendamento da sonda na proposta funciona colado no PowerShell",
+      "Portao oficial runner.py --quick passa"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-21T23:53:15.560129Z",
+    "updated_at": "2026-10-21T23:53:15.560129Z"
+  },
+  {
+    "id": "USR-340",
+    "project_id": "darkfac",
+    "title": "Telegram do Hub recusa /demand de projeto nao-darkfac (intake_service nao ligado)",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "Em 21/10 o owner enviou '/demand pilot-hello: ...' (OA-047, M3 do USR-279) e o bot respondeu 'Este canal nao encaminha demandas ao projeto pilot-hello: nada foi registrado.' O roteamento (core/intake/project_routing.resolve_demand) reconheceu o projeto, mas hub/backend/service.py _build_telegram_gateway cria TelegramGateway sem intake_service; core/integrations/telegram.py:790 entao recusa todo projeto diferente de darkfac. Passar intake_service ingenuamente desviaria tambem as demandas darkfac do demand_handler atual para o intake autonomo (mudanca de comportamento). Corrigir de forma que projetos nao-darkfac usem get_autonomous_intake_service() e darkfac mantenha o fluxo atual.",
+    "core_journey": [
+      "Em 21/10 o owner enviou '/demand pilot-hello: ...' (OA-047, M3 do USR-279) e o bot respondeu 'Este canal nao encaminha demandas ao projeto pilot-hello: nada foi registrado.' O roteamento (core/intake/project_routing.resolve_demand) reconheceu o projeto, mas hub/backend/service.py _build_telegram_gateway cria TelegramGateway sem intake_service; core/integrations/telegram.py:790 entao recusa todo projeto diferente de darkfac. Passar intake_service ingenuamente desviaria tambem as demandas darkfac do demand_handler atual para o intake autonomo (mudanca de comportamento). Corrigir de forma que projetos nao-darkfac usem get_autonomous_intake_service() e darkfac mantenha o fluxo atual."
+    ],
+    "non_goals": [
+      "Nao mudar o fluxo de demandas darkfac"
+    ],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "'/demand pilot-hello: <texto>' pelo webhook do Hub cria demanda/ticket do projeto pilot-hello (prefixo PH) e nenhum USR-",
+      "'/demand <texto>' sem projeto continua indo pelo demand_handler atual (teste de regressao)",
+      "Intake indisponivel responde erro explicito sem registrar nada",
+      "Portao oficial runner.py --quick passa"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-22T00:09:32.852759Z",
+    "updated_at": "2026-10-22T00:09:32.852759Z"
   }
 ]

@@ -246,24 +246,22 @@ def test_run_ticket_parser_supports_git_autonomy_flags():
     assert args.no_push is True
 
 
-def test_governance_evolution_authorized_flag(monkeypatch: pytest.MonkeyPatch, test_git_repo: Path):
+def test_governance_evolution_flag_alone_never_authorizes(monkeypatch: pytest.MonkeyPatch, test_git_repo: Path):
+    """USR-228: the env flag alone is never sufficient; an owner record on the trusted base is required."""
     monkeypatch.delenv("DARKFAC_ALLOW_GOVERNANCE_EVOLUTION", raising=False)
     assert not is_governance_evolution_authorized()
 
     monkeypatch.setenv("DARKFAC_ALLOW_GOVERNANCE_EVOLUTION", "1")
-    assert is_governance_evolution_authorized()
+    assert not is_governance_evolution_authorized()
 
-    # Touch a protected file in test_git_repo
     (test_git_repo / "AGENTS.md").write_text("Modified agents\n", encoding="utf-8")
     _git(test_git_repo, "add", "AGENTS.md")
 
-    # In default mode (without env), guard fails
     monkeypatch.delenv("DARKFAC_ALLOW_GOVERNANCE_EVOLUTION", raising=False)
     assert guard_main(["HEAD", "--repo", str(test_git_repo)]) == 1
 
-    # With authorized flag, guard passes
     monkeypatch.setenv("DARKFAC_ALLOW_GOVERNANCE_EVOLUTION", "true")
-    assert guard_main(["HEAD", "--repo", str(test_git_repo)]) == 0
+    assert guard_main(["HEAD", "--repo", str(test_git_repo)]) == 1
 
 
 def test_sync_with_base_auto_merges_demands_json_concurrent_registrations(test_remote_pair: tuple[Path, Path]):

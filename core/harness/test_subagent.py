@@ -25,6 +25,8 @@ from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field
 
+from core.models.registry import gateway_id, id_of, resolve
+
 logger = logging.getLogger("core.harness.test_subagent")
 
 
@@ -112,27 +114,27 @@ def get_harness_test_runner_spec(
         if deep_rca:
             return HarnessRunnerSpec(
                 harness=norm_harness,
-                model_id="openai/gpt-5-6-luna-high",
+                model_id=gateway_id("luna"),
                 reasoning_effort="max",
                 execution_tier=ExecutionTier.DEEP_DIAGNOSTIC,
                 rationale="Luna max: High-depth reasoning for complex test failure diagnosis, concurrency bugs, and architectural edge cases.",
-                config_snippet='{"model": "openai/gpt-5-6-luna-high", "reasoning_effort": "max"}',
+                config_snippet=json.dumps({"model": gateway_id("luna"), "reasoning_effort": "max"}),
             )
         else:
             return HarnessRunnerSpec(
                 harness=norm_harness,
-                model_id="openai/gpt-5-6-luna-high",
+                model_id=gateway_id("luna"),
                 reasoning_effort="low",
                 execution_tier=ExecutionTier.LIGHT_HARNESS,
                 rationale="Luna low: Ultra-fast execution and syntactic failure parsing without excessive reasoning overhead (40% lower cost, ~0.45s latency).",
-                config_snippet='{"model": "openai/gpt-5-6-luna-high", "reasoning_effort": "low"}',
+                config_snippet=json.dumps({"model": gateway_id("luna"), "reasoning_effort": "low"}),
             )
 
     elif norm_harness == HarnessType.GROK:
         effort = "low" if not deep_rca else "high"
         return HarnessRunnerSpec(
             harness=norm_harness,
-            model_id="xai/grok-4.6",
+            model_id=gateway_id(resolve("review.grok")),
             reasoning_effort=effort,
             execution_tier=ExecutionTier.LIGHT_HARNESS if not deep_rca else ExecutionTier.DEEP_DIAGNOSTIC,
             rationale="Grok 4.6 with reasoning_effort='low' for rapid local terminal verification and parallel Arena subagent execution.",
@@ -143,20 +145,20 @@ def get_harness_test_runner_spec(
         if deep_rca:
             return HarnessRunnerSpec(
                 harness=norm_harness,
-                model_id="anthropic/claude-3.7-sonnet",
+                model_id=gateway_id("legacy-sonnet"),
                 reasoning_effort="medium",
                 execution_tier=ExecutionTier.DEEP_DIAGNOSTIC,
                 rationale="Claude 3.7 Sonnet with controlled thinking for architectural debugging and complex test regressions.",
-                config_snippet='claude --model claude-3-7-sonnet --agent test-runner',
+                config_snippet=f"claude --model {id_of('legacy-sonnet')} --agent test-runner",
             )
         else:
             return HarnessRunnerSpec(
                 harness=norm_harness,
-                model_id="anthropic/claude-haiku-5-5",
+                model_id=gateway_id("haiku"),
                 reasoning_effort="none",
                 execution_tier=ExecutionTier.LIGHT_HARNESS,
                 rationale="Claude Haiku 5.5: Subagent standard for lightweight, ultra-low latency command execution and output distillation.",
-                config_snippet='claude --model claude-haiku-5-5 (subagent in .claude/agents/test-runner.md)',
+                config_snippet=f"claude --model {id_of('haiku')} (subagent in .claude/agents/test-runner.md)",
             )
 
     raise ValueError(f"Unknown harness: {harness}")

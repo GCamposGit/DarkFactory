@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 from datetime import UTC, datetime
 from pathlib import Path
@@ -176,6 +177,13 @@ def get_next_dispatchable_task() -> dict[str, Any] | None:
         ensure_daily_benchmark()
     except Exception as exc:
         print(f"[WARN] Daily benchmark check skipped: {exc}")
+    if "PYTEST_CURRENT_TEST" not in os.environ:
+        try:
+            from core.models.discovery_sources import run_daily_discovery
+
+            run_daily_discovery()
+        except Exception as exc:
+            print(f"[WARN] Daily model discovery skipped: {exc}")
     ledger = _load_ledger()
     priorities = (
         {TaskStatus.NEEDS_FIX},

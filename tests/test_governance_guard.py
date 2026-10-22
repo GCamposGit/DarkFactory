@@ -99,3 +99,19 @@ def test_diff_is_calculated_against_requested_base(git_repository: Path) -> None
     assert guard.get_modified_files(base_sha, repository=git_repository) == [
         "src/feature.py"
     ]
+
+
+def test_env_flag_alone_no_longer_authorizes(
+    git_repository: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    (git_repository / "AGENTS.md").write_text("x\n", encoding="utf-8")
+    monkeypatch.setenv("DARKFAC_ALLOW_GOVERNANCE_EVOLUTION", "1")
+    assert guard.main(["--repo", str(git_repository)]) == 1
+    assert "[BLOCKED] AGENTS.md" in capsys.readouterr().out
+    assert not guard.is_governance_evolution_authorized(["AGENTS.md"], repository=git_repository)
+
+
+def test_governance_helper_is_protected() -> None:
+    assert guard.audit_paths(["core/governance/authorization.py"]) == [
+        "core/governance/authorization.py"
+    ]
