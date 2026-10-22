@@ -240,10 +240,14 @@ def _setup_waiting_human_job(store, stage: str = "integration") -> tuple[str, An
     return run_id, claim.job_key
 
 
-def test_human_probe_sweeper_closes_waiting_job_on_a_finished_run(temp_stores):
+def test_human_probe_sweeper_closes_waiting_job_on_a_finished_run(temp_stores, monkeypatch):
     """A completed run must not keep a waiting_human job in the owner queue."""
     store, artifact_store = temp_stores
-    ghost_id, _ghost_key = _setup_waiting_human_job(store)
+    closed_mirrors = []
+    from core.owner_actions import mirror
+
+    monkeypatch.setattr(mirror, "close_mirrored_request", lambda run_id, stage: closed_mirrors.append((run_id, stage)))
+    ghost_id, ghost_key = _setup_waiting_human_job(store)
     live_id, _live_key = _setup_waiting_human_job(store)
     conn = store._backend._connect()
     try:
@@ -259,6 +263,7 @@ def test_human_probe_sweeper_closes_waiting_job_on_a_finished_run(temp_stores):
     assert ghost["status"] == "cancelled"
     assert {job["status"] for job in ghost["jobs"]} == {"cancelled"}
     assert all(job["cause_code"] == "ghost_open_job_on_terminal_run" for job in ghost["jobs"])
+    assert (ghost_id, ghost_key.stage) in closed_mirrors
 
     live = store.get_run_status(live_id)
     assert live["status"] == "active"
@@ -303,6 +308,64 @@ def test_human_probe_sweeper_resumes_green_infra_request(temp_stores):
     status = store.get_run_status(run_id)
     grill_jobs = [j for j in status["jobs"] if j["stage"] == "grill"]
     assert any(j["status"] == "pending" for j in grill_jobs)
+
+
+def test_human_probe_sweeper_recovers_legacy_quota_wait_without_saved_probe(temp_stores):
+    store, artifact_store = temp_stores
+    run_id, job_key = _setup_waiting_human_job(store, "development")
+    conn = store._backend._connect()
+    try:
+        conn.execute(
+            "UPDATE jobs SET cause_code = 'no_route_available' WHERE run_id = ? AND stage = ?",
+            (run_id, job_key.stage),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    from core.line.human import HumanRequest
+
+    request = HumanRequest(kind="infra", run_id=run_id, blocking_stage=job_key.stage, guide_md="Old quota guide")
+    probed = []
+    worker = CloudWorker(
+        worker_id="test-legacy-quota-sweeper",
+        store=store,
+        artifact_store=artifact_store,
+        request_loader=lambda _project, _run_id: request,
+        human_probe_runner=lambda cmd, **_kwargs: probed.append(cmd) or True,
+    )
+
+    assert worker.sweep_waiting_human_requests() == [run_id]
+    assert probed == [f"python -m core.line.route_probe {job_key.stage}"]
+    assert store.list_waiting_jobs(statuses=("waiting_human",)) == []
+
+
+def test_human_probe_sweeper_closes_mirror_for_cancelled_run_with_no_open_job(temp_stores, monkeypatch):
+    from types import SimpleNamespace
+
+    from core.owner_actions import mirror, store as owner_action_store
+
+    store, artifact_store = temp_stores
+    run_id, job_key = _setup_waiting_human_job(store)
+    store.cancel_run(run_id, reason="owner_cancelled", actor="owner")
+    action = SimpleNamespace(
+        id=f"OA-HR-{run_id}-{job_key.stage}",
+        created_by="production-line",
+        title=f"Linha parada (infra): run {run_id} aguarda voce no estagio '{job_key.stage}'",
+    )
+
+    class _ActionStore:
+        def list_actions(self, *, include_done: bool = True):
+            assert include_done is False
+            return [action]
+
+    closed = []
+    monkeypatch.setattr(owner_action_store, "OwnerActionStore", _ActionStore)
+    monkeypatch.setattr(mirror, "close_mirrored_request", lambda run_id, stage: closed.append((run_id, stage)))
+
+    worker = CloudWorker(worker_id="test-cancelled-mirror-sweeper", store=store, artifact_store=artifact_store)
+    assert worker.sweep_waiting_human_requests() == []
+    assert closed == [(run_id, job_key.stage)]
 
 
 def test_human_probe_sweeper_does_not_resume_red_infra_request(temp_stores):

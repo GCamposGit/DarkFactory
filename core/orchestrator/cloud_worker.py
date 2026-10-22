@@ -1066,13 +1066,77 @@ class CloudWorker:
         except Exception as exc:
             logger.warning("Failed to close ghost open job of run %s: %s", run_id, exc)
             return False
+        try:
+            from core.owner_actions.mirror import close_mirrored_request
+
+            for job in snapshot.get("jobs", []):
+                if str(job.get("status") or "").lower() in ("pending", "running", "waiting_human", "waiting_dependency"):
+                    close_mirrored_request(run_id, str(job.get("stage") or ""))
+        except Exception as exc:
+            logger.warning("Failed to close owner-action mirrors for terminal run %s: %s", run_id, exc)
         logger.info("Closed ghost open job on terminal run %s", run_id)
         return True
+
+    def _is_legacy_route_wait(self, run_id: str, stage: str, blocking_stage: str) -> bool:
+        """Recognize pre-USR-346 quota requests whose saved HumanRequest has no probe."""
+        getter = getattr(self.store, "get_run_status", None)
+        if getter is None:
+            return False
+        try:
+            snapshot = getter(run_id) or {}
+        except Exception as exc:
+            logger.warning("Failed to inspect legacy route wait for run %s: %s", run_id, exc)
+            return False
+        from core.line.route_wait import NO_ROUTE_CAUSE
+
+        for job in snapshot.get("jobs", []):
+            if job.get("stage") != stage or job.get("stage") != blocking_stage:
+                continue
+            if str(job.get("status") or "").lower() != "waiting_human":
+                continue
+            cause = str(job.get("cause_code") or "")
+            if cause == NO_ROUTE_CAUSE or cause.startswith(f"{NO_ROUTE_CAUSE} "):
+                return True
+        return False
+
+    def _close_terminal_request_mirrors(self) -> None:
+        """Close stale OA-HR mirrors even when cancellation already closed every job."""
+        getter = getattr(self.store, "get_run_status", None)
+        if getter is None:
+            return
+        try:
+            from core.owner_actions.mirror import close_mirrored_request
+            from core.owner_actions.store import OwnerActionStore
+
+            for action in OwnerActionStore().list_actions(include_done=False):
+                if not action.id.startswith("OA-HR-") or action.created_by != "production-line":
+                    continue
+                marker = " aguarda voce no estagio '"
+                if not action.title.startswith("Linha parada (") or marker not in action.title:
+                    continue
+                run_part = action.title.split(": run ", 1)
+                stage_part = action.title.rsplit(marker, 1)
+                if len(run_part) != 2 or len(stage_part) != 2 or not stage_part[1].endswith("'"):
+                    continue
+                run_id = run_part[1].split(" aguarda voce no estagio '", 1)[0]
+                blocking_stage = stage_part[1][:-1]
+                if not run_id or not blocking_stage:
+                    continue
+                try:
+                    snapshot = getter(run_id) or {}
+                except Exception as exc:
+                    logger.warning("Failed to inspect OA-HR run %s: %s", run_id, exc)
+                    continue
+                if str(snapshot.get("status") or "").lower() in TERMINAL_RUN_STATUSES:
+                    close_mirrored_request(run_id, blocking_stage)
+        except Exception as exc:
+            logger.warning("Failed to reconcile terminal HumanRequest mirrors: %s", exc)
 
     def sweep_waiting_human_requests(self, now: datetime | None = None) -> list[str]:
         """Sweep waiting_human jobs, probe deterministic checks, and resume green non-grill requests (USR-105)."""
         effective_now = now or datetime.now(UTC)
         resumed_runs: list[str] = []
+        self._close_terminal_request_mirrors()
         try:
             waiting_jobs = self.store.list_waiting_jobs(statuses=("waiting_human",))
         except Exception as exc:
@@ -1116,14 +1180,24 @@ class CloudWorker:
                 if request.kind in ("grill", "commercial_acceptance"):
                     continue
 
-                if not request.probe_cmd:
+                probe_cmd = request.probe_cmd
+                if not probe_cmd and request.kind == "infra" and self._is_legacy_route_wait(
+                    run_id, job_key.stage, request.blocking_stage
+                ):
+                    from core.line.route_wait import route_probe_cmd
+
+                    try:
+                        probe_cmd = route_probe_cmd(request.blocking_stage)
+                    except ValueError:
+                        continue
+                if not probe_cmd:
                     continue
 
                 prober = self._human_probe_runner or run_probe
                 try:
-                    probe_ok = prober(request.probe_cmd, timeout_s=15)
+                    probe_ok = prober(probe_cmd, timeout_s=15)
                 except TypeError:
-                    probe_ok = prober(request.probe_cmd)
+                    probe_ok = prober(probe_cmd)
 
                 if not probe_ok:
                     continue

@@ -242,6 +242,7 @@ def test_past_the_wall_clock_budget_the_waiter_parks_the_run_with_an_infra_reque
     project, request = humans.requests[0]
     assert project.id == "acme"
     assert (request.kind, request.run_id, request.blocking_stage) == ("infra", "run-9", "development")
+    assert request.probe_cmd == "python -m core.line.route_probe development"
     assert "7.0h" in request.guide_md and "6h" in request.guide_md
     assert "python -m core.usage.cli accounts --refresh" in request.guide_md
     assert "escreve codigo" in request.guide_md  # development: OpenRouter is read-only
@@ -256,6 +257,15 @@ def test_the_review_request_blocks_the_independent_review_job_and_offers_openrou
     request = humans.requests[0][1]
     assert request.blocking_stage == "independent_review"  # the JOB stage, so resume_blocked_job finds it
     assert "openrouter.ai" in request.guide_md
+    assert request.probe_cmd == "python -m core.line.route_probe review"
+
+
+def test_route_probe_command_only_accepts_supported_job_stages() -> None:
+    from core.line.route_wait import route_probe_cmd
+
+    assert route_probe_cmd("independent_review") == "python -m core.line.route_probe review"
+    with pytest.raises(ValueError):
+        route_probe_cmd("validation")
 
 
 def test_a_failing_human_request_never_changes_the_outcome(tmp_path: Path) -> None:

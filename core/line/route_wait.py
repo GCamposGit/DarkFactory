@@ -43,6 +43,14 @@ NO_ROUTE_CAUSE = "no_route_available"
 # Routing stage keys (`line_routing.json`) whose job stage has another name.
 _JOB_STAGE_BY_ROUTING_STAGE = {"review": "independent_review"}
 
+
+def route_probe_cmd(stage: str) -> str:
+    """Return the stable subprocess probe used to wake a quota-parked run."""
+    routing_stage = {"independent_review": "review"}.get(stage, stage)
+    if routing_stage not in {"development", "review", "planning", "grill"}:
+        raise ValueError(f"Unsupported route-wait stage: {stage}")
+    return f"python -m core.line.route_probe {routing_stage}"
+
 # `successors.materialize_result` turns a `not_before` retry into `failed(loop_cap)` once the run is
 # past its wall-clock budget. Treating the last minutes of the budget as already spent guarantees the
 # retry this module returns is never converted that way between the stage's clock and the scheduler's.
@@ -172,6 +180,7 @@ class RouteWaiter:
                 cap_h=cfg.run_caps.wall_clock_hours,
                 writes_code=(mode or routing.stage_mode(stage)) == "write",
             ),
+            probe_cmd=route_probe_cmd(job_stage),
         )
         logger.warning(
             "Run %s waited %.1fh for a '%s' route (budget %gh): parking it for the owner",
@@ -224,5 +233,6 @@ __all__ = [
     "RouteWaiter",
     "infra_guide",
     "parse_run_created_at",
+    "route_probe_cmd",
     "run_started_at_lookup",
 ]
