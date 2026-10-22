@@ -11,10 +11,9 @@
 - (technical) O piso de cota local (5.5GB no runner_local vs 7.5GB no scheduler) deve ser unificado nesta rodada ou apenas reportado como divergencia? -> **A** (O criterio 'Limitar despacho local a capacidade verificada' e o scheduler 7.5GB e a referencia mais conservadora; unificar em 7.5GB preserva workers ocupados e evita overcommit, alinhado ao fora-de-escopo de nao relaxar piso.)
 
 ## Decisoes do owner
-- (nenhuma pergunta bloqueante)
+- [intent] O escopo desta rodada inclui corrigir os problemas de fila/ledger/gate local (rc7, reenqueue sem mutex, kind ledger-only, piso 5.5GB vs 7.5GB) ou apenas investigar e documentar a causa da demora do preflight de cota/wake? -> **C: Investigar preflight agora e abrir demandas separadas para os bugs de fila/ledger/gate** (respondida pelo owner)
+- [business] Qual e o prazo (timeout) aceitavel para sondagens externas de cota/wake falharem com erro estruturado? -> **D** (default_after_timeout)
+- [intent] A revisao independente USR-321 pelo Grok (opcao A autorizada pelo owner) faz parte desta rodada de grill/planejamento ou e um fluxo paralelo ja em andamento? -> **A** (default_after_timeout)
 
 ## Aguardando decisao do owner
-- [intent] O escopo desta rodada inclui corrigir os problemas de fila/ledger/gate local (rc7, reenqueue sem mutex, kind ledger-only, piso 5.5GB vs 7.5GB) ou apenas investigar e documentar a causa da demora do preflight de cota/wake? (id=q1)
-- [business] Qual e o prazo (timeout) aceitavel para sondagens externas de cota/wake falharem com erro estruturado? (id=q2)
-- [intent] A revisao independente USR-321 pelo Grok (opcao A autorizada pelo owner) faz parte desta rodada de grill/planejamento ou e um fluxo paralelo ja em andamento? (id=q3)
 - [account] Os scripts operacionais em C:/Users/guigc/darkfac-ops (fora do repo) podem ser lidos/inspecionados nesta investigacao, ou o escopo se limita ao repositorio atual? (id=q4)
