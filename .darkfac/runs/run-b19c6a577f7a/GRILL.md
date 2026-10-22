@@ -13,7 +13,4 @@
 - (technical) Qual estratégia usar para garantir a troca sem queda, considerando que ainda não há confirmação de Stack/Swarm no Dokploy? -> **Verificar o modo: start-first em Stack; blue/green em Compose** (A proposta prevê ambas as rotas; update_config sozinho não garante troca sem queda em Compose simples.)
 
 ## Decisoes do owner
-- (nenhuma pergunta bloqueante)
-
-## Aguardando decisao do owner
-- [intent] “Um merge gera uma única imagem e um único deploy” vale também para merges apenas de documentação, testes ou ledger, hoje dispensados de redeploy? (id=q1)
+- [intent] “Um merge gera uma única imagem e um único deploy” vale também para merges apenas de documentação, testes ou ledger, hoje dispensados de redeploy? -> **Somente merges que alteram o runtime do Hub** (respondida pelo owner)
