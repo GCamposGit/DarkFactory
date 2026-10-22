@@ -10015,5 +10015,35 @@
     "dependencies": [],
     "created_at": "2026-10-22T09:22:06.495119Z",
     "updated_at": "2026-10-22T09:22:06.495119Z"
+  },
+  {
+    "id": "USR-345",
+    "project_id": "darkfac",
+    "title": "Hub: health do projeto quebra com RoadmapHealth sem atributo status",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "Em 22/10 GET https://darkhub.ggcampos.com/api/portfolio/projects/pilot-hello devolveu health_status=healthy com health_details.error informando que o objeto RoadmapHealth nao tem atributo status: o calculo de saude do portfolio acessa um atributo inexistente e mascara o erro como healthy.",
+    "core_journey": [
+      "Em 22/10 GET https://darkhub.ggcampos.com/api/portfolio/projects/pilot-hello devolveu health_status=healthy com health_details.error informando que o objeto RoadmapHealth nao tem atributo status: o calculo de saude do portfolio acessa um atributo inexistente e mascara o erro como healthy."
+    ],
+    "non_goals": [],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "GET /api/portfolio/projects/ID nao traz erro de atributo em health_details",
+      "Falha real no calculo de saude nao vira healthy (teste de regressao)",
+      "Portao oficial runner.py --quick passa"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-22T09:36:39.681403Z",
+    "updated_at": "2026-10-22T09:36:39.681403Z"
   }
 ]
