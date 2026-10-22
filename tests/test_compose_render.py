@@ -128,6 +128,41 @@ def test_repository_from_url(url: Any, expected: Any) -> None:
     assert repository_from_url(url) == expected
 
 
+def test_wait_for_ghcr_tag_returns_when_manifest_exists() -> None:
+    seen: List[Any] = []
+    cr.wait_for_ghcr_tag(SHA, probe=lambda repo, tag: seen.append((repo, tag)) or 200)
+    assert seen == [("gcamposgit/darkhub", SHA)]
+
+
+def test_wait_for_ghcr_tag_tolerates_probe_errors_then_times_out() -> None:
+    now = [0.0]
+    sleeps: List[float] = []
+
+    def sleep(seconds: float) -> None:
+        sleeps.append(seconds)
+        now[0] += seconds
+
+    def probe(repo: str, tag: str) -> int:
+        raise OSError("registry unavailable")
+
+    with pytest.raises(cr.GhcrTagTimeoutError, match="no fallback to build"):
+        cr.wait_for_ghcr_tag(SHA, probe=probe, timeout=2, interval=1, sleep_fn=sleep, clock_fn=lambda: now[0])
+    assert sleeps == [1, 1]
+
+
+@pytest.mark.parametrize("status", [401, 403])
+def test_wait_for_ghcr_tag_fails_immediately_on_auth_error(status: int) -> None:
+    calls: List[int] = []
+
+    def probe(repo: str, tag: str) -> int:
+        calls.append(status)
+        return status
+
+    with pytest.raises(cr.GhcrManifestAuthError, match="GHCR_TOKEN/GITHUB_PAT.*read:packages"):
+        cr.wait_for_ghcr_tag(SHA, probe=probe, timeout=900, sleep_fn=lambda _seconds: None)
+    assert calls == [status]
+
+
 def test_build_mode_is_default_and_unchanged(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv(cr.IMAGE_SOURCE_ENV, raising=False)
     source = (REPO_ROOT / cr.HUB_COMPOSE_PATH).read_text(encoding="utf-8")

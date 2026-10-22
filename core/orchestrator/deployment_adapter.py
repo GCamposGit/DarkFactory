@@ -30,11 +30,18 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from core.orchestrator.build_artifacts import ArtifactRef, Claim
 from core.orchestrator.compose_render import (
+    GHCR_TAG_POLL_SECONDS,
+    GHCR_TAG_TIMEOUT_SECONDS,
     HUB_COMPOSE_PATH,
+    IMAGE_SOURCE_GHCR,
     ComposeFetcher,
     ComposeRenderError,
+    GhcrManifestAuthError,
+    GhcrManifestProbe,
     fetch_compose_at_sha,
     render_darkhub_compose,
+    resolve_hub_image_source,
+    wait_for_ghcr_tag,
 )
 
 logger = logging.getLogger(__name__)
@@ -196,6 +203,11 @@ class DokployDeploymentAdapter:
         api_key: Optional[str] = None,
         transport: Optional[Callable[[str, str, Optional[Dict[str, Any]], Optional[Dict[str, str]]], Dict[str, Any]]] = None,
         compose_fetcher: Optional[ComposeFetcher] = None,
+        ghcr_probe: Optional[GhcrManifestProbe] = None,
+        ghcr_timeout: float = GHCR_TAG_TIMEOUT_SECONDS,
+        ghcr_interval: float = GHCR_TAG_POLL_SECONDS,
+        sleep_fn: Callable[[float], None] = time.sleep,
+        clock_fn: Callable[[], float] = time.monotonic,
     ) -> None:
         self.api_url = api_url or os.getenv("DOKPLOY_API_URL", "")
         self.api_key = api_key or os.getenv("DOKPLOY_API_KEY", "")
@@ -203,6 +215,11 @@ class DokployDeploymentAdapter:
         # (repository, sha, path) -> compose text at that commit; defaults to
         # `gh api` (compose_render.fetch_compose_at_sha). Injected by tests.
         self.compose_fetcher = compose_fetcher
+        self.ghcr_probe = ghcr_probe
+        self.ghcr_timeout = ghcr_timeout
+        self.ghcr_interval = ghcr_interval
+        self.sleep_fn = sleep_fn
+        self.clock_fn = clock_fn
         self._lock = threading.Lock()
         self._operations: Dict[str, DeploymentOperation] = {}
         self._target_configs: Dict[str, TargetConfig] = {}
@@ -317,6 +334,26 @@ class DokployDeploymentAdapter:
         repository = str(params.get("compose_repo") or "").strip()
         if not repository:
             return None, "release_identity_compose_repo_missing"
+        try:
+            image_source = resolve_hub_image_source()
+        except ComposeRenderError:
+            return None, "release_identity_compose_contract_invalid"
+        if image_source == IMAGE_SOURCE_GHCR:
+            try:
+                wait_for_ghcr_tag(
+                    sha,
+                    probe=self.ghcr_probe,
+                    timeout=self.ghcr_timeout,
+                    interval=self.ghcr_interval,
+                    sleep_fn=self.sleep_fn,
+                    clock_fn=self.clock_fn,
+                )
+            except GhcrManifestAuthError:
+                logger.warning("GHCR denied manifest access; configure GHCR_TOKEN or GITHUB_PAT with read:packages")
+                return None, "release_identity_ghcr_auth_denied"
+            except Exception as exc:
+                logger.warning("GHCR release image unavailable for %s (%s)", sha[:12], type(exc).__name__)
+                return None, "release_identity_image_missing"
         path = str(params.get("compose_source_path") or HUB_COMPOSE_PATH).strip()
         fetch = self.compose_fetcher or (lambda repo, rev, rel: fetch_compose_at_sha(repo, rev, rel))
         try:
@@ -329,7 +366,7 @@ class DokployDeploymentAdapter:
         if not isinstance(source, str) or not source.strip():
             return None, "release_identity_compose_unreadable"
         try:
-            return render_darkhub_compose(source, sha), None
+            return render_darkhub_compose(source, sha, image_source=image_source), None
         except ComposeRenderError:
             return None, "release_identity_compose_contract_invalid"
 
@@ -488,6 +525,10 @@ class DokployDeploymentAdapter:
                 )
                 status = DeploymentStatus.FAILED
                 provider_details = {"error": identity_error}
+                if identity_error == "release_identity_ghcr_auth_denied":
+                    provider_details["message"] = (
+                        "GHCR access denied; configure GHCR_TOKEN/GITHUB_PAT with read:packages"
+                    )
             else:
                 deploy_procedure, status_procedure, id_key = self._service_procedure_and_key(target_config)
                 baseline_created_at = self._latest_deployment_created_at(

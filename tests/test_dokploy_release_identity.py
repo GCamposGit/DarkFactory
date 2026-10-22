@@ -562,3 +562,86 @@ def test_stage_still_fails_closed_when_digest_never_converges(tmp_path: Path) ->
     assert adapter.starts == 1
     # 4 polls in _deploy; no extra probe because the stage returned before smoke.
     assert adapter.probes == 4
+
+
+def test_ghcr_image_missing_fails_before_any_dokploy_request(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("DARKHUB_IMAGE_SOURCE", "ghcr")
+    calls: List[Dict[str, Any]] = []
+    _install_urlopen(monkeypatch, [], calls)
+    now = [0.0]
+
+    def sleep(seconds: float) -> None:
+        now[0] += seconds
+
+    adapter = DokployDeploymentAdapter(
+        compose_fetcher=lambda repo, sha, path: TEMPLATE_A,
+        ghcr_probe=lambda repo, tag: 404,
+        ghcr_timeout=2,
+        ghcr_interval=1,
+        sleep_fn=sleep,
+        clock_fn=lambda: now[0],
+    )
+
+    op = adapter.start(_artifact(), _hub_target())
+
+    assert op.status == DeploymentStatus.FAILED
+    assert op.details == {"error": "release_identity_image_missing"}
+    assert calls == []
+
+
+def test_ghcr_image_waits_before_installing_pinned_compose(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("DARKHUB_IMAGE_SOURCE", "ghcr")
+    calls: List[Dict[str, Any]] = []
+    _install_urlopen(
+        monkeypatch,
+        [
+            {"sourceType": "raw", "composePath": "docker-compose.yml", "composeFile": "old"},
+            True,
+            {"deployments": []},
+            {"success": True},
+        ],
+        calls,
+    )
+    probe_calls: List[Any] = []
+
+    def fetch_compose(_repo: str, _sha: str, _path: str) -> str:
+        path = Path(__file__).resolve().parents[1] / "deploy/dokploy/docker-compose.hub.yml"
+        return path.read_text(encoding="utf-8")
+
+    adapter = DokployDeploymentAdapter(
+        compose_fetcher=fetch_compose,
+        ghcr_probe=lambda repo, tag: probe_calls.append((repo, tag)) or 200,
+        ghcr_timeout=2,
+        ghcr_interval=1,
+        sleep_fn=lambda _seconds: None,
+    )
+
+    op = adapter.start(_artifact(), _hub_target())
+
+    assert op.status == DeploymentStatus.IN_PROGRESS
+    assert probe_calls == [("gcamposgit/darkhub", SHA)]
+    update = next(call["body"] for call in calls if call["url"].endswith("compose.update"))
+    assert f"image: ghcr.io/gcamposgit/darkhub:{SHA}" in update["composeFile"]
+    assert "pull_policy: always" in update["composeFile"]
+    assert "order: start-first" in update["composeFile"]
+    assert "container_name:" not in update["composeFile"]
+
+
+def test_ghcr_auth_rejection_is_reported_without_dokploy_request(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("DARKHUB_IMAGE_SOURCE", "ghcr")
+    calls: List[Dict[str, Any]] = []
+    _install_urlopen(monkeypatch, [], calls)
+    adapter = DokployDeploymentAdapter(
+        compose_fetcher=lambda repo, sha, path: TEMPLATE_A,
+        ghcr_probe=lambda repo, tag: 403,
+        ghcr_timeout=900,
+        sleep_fn=lambda _seconds: pytest.fail("auth rejection must not sleep"),
+    )
+
+    op = adapter.start(_artifact(), _hub_target())
+
+    assert op.status == DeploymentStatus.FAILED
+    assert op.details["error"] == "release_identity_ghcr_auth_denied"
+    assert "GHCR_TOKEN/GITHUB_PAT" in op.details["message"]
+    assert "read:packages" in op.details["message"]
+    assert calls == []

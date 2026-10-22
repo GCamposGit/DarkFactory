@@ -18,6 +18,9 @@ import os
 import re
 import subprocess
 import sys
+import time
+import urllib.error
+import urllib.request
 from typing import Callable, Mapping, Optional, Sequence
 
 logger = logging.getLogger(__name__)
@@ -52,6 +55,77 @@ IMAGE_SOURCE_BUILD = "build"
 IMAGE_SOURCE_GHCR = "ghcr"
 GHCR_IMAGE_REPOSITORY = "gcamposgit/darkhub"
 GHCR_IMAGE_PREFIX = f"ghcr.io/{GHCR_IMAGE_REPOSITORY}"
+GHCR_TAG_TIMEOUT_SECONDS = 900.0
+GHCR_TAG_POLL_SECONDS = 15.0
+
+GhcrManifestProbe = Callable[[str, str], int]
+
+
+class GhcrTagTimeoutError(TimeoutError):
+    """The immutable release image did not appear before the wait deadline."""
+
+
+class GhcrManifestAuthError(RuntimeError):
+    """GHCR rejected the manifest probe credentials."""
+
+
+def _default_ghcr_probe(repository: str, tag: str) -> int:
+    """HEAD a GHCR manifest, using an optional read:packages token."""
+    import base64
+
+    token = (os.environ.get("GHCR_TOKEN") or os.environ.get("GITHUB_PAT") or "").strip()
+    headers = {
+        "Accept": "application/vnd.oci.image.index.v1+json, "
+        "application/vnd.docker.distribution.manifest.v2+json",
+    }
+    if token:
+        headers["Authorization"] = "Bearer " + base64.b64encode(token.encode()).decode()
+    request = urllib.request.Request(
+        f"https://ghcr.io/v2/{repository}/manifests/{tag}", headers=headers, method="HEAD"
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=10) as response:
+            return int(response.status)
+    except urllib.error.HTTPError as exc:
+        return int(exc.code)
+
+
+def wait_for_ghcr_tag(
+    sha: str,
+    *,
+    probe: Optional[GhcrManifestProbe] = None,
+    timeout: float = GHCR_TAG_TIMEOUT_SECONDS,
+    interval: float = GHCR_TAG_POLL_SECONDS,
+    sleep_fn: Callable[[float], None] = time.sleep,
+    clock_fn: Callable[[], float] = time.monotonic,
+) -> None:
+    """Wait for the exact GHCR SHA tag, failing closed and never building locally."""
+    if not SHA_PATTERN.fullmatch(sha or ""):
+        raise ValueError("a full 40-character release SHA is required for GHCR")
+    check = probe or _default_ghcr_probe
+    deadline = clock_fn() + max(0.0, timeout)
+    last: object = "no response"
+    while True:
+        try:
+            status = check(GHCR_IMAGE_REPOSITORY, sha)
+            if status == 200:
+                return
+            if status in (401, 403):
+                raise GhcrManifestAuthError(
+                    "GHCR manifest access denied; configure GHCR_TOKEN/GITHUB_PAT with read:packages"
+                )
+            last = f"HTTP {status}"
+        except GhcrManifestAuthError:
+            raise
+        except Exception as exc:
+            last = type(exc).__name__
+        remaining = deadline - clock_fn()
+        if remaining <= 0:
+            raise GhcrTagTimeoutError(
+                f"GHCR image {ghcr_image_ref(sha)} not published within {int(timeout)}s "
+                f"(last: {last}); deploy refused, no fallback to build (check the hub-image workflow)"
+            ) from None
+        sleep_fn(min(max(0.0, interval), remaining))
 
 _BUILD_BLOCK_RE = re.compile(
     r"^    build:\n(?:      .*\n)+    image: darkhub:v2\.1\n    pull_policy: build\n", re.M
@@ -182,6 +256,8 @@ def fetch_compose_at_sha(
 
 
 __all__ = [
+    "GHCR_TAG_POLL_SECONDS",
+    "GHCR_TAG_TIMEOUT_SECONDS",
     "GHCR_IMAGE_PREFIX",
     "GHCR_IMAGE_REPOSITORY",
     "IMAGE_SOURCE_BUILD",
@@ -192,9 +268,14 @@ __all__ = [
     "ComposeFetcher",
     "ComposeRenderError",
     "ComposeSourceError",
+    "GhcrManifestAuthError",
+    "GhcrManifestProbe",
+    "GhcrTagTimeoutError",
     "HUB_COMPOSE_PATH",
     "SHA_PATTERN",
     "fetch_compose_at_sha",
     "render_darkhub_compose",
     "repository_from_url",
+    "wait_for_ghcr_tag",
+    "_default_ghcr_probe",
 ]

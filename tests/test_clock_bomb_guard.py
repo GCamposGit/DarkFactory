@@ -42,7 +42,6 @@ CLOCK_BOMB_EXCEPTIONS: dict[str, str] = {
     # -- docstring/comment prose: the "2026-" text is narrative, not a literal fed to any comparison.
     "tests/line/test_no_route_contract.py": "prosa de docstring/comentario; nao e literal de data usada pelo teste",
     "tests/line/test_retrospective.py": "seed SQL de um run buscado diretamente por run_id; RetrospectiveStageHandler nao filtra por RECENT_RUN_WINDOW, so lookups diretos por id",
-    "tests/test_dokploy_release_identity.py": "docstring do modulo; nao e literal de data",
     "tests/test_darkhub_priority_interventions_and_grill.py": "comentario ('Canario diario 2026-09-30'); nao e literal de data",
     # -- identifiers that are shaped like a date but are not one.
     "tests/line/test_stage_build.py": "'gpt-6-luna-2026-10-01' e nome de modelo, nao uma data",
