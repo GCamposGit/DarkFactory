@@ -10045,5 +10045,39 @@
     "dependencies": [],
     "created_at": "2026-10-22T09:36:39.681403Z",
     "updated_at": "2026-10-22T09:36:39.681403Z"
+  },
+  {
+    "id": "USR-346",
+    "project_id": "darkfac",
+    "title": "Runs parados por falta de cota nunca retomam sozinhos (pedido infra sem probe_cmd)",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "Em 21/10 madrugada 7 runs (USR-279 e marcos M3-M7 do piloto: dem-6f1d432a760f, dem-c1475a6e8b49, dem-942cd4412279, dem-87ec13f56d30, dem-173a2aa6f995; e o canario dem-e365b0bd6553) estouraram o limite de 6h esperando cota em development e foram para waiting_human com OA-HR-run-*-development no Hub. core/line/route_wait.py RouteWaiter cria HumanRequest(kind=infra) sem probe_cmd, e core/orchestrator/cloud_worker.py sweep de probes (linha ~1119) pula pedidos sem probe_cmd: nada retoma o job quando a cota volta (em 22/10 codex 36%% e grok 19,6%% ja dariam rota). O owner viu 13 itens duplicados no Hub (OA-HR + waiting_human por marco). O OA-HR do canario segue aberto mesmo com o run cancelado.",
+    "core_journey": [
+      "Em 21/10 madrugada 7 runs (USR-279 e marcos M3-M7 do piloto: dem-6f1d432a760f, dem-c1475a6e8b49, dem-942cd4412279, dem-87ec13f56d30, dem-173a2aa6f995; e o canario dem-e365b0bd6553) estouraram o limite de 6h esperando cota em development e foram para waiting_human com OA-HR-run-*-development no Hub. core/line/route_wait.py RouteWaiter cria HumanRequest(kind=infra) sem probe_cmd, e core/orchestrator/cloud_worker.py sweep de probes (linha ~1119) pula pedidos sem probe_cmd: nada retoma o job quando a cota volta (em 22/10 codex 36%% e grok 19,6%% ja dariam rota). O owner viu 13 itens duplicados no Hub (OA-HR + waiting_human por marco). O OA-HR do canario segue aberto mesmo com o run cancelado."
+    ],
+    "non_goals": [
+      "Nao relaxar o piso de 15%% de cota"
+    ],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "HumanRequest infra de no_route_available leva probe_cmd deterministico que passa quando pick() devolve rota para a etapa",
+      "O sweep retoma o job sozinho quando a cota volta e fecha o espelho OA-HR (teste)",
+      "Runs ja parados (lista do problema) sao retomados ou fechados por migracao/varredura unica, sem acao do owner",
+      "OA-HR de run cancelado e fechado automaticamente",
+      "Portao oficial runner.py --quick passa"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-22T09:52:45.740519Z",
+    "updated_at": "2026-10-22T09:52:45.740519Z"
   }
 ]
