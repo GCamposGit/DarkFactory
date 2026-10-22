@@ -93,6 +93,21 @@ def read_ledger(ledger_path: Optional[Path] = None) -> list[dict[str, Any]]:
     return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
 
 
+def _register_grill(
+    model_id: str, role: Optional[str], reasons: list[str], now: datetime, path: Path,
+    handler: Optional[Callable[[str, Optional[str], list[str]], Any]],
+) -> None:
+    try:
+        if handler is not None:
+            handler(model_id, role, reasons)
+        elif path.resolve() == DEFAULT_REGISTRY_PATH.resolve():
+            from core.models.pending import request_grill
+
+            request_grill(model_id, role, reasons, now=now)
+    except Exception as exc:  # noqa: BLE001 - the promotion stays blocked either way
+        logger.warning("could not register the Grill pending for %s: %s", model_id, exc)
+
+
 def promote(
     model_id: str,
     *,
@@ -103,8 +118,15 @@ def promote(
     ledger_path: Optional[Path] = None,
     docs_root: Optional[Path] = None,
     precheck: Optional[Precheck] = None,
+    grill_handler: Optional[Callable[[str, Optional[str], list[str]], Any]] = None,
 ) -> dict[str, Any]:
-    """candidate -> active (qualification approved/grandfathered required), optionally binding ``role``."""
+    """candidate -> active (qualification approved/grandfathered required), optionally binding ``role``.
+
+    A Grill block still raises ``LifecycleError`` (nothing written) but first registers a real WAITING_HUMAN pending
+    (``core.models.pending``: owner action + Telegram with recommendation and guide). ``grill_handler(model_id, role,
+    reasons)`` replaces that default; with no handler the default only runs against the default registry path, so
+    isolated registries (tests, scratch worktrees) never notify anyone.
+    """
     path = registry_path or DEFAULT_REGISTRY_PATH
     ledger = ledger_path or LEDGER_PATH
     raw = _load(path)
@@ -127,6 +149,7 @@ def promote(
         parse_registry(raw),
     )
     if decision.required:
+        _register_grill(model_id, role, list(decision.reasons), now, path, grill_handler)
         reasons = "; ".join(decision.reasons)
         raise LifecycleError(f"promotion requires WAITING_HUMAN (Grill): {reasons}")
     if precheck is not None:
