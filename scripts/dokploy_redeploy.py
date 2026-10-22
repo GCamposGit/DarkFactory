@@ -65,11 +65,14 @@ from core.infra.ghcr import (
     GhcrTagUnavailableError,
 )
 from core.orchestrator.compose_render import (
+    COMPOSE_TYPE_STACK,
+    GHCR_STACK_REQUIRED_MESSAGE,
     HUB_COMPOSE_PATH,
     SHA_PATTERN,
     GHCR_IMAGE_REPOSITORY,
     IMAGE_SOURCE_GHCR,
     ComposeRenderError,
+    classify_compose_type,
     ghcr_image_ref,
     render_darkhub_compose as _shared_render_darkhub_compose,
     resolve_hub_image_source,
@@ -1025,7 +1028,10 @@ def _run_main(
         return EXIT_OK
 
     local_subject = get_local_origin_main_subject()
-    darkhub_selected = any(svc.name.lower() == "darkhub" and svc.kind == "compose" for svc in selected)
+    darkhub_service = next(
+        (svc for svc in selected if svc.name.lower() == "darkhub" and svc.kind == "compose"), None
+    )
+    darkhub_selected = darkhub_service is not None
     expected_sha = get_origin_main_sha() if darkhub_selected else None
     if darkhub_selected and expected_sha is None:
         print("Cannot determine full origin/main SHA; Darkhub deploy refused", file=err, flush=True)
@@ -1035,12 +1041,26 @@ def _run_main(
         return EXIT_USAGE_ERROR
     darkhub_compose = None
     image_source = "build"
+    # USR-339 (T2): compose.one fetched once here, up front, so the Stack/Swarm gate below
+    # runs before any POST -- then reused as the per-service baseline in the main loop
+    # instead of fetching it a second time.
+    darkhub_baseline_payload: Optional[Dict[str, Any]] = None
     if darkhub_selected:
         try:
             darkhub_compose = get_origin_main_compose(expected_sha)
             image_source = resolve_hub_image_source(env)
             render_darkhub_compose(darkhub_compose, expected_sha, image_source)
             if image_source == IMAGE_SOURCE_GHCR:
+                darkhub_baseline_payload = fetch_service_status(transport, darkhub_service)
+                compose_type = classify_compose_type(darkhub_baseline_payload)
+                if compose_type != COMPOSE_TYPE_STACK:
+                    print(
+                        f"Darkhub deploy refused: {GHCR_STACK_REQUIRED_MESSAGE} "
+                        f"(detected compose type: {compose_type})",
+                        file=err,
+                        flush=True,
+                    )
+                    return EXIT_DEPLOY_FAILED
                 print(f"Waiting for {ghcr_image_ref(expected_sha)} on GHCR...", file=out, flush=True)
                 wait_for_ghcr_tag(expected_sha, probe=ghcr_probe, sleep_fn=sleep_fn, clock_fn=clock_fn)
         except (DokployUsageError, ComposeRenderError) as exc:
@@ -1108,7 +1128,10 @@ def _run_main(
     baselines: Dict[str, Optional[Deployment]] = {}
     for svc in selected:
         try:
-            baseline_payload = fetch_service_status(transport, svc)
+            if svc is darkhub_service and darkhub_baseline_payload is not None:
+                baseline_payload = darkhub_baseline_payload
+            else:
+                baseline_payload = fetch_service_status(transport, svc)
             baseline = latest_deployment(baseline_payload)
             if svc.name.lower() == "darkhub" and svc.kind == "compose":
                 action, reason = plan_darkhub_deploy(

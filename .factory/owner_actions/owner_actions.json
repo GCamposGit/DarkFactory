@@ -2192,11 +2192,14 @@
           "text": "Conferir a primeira imagem: Actions (Hub image GHCR verde) e Packages darkhub com tag igual ao sha de main"
         },
         {
+          "text": "Antes de ativar o modo ghcr, trocar o compose Darkhub para Stack/Swarm no Dokploy (USR-339, T2): o CLI (scripts/dokploy_redeploy.py) e o DokployDeploymentAdapter da linha agora recusam qualquer deploy em modo ghcr fora de Stack, porque 'start-first' e ignorado pelo Compose simples. Abra https://dokploy.ggcampos.com e faca login; no menu lateral clique em 'Projects' e entre em 'darkfac-core'; selecione o ambiente 'production'; clique no card do compose 'Darkhub'; na pagina do servico abra a aba 'General' (em versoes mais novas pode estar em 'Advanced'); localize o campo 'Compose Type' (ou 'Mode'/'Modo'); troque o valor de 'Docker Compose' para 'Stack' (Swarm); clique em 'Save' e aguarde a confirmacao."
+        },
+        {
           "text": "So entao definir DARKHUB_IMAGE_SOURCE=ghcr (variavel de usuario) e redeployar o Hub; para voltar, remover a variavel",
           "command": "python C:\\dev\\DarkFac\\scripts\\dokploy_redeploy.py --only Darkhub --wait"
         }
       ],
-      "verify": "Pacote darkhub no GHCR com tag do sha; redeploy imprime Waiting for ghcr.io/... e /health responde o sha novo",
+      "verify": "Pacote darkhub no GHCR com tag do sha; compose Darkhub no Dokploy mostra Compose Type = Stack/Swarm (GET /api/compose.one?composeId=<id> confirma o campo, ou a tela 'General' do servico); redeploy imprime Waiting for ghcr.io/... e /health responde o sha novo, sem a mensagem 'Darkhub deploy refused: DARKHUB_IMAGE_SOURCE=ghcr requires ... Stack/Swarm'",
       "created_at": "2026-10-22T00:20:04Z",
       "created_by": "subagente sonnet",
       "resolved_at": null

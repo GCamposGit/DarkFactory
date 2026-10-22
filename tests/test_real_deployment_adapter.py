@@ -45,6 +45,7 @@ from tests.test_dokploy_release_identity import (
     _hub_adapter,
     _hub_target,
     _install_urlopen,
+    _procedures,
 )
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -306,7 +307,7 @@ def test_ghcr_mode_waits_for_tag_then_installs_image_with_start_first(monkeypatc
     _install_urlopen(
         monkeypatch,
         [
-            {"sourceType": "raw", "composePath": "docker-compose.yml", "composeFile": stored},
+            {"sourceType": "raw", "composePath": "docker-compose.yml", "composeFile": stored, "composeType": "stack"},
             True,
             {"deployments": []},
             {"success": True},
@@ -345,3 +346,58 @@ def test_ghcr_tag_missing_fails_closed_before_any_dokploy_call(monkeypatch: pyte
     assert op.status == DeploymentStatus.FAILED
     assert op.details["error"] == "release_identity_ghcr_image_missing"
     assert calls == []  # no compose.one, no compose.update, no compose.deploy
+
+
+# ---------------------------------------------------------------------------
+# 8. T2 (USR-339): ghcr mode requires the Dokploy compose in Stack/Swarm mode
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("compose_type", ["docker-compose", "unknown-thing", None])
+def test_ghcr_mode_refuses_without_stack_compose_and_does_not_mutate(
+    monkeypatch: pytest.MonkeyPatch, compose_type: Any
+) -> None:
+    monkeypatch.setenv("DARKHUB_IMAGE_SOURCE", "ghcr")
+    stored = render_darkhub_compose(_REAL_HUB_COMPOSE_SOURCE, OLD_SHA)
+    one_payload: Dict[str, Any] = {"sourceType": "raw", "composePath": "docker-compose.yml", "composeFile": stored}
+    if compose_type is not None:
+        one_payload["composeType"] = compose_type
+    calls: List[Dict[str, Any]] = []
+    _install_urlopen(monkeypatch, [one_payload], calls)
+    waited: List[str] = []
+    adapter, fetcher = _hub_adapter({SHA: _REAL_HUB_COMPOSE_SOURCE})
+    adapter.ghcr_wait = lambda sha: waited.append(sha)
+
+    op = adapter.start(_artifact(), _hub_target())
+
+    assert op.status == DeploymentStatus.FAILED
+    assert op.details["error"] == "release_identity_ghcr_requires_stack"
+    assert waited == [SHA]  # the gate runs after the GHCR tag wait, not instead of it
+    assert _procedures(calls) == ["compose.one"]  # no compose.update, no compose.deploy
+
+
+def test_build_mode_ignores_compose_type(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Build mode (the default, no DARKHUB_IMAGE_SOURCE) never classifies compose type."""
+    stored = render_darkhub_compose(_REAL_HUB_COMPOSE_SOURCE, OLD_SHA)
+    calls: List[Dict[str, Any]] = []
+    _install_urlopen(
+        monkeypatch,
+        [
+            {
+                "sourceType": "raw",
+                "composePath": "docker-compose.yml",
+                "composeFile": stored,
+                "composeType": "docker-compose",
+            },
+            True,
+            {"deployments": []},
+            {"success": True},
+        ],
+        calls,
+    )
+    adapter, fetcher = _hub_adapter({SHA: _REAL_HUB_COMPOSE_SOURCE})
+
+    op = adapter.start(_artifact(), _hub_target())
+
+    assert op.status == DeploymentStatus.IN_PROGRESS
+    assert _procedures(calls) == ["compose.one", "compose.update", "compose.one", "compose.deploy"]

@@ -649,9 +649,15 @@ def _fake_darkhub_health(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def _program_status(
-    transport: QueueTransport, path: str, deployments_sequence: Sequence[List[Dict[str, Any]]]
+    transport: QueueTransport,
+    path: str,
+    deployments_sequence: Sequence[List[Dict[str, Any]]],
+    compose_type: Optional[str] = None,
 ) -> None:
-    transport.program_get(path, [{"deployments": d, "env": "KEEP=secret-value\n"} for d in deployments_sequence])
+    payload: Dict[str, Any] = {"env": "KEEP=secret-value\n"}
+    if compose_type is not None:
+        payload["composeType"] = compose_type
+    transport.program_get(path, [{**payload, "deployments": d} for d in deployments_sequence])
 
 
 def test_main_missing_credentials_exit_2_no_leak() -> None:
@@ -1818,13 +1824,15 @@ def test_ops_notifier_redacts_secrets() -> None:
     assert "abcdefghijklmnopqrstuvwxyz0123456789" not in sent[0]
 
 
-def _ghcr_run(monkeypatch: pytest.MonkeyPatch, probe: Any, timeout: str = "900"):
+def _ghcr_run(
+    monkeypatch: pytest.MonkeyPatch, probe: Any, timeout: str = "900", compose_type: Optional[str] = "stack"
+):
     from core.infra import node_sync
 
     transport = _make_transport_with_full_project()
     old = {"deploymentId": "old", "status": "done", "title": "old", "createdAt": "2026-09-12T09:00:00Z"}
     new = {"deploymentId": "new", "status": "done", "title": "new", "createdAt": "2026-09-12T09:10:00Z"}
-    _program_status(transport, "/api/compose.one?composeId=compose_hub", [[old], [new]])
+    _program_status(transport, "/api/compose.one?composeId=compose_hub", [[old], [new]], compose_type=compose_type)
     monkeypatch.setattr(node_sync, "sync", lambda **kw: node_sync.SyncReport(expected_sha="a" * 40, nodes=[
         node_sync.NodeStatus(name=name, state="converged", git_sha="a" * 40)
         for name in ("Notebook", "Desktop", "VPS")
@@ -1866,6 +1874,67 @@ def test_darkhub_ghcr_tag_timeout_refuses_without_build_fallback(monkeypatch: py
     assert code != mod.EXIT_OK
     assert "not published" in err and "no fallback to build" in err
     assert transport.post_calls == []
+
+
+def _never_probed(repo: str, tag: str) -> int:
+    raise AssertionError("GHCR tag must not be probed: the Stack/Swarm gate refuses first")
+
+
+# ---------------------------------------------------------------------------
+# T2 (USR-339): ghcr mode requires the Dokploy compose in Stack/Swarm mode
+# ---------------------------------------------------------------------------
+
+
+def test_darkhub_ghcr_mode_refuses_on_plain_compose_before_any_post(monkeypatch: pytest.MonkeyPatch) -> None:
+    code, transport, _out, err = _ghcr_run(monkeypatch, _never_probed, compose_type="docker-compose")
+    assert code == mod.EXIT_DEPLOY_FAILED
+    assert "Stack" in err and "DARKHUB_IMAGE_SOURCE" in err
+    assert transport.post_calls == []
+
+
+@pytest.mark.parametrize("compose_type", [None, "", "unknown", "something-else"])
+def test_darkhub_ghcr_mode_refuses_on_missing_or_unknown_compose_type(
+    monkeypatch: pytest.MonkeyPatch, compose_type: Optional[str]
+) -> None:
+    code, transport, _out, err = _ghcr_run(monkeypatch, _never_probed, compose_type=compose_type)
+    assert code == mod.EXIT_DEPLOY_FAILED
+    assert "Stack" in err
+    assert transport.post_calls == []
+
+
+def test_darkhub_ghcr_mode_with_stack_compose_proceeds_normally(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Already exercised end-to-end by
+    test_darkhub_ghcr_mode_waits_for_tag_then_installs_image_start_first
+    (default compose_type="stack"); this is a focused smoke test for the gate itself."""
+    code, transport, _out, err = _ghcr_run(monkeypatch, lambda repo, tag: 200, compose_type="stack")
+    assert code == mod.EXIT_OK, err
+    assert transport.post_calls != []
+
+
+def test_darkhub_build_mode_ignores_compose_type(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Build mode (the default) never classifies or refuses on compose type."""
+    from core.infra import node_sync
+
+    transport = _make_transport_with_full_project()
+    old = {"deploymentId": "old", "status": "done", "title": "old", "createdAt": "2026-09-12T09:00:00Z"}
+    new = {"deploymentId": "new", "status": "done", "title": "new", "createdAt": "2026-09-12T09:10:00Z"}
+    _program_status(
+        transport, "/api/compose.one?composeId=compose_hub", [[old], [new]], compose_type="docker-compose"
+    )
+    monkeypatch.setattr(node_sync, "sync", lambda **kw: node_sync.SyncReport(expected_sha="a" * 40, nodes=[
+        node_sync.NodeStatus(name=name, state="converged", git_sha="a" * 40)
+        for name in ("Notebook", "Desktop", "VPS")
+    ]))
+    clock = FakeClock()
+    out, err = io.StringIO(), io.StringIO()
+    code = mod.main(
+        ["--only", "Darkhub", "--skip-backup"], env=_ENV,
+        registry_reader=_no_registry, transport_factory=lambda url, key: transport,
+        health_client=lambda: {"git_sha": "a" * 40},
+        sleep_fn=clock.sleep, clock_fn=clock.now, stdout=out, stderr=err,
+    )
+    assert code == mod.EXIT_OK, err.getvalue()
+    assert transport.post_calls != []
 
 
 def test_wait_for_ghcr_tag_survives_probe_errors_then_times_out() -> None:

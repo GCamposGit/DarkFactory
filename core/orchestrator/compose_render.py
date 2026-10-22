@@ -18,7 +18,7 @@ import os
 import re
 import subprocess
 import sys
-from typing import Callable, Mapping, Optional, Sequence
+from typing import Any, Callable, Mapping, Optional, Sequence
 
 logger = logging.getLogger(__name__)
 
@@ -52,6 +52,49 @@ IMAGE_SOURCE_BUILD = "build"
 IMAGE_SOURCE_GHCR = "ghcr"
 GHCR_IMAGE_REPOSITORY = "gcamposgit/darkhub"
 GHCR_IMAGE_PREFIX = f"ghcr.io/{GHCR_IMAGE_REPOSITORY}"
+
+# USR-339 (T2): `start-first` is silently ignored by plain `docker compose` --
+# only a Stack/Swarm-mode compose in Dokploy honors `deploy.update_config`. A
+# ghcr-mode deploy on a non-Stack compose would therefore still drop traffic
+# exactly like `build` mode, while claiming zero-downtime. The exact field
+# name Dokploy's `compose.one` uses for this is unconfirmed, so it is read
+# defensively across a few candidates and any unrecognized/missing value
+# fails closed to "unknown" (never assumed to be Stack).
+COMPOSE_TYPE_STACK = "stack"
+COMPOSE_TYPE_SIMPLE = "simple"
+COMPOSE_TYPE_UNKNOWN = "unknown"
+
+_COMPOSE_TYPE_FIELD_CANDIDATES: tuple[str, ...] = ("composeType", "compose_type", "type")
+_COMPOSE_TYPE_STACK_VALUES = frozenset({"stack", "swarm", "docker-swarm", "dockerswarm"})
+_COMPOSE_TYPE_SIMPLE_VALUES = frozenset({"docker-compose", "compose", "docker_compose", "simple"})
+
+GHCR_STACK_REQUIRED_MESSAGE = (
+    f"{IMAGE_SOURCE_ENV}=ghcr requires the Dokploy compose in Stack/Swarm mode (start-first is "
+    "ignored by plain Compose); switch the Darkhub compose to Stack in Dokploy, or remove "
+    f"{IMAGE_SOURCE_ENV} to use build mode"
+)
+
+
+def classify_compose_type(payload: Optional[Mapping[str, Any]]) -> str:
+    """Classifies a Dokploy ``compose.one`` payload's declared compose type.
+
+    Reads a few candidate field names defensively (the exact key Dokploy uses
+    is unconfirmed) and returns ``COMPOSE_TYPE_UNKNOWN`` for anything missing
+    or unrecognized, so ghcr-mode callers fail closed instead of assuming
+    Stack/Swarm.
+    """
+    if not isinstance(payload, Mapping):
+        return COMPOSE_TYPE_UNKNOWN
+    for key in _COMPOSE_TYPE_FIELD_CANDIDATES:
+        raw = payload.get(key)
+        if raw is None:
+            continue
+        value = str(raw).strip().lower()
+        if value in _COMPOSE_TYPE_STACK_VALUES:
+            return COMPOSE_TYPE_STACK
+        if value in _COMPOSE_TYPE_SIMPLE_VALUES:
+            return COMPOSE_TYPE_SIMPLE
+    return COMPOSE_TYPE_UNKNOWN
 
 _BUILD_BLOCK_RE = re.compile(
     r"^    build:\n(?:      .*\n)+    image: darkhub:v2\.1\n    pull_policy: build\n", re.M
@@ -184,9 +227,14 @@ def fetch_compose_at_sha(
 __all__ = [
     "GHCR_IMAGE_PREFIX",
     "GHCR_IMAGE_REPOSITORY",
+    "GHCR_STACK_REQUIRED_MESSAGE",
     "IMAGE_SOURCE_BUILD",
     "IMAGE_SOURCE_ENV",
     "IMAGE_SOURCE_GHCR",
+    "COMPOSE_TYPE_STACK",
+    "COMPOSE_TYPE_SIMPLE",
+    "COMPOSE_TYPE_UNKNOWN",
+    "classify_compose_type",
     "ghcr_image_ref",
     "resolve_hub_image_source",
     "ComposeFetcher",

@@ -32,11 +32,14 @@ from core.infra.ghcr import GhcrTagUnavailableError
 from core.infra.ghcr import wait_for_tag as _wait_for_ghcr_tag
 from core.orchestrator.build_artifacts import ArtifactRef, Claim
 from core.orchestrator.compose_render import (
+    COMPOSE_TYPE_STACK,
     GHCR_IMAGE_REPOSITORY,
+    GHCR_STACK_REQUIRED_MESSAGE,
     HUB_COMPOSE_PATH,
     IMAGE_SOURCE_GHCR,
     ComposeFetcher,
     ComposeRenderError,
+    classify_compose_type,
     fetch_compose_at_sha,
     render_darkhub_compose,
     resolve_hub_image_source,
@@ -328,8 +331,9 @@ class DokployDeploymentAdapter:
 
     def _render_compose_at_sha(
         self, params: Dict[str, Any], sha: str
-    ) -> tuple[Optional[str], Optional[str]]:
-        """`(rendered_compose, None)` or `(None, error_code)` for the DarkHub compose at `sha`.
+    ) -> tuple[Optional[str], Optional[str], Optional[str]]:
+        """`(rendered_compose, None, image_source)` or `(None, error_code, image_source)`
+        for the DarkHub compose at `sha`.
 
         The repository comes from ``deploy.params.compose_repo`` (``owner/name``;
         the release stage derives it from the project's ``repo_url``). Never
@@ -340,11 +344,13 @@ class DokployDeploymentAdapter:
         ``ghcr`` mode this must first block on ``self.ghcr_wait(sha)`` -- before
         any Dokploy call (``compose.one``/``compose.update``) is ever made. A
         missing/timed-out tag fails closed (``release_identity_ghcr_image_missing``)
-        with no fallback to ``build``.
+        with no fallback to ``build``. ``image_source`` is also returned (even on
+        failure, whenever it could be resolved) so ``_bind_release_identity`` can
+        apply the Stack/Swarm gate (T2) once it has fetched ``compose.one``.
         """
         repository = str(params.get("compose_repo") or "").strip()
         if not repository:
-            return None, "release_identity_compose_repo_missing"
+            return None, "release_identity_compose_repo_missing", None
         path = str(params.get("compose_source_path") or HUB_COMPOSE_PATH).strip()
         fetch = self.compose_fetcher or (lambda repo, rev, rel: fetch_compose_at_sha(repo, rev, rel))
         try:
@@ -353,13 +359,13 @@ class DokployDeploymentAdapter:
             logger.warning(
                 "Dokploy compose source unreadable at %s for %s: %s", sha[:12], repository, type(exc).__name__
             )
-            return None, "release_identity_compose_unreadable"
+            return None, "release_identity_compose_unreadable", None
         if not isinstance(source, str) or not source.strip():
-            return None, "release_identity_compose_unreadable"
+            return None, "release_identity_compose_unreadable", None
         try:
             image_source = resolve_hub_image_source()
         except ComposeRenderError:
-            return None, "release_identity_image_source_invalid"
+            return None, "release_identity_image_source_invalid", None
         if image_source == IMAGE_SOURCE_GHCR:
             try:
                 self.ghcr_wait(sha)
@@ -368,11 +374,11 @@ class DokployDeploymentAdapter:
                     "Dokploy GHCR image not published at %s: %s; refusing deploy, no fallback to build",
                     sha[:12], type(exc).__name__,
                 )
-                return None, "release_identity_ghcr_image_missing"
+                return None, "release_identity_ghcr_image_missing", image_source
         try:
-            return render_darkhub_compose(source, sha, image_source), None
+            return render_darkhub_compose(source, sha, image_source), None, image_source
         except ComposeRenderError:
-            return None, "release_identity_compose_contract_invalid"
+            return None, "release_identity_compose_contract_invalid", image_source
 
     def _bind_release_identity(
         self, base_url: str, api_key: str, target_config: TargetConfig, sha: str
@@ -430,12 +436,25 @@ class DokployDeploymentAdapter:
                 # ticket that edits docker-compose.hub.yml reaches Dokploy.
                 # Done before any Dokploy call: unreadable source -> fail
                 # closed with nothing touched.
-                rendered, render_error = self._render_compose_at_sha(params, sha)
+                rendered, render_error, image_source = self._render_compose_at_sha(params, sha)
                 if render_error is not None or rendered is None:
                     return render_error or "release_identity_compose_unreadable"
                 one = self._dokploy_request(
                     base_url, api_key, "GET", "compose.one", query={"composeId": service_id}
                 )
+                if image_source == IMAGE_SOURCE_GHCR:
+                    # T2 (USR-339): start-first is silently ignored by plain
+                    # Compose -- only Stack/Swarm honors update_config. Refuse
+                    # before compose.update/compose.deploy rather than ship a
+                    # "zero-downtime" deploy that still drops traffic.
+                    compose_type = classify_compose_type(one)
+                    if compose_type != COMPOSE_TYPE_STACK:
+                        logger.warning(
+                            "Dokploy compose %s is not Stack/Swarm (detected=%s) while ghcr image "
+                            "source is active; refusing deploy, no mutation. %s",
+                            service_id, compose_type, GHCR_STACK_REQUIRED_MESSAGE,
+                        )
+                        return "release_identity_ghcr_requires_stack"
                 if one.get("sourceType") != "raw" or not isinstance(one.get("composeFile"), str):
                     return "release_identity_compose_not_raw"
                 if rendered != one["composeFile"]:
