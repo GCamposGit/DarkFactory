@@ -10079,5 +10079,38 @@
     "dependencies": [],
     "created_at": "2026-10-22T09:52:45.740519Z",
     "updated_at": "2026-10-22T09:52:45.740519Z"
+  },
+  {
+    "id": "USR-347",
+    "project_id": "darkfac",
+    "title": "Roteador sem rota com Grok a 17,4%% e probe Anthropic ok mas snapshot parado ha 32h",
+    "origin": "user",
+    "status": "planned",
+    "delivery_evidence": null,
+    "item_type": "feature",
+    "lifecycle_stage": "execution",
+    "horizon": "now",
+    "tags": [
+      "user-demand"
+    ],
+    "problem_statement": "Em 22/10 06:55 python run_ticket.py USR-346 saiu com 'Nenhuma rota disponivel'. Log: codex pulado (codex_headless_visible_windows); 'Snapshot for anthropic is stale (115537.9 s)... probe provider=anthropic outcome=ok' seguido de 'Quota data for anthropic is older than 3600.0s (probe_unavailable); failing closed' -- o probe teve sucesso mas o snapshot nao foi atualizado; grok com 17,4%% restante (acima do piso de 15%%) nem foi avaliado/registrado no log. Resultado: fila de desenvolvimento parada no Notebook com conta saudavel.",
+    "core_journey": [
+      "Em 22/10 06:55 python run_ticket.py USR-346 saiu com 'Nenhuma rota disponivel'. Log: codex pulado (codex_headless_visible_windows); 'Snapshot for anthropic is stale (115537.9 s)... probe provider=anthropic outcome=ok' seguido de 'Quota data for anthropic is older than 3600.0s (probe_unavailable); failing closed' -- o probe teve sucesso mas o snapshot nao foi atualizado; grok com 17,4%% restante (acima do piso de 15%%) nem foi avaliado/registrado no log. Resultado: fila de desenvolvimento parada no Notebook com conta saudavel."
+    ],
+    "non_goals": [
+      "Nao relaxar o piso de 15%%"
+    ],
+    "reachability_contract": "",
+    "acceptance_criteria": [
+      "Probe Anthropic com outcome=ok grava snapshot novo e o roteador usa o valor medido",
+      "Grok acima do piso e elegivel para development no Notebook, ou o log diz o motivo exato da exclusao",
+      "Teste reproduz o caso do log de 22/10",
+      "Portao oficial runner.py --quick passa"
+    ],
+    "suggested_files": [],
+    "estimated_complexity": "medium",
+    "dependencies": [],
+    "created_at": "2026-10-22T09:56:47.415028Z",
+    "updated_at": "2026-10-22T09:56:47.415028Z"
   }
 ]
