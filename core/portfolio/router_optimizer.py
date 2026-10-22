@@ -42,7 +42,7 @@ PAID_DIRECT_MODELS = {
 OPENROUTER_FRONTIER_MODELS = {
     "research": {"model": "deepseek/deepseek-chat", "provider": "openrouter", "cost_est": 0.0002},
     "web_research": {"model": "deepseek/deepseek-chat", "provider": "openrouter", "cost_est": 0.0002},
-    "architecture": {"model": "deepseek/deepseek-r1", "provider": "openrouter", "cost_est": 0.002},
+    "architecture": {"model": resolve_known("deepseek-r1"), "provider": "openrouter", "cost_est": 0.002},
     "coding_high": {"model": "qwen/qwen-2.5-coder-32b-instruct", "provider": "openrouter", "cost_est": 0.0002},
     "coding_medium": {"model": "qwen/qwen-2.5-coder-32b-instruct", "provider": "openrouter", "cost_est": 0.0002},
     "coding_low": {"model": "qwen-code-fast:latest", "provider": "ollama", "cost_est": 0.0},

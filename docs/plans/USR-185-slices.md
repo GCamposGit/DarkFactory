@@ -116,3 +116,8 @@ Chave nova `rollback_thresholds` no `model_registry.json` (validada por `Rollbac
 Marcadores e secoes geradas (`test_subagent_model`, `dev_subagent_models`, `haiku_rules`) nas skills 17 e 19 (`.agents` e `.claude`, espelhos identicos) e em `.claude/agents/test-runner.md` (o `model:` do frontmatter segue literal, validado contra o papel `subagent.haiku` pelo teste de deriva). As regras do Haiku saem de `.factory/config/subagent_model_routing.json`.
 `core/benchmarks/data/benchmark_catalog.json` NAO e derivado: e dado de benchmark observado (precos, notas) lido com esquema estrito por `core/benchmarks/fetcher.py`; JSON nao aceita comentario e injetar chave derivada arriscaria o parse. Teste garante que fica fora dos alvos.
 `python scripts/generate_model_docs.py --check` sai com 0.
+## Fatia 10 (ENTREGUE em 22/10/2026)
+
+- Catraca: `.factory/config/model_id_baseline.json` (total e por arquivo) + `tests/test_model_id_ratchet_usr185.py`; falha se o total ou qualquer arquivo subir, apontando o arquivo e mandando usar alias/`core.models.registry`. Regenerar o baseline (so ao reduzir): `python scripts/model_id_census.py --write-baseline`.
+- Migracao: `core/router/model_router.py` (ids de imagem via `gateway_id`, DeepSeek V4 Pro via `id_of`) e `core/portfolio/router_optimizer.py` (`deepseek-r1` via `resolve_known`). Os nomes de alias tambem casam com a regex do censo, entao o contador nao cai nesses trechos.
+- Contador antes: 511 (99 arquivos). Depois: 511 (99 arquivos). O restante sao aliases/modelos locais, dados (`.factory/*.json`), docs e skills.

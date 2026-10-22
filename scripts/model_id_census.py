@@ -79,6 +79,13 @@ def main(argv: list[str]) -> int:
     if "--verbose" in argv:
         for rel, count in sorted(per_file.items(), key=lambda kv: -kv[1]):
             print(f"{count:5d}  {rel}")
+    if "--write-baseline" in argv:
+        import json
+
+        path = REPO_ROOT / ".factory" / "config" / "model_id_baseline.json"
+        path.write_text(
+            json.dumps({"total": total, "files": dict(sorted(per_file.items()))}, indent=2) + chr(10), encoding="utf-8"
+        )
     print(f"literal_model_ids_outside_allowlist={total} files={len(per_file)}")
     return 0
 
