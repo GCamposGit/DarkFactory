@@ -2198,7 +2198,7 @@
       ],
       "verify": "Pacote darkhub no GHCR com tag do sha; redeploy imprime Waiting for ghcr.io/... e /health responde o sha novo",
       "created_at": "2026-10-22T00:20:04Z",
-      "created_by": "claude-sonnet",
+      "created_by": "subagente sonnet",
       "resolved_at": null
     }
   ]
